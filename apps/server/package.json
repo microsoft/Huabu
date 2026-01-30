@@ -1,0 +1,20 @@
+{
+  "name": "@sediment/server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "tsx src/server.ts"
+  },
+  "dependencies": {
+    "@sediment/shared": "workspace:*",
+    "fastify": "^4.0.0",
+    "@fastify/cors": "^8.0.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0"
+  }
+}
