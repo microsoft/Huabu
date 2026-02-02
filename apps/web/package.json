@@ -6,10 +6,13 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "lint": "eslint . --report-unused-disable-directives --max-warnings 0",
+    "format": "prettier --write .",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@blocksuite/presets": "^0.13.0",
+    "@blocksuite/store": "^0.13.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "@sediment/shared": "workspace:*"

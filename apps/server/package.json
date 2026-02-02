@@ -4,6 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
+    "lint": "eslint .",
+    "format": "prettier --write .",
     "build": "tsc -p tsconfig.json",
     "start": "tsx src/server.ts"
   },

@@ -25,13 +25,15 @@ sediment/
 ## 2. 顶层配置文件
 
 ### pnpm-workspace.yaml
+
 ```yaml
 packages:
-  - "apps/*"
-  - "packages/*"
+  - 'apps/*'
+  - 'packages/*'
 ```
 
 ### tsconfig.base.json
+
 ```json
 {
   "compilerOptions": {
@@ -45,11 +47,13 @@ packages:
 ```
 
 约定：
+
 - 顶层 `tsconfig.base.json` 不配置 `module` / `moduleResolution`（分别在 web/server/shared 各自配置）。
 - 不使用 `paths` 把 shared 指向 `packages/shared/src/*`。
 - web/server 通过 `workspace:*` 依赖引入 shared。
 
 ### package.json
+
 ```json
 {
   "name": "my-ai-project",
@@ -88,16 +92,18 @@ apps/web/
 ```
 
 ### vite.config.ts
+
 ```ts
-import { defineConfig } from "vite"
-import react from "@vitejs/plugin-react"
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
 
 export default defineConfig({
-  plugins: [react()]
-})
+  plugins: [react()],
+});
 ```
 
 约定：
+
 - `apps/web/tsconfig.json` 使用 `"moduleResolution": "Bundler"`，并通常设置 `"noEmit": true`。
 
 ---
@@ -122,6 +128,7 @@ apps/server/
 ```
 
 ### apps/server/package.json（示例）
+
 ```json
 {
   "name": "@sediment/server",
@@ -145,32 +152,35 @@ apps/server/
 ```
 
 ### server.ts
-```ts
-import { app } from "./app"
 
-const PORT = process.env.PORT || 3000
+```ts
+import { app } from './app';
+
+const PORT = process.env.PORT || 3000;
 app.listen({ port: +PORT, host: '0.0.0.0' }, () => {
-  console.log(`Server running at http://localhost:${PORT}`)
-})
+  console.log(`Server running at http://localhost:${PORT}`);
+});
 ```
 
 ### app.ts
-```ts
-import Fastify from "fastify"
-import cors from "@fastify/cors"
-import chatRoutes from "./modules/chat/chat.route"
 
-export const app = Fastify()
+```ts
+import Fastify from 'fastify';
+import cors from '@fastify/cors';
+import chatRoutes from './modules/chat/chat.route';
+
+export const app = Fastify();
 
 // 注册 CORS
-app.register(cors, { 
-  origin: true // 开发环境允许所有，生产环境建议指定域名
-})
+app.register(cors, {
+  origin: true, // 开发环境允许所有，生产环境建议指定域名
+});
 
-app.register(chatRoutes, { prefix: "/api/chat" })
+app.register(chatRoutes, { prefix: '/api/chat' });
 ```
 
 要求（Node ESM）：
+
 - `apps/server/package.json` 设置 `"type": "module"`。
 - `apps/server/tsconfig.json` 使用 `"module": "NodeNext"` + `"moduleResolution": "NodeNext"`。
 - 开发环境使用 `tsx` 运行 TS：`tsx watch src/server.ts`。
@@ -193,11 +203,13 @@ packages/shared/
 ```
 
 约定：
+
 - shared 作为 workspace 包。
 - web/server 通过依赖引用 shared。
 - 不直接 import `shared/src/*`。
 
 ### packages/shared/package.json（示例）
+
 ```json
 {
   "name": "@sediment/shared",
@@ -220,27 +232,31 @@ packages/shared/
 ```
 
 ### packages/shared/tsconfig.json（要点）
+
 - `"module": "NodeNext"`, `"moduleResolution": "NodeNext"`
 - 输出到 `dist/`，并打开 `declaration: true`
 
 ### chat.ts 示例
+
 ```ts
 export interface SendMessageRequest {
-  content: string
+  content: string;
 }
 
 export interface SendMessageResponse {
-  messageId: string
-  reply: string
+  messageId: string;
+  reply: string;
 }
 ```
 
 > 前端和后端都可以直接引用：
+>
 > ```ts
-> import type { SendMessageRequest } from "@sediment/shared"
+> import type { SendMessageRequest } from '@sediment/shared';
 > ```
 
 同时在 web/server 的 `package.json` 里把 shared 加为依赖（示例）：
+
 ```json
 {
   "dependencies": {
@@ -254,28 +270,33 @@ export interface SendMessageResponse {
 ## 6. pnpm 安装和启动
 
 1. 安装依赖并构建 Shared 包：
-> 注意：必须先构建 shared 包，否则后端无法启动
+   > 注意：必须先构建 shared 包，否则后端无法启动
+
 ```bash
 pnpm install
 pnpm -F @sediment/shared build
 ```
 
 2. 启动 Shared 包监听（可选，开发时推荐）：
+
 ```bash
 pnpm -F @sediment/shared dev
 ```
 
 3. 启动后端：
+
 ```bash
 pnpm -F "./apps/server" dev
 ```
 
 4. 启动前端：
+
 ```bash
 pnpm -F "./apps/web" dev
 ```
 
 如果你给每个 workspace 包设置了稳定的 `name`（例如 `@sediment/server`、`@sediment/web`），也可以这样启动：
+
 ```bash
 pnpm -F @sediment/server dev
 pnpm -F @sediment/web dev

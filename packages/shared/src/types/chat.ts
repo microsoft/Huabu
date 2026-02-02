@@ -1,8 +1,8 @@
 export interface SendMessageRequest {
-  content: string
+  content: string;
 }
 
 export interface SendMessageResponse {
-  messageId: string
-  reply: string
+  messageId: string;
+  reply: string;
 }
