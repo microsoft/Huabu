@@ -1,6 +1,8 @@
 import { PageEditor, EdgelessEditor } from '@blocksuite/presets';
 import React, { useEffect, useState, useRef } from 'react';
 
+import { SegmentedControl } from '../Common/SegmentedControl';
+
 import type { Doc } from '@blocksuite/store';
 
 interface EditorProps {
@@ -41,47 +43,18 @@ export const BlockSuiteEditor: React.FC<EditorProps> = ({ doc }) => {
   }, [doc, mode]);
 
   return (
-    <div style={{ height: '100%', width: '100%' }}>
-      <div
-        style={{
-          display: 'flex',
-          gap: '8px',
-          background: 'rgba(255, 255, 255, 0.8)',
-          padding: '4px',
-          borderRadius: '4px',
-        }}
-      >
-        <button
-          onClick={() => setMode('page')}
-          style={{
-            fontWeight: mode === 'page' ? 'bold' : 'normal',
-            padding: '5px 10px',
-            cursor: 'pointer',
-            border: '1px solid #ccc',
-            background: mode === 'page' ? '#eee' : '#fff',
-            borderRadius: '4px',
-          }}
-        >
-          Page Mode
-        </button>
-        <button
-          onClick={() => setMode('edgeless')}
-          style={{
-            fontWeight: mode === 'edgeless' ? 'bold' : 'normal',
-            padding: '5px 10px',
-            cursor: 'pointer',
-            border: '1px solid #ccc',
-            background: mode === 'edgeless' ? '#eee' : '#fff',
-            borderRadius: '4px',
-          }}
-        >
-          Edgeless Mode
-        </button>
+    <div className="relative flex h-full w-full flex-col">
+      <div className="absolute top-4 left-1/2 z-10 w-fit -translate-x-1/2">
+        <SegmentedControl
+          value={mode}
+          onChange={setMode}
+          options={[
+            { value: 'page', label: 'Page Mode' },
+            { value: 'edgeless', label: 'Edgeless Mode' },
+          ]}
+        />
       </div>
-      <div
-        ref={containerRef}
-        style={{ height: '100%', width: '100%', overflow: 'hidden' }}
-      />
+      <div ref={containerRef} className="h-full w-full overflow-hidden" />
     </div>
   );
 };

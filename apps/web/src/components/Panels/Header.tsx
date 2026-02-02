@@ -2,19 +2,8 @@ import React from 'react';
 
 export const Header: React.FC = () => {
   return (
-    <header
-      style={{
-        padding: '10px',
-        borderBottom: '1px solid #ccc',
-        display: 'flex',
-        gap: '10px',
-        alignItems: 'center',
-        background: '#fff',
-        height: '60px',
-        boxSizing: 'border-box',
-      }}
-    >
-      <h2 style={{ margin: 0 }}>Sediment</h2>
+    <header className="flex h-14 shrink-0 items-center gap-3 border-b border-gray-200 bg-white px-4">
+      <h2 className="m-0 text-lg font-semibold text-gray-900">Sediment</h2>
     </header>
   );
 };

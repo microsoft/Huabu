@@ -48,20 +48,12 @@ export const MainLayout = ({
   };
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100%',
-        width: '100%',
-        overflow: 'hidden',
-      }}
-    >
+    <div className="flex h-full w-full flex-col overflow-hidden">
       {/* Header Area */}
-      <div style={{ flexShrink: 0 }}>{header}</div>
+      <div className="shrink-0">{header}</div>
 
       {/* Main Content Area */}
-      <Group style={{ height: '100%', width: '100%' }}>
+      <Group className="h-full w-full">
         {/* Left Panel */}
         <Panel
           panelRef={leftPanelRef}
