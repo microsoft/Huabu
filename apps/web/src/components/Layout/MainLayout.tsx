@@ -53,7 +53,7 @@ export const MainLayout = ({
       <div className="shrink-0">{header}</div>
 
       {/* Main Content Area */}
-      <Group className="h-full w-full">
+      <Group className="h-full w-full p-3">
         {/* Left Panel */}
         <Panel
           panelRef={leftPanelRef}

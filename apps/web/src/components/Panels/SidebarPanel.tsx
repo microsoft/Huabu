@@ -19,7 +19,7 @@ export const SidebarPanel = ({
 }: SidebarPanelProps) => {
   if (isCollapsed) {
     return (
-      <div className="flex h-full flex-col items-center bg-gray-50 pt-3">
+      <div className="flex h-full flex-col items-center pt-3">
         <button
           onClick={onToggle}
           title={`Open ${title}`}
@@ -35,8 +35,9 @@ export const SidebarPanel = ({
   }
 
   return (
-    <div className="flex h-full flex-col bg-gray-50">
-      <div className="flex h-10 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-3">
+    <div className="shadow-bottom flex h-full flex-col rounded-3xl bg-white">
+      {/* title */}
+      <div className="flex h-10 shrink-0 items-center justify-between px-3">
         <span className="text-sm font-semibold">{title}</span>
         <button
           onClick={onToggle}
@@ -46,6 +47,7 @@ export const SidebarPanel = ({
           {iconExpanded}
         </button>
       </div>
+      {/* content */}
       <div className="flex-1 overflow-y-auto p-4">{children}</div>
     </div>
   );
