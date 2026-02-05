@@ -3,6 +3,8 @@
   "private": true,
   "scripts": {
     "dev": "pnpm -r --parallel dev",
+    "dev:server": "pnpm --filter @sediment/server dev",
+    "dev:web": "pnpm --filter @sediment/web dev",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",

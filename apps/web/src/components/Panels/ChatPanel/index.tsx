@@ -1,10 +1,13 @@
-import { PanelRightClose, PanelRightOpen, Send } from 'lucide-react';
+import { PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 
-import { chatApi } from '../../api/chat';
+import { chatApi } from '@/api/chat';
 
-import { SidebarPanel } from './SidebarPanel';
+import { SidebarPanel } from '../SidebarPanel';
+import { ChatInput } from './ChatInput';
+import { MessageList } from './messages/MessageList';
 
+import type { ChatMessage } from './messages/types';
 import type { ChatStreamUpdatePayload } from '@sediment/shared';
 
 interface ChatPanelProps {
@@ -12,15 +15,9 @@ interface ChatPanelProps {
   onToggle?: () => void;
 }
 
-interface Message {
-  id: string;
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-}
-
 export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const [input, setInput] = useState('');
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [loadingText, setLoadingText] = useState('Thinking...');
 
@@ -38,7 +35,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     e.preventDefault();
     if (!input.trim() || isLoading) return;
 
-    const userMessage: Message = {
+    const userMessage: ChatMessage = {
       id: Date.now().toString(),
       role: 'user',
       content: input,
@@ -88,11 +85,12 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           // Handle Tool Updates
         } else if (node === 'tools' && message) {
           // Usually message.content from a ToolNode is the JSON result
+          // TODO:
           setMessages((prev) => [
             ...prev,
             {
               id: Date.now().toString(),
-              role: 'system',
+              role: 'assistant',
               content: `Tool Output: ${message.content.substring(0, 150)}...`,
             },
           ]);
@@ -120,62 +118,24 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       title="Chat"
       isCollapsed={isCollapsed}
       onToggle={onToggle}
-      iconCollapsed={<PanelRightOpen size={20} />}
-      iconExpanded={<PanelRightClose size={20} />}
+      iconCollapsed={<PanelRightOpen />}
+      iconExpanded={<PanelRightClose />}
     >
       <div className="flex h-full flex-col overflow-hidden">
-        {/* Messages List - Simple implementation, needs proper scrolling and styling */}
-        <div className="flex-1 space-y-4 overflow-y-auto p-4">
-          {messages.map((msg) => (
-            <div
-              key={msg.id}
-              className={`flex ${
-                msg.role === 'user' ? 'justify-end' : 'justify-start'
-              }`}
-            >
-              <div
-                className={`max-w-[80%] rounded-lg p-3 text-sm ${
-                  msg.role === 'user'
-                    ? 'bg-blue-500 text-white'
-                    : msg.role === 'system'
-                    ? 'border border-yellow-200 bg-yellow-50 font-mono text-xs text-yellow-800'
-                    : 'bg-gray-100 text-gray-900'
-                }`}
-              >
-                {msg.content}
-              </div>
-            </div>
-          ))}
-          {isLoading && (
-            <div className="flex justify-start">
-              <div className="animate-pulse rounded-lg bg-gray-100 p-3 text-sm text-gray-500">
-                {loadingText}
-              </div>
-            </div>
-          )}
-          <div ref={messagesEndRef} />
-        </div>
+        <MessageList
+          messages={messages}
+          isLoading={isLoading}
+          loadingText={loadingText}
+          endRef={messagesEndRef}
+        />
 
         {/* Input Area */}
-        <div className="border-t border-gray-200 p-4">
-          <form onSubmit={handleSubmit} className="flex gap-2">
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask me anything..."
-              className="flex-1 rounded-md border border-gray-300 px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-              disabled={isLoading}
-            />
-            <button
-              type="submit"
-              disabled={isLoading || !input.trim()}
-              className="rounded-md bg-blue-500 p-2 text-white hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Send size={20} />
-            </button>
-          </form>
-        </div>
+        <ChatInput
+          value={input}
+          onChange={setInput}
+          onSubmit={handleSubmit}
+          disabled={isLoading}
+        />
       </div>
     </SidebarPanel>
   );
