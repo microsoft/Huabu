@@ -1,0 +1,6 @@
+dist
+build
+coverage
+node_modules
+.pnpm-store
+pnpm-lock.yaml

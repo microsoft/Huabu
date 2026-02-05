@@ -1,0 +1,14 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-border: #e5e5e5;
+  --color-background: #f3f3f3;
+  --shadow-bottom: 0 2px 12px rgba(0, 0, 0, 0.08);
+}
+
+html,
+body,
+#root {
+  @apply m-0 h-full w-full p-0;
+  background-color: var(--color-background);
+}

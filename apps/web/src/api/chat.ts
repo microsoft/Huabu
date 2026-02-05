@@ -1,0 +1,98 @@
+import type {
+  SendMessageRequest,
+  ChatStreamUpdatePayload,
+} from '@sediment/shared';
+
+// In production, this should be an env var
+const API_BASE_URL = 'http://localhost:3000/api';
+
+export interface StreamCallbacks {
+  onUpdate: (payload: ChatStreamUpdatePayload) => void;
+  onError: (error: Error) => void;
+  onComplete: () => void;
+}
+
+export const chatApi = {
+  streamMessage: async (
+    content: string,
+    callbacks: StreamCallbacks,
+  ): Promise<void> => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ content } satisfies SendMessageRequest),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      if (!response.body) {
+        throw new Error('Response body is null');
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        console.log('Stream chunk received:', chunk);
+        buffer += chunk;
+
+        // Split by double newline to get events
+        const parts = buffer.split('\n\n');
+        // Keep the last part in the buffer if it's incomplete
+        buffer = parts.pop() || '';
+
+        for (const part of parts) {
+          if (!part.trim()) continue;
+
+          const lines = part.split('\n');
+          let eventType = '';
+          const dataLines: string[] = [];
+
+          for (const line of lines) {
+            if (line.startsWith('event: ')) {
+              eventType = line.substring(7).trim();
+            } else if (line.startsWith('data: ')) {
+              dataLines.push(line.substring(6).trim());
+            }
+          }
+          const dataStr = dataLines.join('\n');
+
+          if (eventType === 'update') {
+            console.log('Processing update event:', dataStr);
+            try {
+              const data = JSON.parse(dataStr) as ChatStreamUpdatePayload;
+              callbacks.onUpdate(data);
+            } catch (e) {
+              console.error('Failed to parse update data', e);
+            }
+          } else if (eventType === 'error') {
+            const errPayload = JSON.parse(dataStr);
+            callbacks.onError(new Error(errPayload.message));
+          } else if (eventType === 'end') {
+            console.log('Stream ended via event');
+            callbacks.onComplete();
+            return;
+          }
+        }
+      }
+
+      // Stream finished without explicit 'end' event
+      callbacks.onComplete();
+    } catch (error) {
+      console.error('Stream error:', error);
+      callbacks.onError(
+        error instanceof Error ? error : new Error('Unknown stream error'),
+      );
+    }
+  },
+};
