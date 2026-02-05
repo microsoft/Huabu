@@ -1,9 +1,10 @@
-import { PanelRightClose, PanelRightOpen, Send } from 'lucide-react';
+import { PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 
 import { chatApi } from '@/api/chat';
 
 import { SidebarPanel } from '../SidebarPanel';
+import { ChatInput } from './ChatInput';
 
 import type { ChatStreamUpdatePayload } from '@sediment/shared';
 
@@ -157,25 +158,12 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         </div>
 
         {/* Input Area */}
-        <div className="border-t border-gray-200 p-4">
-          <form onSubmit={handleSubmit} className="flex gap-2">
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask me anything..."
-              className="flex-1 rounded-md border border-gray-300 px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-              disabled={isLoading}
-            />
-            <button
-              type="submit"
-              disabled={isLoading || !input.trim()}
-              className="rounded-md bg-blue-500 p-2 text-white hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Send size={20} />
-            </button>
-          </form>
-        </div>
+        <ChatInput
+          value={input}
+          onChange={setInput}
+          onSubmit={handleSubmit}
+          disabled={isLoading}
+        />
       </div>
     </SidebarPanel>
   );
