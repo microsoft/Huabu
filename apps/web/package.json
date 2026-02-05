@@ -11,8 +11,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@blocksuite/presets": "^0.13.0",
-    "@blocksuite/store": "^0.13.0",
     "@sediment/shared": "workspace:*",
     "@xyflow/react": "^12.10.0",
     "axios": "^1.13.4",
