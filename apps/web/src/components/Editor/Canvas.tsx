@@ -1,8 +1,9 @@
-import { ReactFlow, Background, Controls, MiniMap } from '@xyflow/react';
-import React from 'react';
+import { ReactFlow, Background, Controls } from '@xyflow/react';
+import React, { useMemo } from 'react';
 import '@xyflow/react/dist/style.css';
 
-import useStore from '../../store/store.ts';
+import useStore from '../../store/canvasStore.ts';
+import { ImageNode } from '../Nodes/ImageNode.tsx';
 
 export const Canvas: React.FC = () => {
   const nodes = useStore((state) => state.nodes);
@@ -11,25 +12,29 @@ export const Canvas: React.FC = () => {
   const onEdgesChange = useStore((state) => state.onEdgesChange);
   const onConnect = useStore((state) => state.onConnect);
 
+  const nodeTypes = useMemo(
+    () => ({
+      image: ImageNode,
+      // text: TextNode,
+    }),
+    [],
+  );
+
   return (
-    <div className="relative flex h-full w-full flex-col bg-gray-50">
+    <div className="relative flex h-full w-full flex-col bg-[#f5f5f5]">
       <ReactFlow
         nodes={nodes}
         edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
-        fitView // 初始化时自动适配视图
+        nodeTypes={nodeTypes}
+        fitView
         attributionPosition="bottom-right"
       >
-        {/* 背景网格 */}
-        <Background color="#ccc" gap={20} />
+        <Background color="#ccc" gap={18} />
 
-        {/* 左下角控制栏 (放大缩小等) */}
         <Controls position="bottom-left" />
-
-        {/* 右下角小地图 (可选) */}
-        <MiniMap position="bottom-right" className="!bottom-10" />
       </ReactFlow>
     </div>
   );
