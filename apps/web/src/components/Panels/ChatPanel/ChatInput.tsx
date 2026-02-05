@@ -59,7 +59,7 @@ export const ChatInput = ({
   };
 
   return (
-    <div className="p-4">
+    <div>
       <form onSubmit={onSubmit} className="w-full">
         <div className="border-border rounded-2xl border bg-white p-3">
           <textarea
@@ -97,12 +97,13 @@ export const ChatInput = ({
 
             <IconButton
               type="submit"
+              title="Send Message"
               disabled={isSubmitDisabled}
               aria-label="Send"
               size="sm"
               variant="solid"
             >
-              <ArrowUp size={18} />
+              <ArrowUp />
             </IconButton>
           </div>
         </div>

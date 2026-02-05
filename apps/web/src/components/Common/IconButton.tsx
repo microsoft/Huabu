@@ -1,3 +1,5 @@
+import { Tooltip } from './Tooltip';
+
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 
 export type IconButtonProps = {
@@ -13,6 +15,7 @@ export const IconButton = ({
   variant = 'outline',
   className,
   type = 'button',
+  title,
   ...props
 }: IconButtonProps) => {
   const sizeClass = size === 'sm' ? 'h-8 w-8' : 'h-9 w-9';
@@ -22,7 +25,7 @@ export const IconButton = ({
       ? 'bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-40'
       : 'border border-border text-gray-600 hover:bg-gray-50 disabled:opacity-50';
 
-  return (
+  const buttonEl = (
     <button
       type={type}
       className={[
@@ -39,4 +42,6 @@ export const IconButton = ({
       {children}
     </button>
   );
+
+  return title ? <Tooltip content={title}>{buttonEl}</Tooltip> : buttonEl;
 };

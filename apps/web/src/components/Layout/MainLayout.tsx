@@ -59,8 +59,9 @@ export const MainLayout = ({
           panelRef={leftPanelRef}
           defaultSize="15%"
           collapsible
-          collapsedSize={48}
-          minSize={120}
+          collapsedSize={isLeftCollapsed ? 48 : 200}
+          minSize={isLeftCollapsed ? 48 : 200}
+          maxSize={isLeftCollapsed ? 48 : '30%'}
         >
           {React.isValidElement(leftPanel)
             ? React.cloneElement(leftPanel as React.ReactElement<any>, {
@@ -82,8 +83,9 @@ export const MainLayout = ({
           panelRef={rightPanelRef}
           defaultSize="15%"
           collapsible
-          collapsedSize={48}
-          minSize={120}
+          collapsedSize={isRightCollapsed ? 48 : 200}
+          minSize={isRightCollapsed ? 48 : 200}
+          maxSize={isRightCollapsed ? 48 : '30%'}
         >
           {React.isValidElement(rightPanel)
             ? React.cloneElement(rightPanel as React.ReactElement<any>, {
