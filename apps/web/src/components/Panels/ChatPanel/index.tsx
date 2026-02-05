@@ -5,7 +5,9 @@ import { chatApi } from '@/api/chat';
 
 import { SidebarPanel } from '../SidebarPanel';
 import { ChatInput } from './ChatInput';
+import { MessageList } from './messages/MessageList';
 
+import type { ChatMessage } from './messages/types';
 import type { ChatStreamUpdatePayload } from '@sediment/shared';
 
 interface ChatPanelProps {
@@ -13,15 +15,9 @@ interface ChatPanelProps {
   onToggle?: () => void;
 }
 
-interface Message {
-  id: string;
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-}
-
 export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const [input, setInput] = useState('');
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [loadingText, setLoadingText] = useState('Thinking...');
 
@@ -39,7 +35,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     e.preventDefault();
     if (!input.trim() || isLoading) return;
 
-    const userMessage: Message = {
+    const userMessage: ChatMessage = {
       id: Date.now().toString(),
       role: 'user',
       content: input,
@@ -89,11 +85,12 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           // Handle Tool Updates
         } else if (node === 'tools' && message) {
           // Usually message.content from a ToolNode is the JSON result
+          // TODO:
           setMessages((prev) => [
             ...prev,
             {
               id: Date.now().toString(),
-              role: 'system',
+              role: 'assistant',
               content: `Tool Output: ${message.content.substring(0, 150)}...`,
             },
           ]);
@@ -125,37 +122,12 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       iconExpanded={<PanelRightClose size={20} />}
     >
       <div className="flex h-full flex-col overflow-hidden">
-        {/* Messages List - Simple implementation, needs proper scrolling and styling */}
-        <div className="flex-1 space-y-4 overflow-y-auto p-4">
-          {messages.map((msg) => (
-            <div
-              key={msg.id}
-              className={`flex ${
-                msg.role === 'user' ? 'justify-end' : 'justify-start'
-              }`}
-            >
-              <div
-                className={`max-w-[80%] rounded-lg p-3 text-sm ${
-                  msg.role === 'user'
-                    ? 'bg-blue-500 text-white'
-                    : msg.role === 'system'
-                    ? 'border border-yellow-200 bg-yellow-50 font-mono text-xs text-yellow-800'
-                    : 'bg-gray-100 text-gray-900'
-                }`}
-              >
-                {msg.content}
-              </div>
-            </div>
-          ))}
-          {isLoading && (
-            <div className="flex justify-start">
-              <div className="animate-pulse rounded-lg bg-gray-100 p-3 text-sm text-gray-500">
-                {loadingText}
-              </div>
-            </div>
-          )}
-          <div ref={messagesEndRef} />
-        </div>
+        <MessageList
+          messages={messages}
+          isLoading={isLoading}
+          loadingText={loadingText}
+          endRef={messagesEndRef}
+        />
 
         {/* Input Area */}
         <ChatInput
