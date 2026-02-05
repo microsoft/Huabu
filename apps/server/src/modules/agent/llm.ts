@@ -17,7 +17,7 @@ export function getLLM() {
     azureOpenAIApiVersion:
       process.env.AZURE_OPENAI_API_VERSION || '2024-08-01-preview',
     temperature: 0,
-    // Add timeout to prevent infinite hang
-    timeout: 10000,
+    streaming: true,
+    timeout: 60000,
   });
 }

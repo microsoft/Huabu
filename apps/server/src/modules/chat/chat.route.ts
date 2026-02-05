@@ -1,9 +1,63 @@
-import { HumanMessage } from '@langchain/core/messages';
+import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 
+import { SYSTEM_PROMPT } from '../../prompt/system.js';
 import { createGraph } from '../agent/graph.js';
 
 import type { SendMessageRequest, SendMessageResponse } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
+
+function isLangChainMessage(value: unknown): value is {
+  content?: unknown;
+  _getType?: () => string;
+  constructor?: { name?: string };
+} {
+  return typeof value === 'object' && value !== null;
+}
+
+function normalizeRole(message: unknown): 'user' | 'assistant' {
+  if (!isLangChainMessage(message)) return 'assistant';
+
+  const type = message._getType?.();
+  const ctorName = message.constructor?.name;
+
+  return type === 'human' || ctorName === 'HumanMessage' ? 'user' : 'assistant';
+}
+
+function normalizeContent(message: unknown): string {
+  if (!isLangChainMessage(message)) {
+    return typeof message === 'string'
+      ? message
+      : JSON.stringify(message ?? '');
+  }
+
+  const content = message.content;
+  if (typeof content === 'string') return content;
+  return JSON.stringify(content ?? '');
+}
+
+function getTextDelta(message: unknown): string | null {
+  if (!isLangChainMessage(message)) {
+    return typeof message === 'string' ? message : null;
+  }
+
+  return typeof message.content === 'string' ? message.content : null;
+}
+
+function writeUpdate(
+  raw: NodeJS.WritableStream,
+  payload: {
+    node: string;
+    message: { role: 'user' | 'assistant'; content: string };
+  },
+) {
+  raw.write(`event: update\ndata: ${JSON.stringify(payload)}\n\n`);
+}
+
+function getUpdateMessages(value: unknown): unknown[] | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const messages = (value as { messages?: unknown }).messages;
+  return Array.isArray(messages) ? messages : null;
+}
 
 const chatRoutes: FastifyPluginAsync = async (
   fastify,
@@ -17,46 +71,109 @@ const chatRoutes: FastifyPluginAsync = async (
     async function (request, reply) {
       const { content } = request.body;
 
+      // We'll stream the response manually via reply.raw
+      reply.hijack();
+
       // SSE Headers
       reply.raw.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
         Connection: 'keep-alive',
         'Access-Control-Allow-Origin': '*',
+        // Avoid proxy buffering (nginx, etc.)
+        'X-Accel-Buffering': 'no',
       });
+
+      // Ensure headers are sent immediately
+      reply.raw.flushHeaders?.();
+      // Kick the stream so clients don't wait for the first payload
+      reply.raw.write(': ok\n\n');
 
       try {
         const inputs = {
-          messages: [new HumanMessage(content)],
+          messages: [
+            new SystemMessage(SYSTEM_PROMPT),
+            new HumanMessage(content),
+          ],
         };
 
-        const stream = await agent.stream(inputs);
+        if (process.env.DEBUG_AGENT === '1') {
+          request.log.info(
+            {
+              contentLength: content?.length,
+              hasAzureKey: Boolean(process.env.AZURE_OPENAI_API_KEY),
+              hasAzureEndpoint: Boolean(process.env.AZURE_OPENAI_API_ENDPOINT),
+            },
+            'chat: starting agent stream',
+          );
+        }
+
+        // We request both:
+        // - 'messages': token-level message chunks (for progressive UI updates)
+        // - 'updates': node-level updates (tool results, final messages, etc.)
+        const stream = await agent.stream(inputs, {
+          streamMode: ['messages', 'updates'],
+        });
+
+        let assistantText = '';
 
         for await (const chunk of stream) {
-          const nodeName = Object.keys(chunk)[0];
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const result = (chunk as Record<string, any>)[nodeName];
+          if (process.env.DEBUG_AGENT === '1') {
+            request.log.info({ chunk }, 'chat: agent stream chunk');
+          }
 
-          if (result && result.messages && Array.isArray(result.messages)) {
-            const lastMessage = result.messages[result.messages.length - 1];
-            // Normalize message
-            // Handle LangChain message objects vs serialized
-            const role =
-              lastMessage._getType?.() === 'human' ||
-              lastMessage.constructor?.name === 'HumanMessage'
-                ? 'user'
-                : 'assistant';
+          // When multiple stream modes are enabled, LangGraph yields tuples:
+          //   ['messages', [BaseMessage, metadata]]
+          //   ['updates',  { agent: { messages: [...] } }]
+          if (!Array.isArray(chunk) || typeof chunk[0] !== 'string') continue;
 
-            const content =
-              typeof lastMessage.content === 'string'
-                ? lastMessage.content
-                : JSON.stringify(lastMessage.content || '');
+          const mode = chunk[0];
+          const payload = chunk[1];
 
-            const event = `event: update\ndata: ${JSON.stringify({
+          if (mode === 'messages') {
+            if (!Array.isArray(payload) || payload.length !== 2) continue;
+            const message = payload[0];
+            const metadata = payload[1] as Record<string, unknown>;
+            const nodeName =
+              typeof metadata.langgraph_node === 'string'
+                ? metadata.langgraph_node
+                : 'agent';
+
+            if (normalizeRole(message) !== 'assistant') continue;
+
+            const delta = getTextDelta(message);
+            assistantText = delta
+              ? assistantText + delta
+              : normalizeContent(message);
+
+            writeUpdate(reply.raw, {
               node: nodeName,
-              message: { role, content },
-            })}\n\n`;
-            reply.raw.write(event);
+              message: { role: 'assistant', content: assistantText },
+            });
+            continue;
+          }
+
+          if (mode === 'updates') {
+            if (typeof payload !== 'object' || payload === null) continue;
+            const updateObj = payload as Record<string, unknown>;
+            const nodeName = Object.keys(updateObj)[0] ?? 'unknown';
+            const nodeResult = updateObj[nodeName];
+
+            const messages = getUpdateMessages(nodeResult);
+            if (!messages || messages.length === 0) continue;
+
+            const lastMessage = messages[messages.length - 1];
+            const role = normalizeRole(lastMessage);
+            const normalizedContent = normalizeContent(lastMessage);
+
+            if (nodeName === 'agent' && role === 'assistant') {
+              assistantText = normalizedContent;
+            }
+
+            writeUpdate(reply.raw, {
+              node: nodeName,
+              message: { role, content: normalizedContent },
+            });
           }
         }
 
