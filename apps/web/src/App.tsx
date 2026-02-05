@@ -1,7 +1,7 @@
 import { createEmptyDoc } from '@blocksuite/presets';
 import { useState, useEffect } from 'react';
 
-import { BlockSuiteEditor } from './components/Editor/BlockSuiteEditor';
+import { Canvas } from './components/Editor/Canvas.tsx';
 import { MainLayout } from './components/Layout/MainLayout';
 import { ChatPanel } from './components/Panels/ChatPanel';
 import { DataSourcePanel } from './components/Panels/DataSourcePanel';
@@ -29,7 +29,7 @@ export default function App() {
       leftPanel={<DataSourcePanel />}
       rightPanel={<ChatPanel />}
     >
-      <BlockSuiteEditor doc={doc} />
+      <Canvas doc={doc} />
     </MainLayout>
   );
 }

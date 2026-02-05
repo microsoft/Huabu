@@ -70,12 +70,12 @@ export const MainLayout = ({
             : leftPanel}
         </Panel>
 
-        <ResizableHandle className={isLeftCollapsed ? 'hidden' : ''} />
+        <ResizableHandle className={'hidden'} />
 
         {/* Center Editor */}
         <Panel minSize={100}>{children}</Panel>
 
-        <ResizableHandle className={isRightCollapsed ? 'hidden' : ''} />
+        <ResizableHandle className={'hidden'} />
 
         {/* Right Panel */}
         <Panel
