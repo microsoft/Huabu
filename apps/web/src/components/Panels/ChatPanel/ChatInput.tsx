@@ -1,8 +1,8 @@
-import { ArrowUp, Lightbulb, Plus, Search } from 'lucide-react';
+import { ArrowUp, Plus } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 
 import { IconButton } from '../../Common/IconButton';
-import { PillButton } from '../../Common/PillButton';
+// import { PillButton } from '../../Common/PillButton';
 
 interface ChatInputProps {
   value: string;
@@ -84,7 +84,7 @@ export const ChatInput = ({
                 <Plus size={16} />
               </IconButton>
 
-              <PillButton disabled={disabled}>
+              {/* <PillButton disabled={disabled}>
                 <Lightbulb size={14} />
                 Think
               </PillButton>
@@ -92,7 +92,7 @@ export const ChatInput = ({
               <PillButton disabled={disabled}>
                 <Search size={14} />
                 Deep Research
-              </PillButton>
+              </PillButton> */}
             </div>
 
             <IconButton

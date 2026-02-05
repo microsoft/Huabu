@@ -18,7 +18,7 @@ export const MessageList = ({
   endRef,
 }: MessageListProps) => {
   return (
-    <div className="flex-1 space-y-4 overflow-y-auto p-4">
+    <div className="flex-1 space-y-4 overflow-y-auto">
       {messages.map((msg) => {
         if (msg.role === 'user') {
           return <UserMessage key={msg.id} content={msg.content} />;
