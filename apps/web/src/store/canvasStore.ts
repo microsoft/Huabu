@@ -21,14 +21,23 @@ type RFState = {
   setEdges: (edges: Edge[]) => void;
 };
 
-const initialNodes: Node[] = [
+const initialNodes = [
   {
-    id: '1',
-    type: 'input',
+    id: 'node-1',
+    type: 'image',
     position: { x: 100, y: 100 },
-    data: { label: 'test node' },
+    data: {
+      label:
+        'Notional model of sensemaking loop for intelligence analysis derived from CTA.',
+      src: 'https://placehold.co/600x400/png',
+      color: 'bg-white',
+    },
   },
-  { id: '2', position: { x: 300, y: 100 }, data: { label: 'test node' } },
+  {
+    id: 'node-2',
+    position: { x: 600, y: 200 },
+    data: { label: '默认节点' }, // 没有 type 默认就是 default
+  },
 ];
 
 const initialEdges: Edge[] = [];
