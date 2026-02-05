@@ -1,3 +1,5 @@
+import { Ellipsis } from 'lucide-react';
+
 import { AIMessage } from './AIMessage';
 import { UserMessage } from './UserMessage';
 
@@ -7,16 +9,25 @@ import type { RefObject } from 'react';
 interface MessageListProps {
   messages: ChatMessage[];
   isLoading: boolean;
-  loadingText: string;
   endRef: RefObject<HTMLDivElement>;
 }
 
 export const MessageList = ({
   messages,
   isLoading,
-  loadingText,
   endRef,
 }: MessageListProps) => {
+  const streamingAssistantId = isLoading
+    ? [...messages]
+        .reverse()
+        .find(
+          (m) =>
+            m.role === 'assistant' &&
+            !m.content.startsWith('Tool Output:') &&
+            !m.content.startsWith('Error:'),
+        )?.id
+    : undefined;
+
   return (
     <div className="flex-1 space-y-4 overflow-y-auto">
       {messages.map((msg) => {
@@ -25,14 +36,23 @@ export const MessageList = ({
         }
 
         if (msg.role === 'assistant') {
-          return <AIMessage key={msg.id} content={msg.content} />;
+          return (
+            <AIMessage
+              key={msg.id}
+              content={msg.content}
+              isStreaming={msg.id === streamingAssistantId}
+            />
+          );
         }
       })}
 
       {isLoading && (
         <div className="flex justify-start">
-          <div className="animate-pulse rounded-lg bg-gray-100 p-3 text-sm text-gray-500">
-            {loadingText}
+          <div
+            className="rounded-2xl border-none px-3 py-2"
+            aria-label={'thinking'}
+          >
+            <Ellipsis className="text-icon animate-pulse" />
           </div>
         </div>
       )}

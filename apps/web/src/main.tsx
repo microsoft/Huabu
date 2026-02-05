@@ -1,5 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import '@blocknote/core/fonts/inter.css';
+import '@blocknote/shadcn/style.css';
 import './index.css';
 
 import App from './App';
