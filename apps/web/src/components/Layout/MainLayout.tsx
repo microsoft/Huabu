@@ -53,14 +53,14 @@ export const MainLayout = ({
       <div className="shrink-0">{header}</div>
 
       {/* Main Content Area */}
-      <Group className="h-full w-full p-3">
+      <Group className="h-full w-full">
         {/* Left Panel */}
         <Panel
           panelRef={leftPanelRef}
           defaultSize="15%"
           collapsible
-          collapsedSize={30}
-          minSize={100}
+          collapsedSize={48}
+          minSize={120}
         >
           {React.isValidElement(leftPanel)
             ? React.cloneElement(leftPanel as React.ReactElement<any>, {
@@ -70,20 +70,20 @@ export const MainLayout = ({
             : leftPanel}
         </Panel>
 
-        <ResizableHandle />
+        <ResizableHandle className={isLeftCollapsed ? 'hidden' : ''} />
 
         {/* Center Editor */}
         <Panel minSize={100}>{children}</Panel>
 
-        <ResizableHandle />
+        <ResizableHandle className={isRightCollapsed ? 'hidden' : ''} />
 
         {/* Right Panel */}
         <Panel
           panelRef={rightPanelRef}
           defaultSize="15%"
           collapsible
-          collapsedSize={30}
-          minSize={100}
+          collapsedSize={48}
+          minSize={120}
         >
           {React.isValidElement(rightPanel)
             ? React.cloneElement(rightPanel as React.ReactElement<any>, {

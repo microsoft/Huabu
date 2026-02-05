@@ -12,12 +12,17 @@ export const DataSourcePanel = ({
   onToggle,
 }: DataSourcePanelProps) => {
   return (
+    // todo: change here
     <SidebarPanel
-      title="Data"
+      title={
+        <div className="cursor-pointer text-sm font-bold hover:text-blue-500"></div>
+      }
+      // todo: change here
+      tools={<div>tool</div>}
       isCollapsed={isCollapsed}
       onToggle={onToggle}
-      iconCollapsed={<PanelLeftOpen size={20} />}
-      iconExpanded={<PanelLeftClose size={20} />}
+      iconCollapsed={<PanelLeftOpen size={16} />}
+      iconExpanded={<PanelLeftClose size={16} />}
     >
       {/* Data Source content would go here */}
     </SidebarPanel>

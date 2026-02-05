@@ -1,11 +1,20 @@
 import { Separator } from 'react-resizable-panels';
 
-export const ResizableHandle = ({ className = '' }: { className?: string }) => {
+interface ResizableHandleProps {
+  className?: string;
+  disabled?: boolean;
+}
+
+export const ResizableHandle = ({
+  className = '',
+  disabled,
+}: ResizableHandleProps) => {
   return (
     <Separator
-      className={`flex w-2.5 cursor-col-resize items-center justify-center border-x border-gray-200 bg-gray-50 transition-colors hover:bg-gray-100 ${className}`}
+      disabled={disabled}
+      className={`group z-10 flex w-2 items-center justify-center bg-transparent transition-all outline-none ${disabled ? 'pointer-events-none w-0 opacity-0' : 'cursor-col-resize'} ${className}`}
     >
-      <div className="h-5 w-1 rounded-sm bg-gray-300" />
+      <div className="group-hover:bg-primary h-8 w-1 rounded-full bg-gray-300 opacity-0 transition-all duration-300 group-hover:h-12 group-hover:opacity-100" />
     </Separator>
   );
 };
