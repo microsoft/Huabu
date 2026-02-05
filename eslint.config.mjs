@@ -69,11 +69,11 @@ export default typescriptEslint.config(
             'builtin',
             'external',
             'internal',
-            'parent',
-            'sibling',
+            ['parent', 'sibling'],
             'index',
             'type',
           ],
+          distinctGroup: true,
           'newlines-between': 'always',
           alphabetize: {
             order: 'asc',

@@ -1,9 +1,9 @@
 import { PanelRightClose, PanelRightOpen, Send } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 
-import { chatApi } from '../../api/chat';
+import { chatApi } from '@/api/chat';
 
-import { SidebarPanel } from './SidebarPanel';
+import { SidebarPanel } from '../SidebarPanel';
 
 import type { ChatStreamUpdatePayload } from '@sediment/shared';
 
