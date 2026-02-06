@@ -11,6 +11,7 @@ interface SidebarPanelProps {
   iconCollapsed: React.ReactNode;
   iconExpanded: React.ReactNode;
   children?: React.ReactNode;
+  className?: string;
 }
 
 export const SidebarPanel = ({
@@ -22,10 +23,13 @@ export const SidebarPanel = ({
   iconCollapsed,
   iconExpanded,
   children,
+  className,
 }: SidebarPanelProps) => {
   if (isCollapsed) {
     return (
-      <div className="flex h-full flex-col items-center bg-white pt-3">
+      <div
+        className={`flex h-full flex-col items-center bg-white pt-3 ${className}`}
+      >
         <GhostButton onClick={onToggle} title={`Expand ${title}`}>
           {iconCollapsed}
         </GhostButton>
@@ -37,7 +41,7 @@ export const SidebarPanel = ({
   }
 
   return (
-    <div className="flex h-full flex-col bg-white">
+    <div className={`flex h-full flex-col bg-white ${className}`}>
       {/* header */}
       <div className="border-border flex h-12 shrink-0 items-center justify-between border-b px-3">
         <div className="flex min-w-0 flex-1 items-center">

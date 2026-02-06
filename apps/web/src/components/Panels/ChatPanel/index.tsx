@@ -19,7 +19,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [loadingText, setLoadingText] = useState('Thinking...');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -29,7 +28,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, isLoading, loadingText]);
+  }, [messages, isLoading]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,7 +43,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     setMessages((prev) => [...prev, userMessage]);
     setInput('');
     setIsLoading(true);
-    setLoadingText('Thinking...');
 
     const assistantId = (Date.now() + 1).toString();
 
@@ -56,7 +54,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         if (node === 'agent' && message) {
           // If the message has toolCalls, show status
           if (message.toolCalls && message.toolCalls.length > 0) {
-            setLoadingText(`Calling tool: ${message.toolCalls[0].name}...`);
+            // TODO: Show tool call status in UI
             return;
           }
 
@@ -79,7 +77,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
                 ];
               }
             });
-            setLoadingText('Thinking...');
           }
 
           // Handle Tool Updates
@@ -120,12 +117,12 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       onToggle={onToggle}
       iconCollapsed={<PanelRightOpen />}
       iconExpanded={<PanelRightClose />}
+      className="border-border border-l"
     >
       <div className="flex h-full flex-col overflow-hidden">
         <MessageList
           messages={messages}
           isLoading={isLoading}
-          loadingText={loadingText}
           endRef={messagesEndRef}
         />
 

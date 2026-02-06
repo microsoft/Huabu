@@ -1,7 +1,7 @@
 import { Copy } from 'lucide-react';
 
 import { copyToClipboard } from '../../../../utils/clipboard';
-import { IconButton } from '../../../Common/IconButton';
+import { GhostButton } from '../../../Common/GhostButton';
 
 interface UserMessageProps {
   content: string;
@@ -10,21 +10,20 @@ interface UserMessageProps {
 export const UserMessage = ({ content }: UserMessageProps) => {
   return (
     <div className="flex justify-end">
-      <div className="flex w-full max-w-[80%] flex-col items-end gap-2">
-        <div className="border-border shadow-bottom rounded-2xl border bg-white p-4 text-sm text-gray-900">
+      <div className="flex w-full flex-col items-end gap-1">
+        <div className="bg-background text-m text-main rounded-2xl border border-none p-3">
           <div className="leading-relaxed whitespace-pre-wrap">{content}</div>
         </div>
 
         <div className="flex items-center gap-2">
-          <IconButton
+          <GhostButton
+            className="text-icon"
             aria-label="Copy message"
             title="Copy"
-            size="sm"
-            variant="outline"
             onClick={() => copyToClipboard(content)}
           >
             <Copy size={16} />
-          </IconButton>
+          </GhostButton>
         </div>
       </div>
     </div>

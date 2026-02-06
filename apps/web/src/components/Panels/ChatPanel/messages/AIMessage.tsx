@@ -1,31 +1,36 @@
 import { Copy } from 'lucide-react';
 
+import { BlockNoteMessageView } from './BlockNoteMessageView';
 import { copyToClipboard } from '../../../../utils/clipboard';
-import { IconButton } from '../../../Common/IconButton';
+import { GhostButton } from '../../../Common/GhostButton';
 
 interface AIMessageProps {
   content: string;
+  isStreaming?: boolean;
 }
 
-export const AIMessage = ({ content }: AIMessageProps) => {
+export const AIMessage = ({ content, isStreaming }: AIMessageProps) => {
   return (
     <div className="flex justify-start">
-      <div className="flex w-full max-w-[80%] flex-col gap-2">
-        <div className="border-border shadow-bottom rounded-2xl border bg-white p-4 text-sm text-gray-900">
-          <div className="leading-relaxed whitespace-pre-wrap">{content}</div>
+      <div className="flex w-full flex-col gap-1">
+        <div className="text-m text-main rounded-2xl border border-none bg-white px-4 pt-4">
+          <div className="leading-relaxed">
+            <BlockNoteMessageView content={content} />
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <IconButton
-            aria-label="Copy message"
-            title="Copy"
-            size="sm"
-            variant="outline"
-            onClick={() => copyToClipboard(content)}
-          >
-            <Copy size={16} />
-          </IconButton>
-        </div>
+        {!isStreaming && (
+          <div className="flex items-center gap-2 px-3">
+            <GhostButton
+              className="text-icon"
+              aria-label="Copy message"
+              title="Copy"
+              onClick={() => copyToClipboard(content)}
+            >
+              <Copy size={16} />
+            </GhostButton>
+          </div>
+        )}
       </div>
     </div>
   );

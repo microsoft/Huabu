@@ -24,6 +24,7 @@ export const DataSourcePanel = ({
       onToggle={onToggle}
       iconCollapsed={<PanelLeftOpen />}
       iconExpanded={<PanelLeftClose />}
+      className="border-border border-r"
     >
       {/* Data Source content would go here */}
     </SidebarPanel>
