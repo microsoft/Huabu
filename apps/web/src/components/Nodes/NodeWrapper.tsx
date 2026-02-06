@@ -3,16 +3,24 @@ import { clsx } from 'clsx';
 import { GripVertical } from 'lucide-react';
 import React, { memo } from 'react';
 
-import { ColorSelector } from '@/components/Common/ColorSelector.tsx';
+export type NodeStyle = {
+  backgroundColor?: string;
+  textColor?: string;
+  fontSize?: number;
+  fontFamily?: string;
+  fontWeight?: string;
+  fontStyle?: string;
+};
 
 export type NodeDataProps = {
   src?: string;
   content?: string;
   label?: string;
-  color?: string;
+
+  style?: NodeStyle;
+
   isExpanded?: boolean;
   settings?: object;
-
   [key: string]: any;
 };
 
@@ -28,11 +36,11 @@ interface NodeWrapperProps {
   toolbar?: React.ReactNode;
 
   keepAspectRatio?: boolean;
+  resizable?: boolean;
 }
 
 export const NodeWrapper = memo(
   ({
-    id,
     data,
     selected,
     children,
@@ -41,12 +49,13 @@ export const NodeWrapper = memo(
     minHeight,
     toolbar,
     keepAspectRatio = false,
+    resizable = true,
   }: NodeWrapperProps) => {
     return (
       <>
         <NodeResizer
           color="#e6e6e6"
-          isVisible={selected}
+          isVisible={selected && resizable}
           minWidth={minWidth}
           minHeight={minHeight}
           keepAspectRatio={keepAspectRatio}
@@ -54,26 +63,25 @@ export const NodeWrapper = memo(
         <NodeToolbar
           isVisible={selected}
           position={Position.Top}
-          offset={6}
-          className="border-border shadow-bottom flex items-center gap-3 rounded-md border bg-white px-2 py-1"
+          offset={12}
+          className="border-border shadow-bottom flex h-8 items-center gap-3 rounded-md border bg-white px-2 py-1"
         >
           {toolbar}
-          <ColorSelector nodeId={id} currentColor={data.color} />
         </NodeToolbar>
 
         <div
           className={clsx(
-            'group relative flex h-full w-full flex-col rounded-xl border transition-all duration-120',
-            data?.color ? data.color : 'bg-white',
-            selected
-              ? 'border-theme-500 ring-theme-100 border ring'
-              : 'hover:border-border border-white',
+            'group relative flex h-full w-full flex-col rounded border-0 transition-all duration-120',
+            data.style?.backgroundColor
+              ? data.style?.backgroundColor
+              : 'bg-transparent',
+            selected ? 'ring-theme-500 ring' : 'ring-border hover:ring',
             className,
           )}
         >
           <div
             className={clsx(
-              'text-icon hover:text-main absolute top-0 -left-[24px] flex h-6 w-4 cursor-grab items-center justify-center rounded opacity-0 transition-opacity',
+              'text-icon hover:text-main absolute top-0 -left-[18px] flex h-6 w-4 cursor-grab items-center justify-center rounded opacity-0 transition-opacity',
               'group-hover:opacity-100',
             )}
             draggable
@@ -90,22 +98,22 @@ export const NodeWrapper = memo(
           <Handle
             type="target"
             position={Position.Top}
-            className="!bg-theme-500 !h-1 !w-1 !border-none opacity-0 transition-opacity group-hover:opacity-100"
+            className="!bg-theme-500 !-top-1 !h-1 !w-1 !border-none opacity-0 transition-opacity group-hover:opacity-100"
           />
           <Handle
             type="source"
             position={Position.Right}
-            className="!bg-theme-500 !h-1 !w-1 !border-none opacity-0 transition-opacity group-hover:opacity-100"
+            className="!bg-theme-500 !-right-1 !h-1 !w-1 !border-none opacity-0 transition-opacity group-hover:opacity-100"
           />
           <Handle
             type="source"
             position={Position.Bottom}
-            className="!bg-theme-500 !h-1 !w-1 !border-none opacity-0 transition-opacity group-hover:opacity-100"
+            className="!bg-theme-500 !-bottom-1 !h-1 !w-1 !border-none opacity-0 transition-opacity group-hover:opacity-100"
           />
           <Handle
             type="target"
             position={Position.Left}
-            className="!bg-theme-500 !h-1 !w-1 !border-none opacity-0 transition-opacity group-hover:opacity-100"
+            className="!bg-theme-500 !-left-1 !h-1 !w-1 !border-none opacity-0 transition-opacity group-hover:opacity-100"
           />
         </div>
       </>

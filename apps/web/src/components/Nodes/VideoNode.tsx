@@ -1,15 +1,15 @@
 import { type Node, type NodeProps } from '@xyflow/react';
-import { ArrowUpRight, Shrink, SlidersHorizontal } from 'lucide-react';
+import { PlayCircle, Volume2, ArrowUpRight } from 'lucide-react';
 
 import { NodeWrapper, type NodeDataProps } from './NodeWrapper.tsx';
 
-type ImageNodeData = NodeDataProps & {};
-export type ImageNodeType = Node<ImageNodeData, 'image'>;
+type VideoNodeData = NodeDataProps & {};
+export type VideoNodeType = Node<VideoNodeData, 'video'>;
 
-export const ImageNode = ({ id, data, selected }: NodeProps<ImageNodeType>) => {
-  const ImageToolbar = (
+export const VideoNode = ({ id, data, selected }: NodeProps<VideoNodeType>) => {
+  const VideoToolbar = (
     <div className="flex w-full items-center justify-between gap-4">
-      {/*source*/}
+      {/* Source */}
       <a
         href={data?.src}
         target="_blank"
@@ -17,22 +17,15 @@ export const ImageNode = ({ id, data, selected }: NodeProps<ImageNodeType>) => {
         onClick={(e) => e.stopPropagation()}
         className="nodrag text-secondary hover:text-theme-500 flex flex-1 cursor-pointer items-center gap-1 overflow-hidden text-xs font-medium transition-colors"
       >
-        <span className="truncate">
-          Source: {data?.src || 'Unknown Source'}
-        </span>
+        <span className="truncate">Source: {data?.src || 'Unknown Video'}</span>
         <ArrowUpRight size={12} strokeWidth={2} />
       </a>
 
-      {/*tools*/}
+      {/* Tools */}
       <div className="text-secondary flex items-center gap-2">
         <div className="bg-border h-3 w-px" />
-
         <button className="hover:text-main">
-          <Shrink size={12} />
-        </button>
-
-        <button className="hover:text-main">
-          <SlidersHorizontal size={12} />
+          <Volume2 size={12} />
         </button>
       </div>
     </div>
@@ -43,20 +36,21 @@ export const ImageNode = ({ id, data, selected }: NodeProps<ImageNodeType>) => {
       id={id}
       data={data}
       selected={selected}
-      toolbar={ImageToolbar}
+      toolbar={VideoToolbar}
       keepAspectRatio={true}
     >
-      <div className="flex h-full flex-col">
-        <div className="relative h-full w-full overflow-hidden">
+      <div className="bg-foreground/5 flex h-full flex-col justify-center rounded-xl">
+        <div className="relative h-full w-full overflow-hidden rounded-xl">
           {data?.src ? (
-            <img
+            <video
               src={data.src}
-              alt={data.label || 'Node image'}
-              className="pointer-events-none h-full w-full rounded border-0 object-contain"
+              controls
+              className="nodrag h-full w-full object-contain"
             />
           ) : (
-            <div className="text-secondary flex h-full w-full items-center justify-center text-sm">
-              No Image Source
+            <div className="text-secondary flex h-full w-full flex-col items-center justify-center gap-2 text-sm">
+              <PlayCircle size={24} className="opacity-20" />
+              <span>No Video Source</span>
             </div>
           )}
         </div>

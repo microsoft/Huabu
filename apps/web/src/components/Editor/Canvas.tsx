@@ -3,7 +3,13 @@ import React, { useMemo } from 'react';
 import '@xyflow/react/dist/style.css';
 
 import useStore from '../../store/canvasStore.ts';
+import { GroupNode } from '../Nodes/GroupNode.tsx';
 import { ImageNode } from '../Nodes/ImageNode.tsx';
+import { NoteNode } from '../Nodes/NoteNode.tsx';
+import { PDFNode } from '../Nodes/PDFNode.tsx';
+import { TextNode } from '../Nodes/TextNode.tsx';
+import { VideoNode } from '../Nodes/VideoNode.tsx';
+import { WebNode } from '../Nodes/WebNode.tsx';
 
 export const Canvas: React.FC = () => {
   const nodes = useStore((state) => state.nodes);
@@ -15,7 +21,12 @@ export const Canvas: React.FC = () => {
   const nodeTypes = useMemo(
     () => ({
       image: ImageNode,
-      // text: TextNode,
+      text: TextNode,
+      note: NoteNode,
+      video: VideoNode,
+      web: WebNode,
+      pdf: PDFNode,
+      group: GroupNode,
     }),
     [],
   );
