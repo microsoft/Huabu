@@ -139,6 +139,10 @@ const chatRoutes: FastifyPluginAsync = async (
                 ? metadata.langgraph_node
                 : 'agent';
 
+            // Only stream token-level deltas for the LLM node.
+            // ToolNode outputs are sent via `updates` mode to avoid duplicates.
+            if (nodeName !== 'agent') continue;
+
             if (normalizeRole(message) !== 'assistant') continue;
 
             const delta = getTextDelta(message);

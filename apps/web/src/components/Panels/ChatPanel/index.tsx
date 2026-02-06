@@ -8,7 +8,35 @@ import { ChatInput } from './ChatInput';
 import { MessageList } from './messages/MessageList';
 
 import type { ChatMessage } from './messages/types';
-import type { ChatStreamUpdatePayload } from '@sediment/shared';
+import type {
+  ChatStreamUpdatePayload,
+  WebSearchToolResponse,
+} from '@sediment/shared';
+
+function parseWebSearchToolResponse(
+  content: string,
+): WebSearchToolResponse | null {
+  try {
+    const data = JSON.parse(content) as unknown;
+    if (typeof data !== 'object' || data === null) return null;
+    if ((data as { tool?: unknown }).tool !== 'web_search') return null;
+
+    return data as WebSearchToolResponse;
+  } catch {
+    return null;
+  }
+}
+
+function toMarkdownSources(
+  sources: Array<{ title: string; url: string }>,
+): string {
+  const lines = sources.map((s) => {
+    const safeTitle = s.title.replace(/\n/g, ' ').replace(/\]/g, '\\]');
+    return `- [${safeTitle}](${s.url})`;
+  });
+
+  return ['Sources:', ...lines].join('\n');
+}
 
 interface ChatPanelProps {
   isCollapsed?: boolean;
@@ -52,13 +80,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
 
         // Handle Agent Updates (LLM Text)
         if (node === 'agent' && message) {
-          // If the message has toolCalls, show status
-          if (message.toolCalls && message.toolCalls.length > 0) {
-            // TODO: Show tool call status in UI
-            return;
-          }
-
-          // Otherwise update conversation content
           if (message.content) {
             setMessages((prev) => {
               const existing = prev.find((m) => m.id === assistantId);
@@ -81,16 +102,35 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
 
           // Handle Tool Updates
         } else if (node === 'tools' && message) {
-          // Usually message.content from a ToolNode is the JSON result
-          // TODO:
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: Date.now().toString(),
-              role: 'assistant',
-              content: `Tool Output: ${message.content.substring(0, 150)}...`,
-            },
-          ]);
+          const parsed = message.content
+            ? parseWebSearchToolResponse(message.content)
+            : null;
+
+          if (parsed && parsed.status === 'success') {
+            const results = parsed.data.results;
+            const sources = results;
+
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: Date.now().toString(),
+                role: 'assistant',
+                content:
+                  sources.length > 0
+                    ? toMarkdownSources(sources)
+                    : 'Sources: (none)',
+              },
+            ]);
+          } else if (parsed && parsed.status === 'error') {
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: Date.now().toString(),
+                role: 'assistant',
+                content: `Web search error: ${parsed.error}`,
+              },
+            ]);
+          }
         }
       },
       onError: (err) => {

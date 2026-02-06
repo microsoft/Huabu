@@ -3,7 +3,7 @@ import { ToolNode } from '@langchain/langgraph/prebuilt';
 
 import { getLLM } from './llm.js';
 import { AgentState } from './state.js';
-import { tools } from './tools.js';
+import { tools } from './tools/index.js';
 
 import type { AIMessage } from '@langchain/core/messages';
 
