@@ -4,8 +4,9 @@ import {
   ChevronRight,
   GripVertical,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 
+import { setDragPayload } from '../../../../utils/dragDrop';
 import { GhostButton } from '../../../Common/GhostButton';
 
 import type { ToolResponse, WebSearchToolResponse } from '@sediment/shared';
@@ -31,6 +32,7 @@ const getHostname = (url: string) => {
 const SourceCard = ({ source }: { source: Source }) => {
   const title = (source.title ?? '').trim() || source.url;
   const hostname = getHostname(source.url);
+  const cardRef = useRef<HTMLAnchorElement | null>(null);
 
   return (
     <div
@@ -40,14 +42,34 @@ const SourceCard = ({ source }: { source: Source }) => {
     >
       <GhostButton
         aria-label="Source handle"
+        draggable
         className={[
           'text-icon hover:text-main absolute top-2 left-0 flex h-4.5 w-4.5 cursor-grab items-center justify-center rounded p-px!',
           'opacity-0 transition-opacity',
           'group-hover:opacity-100 hover:opacity-100 focus-visible:opacity-100',
         ].join(' ')}
+        onDragStart={(e) => {
+          e.stopPropagation();
+
+          setDragPayload(
+            e,
+            {
+              kind: 'web',
+              data: {
+                src: source.url,
+                label: title,
+                favicon: source.favicon,
+                title,
+              },
+            },
+            {
+              fallbackText: source.url,
+              dragImageElement: cardRef.current,
+            },
+          );
+        }}
         onMouseDown={(e) => {
-          // Prevent the card link from activating when grabbing the handle.
-          e.preventDefault();
+          // Do not call preventDefault here; it can prevent native drag from starting.
           e.stopPropagation();
         }}
         onClick={(e) => {
@@ -59,11 +81,12 @@ const SourceCard = ({ source }: { source: Source }) => {
       </GhostButton>
 
       <a
+        ref={cardRef}
         href={source.url}
         target="_blank"
         rel="noopener noreferrer"
         className={[
-          'border-border block rounded-xl border bg-white px-3 py-2',
+          'border-border block rounded-lg border bg-white px-3 py-2',
           'hover:bg-background ml-1 transition-colors',
         ].join(' ')}
       >
