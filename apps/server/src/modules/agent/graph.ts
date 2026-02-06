@@ -6,6 +6,7 @@ import { AgentState } from './state.js';
 import { tools } from './tools/index.js';
 
 import type { AIMessage } from '@langchain/core/messages';
+import type { BaseCheckpointSaver } from '@langchain/langgraph';
 
 // 1. Node: Call the LLM
 const callModel = async (state: typeof AgentState.State) => {
@@ -37,21 +38,16 @@ const shouldContinue = (state: typeof AgentState.State) => {
 };
 
 // 4. Build the Graph
-export const createGraph = () => {
+export const createGraph = (opts?: { checkpointer?: BaseCheckpointSaver }) => {
   const workflow = new StateGraph(AgentState)
     .addNode('agent', callModel)
     .addNode('tools', toolNode)
     .addEdge(START, 'agent')
-    .addConditionalEdges(
-      'agent',
-      shouldContinue,
-      // Map return values of shouldContinue to Node names
-      {
-        tools: 'tools',
-        [END]: END,
-      },
-    )
-    .addEdge('tools', 'agent'); // After tool runs, feed result back to agent
+    .addConditionalEdges('agent', shouldContinue, {
+      tools: 'tools',
+      [END]: END,
+    })
+    .addEdge('tools', 'agent');
 
-  return workflow.compile();
+  return workflow.compile({ checkpointer: opts?.checkpointer });
 };

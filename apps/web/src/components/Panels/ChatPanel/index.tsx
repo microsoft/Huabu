@@ -1,3 +1,4 @@
+import { createId } from '@sediment/shared';
 import { PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 
@@ -20,6 +21,8 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
+  const threadIdRef = useRef<string>(createId('thread'));
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -35,7 +38,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     if (!input.trim() || isLoading) return;
 
     const userMessage: ChatMessage = {
-      id: Date.now().toString(),
+      id: createId('message'),
       role: 'user',
       content: input,
     };
@@ -44,9 +47,9 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     setInput('');
     setIsLoading(true);
 
-    const assistantId = (Date.now() + 1).toString();
+    const assistantId = createId('message');
 
-    await chatApi.streamMessage(userMessage.content, {
+    await chatApi.streamMessage(userMessage.content, threadIdRef.current, {
       onUpdate: (payload: ChatStreamUpdatePayload) => {
         const { node, message } = payload;
 
@@ -80,7 +83,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           setMessages((prev) => [
             ...prev,
             {
-              id: Date.now().toString(),
+              id: createId('tool'),
               role: 'tool',
               toolResponse,
             },
@@ -92,7 +95,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         setMessages((prev) => [
           ...prev,
           {
-            id: Date.now().toString(),
+            id: createId('message'),
             role: 'assistant',
             content: 'Error: ' + err.message,
           },

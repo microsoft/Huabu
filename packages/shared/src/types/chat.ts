@@ -1,5 +1,10 @@
 export interface SendMessageRequest {
   content: string;
+  /**
+   * Conversation/thread identifier used to persist and resume LangGraph state.
+   * Clients should generate a stable ID per chat session and reuse it.
+   */
+  threadId: string;
 }
 
 export interface SendMessageResponse {
@@ -65,6 +70,11 @@ export interface WebSearchResultItem {
   title: string;
   url: string;
   content?: string;
+  /**
+   * Optional reference to externally stored content when the full payload is
+   * too large to embed in tool messages/checkpoints.
+   */
+  contentRef?: string;
   favicon?: string;
   score?: number;
 }
