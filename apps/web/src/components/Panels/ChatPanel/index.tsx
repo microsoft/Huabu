@@ -1,3 +1,4 @@
+import { createId } from '@sediment/shared';
 import { PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 
@@ -20,6 +21,8 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
+  const threadIdRef = useRef<string>(createId('thread'));
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -35,7 +38,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     if (!input.trim() || isLoading) return;
 
     const userMessage: ChatMessage = {
-      id: Date.now().toString(),
+      id: createId('message'),
       role: 'user',
       content: input,
     };
@@ -44,21 +47,14 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     setInput('');
     setIsLoading(true);
 
-    const assistantId = (Date.now() + 1).toString();
+    const assistantId = createId('message');
 
-    await chatApi.streamMessage(userMessage.content, {
+    await chatApi.streamMessage(userMessage.content, threadIdRef.current, {
       onUpdate: (payload: ChatStreamUpdatePayload) => {
         const { node, message } = payload;
 
         // Handle Agent Updates (LLM Text)
         if (node === 'agent' && message) {
-          // If the message has toolCalls, show status
-          if (message.toolCalls && message.toolCalls.length > 0) {
-            // TODO: Show tool call status in UI
-            return;
-          }
-
-          // Otherwise update conversation content
           if (message.content) {
             setMessages((prev) => {
               const existing = prev.find((m) => m.id === assistantId);
@@ -80,15 +76,16 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           }
 
           // Handle Tool Updates
-        } else if (node === 'tools' && message) {
-          // Usually message.content from a ToolNode is the JSON result
-          // TODO:
+        } else if (node === 'tools') {
+          const toolResponse = payload.toolResponse;
+          if (!toolResponse) return;
+
           setMessages((prev) => [
             ...prev,
             {
-              id: Date.now().toString(),
-              role: 'assistant',
-              content: `Tool Output: ${message.content.substring(0, 150)}...`,
+              id: createId('tool'),
+              role: 'tool',
+              toolResponse,
             },
           ]);
         }
@@ -98,7 +95,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         setMessages((prev) => [
           ...prev,
           {
-            id: Date.now().toString(),
+            id: createId('message'),
             role: 'assistant',
             content: 'Error: ' + err.message,
           },
@@ -119,7 +116,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       iconExpanded={<PanelRightClose />}
       className="border-border border-l"
     >
-      <div className="flex h-full flex-col overflow-hidden">
+      <div className="flex h-full flex-col gap-2 overflow-visible">
         <MessageList
           messages={messages}
           isLoading={isLoading}

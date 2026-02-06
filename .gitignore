@@ -139,3 +139,5 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 
 pnpm-lock.yaml
+apps/server/data
+*.sqlite

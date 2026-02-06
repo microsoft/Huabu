@@ -1,3 +1,4 @@
+import { createId } from '@sediment/shared';
 import {
   addEdge,
   applyNodeChanges,
@@ -25,7 +26,7 @@ type RFState = {
 export const initialNodes: Node[] = [
   // --- 1. Text Node  ---
   {
-    id: 'node-text-1',
+    id: createId('node'),
     type: 'text',
     position: { x: 500, y: -400 },
     data: {
@@ -38,7 +39,7 @@ export const initialNodes: Node[] = [
 
   // --- 2. Note Node  ---
   {
-    id: 'node-note-1',
+    id: createId('node'),
     type: 'note',
     position: { x: 1000, y: -200 },
     data: {
@@ -50,7 +51,7 @@ export const initialNodes: Node[] = [
 
   // --- 3. Image Node  ---
   {
-    id: 'node-image-1',
+    id: createId('node'),
     type: 'image',
     position: { x: 1000, y: 0 },
     data: {
@@ -61,7 +62,7 @@ export const initialNodes: Node[] = [
 
   // --- 4. Group Node  ---
   {
-    id: 'group-1',
+    id: createId('node'),
     type: 'group',
     position: { x: 500, y: 400 },
     data: {
@@ -73,7 +74,7 @@ export const initialNodes: Node[] = [
 
   // --- 5. Web Node  ---
   {
-    id: 'node-web-1',
+    id: createId('node'),
     type: 'web',
     // parentId: 'group-1',
     position: { x: 0, y: 60 },
@@ -86,7 +87,7 @@ export const initialNodes: Node[] = [
 
   // --- 6. PDF Node ---
   {
-    id: 'node-pdf-1',
+    id: createId('node'),
     type: 'pdf',
     // parentId: 'group-1',
     position: { x: 500, y: -140 },
@@ -100,7 +101,7 @@ export const initialNodes: Node[] = [
 
   // --- 7. Video Node  ---
   {
-    id: 'node-video-1',
+    id: createId('node'),
     type: 'video',
     position: { x: 0, y: 400 },
     data: {
@@ -114,20 +115,20 @@ export const initialNodes: Node[] = [
 // === 2. Mock Edges  ===
 export const initialEdges: Edge[] = [
   {
-    id: 'e1-2',
+    id: createId('edge'),
     source: 'node-text-1',
     target: 'node-image-1',
     label: 'illustrates',
   },
   {
-    id: 'e1-group',
+    id: createId('edge'),
     source: 'node-text-1',
     target: 'group-1',
     animated: true,
     label: 'references',
   },
   {
-    id: 'e-note-img',
+    id: createId('edge'),
     source: 'node-note-1',
     target: 'node-image-1',
     style: { stroke: '#f59e0b' },

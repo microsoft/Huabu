@@ -15,6 +15,7 @@ export interface StreamCallbacks {
 export const chatApi = {
   streamMessage: async (
     content: string,
+    threadId: string,
     callbacks: StreamCallbacks,
   ): Promise<void> => {
     try {
@@ -23,7 +24,10 @@ export const chatApi = {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ content } satisfies SendMessageRequest),
+        body: JSON.stringify({
+          content,
+          threadId,
+        } satisfies SendMessageRequest),
       });
 
       if (!response.ok) {
@@ -68,7 +72,6 @@ export const chatApi = {
           const dataStr = dataLines.join('\n');
 
           if (eventType === 'update') {
-            console.log('Processing update event:', dataStr);
             try {
               const data = JSON.parse(dataStr) as ChatStreamUpdatePayload;
               callbacks.onUpdate(data);

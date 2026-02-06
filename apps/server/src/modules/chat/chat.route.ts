@@ -1,10 +1,41 @@
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
+import { createId } from '@sediment/shared';
 
 import { SYSTEM_PROMPT } from '../../prompt/system.js';
 import { createGraph } from '../agent/graph.js';
+import { getCheckpointer } from '../agent/store/index.js';
 
-import type { SendMessageRequest, SendMessageResponse } from '@sediment/shared';
+import type {
+  ChatStreamUpdatePayload,
+  SendMessageRequest,
+  SendMessageResponse,
+  ToolResponse,
+} from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
+
+function getOrCreateThreadId(value: unknown): string {
+  if (typeof value === 'string' && value.trim().length > 0) return value;
+  return createId('thread');
+}
+
+async function hasExistingThreadState(
+  agent: unknown,
+  config: { configurable: { thread_id: string } },
+): Promise<boolean> {
+  const maybeGetState = (
+    agent as { getState?: (c: unknown) => Promise<unknown> }
+  ).getState;
+  if (typeof maybeGetState !== 'function') return false;
+
+  try {
+    const state = await maybeGetState(config);
+    const values = (state as { values?: unknown })?.values;
+    const messages = (values as { messages?: unknown })?.messages;
+    return Array.isArray(messages) && messages.length > 0;
+  } catch {
+    return false;
+  }
+}
 
 function isLangChainMessage(value: unknown): value is {
   content?: unknown;
@@ -14,11 +45,13 @@ function isLangChainMessage(value: unknown): value is {
   return typeof value === 'object' && value !== null;
 }
 
-function normalizeRole(message: unknown): 'user' | 'assistant' {
+function normalizeRole(message: unknown): 'user' | 'assistant' | 'tool' {
   if (!isLangChainMessage(message)) return 'assistant';
 
   const type = message._getType?.();
   const ctorName = message.constructor?.name;
+
+  if (type === 'tool' || ctorName === 'ToolMessage') return 'tool';
 
   return type === 'human' || ctorName === 'HumanMessage' ? 'user' : 'assistant';
 }
@@ -45,12 +78,35 @@ function getTextDelta(message: unknown): string | null {
 
 function writeUpdate(
   raw: NodeJS.WritableStream,
-  payload: {
-    node: string;
-    message: { role: 'user' | 'assistant'; content: string };
-  },
+  payload: ChatStreamUpdatePayload,
 ) {
   raw.write(`event: update\ndata: ${JSON.stringify(payload)}\n\n`);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function parseToolResponse(
+  content: string,
+): ToolResponse<string, unknown> | null {
+  try {
+    const data = JSON.parse(content) as unknown;
+    if (!isRecord(data)) return null;
+    if (typeof data.tool !== 'string') return null;
+    if (data.status !== 'success' && data.status !== 'error') return null;
+
+    if (data.status === 'error') {
+      if (typeof data.error !== 'string') return null;
+      if (typeof data.hint !== 'undefined' && typeof data.hint !== 'string') {
+        return null;
+      }
+    }
+
+    return data as ToolResponse<string, unknown>;
+  } catch {
+    return null;
+  }
 }
 
 function getUpdateMessages(value: unknown): unknown[] | null {
@@ -63,13 +119,15 @@ const chatRoutes: FastifyPluginAsync = async (
   fastify,
   _opts,
 ): Promise<void> => {
-  // Compile the graph once
-  const agent = createGraph();
+  // Compile the graph once (with checkpointer for multi-turn persistence)
+  const checkpointer = await getCheckpointer();
+  const agent = createGraph({ checkpointer });
 
   fastify.post<{ Body: SendMessageRequest; Reply: SendMessageResponse }>(
     '/',
     async function (request, reply) {
-      const { content } = request.body;
+      const { content, threadId } = request.body;
+      const resolvedThreadId = getOrCreateThreadId(threadId);
 
       // We'll stream the response manually via reply.raw
       reply.hijack();
@@ -90,11 +148,15 @@ const chatRoutes: FastifyPluginAsync = async (
       reply.raw.write(': ok\n\n');
 
       try {
+        const config = {
+          configurable: { thread_id: resolvedThreadId },
+        };
+
+        const isExisting = await hasExistingThreadState(agent, config);
         const inputs = {
-          messages: [
-            new SystemMessage(SYSTEM_PROMPT),
-            new HumanMessage(content),
-          ],
+          messages: isExisting
+            ? [new HumanMessage(content)]
+            : [new SystemMessage(SYSTEM_PROMPT), new HumanMessage(content)],
         };
 
         if (process.env.DEBUG_AGENT === '1') {
@@ -113,6 +175,13 @@ const chatRoutes: FastifyPluginAsync = async (
         // - 'updates': node-level updates (tool results, final messages, etc.)
         const stream = await agent.stream(inputs, {
           streamMode: ['messages', 'updates'],
+          ...config,
+        });
+
+        // Let the client know which thread is being used (for clients that don't send one yet).
+        writeUpdate(reply.raw, {
+          node: 'meta',
+          metadata: { threadId: resolvedThreadId },
         });
 
         let assistantText = '';
@@ -138,6 +207,10 @@ const chatRoutes: FastifyPluginAsync = async (
               typeof metadata.langgraph_node === 'string'
                 ? metadata.langgraph_node
                 : 'agent';
+
+            // Only stream token-level deltas for the LLM node.
+            // ToolNode outputs are sent via `updates` mode to avoid duplicates.
+            if (nodeName !== 'agent') continue;
 
             if (normalizeRole(message) !== 'assistant') continue;
 
@@ -170,10 +243,19 @@ const chatRoutes: FastifyPluginAsync = async (
               assistantText = normalizedContent;
             }
 
-            writeUpdate(reply.raw, {
-              node: nodeName,
-              message: { role, content: normalizedContent },
-            });
+            if (nodeName === 'tools') {
+              const toolResponse = parseToolResponse(normalizedContent);
+              writeUpdate(reply.raw, {
+                node: nodeName,
+                toolResponse: toolResponse ?? undefined,
+                message: { role: 'tool', content: normalizedContent },
+              });
+            } else {
+              writeUpdate(reply.raw, {
+                node: nodeName,
+                message: { role, content: normalizedContent },
+              });
+            }
           }
         }
 

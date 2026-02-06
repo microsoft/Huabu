@@ -1,6 +1,7 @@
 import { Ellipsis } from 'lucide-react';
 
 import { AIMessage } from './AIMessage';
+import { ToolMessage } from './ToolMessage';
 import { UserMessage } from './UserMessage';
 
 import type { ChatMessage } from './types';
@@ -18,18 +19,11 @@ export const MessageList = ({
   endRef,
 }: MessageListProps) => {
   const streamingAssistantId = isLoading
-    ? [...messages]
-        .reverse()
-        .find(
-          (m) =>
-            m.role === 'assistant' &&
-            !m.content.startsWith('Tool Output:') &&
-            !m.content.startsWith('Error:'),
-        )?.id
+    ? [...messages].reverse().find((m) => m.role === 'assistant')?.id
     : undefined;
 
   return (
-    <div className="flex-1 space-y-4 overflow-y-auto">
+    <div className="flex-1 space-y-1 overflow-x-visible overflow-y-auto">
       {messages.map((msg) => {
         if (msg.role === 'user') {
           return <UserMessage key={msg.id} content={msg.content} />;
@@ -44,6 +38,12 @@ export const MessageList = ({
             />
           );
         }
+
+        if (msg.role === 'tool') {
+          return <ToolMessage key={msg.id} toolResponse={msg.toolResponse} />;
+        }
+
+        return null;
       })}
 
       {isLoading && (
