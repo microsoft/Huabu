@@ -3,6 +3,10 @@ import { z } from 'zod';
 
 import type { WebSearchToolResponse } from '@sediment/shared';
 
+const toToolOutput = (payload: WebSearchToolResponse) => {
+  return JSON.stringify(payload);
+};
+
 export const webSearchTool = tool(
   async ({ query, max_results, search_depth, include_answer }) => {
     const apiKey = process.env.TAVILY_API_KEY;
@@ -13,7 +17,7 @@ export const webSearchTool = tool(
         error: 'Missing TAVILY_API_KEY in environment variables.',
         hint: 'Set TAVILY_API_KEY (for example in apps/server/.env) to enable web_search.',
       } satisfies WebSearchToolResponse;
-      return JSON.stringify(payload);
+      return toToolOutput(payload);
     }
 
     const controller = new AbortController();
@@ -47,7 +51,7 @@ export const webSearchTool = tool(
           status: 'error',
           error: `Tavily request failed with status ${response.status}.`,
         } satisfies WebSearchToolResponse;
-        return JSON.stringify(payload);
+        return toToolOutput(payload);
       }
 
       const data = (await response.json()) as {
@@ -69,7 +73,7 @@ export const webSearchTool = tool(
           title: r.title ?? '',
           url: r.url ?? '',
           content: r.content ?? r.raw_content ?? '',
-          facicon: r.favicon ?? '',
+          favicon: r.favicon ?? '',
           score: typeof r.score === 'number' ? r.score : undefined,
         }));
 
@@ -82,7 +86,7 @@ export const webSearchTool = tool(
           results: normalizedResults,
         },
       } satisfies WebSearchToolResponse;
-      return JSON.stringify(payload);
+      return toToolOutput(payload);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (message) {
@@ -93,7 +97,7 @@ export const webSearchTool = tool(
         status: 'error',
         error: 'Tavily request failed.',
       } satisfies WebSearchToolResponse;
-      return JSON.stringify(payload);
+      return toToolOutput(payload);
     } finally {
       clearTimeout(timeout);
     }

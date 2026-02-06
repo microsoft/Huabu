@@ -8,35 +8,7 @@ import { ChatInput } from './ChatInput';
 import { MessageList } from './messages/MessageList';
 
 import type { ChatMessage } from './messages/types';
-import type {
-  ChatStreamUpdatePayload,
-  WebSearchToolResponse,
-} from '@sediment/shared';
-
-function parseWebSearchToolResponse(
-  content: string,
-): WebSearchToolResponse | null {
-  try {
-    const data = JSON.parse(content) as unknown;
-    if (typeof data !== 'object' || data === null) return null;
-    if ((data as { tool?: unknown }).tool !== 'web_search') return null;
-
-    return data as WebSearchToolResponse;
-  } catch {
-    return null;
-  }
-}
-
-function toMarkdownSources(
-  sources: Array<{ title: string; url: string }>,
-): string {
-  const lines = sources.map((s) => {
-    const safeTitle = s.title.replace(/\n/g, ' ').replace(/\]/g, '\\]');
-    return `- [${safeTitle}](${s.url})`;
-  });
-
-  return ['Sources:', ...lines].join('\n');
-}
+import type { ChatStreamUpdatePayload } from '@sediment/shared';
 
 interface ChatPanelProps {
   isCollapsed?: boolean;
@@ -101,36 +73,18 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           }
 
           // Handle Tool Updates
-        } else if (node === 'tools' && message) {
-          const parsed = message.content
-            ? parseWebSearchToolResponse(message.content)
-            : null;
+        } else if (node === 'tools') {
+          const toolResponse = payload.toolResponse;
+          if (!toolResponse) return;
 
-          if (parsed && parsed.status === 'success') {
-            const results = parsed.data.results;
-            const sources = results;
-
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: Date.now().toString(),
-                role: 'assistant',
-                content:
-                  sources.length > 0
-                    ? toMarkdownSources(sources)
-                    : 'Sources: (none)',
-              },
-            ]);
-          } else if (parsed && parsed.status === 'error') {
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: Date.now().toString(),
-                role: 'assistant',
-                content: `Web search error: ${parsed.error}`,
-              },
-            ]);
-          }
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: Date.now().toString(),
+              role: 'tool',
+              toolResponse,
+            },
+          ]);
         }
       },
       onError: (err) => {
@@ -159,7 +113,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       iconExpanded={<PanelRightClose />}
       className="border-border border-l"
     >
-      <div className="flex h-full flex-col overflow-hidden">
+      <div className="flex h-full flex-col gap-2 overflow-visible">
         <MessageList
           messages={messages}
           isLoading={isLoading}

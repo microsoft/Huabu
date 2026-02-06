@@ -3,7 +3,12 @@ import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { SYSTEM_PROMPT } from '../../prompt/system.js';
 import { createGraph } from '../agent/graph.js';
 
-import type { SendMessageRequest, SendMessageResponse } from '@sediment/shared';
+import type {
+  ChatStreamUpdatePayload,
+  SendMessageRequest,
+  SendMessageResponse,
+  ToolResponse,
+} from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
 function isLangChainMessage(value: unknown): value is {
@@ -14,11 +19,13 @@ function isLangChainMessage(value: unknown): value is {
   return typeof value === 'object' && value !== null;
 }
 
-function normalizeRole(message: unknown): 'user' | 'assistant' {
+function normalizeRole(message: unknown): 'user' | 'assistant' | 'tool' {
   if (!isLangChainMessage(message)) return 'assistant';
 
   const type = message._getType?.();
   const ctorName = message.constructor?.name;
+
+  if (type === 'tool' || ctorName === 'ToolMessage') return 'tool';
 
   return type === 'human' || ctorName === 'HumanMessage' ? 'user' : 'assistant';
 }
@@ -45,12 +52,35 @@ function getTextDelta(message: unknown): string | null {
 
 function writeUpdate(
   raw: NodeJS.WritableStream,
-  payload: {
-    node: string;
-    message: { role: 'user' | 'assistant'; content: string };
-  },
+  payload: ChatStreamUpdatePayload,
 ) {
   raw.write(`event: update\ndata: ${JSON.stringify(payload)}\n\n`);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function parseToolResponse(
+  content: string,
+): ToolResponse<string, unknown> | null {
+  try {
+    const data = JSON.parse(content) as unknown;
+    if (!isRecord(data)) return null;
+    if (typeof data.tool !== 'string') return null;
+    if (data.status !== 'success' && data.status !== 'error') return null;
+
+    if (data.status === 'error') {
+      if (typeof data.error !== 'string') return null;
+      if (typeof data.hint !== 'undefined' && typeof data.hint !== 'string') {
+        return null;
+      }
+    }
+
+    return data as ToolResponse<string, unknown>;
+  } catch {
+    return null;
+  }
 }
 
 function getUpdateMessages(value: unknown): unknown[] | null {
@@ -174,10 +204,19 @@ const chatRoutes: FastifyPluginAsync = async (
               assistantText = normalizedContent;
             }
 
-            writeUpdate(reply.raw, {
-              node: nodeName,
-              message: { role, content: normalizedContent },
-            });
+            if (nodeName === 'tools') {
+              const toolResponse = parseToolResponse(normalizedContent);
+              writeUpdate(reply.raw, {
+                node: nodeName,
+                toolResponse: toolResponse ?? undefined,
+                message: { role: 'tool', content: normalizedContent },
+              });
+            } else {
+              writeUpdate(reply.raw, {
+                node: nodeName,
+                message: { role, content: normalizedContent },
+              });
+            }
           }
         }
 

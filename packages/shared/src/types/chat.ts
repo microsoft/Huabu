@@ -22,9 +22,14 @@ export interface ChatMessageDTO {
 
 export interface ChatStreamUpdatePayload {
   node: string;
-  // Instead of raw raw state, we send a normalized message
+  // Normalized message content for chat rendering.
   message?: ChatMessageDTO;
-  // Or raw tool outputs if needed
+  /**
+   * Structured tool output (preferred for UI). When present, clients should
+   * render tool results from this object rather than JSON-parsing message.content.
+   */
+  toolResponse?: ToolResponse<string, unknown>;
+  // Extra payload details when needed.
   metadata?: Record<string, unknown>;
 }
 
