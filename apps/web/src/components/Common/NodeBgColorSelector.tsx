@@ -2,11 +2,19 @@ import { useReactFlow } from '@xyflow/react';
 import { clsx } from 'clsx';
 import { useState } from 'react';
 
+import type { NodeStyle } from '@/components/Nodes/NodeWrapper.tsx';
+
 const PRESET_COLORS = [
+  {
+    name: 'Transparent',
+    value: 'bg-transparent',
+    border: 'border-theme-500',
+    ring: 'ring-transparent',
+  },
   {
     name: 'White',
     value: 'bg-white',
-    border: 'border-gray-200',
+    border: 'border-border',
     ring: 'ring-gray-200',
   },
   {
@@ -47,11 +55,13 @@ const PRESET_COLORS = [
   },
 ];
 
-export const ColorSelector = ({
+export const NodeBgColorSelector = ({
   nodeId,
+  style = {},
   currentColor,
 }: {
   nodeId: string;
+  style?: NodeStyle;
   currentColor?: string;
 }) => {
   const { updateNodeData } = useReactFlow();
@@ -61,7 +71,12 @@ export const ColorSelector = ({
     PRESET_COLORS.find((c) => c.value === currentColor) || PRESET_COLORS[0];
 
   const handleColorSelect = (colorValue: string) => {
-    updateNodeData(nodeId, { color: colorValue });
+    updateNodeData(nodeId, {
+      style: {
+        ...style,
+        backgroundColor: colorValue,
+      },
+    });
     setIsOpen(false);
   };
 
