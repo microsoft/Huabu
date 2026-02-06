@@ -94,16 +94,12 @@ export const Canvas: React.FC = () => {
         let newNode: Node | null = null;
 
         if (payload.kind === 'web') {
-          const src = payload.data.src;
-          const label = payload.data.label ?? src;
-
           newNode = {
             id: createId('node'),
             type: 'web',
             position,
             data: {
-              src,
-              label,
+              src: payload.data.src,
             },
             style: { width: 460, height: 300 },
           };

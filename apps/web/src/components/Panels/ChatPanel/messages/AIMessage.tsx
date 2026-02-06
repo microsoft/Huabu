@@ -1,6 +1,6 @@
 import { Copy } from 'lucide-react';
 
-import { BlockNoteMessageView } from './BlockNoteMessageView';
+import { BlockNoteCard } from './BlockNoteCard';
 import { copyToClipboard } from '../../../../utils/clipboard';
 import { GhostButton } from '../../../Common/GhostButton';
 
@@ -15,7 +15,7 @@ export const AIMessage = ({ content, isStreaming }: AIMessageProps) => {
       <div className="flex w-full flex-col gap-1">
         <div className="text-m text-main ml-1 rounded-2xl border border-none bg-white px-4 pt-2">
           <div className="leading-relaxed">
-            <BlockNoteMessageView content={content} />
+            <BlockNoteCard content={content} />
           </div>
         </div>
 

@@ -5,77 +5,37 @@ import {
   useCreateBlockNote,
   useBlockNoteEditor,
   useExtensionState,
+  useSelectedBlocks,
 } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/shadcn';
-import { GripVertical } from 'lucide-react';
 import { useEffect, useRef, type FC } from 'react';
 
-import { setDragPayload } from '../../../../utils/dragDrop';
+import {
+  setDragPayload,
+  type DragImageOffset,
+} from '../../../../utils/dragDrop';
+import { DragToCanvasHandleButton } from '../../../Common/DragToCanvasHandleButton';
 
 interface BlockNoteMessageViewProps {
   content: string;
   debounceMs?: number;
 }
 
-const blockToPlainText = (block: unknown): string => {
-  if (!block || typeof block !== 'object') return '';
-
-  const content = (block as { content?: unknown }).content;
-  const children = (block as { children?: unknown }).children;
-
-  const inlineToText = (inline: unknown): string => {
-    if (inline === null || inline === undefined) return '';
-    if (typeof inline === 'string') return inline;
-    if (typeof inline !== 'object') return '';
-
-    const text = (inline as { text?: unknown }).text;
-    if (typeof text === 'string') return text;
-
-    const nested = (inline as { content?: unknown }).content;
-    if (Array.isArray(nested)) return nested.map(inlineToText).join('');
-
-    return '';
-  };
-
-  const thisBlockText =
-    typeof content === 'string'
-      ? content
-      : Array.isArray(content)
-      ? content.map(inlineToText).join('')
-      : '';
-
-  const childrenText = Array.isArray(children)
-    ? children
-        .map(blockToPlainText)
-        .map((t) => t.trim())
-        .filter(Boolean)
-        .join('\n')
-    : '';
-
-  if (!childrenText) return thisBlockText;
-  if (!thisBlockText) return childrenText;
-  return `${thisBlockText}\n${childrenText}`;
-};
-
 type NoteDragHandleButtonProps = {
-  getSelectedText: () => string;
-  onCacheSelection: () => void;
   dragImageRootElement: HTMLElement | null;
 };
 
 const NoteDragHandleButton: FC<NoteDragHandleButtonProps> = (props) => {
   const editor = useBlockNoteEditor<any, any, any>();
+  const selectedBlocks = useSelectedBlocks(editor);
   const hoveredBlock = useExtensionState(SideMenuExtension, {
     editor,
     selector: (state) => state?.block,
   });
 
-  const getHoveredBlockDragImageElement = () => {
+  const getBlockDragImageElement = (blockId: string) => {
     const root = props.dragImageRootElement;
-    const blockId = (hoveredBlock as { id?: unknown } | undefined)?.id;
-    if (!root || typeof blockId !== 'string' || blockId.trim() === '') {
-      return root;
-    }
+    if (!root || blockId.trim() === '') return root;
 
     // BlockNote renders blocks with `data-id` and `id` set to the block id.
     // Prefer `.bn-block` so the drag preview matches the visible content.
@@ -90,25 +50,80 @@ const NoteDragHandleButton: FC<NoteDragHandleButtonProps> = (props) => {
     );
   };
 
+  const createSelectedBlocksDragImageElement = () => {
+    const root = props.dragImageRootElement;
+    if (!root) return null;
+
+    const blockIds = selectedBlocks.map((block) => block.id);
+
+    if (blockIds.length < 2) return null;
+
+    const blockElements: HTMLElement[] = [];
+    for (const blockId of blockIds) {
+      const el = getBlockDragImageElement(blockId);
+      if (el && el !== root) blockElements.push(el);
+    }
+
+    if (blockElements.length < 2) return null;
+
+    // Build a temporary element for the drag preview.
+    const container = document.createElement('div');
+    const rootRect = root.getBoundingClientRect();
+    container.style.display = 'flex';
+    container.style.flexDirection = 'column';
+    // Match the message width so wrapping looks like the source.
+    if (rootRect.width > 0) container.style.width = `${rootRect.width}px`;
+
+    const stripIds = (node: Node) => {
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+      const el = node as HTMLElement;
+      el.removeAttribute('id');
+      for (const child of Array.from(el.children)) stripIds(child);
+    };
+
+    for (const el of blockElements) {
+      const cloned = el.cloneNode(true);
+      stripIds(cloned);
+      container.appendChild(cloned);
+    }
+
+    return container;
+  };
+
   return (
-    <button
-      type="button"
-      aria-label="Drag block to canvas"
-      draggable
+    <DragToCanvasHandleButton
       className="bn-button"
-      onMouseDownCapture={(e) => {
-        props.onCacheSelection();
-        e.stopPropagation();
-      }}
       onDragStart={(e) => {
         e.stopPropagation();
 
-        const selection = props.getSelectedText().trim();
-        const hoveredBlockText = blockToPlainText(hoveredBlock).trim();
-        const noteContent = selection !== '' ? selection : hoveredBlockText;
-        if (noteContent.trim() === '') return;
+        let noteContent = '';
+        let dragImageElement: HTMLElement | null = null;
+        let dragImageOffset: DragImageOffset | undefined;
+        // Prefer selected blocks when a selection exists, so we keep block-level structure.
+        if (selectedBlocks.length > 1) {
+          noteContent = editor.blocksToMarkdownLossy(selectedBlocks).trim();
+          const selectedBlocksDragImage =
+            createSelectedBlocksDragImageElement();
+          dragImageElement = selectedBlocksDragImage;
 
-        const dragImageElement = getHoveredBlockDragImageElement();
+          const firstSelectedId = (selectedBlocks[0] as { id?: unknown } | null)
+            ?.id;
+          if (typeof firstSelectedId === 'string' && dragImageElement) {
+            const dragImageOffsetTarget =
+              getBlockDragImageElement(firstSelectedId);
+            const rect = dragImageOffsetTarget?.getBoundingClientRect();
+            if (rect) {
+              dragImageOffset = {
+                x: e.clientX - rect.left,
+                y: e.clientY - rect.top,
+              };
+            }
+          }
+        } else if (hoveredBlock) {
+          noteContent = editor.blocksToMarkdownLossy([hoveredBlock]).trim();
+          dragImageElement = getBlockDragImageElement(hoveredBlock.id);
+        }
+        if (noteContent.trim() === '') return;
 
         setDragPayload(
           e,
@@ -119,22 +134,16 @@ const NoteDragHandleButton: FC<NoteDragHandleButtonProps> = (props) => {
             },
           },
           {
-            fallbackText: noteContent,
             dragImageElement,
+            dragImageOffset,
           },
         );
       }}
-      onClick={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-      }}
-    >
-      <GripVertical size={16} />
-    </button>
+    />
   );
 };
 
-export const BlockNoteMessageView = ({
+export const BlockNoteCard = ({
   content,
   debounceMs = 150,
 }: BlockNoteMessageViewProps) => {
@@ -145,46 +154,11 @@ export const BlockNoteMessageView = ({
 
   const parseSeqRef = useRef(0);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
-  const selectedTextRef = useRef<string>('');
-
-  const getSelectedText = () => {
-    try {
-      const selection = window.getSelection?.();
-      if (!selection) return '';
-
-      const text = selection.toString() ?? '';
-      if (text.trim() === '') return '';
-
-      const container = wrapperRef.current;
-      if (!container) return '';
-
-      const anchorNode = selection.anchorNode;
-      const focusNode = selection.focusNode;
-      if (!anchorNode || !focusNode) return '';
-
-      // Only treat it as a "selection" if it's within this message.
-      if (!container.contains(anchorNode) || !container.contains(focusNode)) {
-        return '';
-      }
-
-      return text;
-    } catch {
-      return '';
-    }
-  };
-
-  const cacheSelection = () => {
-    selectedTextRef.current = getSelectedText();
-  };
 
   const ReadOnlySideMenu: FC = () => {
     return (
       <SideMenu>
-        <NoteDragHandleButton
-          getSelectedText={() => selectedTextRef.current}
-          onCacheSelection={cacheSelection}
-          dragImageRootElement={wrapperRef.current}
-        />
+        <NoteDragHandleButton dragImageRootElement={wrapperRef.current} />
       </SideMenu>
     );
   };
@@ -206,10 +180,14 @@ export const BlockNoteMessageView = ({
         ) {
           const lines = markdown.split(/\r?\n/);
           if (lines.length > 1) {
-            blocks = lines
+            const normalizedLines = lines
               .map((line) => line.trimEnd())
-              .filter((line) => line.trim() !== '')
-              .map((line) => ({ type: 'paragraph', content: line }));
+              .filter((line) => line.trim() !== '');
+
+            // Re-parse as markdown paragraphs to get valid BlockNote blocks
+            // (with ids/props) instead of constructing block objects manually.
+            const reparsedMarkdown = normalizedLines.join('\n\n');
+            blocks = await editor.tryParseMarkdownToBlocks(reparsedMarkdown);
           }
         }
 

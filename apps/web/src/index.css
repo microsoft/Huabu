@@ -37,21 +37,3 @@ body,
 .noteview-readonly .bn-editor {
   padding: 0 !important;
 }
-
-.noteview-readonly .bn-side-menu .bn-button {
-  width: 18px !important;
-  height: 18px !important;
-}
-
-.noteview-readonly .bn-side-menu .bn-button svg {
-  height: 17px !important;
-  width: 17px !important;
-  color: var(--color-icon) !important;
-  border-radius: 4px !important;
-  cursor: pointer !important;
-}
-
-.noteview-readonly .bn-side-menu .bn-button svg:hover {
-  color: var(--color-main) !important;
-  background-color: var(--color-background) !important;
-}

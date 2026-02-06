@@ -1,12 +1,8 @@
-import {
-  ArrowUpRight,
-  ChevronDown,
-  ChevronRight,
-  GripVertical,
-} from 'lucide-react';
+import { ArrowUpRight, ChevronDown, ChevronRight } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 
 import { setDragPayload } from '../../../../utils/dragDrop';
+import { DragToCanvasHandleButton } from '../../../Common/DragToCanvasHandleButton';
 import { GhostButton } from '../../../Common/GhostButton';
 
 import type { ToolResponse, WebSearchToolResponse } from '@sediment/shared';
@@ -40,11 +36,9 @@ const SourceCard = ({ source }: { source: Source }) => {
       data-source-url={source.url}
       data-source-title={title}
     >
-      <GhostButton
-        aria-label="Source handle"
-        draggable
+      <DragToCanvasHandleButton
         className={[
-          'text-icon hover:text-main absolute top-2 left-0 flex h-4.5 w-4.5 cursor-grab items-center justify-center rounded p-px!',
+          'absolute top-1 left-0',
           'opacity-0 transition-opacity',
           'group-hover:opacity-100 hover:opacity-100 focus-visible:opacity-100',
         ].join(' ')}
@@ -57,29 +51,14 @@ const SourceCard = ({ source }: { source: Source }) => {
               kind: 'web',
               data: {
                 src: source.url,
-                label: title,
-                favicon: source.favicon,
-                title,
               },
             },
             {
-              fallbackText: source.url,
               dragImageElement: cardRef.current,
             },
           );
         }}
-        onMouseDown={(e) => {
-          // Do not call preventDefault here; it can prevent native drag from starting.
-          e.stopPropagation();
-        }}
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-        }}
-      >
-        <GripVertical />
-      </GhostButton>
-
+      />
       <a
         ref={cardRef}
         href={source.url}

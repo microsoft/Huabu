@@ -1,12 +1,10 @@
 export const SEDIMENT_DND_MIME = 'application/x-sediment-dnd';
 
+// TODO: the attribute data should be consistent with NodeDataProps
 export type WebDragPayload = {
   kind: 'web';
   data: {
     src: string;
-    label?: string;
-    favicon?: string;
-    title?: string;
   };
 };
 
@@ -19,13 +17,21 @@ export type NoteDragPayload = {
 
 export type DragPayload = WebDragPayload | NoteDragPayload;
 
+export type DragImageOffset = {
+  x: number;
+  y: number;
+};
+
 export type SetDragPayloadOptions = {
   effectAllowed?: DataTransfer['effectAllowed'];
-  fallbackText?: string;
 
   // If provided, will be used as a drag preview via dataTransfer.setDragImage.
   // We clone it to allow visual tweaks without affecting the live UI.
   dragImageElement?: HTMLElement | null;
+
+  // If provided, used as the cursor offset for setDragImage.
+  // This is required when `dragImageElement` is an offscreen preview element.
+  dragImageOffset?: DragImageOffset;
 };
 
 const clamp = (value: number, min: number, max: number) =>
@@ -61,24 +67,52 @@ export const setDragPayload = (
   e.dataTransfer.effectAllowed = options.effectAllowed ?? 'copy';
   e.dataTransfer.setData(SEDIMENT_DND_MIME, JSON.stringify(payload));
 
-  if (options.fallbackText) {
-    e.dataTransfer.setData('text/plain', options.fallbackText);
+  const dragImageElement = options.dragImageElement;
+  if (!dragImageElement) return;
+
+  const isPreviewElement = !dragImageElement.isConnected;
+  const desiredOffset = options.dragImageOffset;
+
+  // If the caller built a dedicated preview element (not yet connected),
+  // use it directly and clean it up after the browser snapshots it.
+  if (isPreviewElement) {
+    dragImageElement.style.position = 'fixed';
+    dragImageElement.style.top = '-10000px';
+    dragImageElement.style.left = '-10000px';
+    dragImageElement.style.pointerEvents = 'none';
+    dragImageElement.style.background = 'transparent';
+    dragImageElement.style.backgroundColor = 'transparent';
+    document.body.appendChild(dragImageElement);
+
+    const previewRect = dragImageElement.getBoundingClientRect();
+    const offsetX = desiredOffset
+      ? clamp(desiredOffset.x, 0, previewRect.width)
+      : 0;
+    const offsetY = desiredOffset
+      ? clamp(desiredOffset.y, 0, previewRect.height)
+      : 0;
+
+    e.dataTransfer.setDragImage(dragImageElement, offsetX, offsetY);
+
+    // Keep it around long enough for the browser to snapshot it.
+    window.setTimeout(() => dragImageElement.remove(), 0);
+    return;
   }
 
-  if (options.dragImageElement) {
-    const { dragPreview, rect, cleanup } = createTransparentDragPreview(
-      options.dragImageElement,
-    );
+  const { dragPreview, rect, cleanup } =
+    createTransparentDragPreview(dragImageElement);
 
-    // The cursor might start outside of the drag image element.
-    const offsetX = clamp(e.clientX - rect.left, 0, rect.width);
-    const offsetY = clamp(e.clientY - rect.top, 0, rect.height);
+  const offsetX = desiredOffset
+    ? clamp(desiredOffset.x, 0, rect.width)
+    : clamp(e.clientX - rect.left, 0, rect.width);
+  const offsetY = desiredOffset
+    ? clamp(desiredOffset.y, 0, rect.height)
+    : clamp(e.clientY - rect.top, 0, rect.height);
 
-    e.dataTransfer.setDragImage(dragPreview, offsetX, offsetY);
+  e.dataTransfer.setDragImage(dragPreview, offsetX, offsetY);
 
-    // Keep the preview around long enough for the browser to snapshot it.
-    window.setTimeout(cleanup, 0);
-  }
+  // Keep the preview around long enough for the browser to snapshot it.
+  window.setTimeout(cleanup, 0);
 };
 
 export const canReadSedimentPayload = (dt: DataTransfer) =>
@@ -97,9 +131,6 @@ export const getSedimentPayload = (dt: DataTransfer): DragPayload | null => {
 
     if (kind === 'web' && data && typeof data === 'object') {
       const src = (data as { src?: unknown }).src;
-      const label = (data as { label?: unknown }).label;
-      const favicon = (data as { favicon?: unknown }).favicon;
-      const title = (data as { title?: unknown }).title;
 
       if (typeof src !== 'string' || src.trim() === '') return null;
 
@@ -107,9 +138,6 @@ export const getSedimentPayload = (dt: DataTransfer): DragPayload | null => {
         kind: 'web',
         data: {
           src: src.trim(),
-          label: typeof label === 'string' ? label : undefined,
-          favicon: typeof favicon === 'string' ? favicon : undefined,
-          title: typeof title === 'string' ? title : undefined,
         },
       };
     }
