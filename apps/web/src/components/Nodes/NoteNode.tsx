@@ -1,8 +1,11 @@
+import { useCreateBlockNote } from '@blocknote/react';
+import { BlockNoteView } from '@blocknote/shadcn';
 import { type Node, type NodeProps } from '@xyflow/react';
 import { StickyNote, Copy, Check } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { NodeWrapper, type NodeDataProps } from './NodeWrapper.tsx';
+import { copyToClipboard } from '../../utils/clipboard.ts';
 
 type NoteNodeData = NodeDataProps & {
   content?: string;
@@ -11,10 +14,14 @@ export type NoteNodeType = Node<NoteNodeData, 'note'>;
 
 export const NoteNode = ({ id, data, selected }: NodeProps<NoteNodeType>) => {
   const [copied, setCopied] = useState(false);
+  const editor = useCreateBlockNote({
+    initialContent: [{ type: 'paragraph', content: '' }],
+    trailingBlock: false,
+  });
 
   const handleCopy = () => {
     if (data.content) {
-      navigator.clipboard.writeText(data.content);
+      copyToClipboard(data.content);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
@@ -23,7 +30,7 @@ export const NoteNode = ({ id, data, selected }: NodeProps<NoteNodeType>) => {
   const NoteToolbar = (
     <div className="flex w-full items-center justify-between gap-4">
       {/* Label */}
-      <div className="text-secondary flex flex-1 items-center gap-2 text-xs font-medium">
+      <div className="text-secondary flex flex-1 items-center gap-1 text-xs font-medium">
         <StickyNote size={12} />
         <span>Note</span>
       </div>
@@ -43,6 +50,15 @@ export const NoteNode = ({ id, data, selected }: NodeProps<NoteNodeType>) => {
     </div>
   );
 
+  useEffect(() => {
+    void (async () => {
+      const raw = data.content ?? '';
+      const markdown = raw.trim() === '' ? '\n' : raw;
+      const blocks = await editor.tryParseMarkdownToBlocks(markdown);
+      editor.replaceBlocks(editor.document, blocks);
+    })();
+  }, [data.content, editor]);
+
   return (
     <NodeWrapper
       id={id}
@@ -51,7 +67,13 @@ export const NoteNode = ({ id, data, selected }: NodeProps<NoteNodeType>) => {
       toolbar={NoteToolbar}
       keepAspectRatio={false}
     >
-      <div className="flex h-full flex-col p-1">{data.content}</div>
+      <div className="flex h-full flex-col bg-white p-2">
+        <BlockNoteView
+          className="noteview-readonly"
+          editor={editor}
+          editable={false}
+        />
+      </div>
     </NodeWrapper>
   );
 };

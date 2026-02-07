@@ -28,7 +28,7 @@ export const Canvas: React.FC = () => {
   const onNodesChange = useStore((state) => state.onNodesChange);
   const onEdgesChange = useStore((state) => state.onEdgesChange);
   const onConnect = useStore((state) => state.onConnect);
-  const setNodes = useStore((state) => state.setNodes);
+  const addNode = useStore((state) => state.addNode);
 
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const rfInstanceRef = useRef<ReactFlowInstance | null>(null);
@@ -113,12 +113,11 @@ export const Canvas: React.FC = () => {
             data: {
               content: payload.data.content,
             },
-            style: { width: 220, height: 220 },
           };
         }
 
         if (!newNode) return;
-        setNodes([...nodes, newNode]);
+        addNode(newNode);
       }}
     >
       <ReactFlow

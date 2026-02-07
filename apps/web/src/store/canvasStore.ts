@@ -20,6 +20,7 @@ type RFState = {
   onConnect: OnConnect;
   setNodes: (nodes: Node[]) => void;
   setEdges: (edges: Edge[]) => void;
+  addNode: (node: Node) => void;
 };
 
 // === 1. Mock Nodes ===
@@ -159,6 +160,7 @@ const useStore = create<RFState>((set, get) => ({
 
   setNodes: (nodes) => set({ nodes }),
   setEdges: (edges) => set({ edges }),
+  addNode: (node) => set({ nodes: [...get().nodes, node] }),
 }));
 
 export default useStore;
