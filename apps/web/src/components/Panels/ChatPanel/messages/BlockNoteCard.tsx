@@ -3,7 +3,6 @@ import {
   SideMenu,
   SideMenuController,
   useCreateBlockNote,
-  useBlockNoteEditor,
   useExtensionState,
   useSelectedBlocks,
 } from '@blocknote/react';
@@ -22,11 +21,12 @@ interface BlockNoteMessageViewProps {
 }
 
 type NoteDragHandleButtonProps = {
+  editor: ReturnType<typeof useCreateBlockNote>;
   dragImageRootElement: HTMLElement | null;
 };
 
 const NoteDragHandleButton: FC<NoteDragHandleButtonProps> = (props) => {
-  const editor = useBlockNoteEditor<any, any, any>();
+  const editor = props.editor;
   const selectedBlocks = useSelectedBlocks(editor);
   const hoveredBlock = useExtensionState(SideMenuExtension, {
     editor,
@@ -158,7 +158,10 @@ export const BlockNoteCard = ({
   const ReadOnlySideMenu: FC = () => {
     return (
       <SideMenu>
-        <NoteDragHandleButton dragImageRootElement={wrapperRef.current} />
+        <NoteDragHandleButton
+          editor={editor}
+          dragImageRootElement={wrapperRef.current}
+        />
       </SideMenu>
     );
   };
