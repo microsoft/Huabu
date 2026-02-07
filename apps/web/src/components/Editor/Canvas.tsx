@@ -6,7 +6,7 @@ import {
   type ReactFlowInstance,
   type Node,
 } from '@xyflow/react';
-import React, { useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import '@xyflow/react/dist/style.css';
 
 import { ExpandedNodeOverlay } from './ExpandedNodeOverlay';
@@ -15,13 +15,13 @@ import {
   canReadSedimentPayload,
   getSedimentPayload,
 } from '../../utils/dragDrop';
-import { GroupNode } from '../Nodes/GroupNode.tsx';
-import { ImageNode } from '../Nodes/ImageNode.tsx';
-import { NoteNode } from '../Nodes/NoteNode.tsx';
-import { PDFNode } from '../Nodes/PDFNode.tsx';
-import { TextNode } from '../Nodes/TextNode.tsx';
-import { VideoNode } from '../Nodes/VideoNode.tsx';
-import { WebNode } from '../Nodes/WebNode.tsx';
+import { FrameNode } from '../Nodes/FrameNode';
+import { ImageNode } from '../Nodes/ImageNode';
+import { NoteNode } from '../Nodes/NoteNode';
+import { PDFNode } from '../Nodes/PDFNode';
+import { TextNode } from '../Nodes/TextNode';
+import { VideoNode } from '../Nodes/VideoNode';
+import { WebNode } from '../Nodes/WebNode';
 
 export const Canvas: React.FC = () => {
   const nodes = useStore((state) => state.nodes);
@@ -30,6 +30,7 @@ export const Canvas: React.FC = () => {
   const onEdgesChange = useStore((state) => state.onEdgesChange);
   const onConnect = useStore((state) => state.onConnect);
   const addNode = useStore((state) => state.addNode);
+  const frameSelectedNodes = useStore((state) => state.frameSelectedNodes);
 
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const rfInstanceRef = useRef<ReactFlowInstance | null>(null);
@@ -43,10 +44,34 @@ export const Canvas: React.FC = () => {
       video: VideoNode,
       web: WebNode,
       pdf: PDFNode,
-      group: GroupNode,
+      frame: FrameNode,
     }),
     [],
   );
+
+  // Handle "Cmd/Ctrl + G" to create a frame from selected nodes.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const key = e.key.toLowerCase();
+      const isGroup = key === 'g' && (e.metaKey || e.ctrlKey);
+      if (!isGroup || e.shiftKey || e.altKey) return;
+
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      const isTypingContext =
+        tag === 'input' ||
+        tag === 'textarea' ||
+        target?.isContentEditable ||
+        target?.getAttribute?.('role') === 'textbox';
+      if (isTypingContext) return;
+
+      e.preventDefault();
+      frameSelectedNodes();
+    };
+
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [frameSelectedNodes]);
 
   return (
     <div

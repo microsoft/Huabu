@@ -29,6 +29,8 @@ interface NodeWrapperProps {
   data: NodeDataProps;
   selected?: boolean;
 
+  allowOverflow?: boolean;
+
   children: React.ReactNode;
   className?: string;
   minWidth?: number;
@@ -52,6 +54,8 @@ export const NodeWrapper = memo(
     toolbar,
     keepAspectRatio = false,
     resizable = true,
+
+    allowOverflow = false,
 
     onDoubleClick,
   }: NodeWrapperProps) => {
@@ -98,7 +102,14 @@ export const NodeWrapper = memo(
             <GripVertical size={16} />
           </div>
 
-          <div className="flex-1 overflow-hidden p-0">{children}</div>
+          <div
+            className={clsx(
+              'flex-1 p-0',
+              allowOverflow ? 'overflow-visible' : 'overflow-hidden',
+            )}
+          >
+            {children}
+          </div>
 
           <Handle
             type="target"
