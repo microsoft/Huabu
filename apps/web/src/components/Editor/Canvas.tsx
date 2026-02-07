@@ -33,6 +33,7 @@ export const Canvas: React.FC = () => {
 
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const rfInstanceRef = useRef<ReactFlowInstance | null>(null);
+  const lastDropRef = useRef<{ key: string; at: number } | null>(null);
 
   const nodeTypes = useMemo(
     () => ({
@@ -54,11 +55,13 @@ export const Canvas: React.FC = () => {
       onDragOver={(e) => {
         if (!canReadSedimentPayload(e.dataTransfer)) return;
         e.preventDefault();
+        e.stopPropagation();
         e.dataTransfer.dropEffect = 'copy';
       }}
       onDrop={(e) => {
         if (!canReadSedimentPayload(e.dataTransfer)) return;
         e.preventDefault();
+        e.stopPropagation();
 
         const payload = getSedimentPayload(e.dataTransfer);
         if (!payload) return;
@@ -91,6 +94,24 @@ export const Canvas: React.FC = () => {
             y,
           });
         }
+
+        // Some browsers/components can dispatch multiple drop events for a single gesture,
+        // especially when dragging selected text. Deduplicate by dragId.
+        const dedupeKey = `drag:${payload.dragId}`;
+
+        const now =
+          typeof e.timeStamp === 'number' && e.timeStamp > 0
+            ? e.timeStamp
+            : Date.now();
+        const lastDrop = lastDropRef.current;
+        const windowMs = 4000;
+        if (
+          lastDrop &&
+          lastDrop.key === dedupeKey &&
+          now - lastDrop.at < windowMs
+        )
+          return;
+        lastDropRef.current = { key: dedupeKey, at: now };
 
         let newNode: Node | null = null;
 

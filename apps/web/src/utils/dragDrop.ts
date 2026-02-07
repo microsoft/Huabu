@@ -15,7 +15,17 @@ export type NoteDragPayload = {
   };
 };
 
-export type DragPayload = WebDragPayload | NoteDragPayload;
+export type DragPayload = {
+  // Unique identifier for a single drag gesture. Used to dedupe duplicate drop events.
+  dragId: string;
+} & (WebDragPayload | NoteDragPayload);
+
+const createDragId = () => {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  if (uuid) return uuid;
+
+  return `drag-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
 
 export type DragImageOffset = {
   x: number;
@@ -61,11 +71,16 @@ const createTransparentDragPreview = (sourceEl: HTMLElement) => {
 
 export const setDragPayload = (
   e: React.DragEvent,
-  payload: DragPayload,
+  payload: WebDragPayload | NoteDragPayload,
   options: SetDragPayloadOptions = {},
 ) => {
   e.dataTransfer.effectAllowed = options.effectAllowed ?? 'copy';
-  e.dataTransfer.setData(SEDIMENT_DND_MIME, JSON.stringify(payload));
+
+  const enrichedPayload: { dragId: string } & typeof payload = {
+    ...payload,
+    dragId: createDragId(),
+  };
+  e.dataTransfer.setData(SEDIMENT_DND_MIME, JSON.stringify(enrichedPayload));
 
   const dragImageElement = options.dragImageElement;
   if (!dragImageElement) return;
@@ -128,6 +143,10 @@ export const getSedimentPayload = (dt: DataTransfer): DragPayload | null => {
 
     const kind = (parsed as { kind?: unknown }).kind;
     const data = (parsed as { data?: unknown }).data;
+    const dragId = (parsed as { dragId?: unknown }).dragId;
+
+    if (typeof dragId !== 'string' || dragId.trim() === '') return null;
+    const normalizedDragId = dragId.trim();
 
     if (kind === 'web' && data && typeof data === 'object') {
       const src = (data as { src?: unknown }).src;
@@ -139,6 +158,7 @@ export const getSedimentPayload = (dt: DataTransfer): DragPayload | null => {
         data: {
           src: src.trim(),
         },
+        dragId: normalizedDragId,
       };
     }
 
@@ -151,6 +171,7 @@ export const getSedimentPayload = (dt: DataTransfer): DragPayload | null => {
         data: {
           content,
         },
+        dragId: normalizedDragId,
       };
     }
 
