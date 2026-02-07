@@ -170,29 +170,19 @@ export const BlockNoteCard = ({
     const mySeq = ++parseSeqRef.current;
     const handle = setTimeout(() => {
       void (async () => {
-        const markdown = content.trim() === '' ? '\n' : content;
-        let blocks = await editor.tryParseMarkdownToBlocks(markdown);
-
-        // If the markdown parses into a single paragraph but contains newlines,
+        const markdown = content.trim() === '' ? '\n' : content.trim();
         // treat each line as its own paragraph block. This makes the per-block
         // side menu (handle) usable for "each line" content in chat messages.
-        if (
-          markdown.includes('\n') &&
-          blocks.length === 1 &&
-          (blocks[0] as { type?: unknown }).type === 'paragraph'
-        ) {
-          const lines = markdown.split(/\r?\n/);
-          if (lines.length > 1) {
-            const normalizedLines = lines
-              .map((line) => line.trimEnd())
-              .filter((line) => line.trim() !== '');
 
-            // Re-parse as markdown paragraphs to get valid BlockNote blocks
-            // (with ids/props) instead of constructing block objects manually.
-            const reparsedMarkdown = normalizedLines.join('\n\n');
-            blocks = await editor.tryParseMarkdownToBlocks(reparsedMarkdown);
-          }
-        }
+        const lines = markdown.split(/\r?\n/);
+        const normalizedLines = lines
+          .map((line) => line.trimEnd())
+          .filter((line) => line.trim() !== '');
+
+        // Re-parse as markdown paragraphs to get valid BlockNote blocks
+        // (with ids/props) instead of constructing block objects manually.
+        const reparsedMarkdown = normalizedLines.join('\n\n');
+        const blocks = await editor.tryParseMarkdownToBlocks(reparsedMarkdown);
 
         if (parseSeqRef.current !== mySeq) return;
 
