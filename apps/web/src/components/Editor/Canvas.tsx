@@ -69,7 +69,7 @@ export const Canvas: React.FC = () => {
         const instance = rfInstanceRef.current;
         if (!instance) return;
 
-        let position = { x: 0, y: 0 };
+        let position: { x: number; y: number };
 
         // Prefer modern API when available.
         if ('screenToFlowPosition' in instance) {

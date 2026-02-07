@@ -1,9 +1,9 @@
 import { ArrowUpRight, ChevronDown, ChevronRight } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 
-import { setDragPayload } from '../../../../utils/dragDrop';
-import { DragToCanvasHandleButton } from '../../../Common/DragToCanvasHandleButton';
-import { GhostButton } from '../../../Common/GhostButton';
+import { setDragPayload } from '../../utils/dragDrop';
+import { DragToCanvasHandleButton } from '../Common/DragToCanvasHandleButton';
+import { GhostButton } from '../Common/GhostButton';
 
 import type { ToolResponse, WebSearchToolResponse } from '@sediment/shared';
 

@@ -9,11 +9,8 @@ import {
 import { BlockNoteView } from '@blocknote/shadcn';
 import { useEffect, useRef, type FC } from 'react';
 
-import {
-  setDragPayload,
-  type DragImageOffset,
-} from '../../../../utils/dragDrop';
-import { DragToCanvasHandleButton } from '../../../Common/DragToCanvasHandleButton';
+import { setDragPayload, type DragImageOffset } from '../../utils/dragDrop';
+import { DragToCanvasHandleButton } from '../Common/DragToCanvasHandleButton';
 
 interface BlockNoteMessageViewProps {
   content: string;

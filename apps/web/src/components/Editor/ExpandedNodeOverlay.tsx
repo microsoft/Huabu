@@ -233,6 +233,12 @@ export const ExpandedNodeOverlay = () => {
 
   useEffect(() => {
     if (!expandedNodeId) return;
+    if (node) return;
+    closeExpanded();
+  }, [closeExpanded, expandedNodeId, node]);
+
+  useEffect(() => {
+    if (!expandedNodeId || !node) return;
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -250,7 +256,7 @@ export const ExpandedNodeOverlay = () => {
       window.removeEventListener('keydown', onKeyDown, true);
       document.body.style.overflow = prevOverflow;
     };
-  }, [closeExpanded, expandedNodeId]);
+  }, [closeExpanded, expandedNodeId, node]);
 
   if (!expandedNodeId || !node || !portalTarget) return null;
 
