@@ -15,14 +15,14 @@ export const VideoNode = ({ id, data, selected }: NodeProps<VideoNodeType>) => {
         target="_blank"
         rel="noopener noreferrer"
         onClick={(e) => e.stopPropagation()}
-        className="nodrag text-secondary hover:text-theme-500 flex flex-1 cursor-pointer items-center gap-1 overflow-hidden text-xs font-medium transition-colors"
+        className="nodrag text-muted-foreground hover:text-theme-500 flex flex-1 cursor-pointer items-center gap-1 overflow-hidden text-xs font-medium transition-colors"
       >
         <span className="truncate">Source: {data?.src || 'Unknown Video'}</span>
         <ArrowUpRight size={12} strokeWidth={2} />
       </a>
 
       {/* Tools */}
-      <div className="text-secondary flex items-center gap-2">
+      <div className="text-muted-foreground flex items-center gap-2">
         <div className="bg-border h-3 w-px" />
         <button className="hover:text-main">
           <Volume2 size={12} />
@@ -48,7 +48,7 @@ export const VideoNode = ({ id, data, selected }: NodeProps<VideoNodeType>) => {
               className="nodrag h-full w-full object-contain"
             />
           ) : (
-            <div className="text-secondary flex h-full w-full flex-col items-center justify-center gap-2 text-sm">
+            <div className="text-muted-foreground flex h-full w-full flex-col items-center justify-center gap-2 text-sm">
               <PlayCircle size={24} className="opacity-20" />
               <span>No Video Source</span>
             </div>

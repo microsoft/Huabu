@@ -83,7 +83,7 @@ const SourceCard = ({ source }: { source: Source }) => {
           ) : null}
 
           <div className="min-w-0 flex-1">
-            <div className="text-secondary flex min-w-0 items-center gap-2 text-sm font-medium">
+            <div className="text-muted-foreground flex min-w-0 items-center gap-2 text-sm font-medium">
               <span className="truncate">{title}</span>
               <ArrowUpRight
                 className="text-icon flex-none"
@@ -92,7 +92,7 @@ const SourceCard = ({ source }: { source: Source }) => {
               />
             </div>
             {hostname ? (
-              <div className="text-secondary mt-0.5 truncate text-xs">
+              <div className="text-muted-foreground mt-0.5 truncate text-xs">
                 {hostname}
               </div>
             ) : null}
@@ -143,7 +143,7 @@ export const ToolMessage = ({ toolResponse }: ToolMessageProps) => {
 
     return (
       <div className="flex justify-start">
-        <div className="text-secondary border-border rounded-2xl border bg-white px-4 py-3 text-sm whitespace-pre-wrap">
+        <div className="text-muted-foreground border-border rounded-2xl border bg-white px-4 py-3 text-sm whitespace-pre-wrap">
           {fallbackText}
         </div>
       </div>

@@ -1,5 +1,5 @@
 import { type Node, type NodeProps } from '@xyflow/react';
-import { Globe, RotateCw, ExternalLink, Expand } from 'lucide-react';
+import { Globe, RotateCw, ExternalLink, Fullscreen } from 'lucide-react';
 
 import { NodeWrapper, type NodeDataProps } from './NodeWrapper.tsx';
 import useStore from '../../store/canvasStore.ts';
@@ -12,13 +12,13 @@ export const WebNode = ({ id, data, selected }: NodeProps<WebNodeType>) => {
   const WebToolbar = (
     <div className="flex w-full items-center justify-between gap-4">
       {/* URL Display */}
-      <div className="text-secondary flex flex-1 items-center gap-1 overflow-hidden text-xs font-medium">
+      <div className="text-muted-foreground flex flex-1 items-center gap-1 overflow-hidden text-xs font-medium">
         <Globe size={12} />
         <span className="truncate">{data?.src || 'No URL'}</span>
       </div>
 
       {/* Tools */}
-      <div className="text-secondary flex items-center gap-2">
+      <div className="text-muted-foreground flex items-center gap-2">
         <div className="bg-border h-3 w-px" />
 
         <button
@@ -29,7 +29,7 @@ export const WebNode = ({ id, data, selected }: NodeProps<WebNodeType>) => {
             openExpanded(id);
           }}
         >
-          <Expand size={12} />
+          <Fullscreen size={12} />
         </button>
 
         <button className="hover:text-main" title="Refresh">
@@ -72,7 +72,7 @@ export const WebNode = ({ id, data, selected }: NodeProps<WebNodeType>) => {
               sandbox="allow-scripts allow-same-origin"
             />
           ) : (
-            <div className="text-secondary flex h-full w-full items-center justify-center text-sm">
+            <div className="text-muted-foreground flex h-full w-full items-center justify-center text-sm">
               Invalid URL
             </div>
           )}

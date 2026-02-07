@@ -6,7 +6,7 @@ import {
   Download,
   Maximize2,
   Minimize2,
-  Expand,
+  Fullscreen,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
@@ -107,7 +107,7 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
         target="_blank"
         rel="noopener noreferrer"
         onClick={(e) => e.stopPropagation()}
-        className="nodrag text-secondary hover:text-theme-500 flex flex-1 cursor-pointer items-center gap-1 overflow-hidden text-xs font-medium transition-colors"
+        className="nodrag text-muted-foreground hover:text-theme-500 flex flex-1 cursor-pointer items-center gap-1 overflow-hidden text-xs font-medium transition-colors"
       >
         <FileText size={12} className={!isExpanded ? 'text-icon' : ''} />
         <span className="max-w-30 truncate">
@@ -116,7 +116,7 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
         <ArrowUpRight size={12} strokeWidth={2} />
       </a>
 
-      <div className="text-secondary flex items-center gap-3">
+      <div className="text-muted-foreground flex items-center gap-3">
         <div className="bg-border h-3 w-px" />
         <button
           className="hover:text-main"
@@ -127,7 +127,7 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
             openExpanded(id);
           }}
         >
-          <Expand size={12} />
+          <Fullscreen size={12} />
         </button>
         <button
           className="hover:text-main"
@@ -145,7 +145,7 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
         </button>
 
         {isExpanded && (
-          <div className="text-secondary animate-in fade-in slide-in-from-left-2 flex items-center gap-3 duration-200">
+          <div className="text-muted-foreground animate-in fade-in slide-in-from-left-2 flex items-center gap-3 duration-200">
             <div className="bg-border mx-1 h-3 w-px" />
             <button
               className="hover:text-main rounded disabled:opacity-30"
@@ -154,7 +154,7 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
             >
               <ZoomOut size={12} />
             </button>
-            <span className="text-secondary w-8 text-center font-mono text-[10px]">
+            <span className="text-muted-foreground w-8 text-center font-mono text-[10px]">
               {Math.round(scale * 100)}%
             </span>
             <button
@@ -197,7 +197,7 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
               <span className="text-main w-full truncate text-sm font-bold">
                 {data.label || 'PDF Document'}
               </span>
-              <span className="text-secondary text-xs">PDF File</span>
+              <span className="text-muted-foreground text-xs">PDF File</span>
             </div>
           </div>
         )}
@@ -241,7 +241,7 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
                   ))}
                 </Document>
               ) : (
-                <div className="text-secondary flex h-full w-full items-center justify-center text-sm">
+                <div className="text-muted-foreground flex h-full w-full items-center justify-center text-sm">
                   No PDF Source
                 </div>
               )}

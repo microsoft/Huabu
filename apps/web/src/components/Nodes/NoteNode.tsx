@@ -1,7 +1,7 @@
 import { useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/shadcn';
 import { type Node, type NodeProps } from '@xyflow/react';
-import { StickyNote, Copy, Check, Expand } from 'lucide-react';
+import { StickyNote, Copy, Check, Fullscreen } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { NodeWrapper, type NodeDataProps } from './NodeWrapper.tsx';
@@ -32,13 +32,13 @@ export const NoteNode = ({ id, data, selected }: NodeProps<NoteNodeType>) => {
   const NoteToolbar = (
     <div className="flex w-full items-center justify-between gap-4">
       {/* Label */}
-      <div className="text-secondary flex flex-1 items-center gap-1 text-xs font-medium">
+      <div className="text-muted-foreground flex flex-1 items-center gap-1 text-xs font-medium">
         <StickyNote size={12} />
         <span>Note</span>
       </div>
 
       {/* Tools */}
-      <div className="text-secondary flex items-center gap-2">
+      <div className="text-muted-foreground flex items-center gap-2">
         <div className="bg-border h-3 w-px" />
 
         <button
@@ -49,7 +49,7 @@ export const NoteNode = ({ id, data, selected }: NodeProps<NoteNodeType>) => {
           }}
           title="Open Large View"
         >
-          <Expand size={12} />
+          <Fullscreen size={12} />
         </button>
 
         <button

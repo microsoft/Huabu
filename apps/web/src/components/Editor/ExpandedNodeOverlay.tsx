@@ -7,6 +7,7 @@ import { createPortal } from 'react-dom';
 import { Document, Page, pdfjs } from 'react-pdf';
 
 import useStore from '../../store/canvasStore.ts';
+import { blockNoteShadcnOverrides } from '../BlockNote/shadcnOverrides.tsx';
 
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
@@ -50,12 +51,12 @@ const OverlayShell = (props: {
           }}
         >
           <div className="border-border flex h-10 shrink-0 items-center justify-between gap-3 border-b bg-white px-3">
-            <div className="text-secondary flex min-w-0 items-center gap-2 text-xs font-medium">
+            <div className="text-muted-foreground flex min-w-0 items-center gap-2 text-xs font-medium">
               <span className="shrink-0">{props.icon}</span>
               <span className="truncate">{props.title}</span>
             </div>
 
-            <div className="text-secondary flex items-center gap-2">
+            <div className="text-muted-foreground flex items-center gap-2">
               <div className="bg-border h-3 w-px" />
               <button
                 className="hover:text-main"
@@ -108,6 +109,7 @@ const NoteExpandedView = ({ node }: ExpandedRendererProps) => {
       <BlockNoteView
         editor={editor}
         editable={true}
+        shadCNComponents={blockNoteShadcnOverrides}
         onChange={() => {
           if (debounceRef.current) window.clearTimeout(debounceRef.current);
           debounceRef.current = window.setTimeout(() => {
@@ -137,7 +139,7 @@ const WebExpandedView = ({ node }: ExpandedRendererProps) => {
             sandbox="allow-scripts allow-same-origin"
           />
         ) : (
-          <div className="text-secondary flex h-full w-full items-center justify-center text-sm">
+          <div className="text-muted-foreground flex h-full w-full items-center justify-center text-sm">
             Invalid URL
           </div>
         )}
@@ -160,7 +162,9 @@ const PDFExpandedView = ({ node }: ExpandedRendererProps) => {
         <Document
           file={src}
           onLoadSuccess={onDocumentLoadSuccess}
-          loading={<div className="text-secondary p-4 text-xs">Loading...</div>}
+          loading={
+            <div className="text-muted-foreground p-4 text-xs">Loading...</div>
+          }
           error={
             <div className="p-4 text-xs text-red-300">Error loading PDF</div>
           }
@@ -178,7 +182,7 @@ const PDFExpandedView = ({ node }: ExpandedRendererProps) => {
           ))}
         </Document>
       ) : (
-        <div className="text-secondary flex h-full w-full items-center justify-center text-sm">
+        <div className="text-muted-foreground flex h-full w-full items-center justify-center text-sm">
           No PDF Source
         </div>
       )}
@@ -258,7 +262,7 @@ export const ExpandedNodeOverlay = () => {
   else if (node.type === 'pdf') content = <PDFExpandedView node={node} />;
   else {
     content = (
-      <div className="text-secondary flex h-full w-full items-center justify-center text-sm">
+      <div className="text-muted-foreground flex h-full w-full items-center justify-center text-sm">
         Unsupported node type
       </div>
     );

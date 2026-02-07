@@ -49,7 +49,9 @@ export const SidebarPanel = ({
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {tools && (
-            <div className="text-secondary flex items-center">{tools}</div>
+            <div className="text-muted-foreground flex items-center">
+              {tools}
+            </div>
           )}
           <GhostButton onClick={onToggle} title={`Collapse ${title}`}>
             {iconExpanded}

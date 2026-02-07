@@ -15,7 +15,7 @@ export const ImageNode = ({ id, data, selected }: NodeProps<ImageNodeType>) => {
         target="_blank"
         rel="noopener noreferrer"
         onClick={(e) => e.stopPropagation()}
-        className="nodrag text-secondary hover:text-theme-500 flex flex-1 cursor-pointer items-center gap-1 overflow-hidden text-xs font-medium transition-colors"
+        className="nodrag text-muted-foreground hover:text-theme-500 flex flex-1 cursor-pointer items-center gap-1 overflow-hidden text-xs font-medium transition-colors"
       >
         <span className="truncate">
           Source: {data?.src || 'Unknown Source'}
@@ -24,7 +24,7 @@ export const ImageNode = ({ id, data, selected }: NodeProps<ImageNodeType>) => {
       </a>
 
       {/*tools*/}
-      <div className="text-secondary flex items-center gap-2">
+      <div className="text-muted-foreground flex items-center gap-2">
         <div className="bg-border h-3 w-px" />
 
         <button className="hover:text-main">
@@ -55,7 +55,7 @@ export const ImageNode = ({ id, data, selected }: NodeProps<ImageNodeType>) => {
               className="pointer-events-none h-full w-full rounded border-0 object-contain"
             />
           ) : (
-            <div className="text-secondary flex h-full w-full items-center justify-center text-sm">
+            <div className="text-muted-foreground flex h-full w-full items-center justify-center text-sm">
               No Image Source
             </div>
           )}
