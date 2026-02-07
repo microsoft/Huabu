@@ -100,8 +100,10 @@ function getNodeSize(node: NestableNode): { width: number; height: number } {
   };
 }
 
-function getAncestorIds(nodes: NestableNode[], nodeId: string): string[] {
-  const byId = indexById(nodes);
+function getAncestorIds(
+  byId: Map<string, NestableNode>,
+  nodeId: string,
+): string[] {
   const result: string[] = [];
 
   let current = byId.get(nodeId);
@@ -119,11 +121,67 @@ function getAncestorIds(nodes: NestableNode[], nodeId: string): string[] {
 }
 
 function getTopLevelIds(nodes: NestableNode[], ids: string[]): string[] {
+  const byId = indexById(nodes);
   const selected = new Set(ids);
   return ids.filter((id) => {
-    const ancestors = getAncestorIds(nodes, id);
+    const ancestors = getAncestorIds(byId, id);
     return !ancestors.some((a) => selected.has(a));
   });
+}
+
+function createAbsolutePositionGetter(byId: Map<string, NestableNode>) {
+  const absById = new Map<string, XYPosition | null>();
+
+  return (nodeId: string): XYPosition | null => {
+    if (absById.has(nodeId)) return absById.get(nodeId) ?? null;
+
+    const chain: NestableNode[] = [];
+    const visited = new Set<string>();
+
+    let currentId: string | undefined = nodeId;
+    let baseAbs: XYPosition = { x: 0, y: 0 };
+
+    while (currentId) {
+      if (absById.has(currentId)) {
+        baseAbs = absById.get(currentId) ?? { x: 0, y: 0 };
+        break;
+      }
+
+      const current = byId.get(currentId);
+      if (!current) {
+        absById.set(nodeId, null);
+        return null;
+      }
+
+      chain.push(current);
+      visited.add(current.id);
+
+      const parentId = current.parentId;
+      if (!parentId) break;
+
+      // Match getAbsolutePosition semantics:
+      // - dangling parentId: stop walking
+      // - cycles: stop walking
+      if (!byId.has(parentId)) break;
+      if (visited.has(parentId)) break;
+
+      if (absById.has(parentId)) {
+        baseAbs = absById.get(parentId) ?? { x: 0, y: 0 };
+        break;
+      }
+
+      currentId = parentId;
+    }
+
+    let abs = baseAbs;
+    for (let i = chain.length - 1; i >= 0; i -= 1) {
+      const n = chain[i];
+      abs = addPos(abs, n.position);
+      absById.set(n.id, abs);
+    }
+
+    return absById.get(nodeId) ?? null;
+  };
 }
 
 /**
@@ -199,14 +257,15 @@ export function unframe(
   frameId: string,
 ): UnframeResult {
   const byId = indexById(nodes);
+  const getAbs = createAbsolutePositionGetter(byId);
   const group = byId.get(frameId);
   if (!group) return { nodes, edges };
 
-  const groupAbs = getAbsolutePosition(nodes, frameId);
+  const groupAbs = getAbs(frameId);
   if (!groupAbs) return { nodes, edges };
 
   const parentId = group.parentId;
-  const parentAbs = parentId ? getAbsolutePosition(nodes, parentId) : null;
+  const parentAbs = parentId ? getAbs(parentId) : null;
 
   const nextNodes: NestableNode[] = [];
   for (const n of nodes) {
@@ -301,20 +360,6 @@ function rectIntersectionArea(a: Rect, b: Rect): number {
   return w * h;
 }
 
-function nodeToRect(nodes: NestableNode[], nodeId: string): Rect | null {
-  const byId = indexById(nodes);
-  const node = byId.get(nodeId);
-  if (!node) return null;
-
-  const abs = getAbsolutePosition(nodes, nodeId);
-  if (!abs) return null;
-
-  const { width, height } = getNodeSize(node);
-  if (width <= 0 || height <= 0) return null;
-
-  return { x: abs.x, y: abs.y, width, height };
-}
-
 /**
  * If a node is dropped with >= threshold of its area inside an *unlocked* frame,
  * reparent it under that frame while preserving its visual position.
@@ -332,7 +377,36 @@ export function autoFrameNodeByOverlap(
   if (!node) return nodes;
   if (node.type === 'frame') return nodes;
 
-  const nodeRect = nodeToRect(nodes, nodeId);
+  const getAbs = createAbsolutePositionGetter(byId);
+  const rectById = new Map<string, Rect | null>();
+
+  const getRect = (id: string): Rect | null => {
+    if (rectById.has(id)) return rectById.get(id) ?? null;
+
+    const current = byId.get(id);
+    if (!current) {
+      rectById.set(id, null);
+      return null;
+    }
+
+    const abs = getAbs(id);
+    if (!abs) {
+      rectById.set(id, null);
+      return null;
+    }
+
+    const { width, height } = getNodeSize(current);
+    if (width <= 0 || height <= 0) {
+      rectById.set(id, null);
+      return null;
+    }
+
+    const rect = { x: abs.x, y: abs.y, width, height };
+    rectById.set(id, rect);
+    return rect;
+  };
+
+  const nodeRect = getRect(nodeId);
   if (!nodeRect) return nodes;
 
   const nodeArea = nodeRect.width * nodeRect.height;
@@ -351,7 +425,7 @@ export function autoFrameNodeByOverlap(
     if (candidate.id === nodeId) continue;
     if (candidate.data?.locked) continue;
 
-    const frameRect = nodeToRect(nodes, candidate.id);
+    const frameRect = getRect(candidate.id);
     if (!frameRect) continue;
 
     const intersection = rectIntersectionArea(nodeRect, frameRect);
@@ -372,8 +446,8 @@ export function autoFrameNodeByOverlap(
   if (!best) return nodes;
   if (node.parentId === best.frameId) return nodes;
 
-  const frameAbs = getAbsolutePosition(nodes, best.frameId);
-  const nodeAbs = getAbsolutePosition(nodes, nodeId);
+  const frameAbs = getAbs(best.frameId);
+  const nodeAbs = getAbs(nodeId);
   if (!frameAbs || !nodeAbs) return nodes;
 
   const nextNodes = nodes.map((n) => {
@@ -412,15 +486,15 @@ export function frameNodes(
   const minWidth = options.minWidth ?? 240;
   const minHeight = options.minHeight ?? 160;
 
+  const getAbs = createAbsolutePositionGetter(byId);
+
   const directParents = new Set<string | undefined>();
   for (const id of topLevelIds) {
     directParents.add(byId.get(id)?.parentId);
   }
   const groupParentId =
     directParents.size === 1 ? [...directParents][0] : undefined;
-  const groupParentAbs = groupParentId
-    ? getAbsolutePosition(nodes, groupParentId)
-    : null;
+  const groupParentAbs = groupParentId ? getAbs(groupParentId) : null;
 
   let minX = Number.POSITIVE_INFINITY;
   let minY = Number.POSITIVE_INFINITY;
@@ -430,7 +504,7 @@ export function frameNodes(
   for (const id of topLevelIds) {
     const n = byId.get(id);
     if (!n) continue;
-    const abs = getAbsolutePosition(nodes, id);
+    const abs = getAbs(id);
     if (!abs) continue;
 
     const size = getNodeSize(n);
@@ -467,7 +541,7 @@ export function frameNodes(
   const nextNodes = nodes.map((n) => {
     if (!topLevelSet.has(n.id)) return n;
 
-    const abs = getAbsolutePosition(nodes, n.id);
+    const abs = getAbs(n.id);
     if (!abs) return n;
 
     return {
