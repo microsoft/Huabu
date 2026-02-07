@@ -2,6 +2,7 @@ import { type Node, type NodeProps } from '@xyflow/react';
 import { ArrowUpRight, Shrink, SlidersHorizontal } from 'lucide-react';
 
 import { NodeWrapper, type NodeDataProps } from './NodeWrapper.tsx';
+import { GhostButton } from '../Common/GhostButton.tsx';
 
 type ImageNodeData = NodeDataProps & {};
 export type ImageNodeType = Node<ImageNodeData, 'image'>;
@@ -27,13 +28,13 @@ export const ImageNode = ({ id, data, selected }: NodeProps<ImageNodeType>) => {
       <div className="text-muted-foreground flex items-center gap-2">
         <div className="bg-border h-3 w-px" />
 
-        <button className="hover:text-main">
+        <GhostButton aria-label="Shrink">
           <Shrink size={12} />
-        </button>
+        </GhostButton>
 
-        <button className="hover:text-main">
+        <GhostButton aria-label="Adjust">
           <SlidersHorizontal size={12} />
-        </button>
+        </GhostButton>
       </div>
     </div>
   );

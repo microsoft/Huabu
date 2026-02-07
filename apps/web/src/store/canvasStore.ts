@@ -12,6 +12,14 @@ import {
 } from '@xyflow/react';
 import { create } from 'zustand';
 
+import {
+  autoFrameNodeByOverlap,
+  frameNodes,
+  toggleFrameLock,
+  unframe,
+  type NestableNode,
+} from '../utils/frameHelper';
+
 type RFState = {
   nodes: Node[];
   edges: Edge[];
@@ -26,6 +34,12 @@ type RFState = {
   setNodes: (nodes: Node[]) => void;
   setEdges: (edges: Edge[]) => void;
   addNode: (node: Node) => void;
+
+  updateNodeData: (nodeId: string, patch: Record<string, unknown>) => void;
+
+  frameSelectedNodes: () => void;
+  unframe: (frameId: string) => void;
+  toggleFrameLock: (frameId: string) => void;
 };
 
 // === 1. Mock Nodes ===
@@ -66,10 +80,10 @@ export const initialNodes: Node[] = [
     },
   },
 
-  // --- 4. Group Node  ---
+  // --- 4. Frame Node  ---
   {
     id: createId('node'),
-    type: 'group',
+    type: 'frame',
     position: { x: 500, y: 400 },
     data: {
       label: 'Reference Materials',
@@ -82,7 +96,7 @@ export const initialNodes: Node[] = [
   {
     id: createId('node'),
     type: 'web',
-    // parentId: 'group-1',
+    // parentId: 'frame-1',
     position: { x: 0, y: 60 },
     data: {
       src: 'https://en.wikipedia.org/wiki/Sensemaking',
@@ -95,7 +109,7 @@ export const initialNodes: Node[] = [
   {
     id: createId('node'),
     type: 'pdf',
-    // parentId: 'group-1',
+    // parentId: 'frame-1',
     position: { x: 500, y: -140 },
     // extent: 'parent',
     data: {
@@ -129,7 +143,7 @@ export const initialEdges: Edge[] = [
   {
     id: createId('edge'),
     source: 'node-text-1',
-    target: 'group-1',
+    target: 'frame-1',
     animated: true,
     label: 'references',
   },
@@ -150,9 +164,23 @@ const useStore = create<RFState>((set, get) => ({
   closeExpanded: () => set({ expandedNodeId: null }),
 
   onNodesChange: (changes) => {
-    set({
-      nodes: applyNodeChanges(changes, get().nodes),
-    });
+    const prevNodes = get().nodes as NestableNode[];
+    const nextNodes = applyNodeChanges(changes, prevNodes) as NestableNode[];
+
+    const dragStopIds = changes
+      .filter((c) => c.type === 'position')
+      .filter((c) => {
+        const maybe = c as unknown as { dragging?: boolean };
+        return maybe.dragging === false;
+      })
+      .map((c) => c.id);
+
+    let result = nextNodes;
+    for (const nodeId of dragStopIds) {
+      result = autoFrameNodeByOverlap(result, nodeId, { threshold: 0.75 });
+    }
+
+    set({ nodes: result });
   },
 
   onEdgesChange: (changes) => {
@@ -170,6 +198,48 @@ const useStore = create<RFState>((set, get) => ({
   setNodes: (nodes) => set({ nodes }),
   setEdges: (edges) => set({ edges }),
   addNode: (node) => set({ nodes: [...get().nodes, node] }),
+
+  updateNodeData: (nodeId, patch) => {
+    if (!nodeId) return;
+    set({
+      nodes: get().nodes.map((n) => {
+        if (n.id !== nodeId) return n;
+        return {
+          ...n,
+          data: {
+            ...(n.data ?? {}),
+            ...patch,
+          },
+        };
+      }),
+    });
+  },
+
+  frameSelectedNodes: () => {
+    const { nodes } = get();
+    const selectedIds = nodes.filter((n) => n.selected).map((n) => n.id);
+    if (selectedIds.length < 2) return;
+
+    const frameId = createId('node');
+    const result = frameNodes(nodes as NestableNode[], selectedIds, {
+      frameId,
+      label: 'Frame',
+    });
+
+    set({ nodes: result.nodes });
+  },
+
+  unframe: (frameId) => {
+    const { nodes, edges } = get();
+    const result = unframe(nodes as NestableNode[], edges, frameId);
+    set({ nodes: result.nodes, edges: result.edges });
+  },
+
+  toggleFrameLock: (frameId) => {
+    const { nodes } = get();
+
+    set({ nodes: toggleFrameLock(nodes as NestableNode[], frameId) });
+  },
 }));
 
 export default useStore;

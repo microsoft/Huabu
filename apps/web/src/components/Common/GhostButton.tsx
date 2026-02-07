@@ -1,3 +1,5 @@
+import clsx from 'clsx';
+
 import { Tooltip } from './Tooltip';
 
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
@@ -17,14 +19,12 @@ export const GhostButton = ({
   const buttonEl = (
     <button
       type={type}
-      className={[
+      className={clsx(
         'inline-flex cursor-pointer items-center justify-center rounded border-none bg-transparent p-1 transition-colors',
         'enabled:hover:bg-background',
         'disabled:cursor-not-allowed disabled:opacity-50',
         className,
-      ]
-        .filter(Boolean)
-        .join(' ')}
+      )}
       {...props}
     >
       {children}

@@ -1,3 +1,4 @@
+import clsx from 'clsx';
 import { ArrowUpRight } from 'lucide-react';
 import { useRef } from 'react';
 
@@ -30,11 +31,11 @@ export const SourceCard = ({ source }: { source: Source }) => {
       data-source-title={title}
     >
       <DragToCanvasHandleButton
-        className={[
+        className={clsx(
           'absolute top-1 left-0',
           'opacity-0 transition-opacity',
           'group-hover:opacity-100 hover:opacity-100 focus-visible:opacity-100',
-        ].join(' ')}
+        )}
         onDragStart={(e) => {
           e.stopPropagation();
 
@@ -57,10 +58,10 @@ export const SourceCard = ({ source }: { source: Source }) => {
         href={source.url}
         target="_blank"
         rel="noopener noreferrer"
-        className={[
+        className={clsx(
           'border-border block rounded-lg border bg-white px-3 py-2',
           'hover:bg-background ml-1 transition-colors',
-        ].join(' ')}
+        )}
       >
         <div className="flex items-start gap-2">
           {source.favicon ? (

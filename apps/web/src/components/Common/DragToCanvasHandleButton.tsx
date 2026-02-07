@@ -1,3 +1,4 @@
+import clsx from 'clsx';
 import { GripVertical } from 'lucide-react';
 
 import { GhostButton, type GhostButtonProps } from './GhostButton';
@@ -22,7 +23,7 @@ export const DragToCanvasHandleButton = ({
     <GhostButton
       aria-label="Drag block to canvas"
       draggable
-      className={[baseClassName, className].filter(Boolean).join(' ')}
+      className={clsx(baseClassName, className)}
       onMouseDown={(e) => {
         // Do not call preventDefault here; it can prevent native drag from starting.
         e.stopPropagation();

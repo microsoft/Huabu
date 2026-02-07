@@ -1,9 +1,4 @@
-import React, { useRef, useState } from 'react';
-import { Panel, Group } from 'react-resizable-panels';
-
-import { ResizableHandle } from './ResizableHandle';
-
-import type { PanelImperativeHandle } from 'react-resizable-panels';
+import React, { useMemo, useRef, useState } from 'react';
 
 interface MainLayoutProps {
   header: React.ReactNode;
@@ -18,33 +13,144 @@ export const MainLayout = ({
   rightPanel,
   children,
 }: MainLayoutProps) => {
-  const leftPanelRef = useRef<PanelImperativeHandle>(null);
-  const rightPanelRef = useRef<PanelImperativeHandle>(null);
   const [isLeftCollapsed, setIsLeftCollapsed] = useState(false);
   const [isRightCollapsed, setIsRightCollapsed] = useState(false);
 
+  const contentRef = useRef<HTMLDivElement | null>(null);
+
+  // Fixed pixel sizes to guarantee that collapsing side panels only affects
+  // the center panel width.
+  const COLLAPSED_WIDTH_PX = 48;
+  const LEFT_MIN_WIDTH_PX = 200;
+  const RIGHT_MIN_WIDTH_PX = 200;
+  const CENTER_MIN_WIDTH_PX = 100;
+
+  // Maximum side panel widths as ratios of the available content width.
+  // This mirrors the previous maxSize behavior when using react-resizable-panels.
+  const LEFT_MAX_RATIO = 0.3;
+  const RIGHT_MAX_RATIO = 0.5;
+
+  const LEFT_DEFAULT_WIDTH_PX = 260;
+  const RIGHT_DEFAULT_WIDTH_PX = 420;
+
+  const [leftWidthPx, setLeftWidthPx] = useState(LEFT_DEFAULT_WIDTH_PX);
+  const [rightWidthPx, setRightWidthPx] = useState(RIGHT_DEFAULT_WIDTH_PX);
+
+  const effectiveLeftWidthPx = isLeftCollapsed
+    ? COLLAPSED_WIDTH_PX
+    : leftWidthPx;
+  const effectiveRightWidthPx = isRightCollapsed
+    ? COLLAPSED_WIDTH_PX
+    : rightWidthPx;
+
+  const clamp = (value: number, min: number, max: number) =>
+    Math.min(Math.max(value, min), max);
+
+  const resizeHandleClassName =
+    'group flex w-2 shrink-0 items-center justify-center bg-transparent outline-none';
+  const resizeHandleInnerClassName =
+    'h-8 w-1 rounded-full bg-gray-300 opacity-0 transition-all duration-300 group-hover:h-12 group-hover:opacity-100';
+
+  const leftHandleDisabled = isLeftCollapsed;
+  const rightHandleDisabled = isRightCollapsed;
+
+  const leftHandleClassName = `${resizeHandleClassName} ${
+    leftHandleDisabled
+      ? 'pointer-events-none w-0 opacity-0'
+      : 'cursor-col-resize'
+  }`;
+
+  const rightHandleClassName = `${resizeHandleClassName} ${
+    rightHandleDisabled
+      ? 'pointer-events-none w-0 opacity-0'
+      : 'cursor-col-resize'
+  }`;
+
   const toggleLeftPanel = () => {
-    const panel = leftPanelRef.current;
-    if (panel) {
-      if (isLeftCollapsed) {
-        panel.expand();
-      } else {
-        panel.collapse();
-      }
-      setIsLeftCollapsed(!isLeftCollapsed);
-    }
+    setIsLeftCollapsed((prev) => !prev);
   };
 
   const toggleRightPanel = () => {
-    const panel = rightPanelRef.current;
-    if (panel) {
-      if (isRightCollapsed) {
-        panel.expand();
-      } else {
-        panel.collapse();
-      }
-      setIsRightCollapsed(!isRightCollapsed);
-    }
+    setIsRightCollapsed((prev) => !prev);
+  };
+
+  const dragConstraints = useMemo(() => {
+    const totalWidth = contentRef.current?.getBoundingClientRect().width ?? 0;
+    return {
+      totalWidth,
+      minLeft: LEFT_MIN_WIDTH_PX,
+      minRight: RIGHT_MIN_WIDTH_PX,
+      minCenter: CENTER_MIN_WIDTH_PX,
+    };
+  }, [LEFT_MIN_WIDTH_PX, RIGHT_MIN_WIDTH_PX, CENTER_MIN_WIDTH_PX]);
+
+  const onLeftHandlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (leftHandleDisabled) return;
+
+    const startX = e.clientX;
+    const startLeft = leftWidthPx;
+
+    const target = e.currentTarget;
+    target.setPointerCapture(e.pointerId);
+
+    const onMove = (ev: PointerEvent) => {
+      const totalWidth =
+        contentRef.current?.getBoundingClientRect().width ??
+        dragConstraints.totalWidth;
+      const maxLeft = Math.min(
+        totalWidth - effectiveRightWidthPx - dragConstraints.minCenter,
+        totalWidth * LEFT_MAX_RATIO,
+      );
+      const nextLeft = clamp(
+        startLeft + (ev.clientX - startX),
+        dragConstraints.minLeft,
+        maxLeft,
+      );
+      setLeftWidthPx(nextLeft);
+    };
+
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
+
+  const onRightHandlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (rightHandleDisabled) return;
+
+    const startX = e.clientX;
+    const startRight = rightWidthPx;
+
+    const target = e.currentTarget;
+    target.setPointerCapture(e.pointerId);
+
+    const onMove = (ev: PointerEvent) => {
+      const totalWidth =
+        contentRef.current?.getBoundingClientRect().width ??
+        dragConstraints.totalWidth;
+      const maxRight = Math.min(
+        totalWidth - effectiveLeftWidthPx - dragConstraints.minCenter,
+        totalWidth * RIGHT_MAX_RATIO,
+      );
+      // Dragging right handle to the right makes the right panel smaller.
+      const nextRight = clamp(
+        startRight - (ev.clientX - startX),
+        dragConstraints.minRight,
+        maxRight,
+      );
+      setRightWidthPx(nextRight);
+    };
+
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
   };
 
   return (
@@ -53,15 +159,13 @@ export const MainLayout = ({
       <div className="shrink-0">{header}</div>
 
       {/* Main Content Area */}
-      <Group className="h-full w-full">
+      <div ref={contentRef} className="flex min-h-0 flex-1">
         {/* Left Panel */}
-        <Panel
-          panelRef={leftPanelRef}
-          defaultSize="15%"
-          collapsible
-          collapsedSize={isLeftCollapsed ? 48 : 200}
-          minSize={isLeftCollapsed ? 48 : 200}
-          maxSize={isLeftCollapsed ? 48 : '30%'}
+        <div
+          className="shrink-0"
+          style={{
+            width: `${effectiveLeftWidthPx}px`,
+          }}
         >
           {React.isValidElement(leftPanel)
             ? React.cloneElement(leftPanel as React.ReactElement<any>, {
@@ -69,23 +173,37 @@ export const MainLayout = ({
                 onToggle: toggleLeftPanel,
               })
             : leftPanel}
-        </Panel>
+        </div>
 
-        <ResizableHandle className={'hidden'} />
+        {/* Left Resize Handle */}
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          className={leftHandleClassName}
+          onPointerDown={onLeftHandlePointerDown}
+        >
+          <div className={resizeHandleInnerClassName} />
+        </div>
 
         {/* Center Editor */}
-        <Panel minSize={100}>{children}</Panel>
+        <div className="min-w-0 flex-1">{children}</div>
 
-        <ResizableHandle className={'hidden'} />
+        {/* Right Resize Handle */}
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          className={rightHandleClassName}
+          onPointerDown={onRightHandlePointerDown}
+        >
+          <div className={resizeHandleInnerClassName} />
+        </div>
 
         {/* Right Panel */}
-        <Panel
-          panelRef={rightPanelRef}
-          defaultSize="30%"
-          collapsible
-          collapsedSize={isRightCollapsed ? 48 : 200}
-          minSize={isRightCollapsed ? 48 : 200}
-          maxSize={isRightCollapsed ? 48 : '50%'}
+        <div
+          className="shrink-0"
+          style={{
+            width: `${effectiveRightWidthPx}px`,
+          }}
         >
           {React.isValidElement(rightPanel)
             ? React.cloneElement(rightPanel as React.ReactElement<any>, {
@@ -93,8 +211,8 @@ export const MainLayout = ({
                 onToggle: toggleRightPanel,
               })
             : rightPanel}
-        </Panel>
-      </Group>
+        </div>
+      </div>
     </div>
   );
 };
