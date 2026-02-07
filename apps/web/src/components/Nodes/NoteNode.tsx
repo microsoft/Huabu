@@ -86,7 +86,7 @@ export const NoteNode = ({ id, data, selected }: NodeProps<NoteNodeType>) => {
     >
       <div className="flex h-full flex-col bg-white p-2">
         <BlockNoteView
-          className="noteview-readonly"
+          className="noteview-readonly pointer-events-none select-none"
           editor={editor}
           editable={false}
         />
