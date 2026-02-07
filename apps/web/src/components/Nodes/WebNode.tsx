@@ -1,23 +1,36 @@
 import { type Node, type NodeProps } from '@xyflow/react';
-import { Globe, RotateCw, ExternalLink } from 'lucide-react';
+import { Globe, RotateCw, ExternalLink, Fullscreen } from 'lucide-react';
 
 import { NodeWrapper, type NodeDataProps } from './NodeWrapper.tsx';
+import useStore from '../../store/canvasStore.ts';
 
 type WebNodeData = NodeDataProps & {};
 export type WebNodeType = Node<WebNodeData, 'web'>;
 
 export const WebNode = ({ id, data, selected }: NodeProps<WebNodeType>) => {
+  const openExpanded = useStore((s) => s.openExpanded);
   const WebToolbar = (
     <div className="flex w-full items-center justify-between gap-4">
       {/* URL Display */}
-      <div className="text-secondary flex flex-1 items-center gap-1 overflow-hidden text-xs font-medium">
+      <div className="text-muted-foreground flex flex-1 items-center gap-1 overflow-hidden text-xs font-medium">
         <Globe size={12} />
         <span className="truncate">{data?.src || 'No URL'}</span>
       </div>
 
       {/* Tools */}
-      <div className="text-secondary flex items-center gap-2">
+      <div className="text-muted-foreground flex items-center gap-2">
         <div className="bg-border h-3 w-px" />
+
+        <button
+          className="hover:text-main"
+          title="Open Large View"
+          onClick={(e) => {
+            e.stopPropagation();
+            openExpanded(id);
+          }}
+        >
+          <Fullscreen size={12} />
+        </button>
 
         <button className="hover:text-main" title="Refresh">
           <RotateCw size={12} />
@@ -44,6 +57,10 @@ export const WebNode = ({ id, data, selected }: NodeProps<WebNodeType>) => {
       selected={selected}
       toolbar={WebToolbar}
       keepAspectRatio={false}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        openExpanded(id);
+      }}
     >
       <div className="flex h-full flex-col">
         <div className="relative h-full w-full overflow-hidden rounded bg-white">
@@ -55,7 +72,7 @@ export const WebNode = ({ id, data, selected }: NodeProps<WebNodeType>) => {
               sandbox="allow-scripts allow-same-origin"
             />
           ) : (
-            <div className="text-secondary flex h-full w-full items-center justify-center text-sm">
+            <div className="text-muted-foreground flex h-full w-full items-center justify-center text-sm">
               Invalid URL
             </div>
           )}

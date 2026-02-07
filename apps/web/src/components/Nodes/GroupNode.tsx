@@ -10,13 +10,13 @@ export const GroupNode = ({ id, data, selected }: NodeProps<GroupNodeType>) => {
   const GroupToolbar = (
     <div className="flex w-full items-center justify-between gap-4">
       {/* Label */}
-      <div className="text-secondary flex flex-1 items-center gap-2 text-xs font-medium">
+      <div className="text-muted-foreground flex flex-1 items-center gap-2 text-xs font-medium">
         <Layers size={12} />
         <span className="truncate">{data.label || 'Group'}</span>
       </div>
 
       {/* Tools */}
-      <div className="text-secondary flex items-center gap-2">
+      <div className="text-muted-foreground flex items-center gap-2">
         <div className="bg-border h-3 w-px" />
 
         <button className="hover:text-main" title="Ungroup">
@@ -39,7 +39,7 @@ export const GroupNode = ({ id, data, selected }: NodeProps<GroupNodeType>) => {
       className="!border-dashed !border-gray-300 !bg-gray-50/30"
     >
       <div className="relative h-full w-full p-2">
-        <span className="text-secondary/20 pointer-events-none absolute right-4 bottom-2 text-4xl font-bold opacity-10 select-none">
+        <span className="text-muted-foreground/20 pointer-events-none absolute right-4 bottom-2 text-4xl font-bold opacity-10 select-none">
           GROUP
         </span>
       </div>

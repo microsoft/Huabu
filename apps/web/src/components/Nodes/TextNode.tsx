@@ -67,7 +67,7 @@ export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
   const TextToolbar = (
     <div className="flex w-full items-center gap-2">
       <div
-        className="hover:text-main text-secondary relative flex items-center justify-center"
+        className="hover:text-main text-muted-foreground relative flex items-center justify-center"
         title="Font Family"
       >
         <Type size={14} />
@@ -86,7 +86,7 @@ export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
       </div>
 
       <div
-        className="hover:text-main text-secondary relative flex w-8 items-center justify-center"
+        className="hover:text-main text-muted-foreground relative flex w-8 items-center justify-center"
         title="Font Size"
       >
         <button
@@ -124,7 +124,7 @@ export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
           'rounded p-1',
           style.fontWeight === 'bold'
             ? 'text-theme-500 bg-theme-50'
-            : 'text-secondary hover:bg-background',
+            : 'text-muted-foreground hover:bg-background',
         )}
       >
         <Bold size={14} />
@@ -140,7 +140,7 @@ export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
           'rounded p-1',
           style.fontStyle === 'italic'
             ? 'text-theme-500 bg-theme-50'
-            : 'text-secondary hover:bg-background',
+            : 'text-muted-foreground hover:bg-background',
         )}
       >
         <Italic size={14} />
@@ -185,7 +185,7 @@ export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
         <textarea
           ref={textareaRef}
           className={clsx(
-            'placeholder:text-secondary/30 h-full w-full resize-none overflow-hidden bg-transparent outline-none',
+            'placeholder:text-muted-foreground/30 h-full w-full resize-none overflow-hidden bg-transparent outline-none',
             isEditing
               ? 'nodrag cursor-text'
               : 'pointer-events-none cursor-grab select-none',

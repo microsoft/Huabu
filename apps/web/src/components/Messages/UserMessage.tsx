@@ -1,7 +1,7 @@
 import { Copy } from 'lucide-react';
 
-import { copyToClipboard } from '../../../../utils/clipboard';
-import { GhostButton } from '../../../Common/GhostButton';
+import { copyToClipboard } from '../../utils/clipboard';
+import { GhostButton } from '../Common/GhostButton';
 
 interface UserMessageProps {
   content: string;

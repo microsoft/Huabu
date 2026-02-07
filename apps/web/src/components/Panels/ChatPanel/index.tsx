@@ -6,9 +6,9 @@ import { chatApi } from '@/api/chat';
 
 import { SidebarPanel } from '../SidebarPanel';
 import { ChatInput } from './ChatInput';
-import { MessageList } from './messages/MessageList';
+import { MessageList } from '../../Messages/MessageList';
 
-import type { ChatMessage } from './messages/types';
+import type { ChatMessage } from '../../Messages/types';
 import type { ChatStreamUpdatePayload } from '@sediment/shared';
 
 interface ChatPanelProps {
