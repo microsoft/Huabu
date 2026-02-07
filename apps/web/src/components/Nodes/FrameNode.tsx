@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { NodeWrapper, type NodeDataProps } from './NodeWrapper.tsx';
 import useStore from '../../store/canvasStore.ts';
+import { GhostButton } from '../Common/GhostButton.tsx';
 
 type FrameNodeData = NodeDataProps & {};
 export type FrameNodeType = Node<FrameNodeData, 'frame'>;
@@ -56,8 +57,7 @@ export const FrameNode = ({ id, data, selected }: NodeProps<FrameNodeType>) => {
       <div className="text-muted-foreground flex items-center gap-2">
         <div className="bg-border h-3 w-px" />
 
-        <button
-          className="hover:text-main"
+        <GhostButton
           title="Unframe"
           onClick={(e) => {
             e.preventDefault();
@@ -66,9 +66,8 @@ export const FrameNode = ({ id, data, selected }: NodeProps<FrameNodeType>) => {
           }}
         >
           <Ungroup size={12} />
-        </button>
-        <button
-          className="hover:text-main"
+        </GhostButton>
+        <GhostButton
           title={data.locked ? 'Unlock' : 'Lock'}
           onClick={(e) => {
             e.preventDefault();
@@ -77,7 +76,7 @@ export const FrameNode = ({ id, data, selected }: NodeProps<FrameNodeType>) => {
           }}
         >
           <Lock size={12} />
-        </button>
+        </GhostButton>
       </div>
     </div>
   );

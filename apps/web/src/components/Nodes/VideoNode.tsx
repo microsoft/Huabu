@@ -2,6 +2,7 @@ import { type Node, type NodeProps } from '@xyflow/react';
 import { PlayCircle, Volume2, ArrowUpRight } from 'lucide-react';
 
 import { NodeWrapper, type NodeDataProps } from './NodeWrapper.tsx';
+import { GhostButton } from '../Common/GhostButton.tsx';
 
 type VideoNodeData = NodeDataProps & {};
 export type VideoNodeType = Node<VideoNodeData, 'video'>;
@@ -24,9 +25,9 @@ export const VideoNode = ({ id, data, selected }: NodeProps<VideoNodeType>) => {
       {/* Tools */}
       <div className="text-muted-foreground flex items-center gap-2">
         <div className="bg-border h-3 w-px" />
-        <button className="hover:text-main">
+        <GhostButton aria-label="Volume">
           <Volume2 size={12} />
-        </button>
+        </GhostButton>
       </div>
     </div>
   );

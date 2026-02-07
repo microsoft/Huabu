@@ -3,6 +3,7 @@ import { Globe, RotateCw, ExternalLink, Fullscreen } from 'lucide-react';
 
 import { NodeWrapper, type NodeDataProps } from './NodeWrapper.tsx';
 import useStore from '../../store/canvasStore.ts';
+import { GhostButton } from '../Common/GhostButton.tsx';
 
 type WebNodeData = NodeDataProps & {};
 export type WebNodeType = Node<WebNodeData, 'web'>;
@@ -21,8 +22,8 @@ export const WebNode = ({ id, data, selected }: NodeProps<WebNodeType>) => {
       <div className="text-muted-foreground flex items-center gap-2">
         <div className="bg-border h-3 w-px" />
 
-        <button
-          className="hover:text-main"
+        <GhostButton
+          aria-label="Open large view"
           title="Open Large View"
           onClick={(e) => {
             e.stopPropagation();
@@ -30,17 +31,18 @@ export const WebNode = ({ id, data, selected }: NodeProps<WebNodeType>) => {
           }}
         >
           <Fullscreen size={12} />
-        </button>
+        </GhostButton>
 
-        <button className="hover:text-main" title="Refresh">
+        <GhostButton aria-label="Refresh" title="Refresh">
           <RotateCw size={12} />
-        </button>
+        </GhostButton>
 
         <a
           href={data?.src}
           target="_blank"
           rel="noreferrer"
-          className="hover:text-main"
+          aria-label="Open in browser"
+          className="hover:text-main hover:bg-background inline-flex cursor-pointer items-center justify-center rounded border-none bg-transparent p-1 transition-colors"
           title="Open in Browser"
           onClick={(e) => e.stopPropagation()}
         >

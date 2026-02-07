@@ -18,6 +18,7 @@ import 'react-pdf/dist/Page/TextLayer.css';
 
 import { NodeWrapper, type NodeDataProps } from './NodeWrapper.tsx';
 import useStore from '../../store/canvasStore.ts';
+import { GhostButton } from '../Common/GhostButton.tsx';
 
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
@@ -118,8 +119,7 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
 
       <div className="text-muted-foreground flex items-center gap-3">
         <div className="bg-border h-3 w-px" />
-        <button
-          className="hover:text-main"
+        <GhostButton
           title="Open Large View"
           onClick={(e) => {
             e.stopPropagation();
@@ -128,42 +128,41 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
           }}
         >
           <Fullscreen size={12} />
-        </button>
-        <button
-          className="hover:text-main"
-          title="Download"
-          onClick={handleDownload}
-        >
+        </GhostButton>
+        <GhostButton title="Download" onClick={handleDownload}>
           <Download size={12} />
-        </button>
-        <button
-          className="hover:text-main"
+        </GhostButton>
+        <GhostButton
           title={isExpanded ? 'Collapse' : 'Expand'}
           onClick={toggleExpand}
         >
           {isExpanded ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
-        </button>
+        </GhostButton>
 
         {isExpanded && (
           <div className="text-muted-foreground animate-in fade-in slide-in-from-left-2 flex items-center gap-3 duration-200">
             <div className="bg-border mx-1 h-3 w-px" />
-            <button
-              className="hover:text-main rounded disabled:opacity-30"
+            <GhostButton
+              aria-label="Zoom out"
+              title="Zoom out"
+              className="rounded disabled:opacity-30"
               onClick={handleZoomOut}
               disabled={scale <= 0.5}
             >
               <ZoomOut size={12} />
-            </button>
+            </GhostButton>
             <span className="text-muted-foreground w-8 text-center font-mono text-[10px]">
               {Math.round(scale * 100)}%
             </span>
-            <button
-              className="hover:text-main rounded disabled:opacity-30"
+            <GhostButton
+              aria-label="Zoom in"
+              title="Zoom in"
+              className="rounded disabled:opacity-30"
               onClick={handleZoomIn}
               disabled={scale >= 3.0}
             >
               <ZoomIn size={12} />
-            </button>
+            </GhostButton>
           </div>
         )}
       </div>

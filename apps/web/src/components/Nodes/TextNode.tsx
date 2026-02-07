@@ -3,6 +3,7 @@ import { clsx } from 'clsx';
 import { Bold, Italic, Type } from 'lucide-react';
 import { useCallback, useState, useRef } from 'react';
 
+import { GhostButton } from '@/components/Common/GhostButton.tsx';
 import { NodeBgColorSelector } from '@/components/Common/NodeBgColorSelector.tsx';
 import { NodeTextColorSelector } from '@/components/Common/NodeTextColorSelector.tsx';
 
@@ -89,15 +90,15 @@ export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
         className="hover:text-main text-muted-foreground relative flex w-8 items-center justify-center"
         title="Font Size"
       >
-        <button
-          className="border-border hover:bg-muted flex h-6 w-6 items-center justify-center rounded-md border transition-colors"
+        <GhostButton
+          className="border-border hover:bg-muted flex h-6 w-6 items-center justify-center rounded-md border p-0 transition-colors"
           onClick={(e) => {
             e.stopPropagation();
           }}
-          title="Change Text Color"
+          title="Change Font Size"
         >
           <span className="text-xs font-medium">{fontSize}</span>
-        </button>
+        </GhostButton>
 
         <select
           className="absolute inset-0 cursor-pointer opacity-0"
@@ -114,7 +115,7 @@ export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
 
       <div className="bg-border mx-1 h-3 w-px" />
 
-      <button
+      <GhostButton
         onClick={() =>
           updateStyle({
             fontWeight: style.fontWeight === 'bold' ? 'normal' : 'bold',
@@ -123,14 +124,14 @@ export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
         className={clsx(
           'rounded p-1',
           style.fontWeight === 'bold'
-            ? 'text-theme-500 bg-theme-50'
+            ? 'text-theme-500 bg-theme-50 enabled:hover:bg-theme-50'
             : 'text-muted-foreground hover:bg-background',
         )}
       >
         <Bold size={14} />
-      </button>
+      </GhostButton>
 
-      <button
+      <GhostButton
         onClick={() =>
           updateStyle({
             fontStyle: style.fontStyle === 'italic' ? 'normal' : 'italic',
@@ -139,12 +140,12 @@ export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
         className={clsx(
           'rounded p-1',
           style.fontStyle === 'italic'
-            ? 'text-theme-500 bg-theme-50'
+            ? 'text-theme-500 bg-theme-50 enabled:hover:bg-theme-50'
             : 'text-muted-foreground hover:bg-background',
         )}
       >
         <Italic size={14} />
-      </button>
+      </GhostButton>
 
       <div className="bg-border mx-1 h-3 w-px" />
 

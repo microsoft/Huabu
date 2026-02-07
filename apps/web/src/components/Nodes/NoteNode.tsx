@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 import { NodeWrapper, type NodeDataProps } from './NodeWrapper.tsx';
 import useStore from '../../store/canvasStore.ts';
 import { copyToClipboard } from '../../utils/clipboard.ts';
+import { GhostButton } from '../Common/GhostButton.tsx';
 
 type NoteNodeData = NodeDataProps & {
   content?: string;
@@ -41,24 +42,19 @@ export const NoteNode = ({ id, data, selected }: NodeProps<NoteNodeType>) => {
       <div className="text-muted-foreground flex items-center gap-2">
         <div className="bg-border h-3 w-px" />
 
-        <button
-          className="hover:text-main"
+        <GhostButton
+          title="Open Large View"
           onClick={(e) => {
             e.stopPropagation();
             openExpanded(id);
           }}
-          title="Open Large View"
         >
           <Fullscreen size={12} />
-        </button>
+        </GhostButton>
 
-        <button
-          className="hover:text-main"
-          onClick={handleCopy}
-          title="Copy Content"
-        >
+        <GhostButton title="Copy Content" onClick={handleCopy}>
           {copied ? <Check size={12} /> : <Copy size={12} />}
-        </button>
+        </GhostButton>
       </div>
     </div>
   );
