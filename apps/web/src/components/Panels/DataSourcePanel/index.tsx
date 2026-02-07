@@ -19,9 +19,9 @@ import {
   type DataSourceNodeLike,
   type DataSourceTreeItem,
 } from './DataSourceTreeView';
-import { SidebarPanel } from './SidebarPanel';
-import useStore from '../../store/canvasStore';
-import { GhostButton } from '../Common/GhostButton';
+import useStore from '../../../store/canvasStore';
+import { GhostButton } from '../../Common/GhostButton';
+import { SidebarPanel } from '../SidebarPanel';
 
 interface DataSourcePanelProps {
   isCollapsed?: boolean;
