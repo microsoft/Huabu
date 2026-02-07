@@ -6,6 +6,7 @@ import {
   Download,
   Maximize2,
   Minimize2,
+  Expand,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
@@ -16,6 +17,7 @@ import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
 import { NodeWrapper, type NodeDataProps } from './NodeWrapper.tsx';
+import useStore from '../../store/canvasStore.ts';
 
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
@@ -26,6 +28,7 @@ export type PDFNodeType = Node<PDFNodeData, 'pdf'>;
 
 export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
   const { updateNodeData, updateNode } = useReactFlow();
+  const openExpanded = useStore((s) => s.openExpanded);
 
   const [isInteractive, setIsInteractive] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -107,7 +110,7 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
         className="nodrag text-secondary hover:text-theme-500 flex flex-1 cursor-pointer items-center gap-1 overflow-hidden text-xs font-medium transition-colors"
       >
         <FileText size={12} className={!isExpanded ? 'text-icon' : ''} />
-        <span className="max-w-[120px] truncate">
+        <span className="max-w-30 truncate">
           {data.label || 'Document.pdf'}
         </span>
         <ArrowUpRight size={12} strokeWidth={2} />
@@ -115,6 +118,17 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
 
       <div className="text-secondary flex items-center gap-3">
         <div className="bg-border h-3 w-px" />
+        <button
+          className="hover:text-main"
+          title="Open Large View"
+          onClick={(e) => {
+            e.stopPropagation();
+            setIsInteractive(false);
+            openExpanded(id);
+          }}
+        >
+          <Expand size={12} />
+        </button>
         <button
           className="hover:text-main"
           title="Download"
@@ -166,9 +180,7 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
       keepAspectRatio={false}
       className={clsx(
         'bg-white transition-all duration-300 ease-in-out',
-        isExpanded
-          ? 'h-[500px] w-[460px]'
-          : '!border-border h-[80px] w-[260px]',
+        isExpanded ? 'h-125 w-115' : 'border-border! h-20 w-65',
         isInteractive && isExpanded ? 'ring-theme-500/20 ring-2' : '',
       )}
     >

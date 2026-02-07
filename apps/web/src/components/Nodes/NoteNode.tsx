@@ -1,10 +1,11 @@
 import { useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/shadcn';
 import { type Node, type NodeProps } from '@xyflow/react';
-import { StickyNote, Copy, Check } from 'lucide-react';
+import { StickyNote, Copy, Check, Expand } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { NodeWrapper, type NodeDataProps } from './NodeWrapper.tsx';
+import useStore from '../../store/canvasStore.ts';
 import { copyToClipboard } from '../../utils/clipboard.ts';
 
 type NoteNodeData = NodeDataProps & {
@@ -14,6 +15,7 @@ export type NoteNodeType = Node<NoteNodeData, 'note'>;
 
 export const NoteNode = ({ id, data, selected }: NodeProps<NoteNodeType>) => {
   const [copied, setCopied] = useState(false);
+  const openExpanded = useStore((s) => s.openExpanded);
   const editor = useCreateBlockNote({
     initialContent: [{ type: 'paragraph', content: '' }],
     trailingBlock: false,
@@ -38,6 +40,17 @@ export const NoteNode = ({ id, data, selected }: NodeProps<NoteNodeType>) => {
       {/* Tools */}
       <div className="text-secondary flex items-center gap-2">
         <div className="bg-border h-3 w-px" />
+
+        <button
+          className="hover:text-main"
+          onClick={(e) => {
+            e.stopPropagation();
+            openExpanded(id);
+          }}
+          title="Open Large View"
+        >
+          <Expand size={12} />
+        </button>
 
         <button
           className="hover:text-main"
@@ -66,6 +79,10 @@ export const NoteNode = ({ id, data, selected }: NodeProps<NoteNodeType>) => {
       selected={selected}
       toolbar={NoteToolbar}
       keepAspectRatio={false}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        openExpanded(id);
+      }}
     >
       <div className="flex h-full flex-col bg-white p-2">
         <BlockNoteView

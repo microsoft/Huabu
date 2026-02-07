@@ -21,7 +21,7 @@ export type NodeDataProps = {
 
   isExpanded?: boolean;
   settings?: object;
-  [key: string]: any;
+  [key: string]: unknown;
 };
 
 interface NodeWrapperProps {
@@ -37,6 +37,8 @@ interface NodeWrapperProps {
 
   keepAspectRatio?: boolean;
   resizable?: boolean;
+
+  onDoubleClick?: React.MouseEventHandler<HTMLDivElement>;
 }
 
 export const NodeWrapper = memo(
@@ -50,6 +52,8 @@ export const NodeWrapper = memo(
     toolbar,
     keepAspectRatio = false,
     resizable = true,
+
+    onDoubleClick,
   }: NodeWrapperProps) => {
     return (
       <>
@@ -78,6 +82,7 @@ export const NodeWrapper = memo(
             selected ? 'ring-theme-500 ring' : 'ring-border hover:ring',
             className,
           )}
+          onDoubleClick={onDoubleClick}
         >
           <div
             className={clsx(

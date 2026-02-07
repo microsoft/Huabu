@@ -9,6 +9,7 @@ import {
 import React, { useMemo, useRef } from 'react';
 import '@xyflow/react/dist/style.css';
 
+import { ExpandedNodeOverlay } from './ExpandedNodeOverlay';
 import useStore from '../../store/canvasStore.ts';
 import {
   canReadSedimentPayload,
@@ -136,6 +137,8 @@ export const Canvas: React.FC = () => {
         <Background color="#ccc" gap={18} />
 
         <Controls position="bottom-left" />
+
+        <ExpandedNodeOverlay />
       </ReactFlow>
     </div>
   );
