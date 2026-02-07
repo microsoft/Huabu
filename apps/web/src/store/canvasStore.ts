@@ -13,11 +13,12 @@ import {
 import { create } from 'zustand';
 
 import {
+  autoFrameNodeByOverlap,
   frameNodes,
   toggleFrameLock,
   unframe,
-  type GroupingNode,
-} from '../utils/grouping';
+  type NestableNode,
+} from '../utils/frameHelper';
 
 type RFState = {
   nodes: Node[];
@@ -163,9 +164,23 @@ const useStore = create<RFState>((set, get) => ({
   closeExpanded: () => set({ expandedNodeId: null }),
 
   onNodesChange: (changes) => {
-    set({
-      nodes: applyNodeChanges(changes, get().nodes),
-    });
+    const prevNodes = get().nodes as NestableNode[];
+    const nextNodes = applyNodeChanges(changes, prevNodes) as NestableNode[];
+
+    const dragStopIds = changes
+      .filter((c) => c.type === 'position')
+      .filter((c) => {
+        const maybe = c as unknown as { dragging?: boolean };
+        return maybe.dragging === false;
+      })
+      .map((c) => c.id);
+
+    let result = nextNodes;
+    for (const nodeId of dragStopIds) {
+      result = autoFrameNodeByOverlap(result, nodeId, { threshold: 0.75 });
+    }
+
+    set({ nodes: result });
   },
 
   onEdgesChange: (changes) => {
@@ -206,7 +221,7 @@ const useStore = create<RFState>((set, get) => ({
     if (selectedIds.length < 2) return;
 
     const frameId = createId('node');
-    const result = frameNodes(nodes as GroupingNode[], selectedIds, {
+    const result = frameNodes(nodes as NestableNode[], selectedIds, {
       frameId,
       label: 'Frame',
     });
@@ -216,13 +231,14 @@ const useStore = create<RFState>((set, get) => ({
 
   unframe: (frameId) => {
     const { nodes, edges } = get();
-    const result = unframe(nodes as GroupingNode[], edges, frameId);
+    const result = unframe(nodes as NestableNode[], edges, frameId);
     set({ nodes: result.nodes, edges: result.edges });
   },
 
   toggleFrameLock: (frameId) => {
     const { nodes } = get();
-    set({ nodes: toggleFrameLock(nodes as GroupingNode[], frameId) });
+
+    set({ nodes: toggleFrameLock(nodes as NestableNode[], frameId) });
   },
 }));
 

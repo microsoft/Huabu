@@ -1,9 +1,8 @@
 import type { Edge, Node, XYPosition } from '@xyflow/react';
 
-export type GroupingNode = Node & {
+export type NestableNode = Node & {
   parentId?: string;
   extent?: Node['extent'];
-  draggable?: boolean;
   data?: Record<string, unknown>;
 };
 
@@ -15,11 +14,11 @@ function subPos(a: XYPosition, b: XYPosition): XYPosition {
   return { x: a.x - b.x, y: a.y - b.y };
 }
 
-function indexById(nodes: GroupingNode[]): Map<string, GroupingNode> {
+function indexById(nodes: NestableNode[]): Map<string, NestableNode> {
   return new Map(nodes.map((n) => [n.id, n] as const));
 }
 
-function normalizeTreeOrder(nodes: GroupingNode[]): GroupingNode[] {
+function normalizeTreeOrder(nodes: NestableNode[]): NestableNode[] {
   const byId = indexById(nodes);
   const originalIndex = new Map(nodes.map((n, i) => [n.id, i] as const));
 
@@ -35,7 +34,7 @@ function normalizeTreeOrder(nodes: GroupingNode[]): GroupingNode[] {
   const normalizedById = indexById(normalized);
   const visiting = new Set<string>();
   const visited = new Set<string>();
-  const result: GroupingNode[] = [];
+  const result: NestableNode[] = [];
 
   const visit = (id: string) => {
     if (visited.has(id)) return;
@@ -69,7 +68,7 @@ function normalizeTreeOrder(nodes: GroupingNode[]): GroupingNode[] {
   return result;
 }
 
-function getNodeSize(node: GroupingNode): { width: number; height: number } {
+function getNodeSize(node: NestableNode): { width: number; height: number } {
   const measured = (
     node as unknown as { measured?: { width?: number; height?: number } }
   ).measured;
@@ -101,7 +100,7 @@ function getNodeSize(node: GroupingNode): { width: number; height: number } {
   };
 }
 
-function getAncestorIds(nodes: GroupingNode[], nodeId: string): string[] {
+function getAncestorIds(nodes: NestableNode[], nodeId: string): string[] {
   const byId = indexById(nodes);
   const result: string[] = [];
 
@@ -119,7 +118,7 @@ function getAncestorIds(nodes: GroupingNode[], nodeId: string): string[] {
   return result;
 }
 
-function getTopLevelIds(nodes: GroupingNode[], ids: string[]): string[] {
+function getTopLevelIds(nodes: NestableNode[], ids: string[]): string[] {
   const selected = new Set(ids);
   return ids.filter((id) => {
     const ancestors = getAncestorIds(nodes, id);
@@ -132,7 +131,7 @@ function getTopLevelIds(nodes: GroupingNode[], ids: string[]): string[] {
  * Works for nested frames by walking the parent chain.
  */
 export function getAbsolutePosition(
-  nodes: GroupingNode[],
+  nodes: NestableNode[],
   nodeId: string,
 ): XYPosition | null {
   const byId = indexById(nodes);
@@ -156,7 +155,7 @@ export function getAbsolutePosition(
 }
 
 export function getDescendantIds(
-  nodes: GroupingNode[],
+  nodes: NestableNode[],
   rootId: string,
 ): string[] {
   const childrenByParent = new Map<string, string[]>();
@@ -183,7 +182,7 @@ export function getDescendantIds(
 }
 
 export type UnframeResult = {
-  nodes: GroupingNode[];
+  nodes: NestableNode[];
   edges: Edge[];
 };
 
@@ -195,7 +194,7 @@ export type UnframeResult = {
  * - Any edges connected to the removed frame are dropped.
  */
 export function unframe(
-  nodes: GroupingNode[],
+  nodes: NestableNode[],
   edges: Edge[],
   frameId: string,
 ): UnframeResult {
@@ -209,7 +208,7 @@ export function unframe(
   const parentId = group.parentId;
   const parentAbs = parentId ? getAbsolutePosition(nodes, parentId) : null;
 
-  const nextNodes: GroupingNode[] = [];
+  const nextNodes: NestableNode[] = [];
   for (const n of nodes) {
     if (n.id === frameId) continue;
 
@@ -245,13 +244,15 @@ export function unframe(
 }
 
 /**
- * Toggles a frame's locked state by flipping `data.locked` and setting `draggable`.
- * Applies to the frame and all its descendants.
+ * Toggles a frame's locked state by flipping `data.locked`.
+ *
+ * This is intentionally scoped to the frame node itself so locking only affects
+ * behaviors that explicitly check this flag (e.g. auto-frame).
  */
 export function toggleFrameLock(
-  nodes: GroupingNode[],
+  nodes: NestableNode[],
   frameId: string,
-): GroupingNode[] {
+): NestableNode[] {
   const byId = indexById(nodes);
   const group = byId.get(frameId);
   if (!group) return nodes;
@@ -259,16 +260,11 @@ export function toggleFrameLock(
   const locked = Boolean(group.data?.locked);
   const nextLocked = !locked;
 
-  const descendantIds = new Set([frameId, ...getDescendantIds(nodes, frameId)]);
-
   return nodes.map((n) => {
-    if (!descendantIds.has(n.id)) return n;
-
-    const data = { ...(n.data ?? {}), locked: nextLocked };
+    if (n.id !== frameId) return n;
     return {
       ...n,
-      data,
-      draggable: !nextLocked,
+      data: { ...(n.data ?? {}), locked: nextLocked },
     };
   });
 }
@@ -282,9 +278,116 @@ export type FrameNodesOptions = {
 };
 
 export type FrameNodesResult = {
-  nodes: GroupingNode[];
+  nodes: NestableNode[];
   frameId: string;
 };
+
+export type AutoFrameByOverlapOptions = {
+  /** Portion of the dragged node area that must be inside the frame. */
+  threshold?: number;
+};
+
+type Rect = { x: number; y: number; width: number; height: number };
+
+function rectIntersectionArea(a: Rect, b: Rect): number {
+  const x1 = Math.max(a.x, b.x);
+  const y1 = Math.max(a.y, b.y);
+  const x2 = Math.min(a.x + a.width, b.x + b.width);
+  const y2 = Math.min(a.y + a.height, b.y + b.height);
+
+  const w = x2 - x1;
+  const h = y2 - y1;
+  if (w <= 0 || h <= 0) return 0;
+  return w * h;
+}
+
+function nodeToRect(nodes: NestableNode[], nodeId: string): Rect | null {
+  const byId = indexById(nodes);
+  const node = byId.get(nodeId);
+  if (!node) return null;
+
+  const abs = getAbsolutePosition(nodes, nodeId);
+  if (!abs) return null;
+
+  const { width, height } = getNodeSize(node);
+  if (width <= 0 || height <= 0) return null;
+
+  return { x: abs.x, y: abs.y, width, height };
+}
+
+/**
+ * If a node is dropped with >= threshold of its area inside an *unlocked* frame,
+ * reparent it under that frame while preserving its visual position.
+ */
+export function autoFrameNodeByOverlap(
+  nodes: NestableNode[],
+  nodeId: string,
+  options: AutoFrameByOverlapOptions = {},
+): NestableNode[] {
+  const threshold = options.threshold ?? 0.75;
+  if (!Number.isFinite(threshold) || threshold <= 0) return nodes;
+
+  const byId = indexById(nodes);
+  const node = byId.get(nodeId);
+  if (!node) return nodes;
+  if (node.type === 'frame') return nodes;
+
+  const nodeRect = nodeToRect(nodes, nodeId);
+  if (!nodeRect) return nodes;
+
+  const nodeArea = nodeRect.width * nodeRect.height;
+  if (nodeArea <= 0) return nodes;
+
+  let best:
+    | {
+        frameId: string;
+        ratio: number;
+        frameArea: number;
+      }
+    | undefined;
+
+  for (const candidate of nodes) {
+    if (candidate.type !== 'frame') continue;
+    if (candidate.id === nodeId) continue;
+    if (candidate.data?.locked) continue;
+
+    const frameRect = nodeToRect(nodes, candidate.id);
+    if (!frameRect) continue;
+
+    const intersection = rectIntersectionArea(nodeRect, frameRect);
+    const ratio = intersection / nodeArea;
+    if (ratio < threshold) continue;
+
+    const frameArea = frameRect.width * frameRect.height;
+
+    if (
+      !best ||
+      ratio > best.ratio ||
+      (ratio === best.ratio && frameArea < best.frameArea)
+    ) {
+      best = { frameId: candidate.id, ratio, frameArea };
+    }
+  }
+
+  if (!best) return nodes;
+  if (node.parentId === best.frameId) return nodes;
+
+  const frameAbs = getAbsolutePosition(nodes, best.frameId);
+  const nodeAbs = getAbsolutePosition(nodes, nodeId);
+  if (!frameAbs || !nodeAbs) return nodes;
+
+  const nextNodes = nodes.map((n) => {
+    if (n.id !== nodeId) return n;
+    return {
+      ...n,
+      parentId: best.frameId,
+      position: subPos(nodeAbs, frameAbs),
+      extent: 'parent' as const,
+    };
+  });
+
+  return normalizeTreeOrder(nextNodes);
+}
 
 /**
  * Creates a new frame node and reparents the given nodes under it.
@@ -294,7 +397,7 @@ export type FrameNodesResult = {
  *   Otherwise, the frame is created at the root.
  */
 export function frameNodes(
-  nodes: GroupingNode[],
+  nodes: NestableNode[],
   nodeIds: string[],
   options: FrameNodesOptions,
 ): FrameNodesResult {
@@ -347,7 +450,7 @@ export function frameNodes(
 
   const groupPos = groupParentAbs ? subPos(groupAbs, groupParentAbs) : groupAbs;
 
-  const groupNode: GroupingNode = {
+  const groupNode: NestableNode = {
     id: options.frameId,
     type: 'frame',
     ...(groupParentId ? { parentId: groupParentId } : {}),

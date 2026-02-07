@@ -1,5 +1,6 @@
 import { type Node, type NodeProps } from '@xyflow/react';
-import { Layers, Ungroup, Lock } from 'lucide-react';
+import clsx from 'clsx';
+import { Layers, Ungroup, Lock, Unlock } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { NodeWrapper, type NodeDataProps } from './NodeWrapper.tsx';
@@ -67,6 +68,7 @@ export const FrameNode = ({ id, data, selected }: NodeProps<FrameNodeType>) => {
         >
           <Ungroup size={12} />
         </GhostButton>
+        {/* Lock auto-frame */}
         <GhostButton
           title={data.locked ? 'Unlock' : 'Lock'}
           onClick={(e) => {
@@ -75,7 +77,7 @@ export const FrameNode = ({ id, data, selected }: NodeProps<FrameNodeType>) => {
             toggleFrameLock(id);
           }}
         >
-          <Lock size={12} />
+          {data.locked ? <Lock size={12} /> : <Unlock size={12} />}
         </GhostButton>
       </div>
     </div>
@@ -89,7 +91,7 @@ export const FrameNode = ({ id, data, selected }: NodeProps<FrameNodeType>) => {
       toolbar={FrameToolbar}
       keepAspectRatio={false}
       allowOverflow
-      className={frameBorderClassName}
+      className={clsx(frameBorderClassName, 'bg-white')}
     >
       <div className="relative h-full w-full p-2">
         <div className="absolute -top-6 left-2 z-10">

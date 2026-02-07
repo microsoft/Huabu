@@ -1,3 +1,5 @@
+import clsx from 'clsx';
+
 import { Tooltip } from './Tooltip';
 
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
@@ -28,15 +30,13 @@ export const IconButton = ({
   const buttonEl = (
     <button
       type={type}
-      className={[
+      className={clsx(
         'inline-flex items-center justify-center rounded-full',
         sizeClass,
         variantClass,
         'disabled:cursor-not-allowed',
         className,
-      ]
-        .filter(Boolean)
-        .join(' ')}
+      )}
       {...props}
     >
       {children}

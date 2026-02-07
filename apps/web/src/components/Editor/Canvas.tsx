@@ -6,7 +6,7 @@ import {
   type ReactFlowInstance,
   type Node,
 } from '@xyflow/react';
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import '@xyflow/react/dist/style.css';
 
 import { ExpandedNodeOverlay } from './ExpandedNodeOverlay';
@@ -23,6 +23,16 @@ import { TextNode } from '../Nodes/TextNode';
 import { VideoNode } from '../Nodes/VideoNode';
 import { WebNode } from '../Nodes/WebNode';
 
+const nodeTypes = {
+  image: ImageNode,
+  text: TextNode,
+  note: NoteNode,
+  video: VideoNode,
+  web: WebNode,
+  pdf: PDFNode,
+  frame: FrameNode,
+} as const;
+
 export const Canvas: React.FC = () => {
   const nodes = useStore((state) => state.nodes);
   const edges = useStore((state) => state.edges);
@@ -35,19 +45,6 @@ export const Canvas: React.FC = () => {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const rfInstanceRef = useRef<ReactFlowInstance | null>(null);
   const lastDropRef = useRef<{ key: string; at: number } | null>(null);
-
-  const nodeTypes = useMemo(
-    () => ({
-      image: ImageNode,
-      text: TextNode,
-      note: NoteNode,
-      video: VideoNode,
-      web: WebNode,
-      pdf: PDFNode,
-      frame: FrameNode,
-    }),
-    [],
-  );
 
   // Handle "Cmd/Ctrl + G" to create a frame from selected nodes.
   useEffect(() => {
