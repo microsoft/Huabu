@@ -21,7 +21,7 @@ export const ImageNode = ({ id, data, selected }: NodeProps<ImageNodeType>) => {
         <span className="truncate">
           Source: {data?.src || 'Unknown Source'}
         </span>
-        <ArrowUpRight size={12} strokeWidth={2} />
+        <ArrowUpRight size={14} strokeWidth={2} />
       </a>
 
       {/*tools*/}
@@ -29,11 +29,11 @@ export const ImageNode = ({ id, data, selected }: NodeProps<ImageNodeType>) => {
         <div className="bg-border h-3 w-px" />
 
         <GhostButton aria-label="Shrink">
-          <Shrink size={12} />
+          <Shrink size={14} />
         </GhostButton>
 
         <GhostButton aria-label="Adjust">
-          <SlidersHorizontal size={12} />
+          <SlidersHorizontal size={14} />
         </GhostButton>
       </div>
     </div>

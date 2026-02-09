@@ -50,7 +50,7 @@ export const FrameNode = ({ id, data, selected }: NodeProps<FrameNodeType>) => {
     <div className="flex w-full items-center justify-between gap-4">
       {/* Label */}
       <div className="text-muted-foreground flex flex-1 items-center gap-2 text-xs font-medium">
-        <Layers size={12} />
+        <Layers size={14} />
         <span className="truncate">{label}</span>
       </div>
 
@@ -66,7 +66,7 @@ export const FrameNode = ({ id, data, selected }: NodeProps<FrameNodeType>) => {
             unframe(id);
           }}
         >
-          <Ungroup size={12} />
+          <Ungroup size={14} />
         </GhostButton>
         {/* Lock auto-frame */}
         <GhostButton
@@ -77,7 +77,7 @@ export const FrameNode = ({ id, data, selected }: NodeProps<FrameNodeType>) => {
             toggleFrameLock(id);
           }}
         >
-          {data.locked ? <Lock size={12} /> : <Unlock size={12} />}
+          {data.locked ? <Lock size={14} /> : <Unlock size={14} />}
         </GhostButton>
       </div>
     </div>

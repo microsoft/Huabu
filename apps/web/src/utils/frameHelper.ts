@@ -2,7 +2,6 @@ import type { Edge, Node, XYPosition } from '@xyflow/react';
 
 export type NestableNode = Node & {
   parentId?: string;
-  extent?: Node['extent'];
   data?: Record<string, unknown>;
 };
 
@@ -27,7 +26,7 @@ function normalizeTreeOrder(nodes: NestableNode[]): NestableNode[] {
     if (!n.parentId) return n;
     if (byId.has(n.parentId)) return n;
 
-    const { parentId: _parentId, extent: _extent, ...rest } = n;
+    const { parentId: _parentId, ...rest } = n;
     return rest;
   });
 
@@ -42,7 +41,7 @@ function normalizeTreeOrder(nodes: NestableNode[]): NestableNode[] {
       // Break cycles defensively by treating the node as root.
       const node = normalizedById.get(id);
       if (node?.parentId) {
-        const { parentId: _parentId, extent: _extent, ...rest } = node;
+        const { parentId: _parentId, ...rest } = node;
         normalizedById.set(id, rest);
       }
       visiting.delete(id);
@@ -81,8 +80,8 @@ function getNodeSize(node: NestableNode): { width: number; height: number } {
     (typeof style?.width === 'number'
       ? style.width
       : typeof style?.width === 'string'
-        ? Number.parseFloat(style.width)
-        : undefined) ??
+      ? Number.parseFloat(style.width)
+      : undefined) ??
     0;
 
   const height =
@@ -90,8 +89,8 @@ function getNodeSize(node: NestableNode): { width: number; height: number } {
     (typeof style?.height === 'number'
       ? style.height
       : typeof style?.height === 'string'
-        ? Number.parseFloat(style.height)
-        : undefined) ??
+      ? Number.parseFloat(style.height)
+      : undefined) ??
     0;
 
   return {
@@ -279,10 +278,9 @@ export function unframe(
           ...n,
           parentId,
           position: subPos(childAbs, parentAbs),
-          extent: n.extent === 'parent' ? 'parent' : n.extent,
         });
       } else {
-        const { parentId: _parentId, extent: _extent, ...rest } = n;
+        const { parentId: _parentId, ...rest } = n;
         nextNodes.push({
           ...rest,
           position: childAbs,
@@ -319,11 +317,42 @@ export function toggleFrameLock(
   const locked = Boolean(group.data?.locked);
   const nextLocked = !locked;
 
+  const flagKey = '__dragDisabledByFrameLock';
+  const descendantIds = new Set(getDescendantIds(nodes, frameId));
+
   return nodes.map((n) => {
-    if (n.id !== frameId) return n;
+    if (n.id === frameId) {
+      return {
+        ...n,
+        data: { ...(n.data ?? {}), locked: nextLocked },
+      };
+    }
+
+    if (!descendantIds.has(n.id)) return n;
+
+    if (nextLocked) {
+      if (n.draggable === false) return n;
+      return {
+        ...n,
+        draggable: false,
+        data: {
+          ...(n.data ?? {}),
+          [flagKey]: true,
+        },
+      };
+    }
+
+    if ((n.data as Record<string, unknown> | undefined)?.[flagKey] !== true)
+      return n;
+
+    const dataObj = (n.data ?? {}) as Record<string, unknown>;
+    const { [flagKey]: removedFlag, ...restData } = dataObj;
+    void removedFlag;
+
     return {
       ...n,
-      data: { ...(n.data ?? {}), locked: nextLocked },
+      draggable: true,
+      data: restData,
     };
   });
 }
@@ -346,6 +375,11 @@ export type AutoFrameByOverlapOptions = {
   threshold?: number;
 };
 
+export type AutoUnframeByNonOverlapOptions = {
+  /** Treat intersection area <= epsilon as "no overlap". */
+  epsilon?: number;
+};
+
 type Rect = { x: number; y: number; width: number; height: number };
 
 function rectIntersectionArea(a: Rect, b: Rect): number {
@@ -358,6 +392,69 @@ function rectIntersectionArea(a: Rect, b: Rect): number {
   const h = y2 - y1;
   if (w <= 0 || h <= 0) return 0;
   return w * h;
+}
+
+/**
+ * If a node has a parent and the node and parent have no overlap,
+ * detach the node from its parent while preserving its visual position.
+ */
+export function autoUnframeNodeByNonOverlap(
+  nodes: NestableNode[],
+  nodeId: string,
+  options: AutoUnframeByNonOverlapOptions = {},
+): NestableNode[] {
+  const byId = indexById(nodes);
+  const node = byId.get(nodeId);
+  if (!node?.parentId) return nodes;
+
+  const parentId = node.parentId;
+  const parent = byId.get(parentId);
+  if (!parent) return nodes;
+
+  const getAbs = createAbsolutePositionGetter(byId);
+  const nodeAbs = getAbs(nodeId);
+  const parentAbs = getAbs(parentId);
+  if (!nodeAbs || !parentAbs) return nodes;
+
+  const nodeSize = getNodeSize(node);
+  const parentSize = getNodeSize(parent);
+  if (
+    nodeSize.width <= 0 ||
+    nodeSize.height <= 0 ||
+    parentSize.width <= 0 ||
+    parentSize.height <= 0
+  ) {
+    return nodes;
+  }
+
+  const nodeRect: Rect = {
+    x: nodeAbs.x,
+    y: nodeAbs.y,
+    width: nodeSize.width,
+    height: nodeSize.height,
+  };
+  const parentRect: Rect = {
+    x: parentAbs.x,
+    y: parentAbs.y,
+    width: parentSize.width,
+    height: parentSize.height,
+  };
+
+  const intersection = rectIntersectionArea(nodeRect, parentRect);
+  const epsilon = options.epsilon ?? 0;
+  if (intersection > epsilon) return nodes;
+
+  const nextNodes = nodes.map((n) => {
+    if (n.id !== nodeId) return n;
+
+    const { parentId: _parentId, ...rest } = n;
+    return {
+      ...rest,
+      position: nodeAbs,
+    };
+  });
+
+  return normalizeTreeOrder(nextNodes);
 }
 
 /**
@@ -456,7 +553,6 @@ export function autoFrameNodeByOverlap(
       ...n,
       parentId: best.frameId,
       position: subPos(nodeAbs, frameAbs),
-      extent: 'parent' as const,
     };
   });
 
@@ -548,7 +644,6 @@ export function frameNodes(
       ...n,
       parentId: options.frameId,
       position: subPos(abs, groupAbs),
-      extent: 'parent' as const,
       selected: false,
     };
   });

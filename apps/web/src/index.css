@@ -143,11 +143,6 @@ body,
   overflow: hidden;
 }
 
-.lucide {
-  width: 18px;
-  height: 18px;
-}
-
 .noteview-readonly .bn-editor {
   padding: 0 !important;
 }

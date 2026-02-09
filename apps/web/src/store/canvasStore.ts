@@ -14,6 +14,7 @@ import { create } from 'zustand';
 
 import {
   autoFrameNodeByOverlap,
+  autoUnframeNodeByNonOverlap,
   frameNodes,
   toggleFrameLock,
   unframe,
@@ -177,6 +178,7 @@ const useStore = create<RFState>((set, get) => ({
 
     let result = nextNodes;
     for (const nodeId of dragStopIds) {
+      result = autoUnframeNodeByNonOverlap(result, nodeId, { epsilon: 0 });
       result = autoFrameNodeByOverlap(result, nodeId, { threshold: 0.75 });
     }
 

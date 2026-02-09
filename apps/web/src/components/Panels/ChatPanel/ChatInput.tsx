@@ -85,12 +85,12 @@ export const ChatInput = ({
               </IconButton>
 
               {/* <PillButton disabled={disabled}>
-                <Lightbulb size={14} />
+                <Lightbulb size={16} />
                 Think
               </PillButton>
 
               <PillButton disabled={disabled}>
-                <Search size={14} />
+                <Search size={16} />
                 Deep Research
               </PillButton> */}
             </div>
@@ -103,7 +103,7 @@ export const ChatInput = ({
               size="sm"
               variant="solid"
             >
-              <ArrowUp />
+              <ArrowUp size={16} />
             </IconButton>
           </div>
         </div>

@@ -30,24 +30,51 @@ interface DataSourcePanelProps {
 
 type LayerTab = 'layers' | 'notes';
 
+const ICON_SIZE = 14;
+const ICON_STROKE_WIDTH = 1.5;
+
 const getNodeTitleAndIcon = (nodeType: string | undefined) => {
   switch (nodeType) {
     case 'frame':
-      return { title: 'Block', icon: <SquareDashed size={16} /> };
+      return {
+        title: 'Block',
+        icon: <SquareDashed size={ICON_SIZE} strokeWidth={ICON_STROKE_WIDTH} />,
+      };
     case 'image':
-      return { title: 'Image', icon: <ImageIcon size={16} /> };
+      return {
+        title: 'Image',
+        icon: <ImageIcon size={ICON_SIZE} strokeWidth={ICON_STROKE_WIDTH} />,
+      };
     case 'video':
-      return { title: 'Video', icon: <Film size={16} /> };
+      return {
+        title: 'Video',
+        icon: <Film size={ICON_SIZE} strokeWidth={ICON_STROKE_WIDTH} />,
+      };
     case 'web':
-      return { title: 'Website', icon: <Globe size={16} /> };
+      return {
+        title: 'Website',
+        icon: <Globe size={ICON_SIZE} strokeWidth={ICON_STROKE_WIDTH} />,
+      };
     case 'pdf':
-      return { title: 'PDF', icon: <FileText size={16} /> };
+      return {
+        title: 'PDF',
+        icon: <FileText size={ICON_SIZE} strokeWidth={ICON_STROKE_WIDTH} />,
+      };
     case 'note':
-      return { title: 'Note', icon: <StickyNote size={16} /> };
+      return {
+        title: 'Note',
+        icon: <StickyNote size={ICON_SIZE} strokeWidth={ICON_STROKE_WIDTH} />,
+      };
     case 'text':
-      return { title: 'Text', icon: <Type size={16} /> };
+      return {
+        title: 'Text',
+        icon: <Type size={ICON_SIZE} strokeWidth={ICON_STROKE_WIDTH} />,
+      };
     default:
-      return { title: 'Block', icon: <SquareDashed size={16} /> };
+      return {
+        title: 'Block',
+        icon: <SquareDashed size={ICON_SIZE} strokeWidth={ICON_STROKE_WIDTH} />,
+      };
   }
 };
 
@@ -151,8 +178,8 @@ export const DataSourcePanel = ({
       }
       isCollapsed={isCollapsed}
       onToggle={onToggle}
-      iconCollapsed={<PanelLeftOpen />}
-      iconExpanded={<PanelLeftClose />}
+      iconCollapsed={<PanelLeftOpen size={18} />}
+      iconExpanded={<PanelLeftClose size={18} />}
       className="border-border border-r"
     >
       <DataSourceTreeView

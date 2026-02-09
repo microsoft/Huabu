@@ -39,7 +39,9 @@ export const DataSourceTreeView = ({
               className="hover:bg-background flex h-8 w-full items-center gap-2 px-3 text-sm"
               style={{ paddingLeft: 12 + item.depth * 16 }}
             >
-              <span className="text-muted-foreground shrink-0">{icon}</span>
+              <span className="text-muted-foreground flex shrink-0 items-center">
+                {icon}
+              </span>
               <span className="truncate">{name}</span>
             </div>
           );

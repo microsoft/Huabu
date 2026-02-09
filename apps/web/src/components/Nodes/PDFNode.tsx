@@ -110,11 +110,11 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
         onClick={(e) => e.stopPropagation()}
         className="nodrag text-muted-foreground hover:text-theme-500 flex flex-1 cursor-pointer items-center gap-1 overflow-hidden text-xs font-medium transition-colors"
       >
-        <FileText size={12} className={!isExpanded ? 'text-icon' : ''} />
+        <FileText size={14} className={!isExpanded ? 'text-icon' : ''} />
         <span className="max-w-30 truncate">
           {data.label || 'Document.pdf'}
         </span>
-        <ArrowUpRight size={12} strokeWidth={2} />
+        <ArrowUpRight size={14} strokeWidth={2} />
       </a>
 
       <div className="text-muted-foreground flex items-center gap-3">
@@ -127,16 +127,16 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
             openExpanded(id);
           }}
         >
-          <Fullscreen size={12} />
+          <Fullscreen size={14} />
         </GhostButton>
         <GhostButton title="Download" onClick={handleDownload}>
-          <Download size={12} />
+          <Download size={14} />
         </GhostButton>
         <GhostButton
           title={isExpanded ? 'Collapse' : 'Expand'}
           onClick={toggleExpand}
         >
-          {isExpanded ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+          {isExpanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
         </GhostButton>
 
         {isExpanded && (
@@ -149,7 +149,7 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
               onClick={handleZoomOut}
               disabled={scale <= 0.5}
             >
-              <ZoomOut size={12} />
+              <ZoomOut size={14} />
             </GhostButton>
             <span className="text-muted-foreground w-8 text-center font-mono text-[10px]">
               {Math.round(scale * 100)}%
@@ -161,7 +161,7 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
               onClick={handleZoomIn}
               disabled={scale >= 3.0}
             >
-              <ZoomIn size={12} />
+              <ZoomIn size={14} />
             </GhostButton>
           </div>
         )}
