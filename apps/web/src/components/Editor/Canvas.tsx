@@ -5,9 +5,12 @@ import {
   Controls,
   type ReactFlowInstance,
   type Node,
+  Panel,
 } from '@xyflow/react';
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import '@xyflow/react/dist/style.css';
+
+import { NodeToolbar } from '@/components/Editor/CanvasToolbar.tsx';
 
 import { ExpandedNodeOverlay } from './ExpandedNodeOverlay';
 import useStore from '../../store/canvasStore.ts';
@@ -45,6 +48,8 @@ export const Canvas: React.FC = () => {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const rfInstanceRef = useRef<ReactFlowInstance | null>(null);
   const lastDropRef = useRef<{ key: string; at: number } | null>(null);
+
+  const [tool, setTool] = useState<'select' | 'pan'>('select');
 
   // Handle "Cmd/Ctrl + G" to create a frame from selected nodes.
   useEffect(() => {
@@ -176,7 +181,14 @@ export const Canvas: React.FC = () => {
         }}
         fitView
         attributionPosition="bottom-right"
+        panOnDrag={tool === 'pan'}
+        selectionOnDrag={tool === 'select'}
+        panOnScroll={true}
+        zoomOnScroll={true}
       >
+        <Panel position="bottom-center" className="mb-6">
+          <NodeToolbar activeTool={tool} onToolChange={setTool} />
+        </Panel>
         <Background color="#ccc" gap={18} />
 
         <Controls position="bottom-left" />
