@@ -1,15 +1,9 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { createId } from '@sediment/shared';
 
-function getArtifactsDir(): string {
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  // This file lives at: apps/server/src/modules/agent/store/*.ts
-  // We want: apps/server/data/artifacts
-  return path.resolve(here, '../../../../data/artifacts');
-}
+import { getArtifactsDir } from '../../artifact/utils.js';
 
 export async function saveTextArtifact(
   text: string,
