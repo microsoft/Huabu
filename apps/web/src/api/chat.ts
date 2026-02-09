@@ -1,10 +1,9 @@
+import { API_CONFIG } from '../config/api';
+
 import type {
   SendMessageRequest,
   ChatStreamUpdatePayload,
 } from '@sediment/shared';
-
-// In production, this should be an env var
-const API_BASE_URL = 'http://localhost:3000/api';
 
 export interface StreamCallbacks {
   onUpdate: (payload: ChatStreamUpdatePayload) => void;
@@ -19,7 +18,7 @@ export const chatApi = {
     callbacks: StreamCallbacks,
   ): Promise<void> => {
     try {
-      const response = await fetch(`${API_BASE_URL}/chat`, {
+      const response = await fetch(`${API_CONFIG.API_URL}/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

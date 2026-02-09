@@ -25,6 +25,7 @@ import {
   useEffect,
 } from 'react';
 
+import { uploadImage, uploadPdf, uploadVideo } from '../../api/artifact.ts';
 import { GhostButton } from '../Common/GhostButton';
 
 const UrlInputPopover = ({
@@ -173,30 +174,45 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
     [addNodes, screenToFlowPosition],
   );
 
-  const onImageChange = (e: ChangeEvent<HTMLInputElement>) => {
+  const onImageChange = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const url = URL.createObjectURL(file);
-      createNode('image', { src: url });
-      e.target.value = ''; // Reset
+      try {
+        const url = await uploadImage(file);
+        createNode('image', { src: url });
+        e.target.value = ''; // Reset
+      } catch (error) {
+        console.error('Failed to upload image:', error);
+      }
     }
   };
-  const onPdfFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+
+  const onPdfFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const url = URL.createObjectURL(file);
-      createNode('pdf', { src: url });
-      e.target.value = ''; // Reset
+      try {
+        const url = await uploadPdf(file);
+        createNode('pdf', { src: url });
+        e.target.value = ''; // Reset
+      } catch (error) {
+        console.error('Failed to upload PDF:', error);
+      }
     }
   };
-  const onVideoChange = (e: ChangeEvent<HTMLInputElement>) => {
+
+  const onVideoChange = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const url = URL.createObjectURL(file);
-      createNode('video', { src: url });
-      e.target.value = ''; // Reset
+      try {
+        const url = await uploadVideo(file);
+        createNode('video', { src: url });
+        e.target.value = ''; // Reset
+      } catch (error) {
+        console.error('Failed to upload video:', error);
+      }
     }
   };
+
   const handleUrlConfirm = (url: string) => {
     if (!url) return;
     if (activePopup === 'web') {

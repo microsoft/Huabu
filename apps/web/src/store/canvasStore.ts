@@ -12,6 +12,7 @@ import {
 } from '@xyflow/react';
 import { create } from 'zustand';
 
+import { getCanvas, putCanvas } from '../api';
 import {
   autoFrameNodeByOverlap,
   autoUnframeNodeByNonOverlap,
@@ -21,9 +22,17 @@ import {
   type NestableNode,
 } from '../utils/frameHelper';
 
+const CANVAS_ID = 'default-canvas';
+const AUTOSAVE_DEBOUNCE_MS = 1000;
+
 type RFState = {
   nodes: Node[];
   edges: Edge[];
+  canvasId: string;
+  version: number;
+  isLoading: boolean;
+  isSaving: boolean;
+  pendingSave: boolean;
 
   expandedNodeId: string | null;
   openExpanded: (nodeId: string) => void;
@@ -41,127 +50,86 @@ type RFState = {
   frameSelectedNodes: () => void;
   unframe: (frameId: string) => void;
   toggleFrameLock: (frameId: string) => void;
+
+  loadCanvas: () => Promise<void>;
+  saveCanvas: () => Promise<void>;
 };
 
-// === 1. Mock Nodes ===
-export const initialNodes: Node[] = [
-  // --- 1. Text Node  ---
-  {
-    id: createId('node'),
-    type: 'text',
-    position: { x: 500, y: -400 },
-    data: {
-      label: 'Sensemaking Research',
-      content:
-        'This board contains the preliminary research for the HCI project.\nFocus on the relationship between data foraging and schematizing.', // 正文
-    },
-    style: { width: 300, height: 160 },
-  },
+let saveTimeout: ReturnType<typeof setTimeout> | null = null;
 
-  // --- 2. Note Node  ---
-  {
-    id: createId('node'),
-    type: 'note',
-    position: { x: 1000, y: -200 },
-    data: {
-      content:
-        '⚠️ TODO:\n1. Verify the PDF citations.\n2. Update the video link.\n3. Send draft to supervisor.',
-    },
-    style: { width: 220, height: 220 },
-  },
-
-  // --- 3. Image Node  ---
-  {
-    id: createId('node'),
-    type: 'image',
-    position: { x: 1000, y: 0 },
-    data: {
-      src: 'https://placehold.co/600x400/png',
-      label: 'Fig 1. The Data/Frame Theory of Sensemaking',
-    },
-  },
-
-  // --- 4. Frame Node  ---
-  {
-    id: createId('node'),
-    type: 'frame',
-    position: { x: 500, y: 400 },
-    data: {
-      label: 'Reference Materials',
-    },
-    style: { width: 460, height: 240 },
-    zIndex: -1,
-  },
-
-  // --- 5. Web Node  ---
-  {
-    id: createId('node'),
-    type: 'web',
-    // parentId: 'frame-1',
-    position: { x: 0, y: 60 },
-    data: {
-      src: 'https://en.wikipedia.org/wiki/Sensemaking',
-      label: 'Wikipedia: Sensemaking',
-    },
-    style: { width: 460, height: 300 },
-  },
-
-  // --- 6. PDF Node ---
-  {
-    id: createId('node'),
-    type: 'pdf',
-    // parentId: 'frame-1',
-    position: { x: 500, y: -140 },
-    // extent: 'parent',
-    data: {
-      src: 'https://pdfobject.com/pdf/sample.pdf',
-      label: 'Klein_1998_Data_Frame_Theory.pdf',
-    },
-    style: { width: 460, height: 500 },
-  },
-
-  // --- 7. Video Node  ---
-  {
-    id: createId('node'),
-    type: 'video',
-    position: { x: 0, y: 400 },
-    data: {
-      src: 'https://www.w3schools.com/html/mov_bbb.mp4',
-      source: 'External Resource',
-    },
-  },
-];
-
-// === 2. Mock Edges  ===
-export const initialEdges: Edge[] = [
-  {
-    id: createId('edge'),
-    source: 'node-text-1',
-    target: 'node-image-1',
-    label: 'illustrates',
-  },
-  {
-    id: createId('edge'),
-    source: 'node-text-1',
-    target: 'frame-1',
-    animated: true,
-    label: 'references',
-  },
-  {
-    id: createId('edge'),
-    source: 'node-note-1',
-    target: 'node-image-1',
-    style: { stroke: '#f59e0b' },
-  },
-];
+const scheduleAutoSave = (saveCanvas: () => Promise<void>) => {
+  if (saveTimeout) clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(() => {
+    saveCanvas();
+  }, AUTOSAVE_DEBOUNCE_MS);
+};
 
 const useCanvasStore = create<RFState>((set, get) => ({
-  nodes: initialNodes,
-  edges: initialEdges,
+  nodes: [],
+  edges: [],
+  canvasId: CANVAS_ID,
+  version: 0,
+  isLoading: false,
+  isSaving: false,
+  pendingSave: false,
 
   expandedNodeId: null,
   openExpanded: (nodeId) => set({ expandedNodeId: nodeId }),
   closeExpanded: () => set({ expandedNodeId: null }),
+
+  loadCanvas: async () => {
+    set({ isLoading: true });
+    try {
+      const { canvasId } = get();
+      const response = await getCanvas(canvasId);
+      if (!response) {
+        console.warn('Canvas not found, using empty state');
+        set({ isLoading: false });
+        return;
+      }
+
+      const state = response.state as { nodes?: Node[]; edges?: Edge[] };
+      set({
+        nodes: state.nodes ?? [],
+        edges: state.edges ?? [],
+        version: response.version,
+        isLoading: false,
+      });
+    } catch (error) {
+      console.error('Failed to load canvas:', error);
+      set({ isLoading: false });
+    }
+  },
+
+  saveCanvas: async () => {
+    const { isSaving } = get();
+    if (isSaving) {
+      set({ pendingSave: true });
+      return;
+    }
+
+    set({ isSaving: true });
+    try {
+      const { nodes, edges, version, canvasId } = get();
+      const response = await putCanvas(canvasId, {
+        version,
+        state: { nodes, edges },
+      });
+      set({ version: response.version });
+    } catch (error) {
+      console.error('Failed to save canvas:', error);
+      // TODO: Handle version conflict (409) - reload and prompt user
+    } finally {
+      set({ isSaving: false });
+
+      const { pendingSave } = get();
+      if (pendingSave) {
+        set({ pendingSave: false });
+        // Fire-and-forget: re-save the latest state after the in-flight save completes.
+        void get().saveCanvas();
+      }
+    }
+  },
 
   onNodesChange: (changes) => {
     const prevNodes = get().nodes as NestableNode[];
@@ -182,23 +150,33 @@ const useCanvasStore = create<RFState>((set, get) => ({
     }
 
     set({ nodes: result });
+
+    scheduleAutoSave(get().saveCanvas);
   },
 
   onEdgesChange: (changes) => {
     set({
       edges: applyEdgeChanges(changes, get().edges),
     });
+
+    scheduleAutoSave(get().saveCanvas);
   },
 
   onConnect: (connection: Connection) => {
     set({
       edges: addEdge(connection, get().edges),
     });
+
+    scheduleAutoSave(get().saveCanvas);
   },
 
   setNodes: (nodes) => set({ nodes }),
   setEdges: (edges) => set({ edges }),
-  addNode: (node) => set({ nodes: [...get().nodes, node] }),
+  addNode: (node) => {
+    set({ nodes: [...get().nodes, node] });
+
+    scheduleAutoSave(get().saveCanvas);
+  },
 
   updateNodeData: (nodeId, patch) => {
     if (!nodeId) return;
@@ -214,6 +192,8 @@ const useCanvasStore = create<RFState>((set, get) => ({
         };
       }),
     });
+
+    scheduleAutoSave(get().saveCanvas);
   },
 
   frameSelectedNodes: () => {
@@ -228,18 +208,24 @@ const useCanvasStore = create<RFState>((set, get) => ({
     });
 
     set({ nodes: result.nodes });
+
+    scheduleAutoSave(get().saveCanvas);
   },
 
   unframe: (frameId) => {
     const { nodes, edges } = get();
     const result = unframe(nodes as NestableNode[], edges, frameId);
     set({ nodes: result.nodes, edges: result.edges });
+
+    scheduleAutoSave(get().saveCanvas);
   },
 
   toggleFrameLock: (frameId) => {
     const { nodes } = get();
 
     set({ nodes: toggleFrameLock(nodes as NestableNode[], frameId) });
+
+    scheduleAutoSave(get().saveCanvas);
   },
 }));
 
