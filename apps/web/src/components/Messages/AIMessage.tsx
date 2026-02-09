@@ -2,7 +2,7 @@ import { createId } from '@sediment/shared';
 import { Copy, NotepadText } from 'lucide-react';
 
 import { BlockNoteCard } from './BlockNoteCard';
-import useStore from '../../store/canvasStore';
+import useCanvasStore from '../../store/canvasStore';
 import { copyToClipboard } from '../../utils/clipboard';
 import { GhostButton } from '../Common/GhostButton';
 
@@ -12,7 +12,7 @@ interface AIMessageProps {
 }
 
 export const AIMessage = ({ content, isStreaming }: AIMessageProps) => {
-  const addNode = useStore((state) => state.addNode);
+  const addNode = useCanvasStore((state) => state.addNode);
 
   return (
     <div className="flex justify-start">

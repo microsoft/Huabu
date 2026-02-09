@@ -1,19 +1,19 @@
 import { type Node, type NodeProps } from '@xyflow/react';
 import clsx from 'clsx';
-import { Layers, Ungroup, Lock, Unlock } from 'lucide-react';
+import { Ungroup, Lock, Unlock } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { NodeWrapper, type NodeDataProps } from './NodeWrapper.tsx';
-import useStore from '../../store/canvasStore.ts';
+import useCanvasStore from '../../store/canvasStore.ts';
 import { GhostButton } from '../Common/GhostButton.tsx';
 
 type FrameNodeData = NodeDataProps & {};
 export type FrameNodeType = Node<FrameNodeData, 'frame'>;
 
 export const FrameNode = ({ id, data, selected }: NodeProps<FrameNodeType>) => {
-  const unframe = useStore((state) => state.unframe);
-  const toggleFrameLock = useStore((state) => state.toggleFrameLock);
-  const updateNodeData = useStore((state) => state.updateNodeData);
+  const unframe = useCanvasStore((state) => state.unframe);
+  const toggleFrameLock = useCanvasStore((state) => state.toggleFrameLock);
+  const updateNodeData = useCanvasStore((state) => state.updateNodeData);
 
   const frameBorderClassName = selected
     ? "ring-0 hover:ring-0 before:pointer-events-none before:absolute before:inset-0 before:rounded before:content-[''] before:border before:border-theme-500"
@@ -46,95 +46,137 @@ export const FrameNode = ({ id, data, selected }: NodeProps<FrameNodeType>) => {
     setIsEditingLabel(false);
   };
 
-  const FrameToolbar = (
-    <div className="flex w-full items-center justify-between gap-4">
-      {/* Label */}
-      <div className="text-muted-foreground flex flex-1 items-center gap-2 text-xs font-medium">
-        <Layers size={14} />
-        <span className="truncate">{label}</span>
-      </div>
-
-      {/* Tools */}
-      <div className="text-muted-foreground flex items-center gap-2">
-        <div className="bg-border h-3 w-px" />
-
-        <GhostButton
-          title="Unframe"
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            unframe(id);
-          }}
-        >
-          <Ungroup size={14} />
-        </GhostButton>
-        {/* Lock auto-frame */}
-        <GhostButton
-          title={data.locked ? 'Unlock' : 'Lock'}
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            toggleFrameLock(id);
-          }}
-        >
-          {data.locked ? <Lock size={14} /> : <Unlock size={14} />}
-        </GhostButton>
-      </div>
-    </div>
-  );
+  // const FrameToolbar = (
+  //   <div className="flex w-full items-center justify-between gap-4">
+  //     {/* Label */}
+  //     <div className="text-muted-foreground flex flex-1 items-center gap-2 text-xs font-medium">
+  //       <Layers size={14} />
+  //       <span className="truncate">{label}</span>
+  //     </div>
+  //
+  //     {/* Tools */}
+  //     <div className="text-muted-foreground flex items-center gap-2">
+  //       <div className="bg-border h-3 w-px" />
+  //
+  //       <GhostButton
+  //         title="Unframe"
+  //         onClick={(e) => {
+  //           e.preventDefault();
+  //           e.stopPropagation();
+  //           unframe(id);
+  //         }}
+  //       >
+  //         <Ungroup size={14} />
+  //       </GhostButton>
+  //       {/* Lock auto-frame */}
+  //       <GhostButton
+  //         title={data.locked ? 'Unlock' : 'Lock'}
+  //         onClick={(e) => {
+  //           e.preventDefault();
+  //           e.stopPropagation();
+  //           toggleFrameLock(id);
+  //         }}
+  //       >
+  //         {data.locked ? <Lock size={14} /> : <Unlock size={14} />}
+  //       </GhostButton>
+  //     </div>
+  //   </div>
+  // );
 
   return (
     <NodeWrapper
       id={id}
       data={data}
+      type={'frame'}
       selected={selected && !isEditingLabel}
-      toolbar={FrameToolbar}
+      // toolbar={FrameToolbar}
       keepAspectRatio={false}
       allowOverflow
       className={clsx(frameBorderClassName, 'bg-white')}
     >
-      <div className="relative h-full w-full p-2">
-        <div className="absolute -top-6 left-2 z-10">
-          <input
-            ref={labelInputRef}
-            className={
-              isEditingLabel
-                ? 'border-border text-foreground nodrag h-6 border bg-white px-2 text-xs font-medium outline-none'
-                : 'text-muted-foreground hover:text-foreground nodrag h-6 rounded border border-transparent bg-transparent px-1 text-xs font-medium outline-none'
-            }
-            value={draftLabel}
-            readOnly={!isEditingLabel}
-            title="Edit frame name"
-            onChange={(e) => {
-              if (!isEditingLabel) return;
-              setDraftLabel(e.target.value);
-            }}
-            onPointerDown={(e) => {
-              if (!isEditingLabel) return;
-              e.stopPropagation();
-            }}
-            onClick={() => {
-              if (!isEditingLabel) setIsEditingLabel(true);
-            }}
-            onKeyDown={(e) => {
-              e.stopPropagation();
-              if (!isEditingLabel) return;
+      <div className="relative h-full p-2">
+        <div className="absolute -top-6 left-0 z-10 flex items-center gap-1">
+          <div className="relative inline-grid items-center">
+            <span
+              className={clsx(
+                'invisible col-start-1 row-start-1 whitespace-pre',
+                'text-xs font-medium',
+                isEditingLabel
+                  ? 'border border-transparent px-2'
+                  : 'border border-transparent px-1',
+              )}
+            >
+              {draftLabel || 'placeholder'}
+            </span>
 
-              if (e.key === 'Enter') {
-                e.preventDefault();
+            <input
+              ref={labelInputRef}
+              className={clsx(
+                'col-start-1 row-start-1 min-w-[1px]',
+                isEditingLabel
+                  ? 'border-border text-foreground nodrag border-0 bg-transparent px-2 text-xs font-medium outline-none'
+                  : 'text-muted-foreground hover:text-foreground nodrag rounded border border-transparent bg-transparent px-1 text-xs font-medium outline-none',
+              )}
+              value={draftLabel}
+              readOnly={!isEditingLabel}
+              title="Edit frame name"
+              onChange={(e) => {
+                if (!isEditingLabel) return;
+                setDraftLabel(e.target.value);
+              }}
+              onPointerDown={(e) => {
+                if (!isEditingLabel) return;
+                e.stopPropagation();
+              }}
+              onClick={() => {
+                if (!isEditingLabel) setIsEditingLabel(true);
+              }}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (!isEditingLabel) return;
+
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  commitLabel();
+                }
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setDraftLabel(label);
+                  setIsEditingLabel(false);
+                }
+              }}
+              onBlur={() => {
+                if (!isEditingLabel) return;
                 commitLabel();
-              }
-              if (e.key === 'Escape') {
+              }}
+            />
+          </div>
+
+          <div className="text-muted-foreground flex items-center gap-1">
+            <div className="bg-border h-3 w-px" />
+            <GhostButton
+              title={data.locked ? 'Unlock' : 'Lock'}
+              onClick={(e) => {
                 e.preventDefault();
-                setDraftLabel(label);
-                setIsEditingLabel(false);
-              }
-            }}
-            onBlur={() => {
-              if (!isEditingLabel) return;
-              commitLabel();
-            }}
-          />
+                e.stopPropagation();
+                toggleFrameLock(id);
+              }}
+            >
+              {data.locked ? <Lock size={14} /> : <Unlock size={14} />}
+            </GhostButton>
+
+            <GhostButton
+              title="Unframe"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                unframe(id);
+              }}
+            >
+              <Ungroup size={14} />
+            </GhostButton>
+            {/* Lock auto-frame */}
+          </div>
         </div>
       </div>
     </NodeWrapper>

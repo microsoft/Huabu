@@ -1,7 +1,7 @@
 import { type Node, type NodeProps, useReactFlow } from '@xyflow/react';
 import { clsx } from 'clsx';
-import { Bold, Italic, Type } from 'lucide-react';
-import { useCallback, useState, useRef } from 'react';
+import { Bold, Italic, Type, Underline, Strikethrough } from 'lucide-react';
+import { useCallback, useState, useRef, useEffect } from 'react';
 
 import { GhostButton } from '@/components/Common/GhostButton.tsx';
 import { NodeBgColorSelector } from '@/components/Common/NodeBgColorSelector.tsx';
@@ -25,8 +25,6 @@ const FONT_FAMILIES = [
   },
   { name: 'Hand', value: '"Comic Sans MS", "Chalkboard SE", sans-serif' },
 ];
-
-const FONT_SIZES = [12, 14, 16, 20, 24, 32, 48, 64];
 
 type TextNodeData = NodeDataProps & {
   content?: string;
@@ -57,6 +55,22 @@ export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
   const fontSize = style.fontSize || 16;
   const fontFamily = style.fontFamily || FONT_FAMILIES[0].value;
   const textColor = style.textColor;
+  const textDecoration = style.textDecoration || '';
+
+  const [inputFontSize, setInputFontSize] = useState<string | number>(fontSize);
+  useEffect(() => {
+    setInputFontSize(fontSize);
+  }, [fontSize]);
+
+  const toggleDecoration = (value: string) => {
+    let current = textDecoration.split(' ').filter(Boolean);
+    if (current.includes(value)) {
+      current = current.filter((v) => v !== value);
+    } else {
+      current.push(value);
+    }
+    updateStyle({ textDecoration: current.join(' ') });
+  };
 
   const handleDoubleClick = () => {
     setIsEditing(true);
@@ -66,20 +80,22 @@ export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
   const handleBlur = () => setIsEditing(false);
 
   const TextToolbar = (
-    <div className="flex w-full items-center gap-2">
+    <div className="flex w-full items-center gap-1">
+      <div className="text-muted-foreground flex flex-1 items-center text-xs font-medium">
+        <Type size={14} />
+      </div>
+
       <div
-        className="hover:text-main text-muted-foreground relative flex items-center justify-center"
+        className="hover:bg-muted text-muted-foreground border-border flex items-center rounded border bg-transparent p-0.5 transition-colors"
         title="Font Family"
       >
-        <Type size={14} />
-
         <select
-          className="absolute inset-0 cursor-pointer opacity-0"
+          className="h-full w-16 cursor-pointer bg-transparent text-xs outline-none"
           value={fontFamily}
           onChange={(e) => updateStyle({ fontFamily: e.target.value })}
         >
           {FONT_FAMILIES.map((f) => (
-            <option key={f.name} value={f.value}>
+            <option key={f.name} value={f.value} className="text-black">
               {f.name}
             </option>
           ))}
@@ -87,30 +103,44 @@ export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
       </div>
 
       <div
-        className="hover:text-main text-muted-foreground relative flex w-8 items-center justify-center"
+        className="hover:bg-muted text-muted-foreground border-border flex items-center justify-center rounded border bg-transparent p-0.5 transition-colors"
         title="Font Size"
       >
-        <GhostButton
-          className="border-border hover:bg-muted flex h-6 w-6 items-center justify-center rounded-md border p-0 transition-colors"
-          onClick={(e) => {
-            e.stopPropagation();
+        <input
+          type="number"
+          className="w-6 [appearance:textfield] bg-transparent text-center text-xs font-medium outline-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          value={inputFontSize}
+          min={8}
+          max={200}
+          onChange={(e) => {
+            const valStr = e.target.value;
+            setInputFontSize(valStr);
+            const val = Number(valStr);
+            if (valStr !== '' && !isNaN(val) && val >= 0) {
+              updateStyle({ fontSize: val });
+            }
           }}
-          title="Change Font Size"
-        >
-          <span className="text-xs font-medium">{fontSize}</span>
-        </GhostButton>
-
-        <select
-          className="absolute inset-0 cursor-pointer opacity-0"
-          value={fontSize}
-          onChange={(e) => updateStyle({ fontSize: Number(e.target.value) })}
-        >
-          {FONT_SIZES.map((size) => (
-            <option key={size} value={size}>
-              {size}px
-            </option>
-          ))}
-        </select>
+          onBlur={() => {
+            if (inputFontSize === '' || Number(inputFontSize) === 0) {
+              setInputFontSize(fontSize);
+            }
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowUp') {
+              e.preventDefault();
+              const newVal = (Number(inputFontSize) || 16) + 1;
+              updateStyle({ fontSize: newVal });
+              setInputFontSize(newVal);
+            }
+            if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              const newVal = Math.max(1, (Number(inputFontSize) || 16) - 1);
+              updateStyle({ fontSize: newVal });
+              setInputFontSize(newVal);
+            }
+          }}
+        />
+        <span className="px-0.5 text-[8px] opacity-50 select-none">px</span>
       </div>
 
       <div className="bg-border mx-1 h-3 w-px" />
@@ -147,6 +177,30 @@ export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
         <Italic size={14} />
       </GhostButton>
 
+      <GhostButton
+        onClick={() => toggleDecoration('underline')}
+        className={clsx(
+          'p-1',
+          textDecoration.includes('underline')
+            ? 'text-theme-500 bg-theme-50 enabled:hover:bg-theme-50'
+            : 'text-muted-foreground hover:bg-background',
+        )}
+      >
+        <Underline size={14} />
+      </GhostButton>
+
+      <GhostButton
+        onClick={() => toggleDecoration('line-through')}
+        className={clsx(
+          'p-1',
+          textDecoration.includes('line-through')
+            ? 'text-theme-500 bg-theme-50 enabled:hover:bg-theme-50'
+            : 'text-muted-foreground hover:bg-background',
+        )}
+      >
+        <Strikethrough size={14} />
+      </GhostButton>
+
       <div className="bg-border mx-1 h-3 w-px" />
 
       <NodeTextColorSelector
@@ -166,6 +220,7 @@ export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
     <NodeWrapper
       id={id}
       data={data}
+      type={'text'}
       selected={selected}
       toolbar={TextToolbar}
       keepAspectRatio={false}
@@ -181,6 +236,7 @@ export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
           fontFamily: fontFamily,
           fontSize: `${fontSize}px`,
           lineHeight: 1.5,
+          textDecoration: textDecoration,
         }}
       >
         <textarea

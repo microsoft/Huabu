@@ -1,5 +1,7 @@
 import { type Node, type NodeProps } from '@xyflow/react';
-import { ArrowUpRight, Shrink, SlidersHorizontal } from 'lucide-react';
+import { ArrowUpRight, Fullscreen, ImageIcon } from 'lucide-react';
+
+import useCanvasStore from '@/store/canvasStore.ts';
 
 import { NodeWrapper, type NodeDataProps } from './NodeWrapper.tsx';
 import { GhostButton } from '../Common/GhostButton.tsx';
@@ -8,8 +10,10 @@ type ImageNodeData = NodeDataProps & {};
 export type ImageNodeType = Node<ImageNodeData, 'image'>;
 
 export const ImageNode = ({ id, data, selected }: NodeProps<ImageNodeType>) => {
+  const openExpanded = useCanvasStore((s) => s.openExpanded);
+
   const ImageToolbar = (
-    <div className="flex w-full items-center justify-between gap-4">
+    <div className="flex w-full items-center justify-between gap-2">
       {/*source*/}
       <a
         href={data?.src}
@@ -18,23 +22,32 @@ export const ImageNode = ({ id, data, selected }: NodeProps<ImageNodeType>) => {
         onClick={(e) => e.stopPropagation()}
         className="nodrag text-muted-foreground hover:text-theme-500 flex flex-1 cursor-pointer items-center gap-1 overflow-hidden text-xs font-medium transition-colors"
       >
-        <span className="truncate">
-          Source: {data?.src || 'Unknown Source'}
-        </span>
+        <ImageIcon size={14} />
+        <span className="max-w-24 truncate">{data?.src || 'Image'}</span>
         <ArrowUpRight size={14} strokeWidth={2} />
       </a>
 
       {/*tools*/}
-      <div className="text-muted-foreground flex items-center gap-2">
+      <div className="text-muted-foreground flex items-center gap-1">
         <div className="bg-border h-3 w-px" />
 
-        <GhostButton aria-label="Shrink">
-          <Shrink size={14} />
+        <GhostButton
+          title="Open Large View"
+          onClick={(e) => {
+            e.stopPropagation();
+            openExpanded(id);
+          }}
+        >
+          <Fullscreen size={14} />
         </GhostButton>
 
-        <GhostButton aria-label="Adjust">
-          <SlidersHorizontal size={14} />
-        </GhostButton>
+        {/*<GhostButton aria-label="Shrink">*/}
+        {/*  <Shrink size={14} />*/}
+        {/*</GhostButton>*/}
+
+        {/*<GhostButton aria-label="Adjust">*/}
+        {/*  <SlidersHorizontal size={14} />*/}
+        {/*</GhostButton>*/}
       </div>
     </div>
   );
@@ -43,9 +56,14 @@ export const ImageNode = ({ id, data, selected }: NodeProps<ImageNodeType>) => {
     <NodeWrapper
       id={id}
       data={data}
+      type={'image'}
       selected={selected}
       toolbar={ImageToolbar}
       keepAspectRatio={true}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        openExpanded(id);
+      }}
     >
       <div className="flex h-full flex-col">
         <div className="relative h-full w-full overflow-hidden">

@@ -13,7 +13,7 @@ import '@xyflow/react/dist/style.css';
 import { NodeToolbar } from '@/components/Editor/CanvasToolbar.tsx';
 
 import { ExpandedNodeOverlay } from './ExpandedNodeOverlay';
-import useStore from '../../store/canvasStore.ts';
+import useCanvasStore from '../../store/canvasStore.ts';
 import {
   canReadSedimentPayload,
   getSedimentPayload,
@@ -37,13 +37,15 @@ const nodeTypes = {
 } as const;
 
 export const Canvas: React.FC = () => {
-  const nodes = useStore((state) => state.nodes);
-  const edges = useStore((state) => state.edges);
-  const onNodesChange = useStore((state) => state.onNodesChange);
-  const onEdgesChange = useStore((state) => state.onEdgesChange);
-  const onConnect = useStore((state) => state.onConnect);
-  const addNode = useStore((state) => state.addNode);
-  const frameSelectedNodes = useStore((state) => state.frameSelectedNodes);
+  const nodes = useCanvasStore((state) => state.nodes);
+  const edges = useCanvasStore((state) => state.edges);
+  const onNodesChange = useCanvasStore((state) => state.onNodesChange);
+  const onEdgesChange = useCanvasStore((state) => state.onEdgesChange);
+  const onConnect = useCanvasStore((state) => state.onConnect);
+  const addNode = useCanvasStore((state) => state.addNode);
+  const frameSelectedNodes = useCanvasStore(
+    (state) => state.frameSelectedNodes,
+  );
 
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const rfInstanceRef = useRef<ReactFlowInstance | null>(null);
@@ -185,6 +187,9 @@ export const Canvas: React.FC = () => {
         selectionOnDrag={tool === 'select'}
         panOnScroll={true}
         zoomOnScroll={true}
+        minZoom={0.1}
+        maxZoom={5}
+        onlyRenderVisibleElements
       >
         <Panel position="bottom-center" className="mb-6">
           <NodeToolbar activeTool={tool} onToolChange={setTool} />

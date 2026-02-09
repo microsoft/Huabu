@@ -19,7 +19,7 @@ import {
   type DataSourceNodeLike,
   type DataSourceTreeItem,
 } from './DataSourceTreeView';
-import useStore from '../../../store/canvasStore';
+import useCanvasStore from '../../../store/canvasStore';
 import { GhostButton } from '../../Common/GhostButton';
 import { SidebarPanel } from '../SidebarPanel';
 
@@ -118,7 +118,9 @@ export const DataSourcePanel = ({
   isCollapsed,
   onToggle,
 }: DataSourcePanelProps) => {
-  const nodes = useStore((s) => s.nodes) as unknown as DataSourceNodeLike[];
+  const nodes = useCanvasStore(
+    (s) => s.nodes,
+  ) as unknown as DataSourceNodeLike[];
   const [tab, setTab] = useState<LayerTab>('layers');
 
   const layerItems = useMemo(() => buildTreeItems(nodes), [nodes]);

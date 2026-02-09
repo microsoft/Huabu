@@ -33,7 +33,7 @@ const UrlInputPopover = ({
   onCancel,
   onUploadClick,
 }: {
-  type: 'pdf' | 'web' | 'video';
+  type: 'pdf' | 'web' | 'video' | 'image';
   onConfirm: (url: string) => void;
   onCancel: () => void;
   onUploadClick?: () => void;
@@ -60,13 +60,7 @@ const UrlInputPopover = ({
       <input
         ref={inputRef}
         className="min-w-0 flex-1 border-none bg-transparent px-2 text-xs text-gray-700 placeholder:text-gray-400 focus:ring-0 focus:outline-none"
-        placeholder={
-          type === 'web'
-            ? 'https://example.com'
-            : type === 'pdf'
-              ? 'PDF URL...'
-              : 'Video URL...'
-        }
+        placeholder={type === 'web' ? 'https://example.com' : 'URL...'}
         value={url}
         onChange={(e) => setUrl(e.target.value)}
         onKeyDown={handleKeyDown}
@@ -118,7 +112,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
   const videoInputRef = useRef<HTMLInputElement>(null);
 
   const [activePopup, setActivePopup] = useState<
-    'pdf' | 'web' | 'video' | null
+    'image' | 'pdf' | 'web' | 'video' | null
   >(null);
 
   const createNode = useCallback(
@@ -154,7 +148,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           newNode.style = { width: 400, height: 500 };
           break;
         case 'video':
-          newNode.data = { src: payload?.src, title: 'New Video' };
+          newNode.data = { src: payload?.src, title: 'Video' };
           break;
         case 'web':
           newNode.data = { src: payload?.src || '', title: 'Web' };
@@ -179,9 +173,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
     [addNodes, screenToFlowPosition],
   );
 
-  // --- Event Handlers ---
-  const handleImageClick = () => imageInputRef.current?.click();
-  const onImageFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+  const onImageChange = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const url = URL.createObjectURL(file);
@@ -189,7 +181,6 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
       e.target.value = ''; // Reset
     }
   };
-
   const onPdfFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -215,6 +206,8 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
       createNode('pdf', { src: url });
     } else if (activePopup === 'video') {
       createNode('video', { src: url });
+    } else if (activePopup === 'image') {
+      createNode('image', { src: url });
     }
   };
 
@@ -226,7 +219,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
         ref={imageInputRef}
         className="hidden"
         accept="image/*"
-        onChange={onImageFileChange}
+        onChange={onImageChange}
       />
       <input
         type="file"
@@ -285,9 +278,27 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           <Type size={18} />
         </GhostButton>
 
-        <GhostButton title="Image" onClick={handleImageClick}>
-          <ImageIcon size={18} />
-        </GhostButton>
+        <div className="relative">
+          <GhostButton
+            title="Image"
+            className={clsx(
+              activePopup === 'image' && 'text-theme-500 bg-background',
+            )}
+            onClick={() =>
+              setActivePopup(activePopup === 'image' ? null : 'image')
+            }
+          >
+            <ImageIcon size={18} />
+          </GhostButton>
+          {activePopup === 'image' && (
+            <UrlInputPopover
+              type="image"
+              onConfirm={handleUrlConfirm}
+              onCancel={() => setActivePopup(null)}
+              onUploadClick={() => imageInputRef.current?.click()}
+            />
+          )}
+        </div>
 
         <div className="relative">
           <GhostButton

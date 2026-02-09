@@ -3,6 +3,8 @@ import { clsx } from 'clsx';
 import { GripVertical } from 'lucide-react';
 import React, { memo } from 'react';
 
+import useCanvasStore from '@/store/canvasStore.ts';
+
 export type NodeStyle = {
   backgroundColor?: string;
   textColor?: string;
@@ -10,6 +12,8 @@ export type NodeStyle = {
   fontFamily?: string;
   fontWeight?: string;
   fontStyle?: string;
+  textDecoration?: string; // 'underline' | 'line-through' | both
+  align?: 'top-left' | 'center';
 };
 
 export type NodeDataProps = {
@@ -27,6 +31,7 @@ export type NodeDataProps = {
 interface NodeWrapperProps {
   id: string;
   data: NodeDataProps;
+  type: string;
   selected?: boolean;
 
   allowOverflow?: boolean;
@@ -45,6 +50,7 @@ interface NodeWrapperProps {
 
 export const NodeWrapper = memo(
   ({
+    type,
     data,
     selected,
     children,
@@ -59,23 +65,35 @@ export const NodeWrapper = memo(
 
     onDoubleClick,
   }: NodeWrapperProps) => {
+    const selectedCount = useCanvasStore(
+      (state) => state.nodes.filter((node) => node.selected).length,
+    );
+
     return (
       <>
         <NodeResizer
           color="#e6e6e6"
           isVisible={selected && resizable}
-          minWidth={minWidth}
-          minHeight={minHeight}
+          minWidth={
+            type === 'pdf' || type === 'note' || type === 'web' ? 120 : minWidth
+          }
+          minHeight={
+            type === 'pdf' || type === 'note' || type === 'web'
+              ? 120
+              : minHeight
+          }
           keepAspectRatio={keepAspectRatio}
         />
-        <NodeToolbar
-          isVisible={selected}
-          position={Position.Top}
-          offset={12}
-          className="border-border shadow-bottom flex h-8 items-center gap-3 rounded-md border bg-white px-2 py-1"
-        >
-          {toolbar}
-        </NodeToolbar>
+        {type !== 'frame' && (
+          <NodeToolbar
+            isVisible={selected && selectedCount === 1}
+            position={Position.Top}
+            offset={12}
+            className="border-border shadow-bottom flex h-8 items-center gap-3 rounded-md border bg-white px-2 py-1"
+          >
+            {toolbar}
+          </NodeToolbar>
+        )}
 
         <div
           className={clsx(
