@@ -1,25 +1,45 @@
 import { type Node, type NodeProps } from '@xyflow/react';
-import { Globe, RotateCw, ExternalLink, Fullscreen } from 'lucide-react';
+import {
+  Globe,
+  RotateCw,
+  ExternalLink,
+  Fullscreen,
+  ArrowUpRight,
+} from 'lucide-react';
+import { useState, useCallback } from 'react';
 
 import { NodeWrapper, type NodeDataProps } from './NodeWrapper.tsx';
-import useStore from '../../store/canvasStore.ts';
+import useCanvasStore from '../../store/canvasStore.ts';
 import { GhostButton } from '../Common/GhostButton.tsx';
 
 type WebNodeData = NodeDataProps & {};
 export type WebNodeType = Node<WebNodeData, 'web'>;
 
 export const WebNode = ({ id, data, selected }: NodeProps<WebNodeType>) => {
-  const openExpanded = useStore((s) => s.openExpanded);
-  const WebToolbar = (
-    <div className="flex w-full items-center justify-between gap-4">
-      {/* URL Display */}
-      <div className="text-muted-foreground flex flex-1 items-center gap-1 overflow-hidden text-xs font-medium">
-        <Globe size={14} />
-        <span className="truncate">{data?.src || 'No URL'}</span>
-      </div>
+  const openExpanded = useCanvasStore((s) => s.openExpanded);
 
-      {/* Tools */}
-      <div className="text-muted-foreground flex items-center gap-2">
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const handleRefresh = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setRefreshKey((prev) => prev + 1);
+  }, []);
+
+  const WebToolbar = (
+    <div className="flex w-full items-center justify-between gap-2">
+      <a
+        href={data?.src}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={(e) => e.stopPropagation()}
+        className="nodrag text-muted-foreground hover:text-theme-500 flex flex-1 cursor-pointer items-center gap-1 overflow-hidden text-xs font-medium transition-colors"
+      >
+        <Globe size={14} />
+        <span className="max-w-24 truncate">{data?.src || 'Website'}</span>
+        <ArrowUpRight size={14} strokeWidth={2} />
+      </a>
+
+      <div className="text-muted-foreground flex items-center gap-1">
         <div className="bg-border h-3 w-px" />
 
         <GhostButton
@@ -33,7 +53,11 @@ export const WebNode = ({ id, data, selected }: NodeProps<WebNodeType>) => {
           <Fullscreen size={14} />
         </GhostButton>
 
-        <GhostButton aria-label="Refresh" title="Refresh">
+        <GhostButton
+          aria-label="Refresh"
+          title="Refresh"
+          onClick={handleRefresh}
+        >
           <RotateCw size={14} />
         </GhostButton>
 
@@ -56,6 +80,7 @@ export const WebNode = ({ id, data, selected }: NodeProps<WebNodeType>) => {
     <NodeWrapper
       id={id}
       data={data}
+      type={'web'}
       selected={selected}
       toolbar={WebToolbar}
       keepAspectRatio={false}
@@ -67,12 +92,18 @@ export const WebNode = ({ id, data, selected }: NodeProps<WebNodeType>) => {
       <div className="flex h-full flex-col">
         <div className="relative h-full w-full overflow-hidden rounded bg-white">
           {data?.src ? (
-            <iframe
-              src={data.src}
-              className="nodrag h-full w-full"
-              title="Web Preview"
-              sandbox="allow-scripts allow-same-origin"
-            />
+            <>
+              <iframe
+                key={refreshKey}
+                src={data.src}
+                className="h-full w-full border-0"
+                title="Web Preview"
+                sandbox="allow-scripts allow-same-origin allow-forms"
+                loading="lazy"
+              />
+
+              <div className="absolute inset-0 z-10 bg-transparent" />
+            </>
           ) : (
             <div className="text-muted-foreground flex h-full w-full items-center justify-center text-sm">
               Invalid URL

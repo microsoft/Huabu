@@ -1,12 +1,20 @@
 import { useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/shadcn';
 import { type Node, useReactFlow } from '@xyflow/react';
-import { Expand, FileText, Globe, StickyNote, X } from 'lucide-react';
+import {
+  Expand,
+  FileText,
+  Globe,
+  ImageIcon,
+  PlayCircle,
+  StickyNote,
+  X,
+} from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Document, Page, pdfjs } from 'react-pdf';
 
-import useStore from '../../store/canvasStore.ts';
+import useCanvasStore from '../../store/canvasStore.ts';
 import { blockNoteShadcnOverrides } from '../BlockNote/shadcnOverrides.tsx';
 
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
@@ -148,6 +156,50 @@ const WebExpandedView = ({ node }: ExpandedRendererProps) => {
   );
 };
 
+const VideoExpandedView = ({ node }: ExpandedRendererProps) => {
+  const src = typeof node.data?.src === 'string' ? node.data.src : '';
+
+  return (
+    <div className="flex h-full w-full flex-col bg-white p-3">
+      <div className="relative h-full w-full overflow-hidden rounded bg-white">
+        {src ? (
+          <video
+            src={src}
+            controls
+            className="nodrag h-full w-full object-contain"
+          />
+        ) : (
+          <div className="text-muted-foreground flex h-full w-full items-center justify-center text-sm">
+            No Video Source
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const ImageExpandedView = ({ node }: ExpandedRendererProps) => {
+  const src = typeof node.data?.src === 'string' ? node.data.src : '';
+
+  return (
+    <div className="flex h-full w-full flex-col bg-white p-3">
+      <div className="relative h-full w-full overflow-hidden rounded bg-white">
+        {src ? (
+          <img
+            src={src}
+            alt={src || 'Node image'}
+            className="pointer-events-none h-full w-full rounded border-0 object-contain"
+          />
+        ) : (
+          <div className="text-muted-foreground flex h-full w-full items-center justify-center text-sm">
+            No Image Source
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const PDFExpandedView = ({ node }: ExpandedRendererProps) => {
   const src = typeof node.data?.src === 'string' ? node.data.src : '';
   const [numPages, setNumPages] = useState<number | null>(null);
@@ -212,6 +264,20 @@ const getOverlayMeta = (node: Node) => {
       icon: <FileText size={14} />,
     };
   }
+  if (type === 'image') {
+    const label = typeof node.data?.label === 'string' ? node.data.label : '';
+    return {
+      title: label || 'Image',
+      icon: <ImageIcon size={14} />,
+    };
+  }
+  if (type === 'video') {
+    const label = typeof node.data?.label === 'string' ? node.data.label : '';
+    return {
+      title: label || 'Video',
+      icon: <PlayCircle size={14} />,
+    };
+  }
   return {
     title: 'Expanded View',
     icon: <Expand size={14} />,
@@ -219,8 +285,8 @@ const getOverlayMeta = (node: Node) => {
 };
 
 export const ExpandedNodeOverlay = () => {
-  const expandedNodeId = useStore((s) => s.expandedNodeId);
-  const closeExpanded = useStore((s) => s.closeExpanded);
+  const expandedNodeId = useCanvasStore((s) => s.expandedNodeId);
+  const closeExpanded = useCanvasStore((s) => s.closeExpanded);
 
   const { getNode } = useReactFlow();
 
@@ -266,6 +332,8 @@ export const ExpandedNodeOverlay = () => {
   if (node.type === 'note') content = <NoteExpandedView node={node} />;
   else if (node.type === 'web') content = <WebExpandedView node={node} />;
   else if (node.type === 'pdf') content = <PDFExpandedView node={node} />;
+  else if (node.type === 'image') content = <ImageExpandedView node={node} />;
+  else if (node.type === 'video') content = <VideoExpandedView node={node} />;
   else {
     content = (
       <div className="text-muted-foreground flex h-full w-full items-center justify-center text-sm">

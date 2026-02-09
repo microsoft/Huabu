@@ -5,7 +5,7 @@ import { StickyNote, Copy, Check, Fullscreen } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { NodeWrapper, type NodeDataProps } from './NodeWrapper.tsx';
-import useStore from '../../store/canvasStore.ts';
+import useCanvasStore from '../../store/canvasStore.ts';
 import { copyToClipboard } from '../../utils/clipboard.ts';
 import { GhostButton } from '../Common/GhostButton.tsx';
 
@@ -16,7 +16,7 @@ export type NoteNodeType = Node<NoteNodeData, 'note'>;
 
 export const NoteNode = ({ id, data, selected }: NodeProps<NoteNodeType>) => {
   const [copied, setCopied] = useState(false);
-  const openExpanded = useStore((s) => s.openExpanded);
+  const openExpanded = useCanvasStore((s) => s.openExpanded);
   const editor = useCreateBlockNote({
     initialContent: [{ type: 'paragraph', content: '' }],
     trailingBlock: false,
@@ -31,15 +31,15 @@ export const NoteNode = ({ id, data, selected }: NodeProps<NoteNodeType>) => {
   };
 
   const NoteToolbar = (
-    <div className="flex w-full items-center justify-between gap-4">
+    <div className="flex w-full items-center justify-between gap-2">
       {/* Label */}
       <div className="text-muted-foreground flex flex-1 items-center gap-1 text-xs font-medium">
         <StickyNote size={14} />
-        <span>Note</span>
+        <span className="max-w-24 truncate">{data?.src || 'Note'}</span>
       </div>
 
       {/* Tools */}
-      <div className="text-muted-foreground flex items-center gap-2">
+      <div className="text-muted-foreground flex items-center gap-1">
         <div className="bg-border h-3 w-px" />
 
         <GhostButton
@@ -72,6 +72,7 @@ export const NoteNode = ({ id, data, selected }: NodeProps<NoteNodeType>) => {
     <NodeWrapper
       id={id}
       data={data}
+      type={'note'}
       selected={selected}
       toolbar={NoteToolbar}
       keepAspectRatio={false}
@@ -80,7 +81,7 @@ export const NoteNode = ({ id, data, selected }: NodeProps<NoteNodeType>) => {
         openExpanded(id);
       }}
     >
-      <div className="flex h-full flex-col bg-white p-2">
+      <div className="flex h-full flex-col rounded bg-white p-4">
         <BlockNoteView
           className="noteview-readonly pointer-events-none select-none"
           editor={editor}

@@ -10,14 +10,14 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import { useCallback, useState, useRef, useEffect } from 'react';
+import { useCallback, useState, useRef } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
 import { NodeWrapper, type NodeDataProps } from './NodeWrapper.tsx';
-import useStore from '../../store/canvasStore.ts';
+import useCanvasStore from '../../store/canvasStore.ts';
 import { GhostButton } from '../Common/GhostButton.tsx';
 
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
@@ -29,21 +29,14 @@ export type PDFNodeType = Node<PDFNodeData, 'pdf'>;
 
 export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
   const { updateNodeData, updateNode } = useReactFlow();
-  const openExpanded = useStore((s) => s.openExpanded);
+  const openExpanded = useCanvasStore((s) => s.openExpanded);
 
-  const [isInteractive, setIsInteractive] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [numPages, setNumPages] = useState<number | null>(null);
   const [scale, setScale] = useState(0.7);
 
   const isExpanded = data.isExpanded ?? true;
-
-  useEffect(() => {
-    if (!selected) {
-      setIsInteractive(false);
-    }
-  }, [selected]);
 
   const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
     setNumPages(numPages);
@@ -76,8 +69,6 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
   const toggleExpand = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      setIsInteractive(false);
-
       const newExpandedState = !isExpanded;
 
       updateNodeData(id, { isExpanded: newExpandedState });
@@ -91,16 +82,6 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
     [id, isExpanded, updateNodeData, updateNode],
   );
 
-  const handleDoubleClick = useCallback(
-    (e: React.MouseEvent) => {
-      if (isExpanded) {
-        e.stopPropagation();
-        setIsInteractive(true);
-      }
-    },
-    [isExpanded],
-  );
-
   const PDFToolbar = (
     <div className="flex w-full items-center justify-between gap-3">
       <a
@@ -110,20 +91,17 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
         onClick={(e) => e.stopPropagation()}
         className="nodrag text-muted-foreground hover:text-theme-500 flex flex-1 cursor-pointer items-center gap-1 overflow-hidden text-xs font-medium transition-colors"
       >
-        <FileText size={14} className={!isExpanded ? 'text-icon' : ''} />
-        <span className="max-w-30 truncate">
-          {data.label || 'Document.pdf'}
-        </span>
+        <FileText size={14} />
+        <span className="max-w-24 truncate">{data.src || 'Document'}</span>
         <ArrowUpRight size={14} strokeWidth={2} />
       </a>
 
-      <div className="text-muted-foreground flex items-center gap-3">
+      <div className="text-muted-foreground flex items-center gap-1">
         <div className="bg-border h-3 w-px" />
         <GhostButton
           title="Open Large View"
           onClick={(e) => {
             e.stopPropagation();
-            setIsInteractive(false);
             openExpanded(id);
           }}
         >
@@ -140,7 +118,7 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
         </GhostButton>
 
         {isExpanded && (
-          <div className="text-muted-foreground animate-in fade-in slide-in-from-left-2 flex items-center gap-3 duration-200">
+          <div className="text-muted-foreground animate-in fade-in slide-in-from-left-2 flex items-center duration-200">
             <div className="bg-border mx-1 h-3 w-px" />
             <GhostButton
               aria-label="Zoom out"
@@ -173,6 +151,7 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
     <NodeWrapper
       id={id}
       data={data}
+      type={'pdf'}
       selected={selected}
       toolbar={PDFToolbar}
       resizable={isExpanded}
@@ -180,8 +159,11 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
       className={clsx(
         'bg-white transition-all duration-300 ease-in-out',
         isExpanded ? 'h-125 w-115' : 'border-border! h-20 w-65',
-        isInteractive && isExpanded ? 'ring-theme-500/20 ring-2' : '',
       )}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        openExpanded(id);
+      }}
     >
       <div
         ref={containerRef}
@@ -204,14 +186,9 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
         {isExpanded && (
           <>
             <div
-              onWheel={(e) => {
-                if (isInteractive) e.stopPropagation();
-              }}
               className={clsx(
                 'custom-scrollbar flex h-full w-full flex-col items-center overflow-auto p-4',
-                isInteractive
-                  ? 'nodrag nowheel cursor-text select-text'
-                  : 'cursor-grab select-none',
+                'cursor-grab select-none',
               )}
             >
               {data?.src ? (
@@ -219,7 +196,9 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
                   file={data.src}
                   onLoadSuccess={onDocumentLoadSuccess}
                   loading={
-                    <div className="p-4 text-xs text-white">Loading...</div>
+                    <div className="text-muted-foreground p-4 text-xs">
+                      Loading...
+                    </div>
                   }
                   error={
                     <div className="p-4 text-xs text-red-300">
@@ -234,7 +213,7 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
                       pageNumber={index + 1}
                       scale={scale}
                       renderAnnotationLayer={false}
-                      renderTextLayer={true}
+                      renderTextLayer={false}
                       loading={''}
                     />
                   ))}
@@ -245,13 +224,7 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
                 </div>
               )}
             </div>
-
-            {!isInteractive && (
-              <div
-                className="absolute inset-0 z-10 cursor-grab"
-                onDoubleClick={handleDoubleClick}
-              />
-            )}
+            <div className="absolute inset-0 z-10 bg-transparent" />
           </>
         )}
       </div>

@@ -129,7 +129,6 @@ export const initialNodes: Node[] = [
       src: 'https://www.w3schools.com/html/mov_bbb.mp4',
       source: 'External Resource',
     },
-    style: { width: 400, height: 240 },
   },
 ];
 
@@ -156,7 +155,7 @@ export const initialEdges: Edge[] = [
   },
 ];
 
-const useStore = create<RFState>((set, get) => ({
+const useCanvasStore = create<RFState>((set, get) => ({
   nodes: initialNodes,
   edges: initialEdges,
 
@@ -244,4 +243,4 @@ const useStore = create<RFState>((set, get) => ({
   },
 }));
 
-export default useStore;
+export default useCanvasStore;

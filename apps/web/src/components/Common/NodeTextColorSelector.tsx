@@ -73,7 +73,7 @@ export const NodeTextColorSelector = ({
   return (
     <div className="relative flex items-center">
       <button
-        className="border-border hover:bg-muted flex h-6 w-6 items-center justify-center rounded-md border transition-colors"
+        className="border-border hover:bg-muted flex items-center justify-center rounded border p-1 transition-colors"
         onClick={(e) => {
           e.stopPropagation();
           setIsOpen(!isOpen);
