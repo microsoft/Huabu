@@ -34,7 +34,7 @@ export const NoteNode = ({ id, data, selected }: NodeProps<NoteNodeType>) => {
     <div className="flex w-full items-center justify-between gap-4">
       {/* Label */}
       <div className="text-muted-foreground flex flex-1 items-center gap-1 text-xs font-medium">
-        <StickyNote size={12} />
+        <StickyNote size={14} />
         <span>Note</span>
       </div>
 
@@ -49,11 +49,11 @@ export const NoteNode = ({ id, data, selected }: NodeProps<NoteNodeType>) => {
             openExpanded(id);
           }}
         >
-          <Fullscreen size={12} />
+          <Fullscreen size={14} />
         </GhostButton>
 
         <GhostButton title="Copy Content" onClick={handleCopy}>
-          {copied ? <Check size={12} /> : <Copy size={12} />}
+          {copied ? <Check size={14} /> : <Copy size={14} />}
         </GhostButton>
       </div>
     </div>

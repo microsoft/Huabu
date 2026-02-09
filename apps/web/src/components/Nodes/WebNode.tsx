@@ -14,7 +14,7 @@ export const WebNode = ({ id, data, selected }: NodeProps<WebNodeType>) => {
     <div className="flex w-full items-center justify-between gap-4">
       {/* URL Display */}
       <div className="text-muted-foreground flex flex-1 items-center gap-1 overflow-hidden text-xs font-medium">
-        <Globe size={12} />
+        <Globe size={14} />
         <span className="truncate">{data?.src || 'No URL'}</span>
       </div>
 
@@ -30,11 +30,11 @@ export const WebNode = ({ id, data, selected }: NodeProps<WebNodeType>) => {
             openExpanded(id);
           }}
         >
-          <Fullscreen size={12} />
+          <Fullscreen size={14} />
         </GhostButton>
 
         <GhostButton aria-label="Refresh" title="Refresh">
-          <RotateCw size={12} />
+          <RotateCw size={14} />
         </GhostButton>
 
         <a
@@ -46,7 +46,7 @@ export const WebNode = ({ id, data, selected }: NodeProps<WebNodeType>) => {
           title="Open in Browser"
           onClick={(e) => e.stopPropagation()}
         >
-          <ExternalLink size={12} />
+          <ExternalLink size={14} />
         </a>
       </div>
     </div>

@@ -19,14 +19,14 @@ export const VideoNode = ({ id, data, selected }: NodeProps<VideoNodeType>) => {
         className="nodrag text-muted-foreground hover:text-theme-500 flex flex-1 cursor-pointer items-center gap-1 overflow-hidden text-xs font-medium transition-colors"
       >
         <span className="truncate">Source: {data?.src || 'Unknown Video'}</span>
-        <ArrowUpRight size={12} strokeWidth={2} />
+        <ArrowUpRight size={14} strokeWidth={2} />
       </a>
 
       {/* Tools */}
       <div className="text-muted-foreground flex items-center gap-2">
         <div className="bg-border h-3 w-px" />
         <GhostButton aria-label="Volume">
-          <Volume2 size={12} />
+          <Volume2 size={14} />
         </GhostButton>
       </div>
     </div>
