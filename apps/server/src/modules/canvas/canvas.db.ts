@@ -51,10 +51,5 @@ export function getCanvasDb(): Database.Database {
   db = new Database(dbPath);
   migrate(db);
 
-  // Initialize mock data in development
-  if (process.env.NODE_ENV !== 'production') {
-    import('./mock.js').then((mod) => mod.ensureMockCanvas());
-  }
-
   return db;
 }

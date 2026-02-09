@@ -1,6 +1,4 @@
 import { mkdir } from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
@@ -8,6 +6,7 @@ import staticPlugin from '@fastify/static';
 import { fastify } from 'fastify';
 
 import artifactRoute from './modules/artifact/artifact.route.js';
+import { getArtifactsDir } from './modules/artifact/utils.js';
 import canvasRoutes from './modules/canvas/canvas.route.js';
 import chatRoutes from './modules/chat/chat.route.js';
 
@@ -32,9 +31,7 @@ app.register(multipart, {
 });
 
 // Register static file serving for artifacts
-const here = path.dirname(fileURLToPath(import.meta.url));
-const artifactsDir = path.resolve(here, '../data/artifacts');
-
+const artifactsDir = getArtifactsDir();
 // Ensure artifacts directory exists
 await mkdir(artifactsDir, { recursive: true });
 
@@ -42,6 +39,16 @@ app.register(staticPlugin, {
   root: artifactsDir,
   prefix: '/api/artifact/',
 });
+
+if (process.env.NODE_ENV !== 'production') {
+  try {
+    const { ensureMockCanvas } = await import('./modules/canvas/mock.js');
+    ensureMockCanvas();
+  } catch (err) {
+    app.log.error({ err }, 'Failed to initialize mock canvas');
+    throw err;
+  }
+}
 
 app.register(chatRoutes, { prefix: '/api/chat' });
 app.register(canvasRoutes, { prefix: '/api/canvas' });

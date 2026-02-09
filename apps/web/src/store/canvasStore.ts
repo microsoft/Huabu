@@ -32,6 +32,7 @@ type RFState = {
   version: number;
   isLoading: boolean;
   isSaving: boolean;
+  pendingSave: boolean;
 
   expandedNodeId: string | null;
   openExpanded: (nodeId: string) => void;
@@ -70,6 +71,7 @@ const useCanvasStore = create<RFState>((set, get) => ({
   version: 0,
   isLoading: false,
   isSaving: false,
+  pendingSave: false,
 
   expandedNodeId: null,
   openExpanded: (nodeId) => set({ expandedNodeId: nodeId }),
@@ -78,7 +80,8 @@ const useCanvasStore = create<RFState>((set, get) => ({
   loadCanvas: async () => {
     set({ isLoading: true });
     try {
-      const response = await getCanvas(CANVAS_ID);
+      const { canvasId } = get();
+      const response = await getCanvas(canvasId);
       if (!response) {
         console.warn('Canvas not found, using empty state');
         set({ isLoading: false });
@@ -99,20 +102,32 @@ const useCanvasStore = create<RFState>((set, get) => ({
   },
 
   saveCanvas: async () => {
-    const { nodes, edges, version, isSaving, canvasId } = get();
-    if (isSaving) return;
+    const { isSaving } = get();
+    if (isSaving) {
+      set({ pendingSave: true });
+      return;
+    }
 
     set({ isSaving: true });
     try {
+      const { nodes, edges, version, canvasId } = get();
       const response = await putCanvas(canvasId, {
         version,
         state: { nodes, edges },
       });
-      set({ version: response.version, isSaving: false });
+      set({ version: response.version });
     } catch (error) {
       console.error('Failed to save canvas:', error);
-      set({ isSaving: false });
       // TODO: Handle version conflict (409) - reload and prompt user
+    } finally {
+      set({ isSaving: false });
+
+      const { pendingSave } = get();
+      if (pendingSave) {
+        set({ pendingSave: false });
+        // Fire-and-forget: re-save the latest state after the in-flight save completes.
+        void get().saveCanvas();
+      }
     }
   },
 

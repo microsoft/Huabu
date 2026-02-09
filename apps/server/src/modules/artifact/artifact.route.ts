@@ -1,5 +1,6 @@
-import { writeFile } from 'node:fs/promises';
+import { createWriteStream } from 'node:fs';
 import path from 'node:path';
+import { pipeline } from 'node:stream/promises';
 
 import { createId } from '@sediment/shared';
 import { type FastifyPluginAsync } from 'fastify';
@@ -30,15 +31,20 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
       return reply.code(400).send({ error: 'No file provided' });
     }
 
-    const buffer = await data.toBuffer();
     const artifactsDir = getArtifactsDir();
 
     const id = createId('artifact');
-    const ext = path.extname(data.filename || typeExtMap[type]);
+    const uploadedExt = path.extname(data.filename ?? '');
+    const ext = uploadedExt || typeExtMap[type];
     const filename = `${id}${ext}`;
     const filePath = path.join(artifactsDir, filename);
 
-    await writeFile(filePath, new Uint8Array(buffer));
+    try {
+      await pipeline(data.file, createWriteStream(filePath));
+    } catch (error) {
+      request.log.error({ err: error }, 'Failed to stream artifact to disk');
+      return reply.code(500).send({ error: 'Failed to save file' });
+    }
 
     return {
       id,

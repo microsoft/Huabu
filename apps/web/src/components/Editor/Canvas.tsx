@@ -10,8 +10,7 @@ import {
 import React, { useEffect, useRef, useState } from 'react';
 import '@xyflow/react/dist/style.css';
 
-import { NodeToolbar } from '@/components/Editor/CanvasToolbar.tsx';
-
+import { NodeToolbar } from './CanvasToolbar';
 import { ExpandedNodeOverlay } from './ExpandedNodeOverlay';
 import useCanvasStore from '../../store/canvasStore.ts';
 import {
