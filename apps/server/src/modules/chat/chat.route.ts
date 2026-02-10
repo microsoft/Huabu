@@ -240,15 +240,15 @@ const chatRoutes: FastifyPluginAsync = async (
 
         const isExisting = await hasExistingThreadState(agent, config);
 
-        // Prepare system message with context if available
-        const systemPrompt = contextString
-          ? `${SYSTEM_PROMPT}\n\n${contextString}`
-          : SYSTEM_PROMPT;
-
+        // Keep the base system prompt stable in history, and pass selection-based context
+        // via dedicated agent state so it can be applied per request without polluting
+        // the persistent message history.
         const inputs = {
-          messages: isExisting
-            ? [new HumanMessage(content)]
-            : [new SystemMessage(systemPrompt), new HumanMessage(content)],
+          selectionContext: contextString.length > 0 ? contextString : null,
+          messages: [
+            ...(isExisting ? [] : [new SystemMessage(SYSTEM_PROMPT)]),
+            new HumanMessage(content),
+          ],
         };
 
         if (process.env.DEBUG_AGENT === '1') {

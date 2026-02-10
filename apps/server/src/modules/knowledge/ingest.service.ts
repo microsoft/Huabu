@@ -133,8 +133,6 @@ export class IngestService {
 
     if (existing) {
       this.repository.updateSource(params.sourceId, {
-        contentText: '',
-        contentHash: computeContentHash(''),
         title: params.title,
         metadata,
       });

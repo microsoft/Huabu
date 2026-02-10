@@ -9,4 +9,7 @@ export const AgentState = Annotation.Root({
   question: Annotation<string>({
     reducer: (x, y) => y ?? x,
   }),
+  selectionContext: Annotation<string | null>({
+    reducer: (x, y) => (typeof y === 'undefined' ? x : y),
+  }),
 });
