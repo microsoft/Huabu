@@ -5,10 +5,12 @@ import { StickyNote, Copy, Check, Fullscreen } from 'lucide-react';
 import { useEffect, useState, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
-import { NodeWrapper, type NodeDataProps } from './NodeWrapper.tsx';
+import { NodeWrapper } from './NodeWrapper.tsx';
 import useCanvasStore from '../../store/canvasStore.ts';
 import { copyToClipboard } from '../../utils/clipboard.ts';
 import { GhostButton } from '../Common/GhostButton.tsx';
+
+import type { NodeDataProps } from './types.ts';
 
 type NoteNodeData = NodeDataProps & {
   content?: string;

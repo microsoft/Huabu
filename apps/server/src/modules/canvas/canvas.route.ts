@@ -1,16 +1,10 @@
 import { z } from 'zod';
 
 import { getCanvasDb } from './canvas.db.js';
+import { getArtifactsDir } from '../artifact/utils.js';
+import { getIngestService } from '../knowledge/index.js';
 
 import type { FastifyPluginAsync } from 'fastify';
-
-type CanvasNodeRow = {
-  canvas_id: string;
-  node_id: string;
-  type: string | null;
-  data_json: string;
-  updated_at: number;
-};
 
 type CanvasRow = {
   canvas_id: string;
@@ -26,29 +20,8 @@ function nowMs(): number {
   return Date.now();
 }
 
-function extractNodesFromState(
-  state: unknown,
-): Array<{ id: string; type: string | null; data: unknown }> | null {
-  if (typeof state !== 'object' || state === null) return null;
-  const maybeNodes = (state as { nodes?: unknown }).nodes;
-  if (!Array.isArray(maybeNodes)) return null;
-
-  const result: Array<{ id: string; type: string | null; data: unknown }> = [];
-
-  for (const node of maybeNodes) {
-    if (typeof node !== 'object' || node === null) continue;
-    const id = (node as { id?: unknown }).id;
-    if (typeof id !== 'string' || id.trim().length === 0) continue;
-
-    const typeRaw = (node as { type?: unknown }).type;
-    const type = typeof typeRaw === 'string' ? typeRaw : null;
-
-    const data = (node as { data?: unknown }).data;
-
-    result.push({ id, type, data });
-  }
-
-  return result;
+function toMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 const putCanvasBodySchema = z.object({
@@ -58,7 +31,114 @@ const putCanvasBodySchema = z.object({
   title: z.string().min(1).optional(),
 });
 
+const upsertNodeBodySchema = z.object({
+  workspaceId: z.string().min(1).optional(),
+  type: z.enum(['note', 'text', 'web', 'pdf']),
+  title: z.string().optional(),
+  content: z.string().optional(),
+  src: z.string().optional(),
+});
+
 const canvasRoutes: FastifyPluginAsync = async (fastify) => {
+  // Upsert a single node (create or update) and ingest it
+  fastify.put<{
+    Params: { canvasId: string; nodeId: string };
+    Body: unknown;
+  }>('/:canvasId/nodes/:nodeId', async function (request, reply) {
+    const { canvasId, nodeId } = request.params;
+    const parsed = upsertNodeBodySchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ message: 'Invalid request body' });
+    }
+
+    const { workspaceId, type, title, content, src } = parsed.data;
+    const database = getCanvasDb();
+
+    // Get canvas to determine workspaceId
+    const canvasRow = database
+      .prepare('SELECT workspace_id FROM canvases WHERE canvas_id = ?')
+      .get(canvasId) as { workspace_id: string | null } | undefined;
+
+    const resolvedWorkspaceId =
+      workspaceId ?? canvasRow?.workspace_id ?? 'default';
+
+    const ingestService = getIngestService();
+
+    const existingMapping = database
+      .prepare(
+        'SELECT source_id FROM canvas_nodes WHERE canvas_id = ? AND node_id = ?',
+      )
+      .get(canvasId, nodeId) as { source_id: string | null } | undefined;
+
+    try {
+      const existingSourceId = existingMapping?.source_id ?? null;
+
+      const outcome =
+        type === 'pdf'
+          ? await ingestService.ingestPdfCanvasNodeFromArtifact({
+              workspaceId: resolvedWorkspaceId,
+              nodeId,
+              title,
+              artifactUri: src,
+              artifactsDir: getArtifactsDir(),
+              existingSourceId,
+            })
+          : await ingestService.ingestCanvasNode({
+              workspaceId: resolvedWorkspaceId,
+              nodeId,
+              type,
+              title,
+              content,
+              src,
+              existingSourceId,
+            });
+
+      const { sourceId, success, error } = outcome;
+
+      // Upsert the node-source mapping
+      database
+        .prepare(
+          `INSERT INTO canvas_nodes (canvas_id, node_id, source_id)
+           VALUES (?, ?, ?)
+           ON CONFLICT(canvas_id, node_id) DO UPDATE SET source_id = excluded.source_id`,
+        )
+        .run(canvasId, nodeId, sourceId);
+
+      return reply.send({
+        nodeId,
+        sourceId,
+        success,
+        suggestedLabel: outcome.title,
+        error: error ? `${error.code}: ${error.message}` : undefined,
+      });
+    } catch (error) {
+      // Unexpected failure (DB issues, etc). Keep 500, but provide a detailed message.
+      const message = toMessage(error);
+      request.log.error(
+        { nodeId, nodeType: type, error },
+        'Failed to ingest node',
+      );
+      return reply.code(500).send({
+        message: 'Failed to ingest node',
+        details: message,
+      });
+    }
+  });
+
+  // Delete a node and its source mapping
+  fastify.delete<{
+    Params: { canvasId: string; nodeId: string };
+  }>('/:canvasId/nodes/:nodeId', async function (request, reply) {
+    const { canvasId, nodeId } = request.params;
+    const database = getCanvasDb();
+
+    database
+      .prepare('DELETE FROM canvas_nodes WHERE canvas_id = ? AND node_id = ?')
+      .run(canvasId, nodeId);
+
+    return reply.send({ success: true });
+  });
+
   fastify.get<{ Params: { canvasId: string } }>(
     '/:canvasId',
     async function (request, reply) {
@@ -123,77 +203,44 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       const nextVersion = serverVersion + 1;
 
       const stateJson = JSON.stringify(state);
-      const nodes = extractNodesFromState(state) ?? [];
 
-      const tx = database.transaction(() => {
-        if (!existing) {
-          database
-            .prepare(
-              `INSERT INTO canvases (
-                canvas_id, workspace_id, title, version, state_json, created_at, updated_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            )
-            .run(
-              canvasId,
-              workspaceId ?? null,
-              title ?? null,
-              nextVersion,
-              stateJson,
-              timestamp,
-              timestamp,
-            );
-        } else {
-          database
-            .prepare(
-              `UPDATE canvases
-               SET workspace_id = COALESCE(?, workspace_id),
-                   title = COALESCE(?, title),
-                   version = ?,
-                   state_json = ?,
-                   updated_at = ?
-               WHERE canvas_id = ?`,
-            )
-            .run(
-              workspaceId ?? null,
-              title ?? null,
-              nextVersion,
-              stateJson,
-              timestamp,
-              canvasId,
-            );
-        }
-
+      // Only update canvas metadata and state (node-source mappings are managed by node endpoints)
+      if (!existing) {
         database
-          .prepare('DELETE FROM canvas_nodes WHERE canvas_id = ?')
-          .run(canvasId);
-
-        const insertNode = database.prepare(
-          `INSERT INTO canvas_nodes (canvas_id, node_id, type, data_json, updated_at)
-           VALUES (?, ?, ?, ?, ?)`,
-        );
-
-        for (const node of nodes) {
-          const dataJson = JSON.stringify(node.data ?? null);
-
-          const rowToInsert: CanvasNodeRow = {
-            canvas_id: canvasId,
-            node_id: node.id,
-            type: node.type,
-            data_json: dataJson,
-            updated_at: timestamp,
-          };
-
-          insertNode.run(
-            rowToInsert.canvas_id,
-            rowToInsert.node_id,
-            rowToInsert.type,
-            rowToInsert.data_json,
-            rowToInsert.updated_at,
+          .prepare(
+            `INSERT INTO canvases (
+              canvas_id, workspace_id, title, version, state_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            canvasId,
+            workspaceId ?? null,
+            title ?? null,
+            nextVersion,
+            stateJson,
+            timestamp,
+            timestamp,
           );
-        }
-      });
-
-      tx();
+      } else {
+        database
+          .prepare(
+            `UPDATE canvases
+             SET workspace_id = COALESCE(?, workspace_id),
+                 title = COALESCE(?, title),
+                 version = ?,
+                 state_json = ?,
+                 updated_at = ?
+             WHERE canvas_id = ?`,
+          )
+          .run(
+            workspaceId ?? null,
+            title ?? null,
+            nextVersion,
+            stateJson,
+            timestamp,
+            canvasId,
+          );
+      }
 
       return reply.send({
         canvasId,

@@ -15,6 +15,9 @@ export const chatApi = {
   streamMessage: async (
     content: string,
     threadId: string,
+    canvasId: string,
+    canvasVersion: number,
+    selectedNodeIds: string[],
     callbacks: StreamCallbacks,
   ): Promise<void> => {
     try {
@@ -26,6 +29,9 @@ export const chatApi = {
         body: JSON.stringify({
           content,
           threadId,
+          canvasId,
+          canvasVersion,
+          selectedNodeIds,
         } satisfies SendMessageRequest),
       });
 

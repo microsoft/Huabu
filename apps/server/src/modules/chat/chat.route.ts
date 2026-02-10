@@ -4,6 +4,8 @@ import { createId } from '@sediment/shared';
 import { SYSTEM_PROMPT } from '../../prompt/system.js';
 import { createGraph } from '../agent/graph.js';
 import { getCheckpointer } from '../agent/store/index.js';
+import { getCanvasDb } from '../canvas/canvas.db.js';
+import { buildContext } from '../knowledge/index.js';
 
 import type {
   ChatStreamUpdatePayload,
@@ -126,8 +128,92 @@ const chatRoutes: FastifyPluginAsync = async (
   fastify.post<{ Body: SendMessageRequest; Reply: SendMessageResponse }>(
     '/',
     async function (request, reply) {
-      const { content, threadId } = request.body;
+      const { content, threadId, canvasId, canvasVersion, selectedNodeIds } =
+        request.body;
       const resolvedThreadId = getOrCreateThreadId(threadId);
+
+      // Load sourceIds from canvas_nodes for selected nodes
+      const sourceIds: string[] = [];
+
+      if (canvasId && selectedNodeIds && selectedNodeIds.length > 0) {
+        try {
+          const database = getCanvasDb();
+
+          // Version check: ensure client has the latest canvas state
+          if (typeof canvasVersion === 'number') {
+            const canvasRow = database
+              .prepare('SELECT version FROM canvases WHERE canvas_id = ?')
+              .get(canvasId) as { version: number } | undefined;
+
+            if (canvasRow && canvasRow.version !== canvasVersion) {
+              return reply.code(409).send({
+                error:
+                  'Canvas version mismatch. Please refresh canvas and try again.',
+              });
+            }
+          }
+
+          // Load sourceIds from canvas_nodes
+          const placeholders = selectedNodeIds.map(() => '?').join(',');
+          const rows = database
+            .prepare(
+              `SELECT node_id, source_id
+               FROM canvas_nodes
+               WHERE canvas_id = ? AND node_id IN (${placeholders})`,
+            )
+            .all(canvasId, ...selectedNodeIds) as Array<{
+            node_id: string;
+            source_id: string | null;
+          }>;
+
+          for (const row of rows) {
+            if (row.source_id) {
+              sourceIds.push(row.source_id);
+            } else {
+              request.log.warn(
+                { nodeId: row.node_id },
+                'Node has no sourceId (not yet ingested or unsupported type)',
+              );
+            }
+          }
+
+          request.log.info(
+            {
+              canvasId,
+              selectedNodeIds: selectedNodeIds.length,
+              loadedSources: sourceIds.length,
+            },
+            'Loaded sourceIds from canvas_nodes',
+          );
+        } catch (error) {
+          request.log.error(
+            error,
+            'Failed to load sourceIds from canvas_nodes',
+          );
+          // Don't fail the request, just log the error
+          // Chat can proceed without sources
+        }
+      }
+
+      // Build context from ingested sources
+      let contextString = '';
+      if (sourceIds.length > 0) {
+        try {
+          const { context, sources } = await buildContext(sourceIds);
+          contextString = context;
+
+          request.log.info(
+            {
+              sourceCount: sources.length,
+              contextLength: contextString.length,
+            },
+            'Built context from sources',
+          );
+        } catch (error) {
+          request.log.error(error, 'Failed to build context');
+          // Continue without context
+        }
+      }
 
       // We'll stream the response manually via reply.raw
       reply.hijack();
@@ -153,10 +239,16 @@ const chatRoutes: FastifyPluginAsync = async (
         };
 
         const isExisting = await hasExistingThreadState(agent, config);
+
+        // Keep the base system prompt stable in history, and pass selection-based context
+        // via dedicated agent state so it can be applied per request without polluting
+        // the persistent message history.
         const inputs = {
-          messages: isExisting
-            ? [new HumanMessage(content)]
-            : [new SystemMessage(SYSTEM_PROMPT), new HumanMessage(content)],
+          selectionContext: contextString.length > 0 ? contextString : null,
+          messages: [
+            ...(isExisting ? [] : [new SystemMessage(SYSTEM_PROMPT)]),
+            new HumanMessage(content),
+          ],
         };
 
         if (process.env.DEBUG_AGENT === '1') {

@@ -3,9 +3,11 @@ import clsx from 'clsx';
 import { Ungroup, Lock, Unlock } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { NodeWrapper, type NodeDataProps } from './NodeWrapper.tsx';
+import { NodeWrapper } from './NodeWrapper.tsx';
 import useCanvasStore from '../../store/canvasStore.ts';
 import { GhostButton } from '../Common/GhostButton.tsx';
+
+import type { NodeDataProps } from './types.ts';
 
 type FrameNodeData = NodeDataProps & {};
 export type FrameNodeType = Node<FrameNodeData, 'frame'>;
@@ -71,14 +73,23 @@ export const FrameNode = ({ id, data, selected }: NodeProps<FrameNodeType>) => {
               title="Edit frame name"
               size={1}
               className={clsx(
-                'nodrag col-start-1 row-start-1 w-full !min-w-0 bg-transparent px-1.5 text-xs font-medium outline-none',
+                'nodrag col-start-1 row-start-1 w-full min-w-0! bg-transparent px-1.5 text-xs font-medium outline-none',
                 isEditingLabel
                   ? 'text-foreground cursor-text'
                   : 'text-muted-foreground hover:text-foreground cursor-pointer',
               )}
-              onChange={(e) => isEditingLabel && setDraftLabel(e.target.value)}
-              onClick={() => !isEditingLabel && setIsEditingLabel(true)}
-              onBlur={() => isEditingLabel && commitLabel()}
+              onChange={(e) => {
+                if (!isEditingLabel) return;
+                setDraftLabel(e.target.value);
+              }}
+              onClick={() => {
+                if (isEditingLabel) return;
+                setIsEditingLabel(true);
+              }}
+              onBlur={() => {
+                if (!isEditingLabel) return;
+                commitLabel();
+              }}
               onKeyDown={(e) => {
                 if (!isEditingLabel) return;
                 e.stopPropagation();
@@ -87,6 +98,7 @@ export const FrameNode = ({ id, data, selected }: NodeProps<FrameNodeType>) => {
                   commitLabel();
                 }
                 if (e.key === 'Escape') {
+                  e.preventDefault();
                   setDraftLabel(label);
                   setIsEditingLabel(false);
                 }

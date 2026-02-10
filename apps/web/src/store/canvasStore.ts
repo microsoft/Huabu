@@ -12,7 +12,7 @@ import {
 } from '@xyflow/react';
 import { create } from 'zustand';
 
-import { getCanvas, putCanvas } from '../api';
+import { getCanvas, putCanvas, deleteNode } from '../api';
 import {
   autoFrameNodeByOverlap,
   autoUnframeNodeByNonOverlap,
@@ -21,9 +21,26 @@ import {
   unframe,
   type NestableNode,
 } from '../utils/frameHelper';
+import {
+  ingestNodeIfNeeded,
+  shouldIngestOnUpdate,
+  type NodeIngestionInfo,
+} from '../utils/ingestHelper';
 
 const CANVAS_ID = 'default-canvas';
 const AUTOSAVE_DEBOUNCE_MS = 1000;
+
+const triggerIngestion = (node: Node) => {
+  const state = useCanvasStore.getState();
+  void ingestNodeIfNeeded({
+    canvasId: state.canvasId,
+    node,
+    setNodeIngestion: state.setNodeIngestion,
+    clearNodeIngestion: state.clearNodeIngestion,
+    getNodeById: (nodeId) => state.nodes.find((n) => n.id === nodeId),
+    updateNodeDataLocal: state.updateNodeDataLocal,
+  });
+};
 
 type RFState = {
   nodes: Node[];
@@ -34,6 +51,10 @@ type RFState = {
   isSaving: boolean;
   pendingSave: boolean;
 
+  ingestionByNodeId: Record<string, NodeIngestionInfo>;
+  setNodeIngestion: (nodeId: string, info: NodeIngestionInfo) => void;
+  clearNodeIngestion: (nodeId: string) => void;
+
   expandedNodeId: string | null;
   openExpanded: (nodeId: string) => void;
   closeExpanded: () => void;
@@ -41,11 +62,12 @@ type RFState = {
   onNodesChange: OnNodesChange;
   onEdgesChange: OnEdgesChange;
   onConnect: OnConnect;
-  setNodes: (nodes: Node[]) => void;
-  setEdges: (edges: Edge[]) => void;
   addNode: (node: Node) => void;
 
   updateNodeData: (nodeId: string, patch: Record<string, unknown>) => void;
+  updateNodeDataLocal: (nodeId: string, patch: Record<string, unknown>) => void;
+
+  getSelectedNodeIds: () => string[];
 
   frameSelectedNodes: () => void;
   unframe: (frameId: string) => void;
@@ -73,6 +95,23 @@ const useCanvasStore = create<RFState>((set, get) => ({
   isSaving: false,
   pendingSave: false,
 
+  ingestionByNodeId: {},
+  setNodeIngestion: (nodeId, info) => {
+    if (!nodeId) return;
+    set({
+      ingestionByNodeId: {
+        ...get().ingestionByNodeId,
+        [nodeId]: info,
+      },
+    });
+  },
+  clearNodeIngestion: (nodeId) => {
+    if (!nodeId) return;
+    const next = { ...get().ingestionByNodeId };
+    delete next[nodeId];
+    set({ ingestionByNodeId: next });
+  },
+
   expandedNodeId: null,
   openExpanded: (nodeId) => set({ expandedNodeId: nodeId }),
   closeExpanded: () => set({ expandedNodeId: null }),
@@ -84,7 +123,7 @@ const useCanvasStore = create<RFState>((set, get) => ({
       const response = await getCanvas(canvasId);
       if (!response) {
         console.warn('Canvas not found, using empty state');
-        set({ isLoading: false });
+        set({ isLoading: false, ingestionByNodeId: {} });
         return;
       }
 
@@ -94,6 +133,7 @@ const useCanvasStore = create<RFState>((set, get) => ({
         edges: state.edges ?? [],
         version: response.version,
         isLoading: false,
+        ingestionByNodeId: {},
       });
     } catch (error) {
       console.error('Failed to load canvas:', error);
@@ -149,7 +189,41 @@ const useCanvasStore = create<RFState>((set, get) => ({
       result = autoFrameNodeByOverlap(result, nodeId, { threshold: 0.75 });
     }
 
-    set({ nodes: result });
+    // Disallow adding nodes through ReactFlow change events.
+    // Node additions must go through the store's addNode() API.
+    const prevIds = new Set(prevNodes.map((n) => n.id));
+    const addedNodes = result.filter((n) => !prevIds.has(n.id));
+    if (addedNodes.length > 0) {
+      console.error(
+        '[canvasStore] Blocked node additions via onNodesChange. Use addNode() instead.',
+        addedNodes.map((n) => ({ id: n.id, type: n.type })),
+      );
+      result = result.filter((n) => prevIds.has(n.id));
+    }
+
+    // Handle node deletion - call delete API
+    const removedIds = changes
+      .filter((c) => c.type === 'remove')
+      .map((c) => c.id);
+
+    if (removedIds.length > 0) {
+      const { canvasId } = get();
+      // Fire-and-forget deletions
+      for (const nodeId of removedIds) {
+        void deleteNode(canvasId, nodeId).catch((error) => {
+          console.error('Failed to delete node:', nodeId, error);
+        });
+      }
+    }
+
+    set((state) => {
+      if (removedIds.length === 0) return { nodes: result };
+      const nextIngestionByNodeId = { ...state.ingestionByNodeId };
+      for (const nodeId of removedIds) {
+        delete nextIngestionByNodeId[nodeId];
+      }
+      return { nodes: result, ingestionByNodeId: nextIngestionByNodeId };
+    });
 
     scheduleAutoSave(get().saveCanvas);
   },
@@ -170,16 +244,52 @@ const useCanvasStore = create<RFState>((set, get) => ({
     scheduleAutoSave(get().saveCanvas);
   },
 
-  setNodes: (nodes) => set({ nodes }),
-  setEdges: (edges) => set({ edges }),
   addNode: (node) => {
     set({ nodes: [...get().nodes, node] });
+
+    // Ingest the node if needed
+    triggerIngestion(node);
 
     scheduleAutoSave(get().saveCanvas);
   },
 
   updateNodeData: (nodeId, patch) => {
     if (!nodeId) return;
+
+    let updatedNode: Node | undefined;
+    let previousNode: Node | undefined;
+
+    set({
+      nodes: get().nodes.map((n) => {
+        if (n.id !== nodeId) return n;
+        previousNode = n;
+        const updated = {
+          ...n,
+          data: {
+            ...(n.data ?? {}),
+            ...patch,
+          },
+        };
+        updatedNode = updated;
+        return updated;
+      }),
+    });
+
+    // Ingest the updated node if needed
+    if (updatedNode && previousNode) {
+      if (!shouldIngestOnUpdate(previousNode, updatedNode)) {
+        scheduleAutoSave(get().saveCanvas);
+        return;
+      }
+      triggerIngestion(updatedNode);
+    }
+
+    scheduleAutoSave(get().saveCanvas);
+  },
+
+  updateNodeDataLocal: (nodeId, patch) => {
+    if (!nodeId) return;
+
     set({
       nodes: get().nodes.map((n) => {
         if (n.id !== nodeId) return n;
@@ -194,6 +304,12 @@ const useCanvasStore = create<RFState>((set, get) => ({
     });
 
     scheduleAutoSave(get().saveCanvas);
+  },
+
+  getSelectedNodeIds: () => {
+    return get()
+      .nodes.filter((n) => n.selected)
+      .map((n) => n.id);
   },
 
   frameSelectedNodes: () => {

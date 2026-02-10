@@ -24,3 +24,31 @@ export interface CanvasVersionMismatchError {
   message: string;
   serverVersion: number;
 }
+
+/**
+ * Node API types for individual node operations
+ */
+
+export interface UpsertNodeRequest {
+  workspaceId?: string;
+  type: 'note' | 'text' | 'web' | 'pdf';
+  title?: string;
+  content?: string;
+  src?: string;
+}
+
+export interface UpsertNodeResponse {
+  nodeId: string;
+  sourceId: string;
+  success: boolean;
+  /**
+   * Optional server-suggested label derived from ingested content (e.g. web page title, PDF title).
+   * The client may choose to apply it only when the current label is empty or still a placeholder.
+   */
+  suggestedLabel?: string;
+  error?: string;
+}
+
+export interface DeleteNodeResponse {
+  success: boolean;
+}
