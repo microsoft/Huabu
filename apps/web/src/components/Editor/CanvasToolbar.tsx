@@ -151,13 +151,11 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
         case 'image':
           newNode.data = {
             src: payload?.src || '',
-            alt: payload?.label || 'Image',
           };
           break;
         case 'pdf':
           newNode.data = {
             src: payload?.src || '',
-            label: payload?.label || 'PDF Document',
           };
           newNode.style = { width: initialWidth, height: initialHeight };
           newNode.isExpanded = true;
@@ -165,13 +163,11 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
         case 'video':
           newNode.data = {
             src: payload?.src,
-            label: payload?.label || 'Video',
           };
           break;
         case 'web':
           newNode.data = {
             src: payload?.src || '',
-            label: payload?.label || 'Web',
           };
           newNode.style = { width: initialWidth, height: initialHeight };
           break;
@@ -278,7 +274,6 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
 
       createNode(type, {
         src: finalUrl,
-        label: type === 'web' ? 'Website' : 'External Resource',
       });
     });
 

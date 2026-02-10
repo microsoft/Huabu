@@ -29,6 +29,7 @@ interface NodeWrapperProps {
 
 export const NodeWrapper = memo(
   ({
+    id,
     type,
     data,
     selected,
@@ -47,6 +48,10 @@ export const NodeWrapper = memo(
     const selectedCount = useCanvasStore(
       (state) => state.nodes.filter((node) => node.selected).length,
     );
+
+    const ingestion = useCanvasStore((state) => state.ingestionByNodeId[id]);
+    const showIngestionOverlay =
+      type !== 'frame' && ingestion?.status === 'pending';
 
     return (
       <>
@@ -85,6 +90,12 @@ export const NodeWrapper = memo(
           )}
           onDoubleClick={onDoubleClick}
         >
+          {showIngestionOverlay && (
+            <div className="bg-background/40 pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
+              <div className="border-muted-foreground/30 border-t-muted-foreground h-5 w-5 animate-spin rounded-full border-2" />
+            </div>
+          )}
+
           <div
             className={clsx(
               'text-icon hover:text-main absolute top-0 -left-4.5 flex h-6 w-4 cursor-grab items-center justify-center rounded opacity-0 transition-opacity',
