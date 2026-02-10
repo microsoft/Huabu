@@ -46,43 +46,6 @@ export const FrameNode = ({ id, data, selected }: NodeProps<FrameNodeType>) => {
     setIsEditingLabel(false);
   };
 
-  // const FrameToolbar = (
-  //   <div className="flex w-full items-center justify-between gap-4">
-  //     {/* Label */}
-  //     <div className="text-muted-foreground flex flex-1 items-center gap-2 text-xs font-medium">
-  //       <Layers size={14} />
-  //       <span className="truncate">{label}</span>
-  //     </div>
-  //
-  //     {/* Tools */}
-  //     <div className="text-muted-foreground flex items-center gap-2">
-  //       <div className="bg-border h-3 w-px" />
-  //
-  //       <GhostButton
-  //         title="Unframe"
-  //         onClick={(e) => {
-  //           e.preventDefault();
-  //           e.stopPropagation();
-  //           unframe(id);
-  //         }}
-  //       >
-  //         <Ungroup size={14} />
-  //       </GhostButton>
-  //       {/* Lock auto-frame */}
-  //       <GhostButton
-  //         title={data.locked ? 'Unlock' : 'Lock'}
-  //         onClick={(e) => {
-  //           e.preventDefault();
-  //           e.stopPropagation();
-  //           toggleFrameLock(id);
-  //         }}
-  //       >
-  //         {data.locked ? <Lock size={14} /> : <Unlock size={14} />}
-  //       </GhostButton>
-  //     </div>
-  //   </div>
-  // );
-
   return (
     <NodeWrapper
       id={id}
@@ -97,57 +60,36 @@ export const FrameNode = ({ id, data, selected }: NodeProps<FrameNodeType>) => {
       <div className="relative h-full p-2">
         <div className="absolute -top-6 left-0 z-10 flex items-center gap-1">
           <div className="relative inline-grid items-center">
-            <span
-              className={clsx(
-                'invisible col-start-1 row-start-1 whitespace-pre',
-                'text-xs font-medium',
-                isEditingLabel
-                  ? 'border border-transparent px-2'
-                  : 'border border-transparent px-1',
-              )}
-            >
-              {draftLabel || 'placeholder'}
+            <span className="invisible col-start-1 row-start-1 px-1.5 text-xs font-medium whitespace-pre">
+              {draftLabel || ' '}
             </span>
 
             <input
               ref={labelInputRef}
-              className={clsx(
-                'col-start-1 row-start-1 min-w-[1px]',
-                isEditingLabel
-                  ? 'border-border text-foreground nodrag border-0 bg-transparent px-2 text-xs font-medium outline-none'
-                  : 'text-muted-foreground hover:text-foreground nodrag rounded border border-transparent bg-transparent px-1 text-xs font-medium outline-none',
-              )}
               value={draftLabel}
               readOnly={!isEditingLabel}
               title="Edit frame name"
-              onChange={(e) => {
-                if (!isEditingLabel) return;
-                setDraftLabel(e.target.value);
-              }}
-              onPointerDown={(e) => {
-                if (!isEditingLabel) return;
-                e.stopPropagation();
-              }}
-              onClick={() => {
-                if (!isEditingLabel) setIsEditingLabel(true);
-              }}
+              size={1}
+              className={clsx(
+                'nodrag col-start-1 row-start-1 w-full !min-w-0 bg-transparent px-1.5 text-xs font-medium outline-none',
+                isEditingLabel
+                  ? 'text-foreground cursor-text'
+                  : 'text-muted-foreground hover:text-foreground cursor-pointer',
+              )}
+              onChange={(e) => isEditingLabel && setDraftLabel(e.target.value)}
+              onClick={() => !isEditingLabel && setIsEditingLabel(true)}
+              onBlur={() => isEditingLabel && commitLabel()}
               onKeyDown={(e) => {
-                e.stopPropagation();
                 if (!isEditingLabel) return;
-
+                e.stopPropagation();
                 if (e.key === 'Enter') {
                   e.preventDefault();
                   commitLabel();
                 }
                 if (e.key === 'Escape') {
-                  e.preventDefault();
                   setDraftLabel(label);
                   setIsEditingLabel(false);
                 }
-              }}
-              onBlur={() => {
-                if (!isEditingLabel) return;
-                commitLabel();
               }}
             />
           </div>

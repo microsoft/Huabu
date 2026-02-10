@@ -7,95 +7,89 @@ import {
   Scan,
   StickyNote,
   Type,
-  Image as ImageIcon,
-  FileText,
-  PlaySquare,
-  Globe,
   LayoutGrid,
-  Check,
-  X,
   UploadCloud,
   Link as LinkIcon,
+  X,
 } from 'lucide-react';
-import {
-  useCallback,
-  useRef,
-  useState,
-  type ChangeEvent,
-  useEffect,
-} from 'react';
+import { useCallback, useRef, useState, type ChangeEvent } from 'react';
+import { createPortal } from 'react-dom';
 
 import { uploadImage, uploadPdf, uploadVideo } from '../../api/artifact.ts';
 import { GhostButton } from '../Common/GhostButton';
 
-const UrlInputPopover = ({
-  type,
+const detectNodeType = (
+  filename: string,
+): 'image' | 'pdf' | 'video' | 'web' => {
+  const ext = filename.split('.').pop()?.toLowerCase();
+
+  if (!ext) return 'web';
+
+  const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'];
+  const videoExts = ['mp4', 'webm', 'ogg', 'mov'];
+
+  if (imageExts.includes(ext)) return 'image';
+  if (ext === 'pdf') return 'pdf';
+  if (videoExts.includes(ext)) return 'video';
+
+  return 'web';
+};
+
+interface UploadModalProps {
+  title: string;
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm?: () => void;
+  children: React.ReactNode;
+  showConfirm?: boolean;
+}
+
+const UploadModal = ({
+  title,
+  isOpen,
+  onClose,
   onConfirm,
-  onCancel,
-  onUploadClick,
-}: {
-  type: 'pdf' | 'web' | 'video' | 'image';
-  onConfirm: (url: string) => void;
-  onCancel: () => void;
-  onUploadClick?: () => void;
-}) => {
-  const [url, setUrl] = useState('');
-  const inputRef = useRef<HTMLInputElement>(null);
+  children,
+  showConfirm = false,
+}: UploadModalProps) => {
+  if (!isOpen) return null;
 
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') onConfirm(url);
-    if (e.key === 'Escape') onCancel();
-  };
-
-  return (
-    <div className="shadow-border border-border animate-in fade-in zoom-in-95 absolute bottom-full left-1/2 z-50 mb-3 flex min-w-[260px] -translate-x-1/2 items-center gap-1 rounded-lg border bg-white px-2 py-1 duration-100">
-      <div className="text-muted-foreground absolute -bottom-1.5 left-1/2 h-3 w-3 -translate-x-1/2 rotate-45 border-r border-b border-gray-200 bg-white" />
-      <div className="pl-1">
-        <LinkIcon size={14} />
-      </div>
-
-      <input
-        ref={inputRef}
-        className="min-w-0 flex-1 border-none bg-transparent px-2 text-xs text-gray-700 placeholder:text-gray-400 focus:ring-0 focus:outline-none"
-        placeholder={type === 'web' ? 'https://example.com' : 'URL...'}
-        value={url}
-        onChange={(e) => setUrl(e.target.value)}
-        onKeyDown={handleKeyDown}
-      />
-      {onUploadClick && (
-        <>
-          <div className="bg-border mx-1 h-4 w-px" />
+  return createPortal(
+    <div className="bg-background/80 animate-in fade-in fixed inset-0 z-[9999] flex items-center justify-center backdrop-blur-[1px] duration-200">
+      <div className="absolute inset-0" onClick={onClose} />
+      <div className="border-border shadow-bottom animate-in zoom-in-95 relative z-10 w-[360px] rounded-lg border bg-white p-6 duration-200">
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="text-main text-sm font-semibold">{title}</h3>
           <button
-            onClick={onUploadClick}
-            className="hover:text-theme-500 hover:bg-theme-50 rounded p-1 transition-colors"
-            title="Upload Local File"
+            onClick={onClose}
+            className="text-muted-foreground hover:text-danger rounded p-1 transition-colors"
           >
-            <UploadCloud size={14} />
+            <X size={16} />
           </button>
-        </>
-      )}
+        </div>
 
-      <div className="bg-border mx-1 h-4 w-px" />
+        <div>{children}</div>
 
-      <button
-        onClick={() => onConfirm(url)}
-        disabled={!url}
-        className="text-theme-500 hover:bg-theme-50 rounded p-1 transition-colors disabled:opacity-30 disabled:hover:bg-transparent"
-      >
-        <Check size={14} />
-      </button>
-
-      <button
-        onClick={onCancel}
-        className="text-main hover:text-danger hover:bg-danger-bg rounded p-1 transition-colors"
-      >
-        <X size={14} />
-      </button>
-    </div>
+        {showConfirm && (
+          <div className="mt-4 flex justify-center gap-4">
+            <button
+              onClick={onClose}
+              className="text-danger bg-danger-bg flex items-center rounded px-2 py-1 text-xs transition-colors hover:bg-gray-100 hover:text-gray-700"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={onConfirm}
+              className="bg-theme-50 hover:bg-theme-100 text-theme-500 flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors"
+            >
+              {/*<Check size={12} />*/}
+              Confirm
+            </button>
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body,
   );
 };
 
@@ -107,14 +101,14 @@ interface NodeToolbarProps {
 export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
   const { addNodes, screenToFlowPosition } = useReactFlow();
 
-  // Refs for file inputs
-  const imageInputRef = useRef<HTMLInputElement>(null);
-  const pdfInputRef = useRef<HTMLInputElement>(null);
-  const videoInputRef = useRef<HTMLInputElement>(null);
+  // Refs
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [activePopup, setActivePopup] = useState<
-    'image' | 'pdf' | 'web' | 'video' | null
-  >(null);
+  // State
+  const [activeModal, setActiveModal] = useState<'upload' | 'link' | null>(
+    null,
+  );
+  const [linkText, setLinkText] = useState('');
 
   const createNode = useCallback(
     (type: string, payload?: any) => {
@@ -123,12 +117,16 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
         y: window.innerHeight / 2,
       });
 
-      const offset = Math.random() * 30 - 15;
+      const offsetX = Math.random() * 100 - 50;
+      const offsetY = Math.random() * 100 - 50;
+
+      const initialWidth = payload?.width || 400;
+      const initialHeight = payload?.height || 300;
 
       const newNode: any = {
         id: createId(type),
         type,
-        position: { x: position.x + offset, y: position.y + offset },
+        position: { x: position.x + offsetX, y: position.y + offsetY },
         data: {},
         style: {},
       };
@@ -136,29 +134,42 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
       switch (type) {
         case 'note':
           newNode.data = { content: '' };
-          newNode.style = { width: 400, height: 300 };
+          newNode.style = { width: initialWidth, height: initialHeight };
           break;
         case 'text':
-          newNode.data = { content: 'Double click to edit text' };
+          newNode.data = { content: '' };
+          newNode.style = { width: initialWidth, height: initialHeight };
           break;
         case 'image':
-          newNode.data = { src: payload?.src || '', alt: 'Image' };
+          newNode.data = {
+            src: payload?.src || '',
+            alt: payload?.title || 'Image',
+          };
           break;
         case 'pdf':
-          newNode.data = { src: payload?.src || '', title: 'PDF Document' };
-          newNode.style = { width: 400, height: 500 };
+          newNode.data = {
+            src: payload?.src || '',
+            title: payload?.title || 'PDF Document',
+          };
+          newNode.style = { width: initialWidth, height: initialHeight };
           break;
         case 'video':
-          newNode.data = { src: payload?.src, title: 'Video' };
+          newNode.data = {
+            src: payload?.src,
+            title: payload?.title || 'Video',
+          };
           break;
         case 'web':
-          newNode.data = { src: payload?.src || '', title: 'Web' };
-          newNode.style = { width: 400, height: 300 };
+          newNode.data = {
+            src: payload?.src || '',
+            title: payload?.title || 'Web',
+          };
+          newNode.style = { width: initialWidth, height: initialHeight };
           break;
         case 'frame':
           newNode.style = {
-            width: 600,
-            height: 400,
+            width: initialWidth,
+            height: initialHeight,
             backgroundColor: 'rgba(0,0,0,0.05)',
           };
           newNode.data = { label: 'New Frame' };
@@ -168,223 +179,237 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
       }
 
       addNodes(newNode);
-      setActivePopup(null);
-      console.log(newNode);
     },
     [addNodes, screenToFlowPosition],
   );
 
-  const onImageChange = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      try {
-        const url = await uploadImage(file);
-        createNode('image', { src: url });
-        e.target.value = ''; // Reset
-      } catch (error) {
-        console.error('Failed to upload image:', error);
-      }
-    }
+  const getImageDimensions = (
+    file: File,
+  ): Promise<{ width: number; height: number }> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.src = URL.createObjectURL(file);
+      img.onload = () => {
+        resolve({ width: img.naturalWidth, height: img.naturalHeight });
+        URL.revokeObjectURL(img.src);
+      };
+      img.onerror = reject;
+    });
   };
 
-  const onPdfFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      try {
-        const url = await uploadPdf(file);
-        createNode('pdf', { src: url });
-        e.target.value = ''; // Reset
-      } catch (error) {
-        console.error('Failed to upload PDF:', error);
-      }
-    }
+  const getVideoDimensions = (
+    file: File,
+  ): Promise<{ width: number; height: number }> => {
+    return new Promise((resolve, reject) => {
+      const video = document.createElement('video');
+      video.src = URL.createObjectURL(file);
+      video.onloadedmetadata = () => {
+        resolve({ width: video.videoWidth, height: video.videoHeight });
+        URL.revokeObjectURL(video.src);
+      };
+      video.onerror = reject;
+    });
   };
 
-  const onVideoChange = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
+  const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    setActiveModal(null);
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const type = detectNodeType(file.name);
+
       try {
-        const url = await uploadVideo(file);
-        createNode('video', { src: url });
-        e.target.value = ''; // Reset
+        let url = '';
+        let dimensions = { width: 400, height: 300 };
+
+        if (type === 'image') {
+          const [uploadedUrl, dims] = await Promise.all([
+            uploadImage(file),
+            getImageDimensions(file),
+          ]);
+          url = uploadedUrl;
+          dimensions = dims;
+        } else if (type === 'video') {
+          const [uploadedUrl, dims] = await Promise.all([
+            uploadVideo(file),
+            getVideoDimensions(file),
+          ]);
+          url = uploadedUrl;
+          dimensions = dims;
+        } else if (type === 'pdf') {
+          url = await uploadPdf(file);
+          dimensions = { width: 400, height: 300 };
+        }
+
+        createNode(type, {
+          src: url,
+          title: file.name,
+          ...dimensions,
+        });
       } catch (error) {
-        console.error('Failed to upload video:', error);
+        console.error(`Failed to upload ${file.name}:`, error);
       }
     }
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const handleUrlConfirm = (url: string) => {
-    if (!url) return;
-    if (activePopup === 'web') {
+  const handleLinkSubmit = () => {
+    if (!linkText.trim()) return;
+
+    const lines = linkText.split('\n');
+
+    lines.forEach((line) => {
+      const url = line.trim();
+      if (!url) return;
+
       const finalUrl = url.startsWith('http') ? url : `https://${url}`;
-      createNode('web', { src: finalUrl });
-    } else if (activePopup === 'pdf') {
-      createNode('pdf', { src: url });
-    } else if (activePopup === 'video') {
-      createNode('video', { src: url });
-    } else if (activePopup === 'image') {
-      createNode('image', { src: url });
-    }
+      const type = detectNodeType(finalUrl);
+
+      createNode(type, {
+        src: finalUrl,
+        title: type === 'web' ? 'Website' : 'External Resource',
+      });
+    });
+
+    setLinkText('');
+    setActiveModal(null);
   };
 
   return (
-    <div className="text-muted-foreground shadow-bottom pointer-events-auto relative flex w-max items-center gap-2 rounded-lg border-0 bg-white p-2">
-      {/* --- Hidden Inputs --- */}
-      <input
-        type="file"
-        ref={imageInputRef}
-        className="hidden"
-        accept="image/*"
-        onChange={onImageChange}
-      />
-      <input
-        type="file"
-        ref={pdfInputRef}
-        className="hidden"
-        accept="application/pdf"
-        onChange={onPdfFileChange}
-      />
-      <input
-        type="file"
-        ref={videoInputRef}
-        className="hidden"
-        accept="video/mp4"
-        onChange={onVideoChange}
-      />
-
-      {/* Group 1: Tools */}
-      <div className="flex items-center gap-2">
-        <GhostButton
-          title="Select"
-          className={clsx(
-            activeTool === 'select' && 'text-theme-500 bg-background',
-          )}
-          onClick={() => onToolChange('select')}
-        >
-          <MousePointer2 size={18} />
-        </GhostButton>
-        <GhostButton
-          title="Pan"
-          className={clsx(
-            activeTool === 'pan' && 'text-theme-500 bg-background',
-          )}
-          onClick={() => onToolChange('pan')}
-        >
-          <Hand size={18} />
-        </GhostButton>
-      </div>
-
-      <div className="bg-border mx-1 h-4 w-px" />
-
-      {/* Group 2: Layouts */}
-      <div className="flex items-center gap-2">
-        <GhostButton title="Frame" onClick={() => createNode('frame')}>
-          <Scan size={18} />
-        </GhostButton>
-        <GhostButton title="Note" onClick={() => createNode('note')}>
-          <StickyNote size={18} />
-        </GhostButton>
-      </div>
-
-      <div className="bg-border mx-1 h-4 w-px" />
-
-      {/* Group 3: Media (Complex interactions here) */}
-      <div className="flex items-center gap-2">
-        <GhostButton title="Text" onClick={() => createNode('text')}>
-          <Type size={18} />
-        </GhostButton>
-
-        <div className="relative">
+    <>
+      <div className="text-muted-foreground shadow-bottom pointer-events-auto relative flex w-max items-center gap-2 rounded-lg border-0 bg-white p-2">
+        {/* Group 1: Tools */}
+        <div className="flex items-center gap-2">
           <GhostButton
-            title="Image"
+            title="Select"
             className={clsx(
-              activePopup === 'image' && 'text-theme-500 bg-background',
+              activeTool === 'select' && 'text-theme-500 bg-background',
             )}
-            onClick={() =>
-              setActivePopup(activePopup === 'image' ? null : 'image')
-            }
+            onClick={() => onToolChange('select')}
           >
-            <ImageIcon size={18} />
+            <MousePointer2 size={18} />
           </GhostButton>
-          {activePopup === 'image' && (
-            <UrlInputPopover
-              type="image"
-              onConfirm={handleUrlConfirm}
-              onCancel={() => setActivePopup(null)}
-              onUploadClick={() => imageInputRef.current?.click()}
-            />
-          )}
+          <GhostButton
+            title="Pan"
+            className={clsx(
+              activeTool === 'pan' && 'text-theme-500 bg-background',
+            )}
+            onClick={() => onToolChange('pan')}
+          >
+            <Hand size={18} />
+          </GhostButton>
         </div>
 
-        <div className="relative">
-          <GhostButton
-            title="PDF"
-            className={clsx(
-              activePopup === 'pdf' && 'text-theme-500 bg-background',
-            )}
-            onClick={() => setActivePopup(activePopup === 'pdf' ? null : 'pdf')}
-          >
-            <FileText size={18} />
+        <div className="bg-border mx-1 h-4 w-px" />
+
+        {/* Group 2: Layouts */}
+        <div className="flex items-center gap-2">
+          <GhostButton title="Frame" onClick={() => createNode('frame')}>
+            <Scan size={18} />
           </GhostButton>
-          {activePopup === 'pdf' && (
-            <UrlInputPopover
-              type="pdf"
-              onConfirm={handleUrlConfirm}
-              onCancel={() => setActivePopup(null)}
-              onUploadClick={() => pdfInputRef.current?.click()}
-            />
-          )}
+          <GhostButton title="Note" onClick={() => createNode('note')}>
+            <StickyNote size={18} />
+          </GhostButton>
+          <GhostButton title="Text" onClick={() => createNode('text')}>
+            <Type size={18} />
+          </GhostButton>
         </div>
 
-        <div className="relative">
+        <div className="bg-border mx-1 h-4 w-px" />
+
+        <div className="flex items-center gap-2">
           <GhostButton
-            title="Video"
+            title="Upload Files"
             className={clsx(
-              activePopup === 'video' && 'text-theme-500 bg-background',
+              activeModal === 'upload' && 'text-theme-500 bg-background',
             )}
-            onClick={() =>
-              setActivePopup(activePopup === 'video' ? null : 'video')
-            }
+            onClick={() => setActiveModal('upload')}
           >
-            <PlaySquare size={18} />
+            <UploadCloud size={18} />
           </GhostButton>
-          {activePopup === 'video' && (
-            <UrlInputPopover
-              type="video"
-              onConfirm={handleUrlConfirm}
-              onCancel={() => setActivePopup(null)}
-              onUploadClick={() => videoInputRef.current?.click()}
-            />
-          )}
+
+          <GhostButton
+            title="Add Links"
+            className={clsx(
+              activeModal === 'link' && 'text-theme-500 bg-background',
+            )}
+            onClick={() => setActiveModal('link')}
+          >
+            <LinkIcon size={18} />
+          </GhostButton>
         </div>
 
-        <div className="relative">
-          <GhostButton
-            title="Website"
-            className={clsx(
-              activePopup === 'web' && 'text-theme-500 bg-background',
-            )}
-            onClick={() => setActivePopup(activePopup === 'web' ? null : 'web')}
-          >
-            <Globe size={18} />
+        <div className="bg-border mx-1 h-4 w-px" />
+
+        <div className="flex items-center gap-2">
+          <GhostButton title="Layout">
+            <LayoutGrid size={18} />
           </GhostButton>
-          {activePopup === 'web' && (
-            <UrlInputPopover
-              type="web"
-              onConfirm={handleUrlConfirm}
-              onCancel={() => setActivePopup(null)}
-            />
-          )}
         </div>
       </div>
 
-      <div className="bg-border mx-1 h-4 w-px" />
+      {/* --- Modals --- */}
 
-      <div className="flex items-center gap-2">
-        <GhostButton title="Layout">
-          <LayoutGrid size={18} />
-        </GhostButton>
-      </div>
-    </div>
+      {/* 1. File Upload Modal */}
+      <UploadModal
+        title="Upload Local Files"
+        isOpen={activeModal === 'upload'}
+        onClose={() => setActiveModal(null)}
+      >
+        <div className="flex flex-col items-center justify-center gap-4 pt-2">
+          <p className="text-muted-foreground text-center text-xs">
+            Supports Images, PDFs, and Videos.
+            <br />
+            Select multiple files to upload in batch.
+          </p>
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="bg-theme-50 hover:bg-theme-100 text-theme-500 border-theme-500 flex w-full flex-col items-center gap-2 rounded-md border border-dashed px-4 py-8 transition-colors"
+          >
+            <UploadCloud size={24} />
+            <span className="text-sm">Click to select files</span>
+          </button>
+
+          {/* Hidden Input for Multiple Selection */}
+          <input
+            type="file"
+            ref={fileInputRef}
+            className="hidden"
+            multiple
+            accept="image/*,application/pdf,video/mp4"
+            onChange={handleFileChange}
+          />
+        </div>
+      </UploadModal>
+
+      {/* 2. Link Input Modal */}
+      <UploadModal
+        title="Add Links"
+        isOpen={activeModal === 'link'}
+        onClose={() => setActiveModal(null)}
+        onConfirm={handleLinkSubmit}
+        showConfirm={true}
+      >
+        <div className="flex flex-col gap-2">
+          <p className="text-muted-foreground text-xs">
+            Paste URLs below (one per line).
+          </p>
+          <textarea
+            className="border-border placeholder:text-border focus:border-theme-500 focus:ring-theme-500 min-h-[100px] w-full resize-none rounded-md border bg-transparent px-3 py-2 text-sm focus:outline-none"
+            placeholder={`https://example.com/image.png\nhttps://example.com/doc.pdf\nhttps://google.com`}
+            value={linkText}
+            onChange={(e) => setLinkText(e.target.value)}
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                handleLinkSubmit();
+              }
+            }}
+          />
+        </div>
+      </UploadModal>
+    </>
   );
 };

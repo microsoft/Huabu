@@ -131,21 +131,49 @@ export const NodeWrapper = memo(
 
           <Handle
             type="target"
+            id="top-target"
             position={Position.Top}
             className="!bg-theme-500 !-top-1 !h-1 !w-1 !border-none opacity-0 transition-opacity group-hover:opacity-100"
           />
           <Handle
             type="source"
+            id="top-source"
+            position={Position.Top}
+            className="!bg-theme-500 !-top-1 !h-1 !w-1 !border-none opacity-0 transition-opacity group-hover:opacity-100"
+          />
+          <Handle
+            type="target"
+            id="right-target"
             position={Position.Right}
             className="!bg-theme-500 !-right-1 !h-1 !w-1 !border-none opacity-0 transition-opacity group-hover:opacity-100"
           />
           <Handle
             type="source"
+            id="right-source"
+            position={Position.Right}
+            className="!bg-theme-500 !-right-1 !h-1 !w-1 !border-none opacity-0 transition-opacity group-hover:opacity-100"
+          />
+          <Handle
+            type="target"
+            id="bottom-target"
+            position={Position.Bottom}
+            className="!bg-theme-500 !-bottom-1 !h-1 !w-1 !border-none opacity-0 transition-opacity group-hover:opacity-100"
+          />
+          <Handle
+            type="source"
+            id="bottom-source"
             position={Position.Bottom}
             className="!bg-theme-500 !-bottom-1 !h-1 !w-1 !border-none opacity-0 transition-opacity group-hover:opacity-100"
           />
           <Handle
             type="target"
+            id="left-target"
+            position={Position.Left}
+            className="!bg-theme-500 !-left-1 !h-1 !w-1 !border-none opacity-0 transition-opacity group-hover:opacity-100"
+          />
+          <Handle
+            type="source"
+            id="left-source"
             position={Position.Left}
             className="!bg-theme-500 !-left-1 !h-1 !w-1 !border-none opacity-0 transition-opacity group-hover:opacity-100"
           />
