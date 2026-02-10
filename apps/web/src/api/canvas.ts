@@ -4,6 +4,9 @@ import type {
   GetCanvasResponse,
   PutCanvasRequest,
   PutCanvasResponse,
+  UpsertNodeRequest,
+  UpsertNodeResponse,
+  DeleteNodeResponse,
 } from '@sediment/shared';
 
 export async function getCanvas(
@@ -48,4 +51,45 @@ export async function putCanvas(
   }
 
   return (await response.json()) as PutCanvasResponse;
+}
+
+export async function upsertNode(
+  canvasId: string,
+  nodeId: string,
+  request: UpsertNodeRequest,
+): Promise<UpsertNodeResponse> {
+  const response = await fetch(
+    `${API_CONFIG.API_URL}/canvas/${canvasId}/nodes/${nodeId}`,
+    {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(`Failed to upsert node: ${response.statusText}`);
+  }
+
+  return (await response.json()) as UpsertNodeResponse;
+}
+
+export async function deleteNode(
+  canvasId: string,
+  nodeId: string,
+): Promise<DeleteNodeResponse> {
+  const response = await fetch(
+    `${API_CONFIG.API_URL}/canvas/${canvasId}/nodes/${nodeId}`,
+    {
+      method: 'DELETE',
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(`Failed to delete node: ${response.statusText}`);
+  }
+
+  return (await response.json()) as DeleteNodeResponse;
 }

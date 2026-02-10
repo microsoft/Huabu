@@ -12,7 +12,7 @@ import {
 } from '@xyflow/react';
 import { create } from 'zustand';
 
-import { getCanvas, putCanvas } from '../api';
+import { getCanvas, putCanvas, upsertNode, deleteNode } from '../api';
 import {
   autoFrameNodeByOverlap,
   autoUnframeNodeByNonOverlap,
@@ -24,6 +24,29 @@ import {
 
 const CANVAS_ID = 'default-canvas';
 const AUTOSAVE_DEBOUNCE_MS = 1000;
+
+// Helper to check if a node type needs ingestion
+function needsIngestion(nodeType: string): boolean {
+  return ['note', 'text', 'web', 'pdf'].includes(nodeType);
+}
+
+// Helper to trigger node ingestion
+async function ingestNodeIfNeeded(canvasId: string, node: Node): Promise<void> {
+  if (!needsIngestion(node.type ?? '')) return;
+
+  const nodeData = node.data as Record<string, unknown> | undefined;
+
+  try {
+    await upsertNode(canvasId, node.id, {
+      type: node.type as 'note' | 'text' | 'web' | 'pdf',
+      title: (nodeData?.label as string) ?? (nodeData?.title as string),
+      content: nodeData?.content as string,
+      src: nodeData?.src as string,
+    });
+  } catch (error) {
+    console.error('Failed to ingest node:', node.id, error);
+  }
+}
 
 type RFState = {
   nodes: Node[];
@@ -151,6 +174,21 @@ const useCanvasStore = create<RFState>((set, get) => ({
       result = autoFrameNodeByOverlap(result, nodeId, { threshold: 0.75 });
     }
 
+    // Handle node deletion - call delete API
+    const removedIds = changes
+      .filter((c) => c.type === 'remove')
+      .map((c) => c.id);
+
+    if (removedIds.length > 0) {
+      const { canvasId } = get();
+      // Fire-and-forget deletions
+      for (const nodeId of removedIds) {
+        void deleteNode(canvasId, nodeId).catch((error) => {
+          console.error('Failed to delete node:', nodeId, error);
+        });
+      }
+    }
+
     set({ nodes: result });
 
     scheduleAutoSave(get().saveCanvas);
@@ -177,23 +215,38 @@ const useCanvasStore = create<RFState>((set, get) => ({
   addNode: (node) => {
     set({ nodes: [...get().nodes, node] });
 
+    // Ingest the node if needed
+    const { canvasId } = get();
+    void ingestNodeIfNeeded(canvasId, node);
+
     scheduleAutoSave(get().saveCanvas);
   },
 
   updateNodeData: (nodeId, patch) => {
     if (!nodeId) return;
+
+    let updatedNode: Node | undefined;
+
     set({
       nodes: get().nodes.map((n) => {
         if (n.id !== nodeId) return n;
-        return {
+        const updated = {
           ...n,
           data: {
             ...(n.data ?? {}),
             ...patch,
           },
         };
+        updatedNode = updated;
+        return updated;
       }),
     });
+
+    // Ingest the updated node if needed
+    if (updatedNode) {
+      const { canvasId } = get();
+      void ingestNodeIfNeeded(canvasId, updatedNode);
+    }
 
     scheduleAutoSave(get().saveCanvas);
   },

@@ -186,7 +186,7 @@
   - 入参：`{ version, upserts: Node[], deletes: string[] }`
   - 目的：减少每次全量上传 JSON 的开销；但不强制 v1 就做。
 
-**写入流程（推荐）**
+**写入流程（v1 实际实现）**
 
 1. 前端在以下场景触发保存：
 
@@ -196,21 +196,21 @@
 2. 后端收到保存请求后：
 
 - 校验 `version`（乐观锁）
+- 解析 `state.nodes` 提取节点数据（type, data.content, data.src, data.label）
+- **同步调用 ingestService 摄取数据源**（Text/Note/Web 类型）
+  - Text/Note: 调用 `ingestTextSource()`，创建/更新 `sources` + 新增 `source_revisions`
+  - Web: 调用 `ingestWebSource()`，创建/更新 `sources`
+  - 返回 `sourceId`
 - 写入 `canvases.state_json`
-- 解析 nodes 列表，刷新 `canvas_nodes`（upsert）
+- 写入 `canvas_nodes` 表（存储 `node_id` → `source_id` 映射）
+- 摄取失败不影响画布保存（仅记录日志）
 
-3. （可选）触发摄取/索引（与本方案的 Link B 对齐）：
-
-> 一致性原则：画布持久化（`canvases/canvas_nodes`）是权威写入，要求强一致；知识库与向量索引（`sources/source_revisions/chunks` + SurrealDB）是派生数据，允许最终一致。
+> **实现说明**：
 >
-> 换句话说：**画布保存成功 ≠ 必须同步完成摄取/embedding**。摄取可以异步跑，或在 chat 前对 `selectedNodeIds` 按需补齐。
-
-- v1 直接基于 `canvases.state_json` + `sources` 做增量判断：
-  - 解析画布中的 nodes，提取包含 `sourceId` 的数据源节点
-  - 对于新的 sourceId（前端新创建的节点），需要前端在创建时就调用摄取 API（或在保存画布时携带新 source 的元数据）
-  - 对于已存在的 sourceId，从 `sources` 表读取内容并计算 `content_hash`
-  - Note/Text 类型：每次内容变化时新增 `source_revisions`（摄取时机可以是编辑完成保存，或 chat 前按需）
-  - 异步重建 chunks/embeddings
+> - v1 实现采用画布保存时同步摄取（简单直接，无需任务队列）
+> - Text/Note 每次保存都会调用 ingestService（内部通过 hash 判断是否需要新 revision）
+> - Web 节点通过 hash 去重，相同 URL 不会重复摄取
+> - 异步重建 chunks/embeddings（可选，v2）
 
 **验收标准（画布服务端持久化 MVP）**
 
@@ -329,26 +329,31 @@
     - 如果选中大量新节点，摄取时间可能较长（尤其 Web 抓取）
   - 适用场景：MVP/v1、中小规模数据源
 
-- ⭐ **策略 C：混合策略（按类型区分，推荐 v1）**
-  - **Text/Note（可编辑类型）**：Chat 前按需补齐
-    - 理由：编辑频繁，异步摄取容易过期，按需摄取最新鲜
-    - 流程：Chat 时检测 hash 变化 → 同步 upsert `source_revisions`
-  - **Web/PDF（不可编辑类型）**：异步摄取 + Chat 前兜底
-    - 理由：内容稳定，可以异步摄取提前准备（尤其 Web 抓取和 PDF 解析耗时）
-    - 流程：
-      1. 画布保存时触发异步摄取（仅 Web/PDF/Image 类型）
-      2. Chat 前检查：若未摄取成功则同步补齐（兜底）
-  - 优点：
-    - 兼顾体验与可靠性
-    - Text/Note 按需摄取保证新鲜度
-    - Web 等异步摄取减少 Chat 前等待时间
-    - 兜底机制保证数据完整性
-  - 缺点：
-    - 需要实现简单的异步任务队列（可用内存队列/Promise.all 简单实现）
-    - 实现复杂度中等（但相比全异步简单很多）
-  - 适用场景：v1 推荐方案，平衡了实现成本与用户体验
+- ⭐ **策略 D：画布保存时同步摄取（v1 实际实现）**
 
-**决策**：☑ 策略 C（混合策略，推荐）□ 策略 A（全异步）□ 策略 B（全按需）
+  - **所有类型（Text/Note/Web）**：画布保存时同步摄取
+    - 理由：实现简单，数据一致性强，无需任务队列
+    - 流程：
+      1. 前端保存画布（节流后）
+      2. 后端解析 `state.nodes` 提取数据
+      3. 同步调用 `ingestTextSource()` / `ingestWebSource()`
+      4. 获得 `sourceId` 后写入 `canvas_nodes` 表
+    - Chat 时：直接从 `canvas_nodes` 读取 `sourceIds`（无需摄取）
+  - 优点：
+    - 实现最简单，无需异步队列
+    - 数据强一致性（保存成功 = 摄取成功）
+    - Chat 响应快（只需查表，不做摄取）
+  - 缺点：
+    - 画布保存可能稍慢（需等待摄取完成，但实际 < 100ms）
+    - Web 抓取失败会静默跳过（记录日志但不阻塞保存）
+  - 适用场景：v1 MVP，优先简单可靠
+
+- **策略 C：混合策略（按类型区分）** - 未采用，保留为 v2 优化方向
+  - Text/Note：保存时同步摄取
+  - Web/PDF：异步摄取 + Chat 前兜底
+  - 需要实现任务队列，复杂度较高
+
+**决策**：☑ 策略 D（保存时同步摄取，v1 实现）□ 策略 C（混合策略，v2 备选）□ 策略 A（全异步）□ 策略 B（全按需）
 
 ---
 
@@ -425,23 +430,26 @@
    - 实现 `computeContentHash()` 函数
    - 单元测试
 
-3. **Step 3: Text/Note 摄取（Chat 前按需）**
+3. **Step 3: Text/Note 摄取（画布保存时同步摄取）**
 
    - 实现 `ingestTextSource()` 函数
    - 支持 `source_revisions` 新增逻辑
    - 处理 content_text vs artifact 存储
-   - 实现 hash 对比逻辑（检测内容变更）
+   - 触发位置：`canvas.route.ts` 的 `PUT /canvas/:canvasId`
+   - 调用时机：解析 `state.nodes` 后，对每个 note/text 节点调用
+   - 返回 `sourceId` 用于写入 `canvas_nodes` 表
 
-4. **Step 4: Web 摄取（异步 + 兜底）**
+4. **Step 4: Web 摄取（画布保存时同步摄取）**
    - 实现 `ingestWebSource()` 函数
-   - 实现：优先使用节点已有内容，无内容时后端抓取
-   - 错误处理（抓取失败、超时等）
+   - 实现：优先使用节点已有内容（`data.content`），无内容时后端抓取（`data.src`）
+   - 触发位置：`canvas.route.ts` 的 `PUT /canvas/:canvasId`
+   - 错误处理：抓取失败记录日志但不阻塞画布保存
 
 4.5. **Step 4.5: PDF 摄取（异步 + 兜底）**
 
 - 实现 `ingestPdfSource()` 函数
-- **PDF 解析库选择**（任选其一）：
-  - ⭐ **方案 A: pdf-parse (Node.js 原生，推荐 v1)**
+- **PDF 解析库选择**
+  - ⭐ **pdf-parse (Node.js 原生，推荐 v1)**
     - 安装：`npm install pdf-parse`
     - 优点：纯 JS，无需额外服务，简单易用
     - 缺点：复杂 PDF 可能解析不完整
@@ -453,25 +461,31 @@
       const text = data.text; // 提取的文本
       ```
 - 从 artifactUri 读取 PDF 文件 → 解析库提取文本 → 存储
-- 错误处理（文件不存在、解析失败等）
+- 错误处理（文件不存在、Canvas 路由集成（保存时触发摄取）\*\*
 
-5. **Step 5: 简单异步任务队列（仅 Web/PDF）**
+  - 修改 `canvas.route.ts` 的 `PUT /canvas/:canvasId`
+  - 解析 `state.nodes` 提取节点数据（id, type, data.content, data.src, data.label）
+  - 对支持的节点类型调用 ingestService：
+    - Text/Note: `ingestTextSource()`
+    - Web: `ingestWebSource()`
+  - 收集 `sourceId` 并写入 `canvas_nodes` 表
+  - 使用事务确保原子性
 
-   - 实现内存队列或使用 Promise.all 批量处理
-   - 画布保存时触发：提取 Web/PDF 节点 → 入队
-   - 后台 worker 消费队列 → 调用对应摄取函数
-   - 无需持久化队列（重启丢失可接受，chat 前会兜底）
-
-2. **Step 6: Chat 路由集成（混合摄取）**
+6. **Step 6: Chat 路由集成（读取 sourceIds）**
 
    - 修改 `chat.route.ts`，读取 `canvasId/canvasVersion/selectedNodeIds`
-   - 实现版本校验（version mismatch → 409）
-   - 摄取逻辑：
-     - Text/Note：检查 hash → 不一致则同步摄取
-     - Web/PDF：检查是否存在 → 不存在则同步摄取（兜底）
+   - 实现版本校验（version mismatch → 409 Conflict）
+   - 从 `canvas_nodes` 表查询 `sourceIds`：
+     ```sql
+     SELECT source_id FROM canvas_nodes
+     WHERE canvas_id = ? AND node_id IN (?)
+     ```
+   - 调用 `buildContext(sourceIds)` 构建 LLM 上下文
+   - 将 context 追加到 system promptsion，hash 不一致时兜底同步摄取
+     - Web/PDF：检查是否存在，不存在时兜底同步摄取
    - 构建初步上下文（Link C 的前置工作）
 
-3. **Step 7: 测试与验收**
+7. **Step 7: 测试与验收**
    - 单元测试：sourceId 生成、hash 计算、摄取函数
    - 集成测试：
      - Text/Note 编辑 → 立即 chat（验证按需摄取）
@@ -480,19 +494,20 @@
      - PDF 节点上传 → chat（验证 PDF 文本抽取）
    - 验收标准（见文档 Link B 验收标准）
 
-**决策**：☑ 同意推荐顺序（混合策略）□ 调整顺序：\_\_\_\_\_\_\_\_
+**决策**：☑ 同意推荐顺序（混合策略）
 
 ---
 
 **实施检查清单**
 
 在开始编码前，请确认以下所有决策已完成：
+画布保存时同步摄取\*\*
 
-- [x] 数据库命名已确定：`knowledge.sqlite`
-- [x] sourceId 生成策略已明确（针对每种类型）：
-  - Text/Note: UUID
-  - Web: hash(workspaceId + uri)
-  - PDF/File: hash(workspaceId + fileHash)
+- Text/Note/Web: 画布保存时同步调用 ingestService
+- Chat 时: 只读取 sourceIds，不做摄取型）：
+- Text/Note: UUID
+- Web: hash(workspaceId + uri)
+- PDF/File: hash(workspaceId + fileHash)
 - [x] 摄取触发时机已选择：**混合策略**
   - Text/Note: Chat 前按需补齐
   - Web/PDF: 异步摄取 + Chat 前兜底
@@ -505,61 +520,6 @@
 - [x] Web 类型的实现路径已选择：两者都支持（优先已有内容）
 - [x] PDF 解析库已确定：**pdf-parse**（推荐），备选 unpdf/pdfjs-dist
 - [x] 实现步骤顺序已确认（适配混合策略 + PDF）
-
----
-
-3. 按类型摄取（v1 优先顺序）：
-
-- **Text / Note（可编辑）**
-
-  - 确保 `sources` 里有该节点的记录。
-  - 每次保存/更新都新增一条 `source_revisions`（不覆盖历史）。
-  - 小文本可直接存 `content_text`；大文本落 artifact（`artifact://...`）。
-
-- **Web**
-
-  - v1 \*\*
-  - v1：使用 content-core（复用 open-notebook 方案）抽取文本
-  - 实现：从 artifactUri 读取文件 → Python content-core 解析 → 存储文本
-  - v2：增强 locator（页码、bbox 等）
-
-- **Image / Video**
-
-  - v1：不支持
-  - v2：Image 使用 OCR/视觉模型，Video 使用转录 + 关键帧
-  - 持久化 normalized text 与元信息（`uri`/`title`/`content_hash`）。
-
-- **PDF / Image / Video**
-  - v1：先把 Source Record 存起来（文件 URI/元信息），文本抽取/OCR 可以延后。
-  - v2：补抽取/OCR，并写入 locator（页码、bbox 等）。
-
-#### 摄取触发时机（避免“每次改 node 必须同步写很多表”）
-
-为了避免前端编辑节点时产生写放大，本方案推荐把数据写入分成两层：
-
-- **强一致层（必须同步成功）**：`canvases` + `canvas_nodes`（画布权威状态与节点索引）。
-- **派生层（允许最终一致）**：`sources/source_revisions/chunks` + SurrealDB 向量（可重建索引）。
-
-落地时你有两种常见策略，可以混用：
-
-1. **异步摄取（推荐默认）**
-
-- 在画布 `PUT /api/canvas/:canvasId` 成功后，把“可能变化的 data source 节点”放进后台任务队列。
-- 后台按 `content_hash` 增量更新 `sources/source_revisions`，并重建 chunks/embeddings。
-
-2. **Chat 前按需补齐（保证新鲜度）**
-
-- 当用户发起 chat（携带 `canvasId/canvasVersion + selectedNodeIds`）时：
-  - 后端先读取该版本的 `canvas_nodes.data_json`，对 `selectedNodeIds` 计算 `content_hash`
-  - 若发现 knowledge DB 中 `sources.content_hash` 不一致，则先同步 upsert（仅限 selected 范围），再进入检索/生成
-- 这样能保证“刚编辑完就提问”的体验，同时不会让每一次编辑都同步写知识库与向量索引。
-
-**验收标准**
-
-- 一次 chat 调用后，选中的 source 节点在 `sources` 表里都能查到。
-- Note/Text 被编辑后会新增 revision（无覆盖）。
-
----
 
 ### Link C — 检索（构建 LLM 上下文）
 

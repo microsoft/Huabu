@@ -21,6 +21,7 @@
     "better-sqlite3": "^12.6.2",
     "dotenv": "^17.2.3",
     "fastify": "^5.2.0",
+    "pdf-parse": "^2.4.5",
     "zod": "^4.3.6"
   },
   "devDependencies": {

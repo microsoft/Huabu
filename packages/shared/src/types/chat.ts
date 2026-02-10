@@ -21,10 +21,14 @@ export interface SendMessageRequest {
   selectedNodeIds: string[];
 }
 
-export interface SendMessageResponse {
-  messageId: string;
-  reply: string;
-}
+export type SendMessageResponse =
+  | {
+      messageId: string;
+      reply: string;
+    }
+  | {
+      error: string;
+    };
 
 // --- Streaming Types ---
 export type ChatRole = 'user' | 'assistant' | 'system' | 'tool';

@@ -24,3 +24,24 @@ export interface CanvasVersionMismatchError {
   message: string;
   serverVersion: number;
 }
+
+/**
+ * Node API types for individual node operations
+ */
+
+export interface UpsertNodeRequest {
+  workspaceId?: string;
+  type: 'note' | 'text' | 'web' | 'pdf';
+  title?: string;
+  content?: string;
+  src?: string;
+}
+
+export interface UpsertNodeResponse {
+  nodeId: string;
+  sourceId: string | null;
+}
+
+export interface DeleteNodeResponse {
+  success: boolean;
+}
