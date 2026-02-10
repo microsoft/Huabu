@@ -41,6 +41,11 @@ export interface UpsertNodeResponse {
   nodeId: string;
   sourceId: string;
   success: boolean;
+  /**
+   * Optional server-suggested label derived from ingested content (e.g. web page title, PDF title).
+   * The client may choose to apply it only when the current label is empty or still a placeholder.
+   */
+  suggestedLabel?: string;
   error?: string;
 }
 

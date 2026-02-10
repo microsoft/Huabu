@@ -44,6 +44,29 @@ async function ingestNodeIfNeeded(canvasId: string, node: Node): Promise<void> {
       src: nodeData?.src as string,
     });
 
+    // Optionally apply server-suggested label (e.g. parsed PDF/web title).
+    // Only overwrite when the current label is empty or still a known placeholder.
+    if (response.success && response.suggestedLabel) {
+      const suggestedLabel = response.suggestedLabel.trim();
+      if (suggestedLabel.length > 0) {
+        const state = useCanvasStore.getState();
+        const currentNode = state.nodes.find((n) => n.id === node.id);
+        if (currentNode) {
+          const currentLabel =
+            typeof (currentNode.data as Record<string, unknown> | undefined)
+              ?.label === 'string'
+              ? ((currentNode.data as Record<string, unknown>).label as string)
+              : '';
+
+          const isBlank = currentLabel.trim().length === 0;
+
+          if (isBlank) {
+            state.updateNodeData(node.id, { label: suggestedLabel });
+          }
+        }
+      }
+    }
+
     if (!response.success) {
       console.error(
         'Node ingestion did not complete successfully:',

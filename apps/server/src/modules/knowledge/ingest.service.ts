@@ -83,6 +83,11 @@ export type NodeIngestError = {
 export type NodeIngestOutcome = {
   sourceId: string;
   success: boolean;
+  /**
+   * Optional title inferred during ingestion (e.g. from web fetch or PDF metadata).
+   * Canvas can use this as a suggested default label.
+   */
+  title?: string;
   error?: NodeIngestError;
 };
 
@@ -197,7 +202,11 @@ export class IngestService {
           content: nodeContent,
           existingSourceId: existingSourceId ?? undefined,
         });
-        return { sourceId: result.source.source_id, success: true };
+        return {
+          sourceId: result.source.source_id,
+          success: true,
+          title: result.source.title ?? undefined,
+        };
       } catch (error) {
         const sourceId =
           existingSourceId ??
@@ -254,7 +263,11 @@ export class IngestService {
         title,
         content,
       });
-      return { sourceId: result.source.source_id, success: true };
+      return {
+        sourceId: result.source.source_id,
+        success: true,
+        title: result.source.title ?? undefined,
+      };
     } catch (error) {
       const normalizedUri = normalizeUrl(uri);
       const sourceId =
@@ -369,7 +382,11 @@ export class IngestService {
         filePath,
         title,
       });
-      return { sourceId: result.source.source_id, success: true };
+      return {
+        sourceId: result.source.source_id,
+        success: true,
+        title: result.source.title ?? undefined,
+      };
     } catch (error) {
       return placeholderFrom({
         code: 'PDF_PARSE_FAILED',

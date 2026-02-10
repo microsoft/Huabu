@@ -108,6 +108,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         nodeId,
         sourceId,
         success,
+        suggestedLabel: outcome.title,
         error: error ? `${error.code}: ${error.message}` : undefined,
       });
     } catch (error) {
