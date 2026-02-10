@@ -1,4 +1,9 @@
-import { type Node, type NodeProps, useReactFlow } from '@xyflow/react';
+import {
+  type Node,
+  type NodeProps,
+  useReactFlow,
+  useStore,
+} from '@xyflow/react';
 import { clsx } from 'clsx';
 import {
   FileText,
@@ -7,8 +12,6 @@ import {
   Maximize2,
   Minimize2,
   Fullscreen,
-  ZoomIn,
-  ZoomOut,
 } from 'lucide-react';
 import { useCallback, useState, useRef } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
@@ -23,33 +26,33 @@ import { GhostButton } from '../Common/GhostButton.tsx';
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 type PDFNodeData = NodeDataProps & {
+  src?: string;
+  label?: string;
+};
+type CustomPDFNode = Node<PDFNodeData, 'pdf'> & {
   isExpanded?: boolean;
 };
-export type PDFNodeType = Node<PDFNodeData, 'pdf'>;
+export type PDFNodeType = CustomPDFNode;
 
 export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
-  const { updateNodeData, updateNode } = useReactFlow();
+  const { setNodes } = useReactFlow();
   const openExpanded = useCanvasStore((s) => s.openExpanded);
 
   const containerRef = useRef<HTMLDivElement>(null);
-
   const [numPages, setNumPages] = useState<number | null>(null);
-  const [scale, setScale] = useState(0.7);
 
-  const isExpanded = data.isExpanded ?? true;
+  const isExpanded = useStore(
+    useCallback(
+      (state) => {
+        const node = state.nodeLookup?.get(id);
+        return (node as CustomPDFNode)?.isExpanded ?? true;
+      },
+      [id],
+    ),
+  );
 
   const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
     setNumPages(numPages);
-  };
-
-  const handleZoomIn = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setScale((prev) => Math.min(prev + 0.1, 3.0));
-  };
-
-  const handleZoomOut = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setScale((prev) => Math.max(prev - 0.1, 0.5));
   };
 
   const handleDownload = useCallback(
@@ -70,16 +73,24 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
     (e: React.MouseEvent) => {
       e.stopPropagation();
       const newExpandedState = !isExpanded;
-
-      updateNodeData(id, { isExpanded: newExpandedState });
-
-      updateNode(id, {
-        style: newExpandedState
-          ? { width: 460, height: 500 }
-          : { width: 260, height: 80 },
-      });
+      setNodes((nodes) =>
+        nodes.map((node) => {
+          if (node.id === id) {
+            return {
+              ...node,
+              isExpanded: newExpandedState,
+              style: {
+                ...node.style,
+                width: newExpandedState ? 400 : 260,
+                height: newExpandedState ? 300 : 80,
+              },
+            };
+          }
+          return node;
+        }),
+      );
     },
-    [id, isExpanded, updateNodeData, updateNode],
+    [id, isExpanded, setNodes],
   );
 
   const PDFToolbar = (
@@ -116,33 +127,6 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
         >
           {isExpanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
         </GhostButton>
-
-        {isExpanded && (
-          <div className="text-muted-foreground animate-in fade-in slide-in-from-left-2 flex items-center duration-200">
-            <div className="bg-border mx-1 h-3 w-px" />
-            <GhostButton
-              aria-label="Zoom out"
-              title="Zoom out"
-              className="rounded disabled:opacity-30"
-              onClick={handleZoomOut}
-              disabled={scale <= 0.5}
-            >
-              <ZoomOut size={14} />
-            </GhostButton>
-            <span className="text-muted-foreground w-8 text-center font-mono text-[10px]">
-              {Math.round(scale * 100)}%
-            </span>
-            <GhostButton
-              aria-label="Zoom in"
-              title="Zoom in"
-              className="rounded disabled:opacity-30"
-              onClick={handleZoomIn}
-              disabled={scale >= 3.0}
-            >
-              <ZoomIn size={14} />
-            </GhostButton>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -201,8 +185,8 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
                     </div>
                   }
                   error={
-                    <div className="p-4 text-xs text-red-300">
-                      Error loading PDF
+                    <div className="text-danger p-4 text-xs">
+                      Error loading PDF.
                     </div>
                   }
                   className="flex flex-col gap-4"
@@ -211,7 +195,7 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
                     <Page
                       key={`page_${index + 1}`}
                       pageNumber={index + 1}
-                      scale={scale}
+                      scale={0.7}
                       renderAnnotationLayer={false}
                       renderTextLayer={false}
                       loading={''}
@@ -224,7 +208,6 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
                 </div>
               )}
             </div>
-            <div className="absolute inset-0 z-10 bg-transparent" />
           </>
         )}
       </div>

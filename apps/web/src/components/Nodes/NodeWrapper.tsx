@@ -21,11 +21,11 @@ export type NodeDataProps = {
   content?: string;
   label?: string;
 
+  // for text node
   style?: NodeStyle;
 
-  isExpanded?: boolean;
-  settings?: object;
-  [key: string]: unknown;
+  // for frame node
+  locked?: boolean;
 };
 
 interface NodeWrapperProps {

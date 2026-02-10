@@ -97,14 +97,14 @@ export const FrameNode = ({ id, data, selected }: NodeProps<FrameNodeType>) => {
           <div className="text-muted-foreground flex items-center gap-1">
             <div className="bg-border h-3 w-px" />
             <GhostButton
-              title={data.locked ? 'Unlock' : 'Lock'}
+              title={data?.locked ? 'Unlock' : 'Lock'}
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 toggleFrameLock(id);
               }}
             >
-              {data.locked ? <Lock size={14} /> : <Unlock size={14} />}
+              {data?.locked ? <Lock size={14} /> : <Unlock size={14} />}
             </GhostButton>
 
             <GhostButton
