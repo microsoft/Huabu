@@ -5,6 +5,20 @@ export interface SendMessageRequest {
    * Clients should generate a stable ID per chat session and reuse it.
    */
   threadId: string;
+  /**
+   * Canvas ID to load node data from (for source retrieval).
+   */
+  canvasId: string;
+  /**
+   * Canvas version to ensure consistency with client state.
+   * If version mismatch, server returns 409 Conflict.
+   */
+  canvasVersion: number;
+  /**
+   * Selected node IDs on the canvas (data sources for context).
+   * Empty array means no nodes selected.
+   */
+  selectedNodeIds: string[];
 }
 
 export interface SendMessageResponse {

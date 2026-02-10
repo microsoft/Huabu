@@ -47,6 +47,8 @@ type RFState = {
 
   updateNodeData: (nodeId: string, patch: Record<string, unknown>) => void;
 
+  getSelectedNodeIds: () => string[];
+
   frameSelectedNodes: () => void;
   unframe: (frameId: string) => void;
   toggleFrameLock: (frameId: string) => void;
@@ -194,6 +196,12 @@ const useCanvasStore = create<RFState>((set, get) => ({
     });
 
     scheduleAutoSave(get().saveCanvas);
+  },
+
+  getSelectedNodeIds: () => {
+    return get()
+      .nodes.filter((n) => n.selected)
+      .map((n) => n.id);
   },
 
   frameSelectedNodes: () => {

@@ -3,6 +3,7 @@ import { PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 
 import { chatApi } from '@/api/chat';
+import useCanvasStore from '@/store/canvasStore';
 
 import { SidebarPanel } from '../SidebarPanel';
 import { ChatInput } from './ChatInput';
@@ -22,6 +23,12 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const [isLoading, setIsLoading] = useState(false);
 
   const threadIdRef = useRef<string>(createId('thread'));
+
+  const canvasId = useCanvasStore((state) => state.canvasId);
+  const canvasVersion = useCanvasStore((state) => state.version);
+  const getSelectedNodeIds = useCanvasStore(
+    (state) => state.getSelectedNodeIds,
+  );
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -48,63 +55,73 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     setIsLoading(true);
 
     const assistantId = createId('message');
+    const selectedNodeIds = getSelectedNodeIds();
 
-    await chatApi.streamMessage(userMessage.content, threadIdRef.current, {
-      onUpdate: (payload: ChatStreamUpdatePayload) => {
-        const { node, message } = payload;
+    await chatApi.streamMessage(
+      userMessage.content,
+      threadIdRef.current,
+      canvasId,
+      canvasVersion,
+      selectedNodeIds,
+      {
+        onUpdate: (payload: ChatStreamUpdatePayload) => {
+          const { node, message } = payload;
 
-        // Handle Agent Updates (LLM Text)
-        if (node === 'agent' && message) {
-          if (message.content) {
-            setMessages((prev) => {
-              const existing = prev.find((m) => m.id === assistantId);
-              if (existing) {
-                return prev.map((m) =>
-                  m.id === assistantId ? { ...m, content: message.content } : m,
-                );
-              } else {
-                return [
-                  ...prev,
-                  {
-                    id: assistantId,
-                    role: 'assistant',
-                    content: message.content,
-                  },
-                ];
-              }
-            });
+          // Handle Agent Updates (LLM Text)
+          if (node === 'agent' && message) {
+            if (message.content) {
+              setMessages((prev) => {
+                const existing = prev.find((m) => m.id === assistantId);
+                if (existing) {
+                  return prev.map((m) =>
+                    m.id === assistantId
+                      ? { ...m, content: message.content }
+                      : m,
+                  );
+                } else {
+                  return [
+                    ...prev,
+                    {
+                      id: assistantId,
+                      role: 'assistant',
+                      content: message.content,
+                    },
+                  ];
+                }
+              });
+            }
+
+            // Handle Tool Updates
+          } else if (node === 'tools') {
+            const toolResponse = payload.toolResponse;
+            if (!toolResponse) return;
+
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: createId('tool'),
+                role: 'tool',
+                toolResponse,
+              },
+            ]);
           }
-
-          // Handle Tool Updates
-        } else if (node === 'tools') {
-          const toolResponse = payload.toolResponse;
-          if (!toolResponse) return;
-
+        },
+        onError: (err) => {
+          console.error(err);
           setMessages((prev) => [
             ...prev,
             {
-              id: createId('tool'),
-              role: 'tool',
-              toolResponse,
+              id: createId('message'),
+              role: 'assistant',
+              content: 'Error: ' + err.message,
             },
           ]);
-        }
+        },
+        onComplete: () => {
+          setIsLoading(false);
+        },
       },
-      onError: (err) => {
-        console.error(err);
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: createId('message'),
-            role: 'assistant',
-            content: 'Error: ' + err.message,
-          },
-        ]);
-      },
-      onComplete: () => {
-        setIsLoading(false);
-      },
-    });
+    );
   };
 
   return (
