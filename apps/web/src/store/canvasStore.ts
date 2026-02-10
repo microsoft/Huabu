@@ -37,12 +37,20 @@ async function ingestNodeIfNeeded(canvasId: string, node: Node): Promise<void> {
   const nodeData = node.data as Record<string, unknown> | undefined;
 
   try {
-    await upsertNode(canvasId, node.id, {
+    const response = await upsertNode(canvasId, node.id, {
       type: node.type as 'note' | 'text' | 'web' | 'pdf',
       title: (nodeData?.label as string) ?? (nodeData?.title as string),
       content: nodeData?.content as string,
       src: nodeData?.src as string,
     });
+
+    if (!response.success) {
+      console.error(
+        'Node ingestion did not complete successfully:',
+        node.id,
+        response.error,
+      );
+    }
   } catch (error) {
     console.error('Failed to ingest node:', node.id, error);
   }
@@ -186,6 +194,17 @@ const useCanvasStore = create<RFState>((set, get) => ({
         void deleteNode(canvasId, nodeId).catch((error) => {
           console.error('Failed to delete node:', nodeId, error);
         });
+      }
+    }
+
+    // Handle node additions - ingest newly created nodes if needed.
+    // Detect additions by diffing prev/next nodes to avoid relying on change typing.
+    const prevIds = new Set(prevNodes.map((n) => n.id));
+    const addedNodes = result.filter((n) => !prevIds.has(n.id));
+    if (addedNodes.length > 0) {
+      const { canvasId } = get();
+      for (const node of addedNodes) {
+        void ingestNodeIfNeeded(canvasId, node);
       }
     }
 

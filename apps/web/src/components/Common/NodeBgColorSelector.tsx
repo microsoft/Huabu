@@ -2,7 +2,7 @@ import { useReactFlow } from '@xyflow/react';
 import { clsx } from 'clsx';
 import { useState } from 'react';
 
-import type { NodeStyle } from '@/components/Nodes/NodeWrapper.tsx';
+import type { NodeStyle } from '@/components/Nodes/types.ts';
 
 const PRESET_COLORS = [
   {
@@ -83,7 +83,7 @@ export const NodeBgColorSelector = ({
   return (
     <div className="relative flex items-center">
       <button
-        className="border-border flex items-center justify-center rounded-full border p-[1px] transition-transform hover:scale-110"
+        className="border-border flex items-center justify-center rounded-full border p-px transition-transform hover:scale-110"
         onClick={(e) => {
           e.stopPropagation();
           setIsOpen(!isOpen);

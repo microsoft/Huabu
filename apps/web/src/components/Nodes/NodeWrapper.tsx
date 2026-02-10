@@ -5,33 +5,12 @@ import React, { memo } from 'react';
 
 import useCanvasStore from '@/store/canvasStore.ts';
 
-export type NodeStyle = {
-  backgroundColor?: string;
-  textColor?: string;
-  fontSize?: number;
-  fontFamily?: string;
-  fontWeight?: string;
-  fontStyle?: string;
-  textDecoration?: string; // 'underline' | 'line-through' | both
-  align?: 'top-left' | 'center';
-};
-
-export type NodeDataProps = {
-  src?: string;
-  content?: string;
-  label?: string;
-
-  // for text node
-  style?: NodeStyle;
-
-  // for frame node
-  locked?: boolean;
-};
+import type { CanvasNodeType, NodeDataProps } from './types.ts';
 
 interface NodeWrapperProps {
   id: string;
   data: NodeDataProps;
-  type: string;
+  type: CanvasNodeType;
   selected?: boolean;
 
   allowOverflow?: boolean;
@@ -108,7 +87,7 @@ export const NodeWrapper = memo(
         >
           <div
             className={clsx(
-              'text-icon hover:text-main absolute top-0 -left-[18px] flex h-6 w-4 cursor-grab items-center justify-center rounded opacity-0 transition-opacity',
+              'text-icon hover:text-main absolute top-0 -left-4.5 flex h-6 w-4 cursor-grab items-center justify-center rounded opacity-0 transition-opacity',
               'group-hover:opacity-100',
             )}
             draggable
@@ -133,49 +112,49 @@ export const NodeWrapper = memo(
             type="target"
             id="top-target"
             position={Position.Top}
-            className="!bg-theme-500 !-top-1 !h-1 !w-1 !border-none opacity-0 transition-opacity group-hover:opacity-100"
+            className="bg-theme-500! -top-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
           />
           <Handle
             type="source"
             id="top-source"
             position={Position.Top}
-            className="!bg-theme-500 !-top-1 !h-1 !w-1 !border-none opacity-0 transition-opacity group-hover:opacity-100"
+            className="bg-theme-500! -top-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
           />
           <Handle
             type="target"
             id="right-target"
             position={Position.Right}
-            className="!bg-theme-500 !-right-1 !h-1 !w-1 !border-none opacity-0 transition-opacity group-hover:opacity-100"
+            className="bg-theme-500! -right-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
           />
           <Handle
             type="source"
             id="right-source"
             position={Position.Right}
-            className="!bg-theme-500 !-right-1 !h-1 !w-1 !border-none opacity-0 transition-opacity group-hover:opacity-100"
+            className="bg-theme-500! -right-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
           />
           <Handle
             type="target"
             id="bottom-target"
             position={Position.Bottom}
-            className="!bg-theme-500 !-bottom-1 !h-1 !w-1 !border-none opacity-0 transition-opacity group-hover:opacity-100"
+            className="bg-theme-500! -bottom-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
           />
           <Handle
             type="source"
             id="bottom-source"
             position={Position.Bottom}
-            className="!bg-theme-500 !-bottom-1 !h-1 !w-1 !border-none opacity-0 transition-opacity group-hover:opacity-100"
+            className="bg-theme-500! -bottom-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
           />
           <Handle
             type="target"
             id="left-target"
             position={Position.Left}
-            className="!bg-theme-500 !-left-1 !h-1 !w-1 !border-none opacity-0 transition-opacity group-hover:opacity-100"
+            className="bg-theme-500! -left-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
           />
           <Handle
             type="source"
             id="left-source"
             position={Position.Left}
-            className="!bg-theme-500 !-left-1 !h-1 !w-1 !border-none opacity-0 transition-opacity group-hover:opacity-100"
+            className="bg-theme-500! -left-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
           />
         </div>
       </>

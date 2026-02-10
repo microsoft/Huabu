@@ -14,7 +14,13 @@ const __dirname = dirname(__filename);
 
 export default typescriptEslint.config(
   {
-    ignores: ['**/node_modules/**', '**/dist/**', '**/out/**', '**/*.min.*'],
+    ignores: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/out/**',
+      '**/.vite/**',
+      '**/*.min.*',
+    ],
   },
   js.configs.recommended,
   ...typescriptEslint.configs.recommended,

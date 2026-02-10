@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 
-import * as pdf from 'pdf-parse';
+import { PDFParse } from 'pdf-parse';
 
 /**
  * Result of PDF parsing operation
@@ -28,15 +28,7 @@ export async function parsePdfFile(filePath: string): Promise<ParsePdfResult> {
     // Read PDF file as buffer
     const dataBuffer = await readFile(filePath);
 
-    // Parse PDF using pdf-parse
-    const data = await pdf(dataBuffer);
-
-    return {
-      success: true,
-      text: data.text,
-      title: data.info?.Title || undefined,
-      numPages: data.numpages,
-    };
+    return await parsePdfBuffer(dataBuffer);
   } catch (error) {
     return {
       success: false,
@@ -55,14 +47,23 @@ export async function parsePdfFile(filePath: string): Promise<ParsePdfResult> {
  * @returns Parsing result with extracted text
  */
 export async function parsePdfBuffer(buffer: Buffer): Promise<ParsePdfResult> {
+  const parser = new PDFParse({
+    data: buffer,
+  });
+
   try {
-    const data = await pdf(buffer);
+    // Avoid parallel calls that can trigger data transfer/worker issues.
+    const infoResult = await parser.getInfo();
+    const textResult = await parser.getText();
 
     return {
       success: true,
-      text: data.text,
-      title: data.info?.Title || undefined,
-      numPages: data.numpages,
+      text: textResult.text,
+      title:
+        typeof infoResult.info?.Title === 'string'
+          ? infoResult.info.Title
+          : undefined,
+      numPages: infoResult.total,
     };
   } catch (error) {
     return {
@@ -72,5 +73,11 @@ export async function parsePdfBuffer(buffer: Buffer): Promise<ParsePdfResult> {
           ? error.message
           : 'Unknown error parsing PDF buffer',
     };
+  } finally {
+    try {
+      await parser.destroy();
+    } catch {
+      // Ignore cleanup errors.
+    }
   }
 }

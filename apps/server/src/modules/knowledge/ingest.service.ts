@@ -1,6 +1,10 @@
+import { access, readFile } from 'node:fs/promises';
+import path from 'node:path';
+
 import { getKnowledgeRepository } from './knowledge.repository.js';
 import { parsePdfFile } from './pdf-parser.js';
 import {
+  computeBufferHash,
   computeContentHash,
   generateRevisionId,
   generateSourceId,
@@ -10,7 +14,7 @@ import {
 import { fetchWebContent } from './web-fetcher.js';
 
 import type { KnowledgeRepository } from './knowledge.repository.js';
-import type { SourceMetadata, SourceRow } from './types.js';
+import type { SourceMetadata, SourceRow, SourceType } from './types.js';
 
 /**
  * Input for Text/Note source ingestion
@@ -71,12 +75,324 @@ export interface IngestSourceResult {
   contentChanged: boolean;
 }
 
+export type NodeIngestError = {
+  code: string;
+  message: string;
+};
+
+export type NodeIngestOutcome = {
+  sourceId: string;
+  success: boolean;
+  error?: NodeIngestError;
+};
+
 /**
  * Service layer for knowledge source ingestion
  * Handles business logic for creating/updating sources and revisions
  */
 export class IngestService {
   constructor(private repository: KnowledgeRepository) {}
+
+  private safeParseMeta(metaJson: string | null): Record<string, unknown> {
+    if (!metaJson) return {};
+    try {
+      const parsed = JSON.parse(metaJson) as unknown;
+      if (parsed && typeof parsed === 'object')
+        return parsed as Record<string, unknown>;
+      return {};
+    } catch {
+      return {};
+    }
+  }
+
+  private toMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  private upsertPlaceholderSource(params: {
+    sourceId: string;
+    workspaceId: string;
+    type: 'note' | 'text' | 'web' | 'pdf';
+    title?: string;
+    uri?: string;
+    ingestError?: NodeIngestError;
+    extraMetadata?: Record<string, unknown>;
+  }): void {
+    const existing = this.repository.findSourceById(params.sourceId);
+    const metadata: Record<string, unknown> = {
+      ...(existing ? this.safeParseMeta(existing.meta_json) : {}),
+      ...(params.extraMetadata ?? {}),
+      placeholder: true,
+      ingestError: params.ingestError,
+    };
+
+    if (existing) {
+      this.repository.updateSource(params.sourceId, {
+        contentText: '',
+        contentHash: computeContentHash(''),
+        title: params.title,
+        metadata,
+      });
+      return;
+    }
+
+    this.repository.createSource({
+      sourceId: params.sourceId,
+      workspaceId: params.workspaceId,
+      type: params.type,
+      title: params.title,
+      uri: params.uri,
+      contentText: '',
+      contentHash: computeContentHash(''),
+      metadata,
+    });
+  }
+
+  /**
+   * Ingest a node coming from the canvas node endpoint.
+   * This method never throws for expected ingest failures; it returns a non-null sourceId
+   * and includes a detailed ingestError.
+   */
+  async ingestCanvasNode(params: {
+    workspaceId: string;
+    nodeId: string;
+    type: 'note' | 'text' | 'web';
+    title?: string;
+    content?: string;
+    src?: string;
+    existingSourceId?: string | null;
+  }): Promise<NodeIngestOutcome> {
+    const { workspaceId, nodeId, type, title, content, src, existingSourceId } =
+      params;
+
+    if (type === 'note' || type === 'text') {
+      const nodeContent = content ?? '';
+      if (nodeContent.trim().length === 0) {
+        const sourceId =
+          existingSourceId ??
+          generateSourceId({
+            workspaceId,
+            type,
+          });
+        const ingestError: NodeIngestError = {
+          code: 'EMPTY_CONTENT',
+          message: 'No content to ingest yet',
+        };
+        this.upsertPlaceholderSource({
+          sourceId,
+          workspaceId,
+          type,
+          title,
+          ingestError,
+        });
+        return { sourceId, success: false, error: ingestError };
+      }
+
+      try {
+        const result = await this.ingestTextSource({
+          workspaceId,
+          nodeId,
+          type,
+          title,
+          content: nodeContent,
+          existingSourceId: existingSourceId ?? undefined,
+        });
+        return { sourceId: result.source.source_id, success: true };
+      } catch (error) {
+        const sourceId =
+          existingSourceId ??
+          generateSourceId({
+            workspaceId,
+            type,
+          });
+        const ingestError: NodeIngestError = {
+          code: 'TEXT_INGEST_FAILED',
+          message: this.toMessage(error),
+        };
+        this.upsertPlaceholderSource({
+          sourceId,
+          workspaceId,
+          type,
+          title,
+          ingestError,
+        });
+        return { sourceId, success: false, error: ingestError };
+      }
+    }
+
+    // type === 'web'
+    const uri = (src ?? '').trim();
+    if (uri.length === 0) {
+      const normalizedUri = `missing:${nodeId}`;
+      const sourceId =
+        existingSourceId ??
+        generateSourceId({
+          workspaceId,
+          type: 'web',
+          uri: normalizedUri,
+        });
+      const ingestError: NodeIngestError = {
+        code: 'MISSING_SRC',
+        message: 'Missing src for web node',
+      };
+      this.upsertPlaceholderSource({
+        sourceId,
+        workspaceId,
+        type: 'web',
+        title,
+        uri: normalizedUri,
+        ingestError,
+      });
+      return { sourceId, success: false, error: ingestError };
+    }
+
+    try {
+      const result = await this.ingestWebSource({
+        workspaceId,
+        nodeId,
+        uri,
+        title,
+        content,
+      });
+      return { sourceId: result.source.source_id, success: true };
+    } catch (error) {
+      const normalizedUri = normalizeUrl(uri);
+      const sourceId =
+        existingSourceId ??
+        generateSourceId({
+          workspaceId,
+          type: 'web',
+          uri: normalizedUri,
+        });
+      const ingestError: NodeIngestError = {
+        code: 'WEB_INGEST_FAILED',
+        message: this.toMessage(error),
+      };
+      this.upsertPlaceholderSource({
+        sourceId,
+        workspaceId,
+        type: 'web',
+        title,
+        uri: normalizedUri,
+        ingestError,
+      });
+      return { sourceId, success: false, error: ingestError };
+    }
+  }
+
+  /**
+   * Ingest a PDF node when the frontend provides an artifact URI.
+   * The artifactsDir should point at the server's artifact storage directory.
+   */
+  async ingestPdfCanvasNodeFromArtifact(params: {
+    workspaceId: string;
+    nodeId: string;
+    title?: string;
+    artifactUri?: string;
+    artifactsDir: string;
+    existingSourceId?: string | null;
+  }): Promise<NodeIngestOutcome> {
+    const { workspaceId, nodeId, title, artifactsDir, existingSourceId } =
+      params;
+    const artifactUri = (params.artifactUri ?? '').trim();
+
+    const placeholderFrom = async (ingestError: NodeIngestError) => {
+      // Try to create a stable pdf sourceId.
+      let fileHash = artifactUri
+        ? computeContentHash(artifactUri)
+        : computeContentHash(nodeId);
+
+      const filename = this.extractArtifactFilename(artifactUri);
+      if (filename) {
+        const filePath = path.join(artifactsDir, filename);
+        try {
+          const buffer = await readFile(filePath);
+          fileHash = computeBufferHash(buffer);
+        } catch {
+          // Ignore; keep fallback hash.
+        }
+      }
+
+      const sourceId =
+        existingSourceId ??
+        generateSourceId({
+          workspaceId,
+          type: 'pdf',
+          fileHash,
+        });
+
+      this.upsertPlaceholderSource({
+        sourceId,
+        workspaceId,
+        type: 'pdf',
+        title,
+        uri: artifactUri || undefined,
+        ingestError,
+        extraMetadata: {
+          originalArtifactUri: artifactUri,
+        },
+      });
+
+      return { sourceId, success: false, error: ingestError };
+    };
+
+    if (artifactUri.length === 0) {
+      return placeholderFrom({
+        code: 'MISSING_SRC',
+        message: 'Missing src for pdf node',
+      });
+    }
+
+    const filename = this.extractArtifactFilename(artifactUri);
+    if (!filename) {
+      return placeholderFrom({
+        code: 'INVALID_ARTIFACT_URI',
+        message: 'Invalid PDF artifact URI',
+      });
+    }
+
+    const filePath = path.join(artifactsDir, filename);
+    try {
+      await access(filePath);
+    } catch (error) {
+      return placeholderFrom({
+        code: 'PDF_FILE_NOT_FOUND',
+        message: this.toMessage(error),
+      });
+    }
+
+    try {
+      const result = await this.ingestPdfSource({
+        workspaceId,
+        nodeId,
+        artifactUri,
+        filePath,
+        title,
+      });
+      return { sourceId: result.source.source_id, success: true };
+    } catch (error) {
+      return placeholderFrom({
+        code: 'PDF_PARSE_FAILED',
+        message: this.toMessage(error),
+      });
+    }
+  }
+
+  private extractArtifactFilename(artifactUri: string): string {
+    if (!artifactUri) return '';
+
+    const artifactPath = (() => {
+      try {
+        return new URL(artifactUri).pathname;
+      } catch {
+        return artifactUri;
+      }
+    })();
+
+    const rawFilename = artifactPath.split('/').pop();
+    const filename = rawFilename ? path.basename(rawFilename) : '';
+    return filename;
+  }
 
   /**
    * Prepare storage strategy for content
@@ -108,7 +424,7 @@ export class IngestService {
     sourceId: string;
     existingSource: SourceRow | null;
     workspaceId: string;
-    type: string;
+    type: SourceType;
     title?: string;
     uri?: string;
     contentText: string | undefined;
@@ -272,7 +588,9 @@ export class IngestService {
       // Backend fetch fallback
       const fetchResult = await fetchWebContent(input.uri);
       if (!fetchResult.success) {
-        throw new Error(`Failed to fetch web content: ${fetchResult.error}`);
+        throw new Error(
+          `Failed to fetch web content (${input.uri}): ${fetchResult.error}`,
+        );
       }
       content = fetchResult.content ?? '';
       title = title ?? fetchResult.title;

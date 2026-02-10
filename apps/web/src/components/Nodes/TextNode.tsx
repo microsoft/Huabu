@@ -7,11 +7,9 @@ import { GhostButton } from '@/components/Common/GhostButton.tsx';
 import { NodeBgColorSelector } from '@/components/Common/NodeBgColorSelector.tsx';
 import { NodeTextColorSelector } from '@/components/Common/NodeTextColorSelector.tsx';
 
-import {
-  NodeWrapper,
-  type NodeDataProps,
-  type NodeStyle,
-} from './NodeWrapper.tsx';
+import { NodeWrapper } from './NodeWrapper.tsx';
+
+import type { NodeDataProps, NodeStyle } from './types.ts';
 
 const FONT_FAMILIES = [
   { name: 'Default', value: 'ui-sans-serif, system-ui, sans-serif' },

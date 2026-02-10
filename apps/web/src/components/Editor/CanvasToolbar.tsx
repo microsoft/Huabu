@@ -16,7 +16,14 @@ import { useCallback, useRef, useState, type ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
 
 import { uploadImage, uploadPdf, uploadVideo } from '../../api/artifact.ts';
+import useCanvasStore from '../../store/canvasStore.ts';
 import { GhostButton } from '../Common/GhostButton';
+
+import type {
+  CanvasNode,
+  CanvasNodeType,
+  CreateNodePayload,
+} from '../Nodes/types.ts';
 
 const detectNodeType = (
   filename: string,
@@ -55,9 +62,9 @@ const UploadModal = ({
   if (!isOpen) return null;
 
   return createPortal(
-    <div className="bg-background/80 animate-in fade-in fixed inset-0 z-[9999] flex items-center justify-center backdrop-blur-[1px] duration-200">
+    <div className="bg-background/80 animate-in fade-in fixed inset-0 z-9999 flex items-center justify-center backdrop-blur-[1px] duration-200">
       <div className="absolute inset-0" onClick={onClose} />
-      <div className="border-border shadow-bottom animate-in zoom-in-95 relative z-10 w-[360px] rounded-lg border bg-white p-6 duration-200">
+      <div className="border-border shadow-bottom animate-in zoom-in-95 relative z-10 w-90 rounded-lg border bg-white p-6 duration-200">
         <div className="mb-2 flex items-center justify-between">
           <h3 className="text-main text-sm font-semibold">{title}</h3>
           <button
@@ -99,7 +106,8 @@ interface NodeToolbarProps {
 }
 
 export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
-  const { addNodes, screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition } = useReactFlow();
+  const addNode = useCanvasStore((s) => s.addNode);
 
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -111,7 +119,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
   const [linkText, setLinkText] = useState('');
 
   const createNode = useCallback(
-    (type: string, payload?: any) => {
+    (type: CanvasNodeType, payload?: CreateNodePayload) => {
       const position = screenToFlowPosition({
         x: window.innerWidth / 2,
         y: window.innerHeight / 2,
@@ -123,8 +131,8 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
       const initialWidth = payload?.width || 400;
       const initialHeight = payload?.height || 300;
 
-      const newNode: any = {
-        id: createId(type),
+      const newNode: CanvasNode = {
+        id: createId('node'),
         type,
         position: { x: position.x + offsetX, y: position.y + offsetY },
         data: {},
@@ -179,9 +187,9 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           return;
       }
 
-      addNodes(newNode);
+      addNode(newNode);
     },
-    [addNodes, screenToFlowPosition],
+    [addNode, screenToFlowPosition],
   );
 
   const getImageDimensions = (
@@ -398,7 +406,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             Paste URLs below (one per line).
           </p>
           <textarea
-            className="border-border placeholder:text-border focus:border-theme-500 focus:ring-theme-500 min-h-[100px] w-full resize-none rounded-md border bg-transparent px-3 py-2 text-sm focus:outline-none"
+            className="border-border placeholder:text-border focus:border-theme-500 focus:ring-theme-500 min-h-25 w-full resize-none rounded-md border bg-transparent px-3 py-2 text-sm focus:outline-none"
             placeholder={`https://example.com/image.png\nhttps://example.com/doc.pdf\nhttps://google.com`}
             value={linkText}
             onChange={(e) => setLinkText(e.target.value)}

@@ -8,9 +8,11 @@ import {
 } from 'lucide-react';
 import { useState, useCallback } from 'react';
 
-import { NodeWrapper, type NodeDataProps } from './NodeWrapper.tsx';
+import { NodeWrapper } from './NodeWrapper.tsx';
 import useCanvasStore from '../../store/canvasStore.ts';
 import { GhostButton } from '../Common/GhostButton.tsx';
+
+import type { NodeDataProps } from './types.ts';
 
 type WebNodeData = NodeDataProps & {};
 export type WebNodeType = Node<WebNodeData, 'web'>;

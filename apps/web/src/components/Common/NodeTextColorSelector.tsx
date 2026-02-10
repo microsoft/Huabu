@@ -3,7 +3,7 @@ import { clsx } from 'clsx';
 import { Baseline } from 'lucide-react';
 import { useState } from 'react';
 
-import type { NodeStyle } from '@/components/Nodes/NodeWrapper.tsx';
+import type { NodeStyle } from '@/components/Nodes/types.ts';
 
 const PRESET_TEXT_COLORS = [
   {

@@ -9,8 +9,10 @@ import {
 
 import useCanvasStore from '@/store/canvasStore.ts';
 
-import { NodeWrapper, type NodeDataProps } from './NodeWrapper.tsx';
+import { NodeWrapper } from './NodeWrapper.tsx';
 import { GhostButton } from '../Common/GhostButton.tsx';
+
+import type { NodeDataProps } from './types.ts';
 
 type VideoNodeData = NodeDataProps & {};
 export type VideoNodeType = Node<VideoNodeData, 'video'>;

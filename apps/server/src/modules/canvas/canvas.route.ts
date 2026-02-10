@@ -1,5 +1,3 @@
-import path from 'node:path';
-
 import { z } from 'zod';
 
 import { getCanvasDb } from './canvas.db.js';
@@ -20,6 +18,10 @@ type CanvasRow = {
 
 function nowMs(): number {
   return Date.now();
+}
+
+function toMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 const putCanvasBodySchema = z.object({
@@ -61,56 +63,37 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       workspaceId ?? canvasRow?.workspace_id ?? 'default';
 
     const ingestService = getIngestService();
-    let sourceId: string | null = null;
+
+    const existingMapping = database
+      .prepare(
+        'SELECT source_id FROM canvas_nodes WHERE canvas_id = ? AND node_id = ?',
+      )
+      .get(canvasId, nodeId) as { source_id: string | null } | undefined;
 
     try {
-      if (type === 'note' || type === 'text') {
-        const nodeContent = content ?? '';
-        if (nodeContent.trim().length > 0) {
-          const result = await ingestService.ingestTextSource({
-            workspaceId: resolvedWorkspaceId,
-            nodeId,
-            type,
-            title,
-            content: nodeContent,
-          });
-          sourceId = result.source.source_id;
-        }
-      } else if (type === 'web') {
-        const uri = src;
-        if (uri && uri.trim().length > 0) {
-          const result = await ingestService.ingestWebSource({
-            workspaceId: resolvedWorkspaceId,
-            nodeId,
-            uri,
-            title,
-            content,
-          });
-          sourceId = result.source.source_id;
-        }
-      } else if (type === 'pdf') {
-        const artifactUri = src;
-        if (artifactUri && artifactUri.trim().length > 0) {
-          // Extract filename from URI (e.g., "/api/artifact/abc123.pdf" -> "abc123.pdf")
-          const filename = artifactUri.split('/').pop();
-          if (!filename) {
-            throw new Error('Invalid PDF artifact URI');
-          }
+      const existingSourceId = existingMapping?.source_id ?? null;
 
-          const filePath = path.join(getArtifactsDir(), filename);
+      const outcome =
+        type === 'pdf'
+          ? await ingestService.ingestPdfCanvasNodeFromArtifact({
+              workspaceId: resolvedWorkspaceId,
+              nodeId,
+              title,
+              artifactUri: src,
+              artifactsDir: getArtifactsDir(),
+              existingSourceId,
+            })
+          : await ingestService.ingestCanvasNode({
+              workspaceId: resolvedWorkspaceId,
+              nodeId,
+              type,
+              title,
+              content,
+              src,
+              existingSourceId,
+            });
 
-          const result = await ingestService.ingestPdfSource({
-            workspaceId: resolvedWorkspaceId,
-            nodeId,
-            artifactUri,
-            filePath,
-            title,
-          });
-          sourceId = result.source.source_id;
-        }
-      }
-
-      // TODO: handle other node types as needed
+      const { sourceId, success, error } = outcome;
 
       // Upsert the node-source mapping
       database
@@ -124,13 +107,20 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.send({
         nodeId,
         sourceId,
+        success,
+        error: error ? `${error.code}: ${error.message}` : undefined,
       });
     } catch (error) {
+      // Unexpected failure (DB issues, etc). Keep 500, but provide a detailed message.
+      const message = toMessage(error);
       request.log.error(
         { nodeId, nodeType: type, error },
         'Failed to ingest node',
       );
-      return reply.code(500).send({ message: 'Failed to ingest node' });
+      return reply.code(500).send({
+        message: 'Failed to ingest node',
+        details: message,
+      });
     }
   });
 

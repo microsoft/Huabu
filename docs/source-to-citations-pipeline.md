@@ -18,18 +18,15 @@
 为了避免“前端 nodeId、后端 sourceId、可编辑 revision 版本”在链路里混用，本方案约定以下 ID 会出现（有些会落库，有些只在请求/响应里传输）：
 
 - `workspaceId`
-
   - 含义：空间/租户隔离边界。
   - 存储：建议在 `canvases.workspace_id`、`sources.workspace_id`（若你们的鉴权上下文能可靠推断 workspaceId，也可以不在每条请求里显式传，但落库仍建议带上便于隔离与查询）。
 
 - `canvasId`
-
   - 含义：某个 workspace 下的一张画布文档。
   - 存储：`canvases.canvas_id`（PK），以及 `canvas_nodes.canvas_id`。
   - 传输：chat 请求携带，用于后端加载画布权威状态。
 
 - `canvasVersion`
-
   - 含义：画布的乐观锁版本号（确保“本次 chat 使用的画布内容”与前端一致）。
   - 存储：`canvases.version`。
   - 传输：
@@ -37,14 +34,12 @@
     - chat 请求携带 `canvasVersion`；不一致建议后端返回 `409 Conflict`。
 
 - `nodeId`
-
   - 含义：画布节点 ID（UI/ReactFlow 层面的标识），存储位置、大小等样式。
   - 前提：`nodeId` 在同一画布内唯一即可；不同画布可以有不同的 node 渲染同一个 sourceId。
   - 存储：`canvas_nodes.node_id`（主键）+ `canvas_nodes.source_id`（外键，用于关联到数据源）。
   - 传输：chat 请求携带 `selectedNodeIds: string[]`。
 
 - `sourceId`
-
   - 含义：后端 Source Record 的稳定 ID（引用 token 使用）。基于数据源内容本身生成（如 `hash(workspaceId + uri)` 或 `hash(workspaceId + contentIdentifier)`），与 nodeId 无关。同一个数据源可以在多个画布上被不同的 node 渲染。
   - 存储：`sources.source_id`（PK）。
   - 传输：
@@ -52,7 +47,6 @@
     - SSE `citations` 事件里作为 `references[].sourceId` 返回（用于前端把 token 映射到 nodeId/标题/uri）。
 
 - `revisionId`
-
   - 含义：可编辑数据源（Note/Text）内容的版本 ID，用于避免历史引用随着内容编辑而漂移。
   - 存储：`source_revisions.revision_id`（PK）。
   - 传输：SSE `citations` 事件里作为 `references[].revisionId` 返回；前端可用它提示“引用的是当时的哪个版本”。
@@ -147,7 +141,6 @@
 #### `canvas_nodes` 和 `sources` 的区别
 
 - `canvas_nodes`（轻量级索引表）
-
   - **职责**：维护 node ↔ source 的映射关系（仅 ID 映射，不存数据）。
   - **权威性**：派生自 `canvases.state_json`；每次保存画布时同步更新。
   - **典型场景**：
@@ -156,7 +149,6 @@
     - 反向查找：查询某个数据源在哪些画布上被引用
 
 - `sources`（知识库/数据源表）
-
   - **职责**：存储数据源的实际内容（uri、title、content、hash 等）。
   - **权威性**：对"用于 RAG/引用的内容快照"而言是权威记录（尤其 Note/Text 要 revision 化）。
   - **典型场景**：
@@ -173,11 +165,9 @@
 **API 形状（最小集）**
 
 - `GET /api/canvas/:canvasId`
-
   - 返回：`{ canvasId, version, state }`
 
 - `PUT /api/canvas/:canvasId`
-
   - 入参：`{ version, state }`
   - 行为：如果 `version` 与服务器当前版本不一致，返回 `409 Conflict`（提示前端拉取最新再合并/覆盖）。
   - 成功：版本号递增并返回新 `version`。
@@ -239,7 +229,6 @@
 2. 先落地最小表结构：
 
 - `sources`
-
   - `workspace_id` (TEXT)
   - `source_id` (TEXT, PK)
   - `type` (TEXT) — `web|pdf|note|image|text`
@@ -275,14 +264,12 @@
 根据数据源类型选择不同的生成规则：
 
 - **Note/Text（可编辑类型）**
-
   - ⭐ **推荐**：使用 UUID
     - 实现：`sourceId = "src_" + uuid()`
     - 优点：简单、无碰撞风险、无需依赖内容哈希
     - 缺点：不可从内容反推（但可编辑类型本身内容会变，哈希也不稳定）
 
 - **Web（基于 URI）**
-
   - ⭐ **推荐**：`hash(workspaceId + normalizedUri)`
     - 实现：`sourceId = "src_" + hash(workspaceId + normalizeUrl(uri))`
     - 优点：同一 URL 在同一 workspace 内稳定映射到同一 sourceId
@@ -298,7 +285,6 @@
 > 权衡：实现复杂度 vs 用户体验 vs 系统一致性
 
 - **策略 A：全部异步摄取（实现复杂）**
-
   - 流程：
     1. 画布保存成功后，后台任务队列异步处理摄取（所有类型）
     2. 按 `content_hash` 增量更新 `sources/source_revisions`
@@ -313,7 +299,6 @@
   - 适用场景：生产环境、高频编辑场景
 
 - **策略 B：全部 Chat 前按需补齐（实现最简单）**
-
   - 流程：
     1. 用户发起 chat 时，后端读取 `selectedNodeIds` 对应的 `canvas_nodes.data_json`
     2. 对每个 selected node 计算 `content_hash`
@@ -330,7 +315,6 @@
   - 适用场景：MVP/v1、中小规模数据源
 
 - ⭐ **策略 D：画布保存时同步摄取（v1 实际实现）**
-
   - **所有类型（Text/Note/Web）**：画布保存时同步摄取
     - 理由：实现简单，数据一致性强，无需任务队列
     - 流程：
@@ -373,7 +357,6 @@
 根据实现优先级选择 v1 范围：
 
 - ✅ **Text/Note（可编辑，必须支持）**
-
   - 理由：核心场景，需要 revision 机制
   - 实现要点：
     - `sources` 表存基本信息
@@ -381,7 +364,6 @@
     - 从 `canvas_nodes.data_json` 提取 `text/content` 字段
 
 - ✅ **Web（推荐支持）**
-
   - 两种实现路径（如果路径1没有内容，则用路径2backup）：
     - 路径 1：直接使用节点已有内容（前端已抓取/缓存）
       - 从 `canvas_nodes.data_json.content` 获取
@@ -392,7 +374,6 @@
       - 需要处理抓取失败/超时
 
 - ✅ **PDF（v1 支持）**
-
   - **推荐方案：pdf-parse (Node.js 原生)**
     - 库：`pdf-parse` (npm)
     - 实现：
@@ -419,19 +400,16 @@
 ⭐ **推荐顺序**（基于依赖关系，适配混合策略）：
 
 1. **Step 1: 数据库与表结构**
-
    - 创建 `knowledge.sqlite`
    - 实现 `sources` 和 `source_revisions` 表 schema
    - 编写数据库初始化/迁移代码
 
 2. **Step 2: sourceId 生成工具**
-
    - 实现 `generateSourceId()` 函数（针对不同类型）
    - 实现 `computeContentHash()` 函数
    - 单元测试
 
 3. **Step 3: Text/Note 摄取（画布保存时同步摄取）**
-
    - 实现 `ingestTextSource()` 函数
    - 支持 `source_revisions` 新增逻辑
    - 处理 content_text vs artifact 存储
@@ -462,7 +440,6 @@
       ```
 - 从 artifactUri 读取 PDF 文件 → 解析库提取文本 → 存储
 - 错误处理（文件不存在、Canvas 路由集成（保存时触发摄取）\*\*
-
   - 修改 `canvas.route.ts` 的 `PUT /canvas/:canvasId`
   - 解析 `state.nodes` 提取节点数据（id, type, data.content, data.src, data.label）
   - 对支持的节点类型调用 ingestService：
@@ -472,7 +449,6 @@
   - 使用事务确保原子性
 
 6. **Step 6: Chat 路由集成（读取 sourceIds）**
-
    - 修改 `chat.route.ts`，读取 `canvasId/canvasVersion/selectedNodeIds`
    - 实现版本校验（version mismatch → 409 Conflict）
    - 从 `canvas_nodes` 表查询 `sourceIds`：
@@ -645,11 +621,9 @@
 **现在需要做什么**
 
 - 统一引用 token 语法：
-
   - `[source:<sourceId>]`
 
 - 更新系统提示词规则：
-
   - 非平凡事实必须引用
   - 禁止编造 ID
   - 只能引用 references/context 中提供过的 `sourceId`

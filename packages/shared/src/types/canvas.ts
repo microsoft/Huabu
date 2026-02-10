@@ -39,7 +39,9 @@ export interface UpsertNodeRequest {
 
 export interface UpsertNodeResponse {
   nodeId: string;
-  sourceId: string | null;
+  sourceId: string;
+  success: boolean;
+  error?: string;
 }
 
 export interface DeleteNodeResponse {

@@ -10,13 +10,24 @@ export interface FetchWebContentResult {
   error?: string;
 }
 
+const DEFAULT_WEB_FETCH_TIMEOUT_MS = 30_000;
+const DEFAULT_WEB_FETCH_RETRIES = 1;
+const DEFAULT_ABORT_GRACE_MS = 5_000;
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * Fetch and extract text content from a web URL
  *
  * Strategy:
- * - Use native fetch API
- * - Basic HTML text extraction (cheerio-like approach)
- * - Timeout and error handling
+ * - Use Tavily Extract API only
+ * - Timeout and retry handling
  *
  * @param url - URL to fetch
  * @param options - Fetch options
@@ -24,99 +35,160 @@ export interface FetchWebContentResult {
  */
 export async function fetchWebContent(
   url: string,
-  options: {
-    timeout?: number;
-    userAgent?: string;
-  } = {},
 ): Promise<FetchWebContentResult> {
-  const { timeout = 10000, userAgent = 'Sediment/1.0' } = options;
+  const maxAttempts = Math.max(1, DEFAULT_WEB_FETCH_RETRIES + 1);
+  let lastErrorMessage: string | undefined;
 
-  try {
-    // Fetch with timeout
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
-
-    const response = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        'User-Agent': userAgent,
-        Accept: 'text/html,application/xhtml+xml',
-      },
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const tavilyResult = await fetchWebContentViaTavilyExtract(url, {
+      timeoutMs: DEFAULT_WEB_FETCH_TIMEOUT_MS,
     });
 
-    clearTimeout(timeoutId);
+    if (tavilyResult.success) {
+      return tavilyResult;
+    }
+
+    lastErrorMessage = tavilyResult.error ?? 'Unknown error';
+
+    const isRetryable =
+      /request timeout/i.test(lastErrorMessage) ||
+      /status\s+429/i.test(lastErrorMessage) ||
+      /status\s+5\d\d/i.test(lastErrorMessage) ||
+      /ECONNRESET|ETIMEDOUT|EAI_AGAIN/i.test(lastErrorMessage);
+
+    const shouldRetry = attempt < maxAttempts && isRetryable;
+    if (!shouldRetry) {
+      return {
+        success: false,
+        error: lastErrorMessage,
+      };
+    }
+
+    const backoffMs = 250 * attempt * attempt;
+    await sleep(backoffMs);
+  }
+
+  return {
+    success: false,
+    error: lastErrorMessage ?? 'Unknown error',
+  };
+}
+
+async function fetchWebContentViaTavilyExtract(
+  url: string,
+  params: {
+    timeoutMs: number;
+  },
+): Promise<FetchWebContentResult> {
+  const apiKey = process.env.TAVILY_API_KEY;
+  if (!apiKey) {
+    return {
+      success: false,
+      error: 'Missing TAVILY_API_KEY in environment variables.',
+    };
+  }
+
+  const extractDepth: 'basic' | 'advanced' =
+    process.env.SEDIMENT_TAVILY_EXTRACT_DEPTH === 'advanced'
+      ? 'advanced'
+      : 'basic';
+
+  const format: 'text' | 'markdown' =
+    process.env.SEDIMENT_TAVILY_EXTRACT_FORMAT === 'markdown'
+      ? 'markdown'
+      : 'text';
+
+  const timeoutSeconds = clampNumber(
+    Math.round(params.timeoutMs / 1000),
+    1,
+    60,
+  );
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    params.timeoutMs + DEFAULT_ABORT_GRACE_MS,
+  );
+
+  try {
+    const response = await fetch('https://api.tavily.com/extract', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        urls: [url],
+        extract_depth: extractDepth,
+        format,
+        timeout: timeoutSeconds,
+        include_images: false,
+        include_favicon: false,
+      }),
+      signal: controller.signal,
+    });
 
     if (!response.ok) {
+      const text = await response.text().catch(() => '');
       return {
         success: false,
-        error: `HTTP ${response.status}: ${response.statusText}`,
+        error: text
+          ? `Tavily extract failed with status ${response.status}: ${text}`
+          : `Tavily extract failed with status ${response.status}.`,
       };
     }
 
-    const contentType = response.headers.get('content-type');
-    if (!contentType?.includes('text/html')) {
+    const data = (await response.json()) as {
+      results?: Array<{
+        url?: string;
+        title?: string;
+        raw_content?: string;
+        content?: string;
+      }>;
+      failed_results?: Array<{
+        url?: string;
+        error?: string;
+      }>;
+    };
+
+    const firstResult = data.results?.[0];
+    const failed = data.failed_results?.find((r) => r?.url === url);
+
+    if (!firstResult) {
+      const failedMessage = failed?.error ? `: ${failed.error}` : '';
       return {
         success: false,
-        error: `Unsupported content type: ${contentType}`,
+        error: `Tavily extract returned no results${failedMessage}`,
       };
     }
 
-    const html = await response.text();
-    const { title, content } = extractTextFromHtml(html);
+    const content = (
+      firstResult.raw_content ??
+      firstResult.content ??
+      ''
+    ).trim();
+    if (!content) {
+      return {
+        success: false,
+        error: 'Tavily extract returned empty content.',
+      };
+    }
 
     return {
       success: true,
-      title,
+      title:
+        typeof firstResult.title === 'string' ? firstResult.title : undefined,
       content,
     };
   } catch (error) {
-    if (error instanceof Error) {
-      if (error.name === 'AbortError') {
-        return { success: false, error: 'Request timeout' };
-      }
-      return { success: false, error: error.message };
-    }
-    return { success: false, error: 'Unknown error' };
+    const errorMessage =
+      error instanceof Error ? error.message : 'Unknown error';
+    const isAbort = error instanceof Error && error.name === 'AbortError';
+    return {
+      success: false,
+      error: isAbort ? 'Request timeout' : errorMessage,
+    };
+  } finally {
+    clearTimeout(timeoutId);
   }
-}
-
-/**
- * Extract text content from HTML
- * Simplified extraction without heavy dependencies
- *
- * @param html - HTML string
- * @returns Extracted title and content
- */
-function extractTextFromHtml(html: string): {
-  title?: string;
-  content: string;
-} {
-  // Extract title
-  const titleMatch = html.match(/<title[^>]*>(.*?)<\/title>/is);
-  const title = titleMatch?.[1]?.trim();
-
-  // Remove script and style tags
-  let text = html
-    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '');
-
-  // Remove HTML tags
-  text = text.replace(/<[^>]+>/g, ' ');
-
-  // Decode HTML entities (basic set)
-  text = text
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
-
-  // Normalize whitespace
-  text = text
-    .replace(/\s+/g, ' ')
-    .replace(/\n\s*\n/g, '\n\n')
-    .trim();
-
-  return { title, content: text };
 }

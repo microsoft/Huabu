@@ -3,8 +3,10 @@ import { ArrowUpRight, Fullscreen, ImageIcon } from 'lucide-react';
 
 import useCanvasStore from '@/store/canvasStore.ts';
 
-import { NodeWrapper, type NodeDataProps } from './NodeWrapper.tsx';
+import { NodeWrapper } from './NodeWrapper.tsx';
 import { GhostButton } from '../Common/GhostButton.tsx';
+
+import type { NodeDataProps } from './types.ts';
 
 type ImageNodeData = NodeDataProps & {};
 export type ImageNodeType = Node<ImageNodeData, 'image'>;
