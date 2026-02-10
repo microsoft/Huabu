@@ -31,14 +31,15 @@ function migrate(database: Database.Database): void {
     CREATE TABLE IF NOT EXISTS canvas_nodes (
       canvas_id TEXT NOT NULL,
       node_id TEXT NOT NULL,
-      type TEXT,
-      data_json TEXT NOT NULL,
-      updated_at INTEGER NOT NULL,
+      source_id TEXT,
       PRIMARY KEY (canvas_id, node_id)
     );
 
     CREATE INDEX IF NOT EXISTS idx_canvas_nodes_canvas_id
       ON canvas_nodes(canvas_id);
+
+    CREATE INDEX IF NOT EXISTS idx_canvas_nodes_source_id
+      ON canvas_nodes(source_id);
   `);
 }
 

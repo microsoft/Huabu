@@ -7,9 +7,7 @@ import type { FastifyPluginAsync } from 'fastify';
 type CanvasNodeRow = {
   canvas_id: string;
   node_id: string;
-  type: string | null;
-  data_json: string;
-  updated_at: number;
+  source_id: string | null;
 };
 
 type CanvasRow = {
@@ -28,24 +26,25 @@ function nowMs(): number {
 
 function extractNodesFromState(
   state: unknown,
-): Array<{ id: string; type: string | null; data: unknown }> | null {
+): Array<{ id: string; sourceId: string | null }> | null {
   if (typeof state !== 'object' || state === null) return null;
   const maybeNodes = (state as { nodes?: unknown }).nodes;
   if (!Array.isArray(maybeNodes)) return null;
 
-  const result: Array<{ id: string; type: string | null; data: unknown }> = [];
+  const result: Array<{ id: string; sourceId: string | null }> = [];
 
   for (const node of maybeNodes) {
     if (typeof node !== 'object' || node === null) continue;
     const id = (node as { id?: unknown }).id;
     if (typeof id !== 'string' || id.trim().length === 0) continue;
 
-    const typeRaw = (node as { type?: unknown }).type;
-    const type = typeof typeRaw === 'string' ? typeRaw : null;
+    const sourceIdRaw = (node as { sourceId?: unknown }).sourceId;
+    const sourceId =
+      typeof sourceIdRaw === 'string' && sourceIdRaw.trim().length > 0
+        ? sourceIdRaw
+        : null;
 
-    const data = (node as { data?: unknown }).data;
-
-    result.push({ id, type, data });
+    result.push({ id, sourceId });
   }
 
   return result;
@@ -168,27 +167,21 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           .run(canvasId);
 
         const insertNode = database.prepare(
-          `INSERT INTO canvas_nodes (canvas_id, node_id, type, data_json, updated_at)
-           VALUES (?, ?, ?, ?, ?)`,
+          `INSERT INTO canvas_nodes (canvas_id, node_id, source_id)
+           VALUES (?, ?, ?)`,
         );
 
         for (const node of nodes) {
-          const dataJson = JSON.stringify(node.data ?? null);
-
           const rowToInsert: CanvasNodeRow = {
             canvas_id: canvasId,
             node_id: node.id,
-            type: node.type,
-            data_json: dataJson,
-            updated_at: timestamp,
+            source_id: node.sourceId,
           };
 
           insertNode.run(
             rowToInsert.canvas_id,
             rowToInsert.node_id,
-            rowToInsert.type,
-            rowToInsert.data_json,
-            rowToInsert.updated_at,
+            rowToInsert.source_id,
           );
         }
       });
