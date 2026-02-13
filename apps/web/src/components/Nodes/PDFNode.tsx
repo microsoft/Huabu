@@ -173,7 +173,7 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
           <>
             <div
               className={clsx(
-                'custom-scrollbar flex h-full w-full flex-col items-center overflow-auto p-4',
+                'custom-scrollbar flex h-full w-full flex-col items-center overflow-auto',
                 'cursor-grab select-none',
               )}
             >

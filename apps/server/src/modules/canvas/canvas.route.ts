@@ -2,7 +2,10 @@ import { z } from 'zod';
 
 import { getCanvasDb } from './canvas.db.js';
 import { getArtifactsDir } from '../artifact/utils.js';
-import { getIngestService } from '../knowledge/index.js';
+import {
+  getIngestService,
+  getKnowledgeRepository,
+} from '../knowledge/index.js';
 
 import type { FastifyPluginAsync } from 'fastify';
 
@@ -22,6 +25,92 @@ function nowMs(): number {
 
 function toMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Node types whose `content` is managed by the knowledge DB. */
+const CONTENT_MANAGED_TYPES = new Set(['note', 'text']);
+
+interface NodeLike {
+  type?: string;
+  data?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+/**
+ * Strip derived `content` from nodes that already have a `sourceId`.
+ * This avoids storing a redundant copy in canvas state_json – the knowledge
+ * DB is the single source of truth for note/text content.
+ */
+function stripManagedContent(state: unknown): unknown {
+  if (
+    typeof state !== 'object' ||
+    state === null ||
+    !('nodes' in state) ||
+    !Array.isArray((state as { nodes: unknown }).nodes)
+  ) {
+    return state;
+  }
+
+  const { nodes, ...rest } = state as { nodes: NodeLike[] } & Record<
+    string,
+    unknown
+  >;
+
+  const strippedNodes = nodes.map((node) => {
+    if (!node.data?.sourceId || !CONTENT_MANAGED_TYPES.has(node.type ?? '')) {
+      return node;
+    }
+
+    // Remove `content` – it will be hydrated back on read.
+    const { content: _content, ...dataRest } = node.data;
+    return { ...node, data: dataRest };
+  });
+
+  return { ...rest, nodes: strippedNodes };
+}
+
+/**
+ * Hydrate node `content` from the knowledge DB for nodes that reference a source.
+ * Only applies to note/text nodes that have a `sourceId`.
+ */
+function hydrateNodeContent(state: unknown): unknown {
+  if (
+    typeof state !== 'object' ||
+    state === null ||
+    !('nodes' in state) ||
+    !Array.isArray((state as { nodes: unknown }).nodes)
+  ) {
+    return state;
+  }
+
+  const { nodes, ...rest } = state as { nodes: NodeLike[] } & Record<
+    string,
+    unknown
+  >;
+
+  const repository = getKnowledgeRepository();
+
+  const hydratedNodes = nodes.map((node) => {
+    const sourceId = node.data?.sourceId as string | undefined;
+    if (!sourceId || !CONTENT_MANAGED_TYPES.has(node.type ?? '')) {
+      return node;
+    }
+
+    const source = repository.findSourceById(sourceId);
+    if (!source) {
+      return node;
+    }
+
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        content: source.content_text,
+      },
+    };
+  });
+
+  return { ...rest, nodes: hydratedNodes };
 }
 
 const putCanvasBodySchema = z.object({
@@ -148,6 +237,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         state = row.state_json;
       }
 
+      // Hydrate node content from knowledge DB so clients always get fresh data
+      state = hydrateNodeContent(state);
+
       return reply.send({
         canvasId: row.canvas_id,
         version: row.version,
@@ -186,7 +278,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       const timestamp = nowMs();
       const nextVersion = serverVersion + 1;
 
-      const stateJson = JSON.stringify(state);
+      // Strip content that is managed by the knowledge DB to avoid data duplication
+      const leanState = stripManagedContent(state);
+      const stateJson = JSON.stringify(leanState);
 
       // Only update canvas metadata and state (node-source mappings are managed by node endpoints)
       if (!existing) {

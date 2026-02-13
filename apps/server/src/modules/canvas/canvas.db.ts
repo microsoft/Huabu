@@ -30,6 +30,37 @@ function migrate(database: Database.Database): void {
   `);
 }
 
+const DEFAULT_CANVAS_ID = 'default-canvas';
+
+/**
+ * Ensure the default canvas row exists so the client can always load it.
+ * Creates an empty canvas with version 0 if it does not exist yet.
+ */
+function ensureDefaultCanvas(database: Database.Database): void {
+  const row = database
+    .prepare('SELECT canvas_id FROM canvases WHERE canvas_id = ?')
+    .get(DEFAULT_CANVAS_ID);
+
+  if (!row) {
+    const now = Date.now();
+    database
+      .prepare(
+        `INSERT INTO canvases (
+          canvas_id, workspace_id, title, version, state_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        DEFAULT_CANVAS_ID,
+        'default',
+        null,
+        0,
+        JSON.stringify({ nodes: [], edges: [] }),
+        now,
+        now,
+      );
+  }
+}
+
 export function getCanvasDb(): Database.Database {
   if (db) return db;
 
@@ -38,6 +69,7 @@ export function getCanvasDb(): Database.Database {
 
   db = new Database(dbPath);
   migrate(db);
+  ensureDefaultCanvas(db);
 
   return db;
 }
