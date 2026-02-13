@@ -53,7 +53,11 @@ export const SidebarPanel = ({
               {tools}
             </div>
           )}
-          <GhostButton onClick={onToggle} title={`Collapse ${title}`}>
+          <GhostButton
+            className="text-muted-foreground"
+            onClick={onToggle}
+            title={`Collapse ${title}`}
+          >
             {iconExpanded}
           </GhostButton>
         </div>

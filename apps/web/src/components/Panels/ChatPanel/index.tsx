@@ -125,8 +125,8 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       title="Chat"
       isCollapsed={isCollapsed}
       onToggle={onToggle}
-      iconCollapsed={<PanelRightOpen size={18} />}
-      iconExpanded={<PanelRightClose size={18} />}
+      iconCollapsed={<PanelRightOpen size={16} />}
+      iconExpanded={<PanelRightClose size={16} />}
       className="border-border border-l"
     >
       <div className="flex h-full flex-col gap-2 overflow-visible">
