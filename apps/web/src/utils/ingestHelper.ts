@@ -84,6 +84,10 @@ export async function ingestNodeIfNeeded({
       src: nodeData?.src as string,
     });
 
+    if (response.sourceId) {
+      updateNodeDataLocal(node.id, { sourceId: response.sourceId });
+    }
+
     // Optionally apply server-suggested label (e.g. parsed PDF/web title).
     // Only overwrite when the current label is empty.
     if (response.success && response.suggestedLabel) {

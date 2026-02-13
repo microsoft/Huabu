@@ -25,6 +25,9 @@ export type NodeDataProps = {
   content?: string;
   label?: string;
 
+  // Populated after ingestion; used to look up stored snapshots.
+  sourceId?: string;
+
   // for text node
   style?: NodeStyle;
 
