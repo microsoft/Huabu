@@ -60,8 +60,10 @@ type RFState = {
   clearNodeIngestion: (nodeId: string) => void;
 
   expandedNodeId: string | null;
+  expandMode: 'replace' | 'split';
   openExpanded: (nodeId: string) => void;
   closeExpanded: () => void;
+  setExpandMode: (mode: 'replace' | 'split') => void;
 
   onNodesChange: OnNodesChange;
   onEdgesChange: OnEdgesChange;
@@ -71,7 +73,7 @@ type RFState = {
   updateNodeData: (nodeId: string, patch: Record<string, unknown>) => void;
   updateNodeDataLocal: (nodeId: string, patch: Record<string, unknown>) => void;
 
-  getSelectedNodeIds: () => string[];
+  getSelectedSourceIds: () => string[];
 
   frameSelectedNodes: () => void;
   unframe: (frameId: string) => void;
@@ -123,8 +125,10 @@ const useCanvasStore = create<RFState>((set, get) => ({
   },
 
   expandedNodeId: null,
+  expandMode: 'replace',
   openExpanded: (nodeId) => set({ expandedNodeId: nodeId }),
   closeExpanded: () => set({ expandedNodeId: null }),
+  setExpandMode: (mode) => set({ expandMode: mode }),
 
   loadCanvas: async () => {
     set({ isLoading: true });
@@ -321,10 +325,10 @@ const useCanvasStore = create<RFState>((set, get) => ({
     scheduleAutoSave(get().saveCanvas);
   },
 
-  getSelectedNodeIds: () => {
+  getSelectedSourceIds: () => {
     return get()
-      .nodes.filter((n) => n.selected)
-      .map((n) => n.id);
+      .nodes.filter((n) => n.selected && n.data?.sourceId)
+      .map((n) => n.data.sourceId as string);
   },
 
   frameSelectedNodes: () => {

@@ -41,16 +41,6 @@ app.register(staticPlugin, {
   prefix: '/api/artifact/',
 });
 
-if (process.env.NODE_ENV !== 'production') {
-  try {
-    const { ensureMockCanvas } = await import('./modules/canvas/mock.js');
-    ensureMockCanvas();
-  } catch (err) {
-    app.log.error({ err }, 'Failed to initialize mock canvas');
-    throw err;
-  }
-}
-
 app.register(chatRoutes, { prefix: '/api/chat' });
 app.register(canvasRoutes, { prefix: '/api/canvas' });
 app.register(webRoutes, { prefix: '/api/web' });

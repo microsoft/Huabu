@@ -9,7 +9,6 @@ import {
   generateRevisionId,
   generateSourceId,
   normalizeUrl,
-  shouldUseArtifactStorage,
 } from './utils.js';
 import { getWebSnapshot } from './web-fetcher.js';
 
@@ -410,29 +409,6 @@ export class IngestService {
   }
 
   /**
-   * Prepare storage strategy for content
-   * Returns either inline text or artifact URI based on content size
-   */
-  private prepareStorageStrategy(content: string): {
-    contentText: string | undefined;
-    contentArtifactUri: string | undefined;
-  } {
-    const useArtifact = shouldUseArtifactStorage(content);
-
-    if (useArtifact) {
-      // TODO: Implement artifact storage
-      throw new Error(
-        'Artifact storage not yet implemented. Content size exceeds 1MB.',
-      );
-    }
-
-    return {
-      contentText: content,
-      contentArtifactUri: undefined,
-    };
-  }
-
-  /**
    * Create or update source record based on whether it exists
    */
   private createOrUpdateSource(params: {
@@ -523,11 +499,6 @@ export class IngestService {
       };
     }
 
-    // Prepare storage strategy
-    const { contentText, contentArtifactUri } = this.prepareStorageStrategy(
-      input.content,
-    );
-
     // Use transaction for atomic source + revision creation
     const result = this.repository.transaction(() => {
       // Create or update source
@@ -537,7 +508,7 @@ export class IngestService {
         workspaceId: input.workspaceId,
         type: input.type,
         title: input.title,
-        contentText,
+        contentText: input.content,
         contentHash,
         metadata: input.metadata,
       });
@@ -548,8 +519,7 @@ export class IngestService {
         revisionId,
         workspaceId: input.workspaceId,
         sourceId,
-        contentText,
-        contentArtifactUri,
+        contentText: input.content,
         contentHash,
         metadata: input.metadata,
       });
@@ -681,10 +651,6 @@ export class IngestService {
       };
     }
 
-    // Prepare storage strategy
-    const { contentText, contentArtifactUri } =
-      this.prepareStorageStrategy(content);
-
     // Use parsed title or fallback to input title
     const title = parseResult.title || input.title;
 
@@ -703,8 +669,7 @@ export class IngestService {
       type: 'pdf',
       title,
       uri: input.artifactUri,
-      contentText,
-      contentArtifactUri,
+      contentText: content,
       contentHash,
       metadata,
     });
@@ -756,7 +721,7 @@ export class IngestService {
           source,
           latestRevision: {
             revisionId: revision.revision_id,
-            content: revision.content_text ?? '', // TODO: handle artifact
+            content: revision.content_text,
             createdAt: revision.created_at,
           },
         };

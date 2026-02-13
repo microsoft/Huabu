@@ -15,8 +15,7 @@ export interface SourceRow {
   uri: string | null;
   created_at: number;
   updated_at: number;
-  content_artifact_uri: string | null;
-  content_text: string | null;
+  content_text: string;
   content_hash: string;
   meta_json: string | null;
 }
@@ -30,8 +29,7 @@ export interface SourceRevisionRow {
   workspace_id: string;
   source_id: string;
   created_at: number;
-  content_artifact_uri: string | null;
-  content_text: string | null;
+  content_text: string;
   content_hash: string;
   meta_json: string | null;
 }
@@ -71,7 +69,6 @@ export interface CreateSourceInput {
   title?: string;
   uri?: string;
   contentText?: string;
-  contentArtifactUri?: string;
   contentHash: string;
   metadata?: SourceMetadata;
 }
@@ -84,7 +81,6 @@ export interface CreateRevisionInput {
   workspaceId: string;
   sourceId: string;
   contentText?: string;
-  contentArtifactUri?: string;
   contentHash: string;
   metadata?: SourceMetadata;
 }

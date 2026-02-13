@@ -53,8 +53,8 @@ export class KnowledgeRepository {
       INSERT INTO sources (
         source_id, workspace_id, type, title, uri,
         created_at, updated_at,
-        content_artifact_uri, content_text, content_hash, meta_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        content_text, content_hash, meta_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -65,8 +65,7 @@ export class KnowledgeRepository {
       input.uri ?? null,
       now,
       now,
-      input.contentArtifactUri ?? null,
-      input.contentText ?? null,
+      input.contentText ?? '',
       input.contentHash,
       metaJson,
     );
@@ -86,7 +85,6 @@ export class KnowledgeRepository {
     sourceId: string,
     updates: {
       contentText?: string;
-      contentArtifactUri?: string;
       contentHash?: string;
       title?: string;
       metadata?: Record<string, unknown>;
@@ -98,7 +96,6 @@ export class KnowledgeRepository {
     const stmt = this.db.prepare(`
       UPDATE sources
       SET content_text = COALESCE(?, content_text),
-          content_artifact_uri = COALESCE(?, content_artifact_uri),
           content_hash = COALESCE(?, content_hash),
           title = COALESCE(?, title),
           meta_json = COALESCE(?, meta_json),
@@ -108,7 +105,6 @@ export class KnowledgeRepository {
 
     stmt.run(
       updates.contentText ?? null,
-      updates.contentArtifactUri ?? null,
       updates.contentHash ?? null,
       updates.title ?? null,
       metaJson,
@@ -175,8 +171,8 @@ export class KnowledgeRepository {
     const stmt = this.db.prepare(`
       INSERT INTO source_revisions (
         revision_id, workspace_id, source_id, created_at,
-        content_artifact_uri, content_text, content_hash, meta_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        content_text, content_hash, meta_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -184,8 +180,7 @@ export class KnowledgeRepository {
       input.workspaceId,
       input.sourceId,
       now,
-      input.contentArtifactUri ?? null,
-      input.contentText ?? null,
+      input.contentText ?? '',
       input.contentHash,
       metaJson,
     );

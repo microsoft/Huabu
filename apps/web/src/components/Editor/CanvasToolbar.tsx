@@ -151,11 +151,13 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
         case 'image':
           newNode.data = {
             src: payload?.src || '',
+            label: payload?.label,
           };
           break;
         case 'pdf':
           newNode.data = {
             src: payload?.src || '',
+            label: payload?.label,
           };
           newNode.style = { width: initialWidth, height: initialHeight };
           newNode.isExpanded = true;
@@ -163,6 +165,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
         case 'video':
           newNode.data = {
             src: payload?.src,
+            label: payload?.label,
           };
           break;
         case 'web':

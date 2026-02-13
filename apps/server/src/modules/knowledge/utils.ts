@@ -3,11 +3,6 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { SourceType } from './types.js';
 
 /**
- * Content size threshold for artifact storage (1MB)
- */
-export const CONTENT_SIZE_THRESHOLD = 1048576; // 1MB in bytes
-
-/**
  * Normalize URL for consistent sourceId generation
  * - Remove query parameters
  * - Normalize protocol (http/https)
@@ -125,14 +120,4 @@ export function generateSourceId(options: {
  */
 export function generateRevisionId(): string {
   return `rev_${randomUUID()}`;
-}
-
-/**
- * Determine if content should be stored in artifact vs database
- * @param content - Content to check
- * @returns true if should use artifact storage
- */
-export function shouldUseArtifactStorage(content: string): boolean {
-  // Use Buffer.byteLength for accurate UTF-8 byte count
-  return Buffer.byteLength(content, 'utf8') >= CONTENT_SIZE_THRESHOLD;
 }

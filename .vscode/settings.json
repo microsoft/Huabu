@@ -6,7 +6,7 @@
 
   "eslint.enable": true,
   "eslint.packageManager": "pnpm",
-  "eslint.workingDirectories": [{ "mode": "auto" }],
+  "eslint.workingDirectories": ["."],
   "eslint.validate": [
     "javascript",
     "javascriptreact",

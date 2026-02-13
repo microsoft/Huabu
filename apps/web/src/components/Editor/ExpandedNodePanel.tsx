@@ -1,7 +1,9 @@
 import { useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/shadcn';
-import { type Node, useReactFlow } from '@xyflow/react';
+import { type Node } from '@xyflow/react';
 import {
+  ArrowLeft,
+  Columns2,
   Expand,
   FileText,
   Globe,
@@ -11,13 +13,13 @@ import {
   X,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { Document, Page, pdfjs } from 'react-pdf';
 
 import { getWebReader } from '@/api/web';
 
 import useCanvasStore from '../../store/canvasStore.ts';
 import { blockNoteShadcnOverrides } from '../BlockNote/shadcnOverrides.tsx';
+import { GhostButton } from '../Common/GhostButton.tsx';
 
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
@@ -25,71 +27,12 @@ type ExpandedRendererProps = {
   node: Node;
 };
 
-const OverlayShell = (props: {
-  title: string;
-  icon: React.ReactNode;
-  children: React.ReactNode;
-  onClose: () => void;
-}) => {
-  const focusRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    focusRef.current?.focus();
-  }, []);
-
-  return (
-    <div
-      className="fixed inset-0 z-50"
-      role="dialog"
-      aria-modal="true"
-      onMouseDown={(e) => {
-        // Close on backdrop click.
-        if (e.target === e.currentTarget) props.onClose();
-      }}
-    >
-      <div className="bg-background/80 absolute inset-0" />
-
-      <div className="absolute inset-0 flex items-center justify-center p-6">
-        <div
-          ref={focusRef}
-          tabIndex={-1}
-          className="border-border shadow-bottom flex h-full max-h-[90vh] w-full max-w-275 flex-col overflow-hidden rounded-md border bg-white outline-none"
-          onMouseDown={(e) => e.stopPropagation()}
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') props.onClose();
-            e.stopPropagation();
-          }}
-        >
-          <div className="border-border flex h-10 shrink-0 items-center justify-between gap-3 border-b bg-white px-3">
-            <div className="text-muted-foreground flex min-w-0 items-center gap-2 text-xs font-medium">
-              <span className="shrink-0">{props.icon}</span>
-              <span className="truncate">{props.title}</span>
-            </div>
-
-            <div className="text-muted-foreground flex items-center gap-2">
-              <div className="bg-border h-3 w-px" />
-              <button
-                className="hover:text-main"
-                title="Close"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  props.onClose();
-                }}
-              >
-                <X size={14} />
-              </button>
-            </div>
-          </div>
-
-          <div className="flex-1 overflow-hidden">{props.children}</div>
-        </div>
-      </div>
-    </div>
-  );
-};
+/* ------------------------------------------------------------------ */
+/*  Per-type expanded views (unchanged from the original overlay)     */
+/* ------------------------------------------------------------------ */
 
 const NoteExpandedView = ({ node }: ExpandedRendererProps) => {
-  const { updateNodeData } = useReactFlow();
+  const updateNodeData = useCanvasStore((s) => s.updateNodeData);
   const editor = useCreateBlockNote({
     initialContent: [{ type: 'paragraph', content: '' }],
     trailingBlock: false,
@@ -327,67 +270,72 @@ const PDFExpandedView = ({ node }: ExpandedRendererProps) => {
   );
 };
 
+/* ------------------------------------------------------------------ */
+/*  Helpers                                                           */
+/* ------------------------------------------------------------------ */
+
 const getOverlayMeta = (node: Node) => {
   const type = typeof node.type === 'string' ? node.type : '';
   if (type === 'note') {
-    return {
-      title: 'Note',
-      icon: <StickyNote size={14} />,
-    };
+    return { title: 'Note', icon: <StickyNote size={14} /> };
   }
   if (type === 'web') {
     const src = typeof node.data?.src === 'string' ? node.data.src : '';
-    return {
-      title: src || 'Web',
-      icon: <Globe size={14} />,
-    };
+    return { title: src || 'Web', icon: <Globe size={14} /> };
   }
   if (type === 'pdf') {
     const label = typeof node.data?.label === 'string' ? node.data.label : '';
-    return {
-      title: label || 'PDF',
-      icon: <FileText size={14} />,
-    };
+    return { title: label || 'PDF', icon: <FileText size={14} /> };
   }
   if (type === 'image') {
     const label = typeof node.data?.label === 'string' ? node.data.label : '';
-    return {
-      title: label || 'Image',
-      icon: <ImageIcon size={14} />,
-    };
+    return { title: label || 'Image', icon: <ImageIcon size={14} /> };
   }
   if (type === 'video') {
     const label = typeof node.data?.label === 'string' ? node.data.label : '';
-    return {
-      title: label || 'Video',
-      icon: <PlayCircle size={14} />,
-    };
+    return { title: label || 'Video', icon: <PlayCircle size={14} /> };
   }
-  return {
-    title: 'Expanded View',
-    icon: <Expand size={14} />,
-  };
+  return { title: 'Expanded View', icon: <Expand size={14} /> };
 };
 
-export const ExpandedNodeOverlay = () => {
-  const expandedNodeId = useCanvasStore((s) => s.expandedNodeId);
-  const closeExpanded = useCanvasStore((s) => s.closeExpanded);
+const getExpandedContent = (node: Node): React.ReactNode => {
+  if (node.type === 'note') return <NoteExpandedView node={node} />;
+  if (node.type === 'web') return <WebExpandedView node={node} />;
+  if (node.type === 'pdf') return <PDFExpandedView node={node} />;
+  if (node.type === 'image') return <ImageExpandedView node={node} />;
+  if (node.type === 'video') return <VideoExpandedView node={node} />;
+  return (
+    <div className="text-muted-foreground flex h-full w-full items-center justify-center text-sm">
+      Unsupported node type
+    </div>
+  );
+};
 
-  const { getNode } = useReactFlow();
+/* ------------------------------------------------------------------ */
+/*  ExpandedNodePanel – inline panel that replaces or sits beside     */
+/*  the canvas (no portal / overlay).                                 */
+/* ------------------------------------------------------------------ */
+
+export const ExpandedNodePanel = () => {
+  const expandedNodeId = useCanvasStore((s) => s.expandedNodeId);
+  const expandMode = useCanvasStore((s) => s.expandMode);
+  const closeExpanded = useCanvasStore((s) => s.closeExpanded);
+  const setExpandMode = useCanvasStore((s) => s.setExpandMode);
+  const nodes = useCanvasStore((s) => s.nodes);
 
   const node = useMemo(() => {
     if (!expandedNodeId) return null;
-    return getNode(expandedNodeId) ?? null;
-  }, [expandedNodeId, getNode]);
+    return nodes.find((n) => n.id === expandedNodeId) ?? null;
+  }, [expandedNodeId, nodes]);
 
-  const portalTarget = typeof document !== 'undefined' ? document.body : null;
-
+  // If the node was removed while expanded, close the panel.
   useEffect(() => {
     if (!expandedNodeId) return;
     if (node) return;
     closeExpanded();
   }, [closeExpanded, expandedNodeId, node]);
 
+  // Global Escape key handler.
   useEffect(() => {
     if (!expandedNodeId || !node) return;
 
@@ -399,38 +347,63 @@ export const ExpandedNodeOverlay = () => {
     };
 
     window.addEventListener('keydown', onKeyDown, true);
-
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-
-    return () => {
-      window.removeEventListener('keydown', onKeyDown, true);
-      document.body.style.overflow = prevOverflow;
-    };
+    return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [closeExpanded, expandedNodeId, node]);
 
-  if (!expandedNodeId || !node || !portalTarget) return null;
+  if (!expandedNodeId || !node) return null;
 
   const meta = getOverlayMeta(node);
+  const isReplace = expandMode === 'replace';
 
-  let content: React.ReactNode = null;
-  if (node.type === 'note') content = <NoteExpandedView node={node} />;
-  else if (node.type === 'web') content = <WebExpandedView node={node} />;
-  else if (node.type === 'pdf') content = <PDFExpandedView node={node} />;
-  else if (node.type === 'image') content = <ImageExpandedView node={node} />;
-  else if (node.type === 'video') content = <VideoExpandedView node={node} />;
-  else {
-    content = (
-      <div className="text-muted-foreground flex h-full w-full items-center justify-center text-sm">
-        Unsupported node type
+  return (
+    <div className="border-border flex h-full w-full flex-col overflow-hidden border-l bg-white">
+      {/* Header bar */}
+      <div className="border-border flex h-10 shrink-0 items-center justify-between gap-3 border-b bg-white px-3">
+        {/* Left: back button (replace mode) + icon + title */}
+        <div className="flex min-w-0 items-center gap-2">
+          {isReplace && (
+            <GhostButton
+              className="text-muted-foreground"
+              title="Back to Canvas"
+              onClick={closeExpanded}
+            >
+              <ArrowLeft size={14} />
+            </GhostButton>
+          )}
+
+          <div className="text-muted-foreground flex min-w-0 items-center gap-2 text-xs font-medium">
+            <span className="shrink-0">{meta.icon}</span>
+            <span className="truncate">{meta.title}</span>
+          </div>
+        </div>
+
+        {/* Right: mode toggle + close */}
+        <div className="text-muted-foreground flex items-center gap-1">
+          <GhostButton
+            className={
+              !isReplace ? 'text-main bg-muted' : 'text-muted-foreground'
+            }
+            title={isReplace ? 'Split view' : 'Full view'}
+            onClick={() => setExpandMode(isReplace ? 'split' : 'replace')}
+          >
+            <Columns2 size={14} />
+          </GhostButton>
+
+          <GhostButton
+            className="text-muted-foreground"
+            title="Close"
+            onClick={(e) => {
+              e.stopPropagation();
+              closeExpanded();
+            }}
+          >
+            <X size={14} />
+          </GhostButton>
+        </div>
       </div>
-    );
-  }
 
-  return createPortal(
-    <OverlayShell title={meta.title} icon={meta.icon} onClose={closeExpanded}>
-      {content}
-    </OverlayShell>,
-    portalTarget,
+      {/* Content */}
+      <div className="flex-1 overflow-hidden">{getExpandedContent(node)}</div>
+    </div>
   );
 };

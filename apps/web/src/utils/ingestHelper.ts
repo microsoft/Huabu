@@ -82,6 +82,7 @@ export async function ingestNodeIfNeeded({
       title: (nodeData?.label as string) ?? (nodeData?.title as string),
       content: nodeData?.content as string,
       src: nodeData?.src as string,
+      sourceId: (nodeData?.sourceId as string) || undefined,
     });
 
     if (response.sourceId) {

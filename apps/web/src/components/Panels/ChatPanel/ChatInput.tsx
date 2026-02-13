@@ -1,4 +1,4 @@
-import { ArrowUp, Plus } from 'lucide-react';
+import { ArrowUp } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 
 import { IconButton } from '../../Common/IconButton';
@@ -75,14 +75,14 @@ export const ChatInput = ({
 
           <div className="mt-2 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
-              <IconButton
+              {/* <IconButton
                 aria-label="Add"
                 disabled={disabled}
                 size="sm"
                 variant="outline"
               >
                 <Plus size={16} />
-              </IconButton>
+              </IconButton> */}
 
               {/* <PillButton disabled={disabled}>
                 <Lightbulb size={16} />
