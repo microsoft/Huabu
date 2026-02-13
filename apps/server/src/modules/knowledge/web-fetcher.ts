@@ -7,8 +7,24 @@ export interface FetchWebContentResult {
   success: boolean;
   content?: string;
   title?: string;
+  image?: string;
+  favicon?: string;
   error?: string;
 }
+
+export type WebSnapshot = {
+  content: string;
+  title?: string;
+  metadata: {
+    siteName?: string;
+    [key: string]: unknown;
+  };
+};
+
+export type FetchWebContentOptions = {
+  timeoutMs?: number;
+  format?: 'text' | 'markdown';
+};
 
 const DEFAULT_WEB_FETCH_TIMEOUT_MS = 30_000;
 const DEFAULT_WEB_FETCH_RETRIES = 1;
@@ -35,13 +51,20 @@ function sleep(ms: number): Promise<void> {
  */
 export async function fetchWebContent(
   url: string,
+  options: FetchWebContentOptions = {},
 ): Promise<FetchWebContentResult> {
+  const timeoutMs =
+    typeof options.timeoutMs === 'number' && options.timeoutMs > 0
+      ? options.timeoutMs
+      : DEFAULT_WEB_FETCH_TIMEOUT_MS;
+
   const maxAttempts = Math.max(1, DEFAULT_WEB_FETCH_RETRIES + 1);
   let lastErrorMessage: string | undefined;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const tavilyResult = await fetchWebContentViaTavilyExtract(url, {
-      timeoutMs: DEFAULT_WEB_FETCH_TIMEOUT_MS,
+      timeoutMs,
+      format: options.format,
     });
 
     if (tavilyResult.success) {
@@ -74,10 +97,98 @@ export async function fetchWebContent(
   };
 }
 
+function safeGetHostname(url: string): string | undefined {
+  try {
+    const hostname = new URL(url).hostname;
+    return hostname ? hostname : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function mergeDerivedMetadata(params: {
+  uri: string;
+  content: string;
+  metadata: Record<string, unknown>;
+}): Record<string, unknown> {
+  const metadata = params.metadata;
+
+  const existingSiteName =
+    typeof metadata.siteName === 'string' ? metadata.siteName.trim() : '';
+  if (!existingSiteName) {
+    const hostname = safeGetHostname(params.uri);
+    if (hostname) metadata.siteName = hostname;
+  }
+
+  return metadata;
+}
+
+/**
+ * Get a normalized web snapshot for ingestion.
+ *
+ * This consolidates:
+ * - Fetching (when `content` is not provided)
+ * - Merging Tavily fields into metadata
+ * - Deriving siteName from URI
+ */
+export async function getWebSnapshot(params: {
+  uri: string;
+  content?: string;
+  title?: string;
+  metadata?: Record<string, unknown>;
+  format?: 'text' | 'markdown';
+}): Promise<WebSnapshot> {
+  let content = params.content;
+  let title = params.title;
+  const metadata: Record<string, unknown> = { ...(params.metadata ?? {}) };
+
+  if (!content) {
+    // Backend fetch via Tavily. This is the ONLY place we fetch web sources.
+    const fetchResult = await fetchWebContent(params.uri, {
+      format: params.format,
+    });
+
+    if (!fetchResult.success) {
+      throw new Error(
+        `Failed to fetch web content (${params.uri}): ${fetchResult.error}`,
+      );
+    }
+
+    content = fetchResult.content ?? '';
+    title = title ?? fetchResult.title;
+    const image =
+      typeof fetchResult.image === 'string' ? fetchResult.image : '';
+    const favicon =
+      typeof fetchResult.favicon === 'string' ? fetchResult.favicon : '';
+
+    const existingImage =
+      typeof metadata.image === 'string' ? metadata.image.trim() : '';
+    const existingFavicon =
+      typeof metadata.favicon === 'string' ? metadata.favicon.trim() : '';
+
+    if (!existingImage && image.trim()) metadata.image = image.trim();
+    if (!existingFavicon && favicon.trim()) metadata.favicon = favicon.trim();
+  }
+
+  const contentText = content ?? '';
+  mergeDerivedMetadata({
+    uri: params.uri,
+    content: contentText,
+    metadata,
+  });
+
+  return {
+    content: contentText,
+    title,
+    metadata,
+  };
+}
+
 async function fetchWebContentViaTavilyExtract(
   url: string,
   params: {
     timeoutMs: number;
+    format?: 'text' | 'markdown';
   },
 ): Promise<FetchWebContentResult> {
   const apiKey = process.env.TAVILY_API_KEY;
@@ -94,9 +205,10 @@ async function fetchWebContentViaTavilyExtract(
       : 'basic';
 
   const format: 'text' | 'markdown' =
-    process.env.SEDIMENT_TAVILY_EXTRACT_FORMAT === 'markdown'
+    params.format ??
+    (process.env.SEDIMENT_TAVILY_EXTRACT_FORMAT === 'markdown'
       ? 'markdown'
-      : 'text';
+      : 'text');
 
   const timeoutSeconds = clampNumber(
     Math.round(params.timeoutMs / 1000),
@@ -122,8 +234,8 @@ async function fetchWebContentViaTavilyExtract(
         extract_depth: extractDepth,
         format,
         timeout: timeoutSeconds,
-        include_images: false,
-        include_favicon: false,
+        include_images: true,
+        include_favicon: true,
       }),
       signal: controller.signal,
     });
@@ -139,12 +251,7 @@ async function fetchWebContentViaTavilyExtract(
     }
 
     const data = (await response.json()) as {
-      results?: Array<{
-        url?: string;
-        title?: string;
-        raw_content?: string;
-        content?: string;
-      }>;
+      results?: Array<Record<string, unknown>>;
       failed_results?: Array<{
         url?: string;
         error?: string;
@@ -162,11 +269,34 @@ async function fetchWebContentViaTavilyExtract(
       };
     }
 
-    const content = (
-      firstResult.raw_content ??
-      firstResult.content ??
-      ''
-    ).trim();
+    const title =
+      typeof firstResult?.title === 'string' ? firstResult.title : undefined;
+
+    const favicon =
+      typeof firstResult?.favicon === 'string'
+        ? firstResult.favicon
+        : undefined;
+
+    const imagesList = Array.isArray(firstResult?.images)
+      ? (firstResult.images as unknown[])
+      : undefined;
+
+    const imageFromList = imagesList
+      ?.find((v) => typeof v === 'string')
+      ?.toString();
+
+    const image = imageFromList;
+
+    const rawContent =
+      (typeof firstResult?.raw_content === 'string'
+        ? firstResult.raw_content
+        : undefined) ??
+      (typeof firstResult?.content === 'string'
+        ? firstResult.content
+        : undefined) ??
+      '';
+
+    const content = rawContent.trim();
     if (!content) {
       return {
         success: false,
@@ -176,8 +306,9 @@ async function fetchWebContentViaTavilyExtract(
 
     return {
       success: true,
-      title:
-        typeof firstResult.title === 'string' ? firstResult.title : undefined,
+      title,
+      image,
+      favicon,
       content,
     };
   } catch (error) {

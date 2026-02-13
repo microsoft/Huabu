@@ -29,6 +29,7 @@ import {
 
 const CANVAS_ID = 'default-canvas';
 const AUTOSAVE_DEBOUNCE_MS = 1000;
+const DEFAULT_WORKSPACE_NAME = 'Sediment Workspace Name';
 
 const triggerIngestion = (node: Node) => {
   const state = useCanvasStore.getState();
@@ -51,13 +52,18 @@ type RFState = {
   isSaving: boolean;
   pendingSave: boolean;
 
+  workspaceName: string;
+  setWorkspaceName: (name: string) => void;
+
   ingestionByNodeId: Record<string, NodeIngestionInfo>;
   setNodeIngestion: (nodeId: string, info: NodeIngestionInfo) => void;
   clearNodeIngestion: (nodeId: string) => void;
 
   expandedNodeId: string | null;
+  expandMode: 'replace' | 'split';
   openExpanded: (nodeId: string) => void;
   closeExpanded: () => void;
+  setExpandMode: (mode: 'replace' | 'split') => void;
 
   onNodesChange: OnNodesChange;
   onEdgesChange: OnEdgesChange;
@@ -71,6 +77,7 @@ type RFState = {
   setSelectedNodes: (ids: string[], multiSelect?: boolean) => void;
 
   reorderNodes: (activeId: string, overId: string) => void;
+  getSelectedSourceIds: () => string[];
 
   frameSelectedNodes: () => void;
   unframe: (frameId: string) => void;
@@ -98,6 +105,12 @@ const useCanvasStore = create<RFState>((set, get) => ({
   isSaving: false,
   pendingSave: false,
 
+  workspaceName: DEFAULT_WORKSPACE_NAME,
+  setWorkspaceName: (name) => {
+    set({ workspaceName: name });
+    scheduleAutoSave(get().saveCanvas);
+  },
+
   ingestionByNodeId: {},
   setNodeIngestion: (nodeId, info) => {
     if (!nodeId) return;
@@ -116,8 +129,10 @@ const useCanvasStore = create<RFState>((set, get) => ({
   },
 
   expandedNodeId: null,
+  expandMode: 'replace',
   openExpanded: (nodeId) => set({ expandedNodeId: nodeId }),
   closeExpanded: () => set({ expandedNodeId: null }),
+  setExpandMode: (mode) => set({ expandMode: mode }),
 
   loadCanvas: async () => {
     set({ isLoading: true });
@@ -130,10 +145,15 @@ const useCanvasStore = create<RFState>((set, get) => ({
         return;
       }
 
-      const state = response.state as { nodes?: Node[]; edges?: Edge[] };
+      const state = response.state as {
+        nodes?: Node[];
+        edges?: Edge[];
+        workspaceName?: string;
+      };
       set({
         nodes: state.nodes ?? [],
         edges: state.edges ?? [],
+        workspaceName: state.workspaceName ?? get().workspaceName,
         version: response.version,
         isLoading: false,
         ingestionByNodeId: {},
@@ -153,10 +173,10 @@ const useCanvasStore = create<RFState>((set, get) => ({
 
     set({ isSaving: true });
     try {
-      const { nodes, edges, version, canvasId } = get();
+      const { nodes, edges, version, canvasId, workspaceName } = get();
       const response = await putCanvas(canvasId, {
         version,
-        state: { nodes, edges },
+        state: { nodes, edges, workspaceName },
       });
       set({ version: response.version });
     } catch (error) {
@@ -309,10 +329,10 @@ const useCanvasStore = create<RFState>((set, get) => ({
     scheduleAutoSave(get().saveCanvas);
   },
 
-  getSelectedNodeIds: () => {
+  getSelectedSourceIds: () => {
     return get()
-      .nodes.filter((n) => n.selected)
-      .map((n) => n.id);
+      .nodes.filter((n) => n.selected && n.data?.sourceId)
+      .map((n) => n.data.sourceId as string);
   },
 
   setSelectedNodes: (ids, multiSelect = false) => {

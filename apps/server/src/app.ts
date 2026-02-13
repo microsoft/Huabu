@@ -9,6 +9,7 @@ import artifactRoute from './modules/artifact/artifact.route.js';
 import { getArtifactsDir } from './modules/artifact/utils.js';
 import canvasRoutes from './modules/canvas/canvas.route.js';
 import chatRoutes from './modules/chat/chat.route.js';
+import webRoutes from './modules/web/web.route.js';
 
 export const app = fastify({
   logger: {
@@ -40,16 +41,7 @@ app.register(staticPlugin, {
   prefix: '/api/artifact/',
 });
 
-if (process.env.NODE_ENV !== 'production') {
-  try {
-    const { ensureMockCanvas } = await import('./modules/canvas/mock.js');
-    ensureMockCanvas();
-  } catch (err) {
-    app.log.error({ err }, 'Failed to initialize mock canvas');
-    throw err;
-  }
-}
-
 app.register(chatRoutes, { prefix: '/api/chat' });
 app.register(canvasRoutes, { prefix: '/api/canvas' });
+app.register(webRoutes, { prefix: '/api/web' });
 app.register(artifactRoute, { prefix: '/api' });

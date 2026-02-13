@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 
-import { Canvas } from './components/Editor/Canvas.tsx';
+import { CenterArea } from './components/Layout/CenterArea';
 import { MainLayout } from './components/Layout/MainLayout';
 import { ChatPanel } from './components/Panels/ChatPanel';
 import { DataSourcePanel } from './components/Panels/DataSourcePanel';
@@ -20,7 +20,7 @@ export default function App() {
       leftPanel={<DataSourcePanel />}
       rightPanel={<ChatPanel />}
     >
-      <Canvas />
+      <CenterArea />
     </MainLayout>
   );
 }

@@ -6,19 +6,10 @@ export interface SendMessageRequest {
    */
   threadId: string;
   /**
-   * Canvas ID to load node data from (for source retrieval).
+   * Source IDs from the selected canvas nodes.
+   * Empty array means no sources selected.
    */
-  canvasId: string;
-  /**
-   * Canvas version to ensure consistency with client state.
-   * If version mismatch, server returns 409 Conflict.
-   */
-  canvasVersion: number;
-  /**
-   * Selected node IDs on the canvas (data sources for context).
-   * Empty array means no nodes selected.
-   */
-  selectedNodeIds: string[];
+  selectedSourceIds: string[];
 }
 
 export type SendMessageResponse =

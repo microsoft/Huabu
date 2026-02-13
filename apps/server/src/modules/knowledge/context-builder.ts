@@ -33,17 +33,13 @@ export interface SourceWithContent {
 export async function buildContext(
   sourceIds: string[],
   options: {
-    maxContentLength?: number;
     includeMetadata?: boolean;
   } = {},
 ): Promise<{
   context: string;
   sources: SourceWithContent[];
 }> {
-  const {
-    maxContentLength = 10000, // 10k chars per source (roughly 2.5k tokens)
-    includeMetadata = false,
-  } = options;
+  const { includeMetadata = false } = options;
 
   const repository = getKnowledgeRepository();
   const sources: SourceWithContent[] = [];
@@ -73,12 +69,6 @@ export async function buildContext(
       content = getContentFromRow(source);
     }
 
-    // Truncate content if too long
-    if (content.length > maxContentLength) {
-      content =
-        content.substring(0, maxContentLength) + '\n\n[Content truncated]';
-    }
-
     sources.push({
       sourceId: source.source_id,
       type: source.type as 'web' | 'pdf' | 'note' | 'text',
@@ -101,19 +91,9 @@ export async function buildContext(
 
 /**
  * Get content from source or revision row
- * Handles both content_text and content_artifact_uri
  */
 function getContentFromRow(row: SourceRow | SourceRevisionRow): string {
-  if (row.content_text) {
-    return row.content_text;
-  }
-
-  if (row.content_artifact_uri) {
-    // TODO: Implement artifact retrieval
-    return '[Content stored in artifact store - retrieval not yet implemented]';
-  }
-
-  return '';
+  return row.content_text;
 }
 
 /**
