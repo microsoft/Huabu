@@ -7,6 +7,7 @@ import type {
   SourceRevisionRow,
   SourceRow,
 } from './types.js';
+import type { KnowledgeStorageConfig } from '@sediment/shared';
 import type Database from 'better-sqlite3';
 
 /**
@@ -215,30 +216,37 @@ export class KnowledgeRepository implements IKnowledgeRepository {
 
 /**
  * Singleton instance for convenience.
- * Lazily created via createKnowledgeRepository() which consults
- * the KNOWLEDGE_STORAGE env var.
+ * Lazily created via createKnowledgeRepository() which uses
+ * the runtime storage config set from the canvas frontend.
  */
 let repositoryInstance: IKnowledgeRepository | null = null;
 
 /**
- * Create a repository instance based on the KNOWLEDGE_STORAGE env var.
+ * Currently active storage config (set via setKnowledgeStorageConfig).
+ */
+let activeConfig: KnowledgeStorageConfig | null = null;
+
+/**
+ * Create a repository instance based on the provided config.
  *
- * Supported values:
+ * Supported backends:
  *  - "sqlite"   (default) – uses better-sqlite3
  *  - "obsidian" – reads/writes Markdown files in an Obsidian vault
- *                 (requires OBSIDIAN_VAULT_PATH)
+ *                 (requires obsidianVaultPath in config)
  */
-async function createKnowledgeRepository(): Promise<IKnowledgeRepository> {
-  const backend = (process.env.KNOWLEDGE_STORAGE ?? 'sqlite').toLowerCase();
+async function createKnowledgeRepository(
+  config?: KnowledgeStorageConfig,
+): Promise<IKnowledgeRepository> {
+  const backend = (config?.backend ?? 'sqlite').toLowerCase();
 
   if (backend === 'obsidian') {
     // Dynamic import to avoid loading Obsidian code when unused
     const { ObsidianKnowledgeRepository } =
       await import('./obsidian.repository.js');
-    const vaultPath = process.env.OBSIDIAN_VAULT_PATH;
+    const vaultPath = config?.obsidianVaultPath;
     if (!vaultPath) {
       throw new Error(
-        'OBSIDIAN_VAULT_PATH env var is required when KNOWLEDGE_STORAGE=obsidian',
+        'obsidianVaultPath is required when backend is "obsidian"',
       );
     }
     return new ObsidianKnowledgeRepository(vaultPath);
@@ -249,12 +257,35 @@ async function createKnowledgeRepository(): Promise<IKnowledgeRepository> {
 }
 
 /**
+ * Update the storage configuration at runtime.
+ * Clears the cached singleton so the next call to getKnowledgeRepository()
+ * will create a fresh instance matching the new config.
+ *
+ * NOTE: callers should also call resetIngestService() (from ingest.service)
+ * after this to ensure the IngestService picks up the new repository.
+ */
+export function setKnowledgeStorageConfig(
+  config: KnowledgeStorageConfig,
+): void {
+  const configChanged =
+    activeConfig?.backend !== config.backend ||
+    activeConfig?.obsidianVaultPath !== config.obsidianVaultPath;
+
+  if (configChanged) {
+    activeConfig = config;
+    repositoryInstance = null;
+  }
+}
+
+/**
  * Get or initialise the knowledge repository singleton.
  * The concrete implementation is chosen by createKnowledgeRepository().
  */
 export async function getKnowledgeRepository(): Promise<IKnowledgeRepository> {
   if (!repositoryInstance) {
-    repositoryInstance = await createKnowledgeRepository();
+    repositoryInstance = await createKnowledgeRepository(
+      activeConfig ?? undefined,
+    );
   }
   return repositoryInstance;
 }

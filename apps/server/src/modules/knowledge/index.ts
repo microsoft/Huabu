@@ -13,13 +13,18 @@ export type { IKnowledgeRepository } from './knowledge.interface.js';
 export {
   KnowledgeRepository,
   getKnowledgeRepository,
+  setKnowledgeStorageConfig,
 } from './knowledge.repository.js';
 
 // Obsidian backend
 export { ObsidianKnowledgeRepository } from './obsidian.repository.js';
 
 // Service (Business Logic Layer)
-export { IngestService, getIngestService } from './ingest.service.js';
+export {
+  IngestService,
+  getIngestService,
+  resetIngestService,
+} from './ingest.service.js';
 export type {
   IngestTextSourceInput,
   IngestWebSourceInput,

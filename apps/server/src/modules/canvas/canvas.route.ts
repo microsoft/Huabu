@@ -5,8 +5,11 @@ import { getArtifactsDir } from '../artifact/utils.js';
 import {
   getIngestService,
   getKnowledgeRepository,
+  resetIngestService,
+  setKnowledgeStorageConfig,
 } from '../knowledge/index.js';
 
+import type { KnowledgeStorageConfig } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
 type CanvasRow = {
@@ -25,6 +28,31 @@ function nowMs(): number {
 
 function toMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Read the storageConfig from a canvas row's state_json and apply it
+ * so subsequent repository/service calls use the correct backend.
+ */
+function applyStorageConfigFromCanvas(canvasId: string): void {
+  const database = getCanvasDb();
+  const row = database
+    .prepare('SELECT state_json FROM canvases WHERE canvas_id = ?')
+    .get(canvasId) as { state_json: string } | undefined;
+
+  if (!row) return;
+
+  try {
+    const state = JSON.parse(row.state_json) as {
+      storageConfig?: KnowledgeStorageConfig;
+    };
+    if (state.storageConfig) {
+      setKnowledgeStorageConfig(state.storageConfig);
+      resetIngestService();
+    }
+  } catch {
+    // Ignore parse errors – fall back to current config
+  }
 }
 
 /** Node types whose `content` is managed by the knowledge DB. */
@@ -141,6 +169,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.code(400).send({ message: 'Invalid request body' });
     }
 
+    // Ensure the knowledge backend matches the canvas-level config
+    applyStorageConfigFromCanvas(canvasId);
+
     const {
       workspaceId,
       type,
@@ -238,6 +269,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       // Hydrate node content from knowledge DB so clients always get fresh data
+      applyStorageConfigFromCanvas(canvasId);
       state = await hydrateNodeContent(state);
 
       return reply.send({

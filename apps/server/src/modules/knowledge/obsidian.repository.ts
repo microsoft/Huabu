@@ -146,6 +146,15 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
   private readonly sourcesDir: string;
   private readonly revisionsDir: string;
 
+  /**
+   * In-memory index: source_id → absolute file path.
+   * Built once on construction and kept up-to-date on writes.
+   * This allows users to freely rename files in Obsidian without
+   * breaking the link – we always locate files by the `source_id`
+   * stored in YAML frontmatter, not by filename.
+   */
+  private sourceIndex = new Map<string, string>();
+
   constructor(vaultPath: string) {
     const baseDir = path.join(vaultPath, 'Sediment');
     this.sourcesDir = path.join(baseDir, 'sources');
@@ -154,11 +163,60 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
     // Ensure directories exist
     mkdirSync(this.sourcesDir, { recursive: true });
     mkdirSync(this.revisionsDir, { recursive: true });
+
+    // Build the source index from existing files
+    this.rebuildSourceIndex();
   }
 
   // ==================== Internal helpers ====================
 
+  /**
+   * Scan all .md files in the sources directory and build an index
+   * mapping source_id (from frontmatter) → file path.
+   */
+  private rebuildSourceIndex(): void {
+    this.sourceIndex.clear();
+    if (!existsSync(this.sourcesDir)) return;
+
+    const files = readdirSync(this.sourcesDir).filter((f) => f.endsWith('.md'));
+    for (const file of files) {
+      const filePath = path.join(this.sourcesDir, file);
+      try {
+        const raw = readFileSync(filePath, 'utf-8');
+        const { meta } = parseFrontmatter(raw);
+        const id = meta['source_id'];
+        if (id) {
+          this.sourceIndex.set(id, filePath);
+        }
+      } catch {
+        // Skip unreadable files
+      }
+    }
+  }
+
+  /**
+   * Build a human-friendly filename for a source.
+   * Uses the title when available, falling back to the source_id.
+   * The source_id is always appended in parentheses to guarantee uniqueness.
+   */
+  private buildSourceFileName(sourceId: string, title?: string | null): string {
+    if (title) {
+      // Sanitise: remove characters that are invalid in most file systems
+      const UNSAFE_FILENAME_CHARS = /[<>:"/\\|?*]/g;
+      const safe = title.replace(UNSAFE_FILENAME_CHARS, '').trim().slice(0, 80);
+      if (safe.length > 0) {
+        return `${safe} (${sourceId}).md`;
+      }
+    }
+    return `${sourceId}.md`;
+  }
+
   private sourceFilePath(sourceId: string): string {
+    // Prefer the indexed path (survives user renames)
+    const indexed = this.sourceIndex.get(sourceId);
+    if (indexed && existsSync(indexed)) return indexed;
+
+    // Fallback: default name (new file or index miss)
     return path.join(this.sourcesDir, `${sourceId}.md`);
   }
 
@@ -190,7 +248,20 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
       meta_json: source.meta_json,
     });
     const fileContent = `${fm}\n${source.content_text}`;
-    writeFileSync(this.sourceFilePath(source.source_id), fileContent, 'utf-8');
+
+    // Resolve the target path: reuse the existing file (possibly renamed)
+    // or create a new one with a human-friendly name.
+    const targetPath = this.sourceIndex.has(source.source_id)
+      ? this.sourceFilePath(source.source_id)
+      : path.join(
+          this.sourcesDir,
+          this.buildSourceFileName(source.source_id, source.title),
+        );
+
+    writeFileSync(targetPath, fileContent, 'utf-8');
+
+    // Keep the index up-to-date
+    this.sourceIndex.set(source.source_id, targetPath);
   }
 
   private readRevision(filePath: string): SourceRevisionRow | null {
@@ -223,7 +294,18 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
   // ==================== Source Operations ====================
 
   findSourceById(sourceId: string): SourceRow | null {
-    return this.readSource(this.sourceFilePath(sourceId));
+    // Try indexed / default path first
+    const source = this.readSource(this.sourceFilePath(sourceId));
+    if (source) return source;
+
+    // Index miss – the file may have been renamed by the user.
+    // Do a full scan and rebuild the index entry.
+    this.rebuildSourceIndex();
+    const retryPath = this.sourceIndex.get(sourceId);
+    if (retryPath) {
+      return this.readSource(retryPath);
+    }
+    return null;
   }
 
   findSourceByHash(workspaceId: string, contentHash: string): SourceRow | null {

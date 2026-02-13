@@ -747,6 +747,15 @@ export class IngestService {
  */
 let serviceInstance: IngestService | null = null;
 
+/**
+ * Reset the cached IngestService singleton.
+ * Called when the storage backend config changes so that the next call
+ * to getIngestService() creates a fresh instance with the new repository.
+ */
+export function resetIngestService(): void {
+  serviceInstance = null;
+}
+
 export async function getIngestService(): Promise<IngestService> {
   if (!serviceInstance) {
     const repository = await getKnowledgeRepository();

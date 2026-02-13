@@ -2,6 +2,21 @@
  * Canvas API types for server-client communication
  */
 
+/**
+ * Supported knowledge storage backends.
+ */
+export type KnowledgeStorageBackend = 'sqlite' | 'obsidian';
+
+/**
+ * User-configurable knowledge storage settings.
+ * Persisted inside the canvas state so it can be changed from the frontend.
+ */
+export interface KnowledgeStorageConfig {
+  backend: KnowledgeStorageBackend;
+  /** Required when backend is 'obsidian'. Absolute path to the Obsidian vault folder. */
+  obsidianVaultPath?: string;
+}
+
 export interface GetCanvasResponse {
   canvasId: string;
   version: number;
