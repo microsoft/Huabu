@@ -60,8 +60,10 @@ type RFState = {
   clearNodeIngestion: (nodeId: string) => void;
 
   expandedNodeId: string | null;
+  expandMode: 'replace' | 'split';
   openExpanded: (nodeId: string) => void;
   closeExpanded: () => void;
+  setExpandMode: (mode: 'replace' | 'split') => void;
 
   onNodesChange: OnNodesChange;
   onEdgesChange: OnEdgesChange;
@@ -123,8 +125,10 @@ const useCanvasStore = create<RFState>((set, get) => ({
   },
 
   expandedNodeId: null,
+  expandMode: 'replace',
   openExpanded: (nodeId) => set({ expandedNodeId: nodeId }),
   closeExpanded: () => set({ expandedNodeId: null }),
+  setExpandMode: (mode) => set({ expandMode: mode }),
 
   loadCanvas: async () => {
     set({ isLoading: true });
