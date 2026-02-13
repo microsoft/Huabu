@@ -27,7 +27,6 @@ function migrate(database: Database.Database): void {
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
-
   `);
 }
 

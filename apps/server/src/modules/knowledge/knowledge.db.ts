@@ -30,12 +30,9 @@ function migrate(database: Database.Database): void {
       uri TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
-      content_artifact_uri TEXT,
-      content_text TEXT,
+      content_text TEXT NOT NULL,
       content_hash TEXT NOT NULL,
-      meta_json TEXT,
-      CHECK((content_artifact_uri IS NULL AND content_text IS NOT NULL) OR 
-            (content_artifact_uri IS NOT NULL AND content_text IS NULL))
+      meta_json TEXT
     );
 
     -- Source revisions table: stores version history for editable sources (note/text)
@@ -44,13 +41,10 @@ function migrate(database: Database.Database): void {
       workspace_id TEXT NOT NULL,
       source_id TEXT NOT NULL,
       created_at INTEGER NOT NULL,
-      content_artifact_uri TEXT,
-      content_text TEXT,
+      content_text TEXT NOT NULL,
       content_hash TEXT NOT NULL,
       meta_json TEXT,
-      FOREIGN KEY (source_id) REFERENCES sources(source_id) ON DELETE CASCADE,
-      CHECK((content_artifact_uri IS NULL AND content_text IS NOT NULL) OR 
-            (content_artifact_uri IS NOT NULL AND content_text IS NULL))
+      FOREIGN KEY (source_id) REFERENCES sources(source_id) ON DELETE CASCADE
     );
 
     -- Indexes for efficient queries

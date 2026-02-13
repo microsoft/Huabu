@@ -14,7 +14,6 @@
 - sourceId：knowledge DB 的 `sources.source_id`，用于标识一条数据源记录。
 - Revision：仅用于可编辑数据源（note/text），存于 `source_revisions`。
 - revisionId：knowledge DB 的 `source_revisions.revision_id`，表示某次内容快照。
-- artifactUri：指向 artifact store 的 URI（例如 `artifact://...`），用于存放大内容。
 
 ### ID 在哪里出现？
 
@@ -95,17 +94,10 @@
 
 - `sources`
   - `type`: `web|pdf|note|text`
-  - `content_text` 或 `content_artifact_uri` 二选一（由 CHECK 约束保证）
+  - `content_text`：内容全文（NOT NULL）
 
 - `source_revisions`（仅 note/text 需要）
   - 每次内容 hash 变化会新增一条 revision
-
-内容存储策略：
-
-- 阈值：1MB（`CONTENT_SIZE_THRESHOLD = 1048576`）
-- `>= 1MB` 会写入 artifact store，DB 仅存 `content_artifact_uri`
-
-限制：当前 `buildContext()` 还未实现从 artifact store 读取内容；若命中 `content_artifact_uri`，上下文里会出现占位文本。
 
 #### Web / PDF 摄取实现细节
 
@@ -194,4 +186,3 @@ Context builder 行为（`apps/server/src/modules/knowledge/context-builder.ts`�
 - `event: citations`：在 SSE 流结束后输出结构化 `references[]`。
 - 引用 token：在模型输出中生成稳定 token（例如 `[source:<sourceId>]` 或更细粒度的 chunk token）。
 - 前端引用渲染：把 token 转换为编号引用 + 可点击的 References 列表，并实现定位/高亮节点。
-- Artifact 读取：`buildContext()` 在 `content_artifact_uri` 场景下能从 artifact store 读回内容（避免占位文本）。

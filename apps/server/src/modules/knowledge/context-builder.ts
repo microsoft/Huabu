@@ -91,19 +91,9 @@ export async function buildContext(
 
 /**
  * Get content from source or revision row
- * Handles both content_text and content_artifact_uri
  */
 function getContentFromRow(row: SourceRow | SourceRevisionRow): string {
-  if (row.content_text) {
-    return row.content_text;
-  }
-
-  if (row.content_artifact_uri) {
-    // TODO: Implement artifact retrieval
-    return '[Content stored in artifact store - retrieval not yet implemented]';
-  }
-
-  return '';
+  return row.content_text;
 }
 
 /**

@@ -31,8 +31,6 @@ export {
   computeBufferHash,
   generateSourceId,
   generateRevisionId,
-  shouldUseArtifactStorage,
-  CONTENT_SIZE_THRESHOLD,
 } from './utils.js';
 
 // Fetchers/Parsers
