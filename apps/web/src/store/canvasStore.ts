@@ -68,6 +68,9 @@ type RFState = {
   updateNodeDataLocal: (nodeId: string, patch: Record<string, unknown>) => void;
 
   getSelectedNodeIds: () => string[];
+  setSelectedNodes: (ids: string[], multiSelect?: boolean) => void;
+
+  reorderNodes: (activeId: string, overId: string) => void;
 
   frameSelectedNodes: () => void;
   unframe: (frameId: string) => void;
@@ -310,6 +313,36 @@ const useCanvasStore = create<RFState>((set, get) => ({
     return get()
       .nodes.filter((n) => n.selected)
       .map((n) => n.id);
+  },
+
+  setSelectedNodes: (ids, multiSelect = false) => {
+    set((state) => ({
+      nodes: state.nodes.map((node) => {
+        if (multiSelect) {
+          const isTarget = ids.includes(node.id);
+          return isTarget ? { ...node, selected: !node.selected } : node;
+        }
+        return {
+          ...node,
+          selected: ids.includes(node.id),
+        };
+      }),
+    }));
+  },
+
+  reorderNodes: (activeId: string, overId: string) => {
+    const { nodes } = get();
+    const oldIndex = nodes.findIndex((n) => n.id === activeId);
+    const newIndex = nodes.findIndex((n) => n.id === overId);
+
+    if (oldIndex !== -1 && newIndex !== -1) {
+      const newNodes = [...nodes];
+      const [movedItem] = newNodes.splice(oldIndex, 1);
+      newNodes.splice(newIndex, 0, movedItem);
+
+      set({ nodes: newNodes });
+      scheduleAutoSave(get().saveCanvas);
+    }
   },
 
   frameSelectedNodes: () => {

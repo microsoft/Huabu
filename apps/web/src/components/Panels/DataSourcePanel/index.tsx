@@ -3,7 +3,6 @@ import {
   Film,
   Globe,
   Image as ImageIcon,
-  MoreVertical,
   PanelLeftClose,
   PanelLeftOpen,
   Search,
@@ -27,6 +26,8 @@ interface DataSourcePanelProps {
   isCollapsed?: boolean;
   onToggle?: () => void;
 }
+
+type SortType = 'alpha' | 'importance' | 'time' | 'manual';
 
 type LayerTab = 'layers' | 'notes';
 
@@ -123,12 +124,44 @@ export const DataSourcePanel = ({
   ) as unknown as DataSourceNodeLike[];
   const [tab, setTab] = useState<LayerTab>('layers');
 
-  const layerItems = useMemo(() => buildTreeItems(nodes), [nodes]);
+  const [sortType, setSortType] = useState<SortType>('alpha');
+  const [showSortMenu, setShowSortMenu] = useState(false);
+
+  const processedNodes = useMemo(() => {
+    const filtered = [...nodes];
+
+    if (sortType !== 'manual') {
+      filtered.sort((a, b) => {
+        switch (sortType) {
+          case 'importance': {
+            const areaA =
+              (Number(a.measured?.width) || Number(a.width) || 0) *
+              (Number(a.measured?.height) || Number(a.height) || 0);
+            const areaB =
+              (Number(b.measured?.width) || Number(b.width) || 0) *
+              (Number(b.measured?.height) || Number(b.height) || 0);
+            return areaB - areaA;
+          }
+          case 'time':
+            return 1;
+          case 'alpha':
+          default:
+            return getNodeDisplayName(a).localeCompare(getNodeDisplayName(b));
+        }
+      });
+    }
+    return filtered.reverse();
+  }, [nodes, sortType]);
+
+  const layerItems = useMemo(
+    () => buildTreeItems(processedNodes),
+    [processedNodes],
+  );
 
   const noteItems = useMemo(() => {
-    const notes = nodes.filter((n) => n.type === 'note');
+    const notes = processedNodes.filter((n) => n.type === 'note');
     return buildTreeItems(notes);
-  }, [nodes]);
+  }, [processedNodes]);
 
   const visibleItems = tab === 'layers' ? layerItems : noteItems;
 
@@ -145,7 +178,7 @@ export const DataSourcePanel = ({
             type="button"
             className={
               tab === 'layers'
-                ? 'bg-background text-foreground rounded px-2 py-1 text-sm font-semibold'
+                ? 'bg-background text-foreground rounded px-2 py-1 text-sm font-medium'
                 : 'text-muted-foreground hover:text-foreground rounded px-2 py-1 text-sm font-semibold'
             }
             onClick={() => setTab('layers')}
@@ -170,24 +203,60 @@ export const DataSourcePanel = ({
           <GhostButton title="Search" onClick={() => {}}>
             <Search size={16} />
           </GhostButton>
-          <GhostButton title="Sort" onClick={() => {}}>
-            <SlidersHorizontal size={16} />
-          </GhostButton>
-          <GhostButton title="More" onClick={() => {}}>
-            <MoreVertical size={16} />
-          </GhostButton>
+
+          <div className="relative">
+            <GhostButton
+              title="Sort"
+              onClick={() => setShowSortMenu(!showSortMenu)}
+            >
+              <SlidersHorizontal
+                size={16}
+                className={sortType !== 'manual' ? 'text-blue-500' : ''}
+              />
+            </GhostButton>
+
+            {showSortMenu && (
+              <div className="bg-popover border-border absolute top-full right-0 z-50 mt-1 w-32 rounded border py-1 shadow-lg">
+                {[
+                  { id: 'alpha', label: 'Alphabetical', desc: 'A-Z' },
+                  { id: 'importance', label: 'Importance', desc: 'Size' },
+                  { id: 'time', label: 'Time', desc: 'Newest' },
+                ].map((opt) => (
+                  <button
+                    key={opt.id}
+                    className={`hover:bg-accent flex w-full justify-between px-3 py-1.5 text-left text-xs ${
+                      sortType === opt.id ? 'font-bold text-blue-500' : ''
+                    }`}
+                    onClick={() => {
+                      setSortType(opt.id as SortType);
+                      setShowSortMenu(false);
+                    }}
+                  >
+                    <span>{opt.label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          {/*    <GhostButton title="Sort" onClick={() => {}}>*/}
+          {/*  <SlidersHorizontal size={16} />*/}
+          {/*</GhostButton>*/}
+          {/*<GhostButton title="More" onClick={() => {}}>*/}
+          {/*  <MoreVertical size={16} />*/}
+          {/*</GhostButton>*/}
         </div>
       }
       isCollapsed={isCollapsed}
       onToggle={onToggle}
-      iconCollapsed={<PanelLeftOpen size={18} />}
-      iconExpanded={<PanelLeftClose size={18} />}
+      iconCollapsed={<PanelLeftOpen size={16} />}
+      iconExpanded={<PanelLeftClose size={16} />}
       className="border-border border-r"
     >
       <DataSourceTreeView
         items={visibleItems}
         getIcon={getNodeIcon}
         getDisplayName={getNodeDisplayName}
+        onDragStart={() => setSortType('manual')}
       />
     </SidebarPanel>
   );
