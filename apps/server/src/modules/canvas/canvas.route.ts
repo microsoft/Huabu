@@ -37,6 +37,7 @@ const upsertNodeBodySchema = z.object({
   title: z.string().optional(),
   content: z.string().optional(),
   src: z.string().optional(),
+  sourceId: z.string().min(1).optional(),
 });
 
 const canvasRoutes: FastifyPluginAsync = async (fastify) => {
@@ -51,7 +52,14 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.code(400).send({ message: 'Invalid request body' });
     }
 
-    const { workspaceId, type, title, content, src } = parsed.data;
+    const {
+      workspaceId,
+      type,
+      title,
+      content,
+      src,
+      sourceId: existingSourceId,
+    } = parsed.data;
     const database = getCanvasDb();
 
     // Get canvas to determine workspaceId
@@ -64,15 +72,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
     const ingestService = getIngestService();
 
-    const existingMapping = database
-      .prepare(
-        'SELECT source_id FROM canvas_nodes WHERE canvas_id = ? AND node_id = ?',
-      )
-      .get(canvasId, nodeId) as { source_id: string | null } | undefined;
-
     try {
-      const existingSourceId = existingMapping?.source_id ?? null;
-
       const outcome =
         type === 'pdf'
           ? await ingestService.ingestPdfCanvasNodeFromArtifact({
@@ -95,15 +95,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
       const { sourceId, success, error } = outcome;
 
-      // Upsert the node-source mapping
-      database
-        .prepare(
-          `INSERT INTO canvas_nodes (canvas_id, node_id, source_id)
-           VALUES (?, ?, ?)
-           ON CONFLICT(canvas_id, node_id) DO UPDATE SET source_id = excluded.source_id`,
-        )
-        .run(canvasId, nodeId, sourceId);
-
       return reply.send({
         nodeId,
         sourceId,
@@ -125,17 +116,10 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     }
   });
 
-  // Delete a node and its source mapping
+  // Delete a node
   fastify.delete<{
     Params: { canvasId: string; nodeId: string };
-  }>('/:canvasId/nodes/:nodeId', async function (request, reply) {
-    const { canvasId, nodeId } = request.params;
-    const database = getCanvasDb();
-
-    database
-      .prepare('DELETE FROM canvas_nodes WHERE canvas_id = ? AND node_id = ?')
-      .run(canvasId, nodeId);
-
+  }>('/:canvasId/nodes/:nodeId', async function (_request, reply) {
     return reply.send({ success: true });
   });
 

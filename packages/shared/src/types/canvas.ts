@@ -35,6 +35,12 @@ export interface UpsertNodeRequest {
   title?: string;
   content?: string;
   src?: string;
+  /**
+   * Existing source ID from a previous ingestion.
+   * When provided the server will update the existing source
+   * instead of creating a new one.
+   */
+  sourceId?: string;
 }
 
 export interface UpsertNodeResponse {

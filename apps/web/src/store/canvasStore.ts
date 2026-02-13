@@ -73,7 +73,7 @@ type RFState = {
   updateNodeData: (nodeId: string, patch: Record<string, unknown>) => void;
   updateNodeDataLocal: (nodeId: string, patch: Record<string, unknown>) => void;
 
-  getSelectedNodeIds: () => string[];
+  getSelectedSourceIds: () => string[];
 
   frameSelectedNodes: () => void;
   unframe: (frameId: string) => void;
@@ -325,10 +325,10 @@ const useCanvasStore = create<RFState>((set, get) => ({
     scheduleAutoSave(get().saveCanvas);
   },
 
-  getSelectedNodeIds: () => {
+  getSelectedSourceIds: () => {
     return get()
-      .nodes.filter((n) => n.selected)
-      .map((n) => n.id);
+      .nodes.filter((n) => n.selected && n.data?.sourceId)
+      .map((n) => n.data.sourceId as string);
   },
 
   frameSelectedNodes: () => {
