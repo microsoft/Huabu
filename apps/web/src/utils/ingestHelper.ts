@@ -116,17 +116,24 @@ export async function ingestNodeIfNeeded({
       return;
     }
 
+    // EMPTY_CONTENT is expected for newly created note/text nodes – not a real error.
+    const isExpectedEmpty = response.error?.includes('EMPTY_CONTENT');
+
     setNodeIngestion(node.id, {
-      status: 'error',
+      status: isExpectedEmpty ? 'pending' : 'error',
       updatedAt: Date.now(),
-      error: response.error ?? 'Unknown ingestion error',
+      error: isExpectedEmpty
+        ? undefined
+        : (response.error ?? 'Unknown ingestion error'),
     });
 
-    console.error(
-      'Node ingestion did not complete successfully:',
-      node.id,
-      response.error,
-    );
+    if (!isExpectedEmpty) {
+      console.error(
+        'Node ingestion did not complete successfully:',
+        node.id,
+        response.error,
+      );
+    }
   } catch (error) {
     setNodeIngestion(node.id, {
       status: 'error',

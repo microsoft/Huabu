@@ -12,7 +12,7 @@ import {
 } from './utils.js';
 import { getWebSnapshot } from './web-fetcher.js';
 
-import type { KnowledgeRepository } from './knowledge.repository.js';
+import type { IKnowledgeRepository } from './knowledge.interface.js';
 import type { SourceMetadata, SourceRow, SourceType } from './types.js';
 
 /**
@@ -95,7 +95,7 @@ export type NodeIngestOutcome = {
  * Handles business logic for creating/updating sources and revisions
  */
 export class IngestService {
-  constructor(private repository: KnowledgeRepository) {}
+  constructor(private repository: IKnowledgeRepository) {}
 
   private safeParseMeta(metaJson: string | null): Record<string, unknown> {
     if (!metaJson) return {};
@@ -747,9 +747,9 @@ export class IngestService {
  */
 let serviceInstance: IngestService | null = null;
 
-export function getIngestService(): IngestService {
+export async function getIngestService(): Promise<IngestService> {
   if (!serviceInstance) {
-    const repository = getKnowledgeRepository();
+    const repository = await getKnowledgeRepository();
     serviceInstance = new IngestService(repository);
   }
   return serviceInstance;

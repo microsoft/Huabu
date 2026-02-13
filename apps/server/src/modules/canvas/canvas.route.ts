@@ -73,7 +73,7 @@ function stripManagedContent(state: unknown): unknown {
  * Hydrate node `content` from the knowledge DB for nodes that reference a source.
  * Only applies to note/text nodes that have a `sourceId`.
  */
-function hydrateNodeContent(state: unknown): unknown {
+async function hydrateNodeContent(state: unknown): Promise<unknown> {
   if (
     typeof state !== 'object' ||
     state === null ||
@@ -88,7 +88,7 @@ function hydrateNodeContent(state: unknown): unknown {
     unknown
   >;
 
-  const repository = getKnowledgeRepository();
+  const repository = await getKnowledgeRepository();
 
   const hydratedNodes = nodes.map((node) => {
     const sourceId = node.data?.sourceId as string | undefined;
@@ -159,7 +159,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     const resolvedWorkspaceId =
       workspaceId ?? canvasRow?.workspace_id ?? 'default';
 
-    const ingestService = getIngestService();
+    const ingestService = await getIngestService();
 
     try {
       const outcome =
@@ -238,7 +238,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       // Hydrate node content from knowledge DB so clients always get fresh data
-      state = hydrateNodeContent(state);
+      state = await hydrateNodeContent(state);
 
       return reply.send({
         canvasId: row.canvas_id,

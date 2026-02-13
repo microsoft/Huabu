@@ -1,5 +1,6 @@
 import { getKnowledgeDb } from './knowledge.db.js';
 
+import type { IKnowledgeRepository } from './knowledge.interface.js';
 import type {
   CreateRevisionInput,
   CreateSourceInput,
@@ -9,10 +10,10 @@ import type {
 import type Database from 'better-sqlite3';
 
 /**
- * Data Access Layer for knowledge store
- * Encapsulates all SQL operations to decouple business logic from database
+ * SQLite-backed knowledge repository.
+ * Implements IKnowledgeRepository using better-sqlite3.
  */
-export class KnowledgeRepository {
+export class KnowledgeRepository implements IKnowledgeRepository {
   private db: Database.Database;
 
   constructor(database?: Database.Database) {
@@ -213,13 +214,47 @@ export class KnowledgeRepository {
 }
 
 /**
- * Singleton instance for convenience
+ * Singleton instance for convenience.
+ * Lazily created via createKnowledgeRepository() which consults
+ * the KNOWLEDGE_STORAGE env var.
  */
-let repositoryInstance: KnowledgeRepository | null = null;
+let repositoryInstance: IKnowledgeRepository | null = null;
 
-export function getKnowledgeRepository(): KnowledgeRepository {
+/**
+ * Create a repository instance based on the KNOWLEDGE_STORAGE env var.
+ *
+ * Supported values:
+ *  - "sqlite"   (default) – uses better-sqlite3
+ *  - "obsidian" – reads/writes Markdown files in an Obsidian vault
+ *                 (requires OBSIDIAN_VAULT_PATH)
+ */
+async function createKnowledgeRepository(): Promise<IKnowledgeRepository> {
+  const backend = (process.env.KNOWLEDGE_STORAGE ?? 'sqlite').toLowerCase();
+
+  if (backend === 'obsidian') {
+    // Dynamic import to avoid loading Obsidian code when unused
+    const { ObsidianKnowledgeRepository } =
+      await import('./obsidian.repository.js');
+    const vaultPath = process.env.OBSIDIAN_VAULT_PATH;
+    if (!vaultPath) {
+      throw new Error(
+        'OBSIDIAN_VAULT_PATH env var is required when KNOWLEDGE_STORAGE=obsidian',
+      );
+    }
+    return new ObsidianKnowledgeRepository(vaultPath);
+  }
+
+  // Default: SQLite
+  return new KnowledgeRepository();
+}
+
+/**
+ * Get or initialise the knowledge repository singleton.
+ * The concrete implementation is chosen by createKnowledgeRepository().
+ */
+export async function getKnowledgeRepository(): Promise<IKnowledgeRepository> {
   if (!repositoryInstance) {
-    repositoryInstance = new KnowledgeRepository();
+    repositoryInstance = await createKnowledgeRepository();
   }
   return repositoryInstance;
 }

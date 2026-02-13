@@ -41,7 +41,7 @@ export async function buildContext(
 }> {
   const { includeMetadata = false } = options;
 
-  const repository = getKnowledgeRepository();
+  const repository = await getKnowledgeRepository();
   const sources: SourceWithContent[] = [];
 
   for (const sourceId of sourceIds) {

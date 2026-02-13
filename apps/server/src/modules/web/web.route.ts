@@ -172,7 +172,7 @@ const webRoutes: FastifyPluginAsync = async (fastify) => {
 
       const { sourceId } = parsed.data;
 
-      const repository = getKnowledgeRepository();
+      const repository = await getKnowledgeRepository();
       const source = repository.findSourceById(sourceId);
       if (!source || source.type !== 'web') {
         return reply.code(404).send({ message: 'Source not ingested' });
@@ -222,7 +222,7 @@ const webRoutes: FastifyPluginAsync = async (fastify) => {
 
       const { sourceId } = parsed.data;
 
-      const repository = getKnowledgeRepository();
+      const repository = await getKnowledgeRepository();
       const source = repository.findSourceById(sourceId);
       if (!source || source.type !== 'web') {
         return reply.code(404).send({ message: 'Source not ingested' });
