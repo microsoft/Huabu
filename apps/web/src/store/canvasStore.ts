@@ -29,6 +29,7 @@ import {
 
 const CANVAS_ID = 'default-canvas';
 const AUTOSAVE_DEBOUNCE_MS = 1000;
+const DEFAULT_WORKSPACE_NAME = 'Sediment Workspace Name';
 
 const triggerIngestion = (node: Node) => {
   const state = useCanvasStore.getState();
@@ -50,6 +51,9 @@ type RFState = {
   isLoading: boolean;
   isSaving: boolean;
   pendingSave: boolean;
+
+  workspaceName: string;
+  setWorkspaceName: (name: string) => void;
 
   ingestionByNodeId: Record<string, NodeIngestionInfo>;
   setNodeIngestion: (nodeId: string, info: NodeIngestionInfo) => void;
@@ -95,6 +99,12 @@ const useCanvasStore = create<RFState>((set, get) => ({
   isSaving: false,
   pendingSave: false,
 
+  workspaceName: DEFAULT_WORKSPACE_NAME,
+  setWorkspaceName: (name) => {
+    set({ workspaceName: name });
+    scheduleAutoSave(get().saveCanvas);
+  },
+
   ingestionByNodeId: {},
   setNodeIngestion: (nodeId, info) => {
     if (!nodeId) return;
@@ -127,10 +137,15 @@ const useCanvasStore = create<RFState>((set, get) => ({
         return;
       }
 
-      const state = response.state as { nodes?: Node[]; edges?: Edge[] };
+      const state = response.state as {
+        nodes?: Node[];
+        edges?: Edge[];
+        workspaceName?: string;
+      };
       set({
         nodes: state.nodes ?? [],
         edges: state.edges ?? [],
+        workspaceName: state.workspaceName ?? get().workspaceName,
         version: response.version,
         isLoading: false,
         ingestionByNodeId: {},
@@ -150,10 +165,10 @@ const useCanvasStore = create<RFState>((set, get) => ({
 
     set({ isSaving: true });
     try {
-      const { nodes, edges, version, canvasId } = get();
+      const { nodes, edges, version, canvasId, workspaceName } = get();
       const response = await putCanvas(canvasId, {
         version,
-        state: { nodes, edges },
+        state: { nodes, edges, workspaceName },
       });
       set({ version: response.version });
     } catch (error) {
