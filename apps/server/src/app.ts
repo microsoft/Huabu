@@ -9,6 +9,7 @@ import artifactRoute from './modules/artifact/artifact.route.js';
 import { getArtifactsDir } from './modules/artifact/utils.js';
 import canvasRoutes from './modules/canvas/canvas.route.js';
 import chatRoutes from './modules/chat/chat.route.js';
+import webRoutes from './modules/web/web.route.js';
 
 export const app = fastify({
   logger: {
@@ -52,4 +53,5 @@ if (process.env.NODE_ENV !== 'production') {
 
 app.register(chatRoutes, { prefix: '/api/chat' });
 app.register(canvasRoutes, { prefix: '/api/canvas' });
+app.register(webRoutes, { prefix: '/api/web' });
 app.register(artifactRoute, { prefix: '/api' });

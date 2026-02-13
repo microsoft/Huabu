@@ -33,17 +33,13 @@ export interface SourceWithContent {
 export async function buildContext(
   sourceIds: string[],
   options: {
-    maxContentLength?: number;
     includeMetadata?: boolean;
   } = {},
 ): Promise<{
   context: string;
   sources: SourceWithContent[];
 }> {
-  const {
-    maxContentLength = 10000, // 10k chars per source (roughly 2.5k tokens)
-    includeMetadata = false,
-  } = options;
+  const { includeMetadata = false } = options;
 
   const repository = getKnowledgeRepository();
   const sources: SourceWithContent[] = [];
@@ -71,12 +67,6 @@ export async function buildContext(
     } else {
       // For Web/PDF, use source content directly
       content = getContentFromRow(source);
-    }
-
-    // Truncate content if too long
-    if (content.length > maxContentLength) {
-      content =
-        content.substring(0, maxContentLength) + '\n\n[Content truncated]';
     }
 
     sources.push({

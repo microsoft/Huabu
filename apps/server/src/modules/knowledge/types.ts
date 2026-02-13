@@ -44,6 +44,8 @@ export interface SourceMetadata {
   author?: string;
   publishDate?: string;
   favicon?: string;
+  siteName?: string;
+  image?: string;
   wordCount?: number;
 
   // PDF-specific

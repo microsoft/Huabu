@@ -1,8 +1,6 @@
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 
-import { saveTextArtifact } from '../store/index.js';
-
 import type { WebSearchToolResponse } from '@sediment/shared';
 
 const toToolOutput = (payload: WebSearchToolResponse) => {
@@ -79,25 +77,7 @@ export const webSearchTool = tool(
           score: typeof r.score === 'number' ? r.score : undefined,
         }));
 
-      const maxInlineChars = 2_000;
-      const resultsWithRefs = await Promise.all(
-        normalizedResults.map(async (item) => {
-          if (!item.content || item.content.length <= maxInlineChars)
-            return item;
-
-          const { ref } = await saveTextArtifact(item.content, {
-            tool: 'web_search',
-            url: item.url,
-            title: item.title,
-          });
-
-          return {
-            ...item,
-            content: item.content.slice(0, 500),
-            contentRef: ref,
-          };
-        }),
-      );
+      const resultsWithRefs = normalizedResults;
 
       const payload = {
         tool: 'web_search',

@@ -11,7 +11,7 @@ import {
   normalizeUrl,
   shouldUseArtifactStorage,
 } from './utils.js';
-import { fetchWebContent } from './web-fetcher.js';
+import { getWebSnapshot } from './web-fetcher.js';
 
 import type { KnowledgeRepository } from './knowledge.repository.js';
 import type { SourceMetadata, SourceRow, SourceType } from './types.js';
@@ -443,7 +443,6 @@ export class IngestService {
     title?: string;
     uri?: string;
     contentText: string | undefined;
-    contentArtifactUri: string | undefined;
     contentHash: string;
     metadata?: SourceMetadata;
   }): { source: SourceRow; isNew: boolean } {
@@ -455,7 +454,6 @@ export class IngestService {
       title,
       uri,
       contentText,
-      contentArtifactUri,
       contentHash,
       metadata,
     } = params;
@@ -464,7 +462,6 @@ export class IngestService {
       // Update existing source
       const source = this.repository.updateSource(sourceId, {
         contentText,
-        contentArtifactUri,
         contentHash,
         title,
         metadata,
@@ -479,7 +476,6 @@ export class IngestService {
         title,
         uri,
         contentText,
-        contentArtifactUri,
         contentHash,
         metadata,
       });
@@ -542,7 +538,6 @@ export class IngestService {
         type: input.type,
         title: input.title,
         contentText,
-        contentArtifactUri,
         contentHash,
         metadata: input.metadata,
       });
@@ -594,22 +589,17 @@ export class IngestService {
       uri: normalizedUri,
     });
 
-    // Get or fetch content
-    let content = input.content;
-    let title = input.title;
-    const metadata = input.metadata ?? {};
+    const snapshot = await getWebSnapshot({
+      uri: input.uri,
+      content: input.content,
+      title: input.title,
+      metadata: (input.metadata ?? {}) as Record<string, unknown>,
+      format: 'markdown',
+    });
 
-    if (!content) {
-      // Backend fetch fallback
-      const fetchResult = await fetchWebContent(input.uri);
-      if (!fetchResult.success) {
-        throw new Error(
-          `Failed to fetch web content (${input.uri}): ${fetchResult.error}`,
-        );
-      }
-      content = fetchResult.content ?? '';
-      title = title ?? fetchResult.title;
-    }
+    const content = snapshot.content;
+    const title = snapshot.title;
+    const metadata = snapshot.metadata as SourceMetadata;
 
     const contentHash = computeContentHash(content);
 
@@ -624,9 +614,8 @@ export class IngestService {
       };
     }
 
-    // Prepare storage strategy
-    const { contentText, contentArtifactUri } =
-      this.prepareStorageStrategy(content);
+    // Store web markdown in DB to avoid any runtime refetch/IO.
+    const contentText = content;
 
     // Create or update source
     const { source, isNew } = this.createOrUpdateSource({
@@ -637,7 +626,6 @@ export class IngestService {
       title,
       uri: normalizedUri,
       contentText,
-      contentArtifactUri,
       contentHash,
       metadata,
     });

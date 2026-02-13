@@ -14,6 +14,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Document, Page, pdfjs } from 'react-pdf';
 
+import { getWebReader } from '@/api/web';
+
 import useCanvasStore from '../../store/canvasStore.ts';
 import { blockNoteShadcnOverrides } from '../BlockNote/shadcnOverrides.tsx';
 
@@ -135,21 +137,104 @@ const NoteExpandedView = ({ node }: ExpandedRendererProps) => {
 
 const WebExpandedView = ({ node }: ExpandedRendererProps) => {
   const src = typeof node.data?.src === 'string' ? node.data.src : '';
+  const sourceId =
+    typeof (node.data as Record<string, unknown> | undefined)?.sourceId ===
+    'string'
+      ? ((node.data as Record<string, unknown>).sourceId as string) || ''
+      : '';
+
+  const [readerHtml, setReaderHtml] = useState<string>('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!src) {
+      setReaderHtml('');
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
+    if (!sourceId) {
+      setReaderHtml('');
+      setError('Source not ingested');
+      setLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+
+    void (async () => {
+      try {
+        const result = await getWebReader({ sourceId });
+        if (cancelled) return;
+        setReaderHtml(result.html);
+      } catch (e) {
+        if (cancelled) return;
+        setReaderHtml('');
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [src, sourceId]);
+
+  const srcDoc = useMemo(() => {
+    if (!readerHtml) return '';
+    return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base target="_blank" />
+    <style>
+      body { margin: 0; padding: 16px; }
+      img { max-width: 100%; height: auto; }
+      pre { overflow: auto; }
+    </style>
+  </head>
+  <body>
+    ${readerHtml}
+  </body>
+</html>`;
+  }, [readerHtml]);
 
   return (
     <div className="flex h-full w-full flex-col bg-white p-3">
       <div className="relative h-full w-full overflow-hidden rounded bg-white">
-        {src ? (
-          <iframe
-            src={src}
-            className="nodrag h-full w-full"
-            title="Web Preview"
-            sandbox="allow-scripts allow-same-origin"
-          />
-        ) : (
+        {!src ? (
           <div className="text-muted-foreground flex h-full w-full items-center justify-center text-sm">
             Invalid URL
           </div>
+        ) : loading ? (
+          <div className="text-muted-foreground flex h-full w-full items-center justify-center text-sm">
+            Loading...
+          </div>
+        ) : error ? (
+          <div className="text-muted-foreground flex h-full w-full flex-col items-center justify-center gap-2 text-sm">
+            <div>Failed to load reader view</div>
+            <a
+              href={src}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-theme-500 text-xs font-medium"
+            >
+              Open in browser
+            </a>
+          </div>
+        ) : (
+          <iframe
+            className="nodrag h-full w-full border-0"
+            title="Reader View"
+            sandbox="allow-popups"
+            srcDoc={srcDoc}
+          />
         )}
       </div>
     </div>
