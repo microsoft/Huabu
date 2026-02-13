@@ -86,7 +86,13 @@ export async function ingestNodeIfNeeded({
     });
 
     if (response.sourceId) {
-      updateNodeDataLocal(node.id, { sourceId: response.sourceId });
+      const patch: Record<string, unknown> = {
+        sourceId: response.sourceId,
+      };
+      if (response.sourceBackend) {
+        patch.sourceBackend = response.sourceBackend;
+      }
+      updateNodeDataLocal(node.id, patch);
     }
 
     // Optionally apply server-suggested label (e.g. parsed PDF/web title).

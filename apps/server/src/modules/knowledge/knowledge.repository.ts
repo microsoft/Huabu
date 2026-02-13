@@ -289,3 +289,22 @@ export async function getKnowledgeRepository(): Promise<IKnowledgeRepository> {
   }
   return repositoryInstance;
 }
+
+/**
+ * Return a copy of the currently active storage config,
+ * or a default SQLite config if none has been set yet.
+ */
+export function getActiveStorageConfig(): KnowledgeStorageConfig {
+  return activeConfig ? { ...activeConfig } : { backend: 'sqlite' };
+}
+
+/**
+ * Create a standalone repository for a given config.
+ * Unlike getKnowledgeRepository(), this does NOT affect the cached singleton.
+ * Useful for migration scenarios where two backends must be accessed simultaneously.
+ */
+export async function createRepositoryForConfig(
+  config: KnowledgeStorageConfig,
+): Promise<IKnowledgeRepository> {
+  return createKnowledgeRepository(config);
+}

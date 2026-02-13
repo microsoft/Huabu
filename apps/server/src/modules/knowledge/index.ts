@@ -14,6 +14,8 @@ export {
   KnowledgeRepository,
   getKnowledgeRepository,
   setKnowledgeStorageConfig,
+  getActiveStorageConfig,
+  createRepositoryForConfig,
 } from './knowledge.repository.js';
 
 // Obsidian backend
