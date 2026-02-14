@@ -1,5 +1,5 @@
 import { type Node, type NodeProps } from '@xyflow/react';
-import { ArrowUpRight, Fullscreen, ImageIcon } from 'lucide-react';
+import { Fullscreen, ImageIcon } from 'lucide-react';
 
 import useCanvasStore from '@/store/canvasStore.ts';
 
@@ -16,23 +16,14 @@ export const ImageNode = ({ id, data, selected }: NodeProps<ImageNodeType>) => {
 
   const ImageToolbar = (
     <div className="flex w-full items-center justify-between gap-2">
-      {/*source*/}
-      <a
-        href={data?.src}
-        target="_blank"
-        rel="noopener noreferrer"
-        onClick={(e) => e.stopPropagation()}
-        className="nodrag text-muted-foreground hover:text-theme-500 flex flex-1 cursor-pointer items-center gap-1 overflow-hidden text-xs font-medium transition-colors"
-      >
+      {/* Label */}
+      <div className="text-muted-foreground">
         <ImageIcon size={14} />
-        <span className="max-w-24 truncate">{data?.src || 'Image'}</span>
-        <ArrowUpRight size={14} strokeWidth={2} />
-      </a>
-
+      </div>
+      {/* spliter */}
+      <div className="bg-border h-3 w-px" />
       {/*tools*/}
       <div className="text-muted-foreground flex items-center gap-1">
-        <div className="bg-border h-3 w-px" />
-
         <GhostButton
           title="Open Large View"
           onClick={(e) => {

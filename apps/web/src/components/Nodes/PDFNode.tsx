@@ -7,7 +7,6 @@ import {
 import { clsx } from 'clsx';
 import {
   FileText,
-  ArrowUpRight,
   Download,
   Maximize2,
   Minimize2,
@@ -97,20 +96,14 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
 
   const PDFToolbar = (
     <div className="flex w-full items-center justify-between gap-3">
-      <a
-        href={data?.src}
-        target="_blank"
-        rel="noopener noreferrer"
-        onClick={(e) => e.stopPropagation()}
-        className="nodrag text-muted-foreground hover:text-theme-500 flex flex-1 cursor-pointer items-center gap-1 overflow-hidden text-xs font-medium transition-colors"
-      >
+      {/* Label */}
+      <div className="text-muted-foreground">
         <FileText size={14} />
-        <span className="max-w-24 truncate">{data.src || 'Document'}</span>
-        <ArrowUpRight size={14} strokeWidth={2} />
-      </a>
-
+      </div>
+      {/* spliter */}
+      <div className="bg-border h-3 w-px" />
+      {/* Tools */}
       <div className="text-muted-foreground flex items-center gap-1">
-        <div className="bg-border h-3 w-px" />
         <GhostButton
           title="Open Large View"
           onClick={(e) => {
