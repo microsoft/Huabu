@@ -40,10 +40,18 @@ function toMessage(error: unknown): string {
 }
 
 const migrateStorageBodySchema = z.object({
-  to: z.object({
-    backend: z.enum(['sqlite', 'obsidian']),
-    obsidianVaultPath: z.string().optional(),
-  }),
+  to: z.discriminatedUnion('backend', [
+    z.object({
+      backend: z.literal('sqlite'),
+      // Obsidian-specific config is not required when using sqlite backend
+      obsidianVaultPath: z.string().optional(),
+    }),
+    z.object({
+      backend: z.literal('obsidian'),
+      // When using the obsidian backend, a vault path must be provided
+      obsidianVaultPath: z.string(),
+    }),
+  ]),
 });
 
 /**

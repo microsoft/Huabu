@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 
-import { PDFParse } from 'pdf-parse'; // Will need to ignore type error if types are missing, or ensure types exist
+import { PDFParse } from 'pdf-parse';
 
 import type { IDocumentLoader, LoadResult } from './loader.interface.js';
 

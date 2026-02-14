@@ -80,7 +80,15 @@ function parseFrontmatter(raw: string): {
     meta[key] = value;
   }
 
-  const content = raw.slice(endIdx + 4); // skip "\n---\n"
+  let contentStart = endIdx + 4; // skip "\n---"
+  // Consume the distinct newline after the closing marker so it's not part of the content.
+  if (raw.slice(contentStart, contentStart + 2) === '\r\n') {
+    contentStart += 2;
+  } else if (raw[contentStart] === '\n') {
+    contentStart += 1;
+  }
+
+  const content = raw.slice(contentStart);
   return { meta, content };
 }
 
