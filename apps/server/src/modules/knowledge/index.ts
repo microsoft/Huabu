@@ -47,12 +47,10 @@ export {
 } from './utils.js';
 
 // Fetchers/Parsers
-export { fetchWebContent, type FetchWebContentResult } from './web-fetcher.js';
 export {
-  parsePdfFile,
-  parsePdfBuffer,
-  type ParsePdfResult,
-} from './pdf-parser.js';
+  fetchWebContent,
+  type FetchWebContentResult,
+} from './loaders/web.loader.js';
 
 // Types
 export type {

@@ -2,7 +2,7 @@ import { access, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { getKnowledgeRepository } from './knowledge.repository.js';
-import { parsePdfFile } from './pdf-parser.js';
+import { DocumentLoaderFactory } from './loaders/index.js';
 import {
   computeBufferHash,
   computeContentHash,
@@ -10,7 +10,6 @@ import {
   generateSourceId,
   normalizeUrl,
 } from './utils.js';
-import { getWebSnapshot } from './web-fetcher.js';
 
 import type { IKnowledgeRepository } from './knowledge.interface.js';
 import type { SourceMetadata, SourceRow, SourceType } from './types.js';
@@ -476,7 +475,13 @@ export class IngestService {
   async ingestTextSource(
     input: IngestTextSourceInput,
   ): Promise<IngestSourceResult> {
-    const contentHash = computeContentHash(input.content);
+    const loader = DocumentLoaderFactory.getLoader(input.type);
+    const { content } = await loader.load(input.content, {
+      title: input.title,
+      metadata: input.metadata,
+    });
+
+    const contentHash = computeContentHash(content);
 
     // Determine sourceId
     const sourceId =
@@ -508,7 +513,7 @@ export class IngestService {
         workspaceId: input.workspaceId,
         type: input.type,
         title: input.title,
-        contentText: input.content,
+        contentText: content,
         contentHash,
         metadata: input.metadata,
       });
@@ -519,7 +524,7 @@ export class IngestService {
         revisionId,
         workspaceId: input.workspaceId,
         sourceId,
-        contentText: input.content,
+        contentText: content,
         contentHash,
         metadata: input.metadata,
       });
@@ -559,18 +564,18 @@ export class IngestService {
       uri: normalizedUri,
     });
 
-    const snapshot = await getWebSnapshot({
-      uri: input.uri,
+    const loader = DocumentLoaderFactory.getLoader('web');
+    const {
+      content,
+      title,
+      metadata: loadedMeta,
+    } = await loader.load(input.uri, {
       content: input.content,
       title: input.title,
-      metadata: (input.metadata ?? {}) as Record<string, unknown>,
-      format: 'markdown',
+      metadata: input.metadata,
     });
 
-    const content = snapshot.content;
-    const title = snapshot.title;
-    const metadata = snapshot.metadata as SourceMetadata;
-
+    const metadata = loadedMeta as SourceMetadata;
     const contentHash = computeContentHash(content);
 
     // Check if source already exists with same content
@@ -623,14 +628,17 @@ export class IngestService {
     input: IngestPdfSourceInput,
   ): Promise<IngestSourceResult> {
     // Parse PDF file to extract text
-    const parseResult = await parsePdfFile(input.filePath);
-    if (!parseResult.success || !parseResult.text) {
-      throw new Error(
-        `Failed to parse PDF file: ${parseResult.error || 'No text extracted'}`,
-      );
+    const loader = DocumentLoaderFactory.getLoader('pdf');
+    const {
+      content,
+      title: parsedTitle,
+      metadata: loadedMeta,
+    } = await loader.load(input.filePath);
+
+    if (!content) {
+      throw new Error('Failed to parse PDF file: No text extracted');
     }
 
-    const content = parseResult.text;
     const contentHash = computeContentHash(content);
 
     // Generate deterministic sourceId from workspace + file content hash
@@ -652,12 +660,12 @@ export class IngestService {
     }
 
     // Use parsed title or fallback to input title
-    const title = parseResult.title || input.title;
+    const title = parsedTitle || input.title;
 
     // Merge metadata with PDF info
     const metadata = {
       ...input.metadata,
-      numPages: parseResult.numPages,
+      ...loadedMeta,
       originalArtifactUri: input.artifactUri,
     };
 

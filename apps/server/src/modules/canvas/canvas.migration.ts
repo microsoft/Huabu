@@ -159,7 +159,9 @@ export const migrationRoute: FastifyPluginAsync = async (fastify) => {
     let failedCount = 0;
 
     for (const node of migratableNodes) {
-      const sourceId = node.data!.sourceId as string;
+      const sourceId = node.data?.sourceId as string;
+      if (!sourceId) continue;
+
       const nodeId = (node.id as string) ?? sourceId;
 
       try {
