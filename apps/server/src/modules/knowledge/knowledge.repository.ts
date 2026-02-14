@@ -4,6 +4,7 @@ import type { IKnowledgeRepository } from './knowledge.interface.js';
 import type {
   CreateRevisionInput,
   CreateSourceInput,
+  SourceOverview,
   SourceRevisionRow,
   SourceRow,
 } from './types.js';
@@ -50,6 +51,19 @@ export class KnowledgeRepository implements IKnowledgeRepository {
   findAllSources(workspaceId: string): SourceRow[] {
     const stmt = this.db.prepare<[string], SourceRow>(
       'SELECT * FROM sources WHERE workspace_id = ?',
+    );
+    return stmt.all(workspaceId);
+  }
+
+  /**
+   * Find all sources metadata for a workspace (excludes content)
+   */
+  findAllSourcesOverview(workspaceId: string): SourceOverview[] {
+    const stmt = this.db.prepare<[string], SourceOverview>(
+      `SELECT 
+        source_id, workspace_id, type, title, uri, 
+        created_at, updated_at, content_hash, meta_json 
+       FROM sources WHERE workspace_id = ?`,
     );
     return stmt.all(workspaceId);
   }

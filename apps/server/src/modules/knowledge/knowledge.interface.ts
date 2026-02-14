@@ -1,6 +1,7 @@
 import type {
   CreateRevisionInput,
   CreateSourceInput,
+  SourceOverview,
   SourceRevisionRow,
   SourceRow,
 } from './types.js';
@@ -26,6 +27,9 @@ export interface IKnowledgeRepository {
 
   /** Find all sources for a workspace */
   findAllSources(workspaceId: string): SourceRow[];
+
+  /** Find all sources metadata for a workspace (excludes content) */
+  findAllSourcesOverview(workspaceId: string): SourceOverview[];
 
   /** Create a new source record */
   createSource(input: CreateSourceInput): SourceRow;

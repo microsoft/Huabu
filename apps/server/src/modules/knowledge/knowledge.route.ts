@@ -12,7 +12,8 @@ const knowledgeRoute: FastifyPluginAsync = async (fastify) => {
     }
 
     const repo = await getKnowledgeRepository();
-    const sources = repo.findAllSources(workspaceId);
+    // Use metadata-only query for performance
+    const sources = repo.findAllSourcesOverview(workspaceId);
 
     return sources.map((s) => ({
       sourceId: s.source_id,
@@ -22,7 +23,8 @@ const knowledgeRoute: FastifyPluginAsync = async (fastify) => {
       src: s.uri,
       createdAt: s.created_at,
       updatedAt: s.updated_at,
-      content: s.content_text,
+      // Omit content in list to reduce payload size
+      // content: s.content_text,
       contentHash: s.content_hash,
       metaJson: s.meta_json,
     }));

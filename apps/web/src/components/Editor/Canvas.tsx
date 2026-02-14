@@ -158,6 +158,7 @@ export const Canvas: React.FC = () => {
             data: {
               src: payload.data.src,
             },
+            style: { width: 300, height: 200 },
           };
         }
 
@@ -199,6 +200,7 @@ export const Canvas: React.FC = () => {
             type: nodeType,
             position,
             data,
+            style: nodeType === 'web' ? { width: 300, height: 200 } : undefined,
           };
         }
 

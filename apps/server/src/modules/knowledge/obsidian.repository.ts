@@ -14,6 +14,7 @@ import type { IKnowledgeRepository } from './knowledge.interface.js';
 import type {
   CreateRevisionInput,
   CreateSourceInput,
+  SourceOverview,
   SourceRevisionRow,
   SourceRow,
 } from './types.js';
@@ -292,6 +293,35 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
     return toSourceRow(meta, content);
   }
 
+  private readSourceOverview(filePath: string): SourceOverview | null {
+    if (!existsSync(filePath)) return null;
+    const raw = readFileSync(filePath, 'utf-8');
+    const { meta } = parseFrontmatter(raw);
+
+    // If source_id is missing, infer from filename and treat as a generic note
+    if (!meta['source_id']) {
+      const rel = path.relative(this.vaultPath, filePath);
+      const id = rel.replace(/\\/g, '/').replace(/\.md$/, '');
+      meta['source_id'] = id;
+
+      // Use filename for title if missing
+      if (!meta['title']) meta['title'] = path.basename(filePath, '.md');
+      if (!meta['type']) meta['type'] = 'note';
+    }
+
+    return {
+      source_id: meta['source_id'] ?? '',
+      workspace_id: meta['workspace_id'] ?? '',
+      type: (meta['type'] ?? 'text') as SourceRow['type'],
+      title: meta['title'] ?? null,
+      uri: meta['uri'] ?? null,
+      created_at: Number(meta['created_at'] ?? 0),
+      updated_at: Number(meta['updated_at'] ?? 0),
+      content_hash: meta['content_hash'] ?? '',
+      meta_json: meta['meta_json'] ?? null,
+    };
+  }
+
   private writeSource(source: SourceRow, existingFilePath?: string): void {
     const fm = toFrontmatter({
       source_id: source.source_id,
@@ -370,9 +400,11 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
   }
 
   findSourceByHash(workspaceId: string, contentHash: string): SourceRow | null {
-    // Scan all indexed files
-    const all = this.findAllSources();
-    return all.find((s) => s.content_hash === contentHash) || null;
+    // Scan all indexed files (metadata only)
+    const all = this.findAllSourcesOverview(workspaceId);
+    const match = all.find((s) => s.content_hash === contentHash);
+    if (!match) return null;
+    return this.findSourceById(match.source_id);
   }
 
   findAllSources(): SourceRow[] {
@@ -383,6 +415,21 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
     for (const filePath of this.sourceIndex.values()) {
       const source = this.readSource(filePath);
       if (source) {
+        results.push(source);
+      }
+    }
+    return results;
+  }
+
+  findAllSourcesOverview(workspaceId?: string): SourceOverview[] {
+    // Update index to ensure we capture new external files
+    this.rebuildSourceIndex();
+
+    const results: SourceOverview[] = [];
+    for (const filePath of this.sourceIndex.values()) {
+      const source = this.readSourceOverview(filePath);
+      if (source) {
+        if (workspaceId && source.workspace_id !== workspaceId) continue;
         results.push(source);
       }
     }
