@@ -45,6 +45,16 @@ export class KnowledgeRepository implements IKnowledgeRepository {
   }
 
   /**
+   * Find all sources for a workspace
+   */
+  findAllSources(workspaceId: string): SourceRow[] {
+    const stmt = this.db.prepare<[string], SourceRow>(
+      'SELECT * FROM sources WHERE workspace_id = ?',
+    );
+    return stmt.all(workspaceId);
+  }
+
+  /**
    * Create a new source record
    */
   createSource(input: CreateSourceInput): SourceRow {

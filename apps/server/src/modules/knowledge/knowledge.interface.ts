@@ -24,6 +24,9 @@ export interface IKnowledgeRepository {
   /** Find source by workspace and content hash (for deduplication) */
   findSourceByHash(workspaceId: string, contentHash: string): SourceRow | null;
 
+  /** Find all sources for a workspace */
+  findAllSources(workspaceId: string): SourceRow[];
+
   /** Create a new source record */
   createSource(input: CreateSourceInput): SourceRow;
 

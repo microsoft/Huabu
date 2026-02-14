@@ -4,8 +4,11 @@ import {
   readFileSync,
   readdirSync,
   writeFileSync,
+  statSync,
 } from 'node:fs';
 import path from 'node:path';
+
+import { createId } from '@sediment/shared';
 
 import type { IKnowledgeRepository } from './knowledge.interface.js';
 import type {
@@ -156,6 +159,7 @@ function toRevisionRow(
  * This makes every source browsable and editable directly in Obsidian.
  */
 export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
+  private readonly vaultPath: string;
   private readonly sourcesDir: string;
   private readonly revisionsDir: string;
 
@@ -169,6 +173,7 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
   private sourceIndex = new Map<string, string>();
 
   constructor(vaultPath: string) {
+    this.vaultPath = vaultPath;
     const baseDir = path.join(vaultPath, 'Sediment');
     this.sourcesDir = path.join(baseDir, 'sources');
     this.revisionsDir = path.join(baseDir, 'revisions');
@@ -184,27 +189,54 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
   // ==================== Internal helpers ====================
 
   /**
-   * Scan all .md files in the sources directory and build an index
-   * mapping source_id (from frontmatter) → file path.
+   * Scan entire vault for .md files and build index.
    */
   private rebuildSourceIndex(): void {
     this.sourceIndex.clear();
-    if (!existsSync(this.sourcesDir)) return;
+    const files = this.scanVault(this.vaultPath);
 
-    const files = readdirSync(this.sourcesDir).filter((f) => f.endsWith('.md'));
-    for (const file of files) {
-      const filePath = path.join(this.sourcesDir, file);
+    for (const filePath of files) {
       try {
         const raw = readFileSync(filePath, 'utf-8');
         const { meta } = parseFrontmatter(raw);
-        const id = meta['source_id'];
+
+        let id = meta['source_id'];
+        if (!id) {
+          // Unmanaged file: use relative path (minus extension) as ID
+          const rel = path.relative(this.vaultPath, filePath);
+          id = rel.replace(/\\/g, '/').replace(/\.md$/, '');
+        }
+
         if (id) {
-          this.sourceIndex.set(id, filePath);
+          this.sourceIndex.set(String(id), filePath);
         }
       } catch {
         // Skip unreadable files
       }
     }
+  }
+
+  private scanVault(dir: string, fileList: string[] = []): string[] {
+    if (!existsSync(dir)) return fileList;
+    try {
+      const entries = readdirSync(dir);
+      for (const entry of entries) {
+        if (entry.startsWith('.')) continue; // Skip hidden
+
+        const fullPath = path.join(dir, entry);
+        if (fullPath === this.revisionsDir) continue; // Skip revisions
+
+        const stat = statSync(fullPath);
+        if (stat.isDirectory()) {
+          this.scanVault(fullPath, fileList);
+        } else if (entry.endsWith('.md')) {
+          fileList.push(fullPath);
+        }
+      }
+    } catch {
+      // ignore access errors
+    }
+    return fileList;
   }
 
   /**
@@ -245,13 +277,25 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
     if (!existsSync(filePath)) return null;
     const raw = readFileSync(filePath, 'utf-8');
     const { meta, content } = parseFrontmatter(raw);
+
+    // If source_id is missing, infer from filename and treat as a generic note
+    if (!meta['source_id']) {
+      const rel = path.relative(this.vaultPath, filePath);
+      const id = rel.replace(/\\/g, '/').replace(/\.md$/, '');
+      meta['source_id'] = id;
+
+      // Use filename for title if missing
+      if (!meta['title']) meta['title'] = path.basename(filePath, '.md');
+      if (!meta['type']) meta['type'] = 'note';
+    }
+
     return toSourceRow(meta, content);
   }
 
-  private writeSource(source: SourceRow): void {
+  private writeSource(source: SourceRow, existingFilePath?: string): void {
     const fm = toFrontmatter({
       source_id: source.source_id,
-      workspace_id: source.workspace_id,
+      // workspace_id: source.workspace_id, // Obsidian vault implies workspace context
       type: source.type,
       title: source.title,
       uri: source.uri,
@@ -262,14 +306,19 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
     });
     const fileContent = `${fm}\n${source.content_text}`;
 
-    // Resolve the target path: reuse the existing file (possibly renamed)
-    // or create a new one with a human-friendly name.
-    const targetPath = this.sourceIndex.has(source.source_id)
-      ? this.sourceFilePath(source.source_id)
-      : path.join(
-          this.sourcesDir,
-          this.buildSourceFileName(source.source_id, source.title),
-        );
+    // Resolve the target path:
+    // 1. If specifically told to overwrite a file (renaming ID case), use that.
+    // 2. Else if ID exists in index, use that.
+    // 3. Else build new filename.
+    let targetPath = existingFilePath;
+    if (!targetPath) {
+      targetPath = this.sourceIndex.has(source.source_id)
+        ? this.sourceFilePath(source.source_id)
+        : path.join(
+            this.sourcesDir,
+            this.buildSourceFileName(source.source_id, source.title),
+          );
+    }
 
     writeFileSync(targetPath, fileContent, 'utf-8');
 
@@ -290,7 +339,6 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
 
     const fm = toFrontmatter({
       revision_id: rev.revision_id,
-      workspace_id: rev.workspace_id,
       source_id: rev.source_id,
       created_at: rev.created_at,
       content_hash: rev.content_hash,
@@ -322,20 +370,23 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
   }
 
   findSourceByHash(workspaceId: string, contentHash: string): SourceRow | null {
-    // Scan all source files (linear search – acceptable for vault-scale data)
-    if (!existsSync(this.sourcesDir)) return null;
-    const files = readdirSync(this.sourcesDir).filter((f) => f.endsWith('.md'));
-    for (const file of files) {
-      const source = this.readSource(path.join(this.sourcesDir, file));
-      if (
-        source &&
-        source.workspace_id === workspaceId &&
-        source.content_hash === contentHash
-      ) {
-        return source;
+    // Scan all indexed files
+    const all = this.findAllSources();
+    return all.find((s) => s.content_hash === contentHash) || null;
+  }
+
+  findAllSources(): SourceRow[] {
+    // Update index to ensure we capture new external files
+    this.rebuildSourceIndex();
+
+    const results: SourceRow[] = [];
+    for (const filePath of this.sourceIndex.values()) {
+      const source = this.readSource(filePath);
+      if (source) {
+        results.push(source);
       }
     }
-    return null;
+    return results;
   }
 
   createSource(input: CreateSourceInput): SourceRow {
@@ -373,8 +424,30 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
       throw new Error(`Source not found: ${sourceId}`);
     }
 
+    // Check if we need to promote this to a managed ID.
+    // If the file exists but lacks an explicit source_id in frontmatter,
+    // we should generate one now to ensure persistence.
+    let finalId = existing.source_id;
+    const currentFilePath = this.sourceIndex.get(sourceId);
+
+    // If we have a file path, check if it was inferred
+    if (currentFilePath && existsSync(currentFilePath)) {
+      try {
+        const raw = readFileSync(currentFilePath, 'utf-8');
+        const { meta } = parseFrontmatter(raw);
+        if (!meta['source_id']) {
+          // No explicit ID found -> this is an unmanaged file.
+          // Generate a permanent ID now.
+          finalId = createId('note');
+        }
+      } catch {
+        // failed to read/parse, keep existing ID
+      }
+    }
+
     const updated: SourceRow = {
       ...existing,
+      source_id: finalId, // Use the (potentially new) ID
       content_text: updates.contentText ?? existing.content_text,
       content_hash: updates.contentHash ?? existing.content_hash,
       title: updates.title ?? existing.title,
@@ -384,7 +457,17 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
       updated_at: Date.now(),
     };
 
-    this.writeSource(updated);
+    // If we are renaming the ID (promoting), we want to overwrite the SAME file
+    // with the new metadata, rather than creating a new file.
+    const fileToWrite = finalId !== sourceId ? currentFilePath : undefined;
+
+    this.writeSource(updated, fileToWrite);
+
+    // If ID changed, clean up the old index entry (the new one is set in writeSource)
+    if (finalId !== sourceId) {
+      this.sourceIndex.delete(sourceId);
+    }
+
     return updated;
   }
 

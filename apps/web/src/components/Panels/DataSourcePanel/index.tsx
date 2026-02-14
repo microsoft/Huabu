@@ -11,13 +11,14 @@ import {
   StickyNote,
   Type,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 
 import {
   DataSourceTreeView,
   type DataSourceNodeLike,
   type DataSourceTreeItem,
 } from './DataSourceTreeView';
+import { getSources, type Source } from '../../../api/knowledge';
 import useCanvasStore from '../../../store/canvasStore';
 import { GhostButton } from '../../Common/GhostButton';
 import { SidebarPanel } from '../SidebarPanel';
@@ -29,7 +30,7 @@ interface DataSourcePanelProps {
 
 type SortType = 'alpha' | 'importance' | 'time' | 'manual';
 
-type LayerTab = 'layers' | 'notes';
+type LayerTab = 'canvas' | 'sources';
 
 const ICON_SIZE = 14;
 const ICON_STROKE_WIDTH = 1.5;
@@ -122,7 +123,14 @@ export const DataSourcePanel = ({
   const nodes = useCanvasStore(
     (s) => s.nodes,
   ) as unknown as DataSourceNodeLike[];
-  const [tab, setTab] = useState<LayerTab>('layers');
+  const [tab, setTab] = useState<LayerTab>('canvas');
+  const [sources, setSources] = useState<Source[]>([]);
+  console.log('sources in datasource panel', sources);
+  useEffect(() => {
+    if (tab === 'sources') {
+      getSources().then(setSources).catch(console.error);
+    }
+  }, [tab]);
 
   const [sortType, setSortType] = useState<SortType>('alpha');
   const [showSortMenu, setShowSortMenu] = useState(false);
@@ -158,12 +166,22 @@ export const DataSourcePanel = ({
     [processedNodes],
   );
 
-  const noteItems = useMemo(() => {
-    const notes = processedNodes.filter((n) => n.type === 'note');
-    return buildTreeItems(notes);
-  }, [processedNodes]);
+  const sourceItems = useMemo(() => {
+    return sources.map((s) => ({
+      id: s.source_id,
+      depth: 0,
+      node: {
+        id: s.source_id,
+        type: s.type || 'text',
+        data: {
+          label: s.title || s.uri || 'Untitled',
+          ...s,
+        },
+      },
+    }));
+  }, [sources]);
 
-  const visibleItems = tab === 'layers' ? layerItems : noteItems;
+  const visibleItems = tab === 'canvas' ? layerItems : sourceItems;
 
   const getNodeIcon = (nodeType: string | undefined) => {
     return getNodeTitleAndIcon(nodeType).icon;
@@ -177,24 +195,24 @@ export const DataSourcePanel = ({
           <button
             type="button"
             className={
-              tab === 'layers'
+              tab === 'canvas'
                 ? 'bg-background text-foreground rounded px-2 py-1 text-sm font-medium'
                 : 'text-muted-foreground hover:text-foreground rounded px-2 py-1 text-sm font-semibold'
             }
-            onClick={() => setTab('layers')}
+            onClick={() => setTab('canvas')}
           >
-            Layers
+            Canvas
           </button>
           <button
             type="button"
             className={
-              tab === 'notes'
+              tab === 'sources'
                 ? 'bg-background text-foreground rounded px-2 py-1 text-sm font-semibold'
                 : 'text-muted-foreground hover:text-foreground rounded px-2 py-1 text-sm font-semibold'
             }
-            onClick={() => setTab('notes')}
+            onClick={() => setTab('sources')}
           >
-            Notes
+            Sources
           </button>
         </div>
       }
