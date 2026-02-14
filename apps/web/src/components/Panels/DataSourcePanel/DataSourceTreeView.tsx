@@ -53,6 +53,7 @@ export interface SortableTreeRowProps {
   getIcon: (nodeType: string | undefined) => React.ReactNode;
   getDisplayName: (node: DataSourceNodeLike) => string;
   onSelect: (id: string, event: React.MouseEvent) => void;
+  onRename: (id: string, newName: string) => void;
 }
 
 const SortableTreeRow = React.memo(
@@ -63,6 +64,7 @@ const SortableTreeRow = React.memo(
     getIcon,
     getDisplayName,
     onSelect,
+    onRename,
   }: SortableTreeRowProps) => {
     const {
       attributes,
@@ -72,6 +74,8 @@ const SortableTreeRow = React.memo(
       transition,
       isDragging,
     } = useSortable({ id: item.id });
+    const [isEditing, setIsEditing] = React.useState(false);
+    const [editValue, setEditValue] = React.useState('');
 
     const style: React.CSSProperties = {
       transform: CSS.Translate.toString(transform),
@@ -91,24 +95,57 @@ const SortableTreeRow = React.memo(
         ? 'bg-theme-50'
         : 'hover:bg-background';
 
+    const handleDoubleClick = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      setEditValue(name);
+      setIsEditing(true);
+    };
+
+    const handleSave = () => {
+      if (editValue.trim() && editValue !== name) {
+        onRename(item.id, editValue);
+      }
+      setIsEditing(false);
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        handleSave();
+      } else if (e.key === 'Escape') {
+        setIsEditing(false);
+      }
+    };
+
     return (
       <div
         ref={setNodeRef}
         style={style}
         {...attributes}
-        {...listeners}
+        {...(isEditing ? {} : listeners)}
         onClick={(e) => onSelect(item.id, e)}
-        className="flex h-9 w-full cursor-grab touch-none items-center gap-2 bg-white px-2 active:cursor-grabbing"
+        onDoubleClick={handleDoubleClick}
+        className="flex h-9 w-full touch-none items-center gap-2 bg-white px-2"
       >
         <div
-          className={`flex w-full items-center gap-2 rounded px-2 py-1 text-sm font-light transition-colors ${bgColor}`}
+          className={`flex w-full items-center gap-2 rounded px-2 py-1 text-sm transition-colors ${bgColor}`}
         >
           <span className="text-muted-foreground pointer-events-none flex shrink-0 items-center">
             {icon}
           </span>
-          <span className="text-main pointer-events-none truncate select-none">
-            {name}
-          </span>
+          {isEditing ? (
+            <input
+              autoFocus
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              onBlur={handleSave}
+              onKeyDown={handleKeyDown}
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              className="h-6 w-full min-w-0 flex-1 rounded-sm border bg-white px-1 text-sm outline-none"
+            />
+          ) : (
+            <span className="text-main truncate select-none">{name}</span>
+          )}
         </div>
       </div>
     );
@@ -125,6 +162,7 @@ export const DataSourceTreeView = ({
   const nodes = useCanvasStore((state) => state.nodes);
   const setSelectedNodes = useCanvasStore((state) => state.setSelectedNodes);
   const reorderNodes = useCanvasStore((state) => state.reorderNodes);
+  const updateNodeData = useCanvasStore((state) => state.updateNodeData);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -180,6 +218,10 @@ export const DataSourceTreeView = ({
     setSelectedNodes([id], isMulti);
   };
 
+  const handleRename = (id: string, newName: string) => {
+    updateNodeData(id, { label: newName });
+  };
+
   const itemIds = useMemo(
     () => items.map((i: DataSourceTreeItem) => i.id),
     [items],
@@ -207,6 +249,7 @@ export const DataSourceTreeView = ({
                 getIcon={getIcon}
                 getDisplayName={getDisplayName}
                 onSelect={handleSelect}
+                onRename={handleRename}
               />
             ))}
           </SortableContext>
