@@ -1,5 +1,5 @@
 import { Settings } from 'lucide-react';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { MigrationProgress } from './MigrationProgress';
@@ -52,6 +52,16 @@ export const SettingsPopover: React.FC = () => {
     setVaultPath(storageConfig.obsidianVaultPath ?? '');
   }, [storageConfig]);
 
+  const handleClose = useCallback(() => {
+    setBackend(storageConfig.backend);
+    setVaultPath(storageConfig.obsidianVaultPath ?? '');
+    setError('');
+    setPhase('settings');
+    setMigrationResult(null);
+    setMigrationError('');
+    setIsOpen(false);
+  }, [storageConfig]);
+
   // Close on outside click (only when not migrating)
   useEffect(() => {
     if (!isOpen) return;
@@ -70,23 +80,9 @@ export const SettingsPopover: React.FC = () => {
 
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
-  }, [isOpen, phase]);
+  }, [isOpen, phase, handleClose]);
 
   // ─── Helpers ────────────────────────────────────────────────────
-
-  const resetMigrationState = () => {
-    setPhase('settings');
-    setMigrationResult(null);
-    setMigrationError('');
-  };
-
-  const handleClose = () => {
-    setBackend(storageConfig.backend);
-    setVaultPath(storageConfig.obsidianVaultPath ?? '');
-    setError('');
-    resetMigrationState();
-    setIsOpen(false);
-  };
 
   const isConfigChanged = (): boolean => {
     if (backend !== storageConfig.backend) return true;

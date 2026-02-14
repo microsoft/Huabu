@@ -82,7 +82,7 @@ export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
       <div className="text-muted-foreground flex flex-1 items-center text-xs font-medium">
         <Type size={14} />
       </div>
-
+      <div className="bg-border h-3 w-px" />
       <div
         className="hover:bg-muted text-muted-foreground border-border flex items-center rounded border bg-transparent p-0.5 transition-colors"
         title="Font Family"

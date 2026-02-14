@@ -1,6 +1,7 @@
 import React, { useCallback, useRef } from 'react';
 
 import useCanvasStore from '../../store/canvasStore';
+import { usePreviewStore } from '../../store/previewStore';
 import { Canvas } from '../Editor/Canvas';
 import { ExpandedNodePanel } from '../Editor/ExpandedNodePanel';
 
@@ -14,14 +15,27 @@ const SPLIT_DEFAULT_RATIO = 0.5;
  */
 export const CenterArea: React.FC = () => {
   const expandedNodeId = useCanvasStore((s) => s.expandedNodeId);
-  const expandMode = useCanvasStore((s) => s.expandMode);
+  const canvasExpandMode = useCanvasStore((s) => s.expandMode);
+
+  const previewData = usePreviewStore((s) => s.previewData);
+  const previewType = usePreviewStore((s) => s.previewType);
+  const previewExpandMode = usePreviewStore((s) => s.expandMode);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const splitRatioRef = useRef(SPLIT_DEFAULT_RATIO);
   const [splitRatio, setSplitRatio] = React.useState(SPLIT_DEFAULT_RATIO);
 
-  const hasExpanded = !!expandedNodeId;
-  const isReplace = hasExpanded && expandMode === 'replace';
+  const hasPreview = !!previewData && !!previewType;
+  const hasExpanded = !!expandedNodeId || hasPreview;
+
+  // Determine effective expand mode based on what acts as the "expanded" content
+  // Priority: Preview > Node Edit
+  let isReplace = false;
+  if (hasPreview) {
+    isReplace = previewExpandMode === 'replace';
+  } else if (expandedNodeId) {
+    isReplace = canvasExpandMode === 'replace';
+  }
 
   /* ---- Drag handle for split mode ---- */
   const onHandlePointerDown = useCallback(

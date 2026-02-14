@@ -41,6 +41,7 @@ export const Canvas: React.FC = () => {
   const onEdgesChange = useCanvasStore((state) => state.onEdgesChange);
   const onConnect = useCanvasStore((state) => state.onConnect);
   const addNode = useCanvasStore((state) => state.addNode);
+  const setRfInstance = useCanvasStore((state) => state.setRfInstance);
   const frameSelectedNodes = useCanvasStore(
     (state) => state.frameSelectedNodes,
   );
@@ -74,6 +75,13 @@ export const Canvas: React.FC = () => {
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [frameSelectedNodes]);
+
+  useEffect(() => {
+    return () => {
+      rfInstanceRef.current = null;
+      setRfInstance(null);
+    };
+  }, [setRfInstance]);
 
   return (
     <div
@@ -150,7 +158,7 @@ export const Canvas: React.FC = () => {
             data: {
               src: payload.data.src,
             },
-            style: { width: 460, height: 300 },
+            style: { width: 300, height: 200 },
           };
         }
 
@@ -162,6 +170,37 @@ export const Canvas: React.FC = () => {
             data: {
               content: payload.data.content,
             },
+          };
+        }
+
+        if (payload.kind === 'source') {
+          const { type, sourceId, label, ...rest } = payload.data;
+
+          let nodeType = 'text';
+          if (typeof type === 'string' && type in nodeTypes) {
+            nodeType = type;
+          }
+
+          const data: Record<string, unknown> = {
+            label,
+            sourceId,
+            ...rest,
+          };
+
+          // Map specific fields for node types
+          if (nodeType === 'web') {
+            data.src = rest.src;
+          }
+          if (nodeType === 'pdf') {
+            data.src = rest.src;
+          }
+
+          newNode = {
+            id: createId('node'),
+            type: nodeType,
+            position,
+            data,
+            style: nodeType === 'web' ? { width: 300, height: 200 } : undefined,
           };
         }
 
@@ -178,6 +217,7 @@ export const Canvas: React.FC = () => {
         nodeTypes={nodeTypes}
         onInit={(instance) => {
           rfInstanceRef.current = instance;
+          setRfInstance(instance);
         }}
         fitView
         attributionPosition="bottom-right"

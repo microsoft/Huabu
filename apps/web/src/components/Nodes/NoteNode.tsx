@@ -39,15 +39,13 @@ export const NoteNode = ({ id, data, selected }: NodeProps<NoteNodeType>) => {
   const NoteToolbar = (
     <div className="flex w-full items-center justify-between gap-2">
       {/* Label */}
-      <div className="text-muted-foreground flex flex-1 items-center gap-1 text-xs font-medium">
+      <div className="text-muted-foreground">
         <StickyNote size={14} />
-        <span className="max-w-24 truncate">{data?.src || 'Note'}</span>
       </div>
-
+      {/* splitter  */}
+      <div className="bg-border h-3 w-px" />
       {/* Tools */}
       <div className="text-muted-foreground flex items-center gap-1">
-        <div className="bg-border h-3 w-px" />
-
         <GhostButton
           title="Open Large View"
           onClick={(e) => {

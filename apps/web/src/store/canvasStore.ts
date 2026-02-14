@@ -9,6 +9,7 @@ import {
   type OnEdgesChange,
   type OnConnect,
   type Connection,
+  type ReactFlowInstance,
 } from '@xyflow/react';
 import { create } from 'zustand';
 
@@ -72,6 +73,8 @@ type RFState = {
   onEdgesChange: OnEdgesChange;
   onConnect: OnConnect;
   addNode: (node: Node) => void;
+  rfInstance: ReactFlowInstance | null;
+  setRfInstance: (instance: ReactFlowInstance | null) => void;
 
   updateNodeData: (nodeId: string, patch: Record<string, unknown>) => void;
   updateNodeDataLocal: (nodeId: string, patch: Record<string, unknown>) => void;
@@ -278,6 +281,9 @@ const useCanvasStore = create<RFState>((set, get) => ({
 
     scheduleAutoSave(get().saveCanvas);
   },
+
+  rfInstance: null,
+  setRfInstance: (instance) => set({ rfInstance: instance }),
 
   addNode: (node) => {
     set({ nodes: [...get().nodes, node] });

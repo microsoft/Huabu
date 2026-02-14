@@ -17,45 +17,22 @@ import React, { useMemo } from 'react';
 
 import useCanvasStore from '@/store/canvasStore.ts';
 
+import { TreeRowItem } from './TreeRowItem';
+
+import type { DataSourceNodeLike, DataSourceTreeItem } from './types';
 import type { DragEndEvent } from '@dnd-kit/core';
 
-export type DataSourceNodeLike = {
-  id: string;
-  type?: string;
-  parentId?: string;
-  data?: Record<string, unknown>;
-
-  measured?: Record<string, unknown>;
-  width?: number;
-  height?: number;
-};
-
-export type DataSourceTreeItem = {
-  id: string;
-  node: DataSourceNodeLike;
-  depth: number;
-};
-
-export interface DataSourceTreeViewProps {
-  items: DataSourceTreeItem[];
-  getIcon: (nodeType: string | undefined) => React.ReactNode;
-  getDisplayName: (node: DataSourceNodeLike) => string;
-  emptyText?: string;
-  onDragStart?: () => void;
-}
-
-export interface SortableTreeRowProps {
+interface SortableRowProps {
   item: DataSourceTreeItem;
-
   isDirectlySelected: boolean;
   isHighlighted: boolean;
-
   getIcon: (nodeType: string | undefined) => React.ReactNode;
   getDisplayName: (node: DataSourceNodeLike) => string;
   onSelect: (id: string, event: React.MouseEvent) => void;
+  onRename: (id: string, newName: string) => void;
 }
 
-const SortableTreeRow = React.memo(
+const SortableRow = React.memo(
   ({
     item,
     isDirectlySelected,
@@ -63,7 +40,8 @@ const SortableTreeRow = React.memo(
     getIcon,
     getDisplayName,
     onSelect,
-  }: SortableTreeRowProps) => {
+    onRename,
+  }: SortableRowProps) => {
     const {
       attributes,
       listeners,
@@ -76,55 +54,50 @@ const SortableTreeRow = React.memo(
     const style: React.CSSProperties = {
       transform: CSS.Translate.toString(transform),
       transition,
-      paddingLeft: 12 + item.depth * 16,
-      opacity: isDragging ? 0.3 : 1,
-      zIndex: isDragging ? 999 : 'auto',
-      position: 'relative',
     };
 
-    const icon = getIcon(item.node.type);
-    const name = getDisplayName(item.node);
-
-    const bgColor = isDirectlySelected
-      ? 'bg-theme-100'
-      : isHighlighted
-        ? 'bg-theme-50'
-        : 'hover:bg-background';
-
     return (
-      <div
-        ref={setNodeRef}
-        style={style}
-        {...attributes}
-        {...listeners}
+      <TreeRowItem
+        depth={item.depth}
+        icon={getIcon(item.node.type)}
+        label={getDisplayName(item.node)}
+        isSelected={isDirectlySelected}
+        isHighlighted={isHighlighted}
+        isDragging={isDragging}
         onClick={(e) => onSelect(item.id, e)}
-        className="flex h-9 w-full cursor-grab touch-none items-center gap-2 bg-white px-2 active:cursor-grabbing"
-      >
-        <div
-          className={`flex w-full items-center gap-2 rounded px-2 py-1 text-sm font-light transition-colors ${bgColor}`}
-        >
-          <span className="text-muted-foreground pointer-events-none flex shrink-0 items-center">
-            {icon}
-          </span>
-          <span className="text-main pointer-events-none truncate select-none">
-            {name}
-          </span>
-        </div>
-      </div>
+        editable={true}
+        onRename={(newName) => onRename(item.id, newName)}
+        // DnD plumbing
+        forwardedRef={setNodeRef}
+        style={style}
+        dndAttributes={attributes}
+        dndListeners={listeners}
+      />
     );
   },
 );
+SortableRow.displayName = 'SortableRow';
 
-export const DataSourceTreeView = ({
+export interface CanvasLayerTreeProps {
+  items: DataSourceTreeItem[];
+  getIcon: (nodeType: string | undefined) => React.ReactNode;
+  getDisplayName: (node: DataSourceNodeLike) => string;
+  emptyText?: string;
+  onDragStart?: () => void;
+}
+
+export const CanvasLayerTree = ({
   items,
   getIcon,
   getDisplayName,
   emptyText = 'No items',
   onDragStart,
-}: DataSourceTreeViewProps) => {
+}: CanvasLayerTreeProps) => {
   const nodes = useCanvasStore((state) => state.nodes);
   const setSelectedNodes = useCanvasStore((state) => state.setSelectedNodes);
   const reorderNodes = useCanvasStore((state) => state.reorderNodes);
+  const updateNodeData = useCanvasStore((state) => state.updateNodeData);
+  const rfInstance = useCanvasStore((state) => state.rfInstance);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -142,9 +115,7 @@ export const DataSourceTreeView = ({
     const allHighlighted = new Set<string>();
     selectedIds.forEach((id) => {
       allHighlighted.add(id);
-      const selectedItem = items.find(
-        (item: DataSourceTreeItem) => item.id === id,
-      );
+      const selectedItem = items.find((item) => item.id === id);
       if (
         selectedItem?.node.type === 'frame' ||
         selectedItem?.node.type === 'group'
@@ -164,33 +135,51 @@ export const DataSourceTreeView = ({
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
-
     if (over && active.id !== over.id) {
       reorderNodes(active.id as string, over.id as string);
     }
-  };
-
-  const handleDragStart = () => {
-    onDragStart?.();
   };
 
   const handleSelect = (id: string, event: React.MouseEvent) => {
     event.stopPropagation();
     const isMulti = event.metaKey || event.ctrlKey;
     setSelectedNodes([id], isMulti);
+
+    if (rfInstance) {
+      let targetIds = [id];
+      if (isMulti) {
+        if (selectedIds.includes(id)) {
+          // Deselecting
+          targetIds = selectedIds.filter((sid) => sid !== id);
+        } else {
+          // Selecting
+          targetIds = [...selectedIds, id];
+        }
+      }
+
+      if (targetIds.length > 0) {
+        const nodesToFit = targetIds.map((nid) => ({ id: nid }));
+        void rfInstance.fitView({
+          nodes: nodesToFit,
+          duration: 800,
+          maxZoom: 1,
+        });
+      }
+    }
   };
 
-  const itemIds = useMemo(
-    () => items.map((i: DataSourceTreeItem) => i.id),
-    [items],
-  );
+  const handleRename = (id: string, newName: string) => {
+    updateNodeData(id, { label: newName });
+  };
+
+  const itemIds = useMemo(() => items.map((i) => i.id), [items]);
 
   return (
     <DndContext
       sensors={sensors}
       collisionDetection={closestCenter}
       onDragEnd={handleDragEnd}
-      onDragStart={handleDragStart}
+      onDragStart={onDragStart}
     >
       <div className="-mx-3 -my-3 overflow-hidden">
         <div className="flex flex-col py-1">
@@ -198,8 +187,8 @@ export const DataSourceTreeView = ({
             items={itemIds}
             strategy={verticalListSortingStrategy}
           >
-            {items.map((item: DataSourceTreeItem) => (
-              <SortableTreeRow
+            {items.map((item) => (
+              <SortableRow
                 key={item.id}
                 item={item}
                 isDirectlySelected={selectedIds.includes(item.id)}
@@ -207,6 +196,7 @@ export const DataSourceTreeView = ({
                 getIcon={getIcon}
                 getDisplayName={getDisplayName}
                 onSelect={handleSelect}
+                onRename={handleRename}
               />
             ))}
           </SortableContext>

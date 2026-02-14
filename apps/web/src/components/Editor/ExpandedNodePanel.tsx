@@ -1,6 +1,3 @@
-import { useCreateBlockNote } from '@blocknote/react';
-import { BlockNoteView } from '@blocknote/shadcn';
-import { type Node } from '@xyflow/react';
 import {
   ArrowLeft,
   Columns2,
@@ -12,303 +9,35 @@ import {
   StickyNote,
   X,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Document, Page, pdfjs } from 'react-pdf';
-
-import { getWebReader } from '@/api/web';
+import { useEffect, useMemo } from 'react';
 
 import useCanvasStore from '../../store/canvasStore.ts';
-import { blockNoteShadcnOverrides } from '../BlockNote/shadcnOverrides.tsx';
+import { usePreviewStore } from '../../store/previewStore.ts';
 import { GhostButton } from '../Common/GhostButton.tsx';
+import { NodePreviewContent } from '../Nodes/NodePreviewContent.tsx';
 
-pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
-
-type ExpandedRendererProps = {
-  node: Node;
-};
-
-/* ------------------------------------------------------------------ */
-/*  Per-type expanded views (unchanged from the original overlay)     */
-/* ------------------------------------------------------------------ */
-
-const NoteExpandedView = ({ node }: ExpandedRendererProps) => {
-  const updateNodeData = useCanvasStore((s) => s.updateNodeData);
-  const editor = useCreateBlockNote({
-    initialContent: [{ type: 'paragraph', content: '' }],
-    trailingBlock: false,
-  });
-
-  const lastAppliedMarkdownRef = useRef<string | null>(null);
-  const debounceRef = useRef<number | null>(null);
-
-  const content =
-    typeof node.data?.content === 'string' ? node.data.content : '';
-
-  useEffect(() => {
-    const raw = content ?? '';
-    if (lastAppliedMarkdownRef.current === raw) return;
-
-    lastAppliedMarkdownRef.current = raw;
-
-    void (async () => {
-      const markdown = raw.trim() === '' ? '\n' : raw;
-      const blocks = await editor.tryParseMarkdownToBlocks(markdown);
-      editor.replaceBlocks(editor.document, blocks);
-    })();
-  }, [content, editor]);
-
-  return (
-    <div className="custom-scrollbar h-full w-full overflow-auto bg-white p-4">
-      <BlockNoteView
-        editor={editor}
-        editable={true}
-        shadCNComponents={blockNoteShadcnOverrides}
-        onChange={() => {
-          if (debounceRef.current) window.clearTimeout(debounceRef.current);
-          debounceRef.current = window.setTimeout(() => {
-            const markdown = editor
-              .blocksToMarkdownLossy(editor.document)
-              .trim();
-            lastAppliedMarkdownRef.current = markdown;
-            updateNodeData(node.id, { content: markdown });
-          }, 150);
-        }}
-      />
-    </div>
-  );
-};
-
-const WebExpandedView = ({ node }: ExpandedRendererProps) => {
-  const src = typeof node.data?.src === 'string' ? node.data.src : '';
-  const sourceId =
-    typeof (node.data as Record<string, unknown> | undefined)?.sourceId ===
-    'string'
-      ? ((node.data as Record<string, unknown>).sourceId as string) || ''
-      : '';
-
-  const [readerHtml, setReaderHtml] = useState<string>('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!src) {
-      setReaderHtml('');
-      setError(null);
-      setLoading(false);
-      return;
-    }
-
-    if (!sourceId) {
-      setReaderHtml('');
-      setError('Source not ingested');
-      setLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-
-    void (async () => {
-      try {
-        const result = await getWebReader({ sourceId });
-        if (cancelled) return;
-        setReaderHtml(result.html);
-      } catch (e) {
-        if (cancelled) return;
-        setReaderHtml('');
-        setError(e instanceof Error ? e.message : String(e));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [src, sourceId]);
-
-  const srcDoc = useMemo(() => {
-    if (!readerHtml) return '';
-    return `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <base target="_blank" />
-    <style>
-      body { margin: 0; padding: 16px; }
-      img { max-width: 100%; height: auto; }
-      pre { overflow: auto; }
-    </style>
-  </head>
-  <body>
-    ${readerHtml}
-  </body>
-</html>`;
-  }, [readerHtml]);
-
-  return (
-    <div className="flex h-full w-full flex-col bg-white p-3">
-      <div className="relative h-full w-full overflow-hidden rounded bg-white">
-        {!src ? (
-          <div className="text-muted-foreground flex h-full w-full items-center justify-center text-sm">
-            Invalid URL
-          </div>
-        ) : loading ? (
-          <div className="text-muted-foreground flex h-full w-full items-center justify-center text-sm">
-            Loading...
-          </div>
-        ) : error ? (
-          <div className="text-muted-foreground flex h-full w-full flex-col items-center justify-center gap-2 text-sm">
-            <div>Failed to load reader view</div>
-            <a
-              href={src}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:text-theme-500 text-xs font-medium"
-            >
-              Open in browser
-            </a>
-          </div>
-        ) : (
-          <iframe
-            className="nodrag h-full w-full border-0"
-            title="Reader View"
-            sandbox="allow-popups"
-            srcDoc={srcDoc}
-          />
-        )}
-      </div>
-    </div>
-  );
-};
-
-const VideoExpandedView = ({ node }: ExpandedRendererProps) => {
-  const src = typeof node.data?.src === 'string' ? node.data.src : '';
-
-  return (
-    <div className="flex h-full w-full flex-col bg-white p-3">
-      <div className="relative h-full w-full overflow-hidden rounded bg-white">
-        {src ? (
-          <video
-            src={src}
-            controls
-            className="nodrag h-full w-full object-contain"
-          />
-        ) : (
-          <div className="text-muted-foreground flex h-full w-full items-center justify-center text-sm">
-            No Video Source
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
-const ImageExpandedView = ({ node }: ExpandedRendererProps) => {
-  const src = typeof node.data?.src === 'string' ? node.data.src : '';
-
-  return (
-    <div className="flex h-full w-full flex-col bg-white p-3">
-      <div className="relative h-full w-full overflow-hidden rounded bg-white">
-        {src ? (
-          <img
-            src={src}
-            alt={src || 'Node image'}
-            className="pointer-events-none h-full w-full rounded border-0 object-contain"
-          />
-        ) : (
-          <div className="text-muted-foreground flex h-full w-full items-center justify-center text-sm">
-            No Image Source
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
-const PDFExpandedView = ({ node }: ExpandedRendererProps) => {
-  const src = typeof node.data?.src === 'string' ? node.data.src : '';
-  const [numPages, setNumPages] = useState<number | null>(null);
-
-  const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
-    setNumPages(numPages);
-  };
-
-  return (
-    <div className="custom-scrollbar h-full w-full overflow-auto bg-white p-4">
-      {src ? (
-        <Document
-          file={src}
-          onLoadSuccess={onDocumentLoadSuccess}
-          loading={
-            <div className="text-muted-foreground p-4 text-xs">Loading...</div>
-          }
-          error={
-            <div className="p-4 text-xs text-red-300">Error loading PDF</div>
-          }
-          className="flex flex-col items-center gap-4"
-        >
-          {Array.from(new Array(numPages ?? 0), (_el, index) => (
-            <Page
-              key={`page_${index + 1}`}
-              pageNumber={index + 1}
-              scale={1.15}
-              renderAnnotationLayer={false}
-              renderTextLayer={true}
-              loading={''}
-            />
-          ))}
-        </Document>
-      ) : (
-        <div className="text-muted-foreground flex h-full w-full items-center justify-center text-sm">
-          No PDF Source
-        </div>
-      )}
-    </div>
-  );
-};
-
-/* ------------------------------------------------------------------ */
-/*  Helpers                                                           */
-/* ------------------------------------------------------------------ */
-
-const getOverlayMeta = (node: Node) => {
-  const type = typeof node.type === 'string' ? node.type : '';
+// Helper to get meta info (icon, title) for the header
+const getOverlayMeta = (type: string, data: Record<string, unknown>) => {
   if (type === 'note') {
     return { title: 'Note', icon: <StickyNote size={14} /> };
   }
   if (type === 'web') {
-    const src = typeof node.data?.src === 'string' ? node.data.src : '';
+    const src = typeof data?.src === 'string' ? data.src : '';
     return { title: src || 'Web', icon: <Globe size={14} /> };
   }
   if (type === 'pdf') {
-    const label = typeof node.data?.label === 'string' ? node.data.label : '';
+    const label = typeof data?.label === 'string' ? data.label : '';
     return { title: label || 'PDF', icon: <FileText size={14} /> };
   }
   if (type === 'image') {
-    const label = typeof node.data?.label === 'string' ? node.data.label : '';
+    const label = typeof data?.label === 'string' ? data.label : '';
     return { title: label || 'Image', icon: <ImageIcon size={14} /> };
   }
   if (type === 'video') {
-    const label = typeof node.data?.label === 'string' ? node.data.label : '';
+    const label = typeof data?.label === 'string' ? data.label : '';
     return { title: label || 'Video', icon: <PlayCircle size={14} /> };
   }
   return { title: 'Expanded View', icon: <Expand size={14} /> };
-};
-
-const getExpandedContent = (node: Node): React.ReactNode => {
-  if (node.type === 'note') return <NoteExpandedView node={node} />;
-  if (node.type === 'web') return <WebExpandedView node={node} />;
-  if (node.type === 'pdf') return <PDFExpandedView node={node} />;
-  if (node.type === 'image') return <ImageExpandedView node={node} />;
-  if (node.type === 'video') return <VideoExpandedView node={node} />;
-  return (
-    <div className="text-muted-foreground flex h-full w-full items-center justify-center text-sm">
-      Unsupported node type
-    </div>
-  );
 };
 
 /* ------------------------------------------------------------------ */
@@ -317,43 +46,102 @@ const getExpandedContent = (node: Node): React.ReactNode => {
 /* ------------------------------------------------------------------ */
 
 export const ExpandedNodePanel = () => {
+  // Canvas Store State
   const expandedNodeId = useCanvasStore((s) => s.expandedNodeId);
-  const expandMode = useCanvasStore((s) => s.expandMode);
-  const closeExpanded = useCanvasStore((s) => s.closeExpanded);
-  const setExpandMode = useCanvasStore((s) => s.setExpandMode);
+  const canvasExpandMode = useCanvasStore((s) => s.expandMode);
+  const closeExpandedCanvas = useCanvasStore((s) => s.closeExpanded);
+  const setCanvasExpandMode = useCanvasStore((s) => s.setExpandMode);
   const nodes = useCanvasStore((s) => s.nodes);
+  const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+
+  // Preview Store State
+  const previewType = usePreviewStore((s) => s.previewType);
+  const previewData = usePreviewStore((s) => s.previewData);
+  const closePreview = usePreviewStore((s) => s.closePreview);
+  const previewExpandMode = usePreviewStore((s) => s.expandMode);
+  const setPreviewExpandMode = usePreviewStore((s) => s.setExpandMode);
 
   const node = useMemo(() => {
     if (!expandedNodeId) return null;
     return nodes.find((n) => n.id === expandedNodeId) ?? null;
   }, [expandedNodeId, nodes]);
 
+  // Priority: Preview > Node
+  // If preview is open, show it. Otherwise show node (if any).
+  const isPreview = !!(previewType && previewData);
+  const isNode = !!(expandedNodeId && node);
+
+  // Handling conflicts:
+  // If preview is newly opened, we want to ensure canvas expand is closed?
+  // Probably better handled at the trigger site (in SourceLibraryTree).
+  // Here we just render based on priority.
+
+  const activeItem = useMemo(() => {
+    if (isPreview && previewType && previewData) {
+      return {
+        type: previewType,
+        data: previewData,
+        readOnly: true,
+        isNode: false,
+        expandMode: previewExpandMode,
+        close: closePreview,
+        setMode: setPreviewExpandMode,
+      };
+    }
+    if (isNode && node) {
+      return {
+        type: node.type || 'text',
+        data: node.data as Record<string, unknown>,
+        readOnly: false,
+        isNode: true,
+        expandMode: canvasExpandMode,
+        close: closeExpandedCanvas,
+        setMode: setCanvasExpandMode,
+      };
+    }
+    return null;
+  }, [
+    isPreview,
+    previewType,
+    previewData,
+    previewExpandMode,
+    closePreview,
+    setPreviewExpandMode,
+    isNode,
+    node,
+    canvasExpandMode,
+    closeExpandedCanvas,
+    setCanvasExpandMode,
+  ]);
+
   // If the node was removed while expanded, close the panel.
   useEffect(() => {
-    if (!expandedNodeId) return;
-    if (node) return;
-    closeExpanded();
-  }, [closeExpanded, expandedNodeId, node]);
+    if (expandedNodeId && !node && !isPreview) {
+      closeExpandedCanvas();
+    }
+  }, [closeExpandedCanvas, expandedNodeId, node, isPreview]);
 
   // Global Escape key handler.
   useEffect(() => {
-    if (!expandedNodeId || !node) return;
+    if (!activeItem) return;
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
-        closeExpanded();
+        activeItem.close();
       }
     };
 
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [closeExpanded, expandedNodeId, node]);
+  }, [activeItem]);
 
-  if (!expandedNodeId || !node) return null;
+  if (!activeItem) return null;
 
-  const meta = getOverlayMeta(node);
-  const isReplace = expandMode === 'replace';
+  const meta = getOverlayMeta(activeItem.type, activeItem.data);
+  const isReplace = activeItem.expandMode === 'replace';
+
+  const backTitle = activeItem.isNode ? 'Back to Canvas' : 'Close Preview';
 
   return (
     <div className="border-border flex h-full w-full flex-col overflow-hidden border-l bg-white">
@@ -364,8 +152,8 @@ export const ExpandedNodePanel = () => {
           {isReplace && (
             <GhostButton
               className="text-muted-foreground"
-              title="Back to Canvas"
-              onClick={closeExpanded}
+              title={backTitle}
+              onClick={activeItem.close}
             >
               <ArrowLeft size={14} />
             </GhostButton>
@@ -374,6 +162,11 @@ export const ExpandedNodePanel = () => {
           <div className="text-muted-foreground flex min-w-0 items-center gap-2 text-xs font-medium">
             <span className="shrink-0">{meta.icon}</span>
             <span className="truncate">{meta.title}</span>
+            {activeItem.readOnly && (
+              <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[10px] uppercase">
+                Preview
+              </span>
+            )}
           </div>
         </div>
 
@@ -384,7 +177,7 @@ export const ExpandedNodePanel = () => {
               !isReplace ? 'text-main bg-muted' : 'text-muted-foreground'
             }
             title={isReplace ? 'Split view' : 'Full view'}
-            onClick={() => setExpandMode(isReplace ? 'split' : 'replace')}
+            onClick={() => activeItem.setMode(isReplace ? 'split' : 'replace')}
           >
             <Columns2 size={14} />
           </GhostButton>
@@ -394,7 +187,7 @@ export const ExpandedNodePanel = () => {
             title="Close"
             onClick={(e) => {
               e.stopPropagation();
-              closeExpanded();
+              activeItem.close();
             }}
           >
             <X size={14} />
@@ -403,7 +196,19 @@ export const ExpandedNodePanel = () => {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-hidden">{getExpandedContent(node)}</div>
+      <div className="flex-1 overflow-hidden">
+        <NodePreviewContent
+          type={activeItem.type}
+          data={activeItem.data}
+          readOnly={activeItem.readOnly}
+          onContentChange={
+            activeItem.isNode && expandedNodeId
+              ? (newContent) =>
+                  updateNodeData(expandedNodeId, { content: newContent })
+              : undefined
+          }
+        />
+      </div>
     </div>
   );
 };

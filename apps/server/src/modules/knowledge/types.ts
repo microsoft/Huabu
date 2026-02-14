@@ -21,6 +21,11 @@ export interface SourceRow {
 }
 
 /**
+ * Source overview (excludes content_text)
+ */
+export type SourceOverview = Omit<SourceRow, 'content_text'>;
+
+/**
  * Source revision record in the knowledge database
  * Stores version history for editable sources (note/text)
  */

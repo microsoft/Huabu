@@ -10,7 +10,9 @@ import { GhostButton } from '../Common/GhostButton.tsx';
 
 import type { NodeDataProps } from './types.ts';
 
-type WebNodeData = NodeDataProps & {};
+type WebNodeData = NodeDataProps & {
+  src: string;
+};
 export type WebNodeType = Node<WebNodeData, 'web'>;
 
 export const WebNode = ({ id, data, selected }: NodeProps<WebNodeType>) => {
