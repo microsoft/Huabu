@@ -18,18 +18,20 @@ export const CenterArea: React.FC = () => {
   const canvasExpandMode = useCanvasStore((s) => s.expandMode);
 
   const previewData = usePreviewStore((s) => s.previewData);
+  const previewType = usePreviewStore((s) => s.previewType);
   const previewExpandMode = usePreviewStore((s) => s.expandMode);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const splitRatioRef = useRef(SPLIT_DEFAULT_RATIO);
   const [splitRatio, setSplitRatio] = React.useState(SPLIT_DEFAULT_RATIO);
 
-  const hasExpanded = !!expandedNodeId || !!previewData;
+  const hasPreview = !!previewData && !!previewType;
+  const hasExpanded = !!expandedNodeId || hasPreview;
 
   // Determine effective expand mode based on what acts as the "expanded" content
   // Priority: Preview > Node Edit
   let isReplace = false;
-  if (previewData) {
+  if (hasPreview) {
     isReplace = previewExpandMode === 'replace';
   } else if (expandedNodeId) {
     isReplace = canvasExpandMode === 'replace';

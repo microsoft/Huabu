@@ -20,7 +20,7 @@ export const ImageNode = ({ id, data, selected }: NodeProps<ImageNodeType>) => {
       <div className="text-muted-foreground">
         <ImageIcon size={14} />
       </div>
-      {/* spliter */}
+      {/* splitter  */}
       <div className="bg-border h-3 w-px" />
       {/*tools*/}
       <div className="text-muted-foreground flex items-center gap-1">

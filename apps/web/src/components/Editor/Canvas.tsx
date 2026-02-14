@@ -76,6 +76,13 @@ export const Canvas: React.FC = () => {
     return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [frameSelectedNodes]);
 
+  useEffect(() => {
+    return () => {
+      rfInstanceRef.current = null;
+      setRfInstance(null);
+    };
+  }, [setRfInstance]);
+
   return (
     <div
       ref={wrapperRef}

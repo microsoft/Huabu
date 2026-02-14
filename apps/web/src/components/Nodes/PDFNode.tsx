@@ -100,7 +100,7 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
       <div className="text-muted-foreground">
         <FileText size={14} />
       </div>
-      {/* spliter */}
+      {/* splitter  */}
       <div className="bg-border h-3 w-px" />
       {/* Tools */}
       <div className="text-muted-foreground flex items-center gap-1">

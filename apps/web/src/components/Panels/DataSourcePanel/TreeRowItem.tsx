@@ -22,8 +22,8 @@ export interface TreeRowItemProps extends React.HTMLAttributes<HTMLDivElement> {
 
   // DnD refs and props
   forwardedRef?: React.Ref<HTMLDivElement>;
-  dndAttributes?: Record<string, any>;
-  dndListeners?: Record<string, any>;
+  dndAttributes?: Record<string, unknown>;
+  dndListeners?: Record<string, unknown>;
 }
 
 export const TreeRowItem = React.memo(

@@ -42,7 +42,7 @@ export const NoteNode = ({ id, data, selected }: NodeProps<NoteNodeType>) => {
       <div className="text-muted-foreground">
         <StickyNote size={14} />
       </div>
-      {/* spliter */}
+      {/* splitter  */}
       <div className="bg-border h-3 w-px" />
       {/* Tools */}
       <div className="text-muted-foreground flex items-center gap-1">

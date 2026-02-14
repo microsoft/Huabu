@@ -20,7 +20,7 @@ export const VideoNode = ({ id, data, selected }: NodeProps<VideoNodeType>) => {
       <div className="text-muted-foreground">
         <PlaySquare size={14} />
       </div>
-      {/* spliter */}
+      {/* splitter  */}
       <div className="bg-border h-3 w-px" />
 
       {/* Tools */}
