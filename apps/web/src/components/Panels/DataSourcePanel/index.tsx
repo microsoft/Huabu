@@ -282,16 +282,35 @@ export const DataSourcePanel = ({
           getIcon={getNodeIcon}
           getDisplayName={getNodeDisplayName}
           onItemClick={(item) => {
-            const data = {
-              label: item.node.data?.label,
-              ...item.node.data,
-            } as Record<string, unknown>;
+            const nodes = useCanvasStore.getState().nodes;
+            const targetNode = nodes.find(
+              (n) => n.data?.sourceId === item.node.id,
+            );
 
-            // Trigger preview in the central ExpandedNodePanel
-            useCanvasStore.getState().closeExpanded();
-            usePreviewStore
-              .getState()
-              .openPreview(item.node.type || 'text', data);
+            if (targetNode) {
+              const rfInstance = useCanvasStore.getState().rfInstance;
+              useCanvasStore.getState().setSelectedNodes([targetNode.id]);
+              usePreviewStore.getState().closePreview();
+
+              if (rfInstance) {
+                void rfInstance.fitView({
+                  nodes: [{ id: targetNode.id }],
+                  duration: 800,
+                  maxZoom: 1,
+                });
+              }
+            } else {
+              const data = {
+                label: item.node.data?.label,
+                ...item.node.data,
+              } as Record<string, unknown>;
+
+              // Trigger preview in the central ExpandedNodePanel
+              useCanvasStore.getState().closeExpanded();
+              usePreviewStore
+                .getState()
+                .openPreview(item.node.type || 'text', data);
+            }
           }}
         />
       )}
