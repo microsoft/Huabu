@@ -8,7 +8,6 @@ interface MigrationConfirmProps {
   toBackend: KnowledgeStorageBackend;
   migratableCount: number;
   onMigrateAndSwitch: () => void;
-  onSwitchOnly: () => void;
   onCancel: () => void;
 }
 
@@ -21,7 +20,6 @@ export const MigrationConfirm: React.FC<MigrationConfirmProps> = ({
   toBackend,
   migratableCount,
   onMigrateAndSwitch,
-  onSwitchOnly,
   onCancel,
 }) => (
   <>
@@ -49,16 +47,6 @@ export const MigrationConfirm: React.FC<MigrationConfirmProps> = ({
         Migrate &amp; Switch
         <span className="ml-1 text-xs text-gray-400">
           — copy content to new backend
-        </span>
-      </button>
-      <button
-        type="button"
-        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-        onClick={onSwitchOnly}
-      >
-        Switch Only
-        <span className="ml-1 text-xs text-gray-400">
-          — keep cached snapshots as fallback
         </span>
       </button>
       <button

@@ -2,7 +2,6 @@ import { Settings } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-import { MigrationConfirm } from './MigrationConfirm';
 import { MigrationProgress } from './MigrationProgress';
 import { MigrationResult } from './MigrationResult';
 import { StorageSettingsForm } from './StorageSettingsForm';
@@ -40,8 +39,6 @@ export const SettingsPopover: React.FC = () => {
   // Migration flow state
   const [phase, setPhase] = useState<PopoverPhase>('settings');
   const [migratableCount, setMigratableCount] = useState(0);
-  const [pendingConfig, setPendingConfig] =
-    useState<KnowledgeStorageConfig | null>(null);
   const [migrationResult, setMigrationResult] =
     useState<MigrateStorageResponse | null>(null);
   const [migrationError, setMigrationError] = useState('');
@@ -79,7 +76,6 @@ export const SettingsPopover: React.FC = () => {
 
   const resetMigrationState = () => {
     setPhase('settings');
-    setPendingConfig(null);
     setMigrationResult(null);
     setMigrationError('');
   };
@@ -143,33 +139,23 @@ export const SettingsPopover: React.FC = () => {
     }
 
     setMigratableCount(count);
-    setPendingConfig(newConfig);
-    setPhase('confirm');
-  };
+    // Directly start migration instead of asking for confirmation
+    void (async () => {
+      setPhase('migrating');
+      setMigrationError('');
 
-  const handleMigrateAndSwitch = async () => {
-    if (!pendingConfig) return;
-    setPhase('migrating');
-    setMigrationError('');
-
-    try {
-      const result = await migrateStorage(canvasId, pendingConfig);
-      setMigrationResult(result);
-      setPhase('result');
-      await loadCanvas();
-    } catch (err) {
-      setMigrationError(
-        err instanceof Error ? err.message : 'Migration failed',
-      );
-      setPhase('result');
-    }
-  };
-
-  const handleSwitchOnly = () => {
-    if (!pendingConfig) return;
-    setStorageConfig(pendingConfig);
-    resetMigrationState();
-    setIsOpen(false);
+      try {
+        const result = await migrateStorage(canvasId, newConfig);
+        setMigrationResult(result);
+        setPhase('result');
+        await loadCanvas();
+      } catch (err) {
+        setMigrationError(
+          err instanceof Error ? err.message : 'Migration failed',
+        );
+        setPhase('result');
+      }
+    })();
   };
 
   // ─── Popover positioning ────────────────────────────────────────
@@ -199,17 +185,6 @@ export const SettingsPopover: React.FC = () => {
             onVaultPathChange={handleVaultPathChange}
             onSave={handleSave}
             onCancel={handleClose}
-          />
-        );
-      case 'confirm':
-        return (
-          <MigrationConfirm
-            fromBackend={storageConfig.backend}
-            toBackend={pendingConfig?.backend ?? backend}
-            migratableCount={migratableCount}
-            onMigrateAndSwitch={handleMigrateAndSwitch}
-            onSwitchOnly={handleSwitchOnly}
-            onCancel={resetMigrationState}
           />
         );
       case 'migrating':

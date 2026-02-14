@@ -65,11 +65,16 @@ function parseFrontmatter(raw: string): {
     let value: string | null = line.slice(colonIdx + 1).trim();
     if (value === 'null') {
       value = null;
-    } else if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      // Un-quote
+    } else if (value.startsWith('"') && value.endsWith('"')) {
+      // Use JSON.parse to handle escaped characters correctly (e.g. "{\"foo\":\"bar\"}")
+      try {
+        value = JSON.parse(value);
+      } catch {
+        // Fallback if parsing fails
+        value = value.slice(1, -1);
+      }
+    } else if (value.startsWith("'") && value.endsWith("'")) {
+      // Un-quote single quotes
       value = value.slice(1, -1);
     }
     meta[key] = value;
