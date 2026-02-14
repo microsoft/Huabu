@@ -151,7 +151,6 @@ export const Canvas: React.FC = () => {
             data: {
               src: payload.data.src,
             },
-            style: { width: 460, height: 300 },
           };
         }
 
@@ -163,6 +162,36 @@ export const Canvas: React.FC = () => {
             data: {
               content: payload.data.content,
             },
+          };
+        }
+
+        if (payload.kind === 'source') {
+          const { type, sourceId, label, ...rest } = payload.data;
+
+          let nodeType = 'text';
+          if (typeof type === 'string' && type in nodeTypes) {
+            nodeType = type;
+          }
+
+          const data: Record<string, unknown> = {
+            label,
+            sourceId,
+            ...rest,
+          };
+
+          // Map specific fields for node types
+          if (nodeType === 'web') {
+            data.src = rest.src;
+          }
+          if (nodeType === 'pdf') {
+            data.src = rest.src;
+          }
+
+          newNode = {
+            id: createId('node'),
+            type: nodeType,
+            position,
+            data,
           };
         }
 

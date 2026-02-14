@@ -27,7 +27,7 @@ import type { NodeDataProps } from './types.ts';
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 type PDFNodeData = NodeDataProps & {
-  src?: string;
+  src: string;
   label?: string;
 };
 type CustomPDFNode = Node<PDFNodeData, 'pdf'> & {

@@ -79,9 +79,10 @@ export async function ingestNodeIfNeeded({
   try {
     const response = await upsertNode(canvasId, node.id, {
       type: node.type as 'note' | 'text' | 'web' | 'pdf',
-      title: (nodeData?.label as string) ?? (nodeData?.title as string),
-      content: nodeData?.content as string,
-      src: nodeData?.src as string,
+      title:
+        (nodeData?.label as string) ?? (nodeData?.title as string) ?? undefined,
+      content: (nodeData?.content as string) || undefined,
+      src: (nodeData?.src as string) || undefined,
       sourceId: (nodeData?.sourceId as string) || undefined,
     });
 

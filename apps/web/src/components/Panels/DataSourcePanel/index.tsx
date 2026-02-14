@@ -13,13 +13,12 @@ import {
 } from 'lucide-react';
 import { useMemo, useState, useEffect } from 'react';
 
-import {
-  DataSourceTreeView,
-  type DataSourceNodeLike,
-  type DataSourceTreeItem,
-} from './DataSourceTreeView';
+import { CanvasLayerTree } from './CanvasLayerTree';
+import { SourceLibraryTree } from './SourceLibraryTree';
+import { type DataSourceNodeLike, type DataSourceTreeItem } from './types';
 import { getSources, type Source } from '../../../api/knowledge';
 import useCanvasStore from '../../../store/canvasStore';
+import { usePreviewStore } from '../../../store/previewStore';
 import { GhostButton } from '../../Common/GhostButton';
 import { SidebarPanel } from '../SidebarPanel';
 
@@ -125,7 +124,7 @@ export const DataSourcePanel = ({
   ) as unknown as DataSourceNodeLike[];
   const [tab, setTab] = useState<LayerTab>('canvas');
   const [sources, setSources] = useState<Source[]>([]);
-  console.log('sources in datasource panel', sources);
+
   useEffect(() => {
     if (tab === 'sources') {
       getSources().then(setSources).catch(console.error);
@@ -168,13 +167,13 @@ export const DataSourcePanel = ({
 
   const sourceItems = useMemo(() => {
     return sources.map((s) => ({
-      id: s.source_id,
+      id: s.sourceId,
       depth: 0,
       node: {
-        id: s.source_id,
+        id: s.sourceId,
         type: s.type || 'text',
         data: {
-          label: s.title || s.uri || 'Untitled',
+          label: s.title || s.src || 'Untitled',
           ...s,
         },
       },
@@ -270,12 +269,32 @@ export const DataSourcePanel = ({
       iconExpanded={<PanelLeftClose size={16} />}
       className="border-border border-r"
     >
-      <DataSourceTreeView
-        items={visibleItems}
-        getIcon={getNodeIcon}
-        getDisplayName={getNodeDisplayName}
-        onDragStart={() => setSortType('manual')}
-      />
+      {tab === 'canvas' ? (
+        <CanvasLayerTree
+          items={visibleItems}
+          getIcon={getNodeIcon}
+          getDisplayName={getNodeDisplayName}
+          onDragStart={() => setSortType('manual')}
+        />
+      ) : (
+        <SourceLibraryTree
+          items={visibleItems}
+          getIcon={getNodeIcon}
+          getDisplayName={getNodeDisplayName}
+          onItemClick={(item) => {
+            const data = {
+              label: item.node.data?.label,
+              ...item.node.data,
+            } as Record<string, unknown>;
+
+            // Trigger preview in the central ExpandedNodePanel
+            useCanvasStore.getState().closeExpanded();
+            usePreviewStore
+              .getState()
+              .openPreview(item.node.type || 'text', data);
+          }}
+        />
+      )}
     </SidebarPanel>
   );
 };

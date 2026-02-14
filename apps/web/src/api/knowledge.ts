@@ -1,16 +1,16 @@
 import { API_CONFIG } from '../config/api';
 
 export interface Source {
-  source_id: string;
-  workspace_id: string;
+  sourceId: string;
+  workspaceId: string;
   type: 'web' | 'pdf' | 'note' | 'text';
   title: string | null;
-  uri: string | null;
-  created_at: number;
-  updated_at: number;
-  content_text: string;
-  content_hash: string;
-  meta_json: string | null;
+  src: string | null;
+  createdAt: number;
+  updatedAt: number;
+  content: string; // was content_text
+  contentHash: string;
+  metaJson: string | null;
 }
 
 export async function getSources(
