@@ -1,4 +1,4 @@
-import { createId } from '@sediment/shared';
+import { createId, type KnowledgeStorageConfig } from '@sediment/shared';
 import {
   addEdge,
   applyNodeChanges,
@@ -54,6 +54,9 @@ type RFState = {
 
   workspaceName: string;
   setWorkspaceName: (name: string) => void;
+
+  storageConfig: KnowledgeStorageConfig;
+  setStorageConfig: (config: KnowledgeStorageConfig) => void;
 
   ingestionByNodeId: Record<string, NodeIngestionInfo>;
   setNodeIngestion: (nodeId: string, info: NodeIngestionInfo) => void;
@@ -111,6 +114,12 @@ const useCanvasStore = create<RFState>((set, get) => ({
     scheduleAutoSave(get().saveCanvas);
   },
 
+  storageConfig: { backend: 'sqlite' },
+  setStorageConfig: (config) => {
+    set({ storageConfig: config });
+    scheduleAutoSave(get().saveCanvas);
+  },
+
   ingestionByNodeId: {},
   setNodeIngestion: (nodeId, info) => {
     if (!nodeId) return;
@@ -149,11 +158,13 @@ const useCanvasStore = create<RFState>((set, get) => ({
         nodes?: Node[];
         edges?: Edge[];
         workspaceName?: string;
+        storageConfig?: KnowledgeStorageConfig;
       };
       set({
         nodes: state.nodes ?? [],
         edges: state.edges ?? [],
         workspaceName: state.workspaceName ?? get().workspaceName,
+        storageConfig: state.storageConfig ?? get().storageConfig,
         version: response.version,
         isLoading: false,
         ingestionByNodeId: {},
@@ -173,10 +184,11 @@ const useCanvasStore = create<RFState>((set, get) => ({
 
     set({ isSaving: true });
     try {
-      const { nodes, edges, version, canvasId, workspaceName } = get();
+      const { nodes, edges, version, canvasId, workspaceName, storageConfig } =
+        get();
       const response = await putCanvas(canvasId, {
         version,
-        state: { nodes, edges, workspaceName },
+        state: { nodes, edges, workspaceName, storageConfig },
       });
       set({ version: response.version });
     } catch (error) {

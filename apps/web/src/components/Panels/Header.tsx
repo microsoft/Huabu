@@ -1,5 +1,6 @@
 import React from 'react';
 
+import { SettingsPopover } from './SettingsPopover';
 import useCanvasStore from '../../store/canvasStore';
 
 export const Header: React.FC = () => {
@@ -15,6 +16,11 @@ export const Header: React.FC = () => {
         onChange={(e) => setWorkspaceName(e.target.value)}
         aria-label="Workspace name"
       />
+
+      {/* Spacer to push settings to the right */}
+      <div className="flex-1" />
+
+      <SettingsPopover />
     </header>
   );
 };

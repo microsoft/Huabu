@@ -1,12 +1,17 @@
 import { z } from 'zod';
 
 import { getCanvasDb } from './canvas.db.js';
+import { migrationRoute } from './canvas.migration.js';
 import { getArtifactsDir } from '../artifact/utils.js';
 import {
   getIngestService,
   getKnowledgeRepository,
+  resetIngestService,
+  setKnowledgeStorageConfig,
+  getActiveStorageConfig,
 } from '../knowledge/index.js';
 
+import type { KnowledgeStorageConfig } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
 type CanvasRow = {
@@ -27,8 +32,30 @@ function toMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Node types whose `content` is managed by the knowledge DB. */
-const CONTENT_MANAGED_TYPES = new Set(['note', 'text']);
+/**
+ * Read the storageConfig from a canvas row's state_json and apply it
+ * so subsequent repository/service calls use the correct backend.
+ */
+function applyStorageConfigFromCanvas(canvasId: string): void {
+  const database = getCanvasDb();
+  const row = database
+    .prepare('SELECT state_json FROM canvases WHERE canvas_id = ?')
+    .get(canvasId) as { state_json: string } | undefined;
+
+  if (!row) return;
+
+  try {
+    const state = JSON.parse(row.state_json) as {
+      storageConfig?: KnowledgeStorageConfig;
+    };
+    if (state.storageConfig) {
+      setKnowledgeStorageConfig(state.storageConfig);
+      resetIngestService();
+    }
+  } catch {
+    // Ignore parse errors – fall back to current config
+  }
+}
 
 interface NodeLike {
   type?: string;
@@ -57,13 +84,20 @@ function stripManagedContent(state: unknown): unknown {
   >;
 
   const strippedNodes = nodes.map((node) => {
-    if (!node.data?.sourceId || !CONTENT_MANAGED_TYPES.has(node.type ?? '')) {
+    if (!node.data?.sourceId) {
       return node;
     }
 
-    // Remove `content` – it will be hydrated back on read.
-    const { content: _content, ...dataRest } = node.data;
-    return { ...node, data: dataRest };
+    // Strip `content` but preserve it as `contentSnapshot` for fallback
+    // when the storage backend changes or a source cannot be found.
+    const { content, ...dataRest } = node.data;
+    return {
+      ...node,
+      data: {
+        ...dataRest,
+        ...(typeof content === 'string' ? { contentSnapshot: content } : {}),
+      },
+    };
   });
 
   return { ...rest, nodes: strippedNodes };
@@ -73,7 +107,7 @@ function stripManagedContent(state: unknown): unknown {
  * Hydrate node `content` from the knowledge DB for nodes that reference a source.
  * Only applies to note/text nodes that have a `sourceId`.
  */
-function hydrateNodeContent(state: unknown): unknown {
+async function hydrateNodeContent(state: unknown): Promise<unknown> {
   if (
     typeof state !== 'object' ||
     state === null ||
@@ -88,24 +122,28 @@ function hydrateNodeContent(state: unknown): unknown {
     unknown
   >;
 
-  const repository = getKnowledgeRepository();
+  const repository = await getKnowledgeRepository();
 
   const hydratedNodes = nodes.map((node) => {
     const sourceId = node.data?.sourceId as string | undefined;
-    if (!sourceId || !CONTENT_MANAGED_TYPES.has(node.type ?? '')) {
+    if (!sourceId) {
       return node;
     }
 
     const source = repository.findSourceById(sourceId);
-    if (!source) {
-      return node;
-    }
+
+    // Fall back to contentSnapshot when the source cannot be found
+    // (e.g. after switching storage backends without migrating).
+    const content =
+      source?.content_text ??
+      (node.data?.contentSnapshot as string | undefined) ??
+      '';
 
     return {
       ...node,
       data: {
         ...node.data,
-        content: source.content_text,
+        content,
       },
     };
   });
@@ -141,6 +179,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.code(400).send({ message: 'Invalid request body' });
     }
 
+    // Ensure the knowledge backend matches the canvas-level config
+    applyStorageConfigFromCanvas(canvasId);
+
     const {
       workspaceId,
       type,
@@ -159,7 +200,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     const resolvedWorkspaceId =
       workspaceId ?? canvasRow?.workspace_id ?? 'default';
 
-    const ingestService = getIngestService();
+    const ingestService = await getIngestService();
 
     try {
       const outcome =
@@ -183,11 +224,13 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
             });
 
       const { sourceId, success, error } = outcome;
+      const currentConfig = getActiveStorageConfig();
 
       return reply.send({
         nodeId,
         sourceId,
         success,
+        sourceBackend: currentConfig.backend,
         suggestedLabel: outcome.title,
         error: error ? `${error.code}: ${error.message}` : undefined,
       });
@@ -238,7 +281,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       // Hydrate node content from knowledge DB so clients always get fresh data
-      state = hydrateNodeContent(state);
+      applyStorageConfigFromCanvas(canvasId);
+      state = await hydrateNodeContent(state);
 
       return reply.send({
         canvasId: row.canvas_id,
@@ -326,6 +370,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       });
     },
   );
+
+  // ───────────────────── Storage Migration ─────────────────────
+  await fastify.register(migrationRoute);
 };
 
 export default canvasRoutes;

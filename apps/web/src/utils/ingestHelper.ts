@@ -86,7 +86,13 @@ export async function ingestNodeIfNeeded({
     });
 
     if (response.sourceId) {
-      updateNodeDataLocal(node.id, { sourceId: response.sourceId });
+      const patch: Record<string, unknown> = {
+        sourceId: response.sourceId,
+      };
+      if (response.sourceBackend) {
+        patch.sourceBackend = response.sourceBackend;
+      }
+      updateNodeDataLocal(node.id, patch);
     }
 
     // Optionally apply server-suggested label (e.g. parsed PDF/web title).
@@ -112,6 +118,14 @@ export async function ingestNodeIfNeeded({
 
     if (response.success) {
       // Keep the ingestion map small; UI only needs pending.
+      clearNodeIngestion(node.id);
+      return;
+    }
+
+    // EMPTY_CONTENT is expected for newly created note/text nodes – not a real error.
+    const isExpectedEmpty = response.error?.includes('EMPTY_CONTENT');
+
+    if (isExpectedEmpty) {
       clearNodeIngestion(node.id);
       return;
     }

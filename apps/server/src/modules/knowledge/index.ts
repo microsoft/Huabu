@@ -6,14 +6,27 @@
 // Database
 export { getKnowledgeDb, closeKnowledgeDb } from './knowledge.db.js';
 
+// Interface (storage-agnostic contract)
+export type { IKnowledgeRepository } from './knowledge.interface.js';
+
 // Repository (Data Access Layer)
 export {
   KnowledgeRepository,
   getKnowledgeRepository,
+  setKnowledgeStorageConfig,
+  getActiveStorageConfig,
+  createRepositoryForConfig,
 } from './knowledge.repository.js';
 
+// Obsidian backend
+export { ObsidianKnowledgeRepository } from './obsidian.repository.js';
+
 // Service (Business Logic Layer)
-export { IngestService, getIngestService } from './ingest.service.js';
+export {
+  IngestService,
+  getIngestService,
+  resetIngestService,
+} from './ingest.service.js';
 export type {
   IngestTextSourceInput,
   IngestWebSourceInput,
@@ -34,12 +47,10 @@ export {
 } from './utils.js';
 
 // Fetchers/Parsers
-export { fetchWebContent, type FetchWebContentResult } from './web-fetcher.js';
 export {
-  parsePdfFile,
-  parsePdfBuffer,
-  type ParsePdfResult,
-} from './pdf-parser.js';
+  fetchWebContent,
+  type FetchWebContentResult,
+} from './loaders/web.loader.js';
 
 // Types
 export type {

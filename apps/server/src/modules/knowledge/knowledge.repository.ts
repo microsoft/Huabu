@@ -1,18 +1,20 @@
 import { getKnowledgeDb } from './knowledge.db.js';
 
+import type { IKnowledgeRepository } from './knowledge.interface.js';
 import type {
   CreateRevisionInput,
   CreateSourceInput,
   SourceRevisionRow,
   SourceRow,
 } from './types.js';
+import type { KnowledgeStorageConfig } from '@sediment/shared';
 import type Database from 'better-sqlite3';
 
 /**
- * Data Access Layer for knowledge store
- * Encapsulates all SQL operations to decouple business logic from database
+ * SQLite-backed knowledge repository.
+ * Implements IKnowledgeRepository using better-sqlite3.
  */
-export class KnowledgeRepository {
+export class KnowledgeRepository implements IKnowledgeRepository {
   private db: Database.Database;
 
   constructor(database?: Database.Database) {
@@ -213,13 +215,96 @@ export class KnowledgeRepository {
 }
 
 /**
- * Singleton instance for convenience
+ * Singleton instance for convenience.
+ * Lazily created via createKnowledgeRepository() which uses
+ * the runtime storage config set from the canvas frontend.
  */
-let repositoryInstance: KnowledgeRepository | null = null;
+let repositoryInstance: IKnowledgeRepository | null = null;
 
-export function getKnowledgeRepository(): KnowledgeRepository {
+/**
+ * Currently active storage config (set via setKnowledgeStorageConfig).
+ */
+let activeConfig: KnowledgeStorageConfig | null = null;
+
+/**
+ * Create a repository instance based on the provided config.
+ *
+ * Supported backends:
+ *  - "sqlite"   (default) – uses better-sqlite3
+ *  - "obsidian" – reads/writes Markdown files in an Obsidian vault
+ *                 (requires obsidianVaultPath in config)
+ */
+async function createKnowledgeRepository(
+  config?: KnowledgeStorageConfig,
+): Promise<IKnowledgeRepository> {
+  const backend = (config?.backend ?? 'sqlite').toLowerCase();
+
+  if (backend === 'obsidian') {
+    // Dynamic import to avoid loading Obsidian code when unused
+    const { ObsidianKnowledgeRepository } =
+      await import('./obsidian.repository.js');
+    const vaultPath = config?.obsidianVaultPath;
+    if (!vaultPath) {
+      throw new Error(
+        'obsidianVaultPath is required when backend is "obsidian"',
+      );
+    }
+    return new ObsidianKnowledgeRepository(vaultPath);
+  }
+
+  // Default: SQLite
+  return new KnowledgeRepository();
+}
+
+/**
+ * Update the storage configuration at runtime.
+ * Clears the cached singleton so the next call to getKnowledgeRepository()
+ * will create a fresh instance matching the new config.
+ *
+ * NOTE: callers should also call resetIngestService() (from ingest.service)
+ * after this to ensure the IngestService picks up the new repository.
+ */
+export function setKnowledgeStorageConfig(
+  config: KnowledgeStorageConfig,
+): void {
+  const configChanged =
+    activeConfig?.backend !== config.backend ||
+    activeConfig?.obsidianVaultPath !== config.obsidianVaultPath;
+
+  if (configChanged) {
+    activeConfig = config;
+    repositoryInstance = null;
+  }
+}
+
+/**
+ * Get or initialise the knowledge repository singleton.
+ * The concrete implementation is chosen by createKnowledgeRepository().
+ */
+export async function getKnowledgeRepository(): Promise<IKnowledgeRepository> {
   if (!repositoryInstance) {
-    repositoryInstance = new KnowledgeRepository();
+    repositoryInstance = await createKnowledgeRepository(
+      activeConfig ?? undefined,
+    );
   }
   return repositoryInstance;
+}
+
+/**
+ * Return a copy of the currently active storage config,
+ * or a default SQLite config if none has been set yet.
+ */
+export function getActiveStorageConfig(): KnowledgeStorageConfig {
+  return activeConfig ? { ...activeConfig } : { backend: 'sqlite' };
+}
+
+/**
+ * Create a standalone repository for a given config.
+ * Unlike getKnowledgeRepository(), this does NOT affect the cached singleton.
+ * Useful for migration scenarios where two backends must be accessed simultaneously.
+ */
+export async function createRepositoryForConfig(
+  config: KnowledgeStorageConfig,
+): Promise<IKnowledgeRepository> {
+  return createKnowledgeRepository(config);
 }
