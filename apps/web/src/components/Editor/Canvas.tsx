@@ -41,6 +41,7 @@ export const Canvas: React.FC = () => {
   const onEdgesChange = useCanvasStore((state) => state.onEdgesChange);
   const onConnect = useCanvasStore((state) => state.onConnect);
   const addNode = useCanvasStore((state) => state.addNode);
+  const setRfInstance = useCanvasStore((state) => state.setRfInstance);
   const frameSelectedNodes = useCanvasStore(
     (state) => state.frameSelectedNodes,
   );
@@ -178,6 +179,7 @@ export const Canvas: React.FC = () => {
         nodeTypes={nodeTypes}
         onInit={(instance) => {
           rfInstanceRef.current = instance;
+          setRfInstance(instance);
         }}
         fitView
         attributionPosition="bottom-right"

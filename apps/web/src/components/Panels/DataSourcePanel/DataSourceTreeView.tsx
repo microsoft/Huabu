@@ -163,6 +163,7 @@ export const DataSourceTreeView = ({
   const setSelectedNodes = useCanvasStore((state) => state.setSelectedNodes);
   const reorderNodes = useCanvasStore((state) => state.reorderNodes);
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
+  const rfInstance = useCanvasStore((state) => state.rfInstance);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -216,6 +217,28 @@ export const DataSourceTreeView = ({
     event.stopPropagation();
     const isMulti = event.metaKey || event.ctrlKey;
     setSelectedNodes([id], isMulti);
+
+    if (rfInstance) {
+      let targetIds = [id];
+      if (isMulti) {
+        if (selectedIds.includes(id)) {
+          // Deselecting
+          targetIds = selectedIds.filter((sid) => sid !== id);
+        } else {
+          // Selecting
+          targetIds = [...selectedIds, id];
+        }
+      }
+
+      if (targetIds.length > 0) {
+        const nodesToFit = targetIds.map((nid) => ({ id: nid }));
+        void rfInstance.fitView({
+          nodes: nodesToFit,
+          duration: 800,
+          maxZoom: 1,
+        });
+      }
+    }
   };
 
   const handleRename = (id: string, newName: string) => {
