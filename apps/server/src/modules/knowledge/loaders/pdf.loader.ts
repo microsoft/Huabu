@@ -42,7 +42,9 @@ export class PdfLoader implements IDocumentLoader {
       };
     } catch (error) {
       throw new Error(
-        `PDF loading failed: ${error instanceof Error ? error.message : String(error)}`,
+        `PDF loading failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
       );
     }
   }

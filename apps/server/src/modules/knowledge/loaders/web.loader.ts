@@ -71,7 +71,9 @@ export class WebLoader implements IDocumentLoader {
       };
     } catch (error) {
       throw new Error(
-        `Web loading failed: ${error instanceof Error ? error.message : String(error)}`,
+        `Web loading failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
       );
     }
   }

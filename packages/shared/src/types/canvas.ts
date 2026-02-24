@@ -103,3 +103,138 @@ export interface MigrateStorageResponse {
   results: MigrateStorageNodeResult[];
   version: number;
 }
+
+/**
+ * Canvas Operations - Additional Types for Deep Research
+ */
+
+// ==================== Basic Types ====================
+
+export interface Point {
+  x: number;
+  y: number;
+}
+
+export interface Bounds {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+// ==================== Node Origin & Metadata ====================
+
+export type NodeOrigin = 'user' | 'research' | 'chat';
+
+export interface NodeResearchData {
+  /** Original research query */
+  query: string;
+  /** Research session ID (for grouping) */
+  sessionId?: string;
+  /** Related node IDs (for auto-connecting) */
+  relatedNodeIds?: string[];
+}
+
+export interface NodeMetadata {
+  /** Node origin/source */
+  origin?: NodeOrigin;
+  /** Research-related data (only when origin === 'research') */
+  research?: NodeResearchData;
+}
+
+export interface FrameMetadata extends NodeMetadata {
+  /** Whether the frame is locked (prevents auto-resize) */
+  locked?: boolean;
+}
+
+// ==================== Canvas Operation Params ====================
+
+export interface CreateNodeParams {
+  canvasId: string;
+  type: 'note' | 'text' | 'image' | 'pdf' | 'video' | 'web' | 'frame';
+  position: Point;
+  data: Record<string, unknown>;
+  /** Optional: explicit width/height */
+  size?: { width: number; height: number };
+}
+
+export interface CreateFrameParams {
+  canvasId: string;
+  label: string;
+  position: Point;
+  /** Node IDs to wrap in this frame */
+  childNodeIds: string[];
+  /** Optional frame data (researchGenerated, etc.) */
+  data?: Record<string, unknown>;
+  /** Optional: explicit size (otherwise auto-calculated) */
+  size?: { width: number; height: number };
+}
+
+export interface EdgeStyle {
+  stroke?: string;
+  strokeWidth?: number;
+  animated?: boolean;
+}
+
+export interface CreateEdgeParams {
+  canvasId: string;
+  sourceNodeId: string;
+  targetNodeId: string;
+  label?: string;
+  style?: EdgeStyle;
+}
+
+// ==================== Layout Types ====================
+
+export type LayoutStrategy = 'hierarchical' | 'radial' | 'force-directed';
+
+export interface LayoutConfig {
+  strategy: LayoutStrategy;
+  spacing: { x: number; y: number };
+}
+
+export type PlacementStrategy = 'right' | 'bottom' | 'empty-space' | 'auto';
+
+export interface CalculateLayoutParams {
+  canvasId: string;
+  /** Existing canvas bounds */
+  existingBounds?: Bounds;
+  /** Placement strategy */
+  placementStrategy: PlacementStrategy;
+  /** Number of new nodes to place */
+  nodeCount: number;
+  /** Padding from existing content */
+  padding?: number;
+}
+
+export interface LayoutResult {
+  /** Starting position for the first node */
+  startPosition: Point;
+  /** Suggested positions for all nodes (if layout is pre-calculated) */
+  positions?: Point[];
+}
+
+// ==================== Canvas Operation Results ====================
+
+export interface CreateNodeResult {
+  nodeId: string;
+}
+
+export interface CreateFrameResult {
+  frameId: string;
+}
+
+export interface CreateEdgeResult {
+  edgeId: string;
+}
+
+export interface UpdateCanvasStateParams {
+  canvasId: string;
+  version: number;
+  nodes: unknown[]; // ReactFlow Node type
+  edges: unknown[]; // ReactFlow Edge type
+}
+
+export interface UpdateCanvasStateResult {
+  newVersion: number;
+}

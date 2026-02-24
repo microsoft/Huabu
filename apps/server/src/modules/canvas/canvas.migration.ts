@@ -148,7 +148,9 @@ export const migrationRoute: FastifyPluginAsync = async (fastify) => {
       sourceRepo = await createRepositoryForConfig(fromConfig);
     } catch (error) {
       return reply.code(500).send({
-        message: `Failed to connect to source backend (${fromConfig.backend}): ${toMessage(error)}`,
+        message: `Failed to connect to source backend (${
+          fromConfig.backend
+        }): ${toMessage(error)}`,
       });
     }
 
@@ -156,7 +158,9 @@ export const migrationRoute: FastifyPluginAsync = async (fastify) => {
       targetRepo = await createRepositoryForConfig(targetConfig);
     } catch (error) {
       return reply.code(500).send({
-        message: `Failed to connect to target backend (${targetConfig.backend}): ${toMessage(error)}`,
+        message: `Failed to connect to target backend (${
+          targetConfig.backend
+        }): ${toMessage(error)}`,
       });
     }
 
