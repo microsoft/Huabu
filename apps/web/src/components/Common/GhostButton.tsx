@@ -7,11 +7,13 @@ import type { ButtonHTMLAttributes, ReactNode } from 'react';
 export type GhostButtonProps = {
   children: ReactNode;
   className?: string;
+  tooltipWrapperClassName?: string;
 } & Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children' | 'className'>;
 
 export const GhostButton = ({
   children,
   className,
+  tooltipWrapperClassName,
   type = 'button',
   title,
   ...props
@@ -31,5 +33,11 @@ export const GhostButton = ({
     </button>
   );
 
-  return title ? <Tooltip content={title}>{buttonEl}</Tooltip> : buttonEl;
+  return title ? (
+    <Tooltip content={title} wrapperClassName={tooltipWrapperClassName}>
+      {buttonEl}
+    </Tooltip>
+  ) : (
+    buttonEl
+  );
 };

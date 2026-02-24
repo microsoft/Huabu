@@ -33,6 +33,16 @@ export type NodeDataProps = {
 
   // for frame node
   locked?: boolean;
+
+  // node origin/source
+  origin?: 'user' | 'research' | 'chat';
+
+  // research-related properties (only when origin === 'research')
+  research?: {
+    query: string;
+    sessionId?: string;
+    relatedNodeIds?: string[];
+  };
 };
 
 export type CreateNodePayload = {

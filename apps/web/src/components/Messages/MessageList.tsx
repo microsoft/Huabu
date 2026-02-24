@@ -1,6 +1,7 @@
 import { Ellipsis } from 'lucide-react';
 
 import { AIMessage } from './AIMessage';
+import { ResearchProgressCard } from './ResearchProgressCard';
 import { ToolMessage } from './ToolMessage';
 import { UserMessage } from './UserMessage';
 
@@ -41,6 +42,18 @@ export const MessageList = ({
 
         if (msg.role === 'tool') {
           return <ToolMessage key={msg.id} toolResponse={msg.toolResponse} />;
+        }
+
+        if (msg.role === 'research') {
+          return (
+            <ResearchProgressCard
+              key={msg.id}
+              query={msg.query}
+              steps={msg.steps}
+              status={msg.status}
+              nodeIds={msg.nodeIds}
+            />
+          );
         }
 
         return null;
