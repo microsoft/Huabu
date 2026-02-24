@@ -325,7 +325,7 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
   private writeSource(source: SourceRow, existingFilePath?: string): void {
     const fm = toFrontmatter({
       source_id: source.source_id,
-      // workspace_id: source.workspace_id, // Obsidian vault implies workspace context
+      workspace_id: source.workspace_id,
       type: source.type,
       title: source.title,
       uri: source.uri,
@@ -429,7 +429,14 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
     for (const filePath of this.sourceIndex.values()) {
       const source = this.readSourceOverview(filePath);
       if (source) {
-        if (workspaceId && source.workspace_id !== workspaceId) continue;
+        // If workspaceId is specified, filter by it
+        // But allow sources without workspace_id (legacy files) to match any workspace
+        if (
+          workspaceId &&
+          source.workspace_id &&
+          source.workspace_id !== workspaceId
+        )
+          continue;
         results.push(source);
       }
     }
