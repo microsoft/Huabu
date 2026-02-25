@@ -40,32 +40,32 @@ export const ResearchProgressCard = ({
   const colorClasses = isError
     ? 'border-red-200 bg-red-50'
     : isCompleted
-    ? 'border-green-200 bg-green-50'
-    : 'border-blue-200 bg-blue-50';
+      ? 'border-green-200 bg-green-50'
+      : 'border-blue-200 bg-blue-50';
 
   const textColorClasses = isError
     ? 'text-red-900'
     : isCompleted
-    ? 'text-green-900'
-    : 'text-blue-900';
+      ? 'text-green-900'
+      : 'text-blue-900';
 
   const subtextColorClasses = isError
     ? 'text-red-700'
     : isCompleted
-    ? 'text-green-700'
-    : 'text-blue-700';
+      ? 'text-green-700'
+      : 'text-blue-700';
 
   const progressBarColorClasses = isError
     ? 'bg-red-600'
     : isCompleted
-    ? 'bg-green-600'
-    : 'bg-blue-600';
+      ? 'bg-green-600'
+      : 'bg-blue-600';
 
   const progressBarBgColorClasses = isError
     ? 'bg-red-200'
     : isCompleted
-    ? 'bg-green-200'
-    : 'bg-blue-200';
+      ? 'bg-green-200'
+      : 'bg-blue-200';
 
   return (
     <div className={`rounded-2xl border p-4 ${colorClasses}`}>
@@ -78,16 +78,16 @@ export const ResearchProgressCard = ({
                 isError
                   ? 'text-red-600'
                   : isCompleted
-                  ? 'text-green-600'
-                  : 'text-blue-600'
+                    ? 'text-green-600'
+                    : 'text-blue-600'
               }`}
             />
             <span className={`text-sm font-semibold ${textColorClasses}`}>
               {isError
                 ? 'Research Error'
                 : isCompleted
-                ? 'Research Completed'
-                : 'Deep Research in Progress'}
+                  ? 'Research Completed'
+                  : 'Deep Research in Progress'}
             </span>
           </div>
           <div className={`line-clamp-2 text-xs ${subtextColorClasses}`}>
@@ -142,8 +142,8 @@ export const ResearchProgressCard = ({
               isError
                 ? 'text-red-600'
                 : isCompleted
-                ? 'text-green-600'
-                : 'text-blue-600'
+                  ? 'text-green-600'
+                  : 'text-blue-600'
             }`}
           >
             {isExpanded ? (

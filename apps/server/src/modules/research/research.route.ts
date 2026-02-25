@@ -112,6 +112,8 @@ const researchRoutes: FastifyPluginAsync = async (
 
       // Track current step
       let currentStep = 'Initializing...';
+      // Track how many errors have already been sent to avoid re-sending duplicates
+      let sentErrorCount = 0;
 
       // Stream graph execution
       const stream = await graph.stream(initialState, {
@@ -225,9 +227,11 @@ const researchRoutes: FastifyPluginAsync = async (
             });
           }
 
-          // Send error events
-          if (state.errors && state.errors.length > 0) {
-            for (const error of state.errors) {
+          // Send only new error events (avoid re-sending already-sent errors)
+          if (state.errors && state.errors.length > sentErrorCount) {
+            const newErrors = state.errors.slice(sentErrorCount);
+            sentErrorCount = state.errors.length;
+            for (const error of newErrors) {
               writeEvent(reply.raw, {
                 type: 'error',
                 timestamp: Date.now(),
