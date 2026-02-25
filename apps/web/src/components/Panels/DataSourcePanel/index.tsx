@@ -16,7 +16,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { CanvasLayerTree } from './CanvasLayerTree';
 import { SourceLibraryTree } from './SourceLibraryTree';
 import { type DataSourceNodeLike, type DataSourceTreeItem } from './types';
-import { getSources, getSource } from '../../../api/knowledge';
+import { getSources, getSource, updateSource } from '../../../api/knowledge';
 import useCanvasStore from '../../../store/canvasStore';
 import { usePreviewStore } from '../../../store/previewStore';
 import { GhostButton } from '../../Common/GhostButton';
@@ -186,6 +186,17 @@ export const DataSourcePanel = ({
     return getNodeTitleAndIcon(nodeType).icon;
   };
 
+  const handleSourceRename = async (sourceId: string, newName: string) => {
+    try {
+      await updateSource(sourceId, { title: newName });
+      // Refresh sources list
+      const updatedSources = await getSources();
+      setSources(updatedSources);
+    } catch (error) {
+      console.error('Failed to rename source:', error);
+    }
+  };
+
   return (
     <SidebarPanel
       title="Data Sources"
@@ -275,6 +286,7 @@ export const DataSourcePanel = ({
           items={visibleItems}
           getIcon={getNodeIcon}
           getDisplayName={getNodeDisplayName}
+          onRename={handleSourceRename}
           onItemClick={async (item) => {
             const nodes = useCanvasStore.getState().nodes;
             const targetNode = nodes.find(

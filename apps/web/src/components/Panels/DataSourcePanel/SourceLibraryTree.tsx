@@ -11,17 +11,23 @@ interface SourceRowProps {
   getIcon: (nodeType: string | undefined) => React.ReactNode;
   getDisplayName: (node: DataSourceNodeLike) => string;
   onItemClick?: (item: DataSourceTreeItem) => void;
+  onRename?: (id: string, newName: string) => void;
 }
 
 const SourceRow = React.memo(
-  ({ item, getIcon, getDisplayName, onItemClick }: SourceRowProps) => {
+  ({
+    item,
+    getIcon,
+    getDisplayName,
+    onItemClick,
+    onRename,
+  }: SourceRowProps) => {
     const handleDragStart = (e: React.DragEvent) => {
       setDragPayload(e, {
         kind: 'source',
         data: {
           sourceId: item.node.id,
           type: item.node.type,
-          label: getDisplayName(item.node),
           ...item.node.data,
         },
       });
@@ -40,7 +46,8 @@ const SourceRow = React.memo(
         onClick={handleClick}
         draggable // Enable HTML5 Drag
         onDragStart={handleDragStart}
-        // No sorting, rename, or selection state needed for now
+        editable={true}
+        onRename={(newName) => onRename?.(item.id, newName)}
       />
     );
   },
@@ -53,6 +60,7 @@ export interface SourceLibraryTreeProps {
   getDisplayName: (node: DataSourceNodeLike) => string;
   emptyText?: string;
   onItemClick?: (item: DataSourceTreeItem) => void;
+  onRename?: (id: string, newName: string) => void;
 }
 
 export const SourceLibraryTree = ({
@@ -61,6 +69,7 @@ export const SourceLibraryTree = ({
   getDisplayName,
   emptyText = 'No items',
   onItemClick,
+  onRename,
 }: SourceLibraryTreeProps) => {
   return (
     <div className="-mx-3 -my-3 overflow-hidden">
@@ -72,6 +81,7 @@ export const SourceLibraryTree = ({
             getIcon={getIcon}
             getDisplayName={getDisplayName}
             onItemClick={onItemClick}
+            onRename={onRename}
           />
         ))}
 
