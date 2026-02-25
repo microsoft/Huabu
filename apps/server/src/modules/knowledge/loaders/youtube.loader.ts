@@ -15,6 +15,14 @@ export interface YoutubeTranscriptResponse {
   languageMenu?: Record<string, unknown>[];
 }
 
+export interface YoutubeVideoInfoResponse {
+  id: string;
+  title?: string;
+  description?: string;
+  thumbnail?: Array<{ url: string; width: number; height: number }>;
+  [key: string]: unknown;
+}
+
 export class YoutubeLoader implements IDocumentLoader {
   supports(sourceType: string): boolean {
     return sourceType === 'youtube';
@@ -36,8 +44,15 @@ export class YoutubeLoader implements IDocumentLoader {
     }
 
     try {
-      const { transcript, transcript_text } =
-        await this.fetchTranscript(videoId);
+      const [transcriptResult, videoInfo] = await Promise.all([
+        this.fetchTranscript(videoId),
+        this.fetchVideoInfo(videoId).catch((err) => {
+          console.warn(`Failed to fetch video info for ${videoId}:`, err);
+          return null;
+        }),
+      ]);
+
+      const { transcript, transcript_text } = transcriptResult;
 
       // Format transcript into a single string if transcript_text is not provided
       const content =
@@ -47,11 +62,23 @@ export class YoutubeLoader implements IDocumentLoader {
           .map((t) => `[${t.startTime}] ${t.text}`)
           .join('\n');
 
+      // Extract best thumbnail (highest resolution)
+      let bestThumbnailUrl: string | undefined;
+      if (videoInfo?.thumbnail && videoInfo.thumbnail.length > 0) {
+        const sortedThumbnails = [...videoInfo.thumbnail].sort(
+          (a, b) => (b.width || 0) - (a.width || 0),
+        );
+        bestThumbnailUrl = sortedThumbnails[0]?.url;
+      }
+
       return {
         content,
+        title: videoInfo?.title,
         metadata: {
           videoId,
           source: `https://www.youtube.com/watch?v=${videoId}`,
+          description: videoInfo?.description,
+          image: bestThumbnailUrl,
         },
       };
     } catch (error) {
@@ -112,13 +139,51 @@ export class YoutubeLoader implements IDocumentLoader {
 
     const data = (await response.json()) as YoutubeTranscriptResponse;
 
+    // Some videos might not have transcripts, handle gracefully
     if (!data || !data.transcript || !Array.isArray(data.transcript)) {
-      throw new Error('Invalid response format from RapidAPI.');
+      console.warn(`No transcript found for video ${videoId} or invalid format.`);
+      return { transcript: [] };
     }
 
     return {
       transcript: data.transcript,
       transcript_text: data.transcript_text,
     };
+  }
+
+  private async fetchVideoInfo(
+    videoId: string,
+  ): Promise<YoutubeVideoInfoResponse> {
+    const apiKey = process.env.RAPIDAPI_KEY;
+    if (!apiKey) {
+      throw new Error('Missing RAPIDAPI_KEY in environment variables.');
+    }
+
+    const response = await fetch(
+      `https://yt-api.p.rapidapi.com/video/info?id=${videoId}`,
+      {
+        method: 'GET',
+        headers: {
+          'x-rapidapi-key': apiKey,
+          'x-rapidapi-host': 'yt-api.p.rapidapi.com',
+          'Content-Type': 'application/json',
+        },
+      },
+    );
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw new Error(
+        `RapidAPI video info failed with status ${response.status}: ${text}`,
+      );
+    }
+
+    const data = (await response.json()) as YoutubeVideoInfoResponse;
+
+    if (!data || !data.id) {
+      throw new Error('Invalid video info response format from RapidAPI.');
+    }
+
+    return data;
   }
 }
