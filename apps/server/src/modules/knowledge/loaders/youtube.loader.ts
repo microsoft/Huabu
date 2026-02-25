@@ -160,17 +160,29 @@ export class YoutubeLoader implements IDocumentLoader {
       throw new Error('Missing RAPIDAPI_KEY in environment variables.');
     }
 
-    const response = await fetch(
-      `https://yt-api.p.rapidapi.com/video/info?id=${videoId}`,
-      {
-        method: 'GET',
-        headers: {
-          'x-rapidapi-key': apiKey,
-          'x-rapidapi-host': 'yt-api.p.rapidapi.com',
-          'Content-Type': 'application/json',
+    const abortController = new AbortController();
+    const timeoutMs = 15000;
+    const timeoutId = setTimeout(() => {
+      abortController.abort();
+    }, timeoutMs);
+
+    let response: Response;
+    try {
+      response = await fetch(
+        `https://yt-api.p.rapidapi.com/video/info?id=${videoId}`,
+        {
+          method: 'GET',
+          headers: {
+            'x-rapidapi-key': apiKey,
+            'x-rapidapi-host': 'yt-api.p.rapidapi.com',
+            'Content-Type': 'application/json',
+          },
+          signal: abortController.signal,
         },
-      },
-    );
+      );
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     if (!response.ok) {
       const text = await response.text().catch(() => '');
