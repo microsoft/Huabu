@@ -100,7 +100,8 @@ export class YoutubeLoader implements IDocumentLoader {
       if (url.hostname === 'youtu.be') {
         return url.pathname.slice(1);
       }
-      if (url.hostname.includes('youtube.com')) {
+      const hostname = url.hostname.toLowerCase();
+      if (hostname === 'youtube.com' || hostname.endsWith('.youtube.com')) {
         return url.searchParams.get('v');
       }
     } catch {
