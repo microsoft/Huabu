@@ -1,5 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 
+import type {
+  DraggableAttributes,
+  DraggableSyntheticListeners,
+} from '@dnd-kit/core';
 import type { ReactNode } from 'react';
 
 export interface TreeRowItemProps extends React.HTMLAttributes<HTMLDivElement> {
@@ -22,8 +26,8 @@ export interface TreeRowItemProps extends React.HTMLAttributes<HTMLDivElement> {
 
   // DnD refs and props
   forwardedRef?: React.Ref<HTMLDivElement>;
-  dndAttributes?: Record<string, unknown>;
-  dndListeners?: Record<string, unknown>;
+  dndAttributes?: DraggableAttributes;
+  dndListeners?: DraggableSyntheticListeners;
 }
 
 export const TreeRowItem = React.memo(

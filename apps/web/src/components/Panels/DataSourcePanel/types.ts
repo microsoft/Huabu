@@ -2,7 +2,10 @@ export type DataSourceNodeLike = {
   id: string;
   type?: string;
   parentId?: string;
-  data?: Record<string, unknown>;
+  data: {
+    label: string;
+    [key: string]: unknown;
+  };
 
   measured?: Record<string, unknown>;
   width?: number;

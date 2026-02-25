@@ -285,6 +285,57 @@ const useCanvasStore = create<RFState>((set, get) => ({
   setRfInstance: (instance) => set({ rfInstance: instance }),
 
   addNode: (node) => {
+    // Ensure node has a label
+    if (
+      !node.data ||
+      !node.data.label ||
+      String(node.data.label).trim() === ''
+    ) {
+      const existingNodes = get().nodes;
+
+      // Determine the prefix based on node type
+      const nodeType = node.type || 'node';
+      const typeMap: Record<string, string> = {
+        frame: 'Frame',
+        image: 'Image',
+        video: 'Video',
+        web: 'Web',
+        pdf: 'PDF',
+        note: 'Note',
+        text: 'Text',
+      };
+      const prefix = typeMap[nodeType] || 'Untitled';
+
+      // Collect all existing numbers for this prefix
+      const existingNumbers = new Set<number>();
+      const pattern = new RegExp(`^${prefix} (\\d+)$`);
+
+      existingNodes.forEach((n) => {
+        const label = n.data?.label;
+        if (label) {
+          const match = String(label).match(pattern);
+          if (match) {
+            existingNumbers.add(parseInt(match[1], 10));
+          }
+        }
+      });
+
+      // Find the next available number
+      let nextNumber = 1;
+      while (existingNumbers.has(nextNumber)) {
+        nextNumber++;
+      }
+
+      // Set the label
+      node = {
+        ...node,
+        data: {
+          ...node.data,
+          label: `${prefix} ${nextNumber}`,
+        },
+      };
+    }
+
     set({ nodes: [...get().nodes, node] });
 
     // Ingest the node if needed

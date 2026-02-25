@@ -82,9 +82,7 @@ const getNodeTitleAndIcon = (nodeType: string | undefined) => {
 };
 
 const getNodeDisplayName = (node: DataSourceNodeLike): string => {
-  const raw = typeof node.data?.label === 'string' ? node.data.label : '';
-  const trimmed = raw.trim();
-  return trimmed.length > 0 ? trimmed : 'Node';
+  return node.data.label;
 };
 
 const buildTreeItems = (nodes: DataSourceNodeLike[]): DataSourceTreeItem[] => {
@@ -297,7 +295,6 @@ export const DataSourcePanel = ({
               }
             } else {
               let data = {
-                label: item.node.data?.label,
                 ...item.node.data,
               } as Record<string, unknown>;
 
