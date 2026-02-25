@@ -11,6 +11,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import '@xyflow/react/dist/style.css';
 
 import { NodeToolbar } from './CanvasToolbar';
+import { getSource } from '../../api/knowledge';
 import useCanvasStore from '../../store/canvasStore.ts';
 import {
   canReadSedimentPayload,
@@ -41,6 +42,7 @@ export const Canvas: React.FC = () => {
   const onEdgesChange = useCanvasStore((state) => state.onEdgesChange);
   const onConnect = useCanvasStore((state) => state.onConnect);
   const addNode = useCanvasStore((state) => state.addNode);
+  const updateNodeData = useCanvasStore((state) => state.updateNodeData);
   const setRfInstance = useCanvasStore((state) => state.setRfInstance);
   const frameSelectedNodes = useCanvasStore(
     (state) => state.frameSelectedNodes,
@@ -193,6 +195,38 @@ export const Canvas: React.FC = () => {
           }
           if (nodeType === 'pdf') {
             data.src = rest.src;
+          }
+
+          // For note/text nodes, we need to fetch the full content
+          // because SourceOverview doesn't include contentText
+          if ((nodeType === 'note' || nodeType === 'text') && sourceId) {
+            // Create node with loading state first
+            const tempNode: Node = {
+              id: createId('node'),
+              type: nodeType,
+              position,
+              data: {
+                ...data,
+                content: 'Loading...',
+              },
+            };
+            addNode(tempNode);
+
+            // Fetch full source content asynchronously
+            getSource(sourceId)
+              .then((fullSource) => {
+                updateNodeData(tempNode.id, {
+                  content: fullSource.contentText || '',
+                });
+              })
+              .catch((error) => {
+                console.error('Failed to load source content:', error);
+                updateNodeData(tempNode.id, {
+                  content: 'Failed to load content',
+                });
+              });
+
+            return; // Exit early since we've already added the node
           }
 
           newNode = {

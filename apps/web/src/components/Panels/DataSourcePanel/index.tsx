@@ -16,7 +16,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { CanvasLayerTree } from './CanvasLayerTree';
 import { SourceLibraryTree } from './SourceLibraryTree';
 import { type DataSourceNodeLike, type DataSourceTreeItem } from './types';
-import { getSources, type Source } from '../../../api/knowledge';
+import { getSources, getSource, type Source } from '../../../api/knowledge';
 import useCanvasStore from '../../../store/canvasStore';
 import { usePreviewStore } from '../../../store/previewStore';
 import { GhostButton } from '../../Common/GhostButton';
@@ -281,7 +281,7 @@ export const DataSourcePanel = ({
           items={visibleItems}
           getIcon={getNodeIcon}
           getDisplayName={getNodeDisplayName}
-          onItemClick={(item) => {
+          onItemClick={async (item) => {
             const nodes = useCanvasStore.getState().nodes;
             const targetNode = nodes.find(
               (n) => n.data?.sourceId === item.node.id,
@@ -300,16 +300,30 @@ export const DataSourcePanel = ({
                 });
               }
             } else {
-              const data = {
+              let data = {
                 label: item.node.data?.label,
                 ...item.node.data,
               } as Record<string, unknown>;
 
+              // For note/text types, fetch full content for preview
+              const sourceType = item.node.type || 'text';
+              if (sourceType === 'note' || sourceType === 'text') {
+                try {
+                  const fullSource = await getSource(item.node.id);
+                  if (fullSource?.contentText) {
+                    data = {
+                      ...data,
+                      content: fullSource.contentText,
+                    };
+                  }
+                } catch (error) {
+                  console.error('Failed to fetch source content:', error);
+                }
+              }
+
               // Trigger preview in the central ExpandedNodePanel
               useCanvasStore.getState().closeExpanded();
-              usePreviewStore
-                .getState()
-                .openPreview(item.node.type || 'text', data);
+              usePreviewStore.getState().openPreview(sourceType, data);
             }
           }}
         />
