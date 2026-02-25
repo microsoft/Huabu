@@ -142,7 +142,9 @@ export class YoutubeLoader implements IDocumentLoader {
 
     // Some videos might not have transcripts, handle gracefully
     if (!data || !data.transcript || !Array.isArray(data.transcript)) {
-      console.warn(`No transcript found for video ${videoId} or invalid format.`);
+      console.warn(
+        `No transcript found for video ${videoId} or invalid format.`,
+      );
       return { transcript: [] };
     }
 

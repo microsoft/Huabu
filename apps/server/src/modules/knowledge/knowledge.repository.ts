@@ -265,9 +265,8 @@ async function createKnowledgeRepository(
 
   if (backend === 'obsidian') {
     // Dynamic import to avoid loading Obsidian code when unused
-    const { ObsidianKnowledgeRepository } = await import(
-      './obsidian.repository.js'
-    );
+    const { ObsidianKnowledgeRepository } =
+      await import('./obsidian.repository.js');
     const vaultPath = config?.obsidianVaultPath;
     if (!vaultPath) {
       throw new Error(
