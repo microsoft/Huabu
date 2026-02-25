@@ -14,9 +14,9 @@ import type { IKnowledgeRepository } from './knowledge.interface.js';
 import type {
   CreateRevisionInput,
   CreateSourceInput,
+  Source,
   SourceOverview,
-  SourceRevisionRow,
-  SourceRow,
+  SourceRevision,
 } from './types.js';
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -69,17 +69,17 @@ function parseFrontmatter(raw: string): {
     let value: string | null = line.slice(colonIdx + 1).trim();
     if (value === 'null') {
       value = null;
-    } else if (value.startsWith('"') && value.endsWith('"')) {
+    } else if (value && value.startsWith('"') && value.endsWith('"')) {
       // Use JSON.parse to handle escaped characters correctly (e.g. "{\"foo\":\"bar\"}")
       try {
         value = JSON.parse(value);
       } catch {
         // Fallback if parsing fails
-        value = value.slice(1, -1);
+        value = value ? value.slice(1, -1) : '';
       }
-    } else if (value.startsWith("'") && value.endsWith("'")) {
+    } else if (value && value.startsWith("'") && value.endsWith("'")) {
       // Un-quote single quotes
-      value = value.slice(1, -1);
+      value = value ? value.slice(1, -1) : '';
     }
     meta[key] = value;
   }
@@ -101,41 +101,41 @@ function parseFrontmatter(raw: string): {
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
- * Build a SourceRow from parsed frontmatter + content.
+ * Parse frontmatter + content -> Source object.
  */
-function toSourceRow(
+function toSource(
   meta: Record<string, string | null>,
   content: string,
-): SourceRow {
+): Source {
   return {
-    source_id: meta['source_id'] ?? '',
-    workspace_id: meta['workspace_id'] ?? '',
-    type: (meta['type'] ?? 'text') as SourceRow['type'],
+    sourceId: meta['source_id'] ?? '',
+    workspaceId: meta['workspace_id'] ?? '',
+    type: (meta['type'] ?? 'text') as Source['type'],
     title: meta['title'] ?? null,
-    uri: meta['uri'] ?? null,
-    created_at: Number(meta['created_at'] ?? 0),
-    updated_at: Number(meta['updated_at'] ?? 0),
-    content_text: content,
-    content_hash: meta['content_hash'] ?? '',
-    meta_json: meta['meta_json'] ?? null,
+    src: meta['src'] ?? null,
+    createdAt: Number(meta['created_at'] ?? 0),
+    updatedAt: Number(meta['updated_at'] ?? 0),
+    contentText: content,
+    contentHash: meta['content_hash'] ?? '',
+    metaJson: meta['meta_json'] ?? null,
   };
 }
 
 /**
- * Build a SourceRevisionRow from parsed frontmatter + content.
+ * Build a SourceRevision from parsed frontmatter + content.
  */
 function toRevisionRow(
   meta: Record<string, string | null>,
   content: string,
-): SourceRevisionRow {
+): SourceRevision {
   return {
-    revision_id: meta['revision_id'] ?? '',
-    workspace_id: meta['workspace_id'] ?? '',
-    source_id: meta['source_id'] ?? '',
-    created_at: Number(meta['created_at'] ?? 0),
-    content_text: content,
-    content_hash: meta['content_hash'] ?? '',
-    meta_json: meta['meta_json'] ?? null,
+    revisionId: meta['revision_id'] ?? '',
+    workspaceId: meta['workspace_id'] ?? '',
+    sourceId: meta['source_id'] ?? '',
+    createdAt: Number(meta['created_at'] ?? 0),
+    contentText: content,
+    contentHash: meta['content_hash'] ?? '',
+    metaJson: meta['meta_json'] ?? null,
   };
 }
 
@@ -151,10 +151,10 @@ function toRevisionRow(
  *   <vaultPath>/
  *     Sediment/
  *       sources/
- *         <source_id>.md          – one file per source
+ *         <source_id>.md          �?one file per source
  *       revisions/
  *         <source_id>/
- *           <revision_id>.md      – one file per revision
+ *           <revision_id>.md      �?one file per revision
  *
  * Each .md file uses YAML frontmatter for metadata and the body for content.
  * This makes every source browsable and editable directly in Obsidian.
@@ -165,10 +165,10 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
   private readonly revisionsDir: string;
 
   /**
-   * In-memory index: source_id → absolute file path.
+   * In-memory index: source_id �?absolute file path.
    * Built once on construction and kept up-to-date on writes.
    * This allows users to freely rename files in Obsidian without
-   * breaking the link – we always locate files by the `source_id`
+   * breaking the link �?we always locate files by the `source_id`
    * stored in YAML frontmatter, not by filename.
    */
   private sourceIndex = new Map<string, string>();
@@ -274,7 +274,7 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
     return path.join(this.revisionsDir, sourceId, `${revisionId}.md`);
   }
 
-  private readSource(filePath: string): SourceRow | null {
+  private readSource(filePath: string): Source | null {
     if (!existsSync(filePath)) return null;
     const raw = readFileSync(filePath, 'utf-8');
     const { meta, content } = parseFrontmatter(raw);
@@ -290,7 +290,7 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
       if (!meta['type']) meta['type'] = 'note';
     }
 
-    return toSourceRow(meta, content);
+    return toSource(meta, content);
   }
 
   private readSourceOverview(filePath: string): SourceOverview | null {
@@ -310,31 +310,31 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
     }
 
     return {
-      source_id: meta['source_id'] ?? '',
-      workspace_id: meta['workspace_id'] ?? '',
-      type: (meta['type'] ?? 'text') as SourceRow['type'],
+      sourceId: meta['source_id'] ?? '',
+      workspaceId: meta['workspace_id'] ?? '',
+      type: (meta['type'] ?? 'text') as Source['type'],
       title: meta['title'] ?? null,
-      uri: meta['uri'] ?? null,
-      created_at: Number(meta['created_at'] ?? 0),
-      updated_at: Number(meta['updated_at'] ?? 0),
-      content_hash: meta['content_hash'] ?? '',
-      meta_json: meta['meta_json'] ?? null,
+      src: meta['src'] ?? null,
+      createdAt: Number(meta['created_at'] ?? 0),
+      updatedAt: Number(meta['updated_at'] ?? 0),
+      contentHash: meta['content_hash'] ?? '',
+      metaJson: meta['meta_json'] ?? null,
     };
   }
 
-  private writeSource(source: SourceRow, existingFilePath?: string): void {
+  private writeSource(source: Source, existingFilePath?: string): void {
     const fm = toFrontmatter({
-      source_id: source.source_id,
-      workspace_id: source.workspace_id,
+      source_id: source.sourceId,
+      workspace_id: source.workspaceId,
       type: source.type,
       title: source.title,
-      uri: source.uri,
-      created_at: source.created_at,
-      updated_at: source.updated_at,
-      content_hash: source.content_hash,
-      meta_json: source.meta_json,
+      src: source.src,
+      created_at: source.createdAt,
+      updated_at: source.updatedAt,
+      content_hash: source.contentHash,
+      meta_json: source.metaJson,
     });
-    const fileContent = `${fm}\n${source.content_text}`;
+    const fileContent = `${fm}\n${source.contentText}`;
 
     // Resolve the target path:
     // 1. If specifically told to overwrite a file (renaming ID case), use that.
@@ -342,41 +342,41 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
     // 3. Else build new filename.
     let targetPath = existingFilePath;
     if (!targetPath) {
-      targetPath = this.sourceIndex.has(source.source_id)
-        ? this.sourceFilePath(source.source_id)
+      targetPath = this.sourceIndex.has(source.sourceId)
+        ? this.sourceFilePath(source.sourceId)
         : path.join(
             this.sourcesDir,
-            this.buildSourceFileName(source.source_id, source.title),
+            this.buildSourceFileName(source.sourceId, source.title),
           );
     }
 
     writeFileSync(targetPath, fileContent, 'utf-8');
 
     // Keep the index up-to-date
-    this.sourceIndex.set(source.source_id, targetPath);
+    this.sourceIndex.set(source.sourceId, targetPath);
   }
 
-  private readRevision(filePath: string): SourceRevisionRow | null {
+  private readRevision(filePath: string): SourceRevision | null {
     if (!existsSync(filePath)) return null;
     const raw = readFileSync(filePath, 'utf-8');
     const { meta, content } = parseFrontmatter(raw);
     return toRevisionRow(meta, content);
   }
 
-  private writeRevision(rev: SourceRevisionRow): void {
-    const dir = this.revisionDir(rev.source_id);
+  private writeRevision(rev: SourceRevision): void {
+    const dir = this.revisionDir(rev.sourceId);
     mkdirSync(dir, { recursive: true });
 
     const fm = toFrontmatter({
-      revision_id: rev.revision_id,
-      source_id: rev.source_id,
-      created_at: rev.created_at,
-      content_hash: rev.content_hash,
-      meta_json: rev.meta_json,
+      revision_id: rev.revisionId,
+      source_id: rev.sourceId,
+      created_at: rev.createdAt,
+      content_hash: rev.contentHash,
+      meta_json: rev.metaJson,
     });
-    const fileContent = `${fm}\n${rev.content_text}`;
+    const fileContent = `${fm}\n${rev.contentText}`;
     writeFileSync(
-      this.revisionFilePath(rev.source_id, rev.revision_id),
+      this.revisionFilePath(rev.sourceId, rev.revisionId),
       fileContent,
       'utf-8',
     );
@@ -384,12 +384,12 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
 
   // ==================== Source Operations ====================
 
-  findSourceById(sourceId: string): SourceRow | null {
+  findSourceById(sourceId: string): Source | null {
     // Try indexed / default path first
     const source = this.readSource(this.sourceFilePath(sourceId));
     if (source) return source;
 
-    // Index miss – the file may have been renamed by the user.
+    // Index miss �?the file may have been renamed by the user.
     // Do a full scan and rebuild the index entry.
     this.rebuildSourceIndex();
     const retryPath = this.sourceIndex.get(sourceId);
@@ -399,19 +399,19 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
     return null;
   }
 
-  findSourceByHash(workspaceId: string, contentHash: string): SourceRow | null {
+  findSourceByHash(workspaceId: string, contentHash: string): Source | null {
     // Scan all indexed files (metadata only)
     const all = this.findAllSourcesOverview(workspaceId);
-    const match = all.find((s) => s.content_hash === contentHash);
+    const match = all.find((s) => s.contentHash === contentHash);
     if (!match) return null;
-    return this.findSourceById(match.source_id);
+    return this.findSourceById(match.sourceId);
   }
 
-  findAllSources(): SourceRow[] {
+  findAllSources(): Source[] {
     // Update index to ensure we capture new external files
     this.rebuildSourceIndex();
 
-    const results: SourceRow[] = [];
+    const results: Source[] = [];
     for (const filePath of this.sourceIndex.values()) {
       const source = this.readSource(filePath);
       if (source) {
@@ -433,8 +433,8 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
         // But allow sources without workspace_id (legacy files) to match any workspace
         if (
           workspaceId &&
-          source.workspace_id &&
-          source.workspace_id !== workspaceId
+          source.workspaceId &&
+          source.workspaceId !== workspaceId
         )
           continue;
         results.push(source);
@@ -443,21 +443,21 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
     return results;
   }
 
-  createSource(input: CreateSourceInput): SourceRow {
+  createSource(input: CreateSourceInput): Source {
     const now = Date.now();
     const metaJson = input.metadata ? JSON.stringify(input.metadata) : null;
 
-    const source: SourceRow = {
-      source_id: input.sourceId,
-      workspace_id: input.workspaceId,
+    const source: Source = {
+      sourceId: input.sourceId,
+      workspaceId: input.workspaceId,
       type: input.type,
       title: input.title ?? null,
-      uri: input.uri ?? null,
-      created_at: now,
-      updated_at: now,
-      content_text: input.contentText ?? '',
-      content_hash: input.contentHash,
-      meta_json: metaJson,
+      src: input.src ?? null,
+      createdAt: now,
+      updatedAt: now,
+      contentText: input.contentText ?? '',
+      contentHash: input.contentHash,
+      metaJson: metaJson,
     };
 
     this.writeSource(source);
@@ -472,7 +472,7 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
       title?: string;
       metadata?: Record<string, unknown>;
     },
-  ): SourceRow {
+  ): Source {
     const existing = this.findSourceById(sourceId);
     if (!existing) {
       throw new Error(`Source not found: ${sourceId}`);
@@ -481,7 +481,7 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
     // Check if we need to promote this to a managed ID.
     // If the file exists but lacks an explicit source_id in frontmatter,
     // we should generate one now to ensure persistence.
-    let finalId = existing.source_id;
+    let finalId = existing.sourceId;
     const currentFilePath = this.sourceIndex.get(sourceId);
 
     // If we have a file path, check if it was inferred
@@ -499,16 +499,16 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
       }
     }
 
-    const updated: SourceRow = {
+    const updated: Source = {
       ...existing,
-      source_id: finalId, // Use the (potentially new) ID
-      content_text: updates.contentText ?? existing.content_text,
-      content_hash: updates.contentHash ?? existing.content_hash,
+      sourceId: finalId, // Use the (potentially new) ID
+      contentText: updates.contentText ?? existing.contentText,
+      contentHash: updates.contentHash ?? existing.contentHash,
       title: updates.title ?? existing.title,
-      meta_json: updates.metadata
+      metaJson: updates.metadata
         ? JSON.stringify(updates.metadata)
-        : existing.meta_json,
-      updated_at: Date.now(),
+        : existing.metaJson,
+      updatedAt: Date.now(),
     };
 
     // If we are renaming the ID (promoting), we want to overwrite the SAME file
@@ -527,23 +527,23 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
 
   // ==================== Revision Operations ====================
 
-  findLatestRevision(sourceId: string): SourceRevisionRow | null {
+  findLatestRevision(sourceId: string): SourceRevision | null {
     const dir = this.revisionDir(sourceId);
     if (!existsSync(dir)) return null;
 
     const files = readdirSync(dir).filter((f) => f.endsWith('.md'));
-    let latest: SourceRevisionRow | null = null;
+    let latest: SourceRevision | null = null;
 
     for (const file of files) {
       const rev = this.readRevision(path.join(dir, file));
-      if (rev && (!latest || rev.created_at > latest.created_at)) {
+      if (rev && (!latest || rev.createdAt > latest.createdAt)) {
         latest = rev;
       }
     }
     return latest;
   }
 
-  findRevisionById(revisionId: string): SourceRevisionRow | null {
+  findRevisionById(revisionId: string): SourceRevision | null {
     // We need to search across all source revision directories
     if (!existsSync(this.revisionsDir)) return null;
 
@@ -566,19 +566,19 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
   findRevisionByHash(
     sourceId: string,
     contentHash: string,
-  ): SourceRevisionRow | null {
+  ): SourceRevision | null {
     const dir = this.revisionDir(sourceId);
     if (!existsSync(dir)) return null;
 
     const files = readdirSync(dir).filter((f) => f.endsWith('.md'));
-    let match: SourceRevisionRow | null = null;
+    let match: SourceRevision | null = null;
 
     for (const file of files) {
       const rev = this.readRevision(path.join(dir, file));
       if (
         rev &&
-        rev.content_hash === contentHash &&
-        (!match || rev.created_at > match.created_at)
+        rev.contentHash === contentHash &&
+        (!match || rev.createdAt > match.createdAt)
       ) {
         match = rev;
       }
@@ -586,30 +586,30 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
     return match;
   }
 
-  createRevision(input: CreateRevisionInput): SourceRevisionRow {
+  createRevision(input: CreateRevisionInput): SourceRevision {
     const now = Date.now();
     const metaJson = input.metadata ? JSON.stringify(input.metadata) : null;
 
-    const rev: SourceRevisionRow = {
-      revision_id: input.revisionId,
-      workspace_id: input.workspaceId,
-      source_id: input.sourceId,
-      created_at: now,
-      content_text: input.contentText ?? '',
-      content_hash: input.contentHash,
-      meta_json: metaJson,
+    const rev: SourceRevision = {
+      revisionId: input.revisionId,
+      workspaceId: input.workspaceId,
+      sourceId: input.sourceId,
+      createdAt: now,
+      contentText: input.contentText ?? '',
+      contentHash: input.contentHash,
+      metaJson: metaJson,
     };
 
     this.writeRevision(rev);
     return rev;
   }
 
-  findRevisionsBySourceId(sourceId: string): SourceRevisionRow[] {
+  findRevisionsBySourceId(sourceId: string): SourceRevision[] {
     const dir = this.revisionDir(sourceId);
     if (!existsSync(dir)) return [];
 
     const files = readdirSync(dir).filter((f) => f.endsWith('.md'));
-    const revisions: SourceRevisionRow[] = [];
+    const revisions: SourceRevision[] = [];
 
     for (const file of files) {
       const rev = this.readRevision(path.join(dir, file));
@@ -617,14 +617,14 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
     }
 
     // Sort descending by created_at (newest first)
-    return revisions.sort((a, b) => b.created_at - a.created_at);
+    return revisions.sort((a, b) => b.createdAt - a.createdAt);
   }
 
   // ==================== Transaction Support ====================
 
   /**
    * File-based storage has no real transaction support.
-   * Simply execute the function – individual writes are atomic at OS level.
+   * Simply execute the function �?individual writes are atomic at OS level.
    */
   transaction<T>(fn: () => T): T {
     return fn();

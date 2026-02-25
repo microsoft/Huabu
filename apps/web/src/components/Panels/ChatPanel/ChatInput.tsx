@@ -1,13 +1,13 @@
 import { ArrowUp } from 'lucide-react';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
+import { ModeSelector, type ChatMode } from './ModeSelector';
 import { IconButton } from '../../Common/IconButton';
-// import { PillButton } from '../../Common/PillButton';
 
 interface ChatInputProps {
   value: string;
   onChange: (value: string) => void;
-  onSubmit: (e: React.FormEvent) => void;
+  onSubmit: (e: React.FormEvent, mode: ChatMode) => void;
   disabled?: boolean;
   placeholder?: string;
 }
@@ -19,8 +19,13 @@ export const ChatInput = ({
   disabled = false,
   placeholder = 'Asking anything here...',
 }: ChatInputProps) => {
+  const [mode, setMode] = useState<ChatMode>('chat');
   const isSubmitDisabled = disabled || !value.trim();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // Dynamic placeholder based on mode
+  const currentPlaceholder =
+    mode === 'deep-research' ? 'Enter your research query...' : placeholder;
 
   // Auto-resize textarea
   useEffect(() => {
@@ -55,45 +60,34 @@ export const ChatInput = ({
     if (isSubmitDisabled) return;
 
     e.preventDefault();
-    onSubmit(e);
+    onSubmit(e, mode);
+  };
+
+  // Handle form submission
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isSubmitDisabled) {
+      onSubmit(e, mode);
+    }
   };
 
   return (
     <div>
-      <form onSubmit={onSubmit} className="w-full">
+      <form onSubmit={handleSubmit} className="w-full">
         <div className="border-border rounded-2xl border bg-white p-3">
           <textarea
             ref={textareaRef}
             value={value}
             onChange={(e) => onChange(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={placeholder}
+            placeholder={currentPlaceholder}
             disabled={disabled}
             rows={2}
             className="w-full resize-none bg-transparent text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none disabled:cursor-not-allowed"
           />
 
           <div className="mt-2 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              {/* <IconButton
-                aria-label="Add"
-                disabled={disabled}
-                size="sm"
-                variant="outline"
-              >
-                <Plus size={16} />
-              </IconButton> */}
-
-              {/* <PillButton disabled={disabled}>
-                <Lightbulb size={16} />
-                Think
-              </PillButton>
-
-              <PillButton disabled={disabled}>
-                <Search size={16} />
-                Deep Research
-              </PillButton> */}
-            </div>
+            <ModeSelector value={mode} onChange={setMode} disabled={disabled} />
 
             <IconButton
               type="submit"

@@ -12,6 +12,7 @@ type TooltipPosition = {
 export type TooltipProps = {
   content: ReactNode;
   children: ReactElement;
+  wrapperClassName?: string;
 };
 
 const clamp = (value: number, min: number, max: number) => {
@@ -20,7 +21,11 @@ const clamp = (value: number, min: number, max: number) => {
   return value;
 };
 
-export const Tooltip = ({ content, children }: TooltipProps) => {
+export const Tooltip = ({
+  content,
+  children,
+  wrapperClassName,
+}: TooltipProps) => {
   const tooltipId = useId();
   const triggerRef = useRef<HTMLSpanElement | null>(null);
   const tooltipRef = useRef<HTMLDivElement | null>(null);
@@ -91,8 +96,8 @@ export const Tooltip = ({ content, children }: TooltipProps) => {
     isOpen && typeof children.props['aria-describedby'] === 'string'
       ? `${children.props['aria-describedby']} ${tooltipId}`
       : isOpen
-        ? tooltipId
-        : children.props['aria-describedby'];
+      ? tooltipId
+      : children.props['aria-describedby'];
 
   const wrappedChild = cloneElement(children, {
     'aria-describedby': describedBy,
@@ -102,7 +107,7 @@ export const Tooltip = ({ content, children }: TooltipProps) => {
     <>
       <span
         ref={triggerRef}
-        className="inline-flex"
+        className={wrapperClassName || 'inline-flex'}
         onMouseEnter={() => setIsOpen(true)}
         onMouseLeave={() => setIsOpen(false)}
         onFocusCapture={() => setIsOpen(true)}

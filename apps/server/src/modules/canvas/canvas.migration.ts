@@ -16,13 +16,13 @@ import type { FastifyPluginAsync } from 'fastify';
 // Local types duplicated from canvas.route.ts to avoid circular deps or complex refactoring
 // ideally these should be in a shared types file
 type CanvasRow = {
-  canvas_id: string;
-  workspace_id: string | null;
+  canvasId: string;
+  workspaceId: string | null;
   title: string | null;
   version: number;
-  state_json: string;
-  created_at: number;
-  updated_at: number;
+  stateJson: string;
+  createdAt: number;
+  updatedAt: number;
 };
 
 interface NodeLike {
@@ -75,9 +75,9 @@ export const migrationRoute: FastifyPluginAsync = async (fastify) => {
     const database = getCanvasDb();
     const row = database
       .prepare(
-        `SELECT canvas_id, workspace_id, title, version, state_json, created_at, updated_at
+        `SELECT canvasId, workspaceId, title, version, stateJson, createdAt, updatedAt
          FROM canvases
-         WHERE canvas_id = ?`,
+         WHERE canvasId = ?`,
       )
       .get(canvasId) as CanvasRow | undefined;
 
@@ -87,7 +87,7 @@ export const migrationRoute: FastifyPluginAsync = async (fastify) => {
 
     let state: Record<string, unknown>;
     try {
-      state = JSON.parse(row.state_json) as Record<string, unknown>;
+      state = JSON.parse(row.stateJson) as Record<string, unknown>;
     } catch {
       return reply.code(500).send({ message: 'Failed to parse canvas state' });
     }
@@ -122,7 +122,7 @@ export const migrationRoute: FastifyPluginAsync = async (fastify) => {
       state.storageConfig = targetConfig;
       database
         .prepare(
-          `UPDATE canvases SET state_json = ?, version = ?, updated_at = ? WHERE canvas_id = ?`,
+          `UPDATE canvases SET stateJson = ?, version = ?, updatedAt = ? WHERE canvasId = ?`,
         )
         .run(JSON.stringify(state), nextVersion, nowMs(), canvasId);
 
@@ -148,7 +148,9 @@ export const migrationRoute: FastifyPluginAsync = async (fastify) => {
       sourceRepo = await createRepositoryForConfig(fromConfig);
     } catch (error) {
       return reply.code(500).send({
-        message: `Failed to connect to source backend (${fromConfig.backend}): ${toMessage(error)}`,
+        message: `Failed to connect to source backend (${
+          fromConfig.backend
+        }): ${toMessage(error)}`,
       });
     }
 
@@ -156,7 +158,9 @@ export const migrationRoute: FastifyPluginAsync = async (fastify) => {
       targetRepo = await createRepositoryForConfig(targetConfig);
     } catch (error) {
       return reply.code(500).send({
-        message: `Failed to connect to target backend (${targetConfig.backend}): ${toMessage(error)}`,
+        message: `Failed to connect to target backend (${
+          targetConfig.backend
+        }): ${toMessage(error)}`,
       });
     }
 
@@ -181,26 +185,26 @@ export const migrationRoute: FastifyPluginAsync = async (fastify) => {
         }
 
         const existingInTarget = targetRepo.findSourceById(sourceId);
-        const metadata = source.meta_json
-          ? (JSON.parse(source.meta_json) as Record<string, unknown>)
+        const metadata = source.metaJson
+          ? (JSON.parse(source.metaJson) as Record<string, unknown>)
           : undefined;
 
         if (existingInTarget) {
           targetRepo.updateSource(sourceId, {
-            contentText: source.content_text,
-            contentHash: source.content_hash,
+            contentText: source.contentText,
+            contentHash: source.contentHash,
             title: source.title ?? undefined,
             metadata,
           });
         } else {
           targetRepo.createSource({
-            sourceId: source.source_id,
-            workspaceId: source.workspace_id,
+            sourceId: source.sourceId,
+            workspaceId: source.workspaceId,
             type: source.type,
             title: source.title ?? undefined,
-            uri: source.uri ?? undefined,
-            contentText: source.content_text,
-            contentHash: source.content_hash,
+            src: source.src ?? undefined,
+            contentText: source.contentText,
+            contentHash: source.contentHash,
             metadata,
           });
         }
@@ -234,7 +238,7 @@ export const migrationRoute: FastifyPluginAsync = async (fastify) => {
 
     database
       .prepare(
-        `UPDATE canvases SET state_json = ?, version = ?, updated_at = ? WHERE canvas_id = ?`,
+        `UPDATE canvases SET stateJson = ?, version = ?, updatedAt = ? WHERE canvasId = ?`,
       )
       .run(JSON.stringify(state), nextVersion, nowMs(), canvasId);
 

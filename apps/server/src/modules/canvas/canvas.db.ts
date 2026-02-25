@@ -19,13 +19,13 @@ function migrate(database: Database.Database): void {
 
   database.exec(`
     CREATE TABLE IF NOT EXISTS canvases (
-      canvas_id TEXT PRIMARY KEY,
-      workspace_id TEXT,
+      canvasId TEXT PRIMARY KEY,
+      workspaceId TEXT,
       title TEXT,
       version INTEGER NOT NULL,
-      state_json TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      stateJson TEXT NOT NULL,
+      createdAt INTEGER NOT NULL,
+      updatedAt INTEGER NOT NULL
     );
   `);
 }
@@ -38,7 +38,7 @@ const DEFAULT_CANVAS_ID = 'default-canvas';
  */
 function ensureDefaultCanvas(database: Database.Database): void {
   const row = database
-    .prepare('SELECT canvas_id FROM canvases WHERE canvas_id = ?')
+    .prepare('SELECT canvasId FROM canvases WHERE canvasId = ?')
     .get(DEFAULT_CANVAS_ID);
 
   if (!row) {
@@ -46,7 +46,7 @@ function ensureDefaultCanvas(database: Database.Database): void {
     database
       .prepare(
         `INSERT INTO canvases (
-          canvas_id, workspace_id, title, version, state_json, created_at, updated_at
+          canvasId, workspaceId, title, version, stateJson, createdAt, updatedAt
         ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(

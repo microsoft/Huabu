@@ -1,0 +1,91 @@
+/**
+ * Knowledge Store Types
+ * Shared types for knowledge base sources and revisions
+ */
+
+export type SourceType = 'web' | 'pdf' | 'note' | 'text';
+
+/**
+ * Source record - stores metadata and content for all data sources
+ */
+export interface Source {
+  sourceId: string;
+  workspaceId: string;
+  type: SourceType;
+  title: string | null;
+  src: string | null;
+  createdAt: number;
+  updatedAt: number;
+  contentText: string;
+  contentHash: string;
+  metaJson: string | null;
+}
+
+/**
+ * Source overview (excludes contentText for performance)
+ */
+export type SourceOverview = Omit<Source, 'contentText'>;
+
+/**
+ * Source revision record - stores version history for editable sources
+ */
+export interface SourceRevision {
+  revisionId: string;
+  workspaceId: string;
+  sourceId: string;
+  createdAt: number;
+  contentText: string;
+  contentHash: string;
+  metaJson: string | null;
+}
+
+/**
+ * Source metadata (parsed from metaJson)
+ */
+export interface SourceMetadata {
+  // Web-specific
+  author?: string;
+  publishDate?: string;
+  favicon?: string;
+  siteName?: string;
+  image?: string;
+  wordCount?: number;
+
+  // PDF-specific
+  pageCount?: number;
+  fileSize?: number;
+  createdDate?: string;
+
+  // Note-specific
+  tags?: string[];
+  lastEditor?: string;
+
+  // Extensible for future metadata
+  [key: string]: unknown;
+}
+
+/**
+ * Source creation input
+ */
+export interface CreateSourceInput {
+  sourceId: string;
+  workspaceId: string;
+  type: SourceType;
+  title?: string;
+  src?: string;
+  contentText?: string;
+  contentHash: string;
+  metadata?: SourceMetadata;
+}
+
+/**
+ * Source revision creation input
+ */
+export interface CreateRevisionInput {
+  revisionId: string;
+  workspaceId: string;
+  sourceId: string;
+  contentText?: string;
+  contentHash: string;
+  metadata?: SourceMetadata;
+}

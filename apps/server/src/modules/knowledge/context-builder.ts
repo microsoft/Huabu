@@ -1,6 +1,6 @@
 import { getKnowledgeRepository } from './knowledge.repository.js';
 
-import type { SourceRow, SourceRevisionRow } from './types.js';
+import type { Source, SourceRevision } from '@sediment/shared';
 
 /**
  * Source with its content for context building
@@ -9,7 +9,7 @@ export interface SourceWithContent {
   sourceId: string;
   type: 'web' | 'pdf' | 'note' | 'text';
   title?: string;
-  uri?: string;
+  src?: string;
   content: string;
   revisionId?: string;
   metadata?: Record<string, unknown>;
@@ -59,7 +59,7 @@ export async function buildContext(
       const revision = repository.findLatestRevision(sourceId);
       if (revision) {
         content = getContentFromRow(revision);
-        revisionId = revision.revision_id;
+        revisionId = revision.revisionId;
       } else {
         // No revision found, use source content (shouldn't happen normally)
         content = getContentFromRow(source);
@@ -70,13 +70,13 @@ export async function buildContext(
     }
 
     sources.push({
-      sourceId: source.source_id,
+      sourceId: source.sourceId,
       type: source.type as 'web' | 'pdf' | 'note' | 'text',
       title: source.title ?? undefined,
-      uri: source.uri ?? undefined,
+      src: source.src ?? undefined,
       content,
       revisionId,
-      metadata: includeMetadata ? parseMetadata(source.meta_json) : undefined,
+      metadata: includeMetadata ? parseMetadata(source.metaJson) : undefined,
     });
   }
 
@@ -92,8 +92,8 @@ export async function buildContext(
 /**
  * Get content from source or revision row
  */
-function getContentFromRow(row: SourceRow | SourceRevisionRow): string {
-  return row.content_text;
+function getContentFromRow(row: Source | SourceRevision): string {
+  return row.contentText;
 }
 
 /**
@@ -143,8 +143,8 @@ function formatContextString(sources: SourceWithContent[]): string {
       lines.push(`  title: ${source.title}`);
     }
 
-    if (source.uri) {
-      lines.push(`  uri: ${source.uri}`);
+    if (source.src) {
+      lines.push(`  src: ${source.src}`);
     }
 
     if (source.revisionId) {

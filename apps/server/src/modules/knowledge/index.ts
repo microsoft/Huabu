@@ -56,8 +56,6 @@ export {
 export type {
   SourceType,
   SourceOverview,
-  SourceRow,
-  SourceRevisionRow,
   SourceMetadata,
   CreateSourceInput,
   CreateRevisionInput,

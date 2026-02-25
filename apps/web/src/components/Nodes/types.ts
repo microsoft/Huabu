@@ -1,39 +1,19 @@
+import type {
+  CanvasNodeType,
+  NodeData,
+  NodeStyle,
+  NoteNodeData as SharedNoteNodeData,
+  TextNodeData as SharedTextNodeData,
+  WebNodeData as SharedWebNodeData,
+  PdfNodeData as SharedPdfNodeData,
+  VideoNodeData as SharedVideoNodeData,
+  ImageNodeData as SharedImageNodeData,
+  FrameNodeData as SharedFrameNodeData,
+} from '@sediment/shared';
 import type { Node } from '@xyflow/react';
 
-export type CanvasNodeType =
-  | 'note'
-  | 'text'
-  | 'image'
-  | 'pdf'
-  | 'video'
-  | 'web'
-  | 'frame';
-
-export type NodeStyle = {
-  backgroundColor?: string;
-  textColor?: string;
-  fontSize?: number;
-  fontFamily?: string;
-  fontWeight?: string;
-  fontStyle?: string;
-  textDecoration?: string; // 'underline' | 'line-through' | both
-  align?: 'top-left' | 'center';
-};
-
-export type NodeDataProps = {
-  src?: string;
-  content?: string;
-  label?: string;
-
-  // Populated after ingestion; used to look up stored snapshots.
-  sourceId?: string;
-
-  // for text node
-  style?: NodeStyle;
-
-  // for frame node
-  locked?: boolean;
-};
+// Re-export from shared for backwards compatibility
+export type { CanvasNodeType, NodeData, NodeStyle };
 
 export type CreateNodePayload = {
   src?: string;
@@ -42,10 +22,36 @@ export type CreateNodePayload = {
   height?: number;
 };
 
-export type CanvasNodeData = NodeDataProps & {
-  alt?: string;
+/**
+ * Canvas-specific node data types with index signatures for ReactFlow compatibility.
+ * ReactFlow requires Record<string, unknown> for node data.
+ */
+export type CanvasNoteNodeData = SharedNoteNodeData & {
+  [key: string]: unknown;
+};
+export type CanvasTextNodeData = SharedTextNodeData & {
+  [key: string]: unknown;
+};
+export type CanvasWebNodeData = SharedWebNodeData & { [key: string]: unknown };
+export type CanvasPdfNodeData = SharedPdfNodeData & { [key: string]: unknown };
+export type CanvasVideoNodeData = SharedVideoNodeData & {
+  [key: string]: unknown;
+};
+export type CanvasImageNodeData = SharedImageNodeData & {
+  [key: string]: unknown;
+};
+export type CanvasFrameNodeData = SharedFrameNodeData & {
+  [key: string]: unknown;
 };
 
-export type CanvasNode = Node<CanvasNodeData, CanvasNodeType> & {
-  isExpanded?: boolean;
-};
+/** Union type for all canvas node data */
+export type CanvasNodeData =
+  | CanvasNoteNodeData
+  | CanvasTextNodeData
+  | CanvasWebNodeData
+  | CanvasPdfNodeData
+  | CanvasVideoNodeData
+  | CanvasImageNodeData
+  | CanvasFrameNodeData;
+
+export type CanvasNode = Node<CanvasNodeData, CanvasNodeType>;

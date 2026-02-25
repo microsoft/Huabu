@@ -1,10 +1,10 @@
 import type {
   CreateRevisionInput,
   CreateSourceInput,
+  Source,
   SourceOverview,
-  SourceRevisionRow,
-  SourceRow,
-} from './types.js';
+  SourceRevision,
+} from '@sediment/shared';
 
 /**
  * Abstract interface for knowledge storage backends.
@@ -20,19 +20,19 @@ export interface IKnowledgeRepository {
   // ==================== Source Operations ====================
 
   /** Find source by ID */
-  findSourceById(sourceId: string): SourceRow | null;
+  findSourceById(sourceId: string): Source | null;
 
   /** Find source by workspace and content hash (for deduplication) */
-  findSourceByHash(workspaceId: string, contentHash: string): SourceRow | null;
+  findSourceByHash(workspaceId: string, contentHash: string): Source | null;
 
   /** Find all sources for a workspace */
-  findAllSources(workspaceId: string): SourceRow[];
+  findAllSources(workspaceId: string): Source[];
 
   /** Find all sources metadata for a workspace (excludes content) */
   findAllSourcesOverview(workspaceId: string): SourceOverview[];
 
   /** Create a new source record */
-  createSource(input: CreateSourceInput): SourceRow;
+  createSource(input: CreateSourceInput): Source;
 
   /** Update source content and metadata */
   updateSource(
@@ -43,27 +43,27 @@ export interface IKnowledgeRepository {
       title?: string;
       metadata?: Record<string, unknown>;
     },
-  ): SourceRow;
+  ): Source;
 
   // ==================== Revision Operations ====================
 
   /** Find latest revision for a source */
-  findLatestRevision(sourceId: string): SourceRevisionRow | null;
+  findLatestRevision(sourceId: string): SourceRevision | null;
 
   /** Find revision by ID */
-  findRevisionById(revisionId: string): SourceRevisionRow | null;
+  findRevisionById(revisionId: string): SourceRevision | null;
 
   /** Check if a revision with specific hash exists for a source */
   findRevisionByHash(
     sourceId: string,
     contentHash: string,
-  ): SourceRevisionRow | null;
+  ): SourceRevision | null;
 
   /** Create a new revision record */
-  createRevision(input: CreateRevisionInput): SourceRevisionRow;
+  createRevision(input: CreateRevisionInput): SourceRevision;
 
   /** Get all revisions for a source (for history view) */
-  findRevisionsBySourceId(sourceId: string): SourceRevisionRow[];
+  findRevisionsBySourceId(sourceId: string): SourceRevision[];
 
   // ==================== Transaction Support ====================
 

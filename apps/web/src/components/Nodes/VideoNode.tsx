@@ -6,10 +6,9 @@ import useCanvasStore from '@/store/canvasStore.ts';
 import { NodeWrapper } from './NodeWrapper.tsx';
 import { GhostButton } from '../Common/GhostButton.tsx';
 
-import type { NodeDataProps } from './types.ts';
+import type { CanvasVideoNodeData } from './types.ts';
 
-type VideoNodeData = NodeDataProps & {};
-export type VideoNodeType = Node<VideoNodeData, 'video'>;
+export type VideoNodeType = Node<CanvasVideoNodeData, 'video'>;
 
 export const VideoNode = ({ id, data, selected }: NodeProps<VideoNodeType>) => {
   const openExpanded = useCanvasStore((s) => s.openExpanded);

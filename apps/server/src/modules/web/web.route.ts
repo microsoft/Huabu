@@ -178,8 +178,8 @@ const webRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.code(404).send({ message: 'Source not ingested' });
       }
 
-      const meta = safeParseMetaJson(source.meta_json);
-      const uri = source.uri ?? '';
+      const meta = safeParseMetaJson(source.metaJson);
+      const uri = source.src ?? '';
 
       const hostname = (() => {
         try {
@@ -189,7 +189,7 @@ const webRoutes: FastifyPluginAsync = async (fastify) => {
         }
       })();
 
-      const contentText = (source.content_text ?? '').trim();
+      const contentText = (source.contentText ?? '').trim();
 
       const payload: WebPreviewResponse = {
         url: uri,
@@ -228,13 +228,13 @@ const webRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.code(404).send({ message: 'Source not ingested' });
       }
 
-      const markdown = (source.content_text ?? '').trim();
+      const markdown = (source.contentText ?? '').trim();
       if (!markdown) {
         return reply.code(404).send({ message: 'Source has no content yet' });
       }
 
-      const meta = safeParseMetaJson(source.meta_json);
-      const uri = source.uri ?? '';
+      const meta = safeParseMetaJson(source.metaJson);
+      const uri = source.src ?? '';
       const hostname = (() => {
         try {
           return new URL(uri).hostname;

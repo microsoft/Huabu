@@ -8,12 +8,9 @@ import { NodeWrapper } from './NodeWrapper.tsx';
 import useCanvasStore from '../../store/canvasStore.ts';
 import { GhostButton } from '../Common/GhostButton.tsx';
 
-import type { NodeDataProps } from './types.ts';
+import type { CanvasWebNodeData } from './types.ts';
 
-type WebNodeData = NodeDataProps & {
-  src: string;
-};
-export type WebNodeType = Node<WebNodeData, 'web'>;
+export type WebNodeType = Node<CanvasWebNodeData, 'web'>;
 
 export const WebNode = ({ id, data, selected }: NodeProps<WebNodeType>) => {
   const openExpanded = useCanvasStore((s) => s.openExpanded);

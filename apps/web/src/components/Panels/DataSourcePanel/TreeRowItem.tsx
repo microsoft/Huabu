@@ -81,8 +81,8 @@ export const TreeRowItem = React.memo(
     const bgColor = isSelected
       ? 'bg-theme-100'
       : isHighlighted
-        ? 'bg-theme-50'
-        : 'hover:bg-background';
+      ? 'bg-theme-50'
+      : 'hover:bg-background';
 
     const mergedStyle: React.CSSProperties = {
       ...style,
@@ -100,7 +100,9 @@ export const TreeRowItem = React.memo(
         {...(!isEditing ? dndListeners : {})}
         onClick={onClick}
         onDoubleClick={handleDoubleClick}
-        className={`flex h-9 w-full cursor-pointer touch-none items-center gap-2 bg-white px-2 ${className || ''}`}
+        className={`flex h-9 w-full cursor-pointer touch-none items-center gap-2 bg-white px-2 ${
+          className || ''
+        }`}
         {...rest}
       >
         <div

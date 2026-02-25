@@ -15,13 +15,13 @@ import type { KnowledgeStorageConfig } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
 type CanvasRow = {
-  canvas_id: string;
-  workspace_id: string | null;
+  canvasId: string;
+  workspaceId: string | null;
   title: string | null;
   version: number;
-  state_json: string;
-  created_at: number;
-  updated_at: number;
+  stateJson: string;
+  createdAt: number;
+  updatedAt: number;
 };
 
 function nowMs(): number {
@@ -33,19 +33,19 @@ function toMessage(error: unknown): string {
 }
 
 /**
- * Read the storageConfig from a canvas row's state_json and apply it
+ * Read the storageConfig from a canvas row's stateJson and apply it
  * so subsequent repository/service calls use the correct backend.
  */
 function applyStorageConfigFromCanvas(canvasId: string): void {
   const database = getCanvasDb();
   const row = database
-    .prepare('SELECT state_json FROM canvases WHERE canvas_id = ?')
-    .get(canvasId) as { state_json: string } | undefined;
+    .prepare('SELECT stateJson FROM canvases WHERE canvasId = ?')
+    .get(canvasId) as { stateJson: string } | undefined;
 
   if (!row) return;
 
   try {
-    const state = JSON.parse(row.state_json) as {
+    const state = JSON.parse(row.stateJson) as {
       storageConfig?: KnowledgeStorageConfig;
     };
     if (state.storageConfig) {
@@ -135,7 +135,7 @@ async function hydrateNodeContent(state: unknown): Promise<unknown> {
     // Fall back to contentSnapshot when the source cannot be found
     // (e.g. after switching storage backends without migrating).
     const content =
-      source?.content_text ??
+      source?.contentText ??
       (node.data?.contentSnapshot as string | undefined) ??
       '';
 
@@ -194,11 +194,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
     // Get canvas to determine workspaceId
     const canvasRow = database
-      .prepare('SELECT workspace_id FROM canvases WHERE canvas_id = ?')
-      .get(canvasId) as { workspace_id: string | null } | undefined;
+      .prepare('SELECT workspaceId FROM canvases WHERE canvasId = ?')
+      .get(canvasId) as { workspaceId: string | null } | undefined;
 
     const resolvedWorkspaceId =
-      workspaceId ?? canvasRow?.workspace_id ?? 'default';
+      workspaceId ?? canvasRow?.workspaceId ?? 'default';
 
     const ingestService = await getIngestService();
 
@@ -263,9 +263,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
       const row = database
         .prepare(
-          `SELECT canvas_id, workspace_id, title, version, state_json, created_at, updated_at
+          `SELECT canvasId, workspaceId, title, version, stateJson, createdAt, updatedAt
            FROM canvases
-           WHERE canvas_id = ?`,
+           WHERE canvasId = ?`,
         )
         .get(canvasId) as CanvasRow | undefined;
 
@@ -275,9 +275,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
       let state: unknown;
       try {
-        state = JSON.parse(row.state_json) as unknown;
+        state = JSON.parse(row.stateJson) as unknown;
       } catch {
-        state = row.state_json;
+        state = row.stateJson;
       }
 
       // Hydrate node content from knowledge DB so clients always get fresh data
@@ -285,7 +285,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       state = await hydrateNodeContent(state);
 
       return reply.send({
-        canvasId: row.canvas_id,
+        canvasId: row.canvasId,
         version: row.version,
         state,
       });
@@ -306,9 +306,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       const database = getCanvasDb();
       const existing = database
         .prepare(
-          `SELECT canvas_id, workspace_id, title, version, state_json, created_at, updated_at
+          `SELECT canvasId, workspaceId, title, version, stateJson, createdAt, updatedAt
            FROM canvases
-           WHERE canvas_id = ?`,
+           WHERE canvasId = ?`,
         )
         .get(canvasId) as CanvasRow | undefined;
 
@@ -331,7 +331,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         database
           .prepare(
             `INSERT INTO canvases (
-              canvas_id, workspace_id, title, version, state_json, created_at, updated_at
+              canvasId, workspaceId, title, version, stateJson, createdAt, updatedAt
             ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
@@ -347,12 +347,12 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         database
           .prepare(
             `UPDATE canvases
-             SET workspace_id = COALESCE(?, workspace_id),
+             SET workspaceId = COALESCE(?, workspaceId),
                  title = COALESCE(?, title),
                  version = ?,
-                 state_json = ?,
-                 updated_at = ?
-             WHERE canvas_id = ?`,
+                 stateJson = ?,
+                 updatedAt = ?
+             WHERE canvasId = ?`,
           )
           .run(
             workspaceId ?? null,

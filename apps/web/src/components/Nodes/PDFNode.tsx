@@ -1,9 +1,4 @@
-import {
-  type Node,
-  type NodeProps,
-  useReactFlow,
-  useStore,
-} from '@xyflow/react';
+import { type Node, type NodeProps, useReactFlow } from '@xyflow/react';
 import { clsx } from 'clsx';
 import {
   FileText,
@@ -22,18 +17,11 @@ import { NodeWrapper } from './NodeWrapper.tsx';
 import useCanvasStore from '../../store/canvasStore.ts';
 import { GhostButton } from '../Common/GhostButton.tsx';
 
-import type { NodeDataProps } from './types.ts';
+import type { CanvasPdfNodeData } from './types.ts';
 
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
-type PDFNodeData = NodeDataProps & {
-  src: string;
-  label?: string;
-};
-type CustomPDFNode = Node<PDFNodeData, 'pdf'> & {
-  isExpanded?: boolean;
-};
-export type PDFNodeType = CustomPDFNode;
+export type PDFNodeType = Node<CanvasPdfNodeData, 'pdf'>;
 
 export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
   const { setNodes } = useReactFlow();
@@ -42,15 +30,7 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [numPages, setNumPages] = useState<number | null>(null);
 
-  const isExpanded = useStore(
-    useCallback(
-      (state) => {
-        const node = state.nodeLookup?.get(id);
-        return (node as CustomPDFNode)?.isExpanded ?? true;
-      },
-      [id],
-    ),
-  );
+  const isExpanded = data.isExpanded ?? true;
 
   const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
     setNumPages(numPages);
@@ -79,7 +59,10 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
           if (node.id === id) {
             return {
               ...node,
-              isExpanded: newExpandedState,
+              data: {
+                ...node.data,
+                isExpanded: newExpandedState,
+              },
               style: {
                 ...node.style,
                 width: newExpandedState ? 400 : 260,

@@ -79,7 +79,6 @@ type RFState = {
   updateNodeData: (nodeId: string, patch: Record<string, unknown>) => void;
   updateNodeDataLocal: (nodeId: string, patch: Record<string, unknown>) => void;
 
-  getSelectedNodeIds: () => string[];
   setSelectedNodes: (ids: string[], multiSelect?: boolean) => void;
 
   reorderNodes: (activeId: string, overId: string) => void;
