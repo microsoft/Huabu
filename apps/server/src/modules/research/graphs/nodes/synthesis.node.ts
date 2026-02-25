@@ -86,9 +86,9 @@ export async function synthesisNode(
     // Create synthesis node
     const { nodeId } = await canvasService.createNode({
       canvasId: state.canvasId,
-      type: 'note',
       position,
       data: {
+        type: 'note',
         content: synthesis,
         label: `💡 Synthesis: ${state.query.slice(0, 30)}...`,
         origin: 'research',

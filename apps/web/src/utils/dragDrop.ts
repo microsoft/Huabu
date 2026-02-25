@@ -1,6 +1,6 @@
 export const SEDIMENT_DND_MIME = 'application/x-sediment-dnd';
 
-// TODO: the attribute data should be consistent with NodeDataProps
+// TODO: the attribute data should be consistent with NodeData
 export type WebDragPayload = {
   kind: 'web';
   data: {

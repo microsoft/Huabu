@@ -6,10 +6,9 @@ import useCanvasStore from '@/store/canvasStore.ts';
 import { NodeWrapper } from './NodeWrapper.tsx';
 import { GhostButton } from '../Common/GhostButton.tsx';
 
-import type { NodeDataProps } from './types.ts';
+import type { CanvasImageNodeData } from './types.ts';
 
-type ImageNodeData = NodeDataProps & {};
-export type ImageNodeType = Node<ImageNodeData, 'image'>;
+export type ImageNodeType = Node<CanvasImageNodeData, 'image'>;
 
 export const ImageNode = ({ id, data, selected }: NodeProps<ImageNodeType>) => {
   const openExpanded = useCanvasStore((s) => s.openExpanded);

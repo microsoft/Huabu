@@ -7,10 +7,9 @@ import { NodeWrapper } from './NodeWrapper.tsx';
 import useCanvasStore from '../../store/canvasStore.ts';
 import { GhostButton } from '../Common/GhostButton.tsx';
 
-import type { NodeDataProps } from './types.ts';
+import type { CanvasFrameNodeData } from './types.ts';
 
-type FrameNodeData = NodeDataProps & {};
-export type FrameNodeType = Node<FrameNodeData, 'frame'>;
+export type FrameNodeType = Node<CanvasFrameNodeData, 'frame'>;
 
 export const FrameNode = ({ id, data, selected }: NodeProps<FrameNodeType>) => {
   const unframe = useCanvasStore((state) => state.unframe);

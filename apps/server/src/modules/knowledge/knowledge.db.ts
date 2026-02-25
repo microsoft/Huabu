@@ -23,48 +23,48 @@ function migrate(database: Database.Database): void {
   database.exec(`
     -- Sources table: stores metadata and current content snapshot for all data sources
     CREATE TABLE IF NOT EXISTS sources (
-      source_id TEXT PRIMARY KEY,
-      workspace_id TEXT NOT NULL,
+      sourceId TEXT PRIMARY KEY,
+      workspaceId TEXT NOT NULL,
       type TEXT NOT NULL CHECK(type IN ('web', 'pdf', 'note', 'text')),
       title TEXT,
-      uri TEXT,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      content_text TEXT NOT NULL,
-      content_hash TEXT NOT NULL,
-      meta_json TEXT
+      src TEXT,
+      createdAt INTEGER NOT NULL,
+      updatedAt INTEGER NOT NULL,
+      contentText TEXT NOT NULL,
+      contentHash TEXT NOT NULL,
+      metaJson TEXT
     );
 
     -- Source revisions table: stores version history for editable sources (note/text)
     CREATE TABLE IF NOT EXISTS source_revisions (
-      revision_id TEXT PRIMARY KEY,
-      workspace_id TEXT NOT NULL,
-      source_id TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      content_text TEXT NOT NULL,
-      content_hash TEXT NOT NULL,
-      meta_json TEXT,
-      FOREIGN KEY (source_id) REFERENCES sources(source_id) ON DELETE CASCADE
+      revisionId TEXT PRIMARY KEY,
+      workspaceId TEXT NOT NULL,
+      sourceId TEXT NOT NULL,
+      createdAt INTEGER NOT NULL,
+      contentText TEXT NOT NULL,
+      contentHash TEXT NOT NULL,
+      metaJson TEXT,
+      FOREIGN KEY (sourceId) REFERENCES sources(sourceId) ON DELETE CASCADE
     );
 
     -- Indexes for efficient queries
-    CREATE INDEX IF NOT EXISTS idx_sources_workspace_id
-      ON sources(workspace_id);
+    CREATE INDEX IF NOT EXISTS idx_sources_workspaceId
+      ON sources(workspaceId);
 
     CREATE INDEX IF NOT EXISTS idx_sources_type
       ON sources(type);
 
-    CREATE INDEX IF NOT EXISTS idx_sources_content_hash
-      ON sources(content_hash);
+    CREATE INDEX IF NOT EXISTS idx_sources_contentHash
+      ON sources(contentHash);
 
-    CREATE INDEX IF NOT EXISTS idx_revisions_source_id
-      ON source_revisions(source_id);
+    CREATE INDEX IF NOT EXISTS idx_revisions_sourceId
+      ON source_revisions(sourceId);
 
-    CREATE INDEX IF NOT EXISTS idx_revisions_created_at
-      ON source_revisions(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_revisions_createdAt
+      ON source_revisions(createdAt DESC);
 
     CREATE INDEX IF NOT EXISTS idx_revisions_workspace_source
-      ON source_revisions(workspace_id, source_id);
+      ON source_revisions(workspaceId, sourceId);
   `);
 }
 

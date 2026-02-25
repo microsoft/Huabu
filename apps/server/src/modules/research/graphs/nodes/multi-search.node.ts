@@ -76,12 +76,12 @@ export async function multiSearchNode(
         // Create web node with proper size
         const { nodeId } = await canvasService.createNode({
           canvasId: state.canvasId,
-          type: 'web',
           position: {
             x: currentPosition.x + (i % 3) * spacing,
             y: currentPosition.y + Math.floor(i / 3) * 250,
           },
           data: {
+            type: 'web',
             src: result.url,
             label: result.title,
             origin: 'research',

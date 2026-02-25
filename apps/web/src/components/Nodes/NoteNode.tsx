@@ -10,12 +10,9 @@ import useCanvasStore from '../../store/canvasStore.ts';
 import { copyToClipboard } from '../../utils/clipboard.ts';
 import { GhostButton } from '../Common/GhostButton.tsx';
 
-import type { NodeDataProps } from './types.ts';
+import type { CanvasNoteNodeData } from './types.ts';
 
-type NoteNodeData = NodeDataProps & {
-  content?: string;
-};
-export type NoteNodeType = Node<NoteNodeData, 'note'>;
+export type NoteNodeType = Node<CanvasNoteNodeData, 'note'>;
 
 export const NoteNode = ({ id, data, selected }: NodeProps<NoteNodeType>) => {
   const [copied, setCopied] = useState(false);

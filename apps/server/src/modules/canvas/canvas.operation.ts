@@ -15,7 +15,6 @@ import type {
   CreateNodeParams,
   CreateNodeResult,
   CreateFrameParams,
-  CreateFrameResult,
   CreateEdgeParams,
   CreateEdgeResult,
   UpdateCanvasStateParams,
@@ -41,8 +40,8 @@ export class CanvasOperationService {
   }> {
     const db = getCanvasDb();
     const row = db
-      .prepare('SELECT state_json, version FROM canvases WHERE canvas_id = ?')
-      .get(canvasId) as { state_json: string; version: number } | undefined;
+      .prepare('SELECT stateJson, version FROM canvases WHERE canvasId = ?')
+      .get(canvasId) as { stateJson: string; version: number } | undefined;
 
     if (!row) {
       // Canvas doesn't exist, return empty state
@@ -50,7 +49,7 @@ export class CanvasOperationService {
     }
 
     try {
-      const state = JSON.parse(row.state_json) as {
+      const state = JSON.parse(row.stateJson) as {
         nodes?: Array<Record<string, unknown>>;
         edges?: Array<Record<string, unknown>>;
       };
@@ -81,14 +80,14 @@ export class CanvasOperationService {
 
     // Check if canvas exists
     const existing = db
-      .prepare('SELECT canvas_id FROM canvases WHERE canvas_id = ?')
+      .prepare('SELECT canvasId FROM canvases WHERE canvasId = ?')
       .get(canvasId);
 
     if (!existing) {
       // Insert new canvas
       db.prepare(
         `INSERT INTO canvases (
-          canvas_id, workspace_id, title, version, state_json, created_at, updated_at
+          canvasId, workspaceId, title, version, stateJson, createdAt, updatedAt
         ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         canvasId,
@@ -103,10 +102,10 @@ export class CanvasOperationService {
       // Update existing canvas
       db.prepare(
         `UPDATE canvases
-         SET state_json = ?,
+         SET stateJson = ?,
              version = ?,
-             updated_at = ?
-         WHERE canvas_id = ?`,
+             updatedAt = ?
+         WHERE canvasId = ?`,
       ).run(stateJson, nextVersion, timestamp, canvasId);
     }
 
@@ -117,7 +116,7 @@ export class CanvasOperationService {
    * Create a new node on the canvas
    */
   async createNode(params: CreateNodeParams): Promise<CreateNodeResult> {
-    const { canvasId, type, position, data, size } = params;
+    const { canvasId, position, data, size } = params;
 
     const nodeId = createId('node');
 
@@ -127,7 +126,7 @@ export class CanvasOperationService {
     // Create node object (ReactFlow format)
     const newNode = {
       id: nodeId,
-      type,
+      type: data.type,
       position,
       data,
       width: size?.width,
@@ -149,7 +148,7 @@ export class CanvasOperationService {
     console.log('[CanvasOperationService.createNode] Created node:', {
       nodeId,
       canvasId,
-      type,
+      type: data.type,
       position,
     });
 
@@ -159,7 +158,7 @@ export class CanvasOperationService {
   /**
    * Create a frame to group nodes
    */
-  async createFrame(params: CreateFrameParams): Promise<CreateFrameResult> {
+  async createFrame(params: CreateFrameParams): Promise<CreateNodeResult> {
     const { canvasId, label, childNodeIds, position, data, size } = params;
 
     const frameId = createId('frame');
@@ -262,7 +261,7 @@ export class CanvasOperationService {
       childNodeIds,
     });
 
-    return { frameId };
+    return { nodeId: frameId };
   }
 
   /**
@@ -320,14 +319,14 @@ export class CanvasOperationService {
     // Get existing canvas state to calculate bounds
     const db = getCanvasDb();
     const row = db
-      .prepare('SELECT state_json FROM canvases WHERE canvas_id = ?')
-      .get(params.canvasId) as { state_json: string } | undefined;
+      .prepare('SELECT stateJson FROM canvases WHERE canvasId = ?')
+      .get(params.canvasId) as { stateJson: string } | undefined;
 
     let existingBounds: Bounds | null = null;
 
     if (row) {
       try {
-        const state = JSON.parse(row.state_json) as { nodes?: unknown[] };
+        const state = JSON.parse(row.stateJson) as { nodes?: unknown[] };
         if (Array.isArray(state.nodes) && state.nodes.length > 0) {
           // TODO: calculateCanvasBounds with proper types
           existingBounds = { minX: 0, minY: 0, maxX: 800, maxY: 600 };

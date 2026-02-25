@@ -1,0 +1,82 @@
+/**
+ * Canvas Types - Unified Exports
+ *
+ * This module provides a clean interface to all canvas-related types.
+ * Types are organized into logical modules:
+ * - node.ts: Node data structures and type guards
+ * - edge.ts: Edge types and styling
+ * - source.ts: Knowledge source and ingestion types
+ * - layout.ts: Layout calculation types
+ * - operation.ts: Canvas operation types (for programmatic manipulation)
+ * - canvas-api.ts: REST API request/response types
+ */
+
+// Node types
+export type {
+  CanvasNodeType,
+  NodeOrigin,
+  NodeResearchData,
+  NodeStyle,
+  BaseNodeData,
+  NoteNodeData,
+  TextNodeData,
+  WebNodeData,
+  PdfNodeData,
+  VideoNodeData,
+  ImageNodeData,
+  FrameNodeData,
+  NodeData,
+} from './node.js';
+
+export {
+  isNoteNode,
+  isTextNode,
+  isMediaNode,
+  isFrameNode,
+  hasSourceId,
+} from './node.js';
+
+// Edge types
+export type { EdgeStyle } from './edge.js';
+
+// Source types
+export type {
+  KnowledgeStorageBackend,
+  KnowledgeStorageConfig,
+  UpsertNodeRequest,
+  UpsertNodeResponse,
+  DeleteNodeResponse,
+  MigrateStorageRequest,
+  MigrateStorageNodeResult,
+  MigrateStorageResponse,
+} from './source.js';
+
+// Layout types
+export type {
+  Point,
+  Bounds,
+  LayoutStrategy,
+  LayoutConfig,
+  PlacementStrategy,
+  CalculateLayoutParams,
+  LayoutResult,
+} from './layout.js';
+
+// Operation types
+export type {
+  CreateNodeParams,
+  CreateNodeResult,
+  CreateFrameParams,
+  CreateEdgeParams,
+  CreateEdgeResult,
+} from './operation.js';
+
+// Canvas API types
+export type {
+  GetCanvasResponse,
+  PutCanvasRequest,
+  PutCanvasResponse,
+  CanvasVersionMismatchError,
+  UpdateCanvasStateParams,
+  UpdateCanvasStateResult,
+} from './canvas-api.js';

@@ -1,17 +1,6 @@
 import { API_CONFIG } from '../config/api';
 
-export interface Source {
-  sourceId: string;
-  workspaceId: string;
-  type: 'web' | 'pdf' | 'note' | 'text';
-  title: string | null;
-  src: string | null;
-  createdAt: number;
-  updatedAt: number;
-  content: string; // was content_text
-  contentHash: string;
-  metaJson: string | null;
-}
+import type { Source } from '@sediment/shared';
 
 export async function getSources(
   workspaceId: string = 'default',

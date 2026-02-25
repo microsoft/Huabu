@@ -5,11 +5,11 @@ import React, { memo } from 'react';
 
 import useCanvasStore from '@/store/canvasStore.ts';
 
-import type { CanvasNodeType, NodeDataProps } from './types.ts';
+import type { CanvasNodeType, NodeData } from './types.ts';
 
 interface NodeWrapperProps {
   id: string;
-  data: NodeDataProps;
+  data: NodeData;
   type: CanvasNodeType;
   selected?: boolean;
 
@@ -85,8 +85,8 @@ export const NodeWrapper = memo(
         <div
           className={clsx(
             'group relative flex h-full w-full flex-col rounded border-0 transition-all duration-120',
-            data.style?.backgroundColor
-              ? data.style?.backgroundColor
+            'style' in data && data.style?.backgroundColor
+              ? data.style.backgroundColor
               : 'bg-transparent',
             selected ? 'ring-theme-500 ring' : 'ring-border hover:ring',
             // Research node visual identifier: left purple border

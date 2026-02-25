@@ -12,7 +12,7 @@ import {
 } from './utils.js';
 
 import type { IKnowledgeRepository } from './knowledge.interface.js';
-import type { SourceMetadata, SourceRow, SourceType } from './types.js';
+import type { Source, SourceMetadata, SourceType } from '@sediment/shared';
 
 /**
  * Input for Text/Note source ingestion
@@ -37,7 +37,7 @@ export interface IngestTextSourceInput {
 export interface IngestWebSourceInput {
   workspaceId: string;
   nodeId: string;
-  uri: string;
+  src: string;
   title?: string;
   /**
    * Optional: pre-fetched content from frontend
@@ -67,7 +67,7 @@ export interface IngestPdfSourceInput {
  * Result of source ingestion
  */
 export interface IngestSourceResult {
-  source: SourceRow;
+  source: Source;
   revisionId?: string;
   isNew: boolean;
   contentChanged: boolean;
@@ -117,13 +117,13 @@ export class IngestService {
     workspaceId: string;
     type: 'note' | 'text' | 'web' | 'pdf';
     title?: string;
-    uri?: string;
+    src?: string;
     ingestError?: NodeIngestError;
     extraMetadata?: Record<string, unknown>;
   }): void {
     const existing = this.repository.findSourceById(params.sourceId);
     const metadata: Record<string, unknown> = {
-      ...(existing ? this.safeParseMeta(existing.meta_json) : {}),
+      ...(existing ? this.safeParseMeta(existing.metaJson) : {}),
       ...(params.extraMetadata ?? {}),
       placeholder: true,
       ingestError: params.ingestError,
@@ -142,7 +142,7 @@ export class IngestService {
       workspaceId: params.workspaceId,
       type: params.type,
       title: params.title,
-      uri: params.uri,
+      src: params.src,
       contentText: '',
       contentHash: computeContentHash(''),
       metadata,
@@ -199,7 +199,7 @@ export class IngestService {
           existingSourceId: existingSourceId ?? undefined,
         });
         return {
-          sourceId: result.source.source_id,
+          sourceId: result.source.sourceId,
           success: true,
           title: result.source.title ?? undefined,
         };
@@ -245,7 +245,7 @@ export class IngestService {
         workspaceId,
         type: 'web',
         title,
-        uri: normalizedUri,
+        src: normalizedUri,
         ingestError,
       });
       return { sourceId, success: false, error: ingestError };
@@ -255,12 +255,12 @@ export class IngestService {
       const result = await this.ingestWebSource({
         workspaceId,
         nodeId,
-        uri,
+        src: uri,
         title,
         content,
       });
       return {
-        sourceId: result.source.source_id,
+        sourceId: result.source.sourceId,
         success: true,
         title: result.source.title ?? undefined,
       };
@@ -282,7 +282,7 @@ export class IngestService {
         workspaceId,
         type: 'web',
         title,
-        uri: normalizedUri,
+        src: normalizedUri,
         ingestError,
       });
       return { sourceId, success: false, error: ingestError };
@@ -335,7 +335,7 @@ export class IngestService {
         workspaceId,
         type: 'pdf',
         title,
-        uri: artifactUri || undefined,
+        src: artifactUri || undefined,
         ingestError,
         extraMetadata: {
           originalArtifactUri: artifactUri,
@@ -379,7 +379,7 @@ export class IngestService {
         title,
       });
       return {
-        sourceId: result.source.source_id,
+        sourceId: result.source.sourceId,
         success: true,
         title: result.source.title ?? undefined,
       };
@@ -412,22 +412,22 @@ export class IngestService {
    */
   private createOrUpdateSource(params: {
     sourceId: string;
-    existingSource: SourceRow | null;
+    existingSource: Source | null;
     workspaceId: string;
     type: SourceType;
     title?: string;
-    uri?: string;
+    src?: string;
     contentText: string | undefined;
     contentHash: string;
     metadata?: SourceMetadata;
-  }): { source: SourceRow; isNew: boolean } {
+  }): { source: Source; isNew: boolean } {
     const {
       sourceId,
       existingSource,
       workspaceId,
       type,
       title,
-      uri,
+      src,
       contentText,
       contentHash,
       metadata,
@@ -449,7 +449,7 @@ export class IngestService {
         workspaceId,
         type,
         title,
-        uri,
+        src,
         contentText,
         contentHash,
         metadata,
@@ -495,7 +495,7 @@ export class IngestService {
     const existingSource = this.repository.findSourceById(sourceId);
 
     // Check if content actually changed
-    if (existingSource && existingSource.content_hash === contentHash) {
+    if (existingSource && existingSource.contentHash === contentHash) {
       // Content unchanged, no need to create new revision
       return {
         source: existingSource,
@@ -555,7 +555,7 @@ export class IngestService {
     input: IngestWebSourceInput,
   ): Promise<IngestSourceResult> {
     // Normalize URI for consistent sourceId generation
-    const normalizedUri = normalizeUrl(input.uri);
+    const normalizedUri = normalizeUrl(input.src);
 
     // Generate deterministic sourceId
     const sourceId = generateSourceId({
@@ -569,7 +569,7 @@ export class IngestService {
       content,
       title,
       metadata: loadedMeta,
-    } = await loader.load(input.uri, {
+    } = await loader.load(input.src, {
       content: input.content,
       title: input.title,
       metadata: input.metadata,
@@ -580,7 +580,7 @@ export class IngestService {
 
     // Check if source already exists with same content
     const existingSource = this.repository.findSourceById(sourceId);
-    if (existingSource && existingSource.content_hash === contentHash) {
+    if (existingSource && existingSource.contentHash === contentHash) {
       // Content unchanged, no need to update
       return {
         source: existingSource,
@@ -599,7 +599,7 @@ export class IngestService {
       workspaceId: input.workspaceId,
       type: 'web',
       title,
-      uri: normalizedUri,
+      src: normalizedUri,
       contentText,
       contentHash,
       metadata,
@@ -650,7 +650,7 @@ export class IngestService {
 
     // Check if source already exists with same content
     const existingSource = this.repository.findSourceById(sourceId);
-    if (existingSource && existingSource.content_hash === contentHash) {
+    if (existingSource && existingSource.contentHash === contentHash) {
       // Content unchanged, no need to update
       return {
         source: existingSource,
@@ -676,7 +676,7 @@ export class IngestService {
       workspaceId: input.workspaceId,
       type: 'pdf',
       title,
-      uri: input.artifactUri,
+      src: input.artifactUri,
       contentText: content,
       contentHash,
       metadata,
@@ -711,7 +711,7 @@ export class IngestService {
    * Useful for building LLM context
    */
   getSourceWithLatestRevision(sourceId: string): {
-    source: SourceRow;
+    source: Source;
     latestRevision?: {
       revisionId: string;
       content: string;
@@ -728,9 +728,9 @@ export class IngestService {
         return {
           source,
           latestRevision: {
-            revisionId: revision.revision_id,
-            content: revision.content_text,
-            createdAt: revision.created_at,
+            revisionId: revision.revisionId,
+            content: revision.contentText,
+            createdAt: revision.createdAt,
           },
         };
       }
@@ -739,11 +739,11 @@ export class IngestService {
     // For non-editable types or if no revision, use source content
     return {
       source,
-      latestRevision: source.content_text
+      latestRevision: source.contentText
         ? {
             revisionId: 'current', // Placeholder for non-revisioned types
-            content: source.content_text,
-            createdAt: source.updated_at,
+            content: source.contentText,
+            createdAt: source.updatedAt,
           }
         : undefined,
     };

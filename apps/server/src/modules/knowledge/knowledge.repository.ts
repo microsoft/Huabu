@@ -4,10 +4,10 @@ import type { IKnowledgeRepository } from './knowledge.interface.js';
 import type {
   CreateRevisionInput,
   CreateSourceInput,
+  Source,
   SourceOverview,
-  SourceRevisionRow,
-  SourceRow,
-} from './types.js';
+  SourceRevision,
+} from '@sediment/shared';
 import type { KnowledgeStorageConfig } from '@sediment/shared';
 import type Database from 'better-sqlite3';
 
@@ -27,9 +27,9 @@ export class KnowledgeRepository implements IKnowledgeRepository {
   /**
    * Find source by ID
    */
-  findSourceById(sourceId: string): SourceRow | null {
-    const stmt = this.db.prepare<[string], SourceRow>(
-      'SELECT * FROM sources WHERE source_id = ?',
+  findSourceById(sourceId: string): Source | null {
+    const stmt = this.db.prepare<[string], Source>(
+      'SELECT * FROM sources WHERE sourceId = ?',
     );
     return stmt.get(sourceId) ?? null;
   }
@@ -38,9 +38,9 @@ export class KnowledgeRepository implements IKnowledgeRepository {
    * Find source by workspace and content hash
    * Useful for deduplication (e.g., same web URL)
    */
-  findSourceByHash(workspaceId: string, contentHash: string): SourceRow | null {
-    const stmt = this.db.prepare<[string, string], SourceRow>(
-      'SELECT * FROM sources WHERE workspace_id = ? AND content_hash = ?',
+  findSourceByHash(workspaceId: string, contentHash: string): Source | null {
+    const stmt = this.db.prepare<[string, string], Source>(
+      'SELECT * FROM sources WHERE workspaceId = ? AND contentHash = ?',
     );
     return stmt.get(workspaceId, contentHash) ?? null;
   }
@@ -48,9 +48,9 @@ export class KnowledgeRepository implements IKnowledgeRepository {
   /**
    * Find all sources for a workspace
    */
-  findAllSources(workspaceId: string): SourceRow[] {
-    const stmt = this.db.prepare<[string], SourceRow>(
-      'SELECT * FROM sources WHERE workspace_id = ?',
+  findAllSources(workspaceId: string): Source[] {
+    const stmt = this.db.prepare<[string], Source>(
+      'SELECT * FROM sources WHERE workspaceId = ?',
     );
     return stmt.all(workspaceId);
   }
@@ -61,9 +61,9 @@ export class KnowledgeRepository implements IKnowledgeRepository {
   findAllSourcesOverview(workspaceId: string): SourceOverview[] {
     const stmt = this.db.prepare<[string], SourceOverview>(
       `SELECT 
-        source_id, workspace_id, type, title, uri, 
-        created_at, updated_at, content_hash, meta_json 
-       FROM sources WHERE workspace_id = ?`,
+        sourceId, workspaceId, type, title, src, 
+        createdAt, updatedAt, contentHash, metaJson 
+       FROM sources WHERE workspaceId = ?`,
     );
     return stmt.all(workspaceId);
   }
@@ -71,15 +71,15 @@ export class KnowledgeRepository implements IKnowledgeRepository {
   /**
    * Create a new source record
    */
-  createSource(input: CreateSourceInput): SourceRow {
+  createSource(input: CreateSourceInput): Source {
     const now = Date.now();
     const metaJson = input.metadata ? JSON.stringify(input.metadata) : null;
 
     const stmt = this.db.prepare(`
       INSERT INTO sources (
-        source_id, workspace_id, type, title, uri,
-        created_at, updated_at,
-        content_text, content_hash, meta_json
+        sourceId, workspaceId, type, title, src,
+        createdAt, updatedAt,
+        contentText, contentHash, metaJson
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
@@ -88,7 +88,7 @@ export class KnowledgeRepository implements IKnowledgeRepository {
       input.workspaceId,
       input.type,
       input.title ?? null,
-      input.uri ?? null,
+      input.src ?? null,
       now,
       now,
       input.contentText ?? '',
@@ -115,18 +115,18 @@ export class KnowledgeRepository implements IKnowledgeRepository {
       title?: string;
       metadata?: Record<string, unknown>;
     },
-  ): SourceRow {
+  ): Source {
     const now = Date.now();
     const metaJson = updates.metadata ? JSON.stringify(updates.metadata) : null;
 
     const stmt = this.db.prepare(`
       UPDATE sources
-      SET content_text = COALESCE(?, content_text),
-          content_hash = COALESCE(?, content_hash),
+      SET contentText = COALESCE(?, contentText),
+          contentHash = COALESCE(?, contentHash),
           title = COALESCE(?, title),
-          meta_json = COALESCE(?, meta_json),
-          updated_at = ?
-      WHERE source_id = ?
+          metaJson = COALESCE(?, metaJson),
+          updatedAt = ?
+      WHERE sourceId = ?
     `);
 
     stmt.run(
@@ -150,11 +150,11 @@ export class KnowledgeRepository implements IKnowledgeRepository {
   /**
    * Find latest revision for a source
    */
-  findLatestRevision(sourceId: string): SourceRevisionRow | null {
-    const stmt = this.db.prepare<[string], SourceRevisionRow>(`
+  findLatestRevision(sourceId: string): SourceRevision | null {
+    const stmt = this.db.prepare<[string], SourceRevision>(`
       SELECT * FROM source_revisions
-      WHERE source_id = ?
-      ORDER BY created_at DESC
+      WHERE sourceId = ?
+      ORDER BY createdAt DESC
       LIMIT 1
     `);
     return stmt.get(sourceId) ?? null;
@@ -163,9 +163,9 @@ export class KnowledgeRepository implements IKnowledgeRepository {
   /**
    * Find revision by ID
    */
-  findRevisionById(revisionId: string): SourceRevisionRow | null {
-    const stmt = this.db.prepare<[string], SourceRevisionRow>(
-      'SELECT * FROM source_revisions WHERE revision_id = ?',
+  findRevisionById(revisionId: string): SourceRevision | null {
+    const stmt = this.db.prepare<[string], SourceRevision>(
+      'SELECT * FROM source_revisions WHERE revisionId = ?',
     );
     return stmt.get(revisionId) ?? null;
   }
@@ -177,11 +177,11 @@ export class KnowledgeRepository implements IKnowledgeRepository {
   findRevisionByHash(
     sourceId: string,
     contentHash: string,
-  ): SourceRevisionRow | null {
-    const stmt = this.db.prepare<[string, string], SourceRevisionRow>(`
+  ): SourceRevision | null {
+    const stmt = this.db.prepare<[string, string], SourceRevision>(`
       SELECT * FROM source_revisions
-      WHERE source_id = ? AND content_hash = ?
-      ORDER BY created_at DESC
+      WHERE sourceId = ? AND contentHash = ?
+      ORDER BY createdAt DESC
       LIMIT 1
     `);
     return stmt.get(sourceId, contentHash) ?? null;
@@ -190,14 +190,14 @@ export class KnowledgeRepository implements IKnowledgeRepository {
   /**
    * Create a new revision record
    */
-  createRevision(input: CreateRevisionInput): SourceRevisionRow {
+  createRevision(input: CreateRevisionInput): SourceRevision {
     const now = Date.now();
     const metaJson = input.metadata ? JSON.stringify(input.metadata) : null;
 
     const stmt = this.db.prepare(`
       INSERT INTO source_revisions (
-        revision_id, workspace_id, source_id, created_at,
-        content_text, content_hash, meta_json
+        revisionId, workspaceId, sourceId, createdAt,
+        contentText, contentHash, metaJson
       ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
 
@@ -221,11 +221,11 @@ export class KnowledgeRepository implements IKnowledgeRepository {
   /**
    * Get all revisions for a source (for history view)
    */
-  findRevisionsBySourceId(sourceId: string): SourceRevisionRow[] {
-    const stmt = this.db.prepare<[string], SourceRevisionRow>(`
+  findRevisionsBySourceId(sourceId: string): SourceRevision[] {
+    const stmt = this.db.prepare<[string], SourceRevision>(`
       SELECT * FROM source_revisions
-      WHERE source_id = ?
-      ORDER BY created_at DESC
+      WHERE sourceId = ?
+      ORDER BY createdAt DESC
     `);
     return stmt.all(sourceId);
   }

@@ -71,10 +71,10 @@ export async function canvasOrganizationNode(
       size: { width: 900, height: 700 },
     });
 
-    console.log('[canvasOrganizationNode] Created frame:', frameResult.frameId);
+    console.log('[canvasOrganizationNode] Created frame:', frameResult.nodeId);
 
     return {
-      frameId: frameResult.frameId,
+      frameId: frameResult.nodeId,
       endTime: Date.now(),
       finalCanvasVersion: state.canvasVersion + 1,
     };

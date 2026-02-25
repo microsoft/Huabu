@@ -9,7 +9,7 @@ import { NodeTextColorSelector } from '@/components/Common/NodeTextColorSelector
 
 import { NodeWrapper } from './NodeWrapper.tsx';
 
-import type { NodeDataProps, NodeStyle } from './types.ts';
+import type { CanvasTextNodeData, NodeStyle } from './types.ts';
 
 const FONT_FAMILIES = [
   { name: 'Default', value: 'ui-sans-serif, system-ui, sans-serif' },
@@ -24,11 +24,7 @@ const FONT_FAMILIES = [
   { name: 'Hand', value: '"Comic Sans MS", "Chalkboard SE", sans-serif' },
 ];
 
-type TextNodeData = NodeDataProps & {
-  content?: string;
-};
-
-export type TextNodeType = Node<TextNodeData, 'text'>;
+export type TextNodeType = Node<CanvasTextNodeData, 'text'>;
 
 export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
   const { updateNodeData } = useReactFlow();

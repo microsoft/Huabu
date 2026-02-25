@@ -9,11 +9,7 @@ import { tool } from '@langchain/core/tools';
 import { createId } from '@sediment/shared';
 import { z } from 'zod';
 
-import type {
-  CreateNodeResult,
-  CreateFrameResult,
-  CreateEdgeResult,
-} from '@sediment/shared';
+import type { CreateNodeResult, CreateEdgeResult } from '@sediment/shared';
 
 // Tool schemas
 const CreateNodeSchema = z.object({
@@ -113,8 +109,8 @@ export const createCanvasFrameTool = tool(
     // Mock implementation
     const frameId = createId('frame');
 
-    const result: CreateFrameResult = {
-      frameId,
+    const result: CreateNodeResult = {
+      nodeId: frameId,
     };
 
     console.log('[createCanvasFrameTool] Created frame:', {

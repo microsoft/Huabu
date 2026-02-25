@@ -131,56 +131,88 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
       const initialWidth = payload?.width || 400;
       const initialHeight = payload?.height || 300;
 
-      const newNode: CanvasNode = {
+      const baseNode = {
         id: createId('node'),
         type,
         position: { x: position.x + offsetX, y: position.y + offsetY },
-        data: {},
-        style: {},
       };
+
+      let newNode: CanvasNode;
 
       switch (type) {
         case 'note':
-          newNode.data = { content: '' };
-          newNode.style = { width: initialWidth, height: initialHeight };
+          newNode = {
+            ...baseNode,
+            type: 'note',
+            data: { type: 'note', content: '' },
+            style: { width: initialWidth, height: initialHeight },
+          };
           break;
         case 'text':
-          newNode.data = { content: '' };
-          newNode.style = { width: initialWidth, height: initialHeight };
+          newNode = {
+            ...baseNode,
+            type: 'text',
+            data: { type: 'text', content: '' },
+            style: { width: initialWidth, height: initialHeight },
+          };
           break;
         case 'image':
-          newNode.data = {
-            src: payload?.src || '',
-            label: payload?.label,
+          newNode = {
+            ...baseNode,
+            type: 'image',
+            data: {
+              type: 'image',
+              src: payload?.src || '',
+              label: payload?.label,
+            },
           };
           break;
         case 'pdf':
-          newNode.data = {
-            src: payload?.src || '',
-            label: payload?.label,
+          newNode = {
+            ...baseNode,
+            type: 'pdf',
+            data: {
+              type: 'pdf',
+              src: payload?.src || '',
+              label: payload?.label,
+              isExpanded: true,
+            },
+            style: { width: initialWidth, height: initialHeight },
           };
-          newNode.style = { width: initialWidth, height: initialHeight };
-          newNode.isExpanded = true;
           break;
         case 'video':
-          newNode.data = {
-            src: payload?.src,
-            label: payload?.label,
+          newNode = {
+            ...baseNode,
+            type: 'video',
+            data: {
+              type: 'video',
+              src: payload?.src || '',
+              label: payload?.label,
+            },
           };
           break;
         case 'web':
-          newNode.data = {
-            src: payload?.src || '',
+          newNode = {
+            ...baseNode,
+            type: 'web',
+            data: {
+              type: 'web',
+              src: payload?.src || '',
+            },
+            style: { width: initialWidth, height: initialHeight },
           };
-          newNode.style = { width: initialWidth, height: initialHeight };
           break;
         case 'frame':
-          newNode.style = {
-            width: initialWidth,
-            height: initialHeight,
-            backgroundColor: 'rgba(0,0,0,0.05)',
+          newNode = {
+            ...baseNode,
+            type: 'frame',
+            data: { type: 'frame', label: 'New Frame' },
+            style: {
+              width: initialWidth,
+              height: initialHeight,
+              backgroundColor: 'rgba(0,0,0,0.05)',
+            },
           };
-          newNode.data = { label: 'New Frame' };
           break;
         default:
           return;
