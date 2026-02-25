@@ -167,8 +167,7 @@ fastify.post<{
     canvasId: string;
     canvasVersion: number;
     options?: {
-      maxSources?: number; // 默认 5
-      searchDepth?: 'basic' | 'advanced'; // 默认 'advanced'
+      searchDepth?: 'basic' | 'advanced'; // 默认 'advanced' (basic: 4源, advanced: 8源)
       autoLayout?: boolean; // 默认 true
     };
   };

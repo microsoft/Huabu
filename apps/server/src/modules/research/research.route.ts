@@ -86,7 +86,7 @@ const researchRoutes: FastifyPluginAsync = async (
         sessionId,
         canvasVersion: canvasVersion ?? 0,
         config: {
-          maxSources: config?.maxSources ?? 6,
+          searchDepth: config?.searchDepth ?? 'advanced',
           placement: config?.placement ?? 'auto',
           groupWithFrame: config?.groupWithFrame ?? true,
           padding: config?.padding,

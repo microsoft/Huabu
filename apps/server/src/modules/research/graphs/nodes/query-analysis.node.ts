@@ -7,6 +7,7 @@
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 
 import { getLLM } from '../../../agent/llm.js';
+import { getMaxSources } from '../../utils.js';
 
 import type { ResearchState } from '../research.state.js';
 
@@ -58,8 +59,8 @@ export async function queryAnalysisNode(
       subQueries = [state.query];
     }
 
-    // Limit to configured max sources (default 5)
-    const maxSources = state.config?.maxSources ?? 5;
+    // Limit based on search depth (basic: 4 sources, advanced: 8 sources)
+    const maxSources = getMaxSources(state.config);
     subQueries = subQueries.slice(0, Math.max(maxSources - 2, 1));
 
     console.log('[queryAnalysisNode] Generated sub-queries:', subQueries);

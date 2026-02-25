@@ -10,9 +10,7 @@ import type { PlacementStrategy } from './canvas.js';
 // ==================== Request Types ====================
 
 export interface ResearchConfig {
-  /** Maximum number of sources to search (default: 5) */
-  maxSources?: number;
-  /** Search depth: basic (3 sources) or advanced (8+ sources) */
+  /** Search depth: basic (3-5 sources) or advanced (8-10 sources, default) */
   searchDepth?: 'basic' | 'advanced';
   /** Where to place new research nodes */
   placement?: PlacementStrategy;

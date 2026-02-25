@@ -111,7 +111,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     setInput('');
 
     const config: ResearchConfig = {
-      maxSources: 5,
+      searchDepth: 'advanced',
       placement: 'auto',
       groupWithFrame: true,
     };
