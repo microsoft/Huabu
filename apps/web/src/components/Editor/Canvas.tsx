@@ -198,7 +198,7 @@ export const Canvas: React.FC = () => {
           }
 
           // For note/text nodes, we need to fetch the full content
-          // because SourceOverview doesn't include contentText
+          // because SourceOverview doesn't include content
           if ((nodeType === 'note' || nodeType === 'text') && sourceId) {
             // Create node with loading state first
             const tempNode: Node = {
@@ -216,7 +216,7 @@ export const Canvas: React.FC = () => {
             getSource(sourceId)
               .then((fullSource) => {
                 updateNodeData(tempNode.id, {
-                  content: fullSource.contentText || '',
+                  content: fullSource.content || '',
                 });
               })
               .catch((error) => {

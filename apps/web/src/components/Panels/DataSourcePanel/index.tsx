@@ -16,11 +16,13 @@ import { useMemo, useState, useEffect } from 'react';
 import { CanvasLayerTree } from './CanvasLayerTree';
 import { SourceLibraryTree } from './SourceLibraryTree';
 import { type DataSourceNodeLike, type DataSourceTreeItem } from './types';
-import { getSources, getSource, type Source } from '../../../api/knowledge';
+import { getSources, getSource } from '../../../api/knowledge';
 import useCanvasStore from '../../../store/canvasStore';
 import { usePreviewStore } from '../../../store/previewStore';
 import { GhostButton } from '../../Common/GhostButton';
 import { SidebarPanel } from '../SidebarPanel';
+
+import type { Source } from '@sediment/shared';
 
 interface DataSourcePanelProps {
   isCollapsed?: boolean;
@@ -255,12 +257,6 @@ export const DataSourcePanel = ({
               </div>
             )}
           </div>
-          {/*    <GhostButton title="Sort" onClick={() => {}}>*/}
-          {/*  <SlidersHorizontal size={16} />*/}
-          {/*</GhostButton>*/}
-          {/*<GhostButton title="More" onClick={() => {}}>*/}
-          {/*  <MoreVertical size={16} />*/}
-          {/*</GhostButton>*/}
         </div>
       }
       isCollapsed={isCollapsed}
@@ -310,10 +306,10 @@ export const DataSourcePanel = ({
               if (sourceType === 'note' || sourceType === 'text') {
                 try {
                   const fullSource = await getSource(item.node.id);
-                  if (fullSource?.contentText) {
+                  if (fullSource?.content) {
                     data = {
                       ...data,
-                      content: fullSource.contentText,
+                      content: fullSource.content,
                     };
                   }
                 } catch (error) {

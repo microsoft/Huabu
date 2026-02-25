@@ -164,15 +164,15 @@ export async function getWebSnapshot(params: {
     if (!existingFavicon && favicon.trim()) metadata.favicon = favicon.trim();
   }
 
-  const contentText = content ?? '';
+  const finalContent = content ?? '';
   mergeDerivedMetadata({
     uri: params.uri,
-    content: contentText,
+    content: finalContent,
     metadata,
   });
 
   return {
-    content: contentText,
+    content: finalContent,
     title,
     metadata,
   };

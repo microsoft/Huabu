@@ -189,12 +189,12 @@ const webRoutes: FastifyPluginAsync = async (fastify) => {
         }
       })();
 
-      const contentText = (source.contentText ?? '').trim();
+      const content = (source.content ?? '').trim();
 
       const payload: WebPreviewResponse = {
         url: uri,
         title: (source.title ?? '').trim() || uri || sourceId,
-        contentHtml: contentText ? toPreviewHtml(contentText) : undefined,
+        contentHtml: content ? toPreviewHtml(content) : undefined,
         image:
           typeof meta.image === 'string' && meta.image.trim()
             ? meta.image.trim()
@@ -228,7 +228,7 @@ const webRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.code(404).send({ message: 'Source not ingested' });
       }
 
-      const markdown = (source.contentText ?? '').trim();
+      const markdown = (source.content ?? '').trim();
       if (!markdown) {
         return reply.code(404).send({ message: 'Source has no content yet' });
       }

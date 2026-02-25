@@ -135,7 +135,7 @@ async function hydrateNodeContent(state: unknown): Promise<unknown> {
     // Fall back to contentSnapshot when the source cannot be found
     // (e.g. after switching storage backends without migrating).
     const content =
-      source?.contentText ??
+      source?.content ??
       (node.data?.contentSnapshot as string | undefined) ??
       '';
 

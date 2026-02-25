@@ -79,7 +79,7 @@ export class KnowledgeRepository implements IKnowledgeRepository {
       INSERT INTO sources (
         sourceId, workspaceId, type, title, src,
         createdAt, updatedAt,
-        contentText, contentHash, metaJson
+        content, contentHash, metaJson
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
@@ -91,7 +91,7 @@ export class KnowledgeRepository implements IKnowledgeRepository {
       input.src ?? null,
       now,
       now,
-      input.contentText ?? '',
+      input.content ?? '',
       input.contentHash,
       metaJson,
     );
@@ -110,7 +110,7 @@ export class KnowledgeRepository implements IKnowledgeRepository {
   updateSource(
     sourceId: string,
     updates: {
-      contentText?: string;
+      content?: string;
       contentHash?: string;
       title?: string;
       metadata?: Record<string, unknown>;
@@ -121,7 +121,7 @@ export class KnowledgeRepository implements IKnowledgeRepository {
 
     const stmt = this.db.prepare(`
       UPDATE sources
-      SET contentText = COALESCE(?, contentText),
+      SET content = COALESCE(?, content),
           contentHash = COALESCE(?, contentHash),
           title = COALESCE(?, title),
           metaJson = COALESCE(?, metaJson),
@@ -130,7 +130,7 @@ export class KnowledgeRepository implements IKnowledgeRepository {
     `);
 
     stmt.run(
-      updates.contentText ?? null,
+      updates.content ?? null,
       updates.contentHash ?? null,
       updates.title ?? null,
       metaJson,
@@ -197,7 +197,7 @@ export class KnowledgeRepository implements IKnowledgeRepository {
     const stmt = this.db.prepare(`
       INSERT INTO source_revisions (
         revisionId, workspaceId, sourceId, createdAt,
-        contentText, contentHash, metaJson
+        content, contentHash, metaJson
       ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
 
@@ -206,7 +206,7 @@ export class KnowledgeRepository implements IKnowledgeRepository {
       input.workspaceId,
       input.sourceId,
       now,
-      input.contentText ?? '',
+      input.content ?? '',
       input.contentHash,
       metaJson,
     );

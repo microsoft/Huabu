@@ -191,7 +191,7 @@ export const migrationRoute: FastifyPluginAsync = async (fastify) => {
 
         if (existingInTarget) {
           targetRepo.updateSource(sourceId, {
-            contentText: source.contentText,
+            content: source.content,
             contentHash: source.contentHash,
             title: source.title ?? undefined,
             metadata,
@@ -203,7 +203,7 @@ export const migrationRoute: FastifyPluginAsync = async (fastify) => {
             type: source.type,
             title: source.title ?? undefined,
             src: source.src ?? undefined,
-            contentText: source.contentText,
+            content: source.content,
             contentHash: source.contentHash,
             metadata,
           });
