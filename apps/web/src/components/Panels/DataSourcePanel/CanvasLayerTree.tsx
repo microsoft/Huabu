@@ -134,8 +134,8 @@ export const CanvasLayerTree = ({
 
   // Filter out children of collapsed frames
   const visibleItems = useMemo(() => {
-    const collapsedSet = new Set<string>();
     const result: DataSourceTreeItem[] = [];
+    const itemMap = new Map(items.map((item) => [item.id, item]));
 
     for (const item of items) {
       // If this item is a child of a collapsed frame, skip it
@@ -146,19 +146,12 @@ export const CanvasLayerTree = ({
           shouldHide = true;
           break;
         }
-        const parent = items.find((i) => i.id === parentId);
+        const parent = itemMap.get(parentId);
         parentId = parent?.node.parentId;
       }
 
       if (!shouldHide) {
         result.push(item);
-        // Track if this item is collapsed for its children
-        if (
-          (item.node.type === 'frame' || item.node.type === 'group') &&
-          collapsedFrameIds.has(item.id)
-        ) {
-          collapsedSet.add(item.id);
-        }
       }
     }
 
@@ -295,6 +288,12 @@ export const CanvasLayerTree = ({
 
   const itemIds = useMemo(() => visibleItems.map((i) => i.id), [visibleItems]);
 
+  // Build lookup map once for efficient parent-chain traversal
+  const visibleItemMap = useMemo(
+    () => new Map(visibleItems.map((item) => [item.id, item])),
+    [visibleItems],
+  );
+
   return (
     <DndContext
       sensors={sensors}
@@ -317,7 +316,7 @@ export const CanvasLayerTree = ({
               let isDraggingDisabled = false;
               let parentId = item.node.parentId;
               while (parentId) {
-                const parent = visibleItems.find((i) => i.id === parentId);
+                const parent = visibleItemMap.get(parentId);
                 if (parent && Boolean(parent.node.data?.locked)) {
                   isDraggingDisabled = true;
                   break;
