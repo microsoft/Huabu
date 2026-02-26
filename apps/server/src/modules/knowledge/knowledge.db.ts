@@ -30,7 +30,7 @@ function migrate(database: Database.Database): void {
       src TEXT,
       createdAt INTEGER NOT NULL,
       updatedAt INTEGER NOT NULL,
-      contentText TEXT NOT NULL,
+      content TEXT NOT NULL,
       contentHash TEXT NOT NULL,
       metaJson TEXT
     );
@@ -41,7 +41,7 @@ function migrate(database: Database.Database): void {
       workspaceId TEXT NOT NULL,
       sourceId TEXT NOT NULL,
       createdAt INTEGER NOT NULL,
-      contentText TEXT NOT NULL,
+      content TEXT NOT NULL,
       contentHash TEXT NOT NULL,
       metaJson TEXT,
       FOREIGN KEY (sourceId) REFERENCES sources(sourceId) ON DELETE CASCADE

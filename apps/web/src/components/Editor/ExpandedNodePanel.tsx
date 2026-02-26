@@ -18,31 +18,25 @@ import { NodePreviewContent } from '../Nodes/NodePreviewContent.tsx';
 
 // Helper to get meta info (icon, title) for the header
 const getOverlayMeta = (type: string, data: Record<string, unknown>) => {
-  if (type === 'note') {
-    return { title: 'Note', icon: <StickyNote size={14} /> };
-  }
-  if (type === 'web') {
-    const src = typeof data?.src === 'string' ? data.src : '';
-    return { title: src || 'Web', icon: <Globe size={14} /> };
-  }
-  if (type === 'pdf') {
-    const label = typeof data?.label === 'string' ? data.label : '';
-    return { title: label || 'PDF', icon: <FileText size={14} /> };
-  }
-  if (type === 'image') {
-    const label = typeof data?.label === 'string' ? data.label : '';
-    return { title: label || 'Image', icon: <ImageIcon size={14} /> };
-  }
-  if (type === 'video') {
-    const label = typeof data?.label === 'string' ? data.label : '';
-    return { title: label || 'Video', icon: <PlayCircle size={14} /> };
-  }
-  return { title: 'Expanded View', icon: <Expand size={14} /> };
+  const label = data.label as string;
+
+  const iconMap: Record<string, React.ReactNode> = {
+    note: <StickyNote size={14} />,
+    web: <Globe size={14} />,
+    pdf: <FileText size={14} />,
+    image: <ImageIcon size={14} />,
+    video: <PlayCircle size={14} />,
+  };
+
+  return {
+    title: label,
+    icon: iconMap[type] || <Expand size={14} />,
+  };
 };
 
 /* ------------------------------------------------------------------ */
 /*  ExpandedNodePanel – inline panel that replaces or sits beside     */
-/*  the canvas (no portal / overlay).                                 */
+/*  the canvas.                                 */
 /* ------------------------------------------------------------------ */
 
 export const ExpandedNodePanel = () => {

@@ -38,7 +38,7 @@ export interface IKnowledgeRepository {
   updateSource(
     sourceId: string,
     updates: {
-      contentText?: string;
+      content?: string;
       contentHash?: string;
       title?: string;
       metadata?: Record<string, unknown>;

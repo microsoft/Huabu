@@ -93,7 +93,7 @@ export async function buildContext(
  * Get content from source or revision row
  */
 function getContentFromRow(row: Source | SourceRevision): string {
-  return row.contentText;
+  return row.content;
 }
 
 /**

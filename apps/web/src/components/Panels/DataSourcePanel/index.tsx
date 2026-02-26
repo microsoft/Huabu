@@ -16,11 +16,13 @@ import { useMemo, useState, useEffect } from 'react';
 import { CanvasLayerTree } from './CanvasLayerTree';
 import { SourceLibraryTree } from './SourceLibraryTree';
 import { type DataSourceNodeLike, type DataSourceTreeItem } from './types';
-import { getSources, getSource, type Source } from '../../../api/knowledge';
+import { getSources, getSource, updateSource } from '../../../api/knowledge';
 import useCanvasStore from '../../../store/canvasStore';
 import { usePreviewStore } from '../../../store/previewStore';
 import { GhostButton } from '../../Common/GhostButton';
 import { SidebarPanel } from '../SidebarPanel';
+
+import type { Source } from '@sediment/shared';
 
 interface DataSourcePanelProps {
   isCollapsed?: boolean;
@@ -80,9 +82,7 @@ const getNodeTitleAndIcon = (nodeType: string | undefined) => {
 };
 
 const getNodeDisplayName = (node: DataSourceNodeLike): string => {
-  const raw = typeof node.data?.label === 'string' ? node.data.label : '';
-  const trimmed = raw.trim();
-  return trimmed.length > 0 ? trimmed : 'Node';
+  return node.data.label;
 };
 
 const buildTreeItems = (nodes: DataSourceNodeLike[]): DataSourceTreeItem[] => {
@@ -186,6 +186,17 @@ export const DataSourcePanel = ({
     return getNodeTitleAndIcon(nodeType).icon;
   };
 
+  const handleSourceRename = async (sourceId: string, newName: string) => {
+    try {
+      await updateSource(sourceId, { title: newName });
+      // Refresh sources list
+      const updatedSources = await getSources();
+      setSources(updatedSources);
+    } catch (error) {
+      console.error('Failed to rename source:', error);
+    }
+  };
+
   return (
     <SidebarPanel
       title="Data Sources"
@@ -255,12 +266,6 @@ export const DataSourcePanel = ({
               </div>
             )}
           </div>
-          {/*    <GhostButton title="Sort" onClick={() => {}}>*/}
-          {/*  <SlidersHorizontal size={16} />*/}
-          {/*</GhostButton>*/}
-          {/*<GhostButton title="More" onClick={() => {}}>*/}
-          {/*  <MoreVertical size={16} />*/}
-          {/*</GhostButton>*/}
         </div>
       }
       isCollapsed={isCollapsed}
@@ -281,6 +286,7 @@ export const DataSourcePanel = ({
           items={visibleItems}
           getIcon={getNodeIcon}
           getDisplayName={getNodeDisplayName}
+          onRename={handleSourceRename}
           onItemClick={async (item) => {
             const nodes = useCanvasStore.getState().nodes;
             const targetNode = nodes.find(
@@ -301,7 +307,6 @@ export const DataSourcePanel = ({
               }
             } else {
               let data = {
-                label: item.node.data?.label,
                 ...item.node.data,
               } as Record<string, unknown>;
 
@@ -310,10 +315,10 @@ export const DataSourcePanel = ({
               if (sourceType === 'note' || sourceType === 'text') {
                 try {
                   const fullSource = await getSource(item.node.id);
-                  if (fullSource?.contentText) {
+                  if (fullSource?.content) {
                     data = {
                       ...data,
-                      content: fullSource.contentText,
+                      content: fullSource.content,
                     };
                   }
                 } catch (error) {

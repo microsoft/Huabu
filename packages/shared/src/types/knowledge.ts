@@ -16,15 +16,15 @@ export interface Source {
   src: string | null;
   createdAt: number;
   updatedAt: number;
-  contentText: string;
+  content: string;
   contentHash: string;
   metaJson: string | null;
 }
 
 /**
- * Source overview (excludes contentText for performance)
+ * Source overview (excludes content for performance)
  */
-export type SourceOverview = Omit<Source, 'contentText'>;
+export type SourceOverview = Omit<Source, 'content'>;
 
 /**
  * Source revision record - stores version history for editable sources
@@ -34,7 +34,7 @@ export interface SourceRevision {
   workspaceId: string;
   sourceId: string;
   createdAt: number;
-  contentText: string;
+  content: string;
   contentHash: string;
   metaJson: string | null;
 }
@@ -73,7 +73,7 @@ export interface CreateSourceInput {
   type: SourceType;
   title?: string;
   src?: string;
-  contentText?: string;
+  content?: string;
   contentHash: string;
   metadata?: SourceMetadata;
 }
@@ -85,7 +85,7 @@ export interface CreateRevisionInput {
   revisionId: string;
   workspaceId: string;
   sourceId: string;
-  contentText?: string;
+  content?: string;
   contentHash: string;
   metadata?: SourceMetadata;
 }

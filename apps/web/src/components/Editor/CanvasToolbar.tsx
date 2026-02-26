@@ -206,7 +206,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           newNode = {
             ...baseNode,
             type: 'frame',
-            data: { type: 'frame', label: 'New Frame' },
+            data: { type: 'frame' },
             style: {
               width: initialWidth,
               height: initialHeight,

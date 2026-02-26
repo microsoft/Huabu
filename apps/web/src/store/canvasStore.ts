@@ -27,6 +27,7 @@ import {
   shouldIngestOnUpdate,
   type NodeIngestionInfo,
 } from '../utils/ingestHelper';
+import { generateNextLabel } from '../utils/nodeLabels';
 
 const CANVAS_ID = 'default-canvas';
 const AUTOSAVE_DEBOUNCE_MS = 1000;
@@ -285,6 +286,30 @@ const useCanvasStore = create<RFState>((set, get) => ({
   setRfInstance: (instance) => set({ rfInstance: instance }),
 
   addNode: (node) => {
+    // Ensure node has a label
+    if (
+      !node.data ||
+      !node.data.label ||
+      String(node.data.label).trim() === ''
+    ) {
+      const existingNodes = get().nodes;
+      const nodeType = node.type || 'node';
+      const existingLabels = existingNodes.map(
+        (n) => n.data?.label as string | undefined,
+      );
+
+      const generatedLabel = generateNextLabel(nodeType, existingLabels);
+
+      // Set the label
+      node = {
+        ...node,
+        data: {
+          ...node.data,
+          label: generatedLabel,
+        },
+      };
+    }
+
     set({ nodes: [...get().nodes, node] });
 
     // Ingest the node if needed

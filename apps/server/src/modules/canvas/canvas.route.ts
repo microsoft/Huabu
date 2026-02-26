@@ -11,18 +11,9 @@ import {
   getActiveStorageConfig,
 } from '../knowledge/index.js';
 
+import type { CanvasRow, NodeLike } from './canvas.types.js';
 import type { KnowledgeStorageConfig } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
-
-type CanvasRow = {
-  canvasId: string;
-  workspaceId: string | null;
-  title: string | null;
-  version: number;
-  stateJson: string;
-  createdAt: number;
-  updatedAt: number;
-};
 
 function nowMs(): number {
   return Date.now();
@@ -55,12 +46,6 @@ function applyStorageConfigFromCanvas(canvasId: string): void {
   } catch {
     // Ignore parse errors – fall back to current config
   }
-}
-
-interface NodeLike {
-  type?: string;
-  data?: Record<string, unknown>;
-  [key: string]: unknown;
 }
 
 /**
@@ -135,7 +120,7 @@ async function hydrateNodeContent(state: unknown): Promise<unknown> {
     // Fall back to contentSnapshot when the source cannot be found
     // (e.g. after switching storage backends without migrating).
     const content =
-      source?.contentText ??
+      source?.content ??
       (node.data?.contentSnapshot as string | undefined) ??
       '';
 

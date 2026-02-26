@@ -7,29 +7,12 @@ import {
   createRepositoryForConfig,
 } from '../knowledge/index.js';
 
+import type { CanvasRow, NodeLike } from './canvas.types.js';
 import type {
   KnowledgeStorageConfig,
   MigrateStorageNodeResult,
 } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
-
-// Local types duplicated from canvas.route.ts to avoid circular deps or complex refactoring
-// ideally these should be in a shared types file
-type CanvasRow = {
-  canvasId: string;
-  workspaceId: string | null;
-  title: string | null;
-  version: number;
-  stateJson: string;
-  createdAt: number;
-  updatedAt: number;
-};
-
-interface NodeLike {
-  type?: string;
-  data?: Record<string, unknown>;
-  [key: string]: unknown;
-}
 
 function nowMs(): number {
   return Date.now();
@@ -191,7 +174,7 @@ export const migrationRoute: FastifyPluginAsync = async (fastify) => {
 
         if (existingInTarget) {
           targetRepo.updateSource(sourceId, {
-            contentText: source.contentText,
+            content: source.content,
             contentHash: source.contentHash,
             title: source.title ?? undefined,
             metadata,
@@ -203,7 +186,7 @@ export const migrationRoute: FastifyPluginAsync = async (fastify) => {
             type: source.type,
             title: source.title ?? undefined,
             src: source.src ?? undefined,
-            contentText: source.contentText,
+            content: source.content,
             contentHash: source.contentHash,
             metadata,
           });

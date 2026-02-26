@@ -115,7 +115,7 @@ function toSource(
     src: meta['src'] ?? null,
     createdAt: Number(meta['created_at'] ?? 0),
     updatedAt: Number(meta['updated_at'] ?? 0),
-    contentText: content,
+    content: content,
     contentHash: meta['content_hash'] ?? '',
     metaJson: meta['meta_json'] ?? null,
   };
@@ -133,7 +133,7 @@ function toRevisionRow(
     workspaceId: meta['workspace_id'] ?? '',
     sourceId: meta['source_id'] ?? '',
     createdAt: Number(meta['created_at'] ?? 0),
-    contentText: content,
+    content: content,
     contentHash: meta['content_hash'] ?? '',
     metaJson: meta['meta_json'] ?? null,
   };
@@ -334,7 +334,7 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
       content_hash: source.contentHash,
       meta_json: source.metaJson,
     });
-    const fileContent = `${fm}\n${source.contentText}`;
+    const fileContent = `${fm}\n${source.content}`;
 
     // Resolve the target path:
     // 1. If specifically told to overwrite a file (renaming ID case), use that.
@@ -374,7 +374,7 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
       content_hash: rev.contentHash,
       meta_json: rev.metaJson,
     });
-    const fileContent = `${fm}\n${rev.contentText}`;
+    const fileContent = `${fm}\n${rev.content}`;
     writeFileSync(
       this.revisionFilePath(rev.sourceId, rev.revisionId),
       fileContent,
@@ -455,7 +455,7 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
       src: input.src ?? null,
       createdAt: now,
       updatedAt: now,
-      contentText: input.contentText ?? '',
+      content: input.content ?? '',
       contentHash: input.contentHash,
       metaJson: metaJson,
     };
@@ -467,7 +467,7 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
   updateSource(
     sourceId: string,
     updates: {
-      contentText?: string;
+      content?: string;
       contentHash?: string;
       title?: string;
       metadata?: Record<string, unknown>;
@@ -502,7 +502,7 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
     const updated: Source = {
       ...existing,
       sourceId: finalId, // Use the (potentially new) ID
-      contentText: updates.contentText ?? existing.contentText,
+      content: updates.content ?? existing.content,
       contentHash: updates.contentHash ?? existing.contentHash,
       title: updates.title ?? existing.title,
       metaJson: updates.metadata
@@ -595,7 +595,7 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
       workspaceId: input.workspaceId,
       sourceId: input.sourceId,
       createdAt: now,
-      contentText: input.contentText ?? '',
+      content: input.content ?? '',
       contentHash: input.contentHash,
       metaJson: metaJson,
     };

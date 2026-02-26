@@ -143,7 +143,7 @@ export class IngestService {
       type: params.type,
       title: params.title,
       src: params.src,
-      contentText: '',
+      content: '',
       contentHash: computeContentHash(''),
       metadata,
     });
@@ -417,7 +417,7 @@ export class IngestService {
     type: SourceType;
     title?: string;
     src?: string;
-    contentText: string | undefined;
+    content: string | undefined;
     contentHash: string;
     metadata?: SourceMetadata;
   }): { source: Source; isNew: boolean } {
@@ -428,7 +428,7 @@ export class IngestService {
       type,
       title,
       src,
-      contentText,
+      content,
       contentHash,
       metadata,
     } = params;
@@ -436,7 +436,7 @@ export class IngestService {
     if (existingSource) {
       // Update existing source
       const source = this.repository.updateSource(sourceId, {
-        contentText,
+        content,
         contentHash,
         title,
         metadata,
@@ -450,7 +450,7 @@ export class IngestService {
         type,
         title,
         src,
-        contentText,
+        content,
         contentHash,
         metadata,
       });
@@ -513,7 +513,7 @@ export class IngestService {
         workspaceId: input.workspaceId,
         type: input.type,
         title: input.title,
-        contentText: content,
+        content: content,
         contentHash,
         metadata: input.metadata,
       });
@@ -524,7 +524,7 @@ export class IngestService {
         revisionId,
         workspaceId: input.workspaceId,
         sourceId,
-        contentText: content,
+        content: content,
         contentHash,
         metadata: input.metadata,
       });
@@ -589,9 +589,6 @@ export class IngestService {
       };
     }
 
-    // Store web markdown in DB to avoid any runtime refetch/IO.
-    const contentText = content;
-
     // Create or update source
     const { source, isNew } = this.createOrUpdateSource({
       sourceId,
@@ -600,7 +597,7 @@ export class IngestService {
       type: 'web',
       title,
       src: normalizedUri,
-      contentText,
+      content,
       contentHash,
       metadata,
     });
@@ -677,7 +674,7 @@ export class IngestService {
       type: 'pdf',
       title,
       src: input.artifactUri,
-      contentText: content,
+      content: content,
       contentHash,
       metadata,
     });
@@ -729,7 +726,7 @@ export class IngestService {
           source,
           latestRevision: {
             revisionId: revision.revisionId,
-            content: revision.contentText,
+            content: revision.content,
             createdAt: revision.createdAt,
           },
         };
@@ -739,10 +736,10 @@ export class IngestService {
     // For non-editable types or if no revision, use source content
     return {
       source,
-      latestRevision: source.contentText
+      latestRevision: source.content
         ? {
             revisionId: 'current', // Placeholder for non-revisioned types
-            content: source.contentText,
+            content: source.content,
             createdAt: source.updatedAt,
           }
         : undefined,
