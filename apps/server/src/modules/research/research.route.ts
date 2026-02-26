@@ -71,8 +71,8 @@ const researchRoutes: FastifyPluginAsync = async (
     reply.raw.write(': ok\n\n');
 
     try {
-      // Get research graph
-      const graph = getResearchGraph();
+      // Get research graph (async – checkpointer is lazily initialised)
+      const graph = await getResearchGraph();
 
       // Prepare initial state
       const startTime = Date.now();
@@ -115,9 +115,10 @@ const researchRoutes: FastifyPluginAsync = async (
       // Track how many errors have already been sent to avoid re-sending duplicates
       let sentErrorCount = 0;
 
-      // Stream graph execution
+      // Stream graph execution (thread_id enables per-session checkpointing)
       const stream = await graph.stream(initialState, {
         streamMode: ['updates', 'values'],
+        configurable: { thread_id: sessionId },
       });
 
       for await (const chunk of stream) {

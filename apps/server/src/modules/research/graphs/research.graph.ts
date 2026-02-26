@@ -17,13 +17,18 @@ import { multiSearchNode } from './nodes/multi-search.node.js';
 import { queryAnalysisNode } from './nodes/query-analysis.node.js';
 import { synthesisNode } from './nodes/synthesis.node.js';
 import { ResearchState } from './research.state.js';
+import { getCheckpointer } from '../../agent/store/index.js';
 
 /**
  * Create Research Graph
  *
  * Defines the workflow for deep research on canvas.
+ * Uses a SQLite-backed checkpointer so each research session's state is
+ * persisted and can be inspected or resumed after an interruption.
  */
-export function createResearchGraph() {
+async function createResearchGraph() {
+  const checkpointer = await getCheckpointer();
+
   // Build graph
   const graph = new StateGraph(ResearchState)
     // Add all nodes
@@ -41,17 +46,17 @@ export function createResearchGraph() {
     .addEdge('synthesis', 'canvas-organization')
     .addEdge('canvas-organization', END);
 
-  return graph.compile();
+  return graph.compile({ checkpointer });
 }
 
 /**
- * Get singleton instance
+ * Get singleton instance (lazy-initialised, async)
  */
-let researchGraphInstance: ReturnType<typeof createResearchGraph> | null = null;
+let researchGraphPromise: ReturnType<typeof createResearchGraph> | null = null;
 
-export function getResearchGraph() {
-  if (!researchGraphInstance) {
-    researchGraphInstance = createResearchGraph();
+export function getResearchGraph(): ReturnType<typeof createResearchGraph> {
+  if (!researchGraphPromise) {
+    researchGraphPromise = createResearchGraph();
   }
-  return researchGraphInstance;
+  return researchGraphPromise;
 }
