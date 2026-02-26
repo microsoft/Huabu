@@ -53,8 +53,13 @@ export const useChatStore = create<ChatState>()(
     }),
     {
       name: 'sediment-chat',
-      // Only persist the thread ID — messages are loaded from the server on mount.
-      partialize: (state) => ({ threadId: state.threadId }),
+      // Persist the thread ID + any UI-only research messages.
+      // Regular user/assistant messages are loaded from the server checkpoint on mount.
+      // Tool messages (large web-search payloads) are intentionally excluded.
+      partialize: (state) => ({
+        threadId: state.threadId,
+        messages: state.messages.filter((m) => m.role === 'research'),
+      }),
     },
   ),
 );

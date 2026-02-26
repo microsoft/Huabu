@@ -64,19 +64,28 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     // Read current value from store directly to avoid stale closure
     if (useChatStore.getState().isHistoryLoaded) return;
 
-    const { setMessages: set, setHistoryLoaded: setLoaded } =
-      useChatStore.getState();
+    const {
+      messages: storedMessages,
+      setMessages: set,
+      setHistoryLoaded: setLoaded,
+    } = useChatStore.getState();
+
+    // Research messages are persisted in localStorage; preserve them during merge.
+    const researchMessages = storedMessages.filter(
+      (m) => m.role === 'research',
+    );
 
     chatApi
       .fetchHistory(threadId)
       .then((res) => {
-        const loaded: ChatMessage[] = res.messages.map((m, i) => ({
+        const serverMessages: ChatMessage[] = res.messages.map((m, i) => ({
           // Use a stable, position-based ID so React reconciliation is consistent
           id: `history-${i}`,
           role: m.role,
           content: m.content,
         }));
-        set(loaded);
+        // Server messages first (ordered), research messages appended after (UI-only)
+        set([...serverMessages, ...researchMessages]);
         setLoaded(true);
       })
       .catch((err: unknown) => {
