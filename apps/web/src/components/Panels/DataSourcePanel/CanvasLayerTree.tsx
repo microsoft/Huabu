@@ -26,10 +26,16 @@ interface SortableRowProps {
   item: DataSourceTreeItem;
   isDirectlySelected: boolean;
   isHighlighted: boolean;
+  isCollapsible: boolean;
+  isCollapsed: boolean;
+  isLocked: boolean;
+  isDraggingDisabled: boolean;
   getIcon: (nodeType: string | undefined) => React.ReactNode;
   getDisplayName: (node: DataSourceNodeLike) => string;
   onSelect: (id: string, event: React.MouseEvent) => void;
   onRename: (id: string, newName: string) => void;
+  onToggleCollapse: (id: string) => void;
+  onToggleLock: (id: string) => void;
 }
 
 const SortableRow = React.memo(
@@ -37,10 +43,16 @@ const SortableRow = React.memo(
     item,
     isDirectlySelected,
     isHighlighted,
+    isCollapsible,
+    isCollapsed,
+    isLocked,
+    isDraggingDisabled,
     getIcon,
     getDisplayName,
     onSelect,
     onRename,
+    onToggleCollapse,
+    onToggleLock,
   }: SortableRowProps) => {
     const {
       attributes,
@@ -64,14 +76,19 @@ const SortableRow = React.memo(
         isSelected={isDirectlySelected}
         isHighlighted={isHighlighted}
         isDragging={isDragging}
+        isCollapsible={isCollapsible}
+        isCollapsed={isCollapsed}
+        isLocked={isLocked}
         onClick={(e) => onSelect(item.id, e)}
         editable={true}
         onRename={(newName) => onRename(item.id, newName)}
-        // DnD plumbing
+        onToggleCollapse={() => onToggleCollapse(item.id)}
+        onToggleLock={() => onToggleLock(item.id)}
+        // DnD plumbing - disabled if dragging is disabled
         forwardedRef={setNodeRef}
         style={style}
-        dndAttributes={attributes}
-        dndListeners={listeners}
+        dndAttributes={isDraggingDisabled ? undefined : attributes}
+        dndListeners={isDraggingDisabled ? undefined : listeners}
       />
     );
   },
@@ -100,6 +117,13 @@ export const CanvasLayerTree = ({
   const moveNodeOutOfFrame = useCanvasStore(
     (state) => state.moveNodeOutOfFrame,
   );
+  const toggleFrameCollapse = useCanvasStore(
+    (state) => state.toggleFrameCollapse,
+  );
+  const collapsedFrameIds = useCanvasStore((state) => state.collapsedFrameIds);
+  const toggleFrameLock = useCanvasStore((state) => state.toggleFrameLock);
+
+  const isFrameCollapsed = (frameId: string) => collapsedFrameIds.has(frameId);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -107,6 +131,39 @@ export const CanvasLayerTree = ({
       coordinateGetter: sortableKeyboardCoordinates,
     }),
   );
+
+  // Filter out children of collapsed frames
+  const visibleItems = useMemo(() => {
+    const collapsedSet = new Set<string>();
+    const result: DataSourceTreeItem[] = [];
+
+    for (const item of items) {
+      // If this item is a child of a collapsed frame, skip it
+      let parentId = item.node.parentId;
+      let shouldHide = false;
+      while (parentId) {
+        if (collapsedFrameIds.has(parentId)) {
+          shouldHide = true;
+          break;
+        }
+        const parent = items.find((i) => i.id === parentId);
+        parentId = parent?.node.parentId;
+      }
+
+      if (!shouldHide) {
+        result.push(item);
+        // Track if this item is collapsed for its children
+        if (
+          (item.node.type === 'frame' || item.node.type === 'group') &&
+          collapsedFrameIds.has(item.id)
+        ) {
+          collapsedSet.add(item.id);
+        }
+      }
+    }
+
+    return result;
+  }, [items, collapsedFrameIds]);
 
   const selectedIds = useMemo(
     () => nodes.filter((n) => n.selected).map((n) => n.id),
@@ -117,15 +174,15 @@ export const CanvasLayerTree = ({
     const allHighlighted = new Set<string>();
     selectedIds.forEach((id) => {
       allHighlighted.add(id);
-      const selectedItem = items.find((item) => item.id === id);
+      const selectedItem = visibleItems.find((item) => item.id === id);
       if (
         selectedItem?.node.type === 'frame' ||
         selectedItem?.node.type === 'group'
       ) {
-        const currentIndex = items.indexOf(selectedItem);
-        for (let i = currentIndex + 1; i < items.length; i++) {
-          if (items[i].depth > selectedItem.depth) {
-            allHighlighted.add(items[i].id);
+        const currentIndex = visibleItems.indexOf(selectedItem);
+        for (let i = currentIndex + 1; i < visibleItems.length; i++) {
+          if (visibleItems[i].depth > selectedItem.depth) {
+            allHighlighted.add(visibleItems[i].id);
           } else {
             break;
           }
@@ -133,7 +190,7 @@ export const CanvasLayerTree = ({
       }
     });
     return allHighlighted;
-  }, [selectedIds, items]);
+  }, [selectedIds, visibleItems]);
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
@@ -228,7 +285,15 @@ export const CanvasLayerTree = ({
     updateNodeData(id, { label: newName });
   };
 
-  const itemIds = useMemo(() => items.map((i) => i.id), [items]);
+  const handleToggleCollapse = (id: string) => {
+    toggleFrameCollapse(id);
+  };
+
+  const handleToggleLock = (id: string) => {
+    toggleFrameLock(id);
+  };
+
+  const itemIds = useMemo(() => visibleItems.map((i) => i.id), [visibleItems]);
 
   return (
     <DndContext
@@ -242,21 +307,46 @@ export const CanvasLayerTree = ({
             items={itemIds}
             strategy={verticalListSortingStrategy}
           >
-            {items.map((item) => (
-              <SortableRow
-                key={item.id}
-                item={item}
-                isDirectlySelected={selectedIds.includes(item.id)}
-                isHighlighted={highlightedIds.has(item.id)}
-                getIcon={getIcon}
-                getDisplayName={getDisplayName}
-                onSelect={handleSelect}
-                onRename={handleRename}
-              />
-            ))}
+            {visibleItems.map((item) => {
+              const isCollapsible =
+                item.node.type === 'frame' || item.node.type === 'group';
+              const isCollapsed = isFrameCollapsed(item.id);
+              const isLocked = Boolean(item.node.data?.locked);
+
+              // Check if this node is inside a locked frame
+              let isDraggingDisabled = false;
+              let parentId = item.node.parentId;
+              while (parentId) {
+                const parent = visibleItems.find((i) => i.id === parentId);
+                if (parent && Boolean(parent.node.data?.locked)) {
+                  isDraggingDisabled = true;
+                  break;
+                }
+                parentId = parent?.node.parentId;
+              }
+
+              return (
+                <SortableRow
+                  key={item.id}
+                  item={item}
+                  isDirectlySelected={selectedIds.includes(item.id)}
+                  isHighlighted={highlightedIds.has(item.id)}
+                  isCollapsible={isCollapsible}
+                  isCollapsed={isCollapsed}
+                  isLocked={isLocked}
+                  isDraggingDisabled={isDraggingDisabled}
+                  getIcon={getIcon}
+                  getDisplayName={getDisplayName}
+                  onSelect={handleSelect}
+                  onRename={handleRename}
+                  onToggleCollapse={handleToggleCollapse}
+                  onToggleLock={handleToggleLock}
+                />
+              );
+            })}
           </SortableContext>
 
-          {items.length === 0 && (
+          {visibleItems.length === 0 && (
             <div className="text-muted-foreground px-3 py-2 text-sm">
               {emptyText}
             </div>

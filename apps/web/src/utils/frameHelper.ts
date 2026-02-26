@@ -63,7 +63,12 @@ function indexById(nodes: NestableNode[]): Map<string, NestableNode> {
   return new Map(nodes.map((n) => [n.id, n] as const));
 }
 
-function normalizeTreeOrder(nodes: NestableNode[]): NestableNode[] {
+/**
+ * Ensures nodes are ordered so parents appear before their children.
+ * This is required by React Flow to avoid "parent node not found" errors.
+ * Also removes dangling parent references and breaks cycles.
+ */
+export function normalizeTreeOrder(nodes: NestableNode[]): NestableNode[] {
   const byId = indexById(nodes);
   const originalIndex = new Map(nodes.map((n, i) => [n.id, i] as const));
 
