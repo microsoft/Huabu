@@ -83,7 +83,6 @@ export interface CanvasLayerTreeProps {
   getIcon: (nodeType: string | undefined) => React.ReactNode;
   getDisplayName: (node: DataSourceNodeLike) => string;
   emptyText?: string;
-  onDragStart?: () => void;
 }
 
 export const CanvasLayerTree = ({
@@ -91,13 +90,16 @@ export const CanvasLayerTree = ({
   getIcon,
   getDisplayName,
   emptyText = 'No items',
-  onDragStart,
 }: CanvasLayerTreeProps) => {
   const nodes = useCanvasStore((state) => state.nodes);
   const setSelectedNodes = useCanvasStore((state) => state.setSelectedNodes);
   const reorderNodes = useCanvasStore((state) => state.reorderNodes);
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
   const rfInstance = useCanvasStore((state) => state.rfInstance);
+  const moveNodeIntoFrame = useCanvasStore((state) => state.moveNodeIntoFrame);
+  const moveNodeOutOfFrame = useCanvasStore(
+    (state) => state.moveNodeOutOfFrame,
+  );
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -135,9 +137,63 @@ export const CanvasLayerTree = ({
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
-    if (over && active.id !== over.id) {
-      reorderNodes(active.id as string, over.id as string);
+    if (!over || active.id === over.id) return;
+
+    const activeId = active.id as string;
+    const overId = over.id as string;
+
+    // Find the target node to check if it's a frame
+    const targetItem = items.find((item) => item.id === overId);
+    const activeItem = items.find((item) => item.id === activeId);
+
+    if (!targetItem || !activeItem) return;
+
+    const isTargetFrame = targetItem.node.type === 'frame';
+    const activeHasParent = Boolean(activeItem.node.parentId);
+    const activeParentId = activeItem.node.parentId;
+    const targetParentId = targetItem.node.parentId;
+
+    // ============================================================
+    // Canvas Layer Tree handles:
+    // 1. Hierarchy changes (frame/unframe)
+    // 2. Same-level reordering (changes render order / z-index)
+    // Unlike Source Library, it doesn't have sort buttons (alpha/time)
+    // ============================================================
+
+    // Case 1: Dropping on the parent frame itself → unframe
+    if (isTargetFrame && activeParentId === overId) {
+      moveNodeOutOfFrame(activeId);
+      // After unframe, reorder to place node near the target position
+      reorderNodes(activeId, overId);
+      return;
     }
+
+    // Case 2: Dropping on a different frame → move into that frame
+    if (isTargetFrame) {
+      moveNodeIntoFrame(activeId, overId);
+      // After moving into frame, reorder to place node near the target position
+      reorderNodes(activeId, overId);
+      return;
+    }
+
+    // Case 3: Dropping on a node in a different frame → move into that frame
+    if (targetParentId && targetParentId !== activeParentId) {
+      moveNodeIntoFrame(activeId, targetParentId);
+      // After moving into frame, reorder to place node near the target node
+      reorderNodes(activeId, overId);
+      return;
+    }
+
+    // Case 4: Dropping on a top-level node when active is in a frame → unframe
+    if (activeHasParent && !targetParentId) {
+      moveNodeOutOfFrame(activeId);
+      // After unframe, reorder to place node near the target position
+      reorderNodes(activeId, overId);
+      return;
+    }
+
+    // Case 5: Same-level drag → reorder to change render order (z-index)
+    reorderNodes(activeId, overId);
   };
 
   const handleSelect = (id: string, event: React.MouseEvent) => {
@@ -179,7 +235,6 @@ export const CanvasLayerTree = ({
       sensors={sensors}
       collisionDetection={closestCenter}
       onDragEnd={handleDragEnd}
-      onDragStart={onDragStart}
     >
       <div className="-mx-3 -my-3 overflow-hidden">
         <div className="flex flex-col py-1">

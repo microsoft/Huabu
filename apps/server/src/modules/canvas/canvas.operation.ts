@@ -235,12 +235,14 @@ export class CanvasOperationService {
     }
 
     // 3. Update child nodes to reference this frame as parent
+    // Note: extent is explicitly set to undefined to allow dragging children
+    // out of the frame. Auto-frame/unframe mechanisms handle reparenting.
     state.nodes = state.nodes.map((node) => {
       if (childNodeIds.includes(node.id as string)) {
         return {
           ...node,
           parentId: frameId,
-          extent: 'parent',
+          extent: undefined,
         };
       }
       return node;

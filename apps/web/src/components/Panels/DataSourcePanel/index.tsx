@@ -134,39 +134,33 @@ export const DataSourcePanel = ({
   const [sortType, setSortType] = useState<SortType>('alpha');
   const [showSortMenu, setShowSortMenu] = useState(false);
 
-  const processedNodes = useMemo(() => {
-    const filtered = [...nodes];
+  // Canvas layer tree: use original node order (hierarchy-based)
+  const layerItems = useMemo(() => buildTreeItems(nodes), [nodes]);
+
+  // Source library: apply sorting
+  const sourceItems = useMemo(() => {
+    const sortedSources = [...sources];
 
     if (sortType !== 'manual') {
-      filtered.sort((a, b) => {
+      sortedSources.sort((a, b) => {
         switch (sortType) {
-          case 'importance': {
-            const areaA =
-              (Number(a.measured?.width) || Number(a.width) || 0) *
-              (Number(a.measured?.height) || Number(a.height) || 0);
-            const areaB =
-              (Number(b.measured?.width) || Number(b.width) || 0) *
-              (Number(b.measured?.height) || Number(b.height) || 0);
-            return areaB - areaA;
-          }
-          case 'time':
-            return 1;
           case 'alpha':
+            return (a.title || a.src || 'Untitled').localeCompare(
+              b.title || b.src || 'Untitled',
+            );
+          case 'time':
+            // TODO: sort by created/updated time when available
+            return 0;
+          case 'importance':
+            // TODO: implement importance sorting
+            return 0;
           default:
-            return getNodeDisplayName(a).localeCompare(getNodeDisplayName(b));
+            return 0;
         }
       });
     }
-    return filtered.reverse();
-  }, [nodes, sortType]);
 
-  const layerItems = useMemo(
-    () => buildTreeItems(processedNodes),
-    [processedNodes],
-  );
-
-  const sourceItems = useMemo(() => {
-    return sources.map((s) => ({
+    return sortedSources.map((s) => ({
       id: s.sourceId,
       depth: 0,
       node: {
@@ -178,9 +172,7 @@ export const DataSourcePanel = ({
         },
       },
     }));
-  }, [sources]);
-
-  const visibleItems = tab === 'canvas' ? layerItems : sourceItems;
+  }, [sources, sortType]);
 
   const getNodeIcon = (nodeType: string | undefined) => {
     return getNodeTitleAndIcon(nodeType).icon;
@@ -227,46 +219,47 @@ export const DataSourcePanel = ({
         </div>
       }
       tools={
-        <div className="flex items-center gap-1">
-          <GhostButton title="Search" onClick={() => {}}>
-            <Search size={16} />
-          </GhostButton>
-
-          <div className="relative">
-            <GhostButton
-              title="Sort"
-              onClick={() => setShowSortMenu(!showSortMenu)}
-            >
-              <SlidersHorizontal
-                size={16}
-                className={sortType !== 'manual' ? 'text-blue-500' : ''}
-              />
+        tab === 'sources' && (
+          <div className="flex items-center gap-1">
+            <GhostButton title="Search" onClick={() => {}}>
+              <Search size={16} />
             </GhostButton>
 
-            {showSortMenu && (
-              <div className="bg-popover border-border absolute top-full right-0 z-50 mt-1 w-32 rounded border py-1 shadow-lg">
-                {[
-                  { id: 'alpha', label: 'Alphabetical', desc: 'A-Z' },
-                  { id: 'importance', label: 'Importance', desc: 'Size' },
-                  { id: 'time', label: 'Time', desc: 'Newest' },
-                ].map((opt) => (
-                  <button
-                    key={opt.id}
-                    className={`hover:bg-accent flex w-full justify-between px-3 py-1.5 text-left text-xs ${
-                      sortType === opt.id ? 'font-bold text-blue-500' : ''
-                    }`}
-                    onClick={() => {
-                      setSortType(opt.id as SortType);
-                      setShowSortMenu(false);
-                    }}
-                  >
-                    <span>{opt.label}</span>
-                  </button>
-                ))}
-              </div>
-            )}
+            <div className="relative">
+              <GhostButton
+                title="Sort"
+                onClick={() => setShowSortMenu(!showSortMenu)}
+              >
+                <SlidersHorizontal
+                  size={16}
+                  className={sortType !== 'manual' ? 'text-blue-500' : ''}
+                />
+              </GhostButton>
+
+              {showSortMenu && (
+                <div className="bg-popover border-border absolute top-full right-0 z-50 mt-1 w-32 rounded border py-1 shadow-lg">
+                  {[
+                    { id: 'alpha', label: 'Alphabetical', desc: 'A-Z' },
+                    { id: 'time', label: 'Time', desc: 'Newest' },
+                  ].map((opt) => (
+                    <button
+                      key={opt.id}
+                      className={`hover:bg-accent flex w-full justify-between px-3 py-1.5 text-left text-xs ${
+                        sortType === opt.id ? 'font-bold text-blue-500' : ''
+                      }`}
+                      onClick={() => {
+                        setSortType(opt.id as SortType);
+                        setShowSortMenu(false);
+                      }}
+                    >
+                      <span>{opt.label}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )
       }
       isCollapsed={isCollapsed}
       onToggle={onToggle}
@@ -276,14 +269,13 @@ export const DataSourcePanel = ({
     >
       {tab === 'canvas' ? (
         <CanvasLayerTree
-          items={visibleItems}
+          items={layerItems}
           getIcon={getNodeIcon}
           getDisplayName={getNodeDisplayName}
-          onDragStart={() => setSortType('manual')}
         />
       ) : (
         <SourceLibraryTree
-          items={visibleItems}
+          items={sourceItems}
           getIcon={getNodeIcon}
           getDisplayName={getNodeDisplayName}
           onRename={handleSourceRename}

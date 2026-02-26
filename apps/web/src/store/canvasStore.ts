@@ -20,6 +20,8 @@ import {
   frameNodes,
   toggleFrameLock,
   unframe,
+  moveNodeIntoFrame,
+  moveNodeOutOfFrame,
   type NestableNode,
 } from '../utils/frameHelper';
 import {
@@ -88,6 +90,9 @@ type RFState = {
   frameSelectedNodes: () => void;
   unframe: (frameId: string) => void;
   toggleFrameLock: (frameId: string) => void;
+
+  moveNodeIntoFrame: (nodeId: string, frameId: string) => void;
+  moveNodeOutOfFrame: (nodeId: string) => void;
 
   loadCanvas: () => Promise<void>;
   saveCanvas: () => Promise<void>;
@@ -436,6 +441,20 @@ const useCanvasStore = create<RFState>((set, get) => ({
 
     set({ nodes: toggleFrameLock(nodes as NestableNode[], frameId) });
 
+    scheduleAutoSave(get().saveCanvas);
+  },
+
+  moveNodeIntoFrame: (nodeId, frameId) => {
+    const { nodes } = get();
+    const result = moveNodeIntoFrame(nodes as NestableNode[], nodeId, frameId);
+    set({ nodes: result });
+    scheduleAutoSave(get().saveCanvas);
+  },
+
+  moveNodeOutOfFrame: (nodeId) => {
+    const { nodes } = get();
+    const result = moveNodeOutOfFrame(nodes as NestableNode[], nodeId);
+    set({ nodes: result });
     scheduleAutoSave(get().saveCanvas);
   },
 }));
