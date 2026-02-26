@@ -148,6 +148,8 @@ export const TreeRowItem = React.memo(
             <button
               onClick={handleToggleCollapse}
               className="text-muted-foreground hover:text-foreground flex shrink-0 items-center transition-colors"
+              aria-label={isCollapsed ? 'Expand' : 'Collapse'}
+              aria-expanded={!isCollapsed}
             >
               {isCollapsed ? (
                 <ChevronRight size={iconSize} strokeWidth={iconStroke} />

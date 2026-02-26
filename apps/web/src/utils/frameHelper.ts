@@ -755,6 +755,7 @@ export function moveNodeOutOfFrame(
     return {
       ...rest,
       position: nodeAbs,
+      extent: undefined,
     };
   });
 
