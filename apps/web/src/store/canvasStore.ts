@@ -20,6 +20,9 @@ import {
   frameNodes,
   toggleFrameLock,
   unframe,
+  moveNodeIntoFrame,
+  moveNodeOutOfFrame,
+  normalizeTreeOrder,
   type NestableNode,
 } from '../utils/frameHelper';
 import {
@@ -70,6 +73,10 @@ type RFState = {
   closeExpanded: () => void;
   setExpandMode: (mode: 'replace' | 'split') => void;
 
+  collapsedFrameIds: Set<string>;
+  toggleFrameCollapse: (frameId: string) => void;
+  isFrameCollapsed: (frameId: string) => boolean;
+
   onNodesChange: OnNodesChange;
   onEdgesChange: OnEdgesChange;
   onConnect: OnConnect;
@@ -88,6 +95,9 @@ type RFState = {
   frameSelectedNodes: () => void;
   unframe: (frameId: string) => void;
   toggleFrameLock: (frameId: string) => void;
+
+  moveNodeIntoFrame: (nodeId: string, frameId: string) => void;
+  moveNodeOutOfFrame: (nodeId: string) => void;
 
   loadCanvas: () => Promise<void>;
   saveCanvas: () => Promise<void>;
@@ -145,6 +155,21 @@ const useCanvasStore = create<RFState>((set, get) => ({
   openExpanded: (nodeId) => set({ expandedNodeId: nodeId }),
   closeExpanded: () => set({ expandedNodeId: null }),
   setExpandMode: (mode) => set({ expandMode: mode }),
+
+  collapsedFrameIds: new Set<string>(),
+  toggleFrameCollapse: (frameId) => {
+    const { collapsedFrameIds } = get();
+    const next = new Set(collapsedFrameIds);
+    if (next.has(frameId)) {
+      next.delete(frameId);
+    } else {
+      next.add(frameId);
+    }
+    set({ collapsedFrameIds: next });
+  },
+  isFrameCollapsed: (frameId) => {
+    return get().collapsedFrameIds.has(frameId);
+  },
 
   loadCanvas: async () => {
     set({ isLoading: true });
@@ -402,7 +427,10 @@ const useCanvasStore = create<RFState>((set, get) => ({
       const [movedItem] = newNodes.splice(oldIndex, 1);
       newNodes.splice(newIndex, 0, movedItem);
 
-      set({ nodes: newNodes });
+      // Ensure parent nodes are always before their children
+      // This prevents "parent node not found" errors in React Flow
+      const normalizedNodes = normalizeTreeOrder(newNodes as NestableNode[]);
+      set({ nodes: normalizedNodes });
       scheduleAutoSave(get().saveCanvas);
     }
   },
@@ -436,6 +464,20 @@ const useCanvasStore = create<RFState>((set, get) => ({
 
     set({ nodes: toggleFrameLock(nodes as NestableNode[], frameId) });
 
+    scheduleAutoSave(get().saveCanvas);
+  },
+
+  moveNodeIntoFrame: (nodeId, frameId) => {
+    const { nodes } = get();
+    const result = moveNodeIntoFrame(nodes as NestableNode[], nodeId, frameId);
+    set({ nodes: result });
+    scheduleAutoSave(get().saveCanvas);
+  },
+
+  moveNodeOutOfFrame: (nodeId) => {
+    const { nodes } = get();
+    const result = moveNodeOutOfFrame(nodes as NestableNode[], nodeId);
+    set({ nodes: result });
     scheduleAutoSave(get().saveCanvas);
   },
 }));

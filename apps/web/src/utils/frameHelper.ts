@@ -1,3 +1,49 @@
+/**
+ * Frame Helper - Canvas Node Hierarchy Management
+ *
+ * This module provides utilities for managing frame-based node hierarchies in ReactFlow.
+ * Frames are container nodes that can hold child nodes, with automatic coordinate
+ * transformation to maintain visual consistency.
+ *
+ * Architecture (Layered Design):
+ * ┌─────────────────────────────────────────────────────────────────┐
+ * │ Geometry Layer (Low-level, Pure Functions)                      │
+ * ├─────────────────────────────────────────────────────────────────┤
+ * │ • createAbsolutePositionGetter - Compute absolute coordinates   │
+ * │   with memoization for performance                              │
+ * │ • createRectGetter - Calculate node rectangles in absolute      │
+ * │   coordinates with validation and caching                       │
+ * │ • rectIntersectionArea - Calculate overlap between rectangles   │
+ * └─────────────────────────────────────────────────────────────────┘
+ *                                ▼
+ * ┌─────────────────────────────────────────────────────────────────┐
+ * │ Detection Layer (Mid-level, Decision Makers)                    │
+ * ├─────────────────────────────────────────────────────────────────┤
+ * │ • autoFrameNodeByOverlap - Detect if node should enter frame    │
+ * │   (75% overlap threshold, prefers smallest matching frame)      │
+ * │ • autoUnframeNodeByNonOverlap - Detect if node should exit      │
+ * │   frame (no overlap with parent)                                │
+ * │ Both delegate to Execution Layer for actual moves               │
+ * └─────────────────────────────────────────────────────────────────┘
+ *                                ▼
+ * ┌─────────────────────────────────────────────────────────────────┐
+ * │ Execution Layer (High-level, Core Operations)                   │
+ * ├─────────────────────────────────────────────────────────────────┤
+ * │ • moveNodeIntoFrame - Core function to add node to frame        │
+ * │   Validates: locked status, no frame nesting, no cycles         │
+ * │ • moveNodeOutOfFrame - Core function to remove node from frame  │
+ * │   Validates: parent exists and is not locked                    │
+ * │ Both preserve visual positions via coordinate transformation    │
+ * └─────────────────────────────────────────────────────────────────┘
+ *
+ * Design Principles:
+ * 1. Single Responsibility: Each function has one clear purpose
+ * 2. Logic Reuse: Detection functions delegate to execution functions
+ * 3. Immutability: All functions return new arrays, never mutate input
+ * 4. Visual Consistency: All moves preserve node's visual position on canvas
+ * 5. Locked Frame Respect: Locked frames cannot gain or lose children
+ */
+
 import type { Edge, Node, XYPosition } from '@xyflow/react';
 
 export type NestableNode = Node & {
@@ -17,7 +63,12 @@ function indexById(nodes: NestableNode[]): Map<string, NestableNode> {
   return new Map(nodes.map((n) => [n.id, n] as const));
 }
 
-function normalizeTreeOrder(nodes: NestableNode[]): NestableNode[] {
+/**
+ * Ensures nodes are ordered so parents appear before their children.
+ * This is required by React Flow to avoid "parent node not found" errors.
+ * Also removes dangling parent references and breaks cycles.
+ */
+export function normalizeTreeOrder(nodes: NestableNode[]): NestableNode[] {
   const byId = indexById(nodes);
   const originalIndex = new Map(nodes.map((n, i) => [n.id, i] as const));
 
@@ -80,8 +131,8 @@ function getNodeSize(node: NestableNode): { width: number; height: number } {
     (typeof style?.width === 'number'
       ? style.width
       : typeof style?.width === 'string'
-        ? Number.parseFloat(style.width)
-        : undefined) ??
+      ? Number.parseFloat(style.width)
+      : undefined) ??
     0;
 
   const height =
@@ -89,8 +140,8 @@ function getNodeSize(node: NestableNode): { width: number; height: number } {
     (typeof style?.height === 'number'
       ? style.height
       : typeof style?.height === 'string'
-        ? Number.parseFloat(style.height)
-        : undefined) ??
+      ? Number.parseFloat(style.height)
+      : undefined) ??
     0;
 
   return {
@@ -186,29 +237,16 @@ function createAbsolutePositionGetter(byId: Map<string, NestableNode>) {
 /**
  * Computes a node's absolute position in the flow coordinate space.
  * Works for nested frames by walking the parent chain.
+ *
+ * Delegates to createAbsolutePositionGetter for consistent logic.
  */
 export function getAbsolutePosition(
   nodes: NestableNode[],
   nodeId: string,
 ): XYPosition | null {
   const byId = indexById(nodes);
-  let current = byId.get(nodeId);
-  if (!current) return null;
-
-  let pos: XYPosition = { ...current.position };
-  const visited = new Set<string>([current.id]);
-
-  while (current.parentId) {
-    const parent = byId.get(current.parentId);
-    if (!parent) break;
-    if (visited.has(parent.id)) break;
-
-    pos = addPos(parent.position, pos);
-    visited.add(parent.id);
-    current = parent;
-  }
-
-  return pos;
+  const getAbs = createAbsolutePositionGetter(byId);
+  return getAbs(nodeId);
 }
 
 export function getDescendantIds(
@@ -395,89 +433,16 @@ function rectIntersectionArea(a: Rect, b: Rect): number {
 }
 
 /**
- * If a node has a parent and the node and parent have no overlap,
- * detach the node from its parent while preserving its visual position.
+ * Creates a memoized function to get node rectangles in absolute coordinates.
+ * Returns null if the node doesn't exist or has invalid dimensions.
  */
-export function autoUnframeNodeByNonOverlap(
-  nodes: NestableNode[],
-  nodeId: string,
-  options: AutoUnframeByNonOverlapOptions = {},
-): NestableNode[] {
-  const byId = indexById(nodes);
-  const node = byId.get(nodeId);
-  if (!node?.parentId) return nodes;
-
-  const parentId = node.parentId;
-  const parent = byId.get(parentId);
-  if (!parent) return nodes;
-
-  const getAbs = createAbsolutePositionGetter(byId);
-  const nodeAbs = getAbs(nodeId);
-  const parentAbs = getAbs(parentId);
-  if (!nodeAbs || !parentAbs) return nodes;
-
-  const nodeSize = getNodeSize(node);
-  const parentSize = getNodeSize(parent);
-  if (
-    nodeSize.width <= 0 ||
-    nodeSize.height <= 0 ||
-    parentSize.width <= 0 ||
-    parentSize.height <= 0
-  ) {
-    return nodes;
-  }
-
-  const nodeRect: Rect = {
-    x: nodeAbs.x,
-    y: nodeAbs.y,
-    width: nodeSize.width,
-    height: nodeSize.height,
-  };
-  const parentRect: Rect = {
-    x: parentAbs.x,
-    y: parentAbs.y,
-    width: parentSize.width,
-    height: parentSize.height,
-  };
-
-  const intersection = rectIntersectionArea(nodeRect, parentRect);
-  const epsilon = options.epsilon ?? 0;
-  if (intersection > epsilon) return nodes;
-
-  const nextNodes = nodes.map((n) => {
-    if (n.id !== nodeId) return n;
-
-    const { parentId: _parentId, ...rest } = n;
-    return {
-      ...rest,
-      position: nodeAbs,
-    };
-  });
-
-  return normalizeTreeOrder(nextNodes);
-}
-
-/**
- * If a node is dropped with >= threshold of its area inside an *unlocked* frame,
- * reparent it under that frame while preserving its visual position.
- */
-export function autoFrameNodeByOverlap(
-  nodes: NestableNode[],
-  nodeId: string,
-  options: AutoFrameByOverlapOptions = {},
-): NestableNode[] {
-  const threshold = options.threshold ?? 0.75;
-  if (!Number.isFinite(threshold) || threshold <= 0) return nodes;
-
-  const byId = indexById(nodes);
-  const node = byId.get(nodeId);
-  if (!node) return nodes;
-  if (node.type === 'frame') return nodes;
-
-  const getAbs = createAbsolutePositionGetter(byId);
+function createRectGetter(
+  byId: Map<string, NestableNode>,
+  getAbs: (nodeId: string) => XYPosition | null,
+) {
   const rectById = new Map<string, Rect | null>();
 
-  const getRect = (id: string): Rect | null => {
+  return (id: string): Rect | null => {
     if (rectById.has(id)) return rectById.get(id) ?? null;
 
     const current = byId.get(id);
@@ -502,6 +467,68 @@ export function autoFrameNodeByOverlap(
     rectById.set(id, rect);
     return rect;
   };
+}
+
+/**
+ * If a node has a parent and the node and parent have no overlap,
+ * delegate to moveNodeOutOfFrame to detach the node.
+ *
+ * This function is responsible for:
+ * - Detecting non-overlap condition
+ * - Delegating the actual move to moveNodeOutOfFrame (which handles validation)
+ */
+export function autoUnframeNodeByNonOverlap(
+  nodes: NestableNode[],
+  nodeId: string,
+  options: AutoUnframeByNonOverlapOptions = {},
+): NestableNode[] {
+  const byId = indexById(nodes);
+  const node = byId.get(nodeId);
+  if (!node?.parentId) return nodes;
+
+  const parentId = node.parentId;
+  const parent = byId.get(parentId);
+  if (!parent) return nodes;
+
+  const getAbs = createAbsolutePositionGetter(byId);
+  const getRect = createRectGetter(byId, getAbs);
+
+  const nodeRect = getRect(nodeId);
+  const parentRect = getRect(parentId);
+  if (!nodeRect || !parentRect) return nodes;
+
+  const intersection = rectIntersectionArea(nodeRect, parentRect);
+  const epsilon = options.epsilon ?? 0;
+  if (intersection > epsilon) return nodes; // Still overlapping, don't unframe
+
+  // Delegate to moveNodeOutOfFrame for consistent validation and movement logic
+  return moveNodeOutOfFrame(nodes, nodeId);
+}
+
+/**
+ * If a node is dropped with >= threshold of its area inside an *unlocked* frame,
+ * find the best matching frame and delegate to moveNodeIntoFrame.
+ *
+ * This function is responsible for:
+ * - Calculating overlap ratios
+ * - Finding the best frame (highest overlap, smallest area)
+ * - Delegating the actual move to moveNodeIntoFrame (which handles validation)
+ */
+export function autoFrameNodeByOverlap(
+  nodes: NestableNode[],
+  nodeId: string,
+  options: AutoFrameByOverlapOptions = {},
+): NestableNode[] {
+  const threshold = options.threshold ?? 0.75;
+  if (!Number.isFinite(threshold) || threshold <= 0) return nodes;
+
+  const byId = indexById(nodes);
+  const node = byId.get(nodeId);
+  if (!node) return nodes;
+  if (node.type === 'frame') return nodes;
+
+  const getAbs = createAbsolutePositionGetter(byId);
+  const getRect = createRectGetter(byId, getAbs);
 
   const nodeRect = getRect(nodeId);
   if (!nodeRect) return nodes;
@@ -520,7 +547,7 @@ export function autoFrameNodeByOverlap(
   for (const candidate of nodes) {
     if (candidate.type !== 'frame') continue;
     if (candidate.id === nodeId) continue;
-    if (candidate.data?.locked) continue;
+    if (candidate.data?.locked) continue; // Skip locked frames during search
 
     const frameRect = getRect(candidate.id);
     if (!frameRect) continue;
@@ -543,20 +570,8 @@ export function autoFrameNodeByOverlap(
   if (!best) return nodes;
   if (node.parentId === best.frameId) return nodes;
 
-  const frameAbs = getAbs(best.frameId);
-  const nodeAbs = getAbs(nodeId);
-  if (!frameAbs || !nodeAbs) return nodes;
-
-  const nextNodes = nodes.map((n) => {
-    if (n.id !== nodeId) return n;
-    return {
-      ...n,
-      parentId: best.frameId,
-      position: subPos(nodeAbs, frameAbs),
-    };
-  });
-
-  return normalizeTreeOrder(nextNodes);
+  // Delegate to moveNodeIntoFrame for consistent validation and movement logic
+  return moveNodeIntoFrame(nodes, nodeId, best.frameId);
 }
 
 /**
@@ -645,6 +660,7 @@ export function frameNodes(
       parentId: options.frameId,
       position: subPos(abs, groupAbs),
       selected: false,
+      extent: undefined,
     };
   });
 
@@ -652,4 +668,96 @@ export function frameNodes(
     nodes: normalizeTreeOrder([groupNode, ...nextNodes]),
     frameId: options.frameId,
   };
+}
+
+/**
+ * Move a node into a frame, making it a child of the frame.
+ * Preserves the node's visual position on the canvas.
+ *
+ * This is the core function for frame operations. It validates:
+ * - Node and frame existence
+ * - Frame is not locked
+ * - No frames inside frames
+ * - No cycles
+ * - Not already a child
+ */
+export function moveNodeIntoFrame(
+  nodes: NestableNode[],
+  nodeId: string,
+  frameId: string,
+): NestableNode[] {
+  const byId = indexById(nodes);
+  const node = byId.get(nodeId);
+  const frame = byId.get(frameId);
+
+  if (!node || !frame) return nodes;
+  if (frame.data?.locked) return nodes; // Don't move into locked frames
+  if (node.type === 'frame') return nodes; // Don't allow frames inside frames
+  if (node.id === frameId) return nodes; // Can't move into itself
+  if (node.parentId === frameId) return nodes; // Already a child
+
+  // Check if frameId is a descendant of nodeId (would create a cycle)
+  const descendants = new Set(getDescendantIds(nodes, nodeId));
+  if (descendants.has(frameId)) return nodes;
+
+  const getAbs = createAbsolutePositionGetter(byId);
+  const nodeAbs = getAbs(nodeId);
+  const frameAbs = getAbs(frameId);
+
+  if (!nodeAbs || !frameAbs) return nodes;
+
+  // Calculate new relative position
+  const newPosition = subPos(nodeAbs, frameAbs);
+
+  const nextNodes = nodes.map((n) => {
+    if (n.id !== nodeId) return n;
+    return {
+      ...n,
+      parentId: frameId,
+      position: newPosition,
+      extent: undefined,
+    };
+  });
+
+  return normalizeTreeOrder(nextNodes);
+}
+
+/**
+ * Move a node out of its parent frame, making it a top-level node.
+ * Preserves the node's visual position on the canvas.
+ *
+ * This is the core function for unframe operations. It validates:
+ * - Node has a parent
+ * - Parent frame is not locked
+ * - Node position can be calculated
+ */
+export function moveNodeOutOfFrame(
+  nodes: NestableNode[],
+  nodeId: string,
+): NestableNode[] {
+  const byId = indexById(nodes);
+  const node = byId.get(nodeId);
+
+  if (!node?.parentId) return nodes; // Already top-level
+
+  const parent = byId.get(node.parentId);
+  if (parent?.data?.locked) return nodes; // Don't move out of locked frames
+
+  const getAbs = createAbsolutePositionGetter(byId);
+  const nodeAbs = getAbs(nodeId);
+
+  if (!nodeAbs) return nodes;
+
+  const nextNodes = nodes.map((n) => {
+    if (n.id !== nodeId) return n;
+
+    const { parentId: _parentId, ...rest } = n;
+    return {
+      ...rest,
+      position: nodeAbs,
+      extent: undefined,
+    };
+  });
+
+  return normalizeTreeOrder(nextNodes);
 }
