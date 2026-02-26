@@ -5,8 +5,12 @@ import { persist } from 'zustand/middleware';
 import type { ChatMessage } from '../components/Messages/types';
 
 interface ChatState {
+  /** In-memory message list — not persisted to localStorage. */
   messages: ChatMessage[];
+  /** Stable thread identifier — persisted so the same conversation is resumed after refresh. */
   threadId: string;
+  /** True once history has been fetched from the server for the current threadId. */
+  isHistoryLoaded: boolean;
 
   // Actions
   addMessage: (message: ChatMessage) => void;
@@ -14,6 +18,8 @@ interface ChatState {
     id: string,
     updater: (msg: ChatMessage) => ChatMessage,
   ) => void;
+  setMessages: (messages: ChatMessage[]) => void;
+  setHistoryLoaded: (loaded: boolean) => void;
   clearMessages: () => void;
 }
 
@@ -22,6 +28,7 @@ export const useChatStore = create<ChatState>()(
     (set) => ({
       messages: [],
       threadId: createId('thread'),
+      isHistoryLoaded: false,
 
       addMessage: (message) =>
         set((state) => ({ messages: [...state.messages, message] })),
@@ -31,20 +38,23 @@ export const useChatStore = create<ChatState>()(
           messages: state.messages.map((m) => (m.id === id ? updater(m) : m)),
         })),
 
-      clearMessages: () => set({ messages: [], threadId: createId('thread') }),
+      setMessages: (messages) => set({ messages }),
+
+      setHistoryLoaded: (loaded) => set({ isHistoryLoaded: loaded }),
+
+      clearMessages: () =>
+        // isHistoryLoaded stays true for the new thread — it has no server-side
+        // history so there is no need to make an API call.
+        set({
+          messages: [],
+          threadId: createId('thread'),
+          isHistoryLoaded: true,
+        }),
     }),
     {
       name: 'sediment-chat',
-      // Normalise any "running" research messages to "completed" on rehydration
-      // so stale in-progress states are never shown after a page refresh.
-      onRehydrateStorage: () => (state) => {
-        if (!state) return;
-        state.messages = state.messages.map((m) =>
-          m.role === 'research' && m.status === 'running'
-            ? { ...m, status: 'completed' as const }
-            : m,
-        );
-      },
+      // Only persist the thread ID — messages are loaded from the server on mount.
+      partialize: (state) => ({ threadId: state.threadId }),
     },
   ),
 );
