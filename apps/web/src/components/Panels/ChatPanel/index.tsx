@@ -5,6 +5,7 @@ import { useState, useRef, useEffect } from 'react';
 import { chatApi } from '@/api/chat';
 import { researchApi } from '@/api/research';
 import useCanvasStore from '@/store/canvasStore';
+import { useChatStore } from '@/store/chatStore';
 import { useResearchStore } from '@/store/researchStore';
 
 import { SidebarPanel } from '../SidebarPanel';
@@ -22,10 +23,13 @@ interface ChatPanelProps {
 
 export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const [input, setInput] = useState('');
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
-  const threadIdRef = useRef<string>(createId('thread'));
+  // Persistent chat state (survives page refresh)
+  const messages = useChatStore((state) => state.messages);
+  const threadId = useChatStore((state) => state.threadId);
+  const addMessage = useChatStore((state) => state.addMessage);
+  const updateMessage = useChatStore((state) => state.updateMessage);
 
   const getSelectedSourceIds = useCanvasStore(
     (state) => state.getSelectedSourceIds,
@@ -60,38 +64,37 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       // Find existing research message or create new one
       const researchMessageId = 'research-' + researchQuery;
 
-      setMessages((prev) => {
-        const hasResearchMessage = prev.some(
-          (m) => m.role === 'research' && m.id === researchMessageId,
-        );
+      const {
+        messages: currentMessages,
+        addMessage: add,
+        updateMessage: update,
+      } = useChatStore.getState();
 
-        if (!hasResearchMessage) {
-          // Add research message
-          return [
-            ...prev,
-            {
-              id: researchMessageId,
-              role: 'research',
-              query: researchQuery,
-              steps: researchSteps,
-              status: researchStatus,
-              nodeIds: researchNodeIds,
-            },
-          ];
-        } else {
-          // Update existing research message
-          return prev.map((m) =>
-            m.role === 'research' && m.id === researchMessageId
-              ? {
-                  ...m,
-                  steps: researchSteps,
-                  status: researchStatus,
-                  nodeIds: researchNodeIds,
-                }
-              : m,
-          );
-        }
-      });
+      const hasResearchMessage = currentMessages.some(
+        (m) => m.role === 'research' && m.id === researchMessageId,
+      );
+
+      if (!hasResearchMessage) {
+        add({
+          id: researchMessageId,
+          role: 'research',
+          query: researchQuery,
+          steps: researchSteps,
+          status: researchStatus,
+          nodeIds: researchNodeIds,
+        });
+      } else {
+        update(researchMessageId, (m) =>
+          m.role === 'research'
+            ? {
+                ...m,
+                steps: researchSteps,
+                status: researchStatus,
+                nodeIds: researchNodeIds,
+              }
+            : m,
+        );
+      }
     }
   }, [researchStatus, researchQuery, researchSteps, researchNodeIds]);
 
@@ -104,7 +107,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       role: 'user',
       content: input,
     };
-    setMessages((prev) => [...prev, userMessage]);
+    addMessage(userMessage);
 
     // Start research
     const query = input;
@@ -146,7 +149,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       content: input,
     };
 
-    setMessages((prev) => [...prev, userMessage]);
+    addMessage(userMessage);
     setInput('');
     setIsLoading(true);
 
@@ -155,7 +158,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
 
     await chatApi.streamMessage(
       userMessage.content,
-      threadIdRef.current,
+      threadId,
       selectedSourceIds,
       {
         onUpdate: (payload: ChatStreamUpdatePayload) => {
@@ -164,25 +167,22 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           // Handle Agent Updates (LLM Text)
           if (node === 'agent' && message) {
             if (message.content) {
-              setMessages((prev) => {
-                const existing = prev.find((m) => m.id === assistantId);
-                if (existing) {
-                  return prev.map((m) =>
-                    m.id === assistantId
-                      ? { ...m, content: message.content }
-                      : m,
-                  );
-                } else {
-                  return [
-                    ...prev,
-                    {
-                      id: assistantId,
-                      role: 'assistant',
-                      content: message.content,
-                    },
-                  ];
-                }
-              });
+              const existing = useChatStore
+                .getState()
+                .messages.find((m) => m.id === assistantId);
+              if (existing) {
+                updateMessage(assistantId, (m) =>
+                  m.role === 'user' || m.role === 'assistant'
+                    ? { ...m, content: message.content }
+                    : m,
+                );
+              } else {
+                addMessage({
+                  id: assistantId,
+                  role: 'assistant',
+                  content: message.content,
+                });
+              }
             }
 
             // Handle Tool Updates
@@ -190,26 +190,20 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
             const toolResponse = payload.toolResponse;
             if (!toolResponse) return;
 
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: createId('tool'),
-                role: 'tool',
-                toolResponse,
-              },
-            ]);
+            addMessage({
+              id: createId('tool'),
+              role: 'tool',
+              toolResponse,
+            });
           }
         },
         onError: (err) => {
           console.error(err);
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: createId('message'),
-              role: 'assistant',
-              content: 'Error: ' + err.message,
-            },
-          ]);
+          addMessage({
+            id: createId('message'),
+            role: 'assistant',
+            content: 'Error: ' + err.message,
+          });
         },
         onComplete: () => {
           setIsLoading(false);
