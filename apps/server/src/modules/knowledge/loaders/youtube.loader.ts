@@ -83,7 +83,9 @@ export class YoutubeLoader implements IDocumentLoader {
       };
     } catch (error) {
       throw new Error(
-        `YouTube loading failed: ${error instanceof Error ? error.message : String(error)}`,
+        `YouTube loading failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
       );
     }
   }
@@ -142,7 +144,9 @@ export class YoutubeLoader implements IDocumentLoader {
 
     // Some videos might not have transcripts, handle gracefully
     if (!data || !data.transcript || !Array.isArray(data.transcript)) {
-      console.warn(`No transcript found for video ${videoId} or invalid format.`);
+      console.warn(
+        `No transcript found for video ${videoId} or invalid format.`,
+      );
       return { transcript: [] };
     }
 

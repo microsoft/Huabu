@@ -27,6 +27,7 @@ import {
   shouldIngestOnUpdate,
   type NodeIngestionInfo,
 } from '../utils/ingestHelper';
+import { generateNextLabel } from '../utils/nodeLabels';
 
 const CANVAS_ID = 'default-canvas';
 const AUTOSAVE_DEBOUNCE_MS = 1000;
@@ -292,46 +293,19 @@ const useCanvasStore = create<RFState>((set, get) => ({
       String(node.data.label).trim() === ''
     ) {
       const existingNodes = get().nodes;
-
-      // Determine the prefix based on node type
       const nodeType = node.type || 'node';
-      const typeMap: Record<string, string> = {
-        frame: 'Frame',
-        image: 'Image',
-        video: 'Video',
-        web: 'Web',
-        pdf: 'PDF',
-        note: 'Note',
-        text: 'Text',
-      };
-      const prefix = typeMap[nodeType] || 'Untitled';
+      const existingLabels = existingNodes.map(
+        (n) => n.data?.label as string | undefined,
+      );
 
-      // Collect all existing numbers for this prefix
-      const existingNumbers = new Set<number>();
-      const pattern = new RegExp(`^${prefix} (\\d+)$`);
-
-      existingNodes.forEach((n) => {
-        const label = n.data?.label;
-        if (label) {
-          const match = String(label).match(pattern);
-          if (match) {
-            existingNumbers.add(parseInt(match[1], 10));
-          }
-        }
-      });
-
-      // Find the next available number
-      let nextNumber = 1;
-      while (existingNumbers.has(nextNumber)) {
-        nextNumber++;
-      }
+      const generatedLabel = generateNextLabel(nodeType, existingLabels);
 
       // Set the label
       node = {
         ...node,
         data: {
           ...node.data,
-          label: `${prefix} ${nextNumber}`,
+          label: generatedLabel,
         },
       };
     }
