@@ -18,7 +18,6 @@
 ### ID 在哪里出现？
 
 - canvasId / canvasVersion / selectedNodeIds
-
   - 传输：Chat 请求体（`SendMessageRequest`）。
   - 用途：后端从 `canvas_nodes` 反查选中节点对应的 `sourceIds`，并做版本一致性校验。
 
@@ -66,7 +65,6 @@
 后端接口：
 
 - `PUT /canvas/:canvasId/nodes/:nodeId`
-
   - body: `{ workspaceId?, type: 'note'|'text'|'web'|'pdf', title?, content?, src? }`
   - 行为：对该节点执行摄取（ingest），并 upsert `canvas_nodes(canvas_id,node_id,source_id)`
   - 返回：`{ nodeId, sourceId, success, suggestedLabel?, error? }`
@@ -95,7 +93,6 @@
 表结构（v1）：
 
 - `sources`
-
   - `type`: `web|pdf|note|text`
   - `content_text`：内容全文（NOT NULL）
 
@@ -105,7 +102,6 @@
 #### Web / PDF 摄取实现细节
 
 - Web：
-
   - 优先使用前端传来的 `content`（若提供）
   - 否则后端使用 Tavily Extract API 抓取
   - 依赖环境变量：`TAVILY_API_KEY`

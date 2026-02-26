@@ -85,8 +85,8 @@ export const TreeRowItem = React.memo(
     const bgColor = isSelected
       ? 'bg-theme-100'
       : isHighlighted
-      ? 'bg-theme-50'
-      : 'hover:bg-background';
+        ? 'bg-theme-50'
+        : 'hover:bg-background';
 
     const mergedStyle: React.CSSProperties = {
       ...style,

@@ -228,28 +228,47 @@ export const useResearchStore = create<ResearchState>((set, get) => ({
           currentStep: 'Complete!',
           endTime: Date.now(),
           frameId: event.data.frameId ?? null,
-          steps: state.steps.map((s) => ({ ...s, status: 'done' as const })),
+          steps: state.steps.map((s) =>
+            s.status === 'error' ? s : { ...s, status: 'done' as const },
+          ),
         });
         break;
       }
 
       case 'error': {
-        set({
-          status: 'error',
-          error: event.data.message,
-          currentStep: `Error: ${event.data.message}`,
-          steps: [
-            ...state.steps,
-            {
-              id: `error-${Date.now()}`,
-              type: 'thinking',
-              title: 'Error',
-              status: 'error',
-              detail: event.data.message,
-              timestamp: event.timestamp,
-            },
-          ],
-        });
+        if (event.data.recoverable) {
+          // Recoverable error: add a step but keep the current running status
+          set({
+            steps: [
+              ...state.steps,
+              {
+                id: `error-${Date.now()}`,
+                type: 'thinking',
+                title: 'Error',
+                status: 'error',
+                detail: event.data.message,
+                timestamp: event.timestamp,
+              },
+            ],
+          });
+        } else {
+          set({
+            status: 'error',
+            error: event.data.message,
+            currentStep: `Error: ${event.data.message}`,
+            steps: [
+              ...state.steps,
+              {
+                id: `error-${Date.now()}`,
+                type: 'thinking',
+                title: 'Error',
+                status: 'error',
+                detail: event.data.message,
+                timestamp: event.timestamp,
+              },
+            ],
+          });
+        }
         break;
       }
     }

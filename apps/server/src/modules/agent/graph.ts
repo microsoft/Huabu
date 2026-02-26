@@ -37,8 +37,8 @@ const callModel = async (state: typeof AgentState.State) => {
     contextMessage && lastType === 'human'
       ? [...history.slice(0, -1), contextMessage, last]
       : contextMessage
-      ? [...history, contextMessage]
-      : history;
+        ? [...history, contextMessage]
+        : history;
 
   // Invoke the model with the current history + per-turn selection context (ephemeral)
   const response = await modelWithTools.invoke(messagesForModel);
