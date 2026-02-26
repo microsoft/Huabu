@@ -47,12 +47,15 @@ function isLangChainMessage(value: unknown): value is {
   return typeof value === 'object' && value !== null;
 }
 
-function normalizeRole(message: unknown): 'user' | 'assistant' | 'tool' {
+function normalizeRole(
+  message: unknown,
+): 'user' | 'assistant' | 'tool' | 'system' {
   if (!isLangChainMessage(message)) return 'assistant';
 
   const type = message._getType?.();
   const ctorName = message.constructor?.name;
 
+  if (type === 'system' || ctorName === 'SystemMessage') return 'system';
   if (type === 'tool' || ctorName === 'ToolMessage') return 'tool';
 
   return type === 'human' || ctorName === 'HumanMessage' ? 'user' : 'assistant';
@@ -135,11 +138,9 @@ const chatRoutes: FastifyPluginAsync = async (
       const { threadId } = request.params;
 
       if (!threadId || threadId.trim().length === 0) {
-        return reply
-          .code(400)
-          .send({
-            error: 'threadId is required',
-          } as unknown as ChatHistoryResponse);
+        return reply.code(400).send({
+          error: 'threadId is required',
+        } as unknown as ChatHistoryResponse);
       }
 
       const config = { configurable: { thread_id: threadId } };
