@@ -28,6 +28,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   // Persistent chat state (survives page refresh)
   const messages = useChatStore((state) => state.messages);
   const threadId = useChatStore((state) => state.threadId);
+  const isHistoryLoaded = useChatStore((state) => state.isHistoryLoaded);
   const addMessage = useChatStore((state) => state.addMessage);
   const updateMessage = useChatStore((state) => state.updateMessage);
 
@@ -57,6 +58,33 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   useEffect(() => {
     scrollToBottom();
   }, [messages, isLoading]);
+
+  // Load history from server on first mount (once per thread)
+  useEffect(() => {
+    // Read current value from store directly to avoid stale closure
+    if (useChatStore.getState().isHistoryLoaded) return;
+
+    const { setMessages: set, setHistoryLoaded: setLoaded } =
+      useChatStore.getState();
+
+    chatApi
+      .fetchHistory(threadId)
+      .then((res) => {
+        const loaded: ChatMessage[] = res.messages.map((m, i) => ({
+          // Use a stable, position-based ID so React reconciliation is consistent
+          id: `history-${i}`,
+          role: m.role,
+          content: m.content,
+        }));
+        set(loaded);
+        setLoaded(true);
+      })
+      .catch((err: unknown) => {
+        // Non-fatal: just start with an empty list
+        console.warn('Could not load chat history:', err);
+        setLoaded(true);
+      });
+  }, [threadId]);
 
   // Sync research state to messages
   useEffect(() => {
@@ -234,7 +262,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       <div className="flex h-full flex-col gap-2 overflow-visible">
         <MessageList
           messages={messages}
-          isLoading={isLoading}
+          isLoading={isLoading || !isHistoryLoaded}
           endRef={messagesEndRef}
         />
 
@@ -243,7 +271,9 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           value={input}
           onChange={setInput}
           onSubmit={handleSubmit}
-          disabled={isLoading || researchStatus === 'running'}
+          disabled={
+            isLoading || !isHistoryLoaded || researchStatus === 'running'
+          }
         />
       </div>
     </SidebarPanel>

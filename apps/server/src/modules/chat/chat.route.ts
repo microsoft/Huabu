@@ -7,6 +7,7 @@ import { getCheckpointer } from '../agent/store/index.js';
 import { buildContext } from '../knowledge/index.js';
 
 import type {
+  ChatHistoryResponse,
   ChatStreamUpdatePayload,
   SendMessageRequest,
   SendMessageResponse,
@@ -124,6 +125,52 @@ const chatRoutes: FastifyPluginAsync = async (
   const checkpointer = await getCheckpointer();
   const agent = createGraph({ checkpointer });
 
+  /**
+   * GET /chat/history/:threadId
+   * Return the persisted user/assistant message history for a thread.
+   */
+  fastify.get<{ Params: { threadId: string }; Reply: ChatHistoryResponse }>(
+    '/history/:threadId',
+    async function (request, reply) {
+      const { threadId } = request.params;
+
+      if (!threadId || threadId.trim().length === 0) {
+        return reply
+          .code(400)
+          .send({
+            error: 'threadId is required',
+          } as unknown as ChatHistoryResponse);
+      }
+
+      const config = { configurable: { thread_id: threadId } };
+      const state = await agent.getState(config);
+      const rawMessages: unknown[] = Array.isArray(
+        (state?.values as { messages?: unknown })?.messages,
+      )
+        ? ((state.values as { messages: unknown[] }).messages as unknown[])
+        : [];
+
+      // Return only human/AI message pairs; skip system and tool messages
+      // to keep the response lightweight and UI-friendly.
+      const messages = rawMessages
+        .filter((m) => {
+          const role = normalizeRole(m);
+          return role === 'user' || role === 'assistant';
+        })
+        .map((m) => ({
+          role: normalizeRole(m) as 'user' | 'assistant',
+          content: normalizeContent(m),
+        }))
+        .filter((m) => m.content.trim().length > 0);
+
+      return reply.send({ threadId, messages });
+    },
+  );
+
+  /**
+   * POST /chat
+   * Start a new chat message and stream results
+   */
   fastify.post<{ Body: SendMessageRequest; Reply: SendMessageResponse }>(
     '/',
     async function (request, reply) {

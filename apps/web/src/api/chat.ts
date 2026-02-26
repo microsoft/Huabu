@@ -1,6 +1,7 @@
 import { API_CONFIG } from '../config/api';
 
 import type {
+  ChatHistoryResponse,
   SendMessageRequest,
   ChatStreamUpdatePayload,
 } from '@sediment/shared';
@@ -12,6 +13,15 @@ export interface StreamCallbacks {
 }
 
 export const chatApi = {
+  fetchHistory: async (threadId: string): Promise<ChatHistoryResponse> => {
+    const response = await fetch(
+      `${API_CONFIG.API_URL}/chat/history/${encodeURIComponent(threadId)}`,
+    );
+    if (!response.ok) {
+      throw new Error(`Failed to load history: ${response.status}`);
+    }
+    return (await response.json()) as ChatHistoryResponse;
+  },
   streamMessage: async (
     content: string,
     threadId: string,
