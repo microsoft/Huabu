@@ -1,13 +1,18 @@
 import { create } from 'zustand';
 
 import type {
+  ResearchAgentEvent,
   ResearchConfig,
-  ResearchEvent,
   ResearchStep,
 } from '@sediment/shared';
 
 export type ResearchStatus = 'idle' | 'running' | 'completed' | 'error';
 
+/**
+ * Research Store - UI-only state for current research session
+ * Note: Research state persistence is handled by backend checkpoint,
+ * not by this store. This only manages temporary UI state.
+ */
 export interface ResearchState {
   /**
    * Current research status
@@ -66,7 +71,7 @@ export interface ResearchState {
 
   // Actions
   startResearch: (query: string, config: ResearchConfig) => void;
-  handleEvent: (event: ResearchEvent) => void;
+  handleEvent: (event: ResearchAgentEvent) => void;
   completeResearch: () => void;
   setError: (error: string) => void;
   reset: () => void;
@@ -104,130 +109,146 @@ export const useResearchStore = create<ResearchState>((set, get) => ({
 
   handleEvent: (event) => {
     const state = get();
+    const { type, timestamp, data } = event;
+    const tool = data.toolResponse?.tool as string | undefined;
 
-    switch (event.type) {
-      case 'thinking': {
-        set({
-          currentStep: event.data.step,
-          steps: [
-            ...state.steps.filter((s) => s.type !== 'thinking'),
-            {
-              id: `thinking-${event.timestamp}`,
-              type: 'thinking',
-              title: event.data.step,
-              status: 'running',
-              detail: event.data.content,
-              timestamp: event.timestamp,
-            },
-          ],
-        });
-        break;
-      }
-
-      case 'searching': {
-        set({
-          currentStep: 'Searching...',
-          steps: [
-            ...state.steps.map((s) =>
-              s.type === 'thinking' ? { ...s, status: 'done' as const } : s,
-            ),
-            {
-              id: `searching-${event.timestamp}`,
-              type: 'searching',
-              title: `Searching: ${event.data.query}`,
-              status: 'running',
-              detail: `Found ${event.data.resultCount} results`,
-              timestamp: event.timestamp,
-            },
-          ],
-        });
-        break;
-      }
-
-      case 'node_created': {
-        set({
-          createdNodeIds: [...state.createdNodeIds, event.data.nodeId],
-          steps: state.steps.map((s) =>
-            s.type === 'searching' ? { ...s, status: 'done' as const } : s,
-          ),
-        });
-        break;
-      }
-
-      case 'ingesting': {
-        const ingestingId = `ingesting-${event.data.nodeId}`;
-        const existingStep = state.steps.find((s) => s.id === ingestingId);
-
-        if (existingStep) {
-          // Update existing ingesting step
+    switch (type) {
+      case 'update': {
+        // --- Query analysis: planning step ---
+        if (tool === 'research_query_analysis') {
+          const d =
+            data.toolResponse?.status === 'success'
+              ? (data.toolResponse.data as {
+                  query?: string;
+                  subQueries?: string[];
+                })
+              : undefined;
           set({
-            currentStep: 'Processing content...',
-            steps: state.steps.map((s) =>
-              s.id === ingestingId
-                ? {
-                    ...s,
-                    status: event.data.status === 'done' ? 'done' : 'running',
-                    detail: event.data.error,
-                    timestamp: event.timestamp,
-                  }
-                : s,
-            ),
-          });
-        } else {
-          // Add new ingesting step
-          set({
-            currentStep: 'Processing content...',
+            currentStep: 'Analyzing query...',
             steps: [
-              ...state.steps,
+              ...state.steps.filter((s) => s.type !== 'thinking'),
               {
-                id: ingestingId,
-                type: 'ingesting',
-                title: 'Ingesting content',
-                status: event.data.status === 'done' ? 'done' : 'running',
-                detail: event.data.error,
-                nodeIds: [event.data.nodeId],
-                timestamp: event.timestamp,
+                id: `thinking-${timestamp}`,
+                type: 'thinking',
+                title: 'Query Analysis',
+                status: 'done',
+                detail: d?.subQueries?.join(', ') ?? d?.query ?? '',
+                timestamp,
               },
             ],
           });
+          break;
         }
-        break;
-      }
 
-      case 'synthesis': {
-        set({
-          currentStep: 'Generating insights...',
-          steps: [
-            ...state.steps.map((s) =>
-              s.type === 'ingesting' ? { ...s, status: 'done' as const } : s,
-            ),
-            {
-              id: `synthesis-${event.timestamp}-${event.data.nodeId}`,
-              type: 'synthesizing',
-              title: 'AI Synthesis',
-              status: 'done',
-              detail: event.data.content.slice(0, 100) + '...',
-              nodeIds: [event.data.nodeId, ...event.data.relatedNodeIds],
-              timestamp: event.timestamp,
-            },
-          ],
-          createdNodeIds: [
-            ...state.createdNodeIds,
-            event.data.nodeId,
-            ...event.data.relatedNodeIds.filter(
-              (id: string) => !state.createdNodeIds.includes(id),
-            ),
-          ],
-        });
+        // --- Multi-search: searching step ---
+        if (tool === 'research_multi_search') {
+          const d =
+            data.toolResponse?.status === 'success'
+              ? (data.toolResponse.data as {
+                  nodeCount?: number;
+                  resultCount?: number;
+                  queries?: string[];
+                })
+              : undefined;
+          set({
+            currentStep: 'Searching...',
+            steps: [
+              ...state.steps.map((s) =>
+                s.type === 'thinking' ? { ...s, status: 'done' as const } : s,
+              ),
+              {
+                id: `searching-${timestamp}`,
+                type: 'searching',
+                title: 'Web Search',
+                status: 'done',
+                detail: `Found ${d?.resultCount ?? 0} results across ${
+                  d?.nodeCount ?? 0
+                } nodes`,
+                timestamp,
+              },
+            ],
+          });
+          break;
+        }
+
+        // --- Ingestion: processing step ---
+        if (tool === 'research_ingestion') {
+          const d =
+            data.toolResponse?.status === 'success'
+              ? (data.toolResponse.data as {
+                  succeeded?: number;
+                  failed?: number;
+                })
+              : undefined;
+          set({
+            currentStep: 'Processing content...',
+            steps: [
+              ...state.steps.map((s) =>
+                s.type === 'searching' ? { ...s, status: 'done' as const } : s,
+              ),
+              {
+                id: `ingesting-${timestamp}`,
+                type: 'ingesting',
+                title: 'Content Ingestion',
+                status: 'done',
+                detail: `Processed: ${d?.succeeded ?? 0} ok, ${
+                  d?.failed ?? 0
+                } failed`,
+                timestamp,
+              },
+            ],
+          });
+          break;
+        }
+
+        // --- Canvas organization: organizing step ---
+        if (tool === 'research_canvas_organization') {
+          const d =
+            data.toolResponse?.status === 'success'
+              ? (data.toolResponse.data as {
+                  frameId?: string;
+                  nodeCount?: number;
+                  grouped?: boolean;
+                })
+              : undefined;
+          set({
+            currentStep: 'Organizing canvas...',
+            steps: [
+              ...state.steps.map((s) =>
+                s.type === 'ingesting' ? { ...s, status: 'done' as const } : s,
+              ),
+              {
+                id: `organizing-${timestamp}`,
+                type: 'synthesizing',
+                title: 'Canvas Organization',
+                status: 'done',
+                detail: `${d?.nodeCount ?? 0} nodes${
+                  d?.grouped ? ' grouped in frame' : ''
+                }`,
+                timestamp,
+              },
+            ],
+          });
+          break;
+        }
+
+        // --- Synthesis streaming (tokens from LLM, no toolResponse) ---
+        if (data.node === 'synthesis' && !data.toolResponse) {
+          set({ currentStep: 'Generating insights...' });
+          break;
+        }
+
         break;
       }
 
       case 'complete': {
+        const frameId =
+          typeof data.meta?.frameId === 'string' ? data.meta.frameId : null;
         set({
           status: 'completed',
           currentStep: 'Complete!',
           endTime: Date.now(),
-          frameId: event.data.frameId ?? null,
+          frameId,
           steps: state.steps.map((s) =>
             s.status === 'error' ? s : { ...s, status: 'done' as const },
           ),
@@ -236,39 +257,26 @@ export const useResearchStore = create<ResearchState>((set, get) => ({
       }
 
       case 'error': {
-        if (event.data.recoverable) {
-          // Recoverable error: add a step but keep the current running status
-          set({
-            steps: [
-              ...state.steps,
-              {
-                id: `error-${Date.now()}`,
-                type: 'thinking',
-                title: 'Error',
-                status: 'error',
-                detail: event.data.message,
-                timestamp: event.timestamp,
-              },
-            ],
-          });
-        } else {
-          set({
-            status: 'error',
-            error: event.data.message,
-            currentStep: `Error: ${event.data.message}`,
-            steps: [
-              ...state.steps,
-              {
-                id: `error-${Date.now()}`,
-                type: 'thinking',
-                title: 'Error',
-                status: 'error',
-                detail: event.data.message,
-                timestamp: event.timestamp,
-              },
-            ],
-          });
-        }
+        const message =
+          typeof data.meta?.message === 'string'
+            ? data.meta.message
+            : 'An unknown error occurred';
+        set({
+          status: 'error',
+          error: message,
+          currentStep: `Error: ${message}`,
+          steps: [
+            ...state.steps,
+            {
+              id: `error-${Date.now()}`,
+              type: 'thinking',
+              title: 'Error',
+              status: 'error',
+              detail: message,
+              timestamp,
+            },
+          ],
+        });
         break;
       }
     }

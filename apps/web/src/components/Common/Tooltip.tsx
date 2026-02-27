@@ -96,8 +96,8 @@ export const Tooltip = ({
     isOpen && typeof children.props['aria-describedby'] === 'string'
       ? `${children.props['aria-describedby']} ${tooltipId}`
       : isOpen
-        ? tooltipId
-        : children.props['aria-describedby'];
+      ? tooltipId
+      : children.props['aria-describedby'];
 
   const wrappedChild = cloneElement(children, {
     'aria-describedby': describedBy,

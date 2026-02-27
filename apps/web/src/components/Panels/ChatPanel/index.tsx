@@ -1,10 +1,16 @@
-import { createId, type ResearchConfig } from '@sediment/shared';
-import { PanelRightClose, PanelRightOpen } from 'lucide-react';
+import {
+  createId,
+  type ResearchConfig,
+  type ToolResponse,
+} from '@sediment/shared';
+import { PanelRightClose, PanelRightOpen, Plus } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 
 import { chatApi } from '@/api/chat';
 import { researchApi } from '@/api/research';
+import { GhostButton } from '@/components/Common/GhostButton';
 import useCanvasStore from '@/store/canvasStore';
+import { useChatStore } from '@/store/chatStore';
 import { useResearchStore } from '@/store/researchStore';
 
 import { SidebarPanel } from '../SidebarPanel';
@@ -22,10 +28,16 @@ interface ChatPanelProps {
 
 export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const [input, setInput] = useState('');
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
-  const threadIdRef = useRef<string>(createId('thread'));
+  // Persistent chat state (survives page refresh)
+  const threadId = useChatStore((state) => state.threadId);
+  const messages = useChatStore((state) => state.messages);
+  const isHistoryLoaded = useChatStore((state) => state.isHistoryLoaded);
+  const addMessage = useChatStore((state) => state.addMessage);
+  const updateMessage = useChatStore((state) => state.updateMessage);
+  const setLastAction = useChatStore((state) => state.setLastAction);
+  const clearMessages = useChatStore((state) => state.clearMessages);
 
   const getSelectedSourceIds = useCanvasStore(
     (state) => state.getSelectedSourceIds,
@@ -34,11 +46,8 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const canvasVersion = useCanvasStore((state) => state.version);
   const loadCanvas = useCanvasStore((state) => state.loadCanvas);
 
-  // Research store
+  // Research store (for current session UI state only, not persisted)
   const researchStatus = useResearchStore((state) => state.status);
-  const researchQuery = useResearchStore((state) => state.query);
-  const researchSteps = useResearchStore((state) => state.steps);
-  const researchNodeIds = useResearchStore((state) => state.createdNodeIds);
   const startResearchState = useResearchStore((state) => state.startResearch);
   const handleEvent = useResearchStore((state) => state.handleEvent);
   const completeResearch = useResearchStore((state) => state.completeResearch);
@@ -54,46 +63,69 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     scrollToBottom();
   }, [messages, isLoading]);
 
-  // Sync research state to messages
+  // Load history from server on first mount (once per thread)
   useEffect(() => {
-    if (researchStatus !== 'idle' && researchQuery) {
-      // Find existing research message or create new one
-      const researchMessageId = 'research-' + researchQuery;
+    // Read current value from store directly to avoid stale closure
+    if (useChatStore.getState().isHistoryLoaded) return;
 
-      setMessages((prev) => {
-        const hasResearchMessage = prev.some(
-          (m) => m.role === 'research' && m.id === researchMessageId,
+    // Guard against threadId changing while the async fetch is in flight.
+    // If the effect is cleaned up (e.g. threadId changed or component unmounted)
+    // before the fetch resolves, we discard the stale result.
+    let cancelled = false;
+
+    const {
+      threadId: tid,
+      lastAction: action,
+      setMessages: set,
+      setHistoryLoaded: setLoaded,
+    } = useChatStore.getState();
+
+    // Load checkpoint based on last action type
+    // Both chat and research now return ChatHistoryResponse with messages[]
+    const api = action === 'research' ? researchApi : chatApi;
+
+    api
+      .fetchHistory(tid)
+      .then((res) => {
+        if (cancelled) return;
+
+        const serverMessages: ChatMessage[] = res.messages.map(
+          (m, i): ChatMessage => {
+            const id = `history-${i}`;
+
+            // ChatHistoryItem is a union type
+            // Check for tool message variant
+            if ('toolResponse' in m) {
+              return {
+                id,
+                role: 'tool',
+                toolResponse: m.toolResponse as ToolResponse<string, unknown>,
+              };
+            }
+
+            // Otherwise it's user/assistant message variant
+            return {
+              id,
+              role: m.role,
+              content: m.content || '',
+            };
+          },
         );
-
-        if (!hasResearchMessage) {
-          // Add research message
-          return [
-            ...prev,
-            {
-              id: researchMessageId,
-              role: 'research',
-              query: researchQuery,
-              steps: researchSteps,
-              status: researchStatus,
-              nodeIds: researchNodeIds,
-            },
-          ];
-        } else {
-          // Update existing research message
-          return prev.map((m) =>
-            m.role === 'research' && m.id === researchMessageId
-              ? {
-                  ...m,
-                  steps: researchSteps,
-                  status: researchStatus,
-                  nodeIds: researchNodeIds,
-                }
-              : m,
-          );
-        }
+        // All messages come from backend checkpoint
+        set(serverMessages);
+        setLoaded(true);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        // Non-fatal: just start with an empty list
+        console.warn(`Could not load ${action} history:`, err);
+        setLoaded(true);
       });
-    }
-  }, [researchStatus, researchQuery, researchSteps, researchNodeIds]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [threadId]);
 
   const handleDeepResearch = async () => {
     if (!input.trim() || isLoading || researchStatus === 'running') return;
@@ -104,14 +136,17 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       role: 'user',
       content: input,
     };
-    setMessages((prev) => [...prev, userMessage]);
+    addMessage(userMessage);
+
+    // Record last action for checkpoint restoration
+    setLastAction('research');
 
     // Start research
     const query = input;
     setInput('');
 
     const config: ResearchConfig = {
-      searchDepth: 'advanced',
+      searchDepth: 'basic',
       placement: 'auto',
       groupWithFrame: true,
     };
@@ -119,18 +154,37 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     startResearchState(query, config);
 
     try {
-      await researchApi.startResearch(query, canvasId, canvasVersion, config, {
-        onEvent: handleEvent,
-        onError: (error: Error) => {
-          console.error('Research error:', error);
-          setError(error.message);
+      await researchApi.startResearch(
+        query,
+        canvasId,
+        canvasVersion,
+        threadId,
+        config,
+        {
+          onEvent: (event) => {
+            // Update research state
+            handleEvent(event);
+
+            // Add research steps as tool messages to chat
+            if (event.data.toolResponse) {
+              addMessage({
+                id: createId('tool'),
+                role: 'tool',
+                toolResponse: event.data.toolResponse,
+              });
+            }
+          },
+          onError: (error: Error) => {
+            console.error('Research error:', error);
+            setError(error.message);
+          },
+          onComplete: () => {
+            completeResearch();
+            // Reload canvas after research completes
+            loadCanvas();
+          },
         },
-        onComplete: () => {
-          completeResearch();
-          // Reload canvas after research completes
-          loadCanvas();
-        },
-      });
+      );
     } catch (err) {
       console.error('Research failed:', err);
       setError(err instanceof Error ? err.message : 'Unknown error');
@@ -140,13 +194,16 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const handleChat = async () => {
     if (!input.trim() || isLoading) return;
 
+    // Record last action for checkpoint restoration
+    setLastAction('chat');
+
     const userMessage: ChatMessage = {
       id: createId('message'),
       role: 'user',
       content: input,
     };
 
-    setMessages((prev) => [...prev, userMessage]);
+    addMessage(userMessage);
     setInput('');
     setIsLoading(true);
 
@@ -155,7 +212,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
 
     await chatApi.streamMessage(
       userMessage.content,
-      threadIdRef.current,
+      threadId,
       selectedSourceIds,
       {
         onUpdate: (payload: ChatStreamUpdatePayload) => {
@@ -164,25 +221,24 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           // Handle Agent Updates (LLM Text)
           if (node === 'agent' && message) {
             if (message.content) {
-              setMessages((prev) => {
-                const existing = prev.find((m) => m.id === assistantId);
-                if (existing) {
-                  return prev.map((m) =>
-                    m.id === assistantId
-                      ? { ...m, content: message.content }
-                      : m,
-                  );
-                } else {
-                  return [
-                    ...prev,
-                    {
-                      id: assistantId,
-                      role: 'assistant',
-                      content: message.content,
-                    },
-                  ];
-                }
-              });
+              const existing = useChatStore
+                .getState()
+                .messages.find((m) => m.id === assistantId);
+              if (existing) {
+                // Append new token to existing content
+                updateMessage(assistantId, (m) =>
+                  m.role === 'user' || m.role === 'assistant'
+                    ? { ...m, content: m.content + message.content }
+                    : m,
+                );
+              } else {
+                // First token - create new message
+                addMessage({
+                  id: assistantId,
+                  role: 'assistant',
+                  content: message.content,
+                });
+              }
             }
 
             // Handle Tool Updates
@@ -190,26 +246,20 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
             const toolResponse = payload.toolResponse;
             if (!toolResponse) return;
 
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: createId('tool'),
-                role: 'tool',
-                toolResponse,
-              },
-            ]);
+            addMessage({
+              id: createId('tool'),
+              role: 'tool',
+              toolResponse,
+            });
           }
         },
         onError: (err) => {
           console.error(err);
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: createId('message'),
-              role: 'assistant',
-              content: 'Error: ' + err.message,
-            },
-          ]);
+          addMessage({
+            id: createId('message'),
+            role: 'assistant',
+            content: 'Error: ' + err.message,
+          });
         },
         onComplete: () => {
           setIsLoading(false);
@@ -228,6 +278,11 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     }
   };
 
+  const handleNewChat = () => {
+    if (isLoading || researchStatus === 'running') return;
+    clearMessages();
+  };
+
   return (
     <SidebarPanel
       title="Chat"
@@ -236,11 +291,21 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       iconCollapsed={<PanelRightOpen size={16} />}
       iconExpanded={<PanelRightClose size={16} />}
       className="border-border border-l"
+      tools={
+        <GhostButton
+          onClick={handleNewChat}
+          title="New conversation"
+          disabled={isLoading || researchStatus === 'running'}
+          className="text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Plus size={16} />
+        </GhostButton>
+      }
     >
       <div className="flex h-full flex-col gap-2 overflow-visible">
         <MessageList
           messages={messages}
-          isLoading={isLoading}
+          isLoading={isLoading || !isHistoryLoaded}
           endRef={messagesEndRef}
         />
 
@@ -249,7 +314,9 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           value={input}
           onChange={setInput}
           onSubmit={handleSubmit}
-          disabled={isLoading || researchStatus === 'running'}
+          disabled={
+            isLoading || !isHistoryLoaded || researchStatus === 'running'
+          }
         />
       </div>
     </SidebarPanel>

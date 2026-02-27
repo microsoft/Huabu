@@ -27,8 +27,8 @@ export const ResearchState = Annotation.Root({
     reducer: (x, y) => y ?? x,
   }),
 
-  /** Research session ID (for grouping nodes) */
-  sessionId: Annotation<string>({
+  /** Thread ID (for checkpoint and grouping nodes) */
+  threadId: Annotation<string>({
     reducer: (x, y) => y ?? x,
   }),
 

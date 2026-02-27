@@ -6,6 +6,7 @@
  */
 
 import type { PlacementStrategy } from './canvas.js';
+import type { ToolResponse } from './chat.js';
 
 // ==================== Request Types ====================
 
@@ -29,6 +30,8 @@ export interface ResearchRequest {
   canvasId: string;
   /** Current canvas version (for optimistic locking) */
   canvasVersion: number;
+  /** Chat thread ID - research will share the same checkpoint */
+  threadId: string;
   /** Optional: selected source IDs for context */
   selectedSourceIds?: string[];
   /** Research configuration */
@@ -37,112 +40,45 @@ export interface ResearchRequest {
 
 // ==================== Event Types ====================
 
-export type ResearchEventType =
-  | 'thinking' // Query analysis and planning
-  | 'searching' // Web search in progress
-  | 'node_created' // Canvas node was created
-  | 'ingesting' // Content ingestion in progress
-  | 'synthesis' // AI synthesis/analysis
-  | 'complete' // Research completed
-  | 'error'; // Error occurred
-
-export interface BaseResearchEvent {
-  type: ResearchEventType;
+/**
+ * Unified research event — mirrors the backend AgentEvent structure.
+ * All research progress is carried as `update` events with `data.toolResponse`
+ * identifying the step type. This matches the chat agent's event format exactly.
+ */
+export interface ResearchAgentEvent {
+  type: 'update' | 'complete' | 'error';
   timestamp: number;
-}
-
-export interface ThinkingEvent extends BaseResearchEvent {
-  type: 'thinking';
   data: {
-    /** Current step description */
-    step: string;
-    /** Details about the thinking process */
-    content: string;
+    /** Graph node that produced this event */
+    node?: string;
+    /** Text message (token delta for synthesis, summary for other nodes) */
+    message?: { role: string; content: string };
+    /**
+     * Structured step output. `tool` field identifies the step:
+     *   research_query_analysis | research_multi_search |
+     *   research_ingestion | research_canvas_organization
+     */
+    toolResponse?: ToolResponse<string, unknown>;
+    /** Metadata for complete / error events */
+    meta?: Record<string, unknown>;
   };
 }
 
-export interface SearchingEvent extends BaseResearchEvent {
-  type: 'searching';
-  data: {
-    /** Search query */
-    query: string;
-    /** Number of results found */
-    resultCount: number;
-  };
-}
-
-export interface NodeCreatedEvent extends BaseResearchEvent {
-  type: 'node_created';
-  data: {
-    nodeId: string;
-    nodeType: 'text' | 'web' | 'note' | 'frame';
-    position: { x: number; y: number };
-    data: Record<string, unknown>;
-  };
-}
-
-export interface IngestingEvent extends BaseResearchEvent {
-  type: 'ingesting';
-  data: {
-    nodeId: string;
-    sourceId: string;
-    status: 'pending' | 'done' | 'error';
-    error?: string;
-  };
-}
-
-export interface SynthesisEvent extends BaseResearchEvent {
-  type: 'synthesis';
-  data: {
-    /** AI-generated insight/analysis */
-    content: string;
-    /** Node ID containing the synthesis */
-    nodeId: string;
-    /** Related source node IDs */
-    relatedNodeIds: string[];
-  };
-}
-
-export interface CompleteEvent extends BaseResearchEvent {
-  type: 'complete';
-  data: {
-    /** Frame ID wrapping all research nodes (if created) */
-    frameId?: string;
-    /** New canvas version after all updates */
-    canvasVersion: number;
-    /** Total nodes created */
-    nodeCount: number;
-    /** Research duration in milliseconds */
-    duration: number;
-  };
-}
-
-export interface ErrorEvent extends BaseResearchEvent {
-  type: 'error';
-  data: {
-    /** User-facing error message */
-    message: string;
-    /** Step where error occurred */
-    step?: string;
-    /** Whether research can continue */
-    recoverable: boolean;
-  };
-}
-
-export type ResearchEvent =
-  | ThinkingEvent
-  | SearchingEvent
-  | NodeCreatedEvent
-  | IngestingEvent
-  | SynthesisEvent
-  | CompleteEvent
-  | ErrorEvent;
+/** @deprecated Use ResearchAgentEvent */
+export type ResearchEvent = ResearchAgentEvent;
 
 // ==================== Response Types ====================
 
-export interface ResearchStreamEvent {
-  event: 'update' | 'end' | 'error';
-  data: ResearchEvent | { message: string };
+export interface ResearchHistoryResponse {
+  threadId: string;
+  query: string;
+  status: 'idle' | 'running' | 'completed' | 'error';
+  steps: ResearchStep[];
+  createdNodeIds: string[];
+  frameId?: string;
+  error?: string;
+  startTime?: number;
+  endTime?: number;
 }
 
 // ==================== Internal State Types ====================
@@ -165,3 +101,59 @@ export interface ResearchStep {
   nodeIds?: string[];
   timestamp: number;
 }
+
+// ==================== Tool Response Types (for unified message display) ====================
+
+/**
+ * Research steps are now represented as tool responses for unified display.
+ * This allows all agent intermediate steps to be shown consistently with ToolMessage component.
+ */
+
+export type ResearchThinkingToolResponse = ToolResponse<
+  'research_thinking',
+  {
+    step: string;
+    content: string;
+  }
+>;
+
+export type ResearchSearchingToolResponse = ToolResponse<
+  'research_searching',
+  {
+    query: string;
+    resultCount: number;
+  }
+>;
+
+export type ResearchNodeCreatedToolResponse = ToolResponse<
+  'research_node_created',
+  {
+    nodeIds: string[];
+    nodeCount: number;
+  }
+>;
+
+export type ResearchSynthesisToolResponse = ToolResponse<
+  'research_synthesis',
+  {
+    content: string;
+    nodeId: string;
+    relatedNodeIds: string[];
+  }
+>;
+
+export type ResearchFrameCreatedToolResponse = ToolResponse<
+  'research_frame_created',
+  {
+    frameId: string;
+    label: string;
+  }
+>;
+
+/** Union type for all research tool responses */
+export type ResearchToolResponse =
+  | ResearchThinkingToolResponse
+  | ResearchSearchingToolResponse
+  | ResearchNodeCreatedToolResponse
+  | ResearchSynthesisToolResponse
+  | ResearchFrameCreatedToolResponse;
