@@ -195,10 +195,9 @@ export const ExpandedNodePanel = () => {
           type={activeItem.type}
           data={activeItem.data}
           readOnly={activeItem.readOnly}
-          onContentChange={
+          onDataChange={
             activeItem.isNode && expandedNodeId
-              ? (newContent) =>
-                  updateNodeData(expandedNodeId, { content: newContent })
+              ? (patch) => updateNodeData(expandedNodeId, patch)
               : undefined
           }
         />

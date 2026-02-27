@@ -171,6 +171,9 @@ export const Canvas: React.FC = () => {
             position,
             data: {
               content: payload.data.content,
+              ...(payload.data.contentJson
+                ? { contentJson: payload.data.contentJson }
+                : {}),
             },
           };
         }
@@ -259,6 +262,7 @@ export const Canvas: React.FC = () => {
         selectionOnDrag={tool === 'select'}
         panOnScroll={true}
         zoomOnScroll={true}
+        zoomOnDoubleClick={false}
         minZoom={0.1}
         maxZoom={5}
         onlyRenderVisibleElements

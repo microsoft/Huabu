@@ -97,8 +97,9 @@ const NoteDragHandleButton: FC<NoteDragHandleButtonProps> = (props) => {
         let dragImageElement: HTMLElement | null = null;
         let dragImageOffset: DragImageOffset | undefined;
         // Prefer selected blocks when a selection exists, so we keep block-level structure.
+        let dragBlocks: typeof selectedBlocks | null = null;
         if (selectedBlocks.length > 1) {
-          noteContent = editor.blocksToMarkdownLossy(selectedBlocks).trim();
+          dragBlocks = selectedBlocks;
           const selectedBlocksDragImage =
             createSelectedBlocksDragImageElement();
           dragImageElement = selectedBlocksDragImage;
@@ -117,10 +118,16 @@ const NoteDragHandleButton: FC<NoteDragHandleButtonProps> = (props) => {
             }
           }
         } else if (hoveredBlock) {
-          noteContent = editor.blocksToMarkdownLossy([hoveredBlock]).trim();
+          dragBlocks = [hoveredBlock];
           dragImageElement = getBlockDragImageElement(hoveredBlock.id);
         }
-        if (noteContent.trim() === '') return;
+        if (!dragBlocks) return;
+
+        // content = Markdown (primary, human/AI readable)
+        // contentJson = BlockNote JSON (auxiliary, lossless editor round-trip)
+        noteContent = editor.blocksToMarkdownLossy(dragBlocks).trim();
+        if (!noteContent) return;
+        const dragContentJson = JSON.stringify(dragBlocks);
 
         setDragPayload(
           e,
@@ -128,6 +135,7 @@ const NoteDragHandleButton: FC<NoteDragHandleButtonProps> = (props) => {
             kind: 'note',
             data: {
               content: noteContent,
+              contentJson: dragContentJson,
             },
           },
           {

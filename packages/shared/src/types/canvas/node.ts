@@ -51,7 +51,20 @@ export interface BaseNodeData {
 /** Note node: rich content that can be ingested into knowledge base */
 export interface NoteNodeData extends BaseNodeData {
   type: 'note';
+  /**
+   * Canonical Markdown string — the primary, human/AI-readable representation.
+   * This is what gets stored in Obsidian vaults and other Markdown-based backends.
+   * May be empty for brand-new nodes that have not been saved yet.
+   */
   content: string;
+  /**
+   * Auxiliary BlockNote native JSON (lossless editor representation).
+   * Kept in sync with `content`. When this field differs from the BlockNote JSON
+   * that would be derived from `content`, `content` (Markdown) takes precedence
+   * and `contentJson` is regenerated from it.
+   * Optional: absent for legacy notes or notes created externally.
+   */
+  contentJson?: string;
   sourceId?: string;
   style?: NodeStyle;
 }
