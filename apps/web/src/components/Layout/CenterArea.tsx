@@ -76,48 +76,46 @@ export const CenterArea: React.FC = () => {
     [],
   );
 
-  /* ---- No expanded node: just canvas ---- */
-  if (!hasExpanded) {
-    return (
-      <div ref={containerRef} className="h-full w-full">
-        <Canvas />
-      </div>
-    );
-  }
-
-  /* ---- Replace mode: only expanded panel ---- */
-  if (isReplace) {
-    return (
-      <div ref={containerRef} className="h-full w-full">
-        <ExpandedNodePanel />
-      </div>
-    );
-  }
-
-  /* ---- Split mode: canvas + resize handle + expanded panel ---- */
+  // Always keep Canvas mounted in the same structural position to prevent
+  // ReactFlow from unmounting/remounting (which would re-trigger fitView and
+  // cause a visible "resize" whenever a node is expanded or a preview opens).
   const leftPercent = splitRatio * 100;
 
+  // In replace mode the canvas is hidden but kept mounted.
+  const canvasWidth = isReplace
+    ? '0%'
+    : hasExpanded
+    ? `${leftPercent}%`
+    : '100%';
+
   return (
-    <div ref={containerRef} className="flex h-full w-full">
-      {/* Canvas (left) */}
-      <div className="h-full shrink-0" style={{ width: `${leftPercent}%` }}>
+    <div ref={containerRef} className="flex h-full w-full overflow-hidden">
+      {/* Canvas – always mounted; width controlled via CSS */}
+      <div
+        className="h-full shrink-0 overflow-hidden"
+        style={{ width: canvasWidth }}
+      >
         <Canvas />
       </div>
 
-      {/* Resize handle */}
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        className="group flex w-2 shrink-0 cursor-col-resize items-center justify-center bg-transparent outline-none"
-        onPointerDown={onHandlePointerDown}
-      >
-        <div className="h-8 w-1 rounded-full bg-gray-300 opacity-0 transition-all duration-300 group-hover:h-12 group-hover:opacity-100" />
-      </div>
+      {/* Resize handle – visible only in split mode */}
+      {hasExpanded && !isReplace && (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          className="group flex w-2 shrink-0 cursor-col-resize items-center justify-center bg-transparent outline-none"
+          onPointerDown={onHandlePointerDown}
+        >
+          <div className="h-8 w-1 rounded-full bg-gray-300 opacity-0 transition-all duration-300 group-hover:h-12 group-hover:opacity-100" />
+        </div>
+      )}
 
-      {/* Expanded panel (right) */}
-      <div className="h-full min-w-0 flex-1">
-        <ExpandedNodePanel />
-      </div>
+      {/* Expanded panel – rendered only when needed */}
+      {hasExpanded && (
+        <div className={isReplace ? 'h-full w-full' : 'h-full min-w-0 flex-1'}>
+          <ExpandedNodePanel />
+        </div>
+      )}
     </div>
   );
 };

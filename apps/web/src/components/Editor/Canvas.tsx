@@ -256,13 +256,13 @@ export const Canvas: React.FC = () => {
           rfInstanceRef.current = instance;
           setRfInstance(instance);
         }}
+        onNodeDoubleClick={(e) => e.stopPropagation()}
         fitView
         attributionPosition="bottom-right"
         panOnDrag={tool === 'pan'}
         selectionOnDrag={tool === 'select'}
         panOnScroll={true}
         zoomOnScroll={true}
-        zoomOnDoubleClick={false}
         minZoom={0.1}
         maxZoom={5}
         onlyRenderVisibleElements
