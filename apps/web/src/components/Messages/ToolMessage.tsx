@@ -66,71 +66,75 @@ function ResearchToolDisplay({
 
   const { tool, data } = toolResponse;
 
-  // Research thinking
-  if (tool === 'research_thinking') {
-    const { step } = data as { step: string; content: string };
+  // Research query analysis
+  if (tool === 'research_query_analysis') {
+    const { subQueries } = data as { query: string; subQueries: string[] };
     return (
       <div className="flex justify-start">
         <div className="text-muted-foreground border-border flex items-center gap-2 rounded-2xl border bg-white px-3 py-2 text-sm">
           <Sparkles size={14} className="text-primary animate-pulse" />
-          <span>{step}</span>
+          <span>
+            Searching for:{' '}
+            <span className="font-medium">{subQueries.join(' · ')}</span>
+          </span>
         </div>
       </div>
     );
   }
 
-  // Research searching
-  if (tool === 'research_searching') {
-    const { query, resultCount } = data as {
-      query: string;
+  // Research multi-search
+  if (tool === 'research_multi_search') {
+    const { nodeCount, resultCount } = data as {
+      nodeCount: number;
       resultCount: number;
+      queries: string[];
     };
     return (
       <div className="flex justify-start">
         <div className="text-muted-foreground border-border rounded-2xl border bg-white px-3 py-2 text-sm">
-          🔍 Searched: <span className="font-medium">{query}</span> (
-          {resultCount} results)
+          🔍 Found{' '}
+          <span className="font-medium">
+            {nodeCount} source{nodeCount !== 1 ? 's' : ''}
+          </span>{' '}
+          across {resultCount} result{resultCount !== 1 ? 's' : ''}
         </div>
       </div>
     );
   }
 
-  // Research node created
-  if (tool === 'research_node_created') {
-    const { nodeCount } = data as { nodeIds: string[]; nodeCount: number };
+  // Research ingestion
+  if (tool === 'research_ingestion') {
+    const { succeeded, failed } = data as { succeeded: number; failed: number };
     return (
       <div className="flex justify-start">
         <div className="text-muted-foreground border-border rounded-2xl border bg-white px-3 py-2 text-sm">
-          ✅ Created {nodeCount} node{nodeCount !== 1 ? 's' : ''}
+          {failed > 0
+            ? `⚠️ Ingested ${succeeded} source${
+                succeeded !== 1 ? 's' : ''
+              } (${failed} failed)`
+            : `✅ Ingested ${succeeded} source${succeeded !== 1 ? 's' : ''}`}
         </div>
       </div>
     );
   }
 
-  // Research synthesis
-  if (tool === 'research_synthesis') {
-    const { relatedNodeIds } = data as {
-      content: string;
-      nodeId: string;
-      relatedNodeIds: string[];
+  // Research canvas organization
+  if (tool === 'research_canvas_organization') {
+    const { nodeCount, grouped } = data as {
+      frameId?: string;
+      nodeCount: number;
+      grouped: boolean;
     };
     return (
       <div className="flex justify-start">
         <div className="text-muted-foreground border-border rounded-2xl border bg-white px-3 py-2 text-sm">
-          💡 Generated synthesis from {relatedNodeIds.length} source
-          {relatedNodeIds.length !== 1 ? 's' : ''}
-        </div>
-      </div>
-    );
-  }
-
-  // Research frame created
-  if (tool === 'research_frame_created') {
-    const { label } = data as { frameId: string; label: string };
-    return (
-      <div className="flex justify-start">
-        <div className="text-muted-foreground border-border rounded-2xl border bg-white px-3 py-2 text-sm">
-          📦 Organized into frame: <span className="font-medium">{label}</span>
+          {grouped
+            ? `📦 Organized ${nodeCount} node${
+                nodeCount !== 1 ? 's' : ''
+              } into a frame`
+            : `✅ Research complete (${nodeCount} node${
+                nodeCount !== 1 ? 's' : ''
+              })`}
         </div>
       </div>
     );

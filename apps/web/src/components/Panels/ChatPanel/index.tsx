@@ -68,6 +68,11 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     // Read current value from store directly to avoid stale closure
     if (useChatStore.getState().isHistoryLoaded) return;
 
+    // Guard against threadId changing while the async fetch is in flight.
+    // If the effect is cleaned up (e.g. threadId changed or component unmounted)
+    // before the fetch resolves, we discard the stale result.
+    let cancelled = false;
+
     const {
       threadId: tid,
       lastAction: action,
@@ -82,6 +87,8 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     api
       .fetchHistory(tid)
       .then((res) => {
+        if (cancelled) return;
+
         const serverMessages: ChatMessage[] = res.messages.map(
           (m, i): ChatMessage => {
             const id = `history-${i}`;
@@ -109,10 +116,15 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         setLoaded(true);
       })
       .catch((err: unknown) => {
+        if (cancelled) return;
         // Non-fatal: just start with an empty list
         console.warn(`Could not load ${action} history:`, err);
         setLoaded(true);
       });
+
+    return () => {
+      cancelled = true;
+    };
   }, [threadId]);
 
   const handleDeepResearch = async () => {
