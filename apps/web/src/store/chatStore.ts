@@ -11,6 +11,8 @@ interface ChatState {
   threadId: string;
   /** True once history has been fetched from the server for the current threadId. */
   isHistoryLoaded: boolean;
+  /** Last action type - determines which checkpoint to load on refresh */
+  lastAction: 'chat' | 'research';
 
   // Actions
   addMessage: (message: ChatMessage) => void;
@@ -20,6 +22,7 @@ interface ChatState {
   ) => void;
   setMessages: (messages: ChatMessage[]) => void;
   setHistoryLoaded: (loaded: boolean) => void;
+  setLastAction: (action: 'chat' | 'research') => void;
   clearMessages: () => void;
 }
 
@@ -29,6 +32,7 @@ export const useChatStore = create<ChatState>()(
       messages: [],
       threadId: createId('thread'),
       isHistoryLoaded: false,
+      lastAction: 'chat',
 
       addMessage: (message) =>
         set((state) => ({ messages: [...state.messages, message] })),
@@ -42,6 +46,8 @@ export const useChatStore = create<ChatState>()(
 
       setHistoryLoaded: (loaded) => set({ isHistoryLoaded: loaded }),
 
+      setLastAction: (action) => set({ lastAction: action }),
+
       clearMessages: () =>
         // isHistoryLoaded stays true for the new thread — it has no server-side
         // history so there is no need to make an API call.
@@ -49,16 +55,15 @@ export const useChatStore = create<ChatState>()(
           messages: [],
           threadId: createId('thread'),
           isHistoryLoaded: true,
+          lastAction: 'chat',
         }),
     }),
     {
       name: 'sediment-chat',
-      // Persist the thread ID + any UI-only research messages.
-      // Regular user/assistant messages are loaded from the server checkpoint on mount.
-      // Tool messages (large web-search payloads) are intentionally excluded.
+      // Persist thread ID and last action type to determine which checkpoint to load
       partialize: (state) => ({
         threadId: state.threadId,
-        messages: state.messages.filter((m) => m.role === 'research'),
+        lastAction: state.lastAction,
       }),
     },
   ),

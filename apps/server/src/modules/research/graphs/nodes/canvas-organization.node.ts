@@ -4,14 +4,34 @@
  * Final step: wraps all research nodes in a frame and sets final state.
  */
 
+import { AIMessage } from '@langchain/core/messages';
+
 import { getCanvasOperationService } from '../../../canvas/canvas.operation.js';
 
 import type { ResearchState } from '../research.state.js';
+
+function progressMsg(
+  content: string,
+  toolResponseData: Record<string, unknown>,
+  status: 'success' | 'error' = 'success',
+) {
+  return new AIMessage({
+    content,
+    additional_kwargs: {
+      toolResponse: {
+        tool: 'research_canvas_organization',
+        status,
+        data: toolResponseData,
+      },
+    },
+  });
+}
 
 /**
  * Canvas Organization Node
  *
  * Wraps all research nodes in a frame for better organization.
+ * Appends an AIMessage (toolResponse) so the agent can stream structured progress.
  */
 export async function canvasOrganizationNode(
   state: typeof ResearchState.State,
@@ -26,6 +46,12 @@ export async function canvasOrganizationNode(
     return {
       endTime: Date.now(),
       finalCanvasVersion: state.canvasVersion + 1,
+      messages: [
+        progressMsg('Research complete.', {
+          nodeCount: state.createdNodeIds.length,
+          grouped: false,
+        }),
+      ],
     };
   }
 
@@ -37,6 +63,12 @@ export async function canvasOrganizationNode(
     return {
       endTime: Date.now(),
       finalCanvasVersion: state.canvasVersion,
+      messages: [
+        progressMsg('Research complete (no nodes created).', {
+          nodeCount: 0,
+          grouped: false,
+        }),
+      ],
     };
   }
 
@@ -49,7 +81,6 @@ export async function canvasOrganizationNode(
       padding: state.config?.padding,
     });
 
-    // Create frame
     const frameLabel = `🔬 ${state.query.slice(0, 40)}${
       state.query.length > 40 ? '...' : ''
     }`;
@@ -63,10 +94,7 @@ export async function canvasOrganizationNode(
       childNodeIds: allNodeIds,
       data: {
         origin: 'research',
-        research: {
-          query: state.query,
-          sessionId: state.sessionId,
-        },
+        research: { query: state.query, threadId: state.threadId },
       },
       size: { width: 900, height: 700 },
     });
@@ -77,15 +105,34 @@ export async function canvasOrganizationNode(
       frameId: frameResult.nodeId,
       endTime: Date.now(),
       finalCanvasVersion: state.canvasVersion + 1,
+      messages: [
+        progressMsg(`Organized ${allNodeIds.length} node(s) into a frame.`, {
+          frameId: frameResult.nodeId,
+          nodeCount: allNodeIds.length,
+          grouped: true,
+        }),
+      ],
     };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    console.error('[canvasOrganizationNode] Error:', message);
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : 'Unknown error';
+    console.error('[canvasOrganizationNode] Error:', errMsg);
 
     return {
-      errors: [`Canvas organization failed: ${message}`],
+      errors: [`Canvas organization failed: ${errMsg}`],
       endTime: Date.now(),
       finalCanvasVersion: state.canvasVersion + 1,
+      messages: [
+        new AIMessage({
+          content: 'Canvas organization failed.',
+          additional_kwargs: {
+            toolResponse: {
+              tool: 'research_canvas_organization',
+              status: 'error',
+              error: errMsg,
+            },
+          },
+        }),
+      ],
     };
   }
 }

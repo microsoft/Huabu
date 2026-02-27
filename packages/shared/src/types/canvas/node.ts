@@ -19,8 +19,8 @@ export type NodeOrigin = 'user' | 'research' | 'chat';
 export interface NodeResearchData {
   /** Original research query */
   query: string;
-  /** Research session ID (for grouping) */
-  sessionId?: string;
+  /** Thread ID of the research session that created this node */
+  threadId?: string;
   /** Related node IDs (for auto-connecting) */
   relatedNodeIds?: string[];
 }

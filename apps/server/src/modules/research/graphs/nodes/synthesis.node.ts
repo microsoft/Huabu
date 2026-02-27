@@ -94,7 +94,7 @@ export async function synthesisNode(
         origin: 'research',
         research: {
           query: state.query,
-          sessionId: state.sessionId,
+          threadId: state.threadId,
           relatedNodeIds: state.createdNodeIds,
         },
       },

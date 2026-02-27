@@ -33,15 +33,15 @@ function getNodeSize(node: CanvasNode): { width: number; height: number } {
     typeof node.style?.width === 'number'
       ? node.style.width
       : typeof node.style?.width === 'string'
-        ? Number.parseFloat(node.style.width)
-        : undefined;
+      ? Number.parseFloat(node.style.width)
+      : undefined;
 
   const styleHeight =
     typeof node.style?.height === 'number'
       ? node.style.height
       : typeof node.style?.height === 'string'
-        ? Number.parseFloat(node.style.height)
-        : undefined;
+      ? Number.parseFloat(node.style.height)
+      : undefined;
 
   if (
     styleWidth !== undefined &&
