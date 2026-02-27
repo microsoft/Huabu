@@ -4,6 +4,8 @@
  * Triggers content ingestion for web nodes created during search.
  */
 
+import { AIMessage } from '@langchain/core/messages';
+
 import { getCanvasOperationService } from '../../../canvas/canvas.operation.js';
 import { getIngestService } from '../../../knowledge/ingest.service.js';
 
@@ -85,7 +87,21 @@ export async function ingestionNode(
     'failed',
   );
 
+  const succeeded = state.searchResults.length - errors.length;
+  const progressMessage = new AIMessage({
+    content: `Content ingestion complete: ${succeeded} succeeded, ${errors.length} failed.`,
+    additional_kwargs: {
+      toolResponse: {
+        tool: 'research_ingestion',
+        status: errors.length > 0 ? 'error' : 'success',
+        data: { succeeded, failed: errors.length },
+        ...(errors.length > 0 ? { error: errors[0] } : {}),
+      },
+    },
+  });
+
   return {
-    errors: errors.length > 0 ? errors : undefined,
+    messages: [progressMessage],
+    ...(errors.length > 0 ? { errors } : {}),
   };
 }

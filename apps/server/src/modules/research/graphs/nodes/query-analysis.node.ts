@@ -4,7 +4,11 @@
  * Analyzes the research query and decomposes it into sub-queries for focused searching.
  */
 
-import { HumanMessage, SystemMessage } from '@langchain/core/messages';
+import {
+  AIMessage,
+  HumanMessage,
+  SystemMessage,
+} from '@langchain/core/messages';
 
 import { getLLM } from '../../../agent/llm.js';
 import { getMaxSources } from '../../utils.js';
@@ -67,16 +71,42 @@ export async function queryAnalysisNode(
 
     return {
       subQueries,
-      messages: [response],
+      // Emit a progress message so the agent can stream it to the client.
+      // The LLM response itself (response) is internal; only the summary message is surfaced.
+      // Also include the original HumanMessage so it is persisted in the checkpoint.
+      messages: [
+        new HumanMessage(state.query),
+        new AIMessage({
+          content: `Searching for: ${subQueries.join(' · ')}`,
+          additional_kwargs: {
+            toolResponse: {
+              tool: 'research_query_analysis',
+              status: 'success',
+              data: { query: state.query, subQueries },
+            },
+          },
+        }),
+      ],
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error('[queryAnalysisNode] Error:', message);
 
-    // Fallback: use original query
     return {
       subQueries: [state.query],
       errors: [`Query analysis failed: ${message}`],
+      messages: [
+        new AIMessage({
+          content: `Query analysis failed, falling back to original query.`,
+          additional_kwargs: {
+            toolResponse: {
+              tool: 'research_query_analysis',
+              status: 'error',
+              error: message,
+            },
+          },
+        }),
+      ],
     };
   }
 }

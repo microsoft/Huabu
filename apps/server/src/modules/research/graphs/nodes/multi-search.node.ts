@@ -4,6 +4,8 @@
  * Executes web searches for each sub-query and creates canvas nodes for results.
  */
 
+import { AIMessage } from '@langchain/core/messages';
+
 import { webSearchTool } from '../../../agent/tools/web_search.js';
 import { getCanvasOperationService } from '../../../canvas/canvas.operation.js';
 
@@ -87,7 +89,7 @@ export async function multiSearchNode(
             origin: 'research',
             research: {
               query: state.query,
-              sessionId: state.sessionId,
+              threadId: state.threadId,
             },
           },
           size: { width: 280, height: 200 },
@@ -115,8 +117,24 @@ export async function multiSearchNode(
 
   console.log('[multiSearchNode] Created nodes:', createdNodeIds.length);
 
+  const progressMessage = new AIMessage({
+    content: `Found ${createdNodeIds.length} source(s) across ${searchResults.length} search result(s).`,
+    additional_kwargs: {
+      toolResponse: {
+        tool: 'research_multi_search',
+        status: 'success',
+        data: {
+          nodeCount: createdNodeIds.length,
+          resultCount: searchResults.length,
+          queries: state.subQueries,
+        },
+      },
+    },
+  });
+
   return {
     searchResults,
     createdNodeIds,
+    messages: [progressMessage],
   };
 }

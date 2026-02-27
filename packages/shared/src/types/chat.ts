@@ -102,10 +102,15 @@ export type WebSearchToolResponse = ToolResponse<
 // --- Chat History ---
 
 /** A single message item returned by the history endpoint. */
-export interface ChatHistoryItem {
-  role: 'user' | 'assistant';
-  content: string;
-}
+export type ChatHistoryItem =
+  | {
+      role: 'user' | 'assistant';
+      content: string;
+    }
+  | {
+      role: 'tool';
+      toolResponse: ToolResponse<string, unknown>;
+    };
 
 /** Response from GET /api/chat/history/:threadId */
 export interface ChatHistoryResponse {

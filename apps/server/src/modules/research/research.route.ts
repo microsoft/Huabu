@@ -1,21 +1,27 @@
 /**
  * Research Route
  *
- * Handles deep research requests with SSE streaming.
+ * Streams AgentEvent objects — the same format as the chat route.
+ * All research progress is carried via messages with structured toolResponse,
+ * so no special research-specific event types are needed.
  */
 
-import { getResearchGraph } from './graphs/research.graph.js';
+import { ResearchAgent } from './research.agent.js';
 
 import type { ResearchStateType } from './graphs/research.state.js';
-import type { ResearchEvent, ResearchRequest } from '@sediment/shared';
+import type { AgentEvent } from '../agent/base/index.js';
+import type {
+  ChatHistoryResponse,
+  ResearchRequest,
+  ToolResponse,
+} from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
 /**
  * Write SSE event
  */
-function writeEvent(raw: NodeJS.WritableStream, event: ResearchEvent) {
-  const eventType = event.type;
-  raw.write(`event: ${eventType}\ndata: ${JSON.stringify(event)}\n\n`);
+function writeEvent(raw: NodeJS.WritableStream, event: AgentEvent) {
+  raw.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
 }
 
 /**
@@ -25,12 +31,95 @@ const researchRoutes: FastifyPluginAsync = async (
   fastify,
   _opts,
 ): Promise<void> => {
+  // Create ResearchAgent instance (lazy initialization)
+  let agentPromise: Promise<ResearchAgent> | null = null;
+  const getAgent = () => {
+    if (!agentPromise) {
+      agentPromise = ResearchAgent.create();
+    }
+    return agentPromise;
+  };
+
+  /**
+   * GET /research/history/:threadId
+   * Return the persisted research state for a thread.
+   * Returns same format as chat history for unified handling.
+   */
+  fastify.get<{
+    Params: { threadId: string };
+    Reply: ChatHistoryResponse;
+  }>('/history/:threadId', async function (request, reply) {
+    const { threadId } = request.params;
+
+    if (!threadId || threadId.trim().length === 0) {
+      return reply.code(400).send({
+        error: 'threadId is required',
+      } as unknown as ChatHistoryResponse);
+    }
+
+    try {
+      const agent = await getAgent();
+      const state = await agent.getHistory(threadId);
+
+      if (!state) {
+        return reply.code(404).send({
+          error: 'Session not found',
+        } as unknown as ChatHistoryResponse);
+      }
+
+      // All progress info is now in state.messages — same shape as chat history.
+      const rawMessages: unknown[] = Array.isArray(state.messages)
+        ? state.messages
+        : [];
+
+      type MsgEntry =
+        | { role: 'user' | 'assistant'; content: string }
+        | { role: 'tool'; toolResponse: ToolResponse<string, unknown> };
+
+      const messages: MsgEntry[] = rawMessages.flatMap<MsgEntry>((m) => {
+        if (!m || typeof m !== 'object') return [];
+        const obj = m as Record<string, unknown>;
+        // Use both _getType() and constructor.name as fallback (matches chat route)
+        const type =
+          typeof obj._getType === 'function'
+            ? (obj._getType as () => string)()
+            : null;
+        const ctorName = (obj as { constructor?: { name?: string } })
+          .constructor?.name;
+        const content = typeof obj.content === 'string' ? obj.content : '';
+        const kwargs = obj.additional_kwargs as
+          | Record<string, unknown>
+          | undefined;
+        const toolResponse = kwargs?.toolResponse as
+          | ToolResponse<string, unknown>
+          | undefined;
+
+        const isAi = type === 'ai' || ctorName === 'AIMessage';
+        const isHuman = type === 'human' || ctorName === 'HumanMessage';
+
+        if (isAi) {
+          if (toolResponse) return [{ role: 'tool' as const, toolResponse }];
+          if (content) return [{ role: 'assistant' as const, content }];
+        }
+        if (isHuman && content) return [{ role: 'user' as const, content }];
+        return [];
+      });
+
+      return reply.send({ threadId, messages });
+    } catch (error) {
+      request.log.error(error, 'Failed to fetch research history');
+      return reply.code(500).send({
+        error: 'Internal server error',
+      } as unknown as ChatHistoryResponse);
+    }
+  });
+
   /**
    * POST /research
    * Start deep research and stream results
    */
   fastify.post<{ Body: ResearchRequest }>('/', async function (request, reply) {
-    const { query, canvasId, canvasVersion, config } = request.body;
+    const { query, canvasId, canvasVersion, threadId, config } = request.body;
 
     // Validation
     if (!query || query.trim().length === 0) {
@@ -42,6 +131,12 @@ const researchRoutes: FastifyPluginAsync = async (
     if (!canvasId) {
       return reply.code(400).send({
         error: 'Canvas ID is required',
+      });
+    }
+
+    if (!threadId || threadId.trim().length === 0) {
+      return reply.code(400).send({
+        error: 'Thread ID is required',
       });
     }
 
@@ -71,19 +166,15 @@ const researchRoutes: FastifyPluginAsync = async (
     reply.raw.write(': ok\n\n');
 
     try {
-      // Get research graph (async – checkpointer is lazily initialised)
-      const graph = await getResearchGraph();
+      const agent = await getAgent();
+
+      const startTime = Date.now();
 
       // Prepare initial state
-      const startTime = Date.now();
-      const sessionId = `research-${Date.now()}-${Math.random()
-        .toString(36)
-        .slice(2, 9)}`;
-
       const initialState: Partial<ResearchStateType> = {
         query,
         canvasId,
-        sessionId,
+        threadId,
         canvasVersion: canvasVersion ?? 0,
         config: {
           searchDepth: config?.searchDepth ?? 'advanced',
@@ -100,161 +191,22 @@ const researchRoutes: FastifyPluginAsync = async (
         startTime,
       };
 
-      // Send initial thinking event
-      writeEvent(reply.raw, {
-        type: 'thinking',
-        timestamp: startTime,
-        data: {
-          step: 'Starting research...',
-          content: `Query: ${query}`,
-        },
-      });
-
-      // Track current step
-      let currentStep = 'Initializing...';
-      // Track how many errors have already been sent to avoid re-sending duplicates
-      let sentErrorCount = 0;
-
-      // Stream graph execution (thread_id enables per-session checkpointing)
-      const stream = await graph.stream(initialState, {
-        streamMode: ['updates', 'values'],
-        configurable: { thread_id: sessionId },
-      });
-
-      for await (const chunk of stream) {
-        if (process.env.DEBUG_AGENT === '1') {
-          request.log.info({ chunk }, 'research: stream chunk');
-        }
-
-        // LangGraph yields tuples: [mode, payload]
-        if (!Array.isArray(chunk) || typeof chunk[0] !== 'string') continue;
-
-        const mode = chunk[0];
-        const payload = chunk[1];
-
-        if (mode === 'updates') {
-          // Node execution updates
-          if (typeof payload !== 'object' || payload === null) continue;
-          const updateObj = payload as Record<string, unknown>;
-          const nodeName = Object.keys(updateObj)[0] ?? 'unknown';
-
-          // Map node names to user-friendly steps
-          const stepMap: Record<string, string> = {
-            'query-analysis': 'Analyzing your query...',
-            'multi-search': 'Searching for sources...',
-            ingestion: 'Processing content...',
-            synthesis: 'Generating insights...',
-            'canvas-organization': 'Organizing canvas...',
-          };
-
-          currentStep = stepMap[nodeName] ?? nodeName;
-
-          writeEvent(reply.raw, {
-            type: 'thinking',
-            timestamp: Date.now(),
-            data: {
-              step: currentStep,
-              content: `Executing ${nodeName}...`,
-            },
-          });
-        }
-
-        if (mode === 'values') {
-          // Full state updates
-          const state = payload as Partial<ResearchStateType>;
-
-          // Send searching event when we have search results
-          if (state.searchResults && state.searchResults.length > 0) {
-            const firstQuery = state.subQueries?.[0] ?? query;
-            writeEvent(reply.raw, {
-              type: 'searching',
-              timestamp: Date.now(),
-              data: {
-                query: firstQuery,
-                resultCount: state.searchResults.length,
-              },
-            });
-
-            // Send node_created events for each search result
-            const newResults = state.searchResults.filter(
-              (result) => result.nodeId,
-            );
-            for (const result of newResults) {
-              if (!result.nodeId) continue;
-              writeEvent(reply.raw, {
-                type: 'node_created',
-                timestamp: Date.now(),
-                data: {
-                  nodeId: result.nodeId,
-                  nodeType: 'web',
-                  position: { x: 0, y: 0 }, // Position calculated by backend
-                  data: {
-                    url: result.url,
-                    title: result.title,
-                  },
-                },
-              });
-            }
-          }
-
-          // Send synthesis event if we have synthesis nodes
-          if (state.synthesisNodeIds && state.synthesisNodeIds.length > 0) {
-            for (const nodeId of state.synthesisNodeIds) {
-              writeEvent(reply.raw, {
-                type: 'synthesis',
-                timestamp: Date.now(),
-                data: {
-                  content: 'Generated AI synthesis',
-                  nodeId,
-                  relatedNodeIds: state.createdNodeIds ?? [],
-                },
-              });
-            }
-          }
-
-          // Send node_created event for frame
-          if (state.frameId) {
-            writeEvent(reply.raw, {
-              type: 'node_created',
-              timestamp: Date.now(),
-              data: {
-                nodeId: state.frameId,
-                nodeType: 'frame',
-                position: { x: 0, y: 0 },
-                data: {
-                  label: `Research: ${query.slice(0, 40)}`,
-                },
-              },
-            });
-          }
-
-          // Send only new error events (avoid re-sending already-sent errors)
-          if (state.errors && state.errors.length > sentErrorCount) {
-            const newErrors = state.errors.slice(sentErrorCount);
-            sentErrorCount = state.errors.length;
-            for (const error of newErrors) {
-              writeEvent(reply.raw, {
-                type: 'error',
-                timestamp: Date.now(),
-                data: {
-                  message: error,
-                  recoverable: true,
-                },
-              });
-            }
-          }
-        }
+      // Stream AgentEvents directly — same format as chat route
+      for await (const event of agent.stream(initialState, threadId)) {
+        writeEvent(reply.raw, event);
       }
 
-      // Send complete event
+      // Emit complete event with final state metadata
+      const finalState = await agent.getHistory(threadId);
       writeEvent(reply.raw, {
         type: 'complete',
         timestamp: Date.now(),
         data: {
-          frameId: undefined,
-          canvasVersion: 1,
-          nodeCount: 0,
-          duration: Date.now() - startTime,
+          meta: {
+            frameId: finalState?.frameId ?? null,
+            nodeCount: finalState?.createdNodeIds?.length ?? 0,
+            duration: Date.now() - startTime,
+          },
         },
       });
 
@@ -268,8 +220,7 @@ const researchRoutes: FastifyPluginAsync = async (
         type: 'error',
         timestamp: Date.now(),
         data: {
-          message: errorMsg,
-          recoverable: false,
+          meta: { message: errorMsg, recoverable: false },
         },
       });
     } finally {
