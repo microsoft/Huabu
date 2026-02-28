@@ -244,7 +244,19 @@ export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
           )}
           placeholder="Double click to edit..."
           defaultValue={data.content}
-          onChange={(e) => updateNodeData(id, { content: e.target.value })}
+          onChange={(e) => {
+            const content = e.target.value;
+            const isLabelUserSet = data.labelSource === 'user';
+            const patch: Record<string, unknown> = { content };
+            if (!isLabelUserSet) {
+              const firstLine = content.split('\n')[0].trim().slice(0, 50);
+              if (firstLine) {
+                patch.label = firstLine;
+                patch.labelSource = 'auto';
+              }
+            }
+            updateNodeData(id, patch);
+          }}
           onBlur={handleBlur}
           readOnly={!isEditing}
           style={{
