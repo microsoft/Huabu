@@ -34,18 +34,34 @@ import { generateNextLabel } from '../utils/nodeLabels';
 
 const CANVAS_ID = 'default-canvas';
 const AUTOSAVE_DEBOUNCE_MS = 1000;
+const INGESTION_DEBOUNCE_MS = 1000;
 const DEFAULT_WORKSPACE_NAME = 'Sediment Workspace Name';
 
+// Per-node debounce timers so rapid edits only fire one ingestion request
+// after the user stops typing, rather than on every keystroke.
+const ingestionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
 const triggerIngestion = (node: Node) => {
-  const state = useCanvasStore.getState();
-  void ingestNodeIfNeeded({
-    canvasId: state.canvasId,
-    node,
-    setNodeIngestion: state.setNodeIngestion,
-    clearNodeIngestion: state.clearNodeIngestion,
-    getNodeById: (nodeId) => state.nodes.find((n) => n.id === nodeId),
-    updateNodeDataLocal: state.updateNodeDataLocal,
-  });
+  const nodeId = node.id;
+  const existing = ingestionTimers.get(nodeId);
+  if (existing) clearTimeout(existing);
+
+  const timer = setTimeout(() => {
+    ingestionTimers.delete(nodeId);
+    const state = useCanvasStore.getState();
+    // Re-fetch the latest node so we send the most up-to-date content.
+    const latestNode = state.nodes.find((n) => n.id === nodeId) ?? node;
+    void ingestNodeIfNeeded({
+      canvasId: state.canvasId,
+      node: latestNode,
+      setNodeIngestion: state.setNodeIngestion,
+      clearNodeIngestion: state.clearNodeIngestion,
+      getNodeById: (id) => state.nodes.find((n) => n.id === id),
+      updateNodeDataLocal: state.updateNodeDataLocal,
+    });
+  }, INGESTION_DEBOUNCE_MS);
+
+  ingestionTimers.set(nodeId, timer);
 };
 
 type RFState = {

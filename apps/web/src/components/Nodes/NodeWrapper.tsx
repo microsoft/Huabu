@@ -117,8 +117,8 @@ export const NodeWrapper = memo(
           onDoubleClick={onDoubleClick}
         >
           {showIngestionOverlay && (
-            <div className="bg-background/40 pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
-              <div className="border-muted-foreground/30 border-t-muted-foreground h-5 w-5 animate-spin rounded-full border-2" />
+            <div className="pointer-events-none absolute right-1.5 bottom-1.5 z-10">
+              <div className="border-muted-foreground/30 border-t-muted-foreground h-3 w-3 animate-spin rounded-full border-2" />
             </div>
           )}
 

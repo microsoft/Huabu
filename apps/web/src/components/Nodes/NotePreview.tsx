@@ -61,7 +61,6 @@ export const NotePreview = ({
 
   // Track the last Markdown we applied so we can skip no-op updates.
   const lastAppliedMarkdownRef = useRef<string | null>(null);
-  const debounceRef = useRef<number | null>(null);
 
   /** Write a content patch back to the parent. */
   const writePatch = (
@@ -116,23 +115,18 @@ export const NotePreview = ({
           if (readOnly) return;
           if (!onContentChange && !onDataChange) return;
 
-          if (debounceRef.current) window.clearTimeout(debounceRef.current);
-          debounceRef.current = window.setTimeout(() => {
-            const newJson = JSON.stringify(editor.document);
-            const newMarkdown = editor
-              .blocksToMarkdownLossy(editor.document)
-              .trim();
-            lastAppliedMarkdownRef.current = newMarkdown;
-            const isLabelUserSet = data.labelSource === 'user';
-            const autoLabel = isLabelUserSet
-              ? undefined
-              : extractLabelFromBlocks(
-                  editor.document as Parameters<
-                    typeof extractLabelFromBlocks
-                  >[0],
-                ) || undefined;
-            writePatch(newMarkdown, newJson, autoLabel);
-          }, 150);
+          const newJson = JSON.stringify(editor.document);
+          const newMarkdown = editor
+            .blocksToMarkdownLossy(editor.document)
+            .trim();
+          lastAppliedMarkdownRef.current = newMarkdown;
+          const isLabelUserSet = data.labelSource === 'user';
+          const autoLabel = isLabelUserSet
+            ? undefined
+            : extractLabelFromBlocks(
+                editor.document as Parameters<typeof extractLabelFromBlocks>[0],
+              ) || undefined;
+          writePatch(newMarkdown, newJson, autoLabel);
         }}
       />
     </div>
