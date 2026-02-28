@@ -79,4 +79,8 @@ export type {
   CanvasVersionMismatchError,
   UpdateCanvasStateParams,
   UpdateCanvasStateResult,
+  ExportedSource,
+  ExportedArtifact,
+  CanvasExportBundle,
+  ImportCanvasResponse,
 } from './canvas-api.js';
