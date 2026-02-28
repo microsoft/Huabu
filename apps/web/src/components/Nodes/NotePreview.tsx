@@ -17,6 +17,31 @@ export interface PreviewComponentProps {
   onDataChange?: (patch: Record<string, unknown>) => void;
 }
 
+/** Extract an auto-title from a BlockNote document. Prefers H1, then any heading, then the first non-empty block text. */
+const extractLabelFromBlocks = (
+  blocks: Array<{
+    type: string;
+    props?: Record<string, unknown>;
+    content?: Array<{ type: string; text?: string }>;
+  }>,
+): string => {
+  const getBlockText = (block: {
+    content?: Array<{ type: string; text?: string }>;
+  }) =>
+    (block.content ?? [])
+      .filter((item) => item.type === 'text')
+      .map((item) => item.text ?? '')
+      .join('');
+
+  const h1 = blocks.find((b) => b.type === 'heading' && b.props?.level === 1);
+  const anyHeading = blocks.find((b) => b.type === 'heading');
+  const firstNonEmpty = blocks.find((b) => getBlockText(b).trim().length > 0);
+
+  const target = h1 ?? anyHeading ?? firstNonEmpty;
+  if (!target) return '';
+  return getBlockText(target).trim().slice(0, 50);
+};
+
 export const NotePreview = ({
   data,
   readOnly,
@@ -36,11 +61,21 @@ export const NotePreview = ({
 
   // Track the last Markdown we applied so we can skip no-op updates.
   const lastAppliedMarkdownRef = useRef<string | null>(null);
-  const debounceRef = useRef<number | null>(null);
 
   /** Write a content patch back to the parent. */
-  const writePatch = (newMarkdown: string, newJson: string) => {
-    const patch = { content: newMarkdown, contentJson: newJson };
+  const writePatch = (
+    newMarkdown: string,
+    newJson: string,
+    autoLabel?: string,
+  ) => {
+    const patch: Record<string, unknown> = {
+      content: newMarkdown,
+      contentJson: newJson,
+    };
+    if (autoLabel !== undefined) {
+      patch.label = autoLabel;
+      patch.labelSource = 'auto';
+    }
     if (onDataChange) {
       onDataChange(patch);
     } else if (onContentChange) {
@@ -80,15 +115,18 @@ export const NotePreview = ({
           if (readOnly) return;
           if (!onContentChange && !onDataChange) return;
 
-          if (debounceRef.current) window.clearTimeout(debounceRef.current);
-          debounceRef.current = window.setTimeout(() => {
-            const newJson = JSON.stringify(editor.document);
-            const newMarkdown = editor
-              .blocksToMarkdownLossy(editor.document)
-              .trim();
-            lastAppliedMarkdownRef.current = newMarkdown;
-            writePatch(newMarkdown, newJson);
-          }, 150);
+          const newJson = JSON.stringify(editor.document);
+          const newMarkdown = editor
+            .blocksToMarkdownLossy(editor.document)
+            .trim();
+          lastAppliedMarkdownRef.current = newMarkdown;
+          const isLabelUserSet = data.labelSource === 'user';
+          const autoLabel = isLabelUserSet
+            ? undefined
+            : extractLabelFromBlocks(
+                editor.document as Parameters<typeof extractLabelFromBlocks>[0],
+              ) || undefined;
+          writePatch(newMarkdown, newJson, autoLabel);
         }}
       />
     </div>

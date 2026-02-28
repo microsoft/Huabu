@@ -1,4 +1,4 @@
-import { type Node, type NodeProps, useReactFlow } from '@xyflow/react';
+import { type Node, type NodeProps } from '@xyflow/react';
 import { clsx } from 'clsx';
 import { Bold, Italic, Type, Underline, Strikethrough } from 'lucide-react';
 import { useCallback, useState, useRef, useEffect } from 'react';
@@ -6,6 +6,7 @@ import { useCallback, useState, useRef, useEffect } from 'react';
 import { GhostButton } from '@/components/Common/GhostButton.tsx';
 import { NodeBgColorSelector } from '@/components/Common/NodeBgColorSelector.tsx';
 import { NodeTextColorSelector } from '@/components/Common/NodeTextColorSelector.tsx';
+import useCanvasStore from '@/store/canvasStore.ts';
 
 import { NodeWrapper } from './NodeWrapper.tsx';
 
@@ -27,7 +28,7 @@ const FONT_FAMILIES = [
 export type TextNodeType = Node<CanvasTextNodeData, 'text'>;
 
 export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
-  const { updateNodeData } = useReactFlow();
+  const updateNodeData = useCanvasStore((state) => state.updateNodeData);
   const [isEditing, setIsEditing] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -244,7 +245,19 @@ export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
           )}
           placeholder="Double click to edit..."
           defaultValue={data.content}
-          onChange={(e) => updateNodeData(id, { content: e.target.value })}
+          onChange={(e) => {
+            const content = e.target.value;
+            const isLabelUserSet = data.labelSource === 'user';
+            const patch: Record<string, unknown> = { content };
+            if (!isLabelUserSet) {
+              const firstLine = content.split('\n')[0].trim().slice(0, 50);
+              if (firstLine) {
+                patch.label = firstLine;
+                patch.labelSource = 'auto';
+              }
+            }
+            updateNodeData(id, patch);
+          }}
           onBlur={handleBlur}
           readOnly={!isEditing}
           style={{

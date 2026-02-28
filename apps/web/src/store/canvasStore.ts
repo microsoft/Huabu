@@ -13,7 +13,7 @@ import {
 } from '@xyflow/react';
 import { create } from 'zustand';
 
-import { getCanvas, putCanvas, deleteNode } from '../api';
+import { getCanvas, putCanvas, upsertNode, deleteNode } from '../api';
 import {
   autoFrameNodeByOverlap,
   autoUnframeNodeByNonOverlap,
@@ -27,6 +27,7 @@ import {
 } from '../utils/frameHelper';
 import {
   ingestNodeIfNeeded,
+  needsIngestion,
   shouldIngestOnUpdate,
   type NodeIngestionInfo,
 } from '../utils/ingestHelper';
@@ -34,18 +35,34 @@ import { generateNextLabel } from '../utils/nodeLabels';
 
 const CANVAS_ID = 'default-canvas';
 const AUTOSAVE_DEBOUNCE_MS = 1000;
+const INGESTION_DEBOUNCE_MS = 1000;
 const DEFAULT_WORKSPACE_NAME = 'Sediment Workspace Name';
 
+// Per-node debounce timers so rapid edits only fire one ingestion request
+// after the user stops typing, rather than on every keystroke.
+const ingestionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
 const triggerIngestion = (node: Node) => {
-  const state = useCanvasStore.getState();
-  void ingestNodeIfNeeded({
-    canvasId: state.canvasId,
-    node,
-    setNodeIngestion: state.setNodeIngestion,
-    clearNodeIngestion: state.clearNodeIngestion,
-    getNodeById: (nodeId) => state.nodes.find((n) => n.id === nodeId),
-    updateNodeDataLocal: state.updateNodeDataLocal,
-  });
+  const nodeId = node.id;
+  const existing = ingestionTimers.get(nodeId);
+  if (existing) clearTimeout(existing);
+
+  const timer = setTimeout(() => {
+    ingestionTimers.delete(nodeId);
+    const state = useCanvasStore.getState();
+    // Re-fetch the latest node so we send the most up-to-date content.
+    const latestNode = state.nodes.find((n) => n.id === nodeId) ?? node;
+    void ingestNodeIfNeeded({
+      canvasId: state.canvasId,
+      node: latestNode,
+      setNodeIngestion: state.setNodeIngestion,
+      clearNodeIngestion: state.clearNodeIngestion,
+      getNodeById: (id) => state.nodes.find((n) => n.id === id),
+      updateNodeDataLocal: state.updateNodeDataLocal,
+    });
+  }, INGESTION_DEBOUNCE_MS);
+
+  ingestionTimers.set(nodeId, timer);
 };
 
 type RFState = {
@@ -625,5 +642,64 @@ const useCanvasStore = create<RFState>((set, get) => ({
     scheduleAutoSave(get().saveCanvas);
   },
 }));
+
+/**
+ * Flush all pending changes when the page is about to be unloaded.
+ * Uses keepalive:true so requests survive page close/refresh.
+ *
+ * 1. Cancel all pending ingestion debounce timers.
+ * 2. Fire upsertNode (keepalive) for every node that was still queued.
+ * 3. Fire putCanvas (keepalive) with the latest canvas state.
+ */
+function flushOnUnload(): void {
+  const state = useCanvasStore.getState();
+
+  // Collect node IDs that had a pending debounce timer before clearing them.
+  const pendingNodeIds = Array.from(ingestionTimers.keys());
+  for (const timer of ingestionTimers.values()) {
+    clearTimeout(timer);
+  }
+  ingestionTimers.clear();
+
+  const { canvasId, nodes, edges, version, workspaceName, storageConfig } =
+    state;
+
+  // Fire upsertNode with keepalive for every queued node.
+  for (const nodeId of pendingNodeIds) {
+    const node = nodes.find((n) => n.id === nodeId);
+    if (!node || !needsIngestion(node.type ?? '')) continue;
+
+    const nodeData = node.data as Record<string, unknown> | undefined;
+    const nodeType = node.type as 'note' | 'text' | 'web' | 'pdf';
+
+    void upsertNode(
+      canvasId,
+      nodeId,
+      {
+        type: nodeType,
+        title: (nodeData?.label as string) || undefined,
+        content: (nodeData?.content as string) || undefined,
+        src: (nodeData?.src as string) || undefined,
+        sourceId: (nodeData?.sourceId as string) || undefined,
+      },
+      { keepalive: true },
+    ).catch(() => {
+      // Best-effort on unload – ignore errors.
+    });
+  }
+
+  // Flush canvas save.
+  void putCanvas(
+    canvasId,
+    { version, state: { nodes, edges, workspaceName, storageConfig } },
+    { keepalive: true },
+  ).catch(() => {
+    // Best-effort on unload – ignore errors.
+  });
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', flushOnUnload);
+}
 
 export default useCanvasStore;

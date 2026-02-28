@@ -156,3 +156,27 @@ body,
 .canvas-pending-frame .react-flow__pane {
   cursor: crosshair !important;
 }
+
+.noteview-readonly h1 {
+  font-size: 1.4rem !important;
+}
+
+.noteview-readonly h2 {
+  font-size: 1.2rem !important;
+}
+
+.noteview-readonly h3 {
+  font-size: 1.05rem !important;
+}
+
+.noteview-readonly h4 {
+  font-size: 0.95rem !important;
+}
+
+.noteview-readonly h5 {
+  font-size: 0.875rem !important;
+}
+
+.noteview-readonly h6 {
+  font-size: 0.8rem !important;
+}
