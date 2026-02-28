@@ -275,12 +275,12 @@ export const Canvas: React.FC = () => {
         target?.getAttribute?.('role') === 'textbox';
 
       // [ and ] for z-order — no modifier required
-      if (key === '[' && !isNativeInput && !isRichEditor) {
+      if ((key === '[' || key === '【') && !isNativeInput && !isRichEditor) {
         e.preventDefault();
         sendSelectedToOrder('bottom');
         return;
       }
-      if (key === ']' && !isNativeInput && !isRichEditor) {
+      if (key === ']' || (key === '】' && !isNativeInput && !isRichEditor)) {
         e.preventDefault();
         sendSelectedToOrder('top');
         return;
