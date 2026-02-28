@@ -30,6 +30,7 @@ export async function getCanvas(
 export async function putCanvas(
   canvasId: string,
   request: PutCanvasRequest,
+  options?: { keepalive?: boolean },
 ): Promise<PutCanvasResponse> {
   const response = await fetch(`${API_CONFIG.API_URL}/canvas/${canvasId}`, {
     method: 'PUT',
@@ -37,6 +38,7 @@ export async function putCanvas(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(request),
+    keepalive: options?.keepalive ?? false,
   });
 
   if (!response.ok) {
@@ -59,6 +61,7 @@ export async function upsertNode(
   canvasId: string,
   nodeId: string,
   request: UpsertNodeRequest,
+  options?: { keepalive?: boolean },
 ): Promise<UpsertNodeResponse> {
   const response = await fetch(
     `${API_CONFIG.API_URL}/canvas/${canvasId}/nodes/${nodeId}`,
@@ -68,6 +71,7 @@ export async function upsertNode(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(request),
+      keepalive: options?.keepalive ?? false,
     },
   );
 

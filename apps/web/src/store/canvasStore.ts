@@ -13,7 +13,7 @@ import {
 } from '@xyflow/react';
 import { create } from 'zustand';
 
-import { getCanvas, putCanvas, deleteNode } from '../api';
+import { getCanvas, putCanvas, upsertNode, deleteNode } from '../api';
 import {
   autoFrameNodeByOverlap,
   autoUnframeNodeByNonOverlap,
@@ -27,6 +27,7 @@ import {
 } from '../utils/frameHelper';
 import {
   ingestNodeIfNeeded,
+  needsIngestion,
   shouldIngestOnUpdate,
   type NodeIngestionInfo,
 } from '../utils/ingestHelper';
@@ -641,5 +642,64 @@ const useCanvasStore = create<RFState>((set, get) => ({
     scheduleAutoSave(get().saveCanvas);
   },
 }));
+
+/**
+ * Flush all pending changes when the page is about to be unloaded.
+ * Uses keepalive:true so requests survive page close/refresh.
+ *
+ * 1. Cancel all pending ingestion debounce timers.
+ * 2. Fire upsertNode (keepalive) for every node that was still queued.
+ * 3. Fire putCanvas (keepalive) with the latest canvas state.
+ */
+function flushOnUnload(): void {
+  const state = useCanvasStore.getState();
+
+  // Collect node IDs that had a pending debounce timer before clearing them.
+  const pendingNodeIds = Array.from(ingestionTimers.keys());
+  for (const timer of ingestionTimers.values()) {
+    clearTimeout(timer);
+  }
+  ingestionTimers.clear();
+
+  const { canvasId, nodes, edges, version, workspaceName, storageConfig } =
+    state;
+
+  // Fire upsertNode with keepalive for every queued node.
+  for (const nodeId of pendingNodeIds) {
+    const node = nodes.find((n) => n.id === nodeId);
+    if (!node || !needsIngestion(node.type ?? '')) continue;
+
+    const nodeData = node.data as Record<string, unknown> | undefined;
+    const nodeType = node.type as 'note' | 'text' | 'web' | 'pdf';
+
+    void upsertNode(
+      canvasId,
+      nodeId,
+      {
+        type: nodeType,
+        title: (nodeData?.label as string) || undefined,
+        content: (nodeData?.content as string) || undefined,
+        src: (nodeData?.src as string) || undefined,
+        sourceId: (nodeData?.sourceId as string) || undefined,
+      },
+      { keepalive: true },
+    ).catch(() => {
+      // Best-effort on unload – ignore errors.
+    });
+  }
+
+  // Flush canvas save.
+  void putCanvas(
+    canvasId,
+    { version, state: { nodes, edges, workspaceName, storageConfig } },
+    { keepalive: true },
+  ).catch(() => {
+    // Best-effort on unload – ignore errors.
+  });
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', flushOnUnload);
+}
 
 export default useCanvasStore;
