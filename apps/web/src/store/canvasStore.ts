@@ -90,6 +90,7 @@ type RFState = {
   setSelectedNodes: (ids: string[], multiSelect?: boolean) => void;
 
   reorderNodes: (activeId: string, overId: string) => void;
+  sendSelectedToOrder: (direction: 'top' | 'bottom') => void;
   getSelectedSourceIds: () => string[];
 
   frameSelectedNodes: () => void;
@@ -98,6 +99,15 @@ type RFState = {
 
   moveNodeIntoFrame: (nodeId: string, frameId: string) => void;
   moveNodeOutOfFrame: (nodeId: string) => void;
+
+  /** The node type awaiting placement on canvas via click. */
+  pendingNodeType: 'note' | 'text' | 'frame' | null;
+  setPendingNodeType: (type: 'note' | 'text' | 'frame' | null) => void;
+
+  /** Clipboard for node copy-paste. */
+  clipboard: Node[];
+  copySelectedNodes: () => void;
+  pasteNodes: (flowPosition?: { x: number; y: number }) => void;
 
   loadCanvas: () => Promise<void>;
   saveCanvas: () => Promise<void>;
@@ -155,6 +165,9 @@ const useCanvasStore = create<RFState>((set, get) => ({
   openExpanded: (nodeId) => set({ expandedNodeId: nodeId }),
   closeExpanded: () => set({ expandedNodeId: null }),
   setExpandMode: (mode) => set({ expandMode: mode }),
+
+  pendingNodeType: null,
+  setPendingNodeType: (type) => set({ pendingNodeType: type }),
 
   collapsedFrameIds: new Set<string>(),
   toggleFrameCollapse: (frameId) => {
@@ -435,6 +448,23 @@ const useCanvasStore = create<RFState>((set, get) => ({
     }
   },
 
+  sendSelectedToOrder: (direction) => {
+    const { nodes } = get();
+    const selected = nodes.filter((n) => n.selected);
+    if (selected.length === 0) return;
+
+    const selectedIds = new Set(selected.map((n) => n.id));
+    const rest = nodes.filter((n) => !selectedIds.has(n.id));
+
+    // 'top' = render on top (end of array), 'bottom' = render behind (start of array)
+    const reordered =
+      direction === 'top' ? [...rest, ...selected] : [...selected, ...rest];
+
+    const normalizedNodes = normalizeTreeOrder(reordered as NestableNode[]);
+    set({ nodes: normalizedNodes });
+    scheduleAutoSave(get().saveCanvas);
+  },
+
   frameSelectedNodes: () => {
     const { nodes } = get();
     const selectedIds = nodes.filter((n) => n.selected).map((n) => n.id);
@@ -478,6 +508,120 @@ const useCanvasStore = create<RFState>((set, get) => ({
     const { nodes } = get();
     const result = moveNodeOutOfFrame(nodes as NestableNode[], nodeId);
     set({ nodes: result });
+    scheduleAutoSave(get().saveCanvas);
+  },
+
+  clipboard: [],
+
+  copySelectedNodes: () => {
+    const { nodes } = get();
+    const selected = nodes.filter((n) => n.selected);
+    if (selected.length === 0) return;
+
+    // Extract only serialisable properties to avoid structuredClone failures
+    // on ReactFlow internal properties (measured, internals, etc.)
+    const cloned: Node[] = selected.map((n) => ({
+      id: n.id,
+      type: n.type,
+      position: { x: n.position.x, y: n.position.y },
+      data: JSON.parse(JSON.stringify(n.data ?? {})),
+      ...(n.style ? { style: JSON.parse(JSON.stringify(n.style)) } : {}),
+      ...(n.parentId ? { parentId: n.parentId } : {}),
+    }));
+
+    console.log('Copied nodes to clipboard:', cloned);
+
+    set({ clipboard: cloned });
+  },
+
+  pasteNodes: (flowPosition) => {
+    const { clipboard, nodes } = get();
+    if (clipboard.length === 0) return;
+
+    // Compute the offset to apply to each pasted node.
+    // If a flow-space position is provided, centre the pasted group there;
+    // otherwise fall back to a small fixed offset from the originals.
+    let offsetX: number;
+    let offsetY: number;
+
+    if (flowPosition) {
+      // Calculate the bounding-box centre of the copied nodes
+      const xs = clipboard.map((n) => n.position.x);
+      const ys = clipboard.map((n) => n.position.y);
+      const widths = clipboard.map(
+        (n) => (n.style?.width as number) ?? n.measured?.width ?? 200,
+      );
+      const heights = clipboard.map(
+        (n) => (n.style?.height as number) ?? n.measured?.height ?? 150,
+      );
+
+      const minX = Math.min(...xs);
+      const minY = Math.min(...ys);
+      const maxX = Math.max(...xs.map((x, i) => x + widths[i]));
+      const maxY = Math.max(...ys.map((y, i) => y + heights[i]));
+
+      const centerX = (minX + maxX) / 2;
+      const centerY = (minY + maxY) / 2;
+
+      offsetX = flowPosition.x - centerX;
+      offsetY = flowPosition.y - centerY;
+    } else {
+      const OFFSET = 40;
+      offsetX = OFFSET;
+      offsetY = OFFSET;
+    }
+
+    // Build old-id → new-id map so we can remap parentId refs
+    const idMap = new Map<string, string>();
+    for (const node of clipboard) {
+      idMap.set(node.id, createId('node'));
+    }
+
+    const existingLabels = nodes.map(
+      (n) => n.data?.label as string | undefined,
+    );
+
+    const newNodes: Node[] = clipboard.map((node) => {
+      const newId = idMap.get(node.id) ?? createId('node');
+      const nodeType = node.type || 'node';
+      const label = generateNextLabel(nodeType, existingLabels);
+      // Track new label to avoid duplicates within the batch
+      existingLabels.push(label);
+
+      const cloned: Node = {
+        id: newId,
+        type: node.type,
+        position: {
+          x: node.position.x + offsetX,
+          y: node.position.y + offsetY,
+        },
+        selected: true,
+        data: {
+          ...JSON.parse(JSON.stringify(node.data ?? {})),
+          label,
+        },
+        ...(node.style
+          ? { style: JSON.parse(JSON.stringify(node.style)) }
+          : {}),
+      };
+
+      // Remap parentId if the parent was also copied
+      if (node.parentId && idMap.has(node.parentId)) {
+        cloned.parentId = idMap.get(node.parentId);
+      }
+
+      return cloned;
+    });
+
+    // Deselect all existing nodes, then add pasted ones
+    const deselected = nodes.map((n) => ({ ...n, selected: false }));
+    set({ nodes: [...deselected, ...newNodes] });
+
+    // Trigger ingestion for each pasted node
+    for (const node of newNodes) {
+      triggerIngestion(node);
+    }
+
     scheduleAutoSave(get().saveCanvas);
   },
 }));

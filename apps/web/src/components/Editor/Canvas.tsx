@@ -7,7 +7,8 @@ import {
   type Node,
   Panel,
 } from '@xyflow/react';
-import React, { useEffect, useRef, useState } from 'react';
+import clsx from 'clsx';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import '@xyflow/react/dist/style.css';
 
 import { NodeToolbar } from './CanvasToolbar';
@@ -47,36 +48,277 @@ export const Canvas: React.FC = () => {
   const frameSelectedNodes = useCanvasStore(
     (state) => state.frameSelectedNodes,
   );
+  const pendingNodeType = useCanvasStore((state) => state.pendingNodeType);
+  const setPendingNodeType = useCanvasStore(
+    (state) => state.setPendingNodeType,
+  );
+  const copySelectedNodes = useCanvasStore((state) => state.copySelectedNodes);
+  const pasteNodes = useCanvasStore((state) => state.pasteNodes);
+  const sendSelectedToOrder = useCanvasStore(
+    (state) => state.sendSelectedToOrder,
+  );
 
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const rfInstanceRef = useRef<ReactFlowInstance | null>(null);
   const lastDropRef = useRef<{ key: string; at: number } | null>(null);
+  const mousePositionRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
   const [tool, setTool] = useState<'select' | 'pan'>('select');
 
+  // --- Frame drag-to-create state ---
+  const [frameDragStart, setFrameDragStart] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
+  const [frameDragEnd, setFrameDragEnd] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
+  const isDraggingFrame = frameDragStart !== null;
+
+  // Cancel pending node placement with Escape key
+  useEffect(() => {
+    if (!pendingNodeType) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setPendingNodeType(null);
+        setFrameDragStart(null);
+        setFrameDragEnd(null);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [pendingNodeType, setPendingNodeType]);
+
+  // Handle click-to-place for note and text
+  const handlePaneClick = useCallback(
+    (event: React.MouseEvent) => {
+      if (!pendingNodeType || pendingNodeType === 'frame') return;
+      const instance = rfInstanceRef.current;
+      if (!instance) return;
+
+      const position = instance.screenToFlowPosition({
+        x: event.clientX,
+        y: event.clientY,
+      });
+
+      const w = 400;
+      const h = 300;
+
+      // Centre the node at the click position
+      const centeredPosition = {
+        x: position.x - w / 2,
+        y: position.y - h / 2,
+      };
+
+      const baseNode = {
+        id: createId('node'),
+        position: centeredPosition,
+      };
+
+      let newNode: Node;
+
+      switch (pendingNodeType) {
+        case 'note':
+          newNode = {
+            ...baseNode,
+            type: 'note',
+            data: { type: 'note', content: '' },
+            style: { width: w, height: h },
+          };
+          break;
+        case 'text':
+          newNode = {
+            ...baseNode,
+            type: 'text',
+            data: { type: 'text', content: '' },
+            style: { width: w, height: h },
+          };
+          break;
+        default:
+          return;
+      }
+
+      addNode(newNode);
+      setPendingNodeType(null);
+    },
+    [pendingNodeType, addNode, setPendingNodeType],
+  );
+
+  // --- Frame drag-to-create handlers ---
+  const handleFrameMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (pendingNodeType !== 'frame') return;
+      // Only left button
+      if (e.button !== 0) return;
+      // Ignore clicks on toolbar / modals
+      const target = e.target as HTMLElement;
+      if (target.closest('.react-flow__panel')) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+      setFrameDragStart({ x: e.clientX, y: e.clientY });
+      setFrameDragEnd({ x: e.clientX, y: e.clientY });
+    },
+    [pendingNodeType],
+  );
+
+  const handleFrameMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      if (!isDraggingFrame) return;
+      setFrameDragEnd({ x: e.clientX, y: e.clientY });
+    },
+    [isDraggingFrame],
+  );
+
+  const handleFrameMouseUp = useCallback(
+    (e: React.MouseEvent) => {
+      if (!isDraggingFrame || !frameDragStart || !frameDragEnd) return;
+
+      const instance = rfInstanceRef.current;
+      if (!instance) {
+        setFrameDragStart(null);
+        setFrameDragEnd(null);
+        return;
+      }
+
+      const startFlow = instance.screenToFlowPosition({
+        x: frameDragStart.x,
+        y: frameDragStart.y,
+      });
+      const endFlow = instance.screenToFlowPosition({
+        x: e.clientX,
+        y: e.clientY,
+      });
+
+      const x = Math.min(startFlow.x, endFlow.x);
+      const y = Math.min(startFlow.y, endFlow.y);
+      const w = Math.abs(endFlow.x - startFlow.x);
+      const h = Math.abs(endFlow.y - startFlow.y);
+
+      // Minimum size threshold (in screen px) to avoid accidental tiny frames
+      const MIN_SIZE = 20;
+      if (w >= MIN_SIZE && h >= MIN_SIZE) {
+        const newNode: Node = {
+          id: createId('node'),
+          type: 'frame',
+          position: { x, y },
+          data: { type: 'frame' },
+          style: {
+            width: w,
+            height: h,
+            backgroundColor: 'rgba(0,0,0,0.05)',
+          },
+        };
+        addNode(newNode);
+      }
+
+      setFrameDragStart(null);
+      setFrameDragEnd(null);
+      setPendingNodeType(null);
+    },
+    [
+      isDraggingFrame,
+      frameDragStart,
+      frameDragEnd,
+      addNode,
+      setPendingNodeType,
+    ],
+  );
+
+  // Compute the preview rectangle in screen-space
+  const frameDragRect = (() => {
+    if (!frameDragStart || !frameDragEnd) return null;
+    const wrapperBounds = wrapperRef.current?.getBoundingClientRect();
+    if (!wrapperBounds) return null;
+    const x1 = frameDragStart.x - wrapperBounds.left;
+    const y1 = frameDragStart.y - wrapperBounds.top;
+    const x2 = frameDragEnd.x - wrapperBounds.left;
+    const y2 = frameDragEnd.y - wrapperBounds.top;
+    return {
+      left: Math.min(x1, x2),
+      top: Math.min(y1, y2),
+      width: Math.abs(x2 - x1),
+      height: Math.abs(y2 - y1),
+    };
+  })();
+
+  // Track mouse position globally so paste can use it
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      mousePositionRef.current = { x: e.clientX, y: e.clientY };
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    return () => window.removeEventListener('mousemove', onMouseMove);
+  }, []);
+
   // Handle "Cmd/Ctrl + G" to create a frame from selected nodes.
+  // Handle "Cmd/Ctrl + C" to copy selected nodes.
+  // Handle "Cmd/Ctrl + V" to paste copied nodes.
+  // Handle "[" to bring selected nodes to back.
+  // Handle "]" to bring selected nodes to front.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      const key = e.key.toLowerCase();
-      const isGroup = key === 'g' && (e.metaKey || e.ctrlKey);
-      if (!isGroup || e.shiftKey || e.altKey) return;
+      const key = e.key;
+      const mod = e.metaKey || e.ctrlKey;
 
       const target = e.target as HTMLElement | null;
       const tag = target?.tagName?.toLowerCase();
-      const isTypingContext =
-        tag === 'input' ||
-        tag === 'textarea' ||
+
+      // For text inputs / textareas, let the browser handle copy/paste natively
+      const isNativeInput = tag === 'input' || tag === 'textarea';
+
+      // For contentEditable / role=textbox editors (BlockNote etc.),
+      // allow native copy/paste but block other shortcuts like Cmd+G
+      const isRichEditor =
         target?.isContentEditable ||
         target?.getAttribute?.('role') === 'textbox';
-      if (isTypingContext) return;
 
-      e.preventDefault();
-      frameSelectedNodes();
+      // [ and ] for z-order — no modifier required
+      if (key === '[' && !isNativeInput && !isRichEditor) {
+        e.preventDefault();
+        sendSelectedToOrder('bottom');
+        return;
+      }
+      if (key === ']' && !isNativeInput && !isRichEditor) {
+        e.preventDefault();
+        sendSelectedToOrder('top');
+        return;
+      }
+
+      // Remaining shortcuts require Cmd/Ctrl without Shift/Alt
+      if (!mod || e.shiftKey || e.altKey) return;
+
+      const lowerKey = key.toLowerCase();
+
+      if (lowerKey === 'g') {
+        if (isNativeInput || isRichEditor) return;
+        e.preventDefault();
+        frameSelectedNodes();
+      } else if (lowerKey === 'c') {
+        if (isNativeInput || isRichEditor) return;
+        e.preventDefault();
+        copySelectedNodes();
+      } else if (lowerKey === 'v') {
+        if (isNativeInput || isRichEditor) return;
+        e.preventDefault();
+        // Convert current mouse screen position to flow coordinates
+        const instance = rfInstanceRef.current;
+        if (instance) {
+          const flowPos = instance.screenToFlowPosition({
+            x: mousePositionRef.current.x,
+            y: mousePositionRef.current.y,
+          });
+          pasteNodes(flowPos);
+        } else {
+          pasteNodes();
+        }
+      }
     };
 
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [frameSelectedNodes]);
+  }, [frameSelectedNodes, copySelectedNodes, pasteNodes, sendSelectedToOrder]);
 
   useEffect(() => {
     return () => {
@@ -88,7 +330,15 @@ export const Canvas: React.FC = () => {
   return (
     <div
       ref={wrapperRef}
-      className="bg-background relative flex h-full w-full flex-col"
+      className={clsx(
+        'bg-background relative flex h-full w-full flex-col',
+        pendingNodeType === 'note' && 'canvas-pending-note',
+        pendingNodeType === 'text' && 'canvas-pending-text',
+        pendingNodeType === 'frame' && 'canvas-pending-frame',
+      )}
+      onMouseDown={handleFrameMouseDown}
+      onMouseMove={handleFrameMouseMove}
+      onMouseUp={handleFrameMouseUp}
       onDragOver={(e) => {
         if (!canReadSedimentPayload(e.dataTransfer)) return;
         e.preventDefault();
@@ -256,11 +506,12 @@ export const Canvas: React.FC = () => {
           rfInstanceRef.current = instance;
           setRfInstance(instance);
         }}
+        onPaneClick={handlePaneClick}
         onNodeDoubleClick={(e) => e.stopPropagation()}
         fitView
         attributionPosition="bottom-right"
-        panOnDrag={tool === 'pan'}
-        selectionOnDrag={tool === 'select'}
+        panOnDrag={pendingNodeType ? false : tool === 'pan'}
+        selectionOnDrag={pendingNodeType ? false : tool === 'select'}
         panOnScroll={true}
         zoomOnScroll={true}
         minZoom={0.1}
@@ -274,6 +525,19 @@ export const Canvas: React.FC = () => {
 
         <Controls position="bottom-left" />
       </ReactFlow>
+
+      {/* Frame drag preview overlay */}
+      {isDraggingFrame && frameDragRect && frameDragRect.width > 2 && (
+        <div
+          className="border-theme-500 bg-theme-50/30 pointer-events-none absolute z-50 rounded border-2 border-dashed"
+          style={{
+            left: frameDragRect.left,
+            top: frameDragRect.top,
+            width: frameDragRect.width,
+            height: frameDragRect.height,
+          }}
+        />
+      )}
     </div>
   );
 };

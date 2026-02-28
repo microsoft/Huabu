@@ -84,7 +84,7 @@ export const NodeWrapper = memo(
 
         <div
           className={clsx(
-            'group relative flex h-full w-full flex-col rounded border-0 transition-all duration-120',
+            'group relative flex h-full w-full flex-col rounded shadow transition-all duration-120',
             'style' in data && data.style?.backgroundColor
               ? data.style.backgroundColor
               : 'bg-transparent',

@@ -108,6 +108,8 @@ interface NodeToolbarProps {
 export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
   const { screenToFlowPosition } = useReactFlow();
   const addNode = useCanvasStore((s) => s.addNode);
+  const pendingNodeType = useCanvasStore((s) => s.pendingNodeType);
+  const setPendingNodeType = useCanvasStore((s) => s.setPendingNodeType);
 
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -345,13 +347,37 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
 
         {/* Group 2: Layouts */}
         <div className="flex items-center gap-2">
-          <GhostButton title="Frame" onClick={() => createNode('frame')}>
+          <GhostButton
+            title="Frame"
+            className={clsx(
+              pendingNodeType === 'frame' && 'text-theme-500 bg-background',
+            )}
+            onClick={() =>
+              setPendingNodeType(pendingNodeType === 'frame' ? null : 'frame')
+            }
+          >
             <Scan size={18} />
           </GhostButton>
-          <GhostButton title="Note" onClick={() => createNode('note')}>
+          <GhostButton
+            title="Note"
+            className={clsx(
+              pendingNodeType === 'note' && 'text-theme-500 bg-background',
+            )}
+            onClick={() =>
+              setPendingNodeType(pendingNodeType === 'note' ? null : 'note')
+            }
+          >
             <StickyNote size={18} />
           </GhostButton>
-          <GhostButton title="Text" onClick={() => createNode('text')}>
+          <GhostButton
+            title="Text"
+            className={clsx(
+              pendingNodeType === 'text' && 'text-theme-500 bg-background',
+            )}
+            onClick={() =>
+              setPendingNodeType(pendingNodeType === 'text' ? null : 'text')
+            }
+          >
             <Type size={18} />
           </GhostButton>
         </div>

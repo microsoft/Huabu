@@ -146,3 +146,13 @@ body,
 .noteview-readonly .bn-editor {
   padding: 0 !important;
 }
+
+/* Click-to-place cursor overrides for ReactFlow pane */
+.canvas-pending-note .react-flow__pane,
+.canvas-pending-text .react-flow__pane {
+  cursor: text !important;
+}
+
+.canvas-pending-frame .react-flow__pane {
+  cursor: crosshair !important;
+}
