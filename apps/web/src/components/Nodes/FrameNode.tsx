@@ -16,10 +16,6 @@ export const FrameNode = ({ id, data, selected }: NodeProps<FrameNodeType>) => {
   const toggleFrameLock = useCanvasStore((state) => state.toggleFrameLock);
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
 
-  const frameBorderClassName = selected
-    ? "ring-0 hover:ring-0 before:pointer-events-none before:absolute before:inset-0 before:rounded before:content-[''] before:border before:border-theme-500"
-    : "ring-0 hover:ring-0 before:pointer-events-none before:absolute before:inset-0 before:overflow-hidden before:rounded before:content-[''] before:text-icon before:[background:repeating-linear-gradient(90deg,currentColor_0_10px,transparent_10px_18px)_top/100%_1px_no-repeat,repeating-linear-gradient(90deg,currentColor_0_10px,transparent_10px_18px)_bottom/100%_1px_no-repeat,repeating-linear-gradient(0deg,currentColor_0_10px,transparent_10px_18px)_left/1px_100%_no-repeat,repeating-linear-gradient(0deg,currentColor_0_10px,transparent_10px_18px)_right/1px_100%_no-repeat]";
-
   const label = useMemo(() => {
     const raw = typeof data.label === 'string' ? data.label : '';
     const trimmed = raw.trim();
@@ -56,7 +52,7 @@ export const FrameNode = ({ id, data, selected }: NodeProps<FrameNodeType>) => {
       // toolbar={FrameToolbar}
       keepAspectRatio={false}
       allowOverflow
-      className={clsx(frameBorderClassName, 'bg-white')}
+      className="bg-white"
     >
       <div className="relative h-full p-2">
         <div className="absolute -top-6 left-0 z-10 flex items-center gap-1">
