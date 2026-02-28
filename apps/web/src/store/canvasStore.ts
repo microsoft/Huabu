@@ -146,6 +146,15 @@ const scheduleAutoSave = (saveCanvas: () => Promise<void>) => {
   }, AUTOSAVE_DEBOUNCE_MS);
 };
 
+/**
+ * Return a new nodes array where only the nodes whose id is in `selectedIds`
+ * are marked selected; all other nodes are deselected.
+ */
+function selectOnly(nodes: Node[], selectedIds: Iterable<string>): Node[] {
+  const ids = new Set(selectedIds);
+  return nodes.map((n) => ({ ...n, selected: ids.has(n.id) }));
+}
+
 const useCanvasStore = create<RFState>((set, get) => ({
   nodes: [],
   edges: [],
@@ -349,33 +358,30 @@ const useCanvasStore = create<RFState>((set, get) => ({
 
   addNode: (node) => {
     // Ensure node has a label
-    if (
-      !node.data ||
-      !node.data.label ||
-      String(node.data.label).trim() === ''
-    ) {
+    let finalLabel = node.data?.label;
+
+    if (!finalLabel || String(finalLabel).trim() === '') {
       const existingNodes = get().nodes;
       const nodeType = node.type || 'node';
       const existingLabels = existingNodes.map(
         (n) => n.data?.label as string | undefined,
       );
 
-      const generatedLabel = generateNextLabel(nodeType, existingLabels);
-
-      // Set the label
-      node = {
-        ...node,
-        data: {
-          ...node.data,
-          label: generatedLabel,
-        },
-      };
+      finalLabel = generateNextLabel(nodeType, existingLabels);
     }
 
-    set({ nodes: [...get().nodes, node] });
+    const newNode = {
+      ...node,
+      data: {
+        ...node.data,
+        label: finalLabel,
+      },
+    };
+
+    set({ nodes: selectOnly([...get().nodes, newNode], [newNode.id]) });
 
     // Ingest the node if needed
-    triggerIngestion(node);
+    triggerIngestion(newNode);
 
     scheduleAutoSave(get().saveCanvas);
   },
@@ -500,7 +506,7 @@ const useCanvasStore = create<RFState>((set, get) => ({
       label: 'Frame',
     });
 
-    set({ nodes: result.nodes });
+    set({ nodes: selectOnly(result.nodes, [frameId]) });
 
     scheduleAutoSave(get().saveCanvas);
   },
@@ -509,7 +515,7 @@ const useCanvasStore = create<RFState>((set, get) => ({
     const { nodes } = get();
     const frameId = createId('node');
     const result = frameNodesInRect(nodes as NestableNode[], flowRect, frameId);
-    set({ nodes: result.nodes });
+    set({ nodes: selectOnly(result.nodes, [frameId]) });
     scheduleAutoSave(get().saveCanvas);
   },
 
@@ -627,7 +633,6 @@ const useCanvasStore = create<RFState>((set, get) => ({
           x: node.position.x + offsetX,
           y: node.position.y + offsetY,
         },
-        selected: true,
         data: {
           ...JSON.parse(JSON.stringify(node.data ?? {})),
           label,
@@ -645,9 +650,13 @@ const useCanvasStore = create<RFState>((set, get) => ({
       return cloned;
     });
 
-    // Deselect all existing nodes, then add pasted ones
-    const deselected = nodes.map((n) => ({ ...n, selected: false }));
-    set({ nodes: [...deselected, ...newNodes] });
+    // Deselect all existing nodes, then select only pasted ones
+    set({
+      nodes: selectOnly(
+        [...nodes, ...newNodes],
+        newNodes.map((n) => n.id),
+      ),
+    });
 
     // Trigger ingestion for each pasted node
     for (const node of newNodes) {

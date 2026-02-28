@@ -645,7 +645,6 @@ export function frameNodes(
     },
     style: { width, height },
     zIndex: -1,
-    selected: true,
   };
 
   const topLevelSet = new Set(topLevelIds);
@@ -659,7 +658,6 @@ export function frameNodes(
       ...n,
       parentId: options.frameId,
       position: subPos(abs, groupAbs),
-      selected: false,
       extent: undefined,
     };
   });
