@@ -11,7 +11,7 @@ import {
   type Connection,
   type ReactFlowInstance,
 } from '@xyflow/react';
-import { create } from 'zustand';
+import { create, type StateCreator } from 'zustand';
 
 import { getCanvas, putCanvas, upsertNode, deleteNode } from '../api';
 import {
@@ -146,6 +146,38 @@ const scheduleAutoSave = (saveCanvas: () => Promise<void>) => {
   }, AUTOSAVE_DEBOUNCE_MS);
 };
 
+const PERSISTED_KEYS = [
+  'nodes',
+  'edges',
+  'workspaceName',
+  'storageConfig',
+] as const;
+type PersistedKey = (typeof PERSISTED_KEYS)[number];
+
+/**
+ * Middleware that automatically schedules a canvas save whenever a persisted
+ * field (nodes, edges, workspaceName, storageConfig) changes.
+ * Skipped while `isLoading` is true to avoid triggering a save during a load.
+ */
+const autoSaveMiddleware =
+  (config: StateCreator<RFState>): StateCreator<RFState> =>
+  (set, get, api) => {
+    const wrappedSet: typeof set = (...args) => {
+      const prev = get();
+      (set as (...a: typeof args) => void)(...args);
+      if (!prev.isLoading) {
+        const next = get();
+        const changed = (PERSISTED_KEYS as readonly PersistedKey[]).some(
+          (k) => prev[k] !== next[k],
+        );
+        if (changed) {
+          scheduleAutoSave(next.saveCanvas);
+        }
+      }
+    };
+    return config(wrappedSet, get, api);
+  };
+
 /**
  * Return a new nodes array where only the nodes whose id is in `selectedIds`
  * are marked selected; all other nodes are deselected.
@@ -155,517 +187,505 @@ function selectOnly(nodes: Node[], selectedIds: Iterable<string>): Node[] {
   return nodes.map((n) => ({ ...n, selected: ids.has(n.id) }));
 }
 
-const useCanvasStore = create<RFState>((set, get) => ({
-  nodes: [],
-  edges: [],
-  canvasId: CANVAS_ID,
-  version: 0,
-  isLoading: false,
-  isSaving: false,
-  pendingSave: false,
+const useCanvasStore = create<RFState>()(
+  autoSaveMiddleware((set, get) => ({
+    nodes: [],
+    edges: [],
+    canvasId: CANVAS_ID,
+    version: 0,
+    isLoading: false,
+    isSaving: false,
+    pendingSave: false,
 
-  workspaceName: DEFAULT_WORKSPACE_NAME,
-  setWorkspaceName: (name) => {
-    set({ workspaceName: name });
-    scheduleAutoSave(get().saveCanvas);
-  },
+    workspaceName: DEFAULT_WORKSPACE_NAME,
+    setWorkspaceName: (name) => {
+      set({ workspaceName: name });
+    },
 
-  storageConfig: { backend: 'sqlite' },
-  setStorageConfig: (config) => {
-    set({ storageConfig: config });
-    scheduleAutoSave(get().saveCanvas);
-  },
+    storageConfig: { backend: 'sqlite' },
+    setStorageConfig: (config) => {
+      set({ storageConfig: config });
+    },
 
-  ingestionByNodeId: {},
-  setNodeIngestion: (nodeId, info) => {
-    if (!nodeId) return;
-    set({
-      ingestionByNodeId: {
-        ...get().ingestionByNodeId,
-        [nodeId]: info,
-      },
-    });
-  },
-  clearNodeIngestion: (nodeId) => {
-    if (!nodeId) return;
-    const next = { ...get().ingestionByNodeId };
-    delete next[nodeId];
-    set({ ingestionByNodeId: next });
-  },
+    ingestionByNodeId: {},
+    setNodeIngestion: (nodeId, info) => {
+      if (!nodeId) return;
+      set({
+        ingestionByNodeId: {
+          ...get().ingestionByNodeId,
+          [nodeId]: info,
+        },
+      });
+    },
+    clearNodeIngestion: (nodeId) => {
+      if (!nodeId) return;
+      const next = { ...get().ingestionByNodeId };
+      delete next[nodeId];
+      set({ ingestionByNodeId: next });
+    },
 
-  expandedNodeId: null,
-  expandMode: 'replace',
-  openExpanded: (nodeId) => set({ expandedNodeId: nodeId }),
-  closeExpanded: () => set({ expandedNodeId: null }),
-  setExpandMode: (mode) => set({ expandMode: mode }),
+    expandedNodeId: null,
+    expandMode: 'replace',
+    openExpanded: (nodeId) => set({ expandedNodeId: nodeId }),
+    closeExpanded: () => set({ expandedNodeId: null }),
+    setExpandMode: (mode) => set({ expandMode: mode }),
 
-  pendingNodeType: null,
-  setPendingNodeType: (type) => set({ pendingNodeType: type }),
+    pendingNodeType: null,
+    setPendingNodeType: (type) => set({ pendingNodeType: type }),
 
-  collapsedFrameIds: new Set<string>(),
-  toggleFrameCollapse: (frameId) => {
-    const { collapsedFrameIds } = get();
-    const next = new Set(collapsedFrameIds);
-    if (next.has(frameId)) {
-      next.delete(frameId);
-    } else {
-      next.add(frameId);
-    }
-    set({ collapsedFrameIds: next });
-  },
-  isFrameCollapsed: (frameId) => {
-    return get().collapsedFrameIds.has(frameId);
-  },
+    collapsedFrameIds: new Set<string>(),
+    toggleFrameCollapse: (frameId) => {
+      const { collapsedFrameIds } = get();
+      const next = new Set(collapsedFrameIds);
+      if (next.has(frameId)) {
+        next.delete(frameId);
+      } else {
+        next.add(frameId);
+      }
+      set({ collapsedFrameIds: next });
+    },
+    isFrameCollapsed: (frameId) => {
+      return get().collapsedFrameIds.has(frameId);
+    },
 
-  loadCanvas: async () => {
-    set({ isLoading: true });
-    try {
-      const { canvasId } = get();
-      const response = await getCanvas(canvasId);
-      if (!response) {
-        console.warn('Canvas not found, using empty state');
-        set({ isLoading: false, ingestionByNodeId: {} });
+    loadCanvas: async () => {
+      set({ isLoading: true });
+      try {
+        const { canvasId } = get();
+        const response = await getCanvas(canvasId);
+        if (!response) {
+          console.warn('Canvas not found, using empty state');
+          set({ isLoading: false, ingestionByNodeId: {} });
+          return;
+        }
+
+        const state = response.state as {
+          nodes?: Node[];
+          edges?: Edge[];
+          workspaceName?: string;
+          storageConfig?: KnowledgeStorageConfig;
+        };
+        set({
+          nodes: state.nodes ?? [],
+          edges: state.edges ?? [],
+          workspaceName: state.workspaceName ?? get().workspaceName,
+          storageConfig: state.storageConfig ?? get().storageConfig,
+          version: response.version,
+          isLoading: false,
+          ingestionByNodeId: {},
+        });
+      } catch (error) {
+        console.error('Failed to load canvas:', error);
+        set({ isLoading: false });
+      }
+    },
+
+    saveCanvas: async () => {
+      const { isSaving } = get();
+      if (isSaving) {
+        set({ pendingSave: true });
         return;
       }
 
-      const state = response.state as {
-        nodes?: Node[];
-        edges?: Edge[];
-        workspaceName?: string;
-        storageConfig?: KnowledgeStorageConfig;
-      };
-      set({
-        nodes: state.nodes ?? [],
-        edges: state.edges ?? [],
-        workspaceName: state.workspaceName ?? get().workspaceName,
-        storageConfig: state.storageConfig ?? get().storageConfig,
-        version: response.version,
-        isLoading: false,
-        ingestionByNodeId: {},
-      });
-    } catch (error) {
-      console.error('Failed to load canvas:', error);
-      set({ isLoading: false });
-    }
-  },
-
-  saveCanvas: async () => {
-    const { isSaving } = get();
-    if (isSaving) {
-      set({ pendingSave: true });
-      return;
-    }
-
-    set({ isSaving: true });
-    try {
-      const { nodes, edges, version, canvasId, workspaceName, storageConfig } =
-        get();
-      const response = await putCanvas(canvasId, {
-        version,
-        state: { nodes, edges, workspaceName, storageConfig },
-      });
-      set({ version: response.version });
-    } catch (error) {
-      console.error('Failed to save canvas:', error);
-      // TODO: Handle version conflict (409) - reload and prompt user
-    } finally {
-      set({ isSaving: false });
-
-      const { pendingSave } = get();
-      if (pendingSave) {
-        set({ pendingSave: false });
-        // Fire-and-forget: re-save the latest state after the in-flight save completes.
-        void get().saveCanvas();
-      }
-    }
-  },
-
-  onNodesChange: (changes) => {
-    const prevNodes = get().nodes as NestableNode[];
-    const nextNodes = applyNodeChanges(changes, prevNodes) as NestableNode[];
-
-    const dragStopIds = changes
-      .filter((c) => c.type === 'position')
-      .filter((c) => {
-        const maybe = c as unknown as { dragging?: boolean };
-        return maybe.dragging === false;
-      })
-      .map((c) => c.id);
-
-    let result = nextNodes;
-    for (const nodeId of dragStopIds) {
-      result = autoUnframeNodeByNonOverlap(result, nodeId, { epsilon: 0 });
-      result = autoFrameNodeByOverlap(result, nodeId, { threshold: 0.75 });
-    }
-
-    // Disallow adding nodes through ReactFlow change events.
-    // Node additions must go through the store's addNode() API.
-    const prevIds = new Set(prevNodes.map((n) => n.id));
-    const addedNodes = result.filter((n) => !prevIds.has(n.id));
-    if (addedNodes.length > 0) {
-      console.error(
-        '[canvasStore] Blocked node additions via onNodesChange. Use addNode() instead.',
-        addedNodes.map((n) => ({ id: n.id, type: n.type })),
-      );
-      result = result.filter((n) => prevIds.has(n.id));
-    }
-
-    // Handle node deletion - call delete API
-    const removedIds = changes
-      .filter((c) => c.type === 'remove')
-      .map((c) => c.id);
-
-    if (removedIds.length > 0) {
-      const { canvasId } = get();
-      // Fire-and-forget deletions
-      for (const nodeId of removedIds) {
-        void deleteNode(canvasId, nodeId).catch((error) => {
-          console.error('Failed to delete node:', nodeId, error);
+      set({ isSaving: true });
+      try {
+        const {
+          nodes,
+          edges,
+          version,
+          canvasId,
+          workspaceName,
+          storageConfig,
+        } = get();
+        const response = await putCanvas(canvasId, {
+          version,
+          state: { nodes, edges, workspaceName, storageConfig },
         });
+        set({ version: response.version });
+      } catch (error) {
+        console.error('Failed to save canvas:', error);
+        // TODO: Handle version conflict (409) - reload and prompt user
+      } finally {
+        set({ isSaving: false });
+
+        const { pendingSave } = get();
+        if (pendingSave) {
+          set({ pendingSave: false });
+          // Fire-and-forget: re-save the latest state after the in-flight save completes.
+          void get().saveCanvas();
+        }
       }
-    }
+    },
 
-    set((state) => {
-      if (removedIds.length === 0) return { nodes: result };
-      const nextIngestionByNodeId = { ...state.ingestionByNodeId };
-      for (const nodeId of removedIds) {
-        delete nextIngestionByNodeId[nodeId];
+    onNodesChange: (changes) => {
+      const prevNodes = get().nodes as NestableNode[];
+      const nextNodes = applyNodeChanges(changes, prevNodes) as NestableNode[];
+
+      const dragStopIds = changes
+        .filter((c) => c.type === 'position')
+        .filter((c) => {
+          const maybe = c as unknown as { dragging?: boolean };
+          return maybe.dragging === false;
+        })
+        .map((c) => c.id);
+
+      let result = nextNodes;
+      for (const nodeId of dragStopIds) {
+        result = autoUnframeNodeByNonOverlap(result, nodeId, { epsilon: 0 });
+        result = autoFrameNodeByOverlap(result, nodeId, { threshold: 0.75 });
       }
-      return { nodes: result, ingestionByNodeId: nextIngestionByNodeId };
-    });
 
-    scheduleAutoSave(get().saveCanvas);
-  },
+      // Disallow adding nodes through ReactFlow change events.
+      // Node additions must go through the store's addNode() API.
+      const prevIds = new Set(prevNodes.map((n) => n.id));
+      const addedNodes = result.filter((n) => !prevIds.has(n.id));
+      if (addedNodes.length > 0) {
+        console.error(
+          '[canvasStore] Blocked node additions via onNodesChange. Use addNode() instead.',
+          addedNodes.map((n) => ({ id: n.id, type: n.type })),
+        );
+        result = result.filter((n) => prevIds.has(n.id));
+      }
 
-  onEdgesChange: (changes) => {
-    set({
-      edges: applyEdgeChanges(changes, get().edges),
-    });
+      // Handle node deletion - call delete API
+      const removedIds = changes
+        .filter((c) => c.type === 'remove')
+        .map((c) => c.id);
 
-    scheduleAutoSave(get().saveCanvas);
-  },
+      if (removedIds.length > 0) {
+        const { canvasId } = get();
+        // Fire-and-forget deletions
+        for (const nodeId of removedIds) {
+          void deleteNode(canvasId, nodeId).catch((error) => {
+            console.error('Failed to delete node:', nodeId, error);
+          });
+        }
+      }
 
-  onConnect: (connection: Connection) => {
-    set({
-      edges: addEdge(connection, get().edges),
-    });
+      set((state) => {
+        if (removedIds.length === 0) return { nodes: result };
+        const nextIngestionByNodeId = { ...state.ingestionByNodeId };
+        for (const nodeId of removedIds) {
+          delete nextIngestionByNodeId[nodeId];
+        }
+        return { nodes: result, ingestionByNodeId: nextIngestionByNodeId };
+      });
+    },
 
-    scheduleAutoSave(get().saveCanvas);
-  },
+    onEdgesChange: (changes) => {
+      set({
+        edges: applyEdgeChanges(changes, get().edges),
+      });
+    },
 
-  rfInstance: null,
-  setRfInstance: (instance) => set({ rfInstance: instance }),
+    onConnect: (connection: Connection) => {
+      set({
+        edges: addEdge(connection, get().edges),
+      });
+    },
 
-  addNode: (node) => {
-    // Ensure node has a label
-    let finalLabel = node.data?.label;
+    rfInstance: null,
+    setRfInstance: (instance) => set({ rfInstance: instance }),
 
-    if (!finalLabel || String(finalLabel).trim() === '') {
-      const existingNodes = get().nodes;
-      const nodeType = node.type || 'node';
-      const existingLabels = existingNodes.map(
+    addNode: (node) => {
+      // Ensure node has a label
+      let finalLabel = node.data?.label;
+
+      if (!finalLabel || String(finalLabel).trim() === '') {
+        const existingNodes = get().nodes;
+        const nodeType = node.type || 'node';
+        const existingLabels = existingNodes.map(
+          (n) => n.data?.label as string | undefined,
+        );
+
+        finalLabel = generateNextLabel(nodeType, existingLabels);
+      }
+
+      const newNode = {
+        ...node,
+        data: {
+          ...node.data,
+          label: finalLabel,
+        },
+      };
+
+      set({ nodes: selectOnly([...get().nodes, newNode], [newNode.id]) });
+
+      // Ingest the node if needed
+      triggerIngestion(newNode);
+    },
+
+    updateNodeData: (nodeId, patch) => {
+      if (!nodeId) return;
+
+      let updatedNode: Node | undefined;
+      let previousNode: Node | undefined;
+
+      set({
+        nodes: get().nodes.map((n) => {
+          if (n.id !== nodeId) return n;
+          previousNode = n;
+          const updated = {
+            ...n,
+            data: {
+              ...(n.data ?? {}),
+              ...patch,
+            },
+          };
+          updatedNode = updated;
+          return updated;
+        }),
+      });
+
+      // Ingest the updated node if needed
+      if (updatedNode && previousNode) {
+        if (!shouldIngestOnUpdate(previousNode, updatedNode)) {
+          return;
+        }
+        triggerIngestion(updatedNode);
+      }
+    },
+
+    updateNodeDataLocal: (nodeId, patch) => {
+      if (!nodeId) return;
+
+      set({
+        nodes: get().nodes.map((n) => {
+          if (n.id !== nodeId) return n;
+          return {
+            ...n,
+            data: {
+              ...(n.data ?? {}),
+              ...patch,
+            },
+          };
+        }),
+      });
+    },
+
+    getSelectedSourceIds: () => {
+      return get()
+        .nodes.filter((n) => n.selected && n.data?.sourceId)
+        .map((n) => n.data.sourceId as string);
+    },
+
+    setSelectedNodes: (ids, multiSelect = false) => {
+      set((state) => ({
+        nodes: state.nodes.map((node) => {
+          if (multiSelect) {
+            const isTarget = ids.includes(node.id);
+            return isTarget ? { ...node, selected: !node.selected } : node;
+          }
+          return {
+            ...node,
+            selected: ids.includes(node.id),
+          };
+        }),
+      }));
+    },
+
+    reorderNodes: (activeId: string, overId: string) => {
+      const { nodes } = get();
+      const oldIndex = nodes.findIndex((n) => n.id === activeId);
+      const newIndex = nodes.findIndex((n) => n.id === overId);
+
+      if (oldIndex !== -1 && newIndex !== -1) {
+        const newNodes = [...nodes];
+        const [movedItem] = newNodes.splice(oldIndex, 1);
+        newNodes.splice(newIndex, 0, movedItem);
+
+        // Ensure parent nodes are always before their children
+        // This prevents "parent node not found" errors in React Flow
+        const normalizedNodes = normalizeTreeOrder(newNodes as NestableNode[]);
+        set({ nodes: normalizedNodes });
+      }
+    },
+
+    sendSelectedToOrder: (direction) => {
+      const { nodes } = get();
+      const selected = nodes.filter((n) => n.selected);
+      if (selected.length === 0) return;
+
+      const selectedIds = new Set(selected.map((n) => n.id));
+      const rest = nodes.filter((n) => !selectedIds.has(n.id));
+
+      // 'top' = render on top (end of array), 'bottom' = render behind (start of array)
+      const reordered =
+        direction === 'top' ? [...rest, ...selected] : [...selected, ...rest];
+
+      const normalizedNodes = normalizeTreeOrder(reordered as NestableNode[]);
+      set({ nodes: normalizedNodes });
+    },
+
+    frameSelectedNodes: () => {
+      const { nodes } = get();
+      const selectedIds = nodes.filter((n) => n.selected).map((n) => n.id);
+      if (selectedIds.length < 2) return;
+
+      const frameId = createId('node');
+      const result = frameNodes(nodes as NestableNode[], selectedIds, {
+        frameId,
+        label: 'Frame',
+      });
+
+      set({ nodes: selectOnly(result.nodes, [frameId]) });
+    },
+
+    frameNodesInRect: (flowRect) => {
+      const { nodes } = get();
+      const frameId = createId('node');
+      const result = frameNodesInRect(
+        nodes as NestableNode[],
+        flowRect,
+        frameId,
+      );
+      set({ nodes: selectOnly(result.nodes, [frameId]) });
+    },
+
+    unframe: (frameId) => {
+      const { nodes, edges } = get();
+      const result = unframe(nodes as NestableNode[], edges, frameId);
+      set({ nodes: result.nodes, edges: result.edges });
+    },
+
+    toggleFrameLock: (frameId) => {
+      const { nodes } = get();
+
+      set({ nodes: toggleFrameLock(nodes as NestableNode[], frameId) });
+    },
+
+    moveNodeIntoFrame: (nodeId, frameId) => {
+      const { nodes } = get();
+      const result = moveNodeIntoFrame(
+        nodes as NestableNode[],
+        nodeId,
+        frameId,
+      );
+      set({ nodes: result });
+    },
+
+    moveNodeOutOfFrame: (nodeId) => {
+      const { nodes } = get();
+      const result = moveNodeOutOfFrame(nodes as NestableNode[], nodeId);
+      set({ nodes: result });
+    },
+
+    clipboard: [],
+
+    copySelectedNodes: () => {
+      const { nodes } = get();
+      const selected = nodes.filter((n) => n.selected);
+      if (selected.length === 0) return;
+
+      // Extract only serialisable properties to avoid structuredClone failures
+      // on ReactFlow internal properties (measured, internals, etc.)
+      const cloned: Node[] = selected.map((n) => ({
+        id: n.id,
+        type: n.type,
+        position: { x: n.position.x, y: n.position.y },
+        data: JSON.parse(JSON.stringify(n.data ?? {})),
+        ...(n.style ? { style: JSON.parse(JSON.stringify(n.style)) } : {}),
+        ...(n.parentId ? { parentId: n.parentId } : {}),
+      }));
+
+      console.log('Copied nodes to clipboard:', cloned);
+
+      set({ clipboard: cloned });
+    },
+
+    pasteNodes: (flowPosition) => {
+      const { clipboard, nodes } = get();
+      if (clipboard.length === 0) return;
+
+      // Compute the offset to apply to each pasted node.
+      // If a flow-space position is provided, centre the pasted group there;
+      // otherwise fall back to a small fixed offset from the originals.
+      let offsetX: number;
+      let offsetY: number;
+
+      if (flowPosition) {
+        // Calculate the bounding-box centre of the copied nodes
+        const xs = clipboard.map((n) => n.position.x);
+        const ys = clipboard.map((n) => n.position.y);
+        const widths = clipboard.map(
+          (n) => (n.style?.width as number) ?? n.measured?.width ?? 200,
+        );
+        const heights = clipboard.map(
+          (n) => (n.style?.height as number) ?? n.measured?.height ?? 150,
+        );
+
+        const minX = Math.min(...xs);
+        const minY = Math.min(...ys);
+        const maxX = Math.max(...xs.map((x, i) => x + widths[i]));
+        const maxY = Math.max(...ys.map((y, i) => y + heights[i]));
+
+        const centerX = (minX + maxX) / 2;
+        const centerY = (minY + maxY) / 2;
+
+        offsetX = flowPosition.x - centerX;
+        offsetY = flowPosition.y - centerY;
+      } else {
+        const OFFSET = 40;
+        offsetX = OFFSET;
+        offsetY = OFFSET;
+      }
+
+      // Build old-id → new-id map so we can remap parentId refs
+      const idMap = new Map<string, string>();
+      for (const node of clipboard) {
+        idMap.set(node.id, createId('node'));
+      }
+
+      const existingLabels = nodes.map(
         (n) => n.data?.label as string | undefined,
       );
 
-      finalLabel = generateNextLabel(nodeType, existingLabels);
-    }
+      const newNodes: Node[] = clipboard.map((node) => {
+        const newId = idMap.get(node.id) ?? createId('node');
+        const nodeType = node.type || 'node';
+        const label = generateNextLabel(nodeType, existingLabels);
+        // Track new label to avoid duplicates within the batch
+        existingLabels.push(label);
 
-    const newNode = {
-      ...node,
-      data: {
-        ...node.data,
-        label: finalLabel,
-      },
-    };
-
-    set({ nodes: selectOnly([...get().nodes, newNode], [newNode.id]) });
-
-    // Ingest the node if needed
-    triggerIngestion(newNode);
-
-    scheduleAutoSave(get().saveCanvas);
-  },
-
-  updateNodeData: (nodeId, patch) => {
-    if (!nodeId) return;
-
-    let updatedNode: Node | undefined;
-    let previousNode: Node | undefined;
-
-    set({
-      nodes: get().nodes.map((n) => {
-        if (n.id !== nodeId) return n;
-        previousNode = n;
-        const updated = {
-          ...n,
-          data: {
-            ...(n.data ?? {}),
-            ...patch,
+        const cloned: Node = {
+          id: newId,
+          type: node.type,
+          position: {
+            x: node.position.x + offsetX,
+            y: node.position.y + offsetY,
           },
-        };
-        updatedNode = updated;
-        return updated;
-      }),
-    });
-
-    // Ingest the updated node if needed
-    if (updatedNode && previousNode) {
-      if (!shouldIngestOnUpdate(previousNode, updatedNode)) {
-        scheduleAutoSave(get().saveCanvas);
-        return;
-      }
-      triggerIngestion(updatedNode);
-    }
-
-    scheduleAutoSave(get().saveCanvas);
-  },
-
-  updateNodeDataLocal: (nodeId, patch) => {
-    if (!nodeId) return;
-
-    set({
-      nodes: get().nodes.map((n) => {
-        if (n.id !== nodeId) return n;
-        return {
-          ...n,
           data: {
-            ...(n.data ?? {}),
-            ...patch,
+            ...JSON.parse(JSON.stringify(node.data ?? {})),
+            label,
           },
+          ...(node.style
+            ? { style: JSON.parse(JSON.stringify(node.style)) }
+            : {}),
         };
-      }),
-    });
 
-    scheduleAutoSave(get().saveCanvas);
-  },
-
-  getSelectedSourceIds: () => {
-    return get()
-      .nodes.filter((n) => n.selected && n.data?.sourceId)
-      .map((n) => n.data.sourceId as string);
-  },
-
-  setSelectedNodes: (ids, multiSelect = false) => {
-    set((state) => ({
-      nodes: state.nodes.map((node) => {
-        if (multiSelect) {
-          const isTarget = ids.includes(node.id);
-          return isTarget ? { ...node, selected: !node.selected } : node;
+        // Remap parentId if the parent was also copied
+        if (node.parentId && idMap.has(node.parentId)) {
+          cloned.parentId = idMap.get(node.parentId);
         }
-        return {
-          ...node,
-          selected: ids.includes(node.id),
-        };
-      }),
-    }));
-  },
 
-  reorderNodes: (activeId: string, overId: string) => {
-    const { nodes } = get();
-    const oldIndex = nodes.findIndex((n) => n.id === activeId);
-    const newIndex = nodes.findIndex((n) => n.id === overId);
+        return cloned;
+      });
 
-    if (oldIndex !== -1 && newIndex !== -1) {
-      const newNodes = [...nodes];
-      const [movedItem] = newNodes.splice(oldIndex, 1);
-      newNodes.splice(newIndex, 0, movedItem);
+      // Deselect all existing nodes, then select only pasted ones
+      set({
+        nodes: selectOnly(
+          [...nodes, ...newNodes],
+          newNodes.map((n) => n.id),
+        ),
+      });
 
-      // Ensure parent nodes are always before their children
-      // This prevents "parent node not found" errors in React Flow
-      const normalizedNodes = normalizeTreeOrder(newNodes as NestableNode[]);
-      set({ nodes: normalizedNodes });
-      scheduleAutoSave(get().saveCanvas);
-    }
-  },
-
-  sendSelectedToOrder: (direction) => {
-    const { nodes } = get();
-    const selected = nodes.filter((n) => n.selected);
-    if (selected.length === 0) return;
-
-    const selectedIds = new Set(selected.map((n) => n.id));
-    const rest = nodes.filter((n) => !selectedIds.has(n.id));
-
-    // 'top' = render on top (end of array), 'bottom' = render behind (start of array)
-    const reordered =
-      direction === 'top' ? [...rest, ...selected] : [...selected, ...rest];
-
-    const normalizedNodes = normalizeTreeOrder(reordered as NestableNode[]);
-    set({ nodes: normalizedNodes });
-    scheduleAutoSave(get().saveCanvas);
-  },
-
-  frameSelectedNodes: () => {
-    const { nodes } = get();
-    const selectedIds = nodes.filter((n) => n.selected).map((n) => n.id);
-    if (selectedIds.length < 2) return;
-
-    const frameId = createId('node');
-    const result = frameNodes(nodes as NestableNode[], selectedIds, {
-      frameId,
-      label: 'Frame',
-    });
-
-    set({ nodes: selectOnly(result.nodes, [frameId]) });
-
-    scheduleAutoSave(get().saveCanvas);
-  },
-
-  frameNodesInRect: (flowRect) => {
-    const { nodes } = get();
-    const frameId = createId('node');
-    const result = frameNodesInRect(nodes as NestableNode[], flowRect, frameId);
-    set({ nodes: selectOnly(result.nodes, [frameId]) });
-    scheduleAutoSave(get().saveCanvas);
-  },
-
-  unframe: (frameId) => {
-    const { nodes, edges } = get();
-    const result = unframe(nodes as NestableNode[], edges, frameId);
-    set({ nodes: result.nodes, edges: result.edges });
-
-    scheduleAutoSave(get().saveCanvas);
-  },
-
-  toggleFrameLock: (frameId) => {
-    const { nodes } = get();
-
-    set({ nodes: toggleFrameLock(nodes as NestableNode[], frameId) });
-
-    scheduleAutoSave(get().saveCanvas);
-  },
-
-  moveNodeIntoFrame: (nodeId, frameId) => {
-    const { nodes } = get();
-    const result = moveNodeIntoFrame(nodes as NestableNode[], nodeId, frameId);
-    set({ nodes: result });
-    scheduleAutoSave(get().saveCanvas);
-  },
-
-  moveNodeOutOfFrame: (nodeId) => {
-    const { nodes } = get();
-    const result = moveNodeOutOfFrame(nodes as NestableNode[], nodeId);
-    set({ nodes: result });
-    scheduleAutoSave(get().saveCanvas);
-  },
-
-  clipboard: [],
-
-  copySelectedNodes: () => {
-    const { nodes } = get();
-    const selected = nodes.filter((n) => n.selected);
-    if (selected.length === 0) return;
-
-    // Extract only serialisable properties to avoid structuredClone failures
-    // on ReactFlow internal properties (measured, internals, etc.)
-    const cloned: Node[] = selected.map((n) => ({
-      id: n.id,
-      type: n.type,
-      position: { x: n.position.x, y: n.position.y },
-      data: JSON.parse(JSON.stringify(n.data ?? {})),
-      ...(n.style ? { style: JSON.parse(JSON.stringify(n.style)) } : {}),
-      ...(n.parentId ? { parentId: n.parentId } : {}),
-    }));
-
-    console.log('Copied nodes to clipboard:', cloned);
-
-    set({ clipboard: cloned });
-  },
-
-  pasteNodes: (flowPosition) => {
-    const { clipboard, nodes } = get();
-    if (clipboard.length === 0) return;
-
-    // Compute the offset to apply to each pasted node.
-    // If a flow-space position is provided, centre the pasted group there;
-    // otherwise fall back to a small fixed offset from the originals.
-    let offsetX: number;
-    let offsetY: number;
-
-    if (flowPosition) {
-      // Calculate the bounding-box centre of the copied nodes
-      const xs = clipboard.map((n) => n.position.x);
-      const ys = clipboard.map((n) => n.position.y);
-      const widths = clipboard.map(
-        (n) => (n.style?.width as number) ?? n.measured?.width ?? 200,
-      );
-      const heights = clipboard.map(
-        (n) => (n.style?.height as number) ?? n.measured?.height ?? 150,
-      );
-
-      const minX = Math.min(...xs);
-      const minY = Math.min(...ys);
-      const maxX = Math.max(...xs.map((x, i) => x + widths[i]));
-      const maxY = Math.max(...ys.map((y, i) => y + heights[i]));
-
-      const centerX = (minX + maxX) / 2;
-      const centerY = (minY + maxY) / 2;
-
-      offsetX = flowPosition.x - centerX;
-      offsetY = flowPosition.y - centerY;
-    } else {
-      const OFFSET = 40;
-      offsetX = OFFSET;
-      offsetY = OFFSET;
-    }
-
-    // Build old-id → new-id map so we can remap parentId refs
-    const idMap = new Map<string, string>();
-    for (const node of clipboard) {
-      idMap.set(node.id, createId('node'));
-    }
-
-    const existingLabels = nodes.map(
-      (n) => n.data?.label as string | undefined,
-    );
-
-    const newNodes: Node[] = clipboard.map((node) => {
-      const newId = idMap.get(node.id) ?? createId('node');
-      const nodeType = node.type || 'node';
-      const label = generateNextLabel(nodeType, existingLabels);
-      // Track new label to avoid duplicates within the batch
-      existingLabels.push(label);
-
-      const cloned: Node = {
-        id: newId,
-        type: node.type,
-        position: {
-          x: node.position.x + offsetX,
-          y: node.position.y + offsetY,
-        },
-        data: {
-          ...JSON.parse(JSON.stringify(node.data ?? {})),
-          label,
-        },
-        ...(node.style
-          ? { style: JSON.parse(JSON.stringify(node.style)) }
-          : {}),
-      };
-
-      // Remap parentId if the parent was also copied
-      if (node.parentId && idMap.has(node.parentId)) {
-        cloned.parentId = idMap.get(node.parentId);
+      // Trigger ingestion for each pasted node
+      for (const node of newNodes) {
+        triggerIngestion(node);
       }
-
-      return cloned;
-    });
-
-    // Deselect all existing nodes, then select only pasted ones
-    set({
-      nodes: selectOnly(
-        [...nodes, ...newNodes],
-        newNodes.map((n) => n.id),
-      ),
-    });
-
-    // Trigger ingestion for each pasted node
-    for (const node of newNodes) {
-      triggerIngestion(node);
-    }
-
-    scheduleAutoSave(get().saveCanvas);
-  },
-}));
+    },
+  })),
+);
 
 /**
  * Flush all pending changes when the page is about to be unloaded.
