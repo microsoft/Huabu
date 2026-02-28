@@ -607,7 +607,10 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
       const destPath = path.join(artifactsDir, safeFilename);
       try {
-        await writeFile(destPath, Buffer.from(artifact.data, 'base64'));
+        await writeFile(
+          destPath,
+          new Uint8Array(Buffer.from(artifact.data, 'base64')),
+        );
         importedArtifacts++;
       } catch (err) {
         request.log.error(
