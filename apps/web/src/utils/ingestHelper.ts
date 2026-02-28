@@ -45,6 +45,7 @@ export function shouldIngestOnUpdate(prevNode: Node, nextNode: Node): boolean {
   if ((prevNode.type ?? '') !== nextType) return true;
 
   if (nextType === 'note' || nextType === 'text') {
+    // `content` is the canonical Markdown — re-ingest whenever it changes.
     return (
       getStringDataField(prevNode, 'content') !==
       getStringDataField(nextNode, 'content')
@@ -89,8 +90,12 @@ export async function ingestNodeIfNeeded({
       ? undefined
       : currentLabel || (nodeData?.title as string) || undefined;
 
+    // `content` is always Markdown (the canonical representation), so we
+    // can send it directly to all storage backends including Obsidian.
+    const nodeType = node.type as string;
+
     const response = await upsertNode(canvasId, node.id, {
-      type: node.type as 'note' | 'text' | 'web' | 'pdf',
+      type: nodeType as 'note' | 'text' | 'web' | 'pdf',
       title: titleToSend,
       content: (nodeData?.content as string) || undefined,
       src: (nodeData?.src as string) || undefined,

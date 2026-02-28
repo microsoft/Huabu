@@ -12,6 +12,8 @@ export type NoteDragPayload = {
   kind: 'note';
   data: {
     content: string;
+    /** Auxiliary BlockNote JSON for lossless editor round-trips. */
+    contentJson?: string;
   };
 };
 
@@ -177,10 +179,13 @@ export const getSedimentPayload = (dt: DataTransfer): DragPayload | null => {
       const content = (data as { content?: unknown }).content;
       if (typeof content !== 'string' || content.trim() === '') return null;
 
+      const contentJson = (data as { contentJson?: unknown }).contentJson;
+
       return {
         kind: 'note',
         data: {
           content,
+          ...(typeof contentJson === 'string' ? { contentJson } : {}),
         },
         dragId: normalizedDragId,
       };
