@@ -7,6 +7,7 @@ import { createRoot, type Root } from 'react-dom/client';
 
 import { NodeWrapper } from './NodeWrapper.tsx';
 import useCanvasStore from '../../store/canvasStore.ts';
+import { loadBlockNoteContent } from '../../utils/blockNoteContent.ts';
 import { copyToClipboard } from '../../utils/clipboard.ts';
 import { GhostButton } from '../Common/GhostButton.tsx';
 
@@ -125,15 +126,16 @@ export const NoteNode = ({ id, data, selected }: NodeProps<NoteNodeType>) => {
     );
   }, [editor]);
 
-  // Update content when data changes
+  // Update content when data changes.
+  // Prefer contentJson (lossless BlockNote JSON) when available and in sync
+  // with content (Markdown). Fall back to parsing content as Markdown.
   useEffect(() => {
-    void (async () => {
-      const raw = data.content ?? '';
-      const markdown = raw.trim() === '' ? '\n' : raw;
-      const blocks = await editor.tryParseMarkdownToBlocks(markdown);
-      editor.replaceBlocks(editor.document, blocks);
-    })();
-  }, [data.content, editor]);
+    const markdown = typeof data.content === 'string' ? data.content : '';
+    const contentJson =
+      typeof data.contentJson === 'string' ? data.contentJson : null;
+
+    void loadBlockNoteContent(editor, markdown, contentJson);
+  }, [data.content, data.contentJson, editor]);
 
   return (
     <NodeWrapper

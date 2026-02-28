@@ -11,6 +11,7 @@ export interface NodePreviewContentProps {
   data: Record<string, unknown>;
   readOnly?: boolean;
   onContentChange?: (newContent: string) => void;
+  onDataChange?: (patch: Record<string, unknown>) => void;
 }
 
 const DefaultPreview = ({ type }: { type: string }) => {

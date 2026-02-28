@@ -421,6 +421,9 @@ export const Canvas: React.FC = () => {
             position,
             data: {
               content: payload.data.content,
+              ...(payload.data.contentJson
+                ? { contentJson: payload.data.contentJson }
+                : {}),
             },
           };
         }
@@ -504,6 +507,7 @@ export const Canvas: React.FC = () => {
           setRfInstance(instance);
         }}
         onPaneClick={handlePaneClick}
+        onNodeDoubleClick={(e) => e.stopPropagation()}
         fitView
         attributionPosition="bottom-right"
         panOnDrag={pendingNodeType ? false : tool === 'pan'}

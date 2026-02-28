@@ -66,7 +66,8 @@ export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
     updateStyle({ textDecoration: current.join(' ') });
   };
 
-  const handleDoubleClick = () => {
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
     setIsEditing(true);
     setTimeout(() => textareaRef.current?.focus(), 50);
   };
