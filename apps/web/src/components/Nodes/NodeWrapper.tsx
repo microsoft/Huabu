@@ -1,7 +1,16 @@
-import { Handle, Position, NodeResizer, NodeToolbar } from '@xyflow/react';
+import {
+  Handle,
+  Position,
+  NodeResizer,
+  NodeToolbar,
+  useInternalNode,
+  useViewport,
+  useStore,
+} from '@xyflow/react';
 import { clsx } from 'clsx';
 import { GripVertical } from 'lucide-react';
 import React, { memo, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 
 import useCanvasStore from '@/store/canvasStore.ts';
 
@@ -21,6 +30,15 @@ interface NodeWrapperProps {
   minHeight?: number;
   toolbar?: React.ReactNode;
 
+  /**
+   * Content to render in the zoom-invariant overlay layer.
+   * Positioned at the node's top-left corner in screen space.
+   * Use `overlayOffsetY` (screen px) to shift vertically (negative = above the node).
+   */
+  overlayContent?: React.ReactNode;
+  /** Vertical offset in screen pixels from the node's top edge. Negative = above. */
+  overlayOffsetY?: number;
+
   keepAspectRatio?: boolean;
   resizable?: boolean;
 
@@ -38,6 +56,8 @@ export const NodeWrapper = memo(
     minWidth,
     minHeight,
     toolbar,
+    overlayContent,
+    overlayOffsetY = 0,
     keepAspectRatio = false,
     resizable = true,
 
@@ -48,6 +68,13 @@ export const NodeWrapper = memo(
     const selectedCount = useCanvasStore(
       (state) => state.nodes.filter((node) => node.selected).length,
     );
+
+    // For zoom-invariant overlay portal — same target as NodeToolbar (.react-flow__renderer)
+    const rendererEl = useStore(
+      (state) => state.domNode?.querySelector('.react-flow__renderer') ?? null,
+    );
+    const internalNode = useInternalNode(id);
+    const { zoom, x: vpX, y: vpY } = useViewport();
 
     const ingestion = useCanvasStore((state) => state.ingestionByNodeId[id]);
     const showIngestionOverlay =
@@ -92,7 +119,7 @@ export const NodeWrapper = memo(
           keepAspectRatio={keepAspectRatio}
           onResize={handleResize}
         />
-        {type !== 'frame' && (
+        {toolbar && (
           <NodeToolbar
             isVisible={selected && selectedCount === 1}
             position={Position.Top}
@@ -102,6 +129,28 @@ export const NodeWrapper = memo(
             {toolbar}
           </NodeToolbar>
         )}
+
+        {/* Zoom-invariant overlay portal — portals into .react-flow__renderer so it shares the same stacking context as NodeToolbar. DOM order puts toolbar after label, so toolbar always paints on top. */}
+        {overlayContent &&
+          rendererEl &&
+          internalNode?.internals.positionAbsolute &&
+          createPortal(
+            <div
+              style={{
+                position: 'absolute',
+                zIndex: 1000,
+                left: internalNode.internals.positionAbsolute.x * zoom + vpX,
+                top:
+                  internalNode.internals.positionAbsolute.y * zoom +
+                  vpY +
+                  overlayOffsetY,
+                pointerEvents: 'auto',
+              }}
+            >
+              {overlayContent}
+            </div>,
+            rendererEl,
+          )}
 
         <div
           className={clsx(
