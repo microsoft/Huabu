@@ -24,6 +24,9 @@ interface NodeWrapperProps {
   keepAspectRatio?: boolean;
   resizable?: boolean;
 
+  onResizeStart?: () => void;
+  onResize?: (width: number, height: number) => void;
+  onResizeEnd?: (width: number, height: number) => void;
   onDoubleClick?: React.MouseEventHandler<HTMLDivElement>;
 }
 
@@ -43,6 +46,9 @@ export const NodeWrapper = memo(
 
     allowOverflow = false,
 
+    onResizeStart,
+    onResize: onResizeProp,
+    onResizeEnd,
     onDoubleClick,
   }: NodeWrapperProps) => {
     const selectedCount = useCanvasStore(
@@ -72,8 +78,20 @@ export const NodeWrapper = memo(
               : n,
           ),
         }));
+        onResizeProp?.(params.width, params.height);
       },
-      [id],
+      [id, onResizeProp],
+    );
+
+    const handleResizeStart = useCallback(() => {
+      onResizeStart?.();
+    }, [onResizeStart]);
+
+    const handleResizeEnd = useCallback(
+      (_event: unknown, params: { width: number; height: number }) => {
+        onResizeEnd?.(params.width, params.height);
+      },
+      [onResizeEnd],
     );
 
     return (
@@ -90,7 +108,9 @@ export const NodeWrapper = memo(
               : minHeight
           }
           keepAspectRatio={keepAspectRatio}
+          onResizeStart={handleResizeStart}
           onResize={handleResize}
+          onResizeEnd={handleResizeEnd}
         />
         {type !== 'frame' && (
           <NodeToolbar

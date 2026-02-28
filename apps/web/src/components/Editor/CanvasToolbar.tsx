@@ -155,7 +155,6 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             ...baseNode,
             type: 'text',
             data: { type: 'text', content: '' },
-            style: { width: initialWidth, height: initialHeight },
           };
           break;
         case 'image':

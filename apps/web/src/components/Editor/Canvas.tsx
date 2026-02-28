@@ -132,7 +132,6 @@ export const Canvas: React.FC = () => {
             ...baseNode,
             type: 'text',
             data: { type: 'text', content: '' },
-            style: { width: w, height: h },
           };
           break;
         default:
