@@ -18,6 +18,7 @@ import {
   autoFrameNodeByOverlap,
   autoUnframeNodeByNonOverlap,
   frameNodes,
+  frameNodesInRect,
   toggleFrameLock,
   unframe,
   moveNodeIntoFrame,
@@ -111,6 +112,12 @@ type RFState = {
   getSelectedSourceIds: () => string[];
 
   frameSelectedNodes: () => void;
+  frameNodesInRect: (flowRect: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }) => void;
   unframe: (frameId: string) => void;
   toggleFrameLock: (frameId: string) => void;
 
@@ -495,6 +502,14 @@ const useCanvasStore = create<RFState>((set, get) => ({
 
     set({ nodes: result.nodes });
 
+    scheduleAutoSave(get().saveCanvas);
+  },
+
+  frameNodesInRect: (flowRect) => {
+    const { nodes } = get();
+    const frameId = createId('node');
+    const result = frameNodesInRect(nodes as NestableNode[], flowRect, frameId);
+    set({ nodes: result.nodes });
     scheduleAutoSave(get().saveCanvas);
   },
 

@@ -722,6 +722,84 @@ export function moveNodeIntoFrame(
   return normalizeTreeOrder(nextNodes);
 }
 
+export type FrameNodesInRectOptions = {
+  /**
+   * Fraction of a candidate node's area that must overlap the drawn rectangle
+   * for it to be absorbed into the new frame. Default: 0.5 (50 %).
+   */
+  threshold?: number;
+};
+
+export type FrameNodesInRectResult = {
+  nodes: NestableNode[];
+  frameId: string;
+};
+
+/**
+ * Creates a frame node sized to the given flow-space rectangle and absorbs
+ * any top-level, non-frame nodes whose area overlaps the rectangle by at
+ * least `threshold`.
+ *
+ * - The frame is placed at the exact drawn rectangle (no auto-resize).
+ * - Delegates to moveNodeIntoFrame for each absorbed node, so all existing
+ *   validations (locked, nesting, cycles) are respected.
+ */
+export function frameNodesInRect(
+  nodes: NestableNode[],
+  flowRect: { x: number; y: number; width: number; height: number },
+  frameId: string,
+  options: FrameNodesInRectOptions = {},
+): FrameNodesInRectResult {
+  const threshold = options.threshold ?? 0.5;
+  const { x, y, width, height } = flowRect;
+
+  if (width <= 0 || height <= 0) return { nodes, frameId };
+
+  const frameRect: Rect = { x, y, width, height };
+
+  const frameNode: NestableNode = {
+    id: frameId,
+    type: 'frame',
+    position: { x, y },
+    data: { type: 'frame', label: 'Frame' },
+    style: {
+      width,
+      height,
+    },
+    zIndex: -1,
+  };
+
+  // Insert the frame first so moveNodeIntoFrame can resolve it by id.
+  let result: NestableNode[] = [...nodes, frameNode];
+
+  // Use the original node map for absolute-position lookups (before any
+  // parent-child changes are applied).
+  const byId = indexById(nodes);
+  const getAbs = createAbsolutePositionGetter(byId);
+
+  for (const node of nodes) {
+    // Only top-level non-frame nodes are candidates.
+    if (node.type === 'frame') continue;
+    if (node.parentId) continue;
+
+    const abs = getAbs(node.id);
+    if (!abs) continue;
+
+    const size = getNodeSize(node);
+    if (size.width <= 0 || size.height <= 0) continue;
+
+    const nodeRect: Rect = { x: abs.x, y: abs.y, ...size };
+    const nodeArea = size.width * size.height;
+    const intersection = rectIntersectionArea(nodeRect, frameRect);
+
+    if (intersection / nodeArea >= threshold) {
+      result = moveNodeIntoFrame(result, node.id, frameId);
+    }
+  }
+
+  return { nodes: result, frameId };
+}
+
 /**
  * Move a node out of its parent frame, making it a top-level node.
  * Preserves the node's visual position on the canvas.
