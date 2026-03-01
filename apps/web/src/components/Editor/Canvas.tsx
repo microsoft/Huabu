@@ -42,6 +42,8 @@ export const Canvas: React.FC = () => {
   const onNodesChange = useCanvasStore((state) => state.onNodesChange);
   const onEdgesChange = useCanvasStore((state) => state.onEdgesChange);
   const onConnect = useCanvasStore((state) => state.onConnect);
+  const onNodeDragStart = useCanvasStore((state) => state.onNodeDragStart);
+  const onNodeDragStop = useCanvasStore((state) => state.onNodeDragStop);
   const addNode = useCanvasStore((state) => state.addNode);
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
   const setRfInstance = useCanvasStore((state) => state.setRfInstance);
@@ -516,6 +518,8 @@ export const Canvas: React.FC = () => {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onNodeDragStart={onNodeDragStart}
+        onNodeDragStop={onNodeDragStop}
         nodeTypes={nodeTypes}
         onInit={(instance) => {
           rfInstanceRef.current = instance;

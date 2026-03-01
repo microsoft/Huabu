@@ -8,6 +8,7 @@ import {
   type OnNodesChange,
   type OnEdgesChange,
   type OnConnect,
+  type OnNodeDrag,
   type Connection,
   type ReactFlowInstance,
 } from '@xyflow/react';
@@ -57,50 +58,55 @@ type CanvasSnapshot = {
 const undoStack: CanvasSnapshot[] = [];
 const redoStack: CanvasSnapshot[] = [];
 
-// Track the last recorded array references so we can cheaply skip duplicate
-// snapshots when nothing meaningful changed between calls.
-let lastRecordedNodes: Node[] | null = null;
-let lastRecordedEdges: Edge[] | null = null;
-
-/** Snapshot nodes/edges for undo, stripping ReactFlow internals
- *  (selected, dragging, measured, internals).
+/** Snapshot nodes/edges for undo, stripping only ReactFlow transient internals
+ *  (selected, dragging, measured, internals) while preserving all other props
+ *  (draggable, zIndex, extent, etc.) that are actively managed by the app.
  *  No deep-clone needed – all store updates follow immutable patterns. */
 function createSnapshot(nodes: Node[], edges: Edge[]): CanvasSnapshot {
   return {
-    nodes: nodes.map((n) => ({
-      id: n.id,
-      type: n.type,
-      position: { x: n.position.x, y: n.position.y },
-      data: n.data ?? {},
-      ...(n.style ? { style: n.style } : {}),
-      ...(n.parentId !== undefined ? { parentId: n.parentId } : {}),
-    })),
-    edges: edges.map((e) => ({
-      id: e.id,
-      source: e.source,
-      target: e.target,
-      ...(e.sourceHandle ? { sourceHandle: e.sourceHandle } : {}),
-      ...(e.targetHandle ? { targetHandle: e.targetHandle } : {}),
-      ...(e.type ? { type: e.type } : {}),
-      ...(e.data ? { data: e.data } : {}),
-      ...(e.style ? { style: e.style } : {}),
-    })),
+    nodes: nodes.map(
+      ({ selected: _, dragging: _d, measured: _m, internals: _i, ...rest }) =>
+        rest,
+    ),
+    edges: edges.map(({ selected: _, ...rest }) => rest),
   };
 }
 
+/**
+ * Shallow-compare two snapshots by JSON-stringifying each node/edge.
+ * This is intentionally lightweight: the snapshots are already stripped of
+ * transient internals, so we only compare the fields that matter for undo.
+ */
+function snapshotsEqual(a: CanvasSnapshot, b: CanvasSnapshot): boolean {
+  if (a.nodes.length !== b.nodes.length || a.edges.length !== b.edges.length)
+    return false;
+  for (let i = 0; i < a.nodes.length; i++) {
+    if (JSON.stringify(a.nodes[i]) !== JSON.stringify(b.nodes[i])) return false;
+  }
+  for (let i = 0; i < a.edges.length; i++) {
+    if (JSON.stringify(a.edges[i]) !== JSON.stringify(b.edges[i])) return false;
+  }
+  return true;
+}
+
 /** Record the current canvas state to the undo stack.
- *  Skipped when the node/edge references haven't changed since the last call
- *  (e.g. two successive calls with no intervening mutation). */
+ *  Skipped when the stripped snapshot content is identical to the last pushed
+ *  snapshot.  This prevents selection-only changes (which replace the nodes
+ *  array reference but leave positions/data untouched) from filling the undo
+ *  stack with duplicate entries. */
 function takeSnapshot(): void {
   const { nodes, edges } = useCanvasStore.getState();
-  if (nodes === lastRecordedNodes && edges === lastRecordedEdges) return;
+  const candidate = createSnapshot(nodes, edges);
 
-  undoStack.push(createSnapshot(nodes, edges));
+  // Compare against the top of the undo stack after stripping internals,
+  // rather than relying on array reference equality which breaks on
+  // selection / other UI-only updates.
+  const top = undoStack[undoStack.length - 1];
+  if (top && snapshotsEqual(top, candidate)) return;
+
+  undoStack.push(candidate);
   if (undoStack.length > MAX_HISTORY) undoStack.shift();
   redoStack.length = 0;
-
-  lastRecordedNodes = nodes;
-  lastRecordedEdges = edges;
 
   useCanvasStore.setState({
     canUndo: undoStack.length > 0,
@@ -111,8 +117,6 @@ function takeSnapshot(): void {
 function clearHistory(): void {
   undoStack.length = 0;
   redoStack.length = 0;
-  lastRecordedNodes = null;
-  lastRecordedEdges = null;
 
   useCanvasStore.setState({ canUndo: false, canRedo: false });
 }
@@ -132,26 +136,55 @@ function syncServerAfterRestore(
   const prevIds = new Set(prevNodes.map((n) => n.id));
   const restoredIds = new Set(restoredNodes.map((n) => n.id));
 
-  // Nodes that reappear after undo/redo – re-ingest them
+  // Nodes that reappear after undo/redo – abort any in-flight DELETE
+  // first, then re-ingest them so the server-side knowledge store
+  // is repopulated.
   for (const node of restoredNodes) {
     if (!prevIds.has(node.id)) {
+      // Cancel stale DELETE that may still be in flight
+      const controller = inflightDeletes.get(node.id);
+      if (controller) {
+        controller.abort();
+        inflightDeletes.delete(node.id);
+      }
       triggerIngestion(node);
     }
   }
 
   // Nodes that disappear after undo/redo – delete from server
+  // (also tracked with AbortController so a subsequent redo can cancel)
   for (const node of prevNodes) {
     if (!restoredIds.has(node.id)) {
-      void deleteNode(canvasId, node.id).catch((error) => {
-        console.error('Failed to delete node after undo/redo:', node.id, error);
-      });
+      inflightDeletes.get(node.id)?.abort();
+
+      const controller = new AbortController();
+      inflightDeletes.set(node.id, controller);
+
+      void deleteNode(canvasId, node.id, { signal: controller.signal })
+        .catch((error) => {
+          if (error instanceof DOMException && error.name === 'AbortError')
+            return;
+          console.error(
+            'Failed to delete node after undo/redo:',
+            node.id,
+            error,
+          );
+        })
+        .finally(() => {
+          if (inflightDeletes.get(node.id) === controller) {
+            inflightDeletes.delete(node.id);
+          }
+        });
     }
   }
 }
 
-// Debounce flag for resize – NodeResizer fires onResize continuously; we only
-// want to snapshot once per resize gesture.
-let resizeSnapshotTimer: ReturnType<typeof setTimeout> | null = null;
+// Per-node debounce timers for resize – NodeResizer fires onResize continuously;
+// we only want to snapshot once per resize gesture per node.
+const resizeSnapshotTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+// Track in-flight DELETE requests per node so they can be aborted on undo.
+const inflightDeletes = new Map<string, AbortController>();
 
 // Per-node debounce timers so rapid edits only fire one ingestion request
 // after the user stops typing, rather than on every keystroke.
@@ -212,6 +245,8 @@ type RFState = {
   onNodesChange: OnNodesChange;
   onEdgesChange: OnEdgesChange;
   onConnect: OnConnect;
+  onNodeDragStart: OnNodeDrag;
+  onNodeDragStop: OnNodeDrag;
   addNode: (node: Node) => void;
   rfInstance: ReactFlowInstance | null;
   setRfInstance: (instance: ReactFlowInstance | null) => void;
@@ -458,35 +493,38 @@ const useCanvasStore = create<RFState>()(
       }
     },
 
+    onNodeDragStart: () => {
+      // Snapshot the true pre-drag positions before any intermediate
+      // position updates are applied by ReactFlow.
+      takeSnapshot();
+    },
+
+    onNodeDragStop: (_event, _node, draggedNodes) => {
+      // After drag ends, auto-frame / unframe based on overlap.
+      const { nodes } = get();
+      let result = nodes as NestableNode[];
+      for (const dragged of draggedNodes) {
+        result = autoUnframeNodeByNonOverlap(result, dragged.id, {
+          epsilon: 0,
+        });
+        result = autoFrameNodeByOverlap(result, dragged.id, {
+          threshold: 0.75,
+        });
+      }
+      if (result !== nodes) {
+        set({ nodes: result });
+      }
+    },
+
     onNodesChange: (changes) => {
       const hasRemoves = changes.some((c) => c.type === 'remove');
-      const hasDragStops = changes
-        .filter((c) => c.type === 'position')
-        .some((c) => {
-          const maybe = c as unknown as { dragging?: boolean };
-          return maybe.dragging === false;
-        });
 
-      if (hasRemoves || hasDragStops) {
+      if (hasRemoves) {
         takeSnapshot();
       }
 
       const prevNodes = get().nodes as NestableNode[];
-      const nextNodes = applyNodeChanges(changes, prevNodes) as NestableNode[];
-
-      const dragStopIds = changes
-        .filter((c) => c.type === 'position')
-        .filter((c) => {
-          const maybe = c as unknown as { dragging?: boolean };
-          return maybe.dragging === false;
-        })
-        .map((c) => c.id);
-
-      let result = nextNodes;
-      for (const nodeId of dragStopIds) {
-        result = autoUnframeNodeByNonOverlap(result, nodeId, { epsilon: 0 });
-        result = autoFrameNodeByOverlap(result, nodeId, { threshold: 0.75 });
-      }
+      let result = applyNodeChanges(changes, prevNodes) as NestableNode[];
 
       // Disallow adding nodes through ReactFlow change events.
       // Node additions must go through the store's addNode() API.
@@ -507,11 +545,27 @@ const useCanvasStore = create<RFState>()(
 
       if (removedIds.length > 0) {
         const { canvasId } = get();
-        // Fire-and-forget deletions
+        // Fire-and-forget deletions with AbortController so undo can cancel them
         for (const nodeId of removedIds) {
-          void deleteNode(canvasId, nodeId).catch((error) => {
-            console.error('Failed to delete node:', nodeId, error);
-          });
+          // Abort any previous in-flight delete for this node
+          inflightDeletes.get(nodeId)?.abort();
+
+          const controller = new AbortController();
+          inflightDeletes.set(nodeId, controller);
+
+          void deleteNode(canvasId, nodeId, { signal: controller.signal })
+            .catch((error) => {
+              // Ignore AbortError – it means undo cancelled the request
+              if (error instanceof DOMException && error.name === 'AbortError')
+                return;
+              console.error('Failed to delete node:', nodeId, error);
+            })
+            .finally(() => {
+              // Clean up only if this is still the active controller
+              if (inflightDeletes.get(nodeId) === controller) {
+                inflightDeletes.delete(nodeId);
+              }
+            });
         }
       }
 
@@ -720,16 +774,22 @@ const useCanvasStore = create<RFState>()(
     },
 
     resizeNode: (nodeId, width, height) => {
-      // Snapshot once per resize gesture: the first event captures the
-      // pre-resize state; subsequent events within 500 ms extend the timer
-      // so no duplicate snapshots are created during continuous dragging.
-      if (!resizeSnapshotTimer) {
+      // Snapshot once per resize gesture per node: the first event for a
+      // given node captures the pre-resize state; subsequent events within
+      // 500 ms extend the timer so no duplicate snapshots are created
+      // during continuous dragging.
+      const existingTimer = resizeSnapshotTimers.get(nodeId);
+      if (!existingTimer) {
         takeSnapshot();
+      } else {
+        clearTimeout(existingTimer);
       }
-      if (resizeSnapshotTimer) clearTimeout(resizeSnapshotTimer);
-      resizeSnapshotTimer = setTimeout(() => {
-        resizeSnapshotTimer = null;
-      }, 500);
+      resizeSnapshotTimers.set(
+        nodeId,
+        setTimeout(() => {
+          resizeSnapshotTimers.delete(nodeId);
+        }, 500),
+      );
       set({
         nodes: get().nodes.map((n) =>
           n.id === nodeId ? { ...n, style: { ...n.style, width, height } } : n,
@@ -882,12 +942,6 @@ const useCanvasStore = create<RFState>()(
 
       redoStack.push(createSnapshot(nodes, edges));
 
-      // Reset to null so the next takeSnapshot() call will succeed.
-      // Setting to the restored reference would cause it to skip, losing
-      // the restored state before the next mutation.
-      lastRecordedNodes = null;
-      lastRecordedEdges = null;
-
       set({
         nodes: snapshot.nodes,
         edges: snapshot.edges,
@@ -905,9 +959,6 @@ const useCanvasStore = create<RFState>()(
       const { nodes, edges, canvasId } = get();
 
       undoStack.push(createSnapshot(nodes, edges));
-
-      lastRecordedNodes = null;
-      lastRecordedEdges = null;
 
       set({
         nodes: snapshot.nodes,
