@@ -44,6 +44,9 @@ const MAX_HISTORY = 50;
 // Undo / Redo history
 // ---------------------------------------------------------------------------
 
+/** Serialisable snapshot of the canvas for undo / redo.
+ *  Contains deep-cloned nodes and edges with ReactFlow internals
+ *  (`selected`, `dragging`, `measured`, `internals`) stripped out. */
 type CanvasSnapshot = {
   nodes: Node[];
   edges: Edge[];
@@ -702,6 +705,9 @@ const useCanvasStore = create<RFState>()(
     },
 
     resizeNode: (nodeId, width, height) => {
+      // Snapshot once per resize gesture: the first event captures the
+      // pre-resize state; subsequent events within 500 ms extend the timer
+      // so no duplicate snapshots are created during continuous dragging.
       if (!resizeSnapshotTimer) {
         takeSnapshot();
       }
@@ -861,6 +867,9 @@ const useCanvasStore = create<RFState>()(
 
       redoStack.push(createSnapshot(nodes, edges));
 
+      // Reset to null so the next takeSnapshot() call will succeed.
+      // Setting to the restored reference would cause it to skip, losing
+      // the restored state before the next mutation.
       lastRecordedNodes = null;
       lastRecordedEdges = null;
 
