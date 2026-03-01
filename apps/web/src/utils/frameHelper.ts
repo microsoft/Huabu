@@ -131,8 +131,8 @@ function getNodeSize(node: NestableNode): { width: number; height: number } {
     (typeof style?.width === 'number'
       ? style.width
       : typeof style?.width === 'string'
-      ? Number.parseFloat(style.width)
-      : undefined) ??
+        ? Number.parseFloat(style.width)
+        : undefined) ??
     0;
 
   const height =
@@ -140,8 +140,8 @@ function getNodeSize(node: NestableNode): { width: number; height: number } {
     (typeof style?.height === 'number'
       ? style.height
       : typeof style?.height === 'string'
-      ? Number.parseFloat(style.height)
-      : undefined) ??
+        ? Number.parseFloat(style.height)
+        : undefined) ??
     0;
 
   return {
@@ -748,7 +748,10 @@ export function frameNodesInRect(
   frameId: string,
   options: FrameNodesInRectOptions = {},
 ): FrameNodesInRectResult {
-  const threshold = options.threshold ?? 0.5;
+  const rawThreshold = options.threshold ?? 0.5;
+  if (!Number.isFinite(rawThreshold) || rawThreshold <= 0)
+    return { nodes, frameId };
+  const threshold = Math.min(rawThreshold, 1);
   const { x, y, width, height } = flowRect;
 
   if (width <= 0 || height <= 0) return { nodes, frameId };

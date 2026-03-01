@@ -121,6 +121,8 @@ type RFState = {
   unframe: (frameId: string) => void;
   toggleFrameLock: (frameId: string) => void;
 
+  resizeNode: (nodeId: string, width: number, height: number) => void;
+
   moveNodeIntoFrame: (nodeId: string, frameId: string) => void;
   moveNodeOutOfFrame: (nodeId: string) => void;
 
@@ -162,9 +164,9 @@ type PersistedKey = (typeof PERSISTED_KEYS)[number];
 const autoSaveMiddleware =
   (config: StateCreator<RFState>): StateCreator<RFState> =>
   (set, get, api) => {
-    const wrappedSet: typeof set = (...args) => {
-      const prev = get();
-      (set as (...a: typeof args) => void)(...args);
+    // Shared logic: diff persisted keys after a state update and schedule
+    // an autosave when any of them changed.
+    const diffAndSchedule = (prev: RFState) => {
       if (!prev.isLoading) {
         const next = get();
         const changed = (PERSISTED_KEYS as readonly PersistedKey[]).some(
@@ -175,6 +177,23 @@ const autoSaveMiddleware =
         }
       }
     };
+
+    // Wrap the internal `set` used by store actions.
+    const wrappedSet: typeof set = (...args) => {
+      const prev = get();
+      (set as (...a: typeof args) => void)(...args);
+      diffAndSchedule(prev);
+    };
+
+    // Also wrap `api.setState` so that external callers
+    // (e.g. useCanvasStore.setState()) trigger autosave as well.
+    const originalSetState = api.setState;
+    api.setState = (...args) => {
+      const prev = get();
+      (originalSetState as (...a: typeof args) => void)(...args);
+      diffAndSchedule(prev);
+    };
+
     return config(wrappedSet, get, api);
   };
 
@@ -552,6 +571,14 @@ const useCanvasStore = create<RFState>()(
       const { nodes } = get();
 
       set({ nodes: toggleFrameLock(nodes as NestableNode[], frameId) });
+    },
+
+    resizeNode: (nodeId, width, height) => {
+      set({
+        nodes: get().nodes.map((n) =>
+          n.id === nodeId ? { ...n, style: { ...n.style, width, height } } : n,
+        ),
+      });
     },
 
     moveNodeIntoFrame: (nodeId, frameId) => {

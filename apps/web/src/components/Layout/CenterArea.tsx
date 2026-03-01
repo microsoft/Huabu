@@ -85,8 +85,8 @@ export const CenterArea: React.FC = () => {
   const canvasWidth = isReplace
     ? '0%'
     : hasExpanded
-    ? `${leftPercent}%`
-    : '100%';
+      ? `${leftPercent}%`
+      : '100%';
 
   return (
     <div ref={containerRef} className="flex h-full w-full overflow-hidden">
