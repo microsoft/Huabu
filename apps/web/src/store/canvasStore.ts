@@ -38,6 +38,102 @@ const CANVAS_ID = 'default-canvas';
 const AUTOSAVE_DEBOUNCE_MS = 1000;
 const INGESTION_DEBOUNCE_MS = 1000;
 const DEFAULT_WORKSPACE_NAME = 'Sediment Workspace Name';
+const MAX_HISTORY = 50;
+
+// ---------------------------------------------------------------------------
+// Undo / Redo history
+// ---------------------------------------------------------------------------
+
+type CanvasSnapshot = {
+  nodes: Node[];
+  edges: Edge[];
+};
+
+// Module-level stacks – kept outside zustand state so that pushing/popping
+// doesn't trigger subscriber notifications or autosave by itself.
+const undoStack: CanvasSnapshot[] = [];
+const redoStack: CanvasSnapshot[] = [];
+
+// Track the last recorded array references so we can cheaply skip duplicate
+// snapshots when nothing meaningful changed between calls.
+let lastRecordedNodes: Node[] | null = null;
+let lastRecordedEdges: Edge[] | null = null;
+
+/** Deep-clone the parts of nodes/edges we care about for undo, stripping
+ *  ReactFlow internals (selected, dragging, measured, internals). */
+function createSnapshot(nodes: Node[], edges: Edge[]): CanvasSnapshot {
+  return {
+    nodes: nodes.map((n) => ({
+      id: n.id,
+      type: n.type,
+      position: { x: n.position.x, y: n.position.y },
+      data: JSON.parse(JSON.stringify(n.data ?? {})) as Record<string, unknown>,
+      ...(n.style
+        ? {
+            style: JSON.parse(JSON.stringify(n.style)) as Record<
+              string,
+              unknown
+            >,
+          }
+        : {}),
+      ...(n.parentId !== undefined ? { parentId: n.parentId } : {}),
+    })),
+    edges: edges.map((e) => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      ...(e.sourceHandle ? { sourceHandle: e.sourceHandle } : {}),
+      ...(e.targetHandle ? { targetHandle: e.targetHandle } : {}),
+      ...(e.type ? { type: e.type } : {}),
+      ...(e.data
+        ? {
+            data: JSON.parse(JSON.stringify(e.data)) as Record<string, unknown>,
+          }
+        : {}),
+      ...(e.style
+        ? {
+            style: JSON.parse(JSON.stringify(e.style)) as Record<
+              string,
+              unknown
+            >,
+          }
+        : {}),
+    })),
+  };
+}
+
+/** Record the current canvas state to the undo stack.
+ *  Skipped when the node/edge references haven't changed since the last call
+ *  (e.g. two successive calls with no intervening mutation). */
+function takeSnapshot(): void {
+  const { nodes, edges } = useCanvasStore.getState();
+  if (nodes === lastRecordedNodes && edges === lastRecordedEdges) return;
+
+  undoStack.push(createSnapshot(nodes, edges));
+  if (undoStack.length > MAX_HISTORY) undoStack.shift();
+  redoStack.length = 0;
+
+  lastRecordedNodes = nodes;
+  lastRecordedEdges = edges;
+
+  useCanvasStore.setState({
+    canUndo: undoStack.length > 0,
+    canRedo: false,
+  });
+}
+
+function clearHistory(): void {
+  undoStack.length = 0;
+  redoStack.length = 0;
+  lastRecordedNodes = null;
+  lastRecordedEdges = null;
+
+  useCanvasStore.setState({ canUndo: false, canRedo: false });
+}
+
+// Debounce flag for resize – NodeResizer fires onResize continuously; we only
+// want to snapshot once per resize gesture.
+let resizeSnapshotTimer: ReturnType<typeof setTimeout> | null = null;
 
 // Per-node debounce timers so rapid edits only fire one ingestion request
 // after the user stops typing, rather than on every keystroke.
@@ -134,6 +230,12 @@ type RFState = {
   clipboard: Node[];
   copySelectedNodes: () => void;
   pasteNodes: (flowPosition?: { x: number; y: number }) => void;
+
+  /** Undo / Redo */
+  canUndo: boolean;
+  canRedo: boolean;
+  undo: () => void;
+  redo: () => void;
 
   loadCanvas: () => Promise<void>;
   saveCanvas: () => Promise<void>;
@@ -275,6 +377,7 @@ const useCanvasStore = create<RFState>()(
         if (!response) {
           console.warn('Canvas not found, using empty state');
           set({ isLoading: false, ingestionByNodeId: {} });
+          clearHistory();
           return;
         }
 
@@ -293,6 +396,7 @@ const useCanvasStore = create<RFState>()(
           isLoading: false,
           ingestionByNodeId: {},
         });
+        clearHistory();
       } catch (error) {
         console.error('Failed to load canvas:', error);
         set({ isLoading: false });
@@ -337,6 +441,18 @@ const useCanvasStore = create<RFState>()(
     },
 
     onNodesChange: (changes) => {
+      const hasRemoves = changes.some((c) => c.type === 'remove');
+      const hasDragStops = changes
+        .filter((c) => c.type === 'position')
+        .some((c) => {
+          const maybe = c as unknown as { dragging?: boolean };
+          return maybe.dragging === false;
+        });
+
+      if (hasRemoves || hasDragStops) {
+        takeSnapshot();
+      }
+
       const prevNodes = get().nodes as NestableNode[];
       const nextNodes = applyNodeChanges(changes, prevNodes) as NestableNode[];
 
@@ -392,12 +508,17 @@ const useCanvasStore = create<RFState>()(
     },
 
     onEdgesChange: (changes) => {
+      const hasRemoves = changes.some((c) => c.type === 'remove');
+      if (hasRemoves) {
+        takeSnapshot();
+      }
       set({
         edges: applyEdgeChanges(changes, get().edges),
       });
     },
 
     onConnect: (connection: Connection) => {
+      takeSnapshot();
       set({
         edges: addEdge(connection, get().edges),
       });
@@ -407,6 +528,7 @@ const useCanvasStore = create<RFState>()(
     setRfInstance: (instance) => set({ rfInstance: instance }),
 
     addNode: (node) => {
+      takeSnapshot();
       // Ensure node has a label
       let finalLabel = node.data?.label;
 
@@ -509,6 +631,7 @@ const useCanvasStore = create<RFState>()(
       const newIndex = nodes.findIndex((n) => n.id === overId);
 
       if (oldIndex !== -1 && newIndex !== -1) {
+        takeSnapshot();
         const newNodes = [...nodes];
         const [movedItem] = newNodes.splice(oldIndex, 1);
         newNodes.splice(newIndex, 0, movedItem);
@@ -525,6 +648,7 @@ const useCanvasStore = create<RFState>()(
       const selected = nodes.filter((n) => n.selected);
       if (selected.length === 0) return;
 
+      takeSnapshot();
       const selectedIds = new Set(selected.map((n) => n.id));
       const rest = nodes.filter((n) => !selectedIds.has(n.id));
 
@@ -541,6 +665,7 @@ const useCanvasStore = create<RFState>()(
       const selectedIds = nodes.filter((n) => n.selected).map((n) => n.id);
       if (selectedIds.length < 2) return;
 
+      takeSnapshot();
       const frameId = createId('node');
       const result = frameNodes(nodes as NestableNode[], selectedIds, {
         frameId,
@@ -551,6 +676,7 @@ const useCanvasStore = create<RFState>()(
     },
 
     frameNodesInRect: (flowRect) => {
+      takeSnapshot();
       const { nodes } = get();
       const frameId = createId('node');
       const result = frameNodesInRect(
@@ -562,18 +688,27 @@ const useCanvasStore = create<RFState>()(
     },
 
     unframe: (frameId) => {
+      takeSnapshot();
       const { nodes, edges } = get();
       const result = unframe(nodes as NestableNode[], edges, frameId);
       set({ nodes: result.nodes, edges: result.edges });
     },
 
     toggleFrameLock: (frameId) => {
+      takeSnapshot();
       const { nodes } = get();
 
       set({ nodes: toggleFrameLock(nodes as NestableNode[], frameId) });
     },
 
     resizeNode: (nodeId, width, height) => {
+      if (!resizeSnapshotTimer) {
+        takeSnapshot();
+      }
+      if (resizeSnapshotTimer) clearTimeout(resizeSnapshotTimer);
+      resizeSnapshotTimer = setTimeout(() => {
+        resizeSnapshotTimer = null;
+      }, 500);
       set({
         nodes: get().nodes.map((n) =>
           n.id === nodeId ? { ...n, style: { ...n.style, width, height } } : n,
@@ -582,6 +717,7 @@ const useCanvasStore = create<RFState>()(
     },
 
     moveNodeIntoFrame: (nodeId, frameId) => {
+      takeSnapshot();
       const { nodes } = get();
       const result = moveNodeIntoFrame(
         nodes as NestableNode[],
@@ -592,6 +728,7 @@ const useCanvasStore = create<RFState>()(
     },
 
     moveNodeOutOfFrame: (nodeId) => {
+      takeSnapshot();
       const { nodes } = get();
       const result = moveNodeOutOfFrame(nodes as NestableNode[], nodeId);
       set({ nodes: result });
@@ -623,6 +760,8 @@ const useCanvasStore = create<RFState>()(
     pasteNodes: (flowPosition) => {
       const { clipboard, nodes } = get();
       if (clipboard.length === 0) return;
+
+      takeSnapshot();
 
       // Compute the offset to apply to each pasted node.
       // If a flow-space position is provided, centre the pasted group there;
@@ -710,6 +849,45 @@ const useCanvasStore = create<RFState>()(
       for (const node of newNodes) {
         triggerIngestion(node);
       }
+    },
+
+    canUndo: false,
+    canRedo: false,
+
+    undo: () => {
+      const snapshot = undoStack.pop();
+      if (!snapshot) return;
+      const { nodes, edges } = get();
+
+      redoStack.push(createSnapshot(nodes, edges));
+
+      lastRecordedNodes = null;
+      lastRecordedEdges = null;
+
+      set({
+        nodes: snapshot.nodes,
+        edges: snapshot.edges,
+        canUndo: undoStack.length > 0,
+        canRedo: true,
+      });
+    },
+
+    redo: () => {
+      const snapshot = redoStack.pop();
+      if (!snapshot) return;
+      const { nodes, edges } = get();
+
+      undoStack.push(createSnapshot(nodes, edges));
+
+      lastRecordedNodes = null;
+      lastRecordedEdges = null;
+
+      set({
+        nodes: snapshot.nodes,
+        edges: snapshot.edges,
+        canUndo: true,
+        canRedo: redoStack.length > 0,
+      });
     },
   })),
 );

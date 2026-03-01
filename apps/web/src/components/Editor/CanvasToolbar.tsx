@@ -11,6 +11,8 @@ import {
   UploadCloud,
   Link as LinkIcon,
   X,
+  Undo2,
+  Redo2,
 } from 'lucide-react';
 import { useCallback, useRef, useState, type ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
@@ -110,6 +112,10 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
   const addNode = useCanvasStore((s) => s.addNode);
   const pendingNodeType = useCanvasStore((s) => s.pendingNodeType);
   const setPendingNodeType = useCanvasStore((s) => s.setPendingNodeType);
+  const undo = useCanvasStore((s) => s.undo);
+  const redo = useCanvasStore((s) => s.redo);
+  const canUndo = useCanvasStore((s) => s.canUndo);
+  const canRedo = useCanvasStore((s) => s.canRedo);
 
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -339,6 +345,18 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             onClick={() => onToolChange('pan')}
           >
             <Hand size={18} />
+          </GhostButton>
+        </div>
+
+        <div className="bg-border mx-1 h-4 w-px" />
+
+        {/* Undo / Redo */}
+        <div className="flex items-center gap-2">
+          <GhostButton title="Undo" disabled={!canUndo} onClick={undo}>
+            <Undo2 size={18} />
+          </GhostButton>
+          <GhostButton title="Redo" disabled={!canRedo} onClick={redo}>
+            <Redo2 size={18} />
           </GhostButton>
         </div>
 
