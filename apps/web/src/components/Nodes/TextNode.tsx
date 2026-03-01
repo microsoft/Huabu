@@ -6,6 +6,7 @@ import { useCallback, useState, useRef, useMemo, useLayoutEffect } from 'react';
 import { GhostButton } from '@/components/Common/GhostButton.tsx';
 import { NodeBgColorSelector } from '@/components/Common/NodeBgColorSelector.tsx';
 import { NodeTextColorSelector } from '@/components/Common/NodeTextColorSelector.tsx';
+import useCanvasStore from '@/store/canvasStore.ts';
 
 import { NodeWrapper } from './NodeWrapper.tsx';
 import useCanvasStore from '../../store/canvasStore.ts';

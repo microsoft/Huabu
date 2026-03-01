@@ -48,6 +48,7 @@ export const Canvas: React.FC = () => {
   const frameSelectedNodes = useCanvasStore(
     (state) => state.frameSelectedNodes,
   );
+  const frameNodesInRect = useCanvasStore((state) => state.frameNodesInRect);
   const pendingNodeType = useCanvasStore((state) => state.pendingNodeType);
   const setPendingNodeType = useCanvasStore(
     (state) => state.setPendingNodeType,
@@ -200,18 +201,7 @@ export const Canvas: React.FC = () => {
       // Minimum size threshold (in screen px) to avoid accidental tiny frames
       const MIN_SIZE = 20;
       if (w >= MIN_SIZE && h >= MIN_SIZE) {
-        const newNode: Node = {
-          id: createId('node'),
-          type: 'frame',
-          position: { x, y },
-          data: { type: 'frame' },
-          style: {
-            width: w,
-            height: h,
-            backgroundColor: 'rgba(0,0,0,0.05)',
-          },
-        };
-        addNode(newNode);
+        frameNodesInRect({ x, y, width: w, height: h });
       }
 
       setFrameDragStart(null);
@@ -222,7 +212,7 @@ export const Canvas: React.FC = () => {
       isDraggingFrame,
       frameDragStart,
       frameDragEnd,
-      addNode,
+      frameNodesInRect,
       setPendingNodeType,
     ],
   );

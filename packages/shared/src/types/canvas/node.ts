@@ -16,6 +16,9 @@ export type CanvasNodeType =
 
 export type NodeOrigin = 'user' | 'research' | 'chat';
 
+/** Who set the node label — controls whether auto-title may overwrite it */
+export type LabelSource = 'auto' | 'user';
+
 export interface NodeResearchData {
   /** Original research query */
   query: string;
@@ -46,6 +49,13 @@ export interface BaseNodeData {
   research?: NodeResearchData;
   /** Display label */
   label?: string;
+  /**
+   * Who last set the label.
+   * - 'auto': derived from content (H1 / first line). May be overwritten automatically.
+   * - 'user': manually set by the user. Auto-title will not overwrite this.
+   * Absent means the label was generated at node creation time (treated like 'auto').
+   */
+  labelSource?: LabelSource;
 }
 
 /** Note node: rich content that can be ingested into knowledge base */

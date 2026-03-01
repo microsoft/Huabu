@@ -9,6 +9,8 @@ import type {
   DeleteNodeResponse,
   KnowledgeStorageConfig,
   MigrateStorageResponse,
+  CanvasExportBundle,
+  ImportCanvasResponse,
 } from '@sediment/shared';
 
 export async function getCanvas(
@@ -30,6 +32,7 @@ export async function getCanvas(
 export async function putCanvas(
   canvasId: string,
   request: PutCanvasRequest,
+  options?: { keepalive?: boolean },
 ): Promise<PutCanvasResponse> {
   const response = await fetch(`${API_CONFIG.API_URL}/canvas/${canvasId}`, {
     method: 'PUT',
@@ -37,6 +40,7 @@ export async function putCanvas(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(request),
+    keepalive: options?.keepalive ?? false,
   });
 
   if (!response.ok) {
@@ -59,6 +63,7 @@ export async function upsertNode(
   canvasId: string,
   nodeId: string,
   request: UpsertNodeRequest,
+  options?: { keepalive?: boolean },
 ): Promise<UpsertNodeResponse> {
   const response = await fetch(
     `${API_CONFIG.API_URL}/canvas/${canvasId}/nodes/${nodeId}`,
@@ -68,6 +73,7 @@ export async function upsertNode(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(request),
+      keepalive: options?.keepalive ?? false,
     },
   );
 
@@ -123,4 +129,50 @@ export async function migrateStorage(
   }
 
   return (await response.json()) as MigrateStorageResponse;
+}
+
+/**
+ * Download the canvas as a self-contained `.sediment.json` export bundle.
+ * Returns the raw Blob so callers can trigger a browser download.
+ */
+export async function exportCanvas(canvasId: string): Promise<Blob> {
+  const response = await fetch(
+    `${API_CONFIG.API_URL}/canvas/${canvasId}/export`,
+  );
+
+  if (!response.ok) {
+    const error = (await response.json().catch(() => ({}))) as {
+      message?: string;
+    };
+    throw new Error(
+      error.message ?? `Failed to export canvas: ${response.statusText}`,
+    );
+  }
+
+  return response.blob();
+}
+
+/**
+ * Import a canvas from a `.sediment.json` export bundle.
+ * The server restores sources, artifacts, and canvas state.
+ */
+export async function importCanvas(
+  bundle: CanvasExportBundle,
+): Promise<ImportCanvasResponse> {
+  const response = await fetch(`${API_CONFIG.API_URL}/canvas/import`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(bundle),
+  });
+
+  if (!response.ok) {
+    const error = (await response.json().catch(() => ({}))) as {
+      message?: string;
+    };
+    throw new Error(
+      error.message ?? `Failed to import canvas: ${response.statusText}`,
+    );
+  }
+
+  return (await response.json()) as ImportCanvasResponse;
 }

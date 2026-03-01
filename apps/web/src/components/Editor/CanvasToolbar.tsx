@@ -217,7 +217,6 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             style: {
               width: initialWidth,
               height: initialHeight,
-              backgroundColor: 'rgba(0,0,0,0.05)',
             },
           };
           break;
@@ -350,7 +349,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
 
         <div className="bg-border mx-1 h-4 w-px" />
 
-        {/* Group 2: Layouts */}
+        {/* Group 2: Nodes */}
         <div className="flex items-center gap-2">
           <GhostButton
             title="Frame"
