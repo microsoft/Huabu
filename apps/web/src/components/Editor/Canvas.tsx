@@ -107,9 +107,11 @@ export const Canvas: React.FC = () => {
       const h = 300;
 
       // Centre the node at the click position
+      // Text nodes auto-size so use a small estimate for centering
+      const isText = pendingNodeType === 'text';
       const centeredPosition = {
-        x: position.x - w / 2,
-        y: position.y - h / 2,
+        x: position.x - (isText ? 15 : w / 2),
+        y: position.y - (isText ? 12 : h / 2),
       };
 
       const baseNode = {
@@ -133,7 +135,6 @@ export const Canvas: React.FC = () => {
             ...baseNode,
             type: 'text',
             data: { type: 'text', content: '' },
-            style: { width: w, height: h },
           };
           break;
         default:

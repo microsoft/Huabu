@@ -42,6 +42,9 @@ interface NodeWrapperProps {
   keepAspectRatio?: boolean;
   resizable?: boolean;
 
+  onResizeStart?: () => void;
+  onResize?: (width: number, height: number) => void;
+  onResizeEnd?: (width: number, height: number) => void;
   onDoubleClick?: React.MouseEventHandler<HTMLDivElement>;
 }
 
@@ -63,6 +66,9 @@ export const NodeWrapper = memo(
 
     allowOverflow = false,
 
+    onResizeStart,
+    onResize: onResizeProp,
+    onResizeEnd,
     onDoubleClick,
   }: NodeWrapperProps) => {
     const selectedCount = useCanvasStore(
@@ -89,9 +95,34 @@ export const NodeWrapper = memo(
 
     const handleResize = useCallback(
       (_event: unknown, params: { width: number; height: number }) => {
-        resizeNode(id, params.width, params.height);
+        useCanvasStore.setState((state) => ({
+          nodes: state.nodes.map((n) =>
+            n.id === id
+              ? {
+                  ...n,
+                  style: {
+                    ...n.style,
+                    width: params.width,
+                    height: params.height,
+                  },
+                }
+              : n,
+          ),
+        }));
+        onResizeProp?.(params.width, params.height);
       },
-      [id, resizeNode],
+      [id, onResizeProp],
+    );
+
+    const handleResizeStart = useCallback(() => {
+      onResizeStart?.();
+    }, [onResizeStart]);
+
+    const handleResizeEnd = useCallback(
+      (_event: unknown, params: { width: number; height: number }) => {
+        onResizeEnd?.(params.width, params.height);
+      },
+      [onResizeEnd],
     );
 
     return (
@@ -108,7 +139,9 @@ export const NodeWrapper = memo(
               : minHeight
           }
           keepAspectRatio={keepAspectRatio}
+          onResizeStart={handleResizeStart}
           onResize={handleResize}
+          onResizeEnd={handleResizeEnd}
         />
         {toolbar && (
           <NodeToolbar

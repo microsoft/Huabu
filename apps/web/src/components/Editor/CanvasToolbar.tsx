@@ -133,10 +133,16 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
       const initialWidth = payload?.width || 400;
       const initialHeight = payload?.height || 300;
 
+      // Text nodes auto-size, so center with a small estimate
+      const isText = type === 'text';
+
       const baseNode = {
         id: createId('node'),
         type,
-        position: { x: position.x + offsetX, y: position.y + offsetY },
+        position: {
+          x: position.x + offsetX - (isText ? 15 : initialWidth / 2),
+          y: position.y + offsetY - (isText ? 12 : initialHeight / 2),
+        },
       };
 
       let newNode: CanvasNode;
@@ -155,7 +161,6 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             ...baseNode,
             type: 'text',
             data: { type: 'text', content: '' },
-            style: { width: initialWidth, height: initialHeight },
           };
           break;
         case 'image':
