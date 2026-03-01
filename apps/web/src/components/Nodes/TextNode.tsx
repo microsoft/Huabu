@@ -34,12 +34,16 @@ export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
 
   const updateStyle = useCallback(
     (newStyle: Partial<NodeStyle>) => {
-      updateNodeData(id, {
-        style: {
-          ...data.style,
-          ...newStyle,
+      updateNodeData(
+        id,
+        {
+          style: {
+            ...data.style,
+            ...newStyle,
+          },
         },
-      });
+        { recordHistory: true },
+      );
     },
     [id, data.style, updateNodeData],
   );

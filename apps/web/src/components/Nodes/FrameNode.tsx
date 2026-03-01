@@ -53,7 +53,7 @@ export const FrameNode = ({ id, data, selected }: NodeProps<FrameNodeType>) => {
 
   const commitLabel = () => {
     const next = draftLabel.trim() || 'Frame';
-    updateNodeData(id, { label: next });
+    updateNodeData(id, { label: next }, { recordHistory: true });
     setIsEditingLabel(false);
   };
 

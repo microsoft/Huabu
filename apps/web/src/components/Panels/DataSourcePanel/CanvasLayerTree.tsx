@@ -275,7 +275,11 @@ export const CanvasLayerTree = ({
   };
 
   const handleRename = (id: string, newName: string) => {
-    updateNodeData(id, { label: newName, labelSource: 'user' });
+    updateNodeData(
+      id,
+      { label: newName, labelSource: 'user' },
+      { recordHistory: true },
+    );
   };
 
   const handleToggleCollapse = (id: string) => {
