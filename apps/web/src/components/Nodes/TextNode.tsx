@@ -1,4 +1,4 @@
-import { type Node, type NodeProps, useReactFlow } from '@xyflow/react';
+import { type Node, type NodeProps } from '@xyflow/react';
 import { clsx } from 'clsx';
 import { Bold, Italic, Type, Underline, Strikethrough } from 'lucide-react';
 import { useCallback, useState, useRef, useMemo, useLayoutEffect } from 'react';
@@ -107,7 +107,7 @@ function computeFontSizeForHeight(
 }
 
 export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
-  const { updateNodeData } = useReactFlow();
+  const updateNodeData = useCanvasStore((state) => state.updateNodeData);
   const [isEditing, setIsEditing] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isResizingRef = useRef(false);
@@ -243,7 +243,7 @@ export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
           fontOpts,
         );
         setLiveFontSize(fs);
-      }, 30);
+      }, 10);
     },
     [data.content, fontOpts],
   );
