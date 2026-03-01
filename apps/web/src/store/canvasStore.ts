@@ -878,7 +878,7 @@ const useCanvasStore = create<RFState>()(
     undo: () => {
       const snapshot = undoStack.pop();
       if (!snapshot) return;
-      const { nodes, edges } = get();
+      const { nodes, edges, canvasId } = get();
 
       redoStack.push(createSnapshot(nodes, edges));
 
@@ -894,12 +894,15 @@ const useCanvasStore = create<RFState>()(
         canUndo: undoStack.length > 0,
         canRedo: true,
       });
+
+      // Sync server-side state after restoring the snapshot.
+      syncServerAfterRestore(canvasId, nodes, snapshot.nodes);
     },
 
     redo: () => {
       const snapshot = redoStack.pop();
       if (!snapshot) return;
-      const { nodes, edges } = get();
+      const { nodes, edges, canvasId } = get();
 
       undoStack.push(createSnapshot(nodes, edges));
 
@@ -912,6 +915,9 @@ const useCanvasStore = create<RFState>()(
         canUndo: true,
         canRedo: redoStack.length > 0,
       });
+
+      // Sync server-side state after restoring the snapshot.
+      syncServerAfterRestore(canvasId, nodes, snapshot.nodes);
     },
   })),
 );
