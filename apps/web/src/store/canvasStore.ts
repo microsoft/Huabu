@@ -44,8 +44,8 @@ const MAX_HISTORY = 50;
 // Undo / Redo history
 // ---------------------------------------------------------------------------
 
-/** Serialisable snapshot of the canvas for undo / redo.
- *  Contains deep-cloned nodes and edges with ReactFlow internals
+/** Snapshot of the canvas for undo / redo.
+ *  Contains nodes and edges with ReactFlow internals
  *  (`selected`, `dragging`, `measured`, `internals`) stripped out. */
 type CanvasSnapshot = {
   nodes: Node[];
@@ -62,23 +62,17 @@ const redoStack: CanvasSnapshot[] = [];
 let lastRecordedNodes: Node[] | null = null;
 let lastRecordedEdges: Edge[] | null = null;
 
-/** Deep-clone the parts of nodes/edges we care about for undo, stripping
- *  ReactFlow internals (selected, dragging, measured, internals). */
+/** Snapshot nodes/edges for undo, stripping ReactFlow internals
+ *  (selected, dragging, measured, internals).
+ *  No deep-clone needed – all store updates follow immutable patterns. */
 function createSnapshot(nodes: Node[], edges: Edge[]): CanvasSnapshot {
   return {
     nodes: nodes.map((n) => ({
       id: n.id,
       type: n.type,
       position: { x: n.position.x, y: n.position.y },
-      data: JSON.parse(JSON.stringify(n.data ?? {})) as Record<string, unknown>,
-      ...(n.style
-        ? {
-            style: JSON.parse(JSON.stringify(n.style)) as Record<
-              string,
-              unknown
-            >,
-          }
-        : {}),
+      data: n.data ?? {},
+      ...(n.style ? { style: n.style } : {}),
       ...(n.parentId !== undefined ? { parentId: n.parentId } : {}),
     })),
     edges: edges.map((e) => ({
@@ -88,19 +82,8 @@ function createSnapshot(nodes: Node[], edges: Edge[]): CanvasSnapshot {
       ...(e.sourceHandle ? { sourceHandle: e.sourceHandle } : {}),
       ...(e.targetHandle ? { targetHandle: e.targetHandle } : {}),
       ...(e.type ? { type: e.type } : {}),
-      ...(e.data
-        ? {
-            data: JSON.parse(JSON.stringify(e.data)) as Record<string, unknown>,
-          }
-        : {}),
-      ...(e.style
-        ? {
-            style: JSON.parse(JSON.stringify(e.style)) as Record<
-              string,
-              unknown
-            >,
-          }
-        : {}),
+      ...(e.data ? { data: e.data } : {}),
+      ...(e.style ? { style: e.style } : {}),
     })),
   };
 }
@@ -132,6 +115,38 @@ function clearHistory(): void {
   lastRecordedEdges = null;
 
   useCanvasStore.setState({ canUndo: false, canRedo: false });
+}
+
+/**
+ * After an undo/redo restores a snapshot, sync the server-side state:
+ * - Nodes that reappear (present in restored but absent in previous) are
+ *   re-ingested via triggerIngestion so the knowledge store is repopulated.
+ * - Nodes that disappear (present in previous but absent in restored) are
+ *   deleted from the server via deleteNode.
+ */
+function syncServerAfterRestore(
+  canvasId: string,
+  prevNodes: Node[],
+  restoredNodes: Node[],
+): void {
+  const prevIds = new Set(prevNodes.map((n) => n.id));
+  const restoredIds = new Set(restoredNodes.map((n) => n.id));
+
+  // Nodes that reappear after undo/redo – re-ingest them
+  for (const node of restoredNodes) {
+    if (!prevIds.has(node.id)) {
+      triggerIngestion(node);
+    }
+  }
+
+  // Nodes that disappear after undo/redo – delete from server
+  for (const node of prevNodes) {
+    if (!restoredIds.has(node.id)) {
+      void deleteNode(canvasId, node.id).catch((error) => {
+        console.error('Failed to delete node after undo/redo:', node.id, error);
+      });
+    }
+  }
 }
 
 // Debounce flag for resize – NodeResizer fires onResize continuously; we only
