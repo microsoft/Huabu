@@ -2,6 +2,7 @@ import { ArrowUp } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 import { ModeSelector, type ChatMode } from './ModeSelector';
+import { SourceCount } from './SelectedNodeRefs';
 import { IconButton } from '../../Common/IconButton';
 
 interface ChatInputProps {
@@ -89,16 +90,20 @@ export const ChatInput = ({
           <div className="mt-2 flex items-center justify-between gap-3">
             <ModeSelector value={mode} onChange={setMode} disabled={disabled} />
 
-            <IconButton
-              type="submit"
-              title="Send Message"
-              disabled={isSubmitDisabled}
-              aria-label="Send"
-              size="sm"
-              variant="solid"
-            >
-              <ArrowUp size={16} />
-            </IconButton>
+            <div className="flex items-center gap-2">
+              <SourceCount />
+
+              <IconButton
+                type="submit"
+                title="Send Message"
+                disabled={isSubmitDisabled}
+                aria-label="Send"
+                size="sm"
+                variant="solid"
+              >
+                <ArrowUp size={16} />
+              </IconButton>
+            </div>
           </div>
         </div>
       </form>
