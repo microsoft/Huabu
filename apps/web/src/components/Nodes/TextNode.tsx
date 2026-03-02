@@ -9,7 +9,6 @@ import { NodeTextColorSelector } from '@/components/Common/NodeTextColorSelector
 import useCanvasStore from '@/store/canvasStore.ts';
 
 import { NodeWrapper } from './NodeWrapper.tsx';
-import useCanvasStore from '../../store/canvasStore.ts';
 
 import type { CanvasTextNodeData, NodeStyle } from './types.ts';
 
