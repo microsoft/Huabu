@@ -303,8 +303,8 @@ const useCanvasStore = create<RFState>()(
         const response = await getCanvas(canvasId);
         if (!response) {
           console.warn('Canvas not found, using empty state');
-          set({ isLoading: false, ingestionByNodeId: {} });
           canvasHistoryManager.clear();
+          set({ isLoading: false, ingestionByNodeId: {} });
           return;
         }
 
@@ -314,6 +314,7 @@ const useCanvasStore = create<RFState>()(
           workspaceName?: string;
           storageConfig?: KnowledgeStorageConfig;
         };
+        canvasHistoryManager.clear();
         set({
           nodes: state.nodes ?? [],
           edges: state.edges ?? [],
@@ -323,7 +324,6 @@ const useCanvasStore = create<RFState>()(
           isLoading: false,
           ingestionByNodeId: {},
         });
-        canvasHistoryManager.clear();
       } catch (error) {
         console.error('Failed to load canvas:', error);
         set({ isLoading: false });

@@ -17,9 +17,9 @@ import type { ToolResponse } from '@sediment/shared';
  *
  * @template TState - The agent state type
  */
-export abstract class BaseAgent<
-  TState extends BaseAgentState = BaseAgentState,
-> implements IAgent<TState> {
+export abstract class BaseAgent<TState extends BaseAgentState = BaseAgentState>
+  implements IAgent<TState>
+{
   // ==================== Abstract (subclass must implement) ====================
 
   /**

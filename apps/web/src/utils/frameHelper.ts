@@ -131,8 +131,8 @@ function getNodeSize(node: NestableNode): { width: number; height: number } {
     (typeof style?.width === 'number'
       ? style.width
       : typeof style?.width === 'string'
-        ? Number.parseFloat(style.width)
-        : undefined) ??
+      ? Number.parseFloat(style.width)
+      : undefined) ??
     0;
 
   const height =
@@ -140,8 +140,8 @@ function getNodeSize(node: NestableNode): { width: number; height: number } {
     (typeof style?.height === 'number'
       ? style.height
       : typeof style?.height === 'string'
-        ? Number.parseFloat(style.height)
-        : undefined) ??
+      ? Number.parseFloat(style.height)
+      : undefined) ??
     0;
 
   return {
