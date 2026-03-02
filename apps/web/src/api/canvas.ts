@@ -87,11 +87,13 @@ export async function upsertNode(
 export async function deleteNode(
   canvasId: string,
   nodeId: string,
+  options?: { signal?: AbortSignal },
 ): Promise<DeleteNodeResponse> {
   const response = await fetch(
     `${API_CONFIG.API_URL}/canvas/${canvasId}/nodes/${nodeId}`,
     {
       method: 'DELETE',
+      signal: options?.signal,
     },
   );
 

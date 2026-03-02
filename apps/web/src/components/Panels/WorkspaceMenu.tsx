@@ -1,4 +1,4 @@
-import { ChevronDown, Download, Upload } from 'lucide-react';
+import { ChevronDown, Download, Redo2, Undo2, Upload } from 'lucide-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 import { exportCanvas, importCanvas } from '../../api/canvas';
@@ -19,6 +19,10 @@ export const WorkspaceMenu: React.FC = () => {
   const setWorkspaceName = useCanvasStore((s) => s.setWorkspaceName);
   const canvasId = useCanvasStore((s) => s.canvasId);
   const loadCanvas = useCanvasStore((s) => s.loadCanvas);
+  const undo = useCanvasStore((s) => s.undo);
+  const redo = useCanvasStore((s) => s.redo);
+  const canUndo = useCanvasStore((s) => s.canUndo);
+  const canRedo = useCanvasStore((s) => s.canRedo);
 
   const [isOpen, setIsOpen] = useState(false);
   const [menuState, setMenuState] = useState<MenuState>('idle');
@@ -155,6 +159,29 @@ export const WorkspaceMenu: React.FC = () => {
         isOpen={isOpen}
         onClose={() => setIsOpen(false)}
       >
+        <DropdownMenuItem
+          icon={<Undo2 size={14} />}
+          shortcut="⌘Z"
+          disabled={!canUndo}
+          onClick={() => {
+            setIsOpen(false);
+            undo();
+          }}
+        >
+          Undo
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          icon={<Redo2 size={14} />}
+          shortcut="⇧⌘Z"
+          disabled={!canRedo}
+          onClick={() => {
+            setIsOpen(false);
+            redo();
+          }}
+        >
+          Redo
+        </DropdownMenuItem>
+        <div className="my-1 border-t border-gray-200" />
         <DropdownMenuItem
           icon={<Download size={14} />}
           onClick={() => void handleExport()}

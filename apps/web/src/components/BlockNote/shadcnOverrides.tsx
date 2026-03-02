@@ -107,8 +107,8 @@ export const BlockNoteShadcnToggle = React.forwardRef<
       typeof props['data-state'] === 'string'
         ? props['data-state']
         : pressed
-          ? 'on'
-          : 'off';
+        ? 'on'
+        : 'off';
 
     return (
       <button

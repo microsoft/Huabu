@@ -42,6 +42,8 @@ export const Canvas: React.FC = () => {
   const onNodesChange = useCanvasStore((state) => state.onNodesChange);
   const onEdgesChange = useCanvasStore((state) => state.onEdgesChange);
   const onConnect = useCanvasStore((state) => state.onConnect);
+  const onNodeDragStart = useCanvasStore((state) => state.onNodeDragStart);
+  const onNodeDragStop = useCanvasStore((state) => state.onNodeDragStop);
   const addNode = useCanvasStore((state) => state.addNode);
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
   const setRfInstance = useCanvasStore((state) => state.setRfInstance);
@@ -58,6 +60,8 @@ export const Canvas: React.FC = () => {
   const sendSelectedToOrder = useCanvasStore(
     (state) => state.sendSelectedToOrder,
   );
+  const undo = useCanvasStore((state) => state.undo);
+  const redo = useCanvasStore((state) => state.redo);
 
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const rfInstanceRef = useRef<ReactFlowInstance | null>(null);
@@ -246,6 +250,8 @@ export const Canvas: React.FC = () => {
   // Handle "Cmd/Ctrl + G" to create a frame from selected nodes.
   // Handle "Cmd/Ctrl + C" to copy selected nodes.
   // Handle "Cmd/Ctrl + V" to paste copied nodes.
+  // Handle "Cmd/Ctrl + Z" to undo.
+  // Handle "Cmd/Ctrl + Shift + Z" to redo.
   // Handle "[" to bring selected nodes to back.
   // Handle "]" to bring selected nodes to front.
   useEffect(() => {
@@ -277,12 +283,26 @@ export const Canvas: React.FC = () => {
         return;
       }
 
-      // Remaining shortcuts require Cmd/Ctrl without Shift/Alt
-      if (!mod || e.shiftKey || e.altKey) return;
+      if (!mod || e.altKey) return;
 
       const lowerKey = key.toLowerCase();
 
-      if (lowerKey === 'g') {
+      // Cmd/Ctrl+Shift+Z → redo (must come before the shift guard)
+      if (lowerKey === 'z' && e.shiftKey) {
+        if (isNativeInput || isRichEditor) return;
+        e.preventDefault();
+        redo();
+        return;
+      }
+
+      // Remaining shortcuts require Cmd/Ctrl without Shift
+      if (e.shiftKey) return;
+
+      if (lowerKey === 'z') {
+        if (isNativeInput || isRichEditor) return;
+        e.preventDefault();
+        undo();
+      } else if (lowerKey === 'g') {
         if (isNativeInput || isRichEditor) return;
         e.preventDefault();
         frameSelectedNodes();
@@ -309,7 +329,14 @@ export const Canvas: React.FC = () => {
 
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [frameSelectedNodes, copySelectedNodes, pasteNodes, sendSelectedToOrder]);
+  }, [
+    frameSelectedNodes,
+    copySelectedNodes,
+    pasteNodes,
+    sendSelectedToOrder,
+    undo,
+    redo,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -492,6 +519,8 @@ export const Canvas: React.FC = () => {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onNodeDragStart={onNodeDragStart}
+        onNodeDragStop={onNodeDragStop}
         nodeTypes={nodeTypes}
         onInit={(instance) => {
           rfInstanceRef.current = instance;

@@ -8,12 +8,14 @@ import {
   type OnNodesChange,
   type OnEdgesChange,
   type OnConnect,
+  type OnNodeDrag,
   type Connection,
   type ReactFlowInstance,
 } from '@xyflow/react';
 import { create, type StateCreator } from 'zustand';
 
-import { getCanvas, putCanvas, upsertNode, deleteNode } from '../api';
+import { getCanvas, putCanvas, upsertNode } from '../api';
+import { canvasHistoryManager } from './canvasHistoryManager';
 import {
   autoFrameNodeByOverlap,
   autoUnframeNodeByNonOverlap,
@@ -98,11 +100,17 @@ type RFState = {
   onNodesChange: OnNodesChange;
   onEdgesChange: OnEdgesChange;
   onConnect: OnConnect;
+  onNodeDragStart: OnNodeDrag;
+  onNodeDragStop: OnNodeDrag;
   addNode: (node: Node) => void;
   rfInstance: ReactFlowInstance | null;
   setRfInstance: (instance: ReactFlowInstance | null) => void;
 
-  updateNodeData: (nodeId: string, patch: Record<string, unknown>) => void;
+  updateNodeData: (
+    nodeId: string,
+    patch: Record<string, unknown>,
+    options?: { recordHistory?: boolean },
+  ) => void;
   updateNodeDataLocal: (nodeId: string, patch: Record<string, unknown>) => void;
 
   setSelectedNodes: (ids: string[], multiSelect?: boolean) => void;
@@ -135,6 +143,12 @@ type RFState = {
   copySelectedNodes: () => void;
   pasteNodes: (flowPosition?: { x: number; y: number }) => void;
 
+  /** Undo / Redo */
+  canUndo: boolean;
+  canRedo: boolean;
+  undo: () => void;
+  redo: () => void;
+
   loadCanvas: () => Promise<void>;
   saveCanvas: () => Promise<void>;
 };
@@ -157,16 +171,31 @@ const PERSISTED_KEYS = [
 type PersistedKey = (typeof PERSISTED_KEYS)[number];
 
 /**
- * Middleware that automatically schedules a canvas save whenever a persisted
- * field (nodes, edges, workspaceName, storageConfig) changes.
- * Skipped while `isLoading` is true to avoid triggering a save during a load.
+ * Middleware that:
+ * 1. Automatically schedules a canvas save whenever a persisted field
+ *    (nodes, edges, workspaceName, storageConfig) changes.
+ *    Skipped while `isLoading` is true to avoid triggering a save during load.
+ * 2. Automatically syncs `canUndo` / `canRedo` with the history manager
+ *    after every state update, so individual actions never need to set them.
  */
 const autoSaveMiddleware =
   (config: StateCreator<RFState>): StateCreator<RFState> =>
   (set, get, api) => {
-    // Shared logic: diff persisted keys after a state update and schedule
-    // an autosave when any of them changed.
-    const diffAndSchedule = (prev: RFState) => {
+    // Shared post-set logic: autosave diff + history availability sync.
+    const afterSet = (prev: RFState) => {
+      // --- Auto-sync undo/redo availability ---
+      const cur = get();
+      const nextCanUndo = canvasHistoryManager.canUndo;
+      const nextCanRedo = canvasHistoryManager.canRedo;
+      if (cur.canUndo !== nextCanUndo || cur.canRedo !== nextCanRedo) {
+        // Use raw `set` to avoid infinite recursion.
+        (set as (partial: Partial<RFState>) => void)({
+          canUndo: nextCanUndo,
+          canRedo: nextCanRedo,
+        });
+      }
+
+      // --- Autosave diff ---
       if (!prev.isLoading) {
         const next = get();
         const changed = (PERSISTED_KEYS as readonly PersistedKey[]).some(
@@ -182,7 +211,7 @@ const autoSaveMiddleware =
     const wrappedSet: typeof set = (...args) => {
       const prev = get();
       (set as (...a: typeof args) => void)(...args);
-      diffAndSchedule(prev);
+      afterSet(prev);
     };
 
     // Also wrap `api.setState` so that external callers
@@ -191,7 +220,7 @@ const autoSaveMiddleware =
     api.setState = (...args) => {
       const prev = get();
       (originalSetState as (...a: typeof args) => void)(...args);
-      diffAndSchedule(prev);
+      afterSet(prev);
     };
 
     return config(wrappedSet, get, api);
@@ -274,6 +303,7 @@ const useCanvasStore = create<RFState>()(
         const response = await getCanvas(canvasId);
         if (!response) {
           console.warn('Canvas not found, using empty state');
+          canvasHistoryManager.clear();
           set({ isLoading: false, ingestionByNodeId: {} });
           return;
         }
@@ -284,6 +314,7 @@ const useCanvasStore = create<RFState>()(
           workspaceName?: string;
           storageConfig?: KnowledgeStorageConfig;
         };
+        canvasHistoryManager.clear();
         set({
           nodes: state.nodes ?? [],
           edges: state.edges ?? [],
@@ -336,23 +367,40 @@ const useCanvasStore = create<RFState>()(
       }
     },
 
-    onNodesChange: (changes) => {
-      const prevNodes = get().nodes as NestableNode[];
-      const nextNodes = applyNodeChanges(changes, prevNodes) as NestableNode[];
+    onNodeDragStart: () => {
+      // Snapshot the true pre-drag positions before any intermediate
+      // position updates are applied by ReactFlow.
+      const { nodes, edges } = get();
+      canvasHistoryManager.takeSnapshot(nodes, edges);
+    },
 
-      const dragStopIds = changes
-        .filter((c) => c.type === 'position')
-        .filter((c) => {
-          const maybe = c as unknown as { dragging?: boolean };
-          return maybe.dragging === false;
-        })
-        .map((c) => c.id);
-
-      let result = nextNodes;
-      for (const nodeId of dragStopIds) {
-        result = autoUnframeNodeByNonOverlap(result, nodeId, { epsilon: 0 });
-        result = autoFrameNodeByOverlap(result, nodeId, { threshold: 0.75 });
+    onNodeDragStop: (_event, _node, draggedNodes) => {
+      // After drag ends, auto-frame / unframe based on overlap.
+      const { nodes } = get();
+      let result = nodes as NestableNode[];
+      for (const dragged of draggedNodes) {
+        result = autoUnframeNodeByNonOverlap(result, dragged.id, {
+          epsilon: 0,
+        });
+        result = autoFrameNodeByOverlap(result, dragged.id, {
+          threshold: 0.75,
+        });
       }
+      if (result !== nodes) {
+        set({ nodes: result });
+      }
+    },
+
+    onNodesChange: (changes) => {
+      const hasRemoves = changes.some((c) => c.type === 'remove');
+
+      if (hasRemoves) {
+        const { nodes, edges } = get();
+        canvasHistoryManager.takeSnapshot(nodes, edges);
+      }
+
+      const prevNodes = get().nodes as NestableNode[];
+      let result = applyNodeChanges(changes, prevNodes) as NestableNode[];
 
       // Disallow adding nodes through ReactFlow change events.
       // Node additions must go through the store's addNode() API.
@@ -373,11 +421,9 @@ const useCanvasStore = create<RFState>()(
 
       if (removedIds.length > 0) {
         const { canvasId } = get();
-        // Fire-and-forget deletions
+        // Fire-and-forget deletions with AbortController so undo can cancel them
         for (const nodeId of removedIds) {
-          void deleteNode(canvasId, nodeId).catch((error) => {
-            console.error('Failed to delete node:', nodeId, error);
-          });
+          canvasHistoryManager.trackDelete(canvasId, nodeId);
         }
       }
 
@@ -392,14 +438,21 @@ const useCanvasStore = create<RFState>()(
     },
 
     onEdgesChange: (changes) => {
+      const hasRemoves = changes.some((c) => c.type === 'remove');
+      if (hasRemoves) {
+        const { nodes, edges } = get();
+        canvasHistoryManager.takeSnapshot(nodes, edges);
+      }
       set({
         edges: applyEdgeChanges(changes, get().edges),
       });
     },
 
     onConnect: (connection: Connection) => {
+      const { nodes, edges } = get();
+      canvasHistoryManager.takeSnapshot(nodes, edges);
       set({
-        edges: addEdge(connection, get().edges),
+        edges: addEdge(connection, edges),
       });
     },
 
@@ -407,6 +460,9 @@ const useCanvasStore = create<RFState>()(
     setRfInstance: (instance) => set({ rfInstance: instance }),
 
     addNode: (node) => {
+      const { nodes, edges } = get();
+      canvasHistoryManager.takeSnapshot(nodes, edges);
+
       // Ensure node has a label
       let finalLabel = node.data?.label;
 
@@ -434,8 +490,13 @@ const useCanvasStore = create<RFState>()(
       triggerIngestion(newNode);
     },
 
-    updateNodeData: (nodeId, patch) => {
+    updateNodeData: (nodeId, patch, options) => {
       if (!nodeId) return;
+
+      if (options?.recordHistory) {
+        const { nodes, edges } = get();
+        canvasHistoryManager.takeSnapshot(nodes, edges);
+      }
 
       let updatedNode: Node | undefined;
       let previousNode: Node | undefined;
@@ -509,6 +570,7 @@ const useCanvasStore = create<RFState>()(
       const newIndex = nodes.findIndex((n) => n.id === overId);
 
       if (oldIndex !== -1 && newIndex !== -1) {
+        canvasHistoryManager.takeSnapshot(nodes, get().edges);
         const newNodes = [...nodes];
         const [movedItem] = newNodes.splice(oldIndex, 1);
         newNodes.splice(newIndex, 0, movedItem);
@@ -524,6 +586,8 @@ const useCanvasStore = create<RFState>()(
       const { nodes } = get();
       const selected = nodes.filter((n) => n.selected);
       if (selected.length === 0) return;
+
+      canvasHistoryManager.takeSnapshot(nodes, get().edges);
 
       const selectedIds = new Set(selected.map((n) => n.id));
       const rest = nodes.filter((n) => !selectedIds.has(n.id));
@@ -541,6 +605,8 @@ const useCanvasStore = create<RFState>()(
       const selectedIds = nodes.filter((n) => n.selected).map((n) => n.id);
       if (selectedIds.length < 2) return;
 
+      canvasHistoryManager.takeSnapshot(nodes, get().edges);
+
       const frameId = createId('node');
       const result = frameNodes(nodes as NestableNode[], selectedIds, {
         frameId,
@@ -551,7 +617,9 @@ const useCanvasStore = create<RFState>()(
     },
 
     frameNodesInRect: (flowRect) => {
-      const { nodes } = get();
+      const { nodes, edges } = get();
+      canvasHistoryManager.takeSnapshot(nodes, edges);
+
       const frameId = createId('node');
       const result = frameNodesInRect(
         nodes as NestableNode[],
@@ -563,17 +631,20 @@ const useCanvasStore = create<RFState>()(
 
     unframe: (frameId) => {
       const { nodes, edges } = get();
+      canvasHistoryManager.takeSnapshot(nodes, edges);
       const result = unframe(nodes as NestableNode[], edges, frameId);
       set({ nodes: result.nodes, edges: result.edges });
     },
 
     toggleFrameLock: (frameId) => {
-      const { nodes } = get();
-
+      const { nodes, edges } = get();
+      canvasHistoryManager.takeSnapshot(nodes, edges);
       set({ nodes: toggleFrameLock(nodes as NestableNode[], frameId) });
     },
 
     resizeNode: (nodeId, width, height) => {
+      const { nodes, edges } = get();
+      canvasHistoryManager.takeResizeSnapshot(nodeId, nodes, edges);
       set({
         nodes: get().nodes.map((n) =>
           n.id === nodeId ? { ...n, style: { ...n.style, width, height } } : n,
@@ -582,7 +653,8 @@ const useCanvasStore = create<RFState>()(
     },
 
     moveNodeIntoFrame: (nodeId, frameId) => {
-      const { nodes } = get();
+      const { nodes, edges } = get();
+      canvasHistoryManager.takeSnapshot(nodes, edges);
       const result = moveNodeIntoFrame(
         nodes as NestableNode[],
         nodeId,
@@ -592,7 +664,8 @@ const useCanvasStore = create<RFState>()(
     },
 
     moveNodeOutOfFrame: (nodeId) => {
-      const { nodes } = get();
+      const { nodes, edges } = get();
+      canvasHistoryManager.takeSnapshot(nodes, edges);
       const result = moveNodeOutOfFrame(nodes as NestableNode[], nodeId);
       set({ nodes: result });
     },
@@ -623,6 +696,8 @@ const useCanvasStore = create<RFState>()(
     pasteNodes: (flowPosition) => {
       const { clipboard, nodes } = get();
       if (clipboard.length === 0) return;
+
+      canvasHistoryManager.takeSnapshot(nodes, get().edges);
 
       // Compute the offset to apply to each pasted node.
       // If a flow-space position is provided, centre the pasted group there;
@@ -710,6 +785,45 @@ const useCanvasStore = create<RFState>()(
       for (const node of newNodes) {
         triggerIngestion(node);
       }
+    },
+
+    canUndo: false,
+    canRedo: false,
+
+    undo: () => {
+      const { nodes, edges, canvasId } = get();
+      const snapshot = canvasHistoryManager.undo(nodes, edges);
+      if (!snapshot) return;
+
+      set({
+        nodes: snapshot.nodes,
+        edges: snapshot.edges,
+      });
+
+      canvasHistoryManager.syncServerAfterRestore(
+        canvasId,
+        nodes,
+        snapshot.nodes,
+        triggerIngestion,
+      );
+    },
+
+    redo: () => {
+      const { nodes, edges, canvasId } = get();
+      const snapshot = canvasHistoryManager.redo(nodes, edges);
+      if (!snapshot) return;
+
+      set({
+        nodes: snapshot.nodes,
+        edges: snapshot.edges,
+      });
+
+      canvasHistoryManager.syncServerAfterRestore(
+        canvasId,
+        nodes,
+        snapshot.nodes,
+        triggerIngestion,
+      );
     },
   })),
 );

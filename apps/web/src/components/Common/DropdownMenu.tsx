@@ -83,6 +83,8 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
 type DropdownMenuItemProps = {
   icon?: ReactNode;
   children: ReactNode;
+  /** Optional keyboard shortcut hint rendered on the right side. */
+  shortcut?: string;
   className?: string;
 } & Omit<
   ButtonHTMLAttributes<HTMLButtonElement>,
@@ -95,6 +97,7 @@ type DropdownMenuItemProps = {
 export const DropdownMenuItem: React.FC<DropdownMenuItemProps> = ({
   icon,
   children,
+  shortcut,
   className,
   ...props
 }) => (
@@ -107,6 +110,9 @@ export const DropdownMenuItem: React.FC<DropdownMenuItemProps> = ({
     {...props}
   >
     {icon && <span className="shrink-0 text-gray-400">{icon}</span>}
-    {children}
+    <span className="flex-1 text-left">{children}</span>
+    {shortcut && (
+      <span className="ml-4 shrink-0 text-xs text-gray-400">{shortcut}</span>
+    )}
   </GhostButton>
 );
