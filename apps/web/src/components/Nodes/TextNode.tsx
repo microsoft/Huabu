@@ -410,7 +410,25 @@ export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
           )}
           placeholder="Type..."
           defaultValue={content}
-          onChange={(e) => updateNodeData(id, { content: e.target.value })}
+          onChange={(e) => {
+            const newContent = e.target.value;
+            const patch: Record<string, unknown> = { content: newContent };
+
+            // Auto-update the label from content when not manually renamed
+            if (data.labelSource !== 'user') {
+              const firstLine = newContent.split('\n')[0]?.trim() ?? '';
+              const autoLabel =
+                firstLine.length > 40
+                  ? firstLine.slice(0, 40) + '…'
+                  : firstLine;
+              if (autoLabel) {
+                patch.label = autoLabel;
+                patch.labelSource = 'auto';
+              }
+            }
+
+            updateNodeData(id, patch);
+          }}
           onBlur={handleBlur}
           readOnly={!isEditing}
           style={{

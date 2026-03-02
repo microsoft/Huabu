@@ -149,12 +149,24 @@ body,
 
 /* Click-to-place cursor overrides for ReactFlow pane */
 .canvas-pending-note .react-flow__pane,
-.canvas-pending-text .react-flow__pane {
+.canvas-pending-text .react-flow__pane,
+.canvas-pending-note .react-flow__node,
+.canvas-pending-text .react-flow__node {
   cursor: text !important;
 }
 
-.canvas-pending-frame .react-flow__pane {
+.canvas-pending-frame .react-flow__pane,
+.canvas-pending-frame .react-flow__node {
   cursor: crosshair !important;
+}
+
+/* Disable node interactivity while placing a new node.
+   This lets click/drag events pass through existing nodes to the pane/wrapper
+   so creation handlers can fire even when clicking on top of a frame. */
+.canvas-pending-note .react-flow__node,
+.canvas-pending-text .react-flow__node,
+.canvas-pending-frame .react-flow__node {
+  pointer-events: none !important;
 }
 
 .noteview-readonly h1 {

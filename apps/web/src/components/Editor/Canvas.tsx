@@ -532,6 +532,8 @@ export const Canvas: React.FC = () => {
         attributionPosition="bottom-right"
         panOnDrag={pendingNodeType ? false : tool === 'pan'}
         selectionOnDrag={pendingNodeType ? false : tool === 'select'}
+        nodesDraggable={!pendingNodeType}
+        elementsSelectable={!pendingNodeType}
         panOnScroll={true}
         zoomOnScroll={true}
         minZoom={0.1}
