@@ -165,8 +165,21 @@ class CanvasHistoryManager {
 
   /** Clear all history (e.g. after loading a new canvas). */
   clear(): void {
+    // Clear undo/redo stacks.
     this.undoStack.length = 0;
     this.redoStack.length = 0;
+
+    // Abort any in-flight delete requests and clear the tracking map.
+    for (const controller of this.inflightDeletes.values()) {
+      controller.abort();
+    }
+    this.inflightDeletes.clear();
+
+    // Clear any pending resize snapshot timers.
+    for (const timerId of this.resizeSnapshotTimers.values()) {
+      clearTimeout(timerId);
+    }
+    this.resizeSnapshotTimers.clear();
   }
 
   // ---------- Server-side sync after undo/redo ----------
