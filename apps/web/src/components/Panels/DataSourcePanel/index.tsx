@@ -108,10 +108,12 @@ const buildTreeItems = (nodes: DataSourceNodeLike[]): DataSourceTreeItem[] => {
     if (!node) return;
     out.push({ id, node, depth });
     const kids = childrenByParent.get(id) ?? [];
-    for (const kid of kids) visit(kid, depth + 1);
+    // Reverse children so higher z-order (later in nodes array) appears first
+    for (let i = kids.length - 1; i >= 0; i -= 1) visit(kids[i], depth + 1);
   };
 
-  for (const rootId of roots) visit(rootId, 0);
+  // Reverse roots so higher z-order (later in nodes array) appears first
+  for (let i = roots.length - 1; i >= 0; i -= 1) visit(roots[i], 0);
   return out;
 };
 

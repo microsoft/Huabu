@@ -19,8 +19,10 @@ import { canvasHistoryManager } from './canvasHistoryManager';
 import {
   autoFrameNodeByOverlap,
   autoUnframeNodeByNonOverlap,
+  findFrameAtPoint,
   frameNodes,
   frameNodesInRect,
+  getAbsolutePosition,
   toggleFrameLock,
   unframe,
   moveNodeIntoFrame,
@@ -476,13 +478,46 @@ const useCanvasStore = create<RFState>()(
         finalLabel = generateNextLabel(nodeType, existingLabels);
       }
 
-      const newNode = {
+      let newNode = {
         ...node,
         data: {
           ...node.data,
           label: finalLabel,
         },
       };
+
+      // Auto-detect parent frame based on node position.
+      // Only for non-frame nodes that don't already have a parent.
+      if (!newNode.parentId && newNode.type !== 'frame') {
+        // Use center of node for the hit-test when dimensions are available
+        const style = newNode.style as
+          | { width?: number; height?: number }
+          | undefined;
+        const w = typeof style?.width === 'number' ? style.width : 0;
+        const h = typeof style?.height === 'number' ? style.height : 0;
+        const checkPoint = {
+          x: newNode.position.x + w / 2,
+          y: newNode.position.y + h / 2,
+        };
+
+        const frameId = findFrameAtPoint(nodes as NestableNode[], checkPoint);
+        if (frameId) {
+          const frameAbs = getAbsolutePosition(
+            nodes as NestableNode[],
+            frameId,
+          );
+          if (frameAbs) {
+            newNode = {
+              ...newNode,
+              parentId: frameId,
+              position: {
+                x: newNode.position.x - frameAbs.x,
+                y: newNode.position.y - frameAbs.y,
+              },
+            };
+          }
+        }
+      }
 
       set({ nodes: selectOnly([...get().nodes, newNode], [newNode.id]) });
 
@@ -680,15 +715,13 @@ const useCanvasStore = create<RFState>()(
       // Extract only serialisable properties to avoid structuredClone failures
       // on ReactFlow internal properties (measured, internals, etc.)
       const cloned: Node[] = selected.map((n) => ({
-        id: n.id,
+        id: createId('node'), // Generate new ID to avoid conflicts on paste
         type: n.type,
         position: { x: n.position.x, y: n.position.y },
         data: JSON.parse(JSON.stringify(n.data ?? {})),
         ...(n.style ? { style: JSON.parse(JSON.stringify(n.style)) } : {}),
         ...(n.parentId ? { parentId: n.parentId } : {}),
       }));
-
-      console.log('Copied nodes to clipboard:', cloned);
 
       set({ clipboard: cloned });
     },
@@ -773,16 +806,49 @@ const useCanvasStore = create<RFState>()(
         return cloned;
       });
 
+      // Auto-detect parent frame for pasted nodes without a remapped parent.
+      // Use current canvas nodes for frame detection; adjust position to
+      // be relative to the detected frame.
+      const adjustedNodes: Node[] = newNodes.map((n) => {
+        if (n.parentId) return n; // Already has a parent from clipboard remap
+        if (n.type === 'frame') return n; // Don't nest frames
+
+        const style = n.style as
+          | { width?: number; height?: number }
+          | undefined;
+        const w = typeof style?.width === 'number' ? style.width : 0;
+        const h = typeof style?.height === 'number' ? style.height : 0;
+        const checkPoint = {
+          x: n.position.x + w / 2,
+          y: n.position.y + h / 2,
+        };
+
+        const frameId = findFrameAtPoint(nodes as NestableNode[], checkPoint);
+        if (!frameId) return n;
+
+        const frameAbs = getAbsolutePosition(nodes as NestableNode[], frameId);
+        if (!frameAbs) return n;
+
+        return {
+          ...n,
+          parentId: frameId,
+          position: {
+            x: n.position.x - frameAbs.x,
+            y: n.position.y - frameAbs.y,
+          },
+        };
+      });
+
       // Deselect all existing nodes, then select only pasted ones
       set({
         nodes: selectOnly(
-          [...nodes, ...newNodes],
-          newNodes.map((n) => n.id),
+          normalizeTreeOrder([...nodes, ...adjustedNodes] as NestableNode[]),
+          adjustedNodes.map((n) => n.id),
         ),
       });
 
       // Trigger ingestion for each pasted node
-      for (const node of newNodes) {
+      for (const node of adjustedNodes) {
         triggerIngestion(node);
       }
     },

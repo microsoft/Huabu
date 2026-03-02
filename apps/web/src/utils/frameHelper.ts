@@ -131,8 +131,8 @@ function getNodeSize(node: NestableNode): { width: number; height: number } {
     (typeof style?.width === 'number'
       ? style.width
       : typeof style?.width === 'string'
-      ? Number.parseFloat(style.width)
-      : undefined) ??
+        ? Number.parseFloat(style.width)
+        : undefined) ??
     0;
 
   const height =
@@ -140,8 +140,8 @@ function getNodeSize(node: NestableNode): { width: number; height: number } {
     (typeof style?.height === 'number'
       ? style.height
       : typeof style?.height === 'string'
-      ? Number.parseFloat(style.height)
-      : undefined) ??
+        ? Number.parseFloat(style.height)
+        : undefined) ??
     0;
 
   return {
@@ -799,6 +799,47 @@ export function frameNodesInRect(
   }
 
   return { nodes: result, frameId };
+}
+
+/**
+ * Finds the smallest unlocked frame that contains the given point.
+ * Returns the frame's ID, or null if the point is not inside any frame.
+ *
+ * Used during node creation to auto-detect parent frames based on
+ * the creation position (e.g. click, drop, paste).
+ */
+export function findFrameAtPoint(
+  nodes: NestableNode[],
+  point: { x: number; y: number },
+): string | null {
+  const byId = indexById(nodes);
+  const getAbs = createAbsolutePositionGetter(byId);
+  const getRect = createRectGetter(byId, getAbs);
+
+  let best: { frameId: string; area: number } | undefined;
+
+  for (const node of nodes) {
+    if (node.type !== 'frame') continue;
+    if (node.data?.locked) continue;
+
+    const rect = getRect(node.id);
+    if (!rect) continue;
+
+    if (
+      point.x >= rect.x &&
+      point.x <= rect.x + rect.width &&
+      point.y >= rect.y &&
+      point.y <= rect.y + rect.height
+    ) {
+      const area = rect.width * rect.height;
+      // Prefer the smallest frame (most specific container)
+      if (!best || area < best.area) {
+        best = { frameId: node.id, area };
+      }
+    }
+  }
+
+  return best?.frameId ?? null;
 }
 
 /**
