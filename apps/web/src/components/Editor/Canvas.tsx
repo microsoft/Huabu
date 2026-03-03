@@ -12,6 +12,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import '@xyflow/react/dist/style.css';
 
 import { NodeToolbar } from './CanvasToolbar';
+import { MultiSelectToolbar } from './MultiSelectToolbar';
 import { getSource } from '../../api/knowledge';
 import useCanvasStore from '../../store/canvasStore.ts';
 import {
@@ -543,6 +544,7 @@ export const Canvas: React.FC = () => {
         <Panel position="bottom-center" className="mb-6">
           <NodeToolbar activeTool={tool} onToolChange={setTool} />
         </Panel>
+        <MultiSelectToolbar />
         <Background color="#ccc" gap={18} />
 
         <Controls position="bottom-left" />

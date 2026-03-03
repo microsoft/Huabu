@@ -17,6 +17,11 @@ import { create, type StateCreator } from 'zustand';
 import { getCanvas, putCanvas, upsertNode } from '../api';
 import { canvasHistoryManager } from './canvasHistoryManager';
 import {
+  alignNodes,
+  spreadNodes,
+  type AlignDirection,
+} from '../utils/autoLayoutHelper';
+import {
   autoFrameNodeByOverlap,
   autoUnframeNodeByNonOverlap,
   findFrameAtPoint,
@@ -132,6 +137,11 @@ type RFState = {
   toggleFrameLock: (frameId: string) => void;
 
   resizeNode: (nodeId: string, width: number, height: number) => void;
+
+  /** Align selected nodes along an axis. */
+  alignSelectedNodes: (direction: AlignDirection) => void;
+  /** Spread apart overlapping selected nodes (frame children stay in their frame). */
+  spreadSelectedNodes: () => void;
 
   moveNodeIntoFrame: (nodeId: string, frameId: string) => void;
   moveNodeOutOfFrame: (nodeId: string) => void;
@@ -685,6 +695,24 @@ const useCanvasStore = create<RFState>()(
           n.id === nodeId ? { ...n, style: { ...n.style, width, height } } : n,
         ),
       });
+    },
+
+    alignSelectedNodes: (direction) => {
+      const { nodes, edges } = get();
+      const result = alignNodes(nodes, direction);
+      if (!result) return;
+
+      canvasHistoryManager.takeSnapshot(nodes, edges);
+      set({ nodes: result });
+    },
+
+    spreadSelectedNodes: () => {
+      const { nodes, edges } = get();
+      const result = spreadNodes(nodes);
+      if (!result) return;
+
+      canvasHistoryManager.takeSnapshot(nodes, edges);
+      set({ nodes: result });
     },
 
     moveNodeIntoFrame: (nodeId, frameId) => {
