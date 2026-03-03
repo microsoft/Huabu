@@ -12,9 +12,11 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import '@xyflow/react/dist/style.css';
 
 import { NodeToolbar } from './CanvasToolbar';
+import { IntentPopover } from './IntentPopover';
 import { MultiSelectToolbar } from './MultiSelectToolbar';
 import { getSource } from '../../api/knowledge';
 import useCanvasStore from '../../store/canvasStore.ts';
+import { useIntentStore } from '../../store/intentStore';
 import {
   canReadSedimentPayload,
   getSedimentPayload,
@@ -347,6 +349,16 @@ export const Canvas: React.FC = () => {
         } else {
           pasteNodes();
         }
+      } else if (lowerKey === 'i') {
+        // Ctrl/Cmd + I → intent recognition
+        if (isNativeInput || isRichEditor) return;
+        e.preventDefault();
+        useIntentStore
+          .getState()
+          .triggerIntent(
+            mousePositionRef.current.x,
+            mousePositionRef.current.y,
+          );
       }
     };
 
@@ -569,6 +581,7 @@ export const Canvas: React.FC = () => {
           <NodeToolbar activeTool={tool} onToolChange={setTool} />
         </Panel>
         <MultiSelectToolbar />
+        <IntentPopover />
         <Background color="#ccc" gap={18} />
 
         <Controls position="bottom-left" />
