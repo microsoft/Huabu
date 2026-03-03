@@ -97,6 +97,8 @@ export function extractNodeRef(node: Node): NodeRef {
     id: node.id,
     nodeType: (node.type ?? 'note') as CanvasNodeType,
     label: node.data?.label as string | undefined,
+    origin: (node.data as Record<string, unknown> | undefined)
+      ?.origin as NodeRef['origin'],
   };
 }
 
@@ -203,7 +205,7 @@ function handleAddNode(
     ),
     actionHistory: pushAction(actionHistory, {
       action: 'node_created',
-      node: extractNodeRef(newNode),
+      nodes: [extractNodeRef(newNode)],
     }),
   });
 
@@ -397,7 +399,7 @@ function handleGroupSelectionIntoFrame(
     actionHistory: frameNode
       ? pushAction(actionHistory, {
           action: 'node_created',
-          node: extractNodeRef(frameNode),
+          nodes: [extractNodeRef(frameNode)],
         })
       : actionHistory,
   });
@@ -423,7 +425,7 @@ function handleGroupRectIntoFrame(
     actionHistory: frameNode
       ? pushAction(actionHistory, {
           action: 'node_created',
-          node: extractNodeRef(frameNode),
+          nodes: [extractNodeRef(frameNode)],
         })
       : actionHistory,
   });
@@ -722,18 +724,24 @@ function handlePasteNodes(
     };
   });
 
+  // Tag every pasted node so the agent knows this batch came from a paste gesture.
+  const taggedNodes: Node[] = finalNodes.map((n) => ({
+    ...n,
+    data: { ...(n.data as Record<string, unknown>), origin: 'user-pasted' },
+  }));
+
   set({
     nodes: selectOnly(
-      normalizeTreeOrder([...nodes, ...finalNodes] as NestableNode[]),
-      finalNodes.map((n) => n.id),
+      normalizeTreeOrder([...nodes, ...taggedNodes] as NestableNode[]),
+      taggedNodes.map((n) => n.id),
     ),
     actionHistory: pushAction(actionHistory, {
-      action: 'nodes_pasted',
-      nodes: finalNodes.map(extractNodeRef),
+      action: 'node_created',
+      nodes: taggedNodes.map(extractNodeRef),
     }),
   });
 
-  for (const node of finalNodes) {
+  for (const node of taggedNodes) {
     triggerIngestion(node);
   }
 }
@@ -890,5 +898,5 @@ export function handleCommand(
       return handleSpreadNodes(cmd, ctx);
     case 'NODE_DRAG_STOP':
       return handleNodeDragStop(cmd, ctx);
-    }
   }
+}

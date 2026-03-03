@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
+    "typecheck": "pnpm -r --parallel typecheck",
     "prepare": "husky"
   },
   "devDependencies": {

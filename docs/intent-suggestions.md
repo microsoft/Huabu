@@ -135,7 +135,6 @@ export type RecentActionType =
   | 'frame_unframed'
   | 'node_resized'
   | 'nodes_reordered'
-  | 'nodes_pasted'
   | 'nodes_moved';
 
 export interface RecentAction {

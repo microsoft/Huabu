@@ -134,7 +134,7 @@ export const Canvas: React.FC = () => {
           newNode = {
             ...baseNode,
             type: 'note',
-            data: { type: 'note', content: '' },
+            data: { type: 'note', content: '', origin: 'user-created' },
             style: { width: w, height: h },
           };
           break;
@@ -142,7 +142,7 @@ export const Canvas: React.FC = () => {
           newNode = {
             ...baseNode,
             type: 'text',
-            data: { type: 'text', content: '' },
+            data: { type: 'text', content: '', origin: 'user-created' },
           };
           break;
         default:
@@ -463,6 +463,7 @@ export const Canvas: React.FC = () => {
             position,
             data: {
               src: payload.data.src,
+              origin: 'user-drag-chat',
             },
             style: { width: 300, height: 200 },
           };
@@ -478,6 +479,7 @@ export const Canvas: React.FC = () => {
               ...(payload.data.contentJson
                 ? { contentJson: payload.data.contentJson }
                 : {}),
+              origin: 'user-drag-chat',
             },
           };
         }
@@ -493,6 +495,7 @@ export const Canvas: React.FC = () => {
           const data: Record<string, unknown> = {
             label,
             sourceId,
+            origin: 'user-drag-library',
             ...rest,
           };
 
