@@ -9,6 +9,7 @@ import artifactRoute from './modules/artifact/artifact.route.js';
 import { getArtifactsDir } from './modules/artifact/utils.js';
 import canvasRoutes from './modules/canvas/canvas.route.js';
 import chatRoutes from './modules/chat/chat.route.js';
+import intentRoutes from './modules/intent/intent.route.js';
 import knowledgeRoute from './modules/knowledge/knowledge.route.js';
 import researchRoutes from './modules/research/research.route.js';
 import webRoutes from './modules/web/web.route.js';
@@ -49,3 +50,5 @@ app.register(webRoutes, { prefix: '/api/web' });
 app.register(artifactRoute, { prefix: '/api' });
 app.register(knowledgeRoute, { prefix: '/api' });
 app.register(researchRoutes, { prefix: '/api/research' });
+
+app.register(intentRoutes, { prefix: '/api/intent' });
