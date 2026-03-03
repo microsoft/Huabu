@@ -233,6 +233,8 @@ function handleDeleteNodes(
   }
 
   const toDelete = nodes.filter((n) => removedIds.has(n.id));
+  if (toDelete.length === 0) return;
+
   canvasHistoryManager.takeSnapshot(nodes, edges);
 
   for (const node of toDelete) {
