@@ -11,6 +11,7 @@ import {
   applyEdgeChanges,
   type Node,
   type Edge,
+  type EdgeRemoveChange,
   type OnNodesChange,
   type OnEdgesChange,
   type OnConnect,
@@ -500,7 +501,9 @@ const useCanvasStore = create<RFState>()(
     },
 
     onEdgesChange: (changes) => {
-      const removes = changes.filter((c) => c.type === 'remove');
+      const removes = changes.filter(
+        (c): c is EdgeRemoveChange => c.type === 'remove',
+      );
       if (removes.length > 0) {
         get().dispatch({
           type: 'DISCONNECT_EDGES',
