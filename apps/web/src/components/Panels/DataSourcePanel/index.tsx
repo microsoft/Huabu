@@ -289,7 +289,7 @@ export const DataSourcePanel = ({
 
             if (targetNode) {
               const rfInstance = useCanvasStore.getState().rfInstance;
-              useCanvasStore.getState().setSelectedNodes([targetNode.id]);
+              useCanvasStore.getState().selectNodes([targetNode.id]);
               usePreviewStore.getState().closePreview();
 
               if (rfInstance) {
