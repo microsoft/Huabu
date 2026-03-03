@@ -107,8 +107,6 @@ export interface PdfNodeData extends BaseNodeData {
   type: 'pdf';
   src: string;
   sourceId?: string;
-  /** Whether PDF is expanded (showing full content vs preview) */
-  isExpanded?: boolean;
 }
 
 /** Video node: video content */
