@@ -27,6 +27,7 @@ import {
   extractSnippet,
 } from './canvasHandlers';
 import { canvasHistoryManager } from './canvasHistoryManager';
+import { type AlignDirection } from '../utils/autoLayoutHelper';
 import {
   autoFrameNodeByOverlap,
   autoUnframeNodeByNonOverlap,
@@ -76,7 +77,9 @@ export type CanvasCommand =
   | { type: 'TOGGLE_FRAME_LOCK'; frameId: string }
   | { type: 'REORDER_NODES'; activeId: string; overId: string }
   | { type: 'REORDER_NODES'; nodeIds: string[]; position: 'top' | 'bottom' }
-  | { type: 'PASTE_NODES'; flowPosition?: { x: number; y: number } };
+  | { type: 'PASTE_NODES'; flowPosition?: { x: number; y: number } }
+  | { type: 'ALIGN_NODES'; direction: AlignDirection }
+  | { type: 'SPREAD_NODES' };
 
 const CANVAS_ID = 'default-canvas';
 const AUTOSAVE_DEBOUNCE_MS = 1000;
@@ -172,6 +175,11 @@ type RFState = {
   toggleFrameLock: (frameId: string) => void;
 
   resizeNode: (nodeId: string, width: number, height: number) => void;
+
+  /** Align selected nodes along an axis. */
+  alignSelectedNodes: (direction: AlignDirection) => void;
+  /** Spread apart overlapping selected nodes (frame children stay in their frame). */
+  spreadSelectedNodes: () => void;
 
   moveNodeIntoFrame: (nodeId: string, frameId: string) => void;
   moveNodeOutOfFrame: (nodeId: string) => void;
@@ -611,6 +619,14 @@ const useCanvasStore = create<RFState>()(
       get().dispatch({ type: 'RESIZE_NODE', nodeId, width, height });
     },
 
+    alignSelectedNodes: (direction) => {
+      get().dispatch({ type: 'ALIGN_NODES', direction });
+    },
+
+    spreadSelectedNodes: () => {
+      get().dispatch({ type: 'SPREAD_NODES' });
+    },
+
     moveNodeIntoFrame: (nodeId, frameId) => {
       get().dispatch({ type: 'MOVE_INTO_FRAME', nodeId, frameId });
     },
@@ -634,9 +650,7 @@ const useCanvasStore = create<RFState>()(
         position: { x: n.position.x, y: n.position.y },
         data: JSON.parse(JSON.stringify(n.data ?? {})),
         ...(n.style ? { style: JSON.parse(JSON.stringify(n.style)) } : {}),
-        ...(n.parentId 
-          ? { parentId: n.parentId }
-          : {}),
+        ...(n.parentId ? { parentId: n.parentId } : {}),
       }));
 
       set({ clipboard: cloned });
