@@ -41,6 +41,7 @@ import {
 import { addEdge, type Node, type Edge, type Connection } from '@xyflow/react';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
+import { alignNodes, spreadNodes } from '../utils/autoLayoutHelper';
 import {
   findFrameAtPoint,
   frameNodes,
@@ -669,6 +670,30 @@ function handlePasteNodes(
   }
 }
 
+function handleAlignNodes(
+  cmd: Extract<CanvasCommand, { type: 'ALIGN_NODES' }>,
+  ctx: CanvasHandlerContext,
+): void {
+  const { nodes, edges, set } = ctx;
+  const result = alignNodes(nodes, cmd.direction);
+  if (!result) return;
+
+  canvasHistoryManager.takeSnapshot(nodes, edges);
+  set({ nodes: result });
+}
+
+function handleSpreadNodes(
+  _cmd: Extract<CanvasCommand, { type: 'SPREAD_NODES' }>,
+  ctx: CanvasHandlerContext,
+): void {
+  const { nodes, edges, set } = ctx;
+  const result = spreadNodes(nodes);
+  if (!result) return;
+
+  canvasHistoryManager.takeSnapshot(nodes, edges);
+  set({ nodes: result });
+}
+
 // ---------------------------------------------------------------------------
 // Main dispatcher — called by canvasStore's dispatch()
 // ---------------------------------------------------------------------------
@@ -708,5 +733,9 @@ export function handleCommand(
       return handleReorderNodes(cmd, ctx);
     case 'PASTE_NODES':
       return handlePasteNodes(cmd, ctx);
+    case 'ALIGN_NODES':
+      return handleAlignNodes(cmd, ctx);
+    case 'SPREAD_NODES':
+      return handleSpreadNodes(cmd, ctx);
   }
 }

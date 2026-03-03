@@ -27,11 +27,7 @@ import {
   extractSnippet,
 } from './canvasHandlers';
 import { canvasHistoryManager } from './canvasHistoryManager';
-import {
-  alignNodes,
-  spreadNodes,
-  type AlignDirection,
-} from '../utils/autoLayoutHelper';
+import { type AlignDirection } from '../utils/autoLayoutHelper';
 import {
   autoFrameNodeByOverlap,
   autoUnframeNodeByNonOverlap,
@@ -81,7 +77,9 @@ export type CanvasCommand =
   | { type: 'TOGGLE_FRAME_LOCK'; frameId: string }
   | { type: 'REORDER_NODES'; activeId: string; overId: string }
   | { type: 'REORDER_NODES'; nodeIds: string[]; position: 'top' | 'bottom' }
-  | { type: 'PASTE_NODES'; flowPosition?: { x: number; y: number } };
+  | { type: 'PASTE_NODES'; flowPosition?: { x: number; y: number } }
+  | { type: 'ALIGN_NODES'; direction: AlignDirection }
+  | { type: 'SPREAD_NODES' };
 
 const CANVAS_ID = 'default-canvas';
 const AUTOSAVE_DEBOUNCE_MS = 1000;
@@ -622,21 +620,11 @@ const useCanvasStore = create<RFState>()(
     },
 
     alignSelectedNodes: (direction) => {
-      const { nodes, edges } = get();
-      const result = alignNodes(nodes, direction);
-      if (!result) return;
-
-      canvasHistoryManager.takeSnapshot(nodes, edges);
-      set({ nodes: result });
+      get().dispatch({ type: 'ALIGN_NODES', direction });
     },
 
     spreadSelectedNodes: () => {
-      const { nodes, edges } = get();
-      const result = spreadNodes(nodes);
-      if (!result) return;
-
-      canvasHistoryManager.takeSnapshot(nodes, edges);
-      set({ nodes: result });
+      get().dispatch({ type: 'SPREAD_NODES' });
     },
 
     moveNodeIntoFrame: (nodeId, frameId) => {
