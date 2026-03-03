@@ -12,7 +12,6 @@ import { GripVertical } from 'lucide-react';
 import React, { memo, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 
-import { canvasHistoryManager } from '@/store/canvasHistoryManager';
 import useCanvasStore from '@/store/canvasStore.ts';
 
 import type { CanvasNodeType, NodeData } from './types.ts';
@@ -86,6 +85,7 @@ export const NodeWrapper = memo(
     const { zoom, x: vpX, y: vpY } = useViewport();
 
     const dispatch = useCanvasStore((state) => state.dispatch);
+    const takeSnapshot = useCanvasStore((state) => state.takeSnapshot);
     const ingestion = useCanvasStore((state) => state.ingestionByNodeId[id]);
     const showIngestionOverlay =
       type !== 'frame' && ingestion?.status === 'pending';
@@ -95,7 +95,8 @@ export const NodeWrapper = memo(
 
     const handleResize = useCallback(
       (_event: unknown, params: { width: number; height: number }) => {
-        // Directly update the node's dimensions in the store on resize for immediate visual feedback. This also ensures the NodeToolbar and zoom-invariant overlay stay correctly positioned during the resize.
+        // Apply dimensions immediately for visual feedback during drag.
+        // This keeps the NodeToolbar and zoom-invariant overlay in sync.
         useCanvasStore.setState((state) => ({
           nodes: state.nodes.map((n) =>
             n.id === id
@@ -117,22 +118,19 @@ export const NodeWrapper = memo(
 
     const handleResizeStart = useCallback(() => {
       // Snapshot the pre-drag state so the entire resize is a single undo entry.
-      const { nodes, edges } = useCanvasStore.getState();
-      canvasHistoryManager.takeResizeSnapshot(id, nodes, edges);
+      takeSnapshot();
       onResizeStart?.();
-    }, [id, onResizeStart]);
+    }, [onResizeStart, takeSnapshot]);
 
     const handleResizeEnd = useCallback(
       (_event: unknown, params: { width: number; height: number }) => {
         // Commit the final size through dispatch so the autosave middleware
-        // picks it up. skipSnapshot=true because handleResizeStart already
-        // took the undo snapshot at the start of the drag.
+        // picks it up. The snapshot was already taken in handleResizeStart.
         dispatch({
           type: 'RESIZE_NODE',
           nodeId: id,
           width: params.width,
           height: params.height,
-          skipSnapshot: true,
         });
         onResizeEnd?.(params.width, params.height);
       },

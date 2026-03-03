@@ -1,7 +1,8 @@
-import { useReactFlow } from '@xyflow/react';
 import { clsx } from 'clsx';
 import { Baseline } from 'lucide-react';
 import { useState } from 'react';
+
+import useCanvasStore from '@/store/canvasStore.ts';
 
 import type { NodeStyle } from '@/components/Nodes/types.ts';
 
@@ -53,7 +54,7 @@ export const NodeTextColorSelector = ({
   style?: NodeStyle;
   currentTextColor?: string;
 }) => {
-  const { updateNodeData } = useReactFlow();
+  const updateNodeData = useCanvasStore((state) => state.updateNodeData);
   const [isOpen, setIsOpen] = useState(false);
 
   const activeColor =
@@ -61,12 +62,7 @@ export const NodeTextColorSelector = ({
     PRESET_TEXT_COLORS[0];
 
   const handleColorSelect = (colorValue: string) => {
-    updateNodeData(nodeId, {
-      style: {
-        ...style,
-        textColor: colorValue,
-      },
-    });
+    updateNodeData(nodeId, { style: { ...style, textColor: colorValue } });
     setIsOpen(false);
   };
 

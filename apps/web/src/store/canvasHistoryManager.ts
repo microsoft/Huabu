@@ -76,12 +76,6 @@ class CanvasHistoryManager {
   private undoStack: CanvasSnapshot[] = [];
   private redoStack: CanvasSnapshot[] = [];
 
-  // ---- Resize debounce timers ----
-  private resizeSnapshotTimers = new Map<
-    string,
-    ReturnType<typeof setTimeout>
-  >();
-
   // ---- In-flight DELETE requests (abortable on undo) ----
   private inflightDeletes = new Map<string, AbortController>();
 
@@ -112,27 +106,6 @@ class CanvasHistoryManager {
     this.undoStack.push(candidate);
     if (this.undoStack.length > MAX_HISTORY) this.undoStack.shift();
     this.redoStack.length = 0;
-  }
-
-  /**
-   * Debounced snapshot for continuous resize events.
-   * The first call for a given nodeId captures a snapshot; subsequent calls
-   * within 500 ms only extend the timer so no duplicate snapshots are
-   * created during continuous dragging.
-   */
-  takeResizeSnapshot(nodeId: string, nodes: Node[], edges: Edge[]): void {
-    const existingTimer = this.resizeSnapshotTimers.get(nodeId);
-    if (!existingTimer) {
-      this.takeSnapshot(nodes, edges);
-    } else {
-      clearTimeout(existingTimer);
-    }
-    this.resizeSnapshotTimers.set(
-      nodeId,
-      setTimeout(() => {
-        this.resizeSnapshotTimers.delete(nodeId);
-      }, 500),
-    );
   }
 
   // ---------- Undo / Redo ----------
@@ -174,12 +147,6 @@ class CanvasHistoryManager {
       controller.abort();
     }
     this.inflightDeletes.clear();
-
-    // Clear any pending resize snapshot timers.
-    for (const timerId of this.resizeSnapshotTimers.values()) {
-      clearTimeout(timerId);
-    }
-    this.resizeSnapshotTimers.clear();
   }
 
   // ---------- Server-side sync after undo/redo ----------

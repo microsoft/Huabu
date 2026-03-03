@@ -17,6 +17,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "tsc -w -p tsconfig.json"
   }
 }

@@ -40,7 +40,9 @@ function serialiseContext(ctx: AgentBaseContext): string {
     lines.push('Connections:');
     for (const e of ctx.edges) {
       lines.push(
-        `- "${e.source.label ?? e.source.id}" → "${e.target.label ?? e.target.id}"`,
+        `- "${e.source.label ?? e.source.id}" → "${
+          e.target.label ?? e.target.id
+        }"`,
       );
     }
   }
@@ -59,24 +61,70 @@ function serialiseContext(ctx: AgentBaseContext): string {
 
 function formatAction(a: RecentAction): string {
   switch (a.action) {
-    case 'node_created':
-      return `Created ${a.node.nodeType} "${a.node.label ?? a.node.id}"`;
-    case 'node_deleted':
-      return `Deleted ${a.node.nodeType} "${a.node.label ?? a.node.id}"`;
+    case 'node_created': {
+      const labels = a.nodes
+        .map((n) => `${n.nodeType} "${n.label ?? n.id}"`)
+        .join(', ');
+      const origin = a.nodes[0]?.origin ? ` (via ${a.nodes[0].origin})` : '';
+      return `Created ${a.nodes.length} node(s)${origin}: ${labels}`;
+    }
+    case 'nodes_deleted': {
+      const labels = a.nodes
+        .map((n) => `${n.nodeType} "${n.label ?? n.id}"`)
+        .join(', ');
+      return `Deleted ${a.nodes.length} node(s): ${labels}`;
+    }
     case 'node_edited':
       return `Edited ${a.node.nodeType} "${a.node.label ?? a.node.id}"`;
     case 'node_selected':
       return `Selected ${a.node.nodeType} "${a.node.label ?? a.node.id}"`;
+    case 'nodes_selected': {
+      const labels = a.nodes.map((n) => `"${n.label ?? n.id}"`).join(', ');
+      return `Selected ${a.nodes.length} nodes: ${labels}`;
+    }
     case 'node_expanded':
       return `Expanded ${a.node.nodeType} "${a.node.label ?? a.node.id}"`;
     case 'node_connected':
-      return `Connected "${a.source.label ?? a.source.id}" → "${a.target.label ?? a.target.id}"`;
-    case 'node_disconnected':
-      return `Disconnected "${a.source.label ?? a.source.id}" → "${a.target.label ?? a.target.id}"`;
+      return `Connected "${a.source.label ?? a.source.id}" → "${
+        a.target.label ?? a.target.id
+      }"`;
+    case 'edges_disconnected': {
+      const pairs = a.edges
+        .map(
+          (e) =>
+            `"${e.source.label ?? e.source.id}" → "${
+              e.target.label ?? e.target.id
+            }"`,
+        )
+        .join(', ');
+      return `Disconnected ${a.edges.length} edge(s): ${pairs}`;
+    }
     case 'node_framed':
-      return `Moved "${a.node.label ?? a.node.id}" into frame "${a.frame.label ?? a.frame.id}"`;
+      return `Moved "${a.node.label ?? a.node.id}" into frame "${
+        a.frame.label ?? a.frame.id
+      }"`;
     case 'node_unframed':
-      return `Removed "${a.node.label ?? a.node.id}" from frame "${a.frame.label ?? a.frame.id}"`;
+      return `Removed "${a.node.label ?? a.node.id}" from frame "${
+        a.frame.label ?? a.frame.id
+      }"`;
+    case 'frame_unframed':
+      return `Dissolved frame "${a.frame.label ?? a.frame.id}", released ${
+        a.nodes.length
+      } node(s)`;
+    case 'node_resized':
+      return `Resized "${a.node.label ?? a.node.id}" to ${a.width}×${a.height}`;
+    case 'nodes_reordered':
+      return `Reordered ${a.nodes.length} node(s)`;
+    case 'nodes_moved': {
+      const labels = a.nodes.map((n) => `"${n.label ?? n.id}"`).join(', ');
+      return `Moved ${a.nodes.length} node(s): ${labels}`;
+    }
+    default: {
+      // Exhaustiveness guard — if this line produces a TS error, a new
+      // RecentAction variant has been added and this function needs a new case.
+      const _exhaustive: never = a;
+      return `Unknown action: ${(_exhaustive as RecentAction).action}`;
+    }
   }
 }
 

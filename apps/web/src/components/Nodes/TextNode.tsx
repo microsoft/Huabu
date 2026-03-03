@@ -1,7 +1,14 @@
 import { type Node, type NodeProps } from '@xyflow/react';
 import { clsx } from 'clsx';
 import { Bold, Italic, Type, Underline, Strikethrough } from 'lucide-react';
-import { useCallback, useState, useRef, useMemo, useLayoutEffect } from 'react';
+import {
+  useCallback,
+  useState,
+  useRef,
+  useMemo,
+  useLayoutEffect,
+  useEffect,
+} from 'react';
 
 import { GhostButton } from '@/components/Common/GhostButton.tsx';
 import { NodeBgColorSelector } from '@/components/Common/NodeBgColorSelector.tsx';
@@ -108,9 +115,29 @@ function computeFontSizeForHeight(
 
 export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
+  const patchNodeSilent = useCanvasStore((state) => state.patchNodeSilent);
   const [isEditing, setIsEditing] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isResizingRef = useRef(false);
+
+  // Controlled draft state — local during editing, synced from store on undo/external update.
+  const content = data.content ?? '';
+  const [draftContent, setDraftContent] = useState(content);
+  const [draftLabel, setDraftLabel] = useState(
+    data.label as string | undefined,
+  );
+  const [draftLabelSource, setDraftLabelSource] = useState(
+    data.labelSource as string | undefined,
+  );
+
+  // Sync draft from external store changes (undo/redo, server updates).
+  useEffect(() => {
+    if (!isEditing) {
+      setDraftContent(data.content ?? '');
+      setDraftLabel(data.label as string | undefined);
+      setDraftLabelSource(data.labelSource as string | undefined);
+    }
+  }, [data.content, data.label, data.labelSource, isEditing]);
 
   // ------------------------------------------------------------------
   // User-set dimensions: null → auto mode, number → user has resized.
@@ -128,16 +155,12 @@ export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
 
   const updateStyle = useCallback(
     (newStyle: Partial<NodeStyle>) => {
-      updateNodeData(
-        id,
-        {
-          style: {
-            ...data.style,
-            ...newStyle,
-          },
+      updateNodeData(id, {
+        style: {
+          ...data.style,
+          ...newStyle,
         },
-        { recordHistory: true },
-      );
+      });
     },
     [id, data.style, updateNodeData],
   );
@@ -149,8 +172,6 @@ export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
   const isItalic = style.fontStyle === 'italic';
   const textColor = style.textColor;
   const textDecoration = style.textDecoration || '';
-
-  const content = data.content ?? '';
 
   const fontOpts = useMemo(
     () => ({
@@ -172,10 +193,10 @@ export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
     if (userWidth !== null && userHeight !== null) {
       const cw = userWidth - NODE_PADDING * 2;
       const ch = userHeight - NODE_PADDING * 2;
-      return computeFontSizeForHeight(content, cw, ch, fontOpts);
+      return computeFontSizeForHeight(draftContent, cw, ch, fontOpts);
     }
     return baseFontSize;
-  }, [userWidth, userHeight, content, baseFontSize, fontOpts]);
+  }, [userWidth, userHeight, draftContent, baseFontSize, fontOpts]);
 
   const effectiveFontSize = liveFontSize ?? computedFontSize;
 
@@ -186,12 +207,19 @@ export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
 
   const autoSize = useMemo(() => {
     if (userWidth !== null && userHeight !== null) return null;
-    return measureTextContent(content, {
+    return measureTextContent(draftContent, {
       ...fontOpts,
       fontSize: baseFontSize,
       maxWidth: maxAutoWidth,
     });
-  }, [userWidth, userHeight, content, baseFontSize, fontOpts, maxAutoWidth]);
+  }, [
+    userWidth,
+    userHeight,
+    draftContent,
+    baseFontSize,
+    fontOpts,
+    maxAutoWidth,
+  ]);
 
   const targetWidth =
     userWidth ?? Math.max((autoSize?.width ?? 0) + NODE_PADDING * 2, 30);
@@ -240,16 +268,11 @@ export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
       resizeTimerRef.current = setTimeout(() => {
         const cw = width - NODE_PADDING * 2;
         const ch = height - NODE_PADDING * 2;
-        const fs = computeFontSizeForHeight(
-          data.content ?? '',
-          cw,
-          ch,
-          fontOpts,
-        );
+        const fs = computeFontSizeForHeight(draftContent, cw, ch, fontOpts);
         setLiveFontSize(fs);
       }, 10);
     },
-    [data.content, fontOpts],
+    [draftContent, fontOpts],
   );
 
   const handleResizeEnd = useCallback(
@@ -259,10 +282,12 @@ export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
       setUserWidth(width);
       setUserHeight(height);
       setLiveFontSize(null); // clear live → computedFontSize takes over
-      updateNodeData(id, { userWidth: width, userHeight: height });
+      // Persist resize metadata silently — no history entry needed since
+      // the resize gesture already took a snapshot via takeSnapshot().
+      patchNodeSilent(id, { userWidth: width, userHeight: height });
       prevDimsRef.current = { w: width, h: height };
     },
-    [id, updateNodeData],
+    [id, patchNodeSilent],
   );
 
   // ------------------------------------------------------------------
@@ -284,7 +309,22 @@ export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
     setTimeout(() => textareaRef.current?.focus(), 50);
   };
 
-  const handleBlur = () => setIsEditing(false);
+  const handleBlur = () => {
+    setIsEditing(false);
+    // Only commit if something actually changed — avoid a spurious undo
+    // snapshot when the user clicks into and immediately out of the node.
+    const isDirty =
+      draftContent !== (data.content ?? '') ||
+      draftLabel !== (data.label as string | undefined) ||
+      draftLabelSource !== (data.labelSource as string | undefined);
+    if (!isDirty) return;
+    // Commit the draft to the store on blur so it records a single undo entry
+    // for the entire editing session, rather than on every keystroke.
+    const patch: Record<string, unknown> = { content: draftContent };
+    if (draftLabel !== undefined) patch.label = draftLabel;
+    if (draftLabelSource !== undefined) patch.labelSource = draftLabelSource;
+    updateNodeData(id, patch);
+  };
 
   const TextToolbar = (
     <div className="flex w-full items-center gap-1">
@@ -409,25 +449,24 @@ export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
               : 'pointer-events-none cursor-grab select-none',
           )}
           placeholder="Type..."
-          defaultValue={content}
+          value={draftContent}
           onChange={(e) => {
             const newContent = e.target.value;
-            const patch: Record<string, unknown> = { content: newContent };
+            // Update local draft state — no store write on every keystroke.
+            setDraftContent(newContent);
 
-            // Auto-update the label from content when not manually renamed
-            if (data.labelSource !== 'user') {
+            // Auto-update label from content when not manually renamed.
+            if (draftLabelSource !== 'user') {
               const firstLine = newContent.split('\n')[0]?.trim() ?? '';
               const autoLabel =
                 firstLine.length > 40
                   ? firstLine.slice(0, 40) + '…'
                   : firstLine;
               if (autoLabel) {
-                patch.label = autoLabel;
-                patch.labelSource = 'auto';
+                setDraftLabel(autoLabel);
+                setDraftLabelSource('auto');
               }
             }
-
-            updateNodeData(id, patch);
           }}
           onBlur={handleBlur}
           readOnly={!isEditing}

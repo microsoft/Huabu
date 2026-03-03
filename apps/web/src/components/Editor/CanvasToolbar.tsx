@@ -182,7 +182,6 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
               type: 'pdf',
               src: payload?.src || '',
               label: payload?.label,
-              isExpanded: true,
             },
             style: { width: initialWidth, height: initialHeight },
           };

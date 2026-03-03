@@ -1,6 +1,7 @@
-import { useReactFlow } from '@xyflow/react';
 import { clsx } from 'clsx';
 import { useState } from 'react';
+
+import useCanvasStore from '@/store/canvasStore.ts';
 
 import type { NodeStyle } from '@/components/Nodes/types.ts';
 
@@ -64,7 +65,7 @@ export const NodeBgColorSelector = ({
   style?: NodeStyle;
   currentColor?: string;
 }) => {
-  const { updateNodeData } = useReactFlow();
+  const updateNodeData = useCanvasStore((state) => state.updateNodeData);
   const [isOpen, setIsOpen] = useState(false);
 
   const activeColor =
@@ -72,10 +73,7 @@ export const NodeBgColorSelector = ({
 
   const handleColorSelect = (colorValue: string) => {
     updateNodeData(nodeId, {
-      style: {
-        ...style,
-        backgroundColor: colorValue,
-      },
+      style: { ...style, backgroundColor: colorValue },
     });
     setIsOpen(false);
   };

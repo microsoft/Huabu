@@ -123,14 +123,19 @@
 
 export type RecentActionType =
   | 'node_created'
-  | 'node_deleted'
+  | 'nodes_deleted'
   | 'node_edited' // debounce 后触发，非每次击键
   | 'node_connected'
-  | 'node_disconnected'
+  | 'edges_disconnected'
   | 'node_selected' // 最强的即时意图信号
+  | 'nodes_selected'
   | 'node_expanded' // 打开 expanded panel
   | 'node_framed' // 归入 frame（分组意图）
-  | 'node_unframed';
+  | 'node_unframed'
+  | 'frame_unframed'
+  | 'node_resized'
+  | 'nodes_reordered'
+  | 'nodes_moved';
 
 export interface RecentAction {
   action: RecentActionType;

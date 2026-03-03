@@ -14,7 +14,16 @@ export type CanvasNodeType =
   | 'web'
   | 'frame';
 
-export type NodeOrigin = 'user' | 'research' | 'chat';
+export type NodeOrigin =
+  // AI-generated
+  | 'research' // Deep Research pipeline
+  | 'chat' // Chat agent tool call
+  // User-initiated
+  | 'user-created' // Toolbar click → blank node on canvas
+  | 'user-uploaded' // File upload dialog
+  | 'user-pasted' // Cmd+V duplicate of existing node(s)
+  | 'user-drag-library' // Dragged from SourceLibrary panel (references an ingested source)
+  | 'user-drag-chat'; // Dragged from chat message card (SourceCard URL or BlockNoteCard content)
 
 /** Who set the node label — controls whether auto-title may overwrite it */
 export type LabelSource = 'auto' | 'user';
@@ -98,8 +107,6 @@ export interface PdfNodeData extends BaseNodeData {
   type: 'pdf';
   src: string;
   sourceId?: string;
-  /** Whether PDF is expanded (showing full content vs preview) */
-  isExpanded?: boolean;
 }
 
 /** Video node: video content */

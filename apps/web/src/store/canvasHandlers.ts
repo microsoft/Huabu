@@ -5,31 +5,8 @@
  * The store's `dispatch()` is the single entry point; it reads the current
  * state, builds a CanvasHandlerContext, and delegates to `handleCommand`.
  *
- * ---------------------------------------------------------------------------
- * HOW TO ADD A NEW ACTION
- * ---------------------------------------------------------------------------
- * 1. **Define the command shape** in the `CanvasCommand` union (canvasStore.ts).
- *    Use clear, verb-noun naming: VERB_SUBJECT (e.g. DELETE_NODES, RESIZE_NODE).
- *
- * 2. **Add a handler function** below following the existing pattern:
- *    - Accept `(cmd: Extract<CanvasCommand, { type: 'YOUR_TYPE' }>, ctx: CanvasHandlerContext)`
- *    - Take an undo snapshot with `canvasHistoryManager.takeSnapshot` (or
- *      `takeResizeSnapshot` for resize operations) BEFORE mutating state.
- *    - Record an agent-readable entry in `actionHistory` via `pushAction` so
- *      the AI agent has context about recent user activity.
- *    - Call `ctx.set(...)` once at the end — multiple `set` calls cause extra
- *      re-renders and can break the autosave middleware diffing.
- *    - If the action creates or modifies node content that needs to be indexed
- *      in the knowledge base, call `ctx.triggerIngestion(node)` after `set`.
- *
- * 3. **Add the case** to the `switch` in `handleCommand` and call your function.
- *
- * 4. **Expose a public store method** in `canvasStore.ts` (RFState + implementation)
- *    that calls `get().dispatch({ type: 'YOUR_TYPE', ... })`.
- *
- * 5. Guard clauses belong in the handler (e.g. early `break` when there is
- *    nothing to do), not in the public store method.
- * ---------------------------------------------------------------------------
+ * Before modifying this file, read the canonical reference first:
+ * docs/canvas-commands.md — command table and guide for adding new actions.
  */
 
 import {
@@ -52,15 +29,17 @@ import {
   moveNodeIntoFrame,
   moveNodeOutOfFrame,
   normalizeTreeOrder,
+  autoUnframeNodeByNonOverlap,
+  autoFrameNodeByOverlap,
   type NestableNode,
 } from '../utils/frameHelper';
+import {
+  shouldIngestOnUpdate,
+  type NodeIngestionInfo,
+} from '../utils/ingestHelper';
 import { generateNextLabel } from '../utils/nodeLabels';
 
 import type { CanvasCommand } from './canvasStore';
-import type { NodeIngestionInfo } from '../utils/ingestHelper';
-
-// ---------------------------------------------------------------------------
-// Context passed from the store into every handler
 // ---------------------------------------------------------------------------
 
 /**
@@ -118,6 +97,8 @@ export function extractNodeRef(node: Node): NodeRef {
     id: node.id,
     nodeType: (node.type ?? 'note') as CanvasNodeType,
     label: node.data?.label as string | undefined,
+    origin: (node.data as Record<string, unknown> | undefined)
+      ?.origin as NodeRef['origin'],
   };
 }
 
@@ -224,7 +205,7 @@ function handleAddNode(
     ),
     actionHistory: pushAction(actionHistory, {
       action: 'node_created',
-      node: extractNodeRef(newNode),
+      nodes: [extractNodeRef(newNode)],
     }),
   });
 
@@ -252,17 +233,21 @@ function handleDeleteNodes(
   }
 
   const toDelete = nodes.filter((n) => removedIds.has(n.id));
+  if (toDelete.length === 0) return;
+
   canvasHistoryManager.takeSnapshot(nodes, edges);
 
-  let nextActions = actionHistory;
   for (const node of toDelete) {
     canvasHistoryManager.trackDelete(canvasId, node.id);
-    nextActions = pushAction(nextActions, {
-      action: 'node_deleted',
-      node: extractNodeRef(node),
-      snippet: extractSnippet(node),
-    });
   }
+
+  const nextActions = pushAction(actionHistory, {
+    action: 'nodes_deleted',
+    nodes: toDelete.map((node) => ({
+      ...extractNodeRef(node),
+      snippet: extractSnippet(node),
+    })),
+  });
 
   set((state) => {
     const nextIngestionByNodeId = { ...state.ingestionByNodeId };
@@ -314,21 +299,28 @@ function handleDisconnectEdges(
   canvasHistoryManager.takeSnapshot(nodes, edges);
 
   const removedEdgeIds = new Set(cmd.edgeIds);
-  let nextActions = actionHistory;
-  for (const edgeId of cmd.edgeIds) {
+
+  const disconnectedPairs = cmd.edgeIds.flatMap((edgeId) => {
     const edge = edges.find((e) => e.id === edgeId);
-    if (edge) {
-      const sourceNode = nodes.find((n) => n.id === edge.source);
-      const targetNode = nodes.find((n) => n.id === edge.target);
-      if (sourceNode && targetNode) {
-        nextActions = pushAction(nextActions, {
-          action: 'node_disconnected',
-          source: extractNodeRef(sourceNode),
-          target: extractNodeRef(targetNode),
-        });
-      }
-    }
-  }
+    if (!edge) return [];
+    const sourceNode = nodes.find((n) => n.id === edge.source);
+    const targetNode = nodes.find((n) => n.id === edge.target);
+    if (!sourceNode || !targetNode) return [];
+    return [
+      {
+        source: extractNodeRef(sourceNode),
+        target: extractNodeRef(targetNode),
+      },
+    ];
+  });
+
+  const nextActions =
+    disconnectedPairs.length > 0
+      ? pushAction(actionHistory, {
+          action: 'edges_disconnected',
+          edges: disconnectedPairs,
+        })
+      : actionHistory;
 
   set({
     edges: edges.filter((e) => !removedEdgeIds.has(e.id)),
@@ -409,7 +401,7 @@ function handleGroupSelectionIntoFrame(
     actionHistory: frameNode
       ? pushAction(actionHistory, {
           action: 'node_created',
-          node: extractNodeRef(frameNode),
+          nodes: [extractNodeRef(frameNode)],
         })
       : actionHistory,
   });
@@ -435,7 +427,7 @@ function handleGroupRectIntoFrame(
     actionHistory: frameNode
       ? pushAction(actionHistory, {
           action: 'node_created',
-          node: extractNodeRef(frameNode),
+          nodes: [extractNodeRef(frameNode)],
         })
       : actionHistory,
   });
@@ -445,11 +437,24 @@ function handleUnframe(
   cmd: Extract<CanvasCommand, { type: 'UNFRAME' }>,
   ctx: CanvasHandlerContext,
 ): void {
-  const { nodes, edges, set } = ctx;
+  const { nodes, edges, actionHistory, set } = ctx;
   canvasHistoryManager.takeSnapshot(nodes, edges);
 
+  const frame = nodes.find((n) => n.id === cmd.frameId);
+  const children = nodes.filter((n) => n.parentId === cmd.frameId);
+
   const result = unframe(nodes as NestableNode[], edges, cmd.frameId);
-  set({ nodes: result.nodes, edges: result.edges });
+
+  let nextActions = actionHistory;
+  if (frame) {
+    nextActions = pushAction(nextActions, {
+      action: 'frame_unframed',
+      frame: extractNodeRef(frame),
+      nodes: children.map(extractNodeRef),
+    });
+  }
+
+  set({ nodes: result.nodes, edges: result.edges, actionHistory: nextActions });
 }
 
 function handleOpenExpanded(
@@ -486,6 +491,17 @@ function handleSelectNodes(
         node: extractNodeRef(node),
       });
     }
+  } else if (multiSelect && ids.length > 0) {
+    const selectedNodes = ids
+      .map((id) => nodes.find((n) => n.id === id))
+      .filter((n): n is NonNullable<typeof n> => n !== undefined)
+      .map(extractNodeRef);
+    if (selectedNodes.length > 0) {
+      nextActions = pushAction(nextActions, {
+        action: 'nodes_selected',
+        nodes: selectedNodes,
+      });
+    }
   }
 
   set((state) => ({
@@ -504,20 +520,59 @@ function handleResizeNode(
   cmd: Extract<CanvasCommand, { type: 'RESIZE_NODE' }>,
   ctx: CanvasHandlerContext,
 ): void {
-  const { nodes, edges, set } = ctx;
-  // Skip snapshot when the caller (NodeWrapper.handleResizeStart) already
-  // took one before the drag began, so the whole drag is a single undo entry.
-  if (!cmd.skipSnapshot) {
-    canvasHistoryManager.takeResizeSnapshot(cmd.nodeId, nodes, edges);
+  const { nodes, actionHistory, set } = ctx;
+  // The undo snapshot is always taken by the caller before the drag gesture
+  // begins (via store.takeSnapshot()), so the handler never snapshots here.
+  const node = nodes.find((n) => n.id === cmd.nodeId);
+  let nextActions = actionHistory;
+  if (node) {
+    nextActions = pushAction(nextActions, {
+      action: 'node_resized',
+      node: extractNodeRef(node),
+      width: cmd.width,
+      height: cmd.height,
+    });
   }
-
   set({
     nodes: nodes.map((n) =>
       n.id === cmd.nodeId
         ? { ...n, style: { ...n.style, width: cmd.width, height: cmd.height } }
         : n,
     ),
+    actionHistory: nextActions,
   });
+}
+
+function handleUpdateNodeData(
+  cmd: Extract<CanvasCommand, { type: 'UPDATE_NODE_DATA' }>,
+  ctx: CanvasHandlerContext,
+): void {
+  const { nodes, edges, actionHistory, set, triggerIngestion } = ctx;
+
+  // Guard: nothing to do if the target node does not exist.
+  const originalNode = nodes.find((n) => n.id === cmd.nodeId);
+  if (!originalNode) return;
+
+  // Always take a snapshot — every UPDATE_NODE_DATA represents a confirmed
+  // user edit. Silent background writes go through patchNodeSilent instead.
+  canvasHistoryManager.takeSnapshot(nodes, edges);
+
+  const updatedNode: Node = {
+    ...originalNode,
+    data: { ...(originalNode.data ?? {}), ...cmd.patch },
+  };
+
+  set({
+    nodes: nodes.map((n) => (n.id === cmd.nodeId ? updatedNode : n)),
+    actionHistory: pushAction(actionHistory, {
+      action: 'node_edited',
+      node: extractNodeRef(updatedNode),
+    }),
+  });
+
+  if (shouldIngestOnUpdate(originalNode, updatedNode)) {
+    triggerIngestion(updatedNode);
+  }
 }
 
 function handleToggleFrameLock(
@@ -533,7 +588,7 @@ function handleReorderNodes(
   cmd: Extract<CanvasCommand, { type: 'REORDER_NODES' }>,
   ctx: CanvasHandlerContext,
 ): void {
-  const { nodes, edges, set } = ctx;
+  const { nodes, edges, actionHistory, set } = ctx;
 
   if ('position' in cmd) {
     // Move a set of nodes to the absolute top or bottom of the render stack.
@@ -545,7 +600,13 @@ function handleReorderNodes(
     const rest = nodes.filter((n) => !movedIds.has(n.id));
     const reordered =
       cmd.position === 'top' ? [...rest, ...moved] : [...moved, ...rest];
-    set({ nodes: normalizeTreeOrder(reordered as NestableNode[]) });
+    set({
+      nodes: normalizeTreeOrder(reordered as NestableNode[]),
+      actionHistory: pushAction(actionHistory, {
+        action: 'nodes_reordered',
+        nodes: moved.map(extractNodeRef),
+      }),
+    });
   } else {
     // Swap two nodes by their drag-and-drop positions.
     const oldIndex = nodes.findIndex((n) => n.id === cmd.activeId);
@@ -556,7 +617,14 @@ function handleReorderNodes(
     const reordered = [...nodes];
     const [movedItem] = reordered.splice(oldIndex, 1);
     reordered.splice(newIndex, 0, movedItem);
-    set({ nodes: normalizeTreeOrder(reordered as NestableNode[]) });
+    const affectedNodes = [nodes[oldIndex], nodes[newIndex]].filter(Boolean);
+    set({
+      nodes: normalizeTreeOrder(reordered as NestableNode[]),
+      actionHistory: pushAction(actionHistory, {
+        action: 'nodes_reordered',
+        nodes: affectedNodes.map(extractNodeRef),
+      }),
+    });
   }
 }
 
@@ -564,7 +632,7 @@ function handlePasteNodes(
   cmd: Extract<CanvasCommand, { type: 'PASTE_NODES' }>,
   ctx: CanvasHandlerContext,
 ): void {
-  const { nodes, edges, clipboard, set, triggerIngestion } = ctx;
+  const { nodes, edges, clipboard, actionHistory, set, triggerIngestion } = ctx;
   if (clipboard.length === 0) return;
 
   canvasHistoryManager.takeSnapshot(nodes, edges);
@@ -658,14 +726,24 @@ function handlePasteNodes(
     };
   });
 
+  // Tag every pasted node so the agent knows this batch came from a paste gesture.
+  const taggedNodes: Node[] = finalNodes.map((n) => ({
+    ...n,
+    data: { ...(n.data as Record<string, unknown>), origin: 'user-pasted' },
+  }));
+
   set({
     nodes: selectOnly(
-      normalizeTreeOrder([...nodes, ...finalNodes] as NestableNode[]),
-      finalNodes.map((n) => n.id),
+      normalizeTreeOrder([...nodes, ...taggedNodes] as NestableNode[]),
+      taggedNodes.map((n) => n.id),
     ),
+    actionHistory: pushAction(actionHistory, {
+      action: 'node_created',
+      nodes: taggedNodes.map(extractNodeRef),
+    }),
   });
 
-  for (const node of finalNodes) {
+  for (const node of taggedNodes) {
     triggerIngestion(node);
   }
 }
@@ -692,6 +770,87 @@ function handleSpreadNodes(
 
   canvasHistoryManager.takeSnapshot(nodes, edges);
   set({ nodes: result });
+}
+
+function handleNodeDragStop(
+  cmd: Extract<CanvasCommand, { type: 'NODE_DRAG_STOP' }>,
+  ctx: CanvasHandlerContext,
+): void {
+  const { nodes, actionHistory, set } = ctx;
+
+  // Snapshot is already taken in onNodeDragStart before the gesture begins.
+  // Do NOT snapshot here — the whole drag collapses into one undo entry.
+
+  // Capture parentId before auto-frame mutation so we can diff afterwards.
+  const preParentIds = new Map(nodes.map((n) => [n.id, n.parentId]));
+
+  const draggedIds = new Set(cmd.draggedNodeIds);
+
+  // Apply auto-frame / auto-unframe for every dragged node.
+  let result = nodes as NestableNode[];
+  for (const id of cmd.draggedNodeIds) {
+    result = autoUnframeNodeByNonOverlap(result, id, { epsilon: 0 });
+    result = autoFrameNodeByOverlap(result, id, { threshold: 0.75 });
+  }
+
+  if (result === nodes) {
+    // Positions changed (handled by onNodesChange already) but no structural
+    // re-parenting happened. Still push a nodes_moved trace if nodes moved.
+    const draggedNodes = nodes.filter((n) => draggedIds.has(n.id));
+    if (draggedNodes.length === 0) return;
+    set({
+      actionHistory: pushAction(actionHistory, {
+        action: 'nodes_moved',
+        nodes: draggedNodes.map(extractNodeRef),
+      }),
+    });
+    return;
+  }
+
+  // Build frame-change traces.
+  let nextActions = actionHistory;
+  for (const id of cmd.draggedNodeIds) {
+    const node = result.find((n) => n.id === id);
+    if (!node) continue;
+
+    const prevParentId = preParentIds.get(id);
+    const nextParentId = node.parentId;
+
+    if (prevParentId !== nextParentId) {
+      if (nextParentId) {
+        // Node gained a parent → auto-framed.
+        const frame = result.find((n) => n.id === nextParentId);
+        if (frame) {
+          nextActions = pushAction(nextActions, {
+            action: 'node_framed',
+            node: extractNodeRef(node),
+            frame: extractNodeRef(frame),
+          });
+        }
+      } else {
+        // Node lost its parent → auto-unframed.
+        const frame = nodes.find((n) => n.id === prevParentId);
+        if (frame) {
+          nextActions = pushAction(nextActions, {
+            action: 'node_unframed',
+            node: extractNodeRef(node),
+            frame: extractNodeRef(frame),
+          });
+        }
+      }
+    }
+  }
+
+  // Always push a nodes_moved trace for the dragged nodes.
+  const draggedNodes = result.filter((n) => draggedIds.has(n.id));
+  if (draggedNodes.length > 0) {
+    nextActions = pushAction(nextActions, {
+      action: 'nodes_moved',
+      nodes: draggedNodes.map(extractNodeRef),
+    });
+  }
+
+  set({ nodes: result, actionHistory: nextActions });
 }
 
 // ---------------------------------------------------------------------------
@@ -727,6 +886,8 @@ export function handleCommand(
       return handleSelectNodes(cmd, ctx);
     case 'RESIZE_NODE':
       return handleResizeNode(cmd, ctx);
+    case 'UPDATE_NODE_DATA':
+      return handleUpdateNodeData(cmd, ctx);
     case 'TOGGLE_FRAME_LOCK':
       return handleToggleFrameLock(cmd, ctx);
     case 'REORDER_NODES':
@@ -737,5 +898,7 @@ export function handleCommand(
       return handleAlignNodes(cmd, ctx);
     case 'SPREAD_NODES':
       return handleSpreadNodes(cmd, ctx);
+    case 'NODE_DRAG_STOP':
+      return handleNodeDragStop(cmd, ctx);
   }
 }

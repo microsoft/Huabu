@@ -1,4 +1,4 @@
-import type { CanvasNodeType } from './canvas/node.js';
+import type { CanvasNodeType, NodeOrigin } from './canvas/node.js';
 
 // ==================== Node Reference ====================
 
@@ -11,6 +11,8 @@ export interface NodeRef {
   id: string;
   nodeType: CanvasNodeType;
   label?: string;
+  /** How this node came to exist — helps the agent understand user intent. */
+  origin?: NodeOrigin;
 }
 
 // ==================== Recent Actions ====================
@@ -19,19 +21,31 @@ export interface NodeRef {
  * Discriminated union of canvas actions.
  * Each action type carries only the fields relevant to it.
  *
- * Note: `node_deleted` carries an optional snippet because the node
+ * Note: `nodes_deleted` carries optional snippets because the nodes
  * will no longer appear in `nodes[]` after deletion.
  */
 export type RecentAction =
-  | { action: 'node_created'; node: NodeRef }
-  | { action: 'node_deleted'; node: NodeRef; snippet?: string }
+  | {
+      action: 'node_created';
+      /** All nodes created in this single operation (1 for ADD_NODE, N for PASTE_NODES). */
+      nodes: NodeRef[];
+    }
+  | { action: 'nodes_deleted'; nodes: Array<NodeRef & { snippet?: string }> }
   | { action: 'node_edited'; node: NodeRef }
   | { action: 'node_selected'; node: NodeRef }
+  | { action: 'nodes_selected'; nodes: NodeRef[] }
   | { action: 'node_expanded'; node: NodeRef }
   | { action: 'node_connected'; source: NodeRef; target: NodeRef }
-  | { action: 'node_disconnected'; source: NodeRef; target: NodeRef }
+  | {
+      action: 'edges_disconnected';
+      edges: Array<{ source: NodeRef; target: NodeRef }>;
+    }
   | { action: 'node_framed'; node: NodeRef; frame: NodeRef }
-  | { action: 'node_unframed'; node: NodeRef; frame: NodeRef };
+  | { action: 'node_unframed'; node: NodeRef; frame: NodeRef }
+  | { action: 'frame_unframed'; frame: NodeRef; nodes: NodeRef[] }
+  | { action: 'node_resized'; node: NodeRef; width: number; height: number }
+  | { action: 'nodes_reordered'; nodes: NodeRef[] }
+  | { action: 'nodes_moved'; nodes: NodeRef[] };
 
 // ==================== Canvas Snapshot ====================
 

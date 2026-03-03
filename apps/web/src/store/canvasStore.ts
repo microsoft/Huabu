@@ -11,6 +11,7 @@ import {
   applyEdgeChanges,
   type Node,
   type Edge,
+  type EdgeRemoveChange,
   type OnNodesChange,
   type OnEdgesChange,
   type OnConnect,
@@ -29,14 +30,8 @@ import {
 import { canvasHistoryManager } from './canvasHistoryManager';
 import { type AlignDirection } from '../utils/autoLayoutHelper';
 import {
-  autoFrameNodeByOverlap,
-  autoUnframeNodeByNonOverlap,
-  type NestableNode,
-} from '../utils/frameHelper';
-import {
   ingestNodeIfNeeded,
   needsIngestion,
-  shouldIngestOnUpdate,
   type NodeIngestionInfo,
 } from '../utils/ingestHelper';
 
@@ -71,15 +66,19 @@ export type CanvasCommand =
       nodeId: string;
       width: number;
       height: number;
-      /** Pass true when the undo snapshot was already taken (e.g. by handleResizeStart in NodeWrapper). */
-      skipSnapshot?: boolean;
     }
   | { type: 'TOGGLE_FRAME_LOCK'; frameId: string }
   | { type: 'REORDER_NODES'; activeId: string; overId: string }
   | { type: 'REORDER_NODES'; nodeIds: string[]; position: 'top' | 'bottom' }
   | { type: 'PASTE_NODES'; flowPosition?: { x: number; y: number } }
   | { type: 'ALIGN_NODES'; direction: AlignDirection }
-  | { type: 'SPREAD_NODES' };
+  | { type: 'SPREAD_NODES' }
+  | { type: 'NODE_DRAG_STOP'; draggedNodeIds: string[] }
+  | {
+      type: 'UPDATE_NODE_DATA';
+      nodeId: string;
+      patch: Record<string, unknown>;
+    };
 
 const CANVAS_ID = 'default-canvas';
 const AUTOSAVE_DEBOUNCE_MS = 1000;
@@ -106,7 +105,7 @@ const triggerIngestion = (node: Node) => {
       setNodeIngestion: state.setNodeIngestion,
       clearNodeIngestion: state.clearNodeIngestion,
       getNodeById: (id) => state.nodes.find((n) => n.id === id),
-      updateNodeDataLocal: state.updateNodeDataLocal,
+      patchNodeSilent: state.patchNodeSilent,
     });
   }, INGESTION_DEBOUNCE_MS);
 
@@ -151,12 +150,18 @@ type RFState = {
   rfInstance: ReactFlowInstance | null;
   setRfInstance: (instance: ReactFlowInstance | null) => void;
 
-  updateNodeData: (
-    nodeId: string,
-    patch: Record<string, unknown>,
-    options?: { recordHistory?: boolean },
-  ) => void;
-  updateNodeDataLocal: (nodeId: string, patch: Record<string, unknown>) => void;
+  /**
+   * Commit a user-initiated data edit. Always records an undo snapshot.
+   * For silent background writes (server callbacks, resize metadata),
+   * use `patchNodeSilent` instead.
+   */
+  updateNodeData: (nodeId: string, patch: Record<string, unknown>) => void;
+  /**
+   * Apply a node data patch without recording undo history.
+   * Use only for programmatic / background writes (e.g. ingest server
+   * responses, resize dimension metadata) that should not pollute undo.
+   */
+  patchNodeSilent: (nodeId: string, patch: Record<string, unknown>) => void;
 
   selectNodes: (ids: string[], multiSelect?: boolean) => void;
 
@@ -174,7 +179,12 @@ type RFState = {
   unframe: (frameId: string) => void;
   toggleFrameLock: (frameId: string) => void;
 
-  resizeNode: (nodeId: string, width: number, height: number) => void;
+  /**
+   * Take an undo snapshot of the current canvas state.
+   * Call once before a drag gesture begins so the entire gesture collapses
+   * into a single undo entry (e.g. at onResizeStart / onNodeDragStart).
+   */
+  takeSnapshot: () => void;
 
   /** Align selected nodes along an axis. */
   alignSelectedNodes: (direction: AlignDirection) => void;
@@ -473,20 +483,10 @@ const useCanvasStore = create<RFState>()(
     },
 
     onNodeDragStop: (_event, _node, draggedNodes) => {
-      // After drag ends, auto-frame / unframe based on overlap.
-      const { nodes } = get();
-      let result = nodes as NestableNode[];
-      for (const dragged of draggedNodes) {
-        result = autoUnframeNodeByNonOverlap(result, dragged.id, {
-          epsilon: 0,
-        });
-        result = autoFrameNodeByOverlap(result, dragged.id, {
-          threshold: 0.75,
-        });
-      }
-      if (result !== nodes) {
-        set({ nodes: result });
-      }
+      get().dispatch({
+        type: 'NODE_DRAG_STOP',
+        draggedNodeIds: draggedNodes.map((n) => n.id),
+      });
     },
 
     onNodesChange: (changes) => {
@@ -501,7 +501,9 @@ const useCanvasStore = create<RFState>()(
     },
 
     onEdgesChange: (changes) => {
-      const removes = changes.filter((c) => c.type === 'remove');
+      const removes = changes.filter(
+        (c): c is EdgeRemoveChange => c.type === 'remove',
+      );
       if (removes.length > 0) {
         get().dispatch({
           type: 'DISCONNECT_EDGES',
@@ -525,45 +527,17 @@ const useCanvasStore = create<RFState>()(
       get().dispatch({ type: 'ADD_NODE', node });
     },
 
-    updateNodeData: (nodeId, patch, options) => {
+    updateNodeData: (nodeId, patch) => {
       if (!nodeId) return;
-
-      if (options?.recordHistory) {
-        const { nodes, edges } = get();
-        canvasHistoryManager.takeSnapshot(nodes, edges);
-      }
-
-      let updatedNode: Node | undefined;
-      let previousNode: Node | undefined;
-
-      set({
-        nodes: get().nodes.map((n) => {
-          if (n.id !== nodeId) return n;
-          previousNode = n;
-          const updated = {
-            ...n,
-            data: {
-              ...(n.data ?? {}),
-              ...patch,
-            },
-          };
-          updatedNode = updated;
-          return updated;
-        }),
+      get().dispatch({
+        type: 'UPDATE_NODE_DATA',
+        nodeId,
+        patch,
       });
-
-      // Ingest the updated node if needed
-      if (updatedNode && previousNode) {
-        if (!shouldIngestOnUpdate(previousNode, updatedNode)) {
-          return;
-        }
-        triggerIngestion(updatedNode);
-      }
     },
 
-    updateNodeDataLocal: (nodeId, patch) => {
+    patchNodeSilent: (nodeId, patch) => {
       if (!nodeId) return;
-
       set({
         nodes: get().nodes.map((n) => {
           if (n.id !== nodeId) return n;
@@ -615,8 +589,9 @@ const useCanvasStore = create<RFState>()(
       get().dispatch({ type: 'TOGGLE_FRAME_LOCK', frameId });
     },
 
-    resizeNode: (nodeId, width, height) => {
-      get().dispatch({ type: 'RESIZE_NODE', nodeId, width, height });
+    takeSnapshot: () => {
+      const { nodes, edges } = get();
+      canvasHistoryManager.takeSnapshot(nodes, edges);
     },
 
     alignSelectedNodes: (direction) => {
