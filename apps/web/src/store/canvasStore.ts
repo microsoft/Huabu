@@ -1,6 +1,12 @@
-import { createId, type KnowledgeStorageConfig } from '@sediment/shared';
 import {
-  addEdge,
+  createId,
+  type AgentBaseContext,
+  type CanvasNodeType,
+  type KnowledgeStorageConfig,
+  type NodeSummary,
+  type RecentAction,
+} from '@sediment/shared';
+import {
   applyNodeChanges,
   applyEdgeChanges,
   type Node,
@@ -15,6 +21,11 @@ import {
 import { create, type StateCreator } from 'zustand';
 
 import { getCanvas, putCanvas, upsertNode } from '../api';
+import {
+  handleCommand,
+  extractNodeRef,
+  extractSnippet,
+} from './canvasHandlers';
 import { canvasHistoryManager } from './canvasHistoryManager';
 import {
   alignNodes,
@@ -24,15 +35,6 @@ import {
 import {
   autoFrameNodeByOverlap,
   autoUnframeNodeByNonOverlap,
-  findFrameAtPoint,
-  frameNodes,
-  frameNodesInRect,
-  getAbsolutePosition,
-  toggleFrameLock,
-  unframe,
-  moveNodeIntoFrame,
-  moveNodeOutOfFrame,
-  normalizeTreeOrder,
   type NestableNode,
 } from '../utils/frameHelper';
 import {
@@ -41,7 +43,45 @@ import {
   shouldIngestOnUpdate,
   type NodeIngestionInfo,
 } from '../utils/ingestHelper';
-import { generateNextLabel } from '../utils/nodeLabels';
+
+// ---------------------------------------------------------------------------
+// Canvas Command Pattern
+// ---------------------------------------------------------------------------
+
+/**
+ * All user-initiated canvas mutations expressed as typed commands.
+ * `dispatch(cmd)` is the single entry point for:
+ *  - undo history snapshots
+ *  - action-history tracking (for agent context)
+ *  - state mutations
+ */
+export type CanvasCommand =
+  | { type: 'ADD_NODE'; node: Node }
+  | { type: 'DELETE_NODES'; nodeIds: string[] }
+  | { type: 'CONNECT'; connection: Connection }
+  | { type: 'DISCONNECT_EDGES'; edgeIds: string[] }
+  | { type: 'MOVE_INTO_FRAME'; nodeId: string; frameId: string }
+  | { type: 'MOVE_OUT_OF_FRAME'; nodeId: string }
+  | { type: 'GROUP_SELECTION_INTO_FRAME' }
+  | {
+      type: 'GROUP_RECT_INTO_FRAME';
+      flowRect: { x: number; y: number; width: number; height: number };
+    }
+  | { type: 'UNFRAME'; frameId: string }
+  | { type: 'OPEN_EXPANDED'; nodeId: string }
+  | { type: 'SELECT_NODES'; ids: string[]; multiSelect?: boolean }
+  | {
+      type: 'RESIZE_NODE';
+      nodeId: string;
+      width: number;
+      height: number;
+      /** Pass true when the undo snapshot was already taken (e.g. by handleResizeStart in NodeWrapper). */
+      skipSnapshot?: boolean;
+    }
+  | { type: 'TOGGLE_FRAME_LOCK'; frameId: string }
+  | { type: 'REORDER_NODES'; activeId: string; overId: string }
+  | { type: 'REORDER_NODES'; nodeIds: string[]; position: 'top' | 'bottom' }
+  | { type: 'PASTE_NODES'; flowPosition?: { x: number; y: number } };
 
 const CANVAS_ID = 'default-canvas';
 const AUTOSAVE_DEBOUNCE_MS = 1000;
@@ -120,7 +160,7 @@ type RFState = {
   ) => void;
   updateNodeDataLocal: (nodeId: string, patch: Record<string, unknown>) => void;
 
-  setSelectedNodes: (ids: string[], multiSelect?: boolean) => void;
+  selectNodes: (ids: string[], multiSelect?: boolean) => void;
 
   reorderNodes: (activeId: string, overId: string) => void;
   sendSelectedToOrder: (direction: 'top' | 'bottom') => void;
@@ -163,6 +203,10 @@ type RFState = {
 
   loadCanvas: () => Promise<void>;
   saveCanvas: () => Promise<void>;
+
+  actionHistory: RecentAction[];
+  dispatch: (cmd: CanvasCommand) => void;
+  getAgentContext: () => AgentBaseContext;
 };
 
 let saveTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -238,15 +282,6 @@ const autoSaveMiddleware =
     return config(wrappedSet, get, api);
   };
 
-/**
- * Return a new nodes array where only the nodes whose id is in `selectedIds`
- * are marked selected; all other nodes are deselected.
- */
-function selectOnly(nodes: Node[], selectedIds: Iterable<string>): Node[] {
-  const ids = new Set(selectedIds);
-  return nodes.map((n) => ({ ...n, selected: ids.has(n.id) }));
-}
-
 const useCanvasStore = create<RFState>()(
   autoSaveMiddleware((set, get) => ({
     nodes: [],
@@ -286,7 +321,7 @@ const useCanvasStore = create<RFState>()(
 
     expandedNodeId: null,
     expandMode: 'replace',
-    openExpanded: (nodeId) => set({ expandedNodeId: nodeId }),
+    openExpanded: (nodeId) => get().dispatch({ type: 'OPEN_EXPANDED', nodeId }),
     closeExpanded: () => set({ expandedNodeId: null }),
     setExpandMode: (mode) => set({ expandMode: mode }),
 
@@ -306,6 +341,59 @@ const useCanvasStore = create<RFState>()(
     },
     isFrameCollapsed: (frameId) => {
       return get().collapsedFrameIds.has(frameId);
+    },
+
+    // -----------------------------------------------------------------------
+    // Action history & agent context
+    // -----------------------------------------------------------------------
+
+    actionHistory: [],
+
+    dispatch: (cmd) => {
+      const { nodes, edges, canvasId, actionHistory, clipboard } = get();
+      handleCommand(cmd, {
+        nodes,
+        edges,
+        canvasId,
+        actionHistory,
+        clipboard,
+        set,
+        triggerIngestion,
+      });
+    },
+
+    getAgentContext: (): AgentBaseContext => {
+      const { nodes, edges, actionHistory } = get();
+      // Build a lookup map once to avoid O(n²) scans inside edges.map.
+      const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+      return {
+        nodes: nodes.map(
+          (n): NodeSummary => ({
+            id: n.id,
+            type: (n.type ?? 'note') as CanvasNodeType,
+            label: n.data?.label as string | undefined,
+            snippet: extractSnippet(n),
+            selected: n.selected ?? false,
+            frameLabel: n.parentId
+              ? (nodeMap.get(n.parentId)?.data?.label as string | undefined)
+              : undefined,
+            sourceId: n.data?.sourceId as string | undefined,
+          }),
+        ),
+        edges: edges.map((e) => {
+          const sourceNode = nodeMap.get(e.source);
+          const targetNode = nodeMap.get(e.target);
+          return {
+            source: sourceNode
+              ? extractNodeRef(sourceNode)
+              : { id: e.source, nodeType: 'note' as CanvasNodeType },
+            target: targetNode
+              ? extractNodeRef(targetNode)
+              : { id: e.target, nodeType: 'note' as CanvasNodeType },
+          };
+        }),
+        recentActions: actionHistory,
+      };
     },
 
     loadCanvas: async () => {
@@ -404,135 +492,39 @@ const useCanvasStore = create<RFState>()(
     },
 
     onNodesChange: (changes) => {
-      const hasRemoves = changes.some((c) => c.type === 'remove');
-
-      if (hasRemoves) {
-        const { nodes, edges } = get();
-        canvasHistoryManager.takeSnapshot(nodes, edges);
-      }
-
-      const prevNodes = get().nodes as NestableNode[];
-      let result = applyNodeChanges(changes, prevNodes) as NestableNode[];
-
-      // Disallow adding nodes through ReactFlow change events.
-      // Node additions must go through the store's addNode() API.
-      const prevIds = new Set(prevNodes.map((n) => n.id));
-      const addedNodes = result.filter((n) => !prevIds.has(n.id));
-      if (addedNodes.length > 0) {
-        console.error(
-          '[canvasStore] Blocked node additions via onNodesChange. Use addNode() instead.',
-          addedNodes.map((n) => ({ id: n.id, type: n.type })),
-        );
-        result = result.filter((n) => prevIds.has(n.id));
-      }
-
-      // Handle node deletion - call delete API
-      const removedIds = changes
-        .filter((c) => c.type === 'remove')
-        .map((c) => c.id);
-
-      if (removedIds.length > 0) {
-        const { canvasId } = get();
-        // Fire-and-forget deletions with AbortController so undo can cancel them
-        for (const nodeId of removedIds) {
-          canvasHistoryManager.trackDelete(canvasId, nodeId);
-        }
-      }
-
-      set((state) => {
-        if (removedIds.length === 0) return { nodes: result };
-        const nextIngestionByNodeId = { ...state.ingestionByNodeId };
-        for (const nodeId of removedIds) {
-          delete nextIngestionByNodeId[nodeId];
-        }
-        return { nodes: result, ingestionByNodeId: nextIngestionByNodeId };
-      });
+      // Only process RF-internal change types (position, selection, dimensions).
+      // Deletions must go through dispatch({ type: 'DELETE_NODES' }).
+      // Additions must go through dispatch({ type: 'ADD_NODE' }).
+      const internalChanges = changes.filter(
+        (c) => c.type !== 'remove' && c.type !== 'add',
+      );
+      if (internalChanges.length === 0) return;
+      set({ nodes: applyNodeChanges(internalChanges, get().nodes) });
     },
 
     onEdgesChange: (changes) => {
-      const hasRemoves = changes.some((c) => c.type === 'remove');
-      if (hasRemoves) {
-        const { nodes, edges } = get();
-        canvasHistoryManager.takeSnapshot(nodes, edges);
+      const removes = changes.filter((c) => c.type === 'remove');
+      if (removes.length > 0) {
+        get().dispatch({
+          type: 'DISCONNECT_EDGES',
+          edgeIds: removes.map((c) => c.id),
+        });
       }
-      set({
-        edges: applyEdgeChanges(changes, get().edges),
-      });
+      const internalChanges = changes.filter((c) => c.type !== 'remove');
+      if (internalChanges.length > 0) {
+        set({ edges: applyEdgeChanges(internalChanges, get().edges) });
+      }
     },
 
     onConnect: (connection: Connection) => {
-      const { nodes, edges } = get();
-      canvasHistoryManager.takeSnapshot(nodes, edges);
-      set({
-        edges: addEdge(connection, edges),
-      });
+      get().dispatch({ type: 'CONNECT', connection });
     },
 
     rfInstance: null,
     setRfInstance: (instance) => set({ rfInstance: instance }),
 
     addNode: (node) => {
-      const { nodes, edges } = get();
-      canvasHistoryManager.takeSnapshot(nodes, edges);
-
-      // Ensure node has a label
-      let finalLabel = node.data?.label;
-
-      if (!finalLabel || String(finalLabel).trim() === '') {
-        const existingNodes = get().nodes;
-        const nodeType = node.type || 'node';
-        const existingLabels = existingNodes.map(
-          (n) => n.data?.label as string | undefined,
-        );
-
-        finalLabel = generateNextLabel(nodeType, existingLabels);
-      }
-
-      let newNode = {
-        ...node,
-        data: {
-          ...node.data,
-          label: finalLabel,
-        },
-      };
-
-      // Auto-detect parent frame based on node position.
-      // Only for non-frame nodes that don't already have a parent.
-      if (!newNode.parentId && newNode.type !== 'frame') {
-        // Use center of node for the hit-test when dimensions are available
-        const style = newNode.style as
-          | { width?: number; height?: number }
-          | undefined;
-        const w = typeof style?.width === 'number' ? style.width : 0;
-        const h = typeof style?.height === 'number' ? style.height : 0;
-        const checkPoint = {
-          x: newNode.position.x + w / 2,
-          y: newNode.position.y + h / 2,
-        };
-
-        const frameId = findFrameAtPoint(nodes as NestableNode[], checkPoint);
-        if (frameId) {
-          const frameAbs = getAbsolutePosition(
-            nodes as NestableNode[],
-            frameId,
-          );
-          if (frameAbs) {
-            newNode = {
-              ...newNode,
-              parentId: frameId,
-              position: {
-                x: newNode.position.x - frameAbs.x,
-                y: newNode.position.y - frameAbs.y,
-              },
-            };
-          }
-        }
-      }
-
-      set({ nodes: selectOnly([...get().nodes, newNode], [newNode.id]) });
-
-      // Ingest the node if needed
-      triggerIngestion(newNode);
+      get().dispatch({ type: 'ADD_NODE', node });
     },
 
     updateNodeData: (nodeId, patch, options) => {
@@ -594,107 +586,39 @@ const useCanvasStore = create<RFState>()(
         .map((n) => n.data.sourceId as string);
     },
 
-    setSelectedNodes: (ids, multiSelect = false) => {
-      set((state) => ({
-        nodes: state.nodes.map((node) => {
-          if (multiSelect) {
-            const isTarget = ids.includes(node.id);
-            return isTarget ? { ...node, selected: !node.selected } : node;
-          }
-          return {
-            ...node,
-            selected: ids.includes(node.id),
-          };
-        }),
-      }));
+    selectNodes: (ids, multiSelect = false) => {
+      get().dispatch({ type: 'SELECT_NODES', ids, multiSelect });
     },
 
     reorderNodes: (activeId: string, overId: string) => {
-      const { nodes } = get();
-      const oldIndex = nodes.findIndex((n) => n.id === activeId);
-      const newIndex = nodes.findIndex((n) => n.id === overId);
-
-      if (oldIndex !== -1 && newIndex !== -1) {
-        canvasHistoryManager.takeSnapshot(nodes, get().edges);
-        const newNodes = [...nodes];
-        const [movedItem] = newNodes.splice(oldIndex, 1);
-        newNodes.splice(newIndex, 0, movedItem);
-
-        // Ensure parent nodes are always before their children
-        // This prevents "parent node not found" errors in React Flow
-        const normalizedNodes = normalizeTreeOrder(newNodes as NestableNode[]);
-        set({ nodes: normalizedNodes });
-      }
+      get().dispatch({ type: 'REORDER_NODES', activeId, overId });
     },
 
     sendSelectedToOrder: (direction) => {
-      const { nodes } = get();
-      const selected = nodes.filter((n) => n.selected);
-      if (selected.length === 0) return;
-
-      canvasHistoryManager.takeSnapshot(nodes, get().edges);
-
-      const selectedIds = new Set(selected.map((n) => n.id));
-      const rest = nodes.filter((n) => !selectedIds.has(n.id));
-
-      // 'top' = render on top (end of array), 'bottom' = render behind (start of array)
-      const reordered =
-        direction === 'top' ? [...rest, ...selected] : [...selected, ...rest];
-
-      const normalizedNodes = normalizeTreeOrder(reordered as NestableNode[]);
-      set({ nodes: normalizedNodes });
+      const nodeIds = get()
+        .nodes.filter((n) => n.selected)
+        .map((n) => n.id);
+      get().dispatch({ type: 'REORDER_NODES', nodeIds, position: direction });
     },
 
     frameSelectedNodes: () => {
-      const { nodes } = get();
-      const selectedIds = nodes.filter((n) => n.selected).map((n) => n.id);
-      if (selectedIds.length < 2) return;
-
-      canvasHistoryManager.takeSnapshot(nodes, get().edges);
-
-      const frameId = createId('node');
-      const result = frameNodes(nodes as NestableNode[], selectedIds, {
-        frameId,
-        label: 'Frame',
-      });
-
-      set({ nodes: selectOnly(result.nodes, [frameId]) });
+      get().dispatch({ type: 'GROUP_SELECTION_INTO_FRAME' });
     },
 
     frameNodesInRect: (flowRect) => {
-      const { nodes, edges } = get();
-      canvasHistoryManager.takeSnapshot(nodes, edges);
-
-      const frameId = createId('node');
-      const result = frameNodesInRect(
-        nodes as NestableNode[],
-        flowRect,
-        frameId,
-      );
-      set({ nodes: selectOnly(result.nodes, [frameId]) });
+      get().dispatch({ type: 'GROUP_RECT_INTO_FRAME', flowRect });
     },
 
     unframe: (frameId) => {
-      const { nodes, edges } = get();
-      canvasHistoryManager.takeSnapshot(nodes, edges);
-      const result = unframe(nodes as NestableNode[], edges, frameId);
-      set({ nodes: result.nodes, edges: result.edges });
+      get().dispatch({ type: 'UNFRAME', frameId });
     },
 
     toggleFrameLock: (frameId) => {
-      const { nodes, edges } = get();
-      canvasHistoryManager.takeSnapshot(nodes, edges);
-      set({ nodes: toggleFrameLock(nodes as NestableNode[], frameId) });
+      get().dispatch({ type: 'TOGGLE_FRAME_LOCK', frameId });
     },
 
     resizeNode: (nodeId, width, height) => {
-      const { nodes, edges } = get();
-      canvasHistoryManager.takeResizeSnapshot(nodeId, nodes, edges);
-      set({
-        nodes: get().nodes.map((n) =>
-          n.id === nodeId ? { ...n, style: { ...n.style, width, height } } : n,
-        ),
-      });
+      get().dispatch({ type: 'RESIZE_NODE', nodeId, width, height });
     },
 
     alignSelectedNodes: (direction) => {
@@ -716,21 +640,11 @@ const useCanvasStore = create<RFState>()(
     },
 
     moveNodeIntoFrame: (nodeId, frameId) => {
-      const { nodes, edges } = get();
-      canvasHistoryManager.takeSnapshot(nodes, edges);
-      const result = moveNodeIntoFrame(
-        nodes as NestableNode[],
-        nodeId,
-        frameId,
-      );
-      set({ nodes: result });
+      get().dispatch({ type: 'MOVE_INTO_FRAME', nodeId, frameId });
     },
 
     moveNodeOutOfFrame: (nodeId) => {
-      const { nodes, edges } = get();
-      canvasHistoryManager.takeSnapshot(nodes, edges);
-      const result = moveNodeOutOfFrame(nodes as NestableNode[], nodeId);
-      set({ nodes: result });
+      get().dispatch({ type: 'MOVE_OUT_OF_FRAME', nodeId });
     },
 
     clipboard: [],
@@ -743,7 +657,7 @@ const useCanvasStore = create<RFState>()(
       // Extract only serialisable properties to avoid structuredClone failures
       // on ReactFlow internal properties (measured, internals, etc.)
       const cloned: Node[] = selected.map((n) => ({
-        id: createId('node'), // Generate new ID to avoid conflicts on paste
+        id: createId('node'),
         type: n.type,
         position: { x: n.position.x, y: n.position.y },
         data: JSON.parse(JSON.stringify(n.data ?? {})),
@@ -755,130 +669,7 @@ const useCanvasStore = create<RFState>()(
     },
 
     pasteNodes: (flowPosition) => {
-      const { clipboard, nodes } = get();
-      if (clipboard.length === 0) return;
-
-      canvasHistoryManager.takeSnapshot(nodes, get().edges);
-
-      // Compute the offset to apply to each pasted node.
-      // If a flow-space position is provided, centre the pasted group there;
-      // otherwise fall back to a small fixed offset from the originals.
-      let offsetX: number;
-      let offsetY: number;
-
-      if (flowPosition) {
-        // Calculate the bounding-box centre of the copied nodes
-        const xs = clipboard.map((n) => n.position.x);
-        const ys = clipboard.map((n) => n.position.y);
-        const widths = clipboard.map(
-          (n) => (n.style?.width as number) ?? n.measured?.width ?? 200,
-        );
-        const heights = clipboard.map(
-          (n) => (n.style?.height as number) ?? n.measured?.height ?? 150,
-        );
-
-        const minX = Math.min(...xs);
-        const minY = Math.min(...ys);
-        const maxX = Math.max(...xs.map((x, i) => x + widths[i]));
-        const maxY = Math.max(...ys.map((y, i) => y + heights[i]));
-
-        const centerX = (minX + maxX) / 2;
-        const centerY = (minY + maxY) / 2;
-
-        offsetX = flowPosition.x - centerX;
-        offsetY = flowPosition.y - centerY;
-      } else {
-        const OFFSET = 40;
-        offsetX = OFFSET;
-        offsetY = OFFSET;
-      }
-
-      // Build old-id → new-id map so we can remap parentId refs
-      const idMap = new Map<string, string>();
-      for (const node of clipboard) {
-        idMap.set(node.id, createId('node'));
-      }
-
-      const existingLabels = nodes.map(
-        (n) => n.data?.label as string | undefined,
-      );
-
-      const newNodes: Node[] = clipboard.map((node) => {
-        const newId = idMap.get(node.id) ?? createId('node');
-        const nodeType = node.type || 'node';
-        const label = generateNextLabel(nodeType, existingLabels);
-        // Track new label to avoid duplicates within the batch
-        existingLabels.push(label);
-
-        const cloned: Node = {
-          id: newId,
-          type: node.type,
-          position: {
-            x: node.position.x + offsetX,
-            y: node.position.y + offsetY,
-          },
-          data: {
-            ...JSON.parse(JSON.stringify(node.data ?? {})),
-            label,
-          },
-          ...(node.style
-            ? { style: JSON.parse(JSON.stringify(node.style)) }
-            : {}),
-        };
-
-        // Remap parentId if the parent was also copied
-        if (node.parentId && idMap.has(node.parentId)) {
-          cloned.parentId = idMap.get(node.parentId);
-        }
-
-        return cloned;
-      });
-
-      // Auto-detect parent frame for pasted nodes without a remapped parent.
-      // Use current canvas nodes for frame detection; adjust position to
-      // be relative to the detected frame.
-      const adjustedNodes: Node[] = newNodes.map((n) => {
-        if (n.parentId) return n; // Already has a parent from clipboard remap
-        if (n.type === 'frame') return n; // Don't nest frames
-
-        const style = n.style as
-          | { width?: number; height?: number }
-          | undefined;
-        const w = typeof style?.width === 'number' ? style.width : 0;
-        const h = typeof style?.height === 'number' ? style.height : 0;
-        const checkPoint = {
-          x: n.position.x + w / 2,
-          y: n.position.y + h / 2,
-        };
-
-        const frameId = findFrameAtPoint(nodes as NestableNode[], checkPoint);
-        if (!frameId) return n;
-
-        const frameAbs = getAbsolutePosition(nodes as NestableNode[], frameId);
-        if (!frameAbs) return n;
-
-        return {
-          ...n,
-          parentId: frameId,
-          position: {
-            x: n.position.x - frameAbs.x,
-            y: n.position.y - frameAbs.y,
-          },
-        };
-      });
-
-      // Deselect all existing nodes, then select only pasted ones
-      set({
-        nodes: selectOnly(
-          normalizeTreeOrder([...nodes, ...adjustedNodes] as NestableNode[]),
-          adjustedNodes.map((n) => n.id),
-        ),
-      });
-
-      // Trigger ingestion for each pasted node
-      for (const node of adjustedNodes) {
-        triggerIngestion(node);
-      }
+      get().dispatch({ type: 'PASTE_NODES', flowPosition });
     },
 
     canUndo: false,

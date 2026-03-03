@@ -63,6 +63,7 @@ export const Canvas: React.FC = () => {
   );
   const undo = useCanvasStore((state) => state.undo);
   const redo = useCanvasStore((state) => state.redo);
+  const dispatch = useCanvasStore((state) => state.dispatch);
 
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const rfInstanceRef = useRef<ReactFlowInstance | null>(null);
@@ -284,6 +285,27 @@ export const Canvas: React.FC = () => {
         return;
       }
 
+      // Delete / Backspace — delete selected nodes and edges
+      if (
+        (key === 'Delete' || key === 'Backspace') &&
+        !isNativeInput &&
+        !isRichEditor
+      ) {
+        e.preventDefault();
+        const { nodes: cur, edges: curEdges } = useCanvasStore.getState();
+        const selectedNodeIds = cur.filter((n) => n.selected).map((n) => n.id);
+        const selectedEdgeIds = curEdges
+          .filter((e) => e.selected)
+          .map((e) => e.id);
+        if (selectedNodeIds.length > 0) {
+          dispatch({ type: 'DELETE_NODES', nodeIds: selectedNodeIds });
+        }
+        if (selectedEdgeIds.length > 0) {
+          dispatch({ type: 'DISCONNECT_EDGES', edgeIds: selectedEdgeIds });
+        }
+        return;
+      }
+
       if (!mod || e.altKey) return;
 
       const lowerKey = key.toLowerCase();
@@ -337,6 +359,7 @@ export const Canvas: React.FC = () => {
     sendSelectedToOrder,
     undo,
     redo,
+    dispatch,
   ]);
 
   useEffect(() => {
@@ -515,6 +538,7 @@ export const Canvas: React.FC = () => {
       }}
     >
       <ReactFlow
+        deleteKeyCode={null}
         nodes={nodes}
         edges={edges}
         onNodesChange={onNodesChange}

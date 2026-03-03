@@ -109,7 +109,7 @@ export const CanvasLayerTree = ({
   emptyText = 'No items',
 }: CanvasLayerTreeProps) => {
   const nodes = useCanvasStore((state) => state.nodes);
-  const setSelectedNodes = useCanvasStore((state) => state.setSelectedNodes);
+  const selectNodes = useCanvasStore((state) => state.selectNodes);
   const reorderNodes = useCanvasStore((state) => state.reorderNodes);
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
   const rfInstance = useCanvasStore((state) => state.rfInstance);
@@ -249,7 +249,7 @@ export const CanvasLayerTree = ({
   const handleSelect = (id: string, event: React.MouseEvent) => {
     event.stopPropagation();
     const isMulti = event.metaKey || event.ctrlKey;
-    setSelectedNodes([id], isMulti);
+    selectNodes([id], isMulti);
 
     if (rfInstance) {
       let targetIds = [id];

@@ -1,3 +1,5 @@
+import type { AgentBaseContext } from './context.js';
+
 export interface SendMessageRequest {
   content: string;
   /**
@@ -10,6 +12,11 @@ export interface SendMessageRequest {
    * Empty array means no sources selected.
    */
   selectedSourceIds: string[];
+  /**
+   * Lightweight canvas snapshot for context-aware assistance.
+   * Optional — omitting it preserves full backward compatibility.
+   */
+  canvasContext?: AgentBaseContext;
 }
 
 export type SendMessageResponse =
