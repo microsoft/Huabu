@@ -48,7 +48,7 @@ export const Canvas: React.FC = () => {
   const onNodeDragStart = useCanvasStore((state) => state.onNodeDragStart);
   const onNodeDragStop = useCanvasStore((state) => state.onNodeDragStop);
   const addNode = useCanvasStore((state) => state.addNode);
-  const updateNodeData = useCanvasStore((state) => state.updateNodeData);
+  const patchNodeSilent = useCanvasStore((state) => state.patchNodeSilent);
   const setRfInstance = useCanvasStore((state) => state.setRfInstance);
   const frameSelectedNodes = useCanvasStore(
     (state) => state.frameSelectedNodes,
@@ -522,13 +522,13 @@ export const Canvas: React.FC = () => {
             // Fetch full source content asynchronously
             getSource(sourceId)
               .then((fullSource) => {
-                updateNodeData(tempNode.id, {
+                patchNodeSilent(tempNode.id, {
                   content: fullSource.content || '',
                 });
               })
               .catch((error) => {
                 console.error('Failed to load source content:', error);
-                updateNodeData(tempNode.id, {
+                patchNodeSilent(tempNode.id, {
                   content: 'Failed to load content',
                 });
               });
