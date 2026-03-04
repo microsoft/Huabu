@@ -8,9 +8,10 @@
 import { AgentAPI } from './agent.api';
 
 import type {
+  AgentBaseContext,
   ChatHistoryResponse,
-  SendMessageRequest,
   ChatStreamUpdatePayload,
+  SendMessageRequest,
 } from '@sediment/shared';
 
 /**
@@ -47,13 +48,13 @@ export const chatApi = {
   streamMessage: async (
     content: string,
     threadId: string,
-    selectedSourceIds: string[],
+    canvasContext: AgentBaseContext | undefined,
     callbacks: StreamCallbacks,
   ): Promise<void> => {
     const body: SendMessageRequest = {
       content,
       threadId,
-      selectedSourceIds,
+      canvasContext,
     };
 
     // Backend sends ChatStreamUpdatePayload directly in SSE data
