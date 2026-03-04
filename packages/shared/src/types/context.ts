@@ -82,4 +82,9 @@ export interface AgentBaseContext {
    * Ordered from oldest to newest.
    */
   recentActions: RecentAction[];
+  /**
+   * Base64-encoded PNG screenshot of the current canvas viewport.
+   * Optional — captured on-demand (e.g. intent recognition) for visual reasoning.
+   */
+  screenshot?: string;
 }
