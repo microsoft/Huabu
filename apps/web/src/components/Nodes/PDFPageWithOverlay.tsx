@@ -46,14 +46,15 @@ type PDFPageWithOverlayProps = {
   pageNumber: number;
   /** 0-based page index for event data */
   pageIndex: number;
-  scale: number;
+  /** Desired rendered width in px. When undefined the Page renders at its default size. */
+  pageWidth?: number;
   onAreaCaptured: (event: AreaCapturedEvent) => void;
 };
 
 export const PDFPageWithOverlay = ({
   pageNumber,
   pageIndex,
-  scale,
+  pageWidth,
   onAreaCaptured,
 }: PDFPageWithOverlayProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -163,6 +164,9 @@ export const PDFPageWithOverlay = ({
         const page = pageProxyRef.current;
         if (!page) return '';
 
+        // Derive scale: compare desired width against the page's natural (scale=1) width
+        const naturalViewport = page.getViewport({ scale: 1 });
+        const scale = pageWidth ? pageWidth / naturalViewport.width : 1;
         const viewport = page.getViewport({ scale });
         const textContent = await page.getTextContent();
 
@@ -204,7 +208,7 @@ export const PDFPageWithOverlay = ({
         getText,
       });
     },
-    [pageIndex, scale, onAreaCaptured],
+    [pageIndex, pageWidth, onAreaCaptured],
   );
 
   // ---------------------------------------------------------------------------
@@ -231,7 +235,7 @@ export const PDFPageWithOverlay = ({
     >
       <Page
         pageNumber={pageNumber}
-        scale={scale}
+        width={pageWidth}
         renderAnnotationLayer={false}
         renderTextLayer={false}
         loading=""
