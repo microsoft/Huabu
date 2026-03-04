@@ -15,6 +15,7 @@ import type {
   ChatHistoryItem,
   ChatHistoryResponse,
   ChatStreamUpdatePayload,
+  SelectedNodeDetail,
   SendMessageRequest,
   SendMessageResponse,
   ToolResponse,
@@ -31,6 +32,20 @@ function writeUpdate(
   payload: ChatStreamUpdatePayload,
 ) {
   raw.write(`event: update\ndata: ${JSON.stringify(payload)}\n\n`);
+}
+
+/**
+ * Recursively extract knowledge-base source IDs from a selected node.
+ * Frame nodes carry their direct children in `children`, so a single
+ * selected frame yields source IDs for all of its child nodes too.
+ */
+function collectSourceIds(node: SelectedNodeDetail): string[] {
+  const ids: string[] = [];
+  if (node.sourceId) ids.push(node.sourceId);
+  for (const child of node.children ?? []) {
+    ids.push(...collectSourceIds(child));
+  }
+  return ids;
 }
 
 const chatRoutes: FastifyPluginAsync = async (
@@ -124,12 +139,20 @@ const chatRoutes: FastifyPluginAsync = async (
   fastify.post<{ Body: SendMessageRequest; Reply: SendMessageResponse }>(
     '/',
     async function (request, reply) {
-      const { content, threadId, selectedSourceIds } = request.body;
+      const { content, threadId, canvasContext } = request.body;
       const resolvedThreadId = getOrCreateThreadId(threadId);
+
+      // Collect knowledge-base source IDs from selected nodes (including
+      // frame children) so the agent receives ingested content as context.
+      const selectedSourceIds = [
+        ...new Set(
+          (canvasContext?.selectedNodes ?? []).flatMap(collectSourceIds),
+        ),
+      ];
 
       // Build context from ingested sources
       let contextString = '';
-      if (selectedSourceIds && selectedSourceIds.length > 0) {
+      if (selectedSourceIds.length > 0) {
         try {
           const { context, sources } = await buildContext(selectedSourceIds);
           contextString = context;

@@ -8,13 +8,9 @@ export interface SendMessageRequest {
    */
   threadId: string;
   /**
-   * Source IDs from the selected canvas nodes.
-   * Empty array means no sources selected.
-   */
-  selectedSourceIds: string[];
-  /**
    * Lightweight canvas snapshot for context-aware assistance.
-   * Optional — omitting it preserves full backward compatibility.
+   * Contains `selectedNodes` with full content — the server extracts
+   * knowledge-base source IDs directly from there.
    */
   canvasContext?: AgentBaseContext;
 }

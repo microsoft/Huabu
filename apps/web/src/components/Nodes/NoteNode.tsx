@@ -133,9 +133,13 @@ export const NoteNode = ({ id, data, selected }: NodeProps<NoteNodeType>) => {
     const markdown = typeof data.content === 'string' ? data.content : '';
     const contentJson =
       typeof data.contentJson === 'string' ? data.contentJson : null;
+    const contentJsonSource =
+      typeof data.contentJsonSource === 'string'
+        ? data.contentJsonSource
+        : null;
 
-    void loadBlockNoteContent(editor, markdown, contentJson);
-  }, [data.content, data.contentJson, editor]);
+    void loadBlockNoteContent(editor, markdown, contentJson, contentJsonSource);
+  }, [data.content, data.contentJson, data.contentJsonSource, editor]);
 
   return (
     <NodeWrapper

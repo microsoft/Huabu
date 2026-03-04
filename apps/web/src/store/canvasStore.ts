@@ -5,6 +5,7 @@ import {
   type KnowledgeStorageConfig,
   type NodeSummary,
   type RecentAction,
+  type SelectedNodeDetail,
 } from '@sediment/shared';
 import {
   applyNodeChanges,
@@ -26,6 +27,7 @@ import {
   handleCommand,
   extractNodeRef,
   extractSnippet,
+  pushAction,
 } from './canvasHandlers';
 import { canvasHistoryManager } from './canvasHistoryManager';
 import { type AlignDirection } from '../utils/autoLayoutHelper';
@@ -167,7 +169,6 @@ type RFState = {
 
   reorderNodes: (activeId: string, overId: string) => void;
   sendSelectedToOrder: (direction: 'top' | 'bottom') => void;
-  getSelectedSourceIds: () => string[];
 
   frameSelectedNodes: () => void;
   frameNodesInRect: (flowRect: {
@@ -374,6 +375,52 @@ const useCanvasStore = create<RFState>()(
       const { nodes, edges, actionHistory } = get();
       // Build a lookup map once to avoid O(n²) scans inside edges.map.
       const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+
+      /**
+       * Build a SelectedNodeDetail for a single node.
+       * For frame nodes, recursively include direct children so the agent
+       * sees the entire group without needing extra tool calls.
+       */
+      const buildSelectedDetail = (n: Node): SelectedNodeDetail => {
+        const data = n.data as Record<string, unknown> | undefined;
+        const nodeType = (n.type ?? 'note') as CanvasNodeType;
+
+        let content: string | undefined;
+        let src: string | undefined;
+
+        if (
+          n.type === 'web' ||
+          n.type === 'pdf' ||
+          n.type === 'video' ||
+          n.type === 'image'
+        ) {
+          src = data?.src as string | undefined;
+        } else if (n.type !== 'frame') {
+          // Full content — no 120-char truncation
+          const raw = data?.content;
+          if (typeof raw === 'string' && raw.length > 0) content = raw;
+        }
+
+        const detail: SelectedNodeDetail = {
+          id: n.id,
+          type: nodeType,
+          label: data?.label as string | undefined,
+          origin: data?.origin as SelectedNodeDetail['origin'],
+          sourceId: data?.sourceId as string | undefined,
+          ...(content !== undefined ? { content } : {}),
+          ...(src !== undefined ? { src } : {}),
+        };
+
+        if (n.type === 'frame') {
+          const children = nodes
+            .filter((child) => child.parentId === n.id)
+            .map(buildSelectedDetail);
+          if (children.length > 0) detail.children = children;
+        }
+
+        return detail;
+      };
+
       return {
         nodes: nodes.map(
           (n): NodeSummary => ({
@@ -381,7 +428,6 @@ const useCanvasStore = create<RFState>()(
             type: (n.type ?? 'note') as CanvasNodeType,
             label: n.data?.label as string | undefined,
             snippet: extractSnippet(n),
-            selected: n.selected ?? false,
             frameLabel: n.parentId
               ? (nodeMap.get(n.parentId)?.data?.label as string | undefined)
               : undefined,
@@ -401,6 +447,7 @@ const useCanvasStore = create<RFState>()(
           };
         }),
         recentActions: actionHistory,
+        selectedNodes: nodes.filter((n) => n.selected).map(buildSelectedDetail),
       };
     },
 
@@ -552,12 +599,6 @@ const useCanvasStore = create<RFState>()(
       });
     },
 
-    getSelectedSourceIds: () => {
-      return get()
-        .nodes.filter((n) => n.selected && n.data?.sourceId)
-        .map((n) => n.data.sourceId as string);
-    },
-
     selectNodes: (ids, multiSelect = false) => {
       get().dispatch({ type: 'SELECT_NODES', ids, multiSelect });
     },
@@ -639,13 +680,14 @@ const useCanvasStore = create<RFState>()(
     canRedo: false,
 
     undo: () => {
-      const { nodes, edges, canvasId } = get();
+      const { nodes, edges, canvasId, actionHistory } = get();
       const snapshot = canvasHistoryManager.undo(nodes, edges);
       if (!snapshot) return;
 
       set({
         nodes: snapshot.nodes,
         edges: snapshot.edges,
+        actionHistory: pushAction(actionHistory, { action: 'canvas_undone' }),
       });
 
       canvasHistoryManager.syncServerAfterRestore(
@@ -657,13 +699,14 @@ const useCanvasStore = create<RFState>()(
     },
 
     redo: () => {
-      const { nodes, edges, canvasId } = get();
+      const { nodes, edges, canvasId, actionHistory } = get();
       const snapshot = canvasHistoryManager.redo(nodes, edges);
       if (!snapshot) return;
 
       set({
         nodes: snapshot.nodes,
         edges: snapshot.edges,
+        actionHistory: pushAction(actionHistory, { action: 'canvas_redone' }),
       });
 
       canvasHistoryManager.syncServerAfterRestore(

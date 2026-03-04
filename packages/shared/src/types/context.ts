@@ -45,7 +45,9 @@ export type RecentAction =
   | { action: 'frame_unframed'; frame: NodeRef; nodes: NodeRef[] }
   | { action: 'node_resized'; node: NodeRef; width: number; height: number }
   | { action: 'nodes_reordered'; nodes: NodeRef[] }
-  | { action: 'nodes_moved'; nodes: NodeRef[] };
+  | { action: 'nodes_moved'; nodes: NodeRef[] }
+  | { action: 'canvas_undone' }
+  | { action: 'canvas_redone' };
 
 // ==================== Canvas Snapshot ====================
 
@@ -60,11 +62,41 @@ export interface NodeSummary {
   label?: string;
   /** First ~120 chars of plain-text content; src URL for web/pdf/video/image nodes */
   snippet?: string;
-  selected: boolean;
   /** Label of the parent frame, if any */
   frameLabel?: string;
   /** Knowledge base source ID — present when the node has been ingested */
   sourceId?: string;
+}
+
+// ==================== Selected Nodes ====================
+
+/**
+ * Rich representation of a node explicitly selected by the user.
+ *
+ * Selection is a strong intent signal — the user is telling the agent
+ * "focus on this". Unlike NodeSummary (which is truncated for efficiency),
+ * SelectedNodeDetail carries the full content so the agent can reason about
+ * it without needing a follow-up tool call.
+ *
+ * For frame nodes, `children` contains the full detail of every direct child,
+ * so the agent understands the entire group the user is referring to.
+ */
+export interface SelectedNodeDetail {
+  id: string;
+  type: CanvasNodeType;
+  label?: string;
+  origin?: NodeOrigin;
+  /** Full plain-text content — not truncated. Undefined for nodes with no text. */
+  content?: string;
+  /** Source URL for web / pdf / video / image nodes */
+  src?: string;
+  /** Knowledge base source ID — present when the node has been ingested */
+  sourceId?: string;
+  /**
+   * Direct children of a frame node, each carrying their own full detail.
+   * Undefined for non-frame nodes.
+   */
+  children?: SelectedNodeDetail[];
 }
 
 /**
@@ -87,4 +119,14 @@ export interface AgentBaseContext {
    * Optional — captured on-demand (e.g. intent recognition) for visual reasoning.
    */
   screenshot?: string;
+  /**
+   * Nodes explicitly selected by the user at the time of the request.
+   *
+   * Selection is the primary intent signal — it overrides the general canvas
+   * snapshot. Each entry carries full content (no truncation) and, for frame
+   * nodes, a recursive `children` array so the agent sees the entire group.
+   *
+   * Empty array means "no explicit selection; use the full canvas as context".
+   */
+  selectedNodes: SelectedNodeDetail[];
 }

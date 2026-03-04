@@ -39,9 +39,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const setLastAction = useChatStore((state) => state.setLastAction);
   const clearMessages = useChatStore((state) => state.clearMessages);
 
-  const getSelectedSourceIds = useCanvasStore(
-    (state) => state.getSelectedSourceIds,
-  );
+  const getAgentContext = useCanvasStore((state) => state.getAgentContext);
   const canvasId = useCanvasStore((state) => state.canvasId);
   const canvasVersion = useCanvasStore((state) => state.version);
   const loadCanvas = useCanvasStore((state) => state.loadCanvas);
@@ -208,12 +206,11 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     setIsLoading(true);
 
     const assistantId = createId('message');
-    const selectedSourceIds = getSelectedSourceIds();
 
     await chatApi.streamMessage(
       userMessage.content,
       threadId,
-      selectedSourceIds,
+      getAgentContext(),
       {
         onUpdate: (payload: ChatStreamUpdatePayload) => {
           const { node, message } = payload;

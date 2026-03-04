@@ -12,10 +12,10 @@ import type { AgentBaseContext, IntentResponse } from '@sediment/shared';
  * @param canvasContext - The lightweight canvas snapshot
  * @returns Ranked list of intent candidates
  */
-export async function recogniseIntent(
+export async function recognizeIntent(
   canvasContext: AgentBaseContext,
 ): Promise<IntentResponse> {
-  const response = await fetch(`${API_CONFIG.API_URL}/intent/recognise`, {
+  const response = await fetch(`${API_CONFIG.API_URL}/intent/recognize`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ canvasContext }),

@@ -3,7 +3,7 @@
  *
  * Intent recognition service.
  * Receives an AgentBaseContext and returns a ranked list of intent candidates
- * by calling the LLM to analyse the canvas state and recent user actions.
+ * by calling the LLM to analyze the canvas state and recent user actions.
  */
 
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
@@ -17,20 +17,19 @@ import type {
 } from '@sediment/shared';
 
 // ---------------------------------------------------------------------------
-// Context → natural-language serialisation
+// Context → natural-language serialization
 // ---------------------------------------------------------------------------
 
-function serialiseContext(ctx: AgentBaseContext): string {
+function serializeContext(ctx: AgentBaseContext): string {
   const lines: string[] = [];
 
   // Nodes
   if (ctx.nodes.length > 0) {
     lines.push(`Canvas has ${ctx.nodes.length} node(s):`);
     for (const n of ctx.nodes) {
-      const sel = n.selected ? ' [SELECTED]' : '';
       const frame = n.frameLabel ? ` (in frame "${n.frameLabel}")` : '';
       const snippet = n.snippet ? `: ${n.snippet}` : '';
-      lines.push(`- ${n.type} "${n.label ?? n.id}"${sel}${frame}${snippet}`);
+      lines.push(`- ${n.type} "${n.label ?? n.id}"${frame}${snippet}`);
     }
   } else {
     lines.push('Canvas is empty.');
@@ -121,6 +120,10 @@ function formatAction(a: RecentAction): string {
       const labels = a.nodes.map((n) => `"${n.label ?? n.id}"`).join(', ');
       return `Moved ${a.nodes.length} node(s): ${labels}`;
     }
+    case 'canvas_undone':
+      return 'Undid the last canvas action';
+    case 'canvas_redone':
+      return 'Redid the previously undone canvas action';
     default: {
       // Exhaustiveness guard — if this line produces a TS error, a new
       // RecentAction variant has been added and this function needs a new case.
@@ -136,15 +139,15 @@ function formatAction(a: RecentAction): string {
 
 const INTENT_SYSTEM_PROMPT = `You are an intent-recognition engine embedded in a research canvas application called Sediment.
 
-The canvas lets users collect, organise, and synthesise research material using typed nodes (note, text, web, pdf, image, video) that can be grouped into frames and connected by edges.
+The canvas lets users collect, organize, and synthesize research material using typed nodes (note, text, web, pdf, image, video) that can be grouped into frames and connected by edges.
 
 ## Your task
-Analyse the provided canvas snapshot — node types, labels, content snippets, selection state, connections, the user's recent action trail, and optionally a screenshot of the current viewport — and infer the **3–5 most likely next actions** the user wants to take.
+Analyze the provided canvas snapshot — node types, labels, content snippets, selection state, connections, and the user's recent action trail — and infer the **3–5 most likely next actions** the user wants to take.
 
 ## Guidelines
-- Prioritise actions that are **contextually relevant** to the most recent operations and the currently selected node(s). The latest action in the trail carries the strongest signal.
+- Prioritize actions that are **contextually relevant** to the most recent operations and the currently selected node(s). The latest action in the trail carries the strongest signal.
 - If a screenshot is provided, use the spatial layout of nodes to inform your reasoning (e.g. clustered nodes may represent a topical group; isolated nodes may need connecting).
-- If a single node is selected, suggest actions that directly operate on its content (e.g. summarise, expand, find related sources, generate questions).
+- If a single node is selected, suggest actions that directly operate on its content (e.g. summarize, expand, find related sources, generate questions).
 - If multiple nodes are selected or connected, suggest higher-level synthesis actions (e.g. compare, merge, outline, identify contradictions).
 - If the canvas is sparse or empty, suggest bootstrapping actions (e.g. add a research topic, import sources, start a web search).
 - Keep labels short and action-oriented (verb + object, ≤ 8 words).
@@ -166,7 +169,7 @@ async function llmIntentRecognition(
   ctx: AgentBaseContext,
 ): Promise<IntentCandidate[]> {
   const llm = getLLM();
-  const contextText = serialiseContext(ctx);
+  const contextText = serializeContext(ctx);
 
   // Build the user message content parts
   const userContentParts: Array<
@@ -227,7 +230,7 @@ async function llmIntentRecognition(
 /**
  * Perform intent recognition by calling the LLM with the canvas context.
  */
-export async function recogniseIntent(
+export async function recognizeIntent(
   ctx: AgentBaseContext,
 ): Promise<IntentCandidate[]> {
   try {

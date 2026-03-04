@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { NodeWrapper } from './NodeWrapper.tsx';
 import useCanvasStore from '../../store/canvasStore.ts';
 import { GhostButton } from '../Common/GhostButton.tsx';
+import { Input } from '../Common/Input.tsx';
 
 import type { CanvasFrameNodeData } from './types.ts';
 
@@ -64,11 +65,13 @@ export const FrameNode = ({ id, data, selected }: NodeProps<FrameNodeType>) => {
         {draftLabel || ' '}
       </span>
 
-      <input
+      <Input
         ref={labelInputRef}
         value={draftLabel}
         readOnly={!isEditingLabel}
         title="Edit frame name"
+        wrapperClassName="col-start-1 row-start-1 min-w-0 w-full"
+        tooltipOffset={0}
         size={1}
         className={clsx(
           'nodrag col-start-1 row-start-1 w-full min-w-0! bg-transparent px-1.5 text-xs font-medium outline-none',

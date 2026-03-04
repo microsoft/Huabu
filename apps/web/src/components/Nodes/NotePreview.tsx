@@ -1,6 +1,6 @@
 import { useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/shadcn';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { blockNoteShadcnOverrides } from '@/components/BlockNote/shadcnOverrides';
 import { loadBlockNoteContent } from '@/utils/blockNoteContent';
@@ -22,16 +22,18 @@ const extractLabelFromBlocks = (
   blocks: Array<{
     type: string;
     props?: Record<string, unknown>;
-    content?: Array<{ type: string; text?: string }>;
+    content?: Array<{ type: string; text?: string }> | unknown;
   }>,
 ): string => {
   const getBlockText = (block: {
-    content?: Array<{ type: string; text?: string }>;
-  }) =>
-    (block.content ?? [])
+    content?: Array<{ type: string; text?: string }> | unknown;
+  }) => {
+    if (!Array.isArray(block.content)) return '';
+    return block.content
       .filter((item) => item.type === 'text')
       .map((item) => item.text ?? '')
       .join('');
+  };
 
   const h1 = blocks.find((b) => b.type === 'heading' && b.props?.level === 1);
   const anyHeading = blocks.find((b) => b.type === 'heading');
@@ -50,9 +52,14 @@ export const NotePreview = ({
 }: PreviewComponentProps) => {
   // `content` is the canonical Markdown string.
   // `contentJson` is the auxiliary BlockNote JSON (lossless, editor-internal).
+  // `contentJsonSource` is the `content` value at the time `contentJson` was
+  // generated — used to detect external edits (e.g. by the AI agent) without
+  // relying on the lossy `blocksToMarkdownLossy` round-trip.
   const markdown = typeof data.content === 'string' ? data.content : '';
   const contentJson =
     typeof data.contentJson === 'string' ? data.contentJson : null;
+  const contentJsonSource =
+    typeof data.contentJsonSource === 'string' ? data.contentJsonSource : null;
 
   const editor = useCreateBlockNote({
     initialContent: [{ type: 'paragraph', content: '' }],
@@ -61,6 +68,10 @@ export const NotePreview = ({
 
   // Track the last Markdown we applied so we can skip no-op updates.
   const lastAppliedMarkdownRef = useRef<string | null>(null);
+
+  // Disable editing while async content is being loaded to prevent the editor
+  // from accepting input that would immediately be overwritten by replaceBlocks.
+  const [loading, setLoading] = useState(true);
 
   /** Write a content patch back to the parent. */
   const writePatch = (
@@ -71,6 +82,9 @@ export const NotePreview = ({
     const patch: Record<string, unknown> = {
       content: newMarkdown,
       contentJson: newJson,
+      // Record which markdown string this JSON was derived from so we can
+      // detect external edits on next open without a lossy round-trip.
+      contentJsonSource: newMarkdown,
     };
     if (autoLabel !== undefined) {
       patch.label = autoLabel;
@@ -87,19 +101,25 @@ export const NotePreview = ({
     if (lastAppliedMarkdownRef.current === markdown) return;
 
     lastAppliedMarkdownRef.current = markdown;
+    setLoading(true);
 
     void (async () => {
-      const usedJson = await loadBlockNoteContent(
-        editor,
-        markdown,
-        contentJson,
-      );
+      try {
+        const usedJson = await loadBlockNoteContent(
+          editor,
+          markdown,
+          contentJson,
+          contentJsonSource,
+        );
 
-      // If markdown was re-parsed (JSON was absent or stale), write back a
-      // fresh contentJson so the next open is lossless.
-      if (!usedJson && !readOnly) {
-        const newJson = JSON.stringify(editor.document);
-        writePatch(markdown, newJson);
+        // If markdown was re-parsed (JSON was absent or stale), write back a
+        // fresh contentJson so the next open is lossless.
+        if (!usedJson && !readOnly) {
+          const newJson = JSON.stringify(editor.document);
+          writePatch(markdown, newJson);
+        }
+      } finally {
+        setLoading(false);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -109,16 +129,15 @@ export const NotePreview = ({
     <div className="custom-scrollbar h-full w-full overflow-auto bg-white p-4">
       <BlockNoteView
         editor={editor}
-        editable={!readOnly}
+        editable={!readOnly && !loading}
         shadCNComponents={blockNoteShadcnOverrides}
         onChange={() => {
           if (readOnly) return;
           if (!onContentChange && !onDataChange) return;
 
           const newJson = JSON.stringify(editor.document);
-          const newMarkdown = editor
-            .blocksToMarkdownLossy(editor.document)
-            .trim();
+          const md = editor.blocksToMarkdownLossy(editor.document);
+          const newMarkdown = md.trim();
           lastAppliedMarkdownRef.current = newMarkdown;
           const isLabelUserSet = data.labelSource === 'user';
           const autoLabel = isLabelUserSet
