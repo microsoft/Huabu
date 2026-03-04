@@ -1,18 +1,18 @@
 /**
  * @file intent.route.ts
  *
- * POST /api/intent/recognise
+ * POST /api/intent/recognize
  * Accepts an AgentBaseContext and returns ranked intent candidates.
  */
 
-import { recogniseIntent } from './intent.service.js';
+import { recognizeIntent } from './intent.service.js';
 
 import type { IntentRequest, IntentResponse } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
 const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   fastify.post<{ Body: IntentRequest; Reply: IntentResponse }>(
-    '/recognise',
+    '/recognize',
     async (request, reply) => {
       const { canvasContext } = request.body;
 
@@ -22,7 +22,7 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
           .send({ error: 'canvasContext is required' } as never);
       }
 
-      const intentCandidates = await recogniseIntent(canvasContext);
+      const intentCandidates = await recognizeIntent(canvasContext);
 
       return reply.send({ intentCandidates });
     },
