@@ -27,10 +27,9 @@ function serializeContext(ctx: AgentBaseContext): string {
   if (ctx.nodes.length > 0) {
     lines.push(`Canvas has ${ctx.nodes.length} node(s):`);
     for (const n of ctx.nodes) {
-      const sel = n.selected ? ' [SELECTED]' : '';
       const frame = n.frameLabel ? ` (in frame "${n.frameLabel}")` : '';
       const snippet = n.snippet ? `: ${n.snippet}` : '';
-      lines.push(`- ${n.type} "${n.label ?? n.id}"${sel}${frame}${snippet}`);
+      lines.push(`- ${n.type} "${n.label ?? n.id}"${frame}${snippet}`);
     }
   } else {
     lines.push('Canvas is empty.');
