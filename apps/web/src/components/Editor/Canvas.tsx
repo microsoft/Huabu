@@ -481,7 +481,38 @@ export const Canvas: React.FC = () => {
                 : {}),
               origin: 'user-drag-chat',
             },
+            style: { width: 400, height: 300 },
           };
+        }
+
+        if (payload.kind === 'image') {
+          const FIXED_WIDTH = 300;
+          const nodeId = createId('node');
+          const { src, label } = payload.data;
+
+          const doAdd = (height: number) => {
+            addNode({
+              id: nodeId,
+              type: 'image',
+              position,
+              data: { src, label, origin: 'user-drag-chat' },
+              style: { width: FIXED_WIDTH, height },
+            });
+          };
+
+          const img = new Image();
+          img.onload = () => {
+            const height =
+              img.naturalWidth > 0
+                ? Math.round(
+                    FIXED_WIDTH * (img.naturalHeight / img.naturalWidth),
+                  )
+                : 200;
+            doAdd(height);
+          };
+          img.onerror = () => doAdd(200);
+          img.src = src;
+          return;
         }
 
         if (payload.kind === 'source') {

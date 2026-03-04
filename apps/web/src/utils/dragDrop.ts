@@ -28,10 +28,18 @@ export type SourceDragPayload = {
   };
 };
 
+export type ImageDragPayload = {
+  kind: 'image';
+  data: {
+    src: string;
+    label?: string;
+  };
+};
+
 export type DragPayload = {
   // Unique identifier for a single drag gesture. Used to dedupe duplicate drop events.
   dragId: string;
-} & (WebDragPayload | NoteDragPayload | SourceDragPayload);
+} & (WebDragPayload | NoteDragPayload | SourceDragPayload | ImageDragPayload);
 
 const createDragId = () => {
   const uuid = globalThis.crypto?.randomUUID?.();
@@ -84,7 +92,11 @@ const createTransparentDragPreview = (sourceEl: HTMLElement) => {
 
 export const setDragPayload = (
   e: React.DragEvent,
-  payload: WebDragPayload | NoteDragPayload | SourceDragPayload,
+  payload:
+    | WebDragPayload
+    | NoteDragPayload
+    | SourceDragPayload
+    | ImageDragPayload,
   options: SetDragPayloadOptions = {},
 ) => {
   e.dataTransfer.effectAllowed = options.effectAllowed ?? 'copy';
@@ -204,6 +216,22 @@ export const getSedimentPayload = (dt: DataTransfer): DragPayload | null => {
           ...(data as Record<string, unknown>),
           sourceId: sourceId.trim(),
           type: typeof type === 'string' ? type : undefined,
+          label: typeof label === 'string' ? label : undefined,
+        },
+        dragId: normalizedDragId,
+      };
+    }
+
+    if (kind === 'image' && data && typeof data === 'object') {
+      const src = (data as { src?: unknown }).src;
+      if (typeof src !== 'string' || src.trim() === '') return null;
+
+      const label = (data as { label?: unknown }).label;
+
+      return {
+        kind: 'image',
+        data: {
+          src: src.trim(),
           label: typeof label === 'string' ? label : undefined,
         },
         dragId: normalizedDragId,
