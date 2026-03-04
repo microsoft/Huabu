@@ -8,6 +8,7 @@ import { create } from 'zustand';
 
 import useCanvasStore from './canvasStore';
 import { recogniseIntent } from '../api/intent';
+import { captureCanvasScreenshot } from '../utils/canvasScreenshot';
 
 import type { IntentCandidate } from '@sediment/shared';
 
@@ -53,6 +54,13 @@ export const useIntentStore = create<IntentState>()((set) => ({
 
     try {
       const canvasContext = useCanvasStore.getState().getAgentContext();
+
+      // Capture a screenshot of the canvas viewport in parallel
+      const screenshot = await captureCanvasScreenshot({ stripPrefix: true });
+      if (screenshot) {
+        canvasContext.screenshot = screenshot;
+      }
+
       const response = await recogniseIntent(canvasContext);
 
       console.log('[Intent Recognition] Results:', response.intentCandidates);

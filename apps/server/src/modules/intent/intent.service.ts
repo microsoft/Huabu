@@ -6,6 +6,8 @@
  * by calling the LLM to analyse the canvas state and recent user actions.
  */
 
+import { HumanMessage, SystemMessage } from '@langchain/core/messages';
+
 import { getLLM } from '../agent/llm.js';
 
 import type {
@@ -137,10 +139,11 @@ const INTENT_SYSTEM_PROMPT = `You are an intent-recognition engine embedded in a
 The canvas lets users collect, organise, and synthesise research material using typed nodes (note, text, web, pdf, image, video) that can be grouped into frames and connected by edges.
 
 ## Your task
-Analyse the provided canvas snapshot — node types, labels, content snippets, selection state, connections, and the user's recent action trail — and infer the **3–5 most likely next actions** the user wants to take.
+Analyse the provided canvas snapshot — node types, labels, content snippets, selection state, connections, the user's recent action trail, and optionally a screenshot of the current viewport — and infer the **3–5 most likely next actions** the user wants to take.
 
 ## Guidelines
 - Prioritise actions that are **contextually relevant** to the most recent operations and the currently selected node(s). The latest action in the trail carries the strongest signal.
+- If a screenshot is provided, use the spatial layout of nodes to inform your reasoning (e.g. clustered nodes may represent a topical group; isolated nodes may need connecting).
 - If a single node is selected, suggest actions that directly operate on its content (e.g. summarise, expand, find related sources, generate questions).
 - If multiple nodes are selected or connected, suggest higher-level synthesis actions (e.g. compare, merge, outline, identify contradictions).
 - If the canvas is sparse or empty, suggest bootstrapping actions (e.g. add a research topic, import sources, start a web search).
@@ -157,6 +160,7 @@ Sorted by confidence descending.`;
 
 /**
  * Call the LLM to analyse the canvas context and return intent candidates.
+ * When a screenshot is available, sends it as a multimodal image for visual reasoning.
  */
 async function llmIntentRecognition(
   ctx: AgentBaseContext,
@@ -164,12 +168,33 @@ async function llmIntentRecognition(
   const llm = getLLM();
   const contextText = serialiseContext(ctx);
 
+  // Build the user message content parts
+  const userContentParts: Array<
+    | { type: 'text'; text: string }
+    | { type: 'image_url'; image_url: { url: string; detail?: string } }
+  > = [{ type: 'text', text: `Current canvas state:\n\n${contextText}` }];
+
+  // Attach the viewport screenshot if available
+  if (ctx.screenshot) {
+    // If the screenshot is already a data-URL, use it as-is; otherwise wrap it
+    const imageUrl = ctx.screenshot.startsWith('data:')
+      ? ctx.screenshot
+      : `data:image/png;base64,${ctx.screenshot}`;
+
+    userContentParts.push({
+      type: 'image_url',
+      image_url: { url: imageUrl, detail: 'low' },
+    });
+
+    userContentParts.push({
+      type: 'text',
+      text: 'Above is a screenshot of the current canvas viewport. Use the spatial layout to inform your intent suggestions.',
+    });
+  }
+
   const response = await llm.invoke([
-    { role: 'system', content: INTENT_SYSTEM_PROMPT },
-    {
-      role: 'user',
-      content: `Current canvas state:\n\n${contextText}`,
-    },
+    new SystemMessage(INTENT_SYSTEM_PROMPT),
+    new HumanMessage({ content: userContentParts }),
   ]);
 
   const raw =
