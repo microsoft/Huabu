@@ -176,8 +176,8 @@ export const getSedimentPayload = (dt: DataTransfer): DragPayload | null => {
     const normalizedOrigin = normalizeOrigin(origin);
     if (!normalizedOrigin) {
       console.warn(
-        '[dragDrop] Dropped payload is missing a valid "origin" field. ' +
-          { kind, dragId: normalizedDragId, origin },
+        '[dragDrop] Dropped payload is missing a valid "origin" field.',
+        { kind, dragId: normalizedDragId, origin },
       );
       return null;
     }
