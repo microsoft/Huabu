@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 
 import Database from 'better-sqlite3';
 
+import { migrateNodeOrigins } from './origin-migration.js';
+
 let db: Database.Database | null = null;
 
 function getCanvasDbPath(): string {
@@ -70,6 +72,10 @@ export function getCanvasDb(): Database.Database {
   db = new Database(dbPath);
   migrate(db);
   ensureDefaultCanvas(db);
+
+  // @removable — delete this call (and origin-migration.ts) after all
+  // environments have been migrated to object-based origins.
+  migrateNodeOrigins(db);
 
   return db;
 }

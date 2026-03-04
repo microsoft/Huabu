@@ -729,7 +729,10 @@ function handlePasteNodes(
   // Tag every pasted node so the agent knows this batch came from a paste gesture.
   const taggedNodes: Node[] = finalNodes.map((n) => ({
     ...n,
-    data: { ...(n.data as Record<string, unknown>), origin: 'user-pasted' },
+    data: {
+      ...(n.data as Record<string, unknown>),
+      origin: { type: 'user-pasted' },
+    },
   }));
 
   set({

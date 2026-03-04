@@ -91,7 +91,7 @@ export async function synthesisNode(
         type: 'note',
         content: synthesis,
         label: `💡 Synthesis: ${state.query.slice(0, 30)}...`,
-        origin: 'research',
+        origin: { type: 'research' },
         research: {
           query: state.query,
           threadId: state.threadId,

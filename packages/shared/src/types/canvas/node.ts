@@ -14,16 +14,42 @@ export type CanvasNodeType =
   | 'web'
   | 'frame';
 
+/**
+ * Discriminated union describing how a canvas node was created.
+ */
 export type NodeOrigin =
   // AI-generated
-  | 'research' // Deep Research pipeline
-  | 'chat' // Chat agent tool call
+  | { type: 'research' }
+  | { type: 'chat' }
   // User-initiated
-  | 'user-created' // Toolbar click → blank node on canvas
-  | 'user-uploaded' // File upload dialog
-  | 'user-pasted' // Cmd+V duplicate of existing node(s)
-  | 'user-drag-library' // Dragged from SourceLibrary panel (references an ingested source)
-  | 'user-drag-chat'; // Dragged from chat message card (SourceCard URL or BlockNoteCard content)
+  | { type: 'user-created' }
+  | { type: 'user-uploaded' }
+  | { type: 'user-pasted' }
+  | { type: 'user-drag-library' }
+  | { type: 'user-drag-chat'; threadId?: string }
+  | { type: 'user-drag-capture'; sourceId?: string };
+
+/** All possible values of `NodeOrigin['type']`. */
+export type NodeOriginType = NodeOrigin['type'];
+
+/**
+ * Normalize a legacy string origin (from older persisted data) to the
+ * current object format.  Returns `undefined` for unrecognised values.
+ *
+ * @deprecated Remove once all stored data has been migrated.
+ */
+export function normalizeOrigin(raw: unknown): NodeOrigin | undefined {
+  if (!raw) return undefined;
+  // Already in the new { type: … } format
+  if (typeof raw === 'object' && raw !== null && 'type' in raw) {
+    return raw as NodeOrigin;
+  }
+  // Legacy plain-string format → wrap
+  if (typeof raw === 'string') {
+    return { type: raw } as NodeOrigin;
+  }
+  return undefined;
+}
 
 /** Who set the node label — controls whether auto-title may overwrite it */
 export type LabelSource = 'auto' | 'user';
@@ -54,7 +80,7 @@ export interface NodeStyle {
 export interface BaseNodeData {
   /** Node origin/source */
   origin?: NodeOrigin;
-  /** Research-related data (only when origin === 'research') */
+  /** Research-related data (only when origin.type === 'research') */
   research?: NodeResearchData;
   /** Display label */
   label?: string;

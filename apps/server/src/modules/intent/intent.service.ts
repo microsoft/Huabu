@@ -66,7 +66,9 @@ function formatAction(a: RecentAction): string {
       const labels = a.nodes
         .map((n) => `${n.nodeType} "${n.label ?? n.id}"`)
         .join(', ');
-      const origin = a.nodes[0]?.origin ? ` (via ${a.nodes[0].origin})` : '';
+      const origin = a.nodes[0]?.origin
+        ? ` (via ${a.nodes[0].origin.type})`
+        : '';
       return `Created ${a.nodes.length} node(s)${origin}: ${labels}`;
     }
     case 'nodes_deleted': {

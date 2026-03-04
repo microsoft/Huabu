@@ -9,6 +9,7 @@ import {
 import { BlockNoteView } from '@blocknote/shadcn';
 import { useEffect, useRef, type FC } from 'react';
 
+import { useChatStore } from '../../store/chatStore';
 import { setDragPayload, type DragImageOffset } from '../../utils/dragDrop';
 import { DragToCanvasHandleButton } from '../Common/DragToCanvasHandleButton';
 
@@ -20,6 +21,7 @@ interface BlockNoteMessageViewProps {
 type NoteDragHandleButtonProps = {
   editor: ReturnType<typeof useCreateBlockNote>;
   dragImageRootElement: HTMLElement | null;
+  threadId: string;
 };
 
 const NoteDragHandleButton: FC<NoteDragHandleButtonProps> = (props) => {
@@ -133,6 +135,7 @@ const NoteDragHandleButton: FC<NoteDragHandleButtonProps> = (props) => {
           e,
           {
             kind: 'note',
+            origin: { type: 'user-drag-chat', threadId: props.threadId },
             data: {
               content: noteContent,
               contentJson: dragContentJson,
@@ -159,6 +162,7 @@ export const BlockNoteCard = ({
 
   const parseSeqRef = useRef(0);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const threadId = useChatStore((s) => s.threadId);
 
   const ReadOnlySideMenu: FC = () => {
     return (
@@ -166,6 +170,7 @@ export const BlockNoteCard = ({
         <NoteDragHandleButton
           editor={editor}
           dragImageRootElement={wrapperRef.current}
+          threadId={threadId}
         />
       </SideMenu>
     );

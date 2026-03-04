@@ -86,7 +86,7 @@ export async function multiSearchNode(
             type: 'web',
             src: result.url,
             label: result.title,
-            origin: 'research',
+            origin: { type: 'research' },
             research: {
               query: state.query,
               threadId: state.threadId,

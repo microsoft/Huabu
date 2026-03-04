@@ -23,11 +23,13 @@ function getNodeSize(n: Node): { w: number; h: number } {
   const style = n.style as { width?: number; height?: number } | undefined;
   return {
     w:
-      typeof style?.width === 'number' ? style.width : n.measured?.width ?? 200,
+      typeof style?.width === 'number'
+        ? style.width
+        : (n.measured?.width ?? 200),
     h:
       typeof style?.height === 'number'
         ? style.height
-        : n.measured?.height ?? 100,
+        : (n.measured?.height ?? 100),
   };
 }
 
