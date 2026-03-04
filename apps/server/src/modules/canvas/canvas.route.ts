@@ -423,12 +423,36 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
             (s as unknown as { metaJson?: string | null }).metaJson ?? null,
         }));
 
-      // Collect PDF artifacts (nodes whose src is a relative artifact path)
+      // Collect PDF and image artifacts (nodes whose src is a local artifact path)
       const artifactsDir = getArtifactsDir();
       const artifactEntries: CanvasExportBundle['artifacts'] = [];
 
+      const getMimeType = (filename: string): string => {
+        const ext = path.extname(filename).toLowerCase();
+        const mimeMap: Record<string, string> = {
+          '.pdf': 'application/pdf',
+          '.jpg': 'image/jpeg',
+          '.jpeg': 'image/jpeg',
+          '.png': 'image/png',
+          '.gif': 'image/gif',
+          '.webp': 'image/webp',
+          '.svg': 'image/svg+xml',
+          '.bmp': 'image/bmp',
+          '.mp4': 'video/mp4',
+          '.webm': 'video/webm',
+          '.mov': 'video/quicktime',
+          '.avi': 'video/x-msvideo',
+        };
+        return mimeMap[ext] ?? 'application/octet-stream';
+      };
+
       for (const node of nodes) {
-        if (node.type !== 'pdf') continue;
+        if (
+          node.type !== 'pdf' &&
+          node.type !== 'image' &&
+          node.type !== 'video'
+        )
+          continue;
         const src = node.data?.src as string | undefined;
         if (!src) continue;
 
@@ -441,13 +465,13 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           artifactEntries.push({
             filename,
             data: data.toString('base64'),
-            mimeType: 'application/pdf',
+            mimeType: getMimeType(filename),
           });
         } catch {
           // Artifact missing on disk – skip silently, best-effort export
           request.log.warn(
-            { filename },
-            'PDF artifact not found during export',
+            { filename, nodeType: node.type },
+            'Artifact not found during export',
           );
         }
       }
