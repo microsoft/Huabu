@@ -423,7 +423,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
             (s as unknown as { metaJson?: string | null }).metaJson ?? null,
         }));
 
-      // Collect PDF and image artifacts (nodes whose src is a local artifact path)
+      // Collect PDF, image, and video artifacts (nodes whose src is a local artifact path)
       const artifactsDir = getArtifactsDir();
       const artifactEntries: CanvasExportBundle['artifacts'] = [];
 
