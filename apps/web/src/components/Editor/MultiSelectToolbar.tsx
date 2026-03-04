@@ -54,11 +54,11 @@ export const MultiSelectToolbar = () => {
       const w =
         typeof style?.width === 'number'
           ? style.width
-          : node.measured?.width ?? 200;
+          : (node.measured?.width ?? 200);
       const h =
         typeof style?.height === 'number'
           ? style.height
-          : node.measured?.height ?? 100;
+          : (node.measured?.height ?? 100);
 
       minX = Math.min(minX, pos.x);
       minY = Math.min(minY, pos.y);

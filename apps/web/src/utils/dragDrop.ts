@@ -1,3 +1,5 @@
+import { normalizeOrigin, type NodeOrigin } from '@sediment/shared';
+
 export const SEDIMENT_DND_MIME = 'application/x-sediment-dnd';
 
 // TODO: the attribute data should be consistent with NodeData
@@ -39,6 +41,8 @@ export type ImageDragPayload = {
 export type DragPayload = {
   // Unique identifier for a single drag gesture. Used to dedupe duplicate drop events.
   dragId: string;
+  // Where the drag originated from, e.g. 'user-drag-chat', 'user-drag-library', 'user-drag-capture'.
+  origin: NodeOrigin;
 } & (WebDragPayload | NoteDragPayload | SourceDragPayload | ImageDragPayload);
 
 const createDragId = () => {
@@ -92,19 +96,15 @@ const createTransparentDragPreview = (sourceEl: HTMLElement) => {
 
 export const setDragPayload = (
   e: React.DragEvent,
-  payload:
-    | WebDragPayload
-    | NoteDragPayload
-    | SourceDragPayload
-    | ImageDragPayload,
+  payload: Omit<DragPayload, 'dragId'>,
   options: SetDragPayloadOptions = {},
 ) => {
   e.dataTransfer.effectAllowed = options.effectAllowed ?? 'copy';
 
-  const enrichedPayload: { dragId: string } & typeof payload = {
+  const enrichedPayload = {
     ...payload,
     dragId: createDragId(),
-  };
+  } as DragPayload;
   e.dataTransfer.setData(SEDIMENT_DND_MIME, JSON.stringify(enrichedPayload));
 
   const dragImageElement = options.dragImageElement;
@@ -169,9 +169,18 @@ export const getSedimentPayload = (dt: DataTransfer): DragPayload | null => {
     const kind = (parsed as { kind?: unknown }).kind;
     const data = (parsed as { data?: unknown }).data;
     const dragId = (parsed as { dragId?: unknown }).dragId;
+    const origin = (parsed as { origin?: unknown }).origin;
 
     if (typeof dragId !== 'string' || dragId.trim() === '') return null;
     const normalizedDragId = dragId.trim();
+    const normalizedOrigin = normalizeOrigin(origin);
+    if (!normalizedOrigin) {
+      console.warn(
+        '[dragDrop] Dropped payload is missing a valid "origin" field. ' +
+          { kind, dragId: normalizedDragId, origin },
+      );
+      return null;
+    }
 
     if (kind === 'web' && data && typeof data === 'object') {
       const src = (data as { src?: unknown }).src;
@@ -184,6 +193,7 @@ export const getSedimentPayload = (dt: DataTransfer): DragPayload | null => {
           src: src.trim(),
         },
         dragId: normalizedDragId,
+        origin: normalizedOrigin,
       };
     }
 
@@ -200,6 +210,7 @@ export const getSedimentPayload = (dt: DataTransfer): DragPayload | null => {
           ...(typeof contentJson === 'string' ? { contentJson } : {}),
         },
         dragId: normalizedDragId,
+        origin: normalizedOrigin,
       };
     }
 
@@ -219,6 +230,7 @@ export const getSedimentPayload = (dt: DataTransfer): DragPayload | null => {
           label: typeof label === 'string' ? label : undefined,
         },
         dragId: normalizedDragId,
+        origin: normalizedOrigin,
       };
     }
 
@@ -235,6 +247,7 @@ export const getSedimentPayload = (dt: DataTransfer): DragPayload | null => {
           label: typeof label === 'string' ? label : undefined,
         },
         dragId: normalizedDragId,
+        origin: normalizedOrigin,
       };
     }
 

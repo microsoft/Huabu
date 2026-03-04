@@ -34,7 +34,6 @@ All command handlers live in `apps/web/src/store/canvasHandlers.ts`. Follow thes
    Use clear, verb-noun naming: `VERB_SUBJECT` (e.g. `DELETE_NODES`, `RESIZE_NODE`).
 
 2. **Add a handler function** in `canvasHandlers.ts` following the existing pattern:
-
    - Accept `(cmd: Extract<CanvasCommand, { type: 'YOUR_TYPE' }>, ctx: CanvasHandlerContext)`.
    - Take an undo snapshot with `canvasHistoryManager.takeSnapshot` **before** mutating state.
    - Record an agent-readable entry in `actionHistory` via `pushAction` so the AI agent has context about recent user activity.

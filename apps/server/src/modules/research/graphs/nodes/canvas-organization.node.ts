@@ -93,7 +93,7 @@ export async function canvasOrganizationNode(
       },
       childNodeIds: allNodeIds,
       data: {
-        origin: 'research',
+        origin: { type: 'research' },
         research: { query: state.query, threadId: state.threadId },
       },
       size: { width: 900, height: 700 },

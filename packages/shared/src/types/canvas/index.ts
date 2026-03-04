@@ -15,6 +15,7 @@
 export type {
   CanvasNodeType,
   NodeOrigin,
+  NodeOriginType,
   NodeResearchData,
   NodeStyle,
   BaseNodeData,
@@ -34,6 +35,7 @@ export {
   isMediaNode,
   isFrameNode,
   hasSourceId,
+  normalizeOrigin,
 } from './node.js';
 
 // Edge types

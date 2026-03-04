@@ -25,6 +25,7 @@ const SourceRow = React.memo(
     const handleDragStart = (e: React.DragEvent) => {
       setDragPayload(e, {
         kind: 'source',
+        origin: { type: 'user-drag-library' },
         data: {
           sourceId: item.node.id,
           type: item.node.type,

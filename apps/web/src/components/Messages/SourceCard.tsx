@@ -2,6 +2,7 @@ import clsx from 'clsx';
 import { ArrowUpRight } from 'lucide-react';
 import { useRef } from 'react';
 
+import { useChatStore } from '../../store/chatStore';
 import { setDragPayload } from '../../utils/dragDrop';
 import { DragToCanvasHandleButton } from '../Common/DragToCanvasHandleButton';
 
@@ -23,6 +24,7 @@ export const SourceCard = ({ source }: { source: Source }) => {
   const title = (source.title ?? '').trim() || source.url;
   const hostname = getHostname(source.url);
   const cardRef = useRef<HTMLAnchorElement | null>(null);
+  const threadId = useChatStore((s) => s.threadId);
 
   return (
     <div
@@ -43,6 +45,7 @@ export const SourceCard = ({ source }: { source: Source }) => {
             e,
             {
               kind: 'web',
+              origin: { type: 'user-drag-chat', threadId },
               data: {
                 src: source.url,
               },

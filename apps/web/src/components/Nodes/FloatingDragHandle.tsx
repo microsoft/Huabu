@@ -12,6 +12,9 @@ type FloatingDragHandleProps = {
   /** Text extracted from the selected region via pdfjs getTextContent(). Empty string = no text found. */
   text: string;
 
+  /** Source ID of the parent node being captured from (e.g. a PDF node). */
+  sourceId?: string;
+
   /** Uploaded image URL. Null while still capturing. */
   imageUrl?: string | null;
   capturing?: boolean;
@@ -32,6 +35,7 @@ type FloatingDragHandleProps = {
 export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
   position,
   text,
+  sourceId,
   imageUrl,
   capturing = false,
   uploadError = false,
@@ -57,7 +61,11 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
   }, [onDismiss]);
 
   const handleTextDragStart = (e: React.DragEvent) => {
-    setDragPayload(e, { kind: 'note', data: { content: text } });
+    setDragPayload(e, {
+      kind: 'note',
+      origin: { type: 'user-drag-capture', sourceId },
+      data: { content: text },
+    });
     setTimeout(onDismiss, 0);
   };
 
@@ -65,6 +73,7 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
     if (!imageUrl) return;
     setDragPayload(e, {
       kind: 'image',
+      origin: { type: 'user-drag-capture', sourceId },
       data: { src: imageUrl, label: 'PDF Capture' },
     });
     setTimeout(onDismiss, 0);

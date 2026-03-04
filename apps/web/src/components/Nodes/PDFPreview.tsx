@@ -176,6 +176,9 @@ export const PDFPreview = ({ data }: PreviewComponentProps) => {
       {/* ── Floating drag handle (rendered via React Portal to document.body) ── */}
       {pendingCapture && (
         <FloatingDragHandle
+          sourceId={
+            typeof data.sourceId === 'string' ? data.sourceId : undefined
+          }
           text={pendingCapture.text}
           imageUrl={pendingCapture.imageUrl}
           capturing={pendingCapture.capturing}

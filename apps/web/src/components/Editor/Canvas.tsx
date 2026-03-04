@@ -134,7 +134,11 @@ export const Canvas: React.FC = () => {
           newNode = {
             ...baseNode,
             type: 'note',
-            data: { type: 'note', content: '', origin: 'user-created' },
+            data: {
+              type: 'note',
+              content: '',
+              origin: { type: 'user-created' },
+            },
             style: { width: w, height: h },
           };
           break;
@@ -142,7 +146,11 @@ export const Canvas: React.FC = () => {
           newNode = {
             ...baseNode,
             type: 'text',
-            data: { type: 'text', content: '', origin: 'user-created' },
+            data: {
+              type: 'text',
+              content: '',
+              origin: { type: 'user-created' },
+            },
           };
           break;
         default:
@@ -463,7 +471,7 @@ export const Canvas: React.FC = () => {
             position,
             data: {
               src: payload.data.src,
-              origin: 'user-drag-chat',
+              origin: payload.origin,
             },
             style: { width: 300, height: 200 },
           };
@@ -479,7 +487,7 @@ export const Canvas: React.FC = () => {
               ...(payload.data.contentJson
                 ? { contentJson: payload.data.contentJson }
                 : {}),
-              origin: 'user-drag-chat',
+              origin: payload.origin,
             },
             style: { width: 400, height: 300 },
           };
@@ -495,7 +503,7 @@ export const Canvas: React.FC = () => {
               id: nodeId,
               type: 'image',
               position,
-              data: { src, label, origin: 'user-drag-chat' },
+              data: { src, label, origin: payload.origin },
               style: { width: FIXED_WIDTH, height },
             });
           };
@@ -526,7 +534,7 @@ export const Canvas: React.FC = () => {
           const data: Record<string, unknown> = {
             label,
             sourceId,
-            origin: 'user-drag-library',
+            origin: payload.origin,
             ...rest,
           };
 

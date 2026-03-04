@@ -18,7 +18,6 @@
 ### Where do IDs appear?
 
 - `canvasId / canvasVersion / selectedNodeIds`
-
   - Transport: Chat request body (`SendMessageRequest`).
   - Purpose: Backend looks up the `sourceIds` for the selected nodes via `canvas_nodes` and validates version consistency.
 
@@ -66,7 +65,6 @@ Note: In the current implementation, `PUT /canvas/:canvasId` only persists `stat
 Backend endpoints:
 
 - `PUT /canvas/:canvasId/nodes/:nodeId`
-
   - body: `{ workspaceId?, type: 'note'|'text'|'web'|'pdf', title?, content?, src? }`
   - Behaviour: Ingests the node and upserts `canvas_nodes(canvas_id, node_id, source_id)`
   - Returns: `{ nodeId, sourceId, success, suggestedLabel?, error? }`
@@ -95,7 +93,6 @@ Location: `apps/server/data/knowledge.sqlite`
 Table structure (v1):
 
 - `sources`
-
   - `type`: `web | pdf | note | text`
   - `content_text`: Full content text (NOT NULL)
 
@@ -105,7 +102,6 @@ Table structure (v1):
 #### Web / PDF Ingestion Details
 
 - **Web:**
-
   - Prefers `content` sent from the frontend if provided.
   - Otherwise the backend fetches via the Tavily Extract API.
   - Requires environment variable: `TAVILY_API_KEY`
