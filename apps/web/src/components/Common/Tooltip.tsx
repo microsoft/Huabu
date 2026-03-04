@@ -13,6 +13,8 @@ export type TooltipProps = {
   content: ReactNode;
   children: ReactElement;
   wrapperClassName?: string;
+  /** Distance in px between the trigger and the tooltip. Defaults to 8. */
+  offset?: number;
 };
 
 const clamp = (value: number, min: number, max: number) => {
@@ -25,6 +27,7 @@ export const Tooltip = ({
   content,
   children,
   wrapperClassName,
+  offset: offsetProp = 8,
 }: TooltipProps) => {
   const tooltipId = useId();
   const triggerRef = useRef<HTMLSpanElement | null>(null);
@@ -41,7 +44,7 @@ export const Tooltip = ({
     if (!triggerEl || !tooltipEl) return;
 
     const padding = 8;
-    const offset = 8;
+    const offset = offsetProp;
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
 
