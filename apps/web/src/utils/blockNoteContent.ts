@@ -3,30 +3,33 @@ import type { BlockNoteEditor } from '@blocknote/core';
 /**
  * Loads content into a BlockNote editor.
  *
- * Prefers `contentJson` when available and in sync with `markdown` (lossless,
- * no round-trip loss). Falls back to parsing `markdown` when JSON is absent or
- * stale (e.g. `content` was edited externally without updating `contentJson`).
+ * Prefers `contentJson` when it is in sync with `markdown`. Sync is determined
+ * by comparing `markdown` against `contentJsonSource` — the markdown string
+ * that was canonical at the time `contentJson` was last generated. This avoids
+ * the lossy `blocksToMarkdownLossy` round-trip (which cannot faithfully
+ * reproduce tables and other rich blocks).
+ *
+ * Falls back to parsing `markdown` when:
+ * - `contentJson` is absent, OR
+ * - `contentJsonSource` doesn't match `markdown` (edited externally, e.g. by
+ *   the AI agent writing directly to `content`).
  *
  * @returns `true` if `contentJson` was used directly,
- *          `false` if markdown was re-parsed (caller may want to write back a
- *          fresh `contentJson`).
+ *          `false` if markdown was re-parsed (caller should write back a fresh
+ *          `contentJson` and `contentJsonSource`).
  */
 export async function loadBlockNoteContent(
   editor: BlockNoteEditor<any, any, any>,
   markdown: string,
   contentJson: string | null,
+  contentJsonSource: string | null,
 ): Promise<boolean> {
-  if (contentJson !== null) {
+  if (contentJson !== null && contentJsonSource === markdown) {
     try {
       const parsed: unknown = JSON.parse(contentJson);
       if (Array.isArray(parsed)) {
-        const derived = editor.blocksToMarkdownLossy(parsed).trim();
-        if (derived === markdown.trim()) {
-          // JSON is in sync — load directly (lossless, no round-trip)
-          editor.replaceBlocks(editor.document, parsed);
-          return true;
-        }
-        // JSON is stale — fall through to re-parse from Markdown
+        editor.replaceBlocks(editor.document, parsed);
+        return true;
       }
     } catch {
       // Malformed JSON — fall through

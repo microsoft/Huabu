@@ -78,12 +78,21 @@ export interface NoteNodeData extends BaseNodeData {
   content: string;
   /**
    * Auxiliary BlockNote native JSON (lossless editor representation).
-   * Kept in sync with `content`. When this field differs from the BlockNote JSON
-   * that would be derived from `content`, `content` (Markdown) takes precedence
-   * and `contentJson` is regenerated from it.
+   * Should be loaded in preference to `content` when `contentJsonSource === content`,
+   * which means the JSON was generated from the current markdown and is in sync.
+   * When `content` differs from `contentJsonSource` (e.g. edited externally by the
+   * AI agent or an external tool), `content` takes precedence and `contentJson` is
+   * regenerated from it.
    * Optional: absent for legacy notes or notes created externally.
    */
   contentJson?: string;
+  /**
+   * The value of `content` at the time `contentJson` was last generated.
+   * Used to detect whether `content` has been modified externally since the last
+   * editor save, without relying on lossy `blocksToMarkdownLossy` round-trips.
+   * When `contentJsonSource === content`, `contentJson` is authoritative.
+   */
+  contentJsonSource?: string;
   sourceId?: string;
   style?: NodeStyle;
 }
