@@ -45,7 +45,9 @@ export type RecentAction =
   | { action: 'frame_unframed'; frame: NodeRef; nodes: NodeRef[] }
   | { action: 'node_resized'; node: NodeRef; width: number; height: number }
   | { action: 'nodes_reordered'; nodes: NodeRef[] }
-  | { action: 'nodes_moved'; nodes: NodeRef[] };
+  | { action: 'nodes_moved'; nodes: NodeRef[] }
+  | { action: 'canvas_undone' }
+  | { action: 'canvas_redone' };
 
 // ==================== Canvas Snapshot ====================
 

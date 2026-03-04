@@ -26,6 +26,7 @@ import {
   handleCommand,
   extractNodeRef,
   extractSnippet,
+  pushAction,
 } from './canvasHandlers';
 import { canvasHistoryManager } from './canvasHistoryManager';
 import { type AlignDirection } from '../utils/autoLayoutHelper';
@@ -639,13 +640,14 @@ const useCanvasStore = create<RFState>()(
     canRedo: false,
 
     undo: () => {
-      const { nodes, edges, canvasId } = get();
+      const { nodes, edges, canvasId, actionHistory } = get();
       const snapshot = canvasHistoryManager.undo(nodes, edges);
       if (!snapshot) return;
 
       set({
         nodes: snapshot.nodes,
         edges: snapshot.edges,
+        actionHistory: pushAction(actionHistory, { action: 'canvas_undone' }),
       });
 
       canvasHistoryManager.syncServerAfterRestore(
@@ -657,13 +659,14 @@ const useCanvasStore = create<RFState>()(
     },
 
     redo: () => {
-      const { nodes, edges, canvasId } = get();
+      const { nodes, edges, canvasId, actionHistory } = get();
       const snapshot = canvasHistoryManager.redo(nodes, edges);
       if (!snapshot) return;
 
       set({
         nodes: snapshot.nodes,
         edges: snapshot.edges,
+        actionHistory: pushAction(actionHistory, { action: 'canvas_redone' }),
       });
 
       canvasHistoryManager.syncServerAfterRestore(

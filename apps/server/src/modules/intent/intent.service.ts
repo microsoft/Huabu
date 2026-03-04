@@ -121,6 +121,10 @@ function formatAction(a: RecentAction): string {
       const labels = a.nodes.map((n) => `"${n.label ?? n.id}"`).join(', ');
       return `Moved ${a.nodes.length} node(s): ${labels}`;
     }
+    case 'canvas_undone':
+      return 'Undid the last canvas action';
+    case 'canvas_redone':
+      return 'Redid the previously undone canvas action';
     default: {
       // Exhaustiveness guard — if this line produces a TS error, a new
       // RecentAction variant has been added and this function needs a new case.
