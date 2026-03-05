@@ -112,7 +112,7 @@ export const NoteNode = ({ id, data, selected }: NodeProps<NoteNodeType>) => {
 
     reactRootRef.current.render(
       <BlockNoteView
-        className="noteview-readonly pointer-events-none select-none"
+        className="block-note-view block-note-view-readonly pointer-events-none select-none"
         editor={editor}
         editable={false}
         sideMenu={false}

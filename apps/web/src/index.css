@@ -143,10 +143,6 @@ body,
   overflow: hidden;
 }
 
-.noteview-readonly .bn-editor {
-  padding: 0 !important;
-}
-
 /* Click-to-place cursor overrides for ReactFlow pane */
 .canvas-pending-note .react-flow__pane,
 .canvas-pending-text .react-flow__pane,
@@ -169,30 +165,34 @@ body,
   pointer-events: none !important;
 }
 
-.noteview-readonly p {
-  font-size: var(--text-sm);
+.block-note-view-readonly .bn-editor {
+  padding: 0 !important;
 }
 
-.noteview-readonly h1 {
-  font-size: 1.4rem !important;
+/* Override BlockNote base font-size (default 16px → 14px).
+   Use `.bn-default-styles` so heading `em` values and side-menu handler
+   positioning stay consistent with the new base. */
+.block-note-view .bn-default-styles {
+  font-size: 0.875rem; /* 14px */
 }
 
-.noteview-readonly h2 {
-  font-size: 1.2rem !important;
+/* Override heading sizes via BlockNote's own --level CSS variable.
+   Values are in `em` relative to the base font-size above (14px). */
+.block-note-view [data-content-type='heading'] {
+  --level: 1.715em; /* h1 ≈ 24px */
 }
-
-.noteview-readonly h3 {
-  font-size: 1.05rem !important;
+.block-note-view [data-content-type='heading'][data-level='2'] {
+  --level: 1.375em; /* h2 ≈ 19.2px */
 }
-
-.noteview-readonly h4 {
-  font-size: 0.95rem !important;
+.block-note-view [data-content-type='heading'][data-level='3'] {
+  --level: 1.2em; /* h3 ≈ 16.8px */
 }
-
-.noteview-readonly h5 {
-  font-size: 0.875rem !important;
+.block-note-view [data-content-type='heading'][data-level='4'] {
+  --level: 1.085em; /* h4 ≈ 15.2px */
 }
-
-.noteview-readonly h6 {
-  font-size: 0.8rem !important;
+.block-note-view [data-content-type='heading'][data-level='5'] {
+  --level: 1em; /* h5 ≈ 14px */
+}
+.block-note-view [data-content-type='heading'][data-level='6'] {
+  --level: 0.915em; /* h6 ≈ 12.8px */
 }

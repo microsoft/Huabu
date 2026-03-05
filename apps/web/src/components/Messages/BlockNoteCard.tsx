@@ -250,7 +250,7 @@ export const BlockNoteCard = ({
       }}
     >
       <BlockNoteView
-        className="noteview-readonly"
+        className="block-note-view block-note-view-readonly"
         editor={editor}
         editable={true}
         formattingToolbar={false}

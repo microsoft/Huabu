@@ -128,6 +128,7 @@ export const NotePreview = ({
   return (
     <div className="custom-scrollbar h-full w-full overflow-auto bg-white p-1">
       <BlockNoteView
+        className="block-note-view"
         editor={editor}
         editable={!readOnly && !loading}
         shadCNComponents={blockNoteShadcnOverrides}
