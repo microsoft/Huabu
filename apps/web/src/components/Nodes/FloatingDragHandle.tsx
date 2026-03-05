@@ -1,9 +1,11 @@
 import clsx from 'clsx';
 import { GripVertical, ImageIcon, Loader2, Type } from 'lucide-react';
-import { useEffect, useRef, type FC } from 'react';
-import { createPortal } from 'react-dom';
 
 import { setDragPayload } from '@/utils/dragDrop';
+
+import { Popover } from '../Common/Popover';
+
+import type { FC } from 'react';
 
 type FloatingDragHandleProps = {
   /** Screen-space position (clientX/Y from the triggering pointerup) */
@@ -27,7 +29,7 @@ type FloatingDragHandleProps = {
 /**
  * FloatingDragHandle
  *
- * Renders a small panel near the cursor (via a React portal) after the user
+ * Renders a small panel near the cursor (via Popover) after the user
  * draws a capture region in the PDF preview.  Shows up to two drag handles:
  *  - "Text" drag (if text was found in the region)
  *  - "Image" drag (once the cropped bitmap has been uploaded)
@@ -42,23 +44,8 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
   onRetry,
   onDismiss,
 }) => {
-  const containerRef = useRef<HTMLDivElement>(null);
   const hasText = text.trim().length > 0;
   const isImageReady = !!imageUrl && !capturing;
-
-  // Dismiss when the user clicks/taps outside the handle
-  useEffect(() => {
-    const handlePointerDown = (e: PointerEvent) => {
-      if (
-        containerRef.current &&
-        !containerRef.current.contains(e.target as Node)
-      ) {
-        onDismiss();
-      }
-    };
-    document.addEventListener('pointerdown', handlePointerDown);
-    return () => document.removeEventListener('pointerdown', handlePointerDown);
-  }, [onDismiss]);
 
   const handleTextDragStart = (e: React.DragEvent) => {
     setDragPayload(e, {
@@ -79,20 +66,17 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
     setTimeout(onDismiss, 0);
   };
 
-  const left = position.x + 4;
-  const top = position.y + 4;
-
   const dragBtnClass = clsx(
     'flex shrink-0 cursor-grab items-center gap-0.5 rounded px-1.5 py-0.5',
     'bg-muted text-foreground text-xs font-medium',
     'hover:bg-muted/80 active:cursor-grabbing',
   );
 
-  const content = (
-    <div
-      ref={containerRef}
-      className="border-border bg-background fixed z-[9999] flex flex-col gap-1.5 rounded-md border px-2.5 py-2 shadow-lg"
-      style={{ left, top }}
+  return (
+    <Popover
+      position={position}
+      onDismiss={onDismiss}
+      className="flex flex-col gap-1.5 px-2.5 py-2"
     >
       {/* ── Text drag button ── */}
       {hasText && (
@@ -137,8 +121,6 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
           <span>Drag image</span>
         </div>
       )}
-    </div>
+    </Popover>
   );
-
-  return createPortal(content, document.body);
 };

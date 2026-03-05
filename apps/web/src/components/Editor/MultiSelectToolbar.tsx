@@ -98,19 +98,19 @@ export const MultiSelectToolbar = () => {
           title="Align Left"
           onClick={() => alignSelectedNodes('left')}
         >
-          <AlignHorizontalJustifyStart size={16} />
+          <AlignHorizontalJustifyStart size={14} />
         </GhostButton>
         <GhostButton
           title="Align Center (H)"
           onClick={() => alignSelectedNodes('center-h')}
         >
-          <AlignHorizontalJustifyCenter size={16} />
+          <AlignHorizontalJustifyCenter size={14} />
         </GhostButton>
         <GhostButton
           title="Align Right"
           onClick={() => alignSelectedNodes('right')}
         >
-          <AlignHorizontalJustifyEnd size={16} />
+          <AlignHorizontalJustifyEnd size={14} />
         </GhostButton>
 
         <div className="bg-border mx-0.5 h-4 w-px" />
@@ -120,26 +120,26 @@ export const MultiSelectToolbar = () => {
           title="Align Top"
           onClick={() => alignSelectedNodes('top')}
         >
-          <AlignVerticalJustifyStart size={16} />
+          <AlignVerticalJustifyStart size={14} />
         </GhostButton>
         <GhostButton
           title="Align Center (V)"
           onClick={() => alignSelectedNodes('center-v')}
         >
-          <AlignVerticalJustifyCenter size={16} />
+          <AlignVerticalJustifyCenter size={14} />
         </GhostButton>
         <GhostButton
           title="Align Bottom"
           onClick={() => alignSelectedNodes('bottom')}
         >
-          <AlignVerticalJustifyEnd size={16} />
+          <AlignVerticalJustifyEnd size={14} />
         </GhostButton>
 
         <div className="bg-border mx-0.5 h-4 w-px" />
 
         {/* Spread apart overlapping nodes */}
         <GhostButton title="Spread Apart" onClick={() => spreadSelectedNodes()}>
-          <Ungroup size={16} />
+          <Ungroup size={14} />
         </GhostButton>
       </div>
     </div>
