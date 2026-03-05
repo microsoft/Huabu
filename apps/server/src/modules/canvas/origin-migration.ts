@@ -86,7 +86,9 @@ export function migrateNodeOrigins(db: Database.Database): void {
   const count = runMigration();
   if (count > 0) {
     console.log(
-      `[origin-migration] Migrated ${String(count)} canvas(es) to object-based origins.`,
+      `[origin-migration] Migrated ${String(
+        count,
+      )} canvas(es) to object-based origins.`,
     );
   }
 }

@@ -119,16 +119,17 @@ export class AgentAPI {
               callbacks.onComplete();
               return;
             } else if (eventType === 'error') {
-              callbacks.onEvent(event);
-              // Check if it's a non-recoverable error
-              const errorEvent = event as AgentEvent<{
-                message: string;
-                recoverable?: boolean;
-              }>;
-              if (errorEvent.data && !errorEvent.data.recoverable) {
-                callbacks.onError(new Error(errorEvent.data.message));
-                return;
-              }
+              // The error SSE payload is {message: string} at the top level
+              const errorPayload = event as unknown as {
+                message?: string;
+                data?: { message?: string; recoverable?: boolean };
+              };
+              const errorMsg =
+                errorPayload.message ??
+                errorPayload.data?.message ??
+                'Unknown server error';
+              callbacks.onError(new Error(errorMsg));
+              return;
             } else {
               // Regular event
               callbacks.onEvent(event);

@@ -20,7 +20,7 @@ export const MainLayout = ({
 
   // Fixed pixel sizes to guarantee that collapsing side panels only affects
   // the center panel width.
-  const COLLAPSED_WIDTH_PX = 48;
+  const COLLAPSED_WIDTH_PX = 36;
   const LEFT_MIN_WIDTH_PX = 200;
   const RIGHT_MIN_WIDTH_PX = 256;
   const CENTER_MIN_WIDTH_PX = 100;
@@ -47,9 +47,9 @@ export const MainLayout = ({
     Math.min(Math.max(value, min), max);
 
   const resizeHandleClassName =
-    'group flex w-2 shrink-0 items-center justify-center bg-transparent outline-none';
+    'group flex w-1 shrink-0 items-center justify-center bg-transparent outline-none';
   const resizeHandleInnerClassName =
-    'h-8 w-1 rounded-full bg-gray-300 opacity-0 transition-all duration-300 group-hover:h-12 group-hover:opacity-100';
+    'h-8 w-0.5 rounded-full bg-gray-300 opacity-0 transition-all duration-300 group-hover:h-12 group-hover:opacity-100';
 
   const leftHandleDisabled = isLeftCollapsed;
   const rightHandleDisabled = isRightCollapsed;

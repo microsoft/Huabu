@@ -1,5 +1,20 @@
 import type { AgentBaseContext } from './context.js';
 
+/**
+ * An attachment sent alongside a chat message — e.g. a captured PDF region.
+ */
+export interface ChatAttachment {
+  type: 'image';
+  /** Uploaded image URL (e.g. from artifact upload). */
+  url: string;
+  /** Optional extracted text from the same captured region. */
+  extractedText?: string;
+  /** Human-readable label, e.g. "PDF page 3 selection". */
+  label?: string;
+  /** The source node ID the attachment was captured from, for provenance tracking. */
+  originSourceId?: string;
+}
+
 export interface SendMessageRequest {
   content: string;
   /**
@@ -13,6 +28,8 @@ export interface SendMessageRequest {
    * knowledge-base source IDs directly from there.
    */
   canvasContext?: AgentBaseContext;
+  /** Optional file/image attachments to include with the message. */
+  attachments?: ChatAttachment[];
 }
 
 export type SendMessageResponse =
@@ -109,6 +126,8 @@ export type ChatHistoryItem =
   | {
       role: 'user' | 'assistant';
       content: string;
+      /** Image attachments recovered from multimodal messages. */
+      attachments?: ChatAttachment[];
     }
   | {
       role: 'tool';
