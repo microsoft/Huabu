@@ -169,6 +169,10 @@ body,
   pointer-events: none !important;
 }
 
+.noteview-readonly p {
+  font-size: var(--text-sm);
+}
+
 .noteview-readonly h1 {
   font-size: 1.4rem !important;
 }

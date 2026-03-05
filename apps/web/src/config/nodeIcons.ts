@@ -7,12 +7,12 @@
  */
 
 import {
-  FileText,
+  BookOpen,
   Film,
   Globe,
   Image as ImageIcon,
-  SquareDashed,
-  ClipboardPen,
+  Frame,
+  Clipboard,
   Type,
 } from 'lucide-react';
 
@@ -27,16 +27,16 @@ import type { LucideIcon } from 'lucide-react';
  * import { NODE_ICON } from '@/config/nodeIcons';
  * const Icon = NODE_ICON.note;
  * <Icon size={14} />
- * ```<ClipboardPen />
+ * ```
  */
 export const NODE_ICON: Record<CanvasNodeType, LucideIcon> = {
-  note: ClipboardPen,
+  note: Clipboard,
   text: Type,
   image: ImageIcon,
-  pdf: FileText,
+  pdf: BookOpen,
   video: Film,
   web: Globe,
-  frame: SquareDashed,
+  frame: Frame,
 };
 
 /**

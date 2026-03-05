@@ -4,14 +4,19 @@
  * Uses ChatAgent internally but maintains existing API contract for backward compatibility.
  */
 
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { createId } from '@sediment/shared';
 
 import { ChatAgent } from './chat.agent.js';
 import { SYSTEM_PROMPT } from '../../prompt/system.js';
+import { getArtifactsDir } from '../artifact/utils.js';
 import { buildContext } from '../knowledge/index.js';
 
 import type {
+  ChatAttachment,
   ChatHistoryItem,
   ChatHistoryResponse,
   ChatStreamUpdatePayload,
@@ -46,6 +51,87 @@ function collectSourceIds(node: SelectedNodeDetail): string[] {
     ids.push(...collectSourceIds(child));
   }
   return ids;
+}
+
+/**
+ * Resolve an attachment image URL to a base64 data URL.
+ * Local artifact URLs (e.g. http://localhost:3000/api/artifact/xxx.png) are
+ * read from disk and converted to inline data URLs so the LLM API can see them.
+ * Already-valid data URLs or remote URLs are returned as-is.
+ */
+async function resolveImageUrl(url: string): Promise<string> {
+  if (url.startsWith('data:')) return url;
+
+  // Match local artifact path: .../api/artifact/<filename>
+  const artifactMatch = /\/api\/artifact\/([^/?#]+)/.exec(url);
+  if (artifactMatch) {
+    const filename = path.basename(artifactMatch[1]);
+    const filePath = path.resolve(getArtifactsDir(), filename);
+
+    // Guard against path traversal
+    if (!filePath.startsWith(path.resolve(getArtifactsDir()))) {
+      console.warn(`Blocked path traversal attempt: ${artifactMatch[1]}`);
+      return url;
+    }
+
+    try {
+      const buffer = await readFile(filePath);
+      const ext = path.extname(filename).toLowerCase();
+      const MIME_MAP: Record<string, string> = {
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.webp': 'image/webp',
+      };
+      const mime = MIME_MAP[ext] ?? 'image/png';
+      return `data:${mime};base64,${buffer.toString('base64')}`;
+    } catch (err) {
+      console.warn(`Failed to read artifact: ${filePath}`, err);
+      return url;
+    }
+  }
+
+  // External URL — return as-is (may fail if not reachable by the LLM API)
+  return url;
+}
+
+/**
+ * Build the HumanMessage for the agent.
+ * When attachments are present the message uses a multimodal content array
+ * so the LLM can see both images and text in a single turn.
+ * Image URLs pointing to local artifacts are converted to base64 data URLs.
+ */
+async function buildHumanMessage(
+  text: string,
+  attachments: ChatAttachment[] | undefined,
+): Promise<HumanMessage> {
+  if (!attachments || attachments.length === 0) {
+    return new HumanMessage(text);
+  }
+
+  const parts: Array<
+    | { type: 'text'; text: string }
+    | { type: 'image_url'; image_url: { url: string; detail?: string } }
+  > = [{ type: 'text', text }];
+
+  for (const att of attachments) {
+    const dataUrl = await resolveImageUrl(att.url);
+    parts.push({
+      type: 'image_url',
+      image_url: { url: dataUrl, detail: 'high' },
+    });
+
+    // Append extracted text if available
+    if (att.extractedText && att.extractedText.trim().length > 0) {
+      const label = att.label ?? 'attachment';
+      parts.push({
+        type: 'text',
+        text: `[Extracted text from ${label}]:\n${att.extractedText}`,
+      });
+    }
+  }
+
+  return new HumanMessage({ content: parts });
 }
 
 const chatRoutes: FastifyPluginAsync = async (
@@ -95,9 +181,11 @@ const chatRoutes: FastifyPluginAsync = async (
           .map((m) => {
             const role = getMessageRole(m);
             if (role === 'user' || role === 'assistant') {
+              const attachments = extractAttachments(m);
               return {
                 role,
                 content: getMessageContent(m),
+                ...(attachments.length > 0 && { attachments }),
               };
             }
             if (role === 'tool') {
@@ -139,7 +227,7 @@ const chatRoutes: FastifyPluginAsync = async (
   fastify.post<{ Body: SendMessageRequest; Reply: SendMessageResponse }>(
     '/',
     async function (request, reply) {
-      const { content, threadId, canvasContext } = request.body;
+      const { content, threadId, canvasContext, attachments } = request.body;
       const resolvedThreadId = getOrCreateThreadId(threadId);
 
       // Collect knowledge-base source IDs from selected nodes (including
@@ -192,12 +280,13 @@ const chatRoutes: FastifyPluginAsync = async (
         const isExisting =
           state && Array.isArray(state.messages) && state.messages.length > 0;
 
-        // Prepare inputs
+        // Prepare inputs — build a multimodal HumanMessage when attachments are present
+        const userMessage = await buildHumanMessage(content, attachments);
         const inputs = {
           selectionContext: contextString.length > 0 ? contextString : null,
           messages: [
             ...(isExisting ? [] : [new SystemMessage(SYSTEM_PROMPT)]),
-            new HumanMessage(content),
+            userMessage,
           ],
         };
 
@@ -256,9 +345,53 @@ const chatRoutes: FastifyPluginAsync = async (
     }
 
     const content = (message as { content?: unknown }).content;
-    return typeof content === 'string'
-      ? content
-      : JSON.stringify(content ?? '');
+    if (typeof content === 'string') return content;
+
+    // Multimodal content: extract only the user's own text, skipping
+    // "[Extracted text from ...]" annotations injected by buildHumanMessage.
+    if (Array.isArray(content)) {
+      return content
+        .filter(
+          (part): part is { type: 'text'; text: string } =>
+            typeof part === 'object' &&
+            part !== null &&
+            part.type === 'text' &&
+            typeof part.text === 'string' &&
+            !part.text.startsWith('[Extracted text from '),
+        )
+        .map((part) => part.text)
+        .join('\n');
+    }
+
+    return JSON.stringify(content ?? '');
+  }
+
+  /**
+   * Extract ChatAttachment[] from a multimodal HumanMessage.
+   * Recovers image_url parts so the frontend can render thumbnails after refresh.
+   */
+  function extractAttachments(message: unknown): ChatAttachment[] {
+    if (typeof message !== 'object' || message === null) return [];
+    const content = (message as { content?: unknown }).content;
+    if (!Array.isArray(content)) return [];
+
+    return content
+      .filter(
+        (
+          part,
+        ): part is {
+          type: 'image_url';
+          image_url: { url: string; detail?: string };
+        } =>
+          typeof part === 'object' &&
+          part !== null &&
+          part.type === 'image_url' &&
+          typeof part.image_url?.url === 'string',
+      )
+      .map((part) => ({
+        type: 'image' as const,
+        url: part.image_url.url,
+      }));
   }
 
   /**

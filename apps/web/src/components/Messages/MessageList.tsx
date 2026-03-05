@@ -26,7 +26,13 @@ export const MessageList = ({
     <div className="flex-1 space-y-1 overflow-x-visible overflow-y-auto">
       {messages.map((msg) => {
         if (msg.role === 'user') {
-          return <UserMessage key={msg.id} content={msg.content} />;
+          return (
+            <UserMessage
+              key={msg.id}
+              content={msg.content}
+              attachments={msg.attachments}
+            />
+          );
         }
 
         if (msg.role === 'assistant') {

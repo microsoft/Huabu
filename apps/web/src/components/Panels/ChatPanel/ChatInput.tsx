@@ -1,5 +1,7 @@
-import { ArrowUp } from 'lucide-react';
+import { ArrowUp, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+
+import { useChatStore } from '@/store/chatStore';
 
 import { ModeSelector, type ChatMode } from './ModeSelector';
 import { SourceCount } from './SelectedNodeRefs';
@@ -23,6 +25,12 @@ export const ChatInput = ({
   const [mode, setMode] = useState<ChatMode>('chat');
   const isSubmitDisabled = disabled || !value.trim();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // Pending attachments from the store
+  const pendingAttachments = useChatStore((s) => s.pendingAttachments);
+  const removePendingAttachment = useChatStore(
+    (s) => s.removePendingAttachment,
+  );
 
   // Dynamic placeholder based on mode
   const currentPlaceholder =
@@ -76,6 +84,32 @@ export const ChatInput = ({
     <div>
       <form onSubmit={handleSubmit} className="w-full">
         <div className="border-border rounded-2xl border bg-white p-3">
+          {/* ── Pending attachment thumbnails ── */}
+          {pendingAttachments.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-2">
+              {pendingAttachments.map((att, i) => (
+                <div
+                  key={att.url}
+                  className="border-border group relative overflow-hidden rounded border"
+                >
+                  <img
+                    src={att.url}
+                    alt={att.label ?? 'Attached image'}
+                    className="h-16 w-24 object-cover"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removePendingAttachment(i)}
+                    className="absolute top-0.5 right-0.5 rounded-full bg-black/50 p-0.5 text-white opacity-0 transition-opacity group-hover:opacity-100"
+                    title="Remove attachment"
+                  >
+                    <X size={10} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           <textarea
             ref={textareaRef}
             value={value}

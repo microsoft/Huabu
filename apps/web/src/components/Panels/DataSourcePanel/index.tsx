@@ -161,8 +161,8 @@ export const DataSourcePanel = ({
             type="button"
             className={
               tab === 'canvas'
-                ? 'bg-background text-foreground rounded px-2 py-1 text-sm font-medium'
-                : 'text-muted-foreground hover:text-foreground rounded px-2 py-1 text-sm font-semibold'
+                ? 'bg-background text-foreground rounded px-2 py-1'
+                : 'hover:text-foreground rounded px-2 py-1'
             }
             onClick={() => setTab('canvas')}
           >
@@ -172,8 +172,8 @@ export const DataSourcePanel = ({
             type="button"
             className={
               tab === 'sources'
-                ? 'bg-background text-foreground rounded px-2 py-1 text-sm font-semibold'
-                : 'text-muted-foreground hover:text-foreground rounded px-2 py-1 text-sm font-semibold'
+                ? 'bg-background text-foreground rounded px-2 py-1'
+                : 'hover:text-foreground rounded px-2 py-1'
             }
             onClick={() => setTab('sources')}
           >

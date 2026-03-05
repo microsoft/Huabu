@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Document } from 'react-pdf';
 
 import { uploadImage } from '@/api/artifact';
+import { useChatStore } from '@/store/chatStore';
 
 import { FloatingDragHandle } from './FloatingDragHandle';
 import { PDFPageWithOverlay } from './PDFPageWithOverlay';
@@ -11,6 +12,7 @@ import { GhostButton } from '../Common/GhostButton';
 
 import type { PreviewComponentProps } from './NotePreview';
 import type { AreaCapturedEvent, NormalizedRect } from './PDFPageWithOverlay';
+import type { ChatAttachment } from '@sediment/shared';
 
 /**
  * When CSS scale-up exceeds this ratio the canvas is re-rendered at the
@@ -35,6 +37,9 @@ type PendingCaptureDrag = {
 
 export const PDFPreview = ({ data }: PreviewComponentProps) => {
   const src = typeof data.src === 'string' ? data.src : '';
+  const sourceId =
+    typeof data.sourceId === 'string' ? data.sourceId : undefined;
+  const addPendingAttachment = useChatStore((s) => s.addPendingAttachment);
   const [numPages, setNumPages] = useState<number | null>(null);
   const [captureMode, setCaptureMode] = useState(false);
   const [pendingCapture, setPendingCapture] =
@@ -171,6 +176,16 @@ export const PDFPreview = ({ data }: PreviewComponentProps) => {
     [setPendingCapture],
   );
 
+  // ---------------------------------------------------------------------------
+  // Send captured area to chat as a pending attachment
+  // ---------------------------------------------------------------------------
+  const handleSendToChat = useCallback(
+    (attachment: ChatAttachment) => {
+      addPendingAttachment(attachment);
+    },
+    [addPendingAttachment],
+  );
+
   return (
     <div className="relative flex h-full flex-col">
       {/* ── PDF pages ── */}
@@ -252,7 +267,9 @@ export const PDFPreview = ({ data }: PreviewComponentProps) => {
           imageUrl={pendingCapture.imageUrl}
           capturing={pendingCapture.capturing}
           position={pendingCapture.position}
+          originSourceId={sourceId}
           onDismiss={() => setPendingCapture(null)}
+          onSendToChat={handleSendToChat}
         />
       )}
     </div>

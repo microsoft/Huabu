@@ -1,13 +1,15 @@
 import clsx from 'clsx';
-import { Loader2 } from 'lucide-react';
+import { Loader2, MessageSquare, Plus } from 'lucide-react';
 import { useCallback, useRef } from 'react';
 
 import { setDragPayload } from '@/utils/dragDrop';
 
 import { NODE_ICON } from '../../config/nodeIcons';
 import { DragToCanvasHandleButton } from '../Common/DragToCanvasHandleButton';
+import { GhostButton } from '../Common/GhostButton';
 import { Popover } from '../Common/Popover';
 
+import type { ChatAttachment } from '@sediment/shared';
 import type { FC } from 'react';
 
 type FloatingDragHandleProps = {
@@ -24,7 +26,12 @@ type FloatingDragHandleProps = {
   imageUrl?: string | null;
   capturing?: boolean;
 
+  /** Optional source node ID for provenance tracking. */
+  originSourceId?: string;
+
   onDismiss: () => void;
+  /** Called when the user clicks "Send to Chat". */
+  onSendToChat?: (attachment: ChatAttachment) => void;
 };
 
 /**
@@ -41,7 +48,9 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
   sourceId,
   imageUrl,
   capturing = false,
+  originSourceId,
   onDismiss,
+  onSendToChat,
 }) => {
   const hasText = text.trim().length > 0;
   const isImageReady = !!imageUrl && !capturing;
@@ -81,8 +90,21 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
     onDismiss();
   }, [onDismiss]);
 
+  const handleSendToChat = useCallback(() => {
+    if (!onSendToChat || !imageUrl) return;
+    const attachment: ChatAttachment = {
+      type: 'image',
+      url: imageUrl,
+      extractedText: hasText ? text : undefined,
+      label: 'PDF capture',
+      originSourceId,
+    };
+    onSendToChat(attachment);
+    onDismiss();
+  }, [onSendToChat, imageUrl, hasText, text, originSourceId, onDismiss]);
+
   const dragBtnClass = clsx(
-    'flex shrink-0 cursor-grab items-center gap-1 px-2.5 py-1.5',
+    'flex shrink-0 cursor-grab items-center justify-center gap-1 px-2.5 py-1.5',
     'text-xs text-foreground',
     'hover:bg-theme-100 active:cursor-grabbing',
   );
@@ -91,7 +113,7 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
     <Popover
       position={position}
       onDismiss={guardedDismiss}
-      className="flex flex-col"
+      className="grid auto-rows-auto"
     >
       {/* ── Text drag button ── */}
       {hasText && (
@@ -118,10 +140,23 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
           onDragStart={handleImageDragStart}
           onDragEnd={handleDragEnd}
           className={dragBtnClass}
-          title="Drag captured region as an image"
+          title="Drag captured area as an image"
         >
           <NODE_ICON.image size={14} className="shrink-0" />
         </DragToCanvasHandleButton>
+      )}
+
+      {/* ── Send to Chat button ── */}
+      {isImageReady && onSendToChat && imageUrl && (
+        <GhostButton
+          className={dragBtnClass}
+          title="Send captured area to chat"
+          onClick={handleSendToChat}
+        >
+          {/* Plus icon matching the GripVertical icon width in DragToCanvasHandleButton */}
+          <Plus size={10} className="shrink-0" />
+          <MessageSquare size={14} className="shrink-0" />
+        </GhostButton>
       )}
     </Popover>
   );

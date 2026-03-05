@@ -17,7 +17,7 @@ export const AIMessage = ({ content, isStreaming }: AIMessageProps) => {
   return (
     <div className="flex justify-start">
       <div className="flex w-full flex-col gap-1">
-        <div className="text-m text-main ml-1 rounded-2xl border border-none bg-white px-4 pt-2">
+        <div className="text-main ml-1 rounded-2xl border border-none bg-white px-4 pt-2 text-sm">
           <div className="leading-relaxed">
             <BlockNoteCard content={content} />
           </div>

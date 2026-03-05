@@ -9,6 +9,7 @@ import { AgentAPI } from './agent.api';
 
 import type {
   AgentBaseContext,
+  ChatAttachment,
   ChatHistoryResponse,
   ChatStreamUpdatePayload,
   SendMessageRequest,
@@ -50,11 +51,13 @@ export const chatApi = {
     threadId: string,
     canvasContext: AgentBaseContext | undefined,
     callbacks: StreamCallbacks,
+    attachments?: ChatAttachment[],
   ): Promise<void> => {
     const body: SendMessageRequest = {
       content,
       threadId,
       canvasContext,
+      attachments: attachments?.length ? attachments : undefined,
     };
 
     // Backend sends ChatStreamUpdatePayload directly in SSE data
