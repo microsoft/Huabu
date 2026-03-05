@@ -140,7 +140,7 @@ export const NodeWrapper = memo(
     return (
       <>
         <NodeResizer
-          color="#e6e6e6"
+          color="var(--color-theme-300)"
           isVisible={selected && resizable}
           minWidth={
             type === 'pdf' || type === 'note' || type === 'web' ? 120 : minWidth
@@ -154,6 +154,15 @@ export const NodeWrapper = memo(
           onResizeStart={handleResizeStart}
           onResize={handleResize}
           onResizeEnd={handleResizeEnd}
+          handleStyle={{
+            width: 8,
+            height: 8,
+            borderRadius: 0,
+          }}
+          lineStyle={{
+            borderWidth: 8,
+          }}
+          lineClassName="!border-transparent"
         />
         {toolbar && (
           <NodeToolbar
