@@ -1,5 +1,6 @@
 import clsx from 'clsx';
 import { ImageIcon, Loader2, StickyNote } from 'lucide-react';
+import { useCallback, useRef } from 'react';
 
 import { setDragPayload } from '@/utils/dragDrop';
 
@@ -44,24 +45,40 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
   const hasText = text.trim().length > 0;
   const isImageReady = !!imageUrl && !capturing;
 
+  // Track whether a drag is in progress so we can suppress Popover's
+  // outside-click dismiss until the drop completes.
+  const draggingRef = useRef(false);
+
   const handleTextDragStart = (e: React.DragEvent) => {
+    draggingRef.current = true;
     setDragPayload(e, {
       kind: 'note',
       origin: { type: 'user-drag-capture', sourceId },
       data: { content: text },
     });
-    setTimeout(onDismiss, 0);
   };
 
   const handleImageDragStart = (e: React.DragEvent) => {
     if (!imageUrl) return;
+    draggingRef.current = true;
     setDragPayload(e, {
       kind: 'image',
       origin: { type: 'user-drag-capture', sourceId },
       data: { src: imageUrl },
     });
-    setTimeout(onDismiss, 0);
   };
+
+  // Dismiss only after the drag operation finishes (drop or cancel)
+  const handleDragEnd = useCallback(() => {
+    draggingRef.current = false;
+    onDismiss();
+  }, [onDismiss]);
+
+  // Guard dismiss: ignore outside-click while a drag is active
+  const guardedDismiss = useCallback(() => {
+    if (draggingRef.current) return;
+    onDismiss();
+  }, [onDismiss]);
 
   const dragBtnClass = clsx(
     'flex shrink-0 cursor-grab items-center gap-1 px-2.5 py-1.5',
@@ -72,7 +89,7 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
   return (
     <Popover
       position={position}
-      onDismiss={onDismiss}
+      onDismiss={guardedDismiss}
       className="flex flex-col"
     >
       {/* ── Text drag button ── */}
@@ -80,6 +97,7 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
         <DragToCanvasHandleButton
           iconSize={10}
           onDragStart={handleTextDragStart}
+          onDragEnd={handleDragEnd}
           className={dragBtnClass}
           title="Drag selected text as a note"
         >
@@ -97,6 +115,7 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
         <DragToCanvasHandleButton
           iconSize={10}
           onDragStart={handleImageDragStart}
+          onDragEnd={handleDragEnd}
           className={dragBtnClass}
           title="Drag captured region as an image"
         >
