@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { ScanText } from 'lucide-react';
+import { Scan } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Document } from 'react-pdf';
 
@@ -11,6 +11,15 @@ import { GhostButton } from '../Common/GhostButton';
 
 import type { PreviewComponentProps } from './NotePreview';
 import type { AreaCapturedEvent, NormalizedRect } from './PDFPageWithOverlay';
+
+/**
+ * When CSS scale-up exceeds this ratio the canvas is re-rendered at the
+ * current container width so the PDF stays crisp.  CSS transform bridges
+ * the visual gap until the new canvas is ready → no flash.
+ */
+const UPSCALE_THRESHOLD = 1.15;
+/** Debounce delay (ms) before committing a high-res re-render. */
+const RERENDER_DEBOUNCE_MS = 400;
 
 type PendingCaptureDrag = {
   /** Text extracted from the captured region (empty string = none found) */
@@ -32,11 +41,11 @@ export const PDFPreview = ({ data }: PreviewComponentProps) => {
     useState<PendingCaptureDrag | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState<number>(0);
-  // renderedWidth is captured once and never updated — the PDF canvas is
-  // rendered at this fixed size, and CSS transform handles all subsequent
-  // container resizes.  This avoids react-pdf re-renders (and blank flashes)
-  // entirely.
-  const renderedWidthRef = useRef<number>(0);
+  // The width at which the PDF canvas is actually rendered.  Starts at 0 and
+  // is updated when the container is first measured *and* whenever the
+  // container grows significantly (debounced) so the canvas stays sharp.
+  const [renderedWidth, setRenderedWidth] = useState<number>(0);
+  const rerenderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const el = scrollContainerRef.current;
@@ -44,16 +53,42 @@ export const PDFPreview = ({ data }: PreviewComponentProps) => {
     const observer = new ResizeObserver(([entry]) => {
       const available = entry.contentRect.width;
       if (available > 0) {
-        // Lock the render width to the first measurement
-        if (renderedWidthRef.current === 0) {
-          renderedWidthRef.current = available;
-        }
         setContainerWidth(available);
       }
     });
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
+
+  // Debounced re-render: when the container is significantly larger than the
+  // rendered canvas, schedule a state update so react-pdf re-renders at full
+  // resolution.  CSS scale bridges the visual gap during the debounce window.
+  useEffect(() => {
+    // First measurement — render immediately without debounce.
+    if (renderedWidth === 0 && containerWidth > 0) {
+      setRenderedWidth(containerWidth);
+      return;
+    }
+
+    if (containerWidth <= 0 || renderedWidth <= 0) return;
+
+    const ratio = containerWidth / renderedWidth;
+    if (ratio > UPSCALE_THRESHOLD) {
+      // Clear any pending timer and schedule a new one
+      if (rerenderTimerRef.current) clearTimeout(rerenderTimerRef.current);
+      rerenderTimerRef.current = setTimeout(() => {
+        setRenderedWidth(containerWidth);
+        rerenderTimerRef.current = null;
+      }, RERENDER_DEBOUNCE_MS);
+    }
+
+    return () => {
+      if (rerenderTimerRef.current) {
+        clearTimeout(rerenderTimerRef.current);
+        rerenderTimerRef.current = null;
+      }
+    };
+  }, [containerWidth, renderedWidth]);
 
   // Dismiss the floating drag handle on scroll
   useEffect(() => {
@@ -64,9 +99,9 @@ export const PDFPreview = ({ data }: PreviewComponentProps) => {
     return () => el.removeEventListener('scroll', handleScroll);
   }, [pendingCapture]);
 
-  const renderedWidth = renderedWidthRef.current;
-
-  // CSS transform scales the already-rendered canvas — no re-render needed.
+  // CSS transform scales the already-rendered canvas in real-time.
+  // Once the debounced re-render fires, scaleFactor returns to ~1 and the
+  // canvas is at native resolution again → no visual jump.
   const scaleFactor =
     renderedWidth > 0 && containerWidth > 0
       ? containerWidth / renderedWidth
@@ -194,7 +229,7 @@ export const PDFPreview = ({ data }: PreviewComponentProps) => {
       <div className="pointer-events-none absolute top-3 left-3 z-10">
         <div className="text-muted-foreground border-border pointer-events-auto flex flex-col items-center gap-2 rounded-sm border bg-white p-0">
           <GhostButton
-            title="Capture to canvas"
+            title="Select Area"
             className={clsx(captureMode && 'text-theme-500 bg-background')}
             onClick={() => {
               const next = !captureMode;
@@ -202,7 +237,7 @@ export const PDFPreview = ({ data }: PreviewComponentProps) => {
               if (!next) setPendingCapture(null);
             }}
           >
-            <ScanText size={14} />
+            <Scan size={14} />
           </GhostButton>
         </div>
       </div>
