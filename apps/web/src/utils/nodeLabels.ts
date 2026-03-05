@@ -76,3 +76,36 @@ export function generateNextLabel(
 
   return `${prefix} ${nextNumber}`;
 }
+
+/**
+ * Deduplicate a label against existing labels.
+ * If the label is unique, return it as-is.
+ * If it already exists, append or increment a numeric suffix:
+ *   "photo.png" → "photo.png 2" → "photo.png 3" etc.
+ *
+ * This is used by handleAddNode / handlePasteNodes so that every node
+ * entering the canvas gets a unique label while keeping the user's intent.
+ */
+export function deduplicateLabel(
+  label: string,
+  existingLabels: (string | undefined | null)[],
+): string {
+  const existing = new Set(
+    existingLabels.filter((l): l is string => typeof l === 'string'),
+  );
+
+  // If unique already, use as-is
+  if (!existing.has(label)) return label;
+
+  // Try "label 2", "label 3", ...
+  // First strip existing trailing " N" if present, so "Image 1" doesn't become "Image 1 2"
+  const trailingSuffix = label.match(/^(.+?) (\d+)$/);
+  const base = trailingSuffix ? trailingSuffix[1] : label;
+  const startNum = trailingSuffix ? parseInt(trailingSuffix[2], 10) + 1 : 1;
+
+  let n = startNum;
+  while (existing.has(`${base} ${n}`)) {
+    n++;
+  }
+  return `${base} ${n}`;
+}
