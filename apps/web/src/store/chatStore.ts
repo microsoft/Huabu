@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
 import type { ChatMessage } from '../components/Messages/types';
+import type { ChatAttachment } from '@sediment/shared';
 
 interface ChatState {
   /** In-memory message list — not persisted to localStorage. */
@@ -14,6 +15,13 @@ interface ChatState {
   /** Last action type - determines which checkpoint to load on refresh */
   lastAction: 'chat' | 'research';
 
+  /**
+   * Staged attachments waiting to be sent with the next message.
+   * Populated by external actions (e.g. PDF capture "Send to Chat") and
+   * consumed when the user submits a chat message.
+   */
+  pendingAttachments: ChatAttachment[];
+
   // Actions
   addMessage: (message: ChatMessage) => void;
   updateMessage: (
@@ -24,6 +32,13 @@ interface ChatState {
   setHistoryLoaded: (loaded: boolean) => void;
   setLastAction: (action: 'chat' | 'research') => void;
   clearMessages: () => void;
+
+  /** Stage an attachment (e.g. from PDF capture) to be sent with the next chat message. */
+  addPendingAttachment: (attachment: ChatAttachment) => void;
+  /** Remove a staged attachment by index. */
+  removePendingAttachment: (index: number) => void;
+  /** Clear all staged attachments (called after message is sent). */
+  clearPendingAttachments: () => void;
 }
 
 export const useChatStore = create<ChatState>()(
@@ -33,6 +48,7 @@ export const useChatStore = create<ChatState>()(
       threadId: createId('thread'),
       isHistoryLoaded: false,
       lastAction: 'chat',
+      pendingAttachments: [],
 
       addMessage: (message) =>
         set((state) => ({ messages: [...state.messages, message] })),
@@ -56,7 +72,22 @@ export const useChatStore = create<ChatState>()(
           threadId: createId('thread'),
           isHistoryLoaded: true,
           lastAction: 'chat',
+          pendingAttachments: [],
         }),
+
+      addPendingAttachment: (attachment) =>
+        set((state) => ({
+          pendingAttachments: [...state.pendingAttachments, attachment],
+        })),
+
+      removePendingAttachment: (index) =>
+        set((state) => ({
+          pendingAttachments: state.pendingAttachments.filter(
+            (_, i) => i !== index,
+          ),
+        })),
+
+      clearPendingAttachments: () => set({ pendingAttachments: [] }),
     }),
     {
       name: 'sediment-chat',

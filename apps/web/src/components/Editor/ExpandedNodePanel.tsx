@@ -1,16 +1,7 @@
-import {
-  ArrowLeft,
-  Columns2,
-  Expand,
-  FileText,
-  Globe,
-  ImageIcon,
-  PlayCircle,
-  StickyNote,
-  X,
-} from 'lucide-react';
+import { ArrowLeft, Columns2, X } from 'lucide-react';
 import { useEffect, useMemo } from 'react';
 
+import { getNodeIcon } from '../../config/nodeIcons.ts';
 import useCanvasStore from '../../store/canvasStore.ts';
 import { usePreviewStore } from '../../store/previewStore.ts';
 import { GhostButton } from '../Common/GhostButton.tsx';
@@ -19,18 +10,11 @@ import { NodePreviewContent } from '../Nodes/NodePreviewContent.tsx';
 // Helper to get meta info (icon, title) for the header
 const getOverlayMeta = (type: string, data: Record<string, unknown>) => {
   const label = data.label as string;
-
-  const iconMap: Record<string, React.ReactNode> = {
-    note: <StickyNote size={14} />,
-    web: <Globe size={14} />,
-    pdf: <FileText size={14} />,
-    image: <ImageIcon size={14} />,
-    video: <PlayCircle size={14} />,
-  };
+  const Icon = getNodeIcon(type);
 
   return {
     title: label,
-    icon: iconMap[type] || <Expand size={14} />,
+    icon: <Icon size={14} />,
   };
 };
 

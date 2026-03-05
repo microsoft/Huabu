@@ -1,38 +1,56 @@
 import clsx from 'clsx';
-import { Crop } from 'lucide-react';
+import { Scan } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Document } from 'react-pdf';
 
 import { uploadImage } from '@/api/artifact';
+import { useChatStore } from '@/store/chatStore';
 
 import { FloatingDragHandle } from './FloatingDragHandle';
 import { PDFPageWithOverlay } from './PDFPageWithOverlay';
+import { GhostButton } from '../Common/GhostButton';
 
 import type { PreviewComponentProps } from './NotePreview';
-import type { AreaCapturedEvent } from './PDFPageWithOverlay';
+import type { AreaCapturedEvent, NormalizedRect } from './PDFPageWithOverlay';
+import type { ChatAttachment } from '@sediment/shared';
+
+/**
+ * When CSS scale-up exceeds this ratio the canvas is re-rendered at the
+ * current container width so the PDF stays crisp.  CSS transform bridges
+ * the visual gap until the new canvas is ready → no flash.
+ */
+const UPSCALE_THRESHOLD = 1.15;
+/** Debounce delay (ms) before committing a high-res re-render. */
+const RERENDER_DEBOUNCE_MS = 400;
 
 type PendingCaptureDrag = {
   /** Text extracted from the captured region (empty string = none found) */
   text: string;
   imageUrl: string | null;
   capturing: boolean;
-  uploadError: boolean;
   position: { x: number; y: number };
-  retryFn: () => void;
+  /** Which page the selection was drawn on (0-based) */
+  pageIndex: number;
+  /** The selection rectangle (normalized 0–1) to persist on the page */
+  captureRect: NormalizedRect;
 };
 
 export const PDFPreview = ({ data }: PreviewComponentProps) => {
   const src = typeof data.src === 'string' ? data.src : '';
+  const sourceId =
+    typeof data.sourceId === 'string' ? data.sourceId : undefined;
+  const addPendingAttachment = useChatStore((s) => s.addPendingAttachment);
   const [numPages, setNumPages] = useState<number | null>(null);
+  const [captureMode, setCaptureMode] = useState(false);
   const [pendingCapture, setPendingCapture] =
     useState<PendingCaptureDrag | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState<number>(0);
-  // renderedWidth is captured once and never updated — the PDF canvas is
-  // rendered at this fixed size, and CSS transform handles all subsequent
-  // container resizes.  This avoids react-pdf re-renders (and blank flashes)
-  // entirely.
-  const renderedWidthRef = useRef<number>(0);
+  // The width at which the PDF canvas is actually rendered.  Starts at 0 and
+  // is updated when the container is first measured *and* whenever the
+  // container grows significantly (debounced) so the canvas stays sharp.
+  const [renderedWidth, setRenderedWidth] = useState<number>(0);
+  const rerenderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const el = scrollContainerRef.current;
@@ -40,10 +58,6 @@ export const PDFPreview = ({ data }: PreviewComponentProps) => {
     const observer = new ResizeObserver(([entry]) => {
       const available = entry.contentRect.width;
       if (available > 0) {
-        // Lock the render width to the first measurement
-        if (renderedWidthRef.current === 0) {
-          renderedWidthRef.current = available;
-        }
         setContainerWidth(available);
       }
     });
@@ -51,9 +65,48 @@ export const PDFPreview = ({ data }: PreviewComponentProps) => {
     return () => observer.disconnect();
   }, []);
 
-  const renderedWidth = renderedWidthRef.current;
+  // Debounced re-render: when the container is significantly larger than the
+  // rendered canvas, schedule a state update so react-pdf re-renders at full
+  // resolution.  CSS scale bridges the visual gap during the debounce window.
+  useEffect(() => {
+    // First measurement — render immediately without debounce.
+    if (renderedWidth === 0 && containerWidth > 0) {
+      setRenderedWidth(containerWidth);
+      return;
+    }
 
-  // CSS transform scales the already-rendered canvas — no re-render needed.
+    if (containerWidth <= 0 || renderedWidth <= 0) return;
+
+    const ratio = containerWidth / renderedWidth;
+    if (ratio > UPSCALE_THRESHOLD) {
+      // Clear any pending timer and schedule a new one
+      if (rerenderTimerRef.current) clearTimeout(rerenderTimerRef.current);
+      rerenderTimerRef.current = setTimeout(() => {
+        setRenderedWidth(containerWidth);
+        rerenderTimerRef.current = null;
+      }, RERENDER_DEBOUNCE_MS);
+    }
+
+    return () => {
+      if (rerenderTimerRef.current) {
+        clearTimeout(rerenderTimerRef.current);
+        rerenderTimerRef.current = null;
+      }
+    };
+  }, [containerWidth, renderedWidth]);
+
+  // Dismiss the floating drag handle on scroll
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el || !pendingCapture) return;
+    const handleScroll = () => setPendingCapture(null);
+    el.addEventListener('scroll', handleScroll, { passive: true });
+    return () => el.removeEventListener('scroll', handleScroll);
+  }, [pendingCapture]);
+
+  // CSS transform scales the already-rendered canvas in real-time.
+  // Once the debounced re-render fires, scaleFactor returns to ~1 and the
+  // canvas is at native resolution again → no visual jump.
   const scaleFactor =
     renderedWidth > 0 && containerWidth > 0
       ? containerWidth / renderedWidth
@@ -70,15 +123,21 @@ export const PDFPreview = ({ data }: PreviewComponentProps) => {
   // Area-capture handler
   // ---------------------------------------------------------------------------
   const handleAreaCaptured = useCallback(
-    ({ position, getBlob, getText }: AreaCapturedEvent) => {
+    ({
+      position,
+      getBlob,
+      getText,
+      pageIndex,
+      captureRect,
+    }: AreaCapturedEvent) => {
       const doCapture = async () => {
         setPendingCapture({
           text: '',
           imageUrl: null,
           capturing: true,
-          uploadError: false,
           position,
-          retryFn: doCapture,
+          pageIndex,
+          captureRect,
         });
 
         // Run text extraction and image upload in parallel
@@ -107,7 +166,7 @@ export const PDFPreview = ({ data }: PreviewComponentProps) => {
         } catch {
           setPendingCapture((prev) => {
             if (!prev) return prev;
-            return { ...prev, capturing: false, uploadError: true };
+            return { ...prev, capturing: false };
           });
         }
       };
@@ -117,16 +176,18 @@ export const PDFPreview = ({ data }: PreviewComponentProps) => {
     [setPendingCapture],
   );
 
-  return (
-    <div className="flex h-full flex-col">
-      {/* ── Hint bar ── */}
-      <div className="border-border flex shrink-0 items-center gap-1.5 border-b px-3 py-1.5">
-        <Crop size={12} className="text-muted-foreground shrink-0" />
-        <span className="text-muted-foreground text-xs">
-          Draw a region on the page to capture text or image
-        </span>
-      </div>
+  // ---------------------------------------------------------------------------
+  // Send captured area to chat as a pending attachment
+  // ---------------------------------------------------------------------------
+  const handleSendToChat = useCallback(
+    (attachment: ChatAttachment) => {
+      addPendingAttachment(attachment);
+    },
+    [addPendingAttachment],
+  );
 
+  return (
+    <div className="relative flex h-full flex-col">
       {/* ── PDF pages ── */}
       <div
         ref={scrollContainerRef}
@@ -161,7 +222,13 @@ export const PDFPreview = ({ data }: PreviewComponentProps) => {
                   pageNumber={index + 1}
                   pageIndex={index}
                   pageWidth={renderedWidth > 0 ? renderedWidth : undefined}
+                  captureEnabled={captureMode}
                   onAreaCaptured={handleAreaCaptured}
+                  persistedRect={
+                    pendingCapture && pendingCapture.pageIndex === index
+                      ? pendingCapture.captureRect
+                      : undefined
+                  }
                 />
               ))}
             </Document>
@@ -173,6 +240,23 @@ export const PDFPreview = ({ data }: PreviewComponentProps) => {
         )}
       </div>
 
+      {/* ── Floating toolbar (top-left, vertical) ── */}
+      <div className="pointer-events-none absolute top-3 left-3 z-10">
+        <div className="text-muted-foreground border-border pointer-events-auto flex flex-col items-center gap-2 rounded-sm border bg-white p-0">
+          <GhostButton
+            title="Select Area"
+            className={clsx(captureMode && 'text-theme-500 bg-background')}
+            onClick={() => {
+              const next = !captureMode;
+              setCaptureMode(next);
+              if (!next) setPendingCapture(null);
+            }}
+          >
+            <Scan size={14} />
+          </GhostButton>
+        </div>
+      </div>
+
       {/* ── Floating drag handle (rendered via React Portal to document.body) ── */}
       {pendingCapture && (
         <FloatingDragHandle
@@ -182,10 +266,10 @@ export const PDFPreview = ({ data }: PreviewComponentProps) => {
           text={pendingCapture.text}
           imageUrl={pendingCapture.imageUrl}
           capturing={pendingCapture.capturing}
-          uploadError={pendingCapture.uploadError}
-          onRetry={pendingCapture.retryFn}
           position={pendingCapture.position}
+          originSourceId={sourceId}
           onDismiss={() => setPendingCapture(null)}
+          onSendToChat={handleSendToChat}
         />
       )}
     </div>

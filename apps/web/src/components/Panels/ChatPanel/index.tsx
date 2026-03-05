@@ -38,6 +38,10 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const updateMessage = useChatStore((state) => state.updateMessage);
   const setLastAction = useChatStore((state) => state.setLastAction);
   const clearMessages = useChatStore((state) => state.clearMessages);
+  const pendingAttachments = useChatStore((state) => state.pendingAttachments);
+  const clearPendingAttachments = useChatStore(
+    (state) => state.clearPendingAttachments,
+  );
 
   const getAgentContext = useCanvasStore((state) => state.getAgentContext);
   const canvasId = useCanvasStore((state) => state.canvasId);
@@ -106,6 +110,11 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
               id,
               role: m.role,
               content: m.content || '',
+              ...('attachments' in m &&
+                m.attachments &&
+                m.attachments.length > 0 && {
+                  attachments: m.attachments,
+                }),
             };
           },
         );
@@ -195,10 +204,16 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     // Record last action for checkpoint restoration
     setLastAction('chat');
 
+    // Snapshot and clear pending attachments before sending
+    const attachments =
+      pendingAttachments.length > 0 ? [...pendingAttachments] : undefined;
+    if (attachments) clearPendingAttachments();
+
     const userMessage: ChatMessage = {
       id: createId('message'),
       role: 'user',
       content: input,
+      attachments,
     };
 
     addMessage(userMessage);
@@ -262,6 +277,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           setIsLoading(false);
         },
       },
+      attachments,
     );
   };
 

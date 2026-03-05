@@ -1,7 +1,7 @@
 import { useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/shadcn';
 import { type Node, type NodeProps } from '@xyflow/react';
-import { StickyNote, Copy, Check, Fullscreen } from 'lucide-react';
+import { Copy, Check, Fullscreen } from 'lucide-react';
 import { useEffect, useState, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
@@ -36,12 +36,6 @@ export const NoteNode = ({ id, data, selected }: NodeProps<NoteNodeType>) => {
 
   const NoteToolbar = (
     <div className="flex w-full items-center justify-between gap-2">
-      {/* Label */}
-      <div className="text-muted-foreground">
-        <StickyNote size={14} />
-      </div>
-      {/* splitter  */}
-      <div className="bg-border h-3 w-px" />
       {/* Tools */}
       <div className="text-muted-foreground flex items-center gap-1">
         <GhostButton

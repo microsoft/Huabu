@@ -1,5 +1,5 @@
 import { type Node, type NodeProps } from '@xyflow/react';
-import { PlayCircle, PlaySquare, Fullscreen, Play } from 'lucide-react';
+import { PlayCircle, Fullscreen, Play } from 'lucide-react';
 
 import useCanvasStore from '@/store/canvasStore.ts';
 
@@ -15,13 +15,6 @@ export const VideoNode = ({ id, data, selected }: NodeProps<VideoNodeType>) => {
 
   const VideoToolbar = (
     <div className="flex w-full items-center justify-between gap-2">
-      {/* Label */}
-      <div className="text-muted-foreground">
-        <PlaySquare size={14} />
-      </div>
-      {/* splitter  */}
-      <div className="bg-border h-3 w-px" />
-
       {/* Tools */}
       <div className="text-muted-foreground flex items-center gap-1">
         <GhostButton
@@ -33,10 +26,6 @@ export const VideoNode = ({ id, data, selected }: NodeProps<VideoNodeType>) => {
         >
           <Fullscreen size={14} />
         </GhostButton>
-
-        {/*<GhostButton aria-label="Volume">*/}
-        {/*  <Volume2 size={14} />*/}
-        {/*</GhostButton>*/}
       </div>
     </div>
   );

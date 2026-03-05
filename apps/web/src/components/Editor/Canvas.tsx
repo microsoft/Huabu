@@ -478,6 +478,8 @@ export const Canvas: React.FC = () => {
         }
 
         if (payload.kind === 'note') {
+          const NOTE_DEFAULT_WIDTH = 400;
+          const NOTE_DEFAULT_HEIGHT = 300;
           newNode = {
             id: createId('node'),
             type: 'note',
@@ -489,7 +491,7 @@ export const Canvas: React.FC = () => {
                 : {}),
               origin: payload.origin,
             },
-            style: { width: 400, height: 300 },
+            style: { width: NOTE_DEFAULT_WIDTH, height: NOTE_DEFAULT_HEIGHT },
           };
         }
 

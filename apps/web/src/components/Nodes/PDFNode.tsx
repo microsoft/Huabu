@@ -1,6 +1,6 @@
 import { type Node, type NodeProps } from '@xyflow/react';
 import { clsx } from 'clsx';
-import { FileText, Download, Fullscreen } from 'lucide-react';
+import { Download, Fullscreen } from 'lucide-react';
 import { useCallback, useState, useRef } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 
@@ -43,12 +43,6 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
 
   const PDFToolbar = (
     <div className="flex w-full items-center justify-between gap-3">
-      {/* Label */}
-      <div className="text-muted-foreground">
-        <FileText size={14} />
-      </div>
-      {/* splitter  */}
-      <div className="bg-border h-3 w-px" />
       {/* Tools */}
       <div className="text-muted-foreground flex items-center gap-1">
         <GhostButton

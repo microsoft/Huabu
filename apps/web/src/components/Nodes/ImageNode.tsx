@@ -1,5 +1,5 @@
 import { type Node, type NodeProps } from '@xyflow/react';
-import { Fullscreen, ImageIcon } from 'lucide-react';
+import { Fullscreen } from 'lucide-react';
 
 import useCanvasStore from '@/store/canvasStore.ts';
 
@@ -15,12 +15,6 @@ export const ImageNode = ({ id, data, selected }: NodeProps<ImageNodeType>) => {
 
   const ImageToolbar = (
     <div className="flex w-full items-center justify-between gap-2">
-      {/* Label */}
-      <div className="text-muted-foreground">
-        <ImageIcon size={14} />
-      </div>
-      {/* splitter  */}
-      <div className="bg-border h-3 w-px" />
       {/*tools*/}
       <div className="text-muted-foreground flex items-center gap-1">
         <GhostButton
