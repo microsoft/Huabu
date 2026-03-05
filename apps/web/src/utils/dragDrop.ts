@@ -47,7 +47,7 @@ export type DragPayload = {
   origin: NodeOrigin;
 } & (WebDragPayload | NoteDragPayload | SourceDragPayload | ImageDragPayload);
 
-const createDragId = () => {
+export const createDragId = () => {
   const uuid = globalThis.crypto?.randomUUID?.();
   if (uuid) return uuid;
 

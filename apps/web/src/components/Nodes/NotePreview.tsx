@@ -1,7 +1,8 @@
-import { useCreateBlockNote } from '@blocknote/react';
+import { SideMenuController, useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/shadcn';
 import { useEffect, useRef, useState } from 'react';
 
+import { NoteEditorSideMenu } from '@/components/BlockNote/NoteEditorSideMenu';
 import { blockNoteShadcnOverrides } from '@/components/BlockNote/shadcnOverrides';
 import { loadBlockNoteContent } from '@/utils/blockNoteContent';
 
@@ -126,12 +127,13 @@ export const NotePreview = ({
   }, [markdown, contentJson, editor]);
 
   return (
-    <div className="custom-scrollbar h-full w-full overflow-auto bg-white px-1 py-3">
+    <div className="custom-scrollbar h-full w-full overflow-auto bg-white px-0 py-3">
       <BlockNoteView
         className="block-note-view"
         editor={editor}
         editable={!readOnly && !loading}
         shadCNComponents={blockNoteShadcnOverrides}
+        sideMenu={false}
         onChange={() => {
           if (readOnly) return;
           if (!onContentChange && !onDataChange) return;
@@ -148,7 +150,9 @@ export const NotePreview = ({
               ) || undefined;
           writePatch(newMarkdown, newJson, autoLabel);
         }}
-      />
+      >
+        {!readOnly && <SideMenuController sideMenu={NoteEditorSideMenu} />}
+      </BlockNoteView>
     </div>
   );
 };
