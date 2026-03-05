@@ -1,11 +1,12 @@
 import { useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/shadcn';
 import { type Node, type NodeProps } from '@xyflow/react';
-import { StickyNote, Copy, Check, Fullscreen } from 'lucide-react';
+import { Copy, Check, Fullscreen } from 'lucide-react';
 import { useEffect, useState, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
 import { NodeWrapper } from './NodeWrapper.tsx';
+import { NODE_ICON } from '../../config/nodeIcons.ts';
 import useCanvasStore from '../../store/canvasStore.ts';
 import { loadBlockNoteContent } from '../../utils/blockNoteContent.ts';
 import { copyToClipboard } from '../../utils/clipboard.ts';
@@ -38,7 +39,7 @@ export const NoteNode = ({ id, data, selected }: NodeProps<NoteNodeType>) => {
     <div className="flex w-full items-center justify-between gap-2">
       {/* Label */}
       <div className="text-muted-foreground">
-        <StickyNote size={14} />
+        <NODE_ICON.note size={14} />
       </div>
       {/* splitter  */}
       <div className="bg-border h-3 w-px" />

@@ -1,9 +1,10 @@
 import clsx from 'clsx';
-import { ImageIcon, Loader2, StickyNote } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { useCallback, useRef } from 'react';
 
 import { setDragPayload } from '@/utils/dragDrop';
 
+import { NODE_ICON } from '../../config/nodeIcons';
 import { DragToCanvasHandleButton } from '../Common/DragToCanvasHandleButton';
 import { Popover } from '../Common/Popover';
 
@@ -101,7 +102,7 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
           className={dragBtnClass}
           title="Drag selected text as a note"
         >
-          <StickyNote size={14} className="shrink-0" />
+          <NODE_ICON.note size={14} className="shrink-0" />
         </DragToCanvasHandleButton>
       )}
 
@@ -119,7 +120,7 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
           className={dragBtnClass}
           title="Drag captured region as an image"
         >
-          <ImageIcon size={14} className="shrink-0" />
+          <NODE_ICON.image size={14} className="shrink-0" />
         </DragToCanvasHandleButton>
       )}
     </Popover>

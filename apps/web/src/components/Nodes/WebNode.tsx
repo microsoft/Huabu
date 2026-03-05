@@ -1,10 +1,11 @@
 import { type Node, type NodeProps } from '@xyflow/react';
-import { Globe, Fullscreen, ArrowUpRight } from 'lucide-react';
+import { Fullscreen, ArrowUpRight } from 'lucide-react';
 import { useState, useEffect, useMemo } from 'react';
 
 import { getWebPreview } from '@/api/web';
 
 import { NodeWrapper } from './NodeWrapper.tsx';
+import { NODE_ICON } from '../../config/nodeIcons.ts';
 import useCanvasStore from '../../store/canvasStore.ts';
 import { GhostButton } from '../Common/GhostButton.tsx';
 
@@ -90,7 +91,7 @@ export const WebNode = ({ id, data, selected }: NodeProps<WebNodeType>) => {
         onClick={(e) => e.stopPropagation()}
         className="nodrag text-muted-foreground hover:text-theme-500 flex flex-1 cursor-pointer items-center gap-1 overflow-hidden text-xs font-medium transition-colors"
       >
-        <Globe size={14} />
+        <NODE_ICON.web size={14} />
         <span className="max-w-24 truncate">{data?.src || 'Website'}</span>
         <ArrowUpRight size={14} strokeWidth={2} />
       </a>

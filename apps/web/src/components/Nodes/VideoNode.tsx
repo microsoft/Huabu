@@ -1,9 +1,10 @@
 import { type Node, type NodeProps } from '@xyflow/react';
-import { PlayCircle, PlaySquare, Fullscreen, Play } from 'lucide-react';
+import { PlayCircle, Fullscreen, Play } from 'lucide-react';
 
 import useCanvasStore from '@/store/canvasStore.ts';
 
 import { NodeWrapper } from './NodeWrapper.tsx';
+import { NODE_ICON } from '../../config/nodeIcons.ts';
 import { GhostButton } from '../Common/GhostButton.tsx';
 
 import type { CanvasVideoNodeData } from './types.ts';
@@ -17,7 +18,7 @@ export const VideoNode = ({ id, data, selected }: NodeProps<VideoNodeType>) => {
     <div className="flex w-full items-center justify-between gap-2">
       {/* Label */}
       <div className="text-muted-foreground">
-        <PlaySquare size={14} />
+        <NODE_ICON.video size={14} />
       </div>
       {/* splitter  */}
       <div className="bg-border h-3 w-px" />

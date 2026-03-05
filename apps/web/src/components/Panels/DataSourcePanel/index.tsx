@@ -1,15 +1,8 @@
 import {
-  FileText,
-  Film,
-  Globe,
-  Image as ImageIcon,
   PanelLeftClose,
   PanelLeftOpen,
   Search,
   SlidersHorizontal,
-  SquareDashed,
-  StickyNote,
-  Type,
 } from 'lucide-react';
 import { useMemo, useState, useEffect } from 'react';
 
@@ -17,6 +10,7 @@ import { CanvasLayerTree } from './CanvasLayerTree';
 import { SourceLibraryTree } from './SourceLibraryTree';
 import { type DataSourceNodeLike, type DataSourceTreeItem } from './types';
 import { getSources, getSource, updateSource } from '../../../api/knowledge';
+import { getNodeIcon, NODE_TYPE_LABEL } from '../../../config/nodeIcons';
 import useCanvasStore from '../../../store/canvasStore';
 import { usePreviewStore } from '../../../store/previewStore';
 import { GhostButton } from '../../Common/GhostButton';
@@ -37,48 +31,15 @@ const ICON_SIZE = 14;
 const ICON_STROKE_WIDTH = 1.5;
 
 const getNodeTitleAndIcon = (nodeType: string | undefined) => {
-  switch (nodeType) {
-    case 'frame':
-      return {
-        title: 'Block',
-        icon: <SquareDashed size={ICON_SIZE} strokeWidth={ICON_STROKE_WIDTH} />,
-      };
-    case 'image':
-      return {
-        title: 'Image',
-        icon: <ImageIcon size={ICON_SIZE} strokeWidth={ICON_STROKE_WIDTH} />,
-      };
-    case 'video':
-      return {
-        title: 'Video',
-        icon: <Film size={ICON_SIZE} strokeWidth={ICON_STROKE_WIDTH} />,
-      };
-    case 'web':
-      return {
-        title: 'Website',
-        icon: <Globe size={ICON_SIZE} strokeWidth={ICON_STROKE_WIDTH} />,
-      };
-    case 'pdf':
-      return {
-        title: 'PDF',
-        icon: <FileText size={ICON_SIZE} strokeWidth={ICON_STROKE_WIDTH} />,
-      };
-    case 'note':
-      return {
-        title: 'Note',
-        icon: <StickyNote size={ICON_SIZE} strokeWidth={ICON_STROKE_WIDTH} />,
-      };
-    case 'text':
-      return {
-        title: 'Text',
-        icon: <Type size={ICON_SIZE} strokeWidth={ICON_STROKE_WIDTH} />,
-      };
-    default:
-      return {
-        title: 'Block',
-        icon: <SquareDashed size={ICON_SIZE} strokeWidth={ICON_STROKE_WIDTH} />,
-      };
-  }
+  const Icon = getNodeIcon(nodeType);
+  const title =
+    nodeType && nodeType in NODE_TYPE_LABEL
+      ? NODE_TYPE_LABEL[nodeType as keyof typeof NODE_TYPE_LABEL]
+      : 'Block';
+  return {
+    title,
+    icon: <Icon size={ICON_SIZE} strokeWidth={ICON_STROKE_WIDTH} />,
+  };
 };
 
 const getNodeDisplayName = (node: DataSourceNodeLike): string => {

@@ -4,9 +4,6 @@ import clsx from 'clsx';
 import {
   MousePointer2,
   Hand,
-  Scan,
-  StickyNote,
-  Type,
   LayoutGrid,
   UploadCloud,
   Link as LinkIcon,
@@ -16,6 +13,7 @@ import { useCallback, useRef, useState, type ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
 
 import { uploadImage, uploadPdf, uploadVideo } from '../../api/artifact.ts';
+import { NODE_ICON } from '../../config/nodeIcons.ts';
 import useCanvasStore from '../../store/canvasStore.ts';
 import { GhostButton } from '../Common/GhostButton';
 
@@ -359,7 +357,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
               setPendingNodeType(pendingNodeType === 'frame' ? null : 'frame')
             }
           >
-            <Scan size={18} />
+            <NODE_ICON.frame size={18} />
           </GhostButton>
           <GhostButton
             title="Note"
@@ -370,7 +368,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
               setPendingNodeType(pendingNodeType === 'note' ? null : 'note')
             }
           >
-            <StickyNote size={18} />
+            <NODE_ICON.note size={18} />
           </GhostButton>
           <GhostButton
             title="Text"
@@ -381,7 +379,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
               setPendingNodeType(pendingNodeType === 'text' ? null : 'text')
             }
           >
-            <Type size={18} />
+            <NODE_ICON.text size={18} />
           </GhostButton>
         </div>
 

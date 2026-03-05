@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { Crop } from 'lucide-react';
+import { ScanText } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Document } from 'react-pdf';
 
@@ -202,7 +202,7 @@ export const PDFPreview = ({ data }: PreviewComponentProps) => {
               if (!next) setPendingCapture(null);
             }}
           >
-            <Crop size={14} />
+            <ScanText size={14} />
           </GhostButton>
         </div>
       </div>

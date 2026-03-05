@@ -1,6 +1,6 @@
 import { type Node, type NodeProps } from '@xyflow/react';
 import { clsx } from 'clsx';
-import { Bold, Italic, Type, Underline, Strikethrough } from 'lucide-react';
+import { Bold, Italic, Underline, Strikethrough } from 'lucide-react';
 import {
   useCallback,
   useState,
@@ -16,6 +16,7 @@ import { NodeTextColorSelector } from '@/components/Common/NodeTextColorSelector
 import useCanvasStore from '@/store/canvasStore.ts';
 
 import { NodeWrapper } from './NodeWrapper.tsx';
+import { NODE_ICON } from '../../config/nodeIcons.ts';
 
 import type { CanvasTextNodeData, NodeStyle } from './types.ts';
 
@@ -329,7 +330,7 @@ export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
   const TextToolbar = (
     <div className="flex w-full items-center gap-1">
       <div className="text-muted-foreground flex flex-1 items-center text-xs font-medium">
-        <Type size={14} />
+        <NODE_ICON.text size={14} />
       </div>
       <div className="bg-border h-3 w-px" />
       <div
