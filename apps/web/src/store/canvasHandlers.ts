@@ -676,6 +676,10 @@ function handlePasteNodes(
     const label = generateNextLabel(node.type || 'node', existingLabels);
     existingLabels.push(label);
 
+    const clonedData = JSON.parse(JSON.stringify(node.data ?? {}));
+    delete clonedData.sourceId;
+    delete clonedData.sourceBackend;
+
     const cloned: Node = {
       id: newId,
       type: node.type,
@@ -684,7 +688,7 @@ function handlePasteNodes(
         y: node.position.y + offsetY,
       },
       data: {
-        ...JSON.parse(JSON.stringify(node.data ?? {})),
+        ...clonedData,
         label,
       },
       ...(node.style ? { style: JSON.parse(JSON.stringify(node.style)) } : {}),

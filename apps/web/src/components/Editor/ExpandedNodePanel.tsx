@@ -192,6 +192,7 @@ export const ExpandedNodePanel = () => {
       {/* Content */}
       <div className="flex-1 overflow-hidden">
         <NodePreviewContent
+          key={expandedNodeId ?? previewType}
           type={activeItem.type}
           data={activeItem.data}
           readOnly={activeItem.readOnly}
