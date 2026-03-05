@@ -216,7 +216,7 @@ export const Popover: FC<PopoverProps> = ({
     <div
       ref={containerRef}
       className={clsx(
-        'border-border bg-background fixed rounded-md border shadow-lg',
+        'border-border fixed rounded-md border bg-white shadow-lg',
         className,
       )}
       style={{

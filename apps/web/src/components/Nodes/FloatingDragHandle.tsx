@@ -1,8 +1,9 @@
 import clsx from 'clsx';
-import { GripVertical, ImageIcon, Loader2, Type } from 'lucide-react';
+import { ImageIcon, Loader2, StickyNote } from 'lucide-react';
 
 import { setDragPayload } from '@/utils/dragDrop';
 
+import { DragToCanvasHandleButton } from '../Common/DragToCanvasHandleButton';
 import { Popover } from '../Common/Popover';
 
 import type { FC } from 'react';
@@ -20,8 +21,6 @@ type FloatingDragHandleProps = {
   /** Uploaded image URL. Null while still capturing. */
   imageUrl?: string | null;
   capturing?: boolean;
-  uploadError?: boolean;
-  onRetry?: () => void;
 
   onDismiss: () => void;
 };
@@ -40,8 +39,6 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
   sourceId,
   imageUrl,
   capturing = false,
-  uploadError = false,
-  onRetry,
   onDismiss,
 }) => {
   const hasText = text.trim().length > 0;
@@ -61,65 +58,50 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
     setDragPayload(e, {
       kind: 'image',
       origin: { type: 'user-drag-capture', sourceId },
-      data: { src: imageUrl, label: 'PDF Capture' },
+      data: { src: imageUrl },
     });
     setTimeout(onDismiss, 0);
   };
 
   const dragBtnClass = clsx(
-    'flex shrink-0 cursor-grab items-center gap-0.5 rounded px-1.5 py-0.5',
-    'bg-muted text-foreground text-xs font-medium',
-    'hover:bg-muted/80 active:cursor-grabbing',
+    'flex shrink-0 cursor-grab items-center gap-1 px-2.5 py-1.5',
+    'text-xs text-foreground',
+    'hover:bg-theme-100 active:cursor-grabbing',
   );
 
   return (
     <Popover
       position={position}
       onDismiss={onDismiss}
-      className="flex flex-col gap-1.5 px-2.5 py-2"
+      className="flex flex-col"
     >
       {/* ── Text drag button ── */}
       {hasText && (
-        <div
-          draggable
+        <DragToCanvasHandleButton
+          iconSize={10}
           onDragStart={handleTextDragStart}
           className={dragBtnClass}
-          title="Drag selected text to canvas as a note"
+          title="Drag selected text as a note"
         >
-          <Type size={11} className="shrink-0" />
-          <GripVertical size={11} className="shrink-0" />
-          <span>Drag text</span>
-        </div>
+          <StickyNote size={14} className="shrink-0" />
+        </DragToCanvasHandleButton>
       )}
 
       {/* ── Image drag button (or status) ── */}
       {capturing && (
         <div className="text-muted-foreground flex items-center gap-1 text-xs">
           <Loader2 size={11} className="animate-spin" />
-          <span>Capturing…</span>
-        </div>
-      )}
-      {uploadError && (
-        <div className="flex items-center gap-1 text-xs text-red-400">
-          <span>Upload failed</span>
-          {onRetry && (
-            <button className="underline" onClick={onRetry}>
-              Retry
-            </button>
-          )}
         </div>
       )}
       {isImageReady && (
-        <div
-          draggable
+        <DragToCanvasHandleButton
+          iconSize={10}
           onDragStart={handleImageDragStart}
           className={dragBtnClass}
-          title="Drag captured region to canvas as an image"
+          title="Drag captured region as an image"
         >
-          <ImageIcon size={11} className="shrink-0" />
-          <GripVertical size={11} className="shrink-0" />
-          <span>Drag image</span>
-        </div>
+          <ImageIcon size={14} className="shrink-0" />
+        </DragToCanvasHandleButton>
       )}
     </Popover>
   );

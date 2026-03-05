@@ -16,9 +16,7 @@ type PendingCaptureDrag = {
   text: string;
   imageUrl: string | null;
   capturing: boolean;
-  uploadError: boolean;
   position: { x: number; y: number };
-  retryFn: () => void;
   /** Which page the selection was drawn on (0-based) */
   pageIndex: number;
   /** The selection rectangle (normalized 0–1) to persist on the page */
@@ -95,9 +93,7 @@ export const PDFPreview = ({ data }: PreviewComponentProps) => {
           text: '',
           imageUrl: null,
           capturing: true,
-          uploadError: false,
           position,
-          retryFn: doCapture,
           pageIndex,
           captureRect,
         });
@@ -208,8 +204,6 @@ export const PDFPreview = ({ data }: PreviewComponentProps) => {
           text={pendingCapture.text}
           imageUrl={pendingCapture.imageUrl}
           capturing={pendingCapture.capturing}
-          uploadError={pendingCapture.uploadError}
-          onRetry={pendingCapture.retryFn}
           position={pendingCapture.position}
           onDismiss={() => setPendingCapture(null)}
         />

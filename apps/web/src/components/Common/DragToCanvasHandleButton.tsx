@@ -3,21 +3,26 @@ import { GripVertical } from 'lucide-react';
 
 import { GhostButton, type GhostButtonProps } from './GhostButton';
 
+import type { ReactNode } from 'react';
+
 export type DragToCanvasHandleButtonProps = Omit<
   GhostButtonProps,
   'children' | 'draggable'
 > & {
   iconSize?: number;
   className?: string;
+  children?: ReactNode;
 };
 
 export const DragToCanvasHandleButton = ({
   iconSize = 16,
   className,
+  children,
   ...props
 }: DragToCanvasHandleButtonProps) => {
-  const baseClassName =
-    'h-4.5 w-4.5 p-px! text-icon hover:text-main flex cursor-grab items-center justify-center rounded';
+  const baseClassName = children
+    ? 'cursor-grab active:cursor-grabbing'
+    : 'h-4.5 w-4.5 p-px! text-icon hover:text-main flex cursor-grab items-center justify-center rounded';
 
   return (
     <GhostButton
@@ -34,7 +39,8 @@ export const DragToCanvasHandleButton = ({
       }}
       {...props}
     >
-      <GripVertical size={iconSize} />
+      <GripVertical size={iconSize} className="shrink-0" />
+      {children}
     </GhostButton>
   );
 };
