@@ -1,7 +1,8 @@
 import { createId } from '@sediment/shared';
-import { Copy, NotepadText } from 'lucide-react';
+import { Copy } from 'lucide-react';
 
 import { BlockNoteCard } from './BlockNoteCard';
+import { NODE_ICON } from '../../config/nodeIcons';
 import useCanvasStore from '../../store/canvasStore';
 import { copyToClipboard } from '../../utils/clipboard';
 import { GhostButton } from '../Common/GhostButton';
@@ -10,6 +11,8 @@ interface AIMessageProps {
   content: string;
   isStreaming?: boolean;
 }
+
+const NoteIcon = NODE_ICON.note;
 
 export const AIMessage = ({ content, isStreaming }: AIMessageProps) => {
   const addNode = useCanvasStore((state) => state.addNode);
@@ -40,7 +43,7 @@ export const AIMessage = ({ content, isStreaming }: AIMessageProps) => {
                 });
               }}
             >
-              <NotepadText size={16} />
+              <NoteIcon size={16} />
             </GhostButton>
 
             <GhostButton
