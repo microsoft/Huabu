@@ -49,6 +49,8 @@ type PDFPageWithOverlayProps = {
   /** Desired rendered width in px. When undefined the Page renders at its default size. */
   pageWidth?: number;
   onAreaCaptured: (event: AreaCapturedEvent) => void;
+  /** When provided, the selection rectangle stays visible (e.g. while FloatingDragHandle is shown). */
+  persistedRect?: NormalizedRect;
 };
 
 export const PDFPageWithOverlay = ({
@@ -56,6 +58,7 @@ export const PDFPageWithOverlay = ({
   pageIndex,
   pageWidth,
   onAreaCaptured,
+  persistedRect,
 }: PDFPageWithOverlayProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const pageProxyRef = useRef<PdfPageProxy | null>(null);
@@ -212,7 +215,7 @@ export const PDFPageWithOverlay = ({
   );
 
   // ---------------------------------------------------------------------------
-  // Selection rect style for visual feedback during drag
+  // Selection rect style for visual feedback during drag or persisted capture
   // ---------------------------------------------------------------------------
   const selectionStyle = drag
     ? {
@@ -220,6 +223,13 @@ export const PDFPageWithOverlay = ({
         top: `${Math.min(drag.startY, drag.currentY) * 100}%`,
         width: `${Math.abs(drag.currentX - drag.startX) * 100}%`,
         height: `${Math.abs(drag.currentY - drag.startY) * 100}%`,
+      }
+    : persistedRect
+    ? {
+        left: `${persistedRect.x * 100}%`,
+        top: `${persistedRect.y * 100}%`,
+        width: `${persistedRect.width * 100}%`,
+        height: `${persistedRect.height * 100}%`,
       }
     : null;
 

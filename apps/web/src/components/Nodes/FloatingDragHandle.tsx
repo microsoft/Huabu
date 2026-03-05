@@ -79,8 +79,8 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
     setTimeout(onDismiss, 0);
   };
 
-  const left = position.x + 12;
-  const top = position.y + 12;
+  const left = position.x + 4;
+  const top = position.y + 4;
 
   const dragBtnClass = clsx(
     'flex shrink-0 cursor-grab items-center gap-0.5 rounded px-1.5 py-0.5',

@@ -9,7 +9,7 @@ import { FloatingDragHandle } from './FloatingDragHandle';
 import { PDFPageWithOverlay } from './PDFPageWithOverlay';
 
 import type { PreviewComponentProps } from './NotePreview';
-import type { AreaCapturedEvent } from './PDFPageWithOverlay';
+import type { AreaCapturedEvent, NormalizedRect } from './PDFPageWithOverlay';
 
 type PendingCaptureDrag = {
   /** Text extracted from the captured region (empty string = none found) */
@@ -19,6 +19,10 @@ type PendingCaptureDrag = {
   uploadError: boolean;
   position: { x: number; y: number };
   retryFn: () => void;
+  /** Which page the selection was drawn on (0-based) */
+  pageIndex: number;
+  /** The selection rectangle (normalized 0–1) to persist on the page */
+  captureRect: NormalizedRect;
 };
 
 export const PDFPreview = ({ data }: PreviewComponentProps) => {
@@ -51,6 +55,15 @@ export const PDFPreview = ({ data }: PreviewComponentProps) => {
     return () => observer.disconnect();
   }, []);
 
+  // Dismiss the floating drag handle on scroll
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el || !pendingCapture) return;
+    const handleScroll = () => setPendingCapture(null);
+    el.addEventListener('scroll', handleScroll, { passive: true });
+    return () => el.removeEventListener('scroll', handleScroll);
+  }, [pendingCapture]);
+
   const renderedWidth = renderedWidthRef.current;
 
   // CSS transform scales the already-rendered canvas — no re-render needed.
@@ -70,7 +83,13 @@ export const PDFPreview = ({ data }: PreviewComponentProps) => {
   // Area-capture handler
   // ---------------------------------------------------------------------------
   const handleAreaCaptured = useCallback(
-    ({ position, getBlob, getText }: AreaCapturedEvent) => {
+    ({
+      position,
+      getBlob,
+      getText,
+      pageIndex,
+      captureRect,
+    }: AreaCapturedEvent) => {
       const doCapture = async () => {
         setPendingCapture({
           text: '',
@@ -79,6 +98,8 @@ export const PDFPreview = ({ data }: PreviewComponentProps) => {
           uploadError: false,
           position,
           retryFn: doCapture,
+          pageIndex,
+          captureRect,
         });
 
         // Run text extraction and image upload in parallel
@@ -162,6 +183,11 @@ export const PDFPreview = ({ data }: PreviewComponentProps) => {
                   pageIndex={index}
                   pageWidth={renderedWidth > 0 ? renderedWidth : undefined}
                   onAreaCaptured={handleAreaCaptured}
+                  persistedRect={
+                    pendingCapture && pendingCapture.pageIndex === index
+                      ? pendingCapture.captureRect
+                      : undefined
+                  }
                 />
               ))}
             </Document>
