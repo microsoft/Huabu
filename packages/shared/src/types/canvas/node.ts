@@ -142,6 +142,8 @@ export interface PdfNodeData extends BaseNodeData {
   type: 'pdf';
   src: string;
   sourceId?: string;
+  /** When set, the canvas node displays this image instead of the PDF preview. */
+  coverUrl?: string;
 }
 
 /** Video node: video content */

@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { Loader2, MessageSquare, Plus } from 'lucide-react';
+import { Loader2, MessageSquare, Plus, Star } from 'lucide-react';
 import { useCallback, useRef } from 'react';
 
 import { setDragPayload } from '@/utils/dragDrop';
@@ -32,6 +32,8 @@ type FloatingDragHandleProps = {
   onDismiss: () => void;
   /** Called when the user clicks "Send to Chat". */
   onSendToChat?: (attachment: ChatAttachment) => void;
+  /** Called when the user clicks "Set as Cover" to use the captured image as the PDF node cover. */
+  onSetCover?: (imageUrl: string) => void;
 };
 
 /**
@@ -51,6 +53,7 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
   originSourceId,
   onDismiss,
   onSendToChat,
+  onSetCover,
 }) => {
   const hasText = text.trim().length > 0;
   const isImageReady = !!imageUrl && !capturing;
@@ -102,6 +105,12 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
     onSendToChat(attachment);
     onDismiss();
   }, [onSendToChat, imageUrl, hasText, text, originSourceId, onDismiss]);
+
+  const handleSetCover = useCallback(() => {
+    if (!onSetCover || !imageUrl) return;
+    onSetCover(imageUrl);
+    onDismiss();
+  }, [onSetCover, imageUrl, onDismiss]);
 
   const dragBtnClass = clsx(
     'flex shrink-0 cursor-grab items-center justify-center gap-1 px-2.5 py-1.5',
@@ -156,6 +165,18 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
           {/* Plus icon matching the GripVertical icon width in DragToCanvasHandleButton */}
           <Plus size={10} className="shrink-0" />
           <MessageSquare size={14} className="shrink-0" />
+        </GhostButton>
+      )}
+
+      {/* ── Set as Cover button ── */}
+      {isImageReady && onSetCover && imageUrl && (
+        <GhostButton
+          className={dragBtnClass}
+          title="Set captured area as PDF cover"
+          onClick={handleSetCover}
+        >
+          <Plus size={10} className="shrink-0" />
+          <Star size={14} className="shrink-0" />
         </GhostButton>
       )}
     </Popover>
