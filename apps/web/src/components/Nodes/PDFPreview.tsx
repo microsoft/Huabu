@@ -7,6 +7,7 @@ import { uploadImage } from '@/api/artifact';
 
 import { FloatingDragHandle } from './FloatingDragHandle';
 import { PDFPageWithOverlay } from './PDFPageWithOverlay';
+import { GhostButton } from '../Common/GhostButton';
 
 import type { PreviewComponentProps } from './NotePreview';
 import type { AreaCapturedEvent, NormalizedRect } from './PDFPageWithOverlay';
@@ -26,6 +27,7 @@ type PendingCaptureDrag = {
 export const PDFPreview = ({ data }: PreviewComponentProps) => {
   const src = typeof data.src === 'string' ? data.src : '';
   const [numPages, setNumPages] = useState<number | null>(null);
+  const [captureMode, setCaptureMode] = useState(false);
   const [pendingCapture, setPendingCapture] =
     useState<PendingCaptureDrag | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -135,15 +137,7 @@ export const PDFPreview = ({ data }: PreviewComponentProps) => {
   );
 
   return (
-    <div className="flex h-full flex-col">
-      {/* ── Hint bar ── */}
-      <div className="border-border flex shrink-0 items-center gap-1.5 border-b px-3 py-1.5">
-        <Crop size={12} className="text-muted-foreground shrink-0" />
-        <span className="text-muted-foreground text-xs">
-          Draw a region on the page to capture text or image
-        </span>
-      </div>
-
+    <div className="relative flex h-full flex-col">
       {/* ── PDF pages ── */}
       <div
         ref={scrollContainerRef}
@@ -178,6 +172,7 @@ export const PDFPreview = ({ data }: PreviewComponentProps) => {
                   pageNumber={index + 1}
                   pageIndex={index}
                   pageWidth={renderedWidth > 0 ? renderedWidth : undefined}
+                  captureEnabled={captureMode}
                   onAreaCaptured={handleAreaCaptured}
                   persistedRect={
                     pendingCapture && pendingCapture.pageIndex === index
@@ -193,6 +188,23 @@ export const PDFPreview = ({ data }: PreviewComponentProps) => {
             No PDF Source
           </div>
         )}
+      </div>
+
+      {/* ── Floating toolbar (top-left, vertical) ── */}
+      <div className="pointer-events-none absolute top-3 left-3 z-10">
+        <div className="text-muted-foreground border-border pointer-events-auto flex flex-col items-center gap-2 rounded-sm border bg-white p-0">
+          <GhostButton
+            title="Capture to canvas"
+            className={clsx(captureMode && 'text-theme-500 bg-background')}
+            onClick={() => {
+              const next = !captureMode;
+              setCaptureMode(next);
+              if (!next) setPendingCapture(null);
+            }}
+          >
+            <Crop size={14} />
+          </GhostButton>
+        </div>
       </div>
 
       {/* ── Floating drag handle (rendered via React Portal to document.body) ── */}

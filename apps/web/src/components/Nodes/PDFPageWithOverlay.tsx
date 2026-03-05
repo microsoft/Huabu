@@ -2,6 +2,8 @@ import clsx from 'clsx';
 import { useCallback, useRef, useState } from 'react';
 import { Page, pdfjs } from 'react-pdf';
 
+import 'react-pdf/dist/Page/TextLayer.css';
+
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 /** Minimal pdfjs page proxy shape we rely on. */
@@ -48,6 +50,8 @@ type PDFPageWithOverlayProps = {
   pageIndex: number;
   /** Desired rendered width in px. When undefined the Page renders at its default size. */
   pageWidth?: number;
+  /** When false (default), pointer events pass through and no capture overlay is shown. */
+  captureEnabled?: boolean;
   onAreaCaptured: (event: AreaCapturedEvent) => void;
   /** When provided, the selection rectangle stays visible (e.g. while FloatingDragHandle is shown). */
   persistedRect?: NormalizedRect;
@@ -57,6 +61,7 @@ export const PDFPageWithOverlay = ({
   pageNumber,
   pageIndex,
   pageWidth,
+  captureEnabled = false,
   onAreaCaptured,
   persistedRect,
 }: PDFPageWithOverlayProps) => {
@@ -66,10 +71,11 @@ export const PDFPageWithOverlay = ({
   const dragRef = useRef<DragState | null>(null);
 
   // ---------------------------------------------------------------------------
-  // Pointer handlers — area-select is always active (no read/select mode toggle)
+  // Pointer handlers — only active when captureEnabled is true
   // ---------------------------------------------------------------------------
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!captureEnabled) return;
       const container = containerRef.current;
       if (!container) return;
 
@@ -89,7 +95,7 @@ export const PDFPageWithOverlay = ({
       dragRef.current = state;
       setDrag(state);
     },
-    [],
+    [captureEnabled],
   );
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
@@ -234,11 +240,15 @@ export const PDFPageWithOverlay = ({
     : null;
 
   return (
-    // renderTextLayer is always false — no text layer DOM, no white text.
-    // Text content is extracted via pdfjs getTextContent() in handlePointerUp.
+    // When capture mode is off, renderTextLayer is enabled so users can
+    // select/copy text normally.  In capture mode the text layer is hidden
+    // and text is extracted programmatically via pdfjs getTextContent().
     <div
       ref={containerRef}
-      className={clsx('relative cursor-crosshair select-none')}
+      className={clsx(
+        'relative',
+        captureEnabled ? 'cursor-crosshair select-none' : 'select-auto',
+      )}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
@@ -247,7 +257,7 @@ export const PDFPageWithOverlay = ({
         pageNumber={pageNumber}
         width={pageWidth}
         renderAnnotationLayer={false}
-        renderTextLayer={false}
+        renderTextLayer={!captureEnabled}
         loading=""
         onRenderSuccess={(p) => {
           pageProxyRef.current = p as unknown as PdfPageProxy;
