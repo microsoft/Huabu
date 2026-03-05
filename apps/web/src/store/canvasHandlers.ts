@@ -37,7 +37,10 @@ import {
   shouldIngestOnUpdate,
   type NodeIngestionInfo,
 } from '../utils/ingestHelper';
-import { generateNextLabel } from '../utils/nodeLabels';
+import {
+  AUTO_GENERATED_PLACEHOLDER_PATTERN,
+  generateNextLabel,
+} from '../utils/nodeLabels';
 
 import type { CanvasCommand } from './canvasStore';
 // ---------------------------------------------------------------------------
@@ -639,16 +642,21 @@ function handlePasteNodes(
 
   // Compute paste offset: centre the group on flowPosition if provided,
   // otherwise apply a fixed diagonal nudge so the paste is visually distinct.
+  // Only consider root-level nodes (no parentId) for the bounding box,
+  // because children have frame-relative positions.
   let offsetX: number;
   let offsetY: number;
 
+  const rootNodes = clipboard.filter((n) => !n.parentId);
+  const bboxNodes = rootNodes.length > 0 ? rootNodes : clipboard;
+
   if (cmd.flowPosition) {
-    const xs = clipboard.map((n) => n.position.x);
-    const ys = clipboard.map((n) => n.position.y);
-    const widths = clipboard.map(
+    const xs = bboxNodes.map((n) => n.position.x);
+    const ys = bboxNodes.map((n) => n.position.y);
+    const widths = bboxNodes.map(
       (n) => (n.style?.width as number) ?? n.measured?.width ?? 200,
     );
-    const heights = clipboard.map(
+    const heights = bboxNodes.map(
       (n) => (n.style?.height as number) ?? n.measured?.height ?? 150,
     );
     const minX = Math.min(...xs);
@@ -673,7 +681,14 @@ function handlePasteNodes(
 
   const newNodes: Node[] = clipboard.map((node) => {
     const newId = idMap.get(node.id) ?? createId('node');
-    const label = generateNextLabel(node.type || 'node', existingLabels);
+
+    // For pasted nodes: keep custom labels as-is, regenerate auto-generated ones.
+    const originalLabel = String(node.data?.label ?? '').trim();
+    const isAutoLabel =
+      !originalLabel || AUTO_GENERATED_PLACEHOLDER_PATTERN.test(originalLabel);
+    const label = isAutoLabel
+      ? generateNextLabel(node.type || 'node', existingLabels)
+      : originalLabel;
     existingLabels.push(label);
 
     const clonedData = JSON.parse(JSON.stringify(node.data ?? {}));
@@ -683,10 +698,12 @@ function handlePasteNodes(
     const cloned: Node = {
       id: newId,
       type: node.type,
-      position: {
-        x: node.position.x + offsetX,
-        y: node.position.y + offsetY,
-      },
+      // Only apply the offset to root-level nodes. Children keep their
+      // frame-relative positions so the layout inside frames is preserved.
+      position:
+        node.parentId && idMap.has(node.parentId)
+          ? { x: node.position.x, y: node.position.y }
+          : { x: node.position.x + offsetX, y: node.position.y + offsetY },
       data: {
         ...clonedData,
         label,

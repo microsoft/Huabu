@@ -1,5 +1,4 @@
 import {
-  createId,
   type AgentBaseContext,
   type CanvasNodeType,
   type KnowledgeStorageConfig,
@@ -658,15 +657,35 @@ const useCanvasStore = create<RFState>()(
       const selected = nodes.filter((n) => n.selected);
       if (selected.length === 0) return;
 
-      // Extract only serialisable properties to avoid structuredClone failures
-      // on ReactFlow internal properties (measured, internals, etc.)
-      const cloned: Node[] = selected.map((n) => ({
-        id: createId('node'),
+      // When a frame is selected, also include all its descendant nodes
+      // so that copying a frame copies the entire group.
+      const selectedIds = new Set(selected.map((n) => n.id));
+      const collectDescendants = (parentId: string) => {
+        for (const n of nodes) {
+          if (n.parentId === parentId && !selectedIds.has(n.id)) {
+            selectedIds.add(n.id);
+            if (n.type === 'frame') collectDescendants(n.id);
+          }
+        }
+      };
+      for (const n of selected) {
+        if (n.type === 'frame') collectDescendants(n.id);
+      }
+
+      const toCopy = nodes.filter((n) => selectedIds.has(n.id));
+
+      // Keep original IDs in the clipboard so that handlePasteNodes can
+      // build a correct old→new ID map for parentId remapping. The paste
+      // handler assigns fresh IDs when creating the actual nodes.
+      const cloned: Node[] = toCopy.map((n) => ({
+        id: n.id,
         type: n.type,
         position: { x: n.position.x, y: n.position.y },
         data: JSON.parse(JSON.stringify(n.data ?? {})),
         ...(n.style ? { style: JSON.parse(JSON.stringify(n.style)) } : {}),
-        ...(n.parentId ? { parentId: n.parentId } : {}),
+        ...(n.parentId && selectedIds.has(n.parentId)
+          ? { parentId: n.parentId }
+          : {}),
       }));
 
       set({ clipboard: cloned });

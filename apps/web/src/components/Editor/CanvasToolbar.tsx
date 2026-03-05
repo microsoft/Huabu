@@ -15,6 +15,7 @@ import { createPortal } from 'react-dom';
 import { uploadImage, uploadPdf, uploadVideo } from '../../api/artifact.ts';
 import { NODE_ICON } from '../../config/nodeIcons.ts';
 import useCanvasStore from '../../store/canvasStore.ts';
+import { detectNodeType } from '../../utils/mediaUtils.ts';
 import { GhostButton } from '../Common/GhostButton';
 
 import type {
@@ -22,23 +23,6 @@ import type {
   CanvasNodeType,
   CreateNodePayload,
 } from '../Nodes/types.ts';
-
-const detectNodeType = (
-  filename: string,
-): 'image' | 'pdf' | 'video' | 'web' => {
-  const ext = filename.split('.').pop()?.toLowerCase();
-
-  if (!ext) return 'web';
-
-  const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'];
-  const videoExts = ['mp4', 'webm', 'ogg', 'mov'];
-
-  if (imageExts.includes(ext)) return 'image';
-  if (ext === 'pdf') return 'pdf';
-  if (videoExts.includes(ext)) return 'video';
-
-  return 'web';
-};
 
 interface UploadModalProps {
   title: string;
@@ -170,6 +154,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
               src: payload?.src || '',
               label: payload?.label,
             },
+            style: { width: initialWidth, height: initialHeight },
           };
           break;
         case 'pdf':
