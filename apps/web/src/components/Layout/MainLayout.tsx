@@ -20,7 +20,7 @@ export const MainLayout = ({
 
   // Fixed pixel sizes to guarantee that collapsing side panels only affects
   // the center panel width.
-  const COLLAPSED_WIDTH_PX = 48;
+  const COLLAPSED_WIDTH_PX = 36;
   const LEFT_MIN_WIDTH_PX = 200;
   const RIGHT_MIN_WIDTH_PX = 256;
   const CENTER_MIN_WIDTH_PX = 100;
