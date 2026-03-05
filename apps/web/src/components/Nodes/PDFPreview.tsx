@@ -166,7 +166,7 @@ export const PDFPreview = ({ data }: PreviewComponentProps) => {
         } catch {
           setPendingCapture((prev) => {
             if (!prev) return prev;
-            return { ...prev, capturing: false, uploadError: true };
+            return { ...prev, capturing: false };
           });
         }
       };

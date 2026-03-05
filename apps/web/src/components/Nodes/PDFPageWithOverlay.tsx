@@ -231,13 +231,13 @@ export const PDFPageWithOverlay = ({
         height: `${Math.abs(drag.currentY - drag.startY) * 100}%`,
       }
     : persistedRect
-    ? {
-        left: `${persistedRect.x * 100}%`,
-        top: `${persistedRect.y * 100}%`,
-        width: `${persistedRect.width * 100}%`,
-        height: `${persistedRect.height * 100}%`,
-      }
-    : null;
+      ? {
+          left: `${persistedRect.x * 100}%`,
+          top: `${persistedRect.y * 100}%`,
+          width: `${persistedRect.width * 100}%`,
+          height: `${persistedRect.height * 100}%`,
+        }
+      : null;
 
   return (
     // When capture mode is off, renderTextLayer is enabled so users can
