@@ -126,7 +126,7 @@ export const NotePreview = ({
   }, [markdown, contentJson, editor]);
 
   return (
-    <div className="custom-scrollbar h-full w-full overflow-auto bg-white p-1">
+    <div className="custom-scrollbar h-full w-full overflow-auto bg-white px-1 py-3">
       <BlockNoteView
         className="block-note-view"
         editor={editor}
