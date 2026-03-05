@@ -16,7 +16,6 @@ import { NodeTextColorSelector } from '@/components/Common/NodeTextColorSelector
 import useCanvasStore from '@/store/canvasStore.ts';
 
 import { NodeWrapper } from './NodeWrapper.tsx';
-import { NODE_ICON } from '../../config/nodeIcons.ts';
 
 import type { CanvasTextNodeData, NodeStyle } from './types.ts';
 
@@ -329,10 +328,6 @@ export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
 
   const TextToolbar = (
     <div className="flex w-full items-center gap-1">
-      <div className="text-muted-foreground flex flex-1 items-center text-xs font-medium">
-        <NODE_ICON.text size={14} />
-      </div>
-      <div className="bg-border h-3 w-px" />
       <div
         className="hover:bg-muted text-muted-foreground border-border flex items-center rounded border bg-transparent p-0.5 transition-colors"
         title="Font Family"

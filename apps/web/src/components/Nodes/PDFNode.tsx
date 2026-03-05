@@ -8,7 +8,6 @@ import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
 import { NodeWrapper } from './NodeWrapper.tsx';
-import { NODE_ICON } from '../../config/nodeIcons.ts';
 import useCanvasStore from '../../store/canvasStore.ts';
 import { GhostButton } from '../Common/GhostButton.tsx';
 
@@ -44,12 +43,6 @@ export const PDFNode = ({ id, data, selected }: NodeProps<PDFNodeType>) => {
 
   const PDFToolbar = (
     <div className="flex w-full items-center justify-between gap-3">
-      {/* Label */}
-      <div className="text-muted-foreground">
-        <NODE_ICON.pdf size={14} />
-      </div>
-      {/* splitter  */}
-      <div className="bg-border h-3 w-px" />
       {/* Tools */}
       <div className="text-muted-foreground flex items-center gap-1">
         <GhostButton

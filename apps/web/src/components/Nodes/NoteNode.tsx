@@ -6,7 +6,6 @@ import { useEffect, useState, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
 import { NodeWrapper } from './NodeWrapper.tsx';
-import { NODE_ICON } from '../../config/nodeIcons.ts';
 import useCanvasStore from '../../store/canvasStore.ts';
 import { loadBlockNoteContent } from '../../utils/blockNoteContent.ts';
 import { copyToClipboard } from '../../utils/clipboard.ts';
@@ -37,12 +36,6 @@ export const NoteNode = ({ id, data, selected }: NodeProps<NoteNodeType>) => {
 
   const NoteToolbar = (
     <div className="flex w-full items-center justify-between gap-2">
-      {/* Label */}
-      <div className="text-muted-foreground">
-        <NODE_ICON.note size={14} />
-      </div>
-      {/* splitter  */}
-      <div className="bg-border h-3 w-px" />
       {/* Tools */}
       <div className="text-muted-foreground flex items-center gap-1">
         <GhostButton
