@@ -1,4 +1,5 @@
 import { normalizeOrigin } from '@sediment/shared';
+
 import type { NodeOrigin } from '@sediment/shared';
 
 export const SEDIMENT_DND_MIME = 'application/x-sediment-dnd';

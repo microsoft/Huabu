@@ -14,13 +14,21 @@ import '@xyflow/react/dist/style.css';
 import { NodeToolbar } from './CanvasToolbar';
 import { IntentPopover } from './IntentPopover';
 import { MultiSelectToolbar } from './MultiSelectToolbar';
+import { uploadImage, uploadPdf, uploadVideo } from '../../api/artifact';
 import { getSource } from '../../api/knowledge';
+import { useCanvasShortcuts } from '../../hooks/useCanvasShortcuts';
 import useCanvasStore from '../../store/canvasStore.ts';
-import { useIntentStore } from '../../store/intentStore';
 import {
   canReadSedimentPayload,
   getSedimentPayload,
 } from '../../utils/dragDrop';
+import {
+  detectNodeType,
+  detectNodeTypeFromMime,
+  looksLikeUrl,
+  normalizeUrl,
+  getImageDimensionsFromBlob,
+} from '../../utils/mediaUtils';
 import { FrameNode } from '../Nodes/FrameNode';
 import { ImageNode } from '../Nodes/ImageNode';
 import { NoteNode } from '../Nodes/NoteNode';
@@ -50,27 +58,19 @@ export const Canvas: React.FC = () => {
   const addNode = useCanvasStore((state) => state.addNode);
   const patchNodeSilent = useCanvasStore((state) => state.patchNodeSilent);
   const setRfInstance = useCanvasStore((state) => state.setRfInstance);
-  const frameSelectedNodes = useCanvasStore(
-    (state) => state.frameSelectedNodes,
-  );
   const frameNodesInRect = useCanvasStore((state) => state.frameNodesInRect);
   const pendingNodeType = useCanvasStore((state) => state.pendingNodeType);
   const setPendingNodeType = useCanvasStore(
     (state) => state.setPendingNodeType,
   );
-  const copySelectedNodes = useCanvasStore((state) => state.copySelectedNodes);
-  const pasteNodes = useCanvasStore((state) => state.pasteNodes);
-  const sendSelectedToOrder = useCanvasStore(
-    (state) => state.sendSelectedToOrder,
-  );
-  const undo = useCanvasStore((state) => state.undo);
-  const redo = useCanvasStore((state) => state.redo);
-  const dispatch = useCanvasStore((state) => state.dispatch);
 
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const rfInstanceRef = useRef<ReactFlowInstance | null>(null);
   const lastDropRef = useRef<{ key: string; at: number } | null>(null);
   const mousePositionRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  // Keyboard shortcuts + paste handler (extracted to hook)
+  useCanvasShortcuts({ rfInstanceRef, mousePositionRef });
 
   const [tool, setTool] = useState<'select' | 'pan'>('select');
 
@@ -250,138 +250,6 @@ export const Canvas: React.FC = () => {
     };
   })();
 
-  // Track mouse position globally so paste can use it
-  useEffect(() => {
-    const onMouseMove = (e: MouseEvent) => {
-      mousePositionRef.current = { x: e.clientX, y: e.clientY };
-    };
-    window.addEventListener('mousemove', onMouseMove);
-    return () => window.removeEventListener('mousemove', onMouseMove);
-  }, []);
-
-  // Handle "Cmd/Ctrl + G" to create a frame from selected nodes.
-  // Handle "Cmd/Ctrl + C" to copy selected nodes.
-  // Handle "Cmd/Ctrl + V" to paste copied nodes.
-  // Handle "Cmd/Ctrl + Z" to undo.
-  // Handle "Cmd/Ctrl + Shift + Z" to redo.
-  // Handle "[" to bring selected nodes to back.
-  // Handle "]" to bring selected nodes to front.
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      const key = e.key;
-      const mod = e.metaKey || e.ctrlKey;
-
-      const target = e.target as HTMLElement | null;
-      const tag = target?.tagName?.toLowerCase();
-
-      // For text inputs / textareas, let the browser handle copy/paste natively
-      const isNativeInput = tag === 'input' || tag === 'textarea';
-
-      // For contentEditable / role=textbox editors (BlockNote etc.),
-      // allow native copy/paste but block other shortcuts like Cmd+G
-      const isRichEditor =
-        target?.isContentEditable ||
-        target?.getAttribute?.('role') === 'textbox';
-
-      // [ and ] for z-order — no modifier required
-      if ((key === '[' || key === '【') && !isNativeInput && !isRichEditor) {
-        e.preventDefault();
-        sendSelectedToOrder('bottom');
-        return;
-      }
-      if (key === ']' || (key === '】' && !isNativeInput && !isRichEditor)) {
-        e.preventDefault();
-        sendSelectedToOrder('top');
-        return;
-      }
-
-      // Delete / Backspace — delete selected nodes and edges
-      if (
-        (key === 'Delete' || key === 'Backspace') &&
-        !isNativeInput &&
-        !isRichEditor
-      ) {
-        e.preventDefault();
-        const { nodes: cur, edges: curEdges } = useCanvasStore.getState();
-        const selectedNodeIds = cur.filter((n) => n.selected).map((n) => n.id);
-        const selectedEdgeIds = curEdges
-          .filter((e) => e.selected)
-          .map((e) => e.id);
-        if (selectedNodeIds.length > 0) {
-          dispatch({ type: 'DELETE_NODES', nodeIds: selectedNodeIds });
-        }
-        if (selectedEdgeIds.length > 0) {
-          dispatch({ type: 'DISCONNECT_EDGES', edgeIds: selectedEdgeIds });
-        }
-        return;
-      }
-
-      if (!mod || e.altKey) return;
-
-      const lowerKey = key.toLowerCase();
-
-      // Cmd/Ctrl+Shift+Z → redo (must come before the shift guard)
-      if (lowerKey === 'z' && e.shiftKey) {
-        if (isNativeInput || isRichEditor) return;
-        e.preventDefault();
-        redo();
-        return;
-      }
-
-      // Remaining shortcuts require Cmd/Ctrl without Shift
-      if (e.shiftKey) return;
-
-      if (lowerKey === 'z') {
-        if (isNativeInput || isRichEditor) return;
-        e.preventDefault();
-        undo();
-      } else if (lowerKey === 'g') {
-        if (isNativeInput || isRichEditor) return;
-        e.preventDefault();
-        frameSelectedNodes();
-      } else if (lowerKey === 'c') {
-        if (isNativeInput || isRichEditor) return;
-        e.preventDefault();
-        copySelectedNodes();
-      } else if (lowerKey === 'v') {
-        if (isNativeInput || isRichEditor) return;
-        e.preventDefault();
-        // Convert current mouse screen position to flow coordinates
-        const instance = rfInstanceRef.current;
-        if (instance) {
-          const flowPos = instance.screenToFlowPosition({
-            x: mousePositionRef.current.x,
-            y: mousePositionRef.current.y,
-          });
-          pasteNodes(flowPos);
-        } else {
-          pasteNodes();
-        }
-      } else if (lowerKey === 'i') {
-        // Ctrl/Cmd + I → intent recognition
-        if (isNativeInput || isRichEditor) return;
-        e.preventDefault();
-        useIntentStore
-          .getState()
-          .triggerIntent(
-            mousePositionRef.current.x,
-            mousePositionRef.current.y,
-          );
-      }
-    };
-
-    window.addEventListener('keydown', onKeyDown, true);
-    return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [
-    frameSelectedNodes,
-    copySelectedNodes,
-    pasteNodes,
-    sendSelectedToOrder,
-    undo,
-    redo,
-    dispatch,
-  ]);
-
   useEffect(() => {
     return () => {
       rfInstanceRef.current = null;
@@ -402,193 +270,307 @@ export const Canvas: React.FC = () => {
       onMouseMove={handleFrameMouseMove}
       onMouseUp={handleFrameMouseUp}
       onDragOver={(e) => {
-        if (!canReadSedimentPayload(e.dataTransfer)) return;
+        // Accept both internal Sediment payloads and native file/URL drops
+        const isSediment = canReadSedimentPayload(e.dataTransfer);
+        const hasFiles = e.dataTransfer.types.includes('Files');
+        const hasUri = e.dataTransfer.types.includes('text/uri-list');
+        const hasText = e.dataTransfer.types.includes('text/plain');
+        if (!isSediment && !hasFiles && !hasUri && !hasText) return;
         e.preventDefault();
         e.stopPropagation();
         e.dataTransfer.dropEffect = 'copy';
       }}
       onDrop={(e) => {
-        if (!canReadSedimentPayload(e.dataTransfer)) return;
         e.preventDefault();
         e.stopPropagation();
-
-        const payload = getSedimentPayload(e.dataTransfer);
-        if (!payload) return;
 
         const instance = rfInstanceRef.current;
         if (!instance) return;
 
-        let position: { x: number; y: number };
+        const dropPos = instance.screenToFlowPosition({
+          x: e.clientX,
+          y: e.clientY,
+        });
 
-        // Prefer modern API when available.
-        if ('screenToFlowPosition' in instance) {
-          position = (instance as ReactFlowInstance).screenToFlowPosition({
-            x: e.clientX,
-            y: e.clientY,
-          });
-        } else {
-          const bounds = wrapperRef.current?.getBoundingClientRect();
-          const x = bounds ? e.clientX - bounds.left : e.clientX;
-          const y = bounds ? e.clientY - bounds.top : e.clientY;
-          // Back-compat for older XYFlow builds.
-          position = (
-            instance as unknown as {
-              project: (p: { x: number; y: number }) => {
-                x: number;
-                y: number;
-              };
+        /** Center a node of known size at the given point. */
+        const cent = (pos: { x: number; y: number }, w: number, h: number) => ({
+          x: pos.x - w / 2,
+          y: pos.y - h / 2,
+        });
+
+        // ============ 1. Internal Sediment drag payloads ============
+        if (canReadSedimentPayload(e.dataTransfer)) {
+          const payload = getSedimentPayload(e.dataTransfer);
+          if (!payload) return;
+
+          // Deduplicate repeated drop events
+          const dedupeKey = `drag:${payload.dragId}`;
+          const now =
+            typeof e.timeStamp === 'number' && e.timeStamp > 0
+              ? e.timeStamp
+              : Date.now();
+          const lastDrop = lastDropRef.current;
+          if (
+            lastDrop &&
+            lastDrop.key === dedupeKey &&
+            now - lastDrop.at < 4000
+          )
+            return;
+          lastDropRef.current = { key: dedupeKey, at: now };
+
+          let newNode: Node | null = null;
+
+          if (payload.kind === 'web') {
+            const W = 300,
+              H = 200;
+            newNode = {
+              id: createId('node'),
+              type: 'web',
+              position: cent(dropPos, W, H),
+              data: { src: payload.data.src, origin: payload.origin },
+              style: { width: W, height: H },
+            };
+          }
+
+          if (payload.kind === 'note') {
+            const W = 400,
+              H = 300;
+            newNode = {
+              id: createId('node'),
+              type: 'note',
+              position: cent(dropPos, W, H),
+              data: {
+                content: payload.data.content,
+                ...(payload.data.contentJson
+                  ? { contentJson: payload.data.contentJson }
+                  : {}),
+                origin: payload.origin,
+              },
+              style: { width: W, height: H },
+            };
+          }
+
+          if (payload.kind === 'image') {
+            const FIXED_WIDTH = 300;
+            const nodeId = createId('node');
+            const { src, label } = payload.data;
+
+            const doAdd = (height: number) => {
+              addNode({
+                id: nodeId,
+                type: 'image',
+                position: cent(dropPos, FIXED_WIDTH, height),
+                data: { src, label, origin: payload.origin },
+                style: { width: FIXED_WIDTH, height },
+              });
+            };
+
+            const img = new Image();
+            img.onload = () => {
+              const height =
+                img.naturalWidth > 0
+                  ? Math.round(
+                      FIXED_WIDTH * (img.naturalHeight / img.naturalWidth),
+                    )
+                  : 200;
+              doAdd(height);
+            };
+            img.onerror = () => doAdd(200);
+            img.src = src;
+            return;
+          }
+
+          if (payload.kind === 'source') {
+            const { type, sourceId, label, ...rest } = payload.data;
+
+            let nodeType = 'text';
+            if (typeof type === 'string' && type in nodeTypes) {
+              nodeType = type;
             }
-          ).project({
-            x,
-            y,
-          });
-        }
 
-        // Some browsers/components can dispatch multiple drop events for a single gesture,
-        // especially when dragging selected text. Deduplicate by dragId.
-        const dedupeKey = `drag:${payload.dragId}`;
-
-        const now =
-          typeof e.timeStamp === 'number' && e.timeStamp > 0
-            ? e.timeStamp
-            : Date.now();
-        const lastDrop = lastDropRef.current;
-        const windowMs = 4000;
-        if (
-          lastDrop &&
-          lastDrop.key === dedupeKey &&
-          now - lastDrop.at < windowMs
-        )
-          return;
-        lastDropRef.current = { key: dedupeKey, at: now };
-
-        let newNode: Node | null = null;
-
-        if (payload.kind === 'web') {
-          newNode = {
-            id: createId('node'),
-            type: 'web',
-            position,
-            data: {
-              src: payload.data.src,
+            const data: Record<string, unknown> = {
+              label,
+              sourceId,
               origin: payload.origin,
-            },
-            style: { width: 300, height: 200 },
-          };
-        }
+              ...rest,
+            };
 
-        if (payload.kind === 'note') {
-          newNode = {
-            id: createId('node'),
-            type: 'note',
-            position,
-            data: {
-              content: payload.data.content,
-              ...(payload.data.contentJson
-                ? { contentJson: payload.data.contentJson }
-                : {}),
-              origin: payload.origin,
-            },
-            style: { width: 400, height: 300 },
-          };
-        }
+            if (nodeType === 'web') data.src = rest.src;
+            if (nodeType === 'pdf') data.src = rest.src;
 
-        if (payload.kind === 'image') {
-          const FIXED_WIDTH = 300;
-          const nodeId = createId('node');
-          const { src, label } = payload.data;
+            if ((nodeType === 'note' || nodeType === 'text') && sourceId) {
+              const W = 400,
+                H = 300;
+              const tempNode: Node = {
+                id: createId('node'),
+                type: nodeType,
+                position: cent(dropPos, W, H),
+                data: { ...data, content: 'Loading...' },
+                style: { width: W, height: H },
+              };
+              addNode(tempNode);
 
-          const doAdd = (height: number) => {
-            addNode({
-              id: nodeId,
-              type: 'image',
-              position,
-              data: { src, label, origin: payload.origin },
-              style: { width: FIXED_WIDTH, height },
-            });
-          };
+              getSource(sourceId)
+                .then((fullSource) => {
+                  patchNodeSilent(tempNode.id, {
+                    content: fullSource.content || '',
+                  });
+                })
+                .catch((error) => {
+                  console.error('Failed to load source content:', error);
+                  patchNodeSilent(tempNode.id, {
+                    content: 'Failed to load content',
+                  });
+                });
+              return;
+            }
 
-          const img = new Image();
-          img.onload = () => {
-            const height =
-              img.naturalWidth > 0
-                ? Math.round(
-                    FIXED_WIDTH * (img.naturalHeight / img.naturalWidth),
-                  )
-                : 200;
-            doAdd(height);
-          };
-          img.onerror = () => doAdd(200);
-          img.src = src;
-          return;
-        }
-
-        if (payload.kind === 'source') {
-          const { type, sourceId, label, ...rest } = payload.data;
-
-          let nodeType = 'text';
-          if (typeof type === 'string' && type in nodeTypes) {
-            nodeType = type;
-          }
-
-          const data: Record<string, unknown> = {
-            label,
-            sourceId,
-            origin: payload.origin,
-            ...rest,
-          };
-
-          // Map specific fields for node types
-          if (nodeType === 'web') {
-            data.src = rest.src;
-          }
-          if (nodeType === 'pdf') {
-            data.src = rest.src;
-          }
-
-          // For note/text nodes, we need to fetch the full content
-          // because SourceOverview doesn't include content
-          if ((nodeType === 'note' || nodeType === 'text') && sourceId) {
-            // Create node with loading state first
-            const tempNode: Node = {
+            const W = nodeType === 'web' ? 300 : 400;
+            const H = nodeType === 'web' ? 200 : 300;
+            newNode = {
               id: createId('node'),
               type: nodeType,
-              position,
-              data: {
-                ...data,
-                content: 'Loading...',
-              },
+              position: cent(dropPos, W, H),
+              data,
+              style: { width: W, height: H },
             };
-            addNode(tempNode);
-
-            // Fetch full source content asynchronously
-            getSource(sourceId)
-              .then((fullSource) => {
-                patchNodeSilent(tempNode.id, {
-                  content: fullSource.content || '',
-                });
-              })
-              .catch((error) => {
-                console.error('Failed to load source content:', error);
-                patchNodeSilent(tempNode.id, {
-                  content: 'Failed to load content',
-                });
-              });
-
-            return; // Exit early since we've already added the node
           }
 
-          newNode = {
-            id: createId('node'),
-            type: nodeType,
-            position,
-            data,
-            style: nodeType === 'web' ? { width: 300, height: 200 } : undefined,
-          };
+          if (newNode) addNode(newNode);
+          return;
         }
 
-        if (!newNode) return;
-        addNode(newNode);
+        // ============ 2. Native file drops (from desktop / Finder) ============
+        const nativeFiles = Array.from(e.dataTransfer.files);
+        if (nativeFiles.length > 0) {
+          void (async () => {
+            for (let i = 0; i < nativeFiles.length; i++) {
+              const file = nativeFiles[i];
+              const fileType = file.type
+                ? detectNodeTypeFromMime(file.type)
+                : detectNodeType(file.name);
+              const offset = i * 30;
+              const pos = { x: dropPos.x + offset, y: dropPos.y + offset };
+
+              try {
+                if (fileType === 'image') {
+                  const [url, dims] = await Promise.all([
+                    uploadImage(file),
+                    getImageDimensionsFromBlob(file),
+                  ]);
+                  const W = 300;
+                  const H =
+                    dims.width > 0
+                      ? Math.round(W * (dims.height / dims.width))
+                      : 200;
+                  addNode({
+                    id: createId('node'),
+                    type: 'image',
+                    position: cent(pos, W, H),
+                    data: {
+                      type: 'image',
+                      src: url,
+                      label: file.name,
+                      origin: { type: 'user-uploaded' },
+                    },
+                    style: { width: W, height: H },
+                  });
+                } else if (fileType === 'video') {
+                  const url = await uploadVideo(file);
+                  const W = 400,
+                    H = 300;
+                  addNode({
+                    id: createId('node'),
+                    type: 'video',
+                    position: cent(pos, W, H),
+                    data: {
+                      type: 'video',
+                      src: url,
+                      label: file.name,
+                      origin: { type: 'user-uploaded' },
+                    },
+                    style: { width: W, height: H },
+                  });
+                } else if (fileType === 'pdf') {
+                  const url = await uploadPdf(file);
+                  const W = 400,
+                    H = 300;
+                  addNode({
+                    id: createId('node'),
+                    type: 'pdf',
+                    position: cent(pos, W, H),
+                    data: {
+                      type: 'pdf',
+                      src: url,
+                      label: file.name,
+                      origin: { type: 'user-uploaded' },
+                    },
+                    style: { width: W, height: H },
+                  });
+                }
+              } catch (error) {
+                console.error(`Failed to drop file ${file.name}:`, error);
+              }
+            }
+          })();
+          return;
+        }
+
+        // ============ 3. URL drop (browser address bar, link drag) ============
+        const uriList = e.dataTransfer.getData('text/uri-list');
+        const plainText = e.dataTransfer.getData('text/plain');
+        const droppedUrl = (uriList || plainText || '').trim();
+
+        if (droppedUrl && looksLikeUrl(droppedUrl)) {
+          const finalUrl = normalizeUrl(droppedUrl);
+          const nodeType = detectNodeType(finalUrl);
+          const W = nodeType === 'image' ? 300 : 400;
+          const H = nodeType === 'image' ? 200 : 300;
+          let label: string | undefined;
+          try {
+            label = new URL(finalUrl).hostname;
+          } catch {
+            /* ignore */
+          }
+          addNode({
+            id: createId('node'),
+            type: nodeType,
+            position: cent(dropPos, W, H),
+            data: {
+              type: nodeType,
+              src: finalUrl,
+              ...(label ? { label } : {}),
+              origin: { type: 'user-uploaded' },
+            },
+            style: { width: W, height: H },
+          });
+          return;
+        }
+
+        // ============ 4. Plain text drop ============
+        if (plainText) {
+          const trimmed = plainText.trim();
+          const firstLine =
+            trimmed
+              .split('\n')
+              .find((l) => l.trim())
+              ?.trim()
+              .slice(0, 50) || undefined;
+          const W = 400,
+            H = 300;
+          addNode({
+            id: createId('node'),
+            type: 'note',
+            position: cent(dropPos, W, H),
+            data: {
+              type: 'note',
+              content: plainText,
+              ...(firstLine ? { label: firstLine } : {}),
+              origin: { type: 'user-uploaded' },
+            },
+            style: { width: W, height: H },
+          });
+        }
       }}
     >
       <ReactFlow
