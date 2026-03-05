@@ -26,9 +26,6 @@ type FloatingDragHandleProps = {
   imageUrl?: string | null;
   capturing?: boolean;
 
-  /** Optional source node ID for provenance tracking. */
-  originSourceId?: string;
-
   onDismiss: () => void;
   /** Called when the user clicks "Send to Chat". */
   onSendToChat?: (attachment: ChatAttachment) => void;
@@ -48,7 +45,6 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
   sourceId,
   imageUrl,
   capturing = false,
-  originSourceId,
   onDismiss,
   onSendToChat,
 }) => {
@@ -97,11 +93,11 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
       url: imageUrl,
       extractedText: hasText ? text : undefined,
       label: 'PDF capture',
-      originSourceId,
+      originSourceId: sourceId,
     };
     onSendToChat(attachment);
     onDismiss();
-  }, [onSendToChat, imageUrl, hasText, text, originSourceId, onDismiss]);
+  }, [onSendToChat, imageUrl, hasText, text, sourceId, onDismiss]);
 
   const dragBtnClass = clsx(
     'flex shrink-0 cursor-grab items-center justify-center gap-1 px-2.5 py-1.5',
