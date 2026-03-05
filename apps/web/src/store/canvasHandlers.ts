@@ -39,6 +39,7 @@ import {
 } from '../utils/ingestHelper';
 import {
   AUTO_GENERATED_PLACEHOLDER_PATTERN,
+  deduplicateLabel,
   generateNextLabel,
 } from '../utils/nodeLabels';
 
@@ -160,12 +161,41 @@ function handleAddNode(
   const { nodes, edges, actionHistory, set, triggerIngestion } = ctx;
   canvasHistoryManager.takeSnapshot(nodes, edges);
 
+  const existingLabels = nodes.map((n) => n.data?.label as string | undefined);
+
   let finalLabel = cmd.node.data?.label;
   if (!finalLabel || String(finalLabel).trim() === '') {
-    finalLabel = generateNextLabel(
-      cmd.node.type || 'node',
-      nodes.map((n) => n.data?.label as string | undefined),
-    );
+    // Try to derive a meaningful label from the node's content or src
+    const data = cmd.node.data as Record<string, unknown> | undefined;
+    const content = typeof data?.content === 'string' ? data.content : '';
+    const src = typeof data?.src === 'string' ? data.src : '';
+
+    if (content.trim()) {
+      // Use first non-empty line, up to 50 chars
+      finalLabel =
+        content
+          .split('\n')
+          .find((l) => l.trim())
+          ?.trim()
+          .slice(0, 50) || '';
+    } else if (src) {
+      // Derive from URL hostname
+      try {
+        finalLabel = new URL(src).hostname;
+      } catch {
+        finalLabel = '';
+      }
+    }
+
+    if (!finalLabel || String(finalLabel).trim() === '') {
+      // Still nothing — auto-generate "Image 1", "Note 2", etc.
+      finalLabel = generateNextLabel(cmd.node.type || 'node', existingLabels);
+    } else {
+      finalLabel = deduplicateLabel(String(finalLabel), existingLabels);
+    }
+  } else {
+    // Label provided — deduplicate if it collides with an existing one
+    finalLabel = deduplicateLabel(String(finalLabel), existingLabels);
   }
 
   let newNode: Node = {
@@ -682,13 +712,13 @@ function handlePasteNodes(
   const newNodes: Node[] = clipboard.map((node) => {
     const newId = idMap.get(node.id) ?? createId('node');
 
-    // For pasted nodes: keep custom labels as-is, regenerate auto-generated ones.
+    // For pasted nodes: keep custom labels (deduplicated), regenerate auto-generated ones.
     const originalLabel = String(node.data?.label ?? '').trim();
     const isAutoLabel =
       !originalLabel || AUTO_GENERATED_PLACEHOLDER_PATTERN.test(originalLabel);
     const label = isAutoLabel
       ? generateNextLabel(node.type || 'node', existingLabels)
-      : originalLabel;
+      : deduplicateLabel(originalLabel, existingLabels);
     existingLabels.push(label);
 
     const clonedData = JSON.parse(JSON.stringify(node.data ?? {}));
