@@ -111,14 +111,19 @@ async function buildHumanMessage(
 
   const parts: Array<
     | { type: 'text'; text: string }
-    | { type: 'image_url'; image_url: { url: string; detail?: string } }
+    | {
+        type: 'image_url';
+        image_url: { url: string; source_url?: string; detail?: string };
+      }
   > = [{ type: 'text', text }];
 
   for (const att of attachments) {
     const dataUrl = await resolveImageUrl(att.url);
     parts.push({
       type: 'image_url',
-      image_url: { url: dataUrl, detail: 'high' },
+      // source_url preserves the original artifact URL so the history endpoint
+      // can return it instead of the large base64 data URL.
+      image_url: { url: dataUrl, source_url: att.url, detail: 'high' },
     });
 
     // Append extracted text if available
@@ -381,7 +386,7 @@ const chatRoutes: FastifyPluginAsync = async (
           part,
         ): part is {
           type: 'image_url';
-          image_url: { url: string; detail?: string };
+          image_url: { url: string; source_url?: string; detail?: string };
         } =>
           typeof part === 'object' &&
           part !== null &&
@@ -390,7 +395,9 @@ const chatRoutes: FastifyPluginAsync = async (
       )
       .map((part) => ({
         type: 'image' as const,
-        url: part.image_url.url,
+        // Prefer source_url (the original artifact URL, e.g. /api/artifact/xxx.png)
+        // over url which may be a large base64 data URL stored in the checkpoint.
+        url: part.image_url.source_url ?? part.image_url.url,
       }));
   }
 
