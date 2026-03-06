@@ -6,6 +6,7 @@ import { useEffect, useState, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
 import { NodeWrapper } from './NodeWrapper.tsx';
+import { useNodeScale } from '../../hooks/useNodeScale.ts';
 import useCanvasStore from '../../store/canvasStore.ts';
 import { loadBlockNoteContent } from '../../utils/blockNoteContent.ts';
 import { copyToClipboard } from '../../utils/clipboard.ts';
@@ -18,6 +19,7 @@ export type NoteNodeType = Node<CanvasNoteNodeData, 'note'>;
 export const NoteNode = ({ id, data, selected }: NodeProps<NoteNodeType>) => {
   const [copied, setCopied] = useState(false);
   const openExpanded = useCanvasStore((s) => s.openExpanded);
+  const scale = useNodeScale(id, 'note');
   const shadowHostRef = useRef<HTMLDivElement>(null);
   const shadowRootRef = useRef<ShadowRoot | null>(null);
   const reactRootRef = useRef<Root | null>(null);
@@ -148,7 +150,18 @@ export const NoteNode = ({ id, data, selected }: NodeProps<NoteNodeType>) => {
         openExpanded(id);
       }}
     >
-      <div ref={shadowHostRef} className="h-full w-full" />
+      <div className="h-full w-full overflow-hidden">
+        <div
+          style={{
+            transform: `scale(${scale})`,
+            transformOrigin: 'top left',
+            width: `${100 / scale}%`,
+            height: `${100 / scale}%`,
+          }}
+        >
+          <div ref={shadowHostRef} className="h-full w-full" />
+        </div>
+      </div>
     </NodeWrapper>
   );
 };
