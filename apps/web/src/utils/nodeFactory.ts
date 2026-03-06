@@ -142,8 +142,8 @@ export function buildNode(opts: BuildNodeOptions): Node {
     type,
     position: centeredPosition(position, type, size),
     data: {
-      type,
       ...data,
+      type,
     },
   };
 
