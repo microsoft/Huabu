@@ -72,13 +72,32 @@ export function normalizeTreeOrder(nodes: NestableNode[]): NestableNode[] {
   const byId = indexById(nodes);
   const originalIndex = new Map(nodes.map((n, i) => [n.id, i] as const));
 
-  // Drop dangling parent links to avoid runtime errors.
+  // Drop dangling parent links to avoid runtime errors and ensure frame
+  // children share the same zIndex as their parent frame.
   const normalized = nodes.map((n) => {
-    if (!n.parentId) return n;
-    if (byId.has(n.parentId)) return n;
-
-    const { parentId: _parentId, ...rest } = n;
-    return rest;
+    if (!n.parentId) {
+      // Top-level non-frame node should not carry the frame zIndex.
+      if (n.type !== 'frame' && n.zIndex === -1) {
+        const { zIndex: _zIndex, ...rest } = n;
+        return rest;
+      }
+      return n;
+    }
+    if (!byId.has(n.parentId)) {
+      const { parentId: _parentId, ...rest } = n;
+      // Also strip frame-level zIndex when the parent disappears.
+      if (rest.zIndex === -1 && rest.type !== 'frame') {
+        const { zIndex: _zIndex, ...clean } = rest;
+        return clean;
+      }
+      return rest;
+    }
+    // Ensure child nodes of a frame share the frame's zIndex.
+    const parent = byId.get(n.parentId);
+    if (parent?.type === 'frame' && n.zIndex !== -1) {
+      return { ...n, zIndex: -1 };
+    }
+    return n;
   });
 
   const normalizedById = indexById(normalized);
@@ -312,13 +331,16 @@ export function unframe(
       const childAbs = addPos(groupAbs, n.position);
 
       if (parentId && parentAbs) {
+        // Child moves to the frame's parent frame — ensure zIndex: -1.
         nextNodes.push({
           ...n,
           parentId,
           position: subPos(childAbs, parentAbs),
+          zIndex: -1,
         });
       } else {
-        const { parentId: _parentId, ...rest } = n;
+        // Child becomes top-level — strip frame-level zIndex.
+        const { parentId: _parentId, zIndex: _zIndex, ...rest } = n;
         nextNodes.push({
           ...rest,
           position: childAbs,
@@ -659,6 +681,7 @@ export function frameNodes(
       parentId: options.frameId,
       position: subPos(abs, groupAbs),
       extent: undefined,
+      zIndex: -1,
     };
   });
 
@@ -714,6 +737,7 @@ export function moveNodeIntoFrame(
       parentId: frameId,
       position: newPosition,
       extent: undefined,
+      zIndex: -1,
     };
   });
 
@@ -871,7 +895,7 @@ export function moveNodeOutOfFrame(
   const nextNodes = nodes.map((n) => {
     if (n.id !== nodeId) return n;
 
-    const { parentId: _parentId, ...rest } = n;
+    const { parentId: _parentId, zIndex: _zIndex, ...rest } = n;
     return {
       ...rest,
       position: nodeAbs,
