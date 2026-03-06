@@ -51,12 +51,18 @@ const VirtualizedPage = memo(
     const [hasRendered, setHasRendered] = useState(false);
     const [measuredHeight, setMeasuredHeight] = useState<number | null>(null);
 
+    // Use a ref so the observer callback always reads the latest height
+    // without forcing the effect to re-run (which would needlessly
+    // disconnect and recreate the IntersectionObserver).
+    const measuredHeightRef = useRef(measuredHeight);
+    measuredHeightRef.current = measuredHeight;
+
     useEffect(() => {
       const el = placeholderRef.current;
       const root = containerRef.current;
       if (!el || !root) return;
 
-      const margin = (measuredHeight ?? FALLBACK_PAGE_HEIGHT) * OVERSCAN;
+      const margin = FALLBACK_PAGE_HEIGHT * OVERSCAN;
 
       const observer = new IntersectionObserver(
         ([entry]) => {
@@ -72,7 +78,7 @@ const VirtualizedPage = memo(
 
       observer.observe(el);
       return () => observer.disconnect();
-    }, [containerRef, measuredHeight]);
+    }, [containerRef]);
 
     const handleRenderSuccess = useCallback(() => {
       // Measure the actual rendered canvas height to replace the fallback.
@@ -218,7 +224,7 @@ export const PDFNode = memo(
                       Error loading PDF.
                     </div>
                   }
-                  className="flex flex-col gap-4"
+                  className="flex flex-col gap-0"
                 >
                   {Array.from(new Array(numPages), (_el, index) => (
                     <VirtualizedPage
