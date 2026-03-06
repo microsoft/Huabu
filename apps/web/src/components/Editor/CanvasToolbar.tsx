@@ -5,6 +5,8 @@ import {
   MousePointer2,
   Hand,
   LayoutGrid,
+  ToggleLeft,
+  ToggleRight,
   UploadCloud,
   Link as LinkIcon,
   X,
@@ -94,6 +96,9 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
   const addNode = useCanvasStore((s) => s.addNode);
   const pendingNodeType = useCanvasStore((s) => s.pendingNodeType);
   const setPendingNodeType = useCanvasStore((s) => s.setPendingNodeType);
+  const layoutAll = useCanvasStore((s) => s.layoutAll);
+  const autoLayoutEnabled = useCanvasStore((s) => s.autoLayoutEnabled);
+  const toggleAutoLayout = useCanvasStore((s) => s.toggleAutoLayout);
 
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -400,8 +405,20 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
         <div className="bg-border mx-1 h-4 w-px" />
 
         <div className="flex items-center gap-2">
-          <GhostButton title="Layout">
+          <GhostButton title="Auto Layout All" onClick={() => layoutAll()}>
             <LayoutGrid size={18} />
+          </GhostButton>
+          <GhostButton
+            title={
+              autoLayoutEnabled ? 'Disable Auto Layout' : 'Enable Auto Layout'
+            }
+            onClick={() => toggleAutoLayout()}
+          >
+            {autoLayoutEnabled ? (
+              <ToggleRight size={18} />
+            ) : (
+              <ToggleLeft size={18} />
+            )}
           </GhostButton>
         </div>
 

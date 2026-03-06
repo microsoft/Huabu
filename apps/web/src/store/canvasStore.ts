@@ -74,6 +74,9 @@ export type CanvasCommand =
   | { type: 'PASTE_NODES'; flowPosition?: { x: number; y: number } }
   | { type: 'ALIGN_NODES'; direction: AlignDirection }
   | { type: 'SPREAD_NODES' }
+  | { type: 'LAYOUT_ALL' }
+  | { type: 'LAYOUT_GROUP'; frameId: string }
+  | { type: 'LAYOUT_SELECTED' }
   | { type: 'NODE_DRAG_STOP'; draggedNodeIds: string[] }
   | {
       type: 'UPDATE_NODE_DATA';
@@ -190,6 +193,19 @@ type RFState = {
   alignSelectedNodes: (direction: AlignDirection) => void;
   /** Spread apart overlapping selected nodes (frame children stay in their frame). */
   spreadSelectedNodes: () => void;
+
+  /** Auto-layout: whether new nodes are automatically placed. */
+  autoLayoutEnabled: boolean;
+  toggleAutoLayout: () => void;
+  /** Set of frame IDs with auto-layout enabled. */
+  autoLayoutFrames: Set<string>;
+  toggleFrameAutoLayout: (frameId: string) => void;
+  /** Full re-layout of all nodes (user-triggered). */
+  layoutAll: () => void;
+  /** Re-layout children of a specific frame. */
+  layoutGroup: (frameId: string) => void;
+  /** Auto-arrange selected nodes. */
+  layoutSelected: () => void;
 
   moveNodeIntoFrame: (nodeId: string, frameId: string) => void;
   moveNodeOutOfFrame: (nodeId: string) => void;
@@ -358,13 +374,23 @@ const useCanvasStore = create<RFState>()(
     actionHistory: [],
 
     dispatch: (cmd) => {
-      const { nodes, edges, canvasId, actionHistory, clipboard } = get();
+      const {
+        nodes,
+        edges,
+        canvasId,
+        actionHistory,
+        clipboard,
+        autoLayoutEnabled,
+        autoLayoutFrames,
+      } = get();
       handleCommand(cmd, {
         nodes,
         edges,
         canvasId,
         actionHistory,
         clipboard,
+        autoLayoutEnabled,
+        autoLayoutFrames,
         set,
         triggerIngestion,
       });
@@ -640,6 +666,57 @@ const useCanvasStore = create<RFState>()(
 
     spreadSelectedNodes: () => {
       get().dispatch({ type: 'SPREAD_NODES' });
+    },
+
+    autoLayoutEnabled: false,
+    toggleAutoLayout: () => {
+      set({ autoLayoutEnabled: !get().autoLayoutEnabled });
+    },
+    autoLayoutFrames: new Set<string>(),
+    toggleFrameAutoLayout: (frameId) => {
+      const { autoLayoutFrames } = get();
+      const next = new Set(autoLayoutFrames);
+      if (next.has(frameId)) {
+        next.delete(frameId);
+      } else {
+        next.add(frameId);
+      }
+      set({ autoLayoutFrames: next });
+    },
+    layoutAll: () => {
+      get().dispatch({ type: 'LAYOUT_ALL' });
+      // Fit view to center all nodes after layout
+      requestAnimationFrame(() => {
+        get().rfInstance?.fitView({ duration: 300, padding: 0.15 });
+      });
+    },
+    layoutGroup: (frameId) => {
+      get().dispatch({ type: 'LAYOUT_GROUP', frameId });
+      // Fit view to the frame's children after layout
+      requestAnimationFrame(() => {
+        const children = get().nodes.filter((n) => n.parentId === frameId);
+        if (children.length > 0) {
+          get().rfInstance?.fitView({
+            nodes: children.map((n) => ({ id: n.id })),
+            duration: 300,
+            padding: 0.15,
+          });
+        }
+      });
+    },
+    layoutSelected: () => {
+      get().dispatch({ type: 'LAYOUT_SELECTED' });
+      // Fit view to the selected nodes after layout
+      requestAnimationFrame(() => {
+        const selected = get().nodes.filter((n) => n.selected);
+        if (selected.length > 0) {
+          get().rfInstance?.fitView({
+            nodes: selected.map((n) => ({ id: n.id })),
+            duration: 300,
+            padding: 0.15,
+          });
+        }
+      });
     },
 
     moveNodeIntoFrame: (nodeId, frameId) => {

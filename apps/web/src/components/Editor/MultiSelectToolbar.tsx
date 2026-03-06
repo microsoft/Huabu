@@ -6,6 +6,7 @@ import {
   AlignVerticalJustifyStart,
   AlignVerticalJustifyCenter,
   AlignVerticalJustifyEnd,
+  LayoutGrid,
   Ungroup,
 } from 'lucide-react';
 import { useMemo } from 'react';
@@ -26,6 +27,7 @@ export const MultiSelectToolbar = () => {
   const nodes = useCanvasStore((s) => s.nodes);
   const alignSelectedNodes = useCanvasStore((s) => s.alignSelectedNodes);
   const spreadSelectedNodes = useCanvasStore((s) => s.spreadSelectedNodes);
+  const layoutSelected = useCanvasStore((s) => s.layoutSelected);
 
   const { zoom, x: vpX, y: vpY } = useViewport();
 
@@ -140,6 +142,13 @@ export const MultiSelectToolbar = () => {
         {/* Spread apart overlapping nodes */}
         <GhostButton title="Spread Apart" onClick={() => spreadSelectedNodes()}>
           <Ungroup size={14} />
+        </GhostButton>
+
+        <div className="bg-border mx-0.5 h-4 w-px" />
+
+        {/* Auto-arrange selected nodes */}
+        <GhostButton title="Auto Arrange" onClick={() => layoutSelected()}>
+          <LayoutGrid size={14} />
         </GhostButton>
       </div>
     </div>

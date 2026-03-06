@@ -46,6 +46,8 @@ export function useCanvasShortcuts(refs: CanvasShortcutRefs): void {
   const redo = useCanvasStore((s) => s.redo);
   const dispatch = useCanvasStore((s) => s.dispatch);
   const addNode = useCanvasStore((s) => s.addNode);
+  const layoutAll = useCanvasStore((s) => s.layoutAll);
+  const toggleAutoLayout = useCanvasStore((s) => s.toggleAutoLayout);
 
   // Prevents double-paste between native paste event and async Clipboard API.
   const pasteHandledRef = useRef(false);
@@ -236,6 +238,22 @@ export function useCanvasShortcuts(refs: CanvasShortcutRefs): void {
         return;
       }
 
+      // Cmd/Ctrl+Shift+L → layout all
+      if (lowerKey === 'l' && e.shiftKey) {
+        if (isNativeInput || isRichEditor) return;
+        e.preventDefault();
+        layoutAll();
+        return;
+      }
+
+      // Cmd/Ctrl+Shift+A → toggle auto layout
+      if (lowerKey === 'a' && e.shiftKey) {
+        if (isNativeInput || isRichEditor) return;
+        e.preventDefault();
+        toggleAutoLayout();
+        return;
+      }
+
       // Remaining shortcuts require Cmd/Ctrl without Shift
       if (e.shiftKey) return;
 
@@ -352,6 +370,8 @@ export function useCanvasShortcuts(refs: CanvasShortcutRefs): void {
     getFlowPos,
     pasteFiles,
     pasteText,
+    layoutAll,
+    toggleAutoLayout,
   ]);
 
   // --- Fallback: native paste event listener ---

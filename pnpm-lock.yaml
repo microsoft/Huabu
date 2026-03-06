@@ -129,6 +129,9 @@ importers:
       '@blocknote/shadcn':
         specifier: ^0.46.2
         version: 0.46.2(@floating-ui/dom@1.7.5)(@types/react-dom@18.2.7)(@types/react@18.2.15)(postcss@8.5.6)(react-dom@18.2.0)(react@18.2.0)(tailwindcss@4.1.18)
+      '@dagrejs/dagre':
+        specifier: ^2.0.4
+        version: 2.0.4
       '@dnd-kit/core':
         specifier: ^6.3.1
         version: 6.3.1(react-dom@18.2.0)(react@18.2.0)
@@ -514,6 +517,16 @@ packages:
 
   /@cfworker/json-schema@4.1.1:
     resolution: {integrity: sha512-gAmrUZSGtKc3AiBL71iNWxDsyUC5uMaKKGdvzYsBoTW/xi42JQHl7eKV2OYzCUqvc+D2RCcf7EXY2iCyFIk6og==}
+    dev: false
+
+  /@dagrejs/dagre@2.0.4:
+    resolution: {integrity: sha512-J6vCWTNpicHF4zFlZG1cS5DkGzMr9941gddYkakjrg3ZNev4bbqEgLHFTWiFrcJm7UCRu7olO3K6IRDd9gSGhA==}
+    dependencies:
+      '@dagrejs/graphlib': 3.0.4
+    dev: false
+
+  /@dagrejs/graphlib@3.0.4:
+    resolution: {integrity: sha512-HxZ7fCvAwTLCWCO0WjDkzAFQze8LdC6iOpKbetDKHIuDfIgMlIzYzqZ4nxwLlclQX+3ZVeZ1K2OuaOE2WWcyOg==}
     dev: false
 
   /@dnd-kit/accessibility@3.1.1(react@18.2.0):

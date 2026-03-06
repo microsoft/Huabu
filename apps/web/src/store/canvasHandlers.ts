@@ -38,6 +38,12 @@ import {
   type NodeIngestionInfo,
 } from '../utils/ingestHelper';
 import {
+  layoutAll as layoutAllNodes,
+  layoutGroup as layoutGroupNodes,
+  layoutSelected as layoutSelectedNodes,
+  placeNode as placeNewNode,
+} from '../utils/layout';
+import {
   AUTO_GENERATED_PLACEHOLDER_PATTERN,
   deduplicateLabel,
   generateNextLabel,
@@ -57,6 +63,10 @@ export type CanvasHandlerContext = {
   actionHistory: RecentAction[];
   /** Clipboard content — only consumed by PASTE_NODES. */
   clipboard: Node[];
+  /** Whether global auto-layout is enabled. */
+  autoLayoutEnabled: boolean;
+  /** Set of frame IDs with per-frame auto-layout enabled. */
+  autoLayoutFrames: Set<string>;
   /**
    * Call `set` exactly once per handler to apply state mutations.
    * Accepts either a partial object or an updater function (for reads of
@@ -231,11 +241,24 @@ function handleAddNode(
     }
   }
 
+  const updatedNodes = selectOnly(
+    normalizeTreeOrder([...nodes, newNode] as NestableNode[]),
+    [newNode.id],
+  );
+
+  // Check if auto-layout should position this new node
+  const shouldAutoPlace =
+    ctx.autoLayoutEnabled ||
+    (newNode.parentId && ctx.autoLayoutFrames.has(newNode.parentId));
+
+  let finalNodes = updatedNodes;
+  if (shouldAutoPlace) {
+    const placed = placeNewNode(updatedNodes, edges, newNode.id);
+    if (placed) finalNodes = placed;
+  }
+
   set({
-    nodes: selectOnly(
-      normalizeTreeOrder([...nodes, newNode] as NestableNode[]),
-      [newNode.id],
-    ),
+    nodes: finalNodes,
     actionHistory: pushAction(actionHistory, {
       action: 'node_created',
       nodes: [extractNodeRef(newNode)],
@@ -826,6 +849,41 @@ function handleSpreadNodes(
   set({ nodes: result });
 }
 
+// --------------- Layout handlers ---------------
+
+function handleLayoutAll(
+  _cmd: Extract<CanvasCommand, { type: 'LAYOUT_ALL' }>,
+  ctx: CanvasHandlerContext,
+): void {
+  const { nodes, edges, set } = ctx;
+  const result = layoutAllNodes(nodes, edges);
+  if (!result) return;
+  // Snapshot is taken inside applyLayoutResult
+  set({ nodes: result });
+}
+
+function handleLayoutGroup(
+  cmd: Extract<CanvasCommand, { type: 'LAYOUT_GROUP' }>,
+  ctx: CanvasHandlerContext,
+): void {
+  const { nodes, edges, set } = ctx;
+  const result = layoutGroupNodes(nodes, edges, cmd.frameId);
+  if (!result) return;
+  set({ nodes: result });
+}
+
+function handleLayoutSelected(
+  _cmd: Extract<CanvasCommand, { type: 'LAYOUT_SELECTED' }>,
+  ctx: CanvasHandlerContext,
+): void {
+  const { nodes, edges, set } = ctx;
+  const selectedIds = nodes.filter((n) => n.selected).map((n) => n.id);
+  if (selectedIds.length < 2) return;
+  const result = layoutSelectedNodes(nodes, edges, selectedIds);
+  if (!result) return;
+  set({ nodes: result });
+}
+
 function handleNodeDragStop(
   cmd: Extract<CanvasCommand, { type: 'NODE_DRAG_STOP' }>,
   ctx: CanvasHandlerContext,
@@ -952,6 +1010,12 @@ export function handleCommand(
       return handleAlignNodes(cmd, ctx);
     case 'SPREAD_NODES':
       return handleSpreadNodes(cmd, ctx);
+    case 'LAYOUT_ALL':
+      return handleLayoutAll(cmd, ctx);
+    case 'LAYOUT_GROUP':
+      return handleLayoutGroup(cmd, ctx);
+    case 'LAYOUT_SELECTED':
+      return handleLayoutSelected(cmd, ctx);
     case 'NODE_DRAG_STOP':
       return handleNodeDragStop(cmd, ctx);
   }
