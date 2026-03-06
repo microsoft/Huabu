@@ -1,3 +1,4 @@
+import clsx from 'clsx';
 import React from 'react';
 
 import type { KnowledgeStorageBackend } from './types';
@@ -38,22 +39,24 @@ export const StorageSettingsForm: React.FC<StorageSettingsFormProps> = ({
       <div className="flex gap-2">
         <button
           type="button"
-          className={`flex-1 rounded-md border px-3 py-1.5 text-sm transition-colors ${
+          className={clsx(
+            'flex-1 rounded-md border px-3 py-1.5 text-sm transition-colors',
             backend === 'sqlite'
               ? 'border-blue-500 bg-blue-50 text-blue-700'
-              : 'border-border text-gray-600 hover:bg-gray-50'
-          }`}
+              : 'border-border text-gray-600 hover:bg-gray-50',
+          )}
           onClick={() => onBackendChange('sqlite')}
         >
           SQLite
         </button>
         <button
           type="button"
-          className={`flex-1 rounded-md border px-3 py-1.5 text-sm transition-colors ${
+          className={clsx(
+            'flex-1 rounded-md border px-3 py-1.5 text-sm transition-colors',
             backend === 'obsidian'
               ? 'border-blue-500 bg-blue-50 text-blue-700'
-              : 'border-border text-gray-600 hover:bg-gray-50'
-          }`}
+              : 'border-border text-gray-600 hover:bg-gray-50',
+          )}
           onClick={() => onBackendChange('obsidian')}
         >
           Obsidian

@@ -1,3 +1,4 @@
+import clsx from 'clsx';
 import {
   PanelLeftClose,
   PanelLeftOpen,
@@ -207,9 +208,10 @@ export const DataSourcePanel = ({
                   ].map((opt) => (
                     <button
                       key={opt.id}
-                      className={`hover:bg-accent flex w-full justify-between px-3 py-1.5 text-left text-xs ${
-                        sortType === opt.id ? 'font-bold text-blue-500' : ''
-                      }`}
+                      className={clsx(
+                        'hover:bg-accent flex w-full justify-between px-3 py-1.5 text-left text-xs',
+                        sortType === opt.id && 'font-bold text-blue-500',
+                      )}
                       onClick={() => {
                         setSortType(opt.id as SortType);
                         setShowSortMenu(false);

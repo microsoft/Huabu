@@ -1,3 +1,4 @@
+import clsx from 'clsx';
 import { ChevronDown, ChevronRight, Lock, Unlock } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 
@@ -135,13 +136,17 @@ export const TreeRowItem = React.memo(
         onDoubleClick={handleDoubleClick}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
-        className={`flex h-9 w-full cursor-pointer touch-none items-center gap-2 bg-white px-2 ${
-          className || ''
-        }`}
+        className={clsx(
+          'flex h-9 w-full cursor-pointer touch-none items-center gap-2 bg-white px-2',
+          className,
+        )}
         {...rest}
       >
         <div
-          className={`flex w-full items-center gap-2 rounded px-2 py-1 text-sm transition-colors ${bgColor}`}
+          className={clsx(
+            'flex w-full items-center gap-2 rounded px-2 py-1 text-sm transition-colors',
+            bgColor,
+          )}
         >
           {/* Chevron icon for collapsible items (frames/groups) */}
           {isCollapsible && (
@@ -187,11 +192,12 @@ export const TreeRowItem = React.memo(
             {(isLocked || isHovered) && onToggleLock && (
               <button
                 onClick={handleToggleLock}
-                className={`flex items-center transition-colors ${
+                className={clsx(
+                  'flex items-center transition-colors',
                   isLocked
                     ? 'text-foreground'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
+                    : 'text-muted-foreground hover:text-foreground',
+                )}
               >
                 {isLocked ? (
                   <Lock size={iconSize} strokeWidth={iconStroke} />

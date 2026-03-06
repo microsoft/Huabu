@@ -1,3 +1,4 @@
+import clsx from 'clsx';
 import { ChevronDown, Download, Redo2, Undo2, Upload } from 'lucide-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -141,9 +142,10 @@ export const WorkspaceMenu: React.FC = () => {
         >
           <ChevronDown
             size={15}
-            className={`text-gray-500 transition-transform duration-150 ${
-              isOpen ? 'rotate-180' : ''
-            }`}
+            className={clsx(
+              'text-gray-500 transition-transform duration-150',
+              isOpen && 'rotate-180',
+            )}
           />
         </GhostButton>
 

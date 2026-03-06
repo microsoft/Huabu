@@ -1,3 +1,4 @@
+import clsx from 'clsx';
 import React from 'react';
 
 import { GhostButton } from '../Common/GhostButton';
@@ -28,7 +29,10 @@ export const SidebarPanel = ({
   if (isCollapsed) {
     return (
       <div
-        className={`flex h-full flex-col items-center bg-white pt-3 ${className}`}
+        className={clsx(
+          'flex h-full flex-col items-center bg-white pt-3',
+          className,
+        )}
       >
         <GhostButton onClick={onToggle} title={`Expand ${title}`}>
           {iconCollapsed}
@@ -41,7 +45,7 @@ export const SidebarPanel = ({
   }
 
   return (
-    <div className={`flex h-full flex-col bg-white ${className}`}>
+    <div className={clsx('flex h-full flex-col bg-white', className)}>
       {/* header */}
       <div className="border-border flex h-12 shrink-0 items-center justify-between border-b px-3">
         <div className="text-muted-foreground flex min-w-0 flex-1 items-center text-sm font-semibold">

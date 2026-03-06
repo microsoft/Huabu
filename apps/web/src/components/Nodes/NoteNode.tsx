@@ -1,6 +1,7 @@
 import { useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/shadcn';
 import { type Node, type NodeProps, useStore } from '@xyflow/react';
+import clsx from 'clsx';
 import { Copy, Check, Fullscreen } from 'lucide-react';
 import { memo, useEffect, useState, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -160,7 +161,10 @@ export const NoteNode = memo(
         }}
       >
         <div
-          className={`w-full overflow-hidden bg-white${hasFixedHeight ? ' h-full' : ''}`}
+          className={clsx(
+            'w-full overflow-hidden bg-white',
+            hasFixedHeight && 'h-full',
+          )}
         >
           <div
             style={{
@@ -172,7 +176,7 @@ export const NoteNode = memo(
           >
             <div
               ref={shadowHostRef}
-              className={`w-full ${hasFixedHeight ? 'h-full' : 'min-h-25'}`}
+              className={clsx('w-full', hasFixedHeight ? 'h-full' : 'min-h-25')}
               style={!hasFixedHeight ? { maxHeight: 600 } : undefined}
             />
           </div>
