@@ -1,4 +1,3 @@
-import { createId } from '@sediment/shared';
 import {
   ReactFlow,
   Background,
@@ -29,6 +28,7 @@ import {
   normalizeUrl,
   getImageDimensionsFromBlob,
 } from '../../utils/mediaUtils';
+import { buildNode, buildSourceNode } from '../../utils/nodeFactory';
 import { FrameNode } from '../Nodes/FrameNode';
 import { ImageNode } from '../Nodes/ImageNode';
 import { NoteNode } from '../Nodes/NoteNode';
@@ -46,6 +46,8 @@ const nodeTypes = {
   pdf: PDFNode,
   frame: FrameNode,
 } as const;
+
+const VALID_NODE_TYPES = Object.keys(nodeTypes);
 
 export const Canvas: React.FC = () => {
   const nodes = useCanvasStore((state) => state.nodes);
@@ -111,51 +113,14 @@ export const Canvas: React.FC = () => {
         y: event.clientY,
       });
 
-      const w = 400;
-      const h = 300;
-
-      // Centre the node at the click position
-      // Text nodes auto-size so use a small estimate for centering
-      const isText = pendingNodeType === 'text';
-      const centeredPosition = {
-        x: position.x - (isText ? 15 : w / 2),
-        y: position.y - (isText ? 12 : h / 2),
-      };
-
-      const baseNode = {
-        id: createId('node'),
-        position: centeredPosition,
-      };
-
-      let newNode: Node;
-
-      switch (pendingNodeType) {
-        case 'note':
-          newNode = {
-            ...baseNode,
-            type: 'note',
-            data: {
-              type: 'note',
-              content: '',
-              origin: { type: 'user-created' },
-            },
-            style: { width: w, height: h },
-          };
-          break;
-        case 'text':
-          newNode = {
-            ...baseNode,
-            type: 'text',
-            data: {
-              type: 'text',
-              content: '',
-              origin: { type: 'user-created' },
-            },
-          };
-          break;
-        default:
-          return;
-      }
+      const newNode = buildNode({
+        type: pendingNodeType,
+        position,
+        data: {
+          content: '',
+          origin: { type: 'user-created' },
+        },
+      });
 
       addNode(newNode);
       setPendingNodeType(null);
@@ -292,12 +257,6 @@ export const Canvas: React.FC = () => {
           y: e.clientY,
         });
 
-        /** Center a node of known size at the given point. */
-        const cent = (pos: { x: number; y: number }, w: number, h: number) => ({
-          x: pos.x - w / 2,
-          y: pos.y - h / 2,
-        });
-
         // ============ 1. Internal Sediment drag payloads ============
         if (canReadSedimentPayload(e.dataTransfer)) {
           const payload = getSedimentPayload(e.dataTransfer);
@@ -321,24 +280,17 @@ export const Canvas: React.FC = () => {
           let newNode: Node | null = null;
 
           if (payload.kind === 'web') {
-            const W = 300,
-              H = 200;
-            newNode = {
-              id: createId('node'),
+            newNode = buildNode({
               type: 'web',
-              position: cent(dropPos, W, H),
+              position: dropPos,
               data: { src: payload.data.src, origin: payload.origin },
-              style: { width: W, height: H },
-            };
+            });
           }
 
           if (payload.kind === 'note') {
-            const W = 400,
-              H = 300;
-            newNode = {
-              id: createId('node'),
+            newNode = buildNode({
               type: 'note',
-              position: cent(dropPos, W, H),
+              position: dropPos,
               data: {
                 content: payload.data.content,
                 ...(payload.data.contentJson
@@ -346,36 +298,26 @@ export const Canvas: React.FC = () => {
                   : {}),
                 origin: payload.origin,
               },
-              style: { width: W, height: H },
-            };
+            });
           }
 
           if (payload.kind === 'image') {
-            const FIXED_WIDTH = 300;
-            const nodeId = createId('node');
             const { src, label } = payload.data;
 
-            const doAdd = (height: number) => {
-              addNode({
-                id: nodeId,
-                type: 'image',
-                position: cent(dropPos, FIXED_WIDTH, height),
-                data: { src, label, origin: payload.origin },
-                style: { width: FIXED_WIDTH, height },
-              });
+            const doAdd = (natW: number, natH: number) => {
+              addNode(
+                buildNode({
+                  type: 'image',
+                  position: dropPos,
+                  data: { src, label, origin: payload.origin },
+                  naturalDimensions: { width: natW, height: natH },
+                }),
+              );
             };
 
             const img = new Image();
-            img.onload = () => {
-              const height =
-                img.naturalWidth > 0
-                  ? Math.round(
-                      FIXED_WIDTH * (img.naturalHeight / img.naturalWidth),
-                    )
-                  : 200;
-              doAdd(height);
-            };
-            img.onerror = () => doAdd(200);
+            img.onload = () => doAdd(img.naturalWidth, img.naturalHeight);
+            img.onerror = () => doAdd(0, 0);
             img.src = src;
             return;
           }
@@ -384,30 +326,23 @@ export const Canvas: React.FC = () => {
             const { type, sourceId, label, ...rest } = payload.data;
 
             let nodeType = 'text';
-            if (typeof type === 'string' && type in nodeTypes) {
+            if (typeof type === 'string' && VALID_NODE_TYPES.includes(type)) {
               nodeType = type;
             }
 
-            const data: Record<string, unknown> = {
-              label,
-              sourceId,
-              origin: payload.origin,
-              ...rest,
-            };
-
-            if (nodeType === 'web') data.src = rest.src;
-            if (nodeType === 'pdf') data.src = rest.src;
-
+            // For note/text sources, async-load content
             if ((nodeType === 'note' || nodeType === 'text') && sourceId) {
-              const W = 400,
-                H = 300;
-              const tempNode: Node = {
-                id: createId('node'),
+              const tempNode = buildNode({
                 type: nodeType,
-                position: cent(dropPos, W, H),
-                data: { ...data, content: 'Loading...' },
-                style: { width: W, height: H },
-              };
+                position: dropPos,
+                data: {
+                  ...rest,
+                  label,
+                  sourceId,
+                  origin: payload.origin,
+                  content: 'Loading...',
+                },
+              });
               addNode(tempNode);
 
               getSource(sourceId)
@@ -425,15 +360,14 @@ export const Canvas: React.FC = () => {
               return;
             }
 
-            const W = nodeType === 'web' ? 300 : 400;
-            const H = nodeType === 'web' ? 200 : 300;
-            newNode = {
-              id: createId('node'),
-              type: nodeType,
-              position: cent(dropPos, W, H),
-              data,
-              style: { width: W, height: H },
-            };
+            newNode = buildSourceNode({
+              sourceId,
+              sourceType: type,
+              position: dropPos,
+              origin: payload.origin,
+              extra: { ...rest, label },
+              validNodeTypes: VALID_NODE_TYPES,
+            });
           }
 
           if (newNode) addNode(newNode);
@@ -458,55 +392,44 @@ export const Canvas: React.FC = () => {
                     uploadImage(file),
                     getImageDimensionsFromBlob(file),
                   ]);
-                  const W = 300;
-                  const H =
-                    dims.width > 0
-                      ? Math.round(W * (dims.height / dims.width))
-                      : 200;
-                  addNode({
-                    id: createId('node'),
-                    type: 'image',
-                    position: cent(pos, W, H),
-                    data: {
+                  addNode(
+                    buildNode({
                       type: 'image',
-                      src: url,
-                      label: file.name,
-                      origin: { type: 'user-uploaded' },
-                    },
-                    style: { width: W, height: H },
-                  });
+                      position: pos,
+                      data: {
+                        src: url,
+                        label: file.name,
+                        origin: { type: 'user-uploaded' },
+                      },
+                      naturalDimensions: dims,
+                    }),
+                  );
                 } else if (fileType === 'video') {
                   const url = await uploadVideo(file);
-                  const W = 400,
-                    H = 300;
-                  addNode({
-                    id: createId('node'),
-                    type: 'video',
-                    position: cent(pos, W, H),
-                    data: {
+                  addNode(
+                    buildNode({
                       type: 'video',
-                      src: url,
-                      label: file.name,
-                      origin: { type: 'user-uploaded' },
-                    },
-                    style: { width: W, height: H },
-                  });
+                      position: pos,
+                      data: {
+                        src: url,
+                        label: file.name,
+                        origin: { type: 'user-uploaded' },
+                      },
+                    }),
+                  );
                 } else if (fileType === 'pdf') {
                   const url = await uploadPdf(file);
-                  const W = 400,
-                    H = 300;
-                  addNode({
-                    id: createId('node'),
-                    type: 'pdf',
-                    position: cent(pos, W, H),
-                    data: {
+                  addNode(
+                    buildNode({
                       type: 'pdf',
-                      src: url,
-                      label: file.name,
-                      origin: { type: 'user-uploaded' },
-                    },
-                    style: { width: W, height: H },
-                  });
+                      position: pos,
+                      data: {
+                        src: url,
+                        label: file.name,
+                        origin: { type: 'user-uploaded' },
+                      },
+                    }),
+                  );
                 }
               } catch (error) {
                 console.error(`Failed to drop file ${file.name}:`, error);
@@ -524,52 +447,31 @@ export const Canvas: React.FC = () => {
         if (droppedUrl && looksLikeUrl(droppedUrl)) {
           const finalUrl = normalizeUrl(droppedUrl);
           const nodeType = detectNodeType(finalUrl);
-          const W = nodeType === 'image' ? 300 : 400;
-          const H = nodeType === 'image' ? 200 : 300;
-          let label: string | undefined;
-          try {
-            label = new URL(finalUrl).hostname;
-          } catch {
-            /* ignore */
-          }
-          addNode({
-            id: createId('node'),
-            type: nodeType,
-            position: cent(dropPos, W, H),
-            data: {
+          addNode(
+            buildNode({
               type: nodeType,
-              src: finalUrl,
-              ...(label ? { label } : {}),
-              origin: { type: 'user-uploaded' },
-            },
-            style: { width: W, height: H },
-          });
+              position: dropPos,
+              data: {
+                src: finalUrl,
+                origin: { type: 'user-uploaded' },
+              },
+            }),
+          );
           return;
         }
 
         // ============ 4. Plain text drop ============
         if (plainText) {
-          const trimmed = plainText.trim();
-          const firstLine =
-            trimmed
-              .split('\n')
-              .find((l) => l.trim())
-              ?.trim()
-              .slice(0, 50) || undefined;
-          const W = 400,
-            H = 300;
-          addNode({
-            id: createId('node'),
-            type: 'note',
-            position: cent(dropPos, W, H),
-            data: {
+          addNode(
+            buildNode({
               type: 'note',
-              content: plainText,
-              ...(firstLine ? { label: firstLine } : {}),
-              origin: { type: 'user-uploaded' },
-            },
-            style: { width: W, height: H },
-          });
+              position: dropPos,
+              data: {
+                content: plainText,
+                origin: { type: 'user-uploaded' },
+              },
+            }),
+          );
         }
       }}
     >
