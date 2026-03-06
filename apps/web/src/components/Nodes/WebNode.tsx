@@ -158,7 +158,7 @@ export const WebNode = ({ id, data, selected }: NodeProps<WebNodeType>) => {
                   ) : null}
 
                   {/* Priority 1: favicon + site name + title — always visible */}
-                  <div className="flex min-w-0 shrink-0 flex-col gap-1 p-2">
+                  <div className="flex min-w-0 shrink-0 flex-col gap-1 px-2 py-1">
                     <div className="text-muted-foreground flex min-w-0 items-center gap-2 text-xs font-medium">
                       {preview.favicon ? (
                         <img
@@ -178,7 +178,7 @@ export const WebNode = ({ id, data, selected }: NodeProps<WebNodeType>) => {
                       </span>
                     </div>
 
-                    <div className="text-main min-w-0 truncate text-xs font-medium">
+                    <div className="text-main line-clamp-2 min-w-0 text-xs font-medium break-words">
                       {preview.title || src}
                     </div>
                   </div>

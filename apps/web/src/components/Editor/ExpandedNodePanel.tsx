@@ -124,7 +124,7 @@ export const ExpandedNodePanel = () => {
   return (
     <div className="border-border flex h-full w-full flex-col overflow-hidden border-l bg-white">
       {/* Header bar */}
-      <div className="border-border flex h-10 shrink-0 items-center justify-between gap-3 border-b bg-white px-3">
+      <div className="border-border flex h-12 shrink-0 items-center justify-between gap-3 border-b bg-white px-3">
         {/* Left: back button (replace mode) + icon + title */}
         <div className="flex min-w-0 items-center gap-2">
           {isReplace && (
@@ -137,11 +137,10 @@ export const ExpandedNodePanel = () => {
             </GhostButton>
           )}
 
-          <div className="text-muted-foreground flex min-w-0 items-center gap-2 text-xs font-medium">
-            <span className="shrink-0">{meta.icon}</span>
+          <div className="text-muted-foreground flex min-w-0 items-center gap-2 text-sm font-medium">
             <span className="truncate">{meta.title}</span>
             {activeItem.readOnly && (
-              <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[10px] uppercase">
+              <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-xs uppercase">
                 Preview
               </span>
             )}

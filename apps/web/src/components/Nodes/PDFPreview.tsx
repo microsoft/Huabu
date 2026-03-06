@@ -257,17 +257,14 @@ export const PDFPreview = ({ data }: PreviewComponentProps) => {
         </div>
       </div>
 
-      {/* ── Floating drag handle (rendered via React Portal to document.body) ── */}
+      {/* ── Floating drag handle */}
       {pendingCapture && (
         <FloatingDragHandle
-          sourceId={
-            typeof data.sourceId === 'string' ? data.sourceId : undefined
-          }
+          sourceId={sourceId}
           text={pendingCapture.text}
           imageUrl={pendingCapture.imageUrl}
           capturing={pendingCapture.capturing}
           position={pendingCapture.position}
-          originSourceId={sourceId}
           onDismiss={() => setPendingCapture(null)}
           onSendToChat={handleSendToChat}
         />
