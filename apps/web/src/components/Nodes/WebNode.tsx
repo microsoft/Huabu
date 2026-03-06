@@ -1,6 +1,6 @@
 import { type Node, type NodeProps } from '@xyflow/react';
 import { Fullscreen, ArrowUpRight } from 'lucide-react';
-import { useState, useEffect, useMemo } from 'react';
+import { memo, useState, useEffect, useMemo } from 'react';
 
 import { getWebPreview } from '@/api/web';
 
@@ -13,210 +13,214 @@ import type { CanvasWebNodeData } from './types.ts';
 
 export type WebNodeType = Node<CanvasWebNodeData, 'web'>;
 
-export const WebNode = ({ id, data, selected }: NodeProps<WebNodeType>) => {
-  const scale = useNodeScale(id, 'web');
-  const openExpanded = useCanvasStore((s) => s.openExpanded);
-  const ingestion = useCanvasStore((state) => state.ingestionByNodeId[id]);
+export const WebNode = memo(
+  ({ id, data, selected }: NodeProps<WebNodeType>) => {
+    const scale = useNodeScale(id, 'web');
+    const openExpanded = useCanvasStore((s) => s.openExpanded);
+    const ingestion = useCanvasStore((state) => state.ingestionByNodeId[id]);
 
-  const [refreshKey] = useState(0);
+    const [refreshKey] = useState(0);
 
-  const [preview, setPreview] = useState<Awaited<
-    ReturnType<typeof getWebPreview>
-  > | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
-  const [previewError, setPreviewError] = useState<string | null>(null);
+    const [preview, setPreview] = useState<Awaited<
+      ReturnType<typeof getWebPreview>
+    > | null>(null);
+    const [previewLoading, setPreviewLoading] = useState(false);
+    const [previewError, setPreviewError] = useState<string | null>(null);
 
-  const src = typeof data?.src === 'string' ? data.src : '';
-  const sourceId = typeof data?.sourceId === 'string' ? data.sourceId : '';
+    const src = typeof data?.src === 'string' ? data.src : '';
+    const sourceId = typeof data?.sourceId === 'string' ? data.sourceId : '';
 
-  const hostname = useMemo(() => {
-    if (!src) return '';
-    try {
-      return new URL(src).hostname;
-    } catch {
-      return '';
-    }
-  }, [src]);
-
-  useEffect(() => {
-    if (ingestion?.status === 'pending') {
-      setPreview(null);
-      setPreviewError(null);
-      setPreviewLoading(false);
-      return;
-    }
-
-    if (!src) {
-      setPreview(null);
-      setPreviewError(null);
-      setPreviewLoading(false);
-      return;
-    }
-
-    if (!sourceId) {
-      setPreview(null);
-      setPreviewError(null);
-      setPreviewLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-    setPreviewLoading(true);
-    setPreviewError(null);
-
-    void (async () => {
+    const hostname = useMemo(() => {
+      if (!src) return '';
       try {
-        const result = await getWebPreview({ sourceId });
-        if (cancelled) return;
-        setPreview(result);
-      } catch (error) {
-        if (cancelled) return;
-        setPreview(null);
-        setPreviewError(error instanceof Error ? error.message : String(error));
-      } finally {
-        if (!cancelled) setPreviewLoading(false);
+        return new URL(src).hostname;
+      } catch {
+        return '';
       }
-    })();
+    }, [src]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [src, sourceId, refreshKey, ingestion?.status]);
+    useEffect(() => {
+      if (ingestion?.status === 'pending') {
+        setPreview(null);
+        setPreviewError(null);
+        setPreviewLoading(false);
+        return;
+      }
 
-  const WebToolbar = (
-    <div className="flex w-full items-center justify-between gap-2">
-      <a
-        href={data?.src}
-        target="_blank"
-        rel="noopener noreferrer"
-        onClick={(e) => e.stopPropagation()}
-        className="nodrag text-muted-foreground hover:text-theme-500 flex flex-1 cursor-pointer items-center gap-1 overflow-hidden text-xs font-medium transition-colors"
-      >
-        <span className="max-w-24 truncate">{data?.src || 'Website'}</span>
-        <ArrowUpRight size={14} strokeWidth={2} />
-      </a>
+      if (!src) {
+        setPreview(null);
+        setPreviewError(null);
+        setPreviewLoading(false);
+        return;
+      }
 
-      <div className="text-muted-foreground flex items-center gap-1">
-        <div className="bg-border h-3 w-px" />
+      if (!sourceId) {
+        setPreview(null);
+        setPreviewError(null);
+        setPreviewLoading(false);
+        return;
+      }
 
-        <GhostButton
-          aria-label="Open large view"
-          title="Open Large View"
-          onClick={(e) => {
-            e.stopPropagation();
-            openExpanded(id);
-          }}
+      let cancelled = false;
+      setPreviewLoading(true);
+      setPreviewError(null);
+
+      void (async () => {
+        try {
+          const result = await getWebPreview({ sourceId });
+          if (cancelled) return;
+          setPreview(result);
+        } catch (error) {
+          if (cancelled) return;
+          setPreview(null);
+          setPreviewError(
+            error instanceof Error ? error.message : String(error),
+          );
+        } finally {
+          if (!cancelled) setPreviewLoading(false);
+        }
+      })();
+
+      return () => {
+        cancelled = true;
+      };
+    }, [src, sourceId, refreshKey, ingestion?.status]);
+
+    const WebToolbar = (
+      <div className="flex w-full items-center justify-between gap-2">
+        <a
+          href={data?.src}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="nodrag text-muted-foreground hover:text-theme-500 flex flex-1 cursor-pointer items-center gap-1 overflow-hidden text-xs font-medium transition-colors"
         >
-          <Fullscreen size={14} />
-        </GhostButton>
+          <span className="max-w-24 truncate">{data?.src || 'Website'}</span>
+          <ArrowUpRight size={14} strokeWidth={2} />
+        </a>
+
+        <div className="text-muted-foreground flex items-center gap-1">
+          <div className="bg-border h-3 w-px" />
+
+          <GhostButton
+            aria-label="Open large view"
+            title="Open Large View"
+            onClick={(e) => {
+              e.stopPropagation();
+              openExpanded(id);
+            }}
+          >
+            <Fullscreen size={14} />
+          </GhostButton>
+        </div>
       </div>
-    </div>
-  );
+    );
 
-  return (
-    <NodeWrapper
-      id={id}
-      data={data}
-      type={'web'}
-      selected={selected}
-      toolbar={WebToolbar}
-      keepAspectRatio={false}
-      onDoubleClick={(e) => {
-        e.stopPropagation();
-        openExpanded(id);
-      }}
-    >
-      <div className="h-full w-full overflow-hidden">
-        <div
-          style={{
-            transform: `scale(${scale})`,
-            transformOrigin: 'top left',
-            width: `${100 / scale}%`,
-            height: `${100 / scale}%`,
-          }}
-        >
-          <div className="flex h-full flex-col">
-            <div className="relative h-full w-full overflow-hidden rounded bg-white">
-              {src ? (
-                <div className="flex h-full w-full flex-col gap-2 p-3">
-                  {previewLoading ? (
-                    <div className="text-muted-foreground text-base">
-                      Loading preview...
-                    </div>
-                  ) : null}
-
-                  {previewError && ingestion?.status !== 'pending' ? (
-                    <div className="text-muted-foreground text-base">
-                      Preview unavailable
-                      {hostname ? ` • ${hostname}` : ''}
-                    </div>
-                  ) : null}
-
-                  {!previewLoading && !previewError && preview ? (
-                    <div className="border-border flex h-full w-full flex-col overflow-hidden rounded-md border bg-white">
-                      {/* Priority 2: image — visually above title, but shrinks first */}
-                      {preview.image ? (
-                        <img
-                          src={preview.image}
-                          alt=""
-                          className="w-full shrink object-cover"
-                          style={{ minHeight: 0 }}
-                          loading="lazy"
-                          onError={(e) => {
-                            e.currentTarget.style.display = 'none';
-                          }}
-                        />
-                      ) : null}
-
-                      {/* Priority 1: favicon + site name + title — always visible */}
-                      <div className="flex min-w-0 shrink-0 flex-col gap-1 px-2 py-1">
-                        <div className="text-muted-foreground flex min-w-0 items-center gap-2 text-base font-medium">
-                          {preview.favicon ? (
-                            <img
-                              src={preview.favicon}
-                              alt=""
-                              className="h-3.5 w-3.5 flex-none rounded-sm"
-                              loading="lazy"
-                              onError={(e) => {
-                                e.currentTarget.style.display = 'none';
-                              }}
-                            />
-                          ) : null}
-                          <span className="truncate">
-                            {(preview.siteName ?? '').trim() ||
-                              hostname ||
-                              'Website'}
-                          </span>
-                        </div>
-
-                        <div className="text-main line-clamp-2 min-w-0 text-base font-medium break-words">
-                          {preview.title || src}
-                        </div>
+    return (
+      <NodeWrapper
+        id={id}
+        data={data}
+        type={'web'}
+        selected={selected}
+        toolbar={WebToolbar}
+        keepAspectRatio={false}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          openExpanded(id);
+        }}
+      >
+        <div className="h-full w-full overflow-hidden">
+          <div
+            style={{
+              transform: `scale(${scale})`,
+              transformOrigin: 'top left',
+              width: `${100 / scale}%`,
+              height: `${100 / scale}%`,
+            }}
+          >
+            <div className="flex h-full flex-col">
+              <div className="relative h-full w-full overflow-hidden rounded bg-white">
+                {src ? (
+                  <div className="flex h-full w-full flex-col gap-2 p-3">
+                    {previewLoading ? (
+                      <div className="text-muted-foreground text-base">
+                        Loading preview...
                       </div>
+                    ) : null}
 
-                      {/* Priority 3: content html — fills remaining space, hidden when height is tight */}
-                      {preview.contentHtml ? (
-                        <div className="min-h-0 flex-1 overflow-hidden px-2 pb-2">
-                          <div
-                            className="text-muted-foreground prose prose-base overflow-hidden text-base leading-relaxed [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:text-base [&_h2]:font-semibold [&_h3]:text-base [&_h3]:font-medium [&_img]:max-w-full [&_img]:rounded [&_ol]:my-1 [&_p]:my-1 [&_ul]:my-1"
-                            dangerouslySetInnerHTML={{
-                              __html: preview.contentHtml,
+                    {previewError && ingestion?.status !== 'pending' ? (
+                      <div className="text-muted-foreground text-base">
+                        Preview unavailable
+                        {hostname ? ` • ${hostname}` : ''}
+                      </div>
+                    ) : null}
+
+                    {!previewLoading && !previewError && preview ? (
+                      <div className="border-border flex h-full w-full flex-col overflow-hidden rounded-md border bg-white">
+                        {/* Priority 2: image — visually above title, but shrinks first */}
+                        {preview.image ? (
+                          <img
+                            src={preview.image}
+                            alt=""
+                            className="w-full shrink object-cover"
+                            style={{ minHeight: 0 }}
+                            loading="lazy"
+                            onError={(e) => {
+                              e.currentTarget.style.display = 'none';
                             }}
                           />
+                        ) : null}
+
+                        {/* Priority 1: favicon + site name + title — always visible */}
+                        <div className="flex min-w-0 shrink-0 flex-col gap-1 px-2 py-1">
+                          <div className="text-muted-foreground flex min-w-0 items-center gap-2 text-base font-medium">
+                            {preview.favicon ? (
+                              <img
+                                src={preview.favicon}
+                                alt=""
+                                className="h-3.5 w-3.5 flex-none rounded-sm"
+                                loading="lazy"
+                                onError={(e) => {
+                                  e.currentTarget.style.display = 'none';
+                                }}
+                              />
+                            ) : null}
+                            <span className="truncate">
+                              {(preview.siteName ?? '').trim() ||
+                                hostname ||
+                                'Website'}
+                            </span>
+                          </div>
+
+                          <div className="text-main line-clamp-2 min-w-0 text-base font-medium break-words">
+                            {preview.title || src}
+                          </div>
                         </div>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </div>
-              ) : (
-                <div className="text-muted-foreground flex h-full w-full items-center justify-center text-base">
-                  Invalid URL
-                </div>
-              )}
+
+                        {/* Priority 3: content html — fills remaining space, hidden when height is tight */}
+                        {preview.contentHtml ? (
+                          <div className="min-h-0 flex-1 overflow-hidden px-2 pb-2">
+                            <div
+                              className="text-muted-foreground prose prose-base overflow-hidden text-base leading-relaxed [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:text-base [&_h2]:font-semibold [&_h3]:text-base [&_h3]:font-medium [&_img]:max-w-full [&_img]:rounded [&_ol]:my-1 [&_p]:my-1 [&_ul]:my-1"
+                              dangerouslySetInnerHTML={{
+                                __html: preview.contentHtml,
+                              }}
+                            />
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="text-muted-foreground flex h-full w-full items-center justify-center text-base">
+                    Invalid URL
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    </NodeWrapper>
-  );
-};
+      </NodeWrapper>
+    );
+  },
+);

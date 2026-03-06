@@ -16,6 +16,48 @@ import useCanvasStore from '@/store/canvasStore.ts';
 
 import type { CanvasNodeType, NodeData } from './types.ts';
 
+/**
+ * Isolated component that subscribes to viewport changes for the
+ * zoom-invariant overlay portal. This prevents the entire NodeWrapper
+ * from re-rendering on every pan/zoom event.
+ */
+const OverlayPortal = memo(
+  ({
+    nodeId,
+    offsetY,
+    children,
+  }: {
+    nodeId: string;
+    offsetY: number;
+    children: React.ReactNode;
+  }) => {
+    const domNode = useStore((state) => state.domNode);
+    const rendererEl = useMemo(
+      () => domNode?.querySelector('.react-flow__renderer') ?? null,
+      [domNode],
+    );
+    const internalNode = useInternalNode(nodeId);
+    const { zoom, x: vpX, y: vpY } = useViewport();
+
+    if (!rendererEl || !internalNode?.internals.positionAbsolute) return null;
+
+    return createPortal(
+      <div
+        style={{
+          position: 'absolute',
+          zIndex: 1000,
+          left: internalNode.internals.positionAbsolute.x * zoom + vpX,
+          top: internalNode.internals.positionAbsolute.y * zoom + vpY + offsetY,
+          pointerEvents: 'auto',
+        }}
+      >
+        {children}
+      </div>,
+      rendererEl,
+    );
+  },
+);
+
 interface NodeWrapperProps {
   id: string;
   data: NodeData;
@@ -74,15 +116,6 @@ export const NodeWrapper = memo(
     const selectedCount = useCanvasStore(
       (state) => state.nodes.filter((node) => node.selected).length,
     );
-
-    // For zoom-invariant overlay portal — same target as NodeToolbar (.react-flow__renderer)
-    const domNode = useStore((state) => state.domNode);
-    const rendererEl = useMemo(
-      () => domNode?.querySelector('.react-flow__renderer') ?? null,
-      [domNode],
-    );
-    const internalNode = useInternalNode(id);
-    const { zoom, x: vpX, y: vpY } = useViewport();
 
     const dispatch = useCanvasStore((state) => state.dispatch);
     const takeSnapshot = useCanvasStore((state) => state.takeSnapshot);
@@ -175,27 +208,12 @@ export const NodeWrapper = memo(
           </NodeToolbar>
         )}
 
-        {/* Zoom-invariant overlay portal — portals into .react-flow__renderer so it shares the same stacking context as NodeToolbar. DOM order puts toolbar after label, so toolbar always paints on top. */}
-        {overlayContent &&
-          rendererEl &&
-          internalNode?.internals.positionAbsolute &&
-          createPortal(
-            <div
-              style={{
-                position: 'absolute',
-                zIndex: 1000,
-                left: internalNode.internals.positionAbsolute.x * zoom + vpX,
-                top:
-                  internalNode.internals.positionAbsolute.y * zoom +
-                  vpY +
-                  overlayOffsetY,
-                pointerEvents: 'auto',
-              }}
-            >
-              {overlayContent}
-            </div>,
-            rendererEl,
-          )}
+        {/* Zoom-invariant overlay portal — isolated component to avoid re-rendering the entire NodeWrapper on pan/zoom */}
+        {overlayContent && (
+          <OverlayPortal nodeId={id} offsetY={overlayOffsetY}>
+            {overlayContent}
+          </OverlayPortal>
+        )}
 
         <div
           className={clsx(
