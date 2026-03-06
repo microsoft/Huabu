@@ -164,7 +164,7 @@ export const NoteNode = ({ id, data, selected }: NodeProps<NoteNodeType>) => {
       }}
     >
       <div
-        className={`w-full overflow-hidden bg-white${hasFixedHeight ? 'h-full' : ''}`}
+        className={`w-full overflow-hidden bg-white${hasFixedHeight ? ' h-full' : ''}`}
       >
         <div
           style={{
