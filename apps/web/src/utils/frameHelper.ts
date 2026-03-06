@@ -331,11 +331,12 @@ export function unframe(
       const childAbs = addPos(groupAbs, n.position);
 
       if (parentId && parentAbs) {
-        // Child moves to the frame's parent frame — keep zIndex: -1.
+        // Child moves to the frame's parent frame — ensure zIndex: -1.
         nextNodes.push({
           ...n,
           parentId,
           position: subPos(childAbs, parentAbs),
+          zIndex: -1,
         });
       } else {
         // Child becomes top-level — strip frame-level zIndex.
