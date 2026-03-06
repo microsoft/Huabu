@@ -2,6 +2,7 @@ import { type Node, type NodeProps } from '@xyflow/react';
 import { clsx } from 'clsx';
 import { Bold, Italic, Underline, Strikethrough } from 'lucide-react';
 import {
+  memo,
   useCallback,
   useState,
   useRef,
@@ -113,372 +114,376 @@ function computeFontSizeForHeight(
   return Math.max(1, Math.round(lo));
 }
 
-export const TextNode = ({ id, data, selected }: NodeProps<TextNodeType>) => {
-  const updateNodeData = useCanvasStore((state) => state.updateNodeData);
-  const patchNodeSilent = useCanvasStore((state) => state.patchNodeSilent);
-  const [isEditing, setIsEditing] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const isResizingRef = useRef(false);
+export const TextNode = memo(
+  ({ id, data, selected }: NodeProps<TextNodeType>) => {
+    const updateNodeData = useCanvasStore((state) => state.updateNodeData);
+    const patchNodeSilent = useCanvasStore((state) => state.patchNodeSilent);
+    const [isEditing, setIsEditing] = useState(false);
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const isResizingRef = useRef(false);
 
-  // Controlled draft state — local during editing, synced from store on undo/external update.
-  const content = data.content ?? '';
-  const [draftContent, setDraftContent] = useState(content);
-  const [draftLabel, setDraftLabel] = useState(
-    data.label as string | undefined,
-  );
-  const [draftLabelSource, setDraftLabelSource] = useState(
-    data.labelSource as string | undefined,
-  );
-
-  // Sync draft from external store changes (undo/redo, server updates).
-  useEffect(() => {
-    if (!isEditing) {
-      setDraftContent(data.content ?? '');
-      setDraftLabel(data.label as string | undefined);
-      setDraftLabelSource(data.labelSource as string | undefined);
-    }
-  }, [data.content, data.label, data.labelSource, isEditing]);
-
-  // ------------------------------------------------------------------
-  // User-set dimensions: null → auto mode, number → user has resized.
-  // ------------------------------------------------------------------
-  const [userWidth, setUserWidth] = useState<number | null>(
-    typeof data.userWidth === 'number' ? (data.userWidth as number) : null,
-  );
-  const [userHeight, setUserHeight] = useState<number | null>(
-    typeof data.userHeight === 'number' ? (data.userHeight as number) : null,
-  );
-
-  // Live font size during resize (computed from current dimensions)
-  const [liveFontSize, setLiveFontSize] = useState<number | null>(null);
-  const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const updateStyle = useCallback(
-    (newStyle: Partial<NodeStyle>) => {
-      updateNodeData(id, {
-        style: {
-          ...data.style,
-          ...newStyle,
-        },
-      });
-    },
-    [id, data.style, updateNodeData],
-  );
-
-  const style = data.style || {};
-  const baseFontSize = style.fontSize || 16;
-  const fontFamily = style.fontFamily || FONT_FAMILIES[0].value;
-  const isBold = style.fontWeight === 'bold';
-  const isItalic = style.fontStyle === 'italic';
-  const textColor = style.textColor;
-  const textDecoration = style.textDecoration || '';
-
-  const fontOpts = useMemo(
-    () => ({
-      fontFamily,
-      fontWeight: isBold ? 'bold' : 'normal',
-      fontStyle: isItalic ? 'italic' : 'normal',
-      lineHeight: 1.5,
-    }),
-    [fontFamily, isBold, isItalic],
-  );
-
-  // ------------------------------------------------------------------
-  // Effective font size:
-  //   Resizing live  → liveFontSize (debounced during drag)
-  //   User mode      → computed to fill userHeight at userWidth
-  //   Auto mode      → baseFontSize from style
-  // ------------------------------------------------------------------
-  const computedFontSize = useMemo(() => {
-    if (userWidth !== null && userHeight !== null) {
-      const cw = userWidth - NODE_PADDING * 2;
-      const ch = userHeight - NODE_PADDING * 2;
-      return computeFontSizeForHeight(draftContent, cw, ch, fontOpts);
-    }
-    return baseFontSize;
-  }, [userWidth, userHeight, draftContent, baseFontSize, fontOpts]);
-
-  const effectiveFontSize = liveFontSize ?? computedFontSize;
-
-  // ------------------------------------------------------------------
-  // Auto mode measurement (only when not user-resized)
-  // ------------------------------------------------------------------
-  const maxAutoWidth = baseFontSize * MAX_CHARS_PER_LINE * 0.62;
-
-  const autoSize = useMemo(() => {
-    if (userWidth !== null && userHeight !== null) return null;
-    return measureTextContent(draftContent, {
-      ...fontOpts,
-      fontSize: baseFontSize,
-      maxWidth: maxAutoWidth,
-    });
-  }, [
-    userWidth,
-    userHeight,
-    draftContent,
-    baseFontSize,
-    fontOpts,
-    maxAutoWidth,
-  ]);
-
-  const targetWidth =
-    userWidth ?? Math.max((autoSize?.width ?? 0) + NODE_PADDING * 2, 30);
-  const targetHeight =
-    userHeight ??
-    Math.max(
-      (autoSize?.height ?? 0) + NODE_PADDING * 2,
-      baseFontSize * 1.5 + NODE_PADDING * 2,
+    // Controlled draft state — local during editing, synced from store on undo/external update.
+    const content = data.content ?? '';
+    const [draftContent, setDraftContent] = useState(content);
+    const [draftLabel, setDraftLabel] = useState(
+      data.label as string | undefined,
+    );
+    const [draftLabelSource, setDraftLabelSource] = useState(
+      data.labelSource as string | undefined,
     );
 
-  // Avoid redundant store updates
-  const prevDimsRef = useRef({ w: 0, h: 0 });
+    // Sync draft from external store changes (undo/redo, server updates).
+    useEffect(() => {
+      if (!isEditing) {
+        setDraftContent(data.content ?? '');
+        setDraftLabel(data.label as string | undefined);
+        setDraftLabelSource(data.labelSource as string | undefined);
+      }
+    }, [data.content, data.label, data.labelSource, isEditing]);
 
-  useLayoutEffect(() => {
-    if (isResizingRef.current) return;
+    // ------------------------------------------------------------------
+    // User-set dimensions: null → auto mode, number → user has resized.
+    // ------------------------------------------------------------------
+    const [userWidth, setUserWidth] = useState<number | null>(
+      typeof data.userWidth === 'number' ? (data.userWidth as number) : null,
+    );
+    const [userHeight, setUserHeight] = useState<number | null>(
+      typeof data.userHeight === 'number' ? (data.userHeight as number) : null,
+    );
 
-    const w = targetWidth;
-    const h = targetHeight;
+    // Live font size during resize (computed from current dimensions)
+    const [liveFontSize, setLiveFontSize] = useState<number | null>(null);
+    const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    if (
-      Math.abs(prevDimsRef.current.w - w) < 1 &&
-      Math.abs(prevDimsRef.current.h - h) < 1
-    )
-      return;
+    const updateStyle = useCallback(
+      (newStyle: Partial<NodeStyle>) => {
+        updateNodeData(id, {
+          style: {
+            ...data.style,
+            ...newStyle,
+          },
+        });
+      },
+      [id, data.style, updateNodeData],
+    );
 
-    prevDimsRef.current = { w, h };
+    const style = data.style || {};
+    const baseFontSize = style.fontSize || 16;
+    const fontFamily = style.fontFamily || FONT_FAMILIES[0].value;
+    const isBold = style.fontWeight === 'bold';
+    const isItalic = style.fontStyle === 'italic';
+    const textColor = style.textColor;
+    const textDecoration = style.textDecoration || '';
 
-    useCanvasStore.setState((state) => ({
-      nodes: state.nodes.map((n) =>
-        n.id === id ? { ...n, style: { ...n.style, width: w, height: h } } : n,
-      ),
-    }));
-  }, [id, targetWidth, targetHeight]);
+    const fontOpts = useMemo(
+      () => ({
+        fontFamily,
+        fontWeight: isBold ? 'bold' : 'normal',
+        fontStyle: isItalic ? 'italic' : 'normal',
+        lineHeight: 1.5,
+      }),
+      [fontFamily, isBold, isItalic],
+    );
 
-  // ------------------------------------------------------------------
-  // Resize callbacks — live font recalc during drag
-  // ------------------------------------------------------------------
-  const handleResizeStart = useCallback(() => {
-    isResizingRef.current = true;
-  }, []);
+    // ------------------------------------------------------------------
+    // Effective font size:
+    //   Resizing live  → liveFontSize (debounced during drag)
+    //   User mode      → computed to fill userHeight at userWidth
+    //   Auto mode      → baseFontSize from style
+    // ------------------------------------------------------------------
+    const computedFontSize = useMemo(() => {
+      if (userWidth !== null && userHeight !== null) {
+        const cw = userWidth - NODE_PADDING * 2;
+        const ch = userHeight - NODE_PADDING * 2;
+        return computeFontSizeForHeight(draftContent, cw, ch, fontOpts);
+      }
+      return baseFontSize;
+    }, [userWidth, userHeight, draftContent, baseFontSize, fontOpts]);
 
-  const handleResize = useCallback(
-    (width: number, height: number) => {
-      // Debounce the font-size computation (~30ms) for smooth dragging
-      if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
-      resizeTimerRef.current = setTimeout(() => {
-        const cw = width - NODE_PADDING * 2;
-        const ch = height - NODE_PADDING * 2;
-        const fs = computeFontSizeForHeight(draftContent, cw, ch, fontOpts);
-        setLiveFontSize(fs);
-      }, 10);
-    },
-    [draftContent, fontOpts],
-  );
+    const effectiveFontSize = liveFontSize ?? computedFontSize;
 
-  const handleResizeEnd = useCallback(
-    (width: number, height: number) => {
-      isResizingRef.current = false;
-      if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
-      setUserWidth(width);
-      setUserHeight(height);
-      setLiveFontSize(null); // clear live → computedFontSize takes over
-      // Persist resize metadata silently — no history entry needed since
-      // the resize gesture already took a snapshot via takeSnapshot().
-      patchNodeSilent(id, { userWidth: width, userHeight: height });
-      prevDimsRef.current = { w: width, h: height };
-    },
-    [id, patchNodeSilent],
-  );
+    // ------------------------------------------------------------------
+    // Auto mode measurement (only when not user-resized)
+    // ------------------------------------------------------------------
+    const maxAutoWidth = baseFontSize * MAX_CHARS_PER_LINE * 0.62;
 
-  // ------------------------------------------------------------------
-  // Toolbar state
-  // ------------------------------------------------------------------
-  const toggleDecoration = (value: string) => {
-    let current = textDecoration.split(' ').filter(Boolean);
-    if (current.includes(value)) {
-      current = current.filter((v) => v !== value);
-    } else {
-      current.push(value);
-    }
-    updateStyle({ textDecoration: current.join(' ') });
-  };
+    const autoSize = useMemo(() => {
+      if (userWidth !== null && userHeight !== null) return null;
+      return measureTextContent(draftContent, {
+        ...fontOpts,
+        fontSize: baseFontSize,
+        maxWidth: maxAutoWidth,
+      });
+    }, [
+      userWidth,
+      userHeight,
+      draftContent,
+      baseFontSize,
+      fontOpts,
+      maxAutoWidth,
+    ]);
 
-  const handleDoubleClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setIsEditing(true);
-    setTimeout(() => textareaRef.current?.focus(), 50);
-  };
+    const targetWidth =
+      userWidth ?? Math.max((autoSize?.width ?? 0) + NODE_PADDING * 2, 30);
+    const targetHeight =
+      userHeight ??
+      Math.max(
+        (autoSize?.height ?? 0) + NODE_PADDING * 2,
+        baseFontSize * 1.5 + NODE_PADDING * 2,
+      );
 
-  const handleBlur = () => {
-    setIsEditing(false);
-    // Only commit if something actually changed — avoid a spurious undo
-    // snapshot when the user clicks into and immediately out of the node.
-    const isDirty =
-      draftContent !== (data.content ?? '') ||
-      draftLabel !== (data.label as string | undefined) ||
-      draftLabelSource !== (data.labelSource as string | undefined);
-    if (!isDirty) return;
-    // Commit the draft to the store on blur so it records a single undo entry
-    // for the entire editing session, rather than on every keystroke.
-    const patch: Record<string, unknown> = { content: draftContent };
-    if (draftLabel !== undefined) patch.label = draftLabel;
-    if (draftLabelSource !== undefined) patch.labelSource = draftLabelSource;
-    updateNodeData(id, patch);
-  };
+    // Avoid redundant store updates
+    const prevDimsRef = useRef({ w: 0, h: 0 });
 
-  const TextToolbar = (
-    <div className="flex w-full items-center gap-1">
-      <div
-        className="hover:bg-muted text-muted-foreground border-border flex items-center rounded border bg-transparent p-0.5 transition-colors"
-        title="Font Family"
-      >
-        <select
-          className="h-full w-16 cursor-pointer bg-transparent text-xs outline-none"
-          value={fontFamily}
-          onChange={(e) => updateStyle({ fontFamily: e.target.value })}
+    useLayoutEffect(() => {
+      if (isResizingRef.current) return;
+
+      const w = targetWidth;
+      const h = targetHeight;
+
+      if (
+        Math.abs(prevDimsRef.current.w - w) < 1 &&
+        Math.abs(prevDimsRef.current.h - h) < 1
+      )
+        return;
+
+      prevDimsRef.current = { w, h };
+
+      useCanvasStore.setState((state) => ({
+        nodes: state.nodes.map((n) =>
+          n.id === id
+            ? { ...n, style: { ...n.style, width: w, height: h } }
+            : n,
+        ),
+      }));
+    }, [id, targetWidth, targetHeight]);
+
+    // ------------------------------------------------------------------
+    // Resize callbacks — live font recalc during drag
+    // ------------------------------------------------------------------
+    const handleResizeStart = useCallback(() => {
+      isResizingRef.current = true;
+    }, []);
+
+    const handleResize = useCallback(
+      (width: number, height: number) => {
+        // Debounce the font-size computation (~30ms) for smooth dragging
+        if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
+        resizeTimerRef.current = setTimeout(() => {
+          const cw = width - NODE_PADDING * 2;
+          const ch = height - NODE_PADDING * 2;
+          const fs = computeFontSizeForHeight(draftContent, cw, ch, fontOpts);
+          setLiveFontSize(fs);
+        }, 10);
+      },
+      [draftContent, fontOpts],
+    );
+
+    const handleResizeEnd = useCallback(
+      (width: number, height: number) => {
+        isResizingRef.current = false;
+        if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
+        setUserWidth(width);
+        setUserHeight(height);
+        setLiveFontSize(null); // clear live → computedFontSize takes over
+        // Persist resize metadata silently — no history entry needed since
+        // the resize gesture already took a snapshot via takeSnapshot().
+        patchNodeSilent(id, { userWidth: width, userHeight: height });
+        prevDimsRef.current = { w: width, h: height };
+      },
+      [id, patchNodeSilent],
+    );
+
+    // ------------------------------------------------------------------
+    // Toolbar state
+    // ------------------------------------------------------------------
+    const toggleDecoration = (value: string) => {
+      let current = textDecoration.split(' ').filter(Boolean);
+      if (current.includes(value)) {
+        current = current.filter((v) => v !== value);
+      } else {
+        current.push(value);
+      }
+      updateStyle({ textDecoration: current.join(' ') });
+    };
+
+    const handleDoubleClick = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      setIsEditing(true);
+      setTimeout(() => textareaRef.current?.focus(), 50);
+    };
+
+    const handleBlur = () => {
+      setIsEditing(false);
+      // Only commit if something actually changed — avoid a spurious undo
+      // snapshot when the user clicks into and immediately out of the node.
+      const isDirty =
+        draftContent !== (data.content ?? '') ||
+        draftLabel !== (data.label as string | undefined) ||
+        draftLabelSource !== (data.labelSource as string | undefined);
+      if (!isDirty) return;
+      // Commit the draft to the store on blur so it records a single undo entry
+      // for the entire editing session, rather than on every keystroke.
+      const patch: Record<string, unknown> = { content: draftContent };
+      if (draftLabel !== undefined) patch.label = draftLabel;
+      if (draftLabelSource !== undefined) patch.labelSource = draftLabelSource;
+      updateNodeData(id, patch);
+    };
+
+    const TextToolbar = (
+      <div className="flex w-full items-center gap-1">
+        <div
+          className="hover:bg-muted text-muted-foreground border-border flex items-center rounded border bg-transparent p-0.5 transition-colors"
+          title="Font Family"
         >
-          {FONT_FAMILIES.map((f) => (
-            <option key={f.name} value={f.value} className="text-black">
-              {f.name}
-            </option>
-          ))}
-        </select>
-      </div>
+          <select
+            className="h-full w-16 cursor-pointer bg-transparent text-xs outline-none"
+            value={fontFamily}
+            onChange={(e) => updateStyle({ fontFamily: e.target.value })}
+          >
+            {FONT_FAMILIES.map((f) => (
+              <option key={f.name} value={f.value} className="text-black">
+                {f.name}
+              </option>
+            ))}
+          </select>
+        </div>
 
-      <div className="bg-border mx-1 h-3 w-px" />
+        <div className="bg-border mx-1 h-3 w-px" />
 
-      <GhostButton
-        onClick={() =>
-          updateStyle({
-            fontWeight: style.fontWeight === 'bold' ? 'normal' : 'bold',
-          })
-        }
-        className={clsx(
-          'rounded p-1',
-          style.fontWeight === 'bold'
-            ? 'text-theme-500 bg-theme-50 enabled:hover:bg-theme-50'
-            : 'text-muted-foreground hover:bg-background',
-        )}
-      >
-        <Bold size={14} />
-      </GhostButton>
-
-      <GhostButton
-        onClick={() =>
-          updateStyle({
-            fontStyle: style.fontStyle === 'italic' ? 'normal' : 'italic',
-          })
-        }
-        className={clsx(
-          'rounded p-1',
-          style.fontStyle === 'italic'
-            ? 'text-theme-500 bg-theme-50 enabled:hover:bg-theme-50'
-            : 'text-muted-foreground hover:bg-background',
-        )}
-      >
-        <Italic size={14} />
-      </GhostButton>
-
-      <GhostButton
-        onClick={() => toggleDecoration('underline')}
-        className={clsx(
-          'p-1',
-          textDecoration.includes('underline')
-            ? 'text-theme-500 bg-theme-50 enabled:hover:bg-theme-50'
-            : 'text-muted-foreground hover:bg-background',
-        )}
-      >
-        <Underline size={14} />
-      </GhostButton>
-
-      <GhostButton
-        onClick={() => toggleDecoration('line-through')}
-        className={clsx(
-          'p-1',
-          textDecoration.includes('line-through')
-            ? 'text-theme-500 bg-theme-50 enabled:hover:bg-theme-50'
-            : 'text-muted-foreground hover:bg-background',
-        )}
-      >
-        <Strikethrough size={14} />
-      </GhostButton>
-
-      <div className="bg-border mx-1 h-3 w-px" />
-
-      <NodeTextColorSelector
-        nodeId={id}
-        currentTextColor={data.style?.textColor}
-        style={data.style}
-      />
-      <NodeBgColorSelector
-        nodeId={id}
-        currentColor={data.style?.backgroundColor}
-        style={data.style}
-      />
-    </div>
-  );
-
-  return (
-    <NodeWrapper
-      id={id}
-      data={data}
-      type={'text'}
-      selected={selected}
-      toolbar={TextToolbar}
-      keepAspectRatio={false}
-      onResizeStart={handleResizeStart}
-      onResize={handleResize}
-      onResizeEnd={handleResizeEnd}
-      className="transition-all duration-200"
-    >
-      <div
-        className="relative h-full w-full overflow-hidden"
-        style={{ padding: `${NODE_PADDING}px` }}
-        onDoubleClick={handleDoubleClick}
-      >
-        <textarea
-          ref={textareaRef}
+        <GhostButton
+          onClick={() =>
+            updateStyle({
+              fontWeight: style.fontWeight === 'bold' ? 'normal' : 'bold',
+            })
+          }
           className={clsx(
-            'placeholder:text-muted-foreground/30 h-full w-full resize-none overflow-hidden bg-transparent outline-none',
-            isEditing
-              ? 'nodrag cursor-text'
-              : 'pointer-events-none cursor-grab select-none',
+            'rounded p-1',
+            style.fontWeight === 'bold'
+              ? 'text-theme-500 bg-theme-50 enabled:hover:bg-theme-50'
+              : 'text-muted-foreground hover:bg-background',
           )}
-          placeholder="Type..."
-          value={draftContent}
-          onChange={(e) => {
-            const newContent = e.target.value;
-            // Update local draft state — no store write on every keystroke.
-            setDraftContent(newContent);
+        >
+          <Bold size={14} />
+        </GhostButton>
 
-            // Auto-update label from content when not manually renamed.
-            if (draftLabelSource !== 'user') {
-              const firstLine = newContent.split('\n')[0]?.trim() ?? '';
-              const autoLabel =
-                firstLine.length > 40
-                  ? firstLine.slice(0, 40) + '…'
-                  : firstLine;
-              if (autoLabel) {
-                setDraftLabel(autoLabel);
-                setDraftLabelSource('auto');
-              }
-            }
-          }}
-          onBlur={handleBlur}
-          readOnly={!isEditing}
-          style={{
-            color: textColor,
-            fontWeight: isBold ? 'bold' : 'normal',
-            fontStyle: isItalic ? 'italic' : 'normal',
-            fontFamily,
-            fontSize: `${effectiveFontSize}px`,
-            lineHeight: 1.5,
-            textDecoration,
-            wordBreak: 'break-word',
-            whiteSpace: 'pre-wrap',
-          }}
+        <GhostButton
+          onClick={() =>
+            updateStyle({
+              fontStyle: style.fontStyle === 'italic' ? 'normal' : 'italic',
+            })
+          }
+          className={clsx(
+            'rounded p-1',
+            style.fontStyle === 'italic'
+              ? 'text-theme-500 bg-theme-50 enabled:hover:bg-theme-50'
+              : 'text-muted-foreground hover:bg-background',
+          )}
+        >
+          <Italic size={14} />
+        </GhostButton>
+
+        <GhostButton
+          onClick={() => toggleDecoration('underline')}
+          className={clsx(
+            'p-1',
+            textDecoration.includes('underline')
+              ? 'text-theme-500 bg-theme-50 enabled:hover:bg-theme-50'
+              : 'text-muted-foreground hover:bg-background',
+          )}
+        >
+          <Underline size={14} />
+        </GhostButton>
+
+        <GhostButton
+          onClick={() => toggleDecoration('line-through')}
+          className={clsx(
+            'p-1',
+            textDecoration.includes('line-through')
+              ? 'text-theme-500 bg-theme-50 enabled:hover:bg-theme-50'
+              : 'text-muted-foreground hover:bg-background',
+          )}
+        >
+          <Strikethrough size={14} />
+        </GhostButton>
+
+        <div className="bg-border mx-1 h-3 w-px" />
+
+        <NodeTextColorSelector
+          nodeId={id}
+          currentTextColor={data.style?.textColor}
+          style={data.style}
+        />
+        <NodeBgColorSelector
+          nodeId={id}
+          currentColor={data.style?.backgroundColor}
+          style={data.style}
         />
       </div>
-    </NodeWrapper>
-  );
-};
+    );
+
+    return (
+      <NodeWrapper
+        id={id}
+        data={data}
+        type={'text'}
+        selected={selected}
+        toolbar={TextToolbar}
+        keepAspectRatio={false}
+        onResizeStart={handleResizeStart}
+        onResize={handleResize}
+        onResizeEnd={handleResizeEnd}
+        className="transition-all duration-200"
+      >
+        <div
+          className="relative h-full w-full overflow-hidden"
+          style={{ padding: `${NODE_PADDING}px` }}
+          onDoubleClick={handleDoubleClick}
+        >
+          <textarea
+            ref={textareaRef}
+            className={clsx(
+              'placeholder:text-muted-foreground/30 h-full w-full resize-none overflow-hidden bg-transparent outline-none',
+              isEditing
+                ? 'nodrag cursor-text'
+                : 'pointer-events-none cursor-grab select-none',
+            )}
+            placeholder="Type..."
+            value={draftContent}
+            onChange={(e) => {
+              const newContent = e.target.value;
+              // Update local draft state — no store write on every keystroke.
+              setDraftContent(newContent);
+
+              // Auto-update label from content when not manually renamed.
+              if (draftLabelSource !== 'user') {
+                const firstLine = newContent.split('\n')[0]?.trim() ?? '';
+                const autoLabel =
+                  firstLine.length > 40
+                    ? firstLine.slice(0, 40) + '…'
+                    : firstLine;
+                if (autoLabel) {
+                  setDraftLabel(autoLabel);
+                  setDraftLabelSource('auto');
+                }
+              }
+            }}
+            onBlur={handleBlur}
+            readOnly={!isEditing}
+            style={{
+              color: textColor,
+              fontWeight: isBold ? 'bold' : 'normal',
+              fontStyle: isItalic ? 'italic' : 'normal',
+              fontFamily,
+              fontSize: `${effectiveFontSize}px`,
+              lineHeight: 1.5,
+              textDecoration,
+              wordBreak: 'break-word',
+              whiteSpace: 'pre-wrap',
+            }}
+          />
+        </div>
+      </NodeWrapper>
+    );
+  },
+);
