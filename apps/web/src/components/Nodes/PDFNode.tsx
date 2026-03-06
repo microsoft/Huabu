@@ -18,16 +18,24 @@ pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/b
 export type PDFNodeType = Node<CanvasPdfNodeData, 'pdf'>;
 
 /**
- * Estimated height of a single PDF page at scale 0.7 (A4 ≈ 595×842pt).
- * Used to calculate which pages are visible in the scrollable container.
+ * Fallback height of a single PDF page at scale 0.7 (A4 ≈ 595×842pt).
+ * Used only until the real page height has been measured.
  */
-const ESTIMATED_PAGE_HEIGHT = 842 * 0.7; // ~590px
+const FALLBACK_PAGE_HEIGHT = 842 * 0.7; // ~590px
 /** Extra pages to render above/below the visible viewport. */
-const OVERSCAN = 1;
+const OVERSCAN = 2;
 
 /**
- * A single PDF page slot. Uses IntersectionObserver to only render the
+ * A single PDF page slot. Uses IntersectionObserver to lazily render the
  * actual <Page> component when it enters the viewport (plus overscan).
+ *
+ * Once a page has been rendered, it stays mounted (hidden via
+ * `visibility: hidden`) so that re-scrolling back doesn't re-mount the
+ * component and cause a flash of blank content.
+ *
+ * After the first render the real page height is measured via
+ * `onRenderSuccess` so the placeholder matches the actual content and
+ * eliminates scroll-jumping for non-A4 pages.
  */
 const VirtualizedPage = memo(
   ({
@@ -39,41 +47,60 @@ const VirtualizedPage = memo(
   }) => {
     const placeholderRef = useRef<HTMLDivElement>(null);
     const [isVisible, setIsVisible] = useState(false);
+    // Once true the <Page> stays mounted forever (hidden when off-screen).
+    const [hasRendered, setHasRendered] = useState(false);
+    const [measuredHeight, setMeasuredHeight] = useState<number | null>(null);
 
     useEffect(() => {
       const el = placeholderRef.current;
       const root = containerRef.current;
       if (!el || !root) return;
 
+      const margin = (measuredHeight ?? FALLBACK_PAGE_HEIGHT) * OVERSCAN;
+
       const observer = new IntersectionObserver(
         ([entry]) => {
-          setIsVisible(entry.isIntersecting);
+          const visible = entry.isIntersecting;
+          setIsVisible(visible);
+          if (visible) setHasRendered(true);
         },
         {
           root,
-          // Render one page above/below the visible area
-          rootMargin: `${ESTIMATED_PAGE_HEIGHT * OVERSCAN}px 0px`,
+          rootMargin: `${margin}px 0px`,
         },
       );
 
       observer.observe(el);
       return () => observer.disconnect();
-    }, [containerRef]);
+    }, [containerRef, measuredHeight]);
+
+    const handleRenderSuccess = useCallback(() => {
+      // Measure the actual rendered canvas height to replace the fallback.
+      const canvas = placeholderRef.current?.querySelector('canvas');
+      if (canvas) {
+        setMeasuredHeight(canvas.offsetHeight);
+      }
+    }, []);
+
+    const pageHeight = measuredHeight ?? FALLBACK_PAGE_HEIGHT;
 
     return (
       <div
         ref={placeholderRef}
-        style={{ minHeight: ESTIMATED_PAGE_HEIGHT }}
+        style={{ minHeight: pageHeight }}
         className="flex items-center justify-center"
       >
-        {isVisible ? (
-          <Page
-            pageNumber={pageNumber}
-            scale={0.7}
-            renderAnnotationLayer={false}
-            renderTextLayer={false}
-            loading={''}
-          />
+        {hasRendered ? (
+          <div style={isVisible ? undefined : { visibility: 'hidden' }}>
+            <Page
+              pageNumber={pageNumber}
+              scale={0.7}
+              renderAnnotationLayer={false}
+              renderTextLayer={false}
+              loading={''}
+              onRenderSuccess={handleRenderSuccess}
+            />
+          </div>
         ) : null}
       </div>
     );
