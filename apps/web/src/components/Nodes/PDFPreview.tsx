@@ -35,7 +35,7 @@ type PendingCaptureDrag = {
   captureRect: NormalizedRect;
 };
 
-export const PDFPreview = ({ data }: PreviewComponentProps) => {
+export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
   const src = typeof data.src === 'string' ? data.src : '';
   const sourceId =
     typeof data.sourceId === 'string' ? data.sourceId : undefined;
@@ -186,6 +186,16 @@ export const PDFPreview = ({ data }: PreviewComponentProps) => {
     [addPendingAttachment],
   );
 
+  // ---------------------------------------------------------------------------
+  // Set captured area as the PDF node cover image
+  // ---------------------------------------------------------------------------
+  const handleSetCover = useCallback(
+    (imageUrl: string) => {
+      onDataChange?.({ coverUrl: imageUrl });
+    },
+    [onDataChange],
+  );
+
   return (
     <div className="relative flex h-full flex-col">
       {/* ── PDF pages ── */}
@@ -267,6 +277,7 @@ export const PDFPreview = ({ data }: PreviewComponentProps) => {
           position={pendingCapture.position}
           onDismiss={() => setPendingCapture(null)}
           onSendToChat={handleSendToChat}
+          onSetCover={onDataChange ? handleSetCover : undefined}
         />
       )}
     </div>
