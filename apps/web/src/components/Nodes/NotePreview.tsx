@@ -2,7 +2,10 @@ import { SideMenuController, useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/shadcn';
 import { useEffect, useRef, useState } from 'react';
 
-import { NoteEditorSideMenu } from '@/components/BlockNote/NoteEditorSideMenu';
+import {
+  NoteEditorSideMenu,
+  NoteSourceIdProvider,
+} from '@/components/BlockNote/NoteEditorSideMenu';
 import { blockNoteShadcnOverrides } from '@/components/BlockNote/shadcnOverrides';
 import { loadBlockNoteContent } from '@/utils/blockNoteContent';
 
@@ -128,31 +131,37 @@ export const NotePreview = ({
 
   return (
     <div className="custom-scrollbar h-full w-full overflow-auto bg-white px-0 py-3">
-      <BlockNoteView
-        className="block-note-view"
-        editor={editor}
-        editable={!readOnly && !loading}
-        shadCNComponents={blockNoteShadcnOverrides}
-        sideMenu={false}
-        onChange={() => {
-          if (readOnly) return;
-          if (!onContentChange && !onDataChange) return;
-
-          const newJson = JSON.stringify(editor.document);
-          const md = editor.blocksToMarkdownLossy(editor.document);
-          const newMarkdown = md.trim();
-          lastAppliedMarkdownRef.current = newMarkdown;
-          const isLabelUserSet = data.labelSource === 'user';
-          const autoLabel = isLabelUserSet
-            ? undefined
-            : extractLabelFromBlocks(
-                editor.document as Parameters<typeof extractLabelFromBlocks>[0],
-              ) || undefined;
-          writePatch(newMarkdown, newJson, autoLabel);
-        }}
+      <NoteSourceIdProvider
+        value={typeof data.sourceId === 'string' ? data.sourceId : undefined}
       >
-        {!readOnly && <SideMenuController sideMenu={NoteEditorSideMenu} />}
-      </BlockNoteView>
+        <BlockNoteView
+          className="block-note-view"
+          editor={editor}
+          editable={!readOnly && !loading}
+          shadCNComponents={blockNoteShadcnOverrides}
+          sideMenu={false}
+          onChange={() => {
+            if (readOnly) return;
+            if (!onContentChange && !onDataChange) return;
+
+            const newJson = JSON.stringify(editor.document);
+            const md = editor.blocksToMarkdownLossy(editor.document);
+            const newMarkdown = md.trim();
+            lastAppliedMarkdownRef.current = newMarkdown;
+            const isLabelUserSet = data.labelSource === 'user';
+            const autoLabel = isLabelUserSet
+              ? undefined
+              : extractLabelFromBlocks(
+                  editor.document as Parameters<
+                    typeof extractLabelFromBlocks
+                  >[0],
+                ) || undefined;
+            writePatch(newMarkdown, newJson, autoLabel);
+          }}
+        >
+          {!readOnly && <SideMenuController sideMenu={NoteEditorSideMenu} />}
+        </BlockNoteView>
+      </NoteSourceIdProvider>
     </div>
   );
 };

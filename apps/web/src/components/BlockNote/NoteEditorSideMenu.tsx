@@ -8,16 +8,23 @@ import {
 } from '@blocknote/react';
 import clsx from 'clsx';
 import { GripVertical, Plus } from 'lucide-react';
-import { useCallback, useRef, type FC } from 'react';
+import { createContext, useCallback, useContext, useRef, type FC } from 'react';
 
 import { GhostButton } from '@/components/Common/GhostButton';
-import useCanvasStore from '@/store/canvasStore';
 import {
   SEDIMENT_DND_MIME,
   createDragId,
   type DragPayload,
   type NoteDragPayload,
 } from '@/utils/dragDrop';
+
+/**
+ * Context that supplies the knowledge-base sourceId to the side menu.
+ * Provided by the parent NotePreview so the drag payload records correct
+ * provenance without an expensive store lookup.
+ */
+const NoteSourceIdContext = createContext<string | undefined>(undefined);
+export const NoteSourceIdProvider = NoteSourceIdContext.Provider;
 
 const ICON_SIZE = 16;
 const BTN_CLASS =
@@ -99,7 +106,7 @@ const DragHandleButton: FC = () => {
     selector: (state) => state?.block,
   });
   const selectedBlocks = useSelectedBlocks(editor);
-  const sourceId = useCanvasStore((s) => s.expandedNodeId);
+  const sourceId = useContext(NoteSourceIdContext);
 
   // Capture the block reference at drag-start so we can use it in drag-end
   // even if the SideMenu state changes mid-drag.
