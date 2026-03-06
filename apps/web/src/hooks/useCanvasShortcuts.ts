@@ -1,4 +1,3 @@
-import { createId } from '@sediment/shared';
 import { useCallback, useEffect, useRef, type MutableRefObject } from 'react';
 
 import { uploadImage, uploadPdf, uploadVideo } from '../api/artifact';
@@ -11,6 +10,7 @@ import {
   normalizeUrl,
   getImageDimensionsFromBlob,
 } from '../utils/mediaUtils';
+import { buildNode } from '../utils/nodeFactory';
 
 import type { ReactFlowInstance } from '@xyflow/react';
 
@@ -60,12 +60,6 @@ export function useCanvasShortcuts(refs: CanvasShortcutRefs): void {
     });
   }, [rfInstanceRef, mousePositionRef]);
 
-  /** Center a node of given size at a flow-coordinate point. */
-  const centered = (pos: { x: number; y: number }, w: number, h: number) => ({
-    x: pos.x - w / 2,
-    y: pos.y - h / 2,
-  });
-
   /** Upload files and create nodes at the given position. */
   const pasteFiles = useCallback(
     async (files: File[], basePos: { x: number; y: number }) => {
@@ -83,53 +77,44 @@ export function useCanvasShortcuts(refs: CanvasShortcutRefs): void {
               uploadImage(file),
               getImageDimensionsFromBlob(file),
             ]);
-            const W = 300;
-            const H =
-              dims.width > 0 ? Math.round(W * (dims.height / dims.width)) : 200;
-            addNode({
-              id: createId('node'),
-              type: 'image',
-              position: centered(pos, W, H),
-              data: {
+            addNode(
+              buildNode({
                 type: 'image',
-                src: url,
-                label: file.name !== 'pasted-image' ? file.name : undefined,
-                origin: { type: 'user-pasted' },
-              },
-              style: { width: W, height: H },
-            });
+                position: pos,
+                data: {
+                  src: url,
+                  label: file.name !== 'pasted-image' ? file.name : undefined,
+                  origin: { type: 'user-pasted' },
+                },
+                naturalDimensions: dims,
+              }),
+            );
           } else if (type === 'video') {
-            const W = 400,
-              H = 300;
             const url = await uploadVideo(file);
-            addNode({
-              id: createId('node'),
-              type: 'video',
-              position: centered(pos, W, H),
-              data: {
+            addNode(
+              buildNode({
                 type: 'video',
-                src: url,
-                label: file.name,
-                origin: { type: 'user-pasted' },
-              },
-              style: { width: W, height: H },
-            });
+                position: pos,
+                data: {
+                  src: url,
+                  label: file.name,
+                  origin: { type: 'user-pasted' },
+                },
+              }),
+            );
           } else if (type === 'pdf') {
-            const W = 400,
-              H = 300;
             const url = await uploadPdf(file);
-            addNode({
-              id: createId('node'),
-              type: 'pdf',
-              position: centered(pos, W, H),
-              data: {
+            addNode(
+              buildNode({
                 type: 'pdf',
-                src: url,
-                label: file.name,
-                origin: { type: 'user-pasted' },
-              },
-              style: { width: W, height: H },
-            });
+                position: pos,
+                data: {
+                  src: url,
+                  label: file.name,
+                  origin: { type: 'user-pasted' },
+                },
+              }),
+            );
           }
         } catch (error) {
           console.error(`Failed to paste file ${file.name}:`, error);
@@ -153,51 +138,32 @@ export function useCanvasShortcuts(refs: CanvasShortcutRefs): void {
         lines.forEach((line, i) => {
           const finalUrl = normalizeUrl(line.trim());
           const nodeType = detectNodeType(finalUrl);
-          const W = nodeType === 'image' ? 300 : 400;
-          const H = nodeType === 'image' ? 200 : 300;
           const offset = i * 30;
-          let label: string | undefined;
-          try {
-            label = new URL(finalUrl).hostname;
-          } catch {
-            /* ignore */
-          }
-          addNode({
-            id: createId('node'),
-            type: nodeType,
-            position: centered(
-              { x: basePos.x + offset, y: basePos.y + offset },
-              W,
-              H,
-            ),
-            data: {
+          addNode(
+            buildNode({
               type: nodeType,
-              src: finalUrl,
-              ...(label ? { label } : {}),
-              origin: { type: 'user-pasted' },
-            },
-            style: { width: W, height: H },
-          });
+              position: { x: basePos.x + offset, y: basePos.y + offset },
+              data: {
+                src: finalUrl,
+                origin: { type: 'user-pasted' },
+              },
+            }),
+          );
         });
         return;
       }
 
-      // Plain text → note node, label from first line
-      const firstLine = lines[0]?.trim().slice(0, 50) || undefined;
-      const W = 400,
-        H = 300;
-      addNode({
-        id: createId('node'),
-        type: 'note',
-        position: centered(getFlowPos(), W, H),
-        data: {
+      // Plain text → note node (label auto-derived by handleAddNode)
+      addNode(
+        buildNode({
           type: 'note',
-          content: trimmed,
-          ...(firstLine ? { label: firstLine } : {}),
-          origin: { type: 'user-pasted' },
-        },
-        style: { width: W, height: H },
-      });
+          position: getFlowPos(),
+          data: {
+            content: trimmed,
+            origin: { type: 'user-pasted' },
+          },
+        }),
+      );
     },
     [addNode, getFlowPos],
   );

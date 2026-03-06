@@ -1,11 +1,12 @@
 import { useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/shadcn';
-import { type Node, type NodeProps } from '@xyflow/react';
+import { type Node, type NodeProps, useStore } from '@xyflow/react';
 import { Copy, Check, Fullscreen } from 'lucide-react';
 import { useEffect, useState, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
 import { NodeWrapper } from './NodeWrapper.tsx';
+import { useNodeScale } from '../../hooks/useNodeScale.ts';
 import useCanvasStore from '../../store/canvasStore.ts';
 import { loadBlockNoteContent } from '../../utils/blockNoteContent.ts';
 import { copyToClipboard } from '../../utils/clipboard.ts';
@@ -18,6 +19,11 @@ export type NoteNodeType = Node<CanvasNoteNodeData, 'note'>;
 export const NoteNode = ({ id, data, selected }: NodeProps<NoteNodeType>) => {
   const [copied, setCopied] = useState(false);
   const openExpanded = useCanvasStore((s) => s.openExpanded);
+  const scale = useNodeScale(id, 'note');
+  const hasFixedHeight = useStore(
+    (s) =>
+      (s.nodeLookup.get(id)?.style?.height as number | undefined) !== undefined,
+  );
   const shadowHostRef = useRef<HTMLDivElement>(null);
   const shadowRootRef = useRef<ShadowRoot | null>(null);
   const reactRootRef = useRef<Root | null>(null);
@@ -71,7 +77,7 @@ export const NoteNode = ({ id, data, selected }: NodeProps<NoteNodeType>) => {
 
     // Create container for React content
     const container = document.createElement('div');
-    container.className = 'flex h-full flex-col rounded bg-white p-4';
+    container.className = 'flex flex-col rounded bg-white p-4';
     shadowRoot.appendChild(container);
 
     // Inject styles into Shadow DOM using link tags for external stylesheets
@@ -105,6 +111,15 @@ export const NoteNode = ({ id, data, selected }: NodeProps<NoteNodeType>) => {
       shadowRootRef.current = null;
     };
   }, []); // Empty deps - only run once on mount
+
+  // Keep shadow DOM container class in sync with fixed/auto height mode
+  useEffect(() => {
+    const container = shadowRootRef.current?.querySelector('div');
+    if (!container) return;
+    container.className = hasFixedHeight
+      ? 'flex h-full flex-col rounded bg-white p-4'
+      : 'flex flex-col rounded bg-white p-4';
+  }, [hasFixedHeight]);
 
   // Update Shadow DOM content when editor or data changes
   useEffect(() => {
@@ -148,7 +163,24 @@ export const NoteNode = ({ id, data, selected }: NodeProps<NoteNodeType>) => {
         openExpanded(id);
       }}
     >
-      <div ref={shadowHostRef} className="h-full w-full" />
+      <div
+        className={`w-full overflow-hidden bg-white${hasFixedHeight ? ' h-full' : ''}`}
+      >
+        <div
+          style={{
+            transform: `scale(${scale})`,
+            transformOrigin: 'top left',
+            width: `${100 / scale}%`,
+            ...(hasFixedHeight ? { height: `${100 / scale}%` } : {}),
+          }}
+        >
+          <div
+            ref={shadowHostRef}
+            className={`w-full ${hasFixedHeight ? 'h-full' : 'min-h-25'}`}
+            style={!hasFixedHeight ? { maxHeight: 600 } : undefined}
+          />
+        </div>
+      </div>
     </NodeWrapper>
   );
 };

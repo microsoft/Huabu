@@ -5,6 +5,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { getWebPreview } from '@/api/web';
 
 import { NodeWrapper } from './NodeWrapper.tsx';
+import { useNodeScale } from '../../hooks/useNodeScale.ts';
 import useCanvasStore from '../../store/canvasStore.ts';
 import { GhostButton } from '../Common/GhostButton.tsx';
 
@@ -13,6 +14,7 @@ import type { CanvasWebNodeData } from './types.ts';
 export type WebNodeType = Node<CanvasWebNodeData, 'web'>;
 
 export const WebNode = ({ id, data, selected }: NodeProps<WebNodeType>) => {
+  const scale = useNodeScale(id, 'web');
   const openExpanded = useCanvasStore((s) => s.openExpanded);
   const ingestion = useCanvasStore((state) => state.ingestionByNodeId[id]);
 
@@ -124,84 +126,95 @@ export const WebNode = ({ id, data, selected }: NodeProps<WebNodeType>) => {
         openExpanded(id);
       }}
     >
-      <div className="flex h-full flex-col">
-        <div className="relative h-full w-full overflow-hidden rounded bg-white">
-          {src ? (
-            <div className="flex h-full w-full flex-col gap-2 p-3">
-              {previewLoading ? (
-                <div className="text-muted-foreground text-xs">
-                  Loading preview...
-                </div>
-              ) : null}
-
-              {previewError && ingestion?.status !== 'pending' ? (
-                <div className="text-muted-foreground text-xs">
-                  Preview unavailable
-                  {hostname ? ` • ${hostname}` : ''}
-                </div>
-              ) : null}
-
-              {!previewLoading && !previewError && preview ? (
-                <div className="border-border flex h-full w-full flex-col overflow-hidden rounded-md border bg-white">
-                  {/* Priority 2: image — visually above title, but shrinks first */}
-                  {preview.image ? (
-                    <img
-                      src={preview.image}
-                      alt=""
-                      className="w-full shrink object-cover"
-                      style={{ minHeight: 0 }}
-                      loading="lazy"
-                      onError={(e) => {
-                        e.currentTarget.style.display = 'none';
-                      }}
-                    />
+      <div className="h-full w-full overflow-hidden">
+        <div
+          style={{
+            transform: `scale(${scale})`,
+            transformOrigin: 'top left',
+            width: `${100 / scale}%`,
+            height: `${100 / scale}%`,
+          }}
+        >
+          <div className="flex h-full flex-col">
+            <div className="relative h-full w-full overflow-hidden rounded bg-white">
+              {src ? (
+                <div className="flex h-full w-full flex-col gap-2 p-3">
+                  {previewLoading ? (
+                    <div className="text-muted-foreground text-base">
+                      Loading preview...
+                    </div>
                   ) : null}
 
-                  {/* Priority 1: favicon + site name + title — always visible */}
-                  <div className="flex min-w-0 shrink-0 flex-col gap-1 px-2 py-1">
-                    <div className="text-muted-foreground flex min-w-0 items-center gap-2 text-xs font-medium">
-                      {preview.favicon ? (
+                  {previewError && ingestion?.status !== 'pending' ? (
+                    <div className="text-muted-foreground text-base">
+                      Preview unavailable
+                      {hostname ? ` • ${hostname}` : ''}
+                    </div>
+                  ) : null}
+
+                  {!previewLoading && !previewError && preview ? (
+                    <div className="border-border flex h-full w-full flex-col overflow-hidden rounded-md border bg-white">
+                      {/* Priority 2: image — visually above title, but shrinks first */}
+                      {preview.image ? (
                         <img
-                          src={preview.favicon}
+                          src={preview.image}
                           alt=""
-                          className="h-3.5 w-3.5 flex-none rounded-sm"
+                          className="w-full shrink object-cover"
+                          style={{ minHeight: 0 }}
                           loading="lazy"
                           onError={(e) => {
                             e.currentTarget.style.display = 'none';
                           }}
                         />
                       ) : null}
-                      <span className="truncate">
-                        {(preview.siteName ?? '').trim() ||
-                          hostname ||
-                          'Website'}
-                      </span>
-                    </div>
 
-                    <div className="text-main line-clamp-2 min-w-0 text-xs font-medium break-words">
-                      {preview.title || src}
-                    </div>
-                  </div>
+                      {/* Priority 1: favicon + site name + title — always visible */}
+                      <div className="flex min-w-0 shrink-0 flex-col gap-1 px-2 py-1">
+                        <div className="text-muted-foreground flex min-w-0 items-center gap-2 text-base font-medium">
+                          {preview.favicon ? (
+                            <img
+                              src={preview.favicon}
+                              alt=""
+                              className="h-3.5 w-3.5 flex-none rounded-sm"
+                              loading="lazy"
+                              onError={(e) => {
+                                e.currentTarget.style.display = 'none';
+                              }}
+                            />
+                          ) : null}
+                          <span className="truncate">
+                            {(preview.siteName ?? '').trim() ||
+                              hostname ||
+                              'Website'}
+                          </span>
+                        </div>
 
-                  {/* Priority 3: content html — fills remaining space, hidden when height is tight */}
-                  {preview.contentHtml ? (
-                    <div className="min-h-0 flex-1 overflow-hidden px-2 pb-2">
-                      <div
-                        className="text-muted-foreground prose prose-xs overflow-hidden text-xs leading-relaxed [&_h1]:text-sm [&_h1]:font-semibold [&_h2]:text-xs [&_h2]:font-semibold [&_h3]:text-xs [&_h3]:font-medium [&_img]:max-w-full [&_img]:rounded [&_ol]:my-1 [&_p]:my-1 [&_ul]:my-1"
-                        dangerouslySetInnerHTML={{
-                          __html: preview.contentHtml,
-                        }}
-                      />
+                        <div className="text-main line-clamp-2 min-w-0 text-base font-medium break-words">
+                          {preview.title || src}
+                        </div>
+                      </div>
+
+                      {/* Priority 3: content html — fills remaining space, hidden when height is tight */}
+                      {preview.contentHtml ? (
+                        <div className="min-h-0 flex-1 overflow-hidden px-2 pb-2">
+                          <div
+                            className="text-muted-foreground prose prose-base overflow-hidden text-base leading-relaxed [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:text-base [&_h2]:font-semibold [&_h3]:text-base [&_h3]:font-medium [&_img]:max-w-full [&_img]:rounded [&_ol]:my-1 [&_p]:my-1 [&_ul]:my-1"
+                            dangerouslySetInnerHTML={{
+                              __html: preview.contentHtml,
+                            }}
+                          />
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
-              ) : null}
+              ) : (
+                <div className="text-muted-foreground flex h-full w-full items-center justify-center text-base">
+                  Invalid URL
+                </div>
+              )}
             </div>
-          ) : (
-            <div className="text-muted-foreground flex h-full w-full items-center justify-center text-sm">
-              Invalid URL
-            </div>
-          )}
+          </div>
         </div>
       </div>
     </NodeWrapper>
