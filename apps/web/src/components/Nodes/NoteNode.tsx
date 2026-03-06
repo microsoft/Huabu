@@ -160,7 +160,7 @@ export const NoteNode = memo(
         }}
       >
         <div
-          className={`w-full overflow-hidden bg-white${hasFixedHeight ? 'h-full' : ''}`}
+          className={`w-full overflow-hidden bg-white${hasFixedHeight ? ' h-full' : ''}`}
         >
           <div
             style={{
