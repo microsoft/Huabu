@@ -26,6 +26,7 @@
     "clsx": "^2.1.1",
     "cytoscape": "^3.33.1",
     "cytoscape-fcose": "^2.2.0",
+    "cytoscape-layout-utilities": "^1.1.1",
     "html-to-image": "^1.11.13",
     "lucide-react": "^0.577.0",
     "react": "^18.2.0",

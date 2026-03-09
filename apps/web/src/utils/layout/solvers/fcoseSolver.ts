@@ -12,6 +12,7 @@
 
 import cytoscape from 'cytoscape';
 import fcose from 'cytoscape-fcose';
+import layoutUtilities from 'cytoscape-layout-utilities';
 
 import type {
   LayoutGraph,
@@ -22,8 +23,16 @@ import type {
 import type { LayoutSolver } from './types';
 import type { ElementDefinition } from 'cytoscape';
 
-// Register the fCoSE layout extension once at module load.
+// Register extensions once at module load.
 cytoscape.use(fcose);
+cytoscape.use(layoutUtilities);
+
+/**
+ * Multiplier applied to `nodeSpacing` to derive the gap between
+ * disconnected sub-graphs. A value of 4 means component spacing is
+ * 4× the normal node-to-node spacing (e.g. 160 px when nodeSpacing = 40).
+ */
+const COMPONENT_SPACING_FACTOR = 4;
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -192,6 +201,14 @@ export const fcoseSolver: LayoutSolver = {
       ] as any,
     });
 
+    // Initialise the layout-utilities extension on the instance so that
+    // fCoSE can use it for packing disconnected components with the
+    // desired componentSpacing.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (cy as any).layoutUtilities({
+      componentSpacing: options.nodeSpacing * COMPONENT_SPACING_FACTOR,
+    });
+
     // ── Run fCoSE layout ───────────────────────────────────────────────
 
     const hasFixed = fixedNodeConstraint.length > 0;
@@ -212,7 +229,8 @@ export const fcoseSolver: LayoutSolver = {
         idealEdgeLength: () => options.nodeSpacing * 2,
         edgeElasticity: () => 0.45,
 
-        // Compound handling
+        // Compound handling — packing is driven by the
+        // cytoscape-layout-utilities extension configured above.
         packComponents: true,
 
         // Constraints
