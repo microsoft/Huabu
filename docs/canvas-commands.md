@@ -45,3 +45,17 @@ All command handlers live in `apps/web/src/store/canvasHandlers.ts`. Follow thes
 4. **Expose a public store method** in `canvasStore.ts` (`RFState` + implementation) that calls `get().dispatch({ type: 'YOUR_TYPE', ... })`.
 
 5. **Guard clauses belong in the handler** (e.g. early `return` / `break` when there is nothing to do), not in the public store method.
+
+Cmd+I → triggerIntent()
+→ getAgentContext() + screenshot
+→ POST /api/intent/recognize
+→ LLM 返回 [{label, actions: [{op: "ADD_NODE", tempId: "$s", ...}, {op: "CONNECT", sourceId: "$s", ...}]}]
+→ IntentPopover 显示候选（含步骤链）
+→ 用户点击
+→ executeIntent(idx)
+→ console.log 打印 actions 内容（方便 debug）
+→ executeIntentActions(actions)
+→ 每个 action 前 re-read getState()
+→ ADD_NODE 存 tempId → realId 映射
+→ CONNECT 等通过 resolveId() 解析 tempId
+→ logIntentEpisode() 记录到 DB
