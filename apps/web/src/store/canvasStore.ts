@@ -569,7 +569,23 @@ const useCanvasStore = create<RFState>()(
         (c) => c.type !== 'remove' && c.type !== 'add',
       );
       if (internalChanges.length === 0) return;
-      set({ nodes: applyNodeChanges(internalChanges, get().nodes) });
+
+      // Strip `setAttributes` from dimension changes so that
+      // `node.width`/`node.height` (the top-level properties) are never
+      // written by React Flow internals. We use `node.style.width/height`
+      // as the single source of truth for explicit sizing; allowing
+      // `setAttributes` would cause `node.width` to shadow `style.width`
+      // after a resize, making subsequent style-based size updates
+      // silently ignored.
+      const sanitized = internalChanges.map((c) => {
+        if (c.type === 'dimensions' && 'setAttributes' in c) {
+          const { setAttributes, ...rest } = c;
+          return rest;
+        }
+        return c;
+      });
+
+      set({ nodes: applyNodeChanges(sanitized, get().nodes) });
     },
 
     onEdgesChange: (changes) => {
