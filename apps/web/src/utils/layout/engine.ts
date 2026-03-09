@@ -6,13 +6,13 @@
  * that merges default options and forwards to the solver.
  */
 
-import { fcoseSolver } from './solvers/fcoseSolver';
+import { colaSolver } from './solvers/colaSolver';
 
 import type { LayoutSolver } from './solvers/types';
 import type { LayoutGraph, LayoutOptions, LayoutResult } from './types';
 
 export const DEFAULT_LAYOUT_OPTIONS: LayoutOptions = {
-  nodeSpacing: 40,
+  nodeSpacing: 10,
   groupSpacing: 160,
   groupPadding: 40,
 };
@@ -23,7 +23,7 @@ export class LayoutEngine {
   private solver: LayoutSolver;
 
   constructor(solver?: LayoutSolver) {
-    this.solver = solver ?? fcoseSolver;
+    this.solver = solver ?? colaSolver;
   }
 
   /**
