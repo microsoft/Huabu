@@ -9,9 +9,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NodeWrapper } from './NodeWrapper.tsx';
 import { useNodeScale } from '../../hooks/useNodeScale.ts';
 import useCanvasStore from '../../store/canvasStore.ts';
-import { loadBlockNoteContent } from '../../utils/blockNoteContent.ts';
 import { copyToClipboard } from '../../utils/clipboard.ts';
 import { getSharedStyleNodes } from '../../utils/shadowStyleCache.ts';
+import { loadBlockNoteContent } from '../BlockNote/blockNoteContent.ts';
 import { GhostButton } from '../Common/GhostButton.tsx';
 
 import type { CanvasNoteNodeData } from './types.ts';
