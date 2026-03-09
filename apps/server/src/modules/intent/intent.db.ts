@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import Database from 'better-sqlite3';
 
@@ -24,10 +25,8 @@ function migrate(database: Database.Database): void {
 export function getIntentDb(): Database.Database {
   if (db) return db;
 
-  const dataDir = path.resolve(
-    import.meta.dirname ?? path.dirname(new URL(import.meta.url).pathname),
-    '../../../data',
-  );
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const dataDir = path.resolve(here, '../../../data');
 
   db = new Database(path.join(dataDir, 'intent.sqlite'));
   db.pragma('journal_mode = WAL');
