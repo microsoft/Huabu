@@ -150,31 +150,29 @@ describe('buildLayoutGraph — Edge Aggregation', () => {
     expect(result.edges).toHaveLength(0);
   });
 
-  it('creates pairwise edges for same origin.sourceId with weight 0.4', () => {
+  it('creates edge from captured node to its source node with weight 0.4', () => {
+    // origin.sourceId is a knowledge-base sourceId (data.sourceId), not a node ID
     const nodes = [
+      makeNode('source-node', { data: { sourceId: 'kb-src-1' } }),
       makeNode('c1', {
         data: {
-          origin: { type: 'user-drag-capture', sourceId: 'kb-1' },
+          origin: { type: 'user-drag-capture', sourceId: 'kb-src-1' },
         },
       }),
       makeNode('c2', {
         data: {
-          origin: { type: 'user-drag-capture', sourceId: 'kb-1' },
-        },
-      }),
-      makeNode('c3', {
-        data: {
-          origin: { type: 'user-drag-capture', sourceId: 'kb-1' },
+          origin: { type: 'user-drag-capture', sourceId: 'kb-src-1' },
         },
       }),
     ];
     const result = buildLayoutGraph(nodes, []);
 
-    // 3 nodes same sourceId → 3 pairwise edges
-    expect(result.edges).toHaveLength(3);
-    expect(findEdge(result.edges, 'c1', 'c2')?.weight).toBe(0.4);
-    expect(findEdge(result.edges, 'c1', 'c3')?.weight).toBe(0.4);
-    expect(findEdge(result.edges, 'c2', 'c3')?.weight).toBe(0.4);
+    // Each captured node links to its source — 2 edges
+    expect(result.edges).toHaveLength(2);
+    expect(findEdge(result.edges, 'c1', 'source-node')?.weight).toBe(0.4);
+    expect(findEdge(result.edges, 'c2', 'source-node')?.weight).toBe(0.4);
+    // No edge between c1 and c2
+    expect(findEdge(result.edges, 'c1', 'c2')).toBeUndefined();
   });
 
   it('creates chain edges for same research.threadId with weight 0.3', () => {

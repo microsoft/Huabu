@@ -2,16 +2,13 @@
  * @file Layout solver interface.
  *
  * A solver is the minimal replaceable algorithm unit.
- * It receives a flat list of nodes + edges and returns new positions.
- * No group/hierarchy awareness — that is handled by the engine layer.
+ * It receives the full layout graph (nodes, edges, groups) and returns
+ * positions and group sizes. Compound layout, fixed-node constraints,
+ * and disconnected-component handling are the solver's responsibility.
  */
 
-import type { LayoutNode, LayoutEdge, LayoutOptions } from '../types';
+import type { LayoutGraph, LayoutOptions, LayoutResult } from '../types';
 
 export interface LayoutSolver {
-  solve(
-    nodes: LayoutNode[],
-    edges: LayoutEdge[],
-    options: LayoutOptions,
-  ): Map<string, { x: number; y: number }>;
+  solve(graph: LayoutGraph, options: LayoutOptions): LayoutResult;
 }

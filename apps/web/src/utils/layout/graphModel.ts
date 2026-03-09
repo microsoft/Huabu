@@ -133,27 +133,25 @@ export function buildLayoutGraph(
     }
   }
 
-  // 2c. origin.sourceId (user-drag-capture) — capture → source knowledge entry
-  // Find canvas nodes sharing the same sourceId for this relation
-  const nodesBySourceId = new Map<string, string[]>();
+  // 2c. origin.sourceId (user-drag-capture) — link captured node to its source
+  // origin.sourceId is a knowledge-base source ID (data.sourceId), not a canvas
+  // node ID, so we build a reverse lookup from data.sourceId → canvas node ID.
+  const nodeByDataSourceId = new Map<string, string>();
+  for (const n of nodeMap.values()) {
+    const sid = (n.data as Record<string, unknown>)?.sourceId;
+    if (typeof sid === 'string') {
+      nodeByDataSourceId.set(sid, n.id);
+    }
+  }
   for (const n of nodeMap.values()) {
     const data = n.data as Record<string, unknown>;
     const origin = data?.origin as
       | { type?: string; sourceId?: string }
       | undefined;
-    if (origin?.type === 'user-drag-capture' && origin.sourceId) {
-      // sourceId here refers to a knowledge-base source, so find canvas nodes
-      // that have the same data.sourceId to link them
-      const sid = origin.sourceId;
-      const arr = nodesBySourceId.get(sid) ?? [];
-      arr.push(n.id);
-      nodesBySourceId.set(sid, arr);
-    }
-  }
-  for (const group of nodesBySourceId.values()) {
-    for (let i = 0; i < group.length; i++) {
-      for (let j = i + 1; j < group.length; j++) {
-        upsertEdge(edgeMap, group[i], group[j], WEIGHT_ORIGIN_SOURCE_ID);
+    if (origin?.sourceId) {
+      const targetNodeId = nodeByDataSourceId.get(origin.sourceId);
+      if (targetNodeId && targetNodeId !== n.id) {
+        upsertEdge(edgeMap, n.id, targetNodeId, WEIGHT_ORIGIN_SOURCE_ID);
       }
     }
   }
@@ -218,9 +216,44 @@ export function buildLayoutGraph(
     }
   }
 
-  return {
+  const layoutGraph: LayoutGraph = {
     nodes: layoutNodes,
     edges: Array.from(edgeMap.values()),
     groups: Array.from(groupMap.values()),
   };
+
+  // Debug: log graph before layout
+  console.groupCollapsed(
+    `[Layout] buildLayoutGraph — ${layoutGraph.nodes.length} nodes, ${layoutGraph.edges.length} edges, ${layoutGraph.groups.length} groups`,
+  );
+  console.log('Nodes:');
+  for (const n of layoutGraph.nodes) {
+    const flags = [n.fixed ? 'fixed' : 'free'];
+    const reactFlowNode = nodeMap.get(n.id);
+    if (reactFlowNode?.parentId) flags.push(`parent=${reactFlowNode.parentId}`);
+    console.log(
+      `  ${n.id}  ${n.width}×${n.height}  pos=(${Math.round(n.position.x)},${Math.round(n.position.y)})  [${flags.join(', ')}]`,
+    );
+  }
+  if (layoutGraph.edges.length > 0) {
+    console.log('Edges:');
+    for (const e of layoutGraph.edges) {
+      const label =
+        e.weight === 1.0
+          ? 'user-edge'
+          : e.weight === 0.6
+            ? 'relatedNodeIds'
+            : e.weight === 0.4
+              ? 'origin-sourceId'
+              : e.weight === 0.3
+                ? 'same-thread'
+                : `w=${e.weight}`;
+      console.log(`  ${e.source} ↔ ${e.target}  (${label})`);
+    }
+  } else {
+    console.log('  (no edges)');
+  }
+  console.groupEnd();
+
+  return layoutGraph;
 }
