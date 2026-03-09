@@ -8,11 +8,13 @@
 
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 
+import { getIntentDb } from './intent.db.js';
 import { getLLM } from '../agent/llm.js';
 
 import type {
   AgentBaseContext,
   IntentCandidate,
+  IntentEpisode,
   RecentAction,
 } from '@sediment/shared';
 
@@ -29,7 +31,8 @@ function serializeContext(ctx: AgentBaseContext): string {
     for (const n of ctx.nodes) {
       const frame = n.frameLabel ? ` (in frame "${n.frameLabel}")` : '';
       const snippet = n.snippet ? `: ${n.snippet}` : '';
-      lines.push(`- ${n.type} "${n.label ?? n.id}"${frame}${snippet}`);
+      const label = n.label ? ` "${n.label}"` : '';
+      lines.push(`- [${n.id}] ${n.type}${label}${frame}${snippet}`);
     }
   } else {
     lines.push('Canvas is empty.');
@@ -40,11 +43,9 @@ function serializeContext(ctx: AgentBaseContext): string {
     lines.push('');
     lines.push('Connections:');
     for (const e of ctx.edges) {
-      lines.push(
-        `- "${e.source.label ?? e.source.id}" → "${
-          e.target.label ?? e.target.id
-        }"`,
-      );
+      const srcLabel = e.source.label ? ` "${e.source.label}"` : '';
+      const tgtLabel = e.target.label ? ` "${e.target.label}"` : '';
+      lines.push(`- [${e.source.id}]${srcLabel} → [${e.target.id}]${tgtLabel}`);
     }
   }
 
@@ -144,22 +145,42 @@ const INTENT_SYSTEM_PROMPT = `You are an intent-recognition engine embedded in a
 The canvas lets users collect, organize, and synthesize research material using typed nodes (note, text, web, pdf, image, video) that can be grouped into frames and connected by edges.
 
 ## Your task
-Analyze the provided canvas snapshot — node types, labels, content snippets, selection state, connections, and the user's recent action trail — and infer the **3–5 most likely next actions** the user wants to take.
+Analyze the provided canvas snapshot and infer the **3–5 most likely next actions** the user wants to take. For each, provide an executable sequence of atomic operations.
+
+## Available atomic operations
+
+| op | Parameters | Description |
+|----|-----------|-------------|
+| ADD_NODE | nodeType, label?, content?, src?, position?, width?, height? | Create a new node |
+| DELETE_NODES | nodeIds[] | Remove nodes by ID |
+| CONNECT | sourceId, targetId | Draw an edge between two nodes |
+| DISCONNECT | sourceId, targetId | Remove an edge between two nodes |
+| UPDATE_NODE_DATA | nodeId, patch{} | Update a node's data — content, label, or any field |
+| GROUP_INTO_FRAME | nodeIds[], frameLabel? | Group nodes into a new frame |
+| UNFRAME | frameId | Dissolve a frame, releasing its children |
+| MOVE_INTO_FRAME | nodeId, frameId | Move a node into an existing frame |
+| MOVE_OUT_OF_FRAME | nodeId | Remove a node from its parent frame |
+| SELECT_NODES | nodeIds[] | Select one or more nodes |
+| ALIGN_NODES | direction (left/center-h/right/top/center-v/bottom) | Align selected nodes |
+| SPREAD_NODES | (none) | Spread apart overlapping selected nodes |
+
+## Referencing newly created nodes
+Use **$0, $1, $2, ...** as placeholder IDs. $0 = the node created by the 1st ADD_NODE, $1 = the 2nd, etc.
 
 ## Guidelines
-- Prioritize actions that are **contextually relevant** to the most recent operations and the currently selected node(s). The latest action in the trail carries the strongest signal.
-- If a screenshot is provided, use the spatial layout of nodes to inform your reasoning (e.g. clustered nodes may represent a topical group; isolated nodes may need connecting).
-- If a single node is selected, suggest actions that directly operate on its content (e.g. summarize, expand, find related sources, generate questions).
-- If multiple nodes are selected or connected, suggest higher-level synthesis actions (e.g. compare, merge, outline, identify contradictions).
-- If the canvas is sparse or empty, suggest bootstrapping actions (e.g. add a research topic, import sources, start a web search).
-- Keep labels short and action-oriented (verb + object, ≤ 8 words).
+- Base suggestions on the canvas state and recent action trail. The latest action is the strongest signal.
+- Suggest a **diverse range** of operation types. 
+- Use REAL node IDs (from the [id] tags in the canvas state) when referencing existing nodes.
+- Keep labels short (verb + object, ≤ 8 words).
+- Each intent may need multiple operations composed together.
 
 ## Output format
 Return **only** a JSON array (no markdown fences, no commentary). Each element:
 {
   "label": "short actionable description",
   "confidence": 0.0–1.0,
-  "description": "one-sentence rationale for why this action is relevant"
+  "description": "one-sentence rationale",
+  "actions": [ ... ]
 }
 Sorted by confidence descending.`;
 
@@ -218,6 +239,7 @@ async function llmIntentRecognition(
       label: String(item.label ?? ''),
       confidence: Number(item.confidence ?? 0),
       description: item.description ? String(item.description) : undefined,
+      actions: Array.isArray(item.actions) ? item.actions : [],
     }));
   } catch {
     console.error('[intent] Failed to parse LLM response:', raw);
@@ -241,4 +263,30 @@ export async function recognizeIntent(
     console.error('[intent] LLM intent recognition failed:', err);
     return [];
   }
+}
+
+// ---------------------------------------------------------------------------
+// Episode logging — stores intent interaction history for preference learning
+// ---------------------------------------------------------------------------
+
+/**
+ * Persist an intent episode to the database.
+ */
+export function logIntentEpisode(episode: IntentEpisode): void {
+  const db = getIntentDb();
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO intent_episodes
+      (id, timestamp, contextSummary, candidates, outcomeType, chosenIndex, chosenLabel)
+    VALUES
+      (?, ?, ?, ?, ?, ?, ?)
+  `);
+  stmt.run(
+    episode.id,
+    episode.timestamp,
+    episode.contextSummary,
+    JSON.stringify(episode.candidates),
+    episode.outcome.type,
+    episode.outcome.type === 'selected' ? episode.outcome.chosenIndex : null,
+    episode.outcome.type === 'selected' ? episode.outcome.chosenLabel : null,
+  );
 }
