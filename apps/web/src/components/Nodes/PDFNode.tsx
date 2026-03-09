@@ -1,7 +1,14 @@
 import { type Node, type NodeProps } from '@xyflow/react';
 import { clsx } from 'clsx';
 import { Download, Fullscreen, ImageOff } from 'lucide-react';
-import { memo, useCallback, useState, useRef, useEffect } from 'react';
+import {
+  memo,
+  useCallback,
+  useState,
+  useRef,
+  useEffect,
+  useLayoutEffect,
+} from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 
 import 'react-pdf/dist/Page/AnnotationLayer.css';
@@ -17,13 +24,18 @@ pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/b
 
 export type PDFNodeType = Node<CanvasPdfNodeData, 'pdf'>;
 
-/**
- * Fallback height of a single PDF page at scale 0.7 (A4 ≈ 595×842pt).
- * Used only until the real page height has been measured.
- */
-const FALLBACK_PAGE_HEIGHT = 842 * 0.7; // ~590px
+/** A4 aspect ratio (height / width ≈ 1.414). Used for the fallback placeholder. */
+const A4_ASPECT = 842 / 595;
 /** Extra pages to render above/below the visible viewport. */
 const OVERSCAN = 2;
+/**
+ * When CSS scale-up exceeds this ratio the canvas is re-rendered at the
+ * current container width so the PDF stays crisp.  CSS transform bridges
+ * the visual gap until the new canvas is ready → no flash.
+ */
+const UPSCALE_THRESHOLD = 1.15;
+/** Debounce delay (ms) before committing a high-res re-render. */
+const RERENDER_DEBOUNCE_MS = 400;
 
 /**
  * A single PDF page slot. Uses IntersectionObserver to lazily render the
@@ -41,9 +53,11 @@ const VirtualizedPage = memo(
   ({
     pageNumber,
     containerRef,
+    renderedWidth,
   }: {
     pageNumber: number;
     containerRef: React.RefObject<HTMLDivElement | null>;
+    renderedWidth: number;
   }) => {
     const placeholderRef = useRef<HTMLDivElement>(null);
     const [isVisible, setIsVisible] = useState(false);
@@ -51,18 +65,14 @@ const VirtualizedPage = memo(
     const [hasRendered, setHasRendered] = useState(false);
     const [measuredHeight, setMeasuredHeight] = useState<number | null>(null);
 
-    // Use a ref so the observer callback always reads the latest height
-    // without forcing the effect to re-run (which would needlessly
-    // disconnect and recreate the IntersectionObserver).
-    const measuredHeightRef = useRef(measuredHeight);
-    measuredHeightRef.current = measuredHeight;
+    const fallbackPageHeight = renderedWidth * A4_ASPECT;
 
     useEffect(() => {
       const el = placeholderRef.current;
       const root = containerRef.current;
       if (!el || !root) return;
 
-      const margin = FALLBACK_PAGE_HEIGHT * OVERSCAN;
+      const margin = fallbackPageHeight * OVERSCAN;
 
       const observer = new IntersectionObserver(
         ([entry]) => {
@@ -78,7 +88,7 @@ const VirtualizedPage = memo(
 
       observer.observe(el);
       return () => observer.disconnect();
-    }, [containerRef]);
+    }, [containerRef, fallbackPageHeight]);
 
     const handleRenderSuccess = useCallback(() => {
       // Measure the actual rendered canvas height to replace the fallback.
@@ -88,7 +98,7 @@ const VirtualizedPage = memo(
       }
     }, []);
 
-    const pageHeight = measuredHeight ?? FALLBACK_PAGE_HEIGHT;
+    const pageHeight = measuredHeight ?? fallbackPageHeight;
 
     return (
       <div
@@ -100,7 +110,7 @@ const VirtualizedPage = memo(
           <div style={isVisible ? undefined : { visibility: 'hidden' }}>
             <Page
               pageNumber={pageNumber}
-              scale={0.7}
+              width={renderedWidth}
               renderAnnotationLayer={false}
               renderTextLayer={false}
               loading={''}
@@ -120,6 +130,56 @@ export const PDFNode = memo(
 
     const containerRef = useRef<HTMLDivElement>(null);
     const [numPages, setNumPages] = useState<number | null>(null);
+    const [containerWidth, setContainerWidth] = useState(0);
+    // The width at which the PDF canvas is actually rendered. Only updates on
+    // first measure and when the container grows past UPSCALE_THRESHOLD.
+    const [renderedWidth, setRenderedWidth] = useState(0);
+    const rerenderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    // Track the container's live width for CSS transform scaling.
+    useLayoutEffect(() => {
+      const el = containerRef.current;
+      if (!el) return;
+      const ro = new ResizeObserver(([entry]) => {
+        const available = entry.contentRect.width;
+        if (available > 0) setContainerWidth(available);
+      });
+      ro.observe(el);
+      return () => ro.disconnect();
+    }, []);
+
+    // Debounced re-render: when the container is significantly larger than the
+    // rendered canvas, schedule a high-res re-render. CSS scale covers the gap.
+    useEffect(() => {
+      // First measurement → render immediately.
+      if (renderedWidth === 0 && containerWidth > 0) {
+        setRenderedWidth(containerWidth);
+        return;
+      }
+      if (containerWidth <= 0 || renderedWidth <= 0) return;
+
+      const ratio = containerWidth / renderedWidth;
+      if (ratio > UPSCALE_THRESHOLD) {
+        if (rerenderTimerRef.current) clearTimeout(rerenderTimerRef.current);
+        rerenderTimerRef.current = setTimeout(() => {
+          setRenderedWidth(containerWidth);
+          rerenderTimerRef.current = null;
+        }, RERENDER_DEBOUNCE_MS);
+      }
+
+      return () => {
+        if (rerenderTimerRef.current) {
+          clearTimeout(rerenderTimerRef.current);
+          rerenderTimerRef.current = null;
+        }
+      };
+    }, [containerWidth, renderedWidth]);
+
+    // Instant visual scaling via CSS transform while real render is debounced.
+    const scaleFactor =
+      renderedWidth > 0 && containerWidth > 0
+        ? containerWidth / renderedWidth
+        : 1;
 
     const hasCover = !!data.coverUrl;
 
@@ -206,34 +266,44 @@ export const PDFNode = memo(
             /* ── Default PDF preview mode ── */
             <div
               className={clsx(
-                'custom-scrollbar flex h-full w-full flex-col items-center overflow-auto',
+                'custom-scrollbar flex h-full w-full flex-col overflow-auto',
                 'cursor-grab select-none',
               )}
             >
               {data?.src ? (
-                <Document
-                  file={data.src}
-                  onLoadSuccess={onDocumentLoadSuccess}
-                  loading={
-                    <div className="text-muted-foreground p-4 text-xs">
-                      Loading...
-                    </div>
-                  }
-                  error={
-                    <div className="text-danger p-4 text-xs">
-                      Error loading PDF.
-                    </div>
-                  }
-                  className="flex flex-col gap-0"
+                <div
+                  style={{
+                    transformOrigin: 'top left',
+                    transform: `scale(${scaleFactor})`,
+                    width: renderedWidth > 0 ? renderedWidth : undefined,
+                  }}
                 >
-                  {Array.from(new Array(numPages), (_el, index) => (
-                    <VirtualizedPage
-                      key={`page_${index + 1}`}
-                      pageNumber={index + 1}
-                      containerRef={containerRef}
-                    />
-                  ))}
-                </Document>
+                  <Document
+                    file={data.src}
+                    onLoadSuccess={onDocumentLoadSuccess}
+                    loading={
+                      <div className="text-muted-foreground p-4 text-xs">
+                        Loading...
+                      </div>
+                    }
+                    error={
+                      <div className="text-danger p-4 text-xs">
+                        Error loading PDF.
+                      </div>
+                    }
+                    className="flex flex-col gap-0"
+                  >
+                    {renderedWidth > 0 &&
+                      Array.from(new Array(numPages), (_el, index) => (
+                        <VirtualizedPage
+                          key={`page_${index + 1}`}
+                          pageNumber={index + 1}
+                          containerRef={containerRef}
+                          renderedWidth={renderedWidth}
+                        />
+                      ))}
+                  </Document>
+                </div>
               ) : (
                 <div className="text-muted-foreground flex h-full w-full items-center justify-center text-sm">
                   No PDF Source
