@@ -7,9 +7,8 @@
  */
 
 import { applyLayoutResult } from './applier';
-import { LayoutEngine } from './engine';
+import { DEFAULT_LAYOUT_OPTIONS, LayoutEngine } from './engine';
 import { buildLayoutGraph } from './graphModel';
-import { DEFAULT_LAYOUT_OPTIONS } from './types';
 
 import type { LayoutOptions } from './types';
 import type { Node, Edge } from '@xyflow/react';

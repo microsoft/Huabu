@@ -2,7 +2,9 @@
 
 ## Overview
 
-A client-side layout system that computes optimal node positions on the canvas using both explicit user edges and implicit node relationships. The layout module is fully self-contained within `apps/web` — no server-side or shared type changes required.
+A client-side layout system that computes optimal node positions on the canvas using both explicit user edges and implicit node relationships. The layout module lives in `apps/web/src/utils/layout/` and is fully UI-framework-agnostic — no server-side or shared type changes required.
+
+A complementary **server-side placement service** (`apps/server/src/modules/canvas/layout/`) handles initial positioning of research nodes during generation (right/bottom/auto strategies). This document covers the client-side layout system only.
 
 ## Architecture
 
@@ -10,315 +12,123 @@ A client-side layout system that computes optimal node positions on the canvas u
 ┌─────────────────────────────────────────────────────────┐
 │                      Canvas Runtime                      │
 │                                                          │
-│  onNodeAdded() ──────→ LayoutCoordinator                 │
-│  onLayoutRequested() ─→ LayoutCoordinator                │
+│  handleAddNode() ────→ placeNode()    (auto-layout)      │
+│  toolbar / shortcut ─→ layoutAll()    (manual)           │
+│  frame toolbar ──────→ layoutGroup()  (scoped)           │
+│  multi-select ───────→ layoutSelected()                  │
 │                              │                           │
 │              ┌───────────────▼──────────────┐            │
-│              │      LayoutCoordinator       │            │
-│              │      (single entry point)    │            │
+│              │      Coordinator Functions   │            │
+│              │   layoutAll / layoutGroup /   │            │
+│              │   placeNode / layoutSelected  │            │
 │              └───┬─────────────────┬────────┘            │
 │                  │                 │                      │
 │         ┌────────▼───┐   ┌────────▼──────────┐          │
 │         │ GraphModel  │   │  LayoutEngine     │          │
-│         │ (data layer)│   │  (compute layer)  │          │
-│         └────────┬───┘   └────────┬──────────┘          │
-│                  │                │                      │
-│         ┌────────▼────────────────▼──────────┐          │
-│         │         PositionApplier            │          │
-│         │     (write-back + animation + undo)│          │
-│         └────────────────────────────────────┘          │
+│         │ (data layer)│   │  (thin wrapper)   │          │
+│         └────────────┘   └────────┬──────────┘          │
+│                                   │                      │
+│                          ┌────────▼──────────┐          │
+│                          │   fCoSE Solver     │          │
+│                          │ (cytoscape-fcose)  │          │
+│                          └────────┬──────────┘          │
+│                                   │                      │
+│                          ┌────────▼──────────┐          │
+│                          │  PositionApplier   │          │
+│                          │  (write-back+undo) │          │
+│                          └────────────────────┘          │
 └──────────────────────────────────────────────────────────┘
-```
-
-## File Structure
-
-```
-apps/web/src/utils/layout/
-  ├── types.ts              // LayoutNode, LayoutEdge, LayoutGroup, LayoutGraph, LayoutResult, all interfaces
-  ├── graphModel.ts         // Canvas → LayoutGraph conversion + relation inference
-  ├── engine.ts             // LayoutEngine (hierarchical recursion + incremental placement)
-  ├── solvers/
-  │   ├── types.ts          // LayoutSolver interface
-  │   └── dagreSolver.ts    // dagre implementation (initial version, swappable)
-  ├── applier.ts            // PositionApplier
-  └── coordinator.ts        // LayoutCoordinator (external-facing entry point)
 ```
 
 ## Module Responsibilities
 
 ### 1. GraphModel — Canvas data → Layout graph
 
-Converts canvas `CanvasNode[]` + `CanvasEdge[]` (defined in `packages/shared/src/types/canvas/`) into a clean, UI-framework-agnostic graph structure for the layout engine.
+Converts ReactFlow nodes + edges into a UI-framework-agnostic `LayoutGraph` containing `LayoutNode[]`, `LayoutEdge[]`, and `LayoutGroup[]`. Build options allow scoping to a specific frame and marking nodes as fixed.
 
-#### Types
+Three responsibilities:
 
-```typescript
-interface LayoutNode {
-  id: string;
-  width: number;
-  height: number;
-  position: { x: number; y: number };
-  /** When true, the node's position can only change slightly */
-  fixed: boolean;
-}
+- **Node mapping**: Extracts id, dimensions, position, and fixed flag from each canvas node.
+- **Edge aggregation**: Merges explicit and implicit edges (see below).
+- **Group construction**: Builds group hierarchy from `parentId` (frame containment).
 
-interface LayoutEdge {
-  source: string;
-  target: string;
-  /** Higher weight = closer placement in layout. Range [0, 1] */
-  weight: number;
-}
+#### Edge construction
 
-interface LayoutGroup {
-  id: string; // frame node id
-  children: string[]; // direct child node ids
-  padding: number;
-}
+Layout edges encode how strongly two nodes should be placed near each other. They are built from five sources:
 
-interface LayoutGraph {
-  nodes: LayoutNode[];
-  edges: LayoutEdge[];
-  groups: LayoutGroup[];
-}
-```
+| Source                                              | Weight | Strategy                                                                                  |
+| --------------------------------------------------- | ------ | ----------------------------------------------------------------------------------------- |
+| User edge (canvas `Edge`)                           | 1.0    | Direct mapping                                                                            |
+| `node.data.research.relatedNodeIds`                 | 0.6    | Synthesis node → each cited source node                                                   |
+| `node.data.origin.sourceId`                         | 0.4    | Reverse-lookup via `data.sourceId` to find the canvas node that owns the knowledge source |
+| Same `node.data.research.threadId`                  | 0.3    | Chain-link nodes sharing the same research session (A→B→C, not A↔B↔C)                     |
+| Same `node.data.origin.threadId` (`user-drag-chat`) | 0.3    | Chain-link nodes dragged from the same chat thread                                        |
 
-#### Three responsibilities
+Rules:
 
-**a) Node mapping**: `CanvasNode` → `LayoutNode`. Extracts id, measured dimensions, and position.
+- **Max weight, not sum**: When the same (source, target) pair has multiple relationship types, take the max weight to avoid weight explosion.
+- **Direction-normalised keys**: (A,B) and (B,A) share the same key — edges are undirected.
+- **Chain-linking for same-thread groups**: Nodes in the same thread are linked sequentially (O(n) edges) instead of fully connected (O(n²)).
 
-**b) Edge aggregation**: Merges two categories of edges into a unified `LayoutEdge[]`:
+### 2. LayoutEngine — Thin solver wrapper
 
-| Source                                              | Relationship Semantics        | Weight | Notes                                |
-| --------------------------------------------------- | ----------------------------- | ------ | ------------------------------------ |
-| User edge (canvas `Edge`)                           | Explicit user connection      | 1.0    | Layout backbone                      |
-| `node.data.research.relatedNodeIds`                 | Synthesis cites these sources | 0.6    | synthesis → source nodes             |
-| `node.data.origin.sourceId` (`user-drag-capture`)   | Captured content from a node  | 0.4    | Capture node stays near source       |
-| Same `node.data.research.threadId`                  | Same research session         | 0.3    | Nodes from same research run cluster |
-| Same `node.data.origin.threadId` (`user-drag-chat`) | Dragged from same chat thread | 0.3    | Nodes from same conversation cluster |
+A class holding a swappable `LayoutSolver` reference. Because the current solver (fCoSE) natively handles compound nodes, fixed-node constraints, and disconnected components, the engine is a thin pass-through — no custom hierarchical recursion needed.
 
-When the same (source, target) pair has multiple relationships, take **max weight** (not sum) to avoid weight explosion.
+Exposes `layout()` (full) and `place()` (incremental, currently identical — both delegate to the solver).
 
-**c) Group construction**: Builds `LayoutGroup[]` tree from `node.parentId` (frame containment).
+### 3. fCoSE Solver
 
-### 2. LayoutEngine — Pure coordinate computation
+Force-directed compound layout via cytoscape-fcose. Handles:
 
-#### Interface
+- **Coordinate conversion**: ReactFlow frame children use parent-relative positions; the solver works in absolute coordinates and converts back.
+- **Compound nodes**: Frame groups are cytoscape compound nodes; sizes are derived from children.
+- **Fixed constraints**: Pinned via `fixedNodeConstraint` so existing nodes don't move during incremental placement.
+- **Disconnected components**: Packed via `cytoscape-layout-utilities`.
 
-```typescript
-interface LayoutOptions {
-  direction: 'TB' | 'LR';
-  nodeSpacing: number;
-  groupSpacing: number;
-  groupPadding: number;
-}
+The solver is the minimal replaceable unit — swap to dagre, ELK, or d3-force by replacing one file.
 
-interface LayoutResult {
-  positions: Map<string, { x: number; y: number }>;
-  /** Computed group dimensions after layout (used to resize frames) */
-  groupSizes: Map<string, { width: number; height: number }>;
-}
+#### Layout options
 
-interface LayoutEngine {
-  /** Full layout — repositions all non-fixed nodes */
-  layout(graph: LayoutGraph, options: LayoutOptions): LayoutResult;
-  /** Incremental placement — only computes positions for fixed=false nodes */
-  place(graph: LayoutGraph, options: LayoutOptions): LayoutResult;
-}
-```
+| Option         | Default | Description                                                                  |
+| -------------- | ------- | ---------------------------------------------------------------------------- |
+| `nodeSpacing`  | `40`    | Minimum gap between sibling nodes (`nodeSeparation` in fCoSE)                |
+| `groupSpacing` | `60`    | Gap between disconnected sub-graphs (`componentSpacing` in layout-utilities) |
+| `groupPadding` | `40`    | Internal padding inside compound nodes                                       |
 
-#### Hierarchical recursion (full layout)
+Derived values used by fCoSE:
 
-Frame nodes act as atomic containers. Layout proceeds in two phases:
+- `idealEdgeLength` = `nodeSpacing × 2` (constant for all edges)
+- `randomize` = `true` for full layout, `false` when fixed-node constraints exist
 
-**Phase A — Bottom-Up (determine sizes)**
+### 4. Coordinator — Orchestration functions
 
-Starting from the deepest nested frames, working upward:
+Standalone stateless functions that orchestrate the pipeline: `buildLayoutGraph` → `LayoutEngine` → `applyLayoutResult`. Four entry points:
 
-1. Collect child nodes + child frames within the current frame
-2. Collect edges where both source and target are inside the current frame
-3. Call solver → compute relative positions for children
-4. Compute frame's content size = bounding box of children + padding
-5. Return this size upward — the frame participates as a "big node" in the parent layer
+| Function         | Scope                      | Fixed nodes       |
+| ---------------- | -------------------------- | ----------------- |
+| `layoutAll`      | All nodes                  | None              |
+| `layoutGroup`    | Single frame's descendants | None              |
+| `placeNode`      | Single new node            | All except target |
+| `layoutSelected` | Selected nodes only        | All non-selected  |
 
-**Phase B — Top-Down (assign absolute coordinates)**
+All return a new `Node[]` or `null` if nothing changed.
 
-Starting from root level, working downward:
+### 5. PositionApplier — Write back to canvas
 
-1. Root layer layout: top-level nodes + frames (using sizes from Phase A)
-2. Root layout result → frame absolute positions are determined
-3. Recurse into each frame, converting relative coordinates to absolute
-
-#### Cross-frame edges
-
-| Edge scenario                     | Handling                                                                            |
-| --------------------------------- | ----------------------------------------------------------------------------------- |
-| Both endpoints in the same frame  | Participates in that frame's internal layout                                        |
-| Endpoints across different frames | Promoted to the nearest common ancestor layer; connects frame nodes as atomic units |
-
-#### Solver — the swappable algorithm core
-
-```typescript
-interface LayoutSolver {
-  solve(
-    nodes: LayoutNode[],
-    edges: LayoutEdge[],
-    options: LayoutOptions,
-  ): Map<string, { x: number; y: number }>;
-}
-```
-
-The solver is the minimal replaceable unit. Initial implementation uses dagre; can be swapped to ELK, d3-force, or a custom algorithm by replacing a single file.
-
-#### Incremental placement (auto-layout mode)
-
-When canvas or frame has auto-layout enabled and a new node is added:
-
-```
-For each new node (fixed = false):
-  1. Find related nodes via edges
-  2. If related nodes exist:
-       anchor = centroid of related nodes
-       candidatePos = anchor + offset along layout direction
-     Else:
-       candidatePos = edge of existing content bounding box
-  3. Collision detection: check overlap with all fixed nodes
-     If overlapping → spiral outward until clear
-  4. If inside a group, ensure position stays within group bounds
-     (or expand group size if necessary)
-  Return positions for new nodes only
-```
-
-This approach guarantees existing nodes are never moved.
-
-### 3. LayoutCoordinator — Orchestration entry point
-
-```typescript
-interface LayoutCoordinator {
-  /** Full re-layout of all nodes (user-triggered) */
-  layoutAll(options?: Partial<LayoutOptions>): void;
-
-  /** Incremental placement of a single new node */
-  placeNode(nodeId: string, options?: Partial<LayoutOptions>): void;
-
-  /** Full re-layout within a specific frame */
-  layoutGroup(frameId: string, options?: Partial<LayoutOptions>): void;
-}
-```
-
-Each method follows the same pipeline:
-
-1. Read current nodes + edges from `canvasStore`
-2. `GraphModel.build(nodes, edges)` → `LayoutGraph`
-   - `placeNode`: mark target node as `fixed=false`, all others `fixed=true`
-   - `layoutGroup`: extract only the sub-graph within the frame
-3. `LayoutEngine.layout/place(graph, options)` → `LayoutResult`
-4. `PositionApplier.apply(result)`
-
-### 4. PositionApplier — Write back to canvas
-
-```typescript
-interface PositionApplier {
-  apply(result: LayoutResult, options?: { animate?: boolean }): void;
-}
-```
-
-Responsibilities:
-
-- Batch-update node positions via `canvasStore.setNodes()`
-- Update frame node dimensions from `groupSizes`
-- Wrap the entire operation as **a single history entry** (supports Ctrl+Z undo)
-- Optional: CSS transition animation for smooth repositioning
+- Takes an **undo snapshot** before applying changes (single Ctrl+Z undoes entire layout)
+- Produces new node array with updated positions and frame sizes
+- Animation support declared but **not yet implemented**
 
 ## Integration Points
 
-Canvas only needs to connect `LayoutCoordinator` in two places:
+1. **canvasStore actions** dispatch layout commands to `canvasHandlers`
+2. **canvasHandlers** call coordinator functions and write results to state
+3. **handleAddNode** calls `placeNode()` when auto-layout is enabled for the canvas or parent frame
+4. **Post-layout fitView** smoothly pans/zooms the viewport via `requestAnimationFrame`
 
-1. **Toolbar button / keyboard shortcut** → `coordinator.layoutAll()`
-2. **End of `handleAddNode`** → `if (autoLayoutEnabled) coordinator.placeNode(newNodeId)`
+## UI Surface
 
-## Design Decisions
-
-| Decision                              | Choice                                         | Rationale                                                                |
-| ------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------ |
-| Solver decoupled from engine          | Solver is the minimal replaceable unit         | Swap algorithms by changing one file                                     |
-| LayoutGraph isolated from ReactFlow   | GraphModel handles conversion                  | Layout module is independently testable, no UI framework dependency      |
-| Edge weight uses max, not sum         | Avoid weight explosion from multiple relations | Two nodes have a bounded affinity regardless of how many relations exist |
-| Incremental placement uses heuristics | Not a full layout engine run                   | Instant response; deterministically never moves existing nodes           |
-| Groups support recursive nesting      | Frame-in-frame supported                       | Aligns with existing `parentId` tree structure                           |
-| Position write-back is atomic         | Single history entry for the entire operation  | User can undo all position changes with one Ctrl+Z                       |
-| Full layout is manual-trigger only    | Never auto-rearrange existing positions        | Respects user's intentional arrangement                                  |
-| Incremental placement is opt-in       | Only active when auto-layout mode is enabled   | User controls whether new nodes are auto-positioned                      |
-
-## UI Changes
-
-### 1. CanvasToolbar — Global layout entry point
-
-The existing `LayoutGrid` button (currently a no-op) becomes the primary layout trigger.
-
-| Interaction               | Action                                                          |
-| ------------------------- | --------------------------------------------------------------- |
-| **Click**                 | Execute `coordinator.layoutAll()` — full re-layout of all nodes |
-| **Long-press / dropdown** | Open a layout options panel (direction TB/LR, spacing)          |
-
-An additional **Auto-layout toggle** button is placed next to the layout button:
-
-```
-┌──────────────────────────────────────────────┐
-│  🖱  ✋  │  ▢  📝  T  │  📎  🔗  │  ⊞ ○  │
-│                                    ↑    ↑    │
-│                              Layout  Auto    │
-│                              All    Mode     │
-└──────────────────────────────────────────────┘
-```
-
-- `⊞` Layout All — click to execute full layout
-- `○` Auto-layout toggle — highlighted when active; enables incremental placement for new nodes
-
-### 2. Frame Node Toolbar — Per-frame layout
-
-The frame toolbar currently has only an "Unframe" button. Two controls are added:
-
-| Button                 | Action                                                                    |
-| ---------------------- | ------------------------------------------------------------------------- |
-| **Layout children**    | `coordinator.layoutGroup(frameId)` — re-layout only this frame's children |
-| **Auto-layout toggle** | Frame-level auto-layout switch (independent of the global toggle)         |
-
-```
-Frame header:  [  Label  ]
-Frame toolbar: [ Layout ↻ ] [ Auto ○ ] [ Unframe ⊟ ]
-```
-
-### 3. MultiSelectToolbar — Selection layout
-
-The existing multi-select toolbar (align + spread) gains one additional button at the end:
-
-| Button           | Action                                                                   |
-| ---------------- | ------------------------------------------------------------------------ |
-| **Auto-arrange** | Run layout scoped to the selected nodes only (other nodes stay in place) |
-
-### 4. Keyboard Shortcuts
-
-Registered in `useCanvasShortcuts.ts`:
-
-| Shortcut       | Action                                           |
-| -------------- | ------------------------------------------------ |
-| `Ctrl+Shift+L` | Full layout (same as clicking Layout All button) |
-| `Ctrl+Shift+A` | Toggle auto-layout mode                          |
-
-### 5. State Additions
-
-New fields in `canvasStore`:
-
-| Field               | Type            | Persisted               | Description                                 |
-| ------------------- | --------------- | ----------------------- | ------------------------------------------- |
-| `autoLayoutEnabled` | `boolean`       | Yes (saved with canvas) | Global auto-layout toggle                   |
-| `autoLayoutFrames`  | `Set<string>`   | Yes                     | Set of frame IDs with auto-layout enabled   |
-| `layoutOptions`     | `LayoutOptions` | Yes                     | User-preferred layout direction and spacing |
-
-### 6. Visual Feedback
-
-| Scenario              | Feedback                                                                     |
-| --------------------- | ---------------------------------------------------------------------------- |
-| Full layout executing | Nodes smoothly animate to new positions via CSS transition (~300ms)          |
-| Auto-layout enabled   | Toolbar toggle button highlighted; frame header shows a small indicator icon |
-| Incremental placement | New node slides from insertion point to computed position                    |
+- **CanvasToolbar**: Layout All button + Auto-layout toggle (`Ctrl+Shift+L` / `Ctrl+Shift+A`)
+- **Frame toolbar**: Layout Children + per-frame auto-layout toggle + Unframe
+- **MultiSelectToolbar**: Auto Arrange button for selected nodes
+- **State**: `autoLayoutEnabled` (global toggle) and `autoLayoutFrames` (per-frame set) — both in-memory only, **not persisted**

@@ -7,10 +7,15 @@
  */
 
 import { fcoseSolver } from './solvers/fcoseSolver';
-import { DEFAULT_LAYOUT_OPTIONS } from './types';
 
 import type { LayoutSolver } from './solvers/types';
 import type { LayoutGraph, LayoutOptions, LayoutResult } from './types';
+
+export const DEFAULT_LAYOUT_OPTIONS: LayoutOptions = {
+  nodeSpacing: 40,
+  groupSpacing: 160,
+  groupPadding: 40,
+};
 
 // ── Layout Engine ──────────────────────────────────────────────────────
 

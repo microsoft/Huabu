@@ -42,8 +42,6 @@ export interface LayoutGraph {
 // ── Layout options & result ────────────────────────────────────────────
 
 export interface LayoutOptions {
-  /** Primary layout direction */
-  direction: 'TB' | 'LR';
   /** Minimum gap between sibling nodes */
   nodeSpacing: number;
   /** Gap between top-level groups */
@@ -51,13 +49,6 @@ export interface LayoutOptions {
   /** Internal padding inside groups */
   groupPadding: number;
 }
-
-export const DEFAULT_LAYOUT_OPTIONS: LayoutOptions = {
-  direction: 'TB',
-  nodeSpacing: 40,
-  groupSpacing: 60,
-  groupPadding: 40,
-};
 
 export interface LayoutResult {
   /** New positions keyed by node id. */

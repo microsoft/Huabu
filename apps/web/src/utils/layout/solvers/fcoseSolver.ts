@@ -27,13 +27,6 @@ import type { ElementDefinition } from 'cytoscape';
 cytoscape.use(fcose);
 cytoscape.use(layoutUtilities);
 
-/**
- * Multiplier applied to `nodeSpacing` to derive the gap between
- * disconnected sub-graphs. A value of 4 means component spacing is
- * 4× the normal node-to-node spacing (e.g. 160 px when nodeSpacing = 40).
- */
-const COMPONENT_SPACING_FACTOR = 4;
-
 // ── Helpers ────────────────────────────────────────────────────────────
 
 /**
@@ -206,7 +199,7 @@ export const fcoseSolver: LayoutSolver = {
     // desired componentSpacing.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (cy as any).layoutUtilities({
-      componentSpacing: options.nodeSpacing * COMPONENT_SPACING_FACTOR,
+      componentSpacing: options.groupSpacing,
     });
 
     // ── Run fCoSE layout ───────────────────────────────────────────────
