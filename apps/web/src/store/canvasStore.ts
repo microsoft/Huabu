@@ -34,6 +34,8 @@ import {
   computeFrameFit,
   getAbsolutePosition as getFrameAbsolutePosition,
   wouldUnframe,
+  wouldAutoFrame,
+  getNodeSize,
   type NestableNode,
 } from '../utils/frameHelper';
 import {
@@ -177,11 +179,21 @@ type RFState = {
   onNodeDragStop: OnNodeDrag;
 
   /**
-   * Preview of how a frame would resize if the currently dragged node
-   * were dropped. Computed in `onNodeDrag`, rendered as a dashed overlay,
+   * Previews of how frames would resize based on the current drag/resize.
+   * One entry per affected frame — allows showing both the source frame
+   * shrinking and the target frame expanding simultaneously.
+   * Computed in `onNodeDrag`, rendered as dashed overlays,
    * and cleared in `onNodeDragStop`.
    */
-  frameFitPreview: FrameFitPreview | null;
+  frameFitPreviews: FrameFitPreview[];
+  /**
+   * Update the frame fit preview while a child node is being resized.
+   * Called on every resize tick from NodeWrapper so the dashed overlay
+   * stays in sync with the handle. Respects `autoLayoutEnabled`.
+   */
+  updateResizePreview: (nodeId: string) => void;
+  /** Clear the frame fit previews (e.g. when resize ends). */
+  clearFrameFitPreview: () => void;
 
   addNode: (node: Node, skipAutoLayout?: boolean) => void;
   rfInstance: ReactFlowInstance | null;
@@ -599,21 +611,17 @@ const useCanvasStore = create<RFState>()(
       canvasHistoryManager.takeSnapshot(nodes, edges);
     },
 
-    frameFitPreview: null,
+    frameFitPreviews: [],
 
     onNodeDrag: (_event, draggedNode, draggedNodes) => {
       const { nodes, autoLayoutEnabled } = get();
 
       // Frame auto-resize preview only applies when auto-layout is enabled.
       if (!autoLayoutEnabled) {
-        set({ frameFitPreview: null });
+        set({ frameFitPreviews: [] });
         return;
       }
 
-      const draggedIds = new Set(draggedNodes.map((n) => n.id));
-
-      // Build a "virtual" nodes array with live drag positions so overlap
-      // checks and fit calculations reflect where the user is dragging.
       const liveNodes = nodes.map((n) => {
         if (n.id === draggedNode.id)
           return { ...n, position: draggedNode.position };
@@ -625,6 +633,10 @@ const useCanvasStore = create<RFState>()(
       // Collect frame IDs that need a preview, and which dragged children
       // would leave each frame (so we exclude them from the fit preview).
       const leavingByFrame = new Map<string, Set<string>>();
+      const enteringByFrame = new Map<
+        string,
+        { x: number; y: number; width: number; height: number }[]
+      >();
       const previewFrameIds = new Set<string>();
 
       for (const dn of draggedNodes) {
@@ -647,23 +659,47 @@ const useCanvasStore = create<RFState>()(
           }
         }
 
-        // Check if the node might enter a different frame.
-        for (const candidate of liveNodes) {
-          if (candidate.type !== 'frame') continue;
-          if (candidate.data?.locked) continue;
-          if (draggedIds.has(candidate.id)) continue;
-          if (originalNode.parentId === candidate.id) continue;
-          previewFrameIds.add(candidate.id);
+        // Check if the node would enter a different frame (both root and cross-frame).
+        // Only show a preview when the 50% overlap threshold is already met so the
+        // preview is always consistent with the actual drop behaviour.
+        const targetFrameId = wouldAutoFrame(liveNodes, dn.id, {
+          threshold: 0.5,
+        });
+        if (targetFrameId) {
+          previewFrameIds.add(targetFrameId);
+          // Track the dragged node's absolute rect so the fit preview can
+          // include the incoming node in the frame's bounding-box calculation.
+          const nodeAbsPos = getFrameAbsolutePosition(liveNodes, dn.id);
+          const liveNode = liveNodes.find((n) => n.id === dn.id);
+          if (nodeAbsPos && liveNode) {
+            const size = getNodeSize(liveNode);
+            if (size.width > 0 && size.height > 0) {
+              let entering = enteringByFrame.get(targetFrameId);
+              if (!entering) {
+                entering = [];
+                enteringByFrame.set(targetFrameId, entering);
+              }
+              entering.push({
+                x: nodeAbsPos.x,
+                y: nodeAbsPos.y,
+                width: size.width,
+                height: size.height,
+              });
+            }
+          }
         }
       }
 
-      // Compute the fit preview for the most relevant frame.
-      let bestPreview: FrameFitPreview | null = null;
+      // Compute fit previews for all affected frames and show them all
+      // simultaneously — e.g. source frame shrinking + target frame expanding.
+      const previews: FrameFitPreview[] = [];
 
       for (const frameId of previewFrameIds) {
         const leaving = leavingByFrame.get(frameId);
+        const entering = enteringByFrame.get(frameId);
         const fit = computeFrameFit(liveNodes, frameId, {
           excludeNodeIds: leaving,
+          includeAbsoluteRects: entering,
         });
         if (!fit) continue;
 
@@ -684,25 +720,67 @@ const useCanvasStore = create<RFState>()(
           }
         }
 
-        bestPreview = {
+        previews.push({
           frameId,
           x: absX,
           y: absY,
           width: fit.width,
           height: fit.height,
-        };
-        break;
+        });
       }
 
-      set({ frameFitPreview: bestPreview });
+      set({ frameFitPreviews: previews });
     },
 
     onNodeDragStop: (_event, _node, draggedNodes) => {
-      set({ frameFitPreview: null });
+      set({ frameFitPreviews: [] });
       get().dispatch({
         type: 'NODE_DRAG_STOP',
         draggedNodeIds: draggedNodes.map((n) => n.id),
       });
+    },
+
+    updateResizePreview: (nodeId: string) => {
+      const { nodes, autoLayoutEnabled } = get();
+      if (!autoLayoutEnabled) return;
+      const node = (nodes as NestableNode[]).find((n) => n.id === nodeId);
+      if (!node?.parentId) return;
+      const frame = (nodes as NestableNode[]).find(
+        (n) => n.id === node.parentId,
+      );
+      if (!frame || frame.type !== 'frame') return;
+
+      const fit = computeFrameFit(nodes as NestableNode[], node.parentId);
+      if (!fit) return;
+
+      let absX = fit.position.x;
+      let absY = fit.position.y;
+      if (frame.parentId) {
+        const parentAbsPos = getFrameAbsolutePosition(
+          nodes as NestableNode[],
+          frame.parentId,
+        );
+        if (parentAbsPos) {
+          absX += parentAbsPos.x;
+          absY += parentAbsPos.y;
+        }
+      }
+
+      set({
+        frameFitPreviews: [
+          {
+            frameId: node.parentId,
+            x: absX,
+            y: absY,
+            width: fit.width,
+            height: fit.height,
+          },
+        ],
+      });
+    },
+
+    clearFrameFitPreview: () => {
+      set({ frameFitPreviews: [] });
     },
 
     onNodesChange: (changes) => {

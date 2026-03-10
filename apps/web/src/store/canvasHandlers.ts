@@ -979,7 +979,7 @@ function handleNodeDragStop(
       epsilon: 0,
       margin: 10,
     });
-    result = autoFrameNodeByOverlap(result, id, { threshold: 0.75 });
+    result = autoFrameNodeByOverlap(result, id, { threshold: 0.5 });
   }
 
   if (result === nodes) {

@@ -112,7 +112,7 @@ export const Canvas: React.FC = () => {
   const onNodeDragStart = useCanvasStore((state) => state.onNodeDragStart);
   const onNodeDrag = useCanvasStore((state) => state.onNodeDrag);
   const onNodeDragStop = useCanvasStore((state) => state.onNodeDragStop);
-  const frameFitPreview = useCanvasStore((state) => state.frameFitPreview);
+  const frameFitPreviews = useCanvasStore((state) => state.frameFitPreviews);
   const addNode = useCanvasStore((state) => state.addNode);
   const patchNodeSilent = useCanvasStore((state) => state.patchNodeSilent);
   const setRfInstance = useCanvasStore((state) => state.setRfInstance);
@@ -583,14 +583,15 @@ export const Canvas: React.FC = () => {
         />
       )}
 
-      {/* Frame auto-fit preview overlay — shown while dragging nodes near frames */}
-      {frameFitPreview && (
+      {/* Frame auto-fit preview overlays — shown while dragging nodes near frames */}
+      {frameFitPreviews.map((preview) => (
         <FrameFitPreviewOverlay
-          preview={frameFitPreview}
+          key={preview.frameId}
+          preview={preview}
           rfInstance={rfInstanceRef.current}
           wrapperRef={wrapperRef}
         />
-      )}
+      ))}
     </div>
   );
 };

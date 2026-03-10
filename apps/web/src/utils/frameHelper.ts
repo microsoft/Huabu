@@ -141,7 +141,10 @@ export function normalizeTreeOrder(nodes: NestableNode[]): NestableNode[] {
   return result;
 }
 
-function getNodeSize(node: NestableNode): { width: number; height: number } {
+export function getNodeSize(node: NestableNode): {
+  width: number;
+  height: number;
+} {
   const measured = (
     node as unknown as { measured?: { width?: number; height?: number } }
   ).measured;
@@ -608,6 +611,70 @@ export function wouldUnframe(
 }
 
 /**
+ * Pure predicate: returns the frame ID that the node would auto-enter under the
+ * current `autoFrameNodeByOverlap` rules, or `null` if no frame qualifies.
+ *
+ * Used by the drag-preview system to decide whether to show an entering-frame
+ * preview for root-level nodes that have no current parent.
+ */
+export function wouldAutoFrame(
+  nodes: NestableNode[],
+  nodeId: string,
+  options: AutoFrameByOverlapOptions = {},
+): string | null {
+  const threshold = options.threshold ?? 0.5;
+  if (!Number.isFinite(threshold) || threshold <= 0) return null;
+
+  const byId = indexById(nodes);
+  const node = byId.get(nodeId);
+  if (!node) return null;
+  if (node.type === 'frame') return null;
+
+  const getAbs = createAbsolutePositionGetter(byId);
+  const getRect = createRectGetter(byId, getAbs);
+
+  const nodeRect = getRect(nodeId);
+  if (!nodeRect) return null;
+
+  const nodeArea = nodeRect.width * nodeRect.height;
+  if (nodeArea <= 0) return null;
+
+  let best:
+    | {
+        frameId: string;
+        ratio: number;
+        frameArea: number;
+      }
+    | undefined;
+
+  for (const candidate of nodes) {
+    if (candidate.type !== 'frame') continue;
+    if (candidate.id === nodeId) continue;
+    if (candidate.data?.locked) continue;
+
+    const frameRect = getRect(candidate.id);
+    if (!frameRect) continue;
+
+    const frameArea = frameRect.width * frameRect.height;
+    const intersection = rectIntersectionArea(nodeRect, frameRect);
+    const ratio = intersection / Math.min(nodeArea, frameArea);
+    if (ratio < threshold) continue;
+
+    if (
+      !best ||
+      ratio > best.ratio ||
+      (ratio === best.ratio && frameArea < best.frameArea)
+    ) {
+      best = { frameId: candidate.id, ratio, frameArea };
+    }
+  }
+
+  if (!best) return null;
+  if (node.parentId === best.frameId) return null;
+  return best.frameId;
+}
+
+/**
  * If a node is dropped with >= threshold of its area inside an *unlocked* frame,
  * find the best matching frame and delegate to moveNodeIntoFrame.
  *
@@ -621,7 +688,7 @@ export function autoFrameNodeByOverlap(
   nodeId: string,
   options: AutoFrameByOverlapOptions = {},
 ): NestableNode[] {
-  const threshold = options.threshold ?? 0.75;
+  const threshold = options.threshold ?? 0.5;
   if (!Number.isFinite(threshold) || threshold <= 0) return nodes;
 
   const byId = indexById(nodes);
@@ -654,11 +721,10 @@ export function autoFrameNodeByOverlap(
     const frameRect = getRect(candidate.id);
     if (!frameRect) continue;
 
-    const intersection = rectIntersectionArea(nodeRect, frameRect);
-    const ratio = intersection / nodeArea;
-    if (ratio < threshold) continue;
-
     const frameArea = frameRect.width * frameRect.height;
+    const intersection = rectIntersectionArea(nodeRect, frameRect);
+    const ratio = intersection / Math.min(nodeArea, frameArea);
+    if (ratio < threshold) continue;
 
     if (
       !best ||
@@ -959,6 +1025,17 @@ export type FitFrameOptions = {
   minHeight?: number;
   /** Children to exclude from the bounding-box calculation (e.g. nodes about to leave). */
   excludeNodeIds?: ReadonlySet<string>;
+  /**
+   * Extra rects in absolute canvas coordinates to include in the bounding box.
+   * Used by the drag-preview system to show how the frame would look if a
+   * currently-dragged node (not yet a child) were dropped at its current position.
+   */
+  includeAbsoluteRects?: ReadonlyArray<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }>;
 };
 
 /**
@@ -1003,7 +1080,8 @@ export function computeFrameFit(
   const children = nodes.filter(
     (n) => n.parentId === frameId && (!excludeIds || !excludeIds.has(n.id)),
   );
-  if (children.length === 0) return null;
+  const hasExtraRects = (options.includeAbsoluteRects?.length ?? 0) > 0;
+  if (children.length === 0 && !hasExtraRects) return null;
 
   // Build bounding box from children's relative positions
   let minX = Number.POSITIVE_INFINITY;
@@ -1017,6 +1095,23 @@ export function computeFrameFit(
     minY = Math.min(minY, child.position.y);
     maxX = Math.max(maxX, child.position.x + size.width);
     maxY = Math.max(maxY, child.position.y + size.height);
+  }
+
+  // Include extra absolute rects (nodes about to enter the frame).
+  // Convert from absolute canvas coords to frame-relative coords.
+  if (hasExtraRects) {
+    const getAbs = createAbsolutePositionGetter(byId);
+    const frameAbsPos = getAbs(frameId);
+    if (frameAbsPos) {
+      for (const rect of options.includeAbsoluteRects ?? []) {
+        const relX = rect.x - frameAbsPos.x;
+        const relY = rect.y - frameAbsPos.y;
+        minX = Math.min(minX, relX);
+        minY = Math.min(minY, relY);
+        maxX = Math.max(maxX, relX + rect.width);
+        maxY = Math.max(maxY, relY + rect.height);
+      }
+    }
   }
 
   if (!Number.isFinite(minX) || !Number.isFinite(minY)) return null;

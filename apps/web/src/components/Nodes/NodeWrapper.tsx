@@ -119,6 +119,12 @@ export const NodeWrapper = memo(
 
     const dispatch = useCanvasStore((state) => state.dispatch);
     const takeSnapshot = useCanvasStore((state) => state.takeSnapshot);
+    const updateResizePreview = useCanvasStore(
+      (state) => state.updateResizePreview,
+    );
+    const clearFrameFitPreview = useCanvasStore(
+      (state) => state.clearFrameFitPreview,
+    );
     const ingestion = useCanvasStore((state) => state.ingestionByNodeId[id]);
     const showIngestionOverlay =
       type !== 'frame' && ingestion?.status === 'pending';
@@ -144,9 +150,12 @@ export const NodeWrapper = memo(
               : n,
           ),
         }));
+        // Update the frame fit preview so the dashed overlay reflects the
+        // new child size while the resize handle is being dragged.
+        updateResizePreview(id);
         onResizeProp?.(params.width, params.height);
       },
-      [id, onResizeProp],
+      [id, onResizeProp, updateResizePreview],
     );
 
     const handleResizeStart = useCallback(() => {
@@ -157,6 +166,9 @@ export const NodeWrapper = memo(
 
     const handleResizeEnd = useCallback(
       (_event: unknown, params: { width: number; height: number }) => {
+        // Clear the preview before dispatching so the overlay disappears as
+        // the frame animates to its final fitted size.
+        clearFrameFitPreview();
         // Commit the final size through dispatch so the autosave middleware
         // picks it up. The snapshot was already taken in handleResizeStart.
         dispatch({
@@ -167,7 +179,7 @@ export const NodeWrapper = memo(
         });
         onResizeEnd?.(params.width, params.height);
       },
-      [dispatch, id, onResizeEnd],
+      [clearFrameFitPreview, dispatch, id, onResizeEnd],
     );
 
     return (
