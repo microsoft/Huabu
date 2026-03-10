@@ -92,7 +92,7 @@ const FrameFitPreviewOverlay: React.FC<{
 
   return (
     <div
-      className="border-theme-400 pointer-events-none absolute z-40 rounded border-2 border-dashed transition-all duration-150"
+      className="bg-theme-100/15 shadow-bottom pointer-events-none absolute z-40 transition-all duration-150"
       style={{
         left: screenRect.left,
         top: screenRect.top,
