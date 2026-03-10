@@ -4,13 +4,12 @@ import clsx from 'clsx';
 import {
   MousePointer2,
   Hand,
-  LayoutGrid,
-  ToggleLeft,
-  ToggleRight,
+  LayoutDashboard,
   UploadCloud,
   Link as LinkIcon,
   X,
   Brain,
+  Sparkles,
 } from 'lucide-react';
 import { useCallback, useRef, useState, type ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
@@ -406,19 +405,18 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
 
         <div className="flex items-center gap-2">
           <GhostButton title="Auto Layout All" onClick={() => layoutAll()}>
-            <LayoutGrid size={18} />
+            <LayoutDashboard size={18} />
           </GhostButton>
           <GhostButton
             title={
               autoLayoutEnabled ? 'Disable Auto Layout' : 'Enable Auto Layout'
             }
             onClick={() => toggleAutoLayout()}
-          >
-            {autoLayoutEnabled ? (
-              <ToggleRight size={18} />
-            ) : (
-              <ToggleLeft size={18} />
+            className={clsx(
+              autoLayoutEnabled && 'text-theme-500 bg-background',
             )}
+          >
+            <Sparkles size={18} />
           </GhostButton>
         </div>
 
@@ -443,7 +441,6 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
       </div>
 
       {/* --- Modals --- */}
-
       {/* 1. File Upload Modal */}
       <UploadModal
         title="Upload Local Files"
