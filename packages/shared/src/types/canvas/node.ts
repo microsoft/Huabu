@@ -91,6 +91,12 @@ export interface BaseNodeData {
    * Absent means the label was generated at node creation time (treated like 'auto').
    */
   labelSource?: LabelSource;
+  /**
+   * When true the node is locked: it cannot be moved, resized, or repositioned
+   * by auto-layout. For frame nodes, locking also prevents children from being
+   * added, removed, or repositioned.
+   */
+  locked?: boolean;
 }
 
 /** Note node: rich content that can be ingested into knowledge base */
@@ -163,7 +169,6 @@ export interface ImageNodeData extends BaseNodeData {
 /** Frame node: container for grouping other nodes */
 export interface FrameNodeData extends BaseNodeData {
   type: 'frame';
-  locked?: boolean;
 }
 
 /**

@@ -33,6 +33,22 @@ export function applyLayoutResult(
 
   if (positions.size === 0 && groupSizes.size === 0) return null;
 
+  // Pre-compute locked node IDs and locked frame IDs.
+  // This is the authoritative write-back guard — the solver hints (fixed flags)
+  // may not be perfectly honoured by every solver backend (e.g. Cola).
+  const lockedNodeIds = new Set<string>(
+    nodes
+      .filter((n) =>
+        Boolean((n.data as Record<string, unknown> | undefined)?.locked),
+      )
+      .map((n) => n.id),
+  );
+  const lockedFrameIds = new Set<string>(
+    nodes
+      .filter((n) => n.type === 'frame' && lockedNodeIds.has(n.id))
+      .map((n) => n.id),
+  );
+
   // Take undo snapshot before applying changes
   canvasHistoryManager.takeSnapshot(nodes, edges);
 
@@ -42,16 +58,24 @@ export function applyLayoutResult(
 
     if (!newPos && !newSize) return n;
 
+    // Never reposition a locked node (any type) or children of a locked frame.
+    const isLocked =
+      lockedNodeIds.has(n.id) ||
+      (n.parentId !== undefined &&
+        n.parentId !== null &&
+        lockedFrameIds.has(n.parentId));
+
     let updated = n;
 
-    if (newPos) {
+    if (newPos && !isLocked) {
       updated = {
         ...updated,
         position: { x: newPos.x, y: newPos.y },
       };
     }
 
-    if (newSize) {
+    // Never resize a locked node.
+    if (newSize && !lockedNodeIds.has(n.id)) {
       updated = {
         ...updated,
         style: {

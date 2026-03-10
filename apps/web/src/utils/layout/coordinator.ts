@@ -102,8 +102,33 @@ export function layoutSelected(
   if (selectedIds.length < 2) return null;
 
   const selectedSet = new Set(selectedIds);
+
+  // Locked nodes (any type) and children of locked frames must not be
+  // repositioned even when selected.
+  const lockedNodeIds = new Set<string>(
+    nodes
+      .filter((n) =>
+        Boolean((n.data as Record<string, unknown> | undefined)?.locked),
+      )
+      .map((n) => n.id),
+  );
+  const lockedFrameIds = new Set<string>(
+    nodes
+      .filter((n) => n.type === 'frame' && lockedNodeIds.has(n.id))
+      .map((n) => n.id),
+  );
+
   const fixedNodeIds = new Set(
-    nodes.filter((n) => !selectedSet.has(n.id)).map((n) => n.id),
+    nodes
+      .filter(
+        (n) =>
+          !selectedSet.has(n.id) ||
+          lockedNodeIds.has(n.id) ||
+          (n.parentId !== null &&
+            n.parentId !== undefined &&
+            lockedFrameIds.has(n.parentId)),
+      )
+      .map((n) => n.id),
   );
 
   const graph = buildLayoutGraph(nodes, edges, { fixedNodeIds });

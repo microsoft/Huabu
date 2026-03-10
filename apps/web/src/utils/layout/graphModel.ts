@@ -93,6 +93,21 @@ export function buildLayoutGraph(
   const layoutNodes: LayoutNode[] = [];
   const nodeMap = new Map<string, Node>();
 
+  // Pre-build a set of locked node IDs (any type) and locked frame IDs
+  // (whose children also inherit the fixed flag).
+  const lockedNodeIds = new Set<string>(
+    nodes
+      .filter((n) =>
+        Boolean((n.data as Record<string, unknown> | undefined)?.locked),
+      )
+      .map((n) => n.id),
+  );
+  const lockedFrameIds = new Set<string>(
+    nodes
+      .filter((n) => n.type === 'frame' && lockedNodeIds.has(n.id))
+      .map((n) => n.id),
+  );
+
   for (const n of nodes) {
     if (scopeIds && !scopeIds.has(n.id)) continue;
     // Skip frame nodes when scoped — the frame itself is the container
@@ -100,12 +115,24 @@ export function buildLayoutGraph(
 
     nodeMap.set(n.id, n);
     const { w, h } = getNodeSize(n);
+
+    // A node must not be repositioned if:
+    //   1. It is in the explicit fixedNodeIds set (incremental / selected layout), OR
+    //   2. Its own data.locked = true (any node type), OR
+    //   3. Its direct parent is a locked frame (children inherit the lock).
+    const isPinned =
+      (fixedNodeIds?.has(n.id) ?? false) ||
+      lockedNodeIds.has(n.id) ||
+      (n.parentId !== null &&
+        n.parentId !== undefined &&
+        lockedFrameIds.has(n.parentId));
+
     layoutNodes.push({
       id: n.id,
       width: w,
       height: h,
       position: { ...n.position },
-      fixed: fixedNodeIds?.has(n.id) ?? false,
+      fixed: isPinned,
     });
   }
 
@@ -220,39 +247,6 @@ export function buildLayoutGraph(
     edges: Array.from(edgeMap.values()),
     groups: Array.from(groupMap.values()),
   };
-
-  // Debug: log graph before layout
-  console.groupCollapsed(
-    `[Layout] buildLayoutGraph — ${layoutGraph.nodes.length} nodes, ${layoutGraph.edges.length} edges, ${layoutGraph.groups.length} groups`,
-  );
-  console.log('Nodes:');
-  for (const n of layoutGraph.nodes) {
-    const flags = [n.fixed ? 'fixed' : 'free'];
-    const reactFlowNode = nodeMap.get(n.id);
-    if (reactFlowNode?.parentId) flags.push(`parent=${reactFlowNode.parentId}`);
-    console.log(
-      `  ${n.id}  ${n.width}×${n.height}  pos=(${Math.round(n.position.x)},${Math.round(n.position.y)})  [${flags.join(', ')}]`,
-    );
-  }
-  if (layoutGraph.edges.length > 0) {
-    console.log('Edges:');
-    for (const e of layoutGraph.edges) {
-      const label =
-        e.weight === 1.0
-          ? 'user-edge'
-          : e.weight === 0.6
-            ? 'relatedNodeIds'
-            : e.weight === 0.4
-              ? 'origin-sourceId'
-              : e.weight === 0.3
-                ? 'same-thread'
-                : `w=${e.weight}`;
-      console.log(`  ${e.source} ↔ ${e.target}  (${label})`);
-    }
-  } else {
-    console.log('  (no edges)');
-  }
-  console.groupEnd();
 
   return layoutGraph;
 }
