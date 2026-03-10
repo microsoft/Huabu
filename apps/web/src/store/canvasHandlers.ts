@@ -247,9 +247,11 @@ function handleAddNode(
   );
 
   // Check if auto-layout should position this new node
+  // Skip auto-layout when the node was explicitly placed (e.g. from toolbar)
   const shouldAutoPlace =
-    ctx.autoLayoutEnabled ||
-    (newNode.parentId && ctx.autoLayoutFrames.has(newNode.parentId));
+    !cmd.skipAutoLayout &&
+    (ctx.autoLayoutEnabled ||
+      (newNode.parentId && ctx.autoLayoutFrames.has(newNode.parentId)));
 
   let finalNodes = updatedNodes;
   if (shouldAutoPlace) {

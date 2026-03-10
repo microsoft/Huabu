@@ -122,7 +122,7 @@ export const Canvas: React.FC = () => {
         },
       });
 
-      addNode(newNode);
+      addNode(newNode, true);
       setPendingNodeType(null);
     },
     [pendingNodeType, addNode, setPendingNodeType],

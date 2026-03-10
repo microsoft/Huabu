@@ -48,7 +48,7 @@ import {
  *  - state mutations
  */
 export type CanvasCommand =
-  | { type: 'ADD_NODE'; node: Node }
+  | { type: 'ADD_NODE'; node: Node; skipAutoLayout?: boolean }
   | { type: 'DELETE_NODES'; nodeIds: string[] }
   | { type: 'CONNECT'; connection: Connection }
   | { type: 'DISCONNECT_EDGES'; edgeIds: string[] }
@@ -150,7 +150,7 @@ type RFState = {
   onConnect: OnConnect;
   onNodeDragStart: OnNodeDrag;
   onNodeDragStop: OnNodeDrag;
-  addNode: (node: Node) => void;
+  addNode: (node: Node, skipAutoLayout?: boolean) => void;
   rfInstance: ReactFlowInstance | null;
   setRfInstance: (instance: ReactFlowInstance | null) => void;
 
@@ -628,8 +628,8 @@ const useCanvasStore = create<RFState>()(
     rfInstance: null,
     setRfInstance: (instance) => set({ rfInstance: instance }),
 
-    addNode: (node) => {
-      get().dispatch({ type: 'ADD_NODE', node });
+    addNode: (node, skipAutoLayout) => {
+      get().dispatch({ type: 'ADD_NODE', node, skipAutoLayout });
     },
 
     updateNodeData: (nodeId, patch) => {
