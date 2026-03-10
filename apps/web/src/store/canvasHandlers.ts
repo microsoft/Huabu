@@ -65,8 +65,6 @@ export type CanvasHandlerContext = {
   clipboard: Node[];
   /** Whether global auto-layout is enabled. */
   autoLayoutEnabled: boolean;
-  /** Set of frame IDs with per-frame auto-layout enabled. */
-  autoLayoutFrames: Set<string>;
   /**
    * Call `set` exactly once per handler to apply state mutations.
    * Accepts either a partial object or an updater function (for reads of
@@ -248,10 +246,13 @@ function handleAddNode(
 
   // Check if auto-layout should position this new node
   // Skip auto-layout when the node was explicitly placed (e.g. from toolbar)
+  // Auto-layout applies when globally enabled and the parent frame (if any) is not locked
+  const parentFrame = newNode.parentId
+    ? nodes.find((n) => n.id === newNode.parentId)
+    : undefined;
+  const parentLocked = parentFrame?.data?.locked === true;
   const shouldAutoPlace =
-    !cmd.skipAutoLayout &&
-    (ctx.autoLayoutEnabled ||
-      (newNode.parentId && ctx.autoLayoutFrames.has(newNode.parentId)));
+    !cmd.skipAutoLayout && ctx.autoLayoutEnabled && !parentLocked;
 
   let finalNodes = updatedNodes;
   if (shouldAutoPlace) {

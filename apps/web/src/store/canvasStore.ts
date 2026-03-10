@@ -197,9 +197,6 @@ type RFState = {
   /** Auto-layout: whether new nodes are automatically placed. */
   autoLayoutEnabled: boolean;
   toggleAutoLayout: () => void;
-  /** Set of frame IDs with auto-layout enabled. */
-  autoLayoutFrames: Set<string>;
-  toggleFrameAutoLayout: (frameId: string) => void;
   /** Full re-layout of all nodes (user-triggered). */
   layoutAll: () => void;
   /** Re-layout children of a specific frame. */
@@ -381,7 +378,6 @@ const useCanvasStore = create<RFState>()(
         actionHistory,
         clipboard,
         autoLayoutEnabled,
-        autoLayoutFrames,
       } = get();
       handleCommand(cmd, {
         nodes,
@@ -390,7 +386,6 @@ const useCanvasStore = create<RFState>()(
         actionHistory,
         clipboard,
         autoLayoutEnabled,
-        autoLayoutFrames,
         set,
         triggerIngestion,
       });
@@ -704,17 +699,6 @@ const useCanvasStore = create<RFState>()(
     autoLayoutEnabled: false,
     toggleAutoLayout: () => {
       set({ autoLayoutEnabled: !get().autoLayoutEnabled });
-    },
-    autoLayoutFrames: new Set<string>(),
-    toggleFrameAutoLayout: (frameId) => {
-      const { autoLayoutFrames } = get();
-      const next = new Set(autoLayoutFrames);
-      if (next.has(frameId)) {
-        next.delete(frameId);
-      } else {
-        next.add(frameId);
-      }
-      set({ autoLayoutFrames: next });
     },
     layoutAll: () => {
       get().dispatch({ type: 'LAYOUT_ALL' });

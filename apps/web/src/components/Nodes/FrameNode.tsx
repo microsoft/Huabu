@@ -1,6 +1,6 @@
 import { type Node, type NodeProps } from '@xyflow/react';
 import clsx from 'clsx';
-import { LayoutGrid, ToggleLeft, ToggleRight, Ungroup } from 'lucide-react';
+import { LayoutGrid, Ungroup } from 'lucide-react';
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 
 import { NodeWrapper } from './NodeWrapper.tsx';
@@ -17,11 +17,6 @@ export const FrameNode = memo(
     const unframe = useCanvasStore((state) => state.unframe);
     const updateNodeData = useCanvasStore((state) => state.updateNodeData);
     const layoutGroup = useCanvasStore((state) => state.layoutGroup);
-    const autoLayoutFrames = useCanvasStore((state) => state.autoLayoutFrames);
-    const toggleFrameAutoLayout = useCanvasStore(
-      (state) => state.toggleFrameAutoLayout,
-    );
-    const isAutoLayout = autoLayoutFrames.has(id);
 
     const FrameToolbar = (
       <div className="text-muted-foreground flex items-center gap-1">
@@ -34,16 +29,6 @@ export const FrameNode = memo(
           }}
         >
           <LayoutGrid size={14} />
-        </GhostButton>
-        <GhostButton
-          title={isAutoLayout ? 'Disable Auto Layout' : 'Enable Auto Layout'}
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            toggleFrameAutoLayout(id);
-          }}
-        >
-          {isAutoLayout ? <ToggleRight size={14} /> : <ToggleLeft size={14} />}
         </GhostButton>
         <GhostButton
           title="Unframe"
