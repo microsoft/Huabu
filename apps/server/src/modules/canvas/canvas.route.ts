@@ -1,6 +1,8 @@
+import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { createId } from '@sediment/shared';
 import { z } from 'zod';
 
 import { getCanvasDb } from './canvas.db.js';
@@ -476,6 +478,30 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         }
       }
 
+      // Convert PDF cover URLs to inline data URLs for cross-machine portability
+      for (const node of nodes) {
+        if (node.type !== 'pdf') continue;
+        const coverUrl = node.data?.coverUrl as string | undefined;
+        if (!coverUrl || coverUrl.startsWith('data:')) continue;
+
+        const coverFilename = path.basename(coverUrl);
+        const coverPath = path.join(artifactsDir, coverFilename);
+        try {
+          const coverData = await readFile(coverPath);
+          const coverMime = getMimeType(coverFilename);
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+          node.data!.coverUrl = `data:${coverMime};base64,${coverData.toString('base64')}`;
+        } catch {
+          // Cover image missing on disk – remove broken reference
+          request.log.warn(
+            { filename: coverFilename },
+            'Cover image not found during export, removing coverUrl',
+          );
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+          delete node.data!.coverUrl;
+        }
+      }
+
       // Build the export bundle.  We return the raw stateJson nodes (with
       // contentSnapshot) so the import side can restore content even if the
       // knowledge DB is rebuilt from sources.
@@ -555,6 +581,76 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     const bundle = parsed.data;
     const targetCanvasId = bundle.manifest.canvasId;
 
+    // 0. Normalise PDF cover images so they work on the importing machine.
+    //    - data: URLs (new format) → write to disk, set full server URL
+    //    - http(s) URLs (old format) → verify the file will exist, rewrite
+    //      to current server origin, or remove if unavailable
+    const artifactsDir = getArtifactsDir();
+    const serverOrigin = `${request.protocol}://${request.headers.host as string}`;
+    const bundleArtifactFilenames = new Set(
+      bundle.artifacts.map((a) => path.basename(a.filename)),
+    );
+
+    for (const raw of bundle.canvas.nodes) {
+      const node = raw as NodeLike;
+      if (node.type !== 'pdf') continue;
+      const coverUrl = node.data?.coverUrl as string | undefined;
+      if (!coverUrl) continue;
+
+      if (coverUrl.startsWith('data:')) {
+        // New format: embedded data URL → write to disk + set full URL
+        const match = coverUrl.match(/^data:([^;]+);base64,(.+)$/);
+        if (!match) continue;
+
+        const [, mimeType, base64Data] = match;
+        const extMap: Record<string, string> = {
+          'image/png': '.png',
+          'image/jpeg': '.jpg',
+          'image/gif': '.gif',
+          'image/webp': '.webp',
+        };
+        const ext = extMap[mimeType] ?? '.png';
+        const artifactId = createId('artifact');
+        const filename = `${artifactId}${ext}`;
+        const destPath = path.join(artifactsDir, filename);
+
+        try {
+          await writeFile(
+            destPath,
+            new Uint8Array(Buffer.from(base64Data, 'base64')),
+          );
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+          node.data!.coverUrl = `${serverOrigin}/api/artifact/${filename}`;
+        } catch (err) {
+          request.log.error(
+            { filename, err },
+            'Failed to write cover image during import',
+          );
+        }
+      } else {
+        // Old format: server URL → check if the cover artifact is available
+        const coverFilename = path.basename(coverUrl);
+        const willExist =
+          bundleArtifactFilenames.has(coverFilename) ||
+          existsSync(path.join(artifactsDir, coverFilename));
+
+        if (willExist) {
+          // Rewrite to the current server origin so it resolves correctly
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+          node.data!.coverUrl = `${serverOrigin}/api/artifact/${coverFilename}`;
+        } else {
+          // Cover image not in bundle and not on disk → remove to avoid
+          // a broken image; the node will fall back to inline PDF preview
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+          delete node.data!.coverUrl;
+          request.log.warn(
+            { coverFilename },
+            'Cover image not available during import, removed coverUrl',
+          );
+        }
+      }
+    }
+
     // 1. Write canvas state atomically (canvas DB transaction).
     //    This happens first so that a partial failure in source/artifact
     //    writes still leaves the canvas itself in a valid state, and the
@@ -622,7 +718,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
     // 3. Write artifacts to disk (best-effort; filenames are sanitised to
     //    prevent path traversal).
-    const artifactsDir = getArtifactsDir();
     let importedArtifacts = 0;
     for (const artifact of bundle.artifacts) {
       // P0 fix: strip any directory components from the filename
