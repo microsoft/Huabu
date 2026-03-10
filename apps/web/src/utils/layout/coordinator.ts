@@ -13,7 +13,9 @@ import { buildLayoutGraph } from './graphModel';
 import type { LayoutOptions } from './types';
 import type { Node, Edge } from '@xyflow/react';
 
-// Singleton engine instance — solver can be swapped here.
+// Singleton engine instance.
+// layout() uses Cola (stress majorization — great for full re-layout).
+// place()  uses fCoSE (hard fixedNodeConstraint — ideal for incremental placement).
 const engine = new LayoutEngine();
 
 // ── Public API ─────────────────────────────────────────────────────────
@@ -50,6 +52,11 @@ export function layoutGroup(
 /**
  * Incremental placement of a single new node.
  * All existing nodes stay fixed — only the target node is positioned.
+ *
+ * Uses fCoSE (via engine.place) which pins fixed nodes with hard
+ * constraints, avoiding the stress-matrix distance conflicts that
+ * plague stress-majorization solvers when most nodes are locked.
+ *
  * Returns new nodes array or null if no changes.
  */
 export function placeNode(
@@ -67,7 +74,17 @@ export function placeNode(
   const scopeFrameId = targetNode?.parentId ?? undefined;
 
   const graph = buildLayoutGraph(nodes, edges, { fixedNodeIds, scopeFrameId });
-  const result = engine.place(graph, options);
+
+  // Use larger nodeSpacing for incremental placement so fCoSE keeps
+  // more breathing room around the new node and avoids overlaps with
+  // existing fixed nodes.  The default (20) is too tight when the free
+  // node must squeeze into an occupied area.
+  const placeOptions: Partial<LayoutOptions> = {
+    nodeSpacing: 40,
+    ...options,
+  };
+
+  const result = engine.place(graph, placeOptions);
   return applyLayoutResult(nodes, edges, result);
 }
 
