@@ -89,11 +89,12 @@ The solver is the minimal replaceable unit — swap to dagre, ELK, or d3-force b
 
 #### Layout options
 
-| Option         | Default | Description                                                                  |
-| -------------- | ------- | ---------------------------------------------------------------------------- |
-| `nodeSpacing`  | `40`    | Minimum gap between sibling nodes (`nodeSeparation` in fCoSE)                |
-| `groupSpacing` | `60`    | Gap between disconnected sub-graphs (`componentSpacing` in layout-utilities) |
-| `groupPadding` | `40`    | Internal padding inside compound nodes                                       |
+| Option             | Default | Description                                                                  |
+| ------------------ | ------- | ---------------------------------------------------------------------------- |
+| `nodeSpacing`      | `20`    | Minimum gap between sibling nodes (`nodeSeparation` in fCoSE)                |
+| `componentSpacing` | `400`   | Gap between disconnected sub-graphs (`componentSpacing` in layout-utilities) |
+| `framePadding`     | `5`     | Internal padding inside frame (compound) nodes                               |
+| `nodePadding`      | `5`     | Extra padding inflated around each node to prevent tight packing             |
 
 Derived values used by fCoSE:
 

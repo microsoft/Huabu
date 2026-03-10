@@ -29,7 +29,8 @@ export interface LayoutGroup {
   id: string;
   /** Direct child node/group ids */
   children: string[];
-  padding: number;
+  /** Per-group padding override. Falls back to `LayoutOptions.framePadding` when omitted. */
+  padding?: number;
 }
 
 /** The complete graph handed to the layout engine. */
@@ -42,12 +43,14 @@ export interface LayoutGraph {
 // ── Layout options & result ────────────────────────────────────────────
 
 export interface LayoutOptions {
-  /** Minimum gap between sibling nodes */
+  /** Gap between sibling nodes */
   nodeSpacing: number;
-  /** Gap between top-level groups */
-  groupSpacing: number;
-  /** Internal padding inside groups */
-  groupPadding: number;
+  /** Gap between disconnected sub-graphs (connected components) */
+  componentSpacing: number;
+  /** Internal padding inside frame (compound) nodes */
+  framePadding: number;
+  /** Extra padding inflated around each node during layout to prevent tight packing */
+  nodePadding: number;
 }
 
 export interface LayoutResult {

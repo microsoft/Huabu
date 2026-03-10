@@ -40,7 +40,7 @@ import type {
  *
  * The minimum centre-to-centre distance for non-overlap is roughly
  * `(w1+w2)/2` horizontally or `(h1+h2)/2` vertically.  We take the
- * average of these two to get a direction-agnostic baseline, then add
+ * minimum of these two to get a direction-agnostic baseline, then add
  * the desired spacing gap.  Edge weight scales the gap: high-weight
  * edges place nodes at the minimum non-overlap distance, while
  * low-weight edges add additional separation.
@@ -55,13 +55,10 @@ function computeAdaptiveLinkLength(
   const ah = a.height ?? 1;
   const bw = b.width ?? 1;
   const bh = b.height ?? 1;
-
-  // Average half-size sum across both axes
-  const minDist = ((aw + bw) / 2 + (ah + bh) / 2) / 2;
+  const minDist = Math.min((aw + bw) / 2, (ah + bh) / 2);
 
   // Gap scales inversely with weight: weight=1 → 1× spacing, weight=0 → 2× spacing
   const gap = nodeSpacing * (1 + (1 - weight));
-
   return minDist + gap;
 }
 
@@ -228,7 +225,6 @@ export const colaSolver: LayoutSolver = {
     }
 
     // ── Build lookup structures ────────────────────────────────────────
-
     const childToParent = new Map<string, string>();
     const groupIds = new Set<string>();
     for (const g of graph.groups) {
@@ -239,7 +235,6 @@ export const colaSolver: LayoutSolver = {
     }
 
     // ── Resolve absolute positions ─────────────────────────────────────
-
     const absPositions = resolveAbsolutePositions(graph.nodes, childToParent);
 
     // ── Build index mapping ────────────────────────────────────────────
@@ -252,15 +247,19 @@ export const colaSolver: LayoutSolver = {
     leafNodes.forEach((n, i) => idToIndex.set(n.id, i));
 
     // ── Build cola nodes ───────────────────────────────────────────────
-
+    const pad2 = options.nodePadding * 2;
     const colaNodes: ColaInputNode[] = leafNodes.map((node) => {
       const absPos = absPositions.get(node.id) ?? node.position;
       // WebCola uses centre-based coordinates internally.
+      // Inflate width/height by nodePadding so the non-overlap solver
+      // keeps extra breathing room between nodes.  The output conversion
+      // uses the original LayoutNode dimensions, so visual positions
+      // stay correct.
       return {
         x: absPos.x + node.width / 2,
         y: absPos.y + node.height / 2,
-        width: Math.max(node.width, 1),
-        height: Math.max(node.height, 1),
+        width: Math.max(node.width + pad2, 1),
+        height: Math.max(node.height + pad2, 1),
         // fixed = 1 pins the node at its current position during layout.
         fixed: node.fixed ? 1 : 0,
       };
@@ -346,7 +345,6 @@ export const colaSolver: LayoutSolver = {
     }
 
     // ── Build cola groups ──────────────────────────────────────────────
-
     const colaGroups: ColaGroup[] = [];
     const groupIdToGroupIndex = new Map<string, number>();
 
@@ -370,7 +368,7 @@ export const colaSolver: LayoutSolver = {
         // accepts number[].
         colaGroups.push({
           leaves: leaves as unknown as ColaNode[],
-          padding: g.padding ?? options.groupPadding,
+          padding: g.padding ?? options.framePadding,
         });
       }
     }
@@ -503,7 +501,7 @@ export const colaSolver: LayoutSolver = {
       }
 
       layout.linkDistance(((link: ColaLink<ColaNode | number>) => {
-        return link.length ?? options.nodeSpacing * 2;
+        return link.length;
       }) as (t: ColaLink<ColaNode | number>) => number);
 
       layout.start(50, 30, 30, 0, false, false);
@@ -590,7 +588,7 @@ export const colaSolver: LayoutSolver = {
         };
       });
 
-      const offsets = packComponents(componentBoxes, options.groupSpacing);
+      const offsets = packComponents(componentBoxes, options.componentSpacing);
 
       // Apply offsets to all nodes in each component.
       for (let ci = 0; ci < components.length; ci++) {

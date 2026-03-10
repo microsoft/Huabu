@@ -110,6 +110,7 @@ export const fcoseSolver: LayoutSolver = {
     // ── Build cytoscape elements ───────────────────────────────────────
 
     const elements: ElementDefinition[] = [];
+    const pad2 = options.nodePadding * 2;
 
     for (const node of graph.nodes) {
       const isCompound = groupIds.has(node.id);
@@ -123,10 +124,11 @@ export const fcoseSolver: LayoutSolver = {
           ...(parentId ? { parent: parentId } : {}),
           // Only leaf nodes get explicit dimensions;
           // compound nodes derive size from their children.
+          // Inflate by nodePadding so the solver keeps breathing room.
           ...(!isCompound
             ? {
-                width: Math.max(node.width, 1),
-                height: Math.max(node.height, 1),
+                width: Math.max(node.width + pad2, 1),
+                height: Math.max(node.height + pad2, 1),
               }
             : {}),
         },
@@ -188,7 +190,7 @@ export const fcoseSolver: LayoutSolver = {
         {
           selector: ':parent',
           style: {
-            padding: options.groupPadding,
+            padding: options.framePadding,
           },
         },
       ] as any,
@@ -199,7 +201,7 @@ export const fcoseSolver: LayoutSolver = {
     // desired componentSpacing.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (cy as any).layoutUtilities({
-      componentSpacing: options.groupSpacing,
+      componentSpacing: options.componentSpacing,
     });
 
     // ── Run fCoSE layout ───────────────────────────────────────────────

@@ -250,7 +250,7 @@ describe('buildLayoutGraph — Group Construction', () => {
       expect.arrayContaining(['child-a', 'child-b']),
     );
     expect(group.children).toHaveLength(2);
-    expect(group.padding).toBe(40);
+    expect(group.padding).toBeUndefined();
   });
 
   it('does not create a group for a frame with no children', () => {

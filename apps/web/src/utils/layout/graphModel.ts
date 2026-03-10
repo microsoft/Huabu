@@ -211,7 +211,6 @@ export function buildLayoutGraph(
       groupMap.set(n.id, {
         id: n.id,
         children,
-        padding: 40,
       });
     }
   }

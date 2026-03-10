@@ -12,9 +12,10 @@ import type { LayoutSolver } from './solvers/types';
 import type { LayoutGraph, LayoutOptions, LayoutResult } from './types';
 
 export const DEFAULT_LAYOUT_OPTIONS: LayoutOptions = {
-  nodeSpacing: 10,
-  groupSpacing: 160,
-  groupPadding: 40,
+  nodeSpacing: 20,
+  componentSpacing: 400,
+  framePadding: 5,
+  nodePadding: 5,
 };
 
 // ── Layout Engine ──────────────────────────────────────────────────────
