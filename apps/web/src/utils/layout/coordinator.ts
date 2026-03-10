@@ -88,53 +88,5 @@ export function placeNode(
   return applyLayoutResult(nodes, edges, result);
 }
 
-/**
- * Auto-arrange only the selected nodes.
- * Non-selected nodes remain in place.
- * Returns new nodes array or null if no changes.
- */
-export function layoutSelected(
-  nodes: Node[],
-  edges: Edge[],
-  selectedIds: string[],
-  options?: Partial<LayoutOptions>,
-): Node[] | null {
-  if (selectedIds.length < 2) return null;
-
-  const selectedSet = new Set(selectedIds);
-
-  // Locked nodes (any type) and children of locked frames must not be
-  // repositioned even when selected.
-  const lockedNodeIds = new Set<string>(
-    nodes
-      .filter((n) =>
-        Boolean((n.data as Record<string, unknown> | undefined)?.locked),
-      )
-      .map((n) => n.id),
-  );
-  const lockedFrameIds = new Set<string>(
-    nodes
-      .filter((n) => n.type === 'frame' && lockedNodeIds.has(n.id))
-      .map((n) => n.id),
-  );
-
-  const fixedNodeIds = new Set(
-    nodes
-      .filter(
-        (n) =>
-          !selectedSet.has(n.id) ||
-          lockedNodeIds.has(n.id) ||
-          (n.parentId !== null &&
-            n.parentId !== undefined &&
-            lockedFrameIds.has(n.parentId)),
-      )
-      .map((n) => n.id),
-  );
-
-  const graph = buildLayoutGraph(nodes, edges, { fixedNodeIds });
-  const result = engine.layout(graph, options);
-  return applyLayoutResult(nodes, edges, result);
-}
-
 export { DEFAULT_LAYOUT_OPTIONS };
 export type { LayoutOptions };

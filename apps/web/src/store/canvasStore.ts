@@ -102,7 +102,6 @@ export type CanvasCommand =
   | { type: 'SPREAD_NODES' }
   | { type: 'LAYOUT_ALL' }
   | { type: 'LAYOUT_GROUP'; frameId: string }
-  | { type: 'LAYOUT_SELECTED' }
   | { type: 'NODE_DRAG_STOP'; draggedNodeIds: string[] }
   | {
       type: 'UPDATE_NODE_DATA';
@@ -246,8 +245,6 @@ type RFState = {
   layoutAll: () => void;
   /** Re-layout children of a specific frame. */
   layoutGroup: (frameId: string) => void;
-  /** Auto-arrange selected nodes. */
-  layoutSelected: () => void;
 
   moveNodeIntoFrame: (nodeId: string, frameId: string) => void;
   moveNodeOutOfFrame: (nodeId: string) => void;
@@ -931,21 +928,6 @@ const useCanvasStore = create<RFState>()(
         }
       });
     },
-    layoutSelected: () => {
-      get().dispatch({ type: 'LAYOUT_SELECTED' });
-      // Fit view to the selected nodes after layout
-      requestAnimationFrame(() => {
-        const selected = get().nodes.filter((n) => n.selected);
-        if (selected.length > 0) {
-          get().rfInstance?.fitView({
-            nodes: selected.map((n) => ({ id: n.id })),
-            duration: 300,
-            padding: 0.15,
-          });
-        }
-      });
-    },
-
     moveNodeIntoFrame: (nodeId, frameId) => {
       get().dispatch({ type: 'MOVE_INTO_FRAME', nodeId, frameId });
     },

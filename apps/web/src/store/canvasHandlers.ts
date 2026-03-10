@@ -42,7 +42,6 @@ import {
 import {
   layoutAll as layoutAllNodes,
   layoutGroup as layoutGroupNodes,
-  layoutSelected as layoutSelectedNodes,
   placeNode as placeNewNode,
 } from '../utils/layout';
 import {
@@ -946,18 +945,6 @@ function handleLayoutGroup(
   set({ nodes: result });
 }
 
-function handleLayoutSelected(
-  _cmd: Extract<CanvasCommand, { type: 'LAYOUT_SELECTED' }>,
-  ctx: CanvasHandlerContext,
-): void {
-  const { nodes, edges, set } = ctx;
-  const selectedIds = nodes.filter((n) => n.selected).map((n) => n.id);
-  if (selectedIds.length < 2) return;
-  const result = layoutSelectedNodes(nodes, edges, selectedIds);
-  if (!result) return;
-  set({ nodes: result });
-}
-
 function handleNodeDragStop(
   cmd: Extract<CanvasCommand, { type: 'NODE_DRAG_STOP' }>,
   ctx: CanvasHandlerContext,
@@ -1130,8 +1117,6 @@ export function handleCommand(
       return handleLayoutAll(cmd, ctx);
     case 'LAYOUT_GROUP':
       return handleLayoutGroup(cmd, ctx);
-    case 'LAYOUT_SELECTED':
-      return handleLayoutSelected(cmd, ctx);
     case 'NODE_DRAG_STOP':
       return handleNodeDragStop(cmd, ctx);
   }

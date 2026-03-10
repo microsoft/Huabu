@@ -15,12 +15,12 @@ A complementary **server-side placement service** (`apps/server/src/modules/canv
 │  handleAddNode() ────→ placeNode()    (auto-layout)      │
 │  toolbar / shortcut ─→ layoutAll()    (manual)           │
 │  frame toolbar ──────→ layoutGroup()  (scoped)           │
-│  multi-select ───────→ layoutSelected()                  │
+│                                                          │
 │                              │                           │
 │              ┌───────────────▼──────────────┐            │
 │              │      Coordinator Functions   │            │
 │              │   layoutAll / layoutGroup /   │            │
-│              │   placeNode / layoutSelected  │            │
+│              │   placeNode                  │            │
 │              └───┬─────────────────┬────────┘            │
 │                  │                 │                      │
 │         ┌────────▼───┐   ┌────────▼──────────┐          │
@@ -105,12 +105,11 @@ Derived values used by fCoSE:
 
 Standalone stateless functions that orchestrate the pipeline: `buildLayoutGraph` → `LayoutEngine` → `applyLayoutResult`. Four entry points:
 
-| Function         | Scope                      | Fixed nodes       |
-| ---------------- | -------------------------- | ----------------- |
-| `layoutAll`      | All nodes                  | None              |
-| `layoutGroup`    | Single frame's descendants | None              |
-| `placeNode`      | Single new node            | All except target |
-| `layoutSelected` | Selected nodes only        | All non-selected  |
+| Function      | Scope                      | Fixed nodes       |
+| ------------- | -------------------------- | ----------------- |
+| `layoutAll`   | All nodes                  | None              |
+| `layoutGroup` | Single frame's descendants | None              |
+| `placeNode`   | Single new node            | All except target |
 
 All return a new `Node[]` or `null` if nothing changed.
 
@@ -131,5 +130,4 @@ All return a new `Node[]` or `null` if nothing changed.
 
 - **CanvasToolbar**: Layout All button + Auto-layout toggle (`Ctrl+Shift+L` / `Ctrl+Shift+A`)
 - **Frame toolbar**: Layout Children + per-frame auto-layout toggle + Unframe
-- **MultiSelectToolbar**: Auto Arrange button for selected nodes
 - **State**: `autoLayoutEnabled` (global toggle) and `autoLayoutFrames` (per-frame set) — both in-memory only, **not persisted**
