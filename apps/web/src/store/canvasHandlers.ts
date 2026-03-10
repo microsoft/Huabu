@@ -31,6 +31,8 @@ import {
   normalizeTreeOrder,
   autoUnframeNodeByNonOverlap,
   autoFrameNodeByOverlap,
+  fitFrameToChildren,
+  fitFrames,
   type NestableNode,
 } from '../utils/frameHelper';
 import {
@@ -260,6 +262,14 @@ function handleAddNode(
     if (placed) finalNodes = placed;
   }
 
+  // Auto-resize the parent frame to accommodate the new node.
+  if (newNode.parentId && ctx.autoLayoutEnabled) {
+    finalNodes = fitFrameToChildren(
+      finalNodes as NestableNode[],
+      newNode.parentId,
+    );
+  }
+
   set({
     nodes: finalNodes,
     actionHistory: pushAction(actionHistory, {
@@ -294,6 +304,15 @@ function handleDeleteNodes(
   const toDelete = nodes.filter((n) => removedIds.has(n.id));
   if (toDelete.length === 0) return;
 
+  // Collect parent frame IDs of deleted nodes so we can shrink them after.
+  const affectedFrameIds = new Set<string>();
+  for (const n of toDelete) {
+    if (n.parentId && !removedIds.has(n.parentId)) {
+      const parent = nodes.find((p) => p.id === n.parentId);
+      if (parent?.type === 'frame') affectedFrameIds.add(n.parentId);
+    }
+  }
+
   canvasHistoryManager.takeSnapshot(nodes, edges);
 
   for (const node of toDelete) {
@@ -311,8 +330,16 @@ function handleDeleteNodes(
   set((state) => {
     const nextIngestionByNodeId = { ...state.ingestionByNodeId };
     for (const id of removedIds) delete nextIngestionByNodeId[id];
+
+    let nextNodes = state.nodes.filter((n) => !removedIds.has(n.id));
+
+    // Shrink parent frames that lost children.
+    if (affectedFrameIds.size > 0 && ctx.autoLayoutEnabled) {
+      nextNodes = fitFrames(nextNodes as NestableNode[], affectedFrameIds);
+    }
+
     return {
-      nodes: state.nodes.filter((n) => !removedIds.has(n.id)),
+      nodes: nextNodes,
       edges: state.edges.filter(
         (e) => !removedIds.has(e.source) && !removedIds.has(e.target),
       ),
@@ -396,11 +423,21 @@ function handleMoveIntoFrame(
 
   const node = nodes.find((n) => n.id === cmd.nodeId);
   const frame = nodes.find((n) => n.id === cmd.frameId);
-  const result = moveNodeIntoFrame(
+  let result = moveNodeIntoFrame(
     nodes as NestableNode[],
     cmd.nodeId,
     cmd.frameId,
   );
+
+  // Auto-resize the target frame to fit the newly added child.
+  if (ctx.autoLayoutEnabled) {
+    result = fitFrameToChildren(result, cmd.frameId);
+
+    // If the node was previously in a different frame, shrink that frame too.
+    if (node?.parentId && node.parentId !== cmd.frameId) {
+      result = fitFrameToChildren(result, node.parentId);
+    }
+  }
 
   let nextActions = actionHistory;
   if (node && frame) {
@@ -425,7 +462,12 @@ function handleMoveOutOfFrame(
   const frame = node?.parentId
     ? nodes.find((n) => n.id === node.parentId)
     : undefined;
-  const result = moveNodeOutOfFrame(nodes as NestableNode[], cmd.nodeId);
+  let result = moveNodeOutOfFrame(nodes as NestableNode[], cmd.nodeId);
+
+  // Shrink the source frame after losing a child.
+  if (frame && ctx.autoLayoutEnabled) {
+    result = fitFrameToChildren(result, frame.id);
+  }
 
   let nextActions = actionHistory;
   if (node && frame) {
@@ -592,12 +634,25 @@ function handleResizeNode(
       height: cmd.height,
     });
   }
+  let updatedNodes = nodes.map((n) =>
+    n.id === cmd.nodeId
+      ? { ...n, style: { ...n.style, width: cmd.width, height: cmd.height } }
+      : n,
+  );
+
+  // If the resized node is inside a frame, auto-fit the parent frame.
+  if (node?.parentId && ctx.autoLayoutEnabled) {
+    const parent = nodes.find((p) => p.id === node.parentId);
+    if (parent?.type === 'frame') {
+      updatedNodes = fitFrameToChildren(
+        updatedNodes as NestableNode[],
+        node.parentId,
+      );
+    }
+  }
+
   set({
-    nodes: nodes.map((n) =>
-      n.id === cmd.nodeId
-        ? { ...n, style: { ...n.style, width: cmd.width, height: cmd.height } }
-        : n,
-    ),
+    nodes: updatedNodes,
     actionHistory: nextActions,
   });
 }
@@ -812,9 +867,25 @@ function handlePasteNodes(
     },
   }));
 
+  // Collect frames that received pasted nodes so we can resize them.
+  const pastedFrameIds = new Set<string>();
+  for (const n of taggedNodes) {
+    if (n.parentId) pastedFrameIds.add(n.parentId);
+  }
+
+  let pastedResult = normalizeTreeOrder([
+    ...nodes,
+    ...taggedNodes,
+  ] as NestableNode[]);
+
+  // Auto-resize frames that received pasted children.
+  if (pastedFrameIds.size > 0 && ctx.autoLayoutEnabled) {
+    pastedResult = fitFrames(pastedResult, pastedFrameIds);
+  }
+
   set({
     nodes: selectOnly(
-      normalizeTreeOrder([...nodes, ...taggedNodes] as NestableNode[]),
+      pastedResult,
       taggedNodes.map((n) => n.id),
     ),
     actionHistory: pushAction(actionHistory, {
@@ -904,14 +975,37 @@ function handleNodeDragStop(
   // Apply auto-frame / auto-unframe for every dragged node.
   let result = nodes as NestableNode[];
   for (const id of cmd.draggedNodeIds) {
-    result = autoUnframeNodeByNonOverlap(result, id, { epsilon: 0 });
+    result = autoUnframeNodeByNonOverlap(result, id, {
+      epsilon: 0,
+      margin: 10,
+    });
     result = autoFrameNodeByOverlap(result, id, { threshold: 0.75 });
   }
 
   if (result === nodes) {
     // Positions changed (handled by onNodesChange already) but no structural
-    // re-parenting happened. Still push a nodes_moved trace if nodes moved.
+    // re-parenting happened. Still fit frames whose children may have moved
+    // beyond their current boundary, then push a nodes_moved trace.
+    const inFrameIds = new Set<string>();
+    for (const id of cmd.draggedNodeIds) {
+      const node = nodes.find((n) => n.id === id);
+      if (node?.parentId) inFrameIds.add(node.parentId);
+    }
     const draggedNodes = nodes.filter((n) => draggedIds.has(n.id));
+    if (inFrameIds.size > 0 && ctx.autoLayoutEnabled) {
+      const fitted = fitFrames(nodes as NestableNode[], inFrameIds);
+      set({
+        nodes: fitted,
+        actionHistory:
+          draggedNodes.length > 0
+            ? pushAction(actionHistory, {
+                action: 'nodes_moved',
+                nodes: draggedNodes.map(extractNodeRef),
+              })
+            : actionHistory,
+      });
+      return;
+    }
     if (draggedNodes.length === 0) return;
     set({
       actionHistory: pushAction(actionHistory, {
@@ -954,6 +1048,25 @@ function handleNodeDragStop(
         }
       }
     }
+  }
+
+  // Auto-resize all frames that gained or lost children.
+  const affectedFrameIds = new Set<string>();
+  for (const id of cmd.draggedNodeIds) {
+    const prevParentId = preParentIds.get(id);
+    const node = result.find((n) => n.id === id);
+    const nextParentId = node?.parentId;
+    if (prevParentId) affectedFrameIds.add(prevParentId);
+    if (nextParentId) affectedFrameIds.add(nextParentId);
+  }
+  // Also fit frames whose children were moved within them (child may now
+  // extend beyond the frame boundary after being dragged inside).
+  for (const id of cmd.draggedNodeIds) {
+    const node = result.find((n) => n.id === id);
+    if (node?.parentId) affectedFrameIds.add(node.parentId);
+  }
+  if (affectedFrameIds.size > 0 && ctx.autoLayoutEnabled) {
+    result = fitFrames(result, affectedFrameIds);
   }
 
   // Always push a nodes_moved trace for the dragged nodes.

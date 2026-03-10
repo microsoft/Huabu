@@ -31,10 +31,34 @@ import {
 import { canvasHistoryManager } from './canvasHistoryManager';
 import { type AlignDirection } from '../utils/autoLayoutHelper';
 import {
+  computeFrameFit,
+  getAbsolutePosition as getFrameAbsolutePosition,
+  wouldUnframe,
+  type NestableNode,
+} from '../utils/frameHelper';
+import {
   ingestNodeIfNeeded,
   needsIngestion,
   type NodeIngestionInfo,
 } from '../utils/ingestHelper';
+
+// ---------------------------------------------------------------------------
+// Frame Fit Preview
+// ---------------------------------------------------------------------------
+
+/**
+ * Describes how a frame would look if the currently dragged node were
+ * dropped at its current position. Rendered as a dashed overlay during drag.
+ */
+export type FrameFitPreview = {
+  /** The frame that would gain/shrink. */
+  frameId: string;
+  /** Absolute position and size of the preview rectangle. */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
 
 // ---------------------------------------------------------------------------
 // Canvas Command Pattern
@@ -149,7 +173,16 @@ type RFState = {
   onEdgesChange: OnEdgesChange;
   onConnect: OnConnect;
   onNodeDragStart: OnNodeDrag;
+  onNodeDrag: OnNodeDrag;
   onNodeDragStop: OnNodeDrag;
+
+  /**
+   * Preview of how a frame would resize if the currently dragged node
+   * were dropped. Computed in `onNodeDrag`, rendered as a dashed overlay,
+   * and cleared in `onNodeDragStop`.
+   */
+  frameFitPreview: FrameFitPreview | null;
+
   addNode: (node: Node, skipAutoLayout?: boolean) => void;
   rfInstance: ReactFlowInstance | null;
   setRfInstance: (instance: ReactFlowInstance | null) => void;
@@ -566,7 +599,106 @@ const useCanvasStore = create<RFState>()(
       canvasHistoryManager.takeSnapshot(nodes, edges);
     },
 
+    frameFitPreview: null,
+
+    onNodeDrag: (_event, draggedNode, draggedNodes) => {
+      const { nodes, autoLayoutEnabled } = get();
+
+      // Frame auto-resize preview only applies when auto-layout is enabled.
+      if (!autoLayoutEnabled) {
+        set({ frameFitPreview: null });
+        return;
+      }
+
+      const draggedIds = new Set(draggedNodes.map((n) => n.id));
+
+      // Build a "virtual" nodes array with live drag positions so overlap
+      // checks and fit calculations reflect where the user is dragging.
+      const liveNodes = nodes.map((n) => {
+        if (n.id === draggedNode.id)
+          return { ...n, position: draggedNode.position };
+        const live = draggedNodes.find((d) => d.id === n.id);
+        if (live) return { ...n, position: live.position };
+        return n;
+      }) as NestableNode[];
+
+      // Collect frame IDs that need a preview, and which dragged children
+      // would leave each frame (so we exclude them from the fit preview).
+      const leavingByFrame = new Map<string, Set<string>>();
+      const previewFrameIds = new Set<string>();
+
+      for (const dn of draggedNodes) {
+        const originalNode = nodes.find((n) => n.id === dn.id);
+        if (!originalNode) continue;
+        if (originalNode.type === 'frame') continue;
+
+        // If the node is currently in a frame, check whether it would unframe.
+        if (originalNode.parentId) {
+          const parentId = originalNode.parentId;
+          previewFrameIds.add(parentId);
+
+          if (wouldUnframe(liveNodes, dn.id, { epsilon: 0, margin: 10 })) {
+            let leaving = leavingByFrame.get(parentId);
+            if (!leaving) {
+              leaving = new Set();
+              leavingByFrame.set(parentId, leaving);
+            }
+            leaving.add(dn.id);
+          }
+        }
+
+        // Check if the node might enter a different frame.
+        for (const candidate of liveNodes) {
+          if (candidate.type !== 'frame') continue;
+          if (candidate.data?.locked) continue;
+          if (draggedIds.has(candidate.id)) continue;
+          if (originalNode.parentId === candidate.id) continue;
+          previewFrameIds.add(candidate.id);
+        }
+      }
+
+      // Compute the fit preview for the most relevant frame.
+      let bestPreview: FrameFitPreview | null = null;
+
+      for (const frameId of previewFrameIds) {
+        const leaving = leavingByFrame.get(frameId);
+        const fit = computeFrameFit(liveNodes, frameId, {
+          excludeNodeIds: leaving,
+        });
+        if (!fit) continue;
+
+        // Convert to absolute coordinates for overlay rendering.
+        const frame = liveNodes.find((n) => n.id === frameId);
+        if (!frame) continue;
+
+        let absX = fit.position.x;
+        let absY = fit.position.y;
+        if (frame.parentId) {
+          const parentAbsPos = getFrameAbsolutePosition(
+            liveNodes,
+            frame.parentId,
+          );
+          if (parentAbsPos) {
+            absX += parentAbsPos.x;
+            absY += parentAbsPos.y;
+          }
+        }
+
+        bestPreview = {
+          frameId,
+          x: absX,
+          y: absY,
+          width: fit.width,
+          height: fit.height,
+        };
+        break;
+      }
+
+      set({ frameFitPreview: bestPreview });
+    },
+
     onNodeDragStop: (_event, _node, draggedNodes) => {
+      set({ frameFitPreview: null });
       get().dispatch({
         type: 'NODE_DRAG_STOP',
         draggedNodeIds: draggedNodes.map((n) => n.id),

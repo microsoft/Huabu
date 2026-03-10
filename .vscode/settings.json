@@ -48,5 +48,8 @@
   "prettier.prettierPath": "${workspaceFolder}/node_modules/prettier/index.cjs",
   "prettier.configPath": "${workspaceFolder}/.prettierrc",
   "prettier.requireConfig": true,
-  "editor.detectIndentation": false
+  "editor.detectIndentation": false,
+  "chat.tools.terminal.autoApprove": {
+    "npx tsc": true
+  }
 }

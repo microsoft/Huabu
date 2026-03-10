@@ -165,6 +165,15 @@ body,
   pointer-events: none !important;
 }
 
+/* Smooth frame resize animation when children are added/removed.
+   Disabled during active drag (ReactFlow adds `.dragging` to dragged nodes)
+   and during manual resize (NodeResizer adds inline transforms). */
+.react-flow__node-frame:not(.dragging) {
+  transition:
+    width 0.2s ease-out,
+    height 0.2s ease-out;
+}
+
 .block-note-view-readonly .bn-editor {
   padding: 0 !important;
 }
