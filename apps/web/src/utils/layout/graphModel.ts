@@ -18,6 +18,10 @@ const WEIGHT_RELATED_NODE_IDS = 0.6;
 const WEIGHT_ORIGIN_SOURCE_ID = 0.4;
 const WEIGHT_SAME_RESEARCH_THREAD = 0.3;
 const WEIGHT_SAME_CHAT_THREAD = 0.3;
+// Frame siblings must always be in the same connected component so the cola
+// solver never packs them into separate sub-graphs and displaces them relative
+// to their shared parent frame.
+const WEIGHT_SAME_FRAME = 0.2;
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -219,6 +223,24 @@ export function buildLayoutGraph(
   for (const group of nodesByChatThread.values()) {
     for (let i = 0; i < group.length - 1; i++) {
       upsertEdge(edgeMap, group[i], group[i + 1], WEIGHT_SAME_CHAT_THREAD);
+    }
+  }
+
+  // 2f. Frame siblings — ensure every node inside the same frame is in the
+  // same connected component.  Without this, disconnected siblings are laid
+  // out by separate cola instances and then packed 400 px apart, causing
+  // their parent-relative positions to diverge from the frame's bounds.
+  const nodesByFrame = new Map<string, string[]>();
+  for (const n of nodeMap.values()) {
+    if (!n.parentId) continue;
+    const arr = nodesByFrame.get(n.parentId) ?? [];
+    arr.push(n.id);
+    nodesByFrame.set(n.parentId, arr);
+  }
+  for (const siblings of nodesByFrame.values()) {
+    // Chain connection is sufficient to merge all siblings into one component.
+    for (let i = 0; i < siblings.length - 1; i++) {
+      upsertEdge(edgeMap, siblings[i], siblings[i + 1], WEIGHT_SAME_FRAME);
     }
   }
 

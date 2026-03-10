@@ -33,19 +33,17 @@ export function applyLayoutResult(
 
   if (positions.size === 0 && groupSizes.size === 0) return null;
 
-  // Pre-compute locked node IDs and locked frame IDs.
-  // This is the authoritative write-back guard — the solver hints (fixed flags)
-  // may not be perfectly honoured by every solver backend (e.g. Cola).
+  // Pre-compute locked node IDs only for the size guard — locked frames must
+  // not be resized by the layout engine.
+  // Position write-back is NOT guarded here: the solver already marks locked
+  // nodes as fixed so their output positions are unchanged; enforcing a second
+  // guard here would skip necessary ReactFlow position flushes and cause
+  // overlaps when adjacent nodes move.
   const lockedNodeIds = new Set<string>(
     nodes
       .filter((n) =>
         Boolean((n.data as Record<string, unknown> | undefined)?.locked),
       )
-      .map((n) => n.id),
-  );
-  const lockedFrameIds = new Set<string>(
-    nodes
-      .filter((n) => n.type === 'frame' && lockedNodeIds.has(n.id))
       .map((n) => n.id),
   );
 
@@ -58,16 +56,9 @@ export function applyLayoutResult(
 
     if (!newPos && !newSize) return n;
 
-    // Never reposition a locked node (any type) or children of a locked frame.
-    const isLocked =
-      lockedNodeIds.has(n.id) ||
-      (n.parentId !== undefined &&
-        n.parentId !== null &&
-        lockedFrameIds.has(n.parentId));
-
     let updated = n;
 
-    if (newPos && !isLocked) {
+    if (newPos) {
       updated = {
         ...updated,
         position: { x: newPos.x, y: newPos.y },
