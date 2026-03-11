@@ -100,18 +100,21 @@ export const ExpandedNodePanel = () => {
   }, [closeExpandedCanvas, expandedNodeId, node, isPreview]);
 
   // Global Escape key handler.
+  // Bubble phase (no capture flag) so child components (e.g. BlockNote menus)
+  // can call stopPropagation() to handle Escape themselves without closing the
+  // panel. Note: Escape inside a cross-origin iframe won't reach this handler
+  // due to browser security boundaries – that's an acceptable limitation.
   useEffect(() => {
     if (!activeItem) return;
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        e.preventDefault();
         activeItem.close();
       }
     };
 
-    window.addEventListener('keydown', onKeyDown, true);
-    return () => window.removeEventListener('keydown', onKeyDown, true);
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
   }, [activeItem]);
 
   if (!activeItem) return null;
