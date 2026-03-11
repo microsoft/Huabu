@@ -18,11 +18,7 @@ import {
 import { addEdge, type Node, type Edge, type Connection } from '@xyflow/react';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
-import {
-  alignNodes,
-  spreadNodes,
-  resolveTopLevelOverlaps,
-} from '../utils/autoLayoutHelper';
+import { alignNodes, spreadNodes } from '../utils/autoLayoutHelper';
 import {
   findFrameAtPoint,
   frameNodes,
@@ -957,9 +953,9 @@ function handleLayoutAll(
   ctx: CanvasHandlerContext,
 ): void {
   const { nodes, edges, set } = ctx;
+  canvasHistoryManager.takeSnapshot(nodes, edges);
   const result = layoutAllNodes(nodes, edges, { animate: true });
   if (!result) return;
-  // Snapshot is taken inside applyLayoutResult
   set({ nodes: result });
 }
 
@@ -968,14 +964,12 @@ function handleLayoutGroup(
   ctx: CanvasHandlerContext,
 ): void {
   const { nodes, edges, set } = ctx;
+  canvasHistoryManager.takeSnapshot(nodes, edges);
   const result = layoutGroupNodes(nodes, edges, cmd.frameId, { animate: true });
   if (!result) return;
   // Resize the frame to tightly wrap its newly laid-out children.
   const fitted = fitFrameToChildren(result as NestableNode[], cmd.frameId);
-  // Push any other top-level nodes away from the (potentially grown) frame
-  // so they don't end up visually overlapping it.
-  const resolved = resolveTopLevelOverlaps(fitted, cmd.frameId);
-  set({ nodes: resolved });
+  set({ nodes: fitted });
 }
 
 function handleNodeDragStop(

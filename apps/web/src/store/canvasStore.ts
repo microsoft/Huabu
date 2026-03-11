@@ -346,6 +346,11 @@ const autoSaveMiddleware =
     return config(wrappedSet, get, api);
   };
 
+// rAF handle for throttling the heavy preview computation inside onNodeDrag.
+// Keeping it outside the store avoids stale-closure issues and lets
+// onNodeDragStop cancel any pending frame reliably.
+let _dragPreviewRafId: number | null = null;
+
 const useCanvasStore = create<RFState>()(
   autoSaveMiddleware((set, get) => ({
     nodes: [],
@@ -384,7 +389,7 @@ const useCanvasStore = create<RFState>()(
     },
 
     expandedNodeId: null,
-    expandMode: 'replace',
+    expandMode: 'split',
     openExpanded: (nodeId) => get().dispatch({ type: 'OPEN_EXPANDED', nodeId }),
     closeExpanded: () => set({ expandedNodeId: null }),
     setExpandMode: (mode) => set({ expandMode: mode }),
@@ -612,7 +617,7 @@ const useCanvasStore = create<RFState>()(
     frameFitPreviews: [],
 
     onNodeDrag: (_event, draggedNode, draggedNodes) => {
-      const { nodes, autoLayoutEnabled } = get();
+      const { autoLayoutEnabled } = get();
 
       // Frame auto-resize preview only applies when auto-layout is enabled.
       if (!autoLayoutEnabled) {
@@ -620,117 +625,138 @@ const useCanvasStore = create<RFState>()(
         return;
       }
 
-      const liveNodes = nodes.map((n) => {
-        if (n.id === draggedNode.id)
-          return { ...n, position: draggedNode.position };
-        const live = draggedNodes.find((d) => d.id === n.id);
-        if (live) return { ...n, position: live.position };
-        return n;
-      }) as NestableNode[];
+      // Throttle the heavy preview computation to once per animation frame.
+      // Mouse events can fire at 120 Hz+ on high-refresh displays; capping at
+      // ~60 fps via rAF avoids redundant work while keeping previews smooth.
+      if (_dragPreviewRafId !== null) {
+        cancelAnimationFrame(_dragPreviewRafId);
+      }
 
-      // Collect frame IDs that need a preview, and which dragged children
-      // would leave each frame (so we exclude them from the fit preview).
-      const leavingByFrame = new Map<string, Set<string>>();
-      const enteringByFrame = new Map<
-        string,
-        { x: number; y: number; width: number; height: number }[]
-      >();
-      const previewFrameIds = new Set<string>();
+      _dragPreviewRafId = requestAnimationFrame(() => {
+        _dragPreviewRafId = null;
 
-      for (const dn of draggedNodes) {
-        const originalNode = nodes.find((n) => n.id === dn.id);
-        if (!originalNode) continue;
-        if (originalNode.type === 'frame') continue;
+        // Re-read store inside the rAF callback so we always use the
+        // latest node positions (ReactFlow may have applied intermediate
+        // updates between the event and the rAF tick).
+        const { nodes } = get();
 
-        // If the node is currently in a frame, check whether it would unframe.
-        if (originalNode.parentId) {
-          const parentId = originalNode.parentId;
-          previewFrameIds.add(parentId);
+        const liveNodes = nodes.map((n) => {
+          if (n.id === draggedNode.id)
+            return { ...n, position: draggedNode.position };
+          const live = draggedNodes.find((d) => d.id === n.id);
+          if (live) return { ...n, position: live.position };
+          return n;
+        }) as NestableNode[];
 
-          if (wouldUnframe(liveNodes, dn.id, { epsilon: 0, margin: 10 })) {
-            let leaving = leavingByFrame.get(parentId);
-            if (!leaving) {
-              leaving = new Set();
-              leavingByFrame.set(parentId, leaving);
-            }
-            leaving.add(dn.id);
-          }
-        }
+        // Collect frame IDs that need a preview, and which dragged children
+        // would leave each frame (so we exclude them from the fit preview).
+        const leavingByFrame = new Map<string, Set<string>>();
+        const enteringByFrame = new Map<
+          string,
+          { x: number; y: number; width: number; height: number }[]
+        >();
+        const previewFrameIds = new Set<string>();
 
-        // Check if the node would enter a different frame (both root and cross-frame).
-        // Only show a preview when the 50% overlap threshold is already met so the
-        // preview is always consistent with the actual drop behaviour.
-        const targetFrameId = wouldAutoFrame(liveNodes, dn.id, {
-          threshold: 0.5,
-        });
-        if (targetFrameId) {
-          previewFrameIds.add(targetFrameId);
-          // Track the dragged node's absolute rect so the fit preview can
-          // include the incoming node in the frame's bounding-box calculation.
-          const nodeAbsPos = getFrameAbsolutePosition(liveNodes, dn.id);
-          const liveNode = liveNodes.find((n) => n.id === dn.id);
-          if (nodeAbsPos && liveNode) {
-            const size = getNodeSize(liveNode);
-            if (size.width > 0 && size.height > 0) {
-              let entering = enteringByFrame.get(targetFrameId);
-              if (!entering) {
-                entering = [];
-                enteringByFrame.set(targetFrameId, entering);
+        for (const dn of draggedNodes) {
+          const originalNode = nodes.find((n) => n.id === dn.id);
+          if (!originalNode) continue;
+          if (originalNode.type === 'frame') continue;
+
+          // If the node is currently in a frame, check whether it would unframe.
+          if (originalNode.parentId) {
+            const parentId = originalNode.parentId;
+            previewFrameIds.add(parentId);
+
+            if (wouldUnframe(liveNodes, dn.id, { epsilon: 0, margin: 10 })) {
+              let leaving = leavingByFrame.get(parentId);
+              if (!leaving) {
+                leaving = new Set();
+                leavingByFrame.set(parentId, leaving);
               }
-              entering.push({
-                x: nodeAbsPos.x,
-                y: nodeAbsPos.y,
-                width: size.width,
-                height: size.height,
-              });
+              leaving.add(dn.id);
+            }
+          }
+
+          // Check if the node would enter a different frame (both root and cross-frame).
+          // Only show a preview when the 50% overlap threshold is already met so the
+          // preview is always consistent with the actual drop behaviour.
+          const targetFrameId = wouldAutoFrame(liveNodes, dn.id, {
+            threshold: 0.5,
+          });
+          if (targetFrameId) {
+            previewFrameIds.add(targetFrameId);
+            // Track the dragged node's absolute rect so the fit preview can
+            // include the incoming node in the frame's bounding-box calculation.
+            const nodeAbsPos = getFrameAbsolutePosition(liveNodes, dn.id);
+            const liveNode = liveNodes.find((n) => n.id === dn.id);
+            if (nodeAbsPos && liveNode) {
+              const size = getNodeSize(liveNode);
+              if (size.width > 0 && size.height > 0) {
+                let entering = enteringByFrame.get(targetFrameId);
+                if (!entering) {
+                  entering = [];
+                  enteringByFrame.set(targetFrameId, entering);
+                }
+                entering.push({
+                  x: nodeAbsPos.x,
+                  y: nodeAbsPos.y,
+                  width: size.width,
+                  height: size.height,
+                });
+              }
             }
           }
         }
-      }
 
-      // Compute fit previews for all affected frames and show them all
-      // simultaneously — e.g. source frame shrinking + target frame expanding.
-      const previews: FrameFitPreview[] = [];
+        // Compute fit previews for all affected frames and show them all
+        // simultaneously — e.g. source frame shrinking + target frame expanding.
+        const previews: FrameFitPreview[] = [];
 
-      for (const frameId of previewFrameIds) {
-        const leaving = leavingByFrame.get(frameId);
-        const entering = enteringByFrame.get(frameId);
-        const fit = computeFrameFit(liveNodes, frameId, {
-          excludeNodeIds: leaving,
-          includeAbsoluteRects: entering,
-        });
-        if (!fit) continue;
+        for (const frameId of previewFrameIds) {
+          const leaving = leavingByFrame.get(frameId);
+          const entering = enteringByFrame.get(frameId);
+          const fit = computeFrameFit(liveNodes, frameId, {
+            excludeNodeIds: leaving,
+            includeAbsoluteRects: entering,
+          });
+          if (!fit) continue;
 
-        // Convert to absolute coordinates for overlay rendering.
-        const frame = liveNodes.find((n) => n.id === frameId);
-        if (!frame) continue;
+          // Convert to absolute coordinates for overlay rendering.
+          const frame = liveNodes.find((n) => n.id === frameId);
+          if (!frame) continue;
 
-        let absX = fit.position.x;
-        let absY = fit.position.y;
-        if (frame.parentId) {
-          const parentAbsPos = getFrameAbsolutePosition(
-            liveNodes,
-            frame.parentId,
-          );
-          if (parentAbsPos) {
-            absX += parentAbsPos.x;
-            absY += parentAbsPos.y;
+          let absX = fit.position.x;
+          let absY = fit.position.y;
+          if (frame.parentId) {
+            const parentAbsPos = getFrameAbsolutePosition(
+              liveNodes,
+              frame.parentId,
+            );
+            if (parentAbsPos) {
+              absX += parentAbsPos.x;
+              absY += parentAbsPos.y;
+            }
           }
+
+          previews.push({
+            frameId,
+            x: absX,
+            y: absY,
+            width: fit.width,
+            height: fit.height,
+          });
         }
 
-        previews.push({
-          frameId,
-          x: absX,
-          y: absY,
-          width: fit.width,
-          height: fit.height,
-        });
-      }
-
-      set({ frameFitPreviews: previews });
+        set({ frameFitPreviews: previews });
+      });
     },
 
     onNodeDragStop: (_event, _node, draggedNodes) => {
+      // Cancel any pending preview computation — the drag is over.
+      if (_dragPreviewRafId !== null) {
+        cancelAnimationFrame(_dragPreviewRafId);
+        _dragPreviewRafId = null;
+      }
       set({ frameFitPreviews: [] });
       get().dispatch({
         type: 'NODE_DRAG_STOP',
@@ -941,17 +967,6 @@ const useCanvasStore = create<RFState>()(
           }),
         });
       }, LAYOUT_ANIMATION_DURATION_MS);
-      // Fit view to the frame’s children after layout.
-      setTimeout(() => {
-        const children = get().nodes.filter((n) => n.parentId === frameId);
-        if (children.length > 0) {
-          get().rfInstance?.fitView({
-            nodes: children.map((n) => ({ id: n.id })),
-            duration: 300,
-            padding: 0.15,
-          });
-        }
-      }, 50);
     },
     moveNodeIntoFrame: (nodeId, frameId) => {
       get().dispatch({ type: 'MOVE_INTO_FRAME', nodeId, frameId });

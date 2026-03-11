@@ -19,12 +19,9 @@
 
 import { Layout } from 'webcola';
 
-import type {
-  LayoutGraph,
-  LayoutNode,
-  LayoutOptions,
-  LayoutResult,
-} from '../types';
+import { resolveAbsolutePositions } from './solverUtils';
+
+import type { LayoutGraph, LayoutOptions, LayoutResult } from '../types';
 import type { LayoutSolver } from './types';
 import type {
   InputNode as ColaInputNode,
@@ -60,49 +57,6 @@ function computeAdaptiveLinkLength(
   // Gap scales inversely with weight: weight=1 → 1× spacing, weight=0 → 2× spacing
   const gap = nodeSpacing * (1 + (1 - weight));
   return minDist + gap;
-}
-
-/**
- * Resolve the absolute position of a node by walking up the parent chain.
- * ReactFlow frame children store positions relative to their parent;
- * webcola needs all positions in a single global coordinate space.
- */
-function resolveAbsolutePositions(
-  nodes: LayoutNode[],
-  childToParent: Map<string, string>,
-): Map<string, { x: number; y: number }> {
-  const nodeById = new Map(nodes.map((n) => [n.id, n]));
-  const cache = new Map<string, { x: number; y: number }>();
-
-  const resolve = (nodeId: string): { x: number; y: number } => {
-    const cached = cache.get(nodeId);
-    if (cached) return cached;
-
-    const node = nodeById.get(nodeId);
-    if (!node) return { x: 0, y: 0 };
-
-    const parentId = childToParent.get(nodeId);
-    if (parentId) {
-      const parentAbs = resolve(parentId);
-      const abs = {
-        x: parentAbs.x + node.position.x,
-        y: parentAbs.y + node.position.y,
-      };
-      cache.set(nodeId, abs);
-      return abs;
-    }
-
-    // Root-level node — position is already absolute.
-    const abs = { ...node.position };
-    cache.set(nodeId, abs);
-    return abs;
-  };
-
-  for (const node of nodes) {
-    resolve(node.id);
-  }
-
-  return cache;
 }
 
 /**

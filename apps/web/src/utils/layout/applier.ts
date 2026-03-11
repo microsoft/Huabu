@@ -1,17 +1,18 @@
 /**
- * @file PositionApplier — writes layout results back to the canvas store.
+ * @file PositionApplier — maps layout results onto a canvas nodes array.
  *
  * Responsibilities:
  *  - Batch-update node positions
  *  - Update frame sizes from groupSizes
- *  - Wrap the operation as a single undo history entry
+ *
+ * Intentionally has no dependency on the canvas store or history manager.
+ * Callers are responsible for taking an undo snapshot before invoking this.
  */
 
 import { snapToGrid } from '../../config/canvas';
-import { canvasHistoryManager } from '../../store/canvasHistoryManager';
 
 import type { LayoutResult } from './types';
-import type { Node, Edge } from '@xyflow/react';
+import type { Node } from '@xyflow/react';
 
 export interface ApplyOptions {
   /** Whether to animate node position and size transitions. */
@@ -28,12 +29,14 @@ export const LAYOUT_ANIMATION_DURATION_MS = 400;
 /**
  * Apply layout results to the canvas by producing a new nodes array.
  *
- * Takes a snapshot for undo before mutating.
+ * Pure transformation — does NOT mutate state or take undo snapshots.
+ * Callers should call `canvasHistoryManager.takeSnapshot` before invoking
+ * this when the operation needs to be undoable.
+ *
  * Returns the new nodes array, or null if no changes were needed.
  */
 export function applyLayoutResult(
   nodes: Node[],
-  edges: Edge[],
   result: LayoutResult,
   options: ApplyOptions = {},
 ): Node[] | null {
@@ -54,9 +57,6 @@ export function applyLayoutResult(
       )
       .map((n) => n.id),
   );
-
-  // Take undo snapshot before applying changes
-  canvasHistoryManager.takeSnapshot(nodes, edges);
 
   const { animate } = options;
 

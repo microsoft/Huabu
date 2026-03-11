@@ -34,7 +34,7 @@ export function layoutAll(
 ): Node[] | null {
   const graph = buildLayoutGraph(nodes, edges);
   const result = engine.layout(graph, options);
-  return applyLayoutResult(nodes, edges, result, { animate: options?.animate });
+  return applyLayoutResult(nodes, result, { animate: options?.animate });
 }
 
 /**
@@ -49,7 +49,7 @@ export function layoutGroup(
 ): Node[] | null {
   const graph = buildLayoutGraph(nodes, edges, { scopeFrameId: frameId });
   const result = engine.layout(graph, options);
-  return applyLayoutResult(nodes, edges, result, { animate: options?.animate });
+  return applyLayoutResult(nodes, result, { animate: options?.animate });
 }
 
 /**
@@ -88,7 +88,7 @@ export function placeNode(
   };
 
   const result = engine.place(graph, placeOptions);
-  return applyLayoutResult(nodes, edges, result);
+  return applyLayoutResult(nodes, result);
 }
 
 export { DEFAULT_LAYOUT_OPTIONS };

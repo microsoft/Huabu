@@ -483,6 +483,92 @@ function createRectGetter(
 }
 
 /**
+ * Shared predicate: should a child node leave its parent frame?
+ *
+ * Returns `true` when the node has no (or negligible) overlap with the
+ * parent frame AND the edge-to-edge gap exceeds `margin`.
+ *
+ * Used by both `autoUnframeNodeByNonOverlap` (mutates) and
+ * `wouldUnframe` (pure predicate) so the decision logic is defined once.
+ */
+function checkShouldUnframe(
+  nodeRect: Rect,
+  parentRect: Rect,
+  options: AutoUnframeByNonOverlapOptions,
+): boolean {
+  const intersection = rectIntersectionArea(nodeRect, parentRect);
+  const epsilon = options.epsilon ?? 0;
+  if (intersection > epsilon) return false; // Still overlapping, keep in frame
+
+  const margin = options.margin ?? 0;
+  if (margin > 0) {
+    const hGap = Math.max(
+      0,
+      nodeRect.x - (parentRect.x + parentRect.width),
+      parentRect.x - (nodeRect.x + nodeRect.width),
+    );
+    const vGap = Math.max(
+      0,
+      nodeRect.y - (parentRect.y + parentRect.height),
+      parentRect.y - (nodeRect.y + nodeRect.height),
+    );
+    const gap = Math.max(hGap, vGap);
+    if (gap <= margin) return false; // Close enough, keep in frame
+  }
+
+  return true;
+}
+
+/**
+ * Shared predicate: which frame (if any) should a node auto-enter?
+ *
+ * Returns the frame ID with the best overlap ratio, or `null`.
+ * Used by both `autoFrameNodeByOverlap` (mutates) and
+ * `wouldAutoFrame` (pure predicate).
+ */
+function findBestFrameForNode(
+  nodes: NestableNode[],
+  nodeId: string,
+  threshold: number,
+  getRect: (id: string) => Rect | null,
+): string | null {
+  const nodeRect = getRect(nodeId);
+  if (!nodeRect) return null;
+
+  const nodeArea = nodeRect.width * nodeRect.height;
+  if (nodeArea <= 0) return null;
+
+  let best: { frameId: string; ratio: number; frameArea: number } | undefined;
+
+  for (const candidate of nodes) {
+    if (candidate.type !== 'frame') continue;
+    if (candidate.id === nodeId) continue;
+    if (candidate.data?.locked) continue;
+
+    const frameRect = getRect(candidate.id);
+    if (!frameRect) continue;
+
+    const frameArea = frameRect.width * frameRect.height;
+    const intersection = rectIntersectionArea(nodeRect, frameRect);
+    const ratio = intersection / Math.min(nodeArea, frameArea);
+    if (ratio < threshold) continue;
+
+    if (
+      !best ||
+      ratio > best.ratio ||
+      (ratio === best.ratio && frameArea < best.frameArea)
+    ) {
+      best = { frameId: candidate.id, ratio, frameArea };
+    }
+  }
+
+  if (!best) return null;
+  const node = nodes.find((n) => n.id === nodeId);
+  if (node?.parentId === best.frameId) return null;
+  return best.frameId;
+}
+
+/**
  * If a node has a parent and the node and parent have no overlap,
  * delegate to moveNodeOutOfFrame to detach the node.
  *
@@ -510,28 +596,7 @@ export function autoUnframeNodeByNonOverlap(
   const parentRect = getRect(parentId);
   if (!nodeRect || !parentRect) return nodes;
 
-  const intersection = rectIntersectionArea(nodeRect, parentRect);
-  const epsilon = options.epsilon ?? 0;
-  if (intersection > epsilon) return nodes; // Still overlapping, keep in frame
-
-  // No overlap — check edge-to-edge gap against margin.
-  // Only unframe when the closest edge of the node is more than `margin`
-  // pixels away from the frame boundary.
-  const margin = options.margin ?? 0;
-  if (margin > 0) {
-    const hGap = Math.max(
-      0,
-      nodeRect.x - (parentRect.x + parentRect.width),
-      parentRect.x - (nodeRect.x + nodeRect.width),
-    );
-    const vGap = Math.max(
-      0,
-      nodeRect.y - (parentRect.y + parentRect.height),
-      parentRect.y - (nodeRect.y + nodeRect.height),
-    );
-    const gap = Math.max(hGap, vGap);
-    if (gap <= margin) return nodes; // Close enough, keep in frame
-  }
+  if (!checkShouldUnframe(nodeRect, parentRect, options)) return nodes;
 
   // Delegate to moveNodeOutOfFrame for consistent validation and movement logic
   return moveNodeOutOfFrame(nodes, nodeId);
@@ -565,27 +630,7 @@ export function wouldUnframe(
   const parentRect = getRect(parentId);
   if (!nodeRect || !parentRect) return false;
 
-  const intersection = rectIntersectionArea(nodeRect, parentRect);
-  const epsilon = options.epsilon ?? 0;
-  if (intersection > epsilon) return false; // Still overlapping
-
-  const margin = options.margin ?? 0;
-  if (margin > 0) {
-    const hGap = Math.max(
-      0,
-      nodeRect.x - (parentRect.x + parentRect.width),
-      parentRect.x - (nodeRect.x + nodeRect.width),
-    );
-    const vGap = Math.max(
-      0,
-      nodeRect.y - (parentRect.y + parentRect.height),
-      parentRect.y - (nodeRect.y + nodeRect.height),
-    );
-    const gap = Math.max(hGap, vGap);
-    if (gap <= margin) return false; // Close enough, keep in frame
-  }
-
-  return true;
+  return checkShouldUnframe(nodeRect, parentRect, options);
 }
 
 /**
@@ -611,45 +656,7 @@ export function wouldAutoFrame(
   const getAbs = createAbsolutePositionGetter(byId);
   const getRect = createRectGetter(byId, getAbs);
 
-  const nodeRect = getRect(nodeId);
-  if (!nodeRect) return null;
-
-  const nodeArea = nodeRect.width * nodeRect.height;
-  if (nodeArea <= 0) return null;
-
-  let best:
-    | {
-        frameId: string;
-        ratio: number;
-        frameArea: number;
-      }
-    | undefined;
-
-  for (const candidate of nodes) {
-    if (candidate.type !== 'frame') continue;
-    if (candidate.id === nodeId) continue;
-    if (candidate.data?.locked) continue;
-
-    const frameRect = getRect(candidate.id);
-    if (!frameRect) continue;
-
-    const frameArea = frameRect.width * frameRect.height;
-    const intersection = rectIntersectionArea(nodeRect, frameRect);
-    const ratio = intersection / Math.min(nodeArea, frameArea);
-    if (ratio < threshold) continue;
-
-    if (
-      !best ||
-      ratio > best.ratio ||
-      (ratio === best.ratio && frameArea < best.frameArea)
-    ) {
-      best = { frameId: candidate.id, ratio, frameArea };
-    }
-  }
-
-  if (!best) return null;
-  if (node.parentId === best.frameId) return null;
-  return best.frameId;
+  return findBestFrameForNode(nodes, nodeId, threshold, getRect);
 }
 
 /**
@@ -677,47 +684,11 @@ export function autoFrameNodeByOverlap(
   const getAbs = createAbsolutePositionGetter(byId);
   const getRect = createRectGetter(byId, getAbs);
 
-  const nodeRect = getRect(nodeId);
-  if (!nodeRect) return nodes;
-
-  const nodeArea = nodeRect.width * nodeRect.height;
-  if (nodeArea <= 0) return nodes;
-
-  let best:
-    | {
-        frameId: string;
-        ratio: number;
-        frameArea: number;
-      }
-    | undefined;
-
-  for (const candidate of nodes) {
-    if (candidate.type !== 'frame') continue;
-    if (candidate.id === nodeId) continue;
-    if (candidate.data?.locked) continue; // Skip locked frames during search
-
-    const frameRect = getRect(candidate.id);
-    if (!frameRect) continue;
-
-    const frameArea = frameRect.width * frameRect.height;
-    const intersection = rectIntersectionArea(nodeRect, frameRect);
-    const ratio = intersection / Math.min(nodeArea, frameArea);
-    if (ratio < threshold) continue;
-
-    if (
-      !best ||
-      ratio > best.ratio ||
-      (ratio === best.ratio && frameArea < best.frameArea)
-    ) {
-      best = { frameId: candidate.id, ratio, frameArea };
-    }
-  }
-
-  if (!best) return nodes;
-  if (node.parentId === best.frameId) return nodes;
+  const bestFrameId = findBestFrameForNode(nodes, nodeId, threshold, getRect);
+  if (!bestFrameId) return nodes;
 
   // Delegate to moveNodeIntoFrame for consistent validation and movement logic
-  return moveNodeIntoFrame(nodes, nodeId, best.frameId);
+  return moveNodeIntoFrame(nodes, nodeId, bestFrameId);
 }
 
 /**
