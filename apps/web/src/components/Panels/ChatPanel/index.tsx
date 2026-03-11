@@ -1,25 +1,38 @@
 import {
   createId,
   type ResearchConfig,
+  type IntentAction,
   type ToolResponse,
 } from '@sediment/shared';
 import { PanelRightClose, PanelRightOpen, Plus } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 
 import { chatApi } from '@/api/chat';
+import { resolveActions } from '@/api/intent';
 import { researchApi } from '@/api/research';
 import { GhostButton } from '@/components/Common/GhostButton';
-import useCanvasStore from '@/store/canvasStore';
+import useCanvasStore, {
+  type CanvasPreviewSnapshot,
+} from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import { useResearchStore } from '@/store/researchStore';
+import { summarizeIntentActions } from '@/utils/intentActionSummary';
+import { executeIntentActions } from '@/utils/intentExecutor';
 
 import { SidebarPanel } from '../SidebarPanel';
+import { AgentChangeList } from './AgentChangeList';
 import { ChatInput } from './ChatInput';
 import { MessageList } from '../../Messages/MessageList';
 
 import type { ChatMode } from './ModeSelector';
 import type { ChatMessage } from '../../Messages/types';
 import type { ChatStreamUpdatePayload } from '@sediment/shared';
+
+interface AgentChangeSet {
+  prompt: string;
+  actions: IntentAction[];
+  snapshot: CanvasPreviewSnapshot;
+}
 
 interface ChatPanelProps {
   isCollapsed?: boolean;
@@ -29,6 +42,9 @@ interface ChatPanelProps {
 export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [agentChangeSet, setAgentChangeSet] = useState<AgentChangeSet | null>(
+    null,
+  );
 
   // Persistent chat state (survives page refresh)
   const threadId = useChatStore((state) => state.threadId);
@@ -44,6 +60,10 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   );
 
   const getAgentContext = useCanvasStore((state) => state.getAgentContext);
+  const getCanvasSnapshot = useCanvasStore((state) => state.getCanvasSnapshot);
+  const restoreCanvasSnapshot = useCanvasStore(
+    (state) => state.restoreCanvasSnapshot,
+  );
   const canvasId = useCanvasStore((state) => state.canvasId);
   const canvasVersion = useCanvasStore((state) => state.version);
   const loadCanvas = useCanvasStore((state) => state.loadCanvas);
@@ -281,18 +301,106 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     );
   };
 
+  const handleAgent = async () => {
+    if (!input.trim() || isLoading || agentChangeSet) return;
+
+    const prompt = input.trim();
+
+    // Agent-mode changes live in the local chat surface rather than a
+    // dedicated backend checkpoint, so reuse chat history semantics.
+    setLastAction('chat');
+
+    const userMessage: ChatMessage = {
+      id: createId('message'),
+      role: 'user',
+      content: prompt,
+    };
+
+    addMessage(userMessage);
+    setInput('');
+    setIsLoading(true);
+
+    try {
+      const { actions } = await resolveActions(getAgentContext(), prompt);
+
+      if (actions.length === 0) {
+        addMessage({
+          id: createId('message'),
+          role: 'assistant',
+          content:
+            'No actionable canvas changes were generated for that request.',
+        });
+        return;
+      }
+
+      const snapshot = getCanvasSnapshot();
+      executeIntentActions(actions);
+      setAgentChangeSet({ prompt, actions, snapshot });
+
+      addMessage({
+        id: createId('message'),
+        role: 'assistant',
+        content: summarizeIntentActions(actions),
+      });
+    } catch (err) {
+      console.error('Agent action resolution failed:', err);
+      addMessage({
+        id: createId('message'),
+        role: 'assistant',
+        content:
+          err instanceof Error
+            ? `Agent error: ${err.message}`
+            : 'Agent error: unknown error',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleKeepAgentChanges = () => {
+    setAgentChangeSet(null);
+  };
+
+  const handleUpdateAgentAction = (index: number, updated: IntentAction) => {
+    if (!agentChangeSet) return;
+
+    const nextActions = [...agentChangeSet.actions];
+    nextActions[index] = updated;
+
+    restoreCanvasSnapshot(agentChangeSet.snapshot);
+    executeIntentActions(nextActions);
+    setAgentChangeSet({
+      ...agentChangeSet,
+      actions: nextActions,
+    });
+  };
+
+  const handleRevertAgentChanges = () => {
+    if (!agentChangeSet) return;
+
+    restoreCanvasSnapshot(agentChangeSet.snapshot);
+    setAgentChangeSet(null);
+    addMessage({
+      id: createId('message'),
+      role: 'assistant',
+      content: 'Reverted the proposed agent changes.',
+    });
+  };
+
   const handleSubmit = async (e: React.FormEvent, mode: ChatMode) => {
     e.preventDefault();
 
     if (mode === 'deep-research') {
       await handleDeepResearch();
+    } else if (mode === 'agent') {
+      await handleAgent();
     } else {
       await handleChat();
     }
   };
 
   const handleNewChat = () => {
-    if (isLoading || researchStatus === 'running') return;
+    if (isLoading || researchStatus === 'running' || agentChangeSet) return;
     clearMessages();
   };
 
@@ -308,7 +416,9 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         <GhostButton
           onClick={handleNewChat}
           title="New conversation"
-          disabled={isLoading || researchStatus === 'running'}
+          disabled={
+            isLoading || researchStatus === 'running' || !!agentChangeSet
+          }
           className="text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Plus size={16} />
@@ -322,13 +432,26 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           endRef={messagesEndRef}
         />
 
+        {agentChangeSet && (
+          <AgentChangeList
+            prompt={agentChangeSet.prompt}
+            actions={agentChangeSet.actions}
+            onUpdateAction={handleUpdateAgentAction}
+            onKeep={handleKeepAgentChanges}
+            onRevert={handleRevertAgentChanges}
+          />
+        )}
+
         {/* Input Area */}
         <ChatInput
           value={input}
           onChange={setInput}
           onSubmit={handleSubmit}
           disabled={
-            isLoading || !isHistoryLoaded || researchStatus === 'running'
+            isLoading ||
+            !isHistoryLoaded ||
+            researchStatus === 'running' ||
+            !!agentChangeSet
           }
         />
       </div>

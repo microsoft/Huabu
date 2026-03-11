@@ -28,7 +28,11 @@ import {
   extractSnippet,
   pushAction,
 } from './canvasHandlers';
-import { canvasHistoryManager } from './canvasHistoryManager';
+import {
+  canvasHistoryManager,
+  createSnapshot,
+  type CanvasSnapshot,
+} from './canvasHistoryManager';
 import { type AlignDirection } from '../utils/autoLayoutHelper';
 import {
   ingestNodeIfNeeded,
@@ -111,6 +115,10 @@ const triggerIngestion = (node: Node) => {
   }, INGESTION_DEBOUNCE_MS);
 
   ingestionTimers.set(nodeId, timer);
+};
+
+export type CanvasPreviewSnapshot = CanvasSnapshot & {
+  actionHistory: RecentAction[];
 };
 
 type RFState = {
@@ -215,6 +223,8 @@ type RFState = {
   actionHistory: RecentAction[];
   dispatch: (cmd: CanvasCommand) => void;
   getAgentContext: () => AgentBaseContext;
+  getCanvasSnapshot: () => CanvasPreviewSnapshot;
+  restoreCanvasSnapshot: (snapshot: CanvasPreviewSnapshot) => void;
 };
 
 let saveTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -448,6 +458,31 @@ const useCanvasStore = create<RFState>()(
         recentActions: actionHistory,
         selectedNodes: nodes.filter((n) => n.selected).map(buildSelectedDetail),
       };
+    },
+
+    getCanvasSnapshot: () => {
+      const { nodes, edges, actionHistory } = get();
+      return {
+        ...createSnapshot(nodes, edges),
+        actionHistory: [...actionHistory],
+      };
+    },
+
+    restoreCanvasSnapshot: (snapshot) => {
+      const { nodes: prevNodes, canvasId } = get();
+
+      set({
+        nodes: snapshot.nodes,
+        edges: snapshot.edges,
+        actionHistory: [...snapshot.actionHistory],
+      });
+
+      canvasHistoryManager.syncServerAfterRestore(
+        canvasId,
+        prevNodes,
+        snapshot.nodes,
+        triggerIngestion,
+      );
     },
 
     loadCanvas: async () => {

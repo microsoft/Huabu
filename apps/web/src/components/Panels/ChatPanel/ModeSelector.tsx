@@ -1,11 +1,11 @@
 import clsx from 'clsx';
-import { Check, ChevronDown, MessageSquare, Search } from 'lucide-react';
+import { Brain, Check, ChevronDown, MessageSquare, Search } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 import { GhostButton } from '../../Common/GhostButton';
 import { PillButton } from '../../Common/PillButton';
 
-export type ChatMode = 'chat' | 'deep-research';
+export type ChatMode = 'chat' | 'deep-research' | 'agent';
 
 interface ModeOption {
   value: ChatMode;
@@ -26,6 +26,12 @@ const modes: ModeOption[] = [
     label: 'Deep Research',
     icon: <Search size={14} />,
     description: 'Search multiple sources and add to Canvas',
+  },
+  {
+    value: 'agent',
+    label: 'Agent',
+    icon: <Brain size={14} />,
+    description: 'Turn intent into canvas actions and apply them',
   },
 ];
 
