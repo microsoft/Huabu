@@ -5,12 +5,18 @@
  * Accepts an AgentBaseContext and returns ranked intent candidates.
  */
 
-import { recognizeIntent, logIntentEpisode } from './intent.service.js';
+import {
+  recognizeIntent,
+  resolveActions,
+  logIntentEpisode,
+} from './intent.service.js';
 
 import type {
   IntentRequest,
   IntentResponse,
   IntentEpisodeRequest,
+  ResolveActionsRequest,
+  ResolveActionsResponse,
 } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
@@ -41,6 +47,23 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       }
       logIntentEpisode(episode);
       return reply.send({ success: true });
+    },
+  );
+
+  fastify.post<{ Body: ResolveActionsRequest; Reply: ResolveActionsResponse }>(
+    '/resolve-actions',
+    async (request, reply) => {
+      const { canvasContext, chosenIntent } = request.body;
+
+      if (!canvasContext || !chosenIntent) {
+        return reply.code(400).send({
+          error: 'canvasContext and chosenIntent are required',
+        } as never);
+      }
+
+      const actions = await resolveActions(canvasContext, chosenIntent);
+
+      return reply.send({ actions });
     },
   );
 };
