@@ -200,9 +200,12 @@ export function buildLayoutGraph(
     }
   }
   for (const group of nodesByResearchThread.values()) {
-    // Chain rather than fully-connect to keep edge count linear
+    // Fully-connect all nodes in the thread so stress majorization targets
+    // equal pairwise distances, producing a cluster rather than a chain.
     for (let i = 0; i < group.length - 1; i++) {
-      upsertEdge(edgeMap, group[i], group[i + 1], WEIGHT_SAME_RESEARCH_THREAD);
+      for (let j = i + 1; j < group.length; j++) {
+        upsertEdge(edgeMap, group[i], group[j], WEIGHT_SAME_RESEARCH_THREAD);
+      }
     }
   }
 
@@ -222,7 +225,9 @@ export function buildLayoutGraph(
   }
   for (const group of nodesByChatThread.values()) {
     for (let i = 0; i < group.length - 1; i++) {
-      upsertEdge(edgeMap, group[i], group[i + 1], WEIGHT_SAME_CHAT_THREAD);
+      for (let j = i + 1; j < group.length; j++) {
+        upsertEdge(edgeMap, group[i], group[j], WEIGHT_SAME_CHAT_THREAD);
+      }
     }
   }
 
@@ -238,9 +243,12 @@ export function buildLayoutGraph(
     nodesByFrame.set(n.parentId, arr);
   }
   for (const siblings of nodesByFrame.values()) {
-    // Chain connection is sufficient to merge all siblings into one component.
+    // Fully-connect all siblings so stress majorization targets equal
+    // pairwise distances, producing a cluster rather than a chain.
     for (let i = 0; i < siblings.length - 1; i++) {
-      upsertEdge(edgeMap, siblings[i], siblings[i + 1], WEIGHT_SAME_FRAME);
+      for (let j = i + 1; j < siblings.length; j++) {
+        upsertEdge(edgeMap, siblings[i], siblings[j], WEIGHT_SAME_FRAME);
+      }
     }
   }
 

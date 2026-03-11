@@ -17,8 +17,8 @@ import type { LayoutSolver } from './solvers/types';
 import type { LayoutGraph, LayoutOptions, LayoutResult } from './types';
 
 export const DEFAULT_LAYOUT_OPTIONS: LayoutOptions = {
-  nodeSpacing: 20,
-  componentSpacing: 400,
+  nodeSpacing: 10,
+  componentSpacing: 300,
   framePadding: 5,
   nodePadding: 5,
 };
