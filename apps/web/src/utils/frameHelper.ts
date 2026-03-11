@@ -34,6 +34,10 @@
  * │ • moveNodeOutOfFrame - Core function to remove node from frame  │
  * │   Validates: parent exists and is not locked                    │
  * │ Both preserve visual positions via coordinate transformation    │
+ * │                                                                 │
+ * │ • computeFrameFit - Compute ideal frame bounds for children     │
+ * │ • fitFrameToChildren - Resize frame to tightly wrap children    │
+ * │ • fitFrames - Batch-fit multiple frames in one pass             │
  * └─────────────────────────────────────────────────────────────────┘
  *
  * Design Principles:
@@ -43,6 +47,8 @@
  * 4. Visual Consistency: All moves preserve node's visual position on canvas
  * 5. Locked Frame Respect: Locked frames cannot gain or lose children
  */
+
+import { getNodeSize as _getNodeSize } from './nodeSize';
 
 import type { Edge, Node, XYPosition } from '@xyflow/react';
 
@@ -137,36 +143,15 @@ export function normalizeTreeOrder(nodes: NestableNode[]): NestableNode[] {
   return result;
 }
 
-function getNodeSize(node: NestableNode): { width: number; height: number } {
-  const measured = (
-    node as unknown as { measured?: { width?: number; height?: number } }
-  ).measured;
-  const style = (
-    node as unknown as { style?: { width?: unknown; height?: unknown } }
-  ).style;
-
-  const width =
-    (typeof measured?.width === 'number' ? measured.width : undefined) ??
-    (typeof style?.width === 'number'
-      ? style.width
-      : typeof style?.width === 'string'
-        ? Number.parseFloat(style.width)
-        : undefined) ??
-    0;
-
-  const height =
-    (typeof measured?.height === 'number' ? measured.height : undefined) ??
-    (typeof style?.height === 'number'
-      ? style.height
-      : typeof style?.height === 'string'
-        ? Number.parseFloat(style.height)
-        : undefined) ??
-    0;
-
-  return {
-    width: Number.isFinite(width) ? width : 0,
-    height: Number.isFinite(height) ? height : 0,
-  };
+/**
+ * Return the rendered width/height of a canvas node.
+ * Delegates to the shared `getNodeSize` utility in `nodeSize.ts`.
+ */
+export function getNodeSize(node: NestableNode): {
+  width: number;
+  height: number;
+} {
+  return _getNodeSize(node);
 }
 
 function getAncestorIds(
@@ -438,6 +423,12 @@ export type AutoFrameByOverlapOptions = {
 export type AutoUnframeByNonOverlapOptions = {
   /** Treat intersection area <= epsilon as "no overlap". */
   epsilon?: number;
+  /**
+   * If the node extends beyond any edge of the parent frame by more than
+   * this many pixels, treat it as "dragged out" even if there is still
+   * some overlap. Default: 0 (disabled).
+   */
+  margin?: number;
 };
 
 type Rect = { x: number; y: number; width: number; height: number };
@@ -492,6 +483,92 @@ function createRectGetter(
 }
 
 /**
+ * Shared predicate: should a child node leave its parent frame?
+ *
+ * Returns `true` when the node has no (or negligible) overlap with the
+ * parent frame AND the edge-to-edge gap exceeds `margin`.
+ *
+ * Used by both `autoUnframeNodeByNonOverlap` (mutates) and
+ * `wouldUnframe` (pure predicate) so the decision logic is defined once.
+ */
+function checkShouldUnframe(
+  nodeRect: Rect,
+  parentRect: Rect,
+  options: AutoUnframeByNonOverlapOptions,
+): boolean {
+  const intersection = rectIntersectionArea(nodeRect, parentRect);
+  const epsilon = options.epsilon ?? 0;
+  if (intersection > epsilon) return false; // Still overlapping, keep in frame
+
+  const margin = options.margin ?? 0;
+  if (margin > 0) {
+    const hGap = Math.max(
+      0,
+      nodeRect.x - (parentRect.x + parentRect.width),
+      parentRect.x - (nodeRect.x + nodeRect.width),
+    );
+    const vGap = Math.max(
+      0,
+      nodeRect.y - (parentRect.y + parentRect.height),
+      parentRect.y - (nodeRect.y + nodeRect.height),
+    );
+    const gap = Math.max(hGap, vGap);
+    if (gap <= margin) return false; // Close enough, keep in frame
+  }
+
+  return true;
+}
+
+/**
+ * Shared predicate: which frame (if any) should a node auto-enter?
+ *
+ * Returns the frame ID with the best overlap ratio, or `null`.
+ * Used by both `autoFrameNodeByOverlap` (mutates) and
+ * `wouldAutoFrame` (pure predicate).
+ */
+function findBestFrameForNode(
+  nodes: NestableNode[],
+  nodeId: string,
+  threshold: number,
+  getRect: (id: string) => Rect | null,
+): string | null {
+  const nodeRect = getRect(nodeId);
+  if (!nodeRect) return null;
+
+  const nodeArea = nodeRect.width * nodeRect.height;
+  if (nodeArea <= 0) return null;
+
+  let best: { frameId: string; ratio: number; frameArea: number } | undefined;
+
+  for (const candidate of nodes) {
+    if (candidate.type !== 'frame') continue;
+    if (candidate.id === nodeId) continue;
+    if (candidate.data?.locked) continue;
+
+    const frameRect = getRect(candidate.id);
+    if (!frameRect) continue;
+
+    const frameArea = frameRect.width * frameRect.height;
+    const intersection = rectIntersectionArea(nodeRect, frameRect);
+    const ratio = intersection / Math.min(nodeArea, frameArea);
+    if (ratio < threshold) continue;
+
+    if (
+      !best ||
+      ratio > best.ratio ||
+      (ratio === best.ratio && frameArea < best.frameArea)
+    ) {
+      best = { frameId: candidate.id, ratio, frameArea };
+    }
+  }
+
+  if (!best) return null;
+  const node = nodes.find((n) => n.id === nodeId);
+  if (node?.parentId === best.frameId) return null;
+  return best.frameId;
+}
+
+/**
  * If a node has a parent and the node and parent have no overlap,
  * delegate to moveNodeOutOfFrame to detach the node.
  *
@@ -519,12 +596,67 @@ export function autoUnframeNodeByNonOverlap(
   const parentRect = getRect(parentId);
   if (!nodeRect || !parentRect) return nodes;
 
-  const intersection = rectIntersectionArea(nodeRect, parentRect);
-  const epsilon = options.epsilon ?? 0;
-  if (intersection > epsilon) return nodes; // Still overlapping, don't unframe
+  if (!checkShouldUnframe(nodeRect, parentRect, options)) return nodes;
 
   // Delegate to moveNodeOutOfFrame for consistent validation and movement logic
   return moveNodeOutOfFrame(nodes, nodeId);
+}
+
+/**
+ * Pure predicate: would the given node be unframed under the current
+ * `autoUnframeNodeByNonOverlap` rules? Returns `true` when the node has
+ * no overlap with its parent frame AND the edge-to-edge gap exceeds `margin`.
+ *
+ * Used by the drag-preview system to decide whether to exclude a node
+ * from the fit preview of its current parent frame.
+ */
+export function wouldUnframe(
+  nodes: NestableNode[],
+  nodeId: string,
+  options: AutoUnframeByNonOverlapOptions = {},
+): boolean {
+  const byId = indexById(nodes);
+  const node = byId.get(nodeId);
+  if (!node?.parentId) return false;
+
+  const parentId = node.parentId;
+  const parent = byId.get(parentId);
+  if (!parent) return false;
+
+  const getAbs = createAbsolutePositionGetter(byId);
+  const getRect = createRectGetter(byId, getAbs);
+
+  const nodeRect = getRect(nodeId);
+  const parentRect = getRect(parentId);
+  if (!nodeRect || !parentRect) return false;
+
+  return checkShouldUnframe(nodeRect, parentRect, options);
+}
+
+/**
+ * Pure predicate: returns the frame ID that the node would auto-enter under the
+ * current `autoFrameNodeByOverlap` rules, or `null` if no frame qualifies.
+ *
+ * Used by the drag-preview system to decide whether to show an entering-frame
+ * preview for root-level nodes that have no current parent.
+ */
+export function wouldAutoFrame(
+  nodes: NestableNode[],
+  nodeId: string,
+  options: AutoFrameByOverlapOptions = {},
+): string | null {
+  const threshold = options.threshold ?? 0.5;
+  if (!Number.isFinite(threshold) || threshold <= 0) return null;
+
+  const byId = indexById(nodes);
+  const node = byId.get(nodeId);
+  if (!node) return null;
+  if (node.type === 'frame') return null;
+
+  const getAbs = createAbsolutePositionGetter(byId);
+  const getRect = createRectGetter(byId, getAbs);
+
+  return findBestFrameForNode(nodes, nodeId, threshold, getRect);
 }
 
 /**
@@ -541,7 +673,7 @@ export function autoFrameNodeByOverlap(
   nodeId: string,
   options: AutoFrameByOverlapOptions = {},
 ): NestableNode[] {
-  const threshold = options.threshold ?? 0.75;
+  const threshold = options.threshold ?? 0.5;
   if (!Number.isFinite(threshold) || threshold <= 0) return nodes;
 
   const byId = indexById(nodes);
@@ -552,48 +684,11 @@ export function autoFrameNodeByOverlap(
   const getAbs = createAbsolutePositionGetter(byId);
   const getRect = createRectGetter(byId, getAbs);
 
-  const nodeRect = getRect(nodeId);
-  if (!nodeRect) return nodes;
-
-  const nodeArea = nodeRect.width * nodeRect.height;
-  if (nodeArea <= 0) return nodes;
-
-  let best:
-    | {
-        frameId: string;
-        ratio: number;
-        frameArea: number;
-      }
-    | undefined;
-
-  for (const candidate of nodes) {
-    if (candidate.type !== 'frame') continue;
-    if (candidate.id === nodeId) continue;
-    if (candidate.data?.locked) continue; // Skip locked frames during search
-
-    const frameRect = getRect(candidate.id);
-    if (!frameRect) continue;
-
-    const intersection = rectIntersectionArea(nodeRect, frameRect);
-    const ratio = intersection / nodeArea;
-    if (ratio < threshold) continue;
-
-    const frameArea = frameRect.width * frameRect.height;
-
-    if (
-      !best ||
-      ratio > best.ratio ||
-      (ratio === best.ratio && frameArea < best.frameArea)
-    ) {
-      best = { frameId: candidate.id, ratio, frameArea };
-    }
-  }
-
-  if (!best) return nodes;
-  if (node.parentId === best.frameId) return nodes;
+  const bestFrameId = findBestFrameForNode(nodes, nodeId, threshold, getRect);
+  if (!bestFrameId) return nodes;
 
   // Delegate to moveNodeIntoFrame for consistent validation and movement logic
-  return moveNodeIntoFrame(nodes, nodeId, best.frameId);
+  return moveNodeIntoFrame(nodes, nodeId, bestFrameId);
 }
 
 /**
@@ -864,6 +959,196 @@ export function findFrameAtPoint(
   }
 
   return best?.frameId ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Frame Auto-Resize
+// ---------------------------------------------------------------------------
+
+export type FitFrameOptions = {
+  /** Padding around the bounding box of children. Default: 24. */
+  padding?: number;
+  /** Minimum frame width. Default: 240. */
+  minWidth?: number;
+  /** Minimum frame height. Default: 160. */
+  minHeight?: number;
+  /** Children to exclude from the bounding-box calculation (e.g. nodes about to leave). */
+  excludeNodeIds?: ReadonlySet<string>;
+  /**
+   * Extra rects in absolute canvas coordinates to include in the bounding box.
+   * Used by the drag-preview system to show how the frame would look if a
+   * currently-dragged node (not yet a child) were dropped at its current position.
+   */
+  includeAbsoluteRects?: ReadonlyArray<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }>;
+};
+
+/**
+ * Computed fit result describing the ideal position and size for a frame
+ * to tightly wrap its children. Used both by `fitFrameToChildren` (which
+ * applies the result) and by the drag-preview system (which only reads it).
+ */
+export type FrameFitResult = {
+  frameId: string;
+  /** New absolute position of the frame. */
+  position: XYPosition;
+  /** New width and height. */
+  width: number;
+  height: number;
+};
+
+/**
+ * Compute the ideal frame position and size to tightly wrap all its direct
+ * children, without mutating any nodes. Returns `null` if the frame has no
+ * children or does not exist.
+ *
+ * This is a pure read-only function — use `fitFrameToChildren` to apply the
+ * result to a nodes array.
+ */
+export function computeFrameFit(
+  nodes: NestableNode[],
+  frameId: string,
+  options: FitFrameOptions = {},
+): FrameFitResult | null {
+  const byId = indexById(nodes);
+  const frame = byId.get(frameId);
+  if (!frame) return null;
+  if (frame.type !== 'frame') return null;
+  if (frame.data?.locked) return null;
+
+  const padding = options.padding ?? 24;
+  const minWidth = options.minWidth ?? 240;
+  const minHeight = options.minHeight ?? 160;
+
+  // Collect direct children (optionally excluding specific nodes)
+  const excludeIds = options.excludeNodeIds;
+  const children = nodes.filter(
+    (n) => n.parentId === frameId && (!excludeIds || !excludeIds.has(n.id)),
+  );
+  const hasExtraRects = (options.includeAbsoluteRects?.length ?? 0) > 0;
+  if (children.length === 0 && !hasExtraRects) return null;
+
+  // Build bounding box from children's relative positions
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+
+  for (const child of children) {
+    const size = getNodeSize(child);
+    minX = Math.min(minX, child.position.x);
+    minY = Math.min(minY, child.position.y);
+    maxX = Math.max(maxX, child.position.x + size.width);
+    maxY = Math.max(maxY, child.position.y + size.height);
+  }
+
+  // Include extra absolute rects (nodes about to enter the frame).
+  // Convert from absolute canvas coords to frame-relative coords.
+  if (hasExtraRects) {
+    const getAbs = createAbsolutePositionGetter(byId);
+    const frameAbsPos = getAbs(frameId);
+    if (frameAbsPos) {
+      for (const rect of options.includeAbsoluteRects ?? []) {
+        const relX = rect.x - frameAbsPos.x;
+        const relY = rect.y - frameAbsPos.y;
+        minX = Math.min(minX, relX);
+        minY = Math.min(minY, relY);
+        maxX = Math.max(maxX, relX + rect.width);
+        maxY = Math.max(maxY, relY + rect.height);
+      }
+    }
+  }
+
+  if (!Number.isFinite(minX) || !Number.isFinite(minY)) return null;
+
+  // The children's relative positions are relative to the frame's position.
+  // If a child is at negative relative coords, the frame needs to shift left/up.
+  const deltaX = minX - padding;
+  const deltaY = minY - padding;
+
+  const width = Math.max(minWidth, maxX - minX + padding * 2);
+  const height = Math.max(minHeight, maxY - minY + padding * 2);
+
+  // Compute new frame position in the same coordinate space as the current frame.
+  const newPosition: XYPosition = {
+    x: frame.position.x + deltaX,
+    y: frame.position.y + deltaY,
+  };
+
+  return { frameId, position: newPosition, width, height };
+}
+
+/**
+ * Resize a frame to tightly fit all its direct children, preserving the
+ * visual (absolute) positions of all children on the canvas.
+ *
+ * Returns the original nodes array unchanged if:
+ * - The frame doesn't exist or is not a frame type
+ * - The frame is locked
+ * - The frame has no children
+ */
+export function fitFrameToChildren(
+  nodes: NestableNode[],
+  frameId: string,
+  options: FitFrameOptions = {},
+): NestableNode[] {
+  const fit = computeFrameFit(nodes, frameId, options);
+  if (!fit) return nodes;
+
+  const frame = nodes.find((n) => n.id === frameId);
+  if (!frame) return nodes;
+
+  // Compute the delta between old and new frame origins so we can offset
+  // children to keep them visually stationary.
+  const deltaX = fit.position.x - frame.position.x;
+  const deltaY = fit.position.y - frame.position.y;
+
+  return nodes.map((n) => {
+    if (n.id === frameId) {
+      return {
+        ...n,
+        position: fit.position,
+        style: {
+          ...(n.style ?? {}),
+          width: fit.width,
+          height: fit.height,
+        },
+      };
+    }
+
+    // Offset direct children to compensate for frame origin shift
+    if (n.parentId === frameId) {
+      return {
+        ...n,
+        position: {
+          x: n.position.x - deltaX,
+          y: n.position.y - deltaY,
+        },
+      };
+    }
+
+    return n;
+  });
+}
+
+/**
+ * Apply `fitFrameToChildren` to multiple frames in a single pass.
+ * Skips frames that are in the `skipFrameIds` set.
+ */
+export function fitFrames(
+  nodes: NestableNode[],
+  frameIds: Iterable<string>,
+  options: FitFrameOptions = {},
+): NestableNode[] {
+  let result = nodes;
+  for (const id of frameIds) {
+    result = fitFrameToChildren(result, id, options);
+  }
+  return result;
 }
 
 /**

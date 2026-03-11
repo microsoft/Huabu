@@ -9,7 +9,14 @@ import {
 } from '@xyflow/react';
 import { clsx } from 'clsx';
 import { GripVertical } from 'lucide-react';
-import React, { memo, useCallback, useMemo } from 'react';
+import React, {
+  memo,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { createPortal } from 'react-dom';
 
 import useCanvasStore from '@/store/canvasStore.ts';
@@ -20,6 +27,15 @@ import type { CanvasNodeType, NodeData } from './types.ts';
  * Isolated component that subscribes to viewport changes for the
  * zoom-invariant overlay portal. This prevents the entire NodeWrapper
  * from re-rendering on every pan/zoom event.
+ *
+ * Uses the FLIP technique to animate position changes in sync with the
+ * node's CSS transform transition:
+ *  1. Set left/top to the final (new) position immediately — always correct
+ *     for pan/zoom.
+ *  2. Invert via `transform: translate(-Δx, -Δy)` so the overlay visually
+ *     appears at the OLD position without a transition.
+ *  3. Play: in the next animation frame, reset transform to (0,0) with a
+ *     CSS transition that matches the node animation duration.
  */
 const OverlayPortal = memo(
   ({
@@ -39,6 +55,50 @@ const OverlayPortal = memo(
     const internalNode = useInternalNode(nodeId);
     const { zoom, x: vpX, y: vpY } = useViewport();
 
+    const absX = internalNode?.internals.positionAbsolute?.x ?? 0;
+    const absY = internalNode?.internals.positionAbsolute?.y ?? 0;
+
+    // left/top always equal the final screen position so the label stays
+    // correct during pan/zoom without any extra logic.
+    const left = absX * zoom + vpX;
+    const top = absY * zoom + vpY + offsetY;
+
+    // FLIP state: a transient transform offset that starts at -Δ and
+    // transitions back to (0,0), giving the illusion of smooth movement.
+    const prevAbsRef = useRef({ x: absX, y: absY });
+    const [flipOffset, setFlipOffset] = useState({ x: 0, y: 0 });
+    const [playing, setPlaying] = useState(false);
+    const rafRef = useRef(0);
+
+    useLayoutEffect(() => {
+      if (!internalNode) return;
+
+      const dx = absX - prevAbsRef.current.x;
+      const dy = absY - prevAbsRef.current.y;
+      if (dx === 0 && dy === 0) return; // pan/zoom only — no position change
+
+      prevAbsRef.current = { x: absX, y: absY };
+
+      // Only animate when the node itself has a transition active.
+      const nodeStyle = internalNode.style as
+        | Record<string, unknown>
+        | undefined;
+      if (typeof nodeStyle?.transition !== 'string') return;
+
+      // Invert: visually keep label at old position (no transition yet).
+      setFlipOffset({ x: -dx * zoom, y: -dy * zoom });
+      setPlaying(false);
+
+      // Play: next frame — transition transform back to (0,0).
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = requestAnimationFrame(() => {
+        setFlipOffset({ x: 0, y: 0 });
+        setPlaying(true);
+      });
+
+      return () => cancelAnimationFrame(rafRef.current);
+    }, [absX, absY, zoom]); // eslint-disable-line react-hooks/exhaustive-deps
+
     if (!rendererEl || !internalNode?.internals.positionAbsolute) return null;
 
     return createPortal(
@@ -46,9 +106,13 @@ const OverlayPortal = memo(
         style={{
           position: 'absolute',
           zIndex: 1000,
-          left: internalNode.internals.positionAbsolute.x * zoom + vpX,
-          top: internalNode.internals.positionAbsolute.y * zoom + vpY + offsetY,
+          left,
+          top,
           pointerEvents: 'auto',
+          transform: `translate(${flipOffset.x}px, ${flipOffset.y}px)`,
+          transition: playing
+            ? 'transform 350ms cubic-bezier(0.4, 0, 0.2, 1)'
+            : undefined,
         }}
       >
         {children}
@@ -119,6 +183,12 @@ export const NodeWrapper = memo(
 
     const dispatch = useCanvasStore((state) => state.dispatch);
     const takeSnapshot = useCanvasStore((state) => state.takeSnapshot);
+    const updateResizePreview = useCanvasStore(
+      (state) => state.updateResizePreview,
+    );
+    const clearFrameFitPreview = useCanvasStore(
+      (state) => state.clearFrameFitPreview,
+    );
     const ingestion = useCanvasStore((state) => state.ingestionByNodeId[id]);
     const showIngestionOverlay =
       type !== 'frame' && ingestion?.status === 'pending';
@@ -144,9 +214,12 @@ export const NodeWrapper = memo(
               : n,
           ),
         }));
+        // Update the frame fit preview so the dashed overlay reflects the
+        // new child size while the resize handle is being dragged.
+        updateResizePreview(id);
         onResizeProp?.(params.width, params.height);
       },
-      [id, onResizeProp],
+      [id, onResizeProp, updateResizePreview],
     );
 
     const handleResizeStart = useCallback(() => {
@@ -157,6 +230,9 @@ export const NodeWrapper = memo(
 
     const handleResizeEnd = useCallback(
       (_event: unknown, params: { width: number; height: number }) => {
+        // Clear the preview before dispatching so the overlay disappears as
+        // the frame animates to its final fitted size.
+        clearFrameFitPreview();
         // Commit the final size through dispatch so the autosave middleware
         // picks it up. The snapshot was already taken in handleResizeStart.
         dispatch({
@@ -167,7 +243,7 @@ export const NodeWrapper = memo(
         });
         onResizeEnd?.(params.width, params.height);
       },
-      [dispatch, id, onResizeEnd],
+      [clearFrameFitPreview, dispatch, id, onResizeEnd],
     );
 
     return (

@@ -4,11 +4,12 @@ import clsx from 'clsx';
 import {
   MousePointer2,
   Hand,
-  LayoutGrid,
+  LayoutDashboard,
   UploadCloud,
   Link as LinkIcon,
   X,
   Brain,
+  Sparkles,
 } from 'lucide-react';
 import { useCallback, useRef, useState, type ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
@@ -94,6 +95,9 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
   const addNode = useCanvasStore((s) => s.addNode);
   const pendingNodeType = useCanvasStore((s) => s.pendingNodeType);
   const setPendingNodeType = useCanvasStore((s) => s.setPendingNodeType);
+  const layoutAll = useCanvasStore((s) => s.layoutAll);
+  const autoLayoutEnabled = useCanvasStore((s) => s.autoLayoutEnabled);
+  const toggleAutoLayout = useCanvasStore((s) => s.toggleAutoLayout);
 
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -400,8 +404,19 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
         <div className="bg-border mx-1 h-4 w-px" />
 
         <div className="flex items-center gap-2">
-          <GhostButton title="Layout">
-            <LayoutGrid size={18} />
+          <GhostButton title="Auto Layout All" onClick={() => layoutAll()}>
+            <LayoutDashboard size={18} />
+          </GhostButton>
+          <GhostButton
+            title={
+              autoLayoutEnabled ? 'Disable Auto Layout' : 'Enable Auto Layout'
+            }
+            onClick={() => toggleAutoLayout()}
+            className={clsx(
+              autoLayoutEnabled && 'text-theme-500 bg-background',
+            )}
+          >
+            <Sparkles size={18} />
           </GhostButton>
         </div>
 
@@ -426,7 +441,6 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
       </div>
 
       {/* --- Modals --- */}
-
       {/* 1. File Upload Modal */}
       <UploadModal
         title="Upload Local Files"

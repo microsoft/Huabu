@@ -3,6 +3,8 @@ import {
   getDescendantIds,
   type NestableNode,
 } from './frameHelper';
+import { getLayoutNodeSize } from './nodeSize';
+import { snapToGrid } from '../config/canvas';
 
 import type { Node } from '@xyflow/react';
 
@@ -17,21 +19,6 @@ export type AlignDirection =
   | 'bottom';
 
 // ── Shared helpers ─────────────────────────────────────────────────────
-
-/** Return the computed width/height of a node. */
-function getNodeSize(n: Node): { w: number; h: number } {
-  const style = n.style as { width?: number; height?: number } | undefined;
-  return {
-    w:
-      typeof style?.width === 'number'
-        ? style.width
-        : (n.measured?.width ?? 200),
-    h:
-      typeof style?.height === 'number'
-        ? style.height
-        : (n.measured?.height ?? 100),
-  };
-}
 
 /** Return the absolute position of a node (frame-aware). */
 function getAbsPos(nodes: Node[], n: Node): { x: number; y: number } {
@@ -89,7 +76,7 @@ export function alignNodes(
 
   for (const n of participants) {
     const pos = getAbsPos(nodes, n);
-    const { w, h } = getNodeSize(n);
+    const { w, h } = getLayoutNodeSize(n);
     minX = Math.min(minX, pos.x);
     minY = Math.min(minY, pos.y);
     maxX = Math.max(maxX, pos.x + w);
@@ -102,7 +89,7 @@ export function alignNodes(
     if (!participantIds.has(n.id)) return n;
 
     const absPos = getAbsPos(nodes, n);
-    const { w, h } = getNodeSize(n);
+    const { w, h } = getLayoutNodeSize(n);
 
     const offsetX = absPos.x - n.position.x;
     const offsetY = absPos.y - n.position.y;
@@ -134,8 +121,8 @@ export function alignNodes(
     return {
       ...n,
       position: {
-        x: newAbsX - offsetX,
-        y: newAbsY - offsetY,
+        x: snapToGrid(newAbsX - offsetX),
+        y: snapToGrid(newAbsY - offsetY),
       },
     };
   });
@@ -182,7 +169,7 @@ export function spreadNodes(nodes: Node[], gap = 24): Node[] | null {
 
     const rects: Rect[] = group.map((n) => {
       const pos = getAbsPos(nodes, n);
-      const { w, h } = getNodeSize(n);
+      const { w, h } = getLayoutNodeSize(n);
       return { id: n.id, x: pos.x, y: pos.y, w, h };
     });
 
@@ -245,8 +232,8 @@ export function spreadNodes(nodes: Node[], gap = 24): Node[] | null {
     return {
       ...n,
       position: {
-        x: newAbs.x - offsetX,
-        y: newAbs.y - offsetY,
+        x: snapToGrid(newAbs.x - offsetX),
+        y: snapToGrid(newAbs.y - offsetY),
       },
     };
   });

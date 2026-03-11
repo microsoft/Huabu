@@ -2,12 +2,12 @@ import { SideMenuController, useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/shadcn';
 import { useEffect, useRef, useState } from 'react';
 
+import { loadBlockNoteContent } from '@/components/BlockNote/blockNoteContent';
 import {
   NoteEditorSideMenu,
   NoteSourceIdProvider,
 } from '@/components/BlockNote/NoteEditorSideMenu';
 import { blockNoteShadcnOverrides } from '@/components/BlockNote/shadcnOverrides';
-import { loadBlockNoteContent } from '@/utils/blockNoteContent';
 
 export interface PreviewComponentProps {
   data: Record<string, unknown>;

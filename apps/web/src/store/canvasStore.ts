@@ -31,10 +31,37 @@ import {
 import { canvasHistoryManager } from './canvasHistoryManager';
 import { type AlignDirection } from '../utils/autoLayoutHelper';
 import {
+  computeFrameFit,
+  getAbsolutePosition as getFrameAbsolutePosition,
+  wouldUnframe,
+  wouldAutoFrame,
+  getNodeSize,
+  type NestableNode,
+} from '../utils/frameHelper';
+import {
   ingestNodeIfNeeded,
   needsIngestion,
   type NodeIngestionInfo,
 } from '../utils/ingestHelper';
+import { LAYOUT_ANIMATION_DURATION_MS } from '../utils/layout/applier';
+
+// ---------------------------------------------------------------------------
+// Frame Fit Preview
+// ---------------------------------------------------------------------------
+
+/**
+ * Describes how a frame would look if the currently dragged node were
+ * dropped at its current position. Rendered as a dashed overlay during drag.
+ */
+export type FrameFitPreview = {
+  /** The frame that would gain/shrink. */
+  frameId: string;
+  /** Absolute position and size of the preview rectangle. */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
 
 // ---------------------------------------------------------------------------
 // Canvas Command Pattern
@@ -48,7 +75,7 @@ import {
  *  - state mutations
  */
 export type CanvasCommand =
-  | { type: 'ADD_NODE'; node: Node }
+  | { type: 'ADD_NODE'; node: Node; skipAutoLayout?: boolean }
   | { type: 'DELETE_NODES'; nodeIds: string[] }
   | { type: 'CONNECT'; connection: Connection }
   | { type: 'DISCONNECT_EDGES'; edgeIds: string[] }
@@ -74,6 +101,8 @@ export type CanvasCommand =
   | { type: 'PASTE_NODES'; flowPosition?: { x: number; y: number } }
   | { type: 'ALIGN_NODES'; direction: AlignDirection }
   | { type: 'SPREAD_NODES' }
+  | { type: 'LAYOUT_ALL' }
+  | { type: 'LAYOUT_GROUP'; frameId: string }
   | { type: 'NODE_DRAG_STOP'; draggedNodeIds: string[] }
   | {
       type: 'UPDATE_NODE_DATA';
@@ -146,8 +175,27 @@ type RFState = {
   onEdgesChange: OnEdgesChange;
   onConnect: OnConnect;
   onNodeDragStart: OnNodeDrag;
+  onNodeDrag: OnNodeDrag;
   onNodeDragStop: OnNodeDrag;
-  addNode: (node: Node) => void;
+
+  /**
+   * Previews of how frames would resize based on the current drag/resize.
+   * One entry per affected frame — allows showing both the source frame
+   * shrinking and the target frame expanding simultaneously.
+   * Computed in `onNodeDrag`, rendered as dashed overlays,
+   * and cleared in `onNodeDragStop`.
+   */
+  frameFitPreviews: FrameFitPreview[];
+  /**
+   * Update the frame fit preview while a child node is being resized.
+   * Called on every resize tick from NodeWrapper so the dashed overlay
+   * stays in sync with the handle. Respects `autoLayoutEnabled`.
+   */
+  updateResizePreview: (nodeId: string) => void;
+  /** Clear the frame fit previews (e.g. when resize ends). */
+  clearFrameFitPreview: () => void;
+
+  addNode: (node: Node, skipAutoLayout?: boolean) => void;
   rfInstance: ReactFlowInstance | null;
   setRfInstance: (instance: ReactFlowInstance | null) => void;
 
@@ -190,6 +238,14 @@ type RFState = {
   alignSelectedNodes: (direction: AlignDirection) => void;
   /** Spread apart overlapping selected nodes (frame children stay in their frame). */
   spreadSelectedNodes: () => void;
+
+  /** Auto-layout: whether new nodes are automatically placed. */
+  autoLayoutEnabled: boolean;
+  toggleAutoLayout: () => void;
+  /** Full re-layout of all nodes (user-triggered). */
+  layoutAll: () => void;
+  /** Re-layout children of a specific frame. */
+  layoutGroup: (frameId: string) => void;
 
   moveNodeIntoFrame: (nodeId: string, frameId: string) => void;
   moveNodeOutOfFrame: (nodeId: string) => void;
@@ -290,6 +346,11 @@ const autoSaveMiddleware =
     return config(wrappedSet, get, api);
   };
 
+// rAF handle for throttling the heavy preview computation inside onNodeDrag.
+// Keeping it outside the store avoids stale-closure issues and lets
+// onNodeDragStop cancel any pending frame reliably.
+let _dragPreviewRafId: number | null = null;
+
 const useCanvasStore = create<RFState>()(
   autoSaveMiddleware((set, get) => ({
     nodes: [],
@@ -328,7 +389,7 @@ const useCanvasStore = create<RFState>()(
     },
 
     expandedNodeId: null,
-    expandMode: 'replace',
+    expandMode: 'split',
     openExpanded: (nodeId) => get().dispatch({ type: 'OPEN_EXPANDED', nodeId }),
     closeExpanded: () => set({ expandedNodeId: null }),
     setExpandMode: (mode) => set({ expandMode: mode }),
@@ -358,13 +419,21 @@ const useCanvasStore = create<RFState>()(
     actionHistory: [],
 
     dispatch: (cmd) => {
-      const { nodes, edges, canvasId, actionHistory, clipboard } = get();
+      const {
+        nodes,
+        edges,
+        canvasId,
+        actionHistory,
+        clipboard,
+        autoLayoutEnabled,
+      } = get();
       handleCommand(cmd, {
         nodes,
         edges,
         canvasId,
         actionHistory,
         clipboard,
+        autoLayoutEnabled,
         set,
         triggerIngestion,
       });
@@ -469,8 +538,25 @@ const useCanvasStore = create<RFState>()(
           storageConfig?: KnowledgeStorageConfig;
         };
         canvasHistoryManager.clear();
+
+        // Strip top-level `width`/`height` from nodes so that
+        // `node.style.width/height` remains the single source of truth.
+        // Older sessions may have had these set via React Flow's
+        // `setAttributes` during resize, which would shadow style values.
+        //
+        // TODO(cleanup): Once all persisted canvases have been re-saved
+        // without top-level width/height (i.e. after enough time has
+        // passed for all users to have loaded and saved their canvases),
+        // this migration block can be safely removed.
+        const cleanedNodes = (state.nodes ?? []).map((n) => {
+          if (n.width == null && n.height == null) return n;
+
+          const { width, height, ...rest } = n;
+          return rest as Node;
+        });
+
         set({
-          nodes: state.nodes ?? [],
+          nodes: cleanedNodes,
           edges: state.edges ?? [],
           workspaceName: state.workspaceName ?? get().workspaceName,
           storageConfig: state.storageConfig ?? get().storageConfig,
@@ -528,11 +614,197 @@ const useCanvasStore = create<RFState>()(
       canvasHistoryManager.takeSnapshot(nodes, edges);
     },
 
+    frameFitPreviews: [],
+
+    onNodeDrag: (_event, draggedNode, draggedNodes) => {
+      const { autoLayoutEnabled } = get();
+
+      // Frame auto-resize preview only applies when auto-layout is enabled.
+      if (!autoLayoutEnabled) {
+        set({ frameFitPreviews: [] });
+        return;
+      }
+
+      // Throttle the heavy preview computation to once per animation frame.
+      // Mouse events can fire at 120 Hz+ on high-refresh displays; capping at
+      // ~60 fps via rAF avoids redundant work while keeping previews smooth.
+      if (_dragPreviewRafId !== null) {
+        cancelAnimationFrame(_dragPreviewRafId);
+      }
+
+      _dragPreviewRafId = requestAnimationFrame(() => {
+        _dragPreviewRafId = null;
+
+        // Re-read store inside the rAF callback so we always use the
+        // latest node positions (ReactFlow may have applied intermediate
+        // updates between the event and the rAF tick).
+        const { nodes } = get();
+
+        const liveNodes = nodes.map((n) => {
+          if (n.id === draggedNode.id)
+            return { ...n, position: draggedNode.position };
+          const live = draggedNodes.find((d) => d.id === n.id);
+          if (live) return { ...n, position: live.position };
+          return n;
+        }) as NestableNode[];
+
+        // Collect frame IDs that need a preview, and which dragged children
+        // would leave each frame (so we exclude them from the fit preview).
+        const leavingByFrame = new Map<string, Set<string>>();
+        const enteringByFrame = new Map<
+          string,
+          { x: number; y: number; width: number; height: number }[]
+        >();
+        const previewFrameIds = new Set<string>();
+
+        for (const dn of draggedNodes) {
+          const originalNode = nodes.find((n) => n.id === dn.id);
+          if (!originalNode) continue;
+          if (originalNode.type === 'frame') continue;
+
+          // If the node is currently in a frame, check whether it would unframe.
+          if (originalNode.parentId) {
+            const parentId = originalNode.parentId;
+            previewFrameIds.add(parentId);
+
+            if (wouldUnframe(liveNodes, dn.id, { epsilon: 0, margin: 10 })) {
+              let leaving = leavingByFrame.get(parentId);
+              if (!leaving) {
+                leaving = new Set();
+                leavingByFrame.set(parentId, leaving);
+              }
+              leaving.add(dn.id);
+            }
+          }
+
+          // Check if the node would enter a different frame (both root and cross-frame).
+          // Only show a preview when the 50% overlap threshold is already met so the
+          // preview is always consistent with the actual drop behaviour.
+          const targetFrameId = wouldAutoFrame(liveNodes, dn.id, {
+            threshold: 0.5,
+          });
+          if (targetFrameId) {
+            previewFrameIds.add(targetFrameId);
+            // Track the dragged node's absolute rect so the fit preview can
+            // include the incoming node in the frame's bounding-box calculation.
+            const nodeAbsPos = getFrameAbsolutePosition(liveNodes, dn.id);
+            const liveNode = liveNodes.find((n) => n.id === dn.id);
+            if (nodeAbsPos && liveNode) {
+              const size = getNodeSize(liveNode);
+              if (size.width > 0 && size.height > 0) {
+                let entering = enteringByFrame.get(targetFrameId);
+                if (!entering) {
+                  entering = [];
+                  enteringByFrame.set(targetFrameId, entering);
+                }
+                entering.push({
+                  x: nodeAbsPos.x,
+                  y: nodeAbsPos.y,
+                  width: size.width,
+                  height: size.height,
+                });
+              }
+            }
+          }
+        }
+
+        // Compute fit previews for all affected frames and show them all
+        // simultaneously — e.g. source frame shrinking + target frame expanding.
+        const previews: FrameFitPreview[] = [];
+
+        for (const frameId of previewFrameIds) {
+          const leaving = leavingByFrame.get(frameId);
+          const entering = enteringByFrame.get(frameId);
+          const fit = computeFrameFit(liveNodes, frameId, {
+            excludeNodeIds: leaving,
+            includeAbsoluteRects: entering,
+          });
+          if (!fit) continue;
+
+          // Convert to absolute coordinates for overlay rendering.
+          const frame = liveNodes.find((n) => n.id === frameId);
+          if (!frame) continue;
+
+          let absX = fit.position.x;
+          let absY = fit.position.y;
+          if (frame.parentId) {
+            const parentAbsPos = getFrameAbsolutePosition(
+              liveNodes,
+              frame.parentId,
+            );
+            if (parentAbsPos) {
+              absX += parentAbsPos.x;
+              absY += parentAbsPos.y;
+            }
+          }
+
+          previews.push({
+            frameId,
+            x: absX,
+            y: absY,
+            width: fit.width,
+            height: fit.height,
+          });
+        }
+
+        set({ frameFitPreviews: previews });
+      });
+    },
+
     onNodeDragStop: (_event, _node, draggedNodes) => {
+      // Cancel any pending preview computation — the drag is over.
+      if (_dragPreviewRafId !== null) {
+        cancelAnimationFrame(_dragPreviewRafId);
+        _dragPreviewRafId = null;
+      }
+      set({ frameFitPreviews: [] });
       get().dispatch({
         type: 'NODE_DRAG_STOP',
         draggedNodeIds: draggedNodes.map((n) => n.id),
       });
+    },
+
+    updateResizePreview: (nodeId: string) => {
+      const { nodes, autoLayoutEnabled } = get();
+      if (!autoLayoutEnabled) return;
+      const node = (nodes as NestableNode[]).find((n) => n.id === nodeId);
+      if (!node?.parentId) return;
+      const frame = (nodes as NestableNode[]).find(
+        (n) => n.id === node.parentId,
+      );
+      if (!frame || frame.type !== 'frame') return;
+
+      const fit = computeFrameFit(nodes as NestableNode[], node.parentId);
+      if (!fit) return;
+
+      let absX = fit.position.x;
+      let absY = fit.position.y;
+      if (frame.parentId) {
+        const parentAbsPos = getFrameAbsolutePosition(
+          nodes as NestableNode[],
+          frame.parentId,
+        );
+        if (parentAbsPos) {
+          absX += parentAbsPos.x;
+          absY += parentAbsPos.y;
+        }
+      }
+
+      set({
+        frameFitPreviews: [
+          {
+            frameId: node.parentId,
+            x: absX,
+            y: absY,
+            width: fit.width,
+            height: fit.height,
+          },
+        ],
+      });
+    },
+
+    clearFrameFitPreview: () => {
+      set({ frameFitPreviews: [] });
     },
 
     onNodesChange: (changes) => {
@@ -543,7 +815,23 @@ const useCanvasStore = create<RFState>()(
         (c) => c.type !== 'remove' && c.type !== 'add',
       );
       if (internalChanges.length === 0) return;
-      set({ nodes: applyNodeChanges(internalChanges, get().nodes) });
+
+      // Strip `setAttributes` from dimension changes so that
+      // `node.width`/`node.height` (the top-level properties) are never
+      // written by React Flow internals. We use `node.style.width/height`
+      // as the single source of truth for explicit sizing; allowing
+      // `setAttributes` would cause `node.width` to shadow `style.width`
+      // after a resize, making subsequent style-based size updates
+      // silently ignored.
+      const sanitized = internalChanges.map((c) => {
+        if (c.type === 'dimensions' && 'setAttributes' in c) {
+          const { setAttributes, ...rest } = c;
+          return rest;
+        }
+        return c;
+      });
+
+      set({ nodes: applyNodeChanges(sanitized, get().nodes) });
     },
 
     onEdgesChange: (changes) => {
@@ -569,8 +857,8 @@ const useCanvasStore = create<RFState>()(
     rfInstance: null,
     setRfInstance: (instance) => set({ rfInstance: instance }),
 
-    addNode: (node) => {
-      get().dispatch({ type: 'ADD_NODE', node });
+    addNode: (node, skipAutoLayout) => {
+      get().dispatch({ type: 'ADD_NODE', node, skipAutoLayout });
     },
 
     updateNodeData: (nodeId, patch) => {
@@ -642,6 +930,44 @@ const useCanvasStore = create<RFState>()(
       get().dispatch({ type: 'SPREAD_NODES' });
     },
 
+    autoLayoutEnabled: true,
+    toggleAutoLayout: () => {
+      set({ autoLayoutEnabled: !get().autoLayoutEnabled });
+    },
+    layoutAll: () => {
+      get().dispatch({ type: 'LAYOUT_ALL' });
+      // Clear transition styles after the animation completes.
+      setTimeout(() => {
+        const currentNodes = get().nodes;
+        set({
+          nodes: currentNodes.map((n) => {
+            const s = n.style as Record<string, unknown> | undefined;
+            if (!s?.transition) return n;
+            const { transition: _t, ...rest } = s;
+            return { ...n, style: rest as Node['style'] };
+          }),
+        });
+      }, LAYOUT_ANIMATION_DURATION_MS);
+      // Fit view slightly after layout so the animation is already in motion.
+      setTimeout(() => {
+        get().rfInstance?.fitView({ duration: 300, padding: 0.15 });
+      }, 50);
+    },
+    layoutGroup: (frameId) => {
+      get().dispatch({ type: 'LAYOUT_GROUP', frameId });
+      // Clear transition styles after the animation completes.
+      setTimeout(() => {
+        const currentNodes = get().nodes;
+        set({
+          nodes: currentNodes.map((n) => {
+            const s = n.style as Record<string, unknown> | undefined;
+            if (!s?.transition) return n;
+            const { transition: _t, ...rest } = s;
+            return { ...n, style: rest as Node['style'] };
+          }),
+        });
+      }, LAYOUT_ANIMATION_DURATION_MS);
+    },
     moveNodeIntoFrame: (nodeId, frameId) => {
       get().dispatch({ type: 'MOVE_INTO_FRAME', nodeId, frameId });
     },

@@ -7,7 +7,13 @@ import {
   Panel,
 } from '@xyflow/react';
 import clsx from 'clsx';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import '@xyflow/react/dist/style.css';
 
 import { NodeToolbar } from './CanvasToolbar';
@@ -15,6 +21,7 @@ import { IntentPopover } from './IntentPopover';
 import { MultiSelectToolbar } from './MultiSelectToolbar';
 import { uploadImage, uploadPdf, uploadVideo } from '../../api/artifact';
 import { getSource } from '../../api/knowledge';
+import { GRID_SIZE } from '../../config/canvas';
 import { useCanvasShortcuts } from '../../hooks/useCanvasShortcuts';
 import useCanvasStore from '../../store/canvasStore.ts';
 import {
@@ -37,6 +44,8 @@ import { TextNode } from '../Nodes/TextNode';
 import { VideoNode } from '../Nodes/VideoNode';
 import { WebNode } from '../Nodes/WebNode';
 
+import type { FrameFitPreview } from '../../store/canvasStore.ts';
+
 const nodeTypes = {
   image: ImageNode,
   text: TextNode,
@@ -49,6 +58,52 @@ const nodeTypes = {
 
 const VALID_NODE_TYPES = Object.keys(nodeTypes);
 
+/**
+ * Renders a dashed-border preview overlay showing the target frame size
+ * when a node is being dragged near or inside a frame.
+ */
+const FrameFitPreviewOverlay: React.FC<{
+  preview: FrameFitPreview;
+  rfInstance: ReactFlowInstance | null;
+  wrapperRef: React.RefObject<HTMLDivElement | null>;
+}> = React.memo(({ preview, rfInstance, wrapperRef }) => {
+  const screenRect = useMemo(() => {
+    if (!rfInstance || !wrapperRef.current) return null;
+
+    const topLeft = rfInstance.flowToScreenPosition({
+      x: preview.x,
+      y: preview.y,
+    });
+    const bottomRight = rfInstance.flowToScreenPosition({
+      x: preview.x + preview.width,
+      y: preview.y + preview.height,
+    });
+
+    // Convert from screen coords to wrapper-relative coords
+    const wrapperRect = wrapperRef.current.getBoundingClientRect();
+    return {
+      left: topLeft.x - wrapperRect.left,
+      top: topLeft.y - wrapperRect.top,
+      width: bottomRight.x - topLeft.x,
+      height: bottomRight.y - topLeft.y,
+    };
+  }, [preview, rfInstance, wrapperRef]);
+
+  if (!screenRect) return null;
+
+  return (
+    <div
+      className="bg-theme-100/15 shadow-bottom pointer-events-none absolute z-40 transition-all duration-150"
+      style={{
+        left: screenRect.left,
+        top: screenRect.top,
+        width: screenRect.width,
+        height: screenRect.height,
+      }}
+    />
+  );
+});
+
 export const Canvas: React.FC = () => {
   const nodes = useCanvasStore((state) => state.nodes);
   const edges = useCanvasStore((state) => state.edges);
@@ -56,7 +111,9 @@ export const Canvas: React.FC = () => {
   const onEdgesChange = useCanvasStore((state) => state.onEdgesChange);
   const onConnect = useCanvasStore((state) => state.onConnect);
   const onNodeDragStart = useCanvasStore((state) => state.onNodeDragStart);
+  const onNodeDrag = useCanvasStore((state) => state.onNodeDrag);
   const onNodeDragStop = useCanvasStore((state) => state.onNodeDragStop);
+  const frameFitPreviews = useCanvasStore((state) => state.frameFitPreviews);
   const addNode = useCanvasStore((state) => state.addNode);
   const patchNodeSilent = useCanvasStore((state) => state.patchNodeSilent);
   const setRfInstance = useCanvasStore((state) => state.setRfInstance);
@@ -122,7 +179,7 @@ export const Canvas: React.FC = () => {
         },
       });
 
-      addNode(newNode);
+      addNode(newNode, true);
       setPendingNodeType(null);
     },
     [pendingNodeType, addNode, setPendingNodeType],
@@ -483,6 +540,7 @@ export const Canvas: React.FC = () => {
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onNodeDragStart={onNodeDragStart}
+        onNodeDrag={onNodeDrag}
         onNodeDragStop={onNodeDragStop}
         nodeTypes={nodeTypes}
         onInit={(instance) => {
@@ -493,7 +551,13 @@ export const Canvas: React.FC = () => {
         onNodeDoubleClick={(e) => e.stopPropagation()}
         fitView
         attributionPosition="bottom-right"
-        panOnDrag={pendingNodeType ? false : tool === 'pan' ? true : [1] /* 1 = middle mouse button */}
+        panOnDrag={
+          pendingNodeType
+            ? false
+            : tool === 'pan'
+              ? true
+              : [1] /* 1 = middle mouse button */
+        }
         selectionOnDrag={pendingNodeType ? false : tool === 'select'}
         nodesDraggable={!pendingNodeType}
         elementsSelectable={!pendingNodeType}
@@ -508,7 +572,7 @@ export const Canvas: React.FC = () => {
         </Panel>
         <MultiSelectToolbar />
         <IntentPopover />
-        <Background color="#ccc" gap={18} />
+        <Background color="#ccc" gap={GRID_SIZE} />
 
         <Controls position="bottom-left" />
       </ReactFlow>
@@ -525,6 +589,16 @@ export const Canvas: React.FC = () => {
           }}
         />
       )}
+
+      {/* Frame auto-fit preview overlays — shown while dragging nodes near frames */}
+      {frameFitPreviews.map((preview) => (
+        <FrameFitPreviewOverlay
+          key={preview.frameId}
+          preview={preview}
+          rfInstance={rfInstanceRef.current}
+          wrapperRef={wrapperRef}
+        />
+      ))}
     </div>
   );
 };
