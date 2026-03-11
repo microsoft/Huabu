@@ -13,6 +13,7 @@ import { getLLM } from '../agent/llm.js';
 
 import type {
   AgentBaseContext,
+  IntentAction,
   IntentCandidate,
   IntentEpisode,
   RecentAction,
@@ -248,6 +249,99 @@ async function llmIntentRecognition(
 }
 
 // ---------------------------------------------------------------------------
+// LLM-based action resolution (step 2)
+// ---------------------------------------------------------------------------
+
+const ACTION_RESOLVE_SYSTEM_PROMPT = `You are an action-planning engine embedded in a research canvas application called Sediment.
+
+The canvas lets users collect, organize, and synthesize research material using typed nodes (note, text, web, pdf, image, video) that can be grouped into frames and connected by edges.
+
+## Your task
+Given the current canvas state and a user-chosen intent, produce **exactly one** ordered sequence of atomic operations that best fulfils the intent.
+
+## Available atomic operations
+
+| op | Parameters | Description |
+|----|-----------|-------------|
+| ADD_NODE | nodeType, label?, content?, src?, position?, width?, height? | Create a new node |
+| DELETE_NODES | nodeIds[] | Remove nodes by ID |
+| CONNECT | sourceId, targetId | Draw an edge between two nodes |
+| DISCONNECT | sourceId, targetId | Remove an edge between two nodes |
+| UPDATE_NODE_DATA | nodeId, patch{} | Update a node's data — content, label, or any field |
+| GROUP_INTO_FRAME | nodeIds[], frameLabel? | Group nodes into a new frame |
+| UNFRAME | frameId | Dissolve a frame, releasing its children |
+| MOVE_INTO_FRAME | nodeId, frameId | Move a node into an existing frame |
+| MOVE_OUT_OF_FRAME | nodeId | Remove a node from its parent frame |
+| SELECT_NODES | nodeIds[] | Select one or more nodes |
+| ALIGN_NODES | direction (left/center-h/right/top/center-v/bottom) | Align selected nodes |
+| SPREAD_NODES | (none) | Spread apart overlapping selected nodes |
+
+## Referencing newly created nodes
+Use **$0, $1, $2, ...** as placeholder IDs. $0 = the node created by the 1st ADD_NODE, $1 = the 2nd, etc.
+
+## Guidelines
+- Use REAL node IDs (from the [id] tags in the canvas state) when referencing existing nodes.
+- Keep the plan minimal — only include steps required to fulfil the intent.
+- Make every action as concrete as possible.
+
+## Output format
+Return **only** a JSON array of action objects (no markdown fences, no commentary).`;
+
+/**
+ * Given a canvas context and a user-selected intent string, call the LLM to
+ * produce a concrete action plan.
+ */
+async function llmResolveActions(
+  ctx: AgentBaseContext,
+  chosenIntent: string,
+): Promise<IntentAction[]> {
+  const llm = getLLM();
+  const contextText = serializeContext(ctx);
+
+  const userContentParts: Array<
+    | { type: 'text'; text: string }
+    | { type: 'image_url'; image_url: { url: string; detail?: string } }
+  > = [
+    {
+      type: 'text',
+      text: `Current canvas state:\n\n${contextText}\n\nUser-chosen intent: "${chosenIntent}"`,
+    },
+  ];
+
+  if (ctx.screenshot) {
+    const imageUrl = ctx.screenshot.startsWith('data:')
+      ? ctx.screenshot
+      : `data:image/png;base64,${ctx.screenshot}`;
+
+    userContentParts.push({
+      type: 'image_url',
+      image_url: { url: imageUrl, detail: 'low' },
+    });
+  }
+
+  const response = await llm.invoke([
+    new SystemMessage(ACTION_RESOLVE_SYSTEM_PROMPT),
+    new HumanMessage({ content: userContentParts }),
+  ]);
+
+  const raw =
+    typeof response.content === 'string'
+      ? response.content
+      : JSON.stringify(response.content);
+
+  try {
+    const cleaned = raw.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
+    const parsed: unknown = JSON.parse(cleaned);
+
+    if (!Array.isArray(parsed)) return [];
+    return parsed as IntentAction[];
+  } catch {
+    console.error('[intent] Failed to parse action-resolve LLM response:', raw);
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -261,6 +355,21 @@ export async function recognizeIntent(
     return await llmIntentRecognition(ctx);
   } catch (err) {
     console.error('[intent] LLM intent recognition failed:', err);
+    return [];
+  }
+}
+
+/**
+ * Resolve a chosen intent into a concrete action plan via the LLM.
+ */
+export async function resolveActions(
+  ctx: AgentBaseContext,
+  chosenIntent: string,
+): Promise<IntentAction[]> {
+  try {
+    return await llmResolveActions(ctx, chosenIntent);
+  } catch (err) {
+    console.error('[intent] LLM action resolution failed:', err);
     return [];
   }
 }

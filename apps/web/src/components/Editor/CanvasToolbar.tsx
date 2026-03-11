@@ -8,6 +8,7 @@ import {
   UploadCloud,
   Link as LinkIcon,
   X,
+  Brain,
 } from 'lucide-react';
 import { useCallback, useRef, useState, type ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
@@ -15,6 +16,7 @@ import { createPortal } from 'react-dom';
 import { uploadImage, uploadPdf, uploadVideo } from '../../api/artifact.ts';
 import { NODE_ICON } from '../../config/nodeIcons.ts';
 import useCanvasStore from '../../store/canvasStore.ts';
+import { useIntentStore } from '../../store/intentStore.ts';
 import { detectNodeType } from '../../utils/mediaUtils.ts';
 import { GhostButton } from '../Common/GhostButton';
 
@@ -95,6 +97,9 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
 
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const intentButtonRef = useRef<HTMLDivElement>(null);
+
+  const intentOpen = useIntentStore((s) => s.isOpen);
 
   // State
   const [activeModal, setActiveModal] = useState<'upload' | 'link' | null>(
@@ -306,7 +311,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
 
   return (
     <>
-      <div className="text-muted-foreground shadow-bottom pointer-events-auto relative flex w-max items-center gap-2 rounded-lg border-0 bg-white p-2">
+      <div className="text-muted-foreground shadow-bottom pointer-events-auto relative flex w-max items-center gap-2 rounded-lg border-0 bg-white px-4 py-2">
         {/* Group 1: Tools */}
         <div className="flex items-center gap-2">
           <GhostButton
@@ -397,6 +402,25 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
         <div className="flex items-center gap-2">
           <GhostButton title="Layout">
             <LayoutGrid size={18} />
+          </GhostButton>
+        </div>
+
+        <div className="bg-border mx-1 h-4 w-px" />
+
+        <div ref={intentButtonRef} className="flex items-center gap-2">
+          <GhostButton
+            title="Intent (crtl + I)"
+            className={clsx(intentOpen && 'text-theme-500 bg-background')}
+            onClick={() => {
+              const rect = intentButtonRef.current?.getBoundingClientRect();
+              if (rect) {
+                useIntentStore
+                  .getState()
+                  .triggerIntent(rect.left + rect.width / 2, rect.top);
+              }
+            }}
+          >
+            <Brain size={18} />
           </GhostButton>
         </div>
       </div>

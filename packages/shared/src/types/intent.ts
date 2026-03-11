@@ -91,6 +91,22 @@ export interface IntentResponse {
 }
 
 /**
+ * Request body for the second step: resolve a chosen intent into actions.
+ */
+export interface ResolveActionsRequest {
+  canvasContext: AgentBaseContext;
+  /** The intent label chosen by the user (may be a custom user-typed intent) */
+  chosenIntent: string;
+}
+
+/**
+ * Response with the resolved action list for a chosen intent.
+ */
+export interface ResolveActionsResponse {
+  actions: IntentAction[];
+}
+
+/**
  * Request body to log an intent episode outcome.
  */
 export interface IntentEpisodeRequest {
