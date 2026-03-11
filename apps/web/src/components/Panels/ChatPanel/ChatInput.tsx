@@ -34,10 +34,16 @@ export const ChatInput = ({
 
   // Dynamic placeholder based on mode
   const currentPlaceholder =
-    mode === 'deep-research' ? 'Enter your research query...' : placeholder;
+    mode === 'deep-research'
+      ? 'Enter your research query...'
+      : mode === 'agent'
+        ? 'Describe the canvas change you want...'
+        : placeholder;
 
   // Auto-resize textarea
   useEffect(() => {
+    if (mode === 'agent') return;
+
     const textarea = textareaRef.current;
     if (!textarea) return;
 
@@ -56,7 +62,7 @@ export const ChatInput = ({
     textarea.style.height = `${nextHeight}px`;
     textarea.style.overflowY =
       textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
-  }, [value]);
+  }, [mode, value]);
 
   // Handle Enter key for submission
   const handleKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement> = (
