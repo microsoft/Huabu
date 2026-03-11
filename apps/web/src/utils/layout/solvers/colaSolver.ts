@@ -401,24 +401,6 @@ export const colaSolver: LayoutSolver = {
 
     const components = findConnectedComponents(leafNodes.length, colaLinks);
 
-    // Debug: log connected components
-    console.groupCollapsed(
-      `[Layout] colaSolver — ${components.length} connected component(s)`,
-    );
-    for (let ci = 0; ci < components.length; ci++) {
-      const nodeIds = components[ci].map((idx) => leafNodes[idx].id);
-      console.log(
-        `  Component ${ci} (${nodeIds.length} nodes): ${nodeIds.join(', ')}`,
-      );
-    }
-    console.log('Links:', colaLinks.length);
-    for (const link of colaLinks) {
-      console.log(
-        `  ${leafNodes[link.source as number].id} ↔ ${leafNodes[link.target as number].id}  (len=${Math.round(link.length ?? 0)}, w=${link.weight})`,
-      );
-    }
-    console.groupEnd();
-
     // ── Run layout per connected component ─────────────────────────────
     // Running a single WebCola instance with handleDisconnected(false)
     // causes issues: the shortest-path distance between disconnected

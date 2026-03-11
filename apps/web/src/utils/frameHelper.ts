@@ -48,6 +48,8 @@
  * 5. Locked Frame Respect: Locked frames cannot gain or lose children
  */
 
+import { getNodeSize as _getNodeSize } from './nodeSize';
+
 import type { Edge, Node, XYPosition } from '@xyflow/react';
 
 export type NestableNode = Node & {
@@ -141,39 +143,15 @@ export function normalizeTreeOrder(nodes: NestableNode[]): NestableNode[] {
   return result;
 }
 
+/**
+ * Return the rendered width/height of a canvas node.
+ * Delegates to the shared `getNodeSize` utility in `nodeSize.ts`.
+ */
 export function getNodeSize(node: NestableNode): {
   width: number;
   height: number;
 } {
-  const measured = (
-    node as unknown as { measured?: { width?: number; height?: number } }
-  ).measured;
-  const style = (
-    node as unknown as { style?: { width?: unknown; height?: unknown } }
-  ).style;
-
-  const width =
-    (typeof measured?.width === 'number' ? measured.width : undefined) ??
-    (typeof style?.width === 'number'
-      ? style.width
-      : typeof style?.width === 'string'
-        ? Number.parseFloat(style.width)
-        : undefined) ??
-    0;
-
-  const height =
-    (typeof measured?.height === 'number' ? measured.height : undefined) ??
-    (typeof style?.height === 'number'
-      ? style.height
-      : typeof style?.height === 'string'
-        ? Number.parseFloat(style.height)
-        : undefined) ??
-    0;
-
-  return {
-    width: Number.isFinite(width) ? width : 0,
-    height: Number.isFinite(height) ? height : 0,
-  };
+  return _getNodeSize(node);
 }
 
 function getAncestorIds(

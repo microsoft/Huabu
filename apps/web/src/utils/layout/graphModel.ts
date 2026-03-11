@@ -8,6 +8,8 @@
  *   c) Group construction — parentId hierarchy → LayoutGroup[]
  */
 
+import { getLayoutNodeSize } from '../nodeSize';
+
 import type { LayoutEdge, LayoutGraph, LayoutGroup, LayoutNode } from './types';
 import type { Node, Edge } from '@xyflow/react';
 
@@ -24,21 +26,6 @@ const WEIGHT_SAME_CHAT_THREAD = 0.3;
 const WEIGHT_SAME_FRAME = 0.2;
 
 // ── Helpers ────────────────────────────────────────────────────────────
-
-/** Return the computed width/height of a canvas node. */
-function getNodeSize(n: Node): { w: number; h: number } {
-  const style = n.style as { width?: number; height?: number } | undefined;
-  return {
-    w:
-      typeof style?.width === 'number'
-        ? style.width
-        : (n.measured?.width ?? 200),
-    h:
-      typeof style?.height === 'number'
-        ? style.height
-        : (n.measured?.height ?? 100),
-  };
-}
 
 /**
  * Add or update a virtual edge, keeping max weight per (source, target) pair.
@@ -118,7 +105,7 @@ export function buildLayoutGraph(
     if (n.type === 'frame' && n.id === scopeFrameId) continue;
 
     nodeMap.set(n.id, n);
-    const { w, h } = getNodeSize(n);
+    const { w, h } = getLayoutNodeSize(n);
 
     // A node must not be repositioned if:
     //   1. It is in the explicit fixedNodeIds set (incremental / selected layout), OR

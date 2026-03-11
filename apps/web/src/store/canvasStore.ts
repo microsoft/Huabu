@@ -904,7 +904,7 @@ const useCanvasStore = create<RFState>()(
       get().dispatch({ type: 'SPREAD_NODES' });
     },
 
-    autoLayoutEnabled: false,
+    autoLayoutEnabled: true,
     toggleAutoLayout: () => {
       set({ autoLayoutEnabled: !get().autoLayoutEnabled });
     },
