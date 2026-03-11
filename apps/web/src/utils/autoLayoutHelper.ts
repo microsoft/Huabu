@@ -3,6 +3,7 @@ import {
   getDescendantIds,
   type NestableNode,
 } from './frameHelper';
+import { snapToGrid } from '../config/canvas';
 
 import type { Node } from '@xyflow/react';
 
@@ -134,8 +135,8 @@ export function alignNodes(
     return {
       ...n,
       position: {
-        x: newAbsX - offsetX,
-        y: newAbsY - offsetY,
+        x: snapToGrid(newAbsX - offsetX),
+        y: snapToGrid(newAbsY - offsetY),
       },
     };
   });
@@ -245,8 +246,8 @@ export function spreadNodes(nodes: Node[], gap = 24): Node[] | null {
     return {
       ...n,
       position: {
-        x: newAbs.x - offsetX,
-        y: newAbs.y - offsetY,
+        x: snapToGrid(newAbs.x - offsetX),
+        y: snapToGrid(newAbs.y - offsetY),
       },
     };
   });
@@ -344,6 +345,12 @@ export function resolveTopLevelOverlaps(
     const newPos = newPositions.get(n.id);
     if (!newPos) return n;
     if (n.position.x === newPos.x && n.position.y === newPos.y) return n;
-    return { ...n, position: newPos };
+    return {
+      ...n,
+      position: {
+        x: snapToGrid(newPos.x),
+        y: snapToGrid(newPos.y),
+      },
+    };
   });
 }

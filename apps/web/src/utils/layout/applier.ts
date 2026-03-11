@@ -7,6 +7,7 @@
  *  - Wrap the operation as a single undo history entry
  */
 
+import { snapToGrid } from '../../config/canvas';
 import { canvasHistoryManager } from '../../store/canvasHistoryManager';
 
 import type { LayoutResult } from './types';
@@ -70,7 +71,7 @@ export function applyLayoutResult(
     if (newPos) {
       updated = {
         ...updated,
-        position: { x: newPos.x, y: newPos.y },
+        position: { x: snapToGrid(newPos.x), y: snapToGrid(newPos.y) },
       };
     }
 

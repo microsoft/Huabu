@@ -21,6 +21,7 @@ import { IntentPopover } from './IntentPopover';
 import { MultiSelectToolbar } from './MultiSelectToolbar';
 import { uploadImage, uploadPdf, uploadVideo } from '../../api/artifact';
 import { getSource } from '../../api/knowledge';
+import { GRID_SIZE } from '../../config/canvas';
 import { useCanvasShortcuts } from '../../hooks/useCanvasShortcuts';
 import useCanvasStore from '../../store/canvasStore.ts';
 import {
@@ -571,7 +572,7 @@ export const Canvas: React.FC = () => {
         </Panel>
         <MultiSelectToolbar />
         <IntentPopover />
-        <Background color="#ccc" gap={18} />
+        <Background color="#ccc" gap={GRID_SIZE} />
 
         <Controls position="bottom-left" />
       </ReactFlow>
