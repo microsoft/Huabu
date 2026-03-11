@@ -18,7 +18,11 @@ import {
 import { addEdge, type Node, type Edge, type Connection } from '@xyflow/react';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
-import { alignNodes, spreadNodes } from '../utils/autoLayoutHelper';
+import {
+  alignNodes,
+  spreadNodes,
+  resolveTopLevelOverlaps,
+} from '../utils/autoLayoutHelper';
 import {
   findFrameAtPoint,
   frameNodes,
@@ -903,10 +907,22 @@ function handleAlignNodes(
   ctx: CanvasHandlerContext,
 ): void {
   const { nodes, edges, set } = ctx;
-  const result = alignNodes(nodes, cmd.direction);
+  let result = alignNodes(nodes, cmd.direction);
   if (!result) return;
 
   canvasHistoryManager.takeSnapshot(nodes, edges);
+
+  // Resize affected parent frames when auto-layout is enabled.
+  if (ctx.autoLayoutEnabled) {
+    const affectedFrameIds = new Set<string>();
+    for (const n of result) {
+      if (n.selected && n.parentId) affectedFrameIds.add(n.parentId);
+    }
+    if (affectedFrameIds.size > 0) {
+      result = fitFrames(result as NestableNode[], affectedFrameIds);
+    }
+  }
+
   set({ nodes: result });
 }
 
@@ -915,10 +931,22 @@ function handleSpreadNodes(
   ctx: CanvasHandlerContext,
 ): void {
   const { nodes, edges, set } = ctx;
-  const result = spreadNodes(nodes);
+  let result = spreadNodes(nodes);
   if (!result) return;
 
   canvasHistoryManager.takeSnapshot(nodes, edges);
+
+  // Resize affected parent frames when auto-layout is enabled.
+  if (ctx.autoLayoutEnabled) {
+    const affectedFrameIds = new Set<string>();
+    for (const n of result) {
+      if (n.selected && n.parentId) affectedFrameIds.add(n.parentId);
+    }
+    if (affectedFrameIds.size > 0) {
+      result = fitFrames(result as NestableNode[], affectedFrameIds);
+    }
+  }
+
   set({ nodes: result });
 }
 
@@ -942,7 +970,12 @@ function handleLayoutGroup(
   const { nodes, edges, set } = ctx;
   const result = layoutGroupNodes(nodes, edges, cmd.frameId, { animate: true });
   if (!result) return;
-  set({ nodes: result });
+  // Resize the frame to tightly wrap its newly laid-out children.
+  const fitted = fitFrameToChildren(result as NestableNode[], cmd.frameId);
+  // Push any other top-level nodes away from the (potentially grown) frame
+  // so they don't end up visually overlapping it.
+  const resolved = resolveTopLevelOverlaps(fitted, cmd.frameId);
+  set({ nodes: resolved });
 }
 
 function handleNodeDragStop(
