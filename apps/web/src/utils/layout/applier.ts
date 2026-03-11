@@ -13,9 +13,16 @@ import type { LayoutResult } from './types';
 import type { Node, Edge } from '@xyflow/react';
 
 export interface ApplyOptions {
-  /** Whether to animate the transition (not yet implemented). */
+  /** Whether to animate node position and size transitions. */
   animate?: boolean;
 }
+
+/** CSS transition injected when animate=true. Cleared by the store after the duration. */
+export const LAYOUT_ANIMATION_TRANSITION =
+  'transform 350ms cubic-bezier(0.4, 0, 0.2, 1), width 350ms cubic-bezier(0.4, 0, 0.2, 1), height 350ms cubic-bezier(0.4, 0, 0.2, 1)';
+
+/** Duration (ms) matching the transition above — used by callers for cleanup. */
+export const LAYOUT_ANIMATION_DURATION_MS = 400;
 
 /**
  * Apply layout results to the canvas by producing a new nodes array.
@@ -27,7 +34,7 @@ export function applyLayoutResult(
   nodes: Node[],
   edges: Edge[],
   result: LayoutResult,
-  _options: ApplyOptions = {},
+  options: ApplyOptions = {},
 ): Node[] | null {
   const { positions, groupSizes } = result;
 
@@ -49,6 +56,8 @@ export function applyLayoutResult(
 
   // Take undo snapshot before applying changes
   canvasHistoryManager.takeSnapshot(nodes, edges);
+
+  const { animate } = options;
 
   const newNodes = nodes.map((n) => {
     const newPos = positions.get(n.id);
@@ -73,6 +82,17 @@ export function applyLayoutResult(
           ...(updated.style ?? {}),
           width: newSize.width,
           height: newSize.height,
+        },
+      };
+    }
+
+    // Inject CSS transition so ReactFlow's DOM update animates smoothly.
+    if (animate) {
+      updated = {
+        ...updated,
+        style: {
+          ...(updated.style ?? {}),
+          transition: LAYOUT_ANIMATION_TRANSITION,
         },
       };
     }

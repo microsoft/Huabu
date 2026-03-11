@@ -929,7 +929,7 @@ function handleLayoutAll(
   ctx: CanvasHandlerContext,
 ): void {
   const { nodes, edges, set } = ctx;
-  const result = layoutAllNodes(nodes, edges);
+  const result = layoutAllNodes(nodes, edges, { animate: true });
   if (!result) return;
   // Snapshot is taken inside applyLayoutResult
   set({ nodes: result });
@@ -940,7 +940,7 @@ function handleLayoutGroup(
   ctx: CanvasHandlerContext,
 ): void {
   const { nodes, edges, set } = ctx;
-  const result = layoutGroupNodes(nodes, edges, cmd.frameId);
+  const result = layoutGroupNodes(nodes, edges, cmd.frameId, { animate: true });
   if (!result) return;
   set({ nodes: result });
 }

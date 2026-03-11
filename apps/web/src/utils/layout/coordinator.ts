@@ -10,8 +10,11 @@ import { applyLayoutResult } from './applier';
 import { DEFAULT_LAYOUT_OPTIONS, LayoutEngine } from './engine';
 import { buildLayoutGraph } from './graphModel';
 
+import type { ApplyOptions } from './applier';
 import type { LayoutOptions } from './types';
 import type { Node, Edge } from '@xyflow/react';
+
+type CoordinatorOptions = Partial<LayoutOptions> & ApplyOptions;
 
 // Singleton engine instance.
 // layout() uses Cola (stress majorization — great for full re-layout).
@@ -27,11 +30,11 @@ const engine = new LayoutEngine();
 export function layoutAll(
   nodes: Node[],
   edges: Edge[],
-  options?: Partial<LayoutOptions>,
+  options?: CoordinatorOptions,
 ): Node[] | null {
   const graph = buildLayoutGraph(nodes, edges);
   const result = engine.layout(graph, options);
-  return applyLayoutResult(nodes, edges, result);
+  return applyLayoutResult(nodes, edges, result, { animate: options?.animate });
 }
 
 /**
@@ -42,11 +45,11 @@ export function layoutGroup(
   nodes: Node[],
   edges: Edge[],
   frameId: string,
-  options?: Partial<LayoutOptions>,
+  options?: CoordinatorOptions,
 ): Node[] | null {
   const graph = buildLayoutGraph(nodes, edges, { scopeFrameId: frameId });
   const result = engine.layout(graph, options);
-  return applyLayoutResult(nodes, edges, result);
+  return applyLayoutResult(nodes, edges, result, { animate: options?.animate });
 }
 
 /**

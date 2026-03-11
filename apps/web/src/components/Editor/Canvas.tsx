@@ -550,7 +550,13 @@ export const Canvas: React.FC = () => {
         onNodeDoubleClick={(e) => e.stopPropagation()}
         fitView
         attributionPosition="bottom-right"
-        panOnDrag={pendingNodeType ? false : tool === 'pan' ? true : [1] /* 1 = middle mouse button */}
+        panOnDrag={
+          pendingNodeType
+            ? false
+            : tool === 'pan'
+              ? true
+              : [1] /* 1 = middle mouse button */
+        }
         selectionOnDrag={pendingNodeType ? false : tool === 'select'}
         nodesDraggable={!pendingNodeType}
         elementsSelectable={!pendingNodeType}

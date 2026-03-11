@@ -13,8 +13,8 @@ export const MainLayout = ({
   rightPanel,
   children,
 }: MainLayoutProps) => {
-  const [isLeftCollapsed, setIsLeftCollapsed] = useState(false);
-  const [isRightCollapsed, setIsRightCollapsed] = useState(false);
+  const [isLeftCollapsed, setIsLeftCollapsed] = useState(true);
+  const [isRightCollapsed, setIsRightCollapsed] = useState(true);
 
   const contentRef = useRef<HTMLDivElement | null>(null);
 

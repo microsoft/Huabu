@@ -310,19 +310,22 @@ export const CanvasLayerTree = ({
               const isCollapsible =
                 item.node.type === 'frame' || item.node.type === 'group';
               const isCollapsed = isFrameCollapsed(item.id);
-              const isLocked = Boolean(item.node.data?.locked);
+              const isSelfLocked = Boolean(item.node.data?.locked);
 
               // Check if this node is inside a locked frame
-              let isDraggingDisabled = false;
+              let isParentLocked = false;
               let parentId = item.node.parentId;
               while (parentId) {
                 const parent = visibleItemMap.get(parentId);
                 if (parent && Boolean(parent.node.data?.locked)) {
-                  isDraggingDisabled = true;
+                  isParentLocked = true;
                   break;
                 }
                 parentId = parent?.node.parentId;
               }
+
+              const isLocked = isSelfLocked || isParentLocked;
+              const isDraggingDisabled = isParentLocked;
 
               return (
                 <SortableRow

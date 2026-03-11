@@ -43,6 +43,7 @@ import {
   needsIngestion,
   type NodeIngestionInfo,
 } from '../utils/ingestHelper';
+import { LAYOUT_ANIMATION_DURATION_MS } from '../utils/layout/applier';
 
 // ---------------------------------------------------------------------------
 // Frame Fit Preview
@@ -909,15 +910,39 @@ const useCanvasStore = create<RFState>()(
     },
     layoutAll: () => {
       get().dispatch({ type: 'LAYOUT_ALL' });
-      // Fit view to center all nodes after layout
-      requestAnimationFrame(() => {
+      // Clear transition styles after the animation completes.
+      setTimeout(() => {
+        const currentNodes = get().nodes;
+        set({
+          nodes: currentNodes.map((n) => {
+            const s = n.style as Record<string, unknown> | undefined;
+            if (!s?.transition) return n;
+            const { transition: _t, ...rest } = s;
+            return { ...n, style: rest as Node['style'] };
+          }),
+        });
+      }, LAYOUT_ANIMATION_DURATION_MS);
+      // Fit view slightly after layout so the animation is already in motion.
+      setTimeout(() => {
         get().rfInstance?.fitView({ duration: 300, padding: 0.15 });
-      });
+      }, 50);
     },
     layoutGroup: (frameId) => {
       get().dispatch({ type: 'LAYOUT_GROUP', frameId });
-      // Fit view to the frame's children after layout
-      requestAnimationFrame(() => {
+      // Clear transition styles after the animation completes.
+      setTimeout(() => {
+        const currentNodes = get().nodes;
+        set({
+          nodes: currentNodes.map((n) => {
+            const s = n.style as Record<string, unknown> | undefined;
+            if (!s?.transition) return n;
+            const { transition: _t, ...rest } = s;
+            return { ...n, style: rest as Node['style'] };
+          }),
+        });
+      }, LAYOUT_ANIMATION_DURATION_MS);
+      // Fit view to the frame’s children after layout.
+      setTimeout(() => {
         const children = get().nodes.filter((n) => n.parentId === frameId);
         if (children.length > 0) {
           get().rfInstance?.fitView({
@@ -926,7 +951,7 @@ const useCanvasStore = create<RFState>()(
             padding: 0.15,
           });
         }
-      });
+      }, 50);
     },
     moveNodeIntoFrame: (nodeId, frameId) => {
       get().dispatch({ type: 'MOVE_INTO_FRAME', nodeId, frameId });
