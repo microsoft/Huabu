@@ -128,10 +128,12 @@ export const Canvas: React.FC = () => {
   const lastDropRef = useRef<{ key: string; at: number } | null>(null);
   const mousePositionRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
-  // Keyboard shortcuts + paste handler (extracted to hook)
-  useCanvasShortcuts({ rfInstanceRef, mousePositionRef });
-
-  const [tool, setTool] = useState<'select' | 'pan'>('select');
+  // Keyboard shortcuts + paste handler (extracted to hook).
+  // Also manages tool state (select/pan) and Space-key temporary pan.
+  const { tool, setTool } = useCanvasShortcuts({
+    rfInstanceRef,
+    mousePositionRef,
+  });
 
   // --- Frame drag-to-create state ---
   const [frameDragStart, setFrameDragStart] = useState<{
