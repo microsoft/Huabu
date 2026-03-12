@@ -104,6 +104,9 @@ const FrameFitPreviewOverlay: React.FC<{
   );
 });
 
+/** Node types that support expand-on-double-click. */
+const EXPANDABLE_TYPES = new Set(['image', 'video', 'web', 'pdf', 'note']);
+
 export const Canvas: React.FC = () => {
   const nodes = useCanvasStore((state) => state.nodes);
   const edges = useCanvasStore((state) => state.edges);
@@ -117,6 +120,7 @@ export const Canvas: React.FC = () => {
   const addNode = useCanvasStore((state) => state.addNode);
   const patchNodeSilent = useCanvasStore((state) => state.patchNodeSilent);
   const setRfInstance = useCanvasStore((state) => state.setRfInstance);
+  const openExpanded = useCanvasStore((state) => state.openExpanded);
   const frameNodesInRect = useCanvasStore((state) => state.frameNodesInRect);
   const pendingNodeType = useCanvasStore((state) => state.pendingNodeType);
   const setPendingNodeType = useCanvasStore(
@@ -550,7 +554,16 @@ export const Canvas: React.FC = () => {
           setRfInstance(instance);
         }}
         onPaneClick={handlePaneClick}
-        onNodeDoubleClick={(e) => e.stopPropagation()}
+        onNodeDoubleClick={(e, node) => {
+          e.stopPropagation();
+          // Expand any expandable node type on double-click.
+          // This also acts as a fallback when the inner onDoubleClick
+          // handler doesn't fire (e.g. locked nodes whose pointer-events
+          // may have been disrupted).
+          if (EXPANDABLE_TYPES.has(node.type ?? '')) {
+            openExpanded(node.id);
+          }
+        }}
         fitView
         attributionPosition="bottom-right"
         panOnDrag={

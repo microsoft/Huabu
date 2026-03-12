@@ -245,10 +245,6 @@ export const PDFNode = memo(
         resizable
         keepAspectRatio={false}
         className={clsx('bg-white transition-all duration-300 ease-in-out')}
-        onDoubleClick={(e) => {
-          e.stopPropagation();
-          openExpanded(id);
-        }}
       >
         <div
           ref={containerRef}

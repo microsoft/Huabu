@@ -155,10 +155,6 @@ export const NoteNode = memo(
         selected={selected}
         toolbar={NoteToolbar}
         keepAspectRatio={false}
-        onDoubleClick={(e) => {
-          e.stopPropagation();
-          openExpanded(id);
-        }}
       >
         <div
           className={clsx(
