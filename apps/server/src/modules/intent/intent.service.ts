@@ -138,6 +138,33 @@ function formatAction(a: RecentAction): string {
 }
 
 // ---------------------------------------------------------------------------
+// Screenshot helper
+// ---------------------------------------------------------------------------
+
+type ContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string; detail?: string } };
+
+/**
+ * Append a canvas screenshot as a multimodal image_url part.
+ * Handles both raw base64 payloads and existing data-URLs.
+ */
+function appendScreenshot(
+  parts: ContentPart[],
+  screenshot: string | undefined,
+  caption?: string,
+): void {
+  if (!screenshot) return;
+  const url = screenshot.startsWith('data:')
+    ? screenshot
+    : `data:image/png;base64,${screenshot}`;
+  parts.push({ type: 'image_url', image_url: { url, detail: 'auto' } });
+  if (caption) {
+    parts.push({ type: 'text', text: caption });
+  }
+}
+
+// ---------------------------------------------------------------------------
 // LLM-based intent recognition
 // ---------------------------------------------------------------------------
 
@@ -147,23 +174,6 @@ The canvas lets users collect, organize, and synthesize research material using 
 
 ## Your task
 Analyze the provided canvas snapshot and infer the **3–5 most likely next actions** the user wants to take. For each, provide an executable sequence of atomic operations.
-
-## Available atomic operations
-
-| op | Parameters | Description |
-|----|-----------|-------------|
-| ADD_NODE | nodeType, label?, content?, src?, position?, width?, height? | Create a new node |
-| DELETE_NODES | nodeIds[] | Remove nodes by ID |
-| CONNECT | sourceId, targetId | Draw an edge between two nodes |
-| DISCONNECT | sourceId, targetId | Remove an edge between two nodes |
-| UPDATE_NODE_DATA | nodeId, patch{} | Update a node's data — content, label, or any field |
-| GROUP_INTO_FRAME | nodeIds[], frameLabel? | Group nodes into a new frame |
-| UNFRAME | frameId | Dissolve a frame, releasing its children |
-| MOVE_INTO_FRAME | nodeId, frameId | Move a node into an existing frame |
-| MOVE_OUT_OF_FRAME | nodeId | Remove a node from its parent frame |
-| SELECT_NODES | nodeIds[] | Select one or more nodes |
-| ALIGN_NODES | direction (left/center-h/right/top/center-v/bottom) | Align selected nodes |
-| SPREAD_NODES | (none) | Spread apart overlapping selected nodes |
 
 ## Referencing newly created nodes
 Use **$0, $1, $2, ...** as placeholder IDs. $0 = the node created by the 1st ADD_NODE, $1 = the 2nd, etc.
@@ -195,29 +205,15 @@ async function llmIntentRecognition(
   const llm = getLLM();
   const contextText = serializeContext(ctx);
 
-  // Build the user message content parts
-  const userContentParts: Array<
-    | { type: 'text'; text: string }
-    | { type: 'image_url'; image_url: { url: string; detail?: string } }
-  > = [{ type: 'text', text: `Current canvas state:\n\n${contextText}` }];
+  const userContentParts: ContentPart[] = [
+    { type: 'text', text: `Current canvas state:\n\n${contextText}` },
+  ];
 
-  // Attach the viewport screenshot if available
-  if (ctx.screenshot) {
-    // If the screenshot is already a data-URL, use it as-is; otherwise wrap it
-    const imageUrl = ctx.screenshot.startsWith('data:')
-      ? ctx.screenshot
-      : `data:image/png;base64,${ctx.screenshot}`;
-
-    userContentParts.push({
-      type: 'image_url',
-      image_url: { url: imageUrl, detail: 'low' },
-    });
-
-    userContentParts.push({
-      type: 'text',
-      text: 'Above is a screenshot of the current canvas viewport. Use the spatial layout to inform your intent suggestions.',
-    });
-  }
+  appendScreenshot(
+    userContentParts,
+    ctx.screenshot,
+    'Above is a screenshot of the current canvas viewport. Use the spatial layout to inform your intent suggestions.',
+  );
 
   const response = await llm.invoke([
     new SystemMessage(INTENT_SYSTEM_PROMPT),
@@ -298,26 +294,14 @@ async function llmResolveActions(
   const llm = getLLM();
   const contextText = serializeContext(ctx);
 
-  const userContentParts: Array<
-    | { type: 'text'; text: string }
-    | { type: 'image_url'; image_url: { url: string; detail?: string } }
-  > = [
+  const userContentParts: ContentPart[] = [
     {
       type: 'text',
       text: `Current canvas state:\n\n${contextText}\n\nUser-chosen intent: "${chosenIntent}"`,
     },
   ];
 
-  if (ctx.screenshot) {
-    const imageUrl = ctx.screenshot.startsWith('data:')
-      ? ctx.screenshot
-      : `data:image/png;base64,${ctx.screenshot}`;
-
-    userContentParts.push({
-      type: 'image_url',
-      image_url: { url: imageUrl, detail: 'low' },
-    });
-  }
+  appendScreenshot(userContentParts, ctx.screenshot);
 
   const response = await llm.invoke([
     new SystemMessage(ACTION_RESOLVE_SYSTEM_PROMPT),
