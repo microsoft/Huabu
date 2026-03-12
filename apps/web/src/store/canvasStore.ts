@@ -99,7 +99,7 @@ export type CanvasCommand =
       width: number;
       height: number;
     }
-  | { type: 'TOGGLE_FRAME_LOCK'; frameId: string }
+  | { type: 'TOGGLE_NODE_LOCK'; nodeId: string }
   | { type: 'REORDER_NODES'; activeId: string; overId: string }
   | { type: 'REORDER_NODES'; nodeIds: string[]; position: 'top' | 'bottom' }
   | { type: 'PASTE_NODES'; flowPosition?: { x: number; y: number } }
@@ -233,7 +233,7 @@ type RFState = {
     height: number;
   }) => void;
   unframe: (frameId: string) => void;
-  toggleFrameLock: (frameId: string) => void;
+  toggleNodeLock: (nodeId: string) => void;
 
   /**
    * Take an undo snapshot of the current canvas state.
@@ -948,8 +948,8 @@ const useCanvasStore = create<RFState>()(
       get().dispatch({ type: 'UNFRAME', frameId });
     },
 
-    toggleFrameLock: (frameId) => {
-      get().dispatch({ type: 'TOGGLE_FRAME_LOCK', frameId });
+    toggleNodeLock: (nodeId) => {
+      get().dispatch({ type: 'TOGGLE_NODE_LOCK', nodeId });
     },
 
     takeSnapshot: () => {

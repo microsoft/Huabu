@@ -345,63 +345,6 @@ export function unframe(
   return { nodes: normalizeTreeOrder(nextNodes), edges: nextEdges };
 }
 
-/**
- * Toggles a frame's locked state by flipping `data.locked`.
- *
- * This is intentionally scoped to the frame node itself so locking only affects
- * behaviors that explicitly check this flag (e.g. auto-frame).
- */
-export function toggleFrameLock(
-  nodes: NestableNode[],
-  frameId: string,
-): NestableNode[] {
-  const byId = indexById(nodes);
-  const group = byId.get(frameId);
-  if (!group) return nodes;
-
-  const locked = Boolean(group.data?.locked);
-  const nextLocked = !locked;
-
-  const flagKey = '__dragDisabledByFrameLock';
-  const descendantIds = new Set(getDescendantIds(nodes, frameId));
-
-  return nodes.map((n) => {
-    if (n.id === frameId) {
-      return {
-        ...n,
-        data: { ...(n.data ?? {}), locked: nextLocked },
-      };
-    }
-
-    if (!descendantIds.has(n.id)) return n;
-
-    if (nextLocked) {
-      if (n.draggable === false) return n;
-      return {
-        ...n,
-        draggable: false,
-        data: {
-          ...(n.data ?? {}),
-          [flagKey]: true,
-        },
-      };
-    }
-
-    if ((n.data as Record<string, unknown> | undefined)?.[flagKey] !== true)
-      return n;
-
-    const dataObj = (n.data ?? {}) as Record<string, unknown>;
-    const { [flagKey]: removedFlag, ...restData } = dataObj;
-    void removedFlag;
-
-    return {
-      ...n,
-      draggable: true,
-      data: restData,
-    };
-  });
-}
-
 export type FrameNodesOptions = {
   frameId: string;
   label?: string;

@@ -24,7 +24,6 @@ import {
   frameNodes,
   frameNodesInRect,
   getAbsolutePosition,
-  toggleFrameLock,
   unframe,
   moveNodeIntoFrame,
   moveNodeOutOfFrame,
@@ -44,6 +43,7 @@ import {
   layoutGroup as layoutGroupNodes,
   placeNode as placeNewNode,
 } from '../utils/layout';
+import { toggleNodeLock } from '../utils/nodeHelper';
 import {
   AUTO_GENERATED_PLACEHOLDER_PATTERN,
   deduplicateLabel,
@@ -688,13 +688,13 @@ function handleUpdateNodeData(
   }
 }
 
-function handleToggleFrameLock(
-  cmd: Extract<CanvasCommand, { type: 'TOGGLE_FRAME_LOCK' }>,
+function handleToggleNodeLock(
+  cmd: Extract<CanvasCommand, { type: 'TOGGLE_NODE_LOCK' }>,
   ctx: CanvasHandlerContext,
 ): void {
   const { nodes, edges, set } = ctx;
   canvasHistoryManager.takeSnapshot(nodes, edges);
-  set({ nodes: toggleFrameLock(nodes as NestableNode[], cmd.frameId) });
+  set({ nodes: toggleNodeLock(nodes as NestableNode[], cmd.nodeId) });
 }
 
 function handleReorderNodes(
@@ -1130,8 +1130,8 @@ export function handleCommand(
       return handleResizeNode(cmd, ctx);
     case 'UPDATE_NODE_DATA':
       return handleUpdateNodeData(cmd, ctx);
-    case 'TOGGLE_FRAME_LOCK':
-      return handleToggleFrameLock(cmd, ctx);
+    case 'TOGGLE_NODE_LOCK':
+      return handleToggleNodeLock(cmd, ctx);
     case 'REORDER_NODES':
       return handleReorderNodes(cmd, ctx);
     case 'PASTE_NODES':

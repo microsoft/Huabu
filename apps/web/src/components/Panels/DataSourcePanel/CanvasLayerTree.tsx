@@ -121,7 +121,7 @@ export const CanvasLayerTree = ({
     (state) => state.toggleFrameCollapse,
   );
   const collapsedFrameIds = useCanvasStore((state) => state.collapsedFrameIds);
-  const toggleFrameLock = useCanvasStore((state) => state.toggleFrameLock);
+  const toggleNodeLock = useCanvasStore((state) => state.toggleNodeLock);
 
   const isFrameCollapsed = (frameId: string) => collapsedFrameIds.has(frameId);
 
@@ -283,7 +283,7 @@ export const CanvasLayerTree = ({
   };
 
   const handleToggleLock = (id: string) => {
-    toggleFrameLock(id);
+    toggleNodeLock(id);
   };
 
   const itemIds = useMemo(() => visibleItems.map((i) => i.id), [visibleItems]);
