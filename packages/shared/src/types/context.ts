@@ -64,8 +64,6 @@ export interface NodeSummary {
   snippet?: string;
   /** Label of the parent frame, if any */
   frameLabel?: string;
-  /** Knowledge base source ID — present when the node has been ingested */
-  sourceId?: string;
 }
 
 // ==================== Selected Nodes ====================

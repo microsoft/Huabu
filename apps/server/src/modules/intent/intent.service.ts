@@ -28,7 +28,7 @@ function serializeContext(ctx: AgentBaseContext): string {
 
   // Nodes
   if (ctx.nodes.length > 0) {
-    lines.push(`Canvas has ${ctx.nodes.length} node(s):`);
+    lines.push(`# Canvas has ${ctx.nodes.length} node(s):`);
     for (const n of ctx.nodes) {
       const frame = n.frameLabel ? ` (in frame "${n.frameLabel}")` : '';
       const snippet = n.snippet ? `: ${n.snippet}` : '';
@@ -36,13 +36,13 @@ function serializeContext(ctx: AgentBaseContext): string {
       lines.push(`- [${n.id}] ${n.type}${label}${frame}${snippet}`);
     }
   } else {
-    lines.push('Canvas is empty.');
+    lines.push('# Canvas is empty.');
   }
 
   // Edges
   if (ctx.edges.length > 0) {
     lines.push('');
-    lines.push('Connections:');
+    lines.push('# Connections:');
     for (const e of ctx.edges) {
       const srcLabel = e.source.label ? ` "${e.source.label}"` : '';
       const tgtLabel = e.target.label ? ` "${e.target.label}"` : '';
@@ -53,9 +53,32 @@ function serializeContext(ctx: AgentBaseContext): string {
   // Recent actions
   if (ctx.recentActions.length > 0) {
     lines.push('');
-    lines.push('Recent user actions (oldest → newest):');
+    lines.push('# Recent user actions (oldest → newest):');
     for (const a of ctx.recentActions) {
       lines.push(`- ${formatAction(a)}`);
+    }
+  }
+
+  // Selected nodes (strong intent signal — full content included)
+  if (ctx.selectedNodes && ctx.selectedNodes.length > 0) {
+    lines.push('');
+    lines.push(`# Currently selected node(s) (${ctx.selectedNodes.length}):`);
+    for (const s of ctx.selectedNodes) {
+      const label = s.label ? ` "${s.label}"` : '';
+      const content = s.content ? `\n    Content: ${s.content}` : '';
+      const src = s.src ? `\n    Source: ${s.src}` : '';
+      lines.push(`- [${s.id}] ${s.type}${label}${content}${src}`);
+      if (s.children && s.children.length > 0) {
+        for (const child of s.children) {
+          const childLabel = child.label ? ` "${child.label}"` : '';
+          const childContent = child.content
+            ? `\n      Content: ${child.content}`
+            : '';
+          lines.push(
+            `  - [${child.id}] ${child.type}${childLabel}${childContent}`,
+          );
+        }
+      }
     }
   }
 
@@ -173,25 +196,29 @@ const INTENT_SYSTEM_PROMPT = `You are an intent-recognition engine embedded in a
 The canvas lets users collect, organize, and synthesize research material using typed nodes (note, text, web, pdf, image, video) that can be grouped into frames and connected by edges.
 
 ## Your task
-Analyze the provided canvas snapshot and infer the **3–5 most likely next actions** the user wants to take. For each, provide an executable sequence of atomic operations.
+Analyze the provided canvas snapshot and recent user action trail to **infer the user's intent** — what the user most likely wants to do next.
+Apply a sensemaking lens before generating suggestions. First, determine which sensemaking stage the user is currently in based on the canvas state and action history:
+1. **Foraging** — actively collecting and importing new material.
+2. **Organizing** — structuring existing material.
+3. **Synthesizing** — integrating and condensing information .
+4. **Presenting** — refining layout and appearance for communication.
+Use the detected stage to bias your intent suggestions toward actions that are natural for that stage, while still considering cross-stage transitions.
 
-## Referencing newly created nodes
-Use **$0, $1, $2, ...** as placeholder IDs. $0 = the node created by the 1st ADD_NODE, $1 = the 2nd, etc.
+Return **3–5 most likely intents** the user wants to pursue next.
 
 ## Guidelines
-- Base suggestions on the canvas state and recent action trail. The latest action is the strongest signal.
-- Suggest a **diverse range** of operation types. 
-- Use REAL node IDs (from the [id] tags in the canvas state) when referencing existing nodes.
+- Focus on seleted nodes. If nodes are selected, the user's intent is very likely related to those nodes.
+- The **latest action** is the strongest signal.
+- Use REAL node labels (from the [id] tags in the canvas state) when referencing existing nodes.
 - Keep labels short (verb + object, ≤ 8 words).
-- Each intent may need multiple operations composed together.
+- Consider common research intents such as: synthesize/merge, diverge/brainstorm, compare/contrast, extract, reorganize, annotate or summarize, bridge gaps, and refine or restructure.
 
 ## Output format
 Return **only** a JSON array (no markdown fences, no commentary). Each element:
 {
   "label": "short actionable description",
   "confidence": 0.0–1.0,
-  "description": "one-sentence rationale",
-  "actions": [ ... ]
+  "description": "one-sentence rationale"
 }
 Sorted by confidence descending.`;
 
@@ -236,7 +263,7 @@ async function llmIntentRecognition(
       label: String(item.label ?? ''),
       confidence: Number(item.confidence ?? 0),
       description: item.description ? String(item.description) : undefined,
-      actions: Array.isArray(item.actions) ? item.actions : [],
+      actions: [],
     }));
   } catch {
     console.error('[intent] Failed to parse LLM response:', raw);
@@ -253,7 +280,12 @@ const ACTION_RESOLVE_SYSTEM_PROMPT = `You are an action-planning engine embedded
 The canvas lets users collect, organize, and synthesize research material using typed nodes (note, text, web, pdf, image, video) that can be grouped into frames and connected by edges.
 
 ## Your task
-Given the current canvas state and a user-chosen intent, produce **exactly one** ordered sequence of atomic operations that best fulfils the intent.
+Given the user-chosen intent and selected nodes, produce **exactly one** ordered sequence of atomic operations that best fulfils the intent.
+The provided intent is the **strongest guiding signal** — decompose it into a combination of multiple atomic operations to fully realise it.
+
+## Decomposition examples
+- **Merge/synthesize** two nodes → ADD_NODE (create a merged note) → UPDATE_NODE_DATA (fill it with synthesized content) → DELETE_NODES (remove the original two nodes) → CONNECT (link the new node to related context).
+- **Brainstorm/diverge** from a node → ADD_NODE (create several new idea nodes around the source) → UPDATE_NODE_DATA (populate each with a distinct angle or question) → CONNECT (link each new node back to the source).
 
 ## Available atomic operations
 
@@ -276,6 +308,7 @@ Given the current canvas state and a user-chosen intent, produce **exactly one**
 Use **$0, $1, $2, ...** as placeholder IDs. $0 = the node created by the 1st ADD_NODE, $1 = the 2nd, etc.
 
 ## Guidelines
+- Focus on seleted nodes. If nodes are selected, the user's intent is very likely related to those nodes.
 - Use REAL node IDs (from the [id] tags in the canvas state) when referencing existing nodes.
 - Keep the plan minimal — only include steps required to fulfil the intent.
 - Make every action as concrete as possible.

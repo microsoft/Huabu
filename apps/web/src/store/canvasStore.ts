@@ -509,7 +509,6 @@ const useCanvasStore = create<RFState>()(
             frameLabel: n.parentId
               ? (nodeMap.get(n.parentId)?.data?.label as string | undefined)
               : undefined,
-            sourceId: n.data?.sourceId as string | undefined,
           }),
         ),
         edges: edges.map((e) => {
