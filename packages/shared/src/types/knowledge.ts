@@ -10,12 +10,9 @@ export type SourceType = 'web' | 'pdf' | 'note' | 'text';
  */
 export interface Source {
   sourceId: string;
-  workspaceId: string;
   type: SourceType;
   title: string | null;
   src: string | null;
-  createdAt: number;
-  updatedAt: number;
   content: string;
   contentHash: string;
   metaJson: string | null;
@@ -56,7 +53,6 @@ export interface SourceMetadata {
  */
 export interface CreateSourceInput {
   sourceId: string;
-  workspaceId: string;
   type: SourceType;
   title?: string;
   src?: string;

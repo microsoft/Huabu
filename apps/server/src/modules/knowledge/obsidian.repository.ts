@@ -103,12 +103,9 @@ function toSource(
 ): Source {
   return {
     sourceId: meta['source_id'] ?? '',
-    workspaceId: meta['workspace_id'] ?? '',
     type: (meta['type'] ?? 'text') as Source['type'],
     title: meta['title'] ?? null,
     src: meta['src'] ?? null,
-    createdAt: Number(meta['created_at'] ?? 0),
-    updatedAt: Number(meta['updated_at'] ?? 0),
     content: content,
     contentHash: meta['content_hash'] ?? '',
     metaJson: meta['meta_json'] ?? null,
@@ -264,12 +261,9 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
 
     return {
       sourceId: meta['source_id'] ?? '',
-      workspaceId: meta['workspace_id'] ?? '',
       type: (meta['type'] ?? 'text') as Source['type'],
       title: meta['title'] ?? null,
       src: meta['src'] ?? null,
-      createdAt: Number(meta['created_at'] ?? 0),
-      updatedAt: Number(meta['updated_at'] ?? 0),
       contentHash: meta['content_hash'] ?? '',
       metaJson: meta['meta_json'] ?? null,
     };
@@ -278,12 +272,9 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
   private writeSource(source: Source, existingFilePath?: string): void {
     const fm = toFrontmatter({
       source_id: source.sourceId,
-      workspace_id: source.workspaceId,
       type: source.type,
       title: source.title,
       src: source.src,
-      created_at: source.createdAt,
-      updated_at: source.updatedAt,
       content_hash: source.contentHash,
       meta_json: source.metaJson,
     });
@@ -326,9 +317,9 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
     return null;
   }
 
-  findSourceByHash(workspaceId: string, contentHash: string): Source | null {
+  findSourceByHash(contentHash: string): Source | null {
     // Scan all indexed files (metadata only)
-    const all = this.findAllSourcesOverview(workspaceId);
+    const all = this.findAllSourcesOverview();
     const match = all.find((s) => s.contentHash === contentHash);
     if (!match) return null;
     return this.findSourceById(match.sourceId);
@@ -348,7 +339,7 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
     return results;
   }
 
-  findAllSourcesOverview(workspaceId?: string): SourceOverview[] {
+  findAllSourcesOverview(): SourceOverview[] {
     // Update index to ensure we capture new external files
     this.rebuildSourceIndex();
 
@@ -356,14 +347,6 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
     for (const filePath of this.sourceIndex.values()) {
       const source = this.readSourceOverview(filePath);
       if (source) {
-        // If workspaceId is specified, filter by it
-        // But allow sources without workspace_id (legacy files) to match any workspace
-        if (
-          workspaceId &&
-          source.workspaceId &&
-          source.workspaceId !== workspaceId
-        )
-          continue;
         results.push(source);
       }
     }
@@ -371,17 +354,13 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
   }
 
   createSource(input: CreateSourceInput): Source {
-    const now = Date.now();
     const metaJson = input.metadata ? JSON.stringify(input.metadata) : null;
 
     const source: Source = {
       sourceId: input.sourceId,
-      workspaceId: input.workspaceId,
       type: input.type,
       title: input.title ?? null,
       src: input.src ?? null,
-      createdAt: now,
-      updatedAt: now,
       content: input.content ?? '',
       contentHash: input.contentHash,
       metaJson: metaJson,
@@ -435,7 +414,6 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
       metaJson: updates.metadata
         ? JSON.stringify(updates.metadata)
         : existing.metaJson,
-      updatedAt: Date.now(),
     };
 
     // If we are renaming the ID (promoting), we want to overwrite the SAME file

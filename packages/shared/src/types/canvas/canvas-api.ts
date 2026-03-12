@@ -45,14 +45,11 @@ export interface UpdateCanvasStateResult {
  */
 export interface ExportedSource {
   sourceId: string;
-  workspaceId: string;
   type: string;
   title: string | null;
   src: string | null;
   content: string;
   contentHash: string;
-  createdAt: number;
-  updatedAt: number;
   metaJson: string | null;
 }
 

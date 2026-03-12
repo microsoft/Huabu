@@ -10,7 +10,6 @@ import type { CanvasNodeType } from './node.js';
  */
 
 export interface UpsertNodeRequest {
-  workspaceId?: string;
   type: Exclude<CanvasNodeType, 'frame'>; // All node types except 'frame'
   title?: string;
   content?: string;

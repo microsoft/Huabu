@@ -94,7 +94,6 @@ const putCanvasBodySchema = z.object({
 });
 
 const upsertNodeBodySchema = z.object({
-  workspaceId: z.string().min(1).optional(),
   type: z.enum(['note', 'text', 'web', 'pdf']),
   title: z.string().optional(),
   content: z.string().optional(),
@@ -108,14 +107,13 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     Params: { canvasId: string; nodeId: string };
     Body: unknown;
   }>('/:canvasId/nodes/:nodeId', async function (request, reply) {
-    const { canvasId, nodeId } = request.params;
+    const { nodeId } = request.params;
     const parsed = upsertNodeBodySchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.code(400).send({ message: 'Invalid request body' });
     }
 
     const {
-      workspaceId,
       type,
       title,
       content,
@@ -123,17 +121,12 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       sourceId: existingSourceId,
     } = parsed.data;
 
-    // Determine workspaceId from canvas file
-    const canvas = readCanvas(canvasId);
-    const resolvedWorkspaceId = workspaceId ?? canvas?.workspaceId ?? 'default';
-
     const ingestService = await getIngestService();
 
     try {
       const outcome =
         type === 'pdf'
           ? await ingestService.ingestPdfCanvasNodeFromArtifact({
-              workspaceId: resolvedWorkspaceId,
               nodeId,
               title,
               artifactUri: src,
@@ -141,7 +134,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
               existingSourceId,
             })
           : await ingestService.ingestCanvasNode({
-              workspaceId: resolvedWorkspaceId,
               nodeId,
               type,
               title,
@@ -293,14 +285,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         .filter((s): s is NonNullable<typeof s> => s !== null)
         .map((s) => ({
           sourceId: s.sourceId,
-          workspaceId: s.workspaceId,
           type: s.type,
           title: s.title ?? null,
           src: s.src ?? null,
           content: s.content,
           contentHash: s.contentHash,
-          createdAt: s.createdAt,
-          updatedAt: s.updatedAt,
           metaJson:
             (s as unknown as { metaJson?: string | null }).metaJson ?? null,
         }));
@@ -421,14 +410,12 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     sources: z.array(
       z.object({
         sourceId: z.string(),
-        workspaceId: z.string(),
+        workspaceId: z.string().optional(), // kept optional for backward compat with old exports
         type: z.string(),
         title: z.string().nullable(),
         src: z.string().nullable(),
         content: z.string(),
         contentHash: z.string(),
-        createdAt: z.number(),
-        updatedAt: z.number(),
         metaJson: z.string().nullable(),
       }),
     ),
@@ -548,7 +535,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
       repository.createSource({
         sourceId: src.sourceId,
-        workspaceId: src.workspaceId,
         type: src.type as 'note' | 'text' | 'web' | 'pdf',
         title: src.title ?? undefined,
         src: src.src ?? undefined,

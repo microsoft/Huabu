@@ -49,16 +49,16 @@ export function computeBufferHash(buffer: Uint8Array): string {
 }
 
 /**
- * Generate deterministic sourceId from workspace and data
- * @param workspaceId - Workspace identifier
+ * Generate deterministic sourceId from data string.
+ * Uses a fixed "default" prefix to remain backward-compatible with
+ * previously generated IDs.
+ *
  * @param data - Type-specific data for hash generation
  * @returns sourceId in format "src_<hash>"
  */
-function generateDeterministicSourceId(
-  workspaceId: string,
-  data: string,
-): string {
-  const combined = `${workspaceId}:${data}`;
+function generateDeterministicSourceId(data: string): string {
+  // Keep "default:" prefix so existing web/PDF sourceIds stay stable.
+  const combined = `default:${data}`;
   const hash = createHash('sha256')
     .update(combined, 'utf8')
     .digest('hex')
@@ -71,19 +71,18 @@ function generateDeterministicSourceId(
  *
  * Generation rules:
  * - Note/Text: UUID (editable content, hash unstable)
- * - Web: hash(workspaceId + normalizedUri)
- * - PDF: hash(workspaceId + fileContentHash)
+ * - Web: hash(normalizedUri)
+ * - PDF: hash(fileContentHash)
  *
  * @param options - Generation options
  * @returns Generated sourceId
  */
 export function generateSourceId(options: {
-  workspaceId: string;
   type: SourceType;
   uri?: string;
   fileHash?: string;
 }): string {
-  const { workspaceId, type, uri, fileHash } = options;
+  const { type, uri, fileHash } = options;
 
   switch (type) {
     case 'note':
@@ -98,7 +97,7 @@ export function generateSourceId(options: {
         throw new Error('URI required for web source');
       }
       const normalized = normalizeUrl(uri);
-      return generateDeterministicSourceId(workspaceId, `web:${normalized}`);
+      return generateDeterministicSourceId(`web:${normalized}`);
     }
 
     case 'pdf': {
@@ -106,7 +105,7 @@ export function generateSourceId(options: {
       if (!fileHash) {
         throw new Error('File hash required for PDF source');
       }
-      return generateDeterministicSourceId(workspaceId, `pdf:${fileHash}`);
+      return generateDeterministicSourceId(`pdf:${fileHash}`);
     }
 
     default:

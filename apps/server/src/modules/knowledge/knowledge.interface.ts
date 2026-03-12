@@ -19,14 +19,14 @@ export interface IKnowledgeRepository {
   /** Find source by ID */
   findSourceById(sourceId: string): Source | null;
 
-  /** Find source by workspace and content hash (for deduplication) */
-  findSourceByHash(workspaceId: string, contentHash: string): Source | null;
+  /** Find source by content hash (for deduplication) */
+  findSourceByHash(contentHash: string): Source | null;
 
-  /** Find all sources for a workspace */
-  findAllSources(workspaceId: string): Source[];
+  /** Find all sources */
+  findAllSources(): Source[];
 
-  /** Find all sources metadata for a workspace (excludes content) */
-  findAllSourcesOverview(workspaceId: string): SourceOverview[];
+  /** Find all sources metadata (excludes content) */
+  findAllSourcesOverview(): SourceOverview[];
 
   /** Create a new source record */
   createSource(input: CreateSourceInput): Source;

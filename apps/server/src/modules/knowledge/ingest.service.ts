@@ -17,7 +17,6 @@ import type { Source, SourceMetadata, SourceType } from '@sediment/shared';
  * Input for Text/Note source ingestion
  */
 export interface IngestTextSourceInput {
-  workspaceId: string;
   nodeId: string;
   type: 'note' | 'text';
   title?: string;
@@ -34,7 +33,6 @@ export interface IngestTextSourceInput {
  * Input for Web source ingestion
  */
 export interface IngestWebSourceInput {
-  workspaceId: string;
   nodeId: string;
   src: string;
   title?: string;
@@ -50,7 +48,6 @@ export interface IngestWebSourceInput {
  * Input for PDF source ingestion
  */
 export interface IngestPdfSourceInput {
-  workspaceId: string;
   nodeId: string;
   artifactUri: string;
   title?: string;
@@ -112,7 +109,6 @@ export class IngestService {
 
   private upsertPlaceholderSource(params: {
     sourceId: string;
-    workspaceId: string;
     type: 'note' | 'text' | 'web' | 'pdf';
     title?: string;
     src?: string;
@@ -137,7 +133,6 @@ export class IngestService {
 
     this.repository.createSource({
       sourceId: params.sourceId,
-      workspaceId: params.workspaceId,
       type: params.type,
       title: params.title,
       src: params.src,
@@ -153,7 +148,6 @@ export class IngestService {
    * and includes a detailed ingestError.
    */
   async ingestCanvasNode(params: {
-    workspaceId: string;
     nodeId: string;
     type: 'note' | 'text' | 'web';
     title?: string;
@@ -161,8 +155,7 @@ export class IngestService {
     src?: string;
     existingSourceId?: string | null;
   }): Promise<NodeIngestOutcome> {
-    const { workspaceId, nodeId, type, title, content, src, existingSourceId } =
-      params;
+    const { nodeId, type, title, content, src, existingSourceId } = params;
 
     if (type === 'note' || type === 'text') {
       const nodeContent = content ?? '';
@@ -170,7 +163,6 @@ export class IngestService {
         const sourceId =
           existingSourceId ??
           generateSourceId({
-            workspaceId,
             type,
           });
         const ingestError: NodeIngestError = {
@@ -179,7 +171,6 @@ export class IngestService {
         };
         this.upsertPlaceholderSource({
           sourceId,
-          workspaceId,
           type,
           title,
           ingestError,
@@ -189,7 +180,6 @@ export class IngestService {
 
       try {
         const result = await this.ingestTextSource({
-          workspaceId,
           nodeId,
           type,
           title,
@@ -205,7 +195,6 @@ export class IngestService {
         const sourceId =
           existingSourceId ??
           generateSourceId({
-            workspaceId,
             type,
           });
         const ingestError: NodeIngestError = {
@@ -214,7 +203,6 @@ export class IngestService {
         };
         this.upsertPlaceholderSource({
           sourceId,
-          workspaceId,
           type,
           title,
           ingestError,
@@ -230,7 +218,6 @@ export class IngestService {
       const sourceId =
         existingSourceId ??
         generateSourceId({
-          workspaceId,
           type: 'web',
           uri: normalizedUri,
         });
@@ -240,7 +227,6 @@ export class IngestService {
       };
       this.upsertPlaceholderSource({
         sourceId,
-        workspaceId,
         type: 'web',
         title,
         src: normalizedUri,
@@ -251,7 +237,6 @@ export class IngestService {
 
     try {
       const result = await this.ingestWebSource({
-        workspaceId,
         nodeId,
         src: uri,
         title,
@@ -267,7 +252,6 @@ export class IngestService {
       const sourceId =
         existingSourceId ??
         generateSourceId({
-          workspaceId,
           type: 'web',
           uri: normalizedUri,
         });
@@ -277,7 +261,6 @@ export class IngestService {
       };
       this.upsertPlaceholderSource({
         sourceId,
-        workspaceId,
         type: 'web',
         title,
         src: normalizedUri,
@@ -292,15 +275,13 @@ export class IngestService {
    * The artifactsDir should point at the server's artifact storage directory.
    */
   async ingestPdfCanvasNodeFromArtifact(params: {
-    workspaceId: string;
     nodeId: string;
     title?: string;
     artifactUri?: string;
     artifactsDir: string;
     existingSourceId?: string | null;
   }): Promise<NodeIngestOutcome> {
-    const { workspaceId, nodeId, title, artifactsDir, existingSourceId } =
-      params;
+    const { nodeId, title, artifactsDir, existingSourceId } = params;
     const artifactUri = (params.artifactUri ?? '').trim();
 
     const placeholderFrom = async (ingestError: NodeIngestError) => {
@@ -323,14 +304,12 @@ export class IngestService {
       const sourceId =
         existingSourceId ??
         generateSourceId({
-          workspaceId,
           type: 'pdf',
           fileHash,
         });
 
       this.upsertPlaceholderSource({
         sourceId,
-        workspaceId,
         type: 'pdf',
         title,
         src: artifactUri || undefined,
@@ -370,7 +349,6 @@ export class IngestService {
 
     try {
       const result = await this.ingestPdfSource({
-        workspaceId,
         nodeId,
         artifactUri,
         filePath,
@@ -411,7 +389,6 @@ export class IngestService {
   private createOrUpdateSource(params: {
     sourceId: string;
     existingSource: Source | null;
-    workspaceId: string;
     type: SourceType;
     title?: string;
     src?: string;
@@ -422,7 +399,6 @@ export class IngestService {
     const {
       sourceId,
       existingSource,
-      workspaceId,
       type,
       title,
       src,
@@ -444,7 +420,6 @@ export class IngestService {
       // Create new source
       const source = this.repository.createSource({
         sourceId,
-        workspaceId,
         type,
         title,
         src,
@@ -485,7 +460,6 @@ export class IngestService {
     const sourceId =
       input.existingSourceId ??
       generateSourceId({
-        workspaceId: input.workspaceId,
         type: input.type,
       });
 
@@ -508,7 +482,6 @@ export class IngestService {
       const { source, isNew } = this.createOrUpdateSource({
         sourceId,
         existingSource,
-        workspaceId: input.workspaceId,
         type: input.type,
         title: input.title,
         content: content,
@@ -546,7 +519,6 @@ export class IngestService {
 
     // Generate deterministic sourceId
     const sourceId = generateSourceId({
-      workspaceId: input.workspaceId,
       type: 'web',
       uri: normalizedUri,
     });
@@ -580,7 +552,6 @@ export class IngestService {
     const { source, isNew } = this.createOrUpdateSource({
       sourceId,
       existingSource,
-      workspaceId: input.workspaceId,
       type: 'web',
       title,
       src: normalizedUri,
@@ -625,9 +596,8 @@ export class IngestService {
 
     const contentHash = computeContentHash(content);
 
-    // Generate deterministic sourceId from workspace + file content hash
+    // Generate deterministic sourceId from file content hash
     const sourceId = generateSourceId({
-      workspaceId: input.workspaceId,
       type: 'pdf',
       fileHash: contentHash,
     });
@@ -657,7 +627,6 @@ export class IngestService {
     const { source, isNew } = this.createOrUpdateSource({
       sourceId,
       existingSource,
-      workspaceId: input.workspaceId,
       type: 'pdf',
       title,
       src: input.artifactUri,
