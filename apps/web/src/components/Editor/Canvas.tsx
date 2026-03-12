@@ -557,9 +557,6 @@ export const Canvas: React.FC = () => {
         onNodeDoubleClick={(e, node) => {
           e.stopPropagation();
           // Expand any expandable node type on double-click.
-          // This also acts as a fallback when the inner onDoubleClick
-          // handler doesn't fire (e.g. locked nodes whose pointer-events
-          // may have been disrupted).
           if (EXPANDABLE_TYPES.has(node.type ?? '')) {
             openExpanded(node.id);
           }
