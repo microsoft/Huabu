@@ -71,7 +71,8 @@ function measureTextContent(
   document.body.appendChild(el);
   const rect = el.getBoundingClientRect();
   document.body.removeChild(el);
-  return { width: rect.width, height: rect.height };
+  // Ceil the height to prevent sub-pixel rounding from clipping the last line.
+  return { width: Math.ceil(rect.width), height: Math.ceil(rect.height) };
 }
 
 /**
@@ -111,7 +112,10 @@ function computeFontSizeForHeight(
       hi = mid;
     }
   }
-  return Math.max(1, Math.round(lo));
+  // Use 0.5px precision instead of integer-only sizing.
+  // Integer steps can cause big height jumps due to line-wrap discontinuities,
+  // leaving large blank areas. Half-pixel steps fill the container much better.
+  return Math.max(1, Math.floor(lo * 2) / 2);
 }
 
 export const TextNode = memo(
@@ -480,6 +484,8 @@ export const TextNode = memo(
               textDecoration,
               wordBreak: 'break-word',
               whiteSpace: 'pre-wrap',
+              padding: 0,
+              border: 'none',
             }}
           />
         </div>
