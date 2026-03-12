@@ -82,7 +82,6 @@ export interface CanvasExportBundle {
     nodes: unknown[];
     edges: unknown[];
     workspaceName?: string;
-    storageConfig?: unknown;
   };
   /** All knowledge sources referenced by the canvas nodes */
   sources: ExportedSource[];

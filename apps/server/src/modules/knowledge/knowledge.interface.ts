@@ -1,20 +1,17 @@
 import type {
-  CreateRevisionInput,
   CreateSourceInput,
   Source,
   SourceOverview,
-  SourceRevision,
 } from '@sediment/shared';
 
 /**
  * Abstract interface for knowledge storage backends.
  *
  * Implementations:
- * - SqliteKnowledgeRepository  (default, backed by better-sqlite3)
- * - ObsidianKnowledgeRepository (backed by an Obsidian vault on the filesystem)
+ * - ObsidianKnowledgeRepository (file-based, Markdown + YAML frontmatter)
  *
  * Consumers should depend on this interface rather than a concrete class so the
- * storage backend can be swapped via the KNOWLEDGE_STORAGE env var.
+ * storage backend can be swapped at construction time.
  */
 export interface IKnowledgeRepository {
   // ==================== Source Operations ====================
@@ -45,31 +42,11 @@ export interface IKnowledgeRepository {
     },
   ): Source;
 
-  // ==================== Revision Operations ====================
-
-  /** Find latest revision for a source */
-  findLatestRevision(sourceId: string): SourceRevision | null;
-
-  /** Find revision by ID */
-  findRevisionById(revisionId: string): SourceRevision | null;
-
-  /** Check if a revision with specific hash exists for a source */
-  findRevisionByHash(
-    sourceId: string,
-    contentHash: string,
-  ): SourceRevision | null;
-
-  /** Create a new revision record */
-  createRevision(input: CreateRevisionInput): SourceRevision;
-
-  /** Get all revisions for a source (for history view) */
-  findRevisionsBySourceId(sourceId: string): SourceRevision[];
-
   // ==================== Transaction Support ====================
 
   /**
    * Execute a function inside a transaction (or a best-effort equivalent).
-   * SQLite uses real transactions; file-based backends may just run fn().
+   * File-based backends simply run fn() synchronously.
    */
   transaction<T>(fn: () => T): T;
 }

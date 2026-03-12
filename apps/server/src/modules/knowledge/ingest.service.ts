@@ -6,7 +6,6 @@ import { DocumentLoaderFactory } from './loaders/index.js';
 import {
   computeBufferHash,
   computeContentHash,
-  generateRevisionId,
   generateSourceId,
   normalizeUrl,
 } from './utils.js';
@@ -68,7 +67,6 @@ export interface IngestPdfSourceInput {
  */
 export interface IngestSourceResult {
   source: Source;
-  revisionId?: string;
   isNew: boolean;
   contentChanged: boolean;
 }
@@ -504,7 +502,7 @@ export class IngestService {
       };
     }
 
-    // Use transaction for atomic source + revision creation
+    // Use transaction for atomic source creation
     const result = this.repository.transaction(() => {
       // Create or update source
       const { source, isNew } = this.createOrUpdateSource({
@@ -518,18 +516,7 @@ export class IngestService {
         metadata: input.metadata,
       });
 
-      // Create new revision (for editable types, always track history)
-      const revisionId = generateRevisionId();
-      this.repository.createRevision({
-        revisionId,
-        workspaceId: input.workspaceId,
-        sourceId,
-        content: content,
-        contentHash,
-        metadata: input.metadata,
-      });
-
-      return { source, revisionId, isNew };
+      return { source, isNew };
     });
 
     return {
@@ -704,45 +691,19 @@ export class IngestService {
   }
 
   /**
-   * Get source with latest revision content
-   * Useful for building LLM context
+   * Get source with its current content.
+   * Useful for building LLM context.
    */
-  getSourceWithLatestRevision(sourceId: string): {
+  getSourceWithContent(sourceId: string): {
     source: Source;
-    latestRevision?: {
-      revisionId: string;
-      content: string;
-      createdAt: number;
-    };
+    content: string;
   } | null {
     const source = this.repository.findSourceById(sourceId);
     if (!source) return null;
 
-    // For editable types, get latest revision
-    if (source.type === 'note' || source.type === 'text') {
-      const revision = this.repository.findLatestRevision(sourceId);
-      if (revision) {
-        return {
-          source,
-          latestRevision: {
-            revisionId: revision.revisionId,
-            content: revision.content,
-            createdAt: revision.createdAt,
-          },
-        };
-      }
-    }
-
-    // For non-editable types or if no revision, use source content
     return {
       source,
-      latestRevision: source.content
-        ? {
-            revisionId: 'current', // Placeholder for non-revisioned types
-            content: source.content,
-            createdAt: source.updatedAt,
-          }
-        : undefined,
+      content: source.content,
     };
   }
 }
@@ -754,8 +715,8 @@ let serviceInstance: IngestService | null = null;
 
 /**
  * Reset the cached IngestService singleton.
- * Called when the storage backend config changes so that the next call
- * to getIngestService() creates a fresh instance with the new repository.
+ * Must be called whenever the workspace path changes so that the next call
+ * to getIngestService() creates a fresh instance bound to the new repository.
  */
 export function resetIngestService(): void {
   serviceInstance = null;

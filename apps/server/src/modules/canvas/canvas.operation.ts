@@ -7,7 +7,11 @@
 
 import { createId } from '@sediment/shared';
 
-import { getCanvasDb } from './canvas.db.js';
+import {
+  readCanvas,
+  writeCanvas,
+  type CanvasFile,
+} from './canvas.filestore.js';
 import { calculateLayout } from './layout/layout.service.js';
 
 import type {
@@ -31,41 +35,27 @@ import type {
  */
 export class CanvasOperationService {
   /**
-   * Load current canvas state from database
+   * Load current canvas state from file
    */
   private async loadCanvasState(canvasId: string): Promise<{
     nodes: Array<Record<string, unknown>>;
     edges: Array<Record<string, unknown>>;
     version: number;
   }> {
-    const db = getCanvasDb();
-    const row = db
-      .prepare('SELECT stateJson, version FROM canvases WHERE canvasId = ?')
-      .get(canvasId) as { stateJson: string; version: number } | undefined;
+    const canvas = readCanvas(canvasId);
 
-    if (!row) {
+    if (!canvas) {
       // Canvas doesn't exist, return empty state
       return { nodes: [], edges: [], version: 0 };
     }
 
-    try {
-      const state = JSON.parse(row.stateJson) as {
-        nodes?: Array<Record<string, unknown>>;
-        edges?: Array<Record<string, unknown>>;
-      };
-      return {
-        nodes: state.nodes ?? [],
-        edges: state.edges ?? [],
-        version: row.version,
-      };
-    } catch (err) {
-      console.error('[loadCanvasState] Parse error:', err);
-      return { nodes: [], edges: [], version: row.version };
-    }
+    const nodes = (canvas.state.nodes ?? []) as Array<Record<string, unknown>>;
+    const edges = (canvas.state.edges ?? []) as Array<Record<string, unknown>>;
+    return { nodes, edges, version: canvas.version };
   }
 
   /**
-   * Save canvas state to database
+   * Save canvas state to file
    */
   private async saveCanvasState(
     canvasId: string,
@@ -73,41 +63,21 @@ export class CanvasOperationService {
     edges: Array<Record<string, unknown>>,
     currentVersion: number,
   ): Promise<number> {
-    const db = getCanvasDb();
+    const existing = readCanvas(canvasId);
     const nextVersion = currentVersion + 1;
-    const stateJson = JSON.stringify({ nodes, edges });
     const timestamp = Date.now();
 
-    // Check if canvas exists
-    const existing = db
-      .prepare('SELECT canvasId FROM canvases WHERE canvasId = ?')
-      .get(canvasId);
+    const canvasFile: CanvasFile = {
+      canvasId,
+      workspaceId: existing?.workspaceId ?? 'default',
+      title: existing?.title ?? null,
+      version: nextVersion,
+      state: { nodes, edges },
+      createdAt: existing?.createdAt ?? timestamp,
+      updatedAt: timestamp,
+    };
 
-    if (!existing) {
-      // Insert new canvas
-      db.prepare(
-        `INSERT INTO canvases (
-          canvasId, workspaceId, title, version, stateJson, createdAt, updatedAt
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        canvasId,
-        'default',
-        null,
-        nextVersion,
-        stateJson,
-        timestamp,
-        timestamp,
-      );
-    } else {
-      // Update existing canvas
-      db.prepare(
-        `UPDATE canvases
-         SET stateJson = ?,
-             version = ?,
-             updatedAt = ?
-         WHERE canvasId = ?`,
-      ).run(stateJson, nextVersion, timestamp, canvasId);
-    }
+    writeCanvas(canvasFile);
 
     return nextVersion;
   }
@@ -319,26 +289,17 @@ export class CanvasOperationService {
    */
   async calculateLayout(params: CalculateLayoutParams): Promise<LayoutResult> {
     // Get existing canvas state to calculate bounds
-    const db = getCanvasDb();
-    const row = db
-      .prepare('SELECT stateJson FROM canvases WHERE canvasId = ?')
-      .get(params.canvasId) as { stateJson: string } | undefined;
+    const canvas = readCanvas(params.canvasId);
 
     let existingBounds: Bounds | null = null;
 
-    if (row) {
-      try {
-        const state = JSON.parse(row.stateJson) as { nodes?: unknown[] };
-        if (Array.isArray(state.nodes) && state.nodes.length > 0) {
-          // TODO: calculateCanvasBounds with proper types
-          existingBounds = { minX: 0, minY: 0, maxX: 800, maxY: 600 };
-        }
-      } catch (err) {
-        console.error(
-          '[CanvasOperationService.calculateLayout] Parse error:',
-          err,
-        );
-      }
+    if (
+      canvas &&
+      Array.isArray(canvas.state.nodes) &&
+      canvas.state.nodes.length > 0
+    ) {
+      // TODO: calculateCanvasBounds with proper types
+      existingBounds = { minX: 0, minY: 0, maxX: 800, maxY: 600 };
     }
 
     const layoutParams: CalculateLayoutParams = {

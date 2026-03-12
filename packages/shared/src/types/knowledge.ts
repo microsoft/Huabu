@@ -27,19 +27,6 @@ export interface Source {
 export type SourceOverview = Omit<Source, 'content'>;
 
 /**
- * Source revision record - stores version history for editable sources
- */
-export interface SourceRevision {
-  revisionId: string;
-  workspaceId: string;
-  sourceId: string;
-  createdAt: number;
-  content: string;
-  contentHash: string;
-  metaJson: string | null;
-}
-
-/**
  * Source metadata (parsed from metaJson)
  */
 export interface SourceMetadata {
@@ -73,18 +60,6 @@ export interface CreateSourceInput {
   type: SourceType;
   title?: string;
   src?: string;
-  content?: string;
-  contentHash: string;
-  metadata?: SourceMetadata;
-}
-
-/**
- * Source revision creation input
- */
-export interface CreateRevisionInput {
-  revisionId: string;
-  workspaceId: string;
-  sourceId: string;
   content?: string;
   contentHash: string;
   metadata?: SourceMetadata;

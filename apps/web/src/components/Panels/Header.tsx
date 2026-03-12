@@ -10,7 +10,6 @@ export const Header: React.FC = () => {
 
       <WorkspaceMenu />
 
-      {/* Spacer to push settings to the right */}
       <div className="flex-1" />
 
       <SettingsPopover />

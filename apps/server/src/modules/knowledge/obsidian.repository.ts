@@ -11,13 +11,7 @@ import path from 'node:path';
 import { createId } from '@sediment/shared';
 
 import type { IKnowledgeRepository } from './knowledge.interface.js';
-import type {
-  CreateRevisionInput,
-  CreateSourceInput,
-  Source,
-  SourceOverview,
-  SourceRevision,
-} from './types.js';
+import type { CreateSourceInput, Source, SourceOverview } from './types.js';
 
 // ────────────────────────────────────────────────────────────────────────────
 // YAML Frontmatter helpers (lightweight, no external dependency)
@@ -121,67 +115,35 @@ function toSource(
   };
 }
 
-/**
- * Build a SourceRevision from parsed frontmatter + content.
- */
-function toRevisionRow(
-  meta: Record<string, string | null>,
-  content: string,
-): SourceRevision {
-  return {
-    revisionId: meta['revision_id'] ?? '',
-    workspaceId: meta['workspace_id'] ?? '',
-    sourceId: meta['source_id'] ?? '',
-    createdAt: Number(meta['created_at'] ?? 0),
-    content: content,
-    contentHash: meta['content_hash'] ?? '',
-    metaJson: meta['meta_json'] ?? null,
-  };
-}
-
 // ────────────────────────────────────────────────────────────────────────────
 // ObsidianKnowledgeRepository
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
- * Obsidian-vault-backed knowledge repository.
+ * File-based knowledge repository using Markdown with YAML frontmatter.
  *
- * Directory layout inside the vault:
+ * Directory layout:
  *
- *   <vaultPath>/
- *     Sediment/
- *       sources/
- *         <source_id>.md          �?one file per source
- *       revisions/
- *         <source_id>/
- *           <revision_id>.md      �?one file per revision
+ *   <sourcesDir>/
+ *     <Title> (<sourceId>).md   - one file per source
  *
  * Each .md file uses YAML frontmatter for metadata and the body for content.
- * This makes every source browsable and editable directly in Obsidian.
+ * This makes every source browsable and editable directly in any Markdown editor.
  */
 export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
-  private readonly vaultPath: string;
   private readonly sourcesDir: string;
-  private readonly revisionsDir: string;
 
   /**
-   * In-memory index: source_id �?absolute file path.
+   * In-memory index: source_id -> absolute file path.
    * Built once on construction and kept up-to-date on writes.
-   * This allows users to freely rename files in Obsidian without
-   * breaking the link �?we always locate files by the `source_id`
-   * stored in YAML frontmatter, not by filename.
    */
   private sourceIndex = new Map<string, string>();
 
-  constructor(vaultPath: string) {
-    this.vaultPath = vaultPath;
-    const baseDir = path.join(vaultPath, 'Sediment');
-    this.sourcesDir = path.join(baseDir, 'sources');
-    this.revisionsDir = path.join(baseDir, 'revisions');
+  constructor(sourcesDir: string) {
+    this.sourcesDir = sourcesDir;
 
-    // Ensure directories exist
+    // Ensure directory exists
     mkdirSync(this.sourcesDir, { recursive: true });
-    mkdirSync(this.revisionsDir, { recursive: true });
 
     // Build the source index from existing files
     this.rebuildSourceIndex();
@@ -190,11 +152,11 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
   // ==================== Internal helpers ====================
 
   /**
-   * Scan entire vault for .md files and build index.
+   * Scan sources directory for .md files and build index.
    */
   private rebuildSourceIndex(): void {
     this.sourceIndex.clear();
-    const files = this.scanVault(this.vaultPath);
+    const files = this.scanDir(this.sourcesDir);
 
     for (const filePath of files) {
       try {
@@ -204,7 +166,7 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
         let id = meta['source_id'];
         if (!id) {
           // Unmanaged file: use relative path (minus extension) as ID
-          const rel = path.relative(this.vaultPath, filePath);
+          const rel = path.relative(this.sourcesDir, filePath);
           id = rel.replace(/\\/g, '/').replace(/\.md$/, '');
         }
 
@@ -217,7 +179,7 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
     }
   }
 
-  private scanVault(dir: string, fileList: string[] = []): string[] {
+  private scanDir(dir: string, fileList: string[] = []): string[] {
     if (!existsSync(dir)) return fileList;
     try {
       const entries = readdirSync(dir);
@@ -225,11 +187,10 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
         if (entry.startsWith('.')) continue; // Skip hidden
 
         const fullPath = path.join(dir, entry);
-        if (fullPath === this.revisionsDir) continue; // Skip revisions
 
         const stat = statSync(fullPath);
         if (stat.isDirectory()) {
-          this.scanVault(fullPath, fileList);
+          this.scanDir(fullPath, fileList);
         } else if (entry.endsWith('.md')) {
           fileList.push(fullPath);
         }
@@ -266,14 +227,6 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
     return path.join(this.sourcesDir, `${sourceId}.md`);
   }
 
-  private revisionDir(sourceId: string): string {
-    return path.join(this.revisionsDir, sourceId);
-  }
-
-  private revisionFilePath(sourceId: string, revisionId: string): string {
-    return path.join(this.revisionsDir, sourceId, `${revisionId}.md`);
-  }
-
   private readSource(filePath: string): Source | null {
     if (!existsSync(filePath)) return null;
     const raw = readFileSync(filePath, 'utf-8');
@@ -281,7 +234,7 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
 
     // If source_id is missing, infer from filename and treat as a generic note
     if (!meta['source_id']) {
-      const rel = path.relative(this.vaultPath, filePath);
+      const rel = path.relative(this.sourcesDir, filePath);
       const id = rel.replace(/\\/g, '/').replace(/\.md$/, '');
       meta['source_id'] = id;
 
@@ -300,7 +253,7 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
 
     // If source_id is missing, infer from filename and treat as a generic note
     if (!meta['source_id']) {
-      const rel = path.relative(this.vaultPath, filePath);
+      const rel = path.relative(this.sourcesDir, filePath);
       const id = rel.replace(/\\/g, '/').replace(/\.md$/, '');
       meta['source_id'] = id;
 
@@ -354,32 +307,6 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
 
     // Keep the index up-to-date
     this.sourceIndex.set(source.sourceId, targetPath);
-  }
-
-  private readRevision(filePath: string): SourceRevision | null {
-    if (!existsSync(filePath)) return null;
-    const raw = readFileSync(filePath, 'utf-8');
-    const { meta, content } = parseFrontmatter(raw);
-    return toRevisionRow(meta, content);
-  }
-
-  private writeRevision(rev: SourceRevision): void {
-    const dir = this.revisionDir(rev.sourceId);
-    mkdirSync(dir, { recursive: true });
-
-    const fm = toFrontmatter({
-      revision_id: rev.revisionId,
-      source_id: rev.sourceId,
-      created_at: rev.createdAt,
-      content_hash: rev.contentHash,
-      meta_json: rev.metaJson,
-    });
-    const fileContent = `${fm}\n${rev.content}`;
-    writeFileSync(
-      this.revisionFilePath(rev.sourceId, rev.revisionId),
-      fileContent,
-      'utf-8',
-    );
   }
 
   // ==================== Source Operations ====================
@@ -523,101 +450,6 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
     }
 
     return updated;
-  }
-
-  // ==================== Revision Operations ====================
-
-  findLatestRevision(sourceId: string): SourceRevision | null {
-    const dir = this.revisionDir(sourceId);
-    if (!existsSync(dir)) return null;
-
-    const files = readdirSync(dir).filter((f) => f.endsWith('.md'));
-    let latest: SourceRevision | null = null;
-
-    for (const file of files) {
-      const rev = this.readRevision(path.join(dir, file));
-      if (rev && (!latest || rev.createdAt > latest.createdAt)) {
-        latest = rev;
-      }
-    }
-    return latest;
-  }
-
-  findRevisionById(revisionId: string): SourceRevision | null {
-    // We need to search across all source revision directories
-    if (!existsSync(this.revisionsDir)) return null;
-
-    const sourceDirs = readdirSync(this.revisionsDir, {
-      withFileTypes: true,
-    }).filter((d) => d.isDirectory());
-
-    for (const dir of sourceDirs) {
-      const filePath = path.join(
-        this.revisionsDir,
-        dir.name,
-        `${revisionId}.md`,
-      );
-      const rev = this.readRevision(filePath);
-      if (rev) return rev;
-    }
-    return null;
-  }
-
-  findRevisionByHash(
-    sourceId: string,
-    contentHash: string,
-  ): SourceRevision | null {
-    const dir = this.revisionDir(sourceId);
-    if (!existsSync(dir)) return null;
-
-    const files = readdirSync(dir).filter((f) => f.endsWith('.md'));
-    let match: SourceRevision | null = null;
-
-    for (const file of files) {
-      const rev = this.readRevision(path.join(dir, file));
-      if (
-        rev &&
-        rev.contentHash === contentHash &&
-        (!match || rev.createdAt > match.createdAt)
-      ) {
-        match = rev;
-      }
-    }
-    return match;
-  }
-
-  createRevision(input: CreateRevisionInput): SourceRevision {
-    const now = Date.now();
-    const metaJson = input.metadata ? JSON.stringify(input.metadata) : null;
-
-    const rev: SourceRevision = {
-      revisionId: input.revisionId,
-      workspaceId: input.workspaceId,
-      sourceId: input.sourceId,
-      createdAt: now,
-      content: input.content ?? '',
-      contentHash: input.contentHash,
-      metaJson: metaJson,
-    };
-
-    this.writeRevision(rev);
-    return rev;
-  }
-
-  findRevisionsBySourceId(sourceId: string): SourceRevision[] {
-    const dir = this.revisionDir(sourceId);
-    if (!existsSync(dir)) return [];
-
-    const files = readdirSync(dir).filter((f) => f.endsWith('.md'));
-    const revisions: SourceRevision[] = [];
-
-    for (const file of files) {
-      const rev = this.readRevision(path.join(dir, file));
-      if (rev) revisions.push(rev);
-    }
-
-    // Sort descending by created_at (newest first)
-    return revisions.sort((a, b) => b.createdAt - a.createdAt);
   }
 
   // ==================== Transaction Support ====================

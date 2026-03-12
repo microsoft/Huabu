@@ -1,7 +1,5 @@
 import { getKnowledgeRepository } from './knowledge.repository.js';
 
-import type { Source, SourceRevision } from '@sediment/shared';
-
 /**
  * Source with its content for context building
  */
@@ -11,20 +9,14 @@ export interface SourceWithContent {
   title?: string;
   src?: string;
   content: string;
-  revisionId?: string;
   metadata?: Record<string, unknown>;
 }
 
 /**
  * Build LLM context from selected source IDs
  *
- * This is a simplified v1 implementation that:
- * 1. Loads sources from knowledge DB
- * 2. For Note/Text, gets latest revision
- * 3. Truncates content to avoid prompt overflow
- * 4. Returns formatted context string
- *
- * v2 will add vector retrieval with chunking
+ * Loads sources from the knowledge store and formats them into a
+ * structured context string suitable for LLM consumption.
  *
  * @param sourceIds - Array of source IDs to include in context
  * @param options - Optional configuration
@@ -51,31 +43,12 @@ export async function buildContext(
       continue;
     }
 
-    let content = '';
-    let revisionId: string | undefined;
-
-    // For Note/Text, get latest revision
-    if (source.type === 'note' || source.type === 'text') {
-      const revision = repository.findLatestRevision(sourceId);
-      if (revision) {
-        content = getContentFromRow(revision);
-        revisionId = revision.revisionId;
-      } else {
-        // No revision found, use source content (shouldn't happen normally)
-        content = getContentFromRow(source);
-      }
-    } else {
-      // For Web/PDF, use source content directly
-      content = getContentFromRow(source);
-    }
-
     sources.push({
       sourceId: source.sourceId,
       type: source.type as 'web' | 'pdf' | 'note' | 'text',
       title: source.title ?? undefined,
       src: source.src ?? undefined,
-      content,
-      revisionId,
+      content: source.content,
       metadata: includeMetadata ? parseMetadata(source.metaJson) : undefined,
     });
   }
@@ -87,13 +60,6 @@ export async function buildContext(
     context,
     sources,
   };
-}
-
-/**
- * Get content from source or revision row
- */
-function getContentFromRow(row: Source | SourceRevision): string {
-  return row.content;
 }
 
 /**
@@ -113,20 +79,6 @@ function parseMetadata(
 
 /**
  * Format sources into context string for LLM
- *
- * Format (conceptual):
- * ## SELECTED SOURCES
- *
- * - sourceId: src_123
- *   type: note
- *   title: Example Note
- *   content: ...
- *
- * - sourceId: src_456
- *   type: web
- *   title: Example Website
- *   uri: https://example.com
- *   content: ...
  */
 function formatContextString(sources: SourceWithContent[]): string {
   if (sources.length === 0) {
@@ -145,10 +97,6 @@ function formatContextString(sources: SourceWithContent[]): string {
 
     if (source.src) {
       lines.push(`  src: ${source.src}`);
-    }
-
-    if (source.revisionId) {
-      lines.push(`  revisionId: ${source.revisionId}`);
     }
 
     // Add content with proper indentation

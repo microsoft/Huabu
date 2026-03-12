@@ -7,8 +7,6 @@ import type {
   UpsertNodeRequest,
   UpsertNodeResponse,
   DeleteNodeResponse,
-  KnowledgeStorageConfig,
-  MigrateStorageResponse,
   CanvasExportBundle,
   ImportCanvasResponse,
 } from '@sediment/shared';
@@ -102,35 +100,6 @@ export async function deleteNode(
   }
 
   return (await response.json()) as DeleteNodeResponse;
-}
-
-/**
- * Migrate node sources from the current storage backend to a new one.
- * The server copies all content, updates the canvas state, and bumps the version.
- */
-export async function migrateStorage(
-  canvasId: string,
-  to: KnowledgeStorageConfig,
-): Promise<MigrateStorageResponse> {
-  const response = await fetch(
-    `${API_CONFIG.API_URL}/canvas/${canvasId}/migrate-storage`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ to }),
-    },
-  );
-
-  if (!response.ok) {
-    const error = (await response.json().catch(() => ({}))) as {
-      message?: string;
-    };
-    throw new Error(
-      error.message ?? `Failed to migrate storage: ${response.statusText}`,
-    );
-  }
-
-  return (await response.json()) as MigrateStorageResponse;
 }
 
 /**

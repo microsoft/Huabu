@@ -3,19 +3,13 @@
  * Provides centralized access to knowledge store functionality
  */
 
-// Database
-export { getKnowledgeDb, closeKnowledgeDb } from './knowledge.db.js';
-
 // Interface (storage-agnostic contract)
 export type { IKnowledgeRepository } from './knowledge.interface.js';
 
 // Repository (Data Access Layer)
 export {
-  KnowledgeRepository,
   getKnowledgeRepository,
-  setKnowledgeStorageConfig,
-  getActiveStorageConfig,
-  createRepositoryForConfig,
+  resetKnowledgeRepository,
 } from './knowledge.repository.js';
 
 // Obsidian backend
@@ -43,7 +37,6 @@ export {
   computeContentHash,
   computeBufferHash,
   generateSourceId,
-  generateRevisionId,
 } from './utils.js';
 
 // Fetchers/Parsers
@@ -58,5 +51,4 @@ export type {
   SourceOverview,
   SourceMetadata,
   CreateSourceInput,
-  CreateRevisionInput,
 } from './types.js';

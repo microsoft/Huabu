@@ -113,11 +113,3 @@ export function generateSourceId(options: {
       throw new Error(`Unsupported source type: ${type}`);
   }
 }
-
-/**
- * Generate unique revisionId
- * @returns revisionId in format "rev_<uuid>"
- */
-export function generateRevisionId(): string {
-  return `rev_${randomUUID()}`;
-}
