@@ -140,6 +140,18 @@ export async function captureCanvasScreenshot(options?: {
       pixelRatio: CAPTURE_RATIO,
       skipAutoScale: true,
       cacheBust: true,
+      // Skip external images (e.g. favicons) that may fail to load cross-origin
+      // on certain platforms (Windows), which would abort the entire capture.
+      filter: (node: HTMLElement) => {
+        if (node instanceof HTMLImageElement) {
+          const src = node.src ?? '';
+          // Keep inline data-URLs and relative images; skip external URLs
+          if (src && !src.startsWith('data:') && !src.startsWith('blob:')) {
+            return false;
+          }
+        }
+        return true;
+      },
     });
 
     // If there are no labels, return the raw capture directly
