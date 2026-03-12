@@ -250,7 +250,7 @@ export const NodeWrapper = memo(
       <>
         <NodeResizer
           color="var(--color-theme-300)"
-          isVisible={selected && resizable}
+          isVisible={selected && resizable && !data.locked}
           minWidth={
             type === 'pdf' || type === 'note' || type === 'web' ? 120 : minWidth
           }

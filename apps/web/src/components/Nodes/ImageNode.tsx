@@ -48,10 +48,6 @@ export const ImageNode = memo(
         selected={selected}
         toolbar={ImageToolbar}
         keepAspectRatio={true}
-        onDoubleClick={(e) => {
-          e.stopPropagation();
-          openExpanded(id);
-        }}
       >
         <div className="flex h-full flex-col">
           <div className="relative h-full w-full overflow-hidden">

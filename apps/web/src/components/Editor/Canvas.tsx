@@ -104,6 +104,9 @@ const FrameFitPreviewOverlay: React.FC<{
   );
 });
 
+/** Node types that support expand-on-double-click. */
+const EXPANDABLE_TYPES = new Set(['image', 'video', 'web', 'pdf', 'note']);
+
 export const Canvas: React.FC = () => {
   const nodes = useCanvasStore((state) => state.nodes);
   const edges = useCanvasStore((state) => state.edges);
@@ -117,6 +120,7 @@ export const Canvas: React.FC = () => {
   const addNode = useCanvasStore((state) => state.addNode);
   const patchNodeSilent = useCanvasStore((state) => state.patchNodeSilent);
   const setRfInstance = useCanvasStore((state) => state.setRfInstance);
+  const openExpanded = useCanvasStore((state) => state.openExpanded);
   const frameNodesInRect = useCanvasStore((state) => state.frameNodesInRect);
   const pendingNodeType = useCanvasStore((state) => state.pendingNodeType);
   const setPendingNodeType = useCanvasStore(
@@ -128,10 +132,12 @@ export const Canvas: React.FC = () => {
   const lastDropRef = useRef<{ key: string; at: number } | null>(null);
   const mousePositionRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
-  // Keyboard shortcuts + paste handler (extracted to hook)
-  useCanvasShortcuts({ rfInstanceRef, mousePositionRef });
-
-  const [tool, setTool] = useState<'select' | 'pan'>('select');
+  // Keyboard shortcuts + paste handler (extracted to hook).
+  // Also manages tool state (select/pan) and Space-key temporary pan.
+  const { tool, setTool } = useCanvasShortcuts({
+    rfInstanceRef,
+    mousePositionRef,
+  });
 
   // --- Frame drag-to-create state ---
   const [frameDragStart, setFrameDragStart] = useState<{
@@ -548,7 +554,13 @@ export const Canvas: React.FC = () => {
           setRfInstance(instance);
         }}
         onPaneClick={handlePaneClick}
-        onNodeDoubleClick={(e) => e.stopPropagation()}
+        onNodeDoubleClick={(e, node) => {
+          e.stopPropagation();
+          // Expand any expandable node type on double-click.
+          if (EXPANDABLE_TYPES.has(node.type ?? '')) {
+            openExpanded(node.id);
+          }
+        }}
         fitView
         attributionPosition="bottom-right"
         panOnDrag={

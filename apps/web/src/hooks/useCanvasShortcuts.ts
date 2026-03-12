@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, type MutableRefObject } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type MutableRefObject,
+} from 'react';
 
 import { uploadImage, uploadPdf, uploadVideo } from '../api/artifact';
 import useCanvasStore from '../store/canvasStore';
@@ -27,6 +33,8 @@ export interface CanvasShortcutRefs {
   mousePositionRef: MutableRefObject<{ x: number; y: number }>;
 }
 
+export type CanvasTool = 'select' | 'pan';
+
 /**
  * All keyboard / paste handling for the canvas, extracted from Canvas.tsx.
  *
@@ -34,8 +42,14 @@ export interface CanvasShortcutRefs {
  *  - global mousemove tracker (for paste-at-cursor)
  *  - keydown listener (z-order, delete, undo, redo, frame, copy, intent)
  *  - paste listener (internal clipboard → files → images → URLs → text)
+ *  - Space key: temporarily switch to pan mode while held
+ *
+ * Returns `{ tool, setTool }` so Canvas can pass it to the toolbar.
  */
-export function useCanvasShortcuts(refs: CanvasShortcutRefs): void {
+export function useCanvasShortcuts(refs: CanvasShortcutRefs): {
+  tool: CanvasTool;
+  setTool: React.Dispatch<React.SetStateAction<CanvasTool>>;
+} {
   const { rfInstanceRef, mousePositionRef } = refs;
 
   const frameSelectedNodes = useCanvasStore((s) => s.frameSelectedNodes);
@@ -48,6 +62,39 @@ export function useCanvasShortcuts(refs: CanvasShortcutRefs): void {
   const addNode = useCanvasStore((s) => s.addNode);
   const layoutAll = useCanvasStore((s) => s.layoutAll);
   const toggleAutoLayout = useCanvasStore((s) => s.toggleAutoLayout);
+
+  // --- Tool state (select / pan) ---
+  const [tool, setTool] = useState<CanvasTool>('select');
+
+  // Space key: temporarily switch to pan mode while held
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== ' ' || e.repeat) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea') return;
+      if (
+        target?.isContentEditable ||
+        target?.getAttribute?.('role') === 'textbox'
+      )
+        return;
+      setTool((prev) => {
+        if (prev === 'pan') return prev;
+        e.preventDefault();
+        return 'pan';
+      });
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key !== ' ') return;
+      setTool((prev) => (prev === 'pan' ? 'select' : prev));
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+    };
+  }, []);
 
   // Prevents double-paste between native paste event and async Clipboard API.
   const pasteHandledRef = useRef(false);
@@ -443,4 +490,6 @@ export function useCanvasShortcuts(refs: CanvasShortcutRefs): void {
     window.addEventListener('paste', onPaste, true);
     return () => window.removeEventListener('paste', onPaste, true);
   }, [getFlowPos, pasteFiles, pasteText, pasteNodes]);
+
+  return { tool, setTool };
 }

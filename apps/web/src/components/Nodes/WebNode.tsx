@@ -124,10 +124,6 @@ export const WebNode = memo(
         selected={selected}
         toolbar={WebToolbar}
         keepAspectRatio={false}
-        onDoubleClick={(e) => {
-          e.stopPropagation();
-          openExpanded(id);
-        }}
       >
         <div className="h-full w-full overflow-hidden">
           <div

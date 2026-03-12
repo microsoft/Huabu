@@ -40,10 +40,6 @@ export const VideoNode = memo(
         selected={selected}
         toolbar={VideoToolbar}
         keepAspectRatio={true}
-        onDoubleClick={(e) => {
-          e.stopPropagation();
-          openExpanded(id);
-        }}
       >
         <div className="bg-foreground/5 group flex h-full flex-col justify-center rounded border-0">
           <div className="relative h-full w-full overflow-hidden rounded">
