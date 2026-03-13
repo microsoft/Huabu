@@ -1,4 +1,4 @@
-import { FolderOpen } from 'lucide-react';
+import { FolderOpen, History, X } from 'lucide-react';
 import { useState } from 'react';
 
 import { pickFolder } from '../../api/workspace';
@@ -6,11 +6,15 @@ import { useWorkspaceStore } from '../../store/workspaceStore';
 
 /**
  * First-launch page shown when no workspace folder has been configured.
- * Lets the user pick a folder via native OS dialog.
+ * Lets the user pick a folder via native OS dialog or select a recent workspace.
  */
 export default function WorkspaceSetupPage() {
   const selectWorkspace = useWorkspaceStore((s) => s.selectWorkspace);
   const isSyncing = useWorkspaceStore((s) => s.isSyncing);
+  const recentWorkspaces = useWorkspaceStore((s) => s.recentWorkspaces);
+  const removeRecentWorkspace = useWorkspaceStore(
+    (s) => s.removeRecentWorkspace,
+  );
 
   const [isPicking, setIsPicking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,6 +32,15 @@ export default function WorkspaceSetupPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to pick folder');
       setIsPicking(false);
+    }
+  };
+
+  const handleSelectRecent = async (path: string) => {
+    setError(null);
+    try {
+      await selectWorkspace(path);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to open workspace');
     }
   };
 
@@ -66,6 +79,39 @@ export default function WorkspaceSetupPage() {
             {isPicking ? 'Waiting for selection…' : 'Select Folder'}
           </span>
         </button>
+
+        {/* Recent workspaces */}
+        {recentWorkspaces.length > 0 && (
+          <div className="mt-6">
+            <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-gray-400">
+              <History size={12} />
+              <span>Recent Workspaces</span>
+            </div>
+            <ul className="space-y-1">
+              {recentWorkspaces.map((path) => (
+                <li key={path} className="group flex items-center gap-1">
+                  <button
+                    onClick={() => void handleSelectRecent(path)}
+                    disabled={isLoading}
+                    className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors hover:bg-gray-100 disabled:opacity-50"
+                  >
+                    <FolderOpen size={14} className="shrink-0 text-gray-300" />
+                    <span className="truncate text-sm text-gray-600">
+                      {path}
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => removeRecentWorkspace(path)}
+                    className="shrink-0 rounded p-1 text-gray-300 opacity-0 transition-all group-hover:opacity-100 hover:bg-gray-100 hover:text-gray-500"
+                    title="Remove from recent"
+                  >
+                    <X size={14} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {/* Error */}
         {error && (

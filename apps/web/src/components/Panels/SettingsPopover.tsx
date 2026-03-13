@@ -1,4 +1,4 @@
-import { FolderOpen, Settings } from 'lucide-react';
+import { FolderOpen, History, Settings, X } from 'lucide-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
@@ -15,6 +15,10 @@ export const SettingsPopover: React.FC = () => {
   const loadCanvas = useCanvasStore((s) => s.loadCanvas);
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
   const selectWorkspace = useWorkspaceStore((s) => s.selectWorkspace);
+  const recentWorkspaces = useWorkspaceStore((s) => s.recentWorkspaces);
+  const removeRecentWorkspace = useWorkspaceStore(
+    (s) => s.removeRecentWorkspace,
+  );
 
   const [isOpen, setIsOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -102,6 +106,32 @@ export const SettingsPopover: React.FC = () => {
     }
   };
 
+  const handleSelectRecent = async (path: string) => {
+    setError('');
+    setSuccess(false);
+    setSaving(true);
+
+    try {
+      await selectWorkspace(path);
+      setSuccess(true);
+
+      if (successTimeoutRef.current !== null) {
+        clearTimeout(successTimeoutRef.current);
+      }
+      successTimeoutRef.current = window.setTimeout(() => {
+        setSuccess(false);
+        successTimeoutRef.current = null;
+      }, 2000);
+
+      await loadCanvas();
+      window.dispatchEvent(new Event('workspace-changed'));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to open workspace');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const getPopoverStyle = (): React.CSSProperties => {
     if (!triggerRef.current) return {};
     const rect = triggerRef.current.getBoundingClientRect();
@@ -167,6 +197,47 @@ export const SettingsPopover: React.FC = () => {
               The folder where canvas, sources, and artifacts are stored.
               Changes take effect immediately.
             </p>
+
+            {/* Recent workspaces */}
+            {recentWorkspaces.filter((p) => p !== workspacePath).length > 0 && (
+              <div className="mb-3">
+                <div className="mb-1.5 flex items-center gap-1 text-[11px] font-medium text-gray-400">
+                  <History size={10} />
+                  <span>Recent</span>
+                </div>
+                <ul className="space-y-0.5">
+                  {recentWorkspaces
+                    .filter((p) => p !== workspacePath)
+                    .map((path) => (
+                      <li
+                        key={path}
+                        className="group flex items-center gap-0.5"
+                      >
+                        <button
+                          onClick={() => void handleSelectRecent(path)}
+                          disabled={isLoading}
+                          className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-2 py-1.5 text-left transition-colors hover:bg-gray-100 disabled:opacity-50"
+                        >
+                          <FolderOpen
+                            size={12}
+                            className="shrink-0 text-gray-300"
+                          />
+                          <span className="truncate text-xs text-gray-500">
+                            {path}
+                          </span>
+                        </button>
+                        <button
+                          onClick={() => removeRecentWorkspace(path)}
+                          className="shrink-0 rounded p-0.5 text-gray-300 opacity-0 transition-all group-hover:opacity-100 hover:text-gray-500"
+                          title="Remove from recent"
+                        >
+                          <X size={12} />
+                        </button>
+                      </li>
+                    ))}
+                </ul>
+              </div>
+            )}
 
             <div className="flex justify-end">
               <button

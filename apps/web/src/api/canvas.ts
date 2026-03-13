@@ -178,3 +178,25 @@ export async function importCanvas(
 
   return (await response.json()) as ImportCanvasResponse;
 }
+
+/**
+ * Delete a canvas by ID.
+ */
+export async function deleteCanvasById(
+  canvasId: string,
+): Promise<{ success: boolean }> {
+  const response = await fetch(`${API_CONFIG.API_URL}/canvas/${canvasId}`, {
+    method: 'DELETE',
+  });
+
+  if (!response.ok) {
+    const error = (await response.json().catch(() => ({}))) as {
+      message?: string;
+    };
+    throw new Error(
+      error.message ?? `Failed to delete canvas: ${response.statusText}`,
+    );
+  }
+
+  return (await response.json()) as { success: boolean };
+}

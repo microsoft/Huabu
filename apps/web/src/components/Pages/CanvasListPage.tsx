@@ -1,11 +1,19 @@
-import { useCallback, useEffect, useState } from 'react';
+import { Download, Trash2 } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { listCanvases, createCanvas } from '../../api/canvas';
+import {
+  listCanvases,
+  createCanvas,
+  exportCanvas,
+  importCanvas,
+  deleteCanvasById,
+} from '../../api/canvas';
 import { useWorkspaceStore } from '../../store/workspaceStore';
-import { SettingsPopover } from '../Panels/SettingsPopover';
+import { GhostButton } from '../Common/GhostButton';
+import { Header } from '../Panels/Header';
 
-import type { CanvasSummary } from '@sediment/shared';
+import type { CanvasExportBundle, CanvasSummary } from '@sediment/shared';
 
 /**
  * Home page that shows all canvases in the workspace.
@@ -15,6 +23,8 @@ export default function CanvasListPage() {
   const [canvases, setCanvases] = useState<CanvasSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
 
@@ -57,6 +67,63 @@ export default function CanvasListPage() {
     navigate(`/canvas/${canvasId}`);
   };
 
+  const handleExport = async (canvasId: string, title: string | null) => {
+    try {
+      const blob = await exportCanvas(canvasId);
+      const safeName =
+        (title ?? canvasId).replace(/[^a-z0-9_-]/gi, '_') || canvasId;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${safeName}.sediment.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Failed to export canvas:', error);
+    }
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleDelete = async (canvasId: string, title: string | null) => {
+    const label = title || canvasId;
+    const confirmed = window.confirm(
+      `Are you sure you want to delete "${label}"? This action cannot be undone.`,
+    );
+    if (!confirmed) return;
+
+    try {
+      await deleteCanvasById(canvasId);
+      setCanvases((prev) => prev.filter((c) => c.canvasId !== canvasId));
+    } catch (error) {
+      console.error('Failed to delete canvas:', error);
+    }
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Reset so the same file can be re-selected if needed
+    e.target.value = '';
+
+    setIsImporting(true);
+
+    try {
+      const text = await file.text();
+      const bundle = JSON.parse(text) as CanvasExportBundle;
+      const result = await importCanvas(bundle);
+      // Navigate to the newly created canvas
+      navigate(`/canvas/${result.canvasId}`);
+    } catch (err) {
+      console.error('Failed to import canvas:', err);
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   const formatDate = (timestamp: number) => {
     return new Date(timestamp).toLocaleDateString(undefined, {
       year: 'numeric',
@@ -69,18 +136,24 @@ export default function CanvasListPage() {
 
   return (
     <div className="flex min-h-screen flex-col bg-gray-50">
+      {/* Hidden file input for import */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".json,application/json"
+        className="hidden"
+        onChange={(e) => void handleFileChange(e)}
+      />
+
       {/* Header */}
-      <header className="border-border flex h-14 items-center border-b bg-white px-6">
-        <img src="/favicon.svg" alt="Logo" className="mr-3 h-8 w-8" />
-        <h1 className="text-lg font-semibold text-gray-900">Sediment</h1>
+      <Header>
+        <h1 className="px-1 text-lg font-semibold text-gray-900">Sediment</h1>
         {workspacePath && (
-          <span className="ml-3 max-w-xs truncate text-xs text-gray-400">
+          <span className="mt-0.5 ml-1 truncate text-xs text-gray-400">
             {workspacePath}
           </span>
         )}
-        <div className="flex-1" />
-        <SettingsPopover />
-      </header>
+      </Header>
 
       {/* Content */}
       <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-10">
@@ -91,30 +164,56 @@ export default function CanvasListPage() {
               Select a canvas to open, or create a new one.
             </p>
           </div>
-          <button
-            onClick={handleCreate}
-            disabled={isCreating}
-            className="inline-flex items-center gap-2 rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:opacity-50"
-          >
-            {isCreating ? (
-              <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-            ) : (
-              <svg
-                className="h-4 w-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                strokeWidth={2}
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M12 4.5v15m7.5-7.5h-15"
-                />
-              </svg>
-            )}
-            New Canvas
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleImportClick}
+              disabled={isImporting}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50"
+            >
+              {isImporting ? (
+                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-500 border-t-transparent" />
+              ) : (
+                <svg
+                  className="h-4 w-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  strokeWidth={2}
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5"
+                  />
+                </svg>
+              )}
+              Import
+            </button>
+            <button
+              onClick={handleCreate}
+              disabled={isCreating}
+              className="inline-flex items-center gap-2 rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:opacity-50"
+            >
+              {isCreating ? (
+                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+              ) : (
+                <svg
+                  className="h-4 w-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  strokeWidth={2}
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M12 4.5v15m7.5-7.5h-15"
+                  />
+                </svg>
+              )}
+              New Canvas
+            </button>
+          </div>
         </div>
 
         {isLoading ? (
@@ -135,21 +234,48 @@ export default function CanvasListPage() {
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {canvases.map((canvas) => (
-              <button
+              <div
                 key={canvas.canvasId}
-                onClick={() => handleOpen(canvas.canvasId)}
-                className="group flex flex-col rounded-xl border border-gray-200 bg-white p-5 text-left transition-all hover:border-gray-300 hover:shadow-md"
+                className="group relative flex flex-col rounded-xl border border-gray-200 bg-white p-5 text-left transition-all hover:border-gray-300 hover:shadow-md"
               >
-                <h3 className="truncate text-sm font-semibold text-gray-900 group-hover:text-black">
-                  {canvas.title || canvas.canvasId}
-                </h3>
-                <p className="mt-1 text-xs text-gray-400">
-                  {canvas.nodeCount} node{canvas.nodeCount !== 1 ? 's' : ''}
-                </p>
-                <div className="mt-auto pt-4 text-xs text-gray-400">
-                  Updated {formatDate(canvas.updatedAt)}
-                </div>
-              </button>
+                <button
+                  onClick={() => handleOpen(canvas.canvasId)}
+                  className="flex flex-1 flex-col text-left"
+                >
+                  <h3 className="truncate text-sm font-semibold text-gray-900 group-hover:text-black">
+                    {canvas.title || canvas.canvasId}
+                  </h3>
+                  <p className="mt-1 text-xs text-gray-400">
+                    {canvas.nodeCount} node
+                    {canvas.nodeCount !== 1 ? 's' : ''}
+                  </p>
+                  <div className="mt-auto pt-4 text-xs text-gray-400">
+                    Updated {formatDate(canvas.updatedAt)}
+                  </div>
+                </button>
+                {/* Export button */}
+                <GhostButton
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void handleExport(canvas.canvasId, canvas.title);
+                  }}
+                  tooltipWrapperClassName="absolute top-3 right-10 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
+                  title="Export canvas"
+                >
+                  <Download size={16} className="text-gray-400" />
+                </GhostButton>
+                {/* Delete button */}
+                <GhostButton
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void handleDelete(canvas.canvasId, canvas.title);
+                  }}
+                  tooltipWrapperClassName="absolute top-3 right-3 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
+                  title="Delete canvas"
+                >
+                  <Trash2 size={16} className="text-gray-400" />
+                </GhostButton>
+              </div>
             ))}
           </div>
         )}

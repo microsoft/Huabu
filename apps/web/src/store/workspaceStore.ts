@@ -3,6 +3,31 @@ import { create } from 'zustand';
 import { getWorkspacePath, putWorkspacePath } from '../api/workspace';
 
 const STORAGE_KEY = 'sediment:workspace-path';
+const RECENT_KEY = 'sediment:recent-workspaces';
+const MAX_RECENT = 5;
+
+/** Read recent workspace paths from localStorage. */
+function loadRecentWorkspaces(): string[] {
+  try {
+    const raw = localStorage.getItem(RECENT_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (Array.isArray(parsed))
+      return parsed.filter((p) => typeof p === 'string');
+  } catch {
+    // Corrupted data – ignore
+  }
+  return [];
+}
+
+/** Persist a workspace path to the recent list (most recent first, deduplicated). */
+function pushRecentWorkspace(path: string): string[] {
+  const list = loadRecentWorkspaces().filter((p) => p !== path);
+  list.unshift(path);
+  const trimmed = list.slice(0, MAX_RECENT);
+  localStorage.setItem(RECENT_KEY, JSON.stringify(trimmed));
+  return trimmed;
+}
 
 interface WorkspaceState {
   /** The workspace folder path, or null if not yet configured. */
@@ -13,6 +38,8 @@ interface WorkspaceState {
   isSyncing: boolean;
   /** Error from the last sync attempt. */
   error: string | null;
+  /** Recently used workspace paths (most recent first). */
+  recentWorkspaces: string[];
 
   /**
    * Initialise workspace on app boot.
@@ -28,6 +55,9 @@ interface WorkspaceState {
    * and push to the server.
    */
   selectWorkspace: (path: string) => Promise<void>;
+
+  /** Remove a path from the recent workspaces list. */
+  removeRecentWorkspace: (path: string) => void;
 }
 
 export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
@@ -35,6 +65,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
   isReady: false,
   isSyncing: false,
   error: null,
+  recentWorkspaces: loadRecentWorkspaces(),
 
   init: async () => {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -44,7 +75,13 @@ export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
       set({ isSyncing: true, error: null });
       try {
         await putWorkspacePath(saved);
-        set({ workspacePath: saved, isReady: true, isSyncing: false });
+        const recent = pushRecentWorkspace(saved);
+        set({
+          workspacePath: saved,
+          isReady: true,
+          isSyncing: false,
+          recentWorkspaces: recent,
+        });
         return true;
       } catch (err) {
         const message =
@@ -59,7 +96,13 @@ export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
       const info = await getWorkspacePath();
       if (info.configured && info.path) {
         localStorage.setItem(STORAGE_KEY, info.path);
-        set({ workspacePath: info.path, isReady: true, isSyncing: false });
+        const recent = pushRecentWorkspace(info.path);
+        set({
+          workspacePath: info.path,
+          isReady: true,
+          isSyncing: false,
+          recentWorkspaces: recent,
+        });
         return true;
       }
     } catch {
@@ -75,12 +118,24 @@ export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
     try {
       await putWorkspacePath(path);
       localStorage.setItem(STORAGE_KEY, path);
-      set({ workspacePath: path, isReady: true, isSyncing: false });
+      const recent = pushRecentWorkspace(path);
+      set({
+        workspacePath: path,
+        isReady: true,
+        isSyncing: false,
+        recentWorkspaces: recent,
+      });
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Failed to set workspace';
       set({ error: message, isSyncing: false });
       throw err;
     }
+  },
+
+  removeRecentWorkspace: (path: string) => {
+    const list = loadRecentWorkspaces().filter((p) => p !== path);
+    localStorage.setItem(RECENT_KEY, JSON.stringify(list));
+    set({ recentWorkspaces: list });
   },
 }));

@@ -10,6 +10,7 @@ import {
   writeCanvas,
   listCanvases,
   createCanvas,
+  deleteCanvas,
   type CanvasFile,
   type NodeLike,
 } from './canvas.filestore.js';
@@ -148,6 +149,22 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       .code(201)
       .send({ canvasId: canvas.canvasId, title: canvas.title });
   });
+
+  // --- Delete a canvas ---
+
+  fastify.delete<{ Params: { canvasId: string } }>(
+    '/:canvasId',
+    async function (request, reply) {
+      const { canvasId } = request.params;
+      const deleted = deleteCanvas(canvasId);
+
+      if (!deleted) {
+        return reply.code(404).send({ message: 'Canvas not found' });
+      }
+
+      return reply.send({ success: true });
+    },
+  );
 
   // Upsert a single node (create or update) and ingest it
   fastify.put<{
@@ -483,7 +500,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const bundle = parsed.data;
-    const targetCanvasId = bundle.manifest.canvasId;
+    // Always generate a new canvas ID so imports never overwrite existing canvases
+    const targetCanvasId = createId('canvas');
 
     // 0. Normalise PDF cover images
     const artifactsDir = getArtifactsDir();

@@ -13,6 +13,7 @@ import {
   readFileSync,
   readdirSync,
   renameSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
@@ -172,4 +173,20 @@ export function createCanvas(
   };
   atomicWriteJson(filePath, canvas);
   return canvas;
+}
+
+/**
+ * Delete a canvas file from disk.
+ * Returns true if the file existed and was deleted, false otherwise.
+ */
+export function deleteCanvas(canvasId: string): boolean {
+  const filePath = canvasFilePath(canvasId);
+  if (!existsSync(filePath)) return false;
+
+  try {
+    unlinkSync(filePath);
+    return true;
+  } catch {
+    return false;
+  }
 }

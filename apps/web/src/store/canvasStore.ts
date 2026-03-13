@@ -167,6 +167,7 @@ type RFState = {
   canvasId: string;
   version: number;
   isLoading: boolean;
+  canvasNotFound: boolean;
   isSaving: boolean;
   pendingSave: boolean;
 
@@ -372,6 +373,7 @@ const useCanvasStore = create<RFState>()(
     canvasId: CANVAS_ID,
     version: 0,
     isLoading: false,
+    canvasNotFound: false,
     isSaving: false,
     pendingSave: false,
 
@@ -553,7 +555,7 @@ const useCanvasStore = create<RFState>()(
     },
 
     loadCanvas: async (canvasId?: string) => {
-      set({ isLoading: true });
+      set({ isLoading: true, canvasNotFound: false });
       try {
         const targetId = canvasId ?? get().canvasId;
         if (canvasId) {
@@ -561,9 +563,13 @@ const useCanvasStore = create<RFState>()(
         }
         const response = await getCanvas(targetId);
         if (!response) {
-          console.warn('Canvas not found, using empty state');
+          console.warn('Canvas not found:', targetId);
           canvasHistoryManager.clear();
-          set({ isLoading: false, ingestionByNodeId: {} });
+          set({
+            isLoading: false,
+            canvasNotFound: true,
+            ingestionByNodeId: {},
+          });
           return;
         }
 
@@ -625,6 +631,7 @@ const useCanvasStore = create<RFState>()(
         actionHistory: [],
         frameFitPreviews: [],
         collapsedFrameIds: new Set(),
+        canvasNotFound: false,
       });
       canvasHistoryManager.clear();
 

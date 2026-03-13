@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 
 import useStore from '../../store/canvasStore';
 import { CenterArea } from '../Layout/CenterArea';
@@ -19,6 +19,7 @@ export default function CanvasPage() {
   const loadCanvas = useStore((s) => s.loadCanvas);
   const storeCanvasId = useStore((s) => s.canvasId);
   const isLoading = useStore((s) => s.isLoading);
+  const canvasNotFound = useStore((s) => s.canvasNotFound);
   const initialised = useRef(false);
 
   useEffect(() => {
@@ -40,6 +41,44 @@ export default function CanvasPage() {
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="text-muted-foreground text-sm">Loading canvas…</div>
+      </div>
+    );
+  }
+
+  if (canvasNotFound) {
+    return (
+      <div className="flex h-screen flex-col items-center justify-center gap-4">
+        <div className="text-center">
+          <h2 className="text-lg font-semibold text-gray-900">
+            Canvas not found
+          </h2>
+          <p className="mt-1 text-sm text-gray-500">
+            The canvas{' '}
+            <code className="rounded bg-gray-100 px-1.5 py-0.5 text-xs">
+              {canvasId}
+            </code>{' '}
+            does not exist or may have been deleted.
+          </p>
+        </div>
+        <Link
+          to="/"
+          className="inline-flex items-center gap-2 rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-gray-800"
+        >
+          <svg
+            className="h-4 w-4"
+            fill="none"
+            viewBox="0 0 24 24"
+            strokeWidth={2}
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18"
+            />
+          </svg>
+          Back to canvas list
+        </Link>
       </div>
     );
   }
