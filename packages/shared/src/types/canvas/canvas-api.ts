@@ -91,3 +91,30 @@ export interface ImportCanvasResponse {
   importedSources: number;
   importedArtifacts: number;
 }
+
+// ─── Canvas List / Create ─────────────────────────────────────────────────────
+
+/** Summary of a single canvas returned by the list endpoint. */
+export interface CanvasSummary {
+  canvasId: string;
+  title: string | null;
+  nodeCount: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** Response for GET /api/canvas (list all canvases). */
+export interface ListCanvasesResponse {
+  canvases: CanvasSummary[];
+}
+
+/** Request body for POST /api/canvas (create a new canvas). */
+export interface CreateCanvasRequest {
+  title?: string;
+}
+
+/** Response for POST /api/canvas (create a new canvas). */
+export interface CreateCanvasResponse {
+  canvasId: string;
+  title: string | null;
+}

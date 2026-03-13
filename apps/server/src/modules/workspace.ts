@@ -2,9 +2,10 @@
  * Centralised workspace path management.
  *
  * Every storage layer (canvas, knowledge sources, artifacts) resolves its
- * directory relative to a single workspace root. The root defaults to
- * `apps/server/data/vault` but can be overridden via the
- * `SEDIMENT_WORKSPACE_PATH` environment variable.
+ * directory relative to a single workspace root.  The root is set at
+ * runtime by the client via `PUT /api/workspace` and persisted in the
+ * browser's localStorage.  There is no default — the user must pick a
+ * folder on first launch.
  *
  * Directory layout inside the workspace:
  *
@@ -19,38 +20,35 @@
 
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 let _workspacePath: string | null = null;
 
 /**
+ * Whether a workspace path has been configured this session.
+ */
+export function isWorkspaceConfigured(): boolean {
+  return _workspacePath !== null;
+}
+
+/**
  * Return the workspace root path.
  *
- * On the first call the path is resolved from (in priority order):
- *   1. The `SEDIMENT_WORKSPACE_PATH` environment variable (if set at startup)
- *   2. The default: `apps/server/data/vault` relative to this file
- *
- * Subsequent calls return the cached value. Use `setWorkspacePath()` to
- * change the path at runtime; the environment variable is NOT re-read after
- * the first initialisation.
+ * Throws if not yet configured — callers that may run before the client
+ * has chosen a folder should check `isWorkspaceConfigured()` first.
  */
 export function getWorkspacePath(): string {
   if (!_workspacePath) {
-    if (process.env.SEDIMENT_WORKSPACE_PATH) {
-      _workspacePath = path.resolve(process.env.SEDIMENT_WORKSPACE_PATH);
-    } else {
-      const here = path.dirname(fileURLToPath(import.meta.url));
-      // This file lives at: apps/server/src/modules/workspace.ts
-      // Default root: apps/server/data/vault
-      _workspacePath = path.resolve(here, '../../data/vault');
-    }
+    throw new Error(
+      'Workspace path has not been configured. ' +
+        'Call setWorkspacePath() first (via PUT /api/workspace).',
+    );
   }
   return _workspacePath;
 }
 
 /**
- * Update the workspace root path at runtime and re-create subdirectories.
- * Called by the workspace settings API.
+ * Set the workspace root path at runtime and create subdirectories.
+ * Called by the workspace settings API when the user picks a folder.
  */
 export function setWorkspacePath(newPath: string): void {
   _workspacePath = path.resolve(newPath);

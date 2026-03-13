@@ -11,7 +11,9 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   renameSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
@@ -127,4 +129,64 @@ export function writeCanvas(canvas: CanvasFile): void {
 export function readCanvasVersion(canvasId: string): number | null {
   const canvas = readCanvas(canvasId);
   return canvas?.version ?? null;
+}
+
+/**
+ * List all canvas files in the canvas directory.
+ * Returns basic metadata without loading full state.
+ */
+export function listCanvases(): CanvasFile[] {
+  const dir = getCanvasDir();
+  if (!existsSync(dir)) return [];
+
+  const files = readdirSync(dir).filter((f) => f.endsWith('.json'));
+  const canvases: CanvasFile[] = [];
+
+  for (const file of files) {
+    const canvasId = file.replace(/\.json$/, '');
+    const canvas = readCanvas(canvasId);
+    if (canvas) canvases.push(canvas);
+  }
+
+  return canvases;
+}
+
+/**
+ * Create a new empty canvas with the given ID and optional title.
+ * Returns the created canvas, or null if a canvas with that ID already exists.
+ */
+export function createCanvas(
+  canvasId: string,
+  title: string | null = null,
+): CanvasFile | null {
+  const filePath = canvasFilePath(canvasId);
+  if (existsSync(filePath)) return null;
+
+  const now = Date.now();
+  const canvas: CanvasFile = {
+    canvasId,
+    title,
+    version: 0,
+    state: { nodes: [], edges: [] },
+    createdAt: now,
+    updatedAt: now,
+  };
+  atomicWriteJson(filePath, canvas);
+  return canvas;
+}
+
+/**
+ * Delete a canvas file from disk.
+ * Returns true if the file existed and was deleted, false otherwise.
+ */
+export function deleteCanvas(canvasId: string): boolean {
+  const filePath = canvasFilePath(canvasId);
+  if (!existsSync(filePath)) return false;
+
+  try {
+    unlinkSync(filePath);
+    return true;
+  } catch {
+    return false;
+  }
 }

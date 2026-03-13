@@ -9,7 +9,38 @@ import type {
   DeleteNodeResponse,
   CanvasExportBundle,
   ImportCanvasResponse,
+  ListCanvasesResponse,
+  CreateCanvasRequest,
+  CreateCanvasResponse,
 } from '@sediment/shared';
+
+/**
+ * List all canvases in the workspace.
+ */
+export async function listCanvases(): Promise<ListCanvasesResponse> {
+  const response = await fetch(`${API_CONFIG.API_URL}/canvas`);
+  if (!response.ok) {
+    throw new Error(`Failed to list canvases: ${response.statusText}`);
+  }
+  return (await response.json()) as ListCanvasesResponse;
+}
+
+/**
+ * Create a new empty canvas.
+ */
+export async function createCanvas(
+  request: CreateCanvasRequest = {},
+): Promise<CreateCanvasResponse> {
+  const response = await fetch(`${API_CONFIG.API_URL}/canvas`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to create canvas: ${response.statusText}`);
+  }
+  return (await response.json()) as CreateCanvasResponse;
+}
 
 export async function getCanvas(
   canvasId: string,
@@ -146,4 +177,26 @@ export async function importCanvas(
   }
 
   return (await response.json()) as ImportCanvasResponse;
+}
+
+/**
+ * Delete a canvas by ID.
+ */
+export async function deleteCanvasById(
+  canvasId: string,
+): Promise<{ success: boolean }> {
+  const response = await fetch(`${API_CONFIG.API_URL}/canvas/${canvasId}`, {
+    method: 'DELETE',
+  });
+
+  if (!response.ok) {
+    const error = (await response.json().catch(() => ({}))) as {
+      message?: string;
+    };
+    throw new Error(
+      error.message ?? `Failed to delete canvas: ${response.statusText}`,
+    );
+  }
+
+  return (await response.json()) as { success: boolean };
 }
