@@ -1,7 +1,16 @@
 import { readFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 
-// @ts-expect-error -- @opendocsg/pdf2md has no type declarations
-import pdf2md from '@opendocsg/pdf2md';
+const require = createRequire(import.meta.url);
+const pdf2md = require('@opendocsg/pdf2md') as (
+  pdfBuffer: Buffer,
+  callbacks?: {
+    metadataParsed?: (metadata: { info?: { Title?: string } }) => void;
+    pageParsed?: (pages: unknown[]) => void;
+    fontParsed?: (font: unknown) => void;
+    documentParsed?: (document: unknown, pages: unknown[]) => void;
+  },
+) => Promise<string>;
 
 import type { IDocumentLoader, LoadResult } from './loader.interface.js';
 
@@ -61,17 +70,12 @@ export class PdfLoader implements IDocumentLoader {
       let numPages: number | undefined;
 
       const text: string = await pdf2md(buffer, {
-        metadataParsed: (metadata: {
-          info?: { Title?: string };
-        }) => {
+        metadataParsed: (metadata: { info?: { Title?: string } }) => {
           if (typeof metadata.info?.Title === 'string') {
             title = metadata.info.Title;
           }
         },
-        documentParsed: (
-          _pdfDocument: unknown,
-          pages: unknown[],
-        ) => {
+        documentParsed: (_pdfDocument: unknown, pages: unknown[]) => {
           numPages = pages.length;
         },
       });
