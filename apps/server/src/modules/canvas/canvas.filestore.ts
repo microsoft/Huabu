@@ -34,7 +34,6 @@ export interface CanvasFile {
   state: {
     nodes: unknown[];
     edges: unknown[];
-    workspaceName?: string;
     [key: string]: unknown;
   };
   createdAt: number;

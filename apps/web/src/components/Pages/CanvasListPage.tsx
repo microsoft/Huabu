@@ -243,7 +243,7 @@ export default function CanvasListPage() {
                   className="flex flex-1 flex-col text-left"
                 >
                   <h3 className="truncate text-sm font-semibold text-gray-900 group-hover:text-black">
-                    {canvas.title || canvas.canvasId}
+                    {canvas.title || 'Untitled'}
                   </h3>
                   <p className="mt-1 text-xs text-gray-400">
                     {canvas.nodeCount} node

@@ -31,6 +31,19 @@ function nowMs(): number {
   return Date.now();
 }
 
+/**
+ * Generate a default canvas title that doesn't collide with existing ones.
+ * Returns "Untitled", "Untitled (1)", "Untitled (2)", etc.
+ */
+function generateDefaultTitle(existingCanvases: CanvasFile[]): string {
+  const base = 'Untitled';
+  const existingNames = new Set(existingCanvases.map((c) => c.title));
+  if (!existingNames.has(base)) return base;
+  let i = 1;
+  while (existingNames.has(`${base} (${i})`)) i++;
+  return `${base} (${i})`;
+}
+
 function toMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -136,7 +149,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const canvasId = createId('canvas');
-    const title = parsed.data.title ?? null;
+    const existingCanvases = listCanvases();
+    const title = parsed.data.title ?? generateDefaultTitle(existingCanvases);
     const canvas = createCanvas(canvasId, title);
 
     if (!canvas) {
@@ -253,6 +267,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
       return reply.send({
         canvasId: canvas.canvasId,
+        title: canvas.title,
         version: canvas.version,
         state: {
           ...canvas.state,
@@ -286,15 +301,12 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       const timestamp = nowMs();
       const nextVersion = serverVersion + 1;
 
-      // Parse the incoming state object
       const rawState = state as {
         nodes?: NodeLike[];
         edges?: unknown[];
-        workspaceName?: string;
         [key: string]: unknown;
       };
 
-      // Strip content that is managed by the knowledge store to avoid data duplication
       const leanNodes = stripManagedContent(
         (rawState?.nodes ?? []) as NodeLike[],
       );
@@ -436,11 +448,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           version: '1.0',
           exportedAt: new Date().toISOString(),
           canvasId,
+          title: resolveTitle(canvas),
         },
         canvas: {
           nodes,
           edges,
-          workspaceName: canvas.state.workspaceName,
         },
         sources,
         artifacts: artifactEntries,
@@ -464,11 +476,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       version: z.string(),
       exportedAt: z.string(),
       canvasId: z.string(),
+      title: z.string().nullable().optional(),
     }),
     canvas: z.object({
       nodes: z.array(z.unknown()),
       edges: z.array(z.unknown()),
-      workspaceName: z.string().optional(),
     }),
     sources: z.array(
       z.object({
@@ -576,12 +588,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
     const canvasFile: CanvasFile = {
       canvasId: targetCanvasId,
-      title: bundle.canvas.workspaceName ?? existing?.title ?? null,
+      title: bundle.manifest.title ?? null,
       version: nextVersion,
       state: {
         nodes: leanNodes,
         edges: bundle.canvas.edges ?? [],
-        workspaceName: bundle.canvas.workspaceName,
       },
       createdAt: existing?.createdAt ?? timestamp,
       updatedAt: timestamp,
