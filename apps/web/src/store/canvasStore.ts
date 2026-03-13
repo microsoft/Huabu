@@ -1,7 +1,6 @@
 import {
   type AgentBaseContext,
   type CanvasNodeType,
-  type KnowledgeStorageConfig,
   type NodeSummary,
   type RecentAction,
   type SelectedNodeDetail,
@@ -162,9 +161,6 @@ type RFState = {
   workspaceName: string;
   setWorkspaceName: (name: string) => void;
 
-  storageConfig: KnowledgeStorageConfig;
-  setStorageConfig: (config: KnowledgeStorageConfig) => void;
-
   ingestionByNodeId: Record<string, NodeIngestionInfo>;
   setNodeIngestion: (nodeId: string, info: NodeIngestionInfo) => void;
   clearNodeIngestion: (nodeId: string) => void;
@@ -292,18 +288,13 @@ const scheduleAutoSave = (saveCanvas: () => Promise<void>) => {
   }, AUTOSAVE_DEBOUNCE_MS);
 };
 
-const PERSISTED_KEYS = [
-  'nodes',
-  'edges',
-  'workspaceName',
-  'storageConfig',
-] as const;
+const PERSISTED_KEYS = ['nodes', 'edges', 'workspaceName'] as const;
 type PersistedKey = (typeof PERSISTED_KEYS)[number];
 
 /**
  * Middleware that:
  * 1. Automatically schedules a canvas save whenever a persisted field
- *    (nodes, edges, workspaceName, storageConfig) changes.
+ *    (nodes, edges, workspaceName) changes.
  *    Skipped while `isLoading` is true to avoid triggering a save during load.
  * 2. Automatically syncs `canUndo` / `canRedo` with the history manager
  *    after every state update, so individual actions never need to set them.
@@ -374,11 +365,6 @@ const useCanvasStore = create<RFState>()(
     workspaceName: DEFAULT_WORKSPACE_NAME,
     setWorkspaceName: (name) => {
       set({ workspaceName: name });
-    },
-
-    storageConfig: { backend: 'sqlite' },
-    setStorageConfig: (config) => {
-      set({ storageConfig: config });
     },
 
     ingestionByNodeId: {},
@@ -569,7 +555,6 @@ const useCanvasStore = create<RFState>()(
           nodes?: Node[];
           edges?: Edge[];
           workspaceName?: string;
-          storageConfig?: KnowledgeStorageConfig;
         };
         canvasHistoryManager.clear();
 
@@ -593,7 +578,6 @@ const useCanvasStore = create<RFState>()(
           nodes: cleanedNodes,
           edges: state.edges ?? [],
           workspaceName: state.workspaceName ?? get().workspaceName,
-          storageConfig: state.storageConfig ?? get().storageConfig,
           version: response.version,
           isLoading: false,
           ingestionByNodeId: {},
@@ -613,17 +597,10 @@ const useCanvasStore = create<RFState>()(
 
       set({ isSaving: true });
       try {
-        const {
-          nodes,
-          edges,
-          version,
-          canvasId,
-          workspaceName,
-          storageConfig,
-        } = get();
+        const { nodes, edges, version, canvasId, workspaceName } = get();
         const response = await putCanvas(canvasId, {
           version,
-          state: { nodes, edges, workspaceName, storageConfig },
+          state: { nodes, edges, workspaceName },
         });
         set({ version: response.version });
       } catch (error) {
@@ -1116,8 +1093,7 @@ function flushOnUnload(): void {
   }
   ingestionTimers.clear();
 
-  const { canvasId, nodes, edges, version, workspaceName, storageConfig } =
-    state;
+  const { canvasId, nodes, edges, version, workspaceName } = state;
 
   // Fire upsertNode with keepalive for every queued node.
   for (const nodeId of pendingNodeIds) {
@@ -1146,7 +1122,7 @@ function flushOnUnload(): void {
   // Flush canvas save.
   void putCanvas(
     canvasId,
-    { version, state: { nodes, edges, workspaceName, storageConfig } },
+    { version, state: { nodes, edges, workspaceName } },
     { keepalive: true },
   ).catch(() => {
     // Best-effort on unload – ignore errors.

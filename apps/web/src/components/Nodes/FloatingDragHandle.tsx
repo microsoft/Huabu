@@ -2,7 +2,10 @@ import clsx from 'clsx';
 import { Loader2, MessageSquare, Plus, Star } from 'lucide-react';
 import { useCallback, useRef } from 'react';
 
+import useCanvasStore from '@/store/canvasStore';
+import { usePreviewStore } from '@/store/previewStore';
 import { setDragPayload } from '@/utils/dragDrop';
+import { buildNode } from '@/utils/nodeFactory';
 
 import { NODE_ICON } from '../../config/nodeIcons';
 import { DragToCanvasHandleButton } from '../Common/DragToCanvasHandleButton';
@@ -54,6 +57,18 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
   const hasText = text.trim().length > 0;
   const isImageReady = !!imageUrl && !capturing;
 
+  // Detect fullscreen (replace) mode — canvas not visible, so drag is useless.
+  // In this case the buttons become click-to-add with auto-placement.
+  const expandedNodeId = useCanvasStore((s) => s.expandedNodeId);
+  const canvasExpandMode = useCanvasStore((s) => s.expandMode);
+  const previewType = usePreviewStore((s) => s.previewType);
+  const previewExpandMode = usePreviewStore((s) => s.expandMode);
+  const addNode = useCanvasStore((s) => s.addNode);
+
+  const isFullscreen =
+    (!!expandedNodeId && canvasExpandMode === 'replace') ||
+    (!!previewType && previewExpandMode === 'replace');
+
   // Track whether a drag is in progress so we can suppress Popover's
   // outside-click dismiss until the drop completes.
   const draggingRef = useRef(false);
@@ -83,6 +98,34 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
     onDismiss();
   }, [onDismiss]);
 
+  // Click-to-add handlers for fullscreen mode
+  const handleAddNote = useCallback(() => {
+    const node = buildNode({
+      type: 'note',
+      position: { x: 0, y: 0 },
+      data: {
+        content: text,
+        origin: { type: 'user-drag-capture', sourceId },
+      },
+    });
+    addNode(node);
+    onDismiss();
+  }, [text, sourceId, addNode, onDismiss]);
+
+  const handleAddImage = useCallback(() => {
+    if (!imageUrl) return;
+    const node = buildNode({
+      type: 'image',
+      position: { x: 0, y: 0 },
+      data: {
+        src: imageUrl,
+        origin: { type: 'user-drag-capture', sourceId },
+      },
+    });
+    addNode(node);
+    onDismiss();
+  }, [imageUrl, sourceId, addNode, onDismiss]);
+
   // Guard dismiss: ignore outside-click while a drag is active
   const guardedDismiss = useCallback(() => {
     if (draggingRef.current) return;
@@ -109,9 +152,10 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
   }, [onSetCover, imageUrl, onDismiss]);
 
   const dragBtnClass = clsx(
-    'flex shrink-0 cursor-grab items-center justify-center gap-1 px-2.5 py-1.5',
+    'flex shrink-0 items-center justify-center gap-1 px-2.5 py-1.5',
     'text-xs text-foreground',
-    'hover:bg-theme-100 active:cursor-grabbing',
+    'hover:bg-theme-100',
+    !isFullscreen && 'cursor-grab active:cursor-grabbing',
   );
 
   return (
@@ -120,36 +164,56 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
       onDismiss={guardedDismiss}
       className="grid auto-rows-auto"
     >
-      {/* ── Text drag button ── */}
-      {hasText && (
-        <DragToCanvasHandleButton
-          iconSize={10}
-          onDragStart={handleTextDragStart}
-          onDragEnd={handleDragEnd}
-          className={dragBtnClass}
-          title="Drag selected text as a note"
-        >
-          <NODE_ICON.note size={14} className="shrink-0" />
-        </DragToCanvasHandleButton>
-      )}
+      {/* ── Text button: drag (split) or click-to-add (fullscreen) ── */}
+      {hasText &&
+        (isFullscreen ? (
+          <GhostButton
+            className={dragBtnClass}
+            title="Add selected text as a note"
+            onClick={handleAddNote}
+          >
+            <Plus size={10} className="shrink-0" />
+            <NODE_ICON.note size={14} className="shrink-0" />
+          </GhostButton>
+        ) : (
+          <DragToCanvasHandleButton
+            iconSize={10}
+            onDragStart={handleTextDragStart}
+            onDragEnd={handleDragEnd}
+            className={dragBtnClass}
+            title="Drag selected text as a note"
+          >
+            <NODE_ICON.note size={14} className="shrink-0" />
+          </DragToCanvasHandleButton>
+        ))}
 
-      {/* ── Image drag button (or status) ── */}
+      {/* ── Image button (or status) ── */}
       {capturing && (
         <div className="text-muted-foreground flex items-center gap-1 text-xs">
           <Loader2 size={11} className="animate-spin" />
         </div>
       )}
-      {isImageReady && (
-        <DragToCanvasHandleButton
-          iconSize={10}
-          onDragStart={handleImageDragStart}
-          onDragEnd={handleDragEnd}
-          className={dragBtnClass}
-          title="Drag captured area as an image"
-        >
-          <NODE_ICON.image size={14} className="shrink-0" />
-        </DragToCanvasHandleButton>
-      )}
+      {isImageReady &&
+        (isFullscreen ? (
+          <GhostButton
+            className={dragBtnClass}
+            title="Add captured area as an image"
+            onClick={handleAddImage}
+          >
+            <Plus size={10} className="shrink-0" />
+            <NODE_ICON.image size={14} className="shrink-0" />
+          </GhostButton>
+        ) : (
+          <DragToCanvasHandleButton
+            iconSize={10}
+            onDragStart={handleImageDragStart}
+            onDragEnd={handleDragEnd}
+            className={dragBtnClass}
+            title="Drag captured area as an image"
+          >
+            <NODE_ICON.image size={14} className="shrink-0" />
+          </DragToCanvasHandleButton>
+        ))}
 
       {/* ── Send to Chat button ── */}
       {isImageReady && onSendToChat && imageUrl && (

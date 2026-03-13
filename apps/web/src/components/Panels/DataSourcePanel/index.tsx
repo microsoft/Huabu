@@ -95,6 +95,17 @@ export const DataSourcePanel = ({
     }
   }, [tab]);
 
+  // Re-fetch sources when workspace path changes
+  useEffect(() => {
+    const handler = () => {
+      if (tab === 'sources') {
+        getSources().then(setSources).catch(console.error);
+      }
+    };
+    window.addEventListener('workspace-changed', handler);
+    return () => window.removeEventListener('workspace-changed', handler);
+  }, [tab]);
+
   const [sortType, setSortType] = useState<SortType>('alpha');
   const [showSortMenu, setShowSortMenu] = useState(false);
 

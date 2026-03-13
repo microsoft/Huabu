@@ -803,7 +803,6 @@ function handlePasteNodes(
 
     const clonedData = JSON.parse(JSON.stringify(node.data ?? {}));
     delete clonedData.sourceId;
-    delete clonedData.sourceBackend;
 
     const cloned: Node = {
       id: newId,

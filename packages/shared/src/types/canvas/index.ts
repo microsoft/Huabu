@@ -43,14 +43,9 @@ export type { EdgeStyle } from './edge.js';
 
 // Source types
 export type {
-  KnowledgeStorageBackend,
-  KnowledgeStorageConfig,
   UpsertNodeRequest,
   UpsertNodeResponse,
   DeleteNodeResponse,
-  MigrateStorageRequest,
-  MigrateStorageNodeResult,
-  MigrateStorageResponse,
 } from './source.js';
 
 // Layout types

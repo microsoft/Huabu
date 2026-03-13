@@ -6,7 +6,6 @@ import { DocumentLoaderFactory } from './loaders/index.js';
 import {
   computeBufferHash,
   computeContentHash,
-  generateRevisionId,
   generateSourceId,
   normalizeUrl,
 } from './utils.js';
@@ -18,7 +17,6 @@ import type { Source, SourceMetadata, SourceType } from '@sediment/shared';
  * Input for Text/Note source ingestion
  */
 export interface IngestTextSourceInput {
-  workspaceId: string;
   nodeId: string;
   type: 'note' | 'text';
   title?: string;
@@ -35,7 +33,6 @@ export interface IngestTextSourceInput {
  * Input for Web source ingestion
  */
 export interface IngestWebSourceInput {
-  workspaceId: string;
   nodeId: string;
   src: string;
   title?: string;
@@ -51,7 +48,6 @@ export interface IngestWebSourceInput {
  * Input for PDF source ingestion
  */
 export interface IngestPdfSourceInput {
-  workspaceId: string;
   nodeId: string;
   artifactUri: string;
   title?: string;
@@ -68,7 +64,6 @@ export interface IngestPdfSourceInput {
  */
 export interface IngestSourceResult {
   source: Source;
-  revisionId?: string;
   isNew: boolean;
   contentChanged: boolean;
 }
@@ -114,7 +109,6 @@ export class IngestService {
 
   private upsertPlaceholderSource(params: {
     sourceId: string;
-    workspaceId: string;
     type: 'note' | 'text' | 'web' | 'pdf';
     title?: string;
     src?: string;
@@ -139,7 +133,6 @@ export class IngestService {
 
     this.repository.createSource({
       sourceId: params.sourceId,
-      workspaceId: params.workspaceId,
       type: params.type,
       title: params.title,
       src: params.src,
@@ -155,7 +148,6 @@ export class IngestService {
    * and includes a detailed ingestError.
    */
   async ingestCanvasNode(params: {
-    workspaceId: string;
     nodeId: string;
     type: 'note' | 'text' | 'web';
     title?: string;
@@ -163,8 +155,7 @@ export class IngestService {
     src?: string;
     existingSourceId?: string | null;
   }): Promise<NodeIngestOutcome> {
-    const { workspaceId, nodeId, type, title, content, src, existingSourceId } =
-      params;
+    const { nodeId, type, title, content, src, existingSourceId } = params;
 
     if (type === 'note' || type === 'text') {
       const nodeContent = content ?? '';
@@ -172,7 +163,6 @@ export class IngestService {
         const sourceId =
           existingSourceId ??
           generateSourceId({
-            workspaceId,
             type,
           });
         const ingestError: NodeIngestError = {
@@ -181,7 +171,6 @@ export class IngestService {
         };
         this.upsertPlaceholderSource({
           sourceId,
-          workspaceId,
           type,
           title,
           ingestError,
@@ -191,7 +180,6 @@ export class IngestService {
 
       try {
         const result = await this.ingestTextSource({
-          workspaceId,
           nodeId,
           type,
           title,
@@ -207,7 +195,6 @@ export class IngestService {
         const sourceId =
           existingSourceId ??
           generateSourceId({
-            workspaceId,
             type,
           });
         const ingestError: NodeIngestError = {
@@ -216,7 +203,6 @@ export class IngestService {
         };
         this.upsertPlaceholderSource({
           sourceId,
-          workspaceId,
           type,
           title,
           ingestError,
@@ -232,7 +218,6 @@ export class IngestService {
       const sourceId =
         existingSourceId ??
         generateSourceId({
-          workspaceId,
           type: 'web',
           uri: normalizedUri,
         });
@@ -242,7 +227,6 @@ export class IngestService {
       };
       this.upsertPlaceholderSource({
         sourceId,
-        workspaceId,
         type: 'web',
         title,
         src: normalizedUri,
@@ -253,7 +237,6 @@ export class IngestService {
 
     try {
       const result = await this.ingestWebSource({
-        workspaceId,
         nodeId,
         src: uri,
         title,
@@ -269,7 +252,6 @@ export class IngestService {
       const sourceId =
         existingSourceId ??
         generateSourceId({
-          workspaceId,
           type: 'web',
           uri: normalizedUri,
         });
@@ -279,7 +261,6 @@ export class IngestService {
       };
       this.upsertPlaceholderSource({
         sourceId,
-        workspaceId,
         type: 'web',
         title,
         src: normalizedUri,
@@ -294,15 +275,13 @@ export class IngestService {
    * The artifactsDir should point at the server's artifact storage directory.
    */
   async ingestPdfCanvasNodeFromArtifact(params: {
-    workspaceId: string;
     nodeId: string;
     title?: string;
     artifactUri?: string;
     artifactsDir: string;
     existingSourceId?: string | null;
   }): Promise<NodeIngestOutcome> {
-    const { workspaceId, nodeId, title, artifactsDir, existingSourceId } =
-      params;
+    const { nodeId, title, artifactsDir, existingSourceId } = params;
     const artifactUri = (params.artifactUri ?? '').trim();
 
     const placeholderFrom = async (ingestError: NodeIngestError) => {
@@ -325,14 +304,12 @@ export class IngestService {
       const sourceId =
         existingSourceId ??
         generateSourceId({
-          workspaceId,
           type: 'pdf',
           fileHash,
         });
 
       this.upsertPlaceholderSource({
         sourceId,
-        workspaceId,
         type: 'pdf',
         title,
         src: artifactUri || undefined,
@@ -372,7 +349,6 @@ export class IngestService {
 
     try {
       const result = await this.ingestPdfSource({
-        workspaceId,
         nodeId,
         artifactUri,
         filePath,
@@ -413,7 +389,6 @@ export class IngestService {
   private createOrUpdateSource(params: {
     sourceId: string;
     existingSource: Source | null;
-    workspaceId: string;
     type: SourceType;
     title?: string;
     src?: string;
@@ -424,7 +399,6 @@ export class IngestService {
     const {
       sourceId,
       existingSource,
-      workspaceId,
       type,
       title,
       src,
@@ -446,7 +420,6 @@ export class IngestService {
       // Create new source
       const source = this.repository.createSource({
         sourceId,
-        workspaceId,
         type,
         title,
         src,
@@ -487,7 +460,6 @@ export class IngestService {
     const sourceId =
       input.existingSourceId ??
       generateSourceId({
-        workspaceId: input.workspaceId,
         type: input.type,
       });
 
@@ -504,13 +476,12 @@ export class IngestService {
       };
     }
 
-    // Use transaction for atomic source + revision creation
+    // Use transaction for atomic source creation
     const result = this.repository.transaction(() => {
       // Create or update source
       const { source, isNew } = this.createOrUpdateSource({
         sourceId,
         existingSource,
-        workspaceId: input.workspaceId,
         type: input.type,
         title: input.title,
         content: content,
@@ -518,18 +489,7 @@ export class IngestService {
         metadata: input.metadata,
       });
 
-      // Create new revision (for editable types, always track history)
-      const revisionId = generateRevisionId();
-      this.repository.createRevision({
-        revisionId,
-        workspaceId: input.workspaceId,
-        sourceId,
-        content: content,
-        contentHash,
-        metadata: input.metadata,
-      });
-
-      return { source, revisionId, isNew };
+      return { source, isNew };
     });
 
     return {
@@ -559,7 +519,6 @@ export class IngestService {
 
     // Generate deterministic sourceId
     const sourceId = generateSourceId({
-      workspaceId: input.workspaceId,
       type: 'web',
       uri: normalizedUri,
     });
@@ -593,7 +552,6 @@ export class IngestService {
     const { source, isNew } = this.createOrUpdateSource({
       sourceId,
       existingSource,
-      workspaceId: input.workspaceId,
       type: 'web',
       title,
       src: normalizedUri,
@@ -638,9 +596,8 @@ export class IngestService {
 
     const contentHash = computeContentHash(content);
 
-    // Generate deterministic sourceId from workspace + file content hash
+    // Generate deterministic sourceId from file content hash
     const sourceId = generateSourceId({
-      workspaceId: input.workspaceId,
       type: 'pdf',
       fileHash: contentHash,
     });
@@ -670,7 +627,6 @@ export class IngestService {
     const { source, isNew } = this.createOrUpdateSource({
       sourceId,
       existingSource,
-      workspaceId: input.workspaceId,
       type: 'pdf',
       title,
       src: input.artifactUri,
@@ -704,45 +660,19 @@ export class IngestService {
   }
 
   /**
-   * Get source with latest revision content
-   * Useful for building LLM context
+   * Get source with its current content.
+   * Useful for building LLM context.
    */
-  getSourceWithLatestRevision(sourceId: string): {
+  getSourceWithContent(sourceId: string): {
     source: Source;
-    latestRevision?: {
-      revisionId: string;
-      content: string;
-      createdAt: number;
-    };
+    content: string;
   } | null {
     const source = this.repository.findSourceById(sourceId);
     if (!source) return null;
 
-    // For editable types, get latest revision
-    if (source.type === 'note' || source.type === 'text') {
-      const revision = this.repository.findLatestRevision(sourceId);
-      if (revision) {
-        return {
-          source,
-          latestRevision: {
-            revisionId: revision.revisionId,
-            content: revision.content,
-            createdAt: revision.createdAt,
-          },
-        };
-      }
-    }
-
-    // For non-editable types or if no revision, use source content
     return {
       source,
-      latestRevision: source.content
-        ? {
-            revisionId: 'current', // Placeholder for non-revisioned types
-            content: source.content,
-            createdAt: source.updatedAt,
-          }
-        : undefined,
+      content: source.content,
     };
   }
 }
@@ -754,8 +684,8 @@ let serviceInstance: IngestService | null = null;
 
 /**
  * Reset the cached IngestService singleton.
- * Called when the storage backend config changes so that the next call
- * to getIngestService() creates a fresh instance with the new repository.
+ * Must be called whenever the workspace path changes so that the next call
+ * to getIngestService() creates a fresh instance bound to the new repository.
  */
 export function resetIngestService(): void {
   serviceInstance = null;

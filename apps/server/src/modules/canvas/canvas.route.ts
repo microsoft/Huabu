@@ -5,23 +5,22 @@ import path from 'node:path';
 import { createId } from '@sediment/shared';
 import { z } from 'zod';
 
-import { getCanvasDb } from './canvas.db.js';
-import { migrationRoute } from './canvas.migration.js';
-import { getArtifactsDir } from '../artifact/utils.js';
+import {
+  readCanvas,
+  writeCanvas,
+  type CanvasFile,
+  type NodeLike,
+} from './canvas.filestore.js';
 import {
   getIngestService,
   getKnowledgeRepository,
-  resetIngestService,
-  setKnowledgeStorageConfig,
-  getActiveStorageConfig,
 } from '../knowledge/index.js';
+import { getArtifactsDir } from '../workspace.js';
 
-import type { CanvasRow, NodeLike } from './canvas.types.js';
 import type {
   CanvasExportBundle,
   ExportedSource,
   ImportCanvasResponse,
-  KnowledgeStorageConfig,
 } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
@@ -34,57 +33,17 @@ function toMessage(error: unknown): string {
 }
 
 /**
- * Read the storageConfig from a canvas row's stateJson and apply it
- * so subsequent repository/service calls use the correct backend.
- */
-function applyStorageConfigFromCanvas(canvasId: string): void {
-  const database = getCanvasDb();
-  const row = database
-    .prepare('SELECT stateJson FROM canvases WHERE canvasId = ?')
-    .get(canvasId) as { stateJson: string } | undefined;
-
-  if (!row) return;
-
-  try {
-    const state = JSON.parse(row.stateJson) as {
-      storageConfig?: KnowledgeStorageConfig;
-    };
-    if (state.storageConfig) {
-      setKnowledgeStorageConfig(state.storageConfig);
-      resetIngestService();
-    }
-  } catch {
-    // Ignore parse errors – fall back to current config
-  }
-}
-
-/**
  * Strip derived `content` from nodes that already have a `sourceId`.
- * This avoids storing a redundant copy in canvas state_json – the knowledge
- * DB is the single source of truth for note/text content.
+ * This avoids storing a redundant copy in the canvas JSON - the knowledge
+ * store is the single source of truth for note/text content.
  */
-function stripManagedContent(state: unknown): unknown {
-  if (
-    typeof state !== 'object' ||
-    state === null ||
-    !('nodes' in state) ||
-    !Array.isArray((state as { nodes: unknown }).nodes)
-  ) {
-    return state;
-  }
-
-  const { nodes, ...rest } = state as { nodes: NodeLike[] } & Record<
-    string,
-    unknown
-  >;
-
-  const strippedNodes = nodes.map((node) => {
+function stripManagedContent(nodes: NodeLike[]): NodeLike[] {
+  return nodes.map((node) => {
     if (!node.data?.sourceId) {
       return node;
     }
 
     // Strip `content` but preserve it as `contentSnapshot` for fallback
-    // when the storage backend changes or a source cannot be found.
     const { content, ...dataRest } = node.data;
     return {
       ...node,
@@ -94,32 +53,16 @@ function stripManagedContent(state: unknown): unknown {
       },
     };
   });
-
-  return { ...rest, nodes: strippedNodes };
 }
 
 /**
- * Hydrate node `content` from the knowledge DB for nodes that reference a source.
+ * Hydrate node `content` from the knowledge store for nodes that reference a source.
  * Only applies to note/text nodes that have a `sourceId`.
  */
-async function hydrateNodeContent(state: unknown): Promise<unknown> {
-  if (
-    typeof state !== 'object' ||
-    state === null ||
-    !('nodes' in state) ||
-    !Array.isArray((state as { nodes: unknown }).nodes)
-  ) {
-    return state;
-  }
-
-  const { nodes, ...rest } = state as { nodes: NodeLike[] } & Record<
-    string,
-    unknown
-  >;
-
+async function hydrateNodeContent(nodes: NodeLike[]): Promise<NodeLike[]> {
   const repository = await getKnowledgeRepository();
 
-  const hydratedNodes = nodes.map((node) => {
+  return nodes.map((node) => {
     const sourceId = node.data?.sourceId as string | undefined;
     if (!sourceId) {
       return node;
@@ -128,7 +71,6 @@ async function hydrateNodeContent(state: unknown): Promise<unknown> {
     const source = repository.findSourceById(sourceId);
 
     // Fall back to contentSnapshot when the source cannot be found
-    // (e.g. after switching storage backends without migrating).
     const content =
       source?.content ??
       (node.data?.contentSnapshot as string | undefined) ??
@@ -142,19 +84,15 @@ async function hydrateNodeContent(state: unknown): Promise<unknown> {
       },
     };
   });
-
-  return { ...rest, nodes: hydratedNodes };
 }
 
 const putCanvasBodySchema = z.object({
   version: z.number().int().nonnegative(),
   state: z.unknown(),
-  workspaceId: z.string().min(1).optional(),
   title: z.string().min(1).optional(),
 });
 
 const upsertNodeBodySchema = z.object({
-  workspaceId: z.string().min(1).optional(),
   type: z.enum(['note', 'text', 'web', 'pdf']),
   title: z.string().optional(),
   content: z.string().optional(),
@@ -168,32 +106,19 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     Params: { canvasId: string; nodeId: string };
     Body: unknown;
   }>('/:canvasId/nodes/:nodeId', async function (request, reply) {
-    const { canvasId, nodeId } = request.params;
+    const { nodeId } = request.params;
     const parsed = upsertNodeBodySchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.code(400).send({ message: 'Invalid request body' });
     }
 
-    // Ensure the knowledge backend matches the canvas-level config
-    applyStorageConfigFromCanvas(canvasId);
-
     const {
-      workspaceId,
       type,
       title,
       content,
       src,
       sourceId: existingSourceId,
     } = parsed.data;
-    const database = getCanvasDb();
-
-    // Get canvas to determine workspaceId
-    const canvasRow = database
-      .prepare('SELECT workspaceId FROM canvases WHERE canvasId = ?')
-      .get(canvasId) as { workspaceId: string | null } | undefined;
-
-    const resolvedWorkspaceId =
-      workspaceId ?? canvasRow?.workspaceId ?? 'default';
 
     const ingestService = await getIngestService();
 
@@ -201,7 +126,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       const outcome =
         type === 'pdf'
           ? await ingestService.ingestPdfCanvasNodeFromArtifact({
-              workspaceId: resolvedWorkspaceId,
               nodeId,
               title,
               artifactUri: src,
@@ -209,7 +133,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
               existingSourceId,
             })
           : await ingestService.ingestCanvasNode({
-              workspaceId: resolvedWorkspaceId,
               nodeId,
               type,
               title,
@@ -219,18 +142,15 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
             });
 
       const { sourceId, success, error } = outcome;
-      const currentConfig = getActiveStorageConfig();
 
       return reply.send({
         nodeId,
         sourceId,
         success,
-        sourceBackend: currentConfig.backend,
         suggestedLabel: outcome.title,
         error: error ? `${error.code}: ${error.message}` : undefined,
       });
     } catch (error) {
-      // Unexpected failure (DB issues, etc). Keep 500, but provide a detailed message.
       const message = toMessage(error);
       request.log.error(
         { nodeId, nodeType: type, error },
@@ -250,42 +170,34 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     return reply.send({ success: true });
   });
 
+  // --- GET Canvas ---
+
   fastify.get<{ Params: { canvasId: string } }>(
     '/:canvasId',
     async function (request, reply) {
       const { canvasId } = request.params;
-      const database = getCanvasDb();
+      const canvas = readCanvas(canvasId);
 
-      const row = database
-        .prepare(
-          `SELECT canvasId, workspaceId, title, version, stateJson, createdAt, updatedAt
-           FROM canvases
-           WHERE canvasId = ?`,
-        )
-        .get(canvasId) as CanvasRow | undefined;
-
-      if (!row) {
+      if (!canvas) {
         return reply.code(404).send({ message: 'Canvas not found' });
       }
 
-      let state: unknown;
-      try {
-        state = JSON.parse(row.stateJson) as unknown;
-      } catch {
-        state = row.stateJson;
-      }
-
-      // Hydrate node content from knowledge DB so clients always get fresh data
-      applyStorageConfigFromCanvas(canvasId);
-      state = await hydrateNodeContent(state);
+      // Hydrate node content from knowledge store so clients always get fresh data
+      const nodes = canvas.state.nodes as NodeLike[];
+      const hydratedNodes = await hydrateNodeContent(nodes);
 
       return reply.send({
-        canvasId: row.canvasId,
-        version: row.version,
-        state,
+        canvasId: canvas.canvasId,
+        version: canvas.version,
+        state: {
+          ...canvas.state,
+          nodes: hydratedNodes,
+        },
       });
     },
   );
+
+  // --- PUT Canvas ---
 
   fastify.put<{ Params: { canvasId: string }; Body: unknown }>(
     '/:canvasId',
@@ -296,17 +208,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.code(400).send({ message: 'Invalid request body' });
       }
 
-      const { version: clientVersion, state, workspaceId, title } = parsed.data;
+      const { version: clientVersion, state, title } = parsed.data;
 
-      const database = getCanvasDb();
-      const existing = database
-        .prepare(
-          `SELECT canvasId, workspaceId, title, version, stateJson, createdAt, updatedAt
-           FROM canvases
-           WHERE canvasId = ?`,
-        )
-        .get(canvasId) as CanvasRow | undefined;
-
+      const existing = readCanvas(canvasId);
       const serverVersion = existing?.version ?? 0;
       if (clientVersion !== serverVersion) {
         return reply
@@ -317,47 +221,33 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       const timestamp = nowMs();
       const nextVersion = serverVersion + 1;
 
-      // Strip content that is managed by the knowledge DB to avoid data duplication
-      const leanState = stripManagedContent(state);
-      const stateJson = JSON.stringify(leanState);
+      // Parse the incoming state object
+      const rawState = state as {
+        nodes?: NodeLike[];
+        edges?: unknown[];
+        workspaceName?: string;
+        [key: string]: unknown;
+      };
 
-      // Only update canvas metadata and state (node-source mappings are managed by node endpoints)
-      if (!existing) {
-        database
-          .prepare(
-            `INSERT INTO canvases (
-              canvasId, workspaceId, title, version, stateJson, createdAt, updatedAt
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          )
-          .run(
-            canvasId,
-            workspaceId ?? null,
-            title ?? null,
-            nextVersion,
-            stateJson,
-            timestamp,
-            timestamp,
-          );
-      } else {
-        database
-          .prepare(
-            `UPDATE canvases
-             SET workspaceId = COALESCE(?, workspaceId),
-                 title = COALESCE(?, title),
-                 version = ?,
-                 stateJson = ?,
-                 updatedAt = ?
-             WHERE canvasId = ?`,
-          )
-          .run(
-            workspaceId ?? null,
-            title ?? null,
-            nextVersion,
-            stateJson,
-            timestamp,
-            canvasId,
-          );
-      }
+      // Strip content that is managed by the knowledge store to avoid data duplication
+      const leanNodes = stripManagedContent(
+        (rawState?.nodes ?? []) as NodeLike[],
+      );
+
+      const canvasFile: CanvasFile = {
+        canvasId,
+        title: title ?? existing?.title ?? null,
+        version: nextVersion,
+        state: {
+          ...rawState,
+          nodes: leanNodes,
+          edges: rawState?.edges ?? [],
+        },
+        createdAt: existing?.createdAt ?? timestamp,
+        updatedAt: timestamp,
+      };
+
+      writeCanvas(canvasFile);
 
       return reply.send({
         canvasId,
@@ -366,66 +256,43 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     },
   );
 
-  // ───────────────────── Export Canvas ─────────────────────
+  // --- Export Canvas ---
 
   fastify.get<{ Params: { canvasId: string } }>(
     '/:canvasId/export',
     async function (request, reply) {
       const { canvasId } = request.params;
-      const database = getCanvasDb();
+      const canvas = readCanvas(canvasId);
 
-      const row = database
-        .prepare(
-          `SELECT canvasId, workspaceId, title, version, stateJson, createdAt, updatedAt
-           FROM canvases WHERE canvasId = ?`,
-        )
-        .get(canvasId) as CanvasRow | undefined;
-
-      if (!row) {
+      if (!canvas) {
         return reply.code(404).send({ message: 'Canvas not found' });
       }
 
-      let state: {
-        nodes?: NodeLike[];
-        edges?: unknown[];
-        workspaceName?: string;
-        storageConfig?: unknown;
-      };
-      try {
-        state = JSON.parse(row.stateJson) as typeof state;
-      } catch {
-        return reply
-          .code(500)
-          .send({ message: 'Failed to parse canvas state' });
-      }
+      const nodes = (canvas.state.nodes ?? []) as NodeLike[];
+      const edges = canvas.state.edges ?? [];
 
       // Collect all sourceIds referenced by nodes
-      const nodes: NodeLike[] = state.nodes ?? [];
       const sourceIds = nodes
         .map((n) => n.data?.sourceId as string | undefined)
         .filter((id): id is string => typeof id === 'string' && id.length > 0);
 
       // Fetch corresponding knowledge sources
-      applyStorageConfigFromCanvas(canvasId);
       const repository = await getKnowledgeRepository();
       const sources: ExportedSource[] = sourceIds
         .map((id) => repository.findSourceById(id))
         .filter((s): s is NonNullable<typeof s> => s !== null)
         .map((s) => ({
           sourceId: s.sourceId,
-          workspaceId: s.workspaceId,
           type: s.type,
           title: s.title ?? null,
           src: s.src ?? null,
           content: s.content,
           contentHash: s.contentHash,
-          createdAt: s.createdAt,
-          updatedAt: s.updatedAt,
           metaJson:
             (s as unknown as { metaJson?: string | null }).metaJson ?? null,
         }));
 
-      // Collect PDF, image, and video artifacts (nodes whose src is a local artifact path)
+      // Collect PDF, image, and video artifacts
       const artifactsDir = getArtifactsDir();
       const artifactEntries: CanvasExportBundle['artifacts'] = [];
 
@@ -458,7 +325,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         const src = node.data?.src as string | undefined;
         if (!src) continue;
 
-        // src may be an absolute URL like /api/artifact/filename.pdf or just a filename
         const filename = path.basename(src);
         const filePath = path.join(artifactsDir, filename);
 
@@ -470,7 +336,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
             mimeType: getMimeType(filename),
           });
         } catch {
-          // Artifact missing on disk – skip silently, best-effort export
           request.log.warn(
             { filename, nodeType: node.type },
             'Artifact not found during export',
@@ -492,7 +357,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
           node.data!.coverUrl = `data:${coverMime};base64,${coverData.toString('base64')}`;
         } catch {
-          // Cover image missing on disk – remove broken reference
           request.log.warn(
             { filename: coverFilename },
             'Cover image not found during export, removing coverUrl',
@@ -502,9 +366,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         }
       }
 
-      // Build the export bundle.  We return the raw stateJson nodes (with
-      // contentSnapshot) so the import side can restore content even if the
-      // knowledge DB is rebuilt from sources.
       const bundle: CanvasExportBundle = {
         manifest: {
           version: '1.0',
@@ -512,16 +373,15 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           canvasId,
         },
         canvas: {
-          nodes: state.nodes ?? [],
-          edges: state.edges ?? [],
-          workspaceName: state.workspaceName,
-          storageConfig: state.storageConfig,
+          nodes,
+          edges,
+          workspaceName: canvas.state.workspaceName,
         },
         sources,
         artifacts: artifactEntries,
       };
 
-      const safeName = (row.title ?? canvasId).replace(/[^a-z0-9_-]/gi, '_');
+      const safeName = (canvas.title ?? canvasId).replace(/[^a-z0-9_-]/gi, '_');
       return reply
         .header(
           'Content-Disposition',
@@ -532,7 +392,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     },
   );
 
-  // ───────────────────── Import Canvas ─────────────────────
+  // --- Import Canvas ---
 
   const importBodySchema = z.object({
     manifest: z.object({
@@ -544,19 +404,15 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       nodes: z.array(z.unknown()),
       edges: z.array(z.unknown()),
       workspaceName: z.string().optional(),
-      storageConfig: z.unknown().optional(),
     }),
     sources: z.array(
       z.object({
         sourceId: z.string(),
-        workspaceId: z.string(),
         type: z.string(),
         title: z.string().nullable(),
         src: z.string().nullable(),
         content: z.string(),
         contentHash: z.string(),
-        createdAt: z.number(),
-        updatedAt: z.number(),
         metaJson: z.string().nullable(),
       }),
     ),
@@ -581,10 +437,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     const bundle = parsed.data;
     const targetCanvasId = bundle.manifest.canvasId;
 
-    // 0. Normalise PDF cover images so they work on the importing machine.
-    //    - data: URLs (new format) → write to disk, set full server URL
-    //    - http(s) URLs (old format) → verify the file will exist, rewrite
-    //      to current server origin, or remove if unavailable
+    // 0. Normalise PDF cover images
     const artifactsDir = getArtifactsDir();
     const serverOrigin = `${request.protocol}://${request.headers.host as string}`;
     const bundleArtifactFilenames = new Set(
@@ -598,7 +451,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       if (!coverUrl) continue;
 
       if (coverUrl.startsWith('data:')) {
-        // New format: embedded data URL → write to disk + set full URL
         const match = coverUrl.match(/^data:([^;]+);base64,(.+)$/);
         if (!match) continue;
 
@@ -628,19 +480,15 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           );
         }
       } else {
-        // Old format: server URL → check if the cover artifact is available
         const coverFilename = path.basename(coverUrl);
         const willExist =
           bundleArtifactFilenames.has(coverFilename) ||
           existsSync(path.join(artifactsDir, coverFilename));
 
         if (willExist) {
-          // Rewrite to the current server origin so it resolves correctly
           // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
           node.data!.coverUrl = `${serverOrigin}/api/artifact/${coverFilename}`;
         } else {
-          // Cover image not in bundle and not on disk → remove to avoid
-          // a broken image; the node will fall back to inline PDF preview
           // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
           delete node.data!.coverUrl;
           request.log.warn(
@@ -651,51 +499,31 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       }
     }
 
-    // 1. Write canvas state atomically (canvas DB transaction).
-    //    This happens first so that a partial failure in source/artifact
-    //    writes still leaves the canvas itself in a valid state, and the
-    //    user can retry the import (source writes are idempotent).
-    const database = getCanvasDb();
-    const existing = database
-      .prepare('SELECT version FROM canvases WHERE canvasId = ?')
-      .get(targetCanvasId) as { version: number } | undefined;
-
+    // 1. Write canvas state atomically
+    const existing = readCanvas(targetCanvasId);
     const nextVersion = (existing?.version ?? 0) + 1;
     const timestamp = nowMs();
-    const leanState = stripManagedContent(bundle.canvas);
-    const stateJson = JSON.stringify(leanState);
 
-    database.transaction(() => {
-      if (!existing) {
-        database
-          .prepare(
-            `INSERT INTO canvases (
-                canvasId, workspaceId, title, version, stateJson, createdAt, updatedAt
-              ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          )
-          .run(
-            targetCanvasId,
-            'default',
-            bundle.canvas.workspaceName ?? null,
-            nextVersion,
-            stateJson,
-            timestamp,
-            timestamp,
-          );
-      } else {
-        database
-          .prepare(
-            `UPDATE canvases
-               SET version = ?, stateJson = ?, updatedAt = ?
-               WHERE canvasId = ?`,
-          )
-          .run(nextVersion, stateJson, timestamp, targetCanvasId);
-      }
-    })();
+    const leanNodes = stripManagedContent(
+      (bundle.canvas.nodes ?? []) as NodeLike[],
+    );
 
-    // 2. Write sources into knowledge DB (skip if sourceId already exists).
-    //    Idempotent: safe to re-run on retry.
-    applyStorageConfigFromCanvas(targetCanvasId);
+    const canvasFile: CanvasFile = {
+      canvasId: targetCanvasId,
+      title: bundle.canvas.workspaceName ?? existing?.title ?? null,
+      version: nextVersion,
+      state: {
+        nodes: leanNodes,
+        edges: bundle.canvas.edges ?? [],
+        workspaceName: bundle.canvas.workspaceName,
+      },
+      createdAt: existing?.createdAt ?? timestamp,
+      updatedAt: timestamp,
+    };
+
+    writeCanvas(canvasFile);
+
+    // 2. Write sources into knowledge store (skip if sourceId already exists)
     const repository = await getKnowledgeRepository();
     let importedSources = 0;
     for (const src of bundle.sources) {
@@ -703,7 +531,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
       repository.createSource({
         sourceId: src.sourceId,
-        workspaceId: src.workspaceId,
         type: src.type as 'note' | 'text' | 'web' | 'pdf',
         title: src.title ?? undefined,
         src: src.src ?? undefined,
@@ -716,11 +543,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       importedSources++;
     }
 
-    // 3. Write artifacts to disk (best-effort; filenames are sanitised to
-    //    prevent path traversal).
+    // 3. Write artifacts to disk (best-effort)
     let importedArtifacts = 0;
     for (const artifact of bundle.artifacts) {
-      // P0 fix: strip any directory components from the filename
       const safeFilename = path.basename(artifact.filename);
       if (!safeFilename) continue;
 
@@ -746,9 +571,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     };
     return reply.send(response);
   });
-
-  // ───────────────────── Storage Migration ─────────────────────
-  await fastify.register(migrationRoute);
 };
 
 export default canvasRoutes;

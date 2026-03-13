@@ -3,17 +3,11 @@ import { type FastifyPluginAsync } from 'fastify';
 import { getKnowledgeRepository } from './knowledge.repository.js';
 
 const knowledgeRoute: FastifyPluginAsync = async (fastify) => {
-  // Get all sources for a workspace
-  fastify.get('/knowledge/sources', async (request, reply) => {
-    const { workspaceId } = request.query as { workspaceId: string };
-
-    if (!workspaceId) {
-      return reply.code(400).send({ error: 'workspaceId is required' });
-    }
-
+  // Get all sources
+  fastify.get('/knowledge/sources', async (_request, _reply) => {
     const repo = await getKnowledgeRepository();
     // Returns SourceOverview[] - no mapping needed
-    return repo.findAllSourcesOverview(workspaceId);
+    return repo.findAllSourcesOverview();
   });
 
   // Get source content by ID
