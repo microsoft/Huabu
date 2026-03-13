@@ -606,7 +606,7 @@ const useCanvasStore = create<RFState>()(
         set({
           nodes: cleanedNodes,
           edges: state.edges ?? [],
-          canvasTitle: response.title ?? '',
+          canvasTitle: response.title || 'Untitled',
           version: response.version,
           isLoading: false,
           ingestionByNodeId: {},
@@ -658,7 +658,7 @@ const useCanvasStore = create<RFState>()(
         const { nodes, edges, version, canvasId, canvasTitle } = get();
         const response = await putCanvas(canvasId, {
           version,
-          title: canvasTitle,
+          title: canvasTitle || 'Untitled',
           state: { nodes, edges },
         });
         set({ version: response.version });
@@ -1181,7 +1181,7 @@ function flushOnUnload(): void {
   // Flush canvas save.
   void putCanvas(
     canvasId,
-    { version, title: canvasTitle, state: { nodes, edges } },
+    { version, title: canvasTitle || 'Untitled', state: { nodes, edges } },
     { keepalive: true },
   ).catch(() => {
     // Best-effort on unload – ignore errors.
