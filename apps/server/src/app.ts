@@ -1,17 +1,17 @@
+import { tmpdir } from 'node:os';
+
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import staticPlugin from '@fastify/static';
 import { fastify } from 'fastify';
 
 import artifactRoute from './modules/artifact/artifact.route.js';
-import { ensureDefaultCanvas } from './modules/canvas/canvas.filestore.js';
 import canvasRoutes from './modules/canvas/canvas.route.js';
 import chatRoutes from './modules/chat/chat.route.js';
 import intentRoutes from './modules/intent/intent.route.js';
 import knowledgeRoute from './modules/knowledge/knowledge.route.js';
 import researchRoutes from './modules/research/research.route.js';
 import webRoutes from './modules/web/web.route.js';
-import { ensureWorkspaceDirs, getArtifactsDir } from './modules/workspace.js';
 import workspaceRoutes from './modules/workspace.route.js';
 
 export const app = fastify({
@@ -34,24 +34,13 @@ app.register(multipart, {
   },
 });
 
-// Register static file serving for artifacts
-// Ensure workspace directories exist (canvas, sources, artifacts)
-try {
-  ensureWorkspaceDirs();
-  ensureDefaultCanvas();
-} catch (err) {
-  console.error(
-    '[startup] Failed to create workspace directories. ' +
-      'Check that the path is writable and that SEDIMENT_WORKSPACE_PATH (if set) is valid.',
-    err,
-  );
-  process.exit(1);
-}
-const artifactsDir = getArtifactsDir();
-
+// Register @fastify/static to enable `reply.sendFile()`.
+// Actual artifact serving uses a dynamic root resolved at request time
+// (see artifact.route.ts), so we pass `serve: false` here and use the
+// OS temp dir as a throwaway root that is never directly served.
 app.register(staticPlugin, {
-  root: artifactsDir,
-  prefix: '/api/artifact/',
+  root: tmpdir(),
+  serve: false,
 });
 
 app.register(chatRoutes, { prefix: '/api/chat' });

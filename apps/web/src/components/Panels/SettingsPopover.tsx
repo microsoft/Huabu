@@ -2,53 +2,29 @@ import { FolderOpen, Settings } from 'lucide-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-import { getWorkspacePath, putWorkspacePath } from '../../api/workspace';
+import { pickFolder } from '../../api/workspace';
 import useCanvasStore from '../../store/canvasStore';
+import { useWorkspaceStore } from '../../store/workspaceStore';
 import { IconButton } from '../Common/IconButton';
 
 /**
  * A minimal settings popover that lets the user view and change
- * the server-side workspace directory path.
+ * the server-side workspace directory path via native folder picker.
  */
 export const SettingsPopover: React.FC = () => {
   const loadCanvas = useCanvasStore((s) => s.loadCanvas);
+  const workspacePath = useWorkspaceStore((s) => s.workspacePath);
+  const selectWorkspace = useWorkspaceStore((s) => s.selectWorkspace);
 
   const [isOpen, setIsOpen] = useState(false);
-  const [workspacePath, setWorkspacePath] = useState('');
-  const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
+  const [isPicking, setIsPicking] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
 
   const triggerRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const successTimeoutRef = useRef<number | null>(null);
-
-  // Fetch current workspace path when popover opens
-  useEffect(() => {
-    if (!isOpen) return;
-    let cancelled = false;
-
-    void getWorkspacePath()
-      .then((info) => {
-        if (cancelled) return;
-        setWorkspacePath(info.path);
-        setDraft(info.path);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        // Surface the error to the user instead of leaving an unhandled rejection.
-        setError(
-          err instanceof Error
-            ? err.message
-            : 'Failed to load workspace path.',
-        );
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isOpen]);
 
   const handleClose = useCallback(() => {
     setIsOpen(false);
@@ -89,25 +65,24 @@ export const SettingsPopover: React.FC = () => {
     };
   }, []);
 
-  const isDirty = draft.trim() !== workspacePath;
-
-  const handleSave = async () => {
-    const trimmed = draft.trim();
-    if (!trimmed) {
-      setError('Workspace path cannot be empty');
-      return;
-    }
-    if (!isDirty) return;
-
-    setSaving(true);
+  const handlePickFolder = async () => {
+    setIsPicking(true);
     setError('');
     setSuccess(false);
 
     try {
-      const result = await putWorkspacePath(trimmed);
-      setWorkspacePath(result.path);
-      setDraft(result.path);
+      const result = await pickFolder();
+      if (result.cancelled || !result.path) {
+        setIsPicking(false);
+        return;
+      }
+
+      setSaving(true);
+      setIsPicking(false);
+
+      await selectWorkspace(result.path);
       setSuccess(true);
+
       if (successTimeoutRef.current !== null) {
         clearTimeout(successTimeoutRef.current);
       }
@@ -120,9 +95,10 @@ export const SettingsPopover: React.FC = () => {
       await loadCanvas();
       window.dispatchEvent(new Event('workspace-changed'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save');
+      setError(err instanceof Error ? err.message : 'Failed to change folder');
     } finally {
       setSaving(false);
+      setIsPicking(false);
     }
   };
 
@@ -136,6 +112,8 @@ export const SettingsPopover: React.FC = () => {
       zIndex: 9999,
     };
   };
+
+  const isLoading = saving || isPicking;
 
   return (
     <>
@@ -162,44 +140,41 @@ export const SettingsPopover: React.FC = () => {
 
             <label className="mb-1.5 block text-xs font-medium text-gray-600">
               <FolderOpen size={12} className="mr-1 inline" />
-              Workspace Path
+              Workspace Folder
             </label>
 
-            <input
-              type="text"
-              value={draft}
-              onChange={(e) => {
-                setDraft(e.target.value);
-                setError('');
-                setSuccess(false);
-              }}
-              placeholder="/path/to/workspace"
-              className="border-border mb-2 w-full rounded border px-2.5 py-1.5 text-sm text-gray-800 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
-            />
+            {/* Current path display */}
+            <div className="border-border mb-2 flex items-center gap-2 rounded border bg-gray-50 px-2.5 py-2">
+              <span className="flex-1 truncate text-sm text-gray-700">
+                {workspacePath || 'Not configured'}
+              </span>
+              <button
+                type="button"
+                onClick={() => void handlePickFolder()}
+                disabled={isLoading}
+                className="shrink-0 rounded bg-gray-200 px-2.5 py-1 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-300 disabled:opacity-50"
+              >
+                {isPicking ? 'Waiting…' : 'Change'}
+              </button>
+            </div>
 
             {error && <p className="mb-2 text-xs text-red-500">{error}</p>}
-            {success && <p className="mb-2 text-xs text-green-600">Saved!</p>}
+            {success && (
+              <p className="mb-2 text-xs text-green-600">Workspace changed!</p>
+            )}
 
             <p className="mb-3 text-[11px] leading-relaxed text-gray-400">
-              The directory where canvas, sources, and artifacts are stored.
-              Changes take effect immediately for new operations.
+              The folder where canvas, sources, and artifacts are stored.
+              Changes take effect immediately.
             </p>
 
-            <div className="flex justify-end gap-2">
+            <div className="flex justify-end">
               <button
                 type="button"
                 onClick={handleClose}
                 className="rounded px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-100"
               >
                 Close
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleSave()}
-                disabled={saving || !isDirty}
-                className="rounded bg-blue-500 px-3 py-1.5 text-xs text-white hover:bg-blue-600 disabled:opacity-50"
-              >
-                {saving ? 'Saving…' : 'Save'}
               </button>
             </div>
           </div>,

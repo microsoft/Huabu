@@ -118,6 +118,18 @@ const AUTOSAVE_DEBOUNCE_MS = 1000;
 const INGESTION_DEBOUNCE_MS = 1000;
 const DEFAULT_WORKSPACE_NAME = 'Sediment Workspace Name';
 
+/**
+ * Flush pending autosave immediately (synchronous cancel + fire).
+ * Used before switching canvases to avoid losing edits.
+ */
+const flushAutoSave = async (saveCanvas: () => Promise<void>) => {
+  if (saveTimeout) {
+    clearTimeout(saveTimeout);
+    saveTimeout = null;
+    await saveCanvas();
+  }
+};
+
 // Per-node debounce timers so rapid edits only fire one ingestion request
 // after the user stops typing, rather than on every keystroke.
 const ingestionTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -269,7 +281,8 @@ type RFState = {
   undo: () => void;
   redo: () => void;
 
-  loadCanvas: () => Promise<void>;
+  loadCanvas: (canvasId?: string) => Promise<void>;
+  switchCanvas: (canvasId: string) => Promise<void>;
   saveCanvas: () => Promise<void>;
 
   actionHistory: RecentAction[];
@@ -539,11 +552,14 @@ const useCanvasStore = create<RFState>()(
       );
     },
 
-    loadCanvas: async () => {
+    loadCanvas: async (canvasId?: string) => {
       set({ isLoading: true });
       try {
-        const { canvasId } = get();
-        const response = await getCanvas(canvasId);
+        const targetId = canvasId ?? get().canvasId;
+        if (canvasId) {
+          set({ canvasId: targetId });
+        }
+        const response = await getCanvas(targetId);
         if (!response) {
           console.warn('Canvas not found, using empty state');
           canvasHistoryManager.clear();
@@ -586,6 +602,34 @@ const useCanvasStore = create<RFState>()(
         console.error('Failed to load canvas:', error);
         set({ isLoading: false });
       }
+    },
+
+    switchCanvas: async (canvasId: string) => {
+      const currentId = get().canvasId;
+      if (canvasId === currentId) return;
+
+      // Flush any pending save for the current canvas before switching
+      await flushAutoSave(get().saveCanvas);
+
+      // Cancel all pending ingestion timers
+      for (const timer of ingestionTimers.values()) {
+        clearTimeout(timer);
+      }
+      ingestionTimers.clear();
+
+      // Reset state for clean slate
+      set({
+        expandedNodeId: null,
+        pendingNodeType: null,
+        clipboard: [],
+        actionHistory: [],
+        frameFitPreviews: [],
+        collapsedFrameIds: new Set(),
+      });
+      canvasHistoryManager.clear();
+
+      // Load the new canvas
+      await get().loadCanvas(canvasId);
     },
 
     saveCanvas: async () => {

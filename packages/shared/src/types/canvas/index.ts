@@ -80,4 +80,8 @@ export type {
   ExportedArtifact,
   CanvasExportBundle,
   ImportCanvasResponse,
+  CanvasSummary,
+  ListCanvasesResponse,
+  CreateCanvasRequest,
+  CreateCanvasResponse,
 } from './canvas-api.js';

@@ -8,6 +8,8 @@ import { z } from 'zod';
 import {
   readCanvas,
   writeCanvas,
+  listCanvases,
+  createCanvas,
   type CanvasFile,
   type NodeLike,
 } from './canvas.filestore.js';
@@ -100,7 +102,53 @@ const upsertNodeBodySchema = z.object({
   sourceId: z.string().min(1).optional(),
 });
 
+const createCanvasBodySchema = z.object({
+  title: z.string().min(1).optional(),
+});
+
 const canvasRoutes: FastifyPluginAsync = async (fastify) => {
+  // --- List all canvases ---
+
+  fastify.get('/', async function (_request, reply) {
+    const canvases = listCanvases();
+
+    const summaries = canvases.map((c) => ({
+      canvasId: c.canvasId,
+      title: c.title,
+      nodeCount: Array.isArray(c.state.nodes) ? c.state.nodes.length : 0,
+      createdAt: c.createdAt,
+      updatedAt: c.updatedAt,
+    }));
+
+    // Sort by most recently updated first
+    summaries.sort((a, b) => b.updatedAt - a.updatedAt);
+
+    return reply.send({ canvases: summaries });
+  });
+
+  // --- Create a new canvas ---
+
+  fastify.post<{ Body: unknown }>('/', async function (request, reply) {
+    const parsed = createCanvasBodySchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ message: 'Invalid request body' });
+    }
+
+    const canvasId = createId('canvas');
+    const title = parsed.data.title ?? null;
+    const canvas = createCanvas(canvasId, title);
+
+    if (!canvas) {
+      return reply
+        .code(409)
+        .send({ message: 'Canvas with this ID already exists' });
+    }
+
+    return reply
+      .code(201)
+      .send({ canvasId: canvas.canvasId, title: canvas.title });
+  });
+
   // Upsert a single node (create or update) and ingest it
   fastify.put<{
     Params: { canvasId: string; nodeId: string };
