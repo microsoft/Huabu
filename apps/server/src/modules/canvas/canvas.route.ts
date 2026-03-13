@@ -448,7 +448,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           version: '1.0',
           exportedAt: new Date().toISOString(),
           canvasId,
-          title: resolveTitle(canvas),
+          title: canvas.title ?? 'Untitled',
         },
         canvas: {
           nodes,

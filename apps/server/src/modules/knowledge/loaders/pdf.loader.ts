@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+
 import type { IDocumentLoader, LoadResult } from './loader.interface.js';
 
 const require = createRequire(import.meta.url);
