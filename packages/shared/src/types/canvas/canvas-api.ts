@@ -12,8 +12,8 @@ export interface GetCanvasResponse {
 
 export interface PutCanvasRequest {
   version: number;
-  state: unknown;
   title?: string;
+  state: unknown;
 }
 
 export interface PutCanvasResponse {
@@ -73,11 +73,14 @@ export interface CanvasExportBundle {
     version: string;
     exportedAt: string;
     canvasId: string;
+    /** Canvas title, stored here since the workspaceName migration. */
+    title?: string | null;
   };
-  /** Raw canvas state (nodes + edges + workspace metadata) */
+  /** Raw canvas state (nodes + edges) */
   canvas: {
     nodes: unknown[];
     edges: unknown[];
+    /** @deprecated Use the top-level manifest title instead. Kept for backwards-compat when reading old exports. */
     workspaceName?: string;
   };
   /** All knowledge sources referenced by the canvas nodes */

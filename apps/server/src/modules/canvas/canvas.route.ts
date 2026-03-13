@@ -34,6 +34,8 @@ function nowMs(): number {
 /**
  * Generate a default canvas title that doesn't collide with existing ones.
  * Returns "Untitled", "Untitled (1)", "Untitled (2)", etc.
+ * Reads the legacy `state.workspaceName` as a fallback for old canvases that
+ * haven't been migrated to the top-level `title` field yet.
  */
 function generateDefaultTitle(existingCanvases: CanvasFile[]): string {
   const base = 'Untitled';
@@ -46,6 +48,15 @@ function generateDefaultTitle(existingCanvases: CanvasFile[]): string {
   let i = 1;
   while (existingNames.has(`${base} (${i})`)) i++;
   return `${base} (${i})`;
+}
+
+/**
+ * Resolve the display title for a canvas.
+ * Prefer the explicit top-level `title`; fall back to the legacy
+ * `state.workspaceName` for canvases saved before the migration.
+ */
+function resolveTitle(canvas: CanvasFile): string | null {
+  return canvas.title ?? (canvas.state.workspaceName as string | undefined) ?? null;
 }
 
 function toMessage(error: unknown): string {
@@ -132,7 +143,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
     const summaries = canvases.map((c) => ({
       canvasId: c.canvasId,
-      title: c.title ?? (c.state.workspaceName as string | undefined) ?? null,
+      title: resolveTitle(c),
       nodeCount: Array.isArray(c.state.nodes) ? c.state.nodes.length : 0,
       createdAt: c.createdAt,
       updatedAt: c.updatedAt,
@@ -305,7 +316,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       const timestamp = nowMs();
       const nextVersion = serverVersion + 1;
 
-      // Parse the incoming state object
+      // Parse the incoming state object; strip the legacy workspaceName from
+      // state since the title is now a top-level field on the canvas file.
       const rawState = state as {
         nodes?: NodeLike[];
         edges?: unknown[];
@@ -318,12 +330,15 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         (rawState?.nodes ?? []) as NodeLike[],
       );
 
+      // Destructure to drop workspaceName from persisted state
+      const { workspaceName: _legacyName, ...restState } = rawState ?? {};
+
       const canvasFile: CanvasFile = {
         canvasId,
-        title: title ?? existing?.title ?? null,
+        title: title ?? existing?.title ?? (existing ? resolveTitle(existing) : null),
         version: nextVersion,
         state: {
-          ...rawState,
+          ...restState,
           nodes: leanNodes,
           edges: rawState?.edges ?? [],
         },
@@ -455,17 +470,17 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           version: '1.0',
           exportedAt: new Date().toISOString(),
           canvasId,
+          title: resolveTitle(canvas),
         },
         canvas: {
           nodes,
           edges,
-          workspaceName: canvas.state.workspaceName,
         },
         sources,
         artifacts: artifactEntries,
       };
 
-      const safeName = (canvas.title ?? canvasId).replace(/[^a-z0-9_-]/gi, '_');
+      const safeName = (resolveTitle(canvas) ?? canvasId).replace(/[^a-z0-9_-]/gi, '_');
       return reply
         .header(
           'Content-Disposition',
@@ -483,10 +498,13 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       version: z.string(),
       exportedAt: z.string(),
       canvasId: z.string(),
+      /** Title stored in manifest since the workspaceName migration. */
+      title: z.string().nullable().optional(),
     }),
     canvas: z.object({
       nodes: z.array(z.unknown()),
       edges: z.array(z.unknown()),
+      /** @deprecated Kept for backwards-compat when importing old exports. */
       workspaceName: z.string().optional(),
     }),
     sources: z.array(
@@ -595,12 +613,12 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
     const canvasFile: CanvasFile = {
       canvasId: targetCanvasId,
-      title: bundle.canvas.workspaceName ?? existing?.title ?? null,
+      // Prefer the new manifest.title; fall back to legacy canvas.workspaceName for old exports.
+      title: bundle.manifest.title ?? bundle.canvas.workspaceName ?? null,
       version: nextVersion,
       state: {
         nodes: leanNodes,
         edges: bundle.canvas.edges ?? [],
-        workspaceName: bundle.canvas.workspaceName,
       },
       createdAt: existing?.createdAt ?? timestamp,
       updatedAt: timestamp,

@@ -12,8 +12,8 @@ import { GhostButton } from '../Common/GhostButton';
  * Sits in the header and exposes Export / Import canvas actions.
  */
 export const WorkspaceMenu: React.FC = () => {
-  const workspaceName = useCanvasStore((s) => s.workspaceName);
-  const setWorkspaceName = useCanvasStore((s) => s.setWorkspaceName);
+  const canvasTitle = useCanvasStore((s) => s.canvasTitle);
+  const setCanvasTitle = useCanvasStore((s) => s.setCanvasTitle);
   const canvasId = useCanvasStore((s) => s.canvasId);
   const undo = useCanvasStore((s) => s.undo);
   const redo = useCanvasStore((s) => s.redo);
@@ -32,7 +32,7 @@ export const WorkspaceMenu: React.FC = () => {
     if (sizerRef.current && inputRef.current) {
       inputRef.current.style.width = `${sizerRef.current.offsetWidth}px`;
     }
-  }, [workspaceName]);
+  }, [canvasTitle]);
 
   // ─── Export ──────────────────────────────────────────────────────────────
 
@@ -41,7 +41,7 @@ export const WorkspaceMenu: React.FC = () => {
     setStatusMessage('Exporting…');
     try {
       const blob = await exportCanvas(canvasId);
-      const safeName = workspaceName.replace(/[^a-z0-9_-]/gi, '_') || canvasId;
+      const safeName = canvasTitle.replace(/[^a-z0-9_-]/gi, '_') || canvasId;
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -54,7 +54,7 @@ export const WorkspaceMenu: React.FC = () => {
     } finally {
       setTimeout(() => setStatusMessage(''), 3000);
     }
-  }, [canvasId, workspaceName]);
+  }, [canvasId, canvasTitle]);
 
   return (
     <>
@@ -66,13 +66,13 @@ export const WorkspaceMenu: React.FC = () => {
           aria-hidden
           className="invisible absolute px-1 text-lg font-medium whitespace-pre"
         >
-          {workspaceName || '\u00a0'}
+          {canvasTitle || '\u00a0'}
         </span>
         <input
           ref={inputRef}
           className="text-main focus:shadow-bottom m-0 min-w-8 bg-transparent px-1 py-1 text-lg font-medium outline-none focus:rounded-md"
-          value={workspaceName}
-          onChange={(e) => setWorkspaceName(e.target.value)}
+          value={canvasTitle}
+          onChange={(e) => setCanvasTitle(e.target.value)}
           aria-label="Workspace name"
         />
 
