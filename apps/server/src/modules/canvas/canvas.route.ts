@@ -34,29 +34,14 @@ function nowMs(): number {
 /**
  * Generate a default canvas title that doesn't collide with existing ones.
  * Returns "Untitled", "Untitled (1)", "Untitled (2)", etc.
- * Reads the legacy `state.workspaceName` as a fallback for old canvases that
- * haven't been migrated to the top-level `title` field yet.
  */
 function generateDefaultTitle(existingCanvases: CanvasFile[]): string {
   const base = 'Untitled';
-  const existingNames = new Set(
-    existingCanvases.map(
-      (c) => c.title ?? (c.state.workspaceName as string | undefined),
-    ),
-  );
+  const existingNames = new Set(existingCanvases.map((c) => c.title));
   if (!existingNames.has(base)) return base;
   let i = 1;
   while (existingNames.has(`${base} (${i})`)) i++;
   return `${base} (${i})`;
-}
-
-/**
- * Resolve the display title for a canvas.
- * Prefer the explicit top-level `title`; fall back to the legacy
- * `state.workspaceName` for canvases saved before the migration.
- */
-function resolveTitle(canvas: CanvasFile): string | null {
-  return canvas.title ?? (canvas.state.workspaceName as string | undefined) ?? null;
 }
 
 function toMessage(error: unknown): string {
@@ -143,7 +128,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
     const summaries = canvases.map((c) => ({
       canvasId: c.canvasId,
-      title: resolveTitle(c),
+      title: c.title,
       nodeCount: Array.isArray(c.state.nodes) ? c.state.nodes.length : 0,
       createdAt: c.createdAt,
       updatedAt: c.updatedAt,
@@ -316,29 +301,22 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       const timestamp = nowMs();
       const nextVersion = serverVersion + 1;
 
-      // Parse the incoming state object; strip the legacy workspaceName from
-      // state since the title is now a top-level field on the canvas file.
       const rawState = state as {
         nodes?: NodeLike[];
         edges?: unknown[];
-        workspaceName?: string;
         [key: string]: unknown;
       };
 
-      // Strip content that is managed by the knowledge store to avoid data duplication
       const leanNodes = stripManagedContent(
         (rawState?.nodes ?? []) as NodeLike[],
       );
 
-      // Destructure to drop workspaceName from persisted state
-      const { workspaceName: _legacyName, ...restState } = rawState ?? {};
-
       const canvasFile: CanvasFile = {
         canvasId,
-        title: title ?? existing?.title ?? (existing ? resolveTitle(existing) : null),
+        title: title ?? existing?.title ?? null,
         version: nextVersion,
         state: {
-          ...restState,
+          ...rawState,
           nodes: leanNodes,
           edges: rawState?.edges ?? [],
         },
@@ -480,7 +458,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         artifacts: artifactEntries,
       };
 
-      const safeName = (resolveTitle(canvas) ?? canvasId).replace(/[^a-z0-9_-]/gi, '_');
+      const safeName = (canvas.title ?? canvasId).replace(/[^a-z0-9_-]/gi, '_');
       return reply
         .header(
           'Content-Disposition',
@@ -498,14 +476,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       version: z.string(),
       exportedAt: z.string(),
       canvasId: z.string(),
-      /** Title stored in manifest since the workspaceName migration. */
       title: z.string().nullable().optional(),
     }),
     canvas: z.object({
       nodes: z.array(z.unknown()),
       edges: z.array(z.unknown()),
-      /** @deprecated Kept for backwards-compat when importing old exports. */
-      workspaceName: z.string().optional(),
     }),
     sources: z.array(
       z.object({
@@ -613,8 +588,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
     const canvasFile: CanvasFile = {
       canvasId: targetCanvasId,
-      // Prefer the new manifest.title; fall back to legacy canvas.workspaceName for old exports.
-      title: bundle.manifest.title ?? bundle.canvas.workspaceName ?? null,
+      title: bundle.manifest.title ?? null,
       version: nextVersion,
       state: {
         nodes: leanNodes,

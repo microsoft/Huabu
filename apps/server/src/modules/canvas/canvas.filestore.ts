@@ -34,8 +34,6 @@ export interface CanvasFile {
   state: {
     nodes: unknown[];
     edges: unknown[];
-    /** @deprecated Title is now stored at the top level. Kept for migration reads. */
-    workspaceName?: string;
     [key: string]: unknown;
   };
   createdAt: number;

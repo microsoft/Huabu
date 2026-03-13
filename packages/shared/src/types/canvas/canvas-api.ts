@@ -73,15 +73,13 @@ export interface CanvasExportBundle {
     version: string;
     exportedAt: string;
     canvasId: string;
-    /** Canvas title, stored here since the workspaceName migration. */
+    /** Canvas title. */
     title?: string | null;
   };
   /** Raw canvas state (nodes + edges) */
   canvas: {
     nodes: unknown[];
     edges: unknown[];
-    /** @deprecated Use the top-level manifest title instead. Kept for backwards-compat when reading old exports. */
-    workspaceName?: string;
   };
   /** All knowledge sources referenced by the canvas nodes */
   sources: ExportedSource[];
