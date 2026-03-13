@@ -12,7 +12,7 @@
  *     canvas/
  *       default-canvas.json     – canvas state (nodes, edges, version)
  *     sources/
- *       <Title> (<sourceId>).md – knowledge sources (Markdown + YAML frontmatter)
+ *       <Title>.md              – knowledge sources (Markdown + YAML frontmatter; id in frontmatter, optional dedup suffix)
  *     artifacts/
  *       artifact-<uuid>.<ext>   – binary files (images, PDFs, videos)
  */
