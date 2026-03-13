@@ -5,6 +5,7 @@
 
 export interface GetCanvasResponse {
   canvasId: string;
+  title: string | null;
   version: number;
   state: unknown;
 }

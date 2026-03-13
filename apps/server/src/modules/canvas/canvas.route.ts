@@ -31,6 +31,23 @@ function nowMs(): number {
   return Date.now();
 }
 
+/**
+ * Generate a default canvas title that doesn't collide with existing ones.
+ * Returns "Untitled", "Untitled (1)", "Untitled (2)", etc.
+ */
+function generateDefaultTitle(existingCanvases: CanvasFile[]): string {
+  const base = 'Untitled';
+  const existingNames = new Set(
+    existingCanvases.map(
+      (c) => c.title ?? (c.state.workspaceName as string | undefined),
+    ),
+  );
+  if (!existingNames.has(base)) return base;
+  let i = 1;
+  while (existingNames.has(`${base} (${i})`)) i++;
+  return `${base} (${i})`;
+}
+
 function toMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -115,7 +132,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
     const summaries = canvases.map((c) => ({
       canvasId: c.canvasId,
-      title: c.title,
+      title: c.title ?? (c.state.workspaceName as string | undefined) ?? null,
       nodeCount: Array.isArray(c.state.nodes) ? c.state.nodes.length : 0,
       createdAt: c.createdAt,
       updatedAt: c.updatedAt,
@@ -136,7 +153,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const canvasId = createId('canvas');
-    const title = parsed.data.title ?? null;
+    const existingCanvases = listCanvases();
+    const title = parsed.data.title ?? generateDefaultTitle(existingCanvases);
     const canvas = createCanvas(canvasId, title);
 
     if (!canvas) {
@@ -253,6 +271,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
       return reply.send({
         canvasId: canvas.canvasId,
+        title: canvas.title,
         version: canvas.version,
         state: {
           ...canvas.state,

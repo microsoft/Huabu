@@ -608,7 +608,7 @@ const useCanvasStore = create<RFState>()(
         set({
           nodes: cleanedNodes,
           edges: state.edges ?? [],
-          workspaceName: state.workspaceName ?? get().workspaceName,
+          workspaceName: state.workspaceName ?? response.title ?? get().workspaceName,
           version: response.version,
           isLoading: false,
           ingestionByNodeId: {},
