@@ -47,6 +47,7 @@ import {
   type NodeIngestionInfo,
 } from '../utils/ingestHelper';
 import { LAYOUT_ANIMATION_DURATION_MS } from '../utils/layout/applier';
+import { rerouteAllEdges } from '../utils/nodeHelper';
 
 // ---------------------------------------------------------------------------
 // Frame Fit Preview
@@ -448,6 +449,14 @@ const useCanvasStore = create<RFState>()(
         set,
         triggerIngestion,
       });
+
+      // After the handler has run, reroute all edges so their handles
+      // match the current relative positions of source/target nodes.
+      const latest = get();
+      const rerouted = rerouteAllEdges(latest.nodes, latest.edges);
+      if (rerouted !== latest.edges) {
+        set({ edges: rerouted });
+      }
     },
 
     getAgentContext: (): AgentBaseContext => {

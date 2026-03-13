@@ -6,6 +6,87 @@
 
 import { getDescendantIds, type NestableNode } from './frameHelper';
 
+type NodeWithPosition = {
+  position: { x: number; y: number };
+  measured?: { width?: number; height?: number };
+  width?: number;
+  height?: number;
+};
+
+/**
+ * Returns the best source/target handle pair for an edge between two nodes
+ * based on their relative positions on the canvas.
+ *
+ * Picks the handles that produce the most direct, least-crossing path:
+ * - Target primarily to the right → right-source / left-target
+ * - Target primarily to the left  → left-source  / right-target
+ * - Target primarily below        → bottom-source / top-target
+ * - Target primarily above        → top-source   / bottom-target
+ */
+export function getSmartHandles(
+  sourceNode: NodeWithPosition,
+  targetNode: NodeWithPosition,
+): { sourceHandle: string; targetHandle: string } {
+  const sw = sourceNode.measured?.width ?? sourceNode.width ?? 150;
+  const sh = sourceNode.measured?.height ?? sourceNode.height ?? 100;
+  const tw = targetNode.measured?.width ?? targetNode.width ?? 150;
+  const th = targetNode.measured?.height ?? targetNode.height ?? 100;
+
+  const sx = sourceNode.position.x + sw / 2;
+  const sy = sourceNode.position.y + sh / 2;
+  const tx = targetNode.position.x + tw / 2;
+  const ty = targetNode.position.y + th / 2;
+
+  const dx = tx - sx;
+  const dy = ty - sy;
+
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    return dx >= 0
+      ? { sourceHandle: 'right-source', targetHandle: 'left-target' }
+      : { sourceHandle: 'left-source', targetHandle: 'right-target' };
+  } else {
+    return dy >= 0
+      ? { sourceHandle: 'bottom-source', targetHandle: 'top-target' }
+      : { sourceHandle: 'top-source', targetHandle: 'bottom-target' };
+  }
+}
+
+/**
+ * Recalculate sourceHandle / targetHandle for every edge based on the
+ * current relative positions of their source and target nodes.
+ *
+ * Returns the original `edges` reference when nothing changed, so React /
+ * zustand can skip re-renders via reference equality.
+ */
+export function rerouteAllEdges<
+  N extends NodeWithPosition & { id: string },
+  E extends {
+    source: string;
+    target: string;
+    sourceHandle?: string | null;
+    targetHandle?: string | null;
+  },
+>(nodes: N[], edges: E[]): E[] {
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+  let changed = false;
+  const result = edges.map((edge) => {
+    const source = nodeMap.get(edge.source);
+    const target = nodeMap.get(edge.target);
+    if (!source || !target) return edge;
+
+    const handles = getSmartHandles(source, target);
+    if (
+      edge.sourceHandle === handles.sourceHandle &&
+      edge.targetHandle === handles.targetHandle
+    ) {
+      return edge;
+    }
+    changed = true;
+    return { ...edge, ...handles };
+  });
+  return changed ? result : edges;
+}
+
 /**
  * Toggles a node's locked state by flipping `data.locked`.
  *
