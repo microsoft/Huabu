@@ -7,7 +7,7 @@
 ├── canvas/
 │   └── <canvasId>.json              # 画布状态（节点、连线、版本号）
 ├── sources/
-│   └── <Title> (<sourceId>).md      # 知识来源（Markdown + YAML frontmatter）
+│   └── <Title>.md                   # 知识来源（Markdown + YAML frontmatter）
 └── artifacts/
     └── artifact-<uuid>.<ext>        # 二进制附件（图片、PDF、视频等）
 ```

@@ -3,6 +3,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
   writeFileSync,
   statSync,
 } from 'node:fs';
@@ -96,15 +97,17 @@ function parseFrontmatter(raw: string): {
 
 /**
  * Parse frontmatter + content -> Source object.
+ * Title is provided externally (derived from the filename).
  */
 function toSource(
   meta: Record<string, string | null>,
   content: string,
+  title: string | null,
 ): Source {
   return {
-    sourceId: meta['source_id'] ?? '',
+    sourceId: meta['id'] ?? '',
     type: (meta['type'] ?? 'text') as Source['type'],
-    title: meta['title'] ?? null,
+    title,
     src: meta['src'] ?? null,
     content: content,
     contentHash: meta['content_hash'] ?? '',
@@ -122,10 +125,11 @@ function toSource(
  * Directory layout:
  *
  *   <sourcesDir>/
- *     <Title> (<sourceId>).md   - one file per source
+ *     <Title>.md   - one file per source
  *
- * Each .md file uses YAML frontmatter for metadata and the body for content.
- * This makes every source browsable and editable directly in any Markdown editor.
+ * The filename IS the title (without the `.md` extension).
+ * Internal metadata (source_id, type, etc.) lives in YAML frontmatter.
+ * Title is NOT stored in frontmatter – it is derived from the filename.
  */
 export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
   private readonly sourcesDir: string;
@@ -148,23 +152,84 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
 
   // ==================== Internal helpers ====================
 
+  /** Pattern matching legacy filenames that contain a sourceId suffix: `Title (src_xxx).md` */
+  private static readonly LEGACY_FILENAME_RE = /^(.+)\s+\(src_[^)]+\)\.md$/;
+
   /**
-   * Scan sources directory for .md files and build index.
+   * Scan sources directory for .md files, build the in-memory index,
+   * and migrate legacy files that still embed sourceId in the filename
+   * or carry deprecated fields (`title`, `source_id`) in frontmatter.
+   *
+   * TODO(migration): Remove the migration blocks below once all existing
+   * deployments have been upgraded. After removal, `rebuildSourceIndex()`
+   * should only scan + index, without any rewrite / rename logic.
+   * Removable items:
+   *   - LEGACY_FILENAME_RE constant
+   *   - Migration block: remove `title` from frontmatter
+   *   - Migration block: rename `source_id` → `id`
+   *   - Migration block: rename "Title (src_xxx).md" → "Title.md"
    */
   private rebuildSourceIndex(): void {
     this.sourceIndex.clear();
     const files = this.scanDir(this.sourcesDir);
 
-    for (const filePath of files) {
+    for (let filePath of files) {
       try {
         const raw = readFileSync(filePath, 'utf-8');
-        const { meta } = parseFrontmatter(raw);
+        const { meta, content } = parseFrontmatter(raw);
 
-        let id = meta['source_id'];
+        let id = meta['id'];
         if (!id) {
           // Unmanaged file: use relative path (minus extension) as ID
           const rel = path.relative(this.sourcesDir, filePath);
           id = rel.replace(/\\/g, '/').replace(/\.md$/, '');
+        }
+
+        // ── TODO(migration): remove `title` from frontmatter ──
+        let needsRewrite = false;
+        if (meta['title'] !== undefined) {
+          delete meta['title'];
+          needsRewrite = true;
+        }
+        // ── TODO(migration): rename legacy "source_id" → "id" ──
+        if (meta['source_id'] !== undefined) {
+          if (!meta['id']) meta['id'] = meta['source_id'];
+          id = meta['id'];
+          delete meta['source_id'];
+          needsRewrite = true;
+        }
+
+        // ── TODO(migration): rename legacy "Title (src_xxx).md" → "Title.md" ──
+        const basename = path.basename(filePath);
+        const legacyMatch = basename.match(
+          ObsidianKnowledgeRepository.LEGACY_FILENAME_RE,
+        );
+        if (legacyMatch) {
+          const cleanName = `${legacyMatch[1].trim()}.md`;
+          let newPath = path.join(path.dirname(filePath), cleanName);
+
+          // Avoid collision with another file
+          if (existsSync(newPath) && newPath !== filePath) {
+            let n = 2;
+            const stem = legacyMatch[1].trim();
+            while (existsSync(newPath)) {
+              newPath = path.join(path.dirname(filePath), `${stem} (${n}).md`);
+              n++;
+            }
+          }
+
+          if (needsRewrite) {
+            // Rewrite frontmatter (without title) and rename in one go
+            const fm = toFrontmatter(meta);
+            writeFileSync(filePath, `${fm}\n${content}`, 'utf-8');
+            needsRewrite = false;
+          }
+
+          renameSync(filePath, newPath);
+          filePath = newPath;
+        } else if (needsRewrite) {
+          const fm = toFrontmatter(meta);
+          writeFileSync(filePath, `${fm}\n${content}`, 'utf-8');
         }
 
         if (id) {
@@ -198,21 +263,59 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
     return fileList;
   }
 
+  /** Characters that are invalid in most file systems. */
+  private static readonly UNSAFE_FILENAME_CHARS = /[<>:"/\\|?*]/g;
+
   /**
-   * Build a human-friendly filename for a source.
-   * Uses the title when available, falling back to the source_id.
-   * The source_id is always appended in parentheses to guarantee uniqueness.
+   * Build a filename for a source.
+   * The filename IS the title. Falls back to sourceId when no title is available.
    */
   private buildSourceFileName(sourceId: string, title?: string | null): string {
     if (title) {
-      // Sanitise: remove characters that are invalid in most file systems
-      const UNSAFE_FILENAME_CHARS = /[<>:"/\\|?*]/g;
-      const safe = title.replace(UNSAFE_FILENAME_CHARS, '').trim().slice(0, 80);
-      if (safe.length > 0) {
-        return `${safe} (${sourceId}).md`;
-      }
+      const safe = title
+        .replace(ObsidianKnowledgeRepository.UNSAFE_FILENAME_CHARS, '')
+        .trim()
+        .slice(0, 80);
+      if (safe.length > 0) return `${safe}.md`;
     }
     return `${sourceId}.md`;
+  }
+
+  /**
+   * Return a non-colliding filename inside sourcesDir.
+   * If `name.md` already exists AND belongs to a different sourceId,
+   * appends " (2)", " (3)" etc. until unique.
+   */
+  private deduplicateFileName(
+    desiredName: string,
+    ownSourceId: string,
+  ): string {
+    const base = desiredName.replace(/\.md$/, '');
+    let candidate = desiredName;
+    let n = 1;
+    while (true) {
+      const fullPath = path.join(this.sourcesDir, candidate);
+      if (!existsSync(fullPath)) return candidate;
+
+      // If the existing file IS this same source, no collision
+      try {
+        const raw = readFileSync(fullPath, 'utf-8');
+        const { meta } = parseFrontmatter(raw);
+        if (meta['id'] === ownSourceId) return candidate;
+      } catch {
+        // unreadable – treat as collision
+      }
+
+      n++;
+      candidate = `${base} (${n}).md`;
+    }
+  }
+
+  /**
+   * Extract the title from a filename by stripping the `.md` extension.
+   */
+  private static extractTitleFromFilename(filePath: string): string {
+    return path.basename(filePath, '.md');
   }
 
   private sourceFilePath(sourceId: string): string {
@@ -229,18 +332,19 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
     const raw = readFileSync(filePath, 'utf-8');
     const { meta, content } = parseFrontmatter(raw);
 
-    // If source_id is missing, infer from filename and treat as a generic note
-    if (!meta['source_id']) {
+    // If id is missing, infer from filename and treat as a generic note
+    if (!meta['id']) {
       const rel = path.relative(this.sourcesDir, filePath);
       const id = rel.replace(/\\/g, '/').replace(/\.md$/, '');
-      meta['source_id'] = id;
-
-      // Use filename for title if missing
-      if (!meta['title']) meta['title'] = path.basename(filePath, '.md');
+      meta['id'] = id;
       if (!meta['type']) meta['type'] = 'note';
     }
 
-    return toSource(meta, content);
+    // Title is always derived from the filename
+    const title =
+      ObsidianKnowledgeRepository.extractTitleFromFilename(filePath);
+
+    return toSource(meta, content, title);
   }
 
   private readSourceOverview(filePath: string): SourceOverview | null {
@@ -248,21 +352,22 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
     const raw = readFileSync(filePath, 'utf-8');
     const { meta } = parseFrontmatter(raw);
 
-    // If source_id is missing, infer from filename and treat as a generic note
-    if (!meta['source_id']) {
+    // If id is missing, infer from filename and treat as a generic note
+    if (!meta['id']) {
       const rel = path.relative(this.sourcesDir, filePath);
       const id = rel.replace(/\\/g, '/').replace(/\.md$/, '');
-      meta['source_id'] = id;
-
-      // Use filename for title if missing
-      if (!meta['title']) meta['title'] = path.basename(filePath, '.md');
+      meta['id'] = id;
       if (!meta['type']) meta['type'] = 'note';
     }
 
+    // Title is always derived from the filename
+    const title =
+      ObsidianKnowledgeRepository.extractTitleFromFilename(filePath);
+
     return {
-      sourceId: meta['source_id'] ?? '',
+      sourceId: meta['id'] ?? '',
       type: (meta['type'] ?? 'text') as Source['type'],
-      title: meta['title'] ?? null,
+      title,
       src: meta['src'] ?? null,
       contentHash: meta['content_hash'] ?? '',
       metaJson: meta['meta_json'] ?? null,
@@ -270,34 +375,45 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
   }
 
   private writeSource(source: Source, existingFilePath?: string): void {
+    // Title is NOT stored in frontmatter – it's the filename.
     const fm = toFrontmatter({
-      source_id: source.sourceId,
+      id: source.sourceId,
       type: source.type,
-      title: source.title,
       src: source.src,
       content_hash: source.contentHash,
       meta_json: source.metaJson,
     });
     const fileContent = `${fm}\n${source.content}`;
 
-    // Resolve the target path:
-    // 1. If specifically told to overwrite a file (renaming ID case), use that.
-    // 2. Else if ID exists in index, use that.
-    // 3. Else build new filename.
-    let targetPath = existingFilePath;
-    if (!targetPath) {
-      targetPath = this.sourceIndex.has(source.sourceId)
+    // Determine the desired filename from the title
+    const desiredName = this.deduplicateFileName(
+      this.buildSourceFileName(source.sourceId, source.title),
+      source.sourceId,
+    );
+    const desiredPath = path.join(this.sourcesDir, desiredName);
+
+    // Resolve the current file path (if it already exists on disk)
+    const currentPath =
+      existingFilePath ??
+      (this.sourceIndex.has(source.sourceId)
         ? this.sourceFilePath(source.sourceId)
-        : path.join(
-            this.sourcesDir,
-            this.buildSourceFileName(source.sourceId, source.title),
-          );
+        : null);
+
+    if (currentPath && existsSync(currentPath)) {
+      // Write content to the existing file first
+      writeFileSync(currentPath, fileContent, 'utf-8');
+
+      // If the filename should change (title changed), rename the file
+      if (path.resolve(currentPath) !== path.resolve(desiredPath)) {
+        renameSync(currentPath, desiredPath);
+      }
+    } else {
+      // New file – write directly to the desired path
+      writeFileSync(desiredPath, fileContent, 'utf-8');
     }
 
-    writeFileSync(targetPath, fileContent, 'utf-8');
-
     // Keep the index up-to-date
-    this.sourceIndex.set(source.sourceId, targetPath);
+    this.sourceIndex.set(source.sourceId, desiredPath);
   }
 
   // ==================== Source Operations ====================
@@ -395,7 +511,7 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
       try {
         const raw = readFileSync(currentFilePath, 'utf-8');
         const { meta } = parseFrontmatter(raw);
-        if (!meta['source_id']) {
+        if (!meta['id']) {
           // No explicit ID found -> this is an unmanaged file.
           // Generate a permanent ID now.
           finalId = createId('note');

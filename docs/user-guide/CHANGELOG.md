@@ -11,7 +11,7 @@
 画布和知识库的持久化方式从 SQLite 数据库迁移至基于文件的存储。数据以 JSON / Markdown 格式直接保存在工作区目录中，便于浏览、备份和版本管理。
 
 - **画布** → `<workspace>/canvas/<canvasId>.json`（原子写入）
-- **知识来源** → `<workspace>/sources/<Title> (<sourceId>).md`（Markdown + YAML frontmatter，可用任意编辑器查看）
+- **知识来源** → `<workspace>/sources/<Title>.md`（Markdown + YAML frontmatter，可用任意编辑器查看）
 - **附件** → `<workspace>/artifacts/artifact-<uuid>.<ext>`（原始二进制文件）
 
 工作区路径可通过环境变量 `SEDIMENT_WORKSPACE_PATH` 配置，默认为 `apps/server/data/vault`。
