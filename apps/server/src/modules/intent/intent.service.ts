@@ -25,6 +25,92 @@ import type {
 // Context → natural-language serialization
 // ---------------------------------------------------------------------------
 
+/**
+ * Lightweight context for Step 1 (intent recognition).
+ *
+ * Information hierarchy:
+ *   1. Node schema only — type + label, NO snippets/content (the screenshot
+ *      already shows spatial layout; text is noise at this stage).
+ *   2. Selected nodes — full content (strongest intent signal).
+ *   3. Last 10 recent actions (already capped by frontend ring buffer).
+ *   4. Screenshot carries visual annotations for the latest action
+ *      (handled on the frontend side).
+ */
+function serializeContextLight(ctx: AgentBaseContext): string {
+  const lines: string[] = [];
+
+  // Node schema — type + label only, grouped by type for scannability
+  if (ctx.nodes.length > 0) {
+    const byType = new Map<string, typeof ctx.nodes>();
+    for (const n of ctx.nodes) {
+      const list = byType.get(n.type) ?? [];
+      list.push(n);
+      byType.set(n.type, list);
+    }
+    lines.push(
+      `# Canvas: ${ctx.nodes.length} node(s), ${ctx.edges.length} edge(s)`,
+    );
+    for (const [type, nodes] of byType) {
+      const labels = nodes
+        .map((n) => {
+          const frame = n.frameLabel ? ` (in "${n.frameLabel}")` : '';
+          return `[${n.id}] ${n.label ? `"${n.label}"` : '(untitled)'}${frame}`;
+        })
+        .join(', ');
+      lines.push(`- ${type} (${nodes.length}): ${labels}`);
+    }
+  } else {
+    lines.push('# Canvas is empty.');
+  }
+
+  // Edges — compact adjacency list
+  if (ctx.edges.length > 0) {
+    lines.push('');
+    lines.push('# Connections:');
+    for (const e of ctx.edges) {
+      lines.push(`- [${e.source.id}] → [${e.target.id}]`);
+    }
+  }
+
+  // Recent actions (last 10, maintained by frontend)
+  if (ctx.recentActions.length > 0) {
+    lines.push('');
+    lines.push('# Recent user actions (oldest → newest):');
+    for (const a of ctx.recentActions) {
+      lines.push(`- ${formatAction(a)}`);
+    }
+  }
+
+  // Selected nodes — full content (primary intent signal)
+  if (ctx.selectedNodes && ctx.selectedNodes.length > 0) {
+    lines.push('');
+    lines.push(`# Currently selected node(s) (${ctx.selectedNodes.length}):`);
+    for (const s of ctx.selectedNodes) {
+      const label = s.label ? ` "${s.label}"` : '';
+      const content = s.content ? `\n    Content: ${s.content}` : '';
+      const src = s.src ? `\n    Source: ${s.src}` : '';
+      lines.push(`- [${s.id}] ${s.type}${label}${content}${src}`);
+      if (s.children && s.children.length > 0) {
+        for (const child of s.children) {
+          const childLabel = child.label ? ` "${child.label}"` : '';
+          const childContent = child.content
+            ? `\n      Content: ${child.content}`
+            : '';
+          lines.push(
+            `  - [${child.id}] ${child.type}${childLabel}${childContent}`,
+          );
+        }
+      }
+    }
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Full context for Step 2 (action resolution).
+ * Includes node snippets so the LLM can generate concrete content in actions.
+ */
 function serializeContext(ctx: AgentBaseContext): string {
   const lines: string[] = [];
 
@@ -93,10 +179,7 @@ function formatAction(a: RecentAction): string {
       const labels = a.nodes
         .map((n) => `${n.nodeType} "${n.label ?? n.id}"`)
         .join(', ');
-      const origin = a.nodes[0]?.origin
-        ? ` (via ${a.nodes[0].origin.type})`
-        : '';
-      return `Created ${a.nodes.length} node(s)${origin}: ${labels}`;
+      return `Created ${a.nodes.length} node(s): ${labels}`;
     }
     case 'nodes_deleted': {
       const labels = a.nodes
@@ -201,7 +284,7 @@ async function llmIntentRecognition(
   ctx: AgentBaseContext,
 ): Promise<IntentCandidate[]> {
   const llm = getLLM();
-  const contextText = serializeContext(ctx);
+  const contextText = serializeContextLight(ctx);
 
   const userContentParts: ContentPart[] = [
     { type: 'text', text: `Current canvas state:\n\n${contextText}` },
@@ -210,7 +293,7 @@ async function llmIntentRecognition(
   appendScreenshot(
     userContentParts,
     ctx.screenshot,
-    'Above is a screenshot of the current canvas viewport. Use the spatial layout to inform your intent suggestions.',
+    'Above is a screenshot of the current canvas viewport. Nodes are labeled with their IDs. The last user action is annotated in red: a banner at the top-left reads "Last step: ...", affected nodes have red borders, and arrows show directional relationships (connect, frame). Use these visual signals to infer intent.',
   );
 
   const response = await llm.invoke([
@@ -232,9 +315,7 @@ async function llmIntentRecognition(
 
     return (parsed as IntentCandidate[]).map((item) => ({
       label: String(item.label ?? ''),
-      confidence: Number(item.confidence ?? 0),
       description: item.description ? String(item.description) : undefined,
-      actions: [],
     }));
   } catch {
     console.error('[intent] Failed to parse LLM response:', raw);
@@ -304,6 +385,130 @@ export async function recognizeIntent(
     console.error('[intent] LLM intent recognition failed:', err);
     return [];
   }
+}
+
+/**
+ * Stream intent recognition — yields individual IntentCandidate objects
+ * as they are incrementally parsed from the LLM token stream.
+ */
+export async function* recognizeIntentStream(
+  ctx: AgentBaseContext,
+): AsyncGenerator<IntentCandidate> {
+  const llm = getLLM();
+  const contextText = serializeContextLight(ctx);
+
+  const userContentParts: ContentPart[] = [
+    { type: 'text', text: `Current canvas state:\n\n${contextText}` },
+  ];
+
+  appendScreenshot(
+    userContentParts,
+    ctx.screenshot,
+    'Above is a screenshot of the current canvas viewport. Nodes are labeled with their IDs. The last user action is annotated in red: a banner at the top-left reads "Last step: ...", affected nodes have red borders, and arrows show directional relationships (connect, frame). Use these visual signals to infer intent.',
+  );
+
+  let accumulated = '';
+  let yieldedCount = 0;
+
+  const stream = await llm.stream([
+    new SystemMessage(INTENT_SYSTEM_PROMPT),
+    new HumanMessage({ content: userContentParts }),
+  ]);
+
+  for await (const chunk of stream) {
+    const token =
+      typeof chunk.content === 'string'
+        ? chunk.content
+        : Array.isArray(chunk.content)
+          ? chunk.content
+              .filter(
+                (p): p is { type: 'text'; text: string } => p.type === 'text',
+              )
+              .map((p) => p.text)
+              .join('')
+          : '';
+    accumulated += token;
+
+    // Try to parse complete candidate objects from the accumulated JSON array
+    const candidates = tryParsePartialCandidates(accumulated);
+    while (yieldedCount < candidates.length) {
+      yield candidates[yieldedCount];
+      yieldedCount++;
+    }
+  }
+
+  // Final parse attempt on the complete response
+  const finalCandidates = tryParsePartialCandidates(accumulated);
+  while (yieldedCount < finalCandidates.length) {
+    yield finalCandidates[yieldedCount];
+    yieldedCount++;
+  }
+}
+
+/**
+ * Extract fully-closed JSON objects from an accumulating JSON array string.
+ * Uses brace-depth tracking to only yield objects whose closing `}` has
+ * been received — never yields partially-streamed objects.
+ */
+function tryParsePartialCandidates(raw: string): IntentCandidate[] {
+  // Strip markdown fences
+  const cleaned = raw.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
+
+  // Find the opening bracket of the array
+  const arrStart = cleaned.indexOf('[');
+  if (arrStart < 0) return [];
+  const inner = cleaned.slice(arrStart + 1);
+
+  const results: IntentCandidate[] = [];
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  let objStart = -1;
+
+  for (let i = 0; i < inner.length; i++) {
+    const ch = inner[i];
+
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === '\\' && inString) {
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+
+    if (ch === '{') {
+      if (depth === 0) objStart = i;
+      depth++;
+    } else if (ch === '}') {
+      depth--;
+      if (depth === 0 && objStart >= 0) {
+        // We have a complete top-level object
+        const objText = inner.slice(objStart, i + 1);
+        try {
+          const obj = JSON.parse(objText) as Record<string, unknown>;
+          if (obj && typeof obj.label === 'string' && obj.label.length > 0) {
+            results.push({
+              label: obj.label,
+              description: obj.description
+                ? String(obj.description)
+                : undefined,
+            });
+          }
+        } catch {
+          // skip malformed
+        }
+        objStart = -1;
+      }
+    }
+  }
+
+  return results;
 }
 
 /**

@@ -11,7 +11,7 @@ import { create } from 'zustand';
 
 import useCanvasStore from './canvasStore';
 import {
-  recognizeIntent,
+  recognizeIntentStream,
   resolveActions,
   logIntentEpisode,
 } from '../api/intent';
@@ -29,6 +29,8 @@ export type IntentStep = 'intent-select' | 'action-review';
 interface IntentState {
   isOpen: boolean;
   isLoading: boolean;
+  /** True while the LLM is still streaming candidates (candidates may already be partially available) */
+  isStreaming: boolean;
   step: IntentStep;
   /** Intent candidates from step 1 */
   candidates: IntentCandidate[];
@@ -86,6 +88,7 @@ function cacheKey(
 export const useIntentStore = create<IntentState>()((set, get) => ({
   isOpen: false,
   isLoading: false,
+  isStreaming: false,
   step: 'intent-select' as IntentStep,
   candidates: [],
   selectedIndex: -1,
@@ -101,6 +104,7 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
 
     set({
       isLoading: true,
+      isStreaming: true,
       isOpen: true,
       step: 'intent-select',
       position: { x: mouseX, y: mouseY },
@@ -115,7 +119,15 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
     try {
       const canvasContext = useCanvasStore.getState().getAgentContext();
 
-      const screenshot = await captureCanvasScreenshot({ stripPrefix: true });
+      const lastAction =
+        canvasContext.recentActions.length > 0
+          ? canvasContext.recentActions[canvasContext.recentActions.length - 1]
+          : undefined;
+
+      const screenshot = await captureCanvasScreenshot({
+        stripPrefix: true,
+        lastAction,
+      });
       if (screenshot) {
         canvasContext.screenshot = screenshot;
       }
@@ -129,17 +141,24 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
           : 'no recent actions',
       ].join(', ');
 
-      const response = await recognizeIntent(canvasContext);
+      set({ contextSummary: summary, canvasContext });
 
-      set({
-        candidates: response.intentCandidates,
-        isLoading: false,
-        contextSummary: summary,
-        canvasContext,
+      // Stream candidates one-by-one as they arrive from the LLM
+      await recognizeIntentStream(canvasContext, (candidate) => {
+        const { candidates: current } = get();
+        set({ candidates: [...current, candidate], isLoading: false });
       });
+
+      // Mark streaming as done when stream completes
+      set({ isLoading: false, isStreaming: false });
     } catch (err) {
       console.error('[Intent Recognition] Failed:', err);
-      set({ candidates: [], isLoading: false, isOpen: false });
+      set({
+        candidates: [],
+        isLoading: false,
+        isStreaming: false,
+        isOpen: false,
+      });
     }
   },
 
@@ -311,6 +330,7 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
       selectedIndex: -1,
       customIntent: '',
       canvasContext: null,
+      isStreaming: false,
     });
   },
 
@@ -332,6 +352,7 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
       candidates: [],
       position: null,
       isLoading: false,
+      isStreaming: false,
       actions: [],
       step: 'intent-select',
       selectedIndex: -1,

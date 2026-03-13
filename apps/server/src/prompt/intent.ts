@@ -14,9 +14,9 @@ Use the detected stage to bias your intent suggestions toward actions that are n
 Return **3–5 most likely intents** the user wants to pursue next.
 
 ## Guidelines
-- Focus on seleted nodes. If nodes are selected, the user's intent is very likely related to those nodes.
-- The **latest action** is the strongest signal.
-- Use REAL node labels (from the [id] tags in the canvas state) when referencing existing nodes.
+- Focus on selected nodes. If nodes are selected, the user's intent is very likely related to those nodes.
+- Use REAL node labels when referencing existing nodes.
+- The **latest action** is the strongest signal. In the screenshot, nodes involved in the last action are highlighted with a **red border**, and a red banner at the top-left reads "Last step: ..." describing what the user just did.
 - Keep labels short (verb + object, ≤ 8 words).
 - Consider common research intents such as: synthesize/merge, diverge/brainstorm, compare/contrast, extract, reorganize, annotate or summarize, bridge gaps, and refine or restructure.
 
@@ -24,7 +24,5 @@ Return **3–5 most likely intents** the user wants to pursue next.
 Return **only** a JSON array (no markdown fences, no commentary). Each element:
 {
   "label": "short actionable description",
-  "confidence": 0.0–1.0,
-  "description": "one-sentence rationale"
 }
 Sorted by confidence descending.`;

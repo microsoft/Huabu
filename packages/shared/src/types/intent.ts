@@ -40,17 +40,12 @@ export type IntentAction =
 
 /**
  * A single candidate intent identified by the AI model.
- * Now includes an executable action sequence.
  */
 export interface IntentCandidate {
   /** Human-readable intent label */
   label: string;
-  /** Model confidence score (0–1) */
-  confidence: number;
   /** Optional short description / rationale */
   description?: string;
-  /** Ordered sequence of atomic operations to execute this intent */
-  actions: IntentAction[];
 }
 
 // ==================== Intent Episode Logging ====================
