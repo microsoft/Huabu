@@ -1,8 +1,17 @@
 import { readFile } from 'node:fs/promises';
-
-import { PDFParse } from 'pdf-parse';
-
+import { createRequire } from 'node:module';
 import type { IDocumentLoader, LoadResult } from './loader.interface.js';
+
+const require = createRequire(import.meta.url);
+const pdf2md = require('@opendocsg/pdf2md') as (
+  pdfBuffer: Buffer,
+  callbacks?: {
+    metadataParsed?: (metadata: { info?: { Title?: string } }) => void;
+    pageParsed?: (pages: unknown[]) => void;
+    fontParsed?: (font: unknown) => void;
+    documentParsed?: (document: unknown, pages: unknown[]) => void;
+  },
+) => Promise<string>;
 
 export class PdfLoader implements IDocumentLoader {
   supports(sourceType: string): boolean {
@@ -37,7 +46,6 @@ export class PdfLoader implements IDocumentLoader {
         title: result.title,
         metadata: {
           pageCount: result.numPages,
-          // ... other numeric metadata if needed
         },
       };
     } catch (error) {
@@ -49,7 +57,6 @@ export class PdfLoader implements IDocumentLoader {
     }
   }
 
-  // Copied/Refactored from pdf-parser.ts
   private async parsePdfBuffer(buffer: Buffer): Promise<{
     success: boolean;
     text?: string;
@@ -57,23 +64,26 @@ export class PdfLoader implements IDocumentLoader {
     numPages?: number;
     error?: string;
   }> {
-    const parser = new PDFParse({
-      data: buffer,
-    });
-
     try {
-      // Avoid parallel calls that can trigger data transfer/worker issues.
-      const infoResult = await parser.getInfo();
-      const textResult = await parser.getText();
+      let title: string | undefined;
+      let numPages: number | undefined;
+
+      const text: string = await pdf2md(buffer, {
+        metadataParsed: (metadata: { info?: { Title?: string } }) => {
+          if (typeof metadata.info?.Title === 'string') {
+            title = metadata.info.Title;
+          }
+        },
+        documentParsed: (_pdfDocument: unknown, pages: unknown[]) => {
+          numPages = pages.length;
+        },
+      });
 
       return {
         success: true,
-        text: textResult.text,
-        title:
-          typeof infoResult.info?.Title === 'string'
-            ? infoResult.info.Title
-            : undefined,
-        numPages: infoResult.total,
+        text,
+        title,
+        numPages,
       };
     } catch (error) {
       return {
@@ -83,12 +93,6 @@ export class PdfLoader implements IDocumentLoader {
             ? error.message
             : 'Unknown error parsing PDF buffer',
       };
-    } finally {
-      try {
-        await parser.destroy();
-      } catch {
-        // Ignore cleanup errors.
-      }
     }
   }
 }
