@@ -84,6 +84,7 @@ const IntentSelectStep: React.FC<{ anchorY: number }> = ({ anchorY }) => {
   const candidates = useIntentStore((s) => s.candidates);
   const selectedIndex = useIntentStore((s) => s.selectedIndex);
   const customIntent = useIntentStore((s) => s.customIntent);
+  const isStreaming = useIntentStore((s) => s.isStreaming);
   const selectCandidate = useIntentStore((s) => s.selectCandidate);
   const submitCustomIntent = useIntentStore((s) => s.submitCustomIntent);
   const setCustomIntent = useIntentStore((s) => s.setCustomIntent);
@@ -113,7 +114,7 @@ const IntentSelectStep: React.FC<{ anchorY: number }> = ({ anchorY }) => {
 
   return (
     <div className="flex flex-col">
-      {candidates.length === 0 ? (
+      {candidates.length === 0 && !isStreaming ? (
         <div className="text-muted-foreground px-3 py-4 text-sm">
           No suggestions available.
         </div>
@@ -159,6 +160,12 @@ const IntentSelectStep: React.FC<{ anchorY: number }> = ({ anchorY }) => {
               </li>
             );
           })}
+          {isStreaming && (
+            <li className="text-muted-foreground flex items-center gap-1.5 px-4 py-1.5 text-xs">
+              <Loader2 size={12} className="animate-spin" />
+              <span>Thinking…</span>
+            </li>
+          )}
         </ul>
       )}
 
@@ -962,14 +969,15 @@ export const IntentPopover: React.FC = () => {
         </button>
       </div>
 
-      {isLoading ? (
+      {isLoading && step === 'action-review' ? (
         <div className="text-muted-foreground flex items-center gap-2 px-3 py-4 text-sm">
           <Loader2 size={16} className="animate-spin" />
-          <span>
-            {step === 'intent-select'
-              ? 'Analyzing context…'
-              : 'Resolving actions…'}
-          </span>
+          <span>Resolving actions…</span>
+        </div>
+      ) : isLoading && step === 'intent-select' ? (
+        <div className="text-muted-foreground flex items-center gap-2 px-3 py-4 text-sm">
+          <Loader2 size={16} className="animate-spin" />
+          <span>Analyzing context…</span>
         </div>
       ) : step === 'intent-select' ? (
         <IntentSelectStep anchorY={position.y} />

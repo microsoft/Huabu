@@ -1,5 +1,11 @@
 import clsx from 'clsx';
-import { Brain, Check, ChevronDown, MessageSquare, Search } from 'lucide-react';
+import {
+  Check,
+  ChevronDown,
+  MessageSquare,
+  Search,
+  Sprout,
+} from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 import { GhostButton } from '../../Common/GhostButton';
@@ -30,7 +36,7 @@ const modes: ModeOption[] = [
   {
     value: 'agent',
     label: 'Agent',
-    icon: <Brain size={14} />,
+    icon: <Sprout size={14} />,
     description: 'Turn intent into canvas actions and apply them',
   },
 ];

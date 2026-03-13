@@ -8,7 +8,7 @@ import {
   UploadCloud,
   Link as LinkIcon,
   X,
-  Brain,
+  Sprout,
   Sparkles,
 } from 'lucide-react';
 import { useCallback, useRef, useState, type ChangeEvent } from 'react';
@@ -435,7 +435,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
               }
             }}
           >
-            <Brain size={18} />
+            <Sprout size={18} />
           </GhostButton>
         </div>
       </div>
