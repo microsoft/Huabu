@@ -5,12 +5,11 @@ import multipart from '@fastify/multipart';
 import staticPlugin from '@fastify/static';
 import { fastify } from 'fastify';
 
+import agentRoutes from './modules/agent/agent.route.js';
 import artifactRoute from './modules/artifact/artifact.route.js';
 import canvasRoutes from './modules/canvas/canvas.route.js';
-import chatRoutes from './modules/chat/chat.route.js';
 import intentRoutes from './modules/intent/intent.route.js';
 import knowledgeRoute from './modules/knowledge/knowledge.route.js';
-import researchRoutes from './modules/research/research.route.js';
 import webRoutes from './modules/web/web.route.js';
 import { isWorkspaceConfigured } from './modules/workspace.js';
 import workspaceRoutes from './modules/workspace.route.js';
@@ -60,12 +59,11 @@ app.addHook('preHandler', async (request, reply) => {
   }
 });
 
-app.register(chatRoutes, { prefix: '/api/chat' });
+app.register(agentRoutes, { prefix: '/api/agent' });
 app.register(canvasRoutes, { prefix: '/api/canvas' });
 app.register(webRoutes, { prefix: '/api/web' });
 app.register(artifactRoute, { prefix: '/api' });
 app.register(knowledgeRoute, { prefix: '/api' });
-app.register(researchRoutes, { prefix: '/api/research' });
 
 app.register(intentRoutes, { prefix: '/api/intent' });
 app.register(workspaceRoutes, { prefix: '/api' });

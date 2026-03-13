@@ -1,3 +1,4 @@
+export * from './types/agent.js';
 export * from './types/canvas.js';
 export * from './types/chat.js';
 export * from './types/context.js';

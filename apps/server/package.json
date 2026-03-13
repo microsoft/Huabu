@@ -14,10 +14,7 @@
     "@fastify/cors": "^10.0.1",
     "@fastify/multipart": "^9.0.1",
     "@fastify/static": "^8.0.2",
-    "@langchain/core": "^1.1.18",
-    "@langchain/langgraph": "^1.1.3",
-    "@langchain/langgraph-checkpoint-sqlite": "^1.0.1",
-    "@langchain/openai": "^1.2.4",
+    "@mariozechner/pi-ai": "^0.57.1",
     "@sediment/shared": "workspace:*",
     "better-sqlite3": "^12.6.2",
     "dotenv": "^17.2.3",
@@ -29,8 +26,8 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
-    "@types/sanitize-html": "^2.16.0",
     "@types/node": "^20.0.0",
+    "@types/sanitize-html": "^2.16.0",
     "tsx": "^4.0.0",
     "typescript": "^5.0.0"
   }

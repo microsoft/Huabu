@@ -6,13 +6,14 @@
  * by calling the LLM to analyze the canvas state and recent user actions.
  */
 
-import { HumanMessage, SystemMessage } from '@langchain/core/messages';
+import { complete, stream as piStream } from '@mariozechner/pi-ai';
 
 import { getIntentDb } from './intent.db.js';
 import { ACTION_RESOLVE_SYSTEM_PROMPT } from '../../prompt/action-resolve.js';
 import { INTENT_SYSTEM_PROMPT } from '../../prompt/intent.js';
-import { getLLM } from '../agent/llm.js';
+import { getLLMModel } from '../agent/llm.js';
 
+import type { Context } from '@mariozechner/pi-ai';
 import type {
   AgentBaseContext,
   IntentAction,
@@ -251,11 +252,10 @@ function formatAction(a: RecentAction): string {
 
 type ContentPart =
   | { type: 'text'; text: string }
-  | { type: 'image_url'; image_url: { url: string; detail?: string } };
+  | { type: 'image'; data: string; mimeType: string };
 
 /**
- * Append a canvas screenshot as a multimodal image_url part.
- * Handles both raw base64 payloads and existing data-URLs.
+ * Append a canvas screenshot as a pi-ai image content part.
  */
 function appendScreenshot(
   parts: ContentPart[],
@@ -263,10 +263,11 @@ function appendScreenshot(
   caption?: string,
 ): void {
   if (!screenshot) return;
-  const url = screenshot.startsWith('data:')
-    ? screenshot
-    : `data:image/png;base64,${screenshot}`;
-  parts.push({ type: 'image_url', image_url: { url, detail: 'auto' } });
+  // Strip data URL prefix if present to get raw base64
+  const base64 = screenshot.startsWith('data:')
+    ? screenshot.replace(/^data:[^;]+;base64,/, '')
+    : screenshot;
+  parts.push({ type: 'image', data: base64, mimeType: 'image/png' });
   if (caption) {
     parts.push({ type: 'text', text: caption });
   }
@@ -283,7 +284,7 @@ function appendScreenshot(
 async function llmIntentRecognition(
   ctx: AgentBaseContext,
 ): Promise<IntentCandidate[]> {
-  const llm = getLLM();
+  const model = getLLMModel();
   const contextText = serializeContextLight(ctx);
 
   const userContentParts: ContentPart[] = [
@@ -296,18 +297,23 @@ async function llmIntentRecognition(
     'Above is a screenshot of the current canvas viewport. Nodes are labeled with their IDs. The last user action is annotated in red: a banner at the top-left reads "Last step: ...", affected nodes have red borders, and arrows show directional relationships (connect, frame). Use these visual signals to infer intent.',
   );
 
-  const response = await llm.invoke([
-    new SystemMessage(INTENT_SYSTEM_PROMPT),
-    new HumanMessage({ content: userContentParts }),
-  ]);
+  const piContext: Context = {
+    systemPrompt: INTENT_SYSTEM_PROMPT,
+    messages: [
+      { role: 'user', content: userContentParts, timestamp: Date.now() },
+    ],
+  };
 
-  const raw =
-    typeof response.content === 'string'
-      ? response.content
-      : JSON.stringify(response.content);
+  const response = await complete(model, piContext, {
+    apiKey: process.env.AZURE_OPENAI_API_KEY,
+  });
+
+  const raw = response.content
+    .filter((b) => b.type === 'text')
+    .map((b) => (b as { type: 'text'; text: string }).text)
+    .join('');
 
   try {
-    // Strip markdown fences if the model wraps them
     const cleaned = raw.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
     const parsed: unknown = JSON.parse(cleaned);
 
@@ -335,7 +341,7 @@ async function llmResolveActions(
   ctx: AgentBaseContext,
   chosenIntent: string,
 ): Promise<IntentAction[]> {
-  const llm = getLLM();
+  const model = getLLMModel();
   const contextText = serializeContext(ctx);
 
   const userContentParts: ContentPart[] = [
@@ -347,15 +353,21 @@ async function llmResolveActions(
 
   appendScreenshot(userContentParts, ctx.screenshot);
 
-  const response = await llm.invoke([
-    new SystemMessage(ACTION_RESOLVE_SYSTEM_PROMPT),
-    new HumanMessage({ content: userContentParts }),
-  ]);
+  const piContext: Context = {
+    systemPrompt: ACTION_RESOLVE_SYSTEM_PROMPT,
+    messages: [
+      { role: 'user', content: userContentParts, timestamp: Date.now() },
+    ],
+  };
 
-  const raw =
-    typeof response.content === 'string'
-      ? response.content
-      : JSON.stringify(response.content);
+  const response = await complete(model, piContext, {
+    apiKey: process.env.AZURE_OPENAI_API_KEY,
+  });
+
+  const raw = response.content
+    .filter((b) => b.type === 'text')
+    .map((b) => (b as { type: 'text'; text: string }).text)
+    .join('');
 
   try {
     const cleaned = raw.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
@@ -394,7 +406,7 @@ export async function recognizeIntent(
 export async function* recognizeIntentStream(
   ctx: AgentBaseContext,
 ): AsyncGenerator<IntentCandidate> {
-  const llm = getLLM();
+  const model = getLLMModel();
   const contextText = serializeContextLight(ctx);
 
   const userContentParts: ContentPart[] = [
@@ -407,33 +419,29 @@ export async function* recognizeIntentStream(
     'Above is a screenshot of the current canvas viewport. Nodes are labeled with their IDs. The last user action is annotated in red: a banner at the top-left reads "Last step: ...", affected nodes have red borders, and arrows show directional relationships (connect, frame). Use these visual signals to infer intent.',
   );
 
+  const piContext: Context = {
+    systemPrompt: INTENT_SYSTEM_PROMPT,
+    messages: [
+      { role: 'user', content: userContentParts, timestamp: Date.now() },
+    ],
+  };
+
   let accumulated = '';
   let yieldedCount = 0;
 
-  const stream = await llm.stream([
-    new SystemMessage(INTENT_SYSTEM_PROMPT),
-    new HumanMessage({ content: userContentParts }),
-  ]);
+  const s = piStream(model, piContext, {
+    apiKey: process.env.AZURE_OPENAI_API_KEY,
+  });
 
-  for await (const chunk of stream) {
-    const token =
-      typeof chunk.content === 'string'
-        ? chunk.content
-        : Array.isArray(chunk.content)
-          ? chunk.content
-              .filter(
-                (p): p is { type: 'text'; text: string } => p.type === 'text',
-              )
-              .map((p) => p.text)
-              .join('')
-          : '';
-    accumulated += token;
+  for await (const event of s) {
+    if (event.type === 'text_delta') {
+      accumulated += event.delta;
 
-    // Try to parse complete candidate objects from the accumulated JSON array
-    const candidates = tryParsePartialCandidates(accumulated);
-    while (yieldedCount < candidates.length) {
-      yield candidates[yieldedCount];
-      yieldedCount++;
+      const candidates = tryParsePartialCandidates(accumulated);
+      while (yieldedCount < candidates.length) {
+        yield candidates[yieldedCount];
+        yieldedCount++;
+      }
     }
   }
 
