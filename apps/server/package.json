@@ -23,7 +23,7 @@
     "dotenv": "^17.2.3",
     "fastify": "^5.2.0",
     "marked": "^16.3.0",
-    "pdf-parse": "^2.4.5",
+    "@opendocsg/pdf2md": "^0.2.5",
     "sanitize-html": "^2.17.0",
     "zod": "^4.3.6"
   },
