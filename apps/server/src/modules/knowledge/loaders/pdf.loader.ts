@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import type { IDocumentLoader, LoadResult } from './loader.interface.js';
 
 const require = createRequire(import.meta.url);
 const pdf2md = require('@opendocsg/pdf2md') as (
@@ -11,8 +12,6 @@ const pdf2md = require('@opendocsg/pdf2md') as (
     documentParsed?: (document: unknown, pages: unknown[]) => void;
   },
 ) => Promise<string>;
-
-import type { IDocumentLoader, LoadResult } from './loader.interface.js';
 
 export class PdfLoader implements IDocumentLoader {
   supports(sourceType: string): boolean {
