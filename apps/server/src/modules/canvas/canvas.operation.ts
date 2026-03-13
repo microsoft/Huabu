@@ -69,7 +69,6 @@ export class CanvasOperationService {
 
     const canvasFile: CanvasFile = {
       canvasId,
-      workspaceId: existing?.workspaceId ?? 'default',
       title: existing?.title ?? null,
       version: nextVersion,
       state: { nodes, edges },

@@ -12,7 +12,6 @@ export interface GetCanvasResponse {
 export interface PutCanvasRequest {
   version: number;
   state: unknown;
-  workspaceId?: string;
   title?: string;
 }
 

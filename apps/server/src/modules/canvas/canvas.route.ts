@@ -89,7 +89,6 @@ async function hydrateNodeContent(nodes: NodeLike[]): Promise<NodeLike[]> {
 const putCanvasBodySchema = z.object({
   version: z.number().int().nonnegative(),
   state: z.unknown(),
-  workspaceId: z.string().min(1).optional(),
   title: z.string().min(1).optional(),
 });
 
@@ -209,7 +208,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.code(400).send({ message: 'Invalid request body' });
       }
 
-      const { version: clientVersion, state, workspaceId, title } = parsed.data;
+      const { version: clientVersion, state, title } = parsed.data;
 
       const existing = readCanvas(canvasId);
       const serverVersion = existing?.version ?? 0;
@@ -237,7 +236,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
       const canvasFile: CanvasFile = {
         canvasId,
-        workspaceId: workspaceId ?? existing?.workspaceId ?? null,
         title: title ?? existing?.title ?? null,
         version: nextVersion,
         state: {
@@ -410,7 +408,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     sources: z.array(
       z.object({
         sourceId: z.string(),
-        workspaceId: z.string().optional(), // kept optional for backward compat with old exports
         type: z.string(),
         title: z.string().nullable(),
         src: z.string().nullable(),
@@ -513,7 +510,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
     const canvasFile: CanvasFile = {
       canvasId: targetCanvasId,
-      workspaceId: existing?.workspaceId ?? 'default',
       title: bundle.canvas.workspaceName ?? existing?.title ?? null,
       version: nextVersion,
       state: {

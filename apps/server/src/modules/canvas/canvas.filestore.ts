@@ -27,7 +27,6 @@ const DEFAULT_CANVAS_ID = 'default-canvas';
  */
 export interface CanvasFile {
   canvasId: string;
-  workspaceId: string | null;
   title: string | null;
   version: number;
   state: {
@@ -90,7 +89,6 @@ export function ensureDefaultCanvas(): void {
   const now = Date.now();
   const defaultCanvas: CanvasFile = {
     canvasId: DEFAULT_CANVAS_ID,
-    workspaceId: 'default',
     title: null,
     version: 0,
     state: { nodes: [], edges: [] },

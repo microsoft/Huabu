@@ -43,7 +43,6 @@ export async function ingestionNode(
 
       // Trigger ingestion
       const outcome = await ingestService.ingestCanvasNode({
-        workspaceId: 'default',
         nodeId: result.nodeId,
         type: 'web',
         title: result.title,
