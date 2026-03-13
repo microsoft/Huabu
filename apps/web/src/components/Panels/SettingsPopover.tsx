@@ -22,6 +22,7 @@ export const SettingsPopover: React.FC = () => {
 
   const triggerRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const successTimeoutRef = useRef<number | null>(null);
 
   // Fetch current workspace path when popover opens
   useEffect(() => {
@@ -43,6 +44,10 @@ export const SettingsPopover: React.FC = () => {
     setIsOpen(false);
     setError('');
     setSuccess(false);
+    if (successTimeoutRef.current !== null) {
+      clearTimeout(successTimeoutRef.current);
+      successTimeoutRef.current = null;
+    }
   }, []);
 
   // Close on outside click
@@ -64,6 +69,16 @@ export const SettingsPopover: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClick);
   }, [isOpen, handleClose]);
 
+  // Clear any pending success timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (successTimeoutRef.current !== null) {
+        clearTimeout(successTimeoutRef.current);
+        successTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
   const isDirty = draft.trim() !== workspacePath;
 
   const handleSave = async () => {
@@ -83,7 +98,13 @@ export const SettingsPopover: React.FC = () => {
       setWorkspacePath(result.path);
       setDraft(result.path);
       setSuccess(true);
-      setTimeout(() => setSuccess(false), 2000);
+      if (successTimeoutRef.current !== null) {
+        clearTimeout(successTimeoutRef.current);
+      }
+      successTimeoutRef.current = window.setTimeout(() => {
+        setSuccess(false);
+        successTimeoutRef.current = null;
+      }, 2000);
 
       // Reload canvas and notify other panels about workspace change
       await loadCanvas();
