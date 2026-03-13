@@ -17,10 +17,13 @@ export default function CanvasPage() {
   const navigate = useNavigate();
   const switchCanvas = useStore((s) => s.switchCanvas);
   const loadCanvas = useStore((s) => s.loadCanvas);
-  const storeCanvasId = useStore((s) => s.canvasId);
   const isLoading = useStore((s) => s.isLoading);
   const canvasNotFound = useStore((s) => s.canvasNotFound);
   const initialised = useRef(false);
+  // Track the last canvasId we loaded so we can detect URL-driven changes
+  // without subscribing to the Zustand store's canvasId (which would cause
+  // an extra render cycle after loadCanvas/switchCanvas updates it).
+  const prevCanvasIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!canvasId) {
@@ -31,11 +34,13 @@ export default function CanvasPage() {
     // On first mount, use loadCanvas; on subsequent canvas ID changes use switchCanvas
     if (!initialised.current) {
       initialised.current = true;
+      prevCanvasIdRef.current = canvasId;
       void loadCanvas(canvasId);
-    } else if (canvasId !== storeCanvasId) {
+    } else if (canvasId !== prevCanvasIdRef.current) {
+      prevCanvasIdRef.current = canvasId;
       void switchCanvas(canvasId);
     }
-  }, [canvasId, storeCanvasId, loadCanvas, switchCanvas, navigate]);
+  }, [canvasId, loadCanvas, switchCanvas, navigate]);
 
   if (isLoading) {
     return (

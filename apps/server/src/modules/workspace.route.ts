@@ -1,5 +1,6 @@
-import { execSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { promisify } from 'node:util';
 
 import { z } from 'zod';
 
@@ -16,55 +17,66 @@ import {
 
 import type { FastifyPluginAsync } from 'fastify';
 
+const execFileAsync = promisify(execFile);
+
+/**
+ * Run a command asynchronously and return trimmed stdout, or `null` on error.
+ */
+async function runAndTrim(cmd: string, args: string[]): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync(cmd, args, {
+      encoding: 'utf-8',
+      timeout: 120_000,
+    });
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Open a native OS folder-picker dialog and return the selected path.
- * Blocks until the user selects a folder or cancels.
+ * Runs the dialog process asynchronously so the Node event loop is not blocked.
  * Returns `null` when the user cancels.
  */
-function pickFolderNative(): string | null {
+async function pickFolderNative(): Promise<string | null> {
   const platform = process.platform;
 
   try {
     if (platform === 'win32') {
       // PowerShell folder browser dialog — returns the selected path or empty
-      const ps = `
-        Add-Type -AssemblyName System.Windows.Forms
-        $d = New-Object System.Windows.Forms.FolderBrowserDialog
-        $d.Description = 'Select Sediment workspace folder'
-        $d.ShowNewFolderButton = $true
-        if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath } else { '' }
-      `.trim();
-      const result = execSync(
-        `powershell -NoProfile -Command "${ps.replace(/\n/g, '; ')}"`,
-        { encoding: 'utf-8', timeout: 120_000 },
-      ).trim();
-      return result || null;
+      const ps = [
+        'Add-Type -AssemblyName System.Windows.Forms',
+        '$d = New-Object System.Windows.Forms.FolderBrowserDialog',
+        "$d.Description = 'Select Sediment workspace folder'",
+        '$d.ShowNewFolderButton = $true',
+        "if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath } else { '' }",
+      ].join('; ');
+      return await runAndTrim('powershell', ['-NoProfile', '-Command', ps]);
     }
 
     if (platform === 'darwin') {
       // macOS: AppleScript folder chooser
-      const result = execSync(
-        `osascript -e 'tell application "System Events" to return POSIX path of (choose folder with prompt "Select Sediment workspace folder")'`,
-        { encoding: 'utf-8', timeout: 120_000 },
-      ).trim();
-      return result || null;
+      return await runAndTrim('osascript', [
+        '-e',
+        'tell application "System Events" to return POSIX path of (choose folder with prompt "Select Sediment workspace folder")',
+      ]);
     }
 
     // Linux: zenity or kdialog
-    try {
-      const result = execSync(
-        `zenity --file-selection --directory --title="Select Sediment workspace folder"`,
-        { encoding: 'utf-8', timeout: 120_000 },
-      ).trim();
-      return result || null;
-    } catch {
-      // zenity not available — try kdialog
-      const result = execSync(
-        `kdialog --getexistingdirectory "$HOME" --title "Select Sediment workspace folder"`,
-        { encoding: 'utf-8', timeout: 120_000 },
-      ).trim();
-      return result || null;
-    }
+    const zenity = await runAndTrim('zenity', [
+      '--file-selection',
+      '--directory',
+      '--title=Select Sediment workspace folder',
+    ]);
+    if (zenity) return zenity;
+
+    return await runAndTrim('kdialog', [
+      '--getexistingdirectory',
+      process.env.HOME ?? '/',
+      '--title',
+      'Select Sediment workspace folder',
+    ]);
   } catch {
     // User cancelled or dialog failed
     return null;
@@ -97,7 +109,7 @@ const workspaceRoutes: FastifyPluginAsync = async (app) => {
       });
     }
 
-    const selected = pickFolderNative();
+    const selected = await pickFolderNative();
     if (!selected) {
       return reply.send({ cancelled: true, path: null });
     }

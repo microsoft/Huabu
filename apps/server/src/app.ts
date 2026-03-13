@@ -12,6 +12,7 @@ import intentRoutes from './modules/intent/intent.route.js';
 import knowledgeRoute from './modules/knowledge/knowledge.route.js';
 import researchRoutes from './modules/research/research.route.js';
 import webRoutes from './modules/web/web.route.js';
+import { isWorkspaceConfigured } from './modules/workspace.js';
 import workspaceRoutes from './modules/workspace.route.js';
 
 export const app = fastify({
@@ -41,6 +42,22 @@ app.register(multipart, {
 app.register(staticPlugin, {
   root: tmpdir(),
   serve: false,
+});
+
+// Guard: reject requests to non-workspace routes when workspace is not yet configured.
+// The workspace routes themselves are always allowed so the client can set the path.
+app.addHook('preHandler', async (request, reply) => {
+  const url = request.url;
+  if (
+    !isWorkspaceConfigured() &&
+    url.startsWith('/api') &&
+    !url.startsWith('/api/workspace')
+  ) {
+    return reply.status(503).send({
+      message:
+        'Workspace has not been configured yet. Please set a workspace path first.',
+    });
+  }
 });
 
 app.register(chatRoutes, { prefix: '/api/chat' });
