@@ -29,11 +29,21 @@ export const SettingsPopover: React.FC = () => {
     if (!isOpen) return;
     let cancelled = false;
 
-    void getWorkspacePath().then((info) => {
-      if (cancelled) return;
-      setWorkspacePath(info.path);
-      setDraft(info.path);
-    });
+    void getWorkspacePath()
+      .then((info) => {
+        if (cancelled) return;
+        setWorkspacePath(info.path);
+        setDraft(info.path);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        // Surface the error to the user instead of leaving an unhandled rejection.
+        setError(
+          err instanceof Error
+            ? err.message
+            : 'Failed to load workspace path.',
+        );
+      });
 
     return () => {
       cancelled = true;
