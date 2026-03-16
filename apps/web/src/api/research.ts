@@ -7,7 +7,9 @@
 import { agentApi } from './unified-agent';
 
 import type {
+  AgentBaseContext,
   AgentStreamEvent,
+  ChatAttachment,
   ChatHistoryResponse,
   ResearchAgentEvent,
   ResearchConfig,
@@ -44,6 +46,10 @@ export const researchApi = {
     threadId: string,
     config: ResearchConfig | undefined,
     callbacks: ResearchCallbacks,
+    options?: {
+      canvasContext?: AgentBaseContext;
+      attachments?: ChatAttachment[];
+    },
   ): Promise<void> => {
     const content = config?.searchDepth
       ? `Research this topic (depth: ${config.searchDepth}): ${query}`
@@ -62,6 +68,8 @@ export const researchApi = {
       },
       {
         canvasId,
+        canvasContext: options?.canvasContext,
+        attachments: options?.attachments,
       },
     );
   },

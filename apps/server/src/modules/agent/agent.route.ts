@@ -89,6 +89,20 @@ async function resolveImageUrl(url: string): Promise<string> {
     }
   }
 
+  // Fetch external image URLs and convert to base64
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+      if (!res.ok) return url;
+      const contentType = res.headers.get('content-type') ?? '';
+      if (!contentType.startsWith('image/')) return url;
+      const buffer = Buffer.from(await res.arrayBuffer());
+      return `data:${contentType.split(';')[0]};base64,${buffer.toString('base64')}`;
+    } catch {
+      return url;
+    }
+  }
+
   return url;
 }
 
@@ -134,6 +148,31 @@ async function buildUserContent(
   }
 
   return parts;
+}
+
+/**
+ * Collect image attachments from selected canvas nodes (including frame children).
+ * Enables vision analysis when users select image nodes on the canvas.
+ */
+function collectImageAttachments(
+  nodes: SelectedNodeDetail[],
+): ChatAttachment[] {
+  const attachments: ChatAttachment[] = [];
+
+  for (const node of nodes) {
+    if (node.type === 'image' && node.src) {
+      attachments.push({
+        type: 'image',
+        url: node.src,
+        label: node.label ?? `Image node ${node.id}`,
+      });
+    }
+    if (node.children) {
+      attachments.push(...collectImageAttachments(node.children));
+    }
+  }
+
+  return attachments;
 }
 
 function writeSSE(
@@ -318,8 +357,18 @@ const agentRoutes: FastifyPluginAsync = async (
       }
     }
 
+    // Collect image attachments from selected canvas nodes for vision analysis
+    const selectedImageAttachments = canvasContext?.selectedNodes
+      ? collectImageAttachments(canvasContext.selectedNodes)
+      : [];
+    const allAttachments =
+      selectedImageAttachments.length > 0 ||
+      (attachments && attachments.length > 0)
+        ? [...(attachments ?? []), ...selectedImageAttachments]
+        : undefined;
+
     // Build user message
-    let userContent = await buildUserContent(content, attachments);
+    let userContent = await buildUserContent(content, allAttachments);
 
     // Prepend selection context to user message if available
     if (selectionContext) {

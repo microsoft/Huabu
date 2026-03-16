@@ -166,11 +166,17 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const handleDeepResearch = async () => {
     if (!input.trim() || isLoading || researchStatus === 'running') return;
 
+    // Snapshot and clear pending attachments before sending
+    const attachments =
+      pendingAttachments.length > 0 ? [...pendingAttachments] : undefined;
+    if (attachments) clearPendingAttachments();
+
     // Add user message
     const userMessage: ChatMessage = {
       id: createId('message'),
       role: 'user',
       content: input,
+      attachments,
     };
     addMessage(userMessage);
 
@@ -246,6 +252,10 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
             loadCanvas();
           },
         },
+        {
+          canvasContext: getAgentContext(),
+          attachments,
+        },
       );
     } catch (err) {
       console.error('Research failed:', err);
@@ -260,9 +270,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
 
     // Snapshot and clear pending attachments before sending
     const attachments =
-      mode === 'ask' && pendingAttachments.length > 0
-        ? [...pendingAttachments]
-        : undefined;
+      pendingAttachments.length > 0 ? [...pendingAttachments] : undefined;
     if (attachments) clearPendingAttachments();
 
     const userMessage: ChatMessage = {
