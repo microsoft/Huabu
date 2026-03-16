@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { complete } from '@mariozechner/pi-ai';
 import { createId } from '@sediment/shared';
 import { z } from 'zod';
 
@@ -18,7 +19,7 @@ import {
   IMAGE_LABEL_PROMPT,
   buildFrameLabelPrompt,
 } from '../../prompt/resolve-label.js';
-import { getLLM } from '../agent/llm.js';
+import { getLLMModel } from '../agent/llm.js';
 import { resolveArtifactImageUrl } from '../artifact/utils.js';
 import {
   getIngestService,
@@ -26,6 +27,7 @@ import {
 } from '../knowledge/index.js';
 import { getArtifactsDir } from '../workspace.js';
 
+import type { Context } from '@mariozechner/pi-ai';
 import type {
   CanvasExportBundle,
   ExportedSource,
@@ -278,7 +280,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       const body = parsed.data as ResolveLabelRequest;
 
       try {
-        const llm = getLLM();
+        const model = getLLMModel();
         let suggestedLabel: string | undefined;
 
         if (body.type === 'image') {
@@ -286,36 +288,63 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
             body.src,
             getArtifactsDir(),
           );
-          const result = await llm.invoke([
-            {
-              role: 'user',
-              content: [
-                {
-                  type: 'image_url',
-                  image_url: { url: dataUrl, detail: 'low' },
-                },
-                {
-                  type: 'text',
-                  text: IMAGE_LABEL_PROMPT,
-                },
-              ],
-            },
-          ]);
-          const text =
-            typeof result.content === 'string' ? result.content.trim() : '';
+          // Extract base64 data and mime type from the data URL
+          const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+          if (!match) {
+            return reply.code(400).send({ message: 'Invalid image data URL' });
+          }
+          const [, mimeType, base64Data] = match;
+          const piContext: Context = {
+            systemPrompt: '',
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  {
+                    type: 'image',
+                    data: base64Data,
+                    mimeType,
+                  },
+                  {
+                    type: 'text',
+                    text: IMAGE_LABEL_PROMPT,
+                  },
+                ],
+                timestamp: Date.now(),
+              },
+            ],
+          };
+          const result = await complete(model, piContext, {
+            apiKey: process.env.AZURE_OPENAI_API_KEY,
+          });
+          const text = result.content
+            .filter((b) => b.type === 'text')
+            .map((b) => (b as { type: 'text'; text: string }).text)
+            .join('')
+            .trim();
           if (text.length > 0 && text.length <= 60) {
             suggestedLabel = text;
           }
         } else {
           // body.type === 'frame'
-          const result = await llm.invoke([
-            {
-              role: 'user',
-              content: buildFrameLabelPrompt(body.childLabels),
-            },
-          ]);
-          const text =
-            typeof result.content === 'string' ? result.content.trim() : '';
+          const piContext: Context = {
+            systemPrompt: '',
+            messages: [
+              {
+                role: 'user',
+                content: buildFrameLabelPrompt(body.childLabels),
+                timestamp: Date.now(),
+              },
+            ],
+          };
+          const result = await complete(model, piContext, {
+            apiKey: process.env.AZURE_OPENAI_API_KEY,
+          });
+          const text = result.content
+            .filter((b) => b.type === 'text')
+            .map((b) => (b as { type: 'text'; text: string }).text)
+            .join('')
+            .trim();
           if (text.length > 0 && text.length <= 60) {
             suggestedLabel = text;
           }

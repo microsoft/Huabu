@@ -9,14 +9,12 @@
 import { complete, stream as piStream } from '@mariozechner/pi-ai';
 
 import { getIntentDb } from './intent.db.js';
-import { ACTION_RESOLVE_SYSTEM_PROMPT } from '../../prompt/action-resolve.js';
 import { INTENT_SYSTEM_PROMPT } from '../../prompt/intent.js';
 import { getLLMModel } from '../agent/llm.js';
 
 import type { Context } from '@mariozechner/pi-ai';
 import type {
   AgentBaseContext,
-  IntentAction,
   IntentCandidate,
   IntentEpisode,
   RecentAction,
@@ -83,72 +81,6 @@ function serializeContextLight(ctx: AgentBaseContext): string {
   }
 
   // Selected nodes — full content (primary intent signal)
-  if (ctx.selectedNodes && ctx.selectedNodes.length > 0) {
-    lines.push('');
-    lines.push(`# Currently selected node(s) (${ctx.selectedNodes.length}):`);
-    for (const s of ctx.selectedNodes) {
-      const label = s.label ? ` "${s.label}"` : '';
-      const content = s.content ? `\n    Content: ${s.content}` : '';
-      const src = s.src ? `\n    Source: ${s.src}` : '';
-      lines.push(`- [${s.id}] ${s.type}${label}${content}${src}`);
-      if (s.children && s.children.length > 0) {
-        for (const child of s.children) {
-          const childLabel = child.label ? ` "${child.label}"` : '';
-          const childContent = child.content
-            ? `\n      Content: ${child.content}`
-            : '';
-          lines.push(
-            `  - [${child.id}] ${child.type}${childLabel}${childContent}`,
-          );
-        }
-      }
-    }
-  }
-
-  return lines.join('\n');
-}
-
-/**
- * Full context for Step 2 (action resolution).
- * Includes node snippets so the LLM can generate concrete content in actions.
- */
-function serializeContext(ctx: AgentBaseContext): string {
-  const lines: string[] = [];
-
-  // Nodes
-  if (ctx.nodes.length > 0) {
-    lines.push(`# Canvas has ${ctx.nodes.length} node(s):`);
-    for (const n of ctx.nodes) {
-      const frame = n.frameLabel ? ` (in frame "${n.frameLabel}")` : '';
-      const snippet = n.snippet ? `: ${n.snippet}` : '';
-      const label = n.label ? ` "${n.label}"` : '';
-      lines.push(`- [${n.id}] ${n.type}${label}${frame}${snippet}`);
-    }
-  } else {
-    lines.push('# Canvas is empty.');
-  }
-
-  // Edges
-  if (ctx.edges.length > 0) {
-    lines.push('');
-    lines.push('# Connections:');
-    for (const e of ctx.edges) {
-      const srcLabel = e.source.label ? ` "${e.source.label}"` : '';
-      const tgtLabel = e.target.label ? ` "${e.target.label}"` : '';
-      lines.push(`- [${e.source.id}]${srcLabel} → [${e.target.id}]${tgtLabel}`);
-    }
-  }
-
-  // Recent actions
-  if (ctx.recentActions.length > 0) {
-    lines.push('');
-    lines.push('# Recent user actions (oldest → newest):');
-    for (const a of ctx.recentActions) {
-      lines.push(`- ${formatAction(a)}`);
-    }
-  }
-
-  // Selected nodes (strong intent signal — full content included)
   if (ctx.selectedNodes && ctx.selectedNodes.length > 0) {
     lines.push('');
     lines.push(`# Currently selected node(s) (${ctx.selectedNodes.length}):`);
@@ -330,57 +262,6 @@ async function llmIntentRecognition(
 }
 
 // ---------------------------------------------------------------------------
-// LLM-based action resolution (step 2)
-// ---------------------------------------------------------------------------
-
-/**
- * Given a canvas context and a user-selected intent string, call the LLM to
- * produce a concrete action plan.
- */
-async function llmResolveActions(
-  ctx: AgentBaseContext,
-  chosenIntent: string,
-): Promise<IntentAction[]> {
-  const model = getLLMModel();
-  const contextText = serializeContext(ctx);
-
-  const userContentParts: ContentPart[] = [
-    {
-      type: 'text',
-      text: `Current canvas state:\n\n${contextText}\n\nUser-chosen intent: "${chosenIntent}"`,
-    },
-  ];
-
-  appendScreenshot(userContentParts, ctx.screenshot);
-
-  const piContext: Context = {
-    systemPrompt: ACTION_RESOLVE_SYSTEM_PROMPT,
-    messages: [
-      { role: 'user', content: userContentParts, timestamp: Date.now() },
-    ],
-  };
-
-  const response = await complete(model, piContext, {
-    apiKey: process.env.AZURE_OPENAI_API_KEY,
-  });
-
-  const raw = response.content
-    .filter((b) => b.type === 'text')
-    .map((b) => (b as { type: 'text'; text: string }).text)
-    .join('');
-
-  try {
-    const cleaned = raw.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
-    const parsed: unknown = JSON.parse(cleaned);
-
-    if (!Array.isArray(parsed)) return [];
-    return parsed as IntentAction[];
-  } catch {
-    console.error('[intent] Failed to parse action-resolve LLM response:', raw);
-    return [];
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -517,21 +398,6 @@ function tryParsePartialCandidates(raw: string): IntentCandidate[] {
   }
 
   return results;
-}
-
-/**
- * Resolve a chosen intent into a concrete action plan via the LLM.
- */
-export async function resolveActions(
-  ctx: AgentBaseContext,
-  chosenIntent: string,
-): Promise<IntentAction[]> {
-  try {
-    return await llmResolveActions(ctx, chosenIntent);
-  } catch (err) {
-    console.error('[intent] LLM action resolution failed:', err);
-    return [];
-  }
 }
 
 // ---------------------------------------------------------------------------
