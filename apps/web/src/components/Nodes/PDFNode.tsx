@@ -1,6 +1,6 @@
 import { type Node, type NodeProps } from '@xyflow/react';
 import { clsx } from 'clsx';
-import { Download, Fullscreen, ImageOff } from 'lucide-react';
+import { Download, Fullscreen, ImageOff, Loader2 } from 'lucide-react';
 import {
   memo,
   useCallback,
@@ -22,7 +22,7 @@ import { GhostButton } from '../Common/GhostButton.tsx';
 
 import type { CanvasPdfNodeData } from './types.ts';
 
-pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 
 export type PDFNodeType = Node<CanvasPdfNodeData, 'pdf'>;
 
@@ -115,7 +115,17 @@ const VirtualizedPage = memo(
               width={renderedWidth}
               renderAnnotationLayer={false}
               renderTextLayer={false}
-              loading={''}
+              loading={
+                <div
+                  className="flex items-center justify-center bg-neutral-50"
+                  style={{ height: fallbackPageHeight }}
+                >
+                  <Loader2
+                    size={18}
+                    className="text-muted-foreground animate-spin"
+                  />
+                </div>
+              }
               onRenderSuccess={handleRenderSuccess}
             />
           </div>
@@ -290,8 +300,8 @@ export const PDFNode = memo(
                     file={data.src}
                     onLoadSuccess={onDocumentLoadSuccess}
                     loading={
-                      <div className="text-muted-foreground p-4 text-xs">
-                        Loading...
+                      <div className="text-muted-foreground flex h-full min-h-40 w-full items-center justify-center gap-2 p-4 text-xs">
+                        <Loader2 size={16} className="animate-spin" />
                       </div>
                     }
                     error={

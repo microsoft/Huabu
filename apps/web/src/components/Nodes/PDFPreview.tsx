@@ -41,6 +41,7 @@ export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
     typeof data.sourceId === 'string' ? data.sourceId : undefined;
   const addPendingAttachment = useChatStore((s) => s.addPendingAttachment);
   const [numPages, setNumPages] = useState<number | null>(null);
+  const [docLoaded, setDocLoaded] = useState(false);
   const [captureMode, setCaptureMode] = useState(false);
   const [pendingCapture, setPendingCapture] =
     useState<PendingCaptureDrag | null>(null);
@@ -115,6 +116,7 @@ export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
   const onDocumentLoadSuccess = useCallback(
     ({ numPages: n }: { numPages: number }) => {
       setNumPages(n);
+      setDocLoaded(true);
     },
     [],
   );
@@ -198,6 +200,12 @@ export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
 
   return (
     <div className="relative flex h-full flex-col">
+      {/* Loading overlay — visible until document metadata is parsed */}
+      {src && !docLoaded && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-white">
+          <Loader2 size={18} className="text-muted-foreground animate-spin" />
+        </div>
+      )}
       {/* ── PDF pages ── */}
       <div
         ref={scrollContainerRef}
@@ -214,11 +222,7 @@ export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
             <Document
               file={src}
               onLoadSuccess={onDocumentLoadSuccess}
-              loading={
-                <div className="text-muted-foreground flex h-full min-h-40 w-full items-center justify-center gap-2 p-4 text-xs">
-                  <Loader2 size={16} className="animate-spin" />
-                </div>
-              }
+              loading=""
               error={
                 <div className="p-4 text-xs text-red-300">
                   Error loading PDF
