@@ -7,7 +7,9 @@
 import { getDescendantIds, type NestableNode } from '../canvas/frame';
 
 type NodeWithPosition = {
+  id: string;
   position: { x: number; y: number };
+  parentId?: string;
   measured?: { width?: number; height?: number };
   width?: number;
   height?: number;
@@ -59,7 +61,7 @@ export function getSmartHandles(
  * zustand can skip re-renders via reference equality.
  */
 export function rerouteAllEdges<
-  N extends NodeWithPosition & { id: string },
+  N extends NodeWithPosition,
   E extends {
     source: string;
     target: string;
@@ -68,13 +70,53 @@ export function rerouteAllEdges<
   },
 >(nodes: N[], edges: E[]): E[] {
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+
+  // Resolve absolute positions so framed nodes are compared correctly
+  // against nodes outside the frame (or in a different frame).
+  const absPos = new Map<string, { x: number; y: number }>();
+  const resolve = (nodeId: string): { x: number; y: number } | null => {
+    const cached = absPos.get(nodeId);
+    if (cached) return cached;
+    const n = nodeMap.get(nodeId);
+    if (!n) return null;
+    if (!n.parentId) {
+      absPos.set(nodeId, n.position);
+      return n.position;
+    }
+    const parentAbs = resolve(n.parentId);
+    if (!parentAbs) {
+      absPos.set(nodeId, n.position);
+      return n.position;
+    }
+    const abs = {
+      x: parentAbs.x + n.position.x,
+      y: parentAbs.y + n.position.y,
+    };
+    absPos.set(nodeId, abs);
+    return abs;
+  };
+
   let changed = false;
   const result = edges.map((edge) => {
     const source = nodeMap.get(edge.source);
     const target = nodeMap.get(edge.target);
     if (!source || !target) return edge;
 
-    const handles = getSmartHandles(source, target);
+    const sourceAbs = resolve(edge.source);
+    const targetAbs = resolve(edge.target);
+    if (!sourceAbs || !targetAbs) return edge;
+
+    // Skip object spread when the position is already absolute (no parent).
+    const srcNode =
+      sourceAbs === source.position
+        ? source
+        : { ...source, position: sourceAbs };
+    const tgtNode =
+      targetAbs === target.position
+        ? target
+        : { ...target, position: targetAbs };
+
+    const handles = getSmartHandles(srcNode, tgtNode);
     if (
       edge.sourceHandle === handles.sourceHandle &&
       edge.targetHandle === handles.targetHandle
