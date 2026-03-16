@@ -6,7 +6,8 @@ import { useStore } from '@xyflow/react';
  */
 const REF_WIDTHS: Record<string, number> = {
   note: 400,
-  web: 300,
+  web: 400,
+  pdf: 400,
 };
 
 /**

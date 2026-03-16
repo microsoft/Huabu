@@ -5,6 +5,7 @@ import { memo, useState, useEffect, useMemo } from 'react';
 import { getWebPreview } from '@/api/web';
 
 import { NodeWrapper } from './NodeWrapper.tsx';
+import { PreviewCard } from './PreviewCard.tsx';
 import { useNodeScale } from '../../hooks/useNodeScale.ts';
 import useCanvasStore from '../../store/canvasStore.ts';
 import { GhostButton } from '../Common/GhostButton.tsx';
@@ -137,7 +138,7 @@ export const WebNode = memo(
             <div className="flex h-full flex-col">
               <div className="relative h-full w-full overflow-hidden rounded bg-white">
                 {src ? (
-                  <div className="flex h-full w-full flex-col gap-2 p-3">
+                  <div className="flex h-full w-full flex-col gap-2">
                     {previewLoading ? (
                       <div className="text-muted-foreground text-base">
                         Loading preview...
@@ -152,48 +153,12 @@ export const WebNode = memo(
                     ) : null}
 
                     {!previewLoading && !previewError && preview ? (
-                      <div className="border-border flex h-full w-full flex-col overflow-hidden rounded-md border bg-white">
-                        {/* Priority 2: image — visually above title, but shrinks first */}
-                        {preview.image ? (
-                          <img
-                            src={preview.image}
-                            alt=""
-                            className="w-full shrink object-cover"
-                            style={{ minHeight: 0 }}
-                            loading="lazy"
-                            onError={(e) => {
-                              e.currentTarget.style.display = 'none';
-                            }}
-                          />
-                        ) : null}
-
-                        {/* Priority 1: favicon + site name + title — always visible */}
-                        <div className="flex min-w-0 shrink-0 flex-col gap-1 px-2 py-1">
-                          <div className="text-muted-foreground flex min-w-0 items-center gap-2 text-base font-medium">
-                            {preview.favicon ? (
-                              <img
-                                src={preview.favicon}
-                                alt=""
-                                className="h-3.5 w-3.5 flex-none rounded-sm"
-                                loading="lazy"
-                                onError={(e) => {
-                                  e.currentTarget.style.display = 'none';
-                                }}
-                              />
-                            ) : null}
-                            <span className="truncate">
-                              {(preview.siteName ?? '').trim() ||
-                                hostname ||
-                                'Website'}
-                            </span>
-                          </div>
-
-                          <div className="text-main line-clamp-2 min-w-0 text-base font-medium break-words">
-                            {preview.title || src}
-                          </div>
-                        </div>
-
-                        {/* Priority 3: content html — fills remaining space, hidden when height is tight */}
+                      <PreviewCard
+                        image={preview.image}
+                        nodeType="web"
+                        favicon={preview.favicon}
+                        title={preview.title || src}
+                      >
                         {preview.contentHtml ? (
                           <div className="min-h-0 flex-1 overflow-hidden px-2 pb-2">
                             <div
@@ -204,7 +169,7 @@ export const WebNode = memo(
                             />
                           </div>
                         ) : null}
-                      </div>
+                      </PreviewCard>
                     ) : null}
                   </div>
                 ) : (

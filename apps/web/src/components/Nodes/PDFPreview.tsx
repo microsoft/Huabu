@@ -201,7 +201,7 @@ export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
       {/* ── PDF pages ── */}
       <div
         ref={scrollContainerRef}
-        className="custom-scrollbar flex-1 overflow-auto bg-white p-1"
+        className="custom-scrollbar flex-1 overflow-x-hidden overflow-y-auto bg-white p-1"
       >
         {src ? (
           <div
