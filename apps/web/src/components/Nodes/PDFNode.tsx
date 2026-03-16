@@ -22,7 +22,7 @@ import { GhostButton } from '../Common/GhostButton.tsx';
 
 import type { CanvasPdfNodeData } from './types.ts';
 
-pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
+pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 export type PDFNodeType = Node<CanvasPdfNodeData, 'pdf'>;
 
