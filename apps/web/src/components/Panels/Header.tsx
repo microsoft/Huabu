@@ -1,8 +1,8 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 
+import { CanvasMenu } from './CanvasMenu';
 import { SettingsPopover } from './SettingsPopover';
-import { WorkspaceMenu } from './WorkspaceMenu';
 
 interface HeaderProps {
   children?: React.ReactNode;
@@ -15,7 +15,7 @@ export const Header: React.FC<HeaderProps> = ({ children }) => {
         <img src="/favicon.svg" alt="Logo" className="h-8 w-8" />
       </Link>
 
-      {children ?? <WorkspaceMenu />}
+      {children ?? <CanvasMenu />}
 
       <div className="flex-1" />
 

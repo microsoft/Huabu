@@ -114,7 +114,6 @@ export type CanvasCommand =
       patch: Record<string, unknown>;
     };
 
-const CANVAS_ID = 'default-canvas';
 const AUTOSAVE_DEBOUNCE_MS = 1000;
 const INGESTION_DEBOUNCE_MS = 1000;
 
@@ -370,7 +369,7 @@ const useCanvasStore = create<RFState>()(
   autoSaveMiddleware((set, get) => ({
     nodes: [],
     edges: [],
-    canvasId: CANVAS_ID,
+    canvasId: '',
     version: 0,
     isLoading: false,
     canvasNotFound: false,

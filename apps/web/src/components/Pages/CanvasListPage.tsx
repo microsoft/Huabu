@@ -212,8 +212,11 @@ export default function CanvasListPage() {
       <Header>
         <h1 className="px-1 text-lg font-semibold text-gray-900">Sediment</h1>
         {workspacePath && (
-          <span className="mt-0.5 ml-1 truncate text-xs text-gray-400">
-            {workspacePath}
+          <span
+            className="mt-0.5 ml-1 truncate text-xs text-gray-400"
+            title={workspacePath}
+          >
+            {workspacePath.split(/[\\/]/).filter(Boolean).pop()}
           </span>
         )}
       </Header>

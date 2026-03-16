@@ -4,7 +4,6 @@ import { promisify } from 'node:util';
 
 import { z } from 'zod';
 
-import { ensureDefaultCanvas } from './canvas/canvas.filestore.js';
 import {
   resetKnowledgeRepository,
   resetIngestService,
@@ -164,8 +163,6 @@ const workspaceRoutes: FastifyPluginAsync = async (app) => {
     // Reset knowledge singletons so they re-initialise against the new path
     resetKnowledgeRepository();
     resetIngestService();
-    // Ensure a default canvas file exists in the new workspace
-    ensureDefaultCanvas();
     return { path: getWorkspacePath() };
   });
 };
