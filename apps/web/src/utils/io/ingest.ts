@@ -1,6 +1,6 @@
 import { upsertNode } from '@/api/canvas';
 
-import { AUTO_GENERATED_PLACEHOLDER_PATTERN } from './nodeLabels';
+import { AUTO_GENERATED_PLACEHOLDER_PATTERN } from '../node/labels';
 
 import type { Node } from '@xyflow/react';
 

@@ -2,9 +2,9 @@ import {
   getAbsolutePosition,
   getDescendantIds,
   type NestableNode,
-} from './frameHelper';
-import { getLayoutNodeSize } from './nodeSize';
-import { snapToGrid } from '../config/canvas';
+} from './frame';
+import { snapToGrid } from '../../config/canvas';
+import { getLayoutNodeSize } from '../node/size';
 
 import type { Node } from '@xyflow/react';
 

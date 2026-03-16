@@ -8,7 +8,7 @@
  *   c) Group construction — parentId hierarchy → LayoutGroup[]
  */
 
-import { getLayoutNodeSize } from '../nodeSize';
+import { getLayoutNodeSize } from '../node/size';
 
 import type { LayoutEdge, LayoutGraph, LayoutGroup, LayoutNode } from './types';
 import type { Node, Edge } from '@xyflow/react';

@@ -3,7 +3,7 @@
  *
  * Single source of truth for reading a canvas node's rendered dimensions.
  * Consumed by frameHelper (frame fitting), layout/graphModel (Cola/fCoSE),
- * and autoLayoutHelper (align/spread).
+ * and alignment (align/spread).
  *
  * Priority: `measured` (browser-actual) → `style` (user-set) → fallback.
  * `measured` is authoritative for auto-sizing nodes (e.g. NoteNode).

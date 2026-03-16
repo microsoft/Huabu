@@ -15,7 +15,7 @@ import useCanvasStore from '../../store/canvasStore';
 import {
   getAbsolutePosition,
   type NestableNode,
-} from '../../utils/frameHelper';
+} from '../../utils/canvas/frame';
 import { GhostButton } from '../Common/GhostButton';
 
 /**

@@ -1,10 +1,10 @@
 /**
- * @file nodeHelper.ts
+ * @file helper.ts
  *
  * Generic canvas-node utilities that are not specific to frames.
  */
 
-import { getDescendantIds, type NestableNode } from './frameHelper';
+import { getDescendantIds, type NestableNode } from '../canvas/frame';
 
 type NodeWithPosition = {
   position: { x: number; y: number };

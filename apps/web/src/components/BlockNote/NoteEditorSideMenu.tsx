@@ -16,7 +16,7 @@ import {
   createDragId,
   type DragPayload,
   type NoteDragPayload,
-} from '@/utils/dragDrop';
+} from '@/utils/io/dragDrop';
 
 /**
  * Context that supplies the knowledge-base sourceId to the side menu.

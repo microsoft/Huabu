@@ -18,7 +18,7 @@ import {
 import { addEdge, type Node, type Edge, type Connection } from '@xyflow/react';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
-import { alignNodes, spreadNodes } from '../utils/autoLayoutHelper';
+import { alignNodes, spreadNodes } from '../utils/canvas/alignment';
 import {
   findFrameAtPoint,
   frameNodes,
@@ -33,22 +33,22 @@ import {
   fitFrameToChildren,
   fitFrames,
   type NestableNode,
-} from '../utils/frameHelper';
+} from '../utils/canvas/frame';
 import {
   shouldIngestOnUpdate,
   type NodeIngestionInfo,
-} from '../utils/ingestHelper';
+} from '../utils/io/ingest';
 import {
   layoutAll as layoutAllNodes,
   layoutGroup as layoutGroupNodes,
   placeNode as placeNewNode,
 } from '../utils/layout';
-import { toggleNodeLock } from '../utils/nodeHelper';
+import { toggleNodeLock } from '../utils/node/helper';
 import {
   AUTO_GENERATED_PLACEHOLDER_PATTERN,
   deduplicateLabel,
   generateNextLabel,
-} from '../utils/nodeLabels';
+} from '../utils/node/labels';
 
 import type { CanvasCommand } from './canvasStore';
 // ---------------------------------------------------------------------------

@@ -1,5 +1,5 @@
 /**
- * @file intentExecutor.ts
+ * @file executor.ts
  *
  * Executes a sequence of IntentAction atomic operations against the canvas store.
  * Each action maps to a CanvasCommand dispatch or store method.
@@ -11,8 +11,8 @@
 
 import { createId } from '@sediment/shared';
 
-import { buildNode } from './nodeFactory';
-import useCanvasStore from '../store/canvasStore';
+import useCanvasStore from '../../store/canvasStore';
+import { buildNode } from '../node/factory';
 
 import type { IntentAction } from '@sediment/shared';
 

@@ -32,7 +32,7 @@ import {
   createSnapshot,
   type CanvasSnapshot,
 } from './canvasHistoryManager';
-import { type AlignDirection } from '../utils/autoLayoutHelper';
+import { type AlignDirection } from '../utils/canvas/alignment';
 import {
   computeFrameFit,
   getAbsolutePosition as getFrameAbsolutePosition,
@@ -40,14 +40,14 @@ import {
   wouldAutoFrame,
   getNodeSize,
   type NestableNode,
-} from '../utils/frameHelper';
+} from '../utils/canvas/frame';
 import {
   ingestNodeIfNeeded,
   needsIngestion,
   type NodeIngestionInfo,
-} from '../utils/ingestHelper';
+} from '../utils/io/ingest';
 import { LAYOUT_ANIMATION_DURATION_MS } from '../utils/layout/applier';
-import { rerouteAllEdges } from '../utils/nodeHelper';
+import { rerouteAllEdges } from '../utils/node/helper';
 
 // ---------------------------------------------------------------------------
 // Frame Fit Preview
