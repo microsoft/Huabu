@@ -5,14 +5,15 @@
 
 export interface GetCanvasResponse {
   canvasId: string;
+  title: string | null;
   version: number;
   state: unknown;
 }
 
 export interface PutCanvasRequest {
   version: number;
-  state: unknown;
   title?: string;
+  state: unknown;
 }
 
 export interface PutCanvasResponse {
@@ -72,12 +73,13 @@ export interface CanvasExportBundle {
     version: string;
     exportedAt: string;
     canvasId: string;
+    /** Canvas title. */
+    title?: string | null;
   };
-  /** Raw canvas state (nodes + edges + workspace metadata) */
+  /** Raw canvas state (nodes + edges) */
   canvas: {
     nodes: unknown[];
     edges: unknown[];
-    workspaceName?: string;
   };
   /** All knowledge sources referenced by the canvas nodes */
   sources: ExportedSource[];
