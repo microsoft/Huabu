@@ -16,8 +16,8 @@ import useCanvasStore, {
 } from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import { useResearchStore } from '@/store/researchStore';
-import { summarizeIntentActions } from '@/utils/intentActionSummary';
-import { executeIntentActions } from '@/utils/intentExecutor';
+import { executeIntentActions } from '@/utils/intent/executor';
+import { summarizeIntentActions } from '@/utils/intent/summary';
 
 import { SidebarPanel } from '../SidebarPanel';
 import { AgentChangeList } from './AgentChangeList';

@@ -48,7 +48,7 @@
  * 5. Locked Frame Respect: Locked frames cannot gain or lose children
  */
 
-import { getNodeSize as _getNodeSize } from './nodeSize';
+import { getNodeSize as _getNodeSize } from '../node/size';
 
 import type { Edge, Node, XYPosition } from '@xyflow/react';
 

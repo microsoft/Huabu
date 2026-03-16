@@ -15,8 +15,8 @@ import {
   looksLikeUrl,
   normalizeUrl,
   getImageDimensionsFromBlob,
-} from '../utils/mediaUtils';
-import { buildNode } from '../utils/nodeFactory';
+} from '../utils/io/media';
+import { buildNode } from '../utils/node/factory';
 
 import type { ReactFlowInstance } from '@xyflow/react';
 

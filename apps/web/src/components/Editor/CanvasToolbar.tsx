@@ -18,7 +18,7 @@ import { uploadImage, uploadPdf, uploadVideo } from '../../api/artifact.ts';
 import { NODE_ICON } from '../../config/nodeIcons.ts';
 import useCanvasStore from '../../store/canvasStore.ts';
 import { useIntentStore } from '../../store/intentStore.ts';
-import { detectNodeType } from '../../utils/mediaUtils.ts';
+import { detectNodeType } from '../../utils/io/media.ts';
 import { GhostButton } from '../Common/GhostButton';
 
 import type {

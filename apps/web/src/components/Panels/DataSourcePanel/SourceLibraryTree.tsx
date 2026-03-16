@@ -1,6 +1,6 @@
 import React from 'react';
 
-import { setDragPayload } from '@/utils/dragDrop';
+import { setDragPayload } from '@/utils/io/dragDrop';
 
 import { TreeRowItem } from './TreeRowItem';
 

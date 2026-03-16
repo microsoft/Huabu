@@ -15,8 +15,8 @@ import {
   resolveActions,
   logIntentEpisode,
 } from '../api/intent';
-import { captureCanvasScreenshot } from '../utils/canvasScreenshot';
-import { executeIntentActions } from '../utils/intentExecutor';
+import { captureCanvasScreenshot } from '../utils/canvas/screenshot';
+import { executeIntentActions } from '../utils/intent/executor';
 
 import type {
   AgentBaseContext,

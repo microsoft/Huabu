@@ -27,15 +27,15 @@ import useCanvasStore from '../../store/canvasStore.ts';
 import {
   canReadSedimentPayload,
   getSedimentPayload,
-} from '../../utils/dragDrop';
+} from '../../utils/io/dragDrop';
 import {
   detectNodeType,
   detectNodeTypeFromMime,
   looksLikeUrl,
   normalizeUrl,
   getImageDimensionsFromBlob,
-} from '../../utils/mediaUtils';
-import { buildNode, buildSourceNode } from '../../utils/nodeFactory';
+} from '../../utils/io/media';
+import { buildNode, buildSourceNode } from '../../utils/node/factory';
 import { FrameNode } from '../Nodes/FrameNode';
 import { ImageNode } from '../Nodes/ImageNode';
 import { NoteNode } from '../Nodes/NoteNode';

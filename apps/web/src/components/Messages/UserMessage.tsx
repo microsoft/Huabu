@@ -1,6 +1,6 @@
 import { Copy } from 'lucide-react';
 
-import { copyToClipboard } from '../../utils/clipboard';
+import { copyToClipboard } from '../../utils/io/clipboard';
 import { GhostButton } from '../Common/GhostButton';
 
 import type { ChatAttachment } from '@sediment/shared';

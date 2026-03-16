@@ -11,6 +11,7 @@ import {
 } from '../../api/canvas';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import { GhostButton } from '../Common/GhostButton';
+import { Modal } from '../Common/Modal';
 import { Header } from '../Panels/Header';
 
 import type { CanvasExportBundle, CanvasSummary } from '@sediment/shared';
@@ -24,7 +25,13 @@ export default function CanvasListPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<{
+    canvasId: string;
+    title: string | null;
+  } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const confirmDeleteButtonRef = useRef<HTMLButtonElement>(null);
   const navigate = useNavigate();
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
 
@@ -87,18 +94,29 @@ export default function CanvasListPage() {
     fileInputRef.current?.click();
   };
 
-  const handleDelete = async (canvasId: string, title: string | null) => {
-    const label = title || canvasId;
-    const confirmed = window.confirm(
-      `Are you sure you want to delete "${label}"? This action cannot be undone.`,
-    );
-    if (!confirmed) return;
+  const requestDelete = (canvasId: string, title: string | null) => {
+    setPendingDelete({ canvasId, title });
+  };
+
+  const closeDeleteModal = () => {
+    if (isDeleting) return;
+    setPendingDelete(null);
+  };
+
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
 
     try {
-      await deleteCanvasById(canvasId);
-      setCanvases((prev) => prev.filter((c) => c.canvasId !== canvasId));
+      setIsDeleting(true);
+      await deleteCanvasById(pendingDelete.canvasId);
+      setCanvases((prev) =>
+        prev.filter((c) => c.canvasId !== pendingDelete.canvasId),
+      );
+      setPendingDelete(null);
     } catch (error) {
       console.error('Failed to delete canvas:', error);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -136,6 +154,51 @@ export default function CanvasListPage() {
 
   return (
     <div className="flex min-h-screen flex-col bg-gray-50">
+      <Modal
+        isOpen={pendingDelete !== null}
+        title="Delete canvas?"
+        description={
+          pendingDelete ? (
+            <>
+              Are you sure you want to delete{' '}
+              <span className="text-main font-medium">
+                “{pendingDelete.title || pendingDelete.canvasId}”
+              </span>
+              ? This action cannot be undone.
+            </>
+          ) : null
+        }
+        onClose={closeDeleteModal}
+        initialFocusRef={confirmDeleteButtonRef}
+        closeOnBackdropClick={!isDeleting}
+        closeOnEscape={!isDeleting}
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={closeDeleteModal}
+              disabled={isDeleting}
+              className="border-border text-muted-foreground inline-flex items-center justify-center rounded-md border bg-white px-3 py-2 text-sm font-medium transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              ref={confirmDeleteButtonRef}
+              type="button"
+              onClick={() => void confirmDelete()}
+              disabled={isDeleting}
+              className="bg-destructive hover:bg-destructive/90 inline-flex items-center justify-center rounded-md px-3 py-2 text-sm font-medium text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isDeleting ? (
+                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+              ) : (
+                'Delete'
+              )}
+            </button>
+          </>
+        }
+      />
+
       {/* Hidden file input for import */}
       <input
         ref={fileInputRef}
@@ -268,7 +331,7 @@ export default function CanvasListPage() {
                 <GhostButton
                   onClick={(e) => {
                     e.stopPropagation();
-                    void handleDelete(canvas.canvasId, canvas.title);
+                    requestDelete(canvas.canvasId, canvas.title);
                   }}
                   tooltipWrapperClassName="absolute top-3 right-3 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
                   title="Delete canvas"
