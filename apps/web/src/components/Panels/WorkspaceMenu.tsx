@@ -58,7 +58,7 @@ export const WorkspaceMenu: React.FC = () => {
 
   return (
     <>
-      {/* Workspace name input + chevron trigger */}
+      {/* Canvas title input + chevron trigger */}
       <div ref={triggerRef} className="flex min-w-0 items-center">
         {/* Hidden sizer span — mirrors input text to measure natural width */}
         <span
@@ -73,7 +73,7 @@ export const WorkspaceMenu: React.FC = () => {
           className="text-main focus:shadow-bottom m-0 min-w-8 bg-transparent px-1 py-1 text-lg font-medium outline-none focus:rounded-md"
           value={canvasTitle}
           onChange={(e) => setCanvasTitle(e.target.value)}
-          aria-label="Workspace name"
+          aria-label="Canvas title"
         />
 
         <GhostButton
