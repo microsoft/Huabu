@@ -8,10 +8,10 @@ import { DropdownMenu, DropdownMenuItem } from '../Common/DropdownMenu';
 import { GhostButton } from '../Common/GhostButton';
 
 /**
- * Figma-style workspace title + dropdown menu.
+ * canvas title + dropdown menu.
  * Sits in the header and exposes Export / Import canvas actions.
  */
-export const WorkspaceMenu: React.FC = () => {
+export const CanvasMenu: React.FC = () => {
   const canvasTitle = useCanvasStore((s) => s.canvasTitle);
   const setCanvasTitle = useCanvasStore((s) => s.setCanvasTitle);
   const canvasId = useCanvasStore((s) => s.canvasId);

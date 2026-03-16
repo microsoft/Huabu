@@ -20,8 +20,6 @@ import path from 'node:path';
 
 import { getCanvasDir } from '../workspace.js';
 
-const DEFAULT_CANVAS_ID = 'default-canvas';
-
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 /**
@@ -78,26 +76,6 @@ function atomicWriteJson(filePath: string, data: unknown): void {
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────
-
-/**
- * Ensure the default canvas file exists.
- * Called once at server startup.
- */
-export function ensureDefaultCanvas(): void {
-  const filePath = canvasFilePath(DEFAULT_CANVAS_ID);
-  if (existsSync(filePath)) return;
-
-  const now = Date.now();
-  const defaultCanvas: CanvasFile = {
-    canvasId: DEFAULT_CANVAS_ID,
-    title: null,
-    version: 0,
-    state: { nodes: [], edges: [] },
-    createdAt: now,
-    updatedAt: now,
-  };
-  atomicWriteJson(filePath, defaultCanvas);
-}
 
 /**
  * Read a canvas from disk. Returns null if not found.

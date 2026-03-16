@@ -15,6 +15,12 @@ import {
   type NodeLike,
 } from './canvas.filestore.js';
 import {
+  IMAGE_LABEL_PROMPT,
+  buildFrameLabelPrompt,
+} from '../../prompt/resolve-label.js';
+import { getLLM } from '../agent/llm.js';
+import { resolveArtifactImageUrl } from '../artifact/utils.js';
+import {
   getIngestService,
   getKnowledgeRepository,
 } from '../knowledge/index.js';
@@ -24,6 +30,8 @@ import type {
   CanvasExportBundle,
   ExportedSource,
   ImportCanvasResponse,
+  ResolveLabelRequest,
+  ResolveLabelResponse,
 } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
@@ -119,6 +127,14 @@ const upsertNodeBodySchema = z.object({
 const createCanvasBodySchema = z.object({
   title: z.string().min(1).optional(),
 });
+
+const resolveLabelBodySchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('image'), src: z.string().min(1) }),
+  z.object({
+    type: z.literal('frame'),
+    childLabels: z.array(z.string()).min(1),
+  }),
+]);
 
 const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   // --- List all canvases ---
@@ -248,6 +264,78 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   }>('/:canvasId/nodes/:nodeId', async function (_request, reply) {
     return reply.send({ success: true });
   });
+
+  // --- Resolve Label (LLM-powered semantic label generation) ---
+
+  fastify.post<{ Body: unknown }>(
+    '/resolve-label',
+    async function (request, reply) {
+      const parsed = resolveLabelBodySchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ message: 'Invalid request body' });
+      }
+
+      const body = parsed.data as ResolveLabelRequest;
+
+      try {
+        const llm = getLLM();
+        let suggestedLabel: string | undefined;
+
+        if (body.type === 'image') {
+          const dataUrl = await resolveArtifactImageUrl(
+            body.src,
+            getArtifactsDir(),
+          );
+          const result = await llm.invoke([
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'image_url',
+                  image_url: { url: dataUrl, detail: 'low' },
+                },
+                {
+                  type: 'text',
+                  text: IMAGE_LABEL_PROMPT,
+                },
+              ],
+            },
+          ]);
+          const text =
+            typeof result.content === 'string' ? result.content.trim() : '';
+          if (text.length > 0 && text.length <= 60) {
+            suggestedLabel = text;
+          }
+        } else {
+          // body.type === 'frame'
+          const result = await llm.invoke([
+            {
+              role: 'user',
+              content: buildFrameLabelPrompt(body.childLabels),
+            },
+          ]);
+          const text =
+            typeof result.content === 'string' ? result.content.trim() : '';
+          if (text.length > 0 && text.length <= 60) {
+            suggestedLabel = text;
+          }
+        }
+
+        const response: ResolveLabelResponse = { suggestedLabel };
+        return reply.send(response);
+      } catch (error) {
+        const message = toMessage(error);
+        request.log.error(
+          { type: body.type, error },
+          'Failed to resolve label',
+        );
+        return reply.code(500).send({
+          message: 'Failed to resolve label',
+          details: message,
+        });
+      }
+    },
+  );
 
   // --- GET Canvas ---
 

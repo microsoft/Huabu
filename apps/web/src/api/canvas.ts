@@ -12,6 +12,8 @@ import type {
   ListCanvasesResponse,
   CreateCanvasRequest,
   CreateCanvasResponse,
+  ResolveLabelRequest,
+  ResolveLabelResponse,
 } from '@sediment/shared';
 
 /**
@@ -199,4 +201,24 @@ export async function deleteCanvasById(
   }
 
   return (await response.json()) as { success: boolean };
+}
+
+/**
+ * Ask the server to generate a semantic label via LLM.
+ * Used for image nodes (vision) and frame nodes (child label summarization).
+ */
+export async function resolveLabel(
+  request: ResolveLabelRequest,
+): Promise<ResolveLabelResponse> {
+  const response = await fetch(`${API_CONFIG.API_URL}/canvas/resolve-label`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to resolve label: ${response.statusText}`);
+  }
+
+  return (await response.json()) as ResolveLabelResponse;
 }

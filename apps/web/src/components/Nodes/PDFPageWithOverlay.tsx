@@ -1,4 +1,5 @@
 import clsx from 'clsx';
+import { Loader2 } from 'lucide-react';
 import { useCallback, useRef, useState } from 'react';
 import { Page, pdfjs } from 'react-pdf';
 
@@ -69,6 +70,7 @@ export const PDFPageWithOverlay = ({
   const pageProxyRef = useRef<PdfPageProxy | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
   const dragRef = useRef<DragState | null>(null);
+  const [rendered, setRendered] = useState(false);
 
   // ---------------------------------------------------------------------------
   // Pointer handlers — only active when captureEnabled is true
@@ -247,6 +249,7 @@ export const PDFPageWithOverlay = ({
       ref={containerRef}
       className={clsx(
         'relative',
+        !rendered && 'min-h-40',
         captureEnabled ? 'cursor-crosshair select-none' : 'select-auto',
       )}
       onPointerDown={handlePointerDown}
@@ -261,8 +264,16 @@ export const PDFPageWithOverlay = ({
         loading=""
         onRenderSuccess={(p) => {
           pageProxyRef.current = p as unknown as PdfPageProxy;
+          setRendered(true);
         }}
       />
+
+      {/* Spinner overlay until canvas is actually painted */}
+      {!rendered && (
+        <div className="absolute inset-0 flex items-center justify-center bg-neutral-50">
+          <Loader2 size={18} className="text-muted-foreground animate-spin" />
+        </div>
+      )}
 
       {/* Selection box feedback (shown while dragging) */}
       {selectionStyle && (

@@ -10,6 +10,7 @@ import {
   deleteCanvasById,
 } from '../../api/canvas';
 import { useWorkspaceStore } from '../../store/workspaceStore';
+import { Button } from '../Common/Button';
 import { GhostButton } from '../Common/GhostButton';
 import { Modal } from '../Common/Modal';
 import { Header } from '../Panels/Header';
@@ -174,27 +175,27 @@ export default function CanvasListPage() {
         closeOnEscape={!isDeleting}
         footer={
           <>
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="md"
               onClick={closeDeleteModal}
               disabled={isDeleting}
-              className="border-border text-muted-foreground inline-flex items-center justify-center rounded-md border bg-white px-3 py-2 text-sm font-medium transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
               ref={confirmDeleteButtonRef}
-              type="button"
+              variant="danger"
+              size="md"
               onClick={() => void confirmDelete()}
               disabled={isDeleting}
-              className="bg-destructive hover:bg-destructive/90 inline-flex items-center justify-center rounded-md px-3 py-2 text-sm font-medium text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isDeleting ? (
                 <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
               ) : (
                 'Delete'
               )}
-            </button>
+            </Button>
           </>
         }
       />
@@ -212,8 +213,11 @@ export default function CanvasListPage() {
       <Header>
         <h1 className="px-1 text-lg font-semibold text-gray-900">Sediment</h1>
         {workspacePath && (
-          <span className="mt-0.5 ml-1 truncate text-xs text-gray-400">
-            {workspacePath}
+          <span
+            className="mt-0.5 ml-1 truncate text-xs text-gray-400"
+            title={workspacePath}
+          >
+            {workspacePath.split(/[\\/]/).filter(Boolean).pop()}
           </span>
         )}
       </Header>

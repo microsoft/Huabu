@@ -27,7 +27,7 @@ export default function CanvasPage() {
 
   useEffect(() => {
     if (!canvasId) {
-      navigate('/canvas/default-canvas', { replace: true });
+      navigate('/', { replace: true });
       return;
     }
 

@@ -5,7 +5,7 @@ import {
   type ToolResponse,
 } from '@sediment/shared';
 import { PanelRightClose, PanelRightOpen, Plus } from 'lucide-react';
-import { useState, useRef, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
 import { chatApi } from '@/api/chat';
 import { resolveActions } from '@/api/intent';
@@ -74,16 +74,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const handleEvent = useResearchStore((state) => state.handleEvent);
   const completeResearch = useResearchStore((state) => state.completeResearch);
   const setError = useResearchStore((state) => state.setError);
-
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, isLoading]);
 
   // Load history from server on first mount (once per thread)
   useEffect(() => {
@@ -429,7 +419,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         <MessageList
           messages={messages}
           isLoading={isLoading || !isHistoryLoaded}
-          endRef={messagesEndRef}
         />
 
         {agentChangeSet && (

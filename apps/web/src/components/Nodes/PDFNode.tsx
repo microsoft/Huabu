@@ -1,6 +1,6 @@
 import { type Node, type NodeProps } from '@xyflow/react';
 import { clsx } from 'clsx';
-import { Download, Fullscreen, ImageOff } from 'lucide-react';
+import { Download, Fullscreen, ImageOff, Loader2 } from 'lucide-react';
 import {
   memo,
   useCallback,
@@ -15,6 +15,8 @@ import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
 import { NodeWrapper } from './NodeWrapper.tsx';
+import { PreviewCard } from './PreviewCard.tsx';
+import { useNodeScale } from '../../hooks/useNodeScale.ts';
 import useCanvasStore from '../../store/canvasStore.ts';
 import { GhostButton } from '../Common/GhostButton.tsx';
 
@@ -113,7 +115,17 @@ const VirtualizedPage = memo(
               width={renderedWidth}
               renderAnnotationLayer={false}
               renderTextLayer={false}
-              loading={''}
+              loading={
+                <div
+                  className="flex items-center justify-center bg-neutral-50"
+                  style={{ height: fallbackPageHeight }}
+                >
+                  <Loader2
+                    size={18}
+                    className="text-muted-foreground animate-spin"
+                  />
+                </div>
+              }
               onRenderSuccess={handleRenderSuccess}
             />
           </div>
@@ -125,6 +137,7 @@ const VirtualizedPage = memo(
 
 export const PDFNode = memo(
   ({ id, data, selected }: NodeProps<PDFNodeType>) => {
+    const scale = useNodeScale(id, 'pdf');
     const openExpanded = useCanvasStore((s) => s.openExpanded);
     const updateNodeData = useCanvasStore((s) => s.updateNodeData);
 
@@ -248,21 +261,30 @@ export const PDFNode = memo(
       >
         <div
           ref={containerRef}
-          className="bg-border relative flex h-full w-full flex-col overflow-hidden rounded"
+          className="relative flex h-full w-full flex-col overflow-hidden rounded"
         >
           {hasCover ? (
-            /* ── Cover image mode ── */
-            <img
-              src={data.coverUrl}
-              alt={data.label || 'PDF cover'}
-              className="h-full w-full object-cover"
-              draggable={false}
-            />
+            /* ── Cover card mode ── */
+            <div
+              style={{
+                transform: `scale(${scale})`,
+                transformOrigin: 'top left',
+                width: `${100 / scale}%`,
+                height: `${100 / scale}%`,
+              }}
+            >
+              <PreviewCard
+                image={data.coverUrl}
+                imageAlt={data.label || 'PDF cover'}
+                nodeType="pdf"
+                title={data.label || 'Untitled PDF'}
+              />
+            </div>
           ) : (
             /* ── Default PDF preview mode ── */
             <div
               className={clsx(
-                'custom-scrollbar flex h-full w-full flex-col overflow-auto',
+                'custom-scrollbar flex h-full w-full flex-col overflow-x-hidden overflow-y-auto',
                 'cursor-grab select-none',
               )}
             >
@@ -278,8 +300,8 @@ export const PDFNode = memo(
                     file={data.src}
                     onLoadSuccess={onDocumentLoadSuccess}
                     loading={
-                      <div className="text-muted-foreground p-4 text-xs">
-                        Loading...
+                      <div className="text-muted-foreground flex h-full min-h-40 w-full items-center justify-center gap-2 p-4 text-xs">
+                        <Loader2 size={16} className="animate-spin" />
                       </div>
                     }
                     error={

@@ -4,15 +4,12 @@
  * Uses ChatAgent internally but maintains existing API contract for backward compatibility.
  */
 
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
-
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { createId } from '@sediment/shared';
 
 import { ChatAgent } from './chat.agent.js';
 import { SYSTEM_PROMPT } from '../../prompt/system.js';
-import { getArtifactsDir } from '../artifact/utils.js';
+import { getArtifactsDir, resolveArtifactImageUrl } from '../artifact/utils.js';
 import { buildContext } from '../knowledge/index.js';
 
 import type {
@@ -53,46 +50,9 @@ function collectSourceIds(node: SelectedNodeDetail): string[] {
   return ids;
 }
 
-/**
- * Resolve an attachment image URL to a base64 data URL.
- * Local artifact URLs (e.g. http://localhost:3000/api/artifact/xxx.png) are
- * read from disk and converted to inline data URLs so the LLM API can see them.
- * Already-valid data URLs or remote URLs are returned as-is.
- */
+/** Convenience wrapper — resolves against the server's artifact directory. */
 async function resolveImageUrl(url: string): Promise<string> {
-  if (url.startsWith('data:')) return url;
-
-  // Match local artifact path: .../api/artifact/<filename>
-  const artifactMatch = /\/api\/artifact\/([^/?#]+)/.exec(url);
-  if (artifactMatch) {
-    const filename = path.basename(artifactMatch[1]);
-    const filePath = path.resolve(getArtifactsDir(), filename);
-
-    // Guard against path traversal
-    if (!filePath.startsWith(path.resolve(getArtifactsDir()))) {
-      console.warn(`Blocked path traversal attempt: ${artifactMatch[1]}`);
-      return url;
-    }
-
-    try {
-      const buffer = await readFile(filePath);
-      const ext = path.extname(filename).toLowerCase();
-      const MIME_MAP: Record<string, string> = {
-        '.png': 'image/png',
-        '.jpg': 'image/jpeg',
-        '.jpeg': 'image/jpeg',
-        '.webp': 'image/webp',
-      };
-      const mime = MIME_MAP[ext] ?? 'image/png';
-      return `data:${mime};base64,${buffer.toString('base64')}`;
-    } catch (err) {
-      console.warn(`Failed to read artifact: ${filePath}`, err);
-      return url;
-    }
-  }
-
-  // External URL — return as-is (may fail if not reachable by the LLM API)
-  return url;
+  return resolveArtifactImageUrl(url, getArtifactsDir());
 }
 
 /**

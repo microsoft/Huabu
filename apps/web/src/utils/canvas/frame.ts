@@ -481,12 +481,16 @@ function findBestFrameForNode(
   const nodeArea = nodeRect.width * nodeRect.height;
   if (nodeArea <= 0) return null;
 
-  let best: { frameId: string; ratio: number; frameArea: number } | undefined;
+  const descendantIds = new Set(getDescendantIds(nodes, nodeId));
+
+  // 1. Collect all qualifying candidate frames.
+  const candidates: { frameId: string; ratio: number }[] = [];
 
   for (const candidate of nodes) {
     if (candidate.type !== 'frame') continue;
     if (candidate.id === nodeId) continue;
     if (candidate.data?.locked) continue;
+    if (descendantIds.has(candidate.id)) continue;
 
     const frameRect = getRect(candidate.id);
     if (!frameRect) continue;
@@ -496,12 +500,26 @@ function findBestFrameForNode(
     const ratio = intersection / Math.min(nodeArea, frameArea);
     if (ratio < threshold) continue;
 
-    if (
-      !best ||
-      ratio > best.ratio ||
-      (ratio === best.ratio && frameArea < best.frameArea)
-    ) {
-      best = { frameId: candidate.id, ratio, frameArea };
+    candidates.push({ frameId: candidate.id, ratio });
+  }
+
+  if (candidates.length === 0) return null;
+
+  // 2. Among qualifying candidates, remove any frame whose descendant is
+  //    also a candidate — this ensures we always pick the deepest (most
+  //    nested) frame rather than relying on area heuristics.
+  const candidateIdSet = new Set(candidates.map((c) => c.frameId));
+  const deepest = candidates.filter((c) => {
+    const children = getDescendantIds(nodes, c.frameId);
+    return !children.some((d) => candidateIdSet.has(d));
+  });
+
+  // 3. Among the deepest candidates, pick the one with the highest overlap.
+  const pool = deepest.length > 0 ? deepest : candidates;
+  let best: { frameId: string; ratio: number } | undefined;
+  for (const c of pool) {
+    if (!best || c.ratio > best.ratio) {
+      best = c;
     }
   }
 
@@ -594,7 +612,6 @@ export function wouldAutoFrame(
   const byId = indexById(nodes);
   const node = byId.get(nodeId);
   if (!node) return null;
-  if (node.type === 'frame') return null;
 
   const getAbs = createAbsolutePositionGetter(byId);
   const getRect = createRectGetter(byId, getAbs);
@@ -622,7 +639,6 @@ export function autoFrameNodeByOverlap(
   const byId = indexById(nodes);
   const node = byId.get(nodeId);
   if (!node) return nodes;
-  if (node.type === 'frame') return nodes;
 
   const getAbs = createAbsolutePositionGetter(byId);
   const getRect = createRectGetter(byId, getAbs);
@@ -751,7 +767,6 @@ export function moveNodeIntoFrame(
 
   if (!node || !frame) return nodes;
   if (frame.data?.locked) return nodes; // Don't move into locked frames
-  if (node.type === 'frame') return nodes; // Don't allow frames inside frames
   if (node.id === frameId) return nodes; // Can't move into itself
   if (node.parentId === frameId) return nodes; // Already a child
 
@@ -841,9 +856,9 @@ export function frameNodesInRect(
   const getAbs = createAbsolutePositionGetter(byId);
 
   for (const node of nodes) {
-    // Only top-level non-frame nodes are candidates.
-    if (node.type === 'frame') continue;
+    // Only top-level nodes are candidates.
     if (node.parentId) continue;
+    if (node.id === frameId) continue;
 
     const abs = getAbs(node.id);
     if (!abs) continue;

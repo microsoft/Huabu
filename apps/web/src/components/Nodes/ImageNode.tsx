@@ -28,14 +28,6 @@ export const ImageNode = memo(
           >
             <Fullscreen size={14} />
           </GhostButton>
-
-          {/*<GhostButton aria-label="Shrink">*/}
-          {/*  <Shrink size={14} />*/}
-          {/*</GhostButton>*/}
-
-          {/*<GhostButton aria-label="Adjust">*/}
-          {/*  <SlidersHorizontal size={14} />*/}
-          {/*</GhostButton>*/}
         </div>
       </div>
     );

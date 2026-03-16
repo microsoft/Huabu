@@ -121,6 +121,8 @@ export const Canvas: React.FC = () => {
   const patchNodeSilent = useCanvasStore((state) => state.patchNodeSilent);
   const setRfInstance = useCanvasStore((state) => state.setRfInstance);
   const openExpanded = useCanvasStore((state) => state.openExpanded);
+  const expandedNodeId = useCanvasStore((state) => state.expandedNodeId);
+  const expandMode = useCanvasStore((state) => state.expandMode);
   const frameNodesInRect = useCanvasStore((state) => state.frameNodesInRect);
   const pendingNodeType = useCanvasStore((state) => state.pendingNodeType);
   const setPendingNodeType = useCanvasStore(
@@ -277,6 +279,21 @@ export const Canvas: React.FC = () => {
       height: Math.abs(y2 - y1),
     };
   })();
+
+  // When a node is expanded in split mode, pan the canvas so the node stays visible.
+  useEffect(() => {
+    if (!expandedNodeId || expandMode !== 'split') return;
+    // Wait for the canvas container to finish resizing before fitting.
+    const timer = setTimeout(() => {
+      rfInstanceRef.current?.fitView({
+        nodes: [{ id: expandedNodeId }],
+        duration: 300,
+        maxZoom: rfInstanceRef.current.getZoom(),
+        padding: 0.15,
+      });
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [expandedNodeId, expandMode]);
 
   useEffect(() => {
     return () => {
