@@ -1,69 +1,121 @@
-import { Ellipsis } from 'lucide-react';
+import { ArrowDown, Ellipsis } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { AIMessage } from './AIMessage';
 import { ToolMessage } from './ToolMessage';
 import { UserMessage } from './UserMessage';
 
 import type { ChatMessage } from './types';
-import type { RefObject } from 'react';
 
 interface MessageListProps {
   messages: ChatMessage[];
   isLoading: boolean;
-  endRef: RefObject<HTMLDivElement>;
 }
 
-export const MessageList = ({
-  messages,
-  isLoading,
-  endRef,
-}: MessageListProps) => {
+export const MessageList = ({ messages, isLoading }: MessageListProps) => {
+  const [hasNewMessage, setHasNewMessage] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const endRef = useRef<HTMLDivElement>(null);
+  const isAtBottomRef = useRef(true);
+  const prevMessageCountRef = useRef(messages.length);
+
   const streamingAssistantId = isLoading
     ? [...messages].reverse().find((m) => m.role === 'assistant')?.id
     : undefined;
 
+  // Track whether the user is scrolled near the bottom
+  const handleScroll = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const threshold = 50;
+    const atBottom =
+      el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+    isAtBottomRef.current = atBottom;
+    if (atBottom) setHasNewMessage(false);
+  }, []);
+
+  // Auto-scroll when at bottom and content changes (including streaming tokens)
+  useEffect(() => {
+    if (isAtBottomRef.current) {
+      endRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, isLoading]);
+
+  // Show "new message" indicator when messages are added while scrolled up
+  useEffect(() => {
+    if (
+      messages.length > prevMessageCountRef.current &&
+      !isAtBottomRef.current
+    ) {
+      setHasNewMessage(true);
+    }
+    prevMessageCountRef.current = messages.length;
+  }, [messages.length]);
+
+  const scrollToBottom = useCallback(() => {
+    endRef.current?.scrollIntoView({ behavior: 'smooth' });
+    setHasNewMessage(false);
+  }, []);
+
   return (
-    <div className="flex-1 space-y-1 overflow-x-visible overflow-y-auto">
-      {messages.map((msg) => {
-        if (msg.role === 'user') {
-          return (
-            <UserMessage
-              key={msg.id}
-              content={msg.content}
-              attachments={msg.attachments}
-            />
-          );
-        }
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <div
+        ref={containerRef}
+        onScroll={handleScroll}
+        className="flex-1 space-y-1 overflow-x-visible overflow-y-auto"
+      >
+        {messages.map((msg) => {
+          if (msg.role === 'user') {
+            return (
+              <UserMessage
+                key={msg.id}
+                content={msg.content}
+                attachments={msg.attachments}
+              />
+            );
+          }
 
-        if (msg.role === 'assistant') {
-          return (
-            <AIMessage
-              key={msg.id}
-              content={msg.content}
-              isStreaming={msg.id === streamingAssistantId}
-            />
-          );
-        }
+          if (msg.role === 'assistant') {
+            return (
+              <AIMessage
+                key={msg.id}
+                content={msg.content}
+                isStreaming={msg.id === streamingAssistantId}
+              />
+            );
+          }
 
-        if (msg.role === 'tool') {
-          return <ToolMessage key={msg.id} toolResponse={msg.toolResponse} />;
-        }
+          if (msg.role === 'tool') {
+            return <ToolMessage key={msg.id} toolResponse={msg.toolResponse} />;
+          }
 
-        return null;
-      })}
+          return null;
+        })}
 
-      {isLoading && (
-        <div className="flex justify-start">
-          <div
-            className="rounded-2xl border-none px-3 py-2"
-            aria-label={'thinking'}
-          >
-            <Ellipsis className="text-icon animate-pulse" />
+        {isLoading && (
+          <div className="flex justify-start">
+            <div
+              className="rounded-2xl border-none px-3 py-2"
+              aria-label={'thinking'}
+            >
+              <Ellipsis className="text-icon animate-pulse" />
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      <div ref={endRef} />
+        <div ref={endRef} />
+      </div>
+
+      {hasNewMessage && (
+        <button
+          type="button"
+          onClick={scrollToBottom}
+          className="border-border bg-background text-muted-foreground hover:text-foreground absolute bottom-2 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium shadow-lg transition-colors"
+        >
+          New message
+          <ArrowDown size={14} />
+        </button>
+      )}
     </div>
   );
 };
