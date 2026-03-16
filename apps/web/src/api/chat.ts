@@ -1,7 +1,7 @@
 /**
- * Chat API — wraps the unified agent API with chat-specific interface.
+ * Chat API — wraps the unified agent API with ask-specific interface.
  *
- * Now routes through /api/agent with mode='chat' instead of the old /api/chat.
+ * Routes through /api/agent with mode='ask' instead of the old /api/chat.
  * Provides backward compatibility for existing chat components.
  */
 
@@ -76,7 +76,7 @@ export const chatApi = {
     return agentApi.streamMessage(
       content,
       threadId,
-      'chat',
+      'ask',
       {
         onEvent: (event: AgentStreamEvent) => {
           if (event.type === 'meta') {

@@ -10,7 +10,7 @@ import type { AgentBaseContext } from './context.js';
 
 // ==================== Agent Modes ====================
 
-export type AgentMode = 'chat' | 'research' | 'agent';
+export type AgentMode = 'ask' | 'research' | 'agent';
 
 // ==================== Request ====================
 

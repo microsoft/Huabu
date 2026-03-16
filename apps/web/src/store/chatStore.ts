@@ -13,7 +13,7 @@ interface ChatState {
   /** True once history has been fetched from the server for the current threadId. */
   isHistoryLoaded: boolean;
   /** Last action type - determines which checkpoint to load on refresh */
-  lastAction: 'chat' | 'research';
+  lastAction: 'ask' | 'research';
 
   /**
    * Staged attachments waiting to be sent with the next message.
@@ -30,7 +30,7 @@ interface ChatState {
   ) => void;
   setMessages: (messages: ChatMessage[]) => void;
   setHistoryLoaded: (loaded: boolean) => void;
-  setLastAction: (action: 'chat' | 'research') => void;
+  setLastAction: (action: 'ask' | 'research') => void;
   clearMessages: () => void;
 
   /** Stage an attachment (e.g. from PDF capture) to be sent with the next chat message. */
@@ -47,7 +47,7 @@ export const useChatStore = create<ChatState>()(
       messages: [],
       threadId: createId('thread'),
       isHistoryLoaded: false,
-      lastAction: 'chat',
+      lastAction: 'ask',
       pendingAttachments: [],
 
       addMessage: (message) =>
@@ -71,7 +71,7 @@ export const useChatStore = create<ChatState>()(
           messages: [],
           threadId: createId('thread'),
           isHistoryLoaded: true,
-          lastAction: 'chat',
+          lastAction: 'ask',
           pendingAttachments: [],
         }),
 

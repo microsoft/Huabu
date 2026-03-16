@@ -23,7 +23,7 @@ import type { Context, Tool, AssistantMessage } from '@mariozechner/pi-ai';
 
 // ==================== Types ====================
 
-export type AgentMode = 'chat' | 'research' | 'agent';
+export type AgentMode = 'ask' | 'research' | 'agent';
 
 /**
  * Unified streaming event emitted to the frontend via SSE.
@@ -73,7 +73,7 @@ export interface AgentRunOptions {
 
 function getToolsForMode(mode: AgentMode): Tool[] {
   switch (mode) {
-    case 'chat':
+    case 'ask':
       return chatTools;
     case 'research':
       return researchTools;

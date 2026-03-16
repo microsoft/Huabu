@@ -45,7 +45,7 @@ function getSystemPrompt(mode: AgentMode): string {
       return RESEARCH_SYSTEM_PROMPT;
     case 'agent':
       return AGENT_SYSTEM_PROMPT;
-    case 'chat':
+    case 'ask':
     default:
       return SYSTEM_PROMPT;
   }
@@ -277,7 +277,7 @@ const agentRoutes: FastifyPluginAsync = async (
     const {
       content,
       threadId,
-      mode = 'chat',
+      mode = 'ask',
       canvasContext,
       canvasId,
       attachments,

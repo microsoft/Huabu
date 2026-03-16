@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { Button } from '../../Common/Button';
 
-export type ChatMode = 'chat' | 'deep-research' | 'agent';
+export type ChatMode = 'ask' | 'research' | 'agent';
 
 interface ModeOption {
   value: ChatMode;
@@ -21,14 +21,14 @@ interface ModeOption {
 
 const modes: ModeOption[] = [
   {
-    value: 'chat',
-    label: 'Chat',
+    value: 'ask',
+    label: 'Ask',
     icon: <MessageSquare size={14} />,
     description: 'Quick conversation',
   },
   {
-    value: 'deep-research',
-    label: 'Deep Research',
+    value: 'research',
+    label: 'Research',
     icon: <Search size={14} />,
     description: 'Search multiple sources and add to Canvas',
   },

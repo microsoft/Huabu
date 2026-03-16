@@ -8,7 +8,6 @@ import {
 import { PanelRightClose, PanelRightOpen, Plus } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-import { chatApi } from '@/api/chat';
 import { researchApi } from '@/api/research';
 import { agentApi } from '@/api/unified-agent';
 import { IconButton } from '@/components/Common/IconButton';
@@ -26,10 +25,7 @@ import { MessageList } from '../../Messages/MessageList';
 
 import type { ChatMode } from './ModeSelector';
 import type { ChatMessage } from '../../Messages/types';
-import type {
-  AgentStreamEvent,
-  ChatStreamUpdatePayload,
-} from '@sediment/shared';
+import type { AgentStreamEvent } from '@sediment/shared';
 
 /**
  * Parse a tool result string into a proper ToolResponse.
@@ -117,11 +113,8 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       setHistoryLoaded: setLoaded,
     } = useChatStore.getState();
 
-    // Load checkpoint based on last action type
-    // Both chat and research now use the unified agent API
-    const api = action === 'research' ? researchApi : chatApi;
-
-    api
+    // Load checkpoint — both ask and research use the unified agent API
+    agentApi
       .fetchHistory(tid)
       .then((res) => {
         if (cancelled) return;
@@ -260,15 +253,16 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     }
   };
 
-  const handleChat = async () => {
+  const handleStreamingChat = async (mode: 'ask' | 'agent') => {
     if (!input.trim() || isLoading) return;
 
-    // Record last action for checkpoint restoration
-    setLastAction('chat');
+    setLastAction('ask');
 
     // Snapshot and clear pending attachments before sending
     const attachments =
-      pendingAttachments.length > 0 ? [...pendingAttachments] : undefined;
+      mode === 'ask' && pendingAttachments.length > 0
+        ? [...pendingAttachments]
+        : undefined;
     if (attachments) clearPendingAttachments();
 
     const userMessage: ChatMessage = {
@@ -279,83 +273,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     };
 
     addMessage(userMessage);
-    setInput('');
-    setIsLoading(true);
-
-    const assistantId = createId('message');
-
-    await chatApi.streamMessage(
-      userMessage.content,
-      threadId,
-      getAgentContext(),
-      {
-        onUpdate: (payload: ChatStreamUpdatePayload) => {
-          const { node, message } = payload;
-
-          // Handle Agent Updates (LLM Text)
-          if (node === 'agent' && message) {
-            if (message.content) {
-              const existing = useChatStore
-                .getState()
-                .messages.find((m) => m.id === assistantId);
-              if (existing) {
-                // Append new token to existing content
-                updateMessage(assistantId, (m) =>
-                  m.role === 'user' || m.role === 'assistant'
-                    ? { ...m, content: m.content + message.content }
-                    : m,
-                );
-              } else {
-                // First token - create new message
-                addMessage({
-                  id: assistantId,
-                  role: 'assistant',
-                  content: message.content,
-                });
-              }
-            }
-
-            // Handle Tool Updates
-          } else if (node === 'tools') {
-            const toolResponse = payload.toolResponse;
-            if (!toolResponse) return;
-
-            addMessage({
-              id: createId('tool'),
-              role: 'tool',
-              toolResponse,
-            });
-          }
-        },
-        onError: (err) => {
-          console.error(err);
-          addMessage({
-            id: createId('message'),
-            role: 'assistant',
-            content: 'Error: ' + err.message,
-          });
-        },
-        onComplete: () => {
-          setIsLoading(false);
-        },
-      },
-      attachments,
-    );
-  };
-
-  const handleAgent = async () => {
-    if (!input.trim() || isLoading) return;
-
     const prompt = input.trim();
-    setLastAction('chat');
-
-    const userMessage: ChatMessage = {
-      id: createId('message'),
-      role: 'user',
-      content: prompt,
-    };
-
-    addMessage(userMessage);
     setInput('');
     setIsLoading(true);
 
@@ -365,7 +283,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       await agentApi.streamMessage(
         prompt,
         threadId,
-        'agent',
+        mode,
         {
           onEvent: (event: AgentStreamEvent) => {
             if (event.type === 'text_delta') {
@@ -401,33 +319,33 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
             }
           },
           onError: (err) => {
-            console.error('Agent error:', err);
+            console.error(`${mode} error:`, err);
             addMessage({
               id: createId('message'),
               role: 'assistant',
-              content: 'Agent error: ' + err.message,
+              content: `Error: ${err.message}`,
             });
           },
           onComplete: () => {
             setIsLoading(false);
-            // Reload canvas to pick up any changes made by the agent
-            loadCanvas();
+            if (mode === 'agent') loadCanvas();
           },
         },
         {
           canvasContext: getAgentContext(),
-          canvasId,
+          canvasId: mode === 'agent' ? canvasId : undefined,
+          attachments,
         },
       );
     } catch (err) {
-      console.error('Agent failed:', err);
+      console.error(`${mode} failed:`, err);
       addMessage({
         id: createId('message'),
         role: 'assistant',
         content:
           err instanceof Error
-            ? `Agent error: ${err.message}`
-            : 'Agent error: unknown error',
+            ? `Error: ${err.message}`
+            : 'Error: unknown error',
       });
       setIsLoading(false);
     }
@@ -466,12 +384,10 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const handleSubmit = async (e: React.FormEvent, mode: ChatMode) => {
     e.preventDefault();
 
-    if (mode === 'deep-research') {
+    if (mode === 'research') {
       await handleDeepResearch();
-    } else if (mode === 'agent') {
-      await handleAgent();
     } else {
-      await handleChat();
+      await handleStreamingChat(mode);
     }
   };
 

@@ -22,7 +22,7 @@ export const ChatInput = ({
   disabled = false,
   placeholder = 'Asking anything here...',
 }: ChatInputProps) => {
-  const [mode, setMode] = useState<ChatMode>('chat');
+  const [mode, setMode] = useState<ChatMode>('ask');
   const isSubmitDisabled = disabled || !value.trim();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -34,7 +34,7 @@ export const ChatInput = ({
 
   // Dynamic placeholder based on mode
   const currentPlaceholder =
-    mode === 'deep-research'
+    mode === 'research'
       ? 'Enter your research query...'
       : mode === 'agent'
         ? 'Describe the canvas change you want...'
