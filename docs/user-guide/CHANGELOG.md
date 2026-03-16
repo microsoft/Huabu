@@ -4,6 +4,22 @@
 
 ---
 
+## 2026-03-16 · 智能语义标签（Image & Frame）
+
+**变更内容**
+
+- **图片节点**：新增 LLM Vision 自动标签。从 PDF 截图或拖入的图片不再显示 "localhost"，而是由 AI 生成 3-6 词的语义描述（如 "System Architecture Diagram"）。
+- **Frame 节点**：新增 LLM 子节点归纳标签。当 Frame 包含 2 个以上有意义标签的子节点时，AI 会自动生成分组名称（如 "Authentication System"）。
+- 标签在节点创建、子节点变化后自动异步生成，用户手动设置的标签不会被覆盖。
+
+**注意事项**
+
+- 需要已配置 Azure OpenAI（支持 Vision 的部署），否则 Image/Frame 使用原有的顺序编号（Image 1、Frame 1）兜底。
+- 标签生成为异步操作，创建节点后会有短暂延迟（约 2 秒 debounce + LLM 调用时间）。
+- 已存在的旧节点不会自动获得新标签，需手动触发（如将子节点移入/移出 Frame）。
+
+---
+
 ## 2026-03-13 · PDF 解析升级为结构化 Markdown
 
 **变更内容**

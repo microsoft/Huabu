@@ -46,6 +46,8 @@ export type {
   UpsertNodeRequest,
   UpsertNodeResponse,
   DeleteNodeResponse,
+  ResolveLabelRequest,
+  ResolveLabelResponse,
 } from './source.js';
 
 // Layout types

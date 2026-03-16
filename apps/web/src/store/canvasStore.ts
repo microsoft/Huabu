@@ -46,6 +46,7 @@ import {
   needsIngestion,
   type NodeIngestionInfo,
 } from '../utils/io/ingest';
+import { resolveLabelIfNeeded } from '../utils/io/resolveLabel';
 import { LAYOUT_ANIMATION_DURATION_MS } from '../utils/layout/applier';
 import { rerouteAllEdges } from '../utils/node/helper';
 
@@ -154,6 +155,29 @@ const triggerIngestion = (node: Node) => {
   }, INGESTION_DEBOUNCE_MS);
 
   ingestionTimers.set(nodeId, timer);
+};
+
+// Per-node debounce timers for LLM label resolution.
+// Longer debounce for frames (children may still be settling after drag).
+const LABEL_RESOLVE_DEBOUNCE_MS = 2000;
+const labelResolveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+const triggerLabelResolve = (nodeId: string) => {
+  const existing = labelResolveTimers.get(nodeId);
+  if (existing) clearTimeout(existing);
+
+  const timer = setTimeout(() => {
+    labelResolveTimers.delete(nodeId);
+    const state = useCanvasStore.getState();
+    void resolveLabelIfNeeded(nodeId, {
+      getNodeById: (id) => state.nodes.find((n) => n.id === id),
+      getChildNodes: (frameId) =>
+        state.nodes.filter((n) => n.parentId === frameId),
+      patchNodeSilent: state.patchNodeSilent,
+    });
+  }, LABEL_RESOLVE_DEBOUNCE_MS);
+
+  labelResolveTimers.set(nodeId, timer);
 };
 
 export type CanvasPreviewSnapshot = CanvasSnapshot & {
@@ -446,6 +470,7 @@ const useCanvasStore = create<RFState>()(
         autoLayoutEnabled,
         set,
         triggerIngestion,
+        triggerLabelResolve,
       });
 
       // After the handler has run, reroute all edges so their handles

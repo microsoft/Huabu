@@ -38,17 +38,14 @@ import {
   shouldIngestOnUpdate,
   type NodeIngestionInfo,
 } from '../utils/io/ingest';
+import { needsLabelResolve } from '../utils/io/resolveLabel';
 import {
   layoutAll as layoutAllNodes,
   layoutGroup as layoutGroupNodes,
   placeNode as placeNewNode,
 } from '../utils/layout';
 import { toggleNodeLock } from '../utils/node/helper';
-import {
-  AUTO_GENERATED_PLACEHOLDER_PATTERN,
-  deduplicateLabel,
-  generateNextLabel,
-} from '../utils/node/labels';
+import { deduplicateLabel, generateNextLabel } from '../utils/node/labels';
 
 import type { CanvasCommand } from './canvasStore';
 // ---------------------------------------------------------------------------
@@ -78,6 +75,10 @@ export type CanvasHandlerContext = {
    * function holds a reference to `useCanvasStore`.
    */
   triggerIngestion: (node: Node) => void;
+  /**
+   * Schedule a debounced LLM label resolution for image or frame nodes.
+   */
+  triggerLabelResolve: (nodeId: string) => void;
 };
 
 /** Subset of state that handlers are allowed to mutate via `set`. */
@@ -187,8 +188,10 @@ function handleAddNode(
           .find((l) => l.trim())
           ?.trim()
           .slice(0, 50) || '';
-    } else if (src) {
-      // Derive from URL hostname
+    } else if (src && cmd.node.type === 'web') {
+      // Derive from URL hostname — only for web nodes.
+      // Other types with src (image, video, pdf) use sequential labels
+      // and may later receive a semantic label from the server.
       try {
         finalLabel = new URL(src).hostname;
       } catch {
@@ -278,6 +281,15 @@ function handleAddNode(
   });
 
   triggerIngestion(newNode);
+
+  // Resolve semantic label for image nodes (LLM vision) and trigger
+  // frame label re-resolution when a new node lands inside a frame.
+  if (needsLabelResolve(newNode.type ?? '')) {
+    ctx.triggerLabelResolve(newNode.id);
+  }
+  if (newNode.parentId) {
+    ctx.triggerLabelResolve(newNode.parentId);
+  }
 }
 
 function handleDeleteNodes(
@@ -448,6 +460,13 @@ function handleMoveIntoFrame(
   }
 
   set({ nodes: result, actionHistory: nextActions });
+
+  // Re-resolve the frame's label when its children change.
+  ctx.triggerLabelResolve(cmd.frameId);
+  // If the node moved from a different frame, re-resolve that frame too.
+  if (node?.parentId && node.parentId !== cmd.frameId) {
+    ctx.triggerLabelResolve(node.parentId);
+  }
 }
 
 function handleMoveOutOfFrame(
@@ -478,6 +497,11 @@ function handleMoveOutOfFrame(
   }
 
   set({ nodes: result, actionHistory: nextActions });
+
+  // Re-resolve the source frame's label after losing a child.
+  if (frame) {
+    ctx.triggerLabelResolve(frame.id);
+  }
 }
 
 function handleGroupSelectionIntoFrame(
@@ -505,6 +529,9 @@ function handleGroupSelectionIntoFrame(
         })
       : actionHistory,
   });
+
+  // Resolve a semantic label for the newly created frame.
+  ctx.triggerLabelResolve(frameId);
 }
 
 function handleGroupRectIntoFrame(
@@ -531,6 +558,9 @@ function handleGroupRectIntoFrame(
         })
       : actionHistory,
   });
+
+  // Resolve a semantic label for the newly created frame.
+  ctx.triggerLabelResolve(frameId);
 }
 
 function handleUnframe(
@@ -686,6 +716,11 @@ function handleUpdateNodeData(
   if (shouldIngestOnUpdate(originalNode, updatedNode)) {
     triggerIngestion(updatedNode);
   }
+
+  // When a child node's label changes, re-resolve the parent frame's label.
+  if (cmd.patch.label !== undefined && updatedNode.parentId) {
+    ctx.triggerLabelResolve(updatedNode.parentId);
+  }
 }
 
 function handleToggleNodeLock(
@@ -794,8 +829,11 @@ function handlePasteNodes(
 
     // For pasted nodes: keep custom labels (deduplicated), regenerate auto-generated ones.
     const originalLabel = String(node.data?.label ?? '').trim();
+    const originalLabelSource = (
+      node.data as Record<string, unknown> | undefined
+    )?.labelSource as string | undefined;
     const isAutoLabel =
-      !originalLabel || AUTO_GENERATED_PLACEHOLDER_PATTERN.test(originalLabel);
+      !originalLabel || !originalLabelSource || originalLabelSource === 'auto';
     const label = isAutoLabel
       ? generateNextLabel(node.type || 'node', existingLabels)
       : deduplicateLabel(originalLabel, existingLabels);
@@ -1092,6 +1130,17 @@ function handleNodeDragStop(
   }
 
   set({ nodes: result, actionHistory: nextActions });
+
+  // Re-resolve labels for frames whose children changed due to auto-frame/unframe.
+  for (const id of cmd.draggedNodeIds) {
+    const prevParentId = preParentIds.get(id);
+    const node = result.find((n) => n.id === id);
+    const nextParentId = node?.parentId;
+    if (prevParentId !== nextParentId) {
+      if (prevParentId) ctx.triggerLabelResolve(prevParentId);
+      if (nextParentId) ctx.triggerLabelResolve(nextParentId);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
