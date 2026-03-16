@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { Scan } from 'lucide-react';
+import { Loader2, Scan } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Document } from 'react-pdf';
 
@@ -215,8 +215,8 @@ export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
               file={src}
               onLoadSuccess={onDocumentLoadSuccess}
               loading={
-                <div className="text-muted-foreground p-4 text-xs">
-                  Loading…
+                <div className="text-muted-foreground flex h-full min-h-40 w-full items-center justify-center gap-2 p-4 text-xs">
+                  <Loader2 size={16} className="animate-spin" />
                 </div>
               }
               error={
