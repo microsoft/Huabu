@@ -7,83 +7,25 @@ import {
   LayoutDashboard,
   UploadCloud,
   Link as LinkIcon,
-  X,
   Sprout,
   Sparkles,
 } from 'lucide-react';
 import { useCallback, useRef, useState, type ChangeEvent } from 'react';
-import { createPortal } from 'react-dom';
 
 import { uploadImage, uploadPdf, uploadVideo } from '../../api/artifact.ts';
 import { NODE_ICON } from '../../config/nodeIcons.ts';
 import useCanvasStore from '../../store/canvasStore.ts';
 import { useIntentStore } from '../../store/intentStore.ts';
 import { detectNodeType } from '../../utils/io/media.ts';
+import { Button } from '../Common/Button';
 import { GhostButton } from '../Common/GhostButton';
+import { Modal } from '../Common/Modal';
 
 import type {
   CanvasNode,
   CanvasNodeType,
   CreateNodePayload,
 } from '../Nodes/types.ts';
-
-interface UploadModalProps {
-  title: string;
-  isOpen: boolean;
-  onClose: () => void;
-  onConfirm?: () => void;
-  children: React.ReactNode;
-  showConfirm?: boolean;
-}
-
-const UploadModal = ({
-  title,
-  isOpen,
-  onClose,
-  onConfirm,
-  children,
-  showConfirm = false,
-}: UploadModalProps) => {
-  if (!isOpen) return null;
-
-  return createPortal(
-    <div className="bg-background/80 animate-in fade-in fixed inset-0 z-9999 flex items-center justify-center backdrop-blur-[1px] duration-200">
-      <div className="absolute inset-0" onClick={onClose} />
-      <div className="border-border shadow-bottom animate-in zoom-in-95 relative z-10 w-90 rounded-lg border bg-white p-6 duration-200">
-        <div className="mb-2 flex items-center justify-between">
-          <h3 className="text-main text-sm font-semibold">{title}</h3>
-          <button
-            onClick={onClose}
-            className="text-muted-foreground hover:text-danger rounded p-1 transition-colors"
-          >
-            <X size={16} />
-          </button>
-        </div>
-
-        <div>{children}</div>
-
-        {showConfirm && (
-          <div className="mt-4 flex justify-center gap-4">
-            <button
-              onClick={onClose}
-              className="text-danger bg-danger-bg flex items-center rounded px-2 py-1 text-xs transition-colors hover:bg-gray-100 hover:text-gray-700"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={onConfirm}
-              className="bg-theme-50 hover:bg-theme-100 text-theme-500 flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors"
-            >
-              {/*<Check size={12} />*/}
-              Confirm
-            </button>
-          </div>
-        )}
-      </div>
-    </div>,
-    document.body,
-  );
-};
 
 interface NodeToolbarProps {
   activeTool: 'select' | 'pan';
@@ -442,17 +384,13 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
 
       {/* --- Modals --- */}
       {/* 1. File Upload Modal */}
-      <UploadModal
+      <Modal
         title="Upload Local Files"
+        description="Supports Images, PDFs, and Videos. Select multiple files to upload in batch."
         isOpen={activeModal === 'upload'}
         onClose={() => setActiveModal(null)}
       >
         <div className="flex flex-col items-center justify-center gap-4 pt-2">
-          <p className="text-muted-foreground text-center text-xs">
-            Supports Images, PDFs, and Videos.
-            <br />
-            Select multiple files to upload in batch.
-          </p>
           <button
             onClick={() => fileInputRef.current?.click()}
             className="bg-theme-50 hover:bg-theme-100 text-theme-500 border-theme-500 flex w-full flex-col items-center gap-2 rounded-md border border-dashed px-4 py-8 transition-colors"
@@ -471,20 +409,26 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             onChange={handleFileChange}
           />
         </div>
-      </UploadModal>
+      </Modal>
 
       {/* 2. Link Input Modal */}
-      <UploadModal
+      <Modal
         title="Add Links"
+        description="Paste URLs below (one per line)."
         isOpen={activeModal === 'link'}
         onClose={() => setActiveModal(null)}
-        onConfirm={handleLinkSubmit}
-        showConfirm={true}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setActiveModal(null)}>
+              Cancel
+            </Button>
+            <Button variant="primary" onClick={handleLinkSubmit}>
+              Confirm
+            </Button>
+          </>
+        }
       >
-        <div className="flex flex-col gap-2">
-          <p className="text-muted-foreground text-xs">
-            Paste URLs below (one per line).
-          </p>
+        <div className="mt-4 flex flex-col gap-0">
           <textarea
             className="border-border placeholder:text-border focus:border-theme-500 focus:ring-theme-500 min-h-25 w-full resize-none rounded-md border bg-transparent px-3 py-2 text-sm focus:outline-none"
             placeholder={`https://example.com/image.png\nhttps://example.com/doc.pdf\nhttps://google.com`}
@@ -498,7 +442,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             }}
           />
         </div>
-      </UploadModal>
+      </Modal>
     </>
   );
 };

@@ -131,9 +131,9 @@ export function Modal({
         )}
       >
         {(title || description) && (
-          <div className="mb-4">
+          <div className="mb-2">
             {title && (
-              <h3 id={titleId} className="text-main text-sm font-semibold">
+              <h3 id={titleId} className="text-main text-md font-semibold">
                 {title}
               </h3>
             )}
