@@ -57,15 +57,12 @@ function buildRequest(
         const cData = c.data as Record<string, unknown> | undefined;
         const label =
           typeof cData?.label === 'string' ? (cData.label as string) : '';
-        // Skip children whose label is still auto-generated (not yet meaningful)
-        const source = cData?.labelSource as string | undefined;
-        const isUserOrContent = source === 'user' || source === 'auto';
-        return isUserOrContent ? label.trim() : '';
+        return label.trim();
       })
       .filter((l) => l.length > 0);
 
-    // Need at least 2 meaningful child labels to produce a useful summary
-    if (childLabels.length < 2) return null;
+    // Need at least 1 meaningful child labels to produce a useful summary
+    if (childLabels.length < 1) return null;
     return { type: 'frame', childLabels };
   }
 
