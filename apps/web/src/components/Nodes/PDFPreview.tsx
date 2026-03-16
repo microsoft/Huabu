@@ -42,6 +42,10 @@ export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
   const addPendingAttachment = useChatStore((s) => s.addPendingAttachment);
   const [numPages, setNumPages] = useState<number | null>(null);
   const [docLoaded, setDocLoaded] = useState(false);
+  // Reset loading state when the PDF source changes.
+  useEffect(() => {
+    setDocLoaded(false);
+  }, [src]);
   const [captureMode, setCaptureMode] = useState(false);
   const [pendingCapture, setPendingCapture] =
     useState<PendingCaptureDrag | null>(null);

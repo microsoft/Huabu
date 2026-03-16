@@ -483,7 +483,8 @@ function findBestFrameForNode(
 
   const descendantIds = new Set(getDescendantIds(nodes, nodeId));
 
-  let best: { frameId: string; ratio: number; frameArea: number } | undefined;
+  // 1. Collect all qualifying candidate frames.
+  const candidates: { frameId: string; ratio: number }[] = [];
 
   for (const candidate of nodes) {
     if (candidate.type !== 'frame') continue;
@@ -499,12 +500,26 @@ function findBestFrameForNode(
     const ratio = intersection / Math.min(nodeArea, frameArea);
     if (ratio < threshold) continue;
 
-    if (
-      !best ||
-      ratio > best.ratio ||
-      (ratio === best.ratio && frameArea < best.frameArea)
-    ) {
-      best = { frameId: candidate.id, ratio, frameArea };
+    candidates.push({ frameId: candidate.id, ratio });
+  }
+
+  if (candidates.length === 0) return null;
+
+  // 2. Among qualifying candidates, remove any frame whose descendant is
+  //    also a candidate — this ensures we always pick the deepest (most
+  //    nested) frame rather than relying on area heuristics.
+  const candidateIdSet = new Set(candidates.map((c) => c.frameId));
+  const deepest = candidates.filter((c) => {
+    const children = getDescendantIds(nodes, c.frameId);
+    return !children.some((d) => candidateIdSet.has(d));
+  });
+
+  // 3. Among the deepest candidates, pick the one with the highest overlap.
+  const pool = deepest.length > 0 ? deepest : candidates;
+  let best: { frameId: string; ratio: number } | undefined;
+  for (const c of pool) {
+    if (!best || c.ratio > best.ratio) {
+      best = c;
     }
   }
 

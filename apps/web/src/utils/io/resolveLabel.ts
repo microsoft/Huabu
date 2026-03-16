@@ -61,7 +61,7 @@ function buildRequest(
       })
       .filter((l) => l.length > 0);
 
-    // Need at least 1 meaningful child labels to produce a useful summary
+    // Need at least 1 meaningful child label to produce a useful summary
     if (childLabels.length < 1) return null;
     return { type: 'frame', childLabels };
   }

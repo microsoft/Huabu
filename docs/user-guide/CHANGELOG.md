@@ -8,8 +8,8 @@
 
 **变更内容**
 
-- **图片节点**：新增 LLM Vision 自动标签。从 PDF 截图或拖入的图片不再显示 "localhost"，而是由 AI 生成 3-6 词的语义描述（如 "System Architecture Diagram"）。
-- **Frame 节点**：新增 LLM 子节点归纳标签。当 Frame 包含 2 个以上有意义标签的子节点时，AI 会自动生成分组名称（如 "Authentication System"）。
+- **图片节点**：新增 LLM Vision 自动标签。
+- **Frame 节点**：新增 LLM 子节点归纳标签。
 - 标签在节点创建、子节点变化后自动异步生成，用户手动设置的标签不会被覆盖。
 
 **注意事项**
