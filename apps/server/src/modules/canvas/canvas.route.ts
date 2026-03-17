@@ -19,6 +19,7 @@ import {
   IMAGE_LABEL_PROMPT,
   buildFrameLabelPrompt,
 } from '../../prompt/resolve-label.js';
+import { getExtFromMime, getMimeType } from '../../utils/mime.js';
 import { getLLMModel } from '../agent/llm.js';
 import { resolveArtifactImageUrl } from '../artifact/utils.js';
 import {
@@ -490,25 +491,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       const artifactsDir = getArtifactsDir();
       const artifactEntries: CanvasExportBundle['artifacts'] = [];
 
-      const getMimeType = (filename: string): string => {
-        const ext = path.extname(filename).toLowerCase();
-        const mimeMap: Record<string, string> = {
-          '.pdf': 'application/pdf',
-          '.jpg': 'image/jpeg',
-          '.jpeg': 'image/jpeg',
-          '.png': 'image/png',
-          '.gif': 'image/gif',
-          '.webp': 'image/webp',
-          '.svg': 'image/svg+xml',
-          '.bmp': 'image/bmp',
-          '.mp4': 'video/mp4',
-          '.webm': 'video/webm',
-          '.mov': 'video/quicktime',
-          '.avi': 'video/x-msvideo',
-        };
-        return mimeMap[ext] ?? 'application/octet-stream';
-      };
-
       for (const node of nodes) {
         if (
           node.type !== 'pdf' &&
@@ -650,13 +632,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         if (!match) continue;
 
         const [, mimeType, base64Data] = match;
-        const extMap: Record<string, string> = {
-          'image/png': '.png',
-          'image/jpeg': '.jpg',
-          'image/gif': '.gif',
-          'image/webp': '.webp',
-        };
-        const ext = extMap[mimeType] ?? '.png';
+        const ext = getExtFromMime(mimeType);
         const artifactId = createId('artifact');
         const filename = `${artifactId}${ext}`;
         const destPath = path.join(artifactsDir, filename);

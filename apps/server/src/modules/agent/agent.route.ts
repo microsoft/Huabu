@@ -17,6 +17,7 @@ import { createId } from '@sediment/shared';
 import { AGENT_SYSTEM_PROMPT } from '../../prompt/agent.js';
 import { RESEARCH_SYSTEM_PROMPT } from '../../prompt/research.js';
 import { SYSTEM_PROMPT } from '../../prompt/system.js';
+import { IMAGE_MIME_MAP } from '../../utils/mime.js';
 import { runAgent } from '../agent/agent.service.js';
 import { loadContext, saveContext } from '../agent/store/context-store.js';
 import { getArtifactsDir } from '../artifact/utils.js';
@@ -77,13 +78,7 @@ async function resolveImageUrl(url: string): Promise<string> {
     try {
       const buffer = await readFile(filePath);
       const ext = path.extname(filename).toLowerCase();
-      const MIME_MAP: Record<string, string> = {
-        '.png': 'image/png',
-        '.jpg': 'image/jpeg',
-        '.jpeg': 'image/jpeg',
-        '.webp': 'image/webp',
-      };
-      const mime = MIME_MAP[ext] ?? 'image/png';
+      const mime = IMAGE_MIME_MAP[ext] ?? 'image/png';
       return `data:${mime};base64,${buffer.toString('base64')}`;
     } catch {
       return url;

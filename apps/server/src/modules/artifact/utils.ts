@@ -1,17 +1,12 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { IMAGE_MIME_MAP } from '../../utils/mime.js';
+
 /**
  * Re-export artifact directory path from workspace module.
  */
 export { getArtifactsDir } from '../workspace.js';
-
-const MIME_MAP: Record<string, string> = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.webp': 'image/webp',
-};
 
 /**
  * Resolve an artifact image URL to a base64 data URL.
@@ -40,7 +35,7 @@ export async function resolveArtifactImageUrl(
     try {
       const buffer = await readFile(filePath);
       const ext = path.extname(filename).toLowerCase();
-      const mime = MIME_MAP[ext] ?? 'image/png';
+      const mime = IMAGE_MIME_MAP[ext] ?? 'image/png';
       return `data:${mime};base64,${buffer.toString('base64')}`;
     } catch (err) {
       console.warn(`Failed to read artifact: ${filePath}`, err);
