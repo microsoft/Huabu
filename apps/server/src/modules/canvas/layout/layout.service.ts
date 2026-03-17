@@ -4,7 +4,7 @@
  * Central service for calculating canvas layouts during research.
  * Coordinates placement strategies and provides a unified interface.
  */
-
+// TODO: This is a very early version focused on research node placement.
 import { autoSelectPlacement } from './strategies/auto-placement.js';
 import { placeResearchBottom } from './strategies/bottom-placement.js';
 import { placeResearchRight } from './strategies/right-placement.js';

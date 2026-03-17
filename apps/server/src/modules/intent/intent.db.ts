@@ -22,6 +22,7 @@ function migrate(database: Database.Database): void {
   `);
 }
 
+// TODO: store in data folder or workspace folder
 export function getIntentDb(): Database.Database {
   if (db) return db;
 

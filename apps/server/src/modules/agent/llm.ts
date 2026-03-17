@@ -18,6 +18,7 @@ let cachedModel: Model<'azure-openai-responses'> | null = null;
  *   AZURE_OPENAI_API_DEPLOYMENT_NAME
  *   AZURE_OPENAI_API_VERSION (default: read by pi-ai from env)
  */
+// TODO: use API-key
 export function getLLMModel(): Model<'azure-openai-responses'> {
   if (cachedModel) return cachedModel;
 

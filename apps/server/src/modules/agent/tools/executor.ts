@@ -15,7 +15,8 @@ import { getIngestService } from '../../knowledge/index.js';
 import { getKnowledgeRepository } from '../../knowledge/knowledge.repository.js';
 
 import type { NodeData } from '@sediment/shared';
-
+// TODO: spilt into multiple files as it grows, e.g. webSearchTool.ts, canvasTool.ts, knowledgeTool.ts, etc.
+// TODO: add more canvas operations as needed, e.g. updateNode, deleteNode, connectNodes, etc.
 // ==================== Web Search ====================
 
 async function executeWebSearch(args: {

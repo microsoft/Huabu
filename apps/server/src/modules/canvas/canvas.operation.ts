@@ -4,7 +4,8 @@
  * High-level service for programmatic canvas manipulation.
  * Used by the research graph to create nodes, frames, and edges.
  */
-
+// TODO: This is a very early version with only basic operations implemented.
+// TODO: refactor to uniformly handle canvas actions in web and server side
 import { createId } from '@sediment/shared';
 
 import {

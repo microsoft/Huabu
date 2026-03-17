@@ -7,7 +7,7 @@ import type {
 } from '@sediment/shared';
 
 export type ResearchStatus = 'idle' | 'running' | 'completed' | 'error';
-
+// TODO: compare with ChatStore and refine it
 /**
  * Research Store - UI-only state for current research session
  * Note: Research state persistence is handled by backend checkpoint,
