@@ -15,15 +15,12 @@ import { getLLMModel } from './llm.js';
 import {
   chatTools,
   researchTools,
-  agentTools,
+  operateTools,
   executeTool,
 } from './tools/index.js';
 
 import type { Context, Tool, AssistantMessage } from '@mariozechner/pi-ai';
-
-// ==================== Types ====================
-
-export type AgentMode = 'ask' | 'research' | 'agent';
+import type { AgentMode } from '@sediment/shared';
 
 /**
  * Unified streaming event emitted to the frontend via SSE.
@@ -77,8 +74,8 @@ function getToolsForMode(mode: AgentMode): Tool[] {
       return chatTools;
     case 'research':
       return researchTools;
-    case 'agent':
-      return agentTools;
+    case 'operate':
+      return operateTools;
     default:
       return chatTools;
   }

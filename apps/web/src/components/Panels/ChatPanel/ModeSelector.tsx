@@ -10,10 +10,10 @@ import { useEffect, useRef, useState } from 'react';
 
 import { Button } from '../../Common/Button';
 
-export type ChatMode = 'ask' | 'research' | 'agent';
+import type { AgentMode } from '@sediment/shared';
 
 interface ModeOption {
-  value: ChatMode;
+  value: AgentMode;
   label: string;
   icon: React.ReactNode;
   description: string;
@@ -33,16 +33,16 @@ const modes: ModeOption[] = [
     description: 'Search multiple sources and add to Canvas',
   },
   {
-    value: 'agent',
+    value: 'operate',
     label: 'Agent',
     icon: <Sprout size={14} />,
-    description: 'Turn intent into canvas actions and apply them',
+    description: 'Directly modify the Canvas based on your instructions',
   },
 ];
 
 interface ModeSelectorProps {
-  value: ChatMode;
-  onChange: (mode: ChatMode) => void;
+  value: AgentMode;
+  onChange: (mode: AgentMode) => void;
   disabled?: boolean;
 }
 
@@ -76,7 +76,7 @@ export const ModeSelector = ({
     };
   }, [isOpen]);
 
-  const handleModeSelect = (mode: ChatMode) => {
+  const handleModeSelect = (mode: AgentMode) => {
     onChange(mode);
     setIsOpen(false);
   };

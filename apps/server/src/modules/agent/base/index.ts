@@ -8,8 +8,8 @@
 export {
   runAgent,
   createContext,
-  type AgentMode,
   type StreamEvent,
   type StreamEventType,
   type AgentRunOptions,
 } from '../agent.service.js';
+export type { AgentMode } from '@sediment/shared';

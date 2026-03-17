@@ -1,7 +1,7 @@
 /**
  * Tool Definitions for the Unified Agent
  *
- * All tools the AI can call across chat, research, and agent modes.
+ * All tools the AI can call across ask, research, and operate modes.
  * Each tool is a pi-ai Tool with a TypeBox schema for validation.
  */
 
@@ -216,10 +216,10 @@ export const researchTools: Tool[] = [
 ];
 
 /**
- * Tools available in agent mode.
+ * Tools available in operate mode.
  * Full set of canvas manipulation tools for intent execution.
  */
-export const agentTools: Tool[] = [
+export const operateTools: Tool[] = [
   webSearchTool,
   getCanvasStateTool,
   getNodeDetailTool,

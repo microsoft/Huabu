@@ -5,12 +5,12 @@ import type { AgentBaseContext } from './context.js';
  * Unified Agent Types
  *
  * Types for the pi-ai powered unified agent that handles
- * chat, research, and agent (intent execution) modes.
+ * ask, research, and operate (canvas manipulation) modes.
  */
 
 // ==================== Agent Modes ====================
 
-export type AgentMode = 'ask' | 'research' | 'agent';
+export type AgentMode = 'ask' | 'research' | 'operate';
 
 // ==================== Request ====================
 
@@ -23,7 +23,7 @@ export interface AgentRequest {
   mode?: AgentMode;
   /** Canvas context for tool access and knowledge retrieval */
   canvasContext?: AgentBaseContext;
-  /** Canvas ID (required for research/agent modes) */
+  /** Canvas ID (required for research/operate modes) */
   canvasId?: string;
   /** Image/file attachments */
   attachments?: ChatAttachment[];

@@ -3,7 +3,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
 import type { ChatMessage } from '../components/Messages/types';
-import type { ChatAttachment } from '@sediment/shared';
+import type { AgentMode, ChatAttachment } from '@sediment/shared';
 
 interface ChatState {
   /** In-memory message list — not persisted to localStorage. */
@@ -12,8 +12,8 @@ interface ChatState {
   threadId: string;
   /** True once history has been fetched from the server for the current threadId. */
   isHistoryLoaded: boolean;
-  /** Last action type - determines which checkpoint to load on refresh */
-  lastAction: 'ask' | 'research';
+  /** Last agent mode — persisted to determine which checkpoint to load on refresh */
+  lastAction: AgentMode;
 
   /**
    * Staged attachments waiting to be sent with the next message.
@@ -30,7 +30,7 @@ interface ChatState {
   ) => void;
   setMessages: (messages: ChatMessage[]) => void;
   setHistoryLoaded: (loaded: boolean) => void;
-  setLastAction: (action: 'ask' | 'research') => void;
+  setLastAction: (action: AgentMode) => void;
   clearMessages: () => void;
 
   /** Stage an attachment (e.g. from PDF capture) to be sent with the next chat message. */

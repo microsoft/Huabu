@@ -59,7 +59,7 @@ export class AgentAPI {
   /**
    * Stream agent execution via SSE
    *
-   * @param agentType - Agent type ('ask' | 'research' | 'agent')
+   * @param agentType - Agent type ('ask' | 'research' | 'operate')
    * @param endpoint - API endpoint path
    * @param body - Request body
    * @param callbacks - Event callbacks
@@ -156,7 +156,7 @@ export class AgentAPI {
   /**
    * Fetch agent history
    *
-   * @param agentType - Agent type ('ask' | 'research' | 'agent')
+   * @param agentType - Agent type ('ask' | 'research' | 'operate')
    * @param endpoint - API endpoint path
    * @returns History data or null if not found
    */

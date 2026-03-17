@@ -1,2 +1,2 @@
-export { chatTools, researchTools, agentTools } from './definitions.js';
+export { chatTools, researchTools, operateTools } from './definitions.js';
 export { executeTool } from './executor.js';

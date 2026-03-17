@@ -17,12 +17,13 @@ import { createId } from '@sediment/shared';
 import { AGENT_SYSTEM_PROMPT } from '../../prompt/agent.js';
 import { RESEARCH_SYSTEM_PROMPT } from '../../prompt/research.js';
 import { SYSTEM_PROMPT } from '../../prompt/system.js';
-import { runAgent, type AgentMode } from '../agent/agent.service.js';
+import { runAgent } from '../agent/agent.service.js';
 import { loadContext, saveContext } from '../agent/store/context-store.js';
 import { getArtifactsDir } from '../artifact/utils.js';
 import { buildContext } from '../knowledge/index.js';
 
 import type {
+  AgentMode,
   AgentRequest,
   ChatAttachment,
   ChatHistoryResponse,
@@ -43,7 +44,7 @@ function getSystemPrompt(mode: AgentMode): string {
   switch (mode) {
     case 'research':
       return RESEARCH_SYSTEM_PROMPT;
-    case 'agent':
+    case 'operate':
       return AGENT_SYSTEM_PROMPT;
     case 'ask':
     default:
@@ -383,15 +384,15 @@ const agentRoutes: FastifyPluginAsync = async (
       }
     }
 
-    // For research/agent modes, include canvasId in a context note
+    // For research/operate modes, include canvasId in a context note
     if (
-      (mode === 'research' || mode === 'agent') &&
+      (mode === 'research' || mode === 'operate') &&
       canvasId &&
       typeof userContent === 'string'
     ) {
       userContent = `[Canvas ID: ${canvasId}]\n\n${userContent}`;
     } else if (
-      (mode === 'research' || mode === 'agent') &&
+      (mode === 'research' || mode === 'operate') &&
       canvasId &&
       Array.isArray(userContent)
     ) {
