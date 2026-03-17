@@ -10,7 +10,7 @@ import { useEffect, useState } from 'react';
 import { chatApi } from '@/api/chat';
 import { resolveActions } from '@/api/intent';
 import { researchApi } from '@/api/research';
-import { GhostButton } from '@/components/Common/GhostButton';
+import { IconButton } from '@/components/Common/IconButton';
 import useCanvasStore, {
   type CanvasPreviewSnapshot,
 } from '@/store/canvasStore';
@@ -403,7 +403,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       iconExpanded={<PanelRightClose size={16} />}
       className="border-border border-l"
       tools={
-        <GhostButton
+        <IconButton
           onClick={handleNewChat}
           title="New conversation"
           disabled={
@@ -412,7 +412,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           className="text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Plus size={16} />
-        </GhostButton>
+        </IconButton>
       }
     >
       <div className="flex h-full flex-col gap-2 overflow-visible">

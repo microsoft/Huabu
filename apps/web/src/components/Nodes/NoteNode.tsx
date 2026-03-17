@@ -12,7 +12,7 @@ import useCanvasStore from '../../store/canvasStore.ts';
 import { copyToClipboard } from '../../utils/io/clipboard.ts';
 import { getSharedStyleNodes } from '../../utils/shadowStyleCache.ts';
 import { loadBlockNoteContent } from '../BlockNote/blockNoteContent.ts';
-import { GhostButton } from '../Common/GhostButton.tsx';
+import { IconButton } from '../Common/IconButton.tsx';
 
 import type { CanvasNoteNodeData } from './types.ts';
 
@@ -48,7 +48,7 @@ export const NoteNode = memo(
       <div className="flex w-full items-center justify-between gap-2">
         {/* Tools */}
         <div className="text-muted-foreground flex items-center gap-1">
-          <GhostButton
+          <IconButton
             title="Open Large View"
             onClick={(e) => {
               e.stopPropagation();
@@ -56,11 +56,11 @@ export const NoteNode = memo(
             }}
           >
             <Fullscreen size={14} />
-          </GhostButton>
+          </IconButton>
 
-          <GhostButton title="Copy Content" onClick={handleCopy}>
+          <IconButton title="Copy Content" onClick={handleCopy}>
             {copied ? <Check size={14} /> : <Copy size={14} />}
-          </GhostButton>
+          </IconButton>
         </div>
       </div>
     );

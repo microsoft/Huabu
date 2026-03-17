@@ -1,7 +1,7 @@
 import { Copy } from 'lucide-react';
 
 import { copyToClipboard } from '../../utils/io/clipboard';
-import { GhostButton } from '../Common/GhostButton';
+import { IconButton } from '../Common/IconButton';
 
 import type { ChatAttachment } from '@sediment/shared';
 
@@ -36,14 +36,14 @@ export const UserMessage = ({ content, attachments }: UserMessageProps) => {
         </div>
 
         <div className="flex items-center gap-2">
-          <GhostButton
+          <IconButton
             className="text-icon"
             aria-label="Copy message"
             title="Copy"
             onClick={() => copyToClipboard(content)}
           >
             <Copy size={16} />
-          </GhostButton>
+          </IconButton>
         </div>
       </div>
     </div>

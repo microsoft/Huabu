@@ -5,7 +5,7 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react';
 
 import { NodeWrapper } from './NodeWrapper.tsx';
 import useCanvasStore from '../../store/canvasStore.ts';
-import { GhostButton } from '../Common/GhostButton.tsx';
+import { IconButton } from '../Common/IconButton.tsx';
 import { Input } from '../Common/Input.tsx';
 
 import type { CanvasFrameNodeData } from './types.ts';
@@ -20,7 +20,7 @@ export const FrameNode = memo(
 
     const FrameToolbar = (
       <div className="text-muted-foreground flex items-center gap-1">
-        <GhostButton
+        <IconButton
           title="Layout Children"
           onClick={(e) => {
             e.preventDefault();
@@ -29,8 +29,8 @@ export const FrameNode = memo(
           }}
         >
           <LayoutGrid size={14} />
-        </GhostButton>
-        <GhostButton
+        </IconButton>
+        <IconButton
           title="Unframe"
           onClick={(e) => {
             e.preventDefault();
@@ -39,7 +39,7 @@ export const FrameNode = memo(
           }}
         >
           <Ungroup size={14} />
-        </GhostButton>
+        </IconButton>
       </div>
     );
 

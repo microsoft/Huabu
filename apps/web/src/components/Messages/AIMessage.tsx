@@ -5,7 +5,7 @@ import { BlockNoteCard } from './BlockNoteCard';
 import { NODE_ICON } from '../../config/nodeIcons';
 import useCanvasStore from '../../store/canvasStore';
 import { copyToClipboard } from '../../utils/io/clipboard';
-import { GhostButton } from '../Common/GhostButton';
+import { IconButton } from '../Common/IconButton';
 
 interface AIMessageProps {
   content: string;
@@ -28,7 +28,7 @@ export const AIMessage = ({ content, isStreaming }: AIMessageProps) => {
 
         {!isStreaming && (
           <div className="flex items-center gap-1 px-3">
-            <GhostButton
+            <IconButton
               className="text-icon"
               aria-label="Add as note"
               title="Add as note"
@@ -44,16 +44,16 @@ export const AIMessage = ({ content, isStreaming }: AIMessageProps) => {
               }}
             >
               <NoteIcon size={16} />
-            </GhostButton>
+            </IconButton>
 
-            <GhostButton
+            <IconButton
               className="text-icon"
               aria-label="Copy message"
               title="Copy"
               onClick={() => copyToClipboard(content)}
             >
               <Copy size={16} />
-            </GhostButton>
+            </IconButton>
           </div>
         )}
       </div>

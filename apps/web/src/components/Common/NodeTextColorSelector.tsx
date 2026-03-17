@@ -4,6 +4,8 @@ import { useState } from 'react';
 
 import useCanvasStore from '@/store/canvasStore.ts';
 
+import { IconButton } from './IconButton';
+
 import type { NodeStyle } from '@/components/Nodes/types.ts';
 
 const PRESET_TEXT_COLORS = [
@@ -68,16 +70,18 @@ export const NodeTextColorSelector = ({
 
   return (
     <div className="relative flex items-center">
-      <button
-        className="border-border hover:bg-muted flex items-center justify-center rounded border p-1 transition-colors"
+      <IconButton
+        variant="outline"
+        className="border-border hover:bg-muted rounded border p-1"
         onClick={(e) => {
           e.stopPropagation();
           setIsOpen(!isOpen);
         }}
         title="Change Text Color"
+        size="sm"
       >
         <Baseline size={14} style={{ color: activeColor.value }} />
-      </button>
+      </IconButton>
 
       {isOpen && (
         <>

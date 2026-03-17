@@ -11,7 +11,7 @@ import {
 } from '../../api/canvas';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import { Button } from '../Common/Button';
-import { GhostButton } from '../Common/GhostButton';
+import { IconButton } from '../Common/IconButton';
 import { Modal } from '../Common/Modal';
 import { Header } from '../Panels/Header';
 
@@ -232,10 +232,11 @@ export default function CanvasListPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <button
+            <Button
+              variant="secondary"
               onClick={handleImportClick}
               disabled={isImporting}
-              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50"
+              className="gap-2 rounded-lg px-4 py-2.5"
             >
               {isImporting ? (
                 <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-500 border-t-transparent" />
@@ -255,11 +256,12 @@ export default function CanvasListPage() {
                 </svg>
               )}
               Import
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="primary"
               onClick={handleCreate}
               disabled={isCreating}
-              className="inline-flex items-center gap-2 rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:opacity-50"
+              className="gap-2 rounded-lg px-4 py-2.5"
             >
               {isCreating ? (
                 <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
@@ -279,7 +281,7 @@ export default function CanvasListPage() {
                 </svg>
               )}
               New Canvas
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -290,13 +292,14 @@ export default function CanvasListPage() {
         ) : canvases.length === 0 ? (
           <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-200 py-20">
             <p className="text-sm text-gray-400">No canvases yet.</p>
-            <button
+            <Button
+              variant="ghost"
               onClick={handleCreate}
               disabled={isCreating}
               className="mt-4 text-sm font-medium text-gray-900 underline hover:text-gray-700"
             >
               Create your first canvas
-            </button>
+            </Button>
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -321,7 +324,7 @@ export default function CanvasListPage() {
                   </div>
                 </button>
                 {/* Export button */}
-                <GhostButton
+                <IconButton
                   onClick={(e) => {
                     e.stopPropagation();
                     void handleExport(canvas.canvasId, canvas.title);
@@ -330,9 +333,9 @@ export default function CanvasListPage() {
                   title="Export canvas"
                 >
                   <Download size={16} className="text-gray-400" />
-                </GhostButton>
+                </IconButton>
                 {/* Delete button */}
-                <GhostButton
+                <IconButton
                   onClick={(e) => {
                     e.stopPropagation();
                     requestDelete(canvas.canvasId, canvas.title);
@@ -341,7 +344,7 @@ export default function CanvasListPage() {
                   title="Delete canvas"
                 >
                   <Trash2 size={16} className="text-gray-400" />
-                </GhostButton>
+                </IconButton>
               </div>
             ))}
           </div>

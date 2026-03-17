@@ -8,7 +8,7 @@ import { useChatStore } from '@/store/chatStore';
 
 import { FloatingDragHandle } from './FloatingDragHandle';
 import { PDFPageWithOverlay } from './PDFPageWithOverlay';
-import { GhostButton } from '../Common/GhostButton';
+import { IconButton } from '../Common/IconButton';
 
 import type { PreviewComponentProps } from './NotePreview';
 import type { AreaCapturedEvent, NormalizedRect } from './PDFPageWithOverlay';
@@ -261,7 +261,7 @@ export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
       {/* ── Floating toolbar (top-left, vertical) ── */}
       <div className="pointer-events-none absolute top-3 left-3 z-10">
         <div className="text-muted-foreground border-border pointer-events-auto flex flex-col items-center gap-2 rounded-sm border bg-white p-0">
-          <GhostButton
+          <IconButton
             title="Select Area"
             className={clsx(captureMode && 'text-theme-500 bg-background')}
             onClick={() => {
@@ -271,7 +271,7 @@ export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
             }}
           >
             <Scan size={14} />
-          </GhostButton>
+          </IconButton>
         </div>
       </div>
 

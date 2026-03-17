@@ -5,7 +5,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { exportCanvas } from '../../api/canvas';
 import useCanvasStore from '../../store/canvasStore';
 import { DropdownMenu, DropdownMenuItem } from '../Common/DropdownMenu';
-import { GhostButton } from '../Common/GhostButton';
+import { IconButton } from '../Common/IconButton';
 
 /**
  * canvas title + dropdown menu.
@@ -76,7 +76,7 @@ export const CanvasMenu: React.FC = () => {
           aria-label="Canvas title"
         />
 
-        <GhostButton
+        <IconButton
           onClick={() => setIsOpen((prev) => !prev)}
           aria-label="Workspace menu"
           aria-expanded={isOpen}
@@ -89,7 +89,7 @@ export const CanvasMenu: React.FC = () => {
               isOpen && 'rotate-180',
             )}
           />
-        </GhostButton>
+        </IconButton>
 
         {/* Inline status message */}
         {statusMessage && (

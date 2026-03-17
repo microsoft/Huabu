@@ -8,8 +8,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
-import { GhostButton } from '../../Common/GhostButton';
-import { PillButton } from '../../Common/PillButton';
+import { Button } from '../../Common/Button';
 
 export type ChatMode = 'chat' | 'deep-research' | 'agent';
 
@@ -84,7 +83,8 @@ export const ModeSelector = ({
 
   return (
     <div ref={containerRef} className="relative">
-      <PillButton
+      <Button
+        variant="pill"
         type="button"
         onClick={() => !disabled && setIsOpen(!isOpen)}
         disabled={disabled}
@@ -96,12 +96,13 @@ export const ModeSelector = ({
           size={14}
           className={clsx('transition-transform', isOpen && 'rotate-180')}
         />
-      </PillButton>
+      </Button>
 
       {isOpen && (
         <div className="border-border bg-card absolute bottom-full left-0 mb-2 w-auto overflow-hidden rounded-lg border shadow-lg">
           {modes.map((mode) => (
-            <GhostButton
+            <Button
+              variant="ghost"
               key={mode.value}
               onClick={() => handleModeSelect(mode.value)}
               title={mode.description}
@@ -114,7 +115,7 @@ export const ModeSelector = ({
               <div className="shrink-0">{mode.icon}</div>
               <div className="flex-1 text-sm font-medium">{mode.label}</div>
               {mode.value === value && <Check size={16} />}
-            </GhostButton>
+            </Button>
           ))}
         </div>
       )}

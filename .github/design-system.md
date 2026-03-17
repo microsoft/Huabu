@@ -17,34 +17,38 @@ match and use the existing component.
 ```
 START
 │
-├─ Is it a small icon-only action (toolbar icon, copy, expand, close…)?
-│  └─ YES → use <GhostButton title="…"> + lucide icon
-│           (auto-wraps Tooltip when `title` is set)
+├─ Is it a button / clickable control?
+│  ├─ Icon-only (no text label) → <IconButton>
+│  │   • ghost   — toolbar icon, copy, expand, close …
+│  │   • outline — round bordered action (settings) …
+│  │   • solid   — round filled action (send) …
+│  │
+│  ├─ Has text label → <Button>
+│  │   • primary   — confirm / save (theme-colored)
+│  │   • secondary — cancel / dismiss (neutral)
+│  │   • danger    — destructive action
+│  │   • ghost     — text-only inline action
+│  │   • pill      — selector / tag trigger (mode switch, filter)
+│  │
+│  └─ Canvas drag handle → <DragToCanvasHandleButton>
 │
-├─ Is it a round prominent action button (send, settings, add…)?
-│  └─ YES → use <IconButton size="sm|md" variant="outline|solid">
-│           (auto-wraps Tooltip when `title` is set)
+│  All buttons auto-wrap <Tooltip> when `title` is set.
 │
-├─ Is it a pill-shaped selector / tag trigger (mode switch, filter…)?
-│  └─ YES → use <PillButton> + icon + label + optional chevron
-│           (auto-wraps Tooltip when `title` is set)
+├─ Is it an input field that needs a tooltip?
+│  └─ <Input title="…"> (drop-in <input>, auto-wraps Tooltip)
 │
-├─ Is it a drag handle for canvas?
-│  └─ YES → use <DragToCanvasHandleButton>
-│           (extends GhostButton, renders GripVertical)
-│
-├─ Is it a text-only action in a form (Save, Cancel…)?
-│  └─ YES → use an inline <button> styled per §3.6 form-button rules
-│
-├─ Is it a floating layer (tooltip, popover, modal, dropdown, color picker)?
-│  └─ YES → use createPortal() to document.body, apply §3 overlay rules
+├─ Is it a floating layer?
+│  ├─ Tooltip        → <Tooltip>
+│  ├─ Modal / dialog → <Modal>
+│  ├─ Popover        → <Popover>
+│  └─ Dropdown menu  → <DropdownMenu> + <DropdownMenuItem>
+│  (all portal-based, handle positioning & dismissal internally)
 │
 ├─ Is it a sidebar / panel shell?
-│  └─ YES → use <SidebarPanel> with the required props
+│  └─ <SidebarPanel>
 │
 ├─ Is it a canvas node?
-│  └─ YES → wrap content in <NodeWrapper> which provides ring, toolbar,
-│           handles, drag handle, and resize automatically
+│  └─ <NodeWrapper> (provides ring, toolbar, handles, drag, resize)
 │
 └─ NONE matched → Build a new component following §2 tokens + §3 matrix
 ```
@@ -57,25 +61,25 @@ These rules apply **unconditionally** to ALL components, at every level.
 
 ### 2.1 Colors
 
-| Token (Tailwind class)  | Value                      | When to use                                             |
-| ----------------------- | -------------------------- | ------------------------------------------------------- |
-| `text-main`             | `#191919` (`--foreground`) | All primary text, labels, titles                        |
-| `text-muted-foreground` | `#7c7c7c`                  | Secondary text, descriptions, inactive labels           |
-| `text-icon`             | `#ababab`                  | Default icon color (non-interactive or resting state)   |
-| `text-theme-500`        | `#2e90ff`                  | Active / selected state text, toggle-on indicator       |
-| `text-white`            | `#ffffff`                  | Text on dark surfaces (solid buttons, tooltip)          |
-| `text-danger`           | `#e71d1d`                  | Error text, destructive action labels                   |
-| `text-gray-600`         | —                          | IconButton outline variant text                         |
-| `text-gray-700`         | —                          | PillButton text                                         |
-| `bg-white`              | `#ffffff`                  | All surfaces: panels, cards, toolbars, popovers         |
-| `bg-background`         | `#f5f5f5` (`--background`) | Page canvas, hover state for GhostButton, active tab bg |
-| `bg-theme-50`           | `#f2f8ff`                  | Active toggle background, TreeRow highlight             |
-| `bg-theme-100`          | `#dfeefe`                  | TreeRow selected state                                  |
-| `bg-danger-bg`          | `#fff7f8`                  | Error / cancel background                               |
-| `bg-gray-900`           | —                          | Solid buttons, tooltip bubble                           |
-| `border-border`         | `#e6e6e6` (`--border`)     | **Every** border in the app uses this single color      |
-| `ring-theme-500`        | `#2e90ff`                  | Selected node ring, focus ring for primary actions      |
-| `ring-border`           | `#e6e6e6`                  | Hover ring on unselected nodes                          |
+| Token (Tailwind class)  | Value                      | When to use                                               |
+| ----------------------- | -------------------------- | --------------------------------------------------------- |
+| `text-main`             | `#191919` (`--foreground`) | All primary text, labels, titles                          |
+| `text-muted-foreground` | `#7c7c7c`                  | Secondary text, descriptions, inactive labels             |
+| `text-icon`             | `#ababab`                  | Default icon color (non-interactive or resting state)     |
+| `text-theme-500`        | `#2e90ff`                  | Active / selected state text, toggle-on indicator         |
+| `text-white`            | `#ffffff`                  | Text on dark surfaces (solid buttons, tooltip)            |
+| `text-danger`           | `#e71d1d`                  | Error text, destructive action labels                     |
+| `text-gray-600`         | —                          | IconButton outline variant text                           |
+| `text-gray-700`         | —                          | Button pill variant text                                  |
+| `bg-white`              | `#ffffff`                  | All surfaces: panels, cards, toolbars, popovers           |
+| `bg-background`         | `#f5f5f5` (`--background`) | Page canvas, hover state for ghost buttons, active tab bg |
+| `bg-theme-50`           | `#f2f8ff`                  | Active toggle background, TreeRow highlight               |
+| `bg-theme-100`          | `#dfeefe`                  | TreeRow selected state                                    |
+| `bg-danger-bg`          | `#fff7f8`                  | Error / cancel background                                 |
+| `bg-gray-900`           | —                          | Solid buttons, tooltip bubble                             |
+| `border-border`         | `#e6e6e6` (`--border`)     | **Every** border in the app uses this single color        |
+| `ring-theme-500`        | `#2e90ff`                  | Selected node ring, focus ring for primary actions        |
+| `ring-border`           | `#e6e6e6`                  | Hover ring on unselected nodes                            |
 
 ### 2.2 Typography
 
@@ -109,14 +113,14 @@ These rules apply **unconditionally** to ALL components, at every level.
 
 ### 2.4 Border Radius
 
-| Class          | px                | When to use                                                              |
-| -------------- | ----------------- | ------------------------------------------------------------------------ |
-| `rounded-full` | 9999px            | IconButton, PillButton, color swatches, progress bar, resize handle pill |
-| `rounded-2xl`  | 16px              | Chat message bubbles, ChatInput container                                |
-| `rounded-lg`   | `--radius` (10px) | CanvasToolbar, Modal, Popover, SourceCard, dropdown menu                 |
-| `rounded-md`   | 8px               | Tooltip, NodeToolbar, form inputs, form buttons                          |
-| `rounded`      | 4px               | GhostButton, NodeWrapper content, tab buttons, TreeRow inner             |
-| `rounded-sm`   | 2px               | Inline edit input                                                        |
+| Class          | px                | When to use                                                                       |
+| -------------- | ----------------- | --------------------------------------------------------------------------------- |
+| `rounded-full` | 9999px            | IconButton, Button pill variant, color swatches, progress bar, resize handle pill |
+| `rounded-2xl`  | 16px              | Chat message bubbles, ChatInput container                                         |
+| `rounded-lg`   | `--radius` (10px) | CanvasToolbar, Modal, Popover, SourceCard, dropdown menu                          |
+| `rounded-md`   | 8px               | Tooltip, NodeToolbar, form inputs, form buttons                                   |
+| `rounded`      | 4px               | Button/IconButton ghost variant, NodeWrapper content, tab buttons, TreeRow inner  |
+| `rounded-sm`   | 2px               | Inline edit input                                                                 |
 
 ### 2.5 Shadows
 
@@ -286,15 +290,15 @@ DragHandle: hidden by default, `opacity-0 group-hover:opacity-100`.
 
 #### NodeToolbar (per-node floating)
 
-| Property        | Value                                                       |
-| --------------- | ----------------------------------------------------------- |
-| Shape           | `rounded-md border border-border bg-white shadow-bottom`    |
-| Size            | `h-8 px-2 py-1 gap-3`                                       |
-| Position        | Above node, `offset={12}`, visible when single-selected     |
-| Icon size       | `14`                                                        |
-| Icon color      | `text-muted-foreground`                                     |
-| Section divider | `<div className="bg-border h-3 w-px" />`                    |
-| Layout          | Left: type icon → divider → Right: GhostButton action icons |
+| Property        | Value                                                            |
+| --------------- | ---------------------------------------------------------------- |
+| Shape           | `rounded-md border border-border bg-white shadow-bottom`         |
+| Size            | `h-8 px-2 py-1 gap-3`                                            |
+| Position        | Above node, `offset={12}`, visible when single-selected          |
+| Icon size       | `14`                                                             |
+| Icon color      | `text-muted-foreground`                                          |
+| Section divider | `<div className="bg-border h-3 w-px" />`                         |
+| Layout          | Left: type icon → divider → Right: IconButton ghost action icons |
 
 #### CanvasToolbar (bottom floating)
 
@@ -352,61 +356,52 @@ Status icon: `h-3 w-3`. Title: `font-medium text-gray-900`. Detail: `mt-0.5 text
 
 > All clickable controls. **Always check §1 reuse tree first.**
 
-#### GhostButton (icon action)
+#### Button (unified text / pill / ghost button)
 
-| Property   | Value                                              |
-| ---------- | -------------------------------------------------- |
-| Shape      | `rounded`                                          |
-| Background | `bg-transparent`, hover `bg-background`            |
-| Border     | none                                               |
-| Padding    | `p-1`                                              |
-| Tooltip    | auto via `title` prop                              |
-| Usage      | Toolbar icons, panel toggles, message action icons |
+| Variant     | Classes                                                                                                  |
+| ----------- | -------------------------------------------------------------------------------------------------------- |
+| `primary`   | `rounded-md font-medium bg-theme-50 text-theme-500 hover:bg-theme-100`                                   |
+| `secondary` | `rounded-md font-medium border border-border text-muted-foreground bg-white hover:bg-gray-50`            |
+| `danger`    | `rounded-md font-medium bg-destructive text-white hover:bg-destructive/90`                               |
+| `ghost`     | `rounded border-none bg-transparent p-1 enabled:hover:bg-background`                                     |
+| `pill`      | `rounded-full border border-border px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 gap-1` |
 
-#### IconButton (prominent round button)
+Sizes (apply to `primary`, `secondary`, `danger` only):
 
-| Property        | sm                                                    | md             |
-| --------------- | ----------------------------------------------------- | -------------- |
-| Size            | `h-8 w-8`                                             | `h-9 w-9`      |
-| Shape           | `rounded-full`                                        | `rounded-full` |
-| Outline variant | `border border-border text-gray-600 hover:bg-gray-50` | same           |
-| Solid variant   | `bg-gray-900 text-white hover:bg-gray-800`            | same           |
-| Tooltip         | auto via `title` prop                                 | same           |
-| Usage           | Send button (solid sm), Settings (outline md)         |                |
+| Size | Classes               |
+| ---- | --------------------- |
+| `sm` | `px-2 py-1 text-xs`   |
+| `md` | `px-3 py-1.5 text-sm` |
 
-#### PillButton (label + icon combo)
+All variants: `disabled:cursor-not-allowed disabled:opacity-50`. Tooltip auto via `title` prop.
 
-| Property     | Value                               |
-| ------------ | ----------------------------------- |
-| Shape        | `rounded-full border border-border` |
-| Padding      | `px-3 py-1.5`                       |
-| Font         | `text-xs font-medium text-gray-700` |
-| Hover        | `hover:bg-gray-50`                  |
-| Internal gap | `gap-1`                             |
-| Tooltip      | auto via `title` prop               |
-| Usage        | ModeSelector trigger                |
+#### IconButton (icon-only round or ghost button)
+
+| Variant   | Classes                                                                                  |
+| --------- | ---------------------------------------------------------------------------------------- |
+| `ghost`   | `rounded border-none bg-transparent p-1 enabled:hover:bg-background disabled:opacity-50` |
+| `outline` | `rounded-full border border-border text-gray-600 hover:bg-gray-50 disabled:opacity-50`   |
+| `solid`   | `rounded-full bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-40`              |
+
+Sizes (apply to `outline` and `solid` only):
+
+| Size | Classes       |
+| ---- | ------------- |
+| `sm` | `h-6.5 w-6.5` |
+| `md` | `h-9 w-9`     |
+
+Tooltip auto via `title` prop. Usage: Send button (`solid sm`), Settings (`outline md`), toolbar icons (`ghost`).
 
 #### DragToCanvasHandleButton
 
 | Property   | Value                               |
 | ---------- | ----------------------------------- |
-| Based on   | GhostButton                         |
+| Based on   | IconButton                          |
 | Size       | `h-4.5 w-4.5`                       |
 | Icon       | `GripVertical size={16}`            |
 | Color      | `text-icon hover:text-main`         |
 | Cursor     | `cursor-grab`                       |
 | Visibility | `opacity-0 group-hover:opacity-100` |
-
-#### Form Buttons (inline, non-component)
-
-| Variant             | Classes                                                                              |
-| ------------------- | ------------------------------------------------------------------------------------ |
-| Primary (Save)      | `rounded-md bg-gray-900 px-3 py-1.5 text-sm text-white hover:bg-gray-800`            |
-| Secondary (Cancel)  | `rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100`                     |
-| Confirm (theme)     | `rounded bg-theme-50 hover:bg-theme-100 text-theme-500 px-2 py-1 text-xs`            |
-| Cancel (danger)     | `rounded text-danger bg-danger-bg px-2 py-1 text-xs`                                 |
-| Toggle (selected)   | `rounded-md border border-blue-500 bg-blue-50 text-blue-700 px-3 py-1.5 text-sm`     |
-| Toggle (unselected) | `rounded-md border border-border text-gray-600 hover:bg-gray-50 px-3 py-1.5 text-sm` |
 
 #### Color Picker Float (NodeBgColorSelector / NodeTextColorSelector)
 
@@ -488,7 +483,7 @@ All canvas nodes share the same `NodeWrapper` shell.
 ```
 [ TypeIcon (14px, text-muted-foreground) ]
 [ Divider (bg-border h-3 w-px) ]
-[ GhostButton actions (icon 14px) ... ]
+[ IconButton ghost actions (icon 14px) ... ]
 ```
 
 Optional extras for TextNode: font-family select, font-size input,
@@ -527,11 +522,17 @@ Inactive toggle style: `text-muted-foreground hover:bg-background`.
 
 ```ts
 // Reusable components — always prefer these
-import { GhostButton } from '@/components/Common/GhostButton';
+import { Button } from '@/components/Common/Button';
 import { IconButton } from '@/components/Common/IconButton';
-import { PillButton } from '@/components/Common/PillButton';
-import { Tooltip } from '@/components/Common/Tooltip';
 import { DragToCanvasHandleButton } from '@/components/Common/DragToCanvasHandleButton';
+import { Input } from '@/components/Common/Input';
+import { Tooltip } from '@/components/Common/Tooltip';
+import { Modal } from '@/components/Common/Modal';
+import { Popover } from '@/components/Common/Popover';
+import {
+  DropdownMenu,
+  DropdownMenuItem,
+} from '@/components/Common/DropdownMenu';
 import { NodeBgColorSelector } from '@/components/Common/NodeBgColorSelector';
 import { NodeTextColorSelector } from '@/components/Common/NodeTextColorSelector';
 

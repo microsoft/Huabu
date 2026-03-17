@@ -4,7 +4,7 @@ import { useEffect, useMemo } from 'react';
 import { getNodeIcon } from '../../config/nodeIcons.ts';
 import useCanvasStore from '../../store/canvasStore.ts';
 import { usePreviewStore } from '../../store/previewStore.ts';
-import { GhostButton } from '../Common/GhostButton.tsx';
+import { IconButton } from '../Common/IconButton.tsx';
 import { NodePreviewContent } from '../Nodes/NodePreviewContent.tsx';
 
 // Helper to get meta info (icon, title) for the header
@@ -131,13 +131,13 @@ export const ExpandedNodePanel = () => {
         {/* Left: back button (replace mode) + icon + title */}
         <div className="flex min-w-0 items-center gap-2">
           {isReplace && (
-            <GhostButton
+            <IconButton
               className="text-muted-foreground"
               title={backTitle}
               onClick={activeItem.close}
             >
               <ArrowLeft size={14} />
-            </GhostButton>
+            </IconButton>
           )}
 
           <div className="text-muted-foreground flex min-w-0 items-center gap-2 text-sm font-medium">
@@ -152,7 +152,7 @@ export const ExpandedNodePanel = () => {
 
         {/* Right: mode toggle + close */}
         <div className="text-muted-foreground flex items-center gap-1">
-          <GhostButton
+          <IconButton
             className={
               !isReplace ? 'text-main bg-muted' : 'text-muted-foreground'
             }
@@ -160,9 +160,9 @@ export const ExpandedNodePanel = () => {
             onClick={() => activeItem.setMode(isReplace ? 'split' : 'replace')}
           >
             <Columns2 size={14} />
-          </GhostButton>
+          </IconButton>
 
-          <GhostButton
+          <IconButton
             className="text-muted-foreground"
             title="Close"
             onClick={(e) => {
@@ -171,7 +171,7 @@ export const ExpandedNodePanel = () => {
             }}
           >
             <X size={14} />
-          </GhostButton>
+          </IconButton>
         </div>
       </div>
 

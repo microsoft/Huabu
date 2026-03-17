@@ -1,12 +1,12 @@
 import clsx from 'clsx';
 import { GripVertical } from 'lucide-react';
 
-import { GhostButton, type GhostButtonProps } from './GhostButton';
+import { IconButton, type IconButtonProps } from './IconButton';
 
 import type { ReactNode } from 'react';
 
 export type DragToCanvasHandleButtonProps = Omit<
-  GhostButtonProps,
+  IconButtonProps,
   'children' | 'draggable'
 > & {
   iconSize?: number;
@@ -25,7 +25,7 @@ export const DragToCanvasHandleButton = ({
     : 'h-4.5 w-4.5 p-px! text-icon hover:text-main flex cursor-grab items-center justify-center rounded';
 
   return (
-    <GhostButton
+    <IconButton
       aria-label="Drag block to canvas"
       draggable
       className={clsx(baseClassName, className)}
@@ -41,6 +41,6 @@ export const DragToCanvasHandleButton = ({
     >
       <GripVertical size={iconSize} className="shrink-0" />
       {children}
-    </GhostButton>
+    </IconButton>
   );
 };

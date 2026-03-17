@@ -2,6 +2,8 @@ import clsx from 'clsx';
 import { ChevronDown, ChevronRight, Lock, Unlock } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 
+import { IconButton } from '../../Common/IconButton';
+
 import type {
   DraggableAttributes,
   DraggableSyntheticListeners,
@@ -150,9 +152,9 @@ export const TreeRowItem = React.memo(
         >
           {/* Chevron icon for collapsible items (frames/groups) */}
           {isCollapsible && (
-            <button
+            <IconButton
               onClick={handleToggleCollapse}
-              className="text-muted-foreground hover:text-foreground flex shrink-0 items-center transition-colors"
+              className="text-muted-foreground hover:text-foreground shrink-0"
               aria-label={isCollapsed ? 'Expand' : 'Collapse'}
               aria-expanded={!isCollapsed}
             >
@@ -161,7 +163,7 @@ export const TreeRowItem = React.memo(
               ) : (
                 <ChevronDown size={iconSize} strokeWidth={iconStroke} />
               )}
-            </button>
+            </IconButton>
           )}
 
           {/* Node type icon */}
@@ -190,21 +192,21 @@ export const TreeRowItem = React.memo(
           <div className="ml-auto flex shrink-0 items-center gap-1">
             {/* Lock button - always visible if locked, hover visible if unlocked */}
             {(isLocked || isHovered) && onToggleLock && (
-              <button
+              <IconButton
                 onClick={handleToggleLock}
                 className={clsx(
-                  'flex items-center transition-colors',
                   isLocked
                     ? 'text-foreground'
                     : 'text-muted-foreground hover:text-foreground',
                 )}
+                aria-label={isLocked ? 'Unlock' : 'Lock'}
               >
                 {isLocked ? (
                   <Lock size={iconSize} strokeWidth={iconStroke} />
                 ) : (
                   <Unlock size={iconSize} strokeWidth={iconStroke} />
                 )}
-              </button>
+              </IconButton>
             )}
           </div>
         </div>

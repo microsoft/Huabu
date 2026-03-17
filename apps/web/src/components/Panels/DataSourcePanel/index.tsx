@@ -14,7 +14,7 @@ import { getSources, getSource, updateSource } from '../../../api/knowledge';
 import { getNodeIcon, NODE_TYPE_LABEL } from '../../../config/nodeIcons';
 import useCanvasStore from '../../../store/canvasStore';
 import { usePreviewStore } from '../../../store/previewStore';
-import { GhostButton } from '../../Common/GhostButton';
+import { IconButton } from '../../Common/IconButton';
 import { SidebarPanel } from '../SidebarPanel';
 
 import type { Source } from '@sediment/shared';
@@ -196,12 +196,12 @@ export const DataSourcePanel = ({
       tools={
         tab === 'sources' && (
           <div className="flex items-center gap-1">
-            <GhostButton title="Search" onClick={() => {}}>
+            <IconButton title="Search" onClick={() => {}}>
               <Search size={16} />
-            </GhostButton>
+            </IconButton>
 
             <div className="relative">
-              <GhostButton
+              <IconButton
                 title="Sort"
                 onClick={() => setShowSortMenu(!showSortMenu)}
               >
@@ -209,7 +209,7 @@ export const DataSourcePanel = ({
                   size={16}
                   className={sortType !== 'manual' ? 'text-blue-500' : ''}
                 />
-              </GhostButton>
+              </IconButton>
 
               {showSortMenu && (
                 <div className="bg-popover border-border absolute top-full right-0 z-50 mt-1 w-32 rounded border py-1 shadow-lg">

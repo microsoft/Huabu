@@ -2,7 +2,7 @@ import { ChevronDown, ChevronRight, Sparkles } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
 import { SourceCard, type Source } from './SourceCard';
-import { GhostButton } from '../Common/GhostButton';
+import { Button } from '../Common/Button';
 
 import type { ToolResponse, WebSearchToolResponse } from '@sediment/shared';
 
@@ -186,7 +186,8 @@ function WebSearchToolDisplay({
   return (
     <div className="flex justify-start">
       <div className="flex w-full flex-col items-start gap-2">
-        <GhostButton
+        <Button
+          variant="ghost"
           aria-expanded={isExpanded}
           aria-label={`Toggle sources (${count} ${label})`}
           onClick={() => setIsExpanded((v) => !v)}
@@ -195,7 +196,7 @@ function WebSearchToolDisplay({
           <span className="mr-1 ml-2">
             Used {count} {label}
           </span>
-        </GhostButton>
+        </Button>
 
         {isExpanded && (
           <div className="w-full">
