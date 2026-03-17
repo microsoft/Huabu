@@ -978,9 +978,9 @@ export function computeFrameFit(
   if (frame.type !== 'frame') return null;
   if (frame.data?.locked) return null;
 
-  const padding = options.padding ?? 24;
-  const minWidth = options.minWidth ?? 240;
-  const minHeight = options.minHeight ?? 160;
+  const padding = options.padding ?? 12;
+  const minWidth = options.minWidth ?? 20;
+  const minHeight = options.minHeight ?? 20;
 
   // Collect direct children (optionally excluding specific nodes)
   const excludeIds = options.excludeNodeIds;
