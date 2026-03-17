@@ -1,8 +1,8 @@
-import clsx from 'clsx';
 import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
 import { Button } from './Button';
+import { cn } from './cn';
 
 import type { ButtonHTMLAttributes, ReactNode, RefObject } from 'react';
 
@@ -104,7 +104,7 @@ export const DropdownMenuItem: React.FC<DropdownMenuItemProps> = ({
   <Button
     variant="ghost"
     role="menuitem"
-    className={clsx(
+    className={cn(
       'w-full justify-start gap-3 rounded-none px-4 py-2 text-sm text-gray-700',
       className,
     )}

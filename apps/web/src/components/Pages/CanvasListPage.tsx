@@ -236,7 +236,7 @@ export default function CanvasListPage() {
               variant="secondary"
               onClick={handleImportClick}
               disabled={isImporting}
-              className="gap-2 rounded-lg px-4 py-2.5"
+              className="gap-2 rounded-lg px-3 py-2"
             >
               {isImporting ? (
                 <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-500 border-t-transparent" />
@@ -249,7 +249,7 @@ export default function CanvasListPage() {
               variant="primary"
               onClick={handleCreate}
               disabled={isCreating}
-              className="bg-main text-foreground gap-2 rounded-lg px-4 py-2.5"
+              className="bg-primary text-primary-foreground gap-2 rounded-lg px-3 py-2"
             >
               {isCreating ? (
                 <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />

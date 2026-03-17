@@ -1,6 +1,6 @@
-import clsx from 'clsx';
 import { GripVertical } from 'lucide-react';
 
+import { cn } from './cn';
 import { IconButton, type IconButtonProps } from './IconButton';
 
 import type { ReactNode } from 'react';
@@ -28,7 +28,7 @@ export const DragToCanvasHandleButton = ({
     <IconButton
       aria-label="Drag block to canvas"
       draggable
-      className={clsx(baseClassName, className)}
+      className={cn(baseClassName, className)}
       onMouseDown={(e) => {
         // Do not call preventDefault here; it can prevent native drag from starting.
         e.stopPropagation();

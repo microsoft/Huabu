@@ -33,6 +33,7 @@
     "react-dom": "^18.2.0",
     "react-pdf": "^10.3.0",
     "react-router-dom": "^7.13.1",
+    "tailwind-merge": "^3.5.0",
     "webcola": "^3.4.0",
     "zustand": "^5.0.11"
   },
