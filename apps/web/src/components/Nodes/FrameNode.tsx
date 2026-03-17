@@ -66,7 +66,7 @@ export const FrameNode = memo(
 
     const commitLabel = () => {
       const next = draftLabel.trim() || 'Frame';
-      updateNodeData(id, { label: next });
+      updateNodeData(id, { label: next, labelSource: 'user' });
       setIsEditingLabel(false);
     };
 
