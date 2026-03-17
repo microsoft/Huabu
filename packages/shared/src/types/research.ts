@@ -8,7 +8,7 @@
 import type { PlacementStrategy } from './canvas.js';
 import type { ToolResponse } from './chat.js';
 
-// ==================== Request Types ====================
+// ==================== Config Types ====================
 
 export interface ResearchConfig {
   /** Search depth: basic (3-5 sources) or advanced (8-10 sources, default) */
@@ -21,21 +21,6 @@ export interface ResearchConfig {
   autoConnect?: boolean;
   /** Spacing between existing content and research nodes (default: 200px) */
   padding?: number;
-}
-
-export interface ResearchRequest {
-  /** The research query/question */
-  query: string;
-  /** Canvas ID to add nodes to */
-  canvasId: string;
-  /** Current canvas version (for optimistic locking) */
-  canvasVersion: number;
-  /** Chat thread ID - research will share the same checkpoint */
-  threadId: string;
-  /** Optional: selected source IDs for context */
-  selectedSourceIds?: string[];
-  /** Research configuration */
-  config?: ResearchConfig;
 }
 
 // ==================== Event Types ====================
@@ -64,33 +49,7 @@ export interface ResearchAgentEvent {
   };
 }
 
-/** @deprecated Use ResearchAgentEvent */
-export type ResearchEvent = ResearchAgentEvent;
-
-// ==================== Response Types ====================
-
-export interface ResearchHistoryResponse {
-  threadId: string;
-  query: string;
-  status: 'idle' | 'running' | 'completed' | 'error';
-  steps: ResearchStep[];
-  createdNodeIds: string[];
-  frameId?: string;
-  error?: string;
-  startTime?: number;
-  endTime?: number;
-}
-
 // ==================== Internal State Types ====================
-
-export interface SearchResult {
-  query: string;
-  nodeId: string;
-  sourceId?: string;
-  url: string;
-  title: string;
-  content?: string;
-}
 
 export interface ResearchStep {
   id: string;
