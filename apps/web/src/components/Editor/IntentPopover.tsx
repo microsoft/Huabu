@@ -9,7 +9,6 @@ import React, {
 import { createPortal } from 'react-dom';
 
 import { useIntentStore } from '../../store/intentStore';
-import { Button } from '../Common/Button';
 import { IconButton } from '../Common/IconButton';
 
 // ---------------------------------------------------------------------------
