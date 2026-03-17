@@ -83,37 +83,37 @@ export const MessageList = ({
             );
           }
 
-        if (msg.role === 'assistant') {
-          return (
-            <AIMessage
-              key={msg.id}
-              content={msg.content}
-              isStreaming={msg.id === streamingAssistantId}
-              resources={msg.resources}
-            />
-          );
-        }
+          if (msg.role === 'assistant') {
+            return (
+              <AIMessage
+                key={msg.id}
+                content={msg.content}
+                isStreaming={msg.id === streamingAssistantId}
+                resources={msg.resources}
+              />
+            );
+          }
 
-        if (msg.role === 'tool') {
-          return (
-            <ToolMessage
-              key={msg.id}
-              toolResponse={msg.toolResponse}
-              isExecuting={msg.isExecuting}
-            />
-          );
-        }
+          if (msg.role === 'tool') {
+            return (
+              <ToolMessage
+                key={msg.id}
+                toolResponse={msg.toolResponse}
+                isExecuting={msg.isExecuting}
+              />
+            );
+          }
 
-        if (msg.role === 'intent-select') {
-          return (
-            <IntentSelectMessage
-              key={msg.id}
-              candidates={msg.candidates}
-              selectedIntent={msg.selectedIntent}
-              onReselect={(intent) => onIntentReselect?.(msg.id, intent)}
-            />
-          );
-        }
+          if (msg.role === 'intent-select') {
+            return (
+              <IntentSelectMessage
+                key={msg.id}
+                candidates={msg.candidates}
+                selectedIntent={msg.selectedIntent}
+                onReselect={(intent) => onIntentReselect?.(msg.id, intent)}
+              />
+            );
+          }
 
           return null;
         })}

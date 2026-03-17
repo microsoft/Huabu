@@ -6,7 +6,7 @@ import {
 import { PanelRightClose, PanelRightOpen, Plus } from 'lucide-react';
 import { useState, useEffect, useCallback, useRef } from 'react';
 
-import { agentApi } from '@/api/unified-agent';
+import { agentApi } from '@/api/agent';
 import { IconButton } from '@/components/Common/IconButton';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
