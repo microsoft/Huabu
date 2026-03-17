@@ -3,7 +3,7 @@
  *
  * Single-step intent flow:
  *   Show intent candidates + custom input, let user pick one.
- *   The chosen intent is sent to the chat panel in agent mode for execution.
+ *   The chosen intent is sent to the chat panel in operate mode for execution.
  */
 
 import { createId } from '@sediment/shared';
@@ -41,8 +41,12 @@ interface IntentState {
    * Callback set by ChatPanel to receive chosen intents.
    * @internal — not for external use.
    */
-  _onIntentChosen: ((intent: string) => void) | null;
-  _setOnIntentChosen: (cb: ((intent: string) => void) | null) => void;
+  _onIntentChosen:
+    | ((intent: string, candidates: IntentCandidate[]) => void)
+    | null;
+  _setOnIntentChosen: (
+    cb: ((intent: string, candidates: IntentCandidate[]) => void) | null,
+  ) => void;
 }
 
 export const useIntentStore = create<IntentState>()((set, get) => ({
@@ -122,6 +126,8 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
     if (!candidate) return;
 
     const chosenLabel = candidate.label;
+    // Preserve candidates before clearing state
+    const savedCandidates = [...candidates];
 
     void logIntentEpisode({
       id: createId('intent'),
@@ -145,7 +151,7 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
       isStreaming: false,
     });
 
-    _onIntentChosen?.(chosenLabel);
+    _onIntentChosen?.(chosenLabel, savedCandidates);
   },
 
   submitCustomIntent: (text: string) => {
@@ -164,6 +170,9 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
       },
     });
 
+    // Preserve candidates before clearing state
+    const savedCandidates = [...candidates];
+
     // Dismiss popover and send to chat panel
     set({
       isOpen: false,
@@ -174,7 +183,7 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
       isStreaming: false,
     });
 
-    _onIntentChosen?.(text.trim());
+    _onIntentChosen?.(text.trim(), savedCandidates);
   },
 
   setCustomIntent: (text: string) => {

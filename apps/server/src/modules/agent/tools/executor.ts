@@ -290,7 +290,11 @@ async function executeConnectNodes(args: {
     sourceNodeId: args.sourceId,
     targetNodeId: args.targetId,
   });
-  return JSON.stringify({ edgeId: result.edgeId });
+  return JSON.stringify({
+    edgeId: result.edgeId,
+    sourceId: args.sourceId,
+    targetId: args.targetId,
+  });
 }
 
 async function executeDisconnectNodes(args: {
