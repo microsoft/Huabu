@@ -16,7 +16,7 @@ import {
   getAbsolutePosition,
   type NestableNode,
 } from '../../utils/canvas/frame';
-import { GhostButton } from '../Common/GhostButton';
+import { IconButton } from '../Common/IconButton';
 
 /**
  * A floating toolbar that appears horizontally centred above the
@@ -94,53 +94,50 @@ export const MultiSelectToolbar = () => {
     >
       <div className="text-muted-foreground shadow-bottom flex items-center gap-1 rounded-lg border-0 bg-white p-1.5">
         {/* Horizontal alignment */}
-        <GhostButton
+        <IconButton
           title="Align Left"
           onClick={() => alignSelectedNodes('left')}
         >
           <AlignHorizontalJustifyStart size={14} />
-        </GhostButton>
-        <GhostButton
+        </IconButton>
+        <IconButton
           title="Align Center (H)"
           onClick={() => alignSelectedNodes('center-h')}
         >
           <AlignHorizontalJustifyCenter size={14} />
-        </GhostButton>
-        <GhostButton
+        </IconButton>
+        <IconButton
           title="Align Right"
           onClick={() => alignSelectedNodes('right')}
         >
           <AlignHorizontalJustifyEnd size={14} />
-        </GhostButton>
+        </IconButton>
 
         <div className="bg-border mx-0.5 h-4 w-px" />
 
         {/* Vertical alignment */}
-        <GhostButton
-          title="Align Top"
-          onClick={() => alignSelectedNodes('top')}
-        >
+        <IconButton title="Align Top" onClick={() => alignSelectedNodes('top')}>
           <AlignVerticalJustifyStart size={14} />
-        </GhostButton>
-        <GhostButton
+        </IconButton>
+        <IconButton
           title="Align Center (V)"
           onClick={() => alignSelectedNodes('center-v')}
         >
           <AlignVerticalJustifyCenter size={14} />
-        </GhostButton>
-        <GhostButton
+        </IconButton>
+        <IconButton
           title="Align Bottom"
           onClick={() => alignSelectedNodes('bottom')}
         >
           <AlignVerticalJustifyEnd size={14} />
-        </GhostButton>
+        </IconButton>
 
         <div className="bg-border mx-0.5 h-4 w-px" />
 
         {/* Spread apart overlapping nodes */}
-        <GhostButton title="Spread Apart" onClick={() => spreadSelectedNodes()}>
+        <IconButton title="Spread Apart" onClick={() => spreadSelectedNodes()}>
           <Ungroup size={14} />
-        </GhostButton>
+        </IconButton>
       </div>
     </div>
   );

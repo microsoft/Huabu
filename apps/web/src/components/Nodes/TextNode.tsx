@@ -11,7 +11,7 @@ import {
   useEffect,
 } from 'react';
 
-import { GhostButton } from '@/components/Common/GhostButton.tsx';
+import { IconButton } from '@/components/Common/IconButton.tsx';
 import { NodeBgColorSelector } from '@/components/Common/NodeBgColorSelector.tsx';
 import { NodeTextColorSelector } from '@/components/Common/NodeTextColorSelector.tsx';
 import useCanvasStore from '@/store/canvasStore.ts';
@@ -36,7 +36,7 @@ const FONT_FAMILIES = [
 /** Maximum characters per line before wrapping. */
 const MAX_CHARS_PER_LINE = 18;
 /** Padding inside the node (px on each side). */
-const NODE_PADDING = 8;
+const NODE_PADDING = 4;
 
 export type TextNodeType = Node<CanvasTextNodeData, 'text'>;
 
@@ -355,7 +355,7 @@ export const TextNode = memo(
 
         <div className="bg-border mx-1 h-3 w-px" />
 
-        <GhostButton
+        <IconButton
           onClick={() =>
             updateStyle({
               fontWeight: style.fontWeight === 'bold' ? 'normal' : 'bold',
@@ -369,9 +369,9 @@ export const TextNode = memo(
           )}
         >
           <Bold size={14} />
-        </GhostButton>
+        </IconButton>
 
-        <GhostButton
+        <IconButton
           onClick={() =>
             updateStyle({
               fontStyle: style.fontStyle === 'italic' ? 'normal' : 'italic',
@@ -385,9 +385,9 @@ export const TextNode = memo(
           )}
         >
           <Italic size={14} />
-        </GhostButton>
+        </IconButton>
 
-        <GhostButton
+        <IconButton
           onClick={() => toggleDecoration('underline')}
           className={clsx(
             'p-1',
@@ -397,9 +397,9 @@ export const TextNode = memo(
           )}
         >
           <Underline size={14} />
-        </GhostButton>
+        </IconButton>
 
-        <GhostButton
+        <IconButton
           onClick={() => toggleDecoration('line-through')}
           className={clsx(
             'p-1',
@@ -409,7 +409,7 @@ export const TextNode = memo(
           )}
         >
           <Strikethrough size={14} />
-        </GhostButton>
+        </IconButton>
 
         <div className="bg-border mx-1 h-3 w-px" />
 

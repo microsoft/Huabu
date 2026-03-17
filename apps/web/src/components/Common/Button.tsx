@@ -1,22 +1,28 @@
 import clsx from 'clsx';
 import { forwardRef } from 'react';
 
+import { Tooltip } from './Tooltip';
+
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 
 export type ButtonProps = {
   children: ReactNode;
-  variant?: 'primary' | 'secondary' | 'danger';
+  variant?: 'primary' | 'secondary' | 'danger' | 'ghost' | 'pill';
   size?: 'sm' | 'md';
   className?: string;
+  tooltipWrapperClassName?: string;
 } & Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children' | 'className'>;
 
 const variantClasses: Record<NonNullable<ButtonProps['variant']>, string> = {
   primary:
-    'bg-theme-50 text-theme-500 hover:bg-theme-100 border border-transparent',
+    'rounded-md font-medium bg-theme-50 text-theme-500 hover:bg-theme-100 border border-transparent',
   secondary:
-    'border border-border text-muted-foreground bg-white hover:bg-gray-50',
+    'rounded-md font-medium border border-border text-muted-foreground bg-white hover:bg-gray-50',
   danger:
-    'bg-destructive text-white hover:bg-destructive/90 border border-transparent',
+    'rounded-md font-medium bg-destructive text-white hover:bg-destructive/90 border border-transparent',
+  ghost:
+    'cursor-pointer rounded border-none bg-transparent p-1 enabled:hover:bg-background',
+  pill: 'gap-1 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50',
 };
 
 const sizeClasses: Record<NonNullable<ButtonProps['size']>, string> = {
@@ -31,26 +37,40 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       variant = 'primary',
       size = 'md',
       className,
+      tooltipWrapperClassName,
       type = 'button',
+      title,
       ...props
     },
     ref,
-  ) => (
-    <button
-      ref={ref}
-      type={type}
-      className={clsx(
-        'inline-flex items-center justify-center rounded-md font-medium transition-colors',
-        'disabled:cursor-not-allowed disabled:opacity-50',
-        variantClasses[variant],
-        sizeClasses[size],
-        className,
-      )}
-      {...props}
-    >
-      {children}
-    </button>
-  ),
+  ) => {
+    const hasSizeClass = variant !== 'ghost' && variant !== 'pill';
+
+    const buttonEl = (
+      <button
+        ref={ref}
+        type={type}
+        className={clsx(
+          'inline-flex items-center justify-center transition-colors',
+          'disabled:cursor-not-allowed disabled:opacity-50',
+          variantClasses[variant],
+          hasSizeClass && sizeClasses[size],
+          className,
+        )}
+        {...props}
+      >
+        {children}
+      </button>
+    );
+
+    return title ? (
+      <Tooltip content={title} wrapperClassName={tooltipWrapperClassName}>
+        {buttonEl}
+      </Tooltip>
+    ) : (
+      buttonEl
+    );
+  },
 );
 
 Button.displayName = 'Button';

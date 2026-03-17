@@ -5,7 +5,7 @@ import { memo } from 'react';
 import useCanvasStore from '@/store/canvasStore.ts';
 
 import { NodeWrapper } from './NodeWrapper.tsx';
-import { GhostButton } from '../Common/GhostButton.tsx';
+import { IconButton } from '../Common/IconButton.tsx';
 
 import type { CanvasVideoNodeData } from './types.ts';
 
@@ -19,7 +19,7 @@ export const VideoNode = memo(
       <div className="flex w-full items-center justify-between gap-2">
         {/* Tools */}
         <div className="text-muted-foreground flex items-center gap-1">
-          <GhostButton
+          <IconButton
             title="Open Large View"
             onClick={(e) => {
               e.stopPropagation();
@@ -27,7 +27,7 @@ export const VideoNode = memo(
             }}
           >
             <Fullscreen size={14} />
-          </GhostButton>
+          </IconButton>
         </div>
       </div>
     );

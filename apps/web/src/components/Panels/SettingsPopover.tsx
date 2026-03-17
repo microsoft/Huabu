@@ -5,7 +5,6 @@ import { pickFolder } from '../../api/workspace';
 import useCanvasStore from '../../store/canvasStore';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import { Button } from '../Common/Button';
-import { GhostButton } from '../Common/GhostButton';
 import { IconButton } from '../Common/IconButton';
 import { Popover } from '../Common/Popover';
 
@@ -149,6 +148,7 @@ export const SettingsPopover: React.FC = () => {
     <>
       <div ref={triggerRef}>
         <IconButton
+          variant="outline"
           title="Settings"
           onClick={handleToggle}
           aria-label="Open settings"
@@ -210,7 +210,8 @@ export const SettingsPopover: React.FC = () => {
                   .filter((p) => p !== workspacePath)
                   .map((path) => (
                     <li key={path} className="group flex items-center gap-0.5">
-                      <GhostButton
+                      <Button
+                        variant="ghost"
                         onClick={() => void handleSelectRecent(path)}
                         disabled={isLoading}
                         className="flex-1 gap-1.5 text-left"
@@ -222,14 +223,14 @@ export const SettingsPopover: React.FC = () => {
                         <span className="truncate text-xs text-gray-500">
                           {path}
                         </span>
-                      </GhostButton>
-                      <GhostButton
+                      </Button>
+                      <IconButton
                         onClick={() => removeRecentWorkspace(path)}
                         className="shrink-0 p-0.5 text-gray-300 opacity-0 transition-all group-hover:opacity-100 hover:text-gray-500"
                         title="Remove from recent"
                       >
                         <X size={12} />
-                      </GhostButton>
+                      </IconButton>
                     </li>
                   ))}
               </ul>

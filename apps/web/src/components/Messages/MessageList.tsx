@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AIMessage } from './AIMessage';
 import { ToolMessage } from './ToolMessage';
 import { UserMessage } from './UserMessage';
+import { Button } from '../Common/Button';
 
 import type { ChatMessage } from './types';
 
@@ -107,14 +108,14 @@ export const MessageList = ({ messages, isLoading }: MessageListProps) => {
       </div>
 
       {hasNewMessage && (
-        <button
-          type="button"
+        <Button
+          variant="pill"
           onClick={scrollToBottom}
-          className="border-border bg-background text-muted-foreground hover:text-foreground absolute bottom-2 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium shadow-lg transition-colors"
+          className="border-border bg-background text-muted-foreground hover:text-foreground absolute bottom-2 left-1/2 z-10 -translate-x-1/2 gap-1.5 shadow-lg"
         >
           New message
           <ArrowDown size={14} />
-        </button>
+        </Button>
       )}
     </div>
   );

@@ -2,7 +2,7 @@ import clsx from 'clsx';
 import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
-import { GhostButton } from './GhostButton';
+import { Button } from './Button';
 
 import type { ButtonHTMLAttributes, ReactNode, RefObject } from 'react';
 
@@ -92,7 +92,7 @@ type DropdownMenuItemProps = {
 >;
 
 /**
- * A single item inside a `DropdownMenu`. Uses `GhostButton` as its base.
+ * A single item inside a `DropdownMenu`. Uses `Button` with ghost variant as its base.
  */
 export const DropdownMenuItem: React.FC<DropdownMenuItemProps> = ({
   icon,
@@ -101,7 +101,8 @@ export const DropdownMenuItem: React.FC<DropdownMenuItemProps> = ({
   className,
   ...props
 }) => (
-  <GhostButton
+  <Button
+    variant="ghost"
     role="menuitem"
     className={clsx(
       'w-full justify-start gap-3 rounded-none px-4 py-2 text-sm text-gray-700',
@@ -114,5 +115,5 @@ export const DropdownMenuItem: React.FC<DropdownMenuItemProps> = ({
     {shortcut && (
       <span className="ml-4 shrink-0 text-xs text-gray-400">{shortcut}</span>
     )}
-  </GhostButton>
+  </Button>
 );

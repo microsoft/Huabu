@@ -3,6 +3,8 @@ import { useState } from 'react';
 
 import useCanvasStore from '@/store/canvasStore.ts';
 
+import { IconButton } from './IconButton';
+
 import type { NodeStyle } from '@/components/Nodes/types.ts';
 
 const PRESET_COLORS = [
@@ -80,13 +82,15 @@ export const NodeBgColorSelector = ({
 
   return (
     <div className="relative flex items-center">
-      <button
-        className="border-border flex items-center justify-center rounded-full border p-px transition-transform hover:scale-110"
+      <IconButton
+        variant="outline"
+        className="border-border rounded-full border p-px hover:scale-110"
         onClick={(e) => {
           e.stopPropagation();
           setIsOpen(!isOpen);
         }}
         title="Change Color"
+        size="sm"
       >
         <div
           className={clsx(
@@ -95,7 +99,7 @@ export const NodeBgColorSelector = ({
             activeColor.border,
           )}
         />
-      </button>
+      </IconButton>
 
       {isOpen && (
         <>

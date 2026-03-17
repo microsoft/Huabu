@@ -103,14 +103,13 @@ export const ChatInput = ({
                     alt={att.label ?? 'Attached image'}
                     className="h-16 w-24 object-cover"
                   />
-                  <button
-                    type="button"
+                  <IconButton
                     onClick={() => removePendingAttachment(i)}
                     className="absolute top-0.5 right-0.5 rounded-full bg-black/50 p-0.5 text-white opacity-0 transition-opacity group-hover:opacity-100"
                     title="Remove attachment"
                   >
                     <X size={10} />
-                  </button>
+                  </IconButton>
                 </div>
               ))}
             </div>

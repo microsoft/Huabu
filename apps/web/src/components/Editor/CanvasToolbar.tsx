@@ -18,7 +18,7 @@ import useCanvasStore from '../../store/canvasStore.ts';
 import { useIntentStore } from '../../store/intentStore.ts';
 import { detectNodeType } from '../../utils/io/media.ts';
 import { Button } from '../Common/Button';
-import { GhostButton } from '../Common/GhostButton';
+import { IconButton } from '../Common/IconButton';
 import { Modal } from '../Common/Modal';
 
 import type {
@@ -260,7 +260,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
       <div className="text-muted-foreground shadow-bottom pointer-events-auto relative flex w-max items-center gap-2 rounded-lg border-0 bg-white px-4 py-2">
         {/* Group 1: Tools */}
         <div className="flex items-center gap-2">
-          <GhostButton
+          <IconButton
             title="Select"
             className={clsx(
               activeTool === 'select' && 'text-theme-500 bg-background',
@@ -268,8 +268,8 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             onClick={() => onToolChange('select')}
           >
             <MousePointer2 size={18} />
-          </GhostButton>
-          <GhostButton
+          </IconButton>
+          <IconButton
             title="Pan"
             className={clsx(
               activeTool === 'pan' && 'text-theme-500 bg-background',
@@ -277,14 +277,14 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             onClick={() => onToolChange('pan')}
           >
             <Hand size={18} />
-          </GhostButton>
+          </IconButton>
         </div>
 
         <div className="bg-border mx-1 h-4 w-px" />
 
         {/* Group 2: Nodes */}
         <div className="flex items-center gap-2">
-          <GhostButton
+          <IconButton
             title="Frame"
             className={clsx(
               pendingNodeType === 'frame' && 'text-theme-500 bg-background',
@@ -294,8 +294,8 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             }
           >
             <NODE_ICON.frame size={18} />
-          </GhostButton>
-          <GhostButton
+          </IconButton>
+          <IconButton
             title="Note"
             className={clsx(
               pendingNodeType === 'note' && 'text-theme-500 bg-background',
@@ -305,8 +305,8 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             }
           >
             <NODE_ICON.note size={18} />
-          </GhostButton>
-          <GhostButton
+          </IconButton>
+          <IconButton
             title="Text"
             className={clsx(
               pendingNodeType === 'text' && 'text-theme-500 bg-background',
@@ -316,13 +316,13 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             }
           >
             <NODE_ICON.text size={18} />
-          </GhostButton>
+          </IconButton>
         </div>
 
         <div className="bg-border mx-1 h-4 w-px" />
 
         <div className="flex items-center gap-2">
-          <GhostButton
+          <IconButton
             title="Upload Files"
             className={clsx(
               activeModal === 'upload' && 'text-theme-500 bg-background',
@@ -330,9 +330,9 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             onClick={() => setActiveModal('upload')}
           >
             <UploadCloud size={18} />
-          </GhostButton>
+          </IconButton>
 
-          <GhostButton
+          <IconButton
             title="Add Links"
             className={clsx(
               activeModal === 'link' && 'text-theme-500 bg-background',
@@ -340,16 +340,16 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             onClick={() => setActiveModal('link')}
           >
             <LinkIcon size={18} />
-          </GhostButton>
+          </IconButton>
         </div>
 
         <div className="bg-border mx-1 h-4 w-px" />
 
         <div className="flex items-center gap-2">
-          <GhostButton title="Auto Layout All" onClick={() => layoutAll()}>
+          <IconButton title="Auto Layout All" onClick={() => layoutAll()}>
             <LayoutDashboard size={18} />
-          </GhostButton>
-          <GhostButton
+          </IconButton>
+          <IconButton
             title={
               autoLayoutEnabled ? 'Disable Auto Layout' : 'Enable Auto Layout'
             }
@@ -359,13 +359,13 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             )}
           >
             <Sparkles size={18} />
-          </GhostButton>
+          </IconButton>
         </div>
 
         <div className="bg-border mx-1 h-4 w-px" />
 
         <div ref={intentButtonRef} className="flex items-center gap-2">
-          <GhostButton
+          <IconButton
             title="Intent (crtl + I)"
             className={clsx(intentOpen && 'text-theme-500 bg-background')}
             onClick={() => {
@@ -378,7 +378,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             }}
           >
             <Sprout size={18} />
-          </GhostButton>
+          </IconButton>
         </div>
       </div>
 

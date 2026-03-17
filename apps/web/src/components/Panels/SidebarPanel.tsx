@@ -1,7 +1,7 @@
 import clsx from 'clsx';
 import React from 'react';
 
-import { GhostButton } from '../Common/GhostButton';
+import { IconButton } from '../Common/IconButton';
 
 interface SidebarPanelProps {
   isCollapsed?: boolean;
@@ -34,9 +34,9 @@ export const SidebarPanel = ({
           className,
         )}
       >
-        <GhostButton onClick={onToggle} title={`Expand ${title}`}>
+        <IconButton onClick={onToggle} title={`Expand ${title}`}>
           {iconCollapsed}
-        </GhostButton>
+        </IconButton>
         <span className="mt-3 text-xs font-semibold text-gray-500 select-none [text-orientation:mixed] [writing-mode:vertical-rl]">
           {title}
         </span>
@@ -57,13 +57,13 @@ export const SidebarPanel = ({
               {tools}
             </div>
           )}
-          <GhostButton
+          <IconButton
             className="text-muted-foreground"
             onClick={onToggle}
             title={`Collapse ${title}`}
           >
             {iconExpanded}
-          </GhostButton>
+          </IconButton>
         </div>
       </div>
       {/* content */}

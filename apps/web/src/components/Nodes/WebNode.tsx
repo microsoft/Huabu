@@ -8,7 +8,7 @@ import { NodeWrapper } from './NodeWrapper.tsx';
 import { PreviewCard } from './PreviewCard.tsx';
 import { useNodeScale } from '../../hooks/useNodeScale.ts';
 import useCanvasStore from '../../store/canvasStore.ts';
-import { GhostButton } from '../Common/GhostButton.tsx';
+import { IconButton } from '../Common/IconButton.tsx';
 
 import type { CanvasWebNodeData } from './types.ts';
 
@@ -103,7 +103,7 @@ export const WebNode = memo(
         <div className="text-muted-foreground flex items-center gap-1">
           <div className="bg-border h-3 w-px" />
 
-          <GhostButton
+          <IconButton
             aria-label="Open large view"
             title="Open Large View"
             onClick={(e) => {
@@ -112,7 +112,7 @@ export const WebNode = memo(
             }}
           >
             <Fullscreen size={14} />
-          </GhostButton>
+          </IconButton>
         </div>
       </div>
     );

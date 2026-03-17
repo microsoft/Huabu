@@ -10,7 +10,7 @@ import clsx from 'clsx';
 import { GripVertical, Plus } from 'lucide-react';
 import { createContext, useCallback, useContext, useRef, type FC } from 'react';
 
-import { GhostButton } from '@/components/Common/GhostButton';
+import { IconButton } from '@/components/Common/IconButton';
 import {
   SEDIMENT_DND_MIME,
   createDragId,
@@ -69,9 +69,9 @@ const AddBlockButton: FC = () => {
   if (!block) return null;
 
   return (
-    <GhostButton aria-label="Add block" className={BTN_CLASS} onClick={onClick}>
+    <IconButton aria-label="Add block" className={BTN_CLASS} onClick={onClick}>
       <Plus size={ICON_SIZE} className="shrink-0" />
-    </GhostButton>
+    </IconButton>
   );
 };
 
@@ -116,7 +116,7 @@ const DragHandleButton: FC = () => {
   if (!block) return null;
 
   return (
-    <GhostButton
+    <IconButton
       aria-label="Drag handle"
       draggable
       className={clsx(BTN_CLASS, 'mr-1 cursor-grab active:cursor-grabbing')}
@@ -194,7 +194,7 @@ const DragHandleButton: FC = () => {
       }}
     >
       <GripVertical size={ICON_SIZE} className="shrink-0" />
-    </GhostButton>
+    </IconButton>
   );
 };
 

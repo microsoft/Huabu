@@ -22,6 +22,8 @@ import { createPortal } from 'react-dom';
 
 import useCanvasStore from '../../store/canvasStore';
 import { useIntentStore } from '../../store/intentStore';
+import { Button } from '../Common/Button';
+import { IconButton } from '../Common/IconButton';
 
 import type { IntentAction } from '@sediment/shared';
 
@@ -187,7 +189,7 @@ const IntentSelectStep: React.FC<{ anchorY: number }> = ({ anchorY }) => {
               if (e.key === 'Enter') handleCustomSubmit();
             }}
           />
-          <button
+          <IconButton
             type="button"
             title="Send"
             className="text-muted-foreground hover:text-theme-500 flex-shrink-0 transition-colors disabled:opacity-30"
@@ -195,7 +197,7 @@ const IntentSelectStep: React.FC<{ anchorY: number }> = ({ anchorY }) => {
             onClick={handleCustomSubmit}
           >
             <Send size={14} />
-          </button>
+          </IconButton>
         </div>
       </div>
     </div>
@@ -765,30 +767,33 @@ const ActionReviewStep: React.FC = () => {
 
       {/* Action bar */}
       <div className="border-border flex items-center justify-between border-t px-3 py-2">
-        <button
-          type="button"
-          className="text-muted-foreground hover:text-foreground hover:bg-muted flex items-center gap-1 rounded px-1.5 py-0.5 text-xs transition-colors"
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-muted-foreground hover:text-foreground hover:bg-muted gap-1"
           onClick={resetActions}
         >
           <RotateCcw size={12} />
           Reset
-        </button>
+        </Button>
         <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            className="bg-muted hover:bg-muted/80 text-foreground/70 flex items-center gap-1 rounded-md px-3 py-1 text-xs transition-colors"
+          <Button
+            variant="ghost"
+            size="sm"
+            className="bg-muted hover:bg-muted/80 text-foreground/70 gap-1 rounded-md px-3 py-1"
           >
             <Pencil size={10} />
             Edit
-          </button>
-          <button
-            type="button"
-            className="bg-theme-500 hover:bg-theme-600 flex items-center gap-1 rounded-md px-3 py-1 text-xs font-medium text-white transition-colors"
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            className="gap-1 rounded-md px-3 py-1"
             onClick={execute}
           >
             <Play size={10} />
             Execute
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -947,26 +952,24 @@ export const IntentPopover: React.FC = () => {
       {/* Title bar */}
       <div className="border-border flex items-center gap-2 border-b px-3 py-2">
         {step === 'action-review' && (
-          <button
-            type="button"
+          <IconButton
             title="Go back"
-            className="text-muted-foreground hover:text-foreground flex-shrink-0 transition-colors"
+            className="text-muted-foreground hover:text-foreground flex-shrink-0"
             onClick={goBack}
           >
             <ArrowLeft size={14} />
-          </button>
+          </IconButton>
         )}
         <span className="text-foreground/80 min-w-0 flex-1 truncate text-sm">
           {stepTitle}
         </span>
-        <button
-          type="button"
+        <IconButton
           title="Close"
-          className="text-muted-foreground hover:text-foreground flex-shrink-0 rounded p-0.5 transition-colors"
+          className="text-muted-foreground hover:text-foreground flex-shrink-0 rounded p-0.5"
           onClick={dismiss}
         >
           <X size={14} />
-        </button>
+        </IconButton>
       </div>
 
       {isLoading && step === 'action-review' ? (

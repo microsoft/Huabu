@@ -2,7 +2,7 @@ import { ChevronDown, ChevronRight, Sparkles } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
 import { SourceCard, type Source } from './SourceCard';
-import { GhostButton } from '../Common/GhostButton';
+import { Button } from '../Common/Button';
 
 import type { ToolResponse, WebSearchToolResponse } from '@sediment/shared';
 
@@ -92,7 +92,7 @@ function ResearchToolDisplay({
     return (
       <div className="flex justify-start">
         <div className="text-muted-foreground border-border rounded-2xl border bg-white px-3 py-2 text-sm">
-          🔍 Found{' '}
+          馃攳 Found{' '}
           <span className="font-medium">
             {nodeCount} source{nodeCount !== 1 ? 's' : ''}
           </span>{' '}
@@ -186,7 +186,8 @@ function WebSearchToolDisplay({
   return (
     <div className="flex justify-start">
       <div className="flex w-full flex-col items-start gap-2">
-        <GhostButton
+        <Button
+          variant="ghost"
           aria-expanded={isExpanded}
           aria-label={`Toggle sources (${count} ${label})`}
           onClick={() => setIsExpanded((v) => !v)}
@@ -195,7 +196,7 @@ function WebSearchToolDisplay({
           <span className="mr-1 ml-2">
             Used {count} {label}
           </span>
-        </GhostButton>
+        </Button>
 
         {isExpanded && (
           <div className="w-full">

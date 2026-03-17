@@ -11,6 +11,8 @@ import { createPortal } from 'react-dom';
 
 import useCanvasStore from '@/store/canvasStore';
 
+import { Button } from '../../Common/Button';
+
 import type { IntentAction } from '@sediment/shared';
 
 interface AgentChangeListProps {
@@ -583,24 +585,26 @@ export const AgentChangeList = ({
           Agent Change List
         </div>
         <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            className="bg-muted hover:bg-muted/80 text-foreground inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+          <Button
+            variant="ghost"
+            size="sm"
+            className="bg-muted hover:bg-muted/80 text-foreground gap-1 rounded-md px-2.5 py-1"
             onClick={onRevert}
             disabled={disabled}
           >
             <RotateCcw size={12} />
             Revert
-          </button>
-          <button
-            type="button"
-            className="bg-theme-500 hover:bg-theme-600 inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            className="gap-1 rounded-md px-2.5 py-1"
             onClick={onKeep}
             disabled={disabled}
           >
             <Check size={12} />
             Keep
-          </button>
+          </Button>
         </div>
       </div>
 
