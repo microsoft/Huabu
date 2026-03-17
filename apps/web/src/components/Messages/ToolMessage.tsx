@@ -92,7 +92,7 @@ function ResearchToolDisplay({
     return (
       <div className="flex justify-start">
         <div className="text-muted-foreground border-border rounded-2xl border bg-white px-3 py-2 text-sm">
-          馃攳 Found{' '}
+          🔍 Found{' '}
           <span className="font-medium">
             {nodeCount} source{nodeCount !== 1 ? 's' : ''}
           </span>{' '}
