@@ -991,8 +991,18 @@ function handleLayoutAll(
 ): void {
   const { nodes, edges, set } = ctx;
   canvasHistoryManager.takeSnapshot(nodes, edges);
-  const result = layoutAllNodes(nodes, edges, { animate: true });
+  let result = layoutAllNodes(nodes, edges, { animate: true });
   if (!result) return;
+
+  // Refit all frames so children get the standard visual padding.
+  const frameIds = new Set<string>();
+  for (const n of result) {
+    if (n.parentId) frameIds.add(n.parentId);
+  }
+  if (frameIds.size > 0) {
+    result = fitFrames(result as NestableNode[], frameIds);
+  }
+
   set({ nodes: result });
 }
 

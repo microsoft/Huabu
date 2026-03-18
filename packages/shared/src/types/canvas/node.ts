@@ -143,6 +143,15 @@ export interface WebNodeData extends BaseNodeData {
   sourceId?: string;
 }
 
+/** A single highlight annotation on a PDF page. */
+export interface PdfHighlight {
+  id: string;
+  /** 0-based page index */
+  pageIndex: number;
+  /** Bounding rectangles (normalized 0–1 relative to the page) */
+  rects: Array<{ x: number; y: number; width: number; height: number }>;
+}
+
 /** PDF node: PDF document that can be ingested */
 export interface PdfNodeData extends BaseNodeData {
   type: 'pdf';
@@ -150,6 +159,8 @@ export interface PdfNodeData extends BaseNodeData {
   sourceId?: string;
   /** When set, the canvas node displays this image instead of the PDF preview. */
   coverUrl?: string;
+  /** Persistent text highlights drawn by the user. */
+  highlights?: PdfHighlight[];
 }
 
 /** Video node: video content */

@@ -1,4 +1,3 @@
-import clsx from 'clsx';
 import {
   useEffect,
   useId,
@@ -8,6 +7,8 @@ import {
   type RefObject,
 } from 'react';
 import { createPortal } from 'react-dom';
+
+import { cn } from './cn';
 
 export type ModalProps = {
   isOpen: boolean;
@@ -125,7 +126,7 @@ export function Modal({
         aria-labelledby={labelledBy}
         aria-describedby={describedBy}
         tabIndex={-1}
-        className={clsx(
+        className={cn(
           'border-border shadow-bottom animate-in zoom-in-95 relative z-10 w-96 max-w-[calc(100vw-3rem)] rounded-lg border bg-white p-6 duration-200',
           className,
         )}
@@ -140,7 +141,7 @@ export function Modal({
             {description && (
               <div
                 id={descriptionId}
-                className={clsx(
+                className={cn(
                   'text-muted-foreground mt-1 text-sm',
                   !title && 'mt-0',
                 )}

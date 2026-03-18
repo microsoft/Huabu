@@ -44,6 +44,8 @@ type DragState = {
   currentY: number;
 };
 
+import type { PdfHighlight } from '@sediment/shared';
+
 type PDFPageWithOverlayProps = {
   /** 1-based page number for react-pdf */
   pageNumber: number;
@@ -56,6 +58,8 @@ type PDFPageWithOverlayProps = {
   onAreaCaptured: (event: AreaCapturedEvent) => void;
   /** When provided, the selection rectangle stays visible (e.g. while FloatingDragHandle is shown). */
   persistedRect?: NormalizedRect;
+  /** Persistent highlights to render on this page. */
+  highlights?: PdfHighlight[];
 };
 
 export const PDFPageWithOverlay = ({
@@ -65,6 +69,7 @@ export const PDFPageWithOverlay = ({
   captureEnabled = false,
   onAreaCaptured,
   persistedRect,
+  highlights,
 }: PDFPageWithOverlayProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const pageProxyRef = useRef<PdfPageProxy | null>(null);
@@ -247,6 +252,7 @@ export const PDFPageWithOverlay = ({
     // and text is extracted programmatically via pdfjs getTextContent().
     <div
       ref={containerRef}
+      data-pdf-page-index={pageIndex}
       className={clsx(
         'relative',
         !rendered && 'min-h-40',
@@ -286,6 +292,24 @@ export const PDFPageWithOverlay = ({
             borderRadius: '3px',
           }}
         />
+      )}
+
+      {/* Persistent highlights */}
+      {highlights?.map((hl) =>
+        hl.rects.map((r, i) => (
+          <div
+            key={`${hl.id}-${i}`}
+            className="pointer-events-none absolute"
+            style={{
+              left: `${r.x * 100}%`,
+              top: `${r.y * 100}%`,
+              width: `${r.width * 100}%`,
+              height: `${r.height * 100}%`,
+              background: 'rgba(255, 235, 59, 0.5)',
+              mixBlendMode: 'multiply',
+            }}
+          />
+        )),
       )}
     </div>
   );

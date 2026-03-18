@@ -1,5 +1,4 @@
-import clsx from 'clsx';
-
+import { cn } from './cn';
 import { Tooltip } from './Tooltip';
 
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
@@ -40,7 +39,7 @@ export const IconButton = ({
   const buttonEl = (
     <button
       type={type}
-      className={clsx(
+      className={cn(
         'inline-flex items-center justify-center',
         'disabled:cursor-not-allowed',
         variantClasses[variant],

@@ -23,6 +23,7 @@ export type {
   TextNodeData,
   WebNodeData,
   PdfNodeData,
+  PdfHighlight,
   VideoNodeData,
   ImageNodeData,
   FrameNodeData,
