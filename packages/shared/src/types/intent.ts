@@ -106,4 +106,5 @@ export interface ResolveActionsResponse {
  */
 export interface IntentEpisodeRequest {
   episode: IntentEpisode;
+  canvasId?: string;
 }

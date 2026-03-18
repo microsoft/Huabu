@@ -19,7 +19,7 @@ import { RESEARCH_SYSTEM_PROMPT } from '../../prompt/research.js';
 import { SYSTEM_PROMPT } from '../../prompt/system.js';
 import { IMAGE_MIME_MAP } from '../../utils/mime.js';
 import { runAgent } from '../agent/agent.service.js';
-import { loadContext, saveContext } from '../agent/store/context-store.js';
+import { loadContext, saveContext } from '../agent/store/chat-store.js';
 import { getArtifactsDir } from '../artifact/utils.js';
 import { buildContext } from '../knowledge/index.js';
 
@@ -321,7 +321,7 @@ const agentRoutes: FastifyPluginAsync = async (
     const resolvedThreadId = getOrCreateThreadId(threadId);
 
     // Build or resume context
-    let context = loadContext(resolvedThreadId);
+    let context = loadContext(resolvedThreadId, canvasId);
 
     if (!context) {
       context = {
@@ -427,7 +427,7 @@ const agentRoutes: FastifyPluginAsync = async (
       }
 
       // Persist the context after completion
-      saveContext(resolvedThreadId, context);
+      saveContext(resolvedThreadId, context, canvasId);
 
       reply.raw.write('event: end\ndata: {}\n\n');
     } catch (error) {

@@ -85,11 +85,14 @@ export async function recognizeIntentStream(
 /**
  * Log an intent episode (user's choice or dismissal) for preference learning.
  */
-export async function logIntentEpisode(episode: IntentEpisode): Promise<void> {
+export async function logIntentEpisode(
+  episode: IntentEpisode,
+  canvasId?: string,
+): Promise<void> {
   await fetch(`${API_CONFIG.API_URL}/intent/episode`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ episode }),
+    body: JSON.stringify({ episode, canvasId }),
   }).catch((err) => {
     console.error('[intent] Failed to log episode:', err);
   });

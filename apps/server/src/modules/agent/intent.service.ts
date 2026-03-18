@@ -1,14 +1,13 @@
 /**
- * @file intent.service.ts
+ * Intent Recognition Service
  *
- * Intent recognition service.
  * Receives an AgentBaseContext and returns a ranked list of intent candidates
  * by calling the LLM to analyze the canvas state and recent user actions.
  */
 
-import { getIntentDb } from './intent.db.js';
+import { llmComplete, llmStream } from './llm.js';
+import { logIntentEpisode as storeEpisode } from './store/intent-store.js';
 import { INTENT_SYSTEM_PROMPT } from '../../prompt/intent.js';
-import { llmComplete, llmStream } from '../agent/llm.js';
 
 import type { Context } from '@mariozechner/pi-ai';
 import type {
@@ -22,21 +21,9 @@ import type {
 // Context → natural-language serialization
 // ---------------------------------------------------------------------------
 
-/**
- * Lightweight context for Step 1 (intent recognition).
- *
- * Information hierarchy:
- *   1. Node schema only — type + label, NO snippets/content (the screenshot
- *      already shows spatial layout; text is noise at this stage).
- *   2. Selected nodes — full content (strongest intent signal).
- *   3. Last 10 recent actions (already capped by frontend ring buffer).
- *   4. Screenshot carries visual annotations for the latest action
- *      (handled on the frontend side).
- */
 function serializeContextLight(ctx: AgentBaseContext): string {
   const lines: string[] = [];
 
-  // Node schema — type + label only, grouped by type for scannability
   if (ctx.nodes.length > 0) {
     const byType = new Map<string, typeof ctx.nodes>();
     for (const n of ctx.nodes) {
@@ -60,7 +47,6 @@ function serializeContextLight(ctx: AgentBaseContext): string {
     lines.push('# Canvas is empty.');
   }
 
-  // Edges — compact adjacency list
   if (ctx.edges.length > 0) {
     lines.push('');
     lines.push('# Connections:');
@@ -69,7 +55,6 @@ function serializeContextLight(ctx: AgentBaseContext): string {
     }
   }
 
-  // Recent actions (last 10, maintained by frontend)
   if (ctx.recentActions.length > 0) {
     lines.push('');
     lines.push('# Recent user actions (oldest → newest):');
@@ -78,7 +63,6 @@ function serializeContextLight(ctx: AgentBaseContext): string {
     }
   }
 
-  // Selected nodes — full content (primary intent signal)
   if (ctx.selectedNodes && ctx.selectedNodes.length > 0) {
     lines.push('');
     lines.push(`# Currently selected node(s) (${ctx.selectedNodes.length}):`);
@@ -168,8 +152,6 @@ function formatAction(a: RecentAction): string {
     case 'canvas_redone':
       return 'Redid the previously undone canvas action';
     default: {
-      // Exhaustiveness guard — if this line produces a TS error, a new
-      // RecentAction variant has been added and this function needs a new case.
       const _exhaustive: never = a;
       return `Unknown action: ${(_exhaustive as RecentAction).action}`;
     }
@@ -184,16 +166,12 @@ type ContentPart =
   | { type: 'text'; text: string }
   | { type: 'image'; data: string; mimeType: string };
 
-/**
- * Append a canvas screenshot as a pi-ai image content part.
- */
 function appendScreenshot(
   parts: ContentPart[],
   screenshot: string | undefined,
   caption?: string,
 ): void {
   if (!screenshot) return;
-  // Strip data URL prefix if present to get raw base64
   const base64 = screenshot.startsWith('data:')
     ? screenshot.replace(/^data:[^;]+;base64,/, '')
     : screenshot;
@@ -207,10 +185,9 @@ function appendScreenshot(
 // LLM-based intent recognition
 // ---------------------------------------------------------------------------
 
-/**
- * Call the LLM to analyse the canvas context and return intent candidates.
- * When a screenshot is available, sends it as a multimodal image for visual reasoning.
- */
+const SCREENSHOT_CAPTION =
+  'Above is a screenshot of the current canvas viewport. Nodes are labeled with their IDs. The last user action is annotated in red: a banner at the top-left reads "Last step: ...", affected nodes have red borders, and arrows show directional relationships (connect, frame). Use these visual signals to infer intent.';
+
 async function llmIntentRecognition(
   ctx: AgentBaseContext,
 ): Promise<IntentCandidate[]> {
@@ -220,11 +197,7 @@ async function llmIntentRecognition(
     { type: 'text', text: `Current canvas state:\n\n${contextText}` },
   ];
 
-  appendScreenshot(
-    userContentParts,
-    ctx.screenshot,
-    'Above is a screenshot of the current canvas viewport. Nodes are labeled with their IDs. The last user action is annotated in red: a banner at the top-left reads "Last step: ...", affected nodes have red borders, and arrows show directional relationships (connect, frame). Use these visual signals to infer intent.',
-  );
+  appendScreenshot(userContentParts, ctx.screenshot, SCREENSHOT_CAPTION);
 
   const piContext: Context = {
     systemPrompt: INTENT_SYSTEM_PROMPT,
@@ -257,13 +230,9 @@ async function llmIntentRecognition(
 }
 
 // ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
-/**
- * Perform intent recognition by calling the LLM with the canvas context.
- */
 export async function recognizeIntent(
   ctx: AgentBaseContext,
 ): Promise<IntentCandidate[]> {
@@ -275,10 +244,6 @@ export async function recognizeIntent(
   }
 }
 
-/**
- * Stream intent recognition — yields individual IntentCandidate objects
- * as they are incrementally parsed from the LLM token stream.
- */
 export async function* recognizeIntentStream(
   ctx: AgentBaseContext,
 ): AsyncGenerator<IntentCandidate> {
@@ -288,11 +253,7 @@ export async function* recognizeIntentStream(
     { type: 'text', text: `Current canvas state:\n\n${contextText}` },
   ];
 
-  appendScreenshot(
-    userContentParts,
-    ctx.screenshot,
-    'Above is a screenshot of the current canvas viewport. Nodes are labeled with their IDs. The last user action is annotated in red: a banner at the top-left reads "Last step: ...", affected nodes have red borders, and arrows show directional relationships (connect, frame). Use these visual signals to infer intent.',
-  );
+  appendScreenshot(userContentParts, ctx.screenshot, SCREENSHOT_CAPTION);
 
   const piContext: Context = {
     systemPrompt: INTENT_SYSTEM_PROMPT,
@@ -318,7 +279,6 @@ export async function* recognizeIntentStream(
     }
   }
 
-  // Final parse attempt on the complete response
   const finalCandidates = tryParsePartialCandidates(accumulated);
   while (yieldedCount < finalCandidates.length) {
     yield finalCandidates[yieldedCount];
@@ -326,16 +286,9 @@ export async function* recognizeIntentStream(
   }
 }
 
-/**
- * Extract fully-closed JSON objects from an accumulating JSON array string.
- * Uses brace-depth tracking to only yield objects whose closing `}` has
- * been received — never yields partially-streamed objects.
- */
 function tryParsePartialCandidates(raw: string): IntentCandidate[] {
-  // Strip markdown fences
   const cleaned = raw.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
 
-  // Find the opening bracket of the array
   const arrStart = cleaned.indexOf('[');
   if (arrStart < 0) return [];
   const inner = cleaned.slice(arrStart + 1);
@@ -369,7 +322,6 @@ function tryParsePartialCandidates(raw: string): IntentCandidate[] {
     } else if (ch === '}') {
       depth--;
       if (depth === 0 && objStart >= 0) {
-        // We have a complete top-level object
         const objText = inner.slice(objStart, i + 1);
         try {
           const obj = JSON.parse(objText) as Record<string, unknown>;
@@ -393,27 +345,12 @@ function tryParsePartialCandidates(raw: string): IntentCandidate[] {
 }
 
 // ---------------------------------------------------------------------------
-// Episode logging — stores intent interaction history for preference learning
+// Episode logging
 // ---------------------------------------------------------------------------
 
-/**
- * Persist an intent episode to the database.
- */
-export function logIntentEpisode(episode: IntentEpisode): void {
-  const db = getIntentDb();
-  const stmt = db.prepare(`
-    INSERT OR REPLACE INTO intent_episodes
-      (id, timestamp, contextSummary, candidates, outcomeType, chosenIndex, chosenLabel)
-    VALUES
-      (?, ?, ?, ?, ?, ?, ?)
-  `);
-  stmt.run(
-    episode.id,
-    episode.timestamp,
-    episode.contextSummary,
-    JSON.stringify(episode.candidates),
-    episode.outcome.type,
-    episode.outcome.type === 'selected' ? episode.outcome.chosenIndex : null,
-    episode.outcome.type === 'selected' ? episode.outcome.chosenLabel : null,
-  );
+export function logIntentEpisode(
+  episode: IntentEpisode,
+  canvasId?: string,
+): void {
+  storeEpisode(episode, canvasId);
 }

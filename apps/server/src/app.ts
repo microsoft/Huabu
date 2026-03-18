@@ -6,9 +6,9 @@ import staticPlugin from '@fastify/static';
 import { fastify } from 'fastify';
 
 import agentRoutes from './modules/agent/agent.route.js';
+import intentRoutes from './modules/agent/intent.route.js';
 import artifactRoute from './modules/artifact/artifact.route.js';
 import canvasRoutes from './modules/canvas/canvas.route.js';
-import intentRoutes from './modules/intent/intent.route.js';
 import knowledgeRoute from './modules/knowledge/knowledge.route.js';
 import webRoutes from './modules/web/web.route.js';
 import { isWorkspaceConfigured } from './modules/workspace.js';

@@ -128,18 +128,22 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
     const chosenLabel = candidate.label;
     // Preserve candidates before clearing state
     const savedCandidates = [...candidates];
+    const canvasId = useCanvasStore.getState().canvasId;
 
-    void logIntentEpisode({
-      id: createId('intent'),
-      timestamp: Date.now(),
-      contextSummary,
-      candidates,
-      outcome: {
-        type: 'selected',
-        chosenIndex: index,
-        chosenLabel,
+    void logIntentEpisode(
+      {
+        id: createId('intent'),
+        timestamp: Date.now(),
+        contextSummary,
+        candidates,
+        outcome: {
+          type: 'selected',
+          chosenIndex: index,
+          chosenLabel,
+        },
       },
-    });
+      canvasId || undefined,
+    );
 
     // Dismiss popover and send to chat panel
     set({
@@ -157,18 +161,22 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
   submitCustomIntent: (text: string) => {
     if (!text.trim()) return;
     const { candidates, contextSummary, _onIntentChosen } = get();
+    const canvasId = useCanvasStore.getState().canvasId;
 
-    void logIntentEpisode({
-      id: createId('intent'),
-      timestamp: Date.now(),
-      contextSummary,
-      candidates,
-      outcome: {
-        type: 'selected',
-        chosenIndex: 0,
-        chosenLabel: text.trim(),
+    void logIntentEpisode(
+      {
+        id: createId('intent'),
+        timestamp: Date.now(),
+        contextSummary,
+        candidates,
+        outcome: {
+          type: 'selected',
+          chosenIndex: 0,
+          chosenLabel: text.trim(),
+        },
       },
-    });
+      canvasId || undefined,
+    );
 
     // Preserve candidates before clearing state
     const savedCandidates = [...candidates];
@@ -194,13 +202,17 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
     const { candidates, contextSummary } = get();
 
     if (candidates.length > 0) {
-      void logIntentEpisode({
-        id: createId('intent'),
-        timestamp: Date.now(),
-        contextSummary,
-        candidates,
-        outcome: { type: 'dismissed' },
-      });
+      const canvasId = useCanvasStore.getState().canvasId;
+      void logIntentEpisode(
+        {
+          id: createId('intent'),
+          timestamp: Date.now(),
+          contextSummary,
+          candidates,
+          outcome: { type: 'dismissed' },
+        },
+        canvasId || undefined,
+      );
     }
 
     set({

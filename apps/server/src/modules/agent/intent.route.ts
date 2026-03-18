@@ -1,8 +1,9 @@
 /**
- * @file intent.route.ts
+ * Intent Routes
  *
  * POST /api/intent/recognize
- * Accepts an AgentBaseContext and returns ranked intent candidates.
+ * POST /api/intent/recognize-stream
+ * POST /api/intent/episode
  */
 
 import {
@@ -81,11 +82,11 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   fastify.post<{ Body: IntentEpisodeRequest }>(
     '/episode',
     async (request, reply) => {
-      const { episode } = request.body;
+      const { episode, canvasId } = request.body;
       if (!episode?.id) {
         return reply.code(400).send({ error: 'episode is required' } as never);
       }
-      logIntentEpisode(episode);
+      logIntentEpisode(episode, canvasId);
       return reply.send({ success: true });
     },
   );
