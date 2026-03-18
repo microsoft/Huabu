@@ -109,8 +109,8 @@ export const NoteNode = memo(
       const container = shadowRootRef.current?.querySelector('div');
       if (!container) return;
       container.className = hasFixedHeight
-        ? 'flex h-full flex-col rounded bg-white p-4'
-        : 'flex flex-col rounded bg-white p-4';
+        ? 'flex h-full flex-col rounded bg-white p-2'
+        : 'flex flex-col rounded bg-white p-2';
     }, [hasFixedHeight]);
 
     // Update Shadow DOM content when editor or data changes

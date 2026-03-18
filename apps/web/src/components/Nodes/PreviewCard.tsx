@@ -28,7 +28,7 @@ export function PreviewCard({
   const NodeTypeIcon = getNodeIcon(nodeType);
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden bg-white">
+    <div className="flex h-full w-full flex-col justify-evenly overflow-hidden bg-white">
       {/* Cover image — shrinks first when space is tight */}
       {image ? (
         <img
@@ -45,20 +45,20 @@ export function PreviewCard({
       ) : null}
 
       {/* Icon + title — always visible, vertically centered */}
-      <div className="flex min-w-0 shrink-0 items-center gap-2 px-2 py-1">
-        <div className="text-muted-foreground flex flex-none translate-y-px items-center">
+      <div className="flex min-w-0 shrink-0 items-start gap-2 px-2 py-1">
+        <div className="text-muted-foreground flex flex-none translate-y-1 items-center">
           {favicon ? (
             <img
               src={favicon}
               alt=""
-              className="h-3.5 w-3.5 rounded-sm"
+              className="h-4 w-4 rounded-sm"
               loading="lazy"
               onError={(e) => {
                 e.currentTarget.style.display = 'none';
               }}
             />
           ) : (
-            <NodeTypeIcon size={14} />
+            <NodeTypeIcon size={16} />
           )}
         </div>
         <span className="text-main line-clamp-2 min-w-0 text-base font-medium wrap-break-word">

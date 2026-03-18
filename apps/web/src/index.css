@@ -174,6 +174,15 @@ body,
     height 0.2s ease-out;
 }
 
+/* Keep pdf.js text-layer spans invisible during text selection so the
+   HTML text (which uses system fonts) doesn't bleed through the canvas
+   rendering that shows the actual PDF fonts.  A semi-transparent background
+   still shows the user which region is selected. */
+.textLayer span::selection {
+  color: transparent;
+  background: rgba(0, 100, 200, 0.3);
+}
+
 .block-note-view-readonly .bn-editor {
   padding: 0 !important;
 }

@@ -4,8 +4,9 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 import { exportCanvas } from '../../api/canvas';
 import useCanvasStore from '../../store/canvasStore';
-import { DropdownMenu, DropdownMenuItem } from '../Common/DropdownMenu';
+import { DropdownMenuItem } from '../Common/DropdownMenu';
 import { IconButton } from '../Common/IconButton';
+import { Popover } from '../Common/Popover';
 
 /**
  * canvas title + dropdown menu.
@@ -24,8 +25,11 @@ export const CanvasMenu: React.FC = () => {
   const [statusMessage, setStatusMessage] = useState('');
 
   const triggerRef = useRef<HTMLDivElement>(null);
+  const chevronRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const sizerRef = useRef<HTMLSpanElement>(null);
+
+  const justDismissedRef = useRef(false);
 
   // Keep input width in sync with its content
   useEffect(() => {
@@ -73,23 +77,31 @@ export const CanvasMenu: React.FC = () => {
           className="text-main focus:shadow-bottom m-0 min-w-8 bg-transparent px-1 py-1 text-lg font-medium outline-none focus:rounded-md"
           value={canvasTitle}
           onChange={(e) => setCanvasTitle(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') inputRef.current?.blur();
+          }}
           aria-label="Canvas title"
         />
 
-        <IconButton
-          onClick={() => setIsOpen((prev) => !prev)}
-          aria-label="Workspace menu"
-          aria-expanded={isOpen}
-          className="h-7 w-7 shrink-0"
-        >
-          <ChevronDown
-            size={15}
-            className={clsx(
-              'text-gray-500 transition-transform duration-150',
-              isOpen && 'rotate-180',
-            )}
-          />
-        </IconButton>
+        <div ref={chevronRef}>
+          <IconButton
+            onClick={() => {
+              if (justDismissedRef.current) return;
+              setIsOpen((prev) => !prev);
+            }}
+            aria-label="Canvas menu"
+            aria-expanded={isOpen}
+            className="h-7 w-7 shrink-0"
+          >
+            <ChevronDown
+              size={14}
+              className={clsx(
+                'text-gray-500 transition-transform duration-150',
+                isOpen && 'rotate-180',
+              )}
+            />
+          </IconButton>
+        </div>
 
         {/* Inline status message */}
         {statusMessage && (
@@ -98,41 +110,52 @@ export const CanvasMenu: React.FC = () => {
       </div>
 
       {/* Dropdown menu */}
-      <DropdownMenu
-        triggerRef={triggerRef}
-        isOpen={isOpen}
-        onClose={() => setIsOpen(false)}
-      >
-        <DropdownMenuItem
-          icon={<Undo2 size={14} />}
-          shortcut="⌘Z"
-          disabled={!canUndo}
-          onClick={() => {
+      {isOpen && (
+        <Popover
+          position={(() => {
+            if (!chevronRef.current) return { x: 0, y: 0 };
+            const rect = chevronRef.current.getBoundingClientRect();
+            return { x: rect.left, y: rect.bottom };
+          })()}
+          onDismiss={() => {
+            justDismissedRef.current = true;
             setIsOpen(false);
-            undo();
+            requestAnimationFrame(() => {
+              justDismissedRef.current = false;
+            });
           }}
+          offset={{ x: 0, y: 4 }}
+          className="flex flex-col overflow-hidden py-1"
         >
-          Undo
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          icon={<Redo2 size={14} />}
-          shortcut="⇧⌘Z"
-          disabled={!canRedo}
-          onClick={() => {
-            setIsOpen(false);
-            redo();
-          }}
-        >
-          Redo
-        </DropdownMenuItem>
-        <div className="my-1 border-t border-gray-200" />
-        <DropdownMenuItem
-          icon={<Download size={14} />}
-          onClick={() => void handleExport()}
-        >
-          Export Canvas
-        </DropdownMenuItem>
-      </DropdownMenu>
+          <DropdownMenuItem
+            icon={<Undo2 size={14} />}
+            disabled={!canUndo}
+            onClick={() => {
+              setIsOpen(false);
+              undo();
+            }}
+          >
+            Undo
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            icon={<Redo2 size={14} />}
+            disabled={!canRedo}
+            onClick={() => {
+              setIsOpen(false);
+              redo();
+            }}
+          >
+            Redo
+          </DropdownMenuItem>
+          <div className="my-1 border-t border-gray-200" />
+          <DropdownMenuItem
+            icon={<Download size={14} />}
+            onClick={() => void handleExport()}
+          >
+            Export Canvas
+          </DropdownMenuItem>
+        </Popover>
+      )}
     </>
   );
 };
