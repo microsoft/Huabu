@@ -268,7 +268,7 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
 
   /**
    * Build a filename for a source.
-   * The filename IS the title. Falls back to sourceId when no title is available.
+   * The filename IS the title. Falls back to 'Untitled' when no title is available.
    */
   private buildSourceFileName(sourceId: string, title?: string | null): string {
     if (title) {
@@ -278,7 +278,7 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
         .slice(0, 80);
       if (safe.length > 0) return `${safe}.md`;
     }
-    return `${sourceId}.md`;
+    return 'Untitled.md';
   }
 
   /**
