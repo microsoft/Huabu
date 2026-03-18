@@ -166,6 +166,13 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const loadCanvas = useCanvasStore((state) => state.loadCanvas);
   const refreshCanvas = useCanvasStore((state) => state.refreshCanvas);
 
+  // Switch chat thread when canvas changes
+  useEffect(() => {
+    if (canvasId) {
+      useChatStore.getState().switchToCanvas(canvasId);
+    }
+  }, [canvasId]);
+
   // Research store — tracks running status for UI (disable input, etc.)
   const researchStatus = useResearchStore((state) => state.status);
   const startResearchUi = useResearchStore((state) => state.startResearch);
@@ -202,7 +209,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     } = useChatStore.getState();
 
     agentApi
-      .fetchHistory(tid)
+      .fetchHistory(tid, canvasId || undefined)
       .then((res) => {
         if (cancelled) return;
 
@@ -246,7 +253,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     return () => {
       cancelled = true;
     };
-  }, [threadId]);
+  }, [threadId, canvasId]);
 
   const handleStreamingChat = useCallback(
     async (
@@ -533,7 +540,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
 
   const handleNewChat = () => {
     if (isLoading || researchStatus === 'running') return;
-    clearMessages();
+    clearMessages(canvasId || undefined);
     setCanvasChanges([]);
   };
 

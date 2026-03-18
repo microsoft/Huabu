@@ -58,9 +58,13 @@ export const agentApi = {
   /**
    * Fetch conversation history for a thread.
    */
-  fetchHistory: async (threadId: string): Promise<ChatHistoryResponse> => {
+  fetchHistory: async (
+    threadId: string,
+    canvasId?: string,
+  ): Promise<ChatHistoryResponse> => {
+    const params = canvasId ? `?canvasId=${encodeURIComponent(canvasId)}` : '';
     const response = await fetch(
-      `${API_CONFIG.API_URL}/agent/history/${encodeURIComponent(threadId)}`,
+      `${API_CONFIG.API_URL}/agent/history/${encodeURIComponent(threadId)}${params}`,
     );
 
     if (response.status === 404) {

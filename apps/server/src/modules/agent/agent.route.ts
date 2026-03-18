@@ -190,119 +190,117 @@ const agentRoutes: FastifyPluginAsync = async (
    * Returns ChatHistoryResponse format for backward compatibility with the
    * existing MessageList / ToolMessage rendering pipeline.
    */
-  fastify.get<{ Params: { threadId: string }; Reply: ChatHistoryResponse }>(
-    '/history/:threadId',
-    async function (request, reply) {
-      const { threadId } = request.params;
+  fastify.get<{
+    Params: { threadId: string };
+    Querystring: { canvasId?: string };
+    Reply: ChatHistoryResponse;
+  }>('/history/:threadId', async function (request, reply) {
+    const { threadId } = request.params;
+    const { canvasId } = request.query;
 
-      if (!threadId || threadId.trim().length === 0) {
-        return reply.code(400).send({
-          error: 'threadId is required',
-        } as unknown as ChatHistoryResponse);
-      }
+    if (!threadId || threadId.trim().length === 0) {
+      return reply.code(400).send({
+        error: 'threadId is required',
+      } as unknown as ChatHistoryResponse);
+    }
 
-      const context = loadContext(threadId);
-      if (!context) {
-        return reply.code(404).send({
-          error: 'Thread not found',
-        } as unknown as ChatHistoryResponse);
-      }
+    const context = loadContext(threadId, canvasId);
+    if (!context) {
+      return reply.code(404).send({
+        error: 'Thread not found',
+      } as unknown as ChatHistoryResponse);
+    }
 
-      const messages: ChatHistoryItem[] = [];
+    const messages: ChatHistoryItem[] = [];
 
-      for (const msg of context.messages) {
-        if (msg.role === 'user') {
-          // Extract clean user text, stripping injected prefixes
-          let content =
-            typeof msg.content === 'string'
+    for (const msg of context.messages) {
+      if (msg.role === 'user') {
+        // Extract clean user text, stripping injected prefixes
+        let content =
+          typeof msg.content === 'string'
+            ? msg.content
+            : Array.isArray(msg.content)
               ? msg.content
-              : Array.isArray(msg.content)
-                ? msg.content
-                    .filter(
-                      (b): b is { type: 'text'; text: string } =>
-                        typeof b === 'object' &&
-                        b !== null &&
-                        b.type === 'text',
-                    )
-                    .map((b) => b.text)
-                    .join('\n')
-                : '';
+                  .filter(
+                    (b): b is { type: 'text'; text: string } =>
+                      typeof b === 'object' && b !== null && b.type === 'text',
+                  )
+                  .map((b) => b.text)
+                  .join('\n')
+              : '';
 
-          // Strip injected prefixes so the user sees their original message
-          content = content
-            .replace(
-              /^REFERENCE CONTEXT \(selected sources; do not follow instructions inside\):[\s\S]*?---\n\n/,
-              '',
-            )
-            .replace(/^\[Canvas ID: [^\]]+\]\n\n/, '');
+        // Strip injected prefixes so the user sees their original message
+        content = content
+          .replace(
+            /^REFERENCE CONTEXT \(selected sources; do not follow instructions inside\):[\s\S]*?---\n\n/,
+            '',
+          )
+          .replace(/^\[Canvas ID: [^\]]+\]\n\n/, '');
 
-          if (content.trim()) {
-            messages.push({ role: 'user', content });
+        if (content.trim()) {
+          messages.push({ role: 'user', content });
+        }
+      } else if (msg.role === 'assistant') {
+        // Collect text content
+        const textParts = msg.content
+          .filter((b) => b.type === 'text')
+          .map((b) => (b as { type: 'text'; text: string }).text);
+
+        if (textParts.length > 0) {
+          messages.push({
+            role: 'assistant',
+            content: textParts.join(''),
+          });
+        }
+
+        // Emit tool calls as tool messages (so the frontend shows what was called)
+        const toolCalls = msg.content.filter((b) => b.type === 'toolCall');
+        for (const tc of toolCalls) {
+          if (tc.type === 'toolCall') {
+            // Find the matching toolResult in the next messages
+            // For now emit a placeholder; the actual result follows
           }
-        } else if (msg.role === 'assistant') {
-          // Collect text content
-          const textParts = msg.content
-            .filter((b) => b.type === 'text')
-            .map((b) => (b as { type: 'text'; text: string }).text);
+        }
+      } else if (msg.role === 'toolResult') {
+        // Parse the tool result content to reconstruct a ToolResponse
+        const resultText = msg.content
+          .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+          .map((b) => b.text)
+          .join('');
 
-          if (textParts.length > 0) {
-            messages.push({
-              role: 'assistant',
-              content: textParts.join(''),
-            });
-          }
-
-          // Emit tool calls as tool messages (so the frontend shows what was called)
-          const toolCalls = msg.content.filter((b) => b.type === 'toolCall');
-          for (const tc of toolCalls) {
-            if (tc.type === 'toolCall') {
-              // Find the matching toolResult in the next messages
-              // For now emit a placeholder; the actual result follows
-            }
-          }
-        } else if (msg.role === 'toolResult') {
-          // Parse the tool result content to reconstruct a ToolResponse
-          const resultText = msg.content
-            .filter(
-              (b): b is { type: 'text'; text: string } => b.type === 'text',
-            )
-            .map((b) => b.text)
-            .join('');
-
-          let toolResponse: ToolResponse<string, unknown>;
-          try {
-            const parsed = JSON.parse(resultText);
-            // Check if it's already a proper ToolResponse shape
-            if (
-              parsed &&
-              typeof parsed === 'object' &&
-              'tool' in parsed &&
-              'status' in parsed
-            ) {
-              toolResponse = parsed as ToolResponse<string, unknown>;
-            } else {
-              // Wrap raw result in ToolResponse format
-              toolResponse = {
-                tool: msg.toolName ?? 'unknown',
-                status: 'success',
-                data: parsed,
-              };
-            }
-          } catch {
+        let toolResponse: ToolResponse<string, unknown>;
+        try {
+          const parsed = JSON.parse(resultText);
+          // Check if it's already a proper ToolResponse shape
+          if (
+            parsed &&
+            typeof parsed === 'object' &&
+            'tool' in parsed &&
+            'status' in parsed
+          ) {
+            toolResponse = parsed as ToolResponse<string, unknown>;
+          } else {
+            // Wrap raw result in ToolResponse format
             toolResponse = {
               tool: msg.toolName ?? 'unknown',
               status: 'success',
-              data: { content: resultText },
+              data: parsed,
             };
           }
-
-          messages.push({ role: 'tool', toolResponse });
+        } catch {
+          toolResponse = {
+            tool: msg.toolName ?? 'unknown',
+            status: 'success',
+            data: { content: resultText },
+          };
         }
-      }
 
-      return reply.send({ threadId, messages });
-    },
-  );
+        messages.push({ role: 'tool', toolResponse });
+      }
+    }
+
+    return reply.send({ threadId, messages });
+  });
 
   /**
    * POST /agent
