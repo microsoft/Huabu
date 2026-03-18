@@ -1,5 +1,6 @@
 import { tmpdir } from 'node:os';
 
+import compress from '@fastify/compress';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import staticPlugin from '@fastify/static';
@@ -20,6 +21,9 @@ export const app = fastify({
   },
   bodyLimit: 100 * 1024 * 1024, // 100MB for file uploads
 });
+
+// Register response compression
+app.register(compress);
 
 // Register CORS
 app.register(cors, {

@@ -17,7 +17,12 @@ import {
   executeTool,
 } from './tools/index.js';
 
-import type { Context, Tool, AssistantMessage } from '@mariozechner/pi-ai';
+import type {
+  Context,
+  Tool,
+  AssistantMessage,
+  ToolCall,
+} from '@mariozechner/pi-ai';
 import type { AgentMode } from '@sediment/shared';
 
 /**
@@ -193,7 +198,9 @@ export async function* runAgent(
 
     // Check if the LLM wants to call tools
     if (result.stopReason === 'toolUse') {
-      const toolCalls = result.content.filter((b) => b.type === 'toolCall');
+      const toolCalls = result.content.filter(
+        (b): b is ToolCall => b.type === 'toolCall',
+      );
 
       for (const call of toolCalls) {
         // Execute the tool

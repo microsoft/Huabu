@@ -11,15 +11,16 @@
     "start": "tsx src/server.ts"
   },
   "dependencies": {
+    "@fastify/compress": "^8.3.1",
     "@fastify/cors": "^10.0.1",
     "@fastify/multipart": "^9.0.1",
     "@fastify/static": "^8.0.2",
     "@mariozechner/pi-ai": "^0.57.1",
+    "@opendocsg/pdf2md": "^0.2.5",
     "@sediment/shared": "workspace:*",
     "dotenv": "^17.2.3",
     "fastify": "^5.2.0",
     "marked": "^16.3.0",
-    "@opendocsg/pdf2md": "^0.2.5",
     "sanitize-html": "^2.17.0",
     "zod": "^4.3.6"
   },

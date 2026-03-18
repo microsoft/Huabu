@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 
+import { ToastContainer } from './components/Common/Toast';
 import CanvasListPage from './components/Pages/CanvasListPage';
 import CanvasPage from './components/Pages/CanvasPage';
 import WorkspaceSetupPage from './components/Pages/WorkspaceSetupPage';
@@ -51,6 +52,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </WorkspaceGuard>
+      <ToastContainer />
     </BrowserRouter>
   );
 }

@@ -1,5 +1,6 @@
-import { existsSync } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
+import { createReadStream, existsSync } from 'node:fs';
+import { readFile, unlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { createId } from '@sediment/shared';
@@ -551,14 +552,25 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         artifacts: artifactEntries,
       };
 
+      // Write bundle to a temp file, then stream it to avoid holding the
+      // entire serialised JSON (which can be huge due to base64 artifacts)
+      // in memory for the duration of the HTTP transfer.
       const safeName = (canvas.title ?? canvasId).replace(/[^a-z0-9_-]/gi, '_');
+      const tmpFile = path.join(tmpdir(), `${createId('tmp')}.json`);
+      await writeFile(tmpFile, JSON.stringify(bundle));
+
+      const stream = createReadStream(tmpFile);
+      stream.on('close', () => {
+        unlink(tmpFile).catch(() => {});
+      });
+
       return reply
         .header(
           'Content-Disposition',
           `attachment; filename="${safeName}.sediment.json"`,
         )
         .header('Content-Type', 'application/json')
-        .send(bundle);
+        .send(stream);
     },
   );
 

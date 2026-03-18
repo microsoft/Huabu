@@ -137,23 +137,29 @@ export async function deleteNode(
 
 /**
  * Download the canvas as a self-contained `.sediment.json` export bundle.
- * Returns the raw Blob so callers can trigger a browser download.
+ *
+ * Performs a lightweight existence check via getCanvas to catch errors early,
+ * then triggers a native browser download via a temporary `<a>` link
+ * so the full response body never needs to live in JS memory.
  */
-export async function exportCanvas(canvasId: string): Promise<Blob> {
-  const response = await fetch(
-    `${API_CONFIG.API_URL}/canvas/${canvasId}/export`,
-  );
-
-  if (!response.ok) {
-    const error = (await response.json().catch(() => ({}))) as {
-      message?: string;
-    };
-    throw new Error(
-      error.message ?? `Failed to export canvas: ${response.statusText}`,
-    );
+export async function exportCanvas(
+  canvasId: string,
+  downloadName?: string,
+): Promise<void> {
+  // Lightweight pre-check: verify canvas exists without running the export.
+  const canvas = await getCanvas(canvasId);
+  if (!canvas) {
+    throw new Error('Canvas not found');
   }
 
-  return response.blob();
+  const url = `${API_CONFIG.API_URL}/canvas/${canvasId}/export`;
+  const safeName = downloadName?.replace(/[^a-z0-9_-]/gi, '_') || canvasId;
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${safeName}.sediment.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 /**
