@@ -49,6 +49,11 @@ export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
   const [captureMode, setCaptureMode] = useState(false);
   const [pendingCapture, setPendingCapture] =
     useState<PendingCaptureDrag | null>(null);
+  // Text selected via the browser's native selection (non-capture mode).
+  const [pendingTextSelection, setPendingTextSelection] = useState<{
+    text: string;
+    position: { x: number; y: number };
+  } | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState<number>(0);
   // The width at which the PDF canvas is actually rendered.  Starts at 0 and
@@ -108,6 +113,64 @@ export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
     el.addEventListener('scroll', handleScroll, { passive: true });
     return () => el.removeEventListener('scroll', handleScroll);
   }, [pendingCapture]);
+
+  // ---------------------------------------------------------------------------
+  // Native text selection → FloatingDragHandle (non-capture mode only)
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (captureMode) {
+      setPendingTextSelection(null);
+      return;
+    }
+    const el = scrollContainerRef.current;
+    if (!el) return;
+
+    const handleMouseUp = (e: MouseEvent) => {
+      // Small delay lets the browser finalise the selection range.
+      requestAnimationFrame(() => {
+        const sel = window.getSelection();
+        const text = sel?.toString().trim();
+        if (!text) return;
+
+        // Only act when the selection lives inside a .textLayer within *this* container.
+        const anchor = sel?.anchorNode;
+        if (
+          !anchor ||
+          !el.contains(anchor as Node) ||
+          !(anchor as Node).parentElement?.closest('.textLayer')
+        )
+          return;
+
+        setPendingTextSelection({
+          text,
+          position: { x: e.clientX, y: e.clientY },
+        });
+      });
+    };
+
+    el.addEventListener('mouseup', handleMouseUp);
+    return () => el.removeEventListener('mouseup', handleMouseUp);
+  }, [captureMode]);
+
+  // Dismiss text-selection handle when selection is cleared or on scroll.
+  useEffect(() => {
+    if (!pendingTextSelection) return;
+
+    const handleSelectionChange = () => {
+      const text = window.getSelection()?.toString().trim();
+      if (!text) setPendingTextSelection(null);
+    };
+    document.addEventListener('selectionchange', handleSelectionChange);
+
+    const el = scrollContainerRef.current;
+    const handleScroll = () => setPendingTextSelection(null);
+    el?.addEventListener('scroll', handleScroll, { passive: true });
+
+    return () => {
+      document.removeEventListener('selectionchange', handleSelectionChange);
+      el?.removeEventListener('scroll', handleScroll);
+    };
+  }, [pendingTextSelection]);
 
   // CSS transform scales the already-rendered canvas in real-time.
   // Once the debounced re-render fires, scaleFactor returns to ~1 and the
@@ -275,7 +338,7 @@ export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
         </div>
       </div>
 
-      {/* ── Floating drag handle */}
+      {/* ── Floating drag handle (area capture) */}
       {pendingCapture && (
         <FloatingDragHandle
           sourceId={sourceId}
@@ -286,6 +349,18 @@ export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
           onDismiss={() => setPendingCapture(null)}
           onSendToChat={handleSendToChat}
           onSetCover={onDataChange ? handleSetCover : undefined}
+        />
+      )}
+
+      {/* ── Floating drag handle (native text selection) */}
+      {pendingTextSelection && !pendingCapture && (
+        <FloatingDragHandle
+          sourceId={sourceId}
+          text={pendingTextSelection.text}
+          imageUrl={null}
+          capturing={false}
+          position={pendingTextSelection.position}
+          onDismiss={() => setPendingTextSelection(null)}
         />
       )}
     </div>
