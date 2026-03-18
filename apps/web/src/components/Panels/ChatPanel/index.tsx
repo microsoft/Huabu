@@ -163,7 +163,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
 
   const getAgentContext = useCanvasStore((state) => state.getAgentContext);
   const canvasId = useCanvasStore((state) => state.canvasId);
-  const loadCanvas = useCanvasStore((state) => state.loadCanvas);
   const refreshCanvas = useCanvasStore((state) => state.refreshCanvas);
 
   // Switch chat thread when canvas changes
@@ -186,6 +185,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   // Track resources across the current agent run
   const resourcesRef = useRef<ResourceLabel[]>([]);
   const assistantIdRef = useRef<string>('');
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -316,6 +316,10 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       const modifiesCanvas =
         agentMode === 'operate' || agentMode === 'research';
 
+      // Create abort controller for this stream
+      const abortController = new AbortController();
+      abortControllerRef.current = abortController;
+
       try {
         await agentApi.streamMessage(
           prompt,
@@ -432,15 +436,22 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
               }
             },
             onComplete: () => {
+              const wasAborted = abortController.signal.aborted;
               setIsLoading(false);
+              abortControllerRef.current = null;
 
               if (agentMode === 'research') {
                 completeResearchUi();
-                void loadCanvas();
+                // Refresh canvas to pick up research-created nodes
+                if (!wasAborted) {
+                  void refreshCanvas();
+                }
               }
 
               if (agentMode === 'operate') {
-                void refreshCanvas();
+                if (!wasAborted) {
+                  void refreshCanvas();
+                }
                 if (resourcesRef.current.length > 0) {
                   updateMessage(assistantIdRef.current, (m) =>
                     m.role === 'assistant'
@@ -455,9 +466,16 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
             canvasContext: getAgentContext(),
             canvasId: canvasId || undefined,
             attachments,
+            signal: abortController.signal,
           },
         );
       } catch (err) {
+        // Abort is not an error — stream was intentionally stopped
+        if (abortController.signal.aborted) {
+          setIsLoading(false);
+          abortControllerRef.current = null;
+          return;
+        }
         console.error(`${agentMode} failed:`, err);
         addMessage({
           id: createId('message'),
@@ -485,7 +503,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       threadId,
       updateMessage,
       refreshCanvas,
-      loadCanvas,
       getAgentContext,
       canvasId,
       startResearchUi,
@@ -538,6 +555,30 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     await handleStreamingChat(prompt, agentMode);
   };
 
+  const handleStop = useCallback(() => {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    setIsLoading(false);
+
+    // Reset research store if it was running
+    if (useResearchStore.getState().status === 'running') {
+      useResearchStore.getState().completeResearch();
+    }
+
+    // Mark any still-executing tool messages as done
+    const msgs = useChatStore.getState().messages;
+    for (const msg of msgs) {
+      if (msg.role === 'tool' && msg.isExecuting) {
+        updateMessage(msg.id, (m) =>
+          m.role === 'tool' ? { ...m, isExecuting: false } : m,
+        );
+      }
+    }
+
+    // Sync canvas with any partial server-side changes
+    void refreshCanvas();
+  }, [updateMessage, refreshCanvas]);
+
   const handleNewChat = () => {
     if (isLoading || researchStatus === 'running') return;
     clearMessages(canvasId || undefined);
@@ -580,6 +621,8 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           value={input}
           onChange={setInput}
           onSubmit={handleSubmit}
+          onStop={handleStop}
+          isStreaming={isLoading}
           mode={mode}
           onModeChange={setMode}
           disabled={

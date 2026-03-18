@@ -23,6 +23,7 @@ import { loadContext, saveContext } from '../agent/store/chat-store.js';
 import { getArtifactsDir } from '../artifact/utils.js';
 import { buildContext } from '../knowledge/index.js';
 
+import type { AssistantMessage, Context } from '@mariozechner/pi-ai';
 import type {
   AgentMode,
   AgentRequest,
@@ -177,6 +178,65 @@ function writeSSE(
   data: unknown,
 ) {
   raw.write(`event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`);
+}
+
+/**
+ * Clean up context after an abort.
+ *
+ * Keeps all completed messages (user prompt, partial assistant text,
+ * finished tool calls and results) — these are visible to the user and
+ * may have already affected the canvas.
+ *
+ * Only repairs the broken tail:
+ * 1. If the last assistant message requested tool calls that never got
+ *    results, strip those orphaned toolCall entries so the LLM doesn't
+ *    see an invalid conversation state.
+ * 2. Append an interruption notice telling the LLM not to resume.
+ */
+function cleanUpAbortedContext(context: Context): void {
+  const msgs = context.messages;
+
+  // Collect IDs of all toolResults we have
+  const completedCallIds = new Set<string>();
+  for (const m of msgs) {
+    if (m.role === 'toolResult') {
+      completedCallIds.add(m.toolCallId);
+    }
+  }
+
+  // Find the last assistant message and strip orphaned toolCalls
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i];
+    if (m.role === 'assistant') {
+      const assistant = m as AssistantMessage;
+      const hadToolCalls = assistant.content.some((b) => b.type === 'toolCall');
+      if (hadToolCalls) {
+        // Keep only text/thinking content + toolCalls that have results
+        assistant.content = assistant.content.filter(
+          (b) => b.type !== 'toolCall' || completedCallIds.has(b.id),
+        );
+        // If all toolCalls were removed, fix stopReason so LLM doesn't
+        // expect more tool results.
+        const remainingCalls = assistant.content.filter(
+          (b) => b.type === 'toolCall',
+        );
+        if (remainingCalls.length === 0) {
+          assistant.stopReason = 'stop';
+        }
+      }
+      break;
+    }
+  }
+
+  // Append interruption notice
+  msgs.push({
+    role: 'user',
+    content:
+      '[SYSTEM] The user interrupted the previous operation. ' +
+      'Do NOT continue or retry the interrupted task. ' +
+      'Wait for the next user message and treat it as a new request.',
+    timestamp: Date.now(),
+  });
 }
 
 // ==================== Route ====================
@@ -417,23 +477,93 @@ const agentRoutes: FastifyPluginAsync = async (
     // Send thread ID
     writeSSE(reply.raw, 'meta', { threadId: resolvedThreadId, mode });
 
+    // Abort the agent pipeline when the client disconnects.
+    // After reply.hijack(), we need to listen on the raw socket for
+    // connection closure — request.raw 'close' fires when the request
+    // body is received, NOT when the SSE connection drops.
+    const abortController = new AbortController();
+    const onDisconnect = () => {
+      if (!abortController.signal.aborted) {
+        request.log.info(
+          '[agent] Client disconnected — aborting agent pipeline',
+        );
+        abortController.abort();
+      }
+    };
+    const socket = request.raw.socket;
+    reply.raw.once('close', onDisconnect);
+    socket?.once('close', onDisconnect);
+
     try {
-      const stream = runAgent({ mode, context, maxIterations: 20 });
+      const stream = runAgent({
+        mode,
+        context,
+        logger: request.log,
+        maxIterations: 20,
+        signal: abortController.signal,
+      });
 
       for await (const event of stream) {
+        // Stop writing if the client already disconnected
+        if (abortController.signal.aborted) break;
         writeSSE(reply.raw, event.type, event.data);
+      }
+
+      // On abort, clean up orphaned tool calls and insert an interruption
+      // notice so the LLM won't resume the cancelled task.
+      if (abortController.signal.aborted) {
+        request.log.info(
+          '[agent] Abort detected — cleaning up context (%d messages before cleanup)',
+          context.messages.length,
+        );
+        cleanUpAbortedContext(context);
+        request.log.info(
+          '[agent] Context cleaned up (%d messages after cleanup)',
+          context.messages.length,
+        );
       }
 
       // Persist the context after completion
       saveContext(resolvedThreadId, context, canvasId);
 
-      reply.raw.write('event: end\ndata: {}\n\n');
+      // Log final context state for debugging
+      const lastMsgs = context.messages.slice(-3).map((m) => ({
+        role: m.role,
+        ...(m.role === 'user'
+          ? {
+              content:
+                typeof m.content === 'string'
+                  ? m.content.slice(0, 100)
+                  : '[multipart]',
+            }
+          : {}),
+        ...(m.role === 'assistant'
+          ? {
+              stopReason: (m as AssistantMessage).stopReason,
+              contentTypes: (m as AssistantMessage).content.map((b) => b.type),
+            }
+          : {}),
+        ...(m.role === 'toolResult' ? { toolName: m.toolName } : {}),
+      }));
+      request.log.info(
+        { totalMessages: context.messages.length, lastMessages: lastMsgs },
+        '[agent] Context saved for thread %s',
+        resolvedThreadId,
+      );
+
+      if (!abortController.signal.aborted) {
+        reply.raw.write('event: end\ndata: {}\n\n');
+      }
     } catch (error) {
-      request.log.error(error);
-      const errorMsg =
-        error instanceof Error ? error.message : 'Internal Error';
-      writeSSE(reply.raw, 'error', { error: errorMsg });
+      if (!abortController.signal.aborted) {
+        request.log.error(error);
+        const errorMsg =
+          error instanceof Error ? error.message : 'Internal Error';
+        writeSSE(reply.raw, 'error', { error: errorMsg });
+      }
     } finally {
+      reply.raw.removeListener('close', onDisconnect);
+      socket?.removeListener('close', onDisconnect);
       reply.raw.end();
     }
   });

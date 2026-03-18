@@ -58,11 +58,17 @@ export interface StreamEvent {
   };
 }
 
+interface AgentLogger {
+  info: (message: string) => void;
+}
+
 export interface AgentRunOptions {
   /** Agent mode determines available tools and system prompt */
   mode: AgentMode;
   /** pi-ai Context (systemPrompt + messages + tools). Will be mutated with responses. */
   context: Context;
+  /** Structured logger for request-scoped diagnostics */
+  logger?: AgentLogger;
   /** Abort signal for cancellation */
   signal?: AbortSignal;
   /** Maximum number of tool-calling rounds (default: 20) */
@@ -104,7 +110,7 @@ function getToolsForMode(mode: AgentMode): Tool[] {
 export async function* runAgent(
   options: AgentRunOptions,
 ): AsyncGenerator<StreamEvent, void, unknown> {
-  const { mode, context, signal, maxIterations = 20 } = options;
+  const { mode, context, logger, signal, maxIterations = 20 } = options;
 
   const tools = getToolsForMode(mode);
 
@@ -117,10 +123,7 @@ export async function* runAgent(
     iteration++;
 
     if (signal?.aborted) {
-      yield {
-        type: 'error',
-        data: { error: 'Request was aborted' },
-      };
+      logger?.info('[agent] Signal aborted at iteration start, stopping');
       return;
     }
 
@@ -203,6 +206,14 @@ export async function* runAgent(
       );
 
       for (const call of toolCalls) {
+        // Check abort before executing each tool
+        if (signal?.aborted) {
+          logger?.info(
+            '[agent] Signal aborted before tool execution, stopping',
+          );
+          return;
+        }
+
         // Execute the tool
         let toolResultText: string;
         try {

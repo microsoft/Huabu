@@ -80,6 +80,7 @@ export const agentApi = {
 
   /**
    * Send a message and stream the response via SSE.
+   * Pass an AbortSignal to allow cancellation of the stream.
    */
   streamMessage: async (
     content: string,
@@ -90,6 +91,7 @@ export const agentApi = {
       canvasContext?: AgentBaseContext;
       canvasId?: string;
       attachments?: ChatAttachment[];
+      signal?: AbortSignal;
     },
   ): Promise<void> => {
     const body: AgentRequest = {
@@ -108,6 +110,7 @@ export const agentApi = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
+        signal: options?.signal,
       });
 
       if (!response.ok) {
@@ -164,6 +167,11 @@ export const agentApi = {
 
       callbacks.onComplete();
     } catch (error) {
+      // Treat any error while the signal is aborted as an intentional stop
+      if (options?.signal?.aborted) {
+        callbacks.onComplete();
+        return;
+      }
       console.error('[agent] Stream error:', error);
       callbacks.onError(
         error instanceof Error ? error : new Error('Unknown stream error'),
