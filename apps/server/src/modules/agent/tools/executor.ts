@@ -5,18 +5,74 @@
  * and returns a text result to be fed back as a toolResult message.
  */
 
+import { createId } from '@sediment/shared';
+
 import {
   readCanvas,
   writeCanvas,
   type CanvasFile,
 } from '../../canvas/canvas.filestore.js';
-import { getCanvasOperationService } from '../../canvas/canvas.operation.js';
 import { getIngestService } from '../../knowledge/index.js';
 import { getKnowledgeRepository } from '../../knowledge/knowledge.repository.js';
 
 import type { NodeData } from '@sediment/shared';
-// TODO: spilt into multiple files as it grows, e.g. webSearchTool.ts, canvasTool.ts, knowledgeTool.ts, etc.
-// TODO: add more canvas operations as needed, e.g. updateNode, deleteNode, connectNodes, etc.
+// ==================== Canvas Helpers ====================
+
+async function loadCanvasState(canvasId: string) {
+  const canvas = readCanvas(canvasId);
+  if (!canvas) {
+    return {
+      nodes: [] as Array<Record<string, unknown>>,
+      edges: [] as Array<Record<string, unknown>>,
+      version: 0,
+    };
+  }
+  const nodes = (canvas.state.nodes ?? []) as Array<Record<string, unknown>>;
+  const edges = (canvas.state.edges ?? []) as Array<Record<string, unknown>>;
+  return { nodes, edges, version: canvas.version };
+}
+
+async function saveCanvasState(
+  canvasId: string,
+  nodes: Array<Record<string, unknown>>,
+  edges: Array<Record<string, unknown>>,
+  currentVersion: number,
+) {
+  const existing = readCanvas(canvasId);
+  const nextVersion = currentVersion + 1;
+  const timestamp = Date.now();
+  const canvasFile: CanvasFile = {
+    canvasId,
+    title: existing?.title ?? null,
+    version: nextVersion,
+    state: { nodes, edges },
+    createdAt: existing?.createdAt ?? timestamp,
+    updatedAt: timestamp,
+  };
+  writeCanvas(canvasFile);
+  return nextVersion;
+}
+
+async function updateNodeData(
+  canvasId: string,
+  nodeId: string,
+  dataUpdate: Record<string, unknown>,
+) {
+  const state = await loadCanvasState(canvasId);
+  const node = state.nodes.find((n) => n.id === nodeId);
+  if (!node) {
+    console.warn(
+      `[updateNodeData] Node ${nodeId} not found in canvas ${canvasId}`,
+    );
+    return;
+  }
+  node.data = {
+    ...(node.data as Record<string, unknown> | undefined),
+    ...dataUpdate,
+  };
+  await saveCanvasState(canvasId, state.nodes, state.edges, state.version);
+}
+
 // ==================== Web Search ====================
 
 async function executeWebSearch(args: {
@@ -199,8 +255,6 @@ async function executeCreateNode(args: {
   src?: string;
   position?: { x: number; y: number };
 }): Promise<string> {
-  const ops = getCanvasOperationService();
-
   const nodeType = args.nodeType as
     | 'note'
     | 'text'
@@ -209,19 +263,27 @@ async function executeCreateNode(args: {
     | 'pdf'
     | 'video';
 
-  const result = await ops.createNode({
-    canvasId: args.canvasId,
-    position: args.position ?? { x: 0, y: 0 },
-    data: {
-      type: nodeType,
-      label: args.label ?? '',
-      content: args.content,
-      src: args.src,
-    } as NodeData,
+  const nodeId = createId('node');
+  const position = args.position ?? { x: 0, y: 0 };
+  const data: NodeData = {
+    type: nodeType,
+    label: args.label ?? '',
+    content: args.content,
+    src: args.src,
+  } as NodeData;
+
+  const state = await loadCanvasState(args.canvasId);
+  state.nodes.push({
+    id: nodeId,
+    type: data.type,
+    position,
+    data,
+    selected: false,
   });
+  await saveCanvasState(args.canvasId, state.nodes, state.edges, state.version);
 
   return JSON.stringify({
-    nodeId: result.nodeId,
+    nodeId,
     canvasId: args.canvasId,
     type: args.nodeType,
     label: args.label,
@@ -234,12 +296,11 @@ async function executeUpdateNode(args: {
   label?: string;
   content?: string;
 }): Promise<string> {
-  const ops = getCanvasOperationService();
   const patch: Record<string, unknown> = {};
   if (args.label !== undefined) patch.label = args.label;
   if (args.content !== undefined) patch.content = args.content;
 
-  await ops.updateNodeData(args.canvasId, args.nodeId, patch);
+  await updateNodeData(args.canvasId, args.nodeId, patch);
 
   return JSON.stringify({ success: true, nodeId: args.nodeId });
 }
@@ -285,14 +346,19 @@ async function executeConnectNodes(args: {
   sourceId: string;
   targetId: string;
 }): Promise<string> {
-  const ops = getCanvasOperationService();
-  const result = await ops.createEdge({
-    canvasId: args.canvasId,
-    sourceNodeId: args.sourceId,
-    targetNodeId: args.targetId,
+  const edgeId = createId('edge');
+  const state = await loadCanvasState(args.canvasId);
+  state.edges.push({
+    id: edgeId,
+    source: args.sourceId,
+    target: args.targetId,
+    type: 'smoothstep',
+    animated: false,
   });
+  await saveCanvasState(args.canvasId, state.nodes, state.edges, state.version);
+
   return JSON.stringify({
-    edgeId: result.edgeId,
+    edgeId,
     sourceId: args.sourceId,
     targetId: args.targetId,
   });
@@ -333,14 +399,74 @@ async function executeCreateFrame(args: {
   nodeIds: string[];
   frameLabel?: string;
 }): Promise<string> {
-  const ops = getCanvasOperationService();
-  const result = await ops.createFrame({
-    canvasId: args.canvasId,
-    label: args.frameLabel ?? 'Frame',
-    childNodeIds: args.nodeIds,
-    position: { x: 0, y: 0 },
+  const frameId = createId('frame');
+  const label = args.frameLabel ?? 'Frame';
+  const state = await loadCanvasState(args.canvasId);
+
+  // Calculate frame bounds from child nodes
+  let frameWidth = 800;
+  let frameHeight = 600;
+  let frameX = 0;
+  let frameY = 0;
+
+  if (args.nodeIds.length > 0) {
+    const childNodes = state.nodes.filter((n) =>
+      args.nodeIds.includes(n.id as string),
+    );
+    if (childNodes.length > 0) {
+      const positions = childNodes.map((n) => ({
+        x: (n.position as { x: number; y: number }).x,
+        y: (n.position as { x: number; y: number }).y,
+        width: (n.width as number) ?? 200,
+        height: (n.height as number) ?? 150,
+      }));
+      const minX = Math.min(...positions.map((p) => p.x));
+      const minY = Math.min(...positions.map((p) => p.y));
+      const maxX = Math.max(...positions.map((p) => p.x + p.width));
+      const maxY = Math.max(...positions.map((p) => p.y + p.height));
+      frameX = minX - 50;
+      frameY = minY - 80;
+      frameWidth = maxX - minX + 100;
+      frameHeight = maxY - minY + 130;
+    }
+  }
+
+  const newFrame = {
+    id: frameId,
+    type: 'frame',
+    position: { x: frameX, y: frameY },
+    data: { label },
+    width: frameWidth,
+    height: frameHeight,
+    selected: false,
+    style: { width: frameWidth, height: frameHeight },
+  };
+
+  // Parent nodes must come before child nodes in ReactFlow
+  let firstChildIndex = -1;
+  for (let i = 0; i < state.nodes.length; i++) {
+    if (args.nodeIds.includes(state.nodes[i].id as string)) {
+      firstChildIndex = i;
+      break;
+    }
+  }
+  if (firstChildIndex >= 0) {
+    state.nodes.splice(firstChildIndex, 0, newFrame);
+  } else {
+    state.nodes.push(newFrame);
+  }
+
+  // Update child nodes to reference this frame as parent
+  state.nodes = state.nodes.map((node) => {
+    if (args.nodeIds.includes(node.id as string)) {
+      return { ...node, parentId: frameId, extent: undefined };
+    }
+    return node;
   });
-  return JSON.stringify({ frameId: result.nodeId });
+
+  await saveCanvasState(args.canvasId, state.nodes, state.edges, state.version);
+
+  return JSON.stringify({ frameId });
 }
 
 // ==================== Knowledge Operations ====================
@@ -420,8 +546,7 @@ async function executeIngestContent(args: {
 
     // Update the node with the sourceId
     if (outcome.sourceId) {
-      const ops = getCanvasOperationService();
-      await ops.updateNodeData(args.canvasId, args.nodeId, {
+      await updateNodeData(args.canvasId, args.nodeId, {
         sourceId: outcome.sourceId,
       });
     }
