@@ -6,6 +6,51 @@ export type Rect = { x: number; y: number; width: number; height: number };
 const TOL = 0.005;
 const MIN_DIM = 0.002;
 
+/**
+ * Filter out zero-dimension rects, then merge rects that sit on the
+ * same horizontal line (overlapping y-ranges) into single bounding rects.
+ *
+ * pdf.js text-layer spans often produce near-duplicate clientRects for the
+ * same line of text — this collapses them so only one highlight rect per
+ * visual line is stored.
+ */
+export function mergeLineRects(rects: Rect[]): Rect[] {
+  // 1. Drop rects with negligible width or height.
+  const valid = rects.filter((r) => r.width > MIN_DIM && r.height > MIN_DIM);
+  if (valid.length === 0) return [];
+
+  // 2. Sort top-to-bottom, left-to-right.
+  valid.sort((a, b) => a.y - b.y || a.x - b.x);
+
+  // 3. Greedily merge rects whose vertical ranges overlap significantly
+  //    (more than 50% of the shorter rect's height).
+  const merged: Rect[] = [{ ...valid[0] }];
+  for (let i = 1; i < valid.length; i++) {
+    const cur = valid[i];
+    const last = merged[merged.length - 1];
+
+    const overlapTop = Math.max(last.y, cur.y);
+    const overlapBot = Math.min(last.y + last.height, cur.y + cur.height);
+    const overlapH = overlapBot - overlapTop;
+    const minH = Math.min(last.height, cur.height);
+
+    if (overlapH > minH * 0.5) {
+      // Same visual line — expand bounding box.
+      const x1 = Math.min(last.x, cur.x);
+      const y1 = Math.min(last.y, cur.y);
+      const x2 = Math.max(last.x + last.width, cur.x + cur.width);
+      const y2 = Math.max(last.y + last.height, cur.y + cur.height);
+      last.x = x1;
+      last.y = y1;
+      last.width = x2 - x1;
+      last.height = y2 - y1;
+    } else {
+      merged.push({ ...cur });
+    }
+  }
+  return merged;
+}
+
 /** Check whether two rects overlap (with tolerance). */
 export function overlaps(a: Rect, b: Rect): boolean {
   return (

@@ -5,7 +5,7 @@ import { Document } from 'react-pdf';
 
 import { uploadImage } from '@/api/artifact';
 import { useChatStore } from '@/store/chatStore';
-import { computeHighlightUpdate } from '@/utils/pdf/highlight';
+import { computeHighlightUpdate, mergeLineRects } from '@/utils/pdf/highlight';
 
 import { FloatingDragHandle } from './FloatingDragHandle';
 import { PDFPageWithOverlay } from './PDFPageWithOverlay';
@@ -63,6 +63,8 @@ export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
       Array.isArray(data.highlights) ? (data.highlights as PdfHighlight[]) : [],
     [data.highlights],
   );
+  const highlightsRef = useRef(highlights);
+  highlightsRef.current = highlights;
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState<number>(0);
   // The width at which the PDF canvas is actually rendered.  Starts at 0 and
@@ -239,7 +241,12 @@ export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
 
         if (grouped.size === 0) return;
 
-        const updated = computeHighlightUpdate(highlights, grouped);
+        // Deduplicate & merge overlapping rects per page.
+        for (const [pageIdx, rects] of grouped) {
+          grouped.set(pageIdx, mergeLineRects(rects));
+        }
+
+        const updated = computeHighlightUpdate(highlightsRef.current, grouped);
         onDataChange?.({ highlights: updated });
         sel.removeAllRanges();
       });
@@ -247,7 +254,7 @@ export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
 
     el.addEventListener('mouseup', handleMouseUp);
     return () => el.removeEventListener('mouseup', handleMouseUp);
-  }, [highlightMode, highlights, onDataChange]);
+  }, [highlightMode, onDataChange]);
 
   // CSS transform scales the already-rendered canvas in real-time.
   // Once the debounced re-render fires, scaleFactor returns to ~1 and the
@@ -401,7 +408,7 @@ export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
 
       {/* ── Floating toolbar (top-left, vertical) ── */}
       <div className="pointer-events-none absolute top-3 left-3 z-10">
-        <div className="text-muted-foreground border-border pointer-events-auto flex flex-col items-center gap-2 rounded-sm border bg-white p-0">
+        <div className="text-muted-foreground border-border pointer-events-auto flex flex-col items-center gap-1 rounded-sm border bg-white p-0">
           <IconButton
             title="Select Area"
             className={clsx(captureMode && 'text-theme-500 bg-background')}

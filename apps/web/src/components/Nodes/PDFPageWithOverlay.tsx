@@ -305,7 +305,7 @@ export const PDFPageWithOverlay = ({
               top: `${r.y * 100}%`,
               width: `${r.width * 100}%`,
               height: `${r.height * 100}%`,
-              background: 'rgba(255, 235, 59, 0.35)',
+              background: 'rgba(255, 235, 59, 0.5)',
               mixBlendMode: 'multiply',
             }}
           />
