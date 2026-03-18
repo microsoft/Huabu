@@ -33,9 +33,22 @@ export const SourceCount = () => {
     </div>
   );
 
+  const accessibleLabel = `${count} selected ${count === 1 ? 'source' : 'sources'}: ${selectedNodes
+    .map((n) => {
+      const label = (n.data as Record<string, unknown> | undefined)?.label as
+        | string
+        | undefined;
+      return label || n.type || 'Untitled';
+    })
+    .join(', ')}`;
+
   return (
     <Tooltip content={tooltipContent}>
-      <span className="text-muted-foreground inline-flex cursor-default items-center gap-1 text-sm leading-tight">
+      <span
+        tabIndex={0}
+        aria-label={accessibleLabel}
+        className="text-muted-foreground inline-flex cursor-default items-center gap-1 text-sm leading-tight focus:outline-none"
+      >
         <span>{count}</span>
         <span>{count === 1 ? 'source' : 'sources'}</span>
       </span>

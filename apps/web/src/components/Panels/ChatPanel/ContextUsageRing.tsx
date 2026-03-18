@@ -59,10 +59,19 @@ export const ContextUsageRing = () => {
     </div>
   );
 
+  const accessibleLabel = `Context usage ${formatTokens(tokenCount)} of ${formatTokens(
+    CONTEXT_WINDOW,
+  )} tokens, ${percentage} percent`;
+
   return (
     <Tooltip content={tooltipContent}>
-      <span className="inline-flex cursor-default items-center justify-center">
+      <span
+        tabIndex={0}
+        aria-label={accessibleLabel}
+        className="inline-flex cursor-default items-center justify-center focus:outline-none"
+      >
         <svg
+          aria-hidden="true"
           width={size}
           height={size}
           viewBox={`0 0 ${size} ${size}`}

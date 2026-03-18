@@ -490,15 +490,15 @@ const agentRoutes: FastifyPluginAsync = async (
         abortController.abort();
       }
     };
-    reply.raw.on('close', onDisconnect);
-    if (request.raw.socket) {
-      request.raw.socket.on('close', onDisconnect);
-    }
+    const socket = request.raw.socket;
+    reply.raw.once('close', onDisconnect);
+    socket?.once('close', onDisconnect);
 
     try {
       const stream = runAgent({
         mode,
         context,
+        logger: request.log,
         maxIterations: 20,
         signal: abortController.signal,
       });
@@ -562,6 +562,8 @@ const agentRoutes: FastifyPluginAsync = async (
         writeSSE(reply.raw, 'error', { error: errorMsg });
       }
     } finally {
+      reply.raw.removeListener('close', onDisconnect);
+      socket?.removeListener('close', onDisconnect);
       reply.raw.end();
     }
   });
