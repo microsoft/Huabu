@@ -1201,15 +1201,15 @@ function flushOnUnload(): void {
 
   const { canvasId, nodes, edges, version, canvasTitle } = state;
 
-  // Nothing to flush if no canvas is loaded.
-  if (!canvasId) return;
-
   // Collect node IDs that had a pending debounce timer before clearing them.
   const pendingNodeIds = Array.from(ingestionTimers.keys());
   for (const timer of ingestionTimers.values()) {
     clearTimeout(timer);
   }
   ingestionTimers.clear();
+
+  // Nothing else to flush if no canvas is loaded.
+  if (!canvasId) return;
 
   // Fire upsertNode with keepalive for every queued node.
   for (const nodeId of pendingNodeIds) {
