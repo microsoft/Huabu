@@ -177,6 +177,9 @@ importers:
       react-router-dom:
         specifier: ^7.13.1
         version: 7.13.1(react-dom@18.2.0)(react@18.2.0)
+      tailwind-merge:
+        specifier: ^3.5.0
+        version: 3.5.0
       webcola:
         specifier: ^3.4.0
         version: 3.4.0
@@ -9213,6 +9216,10 @@ packages:
 
   /tailwind-merge@2.6.1:
     resolution: {integrity: sha512-Oo6tHdpZsGpkKG88HJ8RR1rg/RdnEkQEfMoEk2x1XRI3F1AxeU+ijRXpiVUF4UbLfcxxRGw6TbUINKYdWVsQTQ==}
+    dev: false
+
+  /tailwind-merge@3.5.0:
+    resolution: {integrity: sha512-I8K9wewnVDkL1NTGoqWmVEIlUcB9gFriAEkXkfCjX5ib8ezGxtR3xD7iZIxrfArjEsH7F1CHD4RFUtxefdqV/A==}
     dev: false
 
   /tailwindcss@4.1.18:

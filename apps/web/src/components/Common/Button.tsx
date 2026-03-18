@@ -1,6 +1,6 @@
-import clsx from 'clsx';
 import { forwardRef } from 'react';
 
+import { cn } from './cn';
 import { Tooltip } from './Tooltip';
 
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
@@ -50,7 +50,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       <button
         ref={ref}
         type={type}
-        className={clsx(
+        className={cn(
           'inline-flex items-center justify-center transition-colors',
           'disabled:cursor-not-allowed disabled:opacity-50',
           variantClasses[variant],

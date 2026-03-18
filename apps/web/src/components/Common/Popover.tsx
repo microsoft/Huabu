@@ -1,4 +1,3 @@
-import clsx from 'clsx';
 import {
   useCallback,
   useEffect,
@@ -9,6 +8,8 @@ import {
   type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
+
+import { cn } from './cn';
 
 type FloatingPosition = { x: number; y: number };
 
@@ -215,7 +216,7 @@ export const Popover: FC<PopoverProps> = ({
   const panel = (
     <div
       ref={containerRef}
-      className={clsx(
+      className={cn(
         'border-border fixed rounded-md border bg-white shadow-lg',
         className,
       )}

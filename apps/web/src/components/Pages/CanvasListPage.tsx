@@ -1,4 +1,4 @@
-import { Download, Trash2 } from 'lucide-react';
+import { Download, Plus, Trash2, Upload } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
@@ -236,24 +236,12 @@ export default function CanvasListPage() {
               variant="secondary"
               onClick={handleImportClick}
               disabled={isImporting}
-              className="gap-2 rounded-lg px-4 py-2.5"
+              className="gap-2 rounded-lg px-3 py-2"
             >
               {isImporting ? (
                 <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-500 border-t-transparent" />
               ) : (
-                <svg
-                  className="h-4 w-4"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  strokeWidth={2}
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5"
-                  />
-                </svg>
+                <Upload size={16} />
               )}
               Import
             </Button>
@@ -261,24 +249,12 @@ export default function CanvasListPage() {
               variant="primary"
               onClick={handleCreate}
               disabled={isCreating}
-              className="gap-2 rounded-lg px-4 py-2.5"
+              className="bg-primary text-primary-foreground gap-2 rounded-lg px-3 py-2"
             >
               {isCreating ? (
                 <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
               ) : (
-                <svg
-                  className="h-4 w-4"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  strokeWidth={2}
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M12 4.5v15m7.5-7.5h-15"
-                  />
-                </svg>
+                <Plus size={16} />
               )}
               New Canvas
             </Button>
