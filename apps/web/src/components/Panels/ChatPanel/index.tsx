@@ -453,7 +453,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           },
           {
             canvasContext: getAgentContext(),
-            canvasId: modifiesCanvas ? canvasId : undefined,
+            canvasId: canvasId || undefined,
             attachments,
           },
         );
