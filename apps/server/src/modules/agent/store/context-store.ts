@@ -19,7 +19,7 @@ import { getWorkspacePath } from '../../workspace.js';
 import type { Context } from '@mariozechner/pi-ai';
 
 function getContextDir(): string {
-  const dir = path.join(getWorkspacePath(), 'contexts');
+  const dir = path.join(getWorkspacePath(), '.history');
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
