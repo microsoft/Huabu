@@ -117,10 +117,7 @@ export async function* runAgent(
     iteration++;
 
     if (signal?.aborted) {
-      yield {
-        type: 'error',
-        data: { error: 'Request was aborted' },
-      };
+      console.log('[agent] Signal aborted at iteration start, stopping');
       return;
     }
 
@@ -203,6 +200,12 @@ export async function* runAgent(
       );
 
       for (const call of toolCalls) {
+        // Check abort before executing each tool
+        if (signal?.aborted) {
+          console.log('[agent] Signal aborted before tool execution, stopping');
+          return;
+        }
+
         // Execute the tool
         let toolResultText: string;
         try {

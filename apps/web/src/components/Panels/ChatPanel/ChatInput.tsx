@@ -1,8 +1,9 @@
-import { ArrowUp, X } from 'lucide-react';
+import { ArrowUp, Square, X } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 
 import { useChatStore } from '@/store/chatStore';
 
+import { ContextUsageRing } from './ContextUsageRing';
 import { ModeSelector } from './ModeSelector';
 import { SourceCount } from './SelectedNodeRefs';
 import { IconButton } from '../../Common/IconButton';
@@ -13,6 +14,8 @@ interface ChatInputProps {
   value: string;
   onChange: (value: string) => void;
   onSubmit: (e: React.FormEvent, mode: AgentMode) => void;
+  onStop: () => void;
+  isStreaming?: boolean;
   mode: AgentMode;
   onModeChange: (mode: AgentMode) => void;
   disabled?: boolean;
@@ -23,6 +26,8 @@ export const ChatInput = ({
   value,
   onChange,
   onSubmit,
+  onStop,
+  isStreaming = false,
   mode,
   onModeChange,
   disabled = false,
@@ -141,16 +146,31 @@ export const ChatInput = ({
             <div className="flex items-center gap-2">
               <SourceCount />
 
-              <IconButton
-                type="submit"
-                title="Send Message"
-                disabled={isSubmitDisabled}
-                aria-label="Send"
-                size="sm"
-                variant="solid"
-              >
-                <ArrowUp size={16} />
-              </IconButton>
+              <ContextUsageRing />
+
+              {isStreaming ? (
+                <IconButton
+                  type="button"
+                  title="Stop generating"
+                  onClick={onStop}
+                  aria-label="Stop"
+                  size="sm"
+                  variant="solid"
+                >
+                  <Square size={14} />
+                </IconButton>
+              ) : (
+                <IconButton
+                  type="submit"
+                  title="Send Message"
+                  disabled={isSubmitDisabled}
+                  aria-label="Send"
+                  size="sm"
+                  variant="solid"
+                >
+                  <ArrowUp size={16} />
+                </IconButton>
+              )}
             </div>
           </div>
         </div>
