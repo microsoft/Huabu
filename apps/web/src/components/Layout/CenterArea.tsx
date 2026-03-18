@@ -13,7 +13,13 @@ const SPLIT_DEFAULT_RATIO = 0.5;
  * the canvas with the expanded panel or shows them side-by-side with a
  * draggable resize handle.
  */
-export const CenterArea: React.FC = () => {
+type CenterAreaProps = {
+  canvasShortcutsDisabled?: boolean;
+};
+
+export const CenterArea: React.FC<CenterAreaProps> = ({
+  canvasShortcutsDisabled = false,
+}) => {
   const expandedNodeId = useCanvasStore((s) => s.expandedNodeId);
   const canvasExpandMode = useCanvasStore((s) => s.expandMode);
 
@@ -95,7 +101,7 @@ export const CenterArea: React.FC = () => {
         className="h-full shrink-0 overflow-hidden"
         style={{ width: canvasWidth }}
       >
-        <Canvas />
+        <Canvas shortcutsDisabled={canvasShortcutsDisabled} />
       </div>
 
       {/* Resize handle – visible only in split mode */}

@@ -33,6 +33,10 @@ export interface CanvasShortcutRefs {
   mousePositionRef: MutableRefObject<{ x: number; y: number }>;
 }
 
+export interface UseCanvasShortcutsOptions {
+  disabled?: boolean;
+}
+
 export type CanvasTool = 'select' | 'pan';
 
 /**
@@ -46,11 +50,15 @@ export type CanvasTool = 'select' | 'pan';
  *
  * Returns `{ tool, setTool }` so Canvas can pass it to the toolbar.
  */
-export function useCanvasShortcuts(refs: CanvasShortcutRefs): {
+export function useCanvasShortcuts(
+  refs: CanvasShortcutRefs,
+  options: UseCanvasShortcutsOptions = {},
+): {
   tool: CanvasTool;
   setTool: React.Dispatch<React.SetStateAction<CanvasTool>>;
 } {
   const { rfInstanceRef, mousePositionRef } = refs;
+  const { disabled = false } = options;
 
   const frameSelectedNodes = useCanvasStore((s) => s.frameSelectedNodes);
   const copySelectedNodes = useCanvasStore((s) => s.copySelectedNodes);
@@ -68,6 +76,8 @@ export function useCanvasShortcuts(refs: CanvasShortcutRefs): {
 
   // Space key: temporarily switch to pan mode while held
   useEffect(() => {
+    if (disabled) return;
+
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== ' ' || e.repeat) return;
       const target = e.target as HTMLElement | null;
@@ -94,7 +104,7 @@ export function useCanvasShortcuts(refs: CanvasShortcutRefs): {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
     };
-  }, []);
+  }, [disabled]);
 
   // Prevents double-paste between native paste event and async Clipboard API.
   const pasteHandledRef = useRef(false);
@@ -219,15 +229,19 @@ export function useCanvasShortcuts(refs: CanvasShortcutRefs): {
 
   // --- Track mouse position globally so paste can use it ---
   useEffect(() => {
+    if (disabled) return;
+
     const onMouseMove = (e: MouseEvent) => {
       mousePositionRef.current = { x: e.clientX, y: e.clientY };
     };
     window.addEventListener('mousemove', onMouseMove);
     return () => window.removeEventListener('mousemove', onMouseMove);
-  }, [mousePositionRef]);
+  }, [disabled, mousePositionRef]);
 
   // --- Keyboard shortcuts (keydown) ---
   useEffect(() => {
+    if (disabled) return;
+
     const onKeyDown = (e: KeyboardEvent) => {
       const key = e.key;
       const mod = e.metaKey || e.ctrlKey;
@@ -406,6 +420,7 @@ export function useCanvasShortcuts(refs: CanvasShortcutRefs): {
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [
+    disabled,
     frameSelectedNodes,
     copySelectedNodes,
     pasteNodes,
@@ -426,6 +441,8 @@ export function useCanvasShortcuts(refs: CanvasShortcutRefs): {
   // element has focus). This catches cases where navigator.clipboard API
   // is not available (HTTP, permission denied).
   useEffect(() => {
+    if (disabled) return;
+
     const onPaste = (e: ClipboardEvent) => {
       const target = e.target as HTMLElement | null;
       const tag = target?.tagName?.toLowerCase();
@@ -489,7 +506,7 @@ export function useCanvasShortcuts(refs: CanvasShortcutRefs): {
 
     window.addEventListener('paste', onPaste, true);
     return () => window.removeEventListener('paste', onPaste, true);
-  }, [getFlowPos, pasteFiles, pasteText, pasteNodes]);
+  }, [disabled, getFlowPos, pasteFiles, pasteText, pasteNodes]);
 
   return { tool, setTool };
 }

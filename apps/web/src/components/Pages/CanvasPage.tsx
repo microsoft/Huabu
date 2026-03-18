@@ -1,8 +1,9 @@
 import { ArrowLeft } from 'lucide-react';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 
 import useStore from '../../store/canvasStore';
+import { KeyboardShortcutsModal } from '../Common/KeyboardShortcutsModal';
 import { CenterArea } from '../Layout/CenterArea';
 import { MainLayout } from '../Layout/MainLayout';
 import { ChatPanel } from '../Panels/ChatPanel';
@@ -21,6 +22,7 @@ export default function CanvasPage() {
   const isLoading = useStore((s) => s.isLoading);
   const canvasNotFound = useStore((s) => s.canvasNotFound);
   const initialised = useRef(false);
+  const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   // Track the last canvasId we loaded so we can detect URL-driven changes
   // without subscribing to the Zustand store's canvasId (which would cause
   // an extra render cycle after loadCanvas/switchCanvas updates it).
@@ -42,6 +44,29 @@ export default function CanvasPage() {
       void switchCanvas(canvasId);
     }
   }, [canvasId, loadCanvas, switchCanvas, navigate]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.repeat) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key !== '?' && e.key !== '？') return;
+
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      const isNativeInput = tag === 'input' || tag === 'textarea';
+      const isRichEditor =
+        target?.isContentEditable ||
+        target?.getAttribute?.('role') === 'textbox';
+
+      if (isNativeInput || isRichEditor) return;
+
+      e.preventDefault();
+      setIsShortcutsOpen(true);
+    };
+
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, []);
 
   if (isLoading) {
     return (
@@ -78,12 +103,19 @@ export default function CanvasPage() {
   }
 
   return (
-    <MainLayout
-      header={<Header />}
-      leftPanel={<DataSourcePanel />}
-      rightPanel={<ChatPanel />}
-    >
-      <CenterArea />
-    </MainLayout>
+    <>
+      <MainLayout
+        header={<Header onOpenHelp={() => setIsShortcutsOpen(true)} />}
+        leftPanel={<DataSourcePanel />}
+        rightPanel={<ChatPanel />}
+      >
+        <CenterArea canvasShortcutsDisabled={isShortcutsOpen} />
+      </MainLayout>
+
+      <KeyboardShortcutsModal
+        isOpen={isShortcutsOpen}
+        onClose={() => setIsShortcutsOpen(false)}
+      />
+    </>
   );
 }
