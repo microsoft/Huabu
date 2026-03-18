@@ -9,9 +9,7 @@
  * Replaces LangGraph's StateGraph, checkpointer, and BaseAgent entirely.
  */
 
-import { stream as piStream } from '@mariozechner/pi-ai';
-
-import { getLLMModel } from './llm.js';
+import { llmStream } from './llm.js';
 import {
   chatTools,
   researchTools,
@@ -103,7 +101,6 @@ export async function* runAgent(
 ): AsyncGenerator<StreamEvent, void, unknown> {
   const { mode, context, signal, maxIterations = 20 } = options;
 
-  const model = getLLMModel();
   const tools = getToolsForMode(mode);
 
   // Ensure tools are set on the context
@@ -123,8 +120,7 @@ export async function* runAgent(
     }
 
     // Stream from the LLM
-    const s = piStream(model, context, {
-      apiKey: process.env.AZURE_OPENAI_API_KEY,
+    const s = llmStream(context, {
       signal,
     });
 

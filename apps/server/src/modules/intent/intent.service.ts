@@ -6,11 +6,9 @@
  * by calling the LLM to analyze the canvas state and recent user actions.
  */
 
-import { complete, stream as piStream } from '@mariozechner/pi-ai';
-
 import { getIntentDb } from './intent.db.js';
 import { INTENT_SYSTEM_PROMPT } from '../../prompt/intent.js';
-import { getLLMModel } from '../agent/llm.js';
+import { llmComplete, llmStream } from '../agent/llm.js';
 
 import type { Context } from '@mariozechner/pi-ai';
 import type {
@@ -216,7 +214,6 @@ function appendScreenshot(
 async function llmIntentRecognition(
   ctx: AgentBaseContext,
 ): Promise<IntentCandidate[]> {
-  const model = getLLMModel();
   const contextText = serializeContextLight(ctx);
 
   const userContentParts: ContentPart[] = [
@@ -236,9 +233,7 @@ async function llmIntentRecognition(
     ],
   };
 
-  const response = await complete(model, piContext, {
-    apiKey: process.env.AZURE_OPENAI_API_KEY,
-  });
+  const response = await llmComplete(piContext);
 
   const raw = response.content
     .filter((b) => b.type === 'text')
@@ -287,7 +282,6 @@ export async function recognizeIntent(
 export async function* recognizeIntentStream(
   ctx: AgentBaseContext,
 ): AsyncGenerator<IntentCandidate> {
-  const model = getLLMModel();
   const contextText = serializeContextLight(ctx);
 
   const userContentParts: ContentPart[] = [
@@ -310,9 +304,7 @@ export async function* recognizeIntentStream(
   let accumulated = '';
   let yieldedCount = 0;
 
-  const s = piStream(model, piContext, {
-    apiKey: process.env.AZURE_OPENAI_API_KEY,
-  });
+  const s = llmStream(piContext);
 
   for await (const event of s) {
     if (event.type === 'text_delta') {

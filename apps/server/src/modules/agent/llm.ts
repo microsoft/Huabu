@@ -1,13 +1,23 @@
 /**
  * LLM Configuration — pi-ai based
  *
- * Provides a configured Model instance for Azure OpenAI (Responses API).
- * Replaces the previous LangChain AzureChatOpenAI wrapper.
+ * Provides a configured Model instance and pre-configured stream/complete
+ * wrappers for Azure OpenAI (Responses API).
  */
 
-import type { Model } from '@mariozechner/pi-ai';
+import {
+  stream as piStream,
+  complete as piComplete,
+} from '@mariozechner/pi-ai';
+
+import type {
+  Context,
+  Model,
+  ProviderStreamOptions,
+} from '@mariozechner/pi-ai';
 
 let cachedModel: Model<'azure-openai-responses'> | null = null;
+let cachedApiKey: string | null = null;
 
 /**
  * Get a configured Azure OpenAI model via pi-ai.
@@ -18,7 +28,6 @@ let cachedModel: Model<'azure-openai-responses'> | null = null;
  *   AZURE_OPENAI_API_DEPLOYMENT_NAME
  *   AZURE_OPENAI_API_VERSION (default: read by pi-ai from env)
  */
-// TODO: use API-key
 export function getLLMModel(): Model<'azure-openai-responses'> {
   if (cachedModel) return cachedModel;
 
@@ -37,6 +46,8 @@ export function getLLMModel(): Model<'azure-openai-responses'> {
       'AZURE_OPENAI_API_DEPLOYMENT_NAME is required. Set it in apps/server/.env',
     );
   }
+
+  cachedApiKey = apiKey;
 
   // The openai SDK's AzureOpenAI class uses baseURL directly.
   // When 'endpoint' is provided to AzureOpenAI, it auto-appends '/openai'.
@@ -58,4 +69,26 @@ export function getLLMModel(): Model<'azure-openai-responses'> {
   } as Model<'azure-openai-responses'>;
 
   return cachedModel;
+}
+
+/**
+ * Stream LLM responses with pre-configured model and API key.
+ */
+export function llmStream(context: Context, options?: ProviderStreamOptions) {
+  const model = getLLMModel();
+  return piStream(model, context, {
+    apiKey: cachedApiKey as string,
+    ...options,
+  });
+}
+
+/**
+ * Complete (non-streaming) LLM call with pre-configured model and API key.
+ */
+export function llmComplete(context: Context, options?: ProviderStreamOptions) {
+  const model = getLLMModel();
+  return piComplete(model, context, {
+    apiKey: cachedApiKey as string,
+    ...options,
+  });
 }

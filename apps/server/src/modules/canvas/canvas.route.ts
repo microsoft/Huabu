@@ -2,7 +2,6 @@ import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { complete } from '@mariozechner/pi-ai';
 import { createId } from '@sediment/shared';
 import { z } from 'zod';
 
@@ -20,7 +19,7 @@ import {
   buildFrameLabelPrompt,
 } from '../../prompt/resolve-label.js';
 import { getExtFromMime, getMimeType } from '../../utils/mime.js';
-import { getLLMModel } from '../agent/llm.js';
+import { llmComplete } from '../agent/llm.js';
 import { resolveArtifactImageUrl } from '../artifact/utils.js';
 import {
   getIngestService,
@@ -281,7 +280,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       const body = parsed.data as ResolveLabelRequest;
 
       try {
-        const model = getLLMModel();
         let suggestedLabel: string | undefined;
 
         if (body.type === 'image') {
@@ -315,9 +313,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
               },
             ],
           };
-          const result = await complete(model, piContext, {
-            apiKey: process.env.AZURE_OPENAI_API_KEY,
-          });
+          const result = await llmComplete(piContext);
           const text = result.content
             .filter((b) => b.type === 'text')
             .map((b) => (b as { type: 'text'; text: string }).text)
@@ -338,9 +334,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
               },
             ],
           };
-          const result = await complete(model, piContext, {
-            apiKey: process.env.AZURE_OPENAI_API_KEY,
-          });
+          const result = await llmComplete(piContext);
           const text = result.content
             .filter((b) => b.type === 'text')
             .map((b) => (b as { type: 'text'; text: string }).text)
