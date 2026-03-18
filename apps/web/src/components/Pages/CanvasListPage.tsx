@@ -13,6 +13,7 @@ import { useWorkspaceStore } from '../../store/workspaceStore';
 import { Button } from '../Common/Button';
 import { IconButton } from '../Common/IconButton';
 import { Modal } from '../Common/Modal';
+import { toast } from '../Common/Toast';
 import { Header } from '../Panels/Header';
 
 import type { CanvasExportBundle, CanvasSummary } from '@sediment/shared';
@@ -31,6 +32,7 @@ export default function CanvasListPage() {
     title: string | null;
   } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [exportingId, setExportingId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const confirmDeleteButtonRef = useRef<HTMLButtonElement>(null);
   const navigate = useNavigate();
@@ -76,18 +78,16 @@ export default function CanvasListPage() {
   };
 
   const handleExport = async (canvasId: string, title: string | null) => {
+    setExportingId(canvasId);
     try {
-      const blob = await exportCanvas(canvasId);
-      const safeName =
-        (title ?? canvasId).replace(/[^a-z0-9_-]/gi, '_') || canvasId;
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${safeName}.sediment.json`;
-      a.click();
-      URL.revokeObjectURL(url);
+      await exportCanvas(canvasId, title ?? undefined);
+      toast('Export started', { variant: 'success' });
     } catch (error) {
-      console.error('Failed to export canvas:', error);
+      toast(error instanceof Error ? error.message : 'Export failed', {
+        variant: 'error',
+      });
+    } finally {
+      setExportingId(null);
     }
   };
 
@@ -306,9 +306,18 @@ export default function CanvasListPage() {
                     void handleExport(canvas.canvasId, canvas.title);
                   }}
                   tooltipWrapperClassName="absolute top-3 right-10 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
-                  title="Export canvas"
+                  title={
+                    exportingId === canvas.canvasId
+                      ? 'Exporting…'
+                      : 'Export canvas'
+                  }
+                  disabled={exportingId === canvas.canvasId}
                 >
-                  <Download size={16} className="text-gray-400" />
+                  {exportingId === canvas.canvasId ? (
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" />
+                  ) : (
+                    <Download size={16} className="text-gray-400" />
+                  )}
                 </IconButton>
                 {/* Delete button */}
                 <IconButton

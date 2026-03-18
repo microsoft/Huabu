@@ -7,6 +7,7 @@ import useCanvasStore from '../../store/canvasStore';
 import { DropdownMenuItem } from '../Common/DropdownMenu';
 import { IconButton } from '../Common/IconButton';
 import { Popover } from '../Common/Popover';
+import { toast } from '../Common/Toast';
 
 /**
  * canvas title + dropdown menu.
@@ -22,7 +23,6 @@ export const CanvasMenu: React.FC = () => {
   const canRedo = useCanvasStore((s) => s.canRedo);
 
   const [isOpen, setIsOpen] = useState(false);
-  const [statusMessage, setStatusMessage] = useState('');
 
   const triggerRef = useRef<HTMLDivElement>(null);
   const chevronRef = useRef<HTMLDivElement>(null);
@@ -42,21 +42,13 @@ export const CanvasMenu: React.FC = () => {
 
   const handleExport = useCallback(async () => {
     setIsOpen(false);
-    setStatusMessage('Exporting…');
     try {
-      const blob = await exportCanvas(canvasId);
-      const safeName = canvasTitle.replace(/[^a-z0-9_-]/gi, '_') || canvasId;
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${safeName}.sediment.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-      setStatusMessage('Export complete');
+      await exportCanvas(canvasId, canvasTitle);
+      toast('Export started', { variant: 'success' });
     } catch (err) {
-      setStatusMessage(err instanceof Error ? err.message : 'Export failed');
-    } finally {
-      setTimeout(() => setStatusMessage(''), 3000);
+      toast(err instanceof Error ? err.message : 'Export failed', {
+        variant: 'error',
+      });
     }
   }, [canvasId, canvasTitle]);
 
@@ -102,11 +94,6 @@ export const CanvasMenu: React.FC = () => {
             />
           </IconButton>
         </div>
-
-        {/* Inline status message */}
-        {statusMessage && (
-          <span className="ml-2 text-xs text-gray-500">{statusMessage}</span>
-        )}
       </div>
 
       {/* Dropdown menu */}
