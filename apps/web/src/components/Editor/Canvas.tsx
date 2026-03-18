@@ -295,6 +295,59 @@ export const Canvas: React.FC = () => {
     return () => clearTimeout(timer);
   }, [expandedNodeId, expandMode]);
 
+  // Boost trackpad pinch-to-zoom sensitivity.
+  // Windows touchpads emit ctrlKey+wheel events with very small deltaY values,
+  // resulting in sluggish, non-continuous zoom under d3-zoom's default
+  // sensitivity (0.002). We intercept these events in the capture phase
+  // (before d3-zoom sees them), apply a higher multiplier, and zoom towards
+  // the cursor position for a natural feel.
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      // Only handle pinch-to-zoom (ctrlKey + wheel)
+      if (!e.ctrlKey) return;
+
+      const instance = rfInstanceRef.current;
+      if (!instance) return;
+
+      // 10× the default d3-zoom wheel sensitivity
+      const SENSITIVITY = 0.02;
+      const { x, y, zoom } = instance.getViewport();
+      const factor = Math.pow(2, -e.deltaY * SENSITIVITY);
+      const newZoom = Math.max(0.1, Math.min(5, zoom * factor));
+
+      if (newZoom === zoom) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      // Zoom towards the cursor position
+      const rect = el.getBoundingClientRect();
+      const cx = e.clientX - rect.left;
+      const cy = e.clientY - rect.top;
+      const flowX = (cx - x) / zoom;
+      const flowY = (cy - y) / zoom;
+
+      instance.setViewport(
+        {
+          x: cx - flowX * newZoom,
+          y: cy - flowY * newZoom,
+          zoom: newZoom,
+        },
+        { duration: 0 },
+      );
+    };
+
+    el.addEventListener('wheel', handleWheel, {
+      capture: true,
+      passive: false,
+    });
+    return () =>
+      el.removeEventListener('wheel', handleWheel, { capture: true });
+  }, []);
+
   useEffect(() => {
     return () => {
       rfInstanceRef.current = null;
