@@ -55,10 +55,10 @@ async function pickFolderNative(): Promise<string | null> {
     }
 
     if (platform === 'darwin') {
-      // macOS: AppleScript folder chooser
+      // macOS: AppleScript folder chooser (top-level to avoid Automation permissions)
       return await runAndTrim('osascript', [
         '-e',
-        'tell application "System Events" to return POSIX path of (choose folder with prompt "Select Sediment workspace folder")',
+        'POSIX path of (choose folder with prompt "Select Sediment workspace folder")',
       ]);
     }
 

@@ -4,7 +4,23 @@
 
 ---
 
-## 2026-03-16 · 智能语义标签（Image & Frame）
+## 2026-03-17 · Chat Panel 体验优化：去重、节点引用可点击、移除 Keep/Revert
+
+**变更内容**
+
+- **修复工具条目重复**：Agent 模式并行调用工具时，Chat Panel 里同一工具操作不再重复显示（之前 executing 和 completed 状态各显示一条）。改用队列追踪代替单变量，并将工具参数与结果合并保留完整信息。
+- **移除 Keep / Revert 按钮**：Agent 模式的 Canvas changes 摘要不再显示 Keep / Revert 操作按钮，变更即时生效。
+- **Connect 操作显示节点名称**：连线操作现在显示 `Connect [源节点] → [目标节点]` 而非笼统的 "Connect nodes"。Canvas changes 摘要同步更新。
+- **节点引用可点击聚焦**：工具操作（Read node、Create、Update、Connect）和 Canvas changes 中的节点名称以 `[label]` 形式显示，点击后在画布中选中并定位到该节点。
+
+**注意事项**
+
+- Canvas 快照 / 恢复机制已移除（无 Revert 需求）。
+- 新增 `NodeRef` 组件（`components/Messages/NodeRef.tsx`）供工具卡片和变更摘要复用。
+
+---
+
+## 2026-03-17 · 统一 AgentMode 类型：`'agent'` → `'operate'`
 
 **变更内容**
 

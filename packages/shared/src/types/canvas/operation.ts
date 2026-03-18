@@ -1,6 +1,6 @@
 /**
  * Canvas Operation Types
- * Programmatic canvas manipulation (used by research graph)
+ * Programmatic canvas manipulation
  */
 
 import type { EdgeStyle } from './edge.js';

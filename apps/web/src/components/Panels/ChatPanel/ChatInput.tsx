@@ -1,16 +1,20 @@
 import { ArrowUp, X } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 
 import { useChatStore } from '@/store/chatStore';
 
-import { ModeSelector, type ChatMode } from './ModeSelector';
+import { ModeSelector } from './ModeSelector';
 import { SourceCount } from './SelectedNodeRefs';
 import { IconButton } from '../../Common/IconButton';
+
+import type { AgentMode } from '@sediment/shared';
 
 interface ChatInputProps {
   value: string;
   onChange: (value: string) => void;
-  onSubmit: (e: React.FormEvent, mode: ChatMode) => void;
+  onSubmit: (e: React.FormEvent, mode: AgentMode) => void;
+  mode: AgentMode;
+  onModeChange: (mode: AgentMode) => void;
   disabled?: boolean;
   placeholder?: string;
 }
@@ -19,10 +23,11 @@ export const ChatInput = ({
   value,
   onChange,
   onSubmit,
+  mode,
+  onModeChange,
   disabled = false,
   placeholder = 'Asking anything here...',
 }: ChatInputProps) => {
-  const [mode, setMode] = useState<ChatMode>('chat');
   const isSubmitDisabled = disabled || !value.trim();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -34,15 +39,15 @@ export const ChatInput = ({
 
   // Dynamic placeholder based on mode
   const currentPlaceholder =
-    mode === 'deep-research'
+    mode === 'research'
       ? 'Enter your research query...'
-      : mode === 'agent'
+      : mode === 'operate'
         ? 'Describe the canvas change you want...'
         : placeholder;
 
   // Auto-resize textarea
   useEffect(() => {
-    if (mode === 'agent') return;
+    if (mode === 'operate') return;
 
     const textarea = textareaRef.current;
     if (!textarea) return;
@@ -127,7 +132,11 @@ export const ChatInput = ({
           />
 
           <div className="mt-2 flex items-center justify-between gap-3">
-            <ModeSelector value={mode} onChange={setMode} disabled={disabled} />
+            <ModeSelector
+              value={mode}
+              onChange={onModeChange}
+              disabled={disabled}
+            />
 
             <div className="flex items-center gap-2">
               <SourceCount />

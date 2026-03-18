@@ -1,37 +1,138 @@
 import {
   createId,
-  type ResearchConfig,
-  type IntentAction,
+  type ChatAttachment,
   type ToolResponse,
 } from '@sediment/shared';
 import { PanelRightClose, PanelRightOpen, Plus } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
-import { chatApi } from '@/api/chat';
-import { resolveActions } from '@/api/intent';
-import { researchApi } from '@/api/research';
+import { agentApi } from '@/api/agent';
 import { IconButton } from '@/components/Common/IconButton';
-import useCanvasStore, {
-  type CanvasPreviewSnapshot,
-} from '@/store/canvasStore';
+import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
+import { useIntentStore } from '@/store/intentStore';
 import { useResearchStore } from '@/store/researchStore';
-import { executeIntentActions } from '@/utils/intent/executor';
-import { summarizeIntentActions } from '@/utils/intent/summary';
 
 import { SidebarPanel } from '../SidebarPanel';
-import { AgentChangeList } from './AgentChangeList';
+import { CanvasChangeBar, type CanvasChange } from './CanvasChangeBar';
 import { ChatInput } from './ChatInput';
 import { MessageList } from '../../Messages/MessageList';
 
-import type { ChatMode } from './ModeSelector';
-import type { ChatMessage } from '../../Messages/types';
-import type { ChatStreamUpdatePayload } from '@sediment/shared';
+import type { ChatMessage, ResourceLabel } from '../../Messages/types';
+import type {
+  AgentMode,
+  AgentStreamEvent,
+  IntentCandidate,
+} from '@sediment/shared';
 
-interface AgentChangeSet {
-  prompt: string;
-  actions: IntentAction[];
-  snapshot: CanvasPreviewSnapshot;
+/**
+ * Parse a tool result string into a proper ToolResponse.
+ */
+function parseToolResponse(
+  toolName: string,
+  raw: string | undefined,
+): ToolResponse<string, unknown> | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      'tool' in parsed &&
+      'status' in parsed
+    ) {
+      return parsed as ToolResponse<string, unknown>;
+    }
+    return { tool: toolName, status: 'success', data: parsed };
+  } catch {
+    return { tool: toolName, status: 'success', data: { content: raw } };
+  }
+}
+
+/** Tools that modify the canvas and should be tracked for the change bar. */
+const CANVAS_MODIFY_TOOLS = new Set([
+  'create_node',
+  'update_node',
+  'delete_nodes',
+  'connect_nodes',
+  'disconnect_nodes',
+  'create_frame',
+]);
+
+/** Extract a CanvasChange from a tool response, or null if not canvas-modifying. */
+function extractCanvasChange(
+  toolResponse: ToolResponse<string, unknown>,
+): CanvasChange | null {
+  if (!CANVAS_MODIFY_TOOLS.has(toolResponse.tool)) return null;
+  if (toolResponse.status !== 'success') return null;
+  const data = (toolResponse.data ?? {}) as Record<string, unknown>;
+  const truncate = (s: string, n: number) =>
+    s.length > n ? s.slice(0, n) + '…' : s;
+
+  switch (toolResponse.tool) {
+    case 'create_node':
+      return {
+        tool: 'create_node',
+        label: `Created: ${truncate((data.label as string) ?? 'untitled', 24)}`,
+        nodeType: (data.type as string) ?? 'note',
+        nodeId: data.nodeId as string,
+      };
+    case 'update_node':
+      return {
+        tool: 'update_node',
+        label: `Updated: ${truncate((data.nodeId as string) ?? '', 24)}`,
+        nodeType: 'note',
+        nodeId: data.nodeId as string,
+      };
+    case 'delete_nodes':
+      return {
+        tool: 'delete_nodes',
+        label: `Deleted ${(data.deletedCount as number) ?? ''} node(s)`,
+      };
+    case 'connect_nodes':
+      return {
+        tool: 'connect_nodes',
+        label: 'Connected nodes',
+        sourceNodeId: data.sourceId as string,
+        targetNodeId: data.targetId as string,
+      };
+    case 'disconnect_nodes':
+      return { tool: 'disconnect_nodes', label: 'Disconnected nodes' };
+    case 'create_frame':
+      return {
+        tool: 'create_frame',
+        label: 'Created frame',
+        nodeType: 'frame',
+      };
+    default:
+      return null;
+  }
+}
+
+/** Extract a ResourceLabel from a tool response. */
+function extractResource(
+  toolResponse: ToolResponse<string, unknown>,
+): ResourceLabel | null {
+  if (toolResponse.status !== 'success') return null;
+  const data = toolResponse.data as Record<string, unknown>;
+
+  if (toolResponse.tool === 'create_node') {
+    return {
+      type: 'node',
+      nodeType: (data.type as string) ?? 'note',
+      label: (data.label as string) ?? 'untitled',
+      id: data.nodeId as string,
+    };
+  }
+  if (toolResponse.tool === 'create_frame') {
+    return {
+      type: 'frame',
+      nodeType: 'frame',
+      label: 'Frame',
+      id: data.frameId as string,
+    };
+  }
+  return null;
 }
 
 interface ChatPanelProps {
@@ -42,9 +143,10 @@ interface ChatPanelProps {
 export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [agentChangeSet, setAgentChangeSet] = useState<AgentChangeSet | null>(
-    null,
-  );
+  const [mode, setMode] = useState<AgentMode>('ask');
+
+  // Canvas change tracking
+  const [canvasChanges, setCanvasChanges] = useState<CanvasChange[]>([]);
 
   // Persistent chat state (survives page refresh)
   const threadId = useChatStore((state) => state.threadId);
@@ -60,29 +162,43 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   );
 
   const getAgentContext = useCanvasStore((state) => state.getAgentContext);
-  const getCanvasSnapshot = useCanvasStore((state) => state.getCanvasSnapshot);
-  const restoreCanvasSnapshot = useCanvasStore(
-    (state) => state.restoreCanvasSnapshot,
-  );
   const canvasId = useCanvasStore((state) => state.canvasId);
-  const canvasVersion = useCanvasStore((state) => state.version);
   const loadCanvas = useCanvasStore((state) => state.loadCanvas);
+  const refreshCanvas = useCanvasStore((state) => state.refreshCanvas);
 
-  // Research store (for current session UI state only, not persisted)
+  // Switch chat thread when canvas changes
+  useEffect(() => {
+    if (canvasId) {
+      useChatStore.getState().switchToCanvas(canvasId);
+    }
+  }, [canvasId]);
+
+  // Research store — tracks running status for UI (disable input, etc.)
   const researchStatus = useResearchStore((state) => state.status);
-  const startResearchState = useResearchStore((state) => state.startResearch);
-  const handleEvent = useResearchStore((state) => state.handleEvent);
-  const completeResearch = useResearchStore((state) => state.completeResearch);
-  const setError = useResearchStore((state) => state.setError);
+  const startResearchUi = useResearchStore((state) => state.startResearch);
+  const completeResearchUi = useResearchStore(
+    (state) => state.completeResearch,
+  );
+  const setResearchError = useResearchStore((state) => state.setError);
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Track resources across the current agent run
+  const resourcesRef = useRef<ResourceLabel[]>([]);
+  const assistantIdRef = useRef<string>('');
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, isLoading]);
 
   // Load history from server on first mount (once per thread)
   useEffect(() => {
-    // Read current value from store directly to avoid stale closure
     if (useChatStore.getState().isHistoryLoaded) return;
 
-    // Guard against threadId changing while the async fetch is in flight.
-    // If the effect is cleaned up (e.g. threadId changed or component unmounted)
-    // before the fetch resolves, we discard the stale result.
     let cancelled = false;
 
     const {
@@ -92,12 +208,8 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       setHistoryLoaded: setLoaded,
     } = useChatStore.getState();
 
-    // Load checkpoint based on last action type
-    // Both chat and research now return ChatHistoryResponse with messages[]
-    const api = action === 'research' ? researchApi : chatApi;
-
-    api
-      .fetchHistory(tid)
+    agentApi
+      .fetchHistory(tid, canvasId || undefined)
       .then((res) => {
         if (cancelled) return;
 
@@ -105,36 +217,35 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           (m, i): ChatMessage => {
             const id = `history-${i}`;
 
-            // ChatHistoryItem is a union type
-            // Check for tool message variant
-            if ('toolResponse' in m) {
+            if (m.role === 'tool') {
               return {
                 id,
-                role: 'tool',
+                role: 'tool' as const,
                 toolResponse: m.toolResponse as ToolResponse<string, unknown>,
               };
             }
 
-            // Otherwise it's user/assistant message variant
+            const msg = m as {
+              role: 'user' | 'assistant';
+              content: string;
+              attachments?: ChatAttachment[];
+            };
             return {
               id,
-              role: m.role,
-              content: m.content || '',
-              ...('attachments' in m &&
-                m.attachments &&
-                m.attachments.length > 0 && {
-                  attachments: m.attachments,
+              role: msg.role,
+              content: msg.content || '',
+              ...(msg.attachments &&
+                msg.attachments.length > 0 && {
+                  attachments: msg.attachments,
                 }),
             };
           },
         );
-        // All messages come from backend checkpoint
         set(serverMessages);
         setLoaded(true);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        // Non-fatal: just start with an empty list
         console.warn(`Could not load ${action} history:`, err);
         setLoaded(true);
       });
@@ -142,256 +253,295 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     return () => {
       cancelled = true;
     };
-  }, [threadId]);
+  }, [threadId, canvasId]);
 
-  const handleDeepResearch = async () => {
-    if (!input.trim() || isLoading || researchStatus === 'running') return;
-
-    // Add user message
-    const userMessage: ChatMessage = {
-      id: createId('message'),
-      role: 'user',
-      content: input,
-    };
-    addMessage(userMessage);
-
-    // Record last action for checkpoint restoration
-    setLastAction('research');
-
-    // Start research
-    const query = input;
-    setInput('');
-
-    const config: ResearchConfig = {
-      searchDepth: 'basic',
-      placement: 'auto',
-      groupWithFrame: true,
-    };
-
-    startResearchState(query, config);
-
-    try {
-      await researchApi.startResearch(
-        query,
-        canvasId,
-        canvasVersion,
-        threadId,
-        config,
-        {
-          onEvent: (event) => {
-            // Update research state
-            handleEvent(event);
-
-            // Add research steps as tool messages to chat
-            if (event.data.toolResponse) {
-              addMessage({
-                id: createId('tool'),
-                role: 'tool',
-                toolResponse: event.data.toolResponse,
-              });
-            }
-          },
-          onError: (error: Error) => {
-            console.error('Research error:', error);
-            setError(error.message);
-          },
-          onComplete: () => {
-            completeResearch();
-            // Reload canvas after research completes
-            loadCanvas();
-          },
-        },
-      );
-    } catch (err) {
-      console.error('Research failed:', err);
-      setError(err instanceof Error ? err.message : 'Unknown error');
-    }
-  };
-
-  const handleChat = async () => {
-    if (!input.trim() || isLoading) return;
-
-    // Record last action for checkpoint restoration
-    setLastAction('chat');
-
-    // Snapshot and clear pending attachments before sending
-    const attachments =
-      pendingAttachments.length > 0 ? [...pendingAttachments] : undefined;
-    if (attachments) clearPendingAttachments();
-
-    const userMessage: ChatMessage = {
-      id: createId('message'),
-      role: 'user',
-      content: input,
-      attachments,
-    };
-
-    addMessage(userMessage);
-    setInput('');
-    setIsLoading(true);
-
-    const assistantId = createId('message');
-
-    await chatApi.streamMessage(
-      userMessage.content,
-      threadId,
-      getAgentContext(),
-      {
-        onUpdate: (payload: ChatStreamUpdatePayload) => {
-          const { node, message } = payload;
-
-          // Handle Agent Updates (LLM Text)
-          if (node === 'agent' && message) {
-            if (message.content) {
-              const existing = useChatStore
-                .getState()
-                .messages.find((m) => m.id === assistantId);
-              if (existing) {
-                // Append new token to existing content
-                updateMessage(assistantId, (m) =>
-                  m.role === 'user' || m.role === 'assistant'
-                    ? { ...m, content: m.content + message.content }
-                    : m,
-                );
-              } else {
-                // First token - create new message
-                addMessage({
-                  id: assistantId,
-                  role: 'assistant',
-                  content: message.content,
-                });
-              }
-            }
-
-            // Handle Tool Updates
-          } else if (node === 'tools') {
-            const toolResponse = payload.toolResponse;
-            if (!toolResponse) return;
-
-            addMessage({
-              id: createId('tool'),
-              role: 'tool',
-              toolResponse,
-            });
-          }
-        },
-        onError: (err) => {
-          console.error(err);
-          addMessage({
-            id: createId('message'),
-            role: 'assistant',
-            content: 'Error: ' + err.message,
-          });
-        },
-        onComplete: () => {
-          setIsLoading(false);
-        },
+  const handleStreamingChat = useCallback(
+    async (
+      prompt: string,
+      agentMode: AgentMode,
+      intentData?: {
+        candidates: IntentCandidate[];
+        selectedIntent: string;
       },
-      attachments,
-    );
-  };
+    ) => {
+      if (!prompt.trim() || isLoading) return;
+      if (agentMode === 'research' && researchStatus === 'running') return;
 
-  const handleAgent = async () => {
-    if (!input.trim() || isLoading || agentChangeSet) return;
+      setLastAction(agentMode);
 
-    const prompt = input.trim();
+      const attachments =
+        pendingAttachments.length > 0 ? [...pendingAttachments] : undefined;
+      if (attachments) clearPendingAttachments();
 
-    // Agent-mode changes live in the local chat surface rather than a
-    // dedicated backend checkpoint, so reuse chat history semantics.
-    setLastAction('chat');
+      // For intent-driven operate calls, show an intent-select widget instead of user bubble
+      if (intentData && agentMode === 'operate') {
+        addMessage({
+          id: createId('intent'),
+          role: 'intent-select',
+          candidates: intentData.candidates,
+          selectedIntent: intentData.selectedIntent,
+        });
+      } else {
+        addMessage({
+          id: createId('message'),
+          role: 'user',
+          content: prompt,
+          attachments,
+        });
+      }
 
-    const userMessage: ChatMessage = {
-      id: createId('message'),
-      role: 'user',
-      content: prompt,
-    };
+      setIsLoading(true);
 
-    addMessage(userMessage);
-    setInput('');
-    setIsLoading(true);
+      // Research: update UI status store
+      if (agentMode === 'research') {
+        startResearchUi(prompt, {
+          searchDepth: 'basic',
+          placement: 'auto',
+          groupWithFrame: true,
+        });
+      }
 
-    try {
-      const { actions } = await resolveActions(getAgentContext(), prompt);
+      // Operate: reset change tracking
+      if (agentMode === 'operate') {
+        setCanvasChanges([]);
+        resourcesRef.current = [];
+      }
 
-      if (actions.length === 0) {
+      const assistantId = createId('message');
+      assistantIdRef.current = assistantId;
+
+      const toolMsgQueue: string[] = [];
+
+      // Whether this mode modifies the canvas (needs refresh after tool calls)
+      const modifiesCanvas =
+        agentMode === 'operate' || agentMode === 'research';
+
+      try {
+        await agentApi.streamMessage(
+          prompt,
+          threadId,
+          agentMode,
+          {
+            onEvent: (event: AgentStreamEvent) => {
+              if (event.type === 'text_delta') {
+                const delta = event.data.content ?? '';
+                const existing = useChatStore
+                  .getState()
+                  .messages.find((m) => m.id === assistantId);
+                if (existing) {
+                  updateMessage(assistantId, (m) =>
+                    m.role === 'user' || m.role === 'assistant'
+                      ? { ...m, content: m.content + delta }
+                      : m,
+                  );
+                } else {
+                  addMessage({
+                    id: assistantId,
+                    role: 'assistant',
+                    content: delta,
+                  });
+                }
+              } else if (event.type === 'tool_start') {
+                const toolName = event.data.toolName ?? 'unknown';
+                const msgId = createId('tool');
+                toolMsgQueue.push(msgId);
+                addMessage({
+                  id: msgId,
+                  role: 'tool',
+                  toolResponse: {
+                    tool: toolName,
+                    status: 'success',
+                    data: event.data.toolArgs ?? {},
+                  },
+                  isExecuting: true,
+                });
+              } else if (event.type === 'tool_result') {
+                const toolResponse = parseToolResponse(
+                  event.data.toolName ?? 'unknown',
+                  event.data.toolResult,
+                );
+                if (toolResponse) {
+                  // Merge original tool args with the result data
+                  const pendingMsgId = toolMsgQueue.shift();
+                  let finalResponse = toolResponse;
+                  if (pendingMsgId) {
+                    const existingMsg = useChatStore
+                      .getState()
+                      .messages.find((m) => m.id === pendingMsgId);
+                    const existingArgs =
+                      existingMsg?.role === 'tool' &&
+                      existingMsg.toolResponse.status === 'success'
+                        ? (existingMsg.toolResponse.data as Record<
+                            string,
+                            unknown
+                          >)
+                        : {};
+                    finalResponse = {
+                      ...toolResponse,
+                      data: {
+                        ...existingArgs,
+                        ...((toolResponse.status === 'success'
+                          ? toolResponse.data
+                          : {}) as Record<string, unknown>),
+                      },
+                    } as typeof toolResponse;
+                    updateMessage(pendingMsgId, () => ({
+                      id: pendingMsgId,
+                      role: 'tool' as const,
+                      toolResponse: finalResponse,
+                      isExecuting: false,
+                    }));
+                  } else {
+                    addMessage({
+                      id: createId('tool'),
+                      role: 'tool',
+                      toolResponse: finalResponse,
+                    });
+                  }
+
+                  // Track canvas changes for the change bar (operate mode)
+                  if (agentMode === 'operate') {
+                    const change = extractCanvasChange(finalResponse);
+                    if (change) {
+                      setCanvasChanges((prev) => [...prev, change]);
+                    }
+                    const resource = extractResource(finalResponse);
+                    if (resource) {
+                      resourcesRef.current = [
+                        ...resourcesRef.current,
+                        resource,
+                      ];
+                    }
+                  }
+
+                  if (modifiesCanvas) {
+                    void refreshCanvas();
+                  }
+                }
+              }
+            },
+            onError: (err) => {
+              console.error(`${agentMode} error:`, err);
+              addMessage({
+                id: createId('message'),
+                role: 'assistant',
+                content: `Error: ${err.message}`,
+              });
+              if (agentMode === 'research') {
+                setResearchError(err.message);
+              }
+            },
+            onComplete: () => {
+              setIsLoading(false);
+
+              if (agentMode === 'research') {
+                completeResearchUi();
+                void loadCanvas();
+              }
+
+              if (agentMode === 'operate') {
+                void refreshCanvas();
+                if (resourcesRef.current.length > 0) {
+                  updateMessage(assistantIdRef.current, (m) =>
+                    m.role === 'assistant'
+                      ? { ...m, resources: [...resourcesRef.current] }
+                      : m,
+                  );
+                }
+              }
+            },
+          },
+          {
+            canvasContext: getAgentContext(),
+            canvasId: canvasId || undefined,
+            attachments,
+          },
+        );
+      } catch (err) {
+        console.error(`${agentMode} failed:`, err);
         addMessage({
           id: createId('message'),
           role: 'assistant',
           content:
-            'No actionable canvas changes were generated for that request.',
+            err instanceof Error
+              ? `Error: ${err.message}`
+              : 'Error: unknown error',
         });
-        return;
+        setIsLoading(false);
+        if (agentMode === 'research') {
+          setResearchError(
+            err instanceof Error ? err.message : 'Unknown error',
+          );
+        }
       }
+    },
+    [
+      isLoading,
+      researchStatus,
+      pendingAttachments,
+      clearPendingAttachments,
+      addMessage,
+      setLastAction,
+      threadId,
+      updateMessage,
+      refreshCanvas,
+      loadCanvas,
+      getAgentContext,
+      canvasId,
+      startResearchUi,
+      completeResearchUi,
+      setResearchError,
+    ],
+  );
 
-      const snapshot = getCanvasSnapshot();
-      executeIntentActions(actions);
-      setAgentChangeSet({ prompt, actions, snapshot });
-
-      addMessage({
-        id: createId('message'),
-        role: 'assistant',
-        content: summarizeIntentActions(actions),
+  // Register intent callback — when user selects an intent in the popover,
+  // it's sent here and executed as an agent chat message.
+  useEffect(() => {
+    const handleIntentChosen = (
+      intent: string,
+      candidates: IntentCandidate[],
+    ) => {
+      // Open the chat panel if collapsed
+      if (isCollapsed && onToggle) {
+        onToggle();
+      }
+      // Switch mode to operate
+      setMode('operate');
+      // Send as operate mode message with intent-select widget
+      void handleStreamingChat(intent, 'operate', {
+        candidates,
+        selectedIntent: intent,
       });
-    } catch (err) {
-      console.error('Agent action resolution failed:', err);
-      addMessage({
-        id: createId('message'),
-        role: 'assistant',
-        content:
-          err instanceof Error
-            ? `Agent error: ${err.message}`
-            : 'Agent error: unknown error',
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    };
+    useIntentStore.getState()._setOnIntentChosen(handleIntentChosen);
+    return () => {
+      useIntentStore.getState()._setOnIntentChosen(null);
+    };
+  }, [handleStreamingChat, isCollapsed, onToggle]);
 
-  const handleKeepAgentChanges = () => {
-    setAgentChangeSet(null);
-  };
+  const handleIntentReselect = useCallback(
+    (messageId: string, intent: string) => {
+      // Update the intent-select message with the new selection
+      updateMessage(messageId, (m) =>
+        m.role === 'intent-select' ? { ...m, selectedIntent: intent } : m,
+      );
+      // Re-run with the new intent
+      void handleStreamingChat(intent, 'operate');
+    },
+    [handleStreamingChat, updateMessage],
+  );
 
-  const handleUpdateAgentAction = (index: number, updated: IntentAction) => {
-    if (!agentChangeSet) return;
-
-    const nextActions = [...agentChangeSet.actions];
-    nextActions[index] = updated;
-
-    restoreCanvasSnapshot(agentChangeSet.snapshot);
-    executeIntentActions(nextActions);
-    setAgentChangeSet({
-      ...agentChangeSet,
-      actions: nextActions,
-    });
-  };
-
-  const handleRevertAgentChanges = () => {
-    if (!agentChangeSet) return;
-
-    restoreCanvasSnapshot(agentChangeSet.snapshot);
-    setAgentChangeSet(null);
-    addMessage({
-      id: createId('message'),
-      role: 'assistant',
-      content: 'Reverted the proposed agent changes.',
-    });
-  };
-
-  const handleSubmit = async (e: React.FormEvent, mode: ChatMode) => {
+  const handleSubmit = async (e: React.FormEvent, agentMode: AgentMode) => {
     e.preventDefault();
-
-    if (mode === 'deep-research') {
-      await handleDeepResearch();
-    } else if (mode === 'agent') {
-      await handleAgent();
-    } else {
-      await handleChat();
-    }
+    const prompt = input.trim();
+    setInput('');
+    await handleStreamingChat(prompt, agentMode);
   };
 
   const handleNewChat = () => {
-    if (isLoading || researchStatus === 'running' || agentChangeSet) return;
-    clearMessages();
+    if (isLoading || researchStatus === 'running') return;
+    clearMessages(canvasId || undefined);
+    setCanvasChanges([]);
   };
 
   return (
@@ -406,9 +556,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         <IconButton
           onClick={handleNewChat}
           title="New conversation"
-          disabled={
-            isLoading || researchStatus === 'running' || !!agentChangeSet
-          }
+          disabled={isLoading || researchStatus === 'running'}
           className="text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Plus size={16} />
@@ -419,16 +567,12 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         <MessageList
           messages={messages}
           isLoading={isLoading || !isHistoryLoaded}
+          onIntentReselect={handleIntentReselect}
         />
 
-        {agentChangeSet && (
-          <AgentChangeList
-            prompt={agentChangeSet.prompt}
-            actions={agentChangeSet.actions}
-            onUpdateAction={handleUpdateAgentAction}
-            onKeep={handleKeepAgentChanges}
-            onRevert={handleRevertAgentChanges}
-          />
+        {/* Canvas change review bar */}
+        {canvasChanges.length > 0 && !isLoading && (
+          <CanvasChangeBar changes={canvasChanges} />
         )}
 
         {/* Input Area */}
@@ -436,11 +580,10 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           value={input}
           onChange={setInput}
           onSubmit={handleSubmit}
+          mode={mode}
+          onModeChange={setMode}
           disabled={
-            isLoading ||
-            !isHistoryLoaded ||
-            researchStatus === 'running' ||
-            !!agentChangeSet
+            isLoading || !isHistoryLoaded || researchStatus === 'running'
           }
         />
       </div>

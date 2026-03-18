@@ -1,5 +1,3 @@
-import type { AgentBaseContext } from './context.js';
-
 /**
  * An attachment sent alongside a chat message — e.g. a captured PDF region.
  */
@@ -13,63 +11,6 @@ export interface ChatAttachment {
   label?: string;
   /** The source node ID the attachment was captured from, for provenance tracking. */
   originSourceId?: string;
-}
-
-export interface SendMessageRequest {
-  content: string;
-  /**
-   * Conversation/thread identifier used to persist and resume LangGraph state.
-   * Clients should generate a stable ID per chat session and reuse it.
-   */
-  threadId: string;
-  /**
-   * Lightweight canvas snapshot for context-aware assistance.
-   * Contains `selectedNodes` with full content — the server extracts
-   * knowledge-base source IDs directly from there.
-   */
-  canvasContext?: AgentBaseContext;
-  /** Optional file/image attachments to include with the message. */
-  attachments?: ChatAttachment[];
-}
-
-export type SendMessageResponse =
-  | {
-      messageId: string;
-      reply: string;
-    }
-  | {
-      error: string;
-    };
-
-// --- Streaming Types ---
-export type ChatRole = 'user' | 'assistant' | 'system' | 'tool';
-
-export interface ChatMessageDTO {
-  role: ChatRole;
-  content: string;
-  toolCalls?: {
-    name: string;
-    args: unknown;
-    id: string;
-  }[];
-}
-
-export interface ChatStreamUpdatePayload {
-  node: string;
-  // Normalized message content for chat rendering.
-  message?: ChatMessageDTO;
-  /**
-   * Structured tool output (preferred for UI). When present, clients should
-   * render tool results from this object rather than JSON-parsing message.content.
-   */
-  toolResponse?: ToolResponse<string, unknown>;
-  // Extra payload details when needed.
-  metadata?: Record<string, unknown>;
-}
-
-export interface ChatStreamEvent {
-  event: 'update' | 'end' | 'error';
-  data: ChatStreamUpdatePayload | Record<string, never> | { message: string };
 }
 
 // --- Tool Result Types ---

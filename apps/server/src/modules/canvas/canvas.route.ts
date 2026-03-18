@@ -18,7 +18,8 @@ import {
   IMAGE_LABEL_PROMPT,
   buildFrameLabelPrompt,
 } from '../../prompt/resolve-label.js';
-import { getLLM } from '../agent/llm.js';
+import { getExtFromMime, getMimeType } from '../../utils/mime.js';
+import { llmComplete } from '../agent/llm.js';
 import { resolveArtifactImageUrl } from '../artifact/utils.js';
 import {
   getIngestService,
@@ -26,6 +27,7 @@ import {
 } from '../knowledge/index.js';
 import { getArtifactsDir } from '../workspace.js';
 
+import type { Context } from '@mariozechner/pi-ai';
 import type {
   CanvasExportBundle,
   ExportedSource,
@@ -278,7 +280,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       const body = parsed.data as ResolveLabelRequest;
 
       try {
-        const llm = getLLM();
         let suggestedLabel: string | undefined;
 
         if (body.type === 'image') {
@@ -286,36 +287,59 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
             body.src,
             getArtifactsDir(),
           );
-          const result = await llm.invoke([
-            {
-              role: 'user',
-              content: [
-                {
-                  type: 'image_url',
-                  image_url: { url: dataUrl, detail: 'low' },
-                },
-                {
-                  type: 'text',
-                  text: IMAGE_LABEL_PROMPT,
-                },
-              ],
-            },
-          ]);
-          const text =
-            typeof result.content === 'string' ? result.content.trim() : '';
+          // Extract base64 data and mime type from the data URL
+          const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+          if (!match) {
+            return reply.code(400).send({ message: 'Invalid image data URL' });
+          }
+          const [, mimeType, base64Data] = match;
+          const piContext: Context = {
+            systemPrompt: '',
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  {
+                    type: 'image',
+                    data: base64Data,
+                    mimeType,
+                  },
+                  {
+                    type: 'text',
+                    text: IMAGE_LABEL_PROMPT,
+                  },
+                ],
+                timestamp: Date.now(),
+              },
+            ],
+          };
+          const result = await llmComplete(piContext);
+          const text = result.content
+            .filter((b) => b.type === 'text')
+            .map((b) => (b as { type: 'text'; text: string }).text)
+            .join('')
+            .trim();
           if (text.length > 0 && text.length <= 60) {
             suggestedLabel = text;
           }
         } else {
           // body.type === 'frame'
-          const result = await llm.invoke([
-            {
-              role: 'user',
-              content: buildFrameLabelPrompt(body.childLabels),
-            },
-          ]);
-          const text =
-            typeof result.content === 'string' ? result.content.trim() : '';
+          const piContext: Context = {
+            systemPrompt: '',
+            messages: [
+              {
+                role: 'user',
+                content: buildFrameLabelPrompt(body.childLabels),
+                timestamp: Date.now(),
+              },
+            ],
+          };
+          const result = await llmComplete(piContext);
+          const text = result.content
+            .filter((b) => b.type === 'text')
+            .map((b) => (b as { type: 'text'; text: string }).text)
+            .join('')
+            .trim();
           if (text.length > 0 && text.length <= 60) {
             suggestedLabel = text;
           }
@@ -461,25 +485,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       const artifactsDir = getArtifactsDir();
       const artifactEntries: CanvasExportBundle['artifacts'] = [];
 
-      const getMimeType = (filename: string): string => {
-        const ext = path.extname(filename).toLowerCase();
-        const mimeMap: Record<string, string> = {
-          '.pdf': 'application/pdf',
-          '.jpg': 'image/jpeg',
-          '.jpeg': 'image/jpeg',
-          '.png': 'image/png',
-          '.gif': 'image/gif',
-          '.webp': 'image/webp',
-          '.svg': 'image/svg+xml',
-          '.bmp': 'image/bmp',
-          '.mp4': 'video/mp4',
-          '.webm': 'video/webm',
-          '.mov': 'video/quicktime',
-          '.avi': 'video/x-msvideo',
-        };
-        return mimeMap[ext] ?? 'application/octet-stream';
-      };
-
       for (const node of nodes) {
         if (
           node.type !== 'pdf' &&
@@ -621,13 +626,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         if (!match) continue;
 
         const [, mimeType, base64Data] = match;
-        const extMap: Record<string, string> = {
-          'image/png': '.png',
-          'image/jpeg': '.jpg',
-          'image/gif': '.gif',
-          'image/webp': '.webp',
-        };
-        const ext = extMap[mimeType] ?? '.png';
+        const ext = getExtFromMime(mimeType);
         const artifactId = createId('artifact');
         const filename = `${artifactId}${ext}`;
         const destPath = path.join(artifactsDir, filename);

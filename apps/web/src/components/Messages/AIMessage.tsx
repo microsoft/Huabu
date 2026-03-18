@@ -7,14 +7,22 @@ import useCanvasStore from '../../store/canvasStore';
 import { copyToClipboard } from '../../utils/io/clipboard';
 import { IconButton } from '../Common/IconButton';
 
+import type { ResourceLabel } from './types';
+import type { CanvasNodeType } from '@sediment/shared';
+
 interface AIMessageProps {
   content: string;
   isStreaming?: boolean;
+  resources?: ResourceLabel[];
 }
 
 const NoteIcon = NODE_ICON.note;
 
-export const AIMessage = ({ content, isStreaming }: AIMessageProps) => {
+export const AIMessage = ({
+  content,
+  isStreaming,
+  resources,
+}: AIMessageProps) => {
   const addNode = useCanvasStore((state) => state.addNode);
 
   return (
@@ -54,6 +62,26 @@ export const AIMessage = ({ content, isStreaming }: AIMessageProps) => {
             >
               <Copy size={16} />
             </IconButton>
+
+            {resources && resources.length > 0 && (
+              <>
+                <span className="bg-border mx-1 h-3 w-px" />
+                {resources.map((r, i) => {
+                  const Icon =
+                    NODE_ICON[r.nodeType as CanvasNodeType] ?? NODE_ICON.note;
+                  return (
+                    <span
+                      key={i}
+                      className="bg-muted text-muted-foreground inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px]"
+                      title={r.label}
+                    >
+                      <Icon size={10} />
+                      <span className="max-w-[80px] truncate">{r.label}</span>
+                    </span>
+                  );
+                })}
+              </>
+            )}
           </div>
         )}
       </div>

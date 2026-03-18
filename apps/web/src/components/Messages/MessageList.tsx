@@ -2,6 +2,7 @@ import { ArrowDown, Ellipsis } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { AIMessage } from './AIMessage';
+import { IntentSelectMessage } from './IntentSelectMessage';
 import { ToolMessage } from './ToolMessage';
 import { UserMessage } from './UserMessage';
 import { Button } from '../Common/Button';
@@ -11,9 +12,15 @@ import type { ChatMessage } from './types';
 interface MessageListProps {
   messages: ChatMessage[];
   isLoading: boolean;
+  /** Called when user re-selects an intent from the intent-select message. */
+  onIntentReselect?: (messageId: string, intent: string) => void;
 }
 
-export const MessageList = ({ messages, isLoading }: MessageListProps) => {
+export const MessageList = ({
+  messages,
+  isLoading,
+  onIntentReselect,
+}: MessageListProps) => {
   const [hasNewMessage, setHasNewMessage] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -82,12 +89,30 @@ export const MessageList = ({ messages, isLoading }: MessageListProps) => {
                 key={msg.id}
                 content={msg.content}
                 isStreaming={msg.id === streamingAssistantId}
+                resources={msg.resources}
               />
             );
           }
 
           if (msg.role === 'tool') {
-            return <ToolMessage key={msg.id} toolResponse={msg.toolResponse} />;
+            return (
+              <ToolMessage
+                key={msg.id}
+                toolResponse={msg.toolResponse}
+                isExecuting={msg.isExecuting}
+              />
+            );
+          }
+
+          if (msg.role === 'intent-select') {
+            return (
+              <IntentSelectMessage
+                key={msg.id}
+                candidates={msg.candidates}
+                selectedIntent={msg.selectedIntent}
+                onReselect={(intent) => onIntentReselect?.(msg.id, intent)}
+              />
+            );
           }
 
           return null;

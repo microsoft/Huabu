@@ -1,5 +1,3 @@
-export * from './agent.api';
+export { agentApi, type AgentStreamCallbacks } from './agent';
 export * from './canvas';
-export * from './chat';
-export * from './research';
 export * from './web';

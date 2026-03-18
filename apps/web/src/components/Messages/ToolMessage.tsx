@@ -1,22 +1,218 @@
-import { ChevronDown, ChevronRight, Sparkles } from 'lucide-react';
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Loader2,
+  Sparkles,
+  X as XIcon,
+} from 'lucide-react';
 import { useMemo, useState } from 'react';
 
+import { NodeRef } from './NodeRef';
 import { SourceCard, type Source } from './SourceCard';
+import { NODE_ICON } from '../../config/nodeIcons';
 import { Button } from '../Common/Button';
 
+import type { CanvasNodeType } from '@sediment/shared';
 import type { ToolResponse, WebSearchToolResponse } from '@sediment/shared';
+
+// ==================== Helpers ====================
+
+/** Extract a human-readable title from tool response data. */
+function getToolTitle(
+  tool: string,
+  data: Record<string, unknown>,
+): { icon: React.ReactNode; title: string } {
+  const nodeType = ((data.type ?? data.nodeType) as string) ?? 'note';
+  const NodeIcon = NODE_ICON[nodeType as CanvasNodeType] ?? NODE_ICON.note;
+  const truncate = (s: string, n: number) =>
+    s.length > n ? s.slice(0, n) + '…' : s;
+
+  switch (tool) {
+    case 'get_node_detail':
+      return {
+        icon: <NodeIcon size={12} />,
+        title: `Read node ${truncate((data.label as string) ?? (data.id as string) ?? '', 20)}`,
+      };
+    case 'get_canvas_state':
+      return { icon: null, title: 'Read canvas state' };
+    case 'create_node':
+      return {
+        icon: <NodeIcon size={12} />,
+        title: `Create ${nodeType}: ${truncate((data.label as string) ?? '', 20)}`,
+      };
+    case 'update_node':
+      return {
+        icon: <NodeIcon size={12} />,
+        title: `Update node ${truncate((data.label as string) ?? (data.nodeId as string) ?? '', 20)}`,
+      };
+    case 'delete_nodes':
+      return {
+        icon: null,
+        title: `Delete ${(data.deletedCount as number) ?? ''} node(s)`,
+      };
+    case 'connect_nodes':
+      return { icon: null, title: `Connect nodes` };
+    case 'disconnect_nodes':
+      return { icon: null, title: `Disconnect nodes` };
+    case 'create_frame':
+      return {
+        icon: <NODE_ICON.frame size={12} />,
+        title: `Create frame`,
+      };
+    case 'web_search':
+      return { icon: null, title: `Web search` };
+    case 'read_source':
+      return {
+        icon: <NodeIcon size={12} />,
+        title: `Read source ${truncate((data.title as string) ?? '', 20)}`,
+      };
+    case 'search_knowledge':
+      return { icon: null, title: `Search knowledge` };
+    case 'ingest_content':
+      return { icon: null, title: `Ingest content` };
+    default:
+      return { icon: null, title: tool };
+  }
+}
+
+// ==================== Agent Tool Card ====================
+
+interface AgentToolCardProps {
+  toolResponse: ToolResponse<string, unknown>;
+  isExecuting?: boolean;
+}
+
+function AgentToolCard({ toolResponse, isExecuting }: AgentToolCardProps) {
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  const data =
+    toolResponse.status === 'success'
+      ? ((toolResponse.data ?? {}) as Record<string, unknown>)
+      : ({} as Record<string, unknown>);
+  const { icon, title } = getToolTitle(toolResponse.tool, data);
+  const isError = toolResponse.status === 'error';
+
+  // Expandable tools: only create_node and update_node show content on expand
+  const EXPANDABLE_TOOLS = new Set(['create_node', 'update_node']);
+  const isExpandable = EXPANDABLE_TOOLS.has(toolResponse.tool);
+  const contentText = isExpandable ? ((data.content as string) ?? null) : null;
+
+  // Render title with clickable NodeRef for tools that reference nodes
+  const renderTitle = (): React.ReactNode => {
+    const tool = toolResponse.tool;
+
+    if (tool === 'connect_nodes') {
+      const sourceId = data.sourceId as string;
+      const targetId = data.targetId as string;
+      if (sourceId && targetId) {
+        return (
+          <>
+            Connect <NodeRef nodeId={sourceId} /> →{' '}
+            <NodeRef nodeId={targetId} />
+          </>
+        );
+      }
+    }
+
+    if (tool === 'get_node_detail') {
+      const nodeId = ((data.id ?? data.nodeId) as string) || undefined;
+      if (nodeId) {
+        return (
+          <>
+            Read node{' '}
+            <NodeRef nodeId={nodeId} fallbackLabel={data.label as string} />
+          </>
+        );
+      }
+    }
+
+    if (tool === 'create_node' && data.nodeId) {
+      const nType = ((data.type ?? data.nodeType) as string) ?? 'note';
+      return (
+        <>
+          Create {nType}:{' '}
+          <NodeRef
+            nodeId={data.nodeId as string}
+            fallbackLabel={data.label as string}
+          />
+        </>
+      );
+    }
+
+    if (tool === 'update_node') {
+      const nodeId = ((data.nodeId ?? data.id) as string) || undefined;
+      if (nodeId) {
+        return (
+          <>
+            Update node{' '}
+            <NodeRef nodeId={nodeId} fallbackLabel={data.label as string} />
+          </>
+        );
+      }
+    }
+
+    return title;
+  };
+
+  // Auto-expand while executing (only for expandable tools)
+  const canExpand = isExpandable && contentText !== null;
+  const showContent = canExpand && (isExecuting || isExpanded);
+
+  const statusIcon = isExecuting ? (
+    <Loader2 size={12} className="text-theme-500 animate-spin" />
+  ) : isError ? (
+    <XIcon size={12} className="text-red-500" />
+  ) : (
+    <Check size={12} className="text-green-600" />
+  );
+
+  return (
+    <div className="flex justify-start">
+      <div className="w-full">
+        <button
+          type="button"
+          className="text-muted-foreground hover:bg-muted flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs transition-colors"
+          onClick={() => canExpand && setIsExpanded(!isExpanded)}
+        >
+          {statusIcon}
+          {icon && <span className="text-muted-foreground/60">{icon}</span>}
+          <span className="flex-1 truncate">{renderTitle()}</span>
+          {!isExecuting && canExpand && (
+            <ChevronRight
+              size={10}
+              className={`text-muted-foreground/50 flex-shrink-0 transition-transform ${showContent ? 'rotate-90' : ''}`}
+            />
+          )}
+        </button>
+        {showContent && contentText && (
+          <div className="border-border text-muted-foreground/60 mt-1 max-h-40 overflow-y-auto rounded border p-2 text-[11px] leading-relaxed">
+            <div className="break-words whitespace-pre-wrap">{contentText}</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ==================== Main ToolMessage ====================
 
 interface ToolMessageProps {
   toolResponse: ToolResponse<string, unknown>;
+  isExecuting?: boolean;
 }
 
 /**
  * ToolMessage - Unified display for all agent tool calls
- * Supports: web_search, research_thinking, research_searching, research_node_created, etc.
+ * Agent tools show as collapsible icon+title cards.
+ * Research and web_search tools keep their existing display.
  */
-export const ToolMessage = ({ toolResponse }: ToolMessageProps) => {
-  // Error handling
-  if (toolResponse.status === 'error') {
+export const ToolMessage = ({
+  toolResponse,
+  isExecuting,
+}: ToolMessageProps) => {
+  // Error handling for non-agent tools
+  if (toolResponse.status === 'error' && !isAgentTool(toolResponse.tool)) {
     const text = toolResponse.hint
       ? `Tool error (${toolResponse.tool}): ${toolResponse.error}\nHint: ${toolResponse.hint}`
       : `Tool error (${toolResponse.tool}): ${toolResponse.error}`;
@@ -30,12 +226,19 @@ export const ToolMessage = ({ toolResponse }: ToolMessageProps) => {
     );
   }
 
+  // Agent tools — collapsible card style
+  if (isAgentTool(toolResponse.tool)) {
+    return (
+      <AgentToolCard toolResponse={toolResponse} isExecuting={isExecuting} />
+    );
+  }
+
   // Research tool types
   if (toolResponse.tool.startsWith('research_')) {
     return <ResearchToolDisplay toolResponse={toolResponse} />;
   }
 
-  // Web search
+  // Web search (from ask mode)
   if (toolResponse.tool === 'web_search') {
     return (
       <WebSearchToolDisplay
@@ -44,15 +247,28 @@ export const ToolMessage = ({ toolResponse }: ToolMessageProps) => {
     );
   }
 
-  // Fallback for unknown tools
+  // Fallback
   return (
-    <div className="flex justify-start">
-      <div className="text-muted-foreground border-border rounded-2xl border bg-white px-4 py-3 text-sm whitespace-pre-wrap">
-        {JSON.stringify(toolResponse)}
-      </div>
-    </div>
+    <AgentToolCard toolResponse={toolResponse} isExecuting={isExecuting} />
   );
 };
+
+/** Tools used by the operate mode that should show as collapsible cards. */
+function isAgentTool(tool: string): boolean {
+  return [
+    'get_node_detail',
+    'get_canvas_state',
+    'create_node',
+    'update_node',
+    'delete_nodes',
+    'connect_nodes',
+    'disconnect_nodes',
+    'create_frame',
+    'read_source',
+    'search_knowledge',
+    'ingest_content',
+  ].includes(tool);
+}
 
 /**
  * Display for research tool responses

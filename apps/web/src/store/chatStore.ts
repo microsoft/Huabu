@@ -3,17 +3,19 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
 import type { ChatMessage } from '../components/Messages/types';
-import type { ChatAttachment } from '@sediment/shared';
+import type { AgentMode, ChatAttachment } from '@sediment/shared';
 
 interface ChatState {
   /** In-memory message list — not persisted to localStorage. */
   messages: ChatMessage[];
-  /** Stable thread identifier — persisted so the same conversation is resumed after refresh. */
+  /** Current thread identifier for the active canvas. */
   threadId: string;
   /** True once history has been fetched from the server for the current threadId. */
   isHistoryLoaded: boolean;
-  /** Last action type - determines which checkpoint to load on refresh */
-  lastAction: 'chat' | 'research';
+  /** Last agent mode — persisted to determine which checkpoint to load on refresh */
+  lastAction: AgentMode;
+  /** Map of canvasId → threadId, persisted so each canvas keeps its own thread. */
+  threadMap: Record<string, string>;
 
   /**
    * Staged attachments waiting to be sent with the next message.
@@ -30,8 +32,11 @@ interface ChatState {
   ) => void;
   setMessages: (messages: ChatMessage[]) => void;
   setHistoryLoaded: (loaded: boolean) => void;
-  setLastAction: (action: 'chat' | 'research') => void;
-  clearMessages: () => void;
+  setLastAction: (action: AgentMode) => void;
+  clearMessages: (canvasId?: string) => void;
+
+  /** Switch to a canvas — loads or creates its threadId, resets in-memory messages. */
+  switchToCanvas: (canvasId: string) => void;
 
   /** Stage an attachment (e.g. from PDF capture) to be sent with the next chat message. */
   addPendingAttachment: (attachment: ChatAttachment) => void;
@@ -43,11 +48,12 @@ interface ChatState {
 
 export const useChatStore = create<ChatState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       messages: [],
       threadId: createId('thread'),
       isHistoryLoaded: false,
-      lastAction: 'chat',
+      lastAction: 'ask',
+      threadMap: {},
       pendingAttachments: [],
 
       addMessage: (message) =>
@@ -64,16 +70,36 @@ export const useChatStore = create<ChatState>()(
 
       setLastAction: (action) => set({ lastAction: action }),
 
-      clearMessages: () =>
-        // isHistoryLoaded stays true for the new thread — it has no server-side
-        // history so there is no need to make an API call.
+      clearMessages: (canvasId?: string) => {
+        const { threadMap } = get();
+        const newThreadId = createId('thread');
+        const updatedMap = canvasId
+          ? { ...threadMap, [canvasId]: newThreadId }
+          : { ...threadMap };
         set({
           messages: [],
-          threadId: createId('thread'),
+          threadId: newThreadId,
           isHistoryLoaded: true,
-          lastAction: 'chat',
+          lastAction: 'ask',
           pendingAttachments: [],
-        }),
+          threadMap: updatedMap,
+        });
+      },
+
+      switchToCanvas: (canvasId: string) => {
+        const { threadMap } = get();
+        let tid = threadMap[canvasId];
+        if (!tid) {
+          tid = createId('thread');
+        }
+        set({
+          threadId: tid,
+          messages: [],
+          isHistoryLoaded: false,
+          pendingAttachments: [],
+          threadMap: { ...threadMap, [canvasId]: tid },
+        });
+      },
 
       addPendingAttachment: (attachment) =>
         set((state) => ({
@@ -91,8 +117,8 @@ export const useChatStore = create<ChatState>()(
     }),
     {
       name: 'sediment-chat',
-      // Persist thread ID and last action type to determine which checkpoint to load
       partialize: (state) => ({
+        threadMap: state.threadMap,
         threadId: state.threadId,
         lastAction: state.lastAction,
       }),
