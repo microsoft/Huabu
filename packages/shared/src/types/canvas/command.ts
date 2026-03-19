@@ -36,8 +36,6 @@ export type CanvasAlignDirection =
   | 'center-v'
   | 'bottom';
 
-export type CanvasDistributionAxis = 'horizontal' | 'vertical';
-
 export type CanvasAutoLayoutScope =
   | { type: 'canvas' }
   | { type: 'frame'; frameId: CanvasNodeId }
@@ -61,21 +59,18 @@ type CanvasNodeCreateInputByType<T extends CanvasNodeType> = {
   position?: Point;
   size?: CanvasSize;
   parentId?: CanvasNodeId | null;
+  /** When true, skip force-directed auto-placement (e.g. node was explicitly placed by drag). */
+  skipAutoLayout?: boolean;
 };
 
 export type CanvasNodeCreateInput = {
   [T in CanvasNodeType]: CanvasNodeCreateInputByType<T>;
 }[CanvasNodeType];
 
-type CanvasNodeDataMergePatchByType<T extends CanvasNodeType> = {
-  nodeId: CanvasNodeId;
-  nodeType: T;
-  patch: Partial<Omit<Extract<NodeData, { type: T }>, 'type'>>;
-};
-
 export type CanvasNodeDataMergePatch = {
-  [T in CanvasNodeType]: CanvasNodeDataMergePatchByType<T>;
-}[CanvasNodeType];
+  nodeId: CanvasNodeId;
+  patch: Record<string, unknown>;
+};
 
 export interface CanvasNodeParentUpdate {
   nodeIds: CanvasNodeId[];
@@ -105,7 +100,10 @@ export interface CanvasEdgeCreateInput {
  * Commands are explicit, JSON-serializable, and free of web-only gesture state.
  */
 export type CanvasCommand =
-  | { type: 'CREATE_NODES'; nodes: CanvasNodeCreateInput[] }
+  | {
+      type: 'CREATE_NODES';
+      nodes: CanvasNodeCreateInput[];
+    }
   | { type: 'DELETE_NODES'; nodeIds: CanvasNodeId[] }
   | { type: 'MERGE_NODE_DATA'; patches: CanvasNodeDataMergePatch[] }
   | {
@@ -117,7 +115,11 @@ export type CanvasCommand =
   | { type: 'SET_NODE_GEOMETRY'; items: CanvasNodeGeometryUpdate[] }
   | { type: 'SET_NODE_SELECTION'; nodeIds: CanvasNodeId[] }
   | { type: 'SET_EXPANDED_NODE'; nodeId: CanvasNodeId | null }
-  | { type: 'SET_NODE_ORDER'; orderedNodeIds: CanvasNodeId[] }
+  | {
+      type: 'REORDER_NODES';
+      nodeIds: CanvasNodeId[];
+      to: 'top' | 'bottom' | { before: CanvasNodeId };
+    }
   | { type: 'SET_NODE_LOCKED'; items: CanvasNodeLockUpdate[] }
   | { type: 'CONNECT_NODES'; edges: CanvasEdgeCreateInput[] }
   | { type: 'DISCONNECT_EDGES'; edges: CanvasEdgeRef[] }
@@ -129,7 +131,6 @@ export type CanvasCommand =
   | {
       type: 'DISTRIBUTE_NODES';
       nodeIds: CanvasNodeId[];
-      axis: CanvasDistributionAxis;
     }
   | {
       type: 'AUTO_LAYOUT';

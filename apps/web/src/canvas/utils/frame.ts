@@ -48,7 +48,7 @@
  * 5. Locked Frame Respect: Locked frames cannot gain or lose children
  */
 
-import { getNodeSize as _getNodeSize } from '../node/size';
+import { getNodeSize as _getNodeSize } from '../../utils/node/size';
 
 import type { Edge, Node, XYPosition } from '@xyflow/react';
 
@@ -952,7 +952,7 @@ export type FitFrameOptions = {
  */
 export type FrameFitResult = {
   frameId: string;
-  /** New absolute position of the frame. */
+  /** Position of the frame (absolute when used as preview overlay). */
   position: XYPosition;
   /** New width and height. */
   width: number;

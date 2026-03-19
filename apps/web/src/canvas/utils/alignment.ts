@@ -4,7 +4,7 @@ import {
   type NestableNode,
 } from './frame';
 import { snapToGrid } from '../../config/canvas';
-import { getLayoutNodeSize } from '../node/size';
+import { getLayoutNodeSize } from '../../utils/node/size';
 
 import type { Node } from '@xyflow/react';
 

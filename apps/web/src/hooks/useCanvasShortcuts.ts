@@ -66,7 +66,8 @@ export function useCanvasShortcuts(
   const sendSelectedToOrder = useCanvasStore((s) => s.sendSelectedToOrder);
   const undo = useCanvasStore((s) => s.undo);
   const redo = useCanvasStore((s) => s.redo);
-  const dispatch = useCanvasStore((s) => s.dispatch);
+  const deleteNodes = useCanvasStore((s) => s.deleteNodes);
+  const disconnectEdges = useCanvasStore((s) => s.disconnectEdges);
   const addNode = useCanvasStore((s) => s.addNode);
   const layoutAll = useCanvasStore((s) => s.layoutAll);
   const toggleAutoLayout = useCanvasStore((s) => s.toggleAutoLayout);
@@ -279,10 +280,10 @@ export function useCanvasShortcuts(
           .filter((edge) => edge.selected)
           .map((edge) => edge.id);
         if (selectedNodeIds.length > 0) {
-          dispatch({ type: 'DELETE_NODES', nodeIds: selectedNodeIds });
+          deleteNodes(selectedNodeIds);
         }
         if (selectedEdgeIds.length > 0) {
-          dispatch({ type: 'DISCONNECT_EDGES', edgeIds: selectedEdgeIds });
+          disconnectEdges(selectedEdgeIds);
         }
         return;
       }
@@ -427,7 +428,8 @@ export function useCanvasShortcuts(
     sendSelectedToOrder,
     undo,
     redo,
-    dispatch,
+    deleteNodes,
+    disconnectEdges,
     mousePositionRef,
     getFlowPos,
     pasteFiles,

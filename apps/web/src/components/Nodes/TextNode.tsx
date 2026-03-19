@@ -1,15 +1,7 @@
-import { type Node, type NodeProps } from '@xyflow/react';
+import { type Node, type NodeProps, useStore } from '@xyflow/react';
 import { clsx } from 'clsx';
 import { Bold, Italic, Underline, Strikethrough } from 'lucide-react';
-import {
-  memo,
-  useCallback,
-  useState,
-  useRef,
-  useMemo,
-  useLayoutEffect,
-  useEffect,
-} from 'react';
+import { memo, useCallback, useState, useRef, useMemo, useEffect } from 'react';
 
 import { IconButton } from '@/components/Common/IconButton.tsx';
 import { NodeBgColorSelector } from '@/components/Common/NodeBgColorSelector.tsx';
@@ -119,9 +111,8 @@ function computeFontSizeForHeight(
 }
 
 export const TextNode = memo(
-  ({ id, data, selected }: NodeProps<TextNodeType>) => {
+  ({ id, data, selected, width, height }: NodeProps<TextNodeType>) => {
     const updateNodeData = useCanvasStore((state) => state.updateNodeData);
-    const patchNodeSilent = useCanvasStore((state) => state.patchNodeSilent);
     const [isEditing, setIsEditing] = useState(false);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const isResizingRef = useRef(false);
@@ -146,13 +137,12 @@ export const TextNode = memo(
     }, [data.content, data.label, data.labelSource, isEditing]);
 
     // ------------------------------------------------------------------
-    // User-set dimensions: null → auto mode, number → user has resized.
+    // Fixed vs auto mode: if the node's style.height is a number,
+    // the user has resized it. Otherwise it's in auto mode.
+    // Mirrors the NoteNode pattern (hasFixedHeight).
     // ------------------------------------------------------------------
-    const [userWidth, setUserWidth] = useState<number | null>(
-      typeof data.userWidth === 'number' ? (data.userWidth as number) : null,
-    );
-    const [userHeight, setUserHeight] = useState<number | null>(
-      typeof data.userHeight === 'number' ? (data.userHeight as number) : null,
+    const hasFixedSize = useStore(
+      (s) => typeof s.nodeLookup.get(id)?.style?.height === 'number',
     );
 
     // Live font size during resize (computed from current dimensions)
@@ -192,75 +182,45 @@ export const TextNode = memo(
     // ------------------------------------------------------------------
     // Effective font size:
     //   Resizing live  → liveFontSize (debounced during drag)
-    //   User mode      → computed to fill userHeight at userWidth
+    //   Fixed mode     → computed to fill node height at node width
     //   Auto mode      → baseFontSize from style
     // ------------------------------------------------------------------
     const computedFontSize = useMemo(() => {
-      if (userWidth !== null && userHeight !== null) {
-        const cw = userWidth - NODE_PADDING * 2;
-        const ch = userHeight - NODE_PADDING * 2;
+      if (hasFixedSize && width != null && height != null) {
+        const cw = width - NODE_PADDING * 2;
+        const ch = height - NODE_PADDING * 2;
         return computeFontSizeForHeight(draftContent, cw, ch, fontOpts);
       }
       return baseFontSize;
-    }, [userWidth, userHeight, draftContent, baseFontSize, fontOpts]);
+    }, [hasFixedSize, width, height, draftContent, baseFontSize, fontOpts]);
 
     const effectiveFontSize = liveFontSize ?? computedFontSize;
 
     // ------------------------------------------------------------------
-    // Auto mode measurement (only when not user-resized)
+    // Auto mode measurement (only when no fixed size)
     // ------------------------------------------------------------------
     const maxAutoWidth = baseFontSize * MAX_CHARS_PER_LINE * 0.62;
 
     const autoSize = useMemo(() => {
-      if (userWidth !== null && userHeight !== null) return null;
+      if (hasFixedSize) return null;
       return measureTextContent(draftContent, {
         ...fontOpts,
         fontSize: baseFontSize,
         maxWidth: maxAutoWidth,
       });
-    }, [
-      userWidth,
-      userHeight,
-      draftContent,
-      baseFontSize,
-      fontOpts,
-      maxAutoWidth,
-    ]);
+    }, [hasFixedSize, draftContent, baseFontSize, fontOpts, maxAutoWidth]);
 
-    const targetWidth =
-      userWidth ?? Math.max((autoSize?.width ?? 0) + NODE_PADDING * 2, 30);
-    const targetHeight =
-      userHeight ??
-      Math.max(
-        (autoSize?.height ?? 0) + NODE_PADDING * 2,
-        baseFontSize * 1.5 + NODE_PADDING * 2,
-      );
-
-    // Avoid redundant store updates
-    const prevDimsRef = useRef({ w: 0, h: 0 });
-
-    useLayoutEffect(() => {
-      if (isResizingRef.current) return;
-
-      const w = targetWidth;
-      const h = targetHeight;
-
-      if (
-        Math.abs(prevDimsRef.current.w - w) < 1 &&
-        Math.abs(prevDimsRef.current.h - h) < 1
-      )
-        return;
-
-      prevDimsRef.current = { w, h };
-
-      useCanvasStore.setState((state) => ({
-        nodes: state.nodes.map((n) =>
-          n.id === id
-            ? { ...n, style: { ...n.style, width: w, height: h } }
-            : n,
-        ),
-      }));
-    }, [id, targetWidth, targetHeight]);
+    // In auto mode, compute target dimensions from content measurement.
+    // In fixed mode, dimensions come from node style (set by setNodeGeometry).
+    const autoWidth = hasFixedSize
+      ? undefined
+      : Math.max((autoSize?.width ?? 0) + NODE_PADDING * 2, 30);
+    const autoHeight = hasFixedSize
+      ? undefined
+      : Math.max(
+          (autoSize?.height ?? 0) + NODE_PADDING * 2,
+          baseFontSize * 1.5 + NODE_PADDING * 2,
+        );
 
     // ------------------------------------------------------------------
     // Resize callbacks — live font recalc during drag
@@ -283,20 +243,13 @@ export const TextNode = memo(
       [draftContent, fontOpts],
     );
 
-    const handleResizeEnd = useCallback(
-      (width: number, height: number) => {
-        isResizingRef.current = false;
-        if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
-        setUserWidth(width);
-        setUserHeight(height);
-        setLiveFontSize(null); // clear live → computedFontSize takes over
-        // Persist resize metadata silently — no history entry needed since
-        // the resize gesture already took a snapshot via takeSnapshot().
-        patchNodeSilent(id, { userWidth: width, userHeight: height });
-        prevDimsRef.current = { w: width, h: height };
-      },
-      [id, patchNodeSilent],
-    );
+    const handleResizeEnd = useCallback(() => {
+      isResizingRef.current = false;
+      if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
+      setLiveFontSize(null); // clear live → computedFontSize takes over
+      // setNodeGeometry (called by NodeWrapper) writes numeric width/height
+      // to node.style, which flips hasFixedSize → true automatically.
+    }, []);
 
     // ------------------------------------------------------------------
     // Toolbar state
@@ -440,8 +393,16 @@ export const TextNode = memo(
         className="transition-all duration-200"
       >
         <div
-          className="relative h-full w-full overflow-hidden"
-          style={{ padding: `${NODE_PADDING}px` }}
+          className={clsx(
+            'relative overflow-hidden',
+            hasFixedSize ? 'h-full w-full' : undefined,
+          )}
+          style={{
+            padding: `${NODE_PADDING}px`,
+            ...(autoWidth != null
+              ? { width: autoWidth, height: autoHeight }
+              : undefined),
+          }}
           onDoubleClick={handleDoubleClick}
         >
           <textarea

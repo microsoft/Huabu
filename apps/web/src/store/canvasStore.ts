@@ -1,5 +1,8 @@
 import {
   type AgentBaseContext,
+  type CanvasCommand,
+  type CanvasCommandType,
+  type CanvasExecution,
   type CanvasNodeType,
   type NodeSummary,
   type RecentAction,
@@ -21,99 +24,32 @@ import {
 import { create, type StateCreator } from 'zustand';
 
 import { getCanvas, putCanvas, upsertNode } from '../api';
+import { canvasHistoryManager } from './canvasHistoryManager';
+import { COMMAND_META } from '../canvas/commands';
+import { executeCanvasCommands } from '../canvas/executor';
+import { runPostEffects } from '../canvas/postEffects';
 import {
-  handleCommand,
-  extractNodeRef,
-  extractSnippet,
-  pushAction,
-} from './canvasHandlers';
-import {
-  canvasHistoryManager,
-  createSnapshot,
-  type CanvasSnapshot,
-} from './canvasHistoryManager';
-import { type AlignDirection } from '../utils/canvas/alignment';
+  resolveUiIntent,
+  type CanvasUiIntent,
+  type UiResolverState,
+} from '../canvas/uiIntent';
+import { extractNodeRef, extractSnippet, pushAction } from '../canvas/utils';
+import { type AlignDirection } from '../canvas/utils/alignment';
 import {
   computeFrameFit,
   getAbsolutePosition as getFrameAbsolutePosition,
   wouldUnframe,
   wouldAutoFrame,
   getNodeSize,
+  type FrameFitResult,
   type NestableNode,
-} from '../utils/canvas/frame';
+} from '../canvas/utils/frame';
 import {
   ingestNodeIfNeeded,
   needsIngestion,
   type NodeIngestionInfo,
 } from '../utils/io/ingest';
 import { resolveLabelIfNeeded } from '../utils/io/resolveLabel';
-import { LAYOUT_ANIMATION_DURATION_MS } from '../utils/layout/applier';
-import { rerouteAllEdges } from '../utils/node/helper';
-
-// ---------------------------------------------------------------------------
-// Frame Fit Preview
-// ---------------------------------------------------------------------------
-
-/**
- * Describes how a frame would look if the currently dragged node were
- * dropped at its current position. Rendered as a dashed overlay during drag.
- */
-export type FrameFitPreview = {
-  /** The frame that would gain/shrink. */
-  frameId: string;
-  /** Absolute position and size of the preview rectangle. */
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-};
-
-// ---------------------------------------------------------------------------
-// Canvas Command Pattern
-// ---------------------------------------------------------------------------
-
-/**
- * All user-initiated canvas mutations expressed as typed commands.
- * `dispatch(cmd)` is the single entry point for:
- *  - undo history snapshots
- *  - action-history tracking (for agent context)
- *  - state mutations
- */
-export type CanvasCommand =
-  | { type: 'ADD_NODE'; node: Node; skipAutoLayout?: boolean }
-  | { type: 'DELETE_NODES'; nodeIds: string[] }
-  | { type: 'CONNECT'; connection: Connection }
-  | { type: 'DISCONNECT_EDGES'; edgeIds: string[] }
-  | { type: 'MOVE_INTO_FRAME'; nodeId: string; frameId: string }
-  | { type: 'MOVE_OUT_OF_FRAME'; nodeId: string }
-  | { type: 'GROUP_SELECTION_INTO_FRAME' }
-  | {
-      type: 'GROUP_RECT_INTO_FRAME';
-      flowRect: { x: number; y: number; width: number; height: number };
-    }
-  | { type: 'UNFRAME'; frameId: string }
-  | { type: 'OPEN_EXPANDED'; nodeId: string }
-  | { type: 'SELECT_NODES'; ids: string[]; multiSelect?: boolean }
-  | {
-      type: 'RESIZE_NODE';
-      nodeId: string;
-      width: number;
-      height: number;
-    }
-  | { type: 'TOGGLE_NODE_LOCK'; nodeId: string }
-  | { type: 'REORDER_NODES'; activeId: string; overId: string }
-  | { type: 'REORDER_NODES'; nodeIds: string[]; position: 'top' | 'bottom' }
-  | { type: 'PASTE_NODES'; flowPosition?: { x: number; y: number } }
-  | { type: 'ALIGN_NODES'; direction: AlignDirection }
-  | { type: 'SPREAD_NODES' }
-  | { type: 'LAYOUT_ALL' }
-  | { type: 'LAYOUT_GROUP'; frameId: string }
-  | { type: 'NODE_DRAG_STOP'; draggedNodeIds: string[] }
-  | {
-      type: 'UPDATE_NODE_DATA';
-      nodeId: string;
-      patch: Record<string, unknown>;
-    };
 
 const AUTOSAVE_DEBOUNCE_MS = 1000;
 const INGESTION_DEBOUNCE_MS = 1000;
@@ -180,10 +116,6 @@ const triggerLabelResolve = (nodeId: string) => {
   labelResolveTimers.set(nodeId, timer);
 };
 
-export type CanvasPreviewSnapshot = CanvasSnapshot & {
-  actionHistory: RecentAction[];
-};
-
 type RFState = {
   nodes: Node[];
   edges: Edge[];
@@ -225,7 +157,7 @@ type RFState = {
    * Computed in `onNodeDrag`, rendered as dashed overlays,
    * and cleared in `onNodeDragStop`.
    */
-  frameFitPreviews: FrameFitPreview[];
+  frameFitPreviews: FrameFitResult[];
   /**
    * Update the frame fit preview while a child node is being resized.
    * Called on every resize tick from NodeWrapper so the dashed overlay
@@ -236,6 +168,17 @@ type RFState = {
   clearFrameFitPreview: () => void;
 
   addNode: (node: Node, skipAutoLayout?: boolean) => void;
+  deleteNodes: (nodeIds: string[]) => void;
+  disconnectEdges: (edgeIds: string[]) => void;
+  setNodeGeometry: (
+    items: Array<{
+      nodeId: string;
+      size?: { width: number; height: number };
+      position?: { x: number; y: number };
+    }>,
+  ) => void;
+  /** Take a pre-resize snapshot so the final SET_NODE_GEOMETRY can be undone. */
+  onNodeResizeStart: () => void;
   rfInstance: ReactFlowInstance | null;
   setRfInstance: (instance: ReactFlowInstance | null) => void;
 
@@ -268,11 +211,13 @@ type RFState = {
   toggleNodeLock: (nodeId: string) => void;
 
   /**
-   * Take an undo snapshot of the current canvas state.
-   * Call once before a drag gesture begins so the entire gesture collapses
-   * into a single undo entry (e.g. at onResizeStart / onNodeDragStart).
+   * @internal Signal the start of a continuous gesture (drag, resize) that will
+   * end with a command of the given type. If `COMMAND_META[commandType]`
+   * has `snapshot: 'caller'`, an undo snapshot is taken now so the
+   * entire gesture collapses into a single undo entry.
+   * Use `onNodeDragStart` / `onNodeResizeStart` instead of calling directly.
    */
-  takeSnapshot: () => void;
+  beginGesture: (commandType: CanvasCommandType) => void;
 
   /** Align selected nodes along an axis. */
   alignSelectedNodes: (direction: AlignDirection) => void;
@@ -312,10 +257,11 @@ type RFState = {
   saveCanvas: () => Promise<void>;
 
   actionHistory: RecentAction[];
-  dispatch: (cmd: CanvasCommand) => void;
+  /** @internal Execute a batch of shared CanvasCommands. Do not call from outside the store. */
+  executeCommands: (commands: CanvasCommand[]) => void;
+  /** @internal Resolve a web-only UiIntent and execute the resulting commands. */
+  dispatchUiIntent: (intent: CanvasUiIntent) => void;
   getAgentContext: () => AgentBaseContext;
-  getCanvasSnapshot: () => CanvasPreviewSnapshot;
-  restoreCanvasSnapshot: (snapshot: CanvasPreviewSnapshot) => void;
 };
 
 let saveTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -426,7 +372,8 @@ const useCanvasStore = create<RFState>()(
 
     expandedNodeId: null,
     expandMode: 'split',
-    openExpanded: (nodeId) => get().dispatch({ type: 'OPEN_EXPANDED', nodeId }),
+    openExpanded: (nodeId) =>
+      get().dispatchUiIntent({ type: 'EXPAND_NODE', nodeId }),
     closeExpanded: () => set({ expandedNodeId: null }),
     setExpandMode: (mode) => set({ expandMode: mode }),
 
@@ -454,33 +401,87 @@ const useCanvasStore = create<RFState>()(
 
     actionHistory: [],
 
-    dispatch: (cmd) => {
-      const {
-        nodes,
-        edges,
-        canvasId,
-        actionHistory,
-        clipboard,
-        autoLayoutEnabled,
-      } = get();
-      handleCommand(cmd, {
-        nodes,
-        edges,
-        canvasId,
-        actionHistory,
-        clipboard,
-        autoLayoutEnabled,
-        set,
-        triggerIngestion,
-        triggerLabelResolve,
-      });
+    // --- Internal: not exposed in the public CanvasStore interface ---
 
-      // After the handler has run, reroute all edges so their handles
-      // match the current relative positions of source/target nodes.
-      const latest = get();
-      const rerouted = rerouteAllEdges(latest.nodes, latest.edges);
-      if (rerouted !== latest.edges) {
-        set({ edges: rerouted });
+    /** Execute a batch of shared CanvasCommands. Source defaults to 'ui'. */
+    executeCommands: (commands) => {
+      const execution: CanvasExecution = {
+        source: 'ui',
+        commands,
+      };
+      const state = {
+        nodes: get().nodes,
+        edges: get().edges,
+        canvasId: get().canvasId,
+        autoLayoutEnabled: get().autoLayoutEnabled,
+      };
+
+      const { writeResult, commandResults, pendingEffects } =
+        executeCanvasCommands(execution, state);
+
+      // Only commit if at least one command was applied.
+      if (!commandResults.some((r) => r.applied)) return;
+
+      // Guard: verify that 'caller' snapshot commands were preceded by beginGesture.
+      const hasCallerSnapshot = commands.some(
+        (c) => COMMAND_META[c.type].snapshot === 'caller',
+      );
+      if (hasCallerSnapshot) {
+        if (!canvasHistoryManager.gestureSnapshotTaken) {
+          console.warn(
+            '[canvasStore] snapshot:"caller" command executed without beginGesture():',
+            commands.map((c) => c.type).join(', '),
+          );
+        }
+        canvasHistoryManager.consumeGestureSnapshot();
+      }
+
+      // Take undo snapshot if needed (before committing new state).
+      if (writeResult.snapshotNeeded) {
+        canvasHistoryManager.takeSnapshot(state.nodes, state.edges);
+      }
+
+      // Commit new state.
+      const updates: Partial<RFState> = {
+        nodes: writeResult.nodes,
+        edges: writeResult.edges,
+      };
+
+      if (writeResult.expandedNodeId !== undefined) {
+        updates.expandedNodeId = writeResult.expandedNodeId;
+      }
+
+      set(updates);
+
+      // Run post-commit side effects (edge reroute, ingestion, label resolve, delete tracking).
+      runPostEffects(
+        pendingEffects,
+        { triggerIngestion, triggerLabelResolve },
+        writeResult.requiresEdgeReroute,
+        state.canvasId,
+        () => ({ nodes: get().nodes, edges: get().edges }),
+        (partial) => set(partial),
+      );
+    },
+
+    /** Resolve a web-only UiIntent and execute the resulting commands. */
+    dispatchUiIntent: (intent) => {
+      const uiState: UiResolverState = {
+        nodes: get().nodes,
+        edges: get().edges,
+        clipboard: get().clipboard,
+      };
+      const execution = resolveUiIntent(intent, uiState);
+      if (execution.commands.length > 0) {
+        get().executeCommands(execution.commands);
+      }
+      // Push trace from intent resolution to action history.
+      if (execution.trace.length > 0) {
+        let history = get().actionHistory;
+        for (const action of execution.trace) {
+          history = pushAction(history, action);
+        }
+        set({ actionHistory: history });
       }
     },
 
@@ -561,31 +562,6 @@ const useCanvasStore = create<RFState>()(
         recentActions: actionHistory,
         selectedNodes: nodes.filter((n) => n.selected).map(buildSelectedDetail),
       };
-    },
-
-    getCanvasSnapshot: () => {
-      const { nodes, edges, actionHistory } = get();
-      return {
-        ...createSnapshot(nodes, edges),
-        actionHistory: [...actionHistory],
-      };
-    },
-
-    restoreCanvasSnapshot: (snapshot) => {
-      const { nodes: prevNodes, canvasId } = get();
-
-      set({
-        nodes: snapshot.nodes,
-        edges: snapshot.edges,
-        actionHistory: [...snapshot.actionHistory],
-      });
-
-      canvasHistoryManager.syncServerAfterRestore(
-        canvasId,
-        prevNodes,
-        snapshot.nodes,
-        triggerIngestion,
-      );
     },
 
     loadCanvas: async (canvasId?: string) => {
@@ -734,8 +710,11 @@ const useCanvasStore = create<RFState>()(
     onNodeDragStart: () => {
       // Snapshot the true pre-drag positions before any intermediate
       // position updates are applied by ReactFlow.
-      const { nodes, edges } = get();
-      canvasHistoryManager.takeSnapshot(nodes, edges);
+      get().beginGesture('SET_NODE_GEOMETRY');
+    },
+
+    onNodeResizeStart: () => {
+      get().beginGesture('SET_NODE_GEOMETRY');
     },
 
     frameFitPreviews: [],
@@ -834,7 +813,7 @@ const useCanvasStore = create<RFState>()(
 
         // Compute fit previews for all affected frames and show them all
         // simultaneously — e.g. source frame shrinking + target frame expanding.
-        const previews: FrameFitPreview[] = [];
+        const previews: FrameFitResult[] = [];
 
         for (const frameId of previewFrameIds) {
           const leaving = leavingByFrame.get(frameId);
@@ -864,8 +843,7 @@ const useCanvasStore = create<RFState>()(
 
           previews.push({
             frameId,
-            x: absX,
-            y: absY,
+            position: { x: absX, y: absY },
             width: fit.width,
             height: fit.height,
           });
@@ -882,7 +860,7 @@ const useCanvasStore = create<RFState>()(
         _dragPreviewRafId = null;
       }
       set({ frameFitPreviews: [] });
-      get().dispatch({
+      get().dispatchUiIntent({
         type: 'NODE_DRAG_STOP',
         draggedNodeIds: draggedNodes.map((n) => n.id),
       });
@@ -918,8 +896,7 @@ const useCanvasStore = create<RFState>()(
         frameFitPreviews: [
           {
             frameId: node.parentId,
-            x: absX,
-            y: absY,
+            position: { x: absX, y: absY },
             width: fit.width,
             height: fit.height,
           },
@@ -963,8 +940,8 @@ const useCanvasStore = create<RFState>()(
         (c): c is EdgeRemoveChange => c.type === 'remove',
       );
       if (removes.length > 0) {
-        get().dispatch({
-          type: 'DISCONNECT_EDGES',
+        get().dispatchUiIntent({
+          type: 'DISCONNECT_EDGE',
           edgeIds: removes.map((c) => c.id),
         });
       }
@@ -975,23 +952,38 @@ const useCanvasStore = create<RFState>()(
     },
 
     onConnect: (connection: Connection) => {
-      get().dispatch({ type: 'CONNECT', connection });
+      get().dispatchUiIntent({
+        type: 'CONNECT_EDGE',
+        source: connection.source,
+        target: connection.target,
+      });
     },
 
     rfInstance: null,
     setRfInstance: (instance) => set({ rfInstance: instance }),
 
     addNode: (node, skipAutoLayout) => {
-      get().dispatch({ type: 'ADD_NODE', node, skipAutoLayout });
+      get().dispatchUiIntent({
+        type: 'ADD_NODE',
+        node,
+        skipAutoLayout,
+      });
+    },
+
+    deleteNodes: (nodeIds) => {
+      get().dispatchUiIntent({ type: 'DELETE_NODES', nodeIds });
+    },
+
+    disconnectEdges: (edgeIds) => {
+      get().dispatchUiIntent({ type: 'DISCONNECT_EDGE', edgeIds });
+    },
+
+    setNodeGeometry: (items) => {
+      get().dispatchUiIntent({ type: 'RESIZE_NODE', items });
     },
 
     updateNodeData: (nodeId, patch) => {
-      if (!nodeId) return;
-      get().dispatch({
-        type: 'UPDATE_NODE_DATA',
-        nodeId,
-        patch,
-      });
+      get().dispatchUiIntent({ type: 'UPDATE_NODE_DATA', nodeId, patch });
     },
 
     patchNodeSilent: (nodeId, patch) => {
@@ -1011,47 +1003,59 @@ const useCanvasStore = create<RFState>()(
     },
 
     selectNodes: (ids, multiSelect = false) => {
-      get().dispatch({ type: 'SELECT_NODES', ids, multiSelect });
+      get().dispatchUiIntent({
+        type: 'SELECT_NODES',
+        nodeIds: ids,
+        mode: multiSelect ? 'toggle' : 'replace',
+      });
     },
 
     reorderNodes: (activeId: string, overId: string) => {
-      get().dispatch({ type: 'REORDER_NODES', activeId, overId });
+      get().dispatchUiIntent({ type: 'REORDER_NODE', activeId, overId });
     },
 
     sendSelectedToOrder: (direction) => {
-      const nodeIds = get()
-        .nodes.filter((n) => n.selected)
-        .map((n) => n.id);
-      get().dispatch({ type: 'REORDER_NODES', nodeIds, position: direction });
+      get().dispatchUiIntent({
+        type: 'REORDER_SELECTED_NODES',
+        to: direction,
+      });
     },
 
     frameSelectedNodes: () => {
-      get().dispatch({ type: 'GROUP_SELECTION_INTO_FRAME' });
+      get().dispatchUiIntent({ type: 'GROUP_SELECTION_INTO_FRAME' });
     },
 
     frameNodesInRect: (flowRect) => {
-      get().dispatch({ type: 'GROUP_RECT_INTO_FRAME', flowRect });
+      get().dispatchUiIntent({ type: 'GROUP_RECT_INTO_FRAME', flowRect });
     },
 
     unframe: (frameId) => {
-      get().dispatch({ type: 'UNFRAME', frameId });
+      get().dispatchUiIntent({ type: 'DISSOLVE_FRAME', frameId });
     },
 
     toggleNodeLock: (nodeId) => {
-      get().dispatch({ type: 'TOGGLE_NODE_LOCK', nodeId });
+      get().dispatchUiIntent({ type: 'TOGGLE_NODE_LOCK', nodeId });
     },
 
-    takeSnapshot: () => {
-      const { nodes, edges } = get();
-      canvasHistoryManager.takeSnapshot(nodes, edges);
+    beginGesture: (commandType) => {
+      if (COMMAND_META[commandType].snapshot === 'caller') {
+        const { nodes, edges } = get();
+        canvasHistoryManager.takeSnapshot(nodes, edges);
+        canvasHistoryManager.markGestureSnapshot();
+      }
     },
 
     alignSelectedNodes: (direction) => {
-      get().dispatch({ type: 'ALIGN_NODES', direction });
+      get().dispatchUiIntent({
+        type: 'ALIGN_SELECTED_NODES',
+        direction,
+      });
     },
 
     spreadSelectedNodes: () => {
-      get().dispatch({ type: 'SPREAD_NODES' });
+      get().dispatchUiIntent({
+        type: 'DISTRIBUTE_SELECTED_NODES',
+      });
     },
 
     autoLayoutEnabled: true,
@@ -1059,45 +1063,22 @@ const useCanvasStore = create<RFState>()(
       set({ autoLayoutEnabled: !get().autoLayoutEnabled });
     },
     layoutAll: () => {
-      get().dispatch({ type: 'LAYOUT_ALL' });
-      // Clear transition styles after the animation completes.
-      setTimeout(() => {
-        const currentNodes = get().nodes;
-        set({
-          nodes: currentNodes.map((n) => {
-            const s = n.style as Record<string, unknown> | undefined;
-            if (!s?.transition) return n;
-            const { transition: _t, ...rest } = s;
-            return { ...n, style: rest as Node['style'] };
-          }),
-        });
-      }, LAYOUT_ANIMATION_DURATION_MS);
+      get().dispatchUiIntent({ type: 'LAYOUT_ALL' });
       // Fit view slightly after layout so the animation is already in motion.
       setTimeout(() => {
         get().rfInstance?.fitView({ duration: 300, padding: 0.15 });
       }, 50);
     },
     layoutGroup: (frameId) => {
-      get().dispatch({ type: 'LAYOUT_GROUP', frameId });
-      // Clear transition styles after the animation completes.
-      setTimeout(() => {
-        const currentNodes = get().nodes;
-        set({
-          nodes: currentNodes.map((n) => {
-            const s = n.style as Record<string, unknown> | undefined;
-            if (!s?.transition) return n;
-            const { transition: _t, ...rest } = s;
-            return { ...n, style: rest as Node['style'] };
-          }),
-        });
-      }, LAYOUT_ANIMATION_DURATION_MS);
+      get().dispatchUiIntent({ type: 'LAYOUT_GROUP', frameId });
     },
+
     moveNodeIntoFrame: (nodeId, frameId) => {
-      get().dispatch({ type: 'MOVE_INTO_FRAME', nodeId, frameId });
+      get().dispatchUiIntent({ type: 'MOVE_NODE_INTO_FRAME', nodeId, frameId });
     },
 
     moveNodeOutOfFrame: (nodeId) => {
-      get().dispatch({ type: 'MOVE_OUT_OF_FRAME', nodeId });
+      get().dispatchUiIntent({ type: 'MOVE_NODE_OUT_OF_FRAME', nodeId });
     },
 
     clipboard: [],
@@ -1142,7 +1123,7 @@ const useCanvasStore = create<RFState>()(
     },
 
     pasteNodes: (flowPosition) => {
-      get().dispatch({ type: 'PASTE_NODES', flowPosition });
+      get().dispatchUiIntent({ type: 'PASTE_CLIPBOARD', flowPosition });
     },
 
     canUndo: false,

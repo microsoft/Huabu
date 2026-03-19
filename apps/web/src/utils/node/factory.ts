@@ -17,11 +17,13 @@ import type { Node } from '@xyflow/react';
 
 export interface NodeSize {
   width: number;
-  height: number;
+  // Optional height: some node types (e.g. text/note) use CSS auto-height, so null height is a valid default.
+  height?: number;
 }
 
 const DEFAULT_SIZES: Record<string, NodeSize> = {
-  note: { width: 400, height: 300 },
+  text: { width: 200 },
+  note: { width: 400 },
   web: { width: 300, height: 200 },
   pdf: { width: 400, height: 300 },
   video: { width: 400, height: 300 },
@@ -37,8 +39,7 @@ export const IMAGE_DEFAULT_SIZE: NodeSize = DEFAULT_SIZES.image;
  * Text nodes auto-size, so they deliberately have **no** default style.
  */
 export function getNodeSize(nodeType: string): NodeSize | null {
-  if (nodeType === 'text' || nodeType === 'note') return null; // auto-height
-  return DEFAULT_SIZES[nodeType] ?? { width: 400, height: 300 };
+  return DEFAULT_SIZES[nodeType];
 }
 
 /**

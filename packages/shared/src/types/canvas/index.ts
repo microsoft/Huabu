@@ -69,7 +69,6 @@ export type {
   CanvasEdgeRef,
   CanvasSize,
   CanvasAlignDirection,
-  CanvasDistributionAxis,
   CanvasAutoLayoutScope,
   CanvasAutoLayoutOptions,
   CanvasNodeCreateInput,
@@ -88,7 +87,6 @@ export type {
   CanvasExecution,
   CanvasCommandFailureReason,
   CanvasCommandResult,
-  CanvasExecutionResult,
 } from './execution.js';
 
 // Operation types

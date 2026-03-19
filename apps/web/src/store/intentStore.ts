@@ -11,7 +11,7 @@ import { create } from 'zustand';
 
 import useCanvasStore from './canvasStore';
 import { recognizeIntentStream, logIntentEpisode } from '../api/intent';
-import { captureCanvasScreenshot } from '../utils/canvas/screenshot';
+import { captureCanvasScreenshot } from '../canvas/utils/screenshot';
 
 import type { IntentCandidate } from '@sediment/shared';
 

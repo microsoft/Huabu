@@ -44,7 +44,7 @@ import { TextNode } from '../Nodes/TextNode';
 import { VideoNode } from '../Nodes/VideoNode';
 import { WebNode } from '../Nodes/WebNode';
 
-import type { FrameFitPreview } from '../../store/canvasStore.ts';
+import type { FrameFitResult } from '../../canvas/utils/frame';
 
 const nodeTypes = {
   image: ImageNode,
@@ -63,7 +63,7 @@ const VALID_NODE_TYPES = Object.keys(nodeTypes);
  * when a node is being dragged near or inside a frame.
  */
 const FrameFitPreviewOverlay: React.FC<{
-  preview: FrameFitPreview;
+  preview: FrameFitResult;
   rfInstance: ReactFlowInstance | null;
   wrapperRef: React.RefObject<HTMLDivElement | null>;
 }> = React.memo(({ preview, rfInstance, wrapperRef }) => {
@@ -71,12 +71,12 @@ const FrameFitPreviewOverlay: React.FC<{
     if (!rfInstance || !wrapperRef.current) return null;
 
     const topLeft = rfInstance.flowToScreenPosition({
-      x: preview.x,
-      y: preview.y,
+      x: preview.position.x,
+      y: preview.position.y,
     });
     const bottomRight = rfInstance.flowToScreenPosition({
-      x: preview.x + preview.width,
-      y: preview.y + preview.height,
+      x: preview.position.x + preview.width,
+      y: preview.position.y + preview.height,
     });
 
     // Convert from screen coords to wrapper-relative coords

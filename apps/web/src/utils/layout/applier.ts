@@ -30,8 +30,8 @@ export const LAYOUT_ANIMATION_DURATION_MS = 400;
  * Apply layout results to the canvas by producing a new nodes array.
  *
  * Pure transformation — does NOT mutate state or take undo snapshots.
- * Callers should call `canvasHistoryManager.takeSnapshot` before invoking
- * this when the operation needs to be undoable.
+ * Callers should call `beginGesture` or ensure snapshot policy is set
+ * in `COMMAND_META` when the operation needs to be undoable.
  *
  * Returns the new nodes array, or null if no changes were needed.
  */

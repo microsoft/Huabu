@@ -1,4 +1,3 @@
-import { createId } from '@sediment/shared';
 import { useReactFlow } from '@xyflow/react';
 import clsx from 'clsx';
 import {
@@ -17,15 +16,12 @@ import { NODE_ICON } from '../../config/nodeIcons.ts';
 import useCanvasStore from '../../store/canvasStore.ts';
 import { useIntentStore } from '../../store/intentStore.ts';
 import { detectNodeType } from '../../utils/io/media.ts';
+import { buildNode } from '../../utils/node/factory.ts';
 import { Button } from '../Common/Button';
 import { IconButton } from '../Common/IconButton';
 import { Modal } from '../Common/Modal';
 
-import type {
-  CanvasNode,
-  CanvasNodeType,
-  CreateNodePayload,
-} from '../Nodes/types.ts';
+import type { CanvasNodeType, CreateNodePayload } from '../Nodes/types.ts';
 
 interface NodeToolbarProps {
   activeTool: 'select' | 'pan';
@@ -63,101 +59,23 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
       const offsetX = Math.random() * 100 - 50;
       const offsetY = Math.random() * 100 - 50;
 
-      const initialWidth = payload?.width || 400;
-      const initialHeight = payload?.height || 300;
+      const center = { x: position.x + offsetX, y: position.y + offsetY };
 
-      // Text nodes auto-size, so center with a small estimate
-      const isText = type === 'text';
+      const data: Record<string, unknown> = { type };
+      if (payload?.src) data.src = payload.src;
+      if (payload?.label) data.label = payload.label;
+      if (type === 'note' || type === 'text') data.content = '';
 
-      const baseNode = {
-        id: createId('node'),
+      const node = buildNode({
         type,
-        position: {
-          x: position.x + offsetX - (isText ? 15 : initialWidth / 2),
-          y: position.y + offsetY - (isText ? 12 : initialHeight / 2),
-        },
-      };
+        position: center,
+        data,
+        ...(payload?.width && payload?.height
+          ? { size: { width: payload.width, height: payload.height } }
+          : {}),
+      });
 
-      let newNode: CanvasNode;
-
-      switch (type) {
-        case 'note':
-          newNode = {
-            ...baseNode,
-            type: 'note',
-            data: { type: 'note', content: '' },
-            style: { width: initialWidth, height: initialHeight },
-          };
-          break;
-        case 'text':
-          newNode = {
-            ...baseNode,
-            type: 'text',
-            data: { type: 'text', content: '' },
-          };
-          break;
-        case 'image':
-          newNode = {
-            ...baseNode,
-            type: 'image',
-            data: {
-              type: 'image',
-              src: payload?.src || '',
-              label: payload?.label,
-            },
-            style: { width: initialWidth, height: initialHeight },
-          };
-          break;
-        case 'pdf':
-          newNode = {
-            ...baseNode,
-            type: 'pdf',
-            data: {
-              type: 'pdf',
-              src: payload?.src || '',
-              label: payload?.label,
-            },
-            style: { width: initialWidth, height: initialHeight },
-          };
-          break;
-        case 'video':
-          newNode = {
-            ...baseNode,
-            type: 'video',
-            data: {
-              type: 'video',
-              src: payload?.src || '',
-              label: payload?.label,
-            },
-          };
-          break;
-        case 'web':
-          newNode = {
-            ...baseNode,
-            type: 'web',
-            data: {
-              type: 'web',
-              src: payload?.src || '',
-            },
-            style: { width: initialWidth, height: initialHeight },
-          };
-          break;
-        case 'frame':
-          newNode = {
-            ...baseNode,
-            type: 'frame',
-            data: { type: 'frame' },
-            style: {
-              width: initialWidth,
-              height: initialHeight,
-            },
-          };
-          break;
-        default:
-          return;
-      }
-
-      addNode(newNode);
+      addNode(node);
     },
     [addNode, screenToFlowPosition],
   );
@@ -201,7 +119,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
 
       try {
         let url = '';
-        let dimensions = { width: 400, height: 300 };
+        let dimensions: { width: number; height: number } | undefined;
 
         if (type === 'image') {
           const [uploadedUrl, dims] = await Promise.all([
@@ -219,7 +137,6 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           dimensions = dims;
         } else if (type === 'pdf') {
           url = await uploadPdf(file);
-          dimensions = { width: 400, height: 300 };
         }
 
         createNode(type, {
