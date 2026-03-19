@@ -148,22 +148,54 @@ export async function runPipeline(
   }
 
   // Stage 5 — Persist
-  // Skip persistence when extraction failed and produced no valid content,
-  // to avoid storing empty/incorrect data. Mark as placeholder instead.
+  // When extraction failed the node is still visible on the canvas, so we
+  // persist a placeholder source (empty content + error metadata) to ensure
+  // the node gets a stable sourceId and can be retried later.
   const extractFailed = diagnostics.some(
     (d) => d.code === 'EXTRACT_FAILED' && d.level === 'error',
   );
   if (has('persist_source') && ctx.normalized) {
     const allowPersistence = request.options?.allowPersistence !== false;
-    if (allowPersistence && !extractFailed) {
+    if (allowPersistence) {
       try {
         const src = ctx.resolved?.normalizedUri ?? ctx.resolved?.artifactUri;
-        ctx.persisted = persist(
-          ctx.normalized,
-          sourceKind,
-          deps.repository,
-          src,
-        );
+
+        if (extractFailed) {
+          // Persist a placeholder with empty content so the node still gets
+          // a sourceId. Store the extraction error in metadata for debugging.
+          const placeholderNormalized = {
+            ...ctx.normalized,
+            canonicalContent: '',
+            metadata: {
+              ...ctx.normalized.metadata,
+              placeholder: true,
+              extractError: diagnostics
+                .filter((d) => d.code === 'EXTRACT_FAILED')
+                .map((d) => d.message)
+                .join('; '),
+            },
+          };
+          ctx.persisted = persist(
+            placeholderNormalized,
+            sourceKind,
+            deps.repository,
+            src,
+          );
+          ctx.persisted.placeholder = true;
+          diagnostics.push({
+            code: 'PERSIST_PLACEHOLDER',
+            level: 'info',
+            message:
+              'Persisted placeholder source because extraction failed — content is empty',
+          });
+        } else {
+          ctx.persisted = persist(
+            ctx.normalized,
+            sourceKind,
+            deps.repository,
+            src,
+          );
+        }
         usedCapabilities.push('persist_source');
       } catch (error) {
         diagnostics.push({
@@ -173,14 +205,6 @@ export async function runPipeline(
           retryable: true,
         });
       }
-    } else if (extractFailed) {
-      ctx.persisted = { skipped: true, placeholder: true };
-      diagnostics.push({
-        code: 'PERSIST_SKIPPED_EXTRACT_FAILED',
-        level: 'warning',
-        message:
-          'Persistence skipped because extraction failed — no valid content to store',
-      });
     } else {
       ctx.persisted = { skipped: true };
     }
