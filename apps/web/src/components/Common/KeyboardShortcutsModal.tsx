@@ -17,6 +17,8 @@ export function KeyboardShortcutsModal({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
+      title="Keyboard Shortcuts"
+      description="Use Ctrl on Windows/Linux and Cmd on macOS."
       className="flex max-h-[calc(100vh-4rem)] w-[42rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden p-0"
     >
       <div className="flex flex-shrink-0 items-start justify-between border-b border-gray-100 px-6 py-5">
