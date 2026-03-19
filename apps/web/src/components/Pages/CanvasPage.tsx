@@ -61,7 +61,7 @@ export default function CanvasPage() {
       if (isNativeInput || isRichEditor) return;
 
       e.preventDefault();
-      setIsShortcutsOpen(true);
+      setIsShortcutsOpen((prev) => !prev);
     };
 
     window.addEventListener('keydown', onKeyDown, true);
