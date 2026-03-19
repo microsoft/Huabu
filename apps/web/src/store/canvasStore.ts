@@ -45,11 +45,10 @@ import {
   type NestableNode,
 } from '../canvas/utils/frame';
 import {
-  ingestNodeIfNeeded,
+  preprocessNodeIfNeeded,
   needsIngestion,
   type NodeIngestionInfo,
-} from '../utils/io/ingest';
-import { resolveLabelIfNeeded } from '../utils/io/resolveLabel';
+} from '../utils/io/preprocess';
 import { getNodeSize } from '../utils/node/size';
 
 const AUTOSAVE_DEBOUNCE_MS = 1000;
@@ -67,7 +66,7 @@ const flushAutoSave = async (saveCanvas: () => Promise<void>) => {
   }
 };
 
-// Per-node debounce timers so rapid edits only fire one ingestion request
+// Per-node debounce timers so rapid edits only fire one preprocessing request
 // after the user stops typing, rather than on every keystroke.
 const ingestionTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -81,12 +80,14 @@ const triggerIngestion = (node: Node) => {
     const state = useCanvasStore.getState();
     // Re-fetch the latest node so we send the most up-to-date content.
     const latestNode = state.nodes.find((n) => n.id === nodeId) ?? node;
-    void ingestNodeIfNeeded({
+    void preprocessNodeIfNeeded({
       canvasId: state.canvasId,
       node: latestNode,
       setNodeIngestion: state.setNodeIngestion,
       clearNodeIngestion: state.clearNodeIngestion,
       getNodeById: (id) => state.nodes.find((n) => n.id === id),
+      getChildNodes: (frameId) =>
+        state.nodes.filter((n) => n.parentId === frameId),
       patchNodeSilent: state.patchNodeSilent,
     });
   }, INGESTION_DEBOUNCE_MS);
@@ -106,7 +107,13 @@ const triggerLabelResolve = (nodeId: string) => {
   const timer = setTimeout(() => {
     labelResolveTimers.delete(nodeId);
     const state = useCanvasStore.getState();
-    void resolveLabelIfNeeded(nodeId, {
+    const node = state.nodes.find((n) => n.id === nodeId);
+    if (!node) return;
+    void preprocessNodeIfNeeded({
+      canvasId: state.canvasId,
+      node,
+      setNodeIngestion: state.setNodeIngestion,
+      clearNodeIngestion: state.clearNodeIngestion,
       getNodeById: (id) => state.nodes.find((n) => n.id === id),
       getChildNodes: (frameId) =>
         state.nodes.filter((n) => n.parentId === frameId),

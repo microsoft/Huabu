@@ -12,10 +12,10 @@ import {
   writeCanvas,
   type CanvasFile,
 } from '../../canvas/canvas.filestore.js';
-import { getIngestService } from '../../knowledge/index.js';
 import { getKnowledgeRepository } from '../../knowledge/knowledge.repository.js';
+import { getPreprocessDispatcher } from '../../preprocessing/index.js';
 
-import type { NodeData } from '@sediment/shared';
+import type { CanvasNodeKind, NodeData } from '@sediment/shared';
 // ==================== Canvas Helpers ====================
 
 async function loadCanvasState(canvasId: string) {
@@ -532,35 +532,34 @@ async function executeIngestContent(args: {
 
   const data = node.data as Record<string, unknown> | undefined;
   const type = (data?.type as string) ?? (node.type as string);
-  const ingestService = await getIngestService();
+  const dispatcher = await getPreprocessDispatcher();
 
-  if (type === 'note' || type === 'text' || type === 'web') {
-    const outcome = await ingestService.ingestCanvasNode({
-      nodeId: args.nodeId,
-      type: type as 'note' | 'text' | 'web',
+  const result = await dispatcher.preprocess({
+    canvasId: args.canvasId,
+    nodeId: args.nodeId,
+    nodeType: type as CanvasNodeKind,
+    trigger: 'manual',
+    snapshot: {
       title: data?.label as string | undefined,
       content: data?.content as string | undefined,
       src: data?.src as string | undefined,
-      existingSourceId: data?.sourceId as string | undefined,
-    });
+      sourceId: data?.sourceId as string | undefined,
+    },
+    options: { allowLLM: false },
+  });
 
-    // Update the node with the sourceId
-    if (outcome.sourceId) {
-      await updateNodeData(args.canvasId, args.nodeId, {
-        sourceId: outcome.sourceId,
-      });
-    }
-
-    return JSON.stringify({
-      sourceId: outcome.sourceId,
-      success: outcome.success,
-      title: outcome.title,
-      error: outcome.error,
+  // Update the node with the sourceId
+  if (result.persistence?.sourceId) {
+    await updateNodeData(args.canvasId, args.nodeId, {
+      sourceId: result.persistence.sourceId,
     });
   }
 
   return JSON.stringify({
-    error: `Ingestion not supported for node type: ${type}`,
+    sourceId: result.persistence?.sourceId,
+    success: result.success,
+    title: result.extracted?.title,
+    error: result.diagnostics.filter((d) => d.level === 'error'),
   });
 }
 

@@ -18,11 +18,13 @@ export {
 export {
   type NodeIngestionStatus,
   type NodeIngestionInfo,
-  type IngestHelperDeps,
+  type PreprocessHelperDeps,
   needsIngestion,
-  shouldIngestOnUpdate,
-  ingestNodeIfNeeded,
-} from './ingest';
+  needsPreprocessing,
+  needsLabelResolve,
+  shouldPreprocessOnUpdate,
+  preprocessNodeIfNeeded,
+} from './preprocess';
 
 export {
   detectNodeType,

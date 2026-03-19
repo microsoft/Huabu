@@ -15,26 +15,20 @@ import {
   type CanvasFile,
   type NodeLike,
 } from './canvas.filestore.js';
-import {
-  IMAGE_LABEL_PROMPT,
-  buildFrameLabelPrompt,
-} from '../../prompt/resolve-label.js';
 import { getExtFromMime, getMimeType } from '../../utils/mime.js';
-import { llmComplete } from '../agent/llm.js';
-import { resolveArtifactImageUrl } from '../artifact/utils.js';
-import {
-  getIngestService,
-  getKnowledgeRepository,
-} from '../knowledge/index.js';
+import { getKnowledgeRepository } from '../knowledge/index.js';
+import { getPreprocessDispatcher } from '../preprocessing/index.js';
 import { getArtifactsDir } from '../workspace.js';
 
-import type { Context } from '@mariozechner/pi-ai';
 import type {
   CanvasExportBundle,
+  CanvasNodeKind,
   ExportedSource,
   ImportCanvasResponse,
+  PreprocessNodeRequest,
   ResolveLabelRequest,
   ResolveLabelResponse,
+  TriggerReason,
 } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
@@ -199,63 +193,59 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     },
   );
 
-  // Upsert a single node (create or update) and ingest it
+  // Upsert a single node (create or update) via the preprocessing pipeline
   fastify.put<{
     Params: { canvasId: string; nodeId: string };
     Body: unknown;
   }>('/:canvasId/nodes/:nodeId', async function (request, reply) {
-    const { nodeId } = request.params;
+    const { canvasId, nodeId } = request.params;
     const parsed = upsertNodeBodySchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.code(400).send({ message: 'Invalid request body' });
     }
 
-    const {
-      type,
-      title,
-      content,
-      src,
-      sourceId: existingSourceId,
-    } = parsed.data;
-
-    const ingestService = await getIngestService();
+    const { type, title, content, src, sourceId } = parsed.data;
+    const dispatcher = await getPreprocessDispatcher();
 
     try {
-      const outcome =
-        type === 'pdf'
-          ? await ingestService.ingestPdfCanvasNodeFromArtifact({
-              nodeId,
-              title,
-              artifactUri: src,
-              artifactsDir: getArtifactsDir(),
-              existingSourceId,
-            })
-          : await ingestService.ingestCanvasNode({
-              nodeId,
-              type,
-              title,
-              content,
-              src,
-              existingSourceId,
-            });
+      const ppRequest: PreprocessNodeRequest = {
+        canvasId,
+        nodeId,
+        nodeType: type as CanvasNodeKind,
+        trigger: 'node_updated' as TriggerReason,
+        snapshot: {
+          title,
+          content,
+          src,
+          sourceId,
+        },
+        options: { allowLLM: false },
+      };
 
-      const { sourceId, success, error } = outcome;
+      const result = await dispatcher.preprocess(ppRequest);
 
       return reply.send({
         nodeId,
-        sourceId,
-        success,
-        suggestedLabel: outcome.title,
-        error: error ? `${error.code}: ${error.message}` : undefined,
+        sourceId: result.persistence?.sourceId ?? result.patch.sourceId ?? '',
+        success: result.success,
+        suggestedLabel:
+          result.enriched?.suggestedLabel ??
+          result.extracted?.title ??
+          undefined,
+        error:
+          result.diagnostics
+            .filter((d) => d.level === 'error')
+            .map((d) => `${d.code}: ${d.message}`)
+            .join('; ') || undefined,
       });
     } catch (error) {
       const message = toMessage(error);
       request.log.error(
         { nodeId, nodeType: type, error },
-        'Failed to ingest node',
+        'Failed to preprocess node',
       );
       return reply.code(500).send({
-        message: 'Failed to ingest node',
+        message: 'Failed to preprocess node',
         details: message,
       });
     }
@@ -268,7 +258,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     return reply.send({ success: true });
   });
 
-  // --- Resolve Label (LLM-powered semantic label generation) ---
+  // --- Resolve Label (LLM-powered semantic label generation via preprocessing pipeline) ---
 
   fastify.post<{ Body: unknown }>(
     '/resolve-label',
@@ -279,74 +269,28 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       const body = parsed.data as ResolveLabelRequest;
+      const dispatcher = await getPreprocessDispatcher();
 
       try {
-        let suggestedLabel: string | undefined;
+        const snapshot: Record<string, unknown> =
+          body.type === 'image'
+            ? { src: body.src }
+            : { childLabels: body.childLabels };
 
-        if (body.type === 'image') {
-          const dataUrl = await resolveArtifactImageUrl(
-            body.src,
-            getArtifactsDir(),
-          );
-          // Extract base64 data and mime type from the data URL
-          const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
-          if (!match) {
-            return reply.code(400).send({ message: 'Invalid image data URL' });
-          }
-          const [, mimeType, base64Data] = match;
-          const piContext: Context = {
-            systemPrompt: '',
-            messages: [
-              {
-                role: 'user',
-                content: [
-                  {
-                    type: 'image',
-                    data: base64Data,
-                    mimeType,
-                  },
-                  {
-                    type: 'text',
-                    text: IMAGE_LABEL_PROMPT,
-                  },
-                ],
-                timestamp: Date.now(),
-              },
-            ],
-          };
-          const result = await llmComplete(piContext);
-          const text = result.content
-            .filter((b) => b.type === 'text')
-            .map((b) => (b as { type: 'text'; text: string }).text)
-            .join('')
-            .trim();
-          if (text.length > 0 && text.length <= 60) {
-            suggestedLabel = text;
-          }
-        } else {
-          // body.type === 'frame'
-          const piContext: Context = {
-            systemPrompt: '',
-            messages: [
-              {
-                role: 'user',
-                content: buildFrameLabelPrompt(body.childLabels),
-                timestamp: Date.now(),
-              },
-            ],
-          };
-          const result = await llmComplete(piContext);
-          const text = result.content
-            .filter((b) => b.type === 'text')
-            .map((b) => (b as { type: 'text'; text: string }).text)
-            .join('')
-            .trim();
-          if (text.length > 0 && text.length <= 60) {
-            suggestedLabel = text;
-          }
-        }
+        const ppRequest: PreprocessNodeRequest = {
+          canvasId: '',
+          nodeId: '',
+          nodeType: body.type as CanvasNodeKind,
+          trigger: 'manual' as TriggerReason,
+          snapshot,
+          options: { allowLLM: true, allowPersistence: false },
+        };
 
-        const response: ResolveLabelResponse = { suggestedLabel };
+        const result = await dispatcher.preprocess(ppRequest);
+
+        const response: ResolveLabelResponse = {
+          suggestedLabel: result.enriched?.suggestedLabel,
+        };
         return reply.send(response);
       } catch (error) {
         const message = toMessage(error);
