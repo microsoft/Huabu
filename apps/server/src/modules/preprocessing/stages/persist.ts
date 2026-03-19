@@ -13,6 +13,7 @@ export function persist(
   normalized: NormalizeResult,
   sourceKind: string | undefined,
   repository: IKnowledgeRepository,
+  src?: string,
 ): PersistResult {
   if (!sourceKind) {
     return { skipped: true };
@@ -49,7 +50,7 @@ export function persist(
     sourceId: normalized.sourceId,
     type,
     title: normalized.title,
-    src: undefined,
+    src,
     content: normalized.canonicalContent,
     contentHash: normalized.contentHash,
     metadata: normalized.metadata,

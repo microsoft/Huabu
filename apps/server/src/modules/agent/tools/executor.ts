@@ -555,11 +555,28 @@ async function executeIngestContent(args: {
     });
   }
 
+  // If no source was persisted (image/frame/video or extraction failure),
+  // report clearly to the agent so it doesn't misinterpret success.
+  const sourceId = result.persistence?.sourceId;
+  const errors = result.diagnostics
+    .filter((d) => d.level === 'error')
+    .map((d) => `${d.code}: ${d.message}`);
+  const errorString = errors.length > 0 ? errors.join('; ') : undefined;
+
+  if (!sourceId && result.success) {
+    return JSON.stringify({
+      sourceId: null,
+      success: true,
+      title: result.extracted?.title,
+      note: `Node type '${type}' does not persist to the knowledge base`,
+    });
+  }
+
   return JSON.stringify({
-    sourceId: result.persistence?.sourceId,
+    sourceId: sourceId ?? null,
     success: result.success,
     title: result.extracted?.title,
-    error: result.diagnostics.filter((d) => d.level === 'error'),
+    error: errorString,
   });
 }
 

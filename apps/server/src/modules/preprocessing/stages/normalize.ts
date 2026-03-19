@@ -33,8 +33,9 @@ export function normalize(
   // Source ID generation
   const sourceId = resolveSourceId(resolved, contentHash, sourceKind);
 
-  // Input fingerprint for cache/skip decisions
-  const inputFingerprint = contentHash;
+  // Input fingerprint: hash type-specific canonical input to avoid collisions
+  // across unrelated nodes (e.g. two empty notes, or image vs frame).
+  const inputFingerprint = computeInputFingerprint(resolved, canonicalContent);
 
   return {
     contentHash,
@@ -44,6 +45,40 @@ export function normalize(
     canonicalContent,
     inputFingerprint,
   };
+}
+
+/**
+ * Compute a type-specific input fingerprint.
+ * Uses the canonical input that uniquely identifies this node's content
+ * rather than falling back to empty-string hash for non-textual types.
+ */
+function computeInputFingerprint(
+  resolved: ResolvedInput,
+  canonicalContent: string,
+): string {
+  const { nodeType } = resolved;
+
+  switch (nodeType) {
+    case 'image':
+      return computeContentHash(`image:${resolved.imageSrc ?? ''}`);
+    case 'frame':
+      return computeContentHash(
+        `frame:${(resolved.childLabels ?? []).join('|')}`,
+      );
+    case 'web':
+      // Use URL + content so fingerprint changes when either changes
+      return computeContentHash(
+        `web:${resolved.normalizedUri ?? ''}:${canonicalContent}`,
+      );
+    case 'pdf':
+      // Use artifact URI + content hash
+      return computeContentHash(
+        `pdf:${resolved.artifactUri ?? ''}:${canonicalContent}`,
+      );
+    default:
+      // note/text/video: content-based
+      return computeContentHash(`${nodeType}:${canonicalContent}`);
+  }
 }
 
 function resolveSourceId(

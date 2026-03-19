@@ -604,8 +604,9 @@ Rules:
 - This stage does NOT persist data
 - Existing `DocumentLoaderFactory` and loaders are reused here
 - Tavily Extract lives here because it is content extraction, not semantic enrichment.
-  However, the provider call goes through `ProviderManager` so it can share
-  budget/retry policy with LLM calls in Stage 4.
+  Currently called through `WebLoader` directly (not `ProviderManager`).
+  Future enhancement: route Tavily calls through `ProviderManager` for unified
+  budget tracking and retry policy alongside LLM calls.
 
 ### Stage 3. Normalize
 
@@ -645,6 +646,7 @@ Design principles:
    the dispatcher MAY combine enrichment requests into fewer LLM calls.
 3. **Skippable** — if `options.allowLLM === false` or `mode === 'interactive'`,
    the entire Enrich stage is skipped. The pipeline still produces a valid result.
+   This is enforced in `pipeline.ts`'s Stage 4 gate.
 4. **Cacheable** — enrichment results are keyed by `inputFingerprint`.
    If the fingerprint has not changed since the last enrichment, cached results are reused.
 

@@ -113,7 +113,9 @@ export async function runPipeline(
     has('generate_summary') ||
     has('generate_keywords')
   ) {
-    const allowLLM = request.options?.allowLLM !== false;
+    const allowLLM =
+      request.options?.allowLLM !== false &&
+      request.options?.mode !== 'interactive';
     if (allowLLM) {
       try {
         ctx.enriched = await enrich(
@@ -146,11 +148,22 @@ export async function runPipeline(
   }
 
   // Stage 5 — Persist
+  // Skip persistence when extraction failed and produced no valid content,
+  // to avoid storing empty/incorrect data. Mark as placeholder instead.
+  const extractFailed = diagnostics.some(
+    (d) => d.code === 'EXTRACT_FAILED' && d.level === 'error',
+  );
   if (has('persist_source') && ctx.normalized) {
     const allowPersistence = request.options?.allowPersistence !== false;
-    if (allowPersistence) {
+    if (allowPersistence && !extractFailed) {
       try {
-        ctx.persisted = persist(ctx.normalized, sourceKind, deps.repository);
+        const src = ctx.resolved?.normalizedUri ?? ctx.resolved?.artifactUri;
+        ctx.persisted = persist(
+          ctx.normalized,
+          sourceKind,
+          deps.repository,
+          src,
+        );
         usedCapabilities.push('persist_source');
       } catch (error) {
         diagnostics.push({
@@ -160,12 +173,22 @@ export async function runPipeline(
           retryable: true,
         });
       }
+    } else if (extractFailed) {
+      ctx.persisted = { skipped: true, placeholder: true };
+      diagnostics.push({
+        code: 'PERSIST_SKIPPED_EXTRACT_FAILED',
+        level: 'warning',
+        message:
+          'Persistence skipped because extraction failed — no valid content to store',
+      });
     } else {
       ctx.persisted = { skipped: true };
     }
   }
 
   // Stage 6 — Project
-  usedCapabilities.push('build_patch');
+  if (has('build_patch')) {
+    usedCapabilities.push('build_patch');
+  }
   return project(request, requestId, usedCapabilities, ctx, diagnostics);
 }
