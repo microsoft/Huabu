@@ -4,7 +4,6 @@
 
 ---
 
-<<<<<<< HEAD
 ## 2026-03-22 · 修复面板中 Ctrl+C 复制文本的问题
 
 **What Changed**
@@ -46,6 +45,18 @@
 
 - `canvasHandlers.ts` 已移除，相关逻辑分散到 `apps/web/src/canvas/commands/` 和 `apps/web/src/canvas/resolvers/` 目录。
 - Canvas store 大幅简化，核心状态管理职责不变。
+
+## 2026-03-20 · 修复聊天历史加载 404
+
+**What Changed**
+
+- 修复了打开 Chat Panel 时偶尔出现 `GET /api/agent/history/:threadId 404` 控制台报错的问题。
+
+**Notes**
+
+- 原因是 Chat Panel 挂载时 canvas 尚未加载完成，导致请求缺少 `canvasId` 参数。现在等 `canvasId` 就绪后才发起历史加载请求。
+
+---
 
 ## 2026-03-20 · 节点预处理流水线统一
 

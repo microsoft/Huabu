@@ -195,12 +195,15 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     scrollToBottom();
   }, [messages, isLoading]);
 
-  // Load history from server on first mount (once per thread)
+  // Load history from server on first mount (once per thread).
+  // Wait for canvasId to be available — on initial mount the canvas may
+  // not have loaded yet, causing a request without canvasId that 404s.
   useEffect(() => {
     // Wait for canvasId to be set before fetching history — on initial render
     // the canvas store hasn't loaded yet, so canvasId is still ''.
     if (!canvasId) return;
     if (useChatStore.getState().isHistoryLoaded) return;
+    if (!canvasId) return;
 
     let cancelled = false;
 
