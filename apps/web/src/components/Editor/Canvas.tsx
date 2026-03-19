@@ -107,7 +107,13 @@ const FrameFitPreviewOverlay: React.FC<{
 /** Node types that support expand-on-double-click. */
 const EXPANDABLE_TYPES = new Set(['image', 'video', 'web', 'pdf', 'note']);
 
-export const Canvas: React.FC = () => {
+type CanvasProps = {
+  shortcutsDisabled?: boolean;
+};
+
+export const Canvas: React.FC<CanvasProps> = ({
+  shortcutsDisabled = false,
+}) => {
   const nodes = useCanvasStore((state) => state.nodes);
   const edges = useCanvasStore((state) => state.edges);
   const onNodesChange = useCanvasStore((state) => state.onNodesChange);
@@ -136,10 +142,15 @@ export const Canvas: React.FC = () => {
 
   // Keyboard shortcuts + paste handler (extracted to hook).
   // Also manages tool state (select/pan) and Space-key temporary pan.
-  const { tool, setTool } = useCanvasShortcuts({
-    rfInstanceRef,
-    mousePositionRef,
-  });
+  const { tool, setTool } = useCanvasShortcuts(
+    {
+      rfInstanceRef,
+      mousePositionRef,
+    },
+    {
+      disabled: shortcutsDisabled,
+    },
+  );
 
   // --- Frame drag-to-create state ---
   const [frameDragStart, setFrameDragStart] = useState<{
