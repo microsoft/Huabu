@@ -12,7 +12,6 @@ export {
   type FitFrameOptions,
   type FrameFitResult,
   normalizeTreeOrder,
-  getNodeSize,
   getAbsolutePosition,
   getDescendantIds,
   unframe,

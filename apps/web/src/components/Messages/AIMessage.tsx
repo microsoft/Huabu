@@ -1,4 +1,3 @@
-import { createId } from '@sediment/shared';
 import { Copy } from 'lucide-react';
 
 import { BlockNoteCard } from './BlockNoteCard';
@@ -42,11 +41,11 @@ export const AIMessage = ({
               title="Add as note"
               onClick={() => {
                 addNode({
-                  id: createId('node'),
-                  type: 'note',
-                  position: { x: 200, y: 200 },
+                  nodeType: 'note',
                   data: {
                     content,
+                    // TODO: update origin
+                    origin: { type: 'user-drag-chat' },
                   },
                 });
               }}
@@ -76,7 +75,7 @@ export const AIMessage = ({
                       title={r.label}
                     >
                       <Icon size={10} />
-                      <span className="max-w-[80px] truncate">{r.label}</span>
+                      <span className="max-w-20 truncate">{r.label}</span>
                     </span>
                   );
                 })}

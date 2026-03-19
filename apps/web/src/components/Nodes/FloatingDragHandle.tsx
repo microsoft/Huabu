@@ -5,7 +5,6 @@ import { useCallback, useRef } from 'react';
 import useCanvasStore from '@/store/canvasStore';
 import { usePreviewStore } from '@/store/previewStore';
 import { setDragPayload } from '@/utils/io/dragDrop';
-import { buildNode } from '@/utils/node/factory';
 
 import { NODE_ICON } from '../../config/nodeIcons';
 import { DragToCanvasHandleButton } from '../Common/DragToCanvasHandleButton';
@@ -100,29 +99,25 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
 
   // Click-to-add handlers for fullscreen mode
   const handleAddNote = useCallback(() => {
-    const node = buildNode({
-      type: 'note',
-      position: { x: 0, y: 0 },
+    addNode({
+      nodeType: 'note',
       data: {
         content: text,
         origin: { type: 'user-drag-capture', sourceId },
       },
     });
-    addNode(node);
     onDismiss();
   }, [text, sourceId, addNode, onDismiss]);
 
   const handleAddImage = useCallback(() => {
     if (!imageUrl) return;
-    const node = buildNode({
-      type: 'image',
-      position: { x: 0, y: 0 },
+    addNode({
+      nodeType: 'image',
       data: {
         src: imageUrl,
         origin: { type: 'user-drag-capture', sourceId },
       },
     });
-    addNode(node);
     onDismiss();
   }, [imageUrl, sourceId, addNode, onDismiss]);
 

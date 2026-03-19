@@ -2,7 +2,7 @@
  * Shared canvas command schema executed by both the web client and agent flows.
  */
 
-import type { LayoutStrategy, Point } from './layout.js';
+import type { Point } from './layout.js';
 import type { CanvasNodeType, NodeData } from './node.js';
 import type { PrefixedId } from '../../utils/id.js';
 
@@ -25,7 +25,8 @@ export type CanvasEdgeRef =
 
 export interface CanvasSize {
   width: number;
-  height: number;
+  /** Optional for auto-height nodes like text and note. */
+  height?: number;
 }
 
 export type CanvasAlignDirection =
@@ -38,12 +39,9 @@ export type CanvasAlignDirection =
 
 export type CanvasAutoLayoutScope =
   | { type: 'canvas' }
-  | { type: 'frame'; frameId: CanvasNodeId }
-  | { type: 'nodes'; nodeIds: CanvasNodeId[] };
+  | { type: 'frame'; frameId: CanvasNodeId };
 
 export interface CanvasAutoLayoutOptions {
-  strategy?: LayoutStrategy;
-  spacing?: Partial<CanvasSize>;
   animate?: boolean;
 }
 

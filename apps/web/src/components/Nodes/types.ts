@@ -12,15 +12,7 @@ import type {
 } from '@sediment/shared';
 import type { Node } from '@xyflow/react';
 
-// Re-export from shared for backwards compatibility
 export type { CanvasNodeType, NodeData, NodeStyle };
-
-export type CreateNodePayload = {
-  src?: string;
-  label?: string;
-  width?: number;
-  height?: number;
-};
 
 /**
  * Canvas-specific node data types with index signatures for ReactFlow compatibility.

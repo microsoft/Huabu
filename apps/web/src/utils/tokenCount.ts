@@ -1,4 +1,4 @@
-import { encode } from 'gpt-tokenizer/encoding/o200k_base';
+import { encode } from 'gpt-tokenizer';
 
 /**
  * Return the number of tokens for a given text string.

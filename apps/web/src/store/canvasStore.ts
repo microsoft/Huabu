@@ -30,6 +30,7 @@ import { executeCanvasCommands } from '../canvas/executor';
 import { runPostEffects } from '../canvas/postEffects';
 import {
   resolveUiIntent,
+  type AddNodeInput,
   type CanvasUiIntent,
   type UiResolverState,
 } from '../canvas/uiIntent';
@@ -40,7 +41,6 @@ import {
   getAbsolutePosition as getFrameAbsolutePosition,
   wouldUnframe,
   wouldAutoFrame,
-  getNodeSize,
   type FrameFitResult,
   type NestableNode,
 } from '../canvas/utils/frame';
@@ -50,6 +50,7 @@ import {
   type NodeIngestionInfo,
 } from '../utils/io/ingest';
 import { resolveLabelIfNeeded } from '../utils/io/resolveLabel';
+import { getNodeSize } from '../utils/node/size';
 
 const AUTOSAVE_DEBOUNCE_MS = 1000;
 const INGESTION_DEBOUNCE_MS = 1000;
@@ -167,7 +168,8 @@ type RFState = {
   /** Clear the frame fit previews (e.g. when resize ends). */
   clearFrameFitPreview: () => void;
 
-  addNode: (node: Node, skipAutoLayout?: boolean) => void;
+  addNodes: (inputs: AddNodeInput[]) => void;
+  addNode: (input: AddNodeInput) => void;
   deleteNodes: (nodeIds: string[]) => void;
   disconnectEdges: (edgeIds: string[]) => void;
   setNodeGeometry: (
@@ -242,7 +244,7 @@ type RFState = {
   /** Clipboard for node copy-paste. */
   clipboard: Node[];
   copySelectedNodes: () => void;
-  pasteNodes: (flowPosition?: { x: number; y: number }) => void;
+  pasteNodes: (flowPosition: { x: number; y: number }) => void;
 
   /** Undo / Redo */
   canUndo: boolean;
@@ -911,7 +913,7 @@ const useCanvasStore = create<RFState>()(
     onNodesChange: (changes) => {
       // Only process RF-internal change types (position, selection, dimensions).
       // Deletions must go through dispatch({ type: 'DELETE_NODES' }).
-      // Additions must go through dispatch({ type: 'ADD_NODE' }).
+      // Additions must go through dispatch({ type: 'ADD_NODES' }).
       const internalChanges = changes.filter(
         (c) => c.type !== 'remove' && c.type !== 'add',
       );
@@ -962,12 +964,15 @@ const useCanvasStore = create<RFState>()(
     rfInstance: null,
     setRfInstance: (instance) => set({ rfInstance: instance }),
 
-    addNode: (node, skipAutoLayout) => {
+    addNodes: (inputs) => {
       get().dispatchUiIntent({
-        type: 'ADD_NODE',
-        node,
-        skipAutoLayout,
+        type: 'ADD_NODES',
+        inputs,
       });
+    },
+
+    addNode: (input) => {
+      get().addNodes([input]);
     },
 
     deleteNodes: (nodeIds) => {
@@ -1105,19 +1110,24 @@ const useCanvasStore = create<RFState>()(
 
       const toCopy = nodes.filter((n) => selectedIds.has(n.id));
 
-      // Keep original IDs in the clipboard so that handlePasteNodes can
-      // build a correct old→new ID map for parentId remapping. The paste
-      // handler assigns fresh IDs when creating the actual nodes.
-      const cloned: Node[] = toCopy.map((n) => ({
-        id: n.id,
-        type: n.type,
-        position: { x: n.position.x, y: n.position.y },
-        data: JSON.parse(JSON.stringify(n.data ?? {})),
-        ...(n.style ? { style: JSON.parse(JSON.stringify(n.style)) } : {}),
-        ...(n.parentId && selectedIds.has(n.parentId)
-          ? { parentId: n.parentId }
-          : {}),
-      }));
+      // Keep original IDs in the clipboard so the paste helper can remap
+      // parent-child relationships onto freshly created node IDs.
+      const cloned: Node[] = toCopy.map((n) => {
+        const hasCopiedParent = !!(n.parentId && selectedIds.has(n.parentId));
+        const absolutePosition = hasCopiedParent
+          ? n.position
+          : (getFrameAbsolutePosition(nodes as NestableNode[], n.id) ??
+            n.position);
+
+        return {
+          id: n.id,
+          type: n.type,
+          position: { x: absolutePosition.x, y: absolutePosition.y },
+          data: JSON.parse(JSON.stringify(n.data ?? {})),
+          ...(n.style ? { style: JSON.parse(JSON.stringify(n.style)) } : {}),
+          ...(hasCopiedParent ? { parentId: n.parentId } : {}),
+        };
+      });
 
       set({ clipboard: cloned });
     },

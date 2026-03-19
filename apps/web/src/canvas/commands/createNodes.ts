@@ -3,13 +3,11 @@ import { createId, type CanvasCommand } from '@sediment/shared';
 import { noop, type CommandDefinition } from './types';
 import { needsLabelResolve } from '../../utils/io/resolveLabel';
 import { placeNode } from '../../utils/layout';
-import { getNodeSize } from '../../utils/node/factory';
+import { getNodeDefaultSize } from '../../utils/node/factory';
 import { deduplicateLabel, generateNextLabel } from '../../utils/node/labels';
 import { selectOnly } from '../utils';
 import {
-  findFrameAtPoint,
   fitFrames,
-  getAbsolutePosition,
   normalizeTreeOrder,
   type NestableNode,
 } from '../utils/frame';
@@ -79,52 +77,32 @@ const createNodes: CommandDefinition<Cmd> = {
       if (needsLabelResolve(nodeType)) labelResolveNodeIds.push(nodeId);
 
       // ---------------------------------------------------------------
-      // 2. Resolve parentId: if not provided and position falls inside
-      //    an existing frame, auto-nest into that frame and convert
-      //    position to frame-relative coordinates.
+      // 2. Build the final ReactFlow node from the already-resolved
+      //    command input. Position semantics are finalized by the caller.
       // ---------------------------------------------------------------
-      let parentId: string | undefined = input.parentId ?? undefined;
-      let position = input.position ?? { x: 0, y: 0 };
+      const size = input.size ?? getNodeDefaultSize(nodeType);
 
-      if (input.position && !parentId && nodeType !== 'frame') {
-        const resolvedSize = input.size ?? getNodeSize(nodeType);
-        const w = resolvedSize?.width ?? 0;
-        const h = resolvedSize?.height ?? 0;
-        const checkPoint = {
-          x: position.x + w / 2,
-          y: position.y + h / 2,
-        };
-        const allNodes = [...state.nodes, ...newNodes] as NestableNode[];
-        const frameId = findFrameAtPoint(allNodes, checkPoint);
-        if (frameId) {
-          const frameAbs = getAbsolutePosition(allNodes, frameId);
-          if (frameAbs) {
-            parentId = frameId;
-            position = {
-              x: position.x - frameAbs.x,
-              y: position.y - frameAbs.y,
-            };
-          }
-        }
-      }
-
-      // ---------------------------------------------------------------
-      // 3. Resolve size: if not provided, use canonical defaults from
-      //    factory. Text/note only get width (CSS auto-height).
-      //    Build the final node object.
-      // ---------------------------------------------------------------
-      const size = input.size ?? getNodeSize(nodeType);
       const node: Node = {
         id: nodeId,
         type: nodeType,
-        position,
-        data: { ...(input.data ?? {}), label },
-        ...(size ? { style: size } : {}),
-        ...(parentId ? { parentId } : {}),
+        position: input.position ?? { x: 0, y: 0 },
+        data: { ...(input.data ?? {}), label, type: nodeType },
+        ...(size
+          ? {
+              style:
+                typeof size.height === 'number'
+                  ? { width: size.width, height: size.height }
+                  : { width: size.width },
+            }
+          : {}),
       };
 
+      if (input.parentId) {
+        node.parentId = input.parentId;
+      }
+
       // Also resolve parent frame labels when a node is nested.
-      if (parentId) labelResolveNodeIds.push(parentId);
+      if (input.parentId) labelResolveNodeIds.push(input.parentId);
 
       newNodes.push(node);
     }

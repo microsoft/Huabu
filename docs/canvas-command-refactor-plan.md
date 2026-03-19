@@ -126,7 +126,6 @@ Good examples:
 2. `DISTRIBUTE_NODES { nodeIds, axis }`
 3. `AUTO_LAYOUT { scope: 'canvas' }`
 4. `AUTO_LAYOUT { scope: 'frame', frameId }`
-5. `AUTO_LAYOUT { scope: 'nodes', nodeIds }`
 
 Bad examples:
 
@@ -156,7 +155,7 @@ This is the recommended shared command set.
 | Edge graph        | `DISCONNECT_EDGES`   | Remove one or more edges                             | Remove by edge id or explicit edge descriptors                                           |
 | Algorithms        | `ALIGN_NODES`        | Align nodes by an explicit set of ids                | Does not depend on current selection                                                     |
 | Algorithms        | `DISTRIBUTE_NODES`   | Spread nodes along an explicit axis                  | Same                                                                                     |
-| Algorithms        | `AUTO_LAYOUT`        | Run layout on explicit scope                         | Scope must be explicit                                                                   |
+| Algorithms        | `AUTO_LAYOUT`        | Run layout on explicit scope                         | Currently supports `canvas` and `frame` scopes; `animate` is the only supported option.  |
 
 ### Explicit IDs for Agent-Created Objects
 
@@ -405,7 +404,7 @@ The agent should be able to emit:
   "commands": [
     {
       "type": "AUTO_LAYOUT",
-      "scope": "canvas"
+      "scope": { "type": "canvas" }
     }
   ]
 }

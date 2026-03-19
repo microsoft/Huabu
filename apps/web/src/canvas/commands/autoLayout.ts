@@ -40,9 +40,6 @@ const autoLayout: CommandDefinition<Cmd> = {
         }
         break;
       }
-      case 'nodes':
-        // Not yet implemented �?fall through to no-op.
-        return noop(state);
     }
 
     if (!result) return noop(state);

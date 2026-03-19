@@ -29,13 +29,19 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
         updated = { ...updated, position: update.position };
       }
       if (update.size) {
+        const nextStyle = {
+          ...updated.style,
+          width: update.size.width,
+        };
+        if (typeof update.size.height === 'number') {
+          nextStyle.height = update.size.height;
+        } else {
+          delete nextStyle.height;
+        }
+
         updated = {
           ...updated,
-          style: {
-            ...updated.style,
-            width: update.size.width,
-            height: update.size.height,
-          },
+          style: nextStyle,
         };
       }
       if (updated.parentId) affectedFrameIds.add(updated.parentId);

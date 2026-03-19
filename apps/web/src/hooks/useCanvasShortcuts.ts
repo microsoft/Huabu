@@ -16,8 +16,8 @@ import {
   normalizeUrl,
   getImageDimensionsFromBlob,
 } from '../utils/io/media';
-import { buildNode } from '../utils/node/factory';
 
+import type { AddNodeInput } from '../canvas/uiIntent';
 import type { ReactFlowInstance } from '@xyflow/react';
 
 // Marker written to the system clipboard when copying canvas nodes.
@@ -68,6 +68,7 @@ export function useCanvasShortcuts(
   const redo = useCanvasStore((s) => s.redo);
   const deleteNodes = useCanvasStore((s) => s.deleteNodes);
   const disconnectEdges = useCanvasStore((s) => s.disconnectEdges);
+  const addNodes = useCanvasStore((s) => s.addNodes);
   const addNode = useCanvasStore((s) => s.addNode);
   const layoutAll = useCanvasStore((s) => s.layoutAll);
   const toggleAutoLayout = useCanvasStore((s) => s.toggleAutoLayout);
@@ -123,65 +124,72 @@ export function useCanvasShortcuts(
   /** Upload files and create nodes at the given position. */
   const pasteFiles = useCallback(
     async (files: File[], basePos: { x: number; y: number }) => {
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const type = file.type
-          ? detectNodeTypeFromMime(file.type)
-          : detectNodeType(file.name);
-        const offset = i * 30;
-        const pos = { x: basePos.x + offset, y: basePos.y + offset };
+      const inputs = (
+        await Promise.all(
+          files.map(async (file, index): Promise<AddNodeInput | null> => {
+            const type = file.type
+              ? detectNodeTypeFromMime(file.type)
+              : detectNodeType(file.name);
+            const offset = index * 30;
+            const pos = { x: basePos.x + offset, y: basePos.y + offset };
 
-        try {
-          if (type === 'image') {
-            const [url, dims] = await Promise.all([
-              uploadImage(file),
-              getImageDimensionsFromBlob(file),
-            ]);
-            addNode(
-              buildNode({
-                type: 'image',
-                position: pos,
-                data: {
-                  src: url,
-                  label: file.name !== 'pasted-image' ? file.name : undefined,
-                  origin: { type: 'user-pasted' },
-                },
-                naturalDimensions: dims,
-              }),
-            );
-          } else if (type === 'video') {
-            const url = await uploadVideo(file);
-            addNode(
-              buildNode({
-                type: 'video',
-                position: pos,
-                data: {
-                  src: url,
-                  label: file.name,
-                  origin: { type: 'user-pasted' },
-                },
-              }),
-            );
-          } else if (type === 'pdf') {
-            const url = await uploadPdf(file);
-            addNode(
-              buildNode({
-                type: 'pdf',
-                position: pos,
-                data: {
-                  src: url,
-                  label: file.name,
-                  origin: { type: 'user-pasted' },
-                },
-              }),
-            );
-          }
-        } catch (error) {
-          console.error(`Failed to paste file ${file.name}:`, error);
-        }
+            try {
+              if (type === 'image') {
+                const [url, dims] = await Promise.all([
+                  uploadImage(file),
+                  getImageDimensionsFromBlob(file),
+                ]);
+                return {
+                  nodeType: 'image',
+                  placementPoint: pos,
+                  data: {
+                    src: url,
+                    label: file.name !== 'pasted-image' ? file.name : undefined,
+                    origin: { type: 'user-pasted' },
+                  },
+                  naturalDimensions: dims,
+                };
+              }
+
+              if (type === 'video') {
+                const url = await uploadVideo(file);
+                return {
+                  nodeType: 'video',
+                  placementPoint: pos,
+                  data: {
+                    src: url,
+                    label: file.name,
+                    origin: { type: 'user-pasted' },
+                  },
+                };
+              }
+
+              if (type === 'pdf') {
+                const url = await uploadPdf(file);
+                return {
+                  nodeType: 'pdf',
+                  placementPoint: pos,
+                  data: {
+                    src: url,
+                    label: file.name,
+                    origin: { type: 'user-pasted' },
+                  },
+                };
+              }
+            } catch (error) {
+              console.error(`Failed to paste file ${file.name}:`, error);
+            }
+
+            return null;
+          }),
+        )
+      ).filter((input): input is AddNodeInput => input !== null);
+
+      if (inputs.length > 0) {
+        addNodes(inputs);
       }
     },
-    [addNode],
+    [addNodes],
   );
 
   /** Paste text content — auto-detect URLs vs plain text. */
@@ -195,37 +203,36 @@ export function useCanvasShortcuts(
 
       if (allUrls) {
         const basePos = getFlowPos();
-        lines.forEach((line, i) => {
-          const finalUrl = normalizeUrl(line.trim());
-          const nodeType = detectNodeType(finalUrl);
-          const offset = i * 30;
-          addNode(
-            buildNode({
-              type: nodeType,
-              position: { x: basePos.x + offset, y: basePos.y + offset },
+        addNodes(
+          lines.map((line, index) => {
+            const finalUrl = normalizeUrl(line.trim());
+            const nodeType = detectNodeType(finalUrl);
+            const offset = index * 30;
+
+            return {
+              nodeType,
+              placementPoint: { x: basePos.x + offset, y: basePos.y + offset },
               data: {
                 src: finalUrl,
                 origin: { type: 'user-pasted' },
               },
-            }),
-          );
-        });
+            };
+          }),
+        );
         return;
       }
 
-      // Plain text → note node (label auto-derived by handleAddNode)
-      addNode(
-        buildNode({
-          type: 'note',
-          position: getFlowPos(),
-          data: {
-            content: trimmed,
-            origin: { type: 'user-pasted' },
-          },
-        }),
-      );
+      // Plain text → note node (label auto-derived by CREATE_NODES)
+      addNode({
+        nodeType: 'note',
+        placementPoint: getFlowPos(),
+        data: {
+          content: trimmed,
+          origin: { type: 'user-pasted' },
+        },
+      });
     },
-    [addNode, getFlowPos],
+    [addNode, addNodes, getFlowPos],
   );
 
   // --- Track mouse position globally so paste can use it ---

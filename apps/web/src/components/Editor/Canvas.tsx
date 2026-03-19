@@ -1,9 +1,9 @@
+import { createId } from '@sediment/shared';
 import {
   ReactFlow,
   Background,
   Controls,
   type ReactFlowInstance,
-  type Node,
   Panel,
 } from '@xyflow/react';
 import clsx from 'clsx';
@@ -35,7 +35,6 @@ import {
   normalizeUrl,
   getImageDimensionsFromBlob,
 } from '../../utils/io/media';
-import { buildNode, buildSourceNode } from '../../utils/node/factory';
 import { FrameNode } from '../Nodes/FrameNode';
 import { ImageNode } from '../Nodes/ImageNode';
 import { NoteNode } from '../Nodes/NoteNode';
@@ -44,6 +43,7 @@ import { TextNode } from '../Nodes/TextNode';
 import { VideoNode } from '../Nodes/VideoNode';
 import { WebNode } from '../Nodes/WebNode';
 
+import type { AddNodeInput } from '../../canvas/uiIntent';
 import type { FrameFitResult } from '../../canvas/utils/frame';
 
 const nodeTypes = {
@@ -140,6 +140,13 @@ export const Canvas: React.FC<CanvasProps> = ({
   const lastDropRef = useRef<{ key: string; at: number } | null>(null);
   const mousePositionRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
+  const addPositionedNode = useCallback(
+    (input: AddNodeInput) => {
+      addNode(input);
+    },
+    [addNode],
+  );
+
   // Keyboard shortcuts + paste handler (extracted to hook).
   // Also manages tool state (select/pan) and Space-key temporary pan.
   const { tool, setTool } = useCanvasShortcuts(
@@ -189,19 +196,18 @@ export const Canvas: React.FC<CanvasProps> = ({
         y: event.clientY,
       });
 
-      const newNode = buildNode({
-        type: pendingNodeType,
-        position,
+      addPositionedNode({
+        nodeType: pendingNodeType,
+        placementPoint: position,
         data: {
           content: '',
           origin: { type: 'user-created' },
         },
+        skipAutoLayout: true,
       });
-
-      addNode(newNode, true);
       setPendingNodeType(null);
     },
-    [pendingNodeType, addNode, setPendingNodeType],
+    [pendingNodeType, addPositionedNode, setPendingNodeType],
   );
 
   // --- Frame drag-to-create handlers ---
@@ -421,20 +427,20 @@ export const Canvas: React.FC<CanvasProps> = ({
             return;
           lastDropRef.current = { key: dedupeKey, at: now };
 
-          let newNode: Node | null = null;
+          let newNodeInput: AddNodeInput | null = null;
 
           if (payload.kind === 'web') {
-            newNode = buildNode({
-              type: 'web',
-              position: dropPos,
+            newNodeInput = {
+              nodeType: 'web',
+              placementPoint: dropPos,
               data: { src: payload.data.src, origin: payload.origin },
-            });
+            };
           }
 
           if (payload.kind === 'note') {
-            newNode = buildNode({
-              type: 'note',
-              position: dropPos,
+            newNodeInput = {
+              nodeType: 'note',
+              placementPoint: dropPos,
               data: {
                 content: payload.data.content,
                 ...(payload.data.contentJson
@@ -442,21 +448,19 @@ export const Canvas: React.FC<CanvasProps> = ({
                   : {}),
                 origin: payload.origin,
               },
-            });
+            };
           }
 
           if (payload.kind === 'image') {
             const { src, label } = payload.data;
 
             const doAdd = (natW: number, natH: number) => {
-              addNode(
-                buildNode({
-                  type: 'image',
-                  position: dropPos,
-                  data: { src, label, origin: payload.origin },
-                  naturalDimensions: { width: natW, height: natH },
-                }),
-              );
+              addPositionedNode({
+                nodeType: 'image',
+                placementPoint: dropPos,
+                data: { src, label, origin: payload.origin },
+                naturalDimensions: { width: natW, height: natH },
+              });
             };
 
             const img = new Image();
@@ -476,9 +480,11 @@ export const Canvas: React.FC<CanvasProps> = ({
 
             // For note/text sources, async-load content
             if ((nodeType === 'note' || nodeType === 'text') && sourceId) {
-              const tempNode = buildNode({
-                type: nodeType,
-                position: dropPos,
+              const tempNodeId = createId('node');
+              addPositionedNode({
+                id: tempNodeId,
+                nodeType: nodeType as 'note' | 'text',
+                placementPoint: dropPos,
                 data: {
                   ...rest,
                   label,
@@ -487,34 +493,35 @@ export const Canvas: React.FC<CanvasProps> = ({
                   content: 'Loading...',
                 },
               });
-              addNode(tempNode);
 
               getSource(sourceId)
                 .then((fullSource) => {
-                  patchNodeSilent(tempNode.id, {
+                  patchNodeSilent(tempNodeId, {
                     content: fullSource.content || '',
                   });
                 })
                 .catch((error) => {
                   console.error('Failed to load source content:', error);
-                  patchNodeSilent(tempNode.id, {
+                  patchNodeSilent(tempNodeId, {
                     content: 'Failed to load content',
                   });
                 });
               return;
             }
 
-            newNode = buildSourceNode({
-              sourceId,
-              sourceType: type,
-              position: dropPos,
-              origin: payload.origin,
-              extra: { ...rest, label },
-              validNodeTypes: VALID_NODE_TYPES,
-            });
+            newNodeInput = {
+              nodeType: nodeType as keyof typeof nodeTypes,
+              placementPoint: dropPos,
+              data: {
+                ...rest,
+                label,
+                sourceId,
+                origin: payload.origin,
+              },
+            };
           }
 
-          if (newNode) addNode(newNode);
+          if (newNodeInput) addNode(newNodeInput);
           return;
         }
 
@@ -536,44 +543,38 @@ export const Canvas: React.FC<CanvasProps> = ({
                     uploadImage(file),
                     getImageDimensionsFromBlob(file),
                   ]);
-                  addNode(
-                    buildNode({
-                      type: 'image',
-                      position: pos,
-                      data: {
-                        src: url,
-                        label: file.name,
-                        origin: { type: 'user-uploaded' },
-                      },
-                      naturalDimensions: dims,
-                    }),
-                  );
+                  addPositionedNode({
+                    nodeType: 'image',
+                    placementPoint: pos,
+                    data: {
+                      src: url,
+                      label: file.name,
+                      origin: { type: 'user-uploaded' },
+                    },
+                    naturalDimensions: dims,
+                  });
                 } else if (fileType === 'video') {
                   const url = await uploadVideo(file);
-                  addNode(
-                    buildNode({
-                      type: 'video',
-                      position: pos,
-                      data: {
-                        src: url,
-                        label: file.name,
-                        origin: { type: 'user-uploaded' },
-                      },
-                    }),
-                  );
+                  addPositionedNode({
+                    nodeType: 'video',
+                    placementPoint: pos,
+                    data: {
+                      src: url,
+                      label: file.name,
+                      origin: { type: 'user-uploaded' },
+                    },
+                  });
                 } else if (fileType === 'pdf') {
                   const url = await uploadPdf(file);
-                  addNode(
-                    buildNode({
-                      type: 'pdf',
-                      position: pos,
-                      data: {
-                        src: url,
-                        label: file.name,
-                        origin: { type: 'user-uploaded' },
-                      },
-                    }),
-                  );
+                  addPositionedNode({
+                    nodeType: 'pdf',
+                    placementPoint: pos,
+                    data: {
+                      src: url,
+                      label: file.name,
+                      origin: { type: 'user-uploaded' },
+                    },
+                  });
                 }
               } catch (error) {
                 console.error(`Failed to drop file ${file.name}:`, error);
@@ -591,31 +592,27 @@ export const Canvas: React.FC<CanvasProps> = ({
         if (droppedUrl && looksLikeUrl(droppedUrl)) {
           const finalUrl = normalizeUrl(droppedUrl);
           const nodeType = detectNodeType(finalUrl);
-          addNode(
-            buildNode({
-              type: nodeType,
-              position: dropPos,
-              data: {
-                src: finalUrl,
-                origin: { type: 'user-uploaded' },
-              },
-            }),
-          );
+          addPositionedNode({
+            nodeType,
+            placementPoint: dropPos,
+            data: {
+              src: finalUrl,
+              origin: { type: 'user-uploaded' },
+            },
+          });
           return;
         }
 
         // ============ 4. Plain text drop ============
         if (plainText) {
-          addNode(
-            buildNode({
-              type: 'note',
-              position: dropPos,
-              data: {
-                content: plainText,
-                origin: { type: 'user-uploaded' },
-              },
-            }),
-          );
+          addPositionedNode({
+            nodeType: 'note',
+            placementPoint: dropPos,
+            data: {
+              content: plainText,
+              origin: { type: 'user-uploaded' },
+            },
+          });
         }
       }}
     >

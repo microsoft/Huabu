@@ -9,14 +9,11 @@ export {
 
 export {
   type NodeSize,
-  type BuildNodeOptions,
-  type SourceNodeOptions,
   IMAGE_DEFAULT_SIZE,
-  getNodeSize as getDefaultNodeSize,
-  computeImageSize,
-  centeredPosition,
-  buildNode,
-  buildSourceNode,
+  getNodeDefaultSize,
+  computeMediaSize,
 } from './factory';
+
+export { nodePositionFromPlacementPoint } from './placement';
 
 export { getSmartHandles, rerouteAllEdges, toggleNodeLock } from './helper';

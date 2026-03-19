@@ -1,4 +1,3 @@
-import { useReactFlow } from '@xyflow/react';
 import clsx from 'clsx';
 import {
   MousePointer2,
@@ -9,19 +8,18 @@ import {
   Sprout,
   Sparkles,
 } from 'lucide-react';
-import { useCallback, useRef, useState, type ChangeEvent } from 'react';
+import { useRef, useState, type ChangeEvent } from 'react';
 
 import { uploadImage, uploadPdf, uploadVideo } from '../../api/artifact.ts';
 import { NODE_ICON } from '../../config/nodeIcons.ts';
 import useCanvasStore from '../../store/canvasStore.ts';
 import { useIntentStore } from '../../store/intentStore.ts';
 import { detectNodeType } from '../../utils/io/media.ts';
-import { buildNode } from '../../utils/node/factory.ts';
 import { Button } from '../Common/Button';
 import { IconButton } from '../Common/IconButton';
 import { Modal } from '../Common/Modal';
 
-import type { CanvasNodeType, CreateNodePayload } from '../Nodes/types.ts';
+import type { AddNodeInput } from '../../canvas/uiIntent.ts';
 
 interface NodeToolbarProps {
   activeTool: 'select' | 'pan';
@@ -29,8 +27,7 @@ interface NodeToolbarProps {
 }
 
 export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
-  const { screenToFlowPosition } = useReactFlow();
-  const addNode = useCanvasStore((s) => s.addNode);
+  const addNodes = useCanvasStore((s) => s.addNodes);
   const pendingNodeType = useCanvasStore((s) => s.pendingNodeType);
   const setPendingNodeType = useCanvasStore((s) => s.setPendingNodeType);
   const layoutAll = useCanvasStore((s) => s.layoutAll);
@@ -48,37 +45,6 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
     null,
   );
   const [linkText, setLinkText] = useState('');
-
-  const createNode = useCallback(
-    (type: CanvasNodeType, payload?: CreateNodePayload) => {
-      const position = screenToFlowPosition({
-        x: window.innerWidth / 2,
-        y: window.innerHeight / 2,
-      });
-
-      const offsetX = Math.random() * 100 - 50;
-      const offsetY = Math.random() * 100 - 50;
-
-      const center = { x: position.x + offsetX, y: position.y + offsetY };
-
-      const data: Record<string, unknown> = { type };
-      if (payload?.src) data.src = payload.src;
-      if (payload?.label) data.label = payload.label;
-      if (type === 'note' || type === 'text') data.content = '';
-
-      const node = buildNode({
-        type,
-        position: center,
-        data,
-        ...(payload?.width && payload?.height
-          ? { size: { width: payload.width, height: payload.height } }
-          : {}),
-      });
-
-      addNode(node);
-    },
-    [addNode, screenToFlowPosition],
-  );
 
   const getImageDimensions = (
     file: File,
@@ -113,41 +79,56 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
     if (!files || files.length === 0) return;
     setActiveModal(null);
 
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const type = detectNodeType(file.name);
+    const inputs = (
+      await Promise.all(
+        Array.from(files).map(async (file): Promise<AddNodeInput | null> => {
+          const type = detectNodeType(file.name);
 
-      try {
-        let url = '';
-        let dimensions: { width: number; height: number } | undefined;
+          try {
+            let url = '';
+            let naturalDimensions:
+              | { width: number; height: number }
+              | undefined;
 
-        if (type === 'image') {
-          const [uploadedUrl, dims] = await Promise.all([
-            uploadImage(file),
-            getImageDimensions(file),
-          ]);
-          url = uploadedUrl;
-          dimensions = dims;
-        } else if (type === 'video') {
-          const [uploadedUrl, dims] = await Promise.all([
-            uploadVideo(file),
-            getVideoDimensions(file),
-          ]);
-          url = uploadedUrl;
-          dimensions = dims;
-        } else if (type === 'pdf') {
-          url = await uploadPdf(file);
-        }
+            if (type === 'image') {
+              const [uploadedUrl, dims] = await Promise.all([
+                uploadImage(file),
+                getImageDimensions(file),
+              ]);
+              url = uploadedUrl;
+              naturalDimensions = dims;
+            } else if (type === 'video') {
+              const [uploadedUrl, dims] = await Promise.all([
+                uploadVideo(file),
+                getVideoDimensions(file),
+              ]);
+              url = uploadedUrl;
+              naturalDimensions = dims;
+            } else if (type === 'pdf') {
+              url = await uploadPdf(file);
+            }
 
-        createNode(type, {
-          src: url,
-          label: file.name,
-          ...dimensions,
-        });
-      } catch (error) {
-        console.error(`Failed to upload ${file.name}:`, error);
-      }
+            return {
+              nodeType: type,
+              data: {
+                type,
+                src: url,
+                label: file.name,
+              },
+              ...(naturalDimensions ? { naturalDimensions } : {}),
+            };
+          } catch (error) {
+            console.error(`Failed to upload ${file.name}:`, error);
+            return null;
+          }
+        }),
+      )
+    ).filter((input): input is AddNodeInput => input !== null);
+
+    if (inputs.length > 0) {
+      addNodes(inputs);
     }
+
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -156,17 +137,27 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
 
     const lines = linkText.split('\n');
 
-    lines.forEach((line) => {
+    const inputs = lines.flatMap((line): AddNodeInput[] => {
       const url = line.trim();
-      if (!url) return;
+      if (!url) return [];
 
       const finalUrl = url.startsWith('http') ? url : `https://${url}`;
       const type = detectNodeType(finalUrl);
 
-      createNode(type, {
-        src: finalUrl,
-      });
+      return [
+        {
+          nodeType: type,
+          data: {
+            type,
+            src: finalUrl,
+          },
+        },
+      ];
     });
+
+    if (inputs.length > 0) {
+      addNodes(inputs);
+    }
 
     setLinkText('');
     setActiveModal(null);

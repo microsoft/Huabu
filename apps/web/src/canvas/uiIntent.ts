@@ -15,6 +15,7 @@ import {
   type CanvasCommand,
   type CanvasEdgeId,
   type CanvasNodeId,
+  type CanvasSize,
   type CanvasNodeType,
   type Point,
   type RecentAction,
@@ -31,7 +32,9 @@ import {
   getAbsolutePosition,
   type NestableNode,
 } from './utils/frame';
+import { computeMediaSize } from '../utils/node/factory';
 import { deduplicateLabel, generateNextLabel } from '../utils/node/labels';
+import { nodePositionFromPlacementPoint } from '../utils/node/placement';
 
 import type { Edge, Node } from '@xyflow/react';
 
@@ -47,6 +50,18 @@ export interface CanvasFlowRect {
 }
 
 export type CanvasUiSelectionMode = 'replace' | 'toggle';
+
+export interface AddNodeInput {
+  id?: CanvasNodeId;
+  nodeType: CanvasNodeType;
+  data?: Record<string, unknown>;
+  size?: CanvasSize;
+  naturalDimensions?: { width: number; height: number };
+  parentId?: CanvasNodeId | null;
+  /** Explicit placement anchor used for centering and frame hit-testing. */
+  placementPoint?: Point;
+  skipAutoLayout?: boolean;
+}
 
 // ---------------------------------------------------------------------------
 // UiIntent union
@@ -80,9 +95,8 @@ export type CanvasUiIntent =
     }
   // --- Direct-mapping intents (operands are already explicit) ---
   | {
-      type: 'ADD_NODE';
-      node: Node;
-      skipAutoLayout?: boolean;
+      type: 'ADD_NODES';
+      inputs: AddNodeInput[];
     }
   | { type: 'DELETE_NODES'; nodeIds: string[] }
   | { type: 'UPDATE_NODE_DATA'; nodeId: string; patch: Record<string, unknown> }
@@ -125,6 +139,117 @@ export interface UiResolverState {
   clipboard: Node[];
 }
 
+const DEFAULT_PASTE_OFFSET = 40;
+
+function canvasSizeFromStyle(
+  style: Node['style'] | undefined,
+): CanvasSize | undefined {
+  const styleRecord = style as Record<string, unknown> | undefined;
+  const width = styleRecord?.width;
+  if (typeof width !== 'number') return undefined;
+
+  const height = styleRecord?.height;
+  return typeof height === 'number' ? { width, height } : { width };
+}
+
+function resolveExplicitFramePlacement(params: {
+  nodes: Node[];
+  nodeType: CanvasNodeType;
+  position?: Point;
+  placementPoint?: Point;
+  parentId?: CanvasNodeId | null;
+}): { position?: Point; parentId?: CanvasNodeId | null } {
+  const { nodes, nodeType, position, placementPoint, parentId } = params;
+
+  if (!position || !placementPoint || parentId || nodeType === 'frame') {
+    return { position, parentId };
+  }
+
+  const frameId = findFrameAtPoint(nodes as NestableNode[], placementPoint);
+  if (!frameId) {
+    return { position, parentId };
+  }
+
+  const frameAbs = getAbsolutePosition(nodes as NestableNode[], frameId);
+  if (!frameAbs) {
+    return { position, parentId };
+  }
+
+  return {
+    parentId: frameId as CanvasNodeId,
+    position: {
+      x: position.x - frameAbs.x,
+      y: position.y - frameAbs.y,
+    },
+  };
+}
+
+function resolveAddNodePlacement(input: AddNodeInput): {
+  position?: Point;
+  size?: CanvasSize;
+} {
+  const size =
+    input.size ??
+    (input.naturalDimensions &&
+    (input.nodeType === 'image' || input.nodeType === 'video')
+      ? computeMediaSize(
+          input.nodeType,
+          input.naturalDimensions.width,
+          input.naturalDimensions.height,
+        )
+      : undefined);
+
+  return {
+    position: input.placementPoint
+      ? nodePositionFromPlacementPoint(
+          input.placementPoint,
+          input.nodeType,
+          size,
+        )
+      : undefined,
+    size,
+  };
+}
+
+function materializeAddNode(
+  input: AddNodeInput,
+  ui: UiResolverState,
+): {
+  node: Extract<CanvasCommand, { type: 'CREATE_NODES' }>['nodes'][number];
+  traceNode: {
+    id: CanvasNodeId;
+    nodeType: CanvasNodeType;
+    label?: string;
+  };
+} {
+  const nodeId = input.id ?? createId('node');
+  const placement = resolveAddNodePlacement(input);
+  const resolved = resolveExplicitFramePlacement({
+    nodes: ui.nodes,
+    nodeType: input.nodeType,
+    position: placement.position,
+    placementPoint: input.placementPoint,
+    parentId: input.parentId,
+  });
+
+  return {
+    node: {
+      id: nodeId,
+      nodeType: input.nodeType,
+      data: input.data as never,
+      ...(resolved.position ? { position: resolved.position } : {}),
+      ...(placement.size ? { size: placement.size } : {}),
+      ...(resolved.parentId ? { parentId: resolved.parentId } : {}),
+      ...(input.skipAutoLayout ? { skipAutoLayout: true } : {}),
+    },
+    traceNode: {
+      id: nodeId,
+      nodeType: input.nodeType,
+      label: input.data?.label as string | undefined,
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Resolver entry point
 // ---------------------------------------------------------------------------
@@ -156,8 +281,8 @@ export function resolveUiIntent(
       return resolveDistributeSelected(intent, ui);
     case 'REORDER_SELECTED_NODES':
       return resolveReorderSelected(intent, ui);
-    case 'ADD_NODE':
-      return resolveAddNode(intent, ui);
+    case 'ADD_NODES':
+      return resolveAddNodes(intent, ui);
     case 'DELETE_NODES':
       return resolveDeleteNodes(intent, ui);
     case 'UPDATE_NODE_DATA':
@@ -185,6 +310,95 @@ export function resolveUiIntent(
     case 'EXPAND_NODE':
       return resolveExpandNode(intent, ui);
   }
+}
+
+// ---------------------------------------------------------------------------
+// PASTE_CLIPBOARD
+// ---------------------------------------------------------------------------
+// TODO: double-check
+function resolvePasteClipboard(
+  intent: Extract<CanvasUiIntent, { type: 'PASTE_CLIPBOARD' }>,
+  ui: UiResolverState,
+): UiIntentResolution {
+  const { clipboard, nodes } = ui;
+  if (clipboard.length === 0) {
+    return { commands: [], trace: [] };
+  }
+
+  const rootNodes = clipboard.filter((node) => !node.parentId);
+  const anchorNode = rootNodes[0] ?? clipboard[0];
+  const offsetX = intent.flowPosition
+    ? intent.flowPosition.x - anchorNode.position.x
+    : DEFAULT_PASTE_OFFSET;
+  const offsetY = intent.flowPosition
+    ? intent.flowPosition.y - anchorNode.position.y
+    : DEFAULT_PASTE_OFFSET;
+
+  const idMap = new Map<string, CanvasNodeId>();
+  for (const node of clipboard) {
+    idMap.set(node.id, createId('node'));
+  }
+
+  const existingLabels = nodes.map(
+    (node) => node.data?.label as string | undefined,
+  );
+  const created: Extract<CanvasCommand, { type: 'CREATE_NODES' }>['nodes'] = [];
+  const traceNodes: Array<{
+    id: CanvasNodeId;
+    nodeType: CanvasNodeType;
+    label?: string;
+  }> = [];
+
+  for (const node of clipboard) {
+    const nodeId = idMap.get(node.id);
+    if (!nodeId) continue;
+
+    const originalLabel = String(node.data?.label ?? '').trim();
+    const originalLabelSource = (
+      node.data as Record<string, unknown> | undefined
+    )?.labelSource as string | undefined;
+    const isAutoLabel =
+      !originalLabel || !originalLabelSource || originalLabelSource === 'auto';
+    const nodeType = (node.type ?? 'note') as CanvasNodeType;
+    const label = isAutoLabel
+      ? generateNextLabel(node.type || 'node', existingLabels)
+      : deduplicateLabel(originalLabel, existingLabels);
+    existingLabels.push(label);
+
+    const clonedData = JSON.parse(JSON.stringify(node.data ?? {}));
+    delete clonedData.sourceId;
+    clonedData.label = label;
+    clonedData.origin = { type: 'user-pasted' };
+
+    const hasRemappedParent = !!(node.parentId && idMap.has(node.parentId));
+    const position = hasRemappedParent
+      ? { x: node.position.x, y: node.position.y }
+      : { x: node.position.x + offsetX, y: node.position.y + offsetY };
+    const size = canvasSizeFromStyle(node.style);
+    const parentId =
+      hasRemappedParent && node.parentId
+        ? (idMap.get(node.parentId) as CanvasNodeId | undefined)
+        : undefined;
+
+    created.push({
+      id: nodeId,
+      nodeType,
+      data: clonedData,
+      position,
+      ...(size ? { size } : {}),
+      ...(parentId ? { parentId } : {}),
+      skipAutoLayout: true,
+    });
+    traceNodes.push({ id: nodeId, nodeType, label });
+  }
+
+  return {
+    commands: [{ type: 'CREATE_NODES', nodes: created }],
+    trace:
+      traceNodes.length > 0
+        ? [{ action: 'node_created', nodes: traceNodes }]
+        : [],
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -325,153 +539,6 @@ function resolveGroupRectIntoFrame(
 }
 
 // ---------------------------------------------------------------------------
-// PASTE_CLIPBOARD
-// ---------------------------------------------------------------------------
-
-function resolvePasteClipboard(
-  intent: Extract<CanvasUiIntent, { type: 'PASTE_CLIPBOARD' }>,
-  ui: UiResolverState,
-): UiIntentResolution {
-  const commands: CanvasCommand[] = [];
-  const { clipboard, nodes } = ui;
-
-  if (clipboard.length === 0) {
-    return { commands, trace: [] };
-  }
-
-  // Compute paste offset.
-  let offsetX: number;
-  let offsetY: number;
-  const rootNodes = clipboard.filter((n) => !n.parentId);
-  const bboxNodes = rootNodes.length > 0 ? rootNodes : clipboard;
-
-  if (intent.flowPosition) {
-    const xs = bboxNodes.map((n) => n.position.x);
-    const ys = bboxNodes.map((n) => n.position.y);
-    const widths = bboxNodes.map(
-      (n) => (n.style?.width as number) ?? n.measured?.width ?? 200,
-    );
-    const heights = bboxNodes.map(
-      (n) => (n.style?.height as number) ?? n.measured?.height ?? 150,
-    );
-    const minX = Math.min(...xs);
-    const minY = Math.min(...ys);
-    const maxX = Math.max(...xs.map((x, i) => x + widths[i]));
-    const maxY = Math.max(...ys.map((y, i) => y + heights[i]));
-    offsetX = intent.flowPosition.x - (minX + maxX) / 2;
-    offsetY = intent.flowPosition.y - (minY + maxY) / 2;
-  } else {
-    const OFFSET = 40;
-    offsetX = OFFSET;
-    offsetY = OFFSET;
-  }
-
-  // Build old-id → new-id map.
-  const idMap = new Map<string, string>();
-  for (const node of clipboard) {
-    idMap.set(node.id, createId('node'));
-  }
-
-  const existingLabels = nodes.map((n) => n.data?.label as string | undefined);
-
-  // Build CREATE_NODES inputs from clipboard.
-  const createInputs: Extract<
-    CanvasCommand,
-    { type: 'CREATE_NODES' }
-  >['nodes'] = [];
-  const newNodeIds: CanvasNodeId[] = [];
-
-  for (const node of clipboard) {
-    const newId = idMap.get(node.id)!;
-    newNodeIds.push(newId as CanvasNodeId);
-
-    // Label handling.
-    const originalLabel = String(node.data?.label ?? '').trim();
-    const originalLabelSource = (
-      node.data as Record<string, unknown> | undefined
-    )?.labelSource as string | undefined;
-    const isAutoLabel =
-      !originalLabel || !originalLabelSource || originalLabelSource === 'auto';
-    const label = isAutoLabel
-      ? generateNextLabel(node.type || 'node', existingLabels)
-      : deduplicateLabel(originalLabel, existingLabels);
-    existingLabels.push(label);
-
-    // Clone data without sourceId.
-    const clonedData = JSON.parse(JSON.stringify(node.data ?? {}));
-    delete clonedData.sourceId;
-    clonedData.label = label;
-    clonedData.origin = { type: 'user-pasted' };
-
-    // Compute position.
-    const hasRemappedParent = node.parentId && idMap.has(node.parentId);
-    const position = hasRemappedParent
-      ? { x: node.position.x, y: node.position.y }
-      : { x: node.position.x + offsetX, y: node.position.y + offsetY };
-
-    // Compute parentId �?remap to new frame ID if the parent was also copied.
-    let parentId: CanvasNodeId | null = null;
-    if (hasRemappedParent) {
-      parentId = idMap.get(node.parentId!)! as CanvasNodeId;
-    } else if (node.type !== 'frame') {
-      // Auto-detect parent frame for pasted root-level nodes.
-      const style = node.style as
-        | { width?: number; height?: number }
-        | undefined;
-      const w = typeof style?.width === 'number' ? style.width : 0;
-      const h = typeof style?.height === 'number' ? style.height : 0;
-      const checkPoint = {
-        x: position.x + w / 2,
-        y: position.y + h / 2,
-      };
-      const frameId = findFrameAtPoint(nodes as NestableNode[], checkPoint);
-      if (frameId) {
-        const frameAbs = getAbsolutePosition(nodes as NestableNode[], frameId);
-        if (frameAbs) {
-          position.x -= frameAbs.x;
-          position.y -= frameAbs.y;
-          parentId = frameId as CanvasNodeId;
-        }
-      }
-    }
-
-    const size = node.style
-      ? {
-          width: (node.style as Record<string, number>).width ?? undefined,
-          height: (node.style as Record<string, number>).height ?? undefined,
-        }
-      : undefined;
-
-    createInputs.push({
-      id: newId as CanvasNodeId,
-      nodeType: (node.type ?? 'note') as CanvasNodeType,
-      data: clonedData,
-      position,
-      ...(size?.width && size?.height
-        ? { size: { width: size.width, height: size.height } }
-        : {}),
-      ...(parentId ? { parentId } : {}),
-      skipAutoLayout: true,
-    } as never);
-  }
-
-  commands.push({ type: 'CREATE_NODES', nodes: createInputs });
-  commands.push({ type: 'SET_NODE_SELECTION', nodeIds: newNodeIds });
-
-  // Build trace from pasted nodes (using clipboard for node refs).
-  const pastedRefs = clipboard.map((n) => ({
-    id: idMap.get(n.id)!,
-    nodeType: (n.type ?? 'note') as CanvasNodeType,
-    label: n.data?.label as string | undefined,
-  }));
-
-  return {
-    commands,
-    trace: [{ action: 'node_created', nodes: pastedRefs }],
-  };
-}
-
-// ---------------------------------------------------------------------------
 // NODE_DRAG_STOP
 // ---------------------------------------------------------------------------
 
@@ -542,13 +609,11 @@ function resolveNodeDragStop(
           original &&
           (original.position !== n.position || original.style !== n.style)
         ) {
-          const style = n.style as Record<string, number> | undefined;
+          const size = canvasSizeFromStyle(n.style);
           geometryUpdates.push({
             nodeId: n.id as CanvasNodeId,
             position: n.position,
-            ...(style?.width && style?.height
-              ? { size: { width: style.width, height: style.height } }
-              : {}),
+            ...(size ? { size } : {}),
           } as never);
         }
       }
@@ -574,8 +639,12 @@ function resolveNodeDragStop(
   const byParent = new Map<string | null, string[]>();
   for (const [nodeId, parentId] of parentChanges) {
     const key = parentId ?? '';
-    if (!byParent.has(key)) byParent.set(key, []);
-    byParent.get(key)!.push(nodeId);
+    const bucket = byParent.get(key);
+    if (bucket) {
+      bucket.push(nodeId);
+    } else {
+      byParent.set(key, [nodeId]);
+    }
   }
   for (const [parentKey, nodeIds] of byParent) {
     commands.push({
@@ -760,41 +829,32 @@ function resolveReorderSelected(
 }
 
 // ---------------------------------------------------------------------------
-// ADD_NODE
+// ADD_NODES
 // ---------------------------------------------------------------------------
 
-function resolveAddNode(
-  intent: Extract<CanvasUiIntent, { type: 'ADD_NODE' }>,
-  _ui: UiResolverState,
+function resolveAddNodes(
+  intent: Extract<CanvasUiIntent, { type: 'ADD_NODES' }>,
+  ui: UiResolverState,
 ): UiIntentResolution {
-  const { node, skipAutoLayout } = intent;
-  const commands: CanvasCommand[] = [
-    {
-      type: 'CREATE_NODES',
-      nodes: [
-        {
-          id: node.id as CanvasNodeId,
-          nodeType: (node.type ?? 'note') as CanvasNodeType,
-          data: node.data as never,
-          position: node.position,
-          ...(node.style
-            ? {
-                size: {
-                  width: (node.style as Record<string, number>).width,
-                  height: (node.style as Record<string, number>).height,
-                },
-              }
-            : {}),
-          ...(node.parentId ? { parentId: node.parentId as CanvasNodeId } : {}),
-          ...(skipAutoLayout ? { skipAutoLayout } : {}),
-        },
-      ],
-    },
-  ];
+  if (intent.inputs.length === 0) {
+    return { commands: [], trace: [] };
+  }
+
+  const created = intent.inputs.map((input) => materializeAddNode(input, ui));
 
   return {
-    commands,
-    trace: [{ action: 'node_created', nodes: [extractNodeRef(node)] }],
+    commands: [
+      {
+        type: 'CREATE_NODES',
+        nodes: created.map((item) => item.node),
+      },
+    ],
+    trace: [
+      {
+        action: 'node_created',
+        nodes: created.map((item) => item.traceNode),
+      },
+    ],
   };
 }
 
@@ -1072,7 +1132,6 @@ function resolveLayoutGroup(
 // ---------------------------------------------------------------------------
 // MOVE_NODE_INTO_FRAME
 // ---------------------------------------------------------------------------
-
 function resolveMoveNodeIntoFrame(
   intent: Extract<CanvasUiIntent, { type: 'MOVE_NODE_INTO_FRAME' }>,
   ui: UiResolverState,
@@ -1103,7 +1162,6 @@ function resolveMoveNodeIntoFrame(
 // ---------------------------------------------------------------------------
 // MOVE_NODE_OUT_OF_FRAME
 // ---------------------------------------------------------------------------
-
 function resolveMoveNodeOutOfFrame(
   intent: Extract<CanvasUiIntent, { type: 'MOVE_NODE_OUT_OF_FRAME' }>,
   ui: UiResolverState,
@@ -1136,7 +1194,6 @@ function resolveMoveNodeOutOfFrame(
 // ---------------------------------------------------------------------------
 // EXPAND_NODE
 // ---------------------------------------------------------------------------
-
 function resolveExpandNode(
   intent: Extract<CanvasUiIntent, { type: 'EXPAND_NODE' }>,
   ui: UiResolverState,

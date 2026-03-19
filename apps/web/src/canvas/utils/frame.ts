@@ -48,7 +48,7 @@
  * 5. Locked Frame Respect: Locked frames cannot gain or lose children
  */
 
-import { getNodeSize as _getNodeSize } from '../../utils/node/size';
+import { getNodeSize } from '../../utils/node/size';
 
 import type { Edge, Node, XYPosition } from '@xyflow/react';
 
@@ -141,17 +141,6 @@ export function normalizeTreeOrder(nodes: NestableNode[]): NestableNode[] {
   for (const id of ids) visit(id);
 
   return result;
-}
-
-/**
- * Return the rendered width/height of a canvas node.
- * Delegates to the shared `getNodeSize` utility in `nodeSize.ts`.
- */
-export function getNodeSize(node: NestableNode): {
-  width: number;
-  height: number;
-} {
-  return _getNodeSize(node);
 }
 
 function getAncestorIds(
