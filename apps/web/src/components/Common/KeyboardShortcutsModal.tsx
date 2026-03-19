@@ -41,6 +41,7 @@ export function KeyboardShortcutsModal({
           onClick={onClose}
           className="-mt-1 -mr-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
           title="Close (Esc)"
+          aria-label="Close keyboard shortcuts"
         >
           <X size={18} />
         </IconButton>
