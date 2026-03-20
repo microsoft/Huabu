@@ -1,8 +1,9 @@
-import { ArrowDown, Ellipsis } from 'lucide-react';
+import { ArrowDown } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { AIMessage } from './AIMessage';
 import { IntentSelectMessage } from './IntentSelectMessage';
+import { ThinkingIndicator } from './ThinkingIndicator';
 import { ToolMessage } from './ToolMessage';
 import { UserMessage } from './UserMessage';
 import { Button } from '../Common/Button';
@@ -120,11 +121,8 @@ export const MessageList = ({
 
         {isLoading && (
           <div className="flex justify-start">
-            <div
-              className="rounded-2xl border-none px-3 py-2"
-              aria-label={'thinking'}
-            >
-              <Ellipsis className="text-icon animate-pulse" />
+            <div className="px-3 py-2">
+              <ThinkingIndicator />
             </div>
           </div>
         )}
