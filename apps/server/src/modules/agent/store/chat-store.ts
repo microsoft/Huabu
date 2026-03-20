@@ -8,8 +8,10 @@
 import {
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   renameSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
@@ -66,6 +68,50 @@ export function loadContext(
   try {
     const raw = readFileSync(filePath, 'utf-8');
     return JSON.parse(raw) as Context;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Find the most recently modified thread file in a canvas directory.
+ * Returns { threadId, context } or null if no threads exist.
+ */
+export function loadLatestContext(
+  canvasId?: string,
+): { threadId: string; context: Context } | null {
+  const dir = getCanvasDir(canvasId);
+
+  let files: string[];
+  try {
+    files = readdirSync(dir).filter(
+      (f) => f.startsWith('thread-') && f.endsWith('.json'),
+    );
+  } catch {
+    return null;
+  }
+
+  if (files.length === 0) return null;
+
+  // Pick the most recently modified thread file
+  let latest: { file: string; mtime: number } | null = null;
+  for (const file of files) {
+    try {
+      const st = statSync(path.join(dir, file));
+      if (!latest || st.mtimeMs > latest.mtime) {
+        latest = { file, mtime: st.mtimeMs };
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  if (!latest) return null;
+
+  const threadId = latest.file.replace(/\.json$/, '');
+  try {
+    const raw = readFileSync(path.join(dir, latest.file), 'utf-8');
+    return { threadId, context: JSON.parse(raw) as Context };
   } catch {
     return null;
   }
