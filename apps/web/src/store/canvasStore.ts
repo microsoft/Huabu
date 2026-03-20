@@ -1174,8 +1174,8 @@ const useCanvasStore = create<RFState>()(
  * Flush all pending changes when the page is about to be unloaded.
  * Uses keepalive:true so requests survive page close/refresh.
  *
- * 1. Cancel all pending ingestion debounce timers.
- * 2. Fire upsertNode (keepalive) for every node that was still queued.
+ * 1. Cancel all pending preprocessing debounce timers.
+ * 2. Fire preprocessNode (keepalive) for every node that was still queued.
  * 3. Fire putCanvas (keepalive) with the latest canvas state.
  */
 function flushOnUnload(): void {

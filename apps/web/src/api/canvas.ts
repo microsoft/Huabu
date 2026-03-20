@@ -4,8 +4,6 @@ import type {
   GetCanvasResponse,
   PutCanvasRequest,
   PutCanvasResponse,
-  UpsertNodeRequest,
-  UpsertNodeResponse,
   DeleteNodeResponse,
   CanvasExportBundle,
   ImportCanvasResponse,
@@ -13,8 +11,6 @@ import type {
   CreateCanvasRequest,
   CreateCanvasResponse,
   PreprocessNodeResponse,
-  ResolveLabelRequest,
-  ResolveLabelResponse,
 } from '@sediment/shared';
 
 /**
@@ -89,31 +85,6 @@ export async function putCanvas(
   }
 
   return (await response.json()) as PutCanvasResponse;
-}
-
-export async function upsertNode(
-  canvasId: string,
-  nodeId: string,
-  request: UpsertNodeRequest,
-  options?: { keepalive?: boolean },
-): Promise<UpsertNodeResponse> {
-  const response = await fetch(
-    `${API_CONFIG.API_URL}/canvas/${canvasId}/nodes/${nodeId}`,
-    {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(request),
-      keepalive: options?.keepalive ?? false,
-    },
-  );
-
-  if (!response.ok) {
-    throw new Error(`Failed to upsert node: ${response.statusText}`);
-  }
-
-  return (await response.json()) as UpsertNodeResponse;
 }
 
 export async function deleteNode(
@@ -208,26 +179,6 @@ export async function deleteCanvasById(
   }
 
   return (await response.json()) as { success: boolean };
-}
-
-/**
- * Ask the server to generate a semantic label via LLM.
- * Used for image nodes (vision) and frame nodes (child label summarization).
- */
-export async function resolveLabel(
-  request: ResolveLabelRequest,
-): Promise<ResolveLabelResponse> {
-  const response = await fetch(`${API_CONFIG.API_URL}/canvas/resolve-label`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(request),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to resolve label: ${response.statusText}`);
-  }
-
-  return (await response.json()) as ResolveLabelResponse;
 }
 
 /**
