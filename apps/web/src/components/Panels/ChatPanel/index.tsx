@@ -203,7 +203,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     // the canvas store hasn't loaded yet, so canvasId is still ''.
     if (!canvasId) return;
     if (useChatStore.getState().isHistoryLoaded) return;
-    if (!canvasId) return;
 
     let cancelled = false;
 
