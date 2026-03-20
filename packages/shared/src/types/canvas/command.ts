@@ -38,8 +38,7 @@ export type CanvasAlignDirection =
 
 export type CanvasAutoLayoutScope =
   | { type: 'canvas' }
-  | { type: 'frame'; frameId: CanvasNodeId }
-  | { type: 'nodes'; nodeIds: CanvasNodeId[] };
+  | { type: 'frame'; frameId: CanvasNodeId };
 
 export interface CanvasAutoLayoutOptions {
   strategy?: LayoutStrategy;
@@ -116,7 +115,7 @@ export type CanvasCommand =
   | {
       type: 'REORDER_NODES';
       nodeIds: CanvasNodeId[];
-      to: 'top' | 'bottom' | { before: CanvasNodeId };
+      to: 'top' | 'bottom' | { before: CanvasNodeId } | { after: CanvasNodeId };
     }
   | { type: 'CONNECT_NODES'; edges: CanvasEdgeCreateInput[] }
   | { type: 'DISCONNECT_EDGES'; edges: CanvasEdgeRef[] }

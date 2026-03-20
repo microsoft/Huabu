@@ -6,19 +6,27 @@ import {
   type MutableRefObject,
 } from 'react';
 
-import { uploadImage, uploadPdf, uploadVideo } from '../api/artifact';
 import useCanvasStore from '../store/canvasStore';
 import { useIntentStore } from '../store/intentStore';
+import { looksLikeUrl } from '../utils/io/media';
 import {
-  detectNodeType,
-  detectNodeTypeFromMime,
-  looksLikeUrl,
-  normalizeUrl,
-  getImageDimensionsFromBlob,
-} from '../utils/io/media';
+  uploadFileToNodeInput,
+  urlToNodeInput,
+  textToNodeInput,
+} from '../utils/io/nodeInputBuilders';
 
 import type { AddNodeInput } from '../canvas/uiIntent';
 import type { ReactFlowInstance } from '@xyflow/react';
+
+/** Returns true when the target is an editable element (input/textarea/contentEditable). */
+function isEditableTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  const tag = el?.tagName?.toLowerCase();
+  if (tag === 'input' || tag === 'textarea') return true;
+  return (
+    el?.isContentEditable || el?.getAttribute?.('role') === 'textbox' || false
+  );
+}
 
 // Marker written to the system clipboard when copying canvas nodes.
 // If the system clipboard still contains this text on paste, we know
@@ -82,14 +90,7 @@ export function useCanvasShortcuts(
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== ' ' || e.repeat) return;
-      const target = e.target as HTMLElement | null;
-      const tag = target?.tagName?.toLowerCase();
-      if (tag === 'input' || tag === 'textarea') return;
-      if (
-        target?.isContentEditable ||
-        target?.getAttribute?.('role') === 'textbox'
-      )
-        return;
+      if (isEditableTarget(e.target)) return;
       setTool((prev) => {
         if (prev === 'pan') return prev;
         e.preventDefault();
@@ -126,61 +127,17 @@ export function useCanvasShortcuts(
     async (files: File[], basePos: { x: number; y: number }) => {
       const inputs = (
         await Promise.all(
-          files.map(async (file, index): Promise<AddNodeInput | null> => {
-            const type = file.type
-              ? detectNodeTypeFromMime(file.type)
-              : detectNodeType(file.name);
+          files.map(async (file, index) => {
             const offset = index * 30;
             const pos = { x: basePos.x + offset, y: basePos.y + offset };
-
-            try {
-              if (type === 'image') {
-                const [url, dims] = await Promise.all([
-                  uploadImage(file),
-                  getImageDimensionsFromBlob(file),
-                ]);
-                return {
-                  nodeType: 'image',
-                  placementPoint: pos,
-                  data: {
-                    src: url,
-                    label: file.name !== 'pasted-image' ? file.name : undefined,
-                    origin: { type: 'user-pasted' },
-                  },
-                  naturalDimensions: dims,
-                };
-              }
-
-              if (type === 'video') {
-                const url = await uploadVideo(file);
-                return {
-                  nodeType: 'video',
-                  placementPoint: pos,
-                  data: {
-                    src: url,
-                    label: file.name,
-                    origin: { type: 'user-pasted' },
-                  },
-                };
-              }
-
-              if (type === 'pdf') {
-                const url = await uploadPdf(file);
-                return {
-                  nodeType: 'pdf',
-                  placementPoint: pos,
-                  data: {
-                    src: url,
-                    label: file.name,
-                    origin: { type: 'user-pasted' },
-                  },
-                };
-              }
-            } catch (error) {
-              console.error(`Failed to paste file ${file.name}:`, error);
+            const input = await uploadFileToNodeInput(file, pos, {
+              type: 'user-pasted',
+            });
+            // Strip auto-label for screenshot pastes (browser gives generic name)
+            if (input?.data && file.name === 'pasted-image') {
+              delete input.data.label;
             }
-
-            return null;
+            return input;
           }),
         )
       ).filter((input): input is AddNodeInput => input !== null);
@@ -205,32 +162,19 @@ export function useCanvasShortcuts(
         const basePos = getFlowPos();
         addNodes(
           lines.map((line, index) => {
-            const finalUrl = normalizeUrl(line.trim());
-            const nodeType = detectNodeType(finalUrl);
             const offset = index * 30;
-
-            return {
-              nodeType,
-              placementPoint: { x: basePos.x + offset, y: basePos.y + offset },
-              data: {
-                src: finalUrl,
-                origin: { type: 'user-pasted' },
-              },
-            };
+            return urlToNodeInput(
+              line.trim(),
+              { x: basePos.x + offset, y: basePos.y + offset },
+              { type: 'user-pasted' },
+            );
           }),
         );
         return;
       }
 
       // Plain text → note node (label auto-derived by CREATE_NODES)
-      addNode({
-        nodeType: 'note',
-        placementPoint: getFlowPos(),
-        data: {
-          content: trimmed,
-          origin: { type: 'user-pasted' },
-        },
-      });
+      addNode(textToNodeInput(trimmed, getFlowPos(), { type: 'user-pasted' }));
     },
     [addNode, addNodes, getFlowPos],
   );
@@ -253,33 +197,22 @@ export function useCanvasShortcuts(
     const onKeyDown = (e: KeyboardEvent) => {
       const key = e.key;
       const mod = e.metaKey || e.ctrlKey;
-
-      const target = e.target as HTMLElement | null;
-      const tag = target?.tagName?.toLowerCase();
-
-      const isNativeInput = tag === 'input' || tag === 'textarea';
-      const isRichEditor =
-        target?.isContentEditable ||
-        target?.getAttribute?.('role') === 'textbox';
+      const editable = isEditableTarget(e.target);
 
       // [ and ] for z-order — no modifier required
-      if ((key === '[' || key === '【') && !isNativeInput && !isRichEditor) {
+      if ((key === '[' || key === '【') && !editable) {
         e.preventDefault();
         sendSelectedToOrder('bottom');
         return;
       }
-      if ((key === ']' || key === '】') && !isNativeInput && !isRichEditor) {
+      if ((key === ']' || key === '】') && !editable) {
         e.preventDefault();
         sendSelectedToOrder('top');
         return;
       }
 
       // Delete / Backspace — delete selected nodes and edges
-      if (
-        (key === 'Delete' || key === 'Backspace') &&
-        !isNativeInput &&
-        !isRichEditor
-      ) {
+      if ((key === 'Delete' || key === 'Backspace') && !editable) {
         e.preventDefault();
         const { nodes: cur, edges: curEdges } = useCanvasStore.getState();
         const selectedNodeIds = cur.filter((n) => n.selected).map((n) => n.id);
@@ -301,7 +234,7 @@ export function useCanvasShortcuts(
 
       // Cmd/Ctrl+Shift+Z → redo (must come before the shift guard)
       if (lowerKey === 'z' && e.shiftKey) {
-        if (isNativeInput || isRichEditor) return;
+        if (editable) return;
         e.preventDefault();
         redo();
         return;
@@ -309,7 +242,7 @@ export function useCanvasShortcuts(
 
       // Cmd/Ctrl+Shift+L → layout all
       if (lowerKey === 'l' && e.shiftKey) {
-        if (isNativeInput || isRichEditor) return;
+        if (editable) return;
         e.preventDefault();
         layoutAll();
         return;
@@ -317,7 +250,7 @@ export function useCanvasShortcuts(
 
       // Cmd/Ctrl+Shift+A → toggle auto layout
       if (lowerKey === 'a' && e.shiftKey) {
-        if (isNativeInput || isRichEditor) return;
+        if (editable) return;
         e.preventDefault();
         toggleAutoLayout();
         return;
@@ -327,15 +260,15 @@ export function useCanvasShortcuts(
       if (e.shiftKey) return;
 
       if (lowerKey === 'z') {
-        if (isNativeInput || isRichEditor) return;
+        if (editable) return;
         e.preventDefault();
         undo();
       } else if (lowerKey === 'g') {
-        if (isNativeInput || isRichEditor) return;
+        if (editable) return;
         e.preventDefault();
         frameSelectedNodes();
       } else if (lowerKey === 'c') {
-        if (isNativeInput || isRichEditor) return;
+        if (editable) return;
         e.preventDefault();
         copySelectedNodes();
         // Write marker to system clipboard so we can detect external copies later
@@ -345,7 +278,7 @@ export function useCanvasShortcuts(
             // Clipboard API unavailable — internal clipboard still works
           });
       } else if (lowerKey === 'v') {
-        if (isNativeInput || isRichEditor) return;
+        if (editable) return;
 
         const { clipboard } = useCanvasStore.getState();
 
@@ -414,7 +347,7 @@ export function useCanvasShortcuts(
           pasteText(sysText);
         }, 150);
       } else if (lowerKey === 'i') {
-        if (isNativeInput || isRichEditor) return;
+        if (editable) return;
         e.preventDefault();
         useIntentStore
           .getState()
@@ -453,14 +386,7 @@ export function useCanvasShortcuts(
     if (disabled) return;
 
     const onPaste = (e: ClipboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      const tag = target?.tagName?.toLowerCase();
-      if (tag === 'input' || tag === 'textarea') return;
-      if (
-        target?.isContentEditable ||
-        target?.getAttribute?.('role') === 'textbox'
-      )
-        return;
+      if (isEditableTarget(e.target)) return;
 
       const dt = e.clipboardData;
       if (!dt) return;

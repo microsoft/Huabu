@@ -33,7 +33,18 @@ export { toScreenshotDataUrl, captureCanvasScreenshot } from './screenshot';
 
 // ── Node helpers ───────────────────────────────────────────────────────
 
-import type { CanvasNodeType, NodeRef, RecentAction } from '@sediment/shared';
+import {
+  findFrameAtPoint,
+  getAbsolutePosition,
+  type NestableNode,
+} from './frame';
+
+import type {
+  CanvasNodeType,
+  NodeRef,
+  NodeSize,
+  RecentAction,
+} from '@sediment/shared';
 import type { Node } from '@xyflow/react';
 
 /** Extract a lightweight NodeRef from a ReactFlow node. */
@@ -89,4 +100,38 @@ export function selectOnly(
 ): Node[] {
   const ids = new Set(selectedIds);
   return nodes.map((n) => ({ ...n, selected: ids.has(n.id) }));
+}
+
+/** Extract a CanvasSize from a ReactFlow node's inline style. */
+export function canvasSizeFromStyle(
+  style: Node['style'] | undefined,
+): NodeSize | undefined {
+  const styleRecord = style as Record<string, unknown> | undefined;
+  const width = styleRecord?.width;
+  if (typeof width !== 'number') return undefined;
+
+  const height = styleRecord?.height;
+  return typeof height === 'number' ? { width, height } : { width };
+}
+
+/** Return the IDs of all selected nodes. */
+export function getSelectedNodeIds(
+  nodes: { id: string; selected?: boolean }[],
+): string[] {
+  return nodes.filter((n) => n.selected).map((n) => n.id);
+}
+
+/**
+ * Hit-test a point against all frame nodes. If a frame is found,
+ * returns its id and absolute position (for coordinate adjustment).
+ */
+export function resolveFrameAtPoint(
+  nodes: NestableNode[],
+  point: { x: number; y: number },
+): { parentId: string; absolutePosition: { x: number; y: number } } | null {
+  const frameId = findFrameAtPoint(nodes, point);
+  if (!frameId) return null;
+  const frameAbs = getAbsolutePosition(nodes, frameId);
+  if (!frameAbs) return null;
+  return { parentId: frameId, absolutePosition: frameAbs };
 }

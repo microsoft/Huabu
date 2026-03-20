@@ -199,7 +199,11 @@ type RFState = {
 
   selectNodes: (ids: string[], multiSelect?: boolean) => void;
 
-  reorderNodes: (activeId: string, overId: string) => void;
+  reorderNodes: (
+    activeId: string,
+    overId: string,
+    position?: 'before' | 'after',
+  ) => void;
   sendSelectedToOrder: (direction: 'top' | 'bottom') => void;
 
   frameSelectedNodes: () => void;
@@ -234,8 +238,15 @@ type RFState = {
   /** Re-layout children of a specific frame. */
   layoutGroup: (frameId: string) => void;
 
-  moveNodeIntoFrame: (nodeId: string, frameId: string) => void;
-  moveNodeOutOfFrame: (nodeId: string) => void;
+  moveNodeIntoFrame: (
+    nodeId: string,
+    frameId: string,
+    reorderTarget?: { nodeId: string; position: 'before' | 'after' },
+  ) => void;
+  moveNodeOutOfFrame: (
+    nodeId: string,
+    reorderTarget?: { nodeId: string; position: 'before' | 'after' },
+  ) => void;
 
   /** The node type awaiting placement on canvas via click. */
   pendingNodeType: 'note' | 'text' | 'frame' | null;
@@ -999,8 +1010,17 @@ const useCanvasStore = create<RFState>()(
       });
     },
 
-    reorderNodes: (activeId: string, overId: string) => {
-      get().dispatchUiIntent({ type: 'REORDER_NODE', activeId, overId });
+    reorderNodes: (
+      activeId: string,
+      overId: string,
+      position?: 'before' | 'after',
+    ) => {
+      get().dispatchUiIntent({
+        type: 'REORDER_NODE',
+        activeId,
+        overId,
+        position,
+      });
     },
 
     sendSelectedToOrder: (direction) => {
@@ -1062,12 +1082,21 @@ const useCanvasStore = create<RFState>()(
       get().dispatchUiIntent({ type: 'LAYOUT_GROUP', frameId });
     },
 
-    moveNodeIntoFrame: (nodeId, frameId) => {
-      get().dispatchUiIntent({ type: 'MOVE_NODE_INTO_FRAME', nodeId, frameId });
+    moveNodeIntoFrame: (nodeId, frameId, reorderTarget) => {
+      get().dispatchUiIntent({
+        type: 'MOVE_NODE_INTO_FRAME',
+        nodeId,
+        frameId,
+        reorderTarget,
+      });
     },
 
-    moveNodeOutOfFrame: (nodeId) => {
-      get().dispatchUiIntent({ type: 'MOVE_NODE_OUT_OF_FRAME', nodeId });
+    moveNodeOutOfFrame: (nodeId, reorderTarget) => {
+      get().dispatchUiIntent({
+        type: 'MOVE_NODE_OUT_OF_FRAME',
+        nodeId,
+        reorderTarget,
+      });
     },
 
     clipboard: [],

@@ -77,8 +77,8 @@ const createNodes: CommandDefinition<Cmd> = {
       if (needsLabelResolve(nodeType)) labelResolveNodeIds.push(nodeId);
 
       // ---------------------------------------------------------------
-      // 2. TODO:size Build the final ReactFlow node from the already-resolved
-      //    command input. Position semantics are finalized by the caller.
+      // 2. Build the final ReactFlow node from the resolved command
+      //    input. Position defaults to (0,0) and is adjusted in step 5.
       // ---------------------------------------------------------------
       const size = input.size ?? getNodeDefaultSize(nodeType);
 
@@ -97,12 +97,13 @@ const createNodes: CommandDefinition<Cmd> = {
           : {}),
       };
 
+      // ---------------------------------------------------------------
+      // 3. Assign parent frame and queue its label for resolution.
+      // ---------------------------------------------------------------
       if (input.parentId) {
         node.parentId = input.parentId;
+        labelResolveNodeIds.push(input.parentId);
       }
-
-      // Also resolve parent frame labels when a node is nested.
-      if (input.parentId) labelResolveNodeIds.push(input.parentId);
 
       newNodes.push(node);
     }

@@ -19,7 +19,6 @@ import '@xyflow/react/dist/style.css';
 import { NodeToolbar } from './CanvasToolbar';
 import { IntentPopover } from './IntentPopover';
 import { MultiSelectToolbar } from './MultiSelectToolbar';
-import { uploadImage, uploadPdf, uploadVideo } from '../../api/artifact';
 import { getSource } from '../../api/knowledge';
 import { GRID_SIZE } from '../../config/canvas';
 import { useCanvasShortcuts } from '../../hooks/useCanvasShortcuts';
@@ -28,13 +27,12 @@ import {
   canReadSedimentPayload,
   getSedimentPayload,
 } from '../../utils/io/dragDrop';
+import { looksLikeUrl } from '../../utils/io/media';
 import {
-  detectNodeType,
-  detectNodeTypeFromMime,
-  looksLikeUrl,
-  normalizeUrl,
-  getImageDimensionsFromBlob,
-} from '../../utils/io/media';
+  uploadFileToNodeInput,
+  urlToNodeInput,
+  textToNodeInput,
+} from '../../utils/io/nodeInputBuilders';
 import { FrameNode } from '../Nodes/FrameNode';
 import { ImageNode } from '../Nodes/ImageNode';
 import { NoteNode } from '../Nodes/NoteNode';
@@ -124,6 +122,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   const onNodeDragStop = useCanvasStore((state) => state.onNodeDragStop);
   const frameFitPreviews = useCanvasStore((state) => state.frameFitPreviews);
   const addNode = useCanvasStore((state) => state.addNode);
+  const addNodes = useCanvasStore((state) => state.addNodes);
   const patchNodeSilent = useCanvasStore((state) => state.patchNodeSilent);
   const setRfInstance = useCanvasStore((state) => state.setRfInstance);
   const openExpanded = useCanvasStore((state) => state.openExpanded);
@@ -139,13 +138,6 @@ export const Canvas: React.FC<CanvasProps> = ({
   const rfInstanceRef = useRef<ReactFlowInstance | null>(null);
   const lastDropRef = useRef<{ key: string; at: number } | null>(null);
   const mousePositionRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
-
-  const addPositionedNode = useCallback(
-    (input: AddNodeInput) => {
-      addNode(input);
-    },
-    [addNode],
-  );
 
   // Keyboard shortcuts + paste handler (extracted to hook).
   // Also manages tool state (select/pan) and Space-key temporary pan.
@@ -170,19 +162,23 @@ export const Canvas: React.FC<CanvasProps> = ({
   } | null>(null);
   const isDraggingFrame = frameDragStart !== null;
 
+  const resetFrameDrag = useCallback(() => {
+    setFrameDragStart(null);
+    setFrameDragEnd(null);
+    setPendingNodeType(null);
+  }, [setPendingNodeType]);
+
   // Cancel pending node placement with Escape key
   useEffect(() => {
     if (!pendingNodeType) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setPendingNodeType(null);
-        setFrameDragStart(null);
-        setFrameDragEnd(null);
+        resetFrameDrag();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [pendingNodeType, setPendingNodeType]);
+  }, [pendingNodeType, resetFrameDrag]);
 
   // Handle click-to-place for note and text
   const handlePaneClick = useCallback(
@@ -196,7 +192,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         y: event.clientY,
       });
 
-      addPositionedNode({
+      addNode({
         nodeType: pendingNodeType,
         placementPoint: position,
         data: {
@@ -207,7 +203,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       });
       setPendingNodeType(null);
     },
-    [pendingNodeType, addPositionedNode, setPendingNodeType],
+    [pendingNodeType, addNode, setPendingNodeType],
   );
 
   // --- Frame drag-to-create handlers ---
@@ -242,8 +238,7 @@ export const Canvas: React.FC<CanvasProps> = ({
 
       const instance = rfInstanceRef.current;
       if (!instance) {
-        setFrameDragStart(null);
-        setFrameDragEnd(null);
+        resetFrameDrag();
         return;
       }
 
@@ -267,16 +262,14 @@ export const Canvas: React.FC<CanvasProps> = ({
         frameNodesInRect({ x, y, width: w, height: h });
       }
 
-      setFrameDragStart(null);
-      setFrameDragEnd(null);
-      setPendingNodeType(null);
+      resetFrameDrag();
     },
     [
       isDraggingFrame,
       frameDragStart,
       frameDragEnd,
       frameNodesInRect,
-      setPendingNodeType,
+      resetFrameDrag,
     ],
   );
 
@@ -455,7 +448,7 @@ export const Canvas: React.FC<CanvasProps> = ({
             const { src, label } = payload.data;
 
             const doAdd = (natW: number, natH: number) => {
-              addPositionedNode({
+              addNode({
                 nodeType: 'image',
                 placementPoint: dropPos,
                 data: { src, label, origin: payload.origin },
@@ -481,7 +474,7 @@ export const Canvas: React.FC<CanvasProps> = ({
             // For note/text sources, async-load content
             if ((nodeType === 'note' || nodeType === 'text') && sourceId) {
               const tempNodeId = createId('node');
-              addPositionedNode({
+              addNode({
                 id: tempNodeId,
                 nodeType: nodeType as 'note' | 'text',
                 placementPoint: dropPos,
@@ -529,57 +522,21 @@ export const Canvas: React.FC<CanvasProps> = ({
         const nativeFiles = Array.from(e.dataTransfer.files);
         if (nativeFiles.length > 0) {
           void (async () => {
-            for (let i = 0; i < nativeFiles.length; i++) {
-              const file = nativeFiles[i];
-              const fileType = file.type
-                ? detectNodeTypeFromMime(file.type)
-                : detectNodeType(file.name);
-              const offset = i * 30;
-              const pos = { x: dropPos.x + offset, y: dropPos.y + offset };
-
-              try {
-                if (fileType === 'image') {
-                  const [url, dims] = await Promise.all([
-                    uploadImage(file),
-                    getImageDimensionsFromBlob(file),
-                  ]);
-                  addPositionedNode({
-                    nodeType: 'image',
-                    placementPoint: pos,
-                    data: {
-                      src: url,
-                      label: file.name,
-                      origin: { type: 'user-uploaded' },
-                    },
-                    naturalDimensions: dims,
+            const inputs = (
+              await Promise.all(
+                nativeFiles.map(async (file, i) => {
+                  const offset = i * 30;
+                  const pos = {
+                    x: dropPos.x + offset,
+                    y: dropPos.y + offset,
+                  };
+                  return uploadFileToNodeInput(file, pos, {
+                    type: 'user-uploaded',
                   });
-                } else if (fileType === 'video') {
-                  const url = await uploadVideo(file);
-                  addPositionedNode({
-                    nodeType: 'video',
-                    placementPoint: pos,
-                    data: {
-                      src: url,
-                      label: file.name,
-                      origin: { type: 'user-uploaded' },
-                    },
-                  });
-                } else if (fileType === 'pdf') {
-                  const url = await uploadPdf(file);
-                  addPositionedNode({
-                    nodeType: 'pdf',
-                    placementPoint: pos,
-                    data: {
-                      src: url,
-                      label: file.name,
-                      origin: { type: 'user-uploaded' },
-                    },
-                  });
-                }
-              } catch (error) {
-                console.error(`Failed to drop file ${file.name}:`, error);
-              }
-            }
+                }),
+              )
+            ).filter((input): input is AddNodeInput => input !== null);
+            if (inputs.length > 0) addNodes(inputs);
           })();
           return;
         }
@@ -590,29 +547,17 @@ export const Canvas: React.FC<CanvasProps> = ({
         const droppedUrl = (uriList || plainText || '').trim();
 
         if (droppedUrl && looksLikeUrl(droppedUrl)) {
-          const finalUrl = normalizeUrl(droppedUrl);
-          const nodeType = detectNodeType(finalUrl);
-          addPositionedNode({
-            nodeType,
-            placementPoint: dropPos,
-            data: {
-              src: finalUrl,
-              origin: { type: 'user-uploaded' },
-            },
-          });
+          addNode(
+            urlToNodeInput(droppedUrl, dropPos, { type: 'user-uploaded' }),
+          );
           return;
         }
 
         // ============ 4. Plain text drop ============
         if (plainText) {
-          addPositionedNode({
-            nodeType: 'note',
-            placementPoint: dropPos,
-            data: {
-              content: plainText,
-              origin: { type: 'user-uploaded' },
-            },
-          });
+          addNode(
+            textToNodeInput(plainText, dropPos, { type: 'user-uploaded' }),
+          );
         }
       }}
     >

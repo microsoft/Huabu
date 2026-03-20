@@ -13,19 +13,16 @@ import {
   type Point,
 } from '@sediment/shared';
 
-import {
-  findFrameAtPoint,
-  getAbsolutePosition,
-  type NestableNode,
-} from './utils/frame';
-import { getNodeDefaultSize } from '../utils/node/nodeDefaultSize';
+import { getNodeDefaultSize } from '../../utils/node/nodeDefaultSize';
+import { resolveFrameAtPoint } from '../utils';
+import { type NestableNode } from '../utils/frame';
 
 import type {
   AddNodeInput,
   CanvasUiIntent,
   UiIntentResolution,
   UiResolverState,
-} from './uiIntent';
+} from '../uiIntent';
 
 // ---------------------------------------------------------------------------
 // Sizing & placement helpers
@@ -68,7 +65,7 @@ function nodePositionFromPlacementPoint(
 }
 
 // ---------------------------------------------------------------------------
-// Frame placement helpers
+// Node materialization
 // ---------------------------------------------------------------------------
 function materializeAddNode(
   input: AddNodeInput,
@@ -83,9 +80,6 @@ function materializeAddNode(
 } {
   const nodeId = input.id ?? createId('node');
 
-  /*
-   * Handle size and position resolution
-   */
   const size =
     input.size ??
     (input.naturalDimensions &&
@@ -108,19 +102,16 @@ function materializeAddNode(
     !parentId &&
     input.nodeType !== 'frame'
   ) {
-    const frameId = findFrameAtPoint(
+    const hit = resolveFrameAtPoint(
       ui.nodes as NestableNode[],
       input.placementPoint,
     );
-    if (frameId) {
-      const frameAbs = getAbsolutePosition(ui.nodes as NestableNode[], frameId);
-      if (frameAbs) {
-        parentId = frameId as CanvasNodeId;
-        position = {
-          x: position.x - frameAbs.x,
-          y: position.y - frameAbs.y,
-        };
-      }
+    if (hit) {
+      parentId = hit.parentId as CanvasNodeId;
+      position = {
+        x: position.x - hit.absolutePosition.x,
+        y: position.y - hit.absolutePosition.y,
+      };
     }
   }
 
