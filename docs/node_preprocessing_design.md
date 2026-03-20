@@ -1,8 +1,14 @@
 # Node Preprocessing Design
 
+> **Status**: This document is both a design spec and a living record.
+> Sections under "Current Model" and "Current Implementation Details" describe
+> the state **before** the preprocessing refactoring. They are kept for
+> historical context. See the "Implementation Progress" section at the end
+> for what has been completed and what remains.
+
 ## Background
 
-Sediment currently has two different classes of server-side processing for canvas nodes:
+Sediment originally had two different classes of server-side processing for canvas nodes:
 
 - Knowledge ingestion for `note`, `text`, `web`, and `pdf`
 - LLM-based semantic preprocessing for `image` and `frame`
@@ -26,7 +32,13 @@ The proposed preprocessing architecture should make the following explicit:
 - How node insertion and node updates flow through the same pipeline with different triggers
 - How to avoid unnecessary repeated work and reduce LLM and external API cost
 
-## Current Model
+## Current Model (Pre-Refactoring)
+
+> The following describes the architecture **before** the preprocessing
+> refactoring. After Phase 1 and Phase 2 of the refactoring plan, the
+> server pipeline has been replaced by the unified 6-stage `PreprocessDispatcher`.
+> Frontend triggers have been partially unified. See "Implementation Progress"
+> for details.
 
 ### Two Different Processing Pipelines
 
@@ -107,7 +119,12 @@ The current codebase mixes these concepts in a few places. The future preprocess
 - `SourceKind`: whether and how the node persists into the knowledge layer
 - `Capability`: what processing operations this node supports
 
-## Current Implementation Details
+## Current Implementation Details (Pre-Refactoring)
+
+> The file paths below reflect the state before the refactoring. After the
+> refactoring (and a concurrent canvas-command restructure on `main`), the
+> frontend trigger files, store handlers, and server route internals have
+> changed. See "Implementation Progress" for the new file layout.
 
 ### Frontend trigger model
 
@@ -994,7 +1011,7 @@ packages/shared/src/types/
 
 ## Refactoring Plan
 
-### Phase 1 — Introduce preprocessing types and server pipeline (no route changes)
+### Phase 1 — Introduce preprocessing types and server pipeline (no route changes) ✅ COMPLETED
 
 Goal: build the new pipeline alongside existing code; both paths work.
 
@@ -1027,38 +1044,55 @@ Steps:
 7. Create `apps/server/src/modules/preprocessing/provider-manager.ts`
    - Wrap `llmComplete` with logging; start simple, add caching later
 
-### Phase 2 — Wire new pipeline into existing routes (behind feature flag)
+### Phase 2 — Wire new pipeline into existing routes (behind feature flag) ✅ COMPLETED (without feature flag)
 
 Goal: existing HTTP routes delegate to the new pipeline internally.
 
+The pipeline was wired directly into the existing routes without a feature flag,
+since the refactoring replaced `IngestService` entirely rather than running in parallel.
+
 Steps:
 
-1. In the `PUT /:canvasId/nodes/:nodeId` handler, add a branch:
+1. In the `PUT /:canvasId/nodes/:nodeId` handler, ~~add a branch~~:
    construct `PreprocessNodeRequest` and call dispatcher, map result to `UpsertNodeResponse`
-2. In the `POST /resolve-label` handler, add a similar branch
-3. Feature flag: `SEDIMENT_USE_PREPROCESSING_PIPELINE=1`
+2. In the `POST /resolve-label` handler, add a similar ~~branch~~ delegation
+3. ~~Feature flag: `SEDIMENT_USE_PREPROCESSING_PIPELINE=1`~~ — not needed; direct replacement
 
-### Phase 3 — Unify frontend triggers
+### Phase 3 — Unify frontend triggers ⚠️ PARTIALLY COMPLETED
 
 Goal: replace the two separate trigger systems with one.
 
-Steps:
+Completed steps:
 
-1. Create `apps/web/src/utils/io/preprocess.ts` — unified `preprocessNodeIfNeeded`
-2. Replace `triggerIngestion` + `triggerLabelResolve` with single `triggerPreprocessing`
-3. Introduce request IDs and stale-result protection
+1. ✅ Created `apps/web/src/utils/io/preprocess.ts` — unified `preprocessNodeIfNeeded`
+2. ⚠️ `triggerIngestion` and `triggerLabelResolve` still exist as two separate debounced
+   entry points in `canvasStore.ts` and `postEffects.ts`. Both now call
+   `preprocessNodeIfNeeded` internally, but the two-callback split remains in the
+   canvas command system's `CanvasEffectCallbacks` interface and `PendingEffects`.
+3. ❌ Request IDs and stale-result protection are not yet implemented.
 
-### Phase 4 — New unified route and cleanup
+Note: a concurrent canvas-command refactor on `main` replaced the old
+`canvasHandlers.ts` with a command-pattern architecture (`apps/web/src/canvas/commands/`).
+The preprocessing trigger integration now lives in:
+
+- `mergeNodeData.ts` — uses `shouldPreprocessOnUpdate()` for ingestion triggers
+- `createNodes.ts` — uses `needsLabelResolve()` for label resolution triggers
+- `postEffects.ts` — dispatches `triggerIngestion` / `triggerLabelResolve` callbacks
+- `runtime.ts` — defines `CanvasEffectCallbacks` with the two-callback interface
+
+### Phase 4 — New unified route and cleanup 🔲 NOT STARTED
 
 Goal: single preprocessing HTTP endpoint, remove old code paths.
 
 Steps:
 
 1. Add `POST /api/canvas/:canvasId/nodes/:nodeId/preprocess` route
-2. Update agent tool `ingest_content` to use dispatcher
+2. ~~Update agent tool `ingest_content` to use dispatcher~~ — ✅ already done in Phase 2
 3. Remove deprecated routes and frontend helpers
+4. Merge `triggerIngestion` + `triggerLabelResolve` into a single `triggerPreprocessing`
+   callback and update `CanvasEffectCallbacks`, `PendingEffects`, and all command handlers
 
-### Phase 5 — Provider manager hardening
+### Phase 5 — Provider manager hardening 🔲 NOT STARTED
 
 Goal: centralize external-provider usage and enable cost optimization.
 
@@ -1093,3 +1127,60 @@ Nodes that fail extraction (e.g. malformed PDFs or missing Web URLs) do not simp
 - They throw a structured `EXTRACT_FAILED` diagnostic.
 - If a web source lacks a URI or a PDF contains empty content, the `Normalize` stage assigns a stable fallback `sourceId` using the `nodeId` or `artifactUri`.
 - This prevents identical empty contents across multiple failed nodes from colliding and overwriting each other in the storage, and allows the `Persist` stage to save a stable placeholder.
+
+## Implementation Progress
+
+This section records the actual state of the codebase relative to the plan above.
+
+### What is implemented
+
+| Area                           | Status | Notes                                                                                       |
+| ------------------------------ | ------ | ------------------------------------------------------------------------------------------- |
+| Shared preprocessing types     | ✅     | `packages/shared/src/types/preprocessing.ts`                                                |
+| Server preprocessing module    | ✅     | `apps/server/src/modules/preprocessing/` with all 6 stages                                  |
+| Capability profiles            | ✅     | 7 node types registered in `profiles.ts`                                                    |
+| PreprocessDispatcher           | ✅     | Dirty-field analysis, execution planning, pipeline orchestration                            |
+| ProviderManager                | ✅     | Wraps `llmComplete` for image label and frame label generation                              |
+| PUT route integration          | ✅     | Uses `PreprocessDispatcher` instead of `IngestService`                                      |
+| POST resolve-label integration | ✅     | Uses `PreprocessDispatcher` instead of inline `llmComplete`                                 |
+| Agent tool `ingest_content`    | ✅     | Uses `PreprocessDispatcher`; supports all node types including PDF                          |
+| Frontend `preprocess.ts`       | ✅     | Unified `preprocessNodeIfNeeded` replaces old `ingestNodeIfNeeded` + `resolveLabelIfNeeded` |
+| Old `IngestService` removed    | ✅     | `apps/server/src/modules/knowledge/ingest.service.ts` deleted                               |
+| Old frontend triggers removed  | ✅     | `ingest.ts` and `resolveLabel.ts` deleted                                                   |
+
+### What is partially done
+
+| Area                         | Status | Gap                                                                                                                                                                                                                |
+| ---------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Frontend trigger unification | ⚠️     | `triggerIngestion` and `triggerLabelResolve` remain as two separate debounced callbacks. Both call `preprocessNodeIfNeeded`, but the interface split is preserved in `CanvasEffectCallbacks` and `PendingEffects`. |
+| HTTP route consolidation     | ⚠️     | Two routes still exist: `PUT /nodes/:id` (ingest path) and `POST /resolve-label` (label path). They share the same dispatcher but use different request construction and response mapping.                         |
+
+### What is not yet implemented
+
+| Area                                     | Notes                                                                                           |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Unified preprocessing HTTP route         | `POST /api/canvas/:canvasId/nodes/:nodeId/preprocess` is defined in the plan but not created    |
+| Request IDs / stale-result protection    | Frontend does not attach revision tokens to preprocessing requests                              |
+| Fingerprint-based Enrich cache           | ProviderManager does not cache LLM results by input fingerprint                                 |
+| Budget limits                            | No per-canvas or per-session token budget enforcement                                           |
+| Batch enrichment                         | Dispatcher processes nodes one at a time; no batch LLM call optimization                        |
+| `generate_summary` / `generate_keywords` | Enrich capabilities defined in profiles for web/pdf but not yet implemented in the Enrich stage |
+
+### Concurrent changes on `main`
+
+After the preprocessing refactoring was developed, a **canvas command refactor** landed
+on `main` (PR #96). This refactoring:
+
+- Deleted `apps/web/src/store/canvasHandlers.ts`
+- Introduced `apps/web/src/canvas/commands/` with one file per command
+- Introduced `apps/web/src/canvas/executor.ts` (batch command executor)
+- Introduced `apps/web/src/canvas/postEffects.ts` (post-commit side effects)
+- Introduced `apps/web/src/canvas/runtime.ts` (decoupled interfaces)
+- Introduced `apps/web/src/canvas/uiIntent.ts` (user-intent resolution)
+
+The preprocessing branch was rebased onto this new `main`. The relevant adaptations:
+
+- `mergeNodeData.ts` now imports `shouldPreprocessOnUpdate` from `io/preprocess`
+- `createNodes.ts` now imports `needsLabelResolve` from `io/preprocess`
+- `postEffects.ts` dispatches `triggerIngestion` / `triggerLabelResolve` which call `preprocessNodeIfNeeded`
+- `canvasHandlers.ts` no longer exists; its preprocessing-related logic was absorbed into the command system
