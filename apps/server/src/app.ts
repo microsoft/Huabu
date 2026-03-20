@@ -8,6 +8,7 @@ import { fastify } from 'fastify';
 
 import agentRoutes from './modules/agent/agent.route.js';
 import intentRoutes from './modules/agent/intent.route.js';
+import llmRoutes from './modules/agent/llm.route.js';
 import artifactRoute from './modules/artifact/artifact.route.js';
 import canvasRoutes from './modules/canvas/canvas.route.js';
 import knowledgeRoute from './modules/knowledge/knowledge.route.js';
@@ -54,7 +55,8 @@ app.addHook('preHandler', async (request, reply) => {
   if (
     !isWorkspaceConfigured() &&
     url.startsWith('/api') &&
-    !url.startsWith('/api/workspace')
+    !url.startsWith('/api/workspace') &&
+    !url.startsWith('/api/llm')
   ) {
     return reply.status(503).send({
       message:
@@ -70,4 +72,5 @@ app.register(artifactRoute, { prefix: '/api' });
 app.register(knowledgeRoute, { prefix: '/api' });
 
 app.register(intentRoutes, { prefix: '/api/intent' });
+app.register(llmRoutes, { prefix: '/api' });
 app.register(workspaceRoutes, { prefix: '/api' });
