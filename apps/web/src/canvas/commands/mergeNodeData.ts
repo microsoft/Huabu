@@ -1,5 +1,5 @@
 import { noop, type CommandDefinition } from './types';
-import { shouldIngestOnUpdate } from '../../utils/io/ingest';
+import { shouldPreprocessOnUpdate } from '../../utils/io/preprocess';
 
 import type { CanvasCommand } from '@sediment/shared';
 import type { Node } from '@xyflow/react';
@@ -31,7 +31,7 @@ const mergeNodeData: CommandDefinition<Cmd> = {
         ...n,
         data: { ...(n.data ?? {}), ...patch },
       };
-      if (shouldIngestOnUpdate(n, updated)) {
+      if (shouldPreprocessOnUpdate(n, updated)) {
         ingestNodes.push(updated);
       }
       if (

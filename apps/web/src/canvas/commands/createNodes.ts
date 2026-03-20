@@ -1,7 +1,7 @@
 import { createId, type CanvasCommand } from '@sediment/shared';
 
 import { noop, type CommandDefinition } from './types';
-import { needsLabelResolve } from '../../utils/io/resolveLabel';
+import { needsLabelResolve } from '../../utils/io/preprocess';
 import { placeNode } from '../../utils/layout';
 import { deduplicateLabel, generateNextLabel } from '../../utils/node/labels';
 import { getNodeDefaultSize } from '../../utils/node/nodeDefaultSize';
