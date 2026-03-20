@@ -27,23 +27,25 @@ resolveLabel.ts ──→ resolveLabel() ──→ POST /resolve-label ──→
 ```
 前端                                    服务端
 ─────────────────────────────────────────────────────────────
-preprocess.ts ──→ upsertNode()    ──→ PUT /nodes/:id    ──→ PreprocessDispatcher
-              ──→ resolveLabel()  ──→ POST /resolve-label ──→ PreprocessDispatcher
-                                                              │
-                                                              ▼
-                                                         6 阶段流水线
-                                                         ┌─ Input Resolve（输入解析）
-                                                         ├─ Extract（内容提取）
-                                                         ├─ Normalize（标准化）
-                                                         ├─ Enrich（LLM 增强，所有 LLM 调用集中于此）
-                                                         ├─ Persist（持久化）
-                                                         └─ Project（结果投影）
+preprocess.ts ──→ preprocessNode()
+              ──→ POST /:canvasId/nodes/:nodeId/preprocess ──→ PreprocessDispatcher
+                                                                │
+                                                                ▼
+                                                           6 阶段流水线
+                                                           ┌─ Input Resolve（输入解析）
+                                                           ├─ Extract（内容提取）
+                                                           ├─ Normalize（标准化）
+                                                           ├─ Enrich（LLM 增强，所有 LLM 调用集中于此）
+                                                           ├─ Persist（持久化）
+                                                           └─ Project（结果投影）
 ```
 
-- 前端统一为一个触发函数 `preprocessNodeIfNeeded`
-- 服务端两个路由均委托同一个 `PreprocessDispatcher`
+- 前端统一为一个触发函数 `triggerPreprocessing` → `preprocessNodeIfNeeded`
+- 所有节点类型共用一个统一的 HTTP 端点 `POST /:canvasId/nodes/:nodeId/preprocess`
+- 服务端由 `PreprocessDispatcher` 根据节点 profile 决定执行哪些阶段
 - 所有 LLM 调用集中在 Enrich 阶段，由 `ProviderManager` 统一管理
 - Agent 工具现支持所有节点类型（包括 PDF）
+- 旧的 `PUT /nodes/:id` 和 `POST /resolve-label` 路由保留为向后兼容
 
 ---
 
@@ -112,34 +114,36 @@ preprocess.ts ──→ upsertNode()    ──→ PUT /nodes/:id    ──→ Pr
 
 #### 前端统一触发器
 
-| 文件                                  | 内容                                                                                                                               |
-| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/web/src/utils/io/preprocess.ts` | 统一的 `preprocessNodeIfNeeded()`、`shouldPreprocessOnUpdate()`、`needsPreprocessing()`、`needsIngestion()`、`needsLabelResolve()` |
+| 文件                                  | 内容                                                                                                                              |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/web/src/utils/io/preprocess.ts` | 统一的 `preprocessNodeIfNeeded()`、`shouldPreprocessOnUpdate()`、`needsPreprocessing()`；通过 `preprocessNode()` API 调用统一端点 |
 
 ### 修改的文件
 
 #### 服务端
 
-| 文件                                              | 变更                                                                                                                                                                                                                                                                                                                                                                                    |
-| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/server/src/modules/canvas/canvas.route.ts`  | **PUT /:canvasId/nodes/:nodeId** — 用 `PreprocessDispatcher.preprocess()` 替换了 `IngestService` 调用。**POST /resolve-label** — 用 `PreprocessDispatcher.preprocess()` 替换了内联 `llmComplete` 调用。移除了 `llmComplete`、`IMAGE_LABEL_PROMPT`、`buildFrameLabelPrompt`、`resolveArtifactImageUrl`、`getIngestService` 的导入。新增了 `getPreprocessDispatcher` 和预处理类型的导入。 |
-| `apps/server/src/modules/agent/tools/executor.ts` | `executeIngestContent()` — 用 `PreprocessDispatcher` 替换了 `IngestService`。现在支持所有节点类型（包括之前不支持的 PDF）。移除了 `getIngestService` 导入，新增了 `getPreprocessDispatcher`、`CanvasNodeKind` 导入。                                                                                                                                                                    |
-| `apps/server/src/modules/workspace.route.ts`      | 用 `resetPreprocessDispatcher()` 替换了 `resetIngestService()`。导入来源从 `knowledge/index.js` 改为 `preprocessing/index.js`。                                                                                                                                                                                                                                                         |
-| `apps/server/src/modules/knowledge/index.ts`      | 移除了导出：`IngestService`、`getIngestService`、`resetIngestService`、`IngestTextSourceInput`、`IngestWebSourceInput`、`IngestPdfSourceInput`、`IngestSourceResult`。                                                                                                                                                                                                                  |
+| 文件                                              | 变更                                                                                                                                                                                                                 |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/server/src/modules/canvas/canvas.route.ts`  | 新增 `POST /:canvasId/nodes/:nodeId/preprocess` 统一端点。旧的 **PUT** 和 **POST /resolve-label** 路由保留为向后兼容，均委托 `PreprocessDispatcher`。新增 `PreprocessNodeResponse` 类型导入。                        |
+| `apps/server/src/modules/agent/tools/executor.ts` | `executeIngestContent()` — 用 `PreprocessDispatcher` 替换了 `IngestService`。现在支持所有节点类型（包括之前不支持的 PDF）。移除了 `getIngestService` 导入，新增了 `getPreprocessDispatcher`、`CanvasNodeKind` 导入。 |
+| `apps/server/src/modules/workspace.route.ts`      | 用 `resetPreprocessDispatcher()` 替换了 `resetIngestService()`。导入来源从 `knowledge/index.js` 改为 `preprocessing/index.js`。                                                                                      |
+| `apps/server/src/modules/knowledge/index.ts`      | 移除了导出：`IngestService`、`getIngestService`、`resetIngestService`、`IngestTextSourceInput`、`IngestWebSourceInput`、`IngestPdfSourceInput`、`IngestSourceResult`。                                               |
 
 #### 前端
 
-| 文件                                            | 变更                                                                                                                                               |
-| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/web/src/store/canvasStore.ts`             | 将 `io/ingest` + `io/resolveLabel` 的导入替换为 `io/preprocess`。`triggerIngestion` 和 `triggerLabelResolve` 现在都调用 `preprocessNodeIfNeeded`。 |
-| `apps/web/src/canvas/commands/mergeNodeData.ts` | 用 `shouldPreprocessOnUpdate`（from `io/preprocess`）替换了 `shouldIngestOnUpdate`（from `io/ingest`）。                                           |
-| `apps/web/src/canvas/commands/createNodes.ts`   | `needsLabelResolve` 的导入来源从 `io/resolveLabel` 改为 `io/preprocess`。                                                                          |
-| `apps/web/src/utils/io/index.ts`                | 更新 re-exports：用 `preprocess` 模块导出替换了 `ingest` 模块导出。                                                                                |
-
-> **注意**：main 分支上发生了一次并行的 canvas command 重构（PR #96），删除了原本的
-> `apps/web/src/store/canvasHandlers.ts`，将其中的处理逻辑拆分到 `apps/web/src/canvas/commands/` 目录下的
-> 独立命令文件中。预处理分支 rebase 后，`shouldPreprocessOnUpdate` 和 `needsLabelResolve`
-> 的调用位置已适配到新的命令系统中。
+| 文件                                            | 变更                                                                                                                                                   |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `apps/web/src/store/canvasStore.ts`             | `triggerIngestion` + `triggerLabelResolve` 合并为 `triggerPreprocessing`（统一 1s debounce）。`flushOnUnload` 改为调用 `preprocessNode()` API。        |
+| `apps/web/src/canvas/commands/createNodes.ts`   | `ingestNodes` + `labelResolveNodeIds` 合并为 `preprocessNodes`。使用 `needsPreprocessing()` 过滤需要预处理的新节点，同时将父 frame Node 对象加入列表。 |
+| `apps/web/src/canvas/commands/mergeNodeData.ts` | 同上合并。当子节点 label 变化时，将父 frame Node 对象加入 `preprocessNodes`。                                                                          |
+| `apps/web/src/canvas/commands/setNodeParent.ts` | `labelResolveNodeIds` 改为 `preprocessNodes`（输出 frame Node 对象而非 ID）。                                                                          |
+| `apps/web/src/canvas/commands/types.ts`         | `CommandHandlerResult` 中 `ingestNodes` + `labelResolveNodeIds` 合并为 `preprocessNodes: Node[]`。                                                     |
+| `apps/web/src/canvas/executor.ts`               | 累积器从两个数组改为 `preprocessNodes` 单一数组。                                                                                                      |
+| `apps/web/src/canvas/postEffects.ts`            | `PendingEffects` 从两个数组改为 `preprocessNodes`。遍历改为单循环调用 `triggerPreprocessing`。                                                         |
+| `apps/web/src/canvas/runtime.ts`                | `CanvasEffectCallbacks` 从 `triggerIngestion` + `triggerLabelResolve` 改为单个 `triggerPreprocessing: (node: Node) => void`。                          |
+| `apps/web/src/store/canvasHistoryManager.ts`    | `TriggerIngestionFn` 改名为 `TriggerPreprocessingFn`。                                                                                                 |
+| `apps/web/src/api/canvas.ts`                    | 新增 `preprocessNode()` API 函数，调用统一端点 `POST /:canvasId/nodes/:nodeId/preprocess`。                                                            |
+| `apps/web/src/utils/io/index.ts`                | 移除 `needsIngestion`、`needsLabelResolve` 的 re-export。                                                                                              |
 
 ### 删除/弃用的文件
 
@@ -154,15 +158,13 @@ preprocess.ts ──→ upsertNode()    ──→ PUT /nodes/:id    ──→ Pr
 
 | 文件                                                       | 原因                                                                                              |
 | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `apps/web/src/api/canvas.ts`                               | `upsertNode()` 和 `resolveLabel()` API 函数被新前端触发器原样复用，HTTP 契约未变。                |
+| `apps/web/src/api/canvas.ts`                               | `upsertNode()` 和 `resolveLabel()` API 函数保留为向后兼容。新增 `preprocessNode()` 作为主调用。   |
 | `apps/server/src/modules/knowledge/loaders/*`              | `TextLoader`、`PdfLoader`、`WebLoader`、`YoutubeLoader` 被 Extract 阶段复用，无需修改。           |
 | `apps/server/src/modules/knowledge/knowledge.interface.ts` | `IKnowledgeRepository` 接口被 Persist 阶段复用。                                                  |
 | `apps/server/src/modules/knowledge/obsidian.repository.ts` | 仓库实现原样复用。                                                                                |
 | `apps/server/src/modules/knowledge/utils.ts`               | `normalizeUrl`、`computeContentHash`、`generateSourceId` 被 Input Resolve 和 Normalize 阶段复用。 |
 | `apps/server/src/modules/agent/llm.ts`                     | `llmComplete` 被 `ProviderManager` 包装，而非替换。                                               |
 | `apps/server/src/prompt/resolve-label.ts`                  | `IMAGE_LABEL_PROMPT` 和 `buildFrameLabelPrompt` 被 `ProviderManager` 使用。                       |
-| `apps/web/src/canvas/postEffects.ts`                       | main 分支新增。通过 `CanvasEffectCallbacks` 调用 `triggerIngestion` / `triggerLabelResolve`。     |
-| `apps/web/src/canvas/runtime.ts`                           | main 分支新增。定义 `CanvasEffectCallbacks` 接口，声明 ingestion 和 label resolve 两个回调。      |
 
 ---
 
@@ -214,41 +216,51 @@ preprocess.ts ──→ upsertNode()    ──→ PUT /nodes/:id    ──→ Pr
 
 ## 当前状态总结
 
-截至 rebase 到 main（含 canvas command 重构 PR #96）后的最终状态。
+截至触发器统一重构完成后的最终状态。
 
 ### 服务端
 
-**完全实现了 6 阶段流水线。** 两个现有 HTTP 路由均通过 `PreprocessDispatcher` 执行：
+**完全实现了 6 阶段流水线。** 三个 HTTP 路由均通过 `PreprocessDispatcher` 执行：
 
-| 路由                           | trigger        | `allowLLM` | `allowPersistence` | 典型节点类型      |
-| ------------------------------ | -------------- | ---------- | ------------------ | ----------------- |
-| `PUT /:canvasId/nodes/:nodeId` | `node_updated` | `false`    | `true`（默认）     | note/text/web/pdf |
-| `POST /resolve-label`          | `manual`       | `true`     | `false`            | image/frame       |
+| 路由                                       | 状态       | trigger        | `allowLLM` | `allowPersistence` | 典型节点类型      |
+| ------------------------------------------ | ---------- | -------------- | ---------- | ------------------ | ----------------- |
+| `POST /:canvasId/nodes/:nodeId/preprocess` | **主路由** | `node_updated` | `true`     | `true`             | 所有节点类型      |
+| `PUT /:canvasId/nodes/:nodeId`             | 兼容保留   | `node_updated` | `false`    | `true`             | note/text/web/pdf |
+| `POST /resolve-label`                      | 兼容保留   | `manual`       | `true`     | `false`            | image/frame       |
 
-两个路由**仍然存在且各自独立**。它们共享同一个 `PreprocessDispatcher` 实例，但请求构造和响应映射各有不同。
+前端已全部迁移到统一端点 `POST /:canvasId/nodes/:nodeId/preprocess`。旧路由保留为向后兼容（供 agent 工具等外部调用者使用）。
 
 ### 前端
-
-前端经过 main 的 canvas command 重构后，架构已变为：
 
 ```
 apps/web/src/canvas/
 ├── commands/               # 每个命令一个文件
-│   ├── createNodes.ts      # 使用 needsLabelResolve()
-│   ├── mergeNodeData.ts    # 使用 shouldPreprocessOnUpdate()
+│   ├── createNodes.ts      # 使用 needsPreprocessing() 过滤 + 收集父 frame
+│   ├── mergeNodeData.ts    # 使用 shouldPreprocessOnUpdate() + 收集父 frame
+│   ├── setNodeParent.ts    # 收集受影响的 frame 到 preprocessNodes
 │   └── ...
-├── executor.ts             # 批量命令执行器
-├── postEffects.ts          # 提交后副作用，调用 triggerIngestion / triggerLabelResolve
-├── runtime.ts              # CanvasEffectCallbacks 接口定义
+├── executor.ts             # 批量命令执行器，累积 preprocessNodes
+├── postEffects.ts          # 提交后副作用，调用 triggerPreprocessing
+├── runtime.ts              # CanvasEffectCallbacks: { triggerPreprocessing }
 └── uiIntent.ts             # 用户意图解析 → CanvasCommand 转换
 ```
 
-预处理相关的触发路径：
+统一的预处理触发路径：
 
-1. **Ingestion 路径**：`mergeNodeData` 命令检测脏字段 → 将节点加入 `PendingEffects.ingestNodes` → `postEffects.ts` 调用 `triggerIngestion(node)` → `canvasStore.ts` 中的 `triggerIngestion` debounce → `preprocessNodeIfNeeded()` → `PUT /nodes/:id`
-2. **Label resolution 路径**：`createNodes` 命令检测需要标签解析的节点 → 将 nodeId 加入 `PendingEffects.labelResolveNodeIds` → `postEffects.ts` 调用 `triggerLabelResolve(nodeId)` → `canvasStore.ts` 中的 `triggerLabelResolve` debounce → `preprocessNodeIfNeeded()` → `POST /resolve-label`
+```
+命令处理器检测脏字段或新节点
+  → 将 Node 对象加入 preprocessNodes
+  → postEffects.ts 遍历 preprocessNodes
+  → triggerPreprocessing(node)           （1s debounce，per-node）
+  → preprocessNodeIfNeeded()
+  → preprocessNode() API
+  → POST /:canvasId/nodes/:nodeId/preprocess
+  → PreprocessDispatcher → 6 阶段流水线
+```
 
-两条路径最终都会调用 `preprocessNodeIfNeeded()`，但前端仍然保持着"两个回调 → 两个 debounce 定时器 → 两个 HTTP 路由"的分离结构。
+**重复调用问题已修复**：之前 image/frame 在 createNodes 中同时进入 `ingestNodes` 和 `labelResolveNodeIds` 两个数组，导致两次 HTTP 请求。现在只有一个 `preprocessNodes` 数组，`createNodes` 通过 `needsPreprocessing()` 过滤，每个节点只触发一次预处理。
+
+**Frame 子节点变化处理**：当 `mergeNodeData` 检测到子节点的 `label` 字段变化时，会将父 frame 的 Node 对象加入 `preprocessNodes`。`setNodeParent` 同理。`preprocessNodeIfNeeded` 中会为 frame 节点收集子标签并构造 `childLabels` snapshot 发送给服务端。
 
 ### 已删除的旧代码
 
@@ -259,83 +271,28 @@ apps/web/src/canvas/
 
 ---
 
-## 架构讨论：当前遗留问题与后续方向
+## 需要注意的问题
 
-### 1. `resolve-label` 路由是否应该继续存在？
+### 1. note/text 节点频繁编辑与 LLM 调用风险
 
-**现状**：`POST /resolve-label` 仍然是一个独立的 HTTP 路由。它与 `PUT /nodes/:id` 在服务端共享同一个 `PreprocessDispatcher`，但在前端它们通过不同的 API 函数（`resolveLabel()` vs `upsertNode()`）发起请求，且携带不同的请求格式。
+**现状**：note/text 节点的 `content` 字段每次编辑都会触发 `shouldPreprocessOnUpdate()` → 1 秒 debounce 后发送预处理请求。当前统一端点默认 `allowLLM: true`，但由于 note/text 的 profile 中没有 `generate_label`、`generate_summary` 等 Enrich 能力，所以 Enrich 阶段实际上不会执行。
 
-**分析**：
+**潜在风险**：一旦为 note/text 的 profile 添加 `generate_summary` 或 `generate_keywords`，每次键入暂停 1 秒后都会触发 LLM 调用，这在用户活跃编辑时非常昂贵。
 
-- 两个路由在服务端的实际执行路径已经统一（均构造 `PreprocessNodeRequest` → 调用 `dispatcher.preprocess()`）
-- 区别仅在于：
-  - `PUT /nodes/:id`：`allowLLM: false`，侧重提取和持久化
-  - `POST /resolve-label`：`allowLLM: true, allowPersistence: false`，侧重 LLM 增强
-- 这个区别完全可以用 `PreprocessNodeRequest.options` 中的标志来表达，不需要两个独立路由
+**建议的缓解措施**：
 
-**建议**：在后续阶段引入统一的 `POST /api/canvas/:canvasId/nodes/:nodeId/preprocess` 路由，通过 `options.allowLLM` 和 `options.allowPersistence` 控制行为。旧路由保留为兼容别名，逐步迁移后删除。
+1. **Debounce 不够，需要指纹去重**：即使 debounce 合并了快速连续的编辑，用户持续编辑（每隔 2-3 秒暂停思考）仍会产生大量 LLM 调用。应在 Enrich 阶段用 `inputFingerprint` 做缓存去重——如果内容指纹未变，跳过 LLM 调用。
+2. **分层 debounce**：对 Enrich 阶段的 LLM 调用使用更长的 debounce（如 10-30 秒），与提取/持久化的 1 秒 debounce 分离。可在服务端通过"延迟 Enrich 队列"实现。
+3. **显著变化阈值**：只在内容变化超过一定比例（如 diff 超过 20%）时才触发 LLM 增强。
+4. **手动触发优先**：对于成本较高的 summary/keywords 生成，默认不自动触发，提供手动"分析"按钮。
 
-### 2. 前端触发器统一：`triggerIngestion` vs `triggerLabelResolve`
+### 2. 统一 debounce 的权衡
 
-**现状**：`CanvasEffectCallbacks` 接口定义了两个独立回调：
+之前 frame 使用 2 秒 debounce（等待子节点稳定），现在统一为 1 秒。如果用户快速拖拽多个节点进出 frame，可能导致 frame 标签生成发出多次无效请求（子节点还在移动中）。短期可接受，因为服务端的指纹去重和 LLM 幂等性可以减轻影响。长期可考虑对 frame 节点实现更智能的"稳定检测"（如检测最近 N 秒内没有新的子节点变化才触发）。
 
-```ts
-interface CanvasEffectCallbacks {
-  triggerIngestion: (node: Node) => void;
-  triggerLabelResolve: (nodeId: string) => void;
-}
-```
+### 3. 旧路由的清理时机
 
-它们使用不同的 debounce 间隔（1000ms vs 2000ms）、不同的参数签名（`Node` vs `nodeId`），并分别调用 `preprocessNodeIfNeeded()` 构造不同的请求。
-
-**分析**：
-
-- 两者的最终目的都是"触发预处理"，只是场景不同
-- 不同的 debounce 间隔有合理性：note 编辑需要较短的 debounce，frame 标签需要等子节点稳定
-- 但如果统一为单个 `triggerPreprocessing(node)` 回调，debounce 策略可以内化到 `preprocessNodeIfNeeded()` 中按节点类型或能力组区分
-
-**建议**：
-
-1. 短期：保持现状，因为 canvas command 系统刚稳定，改动回调接口牵涉面广
-2. 中期：将 `CanvasEffectCallbacks` 合并为单个 `triggerPreprocessing: (node: Node) => void`，在 `preprocessNodeIfNeeded()` 内部根据节点类型选择 debounce 策略
-3. 同时需要调整 `PendingEffects` 结构，将 `ingestNodes` 和 `labelResolveNodeIds` 合并为 `preprocessNodes: Node[]`
-4. 各命令处理器（`createNodes`、`mergeNodeData` 等）统一输出到同一个副作用列表
-
-### 3. 节点更新时的 Enrich 操作
-
-**现状**：
-
-- `PUT /nodes/:id` 路由设置 `allowLLM: false`，这意味着当用户编辑 note/text/web/pdf 内容时不会触发 Enrich 阶段
-- 只有 `POST /resolve-label` 路由（显式标签解析请求）设置 `allowLLM: true`
-- 因此，当前 note/text/web/pdf 的更新永远不会运行 `generate_summary` 或 `generate_keywords`
-
-**问题**：
-
-- 即使 profile 中声明了 `generate_summary`（如 web/pdf），更新路径中也不会执行它
-- image/frame 的标签只在显式 `resolveLabel` 请求时才生成，不会在 `PUT /nodes/:id` 路径中触发
-- 节点内容大幅变更后，之前生成的摘要或关键词可能已过时，但没有机制重新触发
-
-**建议**：
-
-1. **交互式模式快速返回**：保持 `PUT /nodes/:id` 的 `allowLLM: false` 策略不变，确保编辑操作的低延迟
-2. **引入后台 Enrich 通道**：当 Normalize 阶段检测到内容指纹变化时，排入一个"后台增强队列"，以 `mode: 'background'` 异步运行 Enrich 阶段
-3. **前端轮询或 SSE**：后台增强完成后通过 SSE/WebSocket 或轮询推送 patch 给前端
-4. **手动触发**：在节点上下文菜单中提供"重新分析"选项，以 `trigger: 'manual', allowLLM: true` 强制运行完整流水线
-
-### 4. Canvas Command 系统与预处理的职责边界
-
-**现状**：canvas command 系统在业务层面已经分离了"状态变更"和"副作用触发"。命令处理器只负责计算新的 nodes/edges 状态和记录哪些节点需要预处理（通过 `ingestNodes` / `labelResolveNodeIds`）。实际的预处理由 `postEffects.ts` 在提交后异步触发。
-
-**值得注意的设计点**：
-
-- 命令处理器中的 `shouldPreprocessOnUpdate()` 判断逻辑本质上重复了服务端 `dispatcher.buildPlan()` 中的脏字段分析
-- 理想状态下，前端只需知道"这个节点发生了变化，可能需要预处理"，而不需要精确判断"是 content 变了还是 src 变了"
-- 但完全去掉前端的判断会导致大量无效的预处理请求（如仅位置变化也触发请求）
-
-**建议**：保持当前的两层过滤设计：
-
-1. 前端用 `shouldPreprocessOnUpdate()` 做粗粒度过滤，减少不必要的 HTTP 请求
-2. 服务端用 `dispatcher.buildPlan()` 做细粒度规划，确保只运行必要的阶段
+`PUT /nodes/:id` 和 `POST /resolve-label` 目前保留为向后兼容。Agent 工具 `ingest_content` 仍通过 `PreprocessDispatcher` 直接调用（不经过 HTTP），所以旧路由的主要消费者是前端的 `flushOnUnload`（已迁移）和潜在的外部集成。建议在确认无外部依赖后移除旧路由。
 
 ---
 
@@ -348,22 +305,17 @@ interface CanvasEffectCallbacks {
 - [ ] 实现 `generate_summary` 和 `generate_keywords` 的 Enrich 能力（当前 profile 中声明但未实现）
 - [ ] 为 video 节点集成 `YoutubeLoader`（当前 video 走到 Extract 阶段时无操作）
 
-### P1 — 架构统一
+### P1 — 增量 Enrich 与成本控制
 
-- [ ] 引入统一的 `POST /api/canvas/:canvasId/nodes/:nodeId/preprocess` 路由
-- [ ] 将前端 `triggerIngestion` + `triggerLabelResolve` 合并为 `triggerPreprocessing`
-- [ ] 将 `PendingEffects.ingestNodes` + `labelResolveNodeIds` 合并为 `preprocessNodes`
-- [ ] 更新 `CanvasEffectCallbacks` 接口为单回调
-- [ ] 按节点类型或能力组实现差异化 debounce
-
-### P2 — 增量 Enrich
-
-- [ ] 实现后台 Enrich 通道（内容变更后异步运行 LLM 增强）
-- [ ] 实现 `inputFingerprint` 为key的 Enrich 结果缓存
+- [ ] 实现 `inputFingerprint` 为 key 的 Enrich 结果缓存（避免同内容重复 LLM 调用）
+- [ ] 对 Enrich 阶段实现分层 debounce 或延迟队列（与 Extract/Persist 的 1s debounce 分离）
 - [ ] 引入 request ID / revision token 防止过期结果覆盖
-
-### P3 — 成本优化
-
 - [ ] `ProviderManager` 中添加 per-canvas 或 per-session 的 token 预算
+
+### P2 — 清理与优化
+
+- [ ] 移除旧的 `PUT /nodes/:id` 和 `POST /resolve-label` 兼容路由
+- [ ] 清理 `upsertNode()`、`resolveLabel()` 等不再被前端使用的 API 函数
 - [ ] 批量节点导入时的 Enrich 批处理支持
 - [ ] Tavily Extract 调用纳入 `ProviderManager` 统一管理
+- [ ] 按节点类型或能力组实现差异化 debounce（如 frame 使用更长的稳定窗口）
