@@ -19,9 +19,7 @@ export {
   type NodeIngestionStatus,
   type NodeIngestionInfo,
   type PreprocessHelperDeps,
-  needsIngestion,
   needsPreprocessing,
-  needsLabelResolve,
   shouldPreprocessOnUpdate,
   preprocessNodeIfNeeded,
 } from './preprocess';

@@ -33,6 +33,5 @@ export interface CanvasWriteResult {
 
 /** Post-commit side-effect callbacks provided by the store. */
 export interface CanvasEffectCallbacks {
-  triggerIngestion: (node: Node) => void;
-  triggerLabelResolve: (nodeId: string) => void;
+  triggerPreprocessing: (node: Node) => void;
 }

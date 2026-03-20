@@ -26,6 +26,7 @@ import type {
   ExportedSource,
   ImportCanvasResponse,
   PreprocessNodeRequest,
+  PreprocessNodeResponse,
   ResolveLabelRequest,
   ResolveLabelResponse,
   TriggerReason,
@@ -258,7 +259,80 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     return reply.send({ success: true });
   });
 
-  // --- Resolve Label (LLM-powered semantic label generation via preprocessing pipeline) ---
+  // --- Unified preprocessing endpoint ---
+  // Single route that handles all node types (note/text/web/pdf/image/frame/video).
+  // Replaces the split between PUT /:canvasId/nodes/:nodeId and POST /resolve-label.
+
+  const preprocessBodySchema = z.object({
+    nodeType: z.string(),
+    trigger: z.string().optional(),
+    snapshot: z.record(z.string(), z.unknown()),
+    options: z
+      .object({
+        allowLLM: z.boolean().optional(),
+        allowPersistence: z.boolean().optional(),
+        force: z.boolean().optional(),
+      })
+      .optional(),
+  });
+
+  fastify.post<{
+    Params: { canvasId: string; nodeId: string };
+    Body: unknown;
+  }>('/:canvasId/nodes/:nodeId/preprocess', async function (request, reply) {
+    const { canvasId, nodeId } = request.params;
+    const parsed = preprocessBodySchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ message: 'Invalid request body' });
+    }
+
+    const { nodeType, trigger, snapshot, options } = parsed.data;
+    const dispatcher = await getPreprocessDispatcher();
+
+    try {
+      const ppRequest: PreprocessNodeRequest = {
+        canvasId,
+        nodeId,
+        nodeType: nodeType as CanvasNodeKind,
+        trigger: (trigger ?? 'node_updated') as TriggerReason,
+        snapshot,
+        options: {
+          allowLLM: options?.allowLLM ?? true,
+          allowPersistence: options?.allowPersistence ?? true,
+          force: options?.force ?? false,
+        },
+      };
+
+      const result = await dispatcher.preprocess(ppRequest);
+
+      return reply.send({
+        nodeId,
+        success: result.success,
+        sourceId: result.persistence?.sourceId ?? undefined,
+        suggestedLabel:
+          result.enriched?.suggestedLabel ??
+          result.extracted?.title ??
+          undefined,
+        error:
+          result.diagnostics
+            .filter((d) => d.level === 'error')
+            .map((d) => `${d.code}: ${d.message}`)
+            .join('; ') || undefined,
+      } satisfies PreprocessNodeResponse);
+    } catch (error) {
+      const message = toMessage(error);
+      request.log.error(
+        { nodeId, nodeType, error },
+        'Failed to preprocess node',
+      );
+      return reply.code(500).send({
+        message: 'Failed to preprocess node',
+        details: message,
+      });
+    }
+  });
+
+  // --- Resolve Label (legacy — kept for backward compatibility) ---
 
   fastify.post<{ Body: unknown }>(
     '/resolve-label',

@@ -22,7 +22,7 @@ const setNodeParent: CommandDefinition<Cmd> = {
     if (cmd.nodeIds.length === 0) return noop(state);
 
     let result = state.nodes as NestableNode[];
-    const labelResolveNodeIds: string[] = [];
+    const preprocessNodes: Node[] = [];
     const parentId = cmd.parentId as string | null;
 
     for (const nodeId of cmd.nodeIds) {
@@ -43,9 +43,22 @@ const setNodeParent: CommandDefinition<Cmd> = {
             result = fitFrameToChildren(result, prevParentId);
           }
         }
-        labelResolveNodeIds.push(parentId);
+        // Queue affected frames for label re-resolution.
+        const targetFrame = result.find((n) => n.id === parentId);
+        if (
+          targetFrame &&
+          !preprocessNodes.some((p) => p.id === targetFrame.id)
+        ) {
+          preprocessNodes.push(targetFrame as Node);
+        }
         if (prevParentId && prevParentId !== parentId) {
-          labelResolveNodeIds.push(prevParentId);
+          const prevFrame = result.find((n) => n.id === prevParentId);
+          if (
+            prevFrame &&
+            !preprocessNodes.some((p) => p.id === prevFrame.id)
+          ) {
+            preprocessNodes.push(prevFrame as Node);
+          }
         }
       } else {
         // Move out of frame.
@@ -57,7 +70,9 @@ const setNodeParent: CommandDefinition<Cmd> = {
           if (state.autoLayoutEnabled) {
             result = fitFrameToChildren(result, frame.id);
           }
-          labelResolveNodeIds.push(frame.id);
+          if (!preprocessNodes.some((p) => p.id === frame.id)) {
+            preprocessNodes.push(frame);
+          }
         }
       }
     }
@@ -66,7 +81,7 @@ const setNodeParent: CommandDefinition<Cmd> = {
       applied: true,
       nodes: result,
       edges: state.edges,
-      labelResolveNodeIds,
+      preprocessNodes,
     };
   },
 };

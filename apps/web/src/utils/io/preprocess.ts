@@ -1,16 +1,15 @@
 /**
  * Unified node preprocessing trigger.
  *
- * Replaces both `ingest.ts` (knowledge ingestion for note/text/web/pdf)
- * and `resolveLabel.ts` (LLM label for image/frame) with a single helper.
- *
- * All node types flow through the same API call — the server pipeline
+ * ALL node types (note/text/web/pdf/image/frame) flow through the single
+ * POST /:canvasId/nodes/:nodeId/preprocess endpoint. The server pipeline
  * decides which stages to execute based on the node profile.
+ *
+ * This module replaces both the old `ingest.ts` and `resolveLabel.ts`.
  */
 
-import { resolveLabel, upsertNode } from '@/api/canvas';
+import { preprocessNode } from '@/api/canvas';
 
-import type { ResolveLabelRequest } from '@sediment/shared';
 import type { Node } from '@xyflow/react';
 
 // Re-export the ingestion status types (unchanged interface for canvasStore)
@@ -37,22 +36,18 @@ export type PreprocessHelperDeps = {
 
 // ─── Node types that participate in preprocessing ────────────────────────────
 
-const INGEST_TYPES = new Set(['note', 'text', 'web', 'pdf']);
-const LABEL_RESOLVE_TYPES = new Set(['image', 'frame']);
+const PREPROCESS_TYPES = new Set([
+  'note',
+  'text',
+  'web',
+  'pdf',
+  'image',
+  'frame',
+]);
 
 /** Returns true when this node type has any preprocessing behavior. */
 export function needsPreprocessing(nodeType: string): boolean {
-  return INGEST_TYPES.has(nodeType) || LABEL_RESOLVE_TYPES.has(nodeType);
-}
-
-/** Returns true when a node type needs knowledge-store ingestion. */
-export function needsIngestion(nodeType: string): boolean {
-  return INGEST_TYPES.has(nodeType);
-}
-
-/** Returns true when a node type benefits from LLM label resolution. */
-export function needsLabelResolve(nodeType: string): boolean {
-  return LABEL_RESOLVE_TYPES.has(nodeType);
+  return PREPROCESS_TYPES.has(nodeType);
 }
 
 // ─── Dirty-field detection ───────────────────────────────────────────────────
@@ -65,7 +60,10 @@ function getStringDataField(node: Node, field: string): string {
 
 /**
  * Decide whether a node update should trigger preprocessing.
- * Unified replacement for `shouldIngestOnUpdate` and `needsLabelResolve` checks.
+ *
+ * Returns true when a watched data field has changed for this node type.
+ * Frame nodes always return false here — frame label re-resolution is
+ * triggered by child label changes (see command handlers).
  */
 export function shouldPreprocessOnUpdate(
   prevNode: Node,
@@ -89,20 +87,57 @@ export function shouldPreprocessOnUpdate(
     );
   }
 
-  // frame: label changes in children are handled by the separate
-  // triggerLabelResolve callback, not here.
+  // frame: label changes in children trigger preprocessing via
+  // the preprocessNodes array in command handlers, not here.
   return false;
 }
 
 // ─── Unified preprocessing entry point ───────────────────────────────────────
 
 /**
- * Preprocess a node if needed. Routes to the appropriate server endpoint
- * based on node type:
- * - note/text/web/pdf → PUT /canvas/:id/nodes/:nodeId (upsertNode)
- * - image/frame → POST /canvas/resolve-label (resolveLabel)
+ * Build the snapshot object sent to the server for a given node.
+ * For frame nodes we include child labels so the Enrich stage can
+ * generate a group-level label.
+ */
+function buildSnapshot(
+  node: Node,
+  getChildNodes: (frameId: string) => Node[],
+): Record<string, unknown> {
+  const data = node.data as Record<string, unknown> | undefined;
+  const nodeType = node.type ?? '';
+
+  if (nodeType === 'frame') {
+    const children = getChildNodes(node.id);
+    const childLabels = children
+      .map((c) => {
+        const cData = c.data as Record<string, unknown> | undefined;
+        const label =
+          typeof cData?.label === 'string' ? (cData.label as string) : '';
+        return label.trim();
+      })
+      .filter((l) => l.length > 0);
+    return { childLabels };
+  }
+
+  const labelSource = data?.labelSource as string | undefined;
+  const isAutoLabel = !labelSource || labelSource === 'auto';
+
+  return {
+    title: isAutoLabel
+      ? undefined
+      : (data?.label as string) || (data?.title as string) || undefined,
+    content: (data?.content as string) || undefined,
+    src: (data?.src as string) || undefined,
+    sourceId: (data?.sourceId as string) || undefined,
+  };
+}
+
+/**
+ * Preprocess a single node through the unified server endpoint.
  *
- * Both endpoints now internally use the same preprocessing pipeline.
+ * All node types use POST /:canvasId/nodes/:nodeId/preprocess.
+ * The server pipeline decides which stages (extract, enrich, persist, etc.)
+ * to execute based on the node profile.
  */
 export async function preprocessNodeIfNeeded({
   canvasId,
@@ -118,99 +153,68 @@ export async function preprocessNodeIfNeeded({
 
   const nodeData = node.data as Record<string, unknown> | undefined;
 
-  // ── Ingest path (note, text, web, pdf) ──
-  if (needsIngestion(nodeType)) {
-    setNodeIngestion(node.id, { status: 'pending', updatedAt: Date.now() });
+  // Never overwrite user-authored labels with LLM suggestions.
+  if (nodeData?.labelSource === 'user') return;
 
-    try {
-      const currentLabel = (nodeData?.label as string) || '';
-      const labelSource = nodeData?.labelSource as string | undefined;
-      const isAutoLabel = !labelSource || labelSource === 'auto';
-      const titleToSend = isAutoLabel
-        ? undefined
-        : currentLabel || (nodeData?.title as string) || undefined;
-
-      const response = await upsertNode(canvasId, node.id, {
-        type: nodeType as 'note' | 'text' | 'web' | 'pdf',
-        title: titleToSend,
-        content: (nodeData?.content as string) || undefined,
-        src: (nodeData?.src as string) || undefined,
-        sourceId: (nodeData?.sourceId as string) || undefined,
-      });
-
-      if (response.sourceId) {
-        patchNodeSilent(node.id, { sourceId: response.sourceId });
-      }
-
-      if (response.success && response.suggestedLabel) {
-        applySuggestedLabel(
-          node.id,
-          response.suggestedLabel,
-          getNodeById,
-          patchNodeSilent,
-        );
-      }
-
-      if (response.success || response.error?.includes('EMPTY_CONTENT')) {
-        clearNodeIngestion(node.id);
-        return;
-      }
-
-      setNodeIngestion(node.id, {
-        status: 'error',
-        updatedAt: Date.now(),
-        error: response.error ?? 'Unknown preprocessing error',
-      });
-    } catch (error) {
-      setNodeIngestion(node.id, {
-        status: 'error',
-        updatedAt: Date.now(),
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-    return;
+  // For frame nodes: skip if there are no meaningful child labels.
+  if (nodeType === 'frame') {
+    const children = getChildNodes(node.id);
+    const hasLabels = children.some((c) => {
+      const cData = c.data as Record<string, unknown> | undefined;
+      const label = typeof cData?.label === 'string' ? cData.label : '';
+      return label.trim().length > 0;
+    });
+    if (!hasLabels) return;
   }
 
-  // ── Label-resolve path (image, frame) ──
-  if (needsLabelResolve(nodeType)) {
-    // Never overwrite user-set labels
-    if (nodeData?.labelSource === 'user') return;
+  // For image nodes: skip if there is no src.
+  if (nodeType === 'image') {
+    const src = typeof nodeData?.src === 'string' ? nodeData.src : '';
+    if (!src) return;
+  }
 
-    let request: ResolveLabelRequest | null = null;
+  setNodeIngestion(node.id, { status: 'pending', updatedAt: Date.now() });
 
-    if (nodeType === 'image') {
-      const src = typeof nodeData?.src === 'string' ? nodeData.src : '';
-      if (!src) return;
-      request = { type: 'image', src };
-    } else if (nodeType === 'frame') {
-      const children = getChildNodes(node.id);
-      const childLabels = children
-        .map((c) => {
-          const cData = c.data as Record<string, unknown> | undefined;
-          const label =
-            typeof cData?.label === 'string' ? (cData.label as string) : '';
-          return label.trim();
-        })
-        .filter((l) => l.length > 0);
-      if (childLabels.length < 1) return;
-      request = { type: 'frame', childLabels };
+  try {
+    const snapshot = buildSnapshot(node, getChildNodes);
+
+    const response = await preprocessNode(canvasId, node.id, {
+      nodeType,
+      trigger: 'node_updated',
+      snapshot,
+    });
+
+    // Apply sourceId from persistence stage.
+    if (response.sourceId) {
+      patchNodeSilent(node.id, { sourceId: response.sourceId });
     }
 
-    if (!request) return;
-
-    try {
-      const response = await resolveLabel(request);
-      if (!response.suggestedLabel) return;
-
+    // Apply suggested label from enrich or extract stage.
+    if (response.suggestedLabel) {
       applySuggestedLabel(
         node.id,
         response.suggestedLabel,
         getNodeById,
         patchNodeSilent,
       );
-    } catch (error) {
-      console.warn('Failed to resolve label for node:', node.id, error);
     }
+
+    if (response.success || response.error?.includes('EMPTY_CONTENT')) {
+      clearNodeIngestion(node.id);
+      return;
+    }
+
+    setNodeIngestion(node.id, {
+      status: 'error',
+      updatedAt: Date.now(),
+      error: response.error ?? 'Unknown preprocessing error',
+    });
+  } catch (error) {
+    setNodeIngestion(node.id, {
+      status: 'error',
+      updatedAt: Date.now(),
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 

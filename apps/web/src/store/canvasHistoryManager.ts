@@ -24,9 +24,9 @@ export type CanvasPreviewSnapshot = CanvasSnapshot & {
 
 /**
  * Callback the store provides so the history manager can trigger
- * ingestion for nodes that reappear after undo/redo.
+ * preprocessing for nodes that reappear after undo/redo.
  */
-export type TriggerIngestionFn = (node: Node) => void;
+export type TriggerPreprocessingFn = (node: Node) => void;
 
 // ---------------------------------------------------------------------------
 // Snapshot helpers
@@ -188,7 +188,7 @@ class CanvasHistoryManager {
     canvasId: string,
     prevNodes: Node[],
     restoredNodes: Node[],
-    triggerIngestion: TriggerIngestionFn,
+    triggerPreprocessing: TriggerPreprocessingFn,
   ): void {
     const prevIds = new Set(prevNodes.map((n) => n.id));
     const restoredIds = new Set(restoredNodes.map((n) => n.id));
@@ -201,7 +201,7 @@ class CanvasHistoryManager {
           controller.abort();
           this.inflightDeletes.delete(node.id);
         }
-        triggerIngestion(node);
+        triggerPreprocessing(node);
       }
     }
 

@@ -19,8 +19,7 @@ const mergeNodeData: CommandDefinition<Cmd> = {
     const patchMap = new Map(
       cmd.patches.map((p) => [p.nodeId as string, p.patch]),
     );
-    const ingestNodes: Node[] = [];
-    const labelResolveNodeIds: string[] = [];
+    const preprocessNodes: Node[] = [];
     let anyApplied = false;
 
     const nextNodes = state.nodes.map((n) => {
@@ -32,13 +31,22 @@ const mergeNodeData: CommandDefinition<Cmd> = {
         data: { ...(n.data ?? {}), ...patch },
       };
       if (shouldPreprocessOnUpdate(n, updated)) {
-        ingestNodes.push(updated);
+        preprocessNodes.push(updated);
       }
+      // When a child's label changes, the parent frame needs re-resolution.
       if (
         (patch as Record<string, unknown>).label !== undefined &&
         updated.parentId
       ) {
-        labelResolveNodeIds.push(updated.parentId);
+        const parentFrame = state.nodes.find(
+          (pn) => pn.id === updated.parentId,
+        );
+        if (
+          parentFrame &&
+          !preprocessNodes.some((p) => p.id === parentFrame.id)
+        ) {
+          preprocessNodes.push(parentFrame);
+        }
       }
       return updated;
     });
@@ -49,8 +57,7 @@ const mergeNodeData: CommandDefinition<Cmd> = {
       applied: true,
       nodes: nextNodes,
       edges: state.edges,
-      ingestNodes,
-      labelResolveNodeIds,
+      preprocessNodes,
     };
   },
 };

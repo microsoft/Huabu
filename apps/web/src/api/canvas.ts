@@ -12,6 +12,7 @@ import type {
   ListCanvasesResponse,
   CreateCanvasRequest,
   CreateCanvasResponse,
+  PreprocessNodeResponse,
   ResolveLabelRequest,
   ResolveLabelResponse,
 } from '@sediment/shared';
@@ -227,4 +228,40 @@ export async function resolveLabel(
   }
 
   return (await response.json()) as ResolveLabelResponse;
+}
+
+/**
+ * Unified preprocessing endpoint.
+ * Handles all node types through a single route.
+ */
+export async function preprocessNode(
+  canvasId: string,
+  nodeId: string,
+  body: {
+    nodeType: string;
+    trigger?: string;
+    snapshot: Record<string, unknown>;
+    options?: {
+      allowLLM?: boolean;
+      allowPersistence?: boolean;
+      force?: boolean;
+    };
+  },
+  options?: { keepalive?: boolean },
+): Promise<PreprocessNodeResponse> {
+  const response = await fetch(
+    `${API_CONFIG.API_URL}/canvas/${canvasId}/nodes/${nodeId}/preprocess`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      keepalive: options?.keepalive ?? false,
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(`Failed to preprocess node: ${response.statusText}`);
+  }
+
+  return (await response.json()) as PreprocessNodeResponse;
 }
