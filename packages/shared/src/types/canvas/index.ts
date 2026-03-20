@@ -62,6 +62,33 @@ export type {
   LayoutResult,
 } from './layout.js';
 
+// Command types
+export type {
+  CanvasNodeId,
+  CanvasEdgeId,
+  CanvasEdgeRef,
+  NodeSize,
+  CanvasAlignDirection,
+  CanvasAutoLayoutScope,
+  CanvasAutoLayoutOptions,
+  CanvasNodeCreateInput,
+  CanvasNodeDataMergePatch,
+  CanvasNodeParentUpdate,
+  CanvasNodeGeometryUpdate,
+  CanvasNodeLockUpdate,
+  CanvasEdgeCreateInput,
+  CanvasCommand,
+  CanvasCommandType,
+} from './command.js';
+
+// Execution types
+export type {
+  CanvasExecutionSource,
+  CanvasExecution,
+  CanvasCommandFailureReason,
+  CanvasCommandResult,
+} from './execution.js';
+
 // Operation types
 export type {
   CreateNodeParams,

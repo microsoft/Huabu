@@ -1,9 +1,9 @@
+import { createId } from '@sediment/shared';
 import {
   ReactFlow,
   Background,
   Controls,
   type ReactFlowInstance,
-  type Node,
   Panel,
 } from '@xyflow/react';
 import clsx from 'clsx';
@@ -19,7 +19,6 @@ import '@xyflow/react/dist/style.css';
 import { NodeToolbar } from './CanvasToolbar';
 import { IntentPopover } from './IntentPopover';
 import { MultiSelectToolbar } from './MultiSelectToolbar';
-import { uploadImage, uploadPdf, uploadVideo } from '../../api/artifact';
 import { getSource } from '../../api/knowledge';
 import { GRID_SIZE } from '../../config/canvas';
 import { useCanvasShortcuts } from '../../hooks/useCanvasShortcuts';
@@ -28,14 +27,12 @@ import {
   canReadSedimentPayload,
   getSedimentPayload,
 } from '../../utils/io/dragDrop';
+import { looksLikeUrl } from '../../utils/io/media';
 import {
-  detectNodeType,
-  detectNodeTypeFromMime,
-  looksLikeUrl,
-  normalizeUrl,
-  getImageDimensionsFromBlob,
-} from '../../utils/io/media';
-import { buildNode, buildSourceNode } from '../../utils/node/factory';
+  uploadFileToNodeInput,
+  urlToNodeInput,
+  textToNodeInput,
+} from '../../utils/io/nodeInputBuilders';
 import { FrameNode } from '../Nodes/FrameNode';
 import { ImageNode } from '../Nodes/ImageNode';
 import { NoteNode } from '../Nodes/NoteNode';
@@ -44,7 +41,8 @@ import { TextNode } from '../Nodes/TextNode';
 import { VideoNode } from '../Nodes/VideoNode';
 import { WebNode } from '../Nodes/WebNode';
 
-import type { FrameFitPreview } from '../../store/canvasStore.ts';
+import type { AddNodeInput } from '../../canvas/uiIntent';
+import type { FrameFitResult } from '../../canvas/utils/frame';
 
 const nodeTypes = {
   image: ImageNode,
@@ -63,7 +61,7 @@ const VALID_NODE_TYPES = Object.keys(nodeTypes);
  * when a node is being dragged near or inside a frame.
  */
 const FrameFitPreviewOverlay: React.FC<{
-  preview: FrameFitPreview;
+  preview: FrameFitResult;
   rfInstance: ReactFlowInstance | null;
   wrapperRef: React.RefObject<HTMLDivElement | null>;
 }> = React.memo(({ preview, rfInstance, wrapperRef }) => {
@@ -71,12 +69,12 @@ const FrameFitPreviewOverlay: React.FC<{
     if (!rfInstance || !wrapperRef.current) return null;
 
     const topLeft = rfInstance.flowToScreenPosition({
-      x: preview.x,
-      y: preview.y,
+      x: preview.position.x,
+      y: preview.position.y,
     });
     const bottomRight = rfInstance.flowToScreenPosition({
-      x: preview.x + preview.width,
-      y: preview.y + preview.height,
+      x: preview.position.x + preview.width,
+      y: preview.position.y + preview.height,
     });
 
     // Convert from screen coords to wrapper-relative coords
@@ -124,6 +122,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   const onNodeDragStop = useCanvasStore((state) => state.onNodeDragStop);
   const frameFitPreviews = useCanvasStore((state) => state.frameFitPreviews);
   const addNode = useCanvasStore((state) => state.addNode);
+  const addNodes = useCanvasStore((state) => state.addNodes);
   const patchNodeSilent = useCanvasStore((state) => state.patchNodeSilent);
   const setRfInstance = useCanvasStore((state) => state.setRfInstance);
   const openExpanded = useCanvasStore((state) => state.openExpanded);
@@ -163,19 +162,23 @@ export const Canvas: React.FC<CanvasProps> = ({
   } | null>(null);
   const isDraggingFrame = frameDragStart !== null;
 
+  const resetFrameDrag = useCallback(() => {
+    setFrameDragStart(null);
+    setFrameDragEnd(null);
+    setPendingNodeType(null);
+  }, [setPendingNodeType]);
+
   // Cancel pending node placement with Escape key
   useEffect(() => {
     if (!pendingNodeType) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setPendingNodeType(null);
-        setFrameDragStart(null);
-        setFrameDragEnd(null);
+        resetFrameDrag();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [pendingNodeType, setPendingNodeType]);
+  }, [pendingNodeType, resetFrameDrag]);
 
   // Handle click-to-place for note and text
   const handlePaneClick = useCallback(
@@ -189,16 +192,15 @@ export const Canvas: React.FC<CanvasProps> = ({
         y: event.clientY,
       });
 
-      const newNode = buildNode({
-        type: pendingNodeType,
-        position,
+      addNode({
+        nodeType: pendingNodeType,
+        placementPoint: position,
         data: {
           content: '',
           origin: { type: 'user-created' },
         },
+        skipAutoLayout: true,
       });
-
-      addNode(newNode, true);
       setPendingNodeType(null);
     },
     [pendingNodeType, addNode, setPendingNodeType],
@@ -236,8 +238,7 @@ export const Canvas: React.FC<CanvasProps> = ({
 
       const instance = rfInstanceRef.current;
       if (!instance) {
-        setFrameDragStart(null);
-        setFrameDragEnd(null);
+        resetFrameDrag();
         return;
       }
 
@@ -261,16 +262,14 @@ export const Canvas: React.FC<CanvasProps> = ({
         frameNodesInRect({ x, y, width: w, height: h });
       }
 
-      setFrameDragStart(null);
-      setFrameDragEnd(null);
-      setPendingNodeType(null);
+      resetFrameDrag();
     },
     [
       isDraggingFrame,
       frameDragStart,
       frameDragEnd,
       frameNodesInRect,
-      setPendingNodeType,
+      resetFrameDrag,
     ],
   );
 
@@ -421,20 +420,20 @@ export const Canvas: React.FC<CanvasProps> = ({
             return;
           lastDropRef.current = { key: dedupeKey, at: now };
 
-          let newNode: Node | null = null;
+          let newNodeInput: AddNodeInput | null = null;
 
           if (payload.kind === 'web') {
-            newNode = buildNode({
-              type: 'web',
-              position: dropPos,
+            newNodeInput = {
+              nodeType: 'web',
+              placementPoint: dropPos,
               data: { src: payload.data.src, origin: payload.origin },
-            });
+            };
           }
 
           if (payload.kind === 'note') {
-            newNode = buildNode({
-              type: 'note',
-              position: dropPos,
+            newNodeInput = {
+              nodeType: 'note',
+              placementPoint: dropPos,
               data: {
                 content: payload.data.content,
                 ...(payload.data.contentJson
@@ -442,21 +441,19 @@ export const Canvas: React.FC<CanvasProps> = ({
                   : {}),
                 origin: payload.origin,
               },
-            });
+            };
           }
 
           if (payload.kind === 'image') {
             const { src, label } = payload.data;
 
             const doAdd = (natW: number, natH: number) => {
-              addNode(
-                buildNode({
-                  type: 'image',
-                  position: dropPos,
-                  data: { src, label, origin: payload.origin },
-                  naturalDimensions: { width: natW, height: natH },
-                }),
-              );
+              addNode({
+                nodeType: 'image',
+                placementPoint: dropPos,
+                data: { src, label, origin: payload.origin },
+                naturalDimensions: { width: natW, height: natH },
+              });
             };
 
             const img = new Image();
@@ -476,9 +473,11 @@ export const Canvas: React.FC<CanvasProps> = ({
 
             // For note/text sources, async-load content
             if ((nodeType === 'note' || nodeType === 'text') && sourceId) {
-              const tempNode = buildNode({
-                type: nodeType,
-                position: dropPos,
+              const tempNodeId = createId('node');
+              addNode({
+                id: tempNodeId,
+                nodeType: nodeType as 'note' | 'text',
+                placementPoint: dropPos,
                 data: {
                   ...rest,
                   label,
@@ -487,34 +486,35 @@ export const Canvas: React.FC<CanvasProps> = ({
                   content: 'Loading...',
                 },
               });
-              addNode(tempNode);
 
               getSource(sourceId)
                 .then((fullSource) => {
-                  patchNodeSilent(tempNode.id, {
+                  patchNodeSilent(tempNodeId, {
                     content: fullSource.content || '',
                   });
                 })
                 .catch((error) => {
                   console.error('Failed to load source content:', error);
-                  patchNodeSilent(tempNode.id, {
+                  patchNodeSilent(tempNodeId, {
                     content: 'Failed to load content',
                   });
                 });
               return;
             }
 
-            newNode = buildSourceNode({
-              sourceId,
-              sourceType: type,
-              position: dropPos,
-              origin: payload.origin,
-              extra: { ...rest, label },
-              validNodeTypes: VALID_NODE_TYPES,
-            });
+            newNodeInput = {
+              nodeType: nodeType as keyof typeof nodeTypes,
+              placementPoint: dropPos,
+              data: {
+                ...rest,
+                label,
+                sourceId,
+                origin: payload.origin,
+              },
+            };
           }
 
-          if (newNode) addNode(newNode);
+          if (newNodeInput) addNode(newNodeInput);
           return;
         }
 
@@ -522,63 +522,21 @@ export const Canvas: React.FC<CanvasProps> = ({
         const nativeFiles = Array.from(e.dataTransfer.files);
         if (nativeFiles.length > 0) {
           void (async () => {
-            for (let i = 0; i < nativeFiles.length; i++) {
-              const file = nativeFiles[i];
-              const fileType = file.type
-                ? detectNodeTypeFromMime(file.type)
-                : detectNodeType(file.name);
-              const offset = i * 30;
-              const pos = { x: dropPos.x + offset, y: dropPos.y + offset };
-
-              try {
-                if (fileType === 'image') {
-                  const [url, dims] = await Promise.all([
-                    uploadImage(file),
-                    getImageDimensionsFromBlob(file),
-                  ]);
-                  addNode(
-                    buildNode({
-                      type: 'image',
-                      position: pos,
-                      data: {
-                        src: url,
-                        label: file.name,
-                        origin: { type: 'user-uploaded' },
-                      },
-                      naturalDimensions: dims,
-                    }),
-                  );
-                } else if (fileType === 'video') {
-                  const url = await uploadVideo(file);
-                  addNode(
-                    buildNode({
-                      type: 'video',
-                      position: pos,
-                      data: {
-                        src: url,
-                        label: file.name,
-                        origin: { type: 'user-uploaded' },
-                      },
-                    }),
-                  );
-                } else if (fileType === 'pdf') {
-                  const url = await uploadPdf(file);
-                  addNode(
-                    buildNode({
-                      type: 'pdf',
-                      position: pos,
-                      data: {
-                        src: url,
-                        label: file.name,
-                        origin: { type: 'user-uploaded' },
-                      },
-                    }),
-                  );
-                }
-              } catch (error) {
-                console.error(`Failed to drop file ${file.name}:`, error);
-              }
-            }
+            const inputs = (
+              await Promise.all(
+                nativeFiles.map(async (file, i) => {
+                  const offset = i * 30;
+                  const pos = {
+                    x: dropPos.x + offset,
+                    y: dropPos.y + offset,
+                  };
+                  return uploadFileToNodeInput(file, pos, {
+                    type: 'user-uploaded',
+                  });
+                }),
+              )
+            ).filter((input): input is AddNodeInput => input !== null);
+            if (inputs.length > 0) addNodes(inputs);
           })();
           return;
         }
@@ -589,17 +547,8 @@ export const Canvas: React.FC<CanvasProps> = ({
         const droppedUrl = (uriList || plainText || '').trim();
 
         if (droppedUrl && looksLikeUrl(droppedUrl)) {
-          const finalUrl = normalizeUrl(droppedUrl);
-          const nodeType = detectNodeType(finalUrl);
           addNode(
-            buildNode({
-              type: nodeType,
-              position: dropPos,
-              data: {
-                src: finalUrl,
-                origin: { type: 'user-uploaded' },
-              },
-            }),
+            urlToNodeInput(droppedUrl, dropPos, { type: 'user-uploaded' }),
           );
           return;
         }
@@ -607,14 +556,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         // ============ 4. Plain text drop ============
         if (plainText) {
           addNode(
-            buildNode({
-              type: 'note',
-              position: dropPos,
-              data: {
-                content: plainText,
-                origin: { type: 'user-uploaded' },
-              },
-            }),
+            textToNodeInput(plainText, dropPos, { type: 'user-uploaded' }),
           );
         }
       }}

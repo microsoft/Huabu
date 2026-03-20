@@ -66,7 +66,7 @@ export function generateNextLabel(
  * If it already exists, append or increment a numeric suffix:
  *   "photo.png" → "photo.png 2" → "photo.png 3" etc.
  *
- * This is used by handleAddNode / handlePasteNodes so that every node
+ * This is used by node creation flows so that every node
  * entering the canvas gets a unique label while keeping the user's intent.
  */
 export function deduplicateLabel(

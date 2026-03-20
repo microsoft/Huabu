@@ -181,8 +181,10 @@ export const NodeWrapper = memo(
       (state) => state.nodes.filter((node) => node.selected).length,
     );
 
-    const dispatch = useCanvasStore((state) => state.dispatch);
-    const takeSnapshot = useCanvasStore((state) => state.takeSnapshot);
+    const setNodeGeometry = useCanvasStore((state) => state.setNodeGeometry);
+    const onNodeResizeStart = useCanvasStore(
+      (state) => state.onNodeResizeStart,
+    );
     const updateResizePreview = useCanvasStore(
       (state) => state.updateResizePreview,
     );
@@ -223,27 +225,21 @@ export const NodeWrapper = memo(
     );
 
     const handleResizeStart = useCallback(() => {
-      // Snapshot the pre-drag state so the entire resize is a single undo entry.
-      takeSnapshot();
+      onNodeResizeStart();
       onResizeStart?.();
-    }, [onResizeStart, takeSnapshot]);
+    }, [onResizeStart, onNodeResizeStart]);
 
     const handleResizeEnd = useCallback(
       (_event: unknown, params: { width: number; height: number }) => {
         // Clear the preview before dispatching so the overlay disappears as
         // the frame animates to its final fitted size.
         clearFrameFitPreview();
-        // Commit the final size through dispatch so the autosave middleware
-        // picks it up. The snapshot was already taken in handleResizeStart.
-        dispatch({
-          type: 'RESIZE_NODE',
-          nodeId: id,
-          width: params.width,
-          height: params.height,
-        });
+        setNodeGeometry([
+          { nodeId: id, size: { width: params.width, height: params.height } },
+        ]);
         onResizeEnd?.(params.width, params.height);
       },
-      [clearFrameFitPreview, dispatch, id, onResizeEnd],
+      [clearFrameFitPreview, setNodeGeometry, id, onResizeEnd],
     );
 
     return (
@@ -251,14 +247,8 @@ export const NodeWrapper = memo(
         <NodeResizer
           color="var(--color-theme-300)"
           isVisible={selected && resizable && !data.locked}
-          minWidth={
-            type === 'pdf' || type === 'note' || type === 'web' ? 120 : minWidth
-          }
-          minHeight={
-            type === 'pdf' || type === 'note' || type === 'web'
-              ? 120
-              : minHeight
-          }
+          minWidth={minWidth}
+          minHeight={minHeight}
           keepAspectRatio={keepAspectRatio}
           onResizeStart={handleResizeStart}
           onResize={handleResize}

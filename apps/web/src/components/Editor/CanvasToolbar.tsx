@@ -1,5 +1,3 @@
-import { createId } from '@sediment/shared';
-import { useReactFlow } from '@xyflow/react';
 import clsx from 'clsx';
 import {
   MousePointer2,
@@ -10,7 +8,7 @@ import {
   Sprout,
   Sparkles,
 } from 'lucide-react';
-import { useCallback, useRef, useState, type ChangeEvent } from 'react';
+import { useRef, useState, type ChangeEvent } from 'react';
 
 import { uploadImage, uploadPdf, uploadVideo } from '../../api/artifact.ts';
 import { NODE_ICON } from '../../config/nodeIcons.ts';
@@ -21,11 +19,7 @@ import { Button } from '../Common/Button';
 import { IconButton } from '../Common/IconButton';
 import { Modal } from '../Common/Modal';
 
-import type {
-  CanvasNode,
-  CanvasNodeType,
-  CreateNodePayload,
-} from '../Nodes/types.ts';
+import type { AddNodeInput } from '../../canvas/uiIntent.ts';
 
 interface NodeToolbarProps {
   activeTool: 'select' | 'pan';
@@ -33,8 +27,7 @@ interface NodeToolbarProps {
 }
 
 export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
-  const { screenToFlowPosition } = useReactFlow();
-  const addNode = useCanvasStore((s) => s.addNode);
+  const addNodes = useCanvasStore((s) => s.addNodes);
   const pendingNodeType = useCanvasStore((s) => s.pendingNodeType);
   const setPendingNodeType = useCanvasStore((s) => s.setPendingNodeType);
   const layoutAll = useCanvasStore((s) => s.layoutAll);
@@ -52,115 +45,6 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
     null,
   );
   const [linkText, setLinkText] = useState('');
-
-  const createNode = useCallback(
-    (type: CanvasNodeType, payload?: CreateNodePayload) => {
-      const position = screenToFlowPosition({
-        x: window.innerWidth / 2,
-        y: window.innerHeight / 2,
-      });
-
-      const offsetX = Math.random() * 100 - 50;
-      const offsetY = Math.random() * 100 - 50;
-
-      const initialWidth = payload?.width || 400;
-      const initialHeight = payload?.height || 300;
-
-      // Text nodes auto-size, so center with a small estimate
-      const isText = type === 'text';
-
-      const baseNode = {
-        id: createId('node'),
-        type,
-        position: {
-          x: position.x + offsetX - (isText ? 15 : initialWidth / 2),
-          y: position.y + offsetY - (isText ? 12 : initialHeight / 2),
-        },
-      };
-
-      let newNode: CanvasNode;
-
-      switch (type) {
-        case 'note':
-          newNode = {
-            ...baseNode,
-            type: 'note',
-            data: { type: 'note', content: '' },
-            style: { width: initialWidth, height: initialHeight },
-          };
-          break;
-        case 'text':
-          newNode = {
-            ...baseNode,
-            type: 'text',
-            data: { type: 'text', content: '' },
-          };
-          break;
-        case 'image':
-          newNode = {
-            ...baseNode,
-            type: 'image',
-            data: {
-              type: 'image',
-              src: payload?.src || '',
-              label: payload?.label,
-            },
-            style: { width: initialWidth, height: initialHeight },
-          };
-          break;
-        case 'pdf':
-          newNode = {
-            ...baseNode,
-            type: 'pdf',
-            data: {
-              type: 'pdf',
-              src: payload?.src || '',
-              label: payload?.label,
-            },
-            style: { width: initialWidth, height: initialHeight },
-          };
-          break;
-        case 'video':
-          newNode = {
-            ...baseNode,
-            type: 'video',
-            data: {
-              type: 'video',
-              src: payload?.src || '',
-              label: payload?.label,
-            },
-          };
-          break;
-        case 'web':
-          newNode = {
-            ...baseNode,
-            type: 'web',
-            data: {
-              type: 'web',
-              src: payload?.src || '',
-            },
-            style: { width: initialWidth, height: initialHeight },
-          };
-          break;
-        case 'frame':
-          newNode = {
-            ...baseNode,
-            type: 'frame',
-            data: { type: 'frame' },
-            style: {
-              width: initialWidth,
-              height: initialHeight,
-            },
-          };
-          break;
-        default:
-          return;
-      }
-
-      addNode(newNode);
-    },
-    [addNode, screenToFlowPosition],
-  );
 
   const getImageDimensions = (
     file: File,
@@ -195,42 +79,56 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
     if (!files || files.length === 0) return;
     setActiveModal(null);
 
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const type = detectNodeType(file.name);
+    const inputs = (
+      await Promise.all(
+        Array.from(files).map(async (file): Promise<AddNodeInput | null> => {
+          const type = detectNodeType(file.name);
 
-      try {
-        let url = '';
-        let dimensions = { width: 400, height: 300 };
+          try {
+            let url = '';
+            let naturalDimensions:
+              | { width: number; height: number }
+              | undefined;
 
-        if (type === 'image') {
-          const [uploadedUrl, dims] = await Promise.all([
-            uploadImage(file),
-            getImageDimensions(file),
-          ]);
-          url = uploadedUrl;
-          dimensions = dims;
-        } else if (type === 'video') {
-          const [uploadedUrl, dims] = await Promise.all([
-            uploadVideo(file),
-            getVideoDimensions(file),
-          ]);
-          url = uploadedUrl;
-          dimensions = dims;
-        } else if (type === 'pdf') {
-          url = await uploadPdf(file);
-          dimensions = { width: 400, height: 300 };
-        }
+            if (type === 'image') {
+              const [uploadedUrl, dims] = await Promise.all([
+                uploadImage(file),
+                getImageDimensions(file),
+              ]);
+              url = uploadedUrl;
+              naturalDimensions = dims;
+            } else if (type === 'video') {
+              const [uploadedUrl, dims] = await Promise.all([
+                uploadVideo(file),
+                getVideoDimensions(file),
+              ]);
+              url = uploadedUrl;
+              naturalDimensions = dims;
+            } else if (type === 'pdf') {
+              url = await uploadPdf(file);
+            }
 
-        createNode(type, {
-          src: url,
-          label: file.name,
-          ...dimensions,
-        });
-      } catch (error) {
-        console.error(`Failed to upload ${file.name}:`, error);
-      }
+            return {
+              nodeType: type,
+              data: {
+                type,
+                src: url,
+                label: file.name,
+              },
+              ...(naturalDimensions ? { naturalDimensions } : {}),
+            };
+          } catch (error) {
+            console.error(`Failed to upload ${file.name}:`, error);
+            return null;
+          }
+        }),
+      )
+    ).filter((input): input is AddNodeInput => input !== null);
+
+    if (inputs.length > 0) {
+      addNodes(inputs);
     }
+
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -239,17 +137,27 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
 
     const lines = linkText.split('\n');
 
-    lines.forEach((line) => {
+    const inputs = lines.flatMap((line): AddNodeInput[] => {
       const url = line.trim();
-      if (!url) return;
+      if (!url) return [];
 
       const finalUrl = url.startsWith('http') ? url : `https://${url}`;
       const type = detectNodeType(finalUrl);
 
-      createNode(type, {
-        src: finalUrl,
-      });
+      return [
+        {
+          nodeType: type,
+          data: {
+            type,
+            src: finalUrl,
+          },
+        },
+      ];
     });
+
+    if (inputs.length > 0) {
+      addNodes(inputs);
+    }
 
     setLinkText('');
     setActiveModal(null);

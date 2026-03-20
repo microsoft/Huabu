@@ -11,11 +11,11 @@ import {
 import { useMemo } from 'react';
 import { createPortal } from 'react-dom';
 
-import useCanvasStore from '../../store/canvasStore';
 import {
   getAbsolutePosition,
   type NestableNode,
-} from '../../utils/canvas/frame';
+} from '../../canvas/utils/frame';
+import useCanvasStore from '../../store/canvasStore';
 import { IconButton } from '../Common/IconButton';
 
 /**

@@ -4,7 +4,7 @@ import {
   type NestableNode,
 } from './frame';
 import { snapToGrid } from '../../config/canvas';
-import { getLayoutNodeSize } from '../node/size';
+import { getLayoutNodeSize } from '../../utils/node/size';
 
 import type { Node } from '@xyflow/react';
 
@@ -49,7 +49,7 @@ function getAlignParticipants(nodes: Node[], selected: Node[]): Node[] {
 // ── Public API ─────────────────────────────────────────────────────────
 
 /**
- * Align the selected nodes along the given direction.
+ * Align the specified nodes along the given direction.
  *
  * Returns a new `nodes` array (immutable) or `null` when no change is needed.
  *
@@ -61,8 +61,12 @@ function getAlignParticipants(nodes: Node[], selected: Node[]): Node[] {
 export function alignNodes(
   nodes: Node[],
   direction: AlignDirection,
+  nodeIds?: string[],
 ): Node[] | null {
-  const selected = nodes.filter((n) => n.selected);
+  const targetIds = nodeIds ? new Set(nodeIds) : null;
+  const selected = targetIds
+    ? nodes.filter((n) => targetIds.has(n.id))
+    : nodes.filter((n) => n.selected);
   if (selected.length < 2) return null;
 
   const participants = getAlignParticipants(nodes, selected);
@@ -129,7 +133,7 @@ export function alignNodes(
 }
 
 /**
- * Spread apart overlapping selected nodes so nothing overlaps.
+ * Spread apart overlapping nodes so nothing overlaps.
  *
  * Returns a new `nodes` array (immutable) or `null` when no change is needed.
  *
@@ -139,8 +143,15 @@ export function alignNodes(
  * - A greedy iterative resolver pushes colliding rectangles apart using the
  *   minimum-displacement direction.
  */
-export function spreadNodes(nodes: Node[], gap = 24): Node[] | null {
-  const selected = nodes.filter((n) => n.selected);
+export function spreadNodes(
+  nodes: Node[],
+  gap = 24,
+  nodeIds?: string[],
+): Node[] | null {
+  const targetIds = nodeIds ? new Set(nodeIds) : null;
+  const selected = targetIds
+    ? nodes.filter((n) => targetIds.has(n.id))
+    : nodes.filter((n) => n.selected);
   if (selected.length < 2) return null;
 
   const participants = getAlignParticipants(nodes, selected);

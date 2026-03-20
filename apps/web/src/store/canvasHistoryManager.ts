@@ -1,5 +1,6 @@
 import { deleteNode } from '../api';
 
+import type { RecentAction } from '@sediment/shared';
 import type { Node, Edge } from '@xyflow/react';
 
 const MAX_HISTORY = 50;
@@ -14,6 +15,11 @@ const MAX_HISTORY = 50;
 export type CanvasSnapshot = {
   nodes: Node[];
   edges: Edge[];
+};
+
+/** Extended snapshot that also captures action history for preview/restore. */
+export type CanvasPreviewSnapshot = CanvasSnapshot & {
+  actionHistory: RecentAction[];
 };
 
 /**
@@ -78,6 +84,26 @@ class CanvasHistoryManager {
 
   // ---- In-flight DELETE requests (abortable on undo) ----
   private inflightDeletes = new Map<string, AbortController>();
+
+  // ---- Gesture snapshot tracking ----
+  /** True when `beginGesture` has been called but the resulting command
+   *  batch has not yet been executed. Used by the executor to verify
+   *  that `snapshot: 'caller'` commands are properly paired. */
+  private _gestureSnapshotTaken = false;
+
+  get gestureSnapshotTaken(): boolean {
+    return this._gestureSnapshotTaken;
+  }
+
+  /** Mark that a gesture snapshot was consumed by the executor. */
+  consumeGestureSnapshot(): void {
+    this._gestureSnapshotTaken = false;
+  }
+
+  /** Mark that a caller-managed snapshot was taken for the upcoming command. */
+  markGestureSnapshot(): void {
+    this._gestureSnapshotTaken = true;
+  }
 
   // ---------- Public getters ----------
 

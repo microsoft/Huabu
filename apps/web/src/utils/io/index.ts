@@ -31,3 +31,9 @@ export {
   normalizeUrl,
   getImageDimensionsFromBlob,
 } from './media';
+
+export {
+  uploadFileToNodeInput,
+  urlToNodeInput,
+  textToNodeInput,
+} from './nodeInputBuilders';

@@ -203,6 +203,15 @@ export const CanvasLayerTree = ({
     const activeParentId = activeItem.node.parentId;
     const targetParentId = targetItem.node.parentId;
 
+    // Determine drag direction from visible item indices.
+    // The visual list is reversed (higher z-order at top), so dragging DOWN
+    // in the list means lower z-order → insert "before" in the nodes array,
+    // and dragging UP means higher z-order → insert "after".
+    const activeIndex = visibleItems.findIndex((i) => i.id === activeId);
+    const overIndex = visibleItems.findIndex((i) => i.id === overId);
+    const position: 'before' | 'after' =
+      activeIndex < overIndex ? 'before' : 'after';
+
     // ============================================================
     // Canvas Layer Tree handles:
     // 1. Hierarchy changes (frame/unframe)
@@ -211,39 +220,56 @@ export const CanvasLayerTree = ({
     // ============================================================
 
     // Case 1: Dropping on the parent frame itself → unframe
+    // Place the node near the frame in the tree
     if (isTargetFrame && activeParentId === overId) {
-      moveNodeOutOfFrame(activeId);
-      // After unframe, reorder to place node near the target position
-      reorderNodes(activeId, overId);
+      moveNodeOutOfFrame(activeId, {
+        nodeId: overId,
+        position,
+      });
       return;
     }
 
     // Case 2: Dropping on a different frame → move into that frame
+    // Place the node as the first visible child (highest z-order)
     if (isTargetFrame) {
-      moveNodeIntoFrame(activeId, overId);
-      // After moving into frame, reorder to place node near the target position
-      reorderNodes(activeId, overId);
+      // The visual list is reversed: the first visible child under a frame is
+      // the LAST child in the nodes array (highest z-order). To make the new
+      // node the first visible child, place it AFTER that child in the array.
+      const firstVisibleChild = items.find(
+        (item) => item.node.parentId === overId && item.id !== activeId,
+      );
+      moveNodeIntoFrame(
+        activeId,
+        overId,
+        firstVisibleChild
+          ? { nodeId: firstVisibleChild.id, position: 'after' }
+          : undefined,
+      );
       return;
     }
 
     // Case 3: Dropping on a node in a different frame → move into that frame
+    // Place the node near the target node within the frame
     if (targetParentId && targetParentId !== activeParentId) {
-      moveNodeIntoFrame(activeId, targetParentId);
-      // After moving into frame, reorder to place node near the target node
-      reorderNodes(activeId, overId);
+      moveNodeIntoFrame(activeId, targetParentId, {
+        nodeId: overId,
+        position,
+      });
       return;
     }
 
     // Case 4: Dropping on a top-level node when active is in a frame → unframe
+    // Place the node near the target in the tree
     if (activeHasParent && !targetParentId) {
-      moveNodeOutOfFrame(activeId);
-      // After unframe, reorder to place node near the target position
-      reorderNodes(activeId, overId);
+      moveNodeOutOfFrame(activeId, {
+        nodeId: overId,
+        position,
+      });
       return;
     }
 
     // Case 5: Same-level drag → reorder to change render order (z-index)
-    reorderNodes(activeId, overId);
+    reorderNodes(activeId, overId, position);
   };
 
   const handleSelect = (id: string, event: React.MouseEvent) => {

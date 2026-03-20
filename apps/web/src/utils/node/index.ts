@@ -7,16 +7,6 @@ export {
   deduplicateLabel,
 } from './labels';
 
-export {
-  type NodeSize,
-  type BuildNodeOptions,
-  type SourceNodeOptions,
-  IMAGE_DEFAULT_SIZE,
-  getNodeSize as getDefaultNodeSize,
-  computeImageSize,
-  centeredPosition,
-  buildNode,
-  buildSourceNode,
-} from './factory';
+export { getNodeDefaultSize } from './nodeDefaultSize';
 
 export { getSmartHandles, rerouteAllEdges, toggleNodeLock } from './helper';
