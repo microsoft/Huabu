@@ -31,7 +31,7 @@ export const ContextUsageRing = () => {
   const percentage = Math.round(ratio * 100);
 
   // SVG ring parameters
-  const size = 20;
+  const size = 16;
   const strokeWidth = 2.5;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
