@@ -197,6 +197,9 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
 
   // Load history from server on first mount (once per thread)
   useEffect(() => {
+    // Wait for canvasId to be set before fetching history — on initial render
+    // the canvas store hasn't loaded yet, so canvasId is still ''.
+    if (!canvasId) return;
     if (useChatStore.getState().isHistoryLoaded) return;
 
     let cancelled = false;
@@ -209,9 +212,18 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     } = useChatStore.getState();
 
     agentApi
-      .fetchHistory(tid, canvasId || undefined)
+      .fetchHistory(tid, canvasId)
       .then((res) => {
         if (cancelled) return;
+
+        // If the server returned a different threadId (fallback to latest),
+        // update the client's threadMap so future requests use the correct id.
+        if (res.threadId && res.threadId !== tid) {
+          useChatStore.setState((state) => ({
+            threadId: res.threadId,
+            threadMap: { ...state.threadMap, [canvasId]: res.threadId },
+          }));
+        }
 
         const serverMessages: ChatMessage[] = res.messages.map(
           (m, i): ChatMessage => {
