@@ -22,7 +22,7 @@ export const MainLayout = ({
   // the center panel width.
   const COLLAPSED_WIDTH_PX = 36;
   const LEFT_MIN_WIDTH_PX = 200;
-  const RIGHT_MIN_WIDTH_PX = 256;
+  const RIGHT_MIN_WIDTH_PX = 264;
   const CENTER_MIN_WIDTH_PX = 100;
 
   // Maximum side panel widths as ratios of the available content width.
