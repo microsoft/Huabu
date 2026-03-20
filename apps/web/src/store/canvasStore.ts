@@ -591,24 +591,8 @@ const useCanvasStore = create<RFState>()(
         };
         canvasHistoryManager.clear();
 
-        // Strip top-level `width`/`height` from nodes so that
-        // `node.style.width/height` remains the single source of truth.
-        // Older sessions may have had these set via React Flow's
-        // `setAttributes` during resize, which would shadow style values.
-        //
-        // TODO(cleanup): Once all persisted canvases have been re-saved
-        // without top-level width/height (i.e. after enough time has
-        // passed for all users to have loaded and saved their canvases),
-        // this migration block can be safely removed.
-        const cleanedNodes = (state.nodes ?? []).map((n) => {
-          if (n.width == null && n.height == null) return n;
-
-          const { width, height, ...rest } = n;
-          return rest as Node;
-        });
-
         set({
-          nodes: cleanedNodes,
+          nodes: state.nodes ?? [],
           edges: state.edges ?? [],
           canvasTitle: response.title || 'Untitled',
           version: response.version,

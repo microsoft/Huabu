@@ -2,7 +2,7 @@
  * Shared canvas command schema executed by both the web client and agent flows.
  */
 
-import type { Point } from './layout.js';
+import type { LayoutStrategy, Point } from './layout.js';
 import type { CanvasNodeType, NodeData } from './node.js';
 import type { PrefixedId } from '../../utils/id.js';
 
@@ -23,9 +23,8 @@ export type CanvasEdgeRef =
   | CanvasEdgeId
   | { source: CanvasNodeId; target: CanvasNodeId };
 
-export interface CanvasSize {
+export interface NodeSize {
   width: number;
-  /** Optional for auto-height nodes like text and note. */
   height?: number;
 }
 
@@ -39,9 +38,12 @@ export type CanvasAlignDirection =
 
 export type CanvasAutoLayoutScope =
   | { type: 'canvas' }
-  | { type: 'frame'; frameId: CanvasNodeId };
+  | { type: 'frame'; frameId: CanvasNodeId }
+  | { type: 'nodes'; nodeIds: CanvasNodeId[] };
 
 export interface CanvasAutoLayoutOptions {
+  strategy?: LayoutStrategy;
+  spacing?: Partial<NodeSize>;
   animate?: boolean;
 }
 
@@ -55,7 +57,7 @@ type CanvasNodeCreateInputByType<T extends CanvasNodeType> = {
   nodeType: T;
   data?: Partial<Omit<Extract<NodeData, { type: T }>, 'type'>>;
   position?: Point;
-  size?: CanvasSize;
+  size?: NodeSize;
   parentId?: CanvasNodeId | null;
   /** When true, skip force-directed auto-placement (e.g. node was explicitly placed by drag). */
   skipAutoLayout?: boolean;
@@ -78,7 +80,7 @@ export interface CanvasNodeParentUpdate {
 export interface CanvasNodeGeometryUpdate {
   nodeId: CanvasNodeId;
   position?: Point;
-  size?: CanvasSize;
+  size?: NodeSize;
 }
 
 export interface CanvasNodeLockUpdate {
@@ -111,14 +113,11 @@ export type CanvasCommand =
     }
   | { type: 'DISSOLVE_FRAME'; frameId: CanvasNodeId }
   | { type: 'SET_NODE_GEOMETRY'; items: CanvasNodeGeometryUpdate[] }
-  | { type: 'SET_NODE_SELECTION'; nodeIds: CanvasNodeId[] }
-  | { type: 'SET_EXPANDED_NODE'; nodeId: CanvasNodeId | null }
   | {
       type: 'REORDER_NODES';
       nodeIds: CanvasNodeId[];
       to: 'top' | 'bottom' | { before: CanvasNodeId };
     }
-  | { type: 'SET_NODE_LOCKED'; items: CanvasNodeLockUpdate[] }
   | { type: 'CONNECT_NODES'; edges: CanvasEdgeCreateInput[] }
   | { type: 'DISCONNECT_EDGES'; edges: CanvasEdgeRef[] }
   | {
@@ -134,6 +133,9 @@ export type CanvasCommand =
       type: 'AUTO_LAYOUT';
       scope: CanvasAutoLayoutScope;
       options?: CanvasAutoLayoutOptions;
-    };
+    }
+  | { type: 'SET_NODE_SELECTION'; nodeIds: CanvasNodeId[] }
+  | { type: 'SET_EXPANDED_NODE'; nodeId: CanvasNodeId | null }
+  | { type: 'SET_NODE_LOCKED'; items: CanvasNodeLockUpdate[] };
 
 export type CanvasCommandType = CanvasCommand['type'];

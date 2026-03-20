@@ -7,13 +7,6 @@ export {
   deduplicateLabel,
 } from './labels';
 
-export {
-  type NodeSize,
-  IMAGE_DEFAULT_SIZE,
-  getNodeDefaultSize,
-  computeMediaSize,
-} from './factory';
-
-export { nodePositionFromPlacementPoint } from './placement';
+export { getNodeDefaultSize } from './nodeDefaultSize';
 
 export { getSmartHandles, rerouteAllEdges, toggleNodeLock } from './helper';

@@ -15,26 +15,23 @@ import {
   type CanvasCommand,
   type CanvasEdgeId,
   type CanvasNodeId,
-  type CanvasSize,
+  type NodeSize,
   type CanvasNodeType,
   type Point,
   type RecentAction,
 } from '@sediment/shared';
 
+import resolveAddNodes from './resolveAddNodes';
 import { extractNodeRef, extractSnippet } from './utils';
 import {
   autoFrameNodeByOverlap,
   autoUnframeNodeByNonOverlap,
-  findFrameAtPoint,
   frameNodes,
   frameNodesInRect,
   fitFrames,
-  getAbsolutePosition,
   type NestableNode,
 } from './utils/frame';
-import { computeMediaSize } from '../utils/node/factory';
 import { deduplicateLabel, generateNextLabel } from '../utils/node/labels';
-import { nodePositionFromPlacementPoint } from '../utils/node/placement';
 
 import type { Edge, Node } from '@xyflow/react';
 
@@ -55,7 +52,7 @@ export interface AddNodeInput {
   id?: CanvasNodeId;
   nodeType: CanvasNodeType;
   data?: Record<string, unknown>;
-  size?: CanvasSize;
+  size?: NodeSize;
   naturalDimensions?: { width: number; height: number };
   parentId?: CanvasNodeId | null;
   /** Explicit placement anchor used for centering and frame hit-testing. */
@@ -143,111 +140,13 @@ const DEFAULT_PASTE_OFFSET = 40;
 
 function canvasSizeFromStyle(
   style: Node['style'] | undefined,
-): CanvasSize | undefined {
+): NodeSize | undefined {
   const styleRecord = style as Record<string, unknown> | undefined;
   const width = styleRecord?.width;
   if (typeof width !== 'number') return undefined;
 
   const height = styleRecord?.height;
   return typeof height === 'number' ? { width, height } : { width };
-}
-
-function resolveExplicitFramePlacement(params: {
-  nodes: Node[];
-  nodeType: CanvasNodeType;
-  position?: Point;
-  placementPoint?: Point;
-  parentId?: CanvasNodeId | null;
-}): { position?: Point; parentId?: CanvasNodeId | null } {
-  const { nodes, nodeType, position, placementPoint, parentId } = params;
-
-  if (!position || !placementPoint || parentId || nodeType === 'frame') {
-    return { position, parentId };
-  }
-
-  const frameId = findFrameAtPoint(nodes as NestableNode[], placementPoint);
-  if (!frameId) {
-    return { position, parentId };
-  }
-
-  const frameAbs = getAbsolutePosition(nodes as NestableNode[], frameId);
-  if (!frameAbs) {
-    return { position, parentId };
-  }
-
-  return {
-    parentId: frameId as CanvasNodeId,
-    position: {
-      x: position.x - frameAbs.x,
-      y: position.y - frameAbs.y,
-    },
-  };
-}
-
-function resolveAddNodePlacement(input: AddNodeInput): {
-  position?: Point;
-  size?: CanvasSize;
-} {
-  const size =
-    input.size ??
-    (input.naturalDimensions &&
-    (input.nodeType === 'image' || input.nodeType === 'video')
-      ? computeMediaSize(
-          input.nodeType,
-          input.naturalDimensions.width,
-          input.naturalDimensions.height,
-        )
-      : undefined);
-
-  return {
-    position: input.placementPoint
-      ? nodePositionFromPlacementPoint(
-          input.placementPoint,
-          input.nodeType,
-          size,
-        )
-      : undefined,
-    size,
-  };
-}
-
-function materializeAddNode(
-  input: AddNodeInput,
-  ui: UiResolverState,
-): {
-  node: Extract<CanvasCommand, { type: 'CREATE_NODES' }>['nodes'][number];
-  traceNode: {
-    id: CanvasNodeId;
-    nodeType: CanvasNodeType;
-    label?: string;
-  };
-} {
-  const nodeId = input.id ?? createId('node');
-  const placement = resolveAddNodePlacement(input);
-  const resolved = resolveExplicitFramePlacement({
-    nodes: ui.nodes,
-    nodeType: input.nodeType,
-    position: placement.position,
-    placementPoint: input.placementPoint,
-    parentId: input.parentId,
-  });
-
-  return {
-    node: {
-      id: nodeId,
-      nodeType: input.nodeType,
-      data: input.data as never,
-      ...(resolved.position ? { position: resolved.position } : {}),
-      ...(placement.size ? { size: placement.size } : {}),
-      ...(resolved.parentId ? { parentId: resolved.parentId } : {}),
-      ...(input.skipAutoLayout ? { skipAutoLayout: true } : {}),
-    },
-    traceNode: {
-      id: nodeId,
-      nodeType: input.nodeType,
-      label: input.data?.label as string | undefined,
-    },
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -829,39 +728,8 @@ function resolveReorderSelected(
 }
 
 // ---------------------------------------------------------------------------
-// ADD_NODES
-// ---------------------------------------------------------------------------
-
-function resolveAddNodes(
-  intent: Extract<CanvasUiIntent, { type: 'ADD_NODES' }>,
-  ui: UiResolverState,
-): UiIntentResolution {
-  if (intent.inputs.length === 0) {
-    return { commands: [], trace: [] };
-  }
-
-  const created = intent.inputs.map((input) => materializeAddNode(input, ui));
-
-  return {
-    commands: [
-      {
-        type: 'CREATE_NODES',
-        nodes: created.map((item) => item.node),
-      },
-    ],
-    trace: [
-      {
-        action: 'node_created',
-        nodes: created.map((item) => item.traceNode),
-      },
-    ],
-  };
-}
-
-// ---------------------------------------------------------------------------
 // DELETE_NODES
 // ---------------------------------------------------------------------------
-
 function resolveDeleteNodes(
   intent: Extract<CanvasUiIntent, { type: 'DELETE_NODES' }>,
   ui: UiResolverState,
@@ -892,7 +760,6 @@ function resolveDeleteNodes(
 // ---------------------------------------------------------------------------
 // UPDATE_NODE_DATA
 // ---------------------------------------------------------------------------
-
 function resolveUpdateNodeData(
   intent: Extract<CanvasUiIntent, { type: 'UPDATE_NODE_DATA' }>,
   ui: UiResolverState,
@@ -914,7 +781,6 @@ function resolveUpdateNodeData(
 // ---------------------------------------------------------------------------
 // CONNECT_EDGE
 // ---------------------------------------------------------------------------
-
 function resolveConnectEdge(
   intent: Extract<CanvasUiIntent, { type: 'CONNECT_EDGE' }>,
   ui: UiResolverState,

@@ -67,7 +67,7 @@ export type {
   CanvasNodeId,
   CanvasEdgeId,
   CanvasEdgeRef,
-  CanvasSize,
+  NodeSize,
   CanvasAlignDirection,
   CanvasAutoLayoutScope,
   CanvasAutoLayoutOptions,

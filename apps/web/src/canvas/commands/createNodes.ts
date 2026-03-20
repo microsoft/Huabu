@@ -3,8 +3,8 @@ import { createId, type CanvasCommand } from '@sediment/shared';
 import { noop, type CommandDefinition } from './types';
 import { needsLabelResolve } from '../../utils/io/resolveLabel';
 import { placeNode } from '../../utils/layout';
-import { getNodeDefaultSize } from '../../utils/node/factory';
 import { deduplicateLabel, generateNextLabel } from '../../utils/node/labels';
+import { getNodeDefaultSize } from '../../utils/node/nodeDefaultSize';
 import { selectOnly } from '../utils';
 import {
   fitFrames,
@@ -77,7 +77,7 @@ const createNodes: CommandDefinition<Cmd> = {
       if (needsLabelResolve(nodeType)) labelResolveNodeIds.push(nodeId);
 
       // ---------------------------------------------------------------
-      // 2. Build the final ReactFlow node from the already-resolved
+      // 2. TODO:size Build the final ReactFlow node from the already-resolved
       //    command input. Position semantics are finalized by the caller.
       // ---------------------------------------------------------------
       const size = input.size ?? getNodeDefaultSize(nodeType);

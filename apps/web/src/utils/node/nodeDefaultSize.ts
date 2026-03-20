@@ -18,6 +18,6 @@ const DEFAULT_SIZES: Record<string, NodeSize> = {
  * Text and note nodes expose only a default width because their height is
  * content-driven at render time.
  */
-export function getNodeDefaultSize(nodeType: string): NodeSize | null {
-  return DEFAULT_SIZES[nodeType];
+export function getNodeDefaultSize(nodeType: string): NodeSize {
+  return DEFAULT_SIZES[nodeType] || { width: 300, height: 200 };
 }
