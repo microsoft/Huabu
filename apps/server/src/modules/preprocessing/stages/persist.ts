@@ -6,12 +6,12 @@
  */
 
 import type { IKnowledgeRepository } from '../../knowledge/knowledge.interface.js';
-import type { SourceType } from '../../knowledge/types.js';
 import type { NormalizeResult, PersistResult } from '../types.js';
+import type { SourceKind } from '@sediment/shared';
 
 export function persist(
   normalized: NormalizeResult,
-  sourceKind: string | undefined,
+  sourceKind: SourceKind | undefined,
   repository: IKnowledgeRepository,
   src?: string,
 ): PersistResult {
@@ -19,7 +19,7 @@ export function persist(
     return { skipped: true };
   }
 
-  const type = sourceKind as SourceType;
+  const type = sourceKind;
   const existing = repository.findSourceById(normalized.sourceId);
 
   // Content-hash deduplication: skip write if hash unchanged

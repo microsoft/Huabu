@@ -11,6 +11,7 @@ import type {
   PreprocessDiagnostic,
   PreprocessNodeRequest,
   PreprocessNodeResult,
+  SourceKind,
 } from '@sediment/shared';
 
 export function project(
@@ -19,7 +20,7 @@ export function project(
   usedCapabilities: Capability[],
   ctx: PipelineContext,
   diagnostics: PreprocessDiagnostic[],
-  sourceKind?: string,
+  sourceKind?: SourceKind,
 ): PreprocessNodeResult {
   const patch: Record<string, unknown> = {};
 

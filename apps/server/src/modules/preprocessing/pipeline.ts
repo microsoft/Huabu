@@ -22,6 +22,7 @@ import type {
   PreprocessDiagnostic,
   PreprocessNodeRequest,
   PreprocessNodeResult,
+  SourceKind,
 } from '@sediment/shared';
 
 /** Dependencies injected into the pipeline runner. */
@@ -37,7 +38,7 @@ export interface PipelineDeps {
 export async function runPipeline(
   request: PreprocessNodeRequest,
   plan: Capability[],
-  sourceKind: string | undefined,
+  sourceKind: SourceKind | undefined,
   deps: PipelineDeps,
 ): Promise<PreprocessNodeResult> {
   const requestId = randomUUID();

@@ -7,17 +7,17 @@
 
 import { computeContentHash, generateSourceId } from '../../knowledge/utils.js';
 
-import type { SourceType } from '../../knowledge/types.js';
 import type {
   ResolvedInput,
   ExtractResult,
   NormalizeResult,
 } from '../types.js';
+import type { SourceKind } from '@sediment/shared';
 
 export function normalize(
   resolved: ResolvedInput,
   extracted: ExtractResult,
-  sourceKind?: string,
+  sourceKind?: SourceKind,
 ): NormalizeResult {
   const canonicalContent = extracted.content ?? resolved.content ?? '';
   const contentHash = computeContentHash(canonicalContent);
@@ -84,7 +84,7 @@ function computeInputFingerprint(
 function resolveSourceId(
   resolved: ResolvedInput,
   contentHash: string,
-  sourceKind?: string,
+  sourceKind?: SourceKind,
 ): string {
   // If an existing sourceId was provided, keep it
   if (resolved.existingSourceId) {
@@ -96,7 +96,7 @@ function resolveSourceId(
     return `pp_${contentHash.replace('sha256:', '').substring(0, 16)}`;
   }
 
-  const type = sourceKind as SourceType;
+  const type = sourceKind;
 
   // Fallback identifier using artifactUri or nodeId
   const fallbackIdentifier =
