@@ -25,9 +25,9 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
+    "@types/node": "^22.15.0",
     "@types/sanitize-html": "^2.16.0",
     "tsx": "^4.0.0",
-    "typescript": "^5.0.0"
+    "typescript": "^5.9.3"
   }
 }
