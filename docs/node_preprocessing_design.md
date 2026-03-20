@@ -1085,3 +1085,12 @@ and capabilities to execute based on node profiles and dirty-field analysis.
 
 All LLM usage is consolidated in the Enrich stage, enabling cost control, batching,
 caching, and observability in a single place.
+
+### Error Recovery & Fallbacks
+
+Nodes that fail extraction (e.g. malformed PDFs or missing Web URLs) do not simply silently exit. Instead:
+
+- They throw a structured \EXTRACT_FAILED\ diagnostic.
+- If a web source lacks a URI or a PDF contains empty content, the \Normalize\ stage assigns a stable fallback \sourceId\ using the \
+  odeId\ or \rtifactUri\.
+- This prevents identical empty contents across multiple failed nodes from colliding and overwriting each other in the storage, and allows the \Persist\ stage to save a stable placeholder.

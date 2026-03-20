@@ -19,6 +19,7 @@ export function project(
   usedCapabilities: Capability[],
   ctx: PipelineContext,
   diagnostics: PreprocessDiagnostic[],
+  sourceKind?: string,
 ): PreprocessNodeResult {
   const patch: Record<string, unknown> = {};
 
@@ -79,7 +80,7 @@ export function project(
       ? undefined
       : {
           sourceId: ctx.persisted?.sourceId,
-          sourceKind: undefined, // filled by caller if needed
+          sourceKind,
           isNew: ctx.persisted?.isNew,
           contentChanged: ctx.persisted?.contentChanged,
           placeholder: ctx.persisted?.placeholder,

@@ -12,6 +12,9 @@ import type { SourceMetadata } from '@sediment/shared';
 
 /** Canonical input produced by the Input Resolve stage. */
 export interface ResolvedInput {
+  /** The id of the node being processed. */
+  nodeId: string;
+
   /** Node type that was resolved. */
   nodeType: string;
 

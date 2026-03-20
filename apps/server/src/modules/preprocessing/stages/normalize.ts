@@ -98,21 +98,46 @@ function resolveSourceId(
 
   const type = sourceKind as SourceType;
 
-  switch (type) {
-    case 'web':
-      return generateSourceId({
-        type: 'web',
-        uri: resolved.normalizedUri,
-      });
-    case 'pdf':
-      return generateSourceId({
-        type: 'pdf',
-        fileHash: contentHash,
-      });
-    case 'note':
-    case 'text':
-      return generateSourceId({ type });
-    default:
-      return generateSourceId({ type: 'note' });
+  // Fallback identifier using artifactUri or nodeId
+  const fallbackIdentifier =
+    resolved.artifactUri ?? resolved.nodeId ?? contentHash;
+  const generateFallbackId = () =>
+    `fallback_${type}_${fallbackIdentifier.replace('sha256:', '').substring(0, 16)}`;
+
+  try {
+    switch (type) {
+      case 'web':
+        if (!resolved.normalizedUri) {
+          return generateSourceId({
+            type: 'web',
+            uri: `missing:${resolved.nodeId}`,
+          });
+        }
+        return generateSourceId({
+          type: 'web',
+          uri: resolved.normalizedUri,
+        });
+
+      case 'pdf': {
+        const emptyHash = computeContentHash('');
+        let hashToUse = contentHash;
+        if (!contentHash || contentHash === emptyHash) {
+          hashToUse = fallbackIdentifier;
+        }
+        return generateSourceId({
+          type: 'pdf',
+          fileHash: hashToUse,
+        });
+      }
+
+      case 'note':
+      case 'text':
+        return generateSourceId({ type });
+
+      default:
+        return generateFallbackId();
+    }
+  } catch {
+    return generateFallbackId();
   }
 }

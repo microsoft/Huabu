@@ -62,7 +62,14 @@ export async function runPipeline(
   }
 
   if (!ctx.resolved) {
-    return project(request, requestId, usedCapabilities, ctx, diagnostics);
+    return project(
+      request,
+      requestId,
+      usedCapabilities,
+      ctx,
+      diagnostics,
+      sourceKind,
+    );
   }
 
   // Stage 2 — Extract
@@ -214,5 +221,12 @@ export async function runPipeline(
   if (has('build_patch')) {
     usedCapabilities.push('build_patch');
   }
-  return project(request, requestId, usedCapabilities, ctx, diagnostics);
+  return project(
+    request,
+    requestId,
+    usedCapabilities,
+    ctx,
+    diagnostics,
+    sourceKind,
+  );
 }

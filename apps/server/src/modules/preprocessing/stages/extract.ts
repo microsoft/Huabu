@@ -36,7 +36,7 @@ export async function extract(resolved: ResolvedInput): Promise<ExtractResult> {
   if (nodeType === 'web') {
     const src = resolved.normalizedUri;
     if (!src) {
-      return { content: '', skipped: true };
+      throw new Error('Missing URI for web source extraction');
     }
     const loader = DocumentLoaderFactory.getLoader('web');
     const result = await loader.load(src, {
@@ -54,7 +54,7 @@ export async function extract(resolved: ResolvedInput): Promise<ExtractResult> {
   if (nodeType === 'pdf') {
     const filePath = resolved.filePath;
     if (!filePath) {
-      return { content: '', skipped: true };
+      throw new Error('Missing file path for PDF source extraction');
     }
     const loader = DocumentLoaderFactory.getLoader('pdf');
     const result = await loader.load(filePath);

@@ -33,8 +33,9 @@ export function inputResolve(
   request: PreprocessNodeRequest,
   artifactsDir?: string,
 ): ResolvedInput {
-  const { nodeType, snapshot } = request;
+  const { nodeId, nodeType, snapshot } = request;
   const base: ResolvedInput = {
+    nodeId,
     nodeType,
     title: snapshot.title as string | undefined,
     existingSourceId: snapshot.sourceId as string | undefined,
