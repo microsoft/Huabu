@@ -249,7 +249,7 @@ export default function CanvasListPage() {
               variant="primary"
               onClick={handleCreate}
               disabled={isCreating}
-              className="bg-primary text-primary-foreground gap-2 rounded-lg px-3 py-2"
+              className="bg-primary text-primary-foreground hover:bg-primary/80 gap-2 rounded-lg px-3 py-2"
             >
               {isCreating ? (
                 <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />

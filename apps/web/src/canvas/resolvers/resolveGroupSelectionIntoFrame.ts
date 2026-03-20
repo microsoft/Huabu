@@ -44,6 +44,7 @@ export default function resolveGroupSelectionIntoFrame(
             width: (frameNode.style as Record<string, number>)?.width ?? 400,
             height: (frameNode.style as Record<string, number>)?.height ?? 300,
           },
+          skipAutoLayout: true,
         },
       ],
     });

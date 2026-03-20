@@ -16,25 +16,16 @@ const alignNodesDef: CommandDefinition<Cmd> = {
   handler(cmd, state) {
     if (cmd.nodeIds.length === 0) return noop(state);
 
-    // alignNodes utility works on selected nodes, so we need to temporarily
-    // mark the target nodes as selected.
     const targetIds = new Set(cmd.nodeIds as string[]);
-    const nodesWithSelection = state.nodes.map((n) => ({
-      ...n,
-      selected: targetIds.has(n.id),
-    }));
 
-    const result = alignNodes(nodesWithSelection, cmd.direction);
+    const result = alignNodes(
+      state.nodes,
+      cmd.direction,
+      cmd.nodeIds as string[],
+    );
     if (!result) return noop(state);
 
-    // Restore original selection state after alignment.
-    const alignedMap = new Map(result.map((n) => [n.id, n]));
-    let finalNodes = state.nodes.map((n) => {
-      const aligned = alignedMap.get(n.id);
-      if (!aligned) return n;
-      // Keep original selected state, take aligned position.
-      return { ...aligned, selected: n.selected };
-    });
+    let finalNodes = result;
 
     // Resize affected parent frames (only when auto-layout is on).
     const affectedFrameIds = new Set<string>();

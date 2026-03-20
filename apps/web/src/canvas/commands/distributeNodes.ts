@@ -16,23 +16,12 @@ const distributeNodes: CommandDefinition<Cmd> = {
   handler(cmd, state) {
     if (cmd.nodeIds.length < 3) return noop(state);
 
-    // spreadNodes utility works on selected nodes.
     const targetIds = new Set(cmd.nodeIds as string[]);
-    const nodesWithSelection = state.nodes.map((n) => ({
-      ...n,
-      selected: targetIds.has(n.id),
-    }));
 
-    const result = spreadNodes(nodesWithSelection);
+    const result = spreadNodes(state.nodes, 24, cmd.nodeIds as string[]);
     if (!result) return noop(state);
 
-    // Restore original selection state after distribution.
-    const distributedMap = new Map(result.map((n) => [n.id, n]));
-    let finalNodes = state.nodes.map((n) => {
-      const distributed = distributedMap.get(n.id);
-      if (!distributed) return n;
-      return { ...distributed, selected: n.selected };
-    });
+    let finalNodes = result;
 
     // Resize affected parent frames (only when auto-layout is on).
     const affectedFrameIds = new Set<string>();
