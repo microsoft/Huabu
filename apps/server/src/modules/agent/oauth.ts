@@ -6,7 +6,13 @@
  * data/oauth-credentials.json.
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import {
@@ -41,6 +47,11 @@ export function saveCredentials(creds: OAuthCredentials): void {
     mkdirSync(dir, { recursive: true });
   }
   writeFileSync(AUTH_FILE, JSON.stringify(creds, null, 2), 'utf-8');
+  try {
+    chmodSync(AUTH_FILE, 0o600);
+  } catch {
+    // Non-critical — best effort on platforms that support it
+  }
 }
 
 function clearCredentials(): void {

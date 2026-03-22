@@ -6,7 +6,13 @@
  * changed via the /api/llm routes.
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import {
@@ -15,6 +21,7 @@ import {
   getEnvApiKey,
   getModel,
   getModels,
+  getProviders,
 } from '@mariozechner/pi-ai';
 
 import {
@@ -39,77 +46,68 @@ import type {
 
 // ==================== Provider Catalog ====================
 
-const PROVIDER_CATALOG: LLMProviderInfo[] = [
-  {
-    id: 'anthropic',
-    name: 'Anthropic',
-    api: 'anthropic-messages',
-    builtIn: true,
-  },
-  {
-    id: 'openai',
-    name: 'OpenAI',
-    api: 'openai-completions',
-    builtIn: true,
-  },
-  {
+/** Provider-specific metadata not available from pi-ai's registry. */
+const PROVIDER_OVERRIDES: Record<string, Partial<LLMProviderInfo>> = {
+  'azure-openai-responses': {
     id: 'azure-openai',
     name: 'Azure OpenAI',
-    api: 'azure-openai-responses',
-    builtIn: false, // Azure models are custom deployments
+    builtIn: false,
   },
-  {
-    id: 'google',
-    name: 'Google Gemini',
-    api: 'google-generative-ai',
-    builtIn: true,
-  },
-  {
-    id: 'openrouter',
-    name: 'OpenRouter',
-    api: 'openai-completions',
-    defaultBaseUrl: 'https://openrouter.ai/api/v1',
-    builtIn: true,
-  },
-  {
-    id: 'groq',
-    name: 'Groq',
-    api: 'openai-completions',
-    builtIn: true,
-  },
-  {
-    id: 'xai',
-    name: 'xAI',
-    api: 'openai-completions',
-    builtIn: true,
-  },
-  {
-    id: 'mistral',
-    name: 'Mistral',
-    api: 'openai-completions',
-    builtIn: true,
-  },
-  {
-    id: 'amazon-bedrock',
-    name: 'Amazon Bedrock',
-    api: 'bedrock-converse-stream',
-    builtIn: true,
-  },
-  {
-    id: 'google-vertex',
-    name: 'Google Vertex AI',
-    api: 'google-vertex',
-    builtIn: true,
-  },
-  {
-    id: 'github-copilot',
-    name: 'GitHub Copilot',
-    api: 'openai-completions',
-    defaultBaseUrl: 'https://api.githubcopilot.com',
-    builtIn: true,
+  'github-copilot': {
     authType: 'oauth',
   },
-];
+};
+
+/** Display-friendly names for providers whose pi-ai ID is cryptic. */
+const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
+  anthropic: 'Anthropic',
+  openai: 'OpenAI',
+  'azure-openai-responses': 'Azure OpenAI',
+  google: 'Google Gemini',
+  'google-vertex': 'Google Vertex AI',
+  openrouter: 'OpenRouter',
+  groq: 'Groq',
+  xai: 'xAI',
+  mistral: 'Mistral',
+  'amazon-bedrock': 'Amazon Bedrock',
+  'github-copilot': 'GitHub Copilot',
+};
+
+/**
+ * Build provider catalog dynamically from pi-ai's registry.
+ * Falls back to a reasonable default for unknown providers.
+ */
+function buildProviderCatalog(): LLMProviderInfo[] {
+  const knownProviders = getProviders();
+  const catalog: LLMProviderInfo[] = knownProviders.map((id) => {
+    const overrides = PROVIDER_OVERRIDES[id];
+    const models = getModels(id);
+    const api = models[0]?.api ?? 'openai-completions';
+    const baseUrl = models[0]?.baseUrl;
+    return {
+      id: overrides?.id ?? id,
+      name: PROVIDER_DISPLAY_NAMES[id] ?? id,
+      api,
+      builtIn: overrides?.builtIn ?? true,
+      ...(baseUrl ? { defaultBaseUrl: baseUrl } : {}),
+      ...(overrides?.authType ? { authType: overrides.authType } : {}),
+    };
+  });
+
+  // Deduplicate by id (e.g. azure-openai-responses -> azure-openai)
+  const seen = new Set<string>();
+  return catalog.filter((p) => {
+    if (seen.has(p.id)) return false;
+    seen.add(p.id);
+    return true;
+  });
+}
+
+let _providerCatalog: LLMProviderInfo[] | null = null;
+function getProviderCatalog(): LLMProviderInfo[] {
+  if (!_providerCatalog) _providerCatalog = buildProviderCatalog();
+  return _providerCatalog;
+}
 
 // ==================== Persisted Config ====================
 
@@ -145,6 +143,11 @@ function savePersistedConfig(cfg: PersistedConfig): void {
     mkdirSync(dir, { recursive: true });
   }
   writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2), 'utf-8');
+  try {
+    chmodSync(CONFIG_FILE, 0o600);
+  } catch {
+    // Non-critical — best effort on platforms that support it
+  }
 }
 
 // ==================== Runtime State ====================
@@ -153,17 +156,17 @@ let cachedModel: Model<Api> | null = null;
 let cachedApiKey: string | null = null;
 let activeConfig: PersistedConfig | null = null;
 
-/** Resolve the API key for a provider from env vars, persisted config, or explicit value. */
+/** Resolve the API key for a provider from memory, persisted config, or env vars. */
 function resolveApiKey(
   providerId: string,
   explicitKey?: string,
 ): string | null {
   if (explicitKey) return explicitKey;
 
-  // Check persisted config
-  const persisted = loadPersistedConfig();
-  if (persisted?.provider === providerId && persisted.apiKey) {
-    return persisted.apiKey;
+  // Prefer in-memory config (avoids redundant disk reads)
+  const cfg = activeConfig ?? loadPersistedConfig();
+  if (cfg?.provider === providerId && cfg.apiKey) {
+    return cfg.apiKey;
   }
 
   // Fall back to environment variables via pi-ai
@@ -190,7 +193,7 @@ async function resolveApiKeyAsync(
 
 /** Build a Model object for the active configuration. */
 function buildModel(cfg: PersistedConfig): Model<Api> {
-  const providerInfo = PROVIDER_CATALOG.find((p) => p.id === cfg.provider);
+  const providerInfo = getProviderCatalog().find((p) => p.id === cfg.provider);
 
   // Try to get from pi-ai built-in registry first
   if (providerInfo?.builtIn) {
@@ -273,7 +276,7 @@ function ensureConfig(): PersistedConfig {
   }
 
   // Try other providers from env vars
-  for (const p of PROVIDER_CATALOG) {
+  for (const p of getProviderCatalog()) {
     if (p.builtIn && getEnvApiKey(p.id as KnownProvider)) {
       const models = getModelsForProvider(p.id);
       if (models.length > 0) {
@@ -294,14 +297,14 @@ function ensureConfig(): PersistedConfig {
  * Get the list of available providers.
  */
 export function getAvailableProviders(): LLMProviderInfo[] {
-  return PROVIDER_CATALOG;
+  return getProviderCatalog();
 }
 
 /**
  * Get available models for a given provider.
  */
 export function getModelsForProvider(providerId: string): LLMModelInfo[] {
-  const providerInfo = PROVIDER_CATALOG.find((p) => p.id === providerId);
+  const providerInfo = getProviderCatalog().find((p) => p.id === providerId);
   if (!providerInfo) return [];
 
   // Built-in providers: get from pi-ai registry
@@ -358,7 +361,8 @@ export function getModelsForProvider(providerId: string): LLMModelInfo[] {
 export function getLLMConfig(): LLMConfig {
   try {
     const cfg = ensureConfig();
-    const providerInfo = PROVIDER_CATALOG.find((p) => p.id === cfg.provider);
+    const catalog = getProviderCatalog();
+    const providerInfo = catalog.find((p) => p.id === cfg.provider);
     const isOAuth = providerInfo?.authType === 'oauth';
 
     // For OAuth providers, check OAuth credentials
@@ -372,7 +376,11 @@ export function getLLMConfig(): LLMConfig {
       authenticated,
       baseUrl: cfg.baseUrl,
     };
-  } catch {
+  } catch (err) {
+    console.warn(
+      'Failed to load LLM config:',
+      err instanceof Error ? err.message : err,
+    );
     return {
       provider: '',
       model: '',
@@ -406,7 +414,7 @@ export function setLLMConfig(update: LLMConfigUpdate): LLMConfig {
   cachedModel = null;
   cachedApiKey = null;
 
-  const providerInfo = PROVIDER_CATALOG.find(
+  const providerInfo = getProviderCatalog().find(
     (p) => p.id === persisted.provider,
   );
   const isOAuth = providerInfo?.authType === 'oauth';
@@ -434,8 +442,8 @@ export function getLLMModel(): Model<Api> {
   // For OAuth providers, resolveApiKey may return null (async refresh needed)
   // Sync check — the actual async resolution happens in llmStream/llmComplete
   if (!cachedApiKey) {
-    const providerInfo = PROVIDER_CATALOG.find((p) => p.id === cfg.provider);
-    if (providerInfo?.authType !== 'oauth') {
+    const provInfo = getProviderCatalog().find((p) => p.id === cfg.provider);
+    if (provInfo?.authType !== 'oauth') {
       throw new Error(
         `API key not found for provider "${cfg.provider}". ` +
           `Set the API key in .env or configure via Settings.`,
@@ -454,10 +462,10 @@ async function ensureApiKey(): Promise<string> {
   const cfg = ensureConfig();
   const key = await resolveApiKeyAsync(cfg.provider, cfg.apiKey);
   if (!key) {
-    const providerInfo = PROVIDER_CATALOG.find((p) => p.id === cfg.provider);
+    const provInfo = getProviderCatalog().find((p) => p.id === cfg.provider);
     throw new Error(
       `Authentication failed for provider "${cfg.provider}". ` +
-        (providerInfo?.authType === 'oauth'
+        (provInfo?.authType === 'oauth'
           ? 'Please log in via Settings.'
           : `Set the API key in .env or configure via Settings.`),
     );

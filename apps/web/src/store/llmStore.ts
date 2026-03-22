@@ -132,9 +132,20 @@ export const useLLMStore = create<LLMState>()((set, get) => ({
 
       // Poll until user completes or flow expires
       const pollInterval = (interval || 5) * 1000;
+      const maxPolls = 60; // ~5 minutes at 5s intervals
+      let pollCount = 0;
       const poll = async () => {
-        // Check if flow was cancelled
+        // Check if flow was cancelled or max polls exceeded
         if (!get().oauthPending) return;
+        if (++pollCount > maxPolls) {
+          set({
+            oauthPending: false,
+            oauthUserCode: null,
+            oauthVerificationUri: null,
+            error: 'OAuth flow timed out. Please try again.',
+          });
+          return;
+        }
 
         try {
           const result = await pollOAuthLogin();
