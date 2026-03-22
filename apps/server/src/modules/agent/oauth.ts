@@ -10,7 +10,8 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import {
-  githubCopilotOAuthProvider,
+  getOAuthApiKey,
+  getOAuthProvider,
   loginGitHubCopilot,
 } from '@mariozechner/pi-ai/oauth';
 
@@ -19,15 +20,7 @@ import type { Api, Model } from '@mariozechner/pi-ai';
 
 // ==================== Persisted Credentials ====================
 
-const AUTH_FILE = join(
-  dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')),
-  '..',
-  '..',
-  '..',
-  '..',
-  'data',
-  'oauth-credentials.json',
-);
+const AUTH_FILE = join(process.cwd(), 'data', 'oauth-credentials.json');
 
 export function loadCredentials(): OAuthCredentials | null {
   try {
@@ -97,14 +90,16 @@ export async function startDeviceCodeFlow(): Promise<{
     promise: null!,
   };
 
-  // loginGitHubCopilot is async and will call onAuth when the device code is ready
-  const loginPromise = new Promise<OAuthCredentials>((resolve, reject) => {
-    loginGitHubCopilot({
+  // Promise that resolves once onAuth fires with the device code
+  const userCodeReady = new Promise<void>((resolveCode) => {
+    // loginGitHubCopilot is async and will call onAuth when the device code is ready
+    const loginPromise = loginGitHubCopilot({
       onAuth: (url, instructions) => {
         // instructions contains "Enter code: XXXX-XXXX"
         const codeMatch = instructions?.match(/:\s*([A-Z0-9]{4}-[A-Z0-9]{4})/);
         session.userCode = codeMatch?.[1] ?? null;
         session.verificationUri = url;
+        resolveCode();
       },
       onPrompt: async () => {
         // pi-ai asks for enterprise domain — return empty for github.com
@@ -114,35 +109,31 @@ export async function startDeviceCodeFlow(): Promise<{
         // Optional progress updates, ignored
       },
       signal: abortController.signal,
-    })
-      .then(resolve)
-      .catch(reject);
+    });
+
+    session.promise = loginPromise;
   });
 
-  session.promise = loginPromise;
   pendingLogin = session;
 
-  // Wait for onAuth to be called (the login function will call it after getting the device code)
-  // We poll briefly since onAuth is called synchronously within loginGitHubCopilot
-  const maxWait = 30_000;
-  const start = Date.now();
-  while (!session.userCode && Date.now() - start < maxWait) {
-    await new Promise((r) => setTimeout(r, 200));
-    // Check if login already failed
-    if (!pendingLogin || pendingLogin !== session) {
-      throw new Error('OAuth flow was cancelled.');
-    }
-  }
-
-  if (!session.userCode || !session.verificationUri) {
+  // Wait for onAuth callback or timeout
+  await Promise.race([
+    userCodeReady,
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error('Failed to get device code from GitHub.')),
+        30_000,
+      ),
+    ),
+  ]).catch((err) => {
     abortController.abort();
     pendingLogin = null;
-    throw new Error('Failed to get device code from GitHub.');
-  }
+    throw err;
+  });
 
   return {
-    userCode: session.userCode,
-    verificationUri: session.verificationUri,
+    userCode: session.userCode!,
+    verificationUri: session.verificationUri!,
     interval: session.interval,
   };
 }
@@ -185,22 +176,20 @@ export async function pollDeviceCode(): Promise<
 
 /**
  * Get a valid Copilot API key, refreshing if expired.
- * Uses pi-ai's token refresh mechanism.
+ * Delegates expiry detection and token refresh to pi-ai's getOAuthApiKey.
  */
 export async function getCopilotApiKey(): Promise<string | null> {
   const creds = loadCredentials();
   if (!creds) return null;
 
-  // Token still valid
-  if (Date.now() < creds.expires) {
-    return githubCopilotOAuthProvider.getApiKey(creds);
-  }
-
-  // Refresh via pi-ai
   try {
-    const refreshed = await githubCopilotOAuthProvider.refreshToken(creds);
-    saveCredentials(refreshed);
-    return githubCopilotOAuthProvider.getApiKey(refreshed);
+    const result = await getOAuthApiKey('github-copilot', {
+      'github-copilot': creds,
+    });
+    if (!result) return null;
+    // Persist potentially refreshed credentials
+    saveCredentials(result.newCredentials);
+    return result.apiKey;
   } catch {
     return null;
   }
@@ -208,11 +197,14 @@ export async function getCopilotApiKey(): Promise<string | null> {
 
 /**
  * Apply pi-ai's modifyModels to set the correct baseUrl and headers on Copilot models.
+ * Uses dynamic provider lookup to support future OAuth providers without hardcoding.
  */
 export function applyCopilotModelOverrides(models: Model<Api>[]): Model<Api>[] {
   const creds = loadCredentials();
-  if (!creds || !githubCopilotOAuthProvider.modifyModels) return models;
-  return githubCopilotOAuthProvider.modifyModels(models, creds);
+  if (!creds) return models;
+  const provider = getOAuthProvider('github-copilot');
+  if (!provider?.modifyModels) return models;
+  return provider.modifyModels(models, creds);
 }
 
 /**

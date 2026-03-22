@@ -4,7 +4,6 @@ import {
   getLLMConfig,
   getLLMModels,
   getLLMProviders,
-  getOAuthStatus,
   logoutOAuth,
   pollOAuthLogin,
   putLLMConfig,
@@ -146,11 +145,7 @@ export const useLLMStore = create<LLMState>()((set, get) => ({
               oauthVerificationUri: null,
             });
             // Refresh config to reflect authenticated state
-            const [config, status] = await Promise.all([
-              getLLMConfig(),
-              getOAuthStatus(),
-            ]);
-            void status; // status is used implicitly via config refresh
+            const config = await getLLMConfig();
             set({ config });
             return;
           }

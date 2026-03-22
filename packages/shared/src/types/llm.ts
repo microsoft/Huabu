@@ -7,17 +7,10 @@
 // ==================== Provider Registry ====================
 
 /**
- * Known API protocols supported by pi-ai.
- * Determines which streaming implementation is used.
+ * API protocol identifier used by pi-ai (e.g. "openai-completions", "anthropic-messages").
+ * Accepts any string to allow new APIs added in future pi-ai versions.
  */
-export type LLMApiType =
-  | 'openai-completions'
-  | 'openai-responses'
-  | 'azure-openai-responses'
-  | 'anthropic-messages'
-  | 'google-generative-ai'
-  | 'google-vertex'
-  | 'bedrock-converse-stream';
+export type LLMApiType = string;
 
 /**
  * A provider entry in the provider catalog.
@@ -29,8 +22,6 @@ export interface LLMProviderInfo {
   name: string;
   /** Default API protocol for models on this provider. */
   api: LLMApiType;
-  /** Environment variable name for the API key. */
-  envKey: string;
   /** Default base URL (can be overridden at runtime). */
   defaultBaseUrl?: string;
   /** Whether this provider uses built-in pi-ai models. */

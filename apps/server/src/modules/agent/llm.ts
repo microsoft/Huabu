@@ -12,6 +12,7 @@ import { dirname, join } from 'node:path';
 import {
   stream as piStream,
   complete as piComplete,
+  getEnvApiKey,
   getModel,
   getModels,
 } from '@mariozechner/pi-ai';
@@ -43,35 +44,30 @@ const PROVIDER_CATALOG: LLMProviderInfo[] = [
     id: 'anthropic',
     name: 'Anthropic',
     api: 'anthropic-messages',
-    envKey: 'ANTHROPIC_API_KEY',
     builtIn: true,
   },
   {
     id: 'openai',
     name: 'OpenAI',
     api: 'openai-completions',
-    envKey: 'OPENAI_API_KEY',
     builtIn: true,
   },
   {
     id: 'azure-openai',
     name: 'Azure OpenAI',
     api: 'azure-openai-responses',
-    envKey: 'AZURE_OPENAI_API_KEY',
     builtIn: false, // Azure models are custom deployments
   },
   {
     id: 'google',
     name: 'Google Gemini',
     api: 'google-generative-ai',
-    envKey: 'GEMINI_API_KEY',
     builtIn: true,
   },
   {
     id: 'openrouter',
     name: 'OpenRouter',
     api: 'openai-completions',
-    envKey: 'OPENROUTER_API_KEY',
     defaultBaseUrl: 'https://openrouter.ai/api/v1',
     builtIn: true,
   },
@@ -79,42 +75,36 @@ const PROVIDER_CATALOG: LLMProviderInfo[] = [
     id: 'groq',
     name: 'Groq',
     api: 'openai-completions',
-    envKey: 'GROQ_API_KEY',
     builtIn: true,
   },
   {
     id: 'xai',
     name: 'xAI',
     api: 'openai-completions',
-    envKey: 'XAI_API_KEY',
     builtIn: true,
   },
   {
     id: 'mistral',
     name: 'Mistral',
     api: 'openai-completions',
-    envKey: 'MISTRAL_API_KEY',
     builtIn: true,
   },
   {
     id: 'amazon-bedrock',
     name: 'Amazon Bedrock',
     api: 'bedrock-converse-stream',
-    envKey: 'AWS_ACCESS_KEY_ID',
     builtIn: true,
   },
   {
     id: 'google-vertex',
     name: 'Google Vertex AI',
     api: 'google-vertex',
-    envKey: 'GOOGLE_CLOUD_API_KEY',
     builtIn: true,
   },
   {
     id: 'github-copilot',
     name: 'GitHub Copilot',
     api: 'openai-completions',
-    envKey: 'COPILOT_GITHUB_TOKEN',
     defaultBaseUrl: 'https://api.githubcopilot.com',
     builtIn: true,
     authType: 'oauth',
@@ -123,15 +113,12 @@ const PROVIDER_CATALOG: LLMProviderInfo[] = [
 
 // ==================== Persisted Config ====================
 
-const CONFIG_FILE = join(
-  dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')),
-  '..',
-  '..',
-  '..',
-  '..',
-  'data',
-  'llm-config.json',
-);
+/** Resolve a data file path relative to the project root. */
+function getDataFilePath(filename: string): string {
+  return join(process.cwd(), 'data', filename);
+}
+
+const CONFIG_FILE = getDataFilePath('llm-config.json');
 
 interface PersistedConfig {
   provider: string;
@@ -179,19 +166,11 @@ function resolveApiKey(
     return persisted.apiKey;
   }
 
-  // Fall back to environment variables
-  const providerInfo = PROVIDER_CATALOG.find((p) => p.id === providerId);
-  if (providerInfo) {
-    const val = process.env[providerInfo.envKey];
-    if (val) return val;
-  }
-
-  // Provider-specific env var aliases
-  if (providerId === 'azure-openai') {
-    return process.env.AZURE_OPENAI_API_KEY ?? null;
-  }
-
-  return null;
+  // Fall back to environment variables via pi-ai
+  // pi-ai uses 'azure-openai-responses' instead of our 'azure-openai'
+  const piProviderId =
+    providerId === 'azure-openai' ? 'azure-openai-responses' : providerId;
+  return getEnvApiKey(piProviderId as KnownProvider) ?? null;
 }
 
 /**
@@ -295,7 +274,7 @@ function ensureConfig(): PersistedConfig {
 
   // Try other providers from env vars
   for (const p of PROVIDER_CATALOG) {
-    if (p.builtIn && process.env[p.envKey]) {
+    if (p.builtIn && getEnvApiKey(p.id as KnownProvider)) {
       const models = getModelsForProvider(p.id);
       if (models.length > 0) {
         activeConfig = { provider: p.id, model: models[0].id };
@@ -459,7 +438,7 @@ export function getLLMModel(): Model<Api> {
     if (providerInfo?.authType !== 'oauth') {
       throw new Error(
         `API key not found for provider "${cfg.provider}". ` +
-          `Set ${providerInfo?.envKey ?? 'the API key'} in .env or configure via Settings.`,
+          `Set the API key in .env or configure via Settings.`,
       );
     }
   }
@@ -480,7 +459,7 @@ async function ensureApiKey(): Promise<string> {
       `Authentication failed for provider "${cfg.provider}". ` +
         (providerInfo?.authType === 'oauth'
           ? 'Please log in via Settings.'
-          : `Set ${providerInfo?.envKey ?? 'the API key'} in .env or configure via Settings.`),
+          : `Set the API key in .env or configure via Settings.`),
     );
   }
   cachedApiKey = key;
