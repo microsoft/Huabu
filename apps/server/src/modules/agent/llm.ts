@@ -18,8 +18,8 @@ import {
 
 import {
   getCopilotApiKey,
-  getCopilotEndpoint,
   hasOAuthCredentials,
+  applyCopilotModelOverrides,
 } from './oauth.js';
 
 import type {
@@ -221,10 +221,16 @@ function buildModel(cfg: PersistedConfig): Model<Api> {
         cfg.model as never,
       );
       if (builtIn) {
+        let model = builtIn as Model<Api>;
         if (cfg.baseUrl) {
-          return { ...builtIn, baseUrl: cfg.baseUrl } as Model<Api>;
+          model = { ...model, baseUrl: cfg.baseUrl };
         }
-        return builtIn as Model<Api>;
+        // For Copilot, apply pi-ai's model overrides (baseUrl from token, headers)
+        if (cfg.provider === 'github-copilot') {
+          const [modified] = applyCopilotModelOverrides([model]);
+          if (modified) model = modified;
+        }
+        return model;
       }
     } catch {
       // Model not found in registry — build manually
@@ -241,12 +247,7 @@ function buildModel(cfg: PersistedConfig): Model<Api> {
     baseUrl = endpoint.replace(/\/+$/, '') + '/openai';
   }
 
-  // GitHub Copilot: use the endpoint from OAuth credentials
-  if (cfg.provider === 'github-copilot' && !cfg.baseUrl) {
-    baseUrl = getCopilotEndpoint();
-  }
-
-  return {
+  let model: Model<Api> = {
     id: cfg.model,
     name: cfg.model,
     api,
@@ -258,6 +259,14 @@ function buildModel(cfg: PersistedConfig): Model<Api> {
     contextWindow: 128000,
     maxTokens: 16384,
   } as Model<Api>;
+
+  // For Copilot, apply pi-ai's model overrides (baseUrl from token, headers)
+  if (cfg.provider === 'github-copilot') {
+    const [modified] = applyCopilotModelOverrides([model]);
+    if (modified) model = modified;
+  }
+
+  return model;
 }
 
 /** Initialize the active configuration from persisted config or env vars. */
@@ -418,11 +427,18 @@ export function setLLMConfig(update: LLMConfigUpdate): LLMConfig {
   cachedModel = null;
   cachedApiKey = null;
 
-  const apiKey = resolveApiKey(persisted.provider, persisted.apiKey);
+  const providerInfo = PROVIDER_CATALOG.find(
+    (p) => p.id === persisted.provider,
+  );
+  const isOAuth = providerInfo?.authType === 'oauth';
+  const authenticated = isOAuth
+    ? hasOAuthCredentials(persisted.provider)
+    : !!resolveApiKey(persisted.provider, persisted.apiKey);
+
   return {
     provider: persisted.provider,
     model: persisted.model,
-    authenticated: !!apiKey,
+    authenticated,
     baseUrl: persisted.baseUrl,
   };
 }

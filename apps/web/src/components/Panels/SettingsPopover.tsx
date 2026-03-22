@@ -186,17 +186,19 @@ export const SettingsPopover: React.FC = () => {
     await llmLoadModels(providerId);
     setShowApiKeyInput(false);
     setApiKeyValue('');
+
+    // Pick the first model for the new provider and persist the switch
+    const freshModels = useLLMStore.getState().models;
+    const firstModel = freshModels[0]?.id ?? '';
+    await llmUpdateConfig({ provider: providerId, model: firstModel });
+    flashLlmSuccess();
   };
 
   const handleModelChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const modelId = e.target.value;
-    const selectedProvider =
-      document.querySelector<HTMLSelectElement>('#llm-provider-select')
-        ?.value ??
-      llmConfig?.provider ??
-      '';
+    const provider = llmConfig?.provider ?? '';
 
-    await llmUpdateConfig({ provider: selectedProvider, model: modelId });
+    await llmUpdateConfig({ provider, model: modelId });
     flashLlmSuccess();
   };
 
