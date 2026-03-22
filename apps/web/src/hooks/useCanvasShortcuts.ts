@@ -269,6 +269,11 @@ export function useCanvasShortcuts(
         frameSelectedNodes();
       } else if (lowerKey === 'c') {
         if (editable) return;
+        // If the user has selected text (e.g. in a panel), let the browser
+        // handle the native copy instead of overwriting the clipboard with
+        // the canvas node marker.
+        const selection = window.getSelection();
+        if (selection && !selection.isCollapsed) return;
         e.preventDefault();
         copySelectedNodes();
         // Write marker to system clipboard so we can detect external copies later
