@@ -1,8 +1,10 @@
 import { FolderOpen, History, Settings, X } from 'lucide-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
+import { LLMSettings } from './LLMSettings';
 import { pickFolder } from '../../api/workspace';
 import useCanvasStore from '../../store/canvasStore';
+import { useLLMStore } from '../../store/llmStore';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import { Button } from '../Common/Button';
 import { IconButton } from '../Common/IconButton';
@@ -23,6 +25,9 @@ export const SettingsPopover: React.FC = () => {
   const removeRecentWorkspace = useWorkspaceStore(
     (s) => s.removeRecentWorkspace,
   );
+
+  // LLM store — only used for init on open
+  const llmInit = useLLMStore((s) => s.init);
 
   const [isOpen, setIsOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -57,8 +62,12 @@ export const SettingsPopover: React.FC = () => {
 
   const handleToggle = useCallback(() => {
     if (justDismissedRef.current) return;
-    setIsOpen((prev) => !prev);
-  }, []);
+    setIsOpen((prev) => {
+      const next = !prev;
+      if (next) void llmInit();
+      return next;
+    });
+  }, [llmInit]);
 
   // Clear any pending success timeout on unmount
   useEffect(() => {
@@ -236,6 +245,9 @@ export const SettingsPopover: React.FC = () => {
               </ul>
             </div>
           )}
+
+          {/* ── LLM Provider / Model ── */}
+          <LLMSettings />
 
           <div className="flex justify-end">
             <Button variant="secondary" size="sm" onClick={handleClose}>

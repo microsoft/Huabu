@@ -9,7 +9,7 @@ type Cmd = Extract<CanvasCommand, { type: 'CONNECT_NODES' }>;
 const connectNodes: CommandDefinition<Cmd> = {
   meta: {
     snapshot: 'yes',
-    requiresEdgeReroute: false,
+    requiresEdgeReroute: true,
     needsTransitionCleanup: false,
   },
 

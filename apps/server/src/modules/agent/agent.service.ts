@@ -128,7 +128,7 @@ export async function* runAgent(
     }
 
     // Stream from the LLM
-    const s = llmStream(context, {
+    const s = await llmStream(context, {
       signal,
     });
 

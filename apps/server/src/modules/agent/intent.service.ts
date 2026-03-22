@@ -265,7 +265,7 @@ export async function* recognizeIntentStream(
   let accumulated = '';
   let yieldedCount = 0;
 
-  const s = llmStream(piContext);
+  const s = await llmStream(piContext);
 
   for await (const event of s) {
     if (event.type === 'text_delta') {

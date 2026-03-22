@@ -14,6 +14,38 @@
 
 - 当没有选中任何文本时，`Ctrl/Cmd+C` 仍然正常执行画布节点的复制功能。
 
+## 2026-03-22 · 多 LLM Provider 支持与 Settings UI 重构
+
+**变更内容**
+
+- **多 Provider 切换**：LLM 不再绑定 Azure OpenAI，支持在运行时切换 Provider 和 Model。目前支持 Anthropic、OpenAI、Azure OpenAI、Google Gemini、OpenRouter、Groq、xAI、Mistral、Amazon Bedrock、Google Vertex AI、GitHub Copilot。
+- **Settings UI 重构**：Settings 面板新增 Provider / Model 选择器和 API Key 配置区域，切换后即时生效，配置持久化至 `apps/data/llm-config.json`。
+- **GitHub Copilot OAuth 登录**：GitHub Copilot 作为 Provider 时，支持通过 GitHub Device Flow 完成 OAuth 授权，无需手动填写 API Key。
+- **HTTP 代理支持**：自动识别系统环境变量 `HTTPS_PROXY`，也可在 `.env` 中手动配置。配置后所有出站请求将通过代理转发，不配置则直连。
+- **新增 LLM API 路由**：`/api/llm` 提供 Provider 列表、Model 列表、配置读写、OAuth 登录等接口。
+- **前端状态管理**：新增 `llmStore` 管理 Provider/Model 选择状态和认证状态。
+
+**注意事项**
+
+- 需要安装新依赖 `undici`（代理支持）。
+- 未配置任何 Provider 时，LLM 相关功能将无法使用，Settings 中会提示配置。
+
+---
+
+## 2026-03-19 · Canvas Command 重构
+
+**变更内容**
+
+- **Command 模式重构**：将画布操作从 `canvasHandlers.ts`（1200+ 行）拆分为独立的 Command 模块，每个操作（创建、删除、对齐、分布、连线等）对应一个独立文件。
+- **Resolver 层**：新增 Resolver 层处理复杂的用户意图到 Command 的映射（如拖拽停止、粘贴剪贴板、添加节点等），包含碰撞检测、Frame 归组等逻辑。
+- **Post Effects**：Command 执行后的副作用（边重路由、自动标签生成等）统一由 `postEffects` 处理。
+- **Node 工具函数整理**：`nodeDefaultSize`、`nodeInputBuilders` 等工具函数独立提取，`alignment` 和 `frame` 工具从 `utils/canvas` 迁移至 `canvas/utils`。
+
+**注意事项**
+
+- `canvasHandlers.ts` 已移除，相关逻辑分散到 `apps/web/src/canvas/commands/` 和 `apps/web/src/canvas/resolvers/` 目录。
+- Canvas store 大幅简化，核心状态管理职责不变。
+
 ---
 
 ## 2026-03-19 · 快捷键帮助弹窗
