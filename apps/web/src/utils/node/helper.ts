@@ -11,9 +11,44 @@ type NodeWithPosition = {
   position: { x: number; y: number };
   parentId?: string;
   measured?: { width?: number; height?: number };
+  style?: { width?: number | string; height?: number | string };
   width?: number;
   height?: number;
 };
+
+/**
+ * Resolve the effective width/height of a node.
+ * Priority: measured (browser-actual) → style (user-set) → fallback.
+ */
+function resolveSize(node: NodeWithPosition): { w: number; h: number } {
+  const m = node.measured;
+  const s = node.style;
+
+  const w =
+    (typeof m?.width === 'number' ? m.width : undefined) ??
+    (typeof s?.width === 'number'
+      ? s.width
+      : typeof s?.width === 'string'
+        ? Number.parseFloat(s.width)
+        : undefined) ??
+    node.width ??
+    150;
+
+  const h =
+    (typeof m?.height === 'number' ? m.height : undefined) ??
+    (typeof s?.height === 'number'
+      ? s.height
+      : typeof s?.height === 'string'
+        ? Number.parseFloat(s.height)
+        : undefined) ??
+    node.height ??
+    100;
+
+  return {
+    w: Number.isFinite(w) ? w : 150,
+    h: Number.isFinite(h) ? h : 100,
+  };
+}
 
 /**
  * Returns the best source/target handle pair for an edge between two nodes
@@ -29,20 +64,31 @@ export function getSmartHandles(
   sourceNode: NodeWithPosition,
   targetNode: NodeWithPosition,
 ): { sourceHandle: string; targetHandle: string } {
-  const sw = sourceNode.measured?.width ?? sourceNode.width ?? 150;
-  const sh = sourceNode.measured?.height ?? sourceNode.height ?? 100;
-  const tw = targetNode.measured?.width ?? targetNode.width ?? 150;
-  const th = targetNode.measured?.height ?? targetNode.height ?? 100;
+  const { w: sw, h: sh } = resolveSize(sourceNode);
+  const { w: tw, h: th } = resolveSize(targetNode);
 
-  const sx = sourceNode.position.x + sw / 2;
-  const sy = sourceNode.position.y + sh / 2;
-  const tx = targetNode.position.x + tw / 2;
-  const ty = targetNode.position.y + th / 2;
+  const sx = sourceNode.position.x;
+  const sy = sourceNode.position.y;
+  const tx = targetNode.position.x;
+  const ty = targetNode.position.y;
 
-  const dx = tx - sx;
-  const dy = ty - sy;
+  // Center-to-center deltas
+  const dx = tx + tw / 2 - (sx + sw / 2);
+  const dy = ty + th / 2 - (sy + sh / 2);
 
-  if (Math.abs(dx) >= Math.abs(dy)) {
+  // Edge-to-edge gap: positive means no overlap on that axis.
+  const hGap = Math.max(tx - (sx + sw), sx - (tx + tw));
+  const vGap = Math.max(ty - (sy + sh), sy - (ty + th));
+
+  // When nodes are clearly separated on one axis but overlap on the other,
+  // always route along the separated axis — this prevents tall side-by-side
+  // nodes from being connected vertically just because of a y-offset.
+  const clearlyHorizontal = hGap > 0 && vGap <= 0;
+  const clearlyVertical = hGap <= 0 && vGap > 0;
+  const useHorizontal =
+    clearlyHorizontal || (!clearlyVertical && Math.abs(dx) >= Math.abs(dy));
+
+  if (useHorizontal) {
     return dx >= 0
       ? { sourceHandle: 'right-source', targetHandle: 'left-target' }
       : { sourceHandle: 'left-source', targetHandle: 'right-target' };
