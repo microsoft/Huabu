@@ -141,6 +141,4 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 
 apps/server/data
-apps/data/llm-config.json
-apps/data/oauth-credentials.json
 *.sqlite

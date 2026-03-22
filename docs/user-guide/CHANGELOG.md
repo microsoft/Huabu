@@ -20,14 +20,13 @@
 
 - **多 Provider 切换**：LLM 不再绑定 Azure OpenAI，支持在运行时切换 Provider 和 Model。目前支持 Anthropic、OpenAI、Azure OpenAI、Google Gemini、OpenRouter、Groq、xAI、Mistral、Amazon Bedrock、Google Vertex AI、GitHub Copilot。
 - **Settings UI 重构**：Settings 面板新增 Provider / Model 选择器和 API Key 配置区域，切换后即时生效，配置持久化至 `apps/data/llm-config.json`。
-- **GitHub Copilot OAuth 登录**：GitHub Copilot 作为 Provider 时，支持通过 GitHub Device Flow 完成 OAuth 授权，无需手动填写 API Key。OAuth 凭证持久化至 `apps/data/oauth-credentials.json`。
+- **GitHub Copilot OAuth 登录**：GitHub Copilot 作为 Provider 时，支持通过 GitHub Device Flow 完成 OAuth 授权，无需手动填写 API Key。
 - **HTTP 代理支持**：自动识别系统环境变量 `HTTPS_PROXY`，也可在 `.env` 中手动配置。配置后所有出站请求将通过代理转发，不配置则直连。
 - **新增 LLM API 路由**：`/api/llm` 提供 Provider 列表、Model 列表、配置读写、OAuth 登录等接口。
 - **前端状态管理**：新增 `llmStore` 管理 Provider/Model 选择状态和认证状态。
 
 **注意事项**
 
-- `llm-config.json` 和 `oauth-credentials.json` 包含敏感信息，已加入 `.gitignore`。
 - 需要安装新依赖 `undici`（代理支持）。
 - 未配置任何 Provider 时，LLM 相关功能将无法使用，Settings 中会提示配置。
 

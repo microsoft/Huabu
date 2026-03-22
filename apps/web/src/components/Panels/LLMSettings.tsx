@@ -36,6 +36,7 @@ export const LLMSettings: React.FC = () => {
 
   const [showApiKeyInput, setShowApiKeyInput] = useState(false);
   const [apiKeyValue, setApiKeyValue] = useState('');
+  const [manualModel, setManualModel] = useState('');
   const [llmSuccess, setLlmSuccess] = useState(false);
   const llmSuccessRef = useRef<number | null>(null);
 
@@ -65,8 +66,22 @@ export const LLMSettings: React.FC = () => {
     setApiKeyValue('');
 
     const freshModels = useLLMStore.getState().models;
-    const firstModel = freshModels[0]?.id ?? '';
-    await llmUpdateConfig({ provider: providerId, model: firstModel });
+    if (freshModels.length > 0) {
+      const firstModel = freshModels[0].id;
+      setManualModel('');
+      await llmUpdateConfig({ provider: providerId, model: firstModel });
+      flashLlmSuccess();
+    } else {
+      setManualModel('');
+      await llmUpdateConfig({ provider: providerId, model: '' });
+    }
+  };
+
+  const handleManualModelSave = async () => {
+    const model = manualModel.trim();
+    if (!model) return;
+    const provider = llmConfig?.provider ?? '';
+    await llmUpdateConfig({ provider, model });
     flashLlmSuccess();
   };
 
@@ -125,30 +140,53 @@ export const LLMSettings: React.FC = () => {
         />
       </div>
 
-      {/* Model select */}
-      {llmModels.length > 0 && (
+      {/* Model select / manual input */}
+      {llmConfig?.provider && (
         <>
           <label className="mb-1.5 block text-xs font-medium text-gray-600">
             Model
           </label>
-          <div className="relative mb-2">
-            <select
-              className="border-border w-full appearance-none rounded border bg-gray-50 py-1.5 pr-8 pl-2.5 text-sm text-gray-700 focus:ring-1 focus:ring-blue-300 focus:outline-none"
-              value={llmConfig?.model ?? ''}
-              onChange={(e) => void handleModelChange(e)}
-              disabled={llmSaving}
-            >
-              {llmModels.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name || m.id}
-                </option>
-              ))}
-            </select>
-            <ChevronDown
-              size={14}
-              className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 text-gray-400"
-            />
-          </div>
+          {llmModels.length > 0 ? (
+            <div className="relative mb-2">
+              <select
+                className="border-border w-full appearance-none rounded border bg-gray-50 py-1.5 pr-8 pl-2.5 text-sm text-gray-700 focus:ring-1 focus:ring-blue-300 focus:outline-none"
+                value={llmConfig?.model ?? ''}
+                onChange={(e) => void handleModelChange(e)}
+                disabled={llmSaving}
+              >
+                {llmModels.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name || m.id}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                size={14}
+                className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 text-gray-400"
+              />
+            </div>
+          ) : (
+            <div className="mb-2 flex gap-1.5">
+              <input
+                type="text"
+                placeholder="Enter model ID, e.g. gpt-4o"
+                value={manualModel}
+                onChange={(e) => setManualModel(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void handleManualModelSave();
+                }}
+                className="border-border flex-1 rounded border bg-white px-2 py-1.5 text-xs text-gray-700 focus:ring-1 focus:ring-blue-300 focus:outline-none"
+              />
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void handleManualModelSave()}
+                disabled={!manualModel.trim() || llmSaving}
+              >
+                Save
+              </Button>
+            </div>
+          )}
         </>
       )}
 

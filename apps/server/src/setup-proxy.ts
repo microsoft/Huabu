@@ -47,7 +47,6 @@ if (proxyUrl) {
     return undiciFetch(input as Parameters<typeof undiciFetch>[0], opts);
   }) as typeof globalThis.fetch;
 
-  console.log(`Proxy enabled: ${proxyUrl}`);
   if (noProxy.length > 0) {
     console.log(`NO_PROXY: ${noProxy.join(', ')}`);
   }
