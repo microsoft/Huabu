@@ -45,7 +45,6 @@ preprocess.ts ──→ preprocessNode()
 - 服务端由 `PreprocessDispatcher` 根据节点 profile 决定执行哪些阶段
 - 所有 LLM 调用集中在 Enrich 阶段，由 `ProviderManager` 统一管理
 - Agent 工具现支持所有节点类型（包括 PDF）
-- 旧的 `PUT /nodes/:id` 和 `POST /resolve-label` 路由保留为向后兼容
 
 ---
 
@@ -124,7 +123,7 @@ preprocess.ts ──→ preprocessNode()
 
 | 文件                                              | 变更                                                                                                                                                                                                                 |
 | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/server/src/modules/canvas/canvas.route.ts`  | 新增 `POST /:canvasId/nodes/:nodeId/preprocess` 统一端点。旧的 **PUT** 和 **POST /resolve-label** 路由保留为向后兼容，均委托 `PreprocessDispatcher`。新增 `PreprocessNodeResponse` 类型导入。                        |
+| `apps/server/src/modules/canvas/canvas.route.ts`  | 新增 `POST /:canvasId/nodes/:nodeId/preprocess` 统一端点（`nodeType`/`trigger` 使用 `z.enum` 校验）。移除了旧的 **PUT /nodes/:nodeId** 和 **POST /resolve-label** 路由。新增 `PreprocessNodeResponse` 类型导入。     |
 | `apps/server/src/modules/agent/tools/executor.ts` | `executeIngestContent()` — 用 `PreprocessDispatcher` 替换了 `IngestService`。现在支持所有节点类型（包括之前不支持的 PDF）。移除了 `getIngestService` 导入，新增了 `getPreprocessDispatcher`、`CanvasNodeKind` 导入。 |
 | `apps/server/src/modules/workspace.route.ts`      | 用 `resetPreprocessDispatcher()` 替换了 `resetIngestService()`。导入来源从 `knowledge/index.js` 改为 `preprocessing/index.js`。                                                                                      |
 | `apps/server/src/modules/knowledge/index.ts`      | 移除了导出：`IngestService`、`getIngestService`、`resetIngestService`、`IngestTextSourceInput`、`IngestWebSourceInput`、`IngestPdfSourceInput`、`IngestSourceResult`。                                               |
@@ -156,15 +155,15 @@ preprocess.ts ──→ preprocessNode()
 
 ### 未修改的文件（及原因）
 
-| 文件                                                       | 原因                                                                                              |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `apps/web/src/api/canvas.ts`                               | `upsertNode()` 和 `resolveLabel()` API 函数保留为向后兼容。新增 `preprocessNode()` 作为主调用。   |
-| `apps/server/src/modules/knowledge/loaders/*`              | `TextLoader`、`PdfLoader`、`WebLoader`、`YoutubeLoader` 被 Extract 阶段复用，无需修改。           |
-| `apps/server/src/modules/knowledge/knowledge.interface.ts` | `IKnowledgeRepository` 接口被 Persist 阶段复用。                                                  |
-| `apps/server/src/modules/knowledge/obsidian.repository.ts` | 仓库实现原样复用。                                                                                |
-| `apps/server/src/modules/knowledge/utils.ts`               | `normalizeUrl`、`computeContentHash`、`generateSourceId` 被 Input Resolve 和 Normalize 阶段复用。 |
-| `apps/server/src/modules/agent/llm.ts`                     | `llmComplete` 被 `ProviderManager` 包装，而非替换。                                               |
-| `apps/server/src/prompt/resolve-label.ts`                  | `IMAGE_LABEL_PROMPT` 和 `buildFrameLabelPrompt` 被 `ProviderManager` 使用。                       |
+| 文件                                                       | 原因                                                                                               |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `apps/web/src/api/canvas.ts`                               | 移除了 `upsertNode()` 和 `resolveLabel()` API 函数。新增 `preprocessNode()` 作为唯一的预处理 API。 |
+| `apps/server/src/modules/knowledge/loaders/*`              | `TextLoader`、`PdfLoader`、`WebLoader`、`YoutubeLoader` 被 Extract 阶段复用，无需修改。            |
+| `apps/server/src/modules/knowledge/knowledge.interface.ts` | `IKnowledgeRepository` 接口被 Persist 阶段复用。                                                   |
+| `apps/server/src/modules/knowledge/obsidian.repository.ts` | 仓库实现原样复用。                                                                                 |
+| `apps/server/src/modules/knowledge/utils.ts`               | `normalizeUrl`、`computeContentHash`、`generateSourceId` 被 Input Resolve 和 Normalize 阶段复用。  |
+| `apps/server/src/modules/agent/llm.ts`                     | `llmComplete` 被 `ProviderManager` 包装，而非替换。                                                |
+| `apps/server/src/prompt/resolve-label.ts`                  | `IMAGE_LABEL_PROMPT` 和 `buildFrameLabelPrompt` 被 `ProviderManager` 使用。                        |
 
 ---
 
@@ -220,15 +219,13 @@ preprocess.ts ──→ preprocessNode()
 
 ### 服务端
 
-**完全实现了 6 阶段流水线。** 三个 HTTP 路由均通过 `PreprocessDispatcher` 执行：
+**完全实现了 6 阶段流水线。** 统一的 HTTP 端点通过 `PreprocessDispatcher` 执行：
 
-| 路由                                       | 状态       | trigger        | `allowLLM` | `allowPersistence` | 典型节点类型      |
-| ------------------------------------------ | ---------- | -------------- | ---------- | ------------------ | ----------------- |
-| `POST /:canvasId/nodes/:nodeId/preprocess` | **主路由** | `node_updated` | `true`     | `true`             | 所有节点类型      |
-| `PUT /:canvasId/nodes/:nodeId`             | 兼容保留   | `node_updated` | `false`    | `true`             | note/text/web/pdf |
-| `POST /resolve-label`                      | 兼容保留   | `manual`       | `true`     | `false`            | image/frame       |
+| 路由                                       | trigger        | `allowLLM` | `allowPersistence` | 典型节点类型 |
+| ------------------------------------------ | -------------- | ---------- | ------------------ | ------------ |
+| `POST /:canvasId/nodes/:nodeId/preprocess` | `node_updated` | `true`     | `true`             | 所有节点类型 |
 
-前端已全部迁移到统一端点 `POST /:canvasId/nodes/:nodeId/preprocess`。旧路由保留为向后兼容（供 agent 工具等外部调用者使用）。
+旧的 `PUT /:canvasId/nodes/:nodeId` 和 `POST /resolve-label` 路由已移除。
 
 ### 前端
 
@@ -290,10 +287,6 @@ apps/web/src/canvas/
 
 之前 frame 使用 2 秒 debounce（等待子节点稳定），现在统一为 1 秒。如果用户快速拖拽多个节点进出 frame，可能导致 frame 标签生成发出多次无效请求（子节点还在移动中）。短期可接受，因为服务端的指纹去重和 LLM 幂等性可以减轻影响。长期可考虑对 frame 节点实现更智能的"稳定检测"（如检测最近 N 秒内没有新的子节点变化才触发）。
 
-### 3. 旧路由的清理时机
-
-`PUT /nodes/:id` 和 `POST /resolve-label` 目前保留为向后兼容。Agent 工具 `ingest_content` 仍通过 `PreprocessDispatcher` 直接调用（不经过 HTTP），所以旧路由的主要消费者是前端的 `flushOnUnload`（已迁移）和潜在的外部集成。建议在确认无外部依赖后移除旧路由。
-
 ---
 
 ## 后续工作清单
@@ -314,8 +307,7 @@ apps/web/src/canvas/
 
 ### P2 — 清理与优化
 
-- [ ] 移除旧的 `PUT /nodes/:id` 和 `POST /resolve-label` 兼容路由
-- [ ] 清理 `upsertNode()`、`resolveLabel()` 等不再被前端使用的 API 函数
+- [ ] 清理 shared 包中不再被前端直接使用的旧类型（`UpsertNodeRequest`、`UpsertNodeResponse`、`ResolveLabelRequest`、`ResolveLabelResponse`）
 - [ ] 批量节点导入时的 Enrich 批处理支持
 - [ ] Tavily Extract 调用纳入 `ProviderManager` 统一管理
 - [ ] 按节点类型或能力组实现差异化 debounce（如 frame 使用更长的稳定窗口）

@@ -188,8 +188,10 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   // Replaces the split between PUT /:canvasId/nodes/:nodeId and POST /resolve-label.
 
   const preprocessBodySchema = z.object({
-    nodeType: z.string(),
-    trigger: z.string().optional(),
+    nodeType: z.enum(['note', 'text', 'web', 'pdf', 'image', 'video', 'frame']),
+    trigger: z
+      .enum(['node_inserted', 'node_updated', 'flush', 'manual', 'repair'])
+      .optional(),
     snapshot: z.record(z.string(), z.unknown()),
     options: z
       .object({

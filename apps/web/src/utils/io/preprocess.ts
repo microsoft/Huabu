@@ -153,8 +153,15 @@ export async function preprocessNodeIfNeeded({
 
   const nodeData = node.data as Record<string, unknown> | undefined;
 
-  // Never overwrite user-authored labels with LLM suggestions.
-  if (nodeData?.labelSource === 'user') return;
+  // For image/frame nodes: never overwrite user-authored labels.
+  // This guard does NOT apply to note/text/web/pdf — those need
+  // preprocessing for content persistence regardless of label source.
+  if (
+    (nodeType === 'image' || nodeType === 'frame') &&
+    nodeData?.labelSource === 'user'
+  ) {
+    return;
+  }
 
   // For frame nodes: skip if there are no meaningful child labels.
   if (nodeType === 'frame') {
