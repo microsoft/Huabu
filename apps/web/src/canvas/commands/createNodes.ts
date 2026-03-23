@@ -1,7 +1,7 @@
 import { createId, type CanvasCommand } from '@sediment/shared';
 
 import { noop, type CommandDefinition } from './types';
-import { needsLabelResolve } from '../../utils/io/resolveLabel';
+import { needsPreprocessing } from '../../utils/io/preprocess';
 import { placeNode } from '../../utils/layout';
 import { deduplicateLabel, generateNextLabel } from '../../utils/node/labels';
 import { getNodeDefaultSize } from '../../utils/node/nodeDefaultSize';
@@ -30,7 +30,7 @@ const createNodes: CommandDefinition<Cmd> = {
       (n) => n.data?.label as string | undefined,
     );
     const newNodes: Node[] = [];
-    const labelResolveNodeIds: string[] = [];
+    const preprocessNodes: Node[] = [];
 
     for (const input of cmd.nodes) {
       const nodeId = input.id ?? createId('node');
@@ -73,8 +73,6 @@ const createNodes: CommandDefinition<Cmd> = {
         label = deduplicateLabel(label, existingLabels);
       }
       existingLabels.push(label);
-      // Collect nodes needing async LLM label resolution.
-      if (needsLabelResolve(nodeType)) labelResolveNodeIds.push(nodeId);
 
       // ---------------------------------------------------------------
       // 2. Build the final ReactFlow node from the resolved command
@@ -102,7 +100,14 @@ const createNodes: CommandDefinition<Cmd> = {
       // ---------------------------------------------------------------
       if (input.parentId) {
         node.parentId = input.parentId;
-        labelResolveNodeIds.push(input.parentId);
+        // Parent frame needs re-resolution of its group label.
+        const parentFrame = state.nodes.find((n) => n.id === input.parentId);
+        if (
+          parentFrame &&
+          !preprocessNodes.some((p) => p.id === parentFrame.id)
+        ) {
+          preprocessNodes.push(parentFrame);
+        }
       }
 
       newNodes.push(node);
@@ -158,8 +163,12 @@ const createNodes: CommandDefinition<Cmd> = {
       applied: true,
       nodes: finalNodes,
       edges: state.edges,
-      ingestNodes: newNodes,
-      labelResolveNodeIds,
+      preprocessNodes: [
+        // Only include new nodes that need preprocessing.
+        ...newNodes.filter((n) => needsPreprocessing(n.type ?? '')),
+        // Include parent frames that need label re-resolution.
+        ...preprocessNodes,
+      ],
     };
   },
 };

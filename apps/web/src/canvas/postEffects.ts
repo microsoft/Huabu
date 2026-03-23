@@ -12,10 +12,8 @@ import type { Node, Edge } from '@xyflow/react';
 
 /** Accumulated side-effect requests collected during a batch execution. */
 export interface PendingEffects {
-  /** Nodes that need knowledge-base ingestion. */
-  ingestNodes: Node[];
-  /** Node IDs that need LLM label resolution. */
-  labelResolveNodeIds: string[];
+  /** Nodes that need preprocessing (ingestion, label resolution, or both). */
+  preprocessNodes: Node[];
   /** Node IDs that were deleted and need server-side tracking. */
   deletedNodeIds: string[];
   /** Whether layout animation CSS transitions need cleanup after animation. */
@@ -49,22 +47,17 @@ export function runPostEffects(
     }
   }
 
-  // 2. Trigger knowledge-base ingestion for affected nodes.
-  for (const node of effects.ingestNodes) {
-    callbacks.triggerIngestion(node);
+  // 2. Trigger preprocessing for affected nodes.
+  for (const node of effects.preprocessNodes) {
+    callbacks.triggerPreprocessing(node);
   }
 
-  // 3. Trigger LLM label resolution for affected nodes.
-  for (const nodeId of effects.labelResolveNodeIds) {
-    callbacks.triggerLabelResolve(nodeId);
-  }
-
-  // 4. Track server-side deletes.
+  // 3. Track server-side deletes.
   for (const nodeId of effects.deletedNodeIds) {
     canvasHistoryManager.trackDelete(canvasId, nodeId);
   }
 
-  // 5. Clean up CSS transition styles after layout animation completes.
+  // 4. Clean up CSS transition styles after layout animation completes.
   if (effects.needsTransitionCleanup) {
     scheduleTransitionCleanup(
       () => getLatest().nodes,

@@ -32,10 +32,8 @@ export interface CommandHandlerResult {
   reason?: CanvasCommandFailureReason;
   nodes: Node[];
   edges: Edge[];
-  /** Nodes that need knowledge-base ingestion after commit. */
-  ingestNodes?: Node[];
-  /** Node IDs that need LLM label resolution after commit. */
-  labelResolveNodeIds?: string[];
+  /** Nodes that need preprocessing after commit. */
+  preprocessNodes?: Node[];
   /** Node IDs that were deleted and need server-side tracking. */
   deletedNodeIds?: string[];
 }

@@ -46,6 +46,32 @@
 - `canvasHandlers.ts` 已移除，相关逻辑分散到 `apps/web/src/canvas/commands/` 和 `apps/web/src/canvas/resolvers/` 目录。
 - Canvas store 大幅简化，核心状态管理职责不变。
 
+## 2026-03-20 · 修复聊天历史加载 404
+
+**What Changed**
+
+- 修复了打开 Chat Panel 时偶尔出现 `GET /api/agent/history/:threadId 404` 控制台报错的问题。
+
+**Notes**
+
+- 原因是 Chat Panel 挂载时 canvas 尚未加载完成，导致请求缺少 `canvasId` 参数。现在等 `canvasId` 就绪后才发起历史加载请求。
+
+---
+
+## 2026-03-20 · 节点预处理流水线统一
+
+**What Changed**
+
+- 所有 canvas 节点类型（note、text、web、pdf、image、frame、video）现在通过同一条 6 阶段预处理流水线处理，替代了之前分离的知识入库和 LLM 标签生成两套流程。
+- Image 和 frame 节点的自动标签生成现在与 note/text/web/pdf 的内容入库共享相同的前端触发机制和服务端调度器。
+- Agent 工具 `ingest_content` 现在支持所有节点类型（包括之前不支持的 PDF）。
+
+**Notes**
+
+- 用户感知上行为不变：note/text 编辑仍会自动同步到知识库，image/frame 仍会自动生成语义标签。
+- 内部触发函数从 `ingestNodeIfNeeded` + `resolveLabelIfNeeded` 合并为 `preprocessNodeIfNeeded`。
+- 详细设计文档见 `docs/node_preprocessing_design.md`，重构记录见 `docs/refactor_node-preprocessing-workflow.md`。
+
 ---
 
 ## 2026-03-19 · 快捷键帮助弹窗

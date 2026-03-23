@@ -15,19 +15,6 @@ export {
 // Obsidian backend
 export { ObsidianKnowledgeRepository } from './obsidian.repository.js';
 
-// Service (Business Logic Layer)
-export {
-  IngestService,
-  getIngestService,
-  resetIngestService,
-} from './ingest.service.js';
-export type {
-  IngestTextSourceInput,
-  IngestWebSourceInput,
-  IngestPdfSourceInput,
-  IngestSourceResult,
-} from './ingest.service.js';
-
 // Context Builder
 export { buildContext, type SourceWithContent } from './context-builder.js';
 

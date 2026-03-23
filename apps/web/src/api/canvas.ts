@@ -4,16 +4,13 @@ import type {
   GetCanvasResponse,
   PutCanvasRequest,
   PutCanvasResponse,
-  UpsertNodeRequest,
-  UpsertNodeResponse,
   DeleteNodeResponse,
   CanvasExportBundle,
   ImportCanvasResponse,
   ListCanvasesResponse,
   CreateCanvasRequest,
   CreateCanvasResponse,
-  ResolveLabelRequest,
-  ResolveLabelResponse,
+  PreprocessNodeResponse,
 } from '@sediment/shared';
 
 /**
@@ -88,31 +85,6 @@ export async function putCanvas(
   }
 
   return (await response.json()) as PutCanvasResponse;
-}
-
-export async function upsertNode(
-  canvasId: string,
-  nodeId: string,
-  request: UpsertNodeRequest,
-  options?: { keepalive?: boolean },
-): Promise<UpsertNodeResponse> {
-  const response = await fetch(
-    `${API_CONFIG.API_URL}/canvas/${canvasId}/nodes/${nodeId}`,
-    {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(request),
-      keepalive: options?.keepalive ?? false,
-    },
-  );
-
-  if (!response.ok) {
-    throw new Error(`Failed to upsert node: ${response.statusText}`);
-  }
-
-  return (await response.json()) as UpsertNodeResponse;
 }
 
 export async function deleteNode(
@@ -210,21 +182,37 @@ export async function deleteCanvasById(
 }
 
 /**
- * Ask the server to generate a semantic label via LLM.
- * Used for image nodes (vision) and frame nodes (child label summarization).
+ * Unified preprocessing endpoint.
+ * Handles all node types through a single route.
  */
-export async function resolveLabel(
-  request: ResolveLabelRequest,
-): Promise<ResolveLabelResponse> {
-  const response = await fetch(`${API_CONFIG.API_URL}/canvas/resolve-label`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(request),
-  });
+export async function preprocessNode(
+  canvasId: string,
+  nodeId: string,
+  body: {
+    nodeType: string;
+    trigger?: string;
+    snapshot: Record<string, unknown>;
+    options?: {
+      allowLLM?: boolean;
+      allowPersistence?: boolean;
+      force?: boolean;
+    };
+  },
+  options?: { keepalive?: boolean },
+): Promise<PreprocessNodeResponse> {
+  const response = await fetch(
+    `${API_CONFIG.API_URL}/canvas/${canvasId}/nodes/${nodeId}/preprocess`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      keepalive: options?.keepalive ?? false,
+    },
+  );
 
   if (!response.ok) {
-    throw new Error(`Failed to resolve label: ${response.statusText}`);
+    throw new Error(`Failed to preprocess node: ${response.statusText}`);
   }
 
-  return (await response.json()) as ResolveLabelResponse;
+  return (await response.json()) as PreprocessNodeResponse;
 }

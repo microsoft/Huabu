@@ -1,5 +1,5 @@
 import { noop, type CommandDefinition } from './types';
-import { shouldIngestOnUpdate } from '../../utils/io/ingest';
+import { shouldPreprocessOnUpdate } from '../../utils/io/preprocess';
 
 import type { CanvasCommand } from '@sediment/shared';
 import type { Node } from '@xyflow/react';
@@ -19,8 +19,7 @@ const mergeNodeData: CommandDefinition<Cmd> = {
     const patchMap = new Map(
       cmd.patches.map((p) => [p.nodeId as string, p.patch]),
     );
-    const ingestNodes: Node[] = [];
-    const labelResolveNodeIds: string[] = [];
+    const preprocessNodes: Node[] = [];
     let anyApplied = false;
 
     const nextNodes = state.nodes.map((n) => {
@@ -31,14 +30,23 @@ const mergeNodeData: CommandDefinition<Cmd> = {
         ...n,
         data: { ...(n.data ?? {}), ...patch },
       };
-      if (shouldIngestOnUpdate(n, updated)) {
-        ingestNodes.push(updated);
+      if (shouldPreprocessOnUpdate(n, updated)) {
+        preprocessNodes.push(updated);
       }
+      // When a child's label changes, the parent frame needs re-resolution.
       if (
         (patch as Record<string, unknown>).label !== undefined &&
         updated.parentId
       ) {
-        labelResolveNodeIds.push(updated.parentId);
+        const parentFrame = state.nodes.find(
+          (pn) => pn.id === updated.parentId,
+        );
+        if (
+          parentFrame &&
+          !preprocessNodes.some((p) => p.id === parentFrame.id)
+        ) {
+          preprocessNodes.push(parentFrame);
+        }
       }
       return updated;
     });
@@ -49,8 +57,7 @@ const mergeNodeData: CommandDefinition<Cmd> = {
       applied: true,
       nodes: nextNodes,
       edges: state.edges,
-      ingestNodes,
-      labelResolveNodeIds,
+      preprocessNodes,
     };
   },
 };

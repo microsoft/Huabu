@@ -23,7 +23,7 @@ import {
 } from '@xyflow/react';
 import { create, type StateCreator } from 'zustand';
 
-import { getCanvas, putCanvas, upsertNode } from '../api';
+import { getCanvas, preprocessNode, putCanvas } from '../api';
 import { canvasHistoryManager } from './canvasHistoryManager';
 import { COMMAND_META } from '../canvas/commands';
 import { executeCanvasCommands } from '../canvas/executor';
@@ -45,15 +45,14 @@ import {
   type NestableNode,
 } from '../canvas/utils/frame';
 import {
-  ingestNodeIfNeeded,
-  needsIngestion,
+  preprocessNodeIfNeeded,
+  needsPreprocessing,
   type NodeIngestionInfo,
-} from '../utils/io/ingest';
-import { resolveLabelIfNeeded } from '../utils/io/resolveLabel';
+} from '../utils/io/preprocess';
 import { getNodeSize } from '../utils/node/size';
 
 const AUTOSAVE_DEBOUNCE_MS = 1000;
-const INGESTION_DEBOUNCE_MS = 1000;
+const PREPROCESS_DEBOUNCE_MS = 1000;
 
 /**
  * Flush pending autosave immediately (synchronous cancel + fire).
@@ -67,54 +66,33 @@ const flushAutoSave = async (saveCanvas: () => Promise<void>) => {
   }
 };
 
-// Per-node debounce timers so rapid edits only fire one ingestion request
+// Per-node debounce timers so rapid edits only fire one preprocessing request
 // after the user stops typing, rather than on every keystroke.
-const ingestionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const preprocessTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-const triggerIngestion = (node: Node) => {
+const triggerPreprocessing = (node: Node) => {
   const nodeId = node.id;
-  const existing = ingestionTimers.get(nodeId);
+  const existing = preprocessTimers.get(nodeId);
   if (existing) clearTimeout(existing);
 
   const timer = setTimeout(() => {
-    ingestionTimers.delete(nodeId);
+    preprocessTimers.delete(nodeId);
     const state = useCanvasStore.getState();
     // Re-fetch the latest node so we send the most up-to-date content.
     const latestNode = state.nodes.find((n) => n.id === nodeId) ?? node;
-    void ingestNodeIfNeeded({
+    void preprocessNodeIfNeeded({
       canvasId: state.canvasId,
       node: latestNode,
       setNodeIngestion: state.setNodeIngestion,
       clearNodeIngestion: state.clearNodeIngestion,
       getNodeById: (id) => state.nodes.find((n) => n.id === id),
-      patchNodeSilent: state.patchNodeSilent,
-    });
-  }, INGESTION_DEBOUNCE_MS);
-
-  ingestionTimers.set(nodeId, timer);
-};
-
-// Per-node debounce timers for LLM label resolution.
-// Longer debounce for frames (children may still be settling after drag).
-const LABEL_RESOLVE_DEBOUNCE_MS = 2000;
-const labelResolveTimers = new Map<string, ReturnType<typeof setTimeout>>();
-
-const triggerLabelResolve = (nodeId: string) => {
-  const existing = labelResolveTimers.get(nodeId);
-  if (existing) clearTimeout(existing);
-
-  const timer = setTimeout(() => {
-    labelResolveTimers.delete(nodeId);
-    const state = useCanvasStore.getState();
-    void resolveLabelIfNeeded(nodeId, {
-      getNodeById: (id) => state.nodes.find((n) => n.id === id),
       getChildNodes: (frameId) =>
         state.nodes.filter((n) => n.parentId === frameId),
       patchNodeSilent: state.patchNodeSilent,
     });
-  }, LABEL_RESOLVE_DEBOUNCE_MS);
+  }, PREPROCESS_DEBOUNCE_MS);
 
-  labelResolveTimers.set(nodeId, timer);
+  preprocessTimers.set(nodeId, timer);
 };
 
 type RFState = {
@@ -469,7 +447,7 @@ const useCanvasStore = create<RFState>()(
       // Run post-commit side effects (edge reroute, ingestion, label resolve, delete tracking).
       runPostEffects(
         pendingEffects,
-        { triggerIngestion, triggerLabelResolve },
+        { triggerPreprocessing },
         writeResult.requiresEdgeReroute,
         state.canvasId,
         () => ({ nodes: get().nodes, edges: get().edges }),
@@ -651,11 +629,11 @@ const useCanvasStore = create<RFState>()(
       // Flush any pending save for the current canvas before switching
       await flushAutoSave(get().saveCanvas);
 
-      // Cancel all pending ingestion timers
-      for (const timer of ingestionTimers.values()) {
+      // Cancel all pending preprocessing timers
+      for (const timer of preprocessTimers.values()) {
         clearTimeout(timer);
       }
-      ingestionTimers.clear();
+      preprocessTimers.clear();
 
       // Reset state for clean slate
       set({
@@ -1167,7 +1145,7 @@ const useCanvasStore = create<RFState>()(
         canvasId,
         nodes,
         snapshot.nodes,
-        triggerIngestion,
+        triggerPreprocessing,
       );
     },
 
@@ -1186,7 +1164,7 @@ const useCanvasStore = create<RFState>()(
         canvasId,
         nodes,
         snapshot.nodes,
-        triggerIngestion,
+        triggerPreprocessing,
       );
     },
   })),
@@ -1196,8 +1174,8 @@ const useCanvasStore = create<RFState>()(
  * Flush all pending changes when the page is about to be unloaded.
  * Uses keepalive:true so requests survive page close/refresh.
  *
- * 1. Cancel all pending ingestion debounce timers.
- * 2. Fire upsertNode (keepalive) for every node that was still queued.
+ * 1. Cancel all pending preprocessing debounce timers.
+ * 2. Fire preprocessNode (keepalive) for every node that was still queued.
  * 3. Fire putCanvas (keepalive) with the latest canvas state.
  */
 function flushOnUnload(): void {
@@ -1206,33 +1184,55 @@ function flushOnUnload(): void {
   const { canvasId, nodes, edges, version, canvasTitle } = state;
 
   // Collect node IDs that had a pending debounce timer before clearing them.
-  const pendingNodeIds = Array.from(ingestionTimers.keys());
-  for (const timer of ingestionTimers.values()) {
+  const pendingNodeIds = Array.from(preprocessTimers.keys());
+  for (const timer of preprocessTimers.values()) {
     clearTimeout(timer);
   }
-  ingestionTimers.clear();
+  preprocessTimers.clear();
 
   // Nothing else to flush if no canvas is loaded.
   if (!canvasId) return;
 
-  // Fire upsertNode with keepalive for every queued node.
+  // Fire preprocessNode with keepalive for every queued node.
   for (const nodeId of pendingNodeIds) {
     const node = nodes.find((n) => n.id === nodeId);
-    if (!node || !needsIngestion(node.type ?? '')) continue;
+    if (!node || !needsPreprocessing(node.type ?? '')) continue;
 
     const nodeData = node.data as Record<string, unknown> | undefined;
-    const nodeType = node.type as 'note' | 'text' | 'web' | 'pdf';
+    const nodeType = node.type ?? '';
 
-    void upsertNode(
+    // Build a minimal snapshot matching what preprocessNodeIfNeeded would send.
+    const labelSource = nodeData?.labelSource as string | undefined;
+    const isAutoLabel = !labelSource || labelSource === 'auto';
+
+    const snapshot: Record<string, unknown> =
+      nodeType === 'frame'
+        ? {
+            childLabels: nodes
+              .filter((n) => n.parentId === nodeId)
+              .map((c) => {
+                const cData = c.data as Record<string, unknown> | undefined;
+                const label =
+                  typeof cData?.label === 'string' ? cData.label : '';
+                return label.trim();
+              })
+              .filter((l) => l.length > 0),
+          }
+        : {
+            title: isAutoLabel
+              ? undefined
+              : (nodeData?.label as string) ||
+                (nodeData?.title as string) ||
+                undefined,
+            content: (nodeData?.content as string) || undefined,
+            src: (nodeData?.src as string) || undefined,
+            sourceId: (nodeData?.sourceId as string) || undefined,
+          };
+
+    void preprocessNode(
       canvasId,
       nodeId,
-      {
-        type: nodeType,
-        title: (nodeData?.label as string) || undefined,
-        content: (nodeData?.content as string) || undefined,
-        src: (nodeData?.src as string) || undefined,
-        sourceId: (nodeData?.sourceId as string) || undefined,
-      },
+      { nodeType, trigger: 'flush', snapshot },
       { keepalive: true },
     ).catch(() => {
       // Best-effort on unload – ignore errors.
