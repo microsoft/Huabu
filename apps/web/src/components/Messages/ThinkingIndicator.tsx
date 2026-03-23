@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 
 const PHRASES = ['Thinking', 'Planning', 'Analyzing', 'Reasoning', 'Composing'];
 
-const CYCLE_MS = 4000;
+const CYCLE_MS = 10000;
 
 /**
  * Animated loading indicator that cycles through phrases with a

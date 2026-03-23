@@ -32,8 +32,8 @@ import type {
   AgentMode,
   AgentRequest,
   ChatAttachment,
-  ChatHistoryResponse,
   ChatHistoryItem,
+  ChatHistoryResponse,
   SelectedNodeDetail,
   ToolResponse,
 } from '@sediment/shared';
@@ -236,7 +236,7 @@ function cleanUpAbortedContext(context: Context): void {
   msgs.push({
     role: 'user',
     content:
-      '[SYSTEM] The user interrupted the previous operation. ' +
+      '[SYSTEM Interrupted] The user interrupted the previous operation. ' +
       'Do NOT continue or retry the interrupted task. ' +
       'Wait for the next user message and treat it as a new request.',
     timestamp: Date.now(),
@@ -245,13 +245,56 @@ function cleanUpAbortedContext(context: Context): void {
 
 // ==================== Route ====================
 
+/** An SSE event buffered for reconnecting clients. */
+interface BufferedEvent {
+  type: string;
+  data: unknown;
+}
+
+/** State for an active agent run, supporting client reconnection. */
+interface ActiveRun {
+  abortController: AbortController;
+  /** All events emitted so far — replayed to reconnecting clients. */
+  eventBuffer: BufferedEvent[];
+  /** Live subscribers (reconnected SSE clients). */
+  subscribers: Set<(type: string, data: unknown) => void>;
+  /** Whether the run has finished (success, error, or abort). */
+  completed: boolean;
+}
+
+/**
+ * Tracks active (and recently completed) agent runs by threadId.
+ * Enables client reconnection after page refresh.
+ */
+const activeRuns = new Map<string, ActiveRun>();
+
+/** Remove a completed run after a grace period. */
+function scheduleRunCleanup(threadId: string, delayMs = 60_000): void {
+  setTimeout(() => {
+    const run = activeRuns.get(threadId);
+    if (run?.completed) activeRuns.delete(threadId);
+  }, delayMs);
+}
+
 /**
  * Convert a pi-ai Context into ChatHistoryItem entries for the client.
+ * Status messages (interrupted / error) are deferred so they appear
+ * after any adjacent assistant or tool content, matching the visual
+ * order the user saw during the live session.
  */
 function buildHistoryItems(
   context: Context,
   messages: ChatHistoryItem[],
 ): void {
+  let pendingStatus: ChatHistoryItem | null = null;
+
+  const flushStatus = () => {
+    if (pendingStatus) {
+      messages.push(pendingStatus);
+      pendingStatus = null;
+    }
+  };
+
   for (const msg of context.messages) {
     if (msg.role === 'user') {
       let content =
@@ -274,6 +317,26 @@ function buildHistoryItems(
         )
         .replace(/^\[Canvas ID: [^\]]+\]\n\n/, '');
 
+      if (content.startsWith('[SYSTEM Interrupted]')) {
+        // Defer — will be placed after the next assistant/tool content
+        pendingStatus = { role: 'status', status: 'interrupted' };
+        continue;
+      }
+
+      if (content.startsWith('[SYSTEM Error]')) {
+        const detail = content.slice('[SYSTEM Error] '.length);
+        pendingStatus = { role: 'status', status: 'error', detail };
+        continue;
+      }
+
+      // Skip any other internal [SYSTEM] messages
+      if (content.startsWith('[SYSTEM]') || content.startsWith('[SYSTEM ')) {
+        continue;
+      }
+
+      // A real user message — flush any pending status first
+      flushStatus();
+
       if (content.trim()) {
         messages.push({ role: 'user', content });
       }
@@ -288,6 +351,8 @@ function buildHistoryItems(
           content: textParts.join(''),
         });
       }
+      // Flush status after assistant content so it appears below
+      flushStatus();
     } else if (msg.role === 'toolResult') {
       const resultText = msg.content
         .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
@@ -320,8 +385,12 @@ function buildHistoryItems(
       }
 
       messages.push({ role: 'tool', toolResponse });
+      flushStatus();
     }
   }
+
+  // Flush any remaining status at the end (e.g. aborted before assistant replied)
+  flushStatus();
 }
 
 const agentRoutes: FastifyPluginAsync = async (
@@ -330,8 +399,7 @@ const agentRoutes: FastifyPluginAsync = async (
 ): Promise<void> => {
   /**
    * GET /agent/history/:threadId
-   * Returns ChatHistoryResponse format for backward compatibility with the
-   * existing MessageList / ToolMessage rendering pipeline.
+   * Reconstructs the UI message list from the pi-ai Context.
    */
   fastify.get<{
     Params: { threadId: string };
@@ -358,8 +426,6 @@ const agentRoutes: FastifyPluginAsync = async (
         return reply.send({ threadId, messages: [] });
       }
 
-      // Return the latest thread's history with the actual threadId so the
-      // client can update its threadMap.
       const fallbackMessages: ChatHistoryItem[] = [];
       buildHistoryItems(latest.context, fallbackMessages);
       return reply.send({
@@ -373,6 +439,76 @@ const agentRoutes: FastifyPluginAsync = async (
 
     return reply.send({ threadId, messages });
   });
+
+  /**
+   * POST /agent/stop/:threadId
+   * Explicitly stop an active agent run. Only this endpoint triggers
+   * the interrupted state — client disconnects (e.g. page refresh) do not.
+   */
+  fastify.post<{ Params: { threadId: string } }>(
+    '/stop/:threadId',
+    async function (request, reply) {
+      const { threadId } = request.params;
+      const run = activeRuns.get(threadId);
+      if (run && !run.abortController.signal.aborted) {
+        run.abortController.abort();
+        return reply.send({ stopped: true });
+      }
+      return reply.send({ stopped: false });
+    },
+  );
+
+  /**
+   * GET /agent/stream/:threadId
+   * Reconnect to an active (or recently completed) agent run.
+   * Replays buffered events, then streams new events live.
+   */
+  fastify.get<{ Params: { threadId: string } }>(
+    '/stream/:threadId',
+    async function (request, reply) {
+      const { threadId } = request.params;
+      const run = activeRuns.get(threadId);
+
+      // Only reconnect to runs that are still in progress.
+      // Completed runs have already been fully persisted via flushSave(),
+      // so the history endpoint returns complete data — no need to replay.
+      if (!run || run.completed) {
+        return reply.code(404).send({ error: 'No active run' });
+      }
+
+      // SSE setup
+      reply.hijack();
+      reply.raw.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+        'X-Accel-Buffering': 'no',
+      });
+      reply.raw.flushHeaders?.();
+      reply.raw.write(': ok\n\n');
+
+      // Replay all buffered events
+      for (const ev of run.eventBuffer) {
+        writeSSE(reply.raw, ev.type, ev.data);
+      }
+
+      // Subscribe for new live events
+      const subscriber = (type: string, data: unknown) => {
+        writeSSE(reply.raw, type, data);
+        if (type === 'end' || type === 'error') {
+          reply.raw.end();
+          run.subscribers.delete(subscriber);
+        }
+      };
+      run.subscribers.add(subscriber);
+
+      // Clean up if this client disconnects
+      const cleanup = () => run.subscribers.delete(subscriber);
+      reply.raw.once('close', cleanup);
+      request.raw.socket?.once('close', cleanup);
+    },
+  );
 
   /**
    * POST /agent
@@ -489,18 +625,65 @@ const agentRoutes: FastifyPluginAsync = async (
     // Send thread ID
     writeSSE(reply.raw, 'meta', { threadId: resolvedThreadId, mode });
 
-    // Abort the agent pipeline when the client disconnects.
-    // After reply.hijack(), we need to listen on the raw socket for
-    // connection closure — request.raw 'close' fires when the request
-    // body is received, NOT when the SSE connection drops.
+    // Abort controller — only triggered by the explicit /stop endpoint,
+    // NOT by client disconnect (so page refreshes don't interrupt the run).
     const abortController = new AbortController();
-    const onDisconnect = () => {
-      if (!abortController.signal.aborted) {
-        request.log.info(
-          '[agent] Client disconnected — aborting agent pipeline',
-        );
-        abortController.abort();
+    const run: ActiveRun = {
+      abortController,
+      eventBuffer: [
+        { type: 'meta', data: { threadId: resolvedThreadId, mode } },
+      ],
+      subscribers: new Set(),
+      completed: false,
+    };
+    activeRuns.set(resolvedThreadId, run);
+
+    // Save context immediately so history includes the user message on refresh
+    saveContext(resolvedThreadId, context, canvasId);
+
+    // Debounced context save — keeps disk copy fresh during streaming so
+    // refreshes always see partial progress. Flushes at most every 2 seconds.
+    let savePending = false;
+    let saveTimer: ReturnType<typeof setTimeout> | null = null;
+    const debouncedSave = () => {
+      savePending = true;
+      if (!saveTimer) {
+        saveTimer = setTimeout(() => {
+          saveTimer = null;
+          if (savePending) {
+            savePending = false;
+            saveContext(resolvedThreadId, context, canvasId);
+          }
+        }, 2000);
       }
+    };
+    const flushSave = () => {
+      if (saveTimer) {
+        clearTimeout(saveTimer);
+        saveTimer = null;
+      }
+      saveContext(resolvedThreadId, context, canvasId);
+    };
+
+    // Emit an event: buffer it, write to original client, forward to subscribers.
+    const emit = (type: string, data: unknown) => {
+      run.eventBuffer.push({ type, data });
+      if (clientConnected) {
+        writeSSE(reply.raw, type, data);
+      }
+      for (const sub of run.subscribers) {
+        sub(type, data);
+      }
+    };
+
+    // Track whether the client is still connected so we can skip SSE writes
+    // after disconnect without aborting the pipeline.
+    let clientConnected = true;
+    const onDisconnect = () => {
+      clientConnected = false;
+      request.log.info(
+        '[agent] Client disconnected — pipeline continues in background',
+      );
     };
     const socket = request.raw.socket;
     reply.raw.once('close', onDisconnect);
@@ -515,15 +698,55 @@ const agentRoutes: FastifyPluginAsync = async (
         signal: abortController.signal,
       });
 
+      // Track partial assistant text so we can persist it on abort
+      let partialText = '';
+
       for await (const event of stream) {
-        // Stop writing if the client already disconnected
         if (abortController.signal.aborted) break;
-        writeSSE(reply.raw, event.type, event.data);
+        emit(event.type, event.data);
+
+        // Accumulate streamed text so partial replies survive interruption
+        if (
+          event.type === 'text_delta' &&
+          typeof event.data.content === 'string'
+        ) {
+          partialText += event.data.content;
+        }
+
+        // Reset partial text when a complete assistant message lands in context
+        // (runAgent pushes the result after s.result() completes)
+        if (event.type === 'done') {
+          partialText = '';
+        }
+
+        // When the agent yields an error event, persist it in the context
+        // so buildHistoryItems() can reconstruct it on history reload.
+        if (event.type === 'error' && event.data.error) {
+          context.messages.push({
+            role: 'user',
+            content: `[SYSTEM Error] ${event.data.error}`,
+            timestamp: Date.now(),
+          });
+        }
+
+        // Periodically save context so partial progress survives refreshes
+        debouncedSave();
       }
 
-      // On abort, clean up orphaned tool calls and insert an interruption
-      // notice so the LLM won't resume the cancelled task.
+      // On explicit abort (user clicked stop), clean up context.
       if (abortController.signal.aborted) {
+        // If there was partial assistant text that never made it into context
+        // (because s.result() was never called), inject it now so the user
+        // sees the partial reply after reload.
+        if (partialText) {
+          context.messages.push({
+            role: 'assistant',
+            content: [{ type: 'text', text: partialText }],
+            stopReason: 'stop',
+            timestamp: Date.now(),
+          } as unknown as Context['messages'][number]);
+        }
+
         request.log.info(
           '[agent] Abort detected — cleaning up context (%d messages before cleanup)',
           context.messages.length,
@@ -535,8 +758,8 @@ const agentRoutes: FastifyPluginAsync = async (
         );
       }
 
-      // Persist the context after completion
-      saveContext(resolvedThreadId, context, canvasId);
+      // Final save — flush any pending debounce and persist the complete context
+      flushSave();
 
       // Log final context state for debugging
       const lastMsgs = context.messages.slice(-3).map((m) => ({
@@ -564,19 +787,31 @@ const agentRoutes: FastifyPluginAsync = async (
       );
 
       if (!abortController.signal.aborted) {
-        reply.raw.write('event: end\ndata: {}\n\n');
+        emit('end', {});
       }
     } catch (error) {
       if (!abortController.signal.aborted) {
         request.log.error(error);
         const errorMsg =
           error instanceof Error ? error.message : 'Internal Error';
-        writeSSE(reply.raw, 'error', { error: errorMsg });
+        emit('error', { error: errorMsg });
+
+        // Persist error in context so it shows up when history is reloaded
+        context.messages.push({
+          role: 'user',
+          content: `[SYSTEM Error] ${errorMsg}`,
+          timestamp: Date.now(),
+        });
+        saveContext(resolvedThreadId, context, canvasId);
       }
     } finally {
+      run.completed = true;
+      scheduleRunCleanup(resolvedThreadId);
       reply.raw.removeListener('close', onDisconnect);
       socket?.removeListener('close', onDisconnect);
-      reply.raw.end();
+      if (clientConnected) {
+        reply.raw.end();
+      }
     }
   });
 };

@@ -31,6 +31,12 @@ export type ChatMessage =
     }
   | {
       id: string;
+      role: 'status';
+      status: 'interrupted' | 'error';
+      detail?: string;
+    }
+  | {
+      id: string;
       role: 'intent-select';
       /** The intent candidates to choose from. */
       candidates: IntentCandidate[];

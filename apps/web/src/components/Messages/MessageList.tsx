@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { AIMessage } from './AIMessage';
 import { IntentSelectMessage } from './IntentSelectMessage';
+import { StatusMessage } from './StatusMessage';
 import { ThinkingIndicator } from './ThinkingIndicator';
 import { ToolMessage } from './ToolMessage';
 import { UserMessage } from './UserMessage';
@@ -15,12 +16,15 @@ interface MessageListProps {
   isLoading: boolean;
   /** Called when user re-selects an intent from the intent-select message. */
   onIntentReselect?: (messageId: string, intent: string) => void;
+  /** Called when the user clicks retry on an interrupted status message. */
+  onRetry?: () => void;
 }
 
 export const MessageList = ({
   messages,
   isLoading,
   onIntentReselect,
+  onRetry,
 }: MessageListProps) => {
   const [hasNewMessage, setHasNewMessage] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -112,6 +116,17 @@ export const MessageList = ({
                 candidates={msg.candidates}
                 selectedIntent={msg.selectedIntent}
                 onReselect={(intent) => onIntentReselect?.(msg.id, intent)}
+              />
+            );
+          }
+
+          if (msg.role === 'status') {
+            return (
+              <StatusMessage
+                key={msg.id}
+                status={msg.status}
+                detail={msg.detail}
+                onRetry={onRetry}
               />
             );
           }
