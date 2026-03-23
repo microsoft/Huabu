@@ -13,6 +13,7 @@ interface AIMessageProps {
   content: string;
   isStreaming?: boolean;
   resources?: ResourceLabel[];
+  hideActions?: boolean;
 }
 
 const NoteIcon = NODE_ICON.note;
@@ -21,6 +22,7 @@ export const AIMessage = ({
   content,
   isStreaming,
   resources,
+  hideActions,
 }: AIMessageProps) => {
   const addNode = useCanvasStore((state) => state.addNode);
 
@@ -33,7 +35,7 @@ export const AIMessage = ({
           </div>
         </div>
 
-        {!isStreaming && (
+        {!isStreaming && !hideActions && (
           <div className="ml-1 flex items-center gap-1 px-3">
             <IconButton
               className="text-icon"
