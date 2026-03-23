@@ -627,8 +627,8 @@ const agentRoutes: FastifyPluginAsync = async (
     }
     if (contextParts.length > 0) {
       context.messages.push({
-        role: 'system',
-        content: contextParts.join('\n\n---\n\n'),
+        role: 'user',
+        content: `[SYSTEM Context]\n${contextParts.join('\n\n---\n\n')}`,
         timestamp: Date.now(),
       });
     }
