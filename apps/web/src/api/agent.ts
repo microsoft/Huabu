@@ -165,6 +165,7 @@ export const agentApi = {
       canvasContext?: AgentBaseContext;
       canvasId?: string;
       attachments?: ChatAttachment[];
+      selectedNodeIds?: string[];
       signal?: AbortSignal;
     },
   ): Promise<void> => {
@@ -176,6 +177,9 @@ export const agentApi = {
       canvasId: options?.canvasId,
       attachments: options?.attachments?.length
         ? options.attachments
+        : undefined,
+      selectedNodeIds: options?.selectedNodeIds?.length
+        ? options.selectedNodeIds
         : undefined,
     };
 

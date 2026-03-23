@@ -84,6 +84,7 @@ export const MessageList = ({
                 key={msg.id}
                 content={msg.content}
                 attachments={msg.attachments}
+                selectedNodeIds={msg.selectedNodeIds}
               />
             );
           }

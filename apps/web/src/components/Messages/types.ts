@@ -21,6 +21,8 @@ export type ChatMessage =
       attachments?: ChatAttachment[];
       /** Resources created during the agent's response. */
       resources?: ResourceLabel[];
+      /** IDs of canvas nodes selected when this message was sent. */
+      selectedNodeIds?: string[];
     }
   | {
       id: string;

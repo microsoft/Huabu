@@ -35,6 +35,8 @@ export const ChatInput = ({
 }: ChatInputProps) => {
   const isSubmitDisabled = disabled || !value.trim();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const historyIndexRef = useRef(-1);
+  const draftRef = useRef('');
 
   // Pending attachments from the store
   const pendingAttachments = useChatStore((s) => s.pendingAttachments);
@@ -74,17 +76,58 @@ export const ChatInput = ({
       textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
   }, [mode, value]);
 
-  // Handle Enter key for submission
+  // Handle Enter key for submission and ArrowUp/ArrowDown for prompt history
   const handleKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement> = (
     e,
   ) => {
     if (disabled) return;
+    if (e.nativeEvent.isComposing) return;
+
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      const ta = textareaRef.current;
+      if (!ta) return;
+      const atStart = ta.selectionStart === 0 && ta.selectionEnd === 0;
+      const atEnd = ta.selectionStart === ta.value.length;
+      if (
+        (e.key === 'ArrowUp' && atStart) ||
+        (e.key === 'ArrowDown' && atEnd)
+      ) {
+        const history = useChatStore
+          .getState()
+          .messages.filter((m) => m.role === 'user')
+          .map((m) => (m.role === 'user' ? m.content : ''));
+        if (history.length === 0) return;
+
+        e.preventDefault();
+        if (e.key === 'ArrowUp') {
+          if (historyIndexRef.current === -1) draftRef.current = value;
+          const next = Math.min(
+            historyIndexRef.current + 1,
+            history.length - 1,
+          );
+          historyIndexRef.current = next;
+          onChange(history[history.length - 1 - next]);
+          requestAnimationFrame(() => {
+            ta.selectionStart = 0;
+            ta.selectionEnd = 0;
+          });
+        } else {
+          const next = historyIndexRef.current - 1;
+          historyIndexRef.current = next;
+          onChange(
+            next < 0 ? draftRef.current : history[history.length - 1 - next],
+          );
+        }
+        return;
+      }
+    }
+
     if (e.key !== 'Enter') return;
     if (e.shiftKey) return;
-    if (e.nativeEvent.isComposing) return;
     if (isSubmitDisabled) return;
 
     e.preventDefault();
+    historyIndexRef.current = -1;
     onSubmit(e, mode);
   };
 
