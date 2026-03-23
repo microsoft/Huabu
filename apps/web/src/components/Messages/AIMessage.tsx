@@ -27,14 +27,14 @@ export const AIMessage = ({
   return (
     <div className="flex justify-start">
       <div className="flex w-full flex-col gap-1">
-        <div className="text-main ml-1 rounded-2xl border border-none bg-white px-4 pt-2 text-sm">
+        <div className="text-main ml-1 rounded-2xl border border-none bg-white px-4 text-sm">
           <div className="leading-relaxed">
             <BlockNoteCard content={content} />
           </div>
         </div>
 
         {!isStreaming && (
-          <div className="flex items-center gap-1 px-3">
+          <div className="ml-1 flex items-center gap-1 px-3">
             <IconButton
               className="text-icon"
               aria-label="Add as note"
@@ -50,7 +50,7 @@ export const AIMessage = ({
                 });
               }}
             >
-              <NoteIcon size={16} />
+              <NoteIcon size={12} />
             </IconButton>
 
             <IconButton
@@ -59,7 +59,7 @@ export const AIMessage = ({
               title="Copy"
               onClick={() => copyToClipboard(content)}
             >
-              <Copy size={16} />
+              <Copy size={12} />
             </IconButton>
 
             {resources && resources.length > 0 && (

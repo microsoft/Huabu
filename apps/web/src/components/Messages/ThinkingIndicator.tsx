@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-const PHRASES = ['Thinking', 'Planning', 'Analyzing', 'Reasoning', 'Composing'];
+const PHRASES = ['Thinking'];
 
 const CYCLE_MS = 10000;
 
