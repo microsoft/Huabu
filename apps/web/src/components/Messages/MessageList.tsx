@@ -14,6 +14,8 @@ import type { ChatMessage } from './types';
 interface MessageListProps {
   messages: ChatMessage[];
   isLoading: boolean;
+  /** Hide action buttons on AI messages (e.g. in operate mode). */
+  hideAIActions?: boolean;
   /** Called when user re-selects an intent from the intent-select message. */
   onIntentReselect?: (messageId: string, intent: string) => void;
   /** Called when the user clicks retry on an interrupted status message. */
@@ -23,6 +25,7 @@ interface MessageListProps {
 export const MessageList = ({
   messages,
   isLoading,
+  hideAIActions,
   onIntentReselect,
   onRetry,
 }: MessageListProps) => {
@@ -84,6 +87,7 @@ export const MessageList = ({
                 key={msg.id}
                 content={msg.content}
                 attachments={msg.attachments}
+                selectedNodeIds={msg.selectedNodeIds}
               />
             );
           }
@@ -95,6 +99,7 @@ export const MessageList = ({
                 content={msg.content}
                 isStreaming={msg.id === streamingAssistantId}
                 resources={msg.resources}
+                hideActions={hideAIActions}
               />
             );
           }

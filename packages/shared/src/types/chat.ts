@@ -69,6 +69,8 @@ export type ChatHistoryItem =
       content: string;
       /** Image attachments recovered from multimodal messages. */
       attachments?: ChatAttachment[];
+      /** IDs of canvas nodes that were selected when this message was sent. */
+      selectedNodeIds?: string[];
     }
   | {
       role: 'tool';

@@ -38,7 +38,7 @@ export function NodeRef({ nodeId, fallbackLabel }: NodeRefProps) {
     <div
       role="button"
       tabIndex={0}
-      className="border-border hover:bg-theme-50 inline-flex cursor-pointer items-center gap-0.5 rounded border bg-white px-1 py-px align-middle text-[10px] leading-tight font-medium"
+      className="border-border/60 hover:bg-theme-50 inline-flex cursor-pointer items-center gap-0.5 rounded border bg-transparent px-1 py-px align-middle text-[10px] leading-tight font-normal text-gray-400"
       onClick={handleClick}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {

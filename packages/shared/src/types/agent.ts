@@ -27,6 +27,8 @@ export interface AgentRequest {
   canvasId?: string;
   /** Image/file attachments */
   attachments?: ChatAttachment[];
+  /** IDs of canvas nodes selected when the message was sent */
+  selectedNodeIds?: string[];
 }
 
 // ==================== Streaming Events ====================

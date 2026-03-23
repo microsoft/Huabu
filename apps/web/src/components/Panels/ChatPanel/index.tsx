@@ -267,6 +267,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
               role: 'user' | 'assistant';
               content: string;
               attachments?: ChatAttachment[];
+              selectedNodeIds?: string[];
             };
             return {
               id,
@@ -275,6 +276,10 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
               ...(msg.attachments &&
                 msg.attachments.length > 0 && {
                   attachments: msg.attachments,
+                }),
+              ...(msg.selectedNodeIds &&
+                msg.selectedNodeIds.length > 0 && {
+                  selectedNodeIds: msg.selectedNodeIds,
                 }),
             };
           },
@@ -469,6 +474,11 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         pendingAttachments.length > 0 ? [...pendingAttachments] : undefined;
       if (attachments) clearPendingAttachments();
 
+      const selectedNodeIds = useCanvasStore
+        .getState()
+        .nodes.filter((n) => n.selected)
+        .map((n) => n.id);
+
       // For intent-driven operate calls, show an intent-select widget instead of user bubble
       if (intentData && agentMode === 'operate') {
         addMessage({
@@ -483,6 +493,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           role: 'user',
           content: prompt,
           attachments,
+          ...(selectedNodeIds.length > 0 ? { selectedNodeIds } : {}),
         });
       }
 
@@ -670,6 +681,8 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
             canvasContext: getAgentContext(),
             canvasId: canvasId || undefined,
             attachments,
+            selectedNodeIds:
+              selectedNodeIds.length > 0 ? selectedNodeIds : undefined,
             signal: abortController.signal,
           },
         );
@@ -826,6 +839,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         <MessageList
           messages={messages}
           isLoading={isLoading || !isHistoryLoaded}
+          hideAIActions={mode === 'operate'}
           onIntentReselect={handleIntentReselect}
           onRetry={() => {
             // Find the last user message and re-send it
