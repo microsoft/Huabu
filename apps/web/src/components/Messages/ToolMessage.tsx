@@ -187,7 +187,7 @@ function AgentToolCard({ toolResponse, isExecuting }: AgentToolCardProps) {
         </button>
         {showContent && contentText && (
           <div className="border-border text-muted-foreground/60 mt-1 max-h-40 overflow-y-auto rounded border p-2 text-[11px] leading-relaxed">
-            <div className="break-words whitespace-pre-wrap">{contentText}</div>
+            <div className="break-all whitespace-pre-wrap">{contentText}</div>
           </div>
         )}
       </div>

@@ -73,6 +73,12 @@ export type ChatHistoryItem =
   | {
       role: 'tool';
       toolResponse: ToolResponse<string, unknown>;
+    }
+  | {
+      role: 'status';
+      status: 'interrupted' | 'error';
+      /** Optional detail message for the status. */
+      detail?: string;
     };
 
 /** Response from GET /api/chat/history/:threadId */

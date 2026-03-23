@@ -1,8 +1,10 @@
-import { ArrowDown, Ellipsis } from 'lucide-react';
+import { ArrowDown } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { AIMessage } from './AIMessage';
 import { IntentSelectMessage } from './IntentSelectMessage';
+import { StatusMessage } from './StatusMessage';
+import { ThinkingIndicator } from './ThinkingIndicator';
 import { ToolMessage } from './ToolMessage';
 import { UserMessage } from './UserMessage';
 import { Button } from '../Common/Button';
@@ -14,12 +16,15 @@ interface MessageListProps {
   isLoading: boolean;
   /** Called when user re-selects an intent from the intent-select message. */
   onIntentReselect?: (messageId: string, intent: string) => void;
+  /** Called when the user clicks retry on an interrupted status message. */
+  onRetry?: () => void;
 }
 
 export const MessageList = ({
   messages,
   isLoading,
   onIntentReselect,
+  onRetry,
 }: MessageListProps) => {
   const [hasNewMessage, setHasNewMessage] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -115,16 +120,24 @@ export const MessageList = ({
             );
           }
 
+          if (msg.role === 'status') {
+            return (
+              <StatusMessage
+                key={msg.id}
+                status={msg.status}
+                detail={msg.detail}
+                onRetry={onRetry}
+              />
+            );
+          }
+
           return null;
         })}
 
         {isLoading && (
           <div className="flex justify-start">
-            <div
-              className="rounded-2xl border-none px-3 py-2"
-              aria-label={'thinking'}
-            >
-              <Ellipsis className="text-icon animate-pulse" />
+            <div className="px-3 py-2">
+              <ThinkingIndicator />
             </div>
           </div>
         )}

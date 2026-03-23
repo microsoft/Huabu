@@ -79,6 +79,80 @@ export const agentApi = {
   },
 
   /**
+   * Explicitly stop an active agent run on the server.
+   */
+  stopThread: async (threadId: string): Promise<void> => {
+    await fetch(
+      `${API_CONFIG.API_URL}/agent/stop/${encodeURIComponent(threadId)}`,
+      { method: 'POST' },
+    );
+  },
+
+  /**
+   * Reconnect to an active agent run after page refresh.
+   * Returns false if no active run exists (404), otherwise streams events.
+   */
+  reconnectStream: async (
+    threadId: string,
+    callbacks: AgentStreamCallbacks,
+    signal?: AbortSignal,
+  ): Promise<boolean> => {
+    try {
+      const response = await fetch(
+        `${API_CONFIG.API_URL}/agent/stream/${encodeURIComponent(threadId)}`,
+        { signal },
+      );
+
+      if (response.status === 404) return false;
+      if (!response.ok || !response.body) return false;
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() || '';
+
+        for (const part of parts) {
+          const parsed = parseSSEChunk(part);
+          if (!parsed) continue;
+
+          const { eventType, data } = parsed;
+          try {
+            const eventData = JSON.parse(data) as Record<string, unknown>;
+            if (eventType === 'end') {
+              callbacks.onComplete();
+              return true;
+            } else if (eventType === 'error') {
+              callbacks.onError(
+                new Error((eventData.error as string) ?? 'Unknown error'),
+              );
+              return true;
+            } else if (eventType !== 'meta') {
+              callbacks.onEvent({
+                type: eventType as AgentStreamEvent['type'],
+                data: eventData,
+              });
+            }
+          } catch (e) {
+            console.error(`[agent] Failed to parse reconnect ${eventType}:`, e);
+          }
+        }
+      }
+
+      callbacks.onComplete();
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  /**
    * Send a message and stream the response via SSE.
    * Pass an AbortSignal to allow cancellation of the stream.
    */

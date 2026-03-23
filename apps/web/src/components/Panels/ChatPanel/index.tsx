@@ -187,6 +187,21 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const assistantIdRef = useRef<string>('');
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  // Track whether the component is still active (not unloading).
+  // Prevents adding spurious "network error" status on page refresh.
+  const activeRef = useRef(true);
+  useEffect(() => {
+    activeRef.current = true;
+    const onUnload = () => {
+      activeRef.current = false;
+    };
+    window.addEventListener('beforeunload', onUnload);
+    return () => {
+      window.removeEventListener('beforeunload', onUnload);
+      activeRef.current = false;
+    };
+  }, []);
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -239,6 +254,15 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
               };
             }
 
+            if (m.role === 'status') {
+              return {
+                id,
+                role: 'status' as const,
+                status: m.status,
+                detail: m.detail,
+              };
+            }
+
             const msg = m as {
               role: 'user' | 'assistant';
               content: string;
@@ -268,6 +292,164 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       cancelled = true;
     };
   }, [threadId, canvasId]);
+
+  // Try to reconnect to an active server-side run after history is loaded.
+  // This handles the page-refresh case: events buffered during the refresh
+  // are replayed, then live streaming resumes.
+  useEffect(() => {
+    if (!isHistoryLoaded || !threadId || !canvasId) return;
+
+    let cancelled = false;
+
+    const tryReconnect = async () => {
+      const assistantId = createId('message');
+      const toolQueue: string[] = [];
+      // Flag set to true once we know the server has an active run
+      let streaming = false;
+
+      // Clear assistant/tool/status messages loaded from history for the
+      // current run — the reconnect event buffer replays them fully.
+      // Keep only messages up to and including the last user message.
+      const clearStaleMessages = () => {
+        const current = useChatStore.getState().messages;
+        let lastUserIdx = -1;
+        for (let i = current.length - 1; i >= 0; i--) {
+          if (
+            current[i].role === 'user' ||
+            current[i].role === 'intent-select'
+          ) {
+            lastUserIdx = i;
+            break;
+          }
+        }
+        if (lastUserIdx >= 0) {
+          useChatStore
+            .getState()
+            .setMessages(current.slice(0, lastUserIdx + 1));
+        }
+      };
+
+      const connected = await agentApi.reconnectStream(threadId, {
+        onEvent: (event: AgentStreamEvent) => {
+          if (cancelled) return;
+          if (!streaming) {
+            streaming = true;
+            setIsLoading(true);
+            clearStaleMessages();
+          }
+
+          if (event.type === 'text_delta') {
+            const delta = (event.data as Record<string, unknown>).content ?? '';
+            const existing = useChatStore
+              .getState()
+              .messages.find((m) => m.id === assistantId);
+            if (existing) {
+              updateMessage(assistantId, (m) =>
+                m.role === 'user' || m.role === 'assistant'
+                  ? { ...m, content: m.content + (delta as string) }
+                  : m,
+              );
+            } else {
+              addMessage({
+                id: assistantId,
+                role: 'assistant',
+                content: delta as string,
+              });
+            }
+          } else if (event.type === 'tool_start') {
+            const toolName =
+              (event.data as Record<string, unknown>).toolName ?? 'unknown';
+            const msgId = createId('tool');
+            toolQueue.push(msgId);
+            addMessage({
+              id: msgId,
+              role: 'tool',
+              toolResponse: {
+                tool: toolName as string,
+                status: 'success',
+                data: ((event.data as Record<string, unknown>).toolArgs ??
+                  {}) as Record<string, unknown>,
+              },
+              isExecuting: true,
+            });
+          } else if (event.type === 'tool_result') {
+            const toolResponse = parseToolResponse(
+              ((event.data as Record<string, unknown>).toolName ??
+                'unknown') as string,
+              (event.data as Record<string, unknown>).toolResult as
+                | string
+                | undefined,
+            );
+            if (toolResponse) {
+              const pendingMsgId = toolQueue.shift();
+              if (pendingMsgId) {
+                const existingMsg = useChatStore
+                  .getState()
+                  .messages.find((m) => m.id === pendingMsgId);
+                const existingArgs =
+                  existingMsg?.role === 'tool' &&
+                  existingMsg.toolResponse.status === 'success'
+                    ? (existingMsg.toolResponse.data as Record<string, unknown>)
+                    : {};
+                const finalResponse = {
+                  ...toolResponse,
+                  data: {
+                    ...existingArgs,
+                    ...((toolResponse.status === 'success'
+                      ? toolResponse.data
+                      : {}) as Record<string, unknown>),
+                  },
+                } as typeof toolResponse;
+                updateMessage(pendingMsgId, () => ({
+                  id: pendingMsgId,
+                  role: 'tool' as const,
+                  toolResponse: finalResponse,
+                  isExecuting: false,
+                }));
+              } else {
+                addMessage({
+                  id: createId('tool'),
+                  role: 'tool',
+                  toolResponse,
+                });
+              }
+              void refreshCanvas();
+            }
+          }
+        },
+        onError: (err) => {
+          if (cancelled) return;
+          // Clear stale messages from history before adding the error,
+          // so we don't duplicate errors already loaded from history.
+          clearStaleMessages();
+          addMessage({
+            id: createId('status'),
+            role: 'status',
+            status: 'error',
+            detail: err.message,
+          });
+          setIsLoading(false);
+        },
+        onComplete: () => {
+          if (cancelled) return;
+          setIsLoading(false);
+          void refreshCanvas();
+        },
+      });
+
+      if (connected && !cancelled) {
+        // Reconnection was successful — events were processed above
+      }
+    };
+
+    void tryReconnect();
+
+    return () => {
+      cancelled = true;
+    };
+    // Only run once after history loads, not on every re-render
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isHistoryLoaded, threadId, canvasId]);
 
   const handleStreamingChat = useCallback(
     async (
@@ -329,6 +511,9 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       // Whether this mode modifies the canvas (needs refresh after tool calls)
       const modifiesCanvas =
         agentMode === 'operate' || agentMode === 'research';
+
+      // Guard: ensure only one of onError / catch adds an error status
+      let errorHandled = false;
 
       // Create abort controller for this stream
       const abortController = new AbortController();
@@ -439,12 +624,17 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
               }
             },
             onError: (err) => {
+              if (!activeRef.current || errorHandled) return;
+              errorHandled = true;
               console.error(`${agentMode} error:`, err);
               addMessage({
-                id: createId('message'),
-                role: 'assistant',
-                content: `Error: ${err.message}`,
+                id: createId('status'),
+                role: 'status',
+                status: 'error',
+                detail: err.message,
               });
+              setIsLoading(false);
+              abortControllerRef.current = null;
               if (agentMode === 'research') {
                 setResearchError(err.message);
               }
@@ -490,14 +680,17 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           abortControllerRef.current = null;
           return;
         }
+        // Page unloading — don't persist error
+        if (!activeRef.current) return;
+        // Skip if onError callback already handled this
+        if (errorHandled) return;
+        errorHandled = true;
         console.error(`${agentMode} failed:`, err);
         addMessage({
-          id: createId('message'),
-          role: 'assistant',
-          content:
-            err instanceof Error
-              ? `Error: ${err.message}`
-              : 'Error: unknown error',
+          id: createId('status'),
+          role: 'status',
+          status: 'error',
+          detail: err instanceof Error ? err.message : 'Unknown error',
         });
         setIsLoading(false);
         if (agentMode === 'research') {
@@ -570,9 +763,20 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   };
 
   const handleStop = useCallback(() => {
+    // Tell the server to stop the active run
+    const tid = useChatStore.getState().threadId;
+    void agentApi.stopThread(tid);
+
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
     setIsLoading(false);
+
+    // Show interrupted status in chat
+    addMessage({
+      id: createId('status'),
+      role: 'status',
+      status: 'interrupted',
+    });
 
     // Reset research store if it was running
     if (useResearchStore.getState().status === 'running') {
@@ -591,7 +795,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
 
     // Sync canvas with any partial server-side changes
     void refreshCanvas();
-  }, [updateMessage, refreshCanvas]);
+  }, [addMessage, updateMessage, refreshCanvas]);
 
   const handleNewChat = () => {
     if (isLoading || researchStatus === 'running') return;
@@ -623,6 +827,15 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           messages={messages}
           isLoading={isLoading || !isHistoryLoaded}
           onIntentReselect={handleIntentReselect}
+          onRetry={() => {
+            // Find the last user message and re-send it
+            const lastUserMsg = [...messages]
+              .reverse()
+              .find((m) => m.role === 'user');
+            if (lastUserMsg && lastUserMsg.role === 'user') {
+              void handleStreamingChat(lastUserMsg.content, mode);
+            }
+          }}
         />
 
         {/* Canvas change review bar */}

@@ -106,16 +106,17 @@ export const ChatInput = ({
               {pendingAttachments.map((att, i) => (
                 <div
                   key={att.url}
-                  className="border-border group relative overflow-hidden rounded border"
+                  className="border-border group relative flex items-center justify-center rounded-md border"
                 >
                   <img
                     src={att.url}
                     alt={att.label ?? 'Attached image'}
-                    className="h-16 w-24 object-cover"
+                    className="h-14 w-14 rounded-md object-contain"
                   />
                   <IconButton
                     onClick={() => removePendingAttachment(i)}
-                    className="absolute top-0.5 right-0.5 rounded-full bg-black/50 p-0.5 text-white opacity-0 transition-opacity group-hover:opacity-100"
+                    tooltipWrapperClassName="absolute top-0.5 right-0.5 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
+                    className="rounded-full bg-black/50 p-0.5 text-white enabled:hover:bg-black/70"
                     title="Remove attachment"
                   >
                     <X size={10} />
@@ -137,16 +138,17 @@ export const ChatInput = ({
           />
 
           <div className="mt-2 flex items-center justify-between gap-3">
-            <ModeSelector
-              value={mode}
-              onChange={onModeChange}
-              disabled={disabled}
-            />
+            <div className="flex items-center gap-2">
+              <ModeSelector
+                value={mode}
+                onChange={onModeChange}
+                disabled={disabled}
+              />
+              <ContextUsageRing />
+            </div>
 
             <div className="flex items-center gap-2">
               <SourceCount />
-
-              <ContextUsageRing />
 
               {isStreaming ? (
                 <IconButton
@@ -157,7 +159,7 @@ export const ChatInput = ({
                   size="sm"
                   variant="solid"
                 >
-                  <Square size={14} />
+                  <Square size={12} />
                 </IconButton>
               ) : (
                 <IconButton
