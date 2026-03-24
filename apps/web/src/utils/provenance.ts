@@ -140,11 +140,25 @@ export function getBlockAuthorStatus(
 }
 
 // ---------------------------------------------------------------------------
+// Diff types
+// ---------------------------------------------------------------------------
+
+export interface DeletedBlockInfo {
+  /** The plain text content of the deleted block. */
+  text: string;
+  /**
+   * ID of the surviving block after which the deletion occurred.
+   * `null` means the deletion was at the very beginning of the document.
+   */
+  afterBlockId: string | null;
+}
+
+// ---------------------------------------------------------------------------
 // Diff-merge: preserve per-block provenance after AI full-content replacement
 // ---------------------------------------------------------------------------
 
 /** Minimal block shape needed for content-based matching. */
-interface ProvenanceBlock {
+export interface ProvenanceBlock {
   id: string;
   type: string;
   content?: unknown;
@@ -152,7 +166,7 @@ interface ProvenanceBlock {
 }
 
 /** Extract plain text from a BlockNote block, recursing into children. */
-function extractBlockText(block: ProvenanceBlock): string {
+export function extractBlockText(block: ProvenanceBlock): string {
   let text = '';
   if (Array.isArray(block.content)) {
     text = (block.content as Array<{ type?: string; text?: string }>)
@@ -169,7 +183,7 @@ function extractBlockText(block: ProvenanceBlock): string {
 }
 
 /** Content fingerprint for matching blocks across ID changes. */
-function blockFingerprint(block: ProvenanceBlock): string {
+export function blockFingerprint(block: ProvenanceBlock): string {
   return `${block.type}::${extractBlockText(block)}`;
 }
 
@@ -182,9 +196,11 @@ function blockFingerprint(block: ProvenanceBlock): string {
  * (with fresh IDs), preserving provenance for blocks whose content was not
  * actually changed by the AI.
  *
- * - Matched (identical content): old provenance carried over as-is.
- * - Unmatched new blocks: stamped with the AI sentinel provenance.
- * - Deleted old blocks: silently removed from the map.
+ * - Matched (identical content): old provenance carried over as-is (including
+ *   any existing `baselineText` for cumulative diffs).
+ * - Unmatched new blocks: stamped with AI sentinel + `baselineText` set to
+ *   the paired old block's original baseline (cumulative) or current text.
+ * - Deleted old blocks: stored as `__deleted_N__` entries with `baselineText`.
  */
 export function mergeProvenanceAfterAIUpdate(
   oldProvenance: BlockProvenanceMap,
@@ -192,31 +208,115 @@ export function mergeProvenanceAfterAIUpdate(
   newBlocks: ProvenanceBlock[],
   sentinel: BlockProvenance,
 ): BlockProvenanceMap {
-  // Build an ordered pool of old-block provenance keyed by content fingerprint.
-  // Multiple blocks may share a fingerprint (e.g. empty paragraphs); the array
-  // preserves document order so greedy matching stays positionally consistent.
-  const pool = new Map<string, BlockProvenance[]>();
+  // Build an ordered pool of old-block entries keyed by content fingerprint.
+  // Each pool item carries both the provenance entry and the block itself,
+  // so we can extract text for baselineText when blocks are unmatched.
+  const pool = new Map<
+    string,
+    { entry: BlockProvenance; block: ProvenanceBlock }[]
+  >();
   for (const block of oldBlocks) {
     const entry = oldProvenance[block.id];
     if (!entry) continue;
     const fp = blockFingerprint(block);
     const list = pool.get(fp) ?? [];
-    list.push(entry);
+    list.push({ entry, block });
     pool.set(fp, list);
   }
 
   const result: BlockProvenanceMap = {};
+  const matchedOldBlockIds = new Set<string>();
+  const unmatchedNewBlockIds: string[] = [];
+
   for (const block of newBlocks) {
     const fp = blockFingerprint(block);
     const matches = pool.get(fp);
     if (matches && matches.length > 0) {
-      // Content unchanged — carry over old provenance (including any
-      // existing modification history from the user).
-      result[block.id] = { ...matches.shift()! };
+      const match = matches.shift()!;
       if (matches.length === 0) pool.delete(fp);
+      // Content unchanged — carry over old provenance as-is (including
+      // existing baselineText and modification history).
+      result[block.id] = { ...match.entry };
+      matchedOldBlockIds.add(match.block.id);
     } else {
       // New or modified by AI — stamp with sentinel provenance.
       result[block.id] = { ...sentinel };
+      unmatchedNewBlockIds.push(block.id);
+    }
+  }
+
+  // Collect unmatched old blocks in document order.
+  const unmatchedOld: { entry: BlockProvenance; block: ProvenanceBlock }[] = [];
+  for (const block of oldBlocks) {
+    const entry = oldProvenance[block.id];
+    if (entry && !matchedOldBlockIds.has(block.id)) {
+      unmatchedOld.push({ entry, block });
+    }
+  }
+
+  // Pair unmatched old blocks with unmatched new blocks (positional).
+  // Use the old entry's existing baselineText if present (cumulative diffs),
+  // otherwise use the old block's current text.
+  let pairIdx = 0;
+  for (const newBlockId of unmatchedNewBlockIds) {
+    if (pairIdx < unmatchedOld.length) {
+      const { entry: oldEntry, block: oldBlock } = unmatchedOld[pairIdx];
+      result[newBlockId].baselineText =
+        oldEntry.baselineText ?? extractBlockText(oldBlock);
+      pairIdx++;
+    } else {
+      // Brand-new block added by AI — empty baseline.
+      result[newBlockId].baselineText = '';
+    }
+  }
+
+  // Excess unmatched old blocks = deletions by AI.
+  // Walk old blocks in document order to determine positional context
+  // (which surviving new block each deletion falls after).
+  let lastMatchedNewId: string | null = null;
+  // Build old→new ID mapping for matched blocks.
+  const oldToNewId = new Map<string, string>();
+  {
+    // Re-walk using fingerprint pools (rebuild since consumed above).
+    const fpPool2 = new Map<string, string[]>();
+    for (const block of oldBlocks) {
+      if (!matchedOldBlockIds.has(block.id)) continue;
+      const fp = blockFingerprint(block);
+      const list = fpPool2.get(fp) ?? [];
+      list.push(block.id);
+      fpPool2.set(fp, list);
+    }
+    for (const block of newBlocks) {
+      const fp = blockFingerprint(block);
+      const list = fpPool2.get(fp);
+      if (list && list.length > 0) {
+        oldToNewId.set(list.shift()!, block.id);
+        if (list.length === 0) fpPool2.delete(fp);
+      }
+    }
+  }
+
+  // Determine which unmatched old blocks are excess (not paired).
+  const pairedOldBlockIds = new Set(
+    unmatchedOld.slice(0, pairIdx).map((u) => u.block.id),
+  );
+
+  let deletedIdx = 0;
+  for (const block of oldBlocks) {
+    if (matchedOldBlockIds.has(block.id)) {
+      lastMatchedNewId = oldToNewId.get(block.id) ?? lastMatchedNewId;
+    } else if (!pairedOldBlockIds.has(block.id) && oldProvenance[block.id]) {
+      const entry = oldProvenance[block.id];
+      const text = entry.baselineText ?? extractBlockText(block);
+      if (text.trim()) {
+        result[`__deleted_${deletedIdx}__`] = {
+          ...sentinel,
+          deleted: true,
+          baselineText: text,
+          afterBlockId: lastMatchedNewId,
+        };
+        deletedIdx++;
+      }
     }
   }
 
@@ -300,4 +400,129 @@ export function resolveSentinelProvenance(
     newBlocks,
     rawProvenance.__all__,
   );
+}
+
+// ---------------------------------------------------------------------------
+// Baseline / diff derivation utilities
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true if any block in the provenance map has a pending diff
+ * (has a `baselineText` field, including `__deleted_*` entries).
+ */
+export function hasAnyPendingDiff(
+  map: BlockProvenanceMap | undefined,
+): boolean {
+  if (!map) return false;
+  for (const [key, entry] of Object.entries(map)) {
+    if (key === '__all__') continue;
+    if (entry.baselineText !== undefined) return true;
+  }
+  return false;
+}
+
+/**
+ * Derive a block diff map from provenance.
+ * Returns a Map of blockId → baselineText for non-deleted AI blocks
+ * that have a pending diff (baselineText defined).
+ */
+export function deriveBlockDiffMap(
+  map: BlockProvenanceMap | undefined,
+): Map<string, string> {
+  const result = new Map<string, string>();
+  if (!map) return result;
+  for (const [key, entry] of Object.entries(map)) {
+    if (key === '__all__' || key.startsWith('__deleted_')) continue;
+    if (
+      entry.baselineText !== undefined &&
+      getBlockAuthorStatus(entry) === 'ai'
+    ) {
+      result.set(key, entry.baselineText);
+    }
+  }
+  return result;
+}
+
+/**
+ * Derive deleted block info from `__deleted_N__` provenance entries.
+ */
+export function deriveDeletedBlocks(
+  map: BlockProvenanceMap | undefined,
+): DeletedBlockInfo[] {
+  if (!map) return [];
+  const entries = Object.entries(map)
+    .filter(([k]) => k.startsWith('__deleted_'))
+    .sort(([a], [b]) => {
+      const ai = parseInt(a.replace('__deleted_', '').replace('__', ''), 10);
+      const bi = parseInt(b.replace('__deleted_', '').replace('__', ''), 10);
+      return ai - bi;
+    });
+  const result: DeletedBlockInfo[] = [];
+  for (const [, entry] of entries) {
+    if (entry.deleted && entry.baselineText?.trim()) {
+      result.push({
+        text: entry.baselineText,
+        afterBlockId: entry.afterBlockId ?? null,
+      });
+    }
+  }
+  return result;
+}
+
+/**
+ * Remove `baselineText` from a specific block's provenance entry.
+ */
+export function clearBaselineText(
+  map: BlockProvenanceMap | undefined,
+  blockId: string,
+): BlockProvenanceMap {
+  if (!map || !map[blockId]) return map ?? {};
+  const { baselineText: _, ...rest } = map[blockId];
+  return { ...map, [blockId]: rest as BlockProvenance };
+}
+
+/**
+ * Remove all `baselineText` fields and `__deleted_*` entries from provenance.
+ */
+export function clearAllBaselines(
+  map: BlockProvenanceMap | undefined,
+): BlockProvenanceMap {
+  if (!map) return {};
+  const result: BlockProvenanceMap = {};
+  for (const [key, entry] of Object.entries(map)) {
+    if (key.startsWith('__deleted_')) continue;
+    if (entry.baselineText !== undefined) {
+      const { baselineText: _, ...rest } = entry;
+      result[key] = rest as BlockProvenance;
+    } else {
+      result[key] = entry;
+    }
+  }
+  return result;
+}
+
+/**
+ * Remove a specific `__deleted_N__` entry from provenance.
+ */
+export function removeDeletedEntry(
+  map: BlockProvenanceMap | undefined,
+  deletedKey: string,
+): BlockProvenanceMap {
+  if (!map) return {};
+  const { [deletedKey]: _, ...rest } = map;
+  return rest;
+}
+
+/**
+ * Get sorted `__deleted_N__` keys from a provenance map.
+ */
+export function getDeletedKeys(map: BlockProvenanceMap | undefined): string[] {
+  if (!map) return [];
+  return Object.keys(map)
+    .filter((k) => k.startsWith('__deleted_'))
+    .sort((a, b) => {
+      const ai = parseInt(a.replace('__deleted_', '').replace('__', ''), 10);
+      const bi = parseInt(b.replace('__deleted_', '').replace('__', ''), 10);
+      return ai - bi;
+    });
 }

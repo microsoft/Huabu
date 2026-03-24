@@ -1,6 +1,6 @@
 import { SideMenuController, useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/shadcn';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { loadBlockNoteContent } from '@/components/BlockNote/blockNoteContent';
 import {
@@ -8,15 +8,24 @@ import {
   NoteSourceIdProvider,
 } from '@/components/BlockNote/NoteEditorSideMenu';
 import { blockNoteShadcnOverrides } from '@/components/BlockNote/shadcnOverrides';
+import { Button } from '@/components/Common/Button';
 import {
+  clearAllBaselines,
+  clearBaselineText,
+  deriveBlockDiffMap,
+  deriveDeletedBlocks,
+  extractBlockText,
   getBlockAuthorStatus,
-  hasAnyPureAiBlock,
+  getDeletedKeys,
+  hasAnyPendingDiff,
   recordUserEdit,
+  removeDeletedEntry,
   resolveSentinelProvenance,
 } from '@/utils/provenance';
 
-import { AiDiffBanner } from './AiDiffBanner';
+import { InlineBlockDiffs } from './InlineBlockDiffs';
 
+import type { DeletedBlockInfo, ProvenanceBlock } from '@/utils/provenance';
 import type { BlockProvenanceMap } from '@sediment/shared';
 
 export interface PreviewComponentProps {
@@ -82,10 +91,17 @@ export const NotePreview = ({
 
   // Track the last Markdown we applied so we can skip no-op updates.
   const lastAppliedMarkdownRef = useRef<string | null>(null);
+  // Track the last document JSON to detect whether onChange was triggered
+  // by an actual content change vs cursor movement / focus / editable toggle.
+  const lastDocJsonRef = useRef<string>('');
 
   // Disable editing while async content is being loaded to prevent the editor
   // from accepting input that would immediately be overwritten by replaceBlocks.
   const [loading, setLoading] = useState(true);
+  // Synchronous ref companion — `loading` state is batched and may be stale in
+  // the onChange closure, so use this ref to reliably suppress provenance
+  // tracking while replaceBlocks is running.
+  const isReplacingRef = useRef(false);
 
   // Block-level provenance tracking
   const provenanceRef = useRef<BlockProvenanceMap | undefined>(
@@ -111,8 +127,14 @@ export const NotePreview = ({
     setProvenance(externalProvenance);
   }, [externalProvenance]);
 
-  const contentBeforeAI =
-    typeof data.contentBeforeAI === 'string' ? data.contentBeforeAI : undefined;
+  // Ref to the scrollable editor container for DOM queries by InlineBlockDiffs
+  const editorContainerRef = useRef<HTMLDivElement>(null);
+
+  // Per-block diff map and deleted blocks — derived from provenance.
+  const [blockDiffMap, setBlockDiffMap] = useState<Map<string, string>>(
+    new Map(),
+  );
+  const [deletedBlocks, setDeletedBlocks] = useState<DeletedBlockInfo[]>([]);
 
   /** Write a content patch back to the parent. */
   const writePatch = (
@@ -167,12 +189,18 @@ export const NotePreview = ({
           }),
         );
 
+        isReplacingRef.current = true;
         const usedJson = await loadBlockNoteContent(
           editor,
           markdown,
           contentJson,
           contentJsonSource,
         );
+        isReplacingRef.current = false;
+
+        // Snapshot the document JSON so onChange can detect whether content
+        // actually changed vs mere cursor/focus events.
+        lastDocJsonRef.current = JSON.stringify(editor.document);
 
         const rawProvenance = data.provenance as BlockProvenanceMap | undefined;
         const newBlocks = editor.document.map(
@@ -196,14 +224,24 @@ export const NotePreview = ({
           contentJson,
         });
 
+        let effectiveProvenance: BlockProvenanceMap | undefined;
         if (resolved && resolved !== rawProvenance) {
+          effectiveProvenance = resolved;
           provenanceRef.current = resolved;
           setProvenance(resolved);
           lastExpandedProvenanceRef.current = resolved;
           if (!readOnly && onDataChange) {
-            onDataChange({ provenance: resolved });
+            // Clear legacy contentBeforeAI during migration
+            const migrationPatch: Record<string, unknown> = {
+              provenance: resolved,
+            };
+            if (typeof data.contentBeforeAI === 'string') {
+              migrationPatch.contentBeforeAI = undefined;
+            }
+            onDataChange(migrationPatch);
           }
         } else {
+          effectiveProvenance = rawProvenance;
           provenanceRef.current = rawProvenance;
           setProvenance(rawProvenance);
           if (
@@ -221,6 +259,10 @@ export const NotePreview = ({
           const newJson = JSON.stringify(editor.document);
           writePatch(markdown, newJson, undefined, resolved ?? rawProvenance);
         }
+
+        // Derive diff map and deleted blocks directly from provenance.
+        setBlockDiffMap(deriveBlockDiffMap(effectiveProvenance));
+        setDeletedBlocks(deriveDeletedBlocks(effectiveProvenance));
       } finally {
         setLoading(false);
       }
@@ -267,121 +309,358 @@ export const NotePreview = ({
   }, [loading]);
 
   // Generate dynamic CSS rules for persistent per-block provenance color bars.
-  // BlockNote renders blocks as `.bn-block[data-id="<blockId>"]`.
+  // Deep purple (--color-ai) = has pending diff to review.
+  // Light purple (--color-ai-light) = AI block already accepted / no changes.
   const provenanceCss = useMemo(() => {
     if (!provenance) return '';
     const rules: string[] = [];
     for (const [blockId, entry] of Object.entries(provenance)) {
-      if (blockId === '__all__') continue;
-      // Sanitize block ID for CSS selector (BlockNote IDs are UUIDs)
+      if (blockId === '__all__' || blockId.startsWith('__deleted_')) continue;
       const safeId = blockId.replace(/[^a-zA-Z0-9_-]/g, '');
       const status = getBlockAuthorStatus(entry);
+      const hasDiff = blockDiffMap.has(blockId);
       if (status === 'ai') {
+        const color = hasDiff ? 'var(--color-ai)' : 'var(--color-ai-light)';
+        // Use ::before for the purple bar, pushed 12px past block edge to reduce right-side gap
         rules.push(
-          `.bn-block[data-id="${safeId}"] { border-right: 4px solid var(--color-ai-light); padding-right: 6px; }`,
+          `.bn-block[data-id="${safeId}"] { position: relative; padding-right: 8px; }`,
         );
+        rules.push(
+          `.bn-block[data-id="${safeId}"]::before { content: ''; position: absolute; top: 0; right: -12px; bottom: 0; width: 6px; background: ${color}; border-radius: 1px; }`,
+        );
+        if (hasDiff) {
+          rules.push(
+            `.bn-block[data-id="${safeId}"]::after { content: ''; position: absolute; top: 0; right: -22px; width: 20px; height: 100%; cursor: pointer; }`,
+          );
+        }
       } else if (status === 'user-modified') {
         rules.push(
-          `.bn-block[data-id="${safeId}"] { border-right: 4px dashed var(--color-ai-light); padding-right: 6px; }`,
+          `.bn-block[data-id="${safeId}"] { position: relative; padding-right: 8px; }`,
+        );
+        rules.push(
+          `.bn-block[data-id="${safeId}"]::before { content: ''; position: absolute; top: 0; right: -12px; bottom: 0; width: 6px; border-radius: 1px; background: repeating-linear-gradient(to bottom, var(--color-ai-light) 0px, var(--color-ai-light) 4px, transparent 4px, transparent 8px); }`,
         );
       }
     }
     return rules.join('\n');
-  }, [provenance]);
+  }, [provenance, blockDiffMap]);
+
+  // --- Accept / Reject callbacks ---
+
+  const handleAcceptAll = useCallback(() => {
+    const cleared = clearAllBaselines(provenanceRef.current);
+    provenanceRef.current = cleared;
+    setProvenance(cleared);
+    setBlockDiffMap(new Map());
+    setDeletedBlocks([]);
+    onDataChange?.({ provenance: cleared });
+  }, [onDataChange]);
+
+  const handleRejectAll = useCallback(() => {
+    const prov = provenanceRef.current;
+    if (!prov) return;
+
+    // Restore each block to its baselineText
+    for (const [blockId, entry] of Object.entries(prov)) {
+      if (blockId.startsWith('__deleted_') || blockId === '__all__') continue;
+      if (entry.baselineText === undefined) continue;
+      try {
+        if (entry.baselineText === '') {
+          // Block was added by AI — remove it
+          editor.removeBlocks([blockId]);
+        } else {
+          editor.updateBlock(blockId, { content: entry.baselineText });
+        }
+      } catch {
+        // Block may not exist in editor
+      }
+    }
+
+    // Re-insert deleted blocks
+    for (const [key, entry] of Object.entries(prov)) {
+      if (!key.startsWith('__deleted_') || !entry.baselineText) continue;
+      try {
+        if (entry.afterBlockId) {
+          editor.insertBlocks(
+            [{ type: 'paragraph', content: entry.baselineText }],
+            entry.afterBlockId,
+            'after',
+          );
+        } else {
+          const first = editor.document[0];
+          if (first) {
+            editor.insertBlocks(
+              [{ type: 'paragraph', content: entry.baselineText }],
+              first.id,
+              'before',
+            );
+          }
+        }
+      } catch {
+        // Anchor block may not exist
+      }
+    }
+
+    // Clear all baselines and persist
+    const cleared = clearAllBaselines(prov);
+    provenanceRef.current = cleared;
+    setProvenance(cleared);
+    setBlockDiffMap(new Map());
+    setDeletedBlocks([]);
+
+    const md = editor.blocksToMarkdownLossy(editor.document);
+    const json = JSON.stringify(editor.document);
+    lastAppliedMarkdownRef.current = md.trim();
+    lastDocJsonRef.current = json;
+    writePatch(md.trim(), json, undefined, cleared);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, onDataChange]);
+
+  const handleAcceptBlock = useCallback(
+    (blockId: string) => {
+      const updated = clearBaselineText(provenanceRef.current, blockId);
+      provenanceRef.current = updated;
+      setProvenance(updated);
+
+      const newDiffMap = deriveBlockDiffMap(updated);
+      const newDeletedBlocks = deriveDeletedBlocks(updated);
+      setBlockDiffMap(newDiffMap);
+      setDeletedBlocks(newDeletedBlocks);
+      onDataChange?.({ provenance: updated });
+    },
+    [onDataChange],
+  );
+
+  const handleRejectBlock = useCallback(
+    (blockId: string) => {
+      const entry = provenanceRef.current?.[blockId];
+      if (entry?.baselineText === undefined) return;
+
+      try {
+        if (entry.baselineText === '') {
+          // Block was added by AI — remove it
+          editor.removeBlocks([blockId]);
+        } else {
+          editor.updateBlock(blockId, { content: entry.baselineText });
+        }
+      } catch {
+        return;
+      }
+
+      let updated = recordUserEdit(provenanceRef.current, blockId);
+      updated = clearBaselineText(updated, blockId);
+      provenanceRef.current = updated;
+      setProvenance(updated);
+
+      setBlockDiffMap(deriveBlockDiffMap(updated));
+      setDeletedBlocks(deriveDeletedBlocks(updated));
+
+      const md = editor.blocksToMarkdownLossy(editor.document);
+      const json = JSON.stringify(editor.document);
+      lastAppliedMarkdownRef.current = md.trim();
+      lastDocJsonRef.current = json;
+      writePatch(md.trim(), json, undefined, updated);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [editor],
+  );
+
+  const handleAcceptDeletedBlock = useCallback(
+    (index: number) => {
+      const keys = getDeletedKeys(provenanceRef.current);
+      const key = keys[index];
+      if (!key) return;
+
+      const updated = removeDeletedEntry(provenanceRef.current, key);
+      provenanceRef.current = updated;
+      setProvenance(updated);
+      setBlockDiffMap(deriveBlockDiffMap(updated));
+      setDeletedBlocks(deriveDeletedBlocks(updated));
+      onDataChange?.({ provenance: updated });
+    },
+    [onDataChange],
+  );
+
+  const handleRestoreBlock = useCallback(
+    (index: number) => {
+      const keys = getDeletedKeys(provenanceRef.current);
+      const key = keys[index];
+      const entry = provenanceRef.current?.[key];
+      if (!key || !entry?.baselineText) return;
+
+      try {
+        if (entry.afterBlockId) {
+          editor.insertBlocks(
+            [{ type: 'paragraph', content: entry.baselineText }],
+            entry.afterBlockId,
+            'after',
+          );
+        } else {
+          const firstBlock = editor.document[0];
+          if (firstBlock) {
+            editor.insertBlocks(
+              [{ type: 'paragraph', content: entry.baselineText }],
+              firstBlock.id,
+              'before',
+            );
+          }
+        }
+      } catch {
+        return;
+      }
+
+      const updated = removeDeletedEntry(provenanceRef.current, key);
+      provenanceRef.current = updated;
+      setProvenance(updated);
+      setBlockDiffMap(deriveBlockDiffMap(updated));
+      setDeletedBlocks(deriveDeletedBlocks(updated));
+
+      const md = editor.blocksToMarkdownLossy(editor.document);
+      const json = JSON.stringify(editor.document);
+      lastAppliedMarkdownRef.current = md.trim();
+      lastDocJsonRef.current = json;
+      writePatch(md.trim(), json, undefined, updated);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [editor],
+  );
+
+  const getBlockText = useCallback(
+    (blockId: string): string => {
+      const block = editor.document.find(
+        (b: { id: string }) => b.id === blockId,
+      );
+      if (!block) return '';
+      return extractBlockText(block as ProvenanceBlock);
+    },
+    [editor],
+  );
 
   return (
-    <div className="custom-scrollbar h-full w-full overflow-auto bg-white px-0 py-3">
-      {provenanceCss && <style>{provenanceCss}</style>}
-      {!readOnly && contentBeforeAI && (
-        <AiDiffBanner
-          contentBeforeAI={contentBeforeAI}
-          currentContent={markdown}
-          onDismiss={() => onDataChange?.({ contentBeforeAI: undefined })}
-        />
-      )}
-      <NoteSourceIdProvider
-        value={typeof data.sourceId === 'string' ? data.sourceId : undefined}
+    <div className="relative h-full w-full">
+      <div
+        ref={editorContainerRef}
+        className="custom-scrollbar relative h-full w-full overflow-auto bg-white py-3"
       >
-        <BlockNoteView
-          className="block-note-view"
-          editor={editor}
-          editable={!readOnly && !loading}
-          shadCNComponents={blockNoteShadcnOverrides}
-          sideMenu={false}
-          onChange={() => {
-            if (readOnly) return;
-            if (!onContentChange && !onDataChange) return;
+        {provenanceCss && <style>{provenanceCss}</style>}
+        <NoteSourceIdProvider
+          value={typeof data.sourceId === 'string' ? data.sourceId : undefined}
+        >
+          <BlockNoteView
+            className="block-note-view"
+            editor={editor}
+            editable={!readOnly && !loading}
+            shadCNComponents={blockNoteShadcnOverrides}
+            sideMenu={false}
+            onChange={() => {
+              if (readOnly) return;
+              if (!onContentChange && !onDataChange) return;
+              if (isReplacingRef.current) return;
 
-            const newJson = JSON.stringify(editor.document);
-            const md = editor.blocksToMarkdownLossy(editor.document);
-            const newMarkdown = md.trim();
-            lastAppliedMarkdownRef.current = newMarkdown;
+              const newJson = JSON.stringify(editor.document);
 
-            // Track provenance: detect which blocks changed or are new
-            const currentBlockIds = editor.document.map(
-              (b: { id: string }) => b.id,
-            );
-            let updatedProvenance = provenanceRef.current;
+              if (newJson === lastDocJsonRef.current) return;
+              lastDocJsonRef.current = newJson;
 
-            // Record user edits for blocks that are new or had content changes
-            for (const blockId of currentBlockIds) {
-              if (!prevBlockIdsRef.current.has(blockId)) {
-                // New block added by user
-                updatedProvenance = recordUserEdit(updatedProvenance, blockId);
-              }
-            }
+              const md = editor.blocksToMarkdownLossy(editor.document);
+              const newMarkdown = md.trim();
+              lastAppliedMarkdownRef.current = newMarkdown;
 
-            // For existing blocks, we record user edit on the text cursor block
-            const cursorBlock = editor.getTextCursorPosition()?.block;
-            if (cursorBlock && prevBlockIdsRef.current.has(cursorBlock.id)) {
-              updatedProvenance = recordUserEdit(
-                updatedProvenance,
-                cursorBlock.id,
+              const currentBlockIds = editor.document.map(
+                (b: { id: string }) => b.id,
               );
-            }
+              let updatedProvenance = provenanceRef.current;
 
-            // Remove provenance entries for deleted blocks
-            if (updatedProvenance) {
-              const currentIdSet = new Set(currentBlockIds);
-              const cleaned = { ...updatedProvenance };
-              let didClean = false;
-              for (const key of Object.keys(cleaned)) {
-                if (key !== '__all__' && !currentIdSet.has(key)) {
-                  delete cleaned[key];
-                  didClean = true;
+              for (const blockId of currentBlockIds) {
+                if (!prevBlockIdsRef.current.has(blockId)) {
+                  updatedProvenance = recordUserEdit(
+                    updatedProvenance,
+                    blockId,
+                  );
                 }
               }
-              if (didClean) updatedProvenance = cleaned;
-            }
 
-            provenanceRef.current = updatedProvenance;
-            setProvenance(updatedProvenance);
-            lastExpandedProvenanceRef.current = updatedProvenance;
-            prevBlockIdsRef.current = new Set(currentBlockIds);
+              const cursorBlock = editor.getTextCursorPosition()?.block;
+              if (cursorBlock && prevBlockIdsRef.current.has(cursorBlock.id)) {
+                updatedProvenance = recordUserEdit(
+                  updatedProvenance,
+                  cursorBlock.id,
+                );
+                // Clear baselineText when user edits a block
+                if (
+                  updatedProvenance?.[cursorBlock.id]?.baselineText !==
+                  undefined
+                ) {
+                  updatedProvenance = clearBaselineText(
+                    updatedProvenance,
+                    cursorBlock.id,
+                  );
+                }
+              }
 
-            const isLabelUserSet = data.labelSource === 'user';
-            const autoLabel = isLabelUserSet
-              ? undefined
-              : extractLabelFromBlocks(
-                  editor.document as Parameters<
-                    typeof extractLabelFromBlocks
-                  >[0],
-                ) || undefined;
-            writePatch(
-              newMarkdown,
-              newJson,
-              autoLabel,
-              updatedProvenance,
-              // Auto-clear contentBeforeAI when no blocks have pure AI status
-              contentBeforeAI && !hasAnyPureAiBlock(updatedProvenance)
-                ? { contentBeforeAI: undefined }
-                : undefined,
-            );
-          }}
-        >
-          {!readOnly && <SideMenuController sideMenu={NoteEditorSideMenu} />}
-        </BlockNoteView>
-      </NoteSourceIdProvider>
+              if (updatedProvenance) {
+                const currentIdSet = new Set(currentBlockIds);
+                const cleaned = { ...updatedProvenance };
+                let didClean = false;
+                for (const key of Object.keys(cleaned)) {
+                  if (
+                    key !== '__all__' &&
+                    !key.startsWith('__deleted_') &&
+                    !currentIdSet.has(key)
+                  ) {
+                    delete cleaned[key];
+                    didClean = true;
+                  }
+                }
+                if (didClean) updatedProvenance = cleaned;
+              }
+
+              provenanceRef.current = updatedProvenance;
+              setProvenance(updatedProvenance);
+              lastExpandedProvenanceRef.current = updatedProvenance;
+              prevBlockIdsRef.current = new Set(currentBlockIds);
+
+              // Re-derive diffs from updated provenance
+              setBlockDiffMap(deriveBlockDiffMap(updatedProvenance));
+              setDeletedBlocks(deriveDeletedBlocks(updatedProvenance));
+
+              const isLabelUserSet = data.labelSource === 'user';
+              const autoLabel = isLabelUserSet
+                ? undefined
+                : extractLabelFromBlocks(
+                    editor.document as Parameters<
+                      typeof extractLabelFromBlocks
+                    >[0],
+                  ) || undefined;
+              writePatch(newMarkdown, newJson, autoLabel, updatedProvenance);
+            }}
+          >
+            {!readOnly && <SideMenuController sideMenu={NoteEditorSideMenu} />}
+          </BlockNoteView>
+        </NoteSourceIdProvider>
+        {!readOnly && (blockDiffMap.size > 0 || deletedBlocks.length > 0) && (
+          <InlineBlockDiffs
+            blockDiffMap={blockDiffMap}
+            deletedBlocks={deletedBlocks}
+            editorContainerRef={editorContainerRef}
+            getBlockText={getBlockText}
+            onAcceptBlock={handleAcceptBlock}
+            onRejectBlock={handleRejectBlock}
+            onAcceptDeletedBlock={handleAcceptDeletedBlock}
+            onRestoreBlock={handleRestoreBlock}
+          />
+        )}
+      </div>
+      {!readOnly && hasAnyPendingDiff(provenance) && (
+        <div className="absolute right-4 bottom-4 flex items-center gap-1">
+          <Button variant="secondary" size="sm" onClick={handleRejectAll}>
+            Reject All
+          </Button>
+          <Button variant="primary" size="sm" onClick={handleAcceptAll}>
+            Accept All
+          </Button>
+        </div>
+      )}
     </div>
   );
 };

@@ -234,7 +234,7 @@ async function executeCanvasCommands(
         ...cmd,
         nodes: nodes.map((node) => {
           const data = (node.data as Record<string, unknown> | undefined) ?? {};
-          const isNote = data.type === 'note';
+          const isNote = node.nodeType === 'note';
           const hasContent =
             isNote &&
             typeof data.content === 'string' &&

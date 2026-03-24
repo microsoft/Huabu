@@ -95,6 +95,22 @@ export interface BlockProvenance {
     agentMode?: AgentMode;
     at: string;
   }>;
+  /**
+   * Plain text of this block before AI modified it.
+   * Present = has a pending diff to review. Cleared on accept/edit.
+   * Empty string means the block was newly added by AI (no prior content).
+   */
+  baselineText?: string;
+  /**
+   * When true, this entry represents a block that was deleted by AI.
+   * `baselineText` holds the deleted block's original text.
+   */
+  deleted?: boolean;
+  /**
+   * For deleted entries: ID of the surviving block after which the
+   * deletion occurred. `null` = deletion was at the document start.
+   */
+  afterBlockId?: string | null;
 }
 
 /**
@@ -165,10 +181,8 @@ export interface NoteNodeData extends BaseNodeData {
    */
   provenance?: BlockProvenanceMap;
   /**
-   * Snapshot of `content` taken before the first AI edit in a session.
-   * Used to show a Markdown diff of AI changes. Strategy: set once,
-   * not overwritten by subsequent AI edits. Cleared on user dismiss or
-   * when all AI blocks have been user-modified.
+   * @deprecated Use `provenance[blockId].baselineText` instead.
+   * Kept for backward compatibility with existing persisted data.
    */
   contentBeforeAI?: string;
 }

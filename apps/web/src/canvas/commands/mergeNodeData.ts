@@ -55,24 +55,6 @@ const mergeNodeData: CommandDefinition<Cmd> = {
         patchRec.provenance as BlockProvenanceMap | undefined,
       );
 
-      // Capture contentBeforeAI when AI changes content (Strategy A: set once).
-      const isAiContentPatch =
-        patchRec.provenance &&
-        typeof patchRec.provenance === 'object' &&
-        '__all__' in (patchRec.provenance as Record<string, unknown>) &&
-        typeof patchRec.content === 'string' &&
-        (patchRec.content as string).length > 0;
-
-      let contentBeforeAI = dataRec.contentBeforeAI as string | undefined;
-      if (
-        isAiContentPatch &&
-        (!contentBeforeAI || typeof contentBeforeAI !== 'string') &&
-        typeof dataRec.content === 'string' &&
-        (dataRec.content as string).length > 0
-      ) {
-        contentBeforeAI = dataRec.content as string;
-      }
-
       const updated: Node = {
         ...n,
         data: {
@@ -81,7 +63,6 @@ const mergeNodeData: CommandDefinition<Cmd> = {
           ...(mergedProvenance !== undefined
             ? { provenance: mergedProvenance }
             : {}),
-          ...(contentBeforeAI !== undefined ? { contentBeforeAI } : {}),
         },
       };
       if (shouldPreprocessOnUpdate(n, updated)) {
