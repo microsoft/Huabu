@@ -198,7 +198,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
 
   const getAgentContext = useCanvasStore((state) => state.getAgentContext);
   const canvasId = useCanvasStore((state) => state.canvasId);
-  const refreshCanvas = useCanvasStore((state) => state.refreshCanvas);
 
   // Switch chat thread when canvas changes
   useEffect(() => {
@@ -475,10 +474,9 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
                       .executeCommands(parsed.data.commands, 'agent');
                   }
                 } catch {
-                  // Parsing failed — refreshCanvas will handle it in onComplete
+                  // Parsing failed — commands lost; state will be stale until
+                  // next page load.  Acceptable: server never wrote them either.
                 }
-              } else {
-                void refreshCanvas();
               }
             }
           }
@@ -499,7 +497,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         onComplete: () => {
           if (cancelled) return;
           setIsLoading(false);
-          void refreshCanvas();
         },
       });
 
@@ -579,10 +576,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       assistantIdRef.current = assistantId;
 
       const toolMsgQueue: string[] = [];
-
-      // Whether this mode modifies the canvas (needs refresh after tool calls)
-      const modifiesCanvas =
-        agentMode === 'operate' || agentMode === 'research';
 
       // Guard: ensure only one of onError / catch adds an error status
       let errorHandled = false;
@@ -720,11 +713,9 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
                         }
                       }
                     } catch {
-                      // Parsing failed — fall through to refreshCanvas
-                      if (modifiesCanvas) void refreshCanvas();
+                      // Parsing failed — commands lost; state will be stale
+                      // until next page load.
                     }
-                  } else if (modifiesCanvas) {
-                    void refreshCanvas();
                   }
                 }
               }
@@ -746,22 +737,14 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
               }
             },
             onComplete: () => {
-              const wasAborted = abortController.signal.aborted;
               setIsLoading(false);
               abortControllerRef.current = null;
 
               if (agentMode === 'research') {
                 completeResearchUi();
-                // Refresh canvas to pick up research-created nodes
-                if (!wasAborted) {
-                  void refreshCanvas();
-                }
               }
 
               if (agentMode === 'operate') {
-                if (!wasAborted) {
-                  void refreshCanvas();
-                }
                 if (resourcesRef.current.length > 0) {
                   updateMessage(assistantIdRef.current, (m) =>
                     m.role === 'assistant'
@@ -817,7 +800,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       setLastAction,
       threadId,
       updateMessage,
-      refreshCanvas,
       getAgentContext,
       canvasId,
       startResearchUi,
@@ -900,10 +882,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         );
       }
     }
-
-    // Sync canvas with any partial server-side changes
-    void refreshCanvas();
-  }, [addMessage, updateMessage, refreshCanvas]);
+  }, [addMessage, updateMessage]);
 
   const handleNewChat = () => {
     if (isLoading || researchStatus === 'running') return;

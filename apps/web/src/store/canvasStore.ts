@@ -243,8 +243,6 @@ type RFState = {
   redo: () => void;
 
   loadCanvas: (canvasId?: string) => Promise<void>;
-  /** Silently refresh canvas data without showing loading state or clearing history */
-  refreshCanvas: () => Promise<void>;
   switchCanvas: (canvasId: string) => Promise<void>;
   saveCanvas: () => Promise<void>;
 
@@ -596,34 +594,6 @@ const useCanvasStore = create<RFState>()(
       } catch (error) {
         console.error('Failed to load canvas:', error);
         set({ isLoading: false });
-      }
-    },
-
-    refreshCanvas: async () => {
-      try {
-        const targetId = get().canvasId;
-        const response = await getCanvas(targetId);
-        if (!response) return;
-
-        const state = response.state as {
-          nodes?: Node[];
-          edges?: Edge[];
-          workspaceName?: string;
-        };
-
-        const cleanedNodes = (state.nodes ?? []).map((n) => {
-          if (n.width == null && n.height == null) return n;
-          const { width, height, ...rest } = n;
-          return rest as Node;
-        });
-
-        set({
-          nodes: cleanedNodes,
-          edges: state.edges ?? [],
-          version: response.version,
-        });
-      } catch (error) {
-        console.error('Failed to refresh canvas:', error);
       }
     },
 
