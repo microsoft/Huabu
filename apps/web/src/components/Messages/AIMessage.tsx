@@ -3,6 +3,7 @@ import { Copy } from 'lucide-react';
 import { BlockNoteCard } from './BlockNoteCard';
 import { NODE_ICON } from '../../config/nodeIcons';
 import useCanvasStore from '../../store/canvasStore';
+import { useChatStore } from '../../store/chatStore';
 import { copyToClipboard } from '../../utils/io/clipboard';
 import { IconButton } from '../Common/IconButton';
 
@@ -25,6 +26,7 @@ export const AIMessage = ({
   hideActions,
 }: AIMessageProps) => {
   const addNode = useCanvasStore((state) => state.addNode);
+  const threadId = useChatStore((s) => s.threadId);
 
   return (
     <div className="flex justify-start">
@@ -46,8 +48,7 @@ export const AIMessage = ({
                   nodeType: 'note',
                   data: {
                     content,
-                    // TODO: update origin
-                    origin: { type: 'user-drag-chat' },
+                    origin: { type: 'user-from-chat', threadId },
                   },
                 });
               }}

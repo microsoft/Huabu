@@ -220,6 +220,7 @@ export async function* runAgent(
           toolResultText = await executeTool(
             call.name,
             (call.arguments ?? {}) as Record<string, unknown>,
+            { mode },
           );
         } catch (err) {
           toolResultText = JSON.stringify({

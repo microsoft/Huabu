@@ -114,6 +114,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
                 type,
                 src: url,
                 label: file.name,
+                origin: { type: 'user-uploaded' },
               },
               ...(naturalDimensions ? { naturalDimensions } : {}),
             };
@@ -150,6 +151,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           data: {
             type,
             src: finalUrl,
+            origin: { type: 'user-created' },
           },
         },
       ];

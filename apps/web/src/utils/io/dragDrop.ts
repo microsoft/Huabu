@@ -43,7 +43,7 @@ export type ImageDragPayload = {
 export type DragPayload = {
   // Unique identifier for a single drag gesture. Used to dedupe duplicate drop events.
   dragId: string;
-  // Where the drag originated from, e.g. 'user-drag-chat', 'user-drag-library', 'user-drag-capture'.
+  // Where the drag originated from, e.g. 'user-from-chat', 'user-from-library', 'user-excerpt'.
   origin: NodeOrigin;
 } & (WebDragPayload | NoteDragPayload | SourceDragPayload | ImageDragPayload);
 

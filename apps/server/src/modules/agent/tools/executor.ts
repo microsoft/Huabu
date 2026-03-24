@@ -15,7 +15,24 @@ import {
 import { getKnowledgeRepository } from '../../knowledge/knowledge.repository.js';
 import { getPreprocessDispatcher } from '../../preprocessing/index.js';
 
-import type { CanvasNodeKind, NodeData } from '@sediment/shared';
+import type {
+  AgentMode,
+  CanvasNodeKind,
+  NodeData,
+  NodeOrigin,
+} from '@sediment/shared';
+
+// ==================== Origin Helper ====================
+
+function agentModeToOrigin(mode?: AgentMode): NodeOrigin {
+  switch (mode) {
+    case 'research':
+      return { type: 'ai-research' };
+    default:
+      return { type: 'ai-operate' };
+  }
+}
+
 // ==================== Canvas Helpers ====================
 
 async function loadCanvasState(canvasId: string) {
@@ -247,14 +264,17 @@ async function executeGetCanvasState(args: {
   });
 }
 
-async function executeCreateNode(args: {
-  canvasId: string;
-  nodeType: string;
-  label?: string;
-  content?: string;
-  src?: string;
-  position?: { x: number; y: number };
-}): Promise<string> {
+async function executeCreateNode(
+  args: {
+    canvasId: string;
+    nodeType: string;
+    label?: string;
+    content?: string;
+    src?: string;
+    position?: { x: number; y: number };
+  },
+  context?: { mode?: AgentMode },
+): Promise<string> {
   const nodeType = args.nodeType as
     | 'note'
     | 'text'
@@ -270,6 +290,7 @@ async function executeCreateNode(args: {
     label: args.label ?? '',
     content: args.content,
     src: args.src,
+    origin: agentModeToOrigin(context?.mode),
   } as NodeData;
 
   const state = await loadCanvasState(args.canvasId);
@@ -394,11 +415,14 @@ async function executeDisconnectNodes(args: {
   return JSON.stringify({ success: true });
 }
 
-async function executeCreateFrame(args: {
-  canvasId: string;
-  nodeIds: string[];
-  frameLabel?: string;
-}): Promise<string> {
+async function executeCreateFrame(
+  args: {
+    canvasId: string;
+    nodeIds: string[];
+    frameLabel?: string;
+  },
+  context?: { mode?: AgentMode },
+): Promise<string> {
   const frameId = createId('frame');
   const label = args.frameLabel ?? 'Frame';
   const state = await loadCanvasState(args.canvasId);
@@ -435,7 +459,7 @@ async function executeCreateFrame(args: {
     id: frameId,
     type: 'frame',
     position: { x: frameX, y: frameY },
-    data: { label },
+    data: { label, origin: agentModeToOrigin(context?.mode) },
     width: frameWidth,
     height: frameHeight,
     selected: false,
@@ -592,6 +616,7 @@ async function executeIngestContent(args: {
 export async function executeTool(
   name: string,
   args: Record<string, unknown>,
+  context?: { mode?: AgentMode },
 ): Promise<string> {
   switch (name) {
     case 'web_search':
@@ -605,7 +630,10 @@ export async function executeTool(
         args as Parameters<typeof executeGetCanvasState>[0],
       );
     case 'create_node':
-      return executeCreateNode(args as Parameters<typeof executeCreateNode>[0]);
+      return executeCreateNode(
+        args as Parameters<typeof executeCreateNode>[0],
+        context,
+      );
     case 'update_node':
       return executeUpdateNode(args as Parameters<typeof executeUpdateNode>[0]);
     case 'delete_nodes':
@@ -623,6 +651,7 @@ export async function executeTool(
     case 'create_frame':
       return executeCreateFrame(
         args as Parameters<typeof executeCreateFrame>[0],
+        context,
       );
     case 'read_source':
       return executeReadSource(args as Parameters<typeof executeReadSource>[0]);

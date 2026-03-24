@@ -19,15 +19,15 @@ export type CanvasNodeType =
  */
 export type NodeOrigin =
   // AI-generated
-  | { type: 'research' }
-  | { type: 'chat' }
+  | { type: 'ai-research' }
+  | { type: 'ai-operate' }
   // User-initiated
   | { type: 'user-created' }
   | { type: 'user-uploaded' }
   | { type: 'user-pasted' }
-  | { type: 'user-drag-library' }
-  | { type: 'user-drag-chat'; threadId?: string }
-  | { type: 'user-drag-capture'; sourceId?: string };
+  | { type: 'user-from-library' }
+  | { type: 'user-from-chat'; threadId?: string }
+  | { type: 'user-excerpt'; sourceId?: string };
 
 /** All possible values of `NodeOrigin['type']`. */
 export type NodeOriginType = NodeOrigin['type'];
@@ -80,7 +80,7 @@ export interface NodeStyle {
 export interface BaseNodeData {
   /** Node origin/source */
   origin?: NodeOrigin;
-  /** Research-related data (only when origin.type === 'research') */
+  /** Research-related data (only when origin.type === 'ai-research') */
   research?: NodeResearchData;
   /** Display label */
   label?: string;
