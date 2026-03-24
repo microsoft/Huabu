@@ -1,38 +1,115 @@
 import { NODE_ICON } from '../../config/nodeIcons';
 import useCanvasStore from '../../store/canvasStore';
 
-import type { CanvasNodeType } from '@sediment/shared';
+import type { CanvasNodeType, ChatAttachment } from '@sediment/shared';
 
 interface NodeRefProps {
-  nodeId: string;
+  /** Existing canvas node ID to focus. */
+  nodeId?: string;
+  /** Attachment to reference — if the node doesn't exist on canvas, clicking creates it. */
+  attachment?: ChatAttachment;
   fallbackLabel?: string;
 }
 
+const ATTACHMENT_TYPE_TO_NODE: Record<string, CanvasNodeType> = {
+  image: 'image',
+  pdf: 'pdf',
+  file: 'note',
+};
+
 /**
- * Clickable node reference – icon + label in a bordered badge.
- * Clicking focuses the node on the canvas.
+ * Clickable reference badge — works for both canvas nodes and attachments.
+ * - If the referenced node exists on canvas → click focuses it.
+ * - If it doesn't exist but attachment data is provided → click creates the node, then focuses it.
  */
-export function NodeRef({ nodeId, fallbackLabel }: NodeRefProps) {
+export function NodeRef({ nodeId, attachment, fallbackLabel }: NodeRefProps) {
   const nodes = useCanvasStore((s) => s.nodes);
   const selectNodes = useCanvasStore((s) => s.selectNodes);
+  const addNode = useCanvasStore((s) => s.addNode);
   const rfInstance = useCanvasStore((s) => s.rfInstance);
 
-  const node = nodes.find((n) => n.id === nodeId);
+  // Try to find an existing node: by nodeId, or by matching src URL from attachment
+  const node = nodeId
+    ? nodes.find((n) => n.id === nodeId)
+    : attachment
+      ? nodes.find((n) => {
+          const data = n.data as Record<string, unknown> | undefined;
+          return data?.src === attachment.url;
+        })
+      : undefined;
+
   const nodeData = node?.data as Record<string, unknown> | undefined;
-  const label =
-    (nodeData?.label as string) ?? fallbackLabel ?? nodeId.slice(0, 8);
-  const nodeType = ((nodeData?.type ?? node?.type) as string) || 'note';
+
+  // Determine label
+  const label = attachment
+    ? (attachment.filename ?? attachment.label ?? 'file')
+    : ((nodeData?.label as string) ??
+      fallbackLabel ??
+      nodeId?.slice(0, 8) ??
+      '?');
+
+  // Determine icon
+  const nodeType = attachment
+    ? (ATTACHMENT_TYPE_TO_NODE[attachment.type] ?? 'note')
+    : ((nodeData?.type ?? node?.type) as string) || 'note';
   const Icon = NODE_ICON[nodeType as CanvasNodeType] ?? NODE_ICON.note;
 
-  const handleClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    selectNodes([nodeId]);
+  const focusNode = (id: string) => {
+    selectNodes([id]);
     rfInstance?.fitView({
-      nodes: [{ id: nodeId }],
+      nodes: [{ id }],
       duration: 300,
       padding: 0.3,
     });
   };
+
+  const handleClick = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+
+    if (node) {
+      // Node exists on canvas — focus it
+      focusNode(node.id);
+    } else if (attachment) {
+      // Node doesn't exist — create it from attachment data
+      const newNodeType = ATTACHMENT_TYPE_TO_NODE[attachment.type] ?? 'note';
+      if (newNodeType === 'note') {
+        // For text-based files (.md etc.), fetch content and create a note
+        let content = '';
+        try {
+          const res = await fetch(attachment.url);
+          if (res.ok) content = await res.text();
+        } catch {
+          /* use empty */
+        }
+        addNode({
+          nodeType: 'note',
+          data: {
+            type: 'note',
+            content,
+            label: attachment.label ?? attachment.filename,
+          },
+        });
+      } else {
+        addNode({
+          nodeType: newNodeType,
+          data: {
+            type: newNodeType,
+            src: attachment.url,
+            label: attachment.label ?? attachment.filename,
+          },
+        });
+      }
+    } else if (nodeId) {
+      // nodeId provided but node not on canvas — try focusing anyway
+      focusNode(nodeId);
+    }
+  };
+
+  const title = node
+    ? `Focus: ${label}`
+    : attachment
+      ? `Add to canvas: ${label}`
+      : `Focus: ${label}`;
 
   return (
     <div
@@ -45,7 +122,7 @@ export function NodeRef({ nodeId, fallbackLabel }: NodeRefProps) {
           handleClick(e as unknown as React.MouseEvent);
         }
       }}
-      title={`Focus: ${label}`}
+      title={title}
     >
       <Icon size={9} className="flex-shrink-0" />
       <span className="max-w-[100px] truncate">{label}</span>

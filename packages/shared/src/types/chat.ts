@@ -1,9 +1,9 @@
 /**
- * An attachment sent alongside a chat message — e.g. a captured PDF region.
+ * An attachment sent alongside a chat message — e.g. a captured PDF region or pasted file.
  */
 export interface ChatAttachment {
-  type: 'image';
-  /** Uploaded image URL (e.g. from artifact upload). */
+  type: 'image' | 'pdf' | 'file';
+  /** Uploaded file URL (e.g. from artifact upload). */
   url: string;
   /** Optional extracted text from the same captured region. */
   extractedText?: string;
@@ -11,6 +11,8 @@ export interface ChatAttachment {
   label?: string;
   /** The source node ID the attachment was captured from, for provenance tracking. */
   originSourceId?: string;
+  /** Original filename for non-image files. */
+  filename?: string;
 }
 
 // --- Tool Result Types ---

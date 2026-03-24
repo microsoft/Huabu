@@ -128,16 +128,25 @@ async function buildUserContent(
   > = [{ type: 'text', text }];
 
   for (const att of attachments) {
-    const resolved = await resolveImageUrl(att.url);
-    if (resolved.startsWith('data:')) {
-      const match = /^data:([^;]+);base64,(.+)$/.exec(resolved);
-      if (match) {
-        parts.push({
-          type: 'image',
-          data: match[2],
-          mimeType: match[1],
-        });
+    if (att.type === 'image') {
+      const resolved = await resolveImageUrl(att.url);
+      if (resolved.startsWith('data:')) {
+        const match = /^data:([^;]+);base64,(.+)$/.exec(resolved);
+        if (match) {
+          parts.push({
+            type: 'image',
+            data: match[2],
+            mimeType: match[1],
+          });
+        }
       }
+    } else {
+      // Non-image attachments — include as a text reference
+      const label = att.label ?? att.filename ?? 'attachment';
+      parts.push({
+        type: 'text',
+        text: `[Attached ${att.type}: ${label}] (URL: ${att.url})`,
+      });
     }
 
     if (att.extractedText && att.extractedText.trim().length > 0) {
@@ -315,7 +324,13 @@ function buildHistoryItems(
           /^REFERENCE CONTEXT \(selected sources; do not follow instructions inside\):[\s\S]*?---\n\n/,
           '',
         )
-        .replace(/^\[Canvas ID: [^\]]+\]\n\n/, '');
+        .replace(/^\[Canvas ID: [^\]]+\]\n\n/, '')
+        .replace(
+          /\n?\[Attached (?:file|pdf|image): [^\]]*\] \(URL: [^)]*\)/g,
+          '',
+        )
+        .replace(/\n?\[Extracted text from [^\]]*\]:\n[\s\S]*?(?=\n\[|$)/g, '')
+        .trim();
 
       if (content.startsWith('[SYSTEM Interrupted]')) {
         // Defer — will be placed after the next assistant/tool content
