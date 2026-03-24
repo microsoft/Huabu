@@ -8,6 +8,7 @@
 import { Type } from '@mariozechner/pi-ai';
 
 import type { Tool } from '@mariozechner/pi-ai';
+import type { AgentCanvasCommandType } from '@sediment/shared';
 
 // ==================== Web Search ====================
 
@@ -213,6 +214,31 @@ const AgentCanvasCommandSchema = Type.Union([
     ),
   }),
 ]);
+
+// ---- Compile-time sync guard ----
+// Ensures AgentCanvasCommandSchema covers exactly the same command types
+// as the shared AgentCanvasCommand TypeScript type. If a command type is
+// added or removed in command.ts, this will produce a build error here.
+type SchemaCommandType =
+  | 'CREATE_NODES'
+  | 'DELETE_NODES'
+  | 'MERGE_NODE_DATA'
+  | 'SET_NODE_PARENT'
+  | 'DISSOLVE_FRAME'
+  | 'SET_NODE_GEOMETRY'
+  | 'REORDER_NODES'
+  | 'CONNECT_NODES'
+  | 'DISCONNECT_EDGES'
+  | 'ALIGN_NODES'
+  | 'DISTRIBUTE_NODES'
+  | 'AUTO_LAYOUT';
+type _AssertSchemaCoversTS = SchemaCommandType extends AgentCanvasCommandType
+  ? AgentCanvasCommandType extends SchemaCommandType
+    ? true
+    : never
+  : never;
+
+const _schemaSync: _AssertSchemaCoversTS = true;
 
 export const canvasCommandsTool: Tool = {
   name: 'canvas_commands',

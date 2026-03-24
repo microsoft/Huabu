@@ -12,7 +12,6 @@ import { IconButton } from '@/components/Common/IconButton';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import { useIntentStore } from '@/store/intentStore';
-import { useResearchStore } from '@/store/researchStore';
 
 import { SidebarPanel } from '../SidebarPanel';
 import { CanvasChangeBar, type CanvasChange } from './CanvasChangeBar';
@@ -49,9 +48,6 @@ function parseToolResponse(
     return { tool: toolName, status: 'success', data: { content: raw } };
   }
 }
-
-/** Tools that modify the canvas and should be tracked for the change bar. */
-const CANVAS_MODIFY_TOOLS = new Set(['canvas_commands']);
 
 /** Extract CanvasChange entries from a canvas_commands batch. */
 function extractCanvasChangesFromCommands(
@@ -132,42 +128,152 @@ function extractCanvasChangesFromCommands(
   return changes;
 }
 
-/** Extract a CanvasChange from a tool response, or null if not canvas-modifying. */
-function extractCanvasChange(
-  toolResponse: ToolResponse<string, unknown>,
-): CanvasChange | null {
-  if (!CANVAS_MODIFY_TOOLS.has(toolResponse.tool)) return null;
-  if (toolResponse.status !== 'success') return null;
+/** Extract ResourceLabel entries from a canvas_commands batch. */
+function extractResourcesFromCommands(
+  commands: CanvasCommand[],
+): ResourceLabel[] {
+  const resources: ResourceLabel[] = [];
+  for (const cmd of commands) {
+    if (cmd.type === 'CREATE_NODES') {
+      for (const node of cmd.nodes) {
+        const label = (node.data as Record<string, unknown> | undefined)?.label;
+        resources.push({
+          type: node.nodeType === 'frame' ? 'frame' : 'node',
+          nodeType: node.nodeType,
+          // todo: use the actual resource name after the node is created
+          label: (label as string) ?? 'untitled',
+          id: node.id as string,
+        });
+      }
+    }
+  }
+  return resources;
+}
 
-  // For canvas_commands, changes are extracted from the commands array via
-  // extractCanvasChangesFromCommands(), not from the tool response.
+/**
+ * Parse a canvas_commands tool result, execute the commands locally,
+ * and return extracted changes + resources.
+ */
+function applyCanvasCommandsFromToolResult(
+  toolResult: string | undefined,
+): { commands: CanvasCommand[] } | null {
+  try {
+    const parsed = JSON.parse(toolResult ?? '{}') as {
+      status?: string;
+      data?: { commands?: CanvasCommand[] };
+    };
+    if (parsed.status === 'success' && parsed.data?.commands?.length) {
+      useCanvasStore.getState().executeCommands(parsed.data.commands, 'agent');
+      return { commands: parsed.data.commands };
+    }
+  } catch (err) {
+    console.error('[ChatPanel] Failed to parse canvas_commands result:', err);
+  }
   return null;
 }
 
-/** Extract a ResourceLabel from a tool response. */
-function extractResource(
-  toolResponse: ToolResponse<string, unknown>,
-): ResourceLabel | null {
-  if (toolResponse.status !== 'success') return null;
-  const data = toolResponse.data as Record<string, unknown>;
+// ==================== Shared SSE Event Handler ====================
 
-  if (toolResponse.tool === 'create_node') {
-    return {
-      type: 'node',
-      nodeType: (data.type as string) ?? 'note',
-      label: (data.label as string) ?? 'untitled',
-      id: data.nodeId as string,
-    };
+interface StreamEventContext {
+  assistantId: string;
+  toolQueue: string[];
+  /** Called after canvas_commands are applied. */
+  onCanvasCommands?: (commands: CanvasCommand[]) => void;
+}
+
+/**
+ * Shared SSE event handler used by both reconnect and normal streaming.
+ * Processes text_delta, tool_start, tool_result events by updating chat
+ * messages and executing canvas commands.
+ */
+function handleStreamEvent(
+  event: AgentStreamEvent,
+  ctx: StreamEventContext,
+): void {
+  const { addMessage, updateMessage } = useChatStore.getState();
+
+  if (event.type === 'text_delta') {
+    const delta = event.data.content ?? '';
+    const existing = useChatStore
+      .getState()
+      .messages.find((m) => m.id === ctx.assistantId);
+    if (existing) {
+      updateMessage(ctx.assistantId, (m) =>
+        m.role === 'user' || m.role === 'assistant'
+          ? { ...m, content: m.content + delta }
+          : m,
+      );
+    } else {
+      addMessage({
+        id: ctx.assistantId,
+        role: 'assistant',
+        content: delta,
+      });
+    }
+  } else if (event.type === 'tool_start') {
+    const toolName = event.data.toolName ?? 'unknown';
+    const msgId = createId('tool');
+    ctx.toolQueue.push(msgId);
+    addMessage({
+      id: msgId,
+      role: 'tool',
+      toolResponse: {
+        tool: toolName,
+        status: 'success',
+        data: event.data.toolArgs ?? {},
+      },
+      isExecuting: true,
+    });
+  } else if (event.type === 'tool_result') {
+    const toolResponse = parseToolResponse(
+      event.data.toolName ?? 'unknown',
+      event.data.toolResult,
+    );
+    if (!toolResponse) return;
+
+    // Merge original tool args with the result data
+    const pendingMsgId = ctx.toolQueue.shift();
+    let finalResponse = toolResponse;
+    if (pendingMsgId) {
+      const existingMsg = useChatStore
+        .getState()
+        .messages.find((m) => m.id === pendingMsgId);
+      const existingArgs =
+        existingMsg?.role === 'tool' &&
+        existingMsg.toolResponse.status === 'success'
+          ? (existingMsg.toolResponse.data as Record<string, unknown>)
+          : {};
+      finalResponse = {
+        ...toolResponse,
+        data: {
+          ...existingArgs,
+          ...((toolResponse.status === 'success'
+            ? toolResponse.data
+            : {}) as Record<string, unknown>),
+        },
+      } as typeof toolResponse;
+      updateMessage(pendingMsgId, () => ({
+        id: pendingMsgId,
+        role: 'tool' as const,
+        toolResponse: finalResponse,
+        isExecuting: false,
+      }));
+    } else {
+      addMessage({
+        id: createId('tool'),
+        role: 'tool',
+        toolResponse: finalResponse,
+      });
+    }
+
+    // Execute canvas_commands locally
+    if ((event.data.toolName ?? '') === 'canvas_commands') {
+      const result = applyCanvasCommandsFromToolResult(event.data.toolResult);
+      if (result) {
+        ctx.onCanvasCommands?.(result.commands);
+      }
+    }
   }
-  if (toolResponse.tool === 'create_frame') {
-    return {
-      type: 'frame',
-      nodeType: 'frame',
-      label: 'Frame',
-      id: data.frameId as string,
-    };
-  }
-  return null;
 }
 
 interface ChatPanelProps {
@@ -205,14 +311,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       useChatStore.getState().switchToCanvas(canvasId);
     }
   }, [canvasId]);
-
-  // Research store — tracks running status for UI (disable input, etc.)
-  const researchStatus = useResearchStore((state) => state.status);
-  const startResearchUi = useResearchStore((state) => state.startResearch);
-  const completeResearchUi = useResearchStore(
-    (state) => state.completeResearch,
-  );
-  const setResearchError = useResearchStore((state) => state.setError);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -376,110 +474,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
             setIsLoading(true);
             clearStaleMessages();
           }
-
-          if (event.type === 'text_delta') {
-            const delta = (event.data as Record<string, unknown>).content ?? '';
-            const existing = useChatStore
-              .getState()
-              .messages.find((m) => m.id === assistantId);
-            if (existing) {
-              updateMessage(assistantId, (m) =>
-                m.role === 'user' || m.role === 'assistant'
-                  ? { ...m, content: m.content + (delta as string) }
-                  : m,
-              );
-            } else {
-              addMessage({
-                id: assistantId,
-                role: 'assistant',
-                content: delta as string,
-              });
-            }
-          } else if (event.type === 'tool_start') {
-            const toolName =
-              (event.data as Record<string, unknown>).toolName ?? 'unknown';
-            const msgId = createId('tool');
-            toolQueue.push(msgId);
-            addMessage({
-              id: msgId,
-              role: 'tool',
-              toolResponse: {
-                tool: toolName as string,
-                status: 'success',
-                data: ((event.data as Record<string, unknown>).toolArgs ??
-                  {}) as Record<string, unknown>,
-              },
-              isExecuting: true,
-            });
-          } else if (event.type === 'tool_result') {
-            const toolResponse = parseToolResponse(
-              ((event.data as Record<string, unknown>).toolName ??
-                'unknown') as string,
-              (event.data as Record<string, unknown>).toolResult as
-                | string
-                | undefined,
-            );
-            if (toolResponse) {
-              const pendingMsgId = toolQueue.shift();
-              if (pendingMsgId) {
-                const existingMsg = useChatStore
-                  .getState()
-                  .messages.find((m) => m.id === pendingMsgId);
-                const existingArgs =
-                  existingMsg?.role === 'tool' &&
-                  existingMsg.toolResponse.status === 'success'
-                    ? (existingMsg.toolResponse.data as Record<string, unknown>)
-                    : {};
-                const finalResponse = {
-                  ...toolResponse,
-                  data: {
-                    ...existingArgs,
-                    ...((toolResponse.status === 'success'
-                      ? toolResponse.data
-                      : {}) as Record<string, unknown>),
-                  },
-                } as typeof toolResponse;
-                updateMessage(pendingMsgId, () => ({
-                  id: pendingMsgId,
-                  role: 'tool' as const,
-                  toolResponse: finalResponse,
-                  isExecuting: false,
-                }));
-              } else {
-                addMessage({
-                  id: createId('tool'),
-                  role: 'tool',
-                  toolResponse,
-                });
-              }
-              const toolName = ((event.data as Record<string, unknown>)
-                .toolName ?? '') as string;
-              // For canvas_commands, extract commands from the tool result
-              // and execute them locally through the shared executor.
-              if (toolName === 'canvas_commands') {
-                try {
-                  const parsed = JSON.parse(
-                    ((event.data as Record<string, unknown>).toolResult ??
-                      '{}') as string,
-                  ) as {
-                    status?: string;
-                    data?: { commands?: CanvasCommand[] };
-                  };
-                  if (
-                    parsed.status === 'success' &&
-                    parsed.data?.commands?.length
-                  ) {
-                    useCanvasStore
-                      .getState()
-                      .executeCommands(parsed.data.commands, 'agent');
-                  }
-                } catch {
-                  // Parsing failed — commands lost; state will be stale until
-                  // next page load.  Acceptable: server never wrote them either.
-                }
-              }
-            }
-          }
+          handleStreamEvent(event, { assistantId, toolQueue });
         },
         onError: (err) => {
           if (cancelled) return;
@@ -524,7 +519,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       },
     ) => {
       if (!prompt.trim() || isLoading) return;
-      if (agentMode === 'research' && researchStatus === 'running') return;
 
       setLastAction(agentMode);
 
@@ -557,17 +551,8 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
 
       setIsLoading(true);
 
-      // Research: update UI status store
-      if (agentMode === 'research') {
-        startResearchUi(prompt, {
-          searchDepth: 'basic',
-          placement: 'auto',
-          groupWithFrame: true,
-        });
-      }
-
-      // Operate: reset change tracking
-      if (agentMode === 'operate') {
+      // Operate & Research: reset change tracking
+      if (agentMode === 'operate' || agentMode === 'research') {
         setCanvasChanges([]);
         resourcesRef.current = [];
       }
@@ -591,134 +576,26 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           agentMode,
           {
             onEvent: (event: AgentStreamEvent) => {
-              if (event.type === 'text_delta') {
-                const delta = event.data.content ?? '';
-                const existing = useChatStore
-                  .getState()
-                  .messages.find((m) => m.id === assistantId);
-                if (existing) {
-                  updateMessage(assistantId, (m) =>
-                    m.role === 'user' || m.role === 'assistant'
-                      ? { ...m, content: m.content + delta }
-                      : m,
-                  );
-                } else {
-                  addMessage({
-                    id: assistantId,
-                    role: 'assistant',
-                    content: delta,
-                  });
-                }
-              } else if (event.type === 'tool_start') {
-                const toolName = event.data.toolName ?? 'unknown';
-                const msgId = createId('tool');
-                toolMsgQueue.push(msgId);
-                addMessage({
-                  id: msgId,
-                  role: 'tool',
-                  toolResponse: {
-                    tool: toolName,
-                    status: 'success',
-                    data: event.data.toolArgs ?? {},
-                  },
-                  isExecuting: true,
-                });
-              } else if (event.type === 'tool_result') {
-                const toolResponse = parseToolResponse(
-                  event.data.toolName ?? 'unknown',
-                  event.data.toolResult,
-                );
-                if (toolResponse) {
-                  // Merge original tool args with the result data
-                  const pendingMsgId = toolMsgQueue.shift();
-                  let finalResponse = toolResponse;
-                  if (pendingMsgId) {
-                    const existingMsg = useChatStore
-                      .getState()
-                      .messages.find((m) => m.id === pendingMsgId);
-                    const existingArgs =
-                      existingMsg?.role === 'tool' &&
-                      existingMsg.toolResponse.status === 'success'
-                        ? (existingMsg.toolResponse.data as Record<
-                            string,
-                            unknown
-                          >)
-                        : {};
-                    finalResponse = {
-                      ...toolResponse,
-                      data: {
-                        ...existingArgs,
-                        ...((toolResponse.status === 'success'
-                          ? toolResponse.data
-                          : {}) as Record<string, unknown>),
-                      },
-                    } as typeof toolResponse;
-                    updateMessage(pendingMsgId, () => ({
-                      id: pendingMsgId,
-                      role: 'tool' as const,
-                      toolResponse: finalResponse,
-                      isExecuting: false,
-                    }));
-                  } else {
-                    addMessage({
-                      id: createId('tool'),
-                      role: 'tool',
-                      toolResponse: finalResponse,
-                    });
-                  }
-
-                  // Track canvas changes for the change bar (operate mode)
-                  if (agentMode === 'operate') {
-                    const change = extractCanvasChange(finalResponse);
-                    if (change) {
-                      setCanvasChanges((prev) => [...prev, change]);
+              handleStreamEvent(event, {
+                assistantId,
+                toolQueue: toolMsgQueue,
+                onCanvasCommands: (commands) => {
+                  if (agentMode === 'operate' || agentMode === 'research') {
+                    const newChanges =
+                      extractCanvasChangesFromCommands(commands);
+                    if (newChanges.length > 0) {
+                      setCanvasChanges((prev) => [...prev, ...newChanges]);
                     }
-                    const resource = extractResource(finalResponse);
-                    if (resource) {
+                    const newResources = extractResourcesFromCommands(commands);
+                    if (newResources.length > 0) {
                       resourcesRef.current = [
                         ...resourcesRef.current,
-                        resource,
+                        ...newResources,
                       ];
                     }
                   }
-
-                  // For canvas_commands, extract commands from the tool result
-                  // and execute them locally through the shared executor.
-                  if ((event.data.toolName ?? '') === 'canvas_commands') {
-                    try {
-                      const parsed = JSON.parse(
-                        event.data.toolResult ?? '{}',
-                      ) as {
-                        status?: string;
-                        data?: { commands?: CanvasCommand[] };
-                      };
-                      if (
-                        parsed.status === 'success' &&
-                        parsed.data?.commands?.length
-                      ) {
-                        useCanvasStore
-                          .getState()
-                          .executeCommands(parsed.data.commands, 'agent');
-
-                        if (agentMode === 'operate') {
-                          const newChanges = extractCanvasChangesFromCommands(
-                            parsed.data.commands,
-                          );
-                          if (newChanges.length > 0) {
-                            setCanvasChanges((prev) => [
-                              ...prev,
-                              ...newChanges,
-                            ]);
-                          }
-                        }
-                      }
-                    } catch {
-                      // Parsing failed — commands lost; state will be stale
-                      // until next page load.
-                    }
-                  }
-                }
-              }
+                },
+              });
             },
             onError: (err) => {
               if (!activeRef.current || errorHandled) return;
@@ -732,26 +609,20 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
               });
               setIsLoading(false);
               abortControllerRef.current = null;
-              if (agentMode === 'research') {
-                setResearchError(err.message);
-              }
             },
             onComplete: () => {
               setIsLoading(false);
               abortControllerRef.current = null;
 
-              if (agentMode === 'research') {
-                completeResearchUi();
-              }
-
-              if (agentMode === 'operate') {
-                if (resourcesRef.current.length > 0) {
-                  updateMessage(assistantIdRef.current, (m) =>
-                    m.role === 'assistant'
-                      ? { ...m, resources: [...resourcesRef.current] }
-                      : m,
-                  );
-                }
+              if (
+                (agentMode === 'operate' || agentMode === 'research') &&
+                resourcesRef.current.length > 0
+              ) {
+                updateMessage(assistantIdRef.current, (m) =>
+                  m.role === 'assistant'
+                    ? { ...m, resources: [...resourcesRef.current] }
+                    : m,
+                );
               }
             },
           },
@@ -784,16 +655,10 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           detail: err instanceof Error ? err.message : 'Unknown error',
         });
         setIsLoading(false);
-        if (agentMode === 'research') {
-          setResearchError(
-            err instanceof Error ? err.message : 'Unknown error',
-          );
-        }
       }
     },
     [
       isLoading,
-      researchStatus,
       pendingAttachments,
       clearPendingAttachments,
       addMessage,
@@ -802,9 +667,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       updateMessage,
       getAgentContext,
       canvasId,
-      startResearchUi,
-      completeResearchUi,
-      setResearchError,
     ],
   );
 
@@ -868,11 +730,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       status: 'interrupted',
     });
 
-    // Reset research store if it was running
-    if (useResearchStore.getState().status === 'running') {
-      useResearchStore.getState().completeResearch();
-    }
-
     // Mark any still-executing tool messages as done
     const msgs = useChatStore.getState().messages;
     for (const msg of msgs) {
@@ -885,7 +742,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   }, [addMessage, updateMessage]);
 
   const handleNewChat = () => {
-    if (isLoading || researchStatus === 'running') return;
+    if (isLoading) return;
     clearMessages(canvasId || undefined);
     setCanvasChanges([]);
   };
@@ -902,7 +759,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         <IconButton
           onClick={handleNewChat}
           title="New conversation"
-          disabled={isLoading || researchStatus === 'running'}
+          disabled={isLoading}
           className="text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Plus size={16} />
@@ -940,9 +797,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           isStreaming={isLoading}
           mode={mode}
           onModeChange={setMode}
-          disabled={
-            isLoading || !isHistoryLoaded || researchStatus === 'running'
-          }
+          disabled={isLoading || !isHistoryLoaded}
         />
       </div>
     </SidebarPanel>

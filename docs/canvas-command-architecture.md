@@ -148,16 +148,32 @@ Agent emits `AUTO_LAYOUT { scope: { type: 'canvas' } }` directly — valid becau
 
 ---
 
-## TODO: Converge Agent and Web
+## Agent-Side Implementation
 
-The server-side agent tool executor (`apps/server/src/modules/agent/tools/executor.ts`) is currently independent — uses its own `executeTool()` dispatch, directly mutates state via `loadCanvasState()` / `saveCanvasState()`, and does not use `CanvasCommand` or `CanvasExecution`.
+Agent and web now converge on the same `CanvasCommand` pipeline. The server never applies canvas mutations directly.
 
-`packages/shared/src/types/intent.ts` defines a parallel `IntentAction` union (uses `op` discriminant) not yet converged with `CanvasCommand`.
+### Agent Command Schema
 
-### Tasks
+The agent exposes a single `canvas_commands` tool (`apps/server/src/modules/agent/tools/definitions.ts`). Its parameter schema is a TypeBox-validated subset of `CanvasCommand` — the 12 agent-allowed command types (excludes UI-only commands `SET_NODE_LOCKED`, `SET_NODE_SELECTION`, `SET_EXPANDED_NODE`).
 
-- [ ] **Define agent-facing CanvasCommand schema on the server.** Decide whether the agent emits `CanvasCommand` JSON from the LLM tool-call layer, or whether a thin server adapter maps agent tool calls to `CanvasCommand` JSON sent to the web executor.
-- [ ] **Refactor `apps/server/src/modules/agent/tools/executor.ts`.** Replace `executeTool()` dispatch so it produces `CanvasCommand[]` instead of directly mutating state.
-- [ ] **Route agent commands through the web executor.** Wrap agent `CanvasCommand[]` in `CanvasExecution { source: 'agent' }` and execute via the same pipeline.
-- [ ] **Converge `IntentAction` with `CanvasCommand`.** Retire or align the parallel union in `packages/shared/src/types/intent.ts`.
-- [ ] **Remove duplicated domain logic from the server executor.** Delete standalone create/update/delete/connect/frame implementations once agent commands flow through the shared pipeline.
+The LLM emits `CanvasCommand` JSON directly from the tool-call layer; no server adapter is needed.
+
+### Server Executor
+
+`apps/server/src/modules/agent/tools/executor.ts` handles `canvas_commands` via `executeCanvasCommands()`:
+
+1. Injects `NodeOrigin` (`ai-research` or `ai-operate`) into `CREATE_NODES` commands based on agent mode.
+2. Returns the validated command batch as a JSON tool result — **does not apply commands or mutate canvas state**.
+3. The tool result is streamed to the web client as an SSE `tool_result` event.
+
+### Web-Side Execution
+
+`ChatPanel` intercepts `tool_result` events for `canvas_commands`, parses the commands, and calls `canvasStore.executeCommands(commands, 'agent')`:
+
+1. `executeCommands()` wraps the commands in `CanvasExecution { source: 'agent' }`.
+2. The shared `executeCanvasCommands()` executor (`apps/web/src/canvas/executor.ts`) processes them through the same handler registry and post-effects pipeline as UI commands.
+3. Agent-originated commands skip the `beginGesture()` snapshot guard (no UI gesture involved).
+
+### IntentAction Convergence
+
+The parallel `IntentAction` union has been removed from `packages/shared/src/types/intent.ts`. That module now only contains intent _recognition_ types (`IntentCandidate`, `IntentEpisode`, `IntentRequest`, `IntentResponse`).
