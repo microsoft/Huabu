@@ -135,7 +135,7 @@ const NoteDragHandleButton: FC<NoteDragHandleButtonProps> = (props) => {
           e,
           {
             kind: 'note',
-            origin: { type: 'user-drag-chat', threadId: props.threadId },
+            origin: { type: 'user-from-chat', threadId: props.threadId },
             data: {
               content: noteContent,
               contentJson: dragContentJson,

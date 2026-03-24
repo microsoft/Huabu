@@ -76,7 +76,7 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
     draggingRef.current = true;
     setDragPayload(e, {
       kind: 'note',
-      origin: { type: 'user-drag-capture', sourceId },
+      origin: { type: 'user-excerpt', sourceId },
       data: { content: text },
     });
   };
@@ -86,7 +86,7 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
     draggingRef.current = true;
     setDragPayload(e, {
       kind: 'image',
-      origin: { type: 'user-drag-capture', sourceId },
+      origin: { type: 'user-excerpt', sourceId },
       data: { src: imageUrl },
     });
   };
@@ -103,7 +103,7 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
       nodeType: 'note',
       data: {
         content: text,
-        origin: { type: 'user-drag-capture', sourceId },
+        origin: { type: 'user-excerpt', sourceId },
       },
     });
     onDismiss();
@@ -115,7 +115,7 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
       nodeType: 'image',
       data: {
         src: imageUrl,
-        origin: { type: 'user-drag-capture', sourceId },
+        origin: { type: 'user-excerpt', sourceId },
       },
     });
     onDismiss();

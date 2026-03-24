@@ -151,7 +151,7 @@ export function buildLayoutGraph(
     }
   }
 
-  // 2c. origin.sourceId (user-drag-capture) — link captured node to its source
+  // 2c. origin.sourceId (user-excerpt) — link captured node to its source
   // origin.sourceId is a knowledge-base source ID (data.sourceId), not a canvas
   // node ID, so we build a reverse lookup from data.sourceId → canvas node ID.
   const nodeByDataSourceId = new Map<string, string>();
@@ -196,14 +196,14 @@ export function buildLayoutGraph(
     }
   }
 
-  // 2e. Same origin.threadId (user-drag-chat) — nodes from the same chat
+  // 2e. Same origin.threadId (user-from-chat) — nodes from the same chat
   const nodesByChatThread = new Map<string, string[]>();
   for (const n of nodeMap.values()) {
     const data = n.data as Record<string, unknown>;
     const origin = data?.origin as
       | { type?: string; threadId?: string }
       | undefined;
-    if (origin?.type === 'user-drag-chat' && origin.threadId) {
+    if (origin?.type === 'user-from-chat' && origin.threadId) {
       const tid = origin.threadId;
       const arr = nodesByChatThread.get(tid) ?? [];
       arr.push(n.id);

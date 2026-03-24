@@ -152,7 +152,7 @@ const DragHandleButton: FC = () => {
         const payload: Omit<DragPayload, 'dragId'> & NoteDragPayload = {
           kind: 'note',
           origin: {
-            type: 'user-drag-capture',
+            type: 'user-excerpt',
             ...(sourceId ? { sourceId } : {}),
           },
           data: {
