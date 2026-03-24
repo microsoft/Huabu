@@ -1,5 +1,6 @@
 import {
   createId,
+  type CanvasCommand,
   type ChatAttachment,
   type ToolResponse,
 } from '@sediment/shared';
@@ -50,14 +51,86 @@ function parseToolResponse(
 }
 
 /** Tools that modify the canvas and should be tracked for the change bar. */
-const CANVAS_MODIFY_TOOLS = new Set([
-  'create_node',
-  'update_node',
-  'delete_nodes',
-  'connect_nodes',
-  'disconnect_nodes',
-  'create_frame',
-]);
+const CANVAS_MODIFY_TOOLS = new Set(['canvas_commands']);
+
+/** Extract CanvasChange entries from a canvas_commands batch. */
+function extractCanvasChangesFromCommands(
+  commands: CanvasCommand[],
+): CanvasChange[] {
+  const changes: CanvasChange[] = [];
+  const truncate = (s: string, n: number) =>
+    s.length > n ? s.slice(0, n) + '…' : s;
+
+  for (const cmd of commands) {
+    switch (cmd.type) {
+      case 'CREATE_NODES':
+        for (const node of cmd.nodes) {
+          const label = (node.data as Record<string, unknown> | undefined)
+            ?.label;
+          changes.push({
+            tool: 'canvas_commands',
+            label: `Created: ${truncate((label as string) ?? 'untitled', 24)}`,
+            nodeType: node.nodeType,
+            nodeId: node.id,
+          });
+        }
+        break;
+      case 'DELETE_NODES':
+        changes.push({
+          tool: 'canvas_commands',
+          label: `Deleted ${cmd.nodeIds.length} node(s)`,
+        });
+        break;
+      case 'MERGE_NODE_DATA':
+        for (const patch of cmd.patches) {
+          changes.push({
+            tool: 'canvas_commands',
+            label: `Updated: ${truncate(patch.nodeId, 24)}`,
+            nodeId: patch.nodeId,
+          });
+        }
+        break;
+      case 'CONNECT_NODES':
+        for (const edge of cmd.edges) {
+          changes.push({
+            tool: 'canvas_commands',
+            label: 'Connected nodes',
+            sourceNodeId: edge.source,
+            targetNodeId: edge.target,
+          });
+        }
+        break;
+      case 'DISCONNECT_EDGES':
+        changes.push({
+          tool: 'canvas_commands',
+          label: `Disconnected ${cmd.edges.length} edge(s)`,
+        });
+        break;
+      case 'SET_NODE_PARENT':
+        changes.push({
+          tool: 'canvas_commands',
+          label: cmd.parentId ? 'Moved into frame' : 'Moved out of frame',
+        });
+        break;
+      case 'DISSOLVE_FRAME':
+        changes.push({
+          tool: 'canvas_commands',
+          label: 'Dissolved frame',
+          nodeType: 'frame',
+        });
+        break;
+      case 'AUTO_LAYOUT':
+        changes.push({
+          tool: 'canvas_commands',
+          label: 'Auto layout',
+        });
+        break;
+      default:
+        break;
+    }
+  }
+  return changes;
+}
 
 /** Extract a CanvasChange from a tool response, or null if not canvas-modifying. */
 function extractCanvasChange(
@@ -65,48 +138,10 @@ function extractCanvasChange(
 ): CanvasChange | null {
   if (!CANVAS_MODIFY_TOOLS.has(toolResponse.tool)) return null;
   if (toolResponse.status !== 'success') return null;
-  const data = (toolResponse.data ?? {}) as Record<string, unknown>;
-  const truncate = (s: string, n: number) =>
-    s.length > n ? s.slice(0, n) + '…' : s;
 
-  switch (toolResponse.tool) {
-    case 'create_node':
-      return {
-        tool: 'create_node',
-        label: `Created: ${truncate((data.label as string) ?? 'untitled', 24)}`,
-        nodeType: (data.type as string) ?? 'note',
-        nodeId: data.nodeId as string,
-      };
-    case 'update_node':
-      return {
-        tool: 'update_node',
-        label: `Updated: ${truncate((data.nodeId as string) ?? '', 24)}`,
-        nodeType: 'note',
-        nodeId: data.nodeId as string,
-      };
-    case 'delete_nodes':
-      return {
-        tool: 'delete_nodes',
-        label: `Deleted ${(data.deletedCount as number) ?? ''} node(s)`,
-      };
-    case 'connect_nodes':
-      return {
-        tool: 'connect_nodes',
-        label: 'Connected nodes',
-        sourceNodeId: data.sourceId as string,
-        targetNodeId: data.targetId as string,
-      };
-    case 'disconnect_nodes':
-      return { tool: 'disconnect_nodes', label: 'Disconnected nodes' };
-    case 'create_frame':
-      return {
-        tool: 'create_frame',
-        label: 'Created frame',
-        nodeType: 'frame',
-      };
-    default:
-      return null;
-  }
+  // For canvas_commands, changes are extracted from the commands array via
+  // extractCanvasChangesFromCommands(), not from the tool response.
+  return null;
 }
 
 /** Extract a ResourceLabel from a tool response. */
@@ -418,7 +453,33 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
                   toolResponse,
                 });
               }
-              void refreshCanvas();
+              const toolName = ((event.data as Record<string, unknown>)
+                .toolName ?? '') as string;
+              // For canvas_commands, extract commands from the tool result
+              // and execute them locally through the shared executor.
+              if (toolName === 'canvas_commands') {
+                try {
+                  const parsed = JSON.parse(
+                    ((event.data as Record<string, unknown>).toolResult ??
+                      '{}') as string,
+                  ) as {
+                    status?: string;
+                    data?: { commands?: CanvasCommand[] };
+                  };
+                  if (
+                    parsed.status === 'success' &&
+                    parsed.data?.commands?.length
+                  ) {
+                    useCanvasStore
+                      .getState()
+                      .executeCommands(parsed.data.commands, 'agent');
+                  }
+                } catch {
+                  // Parsing failed — refreshCanvas will handle it in onComplete
+                }
+              } else {
+                void refreshCanvas();
+              }
             }
           }
         },
@@ -628,7 +689,41 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
                     }
                   }
 
-                  if (modifiesCanvas) {
+                  // For canvas_commands, extract commands from the tool result
+                  // and execute them locally through the shared executor.
+                  if ((event.data.toolName ?? '') === 'canvas_commands') {
+                    try {
+                      const parsed = JSON.parse(
+                        event.data.toolResult ?? '{}',
+                      ) as {
+                        status?: string;
+                        data?: { commands?: CanvasCommand[] };
+                      };
+                      if (
+                        parsed.status === 'success' &&
+                        parsed.data?.commands?.length
+                      ) {
+                        useCanvasStore
+                          .getState()
+                          .executeCommands(parsed.data.commands, 'agent');
+
+                        if (agentMode === 'operate') {
+                          const newChanges = extractCanvasChangesFromCommands(
+                            parsed.data.commands,
+                          );
+                          if (newChanges.length > 0) {
+                            setCanvasChanges((prev) => [
+                              ...prev,
+                              ...newChanges,
+                            ]);
+                          }
+                        }
+                      }
+                    } catch {
+                      // Parsing failed — fall through to refreshCanvas
+                      if (modifiesCanvas) void refreshCanvas();
+                    }
+                  } else if (modifiesCanvas) {
                     void refreshCanvas();
                   }
                 }

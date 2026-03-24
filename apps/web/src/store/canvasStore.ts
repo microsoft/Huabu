@@ -3,6 +3,7 @@ import {
   type CanvasCommand,
   type CanvasCommandType,
   type CanvasExecution,
+  type CanvasExecutionSource,
   type CanvasNodeType,
   type NodeSummary,
   type RecentAction,
@@ -249,7 +250,10 @@ type RFState = {
 
   actionHistory: RecentAction[];
   /** @internal Execute a batch of shared CanvasCommands. Do not call from outside the store. */
-  executeCommands: (commands: CanvasCommand[]) => void;
+  executeCommands: (
+    commands: CanvasCommand[],
+    source?: CanvasExecutionSource,
+  ) => void;
   /** @internal Resolve a web-only UiIntent and execute the resulting commands. */
   dispatchUiIntent: (intent: CanvasUiIntent) => void;
   getAgentContext: () => AgentBaseContext;
@@ -395,9 +399,9 @@ const useCanvasStore = create<RFState>()(
     // --- Internal: not exposed in the public CanvasStore interface ---
 
     /** Execute a batch of shared CanvasCommands. Source defaults to 'ui'. */
-    executeCommands: (commands) => {
+    executeCommands: (commands, source) => {
       const execution: CanvasExecution = {
-        source: 'ui',
+        source: source ?? 'ui',
         commands,
       };
       const state = {
@@ -414,10 +418,11 @@ const useCanvasStore = create<RFState>()(
       if (!commandResults.some((r) => r.applied)) return;
 
       // Guard: verify that 'caller' snapshot commands were preceded by beginGesture.
+      // Skip for agent-originated commands (no UI gesture involved).
       const hasCallerSnapshot = commands.some(
         (c) => COMMAND_META[c.type].snapshot === 'caller',
       );
-      if (hasCallerSnapshot) {
+      if (hasCallerSnapshot && (source ?? 'ui') !== 'agent') {
         if (!canvasHistoryManager.gestureSnapshotTaken) {
           console.warn(
             '[canvasStore] snapshot:"caller" command executed without beginGesture():',

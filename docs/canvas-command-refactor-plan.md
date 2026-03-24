@@ -1,525 +1,276 @@
-# Canvas Command Refactor Plan
+# Canvas Command Architecture
 
-## Goal
+## Overview
 
-Refactor canvas mutations into a three-layer model:
+Canvas mutations use a three-layer model:
 
-1. `CanvasUiIntent`: web-only user interaction semantics
-2. `CanvasCommand`: shared executable JSON command schema for web and agent
-3. `CanvasExecution`: the batch or transaction boundary for validation, undo, action trace, and side effects
+1. **`CanvasUiIntent`** — web-only user interaction semantics (`apps/web/src/canvas/uiIntent.ts`)
+2. **`CanvasCommand`** — shared executable JSON command schema (`packages/shared/src/types/canvas/command.ts`)
+3. **`CanvasExecution`** — batch/transaction boundary for validation, undo, action trace, and side effects (`packages/shared/src/types/canvas/execution.ts`)
 
-The end state should be:
+Data flow:
 
-1. The agent emits `CanvasCommand` JSON directly.
-2. The web layer resolves UI gestures into the same `CanvasCommand` JSON.
-3. The unified `handle` layer executes only `CanvasCommand`.
-4. Undo, redo, action trace, and post-commit effects are managed at the `CanvasExecution` level.
-
-## Core Decision
-
-`CanvasCommand` remains the final shared executable name.
-
-There are only two input layers:
-
-1. `CanvasUiIntent` for the web
-2. `CanvasCommand` for both web and agent
-
-There is no separate long-lived `LegacyCanvasCommand` layer. Temporary compatibility code may exist during migration, but it should remain implementation detail rather than architecture.
+1. Web gesture → `CanvasUiIntent` → resolver → `CanvasExecution` → executor
+2. Agent response → `CanvasCommand[]` → `CanvasExecution` → executor
+3. Executor → validate, apply, trace, snapshot, effects
 
 ## Layer 1: CanvasUiIntent
 
-`CanvasUiIntent` is a web-only input model for user gestures.
-
-Its job is to answer UI-specific questions before the unified `handle` layer is called.
-
-Examples of UI-specific questions:
-
-1. Which nodes are currently selected?
-2. Which nodes fall inside a marquee rectangle?
-3. Which frame is the current drop target?
-4. What is the current clipboard payload?
-5. What is the viewport-relative insertion point?
+`CanvasUiIntent` is a web-only input model for user gestures. It resolves UI-specific ambiguity (selection, clipboard, drag context, viewport position, rectangle hit-testing) into explicit `CanvasCommand` operands.
 
 `CanvasUiIntent` must not be shared with the agent because it depends on ephemeral frontend state.
 
-### What Belongs in CanvasUiIntent
+### Design Rules
 
-Examples of valid web-only intents:
+Resolvers:
 
-| Ui Intent                                       | Why it is UI-only                                        |
-| ----------------------------------------------- | -------------------------------------------------------- |
-| `GROUP_SELECTION_INTO_FRAME`                    | Depends on the current selection state                   |
-| `GROUP_RECT_INTO_FRAME`                         | Depends on hit-testing a rectangle against current nodes |
-| `PASTE_CLIPBOARD`                               | Depends on clipboard state and paste anchor              |
-| `NODE_DRAG_STOP`                                | Depends on drag session state and drop target analysis   |
-| `SELECT_NODES` with replace or toggle semantics | Depends on modifier keys and current selection           |
-| `ADD_NODE_FROM_TOOLBAR`                         | Depends on viewport insertion heuristics                 |
-
-### What CanvasUiIntent Must Do
-
-The web resolver layer should:
-
-1. Read UI-only state such as selection, clipboard, drag context, viewport position, and rectangle hit-testing.
-2. Resolve ambiguous user gestures into explicit operands.
-3. Produce one `CanvasExecution` containing one or more `CanvasCommand` items.
+1. Read UI-only state (selection, clipboard, drag context, viewport, hit-testing).
+2. Resolve ambiguous gestures into explicit operands.
+3. Return `UiIntentResolution { commands, trace }`.
 4. Never mutate canvas state directly.
 
-### What CanvasUiIntent Must Not Do
-
-The web resolver layer should not:
+Resolvers must not:
 
 1. Own undo snapshots
 2. Write action trace directly
 3. Trigger ingestion or label resolution
-4. Apply state mutations directly
-5. Define shared command semantics
+4. Apply state mutations
+
+### Implementation
+
+Types and resolvers: `apps/web/src/canvas/uiIntent.ts` + `apps/web/src/canvas/resolvers/`.
+
+22 intent types: 8 composite gestures (need selection/clipboard/drag/viewport resolution) + 14 direct-mapping intents (thin wrappers to `CanvasCommand`). See `uiIntent.ts` for the full union.
+
+Composite intent examples:
+
+| Intent                       | Why UI-only                                               |
+| ---------------------------- | --------------------------------------------------------- |
+| `GROUP_SELECTION_INTO_FRAME` | Depends on current selection                              |
+| `GROUP_RECT_INTO_FRAME`      | Hit-tests a rectangle against nodes                       |
+| `PASTE_CLIPBOARD`            | Depends on clipboard state and paste anchor               |
+| `NODE_DRAG_STOP`             | Depends on drag session and drop target                   |
+| `SELECT_NODES`               | Resolves modifier-key mode (`replace` / `toggle` / `add`) |
 
 ## Layer 2: CanvasCommand
 
-`CanvasCommand` is the shared executable command schema.
+`CanvasCommand` is the shared executable command schema. It is the only command type the executor accepts. Both web and agent converge to this schema.
 
-It is the only command type that the unified `handle` layer should accept.
+### Design Rules
 
-Both the web and the agent should converge to this schema.
+`CanvasCommand` is the smallest shared executable domain instruction (not the smallest state diff). A command may own deterministic domain behavior inside execution:
 
-### What CanvasCommand Means
+- `DELETE_NODES` automatically removes incident edges.
+- `SET_NODE_PARENT` rejects invalid targets or cycles.
+- `AUTO_LAYOUT` computes positions from explicit scope.
+- `ALIGN_NODES` aligns provided nodes without relying on selection.
 
-`CanvasCommand` is not the smallest possible state diff.
+Every `CanvasCommand`:
 
-It is the smallest shared executable domain instruction.
+1. Must be JSON-serializable.
+2. May read persistent canvas state during execution.
+3. Must not depend on UI-only state (selection, clipboard, marquee, drag, viewport).
+4. Must use explicit operands (node ids, frame ids, edge ids, scope).
+5. Returns `applied: false` with no side effects if it cannot be applied.
 
-That means a command may still own deterministic domain behavior inside `handle`.
+### Command Catalog
 
-Examples:
+See `packages/shared/src/types/canvas/command.ts` for the full 15-member discriminated union. Summary:
 
-1. `DELETE_NODES` should automatically remove incident edges.
-2. `SET_NODE_PARENT` should reject invalid targets or cycles.
-3. `AUTO_LAYOUT` should compute positions from explicit scope.
-4. `ALIGN_NODES` should align the provided nodes without relying on current selection.
+| Category         | Commands                                         |
+| ---------------- | ------------------------------------------------ |
+| Node lifecycle   | `CREATE_NODES`, `DELETE_NODES`                   |
+| Node editing     | `MERGE_NODE_DATA`                                |
+| Structure        | `SET_NODE_PARENT`, `DISSOLVE_FRAME`              |
+| Geometry         | `SET_NODE_GEOMETRY`                              |
+| Selection / view | `SET_NODE_SELECTION`, `SET_EXPANDED_NODE`        |
+| Ordering         | `REORDER_NODES`                                  |
+| Locking          | `SET_NODE_LOCKED`                                |
+| Edge graph       | `CONNECT_NODES`, `DISCONNECT_EDGES`              |
+| Algorithms       | `ALIGN_NODES`, `DISTRIBUTE_NODES`, `AUTO_LAYOUT` |
 
-`SET_NODE_PARENT` should apply one shared `parentId` to one explicit list of `nodeIds`. If a batch needs different target parents, it should emit multiple `SET_NODE_PARENT` commands.
+### Explicit IDs
 
-### Rules for CanvasCommand
-
-Every `CanvasCommand` should follow these rules:
-
-1. It must be JSON-serializable.
-2. It may read persistent canvas state during execution.
-3. It must not depend on UI-only state such as selection, clipboard, marquee rectangles, drag session state, or viewport-only defaults.
-4. Its operands must be explicit: node ids, frame ids, edge ids, target scope, or batch-local refs.
-5. It may own deterministic structural cleanup and invariant enforcement.
-6. If it cannot be applied, it must return `applied: false` with no side effects.
-
-### Layout and Alignment in CanvasCommand
-
-Yes, layout and alignment belong in `CanvasCommand` when their scope is explicit.
-
-They are valid shared commands because:
-
-1. The agent may legitimately ask the canvas to align or auto-layout nodes.
-2. The execution only depends on persisted canvas state plus explicit payload.
-3. They do not require UI-only context when node ids or layout scope are provided.
-
-Good examples:
-
-1. `ALIGN_NODES { nodeIds, direction }`
-2. `DISTRIBUTE_NODES { nodeIds, axis }`
-3. `AUTO_LAYOUT { scope: 'canvas' }`
-4. `AUTO_LAYOUT { scope: 'frame', frameId }`
-
-Bad examples:
-
-1. `ALIGN_SELECTED_NODES`
-2. `LAYOUT_CURRENT_SELECTION`
-3. `MOVE_INTO_HOVERED_FRAME`
-
-Those are UI intents, not shared commands.
-
-### Suggested CanvasCommand Catalog
-
-This is the recommended shared command set.
-
-| Category          | Command              | Purpose                                              | Notes                                                                                    |
-| ----------------- | -------------------- | ---------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| Node lifecycle    | `CREATE_NODES`       | Create one or more nodes                             | Supports explicit ids or batch-local temp refs                                           |
-| Node lifecycle    | `DELETE_NODES`       | Delete one or more nodes                             | Owns deterministic cleanup such as incident edge removal and optional descendant cascade |
-| Node editing      | `MERGE_NODE_DATA`    | Shallow-merge `node.data` fields                     | No JSON Patch or deep merge semantics                                                    |
-| Structure         | `SET_NODE_PARENT`    | Move one or more nodes under a frame or back to root | Applies one shared `parentId` to the provided `nodeIds`                                  |
-| Structure         | `DISSOLVE_FRAME`     | Remove a frame while releasing its children          | Valid shared command because `frameId` is explicit                                       |
-| Geometry          | `SET_NODE_GEOMETRY`  | Set explicit position and or size                    | Use for direct geometry writes                                                           |
-| Selection or view | `SET_NODE_SELECTION` | Replace the selected set                             | The final selection set must already be resolved                                         |
-| Selection or view | `SET_EXPANDED_NODE`  | Open or close the expanded node                      | UI state, but still executable from an explicit payload                                  |
-| Ordering          | `SET_NODE_ORDER`     | Apply explicit render order                          | Avoid overloaded reorder payloads                                                        |
-| Locking           | `SET_NODE_LOCKED`    | Set locked state explicitly                          | Prefer explicit booleans over toggle semantics                                           |
-| Edge graph        | `CONNECT_NODES`      | Create one or more edges                             | Supports explicit source and target refs                                                 |
-| Edge graph        | `DISCONNECT_EDGES`   | Remove one or more edges                             | Remove by edge id or explicit edge descriptors                                           |
-| Algorithms        | `ALIGN_NODES`        | Align nodes by an explicit set of ids                | Does not depend on current selection                                                     |
-| Algorithms        | `DISTRIBUTE_NODES`   | Spread nodes along an explicit axis                  | Same                                                                                     |
-| Algorithms        | `AUTO_LAYOUT`        | Run layout on explicit scope                         | Currently supports `canvas` and `frame` scopes; `animate` is the only supported option.  |
-
-### Explicit IDs for Agent-Created Objects
-
-The shared command schema should use the same prefixed string id style as the rest of the app.
-
-That means:
-
-1. Node ids use the standard `node-<uuid>` format.
-2. Edge ids use the standard `edge-<uuid>` format.
-3. If later commands in the same batch need to reference a newly created node, the caller should provide the explicit node id up front in `CREATE_NODES`.
-
-This allows a batch like:
-
-```json
-{
-  "source": "agent",
-  "commands": [
-    {
-      "type": "CREATE_NODES",
-      "nodes": [
-        {
-          "id": "node-11111111-1111-4111-8111-111111111111",
-          "nodeType": "note",
-          "data": { "label": "Topic" },
-          "position": { "x": 100, "y": 120 }
-        }
-      ]
-    },
-    {
-      "type": "CREATE_NODES",
-      "nodes": [
-        {
-          "id": "node-22222222-2222-4222-8222-222222222222",
-          "nodeType": "note",
-          "data": { "label": "Detail" },
-          "position": { "x": 260, "y": 120 }
-        }
-      ]
-    },
-    {
-      "type": "CONNECT_NODES",
-      "edges": [
-        {
-          "source": "node-11111111-1111-4111-8111-111111111111",
-          "target": "node-22222222-2222-4222-8222-222222222222"
-        }
-      ]
-    },
-    {
-      "type": "ALIGN_NODES",
-      "nodeIds": [
-        "node-11111111-1111-4111-8111-111111111111",
-        "node-22222222-2222-4222-8222-222222222222"
-      ],
-      "direction": "top"
-    }
-  ]
-}
-```
+Node ids use `node-<uuid>`, edge ids use `edge-<uuid>`. Callers that need to reference a newly created node in a later command within the same batch provide the explicit id in `CREATE_NODES`.
 
 ## Layer 3: CanvasExecution
 
-`CanvasExecution` is the runtime batch or transaction layer.
+`CanvasExecution` is the runtime batch/transaction layer. It defines:
 
-It is not another input language.
+1. Which commands validate and execute together
+2. Which work collapses into a single undo step
+3. Which action trace entries belong to the same action
+4. Which side effects run after commit
 
-It is the boundary that tells the system:
+### Why a Separate Layer
 
-1. Which commands should be validated and executed together
-2. Which work should collapse into a single undo step
-3. Which action trace entries belong to the same user or agent action
-4. Which side effects should run after the batch commits
-
-### Why CanvasExecution Exists
-
-`CanvasUiIntent` is too early for undo and trace because it only exists on the web.
-
-`CanvasCommand` is too small for undo and trace because one logical action often contains multiple commands.
-
-Examples:
-
-1. Group selection into frame resolves to create frame, parent nodes into frame, and select frame.
-2. Agent creates two nodes and connects them in one response.
-3. Drag-stop may yield geometry changes plus parent changes.
-
-All of those should usually become one execution boundary.
-
-### What CanvasExecution Must Do
-
-`CanvasExecution` should:
-
-1. Carry the execution source, such as `ui`, `agent`, or `system`.
-2. Carry the resolved command batch.
-3. Resolve temp refs within the batch.
-4. Validate each command against current state.
-5. Take one undo snapshot when needed.
-6. Apply all accepted commands in memory.
-7. Commit resulting state once.
-8. Generate command results.
-9. Record action trace for the batch.
-10. Run post-commit effects such as ingestion, label resolution, delete bookkeeping, and edge rerouting.
-
-### Suggested Shapes
-
-```ts
-type CanvasExecutionSource = 'ui' | 'agent' | 'system';
-
-type CanvasExecution = {
-  source: CanvasExecutionSource;
-  originUiIntent?: string;
-  commands: CanvasCommand[];
-};
-
-type CanvasCommandResult = {
-  command: CanvasCommand;
-  applied: boolean;
-  reason?:
-    | 'no-op'
-    | 'not-found'
-    | 'invalid-parent'
-    | 'invalid-target'
-    | 'cycle';
-};
-
-type CanvasExecutionResult = {
-  results: CanvasCommandResult[];
-  actionTrace: RecentAction[];
-};
-```
+`CanvasUiIntent` is too early for undo/trace (web-only). `CanvasCommand` is too small (one logical action often spans multiple commands — e.g., group-into-frame = create frame + parent nodes + select frame).
 
 ### Execution Semantics
 
-The executor should behave like this:
+1. Process commands sequentially; each command sees state from prior commands.
+2. Validate each command. Commands that fail return `applied: false`.
+3. If no command changes state, commit nothing.
+4. If any command changes state, take one undo snapshot and commit once.
+5. Run post-commit effects.
 
-1. Load current canvas state.
-2. Resolve batch-local refs.
-3. Validate commands in order.
-4. Apply only commands that pass validation.
-5. If no command changes state, commit nothing and run no side effects.
-6. If at least one command changes state, take one snapshot and commit once.
-7. Generate action trace at the batch level.
-8. Run ordered post-commit effects.
+### Implementation
 
-## How the Three Layers Work Together
+- `apps/web/src/canvas/executor.ts` — `executeCanvasCommands(execution, state) -> ExecutorOutput`
+- `apps/web/src/canvas/runtime.ts` — `CanvasReadState`, `CanvasWriteResult`
+- `apps/web/src/canvas/postEffects.ts` — `runPostEffects()`: edge reroute, preprocessing trigger, delete tracking, CSS transition cleanup
+- `apps/web/src/canvas/commands/` — one handler file per command type (15 files) + `index.ts` (registry `HANDLERS` + `COMMAND_META`) + `types.ts`
 
-### Web Path
+### Store Integration
 
-1. User performs a gesture.
-2. The web layer creates a `CanvasUiIntent`.
-3. A UI intent resolver reads selection, clipboard, rectangle hit-testing, drag context, and viewport state.
-4. The resolver produces a `CanvasExecution` containing explicit `CanvasCommand` items.
-5. The executor validates and applies the batch.
+`canvasStore.ts` exposes two internal methods:
 
-### Agent Path
-
-1. The agent emits `CanvasCommand` JSON directly.
-2. The frontend wraps it in a `CanvasExecution` with `source: 'agent'`.
-3. The executor validates and applies the batch.
-
-### Shared Invariant
-
-Both paths must converge before execution.
-
-That means:
-
-1. The executor does not care whether commands came from the web or the agent.
-2. The executor only sees explicit `CanvasCommand` batches.
-3. UI-only ambiguity must be resolved before execution starts.
+- `dispatchUiIntent(intent)` — resolves `CanvasUiIntent` → commands → `executeCommands()`, pushes trace to `actionHistory`.
+- `executeCommands(commands)` — wraps in `CanvasExecution { source: 'ui' }`, runs executor, manages undo snapshots, commits to Zustand, runs post-effects.
 
 ## Examples
 
-### Example 1: Move Node Into Frame
+### Move Node Into Frame
 
-Web path:
+Web: user drags node over frame → `NODE_DRAG_STOP` intent → resolver identifies `nodeId` + `frameId` → emits `SET_NODE_PARENT`.
 
-1. User drags a node over a frame.
-2. The UI resolver identifies `nodeId` and `frameId`.
-3. It emits:
+Agent: emits `SET_NODE_PARENT` directly.
 
-```json
-{
-  "source": "ui",
-  "originUiIntent": "NODE_DRAG_STOP",
-  "commands": [
-    {
-      "type": "SET_NODE_PARENT",
-      "nodeIds": ["node-11111111-1111-4111-8111-111111111111"],
-      "parentId": "node-99999999-9999-4999-8999-999999999999"
-    }
-  ]
-}
+### Group Selection Into Frame
+
+Web only: user clicks "Group" → `GROUP_SELECTION_INTO_FRAME` intent → resolver reads selection, computes bounds → emits `CREATE_NODES` + `SET_NODE_PARENT` + `SET_NODE_SELECTION` batch.
+
+No shared `GROUP_SELECTION_INTO_FRAME` command exists because selection lookup is web-only.
+
+### Agent Auto Layout
+
+Agent emits `AUTO_LAYOUT { scope: { type: 'canvas' } }` directly — valid because it depends only on explicit scope + persisted state.
+
+---
+
+## TODO: Converge Agent and Web
+
+### Current State
+
+The server-side agent has 6 per-operation mutating tools (`create_node`, `update_node`, `delete_nodes`, `connect_nodes`, `disconnect_nodes`, `create_frame`) that each directly read/write canvas state via `loadCanvasState()` / `saveCanvasState()`. The web client calls `refreshCanvas()` (full state refetch) after each tool result arrives via SSE.
+
+This means:
+
+- Creating 3 nodes + 2 edges = 5 tool calls = 5 LLM iterations.
+- Each tool call is an independent disk write with no undo support.
+- Domain invariants (edge cleanup on delete, frame cycle rejection, tree order normalization) are reimplemented on the server, separate from the web executor.
+
+### Target State
+
+The LLM calls a single `canvas_commands` tool whose payload is a `CanvasCommand[]` batch. The server validates the shape and forwards it to the web client, which executes it through the existing `executeCanvasCommands()` pipeline.
+
+### Decision: UI-only Commands
+
+The following commands are excluded from the agent-facing schema. The LLM tool schema does not describe them, and `AgentCanvasCommand` type prevents accidental use in server code.
+
+| Excluded command     | Reason                                                |
+| -------------------- | ----------------------------------------------------- |
+| `SET_NODE_LOCKED`    | User-controlled protection, agent should not override |
+| `SET_NODE_SELECTION` | Ephemeral UI view state                               |
+| `SET_EXPANDED_NODE`  | Ephemeral UI view state                               |
+
+### Step 1: Add `AgentCanvasCommand` type
+
+File: `packages/shared/src/types/canvas/command.ts`
+
+```ts
+export type UiOnlyCanvasCommandType =
+  | 'SET_NODE_LOCKED'
+  | 'SET_NODE_SELECTION'
+  | 'SET_EXPANDED_NODE';
+
+export type AgentCanvasCommand = Exclude<
+  CanvasCommand,
+  { type: UiOnlyCanvasCommandType }
+>;
+export type AgentCanvasCommandType = AgentCanvasCommand['type'];
 ```
 
-Agent path:
+### Step 2: New tool definition — `canvas_commands`
 
-1. The agent emits the same `SET_NODE_PARENT` command directly.
-2. No `MOVE_INTO_FRAME` command is needed in the shared schema.
+File: `apps/server/src/modules/agent/tools/definitions.ts`
 
-### Example 2: Group Current Selection Into Frame
+- Add a `canvas_commands` tool with parameters:
+  - `canvasId: string` — target canvas
+  - `commands: AgentCanvasCommand[]` — the TypeBox schema describes only agent-allowed command types (12 types, excluding the 3 UI-only ones)
+- Remove the 6 per-operation mutating tool definitions (`createNodeTool`, `updateNodeTool`, `deleteNodesTool`, `connectNodesTool`, `disconnectNodesTool`, `createFrameTool`).
+- Keep all read-only tools unchanged: `get_canvas_state`, `get_node_detail`, `read_source`, `search_knowledge`.
+- Keep `web_search` and `ingest_content` unchanged (not canvas mutations).
+- Update `researchTools` and `operateTools` arrays accordingly.
 
-Web path only:
+The tool description should include:
 
-1. User clicks "Group into frame".
-2. The UI resolver reads the current selection and computes the frame bounds.
-3. It emits a batch like:
+- Each agent-allowed command type with required fields, in natural language.
+- The `node-<uuid>` / `edge-<uuid>` id convention.
+- Examples of common patterns (create + connect, group into frame).
 
-```json
-{
-  "source": "ui",
-  "originUiIntent": "GROUP_SELECTION_INTO_FRAME",
-  "commands": [
-    {
-      "type": "CREATE_NODES",
-      "nodes": [
-        {
-          "id": "node-33333333-3333-4333-8333-333333333333",
-          "nodeType": "frame",
-          "data": { "label": "Frame" },
-          "position": { "x": 100, "y": 80 },
-          "size": { "width": 420, "height": 240 }
-        }
-      ]
-    },
-    {
-      "type": "SET_NODE_PARENT",
-      "nodeIds": ["node-a", "node-b"],
-      "parentId": "node-33333333-3333-4333-8333-333333333333"
-    },
-    {
-      "type": "SET_NODE_SELECTION",
-      "nodeIds": ["node-33333333-3333-4333-8333-333333333333"]
-    }
-  ]
-}
+### Step 3: Server executor — validate + inject origin + forward
+
+File: `apps/server/src/modules/agent/tools/executor.ts`
+
+New `executeCanvasCommands()` handler:
+
+1. Parse `args.commands` as `AgentCanvasCommand[]` (TypeBox schema already validates shape).
+2. Inject `origin` into every `CREATE_NODES` command's node inputs based on `context.mode` (`ai-research` or `ai-operate`).
+3. Return the command batch as a JSON result string: `{ source: 'agent', commands: [...] }`.
+4. The server does **not** apply the commands or write to disk.
+
+Remove:
+
+- `executeCreateNode`, `executeUpdateNode`, `executeDeleteNodes`, `executeConnectNodes`, `executeDisconnectNodes`, `executeCreateFrame`.
+- `loadCanvasState`, `saveCanvasState`, `updateNodeData` helpers.
+- Their corresponding `case` branches in `executeTool()`.
+
+### Step 4: New SSE event — `canvas_commands`
+
+File: `apps/server/src/modules/agent/agent.service.ts`
+
+When `executeTool` handles `canvas_commands`, emit a dedicated SSE event in addition to the standard `tool_result`:
+
+```
+event: canvas_commands
+data: { "source": "agent", "commands": [...] }
 ```
 
-There is no shared `GROUP_SELECTION_INTO_FRAME` command because the selection lookup is web-only.
+The `tool_result` event still carries the same data (so the LLM loop sees feedback). The separate `canvas_commands` event lets the web client handle canvas mutations without parsing tool results.
 
-### Example 3: Agent Requests Auto Layout
+### Step 5: Web client — receive and execute
 
-The agent should be able to emit:
+File: `apps/web/src/api/agent.ts` + `apps/web/src/components/Panels/ChatPanel/index.tsx`
 
-```json
-{
-  "source": "agent",
-  "commands": [
-    {
-      "type": "AUTO_LAYOUT",
-      "scope": { "type": "canvas" }
-    }
-  ]
-}
-```
+On receiving `canvas_commands` SSE event:
 
-This is valid because it depends only on explicit scope plus current persisted canvas state.
+1. Call `canvasStore.executeCommands(event.data.commands)` with `source: 'agent'`.
+2. Remove the `refreshCanvas()` calls after canvas-modifying tool results — commands are applied locally by the executor.
 
-## Suggested Module Split
+File: `apps/web/src/store/canvasStore.ts`
 
-| File                                            | Responsibility                                                       |
-| ----------------------------------------------- | -------------------------------------------------------------------- |
-| `apps/web/src/store/canvasUiIntent.ts`          | Web-only `CanvasUiIntent` types                                      |
-| `apps/web/src/store/canvasUiIntentResolver.ts`  | Resolves `CanvasUiIntent` into `CanvasExecution`                     |
-| `packages/shared/src/types/canvas/command.ts`   | Shared `CanvasCommand` types used by web and agent                   |
-| `packages/shared/src/types/canvas/execution.ts` | Shared batch, result, and execution-layer types                      |
-| `packages/shared/src/types/canvas/index.ts`     | Re-exports shared canvas command and execution types                 |
-| `apps/web/src/store/canvasCommandRuntime.ts`    | Runtime interfaces for reading state and running post-commit effects |
-| `apps/web/src/store/canvasCommandExecutor.ts`   | `handleCommand`, `handleCommands`, and execution logic               |
-| `apps/web/src/store/canvasStore.ts`             | Zustand adapter and UI-facing methods only                           |
+- Extend `executeCommands()` to accept an optional `source` parameter (default `'ui'`), used in `CanvasExecution { source }`.
 
-## What to Build in Each Layer
+### Step 6: Persist after execution
 
-### CanvasUiIntent
+After `executeCommands()` succeeds on the web client, the canvas state is committed to Zustand. The existing canvas save-on-change flow (the web client already PUTs canvas state to `PUT /api/canvas/:id` on changes) handles persistence. No new persistence path is needed.
 
-1. Define a small web-only union for current gesture sources.
-2. Move selection, marquee, clipboard, drag, and viewport logic into resolvers.
-3. Make every resolver return `CanvasExecution` instead of mutating state.
+### Step 7: Retire `IntentAction`
 
-### CanvasCommand
+File: `packages/shared/src/types/intent.ts`
 
-1. Define the shared JSON command union.
-2. Ensure every command uses explicit operands.
-3. Include `ALIGN_NODES`, `DISTRIBUTE_NODES`, and `AUTO_LAYOUT` because the agent must be able to use them.
-4. Keep deterministic structural semantics inside command execution.
+The parallel `IntentAction` union (uses `op` discriminant, different naming) is superseded by `CanvasCommand`. Migrate remaining consumers to `CanvasCommand`, then delete `IntentAction`.
 
-### CanvasExecution
+### File Change Summary
 
-1. Use batch execution as the undo or redo boundary.
-2. Use batch execution as the action trace boundary.
-3. Centralize snapshot policy, validation, post-commit effects, and result reporting.
-
-## Legacy Store Command Mapping
-
-The current `apps/web/src/store/canvasStore.ts` command union is intentionally larger than `CanvasUiIntent` because it mixes web gestures, shared executable commands, and temporary store-local convenience commands.
-
-During migration, each legacy entry follows a migration path rather than always mapping to one single layer label. Some entries become shared `CanvasCommand` directly, some become `CanvasUiIntent` that resolve into commands, and some remain temporary store adapters until call sites finish moving.
-
-| Current store command        | Migration path                                 | Final shape                                                               | Migration note                                                                                 |
-| ---------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `ADD_NODE`                   | Store adapter -> `CanvasCommand`               | `CREATE_NODES`                                                            | `ADD_NODE_FROM_TOOLBAR` is the web intent; explicit node creation is the shared command.       |
-| `DELETE_NODES`               | `CanvasCommand`                                | `DELETE_NODES`                                                            | Keep deterministic cleanup such as edge removal inside execution.                              |
-| `CONNECT`                    | `CanvasCommand`                                | `CONNECT_NODES`                                                           | Replace single-connection payloads with explicit edge create items.                            |
-| `DISCONNECT_EDGES`           | `CanvasCommand`                                | `DISCONNECT_EDGES`                                                        | Accept explicit edge ids or source-target refs.                                                |
-| `MOVE_INTO_FRAME`            | `CanvasCommand`                                | `SET_NODE_PARENT { nodeIds, parentId }`                                   | Do not keep a long-lived shared `MOVE_INTO_FRAME` command.                                     |
-| `MOVE_OUT_OF_FRAME`          | `CanvasCommand`                                | `SET_NODE_PARENT { nodeIds, parentId: null }`                             | Same shared structure as moving into a frame.                                                  |
-| `GROUP_SELECTION_INTO_FRAME` | `CanvasUiIntent` resolver -> `CanvasExecution` | `CREATE_NODES` + `SET_NODE_PARENT` + `SET_NODE_SELECTION`                 | Selection lookup is web-only.                                                                  |
-| `GROUP_RECT_INTO_FRAME`      | `CanvasUiIntent` resolver -> `CanvasExecution` | `CREATE_NODES` + `SET_NODE_PARENT` + `SET_NODE_SELECTION`                 | Rectangle hit-testing is web-only.                                                             |
-| `UNFRAME`                    | `CanvasCommand`                                | `DISSOLVE_FRAME`                                                          | Explicit `frameId` makes this a valid shared command.                                          |
-| `OPEN_EXPANDED`              | `CanvasCommand`                                | `SET_EXPANDED_NODE`                                                       | Open and close should use explicit payloads, including `null` for close.                       |
-| `SELECT_NODES`               | `CanvasUiIntent` resolver -> `CanvasCommand`   | `SET_NODE_SELECTION`                                                      | Replace or toggle semantics are UI-only; execution should receive the final resolved set.      |
-| `RESIZE_NODE`                | `CanvasCommand`                                | `SET_NODE_GEOMETRY`                                                       | Geometry writes belong in shared execution, not in a web-only command.                         |
-| `TOGGLE_NODE_LOCK`           | Store adapter -> `CanvasCommand`               | `SET_NODE_LOCKED`                                                         | Toggle semantics should not survive in the shared command layer.                               |
-| `REORDER_NODES`              | `CanvasCommand`                                | `SET_NODE_ORDER`                                                          | Replace overloaded swap and top-bottom payloads with one explicit ordering payload.            |
-| `PASTE_NODES`                | `CanvasUiIntent` resolver -> `CanvasExecution` | `CREATE_NODES` + optional `SET_NODE_PARENT` + `SET_NODE_SELECTION`        | Clipboard contents and paste anchor are web-only inputs.                                       |
-| `ALIGN_NODES`                | `CanvasUiIntent` resolver -> `CanvasCommand`   | `ALIGN_NODES { nodeIds, direction }`                                      | The current store command implicitly uses selected nodes; the shared command must be explicit. |
-| `SPREAD_NODES`               | `CanvasUiIntent` resolver -> `CanvasCommand`   | `DISTRIBUTE_NODES { nodeIds, axis }`                                      | The current store command is a selected-node convenience and should not remain shared as-is.   |
-| `LAYOUT_ALL`                 | `CanvasCommand`                                | `AUTO_LAYOUT { scope: { type: 'canvas' } }`                               | Shared algorithm command with explicit scope.                                                  |
-| `LAYOUT_GROUP`               | `CanvasCommand`                                | `AUTO_LAYOUT { scope: { type: 'frame', frameId } }`                       | Shared algorithm command with explicit scope.                                                  |
-| `NODE_DRAG_STOP`             | `CanvasUiIntent` resolver -> `CanvasExecution` | `SET_NODE_GEOMETRY` + optional `SET_NODE_PARENT` in one `CanvasExecution` | Drag session state and hover analysis are web-only.                                            |
-| `UPDATE_NODE_DATA`           | `CanvasCommand`                                | `MERGE_NODE_DATA`                                                         | Preserve the current shallow-merge semantics.                                                  |
-
-Implication: `CanvasUiIntent` should stay smaller than the legacy store command union. Many existing entries migrate directly into shared `CanvasCommand`, and some behaviors move into `CanvasExecution` rather than surviving as first-class inputs.
-
-## Migration Plan
-
-### Phase 1: Define the New Types
-
-1. Introduce `CanvasUiIntent`, `CanvasCommand`, and `CanvasExecution` types.
-2. Keep current store methods stable for now.
-3. Add type-level support for batch-local temp refs.
-
-### Phase 2: Introduce the Executor
-
-1. Replace the current switch-based `handleCommand(cmd, ctx)` contract with executor functions that accept `CanvasCommand` or `CanvasExecution`.
-2. Centralize validation, command results, and post-commit effects.
-3. Keep one commit per execution batch.
-
-### Phase 3: Move Web Gesture Logic Out of Command Execution
-
-1. Convert selection-based, rectangle-based, drag-based, and clipboard-based actions into `CanvasUiIntent` resolvers.
-2. Stop passing UI-derived ambiguity into the executor.
-3. Make the executor accept only explicit commands.
-
-### Phase 4: Converge Agent and Web
-
-1. Change the agent action model so it emits `CanvasCommand` JSON directly.
-2. Ensure web-generated batches and agent-generated batches go through the same executor.
-3. Remove legacy store-owned command unions once all call sites migrate.
-
-## Final Boundary
-
-The final architecture should read like this:
-
-1. Web gesture -> `CanvasUiIntent` -> resolver -> `CanvasExecution` -> executor
-2. Agent response -> `CanvasCommand[]` -> `CanvasExecution` -> executor
-3. Executor -> validate, apply, trace, snapshot, effects
-
-Only one layer should be executable by both web and agent:
-
-1. `CanvasCommand`
-
-Only one layer should know about selection rectangles, modifier keys, drag hover targets, or clipboard payloads:
-
-1. `CanvasUiIntent`
-
-Only one layer should own undo or redo boundaries, action trace grouping, and post-commit side effects:
-
-1. `CanvasExecution`
+| File                                                 | Change                                                                                                |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `packages/shared/src/types/canvas/command.ts`        | Add `UiOnlyCanvasCommandType`, `AgentCanvasCommand`, `AgentCanvasCommandType`                         |
+| `apps/server/src/modules/agent/tools/definitions.ts` | Remove 6 mutating tool defs, add `canvas_commands` tool                                               |
+| `apps/server/src/modules/agent/tools/executor.ts`    | Remove 6 execute functions + helpers, add `executeCanvasCommands` (validate + inject origin + return) |
+| `apps/server/src/modules/agent/agent.service.ts`     | Emit `canvas_commands` SSE event                                                                      |
+| `apps/web/src/api/agent.ts`                          | Handle `canvas_commands` event type                                                                   |
+| `apps/web/src/components/Panels/ChatPanel/index.tsx` | On `canvas_commands`, call `executeCommands()` instead of `refreshCanvas()`                           |
+| `apps/web/src/store/canvasStore.ts`                  | Add `source` parameter to `executeCommands()`                                                         |
+| `packages/shared/src/types/intent.ts`                | Retire `IntentAction` (separate cleanup)                                                              |

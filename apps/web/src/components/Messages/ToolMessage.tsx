@@ -36,30 +36,19 @@ function getToolTitle(
       };
     case 'get_canvas_state':
       return { icon: null, title: 'Read canvas state' };
-    case 'create_node':
-      return {
-        icon: <NodeIcon size={12} />,
-        title: `Create ${nodeType}: ${truncate((data.label as string) ?? '', 20)}`,
-      };
-    case 'update_node':
-      return {
-        icon: <NodeIcon size={12} />,
-        title: `Update node ${truncate((data.label as string) ?? (data.nodeId as string) ?? '', 20)}`,
-      };
-    case 'delete_nodes':
+    case 'canvas_commands': {
+      const commands = (data.commands ?? []) as Array<Record<string, unknown>>;
+      const count = commands.length;
+      if (count === 0) return { icon: null, title: 'Canvas commands (empty)' };
+      const first = commands[0].type as string;
       return {
         icon: null,
-        title: `Delete ${(data.deletedCount as number) ?? ''} node(s)`,
+        title:
+          count === 1
+            ? `Canvas: ${first}`
+            : `Canvas: ${first} + ${count - 1} more`,
       };
-    case 'connect_nodes':
-      return { icon: null, title: `Connect nodes` };
-    case 'disconnect_nodes':
-      return { icon: null, title: `Disconnect nodes` };
-    case 'create_frame':
-      return {
-        icon: <NODE_ICON.frame size={12} />,
-        title: `Create frame`,
-      };
+    }
     case 'web_search':
       return { icon: null, title: `Web search` };
     case 'read_source':
@@ -93,27 +82,13 @@ function AgentToolCard({ toolResponse, isExecuting }: AgentToolCardProps) {
   const { icon, title } = getToolTitle(toolResponse.tool, data);
   const isError = toolResponse.status === 'error';
 
-  // Expandable tools: only create_node and update_node show content on expand
-  const EXPANDABLE_TOOLS = new Set(['create_node', 'update_node']);
-  const isExpandable = EXPANDABLE_TOOLS.has(toolResponse.tool);
-  const contentText = isExpandable ? ((data.content as string) ?? null) : null;
+  // Expandable tools: none of the new tools need content expansion
+  const isExpandable = false;
+  const contentText = null;
 
   // Render title with clickable NodeRef for tools that reference nodes
   const renderTitle = (): React.ReactNode => {
     const tool = toolResponse.tool;
-
-    if (tool === 'connect_nodes') {
-      const sourceId = data.sourceId as string;
-      const targetId = data.targetId as string;
-      if (sourceId && targetId) {
-        return (
-          <>
-            Connect <NodeRef nodeId={sourceId} /> →{' '}
-            <NodeRef nodeId={targetId} />
-          </>
-        );
-      }
-    }
 
     if (tool === 'get_node_detail') {
       const nodeId = ((data.id ?? data.nodeId) as string) || undefined;
@@ -121,31 +96,6 @@ function AgentToolCard({ toolResponse, isExecuting }: AgentToolCardProps) {
         return (
           <>
             Read node{' '}
-            <NodeRef nodeId={nodeId} fallbackLabel={data.label as string} />
-          </>
-        );
-      }
-    }
-
-    if (tool === 'create_node' && data.nodeId) {
-      const nType = ((data.type ?? data.nodeType) as string) ?? 'note';
-      return (
-        <>
-          Create {nType}:{' '}
-          <NodeRef
-            nodeId={data.nodeId as string}
-            fallbackLabel={data.label as string}
-          />
-        </>
-      );
-    }
-
-    if (tool === 'update_node') {
-      const nodeId = ((data.nodeId ?? data.id) as string) || undefined;
-      if (nodeId) {
-        return (
-          <>
-            Update node{' '}
             <NodeRef nodeId={nodeId} fallbackLabel={data.label as string} />
           </>
         );
@@ -258,12 +208,7 @@ function isAgentTool(tool: string): boolean {
   return [
     'get_node_detail',
     'get_canvas_state',
-    'create_node',
-    'update_node',
-    'delete_nodes',
-    'connect_nodes',
-    'disconnect_nodes',
-    'create_frame',
+    'canvas_commands',
     'read_source',
     'search_knowledge',
     'ingest_content',

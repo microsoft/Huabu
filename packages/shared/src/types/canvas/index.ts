@@ -79,6 +79,9 @@ export type {
   CanvasEdgeCreateInput,
   CanvasCommand,
   CanvasCommandType,
+  UiOnlyCanvasCommandType,
+  AgentCanvasCommand,
+  AgentCanvasCommandType,
 } from './command.js';
 
 // Execution types

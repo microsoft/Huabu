@@ -138,3 +138,23 @@ export type CanvasCommand =
   | { type: 'SET_NODE_LOCKED'; items: CanvasNodeLockUpdate[] };
 
 export type CanvasCommandType = CanvasCommand['type'];
+
+/**
+ * Command types that are UI-only and excluded from the agent-facing schema.
+ * These depend on ephemeral view state or user-controlled protection.
+ */
+export type UiOnlyCanvasCommandType =
+  | 'SET_NODE_LOCKED'
+  | 'SET_NODE_SELECTION'
+  | 'SET_EXPANDED_NODE';
+
+/**
+ * Subset of CanvasCommand available to the agent.
+ * Excludes UI-only commands that depend on ephemeral frontend state.
+ */
+export type AgentCanvasCommand = Exclude<
+  CanvasCommand,
+  { type: UiOnlyCanvasCommandType }
+>;
+
+export type AgentCanvasCommandType = AgentCanvasCommand['type'];
