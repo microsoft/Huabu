@@ -10,9 +10,12 @@ import {
 import { blockNoteShadcnOverrides } from '@/components/BlockNote/shadcnOverrides';
 import {
   getBlockAuthorStatus,
+  hasAnyPureAiBlock,
   recordUserEdit,
   resolveSentinelProvenance,
 } from '@/utils/provenance';
+
+import { AiDiffBanner } from './AiDiffBanner';
 
 import type { BlockProvenanceMap } from '@sediment/shared';
 
@@ -108,12 +111,16 @@ export const NotePreview = ({
     setProvenance(externalProvenance);
   }, [externalProvenance]);
 
+  const contentBeforeAI =
+    typeof data.contentBeforeAI === 'string' ? data.contentBeforeAI : undefined;
+
   /** Write a content patch back to the parent. */
   const writePatch = (
     newMarkdown: string,
     newJson: string,
     autoLabel?: string,
     provenancePatch?: BlockProvenanceMap,
+    extraPatch?: Record<string, unknown>,
   ) => {
     const patch: Record<string, unknown> = {
       content: newMarkdown,
@@ -121,6 +128,7 @@ export const NotePreview = ({
       // Record which markdown string this JSON was derived from so we can
       // detect external edits on next open without a lossy round-trip.
       contentJsonSource: newMarkdown,
+      ...extraPatch,
     };
     if (autoLabel !== undefined) {
       patch.label = autoLabel;
@@ -284,6 +292,13 @@ export const NotePreview = ({
   return (
     <div className="custom-scrollbar h-full w-full overflow-auto bg-white px-0 py-3">
       {provenanceCss && <style>{provenanceCss}</style>}
+      {!readOnly && contentBeforeAI && (
+        <AiDiffBanner
+          contentBeforeAI={contentBeforeAI}
+          currentContent={markdown}
+          onDismiss={() => onDataChange?.({ contentBeforeAI: undefined })}
+        />
+      )}
       <NoteSourceIdProvider
         value={typeof data.sourceId === 'string' ? data.sourceId : undefined}
       >
@@ -352,7 +367,16 @@ export const NotePreview = ({
                     typeof extractLabelFromBlocks
                   >[0],
                 ) || undefined;
-            writePatch(newMarkdown, newJson, autoLabel, updatedProvenance);
+            writePatch(
+              newMarkdown,
+              newJson,
+              autoLabel,
+              updatedProvenance,
+              // Auto-clear contentBeforeAI when no blocks have pure AI status
+              contentBeforeAI && !hasAnyPureAiBlock(updatedProvenance)
+                ? { contentBeforeAI: undefined }
+                : undefined,
+            );
           }}
         >
           {!readOnly && <SideMenuController sideMenu={NoteEditorSideMenu} />}

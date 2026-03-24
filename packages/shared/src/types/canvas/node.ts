@@ -164,6 +164,13 @@ export interface NoteNodeData extends BaseNodeData {
    * all blocks share the same provenance (e.g. AI-created content).
    */
   provenance?: BlockProvenanceMap;
+  /**
+   * Snapshot of `content` taken before the first AI edit in a session.
+   * Used to show a Markdown diff of AI changes. Strategy: set once,
+   * not overwritten by subsequent AI edits. Cleared on user dismiss or
+   * when all AI blocks have been user-modified.
+   */
+  contentBeforeAI?: string;
 }
 
 /** Text node: simple styled text (not ingested) */

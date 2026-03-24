@@ -111,6 +111,21 @@ export function summarizeProvenance(map: BlockProvenanceMap | undefined): {
 }
 
 /**
+ * Returns true if any block in the provenance map has pure 'ai' status
+ * (AI-authored with no user modifications).
+ */
+export function hasAnyPureAiBlock(
+  map: BlockProvenanceMap | undefined,
+): boolean {
+  if (!map) return false;
+  for (const [key, entry] of Object.entries(map)) {
+    if (key === '__all__') continue;
+    if (getBlockAuthorStatus(entry) === 'ai') return true;
+  }
+  return false;
+}
+
+/**
  * Get the effective author status of a block for visual display.
  */
 export function getBlockAuthorStatus(
