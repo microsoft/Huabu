@@ -312,8 +312,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     }
   }, [canvasId]);
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
   // Track resources across the current agent run
   const resourcesRef = useRef<ResourceLabel[]>([]);
   const assistantIdRef = useRef<string>('');
@@ -333,14 +331,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       activeRef.current = false;
     };
   }, []);
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, isLoading]);
 
   // Load history from server on first mount (once per thread).
   // Wait for canvasId to be available — on initial mount the canvas may
