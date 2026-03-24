@@ -63,7 +63,7 @@ export function NodeRef({ nodeId, attachment, fallbackLabel }: NodeRefProps) {
     });
   };
 
-  const handleClick = (e: React.MouseEvent) => {
+  const handleClick = async (e: React.MouseEvent) => {
     e.stopPropagation();
 
     if (node) {
@@ -72,16 +72,33 @@ export function NodeRef({ nodeId, attachment, fallbackLabel }: NodeRefProps) {
     } else if (attachment) {
       // Node doesn't exist — create it from attachment data
       const newNodeType = ATTACHMENT_TYPE_TO_NODE[attachment.type] ?? 'note';
-      const data: Record<string, unknown> = {
-        label: attachment.label ?? attachment.filename,
-        origin: { type: 'user-drag-chat' as const },
-      };
-      if (newNodeType === 'image' || newNodeType === 'pdf') {
-        data.src = attachment.url;
+      if (newNodeType === 'note') {
+        // For text-based files (.md etc.), fetch content and create a note
+        let content = '';
+        try {
+          const res = await fetch(attachment.url);
+          if (res.ok) content = await res.text();
+        } catch {
+          /* use empty */
+        }
+        addNode({
+          nodeType: 'note',
+          data: {
+            type: 'note',
+            content,
+            label: attachment.label ?? attachment.filename,
+          },
+        });
       } else {
-        data.content = attachment.label ?? attachment.filename ?? '';
+        addNode({
+          nodeType: newNodeType,
+          data: {
+            type: newNodeType,
+            src: attachment.url,
+            label: attachment.label ?? attachment.filename,
+          },
+        });
       }
-      addNode({ nodeType: newNodeType, data });
     } else if (nodeId) {
       // nodeId provided but node not on canvas — try focusing anyway
       focusNode(nodeId);
