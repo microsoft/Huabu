@@ -9,9 +9,9 @@ import {
 } from '@/components/BlockNote/NoteEditorSideMenu';
 import { blockNoteShadcnOverrides } from '@/components/BlockNote/shadcnOverrides';
 import {
-  expandSentinelProvenance,
   getBlockAuthorStatus,
   recordUserEdit,
+  resolveSentinelProvenance,
 } from '@/utils/provenance';
 
 import type { BlockProvenanceMap } from '@sediment/shared';
@@ -94,6 +94,12 @@ export const NotePreview = ({
   // Track which block IDs existed before the last change, to detect new/modified blocks
   const prevBlockIdsRef = useRef<Set<string>>(new Set());
 
+  // Stores the last fully-expanded (per-block) provenance so that it survives
+  // external updates that overwrite provenanceRef with a sentinel map.
+  const lastExpandedProvenanceRef = useRef<BlockProvenanceMap | undefined>(
+    undefined,
+  );
+
   // Sync provenance state when external data.provenance changes (e.g. AI updates)
   const externalProvenance = data.provenance as BlockProvenanceMap | undefined;
   useEffect(() => {
@@ -138,6 +144,21 @@ export const NotePreview = ({
 
     void (async () => {
       try {
+        // Snapshot old blocks before replacement for provenance diffing.
+        const oldBlocksFromEditor = editor.document.map(
+          (b: {
+            id: string;
+            type: string;
+            content?: unknown;
+            children?: unknown;
+          }) => ({
+            id: b.id,
+            type: b.type,
+            content: b.content,
+            children: b.children,
+          }),
+        );
+
         const usedJson = await loadBlockNoteContent(
           editor,
           markdown,
@@ -145,31 +166,52 @@ export const NotePreview = ({
           contentJsonSource,
         );
 
-        // Expand the __all__ sentinel provenance into per-block entries
         const rawProvenance = data.provenance as BlockProvenanceMap | undefined;
-        const blockIds = editor.document.map((b: { id: string }) => b.id);
-        const expanded = expandSentinelProvenance(rawProvenance, blockIds);
+        const newBlocks = editor.document.map(
+          (b: {
+            id: string;
+            type: string;
+            content?: unknown;
+            children?: unknown;
+          }) => ({
+            id: b.id,
+            type: b.type,
+            content: b.content,
+            children: b.children,
+          }),
+        );
 
-        if (expanded && expanded !== rawProvenance) {
-          provenanceRef.current = expanded;
-          setProvenance(expanded);
-          // Persist the expanded provenance back
+        const resolved = resolveSentinelProvenance(rawProvenance, {
+          fallbackOldProvenance: lastExpandedProvenanceRef.current,
+          newBlocks,
+          oldBlocksFromEditor,
+          contentJson,
+        });
+
+        if (resolved && resolved !== rawProvenance) {
+          provenanceRef.current = resolved;
+          setProvenance(resolved);
+          lastExpandedProvenanceRef.current = resolved;
           if (!readOnly && onDataChange) {
-            onDataChange({ provenance: expanded });
+            onDataChange({ provenance: resolved });
           }
         } else {
           provenanceRef.current = rawProvenance;
           setProvenance(rawProvenance);
+          if (
+            rawProvenance &&
+            !('__all__' in rawProvenance) &&
+            Object.keys(rawProvenance).length > 0
+          ) {
+            lastExpandedProvenanceRef.current = rawProvenance;
+          }
         }
 
-        // Capture initial block IDs for change tracking
-        prevBlockIdsRef.current = new Set(blockIds);
+        prevBlockIdsRef.current = new Set(newBlocks.map((b) => b.id));
 
-        // If markdown was re-parsed (JSON was absent or stale), write back a
-        // fresh contentJson so the next open is lossless.
         if (!usedJson && !readOnly) {
           const newJson = JSON.stringify(editor.document);
-          writePatch(markdown, newJson, undefined, expanded ?? rawProvenance);
+          writePatch(markdown, newJson, undefined, resolved ?? rawProvenance);
         }
       } finally {
         setLoading(false);
@@ -185,11 +227,30 @@ export const NotePreview = ({
     const current = provenanceRef.current;
     if (!current || !('__all__' in current)) return;
 
-    const blockIds = editor.document.map((b: { id: string }) => b.id);
-    const expanded = expandSentinelProvenance(current, blockIds);
+    const currentBlocks = editor.document.map(
+      (b: {
+        id: string;
+        type: string;
+        content?: unknown;
+        children?: unknown;
+      }) => ({
+        id: b.id,
+        type: b.type,
+        content: b.content,
+        children: b.children,
+      }),
+    );
+
+    const expanded = resolveSentinelProvenance(current, {
+      newBlocks: currentBlocks,
+      oldBlocksFromEditor: currentBlocks,
+      contentJson,
+    });
+
     if (expanded && expanded !== current) {
       provenanceRef.current = expanded;
       setProvenance(expanded);
+      lastExpandedProvenanceRef.current = expanded;
       if (!readOnly && onDataChange) {
         onDataChange({ provenance: expanded });
       }
@@ -280,6 +341,7 @@ export const NotePreview = ({
 
             provenanceRef.current = updatedProvenance;
             setProvenance(updatedProvenance);
+            lastExpandedProvenanceRef.current = updatedProvenance;
             prevBlockIdsRef.current = new Set(currentBlockIds);
 
             const isLabelUserSet = data.labelSource === 'user';
