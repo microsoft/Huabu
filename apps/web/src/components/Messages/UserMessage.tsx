@@ -21,23 +21,6 @@ export const UserMessage = ({
     <div className="flex flex-col items-end">
       <div className="mt-2 flex max-w-[80%] flex-col items-end gap-1">
         <div className="bg-background text-main overflow-hidden rounded-md border border-none px-4 py-2 text-sm">
-          {/* Attachment thumbnails */}
-          {attachments && attachments.length > 0 && (
-            <div className="mb-2 flex flex-wrap gap-2">
-              {attachments.map((att) => (
-                <div
-                  key={att.url}
-                  className="border-border relative overflow-hidden rounded border"
-                >
-                  <img
-                    src={att.url}
-                    alt={att.label ?? 'Attached image'}
-                    className="h-16 w-24 object-cover"
-                  />
-                </div>
-              ))}
-            </div>
-          )}
           <div className="leading-relaxed break-all whitespace-pre-wrap">
             {content}
           </div>
@@ -45,6 +28,17 @@ export const UserMessage = ({
       </div>
 
       <div className="mt-1 flex w-full min-w-0 items-center justify-end gap-2">
+        {attachments && attachments.length > 0 && (
+          <>
+            <div className="flex min-w-0 shrink gap-1 overflow-x-auto">
+              {attachments.map((att) => (
+                <NodeRef key={att.url} attachment={att} />
+              ))}
+            </div>
+            <span className="bg-border mx-0.5 h-3 w-px shrink-0" />
+          </>
+        )}
+
         {selectedNodeIds && selectedNodeIds.length > 0 && (
           <>
             <div className="flex min-w-0 shrink gap-1 overflow-x-auto">
