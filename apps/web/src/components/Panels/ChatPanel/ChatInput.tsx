@@ -7,6 +7,7 @@ import { useChatStore } from '@/store/chatStore';
 import { ContextUsageRing } from './ContextUsageRing';
 import { ModeSelector } from './ModeSelector';
 import { SourceCount } from './SelectedNodeRefs';
+import { NODE_ICON } from '../../../config/nodeIcons';
 import { IconButton } from '../../Common/IconButton';
 
 import type { AgentMode } from '@sediment/shared';
@@ -191,6 +192,7 @@ export const ChatInput = ({
             ta.selectionEnd = 0;
           });
         } else {
+          if (historyIndexRef.current <= -1) return;
           const next = historyIndexRef.current - 1;
           historyIndexRef.current = next;
           onChange(
@@ -231,39 +233,79 @@ export const ChatInput = ({
           {/* ── Pending attachment thumbnails ── */}
           {pendingAttachments.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-2">
-              {pendingAttachments.map((att, i) => (
-                <div
-                  key={att.url}
-                  className="border-border group relative flex items-center justify-center rounded-md border"
-                >
-                  {att.type === 'image' ? (
-                    <img
-                      src={att.url}
-                      alt={att.label ?? 'Attached image'}
-                      className="h-14 w-14 rounded-md object-contain"
-                    />
-                  ) : (
-                    <div className="flex h-14 w-14 flex-col items-center justify-center gap-0.5 rounded-md bg-gray-50 px-1">
-                      {att.type === 'pdf' ? (
-                        <FileText size={16} className="text-red-400" />
+              {[...pendingAttachments]
+                .sort((a, b) =>
+                  a.originSourceId === '__selection__'
+                    ? -1
+                    : b.originSourceId === '__selection__'
+                      ? 1
+                      : 0,
+                )
+                .map((att) => {
+                  const isSelection = att.originSourceId === '__selection__';
+                  const idx = pendingAttachments.indexOf(att);
+                  return (
+                    <div
+                      key={att.url || `sel-${idx}`}
+                      className={`group relative flex items-center justify-center rounded-md ${isSelection ? 'border-border cursor-pointer border border-dashed' : 'border-border border'}`}
+                      onClick={
+                        isSelection
+                          ? () => {
+                              // Lock: convert selection attachment to a regular one
+                              const locked = { ...att };
+                              delete (locked as Record<string, unknown>)
+                                .originSourceId;
+                              useChatStore
+                                .getState()
+                                .setSelectionAttachment(null);
+                              addPendingAttachment(locked);
+                            }
+                          : undefined
+                      }
+                    >
+                      {att.type === 'image' ? (
+                        <img
+                          src={att.url}
+                          alt={att.label ?? 'Attached image'}
+                          className="h-14 w-14 rounded-md object-contain"
+                        />
                       ) : (
-                        <Paperclip size={16} className="text-gray-400" />
+                        <div className="flex h-14 w-14 flex-col items-center justify-center gap-0.5 rounded-md bg-gray-50 px-1">
+                          {isSelection || att.type === 'file' ? (
+                            <NODE_ICON.note
+                              size={16}
+                              className="text-gray-400"
+                            />
+                          ) : att.type === 'pdf' ? (
+                            <FileText size={16} className="text-red-400" />
+                          ) : (
+                            <Paperclip size={16} className="text-gray-400" />
+                          )}
+                          <span className="w-full truncate text-center text-[8px] text-gray-500">
+                            {att.filename ?? att.label ?? 'file'}
+                          </span>
+                        </div>
                       )}
-                      <span className="w-full truncate text-center text-[8px] text-gray-500">
-                        {att.filename ?? att.label ?? 'file'}
-                      </span>
+                      <IconButton
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (isSelection) {
+                            useChatStore
+                              .getState()
+                              .setSelectionAttachment(null);
+                          } else {
+                            removePendingAttachment(idx);
+                          }
+                        }}
+                        tooltipWrapperClassName="absolute top-0.5 right-0.5 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
+                        className="rounded-full bg-black/50 p-0.5 text-white enabled:hover:bg-black/70"
+                        title="Remove attachment"
+                      >
+                        <X size={10} />
+                      </IconButton>
                     </div>
-                  )}
-                  <IconButton
-                    onClick={() => removePendingAttachment(i)}
-                    tooltipWrapperClassName="absolute top-0.5 right-0.5 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
-                    className="rounded-full bg-black/50 p-0.5 text-white enabled:hover:bg-black/70"
-                    title="Remove attachment"
-                  >
-                    <X size={10} />
-                  </IconButton>
-                </div>
-              ))}
+                  );
+                })}
             </div>
           )}
 

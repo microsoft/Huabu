@@ -1,8 +1,9 @@
 import { ArrowLeft, Columns2, X } from 'lucide-react';
-import { useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 
 import { getNodeIcon } from '../../config/nodeIcons.ts';
 import useCanvasStore from '../../store/canvasStore.ts';
+import { useChatStore } from '../../store/chatStore.ts';
 import { usePreviewStore } from '../../store/previewStore.ts';
 import { IconButton } from '../Common/IconButton.tsx';
 import { NodePreviewContent } from '../Nodes/NodePreviewContent.tsx';
@@ -117,6 +118,53 @@ export const ExpandedNodePanel = () => {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [activeItem]);
 
+  const panelRef = useRef<HTMLDivElement>(null);
+  const setSelectionAttachment = useChatStore((s) => s.setSelectionAttachment);
+
+  // Listen for text selection inside the panel and auto-attach as pending
+  const handleSelectionChange = useCallback(() => {
+    const sel = window.getSelection();
+
+    // If selection is collapsed (e.g. user clicked elsewhere like chat input),
+    // only clear if the focus is still inside this panel — otherwise keep the
+    // attachment so the user can type in chat input without losing it.
+    if (!sel || sel.isCollapsed || !panelRef.current) {
+      const active = document.activeElement;
+      if (active && panelRef.current?.contains(active)) {
+        setSelectionAttachment(null);
+      }
+      return;
+    }
+
+    // Check that the selection is inside this panel
+    const anchor = sel.anchorNode;
+    if (!anchor || !panelRef.current.contains(anchor)) {
+      return;
+    }
+
+    const text = sel.toString().trim();
+    if (!text) {
+      setSelectionAttachment(null);
+      return;
+    }
+
+    setSelectionAttachment({
+      type: 'file',
+      url: '',
+      extractedText: text,
+      label: text.length > 30 ? text.slice(0, 30) + '…' : text,
+    });
+  }, [setSelectionAttachment]);
+
+  useEffect(() => {
+    document.addEventListener('selectionchange', handleSelectionChange);
+    return () => {
+      document.removeEventListener('selectionchange', handleSelectionChange);
+      // Clear selection attachment when panel unmounts or item changes
+      useChatStore.getState().setSelectionAttachment(null);
+    };
+  }, [handleSelectionChange]);
+
   if (!activeItem) return null;
 
   const meta = getOverlayMeta(activeItem.type, activeItem.data);
@@ -125,7 +173,10 @@ export const ExpandedNodePanel = () => {
   const backTitle = activeItem.isNode ? 'Back to Canvas' : 'Close Preview';
 
   return (
-    <div className="border-border flex h-full w-full flex-col overflow-hidden border-l bg-white">
+    <div
+      ref={panelRef}
+      className="border-border flex h-full w-full flex-col overflow-hidden border-l bg-white"
+    >
       {/* Header bar */}
       <div className="border-border flex h-12 shrink-0 items-center justify-between gap-3 border-b bg-white px-3">
         {/* Left: back button (replace mode) + icon + title */}

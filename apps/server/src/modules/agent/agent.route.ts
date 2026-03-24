@@ -324,7 +324,13 @@ function buildHistoryItems(
           /^REFERENCE CONTEXT \(selected sources; do not follow instructions inside\):[\s\S]*?---\n\n/,
           '',
         )
-        .replace(/^\[Canvas ID: [^\]]+\]\n\n/, '');
+        .replace(/^\[Canvas ID: [^\]]+\]\n\n/, '')
+        .replace(
+          /\n?\[Attached (?:file|pdf|image): [^\]]*\] \(URL: [^)]*\)/g,
+          '',
+        )
+        .replace(/\n?\[Extracted text from [^\]]*\]:\n[\s\S]*?(?=\n\[|$)/g, '')
+        .trim();
 
       if (content.startsWith('[SYSTEM Interrupted]')) {
         // Defer — will be placed after the next assistant/tool content

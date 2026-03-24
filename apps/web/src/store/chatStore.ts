@@ -44,6 +44,9 @@ interface ChatState {
   removePendingAttachment: (index: number) => void;
   /** Clear all staged attachments (called after message is sent). */
   clearPendingAttachments: () => void;
+
+  /** Set/replace the text-selection-based attachment (auto-managed by ExpandedNodePanel). */
+  setSelectionAttachment: (attachment: ChatAttachment | null) => void;
 }
 
 export const useChatStore = create<ChatState>()(
@@ -114,6 +117,23 @@ export const useChatStore = create<ChatState>()(
         })),
 
       clearPendingAttachments: () => set({ pendingAttachments: [] }),
+
+      setSelectionAttachment: (attachment) =>
+        set((state) => {
+          // Remove any existing selection attachment
+          const filtered = state.pendingAttachments.filter(
+            (a) => a.originSourceId !== '__selection__',
+          );
+          if (attachment) {
+            return {
+              pendingAttachments: [
+                ...filtered,
+                { ...attachment, originSourceId: '__selection__' },
+              ],
+            };
+          }
+          return { pendingAttachments: filtered };
+        }),
     }),
     {
       name: 'sediment-chat',
