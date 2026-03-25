@@ -6,7 +6,7 @@ import type { CanvasNodeType, ChatAttachment } from '@sediment/shared';
 interface NodeRefProps {
   /** Existing canvas node ID to focus. */
   nodeId?: string;
-  /** Attachment to reference — if the node doesn't exist on canvas, clicking creates it. */
+  /** Attachment to reference. */
   attachment?: ChatAttachment;
   fallbackLabel?: string;
 }
@@ -14,29 +14,26 @@ interface NodeRefProps {
 const ATTACHMENT_TYPE_TO_NODE: Record<string, CanvasNodeType> = {
   image: 'image',
   pdf: 'pdf',
+  text: 'text',
   file: 'note',
+  web: 'web',
 };
 
 /**
  * Clickable reference badge — works for both canvas nodes and attachments.
- * - If the referenced node exists on canvas → click focuses it.
- * - If it doesn't exist but attachment data is provided → click creates the node, then focuses it.
+ * If the referenced node exists on canvas, clicking focuses it.
  */
 export function NodeRef({ nodeId, attachment, fallbackLabel }: NodeRefProps) {
   const nodes = useCanvasStore((s) => s.nodes);
   const selectNodes = useCanvasStore((s) => s.selectNodes);
-  const addNode = useCanvasStore((s) => s.addNode);
   const rfInstance = useCanvasStore((s) => s.rfInstance);
 
-  // Try to find an existing node: by nodeId, or by matching src URL from attachment
-  const node = nodeId
-    ? nodes.find((n) => n.id === nodeId)
-    : attachment
-      ? nodes.find((n) => {
-          const data = n.data as Record<string, unknown> | undefined;
-          return data?.src === attachment.url;
-        })
-      : undefined;
+  // Resolve the effective node ID: explicit prop or attachment's originSourceId
+  const resolvedNodeId = nodeId ?? attachment?.originSourceId;
+
+  const node = resolvedNodeId
+    ? nodes.find((n) => n.id === resolvedNodeId)
+    : undefined;
 
   const nodeData = node?.data as Record<string, unknown> | undefined;
 
@@ -63,53 +60,20 @@ export function NodeRef({ nodeId, attachment, fallbackLabel }: NodeRefProps) {
     });
   };
 
-  const handleClick = async (e: React.MouseEvent) => {
+  const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-
     if (node) {
-      // Node exists on canvas — focus it
       focusNode(node.id);
-    } else if (attachment) {
-      // Node doesn't exist — create it from attachment data
-      const newNodeType = ATTACHMENT_TYPE_TO_NODE[attachment.type] ?? 'note';
-      if (newNodeType === 'note') {
-        // For text-based files (.md etc.), fetch content and create a note
-        let content = '';
-        try {
-          const res = await fetch(attachment.url);
-          if (res.ok) content = await res.text();
-        } catch {
-          /* use empty */
-        }
-        addNode({
-          nodeType: 'note',
-          data: {
-            type: 'note',
-            content,
-            label: attachment.label ?? attachment.filename,
-          },
-        });
-      } else {
-        addNode({
-          nodeType: newNodeType,
-          data: {
-            type: newNodeType,
-            src: attachment.url,
-            label: attachment.label ?? attachment.filename,
-          },
-        });
-      }
-    } else if (nodeId) {
-      // nodeId provided but node not on canvas — try focusing anyway
-      focusNode(nodeId);
+    } else if (resolvedNodeId) {
+      focusNode(resolvedNodeId);
     }
   };
 
   const title = node
     ? `Focus: ${label}`
-    : attachment
-      ? `Add to canvas: ${label}`
-      : `Focus: ${label}`;
+    : resolvedNodeId
+      ? `Focus: ${label}`
+      : label;
 
   return (
     <div

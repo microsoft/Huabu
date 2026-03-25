@@ -149,12 +149,13 @@ export const ExpandedNodePanel = () => {
     }
 
     setSelectionAttachment({
-      type: 'file',
-      url: '',
-      extractedText: text,
-      label: text.length > 30 ? text.slice(0, 30) + '…' : text,
+      type: 'text',
+      source: 'excerpt',
+      originSourceId: expandedNodeId ?? undefined,
+      content: text,
+      label: text.length > 12 ? text.slice(0, 12) + '…' : text,
     });
-  }, [setSelectionAttachment]);
+  }, [setSelectionAttachment, expandedNodeId]);
 
   useEffect(() => {
     document.addEventListener('selectionchange', handleSelectionChange);

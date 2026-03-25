@@ -2,16 +2,12 @@
  * An attachment sent alongside a chat message — e.g. a captured PDF region or pasted file.
  */
 export interface ChatAttachment {
-  type: 'image' | 'pdf' | 'file';
-  /** Uploaded file URL (e.g. from artifact upload). */
-  url: string;
-  /** Optional extracted text from the same captured region. */
-  extractedText?: string;
-  /** Human-readable label, e.g. "PDF page 3 selection". */
-  label?: string;
-  /** The source node ID the attachment was captured from, for provenance tracking. */
+  type: 'image' | 'pdf' | 'text' | 'file' | 'web';
+  source: 'upload' | 'excerpt' | 'selection';
   originSourceId?: string;
-  /** Original filename for non-image files. */
+  url?: string;
+  content?: string;
+  label?: string;
   filename?: string;
 }
 
