@@ -9,7 +9,12 @@ import { readCanvas } from '../../canvas/canvas.filestore.js';
 import { getKnowledgeRepository } from '../../knowledge/knowledge.repository.js';
 import { getPreprocessDispatcher } from '../../preprocessing/index.js';
 
-import type { AgentMode, CanvasNodeKind, NodeOrigin } from '@sediment/shared';
+import type {
+  AgentMode,
+  BlockProvenanceMap,
+  CanvasNodeKind,
+  NodeOrigin,
+} from '@sediment/shared';
 
 // ==================== Origin Helper ====================
 
@@ -20,6 +25,17 @@ function agentModeToOrigin(mode?: AgentMode): NodeOrigin {
     default:
       return { type: 'ai-operate' };
   }
+}
+
+/** Build an `__all__` sentinel provenance map for AI-generated content. */
+function buildAIProvenance(mode?: AgentMode): BlockProvenanceMap {
+  return {
+    __all__: {
+      author: 'ai',
+      agentMode: mode ?? 'operate',
+      createdAt: new Date().toISOString(),
+    },
+  };
 }
 
 // ==================== Web Search ====================
@@ -200,7 +216,8 @@ async function executeGetCanvasState(args: {
 
 /**
  * Validate and prepare a canvas_commands batch for forwarding to the web client.
- * Injects origin into CREATE_NODES commands. Does NOT apply the commands.
+ * Injects origin into CREATE_NODES and provenance into MERGE_NODE_DATA commands.
+ * Does NOT apply the commands.
  */
 async function executeCanvasCommands(
   args: {
@@ -210,18 +227,73 @@ async function executeCanvasCommands(
   context?: { mode?: AgentMode },
 ): Promise<string> {
   const origin = agentModeToOrigin(context?.mode);
+
+  // Read canvas state once so we can resolve node types for provenance injection.
+  const canvas = readCanvas(args.canvasId);
+  const nodeTypeMap = new Map<string, string>();
+  if (canvas) {
+    for (const n of (canvas.state.nodes ?? []) as Array<
+      Record<string, unknown>
+    >) {
+      const data = (n.data as Record<string, unknown> | undefined) ?? {};
+      const nodeType = (n.nodeType ?? n.type ?? data.type) as
+        | string
+        | undefined;
+      if (typeof n.id === 'string' && typeof nodeType === 'string') {
+        nodeTypeMap.set(n.id, nodeType);
+      }
+    }
+  }
+
   const commands = args.commands.map((cmd) => {
     if (cmd.type === 'CREATE_NODES') {
       const nodes = cmd.nodes as Array<Record<string, unknown>>;
       return {
         ...cmd,
-        nodes: nodes.map((node) => ({
-          ...node,
-          data: {
-            ...(node.data as Record<string, unknown> | undefined),
-            origin,
-          },
-        })),
+        nodes: nodes.map((node) => {
+          const data = (node.data as Record<string, unknown> | undefined) ?? {};
+          const isNote = node.nodeType === 'note';
+          const hasContent =
+            isNote &&
+            typeof data.content === 'string' &&
+            data.content.length > 0;
+          return {
+            ...node,
+            data: {
+              ...data,
+              origin,
+              ...(hasContent
+                ? { provenance: buildAIProvenance(context?.mode) }
+                : {}),
+            },
+          };
+        }),
+      };
+    }
+    if (cmd.type === 'MERGE_NODE_DATA') {
+      const patches = cmd.patches as Array<Record<string, unknown>>;
+      return {
+        ...cmd,
+        patches: patches.map((entry) => {
+          const patch =
+            (entry.patch as Record<string, unknown> | undefined) ?? {};
+          const nodeId = entry.nodeId as string | undefined;
+          const isNote = nodeId ? nodeTypeMap.get(nodeId) === 'note' : false;
+          const hasContent =
+            isNote &&
+            typeof patch.content === 'string' &&
+            patch.content.length > 0;
+          if (hasContent) {
+            return {
+              ...entry,
+              patch: {
+                ...patch,
+                provenance: buildAIProvenance(context?.mode),
+              },
+            };
+          }
+          return entry;
+        }),
       };
     }
     return cmd;

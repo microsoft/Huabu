@@ -19,6 +19,8 @@ export type {
   NodeResearchData,
   NodeStyle,
   BaseNodeData,
+  BlockProvenance,
+  BlockProvenanceMap,
   NoteNodeData,
   TextNodeData,
   WebNodeData,
