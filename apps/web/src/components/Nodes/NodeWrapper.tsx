@@ -8,7 +8,6 @@ import {
   useStore,
 } from '@xyflow/react';
 import { clsx } from 'clsx';
-import { GripVertical } from 'lucide-react';
 import React, {
   memo,
   useCallback,
@@ -334,20 +333,6 @@ export const NodeWrapper = memo(
               </div>
             </Tooltip>
           )}
-
-          <div
-            className={clsx(
-              'text-icon hover:text-main absolute top-0 -left-4.5 flex h-6 w-4 cursor-grab items-center justify-center rounded opacity-0 transition-opacity',
-              'group-hover:opacity-100',
-            )}
-            draggable
-            onDragStart={(e) => {
-              e.dataTransfer.setData('application/json', JSON.stringify(data));
-              e.dataTransfer.effectAllowed = 'copyMove';
-            }}
-          >
-            <GripVertical size={16} />
-          </div>
 
           <div
             className={clsx(

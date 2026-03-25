@@ -20,6 +20,7 @@ import {
   hasAnyPendingDiff,
   recordUserEdit,
   removeDeletedEntry,
+  repairDeletedBlockAnchors,
   resolveSentinelProvenance,
 } from '@/utils/provenance';
 
@@ -110,8 +111,10 @@ export const NotePreview = ({
   const [provenance, setProvenance] = useState<BlockProvenanceMap | undefined>(
     provenanceRef.current,
   );
-  // Track which block IDs existed before the last change, to detect new/modified blocks
-  const prevBlockIdsRef = useRef<Set<string>>(new Set());
+  // Track which block IDs existed before the last change, to detect new/modified blocks.
+  // Stored as an ordered array so we can find positional predecessors when repairing
+  // stale afterBlockId references in __deleted_* entries.
+  const prevBlockIdsRef = useRef<string[]>([]);
 
   // Stores the last fully-expanded (per-block) provenance so that it survives
   // external updates that overwrite provenanceRef with a sentinel map.
@@ -253,7 +256,7 @@ export const NotePreview = ({
           }
         }
 
-        prevBlockIdsRef.current = new Set(newBlocks.map((b) => b.id));
+        prevBlockIdsRef.current = newBlocks.map((b) => b.id);
 
         if (!usedJson && !readOnly) {
           const newJson = JSON.stringify(editor.document);
@@ -569,10 +572,11 @@ export const NotePreview = ({
               const currentBlockIds = editor.document.map(
                 (b: { id: string }) => b.id,
               );
+              const prevIdSet = new Set(prevBlockIdsRef.current);
               let updatedProvenance = provenanceRef.current;
 
               for (const blockId of currentBlockIds) {
-                if (!prevBlockIdsRef.current.has(blockId)) {
+                if (!prevIdSet.has(blockId)) {
                   updatedProvenance = recordUserEdit(
                     updatedProvenance,
                     blockId,
@@ -581,7 +585,7 @@ export const NotePreview = ({
               }
 
               const cursorBlock = editor.getTextCursorPosition()?.block;
-              if (cursorBlock && prevBlockIdsRef.current.has(cursorBlock.id)) {
+              if (cursorBlock && prevIdSet.has(cursorBlock.id)) {
                 updatedProvenance = recordUserEdit(
                   updatedProvenance,
                   cursorBlock.id,
@@ -613,12 +617,20 @@ export const NotePreview = ({
                   }
                 }
                 if (didClean) updatedProvenance = cleaned;
+
+                // Repair __deleted_* entries whose afterBlockId is stale
+                // (the anchor block was removed/merged by the user).
+                updatedProvenance = repairDeletedBlockAnchors(
+                  updatedProvenance,
+                  currentIdSet,
+                  prevBlockIdsRef.current,
+                );
               }
 
               provenanceRef.current = updatedProvenance;
               setProvenance(updatedProvenance);
               lastExpandedProvenanceRef.current = updatedProvenance;
-              prevBlockIdsRef.current = new Set(currentBlockIds);
+              prevBlockIdsRef.current = currentBlockIds;
 
               // Re-derive diffs from updated provenance
               setBlockDiffMap(deriveBlockDiffMap(updatedProvenance));
@@ -642,6 +654,7 @@ export const NotePreview = ({
           <InlineBlockDiffs
             blockDiffMap={blockDiffMap}
             deletedBlocks={deletedBlocks}
+            orderedBlockIds={editor.document.map((b: { id: string }) => b.id)}
             editorContainerRef={editorContainerRef}
             getBlockText={getBlockText}
             onAcceptBlock={handleAcceptBlock}

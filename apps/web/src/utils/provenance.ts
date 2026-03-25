@@ -27,7 +27,9 @@ export function expandSentinelProvenance(
   const sentinel = map.__all__;
   const expanded: BlockProvenanceMap = {};
   for (const id of blockIds) {
-    expanded[id] = { ...sentinel };
+    // Set baselineText to '' to mark as brand-new AI block with pending diff,
+    // so the diff bar shows deep purple and the block appears in blockDiffMap.
+    expanded[id] = { ...sentinel, baselineText: '' };
   }
   return expanded;
 }
@@ -301,6 +303,9 @@ export function mergeProvenanceAfterAIUpdate(
     unmatchedOld.slice(0, pairIdx).map((u) => u.block.id),
   );
 
+  // Build a set of new block IDs for quick lookup.
+  const newBlockIdSet = new Set(newBlocks.map((b) => b.id));
+
   let deletedIdx = 0;
   for (const block of oldBlocks) {
     if (matchedOldBlockIds.has(block.id)) {
@@ -318,6 +323,48 @@ export function mergeProvenanceAfterAIUpdate(
         deletedIdx++;
       }
     }
+  }
+
+  // Carry forward existing __deleted_* entries from previous AI operations,
+  // remapping their afterBlockId from old block IDs to new block IDs.
+  for (const [key, entry] of Object.entries(oldProvenance)) {
+    if (!key.startsWith('__deleted_')) continue;
+    if (!entry.deleted || !entry.baselineText?.trim()) continue;
+
+    let remappedAfterId = entry.afterBlockId ?? null;
+    if (remappedAfterId !== null) {
+      // Try direct mapping via oldToNewId
+      const directMap = oldToNewId.get(remappedAfterId);
+      if (directMap) {
+        remappedAfterId = directMap;
+      } else if (!newBlockIdSet.has(remappedAfterId)) {
+        // afterBlockId references a block that no longer exists in new blocks.
+        // Walk backward through oldBlocks to find the nearest preceding
+        // matched block and use its new ID.
+        let found = false;
+        const anchorIdx = oldBlocks.findIndex((b) => b.id === remappedAfterId);
+        if (anchorIdx >= 0) {
+          for (let i = anchorIdx - 1; i >= 0; i--) {
+            const mappedId = oldToNewId.get(oldBlocks[i].id);
+            if (mappedId) {
+              remappedAfterId = mappedId;
+              found = true;
+              break;
+            }
+          }
+        }
+        if (!found) {
+          remappedAfterId = null;
+        }
+      }
+      // else: remappedAfterId already points to a valid new block ID
+    }
+
+    result[`__deleted_${deletedIdx}__`] = {
+      ...entry,
+      afterBlockId: remappedAfterId,
+    };
+    deletedIdx++;
   }
 
   return result;
@@ -525,4 +572,49 @@ export function getDeletedKeys(map: BlockProvenanceMap | undefined): string[] {
       const bi = parseInt(b.replace('__deleted_', '').replace('__', ''), 10);
       return ai - bi;
     });
+}
+
+/**
+ * Repair stale `afterBlockId` references in `__deleted_*` entries.
+ *
+ * When a block that serves as an `afterBlockId` anchor is removed from the
+ * document (e.g. user deletes or merges it), the reference becomes stale and
+ * the deletion indicator would disappear. This function walks the previous
+ * ordered block list to find the nearest preceding block that still exists in
+ * the current document, and updates the `afterBlockId` accordingly.
+ *
+ * @param map          Current provenance map (may be mutated-copy).
+ * @param currentIds   Set of block IDs currently in the editor document.
+ * @param prevOrderedIds  Ordered array of block IDs from the previous state.
+ * @returns            A new provenance map with repaired anchors, or the
+ *                     original map if no repair was needed.
+ */
+export function repairDeletedBlockAnchors(
+  map: BlockProvenanceMap | undefined,
+  currentIds: Set<string>,
+  prevOrderedIds: string[],
+): BlockProvenanceMap | undefined {
+  if (!map) return map;
+
+  let result: BlockProvenanceMap | undefined;
+  for (const key of Object.keys(map)) {
+    if (!key.startsWith('__deleted_')) continue;
+    const entry = map[key];
+    const aid = entry.afterBlockId;
+    if (aid !== null && aid !== undefined && !currentIds.has(aid)) {
+      const prevIdx = prevOrderedIds.indexOf(aid);
+      let newAfterId: string | null = null;
+      if (prevIdx >= 0) {
+        for (let i = prevIdx - 1; i >= 0; i--) {
+          if (currentIds.has(prevOrderedIds[i])) {
+            newAfterId = prevOrderedIds[i];
+            break;
+          }
+        }
+      }
+      if (!result) result = { ...map };
+      result[key] = { ...entry, afterBlockId: newAfterId };
+    }
+  }
+  return result ?? map;
 }

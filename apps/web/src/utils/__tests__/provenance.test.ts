@@ -15,6 +15,7 @@ import {
   removeDeletedEntry,
   hasAnyPendingDiff,
   getDeletedKeys,
+  repairDeletedBlockAnchors,
 } from '../provenance';
 
 import type { ProvenanceBlock } from '../provenance';
@@ -94,13 +95,19 @@ describe('blockFingerprint', () => {
 // ---------------------------------------------------------------------------
 
 describe('expandSentinelProvenance', () => {
-  it('expands __all__ to per-block entries', () => {
+  it('expands __all__ to per-block entries with baselineText', () => {
     const map: BlockProvenanceMap = { __all__: makeAiEntry() };
     const result = expandSentinelProvenance(map, ['b1', 'b2']);
     expect(result).toEqual({
-      b1: makeAiEntry(),
-      b2: makeAiEntry(),
+      b1: makeAiEntry({ baselineText: '' }),
+      b2: makeAiEntry({ baselineText: '' }),
     });
+  });
+
+  it('sets baselineText to empty string for new AI blocks', () => {
+    const map: BlockProvenanceMap = { __all__: makeAiEntry() };
+    const result = expandSentinelProvenance(map, ['b1']);
+    expect(result!.b1.baselineText).toBe('');
   });
 
   it('returns map as-is when no __all__', () => {
@@ -372,6 +379,139 @@ describe('mergeProvenanceAfterAIUpdate', () => {
     expect(result.new1.author).toBe('ai');
     expect(result.new2.author).toBe('user');
   });
+
+  it('preserves existing __deleted_* entries from previous operations', () => {
+    // Simulate: first AI edit deleted "Was here", second AI edit modifies content
+    const oldBlocks = [makeBlock('cur1', 'Hello'), makeBlock('cur2', 'World')];
+    const newBlocks = [
+      makeBlock('new1', 'Hello'),
+      makeBlock('new2', 'World updated'),
+    ];
+    const oldProv: BlockProvenanceMap = {
+      cur1: makeAiEntry(),
+      cur2: makeAiEntry(),
+      __deleted_0__: makeAiEntry({
+        deleted: true,
+        baselineText: 'Was here',
+        afterBlockId: 'cur1',
+      }),
+    };
+
+    const result = mergeProvenanceAfterAIUpdate(
+      oldProv,
+      oldBlocks,
+      newBlocks,
+      sentinel,
+    );
+
+    // The old __deleted_0__ should be carried forward with remapped afterBlockId
+    const deletedKeys = Object.keys(result).filter((k) =>
+      k.startsWith('__deleted_'),
+    );
+    expect(deletedKeys.length).toBeGreaterThanOrEqual(1);
+    const carried = Object.entries(result).find(
+      ([, e]) => e.baselineText === 'Was here',
+    );
+    expect(carried).toBeDefined();
+    expect(carried![1].deleted).toBe(true);
+    // afterBlockId should be remapped from cur1 to new1
+    expect(carried![1].afterBlockId).toBe('new1');
+  });
+
+  it('remaps afterBlockId in carried-forward __deleted_* entries', () => {
+    const oldBlocks = [makeBlock('a', 'Alpha'), makeBlock('b', 'Beta')];
+    const newBlocks = [makeBlock('x', 'Alpha'), makeBlock('y', 'Beta')];
+    const oldProv: BlockProvenanceMap = {
+      a: makeAiEntry(),
+      b: makeAiEntry(),
+      __deleted_0__: makeAiEntry({
+        deleted: true,
+        baselineText: 'Gone',
+        afterBlockId: 'b',
+      }),
+    };
+
+    const result = mergeProvenanceAfterAIUpdate(
+      oldProv,
+      oldBlocks,
+      newBlocks,
+      sentinel,
+    );
+
+    const carried = Object.entries(result).find(
+      ([, e]) => e.baselineText === 'Gone',
+    );
+    expect(carried).toBeDefined();
+    // afterBlockId 'b' should be remapped to 'y'
+    expect(carried![1].afterBlockId).toBe('y');
+  });
+
+  it('handles __deleted_* with afterBlockId pointing to a now-deleted block', () => {
+    // Scenario: old __deleted_0__ had afterBlockId='b', but 'b' is also deleted
+    const oldBlocks = [
+      makeBlock('a', 'Alpha'),
+      makeBlock('b', 'Beta'),
+      makeBlock('c', 'Gamma'),
+    ];
+    const newBlocks = [makeBlock('x', 'Alpha'), makeBlock('z', 'Gamma')];
+    const oldProv: BlockProvenanceMap = {
+      a: makeAiEntry(),
+      b: makeAiEntry(),
+      c: makeAiEntry(),
+      __deleted_0__: makeAiEntry({
+        deleted: true,
+        baselineText: 'Previously deleted',
+        afterBlockId: 'b',
+      }),
+    };
+
+    const result = mergeProvenanceAfterAIUpdate(
+      oldProv,
+      oldBlocks,
+      newBlocks,
+      sentinel,
+    );
+
+    const carried = Object.entries(result).find(
+      ([, e]) => e.baselineText === 'Previously deleted',
+    );
+    expect(carried).toBeDefined();
+    // 'b' is deleted in this operation, so should fall back to nearest
+    // preceding matched block 'a' → 'x'
+    expect(carried![1].afterBlockId).toBe('x');
+  });
+
+  it('accumulates deletions from multiple sequential operations', () => {
+    // First operation deleted "First gone" (stored as __deleted_0__)
+    // Second operation deletes "Beta"
+    const oldBlocks = [makeBlock('a', 'Alpha'), makeBlock('b', 'Beta')];
+    const newBlocks = [makeBlock('x', 'Alpha')];
+    const oldProv: BlockProvenanceMap = {
+      a: makeAiEntry(),
+      b: makeAiEntry(),
+      __deleted_0__: makeAiEntry({
+        deleted: true,
+        baselineText: 'First gone',
+        afterBlockId: 'a',
+      }),
+    };
+
+    const result = mergeProvenanceAfterAIUpdate(
+      oldProv,
+      oldBlocks,
+      newBlocks,
+      sentinel,
+    );
+
+    const deletedEntries = Object.entries(result).filter(([k]) =>
+      k.startsWith('__deleted_'),
+    );
+    // Should have 2 deletions: "Beta" from this operation + "First gone" carried forward
+    expect(deletedEntries).toHaveLength(2);
+
+    const texts = deletedEntries.map(([, e]) => e.baselineText).sort();
+    expect(texts).toEqual(['Beta', 'First gone']);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -608,5 +748,93 @@ describe('getDeletedKeys', () => {
 
   it('returns empty array for undefined', () => {
     expect(getDeletedKeys(undefined)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// repairDeletedBlockAnchors
+// ---------------------------------------------------------------------------
+
+describe('repairDeletedBlockAnchors', () => {
+  it('repairs afterBlockId when anchor block is removed', () => {
+    // Previous block order: [a, b, c]
+    // Block 'b' (the anchor) was removed; 'a' and 'c' survive
+    const map: BlockProvenanceMap = {
+      a: makeAiEntry(),
+      c: makeAiEntry(),
+      __deleted_0__: makeAiEntry({
+        deleted: true,
+        baselineText: 'Gone',
+        afterBlockId: 'b',
+      }),
+    };
+
+    const result = repairDeletedBlockAnchors(map, new Set(['a', 'c']), [
+      'a',
+      'b',
+      'c',
+    ]);
+
+    expect(result!.__deleted_0__.afterBlockId).toBe('a');
+  });
+
+  it('sets afterBlockId to null when all preceding blocks are removed', () => {
+    // Previous order: [a, b, c], anchored after 'a', but 'a' is removed
+    const map: BlockProvenanceMap = {
+      c: makeAiEntry(),
+      __deleted_0__: makeAiEntry({
+        deleted: true,
+        baselineText: 'Gone',
+        afterBlockId: 'a',
+      }),
+    };
+
+    const result = repairDeletedBlockAnchors(map, new Set(['c']), [
+      'a',
+      'b',
+      'c',
+    ]);
+
+    expect(result!.__deleted_0__.afterBlockId).toBeNull();
+  });
+
+  it('does not modify entries with valid afterBlockId', () => {
+    const map: BlockProvenanceMap = {
+      a: makeAiEntry(),
+      b: makeAiEntry(),
+      __deleted_0__: makeAiEntry({
+        deleted: true,
+        baselineText: 'Gone',
+        afterBlockId: 'a',
+      }),
+    };
+
+    const result = repairDeletedBlockAnchors(map, new Set(['a', 'b']), [
+      'a',
+      'b',
+    ]);
+
+    // Should return the same map reference (no repair needed)
+    expect(result).toBe(map);
+    expect(result!.__deleted_0__.afterBlockId).toBe('a');
+  });
+
+  it('does not modify entries with null afterBlockId', () => {
+    const map: BlockProvenanceMap = {
+      a: makeAiEntry(),
+      __deleted_0__: makeAiEntry({
+        deleted: true,
+        baselineText: 'Gone',
+        afterBlockId: null,
+      }),
+    };
+
+    const result = repairDeletedBlockAnchors(map, new Set(['a']), ['a']);
+
+    expect(result).toBe(map);
+  });
+
+  it('returns undefined for undefined input', () => {
+    expect(repairDeletedBlockAnchors(undefined, new Set(), [])).toBeUndefined();
   });
 });
