@@ -9,6 +9,8 @@ import { DocumentLoaderFactory } from '../../knowledge/loaders/index.js';
 
 import type { ResolvedInput, ExtractResult } from '../types.js';
 
+const REMOTE_URL_RE = /^https?:\/\//i;
+
 export async function extract(resolved: ResolvedInput): Promise<ExtractResult> {
   const { nodeType } = resolved;
 
@@ -52,7 +54,27 @@ export async function extract(resolved: ResolvedInput): Promise<ExtractResult> {
 
   // pdf — use PdfLoader
   if (nodeType === 'pdf') {
+    const artifactUri = resolved.artifactUri;
     const filePath = resolved.filePath;
+
+    // Handle remote PDF URLs (e.g. arXiv: https://arxiv.org/pdf/<id>)
+    if (artifactUri && REMOTE_URL_RE.test(artifactUri)) {
+      const response = await fetch(artifactUri);
+      if (!response.ok) {
+        throw new Error(
+          `Failed to fetch remote PDF: ${response.status} ${response.statusText}`,
+        );
+      }
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const loader = DocumentLoaderFactory.getLoader('pdf');
+      const result = await loader.load(buffer);
+      return {
+        content: result.content,
+        title: result.title,
+        metadata: result.metadata,
+      };
+    }
+
     if (!filePath) {
       throw new Error('Missing file path for PDF source extraction');
     }
