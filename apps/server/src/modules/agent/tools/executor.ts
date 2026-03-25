@@ -5,72 +5,37 @@
  * and returns a text result to be fed back as a toolResult message.
  */
 
-import { createId } from '@sediment/shared';
-
-import {
-  readCanvas,
-  writeCanvas,
-  type CanvasFile,
-} from '../../canvas/canvas.filestore.js';
+import { readCanvas } from '../../canvas/canvas.filestore.js';
 import { getKnowledgeRepository } from '../../knowledge/knowledge.repository.js';
 import { getPreprocessDispatcher } from '../../preprocessing/index.js';
 
-import type { CanvasNodeKind, NodeData } from '@sediment/shared';
-// ==================== Canvas Helpers ====================
+import type {
+  AgentMode,
+  BlockProvenanceMap,
+  CanvasNodeKind,
+  NodeOrigin,
+} from '@sediment/shared';
 
-async function loadCanvasState(canvasId: string) {
-  const canvas = readCanvas(canvasId);
-  if (!canvas) {
-    return {
-      nodes: [] as Array<Record<string, unknown>>,
-      edges: [] as Array<Record<string, unknown>>,
-      version: 0,
-    };
+// ==================== Origin Helper ====================
+
+function agentModeToOrigin(mode?: AgentMode): NodeOrigin {
+  switch (mode) {
+    case 'research':
+      return { type: 'ai-research' };
+    default:
+      return { type: 'ai-operate' };
   }
-  const nodes = (canvas.state.nodes ?? []) as Array<Record<string, unknown>>;
-  const edges = (canvas.state.edges ?? []) as Array<Record<string, unknown>>;
-  return { nodes, edges, version: canvas.version };
 }
 
-async function saveCanvasState(
-  canvasId: string,
-  nodes: Array<Record<string, unknown>>,
-  edges: Array<Record<string, unknown>>,
-  currentVersion: number,
-) {
-  const existing = readCanvas(canvasId);
-  const nextVersion = currentVersion + 1;
-  const timestamp = Date.now();
-  const canvasFile: CanvasFile = {
-    canvasId,
-    title: existing?.title ?? null,
-    version: nextVersion,
-    state: { nodes, edges },
-    createdAt: existing?.createdAt ?? timestamp,
-    updatedAt: timestamp,
+/** Build an `__all__` sentinel provenance map for AI-generated content. */
+function buildAIProvenance(mode?: AgentMode): BlockProvenanceMap {
+  return {
+    __all__: {
+      author: 'ai',
+      agentMode: mode ?? 'operate',
+      createdAt: new Date().toISOString(),
+    },
   };
-  writeCanvas(canvasFile);
-  return nextVersion;
-}
-
-async function updateNodeData(
-  canvasId: string,
-  nodeId: string,
-  dataUpdate: Record<string, unknown>,
-) {
-  const state = await loadCanvasState(canvasId);
-  const node = state.nodes.find((n) => n.id === nodeId);
-  if (!node) {
-    console.warn(
-      `[updateNodeData] Node ${nodeId} not found in canvas ${canvasId}`,
-    );
-    return;
-  }
-  node.data = {
-    ...(node.data as Record<string, unknown> | undefined),
-    ...dataUpdate,
-  };
-  await saveCanvasState(canvasId, state.nodes, state.edges, state.version);
 }
 
 // ==================== Web Search ====================
@@ -247,226 +212,102 @@ async function executeGetCanvasState(args: {
   });
 }
 
-async function executeCreateNode(args: {
-  canvasId: string;
-  nodeType: string;
-  label?: string;
-  content?: string;
-  src?: string;
-  position?: { x: number; y: number };
-}): Promise<string> {
-  const nodeType = args.nodeType as
-    | 'note'
-    | 'text'
-    | 'web'
-    | 'image'
-    | 'pdf'
-    | 'video';
+// ==================== Canvas Commands ====================
 
-  const nodeId = createId('node');
-  const position = args.position ?? { x: 0, y: 0 };
-  const data: NodeData = {
-    type: nodeType,
-    label: args.label ?? '',
-    content: args.content,
-    src: args.src,
-  } as NodeData;
+/**
+ * Validate and prepare a canvas_commands batch for forwarding to the web client.
+ * Injects origin into CREATE_NODES and provenance into MERGE_NODE_DATA commands.
+ * Does NOT apply the commands.
+ */
+async function executeCanvasCommands(
+  args: {
+    canvasId: string;
+    commands: Array<Record<string, unknown>>;
+  },
+  context?: { mode?: AgentMode },
+): Promise<string> {
+  const origin = agentModeToOrigin(context?.mode);
 
-  const state = await loadCanvasState(args.canvasId);
-  state.nodes.push({
-    id: nodeId,
-    type: data.type,
-    position,
-    data,
-    selected: false,
-  });
-  await saveCanvasState(args.canvasId, state.nodes, state.edges, state.version);
-
-  return JSON.stringify({
-    nodeId,
-    canvasId: args.canvasId,
-    type: args.nodeType,
-    label: args.label,
-  });
-}
-
-async function executeUpdateNode(args: {
-  canvasId: string;
-  nodeId: string;
-  label?: string;
-  content?: string;
-}): Promise<string> {
-  const patch: Record<string, unknown> = {};
-  if (args.label !== undefined) patch.label = args.label;
-  if (args.content !== undefined) patch.content = args.content;
-
-  await updateNodeData(args.canvasId, args.nodeId, patch);
-
-  return JSON.stringify({ success: true, nodeId: args.nodeId });
-}
-
-async function executeDeleteNodes(args: {
-  canvasId: string;
-  nodeIds: string[];
-}): Promise<string> {
+  // Read canvas state once so we can resolve node types for provenance injection.
   const canvas = readCanvas(args.canvasId);
-  if (!canvas) {
-    return JSON.stringify({ error: `Canvas ${args.canvasId} not found` });
+  const nodeTypeMap = new Map<string, string>();
+  if (canvas) {
+    for (const n of (canvas.state.nodes ?? []) as Array<
+      Record<string, unknown>
+    >) {
+      const data = (n.data as Record<string, unknown> | undefined) ?? {};
+      const nodeType = (n.nodeType ?? n.type ?? data.type) as
+        | string
+        | undefined;
+      if (typeof n.id === 'string' && typeof nodeType === 'string') {
+        nodeTypeMap.set(n.id, nodeType);
+      }
+    }
   }
 
-  const nodes = (canvas.state.nodes ?? []) as Array<Record<string, unknown>>;
-  const edges = (canvas.state.edges ?? []) as Array<Record<string, unknown>>;
-
-  const idsToDelete = new Set(args.nodeIds);
-  const remainingNodes = nodes.filter((n) => !idsToDelete.has(n.id as string));
-  const remainingEdges = edges.filter(
-    (e) =>
-      !idsToDelete.has(e.source as string) &&
-      !idsToDelete.has(e.target as string),
-  );
-
-  const canvasFile: CanvasFile = {
-    canvasId: args.canvasId,
-    title: canvas.title,
-    version: canvas.version + 1,
-    state: { nodes: remainingNodes, edges: remainingEdges },
-    createdAt: canvas.createdAt,
-    updatedAt: Date.now(),
-  };
-  writeCanvas(canvasFile);
+  const commands = args.commands.map((cmd) => {
+    if (cmd.type === 'CREATE_NODES') {
+      const nodes = cmd.nodes as Array<Record<string, unknown>>;
+      return {
+        ...cmd,
+        nodes: nodes.map((node) => {
+          const data = (node.data as Record<string, unknown> | undefined) ?? {};
+          const isNote = node.nodeType === 'note';
+          const hasContent =
+            isNote &&
+            typeof data.content === 'string' &&
+            data.content.length > 0;
+          return {
+            ...node,
+            data: {
+              ...data,
+              origin,
+              ...(hasContent
+                ? { provenance: buildAIProvenance(context?.mode) }
+                : {}),
+            },
+          };
+        }),
+      };
+    }
+    if (cmd.type === 'MERGE_NODE_DATA') {
+      const patches = cmd.patches as Array<Record<string, unknown>>;
+      return {
+        ...cmd,
+        patches: patches.map((entry) => {
+          const patch =
+            (entry.patch as Record<string, unknown> | undefined) ?? {};
+          const nodeId = entry.nodeId as string | undefined;
+          const isNote = nodeId ? nodeTypeMap.get(nodeId) === 'note' : false;
+          const hasContent =
+            isNote &&
+            typeof patch.content === 'string' &&
+            patch.content.length > 0;
+          if (hasContent) {
+            return {
+              ...entry,
+              patch: {
+                ...patch,
+                provenance: buildAIProvenance(context?.mode),
+              },
+            };
+          }
+          return entry;
+        }),
+      };
+    }
+    return cmd;
+  });
 
   return JSON.stringify({
-    success: true,
-    deletedCount: args.nodeIds.length,
+    tool: 'canvas_commands',
+    status: 'success',
+    data: {
+      source: 'agent',
+      canvasId: args.canvasId,
+      commands,
+    },
   });
-}
-
-async function executeConnectNodes(args: {
-  canvasId: string;
-  sourceId: string;
-  targetId: string;
-}): Promise<string> {
-  const edgeId = createId('edge');
-  const state = await loadCanvasState(args.canvasId);
-  state.edges.push({
-    id: edgeId,
-    source: args.sourceId,
-    target: args.targetId,
-    type: 'smoothstep',
-    animated: false,
-  });
-  await saveCanvasState(args.canvasId, state.nodes, state.edges, state.version);
-
-  return JSON.stringify({
-    edgeId,
-    sourceId: args.sourceId,
-    targetId: args.targetId,
-  });
-}
-
-async function executeDisconnectNodes(args: {
-  canvasId: string;
-  sourceId: string;
-  targetId: string;
-}): Promise<string> {
-  const canvas = readCanvas(args.canvasId);
-  if (!canvas) {
-    return JSON.stringify({ error: `Canvas ${args.canvasId} not found` });
-  }
-
-  const nodes = (canvas.state.nodes ?? []) as Array<Record<string, unknown>>;
-  const edges = (canvas.state.edges ?? []) as Array<Record<string, unknown>>;
-
-  const remaining = edges.filter(
-    (e) => !(e.source === args.sourceId && e.target === args.targetId),
-  );
-
-  const canvasFile: CanvasFile = {
-    canvasId: args.canvasId,
-    title: canvas.title,
-    version: canvas.version + 1,
-    state: { nodes, edges: remaining },
-    createdAt: canvas.createdAt,
-    updatedAt: Date.now(),
-  };
-  writeCanvas(canvasFile);
-
-  return JSON.stringify({ success: true });
-}
-
-async function executeCreateFrame(args: {
-  canvasId: string;
-  nodeIds: string[];
-  frameLabel?: string;
-}): Promise<string> {
-  const frameId = createId('frame');
-  const label = args.frameLabel ?? 'Frame';
-  const state = await loadCanvasState(args.canvasId);
-
-  // Calculate frame bounds from child nodes
-  let frameWidth = 800;
-  let frameHeight = 600;
-  let frameX = 0;
-  let frameY = 0;
-
-  if (args.nodeIds.length > 0) {
-    const childNodes = state.nodes.filter((n) =>
-      args.nodeIds.includes(n.id as string),
-    );
-    if (childNodes.length > 0) {
-      const positions = childNodes.map((n) => ({
-        x: (n.position as { x: number; y: number }).x,
-        y: (n.position as { x: number; y: number }).y,
-        width: (n.width as number) ?? 200,
-        height: (n.height as number) ?? 150,
-      }));
-      const minX = Math.min(...positions.map((p) => p.x));
-      const minY = Math.min(...positions.map((p) => p.y));
-      const maxX = Math.max(...positions.map((p) => p.x + p.width));
-      const maxY = Math.max(...positions.map((p) => p.y + p.height));
-      frameX = minX - 50;
-      frameY = minY - 80;
-      frameWidth = maxX - minX + 100;
-      frameHeight = maxY - minY + 130;
-    }
-  }
-
-  const newFrame = {
-    id: frameId,
-    type: 'frame',
-    position: { x: frameX, y: frameY },
-    data: { label },
-    width: frameWidth,
-    height: frameHeight,
-    selected: false,
-    style: { width: frameWidth, height: frameHeight },
-  };
-
-  // Parent nodes must come before child nodes in ReactFlow
-  let firstChildIndex = -1;
-  for (let i = 0; i < state.nodes.length; i++) {
-    if (args.nodeIds.includes(state.nodes[i].id as string)) {
-      firstChildIndex = i;
-      break;
-    }
-  }
-  if (firstChildIndex >= 0) {
-    state.nodes.splice(firstChildIndex, 0, newFrame);
-  } else {
-    state.nodes.push(newFrame);
-  }
-
-  // Update child nodes to reference this frame as parent
-  state.nodes = state.nodes.map((node) => {
-    if (args.nodeIds.includes(node.id as string)) {
-      return { ...node, parentId: frameId, extent: undefined };
-    }
-    return node;
-  });
-
-  await saveCanvasState(args.canvasId, state.nodes, state.edges, state.version);
-
-  return JSON.stringify({ frameId });
 }
 
 // ==================== Knowledge Operations ====================
@@ -548,13 +389,6 @@ async function executeIngestContent(args: {
     options: { allowLLM: false },
   });
 
-  // Update the node with the sourceId
-  if (result.persistence?.sourceId) {
-    await updateNodeData(args.canvasId, args.nodeId, {
-      sourceId: result.persistence.sourceId,
-    });
-  }
-
   // If no source was persisted (image/frame/video or extraction failure),
   // report clearly to the agent so it doesn't misinterpret success.
   const sourceId = result.persistence?.sourceId;
@@ -592,6 +426,7 @@ async function executeIngestContent(args: {
 export async function executeTool(
   name: string,
   args: Record<string, unknown>,
+  context?: { mode?: AgentMode },
 ): Promise<string> {
   switch (name) {
     case 'web_search':
@@ -604,25 +439,10 @@ export async function executeTool(
       return executeGetCanvasState(
         args as Parameters<typeof executeGetCanvasState>[0],
       );
-    case 'create_node':
-      return executeCreateNode(args as Parameters<typeof executeCreateNode>[0]);
-    case 'update_node':
-      return executeUpdateNode(args as Parameters<typeof executeUpdateNode>[0]);
-    case 'delete_nodes':
-      return executeDeleteNodes(
-        args as Parameters<typeof executeDeleteNodes>[0],
-      );
-    case 'connect_nodes':
-      return executeConnectNodes(
-        args as Parameters<typeof executeConnectNodes>[0],
-      );
-    case 'disconnect_nodes':
-      return executeDisconnectNodes(
-        args as Parameters<typeof executeDisconnectNodes>[0],
-      );
-    case 'create_frame':
-      return executeCreateFrame(
-        args as Parameters<typeof executeCreateFrame>[0],
+    case 'canvas_commands':
+      return executeCanvasCommands(
+        args as Parameters<typeof executeCanvasCommands>[0],
+        context,
       );
     case 'read_source':
       return executeReadSource(args as Parameters<typeof executeReadSource>[0]);

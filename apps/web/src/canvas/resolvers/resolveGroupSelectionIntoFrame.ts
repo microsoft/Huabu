@@ -38,7 +38,7 @@ export default function resolveGroupSelectionIntoFrame(
         {
           id: frameId as CanvasNodeId,
           nodeType: 'frame',
-          data: { label: 'Frame' } as never,
+          data: { label: 'Frame', origin: { type: 'user-created' } } as never,
           position: frameNode.position,
           size: {
             width: (frameNode.style as Record<string, number>)?.width ?? 400,

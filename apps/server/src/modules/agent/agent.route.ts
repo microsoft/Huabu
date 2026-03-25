@@ -13,6 +13,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { createId } from '@sediment/shared';
+import { encode } from 'gpt-tokenizer';
 
 import { AGENT_SYSTEM_PROMPT } from '../../prompt/agent.js';
 import { RESEARCH_SYSTEM_PROMPT } from '../../prompt/research.js';
@@ -669,6 +670,58 @@ const agentRoutes: FastifyPluginAsync = async (
       request.raw.socket?.once('close', cleanup);
     },
   );
+
+  /**
+   * GET /agent/context-tokens/:threadId
+   * Returns the current context token count for a conversation thread.
+   */
+  fastify.get<{
+    Params: { threadId: string };
+    Querystring: { canvasId?: string };
+  }>('/context-tokens/:threadId', async function (request, reply) {
+    const { threadId } = request.params;
+    const { canvasId } = request.query;
+    const CONTEXT_WINDOW = 128_000;
+
+    if (!threadId || threadId.trim().length === 0) {
+      return reply.code(400).send({ error: 'threadId is required' });
+    }
+
+    const context = loadContext(threadId, canvasId);
+    if (!context) {
+      return reply.send({ contextTokens: 0, contextWindow: CONTEXT_WINDOW });
+    }
+
+    // Count tokens from system prompt + all messages, including non-text blocks
+    const textParts: string[] = [];
+    if (context.systemPrompt) {
+      textParts.push(context.systemPrompt);
+    }
+    for (const msg of context.messages) {
+      if (typeof msg.content === 'string') {
+        textParts.push(msg.content);
+      } else if (Array.isArray(msg.content)) {
+        for (const part of msg.content) {
+          if (typeof part === 'object' && part !== null && 'type' in part) {
+            const typed = part as { type: string; text?: string };
+            if (typed.type === 'text' && typed.text) {
+              textParts.push(typed.text);
+            } else {
+              // Include non-text blocks (toolCall, thinking, etc.) via serialization
+              try {
+                textParts.push(JSON.stringify(part));
+              } catch {
+                /* skip */
+              }
+            }
+          }
+        }
+      }
+    }
+
+    const contextTokens = encode(textParts.join('\n')).length;
+    return reply.send({ contextTokens, contextWindow: CONTEXT_WINDOW });
+  });
 
   /**
    * POST /agent

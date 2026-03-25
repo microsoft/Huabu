@@ -27,6 +27,7 @@
     "cytoscape": "^3.33.1",
     "cytoscape-fcose": "^2.2.0",
     "cytoscape-layout-utilities": "^1.1.1",
+    "diff": "^8.0.4",
     "gpt-tokenizer": "^3.4.0",
     "html-to-image": "^1.11.13",
     "lucide-react": "^0.577.0",
@@ -40,6 +41,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.18",
+    "@types/diff": "^8.0.0",
     "@types/react": "^18.2.15",
     "@types/react-dom": "^18.2.7",
     "@vitejs/plugin-react": "^4.0.3",

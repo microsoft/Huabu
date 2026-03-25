@@ -156,12 +156,12 @@ describe('buildLayoutGraph — Edge Aggregation', () => {
       makeNode('source-node', { data: { sourceId: 'kb-src-1' } }),
       makeNode('c1', {
         data: {
-          origin: { type: 'user-drag-capture', sourceId: 'kb-src-1' },
+          origin: { type: 'user-excerpt', sourceId: 'kb-src-1' },
         },
       }),
       makeNode('c2', {
         data: {
-          origin: { type: 'user-drag-capture', sourceId: 'kb-src-1' },
+          origin: { type: 'user-excerpt', sourceId: 'kb-src-1' },
         },
       }),
     ];
@@ -190,22 +190,23 @@ describe('buildLayoutGraph — Edge Aggregation', () => {
     expect(findEdge(result.edges, 'r1', 'r3')).toBeUndefined();
   });
 
-  it('creates chain edges for same origin.threadId (chat) with weight 0.3', () => {
+  it('fully connects nodes with same origin.threadId (chat) with weight 0.3', () => {
     const nodes = [
       makeNode('m1', {
-        data: { origin: { type: 'user-drag-chat', threadId: 'chat-1' } },
+        data: { origin: { type: 'user-from-chat', threadId: 'chat-1' } },
       }),
       makeNode('m2', {
-        data: { origin: { type: 'user-drag-chat', threadId: 'chat-1' } },
+        data: { origin: { type: 'user-from-chat', threadId: 'chat-1' } },
       }),
       makeNode('m3', {
-        data: { origin: { type: 'user-drag-chat', threadId: 'chat-1' } },
+        data: { origin: { type: 'user-from-chat', threadId: 'chat-1' } },
       }),
     ];
     const result = buildLayoutGraph(nodes, []);
 
-    expect(result.edges).toHaveLength(2);
+    expect(result.edges).toHaveLength(3);
     expect(findEdge(result.edges, 'm1', 'm2')?.weight).toBe(0.3);
+    expect(findEdge(result.edges, 'm1', 'm3')?.weight).toBe(0.3);
     expect(findEdge(result.edges, 'm2', 'm3')?.weight).toBe(0.3);
   });
 
@@ -376,13 +377,13 @@ describe('buildLayoutGraph — Integration', () => {
       makeNode('card-ext', {
         position: { x: 500, y: 500 },
         data: {
-          origin: { type: 'user-drag-chat', threadId: 'chat-1' },
+          origin: { type: 'user-from-chat', threadId: 'chat-1' },
         },
       }),
       makeNode('card-ext-2', {
         position: { x: 700, y: 500 },
         data: {
-          origin: { type: 'user-drag-chat', threadId: 'chat-1' },
+          origin: { type: 'user-from-chat', threadId: 'chat-1' },
         },
       }),
     ];

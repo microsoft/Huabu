@@ -209,27 +209,32 @@ export const SettingsPopover: React.FC = () => {
 
           {/* Recent workspaces */}
           {recentWorkspaces.filter((p) => p !== workspacePath).length > 0 && (
-            <div className="mb-3">
+            <div className="mb-3 overflow-hidden">
               <div className="mb-1.5 flex items-center gap-1 text-[11px] font-medium text-gray-400">
                 <History size={10} />
                 <span>Recent</span>
               </div>
-              <ul className="space-y-0.5">
+              <ul className="space-y-0.5 overflow-hidden">
                 {recentWorkspaces
                   .filter((p) => p !== workspacePath)
                   .map((path) => (
-                    <li key={path} className="group flex items-center gap-0.5">
+                    <li
+                      key={path}
+                      className="group flex min-w-0 items-center gap-0.5"
+                    >
                       <Button
                         variant="ghost"
                         onClick={() => void handleSelectRecent(path)}
                         disabled={isLoading}
-                        className="flex-1 gap-1.5 text-left"
+                        className="min-w-0 flex-1 justify-start gap-1.5 overflow-hidden"
+                        title={path}
+                        tooltipWrapperClassName="flex min-w-0 flex-1 overflow-hidden"
                       >
                         <FolderOpen
                           size={12}
                           className="shrink-0 text-gray-300"
                         />
-                        <span className="truncate text-xs text-gray-500">
+                        <span className="block truncate text-xs text-gray-500">
                           {path}
                         </span>
                       </Button>

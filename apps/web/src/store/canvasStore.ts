@@ -3,6 +3,7 @@ import {
   type CanvasCommand,
   type CanvasCommandType,
   type CanvasExecution,
+  type CanvasExecutionSource,
   type CanvasNodeType,
   type NodeSummary,
   type RecentAction,
@@ -242,14 +243,15 @@ type RFState = {
   redo: () => void;
 
   loadCanvas: (canvasId?: string) => Promise<void>;
-  /** Silently refresh canvas data without showing loading state or clearing history */
-  refreshCanvas: () => Promise<void>;
   switchCanvas: (canvasId: string) => Promise<void>;
   saveCanvas: () => Promise<void>;
 
   actionHistory: RecentAction[];
   /** @internal Execute a batch of shared CanvasCommands. Do not call from outside the store. */
-  executeCommands: (commands: CanvasCommand[]) => void;
+  executeCommands: (
+    commands: CanvasCommand[],
+    source?: CanvasExecutionSource,
+  ) => void;
   /** @internal Resolve a web-only UiIntent and execute the resulting commands. */
   dispatchUiIntent: (intent: CanvasUiIntent) => void;
   getAgentContext: () => AgentBaseContext;
@@ -395,9 +397,9 @@ const useCanvasStore = create<RFState>()(
     // --- Internal: not exposed in the public CanvasStore interface ---
 
     /** Execute a batch of shared CanvasCommands. Source defaults to 'ui'. */
-    executeCommands: (commands) => {
+    executeCommands: (commands, source) => {
       const execution: CanvasExecution = {
-        source: 'ui',
+        source: source ?? 'ui',
         commands,
       };
       const state = {
@@ -414,10 +416,11 @@ const useCanvasStore = create<RFState>()(
       if (!commandResults.some((r) => r.applied)) return;
 
       // Guard: verify that 'caller' snapshot commands were preceded by beginGesture.
+      // Skip for agent-originated commands (no UI gesture involved).
       const hasCallerSnapshot = commands.some(
         (c) => COMMAND_META[c.type].snapshot === 'caller',
       );
-      if (hasCallerSnapshot) {
+      if (hasCallerSnapshot && (source ?? 'ui') !== 'agent') {
         if (!canvasHistoryManager.gestureSnapshotTaken) {
           console.warn(
             '[canvasStore] snapshot:"caller" command executed without beginGesture():',
@@ -591,34 +594,6 @@ const useCanvasStore = create<RFState>()(
       } catch (error) {
         console.error('Failed to load canvas:', error);
         set({ isLoading: false });
-      }
-    },
-
-    refreshCanvas: async () => {
-      try {
-        const targetId = get().canvasId;
-        const response = await getCanvas(targetId);
-        if (!response) return;
-
-        const state = response.state as {
-          nodes?: Node[];
-          edges?: Edge[];
-          workspaceName?: string;
-        };
-
-        const cleanedNodes = (state.nodes ?? []).map((n) => {
-          if (n.width == null && n.height == null) return n;
-          const { width, height, ...rest } = n;
-          return rest as Node;
-        });
-
-        set({
-          nodes: cleanedNodes,
-          edges: state.edges ?? [],
-          version: response.version,
-        });
-      } catch (error) {
-        console.error('Failed to refresh canvas:', error);
       }
     },
 

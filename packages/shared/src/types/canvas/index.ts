@@ -19,6 +19,8 @@ export type {
   NodeResearchData,
   NodeStyle,
   BaseNodeData,
+  BlockProvenance,
+  BlockProvenanceMap,
   NoteNodeData,
   TextNodeData,
   WebNodeData,
@@ -79,6 +81,9 @@ export type {
   CanvasEdgeCreateInput,
   CanvasCommand,
   CanvasCommandType,
+  UiOnlyCanvasCommandType,
+  AgentCanvasCommand,
+  AgentCanvasCommandType,
 } from './command.js';
 
 // Execution types

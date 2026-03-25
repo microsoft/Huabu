@@ -45,7 +45,7 @@ export const SourceCard = ({ source }: { source: Source }) => {
             e,
             {
               kind: 'web',
-              origin: { type: 'user-drag-chat', threadId },
+              origin: { type: 'user-from-chat', threadId },
               data: {
                 src: source.url,
               },

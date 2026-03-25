@@ -32,11 +32,7 @@ export const CanvasChangeBar = ({ changes }: CanvasChangeBarProps) => {
             NODE_ICON.note;
 
           const renderLabel = () => {
-            if (
-              change.tool === 'connect_nodes' &&
-              change.sourceNodeId &&
-              change.targetNodeId
-            ) {
+            if (change.sourceNodeId && change.targetNodeId) {
               return (
                 <>
                   Connected <NodeRef nodeId={change.sourceNodeId} /> →{' '}

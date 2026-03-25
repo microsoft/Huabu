@@ -434,7 +434,7 @@ export const ChatInput = ({
                 onChange={onModeChange}
                 disabled={disabled}
               />
-              <ContextUsageRing />
+              <ContextUsageRing draftText={value} isStreaming={isStreaming} />
             </div>
 
             <div className="flex items-center gap-2">
