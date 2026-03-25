@@ -309,6 +309,9 @@ export function useAgentStream(): UseAgentStreamReturn {
   const updateMessage = useChatStore((state) => state.updateMessage);
   const setLastAction = useChatStore((state) => state.setLastAction);
   const pendingAttachments = useChatStore((state) => state.pendingAttachments);
+  const selectionAttachment = useChatStore(
+    (state) => state.selectionAttachment,
+  );
   const clearPendingAttachments = useChatStore(
     (state) => state.clearPendingAttachments,
   );
@@ -349,9 +352,16 @@ export function useAgentStream(): UseAgentStreamReturn {
 
       setLastAction(agentMode);
 
-      const attachments =
-        pendingAttachments.length > 0 ? [...pendingAttachments] : undefined;
-      if (attachments) clearPendingAttachments();
+      // Merge pending attachments + selection attachment into a single array
+      const allPending = [
+        ...pendingAttachments,
+        ...(selectionAttachment ? [selectionAttachment] : []),
+      ];
+      const attachments = allPending.length > 0 ? allPending : undefined;
+      if (attachments) {
+        clearPendingAttachments();
+        useChatStore.getState().setSelectionAttachment(null);
+      }
 
       const selectedNodeIds = useCanvasStore
         .getState()
@@ -487,6 +497,7 @@ export function useAgentStream(): UseAgentStreamReturn {
     [
       isLoading,
       pendingAttachments,
+      selectionAttachment,
       clearPendingAttachments,
       addMessage,
       setLastAction,

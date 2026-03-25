@@ -131,14 +131,15 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
     if (!onSendToChat || !imageUrl) return;
     const attachment: ChatAttachment = {
       type: 'image',
+      source: 'excerpt',
       url: imageUrl,
-      extractedText: hasText ? text : undefined,
+      content: hasText ? text : undefined,
       label: 'PDF capture',
-      originSourceId: sourceId,
+      originSourceId: expandedNodeId ?? undefined,
     };
     onSendToChat(attachment);
     onDismiss();
-  }, [onSendToChat, imageUrl, hasText, text, sourceId, onDismiss]);
+  }, [onSendToChat, imageUrl, hasText, text, expandedNodeId, onDismiss]);
 
   const handleSetCover = useCallback(() => {
     if (!onSetCover || !imageUrl) return;

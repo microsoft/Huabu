@@ -121,6 +121,17 @@ export function useChatHistory(setIsLoading: (loading: boolean) => void): void {
   useEffect(() => {
     if (!isHistoryLoaded || !threadId || !canvasId) return;
 
+    // Only attempt reconnect if history suggests an incomplete run:
+    // the last message is from the user (or intent-select) without a
+    // following assistant/tool response, meaning the server may still
+    // be streaming. If history is empty or ends with an assistant/tool
+    // message, there's nothing to reconnect to — skip the request
+    // entirely to avoid a 404 in the browser console.
+    const msgs = useChatStore.getState().messages;
+    if (msgs.length === 0) return;
+    const lastMsg = msgs[msgs.length - 1];
+    if (lastMsg.role !== 'user' && lastMsg.role !== 'intent-select') return;
+
     let cancelled = false;
 
     const tryReconnect = async () => {

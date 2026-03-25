@@ -110,6 +110,13 @@ async function resolveImageUrl(url: string): Promise<string> {
 
 /**
  * Build a pi-ai user message content array, supporting text + images.
+ *
+ * Attachment types handled:
+ *  - image  → resolve URL to base64 and include as vision input
+ *  - pdf    → resolve URL; will be sent as image for vision analysis
+ *  - text   → inline content as text part (e.g. text excerpted from a node)
+ *  - file   → use content if available, otherwise try reading from artifact
+ *  - web    → inline content as text part
  */
 async function buildUserContent(
   text: string,
@@ -129,35 +136,119 @@ async function buildUserContent(
   > = [{ type: 'text', text }];
 
   for (const att of attachments) {
-    if (att.type === 'image') {
-      const resolved = await resolveImageUrl(att.url);
-      if (resolved.startsWith('data:')) {
-        const match = /^data:([^;]+);base64,(.+)$/.exec(resolved);
-        if (match) {
+    const label = att.label ?? att.filename ?? 'attachment';
+    const sourceRef = att.originSourceId
+      ? ` (source: ${att.originSourceId})`
+      : '';
+
+    switch (att.type) {
+      case 'image': {
+        // Resolve image URL to base64 for vision
+        if (att.url) {
+          const resolved = await resolveImageUrl(att.url);
+          if (resolved.startsWith('data:')) {
+            const match = /^data:([^;]+);base64,(.+)$/.exec(resolved);
+            if (match) {
+              parts.push({
+                type: 'image',
+                data: match[2],
+                mimeType: match[1],
+              });
+            }
+          }
+        }
+        // If the image also carries extracted text content (e.g. PDF capture with OCR text)
+        if (att.content && att.content.trim().length > 0) {
           parts.push({
-            type: 'image',
-            data: match[2],
-            mimeType: match[1],
+            type: 'text',
+            text: `[Attached Text from ${label}${sourceRef}]:\n${att.content}`,
           });
         }
+        break;
       }
-    } else {
-      // Non-image attachments — include as a text reference
-      const label = att.label ?? att.filename ?? 'attachment';
-      parts.push({
-        type: 'text',
-        text: `[Attached ${att.type}: ${label}] (URL: ${att.url})`,
-      });
-    }
 
-    if (att.extractedText && att.extractedText.trim().length > 0) {
-      parts.push({
-        type: 'text',
-        text: `[Extracted text from ${att.label ?? 'attachment'}]:\n${att.extractedText}`,
-      });
+      case 'pdf': {
+        if (att.content && att.content.trim().length > 0) {
+          parts.push({
+            type: 'text',
+            text: `[Attached PDF: ${label}${sourceRef}]:\n${att.content}`,
+          });
+        } else {
+          parts.push({
+            type: 'text',
+            text: `[Attached PDF: ${label}]${att.url ? ` (URL: ${att.url})` : ''}`,
+          });
+        }
+        break;
+      }
+
+      case 'text': {
+        // Text excerpted from a node — content is always present
+        if (att.content && att.content.trim().length > 0) {
+          parts.push({
+            type: 'text',
+            text: `[Attached Excerpt from ${sourceRef}]:\n${att.content}`,
+          });
+        }
+        break;
+      }
+
+      case 'web': {
+        // Web URL content
+        if (att.content && att.content.trim().length > 0) {
+          parts.push({
+            type: 'text',
+            text: `[Attached Web Content: ${label}${att.url ? ` (${att.url})` : ''}]:\n${att.content}`,
+          });
+        } else if (att.url) {
+          parts.push({
+            type: 'text',
+            text: `[Attached Web Link: ${label}] URL: ${att.url}`,
+          });
+        }
+        break;
+      }
+
+      case 'file':
+      default: {
+        // File attachment — use content if provided, otherwise read from artifact
+        if (att.content && att.content.trim().length > 0) {
+          parts.push({
+            type: 'text',
+            text: `[Attached File: ${label}${sourceRef}]:\n${att.content}`,
+          });
+        } else if (att.url) {
+          let fileContent: string | null = null;
+          const artifactMatch = /\/api\/artifact\/([^/?#]+)/.exec(att.url);
+          if (artifactMatch) {
+            const filename = path.basename(artifactMatch[1]);
+            const filePath = path.resolve(getArtifactsDir(), filename);
+            if (filePath.startsWith(path.resolve(getArtifactsDir()))) {
+              try {
+                fileContent = await readFile(filePath, 'utf-8');
+              } catch {
+                /* file not readable as text */
+              }
+            }
+          }
+          if (fileContent) {
+            parts.push({
+              type: 'text',
+              text: `[AttachedFile: ${label}]:\n${fileContent}`,
+            });
+          } else {
+            parts.push({
+              type: 'text',
+              text: `[Attached File: ${label}] (URL: ${att.url})`,
+            });
+          }
+        }
+        break;
+      }
     }
   }
 
+  console.log('[!!!] Built user content parts:', parts);
   return parts;
 }
 
@@ -174,6 +265,7 @@ function collectImageAttachments(
     if (node.type === 'image' && node.src) {
       attachments.push({
         type: 'image',
+        source: 'selection',
         url: node.src,
         label: node.label ?? `Image node ${node.id}`,
       });
@@ -326,11 +418,16 @@ function buildHistoryItems(
           '',
         )
         .replace(/^\[Canvas ID: [^\]]+\]\n\n/, '')
+        // Strip one-liner attachment URL references (old + new formats)
         .replace(
-          /\n?\[Attached (?:file|pdf|image): [^\]]*\] \(URL: [^)]*\)/g,
+          /\n?\[Attached\s?(?:file|pdf|image|PDF|File|Web Link): [^\]]*\] (?:\(URL: [^)]*\)|URL: \S+)/g,
           '',
         )
-        .replace(/\n?\[Extracted text from [^\]]*\]:\n[\s\S]*?(?=\n\[|$)/g, '')
+        // Strip attachment content blocks (old + new formats)
+        .replace(
+          /\n?\[(?:Attached\s?(?:Text from|PDF Content:|Excerpt from|Web Content:|File:)|Extracted text from )[^\]]*\]:\n[\s\S]*?(?=\n\[|$)/g,
+          '',
+        )
         .trim();
 
       if (content.startsWith('[SYSTEM Interrupted]')) {
@@ -355,22 +452,51 @@ function buildHistoryItems(
 
       // Extract embedded selectedNodeIds metadata
       let selectedNodeIds: string[] | undefined;
-      const metaMatch = content.match(
-        /\n\[SYSTEM selectedNodeIds:(\[.*?\])\]$/,
+      const nodeIdMatch = content.match(
+        /\n?\[SYSTEM selectedNodeIds:(\[.*?\])\]/,
       );
-      if (metaMatch) {
+      if (nodeIdMatch) {
         try {
-          selectedNodeIds = JSON.parse(metaMatch[1]);
+          selectedNodeIds = JSON.parse(nodeIdMatch[1]);
         } catch {
           /* ignore */
         }
-        content = content.replace(/\n\[SYSTEM selectedNodeIds:\[.*?\]\]$/, '');
+        content = content.replace(/\n?\[SYSTEM selectedNodeIds:\[.*?\]\]/, '');
+      }
+
+      // Extract embedded attachments metadata
+      let attachments: ChatAttachment[] | undefined;
+      const attMatch = content.match(/\n?\[SYSTEM attachments:(\[.*\])\]/);
+      if (attMatch) {
+        try {
+          attachments = JSON.parse(attMatch[1]);
+        } catch {
+          /* ignore */
+        }
+        content = content.replace(/\n?\[SYSTEM attachments:\[.*\]\]/, '');
+      }
+
+      // Also recover image attachments from multipart content blocks
+      if (!attachments && Array.isArray(msg.content)) {
+        const imageBlocks = msg.content.filter(
+          (b): b is { type: 'image'; data: string; mimeType: string } =>
+            typeof b === 'object' && b !== null && b.type === 'image',
+        );
+        if (imageBlocks.length > 0) {
+          attachments = imageBlocks.map((img) => ({
+            type: 'image' as const,
+            source: 'upload' as const,
+            url: `data:${img.mimeType};base64,${img.data.slice(0, 100)}...`,
+            label: 'Image',
+          }));
+        }
       }
 
       if (content.trim()) {
         messages.push({
           role: 'user',
           content,
+          ...(attachments && attachments.length > 0 && { attachments }),
           ...(selectedNodeIds &&
             selectedNodeIds.length > 0 && { selectedNodeIds }),
         });
@@ -720,13 +846,32 @@ const agentRoutes: FastifyPluginAsync = async (
     }
 
     // Add user message to context
-    // Embed selectedNodeIds as a metadata tag so it survives round-trip
-    if (
-      selectedNodeIds &&
-      selectedNodeIds.length > 0 &&
-      typeof userContent === 'string'
-    ) {
-      userContent = `${userContent}\n[SYSTEM selectedNodeIds:${JSON.stringify(selectedNodeIds)}]`;
+    // Embed selectedNodeIds and attachments as metadata tags so they survive round-trip
+    const metadataTags: string[] = [];
+    if (selectedNodeIds && selectedNodeIds.length > 0) {
+      metadataTags.push(
+        `[SYSTEM selectedNodeIds:${JSON.stringify(selectedNodeIds)}]`,
+      );
+    }
+    if (allAttachments && allAttachments.length > 0) {
+      // Store attachment metadata (without content to keep size small)
+      const attMeta = allAttachments.map((a) => ({
+        type: a.type,
+        source: a.source,
+        ...(a.originSourceId ? { originSourceId: a.originSourceId } : {}),
+        ...(a.url ? { url: a.url } : {}),
+        ...(a.label ? { label: a.label } : {}),
+        ...(a.filename ? { filename: a.filename } : {}),
+      }));
+      metadataTags.push(`[SYSTEM attachments:${JSON.stringify(attMeta)}]`);
+    }
+    if (metadataTags.length > 0 && typeof userContent === 'string') {
+      userContent = `${userContent}\n${metadataTags.join('\n')}`;
+    } else if (metadataTags.length > 0 && Array.isArray(userContent)) {
+      userContent = [
+        ...userContent,
+        { type: 'text' as const, text: `\n${metadataTags.join('\n')}` },
+      ];
     }
     context.messages.push({
       role: 'user',

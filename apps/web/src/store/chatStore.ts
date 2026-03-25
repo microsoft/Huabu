@@ -24,6 +24,13 @@ interface ChatState {
    */
   pendingAttachments: ChatAttachment[];
 
+  /**
+   * A text-selection-based attachment auto-managed by ExpandedNodePanel.
+   * Stored separately from pendingAttachments so it can be independently
+   * set/cleared without index gymnastics or magic marker strings.
+   */
+  selectionAttachment: ChatAttachment | null;
+
   // Actions
   addMessage: (message: ChatMessage) => void;
   updateMessage: (
@@ -58,6 +65,7 @@ export const useChatStore = create<ChatState>()(
       lastAction: 'ask',
       threadMap: {},
       pendingAttachments: [],
+      selectionAttachment: null,
 
       addMessage: (message) =>
         set((state) => ({ messages: [...state.messages, message] })),
@@ -85,6 +93,7 @@ export const useChatStore = create<ChatState>()(
           isHistoryLoaded: true,
           lastAction: 'ask',
           pendingAttachments: [],
+          selectionAttachment: null,
           threadMap: updatedMap,
         });
       },
@@ -100,6 +109,7 @@ export const useChatStore = create<ChatState>()(
           messages: [],
           isHistoryLoaded: false,
           pendingAttachments: [],
+          selectionAttachment: null,
           threadMap: { ...threadMap, [canvasId]: tid },
         });
       },
@@ -119,21 +129,7 @@ export const useChatStore = create<ChatState>()(
       clearPendingAttachments: () => set({ pendingAttachments: [] }),
 
       setSelectionAttachment: (attachment) =>
-        set((state) => {
-          // Remove any existing selection attachment
-          const filtered = state.pendingAttachments.filter(
-            (a) => a.originSourceId !== '__selection__',
-          );
-          if (attachment) {
-            return {
-              pendingAttachments: [
-                ...filtered,
-                { ...attachment, originSourceId: '__selection__' },
-              ],
-            };
-          }
-          return { pendingAttachments: filtered };
-        }),
+        set({ selectionAttachment: attachment }),
     }),
     {
       name: 'sediment-chat',
