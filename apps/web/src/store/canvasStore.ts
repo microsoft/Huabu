@@ -956,7 +956,7 @@ const useCanvasStore = create<RFState>()(
         if (trimmedLabel) {
           void updateSource(sourceIdForTitleSync, {
             title: trimmedLabel,
-          }).catch(() => {});
+          }).catch((err) => console.warn('Failed to sync source title:', err));
         }
       }
     },
