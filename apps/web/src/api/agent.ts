@@ -256,4 +256,26 @@ export const agentApi = {
       );
     }
   },
+
+  /**
+   * Fetch the current context token count for a conversation thread.
+   */
+  fetchContextTokens: async (
+    threadId: string,
+    canvasId?: string,
+    signal?: AbortSignal,
+  ): Promise<{ contextTokens: number; contextWindow: number }> => {
+    const params = canvasId ? `?canvasId=${encodeURIComponent(canvasId)}` : '';
+    const response = await fetch(
+      `${API_CONFIG.API_URL}/agent/context-tokens/${encodeURIComponent(threadId)}${params}`,
+      { signal },
+    );
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    return response.json() as Promise<{
+      contextTokens: number;
+      contextWindow: number;
+    }>;
+  },
 };
