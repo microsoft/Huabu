@@ -28,6 +28,7 @@
 
 - 已占用 token 数从后端实时获取（包含 system prompt、所有消息文本及 tool call 等非文本内容），比之前仅统计前端可见消息更准确。
 - 预估占用会模拟后端的包装格式（如 `[Extracted text from ...]`、`[Selected Nodes]` JSON），使估算更贴近实际。
+
 ## 2026-03-24 · AI 内容变更追踪
 
 **变更内容**

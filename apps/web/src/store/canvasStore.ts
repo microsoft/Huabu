@@ -26,6 +26,7 @@ import { create, type StateCreator } from 'zustand';
 
 import { getCanvas, preprocessNode, putCanvas } from '../api';
 import { canvasHistoryManager } from './canvasHistoryManager';
+import { updateSource } from '../api/knowledge';
 import { COMMAND_META } from '../canvas/commands';
 import { executeCanvasCommands } from '../canvas/executor';
 import { runPostEffects } from '../canvas/postEffects';
@@ -936,7 +937,28 @@ const useCanvasStore = create<RFState>()(
     },
 
     updateNodeData: (nodeId, patch) => {
+      // Capture sourceId before dispatch for source title sync.
+      const patchRec = patch as Record<string, unknown>;
+      let sourceIdForTitleSync: string | undefined;
+      if (patchRec.label !== undefined) {
+        const node = get().nodes.find((n) => n.id === nodeId);
+        const data = node?.data as Record<string, unknown> | undefined;
+        if (typeof data?.sourceId === 'string') {
+          sourceIdForTitleSync = data.sourceId;
+        }
+      }
+
       get().dispatchUiIntent({ type: 'UPDATE_NODE_DATA', nodeId, patch });
+
+      // Sync source title when label changes on a node with a source.
+      if (sourceIdForTitleSync && typeof patchRec.label === 'string') {
+        const trimmedLabel = patchRec.label.trim();
+        if (trimmedLabel) {
+          void updateSource(sourceIdForTitleSync, {
+            title: trimmedLabel,
+          }).catch(() => {});
+        }
+      }
     },
 
     patchNodeSilent: (nodeId, patch) => {
@@ -1177,9 +1199,6 @@ function flushOnUnload(): void {
     const nodeType = node.type ?? '';
 
     // Build a minimal snapshot matching what preprocessNodeIfNeeded would send.
-    const labelSource = nodeData?.labelSource as string | undefined;
-    const isAutoLabel = !labelSource || labelSource === 'auto';
-
     const snapshot: Record<string, unknown> =
       nodeType === 'frame'
         ? {
@@ -1194,11 +1213,10 @@ function flushOnUnload(): void {
               .filter((l) => l.length > 0),
           }
         : {
-            title: isAutoLabel
-              ? undefined
-              : (nodeData?.label as string) ||
-                (nodeData?.title as string) ||
-                undefined,
+            title:
+              (nodeData?.label as string) ||
+              (nodeData?.title as string) ||
+              undefined,
             content: (nodeData?.content as string) || undefined,
             src: (nodeData?.src as string) || undefined,
             sourceId: (nodeData?.sourceId as string) || undefined,
