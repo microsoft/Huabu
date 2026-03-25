@@ -93,28 +93,42 @@ export const ContextUsageRing = ({
       total += countTokens(draftText);
     }
 
-    // Pending attachments extracted text
+    // Pending attachments — approximate server-side wrapper formatting
     for (const att of pendingAttachments) {
+      let attachmentText = '';
       if (att.extractedText) {
-        total += countTokens(att.extractedText);
+        const sourceLabel = att.label ?? 'attachment';
+        attachmentText += `[Extracted text from ${sourceLabel}]:\n${att.extractedText}\n`;
       }
       if (att.label) {
-        total += countTokens(att.label);
+        attachmentText += `[Attached ${att.type}: ${att.label}]\n`;
+      }
+      if (attachmentText) {
+        total += countTokens(attachmentText);
       }
     }
 
-    // Selected nodes content
+    // Selected nodes — approximate "[Selected Nodes]\n${JSON.stringify(...)}"
     const selectedNodes = nodes.filter((n) => n.selected);
-    for (const node of selectedNodes) {
-      const data = node.data as Record<string, unknown> | undefined;
-      const content = data?.content;
-      if (typeof content === 'string' && content.length > 0) {
-        total += countTokens(content);
-      }
-      const label = data?.label;
-      if (typeof label === 'string') {
-        total += countTokens(label);
-      }
+    const selectionPayload = selectedNodes
+      .map((node) => {
+        const data = node.data as Record<string, unknown> | undefined;
+        const content = data?.content;
+        const label = data?.label;
+        const hasContent = typeof content === 'string' && content.length > 0;
+        const hasLabel = typeof label === 'string' && label.length > 0;
+        if (!hasContent && !hasLabel) return null;
+        return {
+          id: node.id,
+          ...(hasLabel ? { label: label as string } : {}),
+          ...(hasContent ? { content: content as string } : {}),
+        };
+      })
+      .filter((entry) => entry !== null);
+    if (selectionPayload.length > 0) {
+      total += countTokens(
+        `[Selected Nodes]\n${JSON.stringify(selectionPayload, null, 2)}`,
+      );
     }
 
     return total;

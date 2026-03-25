@@ -271,7 +271,7 @@ export const agentApi = {
       { signal },
     );
     if (!response.ok) {
-      return { contextTokens: 0, contextWindow: 128_000 };
+      throw new Error(`HTTP error! status: ${response.status}`);
     }
     return response.json() as Promise<{
       contextTokens: number;

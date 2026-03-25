@@ -557,32 +557,43 @@ const agentRoutes: FastifyPluginAsync = async (
     const { canvasId } = request.query;
     const CONTEXT_WINDOW = 128_000;
 
+    if (!threadId || threadId.trim().length === 0) {
+      return reply.code(400).send({ error: 'threadId is required' });
+    }
+
     const context = loadContext(threadId, canvasId);
     if (!context) {
       return reply.send({ contextTokens: 0, contextWindow: CONTEXT_WINDOW });
     }
 
-    // Count tokens from system prompt + all messages
-    let text = context.systemPrompt ?? '';
+    // Count tokens from system prompt + all messages, including non-text blocks
+    const textParts: string[] = [];
+    if (context.systemPrompt) {
+      textParts.push(context.systemPrompt);
+    }
     for (const msg of context.messages) {
       if (typeof msg.content === 'string') {
-        text += msg.content;
+        textParts.push(msg.content);
       } else if (Array.isArray(msg.content)) {
         for (const part of msg.content) {
-          if (
-            typeof part === 'object' &&
-            part !== null &&
-            'type' in part &&
-            part.type === 'text' &&
-            'text' in part
-          ) {
-            text += (part as { type: 'text'; text: string }).text;
+          if (typeof part === 'object' && part !== null && 'type' in part) {
+            const typed = part as { type: string; text?: string };
+            if (typed.type === 'text' && typed.text) {
+              textParts.push(typed.text);
+            } else {
+              // Include non-text blocks (toolCall, thinking, etc.) via serialization
+              try {
+                textParts.push(JSON.stringify(part));
+              } catch {
+                /* skip */
+              }
+            }
           }
         }
       }
     }
 
-    const contextTokens = encode(text).length;
+    const contextTokens = encode(textParts.join('\n')).length;
     return reply.send({ contextTokens, contextWindow: CONTEXT_WINDOW });
   });
 
