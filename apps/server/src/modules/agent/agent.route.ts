@@ -13,6 +13,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { createId } from '@sediment/shared';
+import { encode } from 'gpt-tokenizer';
 
 import { AGENT_SYSTEM_PROMPT } from '../../prompt/agent.js';
 import { RESEARCH_SYSTEM_PROMPT } from '../../prompt/research.js';
@@ -543,6 +544,47 @@ const agentRoutes: FastifyPluginAsync = async (
       request.raw.socket?.once('close', cleanup);
     },
   );
+
+  /**
+   * GET /agent/context-tokens/:threadId
+   * Returns the current context token count for a conversation thread.
+   */
+  fastify.get<{
+    Params: { threadId: string };
+    Querystring: { canvasId?: string };
+  }>('/context-tokens/:threadId', async function (request, reply) {
+    const { threadId } = request.params;
+    const { canvasId } = request.query;
+    const CONTEXT_WINDOW = 128_000;
+
+    const context = loadContext(threadId, canvasId);
+    if (!context) {
+      return reply.send({ contextTokens: 0, contextWindow: CONTEXT_WINDOW });
+    }
+
+    // Count tokens from system prompt + all messages
+    let text = context.systemPrompt ?? '';
+    for (const msg of context.messages) {
+      if (typeof msg.content === 'string') {
+        text += msg.content;
+      } else if (Array.isArray(msg.content)) {
+        for (const part of msg.content) {
+          if (
+            typeof part === 'object' &&
+            part !== null &&
+            'type' in part &&
+            part.type === 'text' &&
+            'text' in part
+          ) {
+            text += (part as { type: 'text'; text: string }).text;
+          }
+        }
+      }
+    }
+
+    const contextTokens = encode(text).length;
+    return reply.send({ contextTokens, contextWindow: CONTEXT_WINDOW });
+  });
 
   /**
    * POST /agent
