@@ -136,7 +136,7 @@ interface InlineBlockDiffsProps {
 
 /** The bar (::before) is positioned at right: -12px, width: 6px.
  *  Bar spans blockRight+6 → blockRight+12 in screen coords. */
-const BAR_OFFSET_RIGHT = 12;
+const BAR_OFFSET_RIGHT = 6;
 
 export const InlineBlockDiffs = ({
   blockDiffMap,
@@ -347,7 +347,7 @@ export const InlineBlockDiffs = ({
         <DiffPopover
           style={{
             top: popoverPos.top,
-            left: popoverPos.left,
+            left: popoverPos.left + BAR_OFFSET_RIGHT,
             width: popoverPos.width,
             transform: 'translateX(-100%)',
           }}
@@ -389,7 +389,7 @@ export const InlineBlockDiffs = ({
             className="absolute z-[5] cursor-pointer"
             style={{
               top: pos.top - 1,
-              left: pos.right + BAR_OFFSET_RIGHT - 6,
+              left: pos.right + BAR_OFFSET_RIGHT,
               width: 6,
               height: 6,
               backgroundColor: '#f87171',
@@ -412,8 +412,8 @@ export const InlineBlockDiffs = ({
           {hoveredDeletedIdx === pos.index && (
             <DiffPopover
               style={{
-                top: pos.top + 8,
-                left: pos.right,
+                top: pos.top - 8,
+                left: pos.right + BAR_OFFSET_RIGHT,
                 width: pos.width,
                 transform: 'translateX(-100%)',
               }}
