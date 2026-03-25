@@ -96,9 +96,9 @@ export const ContextUsageRing = ({
     // Pending attachments — approximate server-side wrapper formatting
     for (const att of pendingAttachments) {
       let attachmentText = '';
-      if (att.extractedText) {
+      if (att.content) {
         const sourceLabel = att.label ?? 'attachment';
-        attachmentText += `[Extracted text from ${sourceLabel}]:\n${att.extractedText}\n`;
+        attachmentText += `[Extracted text from ${sourceLabel}]:\n${att.content}\n`;
       }
       if (att.label) {
         attachmentText += `[Attached ${att.type}: ${att.label}]\n`;
