@@ -158,7 +158,7 @@ function applyCanvasCommandsFromToolResult(
       data?: { commands?: CanvasCommand[] };
     };
     if (parsed.status === 'success' && parsed.data?.commands?.length) {
-      useCanvasStore.getState().executeCommands(parsed.data.commands, 'agent');
+      useCanvasStore.getState().executeCommands(parsed.data.commands);
       return { commands: parsed.data.commands };
     }
   } catch (err) {
