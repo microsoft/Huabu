@@ -9,6 +9,7 @@
  */
 
 import { preprocessNode } from '@/api/canvas';
+import { updateSource } from '@/api/knowledge';
 
 import type { Node } from '@xyflow/react';
 
@@ -119,13 +120,8 @@ function buildSnapshot(
     return { childLabels };
   }
 
-  const labelSource = data?.labelSource as string | undefined;
-  const isAutoLabel = !labelSource || labelSource === 'auto';
-
   return {
-    title: isAutoLabel
-      ? undefined
-      : (data?.label as string) || (data?.title as string) || undefined,
+    title: (data?.label as string) || (data?.title as string) || undefined,
     content: (data?.content as string) || undefined,
     src: (data?.src as string) || undefined,
     sourceId: (data?.sourceId as string) || undefined,
@@ -198,12 +194,26 @@ export async function preprocessNodeIfNeeded({
 
     // Apply suggested label from enrich or extract stage.
     if (response.suggestedLabel) {
-      applySuggestedLabel(
+      const labelApplied = applySuggestedLabel(
         node.id,
         response.suggestedLabel,
         getNodeById,
         patchNodeSilent,
       );
+
+      // Sync the source title to match the applied label.
+      if (labelApplied) {
+        const sourceId =
+          response.sourceId ||
+          (typeof (node.data as Record<string, unknown>)?.sourceId === 'string'
+            ? ((node.data as Record<string, unknown>).sourceId as string)
+            : undefined);
+        if (sourceId) {
+          void updateSource(sourceId, {
+            title: response.suggestedLabel.trim(),
+          }).catch(() => {});
+        }
+      }
     }
 
     if (response.success || response.error?.includes('EMPTY_CONTENT')) {
@@ -232,12 +242,12 @@ function applySuggestedLabel(
   suggestedLabel: string,
   getNodeById: (id: string) => Node | undefined,
   patchNodeSilent: (nodeId: string, patch: Record<string, unknown>) => void,
-): void {
+): boolean {
   const trimmed = suggestedLabel.trim();
-  if (trimmed.length === 0) return;
+  if (trimmed.length === 0) return false;
 
   const currentNode = getNodeById(nodeId);
-  if (!currentNode) return;
+  if (!currentNode) return false;
 
   const currentData = currentNode.data as Record<string, unknown> | undefined;
   const currentLabel =
@@ -247,5 +257,8 @@ function applySuggestedLabel(
 
   if (currentLabel.trim().length === 0 || isAutoLabel) {
     patchNodeSilent(nodeId, { label: trimmed, labelSource: 'auto' });
+    return true;
   }
+
+  return false;
 }

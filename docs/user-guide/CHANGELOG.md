@@ -4,6 +4,18 @@
 
 ---
 
+## 2026-03-25 · Source file title syncs with node label
+
+**What Changed**
+
+- The title of source files in the knowledge store now automatically updates when a node's label changes, whether through user rename or auto-generated labels from preprocessing.
+
+**Notes**
+
+- Previously, source files would keep showing "Untitled" even after the node label was updated.
+- Both user-initiated renames and auto-suggested labels from the server now sync to the source file title.
+- The preprocessing pipeline also sends the current label as the source title during initial ingestion, preventing "Untitled" files from being created.
+
 ## 2026-03-25 · 上下文用量环精度提升
 
 **What Changed**
@@ -14,6 +26,7 @@
 
 - 已占用 token 数从后端实时获取（包含 system prompt、所有消息文本及 tool call 等非文本内容），比之前仅统计前端可见消息更准确。
 - 预估占用会模拟后端的包装格式（如 `[Extracted text from ...]`、`[Selected Nodes]` JSON），使估算更贴近实际。
+
 ## 2026-03-24 · AI 内容变更追踪
 
 **变更内容**
