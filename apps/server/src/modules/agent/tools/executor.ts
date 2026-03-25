@@ -227,6 +227,24 @@ async function executeCanvasCommands(
   context?: { mode?: AgentMode },
 ): Promise<string> {
   const origin = agentModeToOrigin(context?.mode);
+
+  // Read canvas state once so we can resolve node types for provenance injection.
+  const canvas = readCanvas(args.canvasId);
+  const nodeTypeMap = new Map<string, string>();
+  if (canvas) {
+    for (const n of (canvas.state.nodes ?? []) as Array<
+      Record<string, unknown>
+    >) {
+      const data = (n.data as Record<string, unknown> | undefined) ?? {};
+      const nodeType = (n.nodeType ?? n.type ?? data.type) as
+        | string
+        | undefined;
+      if (typeof n.id === 'string' && typeof nodeType === 'string') {
+        nodeTypeMap.set(n.id, nodeType);
+      }
+    }
+  }
+
   const commands = args.commands.map((cmd) => {
     if (cmd.type === 'CREATE_NODES') {
       const nodes = cmd.nodes as Array<Record<string, unknown>>;
@@ -259,8 +277,12 @@ async function executeCanvasCommands(
         patches: patches.map((entry) => {
           const patch =
             (entry.patch as Record<string, unknown> | undefined) ?? {};
+          const nodeId = entry.nodeId as string | undefined;
+          const isNote = nodeId ? nodeTypeMap.get(nodeId) === 'note' : false;
           const hasContent =
-            typeof patch.content === 'string' && patch.content.length > 0;
+            isNote &&
+            typeof patch.content === 'string' &&
+            patch.content.length > 0;
           if (hasContent) {
             return {
               ...entry,

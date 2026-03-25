@@ -18,7 +18,7 @@ import {
   getBlockAuthorStatus,
   getDeletedKeys,
   hasAnyPendingDiff,
-  recordUserEdit,
+  recordUserEdits,
   removeDeletedEntry,
   repairDeletedBlockAnchors,
   resolveSentinelProvenance,
@@ -138,6 +138,11 @@ export const NotePreview = ({
     new Map(),
   );
   const [deletedBlocks, setDeletedBlocks] = useState<DeletedBlockInfo[]>([]);
+
+  // Debounced persistence timer for onChange — serialisation + writePatch are
+  // deferred so provenance state updates stay immediate while expensive work
+  // (blocksToMarkdownLossy, JSON stringify for the patch) batches naturally.
+  const persistTimerRef = useRef(0);
 
   /** Write a content patch back to the parent. */
   const writePatch = (
@@ -450,7 +455,7 @@ export const NotePreview = ({
         return;
       }
 
-      let updated = recordUserEdit(provenanceRef.current, blockId);
+      let updated = recordUserEdits(provenanceRef.current, [blockId]);
       updated = clearBaselineText(updated, blockId);
       provenanceRef.current = updated;
       setProvenance(updated);
@@ -565,31 +570,30 @@ export const NotePreview = ({
               if (newJson === lastDocJsonRef.current) return;
               lastDocJsonRef.current = newJson;
 
-              const md = editor.blocksToMarkdownLossy(editor.document);
-              const newMarkdown = md.trim();
-              lastAppliedMarkdownRef.current = newMarkdown;
-
               const currentBlockIds = editor.document.map(
                 (b: { id: string }) => b.id,
               );
               const prevIdSet = new Set(prevBlockIdsRef.current);
-              let updatedProvenance = provenanceRef.current;
 
+              // Collect all block IDs that need user-edit recording,
+              // then apply in one batch to avoid repeated shallow copies.
+              const editedBlockIds: string[] = [];
               for (const blockId of currentBlockIds) {
                 if (!prevIdSet.has(blockId)) {
-                  updatedProvenance = recordUserEdit(
-                    updatedProvenance,
-                    blockId,
-                  );
+                  editedBlockIds.push(blockId);
                 }
               }
-
               const cursorBlock = editor.getTextCursorPosition()?.block;
               if (cursorBlock && prevIdSet.has(cursorBlock.id)) {
-                updatedProvenance = recordUserEdit(
-                  updatedProvenance,
-                  cursorBlock.id,
-                );
+                editedBlockIds.push(cursorBlock.id);
+              }
+
+              let updatedProvenance = recordUserEdits(
+                provenanceRef.current,
+                editedBlockIds,
+              );
+
+              if (cursorBlock && prevIdSet.has(cursorBlock.id)) {
                 // Clear baselineText when user edits a block
                 if (
                   updatedProvenance?.[cursorBlock.id]?.baselineText !==
@@ -620,11 +624,12 @@ export const NotePreview = ({
 
                 // Repair __deleted_* entries whose afterBlockId is stale
                 // (the anchor block was removed/merged by the user).
-                updatedProvenance = repairDeletedBlockAnchors(
-                  updatedProvenance,
-                  currentIdSet,
-                  prevBlockIdsRef.current,
-                );
+                updatedProvenance =
+                  repairDeletedBlockAnchors(
+                    updatedProvenance,
+                    currentIdSet,
+                    prevBlockIdsRef.current,
+                  ) ?? updatedProvenance;
               }
 
               provenanceRef.current = updatedProvenance;
@@ -636,15 +641,32 @@ export const NotePreview = ({
               setBlockDiffMap(deriveBlockDiffMap(updatedProvenance));
               setDeletedBlocks(deriveDeletedBlocks(updatedProvenance));
 
-              const isLabelUserSet = data.labelSource === 'user';
-              const autoLabel = isLabelUserSet
-                ? undefined
-                : extractLabelFromBlocks(
-                    editor.document as Parameters<
-                      typeof extractLabelFromBlocks
-                    >[0],
-                  ) || undefined;
-              writePatch(newMarkdown, newJson, autoLabel, updatedProvenance);
+              // Debounce the expensive serialisation + persistence path.
+              // Provenance state is already updated above for immediate UI.
+              clearTimeout(persistTimerRef.current);
+              persistTimerRef.current = window.setTimeout(() => {
+                const md = editor.blocksToMarkdownLossy(editor.document);
+                const newMarkdown = md.trim();
+                lastAppliedMarkdownRef.current = newMarkdown;
+
+                const latestJson = JSON.stringify(editor.document);
+                lastDocJsonRef.current = latestJson;
+
+                const isLabelUserSet = data.labelSource === 'user';
+                const autoLabel = isLabelUserSet
+                  ? undefined
+                  : extractLabelFromBlocks(
+                      editor.document as Parameters<
+                        typeof extractLabelFromBlocks
+                      >[0],
+                    ) || undefined;
+                writePatch(
+                  newMarkdown,
+                  latestJson,
+                  autoLabel,
+                  provenanceRef.current,
+                );
+              }, 150);
             }}
           >
             {!readOnly && <SideMenuController sideMenu={NoteEditorSideMenu} />}

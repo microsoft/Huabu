@@ -1,3 +1,5 @@
+import { clsx } from 'clsx';
+import { diffWords } from 'diff';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { Button } from '@/components/Common/Button';
@@ -26,12 +28,8 @@ interface DeletedGroup {
 }
 
 // ---------------------------------------------------------------------------
-// Word-level diff
+// Word-level diff (powered by the `diff` npm package)
 // ---------------------------------------------------------------------------
-
-function tokenize(text: string): string[] {
-  return text.match(/\S+|\s+/g) || [];
-}
 
 export function computeWordDiff(
   oldText: string,
@@ -41,65 +39,29 @@ export function computeWordDiff(
   if (!oldText) return [{ type: 'added', text: newText }];
   if (!newText) return [{ type: 'removed', text: oldText }];
 
-  const a = tokenize(oldText);
-  const b = tokenize(newText);
-  const m = a.length;
-  const n = b.length;
-
-  // LCS DP table
-  const dp: number[][] = Array.from({ length: m + 1 }, () =>
-    Array<number>(n + 1).fill(0),
-  );
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      dp[i][j] =
-        a[i - 1] === b[j - 1]
-          ? dp[i - 1][j - 1] + 1
-          : Math.max(dp[i - 1][j], dp[i][j - 1]);
-    }
-  }
-
-  // Backtrack
-  const stack: DiffSegment[] = [];
-  let i = m;
-  let j = n;
-  while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && a[i - 1] === b[j - 1]) {
-      stack.push({ type: 'same', text: a[i - 1] });
-      i--;
-      j--;
-    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-      stack.push({ type: 'added', text: b[j - 1] });
-      j--;
-    } else {
-      stack.push({ type: 'removed', text: a[i - 1] });
-      i--;
-    }
-  }
-  stack.reverse();
-
-  // Merge consecutive segments of the same type
-  const segments: DiffSegment[] = [];
-  for (const seg of stack) {
-    const last = segments[segments.length - 1];
-    if (last && last.type === seg.type) {
-      last.text += seg.text;
-    } else {
-      segments.push({ ...seg });
-    }
-  }
-  return segments;
+  return diffWords(oldText, newText).map((change) => ({
+    type: change.added ? 'added' : change.removed ? 'removed' : 'same',
+    text: change.value,
+  }));
 }
 
 // ---------------------------------------------------------------------------
 // Grouping helpers
 // ---------------------------------------------------------------------------
 
-/** Build groups of consecutive modified blocks from ordered block IDs. */
+/** Build groups of consecutive modified blocks from ordered block IDs.
+ *  A deleted-block indicator between two modified blocks breaks the run. */
 function buildModifiedRuns(
   orderedBlockIds: string[],
   blockDiffMap: Map<string, string>,
+  deletedBlocks: DeletedBlockInfo[],
 ): ModifiedRun[] {
+  // Collect block IDs that have a deletion indicator immediately after them.
+  const hasDeleteAfter = new Set<string>();
+  for (const info of deletedBlocks) {
+    if (info.afterBlockId) hasDeleteAfter.add(info.afterBlockId);
+  }
+
   const runs: ModifiedRun[] = [];
   let current: ModifiedRun | null = null;
 
@@ -109,6 +71,11 @@ function buildModifiedRuns(
         current = { key: blockId, blockIds: [] };
       }
       current.blockIds.push(blockId);
+      // Break the run if a deletion indicator follows this block.
+      if (hasDeleteAfter.has(blockId) && current) {
+        runs.push(current);
+        current = null;
+      }
     } else {
       if (current) {
         runs.push(current);
@@ -241,8 +208,8 @@ export const InlineBlockDiffs = ({
 
   // Build groups
   const modifiedRuns = useMemo(
-    () => buildModifiedRuns(orderedBlockIds, blockDiffMap),
-    [orderedBlockIds, blockDiffMap],
+    () => buildModifiedRuns(orderedBlockIds, blockDiffMap, deletedBlocks),
+    [orderedBlockIds, blockDiffMap, deletedBlocks],
   );
 
   const deletedGroups = useMemo(
@@ -525,7 +492,7 @@ export const InlineBlockDiffs = ({
         <div key={`del-group-${pos.group.key}`}>
           {/* Invisible hit-area div — tall and wide enough to hover easily */}
           <div
-            className="absolute z-[5] flex cursor-pointer items-center justify-center"
+            className="absolute z-5 flex cursor-pointer items-center justify-center"
             style={{
               top: pos.top - 8,
               left: pos.right + BAR_OFFSET_RIGHT - 6,
@@ -588,7 +555,10 @@ export const InlineBlockDiffs = ({
               {pos.group.items.map((item, i) => (
                 <div
                   key={item.index}
-                  className={`bg-red-100 text-red-600 line-through${i > 0 ? 'mt-1 border-t border-red-200 pt-1' : ''}`}
+                  className={clsx(
+                    'bg-red-100 text-red-600 line-through',
+                    i > 0 && 'mt-1 border-t border-red-200 pt-1',
+                  )}
                 >
                   {item.info.text}
                 </div>

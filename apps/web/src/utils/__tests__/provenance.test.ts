@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 import {
   expandSentinelProvenance,
   recordUserEdit,
+  recordUserEdits,
   getBlockAuthorStatus,
   hasAnyPureAiBlock,
   blockFingerprint,
@@ -151,6 +152,34 @@ describe('recordUserEdit', () => {
     const result = recordUserEdit(map, 'b1');
     expect(result.b1.baselineText).toBe('original');
     expect(result.b1.modifications).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// recordUserEdits (batch)
+// ---------------------------------------------------------------------------
+
+describe('recordUserEdits', () => {
+  it('handles multiple block IDs in a single copy', () => {
+    const map: BlockProvenanceMap = { b1: makeAiEntry() };
+    const result = recordUserEdits(map, ['b1', 'b2']);
+    expect(result.b1.modifications).toHaveLength(1);
+    expect(result.b2.author).toBe('user');
+  });
+
+  it('returns empty map for empty blockIds on undefined input', () => {
+    const result = recordUserEdits(undefined, []);
+    expect(result).toEqual({});
+  });
+
+  it('is no-op for existing user blocks', () => {
+    const map: BlockProvenanceMap = {
+      b1: makeUserEntry(),
+      b2: makeUserEntry(),
+    };
+    const result = recordUserEdits(map, ['b1', 'b2']);
+    expect(result.b1).toBe(map.b1);
+    expect(result.b2).toBe(map.b2);
   });
 });
 

@@ -76,6 +76,34 @@ export function recordUserEdit(
 }
 
 /**
+ * Batch variant of `recordUserEdit` — applies user edits for multiple block IDs
+ * with a single shallow copy of the map.
+ */
+export function recordUserEdits(
+  map: BlockProvenanceMap | undefined,
+  blockIds: string[],
+): BlockProvenanceMap {
+  if (blockIds.length === 0) return map ?? {};
+  const result = { ...(map ?? {}) };
+  const now = new Date().toISOString();
+  for (const blockId of blockIds) {
+    const existing = result[blockId];
+    if (!existing) {
+      result[blockId] = { author: 'user', createdAt: now };
+    } else if (existing.author === 'ai') {
+      result[blockId] = {
+        ...existing,
+        modifications: [
+          ...(existing.modifications ?? []),
+          { by: 'user', at: now },
+        ],
+      };
+    }
+  }
+  return result;
+}
+
+/**
  * Compute a summary of block provenance for display purposes.
  */
 export function summarizeProvenance(map: BlockProvenanceMap | undefined): {

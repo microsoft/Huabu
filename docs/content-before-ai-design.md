@@ -1,176 +1,150 @@
-# Content Before AI — Snapshot & Diff Design
+# Block-Level Provenance & Inline Diff Design
 
 ## Background
 
-Sediment's block-level provenance system tracks which blocks in a note were written
-or modified by AI (Phase 2). Visual indicators (purple color bars) show this on the
-editor (Phase 3). However, these mechanisms only show _which blocks_ are AI-authored —
-they cannot show _what was changed_: deletions, modifications to existing text, or the
-overall scope of an AI edit.
-
-Users need a way to answer: "What exactly did the AI change in my note? Did it make
-any unexpected modifications?"
+Sediment tracks which blocks in a note were written or modified by AI using a
+block-level provenance system. Visual indicators (purple color bars) and inline
+word-level diffs let users see _what_ the AI changed and accept or reject
+individual changes.
 
 ## Design Goals
 
-1. Let users see a Markdown diff of AI changes with one click.
-2. Auto-dismiss when the user has reviewed/edited all AI blocks.
-3. Keep the data model minimal — one additional field (`contentBeforeAI`).
-4. No new server-side logic — capture happens entirely on the client.
+1. Per-block provenance tracking (AI vs user authorship).
+2. Inline word-level diff bars for modified blocks, with accept/reject per block.
+3. Deleted-block indicators with restore capability.
+4. Cumulative baselines — multiple AI edits accumulate diffs against the last user-owned state.
 
 ## Data Model
 
-### New field: `NoteNodeData.contentBeforeAI`
+### `BlockProvenance` & `BlockProvenanceMap`
+
+Defined in `packages/shared/src/types/canvas/node.ts`:
 
 ```typescript
-interface NoteNodeData {
-  // ... existing fields ...
-  contentBeforeAI?: string;
+interface BlockProvenance {
+  author: 'ai' | 'user';
+  agentMode?: AgentMode;
+  createdAt: string;
+  modifications?: Array<{
+    by: 'ai' | 'user';
+    agentMode?: AgentMode;
+    at: string;
+  }>;
+  baselineText?: string; // present = pending diff to review
+  deleted?: boolean; // marks a block deleted by AI
+  afterBlockId?: string | null; // positional anchor for deleted entries
 }
+
+type BlockProvenanceMap = Record<string, BlockProvenance>;
 ```
 
-A snapshot of the note's canonical Markdown (`content`) taken **before** the first
-AI edit in a session. Cleared when the user dismisses the banner or when all AI
-blocks have been user-modified (auto-clear).
+The special key `__all__` is a sentinel set by the server when AI creates/updates
+content via Markdown (no block IDs available). The client expands this into
+per-block entries when the editor initialises.
+
+`NoteNodeData.provenance?: BlockProvenanceMap` stores the map.
 
 ### Lifecycle
 
 ```
-[user content] ── AI edit ──► contentBeforeAI = old content (captured once)
-                  AI edit ──► contentBeforeAI unchanged (Strategy A: don't overwrite)
-                  AI edit ──► contentBeforeAI unchanged
-                  user edits all AI blocks ──► contentBeforeAI = undefined (auto-clear)
-                  -- or --
-                  user clicks Dismiss ──► contentBeforeAI = undefined
-                  AI edit ──► contentBeforeAI = old content (new session)
+AI edit → server stamps { provenance: { __all__: { author: 'ai' } } }
+       → client mergeNodeData preserves existing per-block entries alongside sentinel
+       → NotePreview resolves sentinel into per-block entries via content-based matching
+       → baselineText set on modified/new blocks, __deleted_N__ entries for deletions
+       → user accepts/rejects individual blocks or clicks Accept All / Reject All
+       → baselineText cleared → diff bars disappear
 ```
-
-### Strategy A: Cumulative Snapshot
-
-`contentBeforeAI` is set **once** on the first AI edit and **not overwritten** by
-subsequent AI edits. This means the diff always shows cumulative changes from the
-last fully user-owned state. Rationale:
-
-- Users want to see "everything AI changed since I last looked"
-- Block-level provenance already distinguishes which diff sections are pure-AI vs
-  user-modified, so mixed diffs are not confusing
 
 ## Data Flow
 
-### Snapshot Capture
+### Server: Provenance Injection
 
-Happens in the **client-side** `mergeNodeData` command handler
-(`apps/web/src/canvas/commands/mergeNodeData.ts`).
+In `apps/server/src/modules/agent/tools/executor.ts`:
 
-```
-Server executor stamps { provenance: { __all__: { author: 'ai' } }, content: "..." }
-  │
-  ▼
-SSE stream → client canvasStore.executeCommands
-  │
-  ▼
-mergeNodeData handler:
-  1. Has dataRec (existing node data) with dataRec.content = "old markdown"
-  2. Has patchRec (incoming patch) with patchRec.content = "new markdown"
-  3. Detects AI patch: patchRec.provenance has __all__ sentinel
-  4. If dataRec.contentBeforeAI is unset AND dataRec.content is non-empty:
-     → contentBeforeAI = dataRec.content
-  5. Merges into updated node data
-```
+- `CREATE_NODES`: stamps `{ provenance: { __all__: sentinel } }` on note nodes with content.
+- `MERGE_NODE_DATA`: reads canvas state to resolve node types, stamps provenance only on note nodes with content.
 
-Why here and not on the server? The server's `executeCanvasCommands` does not have
-access to the current node content when handling `MERGE_NODE_DATA` — it only receives
-the patch. The client command handler has both the old data and the incoming patch.
+### Client: `mergeNodeData` Command
 
-### Auto-Clear
+In `apps/web/src/canvas/commands/mergeNodeData.ts`:
 
-Happens in `NotePreview.tsx`'s `onChange` handler after provenance updates:
+When an AI patch with `__all__` sentinel arrives, the handler merges it with
+existing per-block provenance so the diff-merge logic can later match old blocks
+to new blocks and carry over user-authored provenance for unchanged content.
 
-```
-User edits a block
-  → provenance updated (recordUserEdit)
-  → check hasAnyPureAiBlock(updatedProvenance)
-  → if false: include { contentBeforeAI: undefined } in the data patch
-```
+### Client: `NotePreview` Sentinel Resolution
 
-The `hasAnyPureAiBlock` utility iterates the provenance map and returns `true` if
-any non-`__all__` entry has `getBlockAuthorStatus() === 'ai'` (pure AI, no user
-modifications).
+In `apps/web/src/components/Nodes/NotePreview.tsx`:
 
-### Manual Dismiss
+On content load, `resolveSentinelProvenance()` expands the `__all__` sentinel:
 
-User clicks "Dismiss" on the banner → `onDataChange({ contentBeforeAI: undefined })`.
+1. No existing per-block entries → simple expansion (all blocks = new AI).
+2. Existing per-block entries → content-based fingerprint matching:
+   - Matched blocks (identical content): old provenance carried over.
+   - Unmatched new blocks: stamped as AI with `baselineText` from paired old block.
+   - Deleted old blocks: stored as `__deleted_N__` entries with positional anchors.
+
+### Client: `onChange` Provenance Tracking
+
+On each content change:
+
+- New block IDs → `recordUserEdits()` batch stamps as user-authored.
+- Cursor block edited → `recordUserEdit()` + `clearBaselineText()` (diff dismissed).
+- Stale provenance entries pruned; deleted-block anchors repaired.
+- Persistence (markdown serialisation + `writePatch`) debounced at 150ms.
 
 ## UI Design
 
-### Banner
+### Purple Color Bars (`::before` pseudo-elements)
 
-Appears at the top of the `NotePreview` component (expanded editor view), between
-the provenance `<style>` tag and the `<NoteSourceIdProvider>`.
+Dynamic CSS rules generated per block via `useMemo`:
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│ ✦ AI modified this note              [View changes] [Dismiss]│
-├──────────────────────────────────────────────────────────────┤
-│  (collapsible diff panel — shown when "View changes" toggled)│
-│  - old line removed                                          │
-│  + new line added                                            │
-│    unchanged context line                                    │
-└──────────────────────────────────────────────────────────────┘
-│                                                              │
-│  [BlockNote editor continues below]                          │
-```
+- **Solid bar** (`--color-ai`): pure AI block with pending diff.
+- **Light solid bar** (`--color-ai-light`): AI block, diff already accepted.
+- **Dashed bar** (striped gradient): AI block user-modified.
 
-Styling:
+### Inline Block Diffs (`InlineBlockDiffs` component)
 
-- Banner bar: `bg-ai-bg text-ai` (uses `--color-ai-bg` and `--color-ai` theme tokens)
-- Diff panel: monospace, green/red highlights for added/removed lines
-- Buttons: `Button variant="ghost" size="sm"`
+- Modified blocks grouped into consecutive "runs".
+- Hovering the bar zone shows a popover with word-level diff (powered by `diffWords` from the `diff` npm package).
+- Accept/Reject buttons per run.
+
+### Deleted Block Indicators
+
+- Red markers positioned after the anchor block.
+- Hover shows deleted text with Accept (confirm deletion) / Reject (restore block).
+
+### Global Actions
+
+- **Accept All / Reject All** buttons at bottom-right when any pending diff exists.
+- Reject All restores all blocks to baseline text and re-inserts deleted blocks.
 
 ### Visibility Rules
 
-- Shown when `contentBeforeAI` is a non-empty string AND not `readOnly`
-- Hidden on canvas card view (only in expanded editor)
+- Diff UI shown only when `!readOnly` and there are pending diffs.
+- Color bars always visible for AI-authored blocks regardless of diff status.
 
 ## Edge Cases
 
-### 1. AI creates a brand-new note (no prior content)
+1. **AI creates a brand-new note** → all blocks get `baselineText: ''` (deep purple bars, popover shows "all added").
+2. **User edits one block, others remain pure-AI** → only edited block's bar changes; diff stays for unedited blocks.
+3. **Multiple sequential AI edits** → cumulative `baselineText` preserved; deletions accumulate across operations.
+4. **Undo/redo** → `mergeNodeData` has `snapshot: 'yes'`, so provenance changes are part of the undo stack.
+5. **Editor remount** → `lastExpandedProvenanceRef` preserves expanded provenance across re-renders; `resolveSentinelProvenance` falls back to `contentJson` parsing.
 
-`dataRec.content` is empty → `contentBeforeAI` is NOT set → no banner.
-Correct: there is no "before" to compare against.
+## Files
 
-### 2. User edits one block, others remain pure-AI
-
-Only the edited block's provenance changes to `user-modified`. Banner stays.
-The diff still shows all changes but provenance color bars indicate which blocks
-the user has already touched.
-
-### 3. `contentBeforeAI` persistence across sessions
-
-`contentBeforeAI` is persisted in the canvas file as part of node data. If the user
-closes and reopens the app, the banner reappears if they haven't addressed AI changes.
-
-### 4. Undo/redo
-
-`mergeNodeData` has `snapshot: 'yes'`, so the capture is part of the undo stack.
-Undoing the AI edit also undoes the snapshot capture.
-
-### 5. `contentBeforeAI: undefined` in patches
-
-`{ ...dataRec, ...patchRec }` with `patchRec.contentBeforeAI = undefined` sets the
-key to `undefined` but does not delete it. All checks use `typeof x === 'string'`,
-so this is functionally equivalent to deletion.
-
-## Files Modified
-
-| File                                             | Change                                           |
-| ------------------------------------------------ | ------------------------------------------------ |
-| `packages/shared/src/types/canvas/node.ts`       | Add `contentBeforeAI?: string` to `NoteNodeData` |
-| `apps/web/src/canvas/commands/mergeNodeData.ts`  | Snapshot capture logic                           |
-| `apps/web/src/utils/provenance.ts`               | Add `hasAnyPureAiBlock()` utility                |
-| `apps/web/src/components/Nodes/AiDiffBanner.tsx` | New banner + diff component                      |
-| `apps/web/src/components/Nodes/NotePreview.tsx`  | Banner integration + auto-clear                  |
+| File                                                 | Role                                                               |
+| ---------------------------------------------------- | ------------------------------------------------------------------ |
+| `packages/shared/src/types/canvas/node.ts`           | `BlockProvenance`, `BlockProvenanceMap`, `NoteNodeData.provenance` |
+| `apps/server/src/modules/agent/tools/executor.ts`    | Stamps AI provenance sentinel on note commands                     |
+| `apps/web/src/canvas/commands/mergeNodeData.ts`      | Merges sentinel with existing per-block provenance                 |
+| `apps/web/src/utils/provenance.ts`                   | Provenance utilities (expand, merge, diff derivation, repair)      |
+| `apps/web/src/components/Nodes/NotePreview.tsx`      | Sentinel resolution, onChange tracking, accept/reject handlers     |
+| `apps/web/src/components/Nodes/InlineBlockDiffs.tsx` | Inline diff bars, popovers, word-level diff display                |
+| `apps/web/src/components/Nodes/NodeWrapper.tsx`      | AI badge and provenance summary tooltip                            |
+| `apps/web/src/index.css`                             | `--color-ai`, `--color-ai-light`, `--color-ai-bg` theme tokens     |
 
 ## Dependencies
 
-- `diff` npm package (for `diffLines` function) — added to `@sediment/web`
+- `diff` npm package (`diffWords` function) — added to `@sediment/web`
