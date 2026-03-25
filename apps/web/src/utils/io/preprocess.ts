@@ -203,15 +203,16 @@ export async function preprocessNodeIfNeeded({
 
       // Sync the source title to match the applied label.
       if (labelApplied) {
+        const nodeData = node.data as Record<string, unknown> | undefined;
         const sourceId =
           response.sourceId ||
-          (typeof (node.data as Record<string, unknown>)?.sourceId === 'string'
-            ? ((node.data as Record<string, unknown>).sourceId as string)
+          (typeof nodeData?.sourceId === 'string'
+            ? (nodeData.sourceId as string)
             : undefined);
         if (sourceId) {
           void updateSource(sourceId, {
             title: response.suggestedLabel.trim(),
-          }).catch(() => {});
+          }).catch((err) => console.warn('Failed to sync source title:', err));
         }
       }
     }
