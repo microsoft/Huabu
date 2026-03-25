@@ -7,12 +7,24 @@ const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'];
 const VIDEO_EXTS = ['mp4', 'webm', 'ogg', 'mov'];
 
 /**
+ * URL patterns for services that serve PDF content directly but without a
+ * `.pdf` file extension (e.g. arXiv abstract/PDF endpoints).
+ */
+const PDF_URL_PATTERNS: RegExp[] = [
+  // arXiv: https://arxiv.org/pdf/<id> or https://arxiv.org/pdf/<id>v<n>
+  /^https?:\/\/arxiv\.org\/pdf\//i,
+];
+
+/**
  * Classify a filename or URL into a canvas node type based on file extension.
  * Strips query strings and hashes before checking.
+ * Also matches known PDF-serving URL patterns for extensionless PDF URLs.
  */
 export const detectNodeType = (
   filename: string,
 ): 'image' | 'pdf' | 'video' | 'web' => {
+  if (PDF_URL_PATTERNS.some((pattern) => pattern.test(filename))) return 'pdf';
+
   const cleanPath = filename.split('?')[0].split('#')[0];
   const ext = cleanPath.split('.').pop()?.toLowerCase();
 
