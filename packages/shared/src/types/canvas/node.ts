@@ -3,6 +3,8 @@
  * Node data structures and type guards
  */
 
+import type { AgentMode } from '../agent.js';
+
 // ==================== Basic Node Types ====================
 
 export type CanvasNodeType =
@@ -74,6 +76,51 @@ export interface NodeStyle {
   align?: 'top-left' | 'center';
 }
 
+// ==================== Block-Level Provenance ====================
+
+/**
+ * Provenance record for a single BlockNote block.
+ * Tracks who originally authored the block and any subsequent modifications.
+ */
+export interface BlockProvenance {
+  /** Who originally created this block */
+  author: 'ai' | 'user';
+  /** Agent mode when AI-authored (omitted for user-authored) */
+  agentMode?: AgentMode;
+  /** ISO timestamp of creation */
+  createdAt: string;
+  /** Chronological list of modifications after initial creation */
+  modifications?: Array<{
+    by: 'ai' | 'user';
+    agentMode?: AgentMode;
+    at: string;
+  }>;
+  /**
+   * Plain text of this block before AI modified it.
+   * Present = has a pending diff to review. Cleared on accept/edit.
+   * Empty string means the block was newly added by AI (no prior content).
+   */
+  baselineText?: string;
+  /**
+   * When true, this entry represents a block that was deleted by AI.
+   * `baselineText` holds the deleted block's original text.
+   */
+  deleted?: boolean;
+  /**
+   * For deleted entries: ID of the surviving block after which the
+   * deletion occurred. `null` = deletion was at the document start.
+   */
+  afterBlockId?: string | null;
+}
+
+/**
+ * Map of block ID → provenance.
+ * The special key `__all__` is a sentinel used when the server creates/updates
+ * content via Markdown (no block IDs available). The client expands this into
+ * per-block entries when the editor initializes.
+ */
+export type BlockProvenanceMap = Record<string, BlockProvenance>;
+
 // ==================== Node Data Types ====================
 
 /** Common fields for all node types */
@@ -127,6 +174,17 @@ export interface NoteNodeData extends BaseNodeData {
   contentJsonSource?: string;
   sourceId?: string;
   style?: NodeStyle;
+  /**
+   * Block-level content provenance map.
+   * Keys are BlockNote block IDs, or `__all__` as a sentinel when
+   * all blocks share the same provenance (e.g. AI-created content).
+   */
+  provenance?: BlockProvenanceMap;
+  /**
+   * @deprecated Use `provenance[blockId].baselineText` instead.
+   * Kept for backward compatibility with existing persisted data.
+   */
+  contentBeforeAI?: string;
 }
 
 /** Text node: simple styled text (not ingested) */
