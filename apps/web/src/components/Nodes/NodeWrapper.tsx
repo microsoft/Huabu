@@ -268,7 +268,7 @@ export const NodeWrapper = memo(
     return (
       <>
         <NodeResizer
-          color="var(--color-theme-300)"
+          color="var(--color-info-light)"
           isVisible={selected && resizable && !data.locked}
           minWidth={minWidth}
           minHeight={minHeight}
@@ -292,7 +292,7 @@ export const NodeWrapper = memo(
             isVisible={selected && selectedCount === 1}
             position={Position.Top}
             offset={12}
-            className="border-border shadow-bottom flex h-8 items-center gap-3 rounded-md border bg-white px-2 py-1"
+            className="border-border shadow-bottom bg-surface flex h-8 items-center gap-3 rounded-md border px-2 py-1"
           >
             {toolbar}
           </NodeToolbar>
@@ -311,7 +311,7 @@ export const NodeWrapper = memo(
             'style' in data && data.style?.backgroundColor
               ? data.style.backgroundColor
               : 'bg-transparent',
-            selected ? 'ring-theme-500 ring' : 'ring-border hover:ring',
+            selected ? 'ring-info ring' : 'ring-border hover:ring',
             // AI-generated node visual identifier: top border
             isAIGenerated && 'border-t-ai border-t-4',
             className,
@@ -320,7 +320,7 @@ export const NodeWrapper = memo(
         >
           {showIngestionOverlay && (
             <div className="pointer-events-none absolute right-1.5 bottom-1.5 z-10">
-              <div className="border-muted-foreground/30 border-t-muted-foreground h-3 w-3 animate-spin rounded-full border-2" />
+              <div className="border-fg-subtle/30 border-t-muted-foreground h-3 w-3 animate-spin rounded-full border-2" />
             </div>
           )}
 
@@ -357,49 +357,49 @@ export const NodeWrapper = memo(
             type="target"
             id="top-target"
             position={Position.Top}
-            className="bg-theme-500! -top-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
+            className="bg-info! -top-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
           />
           <Handle
             type="source"
             id="top-source"
             position={Position.Top}
-            className="bg-theme-500! -top-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
+            className="bg-info! -top-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
           />
           <Handle
             type="target"
             id="right-target"
             position={Position.Right}
-            className="bg-theme-500! -right-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
+            className="bg-info! -right-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
           />
           <Handle
             type="source"
             id="right-source"
             position={Position.Right}
-            className="bg-theme-500! -right-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
+            className="bg-info! -right-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
           />
           <Handle
             type="target"
             id="bottom-target"
             position={Position.Bottom}
-            className="bg-theme-500! -bottom-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
+            className="bg-info! -bottom-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
           />
           <Handle
             type="source"
             id="bottom-source"
             position={Position.Bottom}
-            className="bg-theme-500! -bottom-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
+            className="bg-info! -bottom-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
           />
           <Handle
             type="target"
             id="left-target"
             position={Position.Left}
-            className="bg-theme-500! -left-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
+            className="bg-info! -left-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
           />
           <Handle
             type="source"
             id="left-source"
             position={Position.Left}
-            className="bg-theme-500! -left-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
+            className="bg-info! -left-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
           />
         </div>
       </>

@@ -11,7 +11,7 @@ const PRESET_COLORS = [
   {
     name: 'Transparent',
     value: 'bg-transparent',
-    border: 'border-theme-500',
+    border: 'border-info',
     ring: 'ring-transparent',
   },
   {
@@ -84,7 +84,6 @@ export const NodeBgColorSelector = ({
     <div className="relative flex items-center">
       <IconButton
         variant="outline"
-        className="border-border rounded-full border p-px hover:scale-110"
         onClick={(e) => {
           e.stopPropagation();
           setIsOpen(!isOpen);

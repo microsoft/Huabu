@@ -28,7 +28,7 @@ export const NoteSourceIdProvider = NoteSourceIdContext.Provider;
 
 const ICON_SIZE = 16;
 const BTN_CLASS =
-  'bn-button h-4.5 w-4.5 p-px! text-icon hover:text-main flex items-center justify-center rounded';
+  'bn-button h-4.5 w-4.5 p-px! text-fg-subtle hover:text-fg-default flex items-center justify-center rounded';
 
 /**
  * Custom "Add block" button that matches our compact style.

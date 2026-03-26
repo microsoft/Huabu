@@ -50,7 +50,7 @@ const IntentSelectStep: React.FC<{ anchorY: number }> = ({ anchorY }) => {
   return (
     <div className="flex flex-col">
       {candidates.length === 0 && !isStreaming ? (
-        <div className="text-muted-foreground px-3 py-4 text-sm">
+        <div className="text-fg-subtle px-3 py-4 text-sm">
           No suggestions available.
         </div>
       ) : (
@@ -72,7 +72,7 @@ const IntentSelectStep: React.FC<{ anchorY: number }> = ({ anchorY }) => {
                 <button
                   type="button"
                   className={`mx-2 flex w-[calc(100%-16px)] cursor-pointer flex-col rounded-md px-2 py-1.5 text-left transition-colors ${
-                    isSelected ? 'bg-theme-100' : isHovered ? 'bg-muted' : ''
+                    isSelected ? 'bg-info-bg' : isHovered ? 'bg-bg-default' : ''
                   }`}
                   onMouseEnter={() => setHoveredIdx(idx)}
                   onMouseLeave={() => setHoveredIdx(null)}
@@ -80,14 +80,14 @@ const IntentSelectStep: React.FC<{ anchorY: number }> = ({ anchorY }) => {
                 >
                   {/* Description above label when expanding up */}
                   {isHovered && expandUp && c.description && (
-                    <span className="text-muted-foreground mb-0.5 text-xs leading-snug">
+                    <span className="text-fg-muted mb-0.5 text-xs leading-snug">
                       {c.description}
                     </span>
                   )}
-                  <span className="text-foreground text-sm">{c.label}</span>
+                  <span className="text-fg-default text-sm">{c.label}</span>
                   {/* Description below label when expanding down */}
                   {isHovered && !expandUp && c.description && (
-                    <span className="text-muted-foreground mt-0.5 text-xs leading-snug">
+                    <span className="text-fg-muted mt-0.5 text-xs leading-snug">
                       {c.description}
                     </span>
                   )}
@@ -96,7 +96,7 @@ const IntentSelectStep: React.FC<{ anchorY: number }> = ({ anchorY }) => {
             );
           })}
           {isStreaming && (
-            <li className="text-muted-foreground flex items-center gap-1.5 px-4 py-1.5 text-xs">
+            <li className="text-fg-subtle flex items-center gap-1.5 px-4 py-1.5 text-xs">
               <Loader2 size={12} className="animate-spin" />
               <span>Thinking…</span>
             </li>
@@ -107,15 +107,12 @@ const IntentSelectStep: React.FC<{ anchorY: number }> = ({ anchorY }) => {
       {/* Custom intent input */}
       <div className="border-border border-t px-3 py-2">
         <div className="flex items-center gap-1.5">
-          <PenLine
-            size={12}
-            className="text-muted-foreground/60 flex-shrink-0"
-          />
+          <PenLine size={12} className="text-fg-muted/60 flex-shrink-0" />
           <input
             ref={inputRef}
             type="text"
             placeholder="Describe your intent…"
-            className="text-foreground placeholder:text-muted-foreground/50 w-full bg-transparent text-sm outline-none"
+            className="text-fg-default placeholder:text-fg-subtle/50 w-full bg-transparent text-sm outline-none"
             value={customIntent}
             onChange={(e) => setCustomIntent(e.target.value)}
             onKeyDown={(e) => {
@@ -125,7 +122,6 @@ const IntentSelectStep: React.FC<{ anchorY: number }> = ({ anchorY }) => {
           <IconButton
             type="button"
             title="Send"
-            className="text-muted-foreground hover:text-theme-500 flex-shrink-0 transition-colors disabled:opacity-30"
             disabled={!customIntent.trim()}
             onClick={handleCustomSubmit}
           >
@@ -267,18 +263,18 @@ export const IntentPopover: React.FC = () => {
   return createPortal(
     <div
       ref={containerRef}
-      className="border-border fixed w-80 cursor-grab rounded-md border bg-white shadow active:cursor-grabbing"
+      className="border-border bg-surface fixed w-80 cursor-grab rounded-md border shadow active:cursor-grabbing"
       style={posStyle}
       onPointerDown={handlePointerDown}
     >
       {/* Title bar */}
       <div className="border-border flex items-center gap-2 border-b px-3 py-2">
-        <span className="text-foreground/80 min-w-0 flex-1 truncate text-sm">
+        <span className="text-fg-default/80 min-w-0 flex-1 truncate text-sm">
           Intent Recognition
         </span>
         <IconButton
           title="Close"
-          className="text-muted-foreground hover:text-foreground flex-shrink-0 rounded p-0.5"
+          className="text-fg-muted hover:text-fg-default flex-shrink-0 rounded p-0.5"
           onClick={dismiss}
         >
           <X size={14} />
@@ -286,7 +282,7 @@ export const IntentPopover: React.FC = () => {
       </div>
 
       {isLoading ? (
-        <div className="text-muted-foreground flex items-center gap-2 px-3 py-4 text-sm">
+        <div className="text-fg-subtle flex items-center gap-2 px-3 py-4 text-sm">
           <Loader2 size={16} className="animate-spin" />
           <span>Analyzing context…</span>
         </div>

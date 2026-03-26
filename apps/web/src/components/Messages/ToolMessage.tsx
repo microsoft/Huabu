@@ -110,11 +110,11 @@ function AgentToolCard({ toolResponse, isExecuting }: AgentToolCardProps) {
   const showContent = canExpand && (isExecuting || isExpanded);
 
   const statusIcon = isExecuting ? (
-    <Loader2 size={12} className="text-theme-500 animate-spin" />
+    <Loader2 size={12} className="text-info animate-spin" />
   ) : isError ? (
-    <XIcon size={12} className="text-red-500" />
+    <XIcon size={12} className="text-danger" />
   ) : (
-    <Check size={12} className="text-green-600" />
+    <Check size={12} className="text-success" />
   );
 
   return (
@@ -122,21 +122,21 @@ function AgentToolCard({ toolResponse, isExecuting }: AgentToolCardProps) {
       <div className="w-full">
         <button
           type="button"
-          className="text-muted-foreground hover:bg-muted flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs transition-colors"
+          className="text-fg-muted hover:bg-bg-default flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs transition-colors"
           onClick={() => canExpand && setIsExpanded(!isExpanded)}
         >
           {statusIcon}
-          {icon && <span className="text-muted-foreground/60">{icon}</span>}
+          {icon && <span className="text-fg-muted/60">{icon}</span>}
           <span className="flex-1 truncate">{renderTitle()}</span>
           {!isExecuting && canExpand && (
             <ChevronRight
               size={10}
-              className={`text-muted-foreground/50 flex-shrink-0 transition-transform ${showContent ? 'rotate-90' : ''}`}
+              className={`text-fg-muted/50 flex-shrink-0 transition-transform ${showContent ? 'rotate-90' : ''}`}
             />
           )}
         </button>
         {showContent && contentText && (
-          <div className="border-border text-muted-foreground/60 mt-1 max-h-40 overflow-y-auto rounded border p-2 text-[11px] leading-relaxed">
+          <div className="border-border text-fg-muted/60 mt-1 max-h-40 overflow-y-auto rounded border p-2 text-[11px] leading-relaxed">
             <div className="break-all whitespace-pre-wrap">{contentText}</div>
           </div>
         )}
@@ -232,8 +232,8 @@ function ResearchToolDisplay({
     const { subQueries } = data as { query: string; subQueries: string[] };
     return (
       <div className="flex justify-start">
-        <div className="text-muted-foreground border-border flex items-center gap-2 rounded-2xl border bg-white px-3 py-2 text-sm">
-          <Sparkles size={14} className="text-primary animate-pulse" />
+        <div className="text-fg-muted border-border bg-surface flex items-center gap-2 rounded-2xl border px-3 py-2 text-sm">
+          <Sparkles size={14} className="text-fg-default animate-pulse" />
           <span>
             Searching for:{' '}
             <span className="font-medium">{subQueries.join(' · ')}</span>
@@ -252,7 +252,7 @@ function ResearchToolDisplay({
     };
     return (
       <div className="flex justify-start">
-        <div className="text-muted-foreground border-border rounded-2xl border bg-white px-3 py-2 text-sm">
+        <div className="text-fg-muted border-border bg-surface rounded-2xl border px-3 py-2 text-sm">
           🔍 Found{' '}
           <span className="font-medium">
             {nodeCount} source{nodeCount !== 1 ? 's' : ''}
@@ -268,7 +268,7 @@ function ResearchToolDisplay({
     const { succeeded, failed } = data as { succeeded: number; failed: number };
     return (
       <div className="flex justify-start">
-        <div className="text-muted-foreground border-border rounded-2xl border bg-white px-3 py-2 text-sm">
+        <div className="text-fg-muted border-border bg-surface rounded-2xl border px-3 py-2 text-sm">
           {failed > 0
             ? `⚠️ Ingested ${succeeded} source${
                 succeeded !== 1 ? 's' : ''
@@ -288,7 +288,7 @@ function ResearchToolDisplay({
     };
     return (
       <div className="flex justify-start">
-        <div className="text-muted-foreground border-border rounded-2xl border bg-white px-3 py-2 text-sm">
+        <div className="text-fg-muted border-border bg-surface rounded-2xl border px-3 py-2 text-sm">
           {grouped
             ? `📦 Organized ${nodeCount} node${
                 nodeCount !== 1 ? 's' : ''
@@ -304,7 +304,7 @@ function ResearchToolDisplay({
   // Unknown research tool
   return (
     <div className="flex justify-start">
-      <div className="text-muted-foreground border-border rounded-2xl border bg-white px-3 py-2 text-sm">
+      <div className="text-fg-subtle border-border bg-surface rounded-2xl border px-3 py-2 text-sm">
         {tool}: {JSON.stringify(data)}
       </div>
     </div>
@@ -334,7 +334,7 @@ function WebSearchToolDisplay({
   if (sources.length === 0) {
     return (
       <div className="flex justify-start">
-        <div className="text-muted-foreground border-border rounded-2xl border bg-white px-4 py-3 text-sm whitespace-pre-wrap">
+        <div className="text-fg-muted border-border bg-surface rounded-2xl border px-4 py-3 text-sm whitespace-pre-wrap">
           Used 0 references
         </div>
       </div>

@@ -92,7 +92,7 @@ export const MultiSelectToolbar = () => {
         transform: 'translateX(-50%)',
       }}
     >
-      <div className="text-muted-foreground shadow-bottom flex items-center gap-1 rounded-lg border-0 bg-white p-1.5">
+      <div className="text-fg-muted shadow-bottom bg-surface flex items-center gap-1 rounded-lg border-0 p-1.5">
         {/* Horizontal alignment */}
         <IconButton
           title="Align Left"

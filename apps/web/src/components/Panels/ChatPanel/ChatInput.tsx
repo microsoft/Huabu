@@ -240,7 +240,7 @@ export const ChatInput = ({
     >
       <form onSubmit={handleSubmit} className="w-full">
         <div
-          className={`rounded-2xl border p-3 transition-colors ${isDragOver ? 'border-border bg-theme-50' : 'border-border bg-white'}`}
+          className={`rounded-2xl border p-3 transition-colors ${isDragOver ? 'border-border bg-info-bg' : 'border-border bg-surface'}`}
         >
           {/* ── Pending attachment thumbnails ── */}
           {(pendingAttachments.length > 0 || selectionAttachment) && (
@@ -256,8 +256,8 @@ export const ChatInput = ({
                   if (sourceNodeId) {
                     tooltipParts.push(
                       <div key="src" className="flex items-center gap-1">
-                        <span className="text-gray-400">Source:</span>
-                        <span className="[&>div]:border-white/30 [&>div]:text-white [&>div:hover]:bg-white/10">
+                        <span className="text-fg-subtle">Source:</span>
+                        <span className="[&>div]:text-fg-inverse [&>div]:border-fg-inverse/30 [&>div:hover]:bg-fg-inverse/10">
                           <NodeRef nodeId={sourceNodeId} />
                         </span>
                       </div>,
@@ -271,7 +271,7 @@ export const ChatInput = ({
                         : att.content;
                     tooltipParts.push(
                       <div key="content" className="mt-1 max-w-[360px]">
-                        <span className="text-gray-400">Content: </span>
+                        <span className="text-fg-subtle">Content: </span>
                         <span className="break-words whitespace-pre-wrap">
                           {truncated}
                         </span>
@@ -290,8 +290,8 @@ export const ChatInput = ({
                         addPendingAttachment(locked);
                       }}
                     >
-                      <div className="flex h-12 w-12 items-center justify-center rounded-md bg-gray-50 px-1">
-                        <span className="line-clamp-3 w-full text-center text-[8px] leading-tight text-gray-500">
+                      <div className="bg-surface flex h-12 w-12 items-center justify-center rounded-md px-1">
+                        <span className="text-fg-subtle line-clamp-3 w-full text-center text-[8px] leading-tight">
                           {previewText}
                         </span>
                       </div>
@@ -301,7 +301,7 @@ export const ChatInput = ({
                           useChatStore.getState().setSelectionAttachment(null);
                         }}
                         tooltipWrapperClassName="absolute top-0.5 right-0.5 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
-                        className="rounded-full bg-black/50 p-0.5 text-white enabled:hover:bg-black/70"
+                        className="text-fg-inverse bg-inverse/50 enabled:hover:bg-inverse/70 rounded-full p-0.5"
                         title="Remove attachment"
                       >
                         <X size={10} />
@@ -337,8 +337,8 @@ export const ChatInput = ({
                 if (sourceNodeId) {
                   tooltipParts.push(
                     <div key="src" className="flex items-center gap-1">
-                      <span className="text-gray-400">Source:</span>
-                      <span className="[&>div]:border-white/30 [&>div]:text-white [&>div:hover]:bg-white/10">
+                      <span className="text-fg-subtle">Source:</span>
+                      <span className="[&>div]:text-fg-inverse [&>div]:border-fg-inverse/30 [&>div:hover]:bg-fg-inverse/10">
                         <NodeRef nodeId={sourceNodeId} />
                       </span>
                     </div>,
@@ -352,7 +352,7 @@ export const ChatInput = ({
                       : att.content;
                   tooltipParts.push(
                     <div key="content" className="mt-1 max-w-[360px]">
-                      <span className="text-gray-400">Content: </span>
+                      <span className="text-fg-subtle">Content: </span>
                       <span className="break-words whitespace-pre-wrap">
                         {truncated}
                       </span>
@@ -378,8 +378,8 @@ export const ChatInput = ({
                         className="h-12 w-12 rounded-md object-contain"
                       />
                     ) : (
-                      <div className="flex h-12 w-12 items-center justify-center rounded-md bg-gray-50 px-1">
-                        <span className="line-clamp-3 w-full text-center text-[8px] leading-tight text-gray-500">
+                      <div className="bg-surface flex h-12 w-12 items-center justify-center rounded-md px-1">
+                        <span className="text-fg-subtle line-clamp-3 w-full text-center text-[8px] leading-tight">
                           {previewText}
                         </span>
                       </div>
@@ -390,7 +390,7 @@ export const ChatInput = ({
                         removePendingAttachment(idx);
                       }}
                       tooltipWrapperClassName="absolute top-0.5 right-0.5 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
-                      className="rounded-full bg-black/50 p-0.5 text-white enabled:hover:bg-black/70"
+                      className="text-fg-inverse bg-inverse/50 enabled:hover:bg-inverse/70 rounded-full p-0.5"
                       title="Remove attachment"
                     >
                       <X size={10} />
@@ -424,7 +424,7 @@ export const ChatInput = ({
             placeholder={currentPlaceholder}
             disabled={disabled}
             rows={2}
-            className="w-full resize-none bg-transparent text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none disabled:cursor-not-allowed"
+            className="text-fg-default placeholder:text-fg-subtle w-full resize-none bg-transparent text-sm focus:outline-none disabled:cursor-not-allowed"
           />
 
           <div className="mt-2 flex items-center justify-between gap-3">

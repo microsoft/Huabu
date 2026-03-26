@@ -21,8 +21,8 @@ export const CanvasChangeBar = ({ changes }: CanvasChangeBarProps) => {
   if (changes.length === 0) return null;
 
   return (
-    <div className="border-border bg-muted/30 flex flex-col gap-2 rounded-xl border p-3">
-      <div className="text-foreground/70 text-xs font-medium">
+    <div className="border-border bg-bg-default/30 flex flex-col gap-2 rounded-xl border p-3">
+      <div className="text-fg-default/70 text-xs font-medium">
         Canvas changes ({changes.length})
       </div>
       <div className="flex flex-col gap-1">
@@ -56,7 +56,7 @@ export const CanvasChangeBar = ({ changes }: CanvasChangeBarProps) => {
           return (
             <div
               key={i}
-              className="text-muted-foreground flex items-center gap-1.5 text-xs"
+              className="text-fg-muted flex items-center gap-1.5 text-xs"
             >
               <Icon size={11} className="flex-shrink-0" />
               <span className="truncate">{renderLabel()}</span>

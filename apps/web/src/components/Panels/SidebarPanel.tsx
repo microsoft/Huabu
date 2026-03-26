@@ -30,14 +30,14 @@ export const SidebarPanel = ({
     return (
       <div
         className={clsx(
-          'flex h-full flex-col items-center bg-white pt-3',
+          'bg-surface flex h-full flex-col items-center pt-3',
           className,
         )}
       >
         <IconButton onClick={onToggle} title={`Expand ${title}`}>
           {iconCollapsed}
         </IconButton>
-        <span className="mt-3 text-xs font-semibold text-gray-500 select-none [text-orientation:mixed] [writing-mode:vertical-rl]">
+        <span className="text-fg-muted mt-3 text-xs font-semibold select-none [text-orientation:mixed] [writing-mode:vertical-rl]">
           {title}
         </span>
       </div>
@@ -45,23 +45,17 @@ export const SidebarPanel = ({
   }
 
   return (
-    <div className={clsx('flex h-full flex-col bg-white', className)}>
+    <div className={clsx('bg-surface flex h-full flex-col', className)}>
       {/* header */}
       <div className="border-border flex h-12 shrink-0 items-center justify-between border-b px-3">
-        <div className="text-muted-foreground flex min-w-0 flex-1 items-center text-sm font-semibold">
+        <div className="text-fg-muted flex min-w-0 flex-1 items-center text-sm font-semibold">
           {tabs ? tabs : title}
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {tools && (
-            <div className="text-muted-foreground flex items-center">
-              {tools}
-            </div>
+            <div className="text-fg-muted flex items-center">{tools}</div>
           )}
-          <IconButton
-            className="text-muted-foreground"
-            onClick={onToggle}
-            title={`Collapse ${title}`}
-          >
+          <IconButton onClick={onToggle} title={`Collapse ${title}`}>
             {iconExpanded}
           </IconButton>
         </div>

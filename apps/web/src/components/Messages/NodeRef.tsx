@@ -79,7 +79,7 @@ export function NodeRef({ nodeId, attachment, fallbackLabel }: NodeRefProps) {
     <div
       role="button"
       tabIndex={0}
-      className="border-border/60 hover:bg-theme-50 inline-flex cursor-pointer items-center gap-0.5 rounded border bg-transparent px-1 py-px align-middle text-[10px] leading-tight font-normal text-gray-400"
+      className="border-border/60 hover:bg-info-bg text-fg-subtle inline-flex cursor-pointer items-center gap-0.5 rounded border bg-transparent px-1 py-px align-middle text-[10px] leading-tight font-normal"
       onClick={handleClick}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {

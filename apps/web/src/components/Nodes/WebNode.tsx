@@ -94,13 +94,13 @@ export const WebNode = memo(
           target="_blank"
           rel="noopener noreferrer"
           onClick={(e) => e.stopPropagation()}
-          className="nodrag text-muted-foreground hover:text-theme-500 flex flex-1 cursor-pointer items-center gap-1 overflow-hidden text-xs font-medium transition-colors"
+          className="nodrag text-fg-muted hover:text-info flex flex-1 cursor-pointer items-center gap-1 overflow-hidden text-xs font-medium transition-colors"
         >
           <span className="max-w-24 truncate">{data?.src || 'Website'}</span>
           <ArrowUpRight size={14} strokeWidth={2} />
         </a>
 
-        <div className="text-muted-foreground flex items-center gap-1">
+        <div className="text-fg-muted flex items-center gap-1">
           <div className="bg-border h-3 w-px" />
 
           <IconButton
@@ -136,17 +136,17 @@ export const WebNode = memo(
             }}
           >
             <div className="flex h-full flex-col">
-              <div className="relative h-full w-full overflow-hidden rounded bg-white">
+              <div className="bg-surface relative h-full w-full overflow-hidden rounded">
                 {src ? (
                   <div className="flex h-full w-full flex-col gap-2">
                     {previewLoading ? (
-                      <div className="text-muted-foreground text-base">
+                      <div className="text-fg-subtle text-base">
                         Loading preview...
                       </div>
                     ) : null}
 
                     {previewError && ingestion?.status !== 'pending' ? (
-                      <div className="text-muted-foreground text-base">
+                      <div className="text-fg-subtle text-base">
                         Preview unavailable
                         {hostname ? ` • ${hostname}` : ''}
                       </div>
@@ -162,7 +162,7 @@ export const WebNode = memo(
                         {preview.contentHtml ? (
                           <div className="min-h-0 flex-1 overflow-hidden px-2 pb-2">
                             <div
-                              className="text-muted-foreground prose prose-base overflow-hidden text-base leading-relaxed [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:text-base [&_h2]:font-semibold [&_h3]:text-base [&_h3]:font-medium [&_img]:max-w-full [&_img]:rounded [&_ol]:my-1 [&_p]:my-1 [&_ul]:my-1"
+                              className="text-fg-muted prose prose-base overflow-hidden text-base leading-relaxed [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:text-base [&_h2]:font-semibold [&_h3]:text-base [&_h3]:font-medium [&_img]:max-w-full [&_img]:rounded [&_ol]:my-1 [&_p]:my-1 [&_ul]:my-1"
                               dangerouslySetInnerHTML={{
                                 __html: preview.contentHtml,
                               }}
@@ -173,7 +173,7 @@ export const WebNode = memo(
                     ) : null}
                   </div>
                 ) : (
-                  <div className="text-muted-foreground flex h-full w-full items-center justify-center text-base">
+                  <div className="text-fg-subtle flex h-full w-full items-center justify-center text-base">
                     Invalid URL
                   </div>
                 )}

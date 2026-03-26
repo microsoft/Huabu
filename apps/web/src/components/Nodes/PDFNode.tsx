@@ -117,13 +117,10 @@ const VirtualizedPage = memo(
               renderTextLayer={false}
               loading={
                 <div
-                  className="flex items-center justify-center bg-neutral-50"
+                  className="bg-surface flex items-center justify-center"
                   style={{ height: fallbackPageHeight }}
                 >
-                  <Loader2
-                    size={18}
-                    className="text-muted-foreground animate-spin"
-                  />
+                  <Loader2 size={18} className="text-fg-subtle animate-spin" />
                 </div>
               }
               onRenderSuccess={handleRenderSuccess}
@@ -226,7 +223,7 @@ export const PDFNode = memo(
     const PDFToolbar = (
       <div className="flex w-full items-center justify-between gap-3">
         {/* Tools */}
-        <div className="text-muted-foreground flex items-center gap-1">
+        <div className="flex items-center gap-1">
           <IconButton
             title="Open Large View"
             onClick={(e) => {
@@ -257,7 +254,7 @@ export const PDFNode = memo(
         toolbar={PDFToolbar}
         resizable
         keepAspectRatio={false}
-        className={clsx('bg-white transition-all duration-300 ease-in-out')}
+        className={clsx('bg-surface transition-all duration-300 ease-in-out')}
       >
         <div
           ref={containerRef}
@@ -300,7 +297,7 @@ export const PDFNode = memo(
                     file={data.src}
                     onLoadSuccess={onDocumentLoadSuccess}
                     loading={
-                      <div className="text-muted-foreground flex h-full min-h-40 w-full items-center justify-center gap-2 p-4 text-xs">
+                      <div className="text-fg-subtle flex h-full min-h-40 w-full items-center justify-center gap-2 p-4 text-xs">
                         <Loader2 size={16} className="animate-spin" />
                       </div>
                     }
@@ -323,7 +320,7 @@ export const PDFNode = memo(
                   </Document>
                 </div>
               ) : (
-                <div className="text-muted-foreground flex h-full w-full items-center justify-center text-sm">
+                <div className="text-fg-subtle flex h-full w-full items-center justify-center text-sm">
                   No PDF Source
                 </div>
               )}
