@@ -584,7 +584,6 @@ export const Canvas: React.FC<CanvasProps> = ({
             openExpanded(node.id);
           }
         }}
-        fitView
         attributionPosition="bottom-right"
         panOnDrag={
           pendingNodeType
