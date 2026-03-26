@@ -369,7 +369,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     <div
       ref={wrapperRef}
       className={clsx(
-        'bg-background relative flex h-full w-full flex-col',
+        'bg-bg-default relative flex h-full w-full flex-col',
         pendingNodeType === 'note' && 'canvas-pending-note',
         pendingNodeType === 'text' && 'canvas-pending-text',
         pendingNodeType === 'frame' && 'canvas-pending-frame',

@@ -47,7 +47,7 @@ export const NoteNode = memo(
     const NoteToolbar = (
       <div className="flex w-full items-center justify-between gap-2">
         {/* Tools */}
-        <div className="text-muted-foreground flex items-center gap-1">
+        <div className="text-fg-subtle flex items-center gap-1">
           <IconButton
             title="Open Large View"
             onClick={(e) => {
@@ -81,7 +81,7 @@ export const NoteNode = memo(
 
       // Create container for React content
       const container = document.createElement('div');
-      container.className = 'flex flex-col rounded bg-card p-4';
+      container.className = 'flex flex-col rounded bg-surface p-4';
       shadowRoot.appendChild(container);
 
       // Inject styles into Shadow DOM from shared cache — avoids cloning
@@ -109,8 +109,8 @@ export const NoteNode = memo(
       const container = shadowRootRef.current?.querySelector('div');
       if (!container) return;
       container.className = hasFixedHeight
-        ? 'flex h-full flex-col rounded bg-card p-2'
-        : 'flex flex-col rounded bg-card p-2';
+        ? 'flex h-full flex-col rounded bg-surface p-2'
+        : 'flex flex-col rounded bg-surface p-2';
     }, [hasFixedHeight]);
 
     // Update Shadow DOM content when editor or data changes
@@ -158,7 +158,7 @@ export const NoteNode = memo(
       >
         <div
           className={clsx(
-            'bg-card w-full overflow-hidden',
+            'bg-surface w-full overflow-hidden',
             hasFixedHeight && 'h-full',
           )}
         >

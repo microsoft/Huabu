@@ -149,7 +149,7 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
 
   const dragBtnClass = clsx(
     'flex shrink-0 items-center justify-center gap-1 px-2.5 py-1.5',
-    'text-xs text-foreground',
+    'text-xs text-fg-default',
     'hover:bg-info-bg-hover',
     !isFullscreen && 'cursor-grab active:cursor-grabbing',
   );
@@ -185,7 +185,7 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
 
       {/* ── Image button (or status) ── */}
       {capturing && (
-        <div className="text-muted-foreground flex items-center gap-1 text-xs">
+        <div className="text-fg-subtle flex items-center gap-1 text-xs">
           <Loader2 size={11} className="animate-spin" />
         </div>
       )}

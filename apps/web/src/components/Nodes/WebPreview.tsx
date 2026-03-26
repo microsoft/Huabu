@@ -72,18 +72,18 @@ export const WebPreview = ({ data }: PreviewComponentProps) => {
   }, [readerHtml]);
 
   return (
-    <div className="bg-card flex h-full w-full flex-col p-3">
-      <div className="bg-card relative h-full w-full overflow-hidden rounded">
+    <div className="bg-surface flex h-full w-full flex-col p-3">
+      <div className="bg-surface relative h-full w-full overflow-hidden rounded">
         {!src ? (
-          <div className="text-muted-foreground flex h-full w-full items-center justify-center text-sm">
+          <div className="text-fg-subtle flex h-full w-full items-center justify-center text-sm">
             Invalid URL
           </div>
         ) : loading ? (
-          <div className="text-muted-foreground flex h-full w-full items-center justify-center text-sm">
+          <div className="text-fg-subtle flex h-full w-full items-center justify-center text-sm">
             Loading...
           </div>
         ) : error ? (
-          <div className="text-muted-foreground flex h-full w-full flex-col items-center justify-center gap-2 text-sm">
+          <div className="text-fg-subtle flex h-full w-full flex-col items-center justify-center gap-2 text-sm">
             <div>Failed to load reader view</div>
             <a
               href={src}

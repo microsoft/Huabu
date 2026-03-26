@@ -12,10 +12,10 @@ import { useWorkspaceStore } from './store/workspaceStore';
  */
 function LoadingScreen() {
   return (
-    <div className="bg-background flex h-screen items-center justify-center">
+    <div className="bg-bg-default flex h-screen items-center justify-center">
       <div className="flex flex-col items-center gap-3">
-        <span className="inline-block h-6 w-6 animate-spin rounded-full border-2" />
-        <span className="text-text-muted text-sm">Loading workspace…</span>
+        <span className="border-fg-subtle inline-block h-6 w-6 animate-spin rounded-full border-2 border-t-transparent" />
+        <span className="text-fg-subtle text-sm">Loading workspace…</span>
       </div>
     </div>
   );

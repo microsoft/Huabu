@@ -167,13 +167,13 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
 
   return (
     <>
-      <div className="text-muted-foreground shadow-bottom bg-card pointer-events-auto relative flex w-max items-center gap-2 rounded-lg border-0 px-4 py-2">
+      <div className="text-fg-muted shadow-bottom bg-surface pointer-events-auto relative flex w-max items-center gap-2 rounded-lg border-0 px-4 py-2">
         {/* Group 1: Tools */}
         <div className="flex items-center gap-2">
           <IconButton
             title="Select"
             className={clsx(
-              activeTool === 'select' && 'text-info bg-background',
+              activeTool === 'select' && 'text-info bg-bg-default',
             )}
             onClick={() => onToolChange('select')}
           >
@@ -181,7 +181,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           </IconButton>
           <IconButton
             title="Pan"
-            className={clsx(activeTool === 'pan' && 'text-info bg-background')}
+            className={clsx(activeTool === 'pan' && 'text-info bg-bg-default')}
             onClick={() => onToolChange('pan')}
           >
             <Hand size={18} />
@@ -195,7 +195,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           <IconButton
             title="Frame"
             className={clsx(
-              pendingNodeType === 'frame' && 'text-info bg-background',
+              pendingNodeType === 'frame' && 'text-info bg-bg-default',
             )}
             onClick={() =>
               setPendingNodeType(pendingNodeType === 'frame' ? null : 'frame')
@@ -206,7 +206,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           <IconButton
             title="Note"
             className={clsx(
-              pendingNodeType === 'note' && 'text-info bg-background',
+              pendingNodeType === 'note' && 'text-info bg-bg-default',
             )}
             onClick={() =>
               setPendingNodeType(pendingNodeType === 'note' ? null : 'note')
@@ -217,7 +217,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           <IconButton
             title="Text"
             className={clsx(
-              pendingNodeType === 'text' && 'text-info bg-background',
+              pendingNodeType === 'text' && 'text-info bg-bg-default',
             )}
             onClick={() =>
               setPendingNodeType(pendingNodeType === 'text' ? null : 'text')
@@ -233,7 +233,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           <IconButton
             title="Upload Files"
             className={clsx(
-              activeModal === 'upload' && 'text-info bg-background',
+              activeModal === 'upload' && 'text-info bg-bg-default',
             )}
             onClick={() => setActiveModal('upload')}
           >
@@ -243,7 +243,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           <IconButton
             title="Add Links"
             className={clsx(
-              activeModal === 'link' && 'text-info bg-background',
+              activeModal === 'link' && 'text-info bg-bg-default',
             )}
             onClick={() => setActiveModal('link')}
           >
@@ -262,7 +262,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
               autoLayoutEnabled ? 'Disable Auto Layout' : 'Enable Auto Layout'
             }
             onClick={() => toggleAutoLayout()}
-            className={clsx(autoLayoutEnabled && 'text-info bg-background')}
+            className={clsx(autoLayoutEnabled && 'text-info bg-bg-default')}
           >
             <Sparkles size={18} />
           </IconButton>
@@ -273,7 +273,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
         <div ref={intentButtonRef} className="flex items-center gap-2">
           <IconButton
             title="Intent (crtl + I)"
-            className={clsx(intentOpen && 'text-info bg-background')}
+            className={clsx(intentOpen && 'text-info bg-bg-default')}
             onClick={() => {
               const rect = intentButtonRef.current?.getBoundingClientRect();
               if (rect) {

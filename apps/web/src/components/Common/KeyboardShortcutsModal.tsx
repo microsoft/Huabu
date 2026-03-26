@@ -21,16 +21,16 @@ export function KeyboardShortcutsModal({
     >
       <div className="border-border flex flex-shrink-0 items-start justify-between border-b px-6 py-5">
         <div>
-          <h3 className="text-primary text-base font-semibold">
+          <h3 className="text-fg-default text-base font-semibold">
             Keyboard Shortcuts
           </h3>
-          <p className="text-muted-foreground mt-1.5 text-[13px] leading-relaxed">
+          <p className="text-fg-subtle mt-1.5 text-[13px] leading-relaxed">
             Use{' '}
-            <kbd className="bg-surface-subtle rounded border px-1 py-0.5 font-mono text-[11px] shadow-sm">
+            <kbd className="bg-surface rounded border px-1 py-0.5 font-mono text-[11px] shadow-sm">
               Ctrl
             </kbd>{' '}
             on Windows/Linux and{' '}
-            <kbd className="bg-surface-subtle rounded border px-1 py-0.5 font-mono text-[11px] shadow-sm">
+            <kbd className="bg-surface rounded border px-1 py-0.5 font-mono text-[11px] shadow-sm">
               Cmd
             </kbd>{' '}
             on macOS.
@@ -39,7 +39,7 @@ export function KeyboardShortcutsModal({
         <IconButton
           variant="ghost"
           onClick={onClose}
-          className="text-text-muted hover:bg-hover-medium hover:text-secondary -mt-1 -mr-2"
+          className="text-fg-subtle hover:bg-hover hover:text-fg-muted -mt-1 -mr-2"
           title="Close (Esc)"
           aria-label="Close keyboard shortcuts"
         >
@@ -51,24 +51,24 @@ export function KeyboardShortcutsModal({
         <div className="space-y-6">
           {keyboardShortcutSections.map((section) => (
             <section key={section.title} className="space-y-3">
-              <h4 className="text-text-secondary text-sm font-medium">
+              <h4 className="text-fg-muted text-sm font-medium">
                 {section.title}
               </h4>
-              <div className="border-border bg-card overflow-hidden rounded-lg border">
+              <div className="border-border bg-surface overflow-hidden rounded-lg border">
                 {section.items.map((item, index) => (
                   <div
                     key={`${section.title}-${item.keys}`}
                     className={[
-                      'bg-surface-subtle/50 grid grid-cols-[minmax(9rem,12rem)_1fr] items-center gap-3 px-4 py-3 text-sm',
+                      'bg-surface/50 grid grid-cols-[minmax(9rem,12rem)_1fr] items-center gap-3 px-4 py-3 text-sm',
                       index !== section.items.length - 1
                         ? 'border-border border-b'
                         : '',
                     ].join(' ')}
                   >
-                    <span className="text-secondary font-mono text-[11px] font-semibold tracking-wide">
+                    <span className="text-fg-muted font-mono text-[11px] font-semibold tracking-wide">
                       {item.keys}
                     </span>
-                    <span className="text-muted-foreground text-[13px]">
+                    <span className="text-fg-subtle text-[13px]">
                       {item.description}
                     </span>
                   </div>

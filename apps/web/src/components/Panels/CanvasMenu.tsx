@@ -66,7 +66,7 @@ export const CanvasMenu: React.FC = () => {
         </span>
         <input
           ref={inputRef}
-          className="text-primary focus:shadow-bottom m-0 min-w-8 bg-transparent px-1 py-1 text-lg font-medium outline-none focus:rounded-md"
+          className="text-fg-default focus:shadow-bottom m-0 min-w-8 bg-transparent px-1 py-1 text-lg font-medium outline-none focus:rounded-md"
           value={canvasTitle}
           onChange={(e) => setCanvasTitle(e.target.value)}
           onKeyDown={(e) => {
@@ -88,7 +88,7 @@ export const CanvasMenu: React.FC = () => {
             <ChevronDown
               size={14}
               className={clsx(
-                'text-muted-foreground transition-transform duration-150',
+                'text-fg-subtle transition-transform duration-150',
                 isOpen && 'rotate-180',
               )}
             />

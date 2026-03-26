@@ -71,7 +71,7 @@ export default function CanvasPage() {
   if (isLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
-        <div className="text-muted-foreground text-sm">Loading canvas…</div>
+        <div className="text-fg-subtle text-sm">Loading canvas…</div>
       </div>
     );
   }
@@ -80,12 +80,12 @@ export default function CanvasPage() {
     return (
       <div className="flex h-screen flex-col items-center justify-center gap-4">
         <div className="text-center">
-          <h2 className="text-foreground text-lg font-semibold">
+          <h2 className="text-fg-default text-lg font-semibold">
             Canvas not found
           </h2>
-          <p className="text-muted-foreground mt-1 text-sm">
+          <p className="text-fg-subtle mt-1 text-sm">
             The canvas{' '}
-            <code className="bg-surface-subtle rounded px-1.5 py-0.5 text-xs">
+            <code className="bg-surface rounded px-1.5 py-0.5 text-xs">
               {canvasId}
             </code>{' '}
             does not exist or may have been deleted.
@@ -93,7 +93,7 @@ export default function CanvasPage() {
         </div>
         <Link
           to="/"
-          className="bg-surface-invert text-surface-invert-foreground hover:bg-surface-invert/90 inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors"
+          className="bg-emphasis text-fg-on-emphasis hover:bg-emphasis/90 inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors"
         >
           <ArrowLeft className="h-4 w-4" />
           Back to canvas list

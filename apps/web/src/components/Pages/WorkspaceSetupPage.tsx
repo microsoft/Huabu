@@ -47,7 +47,7 @@ export default function WorkspaceSetupPage() {
   const isLoading = isPicking || isSyncing;
 
   return (
-    <div className="bg-background flex min-h-screen items-center justify-center">
+    <div className="bg-bg-default flex min-h-screen items-center justify-center">
       <div className="w-full max-w-md px-6">
         {/* Logo + Title */}
         <div className="mb-10 text-center">
@@ -56,10 +56,10 @@ export default function WorkspaceSetupPage() {
             alt="Sediment"
             className="mx-auto mb-4 h-16 w-16"
           />
-          <h1 className="text-foreground text-2xl font-bold">
+          <h1 className="text-fg-default text-2xl font-bold">
             Welcome to Sediment
           </h1>
-          <p className="text-muted-foreground mt-2 text-sm">
+          <p className="text-fg-subtle mt-2 text-sm">
             Choose a folder to store your canvases, notes, and artifacts.
           </p>
         </div>
@@ -68,12 +68,12 @@ export default function WorkspaceSetupPage() {
         <button
           onClick={() => void handlePickFolder()}
           disabled={isLoading}
-          className="border-border bg-card text-text-secondary hover:border-border hover:bg-hover-subtle flex w-full items-center justify-center gap-3 rounded-xl border-2 border-dashed px-6 py-8 transition-all disabled:opacity-50"
+          className="border-border bg-surface text-fg-muted hover:border-border hover:bg-hover flex w-full items-center justify-center gap-3 rounded-xl border-2 border-dashed px-6 py-8 transition-all disabled:opacity-50"
         >
           {isLoading ? (
             <span className="border-border inline-block h-5 w-5 animate-spin rounded-full border-2 border-t-transparent" />
           ) : (
-            <FolderOpen size={24} className="text-text-muted" />
+            <FolderOpen size={24} className="text-fg-subtle" />
           )}
           <span className="text-sm font-medium">
             {isPicking ? 'Waiting for selection…' : 'Select Folder'}
@@ -83,7 +83,7 @@ export default function WorkspaceSetupPage() {
         {/* Recent workspaces */}
         {recentWorkspaces.length > 0 && (
           <div className="mt-6">
-            <div className="text-text-muted mb-2 flex items-center gap-1.5 text-xs font-medium">
+            <div className="text-fg-subtle mb-2 flex items-center gap-1.5 text-xs font-medium">
               <History size={12} />
               <span>Recent Workspaces</span>
             </div>
@@ -93,19 +93,16 @@ export default function WorkspaceSetupPage() {
                   <button
                     onClick={() => void handleSelectRecent(path)}
                     disabled={isLoading}
-                    className="hover:bg-hover-medium flex min-w-0 flex-1 items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors disabled:opacity-50"
+                    className="hover:bg-hover flex min-w-0 flex-1 items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors disabled:opacity-50"
                   >
-                    <FolderOpen
-                      size={14}
-                      className="text-text-muted shrink-0"
-                    />
-                    <span className="text-secondary truncate text-sm">
+                    <FolderOpen size={14} className="text-fg-subtle shrink-0" />
+                    <span className="text-fg-muted truncate text-sm">
                       {path}
                     </span>
                   </button>
                   <button
                     onClick={() => removeRecentWorkspace(path)}
-                    className="text-text-muted hover:bg-hover-medium hover:text-muted-foreground shrink-0 rounded p-1 opacity-0 transition-all group-hover:opacity-100"
+                    className="text-fg-subtle hover:bg-hover hover:text-fg-subtle shrink-0 rounded p-1 opacity-0 transition-all group-hover:opacity-100"
                     title="Remove from recent"
                   >
                     <X size={14} />
@@ -122,7 +119,7 @@ export default function WorkspaceSetupPage() {
         )}
 
         {/* Hint */}
-        <p className="text-text-muted mt-8 text-center text-[11px] leading-relaxed">
+        <p className="text-fg-subtle mt-8 text-center text-[11px] leading-relaxed">
           This folder will contain your canvas files, knowledge sources, and
           artifacts. You can change it later in Settings.
         </p>

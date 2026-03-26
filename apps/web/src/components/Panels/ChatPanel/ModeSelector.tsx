@@ -88,7 +88,7 @@ export const ModeSelector = ({
         type="button"
         onClick={() => !disabled && setIsOpen(!isOpen)}
         disabled={disabled}
-        className={clsx('gap-1.5', isOpen && 'bg-secondary')}
+        className={clsx('gap-1.5', isOpen && 'bg-bg-default')}
       >
         {currentMode.icon}
         <span>{currentMode.label}</span>
@@ -99,7 +99,7 @@ export const ModeSelector = ({
       </Button>
 
       {isOpen && (
-        <div className="border-border bg-card absolute bottom-full left-0 mb-2 w-auto overflow-hidden rounded-lg border shadow-lg">
+        <div className="border-border bg-surface absolute bottom-full left-0 mb-2 w-auto overflow-hidden rounded-lg border shadow-lg">
           {modes.map((mode) => (
             <Button
               variant="ghost"
@@ -109,7 +109,7 @@ export const ModeSelector = ({
               tooltipWrapperClassName="flex w-full"
               className={clsx(
                 'flex w-full gap-1.5 rounded-none px-3 py-1.5 text-left whitespace-nowrap transition-colors',
-                mode.value === value ? 'text-info' : 'text-foreground',
+                mode.value === value ? 'text-info' : 'text-fg-default',
               )}
             >
               <div className="shrink-0">{mode.icon}</div>

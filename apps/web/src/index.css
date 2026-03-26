@@ -5,24 +5,23 @@
 @custom-variant dark (&:is(.dark *));
 /* ===================================================================
   App design-system tokens — single source of truth.
+  Naming: fg-* (text), bg-* (surfaces), edge-* (borders).
   =================================================================== */
 :root {
-  --text-primary: #191919;
-  --background: #f5f5f5;
-  --border: #e6e6e6;
-
   /* Text hierarchy */
-  --text-secondary: #525252;
-  --text-muted: #a3a3a3;
+  --fg-default: #191919;
+  --fg-muted: #6b6b6b;
+  --fg-subtle: #ababab;
+  --fg-on-emphasis: #ffffff;
 
-  /* Surface */
-  --surface-subtle: #fafafa;
-  --surface-invert: #1f1f1f;
-  --surface-invert-foreground: #ffffff;
+  /* Backgrounds */
+  --bg-default: #f5f5f5;
+  --bg-surface: #ffffff;
+  --bg-hover: #efefef;
+  --bg-emphasis: #1f1f1f;
 
-  /* Interactive states */
-  --hover-subtle: #f9fafb;
-  --hover-medium: #f3f4f6;
+  /* Borders */
+  --edge-default: #e6e6e6;
 
   /* Status: info */
   --info: #2e90ff;
@@ -66,43 +65,43 @@
   --shimmer-3: #4b5563;
 
   /* ===================================================================
-    ShadCN tokens — consumed by @blocknote/shadcn. Do NOT rename.
-    Inherits from app tokens where semantics overlap.
+    ShadCN bridge — consumed by @blocknote/shadcn.
+    Variable NAMES are fixed by ShadCN. Do NOT rename them.
+    Values bridge to system tokens via var() where semantics overlap.
     =================================================================== */
   --radius: 0.625rem;
+  --background: var(--bg-default);
+  --foreground: var(--fg-default);
+  --border: var(--edge-default);
+  --primary: var(--bg-emphasis);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: var(--bg-default);
+  --muted-foreground: var(--fg-subtle);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted-foreground: #7c7c7c;
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
   --destructive: var(--danger);
-  --input: var(--border);
+  --input: var(--edge-default);
   --ring: oklch(0.708 0 0);
 }
-/* Dark theme overrides. */
+/* Dark theme overrides.
+   TODO: migrate system tokens to fg/bg/edge naming in a follow-up pass. */
 .dark {
   /* --- App design-system tokens --- */
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 10%);
-
-  /* Text hierarchy */
-  --text-secondary: oklch(0.78 0 0);
-  --text-placeholder: oklch(0.53 0 0);
-  --text-faded: oklch(0.38 0 0);
-
-  /* Surface */
-  --surface-subtle: oklch(0.22 0 0);
-  --surface-invert: oklch(0.87 0 0);
-  --surface-invert-foreground: #191919;
-
-  /* Interactive states */
-  --hover-subtle: oklch(0.25 0 0);
-  --hover-medium: oklch(0.28 0 0);
+  --fg-default: oklch(0.985 0 0);
+  --fg-muted: oklch(0.78 0 0);
+  --fg-subtle: oklch(0.53 0 0);
+  --fg-on-emphasis: #191919;
+  --bg-default: oklch(0.145 0 0);
+  --bg-surface: oklch(0.22 0 0);
+  --bg-hover: oklch(0.25 0 0);
+  --bg-emphasis: oklch(0.87 0 0);
+  --edge-default: oklch(1 0 0 / 10%);
 
   /* Status: success */
   --success: #4ade80;
@@ -141,7 +140,7 @@
   --shimmer-2: oklch(0.6 0 0);
   --shimmer-3: oklch(0.7 0 0);
 
-  /* --- ShadCN tokens (BlockNote) — inherits from app tokens --- */
+  /* --- ShadCN bridge (BlockNote) --- */
   --card: oklch(0.205 0 0);
   --card-foreground: oklch(0.985 0 0);
   --popover: oklch(0.205 0 0);
@@ -161,23 +160,18 @@
 
 /* Extending Tailwind theme with utility classes.*/
 @theme inline {
-  /* --- App design-system theme mappings --- */
-  --color-background: var(--background);
-  --color-border: var(--border);
+  /* --- System design tokens --- */
+  --color-fg-default: var(--fg-default);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-fg-on-emphasis: var(--fg-on-emphasis);
 
-  /* Text hierarchy */
-  --color-primary: var(--text-primary);
-  --color-secondary: var(--text-secondary);
-  --color-muted: var(--text-muted);
+  --color-bg-default: var(--bg-default);
+  --color-surface: var(--bg-surface);
+  --color-hover: var(--bg-hover);
+  --color-emphasis: var(--bg-emphasis);
 
-  /* Surface */
-  --color-surface-subtle: var(--surface-subtle);
-  --color-surface-invert: var(--surface-invert);
-  --color-surface-invert-foreground: var(--surface-invert-foreground);
-
-  /* Interactive states */
-  --color-hover-subtle: var(--hover-subtle);
-  --color-hover-medium: var(--hover-medium);
+  --color-edge-default: var(--edge-default);
 
   --color-ai: var(--ai);
   --color-ai-light: var(--ai-light);
@@ -214,15 +208,21 @@
   --color-canvas-grid: var(--canvas-grid);
 
   /* --- ShadCN theme mappings (BlockNote) --- */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-border: var(--border);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -248,7 +248,7 @@ html,
 body,
 #root {
   @apply m-0 h-full w-full p-0;
-  background-color: var(--background);
+  background-color: var(--bg-default);
   overflow: hidden;
 }
 

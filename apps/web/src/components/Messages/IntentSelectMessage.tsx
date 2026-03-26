@@ -58,19 +58,19 @@ export const IntentSelectMessage = ({
         </button>
 
         {isOpen && (
-          <div className="border-border bg-card absolute right-0 bottom-full z-50 mb-2 w-64 overflow-hidden rounded-lg border shadow-lg">
+          <div className="border-border bg-surface absolute right-0 bottom-full z-50 mb-2 w-64 overflow-hidden rounded-lg border shadow-lg">
             {candidates.map((c, idx) => (
               <button
                 key={idx}
                 type="button"
-                className={`hover:bg-hover-subtle flex w-full flex-col px-3 py-2 text-left transition-colors ${
+                className={`hover:bg-hover flex w-full flex-col px-3 py-2 text-left transition-colors ${
                   c.label === selectedIntent ? 'bg-info-bg' : ''
                 }`}
                 onClick={() => handleSelect(c.label)}
               >
-                <span className="text-foreground text-sm">{c.label}</span>
+                <span className="text-fg-default text-sm">{c.label}</span>
                 {c.description && (
-                  <span className="text-muted-foreground text-xs">
+                  <span className="text-fg-subtle text-xs">
                     {c.description}
                   </span>
                 )}

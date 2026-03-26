@@ -154,7 +154,7 @@ export const MessageList = ({
         <Button
           variant="pill"
           onClick={scrollToBottom}
-          className="border-border bg-background text-muted-foreground hover:text-foreground absolute bottom-2 left-1/2 z-10 -translate-x-1/2 gap-1.5 shadow-lg"
+          className="border-border bg-bg-default text-fg-subtle hover:text-fg-default absolute bottom-2 left-1/2 z-10 -translate-x-1/2 gap-1.5 shadow-lg"
         >
           New message
           <ArrowDown size={14} />

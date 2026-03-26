@@ -109,7 +109,7 @@ export const LLMSettings: React.FC = () => {
 
   return (
     <div className="border-border mb-3 border-t pt-3">
-      <label className="text-secondary mb-1.5 block text-xs font-medium">
+      <label className="text-fg-muted mb-1.5 block text-xs font-medium">
         <Bot size={12} className="mr-1 inline" />
         LLM Provider
       </label>
@@ -118,7 +118,7 @@ export const LLMSettings: React.FC = () => {
       <div className="relative mb-2">
         <select
           id="llm-provider-select"
-          className="border-border bg-surface-subtle text-text-secondary focus:ring-info-light w-full appearance-none rounded border py-1.5 pr-8 pl-2.5 text-sm focus:ring-1 focus:outline-none"
+          className="border-border bg-surface text-fg-muted focus:ring-info-light w-full appearance-none rounded border py-1.5 pr-8 pl-2.5 text-sm focus:ring-1 focus:outline-none"
           value={llmConfig?.provider ?? ''}
           onChange={(e) => void handleProviderChange(e)}
           disabled={llmSaving}
@@ -136,20 +136,20 @@ export const LLMSettings: React.FC = () => {
         </select>
         <ChevronDown
           size={14}
-          className="text-text-muted pointer-events-none absolute top-1/2 right-2 -translate-y-1/2"
+          className="text-fg-subtle pointer-events-none absolute top-1/2 right-2 -translate-y-1/2"
         />
       </div>
 
       {/* Model select / manual input */}
       {llmConfig?.provider && (
         <>
-          <label className="text-secondary mb-1.5 block text-xs font-medium">
+          <label className="text-fg-muted mb-1.5 block text-xs font-medium">
             Model
           </label>
           {llmModels.length > 0 ? (
             <div className="relative mb-2">
               <select
-                className="border-border bg-surface-subtle text-text-secondary focus:ring-info-light w-full appearance-none rounded border py-1.5 pr-8 pl-2.5 text-sm focus:ring-1 focus:outline-none"
+                className="border-border bg-surface text-fg-muted focus:ring-info-light w-full appearance-none rounded border py-1.5 pr-8 pl-2.5 text-sm focus:ring-1 focus:outline-none"
                 value={llmConfig?.model ?? ''}
                 onChange={(e) => void handleModelChange(e)}
                 disabled={llmSaving}
@@ -162,7 +162,7 @@ export const LLMSettings: React.FC = () => {
               </select>
               <ChevronDown
                 size={14}
-                className="text-text-muted pointer-events-none absolute top-1/2 right-2 -translate-y-1/2"
+                className="text-fg-subtle pointer-events-none absolute top-1/2 right-2 -translate-y-1/2"
               />
             </div>
           ) : (
@@ -175,7 +175,7 @@ export const LLMSettings: React.FC = () => {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') void handleManualModelSave();
                 }}
-                className="border-border bg-card text-text-secondary focus:ring-info-light flex-1 rounded border px-2 py-1.5 text-xs focus:ring-1 focus:outline-none"
+                className="border-border bg-surface text-fg-muted focus:ring-info-light flex-1 rounded border px-2 py-1.5 text-xs focus:ring-1 focus:outline-none"
               />
               <Button
                 variant="secondary"
@@ -199,7 +199,7 @@ export const LLMSettings: React.FC = () => {
                 Enter this code at the opened page:
               </p>
               <div className="mb-1.5 flex items-center gap-2">
-                <code className="bg-card rounded px-2 py-1 font-mono text-lg font-bold">
+                <code className="bg-surface rounded px-2 py-1 font-mono text-lg font-bold">
                   {oauthUserCode}
                 </code>
                 <IconButton
@@ -306,7 +306,7 @@ export const LLMSettings: React.FC = () => {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') void handleSaveApiKey();
                 }}
-                className="border-border bg-card text-text-secondary focus:ring-info-light flex-1 rounded border px-2 py-1.5 text-xs focus:ring-1 focus:outline-none"
+                className="border-border bg-surface text-fg-muted focus:ring-info-light flex-1 rounded border px-2 py-1.5 text-xs focus:ring-1 focus:outline-none"
                 autoFocus
               />
               <Button

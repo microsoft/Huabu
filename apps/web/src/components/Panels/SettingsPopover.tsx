@@ -173,15 +173,15 @@ export const SettingsPopover: React.FC = () => {
           offset={{ x: 0, y: 6 }}
           className="w-80 p-4"
         >
-          <h3 className="text-primary mb-3 text-sm font-semibold">
+          <h3 className="text-fg-default mb-3 text-sm font-semibold">
             Workspace Settings
           </h3>
 
-          <label className="text-secondary mb-1.5 block text-xs font-medium"></label>
+          <label className="text-fg-muted mb-1.5 block text-xs font-medium"></label>
 
           {/* Current path display */}
-          <div className="border-border bg-surface-subtle mb-2 flex items-center gap-2 rounded border px-2.5 py-2">
-            <span className="text-text-secondary flex-1 truncate text-sm">
+          <div className="border-border bg-surface mb-2 flex items-center gap-2 rounded border px-2.5 py-2">
+            <span className="text-fg-muted flex-1 truncate text-sm">
               {workspacePath || 'Not configured'}
             </span>
             <Button
@@ -199,7 +199,7 @@ export const SettingsPopover: React.FC = () => {
             <p className="text-success mb-2 text-xs">Workspace changed!</p>
           )}
 
-          <p className="text-text-muted mb-3 text-[11px] leading-relaxed">
+          <p className="text-fg-subtle mb-3 text-[11px] leading-relaxed">
             The folder where canvas, sources, and artifacts are stored. Changes
             take effect immediately.
           </p>
@@ -207,7 +207,7 @@ export const SettingsPopover: React.FC = () => {
           {/* Recent workspaces */}
           {recentWorkspaces.filter((p) => p !== workspacePath).length > 0 && (
             <div className="mb-3 overflow-hidden">
-              <div className="text-text-muted mb-1.5 flex items-center gap-1 text-[11px] font-medium">
+              <div className="text-fg-subtle mb-1.5 flex items-center gap-1 text-[11px] font-medium">
                 <History size={10} />
                 <span>Recent</span>
               </div>
@@ -229,15 +229,15 @@ export const SettingsPopover: React.FC = () => {
                       >
                         <FolderOpen
                           size={12}
-                          className="text-text-muted shrink-0"
+                          className="text-fg-subtle shrink-0"
                         />
-                        <span className="text-muted-foreground block truncate text-xs">
+                        <span className="text-fg-subtle block truncate text-xs">
                           {path}
                         </span>
                       </Button>
                       <IconButton
                         onClick={() => removeRecentWorkspace(path)}
-                        className="text-text-muted hover:text-muted-foreground shrink-0 p-0.5 opacity-0 transition-all group-hover:opacity-100"
+                        className="text-fg-subtle hover:text-fg-subtle shrink-0 p-0.5 opacity-0 transition-all group-hover:opacity-100"
                         title="Remove from recent"
                       >
                         <X size={12} />

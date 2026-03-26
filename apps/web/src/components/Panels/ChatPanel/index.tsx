@@ -107,7 +107,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           onClick={handleNewChat}
           title="New conversation"
           disabled={isLoading}
-          className="text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+          className="text-fg-muted hover:text-fg-default disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Plus size={16} />
         </IconButton>

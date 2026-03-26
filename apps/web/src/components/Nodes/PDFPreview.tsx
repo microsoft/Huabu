@@ -353,14 +353,14 @@ export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
     <div className="relative flex h-full flex-col">
       {/* Loading overlay — visible until document metadata is parsed */}
       {src && !docLoaded && (
-        <div className="bg-card absolute inset-0 z-10 flex items-center justify-center">
-          <Loader2 size={18} className="text-muted-foreground animate-spin" />
+        <div className="bg-surface absolute inset-0 z-10 flex items-center justify-center">
+          <Loader2 size={18} className="text-fg-subtle animate-spin" />
         </div>
       )}
       {/* ── PDF pages ── */}
       <div
         ref={scrollContainerRef}
-        className="custom-scrollbar bg-card flex-1 overflow-x-hidden overflow-y-auto p-1"
+        className="custom-scrollbar bg-surface flex-1 overflow-x-hidden overflow-y-auto p-1"
       >
         {src ? (
           <div
@@ -400,7 +400,7 @@ export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
             </Document>
           </div>
         ) : (
-          <div className="text-muted-foreground flex h-full w-full items-center justify-center text-sm">
+          <div className="text-fg-subtle flex h-full w-full items-center justify-center text-sm">
             No PDF Source
           </div>
         )}
@@ -408,10 +408,10 @@ export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
 
       {/* ── Floating toolbar (top-left, vertical) ── */}
       <div className="pointer-events-none absolute top-3 left-3 z-10">
-        <div className="text-muted-foreground border-border bg-card pointer-events-auto flex flex-col items-center gap-1 rounded-sm border p-0">
+        <div className="text-fg-subtle border-border bg-surface pointer-events-auto flex flex-col items-center gap-1 rounded-sm border p-0">
           <IconButton
             title="Select Area"
-            className={clsx(captureMode && 'text-info bg-background')}
+            className={clsx(captureMode && 'text-info bg-bg-default')}
             onClick={() => {
               const next = !captureMode;
               setCaptureMode(next);
@@ -424,7 +424,7 @@ export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
           <IconButton
             title="Highlight Text"
             className={clsx(
-              highlightMode && 'bg-background text-warning-light',
+              highlightMode && 'bg-bg-default text-warning-light',
             )}
             onClick={() => {
               const next = !highlightMode;

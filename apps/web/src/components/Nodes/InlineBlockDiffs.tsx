@@ -133,7 +133,7 @@ const DiffPopover = ({
 }: DiffPopoverProps) => (
   <div
     data-diff-popover
-    className="border-border bg-card absolute z-10 max-h-100 overflow-y-auto rounded-md border p-3 shadow-lg"
+    className="border-border bg-surface absolute z-10 max-h-100 overflow-y-auto rounded-md border p-3 shadow-lg"
     style={style}
     onMouseEnter={onMouseEnter}
     onMouseLeave={onMouseLeave}
@@ -498,7 +498,7 @@ export const InlineBlockDiffs = ({
                         ? 'bg-diff-removed-bg text-diff-removed-text line-through'
                         : seg.type === 'added'
                           ? 'bg-diff-added-bg text-diff-added-text'
-                          : 'text-secondary'
+                          : 'text-fg-muted'
                     }
                   >
                     {seg.text}

@@ -16,11 +16,11 @@ const variantClasses: Record<
   string
 > = {
   ghost:
-    'cursor-pointer rounded border-none bg-transparent p-1 enabled:hover:bg-background disabled:opacity-50',
+    'cursor-pointer rounded border-none bg-transparent p-1 enabled:hover:bg-bg-default disabled:opacity-50',
   outline:
-    'rounded-full border border-border text-secondary hover:bg-hover-subtle disabled:opacity-50',
+    'rounded-full border border-border text-fg-muted hover:bg-hover disabled:opacity-50',
   solid:
-    'rounded-full bg-surface-invert text-surface-invert-foreground hover:bg-surface-invert/90 disabled:opacity-40',
+    'rounded-full bg-emphasis text-fg-on-emphasis hover:bg-emphasis/90 disabled:opacity-40',
 };
 
 export const IconButton = ({

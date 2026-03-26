@@ -111,7 +111,7 @@ export function Modal({
 
   return createPortal(
     <div
-      className="bg-background/80 animate-in fade-in fixed inset-0 flex items-center justify-center backdrop-blur-[1px] duration-200"
+      className="bg-bg-default/80 animate-in fade-in fixed inset-0 flex items-center justify-center backdrop-blur-[1px] duration-200"
       style={{ zIndex }}
     >
       <div
@@ -127,24 +127,24 @@ export function Modal({
         aria-describedby={describedBy}
         tabIndex={-1}
         className={cn(
-          'border-border shadow-bottom animate-in zoom-in-95 bg-card relative z-10 w-96 max-w-[calc(100vw-3rem)] rounded-lg border p-6 duration-200',
+          'border-border shadow-bottom animate-in zoom-in-95 bg-surface relative z-10 w-96 max-w-[calc(100vw-3rem)] rounded-lg border p-6 duration-200',
           className,
         )}
       >
         {(title || description) && (
           <div className="mb-2">
             {title && (
-              <h3 id={titleId} className="text-primary text-md font-semibold">
+              <h3
+                id={titleId}
+                className="text-fg-default text-md font-semibold"
+              >
                 {title}
               </h3>
             )}
             {description && (
               <div
                 id={descriptionId}
-                className={cn(
-                  'text-muted-foreground mt-1 text-sm',
-                  !title && 'mt-0',
-                )}
+                className={cn('text-fg-subtle mt-1 text-sm', !title && 'mt-0')}
               >
                 {description}
               </div>

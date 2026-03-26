@@ -575,7 +575,7 @@ export const NotePreview = ({
     <div className="relative h-full w-full">
       <div
         ref={editorContainerRef}
-        className="custom-scrollbar bg-card relative h-full w-full overflow-auto py-3"
+        className="custom-scrollbar bg-surface relative h-full w-full overflow-auto py-3"
       >
         {provenanceCss && <style>{provenanceCss}</style>}
         <NoteSourceIdProvider

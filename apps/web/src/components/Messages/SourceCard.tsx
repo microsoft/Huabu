@@ -62,8 +62,8 @@ export const SourceCard = ({ source }: { source: Source }) => {
         target="_blank"
         rel="noopener noreferrer"
         className={clsx(
-          'border-border bg-card block rounded-lg border px-3 py-2',
-          'hover:bg-background ml-1 transition-colors',
+          'border-border bg-surface block rounded-lg border px-3 py-2',
+          'hover:bg-bg-default ml-1 transition-colors',
         )}
       >
         <div className="flex items-start gap-2">
@@ -80,16 +80,16 @@ export const SourceCard = ({ source }: { source: Source }) => {
           ) : null}
 
           <div className="min-w-0 flex-1">
-            <div className="text-muted-foreground flex min-w-0 items-center gap-2 text-sm font-medium">
+            <div className="text-fg-subtle flex min-w-0 items-center gap-2 text-sm font-medium">
               <span className="truncate">{title}</span>
               <ArrowUpRight
-                className="text-icon flex-none"
+                className="text-fg-subtle flex-none"
                 size={14}
                 strokeWidth={2}
               />
             </div>
             {hostname ? (
-              <div className="text-muted-foreground mt-0.5 truncate text-xs">
+              <div className="text-fg-subtle mt-0.5 truncate text-xs">
                 {hostname}
               </div>
             ) : null}

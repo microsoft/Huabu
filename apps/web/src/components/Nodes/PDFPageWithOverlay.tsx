@@ -276,8 +276,8 @@ export const PDFPageWithOverlay = ({
 
       {/* Spinner overlay until canvas is actually painted */}
       {!rendered && (
-        <div className="bg-surface-subtle absolute inset-0 flex items-center justify-center">
-          <Loader2 size={18} className="text-muted-foreground animate-spin" />
+        <div className="bg-surface absolute inset-0 flex items-center justify-center">
+          <Loader2 size={18} className="text-fg-subtle animate-spin" />
         </div>
       )}
 

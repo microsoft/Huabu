@@ -375,9 +375,7 @@ export const CanvasLayerTree = ({
           </SortableContext>
 
           {visibleItems.length === 0 && (
-            <div className="text-muted-foreground px-3 py-2 text-sm">
-              {emptyText}
-            </div>
+            <div className="text-fg-subtle px-3 py-2 text-sm">{emptyText}</div>
           )}
         </div>
       </div>

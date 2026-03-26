@@ -46,9 +46,9 @@ export function dismissToast(id: string) {
 // ─── React component ──────────────────────────────────────────────────
 
 const variantClasses: Record<ToastVariant, string> = {
-  info: 'bg-surface-invert text-surface-invert-foreground',
-  success: 'bg-surface-invert text-surface-invert-foreground',
-  error: 'bg-danger text-surface-invert-foreground',
+  info: 'bg-emphasis text-fg-on-emphasis',
+  success: 'bg-emphasis text-fg-on-emphasis',
+  error: 'bg-danger text-fg-on-emphasis',
 };
 
 function ToastEntry({ item }: { item: ToastItem }) {
