@@ -1188,6 +1188,7 @@ function flushOnUnload(): void {
                 return label.trim();
               })
               .filter((l) => l.length > 0),
+            labelSource: (nodeData?.labelSource as string) || undefined,
           }
         : {
             title:

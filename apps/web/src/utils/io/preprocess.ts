@@ -119,7 +119,10 @@ function buildSnapshot(
         return label.trim();
       })
       .filter((l) => l.length > 0);
-    return { childLabels };
+    return {
+      childLabels,
+      labelSource: (data?.labelSource as string) || undefined,
+    };
   }
 
   return {
