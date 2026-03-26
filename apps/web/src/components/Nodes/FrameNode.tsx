@@ -131,7 +131,7 @@ export const FrameNode = memo(
         overlayOffsetY={-24}
         keepAspectRatio={false}
         allowOverflow
-        className="bg-white"
+        className="bg-card"
       >
         <div className="h-full" />
       </NodeWrapper>

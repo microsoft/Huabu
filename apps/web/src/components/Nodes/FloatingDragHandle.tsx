@@ -150,7 +150,7 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
   const dragBtnClass = clsx(
     'flex shrink-0 items-center justify-center gap-1 px-2.5 py-1.5',
     'text-xs text-foreground',
-    'hover:bg-theme-100',
+    'hover:bg-info-bg-hover',
     !isFullscreen && 'cursor-grab active:cursor-grabbing',
   );
 

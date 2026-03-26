@@ -109,7 +109,7 @@ export const ModeSelector = ({
               tooltipWrapperClassName="flex w-full"
               className={clsx(
                 'flex w-full gap-1.5 rounded-none px-3 py-1.5 text-left whitespace-nowrap transition-colors',
-                mode.value === value ? 'text-theme-500' : 'text-foreground',
+                mode.value === value ? 'text-info' : 'text-foreground',
               )}
             >
               <div className="shrink-0">{mode.icon}</div>

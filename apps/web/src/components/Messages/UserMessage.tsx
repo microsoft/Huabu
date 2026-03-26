@@ -20,7 +20,7 @@ export const UserMessage = ({
   return (
     <div className="my-3 flex flex-col items-end">
       <div className="mt-2 flex max-w-[80%] flex-col items-end gap-1">
-        <div className="bg-background text-main overflow-hidden rounded-md border border-none px-4 py-2 text-sm">
+        <div className="bg-background text-primary overflow-hidden rounded-md border border-none px-4 py-2 text-sm">
           <div className="leading-relaxed break-all whitespace-pre-wrap">
             {content}
           </div>
@@ -38,19 +38,6 @@ export const UserMessage = ({
               <NodeRef key={id} nodeId={id} />
             ))}
           </div>
-
-          {/* Middle: vertical separator that stretches to match refs height */}
-          {/* <span className="bg-border w-px shrink-0 self-stretch" /> */}
-
-          {/* Right: copy button, top-aligned */}
-          {/* <IconButton
-            className="text-icon mt-px shrink-0 self-start"
-            aria-label="Copy message"
-            title="Copy"
-            onClick={() => copyToClipboard(content)}
-          >
-            <Copy size={12} />
-          </IconButton> */}
         </div>
       )}
     </div>

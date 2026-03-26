@@ -11,7 +11,7 @@ const PRESET_COLORS = [
   {
     name: 'Transparent',
     value: 'bg-transparent',
-    border: 'border-theme-500',
+    border: 'border-info',
     ring: 'ring-transparent',
   },
   {

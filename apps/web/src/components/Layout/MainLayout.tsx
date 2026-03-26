@@ -49,7 +49,7 @@ export const MainLayout = ({
   const resizeHandleClassName =
     'group flex w-1 shrink-0 items-center justify-center bg-transparent outline-none';
   const resizeHandleInnerClassName =
-    'h-8 w-0.5 rounded-full bg-gray-300 opacity-0 transition-all duration-300 group-hover:h-12 group-hover:opacity-100';
+    'h-8 w-0.5 rounded-full bg-text-faded opacity-0 transition-all duration-300 group-hover:h-12 group-hover:opacity-100';
 
   const leftHandleDisabled = isLeftCollapsed;
   const rightHandleDisabled = isRightCollapsed;

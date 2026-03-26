@@ -127,14 +127,14 @@ export function Modal({
         aria-describedby={describedBy}
         tabIndex={-1}
         className={cn(
-          'border-border shadow-bottom animate-in zoom-in-95 relative z-10 w-96 max-w-[calc(100vw-3rem)] rounded-lg border bg-white p-6 duration-200',
+          'border-border shadow-bottom animate-in zoom-in-95 bg-card relative z-10 w-96 max-w-[calc(100vw-3rem)] rounded-lg border p-6 duration-200',
           className,
         )}
       >
         {(title || description) && (
           <div className="mb-2">
             {title && (
-              <h3 id={titleId} className="text-main text-md font-semibold">
+              <h3 id={titleId} className="text-primary text-md font-semibold">
                 {title}
               </h3>
             )}

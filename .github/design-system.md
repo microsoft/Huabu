@@ -61,37 +61,87 @@ These rules apply **unconditionally** to ALL components, at every level.
 
 ### 2.1 Colors
 
-| Token (Tailwind class)  | Value                      | When to use                                               |
-| ----------------------- | -------------------------- | --------------------------------------------------------- |
-| `text-main`             | `#191919` (`--foreground`) | All primary text, labels, titles                          |
-| `text-muted-foreground` | `#7c7c7c`                  | Secondary text, descriptions, inactive labels             |
-| `text-icon`             | `#ababab`                  | Default icon color (non-interactive or resting state)     |
-| `text-theme-500`        | `#2e90ff`                  | Active / selected state text, toggle-on indicator         |
-| `text-white`            | `#ffffff`                  | Text on dark surfaces (solid buttons, tooltip)            |
-| `text-danger`           | `#e71d1d`                  | Error text, destructive action labels                     |
-| `text-gray-600`         | —                          | IconButton outline variant text                           |
-| `text-gray-700`         | —                          | Button pill variant text                                  |
-| `bg-white`              | `#ffffff`                  | All surfaces: panels, cards, toolbars, popovers           |
-| `bg-background`         | `#f5f5f5` (`--background`) | Page canvas, hover state for ghost buttons, active tab bg |
-| `bg-theme-50`           | `#f2f8ff`                  | Active toggle background, TreeRow highlight               |
-| `bg-theme-100`          | `#dfeefe`                  | TreeRow selected state                                    |
-| `bg-danger-bg`          | `#fff7f8`                  | Error / cancel background                                 |
-| `bg-gray-900`           | —                          | Solid buttons, tooltip bubble                             |
-| `border-border`         | `#e6e6e6` (`--border`)     | **Every** border in the app uses this single color        |
-| `ring-theme-500`        | `#2e90ff`                  | Selected node ring, focus ring for primary actions        |
-| `ring-border`           | `#e6e6e6`                  | Hover ring on unselected nodes                            |
+#### Text Hierarchy
+
+| Token (Tailwind class)           | Value                      | When to use                                           |
+| -------------------------------- | -------------------------- | ----------------------------------------------------- |
+| `text-primary`                   | `#191919` (`--foreground`) | All primary text, labels, titles                      |
+| `text-text-secondary`            | `#525252`                  | Form values, dropdown items, pill button text         |
+| `text-secondary`                 | `#6b6b6b`                  | Form labels, detail text, key bindings                |
+| `text-muted-foreground`          | `#7c7c7c`                  | Secondary text, descriptions, inactive labels         |
+| `text-text-muted`                | `#a3a3a3`                  | Placeholders, timestamps, disabled text, metadata     |
+| `text-icon`                      | `#ababab`                  | Default icon color (non-interactive or resting state) |
+| `text-text-muted`                | `#d4d4d4`                  | Very faded icons, resize handle indicators            |
+| `text-info`                      | `#2e90ff`                  | Active / selected state text, toggle-on indicator     |
+| `text-danger`                    | `#e71d1d`                  | Error text, destructive action labels                 |
+| `text-surface-invert-foreground` | `#ffffff`                  | Text on dark surfaces (solid buttons, tooltip, toast) |
+
+#### Surface & Background
+
+| Token (Tailwind class) | Value                      | When to use                                               |
+| ---------------------- | -------------------------- | --------------------------------------------------------- |
+| `bg-card`              | `#ffffff` (`--card`)       | All surfaces: panels, cards, toolbars, popovers           |
+| `bg-background`        | `#f5f5f5` (`--background`) | Page canvas, hover state for ghost buttons, active tab bg |
+| `bg-surface-subtle`    | `#fafafa`                  | Input backgrounds, kbd elements, code blocks              |
+| `bg-surface-invert`    | `#1f1f1f`                  | Tooltip, toast, solid button backgrounds                  |
+| `bg-info-bg`           | `#f2f8ff`                  | Active toggle background, TreeRow highlight               |
+| `bg-info-bg-hover`     | `#dfeefe`                  | TreeRow selected state                                    |
+| `bg-danger-bg`         | `#fff7f8`                  | Error / cancel background                                 |
+
+#### Interactive States
+
+| Token (Tailwind class)  | Value     | When to use                               |
+| ----------------------- | --------- | ----------------------------------------- |
+| `hover:bg-hover-subtle` | `#f9fafb` | Light hover on buttons, list items        |
+| `hover:bg-hover-medium` | `#f3f4f6` | Medium hover on list items, close buttons |
+
+#### Border & Ring
+
+| Token (Tailwind class) | Value                  | When to use                                        |
+| ---------------------- | ---------------------- | -------------------------------------------------- |
+| `border-border`        | `#e6e6e6` (`--border`) | **Every** border in the app uses this single color |
+| `ring-info`            | `#2e90ff`              | Selected node ring, focus ring for primary actions |
+| `ring-border`          | `#e6e6e6`              | Hover ring on unselected nodes                     |
+
+#### Status Colors
+
+| Token (Tailwind class) | Value     | When to use                         |
+| ---------------------- | --------- | ----------------------------------- |
+| `text-success`         | `#16a34a` | Success text, auth confirmed        |
+| `text-success-light`   | `#22c55e` | Success icon                        |
+| `bg-success-bg`        | `#f0fdf4` | Success background                  |
+| `text-warning`         | `#d97706` | Warning text                        |
+| `text-warning-light`   | `#f59e0b` | Warning icon, context usage ring    |
+| `text-info`            | `#3b82f6` | Info status text                    |
+| `text-info-light`      | `#60a5fa` | Info status icon                    |
+| `bg-info-bg`           | `#eff6ff` | Info status background              |
+| `bg-info-bg-hover`     | `#dbeafe` | Info status hover                   |
+| `text-danger-light`    | `#f87171` | Danger icon color (lighter variant) |
+| `bg-danger-bg-hover`   | `#fee2e2` | Danger hover background             |
+
+#### AI Colors
+
+| Token (Tailwind class) | Value                      | When to use              |
+| ---------------------- | -------------------------- | ------------------------ |
+| `text-ai` / `bg-ai`    | `#bda6ce`                  | AI accent                |
+| `bg-ai-light`          | `rgba(189, 166, 206, 0.3)` | AI accent at 30% opacity |
+| `bg-ai-bg`             | `rgba(189, 166, 206, 0.1)` | AI background            |
+
+> **Node color presets** (§4.3, §4.4) are an intentional exception — they use Tailwind
+> default palette colors (`red-50`, `orange-500`, etc.) because they represent
+> user-selectable decorative colors, not semantic UI tokens.
 
 ### 2.2 Typography
 
-| Property        | Class                       | Usage                                      |
-| --------------- | --------------------------- | ------------------------------------------ |
-| Page title      | `text-lg font-medium`       | Header workspace name                      |
-| Section heading | `text-sm font-semibold`     | Panel headers, modal titles, form headings |
-| Body text       | `text-m leading-relaxed`    | Chat message content                       |
-| UI labels       | `text-sm font-medium`       | Tab labels, form labels, tree row text     |
-| Small text      | `text-xs font-medium`       | Toolbar labels, metadata, card subtitles   |
-| Micro text      | `text-[10px] uppercase`     | Badges ("PREVIEW")                         |
-| Placeholder     | `placeholder:text-gray-400` | Input / textarea placeholders              |
+| Property        | Class                         | Usage                                      |
+| --------------- | ----------------------------- | ------------------------------------------ |
+| Page title      | `text-lg font-medium`         | Header workspace name                      |
+| Section heading | `text-sm font-semibold`       | Panel headers, modal titles, form headings |
+| Body text       | `text-m leading-relaxed`      | Chat message content                       |
+| UI labels       | `text-sm font-medium`         | Tab labels, form labels, tree row text     |
+| Small text      | `text-xs font-medium`         | Toolbar labels, metadata, card subtitles   |
+| Micro text      | `text-[10px] uppercase`       | Badges ("PREVIEW")                         |
+| Placeholder     | `placeholder:text-text-muted` | Input / textarea placeholders              |
 
 **Font families** (TextNode only): Default (system sans), Serif, Mono, Hand.
 
@@ -199,7 +249,7 @@ Use this matrix to determine the exact styling for any UI element.
 | ----------- | ----------------------------------------------------------------- |
 | Component   | `MainLayout`                                                      |
 | Layout      | `flex flex-col h-full w-full overflow-hidden`                     |
-| Header      | `h-12 border-b border-border bg-white px-3 gap-3`                 |
+| Header      | `h-12 border-b border-border bg-card px-3 gap-3`                  |
 | Content row | `flex min-h-0 flex-1`                                             |
 | Children    | Left Panel → Resize Handle → Center → Resize Handle → Right Panel |
 
@@ -209,21 +259,21 @@ Use this matrix to determine the exact styling for any UI element.
 
 > Collapsible side panels and expanded content panels.
 
-| Property         | Expanded                                                        | Collapsed                                                        |
-| ---------------- | --------------------------------------------------------------- | ---------------------------------------------------------------- |
-| Component        | `SidebarPanel`                                                  | `SidebarPanel`                                                   |
-| Background       | `bg-white`                                                      | `bg-white`                                                       |
-| Width            | Left: 260px (min 200, max 30%); Right: 420px (min 200, max 50%) | 48px                                                             |
-| Header           | `h-12 border-b border-border px-3`                              | —                                                                |
-| Content padding  | `p-3`                                                           | —                                                                |
-| Overflow         | `overflow-y-auto`                                               | —                                                                |
-| Side border      | Left: `border-r border-border`; Right: `border-l border-border` | same                                                             |
-| Collapsed label  | —                                                               | `text-xs font-semibold text-gray-500 [writing-mode:vertical-rl]` |
-| Toggle icon size | —                                                               | `16`                                                             |
+| Property         | Expanded                                                        | Collapsed                                                                |
+| ---------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Component        | `SidebarPanel`                                                  | `SidebarPanel`                                                           |
+| Background       | `bg-card`                                                       | `bg-card`                                                                |
+| Width            | Left: 260px (min 200, max 30%); Right: 420px (min 200, max 50%) | 48px                                                                     |
+| Header           | `h-12 border-b border-border px-3`                              | —                                                                        |
+| Content padding  | `p-3`                                                           | —                                                                        |
+| Overflow         | `overflow-y-auto`                                               | —                                                                        |
+| Side border      | Left: `border-r border-border`; Right: `border-l border-border` | same                                                                     |
+| Collapsed label  | —                                                               | `text-xs font-semibold text-muted-foreground [writing-mode:vertical-rl]` |
+| Toggle icon size | —                                                               | `16`                                                                     |
 
 **Resize Handle** (between panels):
 `w-2 bg-transparent cursor-col-resize` with inner pill
-`h-8 w-1 rounded-full bg-gray-300 opacity-0 → group-hover:h-12 group-hover:opacity-100 duration-300`
+`h-8 w-1 rounded-full bg-text-faded opacity-0 → group-hover:h-12 group-hover:opacity-100 duration-300`
 
 **ExpandedNodePanel header**: `h-10 border-b border-border px-3 gap-3`
 Title: `text-xs font-medium text-muted-foreground truncate`
@@ -239,8 +289,8 @@ Title: `text-xs font-medium text-muted-foreground truncate`
 | Variant    | Background      | Radius        | Border                  | Padding     | Align         |
 | ---------- | --------------- | ------------- | ----------------------- | ----------- | ------------- |
 | User       | `bg-background` | `rounded-2xl` | none                    | `p-3`       | right         |
-| AI         | `bg-white`      | `rounded-2xl` | none                    | `px-4 pt-2` | left (`ml-1`) |
-| Tool       | `bg-white`      | `rounded-2xl` | `border border-border`  | `px-4 py-3` | left          |
+| AI         | `bg-card`       | `rounded-2xl` | none                    | `px-4 pt-2` | left (`ml-1`) |
+| Tool       | `bg-card`       | `rounded-2xl` | `border border-border`  | `px-4 py-3` | left          |
 | Tool error | `bg-danger-bg`  | `rounded-2xl` | `border border-border`  | `px-4 py-3` | left          |
 | Research   | status-color bg | `rounded-2xl` | `border` + status-color | `p-4`       | left          |
 
@@ -248,31 +298,31 @@ Font: `text-m leading-relaxed`. Between messages: `space-y-1`.
 
 #### SourceCard
 
-`rounded-lg border border-border bg-white px-3 py-2 hover:bg-background`
+`rounded-lg border border-border bg-card px-3 py-2 hover:bg-background`
 Favicon: `h-3.5 w-3.5 rounded-sm`.
 DragHandle: hidden by default, `opacity-0 group-hover:opacity-100`.
 
 #### ChatInput Container
 
-`rounded-2xl border border-border bg-white p-3`
+`rounded-2xl border border-border bg-card p-3`
 
 #### Modal (UploadModal)
 
 | Property        | Value                                                                     |
 | --------------- | ------------------------------------------------------------------------- |
 | Backdrop        | `fixed inset-0 bg-background/80 backdrop-blur-[1px] z-9999`               |
-| Dialog          | `rounded-lg border border-border bg-white shadow-bottom w-90 p-6`         |
-| Title           | `text-sm font-semibold text-main`                                         |
+| Dialog          | `rounded-lg border border-border bg-card shadow-bottom w-90 p-6`          |
+| Title           | `text-sm font-semibold text-primary`                                      |
 | Close button    | `text-muted-foreground hover:text-danger rounded p-1`, icon `X size={16}` |
 | Enter animation | `animate-in zoom-in-95 fade-in duration-200`                              |
 
 #### Popover
 
-| Property       | Value                                                         |
-| -------------- | ------------------------------------------------------------- |
-| Surface        | `rounded-lg border border-border bg-white shadow-lg w-80 p-4` |
-| Position       | `fixed`, anchored below trigger + 6px, right-aligned          |
-| Implementation | `createPortal(…, document.body)`                              |
+| Property       | Value                                                        |
+| -------------- | ------------------------------------------------------------ |
+| Surface        | `rounded-lg border border-border bg-card shadow-lg w-80 p-4` |
+| Position       | `fixed`, anchored below trigger + 6px, right-aligned         |
+| Implementation | `createPortal(…, document.body)`                             |
 
 #### Dropdown Menu
 
@@ -280,7 +330,7 @@ DragHandle: hidden by default, `opacity-0 group-hover:opacity-100`.
 | ----------- | -------------------------------------------------------- |
 | Surface     | `rounded border border-border bg-popover shadow-lg py-1` |
 | Item        | `px-3 py-1.5 text-xs hover:bg-accent w-full text-left`   |
-| Active item | add `font-bold text-blue-500`                            |
+| Active item | add `font-bold text-info`                                |
 
 ---
 
@@ -292,7 +342,7 @@ DragHandle: hidden by default, `opacity-0 group-hover:opacity-100`.
 
 | Property        | Value                                                            |
 | --------------- | ---------------------------------------------------------------- |
-| Shape           | `rounded-md border border-border bg-white shadow-bottom`         |
+| Shape           | `rounded-md border border-border bg-card shadow-bottom`          |
 | Size            | `h-8 px-2 py-1 gap-3`                                            |
 | Position        | Above node, `offset={12}`, visible when single-selected          |
 | Icon size       | `14`                                                             |
@@ -302,18 +352,18 @@ DragHandle: hidden by default, `opacity-0 group-hover:opacity-100`.
 
 #### CanvasToolbar (bottom floating)
 
-| Property      | Value                                                           |
-| ------------- | --------------------------------------------------------------- |
-| Shape         | `rounded-lg border-0 bg-white shadow-bottom`                    |
-| Size          | `p-2 gap-2`                                                     |
-| Position      | `Panel position="bottom-center" className="mb-6"`               |
-| Icon size     | `18`                                                            |
-| Icon color    | `text-muted-foreground`, active: `text-theme-500 bg-background` |
-| Group divider | `<div className="bg-border mx-1 h-4 w-px" />`                   |
+| Property      | Value                                                      |
+| ------------- | ---------------------------------------------------------- |
+| Shape         | `rounded-lg border-0 bg-card shadow-bottom`                |
+| Size          | `p-2 gap-2`                                                |
+| Position      | `Panel position="bottom-center" className="mb-6"`          |
+| Icon size     | `18`                                                       |
+| Icon color    | `text-muted-foreground`, active: `text-info bg-background` |
+| Group divider | `<div className="bg-border mx-1 h-4 w-px" />`              |
 
 #### Panel Header Bar
 
-Already defined in §3.2. Key: `h-12 px-3 border-b border-border bg-white`.
+Already defined in §3.2. Key: `h-12 px-3 border-b border-border bg-card`.
 
 #### Tabs (inside panel header)
 
@@ -330,25 +380,25 @@ Already defined in §3.2. Key: `h-12 px-3 border-b border-border bg-white`.
 
 #### TreeRowItem
 
-| Property                              | Value                                                      |
-| ------------------------------------- | ---------------------------------------------------------- |
-| Height                                | `h-9`                                                      |
-| Background                            | `bg-white`                                                 |
-| Inner wrapper                         | `rounded px-2 py-1 text-sm transition-colors`              |
-| Indent                                | `paddingLeft: 12 + depth × 16` px                          |
-| Default hover                         | `hover:bg-background`                                      |
-| Selected                              | `bg-theme-100`                                             |
-| Highlighted (child of selected frame) | `bg-theme-50`                                              |
-| Icon                                  | `text-muted-foreground size={14} strokeWidth={1.5}`        |
-| Label                                 | `text-main truncate select-none`                           |
-| Chevron                               | `size={12} strokeWidth={1.5}`                              |
-| Edit input                            | `h-6 rounded-sm border bg-white px-1 text-xs outline-none` |
-| Lock / action icons                   | appear on hover, `size={12} strokeWidth={1.5}`             |
+| Property                              | Value                                                     |
+| ------------------------------------- | --------------------------------------------------------- |
+| Height                                | `h-9`                                                     |
+| Background                            | `bg-card`                                                 |
+| Inner wrapper                         | `rounded px-2 py-1 text-sm transition-colors`             |
+| Indent                                | `paddingLeft: 12 + depth × 16` px                         |
+| Default hover                         | `hover:bg-background`                                     |
+| Selected                              | `bg-info-bg-hover`                                        |
+| Highlighted (child of selected frame) | `bg-info-bg`                                              |
+| Icon                                  | `text-muted-foreground size={14} strokeWidth={1.5}`       |
+| Label                                 | `text-primary truncate select-none`                       |
+| Chevron                               | `size={12} strokeWidth={1.5}`                             |
+| Edit input                            | `h-6 rounded-sm border bg-card px-1 text-xs outline-none` |
+| Lock / action icons                   | appear on hover, `size={12} strokeWidth={1.5}`            |
 
 #### ResearchStepItem
 
 `flex items-start gap-2 text-xs`
-Status icon: `h-3 w-3`. Title: `font-medium text-gray-900`. Detail: `mt-0.5 text-gray-600`.
+Status icon: `h-3 w-3`. Title: `font-medium text-foreground`. Detail: `mt-0.5 text-secondary`.
 
 ---
 
@@ -358,13 +408,13 @@ Status icon: `h-3 w-3`. Title: `font-medium text-gray-900`. Detail: `mt-0.5 text
 
 #### Button (unified text / pill / ghost button)
 
-| Variant     | Classes                                                                                                  |
-| ----------- | -------------------------------------------------------------------------------------------------------- |
-| `primary`   | `rounded-md font-medium bg-theme-50 text-theme-500 hover:bg-theme-100`                                   |
-| `secondary` | `rounded-md font-medium border border-border text-muted-foreground bg-white hover:bg-gray-50`            |
-| `danger`    | `rounded-md font-medium bg-destructive text-white hover:bg-destructive/90`                               |
-| `ghost`     | `rounded border-none bg-transparent p-1 enabled:hover:bg-background`                                     |
-| `pill`      | `rounded-full border border-border px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 gap-1` |
+| Variant     | Classes                                                                                                             |
+| ----------- | ------------------------------------------------------------------------------------------------------------------- |
+| `primary`   | `rounded-md font-medium bg-info-bg text-info hover:bg-info-bg-hover`                                                |
+| `secondary` | `rounded-md font-medium border border-border text-muted-foreground bg-card hover:bg-hover-subtle`                   |
+| `danger`    | `rounded-md font-medium bg-destructive text-surface-invert-foreground hover:bg-destructive/90`                      |
+| `ghost`     | `rounded border-none bg-transparent p-1 enabled:hover:bg-background`                                                |
+| `pill`      | `rounded-full border border-border px-3 py-1.5 text-xs font-medium text-text-secondary hover:bg-hover-subtle gap-1` |
 
 Sizes (apply to `primary`, `secondary`, `danger` only):
 
@@ -377,11 +427,11 @@ All variants: `disabled:cursor-not-allowed disabled:opacity-50`. Tooltip auto vi
 
 #### IconButton (icon-only round or ghost button)
 
-| Variant   | Classes                                                                                  |
-| --------- | ---------------------------------------------------------------------------------------- |
-| `ghost`   | `rounded border-none bg-transparent p-1 enabled:hover:bg-background disabled:opacity-50` |
-| `outline` | `rounded-full border border-border text-gray-600 hover:bg-gray-50 disabled:opacity-50`   |
-| `solid`   | `rounded-full bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-40`              |
+| Variant   | Classes                                                                                                        |
+| --------- | -------------------------------------------------------------------------------------------------------------- |
+| `ghost`   | `rounded border-none bg-transparent p-1 enabled:hover:bg-background disabled:opacity-50`                       |
+| `outline` | `rounded-full border border-border text-secondary hover:bg-hover-subtle disabled:opacity-50`                   |
+| `solid`   | `rounded-full bg-surface-invert text-surface-invert-foreground hover:bg-surface-invert/90 disabled:opacity-40` |
 
 Sizes (apply to `outline` and `solid` only):
 
@@ -399,7 +449,7 @@ Tooltip auto via `title` prop. Usage: Send button (`solid sm`), Settings (`outli
 | Based on   | IconButton                          |
 | Size       | `h-4.5 w-4.5`                       |
 | Icon       | `GripVertical size={16}`            |
-| Color      | `text-icon hover:text-main`         |
+| Color      | `text-icon hover:text-primary`      |
 | Cursor     | `cursor-grab`                       |
 | Visibility | `opacity-0 group-hover:opacity-100` |
 
@@ -407,7 +457,7 @@ Tooltip auto via `title` prop. Usage: Send button (`solid sm`), Settings (`outli
 
 | Property        | Value                                                                         |
 | --------------- | ----------------------------------------------------------------------------- |
-| Float surface   | `rounded-full border border-border bg-white shadow-bottom px-2 py-1.5 gap-2`  |
+| Float surface   | `rounded-full border border-border bg-card shadow-bottom px-2 py-1.5 gap-2`   |
 | Position        | `absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50`                    |
 | Animation       | `animate-in fade-in zoom-in duration-200`                                     |
 | Swatch          | `h-4 w-4 rounded-full border hover:scale-110` (bg) / `hover:scale-125` (text) |
@@ -422,13 +472,13 @@ Tooltip auto via `title` prop. Usage: Send button (`solid sm`), Settings (`outli
 
 #### Tooltip
 
-| Property       | Value                                                               |
-| -------------- | ------------------------------------------------------------------- |
-| Shape          | `rounded-md bg-gray-900 px-2 py-1 text-xs text-white shadow-bottom` |
-| Z-index        | `z-50`                                                              |
-| Positioning    | `fixed`, JS-calculated, prefer above, fallback below                |
-| Interaction    | `pointer-events-none`                                               |
-| Implementation | `createPortal(…, document.body)`                                    |
+| Property       | Value                                                                                         |
+| -------------- | --------------------------------------------------------------------------------------------- |
+| Shape          | `rounded-md bg-surface-invert px-2 py-1 text-xs text-surface-invert-foreground shadow-bottom` |
+| Z-index        | `z-50`                                                                                        |
+| Positioning    | `fixed`, JS-calculated, prefer above, fallback below                                          |
+| Interaction    | `pointer-events-none`                                                                         |
+| Implementation | `createPortal(…, document.body)`                                                              |
 
 #### Inline Separator
 
@@ -465,18 +515,18 @@ All canvas nodes share the same `NodeWrapper` shell.
 
 ### 4.1 NodeWrapper Provides
 
-| Feature            | Implementation                                                                                                          |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------- |
-| Selection ring     | `ring ring-theme-500` (selected) / `ring-border hover:ring` (unselected)                                                |
-| Background         | User-chosen preset or `bg-transparent`                                                                                  |
-| Border             | `border-0` (ring replaces border)                                                                                       |
-| Radius             | `rounded`                                                                                                               |
-| Resize             | `<NodeResizer color="#e6e6e6">`                                                                                         |
-| Toolbar            | `<NodeToolbar>` above node, `offset={12}`, single-select only                                                           |
-| Connection handles | 8 handles (top/right/bottom/left × source/target), `bg-theme-500 h-1 w-1 border-none opacity-0 group-hover:opacity-100` |
-| Drag handle        | `absolute top-0 -left-4.5 h-6 w-4 text-icon hover:text-main opacity-0 group-hover:opacity-100`                          |
-| Ingestion overlay  | Spinner over `bg-background/40`                                                                                         |
-| Research indicator | `border-l-4 border-l-purple-500`                                                                                        |
+| Feature            | Implementation                                                                                                     |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| Selection ring     | `ring ring-info` (selected) / `ring-border hover:ring` (unselected)                                                |
+| Background         | User-chosen preset or `bg-transparent`                                                                             |
+| Border             | `border-0` (ring replaces border)                                                                                  |
+| Radius             | `rounded`                                                                                                          |
+| Resize             | `<NodeResizer color="#e6e6e6">`                                                                                    |
+| Toolbar            | `<NodeToolbar>` above node, `offset={12}`, single-select only                                                      |
+| Connection handles | 8 handles (top/right/bottom/left × source/target), `bg-info h-1 w-1 border-none opacity-0 group-hover:opacity-100` |
+| Drag handle        | `absolute top-0 -left-4.5 h-6 w-4 text-icon hover:text-primary opacity-0 group-hover:opacity-100`                  |
+| Ingestion overlay  | Spinner over `bg-background/40`                                                                                    |
+| Research indicator | `border-l-4 border-l-purple-500`                                                                                   |
 
 ### 4.2 Node Toolbar Internal Layout
 
@@ -489,14 +539,14 @@ All canvas nodes share the same `NodeWrapper` shell.
 Optional extras for TextNode: font-family select, font-size input,
 bold/italic/underline toggles, text-color selector, bg-color selector.
 
-Active toggle style: `text-theme-500 bg-theme-50`.
+Active toggle style: `text-info bg-info-bg`.
 Inactive toggle style: `text-muted-foreground hover:bg-background`.
 
 ### 4.3 Background Color Presets
 
 | Name        | bg class         | border class        |
 | ----------- | ---------------- | ------------------- |
-| Transparent | `bg-transparent` | `border-theme-500`  |
+| Transparent | `bg-transparent` | `border-info`       |
 | White       | `bg-white`       | `border-border`     |
 | Red         | `bg-red-50`      | `border-red-200`    |
 | Orange      | `bg-orange-50`   | `border-orange-200` |

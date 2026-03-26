@@ -46,9 +46,9 @@ export function dismissToast(id: string) {
 // ─── React component ──────────────────────────────────────────────────
 
 const variantClasses: Record<ToastVariant, string> = {
-  info: 'bg-gray-800 text-white',
-  success: 'bg-gray-800 text-white',
-  error: 'bg-red-600 text-white',
+  info: 'bg-surface-invert text-surface-invert-foreground',
+  success: 'bg-surface-invert text-surface-invert-foreground',
+  error: 'bg-danger text-surface-invert-foreground',
 };
 
 function ToastEntry({ item }: { item: ToastItem }) {

@@ -154,7 +154,7 @@ export default function CanvasListPage() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col bg-gray-50">
+    <div className="bg-background flex min-h-screen flex-col">
       <Modal
         isOpen={pendingDelete !== null}
         title="Delete canvas?"
@@ -162,7 +162,7 @@ export default function CanvasListPage() {
           pendingDelete ? (
             <>
               Are you sure you want to delete{' '}
-              <span className="text-main font-medium">
+              <span className="text-primary font-medium">
                 “{pendingDelete.title || pendingDelete.canvasId}”
               </span>
               ? This action cannot be undone.
@@ -211,10 +211,10 @@ export default function CanvasListPage() {
 
       {/* Header */}
       <Header>
-        <h1 className="px-1 text-lg font-semibold text-gray-900">Sediment</h1>
+        <h1 className="text-foreground px-1 text-lg font-semibold">Sediment</h1>
         {workspacePath && (
           <span
-            className="mt-0.5 ml-1 truncate text-xs text-gray-400"
+            className="text-text-muted mt-0.5 ml-1 truncate text-xs"
             title={workspacePath}
           >
             {workspacePath.split(/[\\/]/).filter(Boolean).pop()}
@@ -226,8 +226,8 @@ export default function CanvasListPage() {
       <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-10">
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <h2 className="text-2xl font-bold text-gray-900">Canvases</h2>
-            <p className="mt-1 text-sm text-gray-500">
+            <h2 className="text-foreground text-2xl font-bold">Canvases</h2>
+            <p className="text-muted-foreground mt-1 text-sm">
               Select a canvas to open, or create a new one.
             </p>
           </div>
@@ -239,7 +239,7 @@ export default function CanvasListPage() {
               className="gap-2 rounded-lg px-3 py-2"
             >
               {isImporting ? (
-                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-500 border-t-transparent" />
+                <span className="border-border inline-block h-4 w-4 animate-spin rounded-full border-2 border-t-transparent" />
               ) : (
                 <Upload size={16} />
               )}
@@ -263,16 +263,16 @@ export default function CanvasListPage() {
 
         {isLoading ? (
           <div className="flex items-center justify-center py-20">
-            <div className="text-sm text-gray-400">Loading canvases…</div>
+            <div className="text-text-muted text-sm">Loading canvases…</div>
           </div>
         ) : canvases.length === 0 ? (
-          <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-200 py-20">
-            <p className="text-sm text-gray-400">No canvases yet.</p>
+          <div className="border-border flex flex-col items-center justify-center rounded-xl border-2 border-dashed py-20">
+            <p className="text-text-muted text-sm">No canvases yet.</p>
             <Button
               variant="ghost"
               onClick={handleCreate}
               disabled={isCreating}
-              className="mt-4 text-sm font-medium text-gray-900 underline hover:text-gray-700"
+              className="text-foreground hover:text-text-secondary mt-4 text-sm font-medium underline"
             >
               Create your first canvas
             </Button>
@@ -282,20 +282,20 @@ export default function CanvasListPage() {
             {canvases.map((canvas) => (
               <div
                 key={canvas.canvasId}
-                className="group relative flex flex-col rounded-xl border border-gray-200 bg-white p-5 text-left transition-all hover:border-gray-300 hover:shadow-md"
+                className="group border-border bg-card hover:border-border relative flex flex-col rounded-xl border p-5 text-left transition-all hover:shadow-md"
               >
                 <button
                   onClick={() => handleOpen(canvas.canvasId)}
                   className="flex flex-1 flex-col text-left"
                 >
-                  <h3 className="truncate text-sm font-semibold text-gray-900 group-hover:text-black">
+                  <h3 className="text-foreground group-hover:text-foreground truncate text-sm font-semibold">
                     {canvas.title || 'Untitled'}
                   </h3>
-                  <p className="mt-1 text-xs text-gray-400">
+                  <p className="text-text-muted mt-1 text-xs">
                     {canvas.nodeCount} node
                     {canvas.nodeCount !== 1 ? 's' : ''}
                   </p>
-                  <div className="mt-auto pt-4 text-xs text-gray-400">
+                  <div className="text-text-muted mt-auto pt-4 text-xs">
                     Updated {formatDate(canvas.updatedAt)}
                   </div>
                 </button>
@@ -314,9 +314,9 @@ export default function CanvasListPage() {
                   disabled={exportingId === canvas.canvasId}
                 >
                   {exportingId === canvas.canvasId ? (
-                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" />
+                    <span className="border-border h-4 w-4 animate-spin rounded-full border-2" />
                   ) : (
-                    <Download size={16} className="text-gray-400" />
+                    <Download size={16} className="text-text-muted" />
                   )}
                 </IconButton>
                 {/* Delete button */}
@@ -328,7 +328,7 @@ export default function CanvasListPage() {
                   tooltipWrapperClassName="absolute top-3 right-3 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
                   title="Delete canvas"
                 >
-                  <Trash2 size={16} className="text-gray-400" />
+                  <Trash2 size={16} className="text-text-muted" />
                 </IconButton>
               </div>
             ))}

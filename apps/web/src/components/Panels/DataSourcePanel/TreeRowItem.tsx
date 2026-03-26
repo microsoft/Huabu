@@ -112,9 +112,9 @@ export const TreeRowItem = React.memo(
     };
 
     const bgColor = isSelected
-      ? 'bg-theme-100'
+      ? 'bg-info-bg'
       : isHighlighted
-        ? 'bg-theme-50'
+        ? 'bg-info-bg/50'
         : 'hover:bg-background';
 
     const mergedStyle: React.CSSProperties = {
@@ -139,7 +139,7 @@ export const TreeRowItem = React.memo(
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
         className={clsx(
-          'flex h-9 w-full cursor-pointer touch-none items-center gap-2 bg-white px-2',
+          'bg-card flex h-9 w-full cursor-pointer touch-none items-center gap-2 px-2',
           className,
         )}
         {...rest}
@@ -185,7 +185,7 @@ export const TreeRowItem = React.memo(
               className="h-6 w-full min-w-0 flex-1 rounded-sm border bg-white px-1 text-xs outline-none"
             />
           ) : (
-            <span className="text-main truncate select-none">{label}</span>
+            <span className="text-primary truncate select-none">{label}</span>
           )}
 
           {/* Action buttons on the right */}

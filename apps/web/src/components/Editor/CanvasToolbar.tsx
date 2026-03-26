@@ -167,13 +167,13 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
 
   return (
     <>
-      <div className="text-muted-foreground shadow-bottom pointer-events-auto relative flex w-max items-center gap-2 rounded-lg border-0 bg-white px-4 py-2">
+      <div className="text-muted-foreground shadow-bottom bg-card pointer-events-auto relative flex w-max items-center gap-2 rounded-lg border-0 px-4 py-2">
         {/* Group 1: Tools */}
         <div className="flex items-center gap-2">
           <IconButton
             title="Select"
             className={clsx(
-              activeTool === 'select' && 'text-theme-500 bg-background',
+              activeTool === 'select' && 'text-info bg-background',
             )}
             onClick={() => onToolChange('select')}
           >
@@ -181,9 +181,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           </IconButton>
           <IconButton
             title="Pan"
-            className={clsx(
-              activeTool === 'pan' && 'text-theme-500 bg-background',
-            )}
+            className={clsx(activeTool === 'pan' && 'text-info bg-background')}
             onClick={() => onToolChange('pan')}
           >
             <Hand size={18} />
@@ -197,7 +195,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           <IconButton
             title="Frame"
             className={clsx(
-              pendingNodeType === 'frame' && 'text-theme-500 bg-background',
+              pendingNodeType === 'frame' && 'text-info bg-background',
             )}
             onClick={() =>
               setPendingNodeType(pendingNodeType === 'frame' ? null : 'frame')
@@ -208,7 +206,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           <IconButton
             title="Note"
             className={clsx(
-              pendingNodeType === 'note' && 'text-theme-500 bg-background',
+              pendingNodeType === 'note' && 'text-info bg-background',
             )}
             onClick={() =>
               setPendingNodeType(pendingNodeType === 'note' ? null : 'note')
@@ -219,7 +217,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           <IconButton
             title="Text"
             className={clsx(
-              pendingNodeType === 'text' && 'text-theme-500 bg-background',
+              pendingNodeType === 'text' && 'text-info bg-background',
             )}
             onClick={() =>
               setPendingNodeType(pendingNodeType === 'text' ? null : 'text')
@@ -235,7 +233,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           <IconButton
             title="Upload Files"
             className={clsx(
-              activeModal === 'upload' && 'text-theme-500 bg-background',
+              activeModal === 'upload' && 'text-info bg-background',
             )}
             onClick={() => setActiveModal('upload')}
           >
@@ -245,7 +243,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           <IconButton
             title="Add Links"
             className={clsx(
-              activeModal === 'link' && 'text-theme-500 bg-background',
+              activeModal === 'link' && 'text-info bg-background',
             )}
             onClick={() => setActiveModal('link')}
           >
@@ -264,9 +262,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
               autoLayoutEnabled ? 'Disable Auto Layout' : 'Enable Auto Layout'
             }
             onClick={() => toggleAutoLayout()}
-            className={clsx(
-              autoLayoutEnabled && 'text-theme-500 bg-background',
-            )}
+            className={clsx(autoLayoutEnabled && 'text-info bg-background')}
           >
             <Sparkles size={18} />
           </IconButton>
@@ -277,7 +273,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
         <div ref={intentButtonRef} className="flex items-center gap-2">
           <IconButton
             title="Intent (crtl + I)"
-            className={clsx(intentOpen && 'text-theme-500 bg-background')}
+            className={clsx(intentOpen && 'text-info bg-background')}
             onClick={() => {
               const rect = intentButtonRef.current?.getBoundingClientRect();
               if (rect) {
@@ -303,7 +299,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
         <div className="flex flex-col items-center justify-center gap-4 pt-2">
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="bg-theme-50 hover:bg-theme-100 text-theme-500 border-theme-500 flex w-full flex-col items-center gap-2 rounded-md border border-dashed px-4 py-8 transition-colors"
+            className="bg-info-bg hover:bg-info-bg-hover text-info border-info flex w-full flex-col items-center gap-2 rounded-md border border-dashed px-4 py-8 transition-colors"
           >
             <UploadCloud size={24} />
             <span className="text-sm">Click to select files</span>
@@ -340,7 +336,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
       >
         <div className="mt-4 flex flex-col gap-0">
           <textarea
-            className="border-border placeholder:text-border focus:border-theme-500 focus:ring-theme-500 min-h-25 w-full resize-none rounded-md border bg-transparent px-3 py-2 text-sm focus:outline-none"
+            className="border-border placeholder:text-border focus:border-info focus:ring-info min-h-25 w-full resize-none rounded-md border bg-transparent px-3 py-2 text-sm focus:outline-none"
             placeholder={`https://example.com/image.png\nhttps://example.com/doc.pdf\nhttps://google.com`}
             value={linkText}
             onChange={(e) => setLinkText(e.target.value)}

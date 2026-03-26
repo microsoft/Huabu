@@ -18,9 +18,9 @@ const variantClasses: Record<
   ghost:
     'cursor-pointer rounded border-none bg-transparent p-1 enabled:hover:bg-background disabled:opacity-50',
   outline:
-    'rounded-full border border-border text-gray-600 hover:bg-gray-50 disabled:opacity-50',
+    'rounded-full border border-border text-secondary hover:bg-hover-subtle disabled:opacity-50',
   solid:
-    'rounded-full bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-40',
+    'rounded-full bg-surface-invert text-surface-invert-foreground hover:bg-surface-invert/90 disabled:opacity-40',
 };
 
 export const IconButton = ({

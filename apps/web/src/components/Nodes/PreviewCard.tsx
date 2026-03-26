@@ -28,7 +28,7 @@ export function PreviewCard({
   const NodeTypeIcon = getNodeIcon(nodeType);
 
   return (
-    <div className="flex h-full w-full flex-col justify-evenly overflow-hidden bg-white">
+    <div className="bg-card flex h-full w-full flex-col justify-evenly overflow-hidden">
       {/* Cover image — shrinks first when space is tight */}
       {image ? (
         <img
@@ -61,7 +61,7 @@ export function PreviewCard({
             <NodeTypeIcon size={16} />
           )}
         </div>
-        <span className="text-main line-clamp-2 min-w-0 text-base font-medium wrap-break-word">
+        <span className="text-primary line-clamp-2 min-w-0 text-base font-medium wrap-break-word">
           {title}
         </span>
       </div>

@@ -19,18 +19,18 @@ export function KeyboardShortcutsModal({
       onClose={onClose}
       className="flex max-h-[calc(100vh-4rem)] w-[42rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden p-0"
     >
-      <div className="flex flex-shrink-0 items-start justify-between border-b border-gray-100 px-6 py-5">
+      <div className="border-border flex flex-shrink-0 items-start justify-between border-b px-6 py-5">
         <div>
-          <h3 className="text-base font-semibold text-gray-800">
+          <h3 className="text-primary text-base font-semibold">
             Keyboard Shortcuts
           </h3>
-          <p className="mt-1.5 text-[13px] leading-relaxed text-gray-500">
+          <p className="text-muted-foreground mt-1.5 text-[13px] leading-relaxed">
             Use{' '}
-            <kbd className="rounded border bg-gray-50 px-1 py-0.5 font-mono text-[11px] shadow-sm">
+            <kbd className="bg-surface-subtle rounded border px-1 py-0.5 font-mono text-[11px] shadow-sm">
               Ctrl
             </kbd>{' '}
             on Windows/Linux and{' '}
-            <kbd className="rounded border bg-gray-50 px-1 py-0.5 font-mono text-[11px] shadow-sm">
+            <kbd className="bg-surface-subtle rounded border px-1 py-0.5 font-mono text-[11px] shadow-sm">
               Cmd
             </kbd>{' '}
             on macOS.
@@ -39,7 +39,7 @@ export function KeyboardShortcutsModal({
         <IconButton
           variant="ghost"
           onClick={onClose}
-          className="-mt-1 -mr-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+          className="text-text-muted hover:bg-hover-medium hover:text-secondary -mt-1 -mr-2"
           title="Close (Esc)"
           aria-label="Close keyboard shortcuts"
         >
@@ -51,24 +51,24 @@ export function KeyboardShortcutsModal({
         <div className="space-y-6">
           {keyboardShortcutSections.map((section) => (
             <section key={section.title} className="space-y-3">
-              <h4 className="text-sm font-medium text-gray-700">
+              <h4 className="text-text-secondary text-sm font-medium">
                 {section.title}
               </h4>
-              <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+              <div className="border-border bg-card overflow-hidden rounded-lg border">
                 {section.items.map((item, index) => (
                   <div
                     key={`${section.title}-${item.keys}`}
                     className={[
-                      'grid grid-cols-[minmax(9rem,12rem)_1fr] items-center gap-3 bg-gray-50/50 px-4 py-3 text-sm',
+                      'bg-surface-subtle/50 grid grid-cols-[minmax(9rem,12rem)_1fr] items-center gap-3 px-4 py-3 text-sm',
                       index !== section.items.length - 1
-                        ? 'border-b border-gray-200'
+                        ? 'border-border border-b'
                         : '',
                     ].join(' ')}
                   >
-                    <span className="font-mono text-[11px] font-semibold tracking-wide text-gray-600">
+                    <span className="text-secondary font-mono text-[11px] font-semibold tracking-wide">
                       {item.keys}
                     </span>
-                    <span className="text-[13px] text-gray-500">
+                    <span className="text-muted-foreground text-[13px]">
                       {item.description}
                     </span>
                   </div>

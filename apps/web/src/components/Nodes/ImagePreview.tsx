@@ -4,8 +4,8 @@ export const ImagePreview = ({ data }: PreviewComponentProps) => {
   const src = typeof data.src === 'string' ? data.src : '';
 
   return (
-    <div className="flex h-full w-full flex-col bg-white p-3">
-      <div className="relative h-full w-full overflow-hidden rounded bg-white">
+    <div className="bg-card flex h-full w-full flex-col p-3">
+      <div className="bg-card relative h-full w-full overflow-hidden rounded">
         {src ? (
           <img
             src={src}

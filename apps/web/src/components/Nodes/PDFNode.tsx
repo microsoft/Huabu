@@ -117,7 +117,7 @@ const VirtualizedPage = memo(
               renderTextLayer={false}
               loading={
                 <div
-                  className="flex items-center justify-center bg-neutral-50"
+                  className="bg-surface-subtle flex items-center justify-center"
                   style={{ height: fallbackPageHeight }}
                 >
                   <Loader2
@@ -257,7 +257,7 @@ export const PDFNode = memo(
         toolbar={PDFToolbar}
         resizable
         keepAspectRatio={false}
-        className={clsx('bg-white transition-all duration-300 ease-in-out')}
+        className={clsx('bg-card transition-all duration-300 ease-in-out')}
       >
         <div
           ref={containerRef}

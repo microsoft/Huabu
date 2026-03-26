@@ -176,10 +176,10 @@ export const ExpandedNodePanel = () => {
   return (
     <div
       ref={panelRef}
-      className="border-border flex h-full w-full flex-col overflow-hidden border-l bg-white"
+      className="border-border bg-card flex h-full w-full flex-col overflow-hidden border-l"
     >
       {/* Header bar */}
-      <div className="border-border flex h-12 shrink-0 items-center justify-between gap-3 border-b bg-white px-3">
+      <div className="border-border bg-card flex h-12 shrink-0 items-center justify-between gap-3 border-b px-3">
         {/* Left: back button (replace mode) + icon + title */}
         <div className="flex min-w-0 items-center gap-2">
           {isReplace && (
@@ -206,7 +206,7 @@ export const ExpandedNodePanel = () => {
         <div className="text-muted-foreground flex items-center gap-1">
           <IconButton
             className={
-              !isReplace ? 'text-main bg-muted' : 'text-muted-foreground'
+              !isReplace ? 'text-primary bg-muted' : 'text-muted-foreground'
             }
             title={isReplace ? 'Split view' : 'Full view'}
             onClick={() => activeItem.setMode(isReplace ? 'split' : 'replace')}

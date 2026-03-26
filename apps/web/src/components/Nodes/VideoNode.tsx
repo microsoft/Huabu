@@ -53,7 +53,10 @@ export const VideoNode = memo(
                 />
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/10 transition-colors group-hover:bg-black/20">
                   <div className="rounded-full bg-black/40 p-3 backdrop-blur-sm transition-transform group-hover:scale-110">
-                    <Play className="fill-white text-white" size={24} />
+                    <Play
+                      className="fill-surface-invert-foreground text-surface-invert-foreground"
+                      size={24}
+                    />
                   </div>
                 </div>
               </>

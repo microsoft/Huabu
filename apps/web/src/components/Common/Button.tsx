@@ -15,14 +15,14 @@ export type ButtonProps = {
 
 const variantClasses: Record<NonNullable<ButtonProps['variant']>, string> = {
   primary:
-    'rounded-md font-medium bg-theme-50 text-theme-500 hover:bg-theme-100 border border-transparent',
+    'rounded-md font-medium bg-info-bg text-info hover:bg-info-bg-hover border border-transparent',
   secondary:
-    'rounded-md font-medium border border-border text-muted-foreground bg-white hover:bg-gray-50',
+    'rounded-md font-medium border border-border text-muted-foreground bg-card hover:bg-hover-subtle',
   danger:
-    'rounded-md font-medium bg-destructive text-white hover:bg-destructive/90 border border-transparent',
+    'rounded-md font-medium bg-destructive text-surface-invert-foreground hover:bg-destructive/90 border border-transparent',
   ghost:
     'cursor-pointer rounded border-none bg-transparent p-1 enabled:hover:bg-background',
-  pill: 'gap-1 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50',
+  pill: 'gap-1 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-text-secondary hover:bg-hover-subtle',
 };
 
 const sizeClasses: Record<NonNullable<ButtonProps['size']>, string> = {

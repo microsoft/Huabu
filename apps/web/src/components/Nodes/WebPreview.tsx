@@ -61,7 +61,7 @@ export const WebPreview = ({ data }: PreviewComponentProps) => {
     <style>
       body { margin: 0; padding: 16px; font-family: system-ui, -apple-system, sans-serif; line-height: 1.5; }
       img { max-width: 100%; height: auto; }
-      pre { overflow: auto; background: #f5f5f5; padding: 10px; border-radius: 4px; }
+      pre { overflow: auto; background: #f5f5f5 /* matches --background light value */; padding: 10px; border-radius: 4px; }
       code { font-family: monospace; }
     </style>
   </head>
@@ -72,8 +72,8 @@ export const WebPreview = ({ data }: PreviewComponentProps) => {
   }, [readerHtml]);
 
   return (
-    <div className="flex h-full w-full flex-col bg-white p-3">
-      <div className="relative h-full w-full overflow-hidden rounded bg-white">
+    <div className="bg-card flex h-full w-full flex-col p-3">
+      <div className="bg-card relative h-full w-full overflow-hidden rounded">
         {!src ? (
           <div className="text-muted-foreground flex h-full w-full items-center justify-center text-sm">
             Invalid URL
@@ -89,7 +89,7 @@ export const WebPreview = ({ data }: PreviewComponentProps) => {
               href={src}
               target="_blank"
               rel="noopener noreferrer"
-              className="hover:text-theme-500 text-xs font-medium"
+              className="hover:text-info text-xs font-medium"
             >
               Open in browser
             </a>

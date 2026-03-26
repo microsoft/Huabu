@@ -284,7 +284,7 @@ export const TextNode = memo(
             onChange={(e) => updateStyle({ fontFamily: e.target.value })}
           >
             {FONT_FAMILIES.map((f) => (
-              <option key={f.name} value={f.value} className="text-black">
+              <option key={f.name} value={f.value} className="text-foreground">
                 {f.name}
               </option>
             ))}
@@ -302,7 +302,7 @@ export const TextNode = memo(
           className={clsx(
             'rounded p-1',
             style.fontWeight === 'bold'
-              ? 'text-theme-500 bg-theme-50 enabled:hover:bg-theme-50'
+              ? 'text-info bg-info-bg enabled:hover:bg-info-bg'
               : 'text-muted-foreground hover:bg-background',
           )}
         >
@@ -318,7 +318,7 @@ export const TextNode = memo(
           className={clsx(
             'rounded p-1',
             style.fontStyle === 'italic'
-              ? 'text-theme-500 bg-theme-50 enabled:hover:bg-theme-50'
+              ? 'text-info bg-info-bg enabled:hover:bg-info-bg'
               : 'text-muted-foreground hover:bg-background',
           )}
         >
@@ -330,7 +330,7 @@ export const TextNode = memo(
           className={clsx(
             'p-1',
             textDecoration.includes('underline')
-              ? 'text-theme-500 bg-theme-50 enabled:hover:bg-theme-50'
+              ? 'text-info bg-info-bg enabled:hover:bg-info-bg'
               : 'text-muted-foreground hover:bg-background',
           )}
         >
@@ -342,7 +342,7 @@ export const TextNode = memo(
           className={clsx(
             'p-1',
             textDecoration.includes('line-through')
-              ? 'text-theme-500 bg-theme-50 enabled:hover:bg-theme-50'
+              ? 'text-info bg-info-bg enabled:hover:bg-info-bg'
               : 'text-muted-foreground hover:bg-background',
           )}
         >

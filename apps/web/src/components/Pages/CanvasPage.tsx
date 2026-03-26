@@ -80,12 +80,12 @@ export default function CanvasPage() {
     return (
       <div className="flex h-screen flex-col items-center justify-center gap-4">
         <div className="text-center">
-          <h2 className="text-lg font-semibold text-gray-900">
+          <h2 className="text-foreground text-lg font-semibold">
             Canvas not found
           </h2>
-          <p className="mt-1 text-sm text-gray-500">
+          <p className="text-muted-foreground mt-1 text-sm">
             The canvas{' '}
-            <code className="rounded bg-gray-100 px-1.5 py-0.5 text-xs">
+            <code className="bg-surface-subtle rounded px-1.5 py-0.5 text-xs">
               {canvasId}
             </code>{' '}
             does not exist or may have been deleted.
@@ -93,7 +93,7 @@ export default function CanvasPage() {
         </div>
         <Link
           to="/"
-          className="inline-flex items-center gap-2 rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-gray-800"
+          className="bg-surface-invert text-surface-invert-foreground hover:bg-surface-invert/90 inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors"
         >
           <ArrowLeft className="h-4 w-4" />
           Back to canvas list

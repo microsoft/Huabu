@@ -112,7 +112,7 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
           className="group flex w-2 shrink-0 cursor-col-resize items-center justify-center bg-transparent outline-none"
           onPointerDown={onHandlePointerDown}
         >
-          <div className="h-8 w-1 rounded-full bg-gray-300 opacity-0 transition-all duration-300 group-hover:h-12 group-hover:opacity-100" />
+          <div className="bg-text-faded h-8 w-1 rounded-full opacity-0 transition-all duration-300 group-hover:h-12 group-hover:opacity-100" />
         </div>
       )}
 

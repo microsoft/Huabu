@@ -22,7 +22,7 @@ export const DragToCanvasHandleButton = ({
 }: DragToCanvasHandleButtonProps) => {
   const baseClassName = children
     ? 'cursor-grab active:cursor-grabbing'
-    : 'h-4.5 w-4.5 p-px! text-icon hover:text-main flex cursor-grab items-center justify-center rounded';
+    : 'h-4.5 w-4.5 p-px! text-icon hover:text-primary flex cursor-grab items-center justify-center rounded';
 
   return (
     <IconButton

@@ -133,7 +133,7 @@ const DiffPopover = ({
 }: DiffPopoverProps) => (
   <div
     data-diff-popover
-    className="absolute z-10 max-h-100 overflow-y-auto rounded-md border border-gray-200 bg-white p-3 shadow-lg"
+    className="border-border bg-card absolute z-10 max-h-100 overflow-y-auto rounded-md border p-3 shadow-lg"
     style={style}
     onMouseEnter={onMouseEnter}
     onMouseLeave={onMouseLeave}
@@ -495,10 +495,10 @@ export const InlineBlockDiffs = ({
                     key={si}
                     className={
                       seg.type === 'removed'
-                        ? 'bg-red-100 text-red-600 line-through'
+                        ? 'bg-diff-removed-bg text-diff-removed-text line-through'
                         : seg.type === 'added'
-                          ? 'bg-green-100 text-green-700'
-                          : 'text-gray-600'
+                          ? 'bg-diff-added-bg text-diff-added-text'
+                          : 'text-secondary'
                     }
                   >
                     {seg.text}
@@ -536,7 +536,9 @@ export const InlineBlockDiffs = ({
                 width: 6,
                 height: 6,
                 backgroundColor:
-                  hoveredDeletedKey === pos.group.key ? '#ef4444' : '#f87171',
+                  hoveredDeletedKey === pos.group.key
+                    ? 'var(--color-danger)'
+                    : 'var(--color-danger-light)',
                 borderRadius: 1,
                 transition: 'background-color 150ms',
               }}
@@ -579,8 +581,8 @@ export const InlineBlockDiffs = ({
                 <div
                   key={item.index}
                   className={clsx(
-                    'bg-red-100 text-red-600 line-through',
-                    i > 0 && 'mt-1 border-t border-red-200 pt-1',
+                    'bg-diff-removed-bg text-diff-removed-text line-through',
+                    i > 0 && 'mt-1 pt-1',
                   )}
                 >
                   {item.info.text}

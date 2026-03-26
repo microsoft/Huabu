@@ -94,7 +94,7 @@ export const WebNode = memo(
           target="_blank"
           rel="noopener noreferrer"
           onClick={(e) => e.stopPropagation()}
-          className="nodrag text-muted-foreground hover:text-theme-500 flex flex-1 cursor-pointer items-center gap-1 overflow-hidden text-xs font-medium transition-colors"
+          className="nodrag text-muted-foreground hover:text-info flex flex-1 cursor-pointer items-center gap-1 overflow-hidden text-xs font-medium transition-colors"
         >
           <span className="max-w-24 truncate">{data?.src || 'Website'}</span>
           <ArrowUpRight size={14} strokeWidth={2} />

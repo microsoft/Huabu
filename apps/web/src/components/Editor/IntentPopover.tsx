@@ -72,7 +72,7 @@ const IntentSelectStep: React.FC<{ anchorY: number }> = ({ anchorY }) => {
                 <button
                   type="button"
                   className={`mx-2 flex w-[calc(100%-16px)] cursor-pointer flex-col rounded-md px-2 py-1.5 text-left transition-colors ${
-                    isSelected ? 'bg-theme-100' : isHovered ? 'bg-muted' : ''
+                    isSelected ? 'bg-info-bg' : isHovered ? 'bg-muted' : ''
                   }`}
                   onMouseEnter={() => setHoveredIdx(idx)}
                   onMouseLeave={() => setHoveredIdx(null)}
@@ -125,7 +125,7 @@ const IntentSelectStep: React.FC<{ anchorY: number }> = ({ anchorY }) => {
           <IconButton
             type="button"
             title="Send"
-            className="text-muted-foreground hover:text-theme-500 flex-shrink-0 transition-colors disabled:opacity-30"
+            className="text-muted-foreground hover:text-info flex-shrink-0 transition-colors disabled:opacity-30"
             disabled={!customIntent.trim()}
             onClick={handleCustomSubmit}
           >
@@ -267,7 +267,7 @@ export const IntentPopover: React.FC = () => {
   return createPortal(
     <div
       ref={containerRef}
-      className="border-border fixed w-80 cursor-grab rounded-md border bg-white shadow active:cursor-grabbing"
+      className="border-border bg-card fixed w-80 cursor-grab rounded-md border shadow active:cursor-grabbing"
       style={posStyle}
       onPointerDown={handlePointerDown}
     >

@@ -207,7 +207,7 @@ export const DataSourcePanel = ({
               >
                 <SlidersHorizontal
                   size={16}
-                  className={sortType !== 'manual' ? 'text-blue-500' : ''}
+                  className={sortType !== 'manual' ? 'text-info' : ''}
                 />
               </IconButton>
 
@@ -221,7 +221,7 @@ export const DataSourcePanel = ({
                       key={opt.id}
                       className={clsx(
                         'hover:bg-accent flex w-full justify-between px-3 py-1.5 text-left text-xs',
-                        sortType === opt.id && 'font-bold text-blue-500',
+                        sortType === opt.id && 'text-info font-bold',
                       )}
                       onClick={() => {
                         setSortType(opt.id as SortType);
