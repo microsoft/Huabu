@@ -20,7 +20,7 @@ export const profiles: Record<CanvasNodeKind, NodePreprocessProfile> = {
       'persist_source',
       'build_patch',
     ],
-    watchFields: ['content', 'label'],
+    watchFields: ['content', 'title', 'labelSource'],
   },
   text: {
     nodeType: 'text',
@@ -34,7 +34,7 @@ export const profiles: Record<CanvasNodeKind, NodePreprocessProfile> = {
       'persist_source',
       'build_patch',
     ],
-    watchFields: ['content', 'label'],
+    watchFields: ['content', 'title', 'labelSource'],
   },
   web: {
     nodeType: 'web',
@@ -48,7 +48,7 @@ export const profiles: Record<CanvasNodeKind, NodePreprocessProfile> = {
       'persist_source',
       'build_patch',
     ],
-    watchFields: ['src', 'label'],
+    watchFields: ['src', 'title', 'labelSource'],
   },
   pdf: {
     nodeType: 'pdf',
@@ -62,7 +62,7 @@ export const profiles: Record<CanvasNodeKind, NodePreprocessProfile> = {
       'persist_source',
       'build_patch',
     ],
-    watchFields: ['src', 'label'],
+    watchFields: ['src', 'title', 'labelSource'],
   },
   image: {
     nodeType: 'image',
@@ -72,7 +72,7 @@ export const profiles: Record<CanvasNodeKind, NodePreprocessProfile> = {
       'generate_label',
       'build_patch',
     ],
-    watchFields: ['src'],
+    watchFields: ['src', 'labelSource'],
   },
   video: {
     nodeType: 'video',
@@ -87,7 +87,7 @@ export const profiles: Record<CanvasNodeKind, NodePreprocessProfile> = {
       'generate_label',
       'build_patch',
     ],
-    watchFields: ['childLabels'],
+    watchFields: ['childLabels', 'labelSource'],
   },
 };
 

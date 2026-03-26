@@ -38,6 +38,7 @@ export function inputResolve(
     nodeId,
     nodeType,
     title: snapshot.title as string | undefined,
+    labelSource: snapshot.labelSource as string | undefined,
     existingSourceId: snapshot.sourceId as string | undefined,
   };
 

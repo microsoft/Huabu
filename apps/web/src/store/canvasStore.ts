@@ -26,7 +26,6 @@ import { create, type StateCreator } from 'zustand';
 
 import { getCanvas, preprocessNode, putCanvas } from '../api';
 import { canvasHistoryManager } from './canvasHistoryManager';
-import { updateSource } from '../api/knowledge';
 import { COMMAND_META } from '../canvas/commands';
 import { executeCanvasCommands } from '../canvas/executor';
 import { runPostEffects } from '../canvas/postEffects';
@@ -87,7 +86,6 @@ const triggerPreprocessing = (node: Node) => {
       node: latestNode,
       setNodeIngestion: state.setNodeIngestion,
       clearNodeIngestion: state.clearNodeIngestion,
-      getNodeById: (id) => state.nodes.find((n) => n.id === id),
       getChildNodes: (frameId) =>
         state.nodes.filter((n) => n.parentId === frameId),
       patchNodeSilent: state.patchNodeSilent,
@@ -937,28 +935,7 @@ const useCanvasStore = create<RFState>()(
     },
 
     updateNodeData: (nodeId, patch) => {
-      // Capture sourceId before dispatch for source title sync.
-      const patchRec = patch as Record<string, unknown>;
-      let sourceIdForTitleSync: string | undefined;
-      if (patchRec.label !== undefined) {
-        const node = get().nodes.find((n) => n.id === nodeId);
-        const data = node?.data as Record<string, unknown> | undefined;
-        if (typeof data?.sourceId === 'string') {
-          sourceIdForTitleSync = data.sourceId;
-        }
-      }
-
       get().dispatchUiIntent({ type: 'UPDATE_NODE_DATA', nodeId, patch });
-
-      // Sync source title when label changes on a node with a source.
-      if (sourceIdForTitleSync && typeof patchRec.label === 'string') {
-        const trimmedLabel = patchRec.label.trim();
-        if (trimmedLabel) {
-          void updateSource(sourceIdForTitleSync, {
-            title: trimmedLabel,
-          }).catch((err) => console.warn('Failed to sync source title:', err));
-        }
-      }
     },
 
     patchNodeSilent: (nodeId, patch) => {
@@ -1217,6 +1194,7 @@ function flushOnUnload(): void {
               (nodeData?.label as string) ||
               (nodeData?.title as string) ||
               undefined,
+            labelSource: (nodeData?.labelSource as string) || undefined,
             content: (nodeData?.content as string) || undefined,
             src: (nodeData?.src as string) || undefined,
             sourceId: (nodeData?.sourceId as string) || undefined,

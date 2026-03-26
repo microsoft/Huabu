@@ -29,11 +29,17 @@ export function project(
     patch.sourceId = ctx.persisted.sourceId;
   }
 
-  // Apply suggested label from enrich stage using real node data keys.
-  // Only set label + labelSource so the patch can be applied directly to node data.
-  if (ctx.enriched?.suggestedLabel) {
-    patch.label = ctx.enriched.suggestedLabel;
-    patch.labelSource = 'auto';
+  // Apply suggested label from enrich or extract stage, but only when the
+  // user has not manually set the label.
+  const snapshotLabelSource = request.snapshot.labelSource as
+    | string
+    | undefined;
+  if (snapshotLabelSource !== 'user') {
+    const autoLabel = ctx.enriched?.suggestedLabel ?? ctx.extracted?.title;
+    if (autoLabel) {
+      patch.label = autoLabel;
+      patch.labelSource = 'auto';
+    }
   }
 
   const hasError = diagnostics.some((d) => d.level === 'error');
