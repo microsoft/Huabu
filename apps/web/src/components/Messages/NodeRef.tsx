@@ -1,5 +1,6 @@
 import { NODE_ICON } from '../../config/nodeIcons';
 import useCanvasStore from '../../store/canvasStore';
+import { Tooltip } from '../Common/Tooltip';
 
 import type { CanvasNodeType, ChatAttachment } from '@sediment/shared';
 
@@ -9,6 +10,13 @@ interface NodeRefProps {
   /** Attachment to reference. */
   attachment?: ChatAttachment;
   fallbackLabel?: string;
+  /**
+   * Snapshot label captured at extraction time.
+   * When provided, the label is stable and never read from the live store.
+   */
+  snapshotLabel?: string;
+  /** When true, the badge shows a blinking highlight (used during preview). */
+  previewing?: boolean;
 }
 
 const ATTACHMENT_TYPE_TO_NODE: Record<string, CanvasNodeType> = {
@@ -22,8 +30,15 @@ const ATTACHMENT_TYPE_TO_NODE: Record<string, CanvasNodeType> = {
 /**
  * Clickable reference badge — works for both canvas nodes and attachments.
  * If the referenced node exists on canvas, clicking focuses it.
+ * Disabled state when the node no longer exists.
  */
-export function NodeRef({ nodeId, attachment, fallbackLabel }: NodeRefProps) {
+export function NodeRef({
+  nodeId,
+  attachment,
+  fallbackLabel,
+  snapshotLabel,
+  previewing,
+}: NodeRefProps) {
   const nodes = useCanvasStore((s) => s.nodes);
   const selectNodes = useCanvasStore((s) => s.selectNodes);
   const rfInstance = useCanvasStore((s) => s.rfInstance);
@@ -37,13 +52,18 @@ export function NodeRef({ nodeId, attachment, fallbackLabel }: NodeRefProps) {
 
   const nodeData = node?.data as Record<string, unknown> | undefined;
 
-  // Determine label
-  const label = attachment
-    ? (attachment.filename ?? attachment.label ?? 'file')
-    : ((nodeData?.label as string) ??
-      fallbackLabel ??
-      nodeId?.slice(0, 8) ??
-      '?');
+  // When snapshotLabel is provided, the ref is always valid (snapshot-based)
+  const isDisabled = !snapshotLabel && !!resolvedNodeId && !node && !attachment;
+
+  // Label priority: snapshotLabel (frozen) > live store > fallback > truncated ID
+  const label = snapshotLabel
+    ? snapshotLabel
+    : attachment
+      ? (attachment.filename ?? attachment.label ?? 'file')
+      : ((nodeData?.label as string) ??
+        fallbackLabel ??
+        nodeId?.slice(0, 8) ??
+        '?');
 
   // Determine icon
   const nodeType = attachment
@@ -62,6 +82,7 @@ export function NodeRef({ nodeId, attachment, fallbackLabel }: NodeRefProps) {
 
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (isDisabled || previewing) return;
     if (node) {
       focusNode(node.id);
     } else if (resolvedNodeId) {
@@ -69,27 +90,34 @@ export function NodeRef({ nodeId, attachment, fallbackLabel }: NodeRefProps) {
     }
   };
 
-  const title = node
-    ? `Focus: ${label}`
-    : resolvedNodeId
+  const tooltipContent = isDisabled
+    ? 'Node deleted'
+    : node
       ? `Focus: ${label}`
       : label;
 
-  return (
+  const badge = (
     <div
       role="button"
-      tabIndex={0}
-      className="border-border/60 hover:bg-theme-50 inline-flex cursor-pointer items-center gap-0.5 rounded border bg-transparent px-1 py-px align-middle text-[10px] leading-tight font-normal text-gray-400"
+      tabIndex={isDisabled ? -1 : 0}
+      className={
+        previewing
+          ? 'border-theme-300 bg-theme-50 text-theme-500 animate-preview-blink inline-flex cursor-default items-center gap-0.5 rounded border px-1 py-px align-middle text-[10px] leading-tight font-normal'
+          : isDisabled
+            ? 'border-border/40 text-muted-foreground/40 inline-flex cursor-not-allowed items-center gap-0.5 rounded border bg-transparent px-1 py-px align-middle text-[10px] leading-tight font-normal line-through opacity-60'
+            : 'border-border/60 hover:bg-theme-50 text-muted-foreground/80 inline-flex cursor-pointer items-center gap-0.5 rounded border bg-transparent px-1 py-px align-middle text-[10px] leading-tight font-normal'
+      }
       onClick={handleClick}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           handleClick(e as unknown as React.MouseEvent);
         }
       }}
-      title={title}
     >
       <Icon size={9} className="flex-shrink-0" />
       <span className="max-w-[100px] truncate">{label}</span>
     </div>
   );
+
+  return <Tooltip content={tooltipContent}>{badge}</Tooltip>;
 }

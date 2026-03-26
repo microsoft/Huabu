@@ -4,11 +4,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AIMessage } from './AIMessage';
 import { IntentSelectMessage } from './IntentSelectMessage';
 import { StatusMessage } from './StatusMessage';
-import { ThinkingIndicator } from './ThinkingIndicator';
-import { ToolMessage } from './ToolMessage';
+import { ToolMessageGroup } from './ToolMessage';
 import { UserMessage } from './UserMessage';
+import { ThinkingIndicator } from '../../utils/ThinkingIndicator';
 import { Button } from '../Common/Button';
 
+import type { ToolEntry } from './ToolMessage';
 import type { ChatMessage } from './types';
 
 interface MessageListProps {
@@ -80,64 +81,93 @@ export const MessageList = ({
         onScroll={handleScroll}
         className="flex-1 space-y-1 overflow-x-visible overflow-y-auto"
       >
-        {messages.map((msg) => {
-          if (msg.role === 'user') {
-            return (
-              <UserMessage
-                key={msg.id}
-                content={msg.content}
-                attachments={msg.attachments}
-                selectedNodeIds={msg.selectedNodeIds}
-              />
-            );
-          }
+        {(() => {
+          const elements: React.ReactNode[] = [];
+          let i = 0;
+          while (i < messages.length) {
+            const msg = messages[i]!;
 
-          if (msg.role === 'assistant') {
-            return (
-              <AIMessage
-                key={msg.id}
-                content={msg.content}
-                isStreaming={msg.id === streamingAssistantId}
-                resources={msg.resources}
-                hideActions={hideAIActions}
-              />
-            );
-          }
+            if (msg.role === 'user') {
+              elements.push(
+                <UserMessage
+                  key={msg.id}
+                  content={msg.content}
+                  attachments={msg.attachments}
+                  selectedNodeIds={msg.selectedNodeIds}
+                />,
+              );
+              i++;
+              continue;
+            }
 
-          if (msg.role === 'tool') {
-            return (
-              <ToolMessage
-                key={msg.id}
-                toolResponse={msg.toolResponse}
-                isExecuting={msg.isExecuting}
-              />
-            );
-          }
+            if (msg.role === 'assistant') {
+              elements.push(
+                <AIMessage
+                  key={msg.id}
+                  content={msg.content}
+                  isStreaming={msg.id === streamingAssistantId}
+                  resources={msg.resources}
+                  hideActions={hideAIActions}
+                />,
+              );
+              i++;
+              continue;
+            }
 
-          if (msg.role === 'intent-select') {
-            return (
-              <IntentSelectMessage
-                key={msg.id}
-                candidates={msg.candidates}
-                selectedIntent={msg.selectedIntent}
-                onReselect={(intent) => onIntentReselect?.(msg.id, intent)}
-              />
-            );
-          }
+            if (msg.role === 'tool') {
+              // Group consecutive tool messages of the same tool type
+              const toolName = msg.toolResponse.tool;
+              const group: ToolEntry[] = [];
+              while (i < messages.length) {
+                const cur = messages[i];
+                if (cur?.role !== 'tool' || cur.toolResponse.tool !== toolName)
+                  break;
+                group.push({
+                  messageId: cur.id,
+                  toolResponse: cur.toolResponse,
+                  isExecuting: cur.isExecuting,
+                });
+                i++;
+              }
+              elements.push(
+                <ToolMessageGroup
+                  key={group.map((e) => e.messageId).join(',')}
+                  entries={group}
+                />,
+              );
+              continue;
+            }
 
-          if (msg.role === 'status') {
-            return (
-              <StatusMessage
-                key={msg.id}
-                status={msg.status}
-                detail={msg.detail}
-                onRetry={onRetry}
-              />
-            );
-          }
+            if (msg.role === 'intent-select') {
+              elements.push(
+                <IntentSelectMessage
+                  key={msg.id}
+                  candidates={msg.candidates}
+                  selectedIntent={msg.selectedIntent}
+                  onReselect={(intent) => onIntentReselect?.(msg.id, intent)}
+                />,
+              );
+              i++;
+              continue;
+            }
 
-          return null;
-        })}
+            if (msg.role === 'status') {
+              elements.push(
+                <StatusMessage
+                  key={msg.id}
+                  status={msg.status}
+                  detail={msg.detail}
+                  onRetry={onRetry}
+                />,
+              );
+              i++;
+              continue;
+            }
+
+            i++;
+          }
+          return elements;
+        })()}
 
         {isLoading && (
           <div className="flex justify-start">

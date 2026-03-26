@@ -240,7 +240,7 @@ export const ChatInput = ({
     >
       <form onSubmit={handleSubmit} className="w-full">
         <div
-          className={`rounded-2xl border p-3 transition-colors ${isDragOver ? 'border-border bg-theme-50' : 'border-border bg-white'}`}
+          className={`rounded-xl border p-3 transition-colors ${isDragOver ? 'border-border bg-theme-50' : 'border-border bg-white'}`}
         >
           {/* ── Pending attachment thumbnails ── */}
           {(pendingAttachments.length > 0 || selectionAttachment) && (

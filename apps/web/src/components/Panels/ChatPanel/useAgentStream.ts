@@ -1,6 +1,8 @@
 import {
   createId,
   type CanvasCommand,
+  type CanvasEdgeId,
+  type CanvasNodeId,
   type ToolResponse,
 } from '@sediment/shared';
 import { useState, useCallback, useRef, useEffect } from 'react';
@@ -9,7 +11,8 @@ import { agentApi } from '@/api/agent';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 
-import type { CanvasChange } from './CanvasChangeBar';
+import { snapshotAndExtractChanges } from '../../../hooks/useCanvasChanges';
+
 import type { ResourceLabel } from '../../Messages/types';
 import type {
   AgentMode,
@@ -44,82 +47,10 @@ function parseToolResponse(
 }
 
 /** Extract CanvasChange entries from a canvas_commands batch. */
-export function extractCanvasChangesFromCommands(
-  commands: CanvasCommand[],
-): CanvasChange[] {
-  const changes: CanvasChange[] = [];
-  const truncate = (s: string, n: number) =>
-    s.length > n ? s.slice(0, n) + '…' : s;
-
-  for (const cmd of commands) {
-    switch (cmd.type) {
-      case 'CREATE_NODES':
-        for (const node of cmd.nodes) {
-          const label = (node.data as Record<string, unknown> | undefined)
-            ?.label;
-          changes.push({
-            tool: 'canvas_commands',
-            label: `Created: ${truncate((label as string) ?? 'untitled', 24)}`,
-            nodeType: node.nodeType,
-            nodeId: node.id,
-          });
-        }
-        break;
-      case 'DELETE_NODES':
-        changes.push({
-          tool: 'canvas_commands',
-          label: `Deleted ${cmd.nodeIds.length} node(s)`,
-        });
-        break;
-      case 'MERGE_NODE_DATA':
-        for (const patch of cmd.patches) {
-          changes.push({
-            tool: 'canvas_commands',
-            label: `Updated: ${truncate(patch.nodeId, 24)}`,
-            nodeId: patch.nodeId,
-          });
-        }
-        break;
-      case 'CONNECT_NODES':
-        for (const edge of cmd.edges) {
-          changes.push({
-            tool: 'canvas_commands',
-            label: 'Connected nodes',
-            sourceNodeId: edge.source,
-            targetNodeId: edge.target,
-          });
-        }
-        break;
-      case 'DISCONNECT_EDGES':
-        changes.push({
-          tool: 'canvas_commands',
-          label: `Disconnected ${cmd.edges.length} edge(s)`,
-        });
-        break;
-      case 'SET_NODE_PARENT':
-        changes.push({
-          tool: 'canvas_commands',
-          label: cmd.parentId ? 'Moved into frame' : 'Moved out of frame',
-        });
-        break;
-      case 'DISSOLVE_FRAME':
-        changes.push({
-          tool: 'canvas_commands',
-          label: 'Dissolved frame',
-          nodeType: 'frame',
-        });
-        break;
-      case 'AUTO_LAYOUT':
-        changes.push({
-          tool: 'canvas_commands',
-          label: 'Auto layout',
-        });
-        break;
-      default:
-        break;
-    }
-  }
-  return changes;
+export function extractCanvasChangesFromCommands(commands: CanvasCommand[]) {
+  // Delegate to snapshotAndExtractChanges which reads current canvas state
+  // NOTE: This must be called BEFORE commands are executed.
+  return snapshotAndExtractChanges(commands);
 }
 
 /** Extract ResourceLabel entries from a canvas_commands batch. */
@@ -146,20 +77,44 @@ export function extractResourcesFromCommands(
 // ==================== Side-effectful Helpers ====================
 
 /**
- * Parse a canvas_commands tool result, execute the commands locally,
- * and return the parsed commands.
+ * Parse a canvas_commands tool result, pre-assign missing IDs,
+ * snapshot current state for revert, execute commands, and return
+ * the enriched commands plus change entries.
  */
-function applyCanvasCommandsFromToolResult(
-  toolResult: string | undefined,
-): { commands: CanvasCommand[] } | null {
+function applyCanvasCommandsFromToolResult(toolResult: string | undefined): {
+  commands: CanvasCommand[];
+  changes: ReturnType<typeof snapshotAndExtractChanges>;
+} | null {
   try {
     const parsed = JSON.parse(toolResult ?? '{}') as {
       status?: string;
       data?: { commands?: CanvasCommand[] };
     };
     if (parsed.status === 'success' && parsed.data?.commands?.length) {
-      useCanvasStore.getState().executeCommands(parsed.data.commands, 'agent');
-      return { commands: parsed.data.commands };
+      const commands = parsed.data.commands;
+
+      // Pre-assign IDs to nodes/edges that don't have them
+      for (const cmd of commands) {
+        if (cmd.type === 'CREATE_NODES') {
+          for (const node of cmd.nodes) {
+            if (!node.id) {
+              node.id = createId('node') as CanvasNodeId;
+            }
+          }
+        } else if (cmd.type === 'CONNECT_NODES') {
+          for (const edge of cmd.edges) {
+            if (!edge.id) {
+              edge.id = createId('edge') as CanvasEdgeId;
+            }
+          }
+        }
+      }
+
+      // Snapshot BEFORE execution so revert commands capture current state
+      const changes = snapshotAndExtractChanges(commands);
+
+      useCanvasStore.getState().executeCommands(commands, 'agent');
+      return { commands, changes };
     }
   } catch (err) {
     console.error(
@@ -176,7 +131,10 @@ interface StreamEventContext {
   assistantId: string;
   toolQueue: string[];
   /** Called after canvas_commands are applied. */
-  onCanvasCommands?: (commands: CanvasCommand[]) => void;
+  onCanvasCommands?: (
+    commands: CanvasCommand[],
+    toolMsgId: string | undefined,
+  ) => void;
 }
 
 /**
@@ -268,7 +226,25 @@ export function handleStreamEvent(
     if ((event.data.toolName ?? '') === 'canvas_commands') {
       const result = applyCanvasCommandsFromToolResult(event.data.toolResult);
       if (result) {
-        ctx.onCanvasCommands?.(result.commands);
+        // Attach changes to the tool message
+        const toolMsgId = pendingMsgId ?? undefined;
+        if (toolMsgId && result.changes.length > 0) {
+          updateMessage(toolMsgId, (m) => {
+            if (m.role !== 'tool' || m.toolResponse.status !== 'success')
+              return m;
+            return {
+              ...m,
+              toolResponse: {
+                ...m.toolResponse,
+                data: {
+                  ...(m.toolResponse.data as Record<string, unknown>),
+                  canvasChanges: result.changes,
+                },
+              },
+            };
+          });
+        }
+        ctx.onCanvasCommands?.(result.commands, toolMsgId);
       }
     }
   }
@@ -280,7 +256,6 @@ export interface UseAgentStreamReturn {
   isLoading: boolean;
   /** Expose setter so useChatHistory can update loading state on reconnect. */
   setIsLoading: (loading: boolean) => void;
-  canvasChanges: CanvasChange[];
   /** Start a streaming agent request. */
   startStream: (
     prompt: string,
@@ -292,17 +267,14 @@ export interface UseAgentStreamReturn {
   ) => Promise<void>;
   /** Stop the current stream. */
   stopStream: () => void;
-  /** Reset canvas change list (e.g. on new chat). */
-  clearCanvasChanges: () => void;
 }
 
 /**
  * Hook that manages agent streaming, including starting/stopping streams,
- * processing SSE events, tracking canvas changes and resources.
+ * processing SSE events, and tracking resources.
  */
 export function useAgentStream(): UseAgentStreamReturn {
   const [isLoading, setIsLoading] = useState(false);
-  const [canvasChanges, setCanvasChanges] = useState<CanvasChange[]>([]);
 
   const threadId = useChatStore((state) => state.threadId);
   const addMessage = useChatStore((state) => state.addMessage);
@@ -388,9 +360,8 @@ export function useAgentStream(): UseAgentStreamReturn {
 
       setIsLoading(true);
 
-      // Operate & Research: reset change tracking
+      // Operate & Research: reset resource tracking (canvas changes persist until explicit keep/revert)
       if (agentMode === 'operate' || agentMode === 'research') {
-        setCanvasChanges([]);
         resourcesRef.current = [];
       }
 
@@ -418,11 +389,6 @@ export function useAgentStream(): UseAgentStreamReturn {
                 toolQueue: toolMsgQueue,
                 onCanvasCommands: (commands) => {
                   if (agentMode === 'operate' || agentMode === 'research') {
-                    const newChanges =
-                      extractCanvasChangesFromCommands(commands);
-                    if (newChanges.length > 0) {
-                      setCanvasChanges((prev) => [...prev, ...newChanges]);
-                    }
                     const newResources = extractResourcesFromCommands(commands);
                     if (newResources.length > 0) {
                       resourcesRef.current = [
@@ -535,16 +501,10 @@ export function useAgentStream(): UseAgentStreamReturn {
     }
   }, [addMessage, updateMessage]);
 
-  const clearCanvasChanges = useCallback(() => {
-    setCanvasChanges([]);
-  }, []);
-
   return {
     isLoading,
     setIsLoading,
-    canvasChanges,
     startStream,
     stopStream,
-    clearCanvasChanges,
   };
 }
