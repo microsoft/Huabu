@@ -42,32 +42,6 @@ export interface PreviewComponentProps {
 }
 
 /** Extract an auto-title from a BlockNote document. Prefers H1, then any heading, then the first non-empty block text. */
-const extractLabelFromBlocks = (
-  blocks: Array<{
-    type: string;
-    props?: Record<string, unknown>;
-    content?: Array<{ type: string; text?: string }> | unknown;
-  }>,
-): string => {
-  const getBlockText = (block: {
-    content?: Array<{ type: string; text?: string }> | unknown;
-  }) => {
-    if (!Array.isArray(block.content)) return '';
-    return block.content
-      .filter((item) => item.type === 'text')
-      .map((item) => item.text ?? '')
-      .join('');
-  };
-
-  const h1 = blocks.find((b) => b.type === 'heading' && b.props?.level === 1);
-  const anyHeading = blocks.find((b) => b.type === 'heading');
-  const firstNonEmpty = blocks.find((b) => getBlockText(b).trim().length > 0);
-
-  const target = h1 ?? anyHeading ?? firstNonEmpty;
-  if (!target) return '';
-  return getBlockText(target).trim().slice(0, 50);
-};
-
 export const NotePreview = ({
   data,
   readOnly,
@@ -148,7 +122,6 @@ export const NotePreview = ({
   const writePatch = (
     newMarkdown: string,
     newJson: string,
-    autoLabel?: string,
     provenancePatch?: BlockProvenanceMap,
     extraPatch?: Record<string, unknown>,
   ) => {
@@ -160,10 +133,6 @@ export const NotePreview = ({
       contentJsonSource: newMarkdown,
       ...extraPatch,
     };
-    if (autoLabel !== undefined) {
-      patch.label = autoLabel;
-      patch.labelSource = 'auto';
-    }
     if (provenancePatch !== undefined) {
       patch.provenance = provenancePatch;
     }
@@ -265,7 +234,7 @@ export const NotePreview = ({
 
         if (!usedJson && !readOnly) {
           const newJson = JSON.stringify(editor.document);
-          writePatch(markdown, newJson, undefined, resolved ?? rawProvenance);
+          writePatch(markdown, newJson, resolved ?? rawProvenance);
         }
 
         // Derive diff map and deleted blocks directly from provenance.
@@ -411,7 +380,7 @@ export const NotePreview = ({
     const json = JSON.stringify(editor.document);
     lastAppliedMarkdownRef.current = md.trim();
     lastDocJsonRef.current = json;
-    writePatch(md.trim(), json, undefined, cleared);
+    writePatch(md.trim(), json, cleared);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor, onDataChange]);
 
@@ -458,7 +427,7 @@ export const NotePreview = ({
       const json = JSON.stringify(editor.document);
       lastAppliedMarkdownRef.current = md.trim();
       lastDocJsonRef.current = json;
-      writePatch(md.trim(), json, undefined, updated);
+      writePatch(md.trim(), json, updated);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [editor],
@@ -518,7 +487,7 @@ export const NotePreview = ({
       const json = JSON.stringify(editor.document);
       lastAppliedMarkdownRef.current = md.trim();
       lastDocJsonRef.current = json;
-      writePatch(md.trim(), json, undefined, updated);
+      writePatch(md.trim(), json, updated);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [editor],
@@ -710,20 +679,7 @@ export const NotePreview = ({
                 const latestJson = JSON.stringify(editor.document);
                 lastDocJsonRef.current = latestJson;
 
-                const isLabelUserSet = data.labelSource === 'user';
-                const autoLabel = isLabelUserSet
-                  ? undefined
-                  : extractLabelFromBlocks(
-                      editor.document as Parameters<
-                        typeof extractLabelFromBlocks
-                      >[0],
-                    ) || undefined;
-                writePatch(
-                  newMarkdown,
-                  latestJson,
-                  autoLabel,
-                  provenanceRef.current,
-                );
+                writePatch(newMarkdown, latestJson, provenanceRef.current);
               }, 150);
             }}
           >

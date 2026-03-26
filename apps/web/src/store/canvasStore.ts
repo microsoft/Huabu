@@ -86,7 +86,6 @@ const triggerPreprocessing = (node: Node) => {
       node: latestNode,
       setNodeIngestion: state.setNodeIngestion,
       clearNodeIngestion: state.clearNodeIngestion,
-      getNodeById: (id) => state.nodes.find((n) => n.id === id),
       getChildNodes: (frameId) =>
         state.nodes.filter((n) => n.parentId === frameId),
       patchNodeSilent: state.patchNodeSilent,
@@ -1177,9 +1176,6 @@ function flushOnUnload(): void {
     const nodeType = node.type ?? '';
 
     // Build a minimal snapshot matching what preprocessNodeIfNeeded would send.
-    const labelSource = nodeData?.labelSource as string | undefined;
-    const isAutoLabel = !labelSource || labelSource === 'auto';
-
     const snapshot: Record<string, unknown> =
       nodeType === 'frame'
         ? {
@@ -1192,13 +1188,14 @@ function flushOnUnload(): void {
                 return label.trim();
               })
               .filter((l) => l.length > 0),
+            labelSource: (nodeData?.labelSource as string) || undefined,
           }
         : {
-            title: isAutoLabel
-              ? undefined
-              : (nodeData?.label as string) ||
-                (nodeData?.title as string) ||
-                undefined,
+            title:
+              (nodeData?.label as string) ||
+              (nodeData?.title as string) ||
+              undefined,
+            labelSource: (nodeData?.labelSource as string) || undefined,
             content: (nodeData?.content as string) || undefined,
             src: (nodeData?.src as string) || undefined,
             sourceId: (nodeData?.sourceId as string) || undefined,

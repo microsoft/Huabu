@@ -22,8 +22,14 @@ export function persist(
   const type = sourceKind;
   const existing = repository.findSourceById(normalized.sourceId);
 
-  // Content-hash deduplication: skip write if hash unchanged
+  // Content-hash deduplication: skip full write if hash unchanged.
+  // Still update the source title when it has changed.
   if (existing && existing.contentHash === normalized.contentHash) {
+    if (normalized.title && existing.title !== normalized.title) {
+      repository.updateSource(normalized.sourceId, {
+        title: normalized.title,
+      });
+    }
     return {
       sourceId: normalized.sourceId,
       isNew: false,

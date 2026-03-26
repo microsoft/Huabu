@@ -37,6 +37,7 @@ export interface ResolvedInput {
 
   // Passthrough fields
   title?: string;
+  labelSource?: string;
   existingSourceId?: string;
 }
 
