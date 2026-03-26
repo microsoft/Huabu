@@ -19,7 +19,7 @@ export const FrameNode = memo(
     const layoutGroup = useCanvasStore((state) => state.layoutGroup);
 
     const FrameToolbar = (
-      <div className="text-fg-subtle flex items-center gap-1">
+      <div className="flex items-center gap-1">
         <IconButton
           title="Layout Children"
           onClick={(e) => {
@@ -89,7 +89,7 @@ export const FrameNode = memo(
             'nodrag col-start-1 row-start-1 w-full min-w-0! bg-transparent px-1.5 text-xs font-medium outline-none',
             isEditingLabel
               ? 'text-fg-default cursor-text'
-              : 'text-fg-subtle hover:text-fg-default cursor-pointer',
+              : 'text-fg-muted hover:text-fg-default cursor-pointer',
           )}
           onChange={(e) => {
             if (!isEditingLabel) return;

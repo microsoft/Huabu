@@ -408,7 +408,7 @@ export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
 
       {/* ── Floating toolbar (top-left, vertical) ── */}
       <div className="pointer-events-none absolute top-3 left-3 z-10">
-        <div className="text-fg-subtle border-border bg-surface pointer-events-auto flex flex-col items-center gap-1 rounded-sm border p-0">
+        <div className="border-border bg-surface pointer-events-auto flex flex-col items-center gap-1 rounded-sm border p-0">
           <IconButton
             title="Select Area"
             className={clsx(captureMode && 'text-info bg-bg-default')}

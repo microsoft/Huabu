@@ -24,7 +24,7 @@ export function KeyboardShortcutsModal({
           <h3 className="text-fg-default text-base font-semibold">
             Keyboard Shortcuts
           </h3>
-          <p className="text-fg-subtle mt-1.5 text-[13px] leading-relaxed">
+          <p className="text-fg-muted mt-1.5 text-[13px] leading-relaxed">
             Use{' '}
             <kbd className="bg-surface rounded border px-1 py-0.5 font-mono text-[11px] shadow-sm">
               Ctrl
@@ -37,9 +37,7 @@ export function KeyboardShortcutsModal({
           </p>
         </div>
         <IconButton
-          variant="ghost"
           onClick={onClose}
-          className="text-fg-subtle hover:bg-hover hover:text-fg-muted -mt-1 -mr-2"
           title="Close (Esc)"
           aria-label="Close keyboard shortcuts"
         >
@@ -68,7 +66,7 @@ export function KeyboardShortcutsModal({
                     <span className="text-fg-muted font-mono text-[11px] font-semibold tracking-wide">
                       {item.keys}
                     </span>
-                    <span className="text-fg-subtle text-[13px]">
+                    <span className="text-fg-muted text-[13px]">
                       {item.description}
                     </span>
                   </div>

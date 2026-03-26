@@ -223,7 +223,7 @@ export const PDFNode = memo(
     const PDFToolbar = (
       <div className="flex w-full items-center justify-between gap-3">
         {/* Tools */}
-        <div className="text-fg-subtle flex items-center gap-1">
+        <div className="flex items-center gap-1">
           <IconButton
             title="Open Large View"
             onClick={(e) => {

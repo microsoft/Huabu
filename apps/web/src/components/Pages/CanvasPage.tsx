@@ -93,7 +93,7 @@ export default function CanvasPage() {
         </div>
         <Link
           to="/"
-          className="bg-emphasis text-fg-on-emphasis hover:bg-emphasis/90 inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors"
+          className="bg-inverse text-fg-inverse hover:bg-inverse/90 inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors"
         >
           <ArrowLeft className="h-4 w-4" />
           Back to canvas list

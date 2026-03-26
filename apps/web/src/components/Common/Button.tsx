@@ -19,7 +19,7 @@ const variantClasses: Record<NonNullable<ButtonProps['variant']>, string> = {
   secondary:
     'rounded-md font-medium border border-border text-fg-muted bg-surface hover:bg-hover',
   danger:
-    'rounded-md font-medium bg-danger text-fg-on-emphasis hover:bg-danger/90 border border-transparent',
+    'rounded-md font-medium bg-danger text-fg-inverse hover:bg-danger/90 border border-transparent',
   ghost:
     'cursor-pointer rounded border-none bg-transparent p-1 enabled:hover:bg-bg-default',
   pill: 'gap-1 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-fg-muted hover:bg-hover',

@@ -12,13 +12,13 @@
   --fg-default: #191919;
   --fg-muted: #6b6b6b;
   --fg-subtle: #ababab;
-  --fg-on-emphasis: #ffffff;
+  --fg-inverse: #ffffff;
 
   /* Backgrounds */
   --bg-default: #f5f5f5;
   --bg-surface: #ffffff;
   --bg-hover: #efefef;
-  --bg-emphasis: #1f1f1f;
+  --bg-inverse: #1f1f1f;
 
   /* Borders */
   --edge-default: #e6e6e6;
@@ -73,7 +73,7 @@
   --background: var(--bg-default);
   --foreground: var(--fg-default);
   --border: var(--edge-default);
-  --primary: var(--bg-emphasis);
+  --primary: var(--bg-inverse);
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
@@ -96,11 +96,11 @@
   --fg-default: oklch(0.985 0 0);
   --fg-muted: oklch(0.78 0 0);
   --fg-subtle: oklch(0.53 0 0);
-  --fg-on-emphasis: #191919;
+  --fg-inverse: #191919;
   --bg-default: oklch(0.145 0 0);
   --bg-surface: oklch(0.22 0 0);
   --bg-hover: oklch(0.25 0 0);
-  --bg-emphasis: oklch(0.87 0 0);
+  --bg-inverse: oklch(0.87 0 0);
   --edge-default: oklch(1 0 0 / 10%);
 
   /* Status: success */
@@ -164,12 +164,12 @@
   --color-fg-default: var(--fg-default);
   --color-fg-muted: var(--fg-muted);
   --color-fg-subtle: var(--fg-subtle);
-  --color-fg-on-emphasis: var(--fg-on-emphasis);
+  --color-fg-inverse: var(--fg-inverse);
 
   --color-bg-default: var(--bg-default);
   --color-surface: var(--bg-surface);
   --color-hover: var(--bg-hover);
-  --color-emphasis: var(--bg-emphasis);
+  --color-inverse: var(--bg-inverse);
 
   --color-edge-default: var(--edge-default);
 
@@ -289,7 +289,7 @@ body,
    still shows the user which region is selected. */
 .textLayer span::selection {
   color: transparent;
-  background: rgba(0, 100, 200, 0.3);
+  background: var(--pdf-selection-bg);
 }
 
 .block-note-view-readonly .bn-editor {

@@ -47,7 +47,7 @@ export const NoteNode = memo(
     const NoteToolbar = (
       <div className="flex w-full items-center justify-between gap-2">
         {/* Tools */}
-        <div className="text-fg-subtle flex items-center gap-1">
+        <div className="flex items-center gap-1">
           <IconButton
             title="Open Large View"
             onClick={(e) => {

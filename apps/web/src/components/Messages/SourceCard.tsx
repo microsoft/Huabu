@@ -80,16 +80,16 @@ export const SourceCard = ({ source }: { source: Source }) => {
           ) : null}
 
           <div className="min-w-0 flex-1">
-            <div className="text-fg-subtle flex min-w-0 items-center gap-2 text-sm font-medium">
+            <div className="text-fg-muted flex min-w-0 items-center gap-2 text-sm font-medium">
               <span className="truncate">{title}</span>
               <ArrowUpRight
-                className="text-fg-subtle flex-none"
+                className="text-fg-muted flex-none"
                 size={14}
                 strokeWidth={2}
               />
             </div>
             {hostname ? (
-              <div className="text-fg-subtle mt-0.5 truncate text-xs">
+              <div className="text-fg-muted mt-0.5 truncate text-xs">
                 {hostname}
               </div>
             ) : null}

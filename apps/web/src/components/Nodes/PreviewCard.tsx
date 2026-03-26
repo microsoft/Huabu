@@ -46,7 +46,7 @@ export function PreviewCard({
 
       {/* Icon + title — always visible, vertically centered */}
       <div className="flex min-w-0 shrink-0 items-start gap-2 px-2 py-1">
-        <div className="text-fg-subtle flex flex-none translate-y-1 items-center">
+        <div className="text-fg-muted flex flex-none translate-y-1 items-center">
           {favicon ? (
             <img
               src={favicon}

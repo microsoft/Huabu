@@ -70,9 +70,7 @@ export const IntentSelectMessage = ({
               >
                 <span className="text-fg-default text-sm">{c.label}</span>
                 {c.description && (
-                  <span className="text-fg-subtle text-xs">
-                    {c.description}
-                  </span>
+                  <span className="text-fg-muted text-xs">{c.description}</span>
                 )}
               </button>
             ))}

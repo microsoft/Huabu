@@ -144,7 +144,7 @@ export function Modal({
             {description && (
               <div
                 id={descriptionId}
-                className={cn('text-fg-subtle mt-1 text-sm', !title && 'mt-0')}
+                className={cn('text-fg-muted mt-1 text-sm', !title && 'mt-0')}
               >
                 {description}
               </div>

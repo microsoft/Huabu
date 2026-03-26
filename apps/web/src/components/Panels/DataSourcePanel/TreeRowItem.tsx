@@ -154,7 +154,7 @@ export const TreeRowItem = React.memo(
           {isCollapsible && (
             <IconButton
               onClick={handleToggleCollapse}
-              className="text-fg-subtle hover:text-fg-default shrink-0"
+              className="shrink-0"
               aria-label={isCollapsed ? 'Expand' : 'Collapse'}
               aria-expanded={!isCollapsed}
             >
@@ -182,7 +182,7 @@ export const TreeRowItem = React.memo(
               onKeyDown={handleKeyDown}
               onClick={(e) => e.stopPropagation()}
               onMouseDown={(e) => e.stopPropagation()}
-              className="h-6 w-full min-w-0 flex-1 rounded-sm border bg-white px-1 text-xs outline-none"
+              className="bg-surface h-6 w-full min-w-0 flex-1 rounded-sm border px-1 text-xs outline-none"
             />
           ) : (
             <span className="text-fg-default truncate select-none">
@@ -197,9 +197,7 @@ export const TreeRowItem = React.memo(
               <IconButton
                 onClick={handleToggleLock}
                 className={clsx(
-                  isLocked
-                    ? 'text-fg-default'
-                    : 'text-fg-subtle hover:text-fg-default',
+                  isLocked ? 'text-fg-default' : 'hover:text-fg-default',
                 )}
                 aria-label={isLocked ? 'Unlock' : 'Lock'}
               >

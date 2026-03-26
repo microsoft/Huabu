@@ -275,7 +275,7 @@ export const TextNode = memo(
     const TextToolbar = (
       <div className="flex w-full items-center gap-1">
         <div
-          className="hover:bg-bg-default text-fg-subtle border-border flex items-center rounded border bg-transparent p-0.5 transition-colors"
+          className="hover:bg-bg-default text-fg-muted border-border flex items-center rounded border bg-transparent p-0.5 transition-colors"
           title="Font Family"
         >
           <select
@@ -303,7 +303,7 @@ export const TextNode = memo(
             'rounded p-1',
             style.fontWeight === 'bold'
               ? 'text-info bg-info-bg enabled:hover:bg-info-bg'
-              : 'text-fg-subtle hover:bg-bg-default',
+              : 'text-fg-muted hover:bg-bg-default',
           )}
         >
           <Bold size={14} />
@@ -319,7 +319,7 @@ export const TextNode = memo(
             'rounded p-1',
             style.fontStyle === 'italic'
               ? 'text-info bg-info-bg enabled:hover:bg-info-bg'
-              : 'text-fg-subtle hover:bg-bg-default',
+              : 'text-fg-muted hover:bg-bg-default',
           )}
         >
           <Italic size={14} />
@@ -331,7 +331,7 @@ export const TextNode = memo(
             'p-1',
             textDecoration.includes('underline')
               ? 'text-info bg-info-bg enabled:hover:bg-info-bg'
-              : 'text-fg-subtle hover:bg-bg-default',
+              : 'text-fg-muted hover:bg-bg-default',
           )}
         >
           <Underline size={14} />
@@ -343,7 +343,7 @@ export const TextNode = memo(
             'p-1',
             textDecoration.includes('line-through')
               ? 'text-info bg-info-bg enabled:hover:bg-info-bg'
-              : 'text-fg-subtle hover:bg-bg-default',
+              : 'text-fg-muted hover:bg-bg-default',
           )}
         >
           <Strikethrough size={14} />

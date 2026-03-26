@@ -18,7 +18,7 @@ export const VideoNode = memo(
     const VideoToolbar = (
       <div className="flex w-full items-center justify-between gap-2">
         {/* Tools */}
-        <div className="text-fg-subtle flex items-center gap-1">
+        <div className="text-fg-muted flex items-center gap-1">
           <IconButton
             title="Open Large View"
             onClick={(e) => {
@@ -51,10 +51,10 @@ export const VideoNode = memo(
                   preload="metadata"
                   muted
                 />
-                <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/10 transition-colors group-hover:bg-black/20">
-                  <div className="rounded-full bg-black/40 p-3 backdrop-blur-sm transition-transform group-hover:scale-110">
+                <div className="bg-inverse/10 group-hover:bg-inverse/20 pointer-events-none absolute inset-0 flex items-center justify-center transition-colors">
+                  <div className="bg-inverse/40 rounded-full p-3 backdrop-blur-sm transition-transform group-hover:scale-110">
                     <Play
-                      className="fill-fg-on-emphasis text-fg-on-emphasis"
+                      className="fill-fg-inverse text-fg-inverse"
                       size={24}
                     />
                   </div>

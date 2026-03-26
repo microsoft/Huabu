@@ -125,7 +125,7 @@ export const Tooltip = ({
               ref={tooltipRef}
               id={tooltipId}
               role="tooltip"
-              className="shadow-bottom bg-emphasis text-fg-on-emphasis pointer-events-none fixed z-10001 rounded-md px-2 py-1 text-xs"
+              className="shadow-bottom bg-inverse text-fg-inverse pointer-events-none fixed z-10001 rounded-md px-2 py-1 text-xs"
               style={{
                 left: position?.x ?? -9999,
                 top: position?.y ?? -9999,

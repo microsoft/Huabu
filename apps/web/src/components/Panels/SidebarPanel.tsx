@@ -55,11 +55,7 @@ export const SidebarPanel = ({
           {tools && (
             <div className="text-fg-muted flex items-center">{tools}</div>
           )}
-          <IconButton
-            className="text-fg-muted"
-            onClick={onToggle}
-            title={`Collapse ${title}`}
-          >
+          <IconButton onClick={onToggle} title={`Collapse ${title}`}>
             {iconExpanded}
           </IconButton>
         </div>

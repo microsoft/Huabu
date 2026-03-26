@@ -80,14 +80,14 @@ const IntentSelectStep: React.FC<{ anchorY: number }> = ({ anchorY }) => {
                 >
                   {/* Description above label when expanding up */}
                   {isHovered && expandUp && c.description && (
-                    <span className="text-fg-subtle mb-0.5 text-xs leading-snug">
+                    <span className="text-fg-muted mb-0.5 text-xs leading-snug">
                       {c.description}
                     </span>
                   )}
                   <span className="text-fg-default text-sm">{c.label}</span>
                   {/* Description below label when expanding down */}
                   {isHovered && !expandUp && c.description && (
-                    <span className="text-fg-subtle mt-0.5 text-xs leading-snug">
+                    <span className="text-fg-muted mt-0.5 text-xs leading-snug">
                       {c.description}
                     </span>
                   )}
@@ -107,7 +107,7 @@ const IntentSelectStep: React.FC<{ anchorY: number }> = ({ anchorY }) => {
       {/* Custom intent input */}
       <div className="border-border border-t px-3 py-2">
         <div className="flex items-center gap-1.5">
-          <PenLine size={12} className="text-fg-subtle/60 flex-shrink-0" />
+          <PenLine size={12} className="text-fg-muted/60 flex-shrink-0" />
           <input
             ref={inputRef}
             type="text"
@@ -122,7 +122,6 @@ const IntentSelectStep: React.FC<{ anchorY: number }> = ({ anchorY }) => {
           <IconButton
             type="button"
             title="Send"
-            className="text-fg-subtle hover:text-info flex-shrink-0 transition-colors disabled:opacity-30"
             disabled={!customIntent.trim()}
             onClick={handleCustomSubmit}
           >
@@ -275,7 +274,7 @@ export const IntentPopover: React.FC = () => {
         </span>
         <IconButton
           title="Close"
-          className="text-fg-subtle hover:text-fg-default flex-shrink-0 rounded p-0.5"
+          className="text-fg-muted hover:text-fg-default flex-shrink-0 rounded p-0.5"
           onClick={dismiss}
         >
           <X size={14} />

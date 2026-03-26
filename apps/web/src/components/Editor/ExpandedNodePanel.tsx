@@ -183,11 +183,7 @@ export const ExpandedNodePanel = () => {
         {/* Left: back button (replace mode) + icon + title */}
         <div className="flex min-w-0 items-center gap-2">
           {isReplace && (
-            <IconButton
-              className="text-fg-muted"
-              title={backTitle}
-              onClick={activeItem.close}
-            >
+            <IconButton title={backTitle} onClick={activeItem.close}>
               <ArrowLeft size={14} />
             </IconButton>
           )}
@@ -205,9 +201,7 @@ export const ExpandedNodePanel = () => {
         {/* Right: mode toggle + close */}
         <div className="text-fg-muted flex items-center gap-1">
           <IconButton
-            className={
-              !isReplace ? 'text-fg-default bg-bg-default' : 'text-fg-muted'
-            }
+            className={!isReplace ? 'text-fg-default bg-bg-default' : ''}
             title={isReplace ? 'Split view' : 'Full view'}
             onClick={() => activeItem.setMode(isReplace ? 'split' : 'replace')}
           >
@@ -215,7 +209,6 @@ export const ExpandedNodePanel = () => {
           </IconButton>
 
           <IconButton
-            className="text-fg-muted"
             title="Close"
             onClick={(e) => {
               e.stopPropagation();

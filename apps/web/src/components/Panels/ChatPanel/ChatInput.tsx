@@ -257,7 +257,7 @@ export const ChatInput = ({
                     tooltipParts.push(
                       <div key="src" className="flex items-center gap-1">
                         <span className="text-fg-subtle">Source:</span>
-                        <span className="[&>div]:text-fg-on-emphasis [&>div]:border-white/30 [&>div:hover]:bg-white/10">
+                        <span className="[&>div]:text-fg-inverse [&>div]:border-fg-inverse/30 [&>div:hover]:bg-fg-inverse/10">
                           <NodeRef nodeId={sourceNodeId} />
                         </span>
                       </div>,
@@ -301,7 +301,7 @@ export const ChatInput = ({
                           useChatStore.getState().setSelectionAttachment(null);
                         }}
                         tooltipWrapperClassName="absolute top-0.5 right-0.5 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
-                        className="text-fg-on-emphasis rounded-full bg-black/50 p-0.5 enabled:hover:bg-black/70"
+                        className="text-fg-inverse bg-inverse/50 enabled:hover:bg-inverse/70 rounded-full p-0.5"
                         title="Remove attachment"
                       >
                         <X size={10} />
@@ -338,7 +338,7 @@ export const ChatInput = ({
                   tooltipParts.push(
                     <div key="src" className="flex items-center gap-1">
                       <span className="text-fg-subtle">Source:</span>
-                      <span className="[&>div]:text-fg-on-emphasis [&>div]:border-white/30 [&>div:hover]:bg-white/10">
+                      <span className="[&>div]:text-fg-inverse [&>div]:border-fg-inverse/30 [&>div:hover]:bg-fg-inverse/10">
                         <NodeRef nodeId={sourceNodeId} />
                       </span>
                     </div>,
@@ -390,7 +390,7 @@ export const ChatInput = ({
                         removePendingAttachment(idx);
                       }}
                       tooltipWrapperClassName="absolute top-0.5 right-0.5 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
-                      className="text-fg-on-emphasis rounded-full bg-black/50 p-0.5 enabled:hover:bg-black/70"
+                      className="text-fg-inverse bg-inverse/50 enabled:hover:bg-inverse/70 rounded-full p-0.5"
                       title="Remove attachment"
                     >
                       <X size={10} />

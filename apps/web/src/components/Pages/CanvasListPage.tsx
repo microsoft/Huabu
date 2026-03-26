@@ -191,7 +191,7 @@ export default function CanvasListPage() {
               disabled={isDeleting}
             >
               {isDeleting ? (
-                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                <span className="border-fg-inverse inline-block h-4 w-4 animate-spin rounded-full border-2 border-t-transparent" />
               ) : (
                 'Delete'
               )}
@@ -249,10 +249,10 @@ export default function CanvasListPage() {
               variant="primary"
               onClick={handleCreate}
               disabled={isCreating}
-              className="bg-emphasis text-fg-on-emphasis hover:bg-emphasis/80 gap-2 rounded-lg px-3 py-2"
+              className="bg-inverse text-fg-inverse hover:bg-inverse/80 gap-2 rounded-lg px-3 py-2"
             >
               {isCreating ? (
-                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                <span className="border-fg-inverse inline-block h-4 w-4 animate-spin rounded-full border-2 border-t-transparent" />
               ) : (
                 <Plus size={16} />
               )}

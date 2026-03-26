@@ -56,7 +56,7 @@ export const CanvasChangeBar = ({ changes }: CanvasChangeBarProps) => {
           return (
             <div
               key={i}
-              className="text-fg-subtle flex items-center gap-1.5 text-xs"
+              className="text-fg-muted flex items-center gap-1.5 text-xs"
             >
               <Icon size={11} className="flex-shrink-0" />
               <span className="truncate">{renderLabel()}</span>
