@@ -19,6 +19,7 @@ import React, {
 import { createPortal } from 'react-dom';
 
 import { Tooltip } from '@/components/Common/Tooltip.tsx';
+import { useCornerZoomResize } from '@/hooks/useCornerZoomResize.ts';
 import useCanvasStore from '@/store/canvasStore.ts';
 import { summarizeProvenance } from '@/utils/provenance.ts';
 
@@ -182,6 +183,7 @@ export const NodeWrapper = memo(
     const selectedCount = useCanvasStore(
       (state) => state.nodes.filter((node) => node.selected).length,
     );
+    const { tryStartZoom, shouldResize } = useCornerZoomResize();
 
     const setNodeGeometry = useCanvasStore((state) => state.setNodeGeometry);
     const onNodeResizeStart = useCanvasStore(
@@ -238,10 +240,17 @@ export const NodeWrapper = memo(
       [id, onResizeProp, updateResizePreview],
     );
 
-    const handleResizeStart = useCallback(() => {
-      onNodeResizeStart();
-      onResizeStart?.();
-    }, [onResizeStart, onNodeResizeStart]);
+    const handleResizeStart = useCallback(
+      (
+        event: unknown,
+        params: { x: number; y: number; width: number; height: number },
+      ) => {
+        if (tryStartZoom(event, params)) return;
+        onNodeResizeStart();
+        onResizeStart?.();
+      },
+      [tryStartZoom, onNodeResizeStart, onResizeStart],
+    );
 
     const handleResizeEnd = useCallback(
       (_event: unknown, params: { width: number; height: number }) => {
@@ -264,6 +273,7 @@ export const NodeWrapper = memo(
           minWidth={minWidth}
           minHeight={minHeight}
           keepAspectRatio={keepAspectRatio}
+          shouldResize={shouldResize}
           onResizeStart={handleResizeStart}
           onResize={handleResize}
           onResizeEnd={handleResizeEnd}
