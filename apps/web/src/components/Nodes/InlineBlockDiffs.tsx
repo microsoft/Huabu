@@ -117,6 +117,7 @@ interface DiffPopoverProps {
   children: React.ReactNode;
   onAccept: () => void;
   onReject: () => void;
+  onInsertBelow?: () => void;
   onMouseEnter: () => void;
   onMouseLeave: () => void;
 }
@@ -126,6 +127,7 @@ const DiffPopover = ({
   children,
   onAccept,
   onReject,
+  onInsertBelow,
   onMouseEnter,
   onMouseLeave,
 }: DiffPopoverProps) => (
@@ -138,6 +140,11 @@ const DiffPopover = ({
   >
     <div className="mb-2 text-xs leading-relaxed">{children}</div>
     <div className="flex justify-end gap-1">
+      {onInsertBelow && (
+        <Button variant="secondary" size="sm" onClick={onInsertBelow}>
+          Insert Below
+        </Button>
+      )}
       <Button variant="secondary" size="sm" onClick={onReject}>
         Reject
       </Button>
@@ -160,6 +167,7 @@ interface InlineBlockDiffsProps {
   getBlockText: (blockId: string) => string;
   onAcceptBlock: (blockId: string) => void;
   onRejectBlock: (blockId: string) => void;
+  onInsertBelow?: (blockId: string) => void;
   onAcceptDeletedBlock: (index: number) => void;
   onRestoreBlock: (index: number) => void;
 }
@@ -190,6 +198,7 @@ export const InlineBlockDiffs = ({
   getBlockText,
   onAcceptBlock,
   onRejectBlock,
+  onInsertBelow,
   onAcceptDeletedBlock,
   onRestoreBlock,
 }: InlineBlockDiffsProps) => {
@@ -457,6 +466,20 @@ export const InlineBlockDiffs = ({
             hoveredModifiedKeyRef.current = null;
             setHoveredModifiedKey(null);
           }}
+          onInsertBelow={
+            onInsertBelow
+              ? () => {
+                  hoveredModifiedKeyRef.current = null;
+                  setHoveredModifiedKey(null);
+                  const blockIds = hoveredModifiedPos.run.blockIds;
+                  setTimeout(() => {
+                    for (const blockId of blockIds) {
+                      onInsertBelow(blockId);
+                    }
+                  }, 300);
+                }
+              : undefined
+          }
           onMouseEnter={handlePopoverEnter}
           onMouseLeave={handlePopoverLeave}
         >
