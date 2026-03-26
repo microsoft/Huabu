@@ -72,25 +72,21 @@ export function shouldPreprocessOnUpdate(
   if (!needsPreprocessing(nextType)) return false;
   if ((prevNode.type ?? '') !== nextType) return true;
 
-  // Label change should trigger preprocessing for source title sync.
-  if (
+  const labelChanged =
     getStringDataField(prevNode, 'label') !==
-    getStringDataField(nextNode, 'label')
-  ) {
-    return true;
-  }
+    getStringDataField(nextNode, 'label');
 
   if (nextType === 'note' || nextType === 'text') {
     return (
       getStringDataField(prevNode, 'content') !==
-      getStringDataField(nextNode, 'content')
+        getStringDataField(nextNode, 'content') || labelChanged
     );
   }
 
   if (nextType === 'web' || nextType === 'pdf' || nextType === 'image') {
     return (
       getStringDataField(prevNode, 'src') !==
-      getStringDataField(nextNode, 'src')
+        getStringDataField(nextNode, 'src') || labelChanged
     );
   }
 
