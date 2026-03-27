@@ -7,7 +7,6 @@ import { useChatStore } from '@/store/chatStore';
 import { useIntentStore } from '@/store/intentStore';
 
 import { SidebarPanel } from '../SidebarPanel';
-import { CanvasChangeBar } from './CanvasChangeBar';
 import { ChatInput } from './ChatInput';
 import { useAgentStream } from './useAgentStream';
 import { useChatHistory } from './useChatHistory';
@@ -24,15 +23,8 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const [input, setInput] = useState('');
   const [mode, setMode] = useState<AgentMode>('ask');
 
-  // Agent stream hook — manages streaming, loading state, canvas changes
-  const {
-    isLoading,
-    setIsLoading,
-    canvasChanges,
-    startStream,
-    stopStream,
-    clearCanvasChanges,
-  } = useAgentStream();
+  // Agent stream hook — manages streaming and loading state
+  const { isLoading, setIsLoading, startStream, stopStream } = useAgentStream();
 
   // Chat history hook — loads history and handles reconnection
   useChatHistory(setIsLoading);
@@ -91,7 +83,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const handleNewChat = () => {
     if (isLoading) return;
     clearMessages(canvasId || undefined);
-    clearCanvasChanges();
   };
 
   return (
@@ -128,11 +119,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
             }
           }}
         />
-
-        {/* Canvas change review bar */}
-        {canvasChanges.length > 0 && !isLoading && (
-          <CanvasChangeBar changes={canvasChanges} />
-        )}
 
         {/* Input Area */}
         <ChatInput

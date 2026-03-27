@@ -2,9 +2,9 @@ import clsx from 'clsx';
 import { ArrowUpRight } from 'lucide-react';
 import { useRef } from 'react';
 
-import { useChatStore } from '../../store/chatStore';
-import { setDragPayload } from '../../utils/io/dragDrop';
-import { DragToCanvasHandleButton } from '../Common/DragToCanvasHandleButton';
+import { useChatStore } from '../../../store/chatStore';
+import { setDragPayload } from '../../../utils/io/dragDrop';
+import { DragToCanvasHandleButton } from '../../Common/DragToCanvasHandleButton';
 
 export type Source = {
   title: string;

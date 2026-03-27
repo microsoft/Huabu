@@ -21,7 +21,6 @@ export type CanvasNodeType =
  */
 export type NodeOrigin =
   // AI-generated
-  | { type: 'ai-research' }
   | { type: 'ai-operate' }
   // User-initiated
   | { type: 'user-created' }
@@ -55,15 +54,6 @@ export function normalizeOrigin(raw: unknown): NodeOrigin | undefined {
 
 /** Who set the node label — controls whether auto-title may overwrite it */
 export type LabelSource = 'auto' | 'user';
-
-export interface NodeResearchData {
-  /** Original research query */
-  query: string;
-  /** Thread ID of the research session that created this node */
-  threadId?: string;
-  /** Related node IDs (for auto-connecting) */
-  relatedNodeIds?: string[];
-}
 
 export interface NodeStyle {
   backgroundColor?: string;
@@ -127,8 +117,6 @@ export type BlockProvenanceMap = Record<string, BlockProvenance>;
 export interface BaseNodeData {
   /** Node origin/source */
   origin?: NodeOrigin;
-  /** Research-related data (only when origin.type === 'ai-research') */
-  research?: NodeResearchData;
   /** Display label */
   label?: string;
   /**

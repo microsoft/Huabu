@@ -8,8 +8,8 @@ import { ContextUsageRing } from './ContextUsageRing';
 import { ModeSelector } from './ModeSelector';
 import { SourceCount } from './SelectedNodeRefs';
 import { IconButton } from '../../Common/IconButton';
+import { NodeRef } from '../../Common/NodeRef';
 import { Tooltip } from '../../Common/Tooltip';
-import { NodeRef } from '../../Messages/NodeRef';
 
 import type { AgentMode } from '@sediment/shared';
 
@@ -138,11 +138,7 @@ export const ChatInput = ({
 
   // Dynamic placeholder based on mode
   const currentPlaceholder =
-    mode === 'research'
-      ? 'Enter your research query...'
-      : mode === 'operate'
-        ? 'Describe the canvas change you want...'
-        : placeholder;
+    mode === 'operate' ? 'Describe the canvas change you want...' : placeholder;
 
   // Auto-resize textarea
   useEffect(() => {

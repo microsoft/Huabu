@@ -4,6 +4,34 @@
 
 ---
 
+## 2026-03-27 · 移除 Research Mode
+
+**What Changed**
+
+- 移除了 Chat Panel 中的 Deep Research 模式，现在仅保留 Ask 和 Operate 两种模式。
+- 清理了相关死代码：`ResearchConfig`、`ResearchAgentEvent` 等类型定义，`RESEARCH_SYSTEM_PROMPT`，以及过时的测试用例和注释。
+
+**Notes**
+
+- 无迁移步骤，Research 模式已完全移除。
+
+---
+
+## 2026-03-25 · Canvas Changes Keep / Revert 按钮
+
+**What Changed**
+
+- Agent 模式执行完成后，Canvas changes 面板标题栏新增 **Keep all** 和 **Revert all** 按钮，可一键接受或撤销所有变更。
+- 每一行变更右侧新增 ✓（Keep）和 ✗（Revert）按钮（hover 时显示），支持逐条接受或撤销单个操作。
+- 可撤销的操作类型：创建节点（Created）、连接节点（Connected）。不可撤销的操作（如 Delete、Update、Auto layout）的 Revert 按钮为禁用状态。
+
+**Notes**
+
+- Revert 通过执行反向命令实现（创建 → 删除，连接 → 断开），而非全局 undo。
+- Revert All 按逆序执行所有反向命令，确保先断开边再删除节点。
+
+---
+
 ## 2026-03-25 · arXiv PDF 链接导入支持
 
 **What Changed**

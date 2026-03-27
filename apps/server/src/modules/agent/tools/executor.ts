@@ -18,13 +18,8 @@ import type {
 
 // ==================== Origin Helper ====================
 
-function agentModeToOrigin(mode?: AgentMode): NodeOrigin {
-  switch (mode) {
-    case 'research':
-      return { type: 'ai-research' };
-    default:
-      return { type: 'ai-operate' };
-  }
+function agentModeToOrigin(_mode?: AgentMode): NodeOrigin {
+  return { type: 'ai-operate' };
 }
 
 /** Build an `__all__` sentinel provenance map for AI-generated content. */

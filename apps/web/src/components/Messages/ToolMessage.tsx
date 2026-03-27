@@ -1,113 +1,539 @@
 import {
+  Blend,
   Check,
   ChevronDown,
   ChevronRight,
+  Command,
+  LayoutList,
+  Library,
   Loader2,
-  Sparkles,
+  PackagePlus,
+  ScanText,
+  Search,
+  Undo2,
   X as XIcon,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
-import { NodeRef } from './NodeRef';
-import { SourceCard, type Source } from './SourceCard';
-import { NODE_ICON } from '../../config/nodeIcons';
+import { IconButton } from '@/components/Common/IconButton';
+import { NODE_ICON } from '@/config/nodeIcons';
+import useCanvasStore from '@/store/canvasStore';
+import { useChatStore } from '@/store/chatStore';
+
+import { NodeRef } from '../Common/NodeRef';
+import { SourceCard, type Source } from './Card/SourceCard';
+import { useCanvasChangePreview } from '../../hooks/useCanvasChanges';
 import { Button } from '../Common/Button';
 
-import type { CanvasNodeType } from '@sediment/shared';
+import type { CanvasChange } from '../../hooks/useCanvasChanges';
+import type { CanvasCommand, CanvasNodeType } from '@sediment/shared';
 import type { ToolResponse, WebSearchToolResponse } from '@sediment/shared';
 
 // ==================== Helpers ====================
 
-/** Extract a human-readable title from tool response data. */
-function getToolTitle(
-  tool: string,
-  data: Record<string, unknown>,
-): { icon: React.ReactNode; title: string } {
-  const nodeType = ((data.type ?? data.nodeType) as string) ?? 'note';
-  const NodeIcon = NODE_ICON[nodeType as CanvasNodeType] ?? NODE_ICON.note;
-  const truncate = (s: string, n: number) =>
-    s.length > n ? s.slice(0, n) + '…' : s;
+const truncate = (s: string, n: number) =>
+  s.length > n ? s.slice(0, n) + '…' : s;
 
-  switch (tool) {
-    case 'get_node_detail':
-      return {
-        icon: <NodeIcon size={12} />,
-        title: `Read node ${truncate((data.label as string) ?? (data.id as string) ?? '', 20)}`,
-      };
-    case 'get_canvas_state':
-      return { icon: null, title: 'Read canvas state' };
-    case 'canvas_commands': {
-      const commands = (data.commands ?? []) as Array<Record<string, unknown>>;
-      const count = commands.length;
-      if (count === 0) return { icon: null, title: 'Canvas commands (empty)' };
-      const first = commands[0].type as string;
-      return {
-        icon: null,
-        title:
-          count === 1
-            ? `Canvas: ${first}`
-            : `Canvas: ${first} + ${count - 1} more`,
-      };
-    }
-    case 'web_search':
-      return { icon: null, title: `Web search` };
-    case 'read_source':
-      return {
-        icon: <NodeIcon size={12} />,
-        title: `Read source ${truncate((data.title as string) ?? '', 20)}`,
-      };
-    case 'search_knowledge':
-      return { icon: null, title: `Search knowledge` };
-    case 'ingest_content':
-      return { icon: null, title: `Ingest content` };
-    default:
-      return { icon: null, title: tool };
-  }
+/** Extract icon for a node-referencing tool. */
+function getNodeIcon(data: Record<string, unknown>) {
+  const nodeType = ((data.type ?? data.nodeType) as string) ?? 'note';
+  return NODE_ICON[nodeType as CanvasNodeType] ?? NODE_ICON.note;
 }
 
-// ==================== Agent Tool Card ====================
+// ==================== Tool Icon Mapping ====================
 
-interface AgentToolCardProps {
+const TOOL_ICON: Record<string, typeof ScanText> = {
+  get_node_detail: ScanText,
+  read_source: Library,
+  get_canvas_state: LayoutList,
+  search_knowledge: Search,
+  ingest_content: PackagePlus,
+  canvas_commands: Command,
+};
+
+// ==================== Merged Tool Row ====================
+
+/** A single tool entry within a ToolMessageGroup, used for merging logic. */
+export interface ToolEntry {
+  messageId: string;
   toolResponse: ToolResponse<string, unknown>;
   isExecuting?: boolean;
 }
 
-function AgentToolCard({ toolResponse, isExecuting }: AgentToolCardProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
+/** Props for the unified tool message group component. */
+interface ToolMessageGroupProps {
+  entries: ToolEntry[];
+}
+
+/**
+ * ToolMessageGroup — renders a group of consecutive same-tool messages
+ * as a single merged row. For canvas_commands, shows inline change list.
+ */
+export function ToolMessageGroup({ entries }: ToolMessageGroupProps) {
+  if (entries.length === 0) return null;
+
+  const first = entries[0];
+  const tool = first.toolResponse.tool;
+
+  // Non-agent tools: render individually
+  if (!isAgentTool(tool)) {
+    if (tool === 'web_search') {
+      return (
+        <>
+          {entries.map((e) => (
+            <WebSearchToolDisplay
+              key={e.messageId}
+              toolResponse={e.toolResponse as WebSearchToolResponse}
+            />
+          ))}
+        </>
+      );
+    }
+    // Error display
+    return (
+      <>
+        {entries.map((e) => {
+          if (e.toolResponse.status === 'error') {
+            const text = e.toolResponse.hint
+              ? `Tool error (${e.toolResponse.tool}): ${e.toolResponse.error}\nHint: ${e.toolResponse.hint}`
+              : `Tool error (${e.toolResponse.tool}): ${e.toolResponse.error}`;
+            return (
+              <div key={e.messageId} className="flex justify-start">
+                <div className="bg-danger-bg text-danger border-border rounded-md border px-4 py-3 text-sm whitespace-pre-wrap">
+                  {text}
+                </div>
+              </div>
+            );
+          }
+          return null;
+        })}
+      </>
+    );
+  }
+
+  // canvas_commands: render each individually (each has its own change list)
+  if (tool === 'canvas_commands') {
+    return (
+      <>
+        {entries.map((e) => (
+          <CanvasCommandCard
+            key={e.messageId}
+            messageId={e.messageId}
+            toolResponse={e.toolResponse}
+            isExecuting={e.isExecuting}
+          />
+        ))}
+      </>
+    );
+  }
+
+  // All other agent tools: merge into a single row
+  const anyExecuting = entries.some((e) => e.isExecuting);
+  const anyError = entries.some((e) => e.toolResponse.status === 'error');
+
+  return (
+    <MergedAgentToolRow
+      tool={tool}
+      entries={entries}
+      isExecuting={anyExecuting}
+      isError={anyError}
+    />
+  );
+}
+
+// ==================== Canvas Command Card ====================
+
+function CanvasCommandCard({
+  messageId,
+  toolResponse,
+  isExecuting,
+}: {
+  messageId: string;
+  toolResponse: ToolResponse<string, unknown>;
+  isExecuting?: boolean;
+}) {
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCommandListExpanded, setIsCommandListExpanded] = useState(false);
 
   const data =
     toolResponse.status === 'success'
       ? ((toolResponse.data ?? {}) as Record<string, unknown>)
       : ({} as Record<string, unknown>);
-  const { icon, title } = getToolTitle(toolResponse.tool, data);
-  const isError = toolResponse.status === 'error';
 
-  // Expandable tools: none of the new tools need content expansion
-  const isExpandable = false;
-  const contentText = null;
+  const canvasChanges = (data.canvasChanges ?? []) as CanvasChange[];
+  const hasChanges = canvasChanges.length > 0;
 
-  // Render title with clickable NodeRef for tools that reference nodes
-  const renderTitle = (): React.ReactNode => {
-    const tool = toolResponse.tool;
+  const updateMessage = useChatStore((s) => s.updateMessage);
 
-    if (tool === 'get_node_detail') {
-      const nodeId = ((data.id ?? data.nodeId) as string) || undefined;
-      if (nodeId) {
-        return (
-          <>
-            Read node{' '}
-            <NodeRef nodeId={nodeId} fallbackLabel={data.label as string} />
-          </>
-        );
+  const {
+    isNodeMissing,
+    isNodePreviewing,
+    handlePreviewDown,
+    handlePreviewAllDown,
+    handlePreviewUp,
+  } = useCanvasChangePreview(canvasChanges);
+
+  const removeChange = useCallback(
+    (changeId: string) => {
+      updateMessage(messageId, (m) => {
+        if (m.role !== 'tool' || m.toolResponse.status !== 'success') return m;
+        const d = m.toolResponse.data as Record<string, unknown>;
+        const changes = (d.canvasChanges ?? []) as CanvasChange[];
+        return {
+          ...m,
+          toolResponse: {
+            ...m.toolResponse,
+            data: {
+              ...d,
+              canvasChanges: changes.filter((c) => c.id !== changeId),
+            },
+          },
+        };
+      });
+    },
+    [messageId, updateMessage],
+  );
+
+  const clearAllChanges = useCallback(() => {
+    updateMessage(messageId, (m) => {
+      if (m.role !== 'tool' || m.toolResponse.status !== 'success') return m;
+      const d = m.toolResponse.data as Record<string, unknown>;
+      return {
+        ...m,
+        toolResponse: {
+          ...m.toolResponse,
+          data: { ...d, canvasChanges: [] },
+        },
+      };
+    });
+  }, [messageId, updateMessage]);
+
+  const revertChange = useCallback(
+    (changeId: string) => {
+      const change = canvasChanges.find((c) => c.id === changeId);
+      if (change?.revertible) {
+        const cmds: CanvasCommand[] = [];
+        if (change.revertCommands) cmds.push(...change.revertCommands);
+        else if (change.revertCommand) cmds.push(change.revertCommand);
+        if (cmds.length > 0) {
+          useCanvasStore.getState().executeCommands(cmds, 'ui');
+        }
+      }
+      removeChange(changeId);
+    },
+    [canvasChanges, removeChange],
+  );
+
+  const revertAllChanges = useCallback(() => {
+    const reversed = [...canvasChanges].reverse();
+    const revertCmds: CanvasCommand[] = [];
+    for (const change of reversed) {
+      if (change.revertible) {
+        if (change.revertCommands) revertCmds.push(...change.revertCommands);
+        else if (change.revertCommand) revertCmds.push(change.revertCommand);
       }
     }
+    if (revertCmds.length > 0) {
+      useCanvasStore.getState().executeCommands(revertCmds, 'ui');
+    }
+    clearAllChanges();
+  }, [canvasChanges, clearAllChanges]);
 
-    return title;
-  };
+  // Has canvas changes → render inline change list
+  if (hasChanges) {
+    return (
+      <div className="flex justify-start">
+        <div className="w-full px-2">
+          <div className="border-border bg-background/40 flex flex-col gap-2 rounded-md border p-2.5">
+            {/* Header */}
+            <div className="flex items-center justify-between">
+              <button
+                onClick={() => setIsCollapsed((prev) => !prev)}
+                className="text-foreground/70 flex items-center gap-1 text-xs font-medium"
+              >
+                {isCollapsed ? (
+                  <ChevronRight size={14} />
+                ) : (
+                  <ChevronDown size={14} />
+                )}
+                <Command size={12} className="text-muted-foreground/60" />
+                Canvas changes ({canvasChanges.length})
+              </button>
+              <div className="flex items-center gap-1">
+                <Button
+                  onClick={clearAllChanges}
+                  variant="secondary"
+                  size="sm"
+                  className="gap-1 px-1.5 py-0.5 text-[10px]"
+                >
+                  Keep all
+                </Button>
+                <Button
+                  onClick={revertAllChanges}
+                  variant="secondary"
+                  size="sm"
+                  className="gap-1 px-1.5 py-0.5 text-[10px]"
+                >
+                  Revert all
+                </Button>
+                <Button
+                  onPointerDown={handlePreviewAllDown}
+                  onPointerUp={handlePreviewUp}
+                  onPointerLeave={handlePreviewUp}
+                  variant="ghost"
+                  size="sm"
+                >
+                  <Blend size={12} />
+                </Button>
+              </div>
+            </div>
 
-  // Auto-expand while executing (only for expandable tools)
-  const canExpand = isExpandable && contentText !== null;
-  const showContent = canExpand && (isExecuting || isExpanded);
+            {/* Change rows */}
+            {!isCollapsed && (
+              <div className="flex max-h-[24vh] flex-col gap-0.5 overflow-y-auto">
+                {canvasChanges.map((change) => {
+                  const Icon =
+                    NODE_ICON[(change.nodeType as CanvasNodeType) ?? 'note'] ??
+                    NODE_ICON.note;
+
+                  const allMissing =
+                    (change.nodeId && isNodeMissing(change.nodeId)) ||
+                    (change.sourceNodeId &&
+                      isNodeMissing(change.sourceNodeId)) ||
+                    (change.targetNodeId && isNodeMissing(change.targetNodeId));
+
+                  const renderLabel = () => {
+                    if (change.sourceNodeId && change.targetNodeId) {
+                      const verb = change.label.split(':')[0] || 'Connected';
+                      return (
+                        <>
+                          {verb}{' '}
+                          <NodeRef
+                            nodeId={change.sourceNodeId}
+                            snapshotLabel={change.sourceNodeLabel}
+                            previewing={isNodePreviewing(change.sourceNodeId)}
+                          />{' '}
+                          →{' '}
+                          <NodeRef
+                            nodeId={change.targetNodeId}
+                            snapshotLabel={change.targetNodeLabel}
+                            previewing={isNodePreviewing(change.targetNodeId)}
+                          />
+                        </>
+                      );
+                    }
+                    if (change.nodeId) {
+                      const prefix = change.label.split(':')[0];
+                      return (
+                        <>
+                          {prefix}:{' '}
+                          <NodeRef
+                            nodeId={change.nodeId}
+                            snapshotLabel={change.nodeLabel}
+                            previewing={isNodePreviewing(change.nodeId)}
+                          />
+                        </>
+                      );
+                    }
+                    return change.label;
+                  };
+
+                  return (
+                    <div
+                      key={change.id}
+                      className="text-muted-foreground flex items-center gap-2 pl-0.5 text-xs"
+                    >
+                      <Icon size={12} className="flex-shrink-0" />
+                      <span className="min-w-0 flex-1 truncate">
+                        {renderLabel()}
+                      </span>
+                      <div className="flex flex-shrink-0 items-center gap-0.5">
+                        <IconButton
+                          onClick={() => removeChange(change.id)}
+                          title="Keep this change"
+                          className="text-muted-foreground/40 hover:text-green-600"
+                        >
+                          <Check size={12} />
+                        </IconButton>
+                        <IconButton
+                          onClick={() => revertChange(change.id)}
+                          disabled={!change.revertible || !!allMissing}
+                          title={
+                            change.revertible
+                              ? 'Revert this change'
+                              : 'Cannot revert this change'
+                          }
+                          className="text-muted-foreground/40 hover:text-red-600"
+                        >
+                          <Undo2 size={12} />
+                        </IconButton>
+                        <IconButton
+                          onPointerDown={() => handlePreviewDown(change)}
+                          onPointerUp={handlePreviewUp}
+                          onPointerLeave={handlePreviewUp}
+                          disabled={!change.revertible}
+                          title="Hold to preview before"
+                          className="text-muted-foreground/40 hover:text-blue-500"
+                        >
+                          <Blend size={12} />
+                        </IconButton>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // No changes → compact title (expandable when multiple commands)
+  const commands = (data.commands ?? []) as Array<Record<string, unknown>>;
+  const count = commands.length;
+  const title =
+    count === 0
+      ? 'Canvas commands'
+      : count === 1
+        ? `Canvas: ${commands[0]?.type as string}`
+        : `Canvas: ${count} commands`;
+
+  const statusIcon = isExecuting ? (
+    <Loader2 size={12} className="text-theme-500 animate-spin" />
+  ) : (
+    <Check size={12} className="text-green-600" />
+  );
+
+  if (count <= 1) {
+    return (
+      <div className="flex justify-start">
+        <div className="w-full">
+          <div className="text-muted-foreground hover:bg-muted/50 flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors">
+            {statusIcon}
+            <Command
+              size={12}
+              className="text-muted-foreground/60 flex-shrink-0"
+            />
+            <span className="flex-1 truncate">{title}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex justify-start">
+      <div className="w-full">
+        <button
+          type="button"
+          className="text-muted-foreground hover:bg-muted/50 flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors"
+          onClick={() => setIsCommandListExpanded(!isCommandListExpanded)}
+        >
+          {statusIcon}
+          <Command
+            size={12}
+            className="text-muted-foreground/60 flex-shrink-0"
+          />
+          <span className="flex-1 truncate">{title}</span>
+          <ChevronRight
+            size={10}
+            className={`text-muted-foreground/50 flex-shrink-0 transition-transform ${isCommandListExpanded ? 'rotate-90' : ''}`}
+          />
+        </button>
+        {isCommandListExpanded && (
+          <div className="border-border/40 ml-4 flex flex-col gap-0.5 border-l py-1 pl-3">
+            {commands.map((cmd, idx) => (
+              <div
+                key={idx}
+                className="text-muted-foreground flex items-center gap-1.5 text-xs"
+              >
+                <Check size={10} className="flex-shrink-0 text-green-600/60" />
+                <span className="truncate">
+                  {(cmd.type as string) ?? 'unknown'}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ==================== Merged Agent Tool Row ====================
+
+function MergedAgentToolRow({
+  tool,
+  entries,
+  isExecuting,
+  isError,
+}: {
+  tool: string;
+  entries: ToolEntry[];
+  isExecuting?: boolean;
+  isError?: boolean;
+}) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const count = entries.length;
+
+  // Build merged title and content
+  const { title, nodeRefs } = useMemo(() => {
+    if (tool === 'get_node_detail') {
+      const refs = entries.map((e) => {
+        const d =
+          e.toolResponse.status === 'success'
+            ? ((e.toolResponse.data ?? {}) as Record<string, unknown>)
+            : {};
+        return {
+          nodeId: ((d.id ?? d.nodeId) as string) || undefined,
+          label: (d.label as string) || undefined,
+        };
+      });
+      return {
+        title: count === 1 ? 'Read node' : `Read ${count} nodes`,
+        nodeRefs: refs,
+      };
+    }
+
+    if (tool === 'read_source') {
+      const refs = entries.map((e) => {
+        const d =
+          e.toolResponse.status === 'success'
+            ? ((e.toolResponse.data ?? {}) as Record<string, unknown>)
+            : {};
+        return {
+          nodeId: undefined as string | undefined,
+          label: (d.title as string) || undefined,
+        };
+      });
+      return {
+        title: count === 1 ? 'Read source' : `Read ${count} sources`,
+        nodeRefs: refs,
+      };
+    }
+
+    const emptyRefs: { nodeId?: string; label?: string }[] = [];
+
+    if (tool === 'get_canvas_state') {
+      return { title: 'Read canvas state', nodeRefs: emptyRefs };
+    }
+    if (tool === 'search_knowledge') {
+      return {
+        title:
+          count === 1 ? 'Search knowledge' : `Search knowledge (×${count})`,
+        nodeRefs: emptyRefs,
+      };
+    }
+    if (tool === 'ingest_content') {
+      return {
+        title: count === 1 ? 'Ingest content' : `Ingest content (×${count})`,
+        nodeRefs: emptyRefs,
+      };
+    }
+
+    return { title: tool, nodeRefs: emptyRefs };
+  }, [tool, entries, count]);
 
   const statusIcon = isExecuting ? (
     <Loader2 size={12} className="text-info animate-spin" />
@@ -117,27 +543,133 @@ function AgentToolCard({ toolResponse, isExecuting }: AgentToolCardProps) {
     <Check size={12} className="text-success" />
   );
 
+  const icon = useMemo(() => {
+    const Icon = TOOL_ICON[tool];
+    if (Icon) return <Icon size={12} />;
+    return null;
+  }, [tool]);
+
+  // Single entry with node ref → inline badge
+  if (count === 1 && tool === 'get_node_detail' && nodeRefs[0]?.nodeId) {
+    return (
+      <div className="flex justify-start">
+        <div className="w-full">
+          <div className="text-muted-foreground hover:bg-muted/50 flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors">
+            {statusIcon}
+            {icon && <span className="text-muted-foreground/60">{icon}</span>}
+            <span className="flex-1 truncate">
+              Read node{' '}
+              <NodeRef
+                nodeId={nodeRefs[0].nodeId}
+                fallbackLabel={nodeRefs[0].label}
+              />
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Single entry with read_source
+  if (count === 1 && tool === 'read_source') {
+    return (
+      <div className="flex justify-start">
+        <div className="w-full">
+          <div className="text-muted-foreground hover:bg-muted/50 flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors">
+            {statusIcon}
+            {icon && <span className="text-muted-foreground/60">{icon}</span>}
+            <span className="flex-1 truncate">
+              Read source{' '}
+              {nodeRefs[0]?.label ? truncate(nodeRefs[0].label, 20) : ''}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // No expandable content → simple row
+  if (nodeRefs.length === 0 || count === 1) {
+    return (
+      <div className="flex justify-start">
+        <div className="w-full">
+          <div className="text-muted-foreground hover:bg-muted/50 flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors">
+            {statusIcon}
+            {icon && <span className="text-muted-foreground/60">{icon}</span>}
+            <span className="flex-1 truncate">{title}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Multiple entries with refs → expandable row
   return (
     <div className="flex justify-start">
       <div className="w-full">
         <button
           type="button"
           className="text-fg-muted hover:bg-bg-default flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs transition-colors"
-          onClick={() => canExpand && setIsExpanded(!isExpanded)}
+          onClick={() => setIsExpanded(!isExpanded)}
         >
           {statusIcon}
           {icon && <span className="text-fg-muted/60">{icon}</span>}
-          <span className="flex-1 truncate">{renderTitle()}</span>
-          {!isExecuting && canExpand && (
-            <ChevronRight
-              size={10}
-              className={`text-fg-muted/50 flex-shrink-0 transition-transform ${showContent ? 'rotate-90' : ''}`}
-            />
-          )}
+          <span className="flex-1 truncate">{title}</span>
+          <ChevronRight
+            size={10}
+            className={`text-fg-muted/50 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+          />
         </button>
-        {showContent && contentText && (
-          <div className="border-border text-fg-muted/60 mt-1 max-h-40 overflow-y-auto rounded border p-2 text-[11px] leading-relaxed">
-            <div className="break-all whitespace-pre-wrap">{contentText}</div>
+        {isExpanded && (
+          <div className="border-edge-default/40 ml-4 flex flex-col gap-1 border-l py-1 pl-3">
+            {entries.map((e, i) => {
+              const d =
+                e.toolResponse.status === 'success'
+                  ? ((e.toolResponse.data ?? {}) as Record<string, unknown>)
+                  : {};
+              if (tool === 'get_node_detail') {
+                const nodeId = ((d.id ?? d.nodeId) as string) || undefined;
+                const EntryIcon = getNodeIcon(d);
+                return (
+                  <div
+                    key={e.messageId}
+                    className="text-fg-muted flex items-center gap-1.5 text-xs"
+                  >
+                    <EntryIcon
+                      size={11}
+                      className="text-fg-muted/60 flex-shrink-0"
+                    />
+                    {nodeId ? (
+                      <NodeRef
+                        nodeId={nodeId}
+                        fallbackLabel={d.label as string}
+                      />
+                    ) : (
+                      <span className="truncate">
+                        {nodeRefs[i]?.label ?? '?'}
+                      </span>
+                    )}
+                  </div>
+                );
+              }
+              if (tool === 'read_source') {
+                return (
+                  <div
+                    key={e.messageId}
+                    className="text-fg-muted flex items-center gap-1.5 text-xs"
+                  >
+                    <Library
+                      size={11}
+                      className="text-fg-muted/60 flex-shrink-0"
+                    />
+                    <span className="truncate">
+                      {truncate((d.title as string) ?? '?', 30)}
+                    </span>
+                  </div>
+                );
+              }
+              return null;
+            })}
           </div>
         )}
       </div>
@@ -145,61 +677,25 @@ function AgentToolCard({ toolResponse, isExecuting }: AgentToolCardProps) {
   );
 }
 
-// ==================== Main ToolMessage ====================
+// ==================== Legacy Single ToolMessage (for non-grouped rendering) ====================
 
 interface ToolMessageProps {
+  messageId: string;
   toolResponse: ToolResponse<string, unknown>;
   isExecuting?: boolean;
 }
 
 /**
- * ToolMessage - Unified display for all agent tool calls
- * Agent tools show as collapsible icon+title cards.
- * Research and web_search tools keep their existing display.
+ * ToolMessage — single tool message renderer.
+ * Delegates to ToolMessageGroup with a single entry.
  */
 export const ToolMessage = ({
+  messageId,
   toolResponse,
   isExecuting,
 }: ToolMessageProps) => {
-  // Error handling for non-agent tools
-  if (toolResponse.status === 'error' && !isAgentTool(toolResponse.tool)) {
-    const text = toolResponse.hint
-      ? `Tool error (${toolResponse.tool}): ${toolResponse.error}\nHint: ${toolResponse.hint}`
-      : `Tool error (${toolResponse.tool}): ${toolResponse.error}`;
-
-    return (
-      <div className="flex justify-start">
-        <div className="bg-danger-bg text-danger border-border rounded-2xl border px-4 py-3 text-sm whitespace-pre-wrap">
-          {text}
-        </div>
-      </div>
-    );
-  }
-
-  // Agent tools — collapsible card style
-  if (isAgentTool(toolResponse.tool)) {
-    return (
-      <AgentToolCard toolResponse={toolResponse} isExecuting={isExecuting} />
-    );
-  }
-
-  // Research tool types
-  if (toolResponse.tool.startsWith('research_')) {
-    return <ResearchToolDisplay toolResponse={toolResponse} />;
-  }
-
-  // Web search (from ask mode)
-  if (toolResponse.tool === 'web_search') {
-    return (
-      <WebSearchToolDisplay
-        toolResponse={toolResponse as WebSearchToolResponse}
-      />
-    );
-  }
-
-  // Fallback
   return (
-    <AgentToolCard toolResponse={toolResponse} isExecuting={isExecuting} />
+    <ToolMessageGroup entries={[{ messageId, toolResponse, isExecuting }]} />
   );
 };
 
@@ -213,102 +709,6 @@ function isAgentTool(tool: string): boolean {
     'search_knowledge',
     'ingest_content',
   ].includes(tool);
-}
-
-/**
- * Display for research tool responses
- */
-function ResearchToolDisplay({
-  toolResponse,
-}: {
-  toolResponse: ToolResponse<string, unknown>;
-}) {
-  if (toolResponse.status !== 'success') return null;
-
-  const { tool, data } = toolResponse;
-
-  // Research query analysis
-  if (tool === 'research_query_analysis') {
-    const { subQueries } = data as { query: string; subQueries: string[] };
-    return (
-      <div className="flex justify-start">
-        <div className="text-fg-muted border-border bg-surface flex items-center gap-2 rounded-2xl border px-3 py-2 text-sm">
-          <Sparkles size={14} className="text-fg-default animate-pulse" />
-          <span>
-            Searching for:{' '}
-            <span className="font-medium">{subQueries.join(' · ')}</span>
-          </span>
-        </div>
-      </div>
-    );
-  }
-
-  // Research multi-search
-  if (tool === 'research_multi_search') {
-    const { nodeCount, resultCount } = data as {
-      nodeCount: number;
-      resultCount: number;
-      queries: string[];
-    };
-    return (
-      <div className="flex justify-start">
-        <div className="text-fg-muted border-border bg-surface rounded-2xl border px-3 py-2 text-sm">
-          🔍 Found{' '}
-          <span className="font-medium">
-            {nodeCount} source{nodeCount !== 1 ? 's' : ''}
-          </span>{' '}
-          across {resultCount} result{resultCount !== 1 ? 's' : ''}
-        </div>
-      </div>
-    );
-  }
-
-  // Research ingestion
-  if (tool === 'research_ingestion') {
-    const { succeeded, failed } = data as { succeeded: number; failed: number };
-    return (
-      <div className="flex justify-start">
-        <div className="text-fg-muted border-border bg-surface rounded-2xl border px-3 py-2 text-sm">
-          {failed > 0
-            ? `⚠️ Ingested ${succeeded} source${
-                succeeded !== 1 ? 's' : ''
-              } (${failed} failed)`
-            : `✅ Ingested ${succeeded} source${succeeded !== 1 ? 's' : ''}`}
-        </div>
-      </div>
-    );
-  }
-
-  // Research canvas organization
-  if (tool === 'research_canvas_organization') {
-    const { nodeCount, grouped } = data as {
-      frameId?: string;
-      nodeCount: number;
-      grouped: boolean;
-    };
-    return (
-      <div className="flex justify-start">
-        <div className="text-fg-muted border-border bg-surface rounded-2xl border px-3 py-2 text-sm">
-          {grouped
-            ? `📦 Organized ${nodeCount} node${
-                nodeCount !== 1 ? 's' : ''
-              } into a frame`
-            : `✅ Research complete (${nodeCount} node${
-                nodeCount !== 1 ? 's' : ''
-              })`}
-        </div>
-      </div>
-    );
-  }
-
-  // Unknown research tool
-  return (
-    <div className="flex justify-start">
-      <div className="text-fg-subtle border-border bg-surface rounded-2xl border px-3 py-2 text-sm">
-        {tool}: {JSON.stringify(data)}
-      </div>
-    </div>
-  );
 }
 
 /**
