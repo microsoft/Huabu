@@ -9,6 +9,7 @@ import { PreviewCard } from './PreviewCard.tsx';
 import { useNodeScale } from '../../hooks/useNodeScale.ts';
 import useCanvasStore from '../../store/canvasStore.ts';
 import { Button } from '../Common/Button.tsx';
+import { LoadingState } from '../Common/LoadingState.tsx';
 
 import type { CanvasWebNodeData } from './types.ts';
 
@@ -143,9 +144,7 @@ export const WebNode = memo(
                 {src ? (
                   <div className="flex h-full w-full flex-col gap-2">
                     {previewLoading ? (
-                      <div className="text-fg-subtle text-base">
-                        Loading preview...
-                      </div>
+                      <LoadingState message="Loading preview..." />
                     ) : null}
 
                     {previewError && ingestion?.status !== 'pending' ? (

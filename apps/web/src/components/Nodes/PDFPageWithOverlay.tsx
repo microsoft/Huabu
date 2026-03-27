@@ -1,9 +1,10 @@
 import clsx from 'clsx';
-import { Loader2 } from 'lucide-react';
 import { useCallback, useRef, useState } from 'react';
 import { Page, pdfjs } from 'react-pdf';
 
 import 'react-pdf/dist/Page/TextLayer.css';
+
+import { LoadingState } from '../Common/LoadingState';
 
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
@@ -275,11 +276,7 @@ export const PDFPageWithOverlay = ({
       />
 
       {/* Spinner overlay until canvas is actually painted */}
-      {!rendered && (
-        <div className="bg-surface absolute inset-0 flex items-center justify-center">
-          <Loader2 size={18} className="text-fg-subtle animate-spin" />
-        </div>
-      )}
+      {!rendered && <LoadingState overlay />}
 
       {/* Selection box feedback (shown while dragging) */}
       {selectionStyle && (

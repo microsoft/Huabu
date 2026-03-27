@@ -6,7 +6,6 @@ import {
   Command,
   LayoutList,
   Library,
-  Loader2,
   PackagePlus,
   ScanText,
   Search,
@@ -23,6 +22,7 @@ import { NodeRef } from '../Common/NodeRef';
 import { SourceCard, type Source } from './Card/SourceCard';
 import { useCanvasChangePreview } from '../../hooks/useCanvasChanges';
 import { Button } from '../Common/Button';
+import { Spinner } from '../Common/Spinner';
 
 import type { CanvasChange } from '../../hooks/useCanvasChanges';
 import type { CanvasCommand, CanvasNodeType } from '@sediment/shared';
@@ -99,7 +99,7 @@ export function ToolMessageGroup({ entries }: ToolMessageGroupProps) {
               : `Tool error (${e.toolResponse.tool}): ${e.toolResponse.error}`;
             return (
               <div key={e.messageId} className="flex justify-start">
-                <div className="bg-danger-bg text-danger border-border rounded-md border px-4 py-3 text-sm whitespace-pre-wrap">
+                <div className="bg-danger-bg text-danger border-edge-default rounded-md border px-4 py-3 text-sm whitespace-pre-wrap">
                   {text}
                 </div>
               </div>
@@ -244,7 +244,7 @@ function CanvasCommandCard({
     return (
       <div className="flex justify-start">
         <div className="w-full px-2">
-          <div className="border-border bg-background/40 flex flex-col gap-2 rounded-md border p-2.5">
+          <div className="border-edge-default bg-surface/40 flex flex-col gap-2 rounded-md border p-2.5">
             {/* Header */}
             <div className="flex items-center justify-between">
               <Button
@@ -398,7 +398,7 @@ function CanvasCommandCard({
         : `Canvas: ${count} commands`;
 
   const statusIcon = isExecuting ? (
-    <Loader2 size={12} className="text-info animate-spin" />
+    <Spinner size="xs" className="text-info" />
   ) : (
     <Check size={12} className="text-fg-muted" />
   );
@@ -436,7 +436,7 @@ function CanvasCommandCard({
           />
         </Button>
         {isCommandListExpanded && (
-          <div className="border-border/40 ml-4 flex flex-col gap-0.5 border-l py-1 pl-3">
+          <div className="border-edge-default/40 ml-4 flex flex-col gap-0.5 border-l py-1 pl-3">
             {commands.map((cmd, idx) => (
               <div
                 key={idx}
@@ -530,7 +530,7 @@ function MergedAgentToolRow({
   }, [tool, entries, count]);
 
   const statusIcon = isExecuting ? (
-    <Loader2 size={12} className="text-info animate-spin" />
+    <Spinner size="xs" className="text-info" />
   ) : isError ? (
     <XIcon size={12} className="text-danger" />
   ) : (
@@ -730,7 +730,7 @@ function WebSearchToolDisplay({
   if (sources.length === 0) {
     return (
       <div className="flex justify-start">
-        <div className="text-fg-muted border-border bg-surface rounded-2xl border px-4 py-3 text-sm whitespace-pre-wrap">
+        <div className="text-fg-muted border-edge-default bg-surface rounded-2xl border px-4 py-3 text-sm whitespace-pre-wrap">
           Used 0 references
         </div>
       </div>

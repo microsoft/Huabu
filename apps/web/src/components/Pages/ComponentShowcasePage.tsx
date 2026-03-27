@@ -12,10 +12,13 @@ import { useState } from 'react';
 import { Button } from '../Common/Button';
 import { DragToCanvasHandleButton } from '../Common/DragToCanvasHandleButton';
 import { DropdownMenu, DropdownMenuItem } from '../Common/DropdownMenu';
+import { EmptyState } from '../Common/EmptyState';
 import { Input } from '../Common/Input';
+import { LoadingState } from '../Common/LoadingState';
 import { Modal } from '../Common/Modal';
 import { Popover } from '../Common/Popover';
 import { Select } from '../Common/Select';
+import { Spinner } from '../Common/Spinner';
 import { TabGroup } from '../Common/TabGroup';
 import { toast } from '../Common/Toast';
 import { Tooltip } from '../Common/Tooltip';
@@ -52,8 +55,8 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className="border-border bg-surface overflow-hidden rounded-lg border">
-      <div className="border-border border-b px-6 py-4">
+    <section className="border-edge-default bg-surface overflow-hidden rounded-lg border">
+      <div className="border-edge-default border-b px-6 py-4">
         <h2 className="text-fg-default text-sm font-semibold">{title}</h2>
         <p className="text-fg-muted mt-1 text-sm">{description}</p>
       </div>
@@ -70,7 +73,7 @@ function SubSection({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-lg bg-white p-4">
+    <div className="bg-surface rounded-lg p-4">
       <p className="text-fg-muted mb-3 text-xs font-medium">{label}</p>
       <div className="flex flex-wrap items-center gap-3">{children}</div>
     </div>
@@ -91,7 +94,7 @@ function DropdownMenuDemo() {
       >
         <DropdownMenuItem icon={<Undo2 size={14} />}>Undo</DropdownMenuItem>
         <DropdownMenuItem icon={<Redo2 size={14} />}>Redo</DropdownMenuItem>
-        <div className="border-border my-1 border-t" />
+        <div className="border-edge-default my-1 border-t" />
         <DropdownMenuItem icon={<Download size={14} />} shortcut="Ctrl+E">
           Export
         </DropdownMenuItem>
@@ -355,27 +358,27 @@ export default function ComponentShowcasePage() {
               <SubSection label="Default">
                 <Input
                   placeholder="Type something..."
-                  className="border-border bg-surface text-fg-default w-full rounded-md border px-3 py-1.5 text-sm outline-none"
+                  className="border-edge-default bg-surface text-fg-default w-full rounded-md border px-3 py-1.5 text-sm outline-none"
                 />
               </SubSection>
               <SubSection label="With title (hover for tooltip)">
                 <Input
                   placeholder="Hover me"
                   title="This tooltip comes from the title prop"
-                  className="border-border bg-surface text-fg-default w-full rounded-md border px-3 py-1.5 text-sm outline-none"
+                  className="border-edge-default bg-surface text-fg-default w-full rounded-md border px-3 py-1.5 text-sm outline-none"
                 />
               </SubSection>
               <SubSection label="Disabled">
                 <Input
                   placeholder="Disabled input"
                   disabled
-                  className="border-border bg-surface text-fg-default w-full rounded-md border px-3 py-1.5 text-sm outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                  className="border-edge-default bg-surface text-fg-default w-full rounded-md border px-3 py-1.5 text-sm outline-none disabled:cursor-not-allowed disabled:opacity-50"
                 />
               </SubSection>
               <SubSection label="With value">
                 <Input
                   defaultValue="Pre-filled value"
-                  className="border-border bg-surface text-fg-default w-full rounded-md border px-3 py-1.5 text-sm outline-none"
+                  className="border-edge-default bg-surface text-fg-default w-full rounded-md border px-3 py-1.5 text-sm outline-none"
                 />
               </SubSection>
             </div>
@@ -404,14 +407,14 @@ export default function ComponentShowcasePage() {
             description="Styled menu item using Button ghost + role=menuitem. Supports icon, label, shortcut hint, and disabled state."
           >
             <SubSection label="Simulated menu panel">
-              <div className="border-border bg-surface w-56 overflow-hidden rounded-md border py-1 shadow-lg">
+              <div className="border-edge-default bg-surface w-56 overflow-hidden rounded-md border py-1 shadow-lg">
                 <DropdownMenuItem icon={<Undo2 size={14} />}>
                   Undo
                 </DropdownMenuItem>
                 <DropdownMenuItem icon={<Redo2 size={14} />}>
                   Redo
                 </DropdownMenuItem>
-                <div className="border-border my-1 border-t" />
+                <div className="border-edge-default my-1 border-t" />
                 <DropdownMenuItem
                   icon={<Download size={14} />}
                   shortcut="Ctrl+E"
@@ -523,6 +526,116 @@ export default function ComponentShowcasePage() {
                 Error toast
               </Button>
             </SubSection>
+          </Section>
+
+          {/* ────────────────────── Spinner ─────────────────────── */}
+          <Section
+            title="Spinner"
+            description="Animated loading indicator using Lucide Loader2. Three sizes with color via className."
+          >
+            <div className="space-y-4">
+              <SubSection label="Sizes">
+                <div className="flex items-center gap-6">
+                  <div className="flex flex-col items-center gap-2">
+                    <Spinner size="xs" />
+                    <span className="text-fg-muted text-xs">xs (12px)</span>
+                  </div>
+                  <div className="flex flex-col items-center gap-2">
+                    <Spinner size="sm" />
+                    <span className="text-fg-muted text-xs">sm (16px)</span>
+                  </div>
+                  <div className="flex flex-col items-center gap-2">
+                    <Spinner size="md" />
+                    <span className="text-fg-muted text-xs">md (18px)</span>
+                  </div>
+                </div>
+              </SubSection>
+              <SubSection label="Colors via className">
+                <div className="flex items-center gap-6">
+                  <div className="flex flex-col items-center gap-2">
+                    <Spinner className="text-fg-subtle" />
+                    <span className="text-fg-muted text-xs">
+                      text-fg-subtle
+                    </span>
+                  </div>
+                  <div className="flex flex-col items-center gap-2">
+                    <Spinner className="text-info" />
+                    <span className="text-fg-muted text-xs">text-info</span>
+                  </div>
+                  <div className="bg-inverse flex flex-col items-center gap-2 rounded px-3 py-2">
+                    <Spinner className="text-fg-inverse" />
+                    <span className="text-fg-inverse text-xs">
+                      text-fg-inverse
+                    </span>
+                  </div>
+                </div>
+              </SubSection>
+              <SubSection label="Inline in buttons">
+                <Button variant="solid" disabled>
+                  <Spinner size="sm" className="text-fg-inverse" />
+                  Saving…
+                </Button>
+                <Button variant="outline" disabled>
+                  <Spinner size="sm" className="text-fg-subtle" />
+                  Loading…
+                </Button>
+              </SubSection>
+            </div>
+          </Section>
+
+          {/* ────────────────────── LoadingState ────────────────── */}
+          <Section
+            title="LoadingState"
+            description="Centered spinner + optional message. Supports overlay and fullScreen modes."
+          >
+            <div className="space-y-4">
+              <SubSection label="With message">
+                <div className="bg-bg-default relative h-32 w-full rounded-lg">
+                  <LoadingState message="Loading canvases…" />
+                </div>
+              </SubSection>
+              <SubSection label="Spinner only (no message)">
+                <div className="bg-bg-default relative h-32 w-full rounded-lg">
+                  <LoadingState />
+                </div>
+              </SubSection>
+              <SubSection label="Overlay (absolute-positioned)">
+                <div className="relative h-32 w-full overflow-hidden rounded-lg">
+                  <div className="text-fg-muted flex h-full items-center justify-center text-sm">
+                    Content behind overlay
+                  </div>
+                  <LoadingState overlay />
+                </div>
+              </SubSection>
+            </div>
+          </Section>
+
+          {/* ────────────────────── EmptyState ──────────────────── */}
+          <Section
+            title="EmptyState"
+            description="Centered empty-list message with optional action slot."
+          >
+            <div className="space-y-4">
+              <SubSection label="Message only">
+                <div className="w-full">
+                  <EmptyState message="No items found." className="py-10" />
+                </div>
+              </SubSection>
+              <SubSection label="With action">
+                <div className="w-full">
+                  <EmptyState
+                    message="No canvases yet."
+                    className="border-edge-default rounded-xl border-2 border-dashed py-10"
+                    action={
+                      <Button variant="outline" size="sm">
+                        <Plus />
+                        Create your first canvas
+                      </Button>
+                    }
+                  />
+                </div>
+              </SubSection>
+            </div>
           </Section>
         </div>
       </main>

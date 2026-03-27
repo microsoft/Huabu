@@ -227,7 +227,7 @@ export const Popover: FC<PopoverProps> = ({
     <div
       ref={containerRef}
       className={cn(
-        'border-border bg-surface fixed rounded-md border shadow-lg',
+        'border-edge-default bg-surface fixed rounded-md border shadow-lg',
         className,
       )}
       style={{

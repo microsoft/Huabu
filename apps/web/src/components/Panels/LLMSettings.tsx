@@ -96,7 +96,7 @@ export const LLMSettings: React.FC = () => {
   const isOAuth = selectedProvider?.authType === 'oauth';
 
   return (
-    <div className="border-border mb-3 border-t pt-3">
+    <div className="border-edge-default mb-3 border-t pt-3">
       <label className="text-fg-muted mb-1.5 block text-xs font-medium">
         <Bot size={12} className="mr-1 inline" />
         LLM Provider
@@ -141,7 +141,7 @@ export const LLMSettings: React.FC = () => {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') void handleManualModelSave();
                 }}
-                className="border-border bg-surface text-fg-muted focus:ring-info-light flex-1 rounded border px-2 py-1.5 text-xs focus:ring-1 focus:outline-none"
+                className="border-edge-default bg-surface text-fg-muted focus:ring-info-light flex-1 rounded border px-2 py-1.5 text-xs focus:ring-1 focus:outline-none"
               />
               <Button
                 variant="outline"
@@ -279,7 +279,7 @@ export const LLMSettings: React.FC = () => {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') void handleSaveApiKey();
                 }}
-                className="border-border bg-surface text-fg-muted focus:ring-info-light flex-1 rounded border px-2 py-1.5 text-xs focus:ring-1 focus:outline-none"
+                className="border-edge-default bg-surface text-fg-muted focus:ring-info-light flex-1 rounded border px-2 py-1.5 text-xs focus:ring-1 focus:outline-none"
                 autoFocus
               />
               <Button

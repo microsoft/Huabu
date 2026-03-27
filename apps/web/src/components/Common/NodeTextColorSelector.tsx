@@ -94,7 +94,7 @@ export const NodeTextColorSelector = ({
           />
 
           <div
-            className="border-border shadow-bottom animate-in fade-in zoom-in absolute bottom-full left-1/2 z-50 mb-2 flex -translate-x-1/2 gap-2 rounded-full border bg-white px-2 py-1.5 duration-200"
+            className="border-edge-default shadow-bottom animate-in fade-in zoom-in bg-surface absolute bottom-full left-1/2 z-50 mb-2 flex -translate-x-1/2 gap-2 rounded-full border px-2 py-1.5 duration-200"
             onClick={(e) => e.stopPropagation()}
           >
             {PRESET_TEXT_COLORS.map((color) => (
@@ -104,7 +104,7 @@ export const NodeTextColorSelector = ({
                 className={clsx(
                   'h-4 w-4 rounded-full border transition-all hover:scale-125',
                   color.preview,
-                  'border-border',
+                  'border-edge-default',
                   currentTextColor === color.value
                     ? `ring-2 ${color.ring} ring-offset-1`
                     : '',

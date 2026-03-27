@@ -11,7 +11,10 @@ import {
 } from '../../api/canvas';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import { Button } from '../Common/Button';
+import { EmptyState } from '../Common/EmptyState';
+import { LoadingState } from '../Common/LoadingState';
 import { Modal } from '../Common/Modal';
+import { Spinner } from '../Common/Spinner';
 import { toast } from '../Common/Toast';
 import { Header } from '../Panels/Header';
 
@@ -192,7 +195,7 @@ export default function CanvasListPage() {
               disabled={isDeleting}
             >
               {isDeleting ? (
-                <span className="border-fg-inverse inline-block h-4 w-4 animate-spin rounded-full border-2 border-t-transparent" />
+                <Spinner size="sm" className="text-fg-inverse" />
               ) : (
                 'Delete'
               )}
@@ -240,7 +243,7 @@ export default function CanvasListPage() {
               disabled={isImporting}
             >
               {isImporting ? (
-                <span className="border-fg-subtle inline-block h-4 w-4 animate-spin rounded-full border-2 border-t-transparent" />
+                <Spinner size="sm" className="text-fg-subtle" />
               ) : (
                 <Upload />
               )}
@@ -252,7 +255,7 @@ export default function CanvasListPage() {
               disabled={isCreating}
             >
               {isCreating ? (
-                <span className="border-fg-inverse inline-block h-4 w-4 animate-spin rounded-full border-2 border-t-transparent" />
+                <Spinner size="sm" className="text-fg-inverse" />
               ) : (
                 <Plus />
               )}
@@ -262,28 +265,29 @@ export default function CanvasListPage() {
         </div>
 
         {isLoading ? (
-          <div className="flex items-center justify-center py-20">
-            <div className="text-fg-subtle text-sm">Loading canvases…</div>
-          </div>
+          <LoadingState message="Loading canvases…" className="py-20" />
         ) : canvases.length === 0 ? (
-          <div className="border-border flex flex-col items-center justify-center rounded-xl border-2 border-dashed py-20">
-            <p className="text-fg-subtle text-sm">No canvases yet.</p>
-            <Button
-              variant="ghost"
-              tone="neutral"
-              onClick={handleCreate}
-              disabled={isCreating}
-              className="text-fg-default hover:text-fg-muted mt-4 text-sm font-medium underline"
-            >
-              Create your first canvas
-            </Button>
-          </div>
+          <EmptyState
+            message="No canvases yet."
+            className="border-edge-default rounded-xl border-2 border-dashed"
+            action={
+              <Button
+                variant="ghost"
+                tone="neutral"
+                onClick={handleCreate}
+                disabled={isCreating}
+                className="text-fg-default hover:text-fg-muted text-sm font-medium underline"
+              >
+                Create your first canvas
+              </Button>
+            }
+          />
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {canvases.map((canvas) => (
               <div
                 key={canvas.canvasId}
-                className="group border-border bg-surface hover:border-border relative flex flex-col rounded-xl border p-5 text-left transition-all hover:shadow-md"
+                className="group border-edge-default bg-surface hover:border-edge-default relative flex flex-col rounded-xl border p-5 text-left transition-all hover:shadow-md"
               >
                 <button
                   onClick={() => handleOpen(canvas.canvasId)}
@@ -317,7 +321,7 @@ export default function CanvasListPage() {
                   disabled={exportingId === canvas.canvasId}
                 >
                   {exportingId === canvas.canvasId ? (
-                    <span className="border-fg-subtle h-4 w-4 animate-spin rounded-full border-2 border-t-transparent" />
+                    <Spinner size="sm" className="text-fg-subtle" />
                   ) : (
                     <Download className="text-fg-subtle" />
                   )}

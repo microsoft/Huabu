@@ -1,3 +1,4 @@
+import { Button } from './Button';
 import { cn } from './cn';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -38,18 +39,19 @@ export function TabGroup<T extends string = string>({
   return (
     <div className={cn('flex items-center gap-1', className)}>
       {options.map((option) => (
-        <button
+        <Button
           key={option.value}
-          type="button"
+          variant="ghost"
+          size="sm"
           className={
             option.value === value
-              ? 'bg-bg-default text-fg-default rounded px-2 py-1 text-sm'
-              : 'text-fg-muted hover:text-fg-default rounded px-2 py-1 text-sm'
+              ? 'bg-bg-default text-fg-default'
+              : 'text-fg-muted hover:text-fg-default'
           }
           onClick={() => onChange(option.value)}
         >
           {option.label}
-        </button>
+        </Button>
       ))}
     </div>
   );

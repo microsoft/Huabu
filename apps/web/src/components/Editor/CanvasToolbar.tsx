@@ -364,7 +364,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
       >
         <div className="mt-4 flex flex-col gap-0">
           <textarea
-            className="border-border placeholder:text-border focus:border-info focus:ring-info min-h-25 w-full resize-none rounded-md border bg-transparent px-3 py-2 text-sm focus:outline-none"
+            className="border-edge-default placeholder:text-border focus:border-info focus:ring-info min-h-25 w-full resize-none rounded-md border bg-transparent px-3 py-2 text-sm focus:outline-none"
             placeholder={`https://example.com/image.png\nhttps://example.com/doc.pdf\nhttps://google.com`}
             value={linkText}
             onChange={(e) => setLinkText(e.target.value)}

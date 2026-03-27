@@ -19,6 +19,7 @@ import React, {
 import { createPortal } from 'react-dom';
 
 import { cn } from '@/components/Common/cn.ts';
+import { Spinner } from '@/components/Common/Spinner.tsx';
 import { Tooltip } from '@/components/Common/Tooltip.tsx';
 import { useCornerZoomResize } from '@/hooks/useCornerZoomResize.ts';
 import useCanvasStore from '@/store/canvasStore.ts';
@@ -293,7 +294,7 @@ export const NodeWrapper = memo(
             isVisible={selected && selectedCount === 1}
             position={Position.Top}
             offset={12}
-            className="border-border shadow-bottom bg-surface flex h-8 items-center gap-3 rounded-md border px-2 py-1"
+            className="border-edge-default shadow-bottom bg-surface flex h-8 items-center gap-3 rounded-md border px-2 py-1"
           >
             {toolbar}
           </NodeToolbar>
@@ -321,7 +322,7 @@ export const NodeWrapper = memo(
         >
           {showIngestionOverlay && (
             <div className="pointer-events-none absolute right-1.5 bottom-1.5 z-10">
-              <div className="border-fg-subtle/30 border-t-muted-foreground h-3 w-3 animate-spin rounded-full border-2" />
+              <Spinner size="xs" className="text-fg-subtle" />
             </div>
           )}
 

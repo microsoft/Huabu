@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { getWebReader } from '@/api/web';
 
+import { LoadingState } from '../Common/LoadingState';
+
 import type { PreviewComponentProps } from './NotePreview';
 
 export const WebPreview = ({ data }: PreviewComponentProps) => {
@@ -61,7 +63,7 @@ export const WebPreview = ({ data }: PreviewComponentProps) => {
     <style>
       body { margin: 0; padding: 16px; font-family: system-ui, -apple-system, sans-serif; line-height: 1.5; }
       img { max-width: 100%; height: auto; }
-      pre { overflow: auto; background: #f5f5f5 /* matches --background light value */; padding: 10px; border-radius: 4px; }
+      pre { overflow: auto; background: var(--bg-default); padding: 10px; border-radius: 4px; }
       code { font-family: monospace; }
     </style>
   </head>
@@ -79,9 +81,7 @@ export const WebPreview = ({ data }: PreviewComponentProps) => {
             Invalid URL
           </div>
         ) : loading ? (
-          <div className="text-fg-subtle flex h-full w-full items-center justify-center text-sm">
-            Loading...
-          </div>
+          <LoadingState message="Loading..." />
         ) : error ? (
           <div className="text-fg-subtle flex h-full w-full flex-col items-center justify-center gap-2 text-sm">
             <div>Failed to load reader view</div>

@@ -176,10 +176,10 @@ export const ExpandedNodePanel = () => {
   return (
     <div
       ref={panelRef}
-      className="border-border bg-surface flex h-full w-full flex-col overflow-hidden border-l"
+      className="border-edge-default bg-surface flex h-full w-full flex-col overflow-hidden border-l"
     >
       {/* Header bar */}
-      <div className="border-border bg-surface flex h-12 shrink-0 items-center justify-between gap-3 border-b px-3">
+      <div className="border-edge-default bg-surface flex h-12 shrink-0 items-center justify-between gap-3 border-b px-3">
         {/* Left: back button (replace mode) + icon + title */}
         <div className="flex min-w-0 items-center gap-2">
           {isReplace && (

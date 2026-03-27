@@ -236,7 +236,7 @@ export const ChatInput = ({
     >
       <form onSubmit={handleSubmit} className="w-full">
         <div
-          className={`rounded-2xl border p-3 transition-colors ${isDragOver ? 'border-border bg-info-bg' : 'border-border bg-surface'}`}
+          className={`rounded-2xl border p-3 transition-colors ${isDragOver ? 'border-edge-default bg-info-bg' : 'border-edge-default bg-surface'}`}
         >
           {/* ── Pending attachment thumbnails ── */}
           {(pendingAttachments.length > 0 || selectionAttachment) && (
@@ -278,7 +278,7 @@ export const ChatInput = ({
                   const tile = (
                     <div
                       key="selection-att"
-                      className="group border-border relative flex cursor-pointer items-center justify-center rounded-md border border-dashed"
+                      className="group border-edge-default relative flex cursor-pointer items-center justify-center rounded-md border border-dashed"
                       onClick={() => {
                         // Lock the selection: promote to a regular pending attachment
                         const locked = { ...att };
@@ -370,7 +370,7 @@ export const ChatInput = ({
                 const tile = (
                   <div
                     key={att.url || `att-${idx}`}
-                    className="group border-border relative flex items-center justify-center rounded-md border"
+                    className="group border-edge-default relative flex items-center justify-center rounded-md border"
                   >
                     {att.type === 'image' ? (
                       <img

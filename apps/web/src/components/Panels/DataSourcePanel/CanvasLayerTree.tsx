@@ -18,6 +18,7 @@ import React, { useMemo } from 'react';
 import useCanvasStore from '@/store/canvasStore.ts';
 
 import { TreeRowItem } from './TreeRowItem';
+import { EmptyState } from '../../Common/EmptyState';
 
 import type { DataSourceNodeLike, DataSourceTreeItem } from './types';
 import type { DragEndEvent } from '@dnd-kit/core';
@@ -375,7 +376,7 @@ export const CanvasLayerTree = ({
           </SortableContext>
 
           {visibleItems.length === 0 && (
-            <div className="text-fg-subtle px-3 py-2 text-sm">{emptyText}</div>
+            <EmptyState message={emptyText} className="px-3 py-2" />
           )}
         </div>
       </div>

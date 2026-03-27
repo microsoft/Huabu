@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 
 import { cn } from './cn';
 
-export type ToastVariant = 'info' | 'success' | 'error';
+export type ToastVariant = 'default' | 'info' | 'success' | 'error';
 
 export interface ToastItem {
   id: string;
@@ -46,8 +46,9 @@ export function dismissToast(id: string) {
 // ─── React component ──────────────────────────────────────────────────
 
 const variantClasses: Record<ToastVariant, string> = {
-  info: 'bg-inverse text-fg-inverse',
-  success: 'bg-info text-fg-inverse',
+  default: 'bg-inverse text-fg-inverse',
+  info: 'bg-info text-fg-inverse',
+  success: 'bg-success text-fg-inverse',
   error: 'bg-danger text-fg-inverse',
 };
 

@@ -92,7 +92,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       onToggle={onToggle}
       iconCollapsed={<PanelRightOpen size={16} />}
       iconExpanded={<PanelRightClose size={16} />}
-      className="border-border border-l"
+      className="border-edge-default border-l"
       tools={
         <Button
           variant="ghost"

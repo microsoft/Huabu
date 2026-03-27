@@ -214,7 +214,7 @@ export const DataSourcePanel = ({
       onToggle={onToggle}
       iconCollapsed={<PanelLeftOpen size={16} />}
       iconExpanded={<PanelLeftClose size={16} />}
-      className="border-border border-r"
+      className="border-edge-default border-r"
     >
       {tab === 'canvas' ? (
         <CanvasLayerTree

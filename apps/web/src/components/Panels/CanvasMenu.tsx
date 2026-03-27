@@ -135,7 +135,7 @@ export const CanvasMenu: React.FC = () => {
           >
             Redo
           </DropdownMenuItem>
-          <div className="border-border my-1 border-t" />
+          <div className="border-edge-default my-1 border-t" />
           <DropdownMenuItem
             icon={<Download size={14} />}
             onClick={() => void handleExport()}

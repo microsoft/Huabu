@@ -1,6 +1,6 @@
 import { type Node, type NodeProps } from '@xyflow/react';
 import { clsx } from 'clsx';
-import { Download, Fullscreen, ImageOff, Loader2 } from 'lucide-react';
+import { Download, Fullscreen, ImageOff } from 'lucide-react';
 import {
   memo,
   useCallback,
@@ -19,6 +19,7 @@ import { PreviewCard } from './PreviewCard.tsx';
 import { useNodeScale } from '../../hooks/useNodeScale.ts';
 import useCanvasStore from '../../store/canvasStore.ts';
 import { Button } from '../Common/Button.tsx';
+import { Spinner } from '../Common/Spinner.tsx';
 
 import type { CanvasPdfNodeData } from './types.ts';
 
@@ -120,7 +121,7 @@ const VirtualizedPage = memo(
                   className="bg-surface flex items-center justify-center"
                   style={{ height: fallbackPageHeight }}
                 >
-                  <Loader2 size={18} className="text-fg-subtle animate-spin" />
+                  <Spinner size="md" className="text-fg-subtle" />
                 </div>
               }
               onRenderSuccess={handleRenderSuccess}
@@ -313,7 +314,7 @@ export const PDFNode = memo(
                     onLoadSuccess={onDocumentLoadSuccess}
                     loading={
                       <div className="text-fg-subtle flex h-full min-h-40 w-full items-center justify-center gap-2 p-4 text-xs">
-                        <Loader2 size={16} className="animate-spin" />
+                        <Spinner size="sm" />
                       </div>
                     }
                     error={

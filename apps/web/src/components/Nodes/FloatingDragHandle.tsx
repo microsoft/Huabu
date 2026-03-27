@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { Loader2, MessageSquare, Plus, Star } from 'lucide-react';
+import { MessageSquare, Plus, Star } from 'lucide-react';
 import { useCallback, useRef } from 'react';
 
 import useCanvasStore from '@/store/canvasStore';
@@ -10,6 +10,7 @@ import { NODE_ICON } from '../../config/nodeIcons';
 import { Button } from '../Common/Button';
 import { DragToCanvasHandleButton } from '../Common/DragToCanvasHandleButton';
 import { Popover } from '../Common/Popover';
+import { Spinner } from '../Common/Spinner';
 
 import type { ChatAttachment } from '@sediment/shared';
 import type { FC } from 'react';
@@ -188,7 +189,7 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
       {/* ── Image button (or status) ── */}
       {capturing && (
         <div className="text-fg-subtle flex items-center gap-1 text-xs">
-          <Loader2 size={11} className="animate-spin" />
+          <Spinner size="xs" />
         </div>
       )}
       {isImageReady &&

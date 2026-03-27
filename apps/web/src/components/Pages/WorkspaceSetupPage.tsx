@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { pickFolder } from '../../api/workspace';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import { Button } from '../Common/Button';
+import { Spinner } from '../Common/Spinner';
 
 /**
  * First-launch page shown when no workspace folder has been configured.
@@ -74,7 +75,7 @@ export default function WorkspaceSetupPage() {
           className="w-full rounded-xl border-2 border-dashed px-6 py-8"
         >
           {isLoading ? (
-            <span className="border-border inline-block h-5 w-5 animate-spin rounded-full border-2 border-t-transparent" />
+            <Spinner size="sm" className="text-fg-subtle" />
           ) : (
             <FolderOpen size={24} className="text-fg-subtle" />
           )}
