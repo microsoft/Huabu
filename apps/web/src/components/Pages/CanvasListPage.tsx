@@ -177,7 +177,7 @@ export default function CanvasListPage() {
             <Button
               variant="outline"
               tone="neutral"
-              size="md"
+              size="sm"
               onClick={closeDeleteModal}
               disabled={isDeleting}
             >
@@ -187,7 +187,7 @@ export default function CanvasListPage() {
               ref={confirmDeleteButtonRef}
               variant="solid"
               tone="danger"
-              size="md"
+              size="sm"
               onClick={() => void confirmDelete()}
               disabled={isDeleting}
             >

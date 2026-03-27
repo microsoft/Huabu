@@ -247,9 +247,11 @@ function CanvasCommandCard({
           <div className="border-border bg-background/40 flex flex-col gap-2 rounded-md border p-2.5">
             {/* Header */}
             <div className="flex items-center justify-between">
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => setIsCollapsed((prev) => !prev)}
-                className="text-foreground/70 flex items-center gap-1 text-xs font-medium"
+                className="text-fg-muted gap-1 text-xs font-medium"
               >
                 {isCollapsed ? (
                   <ChevronRight size={14} />
@@ -257,7 +259,7 @@ function CanvasCommandCard({
                   <ChevronDown size={14} />
                 )}
                 Canvas changes ({canvasChanges.length})
-              </button>
+              </Button>
               <div className="flex items-center gap-1">
                 <Button onClick={clearAllChanges} variant="outline" size="sm">
                   Keep all
@@ -331,7 +333,7 @@ function CanvasCommandCard({
                   return (
                     <div
                       key={change.id}
-                      className="text-muted-foreground flex items-center gap-2 pl-0.5 text-xs"
+                      className="text-fg-muted flex items-center gap-2 pl-0.5 text-xs"
                     >
                       <Icon size={12} className="flex-shrink-0" />
                       <span className="min-w-0 flex-1 truncate">
@@ -405,12 +407,9 @@ function CanvasCommandCard({
     return (
       <div className="flex justify-start">
         <div className="w-full">
-          <div className="text-muted-foreground hover:bg-muted/50 flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors">
+          <div className="text-fg-muted hover:bg-hover flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors">
             {statusIcon}
-            <Command
-              size={12}
-              className="text-muted-foreground/60 flex-shrink-0"
-            />
+            <Command size={12} className="text-fg-muted/60 flex-shrink-0" />
             <span className="flex-1 truncate">{title}</span>
           </div>
         </div>
@@ -421,28 +420,27 @@ function CanvasCommandCard({
   return (
     <div className="flex justify-start">
       <div className="w-full">
-        <button
+        <Button
           type="button"
-          className="text-muted-foreground hover:bg-muted/50 flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors"
+          variant="ghost"
+          size="sm"
+          className="text-fg-muted w-full justify-start gap-1.5 text-xs"
           onClick={() => setIsCommandListExpanded(!isCommandListExpanded)}
         >
           {statusIcon}
-          <Command
-            size={12}
-            className="text-muted-foreground/60 flex-shrink-0"
-          />
+          <Command size={12} className="text-fg-muted/60 flex-shrink-0" />
           <span className="flex-1 truncate">{title}</span>
           <ChevronRight
             size={10}
-            className={`text-muted-foreground/50 flex-shrink-0 transition-transform ${isCommandListExpanded ? 'rotate-90' : ''}`}
+            className={`text-fg-muted/50 flex-shrink-0 transition-transform ${isCommandListExpanded ? 'rotate-90' : ''}`}
           />
-        </button>
+        </Button>
         {isCommandListExpanded && (
           <div className="border-border/40 ml-4 flex flex-col gap-0.5 border-l py-1 pl-3">
             {commands.map((cmd, idx) => (
               <div
                 key={idx}
-                className="text-muted-foreground flex items-center gap-1.5 text-xs"
+                className="text-fg-muted flex items-center gap-1.5 text-xs"
               >
                 <Check size={10} className="text-fg-muted flex-shrink-0" />
                 <span className="truncate">
@@ -550,9 +548,9 @@ function MergedAgentToolRow({
     return (
       <div className="flex justify-start">
         <div className="w-full">
-          <div className="text-muted-foreground hover:bg-muted/50 flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors">
+          <div className="text-fg-muted hover:bg-hover flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors">
             {statusIcon}
-            {icon && <span className="text-muted-foreground/60">{icon}</span>}
+            {icon && <span className="text-fg-muted/60">{icon}</span>}
             <span className="flex-1 truncate">
               Read node{' '}
               <NodeRef
@@ -571,9 +569,9 @@ function MergedAgentToolRow({
     return (
       <div className="flex justify-start">
         <div className="w-full">
-          <div className="text-muted-foreground hover:bg-muted/50 flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors">
+          <div className="text-fg-muted hover:bg-hover flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors">
             {statusIcon}
-            {icon && <span className="text-muted-foreground/60">{icon}</span>}
+            {icon && <span className="text-fg-muted/60">{icon}</span>}
             <span className="flex-1 truncate">
               Read source{' '}
               {nodeRefs[0]?.label ? truncate(nodeRefs[0].label, 20) : ''}
@@ -589,9 +587,9 @@ function MergedAgentToolRow({
     return (
       <div className="flex justify-start">
         <div className="w-full">
-          <div className="text-muted-foreground hover:bg-muted/50 flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors">
+          <div className="text-fg-muted hover:bg-hover flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors">
             {statusIcon}
-            {icon && <span className="text-muted-foreground/60">{icon}</span>}
+            {icon && <span className="text-fg-muted/60">{icon}</span>}
             <span className="flex-1 truncate">{title}</span>
           </div>
         </div>
@@ -603,9 +601,11 @@ function MergedAgentToolRow({
   return (
     <div className="flex justify-start">
       <div className="w-full">
-        <button
+        <Button
           type="button"
-          className="text-fg-muted hover:bg-bg-default flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs transition-colors"
+          variant="ghost"
+          size="sm"
+          className="text-fg-muted w-full justify-start gap-1.5 text-xs"
           onClick={() => setIsExpanded(!isExpanded)}
         >
           {statusIcon}
@@ -615,7 +615,7 @@ function MergedAgentToolRow({
             size={10}
             className={`text-fg-muted/50 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
           />
-        </button>
+        </Button>
         {isExpanded && (
           <div className="border-edge-default/40 ml-4 flex flex-col gap-1 border-l py-1 pl-3">
             {entries.map((e, i) => {

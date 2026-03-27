@@ -1,5 +1,8 @@
 import { ChevronDown, Sprout } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useState } from 'react';
+
+import { Button } from '../Common/Button';
+import { DropdownMenu, DropdownMenuItem } from '../Common/DropdownMenu';
 
 import type { IntentCandidate } from '@sediment/shared';
 
@@ -15,21 +18,6 @@ export const IntentSelectMessage = ({
   onReselect,
 }: IntentSelectMessageProps) => {
   const [isOpen, setIsOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (
-        containerRef.current &&
-        !containerRef.current.contains(e.target as Node)
-      ) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isOpen]);
 
   const handleSelect = useCallback(
     (label: string) => {
@@ -43,41 +31,34 @@ export const IntentSelectMessage = ({
 
   return (
     <div className="flex justify-end">
-      <div ref={containerRef} className="relative">
-        {/* TODO: replace Button */}
-        <button
-          type="button"
-          onClick={() => setIsOpen(!isOpen)}
-          className="bg-info-bg text-theme-700 border-theme-200 inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors"
-        >
-          <Sprout size={14} />
-          <span className="max-w-[200px] truncate">{selectedIntent}</span>
-          <ChevronDown
-            size={12}
-            className={`transition-transform ${isOpen ? 'rotate-180' : ''}`}
-          />
-        </button>
-
-        {isOpen && (
-          <div className="border-border bg-surface absolute right-0 bottom-full z-50 mb-2 w-64 overflow-hidden rounded-lg border shadow-lg">
-            {candidates.map((c, idx) => (
-              <button
-                key={idx}
-                type="button"
-                className={`hover:bg-hover flex w-full flex-col px-3 py-2 text-left transition-colors ${
-                  c.label === selectedIntent ? 'bg-info-bg' : ''
-                }`}
-                onClick={() => handleSelect(c.label)}
-              >
-                <span className="text-fg-default text-sm">{c.label}</span>
-                {c.description && (
-                  <span className="text-fg-muted text-xs">{c.description}</span>
-                )}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      <DropdownMenu
+        trigger={
+          <Button variant="outline" tone="info" shape="pill" size="sm">
+            <Sprout size={14} />
+            <span className="max-w-[200px] truncate">{selectedIntent}</span>
+            <ChevronDown
+              size={12}
+              className={`transition-transform ${isOpen ? 'rotate-180' : ''}`}
+            />
+          </Button>
+        }
+        align="bottom-right"
+      >
+        {candidates.map((c, idx) => (
+          <DropdownMenuItem
+            key={idx}
+            onClick={() => handleSelect(c.label)}
+            className={c.label === selectedIntent ? 'bg-info-bg' : ''}
+          >
+            <div className="flex flex-col">
+              <span className="text-fg-default text-sm">{c.label}</span>
+              {c.description && (
+                <span className="text-fg-muted text-xs">{c.description}</span>
+              )}
+            </div>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenu>
     </div>
   );
 };

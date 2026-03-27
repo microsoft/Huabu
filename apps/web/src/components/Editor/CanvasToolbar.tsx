@@ -319,13 +319,15 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
         onClose={() => setActiveModal(null)}
       >
         <div className="flex flex-col items-center justify-center gap-4 pt-2">
-          <button
+          <Button
+            variant="outline"
+            tone="info"
             onClick={() => fileInputRef.current?.click()}
-            className="bg-info-bg hover:bg-info-bg-hover text-info border-info flex w-full flex-col items-center gap-2 rounded-md border border-dashed px-4 py-8 transition-colors"
+            className="flex-col border-dashed px-4 py-8"
           >
             <UploadCloud size={24} />
             <span className="text-sm">Click to select files</span>
-          </button>
+          </Button>
 
           {/* Hidden Input for Multiple Selection */}
           <input

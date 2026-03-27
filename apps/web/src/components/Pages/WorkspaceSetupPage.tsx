@@ -3,6 +3,7 @@ import { useState } from 'react';
 
 import { pickFolder } from '../../api/workspace';
 import { useWorkspaceStore } from '../../store/workspaceStore';
+import { Button } from '../Common/Button';
 
 /**
  * First-launch page shown when no workspace folder has been configured.
@@ -65,10 +66,12 @@ export default function WorkspaceSetupPage() {
         </div>
 
         {/* Main action: folder picker */}
-        <button
+        <Button
+          variant="outline"
+          tone="neutral"
           onClick={() => void handlePickFolder()}
           disabled={isLoading}
-          className="border-border bg-surface text-fg-muted hover:border-border hover:bg-hover flex w-full items-center justify-center gap-3 rounded-xl border-2 border-dashed px-6 py-8 transition-all disabled:opacity-50"
+          className="w-full rounded-xl border-2 border-dashed px-6 py-8"
         >
           {isLoading ? (
             <span className="border-border inline-block h-5 w-5 animate-spin rounded-full border-2 border-t-transparent" />
@@ -78,7 +81,7 @@ export default function WorkspaceSetupPage() {
           <span className="text-sm font-medium">
             {isPicking ? 'Waiting for selection…' : 'Select Folder'}
           </span>
-        </button>
+        </Button>
 
         {/* Recent workspaces */}
         {recentWorkspaces.length > 0 && (
@@ -90,23 +93,29 @@ export default function WorkspaceSetupPage() {
             <ul className="space-y-1">
               {recentWorkspaces.map((path) => (
                 <li key={path} className="group flex items-center gap-1">
-                  <button
+                  <Button
+                    variant="ghost"
+                    tone="neutral"
+                    size="sm"
                     onClick={() => void handleSelectRecent(path)}
                     disabled={isLoading}
-                    className="hover:bg-hover flex min-w-0 flex-1 items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors disabled:opacity-50"
+                    className="min-w-0 flex-1 justify-start rounded-lg text-left"
                   >
                     <FolderOpen size={14} className="text-fg-subtle shrink-0" />
                     <span className="text-fg-muted truncate text-sm">
                       {path}
                     </span>
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    iconOnly
+                    size="sm"
                     onClick={() => removeRecentWorkspace(path)}
-                    className="text-fg-subtle hover:bg-hover hover:text-fg-subtle shrink-0 rounded p-1 opacity-0 transition-all group-hover:opacity-100"
+                    className="opacity-0 transition-all group-hover:opacity-100"
                     title="Remove from recent"
                   >
                     <X size={14} />
-                  </button>
+                  </Button>
                 </li>
               ))}
             </ul>

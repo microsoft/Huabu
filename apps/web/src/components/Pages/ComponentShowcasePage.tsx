@@ -11,10 +11,12 @@ import { useState } from 'react';
 
 import { Button } from '../Common/Button';
 import { DragToCanvasHandleButton } from '../Common/DragToCanvasHandleButton';
-import { DropdownMenuItem } from '../Common/DropdownMenu';
+import { DropdownMenu, DropdownMenuItem } from '../Common/DropdownMenu';
 import { Input } from '../Common/Input';
 import { Modal } from '../Common/Modal';
 import { Popover } from '../Common/Popover';
+import { Select } from '../Common/Select';
+import { TabGroup } from '../Common/TabGroup';
 import { toast } from '../Common/Toast';
 import { Tooltip } from '../Common/Tooltip';
 import { Header } from '../Panels/Header';
@@ -68,7 +70,7 @@ function SubSection({
   children: React.ReactNode;
 }) {
   return (
-    <div className="bg-bg-default rounded-lg p-4">
+    <div className="rounded-lg bg-white p-4">
       <p className="text-fg-muted mb-3 text-xs font-medium">{label}</p>
       <div className="flex flex-wrap items-center gap-3">{children}</div>
     </div>
@@ -76,6 +78,93 @@ function SubSection({
 }
 
 // ─── Stateful sections ──────────────────────────────────────────────────────
+
+function DropdownMenuDemo() {
+  return (
+    <SubSection label="Click trigger to open">
+      <DropdownMenu
+        trigger={
+          <Button variant="outline" size="sm">
+            Actions
+          </Button>
+        }
+      >
+        <DropdownMenuItem icon={<Undo2 size={14} />}>Undo</DropdownMenuItem>
+        <DropdownMenuItem icon={<Redo2 size={14} />}>Redo</DropdownMenuItem>
+        <div className="border-border my-1 border-t" />
+        <DropdownMenuItem icon={<Download size={14} />} shortcut="Ctrl+E">
+          Export
+        </DropdownMenuItem>
+        <DropdownMenuItem icon={<Trash2 size={14} />} disabled>
+          Delete (disabled)
+        </DropdownMenuItem>
+      </DropdownMenu>
+    </SubSection>
+  );
+}
+
+function SelectDemo() {
+  const [fruit, setFruit] = useState('apple');
+  const [direction, setDirection] = useState('down');
+
+  return (
+    <div className="space-y-4">
+      <SubSection label="Default (opens down)">
+        <Select
+          options={[
+            { value: 'apple', label: 'Apple' },
+            { value: 'banana', label: 'Banana' },
+            { value: 'cherry', label: 'Cherry' },
+            { value: 'dragonfruit', label: 'Dragonfruit' },
+          ]}
+          value={fruit}
+          onChange={setFruit}
+        />
+      </SubSection>
+      <SubSection label="Pill shape + info tone">
+        <Select
+          options={[
+            { value: 'down', label: 'Downward', icon: <Download size={14} /> },
+            { value: 'up', label: 'Upward', icon: <Search size={14} /> },
+          ]}
+          value={direction}
+          onChange={setDirection}
+          shape="pill"
+          tone="info"
+        />
+      </SubSection>
+      <SubSection label="Disabled">
+        <Select
+          options={[{ value: 'only', label: 'Only option' }]}
+          value="only"
+          onChange={() => {}}
+          disabled
+        />
+      </SubSection>
+    </div>
+  );
+}
+
+function TabGroupDemo() {
+  const [tab, setTab] = useState('canvas');
+
+  return (
+    <SubSection label="Click to switch tabs">
+      <TabGroup
+        options={[
+          { value: 'canvas', label: 'Canvas' },
+          { value: 'sources', label: 'Sources' },
+          { value: 'settings', label: 'Settings' },
+        ]}
+        value={tab}
+        onChange={setTab}
+      />
+      <span className="text-fg-muted text-sm">
+        Active: <strong className="text-fg-default">{tab}</strong>
+      </span>
+    </SubSection>
+  );
+}
 
 function PopoverDemo() {
   const [isOpen, setIsOpen] = useState(false);
@@ -334,6 +423,30 @@ export default function ComponentShowcasePage() {
                 </DropdownMenuItem>
               </div>
             </SubSection>
+          </Section>
+
+          {/* ────────────────── DropdownMenu ───────────────── */}
+          <Section
+            title="DropdownMenu"
+            description="Container component that composes a trigger Button with a Popover-based menu panel. Handles open/close, outside-click dismiss, Escape, and re-open guard."
+          >
+            <DropdownMenuDemo />
+          </Section>
+
+          {/* ────────────────────── Select ─────────────────────── */}
+          <Section
+            title="Select"
+            description="Custom select control with Button trigger and Popover option panel. Supports up/down direction, icons, and all Button variants."
+          >
+            <SelectDemo />
+          </Section>
+
+          {/* ────────────────────── TabGroup ────────────────────── */}
+          <Section
+            title="TabGroup"
+            description="Stateless segmented control for switching between views. Follows design system §3.4 styling."
+          >
+            <TabGroupDemo />
           </Section>
 
           {/* ────────────────────── Tooltip ───────────────────── */}

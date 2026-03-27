@@ -1,16 +1,9 @@
-import {
-  Bot,
-  Check,
-  ChevronDown,
-  ClipboardCopy,
-  Key,
-  LogIn,
-  LogOut,
-} from 'lucide-react';
+import { Bot, Check, ClipboardCopy, Key, LogIn, LogOut } from 'lucide-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useLLMStore } from '../../store/llmStore';
 import { Button } from '../Common/Button';
+import { Select } from '../Common/Select';
 
 /**
  * LLM provider/model configuration section.
@@ -56,10 +49,7 @@ export const LLMSettings: React.FC = () => {
     }, 2000);
   }, []);
 
-  const handleProviderChange = async (
-    e: React.ChangeEvent<HTMLSelectElement>,
-  ) => {
-    const providerId = e.target.value;
+  const handleProviderChange = async (providerId: string) => {
     await llmLoadModels(providerId);
     setShowApiKeyInput(false);
     setApiKeyValue('');
@@ -84,8 +74,7 @@ export const LLMSettings: React.FC = () => {
     flashLlmSuccess();
   };
 
-  const handleModelChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const modelId = e.target.value;
+  const handleModelChange = async (modelId: string) => {
     const provider = llmConfig?.provider ?? '';
     await llmUpdateConfig({ provider, model: modelId });
     flashLlmSuccess();
@@ -114,28 +103,14 @@ export const LLMSettings: React.FC = () => {
       </label>
 
       {/* Provider select */}
-      <div className="relative mb-2">
-        <select
-          id="llm-provider-select"
-          className="border-border bg-surface text-fg-muted focus:ring-info-light w-full appearance-none rounded border py-1.5 pr-8 pl-2.5 text-sm focus:ring-1 focus:outline-none"
+      <div className="mb-2">
+        <Select
+          options={llmProviders.map((p) => ({ value: p.id, label: p.name }))}
           value={llmConfig?.provider ?? ''}
-          onChange={(e) => void handleProviderChange(e)}
+          onChange={(v) => void handleProviderChange(v)}
           disabled={llmSaving}
-        >
-          {!llmConfig?.provider && (
-            <option value="" disabled>
-              Select provider…
-            </option>
-          )}
-          {llmProviders.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
-        <ChevronDown
-          size={14}
-          className="text-fg-subtle pointer-events-none absolute top-1/2 right-2 -translate-y-1/2"
+          placeholder="Select provider…"
+          className="w-full"
         />
       </div>
 
@@ -146,22 +121,16 @@ export const LLMSettings: React.FC = () => {
             Model
           </label>
           {llmModels.length > 0 ? (
-            <div className="relative mb-2">
-              <select
-                className="border-border bg-surface text-fg-muted focus:ring-info-light w-full appearance-none rounded border py-1.5 pr-8 pl-2.5 text-sm focus:ring-1 focus:outline-none"
+            <div className="mb-2">
+              <Select
+                options={llmModels.map((m) => ({
+                  value: m.id,
+                  label: m.name || m.id,
+                }))}
                 value={llmConfig?.model ?? ''}
-                onChange={(e) => void handleModelChange(e)}
+                onChange={(v) => void handleModelChange(v)}
                 disabled={llmSaving}
-              >
-                {llmModels.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name || m.id}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown
-                size={14}
-                className="text-fg-subtle pointer-events-none absolute top-1/2 right-2 -translate-y-1/2"
+                className="w-full"
               />
             </div>
           ) : (
