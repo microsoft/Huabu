@@ -30,11 +30,13 @@ type SelectProps<T extends string = string> = {
   size?: ButtonProps['size'];
   shape?: ButtonProps['shape'];
   /**
-   * Panel opening direction.
-   * `"down"` (default) opens below the trigger.
-   * `"up"` opens above the trigger.
+   * Which edge of the trigger to align the panel to.
+   * `"bottom-left"` (default) opens below, left-aligned.
+   * `"bottom-right"` opens below, right-aligned.
+   * `"top-left"` opens above, left-aligned.
+   * `"top-right"` opens above, right-aligned.
    */
-  direction?: 'up' | 'down';
+  align?: 'bottom-left' | 'bottom-right' | 'top-left' | 'top-right';
 };
 
 const selectShapeClasses: Record<NonNullable<ButtonProps['shape']>, string> = {
@@ -69,11 +71,18 @@ export function Select<T extends string = string>({
   tone = 'neutral',
   size = 'sm',
   shape = 'default',
-  direction = 'down',
+  align = 'bottom-left',
 }: SelectProps<T>) {
   const [isOpen, setIsOpen] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
   const justDismissedRef = useRef(false);
+
+  const isRight = align === 'bottom-right' || align === 'top-right';
+  const isTop = align === 'top-left' || align === 'top-right';
+
+  // Map Select align → Popover anchor (vertical direction inverts)
+  const anchor =
+    `${isTop ? 'bottom' : 'top'}-${isRight ? 'right' : 'left'}` as const;
 
   const current = options.find((o) => o.value === value);
 
@@ -102,11 +111,11 @@ export function Select<T extends string = string>({
   const computePosition = useCallback(() => {
     if (!triggerRef.current) return { x: 0, y: 0 };
     const rect = triggerRef.current.getBoundingClientRect();
-    if (direction === 'up') {
-      return { x: rect.left, y: rect.top };
-    }
-    return { x: rect.left, y: rect.bottom };
-  }, [direction]);
+    return {
+      x: isRight ? rect.right : rect.left,
+      y: isTop ? rect.top : rect.bottom,
+    };
+  }, [isRight, isTop]);
 
   return (
     <>
@@ -136,8 +145,8 @@ export function Select<T extends string = string>({
         <Popover
           position={computePosition()}
           onDismiss={handleDismiss}
-          offset={direction === 'up' ? { x: 0, y: -4 } : { x: 0, y: 4 }}
-          anchorBottom={direction === 'up'}
+          anchor={anchor}
+          offset={{ x: 0, y: isTop ? -4 : 4 }}
           className="flex flex-col overflow-hidden py-1"
         >
           {options.map((option) => (

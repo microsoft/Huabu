@@ -70,10 +70,16 @@ type DropdownMenuProps = {
   offset?: Partial<{ x: number; y: number }>;
   /**
    * Which edge of the trigger to align the panel to.
-   * `"bottom-left"` (default) opens below aligned to left edge.
-   * `"bottom-right"` opens below aligned to right edge.
+   * `"bottom-left"` (default) opens below, left-aligned.
+   * `"bottom-right"` opens below, right-aligned.
+   * `"top-left"` opens above, left-aligned.
+   * `"top-right"` opens above, right-aligned.
    */
-  align?: 'bottom-left' | 'bottom-right';
+  align?: 'bottom-left' | 'bottom-right' | 'top-left' | 'top-right';
+  /** Controlled open state. When provided, the component becomes controlled. */
+  open?: boolean;
+  /** Called when the open state changes (controlled mode). */
+  onOpenChange?: (open: boolean) => void;
 };
 
 /**
@@ -95,15 +101,30 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
   className,
   offset,
   align = 'bottom-left',
+  open: controlledOpen,
+  onOpenChange,
 }) => {
-  const [isOpen, setIsOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const isControlled = controlledOpen !== undefined;
+  const isOpen = isControlled ? controlledOpen : uncontrolledOpen;
+  const setIsOpen = useCallback(
+    (value: boolean | ((prev: boolean) => boolean)) => {
+      const next = typeof value === 'function' ? value(isOpen) : value;
+      if (isControlled) {
+        onOpenChange?.(next);
+      } else {
+        setUncontrolledOpen(next);
+      }
+    },
+    [isControlled, isOpen, onOpenChange],
+  );
   const triggerRef = useRef<HTMLDivElement>(null);
   const justDismissedRef = useRef(false);
 
   const handleToggle = useCallback(() => {
     if (justDismissedRef.current) return;
     setIsOpen((prev) => !prev);
-  }, []);
+  }, [setIsOpen]);
 
   const handleDismiss = useCallback(() => {
     justDismissedRef.current = true;
@@ -111,19 +132,33 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
     requestAnimationFrame(() => {
       justDismissedRef.current = false;
     });
-  }, []);
+  }, [setIsOpen]);
+
+  const isRight = align === 'bottom-right' || align === 'top-right';
+  const isTop = align === 'top-left' || align === 'top-right';
+
+  // Map DropdownMenu align → Popover anchor (vertical direction inverts)
+  const anchor =
+    `${isTop ? 'bottom' : 'top'}-${isRight ? 'right' : 'left'}` as const;
 
   const computePosition = useCallback(() => {
     if (!triggerRef.current) return { x: 0, y: 0 };
     const rect = triggerRef.current.getBoundingClientRect();
     return {
-      x: align === 'bottom-right' ? rect.right : rect.left,
-      y: rect.bottom,
+      x: isRight ? rect.right : rect.left,
+      y: isTop ? rect.top : rect.bottom,
     };
-  }, [align]);
+  }, [isRight, isTop]);
 
   const clonedTrigger = cloneElement(trigger, {
-    onClick: handleToggle,
+    onClick: (event) => {
+      if (typeof trigger.props.onClick === 'function') {
+        trigger.props.onClick(event);
+      }
+      if (!event.defaultPrevented) {
+        handleToggle();
+      }
+    },
     'aria-expanded': isOpen,
   });
 
@@ -134,7 +169,8 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
         <Popover
           position={computePosition()}
           onDismiss={handleDismiss}
-          offset={offset ?? { x: 0, y: 4 }}
+          anchor={anchor}
+          offset={offset ?? { x: 0, y: isTop ? -4 : 4 }}
           className={cn('flex flex-col overflow-hidden py-1', className)}
         >
           {children}

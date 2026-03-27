@@ -57,11 +57,13 @@ export type PopoverProps = {
   offset?: Partial<FloatingPosition>;
 
   /**
-   * When `true`, the `position.y` value describes where the **bottom** edge
-   * of the panel should sit instead of the top edge. The panel is rendered
-   * above that y coordinate. Defaults to `false`.
+   * Which corner of the panel is pinned to the `position` coordinate.
+   * - `"top-left"` (default) — panel extends right and down.
+   * - `"top-right"` — panel extends left and down.
+   * - `"bottom-left"` — panel extends right and up.
+   * - `"bottom-right"` — panel extends left and up.
    */
-  anchorBottom?: boolean;
+  anchor?: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 
   /**
    * Minimum distance (px) from the boundary edge.
@@ -107,7 +109,7 @@ export const Popover: FC<PopoverProps> = ({
   onDismiss,
   dismissOnEscape = true,
   offset,
-  anchorBottom = false,
+  anchor = 'top-left',
   viewportMargin = 12,
   boundary,
   zIndex = 9999,
@@ -136,7 +138,11 @@ export const Popover: FC<PopoverProps> = ({
     if (!el) return;
 
     const panelRect = el.getBoundingClientRect();
-    const rawX = position.x + ox;
+    const anchorRight = anchor === 'top-right' || anchor === 'bottom-right';
+    const anchorBottom = anchor === 'bottom-left' || anchor === 'bottom-right';
+    const rawX = anchorRight
+      ? position.x + ox - panelRect.width
+      : position.x + ox;
     const rawY = anchorBottom
       ? position.y + oy - panelRect.height
       : position.y + oy;
@@ -160,7 +166,7 @@ export const Popover: FC<PopoverProps> = ({
       x: Math.max(minX, Math.min(rawX, maxX)),
       y: Math.max(minY, Math.min(rawY, maxY)),
     });
-  }, [position.x, position.y, ox, oy, viewportMargin, boundary, anchorBottom]);
+  }, [position.x, position.y, ox, oy, viewportMargin, boundary, anchor]);
 
   useLayoutEffect(() => {
     updateClampedPosition();

@@ -32,6 +32,8 @@ export const IntentSelectMessage = ({
   return (
     <div className="flex justify-end">
       <DropdownMenu
+        open={isOpen}
+        onOpenChange={setIsOpen}
         trigger={
           <Button variant="outline" tone="info" shape="pill" size="sm">
             <Sprout size={14} />

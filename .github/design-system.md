@@ -44,6 +44,14 @@ START
 │  └─ Dropdown menu  → <DropdownMenu> + <DropdownMenuItem>
 │  (all portal-based, handle positioning & dismissal internally)
 │
+├─ Is it a loading indicator?
+│  ├─ Inline spinner (inside button, next to text) → <Spinner>
+│  ├─ Centered area with optional message     → <LoadingState>
+│  └─ Overlay covering a parent container     → <LoadingState overlay>
+│
+├─ Is it an empty / zero-data state?
+│  └─ <EmptyState message="…" action={<Button>…</Button>}>
+│
 ├─ Is it a sidebar / panel shell?
 │  └─ <SidebarPanel>
 │
@@ -232,12 +240,12 @@ All interactive elements: `disabled:cursor-not-allowed disabled:opacity-50`.
 
 ### 2.10 Dividers
 
-| Type                     | Implementation                                       | Usage                                |
-| ------------------------ | ---------------------------------------------------- | ------------------------------------ |
-| Horizontal rule          | `border-b border-border`                             | Below Header, below panel header bar |
-| Vertical panel edge      | `border-l border-border` or `border-r border-border` | Between panels                       |
-| Inline separator (short) | `<div className="bg-border h-3 w-px" />`             | Inside NodeToolbar                   |
-| Inline separator (tall)  | `<div className="bg-border mx-1 h-4 w-px" />`        | Inside CanvasToolbar                 |
+| Type                     | Implementation                                                   | Usage                                |
+| ------------------------ | ---------------------------------------------------------------- | ------------------------------------ |
+| Horizontal rule          | `border-b border-edge-default`                                   | Below Header, below panel header bar |
+| Vertical panel edge      | `border-l border-edge-default` or `border-r border-edge-default` | Between panels                       |
+| Inline separator (short) | `<div className="bg-edge-default h-3 w-px" />`                   | Inside NodeToolbar                   |
+| Inline separator (tall)  | `<div className="bg-edge-default mx-1 h-4 w-px" />`              | Inside CanvasToolbar                 |
 
 ---
 
@@ -263,7 +271,7 @@ Use this matrix to determine the exact styling for any UI element.
 | ----------- | ----------------------------------------------------------------- |
 | Component   | `MainLayout`                                                      |
 | Layout      | `flex flex-col h-full w-full overflow-hidden`                     |
-| Header      | `h-12 border-b border-border bg-surface px-3 gap-3`               |
+| Header      | `h-12 border-b border-edge-default bg-surface px-3 gap-3`         |
 | Content row | `flex min-h-0 flex-1`                                             |
 | Children    | Left Panel → Resize Handle → Center → Resize Handle → Right Panel |
 
@@ -273,23 +281,23 @@ Use this matrix to determine the exact styling for any UI element.
 
 > Collapsible side panels and expanded content panels.
 
-| Property         | Expanded                                                        | Collapsed                                                        |
-| ---------------- | --------------------------------------------------------------- | ---------------------------------------------------------------- |
-| Component        | `SidebarPanel`                                                  | `SidebarPanel`                                                   |
-| Background       | `bg-surface`                                                    | `bg-surface`                                                     |
-| Width            | Left: 260px (min 200, max 30%); Right: 420px (min 200, max 50%) | 48px                                                             |
-| Header           | `h-12 border-b border-border px-3`                              | —                                                                |
-| Content padding  | `p-3`                                                           | —                                                                |
-| Overflow         | `overflow-y-auto`                                               | —                                                                |
-| Side border      | Left: `border-r border-border`; Right: `border-l border-border` | same                                                             |
-| Collapsed label  | —                                                               | `text-xs font-semibold text-fg-muted [writing-mode:vertical-rl]` |
-| Toggle icon size | —                                                               | `16`                                                             |
+| Property         | Expanded                                                                    | Collapsed                                                        |
+| ---------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Component        | `SidebarPanel`                                                              | `SidebarPanel`                                                   |
+| Background       | `bg-surface`                                                                | `bg-surface`                                                     |
+| Width            | Left: 260px (min 200, max 30%); Right: 420px (min 200, max 50%)             | 48px                                                             |
+| Header           | `h-12 border-b border-edge-default px-3`                                    | —                                                                |
+| Content padding  | `p-3`                                                                       | —                                                                |
+| Overflow         | `overflow-y-auto`                                                           | —                                                                |
+| Side border      | Left: `border-r border-edge-default`; Right: `border-l border-edge-default` | same                                                             |
+| Collapsed label  | —                                                                           | `text-xs font-semibold text-fg-muted [writing-mode:vertical-rl]` |
+| Toggle icon size | —                                                                           | `16`                                                             |
 
 **Resize Handle** (between panels):
 `w-2 bg-transparent cursor-col-resize` with inner pill
 `h-8 w-1 rounded-full bg-fg-subtle opacity-0 → group-hover:h-12 group-hover:opacity-100 duration-300`
 
-**ExpandedNodePanel header**: `h-10 border-b border-border px-3 gap-3`
+**ExpandedNodePanel header**: `h-10 border-b border-edge-default px-3 gap-3`
 Title: `text-xs font-medium text-fg-muted truncate`
 
 ---
@@ -300,51 +308,51 @@ Title: `text-xs font-medium text-fg-muted truncate`
 
 #### Message Bubbles
 
-| Variant    | Background      | Radius        | Border                  | Padding     | Align         |
-| ---------- | --------------- | ------------- | ----------------------- | ----------- | ------------- |
-| User       | `bg-bg-default` | `rounded-2xl` | none                    | `p-3`       | right         |
-| AI         | `bg-surface`    | `rounded-2xl` | none                    | `px-4 pt-2` | left (`ml-1`) |
-| Tool       | `bg-surface`    | `rounded-2xl` | `border border-border`  | `px-4 py-3` | left          |
-| Tool error | `bg-danger-bg`  | `rounded-2xl` | `border border-border`  | `px-4 py-3` | left          |
-| Research   | status-color bg | `rounded-2xl` | `border` + status-color | `p-4`       | left          |
+| Variant    | Background      | Radius        | Border                       | Padding     | Align         |
+| ---------- | --------------- | ------------- | ---------------------------- | ----------- | ------------- |
+| User       | `bg-bg-default` | `rounded-2xl` | none                         | `p-3`       | right         |
+| AI         | `bg-surface`    | `rounded-2xl` | none                         | `px-4 pt-2` | left (`ml-1`) |
+| Tool       | `bg-surface`    | `rounded-2xl` | `border border-edge-default` | `px-4 py-3` | left          |
+| Tool error | `bg-danger-bg`  | `rounded-2xl` | `border border-edge-default` | `px-4 py-3` | left          |
+| Research   | status-color bg | `rounded-2xl` | `border` + status-color      | `p-4`       | left          |
 
 Font: `text-m leading-relaxed`. Between messages: `space-y-1`.
 
 #### SourceCard
 
-`rounded-lg border border-border bg-surface px-3 py-2 hover:bg-bg-default`
+`rounded-lg border border-edge-default bg-surface px-3 py-2 hover:bg-bg-default`
 Favicon: `h-3.5 w-3.5 rounded-sm`.
 DragHandle: hidden by default, `opacity-0 group-hover:opacity-100`.
 
 #### ChatInput Container
 
-`rounded-2xl border border-border bg-surface p-3`
+`rounded-2xl border border-edge-default bg-surface p-3`
 
 #### Modal (UploadModal)
 
-| Property        | Value                                                               |
-| --------------- | ------------------------------------------------------------------- |
-| Backdrop        | `fixed inset-0 bg-bg-default/80 backdrop-blur-[1px] z-9999`         |
-| Dialog          | `rounded-lg border border-border bg-surface shadow-bottom w-90 p-6` |
-| Title           | `text-sm font-semibold text-fg-default`                             |
-| Close button    | `text-fg-subtle hover:text-danger rounded p-1`, icon `X size={16}`  |
-| Enter animation | `animate-in zoom-in-95 fade-in duration-200`                        |
+| Property        | Value                                                                     |
+| --------------- | ------------------------------------------------------------------------- |
+| Backdrop        | `fixed inset-0 bg-bg-default/80 backdrop-blur-[1px] z-9999`               |
+| Dialog          | `rounded-lg border border-edge-default bg-surface shadow-bottom w-90 p-6` |
+| Title           | `text-sm font-semibold text-fg-default`                                   |
+| Close button    | `text-fg-subtle hover:text-danger rounded p-1`, icon `X size={16}`        |
+| Enter animation | `animate-in zoom-in-95 fade-in duration-200`                              |
 
 #### Popover
 
-| Property       | Value                                                           |
-| -------------- | --------------------------------------------------------------- |
-| Surface        | `rounded-lg border border-border bg-surface shadow-lg w-80 p-4` |
-| Position       | `fixed`, anchored below trigger + 6px, right-aligned            |
-| Implementation | `createPortal(…, document.body)`                                |
+| Property       | Value                                                                 |
+| -------------- | --------------------------------------------------------------------- |
+| Surface        | `rounded-lg border border-edge-default bg-surface shadow-lg w-80 p-4` |
+| Position       | `fixed`, anchored below trigger + 6px, right-aligned                  |
+| Implementation | `createPortal(…, document.body)`                                      |
 
 #### Dropdown Menu
 
-| Property    | Value                                                    |
-| ----------- | -------------------------------------------------------- |
-| Surface     | `rounded border border-border bg-surface shadow-lg py-1` |
-| Item        | `px-3 py-1.5 text-xs hover:bg-accent w-full text-left`   |
-| Active item | add `font-bold text-info`                                |
+| Property    | Value                                                          |
+| ----------- | -------------------------------------------------------------- |
+| Surface     | `rounded border border-edge-default bg-surface shadow-lg py-1` |
+| Item        | `px-3 py-1.5 text-xs hover:bg-accent w-full text-left`         |
+| Active item | add `font-bold text-info`                                      |
 
 ---
 
@@ -356,12 +364,12 @@ DragHandle: hidden by default, `opacity-0 group-hover:opacity-100`.
 
 | Property        | Value                                                                 |
 | --------------- | --------------------------------------------------------------------- |
-| Shape           | `rounded-md border border-border bg-surface shadow-bottom`            |
+| Shape           | `rounded-md border border-edge-default bg-surface shadow-bottom`      |
 | Size            | `h-8 px-2 py-1 gap-3`                                                 |
 | Position        | Above node, `offset={12}`, visible when single-selected               |
 | Icon size       | `14`                                                                  |
 | Icon color      | `text-fg-subtle`                                                      |
-| Section divider | `<div className="bg-border h-3 w-px" />`                              |
+| Section divider | `<div className="bg-edge-default h-3 w-px" />`                        |
 | Layout          | Left: type icon → divider → Right: Button iconOnly ghost action icons |
 
 #### CanvasToolbar (bottom floating)
@@ -373,11 +381,11 @@ DragHandle: hidden by default, `opacity-0 group-hover:opacity-100`.
 | Position      | `Panel position="bottom-center" className="mb-6"`   |
 | Icon size     | `18`                                                |
 | Icon color    | `text-fg-subtle`, active: `text-info bg-bg-default` |
-| Group divider | `<div className="bg-border mx-1 h-4 w-px" />`       |
+| Group divider | `<div className="bg-edge-default mx-1 h-4 w-px" />` |
 
 #### Panel Header Bar
 
-Already defined in §3.2. Key: `h-12 px-3 border-b border-border bg-surface`.
+Already defined in §3.2. Key: `h-12 px-3 border-b border-edge-default bg-surface`.
 
 #### Tabs (inside panel header)
 
@@ -422,13 +430,13 @@ Status icon: `h-3 w-3`. Title: `font-medium text-fg-default`. Detail: `mt-0.5 te
 
 #### Button (unified text / pill / ghost button)
 
-| Variant     | Classes                                                                                                |
-| ----------- | ------------------------------------------------------------------------------------------------------ |
-| `primary`   | `rounded-md font-medium bg-info-bg text-info hover:bg-info-bg-hover`                                   |
-| `secondary` | `rounded-md font-medium border border-border text-fg-muted bg-surface hover:bg-hover`                  |
-| `danger`    | `rounded-md font-medium bg-danger text-fg-inverse hover:bg-danger/90`                                  |
-| `ghost`     | `rounded border-none bg-transparent p-1 enabled:hover:bg-bg-default`                                   |
-| `pill`      | `rounded-full border border-border px-3 py-1.5 text-xs font-medium text-fg-muted hover:bg-hover gap-1` |
+| Variant     | Classes                                                                                                      |
+| ----------- | ------------------------------------------------------------------------------------------------------------ |
+| `primary`   | `rounded-md font-medium bg-info-bg text-info hover:bg-info-bg-hover`                                         |
+| `secondary` | `rounded-md font-medium border border-edge-default text-fg-muted bg-surface hover:bg-hover`                  |
+| `danger`    | `rounded-md font-medium bg-danger text-fg-inverse hover:bg-danger/90`                                        |
+| `ghost`     | `rounded border-none bg-transparent p-1 enabled:hover:bg-bg-default`                                         |
+| `pill`      | `rounded-full border border-edge-default px-3 py-1.5 text-xs font-medium text-fg-muted hover:bg-hover gap-1` |
 
 Sizes (apply to `primary`, `secondary`, `danger` only):
 
@@ -464,14 +472,14 @@ Tooltip auto via `title` prop. Usage: Send button (`solid iconOnly shape="pill"`
 
 #### Color Picker Float (NodeBgColorSelector / NodeTextColorSelector)
 
-| Property        | Value                                                                          |
-| --------------- | ------------------------------------------------------------------------------ |
-| Float surface   | `rounded-full border border-border bg-surface shadow-bottom px-2 py-1.5 gap-2` |
-| Position        | `absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50`                     |
-| Animation       | `animate-in fade-in zoom-in duration-200`                                      |
-| Swatch          | `h-4 w-4 rounded-full border hover:scale-110` (bg) / `hover:scale-125` (text)  |
-| Selected swatch | add `ring-2 ring-offset-1` + matching ring color                               |
-| Dismiss layer   | `fixed inset-0 z-40` (invisible overlay)                                       |
+| Property        | Value                                                                                |
+| --------------- | ------------------------------------------------------------------------------------ |
+| Float surface   | `rounded-full border border-edge-default bg-surface shadow-bottom px-2 py-1.5 gap-2` |
+| Position        | `absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50`                           |
+| Animation       | `animate-in fade-in zoom-in duration-200`                                            |
+| Swatch          | `h-4 w-4 rounded-full border hover:scale-110` (bg) / `hover:scale-125` (text)        |
+| Selected swatch | add `ring-2 ring-offset-1` + matching ring color                                     |
+| Dismiss layer   | `fixed inset-0 z-40` (invisible overlay)                                             |
 
 ---
 
@@ -491,17 +499,46 @@ Tooltip auto via `title` prop. Usage: Send button (`solid iconOnly shape="pill"`
 
 #### Inline Separator
 
-| Variant              | Classes                   |
-| -------------------- | ------------------------- |
-| Short (NodeToolbar)  | `bg-border h-3 w-px`      |
-| Tall (CanvasToolbar) | `bg-border mx-1 h-4 w-px` |
+| Variant              | Classes                         |
+| -------------------- | ------------------------------- |
+| Short (NodeToolbar)  | `bg-edge-default h-3 w-px`      |
+| Tall (CanvasToolbar) | `bg-edge-default mx-1 h-4 w-px` |
 
-#### Loading Spinner
+#### Spinner
 
-| Property | Value                                                                               |
-| -------- | ----------------------------------------------------------------------------------- |
-| Spinner  | `h-5 w-5 animate-spin rounded-full border-2 border-fg-subtle/30 border-t-fg-subtle` |
-| Overlay  | `bg-bg-default/40 absolute inset-0 z-10 flex items-center justify-center`           |
+> Component: `<Spinner>` from `Common/Spinner.tsx`
+
+| Prop        | Type                   | Default | Description                                        |
+| ----------- | ---------------------- | ------- | -------------------------------------------------- |
+| `size`      | `'xs' \| 'sm' \| 'md'` | `'sm'`  | xs = 12px, sm = 16px, md = 18px                    |
+| `className` | `string`               | —       | Pass color tokens via className (e.g. `text-info`) |
+
+Uses `Loader2` icon with `animate-spin`. Default color inherits from parent.
+
+#### LoadingState
+
+> Component: `<LoadingState>` from `Common/LoadingState.tsx`
+
+Centered spinner + optional text label. Replaces all inline loading patterns.
+
+| Prop         | Type      | Default | Description                                  |
+| ------------ | --------- | ------- | -------------------------------------------- |
+| `message`    | `string`  | —       | Optional text shown next to the spinner      |
+| `overlay`    | `boolean` | `false` | Absolute-positioned to fill parent container |
+| `fullScreen` | `boolean` | `false` | Full viewport height (`h-screen`)            |
+| `className`  | `string`  | —       | Additional container classes                 |
+
+#### EmptyState
+
+> Component: `<EmptyState>` from `Common/EmptyState.tsx`
+
+Centered message + optional action for zero-data states.
+
+| Prop        | Type        | Default | Description                            |
+| ----------- | ----------- | ------- | -------------------------------------- |
+| `message`   | `string`    | —       | Primary message text                   |
+| `action`    | `ReactNode` | —       | Optional action rendered below message |
+| `className` | `string`    | —       | Additional container classes           |
 
 #### Loading Ellipsis (chat)
 
@@ -526,7 +563,7 @@ All canvas nodes share the same `NodeWrapper` shell.
 
 | Feature            | Implementation                                                                                                     |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------ |
-| Selection ring     | `ring ring-info` (selected) / `ring-border hover:ring` (unselected)                                                |
+| Selection ring     | `ring ring-info` (selected) / `ring-edge-default hover:ring` (unselected)                                          |
 | Background         | User-chosen preset or `bg-transparent`                                                                             |
 | Border             | `border-0` (ring replaces border)                                                                                  |
 | Radius             | `rounded`                                                                                                          |
@@ -541,7 +578,7 @@ All canvas nodes share the same `NodeWrapper` shell.
 
 ```
 [ TypeIcon (14px, text-fg-subtle) ]
-[ Divider (bg-border h-3 w-px) ]
+[ Divider (bg-edge-default h-3 w-px) ]
 [ Button iconOnly ghost actions (icon 14px) ... ]
 ```
 
@@ -553,16 +590,16 @@ Inactive toggle style: `text-fg-subtle hover:bg-bg-default`.
 
 ### 4.3 Background Color Presets
 
-| Name        | bg class         | border class        |
-| ----------- | ---------------- | ------------------- |
-| Transparent | `bg-transparent` | `border-info`       |
-| White       | `bg-white`       | `border-border`     |
-| Red         | `bg-red-50`      | `border-red-200`    |
-| Orange      | `bg-orange-50`   | `border-orange-200` |
-| Yellow      | `bg-yellow-50`   | `border-yellow-200` |
-| Green       | `bg-green-50`    | `border-green-200`  |
-| Blue        | `bg-blue-50`     | `border-blue-200`   |
-| Purple      | `bg-purple-50`   | `border-purple-200` |
+| Name        | bg class         | border class          |
+| ----------- | ---------------- | --------------------- |
+| Transparent | `bg-transparent` | `border-info`         |
+| White       | `bg-white`       | `border-edge-default` |
+| Red         | `bg-red-50`      | `border-red-200`      |
+| Orange      | `bg-orange-50`   | `border-orange-200`   |
+| Yellow      | `bg-yellow-50`   | `border-yellow-200`   |
+| Green       | `bg-green-50`    | `border-green-200`    |
+| Blue        | `bg-blue-50`     | `border-blue-200`     |
+| Purple      | `bg-purple-50`   | `border-purple-200`   |
 
 ### 4.4 Text Color Presets
 
@@ -583,10 +620,13 @@ Inactive toggle style: `text-fg-subtle hover:bg-bg-default`.
 // Reusable components — always prefer these
 import { Button } from '@/components/Common/Button'; // use iconOnly for icon-only buttons
 import { DragToCanvasHandleButton } from '@/components/Common/DragToCanvasHandleButton';
+import { EmptyState } from '@/components/Common/EmptyState';
 import { Input } from '@/components/Common/Input';
-import { Tooltip } from '@/components/Common/Tooltip';
+import { LoadingState } from '@/components/Common/LoadingState';
 import { Modal } from '@/components/Common/Modal';
 import { Popover } from '@/components/Common/Popover';
+import { Spinner } from '@/components/Common/Spinner';
+import { Tooltip } from '@/components/Common/Tooltip';
 import {
   DropdownMenu,
   DropdownMenuItem,
@@ -615,8 +655,10 @@ import { createPortal } from 'react-dom';
 When an AI or developer creates a new UI component, verify:
 
 - [ ] Walked §1 decision tree — no existing component fits
+- [ ] Loading states use `<Spinner>` / `<LoadingState>` — no inline CSS spinners
+- [ ] Empty states use `<EmptyState>` — no ad-hoc "no data" patterns
 - [ ] All colors come from §2.1 system tokens (`fg-*`, `bg-*`, `edge-*`, status, AI) — no arbitrary hex values
-- [ ] Border color is `border-edge-default` or `border-border` — no other border colors (except status-specific)
+- [ ] Border color is `border-edge-default` — no other border colors (except status-specific)
 - [ ] Border radius matches §2.4 for the component's size level
 - [ ] Shadow matches §2.5 — only `shadow-bottom` or `shadow-lg`
 - [ ] Icon sizes follow §2.7 — correct `size` for the context

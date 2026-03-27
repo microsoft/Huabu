@@ -30,7 +30,7 @@ export const ModeSelector = ({
       shape="pill"
       tone="neutral"
       size="sm"
-      direction="up"
+      align="top-left"
     />
   );
 };
