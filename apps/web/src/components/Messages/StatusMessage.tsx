@@ -24,18 +24,18 @@ const STATUS_CONFIG: Record<
   interrupted: {
     icon: BadgeInfo,
     label: 'Generation interrupted',
-    bg: 'bg-blue-50',
-    iconColor: 'text-blue-400',
-    textColor: 'text-blue-500',
-    retryHoverBg: 'enabled:hover:bg-blue-100',
+    bg: 'bg-info-bg',
+    iconColor: 'text-info-light',
+    textColor: 'text-info',
+    retryHoverBg: 'enabled:hover:bg-info-bg-hover',
   },
   error: {
     icon: XCircle,
     label: 'Something went wrong',
-    bg: 'bg-red-50',
-    iconColor: 'text-red-400',
-    textColor: 'text-red-500',
-    retryHoverBg: 'enabled:hover:bg-red-100',
+    bg: 'bg-danger-bg',
+    iconColor: 'text-danger-light',
+    textColor: 'text-danger',
+    retryHoverBg: 'enabled:hover:bg-danger-bg-hover',
   },
 };
 

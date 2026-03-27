@@ -117,6 +117,7 @@ interface DiffPopoverProps {
   children: React.ReactNode;
   onAccept: () => void;
   onReject: () => void;
+  onInsertBelow?: () => void;
   onMouseEnter: () => void;
   onMouseLeave: () => void;
 }
@@ -126,18 +127,24 @@ const DiffPopover = ({
   children,
   onAccept,
   onReject,
+  onInsertBelow,
   onMouseEnter,
   onMouseLeave,
 }: DiffPopoverProps) => (
   <div
     data-diff-popover
-    className="absolute z-10 max-h-100 overflow-y-auto rounded-md border border-gray-200 bg-white p-3 shadow-lg"
+    className="border-border bg-surface absolute z-10 max-h-100 overflow-y-auto rounded-md border p-3 shadow-lg"
     style={style}
     onMouseEnter={onMouseEnter}
     onMouseLeave={onMouseLeave}
   >
     <div className="mb-2 text-xs leading-relaxed">{children}</div>
     <div className="flex justify-end gap-1">
+      {onInsertBelow && (
+        <Button variant="secondary" size="sm" onClick={onInsertBelow}>
+          Insert Below
+        </Button>
+      )}
       <Button variant="secondary" size="sm" onClick={onReject}>
         Reject
       </Button>
@@ -160,6 +167,7 @@ interface InlineBlockDiffsProps {
   getBlockText: (blockId: string) => string;
   onAcceptBlock: (blockId: string) => void;
   onRejectBlock: (blockId: string) => void;
+  onInsertBelow?: (blockId: string) => void;
   onAcceptDeletedBlock: (index: number) => void;
   onRestoreBlock: (index: number) => void;
 }
@@ -190,6 +198,7 @@ export const InlineBlockDiffs = ({
   getBlockText,
   onAcceptBlock,
   onRejectBlock,
+  onInsertBelow,
   onAcceptDeletedBlock,
   onRestoreBlock,
 }: InlineBlockDiffsProps) => {
@@ -457,6 +466,20 @@ export const InlineBlockDiffs = ({
             hoveredModifiedKeyRef.current = null;
             setHoveredModifiedKey(null);
           }}
+          onInsertBelow={
+            onInsertBelow
+              ? () => {
+                  hoveredModifiedKeyRef.current = null;
+                  setHoveredModifiedKey(null);
+                  const blockIds = hoveredModifiedPos.run.blockIds;
+                  setTimeout(() => {
+                    for (const blockId of blockIds) {
+                      onInsertBelow(blockId);
+                    }
+                  }, 300);
+                }
+              : undefined
+          }
           onMouseEnter={handlePopoverEnter}
           onMouseLeave={handlePopoverLeave}
         >
@@ -472,10 +495,10 @@ export const InlineBlockDiffs = ({
                     key={si}
                     className={
                       seg.type === 'removed'
-                        ? 'bg-red-100 text-red-600 line-through'
+                        ? 'bg-diff-removed-bg text-diff-removed-text line-through'
                         : seg.type === 'added'
-                          ? 'bg-green-100 text-green-700'
-                          : 'text-gray-600'
+                          ? 'bg-diff-added-bg text-diff-added-text'
+                          : 'text-fg-muted'
                     }
                   >
                     {seg.text}
@@ -513,7 +536,9 @@ export const InlineBlockDiffs = ({
                 width: 6,
                 height: 6,
                 backgroundColor:
-                  hoveredDeletedKey === pos.group.key ? '#ef4444' : '#f87171',
+                  hoveredDeletedKey === pos.group.key
+                    ? 'var(--color-danger)'
+                    : 'var(--color-danger-light)',
                 borderRadius: 1,
                 transition: 'background-color 150ms',
               }}
@@ -556,8 +581,8 @@ export const InlineBlockDiffs = ({
                 <div
                   key={item.index}
                   className={clsx(
-                    'bg-red-100 text-red-600 line-through',
-                    i > 0 && 'mt-1 border-t border-red-200 pt-1',
+                    'bg-diff-removed-bg text-diff-removed-text line-through',
+                    i > 0 && 'mt-1 pt-1',
                   )}
                 >
                   {item.info.text}

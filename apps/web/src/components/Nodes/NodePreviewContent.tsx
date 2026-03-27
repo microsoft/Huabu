@@ -16,7 +16,7 @@ export interface NodePreviewContentProps {
 
 const DefaultPreview = ({ type }: { type: string }) => {
   return (
-    <div className="text-muted-foreground flex h-full w-full items-center justify-center text-sm">
+    <div className="text-fg-muted flex h-full w-full items-center justify-center text-sm">
       Preview not available for {type}
     </div>
   );

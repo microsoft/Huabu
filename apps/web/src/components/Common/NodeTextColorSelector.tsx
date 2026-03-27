@@ -72,7 +72,7 @@ export const NodeTextColorSelector = ({
     <div className="relative flex items-center">
       <IconButton
         variant="outline"
-        className="border-border hover:bg-muted rounded border p-1"
+        className="rounded"
         onClick={(e) => {
           e.stopPropagation();
           setIsOpen(!isOpen);

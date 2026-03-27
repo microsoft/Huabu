@@ -3,45 +3,144 @@
 @source '../node_modules/@blocknote/shadcn';
 
 @custom-variant dark (&:is(.dark *));
-/* Light theme ShadCN CSS variables. */
+/* ===================================================================
+  App design-system tokens — single source of truth.
+  Naming: fg-* (text), bg-* (surfaces), edge-* (borders).
+  =================================================================== */
 :root {
+  /* Text hierarchy */
+  --fg-default: #191919;
+  --fg-muted: #6b6b6b;
+  --fg-subtle: #ababab;
+  --fg-inverse: #ffffff;
+
+  /* Backgrounds */
+  --bg-default: #f5f5f5;
+  --bg-surface: #ffffff;
+  --bg-hover: #efefef;
+  --bg-inverse: #1f1f1f;
+
+  /* Borders */
+  --edge-default: #e6e6e6;
+
+  /* Status: info */
+  --info: #2e90ff;
+  --info-light: #8ac2ff;
+  --info-bg: #f2f8ff;
+  --info-bg-hover: #dbeafe;
+
+  /* Status: success */
+  --success: #16a34a;
+  --success-light: #22c55e;
+  --success-bg: #f0fdf4;
+
+  /* Status: warning */
+  --warning: #d97706;
+  --warning-light: #f59e0b;
+
+  /* Status: danger */
+  --danger: #dc2626;
+  --danger-light: #f87171;
+  --danger-bg: #fff7f8;
+  --danger-bg-hover: #fee2e2;
+
+  /* AI colors */
+  --ai: #bda6ce;
+  --ai-light: rgba(189, 166, 206, 0.3);
+  --ai-bg: rgba(189, 166, 206, 0.1);
+
+  /* Diff */
+  --diff-added-bg: var(--success-bg);
+  --diff-added-text: var(--success);
+  --diff-removed-bg: var(--danger-bg);
+  --diff-removed-text: var(--danger);
+
+  /* Special purpose */
+  --canvas-grid: #cccccc;
+  --pdf-selection-border: rgba(99, 102, 241, 0.85);
+  --pdf-selection-bg: rgba(99, 102, 241, 0.08);
+  --pdf-highlight-bg: rgba(255, 235, 59, 0.5);
+  --shimmer-1: #d1d5db;
+  --shimmer-2: #6b7280;
+  --shimmer-3: #4b5563;
+
+  /* ===================================================================
+    ShadCN bridge — consumed by @blocknote/shadcn.
+    Variable NAMES are fixed by ShadCN. Do NOT rename them.
+    Values bridge to system tokens via var() where semantics overlap.
+    =================================================================== */
   --radius: 0.625rem;
-  --background: #f5f5f5;
-  --foreground: #191919;
+  --background: var(--bg-default);
+  --foreground: var(--fg-default);
+  --border: var(--edge-default);
+  --primary: var(--bg-inverse);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: var(--bg-default);
+  --muted-foreground: var(--fg-subtle);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: #7c7c7c;
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: #e6e6e6;
-  --input: #e6e6e6;
+  --destructive: var(--danger);
+  --input: var(--edge-default);
   --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
 }
-/* Dark theme ShadCN CSS variables. */
+/* Dark theme overrides.
+   TODO: migrate system tokens to fg/bg/edge naming in a follow-up pass. */
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
+  /* --- App design-system tokens --- */
+  --fg-default: oklch(0.985 0 0);
+  --fg-muted: oklch(0.78 0 0);
+  --fg-subtle: oklch(0.53 0 0);
+  --fg-inverse: #191919;
+  --bg-default: oklch(0.145 0 0);
+  --bg-surface: oklch(0.22 0 0);
+  --bg-hover: oklch(0.25 0 0);
+  --bg-inverse: oklch(0.87 0 0);
+  --edge-default: oklch(1 0 0 / 10%);
+
+  /* Status: success */
+  --success: #4ade80;
+  --success-light: #22c55e;
+  --success-bg: oklch(0.22 0.04 150);
+
+  /* Status: warning */
+  --warning: #fbbf24;
+  --warning-light: #f59e0b;
+
+  /* Status: info */
+  --info: #60a5fa;
+  --info-light: #93c5fd;
+  --info-bg: oklch(0.22 0.04 260);
+  --info-bg-hover: oklch(0.28 0.05 260);
+
+  /* Status: danger */
+  --danger: oklch(0.704 0.191 22.216);
+  --danger-light: #f87171;
+  --danger-bg: oklch(0.28 0.06 25);
+  --danger-bg-hover: oklch(0.28 0.06 25);
+
+  --ai: #bda6ce;
+  --ai-light: rgba(189, 166, 206, 0.3);
+  --ai-bg: rgba(189, 166, 206, 0.1);
+
+  /* Diff */
+  --diff-added-bg: oklch(0.25 0.06 150);
+  --diff-added-text: #86efac;
+  --diff-removed-bg: oklch(0.25 0.06 25);
+  --diff-removed-text: #fca5a5;
+
+  /* Special purpose */
+  --canvas-grid: oklch(0.35 0 0);
+  --shimmer-1: oklch(0.45 0 0);
+  --shimmer-2: oklch(0.6 0 0);
+  --shimmer-3: oklch(0.7 0 0);
+
+  /* --- ShadCN bridge (BlockNote) --- */
   --card: oklch(0.205 0 0);
   --card-foreground: oklch(0.985 0 0);
   --popover: oklch(0.205 0 0);
@@ -54,32 +153,64 @@
   --muted-foreground: oklch(0.708 0 0);
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
+  --destructive: var(--danger);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
 }
-/* Extending Tailwind theme with ShadCN utility classes. */
+
+/* Extending Tailwind theme with utility classes.*/
 @theme inline {
+  /* --- System design tokens --- */
+  --color-fg-default: var(--fg-default);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-fg-inverse: var(--fg-inverse);
+
+  --color-bg-default: var(--bg-default);
+  --color-surface: var(--bg-surface);
+  --color-hover: var(--bg-hover);
+  --color-inverse: var(--bg-inverse);
+
+  --color-edge-default: var(--edge-default);
+
+  --color-ai: var(--ai);
+  --color-ai-light: var(--ai-light);
+  --color-ai-bg: var(--ai-bg);
+
+  /* Status: danger */
+  --color-danger: var(--danger);
+  --color-danger-light: var(--danger-light);
+  --color-danger-bg: var(--danger-bg);
+  --color-danger-bg-hover: var(--danger-bg-hover);
+
+  /* Status: success */
+  --color-success: var(--success);
+  --color-success-light: var(--success-light);
+  --color-success-bg: var(--success-bg);
+
+  /* Status: warning */
+  --color-warning: var(--warning);
+  --color-warning-light: var(--warning-light);
+
+  /* Status: info */
+  --color-info: var(--info);
+  --color-info-light: var(--info-light);
+  --color-info-bg: var(--info-bg);
+  --color-info-bg-hover: var(--info-bg-hover);
+
+  /* Diff */
+  --color-diff-added-bg: var(--diff-added-bg);
+  --color-diff-added-text: var(--diff-added-text);
+  --color-diff-removed-bg: var(--diff-removed-bg);
+  --color-diff-removed-text: var(--diff-removed-text);
+
+  /* Special purpose */
+  --color-canvas-grid: var(--canvas-grid);
+
+  /* --- ShadCN theme mappings (BlockNote) --- */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
+  --color-border: var(--border);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
   --color-secondary: var(--secondary);
@@ -88,29 +219,19 @@
   --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
   --color-destructive: var(--destructive);
-  --color-destructive-foreground: var(--destructive-foreground);
-  --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --color-chart-1: var(--chart-1);
-  --color-chart-2: var(--chart-2);
-  --color-chart-3: var(--chart-3);
-  --color-chart-4: var(--chart-4);
-  --color-chart-5: var(--chart-5);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-  --color-sidebar: var(--sidebar);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-ring: var(--sidebar-ring);
 }
+
 /* Applies some additional necessary border styles within the editor. */
 @layer base {
   .bn-shadcn * {
@@ -119,22 +240,6 @@
 }
 
 @theme {
-  --color-main: var(--foreground);
-  --color-icon: #ababab;
-
-  --color-theme-50: #f2f8ff;
-  --color-theme-100: #dfeefe;
-  --color-theme-300: #8ac2ff;
-  --color-theme-500: #2e90ff;
-  --color-theme-900: #004187;
-
-  --color-ai: #bda6ce;
-  --color-ai-light: rgba(189, 166, 206, 0.3);
-  --color-ai-bg: rgba(189, 166, 206, 0.1);
-
-  --color-danger: #e71d1d;
-  --color-danger-bg: #fff7f8;
-
   /*shadow*/
   --shadow-bottom: 0 2px 12px rgba(0, 0, 0, 0.08);
 
@@ -156,7 +261,7 @@ html,
 body,
 #root {
   @apply m-0 h-full w-full p-0;
-  background-color: var(--background);
+  background-color: var(--bg-default);
   overflow: hidden;
 }
 
@@ -197,7 +302,7 @@ body,
    still shows the user which region is selected. */
 .textLayer span::selection {
   color: transparent;
-  background: rgba(0, 100, 200, 0.3);
+  background: var(--pdf-selection-bg);
 }
 
 .block-note-view-readonly .bn-editor {
@@ -245,11 +350,11 @@ body,
 .thinking-shimmer {
   background: linear-gradient(
     90deg,
-    #d1d5db 0%,
-    #6b7280 25%,
-    #4b5563 50%,
-    #6b7280 75%,
-    #d1d5db 100%
+    var(--shimmer-1) 0%,
+    var(--shimmer-2) 25%,
+    var(--shimmer-3) 50%,
+    var(--shimmer-2) 75%,
+    var(--shimmer-1) 100%
   );
   background-size: 200% auto;
   background-clip: text;

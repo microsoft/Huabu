@@ -47,7 +47,7 @@ export const SourceCount = () => {
       <span
         tabIndex={0}
         aria-label={accessibleLabel}
-        className="text-muted-foreground inline-flex cursor-default items-center gap-1 text-sm leading-tight focus:outline-none"
+        className="text-fg-muted inline-flex cursor-default items-center gap-1 text-sm leading-tight focus:outline-none"
       >
         <span>{count}</span>
         <span>{count === 1 ? 'source' : 'sources'}</span>

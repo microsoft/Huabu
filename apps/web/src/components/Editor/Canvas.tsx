@@ -91,7 +91,7 @@ const FrameFitPreviewOverlay: React.FC<{
 
   return (
     <div
-      className="bg-theme-100/15 shadow-bottom pointer-events-none absolute z-40 transition-all duration-150"
+      className="bg-info-bg/40 shadow-bottom pointer-events-none absolute z-40 transition-all duration-150"
       style={{
         left: screenRect.left,
         top: screenRect.top,
@@ -369,7 +369,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     <div
       ref={wrapperRef}
       className={clsx(
-        'bg-background relative flex h-full w-full flex-col',
+        'bg-bg-default relative flex h-full w-full flex-col',
         pendingNodeType === 'note' && 'canvas-pending-note',
         pendingNodeType === 'text' && 'canvas-pending-text',
         pendingNodeType === 'frame' && 'canvas-pending-frame',
@@ -584,7 +584,6 @@ export const Canvas: React.FC<CanvasProps> = ({
             openExpanded(node.id);
           }
         }}
-        fitView
         attributionPosition="bottom-right"
         panOnDrag={
           pendingNodeType
@@ -607,7 +606,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         </Panel>
         <MultiSelectToolbar />
         <IntentPopover />
-        <Background color="#ccc" gap={GRID_SIZE} />
+        <Background color="var(--canvas-grid)" gap={GRID_SIZE} />
 
         <Controls position="bottom-left" />
       </ReactFlow>
@@ -615,7 +614,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       {/* Frame drag preview overlay */}
       {isDraggingFrame && frameDragRect && frameDragRect.width > 2 && (
         <div
-          className="border-theme-500 bg-theme-50/30 pointer-events-none absolute z-50 rounded border-2 border-dashed"
+          className="border-info bg-info-bg/40 pointer-events-none absolute z-50 rounded border-1 border-dashed"
           style={{
             left: frameDragRect.left,
             top: frameDragRect.top,

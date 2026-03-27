@@ -18,7 +18,7 @@ export const ImageNode = memo(
     const ImageToolbar = (
       <div className="flex w-full items-center justify-between gap-2">
         {/*tools*/}
-        <div className="text-muted-foreground flex items-center gap-1">
+        <div className="flex items-center gap-1">
           <IconButton
             title="Open Large View"
             onClick={(e) => {
@@ -50,7 +50,7 @@ export const ImageNode = memo(
                 className="pointer-events-none h-full w-full rounded border-0 object-contain"
               />
             ) : (
-              <div className="text-muted-foreground flex h-full w-full items-center justify-center text-sm">
+              <div className="text-fg-subtle flex h-full w-full items-center justify-center text-sm">
                 No Image Source
               </div>
             )}

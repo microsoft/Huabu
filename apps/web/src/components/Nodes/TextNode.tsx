@@ -120,21 +120,13 @@ export const TextNode = memo(
     // Controlled draft state — local during editing, synced from store on undo/external update.
     const content = data.content ?? '';
     const [draftContent, setDraftContent] = useState(content);
-    const [draftLabel, setDraftLabel] = useState(
-      data.label as string | undefined,
-    );
-    const [draftLabelSource, setDraftLabelSource] = useState(
-      data.labelSource as string | undefined,
-    );
 
     // Sync draft from external store changes (undo/redo, server updates).
     useEffect(() => {
       if (!isEditing) {
         setDraftContent(data.content ?? '');
-        setDraftLabel(data.label as string | undefined);
-        setDraftLabelSource(data.labelSource as string | undefined);
       }
-    }, [data.content, data.label, data.labelSource, isEditing]);
+    }, [data.content, isEditing]);
 
     // ------------------------------------------------------------------
     // Fixed vs auto mode: if the node's style.height is a number,
@@ -274,23 +266,16 @@ export const TextNode = memo(
       setIsEditing(false);
       // Only commit if something actually changed — avoid a spurious undo
       // snapshot when the user clicks into and immediately out of the node.
-      const isDirty =
-        draftContent !== (data.content ?? '') ||
-        draftLabel !== (data.label as string | undefined) ||
-        draftLabelSource !== (data.labelSource as string | undefined);
-      if (!isDirty) return;
+      if (draftContent === (data.content ?? '')) return;
       // Commit the draft to the store on blur so it records a single undo entry
       // for the entire editing session, rather than on every keystroke.
-      const patch: Record<string, unknown> = { content: draftContent };
-      if (draftLabel !== undefined) patch.label = draftLabel;
-      if (draftLabelSource !== undefined) patch.labelSource = draftLabelSource;
-      updateNodeData(id, patch);
+      updateNodeData(id, { content: draftContent });
     };
 
     const TextToolbar = (
       <div className="flex w-full items-center gap-1">
         <div
-          className="hover:bg-muted text-muted-foreground border-border flex items-center rounded border bg-transparent p-0.5 transition-colors"
+          className="hover:bg-bg-default text-fg-muted border-border flex items-center rounded border bg-transparent p-0.5 transition-colors"
           title="Font Family"
         >
           <select
@@ -299,7 +284,7 @@ export const TextNode = memo(
             onChange={(e) => updateStyle({ fontFamily: e.target.value })}
           >
             {FONT_FAMILIES.map((f) => (
-              <option key={f.name} value={f.value} className="text-black">
+              <option key={f.name} value={f.value} className="text-fg-default">
                 {f.name}
               </option>
             ))}
@@ -317,8 +302,8 @@ export const TextNode = memo(
           className={clsx(
             'rounded p-1',
             style.fontWeight === 'bold'
-              ? 'text-theme-500 bg-theme-50 enabled:hover:bg-theme-50'
-              : 'text-muted-foreground hover:bg-background',
+              ? 'text-info bg-info-bg enabled:hover:bg-info-bg'
+              : 'text-fg-muted hover:bg-bg-default',
           )}
         >
           <Bold size={14} />
@@ -333,8 +318,8 @@ export const TextNode = memo(
           className={clsx(
             'rounded p-1',
             style.fontStyle === 'italic'
-              ? 'text-theme-500 bg-theme-50 enabled:hover:bg-theme-50'
-              : 'text-muted-foreground hover:bg-background',
+              ? 'text-info bg-info-bg enabled:hover:bg-info-bg'
+              : 'text-fg-muted hover:bg-bg-default',
           )}
         >
           <Italic size={14} />
@@ -345,8 +330,8 @@ export const TextNode = memo(
           className={clsx(
             'p-1',
             textDecoration.includes('underline')
-              ? 'text-theme-500 bg-theme-50 enabled:hover:bg-theme-50'
-              : 'text-muted-foreground hover:bg-background',
+              ? 'text-info bg-info-bg enabled:hover:bg-info-bg'
+              : 'text-fg-muted hover:bg-bg-default',
           )}
         >
           <Underline size={14} />
@@ -357,8 +342,8 @@ export const TextNode = memo(
           className={clsx(
             'p-1',
             textDecoration.includes('line-through')
-              ? 'text-theme-500 bg-theme-50 enabled:hover:bg-theme-50'
-              : 'text-muted-foreground hover:bg-background',
+              ? 'text-info bg-info-bg enabled:hover:bg-info-bg'
+              : 'text-fg-muted hover:bg-bg-default',
           )}
         >
           <Strikethrough size={14} />
@@ -408,7 +393,7 @@ export const TextNode = memo(
           <textarea
             ref={textareaRef}
             className={clsx(
-              'placeholder:text-muted-foreground/30 h-full w-full resize-none overflow-hidden bg-transparent outline-none',
+              'placeholder:text-fg-subtle/30 h-full w-full resize-none overflow-hidden bg-transparent outline-none',
               isEditing
                 ? 'nodrag cursor-text'
                 : 'pointer-events-none cursor-grab select-none',
@@ -416,22 +401,8 @@ export const TextNode = memo(
             placeholder="Type..."
             value={draftContent}
             onChange={(e) => {
-              const newContent = e.target.value;
               // Update local draft state — no store write on every keystroke.
-              setDraftContent(newContent);
-
-              // Auto-update label from content when not manually renamed.
-              if (draftLabelSource !== 'user') {
-                const firstLine = newContent.split('\n')[0]?.trim() ?? '';
-                const autoLabel =
-                  firstLine.length > 40
-                    ? firstLine.slice(0, 40) + '…'
-                    : firstLine;
-                if (autoLabel) {
-                  setDraftLabel(autoLabel);
-                  setDraftLabelSource('auto');
-                }
-              }
+              setDraftContent(e.target.value);
             }}
             onBlur={handleBlur}
             readOnly={!isEditing}

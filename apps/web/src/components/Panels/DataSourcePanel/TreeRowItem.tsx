@@ -112,10 +112,10 @@ export const TreeRowItem = React.memo(
     };
 
     const bgColor = isSelected
-      ? 'bg-theme-100'
+      ? 'bg-info-bg'
       : isHighlighted
-        ? 'bg-theme-50'
-        : 'hover:bg-background';
+        ? 'bg-info-bg/50'
+        : 'hover:bg-bg-default';
 
     const mergedStyle: React.CSSProperties = {
       ...style,
@@ -139,7 +139,7 @@ export const TreeRowItem = React.memo(
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
         className={clsx(
-          'flex h-9 w-full cursor-pointer touch-none items-center gap-2 bg-white px-2',
+          'bg-surface flex h-9 w-full cursor-pointer touch-none items-center gap-2 px-2',
           className,
         )}
         {...rest}
@@ -154,7 +154,7 @@ export const TreeRowItem = React.memo(
           {isCollapsible && (
             <IconButton
               onClick={handleToggleCollapse}
-              className="text-muted-foreground hover:text-foreground shrink-0"
+              className="shrink-0"
               aria-label={isCollapsed ? 'Expand' : 'Collapse'}
               aria-expanded={!isCollapsed}
             >
@@ -167,7 +167,7 @@ export const TreeRowItem = React.memo(
           )}
 
           {/* Node type icon */}
-          <span className="text-muted-foreground pointer-events-none flex shrink-0 items-center">
+          <span className="text-fg-subtle pointer-events-none flex shrink-0 items-center">
             {icon}
           </span>
 
@@ -182,10 +182,12 @@ export const TreeRowItem = React.memo(
               onKeyDown={handleKeyDown}
               onClick={(e) => e.stopPropagation()}
               onMouseDown={(e) => e.stopPropagation()}
-              className="h-6 w-full min-w-0 flex-1 rounded-sm border bg-white px-1 text-xs outline-none"
+              className="bg-surface h-6 w-full min-w-0 flex-1 rounded-sm border px-1 text-xs outline-none"
             />
           ) : (
-            <span className="text-main truncate select-none">{label}</span>
+            <span className="text-fg-default truncate select-none">
+              {label}
+            </span>
           )}
 
           {/* Action buttons on the right */}
@@ -195,9 +197,7 @@ export const TreeRowItem = React.memo(
               <IconButton
                 onClick={handleToggleLock}
                 className={clsx(
-                  isLocked
-                    ? 'text-foreground'
-                    : 'text-muted-foreground hover:text-foreground',
+                  isLocked ? 'text-fg-default' : 'hover:text-fg-default',
                 )}
                 aria-label={isLocked ? 'Unlock' : 'Lock'}
               >

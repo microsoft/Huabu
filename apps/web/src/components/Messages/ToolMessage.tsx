@@ -538,11 +538,11 @@ function MergedAgentToolRow({
   }, [tool, entries, count]);
 
   const statusIcon = isExecuting ? (
-    <Loader2 size={12} className="text-theme-500 animate-spin" />
+    <Loader2 size={12} className="text-info animate-spin" />
   ) : isError ? (
-    <XIcon size={12} className="text-red-500" />
+    <XIcon size={12} className="text-danger" />
   ) : (
-    <Check size={12} className="text-green-600" />
+    <Check size={12} className="text-success" />
   );
 
   const icon = useMemo(() => {
@@ -611,19 +611,19 @@ function MergedAgentToolRow({
       <div className="w-full">
         <button
           type="button"
-          className="text-muted-foreground hover:bg-muted/50 flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors"
+          className="text-fg-muted hover:bg-bg-default flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs transition-colors"
           onClick={() => setIsExpanded(!isExpanded)}
         >
           {statusIcon}
-          {icon && <span className="text-muted-foreground/60">{icon}</span>}
+          {icon && <span className="text-fg-muted/60">{icon}</span>}
           <span className="flex-1 truncate">{title}</span>
           <ChevronRight
             size={10}
-            className={`text-muted-foreground/50 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+            className={`text-fg-muted/50 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
           />
         </button>
         {isExpanded && (
-          <div className="border-border/40 ml-4 flex flex-col gap-1 border-l py-1 pl-3">
+          <div className="border-edge-default/40 ml-4 flex flex-col gap-1 border-l py-1 pl-3">
             {entries.map((e, i) => {
               const d =
                 e.toolResponse.status === 'success'
@@ -635,11 +635,11 @@ function MergedAgentToolRow({
                 return (
                   <div
                     key={e.messageId}
-                    className="text-muted-foreground flex items-center gap-1.5 text-xs"
+                    className="text-fg-muted flex items-center gap-1.5 text-xs"
                   >
                     <EntryIcon
                       size={11}
-                      className="text-muted-foreground/60 flex-shrink-0"
+                      className="text-fg-muted/60 flex-shrink-0"
                     />
                     {nodeId ? (
                       <NodeRef
@@ -658,11 +658,11 @@ function MergedAgentToolRow({
                 return (
                   <div
                     key={e.messageId}
-                    className="text-muted-foreground flex items-center gap-1.5 text-xs"
+                    className="text-fg-muted flex items-center gap-1.5 text-xs"
                   >
                     <Library
                       size={11}
-                      className="text-muted-foreground/60 flex-shrink-0"
+                      className="text-fg-muted/60 flex-shrink-0"
                     />
                     <span className="truncate">
                       {truncate((d.title as string) ?? '?', 30)}
@@ -714,6 +714,7 @@ function isAgentTool(tool: string): boolean {
 }
 
 /**
+/**
  * Display for web search tool responses
  */
 function WebSearchToolDisplay({
@@ -736,7 +737,7 @@ function WebSearchToolDisplay({
   if (sources.length === 0) {
     return (
       <div className="flex justify-start">
-        <div className="text-muted-foreground border-border rounded-md border bg-white px-4 py-3 text-sm whitespace-pre-wrap">
+        <div className="text-fg-muted border-border bg-surface rounded-2xl border px-4 py-3 text-sm whitespace-pre-wrap">
           Used 0 references
         </div>
       </div>

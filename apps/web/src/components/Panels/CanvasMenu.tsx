@@ -66,7 +66,7 @@ export const CanvasMenu: React.FC = () => {
         </span>
         <input
           ref={inputRef}
-          className="text-main focus:shadow-bottom m-0 min-w-8 bg-transparent px-1 py-1 text-lg font-medium outline-none focus:rounded-md"
+          className="text-fg-default focus:shadow-bottom m-0 min-w-8 bg-transparent px-1 py-1 text-lg font-medium outline-none focus:rounded-md"
           value={canvasTitle}
           onChange={(e) => setCanvasTitle(e.target.value)}
           onKeyDown={(e) => {
@@ -88,7 +88,7 @@ export const CanvasMenu: React.FC = () => {
             <ChevronDown
               size={14}
               className={clsx(
-                'text-gray-500 transition-transform duration-150',
+                'text-fg-subtle transition-transform duration-150',
                 isOpen && 'rotate-180',
               )}
             />
@@ -134,7 +134,7 @@ export const CanvasMenu: React.FC = () => {
           >
             Redo
           </DropdownMenuItem>
-          <div className="my-1 border-t border-gray-200" />
+          <div className="border-border my-1 border-t" />
           <DropdownMenuItem
             icon={<Download size={14} />}
             onClick={() => void handleExport()}

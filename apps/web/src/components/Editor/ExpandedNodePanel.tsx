@@ -176,26 +176,22 @@ export const ExpandedNodePanel = () => {
   return (
     <div
       ref={panelRef}
-      className="border-border flex h-full w-full flex-col overflow-hidden border-l bg-white"
+      className="border-border bg-surface flex h-full w-full flex-col overflow-hidden border-l"
     >
       {/* Header bar */}
-      <div className="border-border flex h-12 shrink-0 items-center justify-between gap-3 border-b bg-white px-3">
+      <div className="border-border bg-surface flex h-12 shrink-0 items-center justify-between gap-3 border-b px-3">
         {/* Left: back button (replace mode) + icon + title */}
         <div className="flex min-w-0 items-center gap-2">
           {isReplace && (
-            <IconButton
-              className="text-muted-foreground"
-              title={backTitle}
-              onClick={activeItem.close}
-            >
+            <IconButton title={backTitle} onClick={activeItem.close}>
               <ArrowLeft size={14} />
             </IconButton>
           )}
 
-          <div className="text-muted-foreground flex min-w-0 items-center gap-2 text-sm font-medium">
+          <div className="text-fg-muted flex min-w-0 items-center gap-2 text-sm font-medium">
             <span className="truncate">{meta.title}</span>
             {activeItem.readOnly && (
-              <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-xs uppercase">
+              <span className="bg-bg-default text-fg-muted rounded px-1.5 py-0.5 text-xs uppercase">
                 Preview
               </span>
             )}
@@ -203,11 +199,9 @@ export const ExpandedNodePanel = () => {
         </div>
 
         {/* Right: mode toggle + close */}
-        <div className="text-muted-foreground flex items-center gap-1">
+        <div className="text-fg-muted flex items-center gap-1">
           <IconButton
-            className={
-              !isReplace ? 'text-main bg-muted' : 'text-muted-foreground'
-            }
+            className={!isReplace ? 'text-fg-default bg-bg-default' : ''}
             title={isReplace ? 'Split view' : 'Full view'}
             onClick={() => activeItem.setMode(isReplace ? 'split' : 'replace')}
           >
@@ -215,7 +209,6 @@ export const ExpandedNodePanel = () => {
           </IconButton>
 
           <IconButton
-            className="text-muted-foreground"
             title="Close"
             onClick={(e) => {
               e.stopPropagation();

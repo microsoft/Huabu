@@ -47,7 +47,7 @@ export const IntentSelectMessage = ({
         <button
           type="button"
           onClick={() => setIsOpen(!isOpen)}
-          className="bg-theme-50 text-theme-700 border-theme-200 hover:bg-theme-100 inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors"
+          className="bg-info-bg text-theme-700 border-theme-200 hover:bg-info-bg-hover inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors"
         >
           <Sprout size={14} />
           <span className="max-w-[200px] truncate">{selectedIntent}</span>
@@ -58,21 +58,19 @@ export const IntentSelectMessage = ({
         </button>
 
         {isOpen && (
-          <div className="border-border absolute right-0 bottom-full z-50 mb-2 w-64 overflow-hidden rounded-lg border bg-white shadow-lg">
+          <div className="border-border bg-surface absolute right-0 bottom-full z-50 mb-2 w-64 overflow-hidden rounded-lg border shadow-lg">
             {candidates.map((c, idx) => (
               <button
                 key={idx}
                 type="button"
-                className={`flex w-full flex-col px-3 py-2 text-left transition-colors hover:bg-gray-50 ${
-                  c.label === selectedIntent ? 'bg-theme-50' : ''
+                className={`hover:bg-hover flex w-full flex-col px-3 py-2 text-left transition-colors ${
+                  c.label === selectedIntent ? 'bg-info-bg' : ''
                 }`}
                 onClick={() => handleSelect(c.label)}
               >
-                <span className="text-foreground text-sm">{c.label}</span>
+                <span className="text-fg-default text-sm">{c.label}</span>
                 {c.description && (
-                  <span className="text-muted-foreground text-xs">
-                    {c.description}
-                  </span>
+                  <span className="text-fg-muted text-xs">{c.description}</span>
                 )}
               </button>
             ))}

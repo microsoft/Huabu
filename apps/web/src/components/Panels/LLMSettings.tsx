@@ -109,7 +109,7 @@ export const LLMSettings: React.FC = () => {
 
   return (
     <div className="border-border mb-3 border-t pt-3">
-      <label className="mb-1.5 block text-xs font-medium text-gray-600">
+      <label className="text-fg-muted mb-1.5 block text-xs font-medium">
         <Bot size={12} className="mr-1 inline" />
         LLM Provider
       </label>
@@ -118,7 +118,7 @@ export const LLMSettings: React.FC = () => {
       <div className="relative mb-2">
         <select
           id="llm-provider-select"
-          className="border-border w-full appearance-none rounded border bg-gray-50 py-1.5 pr-8 pl-2.5 text-sm text-gray-700 focus:ring-1 focus:ring-blue-300 focus:outline-none"
+          className="border-border bg-surface text-fg-muted focus:ring-info-light w-full appearance-none rounded border py-1.5 pr-8 pl-2.5 text-sm focus:ring-1 focus:outline-none"
           value={llmConfig?.provider ?? ''}
           onChange={(e) => void handleProviderChange(e)}
           disabled={llmSaving}
@@ -136,20 +136,20 @@ export const LLMSettings: React.FC = () => {
         </select>
         <ChevronDown
           size={14}
-          className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 text-gray-400"
+          className="text-fg-subtle pointer-events-none absolute top-1/2 right-2 -translate-y-1/2"
         />
       </div>
 
       {/* Model select / manual input */}
       {llmConfig?.provider && (
         <>
-          <label className="mb-1.5 block text-xs font-medium text-gray-600">
+          <label className="text-fg-muted mb-1.5 block text-xs font-medium">
             Model
           </label>
           {llmModels.length > 0 ? (
             <div className="relative mb-2">
               <select
-                className="border-border w-full appearance-none rounded border bg-gray-50 py-1.5 pr-8 pl-2.5 text-sm text-gray-700 focus:ring-1 focus:ring-blue-300 focus:outline-none"
+                className="border-border bg-surface text-fg-muted focus:ring-info-light w-full appearance-none rounded border py-1.5 pr-8 pl-2.5 text-sm focus:ring-1 focus:outline-none"
                 value={llmConfig?.model ?? ''}
                 onChange={(e) => void handleModelChange(e)}
                 disabled={llmSaving}
@@ -162,7 +162,7 @@ export const LLMSettings: React.FC = () => {
               </select>
               <ChevronDown
                 size={14}
-                className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 text-gray-400"
+                className="text-fg-subtle pointer-events-none absolute top-1/2 right-2 -translate-y-1/2"
               />
             </div>
           ) : (
@@ -175,7 +175,7 @@ export const LLMSettings: React.FC = () => {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') void handleManualModelSave();
                 }}
-                className="border-border flex-1 rounded border bg-white px-2 py-1.5 text-xs text-gray-700 focus:ring-1 focus:ring-blue-300 focus:outline-none"
+                className="border-border bg-surface text-fg-muted focus:ring-info-light flex-1 rounded border px-2 py-1.5 text-xs focus:ring-1 focus:outline-none"
               />
               <Button
                 variant="secondary"
@@ -194,12 +194,12 @@ export const LLMSettings: React.FC = () => {
       {llmConfig && isOAuth && (
         <>
           {oauthPending && oauthUserCode ? (
-            <div className="mb-2 rounded border border-blue-200 bg-blue-50 p-2.5">
-              <p className="mb-1.5 text-xs text-blue-700">
+            <div className="border-info-light bg-info-bg mb-2 rounded border p-2.5">
+              <p className="mb-1.5 text-xs">
                 Enter this code at the opened page:
               </p>
               <div className="mb-1.5 flex items-center gap-2">
-                <code className="rounded bg-white px-2 py-1 font-mono text-lg font-bold text-blue-900">
+                <code className="bg-surface rounded px-2 py-1 font-mono text-lg font-bold">
                   {oauthUserCode}
                 </code>
                 <IconButton
@@ -207,13 +207,13 @@ export const LLMSettings: React.FC = () => {
                   onClick={() =>
                     void navigator.clipboard.writeText(oauthUserCode)
                   }
-                  className="text-blue-500 hover:text-blue-700"
+                  className="text-info"
                 >
                   <ClipboardCopy size={14} />
                 </IconButton>
               </div>
               {oauthVerificationUri && (
-                <p className="mb-1.5 text-[11px] text-blue-600">
+                <p className="text-info mb-1.5 text-[11px]">
                   Or visit:{' '}
                   <a
                     href={oauthVerificationUri}
@@ -228,7 +228,7 @@ export const LLMSettings: React.FC = () => {
               <Button
                 variant="ghost"
                 size="sm"
-                className="text-[11px] text-blue-600"
+                className="text-info text-[11px]"
                 onClick={cancelOAuth}
               >
                 Cancel
@@ -238,10 +238,8 @@ export const LLMSettings: React.FC = () => {
             <div className="mb-2 flex items-center gap-1.5 text-xs">
               {llmConfig.authenticated ? (
                 <>
-                  <Check size={12} className="text-green-500" />
-                  <span className="text-green-600">
-                    Authenticated via GitHub
-                  </span>
+                  <Check size={12} className="text-success-light" />
+                  <span className="text-success">Authenticated via GitHub</span>
                   <Button
                     variant="ghost"
                     size="sm"
@@ -254,8 +252,8 @@ export const LLMSettings: React.FC = () => {
                 </>
               ) : (
                 <>
-                  <Key size={12} className="text-amber-500" />
-                  <span className="text-amber-600">Login required</span>
+                  <Key size={12} className="text-warning-light" />
+                  <span className="text-warning">Login required</span>
                   <Button
                     variant="ghost"
                     size="sm"
@@ -279,13 +277,13 @@ export const LLMSettings: React.FC = () => {
           <div className="mb-2 flex items-center gap-1.5 text-xs">
             {llmConfig.authenticated ? (
               <>
-                <Check size={12} className="text-green-500" />
-                <span className="text-green-600">Authenticated</span>
+                <Check size={12} className="text-success-light" />
+                <span className="text-success">Authenticated</span>
               </>
             ) : (
               <>
-                <Key size={12} className="text-amber-500" />
-                <span className="text-amber-600">API key required</span>
+                <Key size={12} className="text-warning-light" />
+                <span className="text-warning">API key required</span>
               </>
             )}
             <Button
@@ -308,7 +306,7 @@ export const LLMSettings: React.FC = () => {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') void handleSaveApiKey();
                 }}
-                className="border-border flex-1 rounded border bg-white px-2 py-1.5 text-xs text-gray-700 focus:ring-1 focus:ring-blue-300 focus:outline-none"
+                className="border-border bg-surface text-fg-muted focus:ring-info-light flex-1 rounded border px-2 py-1.5 text-xs focus:ring-1 focus:outline-none"
                 autoFocus
               />
               <Button
@@ -324,9 +322,9 @@ export const LLMSettings: React.FC = () => {
         </>
       )}
 
-      {llmError && <p className="mb-2 text-xs text-red-500">{llmError}</p>}
+      {llmError && <p className="text-danger mb-2 text-xs">{llmError}</p>}
       {llmSuccess && (
-        <p className="mb-2 text-xs text-green-600">LLM config updated!</p>
+        <p className="text-success mb-2 text-xs">LLM config updated!</p>
       )}
     </div>
   );

@@ -276,8 +276,8 @@ export const PDFPageWithOverlay = ({
 
       {/* Spinner overlay until canvas is actually painted */}
       {!rendered && (
-        <div className="absolute inset-0 flex items-center justify-center bg-neutral-50">
-          <Loader2 size={18} className="text-muted-foreground animate-spin" />
+        <div className="bg-surface absolute inset-0 flex items-center justify-center">
+          <Loader2 size={18} className="text-fg-subtle animate-spin" />
         </div>
       )}
 
@@ -287,8 +287,8 @@ export const PDFPageWithOverlay = ({
           className="pointer-events-none absolute"
           style={{
             ...selectionStyle,
-            border: '1.5px dashed rgba(99, 102, 241, 0.85)',
-            background: 'rgba(99, 102, 241, 0.08)',
+            border: '1.5px dashed var(--pdf-selection-border)',
+            background: 'var(--pdf-selection-bg)',
             borderRadius: '3px',
           }}
         />
@@ -305,7 +305,7 @@ export const PDFPageWithOverlay = ({
               top: `${r.y * 100}%`,
               width: `${r.width * 100}%`,
               height: `${r.height * 100}%`,
-              background: 'rgba(255, 235, 59, 0.5)',
+              background: 'var(--pdf-highlight-bg)',
               mixBlendMode: 'multiply',
             }}
           />

@@ -102,10 +102,10 @@ export function NodeRef({
       tabIndex={isDisabled ? -1 : 0}
       className={
         previewing
-          ? 'border-theme-300 bg-theme-50 text-theme-500 animate-preview-blink inline-flex cursor-default items-center gap-0.5 rounded border px-1 py-px align-middle text-[10px] leading-tight font-normal'
+          ? 'border-info bg-info-bg text-info animate-preview-blink inline-flex cursor-default items-center gap-0.5 rounded border px-1 py-px align-middle text-[10px] leading-tight font-normal'
           : isDisabled
-            ? 'border-border/40 text-muted-foreground/40 inline-flex cursor-not-allowed items-center gap-0.5 rounded border bg-transparent px-1 py-px align-middle text-[10px] leading-tight font-normal line-through opacity-60'
-            : 'border-border/60 hover:bg-theme-50 text-muted-foreground/80 inline-flex cursor-pointer items-center gap-0.5 rounded border bg-transparent px-1 py-px align-middle text-[10px] leading-tight font-normal'
+            ? 'border-edge-default/40 text-fg-subtle/40 inline-flex cursor-not-allowed items-center gap-0.5 rounded border bg-transparent px-1 py-px align-middle text-[10px] leading-tight font-normal line-through opacity-60'
+            : 'border-edge-default/60 hover:bg-info-bg text-fg-subtle inline-flex cursor-pointer items-center gap-0.5 rounded border bg-transparent px-1 py-px align-middle text-[10px] leading-tight font-normal'
       }
       onClick={handleClick}
       onKeyDown={(e) => {

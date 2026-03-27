@@ -31,7 +31,7 @@ export const AIMessage = ({
   return (
     <div className="flex justify-start">
       <div className="flex w-full flex-col gap-1">
-        <div className="text-main ml-1 rounded-2xl border border-none bg-white px-4 text-sm">
+        <div className="text-fg-default bg-surface ml-1 rounded-2xl border border-none px-4 text-sm">
           <div className="leading-relaxed">
             <BlockNoteCard content={content} />
           </div>
@@ -40,7 +40,7 @@ export const AIMessage = ({
         {!isStreaming && !hideActions && (
           <div className="ml-1 flex items-center gap-1 px-3">
             <IconButton
-              className="text-icon"
+              className="text-fg-subtle"
               aria-label="Add as note"
               title="Add as note"
               onClick={() => {
@@ -57,7 +57,7 @@ export const AIMessage = ({
             </IconButton>
 
             <IconButton
-              className="text-icon"
+              className="text-fg-subtle"
               aria-label="Copy message"
               title="Copy"
               onClick={() => copyToClipboard(content)}
@@ -74,7 +74,7 @@ export const AIMessage = ({
                   return (
                     <span
                       key={i}
-                      className="bg-muted text-muted-foreground inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px]"
+                      className="bg-bg-default text-fg-subtle inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px]"
                       title={r.label}
                     >
                       <Icon size={10} />

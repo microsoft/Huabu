@@ -236,9 +236,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         success: result.success,
         sourceId: result.persistence?.sourceId ?? undefined,
         suggestedLabel:
-          result.enriched?.suggestedLabel ??
-          result.extracted?.title ??
-          undefined,
+          typeof result.patch.label === 'string'
+            ? result.patch.label
+            : undefined,
         error:
           result.diagnostics
             .filter((d) => d.level === 'error')

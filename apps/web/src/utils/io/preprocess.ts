@@ -27,7 +27,6 @@ export type PreprocessHelperDeps = {
 
   setNodeIngestion: (nodeId: string, info: NodeIngestionInfo) => void;
   clearNodeIngestion: (nodeId: string) => void;
-  getNodeById: (nodeId: string) => Node | undefined;
   /** Get all direct children of a frame node. */
   getChildNodes: (frameId: string) => Node[];
   /** Silently patch node data without recording undo history. */
@@ -73,17 +72,21 @@ export function shouldPreprocessOnUpdate(
   if (!needsPreprocessing(nextType)) return false;
   if ((prevNode.type ?? '') !== nextType) return true;
 
+  const labelChanged =
+    getStringDataField(prevNode, 'label') !==
+    getStringDataField(nextNode, 'label');
+
   if (nextType === 'note' || nextType === 'text') {
     return (
       getStringDataField(prevNode, 'content') !==
-      getStringDataField(nextNode, 'content')
+        getStringDataField(nextNode, 'content') || labelChanged
     );
   }
 
   if (nextType === 'web' || nextType === 'pdf' || nextType === 'image') {
     return (
       getStringDataField(prevNode, 'src') !==
-      getStringDataField(nextNode, 'src')
+        getStringDataField(nextNode, 'src') || labelChanged
     );
   }
 
@@ -116,16 +119,15 @@ function buildSnapshot(
         return label.trim();
       })
       .filter((l) => l.length > 0);
-    return { childLabels };
+    return {
+      childLabels,
+      labelSource: (data?.labelSource as string) || undefined,
+    };
   }
 
-  const labelSource = data?.labelSource as string | undefined;
-  const isAutoLabel = !labelSource || labelSource === 'auto';
-
   return {
-    title: isAutoLabel
-      ? undefined
-      : (data?.label as string) || (data?.title as string) || undefined,
+    title: (data?.label as string) || (data?.title as string) || undefined,
+    labelSource: (data?.labelSource as string) || undefined,
     content: (data?.content as string) || undefined,
     src: (data?.src as string) || undefined,
     sourceId: (data?.sourceId as string) || undefined,
@@ -144,7 +146,6 @@ export async function preprocessNodeIfNeeded({
   node,
   setNodeIngestion,
   clearNodeIngestion,
-  getNodeById,
   getChildNodes,
   patchNodeSilent,
 }: PreprocessHelperDeps): Promise<void> {
@@ -152,16 +153,6 @@ export async function preprocessNodeIfNeeded({
   if (!needsPreprocessing(nodeType)) return;
 
   const nodeData = node.data as Record<string, unknown> | undefined;
-
-  // For image/frame nodes: never overwrite user-authored labels.
-  // This guard does NOT apply to note/text/web/pdf — those need
-  // preprocessing for content persistence regardless of label source.
-  if (
-    (nodeType === 'image' || nodeType === 'frame') &&
-    nodeData?.labelSource === 'user'
-  ) {
-    return;
-  }
 
   // For frame nodes: skip if there are no meaningful child labels.
   if (nodeType === 'frame') {
@@ -191,19 +182,15 @@ export async function preprocessNodeIfNeeded({
       snapshot,
     });
 
-    // Apply sourceId from persistence stage.
-    if (response.sourceId) {
-      patchNodeSilent(node.id, { sourceId: response.sourceId });
-    }
-
-    // Apply suggested label from enrich or extract stage.
+    // Apply results from the backend.
+    const patch: Record<string, unknown> = {};
+    if (response.sourceId) patch.sourceId = response.sourceId;
     if (response.suggestedLabel) {
-      applySuggestedLabel(
-        node.id,
-        response.suggestedLabel,
-        getNodeById,
-        patchNodeSilent,
-      );
+      patch.label = response.suggestedLabel;
+      patch.labelSource = 'auto';
+    }
+    if (Object.keys(patch).length > 0) {
+      patchNodeSilent(node.id, patch);
     }
 
     if (response.success || response.error?.includes('EMPTY_CONTENT')) {
@@ -222,30 +209,5 @@ export async function preprocessNodeIfNeeded({
       updatedAt: Date.now(),
       error: error instanceof Error ? error.message : String(error),
     });
-  }
-}
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function applySuggestedLabel(
-  nodeId: string,
-  suggestedLabel: string,
-  getNodeById: (id: string) => Node | undefined,
-  patchNodeSilent: (nodeId: string, patch: Record<string, unknown>) => void,
-): void {
-  const trimmed = suggestedLabel.trim();
-  if (trimmed.length === 0) return;
-
-  const currentNode = getNodeById(nodeId);
-  if (!currentNode) return;
-
-  const currentData = currentNode.data as Record<string, unknown> | undefined;
-  const currentLabel =
-    typeof currentData?.label === 'string' ? (currentData.label as string) : '';
-  const labelSource = currentData?.labelSource as string | undefined;
-  const isAutoLabel = !labelSource || labelSource === 'auto';
-
-  if (currentLabel.trim().length === 0 || isAutoLabel) {
-    patchNodeSilent(nodeId, { label: trimmed, labelSource: 'auto' });
   }
 }

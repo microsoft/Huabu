@@ -42,32 +42,6 @@ export interface PreviewComponentProps {
 }
 
 /** Extract an auto-title from a BlockNote document. Prefers H1, then any heading, then the first non-empty block text. */
-const extractLabelFromBlocks = (
-  blocks: Array<{
-    type: string;
-    props?: Record<string, unknown>;
-    content?: Array<{ type: string; text?: string }> | unknown;
-  }>,
-): string => {
-  const getBlockText = (block: {
-    content?: Array<{ type: string; text?: string }> | unknown;
-  }) => {
-    if (!Array.isArray(block.content)) return '';
-    return block.content
-      .filter((item) => item.type === 'text')
-      .map((item) => item.text ?? '')
-      .join('');
-  };
-
-  const h1 = blocks.find((b) => b.type === 'heading' && b.props?.level === 1);
-  const anyHeading = blocks.find((b) => b.type === 'heading');
-  const firstNonEmpty = blocks.find((b) => getBlockText(b).trim().length > 0);
-
-  const target = h1 ?? anyHeading ?? firstNonEmpty;
-  if (!target) return '';
-  return getBlockText(target).trim().slice(0, 50);
-};
-
 export const NotePreview = ({
   data,
   readOnly,
@@ -148,7 +122,6 @@ export const NotePreview = ({
   const writePatch = (
     newMarkdown: string,
     newJson: string,
-    autoLabel?: string,
     provenancePatch?: BlockProvenanceMap,
     extraPatch?: Record<string, unknown>,
   ) => {
@@ -160,10 +133,6 @@ export const NotePreview = ({
       contentJsonSource: newMarkdown,
       ...extraPatch,
     };
-    if (autoLabel !== undefined) {
-      patch.label = autoLabel;
-      patch.labelSource = 'auto';
-    }
     if (provenancePatch !== undefined) {
       patch.provenance = provenancePatch;
     }
@@ -265,7 +234,7 @@ export const NotePreview = ({
 
         if (!usedJson && !readOnly) {
           const newJson = JSON.stringify(editor.document);
-          writePatch(markdown, newJson, undefined, resolved ?? rawProvenance);
+          writePatch(markdown, newJson, resolved ?? rawProvenance);
         }
 
         // Derive diff map and deleted blocks directly from provenance.
@@ -316,9 +285,8 @@ export const NotePreview = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading]);
 
-  // Generate dynamic CSS rules for persistent per-block provenance color bars.
-  // Deep purple (--color-ai) = has pending diff to review.
-  // Light purple (--color-ai-light) = AI block already accepted / no changes.
+  // Generate dynamic CSS rules for per-block provenance color bars.
+  // Deep purple = AI block with pending diff; light purple = AI block accepted / no changes.
   const provenanceCss = useMemo(() => {
     if (!provenance) return '';
     const rules: string[] = [];
@@ -329,7 +297,6 @@ export const NotePreview = ({
       const hasDiff = blockDiffMap.has(blockId);
       if (status === 'ai') {
         const color = hasDiff ? 'var(--color-ai)' : 'var(--color-ai-light)';
-        // Use ::before for the purple bar, pushed 12px past block edge to reduce right-side gap
         rules.push(
           `.bn-block[data-id="${safeId}"] { position: relative; padding-right: 8px; }`,
         );
@@ -341,13 +308,6 @@ export const NotePreview = ({
             `.bn-block[data-id="${safeId}"]::after { content: ''; position: absolute; top: 0; right: -22px; width: 20px; height: 100%; cursor: pointer; }`,
           );
         }
-      } else if (status === 'user-modified') {
-        rules.push(
-          `.bn-block[data-id="${safeId}"] { position: relative; padding-right: 8px; }`,
-        );
-        rules.push(
-          `.bn-block[data-id="${safeId}"]::before { content: ''; position: absolute; top: 0; right: -12px; bottom: 0; width: 6px; border-radius: 1px; background: repeating-linear-gradient(to bottom, var(--color-ai-light) 0px, var(--color-ai-light) 4px, transparent 4px, transparent 8px); }`,
-        );
       }
     }
     return rules.join('\n');
@@ -420,7 +380,7 @@ export const NotePreview = ({
     const json = JSON.stringify(editor.document);
     lastAppliedMarkdownRef.current = md.trim();
     lastDocJsonRef.current = json;
-    writePatch(md.trim(), json, undefined, cleared);
+    writePatch(md.trim(), json, cleared);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor, onDataChange]);
 
@@ -467,7 +427,7 @@ export const NotePreview = ({
       const json = JSON.stringify(editor.document);
       lastAppliedMarkdownRef.current = md.trim();
       lastDocJsonRef.current = json;
-      writePatch(md.trim(), json, undefined, updated);
+      writePatch(md.trim(), json, updated);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [editor],
@@ -527,7 +487,7 @@ export const NotePreview = ({
       const json = JSON.stringify(editor.document);
       lastAppliedMarkdownRef.current = md.trim();
       lastDocJsonRef.current = json;
-      writePatch(md.trim(), json, undefined, updated);
+      writePatch(md.trim(), json, updated);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [editor],
@@ -544,11 +504,78 @@ export const NotePreview = ({
     [editor],
   );
 
+  const handleInsertBelow = useCallback(
+    (blockId: string) => {
+      const entry = provenanceRef.current?.[blockId];
+      if (entry?.baselineText === undefined) return;
+
+      // AI-added block (no prior content) — treat as accept
+      if (entry.baselineText === '') {
+        const updated = clearBaselineText(provenanceRef.current, blockId);
+        provenanceRef.current = updated;
+        setProvenance(updated);
+        setBlockDiffMap(deriveBlockDiffMap(updated));
+        setDeletedBlocks(deriveDeletedBlocks(updated));
+        onDataChange?.({ provenance: updated });
+        return;
+      }
+
+      // Capture the current AI text before restoring
+      const aiText = getBlockText(blockId);
+
+      try {
+        // Restore the block to the user's original content
+        editor.updateBlock(blockId, { content: entry.baselineText });
+        // Insert the AI content as a new block below
+        const inserted = editor.insertBlocks(
+          [{ type: 'paragraph', content: aiText }],
+          blockId,
+          'after',
+        );
+        const insertedId = inserted[0]?.id;
+
+        // Update provenance for the original block (same as reject)
+        let updated = recordUserEdits(provenanceRef.current, [blockId]);
+        updated = clearBaselineText(updated, blockId);
+
+        // Stamp provenance for the new AI block
+        if (insertedId) {
+          updated = {
+            ...updated,
+            [insertedId]: {
+              author: 'ai' as const,
+              createdAt: new Date().toISOString(),
+            },
+          };
+        }
+
+        provenanceRef.current = updated;
+        setProvenance(updated);
+        setBlockDiffMap(deriveBlockDiffMap(updated));
+        setDeletedBlocks(deriveDeletedBlocks(updated));
+
+        const md = editor.blocksToMarkdownLossy(editor.document);
+        const json = JSON.stringify(editor.document);
+        lastAppliedMarkdownRef.current = md.trim();
+        lastDocJsonRef.current = json;
+        // Sync prevBlockIdsRef so onChange doesn't treat the inserted block as new
+        prevBlockIdsRef.current = editor.document.map(
+          (b: { id: string }) => b.id,
+        );
+        writePatch(md.trim(), json, undefined, updated);
+      } catch {
+        return;
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [editor, getBlockText],
+  );
+
   return (
     <div className="relative h-full w-full">
       <div
         ref={editorContainerRef}
-        className="custom-scrollbar relative h-full w-full overflow-auto bg-white py-3"
+        className="custom-scrollbar bg-surface relative h-full w-full overflow-auto py-3"
       >
         {provenanceCss && <style>{provenanceCss}</style>}
         <NoteSourceIdProvider
@@ -652,20 +679,7 @@ export const NotePreview = ({
                 const latestJson = JSON.stringify(editor.document);
                 lastDocJsonRef.current = latestJson;
 
-                const isLabelUserSet = data.labelSource === 'user';
-                const autoLabel = isLabelUserSet
-                  ? undefined
-                  : extractLabelFromBlocks(
-                      editor.document as Parameters<
-                        typeof extractLabelFromBlocks
-                      >[0],
-                    ) || undefined;
-                writePatch(
-                  newMarkdown,
-                  latestJson,
-                  autoLabel,
-                  provenanceRef.current,
-                );
+                writePatch(newMarkdown, latestJson, provenanceRef.current);
               }, 150);
             }}
           >
@@ -681,6 +695,7 @@ export const NotePreview = ({
             getBlockText={getBlockText}
             onAcceptBlock={handleAcceptBlock}
             onRejectBlock={handleRejectBlock}
+            onInsertBelow={handleInsertBelow}
             onAcceptDeletedBlock={handleAcceptDeletedBlock}
             onRestoreBlock={handleRestoreBlock}
           />

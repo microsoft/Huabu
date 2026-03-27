@@ -173,8 +173,8 @@ export const DataSourcePanel = ({
             type="button"
             className={
               tab === 'canvas'
-                ? 'bg-background text-foreground rounded px-2 py-1'
-                : 'hover:text-foreground rounded px-2 py-1'
+                ? 'bg-bg-default text-fg-default rounded px-2 py-1'
+                : 'hover:text-fg-default text-fg-muted rounded px-2 py-1'
             }
             onClick={() => setTab('canvas')}
           >
@@ -184,8 +184,8 @@ export const DataSourcePanel = ({
             type="button"
             className={
               tab === 'sources'
-                ? 'bg-background text-foreground rounded px-2 py-1'
-                : 'hover:text-foreground rounded px-2 py-1'
+                ? 'bg-bg-default text-fg-default rounded px-2 py-1'
+                : 'hover:text-fg-default text-fg-muted rounded px-2 py-1'
             }
             onClick={() => setTab('sources')}
           >
@@ -207,12 +207,12 @@ export const DataSourcePanel = ({
               >
                 <SlidersHorizontal
                   size={16}
-                  className={sortType !== 'manual' ? 'text-blue-500' : ''}
+                  className={sortType !== 'manual' ? 'text-info' : ''}
                 />
               </IconButton>
 
               {showSortMenu && (
-                <div className="bg-popover border-border absolute top-full right-0 z-50 mt-1 w-32 rounded border py-1 shadow-lg">
+                <div className="bg-surface border-border absolute top-full right-0 z-50 mt-1 w-32 rounded border py-1 shadow-lg">
                   {[
                     { id: 'alpha', label: 'Alphabetical', desc: 'A-Z' },
                     { id: 'time', label: 'Time', desc: 'Newest' },
@@ -220,8 +220,8 @@ export const DataSourcePanel = ({
                     <button
                       key={opt.id}
                       className={clsx(
-                        'hover:bg-accent flex w-full justify-between px-3 py-1.5 text-left text-xs',
-                        sortType === opt.id && 'font-bold text-blue-500',
+                        'hover:bg-hover flex w-full justify-between px-3 py-1.5 text-left text-xs',
+                        sortType === opt.id && 'text-info font-bold',
                       )}
                       onClick={() => {
                         setSortType(opt.id as SortType);
