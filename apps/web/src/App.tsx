@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 
 import { ToastContainer } from './components/Common/Toast';
-import ButtonShowcasePage from './components/Pages/ButtonShowcasePage';
 import CanvasListPage from './components/Pages/CanvasListPage';
 import CanvasPage from './components/Pages/CanvasPage';
+import ComponentShowcasePage from './components/Pages/ComponentShowcasePage';
 import WorkspaceSetupPage from './components/Pages/WorkspaceSetupPage';
 import { useWorkspaceStore } from './store/workspaceStore';
 
@@ -49,7 +49,10 @@ export default function App() {
       <WorkspaceGuard>
         <Routes>
           <Route path="/" element={<CanvasListPage />} />
-          <Route path="/playground/buttons" element={<ButtonShowcasePage />} />
+          <Route
+            path="/playground/components"
+            element={<ComponentShowcasePage />}
+          />
           <Route path="/canvas/:canvasId" element={<CanvasPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

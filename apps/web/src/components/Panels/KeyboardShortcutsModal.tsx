@@ -1,8 +1,8 @@
 import { X } from 'lucide-react';
 
-import { Button } from './Button';
-import { Modal } from './Modal';
 import { keyboardShortcutSections } from '../../config/shortcuts';
+import { Button } from '../Common/Button';
+import { Modal } from '../Common/Modal';
 
 type KeyboardShortcutsModalProps = {
   isOpen: boolean;

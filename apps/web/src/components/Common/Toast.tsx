@@ -47,7 +47,7 @@ export function dismissToast(id: string) {
 
 const variantClasses: Record<ToastVariant, string> = {
   info: 'bg-inverse text-fg-inverse',
-  success: 'bg-inverse text-fg-inverse',
+  success: 'bg-info text-fg-inverse',
   error: 'bg-danger text-fg-inverse',
 };
 

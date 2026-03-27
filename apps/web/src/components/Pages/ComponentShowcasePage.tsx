@@ -1,0 +1,418 @@
+import {
+  Download,
+  FileText,
+  Plus,
+  Redo2,
+  Search,
+  Trash2,
+  Undo2,
+} from 'lucide-react';
+import { useState } from 'react';
+
+import { Button } from '../Common/Button';
+import { DragToCanvasHandleButton } from '../Common/DragToCanvasHandleButton';
+import { DropdownMenuItem } from '../Common/DropdownMenu';
+import { Input } from '../Common/Input';
+import { Modal } from '../Common/Modal';
+import { Popover } from '../Common/Popover';
+import { toast } from '../Common/Toast';
+import { Tooltip } from '../Common/Tooltip';
+import { Header } from '../Panels/Header';
+
+// ─── Button constants ───────────────────────────────────────────────────────
+
+const variants = ['solid', 'outline', 'ghost'] as const;
+const shapes = ['default', 'pill'] as const;
+const tones = ['neutral', 'info', 'danger'] as const;
+const sizes = ['sm', 'md'] as const;
+
+const toneDescriptions: Record<(typeof tones)[number], string> = {
+  neutral: 'Default action styling for standard actions',
+  info: 'Highlighted action styling for primary actions',
+  danger: 'Destructive styling for risky actions',
+};
+
+const variantDescriptions: Record<(typeof variants)[number], string> = {
+  solid: 'Filled buttons with the strongest visual weight.',
+  outline: 'Bordered buttons for secondary actions and quiet emphasis.',
+  ghost: 'Minimal buttons for toolbars, menus, and low-emphasis actions.',
+};
+
+// ─── Shared layout helpers ──────────────────────────────────────────────────
+
+function Section({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="border-border bg-surface overflow-hidden rounded-lg border">
+      <div className="border-border border-b px-6 py-4">
+        <h2 className="text-fg-default text-sm font-semibold">{title}</h2>
+        <p className="text-fg-muted mt-1 text-sm">{description}</p>
+      </div>
+      <div className="px-6 py-5">{children}</div>
+    </section>
+  );
+}
+
+function SubSection({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="bg-bg-default rounded-lg p-4">
+      <p className="text-fg-muted mb-3 text-xs font-medium">{label}</p>
+      <div className="flex flex-wrap items-center gap-3">{children}</div>
+    </div>
+  );
+}
+
+// ─── Stateful sections ──────────────────────────────────────────────────────
+
+function PopoverDemo() {
+  const [isOpen, setIsOpen] = useState(false);
+  const [anchor, setAnchor] = useState<{ x: number; y: number } | null>(null);
+
+  const handleToggle = (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (isOpen) {
+      setIsOpen(false);
+    } else {
+      const rect = e.currentTarget.getBoundingClientRect();
+      setAnchor({ x: rect.left, y: rect.bottom });
+      setIsOpen(true);
+    }
+  };
+
+  return (
+    <SubSection label="Click to toggle">
+      <Button variant="outline" onClick={handleToggle}>
+        Toggle Popover
+      </Button>
+      {isOpen && anchor && (
+        <Popover
+          position={anchor}
+          onDismiss={() => setIsOpen(false)}
+          offset={{ x: 0, y: 6 }}
+          className="w-64 p-4"
+        >
+          <p className="text-fg-default text-sm font-medium">Popover content</p>
+          <p className="text-fg-muted mt-1 text-sm">
+            Click outside or press Escape to dismiss.
+          </p>
+        </Popover>
+      )}
+    </SubSection>
+  );
+}
+
+function ModalDemo() {
+  const [isOpen, setIsOpen] = useState(false);
+
+  return (
+    <SubSection label="Click to open">
+      <Button variant="outline" onClick={() => setIsOpen(true)}>
+        Open Modal
+      </Button>
+      <Modal
+        isOpen={isOpen}
+        onClose={() => setIsOpen(false)}
+        title="Example Modal"
+        description="This is a modal with title, description, and footer."
+        footer={
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="solid"
+              tone="info"
+              size="sm"
+              onClick={() => setIsOpen(false)}
+            >
+              Confirm
+            </Button>
+          </>
+        }
+      >
+        <p className="text-fg-muted text-sm">Modal body content goes here.</p>
+      </Modal>
+    </SubSection>
+  );
+}
+
+// ─── Main page ──────────────────────────────────────────────────────────────
+
+export default function ComponentShowcasePage() {
+  return (
+    <div className="bg-bg-default flex h-full min-h-0 flex-col">
+      <Header>
+        <div className="flex min-w-0 items-center gap-3">
+          <h1 className="text-fg-default text-lg font-semibold">
+            Common Component Showcase
+          </h1>
+        </div>
+      </Header>
+
+      <main className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 py-8">
+          {/* ────────────────────── Button ────────────────────── */}
+          <Section
+            title="Button"
+            description="Variant x Shape x Tone x Size matrix (36 text + 36 iconOnly combinations). Disabled states at the end."
+          >
+            <div className="space-y-6">
+              {variants.map((variant) => (
+                <div key={variant}>
+                  <p className="text-fg-default mb-1 text-sm font-medium capitalize">
+                    {variant}
+                  </p>
+                  <p className="text-fg-muted mb-3 text-xs">
+                    {variantDescriptions[variant]}
+                  </p>
+
+                  <div className="space-y-3">
+                    {shapes.map((shape) => (
+                      <div key={shape} className="bg-bg-default rounded-lg p-4">
+                        <p className="text-fg-muted mb-3 text-xs font-medium">
+                          shape=&quot;{shape}&quot;
+                        </p>
+                        <div className="space-y-3">
+                          {tones.map((tone) => (
+                            <div key={`${variant}-${shape}-${tone}`}>
+                              <p className="text-fg-subtle mb-2 text-xs">
+                                tone=&quot;{tone}&quot; &mdash;{' '}
+                                {toneDescriptions[tone]}
+                              </p>
+                              <div className="flex flex-wrap items-center gap-2">
+                                {sizes.map((size) => (
+                                  <Button
+                                    key={`text-${size}`}
+                                    variant={variant}
+                                    shape={shape}
+                                    tone={tone}
+                                    size={size}
+                                  >
+                                    {tone === 'danger' ? (
+                                      <Trash2 />
+                                    ) : tone === 'info' ? (
+                                      <Plus />
+                                    ) : (
+                                      <Search />
+                                    )}
+                                    {size.toUpperCase()}
+                                  </Button>
+                                ))}
+                                {sizes.map((size) => (
+                                  <Button
+                                    key={`icon-${size}`}
+                                    variant={variant}
+                                    shape={shape}
+                                    tone={tone}
+                                    size={size}
+                                    iconOnly
+                                    title={`${variant} ${shape} ${tone} ${size} iconOnly`}
+                                  >
+                                    {tone === 'danger' ? (
+                                      <Trash2 />
+                                    ) : tone === 'info' ? (
+                                      <Plus />
+                                    ) : (
+                                      <Search />
+                                    )}
+                                  </Button>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+
+              <SubSection label="Disabled states">
+                <Button variant="solid" disabled>
+                  Disabled solid
+                </Button>
+                <Button variant="outline" tone="info" disabled>
+                  Disabled outline
+                </Button>
+                <Button variant="ghost" tone="danger" disabled>
+                  Disabled ghost
+                </Button>
+              </SubSection>
+            </div>
+          </Section>
+
+          {/* ────────────────────── Input ────────────────────── */}
+          <Section
+            title="Input"
+            description="Drop-in <input> replacement. Renders the title prop as a Tooltip instead of native browser tooltip."
+          >
+            <div className="grid gap-4 sm:grid-cols-2">
+              <SubSection label="Default">
+                <Input
+                  placeholder="Type something..."
+                  className="border-border bg-surface text-fg-default w-full rounded-md border px-3 py-1.5 text-sm outline-none"
+                />
+              </SubSection>
+              <SubSection label="With title (hover for tooltip)">
+                <Input
+                  placeholder="Hover me"
+                  title="This tooltip comes from the title prop"
+                  className="border-border bg-surface text-fg-default w-full rounded-md border px-3 py-1.5 text-sm outline-none"
+                />
+              </SubSection>
+              <SubSection label="Disabled">
+                <Input
+                  placeholder="Disabled input"
+                  disabled
+                  className="border-border bg-surface text-fg-default w-full rounded-md border px-3 py-1.5 text-sm outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                />
+              </SubSection>
+              <SubSection label="With value">
+                <Input
+                  defaultValue="Pre-filled value"
+                  className="border-border bg-surface text-fg-default w-full rounded-md border px-3 py-1.5 text-sm outline-none"
+                />
+              </SubSection>
+            </div>
+          </Section>
+
+          {/* ────────────── DragToCanvasHandleButton ──────────── */}
+          <Section
+            title="DragToCanvasHandleButton"
+            description="Draggable grip-handle button built on Button ghost + iconOnly. Used for drag-to-canvas interactions."
+          >
+            <div className="flex flex-wrap gap-4">
+              <SubSection label="Default (icon-only)">
+                <DragToCanvasHandleButton title="Drag to canvas" />
+              </SubSection>
+              <SubSection label="With children">
+                <DragToCanvasHandleButton title="Drag text to canvas">
+                  <FileText size={14} />
+                </DragToCanvasHandleButton>
+              </SubSection>
+            </div>
+          </Section>
+
+          {/* ────────────────── DropdownMenuItem ──────────────── */}
+          <Section
+            title="DropdownMenuItem"
+            description="Styled menu item using Button ghost + role=menuitem. Supports icon, label, shortcut hint, and disabled state."
+          >
+            <SubSection label="Simulated menu panel">
+              <div className="border-border bg-surface w-56 overflow-hidden rounded-md border py-1 shadow-lg">
+                <DropdownMenuItem icon={<Undo2 size={14} />}>
+                  Undo
+                </DropdownMenuItem>
+                <DropdownMenuItem icon={<Redo2 size={14} />}>
+                  Redo
+                </DropdownMenuItem>
+                <div className="border-border my-1 border-t" />
+                <DropdownMenuItem
+                  icon={<Download size={14} />}
+                  shortcut="Ctrl+E"
+                >
+                  Export Canvas
+                </DropdownMenuItem>
+                <DropdownMenuItem icon={<Trash2 size={14} />} disabled>
+                  Delete (disabled)
+                </DropdownMenuItem>
+              </div>
+            </SubSection>
+          </Section>
+
+          {/* ────────────────────── Tooltip ───────────────────── */}
+          <Section
+            title="Tooltip"
+            description="Portal-based tooltip on hover/focus. Positioned above (preferred) or below. Auto-disabled when content is empty."
+          >
+            <SubSection label="Hover each button">
+              <Tooltip content="Short tip">
+                <Button variant="outline" size="sm">
+                  Short tooltip
+                </Button>
+              </Tooltip>
+              <Tooltip content="This is a longer tooltip message that demonstrates wrapping behavior">
+                <Button variant="outline" size="sm">
+                  Long tooltip
+                </Button>
+              </Tooltip>
+              <Tooltip content="">
+                <Button variant="outline" size="sm">
+                  Empty content (no tooltip)
+                </Button>
+              </Tooltip>
+            </SubSection>
+          </Section>
+
+          {/* ────────────────────── Popover ───────────────────── */}
+          <Section
+            title="Popover"
+            description="Portal-based floating panel. Fixed positioning with viewport clamping. Dismisses on outside click or Escape."
+          >
+            <PopoverDemo />
+          </Section>
+
+          {/* ────────────────────── Modal ─────────────────────── */}
+          <Section
+            title="Modal"
+            description="Accessible dialog with backdrop blur, scroll lock, focus trap, and Escape/backdrop dismiss."
+          >
+            <ModalDemo />
+          </Section>
+
+          {/* ────────────────────── Toast ─────────────────────── */}
+          <Section
+            title="Toast"
+            description="Imperative toast via toast() function. Three variants: info, success, error. Auto-dismisses after 3 seconds."
+          >
+            <SubSection label="Click to trigger">
+              <Button
+                variant="solid"
+                size="sm"
+                onClick={() => toast('This is an info toast')}
+              >
+                Info toast
+              </Button>
+              <Button
+                variant="solid"
+                tone="info"
+                size="sm"
+                onClick={() =>
+                  toast('Operation completed!', { variant: 'success' })
+                }
+              >
+                Success toast
+              </Button>
+              <Button
+                variant="solid"
+                tone="danger"
+                size="sm"
+                onClick={() =>
+                  toast('Something went wrong', { variant: 'error' })
+                }
+              >
+                Error toast
+              </Button>
+            </SubSection>
+          </Section>
+        </div>
+      </main>
+    </div>
+  );
+}
