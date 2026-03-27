@@ -29,6 +29,7 @@ import type { CanvasChange } from '../../hooks/useCanvasChanges';
 import type { CanvasCommand, CanvasNodeType } from '@sediment/shared';
 import type { ToolResponse, WebSearchToolResponse } from '@sediment/shared';
 
+// TODO: many status icons
 // ==================== Helpers ====================
 
 const truncate = (s: string, n: number) =>
@@ -256,35 +257,23 @@ function CanvasCommandCard({
                 ) : (
                   <ChevronDown size={14} />
                 )}
-                <Command size={12} className="text-muted-foreground/60" />
                 Canvas changes ({canvasChanges.length})
               </button>
               <div className="flex items-center gap-1">
-                <Button
-                  onClick={clearAllChanges}
-                  variant="secondary"
-                  size="sm"
-                  className="gap-1 px-1.5 py-0.5 text-[10px]"
-                >
+                <Button onClick={clearAllChanges} variant="outline" size="sm">
                   Keep all
                 </Button>
-                <Button
-                  onClick={revertAllChanges}
-                  variant="secondary"
-                  size="sm"
-                  className="gap-1 px-1.5 py-0.5 text-[10px]"
-                >
+                <Button onClick={revertAllChanges} variant="outline" size="sm">
                   Revert all
                 </Button>
-                <Button
+                <IconButton
                   onPointerDown={handlePreviewAllDown}
                   onPointerUp={handlePreviewUp}
                   onPointerLeave={handlePreviewUp}
                   variant="ghost"
-                  size="sm"
                 >
                   <Blend size={12} />
-                </Button>
+                </IconButton>
               </div>
             </div>
 
@@ -351,7 +340,7 @@ function CanvasCommandCard({
                         <IconButton
                           onClick={() => removeChange(change.id)}
                           title="Keep this change"
-                          className="text-muted-foreground/40 hover:text-green-600"
+                          className="text-muted-foreground/40 hover:text-success"
                         >
                           <Check size={12} />
                         </IconButton>
@@ -363,7 +352,7 @@ function CanvasCommandCard({
                               ? 'Revert this change'
                               : 'Cannot revert this change'
                           }
-                          className="text-muted-foreground/40 hover:text-red-600"
+                          className="text-muted-foreground/40 hover:text-danger"
                         >
                           <Undo2 size={12} />
                         </IconButton>
@@ -373,7 +362,7 @@ function CanvasCommandCard({
                           onPointerLeave={handlePreviewUp}
                           disabled={!change.revertible}
                           title="Hold to preview before"
-                          className="text-muted-foreground/40 hover:text-blue-500"
+                          className="text-muted-foreground/40 hover:text-info"
                         >
                           <Blend size={12} />
                         </IconButton>
@@ -400,9 +389,9 @@ function CanvasCommandCard({
         : `Canvas: ${count} commands`;
 
   const statusIcon = isExecuting ? (
-    <Loader2 size={12} className="text-theme-500 animate-spin" />
+    <Loader2 size={12} className="text-info animate-spin" />
   ) : (
-    <Check size={12} className="text-green-600" />
+    <Check size={12} className="text-fg-muted" />
   );
 
   if (count <= 1) {
@@ -448,7 +437,7 @@ function CanvasCommandCard({
                 key={idx}
                 className="text-muted-foreground flex items-center gap-1.5 text-xs"
               >
-                <Check size={10} className="flex-shrink-0 text-green-600/60" />
+                <Check size={10} className="text-fg-muted flex-shrink-0" />
                 <span className="truncate">
                   {(cmd.type as string) ?? 'unknown'}
                 </span>
@@ -540,7 +529,7 @@ function MergedAgentToolRow({
   ) : isError ? (
     <XIcon size={12} className="text-danger" />
   ) : (
-    <Check size={12} className="text-success" />
+    <Check size={12} className="text-fg-muted" />
   );
 
   const icon = useMemo(() => {
@@ -749,11 +738,12 @@ function WebSearchToolDisplay({
       <div className="flex w-full flex-col items-start gap-2">
         <Button
           variant="ghost"
+          tone="neutral"
           aria-expanded={isExpanded}
           aria-label={`Toggle sources (${count} ${label})`}
           onClick={() => setIsExpanded((v) => !v)}
         >
-          {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          {isExpanded ? <ChevronDown /> : <ChevronRight />}
           <span className="mr-1 ml-2">
             Used {count} {label}
           </span>

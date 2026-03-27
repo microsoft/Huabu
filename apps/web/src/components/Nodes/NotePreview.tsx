@@ -703,10 +703,20 @@ export const NotePreview = ({
       </div>
       {!readOnly && hasAnyPendingDiff(provenance) && (
         <div className="absolute right-4 bottom-4 flex items-center gap-1">
-          <Button variant="secondary" size="sm" onClick={handleRejectAll}>
+          <Button
+            variant="outline"
+            tone="neutral"
+            size="sm"
+            onClick={handleRejectAll}
+          >
             Reject All
           </Button>
-          <Button variant="primary" size="sm" onClick={handleAcceptAll}>
+          <Button
+            variant="solid"
+            tone="info"
+            size="sm"
+            onClick={handleAcceptAll}
+          >
             Accept All
           </Button>
         </div>

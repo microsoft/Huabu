@@ -28,6 +28,7 @@ export const DropdownMenuItem: React.FC<DropdownMenuItemProps> = ({
 }) => (
   <Button
     variant="ghost"
+    tone="neutral"
     role="menuitem"
     className={cn(
       'text-fg-muted w-full justify-start gap-3 rounded-none px-4 py-2 text-sm',

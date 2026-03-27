@@ -18,6 +18,7 @@ import React, {
 } from 'react';
 import { createPortal } from 'react-dom';
 
+import { cn } from '@/components/Common/cn.ts';
 import { Tooltip } from '@/components/Common/Tooltip.tsx';
 import { useCornerZoomResize } from '@/hooks/useCornerZoomResize.ts';
 import useCanvasStore from '@/store/canvasStore.ts';
@@ -306,7 +307,7 @@ export const NodeWrapper = memo(
         )}
 
         <div
-          className={clsx(
+          className={cn(
             'group relative flex h-full w-full flex-col rounded shadow transition-all duration-120',
             'style' in data && data.style?.backgroundColor
               ? data.style.backgroundColor

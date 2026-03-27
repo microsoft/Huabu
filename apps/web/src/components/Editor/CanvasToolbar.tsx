@@ -325,10 +325,14 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
         onClose={() => setActiveModal(null)}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setActiveModal(null)}>
+            <Button
+              variant="outline"
+              tone="neutral"
+              onClick={() => setActiveModal(null)}
+            >
               Cancel
             </Button>
-            <Button variant="primary" onClick={handleLinkSubmit}>
+            <Button variant="solid" tone="info" onClick={handleLinkSubmit}>
               Confirm
             </Button>
           </>

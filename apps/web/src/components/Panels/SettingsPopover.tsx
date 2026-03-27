@@ -1,4 +1,4 @@
-import { FolderOpen, History, Settings, X } from 'lucide-react';
+import { FolderOpen, Settings, X } from 'lucide-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 import { LLMSettings } from './LLMSettings';
@@ -185,7 +185,8 @@ export const SettingsPopover: React.FC = () => {
               {workspacePath || 'Not configured'}
             </span>
             <Button
-              variant="secondary"
+              variant="ghost"
+              tone="neutral"
               size="sm"
               onClick={() => void handlePickFolder()}
               disabled={isLoading}
@@ -207,8 +208,8 @@ export const SettingsPopover: React.FC = () => {
           {/* Recent workspaces */}
           {recentWorkspaces.filter((p) => p !== workspacePath).length > 0 && (
             <div className="mb-3 overflow-hidden">
-              <div className="text-fg-subtle mb-1.5 flex items-center gap-1 text-[11px] font-medium">
-                <History size={10} />
+              <div className="text-fg-muted mb-1 flex items-center gap-1 text-xs font-medium">
+                <FolderOpen size={12} />
                 <span>Recent</span>
               </div>
               <ul className="space-y-0.5 overflow-hidden">
@@ -221,23 +222,19 @@ export const SettingsPopover: React.FC = () => {
                     >
                       <Button
                         variant="ghost"
+                        tone="neutral"
+                        size="sm"
                         onClick={() => void handleSelectRecent(path)}
                         disabled={isLoading}
-                        className="min-w-0 flex-1 justify-start gap-1.5 overflow-hidden"
+                        className="min-w-0 flex-1 justify-start overflow-hidden"
                         title={path}
-                        tooltipWrapperClassName="flex min-w-0 flex-1 overflow-hidden"
+                        tooltipWrapperClassName="min-w-0 flex-1 overflow-hidden"
                       >
-                        <FolderOpen
-                          size={12}
-                          className="text-fg-subtle shrink-0"
-                        />
-                        <span className="text-fg-subtle block truncate text-xs">
-                          {path}
-                        </span>
+                        <span className="block truncate">{path}</span>
                       </Button>
                       <IconButton
                         onClick={() => removeRecentWorkspace(path)}
-                        className="text-fg-subtle hover:text-fg-subtle shrink-0 p-0.5 opacity-0 transition-all group-hover:opacity-100"
+                        className="text-fg-subtle shrink-0 p-0.5 opacity-0 group-hover:opacity-100"
                         title="Remove from recent"
                       >
                         <X size={12} />
@@ -252,7 +249,12 @@ export const SettingsPopover: React.FC = () => {
           <LLMSettings />
 
           <div className="flex justify-end">
-            <Button variant="secondary" size="sm" onClick={handleClose}>
+            <Button
+              variant="outline"
+              tone="neutral"
+              size="sm"
+              onClick={handleClose}
+            >
               Close
             </Button>
           </div>

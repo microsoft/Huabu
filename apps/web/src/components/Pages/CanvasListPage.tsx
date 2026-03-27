@@ -176,7 +176,8 @@ export default function CanvasListPage() {
         footer={
           <>
             <Button
-              variant="secondary"
+              variant="outline"
+              tone="neutral"
               size="md"
               onClick={closeDeleteModal}
               disabled={isDeleting}
@@ -185,7 +186,8 @@ export default function CanvasListPage() {
             </Button>
             <Button
               ref={confirmDeleteButtonRef}
-              variant="danger"
+              variant="solid"
+              tone="danger"
               size="md"
               onClick={() => void confirmDelete()}
               disabled={isDeleting}
@@ -233,28 +235,27 @@ export default function CanvasListPage() {
           </div>
           <div className="flex items-center gap-2">
             <Button
-              variant="secondary"
+              variant="outline"
+              tone="neutral"
               onClick={handleImportClick}
               disabled={isImporting}
-              className="gap-2 rounded-lg px-3 py-2"
             >
               {isImporting ? (
                 <span className="border-fg-subtle inline-block h-4 w-4 animate-spin rounded-full border-2 border-t-transparent" />
               ) : (
-                <Upload size={16} />
+                <Upload />
               )}
               Import
             </Button>
             <Button
-              variant="primary"
+              variant="solid"
               onClick={handleCreate}
               disabled={isCreating}
-              className="bg-inverse text-fg-inverse hover:bg-inverse/80 gap-2 rounded-lg px-3 py-2"
             >
               {isCreating ? (
                 <span className="border-fg-inverse inline-block h-4 w-4 animate-spin rounded-full border-2 border-t-transparent" />
               ) : (
-                <Plus size={16} />
+                <Plus />
               )}
               New Canvas
             </Button>
@@ -270,6 +271,7 @@ export default function CanvasListPage() {
             <p className="text-fg-subtle text-sm">No canvases yet.</p>
             <Button
               variant="ghost"
+              tone="neutral"
               onClick={handleCreate}
               disabled={isCreating}
               className="text-fg-default hover:text-fg-muted mt-4 text-sm font-medium underline"

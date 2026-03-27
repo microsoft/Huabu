@@ -178,7 +178,8 @@ export const LLMSettings: React.FC = () => {
                 className="border-border bg-surface text-fg-muted focus:ring-info-light flex-1 rounded border px-2 py-1.5 text-xs focus:ring-1 focus:outline-none"
               />
               <Button
-                variant="secondary"
+                variant="outline"
+                tone="neutral"
                 size="sm"
                 onClick={() => void handleManualModelSave()}
                 disabled={!manualModel.trim() || llmSaving}
@@ -227,8 +228,8 @@ export const LLMSettings: React.FC = () => {
               )}
               <Button
                 variant="ghost"
+                tone="info"
                 size="sm"
-                className="text-info text-[11px]"
                 onClick={cancelOAuth}
               >
                 Cancel
@@ -242,11 +243,12 @@ export const LLMSettings: React.FC = () => {
                   <span className="text-success">Authenticated via GitHub</span>
                   <Button
                     variant="ghost"
+                    tone="neutral"
                     size="sm"
-                    className="ml-auto text-[11px]"
+                    className="ml-auto"
                     onClick={() => void llmLogoutOAuth()}
                   >
-                    <LogOut size={11} className="mr-0.5" />
+                    <LogOut />
                     Logout
                   </Button>
                 </>
@@ -256,12 +258,13 @@ export const LLMSettings: React.FC = () => {
                   <span className="text-warning">Login required</span>
                   <Button
                     variant="ghost"
+                    tone="neutral"
                     size="sm"
-                    className="ml-auto text-[11px]"
+                    className="ml-auto"
                     onClick={() => void startOAuth()}
                     disabled={oauthPending}
                   >
-                    <LogIn size={11} className="mr-0.5" />
+                    <LogIn />
                     Login with GitHub
                   </Button>
                 </>
@@ -288,6 +291,7 @@ export const LLMSettings: React.FC = () => {
             )}
             <Button
               variant="ghost"
+              tone="neutral"
               size="sm"
               className="ml-auto text-[11px]"
               onClick={() => setShowApiKeyInput(!showApiKeyInput)}
@@ -310,7 +314,8 @@ export const LLMSettings: React.FC = () => {
                 autoFocus
               />
               <Button
-                variant="secondary"
+                variant="outline"
+                tone="neutral"
                 size="sm"
                 onClick={() => void handleSaveApiKey()}
                 disabled={!apiKeyValue.trim() || llmSaving}

@@ -141,14 +141,19 @@ const DiffPopover = ({
     <div className="mb-2 text-xs leading-relaxed">{children}</div>
     <div className="flex justify-end gap-1">
       {onInsertBelow && (
-        <Button variant="secondary" size="sm" onClick={onInsertBelow}>
+        <Button
+          variant="outline"
+          tone="neutral"
+          size="sm"
+          onClick={onInsertBelow}
+        >
           Insert Below
         </Button>
       )}
-      <Button variant="secondary" size="sm" onClick={onReject}>
+      <Button variant="outline" tone="neutral" size="sm" onClick={onReject}>
         Reject
       </Button>
-      <Button variant="primary" size="sm" onClick={onAccept}>
+      <Button variant="solid" tone="info" size="sm" onClick={onAccept}>
         Accept
       </Button>
     </div>

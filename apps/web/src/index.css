@@ -17,7 +17,7 @@
   /* Backgrounds */
   --bg-default: #f5f5f5;
   --bg-surface: #ffffff;
-  --bg-hover: #efefef;
+  --bg-hover: #f2f2f2;
   --bg-inverse: #1f1f1f;
 
   /* Borders */
@@ -35,13 +35,13 @@
   --success-bg: #f0fdf4;
 
   /* Status: warning */
-  --warning: #d97706;
-  --warning-light: #f59e0b;
+  --warning: #d97a2b;
+  --warning-light: #f7c85c;
 
   /* Status: danger */
-  --danger: #dc2626;
-  --danger-light: #f87171;
-  --danger-bg: #fff7f8;
+  --danger: #e43636;
+  --danger-light: #cf8181;
+  --danger-bg: #fcf8f8;
   --danger-bg-hover: #fee2e2;
 
   /* AI colors */
@@ -57,9 +57,9 @@
 
   /* Special purpose */
   --canvas-grid: #cccccc;
-  --pdf-selection-border: rgba(99, 102, 241, 0.85);
-  --pdf-selection-bg: rgba(99, 102, 241, 0.08);
-  --pdf-highlight-bg: rgba(255, 235, 59, 0.5);
+  --pdf-selection-border: var(--info);
+  --pdf-selection-bg: color-mix(in srgb, var(--info) 12%, transparent);
+  --pdf-highlight-bg: color-mix(in srgb, var(--warning-light) 45%, transparent);
   --shimmer-1: #d1d5db;
   --shimmer-2: #6b7280;
   --shimmer-3: #4b5563;
@@ -297,12 +297,12 @@ body,
 }
 
 /* Keep pdf.js text-layer spans invisible during text selection so the
-   HTML text (which uses system fonts) doesn't bleed through the canvas
-   rendering that shows the actual PDF fonts.  A semi-transparent background
-   still shows the user which region is selected. */
+  HTML text (which uses system fonts) doesn't bleed through the canvas
+  rendering that shows the actual PDF fonts.  A semi-transparent background
+  still shows the user which region is selected. */
 .textLayer span::selection {
   color: transparent;
-  background: var(--pdf-selection-bg);
+  background: color-mix(in srgb, var(--pdf-highlight-bg) 45%, transparent);
 }
 
 .block-note-view-readonly .bn-editor {
