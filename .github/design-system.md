@@ -41,7 +41,8 @@ START
 │  ├─ Tooltip        → <Tooltip>
 │  ├─ Modal / dialog → <Modal>
 │  ├─ Popover        → <Popover>
-│  └─ Dropdown menu  → <DropdownMenu> + <DropdownMenuItem>
+│  ├─ Dropdown menu  → <DropdownMenu> + <DropdownMenuItem>
+│  └─ Select         → <Select> (single-value picker with trigger button)
 │  (all portal-based, handle positioning & dismissal internally)
 │
 ├─ Is it a loading indicator?
@@ -340,19 +341,23 @@ DragHandle: hidden by default, `opacity-0 group-hover:opacity-100`.
 
 #### Popover
 
-| Property       | Value                                                                 |
-| -------------- | --------------------------------------------------------------------- |
-| Surface        | `rounded-lg border border-edge-default bg-surface shadow-lg w-80 p-4` |
-| Position       | `fixed`, anchored below trigger + 6px, right-aligned                  |
-| Implementation | `createPortal(…, document.body)`                                      |
+| Property       | Value                                                                                       |
+| -------------- | ------------------------------------------------------------------------------------------- |
+| Surface        | `rounded-lg border border-edge-default bg-surface shadow-lg` + size/padding per use case    |
+| Position       | `fixed`, configurable via `anchor` (`top-left`, `top-right`, `bottom-left`, `bottom-right`) |
+| Implementation | `createPortal(…, document.body)`                                                            |
 
-#### Dropdown Menu
+#### Dropdown Menu / Select
 
-| Property    | Value                                                          |
-| ----------- | -------------------------------------------------------------- |
-| Surface     | `rounded border border-edge-default bg-surface shadow-lg py-1` |
-| Item        | `px-3 py-1.5 text-xs hover:bg-accent w-full text-left`         |
-| Active item | add `font-bold text-info`                                      |
+Both `<DropdownMenu>` and `<Select>` use `<Popover>` internally and share a unified
+`align` prop (`bottom-left`, `bottom-right`, `top-left`, `top-right`) for panel placement
+relative to the trigger.
+
+| Property    | Value                                                           |
+| ----------- | --------------------------------------------------------------- |
+| Surface     | `rounded border border-edge-default bg-surface shadow-lg py-1`  |
+| Item        | `px-4 py-2 text-sm text-fg-muted w-full justify-start`          |
+| Active item | `bg-info-bg` (DropdownMenu) / `text-info` + check icon (Select) |
 
 ---
 
@@ -539,19 +544,6 @@ Centered message + optional action for zero-data states.
 | `message`   | `string`    | —       | Primary message text                   |
 | `action`    | `ReactNode` | —       | Optional action rendered below message |
 | `className` | `string`    | —       | Additional container classes           |
-
-#### Loading Ellipsis (chat)
-
-`<Ellipsis className="text-fg-subtle animate-pulse" />`
-
-#### Badge
-
-`bg-muted text-fg-subtle rounded px-1.5 py-0.5 text-[10px] uppercase`
-
-#### Progress Bar
-
-Track: `h-1.5 w-full rounded-full` + status bg (e.g. `bg-blue-200`).
-Fill: `h-full rounded-full transition-all duration-300` + status color (e.g. `bg-blue-600`).
 
 ---
 
