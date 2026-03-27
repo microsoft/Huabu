@@ -72,7 +72,7 @@ interface ToolMessageGroupProps {
 export function ToolMessageGroup({ entries }: ToolMessageGroupProps) {
   if (entries.length === 0) return null;
 
-  const first = entries[0]!;
+  const first = entries[0];
   const tool = first.toolResponse.tool;
 
   // Non-agent tools: render individually
@@ -713,7 +713,6 @@ function isAgentTool(tool: string): boolean {
   ].includes(tool);
 }
 
-/**
 /**
  * Display for web search tool responses
  */
