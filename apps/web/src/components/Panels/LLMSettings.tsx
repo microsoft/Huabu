@@ -228,9 +228,8 @@ export const LLMSettings: React.FC = () => {
               )}
               <Button
                 variant="ghost"
-                tone="neutral"
+                tone="info"
                 size="sm"
-                className="text-info text-[11px]"
                 onClick={cancelOAuth}
               >
                 Cancel
@@ -246,10 +245,10 @@ export const LLMSettings: React.FC = () => {
                     variant="ghost"
                     tone="neutral"
                     size="sm"
-                    className="ml-auto text-[11px]"
+                    className="ml-auto"
                     onClick={() => void llmLogoutOAuth()}
                   >
-                    <LogOut size={11} className="mr-0.5" />
+                    <LogOut />
                     Logout
                   </Button>
                 </>
@@ -261,11 +260,11 @@ export const LLMSettings: React.FC = () => {
                     variant="ghost"
                     tone="neutral"
                     size="sm"
-                    className="ml-auto text-[11px]"
+                    className="ml-auto"
                     onClick={() => void startOAuth()}
                     disabled={oauthPending}
                   >
-                    <LogIn size={11} className="mr-0.5" />
+                    <LogIn />
                     Login with GitHub
                   </Button>
                 </>

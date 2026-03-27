@@ -44,10 +44,11 @@ export const IntentSelectMessage = ({
   return (
     <div className="flex justify-end">
       <div ref={containerRef} className="relative">
+        {/* TODO: replace Button */}
         <button
           type="button"
           onClick={() => setIsOpen(!isOpen)}
-          className="bg-info-bg text-theme-700 border-theme-200 hover:bg-info-bg-hover inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors"
+          className="bg-info-bg text-theme-700 border-theme-200 inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors"
         >
           <Sprout size={14} />
           <span className="max-w-[200px] truncate">{selectedIntent}</span>

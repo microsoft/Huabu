@@ -186,10 +186,10 @@ export const MessageList = ({
           shape="pill"
           tone="neutral"
           onClick={scrollToBottom}
-          className="border-border bg-bg-default text-fg-muted hover:text-fg-default absolute bottom-2 left-1/2 z-10 -translate-x-1/2 gap-1.5 shadow-lg"
+          className="absolute bottom-2 left-1/2 z-10 -translate-x-1/2 shadow-lg"
         >
           New message
-          <ArrowDown size={14} />
+          <ArrowDown />
         </Button>
       )}
     </div>

@@ -157,7 +157,6 @@ export default function ButtonShowcasePage() {
                                   shape={shape}
                                   tone={tone}
                                   size={size}
-                                  className="gap-1.5"
                                 >
                                   {tone === 'danger' ? (
                                     <Trash2 />

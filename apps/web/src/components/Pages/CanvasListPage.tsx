@@ -239,26 +239,23 @@ export default function CanvasListPage() {
               tone="neutral"
               onClick={handleImportClick}
               disabled={isImporting}
-              className="gap-2 rounded-lg px-3 py-2"
             >
               {isImporting ? (
                 <span className="border-fg-subtle inline-block h-4 w-4 animate-spin rounded-full border-2 border-t-transparent" />
               ) : (
-                <Upload size={16} />
+                <Upload />
               )}
               Import
             </Button>
             <Button
               variant="solid"
-              tone="info"
               onClick={handleCreate}
               disabled={isCreating}
-              className="bg-inverse text-fg-inverse hover:bg-inverse/80 gap-2 rounded-lg px-3 py-2"
             >
               {isCreating ? (
                 <span className="border-fg-inverse inline-block h-4 w-4 animate-spin rounded-full border-2 border-t-transparent" />
               ) : (
-                <Plus size={16} />
+                <Plus />
               )}
               New Canvas
             </Button>
