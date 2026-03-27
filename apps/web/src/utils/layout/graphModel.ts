@@ -16,9 +16,7 @@ import type { Node, Edge } from '@xyflow/react';
 // ── Edge weight constants ──────────────────────────────────────────────
 
 const WEIGHT_USER_EDGE = 1.0;
-const WEIGHT_RELATED_NODE_IDS = 0.6;
 const WEIGHT_ORIGIN_SOURCE_ID = 0.4;
-const WEIGHT_SAME_RESEARCH_THREAD = 0.3;
 const WEIGHT_SAME_CHAT_THREAD = 0.3;
 // Frame siblings must always be in the same connected component so the cola
 // solver never packs them into separate sub-graphs and displaces them relative
@@ -136,22 +134,7 @@ export function buildLayoutGraph(
     upsertEdge(edgeMap, e.source, e.target, WEIGHT_USER_EDGE);
   }
 
-  // 2b. research.relatedNodeIds — synthesis cites sources
-  for (const n of nodeMap.values()) {
-    const data = n.data as Record<string, unknown>;
-    const research = data?.research as
-      | { relatedNodeIds?: string[] }
-      | undefined;
-    if (research?.relatedNodeIds) {
-      for (const relatedId of research.relatedNodeIds) {
-        if (nodeMap.has(relatedId)) {
-          upsertEdge(edgeMap, n.id, relatedId, WEIGHT_RELATED_NODE_IDS);
-        }
-      }
-    }
-  }
-
-  // 2c. origin.sourceId (user-excerpt) — link captured node to its source
+  // 2b. origin.sourceId (user-excerpt) — link captured node to its source
   // origin.sourceId is a knowledge-base source ID (data.sourceId), not a canvas
   // node ID, so we build a reverse lookup from data.sourceId → canvas node ID.
   const nodeByDataSourceId = new Map<string, string>();
@@ -174,29 +157,7 @@ export function buildLayoutGraph(
     }
   }
 
-  // 2d. Same research.threadId — nodes from the same research session
-  const nodesByResearchThread = new Map<string, string[]>();
-  for (const n of nodeMap.values()) {
-    const data = n.data as Record<string, unknown>;
-    const research = data?.research as { threadId?: string } | undefined;
-    if (research?.threadId) {
-      const tid = research.threadId;
-      const arr = nodesByResearchThread.get(tid) ?? [];
-      arr.push(n.id);
-      nodesByResearchThread.set(tid, arr);
-    }
-  }
-  for (const group of nodesByResearchThread.values()) {
-    // Fully-connect all nodes in the thread so stress majorization targets
-    // equal pairwise distances, producing a cluster rather than a chain.
-    for (let i = 0; i < group.length - 1; i++) {
-      for (let j = i + 1; j < group.length; j++) {
-        upsertEdge(edgeMap, group[i], group[j], WEIGHT_SAME_RESEARCH_THREAD);
-      }
-    }
-  }
-
-  // 2e. Same origin.threadId (user-from-chat) — nodes from the same chat
+  // 2c. Same origin.threadId (user-from-chat) — nodes from the same chat
   const nodesByChatThread = new Map<string, string[]>();
   for (const n of nodeMap.values()) {
     const data = n.data as Record<string, unknown>;

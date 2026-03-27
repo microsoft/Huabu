@@ -1,11 +1,5 @@
 import clsx from 'clsx';
-import {
-  Check,
-  ChevronDown,
-  MessageSquare,
-  Search,
-  Sprout,
-} from 'lucide-react';
+import { Check, ChevronDown, MessageSquare, Sprout } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 import { Button } from '../../Common/Button';
@@ -25,12 +19,6 @@ const modes: ModeOption[] = [
     label: 'Ask',
     icon: <MessageSquare size={14} />,
     description: 'Quick conversation',
-  },
-  {
-    value: 'research',
-    label: 'Research',
-    icon: <Search size={14} />,
-    description: 'Search multiple sources and add to Canvas',
   },
   {
     value: 'operate',

@@ -1,8 +1,8 @@
 /**
  * Unified Agent Route
  *
- * Single SSE endpoint that handles all modes: chat, research, agent.
- * Replaces the separate chat.route.ts and research.route.ts with a
+ * Single SSE endpoint that handles all modes: chat, agent.
+ * Replaces the separate chat.route.ts with a
  * unified API powered by pi-ai.
  *
  * POST /api/agent          — Start or continue an agent conversation
@@ -16,7 +16,6 @@ import { createId } from '@sediment/shared';
 import { encode } from 'gpt-tokenizer';
 
 import { AGENT_SYSTEM_PROMPT } from '../../prompt/agent.js';
-import { RESEARCH_SYSTEM_PROMPT } from '../../prompt/research.js';
 import { SYSTEM_PROMPT } from '../../prompt/system.js';
 import { IMAGE_MIME_MAP } from '../../utils/mime.js';
 import { runAgent } from '../agent/agent.service.js';
@@ -49,8 +48,6 @@ function getOrCreateThreadId(value: unknown): string {
 
 function getSystemPrompt(mode: AgentMode): string {
   switch (mode) {
-    case 'research':
-      return RESEARCH_SYSTEM_PROMPT;
     case 'operate':
       return AGENT_SYSTEM_PROMPT;
     case 'ask':
@@ -827,18 +824,10 @@ const agentRoutes: FastifyPluginAsync = async (
       });
     }
 
-    // For research/operate modes, include canvasId in a context note
-    if (
-      (mode === 'research' || mode === 'operate') &&
-      canvasId &&
-      typeof userContent === 'string'
-    ) {
+    // For operate mode, include canvasId in a context note
+    if (mode === 'operate' && canvasId && typeof userContent === 'string') {
       userContent = `[Canvas ID: ${canvasId}]\n\n${userContent}`;
-    } else if (
-      (mode === 'research' || mode === 'operate') &&
-      canvasId &&
-      Array.isArray(userContent)
-    ) {
+    } else if (mode === 'operate' && canvasId && Array.isArray(userContent)) {
       userContent = [
         { type: 'text' as const, text: `[Canvas ID: ${canvasId}]` },
         ...userContent,

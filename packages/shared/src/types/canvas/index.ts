@@ -16,7 +16,6 @@ export type {
   CanvasNodeType,
   NodeOrigin,
   NodeOriginType,
-  NodeResearchData,
   NodeStyle,
   BaseNodeData,
   BlockProvenance,

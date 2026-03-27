@@ -4,6 +4,19 @@
 
 ---
 
+## 2026-03-27 · 移除 Research Mode
+
+**What Changed**
+
+- 移除了 Chat Panel 中的 Deep Research 模式，现在仅保留 Ask 和 Operate 两种模式。
+- 清理了相关死代码：`ResearchConfig`、`ResearchAgentEvent` 等类型定义，`RESEARCH_SYSTEM_PROMPT`，以及过时的测试用例和注释。
+
+**Notes**
+
+- 无迁移步骤，Research 模式已完全移除。
+
+---
+
 ## 2026-03-25 · Canvas Changes Keep / Revert 按钮
 
 **What Changed**

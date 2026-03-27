@@ -1,7 +1,7 @@
 /**
  * Unified Agent Service
  *
- * Core agent loop using pi-ai. Handles all modes (chat, research, agent)
+ * Core agent loop using pi-ai. Handles all modes (chat, agent)
  * with a shared tool-calling framework. The LLM streams tokens and can
  * invoke tools; the agent loop automatically executes tools and continues
  * until the LLM produces a final text response.
@@ -10,12 +10,7 @@
  */
 
 import { llmStream } from './llm.js';
-import {
-  chatTools,
-  researchTools,
-  operateTools,
-  executeTool,
-} from './tools/index.js';
+import { chatTools, operateTools, executeTool } from './tools/index.js';
 
 import type {
   Context,
@@ -81,8 +76,6 @@ function getToolsForMode(mode: AgentMode): Tool[] {
   switch (mode) {
     case 'ask':
       return chatTools;
-    case 'research':
-      return researchTools;
     case 'operate':
       return operateTools;
     default:

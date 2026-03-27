@@ -1,4 +1,4 @@
-import { NodeRef } from './NodeRef';
+import { NodeRef } from '../Common/NodeRef';
 
 import type { ChatAttachment } from '@sediment/shared';
 

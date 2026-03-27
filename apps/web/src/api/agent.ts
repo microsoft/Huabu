@@ -2,7 +2,7 @@
  * Unified Agent API Client
  *
  * Communicates with the new unified /api/agent endpoint that handles
- * all modes (chat, research, agent) with pi-ai streaming.
+ * all modes (chat, agent) with pi-ai streaming.
  */
 
 import { API_CONFIG } from '../config/api';

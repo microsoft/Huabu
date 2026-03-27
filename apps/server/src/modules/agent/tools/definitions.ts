@@ -1,7 +1,7 @@
 /**
  * Tool Definitions for the Unified Agent
  *
- * All tools the AI can call across ask, research, and operate modes.
+ * All tools the AI can call across ask and operate modes.
  * Each tool is a pi-ai Tool with a TypeBox schema for validation.
  */
 
@@ -317,19 +317,6 @@ export const ingestContentTool: Tool = {
  * Limited to search and read-only canvas/knowledge access.
  */
 export const chatTools: Tool[] = [webSearchTool];
-
-/**
- * Tools available in research mode.
- * Extends chat tools with canvas commands, ingestion, and knowledge access.
- */
-export const researchTools: Tool[] = [
-  webSearchTool,
-  getCanvasStateTool,
-  getNodeDetailTool,
-  canvasCommandsTool,
-  readSourceTool,
-  ingestContentTool,
-];
 
 /**
  * Tools available in operate mode.

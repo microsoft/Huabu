@@ -6,6 +6,6 @@ export * from './types/intent.js';
 export * from './types/knowledge.js';
 export * from './types/llm.js';
 export * from './types/preprocessing.js';
-export * from './types/research.js';
+
 export * from './types/web.js';
 export * from './utils/id.js';

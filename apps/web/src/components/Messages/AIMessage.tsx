@@ -1,6 +1,6 @@
 import { Copy } from 'lucide-react';
 
-import { BlockNoteCard } from './BlockNoteCard';
+import { BlockNoteCard } from './Card/BlockNoteCard';
 import { NODE_ICON } from '../../config/nodeIcons';
 import useCanvasStore from '../../store/canvasStore';
 import { useChatStore } from '../../store/chatStore';

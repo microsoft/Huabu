@@ -1,6 +1,6 @@
+import { Tooltip } from './Tooltip';
 import { NODE_ICON } from '../../config/nodeIcons';
 import useCanvasStore from '../../store/canvasStore';
-import { Tooltip } from '../Common/Tooltip';
 
 import type { CanvasNodeType, ChatAttachment } from '@sediment/shared';
 

@@ -124,32 +124,6 @@ describe('buildLayoutGraph — Edge Aggregation', () => {
     expect(result.edges).toHaveLength(0);
   });
 
-  it('creates edges from research.relatedNodeIds with weight 0.6', () => {
-    const nodes = [
-      makeNode('synthesis', {
-        data: { research: { relatedNodeIds: ['src1', 'src2'] } },
-      }),
-      makeNode('src1'),
-      makeNode('src2'),
-    ];
-    const result = buildLayoutGraph(nodes, []);
-
-    const e1 = findEdge(result.edges, 'synthesis', 'src1');
-    const e2 = findEdge(result.edges, 'synthesis', 'src2');
-    expect(e1?.weight).toBe(0.6);
-    expect(e2?.weight).toBe(0.6);
-  });
-
-  it('skips relatedNodeIds that reference missing nodes', () => {
-    const nodes = [
-      makeNode('synthesis', {
-        data: { research: { relatedNodeIds: ['missing'] } },
-      }),
-    ];
-    const result = buildLayoutGraph(nodes, []);
-    expect(result.edges).toHaveLength(0);
-  });
-
   it('creates edge from captured node to its source node with weight 0.4', () => {
     // origin.sourceId is a knowledge-base sourceId (data.sourceId), not a node ID
     const nodes = [
@@ -175,21 +149,6 @@ describe('buildLayoutGraph — Edge Aggregation', () => {
     expect(findEdge(result.edges, 'c1', 'c2')).toBeUndefined();
   });
 
-  it('creates chain edges for same research.threadId with weight 0.3', () => {
-    const nodes = [
-      makeNode('r1', { data: { research: { threadId: 't1' } } }),
-      makeNode('r2', { data: { research: { threadId: 't1' } } }),
-      makeNode('r3', { data: { research: { threadId: 't1' } } }),
-    ];
-    const result = buildLayoutGraph(nodes, []);
-
-    // Chain: r1-r2, r2-r3 (not r1-r3)
-    expect(result.edges).toHaveLength(2);
-    expect(findEdge(result.edges, 'r1', 'r2')?.weight).toBe(0.3);
-    expect(findEdge(result.edges, 'r2', 'r3')?.weight).toBe(0.3);
-    expect(findEdge(result.edges, 'r1', 'r3')).toBeUndefined();
-  });
-
   it('fully connects nodes with same origin.threadId (chat) with weight 0.3', () => {
     const nodes = [
       makeNode('m1', {
@@ -208,19 +167,6 @@ describe('buildLayoutGraph — Edge Aggregation', () => {
     expect(findEdge(result.edges, 'm1', 'm2')?.weight).toBe(0.3);
     expect(findEdge(result.edges, 'm1', 'm3')?.weight).toBe(0.3);
     expect(findEdge(result.edges, 'm2', 'm3')?.weight).toBe(0.3);
-  });
-
-  it('upsertEdge keeps max weight for the same node pair', () => {
-    // Node 'a' and 'b' connected by a user edge (1.0) AND relatedNodeIds (0.6)
-    const nodes = [
-      makeNode('a', { data: { research: { relatedNodeIds: ['b'] } } }),
-      makeNode('b'),
-    ];
-    const edges = [makeEdge('a', 'b')];
-    const result = buildLayoutGraph(nodes, edges);
-
-    expect(result.edges).toHaveLength(1);
-    expect(findEdge(result.edges, 'a', 'b')?.weight).toBe(1.0);
   });
 
   it('normalises edge direction — (A,B) and (B,A) produce one edge', () => {
@@ -365,14 +311,12 @@ describe('buildLayoutGraph — Integration', () => {
         parentId: 'frame-1',
         position: { x: 10, y: 10 },
         measured: { width: 220, height: 140 },
-        data: {
-          research: { threadId: 'thread-r1', relatedNodeIds: ['note-2'] },
-        },
+        data: {},
       }),
       makeNode('note-2', {
         parentId: 'frame-1',
         position: { x: 300, y: 10 },
-        data: { research: { threadId: 'thread-r1' } },
+        data: {},
       }),
       makeNode('card-ext', {
         position: { x: 500, y: 500 },
@@ -407,11 +351,8 @@ describe('buildLayoutGraph — Integration', () => {
 
     // Edges:
     // - user edge: note-1 → card-ext (1.0)
-    // - relatedNodeIds: note-1 → note-2 (0.6)
-    // - same research thread: note-1 → note-2 (0.3, but upserted to 0.6)
     // - same chat thread: card-ext → card-ext-2 (0.3)
     expect(findEdge(result.edges, 'note-1', 'card-ext')?.weight).toBe(1.0);
-    expect(findEdge(result.edges, 'note-1', 'note-2')?.weight).toBe(0.6);
     expect(findEdge(result.edges, 'card-ext', 'card-ext-2')?.weight).toBe(0.3);
 
     // Group: frame-1 → [note-1, note-2]

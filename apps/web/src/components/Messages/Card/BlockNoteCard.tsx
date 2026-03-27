@@ -9,9 +9,12 @@ import {
 import { BlockNoteView } from '@blocknote/shadcn';
 import { useEffect, useRef, type FC } from 'react';
 
-import { useChatStore } from '../../store/chatStore';
-import { setDragPayload, type DragImageOffset } from '../../utils/io/dragDrop';
-import { DragToCanvasHandleButton } from '../Common/DragToCanvasHandleButton';
+import { useChatStore } from '../../../store/chatStore';
+import {
+  setDragPayload,
+  type DragImageOffset,
+} from '../../../utils/io/dragDrop';
+import { DragToCanvasHandleButton } from '../../Common/DragToCanvasHandleButton';
 
 interface BlockNoteMessageViewProps {
   content: string;

@@ -360,8 +360,8 @@ export function useAgentStream(): UseAgentStreamReturn {
 
       setIsLoading(true);
 
-      // Operate & Research: reset resource tracking (canvas changes persist until explicit keep/revert)
-      if (agentMode === 'operate' || agentMode === 'research') {
+      // Operate: reset resource tracking (canvas changes persist until explicit keep/revert)
+      if (agentMode === 'operate') {
         resourcesRef.current = [];
       }
 
@@ -388,7 +388,7 @@ export function useAgentStream(): UseAgentStreamReturn {
                 assistantId,
                 toolQueue: toolMsgQueue,
                 onCanvasCommands: (commands) => {
-                  if (agentMode === 'operate' || agentMode === 'research') {
+                  if (agentMode === 'operate') {
                     const newResources = extractResourcesFromCommands(commands);
                     if (newResources.length > 0) {
                       resourcesRef.current = [
@@ -417,10 +417,7 @@ export function useAgentStream(): UseAgentStreamReturn {
               setIsLoading(false);
               abortControllerRef.current = null;
 
-              if (
-                (agentMode === 'operate' || agentMode === 'research') &&
-                resourcesRef.current.length > 0
-              ) {
+              if (agentMode === 'operate' && resourcesRef.current.length > 0) {
                 updateMessage(assistantIdRef.current, (m) =>
                   m.role === 'assistant'
                     ? { ...m, resources: [...resourcesRef.current] }
