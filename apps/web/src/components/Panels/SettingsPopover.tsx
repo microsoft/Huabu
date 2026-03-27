@@ -185,7 +185,8 @@ export const SettingsPopover: React.FC = () => {
               {workspacePath || 'Not configured'}
             </span>
             <Button
-              variant="secondary"
+              variant="outline"
+              tone="neutral"
               size="sm"
               onClick={() => void handlePickFolder()}
               disabled={isLoading}
@@ -221,6 +222,7 @@ export const SettingsPopover: React.FC = () => {
                     >
                       <Button
                         variant="ghost"
+                        tone="neutral"
                         onClick={() => void handleSelectRecent(path)}
                         disabled={isLoading}
                         className="min-w-0 flex-1 justify-start gap-1.5 overflow-hidden"
@@ -252,7 +254,12 @@ export const SettingsPopover: React.FC = () => {
           <LLMSettings />
 
           <div className="flex justify-end">
-            <Button variant="secondary" size="sm" onClick={handleClose}>
+            <Button
+              variant="outline"
+              tone="neutral"
+              size="sm"
+              onClick={handleClose}
+            >
               Close
             </Button>
           </div>

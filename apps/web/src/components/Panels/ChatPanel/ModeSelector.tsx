@@ -72,7 +72,9 @@ export const ModeSelector = ({
   return (
     <div ref={containerRef} className="relative">
       <Button
-        variant="pill"
+        variant="outline"
+        shape="pill"
+        tone="neutral"
         type="button"
         onClick={() => !disabled && setIsOpen(!isOpen)}
         disabled={disabled}
@@ -91,6 +93,7 @@ export const ModeSelector = ({
           {modes.map((mode) => (
             <Button
               variant="ghost"
+              tone="neutral"
               key={mode.value}
               onClick={() => handleModeSelect(mode.value)}
               title={mode.description}

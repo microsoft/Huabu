@@ -5,24 +5,45 @@ import { Tooltip } from './Tooltip';
 
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 
+type ButtonVariant = 'solid' | 'outline' | 'ghost';
+type ButtonShape = 'default' | 'pill';
+type ButtonTone = 'neutral' | 'info' | 'danger';
+
 export type ButtonProps = {
   children: ReactNode;
-  variant?: 'primary' | 'secondary' | 'danger' | 'ghost' | 'pill';
+  variant?: ButtonVariant;
+  shape?: ButtonShape;
+  tone?: ButtonTone;
   size?: 'sm' | 'md';
   className?: string;
   tooltipWrapperClassName?: string;
 } & Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children' | 'className'>;
 
-const variantClasses: Record<NonNullable<ButtonProps['variant']>, string> = {
-  primary:
-    'rounded-md font-medium bg-info-bg text-info hover:bg-info-bg-hover border border-transparent',
-  secondary:
-    'rounded-md font-medium border border-border text-fg-muted bg-surface hover:bg-hover',
-  danger:
-    'rounded-md font-medium bg-danger text-fg-inverse hover:bg-danger/90 border border-transparent',
-  ghost:
-    'cursor-pointer rounded border-none bg-transparent p-1 enabled:hover:bg-bg-default',
-  pill: 'gap-1 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-fg-muted hover:bg-hover',
+const variantToneClasses: Record<ButtonVariant, Record<ButtonTone, string>> = {
+  solid: {
+    neutral:
+      'border border-transparent bg-inverse text-fg-inverse enabled:hover:bg-inverse/90',
+    info: 'border border-transparent bg-info-bg text-info hover:bg-info-bg-hover',
+    danger:
+      'border border-transparent bg-danger text-fg-inverse hover:bg-danger/90',
+  },
+  outline: {
+    neutral: 'border border-border bg-surface text-fg-muted hover:bg-hover',
+    info: 'border border-border bg-surface text-info hover:bg-info-bg',
+    danger: 'border border-border bg-surface text-danger hover:bg-danger-bg',
+  },
+  ghost: {
+    neutral:
+      'cursor-pointer border-none bg-transparent p-1 text-fg-muted enabled:hover:bg-bg-default',
+    info: 'cursor-pointer border-none bg-transparent p-1 text-info enabled:hover:bg-info-bg',
+    danger:
+      'cursor-pointer border-none bg-transparent p-1 text-danger enabled:hover:bg-danger-bg',
+  },
+};
+
+const shapeClasses: Record<ButtonShape, string> = {
+  default: 'rounded-md font-medium',
+  pill: 'gap-1 rounded-full px-3 py-1.5 text-xs font-medium',
 };
 
 const sizeClasses: Record<NonNullable<ButtonProps['size']>, string> = {
@@ -30,11 +51,18 @@ const sizeClasses: Record<NonNullable<ButtonProps['size']>, string> = {
   md: 'px-3 py-1.5 text-sm',
 };
 
+const iconSizeClasses: Record<NonNullable<ButtonProps['size']>, string> = {
+  sm: '[&_svg]:h-3.5 [&_svg]:w-3.5',
+  md: '[&_svg]:h-4 [&_svg]:w-4',
+};
+
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   (
     {
       children,
-      variant = 'primary',
+      variant = 'solid',
+      shape = 'default',
+      tone = 'neutral',
       size = 'md',
       className,
       tooltipWrapperClassName,
@@ -44,7 +72,9 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     },
     ref,
   ) => {
-    const hasSizeClass = variant !== 'ghost' && variant !== 'pill';
+    const hasSizeClass = shape !== 'pill';
+    const iconSizeClass =
+      shape === 'pill' ? '[&_svg]:h-3.5 [&_svg]:w-3.5' : iconSizeClasses[size];
 
     const buttonEl = (
       <button
@@ -52,9 +82,12 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         type={type}
         className={cn(
           'inline-flex items-center justify-center transition-colors',
+          '[&_svg]:shrink-0',
           'disabled:cursor-not-allowed disabled:opacity-50',
-          variantClasses[variant],
+          shapeClasses[shape],
+          variantToneClasses[variant][tone],
           hasSizeClass && sizeClasses[size],
+          iconSizeClass,
           className,
         )}
         {...props}

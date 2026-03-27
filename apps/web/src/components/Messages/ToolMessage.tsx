@@ -749,6 +749,7 @@ function WebSearchToolDisplay({
       <div className="flex w-full flex-col items-start gap-2">
         <Button
           variant="ghost"
+          tone="neutral"
           aria-expanded={isExpanded}
           aria-label={`Toggle sources (${count} ${label})`}
           onClick={() => setIsExpanded((v) => !v)}
