@@ -1,11 +1,11 @@
 import { useStore, useViewport } from '@xyflow/react';
 import {
-  AlignHorizontalJustifyStart,
-  AlignHorizontalJustifyCenter,
-  AlignHorizontalJustifyEnd,
-  AlignVerticalJustifyStart,
-  AlignVerticalJustifyCenter,
-  AlignVerticalJustifyEnd,
+  AlignStartVertical,
+  AlignCenterVertical,
+  AlignEndVertical,
+  AlignStartHorizontal,
+  AlignCenterHorizontal,
+  AlignEndHorizontal,
   Ungroup,
 } from 'lucide-react';
 import { useMemo } from 'react';
@@ -101,16 +101,16 @@ export const MultiSelectToolbar = () => {
           title="Align Left"
           onClick={() => alignSelectedNodes('left')}
         >
-          <AlignHorizontalJustifyStart />
+          <AlignStartVertical />
         </Button>
         <Button
           variant="ghost"
           iconOnly
           size="sm"
-          title="Align Center (H)"
+          title="Align Center"
           onClick={() => alignSelectedNodes('center-h')}
         >
-          <AlignHorizontalJustifyCenter />
+          <AlignCenterVertical />
         </Button>
         <Button
           variant="ghost"
@@ -119,7 +119,7 @@ export const MultiSelectToolbar = () => {
           title="Align Right"
           onClick={() => alignSelectedNodes('right')}
         >
-          <AlignHorizontalJustifyEnd />
+          <AlignEndVertical />
         </Button>
 
         <div className="bg-border mx-0.5 h-4 w-px" />
@@ -132,16 +132,16 @@ export const MultiSelectToolbar = () => {
           title="Align Top"
           onClick={() => alignSelectedNodes('top')}
         >
-          <AlignVerticalJustifyStart />
+          <AlignStartHorizontal />
         </Button>
         <Button
           variant="ghost"
           iconOnly
           size="sm"
-          title="Align Center (V)"
+          title="Align Middle"
           onClick={() => alignSelectedNodes('center-v')}
         >
-          <AlignVerticalJustifyCenter />
+          <AlignCenterHorizontal />
         </Button>
         <Button
           variant="ghost"
@@ -150,7 +150,7 @@ export const MultiSelectToolbar = () => {
           title="Align Bottom"
           onClick={() => alignSelectedNodes('bottom')}
         >
-          <AlignVerticalJustifyEnd />
+          <AlignEndHorizontal />
         </Button>
 
         <div className="bg-border mx-0.5 h-4 w-px" />
