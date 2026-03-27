@@ -5,7 +5,7 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react';
 
 import { NodeWrapper } from './NodeWrapper.tsx';
 import useCanvasStore from '../../store/canvasStore.ts';
-import { IconButton } from '../Common/IconButton.tsx';
+import { Button } from '../Common/Button.tsx';
 import { Input } from '../Common/Input.tsx';
 
 import type { CanvasFrameNodeData } from './types.ts';
@@ -20,7 +20,10 @@ export const FrameNode = memo(
 
     const FrameToolbar = (
       <div className="flex items-center gap-1">
-        <IconButton
+        <Button
+          variant="ghost"
+          iconOnly
+          size="sm"
           title="Layout Children"
           onClick={(e) => {
             e.preventDefault();
@@ -28,9 +31,12 @@ export const FrameNode = memo(
             layoutGroup(id);
           }}
         >
-          <LayoutGrid size={14} />
-        </IconButton>
-        <IconButton
+          <LayoutGrid />
+        </Button>
+        <Button
+          variant="ghost"
+          iconOnly
+          size="sm"
           title="Unframe"
           onClick={(e) => {
             e.preventDefault();
@@ -38,8 +44,8 @@ export const FrameNode = memo(
             unframe(id);
           }}
         >
-          <Ungroup size={14} />
-        </IconButton>
+          <Ungroup />
+        </Button>
       </div>
     );
 

@@ -5,7 +5,7 @@ import { getNodeIcon } from '../../config/nodeIcons.ts';
 import useCanvasStore from '../../store/canvasStore.ts';
 import { useChatStore } from '../../store/chatStore.ts';
 import { usePreviewStore } from '../../store/previewStore.ts';
-import { IconButton } from '../Common/IconButton.tsx';
+import { Button } from '../Common/Button.tsx';
 import { NodePreviewContent } from '../Nodes/NodePreviewContent.tsx';
 
 // Helper to get meta info (icon, title) for the header
@@ -183,9 +183,15 @@ export const ExpandedNodePanel = () => {
         {/* Left: back button (replace mode) + icon + title */}
         <div className="flex min-w-0 items-center gap-2">
           {isReplace && (
-            <IconButton title={backTitle} onClick={activeItem.close}>
-              <ArrowLeft size={14} />
-            </IconButton>
+            <Button
+              variant="ghost"
+              iconOnly
+              size="sm"
+              title={backTitle}
+              onClick={activeItem.close}
+            >
+              <ArrowLeft />
+            </Button>
           )}
 
           <div className="text-fg-muted flex min-w-0 items-center gap-2 text-sm font-medium">
@@ -200,23 +206,29 @@ export const ExpandedNodePanel = () => {
 
         {/* Right: mode toggle + close */}
         <div className="text-fg-muted flex items-center gap-1">
-          <IconButton
+          <Button
+            variant="ghost"
+            iconOnly
+            size="sm"
             className={!isReplace ? 'text-fg-default bg-bg-default' : ''}
             title={isReplace ? 'Split view' : 'Full view'}
             onClick={() => activeItem.setMode(isReplace ? 'split' : 'replace')}
           >
-            <Columns2 size={14} />
-          </IconButton>
+            <Columns2 />
+          </Button>
 
-          <IconButton
+          <Button
+            variant="ghost"
+            iconOnly
+            size="sm"
             title="Close"
             onClick={(e) => {
               e.stopPropagation();
               activeItem.close();
             }}
           >
-            <X size={14} />
-          </IconButton>
+            <X />
+          </Button>
         </div>
       </div>
 

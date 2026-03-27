@@ -16,7 +16,7 @@ import {
   type NestableNode,
 } from '../../canvas/utils/frame';
 import useCanvasStore from '../../store/canvasStore';
-import { IconButton } from '../Common/IconButton';
+import { Button } from '../Common/Button';
 
 /**
  * A floating toolbar that appears horizontally centred above the
@@ -94,50 +94,77 @@ export const MultiSelectToolbar = () => {
     >
       <div className="text-fg-muted shadow-bottom bg-surface flex items-center gap-1 rounded-lg border-0 p-1.5">
         {/* Horizontal alignment */}
-        <IconButton
+        <Button
+          variant="ghost"
+          iconOnly
+          size="sm"
           title="Align Left"
           onClick={() => alignSelectedNodes('left')}
         >
-          <AlignHorizontalJustifyStart size={14} />
-        </IconButton>
-        <IconButton
+          <AlignHorizontalJustifyStart />
+        </Button>
+        <Button
+          variant="ghost"
+          iconOnly
+          size="sm"
           title="Align Center (H)"
           onClick={() => alignSelectedNodes('center-h')}
         >
-          <AlignHorizontalJustifyCenter size={14} />
-        </IconButton>
-        <IconButton
+          <AlignHorizontalJustifyCenter />
+        </Button>
+        <Button
+          variant="ghost"
+          iconOnly
+          size="sm"
           title="Align Right"
           onClick={() => alignSelectedNodes('right')}
         >
-          <AlignHorizontalJustifyEnd size={14} />
-        </IconButton>
+          <AlignHorizontalJustifyEnd />
+        </Button>
 
         <div className="bg-border mx-0.5 h-4 w-px" />
 
         {/* Vertical alignment */}
-        <IconButton title="Align Top" onClick={() => alignSelectedNodes('top')}>
-          <AlignVerticalJustifyStart size={14} />
-        </IconButton>
-        <IconButton
+        <Button
+          variant="ghost"
+          iconOnly
+          size="sm"
+          title="Align Top"
+          onClick={() => alignSelectedNodes('top')}
+        >
+          <AlignVerticalJustifyStart />
+        </Button>
+        <Button
+          variant="ghost"
+          iconOnly
+          size="sm"
           title="Align Center (V)"
           onClick={() => alignSelectedNodes('center-v')}
         >
-          <AlignVerticalJustifyCenter size={14} />
-        </IconButton>
-        <IconButton
+          <AlignVerticalJustifyCenter />
+        </Button>
+        <Button
+          variant="ghost"
+          iconOnly
+          size="sm"
           title="Align Bottom"
           onClick={() => alignSelectedNodes('bottom')}
         >
-          <AlignVerticalJustifyEnd size={14} />
-        </IconButton>
+          <AlignVerticalJustifyEnd />
+        </Button>
 
         <div className="bg-border mx-0.5 h-4 w-px" />
 
         {/* Spread apart overlapping nodes */}
-        <IconButton title="Spread Apart" onClick={() => spreadSelectedNodes()}>
-          <Ungroup size={14} />
-        </IconButton>
+        <Button
+          variant="ghost"
+          iconOnly
+          size="sm"
+          title="Spread Apart"
+          onClick={() => spreadSelectedNodes()}
+        >
+          <Ungroup />
+        </Button>
       </div>
     </div>
   );

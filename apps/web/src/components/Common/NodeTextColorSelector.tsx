@@ -4,7 +4,7 @@ import { useState } from 'react';
 
 import useCanvasStore from '@/store/canvasStore.ts';
 
-import { IconButton } from './IconButton';
+import { Button } from './Button';
 
 import type { NodeStyle } from '@/components/Nodes/types.ts';
 
@@ -70,18 +70,18 @@ export const NodeTextColorSelector = ({
 
   return (
     <div className="relative flex items-center">
-      <IconButton
+      <Button
         variant="outline"
-        className="rounded"
+        iconOnly
+        size="sm"
         onClick={(e) => {
           e.stopPropagation();
           setIsOpen(!isOpen);
         }}
         title="Change Text Color"
-        size="sm"
       >
-        <Baseline size={14} style={{ color: activeColor.value }} />
-      </IconButton>
+        <Baseline style={{ color: activeColor.value }} />
+      </Button>
 
       {isOpen && (
         <>

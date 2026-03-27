@@ -3,7 +3,7 @@ import { clsx } from 'clsx';
 import { Bold, Italic, Underline, Strikethrough } from 'lucide-react';
 import { memo, useCallback, useState, useRef, useMemo, useEffect } from 'react';
 
-import { IconButton } from '@/components/Common/IconButton.tsx';
+import { Button } from '@/components/Common/Button.tsx';
 import { NodeBgColorSelector } from '@/components/Common/NodeBgColorSelector.tsx';
 import { NodeTextColorSelector } from '@/components/Common/NodeTextColorSelector.tsx';
 import useCanvasStore from '@/store/canvasStore.ts';
@@ -293,61 +293,69 @@ export const TextNode = memo(
 
         <div className="bg-border mx-1 h-3 w-px" />
 
-        <IconButton
+        <Button
+          variant="ghost"
+          iconOnly
+          size="sm"
           onClick={() =>
             updateStyle({
               fontWeight: style.fontWeight === 'bold' ? 'normal' : 'bold',
             })
           }
           className={clsx(
-            'rounded p-1',
             style.fontWeight === 'bold'
               ? 'text-info bg-info-bg enabled:hover:bg-info-bg'
               : 'text-fg-muted hover:bg-bg-default',
           )}
         >
-          <Bold size={14} />
-        </IconButton>
+          <Bold />
+        </Button>
 
-        <IconButton
+        <Button
+          variant="ghost"
+          iconOnly
+          size="sm"
           onClick={() =>
             updateStyle({
               fontStyle: style.fontStyle === 'italic' ? 'normal' : 'italic',
             })
           }
           className={clsx(
-            'rounded p-1',
             style.fontStyle === 'italic'
               ? 'text-info bg-info-bg enabled:hover:bg-info-bg'
               : 'text-fg-muted hover:bg-bg-default',
           )}
         >
-          <Italic size={14} />
-        </IconButton>
+          <Italic />
+        </Button>
 
-        <IconButton
+        <Button
+          variant="ghost"
+          iconOnly
+          size="sm"
           onClick={() => toggleDecoration('underline')}
           className={clsx(
-            'p-1',
             textDecoration.includes('underline')
               ? 'text-info bg-info-bg enabled:hover:bg-info-bg'
               : 'text-fg-muted hover:bg-bg-default',
           )}
         >
-          <Underline size={14} />
-        </IconButton>
+          <Underline />
+        </Button>
 
-        <IconButton
+        <Button
+          variant="ghost"
+          iconOnly
+          size="sm"
           onClick={() => toggleDecoration('line-through')}
           className={clsx(
-            'p-1',
             textDecoration.includes('line-through')
               ? 'text-info bg-info-bg enabled:hover:bg-info-bg'
               : 'text-fg-muted hover:bg-bg-default',
           )}
         >
-          <Strikethrough size={14} />
-        </IconButton>
+          <Strikethrough />
+        </Button>
 
         <div className="bg-border mx-1 h-3 w-px" />
 

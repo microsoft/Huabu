@@ -1,6 +1,6 @@
 import { BadgeInfo, RefreshCw, XCircle } from 'lucide-react';
 
-import { IconButton } from '../Common/IconButton';
+import { Button } from '../Common/Button';
 
 type StatusType = 'interrupted' | 'error';
 
@@ -57,14 +57,16 @@ export const StatusMessage = ({
           {detail || config.label}
         </span>
         {onRetry && (
-          <IconButton
+          <Button
+            variant="ghost"
+            iconOnly
+            size="sm"
             onClick={onRetry}
             className={`${config.textColor} ${config.retryHoverBg}`}
             title="Retry"
-            variant="ghost"
           >
-            <RefreshCw size={12} />
-          </IconButton>
+            <RefreshCw />
+          </Button>
         )}
       </div>
     </div>

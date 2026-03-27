@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 
 import { CanvasMenu } from './CanvasMenu';
 import { SettingsPopover } from './SettingsPopover';
-import { IconButton } from '../Common/IconButton';
+import { Button } from '../Common/Button';
 
 interface HeaderProps {
   children?: React.ReactNode;
@@ -23,14 +23,16 @@ export const Header: React.FC<HeaderProps> = ({ children, onOpenHelp }) => {
       <div className="flex-1" />
 
       {onOpenHelp && (
-        <IconButton
+        <Button
           variant="outline"
+          shape="pill"
+          iconOnly
           title="Keyboard Shortcuts (?)"
           onClick={onOpenHelp}
           aria-label="Keyboard shortcuts"
         >
-          <HelpCircle size={18} />
-        </IconButton>
+          <HelpCircle />
+        </Button>
       )}
 
       <SettingsPopover />

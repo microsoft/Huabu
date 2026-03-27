@@ -16,7 +16,6 @@ import useCanvasStore from '../../store/canvasStore.ts';
 import { useIntentStore } from '../../store/intentStore.ts';
 import { detectNodeType } from '../../utils/io/media.ts';
 import { Button } from '../Common/Button';
-import { IconButton } from '../Common/IconButton';
 import { Modal } from '../Common/Modal';
 
 import type { AddNodeInput } from '../../canvas/uiIntent.ts';
@@ -167,32 +166,38 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
 
   return (
     <>
-      <div className="text-fg-muted shadow-bottom bg-surface pointer-events-auto relative flex w-max items-center gap-2 rounded-lg border-0 px-4 py-2">
+      <div className="text-fg-muted shadow-bottom bg-surface pointer-events-auto relative flex w-max items-center gap-1.5 rounded-lg border-0 px-4 py-2">
         {/* Group 1: Tools */}
-        <div className="flex items-center gap-2">
-          <IconButton
+        <div className="flex items-center gap-1.5">
+          <Button
+            variant="ghost"
+            iconOnly
             title="Select"
             className={clsx(
               activeTool === 'select' && 'text-info bg-bg-default',
             )}
             onClick={() => onToolChange('select')}
           >
-            <MousePointer2 size={18} />
-          </IconButton>
-          <IconButton
+            <MousePointer2 />
+          </Button>
+          <Button
+            variant="ghost"
+            iconOnly
             title="Pan"
             className={clsx(activeTool === 'pan' && 'text-info bg-bg-default')}
             onClick={() => onToolChange('pan')}
           >
-            <Hand size={18} />
-          </IconButton>
+            <Hand />
+          </Button>
         </div>
 
         <div className="bg-border mx-1 h-4 w-px" />
 
         {/* Group 2: Nodes */}
-        <div className="flex items-center gap-2">
-          <IconButton
+        <div className="flex items-center gap-1.5">
+          <Button
+            variant="ghost"
+            iconOnly
             title="Frame"
             className={clsx(
               pendingNodeType === 'frame' && 'text-info bg-bg-default',
@@ -201,9 +206,11 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
               setPendingNodeType(pendingNodeType === 'frame' ? null : 'frame')
             }
           >
-            <NODE_ICON.frame size={18} />
-          </IconButton>
-          <IconButton
+            <NODE_ICON.frame />
+          </Button>
+          <Button
+            variant="ghost"
+            iconOnly
             title="Note"
             className={clsx(
               pendingNodeType === 'note' && 'text-info bg-bg-default',
@@ -212,9 +219,11 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
               setPendingNodeType(pendingNodeType === 'note' ? null : 'note')
             }
           >
-            <NODE_ICON.note size={18} />
-          </IconButton>
-          <IconButton
+            <NODE_ICON.note />
+          </Button>
+          <Button
+            variant="ghost"
+            iconOnly
             title="Text"
             className={clsx(
               pendingNodeType === 'text' && 'text-info bg-bg-default',
@@ -223,55 +232,68 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
               setPendingNodeType(pendingNodeType === 'text' ? null : 'text')
             }
           >
-            <NODE_ICON.text size={18} />
-          </IconButton>
+            <NODE_ICON.text />
+          </Button>
         </div>
 
         <div className="bg-border mx-1 h-4 w-px" />
 
-        <div className="flex items-center gap-2">
-          <IconButton
+        <div className="flex items-center gap-1.5">
+          <Button
+            variant="ghost"
+            iconOnly
             title="Upload Files"
             className={clsx(
               activeModal === 'upload' && 'text-info bg-bg-default',
             )}
             onClick={() => setActiveModal('upload')}
           >
-            <UploadCloud size={18} />
-          </IconButton>
+            <UploadCloud />
+          </Button>
 
-          <IconButton
+          <Button
+            variant="ghost"
+            iconOnly
             title="Add Links"
             className={clsx(
               activeModal === 'link' && 'text-info bg-bg-default',
             )}
             onClick={() => setActiveModal('link')}
           >
-            <LinkIcon size={18} />
-          </IconButton>
+            <LinkIcon />
+          </Button>
         </div>
 
         <div className="bg-border mx-1 h-4 w-px" />
 
-        <div className="flex items-center gap-2">
-          <IconButton title="Auto Layout All" onClick={() => layoutAll()}>
-            <LayoutDashboard size={18} />
-          </IconButton>
-          <IconButton
+        <div className="flex items-center gap-1.5">
+          <Button
+            variant="ghost"
+            iconOnly
+            title="Auto Layout All"
+            onClick={() => layoutAll()}
+          >
+            <LayoutDashboard />
+          </Button>
+          <Button
+            variant="ghost"
+            iconOnly
             title={
               autoLayoutEnabled ? 'Disable Auto Layout' : 'Enable Auto Layout'
             }
             onClick={() => toggleAutoLayout()}
             className={clsx(autoLayoutEnabled && 'text-info bg-bg-default')}
           >
-            <Sparkles size={18} />
-          </IconButton>
+            <Sparkles />
+          </Button>
         </div>
 
         <div className="bg-border mx-1 h-4 w-px" />
 
-        <div ref={intentButtonRef} className="flex items-center gap-2">
-          <IconButton
+        <div ref={intentButtonRef} className="flex items-center gap-1.5">
+          <Button
+            variant="ghost"
+            iconOnly
             title="Intent (crtl + I)"
             className={clsx(intentOpen && 'text-info bg-bg-default')}
             onClick={() => {
@@ -283,8 +305,8 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
               }
             }}
           >
-            <Sprout size={18} />
-          </IconButton>
+            <Sprout />
+          </Button>
         </div>
       </div>
 

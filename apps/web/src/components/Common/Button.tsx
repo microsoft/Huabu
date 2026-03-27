@@ -15,6 +15,7 @@ export type ButtonProps = {
   shape?: ButtonShape;
   tone?: ButtonTone;
   size?: 'sm' | 'md';
+  iconOnly?: boolean;
   className?: string;
   tooltipWrapperClassName?: string;
 } & Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children' | 'className'>;
@@ -58,6 +59,11 @@ const iconSizeClasses: Record<NonNullable<ButtonProps['size']>, string> = {
   md: '[&_svg]:h-4 [&_svg]:w-4',
 };
 
+const iconOnlySizeClasses: Record<NonNullable<ButtonProps['size']>, string> = {
+  sm: 'p-1',
+  md: 'p-1.5',
+};
+
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   (
     {
@@ -66,6 +72,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       shape = 'default',
       tone = 'neutral',
       size = 'md',
+      iconOnly,
       className,
       tooltipWrapperClassName,
       type = 'button',
@@ -84,7 +91,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
           'disabled:cursor-not-allowed disabled:opacity-50',
           shapeClasses[shape],
           variantToneClasses[variant][tone],
-          sizeClasses[size],
+          iconOnly ? iconOnlySizeClasses[size] : sizeClasses[size],
           iconSizeClasses[size],
           className,
         )}

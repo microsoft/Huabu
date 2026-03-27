@@ -3,7 +3,7 @@ import { useState } from 'react';
 
 import useCanvasStore from '@/store/canvasStore.ts';
 
-import { IconButton } from './IconButton';
+import { Button } from './Button';
 
 import type { NodeStyle } from '@/components/Nodes/types.ts';
 
@@ -82,23 +82,24 @@ export const NodeBgColorSelector = ({
 
   return (
     <div className="relative flex items-center">
-      <IconButton
+      <Button
         variant="outline"
+        iconOnly
+        size="sm"
         onClick={(e) => {
           e.stopPropagation();
           setIsOpen(!isOpen);
         }}
         title="Change Color"
-        size="sm"
       >
         <div
           className={clsx(
-            'h-4 w-4 rounded-full border',
+            'h-3.5 w-3.5 rounded-full border',
             activeColor.value,
             activeColor.border,
           )}
         />
-      </IconButton>
+      </Button>
 
       {isOpen && (
         <>

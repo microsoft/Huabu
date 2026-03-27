@@ -10,7 +10,7 @@ import clsx from 'clsx';
 import { GripVertical, Plus } from 'lucide-react';
 import { createContext, useCallback, useContext, useRef, type FC } from 'react';
 
-import { IconButton } from '@/components/Common/IconButton';
+import { Button } from '@/components/Common/Button';
 import {
   SEDIMENT_DND_MIME,
   createDragId,
@@ -26,9 +26,8 @@ import {
 const NoteSourceIdContext = createContext<string | undefined>(undefined);
 export const NoteSourceIdProvider = NoteSourceIdContext.Provider;
 
-const ICON_SIZE = 16;
 const BTN_CLASS =
-  'bn-button h-4.5 w-4.5 p-px! text-fg-subtle hover:text-fg-default flex items-center justify-center rounded';
+  'bn-button h-4.5 w-4.5 p-px! text-fg-subtle hover:text-fg-default rounded';
 
 /**
  * Custom "Add block" button that matches our compact style.
@@ -69,9 +68,16 @@ const AddBlockButton: FC = () => {
   if (!block) return null;
 
   return (
-    <IconButton aria-label="Add block" className={BTN_CLASS} onClick={onClick}>
-      <Plus size={ICON_SIZE} className="shrink-0" />
-    </IconButton>
+    <Button
+      variant="ghost"
+      iconOnly
+      aria-label="Add block"
+      className={BTN_CLASS}
+      onClick={onClick}
+    >
+      {/* must set size as it is used for BlockNote */}
+      <Plus size={16} />
+    </Button>
   );
 };
 
@@ -116,7 +122,9 @@ const DragHandleButton: FC = () => {
   if (!block) return null;
 
   return (
-    <IconButton
+    <Button
+      variant="ghost"
+      iconOnly
       aria-label="Drag handle"
       draggable
       className={clsx(BTN_CLASS, 'mr-1 cursor-grab active:cursor-grabbing')}
@@ -193,8 +201,8 @@ const DragHandleButton: FC = () => {
         e.stopPropagation();
       }}
     >
-      <GripVertical size={ICON_SIZE} className="shrink-0" />
-    </IconButton>
+      <GripVertical size={16} />
+    </Button>
   );
 };
 

@@ -11,7 +11,6 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useLLMStore } from '../../store/llmStore';
 import { Button } from '../Common/Button';
-import { IconButton } from '../Common/IconButton';
 
 /**
  * LLM provider/model configuration section.
@@ -203,15 +202,18 @@ export const LLMSettings: React.FC = () => {
                 <code className="bg-surface rounded px-2 py-1 font-mono text-lg font-bold">
                   {oauthUserCode}
                 </code>
-                <IconButton
+                <Button
+                  variant="ghost"
+                  iconOnly
+                  size="sm"
+                  tone="info"
                   title="Copy code"
                   onClick={() =>
                     void navigator.clipboard.writeText(oauthUserCode)
                   }
-                  className="text-info"
                 >
-                  <ClipboardCopy size={14} />
-                </IconButton>
+                  <ClipboardCopy />
+                </Button>
               </div>
               {oauthVerificationUri && (
                 <p className="text-info mb-1.5 text-[11px]">

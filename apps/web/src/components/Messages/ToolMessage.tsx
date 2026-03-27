@@ -15,7 +15,6 @@ import {
 } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
 
-import { IconButton } from '@/components/Common/IconButton';
 import { NODE_ICON } from '@/config/nodeIcons';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
@@ -266,14 +265,16 @@ function CanvasCommandCard({
                 <Button onClick={revertAllChanges} variant="outline" size="sm">
                   Revert all
                 </Button>
-                <IconButton
+                <Button
+                  variant="ghost"
+                  iconOnly
+                  size="sm"
                   onPointerDown={handlePreviewAllDown}
                   onPointerUp={handlePreviewUp}
                   onPointerLeave={handlePreviewUp}
-                  variant="ghost"
                 >
-                  <Blend size={12} />
-                </IconButton>
+                  <Blend />
+                </Button>
               </div>
             </div>
 
@@ -337,14 +338,19 @@ function CanvasCommandCard({
                         {renderLabel()}
                       </span>
                       <div className="flex flex-shrink-0 items-center gap-0.5">
-                        <IconButton
+                        <Button
+                          variant="ghost"
+                          iconOnly
+                          size="sm"
                           onClick={() => removeChange(change.id)}
                           title="Keep this change"
-                          className="text-muted-foreground/40 hover:text-success"
                         >
-                          <Check size={12} />
-                        </IconButton>
-                        <IconButton
+                          <Check />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          iconOnly
+                          size="sm"
                           onClick={() => revertChange(change.id)}
                           disabled={!change.revertible || !!allMissing}
                           title={
@@ -352,20 +358,21 @@ function CanvasCommandCard({
                               ? 'Revert this change'
                               : 'Cannot revert this change'
                           }
-                          className="text-muted-foreground/40 hover:text-danger"
                         >
-                          <Undo2 size={12} />
-                        </IconButton>
-                        <IconButton
+                          <Undo2 />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          iconOnly
+                          size="sm"
                           onPointerDown={() => handlePreviewDown(change)}
                           onPointerUp={handlePreviewUp}
                           onPointerLeave={handlePreviewUp}
                           disabled={!change.revertible}
                           title="Hold to preview before"
-                          className="text-muted-foreground/40 hover:text-info"
                         >
-                          <Blend size={12} />
-                        </IconButton>
+                          <Blend />
+                        </Button>
                       </div>
                     </div>
                   );

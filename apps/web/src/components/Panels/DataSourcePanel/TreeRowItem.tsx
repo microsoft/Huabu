@@ -2,7 +2,7 @@ import clsx from 'clsx';
 import { ChevronDown, ChevronRight, Lock, Unlock } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 
-import { IconButton } from '../../Common/IconButton';
+import { Button } from '../../Common/Button';
 
 import type {
   DraggableAttributes,
@@ -125,7 +125,6 @@ export const TreeRowItem = React.memo(
       position: 'relative',
     };
 
-    const iconSize = 12;
     const iconStroke = 1.5;
 
     return (
@@ -152,18 +151,21 @@ export const TreeRowItem = React.memo(
         >
           {/* Chevron icon for collapsible items (frames/groups) */}
           {isCollapsible && (
-            <IconButton
+            <Button
+              variant="ghost"
+              iconOnly
+              size="sm"
               onClick={handleToggleCollapse}
               className="shrink-0"
               aria-label={isCollapsed ? 'Expand' : 'Collapse'}
               aria-expanded={!isCollapsed}
             >
               {isCollapsed ? (
-                <ChevronRight size={iconSize} strokeWidth={iconStroke} />
+                <ChevronRight strokeWidth={iconStroke} />
               ) : (
-                <ChevronDown size={iconSize} strokeWidth={iconStroke} />
+                <ChevronDown strokeWidth={iconStroke} />
               )}
-            </IconButton>
+            </Button>
           )}
 
           {/* Node type icon */}
@@ -194,7 +196,10 @@ export const TreeRowItem = React.memo(
           <div className="ml-auto flex shrink-0 items-center gap-1">
             {/* Lock button - always visible if locked, hover visible if unlocked */}
             {(isLocked || isHovered) && onToggleLock && (
-              <IconButton
+              <Button
+                variant="ghost"
+                iconOnly
+                size="sm"
                 onClick={handleToggleLock}
                 className={clsx(
                   isLocked ? 'text-fg-default' : 'hover:text-fg-default',
@@ -202,11 +207,11 @@ export const TreeRowItem = React.memo(
                 aria-label={isLocked ? 'Unlock' : 'Lock'}
               >
                 {isLocked ? (
-                  <Lock size={iconSize} strokeWidth={iconStroke} />
+                  <Lock strokeWidth={iconStroke} />
                 ) : (
-                  <Unlock size={iconSize} strokeWidth={iconStroke} />
+                  <Unlock strokeWidth={iconStroke} />
                 )}
-              </IconButton>
+              </Button>
             )}
           </div>
         </div>

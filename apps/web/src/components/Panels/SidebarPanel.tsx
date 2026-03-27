@@ -1,7 +1,7 @@
 import clsx from 'clsx';
 import React from 'react';
 
-import { IconButton } from '../Common/IconButton';
+import { Button } from '../Common/Button';
 
 interface SidebarPanelProps {
   isCollapsed?: boolean;
@@ -34,9 +34,14 @@ export const SidebarPanel = ({
           className,
         )}
       >
-        <IconButton onClick={onToggle} title={`Expand ${title}`}>
+        <Button
+          variant="ghost"
+          iconOnly
+          onClick={onToggle}
+          title={`Expand ${title}`}
+        >
           {iconCollapsed}
-        </IconButton>
+        </Button>
         <span className="text-fg-muted mt-3 text-xs font-semibold select-none [text-orientation:mixed] [writing-mode:vertical-rl]">
           {title}
         </span>
@@ -55,9 +60,14 @@ export const SidebarPanel = ({
           {tools && (
             <div className="text-fg-muted flex items-center">{tools}</div>
           )}
-          <IconButton onClick={onToggle} title={`Collapse ${title}`}>
+          <Button
+            variant="ghost"
+            iconOnly
+            onClick={onToggle}
+            title={`Collapse ${title}`}
+          >
             {iconExpanded}
-          </IconButton>
+          </Button>
         </div>
       </div>
       {/* content */}

@@ -5,7 +5,7 @@ import { memo } from 'react';
 import useCanvasStore from '@/store/canvasStore.ts';
 
 import { NodeWrapper } from './NodeWrapper.tsx';
-import { IconButton } from '../Common/IconButton.tsx';
+import { Button } from '../Common/Button.tsx';
 
 import type { CanvasImageNodeData } from './types.ts';
 
@@ -19,15 +19,18 @@ export const ImageNode = memo(
       <div className="flex w-full items-center justify-between gap-2">
         {/*tools*/}
         <div className="flex items-center gap-1">
-          <IconButton
+          <Button
+            variant="ghost"
+            iconOnly
+            size="sm"
             title="Open Large View"
             onClick={(e) => {
               e.stopPropagation();
               openExpanded(id);
             }}
           >
-            <Fullscreen size={14} />
-          </IconButton>
+            <Fullscreen />
+          </Button>
         </div>
       </div>
     );

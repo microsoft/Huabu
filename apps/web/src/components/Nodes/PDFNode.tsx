@@ -18,7 +18,7 @@ import { NodeWrapper } from './NodeWrapper.tsx';
 import { PreviewCard } from './PreviewCard.tsx';
 import { useNodeScale } from '../../hooks/useNodeScale.ts';
 import useCanvasStore from '../../store/canvasStore.ts';
-import { IconButton } from '../Common/IconButton.tsx';
+import { Button } from '../Common/Button.tsx';
 
 import type { CanvasPdfNodeData } from './types.ts';
 
@@ -224,22 +224,37 @@ export const PDFNode = memo(
       <div className="flex w-full items-center justify-between gap-3">
         {/* Tools */}
         <div className="flex items-center gap-1">
-          <IconButton
+          <Button
+            variant="ghost"
+            iconOnly
+            size="sm"
             title="Open Large View"
             onClick={(e) => {
               e.stopPropagation();
               openExpanded(id);
             }}
           >
-            <Fullscreen size={14} />
-          </IconButton>
-          <IconButton title="Download" onClick={handleDownload}>
-            <Download size={14} />
-          </IconButton>
+            <Fullscreen />
+          </Button>
+          <Button
+            variant="ghost"
+            iconOnly
+            size="sm"
+            title="Download"
+            onClick={handleDownload}
+          >
+            <Download />
+          </Button>
           {hasCover && (
-            <IconButton title="Delete Cover" onClick={handleDeleteCover}>
-              <ImageOff size={14} />
-            </IconButton>
+            <Button
+              variant="ghost"
+              iconOnly
+              size="sm"
+              title="Delete Cover"
+              onClick={handleDeleteCover}
+            >
+              <ImageOff />
+            </Button>
           )}
         </div>
       </div>

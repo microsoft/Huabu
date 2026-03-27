@@ -5,7 +5,7 @@ import { NODE_ICON } from '../../config/nodeIcons';
 import useCanvasStore from '../../store/canvasStore';
 import { useChatStore } from '../../store/chatStore';
 import { copyToClipboard } from '../../utils/io/clipboard';
-import { IconButton } from '../Common/IconButton';
+import { Button } from '../Common/Button';
 
 import type { ResourceLabel } from './types';
 import type { CanvasNodeType } from '@sediment/shared';
@@ -39,7 +39,10 @@ export const AIMessage = ({
 
         {!isStreaming && !hideActions && (
           <div className="ml-1 flex items-center gap-1 px-3">
-            <IconButton
+            <Button
+              variant="ghost"
+              iconOnly
+              size="sm"
               className="text-fg-subtle"
               aria-label="Add as note"
               title="Add as note"
@@ -53,17 +56,20 @@ export const AIMessage = ({
                 });
               }}
             >
-              <NoteIcon size={12} />
-            </IconButton>
+              <NoteIcon />
+            </Button>
 
-            <IconButton
+            <Button
+              variant="ghost"
+              iconOnly
+              size="sm"
               className="text-fg-subtle"
               aria-label="Copy message"
               title="Copy"
               onClick={() => copyToClipboard(content)}
             >
-              <Copy size={12} />
-            </IconButton>
+              <Copy />
+            </Button>
 
             {resources && resources.length > 0 && (
               <>
