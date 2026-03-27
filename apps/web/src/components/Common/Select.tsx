@@ -37,6 +37,11 @@ type SelectProps<T extends string = string> = {
   direction?: 'up' | 'down';
 };
 
+const selectShapeClasses: Record<NonNullable<ButtonProps['shape']>, string> = {
+  default: 'rounded',
+  pill: 'rounded-full',
+};
+
 // ─── Select ───────────────────────────────────────────────────────────────────
 
 /**
@@ -114,7 +119,11 @@ export function Select<T extends string = string>({
           disabled={disabled}
           onClick={handleToggle}
           aria-expanded={isOpen}
-          className={cn(isOpen && 'bg-bg-default', className)}
+          className={cn(
+            selectShapeClasses[shape],
+            isOpen && 'bg-bg-default',
+            className,
+          )}
         >
           {current?.icon}
           <span>{current?.label ?? placeholder}</span>
@@ -128,6 +137,7 @@ export function Select<T extends string = string>({
           position={computePosition()}
           onDismiss={handleDismiss}
           offset={direction === 'up' ? { x: 0, y: -4 } : { x: 0, y: 4 }}
+          anchorBottom={direction === 'up'}
           className="flex flex-col overflow-hidden py-1"
         >
           {options.map((option) => (

@@ -57,6 +57,13 @@ export type PopoverProps = {
   offset?: Partial<FloatingPosition>;
 
   /**
+   * When `true`, the `position.y` value describes where the **bottom** edge
+   * of the panel should sit instead of the top edge. The panel is rendered
+   * above that y coordinate. Defaults to `false`.
+   */
+  anchorBottom?: boolean;
+
+  /**
    * Minimum distance (px) from the boundary edge.
    * Used when clamping position to avoid overflow. Defaults to `12`.
    */
@@ -100,6 +107,7 @@ export const Popover: FC<PopoverProps> = ({
   onDismiss,
   dismissOnEscape = true,
   offset,
+  anchorBottom = false,
   viewportMargin = 12,
   boundary,
   zIndex = 9999,
@@ -127,9 +135,11 @@ export const Popover: FC<PopoverProps> = ({
     const el = containerRef.current;
     if (!el) return;
 
-    const rawX = position.x + ox;
-    const rawY = position.y + oy;
     const panelRect = el.getBoundingClientRect();
+    const rawX = position.x + ox;
+    const rawY = anchorBottom
+      ? position.y + oy - panelRect.height
+      : position.y + oy;
 
     // Resolve the clamping region: boundary element rect or full viewport
     const bounds = boundary
@@ -150,7 +160,7 @@ export const Popover: FC<PopoverProps> = ({
       x: Math.max(minX, Math.min(rawX, maxX)),
       y: Math.max(minY, Math.min(rawY, maxY)),
     });
-  }, [position.x, position.y, ox, oy, viewportMargin, boundary]);
+  }, [position.x, position.y, ox, oy, viewportMargin, boundary, anchorBottom]);
 
   useLayoutEffect(() => {
     updateClampedPosition();

@@ -110,7 +110,6 @@ export const LLMSettings: React.FC = () => {
           onChange={(v) => void handleProviderChange(v)}
           disabled={llmSaving}
           placeholder="Select provider…"
-          className="w-full"
         />
       </div>
 
@@ -130,7 +129,6 @@ export const LLMSettings: React.FC = () => {
                 value={llmConfig?.model ?? ''}
                 onChange={(v) => void handleModelChange(v)}
                 disabled={llmSaving}
-                className="w-full"
               />
             </div>
           ) : (
