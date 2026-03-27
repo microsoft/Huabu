@@ -7,7 +7,6 @@ import useCanvasStore from '../../store/canvasStore';
 import { useLLMStore } from '../../store/llmStore';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import { Button } from '../Common/Button';
-import { IconButton } from '../Common/IconButton';
 import { Popover } from '../Common/Popover';
 
 /** Popover width in px (w-80 = 20rem = 320px). */
@@ -156,14 +155,16 @@ export const SettingsPopover: React.FC = () => {
   return (
     <>
       <div ref={triggerRef}>
-        <IconButton
+        <Button
           variant="outline"
+          shape="pill"
+          iconOnly
           title="Settings"
           onClick={handleToggle}
           aria-label="Open settings"
         >
-          <Settings size={18} />
-        </IconButton>
+          <Settings />
+        </Button>
       </div>
 
       {isOpen && (
@@ -232,13 +233,16 @@ export const SettingsPopover: React.FC = () => {
                       >
                         <span className="block truncate">{path}</span>
                       </Button>
-                      <IconButton
+                      <Button
+                        variant="ghost"
+                        iconOnly
+                        size="sm"
                         onClick={() => removeRecentWorkspace(path)}
                         className="text-fg-subtle shrink-0 p-0.5 opacity-0 group-hover:opacity-100"
                         title="Remove from recent"
                       >
-                        <X size={12} />
-                      </IconButton>
+                        <X />
+                      </Button>
                     </li>
                   ))}
               </ul>

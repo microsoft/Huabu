@@ -18,7 +18,7 @@ match and use the existing component.
 START
 │
 ├─ Is it a button / clickable control?
-│  ├─ Icon-only (no text label) → <IconButton>
+│  ├─ Icon-only (no text label) → <Button iconOnly>
 │  │   • ghost   — toolbar icon, copy, expand, close …
 │  │   • outline — round bordered action (settings) …
 │  │   • solid   — round filled action (send) …
@@ -178,14 +178,14 @@ use the system tokens (`bg-surface`, `text-fg-subtle`, etc.) instead.
 
 ### 2.4 Border Radius
 
-| Class          | px                | When to use                                                                       |
-| -------------- | ----------------- | --------------------------------------------------------------------------------- |
-| `rounded-full` | 9999px            | IconButton, Button pill variant, color swatches, progress bar, resize handle pill |
-| `rounded-2xl`  | 16px              | Chat message bubbles, ChatInput container                                         |
-| `rounded-lg`   | `--radius` (10px) | CanvasToolbar, Modal, Popover, SourceCard, dropdown menu                          |
-| `rounded-md`   | 8px               | Tooltip, NodeToolbar, form inputs, form buttons                                   |
-| `rounded`      | 4px               | Button/IconButton ghost variant, NodeWrapper content, tab buttons, TreeRow inner  |
-| `rounded-sm`   | 2px               | Inline edit input                                                                 |
+| Class          | px                | When to use                                                             |
+| -------------- | ----------------- | ----------------------------------------------------------------------- |
+| `rounded-full` | 9999px            | Button `shape="pill"`, color swatches, progress bar, resize handle pill |
+| `rounded-2xl`  | 16px              | Chat message bubbles, ChatInput container                               |
+| `rounded-lg`   | `--radius` (10px) | CanvasToolbar, Modal, Popover, SourceCard, dropdown menu                |
+| `rounded-md`   | 8px               | Tooltip, NodeToolbar, form inputs, form buttons                         |
+| `rounded`      | 4px               | Button ghost variant, NodeWrapper content, tab buttons, TreeRow inner   |
+| `rounded-sm`   | 2px               | Inline edit input                                                       |
 
 ### 2.5 Shadows
 
@@ -217,7 +217,6 @@ use the system tokens (`bg-surface`, `text-fg-subtle`, etc.) instead.
 ### 2.8 Disabled State
 
 All interactive elements: `disabled:cursor-not-allowed disabled:opacity-50`.
-Exception: IconButton solid variant uses `disabled:opacity-40`.
 
 ### 2.9 Transitions & Animation
 
@@ -355,15 +354,15 @@ DragHandle: hidden by default, `opacity-0 group-hover:opacity-100`.
 
 #### NodeToolbar (per-node floating)
 
-| Property        | Value                                                            |
-| --------------- | ---------------------------------------------------------------- |
-| Shape           | `rounded-md border border-border bg-surface shadow-bottom`       |
-| Size            | `h-8 px-2 py-1 gap-3`                                            |
-| Position        | Above node, `offset={12}`, visible when single-selected          |
-| Icon size       | `14`                                                             |
-| Icon color      | `text-fg-subtle`                                                 |
-| Section divider | `<div className="bg-border h-3 w-px" />`                         |
-| Layout          | Left: type icon → divider → Right: IconButton ghost action icons |
+| Property        | Value                                                                 |
+| --------------- | --------------------------------------------------------------------- |
+| Shape           | `rounded-md border border-border bg-surface shadow-bottom`            |
+| Size            | `h-8 px-2 py-1 gap-3`                                                 |
+| Position        | Above node, `offset={12}`, visible when single-selected               |
+| Icon size       | `14`                                                                  |
+| Icon color      | `text-fg-subtle`                                                      |
+| Section divider | `<div className="bg-border h-3 w-px" />`                              |
+| Layout          | Left: type icon → divider → Right: Button iconOnly ghost action icons |
 
 #### CanvasToolbar (bottom floating)
 
@@ -440,28 +439,23 @@ Sizes (apply to `primary`, `secondary`, `danger` only):
 
 All variants: `disabled:cursor-not-allowed disabled:opacity-50`. Tooltip auto via `title` prop.
 
-#### IconButton (icon-only round or ghost button)
+#### Button `iconOnly` (icon-only buttons)
 
-| Variant   | Classes                                                                                  |
-| --------- | ---------------------------------------------------------------------------------------- |
-| `ghost`   | `rounded border-none bg-transparent p-1 enabled:hover:bg-bg-default disabled:opacity-50` |
-| `outline` | `rounded-full border border-border text-fg-muted hover:bg-hover disabled:opacity-50`     |
-| `solid`   | `rounded-full bg-inverse text-fg-inverse hover:bg-inverse/90 disabled:opacity-40`        |
+When `iconOnly` is set, `Button` uses equal padding instead of asymmetric px/py, and SVG sizes are controlled by `iconSizeClasses`.
 
-Sizes (apply to `outline` and `solid` only):
+| Size | Padding | SVG size |
+| ---- | ------- | -------- |
+| `sm` | `p-1`   | 13×13    |
+| `md` | `p-1.5` | 16×16    |
 
-| Size | Classes       |
-| ---- | ------------- |
-| `sm` | `h-6.5 w-6.5` |
-| `md` | `h-9 w-9`     |
-
-Tooltip auto via `title` prop. Usage: Send button (`solid sm`), Settings (`outline md`), toolbar icons (`ghost`).
+Use `shape="pill"` for round icon buttons (e.g., send, settings). Default shape is `rounded-md`.
+Tooltip auto via `title` prop. Usage: Send button (`solid iconOnly shape="pill"`), toolbar icons (`ghost iconOnly`).
 
 #### DragToCanvasHandleButton
 
 | Property   | Value                                  |
 | ---------- | -------------------------------------- |
-| Based on   | IconButton                             |
+| Based on   | Button (iconOnly)                      |
 | Size       | `h-4.5 w-4.5`                          |
 | Icon       | `GripVertical size={16}`               |
 | Color      | `text-fg-subtle hover:text-fg-default` |
@@ -548,7 +542,7 @@ All canvas nodes share the same `NodeWrapper` shell.
 ```
 [ TypeIcon (14px, text-fg-subtle) ]
 [ Divider (bg-border h-3 w-px) ]
-[ IconButton ghost actions (icon 14px) ... ]
+[ Button iconOnly ghost actions (icon 14px) ... ]
 ```
 
 Optional extras for TextNode: font-family select, font-size input,
@@ -587,8 +581,7 @@ Inactive toggle style: `text-fg-subtle hover:bg-bg-default`.
 
 ```ts
 // Reusable components — always prefer these
-import { Button } from '@/components/Common/Button';
-import { IconButton } from '@/components/Common/IconButton';
+import { Button } from '@/components/Common/Button'; // use iconOnly for icon-only buttons
 import { DragToCanvasHandleButton } from '@/components/Common/DragToCanvasHandleButton';
 import { Input } from '@/components/Common/Input';
 import { Tooltip } from '@/components/Common/Tooltip';

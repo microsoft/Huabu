@@ -7,7 +7,7 @@ import { useChatStore } from '@/store/chatStore';
 import { ContextUsageRing } from './ContextUsageRing';
 import { ModeSelector } from './ModeSelector';
 import { SourceCount } from './SelectedNodeRefs';
-import { IconButton } from '../../Common/IconButton';
+import { Button } from '../../Common/Button';
 import { NodeRef } from '../../Common/NodeRef';
 import { Tooltip } from '../../Common/Tooltip';
 
@@ -291,17 +291,22 @@ export const ChatInput = ({
                           {previewText}
                         </span>
                       </div>
-                      <IconButton
+                      <Button
+                        variant="ghost"
+                        shape="pill"
+                        iconOnly
+                        size="sm"
                         onClick={(e) => {
                           e.stopPropagation();
                           useChatStore.getState().setSelectionAttachment(null);
                         }}
                         tooltipWrapperClassName="absolute top-0.5 right-0.5 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
-                        className="text-fg-inverse bg-inverse/50 enabled:hover:bg-inverse/70 rounded-full p-0.5"
+                        className="text-fg-inverse bg-inverse/50 enabled:hover:bg-inverse/70 p-0.5"
                         title="Remove attachment"
                       >
-                        <X size={10} />
-                      </IconButton>
+                        <X />
+                      </Button>
+                      {/* TODO: redundant attachment component, should replace with one common attachment component with pending attribute */}
                     </div>
                   );
 
@@ -380,17 +385,21 @@ export const ChatInput = ({
                         </span>
                       </div>
                     )}
-                    <IconButton
+                    <Button
+                      variant="ghost"
+                      iconOnly
+                      size="sm"
+                      shape="pill"
                       onClick={(e) => {
                         e.stopPropagation();
                         removePendingAttachment(idx);
                       }}
                       tooltipWrapperClassName="absolute top-0.5 right-0.5 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
-                      className="text-fg-inverse bg-inverse/50 enabled:hover:bg-inverse/70 rounded-full p-0.5"
+                      className="text-fg-inverse bg-inverse/50 enabled:hover:bg-inverse/70 p-0.5"
                       title="Remove attachment"
                     >
-                      <X size={10} />
-                    </IconButton>
+                      <X />
+                    </Button>
                   </div>
                 );
 
@@ -437,27 +446,31 @@ export const ChatInput = ({
               <SourceCount />
 
               {isStreaming ? (
-                <IconButton
+                <Button
+                  variant="solid"
+                  shape="pill"
+                  iconOnly
+                  size="sm"
                   type="button"
                   title="Stop generating"
                   onClick={onStop}
                   aria-label="Stop"
-                  size="sm"
-                  variant="solid"
                 >
-                  <Square size={12} />
-                </IconButton>
+                  <Square />
+                </Button>
               ) : (
-                <IconButton
+                <Button
+                  variant="solid"
+                  shape="pill"
+                  iconOnly
+                  size="sm"
                   type="submit"
                   title="Send Message"
                   disabled={isSubmitDisabled}
                   aria-label="Send"
-                  size="sm"
-                  variant="solid"
                 >
-                  <ArrowUp size={16} />
-                </IconButton>
+                  <ArrowUp />
+                </Button>
               )}
             </div>
           </div>

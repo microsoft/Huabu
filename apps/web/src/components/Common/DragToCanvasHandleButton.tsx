@@ -1,13 +1,13 @@
 import { GripVertical } from 'lucide-react';
 
+import { Button, type ButtonProps } from './Button';
 import { cn } from './cn';
-import { IconButton, type IconButtonProps } from './IconButton';
 
 import type { ReactNode } from 'react';
 
 export type DragToCanvasHandleButtonProps = Omit<
-  IconButtonProps,
-  'children' | 'draggable'
+  ButtonProps,
+  'children' | 'draggable' | 'variant' | 'iconOnly'
 > & {
   iconSize?: number;
   className?: string;
@@ -25,10 +25,12 @@ export const DragToCanvasHandleButton = ({
     : 'h-4.5 w-4.5 p-px! text-fg-subtle hover:text-fg-default flex cursor-grab items-center justify-center rounded';
 
   return (
-    <IconButton
+    <Button
+      variant="ghost"
+      iconOnly
       aria-label="Drag block to canvas"
       draggable
-      className={cn(baseClassName, className)}
+      className={cn(baseClassName, '[&_svg]:h-auto [&_svg]:w-auto', className)}
       onMouseDown={(e) => {
         // Do not call preventDefault here; it can prevent native drag from starting.
         e.stopPropagation();
@@ -41,6 +43,6 @@ export const DragToCanvasHandleButton = ({
     >
       <GripVertical size={iconSize} className="shrink-0" />
       {children}
-    </IconButton>
+    </Button>
   );
 };

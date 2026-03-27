@@ -1,7 +1,7 @@
 import { PanelRightClose, PanelRightOpen, Plus } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 
-import { IconButton } from '@/components/Common/IconButton';
+import { Button } from '@/components/Common/Button';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import { useIntentStore } from '@/store/intentStore';
@@ -94,13 +94,15 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       iconExpanded={<PanelRightClose size={16} />}
       className="border-border border-l"
       tools={
-        <IconButton
+        <Button
+          variant="ghost"
+          iconOnly
           onClick={handleNewChat}
           title="New conversation"
           disabled={isLoading}
         >
-          <Plus size={16} />
-        </IconButton>
+          <Plus />
+        </Button>
       }
     >
       <div className="flex h-full flex-col gap-2 overflow-visible">

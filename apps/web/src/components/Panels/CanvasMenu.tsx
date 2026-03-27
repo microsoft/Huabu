@@ -4,8 +4,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 import { exportCanvas } from '../../api/canvas';
 import useCanvasStore from '../../store/canvasStore';
+import { Button } from '../Common/Button';
 import { DropdownMenuItem } from '../Common/DropdownMenu';
-import { IconButton } from '../Common/IconButton';
 import { Popover } from '../Common/Popover';
 import { toast } from '../Common/Toast';
 
@@ -76,23 +76,24 @@ export const CanvasMenu: React.FC = () => {
         />
 
         <div ref={chevronRef}>
-          <IconButton
+          <Button
+            variant="ghost"
+            size="sm"
+            iconOnly
             onClick={() => {
               if (justDismissedRef.current) return;
               setIsOpen((prev) => !prev);
             }}
             aria-label="Canvas menu"
             aria-expanded={isOpen}
-            className="h-7 w-7 shrink-0"
           >
             <ChevronDown
-              size={14}
               className={clsx(
                 'text-fg-subtle transition-transform duration-150',
                 isOpen && 'rotate-180',
               )}
             />
-          </IconButton>
+          </Button>
         </div>
       </div>
 

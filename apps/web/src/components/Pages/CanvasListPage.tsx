@@ -11,7 +11,6 @@ import {
 } from '../../api/canvas';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import { Button } from '../Common/Button';
-import { IconButton } from '../Common/IconButton';
 import { Modal } from '../Common/Modal';
 import { toast } from '../Common/Toast';
 import { Header } from '../Panels/Header';
@@ -302,7 +301,9 @@ export default function CanvasListPage() {
                   </div>
                 </button>
                 {/* Export button */}
-                <IconButton
+                <Button
+                  variant="ghost"
+                  iconOnly
                   onClick={(e) => {
                     e.stopPropagation();
                     void handleExport(canvas.canvasId, canvas.title);
@@ -318,11 +319,13 @@ export default function CanvasListPage() {
                   {exportingId === canvas.canvasId ? (
                     <span className="border-fg-subtle h-4 w-4 animate-spin rounded-full border-2 border-t-transparent" />
                   ) : (
-                    <Download size={16} className="text-fg-subtle" />
+                    <Download className="text-fg-subtle" />
                   )}
-                </IconButton>
+                </Button>
                 {/* Delete button */}
-                <IconButton
+                <Button
+                  variant="ghost"
+                  iconOnly
                   onClick={(e) => {
                     e.stopPropagation();
                     requestDelete(canvas.canvasId, canvas.title);
@@ -330,8 +333,8 @@ export default function CanvasListPage() {
                   tooltipWrapperClassName="absolute top-3 right-3 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
                   title="Delete canvas"
                 >
-                  <Trash2 size={16} className="text-fg-subtle" />
-                </IconButton>
+                  <Trash2 className="text-fg-subtle" />
+                </Button>
               </div>
             ))}
           </div>

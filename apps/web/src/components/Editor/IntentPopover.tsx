@@ -9,7 +9,7 @@ import React, {
 import { createPortal } from 'react-dom';
 
 import { useIntentStore } from '../../store/intentStore';
-import { IconButton } from '../Common/IconButton';
+import { Button } from '../Common/Button';
 
 // ---------------------------------------------------------------------------
 // Step 1: Intent Selection (hover to preview, click to select)
@@ -119,14 +119,17 @@ const IntentSelectStep: React.FC<{ anchorY: number }> = ({ anchorY }) => {
               if (e.key === 'Enter') handleCustomSubmit();
             }}
           />
-          <IconButton
+          <Button
+            variant="ghost"
+            iconOnly
+            size="sm"
             type="button"
             title="Send"
             disabled={!customIntent.trim()}
             onClick={handleCustomSubmit}
           >
-            <Send size={14} />
-          </IconButton>
+            <Send />
+          </Button>
         </div>
       </div>
     </div>
@@ -272,13 +275,15 @@ export const IntentPopover: React.FC = () => {
         <span className="text-fg-default/80 min-w-0 flex-1 truncate text-sm">
           Intent Recognition
         </span>
-        <IconButton
+        <Button
+          variant="ghost"
+          iconOnly
+          size="sm"
           title="Close"
-          className="text-fg-muted hover:text-fg-default flex-shrink-0 rounded p-0.5"
           onClick={dismiss}
         >
-          <X size={14} />
-        </IconButton>
+          <X />
+        </Button>
       </div>
 
       {isLoading ? (

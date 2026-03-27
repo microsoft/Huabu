@@ -9,7 +9,7 @@ import { computeHighlightUpdate, mergeLineRects } from '@/utils/pdf/highlight';
 
 import { FloatingDragHandle } from './FloatingDragHandle';
 import { PDFPageWithOverlay } from './PDFPageWithOverlay';
-import { IconButton } from '../Common/IconButton';
+import { Button } from '../Common/Button';
 
 import type { PreviewComponentProps } from './NotePreview';
 import type { AreaCapturedEvent, NormalizedRect } from './PDFPageWithOverlay';
@@ -409,7 +409,10 @@ export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
       {/* ── Floating toolbar (top-left, vertical) ── */}
       <div className="pointer-events-none absolute top-3 left-3 z-10">
         <div className="border-border bg-surface pointer-events-auto flex flex-col items-center gap-1 rounded-sm border p-0">
-          <IconButton
+          <Button
+            variant="ghost"
+            iconOnly
+            size="sm"
             title="Select Area"
             className={clsx(captureMode && 'text-info bg-bg-default')}
             onClick={() => {
@@ -419,9 +422,12 @@ export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
               if (!next) setPendingCapture(null);
             }}
           >
-            <Scan size={14} />
-          </IconButton>
-          <IconButton
+            <Scan />
+          </Button>
+          <Button
+            variant="ghost"
+            iconOnly
+            size="sm"
             title="Highlight Text"
             className={clsx(
               highlightMode && 'bg-bg-default text-warning-light',
@@ -435,8 +441,8 @@ export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
               }
             }}
           >
-            <Highlighter size={14} />
-          </IconButton>
+            <Highlighter />
+          </Button>
         </div>
       </div>
 

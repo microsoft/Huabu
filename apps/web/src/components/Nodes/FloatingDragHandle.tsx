@@ -7,8 +7,8 @@ import { usePreviewStore } from '@/store/previewStore';
 import { setDragPayload } from '@/utils/io/dragDrop';
 
 import { NODE_ICON } from '../../config/nodeIcons';
+import { Button } from '../Common/Button';
 import { DragToCanvasHandleButton } from '../Common/DragToCanvasHandleButton';
-import { IconButton } from '../Common/IconButton';
 import { Popover } from '../Common/Popover';
 
 import type { ChatAttachment } from '@sediment/shared';
@@ -163,14 +163,16 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
       {/* ── Text button: drag (split) or click-to-add (fullscreen) ── */}
       {hasText &&
         (isFullscreen ? (
-          <IconButton
-            className={dragBtnClass}
+          <Button
+            variant="ghost"
+            iconOnly
+            className={clsx(dragBtnClass, '[&_svg]:h-auto [&_svg]:w-auto')}
             title="Add selected text as a note"
             onClick={handleAddNote}
           >
             <Plus size={10} className="shrink-0" />
             <NODE_ICON.note size={14} className="shrink-0" />
-          </IconButton>
+          </Button>
         ) : (
           <DragToCanvasHandleButton
             iconSize={10}
@@ -191,14 +193,16 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
       )}
       {isImageReady &&
         (isFullscreen ? (
-          <IconButton
-            className={dragBtnClass}
+          <Button
+            variant="ghost"
+            iconOnly
+            className={clsx(dragBtnClass, '[&_svg]:h-auto [&_svg]:w-auto')}
             title="Add captured area as an image"
             onClick={handleAddImage}
           >
             <Plus size={10} className="shrink-0" />
             <NODE_ICON.image size={14} className="shrink-0" />
-          </IconButton>
+          </Button>
         ) : (
           <DragToCanvasHandleButton
             iconSize={10}
@@ -213,27 +217,31 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
 
       {/* ── Send to Chat button ── */}
       {isImageReady && onSendToChat && imageUrl && (
-        <IconButton
-          className={dragBtnClass}
+        <Button
+          variant="ghost"
+          iconOnly
+          className={clsx(dragBtnClass, '[&_svg]:h-auto [&_svg]:w-auto')}
           title="Send captured area to chat"
           onClick={handleSendToChat}
         >
           {/* Plus icon matching the GripVertical icon width in DragToCanvasHandleButton */}
           <Plus size={10} className="shrink-0" />
           <MessageSquare size={14} className="shrink-0" />
-        </IconButton>
+        </Button>
       )}
 
       {/* ── Set as Cover button ── */}
       {isImageReady && onSetCover && imageUrl && (
-        <IconButton
-          className={dragBtnClass}
+        <Button
+          variant="ghost"
+          iconOnly
+          className={clsx(dragBtnClass, '[&_svg]:h-auto [&_svg]:w-auto')}
           title="Set captured area as PDF cover"
           onClick={handleSetCover}
         >
           <Plus size={10} className="shrink-0" />
           <Star size={14} className="shrink-0" />
-        </IconButton>
+        </Button>
       )}
     </Popover>
   );

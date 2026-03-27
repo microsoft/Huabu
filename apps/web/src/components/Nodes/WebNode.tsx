@@ -8,7 +8,7 @@ import { NodeWrapper } from './NodeWrapper.tsx';
 import { PreviewCard } from './PreviewCard.tsx';
 import { useNodeScale } from '../../hooks/useNodeScale.ts';
 import useCanvasStore from '../../store/canvasStore.ts';
-import { IconButton } from '../Common/IconButton.tsx';
+import { Button } from '../Common/Button.tsx';
 
 import type { CanvasWebNodeData } from './types.ts';
 
@@ -103,7 +103,10 @@ export const WebNode = memo(
         <div className="text-fg-muted flex items-center gap-1">
           <div className="bg-border h-3 w-px" />
 
-          <IconButton
+          <Button
+            variant="ghost"
+            iconOnly
+            size="sm"
             aria-label="Open large view"
             title="Open Large View"
             onClick={(e) => {
@@ -111,8 +114,8 @@ export const WebNode = memo(
               openExpanded(id);
             }}
           >
-            <Fullscreen size={14} />
-          </IconButton>
+            <Fullscreen />
+          </Button>
         </div>
       </div>
     );

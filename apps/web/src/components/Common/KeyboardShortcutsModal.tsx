@@ -1,6 +1,6 @@
 import { X } from 'lucide-react';
 
-import { IconButton } from './IconButton';
+import { Button } from './Button';
 import { Modal } from './Modal';
 import { keyboardShortcutSections } from '../../config/shortcuts';
 
@@ -36,13 +36,15 @@ export function KeyboardShortcutsModal({
             on macOS.
           </p>
         </div>
-        <IconButton
+        <Button
+          variant="ghost"
+          iconOnly
           onClick={onClose}
           title="Close (Esc)"
           aria-label="Close keyboard shortcuts"
         >
-          <X size={18} />
-        </IconButton>
+          <X />
+        </Button>
       </div>
 
       <div className="flex-1 overflow-y-auto px-6 py-5">
