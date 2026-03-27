@@ -261,17 +261,6 @@ function CanvasCommandCard({
               </button>
               <div className="flex items-center gap-1">
                 <Button
-                  onPointerDown={handlePreviewAllDown}
-                  onPointerUp={handlePreviewUp}
-                  onPointerLeave={handlePreviewUp}
-                  variant="secondary"
-                  size="sm"
-                  className="gap-1 px-1.5 py-0.5 text-[10px]"
-                >
-                  <Blend size={10} />
-                  View before
-                </Button>
-                <Button
                   onClick={clearAllChanges}
                   variant="secondary"
                   size="sm"
@@ -286,6 +275,15 @@ function CanvasCommandCard({
                   className="gap-1 px-1.5 py-0.5 text-[10px]"
                 >
                   Revert all
+                </Button>
+                <Button
+                  onPointerDown={handlePreviewAllDown}
+                  onPointerUp={handlePreviewUp}
+                  onPointerLeave={handlePreviewUp}
+                  variant="ghost"
+                  size="sm"
+                >
+                  <Blend size={12} />
                 </Button>
               </div>
             </div>
@@ -345,21 +343,11 @@ function CanvasCommandCard({
                       key={change.id}
                       className="text-muted-foreground flex items-center gap-2 pl-0.5 text-xs"
                     >
-                      <Icon size={11} className="flex-shrink-0" />
+                      <Icon size={12} className="flex-shrink-0" />
                       <span className="min-w-0 flex-1 truncate">
                         {renderLabel()}
                       </span>
                       <div className="flex flex-shrink-0 items-center gap-0.5">
-                        <IconButton
-                          onPointerDown={() => handlePreviewDown(change)}
-                          onPointerUp={handlePreviewUp}
-                          onPointerLeave={handlePreviewUp}
-                          disabled={!change.revertible}
-                          title="Hold to preview before"
-                          className="text-muted-foreground/40 hover:text-blue-500"
-                        >
-                          <Blend size={12} />
-                        </IconButton>
                         <IconButton
                           onClick={() => removeChange(change.id)}
                           title="Keep this change"
@@ -378,6 +366,16 @@ function CanvasCommandCard({
                           className="text-muted-foreground/40 hover:text-red-600"
                         >
                           <Undo2 size={12} />
+                        </IconButton>
+                        <IconButton
+                          onPointerDown={() => handlePreviewDown(change)}
+                          onPointerUp={handlePreviewUp}
+                          onPointerLeave={handlePreviewUp}
+                          disabled={!change.revertible}
+                          title="Hold to preview before"
+                          className="text-muted-foreground/40 hover:text-blue-500"
+                        >
+                          <Blend size={12} />
                         </IconButton>
                       </div>
                     </div>
