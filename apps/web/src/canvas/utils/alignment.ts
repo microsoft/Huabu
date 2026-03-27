@@ -3,7 +3,6 @@ import {
   getDescendantIds,
   type NestableNode,
 } from './frame';
-import { snapToGrid } from '../../config/canvas';
 import { getLayoutNodeSize } from '../../utils/node/size';
 
 import type { Node } from '@xyflow/react';
@@ -125,8 +124,8 @@ export function alignNodes(
     return {
       ...n,
       position: {
-        x: snapToGrid(newAbsX - offsetX),
-        y: snapToGrid(newAbsY - offsetY),
+        x: newAbsX - offsetX,
+        y: newAbsY - offsetY,
       },
     };
   });
@@ -243,8 +242,8 @@ export function spreadNodes(
     return {
       ...n,
       position: {
-        x: snapToGrid(newAbs.x - offsetX),
-        y: snapToGrid(newAbs.y - offsetY),
+        x: newAbs.x - offsetX,
+        y: newAbs.y - offsetY,
       },
     };
   });
