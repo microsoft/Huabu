@@ -623,6 +623,7 @@ import {
   DropdownMenu,
   DropdownMenuItem,
 } from '@/components/Common/DropdownMenu';
+import { Select } from '@/components/Common/Select';
 import { NodeBgColorSelector } from '@/components/Common/NodeBgColorSelector';
 import { NodeTextColorSelector } from '@/components/Common/NodeTextColorSelector';
 
