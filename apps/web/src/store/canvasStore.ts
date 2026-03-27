@@ -712,8 +712,6 @@ const useCanvasStore = create<RFState>()(
         for (const dn of draggedNodes) {
           const originalNode = nodes.find((n) => n.id === dn.id);
           if (!originalNode) continue;
-          if (originalNode.type === 'frame') continue;
-
           // If the node is currently in a frame, check whether it would unframe.
           if (originalNode.parentId) {
             const parentId = originalNode.parentId;

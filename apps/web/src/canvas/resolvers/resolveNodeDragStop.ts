@@ -74,7 +74,7 @@ export default function resolveNodeDragStop(
     result = fitFrames(result, affectedFrameIds);
   }
 
-  if (result === nodes && parentChanges.size === 0) {
+  if (parentChanges.size === 0) {
     if (affectedFrameIds.size > 0) {
       for (const n of result) {
         const original = nodes.find((o) => o.id === n.id);
