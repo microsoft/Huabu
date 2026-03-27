@@ -52,7 +52,7 @@ export const SidebarPanel = ({
   return (
     <div className={clsx('bg-surface flex h-full flex-col', className)}>
       {/* header */}
-      <div className="border-border flex h-12 shrink-0 items-center justify-between border-b px-3">
+      <div className="border-edge-default flex h-12 shrink-0 items-center justify-between border-b px-3">
         <div className="text-fg-muted flex min-w-0 flex-1 items-center text-sm font-semibold">
           {tabs ? tabs : title}
         </div>

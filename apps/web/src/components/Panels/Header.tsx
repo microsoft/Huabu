@@ -13,7 +13,7 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({ children, onOpenHelp }) => {
   return (
-    <header className="border-border bg-surface flex h-12 items-center gap-3 border-b px-3">
+    <header className="border-edge-default bg-surface flex h-12 items-center gap-3 border-b px-3">
       <Link to="/" aria-label="Back to home">
         <img src="/favicon.svg" alt="Logo" className="h-8 w-8" />
       </Link>

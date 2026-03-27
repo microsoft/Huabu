@@ -9,9 +9,6 @@ import { useWorkspaceStore } from '../../store/workspaceStore';
 import { Button } from '../Common/Button';
 import { Popover } from '../Common/Popover';
 
-/** Popover width in px (w-80 = 20rem = 320px). */
-const POPOVER_WIDTH = 320;
-
 /**
  * A minimal settings popover that lets the user view and change
  * the server-side workspace directory path via native folder picker.
@@ -145,7 +142,7 @@ export const SettingsPopover: React.FC = () => {
     if (!triggerRef.current) return { x: 0, y: 0 };
     const rect = triggerRef.current.getBoundingClientRect();
     return {
-      x: rect.right - POPOVER_WIDTH,
+      x: rect.right,
       y: rect.bottom,
     };
   };
@@ -171,6 +168,7 @@ export const SettingsPopover: React.FC = () => {
         <Popover
           position={getPopoverPosition()}
           onDismiss={handleDismiss}
+          anchor="top-right"
           offset={{ x: 0, y: 6 }}
           className="w-80 p-4"
         >
@@ -181,7 +179,7 @@ export const SettingsPopover: React.FC = () => {
           <label className="text-fg-muted mb-1.5 block text-xs font-medium"></label>
 
           {/* Current path display */}
-          <div className="border-border bg-surface mb-2 flex items-center gap-2 rounded border px-2.5 py-2">
+          <div className="border-edge-default bg-surface mb-2 flex items-center gap-2 rounded border px-2.5 py-1">
             <span className="text-fg-muted flex-1 truncate text-sm">
               {workspacePath || 'Not configured'}
             </span>

@@ -319,13 +319,15 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
         onClose={() => setActiveModal(null)}
       >
         <div className="flex flex-col items-center justify-center gap-4 pt-2">
-          <button
+          <Button
+            variant="outline"
+            tone="info"
             onClick={() => fileInputRef.current?.click()}
-            className="bg-info-bg hover:bg-info-bg-hover text-info border-info flex w-full flex-col items-center gap-2 rounded-md border border-dashed px-4 py-8 transition-colors"
+            className="flex-col border-dashed px-4 py-8"
           >
             <UploadCloud size={24} />
             <span className="text-sm">Click to select files</span>
-          </button>
+          </Button>
 
           {/* Hidden Input for Multiple Selection */}
           <input
@@ -362,7 +364,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
       >
         <div className="mt-4 flex flex-col gap-0">
           <textarea
-            className="border-border placeholder:text-border focus:border-info focus:ring-info min-h-25 w-full resize-none rounded-md border bg-transparent px-3 py-2 text-sm focus:outline-none"
+            className="border-edge-default placeholder:text-border focus:border-info focus:ring-info min-h-25 w-full resize-none rounded-md border bg-transparent px-3 py-2 text-sm focus:outline-none"
             placeholder={`https://example.com/image.png\nhttps://example.com/doc.pdf\nhttps://google.com`}
             value={linkText}
             onChange={(e) => setLinkText(e.target.value)}

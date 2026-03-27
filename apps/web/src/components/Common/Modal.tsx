@@ -127,7 +127,7 @@ export function Modal({
         aria-describedby={describedBy}
         tabIndex={-1}
         className={cn(
-          'border-border shadow-bottom animate-in zoom-in-95 bg-surface relative z-10 w-96 max-w-[calc(100vw-3rem)] rounded-lg border p-6 duration-200',
+          'border-edge-default shadow-bottom animate-in zoom-in-95 bg-surface relative z-10 w-96 max-w-[calc(100vw-3rem)] rounded-lg border p-6 duration-200',
           className,
         )}
       >

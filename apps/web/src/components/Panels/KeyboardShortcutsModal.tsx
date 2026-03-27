@@ -1,8 +1,8 @@
 import { X } from 'lucide-react';
 
-import { Button } from './Button';
-import { Modal } from './Modal';
 import { keyboardShortcutSections } from '../../config/shortcuts';
+import { Button } from '../Common/Button';
+import { Modal } from '../Common/Modal';
 
 type KeyboardShortcutsModalProps = {
   isOpen: boolean;
@@ -19,7 +19,7 @@ export function KeyboardShortcutsModal({
       onClose={onClose}
       className="flex max-h-[calc(100vh-4rem)] w-[42rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden p-0"
     >
-      <div className="border-border flex flex-shrink-0 items-start justify-between border-b px-6 py-5">
+      <div className="border-edge-default flex flex-shrink-0 items-start justify-between border-b px-6 py-5">
         <div>
           <h3 className="text-fg-default text-base font-semibold">
             Keyboard Shortcuts
@@ -54,14 +54,14 @@ export function KeyboardShortcutsModal({
               <h4 className="text-fg-muted text-sm font-medium">
                 {section.title}
               </h4>
-              <div className="border-border bg-surface overflow-hidden rounded-lg border">
+              <div className="border-edge-default bg-surface overflow-hidden rounded-lg border">
                 {section.items.map((item, index) => (
                   <div
                     key={`${section.title}-${item.keys}`}
                     className={[
                       'bg-surface/50 grid grid-cols-[minmax(9rem,12rem)_1fr] items-center gap-3 px-4 py-3 text-sm',
                       index !== section.items.length - 1
-                        ? 'border-border border-b'
+                        ? 'border-edge-default border-b'
                         : '',
                     ].join(' ')}
                   >

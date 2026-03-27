@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { Highlighter, Loader2, Scan } from 'lucide-react';
+import { Highlighter, Scan } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Document } from 'react-pdf';
 
@@ -10,6 +10,7 @@ import { computeHighlightUpdate, mergeLineRects } from '@/utils/pdf/highlight';
 import { FloatingDragHandle } from './FloatingDragHandle';
 import { PDFPageWithOverlay } from './PDFPageWithOverlay';
 import { Button } from '../Common/Button';
+import { LoadingState } from '../Common/LoadingState';
 
 import type { PreviewComponentProps } from './NotePreview';
 import type { AreaCapturedEvent, NormalizedRect } from './PDFPageWithOverlay';
@@ -352,11 +353,7 @@ export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
   return (
     <div className="relative flex h-full flex-col">
       {/* Loading overlay — visible until document metadata is parsed */}
-      {src && !docLoaded && (
-        <div className="bg-surface absolute inset-0 z-10 flex items-center justify-center">
-          <Loader2 size={18} className="text-fg-subtle animate-spin" />
-        </div>
-      )}
+      {src && !docLoaded && <LoadingState overlay />}
       {/* ── PDF pages ── */}
       <div
         ref={scrollContainerRef}
@@ -408,7 +405,7 @@ export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
 
       {/* ── Floating toolbar (top-left, vertical) ── */}
       <div className="pointer-events-none absolute top-3 left-3 z-10">
-        <div className="border-border bg-surface pointer-events-auto flex flex-col items-center gap-1 rounded-sm border p-0">
+        <div className="border-edge-default bg-surface pointer-events-auto flex flex-col items-center gap-1 rounded-sm border p-0">
           <Button
             variant="ghost"
             iconOnly

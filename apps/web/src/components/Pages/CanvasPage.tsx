@@ -3,12 +3,13 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 
 import useStore from '../../store/canvasStore';
-import { KeyboardShortcutsModal } from '../Common/KeyboardShortcutsModal';
+import { LoadingState } from '../Common/LoadingState';
 import { CenterArea } from '../Layout/CenterArea';
 import { MainLayout } from '../Layout/MainLayout';
 import { ChatPanel } from '../Panels/ChatPanel';
 import { DataSourcePanel } from '../Panels/DataSourcePanel';
 import { Header } from '../Panels/Header';
+import { KeyboardShortcutsModal } from '../Panels/KeyboardShortcutsModal';
 
 /**
  * Page component for a single canvas.
@@ -69,11 +70,7 @@ export default function CanvasPage() {
   }, []);
 
   if (isLoading) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <div className="text-fg-subtle text-sm">Loading canvas…</div>
-      </div>
-    );
+    return <LoadingState message="Loading canvas…" fullScreen />;
   }
 
   if (canvasNotFound) {

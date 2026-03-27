@@ -133,7 +133,7 @@ const DiffPopover = ({
 }: DiffPopoverProps) => (
   <div
     data-diff-popover
-    className="border-border bg-surface absolute z-10 max-h-100 overflow-y-auto rounded-md border p-3 shadow-lg"
+    className="border-edge-default bg-surface absolute z-10 max-h-100 overflow-y-auto rounded-md border p-3 shadow-lg"
     style={style}
     onMouseEnter={onMouseEnter}
     onMouseLeave={onMouseLeave}

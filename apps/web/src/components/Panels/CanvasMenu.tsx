@@ -5,8 +5,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { exportCanvas } from '../../api/canvas';
 import useCanvasStore from '../../store/canvasStore';
 import { Button } from '../Common/Button';
-import { DropdownMenuItem } from '../Common/DropdownMenu';
-import { Popover } from '../Common/Popover';
+import { DropdownMenu, DropdownMenuItem } from '../Common/DropdownMenu';
 import { toast } from '../Common/Toast';
 
 /**
@@ -24,12 +23,8 @@ export const CanvasMenu: React.FC = () => {
 
   const [isOpen, setIsOpen] = useState(false);
 
-  const triggerRef = useRef<HTMLDivElement>(null);
-  const chevronRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const sizerRef = useRef<HTMLSpanElement>(null);
-
-  const justDismissedRef = useRef(false);
 
   // Keep input width in sync with its content
   useEffect(() => {
@@ -53,40 +48,31 @@ export const CanvasMenu: React.FC = () => {
   }, [canvasId, canvasTitle]);
 
   return (
-    <>
-      {/* Canvas title input + chevron trigger */}
-      <div ref={triggerRef} className="flex min-w-0 items-center">
-        {/* Hidden sizer span — mirrors input text to measure natural width */}
-        <span
-          ref={sizerRef}
-          aria-hidden
-          className="invisible absolute px-1 text-lg font-medium whitespace-pre"
-        >
-          {canvasTitle || '\u00a0'}
-        </span>
-        <input
-          ref={inputRef}
-          className="text-fg-default focus:shadow-bottom m-0 min-w-8 bg-transparent px-1 py-1 text-lg font-medium outline-none focus:rounded-md"
-          value={canvasTitle}
-          onChange={(e) => setCanvasTitle(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') inputRef.current?.blur();
-          }}
-          aria-label="Canvas title"
-        />
+    <div className="flex min-w-0 items-center">
+      {/* Hidden sizer span — mirrors input text to measure natural width */}
+      <span
+        ref={sizerRef}
+        aria-hidden
+        className="invisible absolute px-1 text-lg font-medium whitespace-pre"
+      >
+        {canvasTitle || '\u00a0'}
+      </span>
+      <input
+        ref={inputRef}
+        className="text-fg-default focus:shadow-bottom m-0 min-w-8 bg-transparent px-1 py-1 text-lg font-medium outline-none focus:rounded-md"
+        value={canvasTitle}
+        onChange={(e) => setCanvasTitle(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') inputRef.current?.blur();
+        }}
+        aria-label="Canvas title"
+      />
 
-        <div ref={chevronRef}>
-          <Button
-            variant="ghost"
-            size="sm"
-            iconOnly
-            onClick={() => {
-              if (justDismissedRef.current) return;
-              setIsOpen((prev) => !prev);
-            }}
-            aria-label="Canvas menu"
-            aria-expanded={isOpen}
-          >
+      <DropdownMenu
+        open={isOpen}
+        onOpenChange={setIsOpen}
+        trigger={
+          <Button variant="ghost" size="sm" iconOnly aria-label="Canvas menu">
             <ChevronDown
               className={clsx(
                 'text-fg-subtle transition-transform duration-150',
@@ -94,56 +80,36 @@ export const CanvasMenu: React.FC = () => {
               )}
             />
           </Button>
-        </div>
-      </div>
-
-      {/* Dropdown menu */}
-      {isOpen && (
-        <Popover
-          position={(() => {
-            if (!chevronRef.current) return { x: 0, y: 0 };
-            const rect = chevronRef.current.getBoundingClientRect();
-            return { x: rect.left, y: rect.bottom };
-          })()}
-          onDismiss={() => {
-            justDismissedRef.current = true;
+        }
+      >
+        <DropdownMenuItem
+          icon={<Undo2 size={14} />}
+          disabled={!canUndo}
+          onClick={() => {
             setIsOpen(false);
-            requestAnimationFrame(() => {
-              justDismissedRef.current = false;
-            });
+            undo();
           }}
-          offset={{ x: 0, y: 4 }}
-          className="flex flex-col overflow-hidden py-1"
         >
-          <DropdownMenuItem
-            icon={<Undo2 size={14} />}
-            disabled={!canUndo}
-            onClick={() => {
-              setIsOpen(false);
-              undo();
-            }}
-          >
-            Undo
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            icon={<Redo2 size={14} />}
-            disabled={!canRedo}
-            onClick={() => {
-              setIsOpen(false);
-              redo();
-            }}
-          >
-            Redo
-          </DropdownMenuItem>
-          <div className="border-border my-1 border-t" />
-          <DropdownMenuItem
-            icon={<Download size={14} />}
-            onClick={() => void handleExport()}
-          >
-            Export Canvas
-          </DropdownMenuItem>
-        </Popover>
-      )}
-    </>
+          Undo
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          icon={<Redo2 size={14} />}
+          disabled={!canRedo}
+          onClick={() => {
+            setIsOpen(false);
+            redo();
+          }}
+        >
+          Redo
+        </DropdownMenuItem>
+        <div className="border-edge-default my-1 border-t" />
+        <DropdownMenuItem
+          icon={<Download size={14} />}
+          onClick={() => void handleExport()}
+        >
+          Export Canvas
+        </DropdownMenuItem>
+      </DropdownMenu>
+    </div>
   );
 };

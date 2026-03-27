@@ -17,7 +17,7 @@ const PRESET_COLORS = [
   {
     name: 'White',
     value: 'bg-white',
-    border: 'border-border',
+    border: 'border-edge-default',
     ring: 'ring-gray-200',
   },
   {
@@ -112,7 +112,7 @@ export const NodeBgColorSelector = ({
           />
 
           <div
-            className="border-border shadow-bottom animate-in fade-in zoom-in absolute bottom-full left-1/2 z-50 mb-2 flex -translate-x-1/2 gap-2 rounded-full border bg-white px-2 py-1.5 duration-200"
+            className="border-edge-default shadow-bottom animate-in fade-in zoom-in bg-surface absolute bottom-full left-1/2 z-50 mb-2 flex -translate-x-1/2 gap-2 rounded-full border px-2 py-1.5 duration-200"
             onClick={(e) => e.stopPropagation()}
           >
             {PRESET_COLORS.map((color) => (

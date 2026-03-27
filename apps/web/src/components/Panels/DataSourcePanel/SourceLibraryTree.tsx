@@ -3,6 +3,7 @@ import React from 'react';
 import { setDragPayload } from '@/utils/io/dragDrop';
 
 import { TreeRowItem } from './TreeRowItem';
+import { EmptyState } from '../../Common/EmptyState';
 
 import type { DataSourceNodeLike, DataSourceTreeItem } from './types';
 
@@ -87,7 +88,7 @@ export const SourceLibraryTree = ({
         ))}
 
         {items.length === 0 && (
-          <div className="text-fg-subtle px-3 py-2 text-sm">{emptyText}</div>
+          <EmptyState message={emptyText} className="px-3 py-2" />
         )}
       </div>
     </div>

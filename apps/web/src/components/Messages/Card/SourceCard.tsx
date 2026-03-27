@@ -62,7 +62,7 @@ export const SourceCard = ({ source }: { source: Source }) => {
         target="_blank"
         rel="noopener noreferrer"
         className={clsx(
-          'border-border bg-surface block rounded-lg border px-3 py-2',
+          'border-edge-default bg-surface block rounded-lg border px-3 py-2',
           'hover:bg-bg-default ml-1 transition-colors',
         )}
       >

@@ -6,6 +6,7 @@ import { memo, useCallback, useState, useRef, useMemo, useEffect } from 'react';
 import { Button } from '@/components/Common/Button.tsx';
 import { NodeBgColorSelector } from '@/components/Common/NodeBgColorSelector.tsx';
 import { NodeTextColorSelector } from '@/components/Common/NodeTextColorSelector.tsx';
+import { Select } from '@/components/Common/Select.tsx';
 import useCanvasStore from '@/store/canvasStore.ts';
 
 import { NodeWrapper } from './NodeWrapper.tsx';
@@ -274,22 +275,16 @@ export const TextNode = memo(
 
     const TextToolbar = (
       <div className="flex w-full items-center gap-1">
-        <div
-          className="hover:bg-bg-default text-fg-muted border-border flex items-center rounded border bg-transparent p-0.5 transition-colors"
-          title="Font Family"
-        >
-          <select
-            className="h-full w-16 cursor-pointer bg-transparent text-xs outline-none"
-            value={fontFamily}
-            onChange={(e) => updateStyle({ fontFamily: e.target.value })}
-          >
-            {FONT_FAMILIES.map((f) => (
-              <option key={f.name} value={f.value} className="text-fg-default">
-                {f.name}
-              </option>
-            ))}
-          </select>
-        </div>
+        <Select
+          options={FONT_FAMILIES.map((f) => ({
+            value: f.value,
+            label: f.name,
+          }))}
+          value={fontFamily}
+          onChange={(v) => updateStyle({ fontFamily: v })}
+          variant="outline"
+          size="sm"
+        />
 
         <div className="bg-border mx-1 h-3 w-px" />
 

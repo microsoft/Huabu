@@ -1,4 +1,4 @@
-import { Loader2, PenLine, Send, X } from 'lucide-react';
+import { PenLine, Send, X } from 'lucide-react';
 import React, {
   useCallback,
   useEffect,
@@ -10,6 +10,8 @@ import { createPortal } from 'react-dom';
 
 import { useIntentStore } from '../../store/intentStore';
 import { Button } from '../Common/Button';
+import { EmptyState } from '../Common/EmptyState';
+import { Spinner } from '../Common/Spinner';
 
 // ---------------------------------------------------------------------------
 // Step 1: Intent Selection (hover to preview, click to select)
@@ -50,9 +52,7 @@ const IntentSelectStep: React.FC<{ anchorY: number }> = ({ anchorY }) => {
   return (
     <div className="flex flex-col">
       {candidates.length === 0 && !isStreaming ? (
-        <div className="text-fg-subtle px-3 py-4 text-sm">
-          No suggestions available.
-        </div>
+        <EmptyState message="No suggestions available." className="px-3 py-4" />
       ) : (
         <ul className="my-1 flex flex-col">
           {candidates.map((c, idx) => {
@@ -69,8 +69,8 @@ const IntentSelectStep: React.FC<{ anchorY: number }> = ({ anchorY }) => {
                 }}
                 className="relative"
               >
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
                   className={`mx-2 flex w-[calc(100%-16px)] cursor-pointer flex-col rounded-md px-2 py-1.5 text-left transition-colors ${
                     isSelected ? 'bg-info-bg' : isHovered ? 'bg-bg-default' : ''
                   }`}
@@ -91,13 +91,13 @@ const IntentSelectStep: React.FC<{ anchorY: number }> = ({ anchorY }) => {
                       {c.description}
                     </span>
                   )}
-                </button>
+                </Button>
               </li>
             );
           })}
           {isStreaming && (
             <li className="text-fg-subtle flex items-center gap-1.5 px-4 py-1.5 text-xs">
-              <Loader2 size={12} className="animate-spin" />
+              <Spinner size="xs" />
               <span>Thinking…</span>
             </li>
           )}
@@ -105,7 +105,7 @@ const IntentSelectStep: React.FC<{ anchorY: number }> = ({ anchorY }) => {
       )}
 
       {/* Custom intent input */}
-      <div className="border-border border-t px-3 py-2">
+      <div className="border-edge-default border-t px-3 py-2">
         <div className="flex items-center gap-1.5">
           <PenLine size={12} className="text-fg-muted/60 flex-shrink-0" />
           <input
@@ -266,12 +266,12 @@ export const IntentPopover: React.FC = () => {
   return createPortal(
     <div
       ref={containerRef}
-      className="border-border bg-surface fixed w-80 cursor-grab rounded-md border shadow active:cursor-grabbing"
+      className="border-edge-default bg-surface fixed w-80 cursor-grab rounded-md border shadow active:cursor-grabbing"
       style={posStyle}
       onPointerDown={handlePointerDown}
     >
       {/* Title bar */}
-      <div className="border-border flex items-center gap-2 border-b px-3 py-2">
+      <div className="border-edge-default flex items-center gap-2 border-b px-3 py-2">
         <span className="text-fg-default/80 min-w-0 flex-1 truncate text-sm">
           Intent Recognition
         </span>
@@ -288,7 +288,7 @@ export const IntentPopover: React.FC = () => {
 
       {isLoading ? (
         <div className="text-fg-subtle flex items-center gap-2 px-3 py-4 text-sm">
-          <Loader2 size={16} className="animate-spin" />
+          <Spinner size="sm" />
           <span>Analyzing context…</span>
         </div>
       ) : (

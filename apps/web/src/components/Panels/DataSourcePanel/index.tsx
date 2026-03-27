@@ -1,4 +1,3 @@
-import clsx from 'clsx';
 import {
   PanelLeftClose,
   PanelLeftOpen,
@@ -15,6 +14,8 @@ import { getNodeIcon, NODE_TYPE_LABEL } from '../../../config/nodeIcons';
 import useCanvasStore from '../../../store/canvasStore';
 import { usePreviewStore } from '../../../store/previewStore';
 import { Button } from '../../Common/Button';
+import { DropdownMenu, DropdownMenuItem } from '../../Common/DropdownMenu';
+import { TabGroup } from '../../Common/TabGroup';
 import { SidebarPanel } from '../SidebarPanel';
 
 import type { Source } from '@sediment/shared';
@@ -107,7 +108,6 @@ export const DataSourcePanel = ({
   }, [tab]);
 
   const [sortType, setSortType] = useState<SortType>('alpha');
-  const [showSortMenu, setShowSortMenu] = useState(false);
 
   // Canvas layer tree: use original node order (hierarchy-based)
   const layerItems = useMemo(() => buildTreeItems(nodes), [nodes]);
@@ -168,30 +168,14 @@ export const DataSourcePanel = ({
     <SidebarPanel
       title="Data Sources"
       tabs={
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            className={
-              tab === 'canvas'
-                ? 'bg-bg-default text-fg-default rounded px-2 py-1'
-                : 'hover:text-fg-default text-fg-muted rounded px-2 py-1'
-            }
-            onClick={() => setTab('canvas')}
-          >
-            Canvas
-          </button>
-          <button
-            type="button"
-            className={
-              tab === 'sources'
-                ? 'bg-bg-default text-fg-default rounded px-2 py-1'
-                : 'hover:text-fg-default text-fg-muted rounded px-2 py-1'
-            }
-            onClick={() => setTab('sources')}
-          >
-            Sources
-          </button>
-        </div>
+        <TabGroup
+          options={[
+            { value: 'canvas' as const, label: 'Canvas' },
+            { value: 'sources' as const, label: 'Sources' },
+          ]}
+          value={tab}
+          onChange={setTab}
+        />
       }
       tools={
         tab === 'sources' && (
@@ -200,41 +184,29 @@ export const DataSourcePanel = ({
               <Search />
             </Button>
 
-            <div className="relative">
-              <Button
-                variant="ghost"
-                iconOnly
-                title="Sort"
-                onClick={() => setShowSortMenu(!showSortMenu)}
-              >
-                <SlidersHorizontal
-                  className={sortType !== 'manual' ? 'text-info' : ''}
-                />
-              </Button>
-
-              {showSortMenu && (
-                <div className="bg-surface border-border absolute top-full right-0 z-50 mt-1 w-32 rounded border py-1 shadow-lg">
-                  {[
-                    { id: 'alpha', label: 'Alphabetical', desc: 'A-Z' },
-                    { id: 'time', label: 'Time', desc: 'Newest' },
-                  ].map((opt) => (
-                    <button
-                      key={opt.id}
-                      className={clsx(
-                        'hover:bg-hover flex w-full justify-between px-3 py-1.5 text-left text-xs',
-                        sortType === opt.id && 'text-info font-bold',
-                      )}
-                      onClick={() => {
-                        setSortType(opt.id as SortType);
-                        setShowSortMenu(false);
-                      }}
-                    >
-                      <span>{opt.label}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            <DropdownMenu
+              trigger={
+                <Button variant="ghost" iconOnly title="Sort">
+                  <SlidersHorizontal
+                    className={sortType !== 'manual' ? 'text-info' : ''}
+                  />
+                </Button>
+              }
+              align="bottom-right"
+            >
+              {[
+                { id: 'alpha', label: 'Alphabetical' },
+                { id: 'time', label: 'Time' },
+              ].map((opt) => (
+                <DropdownMenuItem
+                  key={opt.id}
+                  onClick={() => setSortType(opt.id as SortType)}
+                  className={sortType === opt.id ? 'text-info font-bold' : ''}
+                >
+                  {opt.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenu>
           </div>
         )
       }
@@ -242,7 +214,7 @@ export const DataSourcePanel = ({
       onToggle={onToggle}
       iconCollapsed={<PanelLeftOpen size={16} />}
       iconExpanded={<PanelLeftClose size={16} />}
-      className="border-border border-r"
+      className="border-edge-default border-r"
     >
       {tab === 'canvas' ? (
         <CanvasLayerTree

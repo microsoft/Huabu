@@ -30,7 +30,7 @@ const variantToneClasses: Record<ButtonVariant, Record<ButtonTone, string>> = {
   },
   outline: {
     neutral:
-      'border border-border bg-surface text-fg-muted enabled:hover:bg-hover',
+      'border border-edge-default bg-surface text-fg-muted enabled:hover:bg-hover',
     info: 'border border-info-light bg-surface text-info enabled:hover:bg-info-bg',
     danger:
       'border border-danger-light bg-surface text-danger enabled:hover:bg-danger-bg',
