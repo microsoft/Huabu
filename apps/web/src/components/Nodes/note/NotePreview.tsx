@@ -94,6 +94,17 @@ export const NotePreview = ({
   // content changed — not only the cursor block.
   const prevBlockTextRef = useRef<Map<string, string>>(new Map());
 
+  /** Snapshot both block IDs and per-block text into the prev-refs so that
+   *  the onChange handler doesn't re-process programmatic edits as user input. */
+  const syncPrevRefs = useCallback((blocks: ProvenanceBlock[]) => {
+    prevBlockIdsRef.current = blocks.map((b) => b.id);
+    const snap = new Map<string, string>();
+    for (const b of blocks) {
+      snap.set(b.id, extractBlockText(b));
+    }
+    prevBlockTextRef.current = snap;
+  }, []);
+
   // Stores the last fully-expanded (per-block) provenance so that it survives
   // external updates that overwrite provenanceRef with a sentinel map.
   const lastExpandedProvenanceRef = useRef<BlockProvenanceMap | undefined>(
@@ -234,13 +245,7 @@ export const NotePreview = ({
           }
         }
 
-        prevBlockIdsRef.current = newBlocks.map((b) => b.id);
-        // Populate per-block text snapshot so onChange can compare content.
-        const textMap = new Map<string, string>();
-        for (const b of newBlocks) {
-          textMap.set(b.id, extractBlockText(b));
-        }
-        prevBlockTextRef.current = textMap;
+        syncPrevRefs(newBlocks as ProvenanceBlock[]);
 
         if (!usedJson && !readOnly) {
           const newJson = JSON.stringify(editor.document);
@@ -391,12 +396,7 @@ export const NotePreview = ({
     lastAppliedMarkdownRef.current = md.trim();
     lastDocJsonRef.current = json;
     // Sync prev refs so onChange doesn't re-process the programmatic edits
-    prevBlockIdsRef.current = editor.document.map((b: { id: string }) => b.id);
-    const textSnap = new Map<string, string>();
-    for (const b of editor.document as ProvenanceBlock[]) {
-      textSnap.set(b.id, extractBlockText(b));
-    }
-    prevBlockTextRef.current = textSnap;
+    syncPrevRefs(editor.document as ProvenanceBlock[]);
     writePatch(md.trim(), json, cleared);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor, onDataChange]);
@@ -445,14 +445,7 @@ export const NotePreview = ({
       lastAppliedMarkdownRef.current = md.trim();
       lastDocJsonRef.current = json;
       // Sync prev refs so onChange doesn't re-process the reverted block
-      prevBlockIdsRef.current = editor.document.map(
-        (b: { id: string }) => b.id,
-      );
-      const textSnap = new Map<string, string>();
-      for (const b of editor.document as ProvenanceBlock[]) {
-        textSnap.set(b.id, extractBlockText(b));
-      }
-      prevBlockTextRef.current = textSnap;
+      syncPrevRefs(editor.document as ProvenanceBlock[]);
       writePatch(md.trim(), json, updated);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -514,14 +507,7 @@ export const NotePreview = ({
       lastAppliedMarkdownRef.current = md.trim();
       lastDocJsonRef.current = json;
       // Sync prev refs so onChange doesn't re-process the restored block
-      prevBlockIdsRef.current = editor.document.map(
-        (b: { id: string }) => b.id,
-      );
-      const textSnap = new Map<string, string>();
-      for (const b of editor.document as ProvenanceBlock[]) {
-        textSnap.set(b.id, extractBlockText(b));
-      }
-      prevBlockTextRef.current = textSnap;
+      syncPrevRefs(editor.document as ProvenanceBlock[]);
       writePatch(md.trim(), json, updated);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -594,14 +580,7 @@ export const NotePreview = ({
         lastAppliedMarkdownRef.current = md.trim();
         lastDocJsonRef.current = json;
         // Sync prev refs so onChange doesn't treat the inserted block as new
-        prevBlockIdsRef.current = editor.document.map(
-          (b: { id: string }) => b.id,
-        );
-        const updatedTextMap = new Map<string, string>();
-        for (const b of editor.document as ProvenanceBlock[]) {
-          updatedTextMap.set(b.id, extractBlockText(b));
-        }
-        prevBlockTextRef.current = updatedTextMap;
+        syncPrevRefs(editor.document as ProvenanceBlock[]);
         writePatch(md.trim(), json, undefined, updated);
       } catch {
         return;
@@ -650,9 +629,18 @@ export const NotePreview = ({
               // comparing against the previous per-block text snapshot.
               // This catches edits the cursor-only heuristic misses
               // (e.g. Enter splitting a block, multi-block paste).
-              // Only extract text for blocks that either are new or have a
-              // provenance entry with baselineText (i.e. in the diff view).
-              // This avoids calling extractBlockText on every block per keystroke.
+              //
+              // PERF: Only extract text for blocks that either are new or
+              // have a provenance entry with baselineText (i.e. in the diff
+              // view). This avoids calling extractBlockText on every block
+              // per keystroke.
+              //
+              // INVARIANT: blocks whose provenance has no baselineText are
+              // never shown in the diff view, so skipping them here is safe.
+              // If baselineText is later cleared (e.g. by user-edit accept),
+              // the block leaves the diff view, and we intentionally stop
+              // tracking its text changes until the next AI update re-adds
+              // a baselineText.
               const prov = provenanceRef.current;
               const editedBlockIds: string[] = [];
               const newTextMap = new Map<string, string>();
