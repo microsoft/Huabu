@@ -294,7 +294,7 @@ export const NodeWrapper = memo(
             isVisible={selected && selectedCount === 1}
             position={Position.Top}
             offset={12}
-            className="border-edge-default shadow-bottom bg-surface flex h-8 items-center gap-3 rounded-md border px-2 py-1"
+            className="border-edge-default shadow-bottom bg-surface flex h-8 items-center gap-3 rounded-md border px-1 py-1"
           >
             {toolbar}
           </NodeToolbar>

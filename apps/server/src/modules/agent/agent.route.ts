@@ -19,11 +19,7 @@ import { AGENT_SYSTEM_PROMPT } from '../../prompt/agent.js';
 import { SYSTEM_PROMPT } from '../../prompt/system.js';
 import { IMAGE_MIME_MAP } from '../../utils/mime.js';
 import { runAgent } from '../agent/agent.service.js';
-import {
-  loadContext,
-  loadLatestContext,
-  saveContext,
-} from '../agent/store/chat-store.js';
+import { loadContext, saveContext } from '../agent/store/chat-store.js';
 import { getArtifactsDir } from '../artifact/utils.js';
 import { buildContext } from '../knowledge/index.js';
 
@@ -575,21 +571,11 @@ const agentRoutes: FastifyPluginAsync = async (
 
     const context = loadContext(threadId, canvasId);
     if (!context) {
-      // Fallback: if the specific threadId is not found, try loading the most
-      // recent thread for this canvas. This handles the case where the client's
-      // threadMap got out of sync (e.g. after clearMessages or localStorage drift).
-      const latest = loadLatestContext(canvasId);
-      if (!latest) {
-        // No history exists for this canvas yet — return empty history (not 404).
-        return reply.send({ threadId, messages: [] });
-      }
-
-      const fallbackMessages: ChatHistoryItem[] = [];
-      buildHistoryItems(latest.context, fallbackMessages);
-      return reply.send({
-        threadId: latest.threadId,
-        messages: fallbackMessages,
-      });
+      // No history for this threadId — return empty. This is expected for
+      // newly created threads (e.g. after "New Chat") that haven't sent a
+      // message yet. Falling back to the latest thread would overwrite the
+      // client's intentional new-thread state on page refresh.
+      return reply.send({ threadId, messages: [] });
     }
 
     const messages: ChatHistoryItem[] = [];

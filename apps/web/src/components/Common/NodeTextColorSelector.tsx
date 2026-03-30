@@ -79,6 +79,7 @@ export const NodeTextColorSelector = ({
           setIsOpen(!isOpen);
         }}
         title="Change Text Color"
+        className="h-6 rounded-sm"
       >
         <Baseline style={{ color: activeColor.value }} />
       </Button>

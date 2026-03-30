@@ -91,6 +91,7 @@ export const NodeBgColorSelector = ({
           setIsOpen(!isOpen);
         }}
         title="Change Color"
+        className="h-6 rounded-sm"
       >
         <div
           className={clsx(

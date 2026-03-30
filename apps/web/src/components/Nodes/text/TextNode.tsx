@@ -196,7 +196,10 @@ export const TextNode = memo(
 
     const autoSize = useMemo(() => {
       if (hasFixedSize) return null;
-      return measureTextContent(draftContent, {
+      // When content is empty, measure the placeholder so the node is wide
+      // enough to display it without clipping.
+      const text = draftContent || 'Type...';
+      return measureTextContent(text, {
         ...fontOpts,
         fontSize: baseFontSize,
         maxWidth: maxAutoWidth,
@@ -284,6 +287,7 @@ export const TextNode = memo(
           onChange={(v) => updateStyle({ fontFamily: v })}
           variant="outline"
           size="sm"
+          className="h-6 rounded-sm"
         />
 
         <div className="bg-border mx-1 h-3 w-px" />
