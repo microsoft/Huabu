@@ -8,8 +8,8 @@ import { useIntentStore } from '@/store/intentStore';
 
 import { SidebarPanel } from '../SidebarPanel';
 import { ChatInput } from './ChatInput';
-import { useAgentStream } from './useAgentStream';
-import { useChatHistory } from './useChatHistory';
+import { useAgentStream } from '../../../hooks/useAgentStream';
+import { useChatHistory } from '../../../hooks/useChatHistory';
 import { MessageList } from '../../Messages/MessageList';
 
 import type { AgentMode, IntentCandidate } from '@sediment/shared';

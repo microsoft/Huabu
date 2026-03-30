@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 
 import { ToastContainer } from './components/Common/Toast';
-import CanvasListPage from './components/Pages/CanvasListPage';
-import CanvasPage from './components/Pages/CanvasPage';
-import ComponentShowcasePage from './components/Pages/ComponentShowcasePage';
-import WorkspaceSetupPage from './components/Pages/WorkspaceSetupPage';
+import CanvasListPage from './pages/CanvasListPage';
+import CanvasPage from './pages/CanvasPage';
+import ComponentShowcasePage from './pages/ComponentShowcasePage';
+import WorkspaceSetupPage from './pages/WorkspaceSetupPage';
 import { useWorkspaceStore } from './store/workspaceStore';
 
 /**

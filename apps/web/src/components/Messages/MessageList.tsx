@@ -6,8 +6,8 @@ import { IntentSelectMessage } from './IntentSelectMessage';
 import { StatusMessage } from './StatusMessage';
 import { ToolMessageGroup } from './ToolMessage';
 import { UserMessage } from './UserMessage';
-import { ThinkingIndicator } from '../../utils/ThinkingIndicator';
 import { Button } from '../Common/Button';
+import { ThinkingIndicator } from '../Common/ThinkingIndicator';
 
 import type { ToolEntry } from './ToolMessage';
 import type { ChatMessage } from './types';

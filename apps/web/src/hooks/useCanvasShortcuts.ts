@@ -6,16 +6,16 @@ import {
   type MutableRefObject,
 } from 'react';
 
-import useCanvasStore from '../store/canvasStore';
-import { useIntentStore } from '../store/intentStore';
-import { looksLikeUrl } from '../utils/io/media';
 import {
   uploadFileToNodeInput,
   urlToNodeInput,
   textToNodeInput,
-} from '../utils/io/nodeInputBuilders';
+} from '../handler/canvasCommand/nodeInputBuilders';
+import useCanvasStore from '../store/canvasStore';
+import { useIntentStore } from '../store/intentStore';
+import { looksLikeUrl } from '../utils/io/media';
 
-import type { AddNodeInput } from '../canvas/uiIntent';
+import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
 import type { ReactFlowInstance } from '@xyflow/react';
 
 /** Returns true when the target is an editable element (input/textarea/contentEditable). */

@@ -1,10 +1,10 @@
-import { ImagePreview } from './ImagePreview';
-import { NotePreview } from './NotePreview';
-import { PDFPreview } from './PDFPreview';
-import { VideoPreview } from './VideoPreview';
-import { WebPreview } from './WebPreview';
+import { ImagePreview } from './image/ImagePreview';
+import { NotePreview } from './note/NotePreview';
+import { PDFPreview } from './pdf/PDFPreview';
+import { VideoPreview } from './video/VideoPreview';
+import { WebPreview } from './web/WebPreview';
 
-import type { PreviewComponentProps } from './NotePreview';
+import type { PreviewComponentProps } from './note/NotePreview';
 
 export const NodePreviews: Record<
   string,

@@ -4,15 +4,15 @@
  * useCanvasShortcuts.ts (paste) to eliminate duplication.
  */
 
+import { uploadImage, uploadPdf, uploadVideo } from '../../api/artifact';
 import {
   detectNodeType,
   detectNodeTypeFromMime,
   getImageDimensionsFromBlob,
   normalizeUrl,
-} from './media';
-import { uploadImage, uploadPdf, uploadVideo } from '../../api/artifact';
+} from '../../utils/io/media';
 
-import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
+import type { AddNodeInput } from './uiIntent';
 import type { NodeOrigin } from '@sediment/shared';
 
 type Point = { x: number; y: number };
