@@ -1,5 +1,5 @@
 /**
- * @file Layout module barrel export.
+ * @file CanvasPage module barrel export.
  */
 
 export { layoutAll, layoutGroup, placeNode } from './coordinator';

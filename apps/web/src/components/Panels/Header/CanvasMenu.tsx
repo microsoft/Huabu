@@ -2,11 +2,11 @@ import clsx from 'clsx';
 import { ChevronDown, Download, Redo2, Undo2 } from 'lucide-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
-import { exportCanvas } from '../../api/canvas';
-import useCanvasStore from '../../store/canvasStore';
-import { Button } from '../Common/Button';
-import { DropdownMenu, DropdownMenuItem } from '../Common/DropdownMenu';
-import { toast } from '../Common/Toast';
+import { exportCanvas } from '../../../api/canvas.ts';
+import useCanvasStore from '../../../store/canvasStore.ts';
+import { Button } from '../../Common/Button.tsx';
+import { DropdownMenu, DropdownMenuItem } from '../../Common/DropdownMenu.tsx';
+import { toast } from '../../Common/Toast.tsx';
 
 /**
  * canvas title + dropdown menu.

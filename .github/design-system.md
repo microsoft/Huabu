@@ -627,7 +627,7 @@ import { Select } from '@/components/Common/Select';
 import { NodeBgColorSelector } from '@/components/Common/NodeBgColorSelector';
 import { NodeTextColorSelector } from '@/components/Common/NodeTextColorSelector';
 
-// Layout shells
+// CanvasPage shells
 import { SidebarPanel } from '@/components/Panels/SidebarPanel';
 import { NodeWrapper } from '@/components/Nodes/NodeWrapper';
 

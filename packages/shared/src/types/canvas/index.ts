@@ -6,7 +6,7 @@
  * - node.ts: Node data structures and type guards
  * - edge.ts: Edge types and styling
  * - source.ts: Knowledge source and ingestion types
- * - layout.ts: Layout calculation types
+ * - layout.ts: CanvasPage calculation types
  * - operation.ts: Canvas operation types (for programmatic manipulation)
  * - canvas-api.ts: REST API request/response types
  */
@@ -52,7 +52,7 @@ export type {
   ResolveLabelResponse,
 } from './source.js';
 
-// Layout types
+// CanvasPage types
 export type {
   Point,
   Bounds,

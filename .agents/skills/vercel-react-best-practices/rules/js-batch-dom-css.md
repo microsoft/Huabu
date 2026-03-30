@@ -1,5 +1,5 @@
 ---
-title: Avoid Layout Thrashing
+title: Avoid CanvasPage Thrashing
 impact: MEDIUM
 impactDescription: prevents forced synchronous layouts and reduces performance bottlenecks
 tags: javascript, dom, css, performance, reflow, layout-thrashing

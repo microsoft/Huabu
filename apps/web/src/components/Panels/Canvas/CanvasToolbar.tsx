@@ -280,7 +280,9 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             variant="ghost"
             iconOnly
             title={
-              autoLayoutEnabled ? 'Disable Auto Layout' : 'Enable Auto Layout'
+              autoLayoutEnabled
+                ? 'Disable Auto CanvasPage'
+                : 'Enable Auto CanvasPage'
             }
             onClick={() => toggleAutoLayout()}
             className={clsx(autoLayoutEnabled && 'text-info bg-bg-default')}

@@ -1,5 +1,5 @@
 /**
- * @file Layout solver interface.
+ * @file CanvasPage solver interface.
  *
  * A solver is the minimal replaceable algorithm unit.
  * It receives the full layout graph (nodes, edges, groups) and returns
