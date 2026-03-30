@@ -9,9 +9,10 @@
 import { createId } from '@sediment/shared';
 import { create } from 'zustand';
 
+import { captureCanvasScreenshot } from '@/handler/canvasCommand/utils/screenshot';
+
 import useCanvasStore from './canvasStore';
 import { recognizeIntentStream, logIntentEpisode } from '../api/intent';
-import { captureCanvasScreenshot } from '../canvas/utils/screenshot';
 
 import type { IntentCandidate } from '@sediment/shared';
 

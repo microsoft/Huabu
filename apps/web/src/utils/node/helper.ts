@@ -4,7 +4,10 @@
  * Generic canvas-node utilities that are not specific to frames.
  */
 
-import { getDescendantIds, type NestableNode } from '../../canvas/utils/frame';
+import {
+  getDescendantIds,
+  type NestableNode,
+} from '@/handler/canvasCommand/utils/frame';
 
 type NodeWithPosition = {
   id: string;

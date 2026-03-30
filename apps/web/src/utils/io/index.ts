@@ -22,7 +22,7 @@ export {
   needsPreprocessing,
   shouldPreprocessOnUpdate,
   preprocessNodeIfNeeded,
-} from './preprocess';
+} from '@/handler/canvasCommand/preprocess';
 
 export {
   detectNodeType,
@@ -36,4 +36,4 @@ export {
   uploadFileToNodeInput,
   urlToNodeInput,
   textToNodeInput,
-} from './nodeInputBuilders';
+} from '../../handler/canvasCommand/nodeInputBuilders';

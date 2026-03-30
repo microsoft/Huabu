@@ -24,19 +24,26 @@ import {
 } from '@xyflow/react';
 import { create, type StateCreator } from 'zustand';
 
-import { getCanvas, preprocessNode, putCanvas } from '../api';
-import { canvasHistoryManager } from './canvasHistoryManager';
-import { COMMAND_META } from '../canvas/commands';
-import { executeCanvasCommands } from '../canvas/executor';
-import { runPostEffects } from '../canvas/postEffects';
+import { COMMAND_META } from '@/handler/canvasCommand/commands';
+import { executeCanvasCommands } from '@/handler/canvasCommand/executor';
+import { runPostEffects } from '@/handler/canvasCommand/postEffects';
+import {
+  preprocessNodeIfNeeded,
+  needsPreprocessing,
+  type NodeIngestionInfo,
+} from '@/handler/canvasCommand/preprocess';
 import {
   resolveUiIntent,
   type AddNodeInput,
   type CanvasUiIntent,
   type UiResolverState,
-} from '../canvas/uiIntent';
-import { extractNodeRef, extractSnippet, pushAction } from '../canvas/utils';
-import { type AlignDirection } from '../canvas/utils/alignment';
+} from '@/handler/canvasCommand/uiIntent';
+import {
+  extractNodeRef,
+  extractSnippet,
+  pushAction,
+} from '@/handler/canvasCommand/utils';
+import { type AlignDirection } from '@/handler/canvasCommand/utils/alignment';
 import {
   computeFrameFit,
   getAbsolutePosition as getFrameAbsolutePosition,
@@ -44,12 +51,10 @@ import {
   wouldAutoFrame,
   type FrameFitResult,
   type NestableNode,
-} from '../canvas/utils/frame';
-import {
-  preprocessNodeIfNeeded,
-  needsPreprocessing,
-  type NodeIngestionInfo,
-} from '../utils/io/preprocess';
+} from '@/handler/canvasCommand/utils/frame';
+
+import { canvasHistoryManager } from './canvasHistoryManager';
+import { getCanvas, preprocessNode, putCanvas } from '../api';
 import { getNodeSize } from '../utils/node/size';
 
 const AUTOSAVE_DEBOUNCE_MS = 1000;
