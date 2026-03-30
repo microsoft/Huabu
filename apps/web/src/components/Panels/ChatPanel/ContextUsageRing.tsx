@@ -193,7 +193,7 @@ export const ContextUsageRing = ({
             r={radius}
             fill="none"
             strokeWidth={strokeWidth}
-            className="stroke-border"
+            className="stroke-edge-default"
           />
           {/* Estimated input arc (orange) — continues after the red arc */}
           {estimatedInputTokens > 0 && projectedEnd > actualEnd && (
@@ -202,7 +202,7 @@ export const ContextUsageRing = ({
               fill="none"
               strokeWidth={strokeWidth}
               strokeLinecap="round"
-              className="stroke-warning-light"
+              className="stroke-fg-subtle"
             />
           )}
           {/* Actual context arc (red) — starts at 12 o'clock */}
@@ -212,7 +212,7 @@ export const ContextUsageRing = ({
               fill="none"
               strokeWidth={strokeWidth}
               strokeLinecap="round"
-              className="stroke-danger"
+              className="stroke-fg-muted"
             />
           )}
         </svg>

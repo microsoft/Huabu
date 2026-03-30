@@ -217,6 +217,33 @@ export function blockFingerprint(block: ProvenanceBlock): string {
   return `${block.type}::${extractBlockText(block)}`;
 }
 
+/** Split text into a multiset of lowercase words for similarity comparison. */
+function wordBag(text: string): Map<string, number> {
+  const bag = new Map<string, number>();
+  for (const w of text.toLowerCase().split(/\s+/)) {
+    if (w) bag.set(w, (bag.get(w) ?? 0) + 1);
+  }
+  return bag;
+}
+
+/** Jaccard-style similarity between two word bags (0–1). */
+function jaccardSimilarity(
+  a: Map<string, number>,
+  b: Map<string, number>,
+): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let intersection = 0;
+  let union = 0;
+  const allKeys = new Set([...a.keys(), ...b.keys()]);
+  for (const key of allKeys) {
+    const ca = a.get(key) ?? 0;
+    const cb = b.get(key) ?? 0;
+    intersection += Math.min(ca, cb);
+    union += Math.max(ca, cb);
+  }
+  return union > 0 ? intersection / union : 0;
+}
+
 /**
  * Merge provenance after an AI full-content replacement.
  *
@@ -284,16 +311,45 @@ export function mergeProvenanceAfterAIUpdate(
     }
   }
 
-  // Pair unmatched old blocks with unmatched new blocks (positional).
-  // Use the old entry's existing baselineText if present (cumulative diffs),
-  // otherwise use the old block's current text.
-  let pairIdx = 0;
+  // Pair unmatched old blocks with unmatched new blocks using word-level
+  // similarity, maintaining document order. This avoids the positional-index
+  // approach which misaligns when the AI inserts brand-new blocks between
+  // modified blocks.
+  //
+  // Similarity is computed against the old block's CURRENT text (not its
+  // baselineText) because the new block's content is most similar to the last
+  // version of the old block, not the original baseline.
+  // Pre-compute word bags for old blocks to avoid repeated work.
+  const oldWordBags = unmatchedOld.map(({ block }) =>
+    wordBag(extractBlockText(block)),
+  );
+
+  // Index new blocks by ID for O(1) lookup.
+  const newBlockById = new Map<string, ProvenanceBlock>();
+  for (const b of newBlocks) newBlockById.set(b.id, b);
+
+  const pairedOldBlockIds = new Set<string>();
+  let oldSearchStart = 0;
   for (const newBlockId of unmatchedNewBlockIds) {
-    if (pairIdx < unmatchedOld.length) {
-      const { entry: oldEntry, block: oldBlock } = unmatchedOld[pairIdx];
+    const newBlock = newBlockById.get(newBlockId)!;
+    const newWords = wordBag(extractBlockText(newBlock));
+
+    let bestIdx = -1;
+    let bestScore = 0;
+    for (let i = oldSearchStart; i < unmatchedOld.length; i++) {
+      const score = jaccardSimilarity(newWords, oldWordBags[i]);
+      if (score > bestScore) {
+        bestScore = score;
+        bestIdx = i;
+      }
+    }
+
+    if (bestScore >= 0.15 && bestIdx >= 0) {
+      const { entry: oldEntry, block: oldBlock } = unmatchedOld[bestIdx];
       result[newBlockId].baselineText =
         oldEntry.baselineText ?? extractBlockText(oldBlock);
-      pairIdx++;
+      pairedOldBlockIds.add(oldBlock.id);
+      oldSearchStart = bestIdx + 1;
     } else {
       // Brand-new block added by AI — empty baseline.
       result[newBlockId].baselineText = '';
@@ -325,11 +381,6 @@ export function mergeProvenanceAfterAIUpdate(
       }
     }
   }
-
-  // Determine which unmatched old blocks are excess (not paired).
-  const pairedOldBlockIds = new Set(
-    unmatchedOld.slice(0, pairIdx).map((u) => u.block.id),
-  );
 
   // Build a set of new block IDs for quick lookup.
   const newBlockIdSet = new Set(newBlocks.map((b) => b.id));
