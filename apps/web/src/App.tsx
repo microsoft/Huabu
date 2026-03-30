@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 
 import { ToastContainer } from './components/Common/Toast';
 import CanvasListPage from './pages/CanvasListPage';
-import CanvasPage from './pages/CanvasPage';
+import CanvasPage from './pages/CanvasPage/CanvasPage.tsx';
 import ComponentShowcasePage from './pages/ComponentShowcasePage';
 import WorkspaceSetupPage from './pages/WorkspaceSetupPage';
 import { useWorkspaceStore } from './store/workspaceStore';

@@ -51,7 +51,7 @@ export function getNodeSize(node: Node): { width: number; height: number } {
 }
 
 /**
- * Layout-specific variant: returns `{ w, h }` with sensible non-zero defaults
+ * CanvasPage-specific variant: returns `{ w, h }` with sensible non-zero defaults
  * (200 × 100) when the node has not yet been measured. Used by layout solvers
  * and alignment helpers that require a positive bounding box to compute
  * distances and avoid divide-by-zero.

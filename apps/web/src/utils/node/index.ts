@@ -8,5 +8,3 @@ export {
 } from './labels';
 
 export { getNodeDefaultSize } from './nodeDefaultSize';
-
-export { getSmartHandles, rerouteAllEdges, toggleNodeLock } from './helper';

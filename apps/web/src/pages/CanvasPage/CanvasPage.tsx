@@ -2,14 +2,15 @@ import { ArrowLeft } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 
-import { CenterArea } from './Layout/CenterArea';
-import { MainLayout } from './Layout/MainLayout';
-import { LoadingState } from '../components/Common/LoadingState';
-import { ChatPanel } from '../components/Panels/ChatPanel';
-import { DataSourcePanel } from '../components/Panels/DataSourcePanel';
-import { Header } from '../components/Panels/Header/Header';
-import { KeyboardShortcutsModal } from '../components/Panels/Header/KeyboardShortcutsModal';
-import useStore from '../store/canvasStore';
+import { CenterArea } from '@/pages/CanvasPage/CenterArea.tsx';
+import { MainLayout } from '@/pages/CanvasPage/MainLayout.tsx';
+
+import { LoadingState } from '../../components/Common/LoadingState.tsx';
+import { ChatPanel } from '../../components/Panels/ChatPanel';
+import { DataSourcePanel } from '../../components/Panels/DataSourcePanel';
+import { Header } from '../../components/Panels/Header/Header.tsx';
+import { KeyboardShortcutsModal } from '../../components/Panels/Header/KeyboardShortcutsModal.tsx';
+import useStore from '../../store/canvasStore.ts';
 
 /**
  * Page component for a single canvas.

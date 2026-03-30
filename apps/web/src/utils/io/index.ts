@@ -16,24 +16,9 @@ export {
 } from './dragDrop';
 
 export {
-  type NodeIngestionStatus,
-  type NodeIngestionInfo,
-  type PreprocessHelperDeps,
-  needsPreprocessing,
-  shouldPreprocessOnUpdate,
-  preprocessNodeIfNeeded,
-} from '@/handler/canvasCommand/preprocess';
-
-export {
   detectNodeType,
   detectNodeTypeFromMime,
   looksLikeUrl,
   normalizeUrl,
   getImageDimensionsFromBlob,
 } from './media';
-
-export {
-  uploadFileToNodeInput,
-  urlToNodeInput,
-  textToNodeInput,
-} from '../../handler/canvasCommand/nodeInputBuilders';

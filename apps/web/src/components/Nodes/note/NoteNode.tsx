@@ -6,11 +6,11 @@ import { Copy, Check, Fullscreen } from 'lucide-react';
 import { memo, useEffect, useState, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
+import { getSharedStyleNodes } from '@/components/BlockNote/shadowStyleCache.ts';
 import { Button } from '@/components/Common/Button';
 import { useNodeScale } from '@/hooks/useNodeScale';
 import useCanvasStore from '@/store/canvasStore';
 import { copyToClipboard } from '@/utils/io/clipboard';
-import { getSharedStyleNodes } from '@/utils/shadowStyleCache';
 
 import { loadBlockNoteContent } from '../../BlockNote/blockNoteContent';
 import { NodeWrapper } from '../NodeWrapper';

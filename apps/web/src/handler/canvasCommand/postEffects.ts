@@ -5,7 +5,8 @@
 
 import { LAYOUT_ANIMATION_DURATION_MS } from '@/handler/autoLayout/applier';
 import { canvasHistoryManager } from '@/store/canvasHistoryManager';
-import { rerouteAllEdges } from '@/utils/node/helper';
+
+import { rerouteAllEdges } from './utils/edge';
 
 import type { CanvasEffectCallbacks } from './runtime';
 import type { Node, Edge } from '@xyflow/react';

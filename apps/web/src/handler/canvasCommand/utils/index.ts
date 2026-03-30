@@ -29,6 +29,8 @@ export {
   moveNodeOutOfFrame,
 } from './frame';
 
+export { getSmartHandles, rerouteAllEdges } from './edge';
+
 export { toScreenshotDataUrl, captureCanvasScreenshot } from './screenshot';
 
 // ── Node helpers ───────────────────────────────────────────────────────

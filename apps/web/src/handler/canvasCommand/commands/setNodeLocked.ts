@@ -1,9 +1,82 @@
-import { toggleNodeLock } from '@/utils/node/helper';
-
 import { noop, type CommandDefinition } from './types';
+import { getDescendantIds, type NestableNode } from '../utils/frame';
 
-import type { NestableNode } from '../utils/frame';
 import type { CanvasCommand } from '@sediment/shared';
+
+/**
+ * Toggles a node's locked state by flipping `data.locked`.
+ *
+ * When locked the node itself becomes non-draggable on the canvas.
+ * It remains selectable so pointer events (e.g. double-click to expand)
+ * still work; resize and content editing are blocked at the component level.
+ * For frame nodes, all descendant nodes additionally become non-draggable.
+ * Unlocking reverses all of the above.
+ */
+function toggleNodeLock(nodes: NestableNode[], nodeId: string): NestableNode[] {
+  const target = nodes.find((n) => n.id === nodeId);
+  if (!target) return nodes;
+
+  const locked = Boolean(target.data?.locked);
+  const nextLocked = !locked;
+
+  const flagKey = '__dragDisabledByFrameLock';
+  const descendantIds = new Set(getDescendantIds(nodes, nodeId));
+
+  return nodes.map((n) => {
+    if (n.id === nodeId) {
+      if (nextLocked) {
+        const { selectable: _s, ...rest } = n;
+        void _s;
+        return {
+          ...rest,
+          draggable: false,
+          className: [n.className, 'nopan'].filter(Boolean).join(' '),
+          data: { ...(n.data ?? {}), locked: true },
+        };
+      }
+      const { draggable: _d, selectable: _s, ...rest } = n;
+      void _d;
+      void _s;
+      const prevClass =
+        (n.className ?? '')
+          .split(' ')
+          .filter((c) => c !== 'nopan')
+          .join(' ') || undefined;
+      return {
+        ...rest,
+        ...(prevClass ? { className: prevClass } : {}),
+        data: { ...(n.data ?? {}), locked: false },
+      };
+    }
+
+    if (!descendantIds.has(n.id)) return n;
+
+    if (nextLocked) {
+      if (n.draggable === false) return n;
+      return {
+        ...n,
+        draggable: false,
+        data: {
+          ...(n.data ?? {}),
+          [flagKey]: true,
+        },
+      };
+    }
+
+    if ((n.data as Record<string, unknown> | undefined)?.[flagKey] !== true)
+      return n;
+
+    const dataObj = (n.data ?? {}) as Record<string, unknown>;
+    const { [flagKey]: removedFlag, ...restData } = dataObj;
+    void removedFlag;
+
+    return {
+      ...n,
+      draggable: true,
+      data: restData,
+    };
+  });
+}
 
 type Cmd = Extract<CanvasCommand, { type: 'SET_NODE_LOCKED' }>;
 

@@ -1,12 +1,12 @@
 /**
- * @file Layout type definitions.
+ * @file CanvasPage type definitions.
  *
  * UI-framework-agnostic types consumed by the layout engine.
  * These types intentionally have no dependency on ReactFlow or any
  * other rendering library so the layout module can be tested in isolation.
  */
 
-// ── Layout graph primitives ────────────────────────────────────────────
+// ── CanvasPage graph primitives ────────────────────────────────────────────
 
 export interface LayoutNode {
   id: string;
@@ -40,7 +40,7 @@ export interface LayoutGraph {
   groups: LayoutGroup[];
 }
 
-// ── Layout options & result ────────────────────────────────────────────
+// ── CanvasPage options & result ────────────────────────────────────────────
 
 export interface LayoutOptions {
   /** Gap between sibling nodes */

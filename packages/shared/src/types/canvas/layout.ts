@@ -1,6 +1,6 @@
 /**
- * Canvas Layout Types
- * Layout calculation and positioning
+ * Canvas CanvasPage Types
+ * CanvasPage calculation and positioning
  */
 
 export interface Point {

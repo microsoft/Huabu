@@ -23,7 +23,7 @@ export const DEFAULT_LAYOUT_OPTIONS: LayoutOptions = {
   nodePadding: 5,
 };
 
-// ── Layout Engine ──────────────────────────────────────────────────────
+// ── CanvasPage Engine ──────────────────────────────────────────────────────
 
 export class LayoutEngine {
   private layoutSolver: LayoutSolver;
