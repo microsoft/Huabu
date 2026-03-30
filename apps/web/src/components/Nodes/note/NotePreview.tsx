@@ -27,7 +27,7 @@ import {
 import { InlineBlockDiffs } from './InlineBlockDiffs';
 
 import type { DeletedBlockInfo, ProvenanceBlock } from '@/utils/provenance';
-import type { BlockProvenanceMap } from '@sediment/shared';
+import type { BlockProvenance, BlockProvenanceMap } from '@sediment/shared';
 
 export interface PreviewComponentProps {
   data: Record<string, unknown>;
