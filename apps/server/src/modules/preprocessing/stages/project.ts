@@ -31,11 +31,12 @@ export function project(
 
   // Apply suggested label from enrich or extract stage, but only when the
   // user has not manually set the label.
+  // Prefer extracted title (e.g. HTML <title>), fallback to LLM-generated label.
   const snapshotLabelSource = request.snapshot.labelSource as
     | string
     | undefined;
   if (snapshotLabelSource !== 'user') {
-    const autoLabel = ctx.enriched?.suggestedLabel ?? ctx.extracted?.title;
+    const autoLabel = ctx.extracted?.title ?? ctx.enriched?.suggestedLabel;
     if (autoLabel) {
       patch.label = autoLabel;
       patch.labelSource = 'auto';

@@ -45,6 +45,8 @@ export const profiles: Record<CanvasNodeKind, NodePreprocessProfile> = {
       'compute_fingerprint',
       'resolve_title',
       'merge_metadata',
+      'generate_label',
+      'generate_summary',
       'persist_source',
       'build_patch',
     ],

@@ -159,9 +159,15 @@ export const WebNode = memo(
                         image={preview.image}
                         nodeType="web"
                         favicon={preview.favicon}
-                        title={preview.title || src}
+                        title={preview.title || data?.label || src}
                       >
-                        {preview.contentHtml ? (
+                        {preview.summary ? (
+                          <div className="min-h-0 flex-1 overflow-hidden px-2 pb-2">
+                            <p className="text-fg-muted text-base leading-relaxed">
+                              {preview.summary}
+                            </p>
+                          </div>
+                        ) : preview.contentHtml ? (
                           <div className="min-h-0 flex-1 overflow-hidden px-2 pb-2">
                             <div
                               className="text-fg-muted prose prose-base overflow-hidden text-base leading-relaxed [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:text-base [&_h2]:font-semibold [&_h3]:text-base [&_h3]:font-medium [&_img]:max-w-full [&_img]:rounded [&_ol]:my-1 [&_p]:my-1 [&_ul]:my-1"

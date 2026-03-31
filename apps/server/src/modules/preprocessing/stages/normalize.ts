@@ -22,12 +22,20 @@ export function normalize(
   const canonicalContent = extracted.content ?? resolved.content ?? '';
   const contentHash = computeContentHash(canonicalContent);
 
-  // Title: if the user explicitly set the label, always honour it.
-  // Otherwise prefer the extracted title, falling back to the resolved title.
+  // Title resolution:
+  // - User-set labels always take precedence.
+  // - For web/pdf nodes whose titles come from extraction (HTML <title>, PDF
+  //   metadata), do NOT fall back to resolved.title — it may carry a stale
+  //   URL-based label from a previous run.  The Enrich stage will supply an
+  //   LLM-generated label later via the pipeline backfill.
+  // - For note/text nodes, resolved.title (derived from content) is a
+  //   reasonable fallback.
   const title =
     resolved.labelSource === 'user'
       ? (resolved.title ?? extracted.title)
-      : (extracted.title ?? resolved.title);
+      : resolved.nodeType === 'web' || resolved.nodeType === 'pdf'
+        ? extracted.title
+        : (extracted.title ?? resolved.title);
 
   // Metadata: merge extracted metadata with any existing metadata
   const metadata = extracted.metadata

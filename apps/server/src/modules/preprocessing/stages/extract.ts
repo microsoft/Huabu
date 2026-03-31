@@ -41,9 +41,10 @@ export async function extract(resolved: ResolvedInput): Promise<ExtractResult> {
       throw new Error('Missing URI for web source extraction');
     }
     const loader = DocumentLoaderFactory.getLoader('web');
+    // Do NOT pass resolved.title — it may contain an auto-generated label
+    // like "Web 1" which would shadow the real HTML <title>.
     const result = await loader.load(src, {
       content: resolved.prefetchedContent,
-      title: resolved.title,
     });
     return {
       content: result.content,

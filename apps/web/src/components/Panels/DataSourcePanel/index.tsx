@@ -120,9 +120,7 @@ export const DataSourcePanel = ({
       sortedSources.sort((a, b) => {
         switch (sortType) {
           case 'alpha':
-            return (a.title || a.src || 'Untitled').localeCompare(
-              b.title || b.src || 'Untitled',
-            );
+            return (a.title || 'Untitled').localeCompare(b.title || 'Untitled');
           case 'time':
             // TODO: sort by created/updated time when available
             return 0;
@@ -142,7 +140,7 @@ export const DataSourcePanel = ({
         id: s.sourceId,
         type: s.type || 'text',
         data: {
-          label: s.title || s.src || 'Untitled',
+          label: s.title || 'Untitled',
           ...s,
         },
       },

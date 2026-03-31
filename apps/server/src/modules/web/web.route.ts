@@ -193,8 +193,12 @@ const webRoutes: FastifyPluginAsync = async (fastify) => {
 
       const payload: WebPreviewResponse = {
         url: uri,
-        title: (source.title ?? '').trim() || uri || 'Untitled',
+        title: (source.title ?? '').trim() || undefined,
         contentHtml: content ? toPreviewHtml(content) : undefined,
+        summary:
+          typeof meta.summary === 'string' && meta.summary.trim()
+            ? meta.summary.trim()
+            : undefined,
         image:
           typeof meta.image === 'string' && meta.image.trim()
             ? meta.image.trim()
@@ -246,7 +250,7 @@ const webRoutes: FastifyPluginAsync = async (fastify) => {
       const html = toReaderHtml(markdown);
       const payload: WebReaderResponse = {
         url: uri,
-        title: (source.title ?? '').trim() || uri || 'Untitled',
+        title: (source.title ?? '').trim(),
         html,
         contentMarkdown: markdown,
         siteName:

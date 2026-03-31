@@ -66,8 +66,11 @@ export function PreviewCard({
         </span>
       </div>
 
-      {/* Extra content (e.g. web page contentHtml) — fills remaining space */}
-      {children}
+      {/* Extra content (e.g. summary, contentHtml) — fills remaining space,
+          but always reserves at least ~2 lines so text is never fully hidden */}
+      {children ? (
+        <div className="min-h-13 flex-1 shrink overflow-hidden">{children}</div>
+      ) : null}
     </div>
   );
 }

@@ -9,6 +9,10 @@
  */
 
 import {
+  buildContentEnrichPrompt,
+  type ContentEnrichResult,
+} from '../../prompt/enrich.js';
+import {
   IMAGE_LABEL_PROMPT,
   buildFrameLabelPrompt,
 } from '../../prompt/resolve-label.js';
@@ -84,6 +88,72 @@ export class ProviderManager {
         return text;
       }
       return undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Enrich text content in a single LLM call: generate label, summary, and
+   * keywords together to minimise token expenditure.
+   */
+  async generateContentMeta(
+    content: string,
+    opts?: {
+      title?: string;
+      needLabel?: boolean;
+      needSummary?: boolean;
+      needKeywords?: boolean;
+    },
+  ): Promise<ContentEnrichResult | undefined> {
+    try {
+      if (!content.trim()) return undefined;
+
+      const piContext: Context = {
+        systemPrompt: '',
+        messages: [
+          {
+            role: 'user',
+            content: buildContentEnrichPrompt(content, opts),
+            timestamp: Date.now(),
+          },
+        ],
+      };
+      const result = await llmComplete(piContext);
+      const text = result.content
+        .filter((b) => b.type === 'text')
+        .map((b) => (b as { type: 'text'; text: string }).text)
+        .join('')
+        .trim();
+      if (!text) return undefined;
+
+      // Strip markdown fences if the model wraps the JSON
+      const cleaned = text
+        .replace(/^```(?:json)?\s*/i, '')
+        .replace(/\s*```\s*$/, '')
+        .trim();
+
+      const parsed = JSON.parse(cleaned) as Record<string, unknown>;
+
+      const label =
+        typeof parsed.label === 'string' && parsed.label.trim()
+          ? parsed.label.trim()
+          : undefined;
+      const summary =
+        typeof parsed.summary === 'string' && parsed.summary.trim()
+          ? parsed.summary.trim()
+          : undefined;
+      const keywords = Array.isArray(parsed.keywords)
+        ? (parsed.keywords.filter(
+            (k): k is string => typeof k === 'string' && k.trim().length > 0,
+          ) as string[])
+        : undefined;
+
+      if (!label && !summary && (!keywords || keywords.length === 0)) {
+        return undefined;
+      }
+
+      return { label, summary, keywords };
     } catch {
       return undefined;
     }

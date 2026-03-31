@@ -44,6 +44,9 @@ export interface SourceMetadata {
   tags?: string[];
   lastEditor?: string;
 
+  // LLM-enriched
+  summary?: string;
+
   // Extensible for future metadata
   [key: string]: unknown;
 }

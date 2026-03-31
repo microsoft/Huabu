@@ -337,6 +337,30 @@ body,
   --level: 0.915em; /* h6 ≈ 12.8px */
 }
 
+/* Shrink table row/column drag handles to match the block-level side-menu
+   drag handle (18×18 px, same as h-4.5 w-4.5).
+   Square so the 90° rotation for column handles stays symmetrical.
+   !important overrides the Tailwind h-9/h-fit/w-fit utilities that
+   co-exist on the ShadCN Button (clsx doesn't deduplicate them).
+   No ancestor selector — floating handles may portal outside .block-note-view. */
+.bn-table-handle {
+  width: 1.125rem !important; /* 18px */
+  height: 1.125rem !important; /* 18px */
+  min-height: 0 !important;
+  min-width: 0 !important;
+  padding: 2px !important;
+  gap: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 3px !important;
+}
+.bn-table-handle svg {
+  width: 16px !important;
+  height: 16px !important;
+  flex-shrink: 0;
+}
+
 /* Thinking indicator shimmer — gradient slides across text */
 @keyframes thinking-shimmer {
   0% {

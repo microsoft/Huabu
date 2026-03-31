@@ -48,7 +48,6 @@ const createNodes: CommandDefinition<Cmd> = {
       if (!label || label.trim() === '') {
         const data = (input.data ?? {}) as Record<string, unknown>;
         const content = typeof data.content === 'string' ? data.content : '';
-        const src = typeof data.src === 'string' ? data.src : '';
 
         if (content.trim()) {
           label =
@@ -57,12 +56,6 @@ const createNodes: CommandDefinition<Cmd> = {
               .find((l) => l.trim())
               ?.trim()
               .slice(0, 50) || '';
-        } else if (src && nodeType === 'web') {
-          try {
-            label = new URL(src).hostname;
-          } catch {
-            label = '';
-          }
         }
 
         if (!label || label.trim() === '') {
