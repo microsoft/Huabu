@@ -23,8 +23,9 @@ export default function resolvePasteClipboard(
   intent: Extract<CanvasUiIntent, { type: 'PASTE_CLIPBOARD' }>,
   ui: UiResolverState,
 ): UiIntentResolution {
-  const { clipboard, nodes } = ui;
-  if (clipboard.length === 0) {
+  const { nodes } = ui;
+  const clipboard = intent.clipboardNodes;
+  if (!clipboard || clipboard.length === 0) {
     return { commands: [], trace: [] };
   }
 

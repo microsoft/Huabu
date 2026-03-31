@@ -235,10 +235,11 @@ type RFState = {
   pendingNodeType: 'note' | 'text' | 'frame' | null;
   setPendingNodeType: (type: 'note' | 'text' | 'frame' | null) => void;
 
-  /** Clipboard for node copy-paste. */
-  clipboard: Node[];
   copySelectedNodes: () => void;
-  pasteNodes: (flowPosition: { x: number; y: number }) => void;
+  pasteNodes: (
+    flowPosition: { x: number; y: number },
+    clipboardNodes: Node[],
+  ) => void;
 
   /** Undo / Redo */
   canUndo: boolean;
@@ -467,7 +468,6 @@ const useCanvasStore = create<RFState>()(
       const uiState: UiResolverState = {
         nodes: get().nodes,
         edges: get().edges,
-        clipboard: get().clipboard,
       };
       const execution = resolveUiIntent(intent, uiState);
       if (execution.commands.length > 0) {
@@ -618,7 +618,6 @@ const useCanvasStore = create<RFState>()(
       set({
         expandedNodeId: null,
         pendingNodeType: null,
-        clipboard: [],
         actionHistory: [],
         frameFitPreviews: [],
         collapsedFrameIds: new Set(),
@@ -1054,8 +1053,6 @@ const useCanvasStore = create<RFState>()(
       });
     },
 
-    clipboard: [],
-
     copySelectedNodes: () => {
       const { nodes } = get();
       const selected = nodes.filter((n) => n.selected);
@@ -1097,11 +1094,19 @@ const useCanvasStore = create<RFState>()(
         };
       });
 
-      set({ clipboard: cloned });
+      // Write serialized node data to system clipboard
+      const payload = JSON.stringify({ __sediment_nodes__: cloned });
+      void navigator.clipboard.writeText(payload).catch(() => {
+        // Clipboard API unavailable
+      });
     },
 
-    pasteNodes: (flowPosition) => {
-      get().dispatchUiIntent({ type: 'PASTE_CLIPBOARD', flowPosition });
+    pasteNodes: (flowPosition, clipboardNodes) => {
+      get().dispatchUiIntent({
+        type: 'PASTE_CLIPBOARD',
+        flowPosition,
+        clipboardNodes,
+      });
     },
 
     canUndo: false,
