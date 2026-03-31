@@ -309,7 +309,8 @@ export const NodeWrapper = memo(
 
         <div
           className={cn(
-            'group relative flex h-full w-full flex-col rounded shadow transition-all duration-120',
+            'group relative flex h-full w-full flex-col rounded transition-all duration-120',
+            type !== 'text' && 'shadow',
             'style' in data && data.style?.backgroundColor
               ? data.style.backgroundColor
               : 'bg-transparent',
