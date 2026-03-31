@@ -16,7 +16,7 @@ import { useIntentStore } from '../store/intentStore';
 import { looksLikeUrl } from '../utils/io/media';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
-import type { ReactFlowInstance } from '@xyflow/react';
+import type { Node, ReactFlowInstance } from '@xyflow/react';
 
 /** Returns true when the target is an editable element (input/textarea/contentEditable). */
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -28,10 +28,32 @@ function isEditableTarget(target: EventTarget | null): boolean {
   );
 }
 
-// Marker written to the system clipboard when copying canvas nodes.
-// If the system clipboard still contains this text on paste, we know
-// the user hasn't copied anything else externally.
-const CANVAS_CLIPBOARD_MARKER = '__sediment_canvas_copy__';
+// Marker key used to identify serialized canvas nodes in the system clipboard.
+const SEDIMENT_NODES_KEY = '__sediment_nodes__';
+
+/**
+ * Try to parse system clipboard text as serialized Sediment canvas nodes.
+ * Returns the node array if valid, otherwise null.
+ */
+function parseSedimentClipboard(
+  text: string | null | undefined,
+): unknown[] | null {
+  if (!text) return null;
+  try {
+    const parsed = JSON.parse(text);
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      Array.isArray(parsed[SEDIMENT_NODES_KEY]) &&
+      parsed[SEDIMENT_NODES_KEY].length > 0
+    ) {
+      return parsed[SEDIMENT_NODES_KEY];
+    }
+  } catch {
+    // Not JSON — not sediment data
+  }
+  return null;
+}
 
 /**
  * Refs shared between Canvas rendering and this shortcut hook.
@@ -271,85 +293,60 @@ export function useCanvasShortcuts(
         if (editable) return;
         // If the user has selected text (e.g. in a panel), let the browser
         // handle the native copy instead of overwriting the clipboard with
-        // the canvas node marker.
+        // serialized node data.
         const selection = window.getSelection();
         if (selection && !selection.isCollapsed) return;
         e.preventDefault();
         copySelectedNodes();
-        // Write marker to system clipboard so we can detect external copies later
-        void navigator.clipboard
-          .writeText(CANVAS_CLIPBOARD_MARKER)
-          .catch(() => {
-            // Clipboard API unavailable — internal clipboard still works
-          });
       } else if (lowerKey === 'v') {
         if (editable) return;
 
-        const { clipboard } = useCanvasStore.getState();
-
-        if (clipboard.length > 0) {
-          // We have internal nodes. Check the marker asynchronously to
-          // decide whether to paste nodes or external content.
-          // Must preventDefault synchronously because we might need it.
-          e.preventDefault();
-          void (async () => {
-            let sysText: string | null = null;
-            try {
-              sysText = await navigator.clipboard.readText();
-            } catch {
-              // Clipboard API denied — paste internal nodes
-              pasteNodes(getFlowPos());
-              return;
-            }
-            if (sysText === CANVAS_CLIPBOARD_MARKER) {
-              // Marker intact — paste canvas nodes
-              pasteNodes(getFlowPos());
-            } else {
-              // User copied something else — clear internal, paste external
-              useCanvasStore.setState({ clipboard: [] });
-              pasteText(sysText ?? '');
-            }
-          })();
-          return;
-        }
-
-        // No internal clipboard. Don't preventDefault so the browser fires
-        // the native 'paste' event which provides clipboardData with actual
-        // file blobs (e.g. PDF from Finder). Native paste handler sets
-        // pasteHandledRef. After a delay, Clipboard API fallback runs.
+        // Don't preventDefault — let the browser fire the native 'paste'
+        // event so we can access clipboardData (files, images, etc.).
+        // The native paste handler does all the work.
+        // A setTimeout fallback covers the case where no native paste fires.
         pasteHandledRef.current = false;
 
         setTimeout(async () => {
           if (pasteHandledRef.current) return;
 
-          // Try Clipboard API as fallback (when native paste doesn't fire)
-          let sysText: string | null = null;
+          // Native paste didn't fire — use Clipboard API as fallback
           try {
-            sysText = await navigator.clipboard.readText();
-          } catch {
-            return;
-          }
+            const sysText = await navigator.clipboard.readText();
 
-          if (!sysText || sysText === CANVAS_CLIPBOARD_MARKER) return;
+            // Check for serialized canvas nodes
+            const nodes = parseSedimentClipboard(sysText);
+            if (nodes) {
+              pasteNodes(getFlowPos(), nodes as Node[]);
+              return;
+            }
 
-          try {
-            const items = await navigator.clipboard.read();
-            for (const item of items) {
-              const imgType = item.types.find((t) => t.startsWith('image/'));
-              if (imgType) {
-                const blob = await item.getType(imgType);
-                const file = new File([blob], 'pasted-image', {
-                  type: imgType,
-                });
-                await pasteFiles([file], getFlowPos());
-                return;
+            // Try images via clipboard.read()
+            try {
+              const items = await navigator.clipboard.read();
+              for (const item of items) {
+                const imgType = item.types.find((t) => t.startsWith('image/'));
+                if (imgType) {
+                  const blob = await item.getType(imgType);
+                  const file = new File([blob], 'pasted-image', {
+                    type: imgType,
+                  });
+                  await pasteFiles([file], getFlowPos());
+                  return;
+                }
               }
+            } catch {
+              // clipboard.read() not available
+            }
+
+            // Plain text / URLs
+            const trimmed = sysText?.trim();
+            if (trimmed) {
+              pasteText(trimmed);
             }
           } catch {
-            // clipboard.read() not available
+            // Clipboard API denied
           }
-
-          pasteText(sysText);
         }, 150);
       } else if (lowerKey === 'i') {
         if (editable) return;
@@ -383,10 +380,9 @@ export function useCanvasShortcuts(
     toggleAutoLayout,
   ]);
 
-  // --- Fallback: native paste event listener ---
-  // Handles paste when the browser fires a native paste event (e.g. when an
-  // element has focus). This catches cases where navigator.clipboard API
-  // is not available (HTTP, permission denied).
+  // --- Native paste event listener ---
+  // Handles paste when the browser fires a native paste event, which gives
+  // access to clipboardData (files, images, etc.).
   useEffect(() => {
     if (disabled) return;
 
@@ -399,21 +395,17 @@ export function useCanvasShortcuts(
       // Signal that native paste is handling it (prevents async fallback)
       pasteHandledRef.current = true;
 
-      // Check if this is an internal canvas paste (marker text)
       const text = dt.getData('text/plain');
-      const { clipboard } = useCanvasStore.getState();
-      if (text === CANVAS_CLIPBOARD_MARKER && clipboard.length > 0) {
+
+      // Check for serialized canvas nodes
+      const nodes = parseSedimentClipboard(text);
+      if (nodes) {
         e.preventDefault();
-        pasteNodes(getFlowPos());
+        pasteNodes(getFlowPos(), nodes as Node[]);
         return;
       }
 
-      // Clear stale internal clipboard
-      if (clipboard.length > 0) {
-        useCanvasStore.setState({ clipboard: [] });
-      }
-
-      // Files
+      // Files (e.g. dragged from Finder)
       const files = Array.from(dt.files);
       if (files.length > 0) {
         e.preventDefault();
