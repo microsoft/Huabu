@@ -7,4 +7,4 @@ export {
   deduplicateLabel,
 } from './labels';
 
-export { getNodeDefaultSize } from './nodeDefaultSize';
+export { getNodeDefaultSize } from '@/config/nodeSizes';

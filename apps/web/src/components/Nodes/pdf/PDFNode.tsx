@@ -14,6 +14,7 @@ import { Document, Page, pdfjs } from 'react-pdf';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
+import { getSource } from '@/api/knowledge';
 import { Button } from '@/components/Common/Button';
 import { Spinner } from '@/components/Common/Spinner';
 import { useNodeScale } from '@/hooks/useNodeScale';
@@ -23,6 +24,7 @@ import { NodeWrapper } from '../NodeWrapper';
 import { PreviewCard } from '../PreviewCard';
 
 import type { CanvasPdfNodeData } from '../types';
+import type { SourceMetadata } from '@sediment/shared';
 
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
@@ -194,6 +196,36 @@ export const PDFNode = memo(
         : 1;
 
     const hasCover = !!data.coverUrl;
+    const sourceId = typeof data.sourceId === 'string' ? data.sourceId : '';
+
+    // Fetch summary from knowledge store for cover-card mode
+    const [summary, setSummary] = useState<string | null>(null);
+    useEffect(() => {
+      if (!hasCover || !sourceId) {
+        setSummary(null);
+        return;
+      }
+      let cancelled = false;
+      void (async () => {
+        try {
+          const source = await getSource(sourceId);
+          if (cancelled) return;
+          if (source.metaJson) {
+            const meta = JSON.parse(source.metaJson) as SourceMetadata;
+            setSummary(
+              typeof meta.summary === 'string' && meta.summary.trim()
+                ? meta.summary.trim()
+                : null,
+            );
+          }
+        } catch {
+          if (!cancelled) setSummary(null);
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, [hasCover, sourceId]);
 
     const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
       setNumPages(numPages);
@@ -292,7 +324,15 @@ export const PDFNode = memo(
                 imageAlt={data.label || 'PDF cover'}
                 nodeType="pdf"
                 title={data.label || 'Untitled PDF'}
-              />
+              >
+                {summary ? (
+                  <div className="min-h-0 flex-1 overflow-hidden px-2 pb-2">
+                    <p className="text-fg-muted text-base leading-relaxed">
+                      {summary}
+                    </p>
+                  </div>
+                ) : null}
+              </PreviewCard>
             </div>
           ) : (
             /* ── Default PDF preview mode ── */
