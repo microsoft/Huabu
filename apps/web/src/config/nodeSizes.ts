@@ -6,10 +6,10 @@ import type { NodeSize } from '@sediment/shared';
 const DEFAULT_SIZES: Record<string, NodeSize> = {
   text: { width: 200 },
   note: { width: 400 },
-  web: { width: 300, height: 200 },
+  web: { width: 400, height: 300 },
   pdf: { width: 400, height: 300 },
   video: { width: 400, height: 300 },
-  image: { width: 300, height: 200 },
+  image: { width: 400, height: 300 },
   frame: { width: 400, height: 300 },
 };
 

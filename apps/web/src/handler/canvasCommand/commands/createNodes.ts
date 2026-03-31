@@ -1,9 +1,9 @@
 import { createId, type CanvasCommand } from '@sediment/shared';
 
+import { getNodeDefaultSize } from '@/config/nodeSizes';
 import { placeNode } from '@/handler/autoLayout';
 import { needsPreprocessing } from '@/handler/canvasCommand/preprocess';
 import { deduplicateLabel, generateNextLabel } from '@/utils/node/labels';
-import { getNodeDefaultSize } from '@/utils/node/nodeDefaultSize';
 
 import { noop, type CommandDefinition } from './types';
 import { selectOnly } from '../utils';

@@ -13,7 +13,7 @@ import {
   type Point,
 } from '@sediment/shared';
 
-import { getNodeDefaultSize } from '@/utils/node/nodeDefaultSize';
+import { getNodeDefaultSize } from '@/config/nodeSizes';
 
 import { resolveFrameAtPoint } from '../utils';
 import { type NestableNode } from '../utils/frame';
