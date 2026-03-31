@@ -4,8 +4,9 @@ export interface WebLookupQuery {
 
 export interface WebPreviewResponse {
   url: string;
-  title: string;
+  title?: string;
   contentHtml?: string;
+  summary?: string;
   image?: string;
   favicon?: string;
   siteName?: string;

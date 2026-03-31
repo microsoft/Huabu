@@ -137,6 +137,24 @@ export async function runPipeline(
         if (has('generate_summary')) usedCapabilities.push('generate_summary');
         if (has('generate_keywords'))
           usedCapabilities.push('generate_keywords');
+
+        // Merge enriched summary into normalized metadata so it is persisted
+        if (ctx.enriched?.summary && ctx.normalized) {
+          ctx.normalized.metadata = {
+            ...ctx.normalized.metadata,
+            summary: ctx.enriched.summary,
+          };
+        }
+
+        // When extracted title is missing, use the LLM-generated label as
+        // the persisted Source.title so canvas list and source list stay in sync.
+        if (
+          !ctx.normalized?.title &&
+          ctx.enriched?.suggestedLabel &&
+          ctx.normalized
+        ) {
+          ctx.normalized.title = ctx.enriched.suggestedLabel;
+        }
       } catch (error) {
         diagnostics.push({
           code: 'ENRICH_FAILED',
