@@ -468,6 +468,7 @@ const useCanvasStore = create<RFState>()(
       const uiState: UiResolverState = {
         nodes: get().nodes,
         edges: get().edges,
+        autoLayoutEnabled: get().autoLayoutEnabled,
       };
       const execution = resolveUiIntent(intent, uiState);
       if (execution.commands.length > 0) {

@@ -144,6 +144,7 @@ export interface UiIntentResolution {
 export interface UiResolverState {
   nodes: Node[];
   edges: Edge[];
+  autoLayoutEnabled: boolean;
 }
 
 // ---------------------------------------------------------------------------
