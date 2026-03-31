@@ -70,7 +70,7 @@ export default function resolveNodeDragStop(
     if (prevParentId) affectedFrameIds.add(prevParentId);
     if (node?.parentId) affectedFrameIds.add(node.parentId);
   }
-  if (affectedFrameIds.size > 0) {
+  if (ui.autoLayoutEnabled && affectedFrameIds.size > 0) {
     result = fitFrames(result, affectedFrameIds);
   }
 
