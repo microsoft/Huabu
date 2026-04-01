@@ -18,7 +18,7 @@ import { DropdownMenu, DropdownMenuItem } from '../../Common/DropdownMenu';
 import { TabGroup } from '../../Common/TabGroup';
 import { SidebarPanel } from '../SidebarPanel';
 
-import type { Source } from '@sediment/shared';
+import type { SourceOverview } from '@sediment/shared';
 
 interface DataSourcePanelProps {
   isCollapsed?: boolean;
@@ -88,7 +88,7 @@ export const DataSourcePanel = ({
     (s) => s.nodes,
   ) as unknown as DataSourceNodeLike[];
   const [tab, setTab] = useState<LayerTab>('canvas');
-  const [sources, setSources] = useState<Source[]>([]);
+  const [sources, setSources] = useState<SourceOverview[]>([]);
 
   useEffect(() => {
     if (tab === 'sources') {
