@@ -19,6 +19,7 @@ import React, {
 import { createPortal } from 'react-dom';
 
 import { cn } from '@/components/Common/cn.ts';
+import { Spinner } from '@/components/Common/Spinner.tsx';
 import { Tooltip } from '@/components/Common/Tooltip.tsx';
 import { useCornerZoomResize } from '@/hooks/useCornerZoomResize.ts';
 import useCanvasStore from '@/store/canvasStore.ts';
