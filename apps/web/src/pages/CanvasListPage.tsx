@@ -1,6 +1,6 @@
 import { Download, Plus, Trash2, Upload } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 import {
   listCanvases,
@@ -156,7 +156,7 @@ export default function CanvasListPage() {
   };
 
   return (
-    <div className="bg-bg-default flex min-h-screen flex-col">
+    <div className="bg-bg-default flex h-screen flex-col">
       <Modal
         isOpen={pendingDelete !== null}
         title="Delete canvas?"
@@ -227,123 +227,134 @@ export default function CanvasListPage() {
       </Header>
 
       {/* Content */}
-      <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-10">
-        <div className="mb-8 flex items-center justify-between">
-          <div>
-            <h2 className="text-fg-default text-2xl font-bold">Canvases</h2>
-            <p className="text-fg-subtle mt-1 text-sm">
-              Select a canvas to open, or create a new one.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              tone="neutral"
-              onClick={handleImportClick}
-              disabled={isImporting}
-            >
-              {isImporting ? (
-                <Spinner size="sm" className="text-fg-subtle" />
-              ) : (
-                <Upload />
-              )}
-              Import
-            </Button>
-            <Button
-              variant="solid"
-              onClick={handleCreate}
-              disabled={isCreating}
-            >
-              {isCreating ? (
-                <Spinner size="sm" className="text-fg-inverse" />
-              ) : (
-                <Plus />
-              )}
-              New Canvas
-            </Button>
-          </div>
-        </div>
-
-        {isLoading ? (
-          <LoadingState message="Loading canvases…" className="py-20" />
-        ) : canvases.length === 0 ? (
-          <EmptyState
-            message="No canvases yet."
-            className="border-edge-default rounded-xl border-2 border-dashed"
-            action={
+      <div className="flex-1 overflow-y-auto">
+        <main className="mx-auto w-full max-w-4xl px-6 py-10">
+          <div className="mb-8 flex items-center justify-between">
+            <div>
+              <div className="flex items-baseline gap-2">
+                <h2 className="text-fg-default text-2xl font-bold">Canvases</h2>
+                <span className="text-fg-subtle text-sm">/</span>
+                <Link
+                  to="/sources"
+                  className="text-fg-subtle hover:text-fg-default text-sm font-medium"
+                >
+                  Sources
+                </Link>
+              </div>
+              <p className="text-fg-subtle mt-1 text-sm">
+                Select a canvas to open, or create a new one.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
               <Button
-                variant="ghost"
+                variant="outline"
                 tone="neutral"
+                onClick={handleImportClick}
+                disabled={isImporting}
+              >
+                {isImporting ? (
+                  <Spinner size="sm" className="text-fg-subtle" />
+                ) : (
+                  <Upload />
+                )}
+                Import
+              </Button>
+              <Button
+                variant="solid"
                 onClick={handleCreate}
                 disabled={isCreating}
-                className="text-fg-default hover:text-fg-muted text-sm font-medium underline"
               >
-                Create your first canvas
+                {isCreating ? (
+                  <Spinner size="sm" className="text-fg-inverse" />
+                ) : (
+                  <Plus />
+                )}
+                New Canvas
               </Button>
-            }
-          />
-        ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {canvases.map((canvas) => (
-              <div
-                key={canvas.canvasId}
-                className="group border-edge-default bg-surface hover:border-edge-default relative flex flex-col rounded-xl border p-5 text-left transition-all hover:shadow-md"
-              >
-                <button
-                  onClick={() => handleOpen(canvas.canvasId)}
-                  className="flex flex-1 flex-col text-left"
-                >
-                  <h3 className="text-fg-default group-hover:text-fg-default truncate text-sm font-semibold">
-                    {canvas.title || 'Untitled'}
-                  </h3>
-                  <p className="text-fg-subtle mt-1 text-xs">
-                    {canvas.nodeCount} node
-                    {canvas.nodeCount !== 1 ? 's' : ''}
-                  </p>
-                  <div className="text-fg-subtle mt-auto pt-4 text-xs">
-                    Updated {formatDate(canvas.updatedAt)}
-                  </div>
-                </button>
-                {/* Export button */}
-                <Button
-                  variant="ghost"
-                  iconOnly
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void handleExport(canvas.canvasId, canvas.title);
-                  }}
-                  tooltipWrapperClassName="absolute top-3 right-10 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
-                  title={
-                    exportingId === canvas.canvasId
-                      ? 'Exporting…'
-                      : 'Export canvas'
-                  }
-                  disabled={exportingId === canvas.canvasId}
-                >
-                  {exportingId === canvas.canvasId ? (
-                    <Spinner size="sm" className="text-fg-subtle" />
-                  ) : (
-                    <Download className="text-fg-subtle" />
-                  )}
-                </Button>
-                {/* Delete button */}
-                <Button
-                  variant="ghost"
-                  iconOnly
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    requestDelete(canvas.canvasId, canvas.title);
-                  }}
-                  tooltipWrapperClassName="absolute top-3 right-3 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
-                  title="Delete canvas"
-                >
-                  <Trash2 className="text-fg-subtle" />
-                </Button>
-              </div>
-            ))}
+            </div>
           </div>
-        )}
-      </main>
+
+          {isLoading ? (
+            <LoadingState message="Loading canvases…" className="py-20" />
+          ) : canvases.length === 0 ? (
+            <EmptyState
+              message="No canvases yet."
+              className="border-edge-default rounded-xl border-2 border-dashed"
+              action={
+                <Button
+                  variant="ghost"
+                  tone="neutral"
+                  onClick={handleCreate}
+                  disabled={isCreating}
+                  className="text-fg-default hover:text-fg-muted text-sm font-medium underline"
+                >
+                  Create your first canvas
+                </Button>
+              }
+            />
+          ) : (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {canvases.map((canvas) => (
+                <div
+                  key={canvas.canvasId}
+                  className="group border-edge-default bg-surface hover:border-edge-default relative flex flex-col rounded-xl border p-5 text-left transition-all hover:shadow-md"
+                >
+                  <button
+                    onClick={() => handleOpen(canvas.canvasId)}
+                    className="flex flex-1 flex-col text-left"
+                  >
+                    <h3 className="text-fg-default group-hover:text-fg-default truncate text-sm font-semibold">
+                      {canvas.title || 'Untitled'}
+                    </h3>
+                    <p className="text-fg-subtle mt-1 text-xs">
+                      {canvas.nodeCount} node
+                      {canvas.nodeCount !== 1 ? 's' : ''}
+                    </p>
+                    <div className="text-fg-subtle mt-auto pt-4 text-xs">
+                      Updated {formatDate(canvas.updatedAt)}
+                    </div>
+                  </button>
+                  {/* Export button */}
+                  <Button
+                    variant="ghost"
+                    iconOnly
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void handleExport(canvas.canvasId, canvas.title);
+                    }}
+                    tooltipWrapperClassName="absolute top-3 right-10 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
+                    title={
+                      exportingId === canvas.canvasId
+                        ? 'Exporting…'
+                        : 'Export canvas'
+                    }
+                    disabled={exportingId === canvas.canvasId}
+                  >
+                    {exportingId === canvas.canvasId ? (
+                      <Spinner size="sm" className="text-fg-subtle" />
+                    ) : (
+                      <Download className="text-fg-subtle" />
+                    )}
+                  </Button>
+                  {/* Delete button */}
+                  <Button
+                    variant="ghost"
+                    iconOnly
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      requestDelete(canvas.canvasId, canvas.title);
+                    }}
+                    tooltipWrapperClassName="absolute top-3 right-3 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
+                    title="Delete canvas"
+                  >
+                    <Trash2 className="text-fg-subtle" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </main>
+      </div>
     </div>
   );
 }

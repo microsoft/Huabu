@@ -138,11 +138,17 @@ export async function runPipeline(
         if (has('generate_keywords'))
           usedCapabilities.push('generate_keywords');
 
-        // Merge enriched summary into normalized metadata so it is persisted
+        // Merge enriched summary and keywords into normalized metadata so they are persisted
         if (ctx.enriched?.summary && ctx.normalized) {
           ctx.normalized.metadata = {
             ...ctx.normalized.metadata,
             summary: ctx.enriched.summary,
+          };
+        }
+        if (ctx.enriched?.keywords?.length && ctx.normalized) {
+          ctx.normalized.metadata = {
+            ...ctx.normalized.metadata,
+            keywords: ctx.enriched.keywords,
           };
         }
 

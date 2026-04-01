@@ -7,7 +7,7 @@ import {
   useViewport,
   useStore,
 } from '@xyflow/react';
-import { clsx } from 'clsx';
+import clsx from 'clsx';
 import React, {
   memo,
   useCallback,
@@ -18,7 +18,7 @@ import React, {
 } from 'react';
 import { createPortal } from 'react-dom';
 
-import { cn } from '@/components/Common/cn';
+import { cn } from '@/components/Common/cn.ts';
 import { Spinner } from '@/components/Common/Spinner.tsx';
 import { Tooltip } from '@/components/Common/Tooltip.tsx';
 import { useCornerZoomResize } from '@/hooks/useCornerZoomResize.ts';

@@ -17,6 +17,7 @@ import 'react-pdf/dist/Page/TextLayer.css';
 import { Button } from '@/components/Common/Button';
 import { Spinner } from '@/components/Common/Spinner';
 import { useNodeScale } from '@/hooks/useNodeScale';
+import { useSourceMeta } from '@/hooks/useSourceMeta';
 import useCanvasStore from '@/store/canvasStore';
 
 import { NodeWrapper } from '../NodeWrapper';
@@ -194,6 +195,10 @@ export const PDFNode = memo(
         : 1;
 
     const hasCover = !!data.coverUrl;
+    const sourceId = typeof data.sourceId === 'string' ? data.sourceId : '';
+
+    // Use cached hook for source metadata in cover-card mode
+    const { summary } = useSourceMeta(hasCover && sourceId ? sourceId : null);
 
     const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
       setNumPages(numPages);
@@ -292,7 +297,15 @@ export const PDFNode = memo(
                 imageAlt={data.label || 'PDF cover'}
                 nodeType="pdf"
                 title={data.label || 'Untitled PDF'}
-              />
+              >
+                {summary ? (
+                  <div className="min-h-0 flex-1 overflow-hidden px-2 pb-2">
+                    <p className="text-fg-muted text-base leading-relaxed">
+                      {summary}
+                    </p>
+                  </div>
+                ) : null}
+              </PreviewCard>
             </div>
           ) : (
             /* ── Default PDF preview mode ── */

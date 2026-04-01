@@ -18,7 +18,7 @@ import { DropdownMenu, DropdownMenuItem } from '../../Common/DropdownMenu';
 import { TabGroup } from '../../Common/TabGroup';
 import { SidebarPanel } from '../SidebarPanel';
 
-import type { Source } from '@sediment/shared';
+import type { SourceOverview } from '@sediment/shared';
 
 interface DataSourcePanelProps {
   isCollapsed?: boolean;
@@ -88,7 +88,7 @@ export const DataSourcePanel = ({
     (s) => s.nodes,
   ) as unknown as DataSourceNodeLike[];
   const [tab, setTab] = useState<LayerTab>('canvas');
-  const [sources, setSources] = useState<Source[]>([]);
+  const [sources, setSources] = useState<SourceOverview[]>([]);
 
   useEffect(() => {
     if (tab === 'sources') {
@@ -154,6 +154,16 @@ export const DataSourcePanel = ({
   const handleSourceRename = async (sourceId: string, newName: string) => {
     try {
       await updateSource(sourceId, { title: newName });
+
+      // Sync label to all canvas nodes that reference this source.
+      const allNodes = useCanvasStore.getState().nodes;
+      const { updateNodeData } = useCanvasStore.getState();
+      for (const n of allNodes) {
+        if (n.data?.sourceId === sourceId) {
+          updateNodeData(n.id, { label: newName, labelSource: 'user' });
+        }
+      }
+
       // Refresh sources list
       const updatedSources = await getSources();
       setSources(updatedSources);

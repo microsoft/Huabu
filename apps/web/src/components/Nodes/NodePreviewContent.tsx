@@ -1,5 +1,7 @@
 import { NodePreviews } from '@/components/Nodes/previews';
 
+import { AiSummaryBanner } from './AiSummaryBanner';
+
 export type PreviewData = {
   type: string;
   data: Record<string, unknown>;
@@ -23,13 +25,22 @@ const DefaultPreview = ({ type }: { type: string }) => {
 };
 
 export const NodePreviewContent = (props: NodePreviewContentProps) => {
-  const { type, ...rest } = props;
+  const { type, data, ...rest } = props;
 
   const PreviewComponent = NodePreviews[type];
+  const sourceId =
+    typeof data.sourceId === 'string' && data.sourceId ? data.sourceId : null;
 
   if (!PreviewComponent) {
     return <DefaultPreview type={type} />;
   }
 
-  return <PreviewComponent {...rest} />;
+  return (
+    <div className="flex h-full flex-col">
+      {sourceId && <AiSummaryBanner sourceId={sourceId} />}
+      <div className="relative min-h-0 flex-1">
+        <PreviewComponent data={data} {...rest} />
+      </div>
+    </div>
+  );
 };

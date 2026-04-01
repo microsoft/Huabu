@@ -115,10 +115,6 @@ function toSource(
   };
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// ObsidianKnowledgeRepository
-// ────────────────────────────────────────────────────────────────────────────
-
 /**
  * File-based knowledge repository using Markdown with YAML frontmatter.
  *
@@ -131,7 +127,7 @@ function toSource(
  * Internal metadata (source_id, type, etc.) lives in YAML frontmatter.
  * Title is NOT stored in frontmatter – it is derived from the filename.
  */
-export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
+export class FileKnowledgeRepository implements IKnowledgeRepository {
   private readonly sourcesDir: string;
 
   /**
@@ -202,7 +198,7 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
         // ── TODO(migration): rename legacy "Title (src_xxx).md" → "Title.md" ──
         const basename = path.basename(filePath);
         const legacyMatch = basename.match(
-          ObsidianKnowledgeRepository.LEGACY_FILENAME_RE,
+          FileKnowledgeRepository.LEGACY_FILENAME_RE,
         );
         if (legacyMatch) {
           const cleanName = `${legacyMatch[1].trim()}.md`;
@@ -273,7 +269,7 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
   private buildSourceFileName(sourceId: string, title?: string | null): string {
     if (title) {
       const safe = title
-        .replace(ObsidianKnowledgeRepository.UNSAFE_FILENAME_CHARS, '')
+        .replace(FileKnowledgeRepository.UNSAFE_FILENAME_CHARS, '')
         .trim()
         .slice(0, 80);
       if (safe.length > 0) return `${safe}.md`;
@@ -341,8 +337,7 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
     }
 
     // Title is always derived from the filename
-    const title =
-      ObsidianKnowledgeRepository.extractTitleFromFilename(filePath);
+    const title = FileKnowledgeRepository.extractTitleFromFilename(filePath);
 
     return toSource(meta, content, title);
   }
@@ -361,9 +356,7 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
     }
 
     // Title is always derived from the filename
-    const title =
-      ObsidianKnowledgeRepository.extractTitleFromFilename(filePath);
-
+    const title = FileKnowledgeRepository.extractTitleFromFilename(filePath);
     return {
       sourceId: meta['id'] ?? '',
       type: (meta['type'] ?? 'text') as Source['type'],
@@ -544,6 +537,16 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
     }
 
     return updated;
+  }
+
+  async deleteSource(sourceId: string): Promise<boolean> {
+    const filePath = this.sourceIndex.get(sourceId);
+    if (!filePath || !existsSync(filePath)) return false;
+
+    const { unlink } = await import('node:fs/promises');
+    await unlink(filePath);
+    this.sourceIndex.delete(sourceId);
+    return true;
   }
 
   // ==================== Transaction Support ====================
