@@ -63,6 +63,9 @@
   --shimmer-1: #d1d5db;
   --shimmer-2: #6b7280;
   --shimmer-3: #4b5563;
+  --skeleton-1: #f3f4f6;
+  --skeleton-2: #e5e7eb;
+  --skeleton-3: #dcdfe4;
 
   /* ===================================================================
     ShadCN bridge — consumed by @blocknote/shadcn.
@@ -139,6 +142,9 @@
   --shimmer-1: oklch(0.45 0 0);
   --shimmer-2: oklch(0.6 0 0);
   --shimmer-3: oklch(0.7 0 0);
+  --skeleton-1: oklch(0.2 0 0);
+  --skeleton-2: oklch(0.28 0 0);
+  --skeleton-3: oklch(0.32 0 0);
 
   /* --- ShadCN bridge (BlockNote) --- */
   --card: oklch(0.205 0 0);
@@ -385,4 +391,37 @@ body,
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   animation: thinking-shimmer 3s linear infinite;
+}
+
+/* Skeleton loading lines — three bars with sliding shimmer */
+.skeleton-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+}
+
+.skeleton-line {
+  height: 10px;
+  border-radius: 4px;
+  background: linear-gradient(
+    90deg,
+    var(--skeleton-1) 0%,
+    var(--skeleton-2) 25%,
+    var(--skeleton-3) 50%,
+    var(--skeleton-2) 75%,
+    var(--skeleton-1) 100%
+  );
+  background-size: 200% auto;
+  animation: thinking-shimmer 1.8s ease-in-out infinite;
+}
+
+.skeleton-line:nth-child(2) {
+  width: 75%;
+  animation-delay: 0.15s;
+}
+
+.skeleton-line:nth-child(3) {
+  width: 50%;
+  animation-delay: 0.3s;
 }

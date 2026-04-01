@@ -97,17 +97,19 @@ async function hydrateNodeContent(nodes: NodeLike[]): Promise<NodeLike[]> {
       (node.data?.contentSnapshot as string | undefined) ??
       '';
 
-    // Hydrate label from source title so it stays in sync.
-    // Preserve the existing node label as fallback.
-    const label =
-      source?.title ?? (node.data?.label as string | undefined) ?? '';
+    // Hydrate label from source title when the user hasn't manually set it
+    const labelPatch: Record<string, unknown> = {};
+    if (source?.title && node.data?.labelSource !== 'user') {
+      labelPatch.label = source.title;
+      labelPatch.labelSource = 'auto';
+    }
 
     return {
       ...node,
       data: {
         ...node.data,
         content,
-        label,
+        ...labelPatch,
       },
     };
   });
