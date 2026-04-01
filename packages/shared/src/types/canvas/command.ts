@@ -2,6 +2,7 @@
  * Shared canvas command schema executed by both the web client and agent flows.
  */
 
+import type { EdgeStyle } from './edge.js';
 import type { LayoutStrategy, Point } from './layout.js';
 import type { CanvasNodeType, NodeData } from './node.js';
 import type { PrefixedId } from '../../utils/id.js';
@@ -91,6 +92,12 @@ export interface CanvasEdgeCreateInput {
   id?: CanvasEdgeId;
   source: CanvasNodeId;
   target: CanvasNodeId;
+  style?: EdgeStyle;
+}
+
+export interface CanvasEdgeStylePatch {
+  edge: CanvasEdgeRef;
+  style: Partial<EdgeStyle>;
 }
 
 /**
@@ -119,6 +126,7 @@ export type CanvasCommand =
     }
   | { type: 'CONNECT_NODES'; edges: CanvasEdgeCreateInput[] }
   | { type: 'DISCONNECT_EDGES'; edges: CanvasEdgeRef[] }
+  | { type: 'SET_EDGE_STYLE'; edges: CanvasEdgeStylePatch[] }
   | {
       type: 'ALIGN_NODES';
       nodeIds: CanvasNodeId[];

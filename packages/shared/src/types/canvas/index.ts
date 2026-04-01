@@ -41,7 +41,9 @@ export {
 } from './node.js';
 
 // Edge types
-export type { EdgeStyle } from './edge.js';
+export type { EdgeStyle, EdgeLineType, EdgeLineStyle } from './edge.js';
+export type { StrokeColorValue, EdgeStrokeWidth } from './edge.js';
+export { STROKE_COLORS, EDGE_STROKE_WIDTHS } from './edge.js';
 
 // Source types
 export type {
@@ -78,6 +80,7 @@ export type {
   CanvasNodeGeometryUpdate,
   CanvasNodeLockUpdate,
   CanvasEdgeCreateInput,
+  CanvasEdgeStylePatch,
   CanvasCommand,
   CanvasCommandType,
   UiOnlyCanvasCommandType,

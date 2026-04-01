@@ -7,7 +7,8 @@
 
 import { getLayoutNodeSize } from '@/utils/node/size';
 
-import type { Node } from '@xyflow/react';
+import type { EdgeStyle } from '@sediment/shared';
+import type { Node, Edge } from '@xyflow/react';
 
 /**
  * Returns the best source/target handle pair for an edge between two nodes
@@ -131,4 +132,61 @@ export function rerouteAllEdges<
     return { ...edge, ...handles };
   });
   return changed ? result : edges;
+}
+
+/**
+ * Convert an EdgeStyle to React Flow edge properties.
+ *
+ * Stores the EdgeStyle as source of truth in `edge.data.edgeStyle` and
+ * derives the React Flow rendering props (`type`, `style`, `animated`).
+ */
+export function applyEdgeStyle(edge: Edge, style?: EdgeStyle): Edge {
+  if (!style) return edge;
+
+  const rfStyle: Record<string, unknown> = {
+    ...(typeof edge.style === 'object' ? edge.style : {}),
+  };
+
+  if (style.stroke) rfStyle.stroke = style.stroke;
+  if (style.strokeWidth !== undefined) rfStyle.strokeWidth = style.strokeWidth;
+  if (style.lineStyle === 'dashed') {
+    rfStyle.strokeDasharray = '6 3';
+  } else if (style.lineStyle === 'dotted') {
+    rfStyle.strokeDasharray = '2 2';
+  }
+
+  // Map our domain lineType to React Flow edge type names
+  const rfType = style.lineType === 'step' ? 'smoothstep' : style.lineType;
+
+  return {
+    ...edge,
+    type: rfType ?? edge.type,
+    animated: style.animated ?? edge.animated,
+    style: rfStyle,
+    data: { ...edge.data, edgeStyle: style },
+  };
+}
+
+/**
+ * Merge a partial EdgeStyle patch into an existing EdgeStyle
+ * stored on an edge's data, then re-apply to RF props.
+ */
+export function mergeEdgeStyle(edge: Edge, patch: Partial<EdgeStyle>): Edge {
+  const existing: EdgeStyle =
+    (edge.data?.edgeStyle as EdgeStyle | undefined) ?? {};
+  const merged: EdgeStyle = { ...existing, ...patch };
+  // Reset dash when lineStyle is explicitly set to solid
+  if (patch.lineStyle === 'solid') {
+    delete (merged as Record<string, unknown>).lineStyle;
+  }
+  return applyEdgeStyle(
+    {
+      ...edge,
+      // Clear previously set RF style so applyEdgeStyle starts fresh
+      style: {},
+      type: undefined,
+      animated: undefined,
+    },
+    merged,
+  );
 }

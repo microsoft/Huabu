@@ -28,6 +28,7 @@ import {
 import { useCanvasShortcuts } from '@/hooks/useCanvasShortcuts';
 
 import { NodeToolbar } from './CanvasToolbar.tsx';
+import { EdgeStyleToolbar } from './EdgeStyleToolbar.tsx';
 import { IntentPopover } from './IntentPopover.tsx';
 import { MultiSelectToolbar } from './MultiSelectToolbar.tsx';
 import { getSource } from '../../../api/knowledge.ts';
@@ -606,6 +607,7 @@ export const Canvas: React.FC<CanvasProps> = ({
           <NodeToolbar activeTool={tool} onToolChange={setTool} />
         </Panel>
         <MultiSelectToolbar />
+        <EdgeStyleToolbar />
         <IntentPopover />
         <Background color="var(--canvas-grid)" gap={GRID_SIZE} />
 

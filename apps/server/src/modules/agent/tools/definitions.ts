@@ -6,6 +6,7 @@
  */
 
 import { Type } from '@mariozechner/pi-ai';
+import { EDGE_STROKE_WIDTHS, STROKE_COLORS } from '@sediment/shared';
 
 import type { Tool } from '@mariozechner/pi-ai';
 import type { AgentCanvasCommandType } from '@sediment/shared';
@@ -104,12 +105,49 @@ const NodeCreateInputSchema = Type.Object({
   ),
 });
 
+const EdgeLineTypeSchema = Type.Union([
+  Type.Literal('bezier'),
+  Type.Literal('straight'),
+  Type.Literal('step'),
+]);
+
+const EdgeLineStyleSchema = Type.Union([
+  Type.Literal('solid'),
+  Type.Literal('dashed'),
+  Type.Literal('dotted'),
+]);
+
+const StrokeColorSchema = Type.Union(
+  STROKE_COLORS.map((c) => Type.Literal(c.value)),
+  {
+    description: `Edge color. Allowed values: ${STROKE_COLORS.map((c) => `"${c.value}" (${c.name})`).join(', ')}`,
+  },
+);
+
+const StrokeWidthSchema = Type.Union(
+  EDGE_STROKE_WIDTHS.map((w) => Type.Literal(w)),
+  {
+    description: `Edge thickness in px. Allowed: ${EDGE_STROKE_WIDTHS.join(', ')}`,
+  },
+);
+
+const EdgeStyleSchema = Type.Object({
+  lineType: Type.Optional(EdgeLineTypeSchema),
+  lineStyle: Type.Optional(EdgeLineStyleSchema),
+  stroke: Type.Optional(StrokeColorSchema),
+  strokeWidth: Type.Optional(StrokeWidthSchema),
+  animated: Type.Optional(
+    Type.Boolean({ description: 'Animated flowing dots' }),
+  ),
+});
+
 const EdgeCreateInputSchema = Type.Object({
   id: Type.Optional(
     Type.String({ description: 'Explicit edge ID (edge-<uuid>)' }),
   ),
   source: Type.String({ description: 'Source node ID' }),
   target: Type.String({ description: 'Target node ID' }),
+  style: Type.Optional(EdgeStyleSchema),
 });
 
 const EdgeRefSchema = Type.Union([
@@ -119,6 +157,11 @@ const EdgeRefSchema = Type.Union([
     target: Type.String(),
   }),
 ]);
+
+const EdgeStylePatchSchema = Type.Object({
+  edge: EdgeRefSchema,
+  style: EdgeStyleSchema,
+});
 
 const AlignDirectionSchema = Type.Union([
   Type.Literal('left'),
@@ -196,6 +239,10 @@ const AgentCanvasCommandSchema = Type.Union([
     edges: Type.Array(EdgeRefSchema),
   }),
   Type.Object({
+    type: Type.Literal('SET_EDGE_STYLE'),
+    edges: Type.Array(EdgeStylePatchSchema),
+  }),
+  Type.Object({
     type: Type.Literal('ALIGN_NODES'),
     nodeIds: Type.Array(Type.String()),
     direction: AlignDirectionSchema,
@@ -229,6 +276,7 @@ type SchemaCommandType =
   | 'REORDER_NODES'
   | 'CONNECT_NODES'
   | 'DISCONNECT_EDGES'
+  | 'SET_EDGE_STYLE'
   | 'ALIGN_NODES'
   | 'DISTRIBUTE_NODES'
   | 'AUTO_LAYOUT';
@@ -253,8 +301,9 @@ export const canvasCommandsTool: Tool = {
 - DISSOLVE_FRAME { frameId } — ungroup a frame, keeping child nodes
 - SET_NODE_GEOMETRY { items: [{ nodeId, position?, size? }] }
 - REORDER_NODES { nodeIds, to: "top" | "bottom" | { before: id } | { after: id } }
-- CONNECT_NODES { edges: [{ source, target, id? }] }
+- CONNECT_NODES { edges: [{ source, target, id?, style? }] } — style: { lineType?: "bezier"|"straight"|"step", lineStyle?: "solid"|"dashed"|"dotted", stroke?: one of the preset hex colors, strokeWidth?: 1|2|3|4, animated?: boolean }
 - DISCONNECT_EDGES { edges: [edgeId | { source, target }] }
+- SET_EDGE_STYLE { edges: [{ edge: edgeId | { source, target }, style: { lineType?, lineStyle?, stroke?, strokeWidth?, animated? } }] }
 - ALIGN_NODES { nodeIds, direction: "left"|"center-h"|"right"|"top"|"center-v"|"bottom" }
 - DISTRIBUTE_NODES { nodeIds }
 - AUTO_LAYOUT { scope: { type: "canvas" } | { type: "frame", frameId } }

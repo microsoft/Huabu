@@ -1,6 +1,7 @@
 import { createId, type CanvasCommand } from '@sediment/shared';
 
 import { noop, type CommandDefinition } from './types';
+import { applyEdgeStyle } from '../utils/edge';
 
 import type { Edge } from '@xyflow/react';
 
@@ -28,7 +29,7 @@ const connectNodes: CommandDefinition<Cmd> = {
         (e) => e.source === source && e.target === target,
       );
       if (!exists) {
-        nextEdges.push({ id, source, target });
+        nextEdges.push(applyEdgeStyle({ id, source, target }, edgeInput.style));
       }
     }
 
