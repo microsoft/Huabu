@@ -12,8 +12,8 @@ export {
   resetKnowledgeRepository,
 } from './knowledge.repository.js';
 
-// Obsidian backend
-export { ObsidianKnowledgeRepository } from './obsidian.repository.js';
+// File-based backend
+export { FileKnowledgeRepository } from './file.repository.js';
 
 // Context Builder
 export { buildContext, type SourceWithContent } from './context-builder.js';

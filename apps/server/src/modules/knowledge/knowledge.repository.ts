@@ -1,4 +1,4 @@
-import { ObsidianKnowledgeRepository } from './obsidian.repository.js';
+import { FileKnowledgeRepository } from './file.repository.js';
 import { getSourcesDir } from '../workspace.js';
 
 import type { IKnowledgeRepository } from './knowledge.interface.js';
@@ -11,12 +11,12 @@ let repositoryInstance: IKnowledgeRepository | null = null;
 
 /**
  * Get or initialise the knowledge repository singleton.
- * Always uses the file-based ObsidianKnowledgeRepository backed by the
+ * Always uses the file-based FileKnowledgeRepository backed by the
  * workspace sources directory.
  */
 export async function getKnowledgeRepository(): Promise<IKnowledgeRepository> {
   if (!repositoryInstance) {
-    repositoryInstance = new ObsidianKnowledgeRepository(getSourcesDir());
+    repositoryInstance = new FileKnowledgeRepository(getSourcesDir());
   }
   return repositoryInstance;
 }

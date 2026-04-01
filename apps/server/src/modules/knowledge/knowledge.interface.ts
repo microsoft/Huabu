@@ -8,7 +8,7 @@ import type {
  * Abstract interface for knowledge storage backends.
  *
  * Implementations:
- * - ObsidianKnowledgeRepository (file-based, Markdown + YAML frontmatter)
+ * - FileKnowledgeRepository (file-based, Markdown + YAML frontmatter)
  *
  * Consumers should depend on this interface rather than a concrete class so the
  * storage backend can be swapped at construction time.

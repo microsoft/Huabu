@@ -160,7 +160,7 @@ preprocess.ts ──→ preprocessNode()
 | `apps/web/src/api/canvas.ts`                               | 移除了 `upsertNode()` 和 `resolveLabel()` API 函数。新增 `preprocessNode()` 作为唯一的预处理 API。 |
 | `apps/server/src/modules/knowledge/loaders/*`              | `TextLoader`、`PdfLoader`、`WebLoader`、`YoutubeLoader` 被 Extract 阶段复用，无需修改。            |
 | `apps/server/src/modules/knowledge/knowledge.interface.ts` | `IKnowledgeRepository` 接口被 Persist 阶段复用。                                                   |
-| `apps/server/src/modules/knowledge/obsidian.repository.ts` | 仓库实现原样复用。                                                                                 |
+| `apps/server/src/modules/knowledge/file.repository.ts`     | 仓库实现原样复用。                                                                                 |
 | `apps/server/src/modules/knowledge/utils.ts`               | `normalizeUrl`、`computeContentHash`、`generateSourceId` 被 Input Resolve 和 Normalize 阶段复用。  |
 | `apps/server/src/modules/agent/llm.ts`                     | `llmComplete` 被 `ProviderManager` 包装，而非替换。                                                |
 | `apps/server/src/prompt/resolve-label.ts`                  | `IMAGE_LABEL_PROMPT` 和 `buildFrameLabelPrompt` 被 `ProviderManager` 使用。                        |
