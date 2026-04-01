@@ -1,4 +1,5 @@
 import { getNodeIcon } from '../../config/nodeIcons.ts';
+import { SkeletonLines } from '../Common/SkeletonLines';
 
 import type { ReactNode } from 'react';
 
@@ -37,11 +38,7 @@ export function PreviewCard({
     <div className="bg-surface flex h-full w-full flex-col justify-evenly overflow-hidden">
       {/* Full-card skeleton when loading */}
       {loading && !image ? (
-        <div className="skeleton-lines h-full w-full justify-center">
-          <div className="skeleton-line" />
-          <div className="skeleton-line" />
-          <div className="skeleton-line" />
-        </div>
+        <SkeletonLines className="h-full w-full justify-center" />
       ) : (
         <>
           {/* Cover image */}
