@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, Sparkles } from 'lucide-react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { getSource } from '@/api/knowledge';
@@ -45,19 +45,18 @@ export const AiSummaryBanner = ({ sourceId }: AiSummaryBannerProps) => {
   if (!summary && !keywords) return null;
 
   return (
-    <div className="bg-ai-bg px-4 py-2">
+    <div className="relative z-10 shrink-0 shadow-[0_1px_2px_rgba(0,0,0,0.08)]">
       <Button
         variant="ghost"
         size="sm"
-        className="hover:text-fg-default gap-1 px-0 hover:!bg-transparent"
+        className="hover:text-fg-default w-full justify-start gap-1 px-3 hover:bg-transparent!"
         onClick={() => setCollapsed((prev) => !prev)}
       >
         {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
-        <Sparkles size={12} />
         <span>AI Summary</span>
       </Button>
       {!collapsed && (
-        <div className="flex flex-col gap-1.5">
+        <div className="animate-in fade-in flex flex-col gap-1.5 px-3 pb-2 duration-150">
           {summary && (
             <p className="text-fg-default text-sm leading-relaxed">{summary}</p>
           )}
@@ -66,7 +65,7 @@ export const AiSummaryBanner = ({ sourceId }: AiSummaryBannerProps) => {
               {keywords.map((kw) => (
                 <span
                   key={kw}
-                  className="bg-surface text-fg-muted rounded-full px-2 py-0.5 text-xs"
+                  className="bg-hover text-fg-muted rounded-full px-2 py-0.5 text-xs"
                 >
                   {kw}
                 </span>

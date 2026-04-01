@@ -38,7 +38,7 @@ export const NodePreviewContent = (props: NodePreviewContentProps) => {
   return (
     <div className="flex h-full flex-col">
       {sourceId && <AiSummaryBanner sourceId={sourceId} />}
-      <div className="min-h-0 flex-1">
+      <div className="relative min-h-0 flex-1">
         <PreviewComponent data={data} {...rest} />
       </div>
     </div>
