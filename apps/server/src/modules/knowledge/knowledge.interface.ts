@@ -42,6 +42,9 @@ export interface IKnowledgeRepository {
     },
   ): Source;
 
+  /** Delete a source by ID. Returns true if it existed and was removed. */
+  deleteSource(sourceId: string): boolean;
+
   // ==================== Transaction Support ====================
 
   /**

@@ -4,6 +4,7 @@ import {
   readFileSync,
   readdirSync,
   renameSync,
+  unlinkSync,
   writeFileSync,
   statSync,
 } from 'node:fs';
@@ -544,6 +545,15 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
     }
 
     return updated;
+  }
+
+  deleteSource(sourceId: string): boolean {
+    const filePath = this.sourceIndex.get(sourceId);
+    if (!filePath || !existsSync(filePath)) return false;
+
+    unlinkSync(filePath);
+    this.sourceIndex.delete(sourceId);
+    return true;
   }
 
   // ==================== Transaction Support ====================
