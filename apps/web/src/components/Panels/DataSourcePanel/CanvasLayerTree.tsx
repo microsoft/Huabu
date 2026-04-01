@@ -15,6 +15,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import React, { useMemo } from 'react';
 
+import { updateSource } from '@/api/knowledge.ts';
 import useCanvasStore from '@/store/canvasStore.ts';
 
 import { TreeRowItem } from './TreeRowItem';
@@ -303,6 +304,14 @@ export const CanvasLayerTree = ({
 
   const handleRename = (id: string, newName: string) => {
     updateNodeData(id, { label: newName, labelSource: 'user' });
+
+    // Sync label back to source.title so they stay consistent.
+    const node = nodes.find((n) => n.id === id);
+    const sourceId = (node?.data as Record<string, unknown> | undefined)
+      ?.sourceId as string | undefined;
+    if (sourceId) {
+      void updateSource(sourceId, { title: newName });
+    }
   };
 
   const handleToggleCollapse = (id: string) => {

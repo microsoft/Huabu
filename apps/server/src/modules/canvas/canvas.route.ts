@@ -53,9 +53,9 @@ function toMessage(error: unknown): string {
 }
 
 /**
- * Strip derived `content` from nodes that already have a `sourceId`.
- * This avoids storing a redundant copy in the canvas JSON - the knowledge
- * store is the single source of truth for note/text content.
+ * Strip derived `content` and `label` from nodes that already have a `sourceId`.
+ * This avoids storing redundant copies in the canvas JSON - the knowledge
+ * store is the single source of truth for content and title/label.
  */
 function stripManagedContent(nodes: NodeLike[]): NodeLike[] {
   return nodes.map((node) => {
@@ -63,8 +63,9 @@ function stripManagedContent(nodes: NodeLike[]): NodeLike[] {
       return node;
     }
 
-    // Strip `content` but preserve it as `contentSnapshot` for fallback
-    const { content, ...dataRest } = node.data;
+    // Strip `content` and `label`; the knowledge store owns both.
+    // Preserve `content` as `contentSnapshot` for fallback.
+    const { content, label, ...dataRest } = node.data;
     return {
       ...node,
       data: {
@@ -96,11 +97,17 @@ async function hydrateNodeContent(nodes: NodeLike[]): Promise<NodeLike[]> {
       (node.data?.contentSnapshot as string | undefined) ??
       '';
 
+    // Hydrate label from source title so it stays in sync.
+    // Preserve the existing node label as fallback.
+    const label =
+      source?.title ?? (node.data?.label as string | undefined) ?? '';
+
     return {
       ...node,
       data: {
         ...node.data,
         content,
+        label,
       },
     };
   });

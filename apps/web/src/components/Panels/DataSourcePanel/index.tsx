@@ -154,6 +154,16 @@ export const DataSourcePanel = ({
   const handleSourceRename = async (sourceId: string, newName: string) => {
     try {
       await updateSource(sourceId, { title: newName });
+
+      // Sync label to all canvas nodes that reference this source.
+      const allNodes = useCanvasStore.getState().nodes;
+      const { updateNodeData } = useCanvasStore.getState();
+      for (const n of allNodes) {
+        if (n.data?.sourceId === sourceId) {
+          updateNodeData(n.id, { label: newName, labelSource: 'user' });
+        }
+      }
+
       // Refresh sources list
       const updatedSources = await getSources();
       setSources(updatedSources);
