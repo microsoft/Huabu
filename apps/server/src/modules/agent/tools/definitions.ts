@@ -292,9 +292,14 @@ export const readSourceTool: Tool = {
 export const searchKnowledgeTool: Tool = {
   name: 'search_knowledge',
   description:
-    'Search the knowledge base for sources matching a query (by title or content keywords).',
+    'Search the knowledge base for sources matching a query (by title or content keywords). When canvasId is provided, results include nodeId/parentId if the source exists on that canvas.',
   parameters: Type.Object({
     query: Type.String({ description: 'Search query' }),
+    canvasId: Type.Optional(
+      Type.String({
+        description: 'Current canvas ID to resolve node positions',
+      }),
+    ),
   }),
 };
 
