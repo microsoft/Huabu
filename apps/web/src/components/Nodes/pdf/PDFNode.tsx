@@ -14,17 +14,16 @@ import { Document, Page, pdfjs } from 'react-pdf';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
-import { getSource } from '@/api/knowledge';
 import { Button } from '@/components/Common/Button';
 import { Spinner } from '@/components/Common/Spinner';
 import { useNodeScale } from '@/hooks/useNodeScale';
+import { useSourceMeta } from '@/hooks/useSourceMeta';
 import useCanvasStore from '@/store/canvasStore';
 
 import { NodeWrapper } from '../NodeWrapper';
 import { PreviewCard } from '../PreviewCard';
 
 import type { CanvasPdfNodeData } from '../types';
-import type { SourceMetadata } from '@sediment/shared';
 
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
@@ -198,34 +197,8 @@ export const PDFNode = memo(
     const hasCover = !!data.coverUrl;
     const sourceId = typeof data.sourceId === 'string' ? data.sourceId : '';
 
-    // Fetch summary from knowledge store for cover-card mode
-    const [summary, setSummary] = useState<string | null>(null);
-    useEffect(() => {
-      if (!hasCover || !sourceId) {
-        setSummary(null);
-        return;
-      }
-      let cancelled = false;
-      void (async () => {
-        try {
-          const source = await getSource(sourceId);
-          if (cancelled) return;
-          if (source.metaJson) {
-            const meta = JSON.parse(source.metaJson) as SourceMetadata;
-            setSummary(
-              typeof meta.summary === 'string' && meta.summary.trim()
-                ? meta.summary.trim()
-                : null,
-            );
-          }
-        } catch {
-          if (!cancelled) setSummary(null);
-        }
-      })();
-      return () => {
-        cancelled = true;
-      };
-    }, [hasCover, sourceId]);
+    // Use cached hook for source metadata in cover-card mode
+    const { summary } = useSourceMeta(hasCover && sourceId ? sourceId : null);
 
     const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
       setNumPages(numPages);

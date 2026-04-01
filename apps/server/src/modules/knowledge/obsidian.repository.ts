@@ -4,7 +4,6 @@ import {
   readFileSync,
   readdirSync,
   renameSync,
-  unlinkSync,
   writeFileSync,
   statSync,
 } from 'node:fs';
@@ -547,11 +546,12 @@ export class ObsidianKnowledgeRepository implements IKnowledgeRepository {
     return updated;
   }
 
-  deleteSource(sourceId: string): boolean {
+  async deleteSource(sourceId: string): Promise<boolean> {
     const filePath = this.sourceIndex.get(sourceId);
     if (!filePath || !existsSync(filePath)) return false;
 
-    unlinkSync(filePath);
+    const { unlink } = await import('node:fs/promises');
+    await unlink(filePath);
     this.sourceIndex.delete(sourceId);
     return true;
   }

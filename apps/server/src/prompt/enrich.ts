@@ -46,7 +46,7 @@ export function buildContentEnrichPrompt(
   }
   if (needKeywords) {
     fields.push(
-      '"keywords": a concise set of 3–6 standardized keywords that accurately reflect the content’s main topic, methodology, and application domain, using established terminology and optimized for search and indexing.',
+      '"keywords": a concise set of 3-6 standardized keywords that accurately reflect the content’s main topic, methodology, and application domain, using established terminology and optimized for search and indexing.',
     );
   }
 

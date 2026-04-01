@@ -11,18 +11,20 @@ import { Link } from 'react-router-dom';
 
 import {
   getSources,
+  checkSourceUsage,
   deleteSource,
   deleteUnusedSources,
-} from '../api/knowledge';
-import { Button } from '../components/Common/Button';
-import { EmptyState } from '../components/Common/EmptyState';
-import { LoadingState } from '../components/Common/LoadingState';
-import { Modal } from '../components/Common/Modal';
-import { Spinner } from '../components/Common/Spinner';
-import { toast } from '../components/Common/Toast';
-import { Header } from '../components/Panels/Header/Header';
-import { useWorkspaceStore } from '../store/workspaceStore';
+} from '@/api/knowledge';
+import { Button } from '@/components/Common/Button';
+import { EmptyState } from '@/components/Common/EmptyState';
+import { LoadingState } from '@/components/Common/LoadingState';
+import { Modal } from '@/components/Common/Modal';
+import { Spinner } from '@/components/Common/Spinner';
+import { toast } from '@/components/Common/Toast';
+import { Header } from '@/components/Panels/Header/Header';
+import { useWorkspaceStore } from '@/store/workspaceStore';
 
+import type { SourceConflict } from '@/api/knowledge';
 import type { SourceOverview, SourceType } from '@sediment/shared';
 
 const sourceTypeIcon: Record<SourceType, React.ReactNode> = {
@@ -49,6 +51,7 @@ export default function SourceListPage() {
   const [pendingDelete, setPendingDelete] = useState<{
     sourceId: string;
     title: string | null;
+    conflict?: SourceConflict;
   } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [pendingPurge, setPendingPurge] = useState(false);
@@ -80,8 +83,14 @@ export default function SourceListPage() {
     return () => window.removeEventListener('workspace-changed', handler);
   }, [fetchSources]);
 
-  const requestDelete = (sourceId: string, title: string | null) => {
-    setPendingDelete({ sourceId, title });
+  const requestDelete = async (sourceId: string, title: string | null) => {
+    try {
+      const conflict = await checkSourceUsage(sourceId);
+      setPendingDelete({ sourceId, title, conflict: conflict ?? undefined });
+    } catch {
+      // If usage check fails, show the plain delete dialog anyway
+      setPendingDelete({ sourceId, title });
+    }
   };
 
   const closeDeleteModal = () => {
@@ -94,7 +103,8 @@ export default function SourceListPage() {
 
     try {
       setIsDeleting(true);
-      await deleteSource(pendingDelete.sourceId);
+      const isForce = !!pendingDelete.conflict;
+      await deleteSource(pendingDelete.sourceId, isForce);
       setSources((prev) =>
         prev.filter((s) => s.sourceId !== pendingDelete.sourceId),
       );
@@ -143,12 +153,35 @@ export default function SourceListPage() {
         description={
           pendingDelete ? (
             <>
-              Are you sure you want to delete{' '}
-              <span className="text-fg-default font-medium">
-                &quot;{pendingDelete.title || pendingDelete.sourceId}&quot;
-              </span>
-              ? The associated artifact files will also be removed. This action
-              cannot be undone.
+              {pendingDelete.conflict ? (
+                <>
+                  <span className="text-fg-default font-medium">
+                    &quot;{pendingDelete.title || pendingDelete.sourceId}&quot;
+                  </span>{' '}
+                  is used by{' '}
+                  <span className="font-medium">
+                    {pendingDelete.conflict.referencedBy.length} canvas
+                    {pendingDelete.conflict.referencedBy.length !== 1
+                      ? 'es'
+                      : ''}
+                  </span>
+                  :{' '}
+                  {pendingDelete.conflict.referencedBy
+                    .map((c) => c.title || c.canvasId)
+                    .join(', ')}
+                  . Deleting will also remove the corresponding nodes from those
+                  canvases. Continue?
+                </>
+              ) : (
+                <>
+                  Are you sure you want to delete{' '}
+                  <span className="text-fg-default font-medium">
+                    &quot;{pendingDelete.title || pendingDelete.sourceId}&quot;
+                  </span>
+                  ? The associated artifact files will also be removed. This
+                  action cannot be undone.
+                </>
+              )}
             </>
           ) : null
         }
@@ -307,7 +340,7 @@ export default function SourceListPage() {
                     iconOnly
                     onClick={(e) => {
                       e.stopPropagation();
-                      requestDelete(source.sourceId, source.title);
+                      void requestDelete(source.sourceId, source.title);
                     }}
                     tooltipWrapperClassName="absolute top-3 right-3 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
                     title="Delete source"

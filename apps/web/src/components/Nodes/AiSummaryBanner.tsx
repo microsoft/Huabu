@@ -1,10 +1,8 @@
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
-import { getSource } from '@/api/knowledge';
 import { Button } from '@/components/Common/Button';
-
-import type { SourceMetadata } from '@sediment/shared';
+import { useSourceMeta } from '@/hooks/useSourceMeta';
 
 interface AiSummaryBannerProps {
   sourceId: string;
@@ -12,35 +10,8 @@ interface AiSummaryBannerProps {
 
 /** Collapsible banner showing AI-generated summary and keywords above the preview. */
 export const AiSummaryBanner = ({ sourceId }: AiSummaryBannerProps) => {
-  const [summary, setSummary] = useState<string | null>(null);
-  const [keywords, setKeywords] = useState<string[] | null>(null);
+  const { summary, keywords } = useSourceMeta(sourceId);
   const [collapsed, setCollapsed] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const source = await getSource(sourceId);
-        if (cancelled || !source.metaJson) return;
-        const meta = JSON.parse(source.metaJson) as SourceMetadata;
-        setSummary(
-          typeof meta.summary === 'string' && meta.summary.trim()
-            ? meta.summary.trim()
-            : null,
-        );
-        setKeywords(
-          Array.isArray(meta.keywords) && meta.keywords.length > 0
-            ? meta.keywords
-            : null,
-        );
-      } catch {
-        /* ignore fetch errors */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [sourceId]);
 
   if (!summary && !keywords) return null;
 

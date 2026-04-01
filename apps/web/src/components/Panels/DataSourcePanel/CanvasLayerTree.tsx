@@ -16,6 +16,7 @@ import { CSS } from '@dnd-kit/utilities';
 import React, { useMemo } from 'react';
 
 import { updateSource } from '@/api/knowledge.ts';
+import { toast } from '@/components/Common/Toast';
 import useCanvasStore from '@/store/canvasStore.ts';
 
 import { TreeRowItem } from './TreeRowItem';
@@ -310,7 +311,9 @@ export const CanvasLayerTree = ({
     const sourceId = (node?.data as Record<string, unknown> | undefined)
       ?.sourceId as string | undefined;
     if (sourceId) {
-      void updateSource(sourceId, { title: newName });
+      updateSource(sourceId, { title: newName }).catch(() => {
+        toast('Failed to sync title to source', { variant: 'error' });
+      });
     }
   };
 

@@ -155,6 +155,32 @@ function extractPreview(
   };
 }
 
+/**
+ * Like extractPreview but accepts an already-parsed meta object to avoid re-parsing.
+ */
+function extractPreviewFromParsed(
+  meta: Record<string, unknown> | null,
+  contentFallback?: string,
+): { summary?: string; keywords?: string[]; snippet?: string } {
+  if (meta) {
+    const summary =
+      typeof meta.summary === 'string' && meta.summary.trim()
+        ? meta.summary.trim()
+        : undefined;
+    const keywords = Array.isArray(meta.keywords)
+      ? (meta.keywords.filter(
+          (k): k is string => typeof k === 'string' && k.trim().length > 0,
+        ) as string[])
+      : undefined;
+    if (summary || (keywords && keywords.length > 0)) {
+      return { summary, keywords };
+    }
+  }
+  return {
+    snippet: contentFallback ? contentFallback.slice(0, 120) : undefined,
+  };
+}
+
 // ==================== Canvas Operations ====================
 
 async function executeGetNodeDetail(args: {
@@ -212,10 +238,25 @@ async function executeGetCanvasState(args: {
   const nodes = (canvas.state.nodes ?? []) as Array<Record<string, unknown>>;
   const edges = (canvas.state.edges ?? []) as Array<Record<string, unknown>>;
 
-  // Batch-load source overviews for nodes with sourceId
+  // Collect sourceIds referenced by nodes, then batch-lookup only those
+  const sourceIds = new Set<string>();
+  for (const n of nodes) {
+    const sid = (n.data as Record<string, unknown> | undefined)?.sourceId as
+      | string
+      | undefined;
+    if (sid) sourceIds.add(sid);
+  }
+
   const repo = await getKnowledgeRepository();
-  const allOverviews = repo.findAllSourcesOverview();
-  const overviewMap = new Map(allOverviews.map((s) => [s.sourceId, s]));
+  const overviewMap = new Map<string, { metaJson: string | null }>();
+  if (sourceIds.size > 0) {
+    const allOverviews = repo.findAllSourcesOverview();
+    for (const s of allOverviews) {
+      if (sourceIds.has(s.sourceId)) {
+        overviewMap.set(s.sourceId, s);
+      }
+    }
+  }
 
   const nodeSummaries = nodes.map((n) => {
     const data = n.data as Record<string, unknown> | undefined;
@@ -376,23 +417,37 @@ async function executeSearchKnowledge(args: {
   const allSources = repo.findAllSources();
 
   const queryLower = args.query.toLowerCase();
+
+  // Parse metaJson once per source and cache the result for both filter and map
+  const parsedMetaCache = new Map<string, Record<string, unknown> | null>();
+  function getParsedMeta(source: {
+    sourceId: string;
+    metaJson: string | null;
+  }): Record<string, unknown> | null {
+    if (parsedMetaCache.has(source.sourceId))
+      return parsedMetaCache.get(source.sourceId) ?? null;
+    let parsed: Record<string, unknown> | null = null;
+    if (source.metaJson) {
+      try {
+        parsed = JSON.parse(source.metaJson) as Record<string, unknown>;
+      } catch {
+        /* ignore */
+      }
+    }
+    parsedMetaCache.set(source.sourceId, parsed);
+    return parsed;
+  }
+
   const matches = allSources.filter((s) => {
     const titleMatch = s.title?.toLowerCase().includes(queryLower);
     const contentMatch = s.content?.toLowerCase().includes(queryLower);
     // Also match against keywords in metaJson
     let keywordMatch = false;
-    if (s.metaJson) {
-      try {
-        const meta = JSON.parse(s.metaJson) as Record<string, unknown>;
-        if (Array.isArray(meta.keywords)) {
-          keywordMatch = meta.keywords.some(
-            (k) =>
-              typeof k === 'string' && k.toLowerCase().includes(queryLower),
-          );
-        }
-      } catch {
-        // ignore
-      }
+    const meta = getParsedMeta(s);
+    if (meta && Array.isArray(meta.keywords)) {
+      keywordMatch = meta.keywords.some(
+        (k) => typeof k === 'string' && k.toLowerCase().includes(queryLower),
+      );
     }
     return titleMatch || contentMatch || keywordMatch;
   });
@@ -422,7 +477,7 @@ async function executeSearchKnowledge(args: {
   }
 
   const results = matches.slice(0, 10).map((s) => {
-    const preview = extractPreview(s.metaJson, s.content);
+    const preview = extractPreviewFromParsed(getParsedMeta(s), s.content);
     const canvasNode = canvasNodeMap.get(s.sourceId);
     return {
       sourceId: s.sourceId,
