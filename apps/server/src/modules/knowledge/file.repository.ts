@@ -338,7 +338,6 @@ export class FileKnowledgeRepository implements IKnowledgeRepository {
 
     // Title is always derived from the filename
     const title = FileKnowledgeRepository.extractTitleFromFilename(filePath);
-    FileKnowledgeRepository.extractTitleFromFilename(filePath);
 
     return toSource(meta, content, title);
   }
@@ -357,7 +356,7 @@ export class FileKnowledgeRepository implements IKnowledgeRepository {
     }
 
     // Title is always derived from the filename
-    const title = File;
+    const title = FileKnowledgeRepository.extractTitleFromFilename(filePath);
     return {
       sourceId: meta['id'] ?? '',
       type: (meta['type'] ?? 'text') as Source['type'],
