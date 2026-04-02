@@ -1,3 +1,9 @@
+import {
+  prepare,
+  layout,
+  prepareWithSegments,
+  layoutWithLines,
+} from '@chenglou/pretext';
 import { type Node, type NodeProps, useStore } from '@xyflow/react';
 import { clsx } from 'clsx';
 import { Baseline, Bold, Italic, Underline, Strikethrough } from 'lucide-react';
@@ -32,7 +38,22 @@ const NODE_PADDING = 4;
 export type TextNodeType = Node<CanvasTextNodeData, 'text'>;
 
 /**
- * Measure the natural content dimensions using a hidden off-screen element.
+ * Build the CSS font shorthand string for pretext's prepare().
+ */
+function buildFontStr(
+  fontSize: number,
+  fontFamily: string,
+  fontWeight: string,
+  fontStyle: string,
+): string {
+  let s = '';
+  if (fontStyle === 'italic') s += 'italic ';
+  if (fontWeight === 'bold') s += 'bold ';
+  return `${s}${fontSize}px ${fontFamily}`;
+}
+
+/**
+ * Measure the natural content dimensions using pretext (no DOM reflow).
  * maxWidth controls the wrap boundary.
  */
 function measureTextContent(
@@ -46,29 +67,29 @@ function measureTextContent(
     maxWidth: number;
   },
 ): { width: number; height: number } {
-  const el = document.createElement('div');
-  el.style.position = 'absolute';
-  el.style.visibility = 'hidden';
-  el.style.whiteSpace = 'pre-wrap';
-  el.style.wordBreak = 'break-word';
-  el.style.fontSize = `${opts.fontSize}px`;
-  el.style.fontFamily = opts.fontFamily;
-  el.style.fontWeight = opts.fontWeight;
-  el.style.fontStyle = opts.fontStyle;
-  el.style.lineHeight = String(opts.lineHeight);
-  el.style.maxWidth = `${opts.maxWidth}px`;
-  el.style.padding = '0';
-  el.textContent = text || ' ';
-  document.body.appendChild(el);
-  const rect = el.getBoundingClientRect();
-  document.body.removeChild(el);
-  // Ceil the height to prevent sub-pixel rounding from clipping the last line.
-  return { width: Math.ceil(rect.width), height: Math.ceil(rect.height) };
+  const fontStr = buildFontStr(
+    opts.fontSize,
+    opts.fontFamily,
+    opts.fontWeight,
+    opts.fontStyle,
+  );
+  const prepared = prepareWithSegments(text || ' ', fontStr, {
+    whiteSpace: 'pre-wrap',
+  });
+  const lineH = opts.fontSize * opts.lineHeight;
+  const { height, lines } = layoutWithLines(prepared, opts.maxWidth, lineH);
+
+  // Width = widest line (shrink-wrap, matching old DOM measurement behaviour)
+  let maxW = 0;
+  for (const line of lines) {
+    if (line.width > maxW) maxW = line.width;
+  }
+  return { width: Math.ceil(maxW), height: Math.ceil(height) };
 }
 
 /**
  * Binary-search for the font size that makes text fill a target height
- * at a given content width.
+ * at a given content width.  Uses pretext — pure arithmetic, no DOM access.
  */
 function computeFontSizeForHeight(
   text: string,
@@ -92,12 +113,16 @@ function computeFontSizeForHeight(
   let hi = 200;
   for (let i = 0; i < 15; i++) {
     const mid = (lo + hi) / 2;
-    const measured = measureTextContent(text, {
-      ...opts,
-      fontSize: mid,
-      maxWidth: contentWidth,
-    });
-    if (measured.height <= contentHeight) {
+    const fontStr = buildFontStr(
+      mid,
+      opts.fontFamily,
+      opts.fontWeight,
+      opts.fontStyle,
+    );
+    const prepared = prepare(text, fontStr, { whiteSpace: 'pre-wrap' });
+    const lineH = mid * opts.lineHeight;
+    const { height } = layout(prepared, contentWidth, lineH);
+    if (height <= contentHeight) {
       lo = mid;
     } else {
       hi = mid;
@@ -138,7 +163,6 @@ export const TextNode = memo(
 
     // Live font size during resize (computed from current dimensions)
     const [liveFontSize, setLiveFontSize] = useState<number | null>(null);
-    const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const updateStyle = useCallback(
       (newStyle: Partial<NodeStyle>) => {
@@ -225,21 +249,17 @@ export const TextNode = memo(
 
     const handleResize = useCallback(
       (width: number, height: number) => {
-        // Debounce the font-size computation (~30ms) for smooth dragging
-        if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
-        resizeTimerRef.current = setTimeout(() => {
-          const cw = width - NODE_PADDING * 2;
-          const ch = height - NODE_PADDING * 2;
-          const fs = computeFontSizeForHeight(draftContent, cw, ch, fontOpts);
-          setLiveFontSize(fs);
-        }, 10);
+        // pretext is pure arithmetic — no DOM reflow, no debounce needed.
+        const cw = width - NODE_PADDING * 2;
+        const ch = height - NODE_PADDING * 2;
+        const fs = computeFontSizeForHeight(draftContent, cw, ch, fontOpts);
+        setLiveFontSize(fs);
       },
       [draftContent, fontOpts],
     );
 
     const handleResizeEnd = useCallback(() => {
       isResizingRef.current = false;
-      if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
       setLiveFontSize(null); // clear live → computedFontSize takes over
       // setNodeGeometry (called by NodeWrapper) writes numeric width/height
       // to node.style, which flips hasFixedSize → true automatically.
