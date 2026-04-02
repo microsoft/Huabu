@@ -99,7 +99,11 @@ async function hydrateNodeContent(nodes: NodeLike[]): Promise<NodeLike[]> {
 
     // Hydrate label from source title when the user hasn't manually set it
     const labelPatch: Record<string, unknown> = {};
-    if (source?.title && node.data?.labelSource !== 'user') {
+    if (
+      source?.title &&
+      node.data?.labelSource !== 'user' &&
+      node.data?.labelSource !== 'agent'
+    ) {
       labelPatch.label = source.title;
       labelPatch.labelSource = 'auto';
     }

@@ -183,6 +183,93 @@ function extractPreviewFromParsed(
 
 // ==================== Canvas Operations ====================
 
+/** Summary shape returned by buildNodeSummaries. */
+export interface NodePreview {
+  nodeId: unknown;
+  sourceId?: string;
+  type: unknown;
+  title: unknown;
+  parentId: unknown;
+  summary?: string;
+  keywords?: string[];
+  snippet?: string;
+}
+
+/**
+ * Build lightweight preview summaries for canvas nodes.
+ *
+ * Shared by `get_canvas_state` (all nodes) and agent context injection
+ * (selected nodes only). Each node gets at most a summary/keywords from
+ * preprocessed metaJson, or a 120-char content snippet — never full content.
+ *
+ * @param canvasId  Canvas to read
+ * @param filterNodeIds  When provided, only return previews for these node IDs.
+ * @returns null if the canvas does not exist.
+ */
+export async function buildNodeSummaries(
+  canvasId: string,
+  filterNodeIds?: Set<string>,
+): Promise<{
+  nodes: NodePreview[];
+  edges: Array<{ source: unknown; target: unknown }>;
+  version: number;
+} | null> {
+  const canvas = readCanvas(canvasId);
+  if (!canvas) return null;
+
+  const allNodes = (canvas.state.nodes ?? []) as Array<Record<string, unknown>>;
+  const allEdges = (canvas.state.edges ?? []) as Array<Record<string, unknown>>;
+
+  const nodes = filterNodeIds
+    ? allNodes.filter((n) => filterNodeIds.has(n.id as string))
+    : allNodes;
+
+  // Collect sourceIds referenced by the target nodes, then batch-lookup
+  const sourceIds = new Set<string>();
+  for (const n of nodes) {
+    const sid = (n.data as Record<string, unknown> | undefined)?.sourceId as
+      | string
+      | undefined;
+    if (sid) sourceIds.add(sid);
+  }
+
+  const repo = await getKnowledgeRepository();
+  const overviewMap = new Map<string, { metaJson: string | null }>();
+  if (sourceIds.size > 0) {
+    const allOverviews = repo.findAllSourcesOverview();
+    for (const s of allOverviews) {
+      if (sourceIds.has(s.sourceId)) {
+        overviewMap.set(s.sourceId, s);
+      }
+    }
+  }
+
+  const nodeSummaries: NodePreview[] = nodes.map((n) => {
+    const data = n.data as Record<string, unknown> | undefined;
+    const sourceId = data?.sourceId as string | undefined;
+    const content = data?.content as string | undefined;
+
+    // Use source metadata for preview when available
+    const overview = sourceId ? overviewMap.get(sourceId) : undefined;
+    const preview = extractPreview(overview?.metaJson ?? undefined, content);
+
+    return {
+      nodeId: n.id,
+      sourceId: sourceId ?? undefined,
+      type: n.type ?? data?.type,
+      title: data?.label,
+      parentId: n.parentId,
+      ...preview,
+    };
+  });
+
+  const edges = filterNodeIds
+    ? []
+    : allEdges.map((e) => ({ source: e.source, target: e.target }));
+
+  return { nodes: nodeSummaries, edges, version: canvas.version };
+}
+
 async function executeGetNodeDetail(args: {
   nodeId: string;
   canvasId: string;
@@ -230,66 +317,18 @@ async function executeGetNodeDetail(args: {
 async function executeGetCanvasState(args: {
   canvasId: string;
 }): Promise<string> {
-  const canvas = readCanvas(args.canvasId);
-  if (!canvas) {
+  const result = await buildNodeSummaries(args.canvasId);
+  if (!result) {
     return JSON.stringify({ error: `Canvas ${args.canvasId} not found` });
   }
 
-  const nodes = (canvas.state.nodes ?? []) as Array<Record<string, unknown>>;
-  const edges = (canvas.state.edges ?? []) as Array<Record<string, unknown>>;
-
-  // Collect sourceIds referenced by nodes, then batch-lookup only those
-  const sourceIds = new Set<string>();
-  for (const n of nodes) {
-    const sid = (n.data as Record<string, unknown> | undefined)?.sourceId as
-      | string
-      | undefined;
-    if (sid) sourceIds.add(sid);
-  }
-
-  const repo = await getKnowledgeRepository();
-  const overviewMap = new Map<string, { metaJson: string | null }>();
-  if (sourceIds.size > 0) {
-    const allOverviews = repo.findAllSourcesOverview();
-    for (const s of allOverviews) {
-      if (sourceIds.has(s.sourceId)) {
-        overviewMap.set(s.sourceId, s);
-      }
-    }
-  }
-
-  const nodeSummaries = nodes.map((n) => {
-    const data = n.data as Record<string, unknown> | undefined;
-    const sourceId = data?.sourceId as string | undefined;
-    const content = data?.content as string | undefined;
-
-    // Use source metadata for preview when available
-    const overview = sourceId ? overviewMap.get(sourceId) : undefined;
-    const preview = extractPreview(overview?.metaJson ?? undefined, content);
-
-    return {
-      nodeId: n.id,
-      sourceId: sourceId ?? undefined,
-      type: n.type ?? data?.type,
-      title: data?.label,
-      src: data?.src,
-      parentId: n.parentId,
-      ...preview,
-    };
-  });
-
-  const edgeSummary = edges.map((e) => ({
-    source: e.source,
-    target: e.target,
-  }));
-
   return JSON.stringify({
     canvasId: args.canvasId,
-    version: canvas.version,
-    nodeCount: nodes.length,
-    edgeCount: edges.length,
-    nodes: nodeSummaries,
-    edges: edgeSummary,
+    version: result.version,
+    nodeCount: result.nodes.length,
+    edgeCount: result.edges.length,
+    nodes: result.nodes,
+    edges: result.edges,
   });
 }
 
@@ -338,6 +377,7 @@ async function executeCanvasCommands(
             isNote &&
             typeof data.content === 'string' &&
             data.content.length > 0;
+          const hasLabel = typeof data.label === 'string';
           return {
             ...node,
             data: {
@@ -346,6 +386,7 @@ async function executeCanvasCommands(
               ...(hasContent
                 ? { provenance: buildAIProvenance(context?.mode) }
                 : {}),
+              ...(hasLabel ? { labelSource: 'agent' as const } : {}),
             },
           };
         }),
@@ -364,13 +405,14 @@ async function executeCanvasCommands(
             isNote &&
             typeof patch.content === 'string' &&
             patch.content.length > 0;
-          if (hasContent) {
+          const hasLabel = typeof patch.label === 'string';
+          const extra: Record<string, unknown> = {};
+          if (hasContent) extra.provenance = buildAIProvenance(context?.mode);
+          if (hasLabel) extra.labelSource = 'agent';
+          if (Object.keys(extra).length > 0) {
             return {
               ...entry,
-              patch: {
-                ...patch,
-                provenance: buildAIProvenance(context?.mode),
-              },
+              patch: { ...patch, ...extra },
             };
           }
           return entry;

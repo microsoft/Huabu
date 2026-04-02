@@ -1,6 +1,6 @@
 import {
+  COLOR_PALETTE as _COLOR_PALETTE,
   EDGE_STROKE_WIDTHS as _EDGE_STROKE_WIDTHS,
-  STROKE_COLORS as _STROKE_COLORS,
 } from '@sediment/shared';
 // Source of truth: packages/shared/src/types/canvas/edge.ts
 
@@ -68,13 +68,16 @@ export const NODE_BG_COLORS: ColorPreset[] = [
   },
 ];
 
-// ---- Stroke / text colors (hex-based) ----
-// Shared by both NodeTextColorSelector and EdgeStyleToolbar so the
-// palette stays visually consistent across elements.
+// ---- Shared hex-based color palette ----
+// Used by edge strokes, text colors, and node accents so the palette
+// stays visually consistent across all elements.
 // Source of truth lives in @sediment/shared; re-exported here with
 // the ColorPreset type expected by UI components.
 
-export const STROKE_COLORS: ColorPreset[] = [..._STROKE_COLORS];
+export const COLOR_PALETTE: ColorPreset[] = [..._COLOR_PALETTE];
+
+/** @deprecated Use COLOR_PALETTE instead */
+export const STROKE_COLORS = COLOR_PALETTE;
 
 // ---- Edge stroke width presets (px) ----
 

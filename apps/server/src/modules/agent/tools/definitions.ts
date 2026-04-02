@@ -6,7 +6,11 @@
  */
 
 import { Type } from '@mariozechner/pi-ai';
-import { EDGE_STROKE_WIDTHS, STROKE_COLORS } from '@sediment/shared';
+import {
+  COLOR_PALETTE,
+  EDGE_STROKE_WIDTHS,
+  NODE_BG_COLORS,
+} from '@sediment/shared';
 
 import type { Tool } from '@mariozechner/pi-ai';
 import type { AgentCanvasCommandType } from '@sediment/shared';
@@ -85,22 +89,116 @@ const NodeTypeSchema = Type.Union([
   Type.Literal('frame'),
 ]);
 
+// ---- Shared color / width schemas (used by both node and edge styles) ----
+
+const PaletteColorSchema = Type.Union(
+  COLOR_PALETTE.map((c) => Type.Literal(c.value)),
+  {
+    description: `Color hex. Allowed: ${COLOR_PALETTE.map((c) => `"${c.value}" (${c.name})`).join(', ')}`,
+  },
+);
+
+const StrokeWidthSchema = Type.Union(
+  EDGE_STROKE_WIDTHS.map((w) => Type.Literal(w)),
+  {
+    description: `Edge thickness in px. Allowed: ${EDGE_STROKE_WIDTHS.join(', ')}`,
+  },
+);
+
+// ---- Node style schemas ----
+
+const NodeBgColorSchema = Type.Union(
+  NODE_BG_COLORS.map((c) => Type.Literal(c.value)),
+  {
+    description: `Background color (Tailwind class). Allowed: ${NODE_BG_COLORS.map((c) => `"${c.value}" (${c.name})`).join(', ')}`,
+  },
+);
+
+const NodeFontFamilySchema = Type.Union([
+  Type.Literal('default'),
+  Type.Literal('serif'),
+  Type.Literal('mono'),
+  Type.Literal('hand'),
+]);
+
+const NodeFontWeightSchema = Type.Union([
+  Type.Literal('normal'),
+  Type.Literal('bold'),
+]);
+
+const NodeFontStyleSchema = Type.Union([
+  Type.Literal('normal'),
+  Type.Literal('italic'),
+]);
+
+const NodeStyleSchema = Type.Object(
+  {
+    backgroundColor: Type.Optional(NodeBgColorSchema),
+    textColor: Type.Optional(PaletteColorSchema),
+    accent: Type.Optional(
+      Type.Union(
+        [...COLOR_PALETTE.map((c) => Type.Literal(c.value)), Type.Null()],
+        {
+          description:
+            'Accent color shown as a colored shadow on the bottom-right. Use a palette hex value, or null to remove. Shared palette with edge stroke colors.',
+        },
+      ),
+    ),
+    fontFamily: Type.Optional(NodeFontFamilySchema),
+    fontWeight: Type.Optional(NodeFontWeightSchema),
+    fontStyle: Type.Optional(NodeFontStyleSchema),
+    textDecoration: Type.Optional(
+      Type.String({
+        description: 'Space-separated: "underline", "line-through", or both',
+      }),
+    ),
+  },
+  {
+    description:
+      'Visual style — full support on text nodes only. backgroundColor and accent apply to all node types.',
+  },
+);
+
+// ---- Node data schema (structured per nodeType) ----
+
+const NodeDataSchema = Type.Object(
+  {
+    label: Type.Optional(Type.String({ description: 'Display label / title' })),
+    content: Type.Optional(
+      Type.String({
+        description: 'Markdown content (note nodes) or plain text (text nodes)',
+      }),
+    ),
+    src: Type.Optional(
+      Type.String({
+        description: 'URL or path (web, image, pdf, video nodes)',
+      }),
+    ),
+    style: Type.Optional(NodeStyleSchema),
+  },
+  {
+    description:
+      'Node data. Fields depend on nodeType: note → label, content, style; text → label, content, style; web/image/pdf/video → label, src; frame → label',
+  },
+);
+
 const NodeCreateInputSchema = Type.Object({
   id: Type.Optional(
     Type.String({ description: 'Explicit node ID (node-<uuid>)' }),
   ),
   nodeType: NodeTypeSchema,
-  data: Type.Optional(
-    Type.Record(Type.String(), Type.Unknown(), {
-      description:
-        'Node data: { label?, content?, src? }. Fields depend on nodeType.',
-    }),
-  ),
+  data: Type.Optional(NodeDataSchema),
   position: Type.Optional(PointSchema),
   size: Type.Optional(NodeSizeSchema),
   parentId: Type.Optional(
     Type.Union([Type.String(), Type.Null()], {
       description: 'Parent frame id, or null for root',
+    }),
+  ),
+  skipAutoLayout: Type.Optional(
+    Type.Boolean({
+      description:
+        'When true, skip auto-placement so the explicit position is preserved exactly.',
     }),
   ),
 });
@@ -117,28 +215,22 @@ const EdgeLineStyleSchema = Type.Union([
   Type.Literal('dotted'),
 ]);
 
-const StrokeColorSchema = Type.Union(
-  STROKE_COLORS.map((c) => Type.Literal(c.value)),
-  {
-    description: `Edge color. Allowed values: ${STROKE_COLORS.map((c) => `"${c.value}" (${c.name})`).join(', ')}`,
-  },
-);
-
-const StrokeWidthSchema = Type.Union(
-  EDGE_STROKE_WIDTHS.map((w) => Type.Literal(w)),
-  {
-    description: `Edge thickness in px. Allowed: ${EDGE_STROKE_WIDTHS.join(', ')}`,
-  },
-);
+const EdgeDirectionSchema = Type.Union([
+  Type.Literal('none'),
+  Type.Literal('forward'),
+  Type.Literal('backward'),
+  Type.Literal('both'),
+]);
 
 const EdgeStyleSchema = Type.Object({
   lineType: Type.Optional(EdgeLineTypeSchema),
   lineStyle: Type.Optional(EdgeLineStyleSchema),
-  stroke: Type.Optional(StrokeColorSchema),
+  stroke: Type.Optional(PaletteColorSchema),
   strokeWidth: Type.Optional(StrokeWidthSchema),
   animated: Type.Optional(
     Type.Boolean({ description: 'Animated flowing dots' }),
   ),
+  direction: Type.Optional(EdgeDirectionSchema),
 });
 
 const EdgeCreateInputSchema = Type.Object({
@@ -197,7 +289,7 @@ const AgentCanvasCommandSchema = Type.Union([
     patches: Type.Array(
       Type.Object({
         nodeId: Type.String(),
-        patch: Type.Record(Type.String(), Type.Unknown()),
+        patch: NodeDataSchema,
       }),
     ),
   }),
@@ -294,19 +386,19 @@ export const canvasCommandsTool: Tool = {
 
 ## Command types
 
-- CREATE_NODES { nodes: [{ nodeType, data?: { label?, content?, src? }, position?: {x,y}, id?, parentId? }] }
-- DELETE_NODES { nodeIds: string[] } — also removes incident edges
-- MERGE_NODE_DATA { patches: [{ nodeId, patch: { label?, content?, ... } }] }
-- SET_NODE_PARENT { nodeIds: string[], parentId: string | null } — move nodes into/out of a frame
-- DISSOLVE_FRAME { frameId } — ungroup a frame, keeping child nodes
-- SET_NODE_GEOMETRY { items: [{ nodeId, position?, size? }] }
-- REORDER_NODES { nodeIds, to: "top" | "bottom" | { before: id } | { after: id } }
-- CONNECT_NODES { edges: [{ source, target, id?, style? }] } — style: { lineType?: "bezier"|"straight"|"step", lineStyle?: "solid"|"dashed"|"dotted", stroke?: one of the preset hex colors, strokeWidth?: 1|2|3|4, animated?: boolean }
-- DISCONNECT_EDGES { edges: [edgeId | { source, target }] }
-- SET_EDGE_STYLE { edges: [{ edge: edgeId | { source, target }, style: { lineType?, lineStyle?, stroke?, strokeWidth?, animated? } }] }
-- ALIGN_NODES { nodeIds, direction: "left"|"center-h"|"right"|"top"|"center-v"|"bottom" }
-- DISTRIBUTE_NODES { nodeIds }
-- AUTO_LAYOUT { scope: { type: "canvas" } | { type: "frame", frameId } }
+- CREATE_NODES — create one or more nodes. Set skipAutoLayout: true when you provide explicit positions.
+- DELETE_NODES — delete nodes by ID (also removes incident edges)
+- MERGE_NODE_DATA — shallow-merge a patch into node data (label, content, style). Style supports accent (hex color for top border stripe, shared palette with edge strokes) and backgroundColor on all node types; text-related style fields only apply to text nodes.
+- SET_NODE_PARENT — move nodes into/out of a frame
+- DISSOLVE_FRAME — ungroup a frame, keeping child nodes
+- SET_NODE_GEOMETRY — set position and/or size of nodes
+- REORDER_NODES — change z-order of nodes
+- CONNECT_NODES — create edges between nodes (with optional style)
+- DISCONNECT_EDGES — remove edges by ID or source/target pair
+- SET_EDGE_STYLE — update visual style of existing edges
+- ALIGN_NODES — align selected nodes along an axis
+- DISTRIBUTE_NODES — evenly distribute selected nodes
+- AUTO_LAYOUT — run force-directed layout on canvas or frame
 
 ## ID conventions
 
@@ -368,9 +460,14 @@ export const ingestContentTool: Tool = {
 
 /**
  * Tools available in chat mode.
- * Limited to search and read-only canvas/knowledge access.
+ * Includes read-only canvas/knowledge access so the agent can
+ * lazily fetch full content of selected nodes on demand.
  */
-export const chatTools: Tool[] = [webSearchTool];
+export const chatTools: Tool[] = [
+  webSearchTool,
+  getNodeDetailTool,
+  readSourceTool,
+];
 
 /**
  * Tools available in operate mode.

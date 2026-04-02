@@ -11,6 +11,7 @@ import {
 import { useMemo } from 'react';
 import { createPortal } from 'react-dom';
 
+import { COLOR_PALETTE } from '@/config/colors';
 import {
   getAbsolutePosition,
   type NestableNode,
@@ -18,6 +19,18 @@ import {
 
 import useCanvasStore from '../../../store/canvasStore';
 import { FloatingToolbar } from '../../Common/FloatingToolbar';
+
+import type { ColorPreset } from '@/components/Common/ColorPicker';
+import type { NodeData } from '@/components/Nodes/types';
+
+/** Sentinel value representing "no accent". */
+const ACCENT_NONE = 'transparent';
+
+/** Accent palette: the shared color palette with a leading "None" entry. */
+const ACCENT_PALETTE: ColorPreset[] = [
+  { name: 'None', value: ACCENT_NONE },
+  ...COLOR_PALETTE,
+];
 
 /**
  * A floating toolbar that appears horizontally centred above the
@@ -27,6 +40,7 @@ export const MultiSelectToolbar = () => {
   const nodes = useCanvasStore((s) => s.nodes);
   const alignSelectedNodes = useCanvasStore((s) => s.alignSelectedNodes);
   const spreadSelectedNodes = useCanvasStore((s) => s.spreadSelectedNodes);
+  const updateNodeData = useCanvasStore((s) => s.updateNodeData);
 
   const { zoom, x: vpX, y: vpY } = useViewport();
 
@@ -35,6 +49,16 @@ export const MultiSelectToolbar = () => {
   const domNode = useStore((s) => s.domNode);
 
   const selectedNodes = useMemo(() => nodes.filter((n) => n.selected), [nodes]);
+
+  // Determine the common accent among selected nodes (empty string if mixed)
+  const commonAccent = useMemo(() => {
+    if (selectedNodes.length === 0) return ACCENT_NONE;
+    const first = (selectedNodes[0].data as NodeData)?.style?.accent ?? null;
+    const allSame = selectedNodes.every(
+      (n) => ((n.data as NodeData)?.style?.accent ?? null) === first,
+    );
+    return allSame ? (first ?? ACCENT_NONE) : ACCENT_NONE;
+  }, [selectedNodes]);
 
   // Compute bounding box of selected nodes in flow (absolute) coordinates
   const selectionBounds = useMemo(() => {
@@ -145,6 +169,23 @@ export const MultiSelectToolbar = () => {
         >
           <Ungroup />
         </FloatingToolbar.ActionButton>
+
+        <FloatingToolbar.Divider />
+
+        {/* Accent color for all selected nodes */}
+        <FloatingToolbar.ColorPicker
+          colors={ACCENT_PALETTE}
+          value={commonAccent}
+          onSelect={(v) => {
+            const accent = v === ACCENT_NONE ? null : v;
+            for (const n of selectedNodes) {
+              updateNodeData(n.id, {
+                style: { ...(n.data as NodeData)?.style, accent },
+              });
+            }
+          }}
+          title="Accent Color"
+        />
       </FloatingToolbar>
     </div>
   );

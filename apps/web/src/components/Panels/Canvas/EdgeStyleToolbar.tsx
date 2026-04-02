@@ -245,7 +245,13 @@ export const EdgeStyleToolbar = () => {
   const currentStroke = style.stroke ?? STROKE_COLORS[0].value;
   const currentWidth = style.strokeWidth ?? 1;
   const currentDirection: EdgeDirection = style.direction ?? 'none';
-
+  console.log('rendering toolbar with style', {
+    currentLineType,
+    currentLineStyle,
+    currentStroke,
+    currentWidth,
+    currentDirection,
+  });
   const toolbar = (
     <div
       className="pointer-events-auto absolute z-[1000]"

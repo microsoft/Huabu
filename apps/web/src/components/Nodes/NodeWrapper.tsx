@@ -19,9 +19,13 @@ import React, {
 import { createPortal } from 'react-dom';
 
 import { cn } from '@/components/Common/cn.ts';
-import { FLOATING_TOOLBAR_CLASS } from '@/components/Common/FloatingToolbar.tsx';
+import {
+  FloatingToolbar,
+  FLOATING_TOOLBAR_CLASS,
+} from '@/components/Common/FloatingToolbar.tsx';
 import { Spinner } from '@/components/Common/Spinner.tsx';
 import { Tooltip } from '@/components/Common/Tooltip.tsx';
+import { COLOR_PALETTE } from '@/config/colors.ts';
 import { NODE_ICON } from '@/config/nodeIcons.ts';
 import { useCornerZoomResize } from '@/hooks/useCornerZoomResize.ts';
 import { useNodeLOD } from '@/hooks/useNodeLOD.ts';
@@ -32,6 +36,12 @@ import { SemanticPlaceholder } from './SemanticPlaceholder.tsx';
 
 import type { CanvasNodeType, NodeData } from './types.ts';
 import type { BlockProvenanceMap } from '@sediment/shared';
+
+/** Sentinel value representing "no accent". */
+const ACCENT_NONE = 'transparent';
+
+/** Accent palette: the shared color palette with a leading "None" entry. */
+const ACCENT_PALETTE = [{ name: 'None', value: ACCENT_NONE }, ...COLOR_PALETTE];
 
 /**
  * Isolated component that subscribes to viewport changes for the
@@ -190,6 +200,7 @@ export const NodeWrapper = memo(
     const selectedCount = useCanvasStore(
       (state) => state.nodes.filter((node) => node.selected).length,
     );
+    const updateNodeData = useCanvasStore((state) => state.updateNodeData);
     const { tryStartZoom, shouldResize } = useCornerZoomResize();
 
     const setNodeGeometry = useCanvasStore((state) => state.setNodeGeometry);
@@ -308,7 +319,7 @@ export const NodeWrapper = memo(
           }}
           lineClassName="!border-transparent"
         />
-        {toolbar && !isMinimal && (
+        {toolbar && (
           <NodeToolbar
             isVisible={selected && selectedCount === 1}
             position={Position.Top}
@@ -328,6 +339,20 @@ export const NodeWrapper = memo(
             })()}
             <div className="bg-border mx-0.5 h-4 w-px" />
             {toolbar}
+            <FloatingToolbar.Divider />
+            <FloatingToolbar.ColorPicker
+              colors={ACCENT_PALETTE}
+              value={data.style?.accent ?? ACCENT_NONE}
+              onSelect={(v) =>
+                updateNodeData(id, {
+                  style: {
+                    ...data.style,
+                    accent: v === ACCENT_NONE ? null : v,
+                  },
+                })
+              }
+              title="Accent Color"
+            />
           </NodeToolbar>
         )}
 
@@ -353,15 +378,28 @@ export const NodeWrapper = memo(
           className={cn(
             'group relative flex h-full w-full flex-col rounded transition-all duration-120',
             isMinimal && 'invisible',
-            type !== 'text' && 'shadow',
+            type !== 'text' && !data.style?.accent && 'shadow',
             'style' in data && data.style?.backgroundColor
               ? data.style.backgroundColor
               : 'bg-transparent',
             selected ? 'ring-info ring' : 'ring-border hover:ring',
-            // AI-generated node visual identifier: top border
-            isAIGenerated && 'border-t-ai border-t-4',
+            // Accent: colored border + bottom-right shadow
+            data.style?.accent && 'border-2',
             className,
           )}
+          style={
+            data.style?.accent
+              ? {
+                  borderColor:
+                    type === 'frame'
+                      ? `color-mix(in srgb, var(--color-fg-default) 0%, transparent)`
+                      : `${data.style.accent}80`,
+                  ...(type === 'frame' && {
+                    boxShadow: `4px 4px 3px 3px ${data.style.accent}`,
+                  }),
+                }
+              : undefined
+          }
           onDoubleClick={onDoubleClick}
         >
           {showIngestionOverlay && (

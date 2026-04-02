@@ -5,7 +5,8 @@ import { useFitText } from '@/hooks/useFitText';
 import type { CanvasNodeType, NodeData } from './types';
 
 /** Padding (px) reserved on each side inside the placeholder. */
-const PADDING = 16;
+const PADDING_X = 32;
+const PADDING_Y = 16;
 
 interface SemanticPlaceholderProps {
   type: CanvasNodeType;
@@ -35,18 +36,29 @@ export function SemanticPlaceholder({
     NODE_TYPE_LABEL[type] ||
     type;
 
+  const accent = data.style?.accent;
+
   const fontSize = useFitText(
     label,
-    Math.max(0, width - PADDING * 2),
-    Math.max(0, height - PADDING * 2),
+    Math.max(0, width - PADDING_X * 2),
+    Math.max(0, height - PADDING_Y * 2),
   );
   return (
     <div
       className={cn(
         'bg-surface absolute inset-0 z-20 flex items-center justify-center rounded p-2 transition-all duration-120',
-        'shadow',
+        !accent && 'shadow',
+        accent && 'border-4',
         selected ? 'ring-info ring' : 'ring-border hover:ring',
       )}
+      style={
+        accent
+          ? {
+              borderColor: `${accent}80`,
+              background: `${accent}10`,
+            }
+          : undefined
+      }
     >
       <span
         className="text-fg-default inline-flex items-center gap-1.5 text-center leading-snug font-medium break-words"

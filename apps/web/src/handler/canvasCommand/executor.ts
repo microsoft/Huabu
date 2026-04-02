@@ -20,6 +20,7 @@
  */
 
 import { HANDLERS, COMMAND_META, type CommandHandlerResult } from './commands';
+import { fitFrames, type NestableNode } from './utils/frame';
 
 import type { PendingEffects } from './postEffects';
 import type { CanvasReadState, CanvasWriteResult } from './runtime';
@@ -115,6 +116,51 @@ export function executeCanvasCommands(
       if (result.deletedNodeIds) {
         pendingEffects.deletedNodeIds.push(...result.deletedNodeIds);
       }
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Agent-sourced frame auto-fit.
+  //
+  // The LLM cannot accurately predict rendered frame dimensions, so we
+  // unconditionally fit affected parent frames after an agent batch
+  // (regardless of autoLayoutEnabled).  Individual handlers already fit
+  // frames when autoLayoutEnabled is true — the second pass is a no-op
+  // in that case.
+  // ------------------------------------------------------------------
+  if (execution.source === 'agent' && anyApplied) {
+    const affectedFrameIds = new Set<string>();
+
+    for (const cmd of execution.commands) {
+      if (cmd.type === 'CREATE_NODES') {
+        for (const n of cmd.nodes) {
+          if (n.nodeType === 'frame' && n.id) {
+            affectedFrameIds.add(n.id as string);
+          }
+          if (n.parentId) {
+            affectedFrameIds.add(n.parentId as string);
+          }
+        }
+      } else if (cmd.type === 'SET_NODE_GEOMETRY') {
+        for (const item of cmd.items) {
+          const node = currentNodes.find((n) => n.id === item.nodeId);
+          if (node?.parentId) affectedFrameIds.add(node.parentId);
+        }
+      } else if (cmd.type === 'SET_NODE_PARENT') {
+        // Fit both old parent (shrink) and new parent (expand).
+        if (cmd.parentId) affectedFrameIds.add(cmd.parentId as string);
+        for (const nid of cmd.nodeIds) {
+          const node = currentNodes.find((n) => n.id === nid);
+          if (node?.parentId) affectedFrameIds.add(node.parentId);
+        }
+      }
+    }
+
+    if (affectedFrameIds.size > 0) {
+      currentNodes = fitFrames(
+        currentNodes as NestableNode[],
+        affectedFrameIds,
+      );
     }
   }
 

@@ -4,6 +4,10 @@
  */
 
 import type { AgentMode } from '../agent.js';
+import type { NodeBgColorValue } from './color.js';
+
+export type { NodeBgColorValue } from './color.js';
+export { NODE_BG_COLORS } from './color.js';
 
 // ==================== Basic Node Types ====================
 
@@ -53,22 +57,7 @@ export function normalizeOrigin(raw: unknown): NodeOrigin | undefined {
 }
 
 /** Who set the node label — controls whether auto-title may overwrite it */
-export type LabelSource = 'auto' | 'user';
-
-/** Node background color presets (Tailwind classes). */
-export const NODE_BG_COLORS = [
-  { name: 'Transparent', value: 'bg-transparent' },
-  { name: 'White', value: 'bg-white' },
-  { name: 'Red', value: 'bg-red-50' },
-  { name: 'Orange', value: 'bg-orange-50' },
-  { name: 'Yellow', value: 'bg-yellow-50' },
-  { name: 'Green', value: 'bg-green-50' },
-  { name: 'Blue', value: 'bg-blue-50' },
-  { name: 'Purple', value: 'bg-purple-50' },
-] as const;
-
-/** Union type of all allowed node background color values. */
-export type NodeBgColorValue = (typeof NODE_BG_COLORS)[number]['value'];
+export type LabelSource = 'auto' | 'user' | 'agent';
 
 /** Font family logical names. CSS font stacks are resolved on the UI side. */
 export type NodeFontFamily = 'default' | 'serif' | 'mono' | 'hand';
@@ -80,6 +69,8 @@ export type NodeTextDecoration = 'underline' | 'line-through';
 export interface NodeStyle {
   backgroundColor?: NodeBgColorValue | (string & {});
   textColor?: string;
+  /** Accent color (hex) shown as a top border stripe for visual grouping. */
+  accent?: string | null;
   fontFamily?: NodeFontFamily;
   fontWeight?: NodeFontWeight;
   fontStyle?: NodeFontStyle;
@@ -152,6 +143,12 @@ export interface BaseNodeData {
    * added, removed, or repositioned.
    */
   locked?: boolean;
+  /**
+   * Visual style. Only `accent` and `backgroundColor` are supported on all
+   * node types; text-related fields (fontFamily, textColor, etc.) are only
+   * used by note and text nodes.
+   */
+  style?: NodeStyle;
 }
 
 /** Note node: rich content that can be ingested into knowledge base */

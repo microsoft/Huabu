@@ -137,6 +137,7 @@ export function Select<T extends string = string>({
           className={cn(
             selectShapeClasses[shape],
             isOpen && 'bg-bg-default',
+            iconOnly && 'gap-0.5 px-1',
             className,
           )}
         >
