@@ -1,14 +1,11 @@
 import { useStore, useViewport } from '@xyflow/react';
-import { clsx } from 'clsx';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 
 import { STROKE_COLORS, EDGE_STROKE_WIDTHS } from '@/config/colors';
 import useCanvasStore from '@/store/canvasStore';
 
-import { Button } from '../../Common/Button';
-import { ColorPicker } from '../../Common/ColorPicker';
-import { Select } from '../../Common/Select';
+import { FloatingToolbar } from '../../Common/FloatingToolbar';
 
 import type { SelectOption } from '../../Common/Select';
 import type { CanvasEdgeId } from '@sediment/shared';
@@ -88,31 +85,10 @@ export const EdgeStyleToolbar = () => {
   const { zoom, x: vpX, y: vpY } = useViewport();
   const domNode = useStore((s) => s.domNode);
 
-  const [showColorPicker, setShowColorPicker] = useState(false);
-  const colorPanelRef = useRef<HTMLDivElement>(null);
-
-  // Close the colour panel when clicking outside
-  useEffect(() => {
-    if (!showColorPicker) return;
-    const handler = (e: MouseEvent) => {
-      if (
-        colorPanelRef.current &&
-        !colorPanelRef.current.contains(e.target as HTMLElement)
-      ) {
-        setShowColorPicker(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [showColorPicker]);
-
   const selectedEdge = useMemo(() => {
     const sel = edges.filter((e) => e.selected);
     return sel.length === 1 ? sel[0] : null;
   }, [edges]);
-
-  // Reset colour picker when selected edge changes
-  useEffect(() => setShowColorPicker(false), [selectedEdge?.id]);
 
   const style = useMemo(
     () => (selectedEdge ? getEdgeStyle(selectedEdge) : ({} as EdgeStyle)),
@@ -161,48 +137,32 @@ export const EdgeStyleToolbar = () => {
         transform: 'translateX(-50%)',
       }}
     >
-      {/* Main toolbar — identical container style to MultiSelectToolbar */}
-      <div className="text-fg-muted shadow-bottom bg-surface flex items-center gap-1 rounded-lg border-0 p-1.5">
+      <FloatingToolbar>
         {/* Line type */}
-        <Select
+        <FloatingToolbar.Select
           options={LINE_TYPE_OPTIONS}
           value={currentLineType}
           onChange={(v) => setStyle({ lineType: v })}
-          size="sm"
-          variant="ghost"
-          align="top-left"
         />
 
-        {/* Divider */}
-        <div className="bg-border mx-0.5 h-4 w-px" />
+        <FloatingToolbar.Divider />
 
         {/* Line style */}
-        <Select
+        <FloatingToolbar.Select
           options={LINE_STYLE_OPTIONS}
           value={currentLineStyle}
           onChange={(v) => setStyle({ lineStyle: v })}
-          size="sm"
-          variant="ghost"
-          align="top-left"
         />
 
-        {/* Divider */}
-        <div className="bg-border mx-0.5 h-4 w-px" />
+        <FloatingToolbar.Divider />
 
-        {/* Stroke width — TextNode-style active state */}
+        {/* Stroke width */}
         {EDGE_STROKE_WIDTHS.map((w) => (
-          <Button
+          <FloatingToolbar.ToggleButton
             key={w}
-            variant="ghost"
-            iconOnly
-            size="sm"
+            active={currentWidth === w}
             title={`Width ${w}px`}
             onClick={() => setStyle({ strokeWidth: w })}
-            className={clsx(
-              currentWidth === w
-                ? 'text-info bg-info-bg enabled:hover:bg-info-bg'
-                : 'text-fg-muted hover:bg-bg-default',
-            )}
           >
             <svg width="16" height="16" viewBox="0 0 16 16">
               <line
@@ -215,42 +175,19 @@ export const EdgeStyleToolbar = () => {
                 strokeLinecap="round"
               />
             </svg>
-          </Button>
+          </FloatingToolbar.ToggleButton>
         ))}
 
-        {/* Divider */}
-        <div className="bg-border mx-0.5 h-4 w-px" />
+        <FloatingToolbar.Divider />
 
-        {/* Color picker — NodeBgColorSelector style */}
-        <div ref={colorPanelRef} className="relative flex items-center">
-          <Button
-            variant="outline"
-            iconOnly
-            size="sm"
-            title="Edge color"
-            onClick={() => setShowColorPicker(!showColorPicker)}
-            className="h-6 rounded-sm"
-          >
-            <div
-              className="border-edge-default h-3.5 w-3.5 rounded-full border"
-              style={{ backgroundColor: currentStroke }}
-            />
-          </Button>
-
-          {showColorPicker && (
-            <div className="border-edge-default shadow-bottom animate-in fade-in zoom-in bg-surface absolute bottom-full left-1/2 z-50 mb-2 -translate-x-1/2 rounded-full border px-2 py-1.5 duration-200">
-              <ColorPicker
-                colors={STROKE_COLORS}
-                activeValue={currentStroke}
-                onSelect={(v) => {
-                  setStyle({ stroke: v });
-                  setShowColorPicker(false);
-                }}
-              />
-            </div>
-          )}
-        </div>
-      </div>
+        {/* Color picker */}
+        <FloatingToolbar.ColorPicker
+          colors={STROKE_COLORS}
+          value={currentStroke}
+          onSelect={(v) => setStyle({ stroke: v })}
+          title="Edge color"
+        />
+      </FloatingToolbar>
     </div>
   );
 

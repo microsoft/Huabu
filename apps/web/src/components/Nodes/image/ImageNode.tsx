@@ -2,7 +2,7 @@ import { type Node, type NodeProps } from '@xyflow/react';
 import { Fullscreen } from 'lucide-react';
 import { memo } from 'react';
 
-import { Button } from '@/components/Common/Button';
+import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import useCanvasStore from '@/store/canvasStore.ts';
 
 import { NodeWrapper } from '../NodeWrapper';
@@ -16,23 +16,15 @@ export const ImageNode = memo(
     const openExpanded = useCanvasStore((s) => s.openExpanded);
 
     const ImageToolbar = (
-      <div className="flex w-full items-center justify-between gap-2">
-        {/*tools*/}
-        <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            iconOnly
-            size="sm"
-            title="Open Large View"
-            onClick={(e) => {
-              e.stopPropagation();
-              openExpanded(id);
-            }}
-          >
-            <Fullscreen />
-          </Button>
-        </div>
-      </div>
+      <FloatingToolbar.ActionButton
+        title="Open Large View"
+        onClick={(e) => {
+          e.stopPropagation();
+          openExpanded(id);
+        }}
+      >
+        <Fullscreen />
+      </FloatingToolbar.ActionButton>
     );
 
     return (

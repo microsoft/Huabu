@@ -7,7 +7,7 @@ import { Document, Page, pdfjs } from 'react-pdf';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
-import { Button } from '@/components/Common/Button';
+import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { useNodeScale } from '@/hooks/useNodeScale';
 import { useSourceMeta } from '@/hooks/useSourceMeta';
 import useCanvasStore from '@/store/canvasStore';
@@ -122,43 +122,28 @@ export const PDFNode = memo(
     }, []);
 
     const PDFToolbar = (
-      <div className="flex w-full items-center justify-between gap-3">
-        {/* Tools */}
-        <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            iconOnly
-            size="sm"
-            title="Open Large View"
-            onClick={(e) => {
-              e.stopPropagation();
-              openExpanded(id);
-            }}
+      <FloatingToolbar.Group>
+        <FloatingToolbar.ActionButton
+          title="Open Large View"
+          onClick={(e) => {
+            e.stopPropagation();
+            openExpanded(id);
+          }}
+        >
+          <Fullscreen />
+        </FloatingToolbar.ActionButton>
+        <FloatingToolbar.ActionButton title="Download" onClick={handleDownload}>
+          <Download />
+        </FloatingToolbar.ActionButton>
+        {hasCover && (
+          <FloatingToolbar.ActionButton
+            title="Delete Cover"
+            onClick={handleDeleteCover}
           >
-            <Fullscreen />
-          </Button>
-          <Button
-            variant="ghost"
-            iconOnly
-            size="sm"
-            title="Download"
-            onClick={handleDownload}
-          >
-            <Download />
-          </Button>
-          {hasCover && (
-            <Button
-              variant="ghost"
-              iconOnly
-              size="sm"
-              title="Delete Cover"
-              onClick={handleDeleteCover}
-            >
-              <ImageOff />
-            </Button>
-          )}
-        </div>
-      </div>
+            <ImageOff />
+          </FloatingToolbar.ActionButton>
+        )}
+      </FloatingToolbar.Group>
     );
 
     return (

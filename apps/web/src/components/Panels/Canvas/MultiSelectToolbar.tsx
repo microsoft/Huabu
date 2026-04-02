@@ -17,7 +17,7 @@ import {
 } from '@/handler/canvasCommand/utils/frame';
 
 import useCanvasStore from '../../../store/canvasStore';
-import { Button } from '../../Common/Button';
+import { FloatingToolbar } from '../../Common/FloatingToolbar';
 
 /**
  * A floating toolbar that appears horizontally centred above the
@@ -93,80 +93,59 @@ export const MultiSelectToolbar = () => {
         transform: 'translateX(-50%)',
       }}
     >
-      <div className="text-fg-muted shadow-bottom bg-surface flex items-center gap-1 rounded-lg border-0 p-1.5">
+      <FloatingToolbar>
         {/* Horizontal alignment */}
-        <Button
-          variant="ghost"
-          iconOnly
-          size="sm"
+        <FloatingToolbar.ActionButton
           title="Align Left"
           onClick={() => alignSelectedNodes('left')}
         >
           <AlignStartVertical />
-        </Button>
-        <Button
-          variant="ghost"
-          iconOnly
-          size="sm"
+        </FloatingToolbar.ActionButton>
+        <FloatingToolbar.ActionButton
           title="Align Center"
           onClick={() => alignSelectedNodes('center-h')}
         >
           <AlignCenterVertical />
-        </Button>
-        <Button
-          variant="ghost"
-          iconOnly
-          size="sm"
+        </FloatingToolbar.ActionButton>
+        <FloatingToolbar.ActionButton
           title="Align Right"
           onClick={() => alignSelectedNodes('right')}
         >
           <AlignEndVertical />
-        </Button>
+        </FloatingToolbar.ActionButton>
 
-        <div className="bg-border mx-0.5 h-4 w-px" />
+        <FloatingToolbar.Divider />
 
         {/* Vertical alignment */}
-        <Button
-          variant="ghost"
-          iconOnly
-          size="sm"
+        <FloatingToolbar.ActionButton
           title="Align Top"
           onClick={() => alignSelectedNodes('top')}
         >
           <AlignStartHorizontal />
-        </Button>
-        <Button
-          variant="ghost"
-          iconOnly
-          size="sm"
+        </FloatingToolbar.ActionButton>
+        <FloatingToolbar.ActionButton
           title="Align Middle"
           onClick={() => alignSelectedNodes('center-v')}
         >
           <AlignCenterHorizontal />
-        </Button>
-        <Button
-          variant="ghost"
-          iconOnly
-          size="sm"
+        </FloatingToolbar.ActionButton>
+        <FloatingToolbar.ActionButton
           title="Align Bottom"
           onClick={() => alignSelectedNodes('bottom')}
         >
           <AlignEndHorizontal />
-        </Button>
+        </FloatingToolbar.ActionButton>
 
-        <div className="bg-border mx-0.5 h-4 w-px" />
+        <FloatingToolbar.Divider />
 
         {/* Spread apart overlapping nodes */}
-        <Button
-          variant="ghost"
-          iconOnly
-          size="sm"
+        <FloatingToolbar.ActionButton
           title="Spread Apart"
           onClick={() => spreadSelectedNodes()}
         >
           <Ungroup />
-        </Button>
-      </div>
+        </FloatingToolbar.ActionButton>
+      </FloatingToolbar>
     </div>
   );
 

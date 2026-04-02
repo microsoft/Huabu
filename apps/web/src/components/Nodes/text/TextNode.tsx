@@ -1,12 +1,10 @@
 import { type Node, type NodeProps, useStore } from '@xyflow/react';
 import { clsx } from 'clsx';
-import { Bold, Italic, Underline, Strikethrough } from 'lucide-react';
+import { Baseline, Bold, Italic, Underline, Strikethrough } from 'lucide-react';
 import { memo, useCallback, useState, useRef, useMemo, useEffect } from 'react';
 
-import { Button } from '@/components/Common/Button.tsx';
-import { NodeBgColorSelector } from '@/components/Common/NodeBgColorSelector.tsx';
-import { NodeTextColorSelector } from '@/components/Common/NodeTextColorSelector.tsx';
-import { Select } from '@/components/Common/Select.tsx';
+import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
+import { NODE_BG_COLORS, STROKE_COLORS } from '@/config/colors';
 import useCanvasStore from '@/store/canvasStore.ts';
 
 import { NodeWrapper } from '../NodeWrapper';
@@ -277,98 +275,88 @@ export const TextNode = memo(
     };
 
     const TextToolbar = (
-      <div className="flex w-full items-center gap-1">
-        <Select
+      <>
+        <FloatingToolbar.Select
           options={FONT_FAMILIES.map((f) => ({
             value: f.value,
             label: f.name,
           }))}
           value={fontFamily}
           onChange={(v) => updateStyle({ fontFamily: v })}
-          variant="outline"
-          size="sm"
-          className="h-6 rounded-sm"
         />
 
-        <div className="bg-border mx-1 h-3 w-px" />
+        <FloatingToolbar.Divider />
 
-        <Button
-          variant="ghost"
-          iconOnly
-          size="sm"
+        <FloatingToolbar.ToggleButton
+          active={style.fontWeight === 'bold'}
+          title="Bold"
           onClick={() =>
             updateStyle({
               fontWeight: style.fontWeight === 'bold' ? 'normal' : 'bold',
             })
           }
-          className={clsx(
-            style.fontWeight === 'bold'
-              ? 'text-info bg-info-bg enabled:hover:bg-info-bg'
-              : 'text-fg-muted hover:bg-bg-default',
-          )}
         >
           <Bold />
-        </Button>
+        </FloatingToolbar.ToggleButton>
 
-        <Button
-          variant="ghost"
-          iconOnly
-          size="sm"
+        <FloatingToolbar.ToggleButton
+          active={style.fontStyle === 'italic'}
+          title="Italic"
           onClick={() =>
             updateStyle({
               fontStyle: style.fontStyle === 'italic' ? 'normal' : 'italic',
             })
           }
-          className={clsx(
-            style.fontStyle === 'italic'
-              ? 'text-info bg-info-bg enabled:hover:bg-info-bg'
-              : 'text-fg-muted hover:bg-bg-default',
-          )}
         >
           <Italic />
-        </Button>
+        </FloatingToolbar.ToggleButton>
 
-        <Button
-          variant="ghost"
-          iconOnly
-          size="sm"
+        <FloatingToolbar.ToggleButton
+          active={textDecoration.includes('underline')}
+          title="Underline"
           onClick={() => toggleDecoration('underline')}
-          className={clsx(
-            textDecoration.includes('underline')
-              ? 'text-info bg-info-bg enabled:hover:bg-info-bg'
-              : 'text-fg-muted hover:bg-bg-default',
-          )}
         >
           <Underline />
-        </Button>
+        </FloatingToolbar.ToggleButton>
 
-        <Button
-          variant="ghost"
-          iconOnly
-          size="sm"
+        <FloatingToolbar.ToggleButton
+          active={textDecoration.includes('line-through')}
+          title="Strikethrough"
           onClick={() => toggleDecoration('line-through')}
-          className={clsx(
-            textDecoration.includes('line-through')
-              ? 'text-info bg-info-bg enabled:hover:bg-info-bg'
-              : 'text-fg-muted hover:bg-bg-default',
-          )}
         >
           <Strikethrough />
-        </Button>
+        </FloatingToolbar.ToggleButton>
 
-        <div className="bg-border mx-1 h-3 w-px" />
+        <FloatingToolbar.Divider />
 
-        <NodeTextColorSelector
-          nodeId={id}
-          currentTextColor={data.style?.textColor}
-          style={data.style}
+        <FloatingToolbar.ColorPicker
+          colors={STROKE_COLORS}
+          value={data.style?.textColor ?? STROKE_COLORS[0].value}
+          onSelect={(v) =>
+            updateNodeData(id, {
+              style: { ...data.style, textColor: v },
+            })
+          }
+          title="Change Text Color"
+        >
+          <Baseline
+            style={{
+              color: data.style?.textColor || STROKE_COLORS[0].value,
+            }}
+          />
+        </FloatingToolbar.ColorPicker>
+        <FloatingToolbar.ColorPicker
+          colors={NODE_BG_COLORS}
+          value={data.style?.backgroundColor ?? NODE_BG_COLORS[0].value}
+          onSelect={(v) =>
+            updateNodeData(id, {
+              style: { ...data.style, backgroundColor: v },
+            })
+          }
+          title="Change Color"
+          classMode
         />
-        <NodeBgColorSelector
-          nodeId={id}
-          currentColor={data.style?.backgroundColor}
-          style={data.style}
-        />
-      </div>
+      </>
     );
 
     return (

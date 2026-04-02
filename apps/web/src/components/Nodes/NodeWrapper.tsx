@@ -19,6 +19,7 @@ import React, {
 import { createPortal } from 'react-dom';
 
 import { cn } from '@/components/Common/cn.ts';
+import { FLOATING_TOOLBAR_CLASS } from '@/components/Common/FloatingToolbar.tsx';
 import { Spinner } from '@/components/Common/Spinner.tsx';
 import { Tooltip } from '@/components/Common/Tooltip.tsx';
 import { useCornerZoomResize } from '@/hooks/useCornerZoomResize.ts';
@@ -301,7 +302,7 @@ export const NodeWrapper = memo(
             isVisible={selected && selectedCount === 1}
             position={Position.Top}
             offset={12}
-            className="border-edge-default shadow-bottom bg-surface flex h-8 items-center gap-3 rounded-md border px-1 py-1"
+            className={FLOATING_TOOLBAR_CLASS}
           >
             {toolbar}
           </NodeToolbar>

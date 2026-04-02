@@ -7,7 +7,7 @@ import { memo, useEffect, useState, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
 import { getSharedStyleNodes } from '@/components/BlockNote/shadowStyleCache.ts';
-import { Button } from '@/components/Common/Button';
+import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { useNodeScale } from '@/hooks/useNodeScale';
 import useCanvasStore from '@/store/canvasStore';
 import { copyToClipboard } from '@/utils/io/clipboard';
@@ -46,33 +46,21 @@ export const NoteNode = memo(
     };
 
     const NoteToolbar = (
-      <div className="flex w-full items-center justify-between gap-2">
-        {/* Tools */}
-        <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            iconOnly
-            size="sm"
-            title="Open Large View"
-            onClick={(e) => {
-              e.stopPropagation();
-              openExpanded(id);
-            }}
-          >
-            <Fullscreen />
-          </Button>
+      <FloatingToolbar.Group>
+        <FloatingToolbar.ActionButton
+          title="Open Large View"
+          onClick={(e) => {
+            e.stopPropagation();
+            openExpanded(id);
+          }}
+        >
+          <Fullscreen />
+        </FloatingToolbar.ActionButton>
 
-          <Button
-            variant="ghost"
-            iconOnly
-            size="sm"
-            title="Copy Content"
-            onClick={handleCopy}
-          >
-            {copied ? <Check /> : <Copy />}
-          </Button>
-        </div>
-      </div>
+        <FloatingToolbar.ActionButton title="Copy Content" onClick={handleCopy}>
+          {copied ? <Check /> : <Copy />}
+        </FloatingToolbar.ActionButton>
+      </FloatingToolbar.Group>
     );
 
     // Initialize Shadow DOM
