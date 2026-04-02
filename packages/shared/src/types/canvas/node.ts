@@ -55,15 +55,35 @@ export function normalizeOrigin(raw: unknown): NodeOrigin | undefined {
 /** Who set the node label — controls whether auto-title may overwrite it */
 export type LabelSource = 'auto' | 'user';
 
+/** Node background color presets (Tailwind classes). */
+export const NODE_BG_COLORS = [
+  { name: 'Transparent', value: 'bg-transparent' },
+  { name: 'White', value: 'bg-white' },
+  { name: 'Red', value: 'bg-red-50' },
+  { name: 'Orange', value: 'bg-orange-50' },
+  { name: 'Yellow', value: 'bg-yellow-50' },
+  { name: 'Green', value: 'bg-green-50' },
+  { name: 'Blue', value: 'bg-blue-50' },
+  { name: 'Purple', value: 'bg-purple-50' },
+] as const;
+
+/** Union type of all allowed node background color values. */
+export type NodeBgColorValue = (typeof NODE_BG_COLORS)[number]['value'];
+
+/** Font family logical names. CSS font stacks are resolved on the UI side. */
+export type NodeFontFamily = 'default' | 'serif' | 'mono' | 'hand';
+
+export type NodeFontWeight = 'normal' | 'bold';
+export type NodeFontStyle = 'normal' | 'italic';
+export type NodeTextDecoration = 'underline' | 'line-through';
+
 export interface NodeStyle {
-  backgroundColor?: string;
+  backgroundColor?: NodeBgColorValue | (string & {});
   textColor?: string;
-  fontSize?: number;
-  fontFamily?: string;
-  fontWeight?: string;
-  fontStyle?: string;
-  textDecoration?: string; // 'underline' | 'line-through' | both
-  align?: 'top-left' | 'center';
+  fontFamily?: NodeFontFamily;
+  fontWeight?: NodeFontWeight;
+  fontStyle?: NodeFontStyle;
+  textDecoration?: string; // space-separated NodeTextDecoration values
 }
 
 // ==================== Block-Level Provenance ====================

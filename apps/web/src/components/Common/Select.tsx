@@ -37,6 +37,11 @@ type SelectProps<T extends string = string> = {
    * `"top-right"` opens above, right-aligned.
    */
   align?: 'bottom-left' | 'bottom-right' | 'top-left' | 'top-right';
+  /**
+   * When true, the trigger button only shows the current option's icon
+   * (plus the chevron). The label text in the dropdown is unaffected.
+   */
+  iconOnly?: boolean;
 };
 
 const selectShapeClasses: Record<NonNullable<ButtonProps['shape']>, string> = {
@@ -72,6 +77,7 @@ export function Select<T extends string = string>({
   size = 'sm',
   shape = 'default',
   align = 'bottom-left',
+  iconOnly = false,
 }: SelectProps<T>) {
   const [isOpen, setIsOpen] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
@@ -135,7 +141,7 @@ export function Select<T extends string = string>({
           )}
         >
           {current?.icon}
-          <span>{current?.label ?? placeholder}</span>
+          {!iconOnly && <span>{current?.label ?? placeholder}</span>}
           <ChevronDown
             className={clsx('transition-transform', isOpen && 'rotate-180')}
           />

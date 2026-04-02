@@ -17,6 +17,11 @@ export type {
   NodeOrigin,
   NodeOriginType,
   NodeStyle,
+  NodeBgColorValue,
+  NodeFontFamily,
+  NodeFontWeight,
+  NodeFontStyle,
+  NodeTextDecoration,
   BaseNodeData,
   BlockProvenance,
   BlockProvenanceMap,
@@ -38,10 +43,16 @@ export {
   isFrameNode,
   hasSourceId,
   normalizeOrigin,
+  NODE_BG_COLORS,
 } from './node.js';
 
 // Edge types
-export type { EdgeStyle, EdgeLineType, EdgeLineStyle } from './edge.js';
+export type {
+  EdgeStyle,
+  EdgeLineType,
+  EdgeLineStyle,
+  EdgeDirection,
+} from './edge.js';
 export type { StrokeColorValue, EdgeStrokeWidth } from './edge.js';
 export { STROKE_COLORS, EDGE_STROKE_WIDTHS } from './edge.js';
 

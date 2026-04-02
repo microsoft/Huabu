@@ -16,18 +16,21 @@ import useCanvasStore from '@/store/canvasStore.ts';
 import { NodeWrapper } from '../NodeWrapper';
 
 import type { CanvasTextNodeData, NodeStyle } from '../types';
+import type { NodeFontFamily } from '@sediment/shared';
 
-const FONT_FAMILIES = [
-  { name: 'Default', value: 'ui-sans-serif, system-ui, sans-serif' },
-  {
-    name: 'Serif',
-    value: 'ui-serif, Georgia, Cambria, "Times New Roman", Times, serif',
-  },
-  {
-    name: 'Mono',
-    value: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-  },
-  { name: 'Hand', value: '"Comic Sans MS", "Chalkboard SE", sans-serif' },
+/** Map logical font family names to CSS font stacks. */
+const FONT_FAMILY_CSS: Record<NodeFontFamily, string> = {
+  default: 'ui-sans-serif, system-ui, sans-serif',
+  serif: 'ui-serif, Georgia, Cambria, "Times New Roman", Times, serif',
+  mono: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+  hand: '"Comic Sans MS", "Chalkboard SE", sans-serif',
+};
+
+const FONT_FAMILY_OPTIONS: { name: string; value: NodeFontFamily }[] = [
+  { name: 'Default', value: 'default' },
+  { name: 'Serif', value: 'serif' },
+  { name: 'Mono', value: 'mono' },
+  { name: 'Hand', value: 'hand' },
 ];
 
 /** Maximum characters per line before wrapping. */
@@ -177,8 +180,8 @@ export const TextNode = memo(
     );
 
     const style = data.style || {};
-    const baseFontSize = style.fontSize || 16;
-    const fontFamily = style.fontFamily || FONT_FAMILIES[0].value;
+    const baseFontSize = 16;
+    const fontFamily = FONT_FAMILY_CSS[style.fontFamily ?? 'default'];
     const isBold = style.fontWeight === 'bold';
     const isItalic = style.fontStyle === 'italic';
     const textColor = style.textColor;
@@ -297,11 +300,11 @@ export const TextNode = memo(
     const TextToolbar = (
       <>
         <FloatingToolbar.Select
-          options={FONT_FAMILIES.map((f) => ({
+          options={FONT_FAMILY_OPTIONS.map((f) => ({
             value: f.value,
             label: f.name,
           }))}
-          value={fontFamily}
+          value={style.fontFamily ?? 'default'}
           onChange={(v) => updateStyle({ fontFamily: v })}
         />
 

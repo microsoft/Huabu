@@ -135,6 +135,8 @@ interface ToolbarSelectProps<T extends string = string> {
   value: T;
   onChange: (value: T) => void;
   className?: string;
+  /** Show only the icon in the trigger (label hidden). */
+  iconOnly?: boolean;
 }
 
 /**
@@ -146,6 +148,7 @@ function ToolbarSelect<T extends string = string>({
   value,
   onChange,
   className,
+  iconOnly,
 }: ToolbarSelectProps<T>) {
   return (
     <BaseSelect
@@ -156,6 +159,7 @@ function ToolbarSelect<T extends string = string>({
       size="sm"
       align="top-left"
       className={className}
+      iconOnly={iconOnly}
     />
   );
 }

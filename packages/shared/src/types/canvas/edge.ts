@@ -5,6 +5,7 @@
 
 export type EdgeLineType = 'bezier' | 'straight' | 'step';
 export type EdgeLineStyle = 'solid' | 'dashed' | 'dotted';
+export type EdgeDirection = 'none' | 'forward' | 'backward' | 'both';
 
 /**
  * Stroke / edge color palette shared between UI pickers and agent tool definitions.
@@ -37,4 +38,5 @@ export interface EdgeStyle {
   stroke?: StrokeColorValue | (string & {});
   strokeWidth?: EdgeStrokeWidth | number;
   animated?: boolean;
+  direction?: EdgeDirection;
 }

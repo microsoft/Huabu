@@ -5,10 +5,11 @@
  * the relative positions of source and target nodes.
  */
 
+import { MarkerType, type Node, type Edge } from '@xyflow/react';
+
 import { getLayoutNodeSize } from '@/utils/node/size';
 
 import type { EdgeStyle } from '@sediment/shared';
-import type { Node, Edge } from '@xyflow/react';
 
 /**
  * Returns the best source/target handle pair for an edge between two nodes
@@ -158,11 +159,22 @@ export function applyEdgeStyle(edge: Edge, style?: EdgeStyle): Edge {
   // Map our domain lineType to React Flow edge type names
   const rfType = style.lineType === 'step' ? 'smoothstep' : style.lineType;
 
+  // Build arrow markers based on direction
+  const direction = style.direction ?? 'none';
+  const markerColor = style.stroke ? { color: style.stroke } : {};
+  const arrowMarker = { type: MarkerType.ArrowClosed, ...markerColor };
+
   return {
     ...edge,
     type: rfType ?? edge.type,
     animated: style.animated ?? edge.animated,
     style: rfStyle,
+    markerEnd:
+      direction === 'forward' || direction === 'both' ? arrowMarker : undefined,
+    markerStart:
+      direction === 'backward' || direction === 'both'
+        ? arrowMarker
+        : undefined,
     data: { ...edge.data, edgeStyle: style },
   };
 }

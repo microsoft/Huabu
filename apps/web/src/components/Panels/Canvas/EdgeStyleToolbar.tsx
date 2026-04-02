@@ -2,29 +2,146 @@ import { useStore, useViewport } from '@xyflow/react';
 import { useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 
-import { STROKE_COLORS, EDGE_STROKE_WIDTHS } from '@/config/colors';
+import { STROKE_COLORS } from '@/config/colors';
 import useCanvasStore from '@/store/canvasStore';
 
 import { FloatingToolbar } from '../../Common/FloatingToolbar';
 
 import type { SelectOption } from '../../Common/Select';
 import type { CanvasEdgeId } from '@sediment/shared';
-import type { EdgeLineType, EdgeLineStyle, EdgeStyle } from '@sediment/shared';
+import type {
+  EdgeLineType,
+  EdgeLineStyle,
+  EdgeDirection,
+  EdgeStyle,
+  EdgeStrokeWidth,
+} from '@sediment/shared';
 import type { Edge, Node } from '@xyflow/react';
+
+// ---- Icon helpers ----
+
+function LineStyleIcon({ dash }: { dash?: string }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16">
+      <line
+        x1="2"
+        y1="8"
+        x2="14"
+        y2="8"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeDasharray={dash}
+      />
+    </svg>
+  );
+}
+
+function ArrowIcon({ left, right }: { left?: boolean; right?: boolean }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16">
+      <line
+        x1={left ? '3.5' : '2'}
+        y1="8"
+        x2={right ? '12.5' : '14'}
+        y2="8"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+      {left && (
+        <polyline
+          points="5.5,6 3,8 5.5,10"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      )}
+      {right && (
+        <polyline
+          points="10.5,6 13,8 10.5,10"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      )}
+    </svg>
+  );
+}
+
+function StrokeWidthIcon({ width }: { width: number }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16">
+      <line
+        x1="2"
+        y1="8"
+        x2="14"
+        y2="8"
+        stroke="currentColor"
+        strokeWidth={width}
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function LineTypeIcon({ type }: { type: EdgeLineType }) {
+  const d =
+    type === 'bezier'
+      ? 'M2 14 C2 3, 14 14, 14 3'
+      : type === 'step'
+        ? 'M2 12 H8 V4 H14'
+        : 'M2 12 L14 4';
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16">
+      <path
+        d={d}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
 
 // ---- Select options ----
 
 const LINE_TYPE_OPTIONS: SelectOption<EdgeLineType>[] = [
-  { value: 'bezier', label: 'Bezier' },
-  { value: 'straight', label: 'Straight' },
-  { value: 'step', label: 'Step' },
+  { value: 'bezier', label: 'Bezier', icon: <LineTypeIcon type="bezier" /> },
+  {
+    value: 'straight',
+    label: 'Straight',
+    icon: <LineTypeIcon type="straight" />,
+  },
+  { value: 'step', label: 'Step', icon: <LineTypeIcon type="step" /> },
 ];
 
 const LINE_STYLE_OPTIONS: SelectOption<EdgeLineStyle>[] = [
-  { value: 'solid', label: 'Solid' },
-  { value: 'dashed', label: 'Dashed' },
-  { value: 'dotted', label: 'Dotted' },
+  { value: 'solid', label: 'Solid', icon: <LineStyleIcon /> },
+  { value: 'dashed', label: 'Dashed', icon: <LineStyleIcon dash="4 3" /> },
+  { value: 'dotted', label: 'Dotted', icon: <LineStyleIcon dash="1.5 3" /> },
 ];
+
+const DIRECTION_OPTIONS: SelectOption<EdgeDirection>[] = [
+  { value: 'none', label: 'No arrow', icon: <ArrowIcon /> },
+  { value: 'forward', label: 'Forward', icon: <ArrowIcon right /> },
+  { value: 'backward', label: 'Backward', icon: <ArrowIcon left /> },
+  { value: 'both', label: 'Both', icon: <ArrowIcon left right /> },
+];
+
+const STROKE_WIDTH_OPTIONS: SelectOption<`${EdgeStrokeWidth}`>[] = (
+  [1, 2, 3, 4] as const
+).map((w) => ({
+  value: `${w}` as `${typeof w}`,
+  label: `${w}px`,
+  icon: <StrokeWidthIcon width={w} />,
+}));
 
 function getEdgeStyle(edge: Edge): EdgeStyle {
   return (edge.data?.edgeStyle as EdgeStyle | undefined) ?? {};
@@ -127,6 +244,7 @@ export const EdgeStyleToolbar = () => {
   const currentLineStyle: EdgeLineStyle = style.lineStyle ?? 'solid';
   const currentStroke = style.stroke ?? STROKE_COLORS[0].value;
   const currentWidth = style.strokeWidth ?? 1;
+  const currentDirection: EdgeDirection = style.direction ?? 'none';
 
   const toolbar = (
     <div
@@ -143,6 +261,7 @@ export const EdgeStyleToolbar = () => {
           options={LINE_TYPE_OPTIONS}
           value={currentLineType}
           onChange={(v) => setStyle({ lineType: v })}
+          iconOnly
         />
 
         <FloatingToolbar.Divider />
@@ -152,31 +271,30 @@ export const EdgeStyleToolbar = () => {
           options={LINE_STYLE_OPTIONS}
           value={currentLineStyle}
           onChange={(v) => setStyle({ lineStyle: v })}
+          iconOnly
+        />
+
+        <FloatingToolbar.Divider />
+
+        {/* Direction */}
+        <FloatingToolbar.Select
+          options={DIRECTION_OPTIONS}
+          value={currentDirection}
+          onChange={(v) => setStyle({ direction: v })}
+          iconOnly
         />
 
         <FloatingToolbar.Divider />
 
         {/* Stroke width */}
-        {EDGE_STROKE_WIDTHS.map((w) => (
-          <FloatingToolbar.ToggleButton
-            key={w}
-            active={currentWidth === w}
-            title={`Width ${w}px`}
-            onClick={() => setStyle({ strokeWidth: w })}
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16">
-              <line
-                x1="2"
-                y1="8"
-                x2="14"
-                y2="8"
-                stroke="currentColor"
-                strokeWidth={w}
-                strokeLinecap="round"
-              />
-            </svg>
-          </FloatingToolbar.ToggleButton>
-        ))}
+        <FloatingToolbar.Select
+          options={STROKE_WIDTH_OPTIONS}
+          value={`${currentWidth}`}
+          onChange={(v) =>
+            setStyle({ strokeWidth: Number(v) as EdgeStrokeWidth })
+          }
+          iconOnly
+        />
 
         <FloatingToolbar.Divider />
 
