@@ -22,6 +22,7 @@ import { cn } from '@/components/Common/cn.ts';
 import { FLOATING_TOOLBAR_CLASS } from '@/components/Common/FloatingToolbar.tsx';
 import { Spinner } from '@/components/Common/Spinner.tsx';
 import { Tooltip } from '@/components/Common/Tooltip.tsx';
+import { NODE_ICON } from '@/config/nodeIcons.ts';
 import { useCornerZoomResize } from '@/hooks/useCornerZoomResize.ts';
 import { useNodeLOD } from '@/hooks/useNodeLOD.ts';
 import useCanvasStore from '@/store/canvasStore.ts';
@@ -314,6 +315,18 @@ export const NodeWrapper = memo(
             offset={12}
             className={FLOATING_TOOLBAR_CLASS}
           >
+            {/* Node type indicator icon */}
+            {(() => {
+              const TypeIcon = NODE_ICON[type];
+              return (
+                <Tooltip content={type}>
+                  <div className="text-fg-subtle flex items-center px-1">
+                    <TypeIcon size={14} />
+                  </div>
+                </Tooltip>
+              );
+            })()}
+            <div className="bg-border mx-0.5 h-4 w-px" />
             {toolbar}
           </NodeToolbar>
         )}
