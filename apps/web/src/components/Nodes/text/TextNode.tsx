@@ -10,7 +10,7 @@ import { Baseline, Bold, Italic, Underline, Strikethrough } from 'lucide-react';
 import { memo, useCallback, useState, useRef, useMemo, useEffect } from 'react';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
-import { NODE_BG_COLORS, STROKE_COLORS } from '@/config/colors';
+import { NODE_BG_COLORS, COLOR_PALETTE } from '@/config/colors';
 import useCanvasStore from '@/store/canvasStore.ts';
 
 import { NodeWrapper } from '../NodeWrapper';
@@ -353,8 +353,8 @@ export const TextNode = memo(
         <FloatingToolbar.Divider />
 
         <FloatingToolbar.ColorPicker
-          colors={STROKE_COLORS}
-          value={data.style?.textColor ?? STROKE_COLORS[0].value}
+          colors={COLOR_PALETTE}
+          value={data.style?.textColor ?? COLOR_PALETTE[0].value}
           onSelect={(v) =>
             updateNodeData(id, {
               style: { ...data.style, textColor: v },
@@ -364,7 +364,7 @@ export const TextNode = memo(
         >
           <Baseline
             style={{
-              color: data.style?.textColor || STROKE_COLORS[0].value,
+              color: data.style?.textColor || COLOR_PALETTE[0].value,
             }}
           />
         </FloatingToolbar.ColorPicker>

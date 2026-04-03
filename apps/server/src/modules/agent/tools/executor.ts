@@ -185,11 +185,11 @@ function extractPreviewFromParsed(
 
 /** Summary shape returned by buildNodeSummaries. */
 export interface NodePreview {
-  nodeId: unknown;
+  nodeId: string;
   sourceId?: string;
-  type: unknown;
-  title: unknown;
-  parentId: unknown;
+  type: string | undefined;
+  title: string | undefined;
+  parentId: string | undefined;
   summary?: string;
   keywords?: string[];
   snippet?: string;
@@ -211,7 +211,7 @@ export async function buildNodeSummaries(
   filterNodeIds?: Set<string>,
 ): Promise<{
   nodes: NodePreview[];
-  edges: Array<{ source: unknown; target: unknown }>;
+  edges: Array<{ source: string; target: string }>;
   version: number;
 } | null> {
   const canvas = readCanvas(canvasId);
@@ -254,18 +254,21 @@ export async function buildNodeSummaries(
     const preview = extractPreview(overview?.metaJson ?? undefined, content);
 
     return {
-      nodeId: n.id,
+      nodeId: n.id as string,
       sourceId: sourceId ?? undefined,
-      type: n.type ?? data?.type,
-      title: data?.label,
-      parentId: n.parentId,
+      type: (n.type ?? data?.type) as string | undefined,
+      title: data?.label as string | undefined,
+      parentId: n.parentId as string | undefined,
       ...preview,
     };
   });
 
   const edges = filterNodeIds
     ? []
-    : allEdges.map((e) => ({ source: e.source, target: e.target }));
+    : allEdges.map((e) => ({
+        source: e.source as string,
+        target: e.target as string,
+      }));
 
   return { nodes: nodeSummaries, edges, version: canvas.version };
 }

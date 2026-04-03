@@ -219,6 +219,15 @@ export const NodeWrapper = memo(
 
     const renderMode = useNodeLOD(id, type);
 
+    // Zoom-invariant handle style – same approach as NodeResizer internals:
+    // CSS `scale` property with Math.max(1/zoom, 1) so handles never shrink
+    // below their base size but grow when zoomed out.
+    const handleScale = useStore((s) => `${Math.max(1 / s.transform[2], 1)}`);
+    const handleStyle: React.CSSProperties = useMemo(
+      () => ({ scale: handleScale }),
+      [handleScale],
+    );
+
     // Read canvas-space dimensions for SemanticPlaceholder text fitting
     const nodeWidth = useStore((s) => {
       const node = s.nodeLookup.get(id);
@@ -368,7 +377,6 @@ export const NodeWrapper = memo(
           <SemanticPlaceholder
             type={type}
             data={data}
-            selected={selected}
             width={nodeWidth}
             height={nodeHeight}
           />
@@ -441,48 +449,56 @@ export const NodeWrapper = memo(
             type="target"
             id="top-target"
             position={Position.Top}
+            style={handleStyle}
             className="bg-info! -top-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
           />
           <Handle
             type="source"
             id="top-source"
             position={Position.Top}
+            style={handleStyle}
             className="bg-info! -top-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
           />
           <Handle
             type="target"
             id="right-target"
             position={Position.Right}
+            style={handleStyle}
             className="bg-info! -right-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
           />
           <Handle
             type="source"
             id="right-source"
             position={Position.Right}
+            style={handleStyle}
             className="bg-info! -right-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
           />
           <Handle
             type="target"
             id="bottom-target"
             position={Position.Bottom}
+            style={handleStyle}
             className="bg-info! -bottom-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
           />
           <Handle
             type="source"
             id="bottom-source"
             position={Position.Bottom}
+            style={handleStyle}
             className="bg-info! -bottom-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
           />
           <Handle
             type="target"
             id="left-target"
             position={Position.Left}
+            style={handleStyle}
             className="bg-info! -left-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
           />
           <Handle
             type="source"
             id="left-source"
             position={Position.Left}
+            style={handleStyle}
             className="bg-info! -left-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
           />
         </div>

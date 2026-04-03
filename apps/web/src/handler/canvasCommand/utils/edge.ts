@@ -187,10 +187,6 @@ export function mergeEdgeStyle(edge: Edge, patch: Partial<EdgeStyle>): Edge {
   const existing: EdgeStyle =
     (edge.data?.edgeStyle as EdgeStyle | undefined) ?? {};
   const merged: EdgeStyle = { ...existing, ...patch };
-  // Reset dash when lineStyle is explicitly set to solid
-  if (patch.lineStyle === 'solid') {
-    delete (merged as Record<string, unknown>).lineStyle;
-  }
   return applyEdgeStyle(
     {
       ...edge,

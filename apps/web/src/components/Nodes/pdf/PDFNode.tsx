@@ -37,25 +37,23 @@ const FirstPageThumbnail = memo(
     onCapture: (dataUrl: string) => void;
   }) => {
     const captured = useRef(false);
+    const containerRef = useRef<HTMLDivElement>(null);
 
     const handleRenderSuccess = useCallback(
-      (page: { width: number }) => {
+      (_page: { width: number }) => {
         if (captured.current) return;
-        const canvas = document.querySelector(
-          `[data-pdf-thumb="${CSS.escape(src)}"] canvas`,
-        ) as HTMLCanvasElement | null;
+        const canvas = containerRef.current?.querySelector('canvas');
         if (canvas) {
           captured.current = true;
           onCapture(canvas.toDataURL('image/jpeg', 0.85));
         }
-        void page;
       },
-      [src, onCapture],
+      [onCapture],
     );
 
     return (
       <div
-        data-pdf-thumb={src}
+        ref={containerRef}
         style={{ position: 'absolute', left: -9999, top: -9999 }}
         aria-hidden
       >

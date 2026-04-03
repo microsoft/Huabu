@@ -22,7 +22,6 @@ function insertSoftBreaks(text: string): string {
 interface SemanticPlaceholderProps {
   type: CanvasNodeType;
   data: NodeData;
-  selected?: boolean;
   /** Canvas-space width of the node. */
   width: number;
   /** Canvas-space height of the node. */
@@ -37,7 +36,6 @@ interface SemanticPlaceholderProps {
 export function SemanticPlaceholder({
   type,
   data,
-  selected,
   width,
   height,
 }: SemanticPlaceholderProps) {
@@ -63,7 +61,6 @@ export function SemanticPlaceholder({
         'absolute inset-0 z-20 flex items-center justify-center rounded p-2 transition-all duration-120',
         !accent && 'bg-surface shadow',
         accent && 'border-6',
-        selected ? 'ring-info ring' : 'ring-border hover:ring',
       )}
       style={
         accent

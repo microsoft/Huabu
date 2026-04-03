@@ -2,7 +2,7 @@ import { useStore, useViewport } from '@xyflow/react';
 import { useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 
-import { STROKE_COLORS } from '@/config/colors';
+import { COLOR_PALETTE } from '@/config/colors';
 import useCanvasStore from '@/store/canvasStore';
 
 import { FloatingToolbar } from '../../Common/FloatingToolbar';
@@ -242,16 +242,10 @@ export const EdgeStyleToolbar = () => {
 
   const currentLineType: EdgeLineType = style.lineType ?? 'bezier';
   const currentLineStyle: EdgeLineStyle = style.lineStyle ?? 'solid';
-  const currentStroke = style.stroke ?? STROKE_COLORS[0].value;
+  const currentStroke = style.stroke ?? COLOR_PALETTE[0].value;
   const currentWidth = style.strokeWidth ?? 1;
   const currentDirection: EdgeDirection = style.direction ?? 'none';
-  console.log('rendering toolbar with style', {
-    currentLineType,
-    currentLineStyle,
-    currentStroke,
-    currentWidth,
-    currentDirection,
-  });
+
   const toolbar = (
     <div
       className="pointer-events-auto absolute z-[1000]"
@@ -306,7 +300,7 @@ export const EdgeStyleToolbar = () => {
 
         {/* Color picker */}
         <FloatingToolbar.ColorPicker
-          colors={STROKE_COLORS}
+          colors={COLOR_PALETTE}
           value={currentStroke}
           onSelect={(v) => setStyle({ stroke: v })}
           title="Edge color"
