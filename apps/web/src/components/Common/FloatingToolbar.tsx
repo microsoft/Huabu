@@ -137,6 +137,8 @@ interface ToolbarSelectProps<T extends string = string> {
   className?: string;
   /** Show only the icon in the trigger (label hidden). */
   iconOnly?: boolean;
+  /** Optional short text label rendered before the select trigger. */
+  label?: string;
 }
 
 /**
@@ -149,18 +151,22 @@ function ToolbarSelect<T extends string = string>({
   onChange,
   className,
   iconOnly,
+  label,
 }: ToolbarSelectProps<T>) {
   return (
-    <BaseSelect
-      options={options}
-      value={value}
-      onChange={onChange}
-      variant="ghost"
-      size="sm"
-      align="top-left"
-      className={className}
-      iconOnly={iconOnly}
-    />
+    <div className="flex items-center">
+      {label && <span className="text-fg-subtle px-0.5 text-xs">{label}</span>}
+      <BaseSelect
+        options={options}
+        value={value}
+        onChange={onChange}
+        variant="ghost"
+        size="sm"
+        align="top-left"
+        className={className}
+        iconOnly={iconOnly}
+      />
+    </div>
   );
 }
 

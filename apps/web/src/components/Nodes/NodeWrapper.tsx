@@ -44,6 +44,50 @@ const ACCENT_NONE = 'transparent';
 /** Accent palette: the shared color palette with a leading "None" entry. */
 const ACCENT_PALETTE = [{ name: 'None', value: ACCENT_NONE }, ...COLOR_PALETTE];
 
+/** Connection handle definitions – source + target on each side. */
+const HANDLE_DEFS = [
+  {
+    type: 'target' as const,
+    id: 'top-target',
+    position: Position.Top,
+  },
+  {
+    type: 'source' as const,
+    id: 'top-source',
+    position: Position.Top,
+  },
+  {
+    type: 'target' as const,
+    id: 'right-target',
+    position: Position.Right,
+  },
+  {
+    type: 'source' as const,
+    id: 'right-source',
+    position: Position.Right,
+  },
+  {
+    type: 'target' as const,
+    id: 'bottom-target',
+    position: Position.Bottom,
+  },
+  {
+    type: 'source' as const,
+    id: 'bottom-source',
+    position: Position.Bottom,
+  },
+  {
+    type: 'target' as const,
+    id: 'left-target',
+    position: Position.Left,
+  },
+  {
+    type: 'source' as const,
+    id: 'left-source',
+    position: Position.Left,
+  },
+] as const;
+
 /**
  * Isolated component that subscribes to viewport changes for the
  * zoom-invariant overlay portal. This prevents the entire NodeWrapper
@@ -221,14 +265,20 @@ export const NodeWrapper = memo(
     const renderMode = useNodeLOD(id, type);
     const isTouch = useIsTouch();
 
-    // Zoom-invariant handle style – same approach as NodeResizer internals:
-    // CSS `scale` property with Math.max(1/zoom, 1) so handles never shrink
-    // below their base size but grow when zoomed out.
-    const handleScale = useStore((s) => `${Math.max(1 / s.transform[2], 1)}`);
-    const handleStyle: React.CSSProperties = useMemo(
-      () => ({ scale: handleScale }),
-      [handleScale],
-    );
+    // Zoom-invariant handle style: scale up width/height directly so React
+    // Flow's getBoundingClientRect-based edge routing stays centred on the
+    // handle.  React Flow's default `transform: translate(-50%, -50%)`
+    // already centres handles at any size, so no margin compensation is
+    // needed.
+    const baseHandleSize = isTouch ? 10 : 4;
+    const handleStyle: React.CSSProperties = useStore((s) => {
+      const factor = Math.max(1 / s.transform[2], 1);
+      const size = baseHandleSize * factor;
+      return {
+        width: size,
+        height: size,
+      };
+    });
 
     // Read canvas-space dimensions for SemanticPlaceholder text fitting
     const nodeWidth = useStore((s) => {
@@ -321,12 +371,9 @@ export const NodeWrapper = memo(
           onResize={handleResize}
           onResizeEnd={handleResizeEnd}
           handleStyle={{
-            width: isTouch ? 20 : 8,
-            height: isTouch ? 20 : 8,
+            width: isTouch ? 12 : 8,
+            height: isTouch ? 12 : 8,
             borderRadius: 0,
-          }}
-          lineStyle={{
-            borderWidth: isTouch ? 16 : 8,
           }}
           lineClassName="!border-transparent"
         />
@@ -447,62 +494,25 @@ export const NodeWrapper = memo(
             {children}
           </div>
 
-          <Handle
-            type="target"
-            id="top-target"
-            position={Position.Top}
-            style={handleStyle}
-            className="bg-info! -top-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
-          />
-          <Handle
-            type="source"
-            id="top-source"
-            position={Position.Top}
-            style={handleStyle}
-            className="bg-info! -top-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
-          />
-          <Handle
-            type="target"
-            id="right-target"
-            position={Position.Right}
-            style={handleStyle}
-            className="bg-info! -right-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
-          />
-          <Handle
-            type="source"
-            id="right-source"
-            position={Position.Right}
-            style={handleStyle}
-            className="bg-info! -right-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
-          />
-          <Handle
-            type="target"
-            id="bottom-target"
-            position={Position.Bottom}
-            style={handleStyle}
-            className="bg-info! -bottom-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
-          />
-          <Handle
-            type="source"
-            id="bottom-source"
-            position={Position.Bottom}
-            style={handleStyle}
-            className="bg-info! -bottom-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
-          />
-          <Handle
-            type="target"
-            id="left-target"
-            position={Position.Left}
-            style={handleStyle}
-            className="bg-info! -left-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
-          />
-          <Handle
-            type="source"
-            id="left-source"
-            position={Position.Left}
-            style={handleStyle}
-            className="bg-info! -left-1! h-1! w-1! border-none! opacity-0 transition-opacity group-hover:opacity-100"
-          />
+          {HANDLE_DEFS.map((h) => (
+            <Handle
+              key={h.id}
+              type={h.type}
+              id={h.id}
+              position={h.position}
+              style={handleStyle}
+              className={cn(
+                'bg-info! z-20 border-none! transition-opacity',
+                isTouch
+                  ? cn(
+                      selected
+                        ? 'opacity-40 active:opacity-100'
+                        : 'pointer-events-none opacity-0',
+                    )
+                  : cn('opacity-0 group-hover:opacity-100'),
+              )}
+            />
+          ))}
         </div>
       </>
     );
