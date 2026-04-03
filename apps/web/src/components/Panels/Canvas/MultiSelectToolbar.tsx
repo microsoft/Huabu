@@ -21,7 +21,7 @@ import useCanvasStore from '../../../store/canvasStore';
 import { FloatingToolbar } from '../../Common/FloatingToolbar';
 
 import type { ColorPreset } from '@/components/Common/ColorPicker';
-import type { NodeData } from '@/components/Nodes/types';
+import type { CanvasNode } from '@/components/Nodes/types';
 
 /** Sentinel value representing "no accent". */
 const ACCENT_NONE = 'transparent';
@@ -48,14 +48,17 @@ export const MultiSelectToolbar = () => {
   // positioning is relative to the flow container, not the transformed viewport.
   const domNode = useStore((s) => s.domNode);
 
-  const selectedNodes = useMemo(() => nodes.filter((n) => n.selected), [nodes]);
+  const selectedNodes = useMemo(
+    () => nodes.filter((n) => n.selected) as CanvasNode[],
+    [nodes],
+  );
 
   // Determine the common accent among selected nodes (empty string if mixed)
   const commonAccent = useMemo(() => {
     if (selectedNodes.length === 0) return ACCENT_NONE;
-    const first = (selectedNodes[0].data as NodeData)?.style?.accent ?? null;
+    const first = selectedNodes[0].data?.style?.accent ?? null;
     const allSame = selectedNodes.every(
-      (n) => ((n.data as NodeData)?.style?.accent ?? null) === first,
+      (n) => (n.data?.style?.accent ?? null) === first,
     );
     return allSame ? (first ?? ACCENT_NONE) : ACCENT_NONE;
   }, [selectedNodes]);
@@ -180,7 +183,7 @@ export const MultiSelectToolbar = () => {
             const accent = v === ACCENT_NONE ? null : v;
             for (const n of selectedNodes) {
               updateNodeData(n.id, {
-                style: { ...(n.data as NodeData)?.style, accent },
+                style: { ...n.data?.style, accent },
               });
             }
           }}
