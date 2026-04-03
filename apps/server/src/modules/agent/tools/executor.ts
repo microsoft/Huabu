@@ -183,6 +183,96 @@ function extractPreviewFromParsed(
 
 // ==================== Canvas Operations ====================
 
+/** Summary shape returned by buildNodeSummaries. */
+export interface NodePreview {
+  nodeId: string;
+  sourceId?: string;
+  type: string | undefined;
+  title: string | undefined;
+  parentId: string | undefined;
+  summary?: string;
+  keywords?: string[];
+  snippet?: string;
+}
+
+/**
+ * Build lightweight preview summaries for canvas nodes.
+ *
+ * Shared by `get_canvas_state` (all nodes) and agent context injection
+ * (selected nodes only). Each node gets at most a summary/keywords from
+ * preprocessed metaJson, or a 120-char content snippet — never full content.
+ *
+ * @param canvasId  Canvas to read
+ * @param filterNodeIds  When provided, only return previews for these node IDs.
+ * @returns null if the canvas does not exist.
+ */
+export async function buildNodeSummaries(
+  canvasId: string,
+  filterNodeIds?: Set<string>,
+): Promise<{
+  nodes: NodePreview[];
+  edges: Array<{ source: string; target: string }>;
+  version: number;
+} | null> {
+  const canvas = readCanvas(canvasId);
+  if (!canvas) return null;
+
+  const allNodes = (canvas.state.nodes ?? []) as Array<Record<string, unknown>>;
+  const allEdges = (canvas.state.edges ?? []) as Array<Record<string, unknown>>;
+
+  const nodes = filterNodeIds
+    ? allNodes.filter((n) => filterNodeIds.has(n.id as string))
+    : allNodes;
+
+  // Collect sourceIds referenced by the target nodes, then batch-lookup
+  const sourceIds = new Set<string>();
+  for (const n of nodes) {
+    const sid = (n.data as Record<string, unknown> | undefined)?.sourceId as
+      | string
+      | undefined;
+    if (sid) sourceIds.add(sid);
+  }
+
+  const repo = await getKnowledgeRepository();
+  const overviewMap = new Map<string, { metaJson: string | null }>();
+  if (sourceIds.size > 0) {
+    const allOverviews = repo.findAllSourcesOverview();
+    for (const s of allOverviews) {
+      if (sourceIds.has(s.sourceId)) {
+        overviewMap.set(s.sourceId, s);
+      }
+    }
+  }
+
+  const nodeSummaries: NodePreview[] = nodes.map((n) => {
+    const data = n.data as Record<string, unknown> | undefined;
+    const sourceId = data?.sourceId as string | undefined;
+    const content = data?.content as string | undefined;
+
+    // Use source metadata for preview when available
+    const overview = sourceId ? overviewMap.get(sourceId) : undefined;
+    const preview = extractPreview(overview?.metaJson ?? undefined, content);
+
+    return {
+      nodeId: n.id as string,
+      sourceId: sourceId ?? undefined,
+      type: (n.type ?? data?.type) as string | undefined,
+      title: data?.label as string | undefined,
+      parentId: n.parentId as string | undefined,
+      ...preview,
+    };
+  });
+
+  const edges = filterNodeIds
+    ? []
+    : allEdges.map((e) => ({
+        source: e.source as string,
+        target: e.target as string,
+      }));
+
+  return { nodes: nodeSummaries, edges, version: canvas.version };
+}
+
 async function executeGetNodeDetail(args: {
   nodeId: string;
   canvasId: string;
@@ -230,66 +320,18 @@ async function executeGetNodeDetail(args: {
 async function executeGetCanvasState(args: {
   canvasId: string;
 }): Promise<string> {
-  const canvas = readCanvas(args.canvasId);
-  if (!canvas) {
+  const result = await buildNodeSummaries(args.canvasId);
+  if (!result) {
     return JSON.stringify({ error: `Canvas ${args.canvasId} not found` });
   }
 
-  const nodes = (canvas.state.nodes ?? []) as Array<Record<string, unknown>>;
-  const edges = (canvas.state.edges ?? []) as Array<Record<string, unknown>>;
-
-  // Collect sourceIds referenced by nodes, then batch-lookup only those
-  const sourceIds = new Set<string>();
-  for (const n of nodes) {
-    const sid = (n.data as Record<string, unknown> | undefined)?.sourceId as
-      | string
-      | undefined;
-    if (sid) sourceIds.add(sid);
-  }
-
-  const repo = await getKnowledgeRepository();
-  const overviewMap = new Map<string, { metaJson: string | null }>();
-  if (sourceIds.size > 0) {
-    const allOverviews = repo.findAllSourcesOverview();
-    for (const s of allOverviews) {
-      if (sourceIds.has(s.sourceId)) {
-        overviewMap.set(s.sourceId, s);
-      }
-    }
-  }
-
-  const nodeSummaries = nodes.map((n) => {
-    const data = n.data as Record<string, unknown> | undefined;
-    const sourceId = data?.sourceId as string | undefined;
-    const content = data?.content as string | undefined;
-
-    // Use source metadata for preview when available
-    const overview = sourceId ? overviewMap.get(sourceId) : undefined;
-    const preview = extractPreview(overview?.metaJson ?? undefined, content);
-
-    return {
-      nodeId: n.id,
-      sourceId: sourceId ?? undefined,
-      type: n.type ?? data?.type,
-      title: data?.label,
-      src: data?.src,
-      parentId: n.parentId,
-      ...preview,
-    };
-  });
-
-  const edgeSummary = edges.map((e) => ({
-    source: e.source,
-    target: e.target,
-  }));
-
   return JSON.stringify({
     canvasId: args.canvasId,
-    version: canvas.version,
-    nodeCount: nodes.length,
-    edgeCount: edges.length,
-    nodes: nodeSummaries,
-    edges: edgeSummary,
+    version: result.version,
+    nodeCount: result.nodes.length,
+    edgeCount: result.edges.length,
+    nodes: result.nodes,
+    edges: result.edges,
   });
 }
 
@@ -338,6 +380,7 @@ async function executeCanvasCommands(
             isNote &&
             typeof data.content === 'string' &&
             data.content.length > 0;
+          const hasLabel = typeof data.label === 'string';
           return {
             ...node,
             data: {
@@ -346,6 +389,7 @@ async function executeCanvasCommands(
               ...(hasContent
                 ? { provenance: buildAIProvenance(context?.mode) }
                 : {}),
+              ...(hasLabel ? { labelSource: 'agent' as const } : {}),
             },
           };
         }),
@@ -364,13 +408,14 @@ async function executeCanvasCommands(
             isNote &&
             typeof patch.content === 'string' &&
             patch.content.length > 0;
-          if (hasContent) {
+          const hasLabel = typeof patch.label === 'string';
+          const extra: Record<string, unknown> = {};
+          if (hasContent) extra.provenance = buildAIProvenance(context?.mode);
+          if (hasLabel) extra.labelSource = 'agent';
+          if (Object.keys(extra).length > 0) {
             return {
               ...entry,
-              patch: {
-                ...patch,
-                provenance: buildAIProvenance(context?.mode),
-              },
+              patch: { ...patch, ...extra },
             };
           }
           return entry;
@@ -568,34 +613,75 @@ async function executeIngestContent(args: {
 export async function executeTool(
   name: string,
   args: Record<string, unknown>,
-  context?: { mode?: AgentMode },
+  context?: { mode?: AgentMode; canvasId?: string },
 ): Promise<string> {
+  const resolveCanvasArgs = <T extends Record<string, unknown>>(
+    value: T,
+  ): (T & { canvasId: string }) | null => {
+    const canvasId =
+      typeof value.canvasId === 'string' && value.canvasId.trim().length > 0
+        ? value.canvasId
+        : context?.canvasId;
+    if (!canvasId) return null;
+    return { ...value, canvasId };
+  };
+
   switch (name) {
     case 'web_search':
       return executeWebSearch(args as Parameters<typeof executeWebSearch>[0]);
-    case 'get_node_detail':
+    case 'get_node_detail': {
+      const resolvedArgs = resolveCanvasArgs(args);
+      if (!resolvedArgs) {
+        return JSON.stringify({
+          error: 'canvasId is required for get_node_detail',
+        });
+      }
       return executeGetNodeDetail(
-        args as Parameters<typeof executeGetNodeDetail>[0],
+        resolvedArgs as Parameters<typeof executeGetNodeDetail>[0],
       );
-    case 'get_canvas_state':
+    }
+    case 'get_canvas_state': {
+      const resolvedArgs = resolveCanvasArgs(args);
+      if (!resolvedArgs) {
+        return JSON.stringify({
+          error: 'canvasId is required for get_canvas_state',
+        });
+      }
       return executeGetCanvasState(
-        args as Parameters<typeof executeGetCanvasState>[0],
+        resolvedArgs as Parameters<typeof executeGetCanvasState>[0],
       );
-    case 'canvas_commands':
+    }
+    case 'canvas_commands': {
+      const resolvedArgs = resolveCanvasArgs(args);
+      if (!resolvedArgs) {
+        return JSON.stringify({
+          tool: 'canvas_commands',
+          status: 'error',
+          error: 'canvasId is required for canvas_commands',
+        });
+      }
       return executeCanvasCommands(
-        args as Parameters<typeof executeCanvasCommands>[0],
+        resolvedArgs as Parameters<typeof executeCanvasCommands>[0],
         context,
       );
+    }
     case 'read_source':
       return executeReadSource(args as Parameters<typeof executeReadSource>[0]);
     case 'search_knowledge':
       return executeSearchKnowledge(
         args as Parameters<typeof executeSearchKnowledge>[0],
       );
-    case 'ingest_content':
+    case 'ingest_content': {
+      const resolvedArgs = resolveCanvasArgs(args);
+      if (!resolvedArgs) {
+        return JSON.stringify({
+          error: 'canvasId is required for ingest_content',
+        });
+      }
       return executeIngestContent(
-        args as Parameters<typeof executeIngestContent>[0],
+        resolvedArgs as Parameters<typeof executeIngestContent>[0],
       );
+    }
     default:
       return JSON.stringify({ error: `Unknown tool: ${name}` });
   }

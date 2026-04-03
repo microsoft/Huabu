@@ -9,6 +9,9 @@
 /** Size (in px) of each grid cell. Matches the `<Background gap>` prop. */
 export const GRID_SIZE = 18;
 
+/** Default internal padding (in px) for frame nodes wrapping their children. */
+export const FRAME_PADDING = 48;
+
 /** Convenience tuple expected by React Flow's `snapGrid` prop. */
 export const SNAP_GRID: [number, number] = [GRID_SIZE, GRID_SIZE];
 

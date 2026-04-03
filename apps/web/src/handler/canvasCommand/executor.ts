@@ -20,6 +20,7 @@
  */
 
 import { HANDLERS, COMMAND_META, type CommandHandlerResult } from './commands';
+import { fitFrames, type NestableNode } from './utils/frame';
 
 import type { PendingEffects } from './postEffects';
 import type { CanvasReadState, CanvasWriteResult } from './runtime';
@@ -66,6 +67,7 @@ export function executeCanvasCommands(
 
   // Track which commands were actually applied.
   let anyApplied = false;
+  const agentAffectedFrameIds = new Set<string>();
 
   for (const cmd of execution.commands) {
     // ------------------------------------------------------------------
@@ -85,6 +87,67 @@ export function executeCanvasCommands(
       cmd: CanvasCommand,
       state: CanvasReadState,
     ) => CommandHandlerResult;
+
+    if (execution.source === 'agent') {
+      if (cmd.type === 'CREATE_NODES') {
+        for (const node of cmd.nodes) {
+          if (node.nodeType === 'frame' && node.id) {
+            agentAffectedFrameIds.add(node.id as string);
+          }
+          if (node.parentId) {
+            agentAffectedFrameIds.add(node.parentId as string);
+          }
+        }
+      } else if (cmd.type === 'SET_NODE_GEOMETRY') {
+        for (const item of cmd.items) {
+          const node = currentNodes.find((n) => n.id === item.nodeId);
+          if (node?.parentId) {
+            agentAffectedFrameIds.add(node.parentId);
+          }
+        }
+      } else if (cmd.type === 'SET_NODE_PARENT') {
+        if (cmd.parentId) {
+          agentAffectedFrameIds.add(cmd.parentId as string);
+        }
+        for (const nodeId of cmd.nodeIds) {
+          const node = currentNodes.find((n) => n.id === nodeId);
+          if (node?.parentId) {
+            agentAffectedFrameIds.add(node.parentId);
+          }
+        }
+      } else if (cmd.type === 'DELETE_NODES') {
+        const removedIds = new Set(cmd.nodeIds as string[]);
+        let changed = true;
+        while (changed) {
+          changed = false;
+          for (const node of currentNodes) {
+            if (
+              node.parentId &&
+              removedIds.has(node.parentId) &&
+              !removedIds.has(node.id)
+            ) {
+              removedIds.add(node.id);
+              changed = true;
+            }
+          }
+        }
+
+        for (const node of currentNodes) {
+          if (
+            removedIds.has(node.id) &&
+            node.parentId &&
+            !removedIds.has(node.parentId)
+          ) {
+            agentAffectedFrameIds.add(node.parentId);
+          }
+        }
+      } else if (cmd.type === 'DISSOLVE_FRAME') {
+        const frame = currentNodes.find((n) => n.id === cmd.frameId);
+        if (frame?.parentId) {
+          agentAffectedFrameIds.add(frame.parentId);
+        }
+      }
+    }
 
     const result = handler(cmd, {
       nodes: currentNodes,
@@ -115,6 +178,24 @@ export function executeCanvasCommands(
       if (result.deletedNodeIds) {
         pendingEffects.deletedNodeIds.push(...result.deletedNodeIds);
       }
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Agent-sourced frame auto-fit.
+  //
+  // The LLM cannot accurately predict rendered frame dimensions, so we
+  // unconditionally fit affected parent frames after an agent batch
+  // (regardless of autoLayoutEnabled).  Individual handlers already fit
+  // frames when autoLayoutEnabled is true — the second pass is a no-op
+  // in that case.
+  // ------------------------------------------------------------------
+  if (execution.source === 'agent' && anyApplied) {
+    if (agentAffectedFrameIds.size > 0) {
+      currentNodes = fitFrames(
+        currentNodes as NestableNode[],
+        agentAffectedFrameIds,
+      );
     }
   }
 

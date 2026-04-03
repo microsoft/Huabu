@@ -3,6 +3,7 @@ import {
   ReactFlow,
   Background,
   Controls,
+  ConnectionMode,
   type ReactFlowInstance,
   Panel,
 } from '@xyflow/react';
@@ -26,8 +27,10 @@ import {
   textToNodeInput,
 } from '@/handler/canvasCommand/nodeInputBuilders';
 import { useCanvasShortcuts } from '@/hooks/useCanvasShortcuts';
+import { useIsTouch } from '@/hooks/useInputMode';
 
 import { NodeToolbar } from './CanvasToolbar.tsx';
+import { EdgeStyleToolbar } from './EdgeStyleToolbar.tsx';
 import { IntentPopover } from './IntentPopover.tsx';
 import { MultiSelectToolbar } from './MultiSelectToolbar.tsx';
 import { getSource } from '../../../api/knowledge.ts';
@@ -150,6 +153,50 @@ export const Canvas: React.FC<CanvasProps> = ({
     {
       disabled: shortcutsDisabled,
     },
+  );
+
+  const isTouch = useIsTouch();
+
+  // When a connection drag ends without landing on a handle, check if the
+  // pointer is over a node element and create the connection anyway.
+  // This makes connecting much easier on touch devices.
+  const onConnectEnd = useCallback(
+    (
+      event: MouseEvent | TouchEvent,
+      connectionState: {
+        fromNode?: { id: string } | null;
+        isValid: boolean | null;
+      },
+    ) => {
+      // If React Flow already handled this as a valid connection, skip.
+      if (connectionState.isValid) return;
+
+      const sourceNodeId = connectionState.fromNode?.id;
+      if (!sourceNodeId) return;
+
+      // Determine the element under the pointer
+      const target =
+        event instanceof TouchEvent
+          ? document.elementFromPoint(
+              event.changedTouches[0].clientX,
+              event.changedTouches[0].clientY,
+            )
+          : (event.target as Element);
+
+      const nodeEl = target?.closest('.react-flow__node');
+      if (!nodeEl) return;
+
+      const targetNodeId = nodeEl.getAttribute('data-id');
+      if (!targetNodeId || targetNodeId === sourceNodeId) return;
+
+      onConnect({
+        source: sourceNodeId,
+        target: targetNodeId,
+        sourceHandle: null,
+        targetHandle: null,
+      });
+    },
+    [onConnect],
   );
 
   // --- Frame drag-to-create state ---
@@ -564,11 +611,14 @@ export const Canvas: React.FC<CanvasProps> = ({
     >
       <ReactFlow
         deleteKeyCode={null}
+        fitView={true}
         nodes={nodes}
         edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onConnectEnd={onConnectEnd}
+        connectionMode={ConnectionMode.Loose}
         onNodeDragStart={onNodeDragStart}
         onNodeDrag={onNodeDrag}
         onNodeDragStop={onNodeDragStop}
@@ -591,13 +641,18 @@ export const Canvas: React.FC<CanvasProps> = ({
             ? false
             : tool === 'pan'
               ? true
-              : [1] /* 1 = middle mouse button */
+              : isTouch
+                ? true
+                : [1] /* 1 = middle mouse button */
         }
-        selectionOnDrag={pendingNodeType ? false : tool === 'select'}
+        selectionOnDrag={
+          pendingNodeType ? false : isTouch ? false : tool === 'select'
+        }
         nodesDraggable={!pendingNodeType}
         elementsSelectable={!pendingNodeType}
-        panOnScroll={true}
+        panOnScroll={!isTouch}
         zoomOnScroll={true}
+        zoomOnPinch={true}
         minZoom={0.1}
         maxZoom={5}
         onlyRenderVisibleElements
@@ -606,6 +661,7 @@ export const Canvas: React.FC<CanvasProps> = ({
           <NodeToolbar activeTool={tool} onToolChange={setTool} />
         </Panel>
         <MultiSelectToolbar />
+        <EdgeStyleToolbar />
         <IntentPopover />
         <Background color="var(--canvas-grid)" gap={GRID_SIZE} />
 

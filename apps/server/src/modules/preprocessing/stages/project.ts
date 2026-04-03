@@ -35,7 +35,7 @@ export function project(
   const snapshotLabelSource = request.snapshot.labelSource as
     | string
     | undefined;
-  if (snapshotLabelSource !== 'user') {
+  if (snapshotLabelSource !== 'user' && snapshotLabelSource !== 'agent') {
     const autoLabel = ctx.extracted?.title ?? ctx.enriched?.suggestedLabel;
     if (autoLabel) {
       patch.label = autoLabel;

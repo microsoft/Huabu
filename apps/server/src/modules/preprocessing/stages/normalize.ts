@@ -31,7 +31,7 @@ export function normalize(
   // - For note/text nodes, resolved.title (derived from content) is a
   //   reasonable fallback.
   const title =
-    resolved.labelSource === 'user'
+    resolved.labelSource === 'user' || resolved.labelSource === 'agent'
       ? (resolved.title ?? extracted.title)
       : resolved.nodeType === 'web' || resolved.nodeType === 'pdf'
         ? extracted.title

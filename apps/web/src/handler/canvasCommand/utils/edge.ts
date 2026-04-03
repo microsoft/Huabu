@@ -5,9 +5,11 @@
  * the relative positions of source and target nodes.
  */
 
+import { MarkerType, type Node, type Edge } from '@xyflow/react';
+
 import { getLayoutNodeSize } from '@/utils/node/size';
 
-import type { Node } from '@xyflow/react';
+import type { EdgeStyle } from '@sediment/shared';
 
 /**
  * Returns the best source/target handle pair for an edge between two nodes
@@ -131,4 +133,77 @@ export function rerouteAllEdges<
     return { ...edge, ...handles };
   });
   return changed ? result : edges;
+}
+
+/**
+ * Convert an EdgeStyle to React Flow edge properties.
+ *
+ * Stores the EdgeStyle as source of truth in `edge.data.edgeStyle` and
+ * derives the React Flow rendering props (`type`, `style`, `animated`).
+ */
+/** Default stroke width applied to every new edge. */
+export const DEFAULT_EDGE_STROKE_WIDTH = 2;
+
+export function applyEdgeStyle(edge: Edge, style?: EdgeStyle): Edge {
+  // Always ensure a baseline strokeWidth even when no style is provided.
+  if (!style) {
+    return {
+      ...edge,
+      style: { ...edge.style, strokeWidth: DEFAULT_EDGE_STROKE_WIDTH },
+    };
+  }
+
+  const rfStyle: Record<string, unknown> = {
+    ...(typeof edge.style === 'object' ? edge.style : {}),
+  };
+
+  if (style.stroke) rfStyle.stroke = style.stroke;
+  rfStyle.strokeWidth = style.strokeWidth ?? DEFAULT_EDGE_STROKE_WIDTH;
+  if (style.lineStyle === 'dashed') {
+    rfStyle.strokeDasharray = '6 3';
+  } else if (style.lineStyle === 'dotted') {
+    rfStyle.strokeDasharray = '2 2';
+  }
+
+  // Map our domain lineType to React Flow edge type names
+  const rfType = style.lineType === 'step' ? 'smoothstep' : style.lineType;
+
+  // Build arrow markers based on direction
+  const direction = style.direction ?? 'none';
+  const markerColor = style.stroke ? { color: style.stroke } : {};
+  const arrowMarker = { type: MarkerType.ArrowClosed, ...markerColor };
+
+  return {
+    ...edge,
+    type: rfType ?? edge.type,
+    animated: style.animated ?? edge.animated,
+    style: rfStyle,
+    markerEnd:
+      direction === 'forward' || direction === 'both' ? arrowMarker : undefined,
+    markerStart:
+      direction === 'backward' || direction === 'both'
+        ? arrowMarker
+        : undefined,
+    data: { ...edge.data, edgeStyle: style },
+  };
+}
+
+/**
+ * Merge a partial EdgeStyle patch into an existing EdgeStyle
+ * stored on an edge's data, then re-apply to RF props.
+ */
+export function mergeEdgeStyle(edge: Edge, patch: Partial<EdgeStyle>): Edge {
+  const existing: EdgeStyle =
+    (edge.data?.edgeStyle as EdgeStyle | undefined) ?? {};
+  const merged: EdgeStyle = { ...existing, ...patch };
+  return applyEdgeStyle(
+    {
+      ...edge,
+      // Clear previously set RF style so applyEdgeStyle starts fresh
+      style: {},
+      type: undefined,
+      animated: undefined,
+    },
+    merged,
+  );
 }

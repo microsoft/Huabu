@@ -3,6 +3,7 @@
  *
  * This module provides a clean interface to all canvas-related types.
  * Types are organized into logical modules:
+ * - color.ts: Shared color palettes and background color presets
  * - node.ts: Node data structures and type guards
  * - edge.ts: Edge types and styling
  * - source.ts: Knowledge source and ingestion types
@@ -11,12 +12,24 @@
  * - canvas-api.ts: REST API request/response types
  */
 
+// Color types
+export type {
+  PaletteColorValue,
+  StrokeColorValue,
+  NodeBgColorValue,
+} from './color.js';
+export { COLOR_PALETTE, STROKE_COLORS, NODE_BG_COLORS } from './color.js';
+
 // Node types
 export type {
   CanvasNodeType,
   NodeOrigin,
   NodeOriginType,
   NodeStyle,
+  NodeFontFamily,
+  NodeFontWeight,
+  NodeFontStyle,
+  NodeTextDecoration,
   BaseNodeData,
   BlockProvenance,
   BlockProvenanceMap,
@@ -41,7 +54,14 @@ export {
 } from './node.js';
 
 // Edge types
-export type { EdgeStyle } from './edge.js';
+export type {
+  EdgeStyle,
+  EdgeLineType,
+  EdgeLineStyle,
+  EdgeDirection,
+  EdgeStrokeWidth,
+} from './edge.js';
+export { EDGE_STROKE_WIDTHS } from './edge.js';
 
 // Source types
 export type {
@@ -78,6 +98,7 @@ export type {
   CanvasNodeGeometryUpdate,
   CanvasNodeLockUpdate,
   CanvasEdgeCreateInput,
+  CanvasEdgeStylePatch,
   CanvasCommand,
   CanvasCommandType,
   UiOnlyCanvasCommandType,

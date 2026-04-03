@@ -16,6 +16,7 @@ import dissolveFrame from './dissolveFrame';
 import distributeNodes from './distributeNodes';
 import mergeNodeData from './mergeNodeData';
 import reorderNodes from './reorderNodes';
+import setEdgeStyle from './setEdgeStyle';
 import setExpandedNode from './setExpandedNode';
 import setNodeGeometry from './setNodeGeometry';
 import setNodeLocked from './setNodeLocked';
@@ -51,6 +52,7 @@ export const HANDLERS: HandlerMap = {
   SET_NODE_LOCKED: setNodeLocked.handler,
   CONNECT_NODES: connectNodes.handler,
   DISCONNECT_EDGES: disconnectEdges.handler,
+  SET_EDGE_STYLE: setEdgeStyle.handler,
   ALIGN_NODES: alignNodes.handler,
   DISTRIBUTE_NODES: distributeNodes.handler,
   AUTO_LAYOUT: autoLayout.handler,
@@ -73,6 +75,7 @@ export const COMMAND_META: Record<CanvasCommandType, CommandMeta> = {
   SET_NODE_LOCKED: setNodeLocked.meta,
   CONNECT_NODES: connectNodes.meta,
   DISCONNECT_EDGES: disconnectEdges.meta,
+  SET_EDGE_STYLE: setEdgeStyle.meta,
   ALIGN_NODES: alignNodes.meta,
   DISTRIBUTE_NODES: distributeNodes.meta,
   AUTO_LAYOUT: autoLayout.meta,

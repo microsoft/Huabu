@@ -48,6 +48,7 @@
  * 5. Locked Frame Respect: Locked frames cannot gain or lose children
  */
 
+import { FRAME_PADDING } from '@/config/canvas';
 import { getNodeSize } from '@/utils/node/size';
 
 import type { Edge, Node, XYPosition } from '@xyflow/react';
@@ -658,7 +659,7 @@ export function frameNodes(
   if (topLevelIds.length === 0) return { nodes, frameId: options.frameId };
 
   const byId = indexById(nodes);
-  const padding = options.padding ?? 24;
+  const padding = options.padding ?? FRAME_PADDING;
   const minWidth = options.minWidth ?? 240;
   const minHeight = options.minHeight ?? 160;
 
@@ -913,7 +914,7 @@ export function findFrameAtPoint(
 // ---------------------------------------------------------------------------
 
 export type FitFrameOptions = {
-  /** Padding around the bounding box of children. Default: 24. */
+  /** Padding around the bounding box of children. Default: FRAME_PADDING (48). */
   padding?: number;
   /** Minimum frame width. Default: 240. */
   minWidth?: number;
@@ -967,7 +968,7 @@ export function computeFrameFit(
   if (frame.type !== 'frame') return null;
   if (frame.data?.locked) return null;
 
-  const padding = options.padding ?? 12;
+  const padding = options.padding ?? FRAME_PADDING;
   const minWidth = options.minWidth ?? 20;
   const minHeight = options.minHeight ?? 20;
 

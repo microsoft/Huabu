@@ -11,13 +11,26 @@ import {
 import { useMemo } from 'react';
 import { createPortal } from 'react-dom';
 
+import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
+import { COLOR_PALETTE } from '@/config/colors';
 import {
   getAbsolutePosition,
   type NestableNode,
 } from '@/handler/canvasCommand/utils/frame';
+import useCanvasStore from '@/store/canvasStore';
 
-import useCanvasStore from '../../../store/canvasStore';
-import { Button } from '../../Common/Button';
+import type { ColorPreset } from '@/components/Common/ColorPicker';
+import type { CanvasNode } from '@/components/Nodes/types';
+import type { CanvasNodeId } from '@sediment/shared';
+
+/** Sentinel value representing "no accent". */
+const ACCENT_NONE = 'transparent';
+
+/** Accent palette: the shared color palette with a leading "None" entry. */
+const ACCENT_PALETTE: ColorPreset[] = [
+  { name: 'None', value: ACCENT_NONE },
+  ...COLOR_PALETTE,
+];
 
 /**
  * A floating toolbar that appears horizontally centred above the
@@ -27,6 +40,7 @@ export const MultiSelectToolbar = () => {
   const nodes = useCanvasStore((s) => s.nodes);
   const alignSelectedNodes = useCanvasStore((s) => s.alignSelectedNodes);
   const spreadSelectedNodes = useCanvasStore((s) => s.spreadSelectedNodes);
+  const executeCommands = useCanvasStore((s) => s.executeCommands);
 
   const { zoom, x: vpX, y: vpY } = useViewport();
 
@@ -34,7 +48,20 @@ export const MultiSelectToolbar = () => {
   // positioning is relative to the flow container, not the transformed viewport.
   const domNode = useStore((s) => s.domNode);
 
-  const selectedNodes = useMemo(() => nodes.filter((n) => n.selected), [nodes]);
+  const selectedNodes = useMemo(
+    () => nodes.filter((n) => n.selected) as CanvasNode[],
+    [nodes],
+  );
+
+  // Determine the common accent among selected nodes (empty string if mixed)
+  const commonAccent = useMemo(() => {
+    if (selectedNodes.length === 0) return ACCENT_NONE;
+    const first = selectedNodes[0].data?.style?.accent ?? null;
+    const allSame = selectedNodes.every(
+      (n) => (n.data?.style?.accent ?? null) === first,
+    );
+    return allSame ? (first ?? ACCENT_NONE) : ACCENT_NONE;
+  }, [selectedNodes]);
 
   // Compute bounding box of selected nodes in flow (absolute) coordinates
   const selectionBounds = useMemo(() => {
@@ -93,80 +120,84 @@ export const MultiSelectToolbar = () => {
         transform: 'translateX(-50%)',
       }}
     >
-      <div className="text-fg-muted shadow-bottom bg-surface flex items-center gap-1 rounded-lg border-0 p-1.5">
+      <FloatingToolbar>
         {/* Horizontal alignment */}
-        <Button
-          variant="ghost"
-          iconOnly
-          size="sm"
+        <FloatingToolbar.ActionButton
           title="Align Left"
           onClick={() => alignSelectedNodes('left')}
         >
           <AlignStartVertical />
-        </Button>
-        <Button
-          variant="ghost"
-          iconOnly
-          size="sm"
+        </FloatingToolbar.ActionButton>
+        <FloatingToolbar.ActionButton
           title="Align Center"
           onClick={() => alignSelectedNodes('center-h')}
         >
           <AlignCenterVertical />
-        </Button>
-        <Button
-          variant="ghost"
-          iconOnly
-          size="sm"
+        </FloatingToolbar.ActionButton>
+        <FloatingToolbar.ActionButton
           title="Align Right"
           onClick={() => alignSelectedNodes('right')}
         >
           <AlignEndVertical />
-        </Button>
+        </FloatingToolbar.ActionButton>
 
-        <div className="bg-border mx-0.5 h-4 w-px" />
+        <FloatingToolbar.Divider />
 
         {/* Vertical alignment */}
-        <Button
-          variant="ghost"
-          iconOnly
-          size="sm"
+        <FloatingToolbar.ActionButton
           title="Align Top"
           onClick={() => alignSelectedNodes('top')}
         >
           <AlignStartHorizontal />
-        </Button>
-        <Button
-          variant="ghost"
-          iconOnly
-          size="sm"
+        </FloatingToolbar.ActionButton>
+        <FloatingToolbar.ActionButton
           title="Align Middle"
           onClick={() => alignSelectedNodes('center-v')}
         >
           <AlignCenterHorizontal />
-        </Button>
-        <Button
-          variant="ghost"
-          iconOnly
-          size="sm"
+        </FloatingToolbar.ActionButton>
+        <FloatingToolbar.ActionButton
           title="Align Bottom"
           onClick={() => alignSelectedNodes('bottom')}
         >
           <AlignEndHorizontal />
-        </Button>
+        </FloatingToolbar.ActionButton>
 
-        <div className="bg-border mx-0.5 h-4 w-px" />
+        <FloatingToolbar.Divider />
 
         {/* Spread apart overlapping nodes */}
-        <Button
-          variant="ghost"
-          iconOnly
-          size="sm"
+        <FloatingToolbar.ActionButton
           title="Spread Apart"
           onClick={() => spreadSelectedNodes()}
         >
           <Ungroup />
-        </Button>
-      </div>
+        </FloatingToolbar.ActionButton>
+
+        <FloatingToolbar.Divider />
+
+        {/* Accent color for all selected nodes */}
+        <FloatingToolbar.ColorPicker
+          colors={ACCENT_PALETTE}
+          value={commonAccent}
+          onSelect={(v) => {
+            const accent = v === ACCENT_NONE ? null : v;
+            if (selectedNodes.length === 0) return;
+
+            executeCommands([
+              {
+                type: 'MERGE_NODE_DATA',
+                patches: selectedNodes.map((node) => ({
+                  nodeId: node.id as CanvasNodeId,
+                  patch: {
+                    style: { ...node.data?.style, accent },
+                  },
+                })),
+              },
+            ]);
+          }}
+          title="Accent Color"
+        />
+      </FloatingToolbar>
     </div>
   );
 

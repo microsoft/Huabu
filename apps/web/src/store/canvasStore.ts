@@ -491,28 +491,18 @@ const useCanvasStore = create<RFState>()(
 
       /**
        * Build a SelectedNodeDetail for a single node.
-       * For frame nodes, recursively include direct children so the agent
-       * sees the entire group without needing extra tool calls.
+       * Only sends lightweight metadata — the agent uses get_node_detail
+       * or read_source to fetch full content on demand, saving tokens.
+       * Image nodes keep `src` so the server can build vision attachments.
+       * For frame nodes, recursively include direct children as `children` details
        */
       const buildSelectedDetail = (n: Node): SelectedNodeDetail => {
         const data = n.data as Record<string, unknown> | undefined;
         const nodeType = (n.type ?? 'note') as CanvasNodeType;
 
-        let content: string | undefined;
-        let src: string | undefined;
-
-        if (
-          n.type === 'web' ||
-          n.type === 'pdf' ||
-          n.type === 'video' ||
-          n.type === 'image'
-        ) {
-          src = data?.src as string | undefined;
-        } else if (n.type !== 'frame') {
-          // Full content — no 120-char truncation
-          const raw = data?.content;
-          if (typeof raw === 'string' && raw.length > 0) content = raw;
-        }
+        // Only keep src for image nodes (needed for vision analysis)
+        const src =
+          n.type === 'image' ? (data?.src as string | undefined) : undefined;
 
         const detail: SelectedNodeDetail = {
           id: n.id,
@@ -520,7 +510,6 @@ const useCanvasStore = create<RFState>()(
           label: data?.label as string | undefined,
           origin: data?.origin as SelectedNodeDetail['origin'],
           sourceId: data?.sourceId as string | undefined,
-          ...(content !== undefined ? { content } : {}),
           ...(src !== undefined ? { src } : {}),
         };
 

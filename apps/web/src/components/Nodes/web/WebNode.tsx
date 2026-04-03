@@ -6,7 +6,7 @@ import { getWebPreview } from '@/api/web';
 
 import { useNodeScale } from '../../../hooks/useNodeScale.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
-import { Button } from '../../Common/Button.tsx';
+import { FloatingToolbar } from '../../Common/FloatingToolbar.tsx';
 import { LoadingState } from '../../Common/LoadingState.tsx';
 import { NodeWrapper } from '../NodeWrapper.tsx';
 import { PreviewCard } from '../PreviewCard.tsx';
@@ -89,7 +89,7 @@ export const WebNode = memo(
     }, [src, sourceId, refreshKey, ingestion?.status]);
 
     const WebToolbar = (
-      <div className="flex w-full items-center justify-between gap-2">
+      <>
         <a
           href={data?.src}
           target="_blank"
@@ -101,24 +101,18 @@ export const WebNode = memo(
           <ArrowUpRight size={14} strokeWidth={2} />
         </a>
 
-        <div className="text-fg-muted flex items-center gap-1">
-          <div className="bg-border h-3 w-px" />
+        <FloatingToolbar.Divider />
 
-          <Button
-            variant="ghost"
-            iconOnly
-            size="sm"
-            aria-label="Open large view"
-            title="Open Large View"
-            onClick={(e) => {
-              e.stopPropagation();
-              openExpanded(id);
-            }}
-          >
-            <Fullscreen />
-          </Button>
-        </div>
-      </div>
+        <FloatingToolbar.ActionButton
+          title="Open Large View"
+          onClick={(e) => {
+            e.stopPropagation();
+            openExpanded(id);
+          }}
+        >
+          <Fullscreen />
+        </FloatingToolbar.ActionButton>
+      </>
     );
 
     return (

@@ -4,7 +4,7 @@ import { memo } from 'react';
 
 import useCanvasStore from '@/store/canvasStore.ts';
 
-import { Button } from '../../Common/Button.tsx';
+import { FloatingToolbar } from '../../Common/FloatingToolbar.tsx';
 import { NodeWrapper } from '../NodeWrapper.tsx';
 
 import type { CanvasVideoNodeData } from '../types.ts';
@@ -16,23 +16,15 @@ export const VideoNode = memo(
     const openExpanded = useCanvasStore((s) => s.openExpanded);
 
     const VideoToolbar = (
-      <div className="flex w-full items-center justify-between gap-2">
-        {/* Tools */}
-        <div className="text-fg-muted flex items-center gap-1">
-          <Button
-            variant="ghost"
-            iconOnly
-            size="sm"
-            title="Open Large View"
-            onClick={(e) => {
-              e.stopPropagation();
-              openExpanded(id);
-            }}
-          >
-            <Fullscreen />
-          </Button>
-        </div>
-      </div>
+      <FloatingToolbar.ActionButton
+        title="Open Large View"
+        onClick={(e) => {
+          e.stopPropagation();
+          openExpanded(id);
+        }}
+      >
+        <Fullscreen />
+      </FloatingToolbar.ActionButton>
     );
 
     return (

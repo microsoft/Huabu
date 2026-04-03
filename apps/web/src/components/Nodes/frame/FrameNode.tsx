@@ -3,12 +3,12 @@ import clsx from 'clsx';
 import { LayoutGrid, Ungroup } from 'lucide-react';
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 
-import useCanvasStore from '../../../store/canvasStore.ts';
-import { Button } from '../../Common/Button.tsx';
-import { Input } from '../../Common/Input.tsx';
-import { NodeWrapper } from '../NodeWrapper.tsx';
+import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
+import { Input } from '@/components/Common/Input.tsx';
+import { NodeWrapper } from '@/components/Nodes/NodeWrapper.tsx';
+import useCanvasStore from '@/store/canvasStore.ts';
 
-import type { CanvasFrameNodeData } from '../types.ts';
+import type { CanvasFrameNodeData } from '@/components/Nodes/types.ts';
 
 export type FrameNodeType = Node<CanvasFrameNodeData, 'frame'>;
 
@@ -19,11 +19,8 @@ export const FrameNode = memo(
     const layoutGroup = useCanvasStore((state) => state.layoutGroup);
 
     const FrameToolbar = (
-      <div className="flex items-center gap-1">
-        <Button
-          variant="ghost"
-          iconOnly
-          size="sm"
+      <>
+        <FloatingToolbar.ActionButton
           title="Layout Children"
           onClick={(e) => {
             e.preventDefault();
@@ -32,11 +29,8 @@ export const FrameNode = memo(
           }}
         >
           <LayoutGrid />
-        </Button>
-        <Button
-          variant="ghost"
-          iconOnly
-          size="sm"
+        </FloatingToolbar.ActionButton>
+        <FloatingToolbar.ActionButton
           title="Unframe"
           onClick={(e) => {
             e.preventDefault();
@@ -45,8 +39,8 @@ export const FrameNode = memo(
           }}
         >
           <Ungroup />
-        </Button>
-      </div>
+        </FloatingToolbar.ActionButton>
+      </>
     );
 
     const label = useMemo(() => {

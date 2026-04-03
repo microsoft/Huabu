@@ -56,6 +56,10 @@ function toMessage(error: unknown): string {
  * Strip derived `content` and `label` from nodes that already have a `sourceId`.
  * This avoids storing redundant copies in the canvas JSON - the knowledge
  * store is the single source of truth for content and title/label.
+ *
+ * Labels that were intentionally set by a user or the AI agent are preserved
+ * in the canvas JSON so they survive save/load cycles without relying on
+ * hydration from the knowledge store.
  */
 function stripManagedContent(nodes: NodeLike[]): NodeLike[] {
   return nodes.map((node) => {
@@ -63,13 +67,17 @@ function stripManagedContent(nodes: NodeLike[]): NodeLike[] {
       return node;
     }
 
-    // Strip `content` and `label`; the knowledge store owns both.
+    // Strip `content`; the knowledge store owns it.
     // Preserve `content` as `contentSnapshot` for fallback.
+    // Only strip `label` when it is auto-derived; keep intentional labels.
     const { content, label, ...dataRest } = node.data;
+    const keepLabel =
+      node.data.labelSource === 'user' || node.data.labelSource === 'agent';
     return {
       ...node,
       data: {
         ...dataRest,
+        ...(keepLabel && label != null ? { label } : {}),
         ...(typeof content === 'string' ? { contentSnapshot: content } : {}),
       },
     };
@@ -97,17 +105,31 @@ async function hydrateNodeContent(nodes: NodeLike[]): Promise<NodeLike[]> {
       (node.data?.contentSnapshot as string | undefined) ??
       '';
 
-    // Hydrate label from source title so it stays in sync.
-    // Preserve the existing node label as fallback.
-    const label =
-      source?.title ?? (node.data?.label as string | undefined) ?? '';
+    // Hydrate label from source title.
+    // When labelSource is 'auto' (or absent): always sync from the knowledge store.
+    // When labelSource is 'user' or 'agent': only restore if the label was
+    // stripped (missing) from a previous save cycle — preserves the
+    // original labelSource so we don't downgrade to 'auto'.
+    const labelPatch: Record<string, unknown> = {};
+    if (source?.title) {
+      if (
+        node.data?.labelSource !== 'user' &&
+        node.data?.labelSource !== 'agent'
+      ) {
+        labelPatch.label = source.title;
+        labelPatch.labelSource = 'auto';
+      } else if (!node.data?.label) {
+        // Intentional label was stripped — restore from source as fallback
+        labelPatch.label = source.title;
+      }
+    }
 
     return {
       ...node,
       data: {
         ...node.data,
         content,
-        label,
+        ...labelPatch,
       },
     };
   });

@@ -4,6 +4,10 @@
  */
 
 import type { AgentMode } from '../agent.js';
+import type { NodeBgColorValue } from './color.js';
+
+export type { NodeBgColorValue } from './color.js';
+export { NODE_BG_COLORS } from './color.js';
 
 // ==================== Basic Node Types ====================
 
@@ -53,17 +57,24 @@ export function normalizeOrigin(raw: unknown): NodeOrigin | undefined {
 }
 
 /** Who set the node label — controls whether auto-title may overwrite it */
-export type LabelSource = 'auto' | 'user';
+export type LabelSource = 'auto' | 'user' | 'agent';
+
+/** Font family logical names. CSS font stacks are resolved on the UI side. */
+export type NodeFontFamily = 'default' | 'serif' | 'mono' | 'hand';
+
+export type NodeFontWeight = 'normal' | 'bold';
+export type NodeFontStyle = 'normal' | 'italic';
+export type NodeTextDecoration = 'underline' | 'line-through';
 
 export interface NodeStyle {
-  backgroundColor?: string;
+  backgroundColor?: NodeBgColorValue | (string & {});
   textColor?: string;
-  fontSize?: number;
-  fontFamily?: string;
-  fontWeight?: string;
-  fontStyle?: string;
-  textDecoration?: string; // 'underline' | 'line-through' | both
-  align?: 'top-left' | 'center';
+  /** Accent color (hex) shown as a top border stripe for visual grouping. */
+  accent?: string | null;
+  fontFamily?: NodeFontFamily;
+  fontWeight?: NodeFontWeight;
+  fontStyle?: NodeFontStyle;
+  textDecoration?: string; // space-separated NodeTextDecoration values
 }
 
 // ==================== Block-Level Provenance ====================
@@ -132,6 +143,12 @@ export interface BaseNodeData {
    * added, removed, or repositioned.
    */
   locked?: boolean;
+  /**
+   * Visual style. Only `accent` and `backgroundColor` are supported on all
+   * node types; text-related fields (fontFamily, textColor, etc.) are only
+   * used by note and text nodes.
+   */
+  style?: NodeStyle;
 }
 
 /** Note node: rich content that can be ingested into knowledge base */

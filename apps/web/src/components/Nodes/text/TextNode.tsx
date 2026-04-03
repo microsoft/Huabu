@@ -1,29 +1,36 @@
+import {
+  prepare,
+  layout,
+  prepareWithSegments,
+  layoutWithLines,
+} from '@chenglou/pretext';
 import { type Node, type NodeProps, useStore } from '@xyflow/react';
 import { clsx } from 'clsx';
-import { Bold, Italic, Underline, Strikethrough } from 'lucide-react';
+import { Baseline, Bold, Italic, Underline, Strikethrough } from 'lucide-react';
 import { memo, useCallback, useState, useRef, useMemo, useEffect } from 'react';
 
-import { Button } from '@/components/Common/Button.tsx';
-import { NodeBgColorSelector } from '@/components/Common/NodeBgColorSelector.tsx';
-import { NodeTextColorSelector } from '@/components/Common/NodeTextColorSelector.tsx';
-import { Select } from '@/components/Common/Select.tsx';
+import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
+import { NODE_BG_COLORS, COLOR_PALETTE } from '@/config/colors';
 import useCanvasStore from '@/store/canvasStore.ts';
 
 import { NodeWrapper } from '../NodeWrapper';
 
 import type { CanvasTextNodeData, NodeStyle } from '../types';
+import type { NodeFontFamily } from '@sediment/shared';
 
-const FONT_FAMILIES = [
-  { name: 'Default', value: 'ui-sans-serif, system-ui, sans-serif' },
-  {
-    name: 'Serif',
-    value: 'ui-serif, Georgia, Cambria, "Times New Roman", Times, serif',
-  },
-  {
-    name: 'Mono',
-    value: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-  },
-  { name: 'Hand', value: '"Comic Sans MS", "Chalkboard SE", sans-serif' },
+/** Map logical font family names to CSS font stacks. */
+const FONT_FAMILY_CSS: Record<NodeFontFamily, string> = {
+  default: 'ui-sans-serif, system-ui, sans-serif',
+  serif: 'ui-serif, Georgia, Cambria, "Times New Roman", Times, serif',
+  mono: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+  hand: '"Comic Sans MS", "Chalkboard SE", sans-serif',
+};
+
+const FONT_FAMILY_OPTIONS: { name: string; value: NodeFontFamily }[] = [
+  { name: 'Default', value: 'default' },
+  { name: 'Serif', value: 'serif' },
+  { name: 'Mono', value: 'mono' },
+  { name: 'Hand', value: 'hand' },
 ];
 
 /** Maximum characters per line before wrapping. */
@@ -34,7 +41,22 @@ const NODE_PADDING = 4;
 export type TextNodeType = Node<CanvasTextNodeData, 'text'>;
 
 /**
- * Measure the natural content dimensions using a hidden off-screen element.
+ * Build the CSS font shorthand string for pretext's prepare().
+ */
+function buildFontStr(
+  fontSize: number,
+  fontFamily: string,
+  fontWeight: string,
+  fontStyle: string,
+): string {
+  let s = '';
+  if (fontStyle === 'italic') s += 'italic ';
+  if (fontWeight === 'bold') s += 'bold ';
+  return `${s}${fontSize}px ${fontFamily}`;
+}
+
+/**
+ * Measure the natural content dimensions using pretext (no DOM reflow).
  * maxWidth controls the wrap boundary.
  */
 function measureTextContent(
@@ -48,29 +70,29 @@ function measureTextContent(
     maxWidth: number;
   },
 ): { width: number; height: number } {
-  const el = document.createElement('div');
-  el.style.position = 'absolute';
-  el.style.visibility = 'hidden';
-  el.style.whiteSpace = 'pre-wrap';
-  el.style.wordBreak = 'break-word';
-  el.style.fontSize = `${opts.fontSize}px`;
-  el.style.fontFamily = opts.fontFamily;
-  el.style.fontWeight = opts.fontWeight;
-  el.style.fontStyle = opts.fontStyle;
-  el.style.lineHeight = String(opts.lineHeight);
-  el.style.maxWidth = `${opts.maxWidth}px`;
-  el.style.padding = '0';
-  el.textContent = text || ' ';
-  document.body.appendChild(el);
-  const rect = el.getBoundingClientRect();
-  document.body.removeChild(el);
-  // Ceil the height to prevent sub-pixel rounding from clipping the last line.
-  return { width: Math.ceil(rect.width), height: Math.ceil(rect.height) };
+  const fontStr = buildFontStr(
+    opts.fontSize,
+    opts.fontFamily,
+    opts.fontWeight,
+    opts.fontStyle,
+  );
+  const prepared = prepareWithSegments(text || ' ', fontStr, {
+    whiteSpace: 'pre-wrap',
+  });
+  const lineH = opts.fontSize * opts.lineHeight;
+  const { height, lines } = layoutWithLines(prepared, opts.maxWidth, lineH);
+
+  // Width = widest line (shrink-wrap, matching old DOM measurement behaviour)
+  let maxW = 0;
+  for (const line of lines) {
+    if (line.width > maxW) maxW = line.width;
+  }
+  return { width: Math.ceil(maxW), height: Math.ceil(height) };
 }
 
 /**
  * Binary-search for the font size that makes text fill a target height
- * at a given content width.
+ * at a given content width.  Uses pretext — pure arithmetic, no DOM access.
  */
 function computeFontSizeForHeight(
   text: string,
@@ -94,12 +116,16 @@ function computeFontSizeForHeight(
   let hi = 200;
   for (let i = 0; i < 15; i++) {
     const mid = (lo + hi) / 2;
-    const measured = measureTextContent(text, {
-      ...opts,
-      fontSize: mid,
-      maxWidth: contentWidth,
-    });
-    if (measured.height <= contentHeight) {
+    const fontStr = buildFontStr(
+      mid,
+      opts.fontFamily,
+      opts.fontWeight,
+      opts.fontStyle,
+    );
+    const prepared = prepare(text, fontStr, { whiteSpace: 'pre-wrap' });
+    const lineH = mid * opts.lineHeight;
+    const { height } = layout(prepared, contentWidth, lineH);
+    if (height <= contentHeight) {
       lo = mid;
     } else {
       hi = mid;
@@ -140,7 +166,6 @@ export const TextNode = memo(
 
     // Live font size during resize (computed from current dimensions)
     const [liveFontSize, setLiveFontSize] = useState<number | null>(null);
-    const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const updateStyle = useCallback(
       (newStyle: Partial<NodeStyle>) => {
@@ -155,8 +180,8 @@ export const TextNode = memo(
     );
 
     const style = data.style || {};
-    const baseFontSize = style.fontSize || 16;
-    const fontFamily = style.fontFamily || FONT_FAMILIES[0].value;
+    const baseFontSize = 16;
+    const fontFamily = FONT_FAMILY_CSS[style.fontFamily ?? 'default'];
     const isBold = style.fontWeight === 'bold';
     const isItalic = style.fontStyle === 'italic';
     const textColor = style.textColor;
@@ -227,21 +252,17 @@ export const TextNode = memo(
 
     const handleResize = useCallback(
       (width: number, height: number) => {
-        // Debounce the font-size computation (~30ms) for smooth dragging
-        if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
-        resizeTimerRef.current = setTimeout(() => {
-          const cw = width - NODE_PADDING * 2;
-          const ch = height - NODE_PADDING * 2;
-          const fs = computeFontSizeForHeight(draftContent, cw, ch, fontOpts);
-          setLiveFontSize(fs);
-        }, 10);
+        // pretext is pure arithmetic — no DOM reflow, no debounce needed.
+        const cw = width - NODE_PADDING * 2;
+        const ch = height - NODE_PADDING * 2;
+        const fs = computeFontSizeForHeight(draftContent, cw, ch, fontOpts);
+        setLiveFontSize(fs);
       },
       [draftContent, fontOpts],
     );
 
     const handleResizeEnd = useCallback(() => {
       isResizingRef.current = false;
-      if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
       setLiveFontSize(null); // clear live → computedFontSize takes over
       // setNodeGeometry (called by NodeWrapper) writes numeric width/height
       // to node.style, which flips hasFixedSize → true automatically.
@@ -277,98 +298,87 @@ export const TextNode = memo(
     };
 
     const TextToolbar = (
-      <div className="flex w-full items-center gap-1">
-        <Select
-          options={FONT_FAMILIES.map((f) => ({
+      <>
+        <FloatingToolbar.Select
+          options={FONT_FAMILY_OPTIONS.map((f) => ({
             value: f.value,
             label: f.name,
           }))}
-          value={fontFamily}
+          value={style.fontFamily ?? 'default'}
           onChange={(v) => updateStyle({ fontFamily: v })}
-          variant="outline"
-          size="sm"
-          className="h-6 rounded-sm"
         />
 
-        <div className="bg-border mx-1 h-3 w-px" />
+        <FloatingToolbar.Divider />
 
-        <Button
-          variant="ghost"
-          iconOnly
-          size="sm"
+        <FloatingToolbar.ToggleButton
+          active={style.fontWeight === 'bold'}
+          title="Bold"
           onClick={() =>
             updateStyle({
               fontWeight: style.fontWeight === 'bold' ? 'normal' : 'bold',
             })
           }
-          className={clsx(
-            style.fontWeight === 'bold'
-              ? 'text-info bg-info-bg enabled:hover:bg-info-bg'
-              : 'text-fg-muted hover:bg-bg-default',
-          )}
         >
           <Bold />
-        </Button>
+        </FloatingToolbar.ToggleButton>
 
-        <Button
-          variant="ghost"
-          iconOnly
-          size="sm"
+        <FloatingToolbar.ToggleButton
+          active={style.fontStyle === 'italic'}
+          title="Italic"
           onClick={() =>
             updateStyle({
               fontStyle: style.fontStyle === 'italic' ? 'normal' : 'italic',
             })
           }
-          className={clsx(
-            style.fontStyle === 'italic'
-              ? 'text-info bg-info-bg enabled:hover:bg-info-bg'
-              : 'text-fg-muted hover:bg-bg-default',
-          )}
         >
           <Italic />
-        </Button>
+        </FloatingToolbar.ToggleButton>
 
-        <Button
-          variant="ghost"
-          iconOnly
-          size="sm"
+        <FloatingToolbar.ToggleButton
+          active={textDecoration.includes('underline')}
+          title="Underline"
           onClick={() => toggleDecoration('underline')}
-          className={clsx(
-            textDecoration.includes('underline')
-              ? 'text-info bg-info-bg enabled:hover:bg-info-bg'
-              : 'text-fg-muted hover:bg-bg-default',
-          )}
         >
           <Underline />
-        </Button>
+        </FloatingToolbar.ToggleButton>
 
-        <Button
-          variant="ghost"
-          iconOnly
-          size="sm"
+        <FloatingToolbar.ToggleButton
+          active={textDecoration.includes('line-through')}
+          title="Strikethrough"
           onClick={() => toggleDecoration('line-through')}
-          className={clsx(
-            textDecoration.includes('line-through')
-              ? 'text-info bg-info-bg enabled:hover:bg-info-bg'
-              : 'text-fg-muted hover:bg-bg-default',
-          )}
         >
           <Strikethrough />
-        </Button>
+        </FloatingToolbar.ToggleButton>
 
-        <div className="bg-border mx-1 h-3 w-px" />
+        <FloatingToolbar.Divider />
 
-        <NodeTextColorSelector
-          nodeId={id}
-          currentTextColor={data.style?.textColor}
-          style={data.style}
+        <FloatingToolbar.ColorPicker
+          colors={COLOR_PALETTE}
+          value={data.style?.textColor ?? COLOR_PALETTE[0].value}
+          onSelect={(v) =>
+            updateNodeData(id, {
+              style: { ...data.style, textColor: v },
+            })
+          }
+          title="Change Text Color"
+        >
+          <Baseline
+            style={{
+              color: data.style?.textColor || COLOR_PALETTE[0].value,
+            }}
+          />
+        </FloatingToolbar.ColorPicker>
+        <FloatingToolbar.ColorPicker
+          colors={NODE_BG_COLORS}
+          value={data.style?.backgroundColor ?? NODE_BG_COLORS[0].value}
+          onSelect={(v) =>
+            updateNodeData(id, {
+              style: { ...data.style, backgroundColor: v },
+            })
+          }
+          title="Change Color"
         />
-        <NodeBgColorSelector
-          nodeId={id}
-          currentColor={data.style?.backgroundColor}
-          style={data.style}
-        />
-      </div>
+      </>
     );
 
     return (
