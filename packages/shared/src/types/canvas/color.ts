@@ -27,16 +27,16 @@ export const STROKE_COLORS = COLOR_PALETTE;
 /** @deprecated Use PaletteColorValue instead */
 export type StrokeColorValue = PaletteColorValue;
 
-/** Node background color presets (Tailwind classes). */
+/** Node background color presets (hex / CSS keyword). */
 export const NODE_BG_COLORS = [
-  { name: 'Transparent', value: 'bg-transparent' },
-  { name: 'White', value: 'bg-white' },
-  { name: 'Red', value: 'bg-red-50' },
-  { name: 'Orange', value: 'bg-orange-50' },
-  { name: 'Yellow', value: 'bg-yellow-50' },
-  { name: 'Green', value: 'bg-green-50' },
-  { name: 'Blue', value: 'bg-blue-50' },
-  { name: 'Purple', value: 'bg-purple-50' },
+  { name: 'Transparent', value: 'transparent' },
+  { name: 'White', value: '#ffffff' },
+  { name: 'Red', value: '#fef2f2' },
+  { name: 'Orange', value: '#fff7ed' },
+  { name: 'Yellow', value: '#fefce8' },
+  { name: 'Green', value: '#f0fdf4' },
+  { name: 'Blue', value: '#eff6ff' },
+  { name: 'Purple', value: '#faf5ff' },
 ] as const;
 
 /** Union type of all allowed node background color values. */

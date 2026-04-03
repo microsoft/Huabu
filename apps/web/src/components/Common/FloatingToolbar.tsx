@@ -176,11 +176,6 @@ interface ToolbarColorPickerProps {
   /** Tooltip label for the trigger button. */
   title?: string;
   /**
-   * Whether color values are Tailwind classes (true) or raw hex strings (false).
-   * Default false.
-   */
-  classMode?: boolean;
-  /**
    * Custom trigger content. When omitted, a circular swatch showing the
    * current color is rendered.
    */
@@ -196,7 +191,6 @@ function ToolbarColorPicker({
   value,
   onSelect,
   title = 'Change color',
-  classMode = false,
   children,
 }: ToolbarColorPickerProps) {
   const [isOpen, setIsOpen] = useState(false);
@@ -217,17 +211,7 @@ function ToolbarColorPicker({
     return () => document.removeEventListener('mousedown', handler);
   }, [isOpen]);
 
-  const activePreset = colors.find((c) => c.value === value);
-
-  const defaultTrigger = classMode ? (
-    <div
-      className={cn(
-        'h-3.5 w-3.5 rounded-full border',
-        activePreset?.value,
-        activePreset?.border ?? 'border-edge-default',
-      )}
-    />
-  ) : (
+  const defaultTrigger = (
     <div
       className="border-edge-default h-3.5 w-3.5 rounded-full border"
       style={{ backgroundColor: value }}
@@ -270,7 +254,6 @@ function ToolbarColorPicker({
                 onSelect(v);
                 setIsOpen(false);
               }}
-              classMode={classMode}
             />
           </div>
         </>

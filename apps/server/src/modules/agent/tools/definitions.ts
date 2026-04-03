@@ -110,7 +110,7 @@ const StrokeWidthSchema = Type.Union(
 const NodeBgColorSchema = Type.Union(
   NODE_BG_COLORS.map((c) => Type.Literal(c.value)),
   {
-    description: `Background color (Tailwind class). Allowed: ${NODE_BG_COLORS.map((c) => `"${c.value}" (${c.name})`).join(', ')}`,
+    description: `Background color (hex / keyword). Allowed: ${NODE_BG_COLORS.map((c) => `"${c.value}" (${c.name})`).join(', ')}`,
   },
 );
 

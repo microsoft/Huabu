@@ -386,27 +386,27 @@ export const NodeWrapper = memo(
           className={cn(
             'group relative flex h-full w-full flex-col rounded transition-all duration-120',
             type !== 'text' && !data.style?.accent && 'shadow',
-            'style' in data && data.style?.backgroundColor
-              ? data.style.backgroundColor
-              : 'bg-transparent',
+            !data.style?.backgroundColor && 'bg-transparent',
             selected ? 'ring-info ring' : 'ring-border hover:ring',
             // Accent: colored border + bottom-right shadow
             data.style?.accent && 'border-2',
             className,
           )}
-          style={
-            data.style?.accent
-              ? {
-                  borderColor:
-                    type === 'frame'
-                      ? `color-mix(in srgb, var(--color-fg-default) 0%, transparent)`
-                      : `${data.style.accent}80`,
-                  ...(type === 'frame' && {
-                    boxShadow: `4px 4px 3px 3px ${data.style.accent}`,
-                  }),
-                }
-              : undefined
-          }
+          style={{
+            ...(data.style?.backgroundColor &&
+              data.style.backgroundColor !== 'transparent' && {
+                backgroundColor: data.style.backgroundColor,
+              }),
+            ...(data.style?.accent && {
+              borderColor:
+                type === 'frame'
+                  ? `color-mix(in srgb, var(--color-fg-default) 0%, transparent)`
+                  : `${data.style.accent}80`,
+              ...(type === 'frame' && {
+                boxShadow: `4px 4px 3px 3px ${data.style.accent}`,
+              }),
+            }),
+          }}
           onDoubleClick={onDoubleClick}
         >
           {showIngestionOverlay && (

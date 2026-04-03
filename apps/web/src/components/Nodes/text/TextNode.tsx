@@ -377,7 +377,6 @@ export const TextNode = memo(
             })
           }
           title="Change Color"
-          classMode
         />
       </>
     );

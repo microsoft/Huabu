@@ -16,24 +16,10 @@ import type { ColorPreset } from '@/components/Common/ColorPicker';
  * the server-side agent tool definitions stay in sync automatically.
  */
 
-// ---- Node background colors (Tailwind class-based) ----
-// Derived from @sediment/shared; UI-specific border/ring classes added here.
+// ---- Node background colors (hex / CSS keyword) ----
+// Derived from @sediment/shared.
 
-const NODE_BG_STYLE: Record<string, { border: string; ring: string }> = {
-  'bg-transparent': { border: 'border-info', ring: 'ring-transparent' },
-  'bg-white': { border: 'border-edge-default', ring: 'ring-gray-200' },
-  'bg-red-50': { border: 'border-red-200', ring: 'ring-red-200' },
-  'bg-orange-50': { border: 'border-orange-200', ring: 'ring-orange-200' },
-  'bg-yellow-50': { border: 'border-yellow-200', ring: 'ring-yellow-200' },
-  'bg-green-50': { border: 'border-green-200', ring: 'ring-green-200' },
-  'bg-blue-50': { border: 'border-blue-200', ring: 'ring-blue-200' },
-  'bg-purple-50': { border: 'border-purple-200', ring: 'ring-purple-200' },
-};
-
-export const NODE_BG_COLORS: ColorPreset[] = _NODE_BG_COLORS.map((c) => ({
-  ...c,
-  ...NODE_BG_STYLE[c.value],
-}));
+export const NODE_BG_COLORS: ColorPreset[] = [..._NODE_BG_COLORS];
 
 // ---- Shared hex-based color palette ----
 // Used by edge strokes, text colors, and node accents so the palette
