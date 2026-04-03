@@ -3,6 +3,7 @@ import { useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 
 import { COLOR_PALETTE } from '@/config/colors';
+import { DEFAULT_EDGE_STROKE_WIDTH } from '@/handler/canvasCommand/utils/edge';
 import useCanvasStore from '@/store/canvasStore';
 
 import { FloatingToolbar } from '../../Common/FloatingToolbar';
@@ -243,7 +244,7 @@ export const EdgeStyleToolbar = () => {
   const currentLineType: EdgeLineType = style.lineType ?? 'bezier';
   const currentLineStyle: EdgeLineStyle = style.lineStyle ?? 'solid';
   const currentStroke = style.stroke ?? COLOR_PALETTE[0].value;
-  const currentWidth = style.strokeWidth ?? 1;
+  const currentWidth = style.strokeWidth ?? DEFAULT_EDGE_STROKE_WIDTH;
   const currentDirection: EdgeDirection = style.direction ?? 'none';
 
   const toolbar = (
@@ -256,8 +257,8 @@ export const EdgeStyleToolbar = () => {
       }}
     >
       <FloatingToolbar>
-        {/* Line type */}
         <FloatingToolbar.Select
+          label="Type"
           options={LINE_TYPE_OPTIONS}
           value={currentLineType}
           onChange={(v) => setStyle({ lineType: v })}
@@ -266,8 +267,8 @@ export const EdgeStyleToolbar = () => {
 
         <FloatingToolbar.Divider />
 
-        {/* Line style */}
         <FloatingToolbar.Select
+          label="Style"
           options={LINE_STYLE_OPTIONS}
           value={currentLineStyle}
           onChange={(v) => setStyle({ lineStyle: v })}
@@ -276,8 +277,8 @@ export const EdgeStyleToolbar = () => {
 
         <FloatingToolbar.Divider />
 
-        {/* Direction */}
         <FloatingToolbar.Select
+          label="Arrow"
           options={DIRECTION_OPTIONS}
           value={currentDirection}
           onChange={(v) => setStyle({ direction: v })}
@@ -286,8 +287,8 @@ export const EdgeStyleToolbar = () => {
 
         <FloatingToolbar.Divider />
 
-        {/* Stroke width */}
         <FloatingToolbar.Select
+          label="Width"
           options={STROKE_WIDTH_OPTIONS}
           value={`${currentWidth}`}
           onChange={(v) =>

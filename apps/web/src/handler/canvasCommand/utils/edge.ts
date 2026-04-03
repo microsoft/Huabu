@@ -141,15 +141,24 @@ export function rerouteAllEdges<
  * Stores the EdgeStyle as source of truth in `edge.data.edgeStyle` and
  * derives the React Flow rendering props (`type`, `style`, `animated`).
  */
+/** Default stroke width applied to every new edge. */
+export const DEFAULT_EDGE_STROKE_WIDTH = 2;
+
 export function applyEdgeStyle(edge: Edge, style?: EdgeStyle): Edge {
-  if (!style) return edge;
+  // Always ensure a baseline strokeWidth even when no style is provided.
+  if (!style) {
+    return {
+      ...edge,
+      style: { ...edge.style, strokeWidth: DEFAULT_EDGE_STROKE_WIDTH },
+    };
+  }
 
   const rfStyle: Record<string, unknown> = {
     ...(typeof edge.style === 'object' ? edge.style : {}),
   };
 
   if (style.stroke) rfStyle.stroke = style.stroke;
-  if (style.strokeWidth !== undefined) rfStyle.strokeWidth = style.strokeWidth;
+  rfStyle.strokeWidth = style.strokeWidth ?? DEFAULT_EDGE_STROKE_WIDTH;
   if (style.lineStyle === 'dashed') {
     rfStyle.strokeDasharray = '6 3';
   } else if (style.lineStyle === 'dotted') {

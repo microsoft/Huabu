@@ -3,6 +3,7 @@ import {
   ReactFlow,
   Background,
   Controls,
+  ConnectionMode,
   type ReactFlowInstance,
   Panel,
 } from '@xyflow/react';
@@ -155,6 +156,48 @@ export const Canvas: React.FC<CanvasProps> = ({
   );
 
   const isTouch = useIsTouch();
+
+  // When a connection drag ends without landing on a handle, check if the
+  // pointer is over a node element and create the connection anyway.
+  // This makes connecting much easier on touch devices.
+  const onConnectEnd = useCallback(
+    (
+      event: MouseEvent | TouchEvent,
+      connectionState: {
+        fromNode?: { id: string } | null;
+        isValid: boolean | null;
+      },
+    ) => {
+      // If React Flow already handled this as a valid connection, skip.
+      if (connectionState.isValid) return;
+
+      const sourceNodeId = connectionState.fromNode?.id;
+      if (!sourceNodeId) return;
+
+      // Determine the element under the pointer
+      const target =
+        event instanceof TouchEvent
+          ? document.elementFromPoint(
+              event.changedTouches[0].clientX,
+              event.changedTouches[0].clientY,
+            )
+          : (event.target as Element);
+
+      const nodeEl = target?.closest('.react-flow__node');
+      if (!nodeEl) return;
+
+      const targetNodeId = nodeEl.getAttribute('data-id');
+      if (!targetNodeId || targetNodeId === sourceNodeId) return;
+
+      onConnect({
+        source: sourceNodeId,
+        target: targetNodeId,
+        sourceHandle: null,
+        targetHandle: null,
+      });
+    },
+    [onConnect],
+  );
 
   // --- Frame drag-to-create state ---
   const [frameDragStart, setFrameDragStart] = useState<{
@@ -574,6 +617,8 @@ export const Canvas: React.FC<CanvasProps> = ({
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onConnectEnd={onConnectEnd}
+        connectionMode={ConnectionMode.Loose}
         onNodeDragStart={onNodeDragStart}
         onNodeDrag={onNodeDrag}
         onNodeDragStop={onNodeDragStop}
