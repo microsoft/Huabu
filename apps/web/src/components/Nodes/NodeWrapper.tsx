@@ -28,6 +28,7 @@ import { Tooltip } from '@/components/Common/Tooltip.tsx';
 import { COLOR_PALETTE } from '@/config/colors.ts';
 import { NODE_ICON } from '@/config/nodeIcons.ts';
 import { useCornerZoomResize } from '@/hooks/useCornerZoomResize.ts';
+import { useIsTouch } from '@/hooks/useInputMode.ts';
 import { useNodeLOD } from '@/hooks/useNodeLOD.ts';
 import useCanvasStore from '@/store/canvasStore.ts';
 import { summarizeProvenance } from '@/utils/provenance.ts';
@@ -218,6 +219,7 @@ export const NodeWrapper = memo(
       type !== 'frame' && ingestion?.status === 'pending';
 
     const renderMode = useNodeLOD(id, type);
+    const isTouch = useIsTouch();
 
     // Zoom-invariant handle style – same approach as NodeResizer internals:
     // CSS `scale` property with Math.max(1/zoom, 1) so handles never shrink
@@ -319,12 +321,12 @@ export const NodeWrapper = memo(
           onResize={handleResize}
           onResizeEnd={handleResizeEnd}
           handleStyle={{
-            width: 8,
-            height: 8,
+            width: isTouch ? 20 : 8,
+            height: isTouch ? 20 : 8,
             borderRadius: 0,
           }}
           lineStyle={{
-            borderWidth: 8,
+            borderWidth: isTouch ? 16 : 8,
           }}
           lineClassName="!border-transparent"
         />

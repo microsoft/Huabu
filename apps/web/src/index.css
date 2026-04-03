@@ -272,6 +272,12 @@ body,
 }
 
 /* Click-to-place cursor overrides for ReactFlow pane */
+/* Prevent browser default gestures (double-tap zoom, pull-to-refresh)
+   from interfering with canvas pan/zoom managed by React Flow. */
+.react-flow {
+  touch-action: none;
+}
+
 .canvas-pending-note .react-flow__pane,
 .canvas-pending-text .react-flow__pane,
 .canvas-pending-note .react-flow__node,

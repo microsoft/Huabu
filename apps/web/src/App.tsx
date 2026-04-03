@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 
 import { ToastContainer } from './components/Common/Toast';
+import { useInputModeListener } from './hooks/useInputMode';
 import CanvasListPage from './pages/CanvasListPage';
 import CanvasPage from './pages/CanvasPage/CanvasPage.tsx';
 import ComponentShowcasePage from './pages/ComponentShowcasePage';
@@ -45,6 +46,8 @@ function WorkspaceGuard({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
+  useInputModeListener();
+
   return (
     <BrowserRouter>
       <WorkspaceGuard>

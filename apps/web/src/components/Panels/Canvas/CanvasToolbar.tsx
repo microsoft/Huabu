@@ -7,10 +7,14 @@ import {
   Link as LinkIcon,
   Sprout,
   Sparkles,
+  Undo2,
+  Redo2,
+  Trash2,
 } from 'lucide-react';
 import { useRef, useState, type ChangeEvent } from 'react';
 
 import { uploadImage, uploadPdf, uploadVideo } from '@/api/artifact';
+import { useIsTouch } from '@/hooks/useInputMode';
 import { useIntentStore } from '@/store/intentStore';
 
 import { NODE_ICON } from '../../../config/nodeIcons.ts';
@@ -33,6 +37,17 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
   const layoutAll = useCanvasStore((s) => s.layoutAll);
   const autoLayoutEnabled = useCanvasStore((s) => s.autoLayoutEnabled);
   const toggleAutoLayout = useCanvasStore((s) => s.toggleAutoLayout);
+
+  // Touch-mode undo / redo / delete
+  const isTouch = useIsTouch();
+  const undo = useCanvasStore((s) => s.undo);
+  const redo = useCanvasStore((s) => s.redo);
+  const canUndo = useCanvasStore((s) => s.canUndo);
+  const canRedo = useCanvasStore((s) => s.canRedo);
+  const nodes = useCanvasStore((s) => s.nodes);
+  const edges = useCanvasStore((s) => s.edges);
+  const deleteNodes = useCanvasStore((s) => s.deleteNodes);
+  const disconnectEdges = useCanvasStore((s) => s.disconnectEdges);
 
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -309,6 +324,51 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             <Sprout />
           </Button>
         </div>
+
+        {/* Touch-only: Undo / Redo / Delete (keyboard shortcuts are unreachable) */}
+        {isTouch && (
+          <>
+            <div className="bg-border mx-1 h-4 w-px" />
+            <div className="flex items-center gap-1.5">
+              <Button
+                variant="ghost"
+                iconOnly
+                title="Undo"
+                disabled={!canUndo}
+                onClick={() => undo()}
+              >
+                <Undo2 />
+              </Button>
+              <Button
+                variant="ghost"
+                iconOnly
+                title="Redo"
+                disabled={!canRedo}
+                onClick={() => redo()}
+              >
+                <Redo2 />
+              </Button>
+              <Button
+                variant="ghost"
+                iconOnly
+                title="Delete selected"
+                onClick={() => {
+                  const selectedNodeIds = nodes
+                    .filter((n) => n.selected)
+                    .map((n) => n.id);
+                  const selectedEdgeIds = edges
+                    .filter((e) => e.selected)
+                    .map((e) => e.id);
+                  if (selectedNodeIds.length > 0) deleteNodes(selectedNodeIds);
+                  if (selectedEdgeIds.length > 0)
+                    disconnectEdges(selectedEdgeIds);
+                }}
+              >
+                <Trash2 />
+              </Button>
+            </div>
+          </>
+        )}
       </div>
 
       {/* --- Modals --- */}

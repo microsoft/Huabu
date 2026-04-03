@@ -26,6 +26,7 @@ import {
   textToNodeInput,
 } from '@/handler/canvasCommand/nodeInputBuilders';
 import { useCanvasShortcuts } from '@/hooks/useCanvasShortcuts';
+import { useIsTouch } from '@/hooks/useInputMode';
 
 import { NodeToolbar } from './CanvasToolbar.tsx';
 import { EdgeStyleToolbar } from './EdgeStyleToolbar.tsx';
@@ -152,6 +153,8 @@ export const Canvas: React.FC<CanvasProps> = ({
       disabled: shortcutsDisabled,
     },
   );
+
+  const isTouch = useIsTouch();
 
   // --- Frame drag-to-create state ---
   const [frameDragStart, setFrameDragStart] = useState<{
@@ -593,13 +596,18 @@ export const Canvas: React.FC<CanvasProps> = ({
             ? false
             : tool === 'pan'
               ? true
-              : [1] /* 1 = middle mouse button */
+              : isTouch
+                ? true
+                : [1] /* 1 = middle mouse button */
         }
-        selectionOnDrag={pendingNodeType ? false : tool === 'select'}
+        selectionOnDrag={
+          pendingNodeType ? false : isTouch ? false : tool === 'select'
+        }
         nodesDraggable={!pendingNodeType}
         elementsSelectable={!pendingNodeType}
-        panOnScroll={true}
+        panOnScroll={!isTouch}
         zoomOnScroll={true}
+        zoomOnPinch={true}
         minZoom={0.1}
         maxZoom={5}
         onlyRenderVisibleElements
