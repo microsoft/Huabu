@@ -1,4 +1,3 @@
-import useCanvasStore from '@store/canvasStore';
 import { useStore, useViewport } from '@xyflow/react';
 import {
   AlignStartVertical,
@@ -18,6 +17,7 @@ import {
   getAbsolutePosition,
   type NestableNode,
 } from '@/handler/canvasCommand/utils/frame';
+import useCanvasStore from '@/store/canvasStore';
 
 import type { ColorPreset } from '@/components/Common/ColorPicker';
 import type { CanvasNode } from '@/components/Nodes/types';
