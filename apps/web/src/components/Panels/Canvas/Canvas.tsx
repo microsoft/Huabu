@@ -565,6 +565,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     >
       <ReactFlow
         deleteKeyCode={null}
+        fitView={true}
         nodes={nodes}
         edges={edges}
         onNodesChange={onNodesChange}

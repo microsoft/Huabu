@@ -37,7 +37,7 @@ export function fitFontSize(
     if (h <= height) lo = mid;
     else hi = mid;
   }
-  return Math.floor(lo * 2) / 2; // 0.5px precision
+  return Math.floor(lo / 4) * 4; // snap to multiples of 4
 }
 
 /**

@@ -301,7 +301,7 @@ export const NodeWrapper = memo(
       <>
         <NodeResizer
           color="var(--color-info-light)"
-          isVisible={selected && resizable && !data.locked && !isMinimal}
+          isVisible={selected && resizable && !data.locked}
           minWidth={minWidth}
           minHeight={minHeight}
           keepAspectRatio={keepAspectRatio}
@@ -357,7 +357,7 @@ export const NodeWrapper = memo(
         )}
 
         {/* Zoom-invariant overlay portal — isolated component to avoid re-rendering the entire NodeWrapper on pan/zoom */}
-        {overlayContent && !isMinimal && (
+        {overlayContent && (
           <OverlayPortal nodeId={id} offsetY={overlayOffsetY}>
             {overlayContent}
           </OverlayPortal>
@@ -377,7 +377,6 @@ export const NodeWrapper = memo(
         <div
           className={cn(
             'group relative flex h-full w-full flex-col rounded transition-all duration-120',
-            isMinimal && 'invisible',
             type !== 'text' && !data.style?.accent && 'shadow',
             'style' in data && data.style?.backgroundColor
               ? data.style.backgroundColor
@@ -431,6 +430,7 @@ export const NodeWrapper = memo(
           <div
             className={clsx(
               'flex-1 p-0',
+              isMinimal && 'invisible',
               allowOverflow ? 'overflow-visible' : 'overflow-hidden',
             )}
           >

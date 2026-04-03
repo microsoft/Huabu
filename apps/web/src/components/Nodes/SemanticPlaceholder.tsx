@@ -5,8 +5,19 @@ import { useFitText } from '@/hooks/useFitText';
 import type { CanvasNodeType, NodeData } from './types';
 
 /** Padding (px) reserved on each side inside the placeholder. */
-const PADDING_X = 32;
+const PADDING_X = 48;
 const PADDING_Y = 16;
+
+const ZWS = '\u200B';
+
+/** Insert zero-width spaces at camelCase / digit-letter boundaries so
+ *  line-breaking prefers natural word segments over arbitrary splits. */
+function insertSoftBreaks(text: string): string {
+  return text
+    .replace(/([a-z])([A-Z])/g, `$1${ZWS}$2`)
+    .replace(/(\d)([A-Za-z])/g, `$1${ZWS}$2`)
+    .replace(/([A-Za-z])(\d)/g, `$1${ZWS}$2`);
+}
 
 interface SemanticPlaceholderProps {
   type: CanvasNodeType;
@@ -30,11 +41,13 @@ export function SemanticPlaceholder({
   width,
   height,
 }: SemanticPlaceholderProps) {
-  const label =
+  const rawLabel =
     ('label' in data && typeof data.label === 'string' ? data.label : null) ||
     ('title' in data && typeof data.title === 'string' ? data.title : null) ||
     NODE_TYPE_LABEL[type] ||
     type;
+
+  const label = insertSoftBreaks(rawLabel);
 
   const accent = data.style?.accent;
 
@@ -43,25 +56,27 @@ export function SemanticPlaceholder({
     Math.max(0, width - PADDING_X * 2),
     Math.max(0, height - PADDING_Y * 2),
   );
+
   return (
     <div
       className={cn(
-        'bg-surface absolute inset-0 z-20 flex items-center justify-center rounded p-2 transition-all duration-120',
-        !accent && 'shadow',
-        accent && 'border-4',
+        'absolute inset-0 z-20 flex items-center justify-center rounded p-2 transition-all duration-120',
+        !accent && 'bg-surface shadow',
+        accent && 'border-6',
         selected ? 'ring-info ring' : 'ring-border hover:ring',
       )}
       style={
         accent
           ? {
               borderColor: `${accent}80`,
-              background: `${accent}10`,
+              background: `color-mix(in srgb, ${accent} 10%, var(--bg-surface))`,
+              color: `color-mix(in srgb, ${accent} 60%, var(--fg-default))`,
             }
           : undefined
       }
     >
       <span
-        className="text-fg-default inline-flex items-center gap-1.5 text-center leading-snug font-medium break-words"
+        className="inline-flex items-center text-center leading-snug font-medium text-balance [word-break:break-word]"
         style={{ fontSize: `${fontSize}px` }}
       >
         <span>{label}</span>

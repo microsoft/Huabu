@@ -9,14 +9,13 @@
  * and the AI agent's allowed colours update automatically.
  */
 export const COLOR_PALETTE = [
-  { name: 'Default', value: '#191919' },
-  { name: 'Gray', value: '#9ca3af' },
-  { name: 'Red', value: '#ef4444' },
-  { name: 'Orange', value: '#D97A2B' },
+  { name: 'Default', value: '#A8A29E' },
+  { name: 'Red', value: '#D07C74' },
+  { name: 'Orange', value: '#D89A5B' },
   { name: 'Amber', value: '#F2D479' },
-  { name: 'Green', value: '#6FAF4F' },
-  { name: 'Blue', value: '#4E8D9C' },
-  { name: 'Purple', value: '#9B8EC7' },
+  { name: 'Green', value: '#7FB38A' },
+  { name: 'Blue', value: '#5F8F9B' },
+  { name: 'Purple', value: '#A08FC0' },
 ] as const;
 
 /** Union type of all allowed palette hex values. */
