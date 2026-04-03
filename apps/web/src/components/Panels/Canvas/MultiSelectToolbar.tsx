@@ -1,3 +1,4 @@
+import useCanvasStore from '@store/canvasStore';
 import { useStore, useViewport } from '@xyflow/react';
 import {
   AlignStartVertical,
@@ -11,17 +12,16 @@ import {
 import { useMemo } from 'react';
 import { createPortal } from 'react-dom';
 
+import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { COLOR_PALETTE } from '@/config/colors';
 import {
   getAbsolutePosition,
   type NestableNode,
 } from '@/handler/canvasCommand/utils/frame';
 
-import useCanvasStore from '../../../store/canvasStore';
-import { FloatingToolbar } from '../../Common/FloatingToolbar';
-
 import type { ColorPreset } from '@/components/Common/ColorPicker';
 import type { CanvasNode } from '@/components/Nodes/types';
+import type { CanvasNodeId } from '@sediment/shared';
 
 /** Sentinel value representing "no accent". */
 const ACCENT_NONE = 'transparent';
@@ -40,7 +40,7 @@ export const MultiSelectToolbar = () => {
   const nodes = useCanvasStore((s) => s.nodes);
   const alignSelectedNodes = useCanvasStore((s) => s.alignSelectedNodes);
   const spreadSelectedNodes = useCanvasStore((s) => s.spreadSelectedNodes);
-  const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+  const executeCommands = useCanvasStore((s) => s.executeCommands);
 
   const { zoom, x: vpX, y: vpY } = useViewport();
 
@@ -181,11 +181,19 @@ export const MultiSelectToolbar = () => {
           value={commonAccent}
           onSelect={(v) => {
             const accent = v === ACCENT_NONE ? null : v;
-            for (const n of selectedNodes) {
-              updateNodeData(n.id, {
-                style: { ...n.data?.style, accent },
-              });
-            }
+            if (selectedNodes.length === 0) return;
+
+            executeCommands([
+              {
+                type: 'MERGE_NODE_DATA',
+                patches: selectedNodes.map((node) => ({
+                  nodeId: node.id as CanvasNodeId,
+                  patch: {
+                    style: { ...node.data?.style, accent },
+                  },
+                })),
+              },
+            ]);
           }}
           title="Accent Color"
         />

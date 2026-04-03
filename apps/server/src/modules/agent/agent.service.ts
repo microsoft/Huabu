@@ -60,6 +60,8 @@ interface AgentLogger {
 export interface AgentRunOptions {
   /** Agent mode determines available tools and system prompt */
   mode: AgentMode;
+  /** Current canvas ID available as implicit context for canvas-aware tools. */
+  canvasId?: string;
   /** pi-ai Context (systemPrompt + messages + tools). Will be mutated with responses. */
   context: Context;
   /** Structured logger for request-scoped diagnostics */
@@ -103,7 +105,14 @@ function getToolsForMode(mode: AgentMode): Tool[] {
 export async function* runAgent(
   options: AgentRunOptions,
 ): AsyncGenerator<StreamEvent, void, unknown> {
-  const { mode, context, logger, signal, maxIterations = 20 } = options;
+  const {
+    mode,
+    canvasId,
+    context,
+    logger,
+    signal,
+    maxIterations = 20,
+  } = options;
 
   const tools = getToolsForMode(mode);
 
@@ -213,7 +222,7 @@ export async function* runAgent(
           toolResultText = await executeTool(
             call.name,
             (call.arguments ?? {}) as Record<string, unknown>,
-            { mode },
+            { mode, canvasId },
           );
         } catch (err) {
           toolResultText = JSON.stringify({

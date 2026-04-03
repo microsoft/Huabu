@@ -773,16 +773,6 @@ const agentRoutes: FastifyPluginAsync = async (
       }
     }
 
-    // For operate mode, include canvasId in a context note
-    if (mode === 'operate' && canvasId && typeof userContent === 'string') {
-      userContent = `[Canvas ID: ${canvasId}]\n\n${userContent}`;
-    } else if (mode === 'operate' && canvasId && Array.isArray(userContent)) {
-      userContent = [
-        { type: 'text' as const, text: `[Canvas ID: ${canvasId}]` },
-        ...userContent,
-      ];
-    }
-
     // Add user message to context
     // Embed selectedNodeIds and attachments as metadata tags so they survive round-trip
     const metadataTags: string[] = [];
@@ -899,6 +889,7 @@ const agentRoutes: FastifyPluginAsync = async (
     try {
       const stream = runAgent({
         mode,
+        canvasId,
         context,
         logger: request.log,
         maxIterations: 20,

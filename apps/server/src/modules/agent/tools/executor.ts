@@ -613,34 +613,75 @@ async function executeIngestContent(args: {
 export async function executeTool(
   name: string,
   args: Record<string, unknown>,
-  context?: { mode?: AgentMode },
+  context?: { mode?: AgentMode; canvasId?: string },
 ): Promise<string> {
+  const resolveCanvasArgs = <T extends Record<string, unknown>>(
+    value: T,
+  ): (T & { canvasId: string }) | null => {
+    const canvasId =
+      typeof value.canvasId === 'string' && value.canvasId.trim().length > 0
+        ? value.canvasId
+        : context?.canvasId;
+    if (!canvasId) return null;
+    return { ...value, canvasId };
+  };
+
   switch (name) {
     case 'web_search':
       return executeWebSearch(args as Parameters<typeof executeWebSearch>[0]);
-    case 'get_node_detail':
+    case 'get_node_detail': {
+      const resolvedArgs = resolveCanvasArgs(args);
+      if (!resolvedArgs) {
+        return JSON.stringify({
+          error: 'canvasId is required for get_node_detail',
+        });
+      }
       return executeGetNodeDetail(
-        args as Parameters<typeof executeGetNodeDetail>[0],
+        resolvedArgs as Parameters<typeof executeGetNodeDetail>[0],
       );
-    case 'get_canvas_state':
+    }
+    case 'get_canvas_state': {
+      const resolvedArgs = resolveCanvasArgs(args);
+      if (!resolvedArgs) {
+        return JSON.stringify({
+          error: 'canvasId is required for get_canvas_state',
+        });
+      }
       return executeGetCanvasState(
-        args as Parameters<typeof executeGetCanvasState>[0],
+        resolvedArgs as Parameters<typeof executeGetCanvasState>[0],
       );
-    case 'canvas_commands':
+    }
+    case 'canvas_commands': {
+      const resolvedArgs = resolveCanvasArgs(args);
+      if (!resolvedArgs) {
+        return JSON.stringify({
+          tool: 'canvas_commands',
+          status: 'error',
+          error: 'canvasId is required for canvas_commands',
+        });
+      }
       return executeCanvasCommands(
-        args as Parameters<typeof executeCanvasCommands>[0],
+        resolvedArgs as Parameters<typeof executeCanvasCommands>[0],
         context,
       );
+    }
     case 'read_source':
       return executeReadSource(args as Parameters<typeof executeReadSource>[0]);
     case 'search_knowledge':
       return executeSearchKnowledge(
         args as Parameters<typeof executeSearchKnowledge>[0],
       );
-    case 'ingest_content':
+    case 'ingest_content': {
+      const resolvedArgs = resolveCanvasArgs(args);
+      if (!resolvedArgs) {
+        return JSON.stringify({
+          error: 'canvasId is required for ingest_content',
+        });
+      }
       return executeIngestContent(
-        args as Parameters<typeof executeIngestContent>[0],
+        resolvedArgs as Parameters<typeof executeIngestContent>[0],
       );
+    }
     default:
       return JSON.stringify({ error: `Unknown tool: ${name}` });
   }

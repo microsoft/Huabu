@@ -51,7 +51,12 @@ export const getNodeDetailTool: Tool = {
     'Get the full content and metadata of a specific canvas node by its ID.',
   parameters: Type.Object({
     nodeId: Type.String({ description: 'The ID of the canvas node to read' }),
-    canvasId: Type.String({ description: 'The canvas ID' }),
+    canvasId: Type.Optional(
+      Type.String({
+        description:
+          'Optional canvas ID override. When omitted, the current request canvas is used.',
+      }),
+    ),
   }),
 };
 
@@ -60,7 +65,12 @@ export const getCanvasStateTool: Tool = {
   description:
     'Get a summary of the current canvas state including all nodes, edges, and frames.',
   parameters: Type.Object({
-    canvasId: Type.String({ description: 'The canvas ID' }),
+    canvasId: Type.Optional(
+      Type.String({
+        description:
+          'Optional canvas ID override. When omitted, the current request canvas is used.',
+      }),
+    ),
   }),
 };
 
@@ -411,7 +421,12 @@ export const canvasCommandsTool: Tool = {
 Group into frame: CREATE_NODES (frame) + SET_NODE_PARENT (children → frame)
 Create and connect: CREATE_NODES (multiple nodes with explicit ids) + CONNECT_NODES (edges referencing those ids)`,
   parameters: Type.Object({
-    canvasId: Type.String({ description: 'The canvas ID' }),
+    canvasId: Type.Optional(
+      Type.String({
+        description:
+          'Optional canvas ID override. When omitted, the current request canvas is used.',
+      }),
+    ),
     commands: Type.Array(AgentCanvasCommandSchema, {
       description: 'Array of canvas commands to execute as a batch',
     }),
@@ -449,7 +464,12 @@ export const ingestContentTool: Tool = {
   description:
     'Trigger content ingestion for a canvas node, loading its web/PDF content into the knowledge base.',
   parameters: Type.Object({
-    canvasId: Type.String({ description: 'The canvas ID' }),
+    canvasId: Type.Optional(
+      Type.String({
+        description:
+          'Optional canvas ID override. When omitted, the current request canvas is used.',
+      }),
+    ),
     nodeId: Type.String({
       description: 'The node ID to trigger ingestion for',
     }),

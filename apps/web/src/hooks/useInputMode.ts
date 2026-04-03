@@ -3,6 +3,8 @@ import { create } from 'zustand';
 
 export type InputMode = 'mouse' | 'touch' | 'pen';
 
+const INPUT_MODES: ReadonlySet<InputMode> = new Set(['mouse', 'touch', 'pen']);
+
 interface InputModeState {
   mode: InputMode;
 }
@@ -34,7 +36,9 @@ export function useIsTouch(): boolean {
 export function useInputModeListener(): void {
   useEffect(() => {
     const handler = (e: PointerEvent) => {
-      const next = e.pointerType as InputMode;
+      const next = INPUT_MODES.has(e.pointerType as InputMode)
+        ? (e.pointerType as InputMode)
+        : 'mouse';
       if (useInputModeStore.getState().mode !== next) {
         useInputModeStore.setState({ mode: next });
       }

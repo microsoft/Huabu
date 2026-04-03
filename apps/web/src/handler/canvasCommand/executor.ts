@@ -67,6 +67,7 @@ export function executeCanvasCommands(
 
   // Track which commands were actually applied.
   let anyApplied = false;
+  const agentAffectedFrameIds = new Set<string>();
 
   for (const cmd of execution.commands) {
     // ------------------------------------------------------------------
@@ -86,6 +87,67 @@ export function executeCanvasCommands(
       cmd: CanvasCommand,
       state: CanvasReadState,
     ) => CommandHandlerResult;
+
+    if (execution.source === 'agent') {
+      if (cmd.type === 'CREATE_NODES') {
+        for (const node of cmd.nodes) {
+          if (node.nodeType === 'frame' && node.id) {
+            agentAffectedFrameIds.add(node.id as string);
+          }
+          if (node.parentId) {
+            agentAffectedFrameIds.add(node.parentId as string);
+          }
+        }
+      } else if (cmd.type === 'SET_NODE_GEOMETRY') {
+        for (const item of cmd.items) {
+          const node = currentNodes.find((n) => n.id === item.nodeId);
+          if (node?.parentId) {
+            agentAffectedFrameIds.add(node.parentId);
+          }
+        }
+      } else if (cmd.type === 'SET_NODE_PARENT') {
+        if (cmd.parentId) {
+          agentAffectedFrameIds.add(cmd.parentId as string);
+        }
+        for (const nodeId of cmd.nodeIds) {
+          const node = currentNodes.find((n) => n.id === nodeId);
+          if (node?.parentId) {
+            agentAffectedFrameIds.add(node.parentId);
+          }
+        }
+      } else if (cmd.type === 'DELETE_NODES') {
+        const removedIds = new Set(cmd.nodeIds as string[]);
+        let changed = true;
+        while (changed) {
+          changed = false;
+          for (const node of currentNodes) {
+            if (
+              node.parentId &&
+              removedIds.has(node.parentId) &&
+              !removedIds.has(node.id)
+            ) {
+              removedIds.add(node.id);
+              changed = true;
+            }
+          }
+        }
+
+        for (const node of currentNodes) {
+          if (
+            removedIds.has(node.id) &&
+            node.parentId &&
+            !removedIds.has(node.parentId)
+          ) {
+            agentAffectedFrameIds.add(node.parentId);
+          }
+        }
+      } else if (cmd.type === 'DISSOLVE_FRAME') {
+        const frame = currentNodes.find((n) => n.id === cmd.frameId);
+        if (frame?.parentId) {
+          agentAffectedFrameIds.add(frame.parentId);
+        }
+      }
+    }
 
     const result = handler(cmd, {
       nodes: currentNodes,
@@ -129,37 +191,10 @@ export function executeCanvasCommands(
   // in that case.
   // ------------------------------------------------------------------
   if (execution.source === 'agent' && anyApplied) {
-    const affectedFrameIds = new Set<string>();
-
-    for (const cmd of execution.commands) {
-      if (cmd.type === 'CREATE_NODES') {
-        for (const n of cmd.nodes) {
-          if (n.nodeType === 'frame' && n.id) {
-            affectedFrameIds.add(n.id as string);
-          }
-          if (n.parentId) {
-            affectedFrameIds.add(n.parentId as string);
-          }
-        }
-      } else if (cmd.type === 'SET_NODE_GEOMETRY') {
-        for (const item of cmd.items) {
-          const node = currentNodes.find((n) => n.id === item.nodeId);
-          if (node?.parentId) affectedFrameIds.add(node.parentId);
-        }
-      } else if (cmd.type === 'SET_NODE_PARENT') {
-        // Fit both old parent (shrink) and new parent (expand).
-        if (cmd.parentId) affectedFrameIds.add(cmd.parentId as string);
-        for (const nid of cmd.nodeIds) {
-          const node = currentNodes.find((n) => n.id === nid);
-          if (node?.parentId) affectedFrameIds.add(node.parentId);
-        }
-      }
-    }
-
-    if (affectedFrameIds.size > 0) {
+    if (agentAffectedFrameIds.size > 0) {
       currentNodes = fitFrames(
         currentNodes as NestableNode[],
-        affectedFrameIds,
+        agentAffectedFrameIds,
       );
     }
   }
