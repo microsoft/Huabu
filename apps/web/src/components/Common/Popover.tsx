@@ -1,7 +1,12 @@
 import {
+  createContext,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
+  useMemo,
+  type MutableRefObject,
+  type Ref,
   useRef,
   useState,
   type FC,
@@ -12,6 +17,8 @@ import { createPortal } from 'react-dom';
 import { cn } from './cn';
 
 type FloatingPosition = { x: number; y: number };
+
+const PopoverContainerContext = createContext<Element | null>(null);
 
 /**
  * Tracks the latest mouse position so Popover can default to it
@@ -32,6 +39,17 @@ function ensureMouseTracking() {
     },
     { passive: true },
   );
+}
+
+function assignRef<T>(ref: Ref<T> | undefined, value: T | null) {
+  if (!ref) return;
+
+  if (typeof ref === 'function') {
+    ref(value);
+    return;
+  }
+
+  (ref as MutableRefObject<T | null>).current = value;
 }
 
 export type PopoverProps = {
@@ -90,6 +108,9 @@ export type PopoverProps = {
   /** Portal target. Defaults to `document.body`. */
   container?: Element;
 
+  /** Optional ref for accessing the rendered popover container element. */
+  contentRef?: Ref<HTMLDivElement>;
+
   children: ReactNode;
 };
 
@@ -115,10 +136,15 @@ export const Popover: FC<PopoverProps> = ({
   zIndex = 9999,
   className,
   container,
+  contentRef,
   children,
 }) => {
-  const containerRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const [clamped, setClamped] = useState<FloatingPosition | null>(null);
+  const [contentElement, setContentElement] = useState<HTMLDivElement | null>(
+    null,
+  );
+  const parentContainer = useContext(PopoverContainerContext);
 
   // If no position is provided, snapshot the mouse position on first mount.
   // Using a lazy initializer keeps the side-effect out of the render body.
@@ -228,24 +254,33 @@ export const Popover: FC<PopoverProps> = ({
   }, [onDismiss, dismissOnEscape]);
 
   const isMeasuring = clamped === null;
+  const portalContainer = container ?? parentContainer ?? document.body;
+
+  const contextValue = useMemo(() => contentElement, [contentElement]);
 
   const panel = (
-    <div
-      ref={containerRef}
-      className={cn(
-        'border-edge-default bg-surface fixed rounded-md border shadow-lg',
-        className,
-      )}
-      style={{
-        left: isMeasuring ? 0 : clamped.x,
-        top: isMeasuring ? 0 : clamped.y,
-        visibility: isMeasuring ? 'hidden' : 'visible',
-        zIndex,
-      }}
-    >
-      {children}
-    </div>
+    <PopoverContainerContext.Provider value={contextValue}>
+      <div
+        ref={(node) => {
+          containerRef.current = node;
+          setContentElement(node);
+          assignRef(contentRef, node);
+        }}
+        className={cn(
+          'border-edge-default bg-surface fixed rounded-md border shadow-lg',
+          className,
+        )}
+        style={{
+          left: isMeasuring ? 0 : clamped.x,
+          top: isMeasuring ? 0 : clamped.y,
+          visibility: isMeasuring ? 'hidden' : 'visible',
+          zIndex,
+        }}
+      >
+        {children}
+      </div>
+    </PopoverContainerContext.Provider>
   );
 
-  return createPortal(panel, container ?? document.body);
+  return createPortal(panel, portalContainer);
 };
