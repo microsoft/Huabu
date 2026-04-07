@@ -9,6 +9,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 
+import { listCanvases } from '@/api/canvas';
 import {
   getSources,
   checkSourceUsage,
@@ -21,6 +22,7 @@ import { LoadingState } from '@/components/Common/LoadingState';
 import { Modal } from '@/components/Common/Modal';
 import { Spinner } from '@/components/Common/Spinner';
 import { toast } from '@/components/Common/Toast';
+import { Tooltip } from '@/components/Common/Tooltip';
 import { Header } from '@/components/Panels/Header/Header';
 import { APP_NAME } from '@/config/app';
 import { useWorkspaceStore } from '@/store/workspaceStore';
@@ -48,6 +50,7 @@ const sourceTypeLabel: Record<SourceType, string> = {
  */
 export default function SourceListPage() {
   const [sources, setSources] = useState<SourceOverview[]>([]);
+  const [canvasCount, setCanvasCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [pendingDelete, setPendingDelete] = useState<{
     sourceId: string;
@@ -64,8 +67,12 @@ export default function SourceListPage() {
   const fetchSources = useCallback(async () => {
     try {
       setIsLoading(true);
-      const data = await getSources();
+      const [data, canvasResponse] = await Promise.all([
+        getSources(),
+        listCanvases(),
+      ]);
       setSources(data);
+      setCanvasCount(canvasResponse.canvases.length);
     } catch (error) {
       console.error('Failed to list sources:', error);
     } finally {
@@ -259,16 +266,25 @@ export default function SourceListPage() {
 
       {/* Header */}
       <Header>
-        <h1 className="text-fg-default px-1 text-lg font-semibold">
+        <h1 className="text-fg-default pl-1 text-lg font-semibold">
           {APP_NAME}
         </h1>
         {workspacePath && (
-          <span
-            className="text-fg-subtle mt-0.5 ml-1 truncate text-xs"
-            title={workspacePath}
+          <Tooltip
+            content={
+              <>
+                <div>Path: {workspacePath}</div>
+                <div>
+                  {canvasCount} canvas{canvasCount !== 1 ? 'es' : ''},{' '}
+                  {sources.length} source{sources.length !== 1 ? 's' : ''}
+                </div>
+              </>
+            }
           >
-            {workspacePath.split(/[\\/]/).filter(Boolean).pop()}
-          </span>
+            <span className="text-fg-subtle hover:text-fg-default mt-0.5 ml-1 cursor-default truncate text-xs transition-colors">
+              Path: {workspacePath.split(/[\\/]/).filter(Boolean).pop()}
+            </span>
+          </Tooltip>
         )}
       </Header>
 
