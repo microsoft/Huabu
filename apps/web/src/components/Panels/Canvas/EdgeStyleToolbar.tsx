@@ -1,3 +1,4 @@
+import { EDGE_STROKE_WIDTHS } from '@sediment/shared';
 import { useStore, useViewport } from '@xyflow/react';
 import { useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
@@ -136,13 +137,12 @@ const DIRECTION_OPTIONS: SelectOption<EdgeDirection>[] = [
   { value: 'both', label: 'Both', icon: <ArrowIcon left right /> },
 ];
 
-const STROKE_WIDTH_OPTIONS: SelectOption<`${EdgeStrokeWidth}`>[] = (
-  [1, 2, 3, 4] as const
-).map((w) => ({
-  value: `${w}` as `${typeof w}`,
-  label: `${w}px`,
-  icon: <StrokeWidthIcon width={w} />,
-}));
+const STROKE_WIDTH_OPTIONS: SelectOption<`${EdgeStrokeWidth}`>[] =
+  EDGE_STROKE_WIDTHS.map((w) => ({
+    value: `${w}` as `${typeof w}`,
+    label: `${w}px`,
+    icon: <StrokeWidthIcon width={w} />,
+  }));
 
 function getEdgeStyle(edge: Edge): EdgeStyle {
   return (edge.data?.edgeStyle as EdgeStyle | undefined) ?? {};
