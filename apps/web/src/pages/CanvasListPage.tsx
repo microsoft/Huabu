@@ -16,6 +16,7 @@ import { Modal } from '../components/Common/Modal';
 import { Spinner } from '../components/Common/Spinner';
 import { toast } from '../components/Common/Toast';
 import { Header } from '../components/Panels/Header/Header';
+import { APP_NAME } from '../config/app';
 import { useWorkspaceStore } from '../store/workspaceStore';
 
 import type { CanvasExportBundle, CanvasSummary } from '@sediment/shared';
@@ -215,7 +216,9 @@ export default function CanvasListPage() {
 
       {/* Header */}
       <Header>
-        <h1 className="text-fg-default px-1 text-lg font-semibold">Sediment</h1>
+        <h1 className="text-fg-default px-1 text-lg font-semibold">
+          {APP_NAME}
+        </h1>
         {workspacePath && (
           <span
             className="text-fg-subtle mt-0.5 ml-1 truncate text-xs"
