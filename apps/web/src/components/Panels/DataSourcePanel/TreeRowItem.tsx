@@ -119,7 +119,7 @@ export const TreeRowItem = React.memo(
 
     const mergedStyle: React.CSSProperties = {
       ...style,
-      paddingLeft: 12 + depth * 16,
+      paddingLeft: 8 + depth * 25,
       opacity: isDragging ? 0.3 : 1,
       zIndex: isDragging ? 999 : 'auto',
       position: 'relative',
@@ -138,14 +138,14 @@ export const TreeRowItem = React.memo(
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
         className={clsx(
-          'bg-surface flex h-9 w-full cursor-pointer touch-none items-center gap-2 px-2',
+          'bg-surface flex h-9 w-full cursor-pointer touch-none items-center gap-1 px-2',
           className,
         )}
         {...rest}
       >
         <div
           className={clsx(
-            'flex w-full items-center gap-2 rounded px-2 py-1 text-sm transition-colors',
+            'flex w-full items-center gap-1 rounded px-1 py-1 text-sm transition-colors',
             bgColor,
           )}
         >
@@ -156,7 +156,7 @@ export const TreeRowItem = React.memo(
               iconOnly
               size="sm"
               onClick={handleToggleCollapse}
-              className="shrink-0"
+              className="shrink-0 hover:!bg-transparent"
               aria-label={isCollapsed ? 'Expand' : 'Collapse'}
               aria-expanded={!isCollapsed}
             >

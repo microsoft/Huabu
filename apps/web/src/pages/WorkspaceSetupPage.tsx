@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { pickFolder } from '../api/workspace';
 import { Button } from '../components/Common/Button';
 import { Spinner } from '../components/Common/Spinner';
+import { APP_NAME } from '../config/app';
 import { useWorkspaceStore } from '../store/workspaceStore';
 
 /**
@@ -55,11 +56,11 @@ export default function WorkspaceSetupPage() {
         <div className="mb-10 text-center">
           <img
             src="/favicon.svg"
-            alt="Sediment"
+            alt={APP_NAME}
             className="mx-auto mb-4 h-16 w-16"
           />
           <h1 className="text-fg-default text-2xl font-bold">
-            Welcome to Sediment
+            Welcome to {APP_NAME}
           </h1>
           <p className="text-fg-subtle mt-2 text-sm">
             Choose a folder to store your canvases, notes, and artifacts.
