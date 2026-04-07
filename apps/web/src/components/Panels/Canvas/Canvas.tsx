@@ -118,6 +118,28 @@ export const Canvas: React.FC<CanvasProps> = ({
 }) => {
   const nodes = useCanvasStore((state) => state.nodes);
   const edges = useCanvasStore((state) => state.edges);
+
+  // Override marker colors on selected edges so arrows match the selection
+  // highlight color (--color-info). CSS cannot style SVG <marker> referenced
+  // via url() from <defs>, so we swap the marker config in JS.
+  const displayEdges = useMemo(() => {
+    const infoColor = getComputedStyle(document.documentElement)
+      .getPropertyValue('--color-info')
+      .trim();
+    if (!infoColor) return edges;
+    return edges.map((e) => {
+      if (!e.selected) return e;
+      const recolor = (m: typeof e.markerEnd) => {
+        if (!m || typeof m === 'string') return m;
+        return { ...m, color: infoColor };
+      };
+      return {
+        ...e,
+        markerEnd: recolor(e.markerEnd),
+        markerStart: recolor(e.markerStart),
+      };
+    });
+  }, [edges]);
   const onNodesChange = useCanvasStore((state) => state.onNodesChange);
   const onEdgesChange = useCanvasStore((state) => state.onEdgesChange);
   const onConnect = useCanvasStore((state) => state.onConnect);
@@ -613,7 +635,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         deleteKeyCode={null}
         fitView={true}
         nodes={nodes}
-        edges={edges}
+        edges={displayEdges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}

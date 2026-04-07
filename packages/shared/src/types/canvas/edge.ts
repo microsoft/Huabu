@@ -13,7 +13,7 @@ export type EdgeLineStyle = 'solid' | 'dashed' | 'dotted';
 export type EdgeDirection = 'none' | 'forward' | 'backward' | 'both';
 
 /** Edge stroke width presets (px). */
-export const EDGE_STROKE_WIDTHS = [1, 2, 3, 4] as const;
+export const EDGE_STROKE_WIDTHS = [2, 4, 8, 16] as const;
 
 /** Union type of all allowed stroke widths. */
 export type EdgeStrokeWidth = (typeof EDGE_STROKE_WIDTHS)[number];
