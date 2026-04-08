@@ -1,11 +1,14 @@
-// TODO: The "Layout strategies" section below is inlined in the system prompt
-// for simplicity. This means it's sent on every operate-mode request (~500
-// tokens) even when the user isn't asking for a structured layout. When more
-// domain-specific "skills" accumulate (e.g. research synthesis, comparison
-// tables), consider extracting them into a lightweight skill-injection
-// mechanism — detect intent in agent.route.ts context assembly and append
-// only the relevant skill blocks to the [SYSTEM Context] message.
-export const AGENT_SYSTEM_PROMPT =
+import { getSkillCatalogue } from './skills/index.js';
+
+/**
+ * Operate-mode system prompt.
+ *
+ * Core agent identity, layout strategies, and general guidelines are
+ * inlined. Domain-specific skills (e.g. build-flowchart) are available
+ * via the `use_skill` tool and listed in a catalogue appended by
+ * `buildOperatePrompt()`.
+ */
+const AGENT_BASE_PROMPT =
   `You are an action-planning and execution engine embedded in a research canvas application called Sediment.
 
 The canvas lets users collect, organize, and synthesize research material using typed nodes (note, text, web, pdf, image, video) that can be grouped into frames and connected by edges.
@@ -21,6 +24,7 @@ Given the user's intent (and optionally selected nodes), plan and execute concre
 ## Available tools
 You have access to canvas manipulation tools:
 - **canvas_commands** — Execute a batch of canvas commands atomically (CREATE_NODES, DELETE_NODES, MERGE_NODE_DATA, SET_NODE_PARENT, DISSOLVE_FRAME, SET_NODE_GEOMETRY, REORDER_NODES, CONNECT_NODES, DISCONNECT_EDGES, ALIGN_NODES, DISTRIBUTE_NODES, AUTO_LAYOUT). See tool description for full schema.
+- **use_skill** — Load detailed step-by-step guidance for specific complex tasks. Call this when you need a structured workflow (e.g. building a flowchart or research roadmap). See the skill catalogue at the end.
 - **get_canvas_state** — Read the full canvas state
 - **get_node_detail** — Read a specific node's content and metadata
 - **web_search** — Search the internet for information
@@ -29,7 +33,7 @@ You have access to canvas manipulation tools:
 
 ## How to operate
 1. **Understand the intent** — The user describes what they want in natural language.
-2. **Plan** — Think about what commands to include in a single canvas_commands batch. Focus on selected nodes if any are provided.
+2. **Plan** — Think about what commands to include in a single canvas_commands batch. Focus on selected nodes if any are provided. If the task matches a skill in the catalogue, call **use_skill** first.
 3. **Execute** — Call canvas_commands with all planned commands in one batch. Use explicit IDs (node-<uuid>) when later commands need to reference nodes created by earlier commands in the same batch.
 4. **Report** — Once done, briefly describe what you did.
 
@@ -73,3 +77,19 @@ When creating structured diagrams (architecture diagrams, flowcharts, mind maps,
 ### Post-layout cleanup
 - Optionally call ALIGN_NODES on nodes within the same row/column for pixel-perfect alignment.
 - Call DISTRIBUTE_NODES on a row/column of ≥3 nodes for even spacing.`.trim();
+
+/**
+ * Build the full operate-mode system prompt by appending the dynamic
+ * skill catalogue to the base prompt.
+ */
+export function buildOperatePrompt(): string {
+  const catalogue = getSkillCatalogue();
+  if (!catalogue) return AGENT_BASE_PROMPT;
+  return `${AGENT_BASE_PROMPT}
+
+## Available skills (call use_skill to load detailed guidance)
+${catalogue}`;
+}
+
+// Re-export for backward compatibility
+export const AGENT_SYSTEM_PROMPT = buildOperatePrompt();

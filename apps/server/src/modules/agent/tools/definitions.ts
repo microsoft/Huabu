@@ -476,6 +476,20 @@ export const ingestContentTool: Tool = {
   }),
 };
 
+// ==================== Skill Tool ====================
+
+export const useSkillTool: Tool = {
+  name: 'use_skill',
+  description:
+    'Load detailed guidance for a specific skill before executing complex canvas operations. Call this when you need step-by-step guidance for tasks like building flowcharts, creating structured layouts, synthesizing nodes, etc. The skill content will be returned as the tool result.',
+  parameters: Type.Object({
+    skillId: Type.String({
+      description:
+        'The skill ID to load. See the skill catalogue in the system prompt for available IDs.',
+    }),
+  }),
+};
+
 // ==================== Tool Sets by Mode ====================
 
 /**
@@ -498,6 +512,7 @@ export const operateTools: Tool[] = [
   getCanvasStateTool,
   getNodeDetailTool,
   canvasCommandsTool,
+  useSkillTool,
   readSourceTool,
   searchKnowledgeTool,
   ingestContentTool,
