@@ -5,6 +5,7 @@
  * the relative positions of source and target nodes.
  */
 
+import { EDGE_STROKE_WIDTHS } from '@sediment/shared';
 import { MarkerType, type Node, type Edge } from '@xyflow/react';
 
 import { getLayoutNodeSize } from '@/utils/node/size';
@@ -142,7 +143,7 @@ export function rerouteAllEdges<
  * derives the React Flow rendering props (`type`, `style`, `animated`).
  */
 /** Default stroke width applied to every new edge. */
-export const DEFAULT_EDGE_STROKE_WIDTH = 2;
+export const DEFAULT_EDGE_STROKE_WIDTH = EDGE_STROKE_WIDTHS[1];
 
 export function applyEdgeStyle(edge: Edge, style?: EdgeStyle): Edge {
   // Always ensure a baseline strokeWidth even when no style is provided.
@@ -158,15 +159,26 @@ export function applyEdgeStyle(edge: Edge, style?: EdgeStyle): Edge {
   };
 
   if (style.stroke) rfStyle.stroke = style.stroke;
-  rfStyle.strokeWidth = style.strokeWidth ?? DEFAULT_EDGE_STROKE_WIDTH;
+  const w = style.strokeWidth ?? DEFAULT_EDGE_STROKE_WIDTH;
+  rfStyle.strokeWidth = w;
   if (style.lineStyle === 'dashed') {
-    rfStyle.strokeDasharray = '6 3';
+    rfStyle.strokeDasharray = `${w * 3} ${w * 1.5}`;
   } else if (style.lineStyle === 'dotted') {
-    rfStyle.strokeDasharray = '2 2';
+    rfStyle.strokeDasharray = `${w * 0.1} ${w * 1.5}`;
+    rfStyle.strokeLinecap = 'round';
   }
 
-  // Map our domain lineType to React Flow edge type names
-  const rfType = style.lineType === 'step' ? 'smoothstep' : style.lineType;
+  // Map our domain lineType to React Flow edge type names.
+  // Only known types are forwarded; unknown values (e.g. from LLM) fall back
+  // to 'default' (React Flow's bezier) to avoid "edge type not found" warnings.
+  const LINE_TYPE_TO_RF: Record<string, string> = {
+    bezier: 'default',
+    straight: 'straight',
+    step: 'smoothstep',
+  };
+  const rfType = style.lineType
+    ? (LINE_TYPE_TO_RF[style.lineType] ?? 'default')
+    : undefined;
 
   // Build arrow markers based on direction
   const direction = style.direction ?? 'none';
