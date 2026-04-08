@@ -5,6 +5,7 @@
  * and returns a text result to be fed back as a toolResult message.
  */
 
+import { SKILL_REGISTRY } from '../../../prompt/skills/index.js';
 import { readCanvas } from '../../canvas/canvas.filestore.js';
 import { getKnowledgeRepository } from '../../knowledge/knowledge.repository.js';
 import { getPreprocessDispatcher } from '../../preprocessing/index.js';
@@ -337,11 +338,6 @@ async function executeGetCanvasState(args: {
 
 // ==================== Canvas Commands ====================
 
-/**
- * Validate and prepare a canvas_commands batch for forwarding to the web client.
- * Injects origin into CREATE_NODES and provenance into MERGE_NODE_DATA commands.
- * Does NOT apply the commands.
- */
 async function executeCanvasCommands(
   args: {
     canvasId: string;
@@ -681,6 +677,19 @@ export async function executeTool(
       return executeIngestContent(
         resolvedArgs as Parameters<typeof executeIngestContent>[0],
       );
+    }
+    case 'use_skill': {
+      const skillId =
+        typeof args.skillId === 'string' ? args.skillId.trim() : '';
+      const skill = SKILL_REGISTRY.get(skillId);
+      if (!skill) {
+        const available = [...SKILL_REGISTRY.keys()];
+        return JSON.stringify({
+          error: `Unknown skill: "${skillId}"`,
+          available,
+        });
+      }
+      return skill.content;
     }
     default:
       return JSON.stringify({ error: `Unknown tool: ${name}` });

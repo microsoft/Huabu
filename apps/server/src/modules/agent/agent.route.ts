@@ -15,7 +15,7 @@ import path from 'node:path';
 import { createId } from '@sediment/shared';
 import { encode } from 'gpt-tokenizer';
 
-import { AGENT_SYSTEM_PROMPT } from '../../prompt/agent.js';
+import { buildOperatePrompt } from '../../prompt/agent.js';
 import { SYSTEM_PROMPT } from '../../prompt/system.js';
 import { IMAGE_MIME_MAP } from '../../utils/mime.js';
 import { runAgent } from '../agent/agent.service.js';
@@ -45,7 +45,7 @@ function getOrCreateThreadId(value: unknown): string {
 function getSystemPrompt(mode: AgentMode): string {
   switch (mode) {
     case 'operate':
-      return AGENT_SYSTEM_PROMPT;
+      return buildOperatePrompt();
     case 'ask':
     default:
       return SYSTEM_PROMPT;

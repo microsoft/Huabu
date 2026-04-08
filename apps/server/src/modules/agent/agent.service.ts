@@ -9,6 +9,8 @@
  * Replaces LangGraph's StateGraph, checkpointer, and BaseAgent entirely.
  */
 
+import { validateToolCall } from '@mariozechner/pi-ai';
+
 import { llmStream } from './llm.js';
 import { chatTools, operateTools, executeTool } from './tools/index.js';
 
@@ -218,13 +220,19 @@ export async function* runAgent(
 
         // Execute the tool
         let toolResultText: string;
+        let isError = false;
         try {
+          // Validate arguments against the tool's TypeBox schema.
+          // AJV will coerce types where possible; throws on invalid args
+          // so the LLM receives the error and can retry.
+          const validatedArgs = validateToolCall(tools, call);
           toolResultText = await executeTool(
             call.name,
-            (call.arguments ?? {}) as Record<string, unknown>,
+            validatedArgs as Record<string, unknown>,
             { mode, canvasId },
           );
         } catch (err) {
+          isError = true;
           toolResultText = JSON.stringify({
             error: err instanceof Error ? err.message : 'Tool execution failed',
           });
@@ -245,7 +253,7 @@ export async function* runAgent(
           toolCallId: call.id,
           toolName: call.name,
           content: [{ type: 'text', text: toolResultText }],
-          isError: false,
+          isError,
           timestamp: Date.now(),
         });
       }
