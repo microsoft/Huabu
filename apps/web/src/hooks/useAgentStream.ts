@@ -74,7 +74,168 @@ export function extractResourcesFromCommands(
   return resources;
 }
 
+// ==================== Constants ====================
+
+/** Duration of each element's opacity transition (ms). */
+const ENTER_ANIM_DURATION = 300;
+
+/** Stagger delay between consecutive elements in the reveal queue (ms). */
+const ENTER_ANIM_STAGGER = 200;
+
+// ==================== Animation State ====================
+// Singleton module state — only valid because useAgentStream is mounted once
+// (in ChatPanel). Do NOT import this hook from additional components.
+
+/** Pending timeouts for the current animation so they can be cancelled. */
+let animTimers: ReturnType<typeof setTimeout>[] = [];
+/** IDs of nodes currently being animated (may have opacity: 0). */
+let animNodeIds = new Set<string>();
+/** IDs of edges currently being animated (may have opacity: 0). */
+let animEdgeIds = new Set<string>();
+
+/**
+ * Cancel any in-progress entrance animation and immediately reveal all
+ * elements.  Safe to call at any time — no-op when nothing is animating.
+ *
+ * Exported so external code (e.g. canvas-change preview) can clear the
+ * animation before snapshotting state.
+ */
+export function cancelAgentAnimation(): void {
+  for (const t of animTimers) clearTimeout(t);
+  animTimers = [];
+
+  if (animNodeIds.size === 0 && animEdgeIds.size === 0) return;
+
+  const nIds = animNodeIds;
+  const eIds = animEdgeIds;
+  animNodeIds = new Set();
+  animEdgeIds = new Set();
+
+  useCanvasStore.setState((state) => ({
+    nodes: state.nodes.map((n) => {
+      if (!nIds.has(n.id)) return n;
+      const {
+        opacity: _nOp,
+        transition: _nTr,
+        ...rest
+      } = (n.style ?? {}) as Record<string, unknown>;
+      return { ...n, style: { ...rest, opacity: 1 } };
+    }),
+    edges: state.edges.map((e) => {
+      if (!eIds.has(e.id)) return e;
+      const {
+        opacity: _op,
+        transition: _tr,
+        ...rest
+      } = (e.style ?? {}) as Record<string, unknown>;
+      return { ...e, style: { ...rest, opacity: 1 } };
+    }),
+  }));
+}
+
 // ==================== Side-effectful Helpers ====================
+
+/**
+ * Build a reveal queue from commands in execution order, then reveal
+ * each element one by one with a staggered delay.
+ *
+ * Queue items are interleaved following command order:
+ *   CREATE_NODES → each node is one queue slot
+ *   CONNECT_NODES → each edge is one queue slot
+ *   Other command types → skipped (they don't create visible elements)
+ */
+function animateAgentBatch(commands: CanvasCommand[]): void {
+  // Build ordered reveal queue: { type: 'node' | 'edge', id }
+  const queue: { kind: 'node' | 'edge'; id: string }[] = [];
+  for (const cmd of commands) {
+    if (cmd.type === 'CREATE_NODES') {
+      for (const n of cmd.nodes) {
+        if (n.id) queue.push({ kind: 'node', id: n.id as string });
+      }
+    } else if (cmd.type === 'CONNECT_NODES') {
+      for (const e of cmd.edges) {
+        if (e.id) queue.push({ kind: 'edge', id: e.id as string });
+      }
+    }
+  }
+  if (queue.length === 0) return;
+
+  // Cancel any previous animation that may still be running.
+  cancelAgentAnimation();
+
+  const newNodeIds = new Set(
+    queue.filter((q) => q.kind === 'node').map((q) => q.id),
+  );
+  const newEdgeIds = new Set(
+    queue.filter((q) => q.kind === 'edge').map((q) => q.id),
+  );
+
+  animNodeIds = new Set(newNodeIds);
+  animEdgeIds = new Set(newEdgeIds);
+
+  const transition = `opacity ${ENTER_ANIM_DURATION}ms ease-out`;
+
+  // Step 1: Hide everything that's in the queue.
+  useCanvasStore.setState((state) => ({
+    nodes: state.nodes.map((n) => {
+      if (!newNodeIds.has(n.id)) return n;
+      return { ...n, style: { ...n.style, opacity: 0, transition } };
+    }),
+    edges: state.edges.map((e) => {
+      if (!newEdgeIds.has(e.id)) return e;
+      return { ...e, style: { ...e.style, opacity: 0, transition } };
+    }),
+  }));
+
+  // Step 2: Reveal each queue item in order.
+  for (const [idx, item] of queue.entries()) {
+    const timer = setTimeout(() => {
+      if (item.kind === 'node') {
+        animNodeIds.delete(item.id);
+        useCanvasStore.setState((state) => ({
+          nodes: state.nodes.map((n) =>
+            n.id === item.id ? { ...n, style: { ...n.style, opacity: 1 } } : n,
+          ),
+        }));
+      } else {
+        animEdgeIds.delete(item.id);
+        useCanvasStore.setState((state) => ({
+          edges: state.edges.map((e) =>
+            e.id === item.id ? { ...e, style: { ...e.style, opacity: 1 } } : e,
+          ),
+        }));
+      }
+    }, idx * ENTER_ANIM_STAGGER);
+    animTimers.push(timer);
+  }
+
+  // Step 3: Clean up transition styles after everything is visible.
+  const totalMs = queue.length * ENTER_ANIM_STAGGER + ENTER_ANIM_DURATION;
+  const cleanupTimer = setTimeout(() => {
+    animTimers = [];
+    animNodeIds = new Set();
+    animEdgeIds = new Set();
+    useCanvasStore.setState((state) => ({
+      nodes: state.nodes.map((n) => {
+        if (!newNodeIds.has(n.id)) return n;
+        const { transition: _, ...rest } = (n.style ?? {}) as Record<
+          string,
+          unknown
+        >;
+        return { ...n, style: rest };
+      }),
+      edges: state.edges.map((e) => {
+        if (!newEdgeIds.has(e.id)) return e;
+        const { transition: _, ...rest } = (e.style ?? {}) as Record<
+          string,
+          unknown
+        >;
+        return { ...e, style: rest };
+      }),
+    }));
+  }, totalMs);
+  animTimers.push(cleanupTimer);
+}
 
 /**
  * Parse a canvas_commands tool result, pre-assign missing IDs,
@@ -114,6 +275,10 @@ function applyCanvasCommandsFromToolResult(toolResult: string | undefined): {
       const changes = snapshotAndExtractChanges(commands);
 
       useCanvasStore.getState().executeCommands(commands, 'agent');
+
+      // Staggered entrance animation following command execution order
+      animateAgentBatch(commands);
+
       return { commands, changes };
     }
   } catch (err) {
