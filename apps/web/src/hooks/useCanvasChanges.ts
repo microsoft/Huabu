@@ -13,6 +13,8 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 
 import useCanvasStore from '@/store/canvasStore';
 
+import { cancelAgentAnimation } from './useAgentStream';
+
 import type {
   CanvasCommand,
   CanvasEdgeId,
@@ -684,6 +686,9 @@ export function useCanvasChangePreview(changes: CanvasChange[]) {
 
   const startPreview = useCallback((change: CanvasChange) => {
     if (snapshotRef.current) return;
+    // Cancel any in-progress agent entrance animation so the snapshot
+    // captures clean state (no opacity:0 or transition styles).
+    cancelAgentAnimation();
     const { nodes, edges } = useCanvasStore.getState();
     snapshotRef.current = { nodes, edges };
     previewNodeIdsRef.current = new Set(collectChangeNodeIds(change));
@@ -700,6 +705,7 @@ export function useCanvasChangePreview(changes: CanvasChange[]) {
 
   const startPreviewAll = useCallback(() => {
     if (snapshotRef.current) return;
+    cancelAgentAnimation();
     const { nodes, edges } = useCanvasStore.getState();
     snapshotRef.current = { nodes, edges };
 
