@@ -55,6 +55,10 @@
   --diff-removed-bg: var(--danger-bg);
   --diff-removed-text: var(--danger);
 
+  /* Prompt node */
+  --prompt-bg: #f2d479;
+  --prompt-border: #b89a4a;
+
   /* Special purpose */
   --canvas-grid: #cccccc;
   --pdf-selection-border: var(--info);
@@ -138,6 +142,8 @@
   --diff-removed-text: #fca5a5;
 
   /* Special purpose */
+  --prompt-bg: #c4a84d;
+  --prompt-border: #8a7535;
   --canvas-grid: oklch(0.35 0 0);
   --shimmer-1: oklch(0.45 0 0);
   --shimmer-2: oklch(0.6 0 0);
@@ -212,6 +218,8 @@
 
   /* Special purpose */
   --color-canvas-grid: var(--canvas-grid);
+  --color-prompt-bg: var(--prompt-bg);
+  --color-prompt-border: var(--prompt-border);
 
   /* --- ShadCN theme mappings (BlockNote) --- */
   --color-background: var(--background);
@@ -280,8 +288,10 @@ body,
 
 .canvas-pending-note .react-flow__pane,
 .canvas-pending-text .react-flow__pane,
+.canvas-pending-prompt .react-flow__pane,
 .canvas-pending-note .react-flow__node,
-.canvas-pending-text .react-flow__node {
+.canvas-pending-text .react-flow__node,
+.canvas-pending-prompt .react-flow__node {
   cursor: text !important;
 }
 
@@ -295,6 +305,7 @@ body,
    so creation handlers can fire even when clicking on top of a frame. */
 .canvas-pending-note .react-flow__node,
 .canvas-pending-text .react-flow__node,
+.canvas-pending-prompt .react-flow__node,
 .canvas-pending-frame .react-flow__node {
   pointer-events: none !important;
 }

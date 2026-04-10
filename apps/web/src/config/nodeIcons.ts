@@ -7,6 +7,7 @@
  */
 
 import {
+  BadgeQuestionMark,
   BookOpen,
   Film,
   Globe,
@@ -37,6 +38,7 @@ export const NODE_ICON: Record<CanvasNodeType, LucideIcon> = {
   video: Film,
   web: Globe,
   frame: Frame,
+  prompt: BadgeQuestionMark,
 };
 
 /**
@@ -50,6 +52,7 @@ export const NODE_TYPE_LABEL: Record<CanvasNodeType, string> = {
   video: 'Video',
   web: 'Website',
   frame: 'Frame',
+  prompt: 'Prompt',
 };
 
 /**

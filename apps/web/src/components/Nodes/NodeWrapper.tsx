@@ -434,11 +434,16 @@ export const NodeWrapper = memo(
         <div
           className={cn(
             'group relative flex h-full w-full flex-col rounded transition-all duration-120',
-            type !== 'text' && !data.style?.accent && 'shadow',
+            type !== 'text' &&
+              type !== 'prompt' &&
+              !data.style?.accent &&
+              'shadow',
             !data.style?.backgroundColor && 'bg-transparent',
             selected ? 'ring-info ring' : 'ring-border hover:ring',
             // Accent: colored border + bottom-right shadow
             data.style?.accent && 'border-2',
+            // Prompt nodes need visible overflow for the status pin circle
+            type === 'prompt' && 'overflow-visible',
             className,
           )}
           style={{
@@ -486,7 +491,7 @@ export const NodeWrapper = memo(
 
           <div
             className={clsx(
-              'flex-1 p-0',
+              'min-h-0 flex-1 p-0',
               isMinimal && 'invisible',
               allowOverflow ? 'overflow-visible' : 'overflow-hidden',
             )}

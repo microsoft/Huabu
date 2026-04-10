@@ -8,6 +8,8 @@ import {
   type NodeSummary,
   type RecentAction,
   type SelectedNodeDetail,
+  buildSpatialSummary,
+  type SpatialNode,
 } from '@sediment/shared';
 import {
   applyNodeChanges,
@@ -99,6 +101,95 @@ const triggerPreprocessing = (node: Node) => {
 
   preprocessTimers.set(nodeId, timer);
 };
+
+// ── Spatial cache ──────────────────────────────────────────────
+// Module-level cache keyed by a lightweight fingerprint of
+// node positions + edge endpoints.  Avoids re-running the O(n²)
+// clustering in buildSpatialSummary on every getAgentContext call
+// when the canvas hasn't changed.
+
+interface SpatialCache {
+  fingerprint: string;
+  spatialNodes: SpatialNode[];
+  summary: ReturnType<typeof buildSpatialSummary>;
+}
+
+let _spatialCache: SpatialCache | null = null;
+
+/** Build a fast fingerprint from positions + edges for cache invalidation. */
+function spatialFingerprint(nodes: Node[], edges: Edge[]): string {
+  // Encode node count, each node's id+position+size, and edge count+endpoints.
+  const parts: string[] = [String(nodes.length)];
+  for (const n of nodes) {
+    const sz = getNodeSize(n);
+    parts.push(
+      `${n.id}:${n.position.x},${n.position.y},${sz.width},${sz.height}`,
+    );
+  }
+  parts.push(String(edges.length));
+  for (const e of edges) {
+    parts.push(`${e.source}>${e.target}`);
+  }
+  return parts.join('|');
+}
+
+function resolveAbsolutePosition(
+  node: Node,
+  byId: Map<string, Node>,
+): { x: number; y: number } {
+  let x = node.position.x;
+  let y = node.position.y;
+  let cur = node.parentId ? byId.get(node.parentId) : undefined;
+  while (cur) {
+    x += cur.position.x;
+    y += cur.position.y;
+    cur = cur.parentId ? byId.get(cur.parentId) : undefined;
+  }
+  return { x, y };
+}
+
+function toSpatialNodes(nodes: Node[]): SpatialNode[] {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  return nodes.map((n) => {
+    const sz = getNodeSize(n);
+    const abs = resolveAbsolutePosition(n, byId);
+    return {
+      id: n.id,
+      rect: {
+        x: abs.x,
+        y: abs.y,
+        width: sz.width || 200,
+        height: sz.height || 100,
+      },
+      type: n.type,
+      parentId: n.parentId ?? null,
+      label: (n.data as Record<string, unknown>)?.label as string | undefined,
+    };
+  });
+}
+
+/**
+ * Get (or compute) cached spatial nodes + summary for the current canvas.
+ * Safe to call from anywhere (components, handlers).
+ */
+export function getCachedSpatialData(): {
+  spatialNodes: SpatialNode[];
+  summary: ReturnType<typeof buildSpatialSummary>;
+} {
+  const { nodes, edges } = useCanvasStore.getState();
+  const fp = spatialFingerprint(nodes, edges);
+  if (_spatialCache && _spatialCache.fingerprint === fp) {
+    return {
+      spatialNodes: _spatialCache.spatialNodes,
+      summary: _spatialCache.summary,
+    };
+  }
+  const spatialNodes = toSpatialNodes(nodes);
+  const edgeList = edges.map((e) => ({ source: e.source, target: e.target }));
+  const summary = buildSpatialSummary(spatialNodes, edgeList);
+  _spatialCache = { fingerprint: fp, spatialNodes, summary };
+  return { spatialNodes, summary };
+}
 
 type RFState = {
   nodes: Node[];
@@ -232,8 +323,10 @@ type RFState = {
   ) => void;
 
   /** The node type awaiting placement on canvas via click. */
-  pendingNodeType: 'note' | 'text' | 'frame' | null;
-  setPendingNodeType: (type: 'note' | 'text' | 'frame' | null) => void;
+  pendingNodeType: 'note' | 'text' | 'frame' | 'prompt' | null;
+  setPendingNodeType: (
+    type: 'note' | 'text' | 'frame' | 'prompt' | null,
+  ) => void;
 
   copySelectedNodes: () => void;
   pasteNodes: (
@@ -504,12 +597,17 @@ const useCanvasStore = create<RFState>()(
         const src =
           n.type === 'image' ? (data?.src as string | undefined) : undefined;
 
+        const size = getNodeSize(n);
         const detail: SelectedNodeDetail = {
           id: n.id,
           type: nodeType,
           label: data?.label as string | undefined,
           origin: data?.origin as SelectedNodeDetail['origin'],
           sourceId: data?.sourceId as string | undefined,
+          position: { x: n.position.x, y: n.position.y },
+          ...(size.width > 0 || size.height > 0
+            ? { size: { width: size.width, height: size.height } }
+            : {}),
           ...(src !== undefined ? { src } : {}),
         };
 
@@ -524,8 +622,9 @@ const useCanvasStore = create<RFState>()(
       };
 
       return {
-        nodes: nodes.map(
-          (n): NodeSummary => ({
+        nodes: nodes.map((n): NodeSummary => {
+          const size = getNodeSize(n);
+          return {
             id: n.id,
             type: (n.type ?? 'note') as CanvasNodeType,
             label: n.data?.label as string | undefined,
@@ -533,8 +632,13 @@ const useCanvasStore = create<RFState>()(
             frameLabel: n.parentId
               ? (nodeMap.get(n.parentId)?.data?.label as string | undefined)
               : undefined,
-          }),
-        ),
+            position: { x: n.position.x, y: n.position.y },
+            size:
+              size.width > 0 || size.height > 0
+                ? { width: size.width, height: size.height }
+                : undefined,
+          };
+        }),
         edges: edges.map((e) => {
           const sourceNode = nodeMap.get(e.source);
           const targetNode = nodeMap.get(e.target);
@@ -549,6 +653,7 @@ const useCanvasStore = create<RFState>()(
         }),
         recentActions: actionHistory,
         selectedNodes: nodes.filter((n) => n.selected).map(buildSelectedDetail),
+        spatialSummary: getCachedSpatialData().summary,
       };
     },
 
