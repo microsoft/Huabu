@@ -1,4 +1,4 @@
-import { useStore } from '@xyflow/react';
+import useCanvasStore from '@/store/canvasStore';
 
 /**
  * Reference widths at which each node type renders at its "natural"
@@ -16,16 +16,15 @@ const REF_WIDTHS: Record<string, number> = {
  * `transform: scale(factor)` so text and layout scale proportionally when
  * the node is resized.
  *
- * At the default creation size the scale is 1.  Clamped to [0.5, 2.5].
+ * At the default creation size the scale is 1.  Clamped to min 0.5.
  */
 export function useNodeScale(nodeId: string, nodeType: string): number {
   const refWidth = REF_WIDTHS[nodeType];
 
-  return useStore((state) => {
+  return useCanvasStore((state) => {
     if (!refWidth) return 1;
-    const node = state.nodeLookup.get(nodeId);
-    if (!node) return 1;
-    const w = (node.style?.width as number) || node.measured?.width || refWidth;
-    return Math.max(0.5, Math.min(w / refWidth, 2.5));
+    const node = state.nodes.find((n) => n.id === nodeId);
+    const w = (node?.style?.width as number | undefined) ?? refWidth;
+    return Math.max(0.5, w / refWidth);
   });
 }

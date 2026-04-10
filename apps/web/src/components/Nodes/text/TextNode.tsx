@@ -1,9 +1,4 @@
-import {
-  prepare,
-  layout,
-  prepareWithSegments,
-  layoutWithLines,
-} from '@chenglou/pretext';
+import { prepareWithSegments, layoutWithLines } from '@chenglou/pretext';
 import { type Node, type NodeProps, useStore } from '@xyflow/react';
 import { clsx } from 'clsx';
 import { Baseline, Bold, Italic, Underline, Strikethrough } from 'lucide-react';
@@ -37,6 +32,16 @@ const FONT_FAMILY_OPTIONS: { name: string; value: NodeFontFamily }[] = [
 const MAX_CHARS_PER_LINE = 18;
 /** Padding inside the node (px on each side). */
 const NODE_PADDING = 4;
+/** Border width NodeWrapper applies when an accent colour is set (`border-2`). */
+const ACCENT_BORDER = 2;
+/**
+ * Extra width (px) added to the content area so that lines which barely fit
+ * in pretext don't wrap in the browser.  pretext uses canvas text-metrics
+ * while the browser uses its own font-shaping engine; for CJK text the
+ * per-character difference can be 1-2 px, enough to push a line over the
+ * edge and create an extra wrap (→ the last line gets clipped).
+ */
+const WRAP_TOLERANCE = 4;
 
 export type TextNodeType = Node<CanvasTextNodeData, 'text'>;
 
@@ -122,9 +127,11 @@ function computeFontSizeForHeight(
       opts.fontWeight,
       opts.fontStyle,
     );
-    const prepared = prepare(text, fontStr, { whiteSpace: 'pre-wrap' });
+    const prepared = prepareWithSegments(text, fontStr, {
+      whiteSpace: 'pre-wrap',
+    });
     const lineH = mid * opts.lineHeight;
-    const { height } = layout(prepared, contentWidth, lineH);
+    const { height } = layoutWithLines(prepared, contentWidth, lineH);
     if (height <= contentHeight) {
       lo = mid;
     } else {
@@ -197,22 +204,34 @@ export const TextNode = memo(
       [fontFamily, isBold, isItalic],
     );
 
+    // When an accent is set NodeWrapper renders `border-2` which, under
+    // border-box, eats into the node's width/height.  We must subtract
+    // it from the available content area for measurement.
+    const borderInset = style.accent ? ACCENT_BORDER : 0;
+
     // ------------------------------------------------------------------
     // Effective font size:
-    //   Resizing live  → liveFontSize (debounced during drag)
+    //   Resizing live  → liveFontSize (during drag)
     //   Fixed mode     → computed to fill node height at node width
-    //   Auto mode      → baseFontSize from style
+    //   Auto mode      → baseFontSize, refined by pretext to guarantee fit
     // ------------------------------------------------------------------
+    const inset = NODE_PADDING + borderInset;
     const computedFontSize = useMemo(() => {
       if (hasFixedSize && width != null && height != null) {
-        const cw = width - NODE_PADDING * 2;
-        const ch = height - NODE_PADDING * 2;
+        const cw = width - inset * 2;
+        const ch = height - inset * 2;
         return computeFontSizeForHeight(draftContent, cw, ch, fontOpts);
       }
       return baseFontSize;
-    }, [hasFixedSize, width, height, draftContent, baseFontSize, fontOpts]);
-
-    const effectiveFontSize = liveFontSize ?? computedFontSize;
+    }, [
+      hasFixedSize,
+      width,
+      height,
+      draftContent,
+      baseFontSize,
+      fontOpts,
+      inset,
+    ]);
 
     // ------------------------------------------------------------------
     // Auto mode measurement (only when no fixed size)
@@ -231,16 +250,20 @@ export const TextNode = memo(
       });
     }, [hasFixedSize, draftContent, baseFontSize, fontOpts, maxAutoWidth]);
 
+    const effectiveFontSize = liveFontSize ?? computedFontSize;
+
     // In auto mode, compute target dimensions from content measurement.
     // In fixed mode, dimensions come from node style (set by setNodeGeometry).
+    // WRAP_TOLERANCE prevents the browser from wrapping a line that pretext
+    // said fits — the most common cause of last-line clipping.
     const autoWidth = hasFixedSize
       ? undefined
-      : Math.max((autoSize?.width ?? 0) + NODE_PADDING * 2, 30);
+      : Math.max((autoSize?.width ?? 0) + WRAP_TOLERANCE + inset * 2, 30);
     const autoHeight = hasFixedSize
       ? undefined
       : Math.max(
-          (autoSize?.height ?? 0) + NODE_PADDING * 2,
-          baseFontSize * 1.5 + NODE_PADDING * 2,
+          (autoSize?.height ?? 0) + inset * 2,
+          baseFontSize * 1.5 + inset * 2,
         );
 
     // ------------------------------------------------------------------
@@ -253,12 +276,12 @@ export const TextNode = memo(
     const handleResize = useCallback(
       (width: number, height: number) => {
         // pretext is pure arithmetic — no DOM reflow, no debounce needed.
-        const cw = width - NODE_PADDING * 2;
-        const ch = height - NODE_PADDING * 2;
+        const cw = width - inset * 2;
+        const ch = height - inset * 2;
         const fs = computeFontSizeForHeight(draftContent, cw, ch, fontOpts);
         setLiveFontSize(fs);
       },
-      [draftContent, fontOpts],
+      [draftContent, fontOpts, inset],
     );
 
     const handleResizeEnd = useCallback(() => {
