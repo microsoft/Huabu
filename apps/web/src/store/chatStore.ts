@@ -23,6 +23,11 @@ interface ChatState {
    */
   viewingPromptThread: { nodeId: string; threadId: string } | null;
 
+  /** @internal Stashed canvas thread ID while viewing a prompt thread. */
+  _stashedThreadId?: string;
+  /** @internal Stashed canvas messages while viewing a prompt thread. */
+  _stashedMessages?: ChatMessage[];
+
   /**
    * Staged attachments waiting to be sent with the next message.
    * Populated by external actions (e.g. PDF capture "Send to Chat") and
@@ -172,15 +177,14 @@ export const useChatStore = create<ChatState>()(
       },
 
       closePromptThread: () => {
-        const state = get() as ChatState & {
-          _stashedThreadId?: string;
-          _stashedMessages?: ChatMessage[];
-        };
+        const state = get();
         set({
           viewingPromptThread: null,
           threadId: state._stashedThreadId ?? state.threadId,
           messages: state._stashedMessages ?? [],
           isHistoryLoaded: (state._stashedMessages ?? []).length > 0,
+          _stashedThreadId: undefined,
+          _stashedMessages: undefined,
         });
       },
     }),

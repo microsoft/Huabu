@@ -125,8 +125,8 @@ async function executePromptNode(nodeId: string): Promise<void> {
     patch(nodeId, { threadId });
   }
 
-  // Set running
-  patch(nodeId, { status: 'running', errorMessage: undefined });
+  // Set running (reset viewed so the glow re-appears on completion)
+  patch(nodeId, { status: 'running', errorMessage: undefined, viewed: false });
 
   // Abort controller
   const abortController = new AbortController();

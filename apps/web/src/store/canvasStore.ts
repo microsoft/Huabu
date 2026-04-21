@@ -109,16 +109,25 @@ const triggerPreprocessing = (node: Node) => {
 // when the canvas hasn't changed.
 
 interface SpatialCache {
-  fingerprint: string;
+  fingerprint: number;
   spatialNodes: SpatialNode[];
   summary: ReturnType<typeof buildSpatialSummary>;
 }
 
 let _spatialCache: SpatialCache | null = null;
 
+/** FNV-1a 32-bit hash — fast, non-cryptographic, good distribution. */
+function fnv1a(str: string): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i);
+    hash = (hash * 0x01000193) >>> 0;
+  }
+  return hash;
+}
+
 /** Build a fast fingerprint from positions + edges for cache invalidation. */
-function spatialFingerprint(nodes: Node[], edges: Edge[]): string {
-  // Encode node count, each node's id+position+size, and edge count+endpoints.
+function spatialFingerprint(nodes: Node[], edges: Edge[]): number {
   const parts: string[] = [String(nodes.length)];
   for (const n of nodes) {
     const sz = getNodeSize(n);
@@ -130,7 +139,7 @@ function spatialFingerprint(nodes: Node[], edges: Edge[]): string {
   for (const e of edges) {
     parts.push(`${e.source}>${e.target}`);
   }
-  return parts.join('|');
+  return fnv1a(parts.join('|'));
 }
 
 function resolveAbsolutePosition(

@@ -455,17 +455,6 @@ body,
 
 /* ── Prompt node badge animations ── */
 
-/* Pending: gentle pulse */
-@keyframes prompt-badge-pulse {
-  0%,
-  100% {
-    transform: scale(1);
-  }
-  50% {
-    transform: scale(1.15);
-  }
-}
-
 /* Running: icon spin */
 @keyframes prompt-icon-spin {
   from {
@@ -473,30 +462,6 @@ body,
   }
   to {
     transform: rotate(360deg);
-  }
-}
-
-/* Done unviewed: pop in */
-@keyframes prompt-badge-pop {
-  0% {
-    transform: scale(0);
-  }
-  60% {
-    transform: scale(1.15);
-  }
-  100% {
-    transform: scale(1);
-  }
-}
-
-/* Done unviewed: glow breathe */
-@keyframes prompt-badge-glow {
-  0%,
-  100% {
-    box-shadow: 0 0 6px 2px color-mix(in srgb, var(--success) 30%, transparent);
-  }
-  50% {
-    box-shadow: 0 0 12px 5px color-mix(in srgb, var(--success) 50%, transparent);
   }
 }
 
@@ -518,37 +483,20 @@ body,
 
 /* ── Sticky-note styling ── */
 
-/* Done unviewed: pop-in + glow on the whole node */
-.prompt-node-done-unviewed {
-  animation: prompt-node-pop 0.4s ease-out;
-}
-
-.prompt-node-done-unviewed,
-.prompt-node-done-unviewed::before {
-  animation: prompt-node-glow 2.5s ease-in-out 0.4s infinite;
-}
-
-@keyframes prompt-node-pop {
-  0% {
-    transform: scale(0.92);
-    opacity: 0.6;
-  }
-  60% {
-    transform: scale(1.03);
-  }
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
+/* Done: glow via drop-shadow on the outer RF node (avoids stacking context on .prompt-sticky) */
+.react-flow__node:has(.prompt-node-done-unviewed) {
+  animation: prompt-node-glow 2.5s ease-in-out infinite;
 }
 
 @keyframes prompt-node-glow {
   0%,
   100% {
-    box-shadow: 0 0 8px 3px color-mix(in srgb, var(--success) 25%, transparent);
+    filter: drop-shadow(0 0 6px rgba(22, 163, 74, 0.3))
+      drop-shadow(0 0 14px rgba(22, 163, 74, 0.15));
   }
   50% {
-    box-shadow: 0 0 18px 6px color-mix(in srgb, var(--success) 45%, transparent);
+    filter: drop-shadow(0 0 10px rgba(22, 163, 74, 0.5))
+      drop-shadow(0 0 24px rgba(22, 163, 74, 0.25));
   }
 }
 

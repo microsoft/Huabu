@@ -1,4 +1,3 @@
-import { buildPromptNodeContext } from '@sediment/shared';
 import { type Node, type NodeProps } from '@xyflow/react';
 import { clsx } from 'clsx';
 import {
@@ -16,7 +15,7 @@ import { memo, useCallback, useState, useRef, useEffect, useMemo } from 'react';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
 import { Tooltip } from '@/components/Common/Tooltip.tsx';
 import { useTextAutoSize } from '@/hooks/useTextAutoSize';
-import useCanvasStore, { getCachedSpatialData } from '@/store/canvasStore.ts';
+import useCanvasStore from '@/store/canvasStore.ts';
 import { useChatStore } from '@/store/chatStore.ts';
 import { usePanelStore } from '@/store/panelStore.ts';
 
@@ -29,18 +28,9 @@ export type PromptNodeType = Node<CanvasPromptNodeData, 'prompt'>;
 /** Padding inside the node (px). */
 const NODE_PADDING = 12;
 
-/**
- * Yield control to the browser via MessageChannel.
- * Unlike setTimeout(0) which has a ≥4 ms clamped delay,
- * MessageChannel fires as the next macrotask with no minimum delay.
- */
-function yieldToMain(): Promise<void> {
-  return new Promise((resolve) => {
-    const ch = new MessageChannel();
-    ch.port1.onmessage = () => resolve();
-    ch.port2.postMessage(undefined);
-  });
-}
+/** Font family for the prompt sticky-note style. */
+const PROMPT_FONT_FAMILY =
+  '"Comic Sans MS", STXingkai, KaiTi, "Kaiti SC", cursive';
 
 export const PromptNode = memo(
   ({ id, data, selected, width, height }: NodeProps<PromptNodeType>) => {
@@ -84,7 +74,7 @@ export const PromptNode = memo(
     // ------------------------------------------------------------------
     const fontOpts = useMemo(
       () => ({
-        fontFamily: '"Comic Sans MS", STXingkai, KaiTi, "Kaiti SC", cursive',
+        fontFamily: PROMPT_FONT_FAMILY,
         fontWeight: 'normal',
         fontStyle: 'normal',
         lineHeight: 1.5,
@@ -214,7 +204,6 @@ export const PromptNode = memo(
           {/* Cancel — only when pending/running */}
           {(status === 'pending' || status === 'running') && (
             <>
-              <FloatingToolbar.Divider />
               <FloatingToolbar.ActionButton
                 title="Cancel"
                 onClick={() => {
@@ -241,7 +230,7 @@ export const PromptNode = memo(
       [id, status, hasRun, data.threadId, patchNodeSilent, openInChat],
     );
 
-    const handleBlur = useCallback(async () => {
+    const handleBlur = useCallback(() => {
       setIsEditing(false);
 
       const trimmed = draft.trim();
@@ -254,80 +243,14 @@ export const PromptNode = memo(
         });
       }
 
-      // Only compute spatial context + screenshot when content actually changed.
+      // Only schedule auto-run when content actually changed.
       if (!trimmed || !contentChanged) return;
-
-      // Cancel any in-flight pipeline from a prior blur.
-      processingRef.current?.abort();
-      const controller = new AbortController();
-      processingRef.current = controller;
-      const { signal } = controller;
-
-      // ── Async pipeline: yield to the browser (MessageChannel) between
-      //    each step so the main thread stays responsive. ──
-
-      const t0 = performance.now();
-
-      // Step 1: compute spatial context
-      await yieldToMain();
-      if (signal.aborted) return;
-
-      const tYield1 = performance.now();
-
-      const { spatialNodes } = getCachedSpatialData();
-      const target = spatialNodes.find((n) => n.id === id);
-      if (!target) return;
-
-      const nodes = useCanvasStore.getState().nodes;
-      const edges = useCanvasStore.getState().edges;
-
-      const snippets = new Map<string, string>();
-      for (const n of nodes) {
-        const d = n.data as Record<string, unknown> | undefined;
-        const snippet =
-          (d?.label as string) ??
-          (d?.content as string)?.slice(0, 120) ??
-          (d?.src as string) ??
-          '';
-        if (snippet) snippets.set(n.id, snippet);
-      }
-
-      buildPromptNodeContext(
-        target,
-        spatialNodes,
-        edges.map((e) => ({ source: e.source, target: e.target })),
-        snippets,
-      );
-
-      const tSpatial = performance.now();
-
-      // Step 2: set pending (triggers React re-render in a new macrotask)
-      await yieldToMain();
-      if (signal.aborted) return;
-
-      const tYield2 = performance.now();
 
       const delay = (data.autoRunDelay as number | undefined) ?? 10;
       patchNodeSilent(id, {
         status: 'pending',
         runAt: Date.now() + delay * 1000,
       });
-
-      const tPending = performance.now();
-
-      if (import.meta.env.DEV) {
-        const fmt = (ms: number) => `${ms.toFixed(1)}ms`;
-        console.log(
-          `%c[PromptNode] Blur pipeline timing:
-  yield1 (wait):     ${fmt(tYield1 - t0)}
-  spatialContext:     ${fmt(tSpatial - tYield1)}
-  yield2 (wait):     ${fmt(tYield2 - tSpatial)}
-  patchPending:      ${fmt(tPending - tYield2)}
-  ─────────────────
-  TOTAL:             ${fmt(tPending - t0)}`,
-          'color: #f59e0b; font-weight: bold',
-        );
-      }
     }, [
       draft,
       inputContent,
@@ -381,14 +304,14 @@ export const PromptNode = memo(
                       ? `Starts in ${countdownSecs}s`
                       : 'Pending',
                   iconBg: 'var(--warning)',
-                  pillBg: 'color-mix(in srgb, var(--warning) 10%, white 20%))',
+                  pillBg: 'color-mix(in srgb, var(--warning) 10%, white 20%)',
                   pillFg: 'var(--warning)',
                 },
                 running: {
                   icon: Loader,
                   label: 'Running',
                   iconBg: 'var(--info)',
-                  pillBg: 'color-mix(in srgb, var(--info) 10%, white 20%))',
+                  pillBg: 'color-mix(in srgb, var(--info) 10%, white 20%)',
                   pillFg: 'var(--info)',
                 },
                 done: {
@@ -397,7 +320,6 @@ export const PromptNode = memo(
                   iconBg: 'var(--success)',
                   pillBg: 'color-mix(in srgb, var(--success) 10%, white 20%)',
                   pillFg: 'var(--success)',
-                  glow: !isViewed,
                 },
                 error: {
                   icon: X,
@@ -409,7 +331,6 @@ export const PromptNode = memo(
               }[status];
               if (!cfg) return null;
               const Icon = cfg.icon;
-              const hasGlow = 'glow' in cfg && cfg.glow;
 
               const badgeAnimation =
                 status === 'error'
@@ -427,9 +348,6 @@ export const PromptNode = memo(
                   style={{
                     backgroundColor: cfg.pillBg,
                     color: cfg.pillFg,
-                    ...(hasGlow && {
-                      boxShadow: `0 0 8px 3px color-mix(in srgb, var(--success) 45%, transparent)`,
-                    }),
                     ...(badgeAnimation && { animation: badgeAnimation }),
                   }}
                 >
@@ -476,8 +394,7 @@ export const PromptNode = memo(
               padding: 0,
               border: 'none',
               color: 'var(--prompt-fg)',
-              fontFamily:
-                '"Comic Sans MS", STXingkai, KaiTi, "Kaiti SC", cursive',
+              fontFamily: PROMPT_FONT_FAMILY,
               fontWeight: 'normal',
               fontSize: `${effectiveFontSize}px`,
               lineHeight: 1.5,

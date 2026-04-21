@@ -630,43 +630,34 @@ export function buildPromptNodeContext(
         }
       }
 
-      // Candidates are nodes not inside any ancestor frame (and not ancestors
-      // themselves), and not the prompt node.
-      const outerCandidates = allNodes.filter((n) => {
-        if (n.id === promptNode.id) return false;
-        if (ancestorIds.has(n.id)) return false;
-        // Skip nodes that are children/descendants of ancestor frames.
+      // Helper: true when any ancestor of `n` is in `ancestorIds`.
+      const isInsideAncestor = (n: SpatialNode): boolean => {
         let pid = n.parentId;
         while (pid) {
-          if (ancestorIds.has(pid)) return true; // inside an ancestor — skip
+          if (ancestorIds.has(pid)) return true;
           pid = nodeById.get(pid)?.parentId;
         }
-        return n.type !== 'frame'; // keep top-level content nodes
-      });
+        return false;
+      };
 
-      // Filter out any that are inside ancestor frames.
-      const topLevelOuter = outerCandidates.filter((n) => {
-        let pid = n.parentId;
-        while (pid) {
-          if (ancestorIds.has(pid)) return false;
-          pid = nodeById.get(pid)?.parentId;
-        }
-        return true;
-      });
+      // Top-level content nodes: not the prompt, not an ancestor frame,
+      // not a frame, and not nested inside any ancestor frame.
+      const topLevelOuter = allNodes.filter(
+        (n) =>
+          n.id !== promptNode.id &&
+          !ancestorIds.has(n.id) &&
+          n.type !== 'frame' &&
+          !isInsideAncestor(n),
+      );
 
-      // Also collect top-level frames that are NOT ancestors as whole entities.
-      const outerFrames = allNodes.filter((n) => {
-        if (n.type !== 'frame') return false;
-        if (ancestorIds.has(n.id)) return false;
-        if (n.id === promptNode.id) return false;
-        // Only top-level or not inside an ancestor.
-        let pid = n.parentId;
-        while (pid) {
-          if (ancestorIds.has(pid)) return false;
-          pid = nodeById.get(pid)?.parentId;
-        }
-        return true;
-      });
+      // Top-level frames that are NOT ancestors (treated as whole entities).
+      const outerFrames = allNodes.filter(
+        (n) =>
+          n.type === 'frame' &&
+          n.id !== promptNode.id &&
+          !ancestorIds.has(n.id) &&
+          !isInsideAncestor(n),
+      );
 
       // Build groups from loose nodes (non-frame, no parent that is an outer frame).
       const outerFrameIds = new Set(outerFrames.map((f) => f.id));

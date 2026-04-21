@@ -1,5 +1,5 @@
 import { useStore } from '@xyflow/react';
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useMemo } from 'react';
 
 import { NODE_TYPE_LABEL } from '@/config/nodeIcons';
 import { getCachedSpatialData } from '@/store/canvasStore';
@@ -61,9 +61,6 @@ export function useClusterFontSize(
   width: number,
   height: number,
 ): number {
-  const prevKeyRef = useRef('');
-  const prevResultRef = useRef<number | null>(null);
-
   // Build a stable key for the current cluster's sibling dimensions + labels.
   // This selector runs on every xyflow state update but returns a primitive
   // string, so downstream useMemo only recalculates when actual data changes.
@@ -110,9 +107,6 @@ export function useClusterFontSize(
   const clusterMedian = useMemo(() => {
     if (!siblingKey) return null;
 
-    // Fast-path: if the key hasn't changed, return the cached result.
-    if (siblingKey === prevKeyRef.current) return prevResultRef.current;
-
     const entries = siblingKey.split('\n');
     const sizes: number[] = [];
     for (const entry of entries) {
@@ -139,10 +133,7 @@ export function useClusterFontSize(
         : sizes[mid];
 
     // Snap to 4px grid (consistent with fitFontSize output)
-    const result = Math.floor(median / 4) * 4 || median;
-    prevKeyRef.current = siblingKey;
-    prevResultRef.current = result;
-    return result;
+    return Math.floor(median / 4) * 4 || median;
   }, [siblingKey]);
 
   // Use the median but never exceed this node's own fit size.
