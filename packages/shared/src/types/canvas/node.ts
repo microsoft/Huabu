@@ -19,7 +19,7 @@ export type CanvasNodeType =
   | 'video'
   | 'web'
   | 'frame'
-  | 'sketch';
+  | 'sketch'
   | 'prompt';
 
 /**
@@ -306,7 +306,7 @@ export type NodeData =
   | VideoNodeData
   | ImageNodeData
   | FrameNodeData
-  | SketchNodeData;
+  | SketchNodeData
   | PromptNodeData;
 
 // ==================== Type Guards ====================
