@@ -15,6 +15,7 @@ import {
   Frame,
   Clipboard,
   Type,
+  Pencil,
 } from 'lucide-react';
 
 import type { CanvasNodeType } from '@sediment/shared';
@@ -38,6 +39,7 @@ export const NODE_ICON: Record<CanvasNodeType, LucideIcon> = {
   video: Film,
   web: Globe,
   frame: Frame,
+  sketch: Pencil,
   prompt: BadgeQuestionMark,
 };
 
@@ -52,6 +54,7 @@ export const NODE_TYPE_LABEL: Record<CanvasNodeType, string> = {
   video: 'Video',
   web: 'Website',
   frame: 'Frame',
+  sketch: 'Sketch',
   prompt: 'Prompt',
 };
 

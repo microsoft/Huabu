@@ -605,12 +605,12 @@ function MergedAgentToolRow({
           type="button"
           variant="ghost"
           size="sm"
-          className="text-fg-muted w-full justify-start gap-1.5 text-xs"
+          className="text-fg-muted w-full justify-start gap-1.5 px-2 py-1 text-left text-xs [&_svg]:h-3 [&_svg]:w-3"
           onClick={() => setIsExpanded(!isExpanded)}
         >
           {statusIcon}
           {icon && <span className="text-fg-muted/60">{icon}</span>}
-          <span className="flex-1 truncate">{title}</span>
+          <span className="flex-1 truncate text-left">{title}</span>
           <ChevronRight
             size={10}
             className={`text-fg-muted/50 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`}

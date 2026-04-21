@@ -440,11 +440,18 @@ export const NodeWrapper = memo(
           className={cn(
             'group relative flex h-full w-full flex-col rounded transition-all duration-120',
             type !== 'text' &&
+              type !== 'sketch' &&
               type !== 'prompt' &&
               !data.style?.accent &&
               'shadow',
             !data.style?.backgroundColor && 'bg-transparent',
-            selected ? 'ring-info ring' : 'ring-border hover:ring',
+            selected
+              ? type === 'sketch'
+                ? 'ring-info/50 ring'
+                : 'ring-info ring'
+              : type === 'sketch'
+                ? ''
+                : 'ring-border hover:ring',
             // Accent: colored border + bottom-right shadow
             data.style?.accent && 'border-2',
             // Prompt nodes need visible overflow for status badges and progress bar

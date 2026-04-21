@@ -331,10 +331,10 @@ type RFState = {
     reorderTarget?: { nodeId: string; position: 'before' | 'after' },
   ) => void;
 
-  /** The node type awaiting placement on canvas via click. */
-  pendingNodeType: 'note' | 'text' | 'frame' | 'prompt' | null;
+  /** The node type awaiting placement on canvas via click or drawing. */
+  pendingNodeType: 'note' | 'text' | 'frame' | 'sketch' | 'prompt' | null;
   setPendingNodeType: (
-    type: 'note' | 'text' | 'frame' | 'prompt' | null,
+    type: 'note' | 'text' | 'frame' | 'sketch' | 'prompt' | null,
   ) => void;
 
   copySelectedNodes: () => void;

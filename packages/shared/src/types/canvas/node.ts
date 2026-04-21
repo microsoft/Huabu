@@ -19,6 +19,7 @@ export type CanvasNodeType =
   | 'video'
   | 'web'
   | 'frame'
+  | 'sketch';
   | 'prompt';
 
 /**
@@ -246,6 +247,16 @@ export interface FrameNodeData extends BaseNodeData {
   type: 'frame';
 }
 
+/** Sketch node: freehand drawing stored as pressure-sensitive points */
+export interface SketchNodeData extends BaseNodeData {
+  type: 'sketch';
+  /** Array of [x, y, pressure] points in local node coordinates */
+  points: number[][];
+  /** Original bounding box size when the stroke was created */
+  initialSize: { width: number; height: number };
+  /** Stroke color (hex) */
+  strokeColor?: string;
+}
 // ==================== Prompt Node ====================
 
 /** Execution status of a prompt node. */
@@ -295,6 +306,7 @@ export type NodeData =
   | VideoNodeData
   | ImageNodeData
   | FrameNodeData
+  | SketchNodeData;
   | PromptNodeData;
 
 // ==================== Type Guards ====================
@@ -315,6 +327,10 @@ export function isMediaNode(
 
 export function isFrameNode(data: NodeData): data is FrameNodeData {
   return data.type === 'frame';
+}
+
+export function isSketchNode(data: NodeData): data is SketchNodeData {
+  return data.type === 'sketch';
 }
 
 export function hasSourceId(
