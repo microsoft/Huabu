@@ -1,12 +1,8 @@
 import { cn } from '@/components/Common/cn';
 import { NODE_TYPE_LABEL } from '@/config/nodeIcons';
-import { useFitText } from '@/hooks/useFitText';
+import { useClusterFontSize } from '@/hooks/useClusterFontSize';
 
 import type { CanvasNodeType, NodeData } from './types';
-
-/** Padding (px) reserved on each side inside the placeholder. */
-const PADDING_X = 48;
-const PADDING_Y = 16;
 
 const ZWS = '\u200B';
 
@@ -20,6 +16,8 @@ function insertSoftBreaks(text: string): string {
 }
 
 interface SemanticPlaceholderProps {
+  /** ReactFlow node ID — used for cluster-based font size normalisation. */
+  nodeId: string;
   type: CanvasNodeType;
   data: NodeData;
   /** Canvas-space width of the node. */
@@ -34,6 +32,7 @@ interface SemanticPlaceholderProps {
  * (via pretext) to fill the available space.
  */
 export function SemanticPlaceholder({
+  nodeId,
   type,
   data,
   width,
@@ -49,11 +48,7 @@ export function SemanticPlaceholder({
 
   const accent = data.style?.accent;
 
-  const fontSize = useFitText(
-    label,
-    Math.max(0, width - PADDING_X * 2),
-    Math.max(0, height - PADDING_Y * 2),
-  );
+  const fontSize = useClusterFontSize(nodeId, label, width, height);
 
   return (
     <div

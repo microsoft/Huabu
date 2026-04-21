@@ -279,6 +279,8 @@ export interface PromptNodeData extends BaseNodeData {
   errorMessage?: string;
   /** Short AI response shown on node after completion. */
   responseSummary?: string;
+  /** Whether the user has viewed the completed response in the chat panel. */
+  viewed?: boolean;
 }
 
 /**

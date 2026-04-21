@@ -31,7 +31,7 @@
 
   /* Status: success */
   --success: #16a34a;
-  --success-light: #22c55e;
+  --success-light: #6faf4f;
   --success-bg: #f0fdf4;
 
   /* Status: warning */
@@ -56,8 +56,9 @@
   --diff-removed-text: var(--danger);
 
   /* Prompt node */
-  --prompt-bg: #f2d479;
-  --prompt-border: #b89a4a;
+  --prompt-fg: #d97a2b;
+  --prompt-bg: #fbe7ad;
+  --prompt-border: #eec84e;
 
   /* Special purpose */
   --canvas-grid: #cccccc;
@@ -142,7 +143,8 @@
   --diff-removed-text: #fca5a5;
 
   /* Special purpose */
-  --prompt-bg: #c4a84d;
+  --prompt-fg: #d97a2b;
+  --prompt-bg: #eec84e;
   --prompt-border: #8a7535;
   --canvas-grid: oklch(0.35 0 0);
   --shimmer-1: oklch(0.45 0 0);
@@ -218,6 +220,7 @@
 
   /* Special purpose */
   --color-canvas-grid: var(--canvas-grid);
+  --color-prompt-fg: var(--prompt-fg);
   --color-prompt-bg: var(--prompt-bg);
   --color-prompt-border: var(--prompt-border);
 
@@ -448,4 +451,121 @@ body,
 .skeleton-line:nth-child(3) {
   width: 50%;
   animation-delay: 0.3s;
+}
+
+/* ── Prompt node badge animations ── */
+
+/* Pending: gentle pulse */
+@keyframes prompt-badge-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.15);
+  }
+}
+
+/* Running: icon spin */
+@keyframes prompt-icon-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Done unviewed: pop in */
+@keyframes prompt-badge-pop {
+  0% {
+    transform: scale(0);
+  }
+  60% {
+    transform: scale(1.15);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Done unviewed: glow breathe */
+@keyframes prompt-badge-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 6px 2px color-mix(in srgb, var(--success) 30%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 12px 5px color-mix(in srgb, var(--success) 50%, transparent);
+  }
+}
+
+/* Error: shake */
+@keyframes prompt-badge-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20%,
+  60% {
+    transform: translateX(-3px);
+  }
+  40%,
+  80% {
+    transform: translateX(3px);
+  }
+}
+
+/* ── Sticky-note styling ── */
+
+/* Done unviewed: pop-in + glow on the whole node */
+.prompt-node-done-unviewed {
+  animation: prompt-node-pop 0.4s ease-out;
+}
+
+.prompt-node-done-unviewed,
+.prompt-node-done-unviewed::before {
+  animation: prompt-node-glow 2.5s ease-in-out 0.4s infinite;
+}
+
+@keyframes prompt-node-pop {
+  0% {
+    transform: scale(0.92);
+    opacity: 0.6;
+  }
+  60% {
+    transform: scale(1.03);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes prompt-node-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 8px 3px color-mix(in srgb, var(--success) 25%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 18px 6px color-mix(in srgb, var(--success) 45%, transparent);
+  }
+}
+
+.prompt-sticky {
+  --depth-offset: 12px;
+  position: relative;
+  overflow: visible !important;
+}
+
+/* Back layer — darker yellow-green strip visible on right & bottom edges */
+.prompt-sticky::before {
+  content: '';
+  position: absolute;
+  inset: var(--depth-offset) calc(var(--depth-offset) * -1)
+    calc(var(--depth-offset) * -1) var(--depth-offset);
+  background: var(--prompt-border);
+  border-radius: 1rem;
+  z-index: -1;
+  pointer-events: none;
 }

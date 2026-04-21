@@ -87,6 +87,16 @@ export function useTextAutoSize({
     return baseFontSize;
   }, [hasFixedSize, width, height, text, baseFontSize, fontOpts, inset]);
 
+  // Clear liveFontSize once computedFontSize updates after resize ends,
+  // so the stable memo-driven value takes over.
+  const prevComputedRef = useRef(computedFontSize);
+  if (prevComputedRef.current !== computedFontSize) {
+    prevComputedRef.current = computedFontSize;
+    if (!isResizingRef.current && liveFontSize !== null) {
+      setLiveFontSize(null);
+    }
+  }
+
   const maxAutoWidth = baseFontSize * MAX_CHARS_PER_LINE * 0.62;
 
   const autoSize = useMemo(() => {
@@ -99,6 +109,8 @@ export function useTextAutoSize({
     });
   }, [hasFixedSize, text, baseFontSize, fontOpts, maxAutoWidth, placeholder]);
 
+  // After resize ends, prefer computedFontSize (driven by NodeProps width/height)
+  // over liveFontSize. During active drag, use liveFontSize for instant feedback.
   const effectiveFontSize = liveFontSize ?? computedFontSize;
 
   const autoWidth = hasFixedSize
@@ -127,7 +139,9 @@ export function useTextAutoSize({
 
   const handleResizeEnd = useCallback(() => {
     isResizingRef.current = false;
-    setLiveFontSize(null);
+    // Keep liveFontSize until the next render with updated NodeProps dimensions,
+    // which will recompute computedFontSize. Clearing it immediately would cause
+    // a flash to baseFontSize before React Flow propagates measured dimensions.
   }, []);
 
   return {

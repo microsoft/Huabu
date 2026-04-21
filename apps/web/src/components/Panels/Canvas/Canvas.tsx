@@ -28,6 +28,7 @@ import {
 } from '@/handler/canvasCommand/nodeInputBuilders';
 import { useCanvasShortcuts } from '@/hooks/useCanvasShortcuts';
 import { useIsTouch } from '@/hooks/useInputMode';
+import { usePromptRunner } from '@/hooks/usePromptRunner';
 
 import { NodeToolbar } from './CanvasToolbar.tsx';
 import { EdgeStyleToolbar } from './EdgeStyleToolbar.tsx';
@@ -180,6 +181,9 @@ export const Canvas: React.FC<CanvasProps> = ({
   );
 
   const isTouch = useIsTouch();
+
+  // Run prompt nodes when their timers expire.
+  usePromptRunner();
 
   // When a connection drag ends without landing on a handle, check if the
   // pointer is over a node element and create the connection anyway.

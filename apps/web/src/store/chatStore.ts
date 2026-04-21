@@ -18,6 +18,12 @@ interface ChatState {
   threadMap: Record<string, string>;
 
   /**
+   * When set, the chat panel is viewing a prompt node's conversation thread
+   * in read/replay mode instead of the normal canvas chat.
+   */
+  viewingPromptThread: { nodeId: string; threadId: string } | null;
+
+  /**
    * Staged attachments waiting to be sent with the next message.
    * Populated by external actions (e.g. PDF capture "Send to Chat") and
    * consumed when the user submits a chat message.
@@ -54,6 +60,11 @@ interface ChatState {
 
   /** Set/replace the text-selection-based attachment (auto-managed by ExpandedNodePanel). */
   setSelectionAttachment: (attachment: ChatAttachment | null) => void;
+
+  /** Open a prompt node's thread in the chat panel (replay mode). */
+  openPromptThread: (nodeId: string, threadId: string) => void;
+  /** Close prompt thread replay and return to normal canvas chat. */
+  closePromptThread: () => void;
 }
 
 export const useChatStore = create<ChatState>()(
@@ -66,6 +77,7 @@ export const useChatStore = create<ChatState>()(
       threadMap: {},
       pendingAttachments: [],
       selectionAttachment: null,
+      viewingPromptThread: null,
 
       addMessage: (message) =>
         set((state) => ({ messages: [...state.messages, message] })),
@@ -130,6 +142,47 @@ export const useChatStore = create<ChatState>()(
 
       setSelectionAttachment: (attachment) =>
         set({ selectionAttachment: attachment }),
+
+      openPromptThread: (nodeId, threadId) => {
+        const {
+          threadId: currentThreadId,
+          messages: currentMessages,
+          viewingPromptThread: currentViewing,
+        } = get();
+
+        // Already viewing this exact prompt thread — nothing to do.
+        if (currentViewing?.threadId === threadId) return;
+
+        // If we're already viewing a different prompt thread, don't
+        // overwrite the stash — keep the original canvas thread.
+        const isAlreadyViewing = currentViewing !== null;
+
+        set({
+          viewingPromptThread: { nodeId, threadId },
+          // Swap to the prompt thread — history hook will refetch
+          threadId: threadId,
+          messages: [],
+          isHistoryLoaded: false,
+          // Stash the previous thread ID so we can restore on close
+          ...(!isAlreadyViewing && {
+            _stashedThreadId: currentThreadId,
+            _stashedMessages: currentMessages,
+          }),
+        });
+      },
+
+      closePromptThread: () => {
+        const state = get() as ChatState & {
+          _stashedThreadId?: string;
+          _stashedMessages?: ChatMessage[];
+        };
+        set({
+          viewingPromptThread: null,
+          threadId: state._stashedThreadId ?? state.threadId,
+          messages: state._stashedMessages ?? [],
+          isHistoryLoaded: (state._stashedMessages ?? []).length > 0,
+        });
+      },
     }),
     {
       name: 'sediment-chat',

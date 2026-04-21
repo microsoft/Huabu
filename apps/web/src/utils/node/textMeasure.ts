@@ -74,6 +74,15 @@ export function computeFontSizeForHeight(
       Math.min(Math.round(contentHeight / opts.lineHeight), 200),
     );
   }
+
+  // Reserve a small margin so browser rendering differences don't clip
+  // the last line. 2px height absorbs sub-pixel rounding; 4px narrower
+  // width forces pretext to wrap at least as aggressively as the browser
+  // (especially for CJK + Latin mixed text where break opportunities differ).
+  const safeHeight = contentHeight - 2;
+  const safeWidth = contentWidth - 4;
+  if (safeHeight <= 0 || safeWidth <= 0) return 1;
+
   let lo = 1;
   let hi = 200;
   for (let i = 0; i < 15; i++) {
@@ -88,8 +97,8 @@ export function computeFontSizeForHeight(
       whiteSpace: 'pre-wrap',
     });
     const lineH = mid * opts.lineHeight;
-    const { height } = layoutWithLines(prepared, contentWidth, lineH);
-    if (height <= contentHeight) {
+    const { height } = layoutWithLines(prepared, safeWidth, lineH);
+    if (height <= safeHeight) {
       lo = mid;
     } else {
       hi = mid;
