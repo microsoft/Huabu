@@ -323,6 +323,19 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           <Button
             variant="ghost"
             iconOnly
+            title="Prompt"
+            className={clsx(
+              pendingNodeType === 'prompt' && 'text-info bg-bg-default',
+            )}
+            onClick={() =>
+              setPendingNodeType(pendingNodeType === 'prompt' ? null : 'prompt')
+            }
+          >
+            <NODE_ICON.prompt />
+          </Button>
+          <Button
+            variant="ghost"
+            iconOnly
             title="Intent (crtl + I)"
             className={clsx(intentOpen && 'text-info bg-bg-default')}
             onClick={() => {

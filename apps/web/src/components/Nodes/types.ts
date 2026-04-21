@@ -10,6 +10,7 @@ import type {
   ImageNodeData as SharedImageNodeData,
   FrameNodeData as SharedFrameNodeData,
   SketchNodeData as SharedSketchNodeData,
+  PromptNodeData as SharedPromptNodeData,
 } from '@sediment/shared';
 import type { Node } from '@xyflow/react';
 
@@ -39,6 +40,9 @@ export type CanvasFrameNodeData = SharedFrameNodeData & {
 export type CanvasSketchNodeData = SharedSketchNodeData & {
   [key: string]: unknown;
 };
+export type CanvasPromptNodeData = SharedPromptNodeData & {
+  [key: string]: unknown;
+};
 
 /** Union type for all canvas node data */
 export type CanvasNodeData =
@@ -50,5 +54,6 @@ export type CanvasNodeData =
   | CanvasImageNodeData
   | CanvasFrameNodeData
   | CanvasSketchNodeData;
+  | CanvasPromptNodeData;
 
 export type CanvasNode = Node<CanvasNodeData, CanvasNodeType>;

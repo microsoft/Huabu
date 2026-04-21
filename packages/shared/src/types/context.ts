@@ -1,4 +1,5 @@
 import type { CanvasNodeType, NodeOrigin } from './canvas/node.js';
+import type { SpatialSummary } from '../utils/spatial.js';
 
 // ==================== Node Reference ====================
 
@@ -64,6 +65,10 @@ export interface NodeSummary {
   snippet?: string;
   /** Label of the parent frame, if any */
   frameLabel?: string;
+  /** Absolute position on canvas (top-left corner). */
+  position?: { x: number; y: number };
+  /** Measured or styled dimensions. */
+  size?: { width: number; height: number };
 }
 
 // ==================== Selected Nodes ====================
@@ -95,6 +100,10 @@ export interface SelectedNodeDetail {
    * Undefined for non-frame nodes.
    */
   children?: SelectedNodeDetail[];
+  /** Absolute position on canvas (top-left corner). */
+  position?: { x: number; y: number };
+  /** Measured or styled dimensions. */
+  size?: { width: number; height: number };
 }
 
 /**
@@ -127,4 +136,11 @@ export interface AgentBaseContext {
    * Empty array means "no explicit selection; use the full canvas as context".
    */
   selectedNodes: SelectedNodeDetail[];
+  /**
+   * Pre-computed spatial summary of the canvas layout.
+   * Contains clusters (groups of nearby nodes) with their arrangement
+   * patterns and isolated nodes. Used to give the AI spatial awareness
+   * without it having to reason about raw coordinates.
+   */
+  spatialSummary?: SpatialSummary;
 }

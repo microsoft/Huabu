@@ -7,6 +7,7 @@
  */
 
 import {
+  BadgeQuestionMark,
   BookOpen,
   Film,
   Globe,
@@ -39,6 +40,7 @@ export const NODE_ICON: Record<CanvasNodeType, LucideIcon> = {
   web: Globe,
   frame: Frame,
   sketch: Pencil,
+  prompt: BadgeQuestionMark,
 };
 
 /**
@@ -53,6 +55,7 @@ export const NODE_TYPE_LABEL: Record<CanvasNodeType, string> = {
   web: 'Website',
   frame: 'Frame',
   sketch: 'Sketch',
+  prompt: 'Prompt',
 };
 
 /**
