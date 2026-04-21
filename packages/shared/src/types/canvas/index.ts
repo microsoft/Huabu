@@ -41,6 +41,7 @@ export type {
   VideoNodeData,
   ImageNodeData,
   FrameNodeData,
+  SketchNodeData,
   NodeData,
 } from './node.js';
 
@@ -49,6 +50,7 @@ export {
   isTextNode,
   isMediaNode,
   isFrameNode,
+  isSketchNode,
   hasSourceId,
   normalizeOrigin,
 } from './node.js';

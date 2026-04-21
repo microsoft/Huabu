@@ -18,7 +18,8 @@ export type CanvasNodeType =
   | 'pdf'
   | 'video'
   | 'web'
-  | 'frame';
+  | 'frame'
+  | 'sketch';
 
 /**
  * Discriminated union describing how a canvas node was created.
@@ -245,6 +246,17 @@ export interface FrameNodeData extends BaseNodeData {
   type: 'frame';
 }
 
+/** Sketch node: freehand drawing stored as pressure-sensitive points */
+export interface SketchNodeData extends BaseNodeData {
+  type: 'sketch';
+  /** Array of [x, y, pressure] points in local node coordinates */
+  points: number[][];
+  /** Original bounding box size when the stroke was created */
+  initialSize: { width: number; height: number };
+  /** Stroke color (hex) */
+  strokeColor?: string;
+}
+
 /**
  * Discriminated union of all node data types.
  * Use the 'type' field to narrow down to specific node type.
@@ -256,7 +268,8 @@ export type NodeData =
   | PdfNodeData
   | VideoNodeData
   | ImageNodeData
-  | FrameNodeData;
+  | FrameNodeData
+  | SketchNodeData;
 
 // ==================== Type Guards ====================
 
@@ -276,6 +289,10 @@ export function isMediaNode(
 
 export function isFrameNode(data: NodeData): data is FrameNodeData {
   return data.type === 'frame';
+}
+
+export function isSketchNode(data: NodeData): data is SketchNodeData {
+  return data.type === 'sketch';
 }
 
 export function hasSourceId(

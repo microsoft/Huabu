@@ -42,6 +42,8 @@ import {
 } from '../../../utils/io/dragDrop.ts';
 import { looksLikeUrl } from '../../../utils/io/media.ts';
 import { FrameNode } from '../../Nodes/frame/FrameNode.tsx';
+import { SketchNode } from '../../Nodes/sketch/SketchNode.tsx';
+import { SketchOverlay } from '../../Nodes/sketch/SketchOverlay.tsx';
 import { VideoNode } from '../../Nodes/video/VideoNode.tsx';
 import { WebNode } from '../../Nodes/web/WebNode.tsx';
 
@@ -56,6 +58,7 @@ const nodeTypes = {
   web: WebNode,
   pdf: PDFNode,
   frame: FrameNode,
+  sketch: SketchNode,
 } as const;
 
 const VALID_NODE_TYPES = Object.keys(nodeTypes);
@@ -253,7 +256,12 @@ export const Canvas: React.FC<CanvasProps> = ({
   // Handle click-to-place for note and text
   const handlePaneClick = useCallback(
     (event: React.MouseEvent) => {
-      if (!pendingNodeType || pendingNodeType === 'frame') return;
+      if (
+        !pendingNodeType ||
+        pendingNodeType === 'frame' ||
+        pendingNodeType === 'sketch'
+      )
+        return;
       const instance = rfInstanceRef.current;
       if (!instance) return;
 
@@ -443,6 +451,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         pendingNodeType === 'note' && 'canvas-pending-note',
         pendingNodeType === 'text' && 'canvas-pending-text',
         pendingNodeType === 'frame' && 'canvas-pending-frame',
+        pendingNodeType === 'sketch' && 'cursor-crosshair',
       )}
       onMouseDown={handleFrameMouseDown}
       onMouseMove={handleFrameMouseMove}
@@ -688,6 +697,11 @@ export const Canvas: React.FC<CanvasProps> = ({
         <Background color="var(--canvas-grid)" gap={GRID_SIZE} />
 
         <Controls position="bottom-left" />
+
+        {/* Sketch overlay inside ReactFlow so it shares stacking context with Panel */}
+        {pendingNodeType === 'sketch' && (
+          <SketchOverlay rfInstance={rfInstanceRef.current} />
+        )}
       </ReactFlow>
 
       {/* Frame drag preview overlay */}

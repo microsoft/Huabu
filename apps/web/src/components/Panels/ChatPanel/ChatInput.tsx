@@ -149,14 +149,18 @@ export const ChatInput = ({
 
     textarea.style.height = 'auto';
 
-    const lineHeight = Number.parseFloat(
-      window.getComputedStyle(textarea).lineHeight || '0',
-    );
+    const computedStyle = window.getComputedStyle(textarea);
+    const parsedLineHeight = Number.parseFloat(computedStyle.lineHeight || '');
+    const parsedFontSize = Number.parseFloat(computedStyle.fontSize || '');
+    // Some browsers report line-height as "normal"; derive a stable fallback.
+    const lineHeight =
+      Number.isFinite(parsedLineHeight) && parsedLineHeight > 0
+        ? parsedLineHeight
+        : Number.isFinite(parsedFontSize) && parsedFontSize > 0
+          ? parsedFontSize * 1.5
+          : 24;
     const maxLines = 5;
-    const maxHeight =
-      Number.isFinite(lineHeight) && lineHeight > 0
-        ? lineHeight * maxLines
-        : textarea.scrollHeight;
+    const maxHeight = lineHeight * maxLines;
 
     const nextHeight = Math.min(textarea.scrollHeight, maxHeight);
     textarea.style.height = `${nextHeight}px`;

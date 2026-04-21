@@ -250,6 +250,19 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           >
             <NODE_ICON.text />
           </Button>
+          <Button
+            variant="ghost"
+            iconOnly
+            title="Sketch"
+            className={clsx(
+              pendingNodeType === 'sketch' && 'text-info bg-bg-default',
+            )}
+            onClick={() =>
+              setPendingNodeType(pendingNodeType === 'sketch' ? null : 'sketch')
+            }
+          >
+            <NODE_ICON.sketch />
+          </Button>
         </div>
 
         <div className="bg-border mx-1 h-4 w-px" />

@@ -434,9 +434,18 @@ export const NodeWrapper = memo(
         <div
           className={cn(
             'group relative flex h-full w-full flex-col rounded transition-all duration-120',
-            type !== 'text' && !data.style?.accent && 'shadow',
+            type !== 'text' &&
+              type !== 'sketch' &&
+              !data.style?.accent &&
+              'shadow',
             !data.style?.backgroundColor && 'bg-transparent',
-            selected ? 'ring-info ring' : 'ring-border hover:ring',
+            selected
+              ? type === 'sketch'
+                ? 'ring-info/50 ring'
+                : 'ring-info ring'
+              : type === 'sketch'
+                ? ''
+                : 'ring-border hover:ring',
             // Accent: colored border + bottom-right shadow
             data.style?.accent && 'border-2',
             className,
