@@ -1,11 +1,11 @@
-import { prepareWithSegments, layoutWithLines } from '@chenglou/pretext';
-import { type Node, type NodeProps, useStore } from '@xyflow/react';
+import { type Node, type NodeProps } from '@xyflow/react';
 import { clsx } from 'clsx';
 import { Baseline, Bold, Italic, Underline, Strikethrough } from 'lucide-react';
 import { memo, useCallback, useState, useRef, useMemo, useEffect } from 'react';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
 import { NODE_BG_COLORS, COLOR_PALETTE } from '@/config/colors';
+import { useTextAutoSize } from '@/hooks/useTextAutoSize';
 import useCanvasStore from '@/store/canvasStore.ts';
 
 import { NodeWrapper } from '../NodeWrapper';
@@ -28,128 +28,18 @@ const FONT_FAMILY_OPTIONS: { name: string; value: NodeFontFamily }[] = [
   { name: 'Hand', value: 'hand' },
 ];
 
-/** Maximum characters per line before wrapping. */
-const MAX_CHARS_PER_LINE = 18;
 /** Padding inside the node (px on each side). */
 const NODE_PADDING = 4;
 /** Border width NodeWrapper applies when an accent colour is set (`border-2`). */
 const ACCENT_BORDER = 2;
-/**
- * Extra width (px) added to the content area so that lines which barely fit
- * in pretext don't wrap in the browser.  pretext uses canvas text-metrics
- * while the browser uses its own font-shaping engine; for CJK text the
- * per-character difference can be 1-2 px, enough to push a line over the
- * edge and create an extra wrap (→ the last line gets clipped).
- */
-const WRAP_TOLERANCE = 4;
 
 export type TextNodeType = Node<CanvasTextNodeData, 'text'>;
-
-/**
- * Build the CSS font shorthand string for pretext's prepare().
- */
-function buildFontStr(
-  fontSize: number,
-  fontFamily: string,
-  fontWeight: string,
-  fontStyle: string,
-): string {
-  let s = '';
-  if (fontStyle === 'italic') s += 'italic ';
-  if (fontWeight === 'bold') s += 'bold ';
-  return `${s}${fontSize}px ${fontFamily}`;
-}
-
-/**
- * Measure the natural content dimensions using pretext (no DOM reflow).
- * maxWidth controls the wrap boundary.
- */
-function measureTextContent(
-  text: string,
-  opts: {
-    fontSize: number;
-    fontFamily: string;
-    fontWeight: string;
-    fontStyle: string;
-    lineHeight: number;
-    maxWidth: number;
-  },
-): { width: number; height: number } {
-  const fontStr = buildFontStr(
-    opts.fontSize,
-    opts.fontFamily,
-    opts.fontWeight,
-    opts.fontStyle,
-  );
-  const prepared = prepareWithSegments(text || ' ', fontStr, {
-    whiteSpace: 'pre-wrap',
-  });
-  const lineH = opts.fontSize * opts.lineHeight;
-  const { height, lines } = layoutWithLines(prepared, opts.maxWidth, lineH);
-
-  // Width = widest line (shrink-wrap, matching old DOM measurement behaviour)
-  let maxW = 0;
-  for (const line of lines) {
-    if (line.width > maxW) maxW = line.width;
-  }
-  return { width: Math.ceil(maxW), height: Math.ceil(height) };
-}
-
-/**
- * Binary-search for the font size that makes text fill a target height
- * at a given content width.  Uses pretext — pure arithmetic, no DOM access.
- */
-function computeFontSizeForHeight(
-  text: string,
-  contentWidth: number,
-  contentHeight: number,
-  opts: {
-    fontFamily: string;
-    fontWeight: string;
-    fontStyle: string;
-    lineHeight: number;
-  },
-): number {
-  if (contentWidth <= 0 || contentHeight <= 0) return 16;
-  if (!text.trim()) {
-    return Math.max(
-      1,
-      Math.min(Math.round(contentHeight / opts.lineHeight), 200),
-    );
-  }
-  let lo = 1;
-  let hi = 200;
-  for (let i = 0; i < 15; i++) {
-    const mid = (lo + hi) / 2;
-    const fontStr = buildFontStr(
-      mid,
-      opts.fontFamily,
-      opts.fontWeight,
-      opts.fontStyle,
-    );
-    const prepared = prepareWithSegments(text, fontStr, {
-      whiteSpace: 'pre-wrap',
-    });
-    const lineH = mid * opts.lineHeight;
-    const { height } = layoutWithLines(prepared, contentWidth, lineH);
-    if (height <= contentHeight) {
-      lo = mid;
-    } else {
-      hi = mid;
-    }
-  }
-  // Use 0.5px precision instead of integer-only sizing.
-  // Integer steps can cause big height jumps due to line-wrap discontinuities,
-  // leaving large blank areas. Half-pixel steps fill the container much better.
-  return Math.max(1, Math.floor(lo * 2) / 2);
-}
 
 export const TextNode = memo(
   ({ id, data, selected, width, height }: NodeProps<TextNodeType>) => {
     const updateNodeData = useCanvasStore((state) => state.updateNodeData);
     const [isEditing, setIsEditing] = useState(false);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
-    const isResizingRef = useRef(false);
 
     // Controlled draft state — local during editing, synced from store on undo/external update.
     const content = data.content ?? '';
@@ -163,17 +53,8 @@ export const TextNode = memo(
     }, [data.content, isEditing]);
 
     // ------------------------------------------------------------------
-    // Fixed vs auto mode: if the node's style.height is a number,
-    // the user has resized it. Otherwise it's in auto mode.
-    // Mirrors the NoteNode pattern (hasFixedHeight).
+    // Text auto-sizing (shared with PromptNode)
     // ------------------------------------------------------------------
-    const hasFixedSize = useStore(
-      (s) => typeof s.nodeLookup.get(id)?.style?.height === 'number',
-    );
-
-    // Live font size during resize (computed from current dimensions)
-    const [liveFontSize, setLiveFontSize] = useState<number | null>(null);
-
     const updateStyle = useCallback(
       (newStyle: Partial<NodeStyle>) => {
         updateNodeData(id, {
@@ -204,92 +85,27 @@ export const TextNode = memo(
       [fontFamily, isBold, isItalic],
     );
 
-    // When an accent is set NodeWrapper renders `border-2` which, under
-    // border-box, eats into the node's width/height.  We must subtract
-    // it from the available content area for measurement.
     const borderInset = style.accent ? ACCENT_BORDER : 0;
 
-    // ------------------------------------------------------------------
-    // Effective font size:
-    //   Resizing live  → liveFontSize (during drag)
-    //   Fixed mode     → computed to fill node height at node width
-    //   Auto mode      → baseFontSize, refined by pretext to guarantee fit
-    // ------------------------------------------------------------------
-    const inset = NODE_PADDING + borderInset;
-    const computedFontSize = useMemo(() => {
-      if (hasFixedSize && width != null && height != null) {
-        const cw = width - inset * 2;
-        const ch = height - inset * 2;
-        return computeFontSizeForHeight(draftContent, cw, ch, fontOpts);
-      }
-      return baseFontSize;
-    }, [
+    const {
       hasFixedSize,
+      effectiveFontSize,
+      autoWidth,
+      autoHeight,
+      handleResizeStart,
+      handleResize,
+      handleResizeEnd,
+    } = useTextAutoSize({
+      nodeId: id,
+      text: draftContent,
+      baseFontSize,
+      padding: NODE_PADDING,
+      borderInset,
+      fontOpts,
+      placeholder: 'Type...',
       width,
       height,
-      draftContent,
-      baseFontSize,
-      fontOpts,
-      inset,
-    ]);
-
-    // ------------------------------------------------------------------
-    // Auto mode measurement (only when no fixed size)
-    // ------------------------------------------------------------------
-    const maxAutoWidth = baseFontSize * MAX_CHARS_PER_LINE * 0.62;
-
-    const autoSize = useMemo(() => {
-      if (hasFixedSize) return null;
-      // When content is empty, measure the placeholder so the node is wide
-      // enough to display it without clipping.
-      const text = draftContent || 'Type...';
-      return measureTextContent(text, {
-        ...fontOpts,
-        fontSize: baseFontSize,
-        maxWidth: maxAutoWidth,
-      });
-    }, [hasFixedSize, draftContent, baseFontSize, fontOpts, maxAutoWidth]);
-
-    const effectiveFontSize = liveFontSize ?? computedFontSize;
-
-    // In auto mode, compute target dimensions from content measurement.
-    // In fixed mode, dimensions come from node style (set by setNodeGeometry).
-    // WRAP_TOLERANCE prevents the browser from wrapping a line that pretext
-    // said fits — the most common cause of last-line clipping.
-    const autoWidth = hasFixedSize
-      ? undefined
-      : Math.max((autoSize?.width ?? 0) + WRAP_TOLERANCE + inset * 2, 30);
-    const autoHeight = hasFixedSize
-      ? undefined
-      : Math.max(
-          (autoSize?.height ?? 0) + inset * 2,
-          baseFontSize * 1.5 + inset * 2,
-        );
-
-    // ------------------------------------------------------------------
-    // Resize callbacks — live font recalc during drag
-    // ------------------------------------------------------------------
-    const handleResizeStart = useCallback(() => {
-      isResizingRef.current = true;
-    }, []);
-
-    const handleResize = useCallback(
-      (width: number, height: number) => {
-        // pretext is pure arithmetic — no DOM reflow, no debounce needed.
-        const cw = width - inset * 2;
-        const ch = height - inset * 2;
-        const fs = computeFontSizeForHeight(draftContent, cw, ch, fontOpts);
-        setLiveFontSize(fs);
-      },
-      [draftContent, fontOpts, inset],
-    );
-
-    const handleResizeEnd = useCallback(() => {
-      isResizingRef.current = false;
-      setLiveFontSize(null); // clear live → computedFontSize takes over
-      // setNodeGeometry (called by NodeWrapper) writes numeric width/height
-      // to node.style, which flips hasFixedSize → true automatically.
-    }, []);
+    });
 
     // ------------------------------------------------------------------
     // Toolbar state
@@ -312,11 +128,7 @@ export const TextNode = memo(
 
     const handleBlur = () => {
       setIsEditing(false);
-      // Only commit if something actually changed — avoid a spurious undo
-      // snapshot when the user clicks into and immediately out of the node.
       if (draftContent === (data.content ?? '')) return;
-      // Commit the draft to the store on blur so it records a single undo entry
-      // for the entire editing session, rather than on every keystroke.
       updateNodeData(id, { content: draftContent });
     };
 

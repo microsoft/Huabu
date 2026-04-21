@@ -1,4 +1,4 @@
-import { PanelRightClose, PanelRightOpen, Plus } from 'lucide-react';
+import { ArrowLeft, PanelRightClose, PanelRightOpen, Plus } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 
 import { Button } from '@/components/Common/Button';
@@ -35,6 +35,10 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const updateMessage = useChatStore((state) => state.updateMessage);
   const clearMessages = useChatStore((state) => state.clearMessages);
   const canvasId = useCanvasStore((state) => state.canvasId);
+
+  // Prompt thread replay mode
+  const viewingPromptThread = useChatStore((s) => s.viewingPromptThread);
+  const closePromptThread = useChatStore((s) => s.closePromptThread);
 
   // Register intent callback — when user selects an intent in the popover,
   // it's sent here and executed as an agent chat message.
@@ -87,22 +91,33 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
 
   return (
     <SidebarPanel
-      title="Chat"
+      title={viewingPromptThread ? 'Prompt Replay' : 'Chat'}
       isCollapsed={isCollapsed}
       onToggle={onToggle}
       iconCollapsed={<PanelRightOpen size={16} />}
       iconExpanded={<PanelRightClose size={16} />}
       className="border-edge-default border-l"
       tools={
-        <Button
-          variant="ghost"
-          iconOnly
-          onClick={handleNewChat}
-          title="New conversation"
-          disabled={isLoading}
-        >
-          <Plus />
-        </Button>
+        viewingPromptThread ? (
+          <Button
+            variant="ghost"
+            iconOnly
+            onClick={closePromptThread}
+            title="Back to chat"
+          >
+            <ArrowLeft />
+          </Button>
+        ) : (
+          <Button
+            variant="ghost"
+            iconOnly
+            onClick={handleNewChat}
+            title="New conversation"
+            disabled={isLoading}
+          >
+            <Plus />
+          </Button>
+        )
       }
     >
       <div className="flex h-full flex-col gap-2 overflow-visible">

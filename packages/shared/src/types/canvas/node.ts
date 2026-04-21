@@ -18,7 +18,8 @@ export type CanvasNodeType =
   | 'pdf'
   | 'video'
   | 'web'
-  | 'frame';
+  | 'frame'
+  | 'prompt';
 
 /**
  * Discriminated union describing how a canvas node was created.
@@ -245,6 +246,43 @@ export interface FrameNodeData extends BaseNodeData {
   type: 'frame';
 }
 
+// ==================== Prompt Node ====================
+
+/** Execution status of a prompt node. */
+export type PromptNodeStatus =
+  | 'idle'
+  | 'pending'
+  | 'running'
+  | 'done'
+  | 'error';
+
+/**
+ * Extensible input union for prompt nodes.
+ * Discriminated on `kind` — add new modalities (sketch, voice, etc.) here.
+ */
+export type PromptInput = { kind: 'text'; content: string };
+
+/** Prompt node: AI interaction medium embedded on canvas. */
+export interface PromptNodeData extends BaseNodeData {
+  type: 'prompt';
+  /** User's input (extensible discriminated union). */
+  input: PromptInput;
+  /** Current execution status. */
+  status: PromptNodeStatus;
+  /** Epoch ms when auto-run triggers. Transient — not persisted. */
+  runAt?: number;
+  /** Per-node auto-run delay override (seconds). */
+  autoRunDelay?: number;
+  /** Agent thread ID (set when run starts). */
+  threadId?: string;
+  /** Error message when status === 'error'. */
+  errorMessage?: string;
+  /** Short AI response shown on node after completion. */
+  responseSummary?: string;
+  /** Whether the user has viewed the completed response in the chat panel. */
+  viewed?: boolean;
+}
+
 /**
  * Discriminated union of all node data types.
  * Use the 'type' field to narrow down to specific node type.
@@ -256,7 +294,8 @@ export type NodeData =
   | PdfNodeData
   | VideoNodeData
   | ImageNodeData
-  | FrameNodeData;
+  | FrameNodeData
+  | PromptNodeData;
 
 // ==================== Type Guards ====================
 
@@ -287,4 +326,8 @@ export function hasSourceId(
   | VideoNodeData
   | ImageNodeData {
   return 'sourceId' in data;
+}
+
+export function isPromptNode(data: NodeData): data is PromptNodeData {
+  return data.type === 'prompt';
 }

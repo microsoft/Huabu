@@ -397,20 +397,24 @@ export const NodeWrapper = memo(
             })()}
             <div className="bg-border mx-0.5 h-4 w-px" />
             {toolbar}
-            <FloatingToolbar.Divider />
-            <FloatingToolbar.ColorPicker
-              colors={ACCENT_PALETTE}
-              value={data.style?.accent ?? ACCENT_NONE}
-              onSelect={(v) =>
-                updateNodeData(id, {
-                  style: {
-                    ...data.style,
-                    accent: v === ACCENT_NONE ? null : v,
-                  },
-                })
-              }
-              title="Accent Color"
-            />
+            {type !== 'prompt' && (
+              <>
+                <FloatingToolbar.Divider />
+                <FloatingToolbar.ColorPicker
+                  colors={ACCENT_PALETTE}
+                  value={data.style?.accent ?? ACCENT_NONE}
+                  onSelect={(v) =>
+                    updateNodeData(id, {
+                      style: {
+                        ...data.style,
+                        accent: v === ACCENT_NONE ? null : v,
+                      },
+                    })
+                  }
+                  title="Accent Color"
+                />
+              </>
+            )}
           </NodeToolbar>
         )}
 
@@ -424,6 +428,7 @@ export const NodeWrapper = memo(
         {/* Semantic zoom: placeholder overlay when in minimal LOD */}
         {isMinimal && (
           <SemanticPlaceholder
+            nodeId={id}
             type={type}
             data={data}
             width={nodeWidth}
@@ -434,11 +439,16 @@ export const NodeWrapper = memo(
         <div
           className={cn(
             'group relative flex h-full w-full flex-col rounded transition-all duration-120',
-            type !== 'text' && !data.style?.accent && 'shadow',
+            type !== 'text' &&
+              type !== 'prompt' &&
+              !data.style?.accent &&
+              'shadow',
             !data.style?.backgroundColor && 'bg-transparent',
             selected ? 'ring-info ring' : 'ring-border hover:ring',
             // Accent: colored border + bottom-right shadow
             data.style?.accent && 'border-2',
+            // Prompt nodes need visible overflow for status badges and progress bar
+            type === 'prompt' && 'overflow-visible',
             className,
           )}
           style={{
@@ -454,6 +464,9 @@ export const NodeWrapper = memo(
               ...(type === 'frame' && {
                 boxShadow: `4px 4px 3px 3px ${data.style.accent}`,
               }),
+            }),
+            ...(type === 'prompt' && {
+              borderColor: 'transparent',
             }),
           }}
           onDoubleClick={onDoubleClick}
@@ -486,7 +499,7 @@ export const NodeWrapper = memo(
 
           <div
             className={clsx(
-              'flex-1 p-0',
+              'min-h-0 flex-1 p-0',
               isMinimal && 'invisible',
               allowOverflow ? 'overflow-visible' : 'overflow-hidden',
             )}

@@ -28,6 +28,7 @@ import {
 } from '@/handler/canvasCommand/nodeInputBuilders';
 import { useCanvasShortcuts } from '@/hooks/useCanvasShortcuts';
 import { useIsTouch } from '@/hooks/useInputMode';
+import { usePromptRunner } from '@/hooks/usePromptRunner';
 
 import { NodeToolbar } from './CanvasToolbar.tsx';
 import { EdgeStyleToolbar } from './EdgeStyleToolbar.tsx';
@@ -42,6 +43,7 @@ import {
 } from '../../../utils/io/dragDrop.ts';
 import { looksLikeUrl } from '../../../utils/io/media.ts';
 import { FrameNode } from '../../Nodes/frame/FrameNode.tsx';
+import { PromptNode } from '../../Nodes/prompt/PromptNode.tsx';
 import { VideoNode } from '../../Nodes/video/VideoNode.tsx';
 import { WebNode } from '../../Nodes/web/WebNode.tsx';
 
@@ -56,6 +58,7 @@ const nodeTypes = {
   web: WebNode,
   pdf: PDFNode,
   frame: FrameNode,
+  prompt: PromptNode,
 } as const;
 
 const VALID_NODE_TYPES = Object.keys(nodeTypes);
@@ -179,6 +182,9 @@ export const Canvas: React.FC<CanvasProps> = ({
 
   const isTouch = useIsTouch();
 
+  // Run prompt nodes when their timers expire.
+  usePromptRunner();
+
   // When a connection drag ends without landing on a handle, check if the
   // pointer is over a node element and create the connection anyway.
   // This makes connecting much easier on touch devices.
@@ -250,7 +256,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [pendingNodeType, resetFrameDrag]);
 
-  // Handle click-to-place for note and text
+  // Handle click-to-place for note, text, and prompt
   const handlePaneClick = useCallback(
     (event: React.MouseEvent) => {
       if (!pendingNodeType || pendingNodeType === 'frame') return;
@@ -262,13 +268,22 @@ export const Canvas: React.FC<CanvasProps> = ({
         y: event.clientY,
       });
 
+      const data: Record<string, unknown> =
+        pendingNodeType === 'prompt'
+          ? {
+              input: { kind: 'text', content: '' },
+              status: 'idle',
+              origin: { type: 'user-created' },
+            }
+          : {
+              content: '',
+              origin: { type: 'user-created' },
+            };
+
       addNode({
         nodeType: pendingNodeType,
         placementPoint: position,
-        data: {
-          content: '',
-          origin: { type: 'user-created' },
-        },
+        data,
         skipAutoLayout: true,
       });
       setPendingNodeType(null);
@@ -443,6 +458,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         pendingNodeType === 'note' && 'canvas-pending-note',
         pendingNodeType === 'text' && 'canvas-pending-text',
         pendingNodeType === 'frame' && 'canvas-pending-frame',
+        pendingNodeType === 'prompt' && 'canvas-pending-prompt',
       )}
       onMouseDown={handleFrameMouseDown}
       onMouseMove={handleFrameMouseMove}

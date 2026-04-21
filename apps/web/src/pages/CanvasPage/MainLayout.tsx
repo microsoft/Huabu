@@ -1,4 +1,6 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+
+import { usePanelStore } from '@/store/panelStore';
 
 interface MainLayoutProps {
   header: React.ReactNode;
@@ -73,6 +75,14 @@ export const MainLayout = ({
   const toggleRightPanel = () => {
     setIsRightCollapsed((prev) => !prev);
   };
+
+  // Open right panel programmatically when requested via panelStore
+  const openRequest = usePanelStore((s) => s.rightPanelOpenRequest);
+  useEffect(() => {
+    if (openRequest > 0) {
+      setIsRightCollapsed(false);
+    }
+  }, [openRequest]);
 
   const dragConstraints = useMemo(() => {
     const totalWidth = contentRef.current?.getBoundingClientRect().width ?? 0;

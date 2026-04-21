@@ -95,6 +95,11 @@ export const profiles: Record<CanvasNodeKind, NodePreprocessProfile> = {
     ],
     watchFields: ['childLabels', 'labelSource'],
   },
+  prompt: {
+    nodeType: 'prompt',
+    capabilities: [],
+    watchFields: [],
+  },
 };
 
 /**

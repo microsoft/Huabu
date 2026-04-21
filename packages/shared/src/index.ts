@@ -9,3 +9,4 @@ export * from './types/preprocessing.js';
 
 export * from './types/web.js';
 export * from './utils/id.js';
+export * from './utils/spatial.js';
