@@ -1,7 +1,7 @@
 # Prompt Node — Design Document
 
-> **Status**: In Progress  
-> **Date**: 2026-04-10
+> **Status**: Largely Complete (Phase 3 architecture simplified, screenshot deferred)  
+> **Date**: 2026-04-21
 
 ---
 
@@ -9,7 +9,7 @@
 
 ### 1.1 What
 
-A new canvas node type — **Prompt Node** — that serves as an AI interaction medium embedded directly on the canvas. Unlike content nodes (note, text, pdf, etc.), a prompt node carries a **user question or intent**, and uses its **spatial position and surrounding context** to invoke a dedicated AI agent that reasons about the canvas.
+A new canvas node type — **Prompt Node** — that serves as an AI interaction medium embedded directly on the canvas. Unlike content nodes (note, text, pdf, etc.), a prompt node carries a **user question or intent**, and uses its **spatial position and surrounding context** to invoke the existing chat AI agent (in `ask` mode) that reasons about the canvas.
 
 ### 1.2 Why
 
@@ -42,7 +42,7 @@ interface Point { x: number; y: number }
 
 rectCenter(r: Rect): Point
 pointDistance(a: Point, b: Point): number
-rectDistance(a: Rect, b: Rect): number           // center-to-center
+rectCenterDistance(a: Rect, b: Rect): number     // center-to-center
 rectEdgeDistance(a: Rect, b: Rect): number       // edge-to-edge (0 if overlap)
 rectsOverlap(a: Rect, b: Rect): boolean
 rectIntersectionArea(a: Rect, b: Rect): number
@@ -101,12 +101,20 @@ buildSpatialSummary(
   opts?: { clusterGap?: number },
 ): SpatialSummary
 
-// For prompt node — focused context around a specific node
+// For prompt node — three-layer spatial context around a specific node
+buildSpatialLayers(
+  promptNode: SpatialNode,
+  allNodes: SpatialNode[],
+  edges: ReadonlyArray<{ source: string; target: string }>,
+  nodeSnippets?: Map<string, string>,
+): SpatialLayer[]
+
 buildPromptNodeContext(
   promptNode: SpatialNode,
   allNodes: SpatialNode[],
-  edges: Array<{ source: string; target: string }>,
-  nodeLabels: Map<string, string>,
+  edges: ReadonlyArray<{ source: string; target: string }>,
+  nodeSnippets?: Map<string, string>,
+  opts?: { maxDistance?: number },
 ): PromptSpatialContext
 ```
 
@@ -139,16 +147,33 @@ interface SpatialCluster {
   arrangement: string; // human-readable
 }
 
-interface PromptSpatialContext {
+interface SpatialLayer {
+  frameId?: string;
+  frameLabel?: string;
   groups: SpatialGroup[];
-  relevantEdges: Array<{ source: string; target: string; label?: string }>;
-  semanticPosition: string; // e.g. "between Group A and Group B"
+  description: string;
+}
+
+interface PromptSpatialContext {
+  layers: SpatialLayer[]; // nested from innermost to outermost
+  groups: SpatialGroup[]; // flat list across all layers
+  relevantEdges: Array<{
+    source: string;
+    target: string;
+    sourceLabel?: string;
+    targetLabel?: string;
+  }>;
+  semanticPosition: string; // natural language description
 }
 
 interface SpatialGroup {
-  direction: CardinalDirection; // relative to prompt node
-  arrangement: string;
-  nodes: Array<{ id: string; type: string; label?: string; snippet?: string }>;
+  dx: number; // X offset from reference center
+  dy: number; // Y offset from reference center
+  arrangement: string; // human-readable pattern
+  frameId?: string;
+  frameLabel?: string;
+  nodes: Array<{ id: string; type?: string; label?: string; snippet?: string }>;
+  _minEdgeDist: number; // internal: min edge distance to reference
 }
 ```
 
@@ -156,7 +181,7 @@ interface SpatialGroup {
 
 #### `getAgentContext()` (canvasStore)
 
-Populate `position` and `size` on every `NodeSummary`, and include a new `spatialSummary` field computed via `buildSpatialSummary()`.
+Populate `position` and `size` on every `NodeSummary`, and include a new `spatialSummary` field computed via `buildSpatialSummary()`. Uses `getCachedSpatialData()` — a module-level cache with FNV-1a fingerprint-based invalidation to avoid O(n²) clustering on every call.
 
 #### Server Serialization
 
@@ -238,6 +263,8 @@ export interface PromptNodeData extends BaseNodeData {
   errorMessage?: string
   /** Short AI response shown on node after completion. */
   responseSummary?: string
+  /** Whether user has viewed the completed response in chat panel. */
+  viewed?: boolean
 }
 
 // Add to NodeData union
@@ -264,34 +291,40 @@ export type CanvasPromptNodeData = SharedPromptNodeData & {
 
 ```
 apps/web/src/components/Nodes/prompt/
-├── PromptNode.tsx          ← Main component
-├── PromptInputArea.tsx     ← Extensible input (text for now)
-└── PromptStatusBar.tsx     ← Countdown / spinner / done / error
+└── PromptNode.tsx          ← Main component (input + status inlined)
 ```
+
+> **Decision**: Input area and status bar are inlined in `PromptNode.tsx` rather than split into sub-components. The component is manageable as a single file.
 
 ### 4.2 Visual Design
 
 ```
-┌─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┐   ← dashed border (distinct from content nodes)
-  💡                                      ← icon: Sparkles or Lightbulb
+┌─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┐   ← sticky-note style, rounded corners
+  ❓                                      ← icon: BadgeQuestionMark
 │                                     │
-  AI 如何 Support这个过程？
+  AI 如何 Support这个过程？               ← font: Comic Sans MS / STXingkai / cursive
 │                                     │
-├─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┤
-│ ⏳ Running in 24s    [▶ Now]  [✕]  │   ← status bar (only when pending)
+  [⏳ 8s]                                 ← status badge (top-left, only when active)
 └─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┘
 ```
 
 States:
 
-- **idle** (empty): Placeholder "Ask a question..." — no status bar
-- **idle** (has content): Shows content — no status bar
-- **pending**: Content readonly + countdown bar with "▶ Now" and "✕"
-- **running**: Content readonly + spinner "Thinking..."
-- **done**: Content readonly + "✓ Done" + response summary below
-- **error**: Content readonly + "✗ Error" + error message
+- **idle** (empty): Placeholder "Ask a question..." — no status badge
+- **idle** (has content): Shows content — no status badge
+- **pending**: Content readonly + `Clock` badge with countdown (e.g. "8s")
+- **running**: Content readonly + `Loader` spinner badge
+- **done**: Content readonly + `Check` badge (glow effect if `viewed === false`)
+- **error**: Content readonly + `X` badge + error message
 
-Accent color: distinct warm tone (e.g. amber) to differentiate from content nodes.
+Accent color: uses `var(--prompt-bg)` CSS variable. Done-unviewed state shows a visual glow (`prompt-node-done-unviewed` class).
+
+Toolbar buttons (shown on node selection):
+
+- **Edit** (`Pencil`): Enter edit mode (hidden during pending/running)
+- **View conversation** (`MessageSquare`): Open in chat panel (shown when `hasRun && threadId`)
+- **Cancel** (`Square`): Cancel pending timer or running agent
+- **Run Now** (`Play`): Immediately fire pending prompt
 
 ### 4.3 State Machine & Interaction
 
@@ -304,7 +337,7 @@ Accent color: distinct warm tone (e.g. amber) to differentiate from content node
       └──┬───┘                      └─────┬───┘ │
          │  ▲                       timer │  ▲  │
   double │  │ double-click          fires │  │  │
-  click  │  │ (cancels timer/agent)    or │  │  │
+  click  │  │ (enters edit mode)       or │  │  │
          │  │                      "Now" │  │  │
          │  │                            ▼  │  │
          │  │                      ┌─────────┐ │
@@ -317,41 +350,38 @@ Accent color: distinct warm tone (e.g. amber) to differentiate from content node
          │                       └──────┘ └───────┘
          │                           │        │
          └───────────────────────────┴────────┘
-                    (double-click to re-edit)
+             double-click on done/error:
+               if threadId → open chat panel
+               else → re-edit
 ```
 
 ### 4.4 Auto-run Timer
 
 ```typescript
-const DEFAULT_AUTO_RUN_DELAY = 30; // seconds
+const DEFAULT_AUTO_RUN_DELAY = 10; // seconds (was 30 in original design)
 
 // On blur:
-//   1. Commit input text
-//   2. Eager-capture viewport screenshot
-//   3. Set status='pending', runAt=Date.now() + delay*1000
+//   1. Commit input text (with undo recording)
+//   2. Set status='pending', runAt=Date.now() + delay*1000
 
-// useEffect watches status==='pending':
-//   - setTimeout for (runAt - now) ms
-//   - On fire: call run(nodeId)
-//   - Cleanup: clearTimeout on unmount or status change
-
-// On double-click during pending:
-//   - Cancel timer (set status='idle', runAt=undefined)
-//   - Enter edit mode
+// usePromptRunner() hook watches canvas store:
+//   - Subscribes to node changes
+//   - For each pending prompt node: setTimeout for (runAt - now) ms
+//   - On fire: executePromptNode(nodeId)
+//   - Cleanup: clearTimeout on unmount or node deletion
 ```
 
-Per-node configurable via toolbar: `[10s] [30s] [60s] [Off]`  
-`Off` = manual-only mode — shows a "▶ Run" button instead.
+Per-node `autoRunDelay` field is supported but no UI selector has been built yet. Default is 10 seconds.
 
 ### 4.5 Config Updates
 
 | File                  | Change                                  |
 | --------------------- | --------------------------------------- |
-| `config/nodeIcons.ts` | `prompt: Sparkles`                      |
+| `config/nodeIcons.ts` | `prompt: BadgeQuestionMark`             |
 | `config/nodeSizes.ts` | `prompt: { width: 280, height: 160 }`   |
 | `Canvas.tsx`          | `nodeTypes.prompt = PromptNode`         |
 | `canvasStore.ts`      | `pendingNodeType` union adds `'prompt'` |
-| NodeToolbar           | Add prompt node creation button         |
+| `CanvasToolbar.tsx`   | Prompt node creation button             |
 
 ---
 
@@ -376,42 +406,13 @@ Both channels serve the AI, but carry different strengths:
 
 **Text is the foundation (always available). Vision is best-effort enhancement.**
 
-### 5.3 Eager Screenshot Capture
+### 5.3 Screenshot Capture
 
-**Problem**: When the user clicks "Run" (or auto-run fires), the viewport may have moved away from the prompt node, making screenshot capture unreliable.
+> **Status**: NOT IMPLEMENTED — deferred.
 
-**Solution**: Capture screenshot at **blur time** (when the user finishes editing), not at run time.
+The original design called for eager screenshot capture at blur time with caching and invalidation. This has not been built. The text-based spatial context (via `buildPromptNodeContext()`) is the sole context channel.
 
-```
-Edit prompt node → blur
-  ├── ① Commit text input
-  ├── ② requestIdleCallback → capture local viewport screenshot
-  ├── ③ Store in memory (_cachedScreenshot, not persisted to JSON)
-  └── ④ Start countdown timer
-
-... user may pan viewport elsewhere ...
-
-Auto-run fires (or user clicks ▶ Now)
-  └── Use cached screenshot from blur ✅ (viewport-independent)
-```
-
-**Invalidation**: If nearby nodes are moved/edited/deleted after capture, clear the cached screenshot. The text layer still provides complete spatial information.
-
-**Adaptive viewport sizing**: Expand capture area to include at least N nearby nodes:
-
-```typescript
-function adaptivePadding(
-  target,
-  allNodes,
-  minNodes = 5,
-  maxPadding = 800,
-): number {
-  const sorted = findNearbyNodes(target, allNodes);
-  if (sorted.length === 0) return 200;
-  const idx = Math.min(minNodes - 1, sorted.length - 1);
-  return Math.min(sorted[idx].distance + 100, maxPadding);
-}
-```
+Future implementation could add vision as a best-effort enhancement on top of the always-available text layer.
 
 ### 5.4 Text Context Format (Example)
 
@@ -459,69 +460,81 @@ Between two groups, below the flow arrow
 
 ---
 
-## 6. Prompt Node — Agent Backend (Phase 3)
+## 6. Prompt Node — Agent Execution (Phase 3)
+
+> **Decision**: Rather than building a separate prompt agent backend, the implementation reuses the existing `/api/agent` endpoint in `ask` mode. Spatial context is serialized to natural language and prepended to the user's question.
 
 ### 6.1 Endpoint
 
 ```
-POST /api/agent/prompt            ← Start prompt node agent run (SSE)
-POST /api/agent/prompt/stop       ← Stop a running prompt node agent
+POST /api/agent                   ← Existing chat agent endpoint (SSE)
 ```
 
-### 6.2 Request Schema
+No separate prompt-specific routes were needed. The prompt node's `usePromptRunner` hook calls `agentApi.streamMessage()` with mode `'ask'`.
+
+### 6.2 Execution Flow (`usePromptRunner.ts`)
 
 ```typescript
-interface PromptAgentRequest {
-  canvasId: string;
-  nodeId: string;
-  input: PromptInput;
-  spatialContext: PromptSpatialContext; // pre-computed by frontend
-  screenshot?: string; // base64 PNG, best-effort
+async function executePromptNode(nodeId: string): Promise<void> {
+  // 1. Build spatial context from cached spatial data
+  const { spatialNodes } = getCachedSpatialData();
+  const target = spatialNodes.find((n) => n.id === nodeId);
+  const spatialCtx = target
+    ? buildPromptNodeContext(target, spatialNodes, edges, snippets)
+    : undefined;
+
+  // 2. Serialize spatial context to natural-language markdown
+  const contextMsg = spatialCtx
+    ? buildContextMessage(question, spatialCtx)
+    : undefined;
+
+  // 3. Prepend context to user's question
+  const messageContent = contextMsg
+    ? `${contextMsg.content}\n\n${question}`
+    : question;
+
+  // 4. Stream to existing /api/agent in 'ask' mode
+  await agentApi.streamMessage(
+    messageContent,
+    threadId, // unique per prompt node, created via createId('thread')
+    'ask',
+    callbacks,
+    { canvasId, signal: abortController.signal },
+  );
 }
 ```
 
 ### 6.3 Agent Design
 
-- **Separate from chat agent** — own thread per prompt node, own system prompt
+- **Reuses existing chat agent** — own thread per prompt node (created if missing), same system prompt
 - **Reuses existing tools** — `get_node_detail`, `canvas_commands`, `web_search`, `search_knowledge`, etc.
-- **System prompt emphasis**:
-  - Spatial context is first-class information
-  - Prefer creating/placing results near the prompt node
-  - Can read full node content on demand via tools
-  - Response summary should be concise (shown on the node)
-- **Result**: Text response (→ `responseSummary`) + optional canvas commands (create nodes, edges, etc.)
+- **Spatial context injected** as `[SYSTEM Context]` preamble in the message content
+- **Conversation viewable** in chat panel via `openPromptThread(nodeId, threadId)`
 
 ### 6.4 SSE Events
 
-Reuses existing `AgentStreamEvent` types:
+Reuses existing `AgentStreamEvent` types. Events stream in the background — the full conversation is viewed later by opening the chat panel linked to the prompt node's `threadId`.
 
-- `text_delta` → accumulates into `responseSummary`
-- `tool_start` / `tool_result` → canvas commands applied immediately
-- `done` → status = `'done'`
-- `error` → status = `'error'`, message stored in `errorMessage`
+- On complete: `status = 'done'`
+- On error: `status = 'error'`, error message stored in `errorMessage`
 
 ### 6.5 Lifecycle Management
 
 ```typescript
-// canvasStore additions
-activePromptRuns: Map<string, AbortController>;
+// Module-level in usePromptRunner.ts (NOT in canvasStore)
+const activeRuns = new Map<string, AbortController>();
 
 // On run start:
-activePromptRuns.set(nodeId, abortController);
+activeRuns.set(nodeId, abortController);
 
 // On completion/error:
-activePromptRuns.delete(nodeId);
+activeRuns.delete(nodeId);
 
-// On node deletion (in deleteNodes):
-for (const id of nodeIds) {
-  const run = activePromptRuns.get(id);
-  if (run) {
-    run.abort(); // frontend: cancel SSE
-    agentApi.stopPromptRun(id); // backend: terminate agent
-    activePromptRuns.delete(id);
-  }
-}
+// On node deletion (detected by store subscription):
+// Cleans up timers and aborts active runs
 ```
+
+Active run tracking is managed at module-level in `usePromptRunner.ts`, not as a store property. The store subscription detects node deletions and triggers cleanup.
 
 ---
 
@@ -539,8 +552,8 @@ export type PromptInput =
   | { kind: 'selection'; selectedNodeIds: string[] };
 ```
 
-Frontend: `PromptInputArea.tsx` switches renderer by `input.kind`.  
-Backend: Agent selects system prompt / tool set by `input.kind`.
+Frontend: `PromptNode.tsx` switches renderer by `input.kind` (currently only `text`).  
+Backend: Agent receives appropriate context based on `input.kind`.
 
 ### 7.2 Agent Strategy per Input Kind
 
@@ -557,32 +570,36 @@ Backend: Agent selects system prompt / tool set by `input.kind`.
 
 ### New Files
 
-| Path                                                       | Purpose                               |
-| ---------------------------------------------------------- | ------------------------------------- |
-| `packages/shared/src/utils/spatial.ts`                     | Spatial geometry primitives + queries |
-| `apps/web/src/components/Nodes/prompt/PromptNode.tsx`      | Main prompt node component            |
-| `apps/web/src/components/Nodes/prompt/PromptInputArea.tsx` | Extensible input area                 |
-| `apps/web/src/components/Nodes/prompt/PromptStatusBar.tsx` | Status/countdown UI                   |
-| `apps/web/src/hooks/usePromptAgent.ts`                     | Run/stop/context-gathering hook       |
-| `apps/web/src/api/promptAgent.ts`                          | API client for prompt agent endpoints |
-| `apps/server/src/modules/agent/prompt-agent.route.ts`      | HTTP endpoints                        |
-| `apps/server/src/modules/agent/prompt-agent.service.ts`    | Agent execution logic                 |
-| `apps/server/src/prompt/prompt-node.ts`                    | System prompt for prompt agent        |
+| Path                                                  | Purpose                                 | Status |
+| ----------------------------------------------------- | --------------------------------------- | ------ |
+| `packages/shared/src/utils/spatial.ts`                | Spatial geometry primitives + queries   | ✅     |
+| `apps/web/src/components/Nodes/prompt/PromptNode.tsx` | Main prompt node component (all-in-one) | ✅     |
+| `apps/web/src/hooks/usePromptRunner.ts`               | Auto-run timer + agent execution hook   | ✅     |
+
+### Planned but Not Created
+
+| Path                                                       | Reason Not Created                         |
+| ---------------------------------------------------------- | ------------------------------------------ |
+| `apps/web/src/components/Nodes/prompt/PromptInputArea.tsx` | Inlined in PromptNode.tsx                  |
+| `apps/web/src/components/Nodes/prompt/PromptStatusBar.tsx` | Inlined in PromptNode.tsx                  |
+| `apps/web/src/api/promptAgent.ts`                          | Reuses existing `agentApi.streamMessage()` |
+| `apps/server/src/modules/agent/prompt-agent.route.ts`      | Reuses existing `/api/agent` endpoint      |
+| `apps/server/src/modules/agent/prompt-agent.service.ts`    | Reuses existing chat agent service         |
+| `apps/server/src/prompt/prompt-node.ts`                    | Reuses existing system prompt              |
 
 ### Modified Files
 
-| Path                                               | Change                                                                                                                                                 |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `packages/shared/src/types/canvas/node.ts`         | Add `PromptNodeData`, `PromptNodeStatus`, `PromptInput`                                                                                                |
-| `packages/shared/src/types/context.ts`             | Add `position?/size?` to `NodeSummary`/`SelectedNodeDetail`; add `SpatialSummary`, `PromptSpatialContext`                                              |
-| `packages/shared/src/index.ts`                     | Export new types + spatial utils                                                                                                                       |
-| `apps/web/src/components/Nodes/types.ts`           | Add `CanvasPromptNodeData` to union                                                                                                                    |
-| `apps/web/src/components/Panels/Canvas/Canvas.tsx` | Register `prompt` in `nodeTypes`                                                                                                                       |
-| `apps/web/src/config/nodeIcons.ts`                 | Add `prompt` icon                                                                                                                                      |
-| `apps/web/src/config/nodeSizes.ts`                 | Add `prompt` default size                                                                                                                              |
-| `apps/web/src/store/canvasStore.ts`                | `pendingNodeType` adds `'prompt'`; `getAgentContext()` adds position/size + spatialSummary; `deleteNodes` hook for active runs; `activePromptRuns` map |
-| `apps/server/src/app.ts`                           | Register prompt-agent routes                                                                                                                           |
-| NodeToolbar (TBD)                                  | Add prompt node creation button                                                                                                                        |
+| Path                                                      | Change                                                                                                                      |
+| --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `packages/shared/src/types/canvas/node.ts`                | Add `PromptNodeData`, `PromptNodeStatus`, `PromptInput`                                                                     |
+| `packages/shared/src/types/context.ts`                    | Add `position?/size?` to `NodeSummary`/`SelectedNodeDetail`; add `SpatialSummary`, `PromptSpatialContext`                   |
+| `packages/shared/src/index.ts`                            | Export new types + spatial utils                                                                                            |
+| `apps/web/src/components/Nodes/types.ts`                  | Add `CanvasPromptNodeData` to union                                                                                         |
+| `apps/web/src/components/Panels/Canvas/Canvas.tsx`        | Register `prompt` in `nodeTypes`                                                                                            |
+| `apps/web/src/config/nodeIcons.ts`                        | Add `prompt` icon                                                                                                           |
+| `apps/web/src/config/nodeSizes.ts`                        | Add `prompt` default size                                                                                                   |
+| `apps/web/src/store/canvasStore.ts`                       | `pendingNodeType` adds `'prompt'`; `getAgentContext()` adds position/size + spatialSummary; `getCachedSpatialData()` helper |
+| `apps/web/src/components/Panels/Canvas/CanvasToolbar.tsx` | Prompt node creation button                                                                                                 |
 
 ---
 
@@ -606,9 +623,9 @@ Backend: Agent selects system prompt / tool set by `input.kind`.
 
 - [x] Shared types: `PromptNodeData`, `PromptNodeStatus`, `PromptInput`
 - [x] Web types: `CanvasPromptNodeData`
-- [x] Config: icons, sizes
+- [x] Config: icons (`BadgeQuestionMark`), sizes (`280×160`)
 - [x] `PromptNode.tsx` (input + status inlined, not split into sub-components)
-- [ ] `PromptInputArea.tsx` + `PromptStatusBar.tsx` — not split out (functionality inlined in PromptNode)
+- [x] ~~`PromptInputArea.tsx` + `PromptStatusBar.tsx`~~ — decided against splitting; functionality inlined in PromptNode
 - [x] Register in `Canvas.tsx` nodeTypes
 - [x] `canvasStore`: `pendingNodeType` add `'prompt'`
 - [x] NodeToolbar: creation button (`CanvasToolbar.tsx`)
@@ -619,26 +636,26 @@ Backend: Agent selects system prompt / tool set by `input.kind`.
 > **Risk**: Low (frontend-only, isolated to prompt node)  
 > **Dependencies**: Phase 1
 
-- [ ] Auto-run timer logic in PromptNode (blur → pending → auto-fire)
-- [ ] Configurable delay (toolbar selector)
-- [x] Eager screenshot capture on blur (`captureLocalViewport()` in PromptNode)
-- [ ] Screenshot cache + invalidation
-- [ ] `usePromptAgent.ts` — spatial context building + screenshot management
+- [x] Auto-run timer logic: `usePromptRunner.ts` (blur → pending → auto-fire, default 10s)
+- [ ] Configurable delay UI (toolbar selector) — per-node `autoRunDelay` field exists but no UI
+- [ ] ~~Eager screenshot capture~~ — deferred (text context is sufficient)
+- [ ] ~~Screenshot cache + invalidation~~ — deferred
+- [x] `usePromptRunner.ts` — spatial context building + agent execution
 
-### Phase 3 — Backend Agent
+### Phase 3 — Agent Execution
 
-> **Risk**: Medium-High (new SSE endpoint, agent loop)  
+> **Risk**: ~~Medium-High~~ Low (reuses existing agent infrastructure)  
 > **Dependencies**: Phase 1, Phase 2
+>
+> **Decision**: Instead of building a separate prompt agent backend, the implementation reuses the existing `/api/agent` endpoint in `ask` mode with spatial context prepended to the message.
 
-- [ ] `prompt-agent.route.ts` — POST /api/agent/prompt, POST /api/agent/prompt/stop
-- [ ] `prompt-agent.service.ts` — agent loop (reuses pi-ai + existing tools)
-- [ ] `prompt-node.ts` — system prompt with spatial context instructions
-- [ ] `apps/server/src/app.ts` — register routes
-- [ ] `apps/web/src/api/promptAgent.ts` — API client
-- [ ] `usePromptAgent.ts` — SSE stream handling, status updates
-- [ ] `canvasStore` — lifecycle management (activePromptRuns, delete hook)
-
-> ⚠️ Phase 3 is entirely unstarted — this is the critical path to making prompt nodes functional.
+- [x] ~~`prompt-agent.route.ts`~~ — not needed; reuses existing `/api/agent`
+- [x] ~~`prompt-agent.service.ts`~~ — not needed; reuses existing chat agent
+- [x] ~~`prompt-node.ts`~~ — not needed; reuses existing system prompt
+- [x] ~~`apps/server/src/app.ts`~~ — no changes needed
+- [x] ~~`apps/web/src/api/promptAgent.ts`~~ — not needed; reuses `agentApi.streamMessage()`
+- [x] `usePromptRunner.ts` — SSE stream handling, status updates, spatial context serialization
+- [x] Lifecycle management — module-level `activeRuns` Map in `usePromptRunner.ts`
 
 ### Phase 4 — Integration & Polish
 
@@ -648,6 +665,8 @@ Backend: Agent selects system prompt / tool set by `input.kind`.
 - [ ] Intent serialization: add spatial descriptions
 - [x] `buildNodeSummaries()`: return position data (done in Phase 0)
 - [ ] Changelog entry (`docs/user-guide/CHANGELOG.md`)
+- [ ] Configurable delay UI selector (`[10s] [30s] [60s] [Off]`)
+- [ ] Screenshot capture (vision channel — deferred)
 
 ---
 
@@ -655,18 +674,18 @@ Backend: Agent selects system prompt / tool set by `input.kind`.
 
 ### 10.1 What Gets Saved to Canvas JSON
 
-| Field                      | Persisted | Reason                                      |
-| -------------------------- | --------- | ------------------------------------------- |
-| `type: 'prompt'`           | ✅        | Node identity                               |
-| `input`                    | ✅        | User's question is the core content         |
-| `status`                   | ✅        | But sanitized on reload (see below)         |
-| `autoRunDelay`             | ✅        | User configuration                          |
-| `responseSummary`          | ✅        | Preserves results across sessions           |
-| `threadId`                 | ✅        | History reconstruction                      |
-| `errorMessage`             | ✅        | User needs to see last error                |
-| `runAt`                    | ❌        | Epoch timestamp — stale after reload        |
-| `_cachedScreenshot`        | ❌        | Memory-only (too large for JSON, transient) |
-| `activePromptRuns` (store) | ❌        | AbortController not serializable            |
+| Field                 | Persisted | Reason                                     |
+| --------------------- | --------- | ------------------------------------------ |
+| `type: 'prompt'`      | ✅        | Node identity                              |
+| `input`               | ✅        | User's question is the core content        |
+| `status`              | ✅        | But sanitized on reload (see below)        |
+| `autoRunDelay`        | ✅        | User configuration                         |
+| `responseSummary`     | ✅        | Preserves results across sessions          |
+| `threadId`            | ✅        | History reconstruction                     |
+| `errorMessage`        | ✅        | User needs to see last error               |
+| `viewed`              | ✅        | Whether user has viewed completed response |
+| `runAt`               | ❌        | Epoch timestamp — stale after reload       |
+| `activeRuns` (module) | ❌        | AbortController not serializable           |
 
 ### 10.2 Status Sanitization on Load
 
@@ -690,4 +709,7 @@ Prompt nodes **are visible** to other agents (chat agent, other prompt nodes) vi
 
 1. **Multiple re-runs**: When re-running, should previous results (created nodes) be cleaned up automatically, or left in place?
 2. **Token budget**: How much spatial context is too much? Benchmark token usage of `SpatialSummary` serialization for large canvases (50+ nodes).
-3. **Prompt node creation UX**: Click-to-place (like text/note)? Or a different gesture (e.g. right-click → "Ask here")?
+3. ~~**Prompt node creation UX**~~: Resolved — click-to-place via toolbar button (same as note/text/frame).
+4. **Screenshot / vision channel**: Deferred. Text-only spatial context is working well. Should vision be added for complex visual layouts?
+5. **Configurable delay UI**: The `autoRunDelay` field is supported but has no UI. Should a toolbar selector be built?
+6. **Dedicated prompt agent**: Current implementation reuses the chat agent. Should a specialized system prompt be created for better prompt-node-specific reasoning?
