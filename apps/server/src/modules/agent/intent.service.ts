@@ -7,7 +7,10 @@
 
 import { llmComplete, llmStream } from './llm.js';
 import { logIntentEpisode as storeEpisode } from './store/intent-store.js';
-import { INTENT_SYSTEM_PROMPT } from '../../prompt/intent.js';
+import {
+  INTENT_SYSTEM_PROMPT,
+  SKETCH_INTENT_SYSTEM_PROMPT,
+} from '../../prompt/intent.js';
 
 import type { Context } from '@mariozechner/pi-ai';
 import type {
@@ -342,6 +345,56 @@ function tryParsePartialCandidates(raw: string): IntentCandidate[] {
   }
 
   return results;
+}
+
+// ---------------------------------------------------------------------------
+// Sketch intent recognition
+// ---------------------------------------------------------------------------
+
+/**
+ * Recognize sketch intent from a canvas screenshot.
+ * Returns IntentCandidate[] (typically one) that can be auto-executed.
+ */
+export async function* recognizeSketchIntentStream(
+  screenshot: string,
+): AsyncGenerator<IntentCandidate> {
+  const base64 = screenshot.startsWith('data:')
+    ? screenshot.replace(/^data:[^;]+;base64,/, '')
+    : screenshot;
+
+  const userContentParts: ContentPart[] = [
+    { type: 'image', data: base64, mimeType: 'image/png' },
+  ];
+
+  const piContext: Context = {
+    systemPrompt: SKETCH_INTENT_SYSTEM_PROMPT,
+    messages: [
+      { role: 'user', content: userContentParts, timestamp: Date.now() },
+    ],
+  };
+
+  let accumulated = '';
+  let yieldedCount = 0;
+
+  const s = await llmStream(piContext);
+
+  for await (const event of s) {
+    if (event.type === 'text_delta') {
+      accumulated += event.delta;
+
+      const candidates = tryParsePartialCandidates(accumulated);
+      while (yieldedCount < candidates.length) {
+        yield candidates[yieldedCount];
+        yieldedCount++;
+      }
+    }
+  }
+
+  const finalCandidates = tryParsePartialCandidates(accumulated);
+  while (yieldedCount < finalCandidates.length) {
+    yield finalCandidates[yieldedCount];
+    yieldedCount++;
+  }
 }
 
 // ---------------------------------------------------------------------------

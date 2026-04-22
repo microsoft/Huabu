@@ -3,12 +3,14 @@
  *
  * POST /api/intent/recognize
  * POST /api/intent/recognize-stream
+ * POST /api/intent/recognize-sketch-stream
  * POST /api/intent/episode
  */
 
 import {
   recognizeIntent,
   recognizeIntentStream,
+  recognizeSketchIntentStream,
   logIntentEpisode,
 } from './intent.service.js';
 
@@ -16,6 +18,7 @@ import type {
   IntentRequest,
   IntentResponse,
   IntentEpisodeRequest,
+  SketchIntentRequest,
 } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
@@ -72,6 +75,59 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
         request.log.error(err, 'Intent streaming failed');
         reply.raw.write(
           `event: error\ndata: ${JSON.stringify({ error: 'Intent recognition failed' })}\n\n`,
+        );
+      }
+
+      reply.raw.end();
+    },
+  );
+
+  // Sketch intent recognition — same SSE pattern, different prompt, auto-executed
+  fastify.post<{ Body: SketchIntentRequest }>(
+    '/recognize-sketch-stream',
+    async (request, reply) => {
+      const { screenshot, sketchNodeIds } = request.body;
+
+      if (!screenshot) {
+        return reply
+          .code(400)
+          .send({ error: 'screenshot is required' } as never);
+      }
+
+      if (
+        !sketchNodeIds ||
+        !Array.isArray(sketchNodeIds) ||
+        sketchNodeIds.length === 0
+      ) {
+        return reply
+          .code(400)
+          .send({ error: 'sketchNodeIds must be a non-empty array' } as never);
+      }
+
+      reply.hijack();
+
+      reply.raw.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+        'X-Accel-Buffering': 'no',
+      });
+
+      reply.raw.flushHeaders?.();
+      reply.raw.write(': ok\n\n');
+
+      try {
+        for await (const candidate of recognizeSketchIntentStream(screenshot)) {
+          reply.raw.write(
+            `event: candidate\ndata: ${JSON.stringify(candidate)}\n\n`,
+          );
+        }
+        reply.raw.write('event: done\ndata: {}\n\n');
+      } catch (err) {
+        request.log.error(err, 'Sketch intent streaming failed');
+        reply.raw.write(
+          `event: error\ndata: ${JSON.stringify({ error: 'Sketch intent recognition failed' })}\n\n`,
         );
       }
 

@@ -12,7 +12,11 @@ import { create } from 'zustand';
 import { captureCanvasScreenshot } from '@/handler/canvasCommand/utils/screenshot';
 
 import useCanvasStore from './canvasStore';
-import { recognizeIntentStream, logIntentEpisode } from '../api/intent';
+import {
+  recognizeIntentStream,
+  recognizeSketchIntentStream,
+  logIntentEpisode,
+} from '../api/intent';
 
 import type { IntentCandidate } from '@sediment/shared';
 
@@ -38,6 +42,14 @@ interface IntentState {
   setCustomIntent: (text: string) => void;
   dismiss: () => void;
 
+  // ── Sketch recognition ──
+  /** Sketch node IDs waiting for the 10 s idle timer. */
+  pendingSketchIds: string[];
+  /** Called by SketchOverlay after each stroke finishes. Resets the 10 s idle timer. */
+  onSketchCreated: (sketchNodeId: string) => void;
+  /** Cancel any pending sketch recognition (e.g. user switches away from sketch tool). */
+  cancelSketchRecognition: () => void;
+
   /**
    * Callback set by ChatPanel to receive chosen intents.
    * @internal — not for external use.
@@ -50,6 +62,10 @@ interface IntentState {
   ) => void;
 }
 
+/** Idle time (ms) after the last sketch stroke before triggering recognition. */
+const SKETCH_RECOGNITION_DELAY_MS = 5_000;
+let _sketchTimer: ReturnType<typeof setTimeout> | null = null;
+
 export const useIntentStore = create<IntentState>()((set, get) => ({
   isOpen: false,
   isLoading: false,
@@ -59,6 +75,7 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
   customIntent: '',
   position: null,
   contextSummary: '',
+  pendingSketchIds: [],
 
   _onIntentChosen: null,
   _setOnIntentChosen: (cb) => set({ _onIntentChosen: cb }),
@@ -226,4 +243,72 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
       customIntent: '',
     });
   },
+
+  // ── Sketch recognition ────────────────────────────────────────
+
+  onSketchCreated: (sketchNodeId: string) => {
+    const current = get().pendingSketchIds;
+    if (!current.includes(sketchNodeId)) {
+      set({ pendingSketchIds: [...current, sketchNodeId] });
+    }
+
+    // Reset the 5 s idle timer
+    if (_sketchTimer) clearTimeout(_sketchTimer);
+    _sketchTimer = setTimeout(() => {
+      _sketchTimer = null;
+      void triggerSketchRecognition(get, set);
+    }, SKETCH_RECOGNITION_DELAY_MS);
+  },
+
+  cancelSketchRecognition: () => {
+    if (_sketchTimer) {
+      clearTimeout(_sketchTimer);
+      _sketchTimer = null;
+    }
+    set({ pendingSketchIds: [] });
+  },
 }));
+
+// ---------------------------------------------------------------------------
+// Sketch recognition — runs after 10 s idle, auto-sends to chat panel
+// ---------------------------------------------------------------------------
+
+async function triggerSketchRecognition(
+  get: () => IntentState,
+  set: (partial: Partial<IntentState>) => void,
+): Promise<void> {
+  const { pendingSketchIds, _onIntentChosen } = get();
+  if (pendingSketchIds.length === 0) return;
+
+  // Grab the batch and clear
+  const sketchIds = [...pendingSketchIds];
+  set({ pendingSketchIds: [] });
+
+  // Verify the sketch nodes still exist on canvas
+  const { nodes } = useCanvasStore.getState();
+  const existingIds = sketchIds.filter((id) =>
+    nodes.some((n) => n.id === id && n.type === 'sketch'),
+  );
+  if (existingIds.length === 0) return;
+
+  try {
+    // Capture screenshot only — the vision model reads everything from the image
+    const screenshot = await captureCanvasScreenshot({ stripPrefix: true });
+    if (!screenshot) return;
+
+    // Stream sketch intent candidates (typically just one)
+    const candidates: IntentCandidate[] = [];
+
+    await recognizeSketchIntentStream(screenshot, existingIds, (candidate) => {
+      candidates.push(candidate);
+    });
+
+    // Auto-execute: send the first candidate directly to chat panel
+    const first = candidates[0];
+    if (first && _onIntentChosen) {
+      _onIntentChosen(first.label, candidates);
+    }
+  } catch (err) {
+    console.error('[Sketch Intent Recognition] Failed:', err);
+  }
+}

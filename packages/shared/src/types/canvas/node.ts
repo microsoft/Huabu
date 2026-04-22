@@ -34,7 +34,9 @@ export type NodeOrigin =
   | { type: 'user-pasted' }
   | { type: 'user-from-library' }
   | { type: 'user-from-chat'; threadId?: string }
-  | { type: 'user-excerpt'; sourceId?: string };
+  | { type: 'user-excerpt'; sourceId?: string }
+  // Sketch recognition
+  | { type: 'sketch-recognized' };
 
 /** All possible values of `NodeOrigin['type']`. */
 export type NodeOriginType = NodeOrigin['type'];
