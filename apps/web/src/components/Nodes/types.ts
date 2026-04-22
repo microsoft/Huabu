@@ -53,7 +53,7 @@ export type CanvasNodeData =
   | CanvasVideoNodeData
   | CanvasImageNodeData
   | CanvasFrameNodeData
-  | CanvasSketchNodeData;
+  | CanvasSketchNodeData
   | CanvasPromptNodeData;
 
 export type CanvasNode = Node<CanvasNodeData, CanvasNodeType>;

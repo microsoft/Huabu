@@ -49,6 +49,19 @@ export interface IntentResponse {
   intentCandidates: IntentCandidate[];
 }
 
+// ==================== Sketch Recognition ====================
+
+/**
+ * Request body for sketch intent recognition.
+ * Only requires a screenshot — the vision model analyzes it visually.
+ */
+export interface SketchIntentRequest {
+  /** Base64 PNG screenshot of the canvas (no data: prefix). */
+  screenshot: string;
+  /** IDs of the sketch nodes to analyze. */
+  sketchNodeIds: string[];
+}
+
 /**
  * Request body to log an intent episode outcome.
  */

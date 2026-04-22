@@ -2,6 +2,7 @@ import { createId } from '@sediment/shared';
 import { useCallback, useRef, useState } from 'react';
 
 import useCanvasStore from '@/store/canvasStore';
+import { useIntentStore } from '@/store/intentStore';
 
 import { pointsToPath, SKETCH_OPTIONS } from './sketchPath';
 
@@ -69,6 +70,7 @@ export function SketchOverlay({
   rfInstance: ReactFlowInstance | null;
 }) {
   const addNode = useCanvasStore((s) => s.addNode);
+  const onSketchCreated = useIntentStore((s) => s.onSketchCreated);
 
   // Two parallel arrays:
   // - screenPtsRef: raw clientX/clientY for screenToFlowPosition (node creation)
@@ -124,8 +126,10 @@ export function SketchOverlay({
         (pos) => rfInstance?.screenToFlowPosition(pos) ?? pos,
       );
 
+      const nodeId = createId('node');
+
       addNode({
-        id: createId('node'),
+        id: nodeId,
         nodeType: 'sketch',
         // placementPoint is treated as the CENTER of the node by the intent
         // system, so offset by half the bounding box dimensions.
@@ -143,10 +147,13 @@ export function SketchOverlay({
         skipAutoLayout: true,
       });
 
+      // Notify the recognition store so the 10 s idle timer starts/resets
+      onSketchCreated(nodeId);
+
       screenPtsRef.current = [];
       setPoints([]);
     },
-    [rfInstance, addNode],
+    [rfInstance, addNode, onSketchCreated],
   );
 
   const zoom = rfInstance?.getViewport().zoom ?? 1;
