@@ -80,6 +80,15 @@ export function useChatHistory(setIsLoading: (loading: boolean) => void): void {
               };
             }
 
+            if (m.role === 'intent-select') {
+              return {
+                id,
+                role: 'intent-select' as const,
+                candidates: m.candidates,
+                selectedIntent: m.selectedIntent,
+              };
+            }
+
             const msg = m as {
               role: 'user' | 'assistant';
               content: string;

@@ -260,19 +260,6 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           >
             <NODE_ICON.text />
           </Button>
-          <Button
-            variant="ghost"
-            iconOnly
-            title="Sketch"
-            className={clsx(
-              pendingNodeType === 'sketch' && 'text-info bg-bg-default',
-            )}
-            onClick={() =>
-              setPendingNodeType(pendingNodeType === 'sketch' ? null : 'sketch')
-            }
-          >
-            <NODE_ICON.sketch />
-          </Button>
         </div>
 
         <div className="bg-border mx-1 h-4 w-px" />
@@ -333,7 +320,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           <Button
             variant="ghost"
             iconOnly
-            title="Prompt"
+            title="Question"
             className={clsx(
               pendingNodeType === 'prompt' && 'text-info bg-bg-default',
             )}
@@ -346,7 +333,20 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           <Button
             variant="ghost"
             iconOnly
-            title="Intent (crtl + I)"
+            title="Annotation"
+            className={clsx(
+              pendingNodeType === 'sketch' && 'text-info bg-bg-default',
+            )}
+            onClick={() =>
+              setPendingNodeType(pendingNodeType === 'sketch' ? null : 'sketch')
+            }
+          >
+            <NODE_ICON.sketch />
+          </Button>
+          <Button
+            variant="ghost"
+            iconOnly
+            title="Intent"
             className={clsx(intentOpen && 'text-info bg-bg-default')}
             onClick={() => {
               const rect = intentButtonRef.current?.getBoundingClientRect();

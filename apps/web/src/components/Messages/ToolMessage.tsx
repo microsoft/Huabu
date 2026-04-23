@@ -14,7 +14,6 @@ import {
 } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
 
-import { NODE_ICON } from '@/config/nodeIcons';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 
@@ -25,7 +24,7 @@ import { Button } from '../Common/Button';
 import { Spinner } from '../Common/Spinner';
 
 import type { CanvasChange } from '../../hooks/useCanvasChanges';
-import type { CanvasCommand, CanvasNodeType } from '@sediment/shared';
+import type { CanvasCommand } from '@sediment/shared';
 import type { ToolResponse, WebSearchToolResponse } from '@sediment/shared';
 
 // TODO: many status icons
@@ -33,12 +32,6 @@ import type { ToolResponse, WebSearchToolResponse } from '@sediment/shared';
 
 const truncate = (s: string, n: number) =>
   s.length > n ? s.slice(0, n) + '…' : s;
-
-/** Extract icon for a node-referencing tool. */
-function getNodeIcon(data: Record<string, unknown>) {
-  const nodeType = ((data.type ?? data.nodeType) as string) ?? 'note';
-  return NODE_ICON[nodeType as CanvasNodeType] ?? NODE_ICON.note;
-}
 
 // ==================== Tool Icon Mapping ====================
 
@@ -141,6 +134,181 @@ export function ToolMessageGroup({ entries }: ToolMessageGroupProps) {
   );
 }
 
+// ==================== Canvas Change Reconstruction ====================
+
+/**
+ * Reconstruct display-only CanvasChange entries from raw commands.
+ * Used after refresh when canvasChanges weren't persisted.
+ * All entries are non-revertible.
+ */
+function reconstructChangesFromCommands(
+  commands: Array<Record<string, unknown>>,
+): CanvasChange[] {
+  const changes: CanvasChange[] = [];
+  let counter = 0;
+
+  for (const cmd of commands) {
+    const type = cmd.type as string;
+    switch (type) {
+      case 'CREATE_NODES': {
+        const nodes = (cmd.nodes ?? []) as Array<Record<string, unknown>>;
+        for (const node of nodes) {
+          const label = (node.data as Record<string, unknown> | undefined)
+            ?.label as string | undefined;
+          changes.push({
+            id: `hist-${counter++}`,
+            tool: 'canvas_commands',
+            label: `Created: ${truncate(label ?? 'untitled', 24)}`,
+            nodeType: (node.nodeType as string) ?? 'note',
+            nodeId: node.id as string,
+            nodeLabel: truncate(label ?? 'untitled', 24),
+            revertible: false,
+          });
+        }
+        break;
+      }
+      case 'DELETE_NODES': {
+        const nodeIds = (cmd.nodeIds ?? []) as string[];
+        for (const nodeId of nodeIds) {
+          changes.push({
+            id: `hist-${counter++}`,
+            tool: 'canvas_commands',
+            label: `Deleted: ${truncate(nodeId, 24)}`,
+            nodeId,
+            revertible: false,
+          });
+        }
+        break;
+      }
+      case 'MERGE_NODE_DATA': {
+        const patches = (cmd.patches ?? []) as Array<Record<string, unknown>>;
+        for (const patch of patches) {
+          changes.push({
+            id: `hist-${counter++}`,
+            tool: 'canvas_commands',
+            label: `Updated: ${truncate((patch.nodeId as string) ?? '?', 24)}`,
+            nodeId: patch.nodeId as string,
+            revertible: false,
+          });
+        }
+        break;
+      }
+      case 'CONNECT_NODES': {
+        const edges = (cmd.edges ?? []) as Array<Record<string, unknown>>;
+        for (const edge of edges) {
+          changes.push({
+            id: `hist-${counter++}`,
+            tool: 'canvas_commands',
+            label: 'Connected',
+            sourceNodeId: edge.source as string,
+            targetNodeId: edge.target as string,
+            revertible: false,
+          });
+        }
+        break;
+      }
+      case 'DISCONNECT_EDGES': {
+        const edges = (cmd.edges ?? []) as Array<
+          string | Record<string, unknown>
+        >;
+        for (const edge of edges) {
+          const source =
+            typeof edge === 'string' ? undefined : (edge.source as string);
+          const target =
+            typeof edge === 'string' ? undefined : (edge.target as string);
+          changes.push({
+            id: `hist-${counter++}`,
+            tool: 'canvas_commands',
+            label: 'Disconnected',
+            sourceNodeId: source,
+            targetNodeId: target,
+            revertible: false,
+          });
+        }
+        break;
+      }
+      case 'SET_NODE_PARENT': {
+        const nodeIds = (cmd.nodeIds ?? []) as string[];
+        const parentId = cmd.parentId as string | null;
+        const verb = parentId ? 'Moved into frame' : 'Moved out of frame';
+        for (const nodeId of nodeIds) {
+          changes.push({
+            id: `hist-${counter++}`,
+            tool: 'canvas_commands',
+            label: `${verb}: ${truncate(nodeId, 24)}`,
+            nodeId,
+            revertible: false,
+          });
+        }
+        break;
+      }
+      case 'DISSOLVE_FRAME': {
+        changes.push({
+          id: `hist-${counter++}`,
+          tool: 'canvas_commands',
+          label: 'Dissolved frame',
+          nodeType: 'frame',
+          nodeId: cmd.frameId as string,
+          revertible: false,
+        });
+        break;
+      }
+      case 'SET_NODE_GEOMETRY': {
+        const items = (cmd.items ?? []) as Array<Record<string, unknown>>;
+        for (const item of items) {
+          changes.push({
+            id: `hist-${counter++}`,
+            tool: 'canvas_commands',
+            label: `Repositioned: ${truncate((item.nodeId as string) ?? '?', 24)}`,
+            nodeId: item.nodeId as string,
+            revertible: false,
+          });
+        }
+        break;
+      }
+      case 'ALIGN_NODES': {
+        const nodeIds = (cmd.nodeIds ?? []) as string[];
+        changes.push({
+          id: `hist-${counter++}`,
+          tool: 'canvas_commands',
+          label: `Aligned ${nodeIds.length} node(s)`,
+          revertible: false,
+        });
+        break;
+      }
+      case 'DISTRIBUTE_NODES': {
+        const nodeIds = (cmd.nodeIds ?? []) as string[];
+        changes.push({
+          id: `hist-${counter++}`,
+          tool: 'canvas_commands',
+          label: `Distributed ${nodeIds.length} node(s)`,
+          revertible: false,
+        });
+        break;
+      }
+      case 'AUTO_LAYOUT': {
+        changes.push({
+          id: `hist-${counter++}`,
+          tool: 'canvas_commands',
+          label: 'Auto layout',
+          revertible: false,
+        });
+        break;
+      }
+      default:
+        changes.push({
+          id: `hist-${counter++}`,
+          tool: 'canvas_commands',
+          label: type || 'Unknown command',
+          revertible: false,
+        });
+        break;
+    }
+  }
+
+  return changes;
+}
+
 // ==================== Canvas Command Card ====================
 
 function CanvasCommandCard({
@@ -153,7 +321,6 @@ function CanvasCommandCard({
   isExecuting?: boolean;
 }) {
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const [isCommandListExpanded, setIsCommandListExpanded] = useState(false);
 
   const data =
     toolResponse.status === 'success'
@@ -161,7 +328,17 @@ function CanvasCommandCard({
       : ({} as Record<string, unknown>);
 
   const canvasChanges = (data.canvasChanges ?? []) as CanvasChange[];
-  const hasChanges = canvasChanges.length > 0;
+  const commands = (data.commands ?? []) as Array<Record<string, unknown>>;
+
+  // Use live canvasChanges if available; otherwise reconstruct from commands
+  const displayChanges = useMemo(() => {
+    if (canvasChanges.length > 0) return canvasChanges;
+    if (commands.length > 0) return reconstructChangesFromCommands(commands);
+    return [];
+  }, [canvasChanges, commands]);
+
+  const hasChanges = displayChanges.length > 0;
+  const anyRevertible = displayChanges.some((c) => c.revertible);
 
   const updateMessage = useChatStore((s) => s.updateMessage);
 
@@ -239,55 +416,89 @@ function CanvasCommandCard({
     clearAllChanges();
   }, [canvasChanges, clearAllChanges]);
 
-  // Has canvas changes → render inline change list
+  const statusIcon = isExecuting ? (
+    <Spinner size="xs" className="text-info" />
+  ) : (
+    <Check size={12} className="text-fg-muted" />
+  );
+
+  // Render inline change list (live or reconstructed from history)
   if (hasChanges) {
+    const title =
+      displayChanges.length === 1
+        ? 'Canvas 1 change'
+        : `Canvas ${displayChanges.length} changes`;
+
+    // Single non-revertible change → simple inline row (matches read-node single style)
+    if (displayChanges.length === 1 && !anyRevertible) {
+      const change = displayChanges[0];
+      return (
+        <div className="flex justify-start">
+          <div className="w-full">
+            <div className="text-fg-muted hover:bg-hover flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors">
+              {statusIcon}
+              <Command size={12} className="text-fg-muted/60 flex-shrink-0" />
+              <span className="flex-1 truncate">{change.label}</span>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="flex justify-start">
         <div className="w-full">
-          {/* Header row — matches read-node style */}
-          <div className="text-fg-muted flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-xs">
-            <Check size={12} className="text-fg-muted flex-shrink-0" />
+          {/* Header row */}
+          <div className="text-fg-muted hover:bg-hover flex w-full items-center gap-1.5 rounded-md px-2 py-0.5 text-xs transition-colors">
+            {statusIcon}
             <Command size={12} className="text-fg-muted/60 flex-shrink-0" />
             <button
               type="button"
               onClick={() => setIsCollapsed((prev) => !prev)}
               className="flex flex-1 items-center gap-1 truncate text-left"
             >
-              <span>Canvas changes ({canvasChanges.length})</span>
-              {isCollapsed ? (
-                <ChevronRight size={10} />
-              ) : (
-                <ChevronDown size={10} />
-              )}
+              <span>{title}</span>
+              <ChevronRight
+                size={10}
+                className={`text-fg-muted/50 flex-shrink-0 transition-transform ${!isCollapsed ? 'rotate-90' : ''}`}
+              />
             </button>
-            <div className="flex flex-shrink-0 items-center gap-1">
-              <Button onClick={clearAllChanges} variant="outline" size="sm">
-                Keep all
-              </Button>
-              <Button onClick={revertAllChanges} variant="outline" size="sm">
-                Revert all
-              </Button>
-              <Button
-                variant="ghost"
-                iconOnly
-                size="sm"
-                onPointerDown={handlePreviewAllDown}
-                onPointerUp={handlePreviewUp}
-                onPointerLeave={handlePreviewUp}
-              >
-                <Blend />
-              </Button>
-            </div>
+            {anyRevertible && (
+              <div className="flex flex-shrink-0 items-center gap-1">
+                <Button
+                  onClick={clearAllChanges}
+                  variant="outline"
+                  size="sm"
+                  className="h-5 rounded-sm"
+                >
+                  Keep all
+                </Button>
+                <Button
+                  onClick={revertAllChanges}
+                  variant="outline"
+                  size="sm"
+                  className="h-5 rounded-sm"
+                >
+                  Revert all
+                </Button>
+                <Button
+                  variant="ghost"
+                  iconOnly
+                  size="sm"
+                  onPointerDown={handlePreviewAllDown}
+                  onPointerUp={handlePreviewUp}
+                  onPointerLeave={handlePreviewUp}
+                >
+                  <Blend />
+                </Button>
+              </div>
+            )}
           </div>
 
           {/* Change rows */}
           {!isCollapsed && (
-            <div className="border-edge-default/40 ml-4 flex max-h-[24vh] flex-col gap-0.5 overflow-y-auto border-l py-1 pl-3">
-              {canvasChanges.map((change) => {
-                const Icon =
-                  NODE_ICON[(change.nodeType as CanvasNodeType) ?? 'note'] ??
-                  NODE_ICON.note;
-
+            <div className="border-edge-default/40 ml-4 flex max-h-[24vh] flex-col gap-1 overflow-y-auto border-l py-1 pl-3">
+              {displayChanges.map((change) => {
                 const allMissing =
                   (change.nodeId && isNodeMissing(change.nodeId)) ||
                   (change.sourceNodeId && isNodeMissing(change.sourceNodeId)) ||
@@ -334,47 +545,44 @@ function CanvasCommandCard({
                     key={change.id}
                     className="text-fg-muted flex items-center gap-2 pr-2 text-xs"
                   >
-                    <Icon size={12} className="flex-shrink-0" />
                     <span className="min-w-0 flex-1 truncate">
                       {renderLabel()}
                     </span>
-                    <div className="flex flex-shrink-0 items-center gap-0.5">
-                      <Button
-                        variant="ghost"
-                        iconOnly
-                        size="sm"
-                        onClick={() => removeChange(change.id)}
-                        title="Keep this change"
-                      >
-                        <Check />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        iconOnly
-                        size="sm"
-                        onClick={() => revertChange(change.id)}
-                        disabled={!change.revertible || !!allMissing}
-                        title={
-                          change.revertible
-                            ? 'Revert this change'
-                            : 'Cannot revert this change'
-                        }
-                      >
-                        <Undo2 />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        iconOnly
-                        size="sm"
-                        onPointerDown={() => handlePreviewDown(change)}
-                        onPointerUp={handlePreviewUp}
-                        onPointerLeave={handlePreviewUp}
-                        disabled={!change.revertible}
-                        title="Hold to preview before"
-                      >
-                        <Blend />
-                      </Button>
-                    </div>
+                    {change.revertible && (
+                      <div className="flex flex-shrink-0 items-center gap-0.5">
+                        <Button
+                          variant="ghost"
+                          iconOnly
+                          size="sm"
+                          onClick={() => removeChange(change.id)}
+                          title="Keep this change"
+                        >
+                          <Check />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          iconOnly
+                          size="sm"
+                          onClick={() => revertChange(change.id)}
+                          disabled={!change.revertible || !!allMissing}
+                          title="Revert this change"
+                        >
+                          <Undo2 />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          iconOnly
+                          size="sm"
+                          onPointerDown={() => handlePreviewDown(change)}
+                          onPointerUp={handlePreviewUp}
+                          onPointerLeave={handlePreviewUp}
+                          disabled={!change.revertible}
+                          title="Hold to preview before"
+                        >
+                          <Blend />
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -385,69 +593,15 @@ function CanvasCommandCard({
     );
   }
 
-  // No changes → compact title (expandable when multiple commands)
-  const commands = (data.commands ?? []) as Array<Record<string, unknown>>;
-  const count = commands.length;
-  const title =
-    count === 0
-      ? 'Canvas commands'
-      : count === 1
-        ? `Canvas: ${commands[0]?.type as string}`
-        : `Canvas: ${count} commands`;
-
-  const statusIcon = isExecuting ? (
-    <Spinner size="xs" className="text-info" />
-  ) : (
-    <Check size={12} className="text-fg-muted" />
-  );
-
-  if (count <= 1) {
-    return (
-      <div className="flex justify-start">
-        <div className="w-full">
-          <div className="text-fg-muted hover:bg-hover flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors">
-            {statusIcon}
-            <Command size={12} className="text-fg-muted/60 flex-shrink-0" />
-            <span className="flex-1 truncate">{title}</span>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
+  // Truly empty → simple row
   return (
     <div className="flex justify-start">
       <div className="w-full">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="text-fg-muted w-full justify-start gap-1.5 text-xs"
-          onClick={() => setIsCommandListExpanded(!isCommandListExpanded)}
-        >
+        <div className="text-fg-muted hover:bg-hover flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors">
           {statusIcon}
           <Command size={12} className="text-fg-muted/60 flex-shrink-0" />
-          <span className="flex-1 truncate">{title}</span>
-          <ChevronRight
-            size={10}
-            className={`text-fg-muted/50 flex-shrink-0 transition-transform ${isCommandListExpanded ? 'rotate-90' : ''}`}
-          />
-        </Button>
-        {isCommandListExpanded && (
-          <div className="border-edge-default/40 ml-4 flex flex-col gap-0.5 border-l py-1 pl-3">
-            {commands.map((cmd, idx) => (
-              <div
-                key={idx}
-                className="text-fg-muted flex items-center gap-1.5 text-xs"
-              >
-                <Check size={10} className="text-fg-muted flex-shrink-0" />
-                <span className="truncate">
-                  {(cmd.type as string) ?? 'unknown'}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
+          <span className="flex-1 truncate">Canvas commands</span>
+        </div>
       </div>
     </div>
   );
@@ -512,8 +666,7 @@ function MergedAgentToolRow({
     }
     if (tool === 'search_knowledge') {
       return {
-        title:
-          count === 1 ? 'Search knowledge' : `Search knowledge (×${count})`,
+        title: count === 1 ? 'Search knowledge' : `Search ${count} knowledge`,
         nodeRefs: emptyRefs,
       };
     }
@@ -599,21 +752,21 @@ function MergedAgentToolRow({
   return (
     <div className="flex justify-start">
       <div className="w-full">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="text-fg-muted w-full justify-start gap-1.5 px-2 py-1 text-left text-xs [&_svg]:h-3 [&_svg]:w-3"
-          onClick={() => setIsExpanded(!isExpanded)}
-        >
+        <div className="text-fg-muted hover:bg-hover flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors">
           {statusIcon}
           {icon && <span className="text-fg-muted/60">{icon}</span>}
-          <span className="flex-1 truncate text-left">{title}</span>
-          <ChevronRight
-            size={10}
-            className={`text-fg-muted/50 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
-          />
-        </Button>
+          <button
+            type="button"
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="flex flex-1 items-center gap-1 truncate text-left"
+          >
+            <span>{title}</span>
+            <ChevronRight
+              size={10}
+              className={`text-fg-muted/50 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+            />
+          </button>
+        </div>
         {isExpanded && (
           <div className="border-edge-default/40 ml-4 flex flex-col gap-1 border-l py-1 pl-3">
             {entries.map((e, i) => {
@@ -623,26 +776,22 @@ function MergedAgentToolRow({
                   : {};
               if (tool === 'get_node_detail') {
                 const nodeId = ((d.id ?? d.nodeId) as string) || undefined;
-                const EntryIcon = getNodeIcon(d);
                 return (
                   <div
                     key={e.messageId}
                     className="text-fg-muted flex items-center gap-1.5 text-xs"
                   >
-                    <EntryIcon
-                      size={11}
-                      className="text-fg-muted/60 flex-shrink-0"
-                    />
-                    {nodeId ? (
-                      <NodeRef
-                        nodeId={nodeId}
-                        fallbackLabel={d.label as string}
-                      />
-                    ) : (
-                      <span className="truncate">
-                        {nodeRefs[i]?.label ?? '?'}
-                      </span>
-                    )}
+                    <span className="truncate">
+                      Read:{' '}
+                      {nodeId ? (
+                        <NodeRef
+                          nodeId={nodeId}
+                          fallbackLabel={d.label as string}
+                        />
+                      ) : (
+                        (nodeRefs[i]?.label ?? '?')
+                      )}
+                    </span>
                   </div>
                 );
               }
@@ -652,10 +801,6 @@ function MergedAgentToolRow({
                     key={e.messageId}
                     className="text-fg-muted flex items-center gap-1.5 text-xs"
                   >
-                    <Library
-                      size={11}
-                      className="text-fg-muted/60 flex-shrink-0"
-                    />
                     <span className="truncate">
                       {truncate((d.title as string) ?? '?', 30)}
                     </span>

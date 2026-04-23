@@ -1,3 +1,5 @@
+import type { IntentCandidate } from './intent.js';
+
 /**
  * An attachment sent alongside a chat message — e.g. a captured PDF region or pasted file.
  */
@@ -79,6 +81,16 @@ export type ChatHistoryItem =
       status: 'interrupted' | 'error';
       /** Optional detail message for the status. */
       detail?: string;
+    }
+  | {
+      role: 'intent-select';
+      candidates: IntentCandidate[];
+      selectedIntent: string;
+    }
+  | {
+      role: 'intent-select';
+      candidates: IntentCandidate[];
+      selectedIntent: string;
     };
 
 /** Response from GET /api/chat/history/:threadId */

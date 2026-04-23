@@ -147,7 +147,7 @@ export function SketchOverlay({
         skipAutoLayout: true,
       });
 
-      // Notify the recognition store so the 10 s idle timer starts/resets
+      // Notify the recognition store so the 5 s idle timer starts/resets
       onSketchCreated(nodeId);
 
       screenPtsRef.current = [];

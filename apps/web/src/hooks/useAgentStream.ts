@@ -597,6 +597,7 @@ export function useAgentStream(): UseAgentStreamReturn {
             attachments,
             selectedNodeIds:
               selectedNodeIds.length > 0 ? selectedNodeIds : undefined,
+            intentData,
             signal: abortController.signal,
           },
         );

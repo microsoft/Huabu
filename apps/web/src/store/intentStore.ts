@@ -292,7 +292,7 @@ async function triggerSketchRecognition(
   if (existingIds.length === 0) return;
 
   try {
-    // Capture screenshot only — the vision model reads everything from the image
+    // Capture screenshot BEFORE deleting sketches — the vision model needs to see them
     const screenshot = await captureCanvasScreenshot({ stripPrefix: true });
     if (!screenshot) return;
 
@@ -303,6 +303,9 @@ async function triggerSketchRecognition(
       candidates.push(candidate);
     });
 
+    // Always delete sketch nodes — they are ephemeral gestures, not permanent content
+    useCanvasStore.getState().deleteNodes(existingIds);
+
     // Auto-execute: send the first candidate directly to chat panel
     const first = candidates[0];
     if (first && _onIntentChosen) {
@@ -310,5 +313,7 @@ async function triggerSketchRecognition(
     }
   } catch (err) {
     console.error('[Sketch Intent Recognition] Failed:', err);
+    // Delete sketch nodes even on failure — they should not persist
+    useCanvasStore.getState().deleteNodes(existingIds);
   }
 }
