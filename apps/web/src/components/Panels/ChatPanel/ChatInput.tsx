@@ -142,8 +142,6 @@ export const ChatInput = ({
 
   // Auto-resize textarea
   useEffect(() => {
-    if (mode === 'operate') return;
-
     const textarea = textareaRef.current;
     if (!textarea) return;
 
@@ -166,7 +164,7 @@ export const ChatInput = ({
     textarea.style.height = `${nextHeight}px`;
     textarea.style.overflowY =
       textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
-  }, [mode, value]);
+  }, [value]);
 
   // Handle Enter key for submission and ArrowUp/ArrowDown for prompt history
   const handleKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement> = (

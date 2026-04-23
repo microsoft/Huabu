@@ -26,9 +26,10 @@ export async function uploadFileToNodeInput(
   placementPoint: Point,
   origin: NodeOrigin,
 ): Promise<AddNodeInput | null> {
-  const type = file.type
-    ? detectNodeTypeFromMime(file.type)
-    : detectNodeType(file.name);
+  // Prefer MIME-based detection, but fall back to filename when MIME is
+  // absent or yields the generic 'web' bucket (e.g. .md reported as text/plain).
+  const mimeType = file.type ? detectNodeTypeFromMime(file.type) : 'web';
+  const type = mimeType === 'web' ? detectNodeType(file.name) : mimeType;
 
   try {
     if (type === 'image') {
@@ -59,6 +60,15 @@ export async function uploadFileToNodeInput(
         nodeType: 'pdf',
         placementPoint,
         data: { src, label: file.name, origin },
+      };
+    }
+
+    if (type === 'note') {
+      const content = await file.text();
+      return {
+        nodeType: 'note',
+        placementPoint,
+        data: { content, label: file.name, origin },
       };
     }
   } catch (error) {

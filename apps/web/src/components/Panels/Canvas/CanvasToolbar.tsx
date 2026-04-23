@@ -121,6 +121,16 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
               naturalDimensions = dims;
             } else if (type === 'pdf') {
               url = await uploadPdf(file);
+            } else if (type === 'note') {
+              const content = await file.text();
+              return {
+                nodeType: 'note',
+                data: {
+                  content,
+                  label: file.name,
+                  origin: { type: 'user-uploaded' },
+                },
+              };
             }
 
             return {
@@ -410,7 +420,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             variant="outline"
             tone="info"
             onClick={() => fileInputRef.current?.click()}
-            className="flex-col border-dashed px-4 py-8"
+            className="w-full flex-col border-dashed px-4 py-8"
           >
             <UploadCloud size={24} />
             <span className="text-sm">Click to select files</span>
@@ -422,7 +432,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             ref={fileInputRef}
             className="hidden"
             multiple
-            accept="image/*,application/pdf,video/mp4"
+            accept="image/*,application/pdf,video/mp4,.md,.markdown,text/markdown"
             onChange={handleFileChange}
           />
         </div>

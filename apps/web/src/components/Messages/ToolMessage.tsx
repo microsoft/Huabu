@@ -243,145 +243,143 @@ function CanvasCommandCard({
   if (hasChanges) {
     return (
       <div className="flex justify-start">
-        <div className="w-full px-2">
-          <div className="border-edge-default bg-surface/40 flex flex-col gap-2 rounded-md border p-2.5">
-            {/* Header */}
-            <div className="flex items-center justify-between">
+        <div className="w-full">
+          {/* Header row — matches read-node style */}
+          <div className="text-fg-muted flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-xs">
+            <Check size={12} className="text-fg-muted flex-shrink-0" />
+            <Command size={12} className="text-fg-muted/60 flex-shrink-0" />
+            <button
+              type="button"
+              onClick={() => setIsCollapsed((prev) => !prev)}
+              className="flex flex-1 items-center gap-1 truncate text-left"
+            >
+              <span>Canvas changes ({canvasChanges.length})</span>
+              {isCollapsed ? (
+                <ChevronRight size={10} />
+              ) : (
+                <ChevronDown size={10} />
+              )}
+            </button>
+            <div className="flex flex-shrink-0 items-center gap-1">
+              <Button onClick={clearAllChanges} variant="outline" size="sm">
+                Keep all
+              </Button>
+              <Button onClick={revertAllChanges} variant="outline" size="sm">
+                Revert all
+              </Button>
               <Button
                 variant="ghost"
+                iconOnly
                 size="sm"
-                onClick={() => setIsCollapsed((prev) => !prev)}
-                className="text-fg-muted gap-1 text-xs font-medium"
+                onPointerDown={handlePreviewAllDown}
+                onPointerUp={handlePreviewUp}
+                onPointerLeave={handlePreviewUp}
               >
-                {isCollapsed ? (
-                  <ChevronRight size={14} />
-                ) : (
-                  <ChevronDown size={14} />
-                )}
-                Canvas changes ({canvasChanges.length})
+                <Blend />
               </Button>
-              <div className="flex items-center gap-1">
-                <Button onClick={clearAllChanges} variant="outline" size="sm">
-                  Keep all
-                </Button>
-                <Button onClick={revertAllChanges} variant="outline" size="sm">
-                  Revert all
-                </Button>
-                <Button
-                  variant="ghost"
-                  iconOnly
-                  size="sm"
-                  onPointerDown={handlePreviewAllDown}
-                  onPointerUp={handlePreviewUp}
-                  onPointerLeave={handlePreviewUp}
-                >
-                  <Blend />
-                </Button>
-              </div>
             </div>
-
-            {/* Change rows */}
-            {!isCollapsed && (
-              <div className="flex max-h-[24vh] flex-col gap-0.5 overflow-y-auto">
-                {canvasChanges.map((change) => {
-                  const Icon =
-                    NODE_ICON[(change.nodeType as CanvasNodeType) ?? 'note'] ??
-                    NODE_ICON.note;
-
-                  const allMissing =
-                    (change.nodeId && isNodeMissing(change.nodeId)) ||
-                    (change.sourceNodeId &&
-                      isNodeMissing(change.sourceNodeId)) ||
-                    (change.targetNodeId && isNodeMissing(change.targetNodeId));
-
-                  const renderLabel = () => {
-                    if (change.sourceNodeId && change.targetNodeId) {
-                      const verb = change.label.split(':')[0] || 'Connected';
-                      return (
-                        <>
-                          {verb}{' '}
-                          <NodeRef
-                            nodeId={change.sourceNodeId}
-                            snapshotLabel={change.sourceNodeLabel}
-                            previewing={isNodePreviewing(change.sourceNodeId)}
-                          />{' '}
-                          →{' '}
-                          <NodeRef
-                            nodeId={change.targetNodeId}
-                            snapshotLabel={change.targetNodeLabel}
-                            previewing={isNodePreviewing(change.targetNodeId)}
-                          />
-                        </>
-                      );
-                    }
-                    if (change.nodeId) {
-                      const prefix = change.label.split(':')[0];
-                      return (
-                        <>
-                          {prefix}:{' '}
-                          <NodeRef
-                            nodeId={change.nodeId}
-                            snapshotLabel={change.nodeLabel}
-                            previewing={isNodePreviewing(change.nodeId)}
-                          />
-                        </>
-                      );
-                    }
-                    return change.label;
-                  };
-
-                  return (
-                    <div
-                      key={change.id}
-                      className="text-fg-muted flex items-center gap-2 pl-0.5 text-xs"
-                    >
-                      <Icon size={12} className="flex-shrink-0" />
-                      <span className="min-w-0 flex-1 truncate">
-                        {renderLabel()}
-                      </span>
-                      <div className="flex flex-shrink-0 items-center gap-0.5">
-                        <Button
-                          variant="ghost"
-                          iconOnly
-                          size="sm"
-                          onClick={() => removeChange(change.id)}
-                          title="Keep this change"
-                        >
-                          <Check />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          iconOnly
-                          size="sm"
-                          onClick={() => revertChange(change.id)}
-                          disabled={!change.revertible || !!allMissing}
-                          title={
-                            change.revertible
-                              ? 'Revert this change'
-                              : 'Cannot revert this change'
-                          }
-                        >
-                          <Undo2 />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          iconOnly
-                          size="sm"
-                          onPointerDown={() => handlePreviewDown(change)}
-                          onPointerUp={handlePreviewUp}
-                          onPointerLeave={handlePreviewUp}
-                          disabled={!change.revertible}
-                          title="Hold to preview before"
-                        >
-                          <Blend />
-                        </Button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
           </div>
+
+          {/* Change rows */}
+          {!isCollapsed && (
+            <div className="border-edge-default/40 ml-4 flex max-h-[24vh] flex-col gap-0.5 overflow-y-auto border-l py-1 pl-3">
+              {canvasChanges.map((change) => {
+                const Icon =
+                  NODE_ICON[(change.nodeType as CanvasNodeType) ?? 'note'] ??
+                  NODE_ICON.note;
+
+                const allMissing =
+                  (change.nodeId && isNodeMissing(change.nodeId)) ||
+                  (change.sourceNodeId && isNodeMissing(change.sourceNodeId)) ||
+                  (change.targetNodeId && isNodeMissing(change.targetNodeId));
+
+                const renderLabel = () => {
+                  if (change.sourceNodeId && change.targetNodeId) {
+                    const verb = change.label.split(':')[0] || 'Connected';
+                    return (
+                      <>
+                        {verb}{' '}
+                        <NodeRef
+                          nodeId={change.sourceNodeId}
+                          snapshotLabel={change.sourceNodeLabel}
+                          previewing={isNodePreviewing(change.sourceNodeId)}
+                        />{' '}
+                        →{' '}
+                        <NodeRef
+                          nodeId={change.targetNodeId}
+                          snapshotLabel={change.targetNodeLabel}
+                          previewing={isNodePreviewing(change.targetNodeId)}
+                        />
+                      </>
+                    );
+                  }
+                  if (change.nodeId) {
+                    const prefix = change.label.split(':')[0];
+                    return (
+                      <>
+                        {prefix}:{' '}
+                        <NodeRef
+                          nodeId={change.nodeId}
+                          snapshotLabel={change.nodeLabel}
+                          previewing={isNodePreviewing(change.nodeId)}
+                        />
+                      </>
+                    );
+                  }
+                  return change.label;
+                };
+
+                return (
+                  <div
+                    key={change.id}
+                    className="text-fg-muted flex items-center gap-2 pr-2 text-xs"
+                  >
+                    <Icon size={12} className="flex-shrink-0" />
+                    <span className="min-w-0 flex-1 truncate">
+                      {renderLabel()}
+                    </span>
+                    <div className="flex flex-shrink-0 items-center gap-0.5">
+                      <Button
+                        variant="ghost"
+                        iconOnly
+                        size="sm"
+                        onClick={() => removeChange(change.id)}
+                        title="Keep this change"
+                      >
+                        <Check />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        iconOnly
+                        size="sm"
+                        onClick={() => revertChange(change.id)}
+                        disabled={!change.revertible || !!allMissing}
+                        title={
+                          change.revertible
+                            ? 'Revert this change'
+                            : 'Cannot revert this change'
+                        }
+                      >
+                        <Undo2 />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        iconOnly
+                        size="sm"
+                        onPointerDown={() => handlePreviewDown(change)}
+                        onPointerUp={handlePreviewUp}
+                        onPointerLeave={handlePreviewUp}
+                        disabled={!change.revertible}
+                        title="Hold to preview before"
+                      >
+                        <Blend />
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     );
