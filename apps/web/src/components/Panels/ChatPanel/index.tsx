@@ -36,9 +36,9 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const clearMessages = useChatStore((state) => state.clearMessages);
   const canvasId = useCanvasStore((state) => state.canvasId);
 
-  // Prompt thread replay mode
-  const viewingPromptThread = useChatStore((s) => s.viewingPromptThread);
-  const closePromptThread = useChatStore((s) => s.closePromptThread);
+  // Question thread replay mode
+  const viewingQuestionThread = useChatStore((s) => s.viewingQuestionThread);
+  const closeQuestionThread = useChatStore((s) => s.closeQuestionThread);
 
   // Register intent callback — when user selects an intent in the popover,
   // it's sent here and executed as an agent chat message.
@@ -91,18 +91,18 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
 
   return (
     <SidebarPanel
-      title={viewingPromptThread ? 'Prompt Replay' : 'Chat'}
+      title={viewingQuestionThread ? 'Question Replay' : 'Chat'}
       isCollapsed={isCollapsed}
       onToggle={onToggle}
       iconCollapsed={<PanelRightOpen size={16} />}
       iconExpanded={<PanelRightClose size={16} />}
       className="border-edge-default border-l"
       tools={
-        viewingPromptThread ? (
+        viewingQuestionThread ? (
           <Button
             variant="ghost"
             iconOnly
-            onClick={closePromptThread}
+            onClick={closeQuestionThread}
             title="Back to chat"
           >
             <ArrowLeft />

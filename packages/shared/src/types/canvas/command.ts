@@ -141,6 +141,16 @@ export type CanvasCommand =
       scope: CanvasAutoLayoutScope;
       options?: CanvasAutoLayoutOptions;
     }
+  | {
+      type: 'CREATE_QUESTION';
+      id?: CanvasNodeId;
+      /** The question text content. */
+      content: string;
+      position?: Point;
+      size?: NodeSize;
+      parentId?: CanvasNodeId | null;
+      skipAutoLayout?: boolean;
+    }
   | { type: 'SET_NODE_SELECTION'; nodeIds: CanvasNodeId[] }
   | { type: 'SET_EXPANDED_NODE'; nodeId: CanvasNodeId | null }
   | { type: 'SET_NODE_LOCKED'; items: CanvasNodeLockUpdate[] };

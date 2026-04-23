@@ -98,8 +98,8 @@ export default function resolvePasteClipboard(
     clonedData.label = label;
     clonedData.origin = { type: 'user-pasted' };
 
-    // Reset prompt node runtime state so the copy starts fresh.
-    if (clonedData.type === 'prompt') {
+    // Reset question node runtime state so the copy starts fresh.
+    if (clonedData.type === 'question') {
       clonedData.status = 'idle';
       delete clonedData.runAt;
       delete clonedData.threadId;

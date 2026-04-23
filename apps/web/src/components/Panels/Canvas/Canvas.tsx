@@ -28,7 +28,7 @@ import {
 } from '@/handler/canvasCommand/nodeInputBuilders';
 import { useCanvasShortcuts } from '@/hooks/useCanvasShortcuts';
 import { useIsTouch } from '@/hooks/useInputMode';
-import { usePromptRunner } from '@/hooks/usePromptRunner';
+import { useQuestionRunner } from '@/hooks/useQuestionRunner';
 
 import { NodeToolbar } from './CanvasToolbar.tsx';
 import { EdgeStyleToolbar } from './EdgeStyleToolbar.tsx';
@@ -43,7 +43,7 @@ import {
 } from '../../../utils/io/dragDrop.ts';
 import { looksLikeUrl } from '../../../utils/io/media.ts';
 import { FrameNode } from '../../Nodes/frame/FrameNode.tsx';
-import { PromptNode } from '../../Nodes/prompt/PromptNode.tsx';
+import { QuestionNode } from '../../Nodes/question/QuestionNode.tsx';
 import { SketchNode } from '../../Nodes/sketch/SketchNode.tsx';
 import { SketchOverlay } from '../../Nodes/sketch/SketchOverlay.tsx';
 import { VideoNode } from '../../Nodes/video/VideoNode.tsx';
@@ -61,7 +61,7 @@ const nodeTypes = {
   pdf: PDFNode,
   frame: FrameNode,
   sketch: SketchNode,
-  prompt: PromptNode,
+  question: QuestionNode,
 } as const;
 
 const VALID_NODE_TYPES = Object.keys(nodeTypes);
@@ -185,8 +185,8 @@ export const Canvas: React.FC<CanvasProps> = ({
 
   const isTouch = useIsTouch();
 
-  // Run prompt nodes when their timers expire.
-  usePromptRunner();
+  // Run question nodes when their timers expire.
+  useQuestionRunner();
 
   // When a connection drag ends without landing on a handle, check if the
   // pointer is over a node element and create the connection anyway.
@@ -259,7 +259,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [pendingNodeType, resetFrameDrag]);
 
-  // Handle click-to-place for note, text, and prompt
+  // Handle click-to-place for note, text, and question
   const handlePaneClick = useCallback(
     (event: React.MouseEvent) => {
       if (
@@ -277,7 +277,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       });
 
       const data: Record<string, unknown> =
-        pendingNodeType === 'prompt'
+        pendingNodeType === 'question'
           ? {
               input: { kind: 'text', content: '' },
               status: 'idle',
@@ -467,7 +467,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         pendingNodeType === 'text' && 'canvas-pending-text',
         pendingNodeType === 'frame' && 'canvas-pending-frame',
         pendingNodeType === 'sketch' && 'cursor-crosshair',
-        pendingNodeType === 'prompt' && 'canvas-pending-prompt',
+        pendingNodeType === 'question' && 'canvas-pending-question',
       )}
       onMouseDown={handleFrameMouseDown}
       onMouseMove={handleFrameMouseMove}

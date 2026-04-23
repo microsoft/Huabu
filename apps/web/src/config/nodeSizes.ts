@@ -11,7 +11,7 @@ const DEFAULT_SIZES: Record<string, NodeSize> = {
   video: { width: 400, height: 300 },
   image: { width: 400, height: 300 },
   frame: { width: 400, height: 300 },
-  prompt: { width: 280, height: 160 },
+  question: { width: 280, height: 160 },
 };
 
 /**

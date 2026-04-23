@@ -1,7 +1,7 @@
 /**
  * Pure text measurement utilities using pretext.
  *
- * Shared by TextNode and PromptNode for auto-sizing and font-fill behaviour.
+ * Shared by TextNode and QuestionNode for auto-sizing and font-fill behaviour.
  * No DOM access — all arithmetic is done via canvas text-metrics.
  */
 

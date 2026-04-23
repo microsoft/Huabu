@@ -20,7 +20,7 @@ export type CanvasNodeType =
   | 'web'
   | 'frame'
   | 'sketch'
-  | 'prompt';
+  | 'question';
 
 /**
  * Discriminated union describing how a canvas node was created.
@@ -259,10 +259,10 @@ export interface SketchNodeData extends BaseNodeData {
   /** Stroke color (hex) */
   strokeColor?: string;
 }
-// ==================== Prompt Node ====================
+// ==================== Question Node ====================
 
-/** Execution status of a prompt node. */
-export type PromptNodeStatus =
+/** Execution status of a question node. */
+export type QuestionNodeStatus =
   | 'idle'
   | 'pending'
   | 'running'
@@ -270,18 +270,18 @@ export type PromptNodeStatus =
   | 'error';
 
 /**
- * Extensible input union for prompt nodes.
+ * Extensible input union for question nodes.
  * Discriminated on `kind` — add new modalities (sketch, voice, etc.) here.
  */
-export type PromptInput = { kind: 'text'; content: string };
+export type QuestionInput = { kind: 'text'; content: string };
 
-/** Prompt node: AI interaction medium embedded on canvas. */
-export interface PromptNodeData extends BaseNodeData {
-  type: 'prompt';
+/** Question node: AI interaction medium embedded on canvas. */
+export interface QuestionNodeData extends BaseNodeData {
+  type: 'question';
   /** User's input (extensible discriminated union). */
-  input: PromptInput;
+  input: QuestionInput;
   /** Current execution status. */
-  status: PromptNodeStatus;
+  status: QuestionNodeStatus;
   /** Epoch ms when auto-run triggers. Transient — not persisted. */
   runAt?: number;
   /** Per-node auto-run delay override (seconds). */
@@ -309,7 +309,7 @@ export type NodeData =
   | ImageNodeData
   | FrameNodeData
   | SketchNodeData
-  | PromptNodeData;
+  | QuestionNodeData;
 
 // ==================== Type Guards ====================
 
@@ -346,6 +346,6 @@ export function hasSourceId(
   return 'sourceId' in data;
 }
 
-export function isPromptNode(data: NodeData): data is PromptNodeData {
-  return data.type === 'prompt';
+export function isQuestionNode(data: NodeData): data is QuestionNodeData {
+  return data.type === 'question';
 }

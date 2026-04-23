@@ -21,19 +21,19 @@ import { usePanelStore } from '@/store/panelStore.ts';
 
 import { NodeWrapper } from '../NodeWrapper';
 
-import type { CanvasPromptNodeData } from '../types';
+import type { CanvasQuestionNodeData } from '../types';
 
-export type PromptNodeType = Node<CanvasPromptNodeData, 'prompt'>;
+export type QuestionNodeType = Node<CanvasQuestionNodeData, 'question'>;
 
 /** Padding inside the node (px). */
 const NODE_PADDING = 12;
 
-/** Font family for the prompt sticky-note style. */
-const PROMPT_FONT_FAMILY =
+/** Font family for the question sticky-note style. */
+const QUESTION_FONT_FAMILY =
   '"Comic Sans MS", STXingkai, KaiTi, "Kaiti SC", cursive';
 
-export const PromptNode = memo(
-  ({ id, data, selected, width, height }: NodeProps<PromptNodeType>) => {
+export const QuestionNode = memo(
+  ({ id, data, selected, width, height }: NodeProps<QuestionNodeType>) => {
     const updateNodeData = useCanvasStore((state) => state.updateNodeData);
     const patchNodeSilent = useCanvasStore((state) => state.patchNodeSilent);
     const [isEditing, setIsEditing] = useState(false);
@@ -74,7 +74,7 @@ export const PromptNode = memo(
     // ------------------------------------------------------------------
     const fontOpts = useMemo(
       () => ({
-        fontFamily: PROMPT_FONT_FAMILY,
+        fontFamily: QUESTION_FONT_FAMILY,
         fontWeight: 'normal',
         fontStyle: 'normal',
         lineHeight: 1.5,
@@ -105,7 +105,7 @@ export const PromptNode = memo(
     const viewed = data.viewed ?? false;
 
     /** Sticky-note warm background colour (design token). */
-    const STICKY_BG = 'var(--prompt-bg)';
+    const STICKY_BG = 'var(--question-bg)';
 
     // ------------------------------------------------------------------
     // Countdown seconds for pending label
@@ -130,14 +130,14 @@ export const PromptNode = memo(
     const hasRun = status === 'done' || status === 'error';
 
     // ------------------------------------------------------------------
-    // Open prompt thread in chat panel
+    // Open question thread in chat panel
     // ------------------------------------------------------------------
-    const openPromptThread = useChatStore((s) => s.openPromptThread);
+    const openQuestionThread = useChatStore((s) => s.openQuestionThread);
     const requestOpenRightPanel = usePanelStore((s) => s.requestOpenRightPanel);
 
     const openInChat = useCallback(() => {
       if (!data.threadId) return;
-      openPromptThread(id, data.threadId);
+      openQuestionThread(id, data.threadId);
       requestOpenRightPanel();
       // Mark as viewed (persisted via autosave, no undo entry).
       if (!data.viewed) {
@@ -147,7 +147,7 @@ export const PromptNode = memo(
       id,
       data.threadId,
       data.viewed,
-      openPromptThread,
+      openQuestionThread,
       requestOpenRightPanel,
       patchNodeSilent,
     ]);
@@ -178,10 +178,10 @@ export const PromptNode = memo(
     // ------------------------------------------------------------------
     // Toolbar
     // ------------------------------------------------------------------
-    const promptToolbar = useMemo(
+    const questionToolbar = useMemo(
       () => (
         <>
-          {/* Edit prompt (before execution) or View conversation (after execution) */}
+          {/* Edit question (before execution) or View conversation (after execution) */}
           {hasRun && data.threadId ? (
             <FloatingToolbar.ActionButton
               title="View conversation"
@@ -191,7 +191,7 @@ export const PromptNode = memo(
             </FloatingToolbar.ActionButton>
           ) : status !== 'running' && status !== 'pending' ? (
             <FloatingToolbar.ActionButton
-              title="Edit prompt"
+              title="Edit question"
               onClick={() => {
                 processingRef.current?.abort();
                 setIsEditing(true);
@@ -266,17 +266,17 @@ export const PromptNode = memo(
       <NodeWrapper
         id={id}
         data={{ ...data, style: { ...data.style, backgroundColor: STICKY_BG } }}
-        type={'prompt'}
+        type={'question'}
         selected={selected}
-        toolbar={promptToolbar}
+        toolbar={questionToolbar}
         keepAspectRatio={false}
         allowOverflow
         onResizeStart={handleResizeStart}
         onResize={handleResize}
         onResizeEnd={handleResizeEnd}
         className={clsx(
-          'prompt-sticky rounded-2xl transition-all duration-200',
-          isDoneUnviewed && 'prompt-node-done-unviewed',
+          'question-sticky rounded-2xl transition-all duration-200',
+          isDoneUnviewed && 'question-node-done-unviewed',
         )}
       >
         {/* Sticky-note content */}
@@ -334,12 +334,12 @@ export const PromptNode = memo(
 
               const badgeAnimation =
                 status === 'error'
-                  ? 'prompt-badge-shake 0.5s ease-in-out'
+                  ? 'question-badge-shake 0.5s ease-in-out'
                   : undefined;
 
               const iconAnimation =
                 status === 'running'
-                  ? 'prompt-icon-spin 4s linear infinite'
+                  ? 'question-icon-spin 4s linear infinite'
                   : undefined;
 
               const badge = (
@@ -393,8 +393,8 @@ export const PromptNode = memo(
             style={{
               padding: 0,
               border: 'none',
-              color: 'var(--prompt-fg)',
-              fontFamily: PROMPT_FONT_FAMILY,
+              color: 'var(--question-fg)',
+              fontFamily: QUESTION_FONT_FAMILY,
               fontWeight: 'normal',
               fontSize: `${effectiveFontSize}px`,
               lineHeight: 1.5,

@@ -146,6 +146,10 @@ export function executeCanvasCommands(
         if (frame?.parentId) {
           agentAffectedFrameIds.add(frame.parentId);
         }
+      } else if (cmd.type === 'CREATE_QUESTION') {
+        if (cmd.parentId) {
+          agentAffectedFrameIds.add(cmd.parentId as string);
+        }
       }
     }
 

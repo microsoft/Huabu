@@ -418,6 +418,13 @@ async function executeCanvasCommands(
         }),
       };
     }
+    if (cmd.type === 'CREATE_QUESTION') {
+      const raw = cmd as Record<string, unknown>;
+      return {
+        ...raw,
+        origin,
+      };
+    }
     return cmd;
   });
 

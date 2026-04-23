@@ -1,5 +1,5 @@
 /**
- * Hook that encapsulates text auto-sizing logic shared by TextNode and PromptNode.
+ * Hook that encapsulates text auto-sizing logic shared by TextNode and QuestionNode.
  *
  * Two modes:
  *   - Auto mode (no fixed size): node shrink-wraps to content at baseFontSize

@@ -42,9 +42,9 @@ export type {
   ImageNodeData,
   FrameNodeData,
   SketchNodeData,
-  PromptNodeData,
-  PromptNodeStatus,
-  PromptInput,
+  QuestionNodeData,
+  QuestionNodeStatus,
+  QuestionInput,
   NodeData,
 } from './node.js';
 
@@ -54,7 +54,7 @@ export {
   isMediaNode,
   isFrameNode,
   isSketchNode,
-  isPromptNode,
+  isQuestionNode,
   hasSourceId,
   normalizeOrigin,
 } from './node.js';
