@@ -28,44 +28,37 @@ Return **only** a JSON array (no markdown fences, no commentary). Each element:
 Sorted by confidence descending.`;
 
 /**
- * System prompt for sketch-based intent recognition.
- * The model receives only a screenshot and sketch node IDs — no text context.
+ * System prompt for annotation-based intent recognition.
+ * The model receives only a screenshot and annotation node IDs — no text context.
  */
-export const SKETCH_INTENT_SYSTEM_PROMPT = `You are a sketch-recognition engine for a canvas app.
+export const ANNOTATION_INTENT_SYSTEM_PROMPT = `You recognize freehand annotations on a canvas screenshot.
 
-You receive a screenshot of the canvas. Users draw freehand sketch strokes (thin black marks) alongside typed nodes (each labeled with its ID badge). Your job: figure out what the sketch strokes mean, then tell the system what canvas operations to perform.
+Red strokes with a red tag (e.g. "✏ node-abc12345") = user drawings. The tag shows a truncated annotation node ID. White badges with black text above other nodes = node IDs.
 
-Sketch nodes are ephemeral — they are automatically deleted after recognition. Do NOT mention deleting sketch nodes in your output. Focus only on the operation the user intended.
+## Decision tree (check in order)
 
-## Recognizable sketch patterns → operations
+1. **Stroke spans two nodes** → edge
+   Output: { "label": "Connect [nodeA ID] to [nodeB ID]" }
 
-1. **Question mark (?) drawn near a node** → Ask a question.
-   The user drew a "?" on or beside a node, indicating they want to ask something about that content. Infer a question based on what the nearby node contains.
-   Output: { "label": "Ask: [inferred question about the nearby node's content]" }
+2. **✕ or scribble covers a node** → delete
+   Output: { "label": "Delete [node ID]" }
 
-2. **Ellipsis (…  / three dots / "...") drawn near a node** → Expand or supplement.
-   The user drew "..." on or beside a node, indicating they want more detail or the content to be expanded. Infer what information should be supplemented based on the nearby node's content.
-   Output: { "label": "Expand: [describe what to supplement based on nearby content]" }
+3. **Circle around multiple nodes** → group
+   Output: { "label": "Group [node IDs] into frame" }
 
-3. **Cross (✕) / scribble over a node** → Delete node.
-   The sketch crosses out or scribbles over a node. Delete the target node.
-   Output: { "label": "Delete [node label]" }
+4. **Three dots / ellipsis (…) near a node** → expand
+   Output: { "label": "Expand: [what to supplement based on nearby node]" }
 
-4. **Line / arrow between two nodes** → Create an edge.
-   The sketch connects Node A to Node B. Create an edge from A to B.
-   Output: { "label": "Connect [A label] to [B label]" }
+5. **Any other mark (?, dot, squiggle, line near one node, etc.)** → question node
+   Read the nearby node's label. Create a question about it.
+   Include the annotation node ID from the red tag so the system knows WHERE to place the question.
+   Output: { "label": "CREATE_QUESTION at [annotation node ID from red tag] with content: [question about the nearby node]" }
 
-5. **Anything else** → Describe your best guess as a short action.
-   Output: { "label": "short action description" }
+Step 5 is the default. If unsure, always pick step 5.
 
-## Important
-- Do NOT include "delete sketch" in your output — sketch nodes are already cleaned up automatically.
-- Node IDs appear as badges in the screenshot. Use the REAL labels you see.
-- Focus on spatial relationships: where the sketch starts, ends, and what it overlaps.
-- For "?" and "..." patterns, identify the nearest node and infer the intent from its content.
-- Return exactly ONE intent.
-- Be decisive — always return your best guess.
+For step 5:
+- The annotation node ID is the one shown in the RED tag (e.g. node-abc12345). Include it exactly.
+- The question must reference the nearby non-annotation node by label and ask something specific.
 
-## Output format
-Return **only** a JSON array with one element (no markdown fences, no commentary):
-[{ "label": "short actionable description" }]`;
+Return ONLY a JSON array with one object. No markdown, no explanation.
+[{ "label": "..." }]`;

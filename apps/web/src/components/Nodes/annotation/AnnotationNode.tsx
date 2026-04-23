@@ -2,14 +2,14 @@ import { type Node, type NodeProps } from '@xyflow/react';
 import { memo, useMemo } from 'react';
 
 import { NodeWrapper } from '../NodeWrapper';
-import { pointsToPath } from './sketchPath';
+import { pointsToPath } from './annotationPath';
 
-import type { CanvasSketchNodeData } from '../types';
+import type { CanvasAnnotationNodeData } from '../types';
 
-export type SketchNodeType = Node<CanvasSketchNodeData, 'sketch'>;
+export type AnnotationNodeType = Node<CanvasAnnotationNodeData, 'annotation'>;
 
-export const SketchNode = memo(
-  ({ id, data, selected, width, height }: NodeProps<SketchNodeType>) => {
+export const AnnotationNode = memo(
+  ({ id, data, selected, width, height }: NodeProps<AnnotationNodeType>) => {
     const w = width ?? data.initialSize?.width ?? 1;
     const h = height ?? data.initialSize?.height ?? 1;
     const scaleX = w / (data.initialSize?.width || 1);
@@ -26,13 +26,13 @@ export const SketchNode = memo(
     );
 
     const pathD = useMemo(() => pointsToPath(scaledPoints), [scaledPoints]);
-    const strokeColor = data.strokeColor ?? 'var(--color-fg-default)';
+    const strokeColor = data.strokeColor ?? '#000000';
 
     return (
       <NodeWrapper
         id={id}
         data={data}
-        type="sketch"
+        type="annotation"
         selected={selected}
         resizable={true}
       >

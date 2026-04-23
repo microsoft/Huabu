@@ -4,7 +4,7 @@ import { useCallback, useRef, useState } from 'react';
 import useCanvasStore from '@/store/canvasStore';
 import { useIntentStore } from '@/store/intentStore';
 
-import { pointsToPath, SKETCH_OPTIONS } from './sketchPath';
+import { pointsToPath, ANNOTATION_OPTIONS } from './annotationPath';
 
 import type { ReactFlowInstance } from '@xyflow/react';
 /**
@@ -35,7 +35,7 @@ function processPoints(
   }
 
   // Add stroke thickness padding
-  const pad = SKETCH_OPTIONS.size * 0.5;
+  const pad = ANNOTATION_OPTIONS.size * 0.5;
   x1 -= pad;
   y1 -= pad;
   x2 += pad;
@@ -61,16 +61,16 @@ function processPoints(
 
 /**
  * Full-screen overlay that captures pointer events for freehand drawing.
- * Renders a live SVG preview of the current stroke, then creates a
- * sketch node on pointer-up.
+ * Renders a live SVG preview of the current stroke, then creates an
+ * annotation node on pointer-up.
  */
-export function SketchOverlay({
+export function AnnotationOverlay({
   rfInstance,
 }: {
   rfInstance: ReactFlowInstance | null;
 }) {
   const addNode = useCanvasStore((s) => s.addNode);
-  const onSketchCreated = useIntentStore((s) => s.onSketchCreated);
+  const onAnnotationCreated = useIntentStore((s) => s.onAnnotationCreated);
 
   // Two parallel arrays:
   // - screenPtsRef: raw clientX/clientY for screenToFlowPosition (node creation)
@@ -130,7 +130,7 @@ export function SketchOverlay({
 
       addNode({
         id: nodeId,
-        nodeType: 'sketch',
+        nodeType: 'annotation',
         // placementPoint is treated as the CENTER of the node by the intent
         // system, so offset by half the bounding box dimensions.
         placementPoint: {
@@ -139,7 +139,7 @@ export function SketchOverlay({
         },
         size: { width: result.width, height: result.height },
         data: {
-          type: 'sketch',
+          type: 'annotation',
           points: result.points,
           initialSize: result.initialSize,
           origin: { type: 'user-created' },
@@ -148,12 +148,12 @@ export function SketchOverlay({
       });
 
       // Notify the recognition store so the 5 s idle timer starts/resets
-      onSketchCreated(nodeId);
+      onAnnotationCreated(nodeId);
 
       screenPtsRef.current = [];
       setPoints([]);
     },
-    [rfInstance, addNode, onSketchCreated],
+    [rfInstance, addNode, onAnnotationCreated],
   );
 
   const zoom = rfInstance?.getViewport().zoom ?? 1;
@@ -168,7 +168,7 @@ export function SketchOverlay({
     >
       <svg className="h-full w-full">
         {points.length > 0 && (
-          <path d={pointsToPath(points, zoom)} fill="var(--color-fg-default)" />
+          <path d={pointsToPath(points, zoom)} fill="#000000" />
         )}
       </svg>
     </div>

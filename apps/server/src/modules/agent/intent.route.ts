@@ -3,14 +3,14 @@
  *
  * POST /api/intent/recognize
  * POST /api/intent/recognize-stream
- * POST /api/intent/recognize-sketch-stream
+ * POST /api/intent/recognize-annotation-stream
  * POST /api/intent/episode
  */
 
 import {
   recognizeIntent,
   recognizeIntentStream,
-  recognizeSketchIntentStream,
+  recognizeAnnotationIntentStream,
   logIntentEpisode,
 } from './intent.service.js';
 
@@ -18,7 +18,7 @@ import type {
   IntentRequest,
   IntentResponse,
   IntentEpisodeRequest,
-  SketchIntentRequest,
+  AnnotationIntentRequest,
 } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
@@ -82,11 +82,11 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     },
   );
 
-  // Sketch intent recognition — same SSE pattern, different prompt, auto-executed
-  fastify.post<{ Body: SketchIntentRequest }>(
-    '/recognize-sketch-stream',
+  // Annotation intent recognition — same SSE pattern, different prompt, auto-executed
+  fastify.post<{ Body: AnnotationIntentRequest }>(
+    '/recognize-annotation-stream',
     async (request, reply) => {
-      const { screenshot, sketchNodeIds } = request.body;
+      const { screenshot, annotationNodeIds } = request.body;
 
       if (!screenshot) {
         return reply
@@ -95,13 +95,13 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       }
 
       if (
-        !sketchNodeIds ||
-        !Array.isArray(sketchNodeIds) ||
-        sketchNodeIds.length === 0
+        !annotationNodeIds ||
+        !Array.isArray(annotationNodeIds) ||
+        annotationNodeIds.length === 0
       ) {
-        return reply
-          .code(400)
-          .send({ error: 'sketchNodeIds must be a non-empty array' } as never);
+        return reply.code(400).send({
+          error: 'annotationNodeIds must be a non-empty array',
+        } as never);
       }
 
       reply.hijack();
@@ -118,16 +118,18 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       reply.raw.write(': ok\n\n');
 
       try {
-        for await (const candidate of recognizeSketchIntentStream(screenshot)) {
+        for await (const candidate of recognizeAnnotationIntentStream(
+          screenshot,
+        )) {
           reply.raw.write(
             `event: candidate\ndata: ${JSON.stringify(candidate)}\n\n`,
           );
         }
         reply.raw.write('event: done\ndata: {}\n\n');
       } catch (err) {
-        request.log.error(err, 'Sketch intent streaming failed');
+        request.log.error(err, 'Annotation intent streaming failed');
         reply.raw.write(
-          `event: error\ndata: ${JSON.stringify({ error: 'Sketch intent recognition failed' })}\n\n`,
+          `event: error\ndata: ${JSON.stringify({ error: 'Annotation intent recognition failed' })}\n\n`,
         );
       }
 

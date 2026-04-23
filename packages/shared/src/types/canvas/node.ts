@@ -19,7 +19,7 @@ export type CanvasNodeType =
   | 'video'
   | 'web'
   | 'frame'
-  | 'sketch'
+  | 'annotation'
   | 'question';
 
 /**
@@ -35,8 +35,8 @@ export type NodeOrigin =
   | { type: 'user-from-library' }
   | { type: 'user-from-chat'; threadId?: string }
   | { type: 'user-excerpt'; sourceId?: string }
-  // Sketch recognition
-  | { type: 'sketch-recognized' };
+  // Annotation recognition
+  | { type: 'annotation-recognized' };
 
 /** All possible values of `NodeOrigin['type']`. */
 export type NodeOriginType = NodeOrigin['type'];
@@ -249,9 +249,9 @@ export interface FrameNodeData extends BaseNodeData {
   type: 'frame';
 }
 
-/** Sketch node: freehand drawing stored as pressure-sensitive points */
-export interface SketchNodeData extends BaseNodeData {
-  type: 'sketch';
+/** Annotation node: freehand drawing stored as pressure-sensitive points */
+export interface AnnotationNodeData extends BaseNodeData {
+  type: 'annotation';
   /** Array of [x, y, pressure] points in local node coordinates */
   points: number[][];
   /** Original bounding box size when the stroke was created */
@@ -271,7 +271,7 @@ export type QuestionNodeStatus =
 
 /**
  * Extensible input union for question nodes.
- * Discriminated on `kind` — add new modalities (sketch, voice, etc.) here.
+ * Discriminated on `kind` — add new modalities (annotation, voice, etc.) here.
  */
 export type QuestionInput = { kind: 'text'; content: string };
 
@@ -308,7 +308,7 @@ export type NodeData =
   | VideoNodeData
   | ImageNodeData
   | FrameNodeData
-  | SketchNodeData
+  | AnnotationNodeData
   | QuestionNodeData;
 
 // ==================== Type Guards ====================
@@ -331,8 +331,8 @@ export function isFrameNode(data: NodeData): data is FrameNodeData {
   return data.type === 'frame';
 }
 
-export function isSketchNode(data: NodeData): data is SketchNodeData {
-  return data.type === 'sketch';
+export function isAnnotationNode(data: NodeData): data is AnnotationNodeData {
+  return data.type === 'annotation';
 }
 
 export function hasSourceId(

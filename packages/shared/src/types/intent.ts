@@ -49,17 +49,17 @@ export interface IntentResponse {
   intentCandidates: IntentCandidate[];
 }
 
-// ==================== Sketch Recognition ====================
+// ==================== Annotation Recognition ====================
 
 /**
- * Request body for sketch intent recognition.
+ * Request body for annotation intent recognition.
  * Only requires a screenshot — the vision model analyzes it visually.
  */
-export interface SketchIntentRequest {
+export interface AnnotationIntentRequest {
   /** Base64 PNG screenshot of the canvas (no data: prefix). */
   screenshot: string;
-  /** IDs of the sketch nodes to analyze. */
-  sketchNodeIds: string[];
+  /** IDs of the annotation nodes to analyze. */
+  annotationNodeIds: string[];
 }
 
 /**

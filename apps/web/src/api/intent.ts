@@ -99,29 +99,29 @@ export async function logIntentEpisode(
 }
 
 /**
- * Stream sketch intent recognition via SSE.
- * Same pattern as `recognizeIntentStream` but uses a sketch-specific prompt
+ * Stream annotation intent recognition via SSE.
+ * Same pattern as `recognizeIntentStream` but uses an annotation-specific prompt
  * and only requires a screenshot.
  */
-export async function recognizeSketchIntentStream(
+export async function recognizeAnnotationIntentStream(
   screenshot: string,
-  sketchNodeIds: string[],
+  annotationNodeIds: string[],
   onCandidate: (candidate: IntentCandidate) => void,
   signal?: AbortSignal,
 ): Promise<void> {
   const response = await fetch(
-    `${API_CONFIG.API_URL}/intent/recognize-sketch-stream`,
+    `${API_CONFIG.API_URL}/intent/recognize-annotation-stream`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ screenshot, sketchNodeIds }),
+      body: JSON.stringify({ screenshot, annotationNodeIds }),
       signal,
     },
   );
 
   if (!response.ok) {
     throw new Error(
-      `Sketch intent streaming failed: ${response.status} ${response.statusText}`,
+      `Annotation intent streaming failed: ${response.status} ${response.statusText}`,
     );
   }
 
@@ -157,12 +157,14 @@ export async function recognizeSketchIntentStream(
               onCandidate(candidate);
             } catch {
               console.warn(
-                '[intent] Failed to parse sketch streaming candidate',
+                '[intent] Failed to parse annotation streaming candidate',
               );
             }
           } else if (eventType === 'error') {
             const parsed = JSON.parse(data) as { error?: string };
-            throw new Error(parsed.error ?? 'Sketch intent recognition failed');
+            throw new Error(
+              parsed.error ?? 'Annotation intent recognition failed',
+            );
           }
         }
         eventType = '';

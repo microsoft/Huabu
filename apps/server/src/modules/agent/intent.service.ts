@@ -9,7 +9,7 @@ import { llmComplete, llmStream } from './llm.js';
 import { logIntentEpisode as storeEpisode } from './store/intent-store.js';
 import {
   INTENT_SYSTEM_PROMPT,
-  SKETCH_INTENT_SYSTEM_PROMPT,
+  ANNOTATION_INTENT_SYSTEM_PROMPT,
 } from '../../prompt/intent.js';
 
 import type { Context } from '@mariozechner/pi-ai';
@@ -348,14 +348,14 @@ function tryParsePartialCandidates(raw: string): IntentCandidate[] {
 }
 
 // ---------------------------------------------------------------------------
-// Sketch intent recognition
+// Annotation intent recognition
 // ---------------------------------------------------------------------------
 
 /**
- * Recognize sketch intent from a canvas screenshot.
+ * Recognize annotation intent from a canvas screenshot.
  * Returns IntentCandidate[] (typically one) that can be auto-executed.
  */
-export async function* recognizeSketchIntentStream(
+export async function* recognizeAnnotationIntentStream(
   screenshot: string,
 ): AsyncGenerator<IntentCandidate> {
   const base64 = screenshot.startsWith('data:')
@@ -367,7 +367,7 @@ export async function* recognizeSketchIntentStream(
   ];
 
   const piContext: Context = {
-    systemPrompt: SKETCH_INTENT_SYSTEM_PROMPT,
+    systemPrompt: ANNOTATION_INTENT_SYSTEM_PROMPT,
     messages: [
       { role: 'user', content: userContentParts, timestamp: Date.now() },
     ],

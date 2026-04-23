@@ -337,13 +337,15 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             iconOnly
             title="Annotation"
             className={clsx(
-              pendingNodeType === 'sketch' && 'text-info bg-bg-default',
+              pendingNodeType === 'annotation' && 'text-info bg-bg-default',
             )}
             onClick={() =>
-              setPendingNodeType(pendingNodeType === 'sketch' ? null : 'sketch')
+              setPendingNodeType(
+                pendingNodeType === 'annotation' ? null : 'annotation',
+              )
             }
           >
-            <NODE_ICON.sketch />
+            <NODE_ICON.annotation />
           </Button>
           <Button
             variant="ghost"

@@ -42,10 +42,10 @@ import {
   getSedimentPayload,
 } from '../../../utils/io/dragDrop.ts';
 import { looksLikeUrl } from '../../../utils/io/media.ts';
+import { AnnotationNode } from '../../Nodes/annotation/AnnotationNode.tsx';
+import { AnnotationOverlay } from '../../Nodes/annotation/AnnotationOverlay.tsx';
 import { FrameNode } from '../../Nodes/frame/FrameNode.tsx';
 import { QuestionNode } from '../../Nodes/question/QuestionNode.tsx';
-import { SketchNode } from '../../Nodes/sketch/SketchNode.tsx';
-import { SketchOverlay } from '../../Nodes/sketch/SketchOverlay.tsx';
 import { VideoNode } from '../../Nodes/video/VideoNode.tsx';
 import { WebNode } from '../../Nodes/web/WebNode.tsx';
 
@@ -60,7 +60,7 @@ const nodeTypes = {
   web: WebNode,
   pdf: PDFNode,
   frame: FrameNode,
-  sketch: SketchNode,
+  annotation: AnnotationNode,
   question: QuestionNode,
 } as const;
 
@@ -265,7 +265,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       if (
         !pendingNodeType ||
         pendingNodeType === 'frame' ||
-        pendingNodeType === 'sketch'
+        pendingNodeType === 'annotation'
       )
         return;
       const instance = rfInstanceRef.current;
@@ -466,7 +466,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         pendingNodeType === 'note' && 'canvas-pending-note',
         pendingNodeType === 'text' && 'canvas-pending-text',
         pendingNodeType === 'frame' && 'canvas-pending-frame',
-        pendingNodeType === 'sketch' && 'cursor-crosshair',
+        pendingNodeType === 'annotation' && 'cursor-crosshair',
         pendingNodeType === 'question' && 'canvas-pending-question',
       )}
       onMouseDown={handleFrameMouseDown}
@@ -714,9 +714,9 @@ export const Canvas: React.FC<CanvasProps> = ({
 
         <Controls position="bottom-left" />
 
-        {/* Sketch overlay inside ReactFlow so it shares stacking context with Panel */}
-        {pendingNodeType === 'sketch' && (
-          <SketchOverlay rfInstance={rfInstanceRef.current} />
+        {/* Annotation overlay inside ReactFlow so it shares stacking context with Panel */}
+        {pendingNodeType === 'annotation' && (
+          <AnnotationOverlay rfInstance={rfInstanceRef.current} />
         )}
       </ReactFlow>
 

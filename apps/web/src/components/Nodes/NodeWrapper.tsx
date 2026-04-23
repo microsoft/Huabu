@@ -440,16 +440,16 @@ export const NodeWrapper = memo(
           className={cn(
             'group relative flex h-full w-full flex-col rounded transition-all duration-120',
             type !== 'text' &&
-              type !== 'sketch' &&
+              type !== 'annotation' &&
               type !== 'question' &&
               !data.style?.accent &&
               'shadow',
             !data.style?.backgroundColor && 'bg-transparent',
             selected
-              ? type === 'sketch'
+              ? type === 'annotation'
                 ? 'ring-info/50 ring'
                 : 'ring-info ring'
-              : type === 'sketch'
+              : type === 'annotation'
                 ? ''
                 : 'ring-border hover:ring',
             // Accent: colored border + bottom-right shadow

@@ -44,6 +44,12 @@ const createQuestion: CommandDefinition<Cmd> = {
 
     const size = cmd.size ?? getNodeDefaultSize(nodeType);
 
+    // When content is provided, auto-schedule execution after 10s.
+    // This matches the behavior of manually editing a question node and
+    // blurring — useQuestionRunner watches for status==='pending' + runAt.
+    const hasContent = cmd.content.trim().length > 0;
+    const AUTO_RUN_DELAY_S = 10;
+
     const node: Node = {
       id: nodeId,
       type: nodeType,
@@ -52,7 +58,8 @@ const createQuestion: CommandDefinition<Cmd> = {
         type: nodeType,
         label,
         input: { kind: 'text', content: cmd.content },
-        status: 'idle',
+        status: hasContent ? 'pending' : 'idle',
+        ...(hasContent ? { runAt: Date.now() + AUTO_RUN_DELAY_S * 1000 } : {}),
       },
       ...(size
         ? {

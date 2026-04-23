@@ -39,7 +39,7 @@ export const NODE_ICON: Record<CanvasNodeType, LucideIcon> = {
   video: Film,
   web: Globe,
   frame: Frame,
-  sketch: Pencil,
+  annotation: Pencil,
   question: BadgeQuestionMark,
 };
 
@@ -54,7 +54,7 @@ export const NODE_TYPE_LABEL: Record<CanvasNodeType, string> = {
   video: 'Video',
   web: 'Website',
   frame: 'Frame',
-  sketch: 'Sketch',
+  annotation: 'Annotation',
   question: 'Question',
 };
 
