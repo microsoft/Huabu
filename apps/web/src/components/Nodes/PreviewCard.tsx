@@ -111,11 +111,9 @@ export function PreviewCard({
               </span>
             </div>
 
-            {/* Summary — grows to show more when node is resized */}
+            {/* Summary — clamp is applied by callers on the text element */}
             {children ? (
-              <div className="max-h-14 overflow-hidden px-4 pb-2">
-                {children}
-              </div>
+              <div className="overflow-hidden px-4 pb-2">{children}</div>
             ) : null}
           </div>
         </>

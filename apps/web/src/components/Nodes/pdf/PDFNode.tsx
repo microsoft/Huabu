@@ -184,11 +184,9 @@ export const PDFNode = memo(
                 onInfoClick={() => openExpanded(id)}
               >
                 {summary ? (
-                  <div className="min-h-0 flex-1 overflow-hidden">
-                    <p className="text-fg-muted text-base leading-relaxed">
-                      {summary}
-                    </p>
-                  </div>
+                  <p className="text-fg-muted line-clamp-5 text-base leading-relaxed">
+                    {summary}
+                  </p>
                 ) : null}
               </PreviewCard>
             ) : (
