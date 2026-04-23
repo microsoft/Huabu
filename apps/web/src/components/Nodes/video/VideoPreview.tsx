@@ -1,3 +1,5 @@
+import { resolveArtifactUrl } from '@/api/artifact';
+
 import type { PreviewComponentProps } from '../note/NotePreview';
 
 export const VideoPreview = ({ data }: PreviewComponentProps) => {
@@ -8,7 +10,7 @@ export const VideoPreview = ({ data }: PreviewComponentProps) => {
       <div className="bg-surface relative h-full w-full overflow-hidden rounded">
         {src ? (
           <video
-            src={src}
+            src={resolveArtifactUrl(src)}
             controls
             className="nodrag h-full w-full object-contain"
           />

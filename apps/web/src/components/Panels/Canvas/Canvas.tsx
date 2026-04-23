@@ -43,9 +43,9 @@ import {
 } from '../../../utils/io/dragDrop.ts';
 import { looksLikeUrl } from '../../../utils/io/media.ts';
 import { FrameNode } from '../../Nodes/frame/FrameNode.tsx';
+import { PromptNode } from '../../Nodes/prompt/PromptNode.tsx';
 import { SketchNode } from '../../Nodes/sketch/SketchNode.tsx';
 import { SketchOverlay } from '../../Nodes/sketch/SketchOverlay.tsx';
-import { PromptNode } from '../../Nodes/prompt/PromptNode.tsx';
 import { VideoNode } from '../../Nodes/video/VideoNode.tsx';
 import { WebNode } from '../../Nodes/web/WebNode.tsx';
 

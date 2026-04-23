@@ -5,7 +5,7 @@ import { pipeline } from 'node:stream/promises';
 import { createId } from '@sediment/shared';
 import { type FastifyPluginAsync } from 'fastify';
 
-import { getArtifactsDir } from './utils.js';
+import { ARTIFACT_API_PREFIX, getArtifactsDir } from './utils.js';
 
 const artifactRoute: FastifyPluginAsync = async (fastify) => {
   // Upload artifact with type parameter
@@ -48,7 +48,7 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
 
     return {
       id,
-      uri: `/api/artifact/${filename}`,
+      uri: `${ARTIFACT_API_PREFIX}/${filename}`,
       filename: data.filename,
       mimetype: data.mimetype,
     };

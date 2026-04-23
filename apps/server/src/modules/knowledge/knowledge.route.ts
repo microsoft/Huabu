@@ -4,6 +4,7 @@ import path from 'node:path';
 import { type FastifyPluginAsync } from 'fastify';
 
 import { getKnowledgeRepository } from './knowledge.repository.js';
+import { ARTIFACT_API_PREFIX } from '../artifact/utils.js';
 import {
   listCanvases,
   readCanvas,
@@ -38,11 +39,11 @@ function collectSourceCanvasMap(): Map<string, Set<string>> {
 
 /**
  * Delete artifact files referenced by the source's `src` field.
- * Only removes local artifacts (those matching /api/artifact/<filename>).
+ * Only removes local artifacts (those matching {ARTIFACT_API_PREFIX}/<filename>).
  */
 async function deleteSourceArtifacts(src: string | null): Promise<void> {
   if (!src) return;
-  const match = /\/api\/artifact\/([^/?#]+)/.exec(src);
+  const match = new RegExp(`${ARTIFACT_API_PREFIX}/([^/?#]+)`).exec(src);
   if (!match) return;
   const filename = path.basename(match[1]);
   const filePath = path.resolve(getArtifactsDir(), filename);
