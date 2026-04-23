@@ -1,3 +1,5 @@
+import { resolveArtifactUrl } from '@/api/artifact';
+
 import type { PreviewComponentProps } from '../note/NotePreview';
 
 export const ImagePreview = ({ data }: PreviewComponentProps) => {
@@ -8,7 +10,7 @@ export const ImagePreview = ({ data }: PreviewComponentProps) => {
       <div className="bg-surface relative h-full w-full overflow-hidden rounded">
         {src ? (
           <img
-            src={src}
+            src={resolveArtifactUrl(src)}
             alt={src || 'Node image'}
             className="pointer-events-none h-full w-full rounded border-0 object-contain"
           />

@@ -8,6 +8,9 @@ import { IMAGE_MIME_MAP } from '../../utils/mime.js';
  */
 export { getArtifactsDir } from '../workspace.js';
 
+/** Canonical URL prefix for serving artifacts. */
+export const ARTIFACT_API_PREFIX = '/api/artifact';
+
 /**
  * Resolve an artifact image URL to a base64 data URL.
  * Local artifact URLs (e.g. http://localhost:3000/api/artifact/xxx.png) are
@@ -20,8 +23,10 @@ export async function resolveArtifactImageUrl(
 ): Promise<string> {
   if (url.startsWith('data:')) return url;
 
-  // Match local artifact path: .../api/artifact/<filename>
-  const artifactMatch = /\/api\/artifact\/([^/?#]+)/.exec(url);
+  // Match local artifact path: ...{ARTIFACT_API_PREFIX}/<filename>
+  const artifactMatch = new RegExp(`${ARTIFACT_API_PREFIX}/([^/?#]+)`).exec(
+    url,
+  );
   if (artifactMatch) {
     const filename = path.basename(artifactMatch[1]);
     const filePath = path.resolve(artifactsDir, filename);

@@ -2,6 +2,7 @@ import { type Node, type NodeProps } from '@xyflow/react';
 import { Fullscreen } from 'lucide-react';
 import { memo } from 'react';
 
+import { resolveArtifactUrl } from '@/api/artifact';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import useCanvasStore from '@/store/canvasStore.ts';
 
@@ -40,7 +41,7 @@ export const ImageNode = memo(
           <div className="relative h-full w-full overflow-hidden">
             {data?.src ? (
               <img
-                src={data.src}
+                src={resolveArtifactUrl(data.src)}
                 alt={data.label || 'Node image'}
                 className="pointer-events-none h-full w-full rounded border-0 object-contain"
               />
