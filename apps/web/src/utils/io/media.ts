@@ -22,7 +22,7 @@ const PDF_URL_PATTERNS: RegExp[] = [
  */
 export const detectNodeType = (
   filename: string,
-): 'image' | 'pdf' | 'video' | 'web' => {
+): 'image' | 'pdf' | 'video' | 'note' | 'web' => {
   if (PDF_URL_PATTERNS.some((pattern) => pattern.test(filename))) return 'pdf';
 
   const cleanPath = filename.split('?')[0].split('#')[0];
@@ -31,6 +31,7 @@ export const detectNodeType = (
   if (!ext) return 'web';
   if (IMAGE_EXTS.includes(ext)) return 'image';
   if (ext === 'pdf') return 'pdf';
+  if (ext === 'md' || ext === 'markdown') return 'note';
   if (VIDEO_EXTS.includes(ext)) return 'video';
   return 'web';
 };
@@ -40,9 +41,10 @@ export const detectNodeType = (
  */
 export const detectNodeTypeFromMime = (
   mimeType: string,
-): 'image' | 'pdf' | 'video' | 'web' => {
+): 'image' | 'pdf' | 'video' | 'note' | 'web' => {
   if (mimeType.startsWith('image/')) return 'image';
   if (mimeType === 'application/pdf') return 'pdf';
+  if (mimeType === 'text/markdown') return 'note';
   if (mimeType.startsWith('video/')) return 'video';
   return 'web';
 };
