@@ -166,6 +166,10 @@ export const agentApi = {
       canvasId?: string;
       attachments?: ChatAttachment[];
       selectedNodeIds?: string[];
+      intentData?: {
+        candidates: { label: string; description?: string }[];
+        selectedIntent: string;
+      };
       signal?: AbortSignal;
     },
   ): Promise<void> => {
@@ -181,6 +185,7 @@ export const agentApi = {
       selectedNodeIds: options?.selectedNodeIds?.length
         ? options.selectedNodeIds
         : undefined,
+      intentData: options?.intentData,
     };
 
     try {

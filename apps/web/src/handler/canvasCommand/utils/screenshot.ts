@@ -27,6 +27,8 @@ export function toScreenshotDataUrl(screenshot: string): string {
 interface NodeLabel {
   id: string;
   label: string;
+  /** Node type (e.g. 'note', 'annotation'). */
+  nodeType: string;
   /** Position relative to the viewport element, already scaled by CAPTURE_RATIO. */
   x: number;
   y: number;
@@ -55,10 +57,17 @@ function collectNodeLabels(viewport: HTMLElement): NodeLabel[] {
     const nodeId = el.getAttribute('data-id');
     if (!nodeId) continue;
 
+    // React Flow stores the node type as a class: react-flow__node-<type>
+    const typeClass = Array.from(el.classList).find((c) =>
+      c.startsWith('react-flow__node-'),
+    );
+    const nodeType = typeClass?.replace('react-flow__node-', '') ?? 'unknown';
+
     const r = el.getBoundingClientRect();
     result.push({
       id: nodeId,
       label: nodeId,
+      nodeType,
       x: (panX + (r.left - vpRect.left)) * CAPTURE_RATIO,
       y: (panY + (r.top - vpRect.top)) * CAPTURE_RATIO,
       w: r.width * CAPTURE_RATIO,
@@ -289,8 +298,11 @@ function drawAnnotatedImage(
     }
   }
 
-  // --- Pass 2: Draw ID badges on all nodes ---
+  // --- Pass 2: Draw ID badges on all non-annotation nodes ---
+  // Annotation nodes don't get badges — they are drawn in Pass 5.
   for (const nl of labels) {
+    if (nl.nodeType === 'annotation') continue;
+
     const isHighlighted = highlightIds.has(nl.id);
     const text = nl.label;
     const tw = ctx.measureText(text).width;
@@ -299,13 +311,24 @@ function drawAnnotatedImage(
     const bx = nl.x;
     const by = nl.y - bh - offsetY;
 
-    // Red badge for highlighted nodes, black for others
+    // Transparent background with border + black text for normal badges,
+    // red badge for highlighted nodes.
     ctx.beginPath();
     ctx.roundRect(bx, by, bw, bh, radius);
-    ctx.fillStyle = isHighlighted ? ANNOTATION_COLOR : '#000';
-    ctx.fill();
+    if (isHighlighted) {
+      ctx.fillStyle = ANNOTATION_COLOR;
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+    } else {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+      ctx.fill();
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 1.5 * CAPTURE_RATIO;
+      ctx.setLineDash([]);
+      ctx.stroke();
+      ctx.fillStyle = '#000';
+    }
 
-    ctx.fillStyle = '#fff';
     ctx.fillText(text, bx + paddingX, by + paddingY);
   }
 
@@ -348,6 +371,46 @@ function drawAnnotatedImage(
         borderWidth,
       );
     }
+  }
+
+  // --- Pass 5: Redraw annotation nodes in red on the topmost layer ---
+  // Annotation strokes are ephemeral gestures; redrawing them last ensures
+  // they are visually above everything else so the AI can clearly see them.
+  const annotationBorder = 3 * CAPTURE_RATIO;
+  for (const nl of labels) {
+    if (nl.nodeType !== 'annotation') continue;
+
+    // Draw a bold red border around the annotation node area
+    ctx.strokeStyle = '#ef4444';
+    ctx.lineWidth = annotationBorder;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.roundRect(nl.x, nl.y, nl.w, nl.h, radius);
+    ctx.stroke();
+
+    // Draw a small red tag with truncated annotation node ID above the node
+    const tagFont = 11 * CAPTURE_RATIO;
+    ctx.font = `700 ${tagFont}px system-ui, -apple-system, sans-serif`;
+    // Show truncated ID so the AI can reference it (e.g. "\u270f node-a1b2c3d4")
+    const shortId = nl.id.length > 18 ? nl.id.slice(0, 18) : nl.id;
+    const tag = `\u270f ${shortId}`;
+    const tagW = ctx.measureText(tag).width;
+    const tagPx = 4 * CAPTURE_RATIO;
+    const tagPy = 2 * CAPTURE_RATIO;
+    const tagBw = tagW + tagPx * 2;
+    const tagBh = tagFont + tagPy * 2;
+    const tagBx = nl.x;
+    const tagBy = nl.y - tagBh - 2 * CAPTURE_RATIO;
+
+    ctx.beginPath();
+    ctx.roundRect(tagBx, tagBy, tagBw, tagBh, radius);
+    ctx.fillStyle = '#ef4444';
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.fillText(tag, tagBx + tagPx, tagBy + tagPy);
+
+    // Restore font for next loop
+    ctx.font = `600 ${fontSize}px system-ui, -apple-system, sans-serif`;
   }
 
   return canvas.toDataURL('image/png');

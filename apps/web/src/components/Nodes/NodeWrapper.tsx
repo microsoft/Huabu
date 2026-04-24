@@ -397,7 +397,7 @@ export const NodeWrapper = memo(
             })()}
             <div className="bg-border mx-0.5 h-4 w-px" />
             {toolbar}
-            {type !== 'prompt' && (
+            {type !== 'question' && (
               <>
                 <FloatingToolbar.Divider />
                 <FloatingToolbar.ColorPicker
@@ -440,22 +440,22 @@ export const NodeWrapper = memo(
           className={cn(
             'group relative flex h-full w-full flex-col rounded transition-all duration-120',
             type !== 'text' &&
-              type !== 'sketch' &&
-              type !== 'prompt' &&
+              type !== 'annotation' &&
+              type !== 'question' &&
               !data.style?.accent &&
               'shadow',
             !data.style?.backgroundColor && 'bg-transparent',
             selected
-              ? type === 'sketch'
+              ? type === 'annotation'
                 ? 'ring-info/50 ring'
                 : 'ring-info ring'
-              : type === 'sketch'
+              : type === 'annotation'
                 ? ''
                 : 'ring-border hover:ring',
             // Accent: colored border + bottom-right shadow
             data.style?.accent && 'border-2',
-            // Prompt nodes need visible overflow for status badges and progress bar
-            type === 'prompt' && 'overflow-visible',
+            // Question nodes need visible overflow for status badges and progress bar
+            type === 'question' && 'overflow-visible',
             className,
           )}
           style={{
@@ -472,7 +472,7 @@ export const NodeWrapper = memo(
                 boxShadow: `4px 4px 3px 3px ${data.style.accent}`,
               }),
             }),
-            ...(type === 'prompt' && {
+            ...(type === 'question' && {
               borderColor: 'transparent',
             }),
           }}

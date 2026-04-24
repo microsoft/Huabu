@@ -1,17 +1,17 @@
 /**
- * Hook that manages the execution lifecycle of prompt nodes.
+ * Hook that manages the execution lifecycle of question nodes.
  *
- * Watches for prompt nodes with status==='pending' whose runAt has
- * expired, then sends the prompt + spatial context to the existing
+ * Watches for question nodes with status==='pending' whose runAt has
+ * expired, then sends the question + spatial context to the existing
  * /api/agent endpoint and updates node status throughout.
  *
  * Mount once in the Canvas component — it is canvas-scoped.
  */
 
 import {
-  buildPromptNodeContext,
+  buildQuestionNodeContext,
   createId,
-  type PromptSpatialContext,
+  type QuestionSpatialContext,
   type SpatialNode,
 } from '@sediment/shared';
 import { useEffect, useRef } from 'react';
@@ -21,7 +21,7 @@ import useCanvasStore, { getCachedSpatialData } from '@/store/canvasStore';
 
 // ── Serialise spatial context to natural-language text ──────────
 
-function serializeSpatialContext(ctx: PromptSpatialContext): string {
+function serializeSpatialContext(ctx: QuestionSpatialContext): string {
   const sections: string[] = [];
 
   sections.push(`### Spatial Position\n\n${ctx.semanticPosition}`);
@@ -71,7 +71,7 @@ function serializeSpatialContext(ctx: PromptSpatialContext): string {
 
 function buildContextMessage(
   question: string,
-  spatialCtx: PromptSpatialContext,
+  spatialCtx: QuestionSpatialContext,
 ): {
   content: string;
 } {
@@ -79,7 +79,7 @@ function buildContextMessage(
 
   const content = [
     '[SYSTEM Context]',
-    '## Prompt Node Context',
+    '## Question Node Context',
     '',
     `### Your Question\n\n"${question}"`,
     '',
@@ -93,7 +93,7 @@ function buildContextMessage(
 
 const activeRuns = new Map<string, AbortController>();
 
-/** Abort and clean up a prompt node run. */
+/** Abort and clean up a question node run. */
 function abortRun(nodeId: string): void {
   const ac = activeRuns.get(nodeId);
   if (ac) {
@@ -104,7 +104,7 @@ function abortRun(nodeId: string): void {
 
 // ── Core execution function ────────────────────────────────────
 
-async function executePromptNode(nodeId: string): Promise<void> {
+async function executeQuestionNode(nodeId: string): Promise<void> {
   const state = useCanvasStore.getState();
   const node = state.nodes.find((n) => n.id === nodeId);
   if (!node) return;
@@ -137,7 +137,7 @@ async function executePromptNode(nodeId: string): Promise<void> {
     const { spatialNodes } = getCachedSpatialData();
     const target = spatialNodes.find((n: SpatialNode) => n.id === nodeId);
 
-    let spatialCtx: PromptSpatialContext | undefined;
+    let spatialCtx: QuestionSpatialContext | undefined;
     if (target) {
       const edges = state.edges.map((e) => ({
         source: e.source,
@@ -153,7 +153,7 @@ async function executePromptNode(nodeId: string): Promise<void> {
           '';
         if (snippet) snippets.set(n.id, snippet);
       }
-      spatialCtx = buildPromptNodeContext(
+      spatialCtx = buildQuestionNodeContext(
         target,
         spatialNodes,
         edges,
@@ -180,7 +180,7 @@ async function executePromptNode(nodeId: string): Promise<void> {
       {
         onEvent: () => {
           // Events stream in background — we don't render them live.
-          // The conversation is viewed later via openPromptThread.
+          // The conversation is viewed later via openQuestionThread.
         },
         onError: (err) => {
           if (!abortController.signal.aborted) {
@@ -216,17 +216,17 @@ async function executePromptNode(nodeId: string): Promise<void> {
 
 // ── Hook ───────────────────────────────────────────────────────
 
-export function usePromptRunner(): void {
+export function useQuestionRunner(): void {
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
     new Map(),
   );
 
   useEffect(() => {
-    // Track which prompt nodes we already know about to avoid re-scanning
+    // Track which question nodes we already know about to avoid re-scanning
     // unchanged nodes on every unrelated store update.
     const knownStates = new Map<string, { status: string; runAt?: number }>();
 
-    // Subscribe to store changes — watch prompt nodes
+    // Subscribe to store changes — watch question nodes
     const unsub = useCanvasStore.subscribe((state, prev) => {
       const nodes = state.nodes;
       const prevNodes = prev.nodes;
@@ -234,17 +234,17 @@ export function usePromptRunner(): void {
       // Only react if node list reference changed
       if (nodes === prevNodes) return;
 
-      // Build a set of current prompt node IDs for cleanup.
-      const currentPromptIds = new Set<string>();
+      // Build a set of current question node IDs for cleanup.
+      const currentQuestionIds = new Set<string>();
 
       for (const node of nodes) {
         const data = node.data as Record<string, unknown>;
-        if (data.type !== 'prompt') continue;
+        if (data.type !== 'question') continue;
 
         const status = data.status as string;
         const runAt = data.runAt as number | undefined;
         const nodeId = node.id;
-        currentPromptIds.add(nodeId);
+        currentQuestionIds.add(nodeId);
 
         // Skip if nothing changed for this node.
         const prev = knownStates.get(nodeId);
@@ -266,7 +266,7 @@ export function usePromptRunner(): void {
               | Record<string, unknown>
               | undefined;
             if (currentData?.status === 'pending') {
-              void executePromptNode(nodeId);
+              void executeQuestionNode(nodeId);
             }
           }, delay);
           timersRef.current.set(nodeId, timer);
@@ -288,9 +288,9 @@ export function usePromptRunner(): void {
         }
       }
 
-      // Clean up timers for deleted prompt nodes
+      // Clean up timers for deleted question nodes
       for (const nodeId of timersRef.current.keys()) {
-        if (!currentPromptIds.has(nodeId)) {
+        if (!currentQuestionIds.has(nodeId)) {
           const t = timersRef.current.get(nodeId);
           if (t) clearTimeout(t);
           timersRef.current.delete(nodeId);

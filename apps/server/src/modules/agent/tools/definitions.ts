@@ -283,7 +283,7 @@ const AutoLayoutScopeSchema = Type.Union([
 ]);
 
 /**
- * TypeBox schema for the 12 agent-allowed CanvasCommand types.
+ * TypeBox schema for the 13 agent-allowed CanvasCommand types.
  */
 const AgentCanvasCommandSchema = Type.Union([
   Type.Object({
@@ -362,6 +362,26 @@ const AgentCanvasCommandSchema = Type.Union([
       }),
     ),
   }),
+  Type.Object({
+    type: Type.Literal('CREATE_QUESTION'),
+    id: Type.Optional(
+      Type.String({ description: 'Explicit node ID (node-<uuid>)' }),
+    ),
+    content: Type.String({ description: 'The question text content' }),
+    position: Type.Optional(PointSchema),
+    size: Type.Optional(NodeSizeSchema),
+    parentId: Type.Optional(
+      Type.Union([Type.String(), Type.Null()], {
+        description: 'Parent frame id, or null for root',
+      }),
+    ),
+    skipAutoLayout: Type.Optional(
+      Type.Boolean({
+        description:
+          'When true, skip auto-placement so the explicit position is preserved exactly.',
+      }),
+    ),
+  }),
 ]);
 
 // ---- Compile-time sync guard ----
@@ -381,7 +401,8 @@ type SchemaCommandType =
   | 'SET_EDGE_STYLE'
   | 'ALIGN_NODES'
   | 'DISTRIBUTE_NODES'
-  | 'AUTO_LAYOUT';
+  | 'AUTO_LAYOUT'
+  | 'CREATE_QUESTION';
 type _AssertSchemaCoversTS = SchemaCommandType extends AgentCanvasCommandType
   ? AgentCanvasCommandType extends SchemaCommandType
     ? true
@@ -397,6 +418,7 @@ export const canvasCommandsTool: Tool = {
 ## Command types
 
 - CREATE_NODES — create one or more nodes. Set skipAutoLayout: true when you provide explicit positions.
+- CREATE_QUESTION — create a question node on the canvas. The agent uses this to pose follow-up questions or prompts to the user. Provide the question text as content.
 - DELETE_NODES — delete nodes by ID (also removes incident edges)
 - MERGE_NODE_DATA — shallow-merge a patch into node data (label, content, style). Style supports accent (hex color for top border stripe, shared palette with edge strokes) and backgroundColor on all node types; text-related style fields only apply to text nodes.
 - SET_NODE_PARENT — move nodes into/out of a frame

@@ -332,9 +332,9 @@ type RFState = {
   ) => void;
 
   /** The node type awaiting placement on canvas via click or drawing. */
-  pendingNodeType: 'note' | 'text' | 'frame' | 'sketch' | 'prompt' | null;
+  pendingNodeType: 'note' | 'text' | 'frame' | 'annotation' | 'question' | null;
   setPendingNodeType: (
-    type: 'note' | 'text' | 'frame' | 'sketch' | 'prompt' | null,
+    type: 'note' | 'text' | 'frame' | 'annotation' | 'question' | null,
   ) => void;
 
   copySelectedNodes: () => void;

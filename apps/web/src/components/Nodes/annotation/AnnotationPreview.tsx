@@ -1,20 +1,23 @@
 import { memo, useMemo } from 'react';
 
-import { pointsToPath } from './sketchPath';
+import { pointsToPath } from './annotationPath';
 
 import type { PreviewComponentProps } from '../note/NotePreview';
 
 /**
- * Lightweight preview card for sketch nodes (used in search results, etc.).
+ * Lightweight preview card for annotation nodes (used in search results, etc.).
  */
-export const SketchPreview = memo(({ data }: PreviewComponentProps) => {
-  const sketchData = data as {
+export const AnnotationPreview = memo(({ data }: PreviewComponentProps) => {
+  const annotationData = data as {
     points?: number[][];
     initialSize?: { width: number; height: number };
     strokeColor?: string;
   };
-  const points = sketchData.points ?? [];
-  const initialSize = sketchData.initialSize ?? { width: 200, height: 100 };
+  const points = annotationData.points ?? [];
+  const initialSize = annotationData.initialSize ?? {
+    width: 200,
+    height: 100,
+  };
   const pathD = useMemo(() => pointsToPath(points), [points]);
 
   return (
@@ -24,7 +27,7 @@ export const SketchPreview = memo(({ data }: PreviewComponentProps) => {
         className="h-full w-full"
         preserveAspectRatio="xMidYMid meet"
       >
-        <path d={pathD} fill={sketchData.strokeColor ?? 'currentColor'} />
+        <path d={pathD} fill={annotationData.strokeColor ?? 'currentColor'} />
       </svg>
     </div>
   );

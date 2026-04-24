@@ -1,5 +1,6 @@
 import type { ChatAttachment } from './chat.js';
 import type { AgentBaseContext } from './context.js';
+import type { IntentCandidate } from './intent.js';
 
 /**
  * Unified Agent Types
@@ -29,6 +30,11 @@ export interface AgentRequest {
   attachments?: ChatAttachment[];
   /** IDs of canvas nodes selected when the message was sent */
   selectedNodeIds?: string[];
+  /** Intent-select data for operate mode triggered by intent recognition */
+  intentData?: {
+    candidates: IntentCandidate[];
+    selectedIntent: string;
+  };
 }
 
 // ==================== Streaming Events ====================

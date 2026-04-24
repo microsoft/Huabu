@@ -491,10 +491,10 @@ export function buildSpatialSummary(
 }
 
 // ================================================================
-// Prompt Node Context Builder
+// Question Node Context Builder
 // ================================================================
 
-/** A spatial group of nodes near the prompt node. */
+/** A spatial group of nodes near the question node. */
 export interface SpatialGroup {
   /** X offset (px) from reference center to group centroid. Positive = right. */
   dx: number;
@@ -523,7 +523,7 @@ export interface SpatialGroup {
 
 /**
  * A layer of spatial context.
- * - The innermost layer describes the prompt node vs. siblings in its frame.
+ * - The innermost layer describes the question node vs. siblings in its frame.
  * - Each outer layer describes the parent frame vs. its surroundings.
  */
 export interface SpatialLayer {
@@ -537,57 +537,57 @@ export interface SpatialLayer {
   description: string;
 }
 
-/** Full spatial context around a prompt node. */
-export interface PromptSpatialContext {
+/** Full spatial context around a question node. */
+export interface QuestionSpatialContext {
   /**
-   * Nested layers, from innermost (prompt node within its frame)
+   * Nested layers, from innermost (question node within its frame)
    * to outermost (top-level canvas).
    */
   layers: SpatialLayer[];
   /** Flat list of all groups across layers (for backward compat). */
   groups: SpatialGroup[];
-  /** Edges crossing between groups or touching the prompt node. */
+  /** Edges crossing between groups or touching the question node. */
   relevantEdges: Array<{
     source: string;
     target: string;
     sourceLabel?: string;
     targetLabel?: string;
   }>;
-  /** Natural-language description of the prompt node's semantic position. */
+  /** Natural-language description of the question node's semantic position. */
   semanticPosition: string;
 }
 
 /**
- * Build the spatial context for a prompt node.
+ * Build the spatial context for a question node.
  *
  * Uses a nested approach:
- *   1. If the prompt is inside a frame, describe its position relative to
+ *   1. If the question is inside a frame, describe its position relative to
  *      sibling nodes in the same frame.
  *   2. Then describe the frame's position relative to entities outside it
  *      (other frames as wholes, loose nodes).
  *   3. Repeat for grandparent frames if nested.
  */
-export function buildPromptNodeContext(
-  promptNode: SpatialNode,
+export function buildQuestionNodeContext(
+  questionNode: SpatialNode,
   allNodes: SpatialNode[],
   edges: ReadonlyArray<{ source: string; target: string }>,
   nodeSnippets?: Map<string, string>,
   opts?: { maxDistance?: number },
-): PromptSpatialContext {
+): QuestionSpatialContext {
   const nodeById = new Map(allNodes.map((n) => [n.id, n]));
   const maxDistance = opts?.maxDistance ?? 2000;
 
   // All content nodes (non-frame, non-self).
   const contentNodes = allNodes.filter(
-    (n) => n.id !== promptNode.id && n.type !== 'frame',
+    (n) => n.id !== questionNode.id && n.type !== 'frame',
   );
 
   const layers: SpatialLayer[] = [];
   const allGroups: SpatialGroup[] = [];
 
-  // ── Walk from inside-out, starting from the prompt node ──
-  let currentRef: SpatialNode = promptNode;
-  let currentFrameId: string | null | undefined = promptNode.parentId;
+  // ── Walk from inside-out, starting from the question node ──
+  let currentRef: SpatialNode = questionNode;
+  let currentFrameId: string | null | undefined = questionNode.parentId;
 
   while (true) {
     const frame = currentFrameId ? nodeById.get(currentFrameId) : undefined;
@@ -623,7 +623,7 @@ export function buildPromptNodeContext(
       // Collect ancestors to exclude.
       const ancestorIds = new Set<string>();
       {
-        let p: string | null | undefined = promptNode.parentId;
+        let p: string | null | undefined = questionNode.parentId;
         while (p) {
           ancestorIds.add(p);
           p = nodeById.get(p)?.parentId;
@@ -640,11 +640,11 @@ export function buildPromptNodeContext(
         return false;
       };
 
-      // Top-level content nodes: not the prompt, not an ancestor frame,
+      // Top-level content nodes: not the question, not an ancestor frame,
       // not a frame, and not nested inside any ancestor frame.
       const topLevelOuter = allNodes.filter(
         (n) =>
-          n.id !== promptNode.id &&
+          n.id !== questionNode.id &&
           !ancestorIds.has(n.id) &&
           n.type !== 'frame' &&
           !isInsideAncestor(n),
@@ -654,7 +654,7 @@ export function buildPromptNodeContext(
       const outerFrames = allNodes.filter(
         (n) =>
           n.type === 'frame' &&
-          n.id !== promptNode.id &&
+          n.id !== questionNode.id &&
           !ancestorIds.has(n.id) &&
           !isInsideAncestor(n),
       );
@@ -731,9 +731,9 @@ export function buildPromptNodeContext(
     };
   }
 
-  // Find edges that involve nearby nodes or touch the prompt node.
+  // Find edges that involve nearby nodes or touch the question node.
   const nearbyIds = new Set(allGroups.flatMap((g) => g.nodes.map((n) => n.id)));
-  nearbyIds.add(promptNode.id);
+  nearbyIds.add(questionNode.id);
 
   const relevantEdges = edges
     .filter((e) => nearbyIds.has(e.source) && nearbyIds.has(e.target))

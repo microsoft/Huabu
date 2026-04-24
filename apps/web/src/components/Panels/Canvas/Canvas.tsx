@@ -28,7 +28,7 @@ import {
 } from '@/handler/canvasCommand/nodeInputBuilders';
 import { useCanvasShortcuts } from '@/hooks/useCanvasShortcuts';
 import { useIsTouch } from '@/hooks/useInputMode';
-import { usePromptRunner } from '@/hooks/usePromptRunner';
+import { useQuestionRunner } from '@/hooks/useQuestionRunner';
 
 import { NodeToolbar } from './CanvasToolbar.tsx';
 import { EdgeStyleToolbar } from './EdgeStyleToolbar.tsx';
@@ -42,10 +42,10 @@ import {
   getSedimentPayload,
 } from '../../../utils/io/dragDrop.ts';
 import { looksLikeUrl } from '../../../utils/io/media.ts';
+import { AnnotationNode } from '../../Nodes/annotation/AnnotationNode.tsx';
+import { AnnotationOverlay } from '../../Nodes/annotation/AnnotationOverlay.tsx';
 import { FrameNode } from '../../Nodes/frame/FrameNode.tsx';
-import { SketchNode } from '../../Nodes/sketch/SketchNode.tsx';
-import { SketchOverlay } from '../../Nodes/sketch/SketchOverlay.tsx';
-import { PromptNode } from '../../Nodes/prompt/PromptNode.tsx';
+import { QuestionNode } from '../../Nodes/question/QuestionNode.tsx';
 import { VideoNode } from '../../Nodes/video/VideoNode.tsx';
 import { WebNode } from '../../Nodes/web/WebNode.tsx';
 
@@ -60,8 +60,8 @@ const nodeTypes = {
   web: WebNode,
   pdf: PDFNode,
   frame: FrameNode,
-  sketch: SketchNode,
-  prompt: PromptNode,
+  annotation: AnnotationNode,
+  question: QuestionNode,
 } as const;
 
 const VALID_NODE_TYPES = Object.keys(nodeTypes);
@@ -185,8 +185,8 @@ export const Canvas: React.FC<CanvasProps> = ({
 
   const isTouch = useIsTouch();
 
-  // Run prompt nodes when their timers expire.
-  usePromptRunner();
+  // Run question nodes when their timers expire.
+  useQuestionRunner();
 
   // When a connection drag ends without landing on a handle, check if the
   // pointer is over a node element and create the connection anyway.
@@ -259,13 +259,13 @@ export const Canvas: React.FC<CanvasProps> = ({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [pendingNodeType, resetFrameDrag]);
 
-  // Handle click-to-place for note, text, and prompt
+  // Handle click-to-place for note, text, and question
   const handlePaneClick = useCallback(
     (event: React.MouseEvent) => {
       if (
         !pendingNodeType ||
         pendingNodeType === 'frame' ||
-        pendingNodeType === 'sketch'
+        pendingNodeType === 'annotation'
       )
         return;
       const instance = rfInstanceRef.current;
@@ -277,7 +277,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       });
 
       const data: Record<string, unknown> =
-        pendingNodeType === 'prompt'
+        pendingNodeType === 'question'
           ? {
               input: { kind: 'text', content: '' },
               status: 'idle',
@@ -466,8 +466,8 @@ export const Canvas: React.FC<CanvasProps> = ({
         pendingNodeType === 'note' && 'canvas-pending-note',
         pendingNodeType === 'text' && 'canvas-pending-text',
         pendingNodeType === 'frame' && 'canvas-pending-frame',
-        pendingNodeType === 'sketch' && 'cursor-crosshair',
-        pendingNodeType === 'prompt' && 'canvas-pending-prompt',
+        pendingNodeType === 'annotation' && 'cursor-crosshair',
+        pendingNodeType === 'question' && 'canvas-pending-question',
       )}
       onMouseDown={handleFrameMouseDown}
       onMouseMove={handleFrameMouseMove}
@@ -714,9 +714,9 @@ export const Canvas: React.FC<CanvasProps> = ({
 
         <Controls position="bottom-left" />
 
-        {/* Sketch overlay inside ReactFlow so it shares stacking context with Panel */}
-        {pendingNodeType === 'sketch' && (
-          <SketchOverlay rfInstance={rfInstanceRef.current} />
+        {/* Annotation overlay inside ReactFlow so it shares stacking context with Panel */}
+        {pendingNodeType === 'annotation' && (
+          <AnnotationOverlay rfInstance={rfInstanceRef.current} />
         )}
       </ReactFlow>
 

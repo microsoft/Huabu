@@ -41,10 +41,10 @@ export type {
   VideoNodeData,
   ImageNodeData,
   FrameNodeData,
-  SketchNodeData,
-  PromptNodeData,
-  PromptNodeStatus,
-  PromptInput,
+  AnnotationNodeData,
+  QuestionNodeData,
+  QuestionNodeStatus,
+  QuestionInput,
   NodeData,
 } from './node.js';
 
@@ -53,8 +53,8 @@ export {
   isTextNode,
   isMediaNode,
   isFrameNode,
-  isSketchNode,
-  isPromptNode,
+  isAnnotationNode,
+  isQuestionNode,
   hasSourceId,
   normalizeOrigin,
 } from './node.js';

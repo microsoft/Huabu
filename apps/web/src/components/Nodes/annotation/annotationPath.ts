@@ -1,6 +1,6 @@
 import getStroke from 'perfect-freehand';
 
-export const SKETCH_OPTIONS = {
+export const ANNOTATION_OPTIONS = {
   size: 4,
   thinning: 0.5,
   smoothing: 0.5,
@@ -35,8 +35,8 @@ function getSvgPathFromStroke(stroke: number[][]): string {
  */
 export function pointsToPath(points: number[][], zoom = 1): string {
   const stroke = getStroke(points, {
-    ...SKETCH_OPTIONS,
-    size: SKETCH_OPTIONS.size * zoom,
+    ...ANNOTATION_OPTIONS,
+    size: ANNOTATION_OPTIONS.size * zoom,
   });
   return getSvgPathFromStroke(stroke);
 }

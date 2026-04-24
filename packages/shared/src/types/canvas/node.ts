@@ -19,8 +19,8 @@ export type CanvasNodeType =
   | 'video'
   | 'web'
   | 'frame'
-  | 'sketch'
-  | 'prompt';
+  | 'annotation'
+  | 'question';
 
 /**
  * Discriminated union describing how a canvas node was created.
@@ -35,8 +35,8 @@ export type NodeOrigin =
   | { type: 'user-from-library' }
   | { type: 'user-from-chat'; threadId?: string }
   | { type: 'user-excerpt'; sourceId?: string }
-  // Sketch recognition
-  | { type: 'sketch-recognized' };
+  // Annotation recognition
+  | { type: 'annotation-recognized' };
 
 /** All possible values of `NodeOrigin['type']`. */
 export type NodeOriginType = NodeOrigin['type'];
@@ -249,9 +249,9 @@ export interface FrameNodeData extends BaseNodeData {
   type: 'frame';
 }
 
-/** Sketch node: freehand drawing stored as pressure-sensitive points */
-export interface SketchNodeData extends BaseNodeData {
-  type: 'sketch';
+/** Annotation node: freehand drawing stored as pressure-sensitive points */
+export interface AnnotationNodeData extends BaseNodeData {
+  type: 'annotation';
   /** Array of [x, y, pressure] points in local node coordinates */
   points: number[][];
   /** Original bounding box size when the stroke was created */
@@ -259,10 +259,10 @@ export interface SketchNodeData extends BaseNodeData {
   /** Stroke color (hex) */
   strokeColor?: string;
 }
-// ==================== Prompt Node ====================
+// ==================== Question Node ====================
 
-/** Execution status of a prompt node. */
-export type PromptNodeStatus =
+/** Execution status of a question node. */
+export type QuestionNodeStatus =
   | 'idle'
   | 'pending'
   | 'running'
@@ -270,18 +270,18 @@ export type PromptNodeStatus =
   | 'error';
 
 /**
- * Extensible input union for prompt nodes.
- * Discriminated on `kind` — add new modalities (sketch, voice, etc.) here.
+ * Extensible input union for question nodes.
+ * Discriminated on `kind` — add new modalities (annotation, voice, etc.) here.
  */
-export type PromptInput = { kind: 'text'; content: string };
+export type QuestionInput = { kind: 'text'; content: string };
 
-/** Prompt node: AI interaction medium embedded on canvas. */
-export interface PromptNodeData extends BaseNodeData {
-  type: 'prompt';
+/** Question node: AI interaction medium embedded on canvas. */
+export interface QuestionNodeData extends BaseNodeData {
+  type: 'question';
   /** User's input (extensible discriminated union). */
-  input: PromptInput;
+  input: QuestionInput;
   /** Current execution status. */
-  status: PromptNodeStatus;
+  status: QuestionNodeStatus;
   /** Epoch ms when auto-run triggers. Transient — not persisted. */
   runAt?: number;
   /** Per-node auto-run delay override (seconds). */
@@ -308,8 +308,8 @@ export type NodeData =
   | VideoNodeData
   | ImageNodeData
   | FrameNodeData
-  | SketchNodeData
-  | PromptNodeData;
+  | AnnotationNodeData
+  | QuestionNodeData;
 
 // ==================== Type Guards ====================
 
@@ -331,8 +331,8 @@ export function isFrameNode(data: NodeData): data is FrameNodeData {
   return data.type === 'frame';
 }
 
-export function isSketchNode(data: NodeData): data is SketchNodeData {
-  return data.type === 'sketch';
+export function isAnnotationNode(data: NodeData): data is AnnotationNodeData {
+  return data.type === 'annotation';
 }
 
 export function hasSourceId(
@@ -346,6 +346,6 @@ export function hasSourceId(
   return 'sourceId' in data;
 }
 
-export function isPromptNode(data: NodeData): data is PromptNodeData {
-  return data.type === 'prompt';
+export function isQuestionNode(data: NodeData): data is QuestionNodeData {
+  return data.type === 'question';
 }

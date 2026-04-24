@@ -53,7 +53,7 @@ export const TextNode = memo(
     }, [data.content, isEditing]);
 
     // ------------------------------------------------------------------
-    // Text auto-sizing (shared with PromptNode)
+    // Text auto-sizing (shared with QuestionNode)
     // ------------------------------------------------------------------
     const updateStyle = useCallback(
       (newStyle: Partial<NodeStyle>) => {
