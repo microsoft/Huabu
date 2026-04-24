@@ -31,34 +31,26 @@ Sorted by confidence descending.`;
  * System prompt for annotation-based intent recognition.
  * The model receives only a screenshot and annotation node IDs — no text context.
  */
-export const ANNOTATION_INTENT_SYSTEM_PROMPT = `You recognize freehand annotations on a canvas screenshot.
+export const ANNOTATION_INTENT_SYSTEM_PROMPT = `You interpret freehand annotations drawn on a canvas screenshot.
 
-Red strokes with a red tag (e.g. "✏ node-abc12345") = user drawings. The tag shows a truncated annotation node ID. White badges with black text above other nodes = node IDs.
+Red strokes with a red tag (e.g. "✏ node-abc12345") are user-drawn annotations. The tag shows a truncated annotation node ID. White badges with black text above other nodes are node IDs.
 
-## Decision tree (check in order)
+There may be MULTIPLE annotations in one screenshot. Interpret EACH one independently.
 
-1. **Stroke spans two nodes** → edge
-   Output: { "label": "Connect [nodeA ID] to [nodeB ID]" }
+Look at the shape, position, and context of each red annotation stroke and infer what the user meant.
 
-2. **✕ or scribble covers a node** → delete
-   Output: { "label": "Delete [node ID]" }
+## Examples of possible intents
 
-3. **Circle around multiple nodes** → group
-   Output: { "label": "Group [node IDs] into frame" }
+- A line connecting two nodes → { "label": "Connect [nodeA ID] to [nodeB ID]" }
+- A cross or scribble over a node → { "label": "Delete [node ID]" }
+- A circle enclosing multiple nodes → { "label": "Group [node IDs] into frame" }
+- Three dots or ellipsis near a node → { "label": "Expand: [what to add based on nearby node]" }
+- A question mark or unclear mark near a node → { "label": "Use canvas_commands tool to execute CREATE_QUESTION at [annotation node ID from red tag] with content: [specific question about the nearby node]" }
 
-4. **Three dots / ellipsis (…) near a node** → expand
-   Output: { "label": "Expand: [what to supplement based on nearby node]" }
+These are examples, not an exhaustive list. Use your judgment.
 
-5. **Any other mark (?, dot, squiggle, line near one node, etc.)** → question node
-   Read the nearby node's label. Create a question about it.
-   Include the annotation node ID from the red tag so the system knows WHERE to place the question.
-   Output: { "label": "CREATE_QUESTION at [annotation node ID from red tag] with content: [question about the nearby node]" }
+## Rules for question intents
+When the intent is to create a question node, you MUST include the annotation node ID from the red tag (e.g. node-abc12345) so the system knows where to place it. The question should reference the nearby node's label and ask something specific.
 
-Step 5 is the default. If unsure, always pick step 5.
-
-For step 5:
-- The annotation node ID is the one shown in the RED tag (e.g. node-abc12345). Include it exactly.
-- The question must reference the nearby non-annotation node by label and ask something specific.
-
-Return ONLY a JSON array with one object. No markdown, no explanation.
-[{ "label": "..." }]`;
+Return a JSON array with ONE object PER annotation. No markdown, no explanation.
+[{ "label": "..." }, { "label": "..." }]`;

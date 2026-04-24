@@ -43,7 +43,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   // Register intent callback — when user selects an intent in the popover,
   // it's sent here and executed as an agent chat message.
   useEffect(() => {
-    const handleIntentChosen = (
+    const handleIntentChosen = async (
       intent: string,
       candidates: IntentCandidate[],
     ) => {
@@ -53,8 +53,10 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       }
       // Switch mode to operate
       setMode('operate');
-      // Send as operate mode message with intent-select widget
-      void startStream(intent, 'operate', {
+      // Send as operate mode message with intent-select widget.
+      // Return the promise so callers (e.g. annotation recognition) can
+      // await agent completion before cleaning up.
+      await startStream(intent, 'operate', {
         candidates,
         selectedIntent: intent,
       });

@@ -55,15 +55,20 @@ interface IntentState {
    * @internal — not for external use.
    */
   _onIntentChosen:
-    | ((intent: string, candidates: IntentCandidate[]) => void)
+    | ((intent: string, candidates: IntentCandidate[]) => Promise<void> | void)
     | null;
   _setOnIntentChosen: (
-    cb: ((intent: string, candidates: IntentCandidate[]) => void) | null,
+    cb:
+      | ((
+          intent: string,
+          candidates: IntentCandidate[],
+        ) => Promise<void> | void)
+      | null,
   ) => void;
 }
 
 /** Idle time (ms) after the last annotation stroke before triggering recognition. */
-const ANNOTATION_RECOGNITION_DELAY_MS = 5_000;
+const ANNOTATION_RECOGNITION_DELAY_MS = 3_000;
 let _annotationTimer: ReturnType<typeof setTimeout> | null = null;
 
 export const useIntentStore = create<IntentState>()((set, get) => ({
@@ -318,32 +323,39 @@ async function triggerAnnotationRecognition(
       },
     );
 
-    // Always delete annotation nodes — they are ephemeral gestures, not permanent content
-    useCanvasStore.getState().deleteNodes(existingIds);
-
-    // Inject annotation positions into the intent label so the operate
+    // Inject annotation positions into ALL candidate labels so the operate
     // agent can place new nodes (e.g. question) at the drawn location.
     // Replace "CREATE_QUESTION at node-xxx" with "CREATE_QUESTION at position {x,y}".
-    const first = candidates[0];
-    if (first && _onIntentChosen) {
-      let label = first.label;
-      for (const [id, pos] of annotationPositions) {
-        // Match both full and truncated IDs the LLM might return
-        const shortId = id.slice(0, 18);
-        if (label.includes(id)) {
-          label = label.replace(
-            id,
-            `position {x:${Math.round(pos.x)},y:${Math.round(pos.y)}}`,
-          );
-        } else if (label.includes(shortId)) {
-          label = label.replace(
-            shortId,
-            `position {x:${Math.round(pos.x)},y:${Math.round(pos.y)}}`,
-          );
+    if (candidates.length > 0 && _onIntentChosen) {
+      const processedLabels: string[] = [];
+      for (const candidate of candidates) {
+        let label = candidate.label;
+        for (const [id, pos] of annotationPositions) {
+          const shortId = id.slice(0, 18);
+          if (label.includes(id)) {
+            label = label.replace(
+              id,
+              `position {x:${Math.round(pos.x)},y:${Math.round(pos.y)}}`,
+            );
+          } else if (label.includes(shortId)) {
+            label = label.replace(
+              shortId,
+              `position {x:${Math.round(pos.x)},y:${Math.round(pos.y)}}`,
+            );
+          }
         }
+        processedLabels.push(label);
       }
-      _onIntentChosen(label, candidates);
+
+      // Combine all intents into a single message so the operate agent
+      // executes them all in one batch.
+      const combinedLabel = processedLabels.join('\n');
+      // Await the operate agent to fully complete before deleting annotations.
+      await _onIntentChosen(combinedLabel, candidates);
     }
+
+    // Delete annotation nodes LAST — after operate agent has finished execution
+    useCanvasStore.getState().deleteNodes(existingIds);
   } catch (err) {
     console.error('[Annotation Intent Recognition] Failed:', err);
     // Delete annotation nodes even on failure — they should not persist
