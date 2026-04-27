@@ -2,15 +2,14 @@ import { useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/shadcn';
 import { type Node, type NodeProps, useStore } from '@xyflow/react';
 import clsx from 'clsx';
-import { Copy, Check, Fullscreen } from 'lucide-react';
-import { memo, useEffect, useState, useRef } from 'react';
+import { Fullscreen } from 'lucide-react';
+import { memo, useEffect, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
 import { getSharedStyleNodes } from '@/components/BlockNote/shadowStyleCache.ts';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { useNodeScale } from '@/hooks/useNodeScale';
 import useCanvasStore from '@/store/canvasStore';
-import { copyToClipboard } from '@/utils/io/clipboard';
 
 import { loadBlockNoteContent } from '../../BlockNote/blockNoteContent';
 import { NodeWrapper } from '../NodeWrapper';
@@ -21,7 +20,6 @@ export type NoteNodeType = Node<CanvasNoteNodeData, 'note'>;
 
 export const NoteNode = memo(
   ({ id, data, selected }: NodeProps<NoteNodeType>) => {
-    const [copied, setCopied] = useState(false);
     const openExpanded = useCanvasStore((s) => s.openExpanded);
     const scale = useNodeScale(id, 'note');
     const hasFixedHeight = useStore(
@@ -37,14 +35,6 @@ export const NoteNode = memo(
       trailingBlock: false,
     });
 
-    const handleCopy = () => {
-      if (data.content) {
-        copyToClipboard(data.content);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      }
-    };
-
     const NoteToolbar = (
       <FloatingToolbar.Group>
         <FloatingToolbar.ActionButton
@@ -55,10 +45,6 @@ export const NoteNode = memo(
           }}
         >
           <Fullscreen />
-        </FloatingToolbar.ActionButton>
-
-        <FloatingToolbar.ActionButton title="Copy" onClick={handleCopy}>
-          {copied ? <Check /> : <Copy />}
         </FloatingToolbar.ActionButton>
       </FloatingToolbar.Group>
     );
