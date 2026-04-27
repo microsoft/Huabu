@@ -20,7 +20,7 @@ import {
 import useCanvasStore from './canvasStore';
 import {
   recognizeIntentStream,
-  recognizeAnnotationIntentStream,
+  recognizeAnnotationCommands,
   logIntentEpisode,
 } from '../api/intent';
 
@@ -31,6 +31,7 @@ import type {
   ResolvedAnnotationIntent,
 } from '@/utils/annotation';
 import type {
+  CanvasCommand,
   IntentCandidate,
   AnnotationClusterContext,
   AnnotationNearbyNode,
@@ -374,32 +375,27 @@ function toClusterContextPayload(
 
 /**
  * Process a single annotation cluster through Stage 3 (LLM fallback).
+ * Returns directly executable CanvasCommand[].
  */
 async function resolveByLLM(
   ctx: AnnotationContext,
   screenshot: string,
   signal: AbortSignal,
 ): Promise<ResolvedAnnotationIntent | null> {
-  const candidates: IntentCandidate[] = [];
-
-  await recognizeAnnotationIntentStream(
+  const response = await recognizeAnnotationCommands(
     screenshot,
     ctx.cluster.strokeIds,
     toClusterContextPayload(ctx),
-    (candidate) => {
-      candidates.push(candidate);
-    },
     signal,
   );
 
-  if (candidates.length === 0) return null;
+  if (!response.commands || response.commands.length === 0) return null;
 
-  const center = rectCenter(ctx.cluster.bbox);
   return {
-    label: candidates[0].label,
+    commands: response.commands,
+    reasoning: response.reasoning,
     source: 'llm',
     cluster: ctx.cluster,
-    position: { x: Math.round(center.x), y: Math.round(center.y) },
   };
 }
 
@@ -407,7 +403,7 @@ async function triggerAnnotationRecognition(
   get: () => IntentState,
   set: (partial: Partial<IntentState>) => void,
 ): Promise<void> {
-  const { pendingAnnotationIds, _onIntentChosen } = get();
+  const { pendingAnnotationIds } = get();
   if (pendingAnnotationIds.length === 0) return;
 
   // Grab the batch and clear
@@ -466,25 +462,34 @@ async function triggerAnnotationRecognition(
     }
   }
 
+  if (signal.aborted) return;
+
   // All annotation node IDs across all clusters
   const allAnnotationIds = clusters.flatMap((c) => c.strokeIds);
 
-  // Send resolved intents to the operate agent
-  if (resolvedIntents.length > 0 && _onIntentChosen && !signal.aborted) {
-    try {
-      const combinedLabel = resolvedIntents.map((r) => r.label).join('\n');
-      const candidates: IntentCandidate[] = resolvedIntents.map((r) => ({
-        label: r.label,
-        description: `source: ${r.source}`,
-      }));
+  // Aggregate all resolved commands and execute atomically as one batch.
+  // Append a final DELETE_NODES command for the annotation strokes themselves
+  // so the entire operation (intent execution + cleanup) is one undo step.
+  const allCommands: CanvasCommand[] = resolvedIntents.flatMap(
+    (r) => r.commands,
+  );
 
-      // Await the operate agent to fully complete before deleting annotations
-      await _onIntentChosen(combinedLabel, candidates);
-    } catch (err) {
-      console.error('[Annotation Intent] Operate agent failed:', err);
-    }
+  if (allAnnotationIds.length > 0) {
+    allCommands.push({
+      type: 'DELETE_NODES',
+      nodeIds: allAnnotationIds as never,
+    });
   }
 
-  // Delete annotation nodes LAST — after operate agent has finished
-  useCanvasStore.getState().deleteNodes(allAnnotationIds);
+  if (allCommands.length > 0) {
+    if (resolvedIntents.length > 0) {
+      console.log(
+        '[Annotation Intent] Executing',
+        resolvedIntents.length,
+        'resolved intent(s):',
+        resolvedIntents.map((r) => `[${r.source}] ${r.reasoning}`).join(' | '),
+      );
+    }
+    useCanvasStore.getState().executeCommands(allCommands, 'agent');
+  }
 }

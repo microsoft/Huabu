@@ -6,9 +6,10 @@ import { API_CONFIG } from '../config/api';
 
 import type {
   AgentBaseContext,
+  AnnotationClusterContext,
+  AnnotationCommandResponse,
   IntentCandidate,
   IntentEpisode,
-  AnnotationClusterContext,
 } from '@sediment/shared';
 
 /**
@@ -100,19 +101,20 @@ export async function logIntentEpisode(
 }
 
 /**
- * Stream annotation intent recognition via SSE.
- * Sends a screenshot along with structured cluster context so the LLM has
- * both visual and semantic signals for intent recognition.
+ * One-step annotation → canvas commands.
+ *
+ * Sends a screenshot + structured cluster context to the server. The LLM
+ * reasons about the user's intent and returns an executable batch of canvas
+ * commands, ready to be applied via `executeCommands`.
  */
-export async function recognizeAnnotationIntentStream(
+export async function recognizeAnnotationCommands(
   screenshot: string,
   annotationNodeIds: string[],
   clusterContext: AnnotationClusterContext,
-  onCandidate: (candidate: IntentCandidate) => void,
   signal?: AbortSignal,
-): Promise<void> {
+): Promise<AnnotationCommandResponse> {
   const response = await fetch(
-    `${API_CONFIG.API_URL}/intent/recognize-annotation-stream`,
+    `${API_CONFIG.API_URL}/intent/recognize-annotation`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -123,55 +125,9 @@ export async function recognizeAnnotationIntentStream(
 
   if (!response.ok) {
     throw new Error(
-      `Annotation intent streaming failed: ${response.status} ${response.statusText}`,
+      `Annotation command recognition failed: ${response.status} ${response.statusText}`,
     );
   }
 
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error('No response body');
-
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-
-    const lines = buffer.split('\n');
-    buffer = lines.pop() ?? '';
-
-    let eventType = '';
-    let dataLines: string[] = [];
-
-    for (const line of lines) {
-      if (line.startsWith('event: ')) {
-        eventType = line.slice(7).trim();
-      } else if (line.startsWith('data: ')) {
-        dataLines.push(line.slice(6));
-      } else if (line === '') {
-        if (eventType && dataLines.length > 0) {
-          const data = dataLines.join('\n');
-          if (eventType === 'candidate') {
-            try {
-              const candidate = JSON.parse(data) as IntentCandidate;
-              onCandidate(candidate);
-            } catch {
-              console.warn(
-                '[intent] Failed to parse annotation streaming candidate',
-              );
-            }
-          } else if (eventType === 'error') {
-            const parsed = JSON.parse(data) as { error?: string };
-            throw new Error(
-              parsed.error ?? 'Annotation intent recognition failed',
-            );
-          }
-        }
-        eventType = '';
-        dataLines = [];
-      }
-    }
-  }
+  return (await response.json()) as AnnotationCommandResponse;
 }

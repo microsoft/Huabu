@@ -28,41 +28,74 @@ Return **only** a JSON array (no markdown fences, no commentary). Each element:
 Sorted by confidence descending.`;
 
 /**
- * System prompt for annotation-based intent recognition (LLM fallback path).
+ * System prompt for one-step annotation → canvas commands.
  *
- * This prompt is only used when the client-side rule engine cannot confidently
- * classify an annotation. It receives BOTH a screenshot AND structured context
- * (shape type, nearby nodes, enclosed nodes, endpoint nodes).
+ * The model receives BOTH:
+ *   1. A screenshot of the canvas with red annotation strokes
+ *   2. Structured cluster context (shape, nearby/enclosed nodes, endpoints)
+ *
+ * It must FIRST reason about user intent, THEN directly emit an executable
+ * list of CanvasCommand objects — no separate intent label, no operate-agent
+ * roundtrip. This is the entire pipeline in one LLM call.
  */
-export const ANNOTATION_INTENT_SYSTEM_PROMPT = `You interpret freehand annotations drawn on a canvas screenshot.
+export const ANNOTATION_INTENT_SYSTEM_PROMPT = `You convert freehand canvas annotations into executable canvas commands in ONE step.
 
 You will receive:
-1. A screenshot of the canvas with red annotation strokes visible
-2. Structured context from the client-side analysis pipeline, including:
-   - The detected shape type and confidence
-   - Nearby canvas nodes with their IDs, types, labels, and positions
-   - Nodes enclosed by the annotation area
-   - For line/arrow shapes: the nearest node to each endpoint
+1. A screenshot of the canvas — red strokes are the user's annotation
+2. Structured context from the client-side analysis pipeline:
+   - Detected shape type and confidence (line / arrow / circle / cross / scribble / other)
+   - Nearby canvas nodes with their IDs, types, labels, positions
+   - Nodes enclosed/overlapped by the annotation area
+   - For line/arrow: nearest node to each endpoint
 
-## Your task
-Determine what the user intended with their annotation gesture. The client-side rule engine already handles clear cases (lines between two nodes, circles around groups, crosses over nodes). You are called for AMBIGUOUS cases where the rule engine was not confident.
+## Your output (STRICT)
 
-## Guidelines
-- Use the structured context as your PRIMARY signal — it gives you precise node IDs and spatial relationships
-- Use the screenshot as a SECONDARY signal to verify the shape and see visual context
-- Reference nodes by their exact ID from the structured context (e.g. node-abc12345)
-- Include the annotation center position in position-dependent intents like: "at position {x:100,y:200}"
-- Keep labels short and actionable (verb + object, ≤ 12 words)
-- Generate exactly ONE intent — pick the single most likely interpretation
+Return a single JSON object — no markdown fences, no commentary outside the JSON:
 
-## Common annotation intent patterns
-- Line/arrow between nodes → "Connect [sourceId] to [targetId]"
-- Circle around nodes → "Group [nodeIds] into a new frame"
-- Cross/scribble over a node → "Delete [nodeId]"
-- Circle around single node → "Expand or elaborate on [nodeId]"
-- Mark near a node → "Add a question about [nodeId] at position {x:N,y:N}"
-- Gesture in empty area → "Create a new note at position {x:N,y:N} about [topic from nearby nodes]"
+{
+  "reasoning": "one short sentence explaining what the user intended",
+  "commands": [ /* array of CanvasCommand objects, executed atomically */ ]
+}
 
-## Output format
-Return ONLY a JSON array with exactly ONE object. No markdown fences, no commentary.
-[{ "label": "your intent description here" }]`;
+## Available CanvasCommand types
+
+- CREATE_NODES — { type: "CREATE_NODES", nodes: [{ id?, nodeType, data?, position?, size?, parentId?, skipAutoLayout? }] }
+  - nodeType ∈ "note" | "text" | "frame" | "question" | …
+  - For "note": data.label (string), data.content (string)
+  - For "frame": data.label (string)
+  - Provide explicit id ("node-<uuid>") when later commands need to reference it
+  - Set skipAutoLayout: true when you provide an explicit position
+- DELETE_NODES — { type: "DELETE_NODES", nodeIds: ["node-..."] }
+- CONNECT_NODES — { type: "CONNECT_NODES", edges: [{ source, target, id?, style? }] }
+- SET_NODE_PARENT — { type: "SET_NODE_PARENT", nodeIds: [...], parentId: "node-..." | null }
+- CREATE_QUESTION — { type: "CREATE_QUESTION", content, position?, parentId?, skipAutoLayout? }
+- MERGE_NODE_DATA — { type: "MERGE_NODE_DATA", patches: [{ nodeId, patch: { label?, content?, ... } }] }
+- AUTO_LAYOUT — { type: "AUTO_LAYOUT", scope: { type: "canvas" } | { type: "frame", frameId } }
+
+## Mapping rules
+
+- Line/arrow connecting two nodes → CONNECT_NODES with one edge { source: startNodeId, target: endNodeId }
+- Circle enclosing ≥2 nodes → CREATE_NODES (one frame with explicit id and label) + SET_NODE_PARENT (those node IDs → that frame)
+- Cross / scribble over node(s) → DELETE_NODES
+- Single circle / underline / arrow pointing AT a single node → MERGE_NODE_DATA to highlight (e.g. set data.style.accent: "#ef4444"), or CREATE_NODES with a sibling note expanding on the topic + CONNECT_NODES from the original to the new note. Choose based on visual context.
+- Question mark / "?" near a node → CREATE_QUESTION at the annotation center position with content asking about the nearby node label. Set skipAutoLayout: true.
+- Mark / "!" / star in empty area → CREATE_NODES with a single note at the annotation center; skipAutoLayout: true; data.label and data.content reflect the topic suggested by nearby nodes.
+- Ambiguous shape ("other" type) → infer the most natural canvas operation from the nearby nodes; if you cannot, return commands: []
+
+## ID rules
+
+- Every CREATE_NODES node may include an explicit id like "node-abc123" so subsequent commands (CONNECT_NODES, SET_NODE_PARENT) can reference it
+- Only use existing IDs that appear in the structured context — never invent IDs for nodes that don't already exist (except for nodes you create in the same batch)
+
+## Position rules
+
+- The structured context gives you the annotation center position; use it for any newly created node
+- Always set skipAutoLayout: true when you set an explicit position
+
+## Reasoning
+
+Keep "reasoning" concise (≤ 20 words). It will be shown to the user as the rationale.
+
+## Output format reminder
+
+Output exactly one JSON object. NO leading text. NO markdown fences. NO trailing text.`;

@@ -6,7 +6,7 @@
  * Stage 3: Intent Resolution — rule-based fast path or LLM fallback
  */
 
-import type { Rect, CardinalDirection } from '@sediment/shared';
+import type { CanvasCommand, CardinalDirection, Rect } from '@sediment/shared';
 
 // ── Stage 1: Clustering ──────────────────────────────────────────
 
@@ -82,14 +82,14 @@ export interface AnnotationContext {
 
 // ── Stage 3: Resolved Intent ─────────────────────────────────────
 
-/** A resolved annotation intent ready for execution. */
+/** A resolved annotation intent — directly executable canvas commands. */
 export interface ResolvedAnnotationIntent {
-  /** Human-readable label for the operate agent. */
-  label: string;
+  /** Atomic batch of canvas commands to execute. */
+  commands: CanvasCommand[];
   /** Which resolution path was used. */
   source: 'rule' | 'llm';
+  /** One-sentence explanation of what the user meant. */
+  reasoning: string;
   /** The annotation cluster that produced this intent. */
   cluster: AnnotationCluster;
-  /** Position to pass to the operate agent (center of the cluster). */
-  position: { x: number; y: number };
 }

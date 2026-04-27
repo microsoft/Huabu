@@ -1,3 +1,4 @@
+import type { CanvasCommand } from './canvas/command.js';
 import type { AgentBaseContext } from './context.js';
 
 // ==================== Intent Recognition ====================
@@ -101,6 +102,18 @@ export interface AnnotationIntentRequest {
   annotationNodeIds: string[];
   /** Structured context from the client-side pipeline. */
   clusterContext: AnnotationClusterContext;
+}
+
+/**
+ * Response body for the one-step annotation → canvas commands endpoint.
+ * The LLM reasons about the user's intent and emits the executable command
+ * batch directly — no separate intent label, no operate-agent roundtrip.
+ */
+export interface AnnotationCommandResponse {
+  /** One-sentence reason describing what the user meant. */
+  reasoning: string;
+  /** Atomic batch of canvas commands to execute. */
+  commands: CanvasCommand[];
 }
 
 /**

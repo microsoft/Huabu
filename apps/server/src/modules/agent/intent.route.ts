@@ -10,7 +10,7 @@
 import {
   recognizeIntent,
   recognizeIntentStream,
-  recognizeAnnotationIntentStream,
+  recognizeAnnotationCommands,
   logIntentEpisode,
 } from './intent.service.js';
 
@@ -82,9 +82,11 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     },
   );
 
-  // Annotation intent recognition — uses structured context + screenshot
+  // Annotation → canvas commands (one-step, no SSE).
+  // Receives screenshot + structured cluster context, asks LLM to reason
+  // and return an executable batch of canvas commands.
   fastify.post<{ Body: AnnotationIntentRequest }>(
-    '/recognize-annotation-stream',
+    '/recognize-annotation',
     async (request, reply) => {
       const { screenshot, annotationNodeIds, clusterContext } = request.body;
 
@@ -110,37 +112,18 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
           .send({ error: 'clusterContext is required' } as never);
       }
 
-      reply.hijack();
-
-      reply.raw.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        Connection: 'keep-alive',
-        'Access-Control-Allow-Origin': '*',
-        'X-Accel-Buffering': 'no',
-      });
-
-      reply.raw.flushHeaders?.();
-      reply.raw.write(': ok\n\n');
-
       try {
-        for await (const candidate of recognizeAnnotationIntentStream(
+        const result = await recognizeAnnotationCommands(
           screenshot,
           clusterContext,
-        )) {
-          reply.raw.write(
-            `event: candidate\ndata: ${JSON.stringify(candidate)}\n\n`,
-          );
-        }
-        reply.raw.write('event: done\ndata: {}\n\n');
-      } catch (err) {
-        request.log.error(err, 'Annotation intent streaming failed');
-        reply.raw.write(
-          `event: error\ndata: ${JSON.stringify({ error: 'Annotation intent recognition failed' })}\n\n`,
         );
+        return reply.send(result);
+      } catch (err) {
+        request.log.error(err, 'Annotation command recognition failed');
+        return reply
+          .code(500)
+          .send({ error: 'Annotation command recognition failed' } as never);
       }
-
-      reply.raw.end();
     },
   );
 

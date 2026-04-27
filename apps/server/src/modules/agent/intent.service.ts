@@ -16,6 +16,7 @@ import type { Context } from '@mariozechner/pi-ai';
 import type {
   AgentBaseContext,
   AnnotationClusterContext,
+  CanvasCommand,
   IntentCandidate,
   IntentEpisode,
   RecentAction,
@@ -399,14 +400,68 @@ function serializeClusterContext(ctx: AnnotationClusterContext): string {
 }
 
 /**
- * Recognize annotation intent from a canvas screenshot + structured context.
- * This is the LLM fallback path — only called when the client-side rule engine
- * could not confidently resolve the intent.
+ * One-step annotation → canvas commands.
+ *
+ * Receives a screenshot + structured cluster context, asks the LLM to reason
+ * about the user's intent, and returns an executable batch of canvas commands.
+ * No intermediate "intent label" is produced — the LLM directly outputs the
+ * command list, which the client applies atomically via executeCommands.
  */
-export async function* recognizeAnnotationIntentStream(
+export interface AnnotationCommandResult {
+  /** One-sentence reason describing what the user meant. */
+  reasoning: string;
+  /** Atomic batch of canvas commands to execute. */
+  commands: CanvasCommand[];
+}
+
+/** Strip markdown fences and any leading/trailing prose around a JSON object. */
+function extractJsonObject(raw: string): string | null {
+  const cleaned = raw
+    .replace(/^[\s\S]*?```(?:json)?\s*/, '')
+    .replace(/\s*```[\s\S]*$/, '')
+    .trim();
+
+  const start = cleaned.indexOf('{');
+  if (start < 0) return null;
+
+  // Walk the string to find the matching closing brace
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < cleaned.length; i++) {
+    const ch = cleaned[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === '\\' && inString) {
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) {
+        return cleaned.slice(start, i + 1);
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Recognize annotation intent and return executable canvas commands in one call.
+ */
+export async function recognizeAnnotationCommands(
   screenshot: string,
   clusterContext: AnnotationClusterContext,
-): AsyncGenerator<IntentCandidate> {
+): Promise<AnnotationCommandResult> {
   const base64 = screenshot.startsWith('data:')
     ? screenshot.replace(/^data:[^;]+;base64,/, '')
     : screenshot;
@@ -417,7 +472,7 @@ export async function* recognizeAnnotationIntentStream(
     { type: 'image', data: base64, mimeType: 'image/png' },
     {
       type: 'text',
-      text: `Annotation analysis from client-side pipeline:\n\n${contextText}\n\nThe rule engine could not confidently classify this annotation. Please analyze the screenshot and the structured context above to determine the user's intent. Return exactly ONE intent as a JSON array with a single object.`,
+      text: `Annotation analysis from client-side pipeline:\n\n${contextText}\n\nReason about the user's intent and emit the canvas command batch as a single JSON object {"reasoning": ..., "commands": [...]}. Output JSON only.`,
     },
   ];
 
@@ -428,27 +483,33 @@ export async function* recognizeAnnotationIntentStream(
     ],
   };
 
-  let accumulated = '';
-  let yieldedCount = 0;
+  const response = await llmComplete(piContext);
 
-  const s = await llmStream(piContext);
+  const raw = response.content
+    .filter((b) => b.type === 'text')
+    .map((b) => (b as { type: 'text'; text: string }).text)
+    .join('');
 
-  for await (const event of s) {
-    if (event.type === 'text_delta') {
-      accumulated += event.delta;
-
-      const candidates = tryParsePartialCandidates(accumulated);
-      while (yieldedCount < candidates.length) {
-        yield candidates[yieldedCount];
-        yieldedCount++;
-      }
-    }
+  const jsonText = extractJsonObject(raw);
+  if (!jsonText) {
+    console.error('[annotation-intent] no JSON object found in LLM output');
+    return { reasoning: '', commands: [] };
   }
 
-  const finalCandidates = tryParsePartialCandidates(accumulated);
-  while (yieldedCount < finalCandidates.length) {
-    yield finalCandidates[yieldedCount];
-    yieldedCount++;
+  try {
+    const parsed = JSON.parse(jsonText) as {
+      reasoning?: unknown;
+      commands?: unknown;
+    };
+    const reasoning =
+      typeof parsed.reasoning === 'string' ? parsed.reasoning : '';
+    const commands = Array.isArray(parsed.commands)
+      ? (parsed.commands as CanvasCommand[])
+      : [];
+    return { reasoning, commands };
+  } catch (err) {
+    console.error('[annotation-intent] failed to parse JSON:', err, jsonText);
+    return { reasoning: '', commands: [] };
   }
 }
 
