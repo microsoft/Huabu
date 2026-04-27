@@ -15,6 +15,7 @@ import {
 import type { Context } from '@mariozechner/pi-ai';
 import type {
   AgentBaseContext,
+  AnnotationClusterContext,
   IntentCandidate,
   IntentEpisode,
   RecentAction,
@@ -352,18 +353,72 @@ function tryParsePartialCandidates(raw: string): IntentCandidate[] {
 // ---------------------------------------------------------------------------
 
 /**
- * Recognize annotation intent from a canvas screenshot.
- * Returns IntentCandidate[] (typically one) that can be auto-executed.
+ * Serialize an AnnotationClusterContext into a human-readable text block
+ * so the LLM has structured context alongside the screenshot.
+ */
+function serializeClusterContext(ctx: AnnotationClusterContext): string {
+  const lines: string[] = [];
+
+  lines.push(
+    `Shape: ${ctx.shapeType} (confidence: ${(ctx.shapeConfidence * 100).toFixed(0)}%)`,
+  );
+  lines.push(`Annotation center: (${ctx.position.x}, ${ctx.position.y})`);
+
+  if (ctx.startNode) {
+    const sn = ctx.startNode;
+    lines.push(
+      `Start-point nearest node: [${sn.id}] ${sn.type}${sn.label ? ` "${sn.label}"` : ''} at (${sn.position.x}, ${sn.position.y}), distance=${sn.distance}px, ${sn.direction}`,
+    );
+  }
+  if (ctx.endNode) {
+    const en = ctx.endNode;
+    lines.push(
+      `End-point nearest node: [${en.id}] ${en.type}${en.label ? ` "${en.label}"` : ''} at (${en.position.x}, ${en.position.y}), distance=${en.distance}px, ${en.direction}`,
+    );
+  }
+
+  if (ctx.enclosedNodes.length > 0) {
+    lines.push(`Enclosed/overlapping nodes (${ctx.enclosedNodes.length}):`);
+    for (const n of ctx.enclosedNodes) {
+      lines.push(
+        `  - [${n.id}] ${n.type}${n.label ? ` "${n.label}"` : ''} at (${n.position.x}, ${n.position.y})`,
+      );
+    }
+  }
+
+  if (ctx.nearbyNodes.length > 0) {
+    lines.push(`Nearby nodes (${ctx.nearbyNodes.length}):`);
+    for (const n of ctx.nearbyNodes) {
+      lines.push(
+        `  - [${n.id}] ${n.type}${n.label ? ` "${n.label}"` : ''}, dist=${n.distance}px ${n.direction}`,
+      );
+    }
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Recognize annotation intent from a canvas screenshot + structured context.
+ * This is the LLM fallback path — only called when the client-side rule engine
+ * could not confidently resolve the intent.
  */
 export async function* recognizeAnnotationIntentStream(
   screenshot: string,
+  clusterContext: AnnotationClusterContext,
 ): AsyncGenerator<IntentCandidate> {
   const base64 = screenshot.startsWith('data:')
     ? screenshot.replace(/^data:[^;]+;base64,/, '')
     : screenshot;
 
+  const contextText = serializeClusterContext(clusterContext);
+
   const userContentParts: ContentPart[] = [
     { type: 'image', data: base64, mimeType: 'image/png' },
+    {
+      type: 'text',
+      text: `Annotation analysis from client-side pipeline:\n\n${contextText}\n\nThe rule engine could not confidently classify this annotation. Please analyze the screenshot and the structured context above to determine the user's intent. Return exactly ONE intent as a JSON array with a single object.`,
+    },
   ];
 
   const piContext: Context = {

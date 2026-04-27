@@ -8,6 +8,7 @@ import type {
   AgentBaseContext,
   IntentCandidate,
   IntentEpisode,
+  AnnotationClusterContext,
 } from '@sediment/shared';
 
 /**
@@ -100,12 +101,13 @@ export async function logIntentEpisode(
 
 /**
  * Stream annotation intent recognition via SSE.
- * Same pattern as `recognizeIntentStream` but uses an annotation-specific prompt
- * and only requires a screenshot.
+ * Sends a screenshot along with structured cluster context so the LLM has
+ * both visual and semantic signals for intent recognition.
  */
 export async function recognizeAnnotationIntentStream(
   screenshot: string,
   annotationNodeIds: string[],
+  clusterContext: AnnotationClusterContext,
   onCandidate: (candidate: IntentCandidate) => void,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -114,7 +116,7 @@ export async function recognizeAnnotationIntentStream(
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ screenshot, annotationNodeIds }),
+      body: JSON.stringify({ screenshot, annotationNodeIds, clusterContext }),
       signal,
     },
   );

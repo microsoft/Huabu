@@ -6,10 +6,16 @@
  *   The chosen intent is sent to the chat panel in operate mode for execution.
  */
 
-import { createId } from '@sediment/shared';
+import { createId, rectCenter } from '@sediment/shared';
 import { create } from 'zustand';
 
 import { captureCanvasScreenshot } from '@/handler/canvasCommand/utils/screenshot';
+import {
+  clusterAnnotations,
+  classifyShape,
+  extractAnnotationContext,
+  resolveByRules,
+} from '@/utils/annotation';
 
 import useCanvasStore from './canvasStore';
 import {
@@ -18,7 +24,18 @@ import {
   logIntentEpisode,
 } from '../api/intent';
 
-import type { IntentCandidate } from '@sediment/shared';
+import type {
+  AnnotationStroke,
+  AnnotationContext,
+  NearbyNodeInfo,
+  ResolvedAnnotationIntent,
+} from '@/utils/annotation';
+import type {
+  IntentCandidate,
+  AnnotationClusterContext,
+  AnnotationNearbyNode,
+} from '@sediment/shared';
+import type { Node } from '@xyflow/react';
 
 interface IntentState {
   isOpen: boolean;
@@ -270,13 +287,121 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
       clearTimeout(_annotationTimer);
       _annotationTimer = null;
     }
+    _annotationAbortController?.abort();
+    _annotationAbortController = null;
     set({ pendingAnnotationIds: [] });
   },
 }));
 
 // ---------------------------------------------------------------------------
-// Annotation recognition — runs after 5 s idle, auto-sends to chat panel
+// Annotation recognition — three-stage pipeline
+//
+// Stage 1: Cluster annotation strokes spatially
+// Stage 2: Classify each cluster's shape + extract nearby node context
+// Stage 3: Rule-based fast path OR LLM fallback for each cluster
 // ---------------------------------------------------------------------------
+
+/** Abort controller for in-flight LLM annotation requests. */
+let _annotationAbortController: AbortController | null = null;
+
+/**
+ * Build AnnotationStroke descriptors from annotation node IDs.
+ */
+function collectStrokes(
+  annotationIds: string[],
+  nodes: Node[],
+): AnnotationStroke[] {
+  const strokes: AnnotationStroke[] = [];
+  for (const id of annotationIds) {
+    const node = nodes.find((n) => n.id === id && n.type === 'annotation');
+    if (!node) continue;
+
+    const data = node.data as Record<string, unknown>;
+    const points = (data.points as number[][]) ?? [];
+    const initialSize = (data.initialSize as {
+      width: number;
+      height: number;
+    }) ?? {
+      width: 0,
+      height: 0,
+    };
+
+    const w =
+      (node.measured?.width ?? (node.style?.width as number | undefined)) ||
+      initialSize.width;
+    const h =
+      (node.measured?.height ?? (node.style?.height as number | undefined)) ||
+      initialSize.height;
+
+    strokes.push({
+      id,
+      rect: { x: node.position.x, y: node.position.y, width: w, height: h },
+      points,
+      initialSize,
+    });
+  }
+  return strokes;
+}
+
+/**
+ * Convert an AnnotationContext to the shared AnnotationClusterContext type
+ * for sending to the server.
+ */
+function toClusterContextPayload(
+  ctx: AnnotationContext,
+): AnnotationClusterContext {
+  const center = rectCenter(ctx.cluster.bbox);
+  const mapNode = (n: NearbyNodeInfo): AnnotationNearbyNode => ({
+    id: n.id,
+    type: n.type,
+    label: n.label,
+    position: n.position,
+    size: n.size,
+    distance: Math.round(n.distance),
+    direction: n.direction,
+  });
+
+  return {
+    shapeType: ctx.shape.type,
+    shapeConfidence: ctx.shape.confidence,
+    position: { x: Math.round(center.x), y: Math.round(center.y) },
+    nearbyNodes: ctx.nearbyNodes.map(mapNode),
+    enclosedNodes: ctx.enclosedNodes.map(mapNode),
+    startNode: ctx.startNode ? mapNode(ctx.startNode) : undefined,
+    endNode: ctx.endNode ? mapNode(ctx.endNode) : undefined,
+  };
+}
+
+/**
+ * Process a single annotation cluster through Stage 3 (LLM fallback).
+ */
+async function resolveByLLM(
+  ctx: AnnotationContext,
+  screenshot: string,
+  signal: AbortSignal,
+): Promise<ResolvedAnnotationIntent | null> {
+  const candidates: IntentCandidate[] = [];
+
+  await recognizeAnnotationIntentStream(
+    screenshot,
+    ctx.cluster.strokeIds,
+    toClusterContextPayload(ctx),
+    (candidate) => {
+      candidates.push(candidate);
+    },
+    signal,
+  );
+
+  if (candidates.length === 0) return null;
+
+  const center = rectCenter(ctx.cluster.bbox);
+  return {
+    label: candidates[0].label,
+    source: 'llm',
+    cluster: ctx.cluster,
+    position: { x: Math.round(center.x), y: Math.round(center.y) },
+  };
+}
 
 async function triggerAnnotationRecognition(
   get: () => IntentState,
@@ -289,76 +414,77 @@ async function triggerAnnotationRecognition(
   const annotationIds = [...pendingAnnotationIds];
   set({ pendingAnnotationIds: [] });
 
-  // Verify the annotation nodes still exist on canvas
+  // Abort any previously in-flight annotation LLM request
+  _annotationAbortController?.abort();
+  _annotationAbortController = new AbortController();
+  const { signal } = _annotationAbortController;
+
   const { nodes } = useCanvasStore.getState();
-  const existingIds = annotationIds.filter((id) =>
-    nodes.some((n) => n.id === id && n.type === 'annotation'),
-  );
-  if (existingIds.length === 0) return;
 
-  // Save annotation positions BEFORE they get deleted — used to inject
-  // coordinates into the intent label so the operate agent knows WHERE
-  // to place new nodes (e.g. CREATE_QUESTION at the annotation's spot).
-  const annotationPositions = new Map<string, { x: number; y: number }>();
-  for (const id of existingIds) {
-    const node = nodes.find((n) => n.id === id);
-    if (node) {
-      annotationPositions.set(id, { ...node.position });
+  // ── Stage 1: Cluster ──────────────────────────────────────────
+  const strokes = collectStrokes(annotationIds, nodes);
+  if (strokes.length === 0) return;
+
+  const clusters = clusterAnnotations(strokes);
+
+  // ── Stage 2: Classify + extract context ───────────────────────
+  const contextsByCluster: AnnotationContext[] = clusters.map((cluster) => {
+    const shape = classifyShape(cluster);
+    return extractAnnotationContext(cluster, shape, nodes);
+  });
+
+  // ── Stage 3: Resolve intents (rule-based fast path + LLM fallback) ──
+  const resolvedIntents: ResolvedAnnotationIntent[] = [];
+  const llmPending: AnnotationContext[] = [];
+
+  for (const ctx of contextsByCluster) {
+    const ruleResult = resolveByRules(ctx);
+    if (ruleResult) {
+      resolvedIntents.push(ruleResult);
+    } else {
+      llmPending.push(ctx);
     }
   }
 
-  try {
-    // Capture screenshot BEFORE deleting annotations — the vision model needs to see them
-    const screenshot = await captureCanvasScreenshot({ stripPrefix: true });
-    if (!screenshot) return;
-
-    // Stream annotation intent candidates (typically just one)
-    const candidates: IntentCandidate[] = [];
-
-    await recognizeAnnotationIntentStream(
-      screenshot,
-      existingIds,
-      (candidate) => {
-        candidates.push(candidate);
-      },
-    );
-
-    // Inject annotation positions into ALL candidate labels so the operate
-    // agent can place new nodes (e.g. question) at the drawn location.
-    // Replace "CREATE_QUESTION at node-xxx" with "CREATE_QUESTION at position {x,y}".
-    if (candidates.length > 0 && _onIntentChosen) {
-      const processedLabels: string[] = [];
-      for (const candidate of candidates) {
-        let label = candidate.label;
-        for (const [id, pos] of annotationPositions) {
-          const shortId = id.slice(0, 18);
-          if (label.includes(id)) {
-            label = label.replace(
-              id,
-              `position {x:${Math.round(pos.x)},y:${Math.round(pos.y)}}`,
-            );
-          } else if (label.includes(shortId)) {
-            label = label.replace(
-              shortId,
-              `position {x:${Math.round(pos.x)},y:${Math.round(pos.y)}}`,
-            );
-          }
+  // LLM fallback for clusters the rule engine couldn't resolve
+  if (llmPending.length > 0 && !signal.aborted) {
+    try {
+      // Capture screenshot only when LLM is actually needed
+      const screenshot = await captureCanvasScreenshot({ stripPrefix: true });
+      if (screenshot && !signal.aborted) {
+        // Process LLM clusters sequentially to avoid overwhelming the server
+        for (const ctx of llmPending) {
+          if (signal.aborted) break;
+          const result = await resolveByLLM(ctx, screenshot, signal);
+          if (result) resolvedIntents.push(result);
         }
-        processedLabels.push(label);
       }
-
-      // Combine all intents into a single message so the operate agent
-      // executes them all in one batch.
-      const combinedLabel = processedLabels.join('\n');
-      // Await the operate agent to fully complete before deleting annotations.
-      await _onIntentChosen(combinedLabel, candidates);
+    } catch (err) {
+      if ((err as Error).name !== 'AbortError') {
+        console.error('[Annotation Intent] LLM fallback failed:', err);
+      }
     }
-
-    // Delete annotation nodes LAST — after operate agent has finished execution
-    useCanvasStore.getState().deleteNodes(existingIds);
-  } catch (err) {
-    console.error('[Annotation Intent Recognition] Failed:', err);
-    // Delete annotation nodes even on failure — they should not persist
-    useCanvasStore.getState().deleteNodes(existingIds);
   }
+
+  // All annotation node IDs across all clusters
+  const allAnnotationIds = clusters.flatMap((c) => c.strokeIds);
+
+  // Send resolved intents to the operate agent
+  if (resolvedIntents.length > 0 && _onIntentChosen && !signal.aborted) {
+    try {
+      const combinedLabel = resolvedIntents.map((r) => r.label).join('\n');
+      const candidates: IntentCandidate[] = resolvedIntents.map((r) => ({
+        label: r.label,
+        description: `source: ${r.source}`,
+      }));
+
+      // Await the operate agent to fully complete before deleting annotations
+      await _onIntentChosen(combinedLabel, candidates);
+    } catch (err) {
+      console.error('[Annotation Intent] Operate agent failed:', err);
+    }
+  }
+
+  // Delete annotation nodes LAST — after operate agent has finished
+  useCanvasStore.getState().deleteNodes(allAnnotationIds);
 }

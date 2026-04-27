@@ -28,29 +28,41 @@ Return **only** a JSON array (no markdown fences, no commentary). Each element:
 Sorted by confidence descending.`;
 
 /**
- * System prompt for annotation-based intent recognition.
- * The model receives only a screenshot and annotation node IDs — no text context.
+ * System prompt for annotation-based intent recognition (LLM fallback path).
+ *
+ * This prompt is only used when the client-side rule engine cannot confidently
+ * classify an annotation. It receives BOTH a screenshot AND structured context
+ * (shape type, nearby nodes, enclosed nodes, endpoint nodes).
  */
 export const ANNOTATION_INTENT_SYSTEM_PROMPT = `You interpret freehand annotations drawn on a canvas screenshot.
 
-Red strokes with a red tag (e.g. "✏ node-abc12345") are user-drawn annotations. The tag shows a truncated annotation node ID. White badges with black text above other nodes are node IDs.
+You will receive:
+1. A screenshot of the canvas with red annotation strokes visible
+2. Structured context from the client-side analysis pipeline, including:
+   - The detected shape type and confidence
+   - Nearby canvas nodes with their IDs, types, labels, and positions
+   - Nodes enclosed by the annotation area
+   - For line/arrow shapes: the nearest node to each endpoint
 
-There may be MULTIPLE annotations in one screenshot. Interpret EACH one independently.
+## Your task
+Determine what the user intended with their annotation gesture. The client-side rule engine already handles clear cases (lines between two nodes, circles around groups, crosses over nodes). You are called for AMBIGUOUS cases where the rule engine was not confident.
 
-Look at the shape, position, and context of each red annotation stroke and infer what the user meant.
+## Guidelines
+- Use the structured context as your PRIMARY signal — it gives you precise node IDs and spatial relationships
+- Use the screenshot as a SECONDARY signal to verify the shape and see visual context
+- Reference nodes by their exact ID from the structured context (e.g. node-abc12345)
+- Include the annotation center position in position-dependent intents like: "at position {x:100,y:200}"
+- Keep labels short and actionable (verb + object, ≤ 12 words)
+- Generate exactly ONE intent — pick the single most likely interpretation
 
-## Examples of possible intents
+## Common annotation intent patterns
+- Line/arrow between nodes → "Connect [sourceId] to [targetId]"
+- Circle around nodes → "Group [nodeIds] into a new frame"
+- Cross/scribble over a node → "Delete [nodeId]"
+- Circle around single node → "Expand or elaborate on [nodeId]"
+- Mark near a node → "Add a question about [nodeId] at position {x:N,y:N}"
+- Gesture in empty area → "Create a new note at position {x:N,y:N} about [topic from nearby nodes]"
 
-- A line connecting two nodes → { "label": "Connect [nodeA ID] to [nodeB ID]" }
-- A cross or scribble over a node → { "label": "Delete [node ID]" }
-- A circle enclosing multiple nodes → { "label": "Group [node IDs] into frame" }
-- Three dots or ellipsis near a node → { "label": "Expand: [what to add based on nearby node]" }
-- A question mark or unclear mark near a node → { "label": "Use canvas_commands tool to execute CREATE_QUESTION at [annotation node ID from red tag] with content: [specific question about the nearby node]" }
-
-These are examples, not an exhaustive list. Use your judgment.
-
-## Rules for question intents
-When the intent is to create a question node, you MUST include the annotation node ID from the red tag (e.g. node-abc12345) so the system knows where to place it. The question should reference the nearby node's label and ask something specific.
-
-Return a JSON array with ONE object PER annotation. No markdown, no explanation.
-[{ "label": "..." }, { "label": "..." }]`;
+## Output format
+Return ONLY a JSON array with exactly ONE object. No markdown fences, no commentary.
+[{ "label": "your intent description here" }]`;

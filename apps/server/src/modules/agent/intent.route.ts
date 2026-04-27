@@ -82,11 +82,11 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     },
   );
 
-  // Annotation intent recognition — same SSE pattern, different prompt, auto-executed
+  // Annotation intent recognition — uses structured context + screenshot
   fastify.post<{ Body: AnnotationIntentRequest }>(
     '/recognize-annotation-stream',
     async (request, reply) => {
-      const { screenshot, annotationNodeIds } = request.body;
+      const { screenshot, annotationNodeIds, clusterContext } = request.body;
 
       if (!screenshot) {
         return reply
@@ -102,6 +102,12 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
         return reply.code(400).send({
           error: 'annotationNodeIds must be a non-empty array',
         } as never);
+      }
+
+      if (!clusterContext) {
+        return reply
+          .code(400)
+          .send({ error: 'clusterContext is required' } as never);
       }
 
       reply.hijack();
@@ -120,6 +126,7 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       try {
         for await (const candidate of recognizeAnnotationIntentStream(
           screenshot,
+          clusterContext,
         )) {
           reply.raw.write(
             `event: candidate\ndata: ${JSON.stringify(candidate)}\n\n`,
