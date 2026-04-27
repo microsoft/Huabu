@@ -38,14 +38,14 @@ export const CanvasMenu: React.FC = () => {
   const handleExport = useCallback(async () => {
     setIsOpen(false);
     try {
-      await exportCanvas(canvasId, canvasTitle);
+      await exportCanvas(canvasId);
       toast('Export started', { variant: 'success' });
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Export failed', {
         variant: 'error',
       });
     }
-  }, [canvasId, canvasTitle]);
+  }, [canvasId]);
 
   return (
     <div className="flex min-w-0 items-center">

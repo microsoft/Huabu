@@ -87,10 +87,10 @@ export default function CanvasListPage() {
     navigate(`/canvas/${canvasId}`);
   };
 
-  const handleExport = async (canvasId: string, title: string | null) => {
+  const handleExport = async (canvasId: string) => {
     setExportingId(canvasId);
     try {
-      await exportCanvas(canvasId, title ?? undefined);
+      await exportCanvas(canvasId);
       toast('Export started', { variant: 'success' });
     } catch (error) {
       toast(error instanceof Error ? error.message : 'Export failed', {
@@ -339,7 +339,7 @@ export default function CanvasListPage() {
                     iconOnly
                     onClick={(e) => {
                       e.stopPropagation();
-                      void handleExport(canvas.canvasId, canvas.title);
+                      void handleExport(canvas.canvasId);
                     }}
                     tooltipWrapperClassName="absolute top-3 right-10 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
                     title={
