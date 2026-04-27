@@ -1,7 +1,7 @@
 import { ArrowUp, Square, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { uploadImage, uploadPdf } from '@/api/artifact';
+import { resolveArtifactUrl, uploadImage, uploadPdf } from '@/api/artifact';
 import { useChatStore } from '@/store/chatStore';
 
 import { ContextUsageRing } from './ContextUsageRing';
@@ -376,7 +376,7 @@ export const ChatInput = ({
                   >
                     {att.type === 'image' ? (
                       <img
-                        src={att.url}
+                        src={resolveArtifactUrl(att.url)}
                         alt={att.label ?? 'Attached image'}
                         className="h-12 w-12 rounded-md object-contain"
                       />
