@@ -195,7 +195,7 @@ export const TextNode = memo(
               style: { ...data.style, textColor: v },
             })
           }
-          title="Change Text Color"
+          title="Text Color"
         >
           <Baseline
             style={{
@@ -211,7 +211,7 @@ export const TextNode = memo(
               style: { ...data.style, backgroundColor: v },
             })
           }
-          title="Change Color"
+          title="Background Color"
         />
       </>
     );

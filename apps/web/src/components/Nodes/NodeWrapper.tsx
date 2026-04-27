@@ -246,6 +246,7 @@ export const NodeWrapper = memo(
       (state) => state.nodes.filter((node) => node.selected).length,
     );
     const updateNodeData = useCanvasStore((state) => state.updateNodeData);
+    const convertNodeType = useCanvasStore((state) => state.convertNodeType);
     const { tryStartZoom, shouldResize } = useCornerZoomResize();
 
     const setNodeGeometry = useCanvasStore((state) => state.setNodeGeometry);
@@ -261,6 +262,18 @@ export const NodeWrapper = memo(
     const ingestion = useCanvasStore((state) => state.ingestionByNodeId[id]);
     const showIngestionOverlay =
       type !== 'frame' && ingestion?.status === 'pending';
+    const expandedNodeId = useCanvasStore((state) => state.expandedNodeId);
+    // Disable the text/note toggle while the large-view editor is open on
+    // this node (BlockNote dirty state would otherwise overwrite the
+    // conversion) or while an ingest is in flight.
+    const isTypeToggleDisabled =
+      expandedNodeId === id || ingestion?.status === 'pending';
+    const typeToggleDisabledReason =
+      expandedNodeId === id
+        ? 'Close the editor to change type'
+        : ingestion?.status === 'pending'
+          ? 'Ingestion in progress'
+          : null;
 
     const renderMode = useNodeLOD(id, type);
     const isTouch = useIsTouch();
@@ -384,17 +397,52 @@ export const NodeWrapper = memo(
             offset={12}
             className={FLOATING_TOOLBAR_CLASS}
           >
-            {/* Node type indicator icon */}
-            {(() => {
-              const TypeIcon = NODE_ICON[type];
-              return (
-                <Tooltip content={type}>
-                  <div className="text-fg-subtle flex items-center px-1">
-                    <TypeIcon size={14} />
-                  </div>
-                </Tooltip>
-              );
-            })()}
+            {/* Node type indicator. For text/note, render as a segmented
+                toggle so users can convert between the two with one click;
+                other types show a read-only badge. */}
+            {type === 'text' || type === 'note' ? (
+              <FloatingToolbar.Group>
+                <FloatingToolbar.ToggleButton
+                  active={type === 'text'}
+                  disabled={isTypeToggleDisabled}
+                  title={
+                    typeToggleDisabledReason ??
+                    (type === 'text' ? 'Text' : 'Convert to Text')
+                  }
+                  onClick={() => convertNodeType(id, 'text')}
+                >
+                  {(() => {
+                    const Icon = NODE_ICON.text;
+                    return <Icon />;
+                  })()}
+                </FloatingToolbar.ToggleButton>
+                <FloatingToolbar.ToggleButton
+                  active={type === 'note'}
+                  disabled={isTypeToggleDisabled}
+                  title={
+                    typeToggleDisabledReason ??
+                    (type === 'note' ? 'Note' : 'Convert to Note')
+                  }
+                  onClick={() => convertNodeType(id, 'note')}
+                >
+                  {(() => {
+                    const Icon = NODE_ICON.note;
+                    return <Icon />;
+                  })()}
+                </FloatingToolbar.ToggleButton>
+              </FloatingToolbar.Group>
+            ) : (
+              (() => {
+                const TypeIcon = NODE_ICON[type];
+                return (
+                  <Tooltip content={type}>
+                    <div className="text-fg-subtle flex items-center px-1">
+                      <TypeIcon size={14} />
+                    </div>
+                  </Tooltip>
+                );
+              })()
+            )}
             <div className="bg-border mx-0.5 h-4 w-px" />
             {toolbar}
             {type !== 'question' && (

@@ -48,7 +48,7 @@ export const NoteNode = memo(
     const NoteToolbar = (
       <FloatingToolbar.Group>
         <FloatingToolbar.ActionButton
-          title="Open Large View"
+          title="Expand"
           onClick={(e) => {
             e.stopPropagation();
             openExpanded(id);
@@ -57,7 +57,7 @@ export const NoteNode = memo(
           <Fullscreen />
         </FloatingToolbar.ActionButton>
 
-        <FloatingToolbar.ActionButton title="Copy Content" onClick={handleCopy}>
+        <FloatingToolbar.ActionButton title="Copy" onClick={handleCopy}>
           {copied ? <Check /> : <Copy />}
         </FloatingToolbar.ActionButton>
       </FloatingToolbar.Group>

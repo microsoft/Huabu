@@ -50,6 +50,7 @@ interface ToggleButtonProps {
   onClick: (e: React.MouseEvent) => void;
   children: ReactNode;
   className?: string;
+  disabled?: boolean;
 }
 
 /**
@@ -64,6 +65,7 @@ function ToggleButton({
   onClick,
   children,
   className,
+  disabled,
 }: ToggleButtonProps) {
   return (
     <Button
@@ -72,6 +74,7 @@ function ToggleButton({
       size="sm"
       title={title}
       onClick={onClick}
+      disabled={disabled}
       className={cn(
         active
           ? 'text-info bg-info-bg enabled:hover:bg-info-bg'

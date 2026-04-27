@@ -125,7 +125,8 @@ export type CanvasUiIntent =
       nodeId: string;
       reorderTarget?: { nodeId: string; position: 'before' | 'after' };
     }
-  | { type: 'EXPAND_NODE'; nodeId: string };
+  | { type: 'EXPAND_NODE'; nodeId: string }
+  | { type: 'CONVERT_NODE_TYPE'; nodeId: string; to: 'text' | 'note' };
 
 // ---------------------------------------------------------------------------
 // Resolver result — commands + trace
@@ -245,6 +246,20 @@ export function resolveUiIntent(
         trace: node
           ? [{ action: 'node_expanded', node: extractNodeRef(node) }]
           : [],
+      };
+    }
+    case 'CONVERT_NODE_TYPE': {
+      const node = ui.nodes.find((n) => n.id === intent.nodeId);
+      if (!node) return { commands: [], trace: [] };
+      return {
+        commands: [
+          {
+            type: 'CHANGE_NODE_TYPE',
+            nodeId: intent.nodeId as CanvasNodeId,
+            to: intent.to,
+          },
+        ],
+        trace: [{ action: 'node_edited', node: extractNodeRef(node) }],
       };
     }
   }
