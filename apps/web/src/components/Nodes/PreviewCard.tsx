@@ -1,3 +1,4 @@
+import { getAccentTokens } from './accentTokens';
 import { getNodeIcon } from '../../config/nodeIcons.ts';
 import { SkeletonLines } from '../Common/SkeletonLines';
 
@@ -21,8 +22,6 @@ export interface PreviewCardProps {
   imagePosition?: 'top' | 'center';
   /** Accent color hex for the gradient. Falls back to a neutral gray. */
   accentColor?: string | null;
-  /** Called when the info area (title + summary) is clicked. */
-  onInfoClick?: () => void;
   children?: ReactNode;
 }
 
@@ -35,20 +34,26 @@ export function PreviewCard({
   loading = false,
   imagePosition = 'center',
   accentColor,
-  onInfoClick,
   children,
 }: PreviewCardProps) {
   const NodeTypeIcon = getNodeIcon(nodeType);
 
-  const borderColor = accentColor ? `${accentColor}40` : 'var(--edge-default)';
+  const accentTokens = accentColor ? getAccentTokens(accentColor) : null;
 
-  const hoverBg: CSSProperties = accentColor
-    ? {
-        ['--info-hover-bg' as string]: `color-mix(in srgb, ${accentColor} 8%, transparent)`,
-      }
-    : {
-        ['--info-hover-bg' as string]: 'rgba(0,0,0,0.03)',
-      };
+  const borderColor = accentTokens?.divider ?? 'var(--edge-default)';
+
+  // Foreground for icon + title — derived via the same formula as
+  // SemanticPlaceholder so the color does not jump when LOD changes.
+  const accentFg: CSSProperties | undefined = accentTokens
+    ? { color: accentTokens.fg }
+    : undefined;
+
+  // Info-area background — a very subtle accent tint so the section reads
+  // as related to the cover image without competing with it.
+  const infoAreaStyle: CSSProperties = {
+    borderTop: `2px solid ${borderColor}`,
+    background: accentTokens?.softBg ?? 'transparent',
+  };
 
   return (
     <div className="bg-surface relative flex h-full w-full flex-col overflow-hidden">
@@ -72,22 +77,12 @@ export function PreviewCard({
             />
           ) : null}
 
-          {/* Info area — grows with node height, clickable to expand */}
-          <div
-            className="flex flex-1 shrink cursor-pointer flex-col transition-colors duration-150 hover:bg-[var(--info-hover-bg)]"
-            style={{
-              borderTop: `2px solid ${borderColor}`,
-              ...hoverBg,
-            }}
-            onClick={() => {
-              // e.stopPropagation();
-              onInfoClick?.();
-            }}
-          >
+          {/* Info area — grows with node height. */}
+          <div className="flex flex-1 shrink flex-col" style={infoAreaStyle}>
             <div className="flex min-w-0 shrink-0 items-start gap-2 px-4 pt-2">
               <div
                 className="flex flex-none translate-y-1 items-center"
-                style={accentColor ? { color: accentColor } : undefined}
+                style={accentFg}
               >
                 {favicon ? (
                   <img
@@ -104,8 +99,8 @@ export function PreviewCard({
                 )}
               </div>
               <span
-                className="line-clamp-2 min-w-0 font-medium wrap-break-word"
-                style={accentColor ? { color: accentColor } : undefined}
+                className="min-w-0 text-lg font-medium wrap-break-word"
+                style={accentFg}
               >
                 {title}
               </span>

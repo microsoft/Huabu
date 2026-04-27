@@ -4,6 +4,20 @@
 
 ---
 
+## 2026-04-27 · Accent 节点跨 LOD 颜色统一
+
+**What Changed**
+
+- 设置了 `accent` 的节点，其 PreviewCard（完整视图）的标题与图标颜色不再使用饱和的 accent 原色，改为与 SemanticPlaceholder（minimal LOD 占位符）相同的混色公式，保证缩放切换 LOD 时颜色不再"跳变"。
+- SemanticPlaceholder 的 accent 边框由 6px 调整为 4px，视觉更克制。
+
+**Notes**
+
+- 颜色派生集中到 `apps/web/src/components/Nodes/accentTokens.ts`，后续如需统一调整 accent 文本/背景/边框混合比例，只需修改这一处。
+- 该变更只影响视觉，不改变交互或数据。
+
+---
+
 ## 2026-04-27 · Text / Note 节点一键互转
 
 **What Changed**

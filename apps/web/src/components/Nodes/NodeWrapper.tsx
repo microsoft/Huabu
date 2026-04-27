@@ -33,6 +33,7 @@ import { useNodeLOD } from '@/hooks/useNodeLOD.ts';
 import useCanvasStore from '@/store/canvasStore.ts';
 import { summarizeProvenance } from '@/utils/provenance.ts';
 
+import { getAccentTokens } from './accentTokens.ts';
 import { SemanticPlaceholder } from './SemanticPlaceholder.tsx';
 
 import type { CanvasNodeType, NodeData } from './types.ts';
@@ -371,6 +372,11 @@ export const NodeWrapper = memo(
 
     const isMinimal = renderMode === 'minimal';
 
+    // Derive accent-tinted tokens once so border/shadow stay in sync with
+    // the rest of the canvas (PreviewCard, SemanticPlaceholder, ...).
+    const accent = data.style?.accent;
+    const accentTokens = accent ? getAccentTokens(accent) : null;
+
     return (
       <>
         <NodeResizer
@@ -501,7 +507,7 @@ export const NodeWrapper = memo(
                 ? ''
                 : 'ring-border hover:ring',
             // Accent: colored border + bottom-right shadow
-            data.style?.accent && 'border-2',
+            data.style?.accent && 'border-3',
             // Question nodes need visible overflow for status badges and progress bar
             type === 'question' && 'overflow-visible',
             className,
@@ -511,13 +517,13 @@ export const NodeWrapper = memo(
               data.style.backgroundColor !== 'transparent' && {
                 backgroundColor: data.style.backgroundColor,
               }),
-            ...(data.style?.accent && {
+            ...(accentTokens && {
               borderColor:
                 type === 'frame'
                   ? `color-mix(in srgb, var(--color-fg-default) 0%, transparent)`
-                  : `${data.style.accent}80`,
+                  : accentTokens.border,
               ...(type === 'frame' && {
-                boxShadow: `4px 4px 3px 3px ${data.style.accent}`,
+                boxShadow: `4px 4px 3px 3px ${accentTokens.shadow}`,
               }),
             }),
             ...(type === 'question' && {

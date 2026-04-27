@@ -181,7 +181,6 @@ export const PDFNode = memo(
                 loading={!coverImage}
                 imagePosition="top"
                 accentColor={data.style?.accent}
-                onInfoClick={() => openExpanded(id)}
               >
                 {summary ? (
                   <p className="text-fg-muted line-clamp-5 text-base leading-relaxed">
