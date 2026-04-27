@@ -506,8 +506,10 @@ export const NodeWrapper = memo(
               : type === 'annotation'
                 ? ''
                 : 'ring-border hover:ring',
-            // Accent: colored border + bottom-right shadow
-            data.style?.accent && 'border-3',
+            // Always reserve a 3px border so toggling accent on/off does
+            // not shift inner content. Default border is transparent;
+            // accent (or other states) override `borderColor` via style.
+            'border-3 border-transparent',
             // Question nodes need visible overflow for status badges and progress bar
             type === 'question' && 'overflow-visible',
             className,

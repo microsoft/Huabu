@@ -79,9 +79,11 @@ export function PreviewCard({
 
           {/* Info area — grows with node height. */}
           <div className="flex flex-1 shrink flex-col" style={infoAreaStyle}>
-            <div className="flex min-w-0 shrink-0 items-start gap-2 px-4 pt-2">
+            <div className="min-w-0 shrink-0 px-4 pt-2">
+              {/* Float the icon so the title wraps underneath it instead
+                  of staying indented on subsequent lines. */}
               <div
-                className="flex flex-none translate-y-1 items-center"
+                className="float-left mr-2 flex translate-y-1.75 items-center"
                 style={accentFg}
               >
                 {favicon ? (
