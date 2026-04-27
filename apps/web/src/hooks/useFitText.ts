@@ -21,7 +21,7 @@ export function fitFontSize(
   opts?: FitTextOptions,
 ): number {
   const min = opts?.minSize ?? 10;
-  const max = opts?.maxSize ?? 72;
+  const max = opts?.maxSize ?? 144;
   const font = opts?.font ?? DEFAULT_FONT;
   const lhRatio = opts?.lineHeightRatio ?? 1.4;
 

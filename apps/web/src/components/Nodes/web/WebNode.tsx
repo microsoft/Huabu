@@ -158,20 +158,16 @@ export const WebNode = memo(
                         onInfoClick={() => openExpanded(id)}
                       >
                         {preview.summary ? (
-                          <div className="min-h-0 flex-1 overflow-hidden">
-                            <p className="text-fg-muted text-base leading-relaxed">
-                              {preview.summary}
-                            </p>
-                          </div>
+                          <p className="text-fg-muted line-clamp-5 text-base leading-relaxed">
+                            {preview.summary}
+                          </p>
                         ) : preview.contentHtml ? (
-                          <div className="min-h-0 flex-1 overflow-hidden">
-                            <div
-                              className="text-fg-muted prose prose-base overflow-hidden text-base leading-relaxed [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:text-base [&_h2]:font-semibold [&_h3]:text-base [&_h3]:font-medium [&_img]:max-w-full [&_img]:rounded [&_ol]:my-1 [&_p]:my-1 [&_ul]:my-1"
-                              dangerouslySetInnerHTML={{
-                                __html: preview.contentHtml,
-                              }}
-                            />
-                          </div>
+                          <div
+                            className="text-fg-muted prose prose-base line-clamp-5 text-base leading-relaxed [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:text-base [&_h2]:font-semibold [&_h3]:text-base [&_h3]:font-medium [&_img]:max-w-full [&_img]:rounded [&_ol]:my-1 [&_p]:my-1 [&_ul]:my-1"
+                            dangerouslySetInnerHTML={{
+                              __html: preview.contentHtml,
+                            }}
+                          />
                         ) : null}
                       </PreviewCard>
                     ) : null}
