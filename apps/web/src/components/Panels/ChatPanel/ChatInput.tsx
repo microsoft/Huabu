@@ -376,7 +376,7 @@ export const ChatInput = ({
                     key={att.url || `att-${idx}`}
                     className="group border-edge-default relative flex items-center justify-center rounded-md border"
                   >
-                    {att.type === 'image' ? (
+                    {att.type === 'image' && att.url ? (
                       <img
                         src={resolveArtifactUrl(att.url)}
                         alt={att.label ?? 'Attached image'}
