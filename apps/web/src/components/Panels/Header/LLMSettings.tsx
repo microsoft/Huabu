@@ -1,4 +1,4 @@
-import { Bot, Check, ClipboardCopy, Key, LogIn, LogOut } from 'lucide-react';
+import { Check, ClipboardCopy, Key, LogIn, LogOut } from 'lucide-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 import { Button } from '@/components/Common/Button';
@@ -98,7 +98,6 @@ export const LLMSettings: React.FC = () => {
   return (
     <div className="border-edge-default mb-3 border-t pt-3">
       <label className="text-fg-muted mb-1.5 block text-xs font-medium">
-        <Bot size={12} className="mr-1 inline" />
         LLM Provider
       </label>
 

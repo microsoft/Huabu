@@ -8,6 +8,7 @@ import { useLLMStore } from '../../../store/llmStore';
 import { useWorkspaceStore } from '../../../store/workspaceStore';
 import { Button } from '../../Common/Button';
 import { Popover } from '../../Common/Popover';
+import { Tooltip } from '../../Common/Tooltip';
 
 /**
  * A minimal settings popover that lets the user view and change
@@ -180,9 +181,15 @@ export const SettingsPopover: React.FC = () => {
 
           {/* Current path display */}
           <div className="border-edge-default bg-surface mb-2 flex items-center gap-2 rounded border px-2.5 py-1">
-            <span className="text-fg-muted flex-1 truncate text-sm">
-              {workspacePath || 'Not configured'}
-            </span>
+            <Tooltip
+              content={workspacePath || 'Not configured'}
+              placement="bottom"
+              wrapperClassName="min-w-0 flex-1"
+            >
+              <span className="text-fg-muted block truncate text-sm">
+                {workspacePath || 'Not configured'}
+              </span>
+            </Tooltip>
             <Button
               variant="ghost"
               tone="neutral"
