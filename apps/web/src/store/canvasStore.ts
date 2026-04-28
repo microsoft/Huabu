@@ -258,7 +258,9 @@ type RFState = {
   setNodeGeometry: (
     items: Array<{
       nodeId: string;
-      size?: { width: number; height: number };
+      // `height` is optional: pass undefined to clear an explicit height
+      // and revert the node to content-driven auto-sizing.
+      size?: { width: number; height?: number };
       position?: { x: number; y: number };
     }>,
   ) => void;
