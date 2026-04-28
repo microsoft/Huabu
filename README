@@ -1,0 +1,150 @@
+# Huabu
+
+> A canvas-based framework for human–AI collaboration.
+
+Huabu provides a shared two-dimensional workspace where ideas, notes, documents,
+questions, and AI outputs live side by side as **persistent nodes**. Instead of
+treating AI as a chat window detached from your work, Huabu places the human and
+the AI inside the same canvas so they can build on each other's contributions
+over time.
+
+This repository (`sediment`) is the reference implementation of Huabu.
+
+---
+
+## Two Principles
+
+### 1. Externalize Thinking
+
+Huabu makes the intermediate structure of thought visible on the canvas.
+Ideas can be organized, revised, and revisited outside of working memory.
+The canvas captures not only **content**, but also **structure** — spatial
+arrangement reflects relationships, priorities, uncertainty, and the emerging
+clusters of thought that usually stay implicit in a linear document or chat.
+
+### 2. Share Cognitive Space
+
+Because the AI operates in the same workspace as the human, it can access the broader context of the work rather than only the latest instruction. This lets
+it:
+
+- help organize materials,
+- synthesize across nodes,
+- identify what remains unresolved,
+- and support the development of ideas into more structured and actionable
+  outputs.
+
+The canvas is the shared memory; both sides read from it and write to it.
+
+---
+
+## What's in a Canvas
+
+A Huabu canvas is an infinite 2D surface composed of typed, persistent nodes
+that the user and the AI can both create, modify, link, and group.
+
+| Node type   | Purpose                                                       |
+| ----------- | ------------------------------------------------------------- |
+| Note        | Rich-text / Markdown notes for ideas and drafts               |
+| Text        | Lightweight text blocks for labels and annotations            |
+| Web         | Embedded web pages as living references                       |
+| PDF         | PDF reader with highlighting that flows back into the canvas  |
+| Image/Video | Visual material kept next to the thinking it informs          |
+| Frame       | Grouping container that gives a region of the canvas identity |
+| Edge        | Explicit relationships between nodes                          |
+
+Around these primitives Huabu adds:
+
+- **Intent system** — press `Ctrl/Cmd+I` and the AI proposes the next useful
+  moves based on what is currently on the canvas.
+- **Auto layout** — semantic, force-directed arrangement so the canvas stays
+  legible as it grows.
+- **Knowledge base** — canvas content can be promoted into a searchable
+  knowledge source the AI can draw on later.
+- **AI chat side panel** — a conversational surface whose actions land back
+  on the canvas as nodes and edges, not just as text replies.
+
+See the user guide in [docs/user-guide](./docs/user-guide/README.md) for
+details.
+
+---
+
+## Repository Layout
+
+This is a pnpm workspace.
+
+```
+apps/
+  web/      React + Vite canvas client
+  server/   Fastify backend: agent, canvas, knowledge, preprocessing
+  data/     Local working data (sqlite, vault, artifacts)
+packages/
+  shared/   Shared types and utilities
+docs/       Design notes and user guide
+```
+
+Key backend modules ([apps/server/src/modules](apps/server/src/modules)):
+
+- `agent/` — the AI agent runtime that reads and writes the canvas
+- `canvas/` — canvas state, commands, and persistence
+- `knowledge/` — knowledge base indexing and retrieval
+- `preprocessing/` — ingestion pipeline (e.g. PDF → structured content)
+- `artifact/` — generated artifacts produced by the agent
+- `web/` — web fetching utilities used by node ingestion
+
+Key frontend areas ([apps/web/src](apps/web/src)):
+
+- `components/Nodes/` — node implementations
+- `components/Panels/` — side panels including the AI chat
+- `handler/canvasCommand/` — canvas mutation commands shared with the agent
+- `handler/autoLayout/` — semantic auto-layout
+- `hooks/useAgentStream.ts` — streaming agent protocol on the client
+
+---
+
+## Getting Started
+
+Requirements: Node.js 20+ and pnpm 10+.
+
+```bash
+pnpm install
+pnpm dev
+```
+
+This starts the server, the web client, and the shared package in watch mode.
+You can also start them individually:
+
+```bash
+pnpm dev:server
+pnpm dev:web
+pnpm dev:shared
+```
+
+Other useful scripts:
+
+```bash
+pnpm typecheck   # type-check every workspace package
+pnpm lint        # lint everything
+pnpm lint:fix    # lint and auto-fix
+pnpm format      # prettier write
+```
+
+For environment setup details, see [docs/setup.md](./docs/setup.md).
+
+---
+
+## Documentation
+
+- [User Guide](./docs/user-guide/README.md) — how to use the product
+- [Changelog](./docs/user-guide/CHANGELOG.md) — user-facing changes
+- Design notes in [docs/](./docs):
+  - [Canvas command architecture](./docs/canvas-command-architecture.md)
+  - [Auto layout](./docs/auto-layout.md)
+  - [Node preprocessing design](./docs/node_preprocessing_design.md)
+  - [Content-before-AI design](./docs/content-before-ai-design.md)
+  - [Prompt node design](./docs/prompt-node-design.md)
+
+---
+
+## License
+
+See [LICENSE](./LICENSE).
