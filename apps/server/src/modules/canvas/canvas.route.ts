@@ -501,7 +501,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       const rawName = `${canvas.title ?? canvasId}.sediment.json`;
       const asciiFallback = rawName
         .replace(/[^\x20-\x7E]/g, '_')
-        .replace(/['"\\]/g, '_');
+        .replace(/[;'"\\]/g, '_');
       const encodedName = encodeURIComponent(rawName);
       const tmpFile = path.join(tmpdir(), `${createId('tmp')}.json`);
       await writeFile(tmpFile, JSON.stringify(bundle));

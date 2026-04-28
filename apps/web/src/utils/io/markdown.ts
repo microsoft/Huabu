@@ -61,8 +61,8 @@ export function stripMarkdown(input: string): string {
   text = text.replace(/\*\*([^*]+)\*\*/g, '$1'); // **bold**
   text = text.replace(/__([^_]+)__/g, '$1'); // __bold__
   text = text.replace(/~~([^~]+)~~/g, '$1'); // ~~strike~~
-  text = text.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1$2'); // *italic*
-  text = text.replace(/(^|[^_])_([^_\n]+)_/g, '$1$2'); // _italic_
+  text = text.replace(/(^|[^*])\*([^*\n]*[^*\n\\])\*/g, '$1$2'); // *italic*
+  text = text.replace(/(^|[^_])_([^_\n]*[^_\n\\])_(?!_)/g, '$1$2'); // _italic_
 
   // Inline code `code`
   text = text.replace(/`([^`]+)`/g, '$1');

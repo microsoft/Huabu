@@ -292,7 +292,7 @@ export const NoteNode = memo(
         mo.disconnect();
         ro.disconnect();
       };
-    }, [data.content, data.contentJson, data.contentJsonSource]);
+    }, []);
 
     // Truncation only matters in fixed-height mode. Both heights are state,
     // so this re-evaluates when the user resizes the node or the content
@@ -354,9 +354,15 @@ export const NoteNode = memo(
             />
           </div>
           {isTruncated && (
-            <button
-              type="button"
+            <div
+              role="button"
+              tabIndex={0}
               onClick={handleToggleAutoHeight}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  handleToggleAutoHeight(e as unknown as React.MouseEvent);
+                }
+              }}
               className="group absolute right-0 bottom-0 left-0 flex h-10 cursor-pointer items-end justify-center pb-1"
               aria-label="Show all content"
             >
@@ -374,7 +380,7 @@ export const NoteNode = memo(
               >
                 <ChevronsDown size={14} />
               </div>
-            </button>
+            </div>
           )}
         </div>
       </NodeWrapper>

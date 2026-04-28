@@ -426,10 +426,7 @@ export const NodeWrapper = memo(
                   }
                   onClick={() => convertNodeType(id, 'text')}
                 >
-                  {(() => {
-                    const Icon = NODE_ICON.text;
-                    return <Icon />;
-                  })()}
+                  <NODE_ICON.text />
                 </FloatingToolbar.ToggleButton>
                 <FloatingToolbar.ToggleButton
                   active={type === 'note'}
@@ -440,23 +437,18 @@ export const NodeWrapper = memo(
                   }
                   onClick={() => convertNodeType(id, 'note')}
                 >
-                  {(() => {
-                    const Icon = NODE_ICON.note;
-                    return <Icon />;
-                  })()}
+                  <NODE_ICON.note />
                 </FloatingToolbar.ToggleButton>
               </FloatingToolbar.Group>
             ) : (
-              (() => {
-                const TypeIcon = NODE_ICON[type];
-                return (
-                  <Tooltip content={type}>
-                    <div className="text-fg-subtle flex items-center px-1">
-                      <TypeIcon size={14} />
-                    </div>
-                  </Tooltip>
-                );
-              })()
+              <Tooltip content={type}>
+                <div className="text-fg-subtle flex items-center px-1">
+                  {(() => {
+                    const TypeIcon = NODE_ICON[type];
+                    return <TypeIcon size={14} />;
+                  })()}
+                </div>
+              </Tooltip>
             )}
             <div className="bg-border mx-0.5 h-4 w-px" />
             {toolbar}
