@@ -4,6 +4,24 @@
 
 ---
 
+## 2026-04-28 · 用户指南整体重写
+
+**What Changed**
+
+- 用户指南按 Huabu 的两条原则（Externalize Thinking / Share Cognitive Space）整体重写，章节结构调整为 10 篇：
+  - 新增 [02 · 工作区与画布](./02-workspace-and-canvases.md)、[05 · Sources 与知识库](./05-sources-and-knowledge.md)、[09 · 设置与 LLM](./09-settings-and-llm.md)
+  - 合并意图系统与自动布局为 [07 · 意图与自动布局](./07-intent-and-auto-layout.md)
+  - 重命名 06 为 [人机协作](./06-ai-collaboration.md)，把 AI 模式更正为 **Ask / Operate** 两种（Deep Research 已下线）
+  - 节点篇补充 **Question** 与 **Annotation** 两类节点
+- 仓库根 `README.md` 同步对齐 Huabu 框架定位
+
+**Notes**
+
+- 老的章节文件（`02-canvas-basics.md`、`03-nodes.md`、`04-intent-system.md`、`05-auto-layout.md`、`06-ai-chat.md`、`07-shortcuts.md`、`08-data-storage.md`）已被移除，外链请按新文件名更新
+- 文档移除了对 LangGraph / Deep Research / "三种模式" 的过时描述
+
+---
+
 ## 2026-04-27 · Note 节点高度模式与截断指示
 
 **What Changed**
