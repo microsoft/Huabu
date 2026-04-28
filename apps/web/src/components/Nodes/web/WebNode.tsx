@@ -155,7 +155,6 @@ export const WebNode = memo(
                         favicon={preview.favicon}
                         title={preview.title || data?.label || src}
                         accentColor={data.style?.accent}
-                        onInfoClick={() => openExpanded(id)}
                       >
                         {preview.summary ? (
                           <p className="text-fg-muted line-clamp-5 text-base leading-relaxed">

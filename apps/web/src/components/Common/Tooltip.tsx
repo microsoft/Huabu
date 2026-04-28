@@ -1,4 +1,11 @@
-import { cloneElement, useId, useLayoutEffect, useRef, useState } from 'react';
+import {
+  cloneElement,
+  useCallback,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import { createPortal } from 'react-dom';
 
 import type { ReactElement, ReactNode } from 'react';
@@ -9,12 +16,19 @@ type TooltipPosition = {
   maxWidth: number;
 };
 
+export type TooltipPlacement = 'auto' | 'top' | 'bottom';
+
 export type TooltipProps = {
   content: ReactNode;
   children: ReactElement;
   wrapperClassName?: string;
   /** Distance in px between the trigger and the tooltip. Defaults to 8. */
   offset?: number;
+  /**
+   * Preferred placement relative to the trigger. Defaults to `'auto'`,
+   * which picks `top` when there's room and falls back to `bottom`.
+   */
+  placement?: TooltipPlacement;
 };
 
 const clamp = (value: number, min: number, max: number) => {
@@ -28,6 +42,7 @@ export const Tooltip = ({
   children,
   wrapperClassName,
   offset: offsetProp = 8,
+  placement = 'auto',
 }: TooltipProps) => {
   const tooltipId = useId();
   const triggerRef = useRef<HTMLSpanElement | null>(null);
@@ -38,7 +53,7 @@ export const Tooltip = ({
   const isDisabled =
     content === null || content === undefined || content === '';
 
-  const updatePosition = () => {
+  const updatePosition = useCallback(() => {
     const triggerEl = triggerRef.current;
     const tooltipEl = tooltipRef.current;
     if (!triggerEl || !tooltipEl) return;
@@ -64,9 +79,19 @@ export const Tooltip = ({
 
     const yAbove = triggerRect.top - offset - tooltipRect.height;
     const yBelow = triggerRect.bottom + offset;
-    const preferAbove = yAbove >= padding;
+    const fitsAbove = yAbove >= padding;
+    const fitsBelow = yBelow + tooltipRect.height <= viewportHeight - padding;
 
-    const idealY = preferAbove ? yAbove : yBelow;
+    let useAbove: boolean;
+    if (placement === 'top') {
+      useAbove = fitsAbove || !fitsBelow;
+    } else if (placement === 'bottom') {
+      useAbove = !fitsBelow && fitsAbove;
+    } else {
+      useAbove = fitsAbove;
+    }
+
+    const idealY = useAbove ? yAbove : yBelow;
     const y = clamp(
       idealY,
       padding,
@@ -74,7 +99,7 @@ export const Tooltip = ({
     );
 
     setPosition({ x, y, maxWidth });
-  };
+  }, [offsetProp, placement]);
 
   useLayoutEffect(() => {
     if (!isOpen) return;
@@ -89,7 +114,7 @@ export const Tooltip = ({
       window.removeEventListener('resize', onWindowChange);
       window.removeEventListener('scroll', onWindowChange, true);
     };
-  }, [isOpen]);
+  }, [isOpen, updatePosition]);
 
   if (isDisabled) {
     return children;

@@ -153,7 +153,20 @@ export type CanvasCommand =
     }
   | { type: 'SET_NODE_SELECTION'; nodeIds: CanvasNodeId[] }
   | { type: 'SET_EXPANDED_NODE'; nodeId: CanvasNodeId | null }
-  | { type: 'SET_NODE_LOCKED'; items: CanvasNodeLockUpdate[] };
+  | { type: 'SET_NODE_LOCKED'; items: CanvasNodeLockUpdate[] }
+  | {
+      /**
+       * Convert a node between `text` and `note` types. UI-only — used by the
+       * one-click toggle in the node toolbar after a paste lands in the
+       * "wrong" container. Both types share a `content` string field, so the
+       * conversion is loss-aware: switching `note` → `text` drops rich-text
+       * fields (contentJson, provenance) which is acceptable because users
+       * can undo if the result is unwanted.
+       */
+      type: 'CHANGE_NODE_TYPE';
+      nodeId: CanvasNodeId;
+      to: 'text' | 'note';
+    };
 
 export type CanvasCommandType = CanvasCommand['type'];
 
@@ -164,7 +177,8 @@ export type CanvasCommandType = CanvasCommand['type'];
 export type UiOnlyCanvasCommandType =
   | 'SET_NODE_LOCKED'
   | 'SET_NODE_SELECTION'
-  | 'SET_EXPANDED_NODE';
+  | 'SET_EXPANDED_NODE'
+  | 'CHANGE_NODE_TYPE';
 
 /**
  * Subset of CanvasCommand available to the agent.

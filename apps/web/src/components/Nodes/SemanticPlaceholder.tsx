@@ -2,6 +2,8 @@ import { cn } from '@/components/Common/cn';
 import { NODE_TYPE_LABEL } from '@/config/nodeIcons';
 import { useClusterFontSize } from '@/hooks/useClusterFontSize';
 
+import { getAccentTokens } from './accentTokens';
+
 import type { CanvasNodeType, NodeData } from './types';
 
 const ZWS = '\u200B';
@@ -47,6 +49,7 @@ export function SemanticPlaceholder({
   const label = insertSoftBreaks(rawLabel);
 
   const accent = data.style?.accent;
+  const accentTokens = accent ? getAccentTokens(accent) : null;
 
   const fontSize = useClusterFontSize(nodeId, label, width, height);
 
@@ -54,15 +57,15 @@ export function SemanticPlaceholder({
     <div
       className={cn(
         'pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded p-2 transition-all duration-120',
-        !accent && 'bg-surface shadow',
-        accent && 'border-6',
+        !accentTokens && 'bg-surface shadow',
+        accentTokens && 'border-4',
       )}
       style={
-        accent
+        accentTokens
           ? {
-              borderColor: `${accent}80`,
-              background: `color-mix(in srgb, ${accent} 10%, var(--bg-surface))`,
-              color: `color-mix(in srgb, ${accent} 60%, var(--fg-default))`,
+              borderColor: accentTokens.border,
+              background: accentTokens.bg,
+              color: accentTokens.fg,
             }
           : undefined
       }

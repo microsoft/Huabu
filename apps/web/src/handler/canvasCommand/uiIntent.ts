@@ -100,7 +100,9 @@ export type CanvasUiIntent =
       type: 'RESIZE_NODE';
       items: Array<{
         nodeId: string;
-        size?: { width: number; height: number };
+        // `height` is optional: omit (or pass undefined) to clear any
+        // explicit height and let the node fall back to auto-sizing.
+        size?: { width: number; height?: number };
         position?: { x: number; y: number };
       }>;
     }
@@ -125,7 +127,8 @@ export type CanvasUiIntent =
       nodeId: string;
       reorderTarget?: { nodeId: string; position: 'before' | 'after' };
     }
-  | { type: 'EXPAND_NODE'; nodeId: string };
+  | { type: 'EXPAND_NODE'; nodeId: string }
+  | { type: 'CONVERT_NODE_TYPE'; nodeId: string; to: 'text' | 'note' };
 
 // ---------------------------------------------------------------------------
 // Resolver result — commands + trace
@@ -247,6 +250,20 @@ export function resolveUiIntent(
           : [],
       };
     }
+    case 'CONVERT_NODE_TYPE': {
+      const node = ui.nodes.find((n) => n.id === intent.nodeId);
+      if (!node) return { commands: [], trace: [] };
+      return {
+        commands: [
+          {
+            type: 'CHANGE_NODE_TYPE',
+            nodeId: intent.nodeId as CanvasNodeId,
+            to: intent.to,
+          },
+        ],
+        trace: [{ action: 'node_edited', node: extractNodeRef(node) }],
+      };
+    }
   }
 }
 
@@ -365,8 +382,12 @@ function resolveResizeNode(
   ui: UiResolverState,
 ): UiIntentResolution {
   const trace: RecentAction[] = [];
-  const primary = intent.items.find((i) => i.size);
-  if (primary?.size) {
+  // Pick the first item that has a fully-specified size for the trace entry;
+  // height-less updates (used to clear an explicit height) are not recorded.
+  const primary = intent.items.find(
+    (i) => i.size && typeof i.size.height === 'number',
+  );
+  if (primary?.size && typeof primary.size.height === 'number') {
     const node = ui.nodes.find((n) => n.id === primary.nodeId);
     if (node) {
       trace.push({

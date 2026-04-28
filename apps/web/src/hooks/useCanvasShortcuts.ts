@@ -9,7 +9,8 @@ import {
 import {
   uploadFileToNodeInput,
   urlToNodeInput,
-  textToNodeInput,
+  textToNoteNodeInput,
+  textToTextNodeInput,
 } from '../handler/canvasCommand/nodeInputBuilders';
 import useCanvasStore from '../store/canvasStore';
 import { useIntentStore } from '../store/intentStore';
@@ -195,8 +196,16 @@ export function useCanvasShortcuts(
         return;
       }
 
-      // Plain text → note node (label auto-derived by CREATE_NODES)
-      addNode(textToNodeInput(trimmed, getFlowPos(), { type: 'user-pasted' }));
+      // Plain text → text node for short single-line snippets, otherwise
+      // note node. Threshold: trim, no embedded newlines, length < 30.
+      // Users can flip the type with one click via the node toolbar.
+      const SHORT_TEXT_MAX_LENGTH = 30;
+      const isShortSingleLine =
+        !trimmed.includes('\n') && trimmed.length < SHORT_TEXT_MAX_LENGTH;
+      const builder = isShortSingleLine
+        ? textToTextNodeInput
+        : textToNoteNodeInput;
+      addNode(builder(trimmed, getFlowPos(), { type: 'user-pasted' }));
     },
     [addNode, addNodes, getFlowPos],
   );

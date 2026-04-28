@@ -258,7 +258,9 @@ type RFState = {
   setNodeGeometry: (
     items: Array<{
       nodeId: string;
-      size?: { width: number; height: number };
+      // `height` is optional: pass undefined to clear an explicit height
+      // and revert the node to content-driven auto-sizing.
+      size?: { width: number; height?: number };
       position?: { x: number; y: number };
     }>,
   ) => void;
@@ -298,6 +300,8 @@ type RFState = {
   }) => void;
   unframe: (frameId: string) => void;
   toggleNodeLock: (nodeId: string) => void;
+  /** Convert a `text` node to a `note` node or vice-versa (preserves content; undoable). */
+  convertNodeType: (nodeId: string, to: 'text' | 'note') => void;
 
   /**
    * @internal Signal the start of a continuous gesture (drag, resize) that will
@@ -1102,6 +1106,20 @@ const useCanvasStore = create<RFState>()(
 
     toggleNodeLock: (nodeId) => {
       get().dispatchUiIntent({ type: 'TOGGLE_NODE_LOCK', nodeId });
+    },
+
+    convertNodeType: (nodeId, to) => {
+      // Guard: refuse to mutate the node type while the BlockNote editor is
+      // open on this node. The expanded editor holds dirty state that would
+      // otherwise be flushed back onto a node whose type just changed,
+      // overwriting the conversion. The toolbar disables the toggle in this
+      // state — this is a defensive backstop for programmatic callers.
+      const { expandedNodeId, ingestionByNodeId } = get();
+      if (expandedNodeId === nodeId) return;
+      // Guard: don't change type mid-ingest, otherwise the in-flight ingest
+      // result would land on a node that no longer matches its source type.
+      if (ingestionByNodeId[nodeId]?.status === 'pending') return;
+      get().dispatchUiIntent({ type: 'CONVERT_NODE_TYPE', nodeId, to });
     },
 
     beginGesture: (commandType) => {

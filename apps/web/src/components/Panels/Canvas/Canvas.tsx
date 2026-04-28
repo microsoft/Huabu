@@ -24,7 +24,7 @@ import { TextNode } from '@/components/Nodes/text/TextNode';
 import {
   uploadFileToNodeInput,
   urlToNodeInput,
-  textToNodeInput,
+  textToNoteNodeInput,
 } from '@/handler/canvasCommand/nodeInputBuilders';
 import { useCanvasShortcuts } from '@/hooks/useCanvasShortcuts';
 import { useIsTouch } from '@/hooks/useInputMode';
@@ -651,7 +651,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         // ============ 4. Plain text drop ============
         if (plainText) {
           addNode(
-            textToNodeInput(plainText, dropPos, { type: 'user-uploaded' }),
+            textToNoteNodeInput(plainText, dropPos, { type: 'user-uploaded' }),
           );
         }
       }}

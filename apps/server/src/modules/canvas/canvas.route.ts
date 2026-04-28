@@ -498,7 +498,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       // Write bundle to a temp file, then stream it to avoid holding the
       // entire serialised JSON (which can be huge due to base64 artifacts)
       // in memory for the duration of the HTTP transfer.
-      const safeName = (canvas.title ?? canvasId).replace(/[^a-z0-9_-]/gi, '_');
+      const rawName = `${canvas.title ?? canvasId}.sediment.json`;
+      const asciiFallback = rawName
+        .replace(/[^\x20-\x7E]/g, '_')
+        .replace(/[;'"\\]/g, '_');
+      const encodedName = encodeURIComponent(rawName);
       const tmpFile = path.join(tmpdir(), `${createId('tmp')}.json`);
       await writeFile(tmpFile, JSON.stringify(bundle));
 
@@ -510,7 +514,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       return reply
         .header(
           'Content-Disposition',
-          `attachment; filename="${safeName}.sediment.json"`,
+          `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodedName}`,
         )
         .header('Content-Type', 'application/json')
         .send(stream);
