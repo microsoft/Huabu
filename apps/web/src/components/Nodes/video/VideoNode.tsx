@@ -2,6 +2,7 @@ import { type Node, type NodeProps } from '@xyflow/react';
 import { PlayCircle, Fullscreen, Play } from 'lucide-react';
 import { memo } from 'react';
 
+import { resolveArtifactUrl } from '@/api/artifact';
 import useCanvasStore from '@/store/canvasStore.ts';
 
 import { FloatingToolbar } from '../../Common/FloatingToolbar.tsx';
@@ -41,7 +42,7 @@ export const VideoNode = memo(
             {data?.src ? (
               <>
                 <video
-                  src={data.src}
+                  src={resolveArtifactUrl(data.src)}
                   className="pointer-events-none h-full w-full object-contain select-none"
                   preload="metadata"
                   muted

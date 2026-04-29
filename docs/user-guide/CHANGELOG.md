@@ -85,6 +85,43 @@
 **Notes**
 
 - 该提示完全只读，不会拦截鼠标事件；切换到非标注工具或撤销过程中正在等待的标注会即时清除浮层。
+## 2026-04-27 · Note 节点高度模式与截断指示
+
+**What Changed**
+
+- Note 节点的高度有两种明确模式：**自动高度**（默认）与**固定高度**。自动模式下内容完整展开，不再有任何隐式上限；固定模式下保持用户手动设定的尺寸，超出部分被裁剪。
+- 选中 Note 节点时，浮动工具栏新增一个 `MoveVertical` 切换按钮：高亮 = 自动模式，未高亮 = 固定模式。点击即可在两种模式之间切换。
+- 当节点处于固定模式且内容被裁剪时，节点底部出现淡出渐隐，中间显示一个 `ChevronsDown` 角标按钮。
+
+---
+
+## 2026-04-27 · Accent 节点跨 LOD 颜色统一
+
+**What Changed**
+
+- 设置了 `accent` 的节点，其 PreviewCard（完整视图）的标题与图标颜色不再使用饱和的 accent 原色，改为与 SemanticPlaceholder（minimal LOD 占位符）相同的混色公式，保证缩放切换 LOD 时颜色不再"跳变"。
+- SemanticPlaceholder 的 accent 边框由 6px 调整为 4px，视觉更克制。
+
+**Notes**
+
+- 颜色派生集中到 `apps/web/src/components/Nodes/accentTokens.ts`，后续如需统一调整 accent 文本/背景/边框混合比例，只需修改这一处。
+- 该变更只影响视觉，不改变交互或数据。
+
+---
+
+## 2026-04-27 · Text / Note 节点一键互转
+
+**What Changed**
+
+- 选中 `text` 或 `note` 节点时，浮动工具栏左侧的类型图标变为分段开关，单击即可在 Text / Note 之间切换。
+- 粘贴纯文本时按长度自动选择容器：单行且长度 < 30 进入 `text` 节点，否则进入 `note` 节点；后续可随时通过开关切换。
+- `note → text` 转换会把 Markdown 内容拍平为纯文本（剥离标题、强调、列表、链接、代码围栏等语法），并清理仅 note 渲染会用到的 BlockNote JSON 缓存与 block-level provenance。
+
+**Notes**
+
+- 转换不会触碰 `sourceId`：节点与知识库 source 的绑定保留下来，切回 `note` 后可继续 ingest，不会产生 KB 孤儿记录。
+- 当节点正处于大视图编辑（BlockNote 打开）或正在执行 ingest 时，类型开关会被禁用，避免脏状态被回写覆盖转换结果。
+- 所有转换都进入 undo 堆栈，误操作可撤销恢复 `contentJson` / provenance 等附属数据。
 
 ---
 

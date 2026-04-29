@@ -7,6 +7,7 @@ import { Document, Page, pdfjs } from 'react-pdf';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
+import { resolveArtifactUrl } from '@/api/artifact';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { useNodeScale } from '@/hooks/useNodeScale';
 import { useSourceMeta } from '@/hooks/useSourceMeta';
@@ -57,7 +58,7 @@ const FirstPageThumbnail = memo(
         style={{ position: 'absolute', left: -9999, top: -9999 }}
         aria-hidden
       >
-        <Document file={src} loading={null} error={null}>
+        <Document file={resolveArtifactUrl(src)} loading={null} error={null}>
           <Page
             pageNumber={1}
             width={THUMBNAIL_WIDTH}
@@ -91,14 +92,16 @@ export const PDFNode = memo(
       setThumbnail(null);
     }, [src]);
 
-    const coverImage = hasCover ? data.coverUrl : (thumbnail ?? undefined);
+    const coverImage = hasCover
+      ? resolveArtifactUrl(data.coverUrl as string)
+      : (thumbnail ?? undefined);
 
     const handleDownload = useCallback(
       (e: React.MouseEvent) => {
         e.stopPropagation();
         if (!src) return;
         const link = document.createElement('a');
-        link.href = src;
+        link.href = resolveArtifactUrl(src);
         link.download = data.label || src.split('/').pop() || 'document.pdf';
         document.body.appendChild(link);
         link.click();
@@ -178,14 +181,11 @@ export const PDFNode = memo(
                 loading={!coverImage}
                 imagePosition="top"
                 accentColor={data.style?.accent}
-                onInfoClick={() => openExpanded(id)}
               >
                 {summary ? (
-                  <div className="min-h-0 flex-1 overflow-hidden">
-                    <p className="text-fg-muted text-base leading-relaxed">
-                      {summary}
-                    </p>
-                  </div>
+                  <p className="text-fg-muted line-clamp-5 text-base leading-relaxed">
+                    {summary}
+                  </p>
                 ) : null}
               </PreviewCard>
             ) : (

@@ -97,15 +97,31 @@ export function urlToNodeInput(
 }
 
 /**
- * Build an `AddNodeInput` for a plain-text note node.
+ * Build an `AddNodeInput` for a `note` node holding the given plain text.
+ * Use this for multi-line / longer text where rich formatting may be needed.
  */
-export function textToNodeInput(
+export function textToNoteNodeInput(
   text: string,
   placementPoint: Point,
   origin: NodeOrigin,
 ): AddNodeInput {
   return {
     nodeType: 'note',
+    placementPoint,
+    data: { content: text, origin },
+  };
+}
+
+/**
+ * Build an `AddNodeInput` for a lightweight text node (single short line).
+ */
+export function textToTextNodeInput(
+  text: string,
+  placementPoint: Point,
+  origin: NodeOrigin,
+): AddNodeInput {
+  return {
+    nodeType: 'text',
     placementPoint,
     data: { content: text, origin },
   };

@@ -16,6 +16,7 @@ import {
   type NodeLike,
 } from './canvas.filestore.js';
 import { getExtFromMime, getMimeType } from '../../utils/mime.js';
+import { ARTIFACT_API_PREFIX } from '../artifact/utils.js';
 import { getKnowledgeRepository } from '../knowledge/index.js';
 import { getPreprocessDispatcher } from '../preprocessing/index.js';
 import { getArtifactsDir } from '../workspace.js';
@@ -439,6 +440,23 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         }
       }
 
+      // Normalise artifact src to portable relative paths (strip any absolute origin)
+      for (const node of nodes) {
+        if (
+          node.type !== 'pdf' &&
+          node.type !== 'image' &&
+          node.type !== 'video'
+        )
+          continue;
+        const src = node.data?.src as string | undefined;
+        if (!src) continue;
+        const artifactIdx = src.indexOf(ARTIFACT_API_PREFIX);
+        if (artifactIdx !== -1) {
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+          node.data!.src = src.slice(artifactIdx);
+        }
+      }
+
       // Convert PDF cover URLs to inline data URLs for cross-machine portability
       for (const node of nodes) {
         if (node.type !== 'pdf') continue;
@@ -480,7 +498,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       // Write bundle to a temp file, then stream it to avoid holding the
       // entire serialised JSON (which can be huge due to base64 artifacts)
       // in memory for the duration of the HTTP transfer.
-      const safeName = (canvas.title ?? canvasId).replace(/[^a-z0-9_-]/gi, '_');
+      const rawName = `${canvas.title ?? canvasId}.sediment.json`;
+      const asciiFallback = rawName
+        .replace(/[^\x20-\x7E]/g, '_')
+        .replace(/[;'"\\]/g, '_');
+      const encodedName = encodeURIComponent(rawName);
       const tmpFile = path.join(tmpdir(), `${createId('tmp')}.json`);
       await writeFile(tmpFile, JSON.stringify(bundle));
 
@@ -492,7 +514,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       return reply
         .header(
           'Content-Disposition',
-          `attachment; filename="${safeName}.sediment.json"`,
+          `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodedName}`,
         )
         .header('Content-Type', 'application/json')
         .send(stream);
@@ -545,9 +567,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     // Always generate a new canvas ID so imports never overwrite existing canvases
     const targetCanvasId = createId('canvas');
 
-    // 0. Normalise PDF cover images
+    // 0. Normalise PDF cover images — convert inline base64 data URLs to files
     const artifactsDir = getArtifactsDir();
-    const serverOrigin = `${request.protocol}://${request.headers.host as string}`;
     const bundleArtifactFilenames = new Set(
       bundle.artifacts.map((a) => path.basename(a.filename)),
     );
@@ -574,7 +595,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
             new Uint8Array(Buffer.from(base64Data, 'base64')),
           );
           // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          node.data!.coverUrl = `${serverOrigin}/api/artifact/${filename}`;
+          node.data!.coverUrl = `${ARTIFACT_API_PREFIX}/${filename}`;
         } catch (err) {
           request.log.error(
             { filename, err },
@@ -582,6 +603,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           );
         }
       } else {
+        // Normalise cover URL to relative path
         const coverFilename = path.basename(coverUrl);
         const willExist =
           bundleArtifactFilenames.has(coverFilename) ||
@@ -589,7 +611,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
         if (willExist) {
           // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          node.data!.coverUrl = `${serverOrigin}/api/artifact/${coverFilename}`;
+          node.data!.coverUrl = `${ARTIFACT_API_PREFIX}/${coverFilename}`;
         } else {
           // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
           delete node.data!.coverUrl;
@@ -598,6 +620,25 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
             'Cover image not available during import, removed coverUrl',
           );
         }
+      }
+    }
+
+    // 0b. Normalise artifact src to relative paths
+    for (const raw of bundle.canvas.nodes) {
+      const node = raw as NodeLike;
+      if (node.type !== 'image' && node.type !== 'video' && node.type !== 'pdf')
+        continue;
+      const src = node.data?.src as string | undefined;
+      if (!src) continue;
+
+      const srcFilename = path.basename(src);
+      const willExist =
+        bundleArtifactFilenames.has(srcFilename) ||
+        existsSync(path.join(artifactsDir, srcFilename));
+
+      if (willExist) {
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        node.data!.src = `${ARTIFACT_API_PREFIX}/${srcFilename}`;
       }
     }
 

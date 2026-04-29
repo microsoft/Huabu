@@ -8,6 +8,7 @@
 
 import alignNodes from './alignNodes';
 import autoLayout from './autoLayout';
+import changeNodeType from './changeNodeType';
 import connectNodes from './connectNodes';
 import createNodes from './createNodes';
 import createQuestion from './createQuestion';
@@ -58,6 +59,7 @@ export const HANDLERS: HandlerMap = {
   ALIGN_NODES: alignNodes.handler,
   DISTRIBUTE_NODES: distributeNodes.handler,
   AUTO_LAYOUT: autoLayout.handler,
+  CHANGE_NODE_TYPE: changeNodeType.handler,
 };
 
 // ---------------------------------------------------------------------------
@@ -82,6 +84,7 @@ export const COMMAND_META: Record<CanvasCommandType, CommandMeta> = {
   ALIGN_NODES: alignNodes.meta,
   DISTRIBUTE_NODES: distributeNodes.meta,
   AUTO_LAYOUT: autoLayout.meta,
+  CHANGE_NODE_TYPE: changeNodeType.meta,
 };
 
 // Re-export types for consumers.

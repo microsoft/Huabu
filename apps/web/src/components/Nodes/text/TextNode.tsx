@@ -30,8 +30,8 @@ const FONT_FAMILY_OPTIONS: { name: string; value: NodeFontFamily }[] = [
 
 /** Padding inside the node (px on each side). */
 const NODE_PADDING = 4;
-/** Border width NodeWrapper applies when an accent colour is set (`border-2`). */
-const ACCENT_BORDER = 2;
+/** Border width NodeWrapper applies when an accent color is set (`border-3`). */
+const ACCENT_BORDER = 3;
 
 export type TextNodeType = Node<CanvasTextNodeData, 'text'>;
 
@@ -195,7 +195,7 @@ export const TextNode = memo(
               style: { ...data.style, textColor: v },
             })
           }
-          title="Change Text Color"
+          title="Text Color"
         >
           <Baseline
             style={{
@@ -211,7 +211,7 @@ export const TextNode = memo(
               style: { ...data.style, backgroundColor: v },
             })
           }
-          title="Change Color"
+          title="Background Color"
         />
       </>
     );

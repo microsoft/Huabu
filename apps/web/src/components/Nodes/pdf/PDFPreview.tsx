@@ -3,7 +3,7 @@ import { Highlighter, Scan } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Document } from 'react-pdf';
 
-import { uploadImage } from '@/api/artifact';
+import { resolveArtifactUrl, uploadImage } from '@/api/artifact';
 import {
   computeHighlightUpdate,
   mergeLineRects,
@@ -42,6 +42,7 @@ type PendingCaptureDrag = {
 
 export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
   const src = typeof data.src === 'string' ? data.src : '';
+  const resolvedSrc = resolveArtifactUrl(src);
   const sourceId =
     typeof data.sourceId === 'string' ? data.sourceId : undefined;
   const addPendingAttachment = useChatStore((s) => s.addPendingAttachment);
@@ -371,7 +372,7 @@ export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
             }}
           >
             <Document
-              file={src}
+              file={resolvedSrc}
               onLoadSuccess={onDocumentLoadSuccess}
               loading=""
               error={

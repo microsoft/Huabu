@@ -42,7 +42,7 @@ export function TabGroup<T extends string = string>({
         <Button
           key={option.value}
           variant="ghost"
-          size="sm"
+          size="md"
           className={
             option.value === value
               ? 'bg-bg-default text-fg-default'
