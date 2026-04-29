@@ -299,14 +299,163 @@ read_source / get_node_detail / search_knowledge / canvas_commands ...
 
 ---
 
-## 6. 推荐切入顺序
+## 6. Context 分发策略(按功能切片)
+
+前文的 Tier 1–4 是"我们能加什么";本节回答的是 **"加完之后,每个功能各自该
+默认看到什么、该靠工具按需取什么"**。这是一份全局的分发契约,避免出现
+"所有 LLM 调用都把所有 context 一股脑塞进去"的失控状态。
+
+### 6.1 思想分层(再次明确)
+
+| 层  | 字段                                                             | 谁产生            | 默认是否进上下文       | 真要的时候怎么拿          |
+| --- | ---------------------------------------------------------------- | ----------------- | ---------------------- | ------------------------- |
+| L0  | `id` / `type` / `label` / `frameId` / `position` / `size`        | 用户 + 系统       | **总是**(Always-on)    | —                         |
+| L1  | `summary`(1–3 句)/ `keywords` / `origin` / `epistemicStatus`     | enrich + 用户标注 | **大多数 AI 功能默认** | 工具 `get_node_digest`    |
+| L2  | `content`(markdown)/ `contentJson` / `provenance` / `highlights` | 节点本体 + 历史   | **永远不默认**         | 工具 `get_node_detail` 等 |
+
+L0 是"画布的骨架",L1 是"画布的语义索引",L2 是"画布的全文"。
+
+### 6.2 判定一个信号默认 vs 工具的三条准则
+
+1. **基数与体积**:数量随节点数线性增长且单条 > 200 字符 → 默认走 L1 摘要,
+   L2 走工具(典型:Note 正文、PDF 全文)。
+2. **决策必要性**:Agent 是否**每次**都需要它来选择下一步动作?是 → 默认;
+   否 → 工具(典型:`recentActions` 是;BlockProvenance 不是)。
+3. **新鲜度敏感**:数据变化频繁且消费方对时延敏感(如 viewport / hover)
+   → 走 **轻量轮询字段** 而不是塞历史消息;否则可以让工具按需取最新。
+
+### 6.3 功能 × 信号 矩阵
+
+> ✅ 默认提供 / 🛠 通过工具按需 / ✗ 不暴露 / 👁 通过视觉(截图)
+
+| 信号                                  | Ask       | Operate   | Intent (Ctrl+I) | Annotation Intent | Preprocessing | Prompt Node |
+| ------------------------------------- | --------- | --------- | --------------- | ----------------- | ------------- | ----------- |
+| L0 节点骨架 (`NodeSummary` 全集)      | ✅        | ✅        | ✅              | 👁 + 节点 id 角标 | ✗(单节点)     | ✅(邻居)    |
+| L1 摘要 (`aiDigest`)                  | ✅        | ✅        | ✅              | ✗                 | ✗             | ✅(邻居)    |
+| 选中节点元数据 (`SelectedNodeDetail`) | ✅        | ✅        | ✅              | ✗                 | ✗             | ✅(自身)    |
+| 选中节点正文                          | 🛠        | 🛠        | 🛠              | ✗                 | 自身全文      | ✅(自身)    |
+| 边(source/target)                     | ✅        | ✅        | ✅              | ✗                 | ✗             | 邻接边      |
+| 边语义(T2-B)                          | ✅        | ✅        | ✅              | ✗                 | ✗             | ✅          |
+| Frame 树(T2-A)                        | ✅        | ✅        | ✅              | ✗                 | ✗             | ✅(本枝)    |
+| 空间聚类 `spatialSummary`             | ✅        | ✅        | ✅              | ✗                 | ✗             | ✗           |
+| 视口 `viewport`(T3-A)                 | ✅        | ✅        | ✅              | 隐含于截图        | ✗             | ✗           |
+| 截图                                  | 🛠 opt-in | 🛠 opt-in | ✅(标注增强)    | ✅(主输入)        | ✗             | ✗           |
+| Annotation 语义(T3-C)                 | ✅        | ✅        | ✅              | ✅                | ✗             | ✗           |
+| `recentActions` + 时间戳              | ✅        | ✅        | ✅              | ✗                 | ✗             | ✗           |
+| 聊天历史                              | ✅        | ✅        | ✗               | ✗                 | ✗             | ✗           |
+| 知识库源全文                          | 🛠        | 🛠        | ✗               | ✗                 | ✗             | 🛠          |
+| 节点 provenance                       | 🛠        | 🛠        | ✗               | ✗                 | ✗             | ✗           |
+| 跨 canvas 索引(T4-B)                  | 🛠        | 🛠        | ✗               | ✗                 | ✗             | ✗           |
+| 用户偏好                              | ✅(精简)  | ✅(精简)  | ✗               | ✗                 | ✗             | ✗           |
+
+### 6.4 每个功能的"上下文配方"
+
+#### A. Ask(对话答疑)
+
+- **默认**:L0 全部 + L1 全部 + 选中节点元数据 + 边 + spatialSummary
+  - `recentActions`(带时间戳)+ 聊天历史 + viewport。
+- **可选**:截图(用户开关 / 当问句含"看一下""这片区域"等关键词时自动附带)。
+- **工具**:`get_node_detail`(单节点)/ `get_node_details_batch`(新增,多节点合并取)
+  / `read_source` / `search_knowledge` / `web_search` / `get_provenance`。
+- **要点**:Ask 重在"读"和"答",**不发任何节点正文**,把 token 留给上下文广度
+  和后续工具调用。
+
+#### B. Operate(画布改写)
+
+- **默认**:同 Ask + **结构索引**(`frameTree` + `edgesByNode`,T2-A)+
+  **边语义**(T2-B)+ **节点认知状态**(T2-C,让 AI 知道哪些是 confirmed
+  不能轻易改)+ 技能目录摘要。
+- **可选**:截图(同上)。
+- **工具**:Ask 全部 + `canvas_commands` + `use_skill`
+  - `get_provenance`(改前必查)。
+- **要点**:Operate 多了 **"改写前的安全检查"** 需求,所以结构与状态字段优先于
+  Ask;但仍坚持 **正文走工具**,避免一次 prompt 就把整张画布塞满。
+
+#### C. Intent(Ctrl+I)
+
+- **默认**:L0 + L1 + 选中节点元数据 + spatialSummary + 截图(带最近动作高亮)
+  - `recentActions`(短窗口,3–5 条)+ viewport。
+- **不发**:聊天历史(意图是"此刻的画布",和聊天分支无关)、节点正文、
+  knowledge 源(若需要 → 由后续被选中的 intent 触发的 ask/operate 阶段去取)。
+- **工具**:基本不走工具(单 LLM 调用,流式返回 JSON);若必要可读 `read_source`。
+- **要点**:Intent 是**最贵**的"看一眼就要给五个建议"的功能,**视觉信号(截图)
+  是它的核心**,文字 context 应当**精简到 L0 + L1**。
+
+#### D. Annotation Intent(笔触意图)
+
+- **默认**:截图(带红色笔触和被圈节点 id 角标)+ 被圈节点的 L0(id/type/label
+  即可,不带 L1)+ Annotation 语义字段(T3-C 提供的圈选/箭头/划掉粗判)。
+- **不发**:任何文本上下文。
+- **要点**:这是**视觉优先**的功能,文字越少越好,**Annotation 语义字段**
+  让模型不必完全依赖图像识别也能稳定理解"用户圈住了 A、B、C"。
+
+#### E. Preprocessing(后台 enrich)
+
+- **默认**:**只**节点自身的 ResolvedInput / 提取后的内容。无任何画布上下文。
+- **要点**:enrich 的目标是"为这个节点生产 L1 摘要",必须保持**单节点纯函数**
+  特性,以便:
+  - 缓存友好(指纹一致就跳过)
+  - 可批量并行
+  - 不会因为"画布上下文变了"导致同一节点 enrich 结果漂移
+- **可改进**:Frame label 合成可以带"兄弟 frame 的现有名字"来避免重名,但
+  仍属于**结构信号**,不引入 L1/L2。
+
+#### F. Prompt Node(画布上的提问节点)
+
+- **默认**:节点自身正文(L2)+ 邻接节点(通过边或包围 frame)的 L0+L1
+  - 邻接节点正文(L2,但限定半径,如距离 < 2 跳)。
+- **不发**:全画布、聊天历史(prompt 节点天然是"局部对话")。
+- **工具**:同 Ask。
+- **要点**:这是 **"局部画布即上下文"** 的特殊功能,空间近邻代替全画布广度。
+
+### 6.5 该新增的 Tool 一览
+
+按"减少 round-trip / 把 L2 放到工具层"的原则,推荐以下工具(在现有
+[tools/definitions.ts](../apps/server/src/modules/agent/tools/definitions.ts)
+基础上补齐):
+
+| 工具                                  | 输入                | 返回                                                   | 解决的问题                                        |
+| ------------------------------------- | ------------------- | ------------------------------------------------------ | ------------------------------------------------- |
+| `get_node_details_batch`              | `nodeIds: string[]` | `Array<{ nodeId, content, contentJson?, sourceId? }>`  | 一次取多节点正文,避免 N 次 `get_node_detail`      |
+| `get_node_provenance(nodeId)`         | `nodeId`            | BlockProvenance(作者/时间/AI 修改/pending diff)        | Operate 前的安全检查,避免误覆盖用户内容           |
+| `get_block_tree(nodeId)`              | `nodeId`            | BlockNote 结构化树(标题/段落/列表/code 块)             | 让模型理解文档结构而不必再 parse markdown         |
+| `get_annotation_strokes(nodeId)`      | `nodeId`            | 简化几何(包围盒 / 圈中节点 / 形状粗判)                 | Annotation 节点的语义解读,不必依赖整张截图        |
+| `get_recent_history(canvasId, since)` | `since: ts`         | 超出 ring buffer 的更长动作历史                        | 复盘"昨天我做了什么"                              |
+| `list_canvases(workspace)`            | —                   | `Array<{ canvasId, title, lastUpdated, topKeywords }>` | 让 Agent 知道工作区还有哪些 canvas                |
+| `get_canvas_digest(canvasId)`         | `canvasId`          | 该 canvas 的 L0+L1 + 顶层 frame 树                     | 跨 canvas 跳转的"轻量观察"                        |
+| `get_viewport_snapshot()`             | —                   | 当前视口 PNG                                           | 让 Ask/Operate 也能在被询问"这片区域"时主动取截图 |
+
+### 6.6 永远不进默认上下文(无论功能)
+
+无论是哪个功能,以下数据**始终**走工具而非默认上下文,因为它们要么过大、
+要么使用频率低、要么会引入噪声:
+
+- 节点正文(L2 markdown)
+- BlockNote 完整 contentJson
+- BlockProvenance 全量(per-block 修改记录)
+- Annotation 节点的原始 `points` 几何数组
+- 知识库源的全文
+- 跨 canvas 的全画布状态
+- 历史 checkpoint 的完整序列(只暴露必要切片)
+
+### 6.7 一句话总结
+
+> **L0/L1 让 Agent "看清结构",L2 留给工具按需取;
+> 视觉信号优先服务"意图与笔触";
+> Preprocessing 必须是单节点纯函数,不引入画布上下文。**
+
+---
+
+## 7. 推荐切入顺序
 
 1. **T1-A**(全节点 aiDigest) — 单 PR、最高 ROI、不改 schema、立刻能感知效果。
 2. **T2-C**(epistemicStatus) — 把"思考状态"显化,直接对齐
    Externalize Thinking。
 3. **T2-A / T2-B**(结构索引 + 边语义) — 让结构变成一等公民。
 4. **T3-A / T3-C**(viewport + annotation 语义) — 让 Agent 真正"在场"。
-5. **T4**(vault 镜像、跨 canvas) — 长期愿景。
+5. **新增 Tool**(`get_node_details_batch` / `get_provenance` / `get_canvas_digest`)
+   — 把"L2 走工具"的契约真正闭环。
+6. **T4**(vault 镜像、跨 canvas) — 长期愿景。
 
 ---
 
