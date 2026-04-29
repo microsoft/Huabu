@@ -45,6 +45,7 @@ export const NoteNode = memo(
   ({ id, data, selected }: NodeProps<NoteNodeType>) => {
     const openExpanded = useCanvasStore((s) => s.openExpanded);
     const setNodeGeometry = useCanvasStore((s) => s.setNodeGeometry);
+    const patchNodeSilent = useCanvasStore((s) => s.patchNodeSilent);
     const scale = useNodeScale(id, 'note');
     const viewportZoom = useStore((s) => s.transform[2]);
     const counterZoomScale = Math.min(3, Math.max(1, 1 / viewportZoom));
@@ -66,7 +67,18 @@ export const NoteNode = memo(
     // Latest measured rendered content height & host (visible) height.
     // Both are kept in state so the truncation indicator re-evaluates when
     // either the content grows/shrinks or the user resizes the node.
-    const [contentHeight, setContentHeight] = useState(0);
+    //
+    // `contentHeight` is seeded from the persisted `data.measuredHeight`
+    // hint so an auto-height note paints at its real size on the very
+    // first frame after mount — without the seed, the node would briefly
+    // collapse to `AUTO_HEIGHT_MIN` while waiting for BlockNote to mount
+    // and the ResizeObserver to fire (visible flicker during virtualized
+    // remounts, zoom changes, and page reloads).
+    const seededHeight =
+      typeof data.measuredHeight === 'number' && data.measuredHeight > 0
+        ? data.measuredHeight
+        : 0;
+    const [contentHeight, setContentHeight] = useState(seededHeight);
     const [hostHeight, setHostHeight] = useState(0);
 
     // Read the current explicit height (if any) so we can remember it as
@@ -302,6 +314,21 @@ export const NoteNode = memo(
       contentHeight > 0 &&
       hostHeight > 0 &&
       contentHeight - hostHeight > 1;
+
+    // Persist the measured intrinsic content height back into node data so
+    // the next mount (virtualization remount, zoom-triggered re-render,
+    // page reload) can seed `contentHeight` immediately and skip the
+    // first-frame collapse to `AUTO_HEIGHT_MIN`.
+    //
+    // Silent patch (no undo entry) and gated on a >1px delta to avoid
+    // spamming the store with sub-pixel jitter from the ResizeObserver.
+    useEffect(() => {
+      if (contentHeight <= 0) return;
+      const persisted =
+        typeof data.measuredHeight === 'number' ? data.measuredHeight : 0;
+      if (Math.abs(persisted - contentHeight) <= 1) return;
+      patchNodeSilent(id, { measuredHeight: contentHeight });
+    }, [contentHeight, data.measuredHeight, id, patchNodeSilent]);
 
     return (
       <NodeWrapper
