@@ -37,6 +37,7 @@ import type {
   IntentCandidate,
   AnnotationClusterContext,
   AnnotationNearbyEdge,
+  ShapeClassification,
 } from '@sediment/shared';
 import type { Node } from '@xyflow/react';
 
@@ -67,6 +68,20 @@ export interface AnnotationProcessingCluster {
    * Only populated once `status === 'done'`.
    */
   changes?: CanvasChange[];
+  /** Shape classifier output (line / arrow / circle / cross / scribble / other). */
+  shape?: ShapeClassification;
+  /** Which path produced the commands: deterministic rule engine vs LLM fallback. */
+  source?: 'rule' | 'llm';
+  /** One-sentence reason describing what the user meant. */
+  reasoning?: string;
+  /** Raw canvas commands produced for this cluster. */
+  commands?: CanvasCommand[];
+  /** Short text summary of the nearby / enclosed nodes used as context. */
+  contextSummary?: string;
+  /** Canvas id this cluster was recognised against. */
+  canvasId?: string;
+  /** Set when LLM recognition failed for this cluster. */
+  error?: string;
 }
 
 interface IntentState {
@@ -320,23 +335,26 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
       ? current
       : [...current, annotationNodeId];
 
-    // If a previous batch finished and is still showing 'done' overlays,
-    // wipe them now — the user is starting a fresh gesture.
-    const prevDoneOnly =
-      state.processingClusters.length > 0 &&
-      state.processingClusters.every((c) => c.status === 'done');
-    const baseClusters = prevDoneOnly ? [] : state.processingClusters;
+    // Preserve any `done` overlays from previous batches — they carry the
+    // only UI to Accept/Revert already-applied commands, so silently
+    // dropping them would strand those changes on the canvas.
+    const doneClusters = state.processingClusters.filter(
+      (c) => c.status === 'done',
+    );
+    const prevInProgress = state.processingClusters.filter(
+      (c) => c.status !== 'done',
+    );
 
-    // Recompute overlay clusters from the live pending stroke set so the
-    // overlay grows immediately as the user keeps drawing.
+    // Recompute in-progress overlay clusters from the live pending stroke
+    // set so the overlay grows immediately as the user keeps drawing.
     const { nodes } = useCanvasStore.getState();
     const strokes = collectStrokes(nextPending, nodes);
     const clusters = clusterAnnotations(strokes);
 
-    // Preserve status from existing clusters keyed by stroke ids; new
-    // clusters start in 'preparing' (user is still drawing).
-    const prevById = new Map(baseClusters.map((c) => [c.id, c]));
-    const nextProcessing: AnnotationProcessingCluster[] = clusters.map((c) => {
+    // Preserve status from existing in-progress clusters keyed by stroke
+    // ids; new clusters start in 'preparing' (user is still drawing).
+    const prevById = new Map(prevInProgress.map((c) => [c.id, c]));
+    const inProgress: AnnotationProcessingCluster[] = clusters.map((c) => {
       const id = clusterKey(c);
       const prev = prevById.get(id);
       return {
@@ -350,7 +368,7 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
 
     set({
       pendingAnnotationIds: nextPending,
-      processingClusters: nextProcessing,
+      processingClusters: [...doneClusters, ...inProgress],
     });
 
     // Reset the idle timer
@@ -444,6 +462,49 @@ let _annotationAbortController: AbortController | null = null;
 /** Stable id for a cluster derived from its annotation node ids. */
 function clusterKey(cluster: AnnotationCluster): string {
   return cluster.strokeIds.slice().sort().join('|');
+}
+
+/**
+ * Build a short human-readable summary of the spatial context used by the
+ * resolver. Used by the cluster inspector to explain "what the AI saw".
+ */
+function buildContextSummary(ctx: AnnotationContext): string {
+  const parts: string[] = [];
+  parts.push(
+    `Shape: ${ctx.shape.type} (confidence ${ctx.shape.confidence.toFixed(2)})`,
+  );
+  if (ctx.enclosedNodes.length > 0) {
+    const labels = ctx.enclosedNodes
+      .slice(0, 5)
+      .map((n) => n.label ?? n.id)
+      .join(', ');
+    parts.push(
+      `Enclosed (${ctx.enclosedNodes.length}): ${labels}${ctx.enclosedNodes.length > 5 ? '…' : ''}`,
+    );
+  }
+  if (ctx.startNode || ctx.endNode) {
+    const from = ctx.startNode
+      ? (ctx.startNode.label ?? ctx.startNode.id)
+      : '?';
+    const to = ctx.endNode ? (ctx.endNode.label ?? ctx.endNode.id) : '?';
+    parts.push(`Endpoints: ${from} → ${to}`);
+  }
+  if (ctx.nearbyNodes.length > 0) {
+    const labels = ctx.nearbyNodes
+      .slice(0, 5)
+      .map(
+        (n) =>
+          `${n.label ?? n.id} (${Math.round(n.distance)}px ${n.direction})`,
+      )
+      .join(', ');
+    parts.push(
+      `Nearby (${ctx.nearbyNodes.length}): ${labels}${ctx.nearbyNodes.length > 5 ? '…' : ''}`,
+    );
+  }
+  if (ctx.nearbyEdges.length > 0) {
+    parts.push(`Nearby edges: ${ctx.nearbyEdges.length}`);
+  }
+  return parts.join('\n');
 }
 
 /**
@@ -577,6 +638,25 @@ async function triggerAnnotationRecognition(
   const annotationIds = [...pendingAnnotationIds];
   set({ pendingAnnotationIds: [] });
 
+  // Bind this recognition run to the current canvas. If the user switches
+  // canvases (or the canvas reloads) before we commit, we must abandon the
+  // result rather than apply commands referencing strokes from the wrong
+  // canvas.
+  const startCanvasId = useCanvasStore.getState().canvasId;
+  const isStillCurrent = () =>
+    useCanvasStore.getState().canvasId === startCanvasId;
+
+  // Drop only this batch's in-progress overlays, leaving any `done`
+  // overlays from previous batches untouched (their Accept/Revert UI is
+  // the only way to undo already-applied commands).
+  const clearBatchInProgress = () => {
+    set({
+      processingClusters: get().processingClusters.filter(
+        (c) => c.status === 'done',
+      ),
+    });
+  };
+
   // Abort any previously in-flight annotation LLM request
   _annotationAbortController?.abort();
   _annotationAbortController = new AbortController();
@@ -586,23 +666,48 @@ async function triggerAnnotationRecognition(
 
   // ── Stage 1: Cluster ──────────────────────────────────────────
   const strokes = collectStrokes(annotationIds, nodes);
-  if (strokes.length === 0) return;
+  if (strokes.length === 0) {
+    // Strokes were deleted before recognition fired — drop the leftover
+    // 'preparing'/'pending' overlays so they don't linger forever.
+    clearBatchInProgress();
+    return;
+  }
 
   const clusters = clusterAnnotations(strokes);
-  // Refresh the overlay clusters and flip them to 'pending' — the idle timer
-  // has fired, so we are now actively preparing the request.
-  const initialProcessing: AnnotationProcessingCluster[] = clusters.map(
-    (c) => ({
-      id: clusterKey(c),
-      strokeIds: c.strokeIds,
-      status: 'pending',
-    }),
-  );
-  set({ processingClusters: initialProcessing });
+  // Set of cluster ids owned by THIS batch. All subsequent state updates
+  // are scoped to these ids so unrelated `done` overlays are preserved.
+  const batchIds = new Set(clusters.map((c) => clusterKey(c)));
+
   // ── Stage 2: Classify + extract context ───────────────────────
+  // Run classification BEFORE writing initial batch state so we can attach
+  // the shape + context summary immediately for the inspector panel.
   const contextsByCluster: AnnotationContext[] = clusters.map((cluster) => {
     const shape = classifyShape(cluster);
     return extractAnnotationContext(cluster, shape, nodes, edges);
+  });
+  const ctxByClusterId = new Map(
+    contextsByCluster.map((c) => [clusterKey(c.cluster), c]),
+  );
+
+  // Refresh the overlay clusters and flip them to 'pending' — the idle timer
+  // has fired, so we are now actively preparing the request.
+  const initialBatch: AnnotationProcessingCluster[] = clusters.map((c) => {
+    const cid = clusterKey(c);
+    const ctx = ctxByClusterId.get(cid);
+    return {
+      id: cid,
+      strokeIds: c.strokeIds,
+      status: 'pending',
+      canvasId: startCanvasId ?? undefined,
+      shape: ctx?.shape,
+      contextSummary: ctx ? buildContextSummary(ctx) : undefined,
+    };
+  });
+  set({
+    processingClusters: [
+      ...get().processingClusters.filter((c) => !batchIds.has(c.id)),
+      ...initialBatch,
+    ],
   });
 
   // ── Stage 3: Resolve intents (rule-based fast path + LLM fallback) ──
@@ -625,31 +730,57 @@ async function triggerAnnotationRecognition(
   }
 
   // LLM fallback for clusters the rule engine couldn't resolve
+  const errorByCluster = new Map<string, string>();
   if (llmPending.length > 0 && !signal.aborted) {
-    try {
-      // Switch all clusters to 'running' the moment we start preparing
-      // per-cluster screenshots and firing requests.
-      set({
-        processingClusters: get().processingClusters.map((c) => ({
-          ...c,
-          status: 'running',
-        })),
-      });
-      // Process LLM clusters sequentially. Each cluster shares the same
-      // viewport screenshot for now; per-cluster bbox highlighting and edge
-      // re-drawing are not yet wired through `captureCanvasScreenshot`.
-      for (const { clusterId: cid, ctx } of llmPending) {
-        if (signal.aborted) break;
+    // Switch this batch's clusters to 'running' the moment we start firing
+    // requests. Other batches' clusters are left alone.
+    set({
+      processingClusters: get().processingClusters.map((c) =>
+        batchIds.has(c.id) ? { ...c, status: 'running' } : c,
+      ),
+    });
+
+    // Per-cluster LLM calls are independent — fire them in parallel.
+    // They share the same AbortSignal so a cancellation halts the batch.
+    // Each cluster shares the same viewport screenshot for now;
+    // per-cluster bbox highlighting is not yet wired through
+    // `captureCanvasScreenshot`.
+    const llmResults = await Promise.allSettled(
+      llmPending.map(async ({ clusterId: cid, ctx }) => {
+        if (signal.aborted)
+          return { cid, value: null as ResolvedAnnotationIntent | null };
         const screenshot = await captureCanvasScreenshot({
           stripPrefix: true,
         });
-        if (!screenshot || signal.aborted) continue;
+        if (!screenshot || signal.aborted) return { cid, value: null };
         const result = await resolveByLLM(ctx, screenshot, signal);
-        if (result) resolvedIntents.push({ clusterId: cid, intent: result });
-      }
-    } catch (err) {
-      if ((err as Error).name !== 'AbortError') {
-        console.error('[Annotation Intent] LLM fallback failed:', err);
+        return { cid, value: result };
+      }),
+    );
+
+    for (const r of llmResults) {
+      if (r.status === 'fulfilled') {
+        const { cid, value } = r.value;
+        if (value) {
+          resolvedIntents.push({ clusterId: cid, intent: value });
+        } else if (!signal.aborted) {
+          errorByCluster.set(cid, 'No intent recognised by LLM');
+        }
+      } else {
+        const err = r.reason as Error | undefined;
+        if (err?.name !== 'AbortError') {
+          console.error('[Annotation Intent] LLM fallback failed:', err);
+        }
+        // We don't know which cluster failed (allSettled erased the index);
+        // mark all still-unresolved llmPending clusters with the error.
+        const unresolved = new Set(llmPending.map((p) => p.clusterId));
+        for (const { clusterId } of resolvedIntents)
+          unresolved.delete(clusterId);
+        for (const cid of unresolved) {
+          if (!errorByCluster.has(cid)) {
+            errorByCluster.set(cid, err?.message ?? 'LLM call failed');
+          }
+        }
       }
     }
   }
@@ -657,6 +788,13 @@ async function triggerAnnotationRecognition(
   if (signal.aborted) {
     // A newer batch (or user cancel) superseded us — leave any existing
     // overlay state to whoever caused the abort.
+    return;
+  }
+
+  // Canvas changed under us during the LLM call — abandon results so we
+  // don't apply commands referencing the wrong canvas.
+  if (!isStillCurrent()) {
+    clearBatchInProgress();
     return;
   }
 
@@ -708,26 +846,49 @@ async function triggerAnnotationRecognition(
 
     // For rule-only batches the overlay is still in 'pending' — promote to
     // 'running' for the brief duration of executeCommands so the user sees
-    // the same lifecycle.
+    // the same lifecycle. Scoped to this batch's ids only.
     set({
       processingClusters: get().processingClusters.map((c) =>
-        c.status === 'pending' || c.status === 'preparing'
+        batchIds.has(c.id) &&
+        (c.status === 'pending' || c.status === 'preparing')
           ? { ...c, status: 'running' }
           : c,
       ),
     });
 
+    // Final canvas check immediately before commit.
+    if (!isStillCurrent()) {
+      clearBatchInProgress();
+      return;
+    }
+
     useCanvasStore.getState().executeCommands(allCommands, 'agent');
   }
 
-  // Mark all clusters 'done' and attach their captured changes so the
-  // overlay can render accept/revert/blend buttons. Overlays linger on the
-  // canvas until the user resolves them or the next batch starts.
+  // Index resolved intents by cluster so the final write can attach
+  // source / reasoning / commands per overlay.
+  const intentByCluster = new Map<string, ResolvedAnnotationIntent>();
+  for (const { clusterId, intent } of resolvedIntents) {
+    intentByCluster.set(clusterId, intent);
+  }
+
+  // Mark this batch's clusters 'done' and attach their captured changes
+  // so the overlay can render accept/revert/blend buttons. Overlays linger
+  // on the canvas until the user resolves them. Other batches' clusters
+  // are not touched.
   set({
-    processingClusters: get().processingClusters.map((c) => ({
-      ...c,
-      status: 'done',
-      changes: changesByCluster.get(c.id) ?? c.changes,
-    })),
+    processingClusters: get().processingClusters.map((c) => {
+      if (!batchIds.has(c.id)) return c;
+      const intent = intentByCluster.get(c.id);
+      return {
+        ...c,
+        status: 'done',
+        changes: changesByCluster.get(c.id) ?? c.changes,
+        commands: intent?.commands ?? c.commands,
+        reasoning: intent?.reasoning ?? c.reasoning,
+        source: intent?.source ?? c.source,
+        error: errorByCluster.get(c.id) ?? c.error,
+      };
+    }),
   });
 }

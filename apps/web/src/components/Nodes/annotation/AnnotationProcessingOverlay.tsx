@@ -16,7 +16,9 @@ import { Blend, Check, Clock, Loader, Pencil, Undo2 } from 'lucide-react';
 import { memo, useMemo } from 'react';
 
 import useCanvasStore from '@/store/canvasStore';
+import { useChatStore } from '@/store/chatStore';
 import { useIntentStore } from '@/store/intentStore';
+import { usePanelStore } from '@/store/panelStore';
 
 import { useCanvasChangePreview } from '../../../hooks/useCanvasChanges';
 import { Button } from '../../Common/Button';
@@ -159,6 +161,13 @@ const ClusterOverlay = memo(
 
     const acceptCluster = useIntentStore((s) => s.acceptCluster);
     const revertCluster = useIntentStore((s) => s.revertCluster);
+    const openAnnotationCluster = useChatStore((s) => s.openAnnotationCluster);
+    const requestOpenRightPanel = usePanelStore((s) => s.requestOpenRightPanel);
+
+    const handleOpenInspector = () => {
+      openAnnotationCluster(cluster.id);
+      requestOpenRightPanel();
+    };
 
     const changes = useMemo(() => cluster.changes ?? [], [cluster.changes]);
     const { handlePreviewAllDown, handlePreviewUp } =
@@ -193,8 +202,11 @@ const ClusterOverlay = memo(
             transformOrigin: 'top left',
           }}
         >
-          <div
-            className="flex items-center gap-1 rounded-full py-0.5 pr-2 pl-0.5 shadow-sm"
+          <button
+            type="button"
+            onClick={handleOpenInspector}
+            title="Open recognition details in chat panel"
+            className="hover:ring-edge-default pointer-events-auto flex cursor-pointer items-center gap-1 rounded-full py-0.5 pr-2 pl-0.5 shadow-sm transition hover:ring-2"
             style={{
               backgroundColor: cfg.pillBg,
               color: cfg.pillFg,
@@ -215,7 +227,7 @@ const ClusterOverlay = memo(
               />
             </div>
             <span className="text-xs font-semibold">{cfg.label}</span>
-          </div>
+          </button>
 
           {showActions && (
             <div className="pointer-events-auto flex items-center gap-0.5 rounded-md p-0.5">

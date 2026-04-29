@@ -4,6 +4,43 @@
 
 ---
 
+## 2026-04-29 · Annotation 识别详情面板
+
+**What Changed**
+
+- Annotation cluster overlay 左上角的状态徽章（`Preparing` / `Pending` / `Running` / `Done`）现在可以点击。
+- 点击后右侧 chat 面板会切换到 **Annotation Recognition** 视图，展示这次识别的完整轨迹：
+  1. **User 消息**：触发的手势形状、置信度、所用空间上下文（包住 / 端点 / 邻近节点）。
+  2. **Assistant 消息**：解析路径标签（`rule` / `llm`）+ reasoning 文本。
+  3. **Tool 卡片**（`canvas_commands`）：复用 chat 面板已有的 canvas command 卡片渲染原始命令与变更列表，自带 Accept / Revert / Blend。
+  4. **Error 行**（如有）：LLM 调用失败时显示错误信息。
+- 顶部出现 ← 返回按钮，点击退出详情视图回到主聊天。
+- Overlay 上原本的 Accept / Revert / Blend 按钮**保留**，可在 overlay 与详情面板任一处操作，效果一致。
+
+**Notes**
+
+- Annotation 识别没有真正的多步 agent tool call —— 详情面板里的"对话"是根据本地解析过程合成的，不写入 chat 历史，关闭详情视图后也不会留痕。
+- Annotation 详情视图与 Question Replay 视图互斥：打开 annotation 详情时，若正在查看 question 线程会自动退出回到 canvas chat。
+- 详情视图为只读，输入框被隐藏。
+
+---
+
+## 2026-04-29 · Annotation 识别流程的稳健性修复
+
+**What Changed**
+
+- 之前一批 annotation 进入 `Done` 状态后还在等用户处理时，如果继续画新的笔画，旧的 overlay（连同 Accept / Revert 入口）会被静默清掉；现在会保留旧 overlay，新一批与旧 cluster 并存。
+- 同一批次内的多个 cluster 在走 LLM fallback 时，请求改为并行触发（`Promise.allSettled` 共享同一个 abort signal），多 cluster 场景下识别耗时显著下降。
+- 识别开始时会绑定当前 canvasId；如果在 LLM 调用期间用户切换了 canvas，结果会被丢弃，不会再把命令打到错误的画布上。
+- `triggerAnnotationRecognition` 早返回（如笔画在识别触发前就被删除）时，会清理掉残留的 `Preparing` / `Pending` overlay。
+
+**Notes**
+
+- 上述改动不影响交互方式：用户操作流程与按钮位置完全保持一致。
+- `Done` 状态的 overlay 必须由用户主动 Accept / Revert 才会消失。
+
+---
+
 ## 2026-04-29 · Annotation 推断结果的 Accept / Revert / Blend 操作
 
 **What Changed**
