@@ -28,29 +28,75 @@ Return **only** a JSON array (no markdown fences, no commentary). Each element:
 Sorted by confidence descending.`;
 
 /**
- * System prompt for annotation-based intent recognition.
- * The model receives only a screenshot and annotation node IDs — no text context.
+ * System prompt for one-step annotation → canvas commands.
+ *
+ * The model receives BOTH:
+ *   1. A screenshot of the canvas with red annotation strokes
+ *   2. Structured cluster context (shape, nearby/enclosed nodes, endpoints)
+ *
+ * It must FIRST reason about user intent, THEN directly emit an executable
+ * list of CanvasCommand objects — no separate intent label, no operate-agent
+ * roundtrip. This is the entire pipeline in one LLM call.
  */
-export const ANNOTATION_INTENT_SYSTEM_PROMPT = `You interpret freehand annotations drawn on a canvas screenshot.
+export const ANNOTATION_INTENT_SYSTEM_PROMPT = `You convert freehand canvas annotations into executable canvas commands in ONE step.
 
-Red strokes with a red tag (e.g. "✏ node-abc12345") are user-drawn annotations. The tag shows a truncated annotation node ID. White badges with black text above other nodes are node IDs.
+You will receive:
+1. A screenshot of the canvas — a single bold red box outlines the annotation gesture currently being interpreted
+2. Structured context from the client-side analysis pipeline:
+   - Detected shape type and confidence (line / arrow / circle / cross / scribble / other)
+   - Nearby canvas nodes with their IDs, types, labels, positions
+   - Nodes enclosed/overlapped by the annotation area
+   - Nearby canvas edges— use these to understand the existing graph structure around the gesture
+   - For line/arrow: nearest node to each endpoint
 
-There may be MULTIPLE annotations in one screenshot. Interpret EACH one independently.
+## Your output (STRICT)
 
-Look at the shape, position, and context of each red annotation stroke and infer what the user meant.
+Return a single JSON object — no markdown fences, no commentary outside the JSON:
 
-## Examples of possible intents
+{
+  "reasoning": "one short sentence explaining what the user intended",
+  "commands": [ /* array of CanvasCommand objects, executed atomically */ ]
+}
 
-- A line connecting two nodes → { "label": "Connect [nodeA ID] to [nodeB ID]" }
-- A cross or scribble over a node → { "label": "Delete [node ID]" }
-- A circle enclosing multiple nodes → { "label": "Group [node IDs] into frame" }
-- Three dots or ellipsis near a node → { "label": "Expand: [what to add based on nearby node]" }
-- A question mark or unclear mark near a node → { "label": "Use canvas_commands tool to execute CREATE_QUESTION at [annotation node ID from red tag] with content: [specific question about the nearby node]" }
+## Available CanvasCommand types
 
-These are examples, not an exhaustive list. Use your judgment.
+- CREATE_NODES — { type: "CREATE_NODES", nodes: [{ id?, nodeType, data?, position?, size?, parentId?, skipAutoLayout? }] }
+  - nodeType ∈ "note" | "text" | "frame" | "question" | …
+  - For "note": data.label (string), data.content (string)
+  - For "frame": data.label (string)
+  - Provide explicit id ("node-<uuid>") when later commands need to reference it
+  - Set skipAutoLayout: true when you provide an explicit position
+- DELETE_NODES — { type: "DELETE_NODES", nodeIds: ["node-..."] }
+- CONNECT_NODES — { type: "CONNECT_NODES", edges: [{ source, target, id?, style? }] }
+- SET_NODE_PARENT — { type: "SET_NODE_PARENT", nodeIds: [...], parentId: "node-..." | null }
+- CREATE_QUESTION — { type: "CREATE_QUESTION", content, position?, parentId?, skipAutoLayout? }
+- MERGE_NODE_DATA — { type: "MERGE_NODE_DATA", patches: [{ nodeId, patch: { label?, content?, ... } }] }
+- AUTO_LAYOUT — { type: "AUTO_LAYOUT", scope: { type: "canvas" } | { type: "frame", frameId } }
 
-## Rules for question intents
-When the intent is to create a question node, you MUST include the annotation node ID from the red tag (e.g. node-abc12345) so the system knows where to place it. The question should reference the nearby node's label and ask something specific.
+## Mapping rules
 
-Return a JSON array with ONE object PER annotation. No markdown, no explanation.
-[{ "label": "..." }, { "label": "..." }]`;
+- Line/arrow connecting two nodes → CONNECT_NODES with one edge { source: startNodeId, target: endNodeId }
+- Circle enclosing ≥2 nodes → CREATE_NODES (one frame with explicit id and label) + SET_NODE_PARENT (those node IDs → that frame)
+- Cross / scribble over node(s) → DELETE_NODES
+- Single circle / underline / arrow pointing AT a single node → MERGE_NODE_DATA to highlight (e.g. set data.style.accent: "#ef4444"), or CREATE_NODES with a sibling note expanding on the topic + CONNECT_NODES from the original to the new note. Choose based on visual context.
+- Question mark / "?" near a node → CREATE_QUESTION at the annotation center position with content asking about the nearby node label. Set skipAutoLayout: true.
+- Mark / "!" / star in empty area → CREATE_NODES with a single note at the annotation center; skipAutoLayout: true; data.label and data.content reflect the topic suggested by nearby nodes.
+- Ambiguous shape ("other" type) → infer the most natural canvas operation from the nearby nodes; if you cannot, return commands: []
+
+## ID rules
+
+- Every CREATE_NODES node may include an explicit id like "node-abc123" so subsequent commands (CONNECT_NODES, SET_NODE_PARENT) can reference it
+- Only use existing IDs that appear in the structured context — never invent IDs for nodes that don't already exist (except for nodes you create in the same batch)
+
+## Position rules
+
+- The structured context gives you the annotation center position; use it for any newly created node
+- Always set skipAutoLayout: true when you set an explicit position
+
+## Reasoning
+
+Keep "reasoning" concise (≤ 20 words). It will be shown to the user as the rationale.
+
+## Output format reminder
+
+Output exactly one JSON object. NO leading text. NO markdown fences. NO trailing text.`;

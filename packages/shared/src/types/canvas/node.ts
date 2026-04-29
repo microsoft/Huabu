@@ -258,6 +258,12 @@ export interface AnnotationNodeData extends BaseNodeData {
   initialSize: { width: number; height: number };
   /** Stroke color (hex) */
   strokeColor?: string;
+  /**
+   * True after the intent pipeline has consumed this annotation. Executed
+   * strokes are dimmed on the canvas instead of being deleted, so the user
+   * can still see what they drew.
+   */
+  executed?: boolean;
 }
 // ==================== Question Node ====================
 

@@ -44,6 +44,7 @@ import {
 import { looksLikeUrl } from '../../../utils/io/media.ts';
 import { AnnotationNode } from '../../Nodes/annotation/AnnotationNode.tsx';
 import { AnnotationOverlay } from '../../Nodes/annotation/AnnotationOverlay.tsx';
+import { AnnotationProcessingOverlay } from '../../Nodes/annotation/AnnotationProcessingOverlay.tsx';
 import { FrameNode } from '../../Nodes/frame/FrameNode.tsx';
 import { QuestionNode } from '../../Nodes/question/QuestionNode.tsx';
 import { VideoNode } from '../../Nodes/video/VideoNode.tsx';
@@ -718,6 +719,9 @@ export const Canvas: React.FC<CanvasProps> = ({
         {pendingNodeType === 'annotation' && (
           <AnnotationOverlay rfInstance={rfInstanceRef.current} />
         )}
+
+        {/* Annotation intent processing overlay — lives in flow space so it pans/zooms with the canvas */}
+        <AnnotationProcessingOverlay />
       </ReactFlow>
 
       {/* Frame drag preview overlay */}

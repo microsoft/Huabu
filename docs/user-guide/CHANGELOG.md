@@ -4,6 +4,87 @@
 
 ---
 
+## 2026-04-29 · Annotation 识别详情面板
+
+**What Changed**
+
+- Annotation cluster overlay 左上角的状态徽章（`Preparing` / `Pending` / `Running` / `Done`）现在可以点击。
+- 点击后右侧 chat 面板会切换到 **Annotation Recognition** 视图，展示这次识别的完整轨迹：
+  1. **User 消息**：触发的手势形状、置信度、所用空间上下文（包住 / 端点 / 邻近节点）。
+  2. **Assistant 消息**：解析路径标签（`rule` / `llm`）+ reasoning 文本。
+  3. **Tool 卡片**（`canvas_commands`）：复用 chat 面板已有的 canvas command 卡片渲染原始命令与变更列表，自带 Accept / Revert / Blend。
+  4. **Error 行**（如有）：LLM 调用失败时显示错误信息。
+- 顶部出现 ← 返回按钮，点击退出详情视图回到主聊天。
+- Overlay 上原本的 Accept / Revert / Blend 按钮**保留**，可在 overlay 与详情面板任一处操作，效果一致。
+
+**Notes**
+
+- Annotation 识别没有真正的多步 agent tool call —— 详情面板里的"对话"是根据本地解析过程合成的，不写入 chat 历史，关闭详情视图后也不会留痕。
+- Annotation 详情视图与 Question Replay 视图互斥：打开 annotation 详情时，若正在查看 question 线程会自动退出回到 canvas chat。
+- 详情视图为只读，输入框被隐藏。
+
+---
+
+## 2026-04-29 · Annotation 识别流程的稳健性修复
+
+**What Changed**
+
+- 之前一批 annotation 进入 `Done` 状态后还在等用户处理时，如果继续画新的笔画，旧的 overlay（连同 Accept / Revert 入口）会被静默清掉；现在会保留旧 overlay，新一批与旧 cluster 并存。
+- 同一批次内的多个 cluster 在走 LLM fallback 时，请求改为并行触发（`Promise.allSettled` 共享同一个 abort signal），多 cluster 场景下识别耗时显著下降。
+- 识别开始时会绑定当前 canvasId；如果在 LLM 调用期间用户切换了 canvas，结果会被丢弃，不会再把命令打到错误的画布上。
+- `triggerAnnotationRecognition` 早返回（如笔画在识别触发前就被删除）时，会清理掉残留的 `Preparing` / `Pending` overlay。
+
+**Notes**
+
+- 上述改动不影响交互方式：用户操作流程与按钮位置完全保持一致。
+- `Done` 状态的 overlay 必须由用户主动 Accept / Revert 才会消失。
+
+---
+
+## 2026-04-29 · Annotation 推断结果的 Accept / Revert / Blend 操作
+
+**What Changed**
+
+- Annotation 推断完成后（`Done` 状态），cluster overlay 的右上角会出现 3 个图标按钮：
+  - **Check（接受）**：保留 AI 生成的画布修改，并把 overlay + 灰色的 annotation stroke 一起从画布上清除。
+  - **Undo2（撤销）**：把这一批 cluster 生成的所有画布修改恢复原状，并同时清除 overlay 与 stroke。
+  - **Blend（对比预览）**：按住时画布临时回到修改前的样子，松手恢复当前结果。
+- 操作仅作用于该 cluster 自己生成的命令；同一批次中其他 cluster 互不影响。
+
+**Notes**
+
+- 在状态变成 `Done` 之前（`Preparing` / `Pending` / `Running`）不会显示按钮。
+- 没有任何可逆命令时，撤销与对比预览按钮会自动 disabled，但接受按钮仍可用以清除 overlay。
+- 复用 ChatPanel 中 canvas command 工具消息已有的 `snapshotAndExtractChanges` 与 `useCanvasChangePreview`，行为与那边的 Accept / Revert / Blend 完全一致。
+
+---
+
+## 2026-04-28 · Annotation 截图与上下文增强
+
+**What Changed**
+
+- Annotation 推断现在按聚类（cluster）分别截图：每张截图只用一个红色边框标出当前手势的范围，不再为每条 stroke 单独打 ID 标签，画面更聚焦。
+- 截图内会重新绘制画布上的连线（edges）。修复了 `html-to-image` 偶尔丢失 xyflow 内联 SVG edge 的问题，确保 LLM 能看到节点之间的现有连接。
+- 发送给服务端的请求不再包含 annotation 节点 ID 列表；改为只发送 cluster 上下文 + 截图。
+- Cluster 上下文新增 `Nearby edges` 字段：列出与手势相交或非常接近（≤50px）的画布边，帮助模型了解周围已有的连接关系，避免重复建边。
+
+**Notes**
+
+- 已执行（`executed`）的 annotation stroke 仍会以淡灰色保留显示，不受本次变更影响。
+- 服务端 `/intent/recognize-annotation` 接口的 `annotationNodeIds` 字段已移除；前端 `recognizeAnnotationCommands` API 同步删除了对应参数。
+
+---
+
+## 2026-04-27 · Annotation 推断过程可视化
+
+**What Changed**
+
+- 在画布上绘制 sketch（连线 / 圈选 / 删除等手势）后等待推断时，对应的聚类区域会显示一个半透明浅灰色虚线框框，框左上角带有与 Question Node 一致的状态徽章。
+- 状态会依次显示 `Preparing`（推断中）→ `Executing`（执行命令）→ `Done`（已完成），完成后约 0.7s 自动消失。
+
+**Notes**
+
+- 该提示完全只读，不会拦截鼠标事件；切换到非标注工具或撤销过程中正在等待的标注会即时清除浮层。
 ## 2026-04-27 · Note 节点高度模式与截断指示
 
 **What Changed**

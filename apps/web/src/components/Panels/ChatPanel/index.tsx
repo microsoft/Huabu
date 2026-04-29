@@ -8,6 +8,7 @@ import { useIntentStore } from '@/store/intentStore';
 
 import { SidebarPanel } from '../SidebarPanel';
 import { ChatInput } from './ChatInput';
+import { useAnnotationClusterMessages } from './useAnnotationClusterMessages';
 import { useAgentStream } from '../../../hooks/useAgentStream';
 import { useChatHistory } from '../../../hooks/useChatHistory';
 import { MessageList } from '../../Messages/MessageList';
@@ -39,6 +40,17 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   // Question thread replay mode
   const viewingQuestionThread = useChatStore((s) => s.viewingQuestionThread);
   const closeQuestionThread = useChatStore((s) => s.closeQuestionThread);
+
+  // Annotation cluster inspector mode (mutually exclusive with question
+  // replay). When set, MessageList renders synthesized messages built from
+  // the live cluster state instead of the canvas chat.
+  const viewingAnnotationCluster = useChatStore(
+    (s) => s.viewingAnnotationCluster,
+  );
+  const closeAnnotationCluster = useChatStore((s) => s.closeAnnotationCluster);
+  const annotationMessages = useAnnotationClusterMessages(
+    viewingAnnotationCluster?.clusterId ?? null,
+  );
 
   // Register intent callback — when user selects an intent in the popover,
   // it's sent here and executed as an agent chat message.
@@ -93,14 +105,29 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
 
   return (
     <SidebarPanel
-      title={viewingQuestionThread ? 'Question Replay' : 'Chat'}
+      title={
+        viewingAnnotationCluster
+          ? 'Annotation Recognition'
+          : viewingQuestionThread
+            ? 'Question Replay'
+            : 'Chat'
+      }
       isCollapsed={isCollapsed}
       onToggle={onToggle}
       iconCollapsed={<PanelRightOpen size={16} />}
       iconExpanded={<PanelRightClose size={16} />}
       className="border-edge-default border-l"
       tools={
-        viewingQuestionThread ? (
+        viewingAnnotationCluster ? (
+          <Button
+            variant="ghost"
+            iconOnly
+            onClick={closeAnnotationCluster}
+            title="Back to chat"
+          >
+            <ArrowLeft />
+          </Button>
+        ) : viewingQuestionThread ? (
           <Button
             variant="ghost"
             iconOnly
@@ -124,9 +151,11 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     >
       <div className="flex h-full flex-col gap-2 overflow-visible">
         <MessageList
-          messages={messages}
-          isLoading={isLoading || !isHistoryLoaded}
-          hideAIActions={mode === 'operate'}
+          messages={viewingAnnotationCluster ? annotationMessages : messages}
+          isLoading={
+            viewingAnnotationCluster ? false : isLoading || !isHistoryLoaded
+          }
+          hideAIActions={mode === 'operate' || !!viewingAnnotationCluster}
           onIntentReselect={handleIntentReselect}
           onRetry={() => {
             // Find the last user message and re-send it
@@ -139,17 +168,19 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           }}
         />
 
-        {/* Input Area */}
-        <ChatInput
-          value={input}
-          onChange={setInput}
-          onSubmit={handleSubmit}
-          onStop={stopStream}
-          isStreaming={isLoading}
-          mode={mode}
-          onModeChange={setMode}
-          disabled={isLoading || !isHistoryLoaded}
-        />
+        {/* Input is hidden in annotation inspector mode — it's a read-only view. */}
+        {!viewingAnnotationCluster && (
+          <ChatInput
+            value={input}
+            onChange={setInput}
+            onSubmit={handleSubmit}
+            onStop={stopStream}
+            isStreaming={isLoading}
+            mode={mode}
+            onModeChange={setMode}
+            disabled={isLoading || !isHistoryLoaded}
+          />
+        )}
       </div>
     </SidebarPanel>
   );

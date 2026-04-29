@@ -23,6 +23,13 @@ interface ChatState {
    */
   viewingQuestionThread: { nodeId: string; threadId: string } | null;
 
+  /**
+   * When set, the chat panel is inspecting a single annotation cluster
+   * (showing its synthesized tool-call style trace). Mutually exclusive
+   * with `viewingQuestionThread`.
+   */
+  viewingAnnotationCluster: { clusterId: string } | null;
+
   /** @internal Stashed canvas thread ID while viewing a question thread. */
   _stashedThreadId?: string;
   /** @internal Stashed canvas messages while viewing a question thread. */
@@ -70,6 +77,11 @@ interface ChatState {
   openQuestionThread: (nodeId: string, threadId: string) => void;
   /** Close question thread replay and return to normal canvas chat. */
   closeQuestionThread: () => void;
+
+  /** Open the inspector view for a single annotation cluster. */
+  openAnnotationCluster: (clusterId: string) => void;
+  /** Close the annotation cluster inspector view. */
+  closeAnnotationCluster: () => void;
 }
 
 export const useChatStore = create<ChatState>()(
@@ -83,6 +95,7 @@ export const useChatStore = create<ChatState>()(
       pendingAttachments: [],
       selectionAttachment: null,
       viewingQuestionThread: null,
+      viewingAnnotationCluster: null,
 
       addMessage: (message) =>
         set((state) => ({ messages: [...state.messages, message] })),
@@ -186,6 +199,30 @@ export const useChatStore = create<ChatState>()(
           _stashedThreadId: undefined,
           _stashedMessages: undefined,
         });
+      },
+
+      openAnnotationCluster: (clusterId) => {
+        // Annotation inspector is a pure overlay over the existing chat
+        // state — no thread switch, no message stash needed. We just flip a
+        // flag and the ChatPanel renders synthesized messages from the
+        // intent store instead of `state.messages`. Closing any active
+        // question thread first keeps the two modes mutually exclusive.
+        const state = get();
+        if (state.viewingQuestionThread) {
+          set({
+            viewingQuestionThread: null,
+            threadId: state._stashedThreadId ?? state.threadId,
+            messages: state._stashedMessages ?? [],
+            isHistoryLoaded: (state._stashedMessages ?? []).length > 0,
+            _stashedThreadId: undefined,
+            _stashedMessages: undefined,
+          });
+        }
+        set({ viewingAnnotationCluster: { clusterId } });
+      },
+
+      closeAnnotationCluster: () => {
+        set({ viewingAnnotationCluster: null });
       },
     }),
     {

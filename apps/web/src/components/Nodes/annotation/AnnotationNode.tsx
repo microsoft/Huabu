@@ -27,6 +27,9 @@ export const AnnotationNode = memo(
 
     const pathD = useMemo(() => pointsToPath(scaledPoints), [scaledPoints]);
     const strokeColor = data.strokeColor ?? '#000000';
+    // Executed strokes are dimmed but kept on the canvas so the user can
+    // still see the gesture they drew.
+    const isExecuted = data.executed ?? false;
 
     return (
       <NodeWrapper
@@ -41,6 +44,7 @@ export const AnnotationNode = memo(
           height={h}
           viewBox={`0 0 ${w} ${h}`}
           className="pointer-events-none h-full w-full"
+          style={isExecuted ? { opacity: 0.25 } : undefined}
         >
           <path
             d={pathD}
