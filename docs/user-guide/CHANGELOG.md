@@ -4,6 +4,21 @@
 
 ---
 
+## 2026-04-29 · Annotation 识别支持并发批次
+
+**What Changed**
+
+- 在第一批 annotation 还在识别（`Pending` / `Running`）或刚到 `Done` 等用户处理时，用户继续在画布另一处画新的笔画，新一批会作为**独立请求并行执行**，不会再 abort 旧批次。
+- 每个识别批次拥有自己独立的 `AbortController`，互不影响。
+
+**Notes**
+
+- 主动取消（如离开 annotation 工具、切换 canvas）通过 `cancelAnnotationRecognition` 一次性 abort 所有在飞批次。
+- canvas 切换、笔画在识别前被删除等护栏行为保持不变；只是不再会因为"有新批次"被误伤。
+- 修复回归：在已有批次处于 `Pending` / `Running` 时继续画新笔画，不会再把旧批次的 overlay 抹掉 —— 旧批次的 cluster 会原样保留，仅基于当前 pending 笔画重算新一批 `Preparing` overlay。
+
+---
+
 ## 2026-04-29 · Annotation 识别详情面板
 
 **What Changed**
@@ -85,6 +100,7 @@
 **Notes**
 
 - 该提示完全只读，不会拦截鼠标事件；切换到非标注工具或撤销过程中正在等待的标注会即时清除浮层。
+
 ## 2026-04-27 · Note 节点高度模式与截断指示
 
 **What Changed**
