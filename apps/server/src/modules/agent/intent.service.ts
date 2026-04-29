@@ -396,6 +396,17 @@ function serializeClusterContext(ctx: AnnotationClusterContext): string {
     }
   }
 
+  if (ctx.nearbyEdges && ctx.nearbyEdges.length > 0) {
+    lines.push(`Nearby edges (${ctx.nearbyEdges.length}):`);
+    for (const e of ctx.nearbyEdges) {
+      const sLabel = e.sourceLabel ? ` "${e.sourceLabel}"` : '';
+      const tLabel = e.targetLabel ? ` "${e.targetLabel}"` : '';
+      lines.push(
+        `  - [${e.id}] [${e.source}]${sLabel} → [${e.target}]${tLabel}, dist=${e.distance}px`,
+      );
+    }
+  }
+
   return lines.join('\n');
 }
 

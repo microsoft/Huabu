@@ -13,7 +13,7 @@
  *   other  — none of the above; needs LLM
  */
 
-import type { AnnotationCluster, ShapeClassification } from './types';
+import type { AnnotationCluster, ShapeClassification } from '@sediment/shared';
 
 // ── Geometry helpers ─────────────────────────────────────────────
 

@@ -373,44 +373,37 @@ function drawAnnotatedImage(
     }
   }
 
-  // --- Pass 5: Redraw annotation nodes in red on the topmost layer ---
-  // Annotation strokes are ephemeral gestures; redrawing them last ensures
-  // they are visually above everything else so the AI can clearly see them.
-  const annotationBorder = 3 * CAPTURE_RATIO;
-  for (const nl of labels) {
-    if (nl.nodeType !== 'annotation') continue;
+  // --- Pass 5: Draw a single red bounding box around all annotation nodes ---
+  // Annotation strokes are ephemeral gestures; grouping them into one box
+  // keeps the visual layer clean and avoids cluttering with individual IDs.
+  const annotationNodes = labels.filter((nl) => nl.nodeType === 'annotation');
+  if (annotationNodes.length > 0) {
+    const annotationBorder = 3 * CAPTURE_RATIO;
+    const pad = 6 * CAPTURE_RATIO;
 
-    // Draw a bold red border around the annotation node area
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const nl of annotationNodes) {
+      minX = Math.min(minX, nl.x);
+      minY = Math.min(minY, nl.y);
+      maxX = Math.max(maxX, nl.x + nl.w);
+      maxY = Math.max(maxY, nl.y + nl.h);
+    }
+
     ctx.strokeStyle = '#ef4444';
     ctx.lineWidth = annotationBorder;
     ctx.setLineDash([]);
     ctx.beginPath();
-    ctx.roundRect(nl.x, nl.y, nl.w, nl.h, radius);
+    ctx.roundRect(
+      minX - pad,
+      minY - pad,
+      maxX - minX + pad * 2,
+      maxY - minY + pad * 2,
+      radius,
+    );
     ctx.stroke();
-
-    // Draw a small red tag with truncated annotation node ID above the node
-    const tagFont = 11 * CAPTURE_RATIO;
-    ctx.font = `700 ${tagFont}px system-ui, -apple-system, sans-serif`;
-    // Show truncated ID so the AI can reference it (e.g. "\u270f node-a1b2c3d4")
-    const shortId = nl.id.length > 18 ? nl.id.slice(0, 18) : nl.id;
-    const tag = `\u270f ${shortId}`;
-    const tagW = ctx.measureText(tag).width;
-    const tagPx = 4 * CAPTURE_RATIO;
-    const tagPy = 2 * CAPTURE_RATIO;
-    const tagBw = tagW + tagPx * 2;
-    const tagBh = tagFont + tagPy * 2;
-    const tagBx = nl.x;
-    const tagBy = nl.y - tagBh - 2 * CAPTURE_RATIO;
-
-    ctx.beginPath();
-    ctx.roundRect(tagBx, tagBy, tagBw, tagBh, radius);
-    ctx.fillStyle = '#ef4444';
-    ctx.fill();
-    ctx.fillStyle = '#fff';
-    ctx.fillText(tag, tagBx + tagPx, tagBy + tagPy);
-
-    // Restore font for next loop
-    ctx.font = `600 ${fontSize}px system-ui, -apple-system, sans-serif`;
   }
 
   return canvas.toDataURL('image/png');

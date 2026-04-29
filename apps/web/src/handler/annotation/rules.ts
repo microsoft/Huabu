@@ -11,7 +11,10 @@
 
 import { createId } from '@sediment/shared';
 
-import type { AnnotationContext, ResolvedAnnotationIntent } from './types';
+import type {
+  AnnotationContext,
+  ResolvedAnnotationIntent,
+} from '@sediment/shared';
 import type { CanvasCommand, CanvasNodeId } from '@sediment/shared';
 
 /** Minimum confidence threshold to use the rule engine. */

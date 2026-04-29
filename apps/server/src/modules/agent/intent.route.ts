@@ -88,22 +88,12 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   fastify.post<{ Body: AnnotationIntentRequest }>(
     '/recognize-annotation',
     async (request, reply) => {
-      const { screenshot, annotationNodeIds, clusterContext } = request.body;
+      const { screenshot, clusterContext } = request.body;
 
       if (!screenshot) {
         return reply
           .code(400)
           .send({ error: 'screenshot is required' } as never);
-      }
-
-      if (
-        !annotationNodeIds ||
-        !Array.isArray(annotationNodeIds) ||
-        annotationNodeIds.length === 0
-      ) {
-        return reply.code(400).send({
-          error: 'annotationNodeIds must be a non-empty array',
-        } as never);
       }
 
       if (!clusterContext) {

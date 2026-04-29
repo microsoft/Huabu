@@ -41,11 +41,12 @@ Sorted by confidence descending.`;
 export const ANNOTATION_INTENT_SYSTEM_PROMPT = `You convert freehand canvas annotations into executable canvas commands in ONE step.
 
 You will receive:
-1. A screenshot of the canvas — red strokes are the user's annotation
+1. A screenshot of the canvas — a single bold red box outlines the annotation gesture currently being interpreted
 2. Structured context from the client-side analysis pipeline:
    - Detected shape type and confidence (line / arrow / circle / cross / scribble / other)
    - Nearby canvas nodes with their IDs, types, labels, positions
    - Nodes enclosed/overlapped by the annotation area
+   - Nearby canvas edges— use these to understand the existing graph structure around the gesture
    - For line/arrow: nearest node to each endpoint
 
 ## Your output (STRICT)

@@ -109,7 +109,6 @@ export async function logIntentEpisode(
  */
 export async function recognizeAnnotationCommands(
   screenshot: string,
-  annotationNodeIds: string[],
   clusterContext: AnnotationClusterContext,
   signal?: AbortSignal,
 ): Promise<AnnotationCommandResponse> {
@@ -118,7 +117,7 @@ export async function recognizeAnnotationCommands(
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ screenshot, annotationNodeIds, clusterContext }),
+      body: JSON.stringify({ screenshot, clusterContext }),
       signal,
     },
   );

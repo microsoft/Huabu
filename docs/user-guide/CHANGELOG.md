@@ -4,6 +4,53 @@
 
 ---
 
+## 2026-04-29 · Annotation 推断结果的 Accept / Revert / Blend 操作
+
+**What Changed**
+
+- Annotation 推断完成后（`Done` 状态），cluster overlay 的右上角会出现 3 个图标按钮：
+  - **Check（接受）**：保留 AI 生成的画布修改，并把 overlay + 灰色的 annotation stroke 一起从画布上清除。
+  - **Undo2（撤销）**：把这一批 cluster 生成的所有画布修改恢复原状，并同时清除 overlay 与 stroke。
+  - **Blend（对比预览）**：按住时画布临时回到修改前的样子，松手恢复当前结果。
+- 操作仅作用于该 cluster 自己生成的命令；同一批次中其他 cluster 互不影响。
+
+**Notes**
+
+- 在状态变成 `Done` 之前（`Preparing` / `Pending` / `Running`）不会显示按钮。
+- 没有任何可逆命令时，撤销与对比预览按钮会自动 disabled，但接受按钮仍可用以清除 overlay。
+- 复用 ChatPanel 中 canvas command 工具消息已有的 `snapshotAndExtractChanges` 与 `useCanvasChangePreview`，行为与那边的 Accept / Revert / Blend 完全一致。
+
+---
+
+## 2026-04-28 · Annotation 截图与上下文增强
+
+**What Changed**
+
+- Annotation 推断现在按聚类（cluster）分别截图：每张截图只用一个红色边框标出当前手势的范围，不再为每条 stroke 单独打 ID 标签，画面更聚焦。
+- 截图内会重新绘制画布上的连线（edges）。修复了 `html-to-image` 偶尔丢失 xyflow 内联 SVG edge 的问题，确保 LLM 能看到节点之间的现有连接。
+- 发送给服务端的请求不再包含 annotation 节点 ID 列表；改为只发送 cluster 上下文 + 截图。
+- Cluster 上下文新增 `Nearby edges` 字段：列出与手势相交或非常接近（≤50px）的画布边，帮助模型了解周围已有的连接关系，避免重复建边。
+
+**Notes**
+
+- 已执行（`executed`）的 annotation stroke 仍会以淡灰色保留显示，不受本次变更影响。
+- 服务端 `/intent/recognize-annotation` 接口的 `annotationNodeIds` 字段已移除；前端 `recognizeAnnotationCommands` API 同步删除了对应参数。
+
+---
+
+## 2026-04-27 · Annotation 推断过程可视化
+
+**What Changed**
+
+- 在画布上绘制 sketch（连线 / 圈选 / 删除等手势）后等待推断时，对应的聚类区域会显示一个半透明浅灰色虚线框框，框左上角带有与 Question Node 一致的状态徽章。
+- 状态会依次显示 `Preparing`（推断中）→ `Executing`（执行命令）→ `Done`（已完成），完成后约 0.7s 自动消失。
+
+**Notes**
+
+- 该提示完全只读，不会拦截鼠标事件；切换到非标注工具或撤销过程中正在等待的标注会即时清除浮层。
+
+---
+
 ## 2026-04-09 · 修复 Chat 输入框长文本滚动
 
 **What Changed**

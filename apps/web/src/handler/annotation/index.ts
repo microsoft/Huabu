@@ -11,13 +11,3 @@ export { clusterAnnotations } from './clustering';
 export { classifyShape } from './classification';
 export { extractAnnotationContext } from './context';
 export { resolveByRules } from './rules';
-
-export type {
-  AnnotationStroke,
-  AnnotationCluster,
-  AnnotationShapeType,
-  ShapeClassification,
-  NearbyNodeInfo,
-  AnnotationContext,
-  ResolvedAnnotationIntent,
-} from './types';

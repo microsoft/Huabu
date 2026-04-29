@@ -11,7 +11,7 @@
 
 import { rectEdgeDistance } from '@sediment/shared';
 
-import type { AnnotationStroke, AnnotationCluster } from './types';
+import type { AnnotationStroke, AnnotationCluster } from '@sediment/shared';
 import type { Rect } from '@sediment/shared';
 
 /**
