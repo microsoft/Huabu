@@ -2,8 +2,6 @@
  * Preprocessing Module — Public Exports
  */
 
-import { getKnowledgeRepository } from '../knowledge/knowledge.repository.js';
-import { getArtifactsDir } from '../workspace.js';
 import { PreprocessDispatcher } from './dispatcher.js';
 
 export { PreprocessDispatcher } from './dispatcher.js';
@@ -37,23 +35,17 @@ let dispatcherInstance: PreprocessDispatcher | null = null;
 
 /**
  * Get or create the singleton PreprocessDispatcher.
- * Uses the current workspace knowledge repository and artifacts directory.
+ * The dispatcher resolves the appropriate `CanvasStore` per request,
+ * so it does not need to be reset when the workspace path changes.
  */
-export async function getPreprocessDispatcher(): Promise<PreprocessDispatcher> {
+export function getPreprocessDispatcher(): PreprocessDispatcher {
   if (!dispatcherInstance) {
-    const repository = await getKnowledgeRepository();
-    dispatcherInstance = new PreprocessDispatcher(
-      repository,
-      getArtifactsDir(),
-    );
+    dispatcherInstance = new PreprocessDispatcher();
   }
   return dispatcherInstance;
 }
 
-/**
- * Reset the cached dispatcher singleton.
- * Must be called whenever the workspace path changes.
- */
+/** Reset the cached dispatcher singleton. */
 export function resetPreprocessDispatcher(): void {
   dispatcherInstance = null;
 }

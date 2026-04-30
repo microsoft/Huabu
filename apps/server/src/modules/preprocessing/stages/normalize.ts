@@ -1,11 +1,13 @@
 /**
  * Stage 3 — Normalize
  *
- * Produces canonical content hash, stable sourceId, title, and merged metadata.
- * No external calls, no LLM.
+ * Produces canonical content hash, stable nodeId, title, and merged
+ * metadata. No external calls, no LLM. Source identity is now
+ * canvas-local: the `sourceId` field carries the canvas node id, which
+ * is what `nodes/<nodeId>.md` is keyed by.
  */
 
-import { computeContentHash, generateSourceId } from '../../knowledge/utils.js';
+import { computeContentHash } from '../utils.js';
 
 import type {
   ResolvedInput,
@@ -95,61 +97,11 @@ function computeInputFingerprint(
 
 function resolveSourceId(
   resolved: ResolvedInput,
-  contentHash: string,
-  sourceKind?: SourceKind,
+  _contentHash: string,
+  _sourceKind?: SourceKind,
 ): string {
-  // If an existing sourceId was provided, keep it
-  if (resolved.existingSourceId) {
-    return resolved.existingSourceId;
-  }
-
-  if (!sourceKind) {
-    // No source kind — generate a content-based fingerprint for cache keying
-    return `pp_${contentHash.replace('sha256:', '').substring(0, 16)}`;
-  }
-
-  const type = sourceKind;
-
-  // Fallback identifier using artifactUri or nodeId
-  const fallbackIdentifier =
-    resolved.artifactUri ?? resolved.nodeId ?? contentHash;
-  const generateFallbackId = () =>
-    `fallback_${type}_${fallbackIdentifier.replace('sha256:', '').substring(0, 16)}`;
-
-  try {
-    switch (type) {
-      case 'web':
-        if (!resolved.normalizedUri) {
-          return generateSourceId({
-            type: 'web',
-            uri: `missing:${resolved.nodeId}`,
-          });
-        }
-        return generateSourceId({
-          type: 'web',
-          uri: resolved.normalizedUri,
-        });
-
-      case 'pdf': {
-        const emptyHash = computeContentHash('');
-        let hashToUse = contentHash;
-        if (!contentHash || contentHash === emptyHash) {
-          hashToUse = fallbackIdentifier;
-        }
-        return generateSourceId({
-          type: 'pdf',
-          fileHash: hashToUse,
-        });
-      }
-
-      case 'note':
-      case 'text':
-        return generateSourceId({ type });
-
-      default:
-        return generateFallbackId();
-    }
-  } catch {
-    return generateFallbackId();
-  }
+  // Source identity is canvas-local: the node id is the source id.
+  // An explicit existing id (e.g. supplied by a legacy snapshot) wins
+  // when present, otherwise fall back to the resolved node id.
+  return resolved.existingSourceId ?? resolved.nodeId;
 }

@@ -16,7 +16,7 @@ import { project } from './stages/project.js';
 
 import type { ProviderManager } from './provider-manager.js';
 import type { PipelineContext } from './types.js';
-import type { IKnowledgeRepository } from '../knowledge/knowledge.interface.js';
+import type { CanvasStore } from '../storage/canvas-store.js';
 import type {
   Capability,
   PreprocessDiagnostic,
@@ -27,9 +27,8 @@ import type {
 
 /** Dependencies injected into the pipeline runner. */
 export interface PipelineDeps {
-  repository: IKnowledgeRepository;
+  store: CanvasStore;
   provider: ProviderManager;
-  artifactsDir: string;
 }
 
 /**
@@ -51,7 +50,7 @@ export async function runPipeline(
   // Stage 1 — Input Resolve
   if (has('resolve_input')) {
     try {
-      ctx.resolved = inputResolve(request, deps.artifactsDir);
+      ctx.resolved = inputResolve(request, deps.store.artifactsDir());
       usedCapabilities.push('resolve_input');
     } catch (error) {
       diagnostics.push({
@@ -132,6 +131,7 @@ export async function runPipeline(
           ctx.normalized,
           plan,
           deps.provider,
+          deps.store.artifactsDir(),
         );
         if (has('generate_label')) usedCapabilities.push('generate_label');
         if (has('generate_summary')) usedCapabilities.push('generate_summary');
@@ -210,7 +210,7 @@ export async function runPipeline(
           ctx.persisted = persist(
             placeholderNormalized,
             sourceKind,
-            deps.repository,
+            deps.store,
             src,
           );
           ctx.persisted.placeholder = true;
@@ -221,12 +221,7 @@ export async function runPipeline(
               'Persisted placeholder source because extraction failed — content is empty',
           });
         } else {
-          ctx.persisted = persist(
-            ctx.normalized,
-            sourceKind,
-            deps.repository,
-            src,
-          );
+          ctx.persisted = persist(ctx.normalized, sourceKind, deps.store, src);
         }
         usedCapabilities.push('persist_source');
       } catch (error) {

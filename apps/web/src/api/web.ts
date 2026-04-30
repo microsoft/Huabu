@@ -12,7 +12,8 @@ export async function getWebPreview(
   query: WebLookupQuery,
 ): Promise<WebPreviewResponse> {
   const searchParams = new URLSearchParams();
-  searchParams.set('sourceId', query.sourceId);
+  searchParams.set('canvasId', query.canvasId);
+  searchParams.set('nodeId', query.nodeId);
 
   const response = await fetch(
     `${API_CONFIG.API_URL}/web/preview?${searchParams.toString()}`,
@@ -29,7 +30,8 @@ export async function getWebReader(
   query: WebLookupQuery,
 ): Promise<WebReaderResponse> {
   const searchParams = new URLSearchParams();
-  searchParams.set('sourceId', query.sourceId);
+  searchParams.set('canvasId', query.canvasId);
+  searchParams.set('nodeId', query.nodeId);
 
   const response = await fetch(
     `${API_CONFIG.API_URL}/web/reader?${searchParams.toString()}`,

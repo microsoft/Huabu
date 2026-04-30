@@ -4,8 +4,8 @@ import { promisify } from 'node:util';
 
 import { z } from 'zod';
 
-import { resetKnowledgeRepository } from './knowledge/index.js';
 import { resetPreprocessDispatcher } from './preprocessing/index.js';
+import { resetStorageCache } from './storage/index.js';
 import {
   getWorkspacePath,
   isWorkspaceConfigured,
@@ -158,8 +158,8 @@ const workspaceRoutes: FastifyPluginAsync = async (app) => {
     }
 
     setWorkspacePath(parsed.data.path);
-    // Reset knowledge singletons so they re-initialise against the new path
-    resetKnowledgeRepository();
+    // Reset cached singletons so they re-initialise against the new path
+    resetStorageCache();
     resetPreprocessDispatcher();
     return { path: getWorkspacePath() };
   });

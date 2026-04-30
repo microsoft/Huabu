@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-import type { SourceType } from './types.js';
+import type { SourceType } from '@sediment/shared';
 
 /**
  * Normalize URL for consistent sourceId generation

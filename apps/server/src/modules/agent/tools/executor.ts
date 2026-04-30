@@ -6,9 +6,8 @@
  */
 
 import { SKILL_REGISTRY } from '../../../prompt/skills/index.js';
-import { readCanvas } from '../../canvas/canvas.filestore.js';
-import { getKnowledgeRepository } from '../../knowledge/knowledge.repository.js';
 import { getPreprocessDispatcher } from '../../preprocessing/index.js';
+import { getCanvasStore } from '../../storage/index.js';
 
 import type {
   AgentMode,
@@ -126,37 +125,6 @@ async function executeWebSearch(args: {
 // ==================== Shared Helpers ====================
 
 /**
- * Parse metaJson and extract summary + keywords for preview.
- */
-function extractPreview(
-  metaJson: string | null | undefined,
-  contentFallback?: string,
-): { summary?: string; keywords?: string[]; snippet?: string } {
-  if (metaJson) {
-    try {
-      const meta = JSON.parse(metaJson) as Record<string, unknown>;
-      const summary =
-        typeof meta.summary === 'string' && meta.summary.trim()
-          ? meta.summary.trim()
-          : undefined;
-      const keywords = Array.isArray(meta.keywords)
-        ? (meta.keywords.filter(
-            (k): k is string => typeof k === 'string' && k.trim().length > 0,
-          ) as string[])
-        : undefined;
-      if (summary || (keywords && keywords.length > 0)) {
-        return { summary, keywords };
-      }
-    } catch {
-      // fall through to snippet
-    }
-  }
-  return {
-    snippet: contentFallback ? contentFallback.slice(0, 120) : undefined,
-  };
-}
-
-/**
  * Like extractPreview but accepts an already-parsed meta object to avoid re-parsing.
  */
 function extractPreviewFromParsed(
@@ -215,8 +183,9 @@ export async function buildNodeSummaries(
   edges: Array<{ source: string; target: string }>;
   version: number;
 } | null> {
-  const canvas = readCanvas(canvasId);
+  const canvas = getCanvasStore(canvasId).read();
   if (!canvas) return null;
+  const store = getCanvasStore(canvasId);
 
   const allNodes = (canvas.state.nodes ?? []) as Array<Record<string, unknown>>;
   const allEdges = (canvas.state.edges ?? []) as Array<Record<string, unknown>>;
@@ -225,38 +194,21 @@ export async function buildNodeSummaries(
     ? allNodes.filter((n) => filterNodeIds.has(n.id as string))
     : allNodes;
 
-  // Collect sourceIds referenced by the target nodes, then batch-lookup
-  const sourceIds = new Set<string>();
-  for (const n of nodes) {
-    const sid = (n.data as Record<string, unknown> | undefined)?.sourceId as
-      | string
-      | undefined;
-    if (sid) sourceIds.add(sid);
-  }
-
-  const repo = await getKnowledgeRepository();
-  const overviewMap = new Map<string, { metaJson: string | null }>();
-  if (sourceIds.size > 0) {
-    const allOverviews = repo.findAllSourcesOverview();
-    for (const s of allOverviews) {
-      if (sourceIds.has(s.sourceId)) {
-        overviewMap.set(s.sourceId, s);
-      }
-    }
-  }
-
   const nodeSummaries: NodePreview[] = nodes.map((n) => {
     const data = n.data as Record<string, unknown> | undefined;
-    const sourceId = data?.sourceId as string | undefined;
-    const content = data?.content as string | undefined;
-
-    // Use source metadata for preview when available
-    const overview = sourceId ? overviewMap.get(sourceId) : undefined;
-    const preview = extractPreview(overview?.metaJson ?? undefined, content);
+    const nodeId = n.id as string;
+    const nodeContent = nodeId ? store.readNode(nodeId) : null;
+    const content =
+      nodeContent?.content ?? (data?.content as string | undefined);
+    const meta = (nodeContent?.metadata ?? null) as Record<
+      string,
+      unknown
+    > | null;
+    const preview = extractPreviewFromParsed(meta, content);
 
     return {
-      nodeId: n.id as string,
-      sourceId: sourceId ?? undefined,
+      nodeId,
+      sourceId: nodeId,
       type: (n.type ?? data?.type) as string | undefined,
       title: data?.label as string | undefined,
       parentId: n.parentId as string | undefined,
@@ -278,7 +230,8 @@ async function executeGetNodeDetail(args: {
   nodeId: string;
   canvasId: string;
 }): Promise<string> {
-  const canvas = readCanvas(args.canvasId);
+  const store = getCanvasStore(args.canvasId);
+  const canvas = store.read();
   if (!canvas) {
     return JSON.stringify({ error: `Canvas ${args.canvasId} not found` });
   }
@@ -292,25 +245,16 @@ async function executeGetNodeDetail(args: {
   }
 
   const data = node.data as Record<string, unknown> | undefined;
-  const sourceId = data?.sourceId as string | undefined;
-
-  // If the node has a sourceId, load content from knowledge base
-  let content = data?.content as string | undefined;
-  if (sourceId) {
-    const repo = await getKnowledgeRepository();
-    const source = repo.findSourceById(sourceId);
-    if (source) {
-      content = source.content;
-    }
-  }
+  const nodeContent = store.readNode(args.nodeId);
+  const content = nodeContent?.content ?? (data?.content as string | undefined);
 
   return JSON.stringify({
     id: node.id,
     type: node.type ?? data?.type,
     label: data?.label,
     content,
-    src: data?.src,
-    sourceId,
+    src: data?.src ?? nodeContent?.src ?? undefined,
+    sourceId: args.nodeId,
     position: node.position,
     width: node.width,
     height: node.height,
@@ -348,7 +292,7 @@ async function executeCanvasCommands(
   const origin = agentModeToOrigin(context?.mode);
 
   // Read canvas state once so we can resolve node types for provenance injection.
-  const canvas = readCanvas(args.canvasId);
+  const canvas = getCanvasStore(args.canvasId).read();
   const nodeTypeMap = new Map<string, string>();
   if (canvas) {
     for (const n of (canvas.state.nodes ?? []) as Array<
@@ -441,101 +385,93 @@ async function executeCanvasCommands(
 
 // ==================== Knowledge Operations ====================
 
-async function executeReadSource(args: { sourceId: string }): Promise<string> {
-  const repo = await getKnowledgeRepository();
-  const source = repo.findSourceById(args.sourceId);
-  if (!source) {
-    return JSON.stringify({ error: `Source ${args.sourceId} not found` });
+async function executeReadSource(args: {
+  sourceId: string;
+  canvasId: string;
+}): Promise<string> {
+  const node = getCanvasStore(args.canvasId).readNode(args.sourceId);
+  if (!node) {
+    return JSON.stringify({
+      error: `Node ${args.sourceId} not found in canvas ${args.canvasId}`,
+    });
   }
 
   return JSON.stringify({
-    sourceId: source.sourceId,
-    type: source.type,
-    title: source.title,
-    src: source.src,
-    content: source.content,
+    sourceId: args.sourceId,
+    type: node.type,
+    title: node.title,
+    src: node.src,
+    content: node.content,
   });
 }
 
 async function executeSearchKnowledge(args: {
   query: string;
-  canvasId?: string;
+  canvasId: string;
 }): Promise<string> {
-  const repo = await getKnowledgeRepository();
-  const allSources = repo.findAllSources();
-
-  const queryLower = args.query.toLowerCase();
-
-  // Parse metaJson once per source and cache the result for both filter and map
-  const parsedMetaCache = new Map<string, Record<string, unknown> | null>();
-  function getParsedMeta(source: {
-    sourceId: string;
-    metaJson: string | null;
-  }): Record<string, unknown> | null {
-    if (parsedMetaCache.has(source.sourceId))
-      return parsedMetaCache.get(source.sourceId) ?? null;
-    let parsed: Record<string, unknown> | null = null;
-    if (source.metaJson) {
-      try {
-        parsed = JSON.parse(source.metaJson) as Record<string, unknown>;
-      } catch {
-        /* ignore */
-      }
-    }
-    parsedMetaCache.set(source.sourceId, parsed);
-    return parsed;
+  const store = getCanvasStore(args.canvasId);
+  const canvas = store.read();
+  if (!canvas) {
+    return JSON.stringify({
+      query: args.query,
+      resultCount: 0,
+      results: [],
+    });
   }
 
-  const matches = allSources.filter((s) => {
-    const titleMatch = s.title?.toLowerCase().includes(queryLower);
-    const contentMatch = s.content?.toLowerCase().includes(queryLower);
-    // Also match against keywords in metaJson
+  const queryLower = args.query.toLowerCase();
+  const allNodes = (canvas.state.nodes ?? []) as Array<Record<string, unknown>>;
+
+  const matches: Array<{
+    nodeId: string;
+    parentId?: unknown;
+    type: string;
+    title: string | null;
+    src: string | null;
+    content: string;
+    metadata: Record<string, unknown>;
+  }> = [];
+
+  for (const n of allNodes) {
+    const nodeId = typeof n.id === 'string' ? n.id : '';
+    if (!nodeId) continue;
+    const nodeContent = store.readNode(nodeId);
+    if (!nodeContent) continue;
+
+    const titleMatch = nodeContent.title?.toLowerCase().includes(queryLower);
+    const contentMatch = nodeContent.content
+      ?.toLowerCase()
+      .includes(queryLower);
     let keywordMatch = false;
-    const meta = getParsedMeta(s);
+    const meta = nodeContent.metadata as Record<string, unknown>;
     if (meta && Array.isArray(meta.keywords)) {
       keywordMatch = meta.keywords.some(
         (k) => typeof k === 'string' && k.toLowerCase().includes(queryLower),
       );
     }
-    return titleMatch || contentMatch || keywordMatch;
-  });
-
-  // Build sourceId → canvas node mapping for the current canvas
-  const canvasNodeMap = new Map<
-    string,
-    { nodeId: string; parentId?: unknown }
-  >();
-  if (args.canvasId) {
-    const canvas = readCanvas(args.canvasId);
-    if (canvas) {
-      const nodes = (canvas.state.nodes ?? []) as Array<
-        Record<string, unknown>
-      >;
-      for (const n of nodes) {
-        const data = n.data as Record<string, unknown> | undefined;
-        const sid = data?.sourceId as string | undefined;
-        if (sid && !canvasNodeMap.has(sid)) {
-          canvasNodeMap.set(sid, {
-            nodeId: n.id as string,
-            parentId: n.parentId,
-          });
-        }
-      }
+    if (titleMatch || contentMatch || keywordMatch) {
+      matches.push({
+        nodeId,
+        parentId: n.parentId,
+        type: nodeContent.type,
+        title: nodeContent.title ?? null,
+        src: nodeContent.src ?? null,
+        content: nodeContent.content,
+        metadata: meta ?? {},
+      });
     }
   }
 
-  const results = matches.slice(0, 10).map((s) => {
-    const preview = extractPreviewFromParsed(getParsedMeta(s), s.content);
-    const canvasNode = canvasNodeMap.get(s.sourceId);
+  const results = matches.slice(0, 10).map((m) => {
+    const preview = extractPreviewFromParsed(m.metadata, m.content);
     return {
-      sourceId: s.sourceId,
-      type: s.type,
-      title: s.title,
-      src: s.src,
+      sourceId: m.nodeId,
+      nodeId: m.nodeId,
+      parentId: m.parentId,
+      type: m.type,
+      title: m.title,
+      src: m.src,
       ...preview,
-      ...(canvasNode
-        ? { nodeId: canvasNode.nodeId, parentId: canvasNode.parentId }
-        : {}),
     };
   });
 
@@ -550,7 +486,7 @@ async function executeIngestContent(args: {
   canvasId: string;
   nodeId: string;
 }): Promise<string> {
-  const canvas = readCanvas(args.canvasId);
+  const canvas = getCanvasStore(args.canvasId).read();
   if (!canvas) {
     return JSON.stringify({ error: `Canvas ${args.canvasId} not found` });
   }
@@ -563,7 +499,7 @@ async function executeIngestContent(args: {
 
   const data = node.data as Record<string, unknown> | undefined;
   const type = (data?.type as string) ?? (node.type as string);
-  const dispatcher = await getPreprocessDispatcher();
+  const dispatcher = getPreprocessDispatcher();
 
   const result = await dispatcher.preprocess({
     canvasId: args.canvasId,
@@ -668,12 +604,28 @@ export async function executeTool(
         context,
       );
     }
-    case 'read_source':
-      return executeReadSource(args as Parameters<typeof executeReadSource>[0]);
-    case 'search_knowledge':
-      return executeSearchKnowledge(
-        args as Parameters<typeof executeSearchKnowledge>[0],
+    case 'read_source': {
+      const resolvedArgs = resolveCanvasArgs(args);
+      if (!resolvedArgs) {
+        return JSON.stringify({
+          error: 'canvasId is required for read_source',
+        });
+      }
+      return executeReadSource(
+        resolvedArgs as Parameters<typeof executeReadSource>[0],
       );
+    }
+    case 'search_knowledge': {
+      const resolvedArgs = resolveCanvasArgs(args);
+      if (!resolvedArgs) {
+        return JSON.stringify({
+          error: 'canvasId is required for search_knowledge',
+        });
+      }
+      return executeSearchKnowledge(
+        resolvedArgs as Parameters<typeof executeSearchKnowledge>[0],
+      );
+    }
     case 'ingest_content': {
       const resolvedArgs = resolveCanvasArgs(args);
       if (!resolvedArgs) {
