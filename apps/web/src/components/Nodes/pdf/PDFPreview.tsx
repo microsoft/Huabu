@@ -8,6 +8,7 @@ import {
   computeHighlightUpdate,
   mergeLineRects,
 } from '@/handler/pdfHighlight/highlight';
+import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 
 import { FloatingDragHandle } from '../FloatingDragHandle';
@@ -310,7 +311,9 @@ export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
           const file = new File([blob], 'pdf-capture.png', {
             type: 'image/png',
           });
-          const url = await uploadImage(file);
+          const canvasId = useCanvasStore.getState().canvasId;
+          if (!canvasId) throw new Error('No active canvas');
+          const url = await uploadImage(file, canvasId);
 
           setPendingCapture((prev) => {
             if (!prev) return prev;

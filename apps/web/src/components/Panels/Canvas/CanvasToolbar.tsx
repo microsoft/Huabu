@@ -48,6 +48,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
   const edges = useCanvasStore((s) => s.edges);
   const deleteNodes = useCanvasStore((s) => s.deleteNodes);
   const disconnectEdges = useCanvasStore((s) => s.disconnectEdges);
+  const canvasId = useCanvasStore((s) => s.canvasId);
 
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -92,6 +93,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
   const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
+    if (!canvasId) return;
     setActiveModal(null);
 
     const inputs = (
@@ -107,20 +109,20 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
 
             if (type === 'image') {
               const [uploadedUrl, dims] = await Promise.all([
-                uploadImage(file),
+                uploadImage(file, canvasId),
                 getImageDimensions(file),
               ]);
               url = uploadedUrl;
               naturalDimensions = dims;
             } else if (type === 'video') {
               const [uploadedUrl, dims] = await Promise.all([
-                uploadVideo(file),
+                uploadVideo(file, canvasId),
                 getVideoDimensions(file),
               ]);
               url = uploadedUrl;
               naturalDimensions = dims;
             } else if (type === 'pdf') {
-              url = await uploadPdf(file);
+              url = await uploadPdf(file, canvasId);
             } else if (type === 'note') {
               const content = await file.text();
               return {

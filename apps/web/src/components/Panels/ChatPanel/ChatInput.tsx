@@ -2,6 +2,7 @@ import { ArrowUp, Square, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { resolveArtifactUrl, uploadImage, uploadPdf } from '@/api/artifact';
+import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 
 import { ContextUsageRing } from './ContextUsageRing';
@@ -49,13 +50,15 @@ export const ChatInput = ({
     (s) => s.removePendingAttachment,
   );
   const [isDragOver, setIsDragOver] = useState(false);
+  const canvasId = useCanvasStore((s) => s.canvasId);
 
   // Upload a file and add it as a pending attachment
   const attachFile = useCallback(
     async (file: File) => {
+      if (!canvasId) return;
       try {
         if (file.type.startsWith('image/')) {
-          const url = await uploadImage(file);
+          const url = await uploadImage(file, canvasId);
           addPendingAttachment({
             type: 'image',
             source: 'upload',
@@ -63,7 +66,7 @@ export const ChatInput = ({
             label: file.name || 'Image',
           });
         } else if (file.type === 'application/pdf') {
-          const url = await uploadPdf(file);
+          const url = await uploadPdf(file, canvasId);
           addPendingAttachment({
             type: 'pdf',
             source: 'upload',
@@ -78,7 +81,7 @@ export const ChatInput = ({
             /\.(md|txt|csv|json|xml|yaml|yml|log)$/i.test(file.name);
           const textContent = isText ? await file.text() : undefined;
 
-          const url = await uploadImage(file);
+          const url = await uploadImage(file, canvasId);
           addPendingAttachment({
             type: 'file',
             source: 'upload',
@@ -92,7 +95,7 @@ export const ChatInput = ({
         console.error('Failed to upload file:', err);
       }
     },
-    [addPendingAttachment],
+    [addPendingAttachment, canvasId],
   );
 
   // Handle paste — upload pasted images/files as attachments

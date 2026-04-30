@@ -163,6 +163,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   const expandMode = useCanvasStore((state) => state.expandMode);
   const frameNodesInRect = useCanvasStore((state) => state.frameNodesInRect);
   const pendingNodeType = useCanvasStore((state) => state.pendingNodeType);
+  const canvasId = useCanvasStore((state) => state.canvasId);
   const setPendingNodeType = useCanvasStore(
     (state) => state.setPendingNodeType,
   );
@@ -617,6 +618,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         // ============ 2. Native file drops (from desktop / Finder) ============
         const nativeFiles = Array.from(e.dataTransfer.files);
         if (nativeFiles.length > 0) {
+          if (!canvasId) return;
           void (async () => {
             const inputs = (
               await Promise.all(
@@ -626,9 +628,12 @@ export const Canvas: React.FC<CanvasProps> = ({
                     x: dropPos.x + offset,
                     y: dropPos.y + offset,
                   };
-                  return uploadFileToNodeInput(file, pos, {
-                    type: 'user-uploaded',
-                  });
+                  return uploadFileToNodeInput(
+                    file,
+                    pos,
+                    { type: 'user-uploaded' },
+                    canvasId,
+                  );
                 }),
               )
             ).filter((input): input is AddNodeInput => input !== null);

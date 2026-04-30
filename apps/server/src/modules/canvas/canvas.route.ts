@@ -7,7 +7,7 @@ import { createId } from '@sediment/shared';
 import { z } from 'zod';
 
 import { getExtFromMime, getMimeType } from '../../utils/mime.js';
-import { ARTIFACT_API_PREFIX } from '../artifact/utils.js';
+import { artifactApiPath } from '../artifact/utils.js';
 import { getPreprocessDispatcher } from '../preprocessing/index.js';
 import {
   createCanvas,
@@ -503,10 +503,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           continue;
         const src = node.data?.src as string | undefined;
         if (!src) continue;
-        const artifactIdx = src.indexOf(ARTIFACT_API_PREFIX);
-        if (artifactIdx !== -1) {
+        // Strip any absolute origin from canvas-scoped artifact URLs.
+        const apiIdx = src.indexOf('/api/canvas/');
+        if (apiIdx > 0) {
           // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          node.data!.src = src.slice(artifactIdx);
+          node.data!.src = src.slice(apiIdx);
         }
       }
 
@@ -651,7 +652,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
             new Uint8Array(Buffer.from(base64Data, 'base64')),
           );
           // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          node.data!.coverUrl = `${ARTIFACT_API_PREFIX}/${filename}`;
+          node.data!.coverUrl = artifactApiPath(targetCanvasId, filename);
         } catch (err) {
           request.log.error(
             { filename, err },
@@ -667,7 +668,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
         if (willExist) {
           // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          node.data!.coverUrl = `${ARTIFACT_API_PREFIX}/${coverFilename}`;
+          node.data!.coverUrl = artifactApiPath(targetCanvasId, coverFilename);
         } else {
           // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
           delete node.data!.coverUrl;
@@ -694,7 +695,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
       if (willExist) {
         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        node.data!.src = `${ARTIFACT_API_PREFIX}/${srcFilename}`;
+        node.data!.src = artifactApiPath(targetCanvasId, srcFilename);
       }
     }
 

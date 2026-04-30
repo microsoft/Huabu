@@ -103,6 +103,7 @@ export function useCanvasShortcuts(
   const addNode = useCanvasStore((s) => s.addNode);
   const layoutAll = useCanvasStore((s) => s.layoutAll);
   const toggleAutoLayout = useCanvasStore((s) => s.toggleAutoLayout);
+  const canvasId = useCanvasStore((s) => s.canvasId);
 
   // --- Tool state (select / pan) ---
   const [tool, setTool] = useState<CanvasTool>('select');
@@ -148,14 +149,18 @@ export function useCanvasShortcuts(
   /** Upload files and create nodes at the given position. */
   const pasteFiles = useCallback(
     async (files: File[], basePos: { x: number; y: number }) => {
+      if (!canvasId) return;
       const inputs = (
         await Promise.all(
           files.map(async (file, index) => {
             const offset = index * 30;
             const pos = { x: basePos.x + offset, y: basePos.y + offset };
-            const input = await uploadFileToNodeInput(file, pos, {
-              type: 'user-pasted',
-            });
+            const input = await uploadFileToNodeInput(
+              file,
+              pos,
+              { type: 'user-pasted' },
+              canvasId,
+            );
             // Strip auto-label for screenshot pastes (browser gives generic name)
             if (input?.data && file.name === 'pasted-image') {
               delete input.data.label;
@@ -169,7 +174,7 @@ export function useCanvasShortcuts(
         addNodes(inputs);
       }
     },
-    [addNodes],
+    [addNodes, canvasId],
   );
 
   /** Paste text content — auto-detect URLs vs plain text. */
