@@ -88,7 +88,7 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   fastify.post<{ Body: AnnotationIntentRequest }>(
     '/recognize-annotation',
     async (request, reply) => {
-      const { screenshot, clusterContext } = request.body;
+      const { screenshot, clusterContext, canvasId } = request.body;
 
       if (!screenshot) {
         return reply
@@ -106,6 +106,7 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
         const result = await recognizeAnnotationCommands(
           screenshot,
           clusterContext,
+          canvasId,
         );
         return reply.send(result);
       } catch (err) {

@@ -6,14 +6,12 @@
  *   The chosen intent is sent to the chat panel in operate mode for execution.
  */
 
-import { createId, rectCenter } from '@sediment/shared';
+import { createId } from '@sediment/shared';
 import { create } from 'zustand';
 
 import {
   clusterAnnotations,
-  classifyShape,
   extractAnnotationContext,
-  resolveByRules,
 } from '@/handler/annotation';
 import { captureCanvasScreenshot } from '@/handler/canvasCommand/utils/screenshot';
 import { snapshotAndExtractChanges } from '@/hooks/useCanvasChanges';
@@ -30,14 +28,11 @@ import type {
   AnnotationStroke,
   AnnotationContext,
   AnnotationCluster,
-  AnnotationNearbyNode,
   ResolvedAnnotationIntent,
   CanvasCommand,
   CanvasNodeId,
   IntentCandidate,
   AnnotationClusterContext,
-  AnnotationNearbyEdge,
-  ShapeClassification,
 } from '@sediment/shared';
 import type { Node } from '@xyflow/react';
 
@@ -68,10 +63,8 @@ export interface AnnotationProcessingCluster {
    * Only populated once `status === 'done'`.
    */
   changes?: CanvasChange[];
-  /** Shape classifier output (line / arrow / circle / cross / scribble / other). */
-  shape?: ShapeClassification;
-  /** Which path produced the commands: deterministic rule engine vs LLM fallback. */
-  source?: 'rule' | 'llm';
+  /** Resolution path. Always `'llm'` since the rule engine has been removed. */
+  source?: 'llm';
   /** One-sentence reason describing what the user meant. */
   reasoning?: string;
   /** Raw canvas commands produced for this cluster. */
@@ -468,8 +461,9 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
 // Annotation recognition — three-stage pipeline
 //
 // Stage 1: Cluster annotation strokes spatially
-// Stage 2: Classify each cluster's shape + extract nearby node context
-// Stage 3: Rule-based fast path OR LLM fallback for each cluster
+// Stage 2: Collect IDs of nearby/enclosed nodes + edges (no labels/positions)
+// Stage 3: Send screenshot + IDs to the server-side LLM agent which fetches
+//          additional node content on demand via `get_node_detail`
 //
 // Each call to `triggerAnnotationRecognition` owns its own AbortController
 // and runs independently of any other in-flight batches. Two consecutive
@@ -492,40 +486,22 @@ function clusterKey(cluster: AnnotationCluster): string {
  * resolver. Used by the cluster inspector to explain "what the AI saw".
  */
 function buildContextSummary(ctx: AnnotationContext): string {
-  const parts: string[] = [];
-  parts.push(
-    `Shape: ${ctx.shape.type} (confidence ${ctx.shape.confidence.toFixed(2)})`,
-  );
-  if (ctx.enclosedNodes.length > 0) {
-    const labels = ctx.enclosedNodes
-      .slice(0, 5)
-      .map((n) => n.label ?? n.id)
-      .join(', ');
+  const parts: string[] = [
+    `Strokes: ${ctx.cluster.strokeIds.length}`,
+    `Bbox: ${Math.round(ctx.cluster.bbox.width)}×${Math.round(ctx.cluster.bbox.height)}px`,
+  ];
+  if (ctx.enclosedNodeIds.length > 0) {
     parts.push(
-      `Enclosed (${ctx.enclosedNodes.length}): ${labels}${ctx.enclosedNodes.length > 5 ? '…' : ''}`,
+      `Enclosed (${ctx.enclosedNodeIds.length}): ${ctx.enclosedNodeIds.slice(0, 5).join(', ')}${ctx.enclosedNodeIds.length > 5 ? '…' : ''}`,
     );
   }
-  if (ctx.startNode || ctx.endNode) {
-    const from = ctx.startNode
-      ? (ctx.startNode.label ?? ctx.startNode.id)
-      : '?';
-    const to = ctx.endNode ? (ctx.endNode.label ?? ctx.endNode.id) : '?';
-    parts.push(`Endpoints: ${from} → ${to}`);
-  }
-  if (ctx.nearbyNodes.length > 0) {
-    const labels = ctx.nearbyNodes
-      .slice(0, 5)
-      .map(
-        (n) =>
-          `${n.label ?? n.id} (${Math.round(n.distance)}px ${n.direction})`,
-      )
-      .join(', ');
+  if (ctx.nearbyNodeIds.length > 0) {
     parts.push(
-      `Nearby (${ctx.nearbyNodes.length}): ${labels}${ctx.nearbyNodes.length > 5 ? '…' : ''}`,
+      `Nearby nodes (${ctx.nearbyNodeIds.length}): ${ctx.nearbyNodeIds.slice(0, 5).join(', ')}${ctx.nearbyNodeIds.length > 5 ? '…' : ''}`,
     );
   }
-  if (ctx.nearbyEdges.length > 0) {
-    parts.push(`Nearby edges: ${ctx.nearbyEdges.length}`);
+  if (ctx.nearbyEdgeIds.length > 0) {
+    parts.push(`Nearby edges: ${ctx.nearbyEdgeIds.length}`);
   }
   return parts.join('\n');
 }
@@ -587,65 +563,52 @@ function collectStrokes(
 }
 
 /**
- * Convert an AnnotationContext to the shared AnnotationClusterContext type
- * for sending to the server.
+ * Convert an AnnotationContext to the wire payload sent to the server.
+ * Only IDs + the cluster bbox cross the wire — the LLM fetches any node
+ * content it needs via the `get_node_detail` tool.
  */
 function toClusterContextPayload(
   ctx: AnnotationContext,
 ): AnnotationClusterContext {
-  const center = rectCenter(ctx.cluster.bbox);
-  const mapNode = (n: AnnotationNearbyNode): AnnotationNearbyNode => ({
-    id: n.id,
-    type: n.type,
-    label: n.label,
-    position: n.position,
-    size: n.size,
-    distance: Math.round(n.distance),
-    direction: n.direction,
-  });
-
   return {
-    shapeType: ctx.shape.type,
-    shapeConfidence: ctx.shape.confidence,
-    position: { x: Math.round(center.x), y: Math.round(center.y) },
-    nearbyNodes: ctx.nearbyNodes.map(mapNode),
-    enclosedNodes: ctx.enclosedNodes.map(mapNode),
-    nearbyEdges: ctx.nearbyEdges.map(
-      (e): AnnotationNearbyEdge => ({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        sourceLabel: e.sourceLabel,
-        targetLabel: e.targetLabel,
-        distance: Math.round(e.distance),
-      }),
-    ),
-    startNode: ctx.startNode ? mapNode(ctx.startNode) : undefined,
-    endNode: ctx.endNode ? mapNode(ctx.endNode) : undefined,
+    bbox: {
+      x: Math.round(ctx.cluster.bbox.x),
+      y: Math.round(ctx.cluster.bbox.y),
+      width: Math.round(ctx.cluster.bbox.width),
+      height: Math.round(ctx.cluster.bbox.height),
+    },
+    strokeCount: ctx.cluster.strokeIds.length,
+    nearbyNodeIds: ctx.nearbyNodeIds,
+    enclosedNodeIds: ctx.enclosedNodeIds,
+    nearbyEdgeIds: ctx.nearbyEdgeIds,
   };
 }
 
 /**
- * Process a single annotation cluster through Stage 3 (LLM fallback).
- * Returns directly executable CanvasCommand[].
+ * Send the cluster + screenshot to the server-side annotation agent and
+ * return the executable command batch it produced.
  */
 async function resolveByLLM(
   ctx: AnnotationContext,
   screenshot: string,
   signal: AbortSignal,
+  canvasId?: string,
 ): Promise<ResolvedAnnotationIntent | null> {
   const response = await recognizeAnnotationCommands(
     screenshot,
     toClusterContextPayload(ctx),
     signal,
+    canvasId,
   );
 
-  if (!response.commands || response.commands.length === 0) return null;
-
+  // An empty `commands` array is a VALID outcome: the LLM understood the
+  // gesture but decided no canvas mutation was warranted (e.g. an ambiguous
+  // deletion stroke that doesn't clearly target any node). Surface the
+  // reasoning so the detail panel can show what the LLM thought, instead of
+  // silently flipping the cluster into an error state.
   return {
-    commands: response.commands,
+    commands: response.commands ?? [],
     reasoning: response.reasoning,
-    source: 'llm',
     cluster: ctx.cluster,
   };
 }
@@ -704,13 +667,10 @@ async function triggerAnnotationRecognition(
     // are scoped to these ids so unrelated `done` overlays are preserved.
     const batchIds = new Set(clusters.map((c) => clusterKey(c)));
 
-    // ── Stage 2: Classify + extract context ───────────────────────
-    // Run classification BEFORE writing initial batch state so we can attach
-    // the shape + context summary immediately for the inspector panel.
-    const contextsByCluster: AnnotationContext[] = clusters.map((cluster) => {
-      const shape = classifyShape(cluster);
-      return extractAnnotationContext(cluster, shape, nodes, edges);
-    });
+    // ── Stage 2: Extract spatial context (IDs only) ───────────────
+    const contextsByCluster: AnnotationContext[] = clusters.map((cluster) =>
+      extractAnnotationContext(cluster, nodes, edges),
+    );
     const ctxByClusterId = new Map(
       contextsByCluster.map((c) => [clusterKey(c.cluster), c]),
     );
@@ -725,7 +685,6 @@ async function triggerAnnotationRecognition(
         strokeIds: c.strokeIds,
         status: 'pending',
         canvasId: startCanvasId ?? undefined,
-        shape: ctx?.shape,
         contextSummary: ctx ? buildContextSummary(ctx) : undefined,
       };
     });
@@ -736,28 +695,18 @@ async function triggerAnnotationRecognition(
       ],
     });
 
-    // ── Stage 3: Resolve intents (rule-based fast path + LLM fallback) ──
-    // Track which cluster each resolved intent belongs to so we can later
-    // attribute generated CanvasChanges back to the originating overlay.
+    // ── Stage 3: Resolve every cluster via the server-side LLM agent ──
+    // The rule-based fast path was removed because its false-positive rate
+    // was too high — the LLM (with on-demand `get_node_detail` access) now
+    // makes every call. Per-cluster requests are independent and fire in
+    // parallel under the shared AbortSignal.
     const resolvedIntents: Array<{
       clusterId: string;
       intent: ResolvedAnnotationIntent;
     }> = [];
-    const llmPending: Array<{ clusterId: string; ctx: AnnotationContext }> = [];
-
-    for (const ctx of contextsByCluster) {
-      const cid = clusterKey(ctx.cluster);
-      const ruleResult = resolveByRules(ctx);
-      if (ruleResult) {
-        resolvedIntents.push({ clusterId: cid, intent: ruleResult });
-      } else {
-        llmPending.push({ clusterId: cid, ctx });
-      }
-    }
-
-    // LLM fallback for clusters the rule engine couldn't resolve
     const errorByCluster = new Map<string, string>();
-    if (llmPending.length > 0 && !signal.aborted) {
+
+    if (contextsByCluster.length > 0 && !signal.aborted) {
       // Switch this batch's clusters to 'running' the moment we start firing
       // requests. Other batches' clusters are left alone.
       set({
@@ -766,20 +715,21 @@ async function triggerAnnotationRecognition(
         ),
       });
 
-      // Per-cluster LLM calls are independent — fire them in parallel.
-      // They share the same AbortSignal so a cancellation halts the batch.
-      // Each cluster shares the same viewport screenshot for now;
-      // per-cluster bbox highlighting is not yet wired through
-      // `captureCanvasScreenshot`.
       const llmResults = await Promise.allSettled(
-        llmPending.map(async ({ clusterId: cid, ctx }) => {
+        contextsByCluster.map(async (ctx) => {
+          const cid = clusterKey(ctx.cluster);
           if (signal.aborted)
             return { cid, value: null as ResolvedAnnotationIntent | null };
           const screenshot = await captureCanvasScreenshot({
             stripPrefix: true,
           });
           if (!screenshot || signal.aborted) return { cid, value: null };
-          const result = await resolveByLLM(ctx, screenshot, signal);
+          const result = await resolveByLLM(
+            ctx,
+            screenshot,
+            signal,
+            startCanvasId ?? undefined,
+          );
           return { cid, value: result };
         }),
       );
@@ -795,11 +745,13 @@ async function triggerAnnotationRecognition(
         } else {
           const err = r.reason as Error | undefined;
           if (err?.name !== 'AbortError') {
-            console.error('[Annotation Intent] LLM fallback failed:', err);
+            console.error('[Annotation Intent] LLM call failed:', err);
           }
           // We don't know which cluster failed (allSettled erased the index);
-          // mark all still-unresolved llmPending clusters with the error.
-          const unresolved = new Set(llmPending.map((p) => p.clusterId));
+          // mark all still-unresolved clusters with the error.
+          const unresolved = new Set(
+            contextsByCluster.map((c) => clusterKey(c.cluster)),
+          );
           for (const { clusterId } of resolvedIntents)
             unresolved.delete(clusterId);
           for (const cid of unresolved) {
@@ -864,15 +816,13 @@ async function triggerAnnotationRecognition(
           '[Annotation Intent] Executing',
           resolvedIntents.length,
           'resolved intent(s):',
-          resolvedIntents
-            .map((r) => `[${r.intent.source}] ${r.intent.reasoning}`)
-            .join(' | '),
+          resolvedIntents.map((r) => r.intent.reasoning).join(' | '),
         );
       }
 
-      // For rule-only batches the overlay is still in 'pending' — promote to
-      // 'running' for the brief duration of executeCommands so the user sees
-      // the same lifecycle. Scoped to this batch's ids only.
+      // Promote any clusters still in pending/preparing to 'running' for the
+      // brief duration of executeCommands so the user sees the same
+      // lifecycle. Scoped to this batch's ids only.
       set({
         processingClusters: get().processingClusters.map((c) =>
           batchIds.has(c.id) &&
@@ -912,7 +862,7 @@ async function triggerAnnotationRecognition(
           changes: changesByCluster.get(c.id) ?? c.changes,
           commands: intent?.commands ?? c.commands,
           reasoning: intent?.reasoning ?? c.reasoning,
-          source: intent?.source ?? c.source,
+          source: intent ? 'llm' : c.source,
           error: errorByCluster.get(c.id) ?? c.error,
         };
       }),
