@@ -21,6 +21,8 @@
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 
+import { runMigrationIfNeeded } from './storage/migrate.js';
+
 let _workspacePath: string | null = null;
 
 /**
@@ -49,10 +51,14 @@ export function getWorkspacePath(): string {
 /**
  * Set the workspace root path at runtime and create subdirectories.
  * Called by the workspace settings API when the user picks a folder.
+ *
+ * Also runs the legacy → canvas-centric layout migration on the new
+ * workspace (no-op once it has been migrated).
  */
 export function setWorkspacePath(newPath: string): void {
   _workspacePath = path.resolve(newPath);
   ensureWorkspaceDirs();
+  runMigrationIfNeeded(_workspacePath);
 }
 
 export function getCanvasDir(): string {
