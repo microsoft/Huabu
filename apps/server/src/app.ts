@@ -67,7 +67,7 @@ app.addHook('preHandler', async (request, reply) => {
 app.register(agentRoutes, { prefix: '/api/agent' });
 app.register(canvasRoutes, { prefix: '/api/canvas' });
 app.register(webRoutes, { prefix: '/api/web' });
-app.register(artifactRoute, { prefix: '/api' });
+app.register(artifactRoute, { prefix: '/api/canvas' });
 
 app.register(intentRoutes, { prefix: '/api/intent' });
 app.register(llmRoutes, { prefix: '/api' });

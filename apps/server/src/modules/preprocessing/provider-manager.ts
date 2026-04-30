@@ -31,7 +31,12 @@ export class ProviderManager {
     artifactsDir: string,
   ): Promise<string | undefined> {
     try {
-      const dataUrl = await resolveArtifactImageUrl(src, artifactsDir);
+      // Resolve URL → data URL. The local artifact branch reads the file
+      // from `artifactsDir`; remote / data URLs are returned as-is.
+      const dataUrl = await resolveArtifactImageUrl(
+        src,
+        (_canvasId, filename) => `${artifactsDir}/${filename}`,
+      );
       const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
       if (!match) return undefined;
 

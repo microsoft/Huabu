@@ -21,7 +21,8 @@ import { IMAGE_MIME_MAP } from '../../utils/mime.js';
 import { runAgent } from '../agent/agent.service.js';
 import { loadContext, saveContext } from '../agent/store/chat-store.js';
 import { buildNodeSummaries } from '../agent/tools/executor.js';
-import { getArtifactsDir } from '../artifact/utils.js';
+import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
+import { getCanvasStore } from '../storage/index.js';
 
 import type { AssistantMessage, Context } from '@mariozechner/pi-ai';
 import type {
@@ -55,13 +56,15 @@ function getSystemPrompt(mode: AgentMode): string {
 async function resolveImageUrl(url: string): Promise<string> {
   if (url.startsWith('data:')) return url;
 
-  const artifactMatch = /\/api\/artifact\/([^/?#]+)/.exec(url);
+  const artifactMatch = ARTIFACT_URL_REGEX.exec(url);
   if (artifactMatch) {
-    const filename = path.basename(artifactMatch[1]);
-    const filePath = path.resolve(getArtifactsDir(), filename);
+    const canvasId = artifactMatch[1];
+    const filename = path.basename(artifactMatch[2]);
+    const artifactsDir = getCanvasStore(canvasId).artifactsDir();
+    const filePath = path.resolve(artifactsDir, filename);
 
-    if (!filePath.startsWith(path.resolve(getArtifactsDir()))) {
-      console.warn(`Blocked path traversal attempt: ${artifactMatch[1]}`);
+    if (!filePath.startsWith(path.resolve(artifactsDir))) {
+      console.warn(`Blocked path traversal attempt: ${artifactMatch[2]}`);
       return url;
     }
 
@@ -203,11 +206,13 @@ async function buildUserContent(
           });
         } else if (att.url) {
           let fileContent: string | null = null;
-          const artifactMatch = /\/api\/artifact\/([^/?#]+)/.exec(att.url);
+          const artifactMatch = ARTIFACT_URL_REGEX.exec(att.url);
           if (artifactMatch) {
-            const filename = path.basename(artifactMatch[1]);
-            const filePath = path.resolve(getArtifactsDir(), filename);
-            if (filePath.startsWith(path.resolve(getArtifactsDir()))) {
+            const canvasId = artifactMatch[1];
+            const filename = path.basename(artifactMatch[2]);
+            const artifactsDir = getCanvasStore(canvasId).artifactsDir();
+            const filePath = path.resolve(artifactsDir, filename);
+            if (filePath.startsWith(path.resolve(artifactsDir))) {
               try {
                 fileContent = await readFile(filePath, 'utf-8');
               } catch {

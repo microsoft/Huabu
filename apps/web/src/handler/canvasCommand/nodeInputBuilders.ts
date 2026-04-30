@@ -25,6 +25,7 @@ export async function uploadFileToNodeInput(
   file: File,
   placementPoint: Point,
   origin: NodeOrigin,
+  canvasId: string,
 ): Promise<AddNodeInput | null> {
   // Prefer MIME-based detection, but fall back to filename when MIME is
   // absent or yields the generic 'web' bucket (e.g. .md reported as text/plain).
@@ -34,7 +35,7 @@ export async function uploadFileToNodeInput(
   try {
     if (type === 'image') {
       const [src, naturalDimensions] = await Promise.all([
-        uploadImage(file),
+        uploadImage(file, canvasId),
         getImageDimensionsFromBlob(file),
       ]);
       return {
@@ -46,7 +47,7 @@ export async function uploadFileToNodeInput(
     }
 
     if (type === 'video') {
-      const src = await uploadVideo(file);
+      const src = await uploadVideo(file, canvasId);
       return {
         nodeType: 'video',
         placementPoint,
@@ -55,7 +56,7 @@ export async function uploadFileToNodeInput(
     }
 
     if (type === 'pdf') {
-      const src = await uploadPdf(file);
+      const src = await uploadPdf(file, canvasId);
       return {
         nodeType: 'pdf',
         placementPoint,

@@ -5,66 +5,76 @@ import { pipeline } from 'node:stream/promises';
 import { createId } from '@sediment/shared';
 import { type FastifyPluginAsync } from 'fastify';
 
-import { ARTIFACT_API_PREFIX, getArtifactsDir } from './utils.js';
+import { artifactApiPath } from './utils.js';
+import { getCanvasStore } from '../storage/index.js';
 
+/**
+ * Canvas-scoped artifact route. Mount under `/api/canvas`.
+ *
+ *   POST /:canvasId/artifact/:type   → upload (image | pdf | video)
+ *   GET  /:canvasId/artifact/:filename → serve
+ */
 const artifactRoute: FastifyPluginAsync = async (fastify) => {
-  // Upload artifact with type parameter
-  fastify.post('/artifact/:type', async (request, reply) => {
-    const { type } = request.params as { type: string };
+  fastify.post<{ Params: { canvasId: string; type: string } }>(
+    '/:canvasId/artifact/:type',
+    async (request, reply) => {
+      const { canvasId, type } = request.params;
 
-    // Validate type and set default extension
-    const typeExtMap: Record<string, string> = {
-      image: '.png',
-      pdf: '.pdf',
-      video: '.mp4',
-    };
+      const typeExtMap: Record<string, string> = {
+        image: '.png',
+        pdf: '.pdf',
+        video: '.mp4',
+      };
 
-    if (!typeExtMap[type]) {
-      return reply
-        .code(400)
-        .send({ error: 'Invalid type. Must be image, pdf, or video' });
-    }
+      if (!typeExtMap[type]) {
+        return reply
+          .code(400)
+          .send({ error: 'Invalid type. Must be image, pdf, or video' });
+      }
 
-    const data = await request.file();
+      const data = await request.file();
+      if (!data) {
+        return reply.code(400).send({ error: 'No file provided' });
+      }
 
-    if (!data) {
-      return reply.code(400).send({ error: 'No file provided' });
-    }
+      const store = getCanvasStore(canvasId);
+      const id = createId('artifact');
+      const uploadedExt = path.extname(data.filename ?? '');
+      const ext = uploadedExt || typeExtMap[type];
+      const filename = `${id}${ext}`;
 
-    const artifactsDir = getArtifactsDir();
+      try {
+        await pipeline(
+          data.file,
+          createWriteStream(store.artifactPath(filename)),
+        );
+      } catch (error) {
+        request.log.error({ err: error }, 'Failed to stream artifact to disk');
+        return reply.code(500).send({ error: 'Failed to save file' });
+      }
 
-    const id = createId('artifact');
-    const uploadedExt = path.extname(data.filename ?? '');
-    const ext = uploadedExt || typeExtMap[type];
-    const filename = `${id}${ext}`;
-    const filePath = path.join(artifactsDir, filename);
+      return {
+        id,
+        uri: artifactApiPath(canvasId, filename),
+        filename: data.filename,
+        mimetype: data.mimetype,
+      };
+    },
+  );
 
-    try {
-      await pipeline(data.file, createWriteStream(filePath));
-    } catch (error) {
-      request.log.error({ err: error }, 'Failed to stream artifact to disk');
-      return reply.code(500).send({ error: 'Failed to save file' });
-    }
+  fastify.get<{ Params: { canvasId: string; filename: string } }>(
+    '/:canvasId/artifact/:filename',
+    async (request, reply) => {
+      const { canvasId, filename } = request.params;
+      const store = getCanvasStore(canvasId);
 
-    return {
-      id,
-      uri: `${ARTIFACT_API_PREFIX}/${filename}`,
-      filename: data.filename,
-      mimetype: data.mimetype,
-    };
-  });
-
-  // Serve artifact by ID
-  fastify.get('/artifact/:id', async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const artifactsDir = getArtifactsDir();
-
-    try {
-      return reply.sendFile(id, artifactsDir);
-    } catch {
-      return reply.code(404).send({ error: 'Artifact not found' });
-    }
-  });
+      try {
+        return reply.sendFile(filename, store.artifactsDir());
+      } catch {
+        return reply.code(404).send({ error: 'Artifact not found' });
+      }
+    },
+  );
 };
 
 export default artifactRoute;
