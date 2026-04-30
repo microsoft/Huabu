@@ -1,70 +1,61 @@
 /**
  * Stage 5 — Persist
  *
- * Writes canonical source records into the knowledge store.
- * Skipped for node types that have no sourceKind (image, frame, video).
+ * Writes canonical node content into the canvas store as
+ * `<canvasId>/nodes/<nodeId>.md`. Skipped for node types that have no
+ * `sourceKind` (image, frame, video).
+ *
+ * Source identity is canvas-local: the persisted record is keyed by the
+ * canvas node id rather than a global source id.
  */
 
-import type { IKnowledgeRepository } from '../../knowledge/knowledge.interface.js';
+import type { CanvasStore } from '../../storage/canvas-store.js';
 import type { NormalizeResult, PersistResult } from '../types.js';
 import type { SourceKind } from '@sediment/shared';
 
 export function persist(
   normalized: NormalizeResult,
   sourceKind: SourceKind | undefined,
-  repository: IKnowledgeRepository,
+  store: CanvasStore,
   src?: string,
 ): PersistResult {
   if (!sourceKind) {
     return { skipped: true };
   }
 
-  const type = sourceKind;
-  const existing = repository.findSourceById(normalized.sourceId);
+  const nodeId = normalized.sourceId;
+  const existing = store.readNode(nodeId);
 
-  // Content-hash deduplication: skip full write if hash unchanged.
-  // Still update the source title when it has changed.
+  // Hash-based dedup inside this canvas: skip rewrite when canonical
+  // content has not changed. Title may still drift, so refresh it.
   if (existing && existing.contentHash === normalized.contentHash) {
     if (normalized.title && existing.title !== normalized.title) {
-      repository.updateSource(normalized.sourceId, {
+      store.writeNode(nodeId, {
+        ...existing,
         title: normalized.title,
       });
     }
     return {
-      sourceId: normalized.sourceId,
+      sourceId: nodeId,
       isNew: false,
       contentChanged: false,
     };
   }
 
-  if (existing) {
-    repository.updateSource(normalized.sourceId, {
-      content: normalized.canonicalContent,
-      contentHash: normalized.contentHash,
-      title: normalized.title,
-      metadata: normalized.metadata,
-    });
-    return {
-      sourceId: normalized.sourceId,
-      isNew: false,
-      contentChanged: true,
-    };
-  }
-
-  // Create new source
-  repository.createSource({
-    sourceId: normalized.sourceId,
-    type,
-    title: normalized.title,
-    src,
+  store.writeNode(nodeId, {
+    nodeId,
+    type: sourceKind,
+    title: normalized.title ?? null,
+    src: src ?? null,
     content: normalized.canonicalContent,
     contentHash: normalized.contentHash,
-    metadata: normalized.metadata,
+    metadata:
+      (normalized.metadata as Record<string, unknown> | undefined) ?? {},
   });
 
   return {
-    sourceId: normalized.sourceId,
-    isNew: true,
+    sourceId: nodeId,
+    isNew: !existing,
     contentChanged: true,
   };
 }

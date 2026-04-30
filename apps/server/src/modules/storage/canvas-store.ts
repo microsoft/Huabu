@@ -223,6 +223,11 @@ export class CanvasStore {
     return artifactPath(this.canvasId, filename);
   }
 
+  /** Absolute path of the canvas artifacts directory. */
+  artifactsDir(): string {
+    return artifactsDir(this.canvasId);
+  }
+
   async writeArtifactStream(
     filename: string,
     src: NodeJS.ReadableStream,

@@ -7,7 +7,7 @@
 
 import path from 'node:path';
 
-import { normalizeUrl } from '../../knowledge/utils.js';
+import { normalizeUrl } from '../utils.js';
 
 import type { ResolvedInput } from '../types.js';
 import type { PreprocessNodeRequest } from '@sediment/shared';

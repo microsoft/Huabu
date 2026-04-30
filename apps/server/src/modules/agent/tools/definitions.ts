@@ -459,23 +459,31 @@ Create and connect: CREATE_NODES (multiple nodes with explicit ids) + CONNECT_NO
 
 export const readSourceTool: Tool = {
   name: 'read_source',
-  description: 'Read the full content of a knowledge source by its source ID.',
+  description:
+    'Read the full content of a canvas node by its ID. Scoped to a single canvas.',
   parameters: Type.Object({
     sourceId: Type.String({
-      description: 'The knowledge base source ID to read',
+      description: 'The node ID to read',
     }),
+    canvasId: Type.Optional(
+      Type.String({
+        description:
+          'Optional canvas ID override. When omitted, the current request canvas is used.',
+      }),
+    ),
   }),
 };
 
 export const searchKnowledgeTool: Tool = {
   name: 'search_knowledge',
   description:
-    'Search the knowledge base for sources matching a query (by title or content keywords). When canvasId is provided, results include nodeId/parentId if the source exists on that canvas.',
+    'Search nodes in the current canvas for matches against a query (title, content, or keywords).',
   parameters: Type.Object({
     query: Type.String({ description: 'Search query' }),
     canvasId: Type.Optional(
       Type.String({
-        description: 'Current canvas ID to resolve node positions',
+        description:
+          'Optional canvas ID override. When omitted, the current request canvas is used.',
       }),
     ),
   }),

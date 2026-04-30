@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { getWebReader } from '@/api/web';
 
+import useCanvasStore from '../../../store/canvasStore.ts';
 import { LoadingState } from '../../Common/LoadingState';
 
 import type { PreviewComponentProps } from '../note/NotePreview';
@@ -9,6 +10,7 @@ import type { PreviewComponentProps } from '../note/NotePreview';
 export const WebPreview = ({ data }: PreviewComponentProps) => {
   const src = typeof data.src === 'string' ? data.src : '';
   const sourceId = typeof data.sourceId === 'string' ? data.sourceId : '';
+  const canvasId = useCanvasStore((s) => s.canvasId);
 
   const [readerHtml, setReaderHtml] = useState<string>('');
   const [loading, setLoading] = useState(false);
@@ -33,6 +35,13 @@ export const WebPreview = ({ data }: PreviewComponentProps) => {
       return;
     }
 
+    if (!canvasId) {
+      setReaderHtml('');
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -40,7 +49,7 @@ export const WebPreview = ({ data }: PreviewComponentProps) => {
 
     void (async () => {
       try {
-        const result = await getWebReader({ sourceId });
+        const result = await getWebReader({ canvasId, nodeId: sourceId });
         if (cancelled) return;
         setReaderHtml(result.html);
       } catch (e) {
@@ -55,7 +64,7 @@ export const WebPreview = ({ data }: PreviewComponentProps) => {
     return () => {
       cancelled = true;
     };
-  }, [src, sourceId]);
+  }, [src, sourceId, canvasId]);
 
   // Listen for height reports from the iframe to auto-size it
   useEffect(() => {

@@ -6,21 +6,18 @@ import path from 'node:path';
 import { createId } from '@sediment/shared';
 import { z } from 'zod';
 
-import {
-  readCanvas,
-  writeCanvas,
-  listCanvases,
-  createCanvas,
-  deleteCanvas,
-  type CanvasFile,
-  type NodeLike,
-} from './canvas.filestore.js';
 import { getExtFromMime, getMimeType } from '../../utils/mime.js';
 import { ARTIFACT_API_PREFIX } from '../artifact/utils.js';
-import { getKnowledgeRepository } from '../knowledge/index.js';
 import { getPreprocessDispatcher } from '../preprocessing/index.js';
-import { getArtifactsDir } from '../workspace.js';
+import {
+  createCanvas,
+  deleteCanvas,
+  getCanvasStore,
+  listCanvases,
+  type CanvasFile,
+} from '../storage/index.js';
 
+import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
 import type {
   CanvasExportBundle,
   CanvasNodeKind,
@@ -31,6 +28,17 @@ import type {
   TriggerReason,
 } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
+
+/**
+ * Loose node type for processing unknown/untyped node structures.
+ * Used when iterating over canvas state before validation.
+ */
+interface NodeLike {
+  id?: string;
+  type?: string;
+  data?: Record<string, unknown>;
+  [key: string]: unknown;
+}
 
 function nowMs(): number {
   return Date.now();
@@ -54,85 +62,93 @@ function toMessage(error: unknown): string {
 }
 
 /**
- * Strip derived `content` and `label` from nodes that already have a `sourceId`.
- * This avoids storing redundant copies in the canvas JSON - the knowledge
- * store is the single source of truth for content and title/label.
+ * Persist node markdown into the canvas store and return canvas-state
+ * nodes with the bulky `content` / `contentSnapshot` fields stripped.
  *
- * Labels that were intentionally set by a user or the AI agent are preserved
- * in the canvas JSON so they survive save/load cycles without relying on
- * hydration from the knowledge store.
+ * Labels intentionally set by a user or the agent are preserved on the
+ * canvas node so they survive save/load cycles without depending on the
+ * node markdown.
  */
-function stripManagedContent(nodes: NodeLike[]): NodeLike[] {
+function persistAndStripNodes(
+  store: CanvasStore,
+  nodes: NodeLike[],
+): NodeLike[] {
   return nodes.map((node) => {
-    if (!node.data?.sourceId) {
-      return node;
+    const data = node.data ?? {};
+    const nodeId = typeof node.id === 'string' ? node.id : '';
+    const content =
+      typeof data['content'] === 'string'
+        ? (data['content'] as string)
+        : undefined;
+
+    if (nodeId && typeof content === 'string') {
+      const existing = store.readNode(nodeId);
+      const nodeContent: NodeContent = {
+        nodeId,
+        type:
+          typeof node.type === 'string'
+            ? node.type
+            : (existing?.type ?? 'note'),
+        title:
+          typeof data['label'] === 'string'
+            ? (data['label'] as string)
+            : (existing?.title ?? null),
+        src:
+          typeof data['src'] === 'string'
+            ? (data['src'] as string)
+            : (existing?.src ?? null),
+        content,
+        contentHash: existing?.contentHash ?? '',
+        metadata: existing?.metadata ?? {},
+      };
+      try {
+        store.writeNode(nodeId, nodeContent);
+      } catch {
+        // Best effort — skip nodes whose id fails sanitisation.
+      }
     }
 
-    // Strip `content`; the knowledge store owns it.
-    // Preserve `content` as `contentSnapshot` for fallback.
-    // Only strip `label` when it is auto-derived; keep intentional labels.
-    const { content, label, ...dataRest } = node.data;
+    const { content: _omitContent, ...dataRest } = data;
     const keepLabel =
-      node.data.labelSource === 'user' || node.data.labelSource === 'agent';
-    return {
-      ...node,
-      data: {
-        ...dataRest,
-        ...(keepLabel && label != null ? { label } : {}),
-        ...(typeof content === 'string' ? { contentSnapshot: content } : {}),
-      },
-    };
+      data['labelSource'] === 'user' || data['labelSource'] === 'agent';
+    const cleanData: Record<string, unknown> = { ...dataRest };
+    if (!keepLabel) delete cleanData['label'];
+    return { ...node, data: cleanData };
   });
 }
 
 /**
- * Hydrate node `content` from the knowledge store for nodes that reference a source.
- * Only applies to note/text nodes that have a `sourceId`.
+ * Hydrate node content from the canvas store. Reads the per-node
+ * markdown file and re-attaches `content` / `label` (when auto-derived)
+ * onto each node so callers see fresh data.
  */
-async function hydrateNodeContent(nodes: NodeLike[]): Promise<NodeLike[]> {
-  const repository = await getKnowledgeRepository();
-
+function hydrateNodeContent(store: CanvasStore, nodes: NodeLike[]): NodeLike[] {
   return nodes.map((node) => {
-    const sourceId = node.data?.sourceId as string | undefined;
-    if (!sourceId) {
-      return node;
+    const nodeId = typeof node.id === 'string' ? node.id : '';
+    if (!nodeId) return node;
+
+    let nodeContent: NodeContent | null = null;
+    try {
+      nodeContent = store.readNode(nodeId);
+    } catch {
+      nodeContent = null;
     }
+    if (!nodeContent) return node;
 
-    const source = repository.findSourceById(sourceId);
+    const data = { ...(node.data ?? {}) };
+    data['content'] = nodeContent.content;
 
-    // Fall back to contentSnapshot when the source cannot be found
-    const content =
-      source?.content ??
-      (node.data?.contentSnapshot as string | undefined) ??
-      '';
-
-    // Hydrate label from source title.
-    // When labelSource is 'auto' (or absent): always sync from the knowledge store.
-    // When labelSource is 'user' or 'agent': only restore if the label was
-    // stripped (missing) from a previous save cycle — preserves the
-    // original labelSource so we don't downgrade to 'auto'.
-    const labelPatch: Record<string, unknown> = {};
-    if (source?.title) {
-      if (
-        node.data?.labelSource !== 'user' &&
-        node.data?.labelSource !== 'agent'
-      ) {
-        labelPatch.label = source.title;
-        labelPatch.labelSource = 'auto';
-      } else if (!node.data?.label) {
-        // Intentional label was stripped — restore from source as fallback
-        labelPatch.label = source.title;
+    if (nodeContent.title) {
+      const labelSource = data['labelSource'];
+      if (labelSource !== 'user' && labelSource !== 'agent') {
+        data['label'] = nodeContent.title;
+        data['labelSource'] = 'auto';
+      } else if (!data['label']) {
+        data['label'] = nodeContent.title;
       }
     }
 
-    return {
-      ...node,
-      data: {
-        ...node.data,
-        content,
-        ...labelPatch,
-      },
-    };
+    return { ...node, data };
   });
 }
 
@@ -206,10 +222,43 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     },
   );
 
-  // Delete a node
+  // Delete a node — removes its markdown, plus the node and any
+  // incident edges from the canvas JSON.
   fastify.delete<{
     Params: { canvasId: string; nodeId: string };
-  }>('/:canvasId/nodes/:nodeId', async function (_request, reply) {
+  }>('/:canvasId/nodes/:nodeId', async function (request, reply) {
+    const { canvasId, nodeId } = request.params;
+    const store = getCanvasStore(canvasId);
+    const canvas = store.read();
+    if (!canvas) {
+      return reply.code(404).send({ message: 'Canvas not found' });
+    }
+
+    store.deleteNode(nodeId);
+
+    const nodes = (canvas.state.nodes ?? []) as NodeLike[];
+    const remainingNodes = nodes.filter((n) => n.id !== nodeId);
+    const edges = (canvas.state.edges ?? []) as Array<Record<string, unknown>>;
+    const remainingEdges = edges.filter(
+      (e) => e.source !== nodeId && e.target !== nodeId,
+    );
+
+    if (
+      remainingNodes.length !== nodes.length ||
+      remainingEdges.length !== edges.length
+    ) {
+      store.write({
+        ...canvas,
+        version: canvas.version + 1,
+        state: {
+          ...canvas.state,
+          nodes: remainingNodes,
+          edges: remainingEdges,
+        },
+        updatedAt: nowMs(),
+      });
+    }
+
     return reply.send({ success: true });
   });
 
@@ -243,7 +292,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const { nodeType, trigger, snapshot, options } = parsed.data;
-    const dispatcher = await getPreprocessDispatcher();
+    const dispatcher = getPreprocessDispatcher();
 
     try {
       const ppRequest: PreprocessNodeRequest = {
@@ -294,15 +343,17 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     '/:canvasId',
     async function (request, reply) {
       const { canvasId } = request.params;
-      const canvas = readCanvas(canvasId);
+      const store = getCanvasStore(canvasId);
+      const canvas = store.read();
 
       if (!canvas) {
         return reply.code(404).send({ message: 'Canvas not found' });
       }
 
-      // Hydrate node content from knowledge store so clients always get fresh data
+      // Hydrate node content from the per-canvas store so clients always
+      // receive fresh markdown bodies.
       const nodes = canvas.state.nodes as NodeLike[];
-      const hydratedNodes = await hydrateNodeContent(nodes);
+      const hydratedNodes = hydrateNodeContent(store, nodes);
 
       return reply.send({
         canvasId: canvas.canvasId,
@@ -329,7 +380,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
       const { version: clientVersion, state, title } = parsed.data;
 
-      const existing = readCanvas(canvasId);
+      const store = getCanvasStore(canvasId);
+      const existing = store.read();
       const serverVersion = existing?.version ?? 0;
       if (clientVersion !== serverVersion) {
         return reply
@@ -346,7 +398,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         [key: string]: unknown;
       };
 
-      const leanNodes = stripManagedContent(
+      const leanNodes = persistAndStripNodes(
+        store,
         (rawState?.nodes ?? []) as NodeLike[],
       );
 
@@ -363,7 +416,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         updatedAt: timestamp,
       };
 
-      writeCanvas(canvasFile);
+      store.write(canvasFile);
 
       return reply.send({
         canvasId,
@@ -378,7 +431,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     '/:canvasId/export',
     async function (request, reply) {
       const { canvasId } = request.params;
-      const canvas = readCanvas(canvasId);
+      const store = getCanvasStore(canvasId);
+      const canvas = store.read();
 
       if (!canvas) {
         return reply.code(404).send({ message: 'Canvas not found' });
@@ -387,29 +441,28 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       const nodes = (canvas.state.nodes ?? []) as NodeLike[];
       const edges = canvas.state.edges ?? [];
 
-      // Collect all sourceIds referenced by nodes
-      const sourceIds = nodes
-        .map((n) => n.data?.sourceId as string | undefined)
-        .filter((id): id is string => typeof id === 'string' && id.length > 0);
-
-      // Fetch corresponding knowledge sources
-      const repository = await getKnowledgeRepository();
-      const sources: ExportedSource[] = sourceIds
-        .map((id) => repository.findSourceById(id))
-        .filter((s): s is NonNullable<typeof s> => s !== null)
-        .map((s) => ({
-          sourceId: s.sourceId,
-          type: s.type,
-          title: s.title ?? null,
-          src: s.src ?? null,
-          content: s.content,
-          contentHash: s.contentHash,
-          metaJson:
-            (s as unknown as { metaJson?: string | null }).metaJson ?? null,
-        }));
+      // Build exported sources from per-node markdown content.
+      const sources: ExportedSource[] = [];
+      for (const node of nodes) {
+        const nodeId = typeof node.id === 'string' ? node.id : '';
+        if (!nodeId) continue;
+        const nodeContent = store.readNode(nodeId);
+        if (!nodeContent) continue;
+        sources.push({
+          sourceId: nodeId,
+          type: nodeContent.type,
+          title: nodeContent.title ?? null,
+          src: nodeContent.src ?? null,
+          content: nodeContent.content,
+          contentHash: nodeContent.contentHash,
+          metaJson: nodeContent.metadata
+            ? JSON.stringify(nodeContent.metadata)
+            : null,
+        });
+      }
 
       // Collect PDF, image, and video artifacts
-      const artifactsDir = getArtifactsDir();
+      const artifactsDir = store.artifactsDir();
       const artifactEntries: CanvasExportBundle['artifacts'] = [];
 
       for (const node of nodes) {
@@ -566,9 +619,12 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     const bundle = parsed.data;
     // Always generate a new canvas ID so imports never overwrite existing canvases
     const targetCanvasId = createId('canvas');
+    const targetTitle = bundle.manifest.title ?? 'Untitled';
+    createCanvas(targetCanvasId, targetTitle);
+    const targetStore = getCanvasStore(targetCanvasId);
 
     // 0. Normalise PDF cover images — convert inline base64 data URLs to files
-    const artifactsDir = getArtifactsDir();
+    const artifactsDir = targetStore.artifactsDir();
     const bundleArtifactFilenames = new Set(
       bundle.artifacts.map((a) => path.basename(a.filename)),
     );
@@ -643,11 +699,34 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     // 1. Write canvas state atomically
-    const existing = readCanvas(targetCanvasId);
+    const existing = targetStore.read();
     const nextVersion = (existing?.version ?? 0) + 1;
     const timestamp = nowMs();
 
-    const leanNodes = stripManagedContent(
+    // 2. Persist sources as per-node markdown into the new canvas store first,
+    // so persistAndStripNodes below can preserve any node-level fields.
+    let importedSources = 0;
+    for (const src of bundle.sources) {
+      try {
+        targetStore.writeNode(src.sourceId, {
+          nodeId: src.sourceId,
+          type: src.type,
+          title: src.title ?? null,
+          src: src.src ?? null,
+          content: src.content,
+          contentHash: src.contentHash,
+          metadata: src.metaJson
+            ? (JSON.parse(src.metaJson) as Record<string, unknown>)
+            : {},
+        });
+        importedSources++;
+      } catch {
+        // Best effort — skip entries with unsanitisable ids.
+      }
+    }
+
+    const leanNodes = persistAndStripNodes(
+      targetStore,
       (bundle.canvas.nodes ?? []) as NodeLike[],
     );
 
@@ -663,27 +742,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       updatedAt: timestamp,
     };
 
-    writeCanvas(canvasFile);
-
-    // 2. Write sources into knowledge store (skip if sourceId already exists)
-    const repository = await getKnowledgeRepository();
-    let importedSources = 0;
-    for (const src of bundle.sources) {
-      if (repository.findSourceById(src.sourceId)) continue;
-
-      repository.createSource({
-        sourceId: src.sourceId,
-        type: src.type as 'note' | 'text' | 'web' | 'pdf',
-        title: src.title ?? undefined,
-        src: src.src ?? undefined,
-        content: src.content,
-        contentHash: src.contentHash,
-        metadata: src.metaJson
-          ? (JSON.parse(src.metaJson) as Record<string, unknown>)
-          : undefined,
-      });
-      importedSources++;
-    }
+    targetStore.write(canvasFile);
 
     // 3. Write artifacts to disk (best-effort)
     let importedArtifacts = 0;

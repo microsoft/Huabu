@@ -18,7 +18,6 @@ import {
 } from '../../prompt/resolve-label.js';
 import { llmComplete } from '../agent/llm.js';
 import { resolveArtifactImageUrl } from '../artifact/utils.js';
-import { getArtifactsDir } from '../workspace.js';
 
 import type { Context } from '@mariozechner/pi-ai';
 
@@ -27,9 +26,12 @@ export class ProviderManager {
    * Generate a short semantic label for an image using LLM vision.
    * Returns undefined if generation fails or produces an invalid result.
    */
-  async generateImageLabel(src: string): Promise<string | undefined> {
+  async generateImageLabel(
+    src: string,
+    artifactsDir: string,
+  ): Promise<string | undefined> {
     try {
-      const dataUrl = await resolveArtifactImageUrl(src, getArtifactsDir());
+      const dataUrl = await resolveArtifactImageUrl(src, artifactsDir);
       const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
       if (!match) return undefined;
 

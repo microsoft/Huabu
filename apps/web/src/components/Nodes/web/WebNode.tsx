@@ -19,6 +19,7 @@ export const WebNode = memo(
   ({ id, data, selected }: NodeProps<WebNodeType>) => {
     const scale = useNodeScale(id, 'web');
     const openExpanded = useCanvasStore((s) => s.openExpanded);
+    const canvasId = useCanvasStore((s) => s.canvasId);
     const ingestion = useCanvasStore((state) => state.ingestionByNodeId[id]);
 
     const [refreshKey] = useState(0);
@@ -63,13 +64,20 @@ export const WebNode = memo(
         return;
       }
 
+      if (!canvasId) {
+        setPreview(null);
+        setPreviewError(null);
+        setPreviewLoading(false);
+        return;
+      }
+
       let cancelled = false;
       setPreviewLoading(true);
       setPreviewError(null);
 
       void (async () => {
         try {
-          const result = await getWebPreview({ sourceId });
+          const result = await getWebPreview({ canvasId, nodeId: id });
           if (cancelled) return;
           setPreview(result);
         } catch (error) {
@@ -86,7 +94,7 @@ export const WebNode = memo(
       return () => {
         cancelled = true;
       };
-    }, [src, sourceId, refreshKey, ingestion?.status]);
+    }, [src, sourceId, canvasId, refreshKey, ingestion?.status, id]);
 
     const WebToolbar = (
       <>
