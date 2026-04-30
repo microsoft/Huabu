@@ -111,13 +111,14 @@ export async function recognizeAnnotationCommands(
   screenshot: string,
   clusterContext: AnnotationClusterContext,
   signal?: AbortSignal,
+  canvasId?: string,
 ): Promise<AnnotationCommandResponse> {
   const response = await fetch(
     `${API_CONFIG.API_URL}/intent/recognize-annotation`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ screenshot, clusterContext }),
+      body: JSON.stringify({ screenshot, clusterContext, canvasId }),
       signal,
     },
   );

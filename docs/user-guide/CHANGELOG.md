@@ -4,6 +4,42 @@
 
 ---
 
+## 2026-04-30 · Annotation 识别管线精简：删除规则路径
+
+**What Changed**
+
+- 删除了 `classifyShape`（形状识别）和 `resolveByRules`（规则触发）两个模块，连同 `ShapeClassification` / `AnnotationShapeType` / `AnnotationNearbyNode` / `AnnotationNearbyEdge` 类型一起从前后端清理。
+- 现在每一个 annotation cluster 都直接走服务端 vision LLM。规则路径不再触发任何动作，从源头消除了规则误判带来的「画一笔节点就消失了」这类问题。
+- 发送给服务端的 `AnnotationClusterContext` 精简成「**只剩 ID**」：cluster bbox + stroke count + `nearbyNodeIds` / `enclosedNodeIds` / `nearbyEdgeIds`。不再发送任何 label / 位置 / 距离 / 方向 / 形状推断。
+- 服务端 `recognizeAnnotationCommands` 改写成多轮 tool-calling 循环。LLM 可以在做决策前调用 `get_node_detail({ nodeId })` 工具按需读取节点的 label / content / metadata，最多 6 轮。
+- 新增 `canvasId` 字段到 `AnnotationIntentRequest`，让服务端 `get_node_detail` 知道去哪个 canvas 找节点。
+
+**Notes**
+
+- Accept / Revert / Blend 的 overlay 行为、并发批次、详情面板这些都保持不变。
+- LLM 调用次数会比以前多（原本一次就出结果，现在可能 1-3 次 tool round），延迟会稍微长一点，但识别准确率应当大幅提升。
+- `AnnotationProcessingCluster.shape` 字段已删除；`source` 字段固定为 `'llm'`（不再有 `'rule'`）。如果有自定义代码读这两个字段需要更新。
+
+---
+
+## 2026-04-29 · Annotation 识别管线大改
+
+**What Changed**
+
+- 给 LLM 的结构化上下文加了 `bbox`、`strokeCount`、`shapeAlternatives`，并把 `nearbyNodes` 按 `direct/close/around` 分桶呈现，提示更清楚。
+
+**Notes**
+
+- 所有原有功能（Accept / Revert / Blend、并发批次、详情面板）保持不变。
+- 主要受益场景：
+  - 画 X 删节点 / 删边
+  - 同一对节点反复连线方向不一致
+  - 圈得不闭合的 circle
+  - 画歪的 line / arrow
+- 客户端依赖新增：`simplify-js`。
+
+---
+
 ## 2026-04-29 · Annotation 识别支持并发批次
 
 **What Changed**
@@ -16,6 +52,7 @@
 - 主动取消（如离开 annotation 工具、切换 canvas）通过 `cancelAnnotationRecognition` 一次性 abort 所有在飞批次。
 - canvas 切换、笔画在识别前被删除等护栏行为保持不变；只是不再会因为"有新批次"被误伤。
 - 修复回归：在已有批次处于 `Pending` / `Running` 时继续画新笔画，不会再把旧批次的 overlay 抹掉 —— 旧批次的 cluster 会原样保留，仅基于当前 pending 笔画重算新一批 `Preparing` overlay。
+- 修复："LLM 看懂了但选择不操作"（返回 `commands: []` + reasoning）时，不再显示 "No intent recognised by LLM" 错误。详情面板会展示 LLM 的 reasoning，笔画照常变灰表示已处理。
 
 ---
 

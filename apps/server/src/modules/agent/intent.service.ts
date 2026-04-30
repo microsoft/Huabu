@@ -5,14 +5,18 @@
  * by calling the LLM to analyze the canvas state and recent user actions.
  */
 
+import { validateToolCall } from '@mariozechner/pi-ai';
+
 import { llmComplete, llmStream } from './llm.js';
 import { logIntentEpisode as storeEpisode } from './store/intent-store.js';
+import { getNodeDetailTool } from './tools/definitions.js';
+import { executeTool } from './tools/executor.js';
 import {
   INTENT_SYSTEM_PROMPT,
   ANNOTATION_INTENT_SYSTEM_PROMPT,
 } from '../../prompt/intent.js';
 
-import type { Context } from '@mariozechner/pi-ai';
+import type { AssistantMessage, Context, ToolCall } from '@mariozechner/pi-ai';
 import type {
   AgentBaseContext,
   AnnotationClusterContext,
@@ -351,73 +355,53 @@ function tryParsePartialCandidates(raw: string): IntentCandidate[] {
 
 // ---------------------------------------------------------------------------
 // Annotation intent recognition
+//
+// The client sends a screenshot plus a minimal context payload (cluster
+// bbox + ID lists for nearby/enclosed nodes and nearby edges). The LLM is
+// driven through a small tool-calling loop with a single tool exposed:
+// `get_node_detail`, which it can call iteratively to fetch any node's
+// content before producing the final JSON command batch.
 // ---------------------------------------------------------------------------
 
 /**
- * Serialize an AnnotationClusterContext into a human-readable text block
- * so the LLM has structured context alongside the screenshot.
+ * Render the minimal cluster payload as a short text block. We deliberately
+ * include nothing beyond IDs — the LLM is expected to use the screenshot
+ * for visual reasoning and `get_node_detail` for content lookups.
  */
 function serializeClusterContext(ctx: AnnotationClusterContext): string {
   const lines: string[] = [];
-
   lines.push(
-    `Shape: ${ctx.shapeType} (confidence: ${(ctx.shapeConfidence * 100).toFixed(0)}%)`,
+    `Annotation bbox: (${ctx.bbox.x}, ${ctx.bbox.y}) ${ctx.bbox.width}x${ctx.bbox.height}px`,
   );
-  lines.push(`Annotation center: (${ctx.position.x}, ${ctx.position.y})`);
+  lines.push(`Stroke count: ${ctx.strokeCount}`);
 
-  if (ctx.startNode) {
-    const sn = ctx.startNode;
+  if (ctx.enclosedNodeIds.length > 0) {
     lines.push(
-      `Start-point nearest node: [${sn.id}] ${sn.type}${sn.label ? ` "${sn.label}"` : ''} at (${sn.position.x}, ${sn.position.y}), distance=${sn.distance}px, ${sn.direction}`,
+      `Enclosed node IDs (${ctx.enclosedNodeIds.length}): ${ctx.enclosedNodeIds.join(', ')}`,
     );
+  } else {
+    lines.push('Enclosed node IDs: (none)');
   }
-  if (ctx.endNode) {
-    const en = ctx.endNode;
+
+  if (ctx.nearbyNodeIds.length > 0) {
     lines.push(
-      `End-point nearest node: [${en.id}] ${en.type}${en.label ? ` "${en.label}"` : ''} at (${en.position.x}, ${en.position.y}), distance=${en.distance}px, ${en.direction}`,
+      `Nearby node IDs (${ctx.nearbyNodeIds.length}, by proximity): ${ctx.nearbyNodeIds.join(', ')}`,
     );
+  } else {
+    lines.push('Nearby node IDs: (none)');
   }
 
-  if (ctx.enclosedNodes.length > 0) {
-    lines.push(`Enclosed/overlapping nodes (${ctx.enclosedNodes.length}):`);
-    for (const n of ctx.enclosedNodes) {
-      lines.push(
-        `  - [${n.id}] ${n.type}${n.label ? ` "${n.label}"` : ''} at (${n.position.x}, ${n.position.y})`,
-      );
-    }
-  }
-
-  if (ctx.nearbyNodes.length > 0) {
-    lines.push(`Nearby nodes (${ctx.nearbyNodes.length}):`);
-    for (const n of ctx.nearbyNodes) {
-      lines.push(
-        `  - [${n.id}] ${n.type}${n.label ? ` "${n.label}"` : ''}, dist=${n.distance}px ${n.direction}`,
-      );
-    }
-  }
-
-  if (ctx.nearbyEdges && ctx.nearbyEdges.length > 0) {
-    lines.push(`Nearby edges (${ctx.nearbyEdges.length}):`);
-    for (const e of ctx.nearbyEdges) {
-      const sLabel = e.sourceLabel ? ` "${e.sourceLabel}"` : '';
-      const tLabel = e.targetLabel ? ` "${e.targetLabel}"` : '';
-      lines.push(
-        `  - [${e.id}] [${e.source}]${sLabel} → [${e.target}]${tLabel}, dist=${e.distance}px`,
-      );
-    }
+  if (ctx.nearbyEdgeIds.length > 0) {
+    lines.push(
+      `Nearby edge IDs (${ctx.nearbyEdgeIds.length}): ${ctx.nearbyEdgeIds.join(', ')}`,
+    );
+  } else {
+    lines.push('Nearby edge IDs: (none)');
   }
 
   return lines.join('\n');
 }
 
-/**
- * One-step annotation → canvas commands.
- *
- * Receives a screenshot + structured cluster context, asks the LLM to reason
- * about the user's intent, and returns an executable batch of canvas commands.
- * No intermediate "intent label" is produced — the LLM directly outputs the
- * command list, which the client applies atomically via executeCommands.
- */
 export interface AnnotationCommandResult {
   /** One-sentence reason describing what the user meant. */
   reasoning: string;
@@ -435,7 +419,6 @@ function extractJsonObject(raw: string): string | null {
   const start = cleaned.indexOf('{');
   if (start < 0) return null;
 
-  // Walk the string to find the matching closing brace
   let depth = 0;
   let inString = false;
   let escaped = false;
@@ -466,12 +449,97 @@ function extractJsonObject(raw: string): string | null {
   return null;
 }
 
+/** Maximum tool-calling iterations for a single annotation request. */
+const ANNOTATION_MAX_ITERATIONS = 6;
+
 /**
- * Recognize annotation intent and return executable canvas commands in one call.
+ * Drive the LLM through a tool-calling loop limited to `get_node_detail`,
+ * then parse the final assistant text as `{ reasoning, commands }`.
+ */
+async function runAnnotationAgent(
+  piContext: Context,
+  canvasId?: string,
+): Promise<string> {
+  const tools = [getNodeDetailTool];
+  piContext.tools = tools;
+
+  let iteration = 0;
+  while (iteration < ANNOTATION_MAX_ITERATIONS) {
+    iteration++;
+
+    const s = await llmStream(piContext);
+
+    // Drain the stream so the result is finalized.
+    for await (const _event of s) {
+      // We don't need to surface deltas to the client — the route returns
+      // the final command batch as a single JSON response.
+    }
+
+    let result: AssistantMessage;
+    try {
+      result = await s.result();
+    } catch (err) {
+      console.error('[annotation-intent] LLM stream failed:', err);
+      return '';
+    }
+
+    piContext.messages.push(result);
+
+    if (result.stopReason !== 'toolUse') {
+      return result.content
+        .filter((b) => b.type === 'text')
+        .map((b) => (b as { type: 'text'; text: string }).text)
+        .join('');
+    }
+
+    const toolCalls = result.content.filter(
+      (b): b is ToolCall => b.type === 'toolCall',
+    );
+
+    for (const call of toolCalls) {
+      let toolResultText: string;
+      let isError = false;
+      try {
+        const validatedArgs = validateToolCall(tools, call);
+        toolResultText = await executeTool(
+          call.name,
+          validatedArgs as Record<string, unknown>,
+          { mode: 'ask', canvasId },
+        );
+      } catch (err) {
+        isError = true;
+        toolResultText = JSON.stringify({
+          error: err instanceof Error ? err.message : 'Tool execution failed',
+        });
+      }
+
+      piContext.messages.push({
+        role: 'toolResult',
+        toolCallId: call.id,
+        toolName: call.name,
+        content: [{ type: 'text', text: toolResultText }],
+        isError,
+        timestamp: Date.now(),
+      });
+    }
+  }
+
+  console.warn(
+    '[annotation-intent] max tool iterations reached without a final answer',
+  );
+  return '';
+}
+
+/**
+ * Recognize annotation intent and return executable canvas commands.
+ *
+ * The LLM may issue several `get_node_detail` tool calls before producing
+ * the final JSON answer; we parse that JSON for the client to execute.
  */
 export async function recognizeAnnotationCommands(
   screenshot: string,
   clusterContext: AnnotationClusterContext,
+  canvasId?: string,
 ): Promise<AnnotationCommandResult> {
   const base64 = screenshot.startsWith('data:')
     ? screenshot.replace(/^data:[^;]+;base64,/, '')
@@ -483,7 +551,7 @@ export async function recognizeAnnotationCommands(
     { type: 'image', data: base64, mimeType: 'image/png' },
     {
       type: 'text',
-      text: `Annotation analysis from client-side pipeline:\n\n${contextText}\n\nReason about the user's intent and emit the canvas command batch as a single JSON object {"reasoning": ..., "commands": [...]}. Output JSON only.`,
+      text: `Annotation context (IDs only — call get_node_detail for any node whose content you need):\n\n${contextText}\n\nUse the screenshot to read the gesture, fetch any node content you need via get_node_detail, then output the final JSON object {"reasoning": ..., "commands": [...]}.`,
     },
   ];
 
@@ -494,12 +562,7 @@ export async function recognizeAnnotationCommands(
     ],
   };
 
-  const response = await llmComplete(piContext);
-
-  const raw = response.content
-    .filter((b) => b.type === 'text')
-    .map((b) => (b as { type: 'text'; text: string }).text)
-    .join('');
+  const raw = await runAnnotationAgent(piContext, canvasId);
 
   const jsonText = extractJsonObject(raw);
   if (!jsonText) {

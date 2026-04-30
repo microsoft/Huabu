@@ -1,13 +1,12 @@
 /**
  * Synthesize a ChatMessage[] timeline for an annotation cluster.
  *
- * Annotation recognition does NOT go through the multi-step agent runner —
- * the rule engine is local and the LLM fallback is a single vision call —
- * so there is no "real" chat thread to replay. Instead we fake one by
- * emitting:
+ * Annotation recognition runs as a single server-side vision-LLM call (with
+ * on-demand `get_node_detail` tool access), so there is no real chat thread
+ * to replay. Instead we fake one by emitting:
  *
- *  1. A user message describing the gesture (shape + spatial context).
- *  2. An assistant message with the resolver's reasoning.
+ *  1. A user message describing the gesture (stroke count + ID context).
+ *  2. An assistant message with the LLM's reasoning.
  *  3. A `canvas_commands` tool message carrying the produced commands +
  *     captured CanvasChange entries — rendered by the existing
  *     `CanvasCommandCard` so Accept / Revert / Blend "just work".
@@ -23,14 +22,6 @@ import { useIntentStore } from '@/store/intentStore';
 
 import type { ChatMessage } from '../../Messages/types';
 import type { AnnotationProcessingCluster } from '@/store/intentStore';
-
-const TOOL_TITLE: Record<
-  NonNullable<AnnotationProcessingCluster['source']>,
-  string
-> = {
-  rule: 'Resolved by deterministic rules',
-  llm: 'Resolved by vision LLM',
-};
 
 /**
  * Build the ChatMessage[] timeline for the given cluster.
@@ -53,11 +44,8 @@ function buildMessages(cluster: AnnotationProcessingCluster): ChatMessage[] {
   const messages: ChatMessage[] = [];
 
   // 1. User message: describe the gesture
-  const shapeLabel = cluster.shape
-    ? `${cluster.shape.type} (confidence ${cluster.shape.confidence.toFixed(2)})`
-    : 'gesture';
   const userParts: string[] = [
-    `Annotation gesture · ${shapeLabel} · ${cluster.strokeIds.length} stroke${cluster.strokeIds.length === 1 ? '' : 's'}`,
+    `Annotation gesture · ${cluster.strokeIds.length} stroke${cluster.strokeIds.length === 1 ? '' : 's'}`,
   ];
   if (cluster.contextSummary) {
     userParts.push('', cluster.contextSummary);
@@ -70,13 +58,10 @@ function buildMessages(cluster: AnnotationProcessingCluster): ChatMessage[] {
 
   // 2. Assistant reasoning (only if we have one)
   if (cluster.reasoning) {
-    const sourceTag = cluster.source
-      ? `[${TOOL_TITLE[cluster.source]}]\n\n`
-      : '';
     messages.push({
       id: `${cluster.id}-assistant`,
       role: 'assistant',
-      content: `${sourceTag}${cluster.reasoning}`,
+      content: cluster.reasoning,
     });
   }
 
@@ -93,7 +78,7 @@ function buildMessages(cluster: AnnotationProcessingCluster): ChatMessage[] {
         tool: 'canvas_commands',
         status: 'success',
         data: {
-          source: cluster.source === 'llm' ? 'agent' : 'rule',
+          source: 'agent',
           canvasId: cluster.canvasId,
           commands: cluster.commands ?? [],
           canvasChanges: cluster.changes ?? [],
