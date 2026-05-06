@@ -445,7 +445,7 @@ export interface SpatialSummary {
  */
 export function buildSpatialSummary(
   nodes: SpatialNode[],
-  edges: ReadonlyArray<{ source: string; target: string }>,
+  _edges: ReadonlyArray<{ source: string; target: string }>,
   opts?: { clusterGap?: number },
 ): SpatialSummary {
   if (nodes.length === 0) return { clusters: [], isolated: [] };
