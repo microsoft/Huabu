@@ -1,13 +1,13 @@
-import { createReadStream, existsSync } from 'node:fs';
-import { readFile, unlink, writeFile } from 'node:fs/promises';
+import { createWriteStream, existsSync, mkdirSync } from 'node:fs';
+import { mkdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { createId } from '@sediment/shared';
+import archiver from 'archiver';
+import yauzl from 'yauzl';
 import { z } from 'zod';
 
-import { getExtFromMime, getMimeType } from '../../utils/mime.js';
-import { artifactApiPath } from '../artifact/utils.js';
 import { getPreprocessDispatcher } from '../preprocessing/index.js';
 import {
   createCanvas,
@@ -16,12 +16,11 @@ import {
   listCanvases,
   type CanvasFile,
 } from '../storage/index.js';
+import { getWorkspacePath } from '../workspace.js';
 
 import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
 import type {
-  CanvasExportBundle,
   CanvasNodeKind,
-  ExportedSource,
   ImportCanvasResponse,
   PreprocessNodeRequest,
   PreprocessNodeResponse,
@@ -425,354 +424,222 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     },
   );
 
-  // --- Export Canvas ---
+  // --- Export Canvas (zip) ---
 
-  fastify.get<{ Params: { canvasId: string } }>(
-    '/:canvasId/export',
-    async function (request, reply) {
-      const { canvasId } = request.params;
-      const store = getCanvasStore(canvasId);
-      const canvas = store.read();
+  /**
+   * Stream the entire `<canvasId>/` directory as a `.sediment.zip` archive.
+   *
+   * The zip mirrors the on-disk layout (canvas.json, nodes/, artifacts/,
+   * memory/, .history/) with a `manifest.json` at the root identifying
+   * the export version and source canvas id.
+   */
+  fastify.get<{
+    Params: { canvasId: string };
+    Querystring: { includeHistory?: string };
+  }>('/:canvasId/export', async function (request, reply) {
+    const { canvasId } = request.params;
+    const includeHistory = request.query.includeHistory !== 'false';
 
-      if (!canvas) {
-        return reply.code(404).send({ message: 'Canvas not found' });
-      }
+    const store = getCanvasStore(canvasId);
+    const canvas = store.read();
+    if (!canvas) {
+      return reply.code(404).send({ message: 'Canvas not found' });
+    }
 
-      const nodes = (canvas.state.nodes ?? []) as NodeLike[];
-      const edges = canvas.state.edges ?? [];
+    const canvasDir = path.join(getWorkspacePath(), canvasId);
+    if (!existsSync(canvasDir)) {
+      return reply.code(404).send({ message: 'Canvas directory not found' });
+    }
 
-      // Build exported sources from per-node markdown content.
-      const sources: ExportedSource[] = [];
-      for (const node of nodes) {
-        const nodeId = typeof node.id === 'string' ? node.id : '';
-        if (!nodeId) continue;
-        const nodeContent = store.readNode(nodeId);
-        if (!nodeContent) continue;
-        sources.push({
-          sourceId: nodeId,
-          type: nodeContent.type,
-          title: nodeContent.title ?? null,
-          src: nodeContent.src ?? null,
-          content: nodeContent.content,
-          contentHash: nodeContent.contentHash,
-          metaJson: nodeContent.metadata
-            ? JSON.stringify(nodeContent.metadata)
-            : null,
-        });
-      }
+    const manifest = {
+      version: '2',
+      exportedAt: new Date().toISOString(),
+      sourceCanvasId: canvasId,
+      title: canvas.title,
+    };
 
-      // Collect PDF, image, and video artifacts
-      const artifactsDir = store.artifactsDir();
-      const artifactEntries: CanvasExportBundle['artifacts'] = [];
+    const rawName = `${canvas.title ?? canvasId}.sediment.zip`;
+    const asciiFallback = rawName
+      .replace(/[^\x20-\x7E]/g, '_')
+      .replace(/[;'"\\]/g, '_');
+    const encodedName = encodeURIComponent(rawName);
 
-      for (const node of nodes) {
-        if (
-          node.type !== 'pdf' &&
-          node.type !== 'image' &&
-          node.type !== 'video'
-        )
-          continue;
-        const src = node.data?.src as string | undefined;
-        if (!src) continue;
+    reply
+      .header(
+        'Content-Disposition',
+        `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodedName}`,
+      )
+      .header('Content-Type', 'application/zip');
 
-        const filename = path.basename(src);
-        const filePath = path.join(artifactsDir, filename);
+    const archive = archiver('zip', { zlib: { level: 6 } });
+    archive.on('warning', (err) => {
+      request.log.warn({ err }, 'archiver warning during export');
+    });
+    archive.on('error', (err) => {
+      request.log.error({ err }, 'archiver error during export');
+    });
 
-        try {
-          const data = await readFile(filePath);
-          artifactEntries.push({
-            filename,
-            data: data.toString('base64'),
-            mimeType: getMimeType(filename),
-          });
-        } catch {
-          request.log.warn(
-            { filename, nodeType: node.type },
-            'Artifact not found during export',
-          );
-        }
-      }
+    archive.append(JSON.stringify(manifest, null, 2), {
+      name: 'manifest.json',
+    });
+    archive.glob('**/*', {
+      cwd: canvasDir,
+      dot: includeHistory,
+      ignore: includeHistory ? [] : ['.history/**'],
+    });
 
-      // Normalise artifact src to portable relative paths (strip any absolute origin)
-      for (const node of nodes) {
-        if (
-          node.type !== 'pdf' &&
-          node.type !== 'image' &&
-          node.type !== 'video'
-        )
-          continue;
-        const src = node.data?.src as string | undefined;
-        if (!src) continue;
-        // Strip any absolute origin from canvas-scoped artifact URLs.
-        const apiIdx = src.indexOf('/api/canvas/');
-        if (apiIdx > 0) {
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          node.data!.src = src.slice(apiIdx);
-        }
-      }
-
-      // Convert PDF cover URLs to inline data URLs for cross-machine portability
-      for (const node of nodes) {
-        if (node.type !== 'pdf') continue;
-        const coverUrl = node.data?.coverUrl as string | undefined;
-        if (!coverUrl || coverUrl.startsWith('data:')) continue;
-
-        const coverFilename = path.basename(coverUrl);
-        const coverPath = path.join(artifactsDir, coverFilename);
-        try {
-          const coverData = await readFile(coverPath);
-          const coverMime = getMimeType(coverFilename);
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          node.data!.coverUrl = `data:${coverMime};base64,${coverData.toString('base64')}`;
-        } catch {
-          request.log.warn(
-            { filename: coverFilename },
-            'Cover image not found during export, removing coverUrl',
-          );
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          delete node.data!.coverUrl;
-        }
-      }
-
-      const bundle: CanvasExportBundle = {
-        manifest: {
-          version: '1.0',
-          exportedAt: new Date().toISOString(),
-          canvasId,
-          title: canvas.title ?? 'Untitled',
-        },
-        canvas: {
-          nodes,
-          edges,
-        },
-        sources,
-        artifacts: artifactEntries,
-      };
-
-      // Write bundle to a temp file, then stream it to avoid holding the
-      // entire serialised JSON (which can be huge due to base64 artifacts)
-      // in memory for the duration of the HTTP transfer.
-      const rawName = `${canvas.title ?? canvasId}.sediment.json`;
-      const asciiFallback = rawName
-        .replace(/[^\x20-\x7E]/g, '_')
-        .replace(/[;'"\\]/g, '_');
-      const encodedName = encodeURIComponent(rawName);
-      const tmpFile = path.join(tmpdir(), `${createId('tmp')}.json`);
-      await writeFile(tmpFile, JSON.stringify(bundle));
-
-      const stream = createReadStream(tmpFile);
-      stream.on('close', () => {
-        unlink(tmpFile).catch(() => {});
-      });
-
-      return reply
-        .header(
-          'Content-Disposition',
-          `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodedName}`,
-        )
-        .header('Content-Type', 'application/json')
-        .send(stream);
-    },
-  );
-
-  // --- Import Canvas ---
-
-  const importBodySchema = z.object({
-    manifest: z.object({
-      version: z.string(),
-      exportedAt: z.string(),
-      canvasId: z.string(),
-      title: z.string().nullable().optional(),
-    }),
-    canvas: z.object({
-      nodes: z.array(z.unknown()),
-      edges: z.array(z.unknown()),
-    }),
-    sources: z.array(
-      z.object({
-        sourceId: z.string(),
-        type: z.string(),
-        title: z.string().nullable(),
-        src: z.string().nullable(),
-        content: z.string(),
-        contentHash: z.string(),
-        metaJson: z.string().nullable(),
-      }),
-    ),
-    artifacts: z.array(
-      z.object({
-        filename: z.string().min(1).max(255),
-        data: z.string(),
-        mimeType: z.string(),
-      }),
-    ),
+    void archive.finalize();
+    return reply.send(archive);
   });
 
-  fastify.post<{ Body: unknown }>('/import', async function (request, reply) {
-    const parsed = importBodySchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.code(400).send({
-        message: 'Invalid import bundle',
-        details: parsed.error.format(),
+  // --- Import Canvas (zip) ---
+
+  fastify.post('/import', async function (request, reply) {
+    const file = await request.file();
+    if (!file) {
+      return reply.code(400).send({ message: 'No file provided' });
+    }
+
+    // Stream the upload to a temp zip file
+    const tmpZip = path.join(tmpdir(), `${createId('import')}.zip`);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const ws = createWriteStream(tmpZip);
+        file.file.pipe(ws);
+        ws.on('finish', () => resolve());
+        ws.on('error', reject);
+        file.file.on('error', reject);
       });
-    }
 
-    const bundle = parsed.data;
-    // Always generate a new canvas ID so imports never overwrite existing canvases
-    const targetCanvasId = createId('canvas');
-    const targetTitle = bundle.manifest.title ?? 'Untitled';
-    createCanvas(targetCanvasId, targetTitle);
-    const targetStore = getCanvasStore(targetCanvasId);
+      const targetCanvasId = createId('canvas');
+      const targetDir = path.join(getWorkspacePath(), targetCanvasId);
+      mkdirSync(targetDir, { recursive: true });
 
-    // 0. Normalise PDF cover images — convert inline base64 data URLs to files
-    const artifactsDir = targetStore.artifactsDir();
-    const bundleArtifactFilenames = new Set(
-      bundle.artifacts.map((a) => path.basename(a.filename)),
-    );
+      type ImportManifest = {
+        version?: string;
+        sourceCanvasId?: string;
+        title?: string | null;
+      };
+      let manifest: ImportManifest | null = null;
 
-    for (const raw of bundle.canvas.nodes) {
-      const node = raw as NodeLike;
-      if (node.type !== 'pdf') continue;
-      const coverUrl = node.data?.coverUrl as string | undefined;
-      if (!coverUrl) continue;
-
-      if (coverUrl.startsWith('data:')) {
-        const match = coverUrl.match(/^data:([^;]+);base64,(.+)$/);
-        if (!match) continue;
-
-        const [, mimeType, base64Data] = match;
-        const ext = getExtFromMime(mimeType);
-        const artifactId = createId('artifact');
-        const filename = `${artifactId}${ext}`;
-        const destPath = path.join(artifactsDir, filename);
-
-        try {
-          await writeFile(
-            destPath,
-            new Uint8Array(Buffer.from(base64Data, 'base64')),
-          );
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          node.data!.coverUrl = artifactApiPath(targetCanvasId, filename);
-        } catch (err) {
-          request.log.error(
-            { filename, err },
-            'Failed to write cover image during import',
-          );
+      await extractZip(tmpZip, async (entryPath, readEntry) => {
+        if (entryPath === 'manifest.json') {
+          const buf = await readEntry();
+          try {
+            manifest = JSON.parse(buf.toString('utf-8')) as ImportManifest;
+          } catch {
+            manifest = null;
+          }
+          return;
         }
-      } else {
-        // Normalise cover URL to relative path
-        const coverFilename = path.basename(coverUrl);
-        const willExist =
-          bundleArtifactFilenames.has(coverFilename) ||
-          existsSync(path.join(artifactsDir, coverFilename));
-
-        if (willExist) {
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          node.data!.coverUrl = artifactApiPath(targetCanvasId, coverFilename);
-        } else {
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          delete node.data!.coverUrl;
-          request.log.warn(
-            { coverFilename },
-            'Cover image not available during import, removed coverUrl',
-          );
+        const dest = path.join(targetDir, entryPath);
+        if (!dest.startsWith(targetDir + path.sep)) {
+          // Path traversal guard
+          return;
         }
-      }
-    }
+        await mkdir(path.dirname(dest), { recursive: true });
+        const buf = await readEntry();
+        await writeFile(dest, new Uint8Array(buf));
+      });
 
-    // 0b. Normalise artifact src to relative paths
-    for (const raw of bundle.canvas.nodes) {
-      const node = raw as NodeLike;
-      if (node.type !== 'image' && node.type !== 'video' && node.type !== 'pdf')
-        continue;
-      const src = node.data?.src as string | undefined;
-      if (!src) continue;
-
-      const srcFilename = path.basename(src);
-      const willExist =
-        bundleArtifactFilenames.has(srcFilename) ||
-        existsSync(path.join(artifactsDir, srcFilename));
-
-      if (willExist) {
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        node.data!.src = artifactApiPath(targetCanvasId, srcFilename);
-      }
-    }
-
-    // 1. Write canvas state atomically
-    const existing = targetStore.read();
-    const nextVersion = (existing?.version ?? 0) + 1;
-    const timestamp = nowMs();
-
-    // 2. Persist sources as per-node markdown into the new canvas store first,
-    // so persistAndStripNodes below can preserve any node-level fields.
-    let importedSources = 0;
-    for (const src of bundle.sources) {
-      try {
-        targetStore.writeNode(src.sourceId, {
-          nodeId: src.sourceId,
-          type: src.type,
-          title: src.title ?? null,
-          src: src.src ?? null,
-          content: src.content,
-          contentHash: src.contentHash,
-          metadata: src.metaJson
-            ? (JSON.parse(src.metaJson) as Record<string, unknown>)
-            : {},
+      // Rewrite canvas.json so canvasId matches the new directory.
+      const canvasJsonPath = path.join(targetDir, 'canvas.json');
+      if (!existsSync(canvasJsonPath)) {
+        await rm(targetDir, { recursive: true, force: true });
+        return reply.code(400).send({
+          message: 'Invalid bundle: missing canvas.json',
         });
-        importedSources++;
-      } catch {
-        // Best effort — skip entries with unsanitisable ids.
       }
+      const raw = await readFile(canvasJsonPath, 'utf-8');
+      const parsed = JSON.parse(raw) as CanvasFile;
+      const sourceCanvasId = parsed.canvasId;
+      const importedManifest = manifest as ImportManifest | null;
+      const targetTitle =
+        importedManifest?.title ?? parsed.title ?? 'Imported canvas';
+
+      const remapped: CanvasFile = {
+        ...parsed,
+        canvasId: targetCanvasId,
+        title: targetTitle,
+        state: rewriteCanvasArtifactUrls(
+          parsed.state,
+          sourceCanvasId,
+          targetCanvasId,
+        ),
+      };
+      await writeFile(canvasJsonPath, JSON.stringify(remapped));
+
+      const response: ImportCanvasResponse = {
+        canvasId: targetCanvasId,
+        importedSources: 0,
+        importedArtifacts: 0,
+      };
+      return reply.send(response);
+    } catch (err) {
+      request.log.error({ err }, 'Failed to import canvas zip');
+      return reply.code(500).send({ message: 'Failed to import canvas' });
+    } finally {
+      void unlink(tmpZip).catch(() => {});
     }
-
-    const leanNodes = persistAndStripNodes(
-      targetStore,
-      (bundle.canvas.nodes ?? []) as NodeLike[],
-    );
-
-    const canvasFile: CanvasFile = {
-      canvasId: targetCanvasId,
-      title: bundle.manifest.title ?? null,
-      version: nextVersion,
-      state: {
-        nodes: leanNodes,
-        edges: bundle.canvas.edges ?? [],
-      },
-      createdAt: existing?.createdAt ?? timestamp,
-      updatedAt: timestamp,
-    };
-
-    targetStore.write(canvasFile);
-
-    // 3. Write artifacts to disk (best-effort)
-    let importedArtifacts = 0;
-    for (const artifact of bundle.artifacts) {
-      const safeFilename = path.basename(artifact.filename);
-      if (!safeFilename) continue;
-
-      const destPath = path.join(artifactsDir, safeFilename);
-      try {
-        await writeFile(
-          destPath,
-          new Uint8Array(Buffer.from(artifact.data, 'base64')),
-        );
-        importedArtifacts++;
-      } catch (err) {
-        request.log.error(
-          { filename: safeFilename, err },
-          'Failed to write artifact during import',
-        );
-      }
-    }
-
-    const response: ImportCanvasResponse = {
-      canvasId: targetCanvasId,
-      importedSources,
-      importedArtifacts,
-    };
-    return reply.send(response);
   });
 };
+
+/**
+ * Rewrite `/api/canvas/<old>/artifact/<file>` URLs inside canvas state to
+ * point at the freshly-allocated canvas id. Mutates and returns the input.
+ */
+function rewriteCanvasArtifactUrls<T>(
+  state: T,
+  fromCanvasId: string,
+  toCanvasId: string,
+): T {
+  const fromPrefix = `/api/canvas/${fromCanvasId}/artifact/`;
+  const toPrefix = `/api/canvas/${toCanvasId}/artifact/`;
+  const json = JSON.stringify(state).split(fromPrefix).join(toPrefix);
+  return JSON.parse(json) as T;
+}
+
+/**
+ * Iterate over zip entries via `yauzl`, calling `onEntry(path, read)` for
+ * each file. `read()` returns a buffer of the entry's full content.
+ */
+async function extractZip(
+  zipPath: string,
+  onEntry: (entryPath: string, read: () => Promise<Buffer>) => Promise<void>,
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    yauzl.open(zipPath, { lazyEntries: true }, (err, zipfile) => {
+      if (err || !zipfile)
+        return reject(err ?? new Error('Failed to open zip'));
+      zipfile.on('entry', (entry) => {
+        if (/\/$/.test(entry.fileName)) {
+          // Directory entry — skip.
+          zipfile.readEntry();
+          return;
+        }
+        zipfile.openReadStream(entry, (err2, stream) => {
+          if (err2 || !stream) {
+            zipfile.close();
+            return reject(err2 ?? new Error('Failed to open entry'));
+          }
+          const chunks: Buffer[] = [];
+          stream.on('data', (c: Buffer) => chunks.push(c));
+          stream.on('end', () => {
+            void onEntry(entry.fileName, async () => Buffer.concat(chunks))
+              .then(() => zipfile.readEntry())
+              .catch((e) => {
+                zipfile.close();
+                reject(e);
+              });
+          });
+          stream.on('error', reject);
+        });
+      });
+      zipfile.on('end', () => resolve());
+      zipfile.on('error', reject);
+      zipfile.readEntry();
+    });
+  });
+}
 
 export default canvasRoutes;

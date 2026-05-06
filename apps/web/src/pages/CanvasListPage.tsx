@@ -21,7 +21,7 @@ import { Header } from '../components/Panels/Header/Header';
 import { APP_NAME } from '../config/app';
 import { useWorkspaceStore } from '../store/workspaceStore';
 
-import type { CanvasExportBundle, CanvasSummary } from '@sediment/shared';
+import type { CanvasSummary } from '@sediment/shared';
 
 /**
  * Home page that shows all canvases in the workspace.
@@ -141,9 +141,7 @@ export default function CanvasListPage() {
     setIsImporting(true);
 
     try {
-      const text = await file.text();
-      const bundle = JSON.parse(text) as CanvasExportBundle;
-      const result = await importCanvas(bundle);
+      const result = await importCanvas(file);
       // Navigate to the newly created canvas
       navigate(`/canvas/${result.canvasId}`);
     } catch (err) {
@@ -216,7 +214,7 @@ export default function CanvasListPage() {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".json,application/json"
+        accept=".zip,application/zip"
         className="hidden"
         onChange={(e) => void handleFileChange(e)}
       />

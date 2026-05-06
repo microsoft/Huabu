@@ -5,7 +5,6 @@ import type {
   PutCanvasRequest,
   PutCanvasResponse,
   DeleteNodeResponse,
-  CanvasExportBundle,
   ImportCanvasResponse,
   ListCanvasesResponse,
   CreateCanvasRequest,
@@ -133,16 +132,17 @@ export async function exportCanvas(canvasId: string): Promise<void> {
 }
 
 /**
- * Import a canvas from a `.sediment.json` export bundle.
- * The server restores sources, artifacts, and canvas state.
+ * Import a canvas from a `.sediment.zip` archive.
+ * The server allocates a fresh canvas id, restores artifacts/history,
+ * and rewrites embedded artifact URLs to the new id.
  */
-export async function importCanvas(
-  bundle: CanvasExportBundle,
-): Promise<ImportCanvasResponse> {
+export async function importCanvas(file: File): Promise<ImportCanvasResponse> {
+  const formData = new FormData();
+  formData.append('file', file, file.name);
+
   const response = await fetch(`${API_CONFIG.API_URL}/canvas/import`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(bundle),
+    body: formData,
   });
 
   if (!response.ok) {

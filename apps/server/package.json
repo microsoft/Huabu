@@ -18,17 +18,21 @@
     "@mariozechner/pi-ai": "^0.57.1",
     "@opendocsg/pdf2md": "^0.2.5",
     "@sediment/shared": "workspace:*",
+    "archiver": "^7.0.1",
     "dotenv": "^17.2.3",
     "fastify": "^5.2.0",
     "gpt-tokenizer": "^3.4.0",
     "marked": "^16.3.0",
     "sanitize-html": "^2.17.0",
     "undici": "^7.24.5",
+    "yauzl": "^3.3.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@types/archiver": "^7.0.0",
     "@types/node": "^22.15.0",
     "@types/sanitize-html": "^2.16.0",
+    "@types/yauzl": "^2.10.3",
     "tsx": "^4.0.0",
     "typescript": "^5.9.3"
   }
