@@ -1,6 +1,6 @@
 import { Download, Plus, Trash2, Upload } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 
 import {
   listCanvases,
@@ -9,7 +9,6 @@ import {
   importCanvas,
   deleteCanvasById,
 } from '../api/canvas';
-import { getSources } from '../api/knowledge';
 import { Button } from '../components/Common/Button';
 import { EmptyState } from '../components/Common/EmptyState';
 import { LoadingState } from '../components/Common/LoadingState';
@@ -38,7 +37,6 @@ export default function CanvasListPage() {
   } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [exportingId, setExportingId] = useState<string | null>(null);
-  const [sourceCount, setSourceCount] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const confirmDeleteButtonRef = useRef<HTMLButtonElement>(null);
   const navigate = useNavigate();
@@ -47,12 +45,8 @@ export default function CanvasListPage() {
   const fetchCanvases = useCallback(async () => {
     try {
       setIsLoading(true);
-      const [response, sources] = await Promise.all([
-        listCanvases(),
-        getSources(),
-      ]);
+      const response = await listCanvases();
       setCanvases(response.canvases);
-      setSourceCount(sources.length);
     } catch (error) {
       console.error('Failed to list canvases:', error);
     } finally {
@@ -132,20 +126,24 @@ export default function CanvasListPage() {
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
 
-    // Reset so the same file can be re-selected if needed
+    // Snapshot the list before resetting the input.
+    const selected = Array.from(files);
     e.target.value = '';
 
     setIsImporting(true);
 
     try {
-      const result = await importCanvas(file);
+      const result = await importCanvas(selected);
       // Navigate to the newly created canvas
       navigate(`/canvas/${result.canvasId}`);
     } catch (err) {
       console.error('Failed to import canvas:', err);
+      toast(err instanceof Error ? err.message : 'Import failed', {
+        variant: 'error',
+      });
     } finally {
       setIsImporting(false);
     }
@@ -210,12 +208,16 @@ export default function CanvasListPage() {
         }
       />
 
-      {/* Hidden file input for import */}
+      {/* Hidden folder input for import */}
       <input
         ref={fileInputRef}
         type="file"
-        accept=".zip,application/zip"
+        // @ts-expect-error — webkitdirectory is non-standard but widely supported
+        webkitdirectory=""
+        directory=""
+        multiple
         className="hidden"
+        aria-label="Import canvas folder"
         onChange={(e) => void handleFileChange(e)}
       />
 
@@ -230,8 +232,7 @@ export default function CanvasListPage() {
               <div className="text-center">
                 <div>Path: {workspacePath}</div>
                 <div>
-                  {canvases.length} canvas{canvases.length !== 1 ? 'es' : ''},{' '}
-                  {sourceCount} source{sourceCount !== 1 ? 's' : ''}
+                  {canvases.length} canvas{canvases.length !== 1 ? 'es' : ''}
                 </div>
               </div>
             }
@@ -248,16 +249,7 @@ export default function CanvasListPage() {
         <main className="mx-auto w-full max-w-4xl px-6 py-10">
           <div className="mb-8 flex items-center justify-between">
             <div>
-              <div className="flex items-baseline gap-2">
-                <h2 className="text-fg-default text-2xl font-bold">Canvases</h2>
-                <span className="text-fg-subtle text-sm">/</span>
-                <Link
-                  to="/sources"
-                  className="text-fg-subtle hover:text-fg-default text-sm font-medium"
-                >
-                  Sources
-                </Link>
-              </div>
+              <h2 className="text-fg-default text-2xl font-bold">Canvases</h2>
               <p className="text-fg-subtle mt-1 text-sm">
                 Select a canvas to open, or create a new one.
               </p>
