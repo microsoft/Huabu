@@ -10,7 +10,7 @@ import type { CanvasNodeKind, NodePreprocessProfile } from '@sediment/shared';
 export const profiles: Record<CanvasNodeKind, NodePreprocessProfile> = {
   note: {
     nodeType: 'note',
-    sourceKind: 'note',
+    contentKind: 'note',
     capabilities: [
       'resolve_input',
       'extract_text',
@@ -24,7 +24,7 @@ export const profiles: Record<CanvasNodeKind, NodePreprocessProfile> = {
   },
   text: {
     nodeType: 'text',
-    sourceKind: 'text',
+    contentKind: 'text',
     capabilities: [
       'resolve_input',
       'extract_text',
@@ -38,7 +38,7 @@ export const profiles: Record<CanvasNodeKind, NodePreprocessProfile> = {
   },
   web: {
     nodeType: 'web',
-    sourceKind: 'web',
+    contentKind: 'web',
     capabilities: [
       'resolve_input',
       'fetch_remote_content',
@@ -55,7 +55,7 @@ export const profiles: Record<CanvasNodeKind, NodePreprocessProfile> = {
   },
   pdf: {
     nodeType: 'pdf',
-    sourceKind: 'pdf',
+    contentKind: 'pdf',
     capabilities: [
       'resolve_input',
       'extract_text',

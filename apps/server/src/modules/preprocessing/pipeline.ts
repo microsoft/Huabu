@@ -22,7 +22,7 @@ import type {
   PreprocessDiagnostic,
   PreprocessNodeRequest,
   PreprocessNodeResult,
-  SourceKind,
+  NodeContentKind,
 } from '@sediment/shared';
 
 /** Dependencies injected into the pipeline runner. */
@@ -37,7 +37,7 @@ export interface PipelineDeps {
 export async function runPipeline(
   request: PreprocessNodeRequest,
   plan: Capability[],
-  sourceKind: SourceKind | undefined,
+  contentKind: NodeContentKind | undefined,
   deps: PipelineDeps,
 ): Promise<PreprocessNodeResult> {
   const requestId = randomUUID();
@@ -68,7 +68,7 @@ export async function runPipeline(
       usedCapabilities,
       ctx,
       diagnostics,
-      sourceKind,
+      contentKind,
     );
   }
 
@@ -99,7 +99,7 @@ export async function runPipeline(
       ctx.normalized = normalize(
         ctx.resolved,
         ctx.extracted ?? { skipped: true },
-        sourceKind,
+        contentKind,
       );
       if (has('compute_fingerprint'))
         usedCapabilities.push('compute_fingerprint');
@@ -209,7 +209,7 @@ export async function runPipeline(
           };
           ctx.persisted = persist(
             placeholderNormalized,
-            sourceKind,
+            contentKind,
             deps.store,
             src,
           );
@@ -221,7 +221,7 @@ export async function runPipeline(
               'Persisted placeholder source because extraction failed — content is empty',
           });
         } else {
-          ctx.persisted = persist(ctx.normalized, sourceKind, deps.store, src);
+          ctx.persisted = persist(ctx.normalized, contentKind, deps.store, src);
         }
         usedCapabilities.push('persist_source');
       } catch (error) {
@@ -247,6 +247,6 @@ export async function runPipeline(
     usedCapabilities,
     ctx,
     diagnostics,
-    sourceKind,
+    contentKind,
   );
 }
