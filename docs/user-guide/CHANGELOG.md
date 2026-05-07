@@ -4,6 +4,35 @@
 
 ---
 
+## 2026-05-07 · 自动补齐：缺 label 的节点加载时自动触发 preprocessing
+
+**What Changed**
+
+- `loadCanvas` 加载完成后，会扫描所有需要 preprocessing 的节点（note / text / web / pdf / image / frame），凡是 label 为空的都会自动入队一次 preprocessing。
+- 走的是已有的 `triggerPreprocessing` 防抖通道（每节点 1s 防抖），不会重复打到服务端。
+
+**Notes**
+
+- 主要兜底两类历史数据：(1) 旧版 frame 因 label 持久化 bug 丢掉的自动 label；(2) 任何首次 preprocess 没跑完就刷新的 media 节点。
+- Frame 节点遵循已有规则：子节点没有任何 label 时仍然 skip（避免空 LLM 调用）。
+- 如果用户/agent 已经手动设置过 label，节点已经有 label，本次 backfill 不会触碰。
+
+---
+
+## 2026-05-07 · 修复：Frame 自动 label 刷新后丢失
+
+**What Changed**
+
+- 修复了 frame 节点经 preprocessing 生成的自动 label（`labelSource: 'auto'`）在刷新后消失的问题。
+- 服务端 `persistAndStripNodes` 现在只在该节点确实有 per-node markdown 标题可以回填时，才丢掉 canvas.json 上的 `label`；对于没有 markdown 文件的节点（典型例子就是 frame），auto label 会保留在 canvas.json 中。
+
+**Notes**
+
+- 起因：之前的策略是把 `label` 当作可重建数据丢弃，依赖加载时 `hydrateNodeContent` 从 `nodes/<nodeId>.md` frontmatter 把 title 重新装回去。Frame 节点没有 markdown 文件，所以 hydrate 阶段拿不回任何 title，刷新后 label 就空了。
+- 用户/agent 设置的 label（`labelSource: 'user' | 'agent'`）的行为不变，仍然始终保留在 canvas.json 中。
+
+---
+
 ## 2026-05-07 · 修复：Canvas 上传 PDF / 图片 / 视频失败
 
 **What Changed**

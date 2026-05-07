@@ -694,14 +694,27 @@ const useCanvasStore = create<RFState>()(
         };
         canvasHistoryManager.clear();
 
+        const loadedNodes = state.nodes ?? [];
         set({
-          nodes: state.nodes ?? [],
+          nodes: loadedNodes,
           edges: state.edges ?? [],
           canvasTitle: response.title || 'Untitled',
           version: response.version,
           isLoading: false,
           ingestionByNodeId: {},
         });
+
+        // Backfill: any node that participates in preprocessing but has
+        // no label after load (e.g. frame auto-labels lost in older data,
+        // or media nodes whose initial preprocess never completed) gets
+        // re-queued so the server can regenerate one.
+        for (const node of loadedNodes) {
+          if (!needsPreprocessing(node.type ?? '')) continue;
+          const data = node.data as Record<string, unknown> | undefined;
+          const label = typeof data?.label === 'string' ? data.label : '';
+          if (label.trim().length > 0) continue;
+          triggerPreprocessing(node);
+        }
       } catch (error) {
         console.error('Failed to load canvas:', error);
         set({ isLoading: false });
