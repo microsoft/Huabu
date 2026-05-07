@@ -126,24 +126,20 @@ export default function CanvasListPage() {
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-    // Snapshot the list before resetting the input.
-    const selected = Array.from(files);
+    // Reset so the same file can be re-selected if needed
     e.target.value = '';
 
     setIsImporting(true);
 
     try {
-      const result = await importCanvas(selected);
+      const result = await importCanvas(file);
       // Navigate to the newly created canvas
       navigate(`/canvas/${result.canvasId}`);
     } catch (err) {
       console.error('Failed to import canvas:', err);
-      toast(err instanceof Error ? err.message : 'Import failed', {
-        variant: 'error',
-      });
     } finally {
       setIsImporting(false);
     }
@@ -208,16 +204,12 @@ export default function CanvasListPage() {
         }
       />
 
-      {/* Hidden folder input for import */}
+      {/* Hidden file input for import */}
       <input
         ref={fileInputRef}
         type="file"
-        // @ts-expect-error — webkitdirectory is non-standard but widely supported
-        webkitdirectory=""
-        directory=""
-        multiple
+        accept=".zip,application/zip"
         className="hidden"
-        aria-label="Import canvas folder"
         onChange={(e) => void handleFileChange(e)}
       />
 

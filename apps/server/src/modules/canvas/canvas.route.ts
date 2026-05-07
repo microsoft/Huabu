@@ -1,9 +1,11 @@
 import { createWriteStream, existsSync, mkdirSync } from 'node:fs';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { createId } from '@sediment/shared';
 import archiver from 'archiver';
+import yauzl from 'yauzl';
 import { z } from 'zod';
 
 import { getPreprocessDispatcher } from '../preprocessing/index.js';
@@ -490,93 +492,70 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     return reply.send(archive);
   });
 
-  // --- Import Canvas (folder upload) ---
-  //
-  // Expects a multipart upload containing every file in the canvas folder.
-  // Each file part's `fieldname` is treated as its path relative to the
-  // selected folder (e.g. `MyCanvas/canvas.json`, `MyCanvas/nodes/x.md`),
-  // matching what the browser provides via `File.webkitRelativePath`.
-  //
-  // The leading folder segment is stripped before writing so the contents
-  // land directly under the new canvas directory. If `canvas.json` is not
-  // found in the upload, an empty canvas is created instead.
-  fastify.post('/import', async function (request, reply) {
-    const targetCanvasId = createId('canvas');
-    const targetDir = path.join(getWorkspacePath(), targetCanvasId);
+  // --- Import Canvas (zip) ---
 
+  fastify.post('/import', async function (request, reply) {
+    const file = await request.file();
+    if (!file) {
+      return reply.code(400).send({ message: 'No file provided' });
+    }
+
+    // Stream the upload to a temp zip file
+    const tmpZip = path.join(tmpdir(), `${createId('import')}.zip`);
     try {
+      await new Promise<void>((resolve, reject) => {
+        const ws = createWriteStream(tmpZip);
+        file.file.pipe(ws);
+        ws.on('finish', () => resolve());
+        ws.on('error', reject);
+        file.file.on('error', reject);
+      });
+
+      const targetCanvasId = createId('canvas');
+      const targetDir = path.join(getWorkspacePath(), targetCanvasId);
       mkdirSync(targetDir, { recursive: true });
 
-      let receivedAny = false;
-      const parts = request.parts();
-      for await (const part of parts) {
-        if (part.type !== 'file') continue;
-        receivedAny = true;
+      type ImportManifest = {
+        version?: string;
+        sourceCanvasId?: string;
+        title?: string | null;
+      };
+      let manifest: ImportManifest | null = null;
 
-        // The browser sends each file under fieldname = relative path.
-        // Fall back to filename if a client posts without a relative path.
-        const rawPath = part.fieldname || part.filename || '';
-        const relPath = stripLeadingFolder(rawPath);
-
-        if (!relPath) {
-          // Drain the stream to allow the next part to be read.
-          await new Promise<void>((resolve, reject) => {
-            part.file.on('end', () => resolve());
-            part.file.on('error', reject);
-            part.file.resume();
-          });
-          continue;
+      await extractZip(tmpZip, async (entryPath, readEntry) => {
+        if (entryPath === 'manifest.json') {
+          const buf = await readEntry();
+          try {
+            manifest = JSON.parse(buf.toString('utf-8')) as ImportManifest;
+          } catch {
+            manifest = null;
+          }
+          return;
         }
-
-        const dest = path.join(targetDir, relPath);
+        const dest = path.join(targetDir, entryPath);
         if (!dest.startsWith(targetDir + path.sep)) {
-          // Path traversal guard — drain & skip.
-          await new Promise<void>((resolve, reject) => {
-            part.file.on('end', () => resolve());
-            part.file.on('error', reject);
-            part.file.resume();
-          });
-          continue;
+          // Path traversal guard
+          return;
         }
-
         await mkdir(path.dirname(dest), { recursive: true });
-        await new Promise<void>((resolve, reject) => {
-          const ws = createWriteStream(dest);
-          part.file.pipe(ws);
-          ws.on('finish', () => resolve());
-          ws.on('error', reject);
-          part.file.on('error', reject);
-        });
-      }
-
-      const canvasJsonPath = path.join(targetDir, 'canvas.json');
-
-      // No canvas.json in the uploaded folder → fall back to creating
-      // a fresh, empty canvas instead.
-      if (!receivedAny || !existsSync(canvasJsonPath)) {
-        await rm(targetDir, { recursive: true, force: true });
-        const fallback = createCanvas(
-          targetCanvasId,
-          generateDefaultTitle(listCanvases()),
-        );
-        if (!fallback) {
-          return reply
-            .code(500)
-            .send({ message: 'Failed to create fallback canvas' });
-        }
-        const response: ImportCanvasResponse = {
-          canvasId: fallback.canvasId,
-          importedSources: 0,
-          importedArtifacts: 0,
-        };
-        return reply.send(response);
-      }
+        const buf = await readEntry();
+        await writeFile(dest, new Uint8Array(buf));
+      });
 
       // Rewrite canvas.json so canvasId matches the new directory.
+      const canvasJsonPath = path.join(targetDir, 'canvas.json');
+      if (!existsSync(canvasJsonPath)) {
+        await rm(targetDir, { recursive: true, force: true });
+        return reply.code(400).send({
+          message: 'Invalid bundle: missing canvas.json',
+        });
+      }
       const raw = await readFile(canvasJsonPath, 'utf-8');
       const parsed = JSON.parse(raw) as CanvasFile;
       const sourceCanvasId = parsed.canvasId;
-      const targetTitle = parsed.title ?? 'Imported canvas';
+      const importedManifest = manifest as ImportManifest | null;
+      const targetTitle =
+        importedManifest?.title ?? parsed.title ?? 'Imported canvas';
 
       const remapped: CanvasFile = {
         ...parsed,
@@ -597,28 +576,13 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       };
       return reply.send(response);
     } catch (err) {
-      request.log.error({ err }, 'Failed to import canvas folder');
-      await rm(targetDir, { recursive: true, force: true }).catch(() => {});
+      request.log.error({ err }, 'Failed to import canvas zip');
       return reply.code(500).send({ message: 'Failed to import canvas' });
+    } finally {
+      void unlink(tmpZip).catch(() => {});
     }
   });
 };
-
-/**
- * Normalize an uploaded file path: convert backslashes to forward
- * slashes, strip a single leading folder segment (the folder the user
- * selected), and reject empty / dot / parent-relative segments.
- */
-function stripLeadingFolder(rawPath: string): string {
-  const normalized = rawPath.replace(/\\/g, '/').replace(/^\/+/, '');
-  if (!normalized) return '';
-  const parts = normalized.split('/').filter((p) => p && p !== '.');
-  if (parts.some((p) => p === '..')) return '';
-  // If the upload preserves the selected folder name, strip it. A flat
-  // upload (single file with no folder prefix) is kept as-is.
-  if (parts.length > 1) parts.shift();
-  return parts.join('/');
-}
 
 /**
  * Rewrite `/api/canvas/<old>/artifact/<file>` URLs inside canvas state to
@@ -633,6 +597,49 @@ function rewriteCanvasArtifactUrls<T>(
   const toPrefix = `/api/canvas/${toCanvasId}/artifact/`;
   const json = JSON.stringify(state).split(fromPrefix).join(toPrefix);
   return JSON.parse(json) as T;
+}
+
+/**
+ * Iterate over zip entries via `yauzl`, calling `onEntry(path, read)` for
+ * each file. `read()` returns a buffer of the entry's full content.
+ */
+async function extractZip(
+  zipPath: string,
+  onEntry: (entryPath: string, read: () => Promise<Buffer>) => Promise<void>,
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    yauzl.open(zipPath, { lazyEntries: true }, (err, zipfile) => {
+      if (err || !zipfile)
+        return reject(err ?? new Error('Failed to open zip'));
+      zipfile.on('entry', (entry) => {
+        if (/\/$/.test(entry.fileName)) {
+          // Directory entry — skip.
+          zipfile.readEntry();
+          return;
+        }
+        zipfile.openReadStream(entry, (err2, stream) => {
+          if (err2 || !stream) {
+            zipfile.close();
+            return reject(err2 ?? new Error('Failed to open entry'));
+          }
+          const chunks: Buffer[] = [];
+          stream.on('data', (c: Buffer) => chunks.push(c));
+          stream.on('end', () => {
+            void onEntry(entry.fileName, async () => Buffer.concat(chunks))
+              .then(() => zipfile.readEntry())
+              .catch((e) => {
+                zipfile.close();
+                reject(e);
+              });
+          });
+          stream.on('error', reject);
+        });
+      });
+      zipfile.on('end', () => resolve());
+      zipfile.on('error', reject);
+      zipfile.readEntry();
+    });
+  });
 }
 
 export default canvasRoutes;
