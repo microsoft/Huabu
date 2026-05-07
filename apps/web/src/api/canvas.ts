@@ -132,13 +132,29 @@ export async function exportCanvas(canvasId: string): Promise<void> {
 }
 
 /**
- * Import a canvas from a `.sediment.zip` archive.
- * The server allocates a fresh canvas id, restores artifacts/history,
- * and rewrites embedded artifact URLs to the new id.
+ * Import a canvas from a folder selected via `<input webkitdirectory>`.
+ *
+ * Each file is sent as a multipart part whose field name is the file's
+ * path relative to the selected folder (`File.webkitRelativePath`), so
+ * the server can recreate the directory layout. The folder must contain
+ * a `canvas.json` file at its root; otherwise the server creates a
+ * fresh empty canvas as a fallback.
  */
-export async function importCanvas(file: File): Promise<ImportCanvasResponse> {
+export async function importCanvas(
+  files: FileList | File[],
+): Promise<ImportCanvasResponse> {
+  const list = Array.from(files);
+  if (list.length === 0) {
+    throw new Error('No files selected');
+  }
+
   const formData = new FormData();
-  formData.append('file', file, file.name);
+  for (const file of list) {
+    const relPath =
+      (file as File & { webkitRelativePath?: string }).webkitRelativePath ||
+      file.name;
+    formData.append(relPath, file, file.name);
+  }
 
   const response = await fetch(`${API_CONFIG.API_URL}/canvas/import`, {
     method: 'POST',

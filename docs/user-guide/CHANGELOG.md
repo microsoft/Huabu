@@ -4,6 +4,24 @@
 
 ---
 
+## 2026-05-07 · Canvas 导入改为选择文件夹
+
+**What Changed**
+
+- Canvas 列表页（首页）的「Import」按钮现在弹出的是文件夹选择器，而不是 `.zip` 文件选择器。
+- 选中的文件夹会被原样上传到工作区作为一个新的 canvas 目录。如果文件夹根目录里包含 `canvas.json`，就按导入处理；否则会回退为创建一个空白 canvas。
+- 服务端 `POST /api/canvas/import` 改为接收 multipart 形式的多文件上传（每个文件的 `fieldname` 是相对于所选文件夹的路径），不再接收 `.zip`。
+- Canvas 列表页同时移除了 Sources 入口和工作区 tooltip 中的 source 数量显示，避免读取已下线的 `/api/knowledge` 接口导致列表无法加载。
+- 删除了已失效的 `SourceListPage` 页面与 `/sources` 路由。
+
+**Notes**
+
+- 旧的 `.sediment.zip` 导出文件无法再直接导入。如果需要导入旧的导出，先把 zip 解压成一个文件夹，再选这个文件夹即可。
+- 文件夹导入依赖浏览器的 `webkitdirectory` 属性，主流桌面浏览器（Chrome / Edge / Safari / Firefox 桌面版）均支持。
+- 服务端不再依赖 `yauzl` 解压逻辑（仅在导入路径中用过），如果有外部脚本依赖 zip 导入接口需要相应调整。
+
+---
+
 ## 2026-04-30 · Annotation 识别管线精简：删除规则路径
 
 **What Changed**
