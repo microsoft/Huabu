@@ -28,7 +28,7 @@ You have access to canvas manipulation tools:
 - **get_canvas_state** — Read the full canvas state
 - **get_node_detail** — Read a specific node's content and metadata
 - **web_search** — Search the internet for information
-- **ingest_content** — Load a node's web/PDF content into the knowledge base
+- **ingest_content** — Load a node's web/PDF content into the canvas store
 
 ## How to operate
 1. **Understand the intent** — The user describes what they want in natural language.

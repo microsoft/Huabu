@@ -479,4 +479,3 @@ L0 是"画布的骨架",L1 是"画布的语义索引",L2 是"画布的全文"。
 | Intent prompt               | [apps/server/src/prompt/intent.ts](../apps/server/src/prompt/intent.ts)                                             |
 | 预处理流水线                | [apps/server/src/modules/preprocessing/pipeline.ts](../apps/server/src/modules/preprocessing/pipeline.ts)           |
 | Enrich 阶段                 | [apps/server/src/modules/preprocessing/stages/enrich.ts](../apps/server/src/modules/preprocessing/stages/enrich.ts) |
-| 知识库 context-builder      | [apps/server/src/modules/knowledge/context-builder.ts](../apps/server/src/modules/knowledge/context-builder.ts)     |
