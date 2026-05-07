@@ -134,24 +134,16 @@ export function buildLayoutGraph(
     upsertEdge(edgeMap, e.source, e.target, WEIGHT_USER_EDGE);
   }
 
-  // 2b. origin.sourceId (user-excerpt) — link captured node to its source
-  // origin.sourceId is a knowledge-base source ID (data.sourceId), not a canvas
-  // node ID, so we build a reverse lookup from data.sourceId → canvas node ID.
-  const nodeByDataSourceId = new Map<string, string>();
-  for (const n of nodeMap.values()) {
-    const sid = (n.data as Record<string, unknown>)?.sourceId;
-    if (typeof sid === 'string') {
-      nodeByDataSourceId.set(sid, n.id);
-    }
-  }
+  // 2b. origin.excerptFromNodeId (user-excerpt) — link captured node back
+  // to the canvas node it was excerpted from.
   for (const n of nodeMap.values()) {
     const data = n.data as Record<string, unknown>;
     const origin = data?.origin as
-      | { type?: string; sourceId?: string }
+      | { type?: string; excerptFromNodeId?: string }
       | undefined;
-    if (origin?.sourceId) {
-      const targetNodeId = nodeByDataSourceId.get(origin.sourceId);
-      if (targetNodeId && targetNodeId !== n.id) {
+    if (origin?.excerptFromNodeId && nodeMap.has(origin.excerptFromNodeId)) {
+      const targetNodeId = origin.excerptFromNodeId;
+      if (targetNodeId !== n.id) {
         upsertEdge(edgeMap, n.id, targetNodeId, WEIGHT_ORIGIN_SOURCE_ID);
       }
     }

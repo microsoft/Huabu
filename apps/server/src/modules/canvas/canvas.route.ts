@@ -345,7 +345,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.send({
         nodeId,
         success: result.success,
-        sourceId: result.persistence?.sourceId ?? undefined,
         suggestedLabel:
           typeof result.patch.label === 'string'
             ? result.patch.label

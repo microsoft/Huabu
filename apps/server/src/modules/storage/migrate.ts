@@ -320,7 +320,7 @@ function migrateOneCanvas(
       data[field] = `/api/canvas/${canvasId}/artifact/${filename}`;
     }
 
-    // (c) Rewrite origin.sourceId -> origin.parentNodeId.
+    // (c) Rewrite origin.sourceId -> origin.excerptFromNodeId.
     const origin = data['origin'];
     if (origin && typeof origin === 'object') {
       const originRecord = origin as Record<string, unknown>;
@@ -329,7 +329,7 @@ function migrateOneCanvas(
         const targetNodeId = sourceToNode.get(originSid);
         delete originRecord['sourceId'];
         if (targetNodeId) {
-          originRecord['parentNodeId'] = targetNodeId;
+          originRecord['excerptFromNodeId'] = targetNodeId;
         } else {
           logger.warn('origin.sourceId could not be resolved to a node', {
             canvasId,

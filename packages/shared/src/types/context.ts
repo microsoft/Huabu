@@ -55,7 +55,6 @@ export type RecentAction =
 /**
  * Lightweight summary of a canvas node injected into the agent context.
  * `snippet` is the first ~120 chars of plain-text content (or src for web/pdf).
- * `sourceId` is set when the node has been ingested into the knowledge base.
  */
 export interface NodeSummary {
   id: string;
@@ -93,8 +92,6 @@ export interface SelectedNodeDetail {
   content?: string;
   /** Source URL for web / pdf / video / image nodes */
   src?: string;
-  /** Knowledge base source ID — present when the node has been ingested */
-  sourceId?: string;
   /**
    * Direct children of a frame node, each carrying their own full detail.
    * Undefined for non-frame nodes.

@@ -147,7 +147,6 @@ export interface PreprocessNodeResult {
   };
 
   persistence?: {
-    sourceId?: string;
     contentKind?: NodeContentKind;
     isNew?: boolean;
     contentChanged?: boolean;
@@ -166,13 +165,10 @@ export interface PreprocessNodeResult {
 
 /**
  * Simplified response returned by the unified preprocess endpoint.
- * Clients use this instead of UpsertNodeResponse / ResolveLabelResponse.
  */
 export interface PreprocessNodeResponse {
   nodeId: string;
   success: boolean;
-  /** Source ID from the Persist stage (for note/text/web/pdf). */
-  sourceId?: string;
   /** LLM-suggested label from the Enrich stage (for image/frame, or title-derived for ingest types). */
   suggestedLabel?: string;
   /** Structured error description, if any. */

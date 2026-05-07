@@ -26,14 +26,14 @@ A single global toggle controls whether layout runs automatically on node creati
 
 The layout engine builds a graph from both the visible canvas edges and hidden semantic relationships. These implicit edges pull related nodes closer together without requiring the user to draw connections manually.
 
-| Relationship              | Weight | Description                                                              |
-| ------------------------- | ------ | ------------------------------------------------------------------------ |
-| User-drawn canvas edge    | `1.0`  | Direct mapping                                                           |
-| `research.relatedNodeIds` | `0.6`  | Synthesis node → each source node it cites                               |
-| `origin.sourceId`         | `0.4`  | Node derived from a knowledge source → the node that owns that source    |
-| Same `research.threadId`  | `0.3`  | Nodes produced in the same research session, fully connected (all pairs) |
-| Same `origin.threadId`    | `0.3`  | Nodes dragged from the same chat thread, fully connected (all pairs)     |
-| Same frame (`parentId`)   | `0.2`  | Sibling nodes inside the same frame, fully connected (all pairs)         |
+| Relationship               | Weight | Description                                                              |
+| -------------------------- | ------ | ------------------------------------------------------------------------ |
+| User-drawn canvas edge     | `1.0`  | Direct mapping                                                           |
+| `research.relatedNodeIds`  | `0.6`  | Synthesis node → each source node it cites                               |
+| `origin.excerptFromNodeId` | `0.4`  | Excerpt node → the canvas node it was captured from                      |
+| Same `research.threadId`   | `0.3`  | Nodes produced in the same research session, fully connected (all pairs) |
+| Same `origin.threadId`     | `0.3`  | Nodes dragged from the same chat thread, fully connected (all pairs)     |
+| Same frame (`parentId`)    | `0.2`  | Sibling nodes inside the same frame, fully connected (all pairs)         |
 
 Two rules keep the graph clean:
 

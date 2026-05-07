@@ -9,6 +9,8 @@ export type PreviewData = {
 };
 
 export interface NodePreviewContentProps {
+  /** Canvas node id, when bound to a real node. */
+  id?: string;
   type: string;
   data: Record<string, unknown>;
   readOnly?: boolean;
@@ -25,7 +27,7 @@ const DefaultPreview = ({ type }: { type: string }) => {
 };
 
 export const NodePreviewContent = (props: NodePreviewContentProps) => {
-  const { type, data, ...rest } = props;
+  const { type, data, id, ...rest } = props;
 
   const PreviewComponent = NodePreviews[type];
 
@@ -43,7 +45,7 @@ export const NodePreviewContent = (props: NodePreviewContentProps) => {
     <div className="flex h-full flex-col">
       <AiSummaryBanner summary={summary} keywords={keywords} />
       <div className="relative min-h-0 flex-1">
-        <PreviewComponent data={data} {...rest} />
+        <PreviewComponent id={id} data={data} {...rest} />
       </div>
     </div>
   );
