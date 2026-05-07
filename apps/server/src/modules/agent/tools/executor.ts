@@ -246,11 +246,26 @@ async function executeGetNodeDetail(args: {
 
   const data = node.data as Record<string, unknown> | undefined;
   const nodeContent = store.readNode(args.nodeId);
-  const content = nodeContent?.content ?? (data?.content as string | undefined);
+  const persistedContent = nodeContent?.content;
+  const inlineContent = data?.content as string | undefined;
+  // Prefer persisted markdown, but if it is missing OR an empty string
+  // fall back to whatever inline content the canvas JSON still has.
+  // Plain `??` would treat "" as a valid value and skip the fallback.
+  const content =
+    persistedContent && persistedContent.length > 0
+      ? persistedContent
+      : (inlineContent ?? persistedContent ?? '');
+
+  const nodeType = (node.type ?? data?.type) as string | undefined;
+  const isTextBearing = nodeType === 'note' || nodeType === 'text';
+  const warning =
+    isTextBearing && content.length === 0
+      ? 'No persisted content found for this node.'
+      : undefined;
 
   return JSON.stringify({
     id: node.id,
-    type: node.type ?? data?.type,
+    type: nodeType,
     label: data?.label,
     content,
     src: data?.src ?? nodeContent?.src ?? undefined,
@@ -259,6 +274,7 @@ async function executeGetNodeDetail(args: {
     width: node.width,
     height: node.height,
     parentId: node.parentId,
+    ...(warning ? { warning } : {}),
   });
 }
 
@@ -385,103 +401,6 @@ async function executeCanvasCommands(
 
 // ==================== Knowledge Operations ====================
 
-async function executeReadSource(args: {
-  sourceId: string;
-  canvasId: string;
-}): Promise<string> {
-  const node = getCanvasStore(args.canvasId).readNode(args.sourceId);
-  if (!node) {
-    return JSON.stringify({
-      error: `Node ${args.sourceId} not found in canvas ${args.canvasId}`,
-    });
-  }
-
-  return JSON.stringify({
-    sourceId: args.sourceId,
-    type: node.type,
-    title: node.title,
-    src: node.src,
-    content: node.content,
-  });
-}
-
-async function executeSearchKnowledge(args: {
-  query: string;
-  canvasId: string;
-}): Promise<string> {
-  const store = getCanvasStore(args.canvasId);
-  const canvas = store.read();
-  if (!canvas) {
-    return JSON.stringify({
-      query: args.query,
-      resultCount: 0,
-      results: [],
-    });
-  }
-
-  const queryLower = args.query.toLowerCase();
-  const allNodes = (canvas.state.nodes ?? []) as Array<Record<string, unknown>>;
-
-  const matches: Array<{
-    nodeId: string;
-    parentId?: unknown;
-    type: string;
-    title: string | null;
-    src: string | null;
-    content: string;
-    metadata: Record<string, unknown>;
-  }> = [];
-
-  for (const n of allNodes) {
-    const nodeId = typeof n.id === 'string' ? n.id : '';
-    if (!nodeId) continue;
-    const nodeContent = store.readNode(nodeId);
-    if (!nodeContent) continue;
-
-    const titleMatch = nodeContent.title?.toLowerCase().includes(queryLower);
-    const contentMatch = nodeContent.content
-      ?.toLowerCase()
-      .includes(queryLower);
-    let keywordMatch = false;
-    const meta = nodeContent.metadata as Record<string, unknown>;
-    if (meta && Array.isArray(meta.keywords)) {
-      keywordMatch = meta.keywords.some(
-        (k) => typeof k === 'string' && k.toLowerCase().includes(queryLower),
-      );
-    }
-    if (titleMatch || contentMatch || keywordMatch) {
-      matches.push({
-        nodeId,
-        parentId: n.parentId,
-        type: nodeContent.type,
-        title: nodeContent.title ?? null,
-        src: nodeContent.src ?? null,
-        content: nodeContent.content,
-        metadata: meta ?? {},
-      });
-    }
-  }
-
-  const results = matches.slice(0, 10).map((m) => {
-    const preview = extractPreviewFromParsed(m.metadata, m.content);
-    return {
-      sourceId: m.nodeId,
-      nodeId: m.nodeId,
-      parentId: m.parentId,
-      type: m.type,
-      title: m.title,
-      src: m.src,
-      ...preview,
-    };
-  });
-
-  return JSON.stringify({
-    query: args.query,
-    resultCount: results.length,
-    results,
-  });
-}
-
 async function executeIngestContent(args: {
   canvasId: string;
   nodeId: string;
@@ -602,28 +521,6 @@ export async function executeTool(
       return executeCanvasCommands(
         resolvedArgs as Parameters<typeof executeCanvasCommands>[0],
         context,
-      );
-    }
-    case 'read_source': {
-      const resolvedArgs = resolveCanvasArgs(args);
-      if (!resolvedArgs) {
-        return JSON.stringify({
-          error: 'canvasId is required for read_source',
-        });
-      }
-      return executeReadSource(
-        resolvedArgs as Parameters<typeof executeReadSource>[0],
-      );
-    }
-    case 'search_knowledge': {
-      const resolvedArgs = resolveCanvasArgs(args);
-      if (!resolvedArgs) {
-        return JSON.stringify({
-          error: 'canvasId is required for search_knowledge',
-        });
-      }
-      return executeSearchKnowledge(
-        resolvedArgs as Parameters<typeof executeSearchKnowledge>[0],
       );
     }
     case 'ingest_content': {

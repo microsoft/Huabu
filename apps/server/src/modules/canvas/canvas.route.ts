@@ -82,28 +82,41 @@ function persistAndStripNodes(
 
     if (nodeId && typeof content === 'string') {
       const existing = store.readNode(nodeId);
-      const nodeContent: NodeContent = {
-        nodeId,
-        type:
-          typeof node.type === 'string'
-            ? node.type
-            : (existing?.type ?? 'note'),
-        title:
-          typeof data['label'] === 'string'
-            ? (data['label'] as string)
-            : (existing?.title ?? null),
-        src:
-          typeof data['src'] === 'string'
-            ? (data['src'] as string)
-            : (existing?.src ?? null),
-        content,
-        contentHash: existing?.contentHash ?? '',
-        metadata: existing?.metadata ?? {},
-      };
-      try {
-        store.writeNode(nodeId, nodeContent);
-      } catch {
-        // Best effort — skip nodes whose id fails sanitisation.
+      const nodeType =
+        typeof node.type === 'string' ? node.type : (existing?.type ?? 'note');
+      // Guard against accidental content wipes: if the incoming content is
+      // an empty string but the persisted markdown already has non-empty
+      // content for a text-bearing node, skip the write. This prevents
+      // races (e.g. autosave firing before the editor flushes its buffer)
+      // from clobbering real content with "".
+      const isTextBearing = nodeType === 'note' || nodeType === 'text';
+      const wouldClobber =
+        content.length === 0 &&
+        isTextBearing &&
+        typeof existing?.content === 'string' &&
+        existing.content.length > 0;
+
+      if (!wouldClobber) {
+        const nodeContent: NodeContent = {
+          nodeId,
+          type: nodeType,
+          title:
+            typeof data['label'] === 'string'
+              ? (data['label'] as string)
+              : (existing?.title ?? null),
+          src:
+            typeof data['src'] === 'string'
+              ? (data['src'] as string)
+              : (existing?.src ?? null),
+          content,
+          contentHash: existing?.contentHash ?? '',
+          metadata: existing?.metadata ?? {},
+        };
+        try {
+          store.writeNode(nodeId, nodeContent);
+        } catch {
+          // Best effort — skip nodes whose id fails sanitisation.
+        }
       }
     }
 

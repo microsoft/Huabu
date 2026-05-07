@@ -457,38 +457,6 @@ Create and connect: CREATE_NODES (multiple nodes with explicit ids) + CONNECT_NO
 
 // ==================== Knowledge Tools ====================
 
-export const readSourceTool: Tool = {
-  name: 'read_source',
-  description:
-    'Read the full content of a canvas node by its ID. Scoped to a single canvas.',
-  parameters: Type.Object({
-    sourceId: Type.String({
-      description: 'The node ID to read',
-    }),
-    canvasId: Type.Optional(
-      Type.String({
-        description:
-          'Optional canvas ID override. When omitted, the current request canvas is used.',
-      }),
-    ),
-  }),
-};
-
-export const searchKnowledgeTool: Tool = {
-  name: 'search_knowledge',
-  description:
-    'Search nodes in the current canvas for matches against a query (title, content, or keywords).',
-  parameters: Type.Object({
-    query: Type.String({ description: 'Search query' }),
-    canvasId: Type.Optional(
-      Type.String({
-        description:
-          'Optional canvas ID override. When omitted, the current request canvas is used.',
-      }),
-    ),
-  }),
-};
-
 export const ingestContentTool: Tool = {
   name: 'ingest_content',
   description:
@@ -527,11 +495,7 @@ export const useSkillTool: Tool = {
  * Includes read-only canvas/knowledge access so the agent can
  * lazily fetch full content of selected nodes on demand.
  */
-export const chatTools: Tool[] = [
-  webSearchTool,
-  getNodeDetailTool,
-  readSourceTool,
-];
+export const chatTools: Tool[] = [webSearchTool, getNodeDetailTool];
 
 /**
  * Tools available in operate mode.
@@ -543,7 +507,5 @@ export const operateTools: Tool[] = [
   getNodeDetailTool,
   canvasCommandsTool,
   useSkillTool,
-  readSourceTool,
-  searchKnowledgeTool,
   ingestContentTool,
 ];
