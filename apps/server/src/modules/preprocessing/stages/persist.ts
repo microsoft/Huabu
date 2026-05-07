@@ -3,7 +3,7 @@
  *
  * Writes canonical node content into the canvas store as
  * `<canvasId>/nodes/<nodeId>.md`. Skipped for node types that have no
- * `sourceKind` (image, frame, video).
+ * `contentKind` (image, frame, video).
  *
  * Source identity is canvas-local: the persisted record is keyed by the
  * canvas node id rather than a global source id.
@@ -11,15 +11,15 @@
 
 import type { CanvasStore } from '../../storage/canvas-store.js';
 import type { NormalizeResult, PersistResult } from '../types.js';
-import type { SourceKind } from '@sediment/shared';
+import type { NodeContentKind } from '@sediment/shared';
 
 export function persist(
   normalized: NormalizeResult,
-  sourceKind: SourceKind | undefined,
+  contentKind: NodeContentKind | undefined,
   store: CanvasStore,
   src?: string,
 ): PersistResult {
-  if (!sourceKind) {
+  if (!contentKind) {
     return { skipped: true };
   }
 
@@ -44,7 +44,7 @@ export function persist(
 
   store.writeNode(nodeId, {
     nodeId,
-    type: sourceKind,
+    type: contentKind,
     title: normalized.title ?? null,
     src: src ?? null,
     content: normalized.canonicalContent,

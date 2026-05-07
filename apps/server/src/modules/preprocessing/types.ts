@@ -4,7 +4,7 @@
  * These types flow between pipeline stages and are not part of the public API.
  */
 
-import type { SourceMetadata } from '@sediment/shared';
+import type { NodeContentMetadata } from '@sediment/shared';
 
 // ---------------------------------------------------------------------------
 // Stage 1 — Input Resolve
@@ -63,7 +63,7 @@ export interface NormalizeResult {
   contentHash: string;
   sourceId: string;
   title?: string;
-  metadata?: SourceMetadata;
+  metadata?: NodeContentMetadata;
   canonicalContent: string;
   inputFingerprint: string;
 }

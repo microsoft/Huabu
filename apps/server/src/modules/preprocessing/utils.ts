@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-import type { SourceType } from '@sediment/shared';
+import type { NodeContentKind } from '@sediment/shared';
 
 /**
  * Normalize URL for consistent sourceId generation
@@ -78,7 +78,7 @@ function generateDeterministicSourceId(data: string): string {
  * @returns Generated sourceId
  */
 export function generateSourceId(options: {
-  type: SourceType;
+  type: NodeContentKind;
   uri?: string;
   fileHash?: string;
 }): string {

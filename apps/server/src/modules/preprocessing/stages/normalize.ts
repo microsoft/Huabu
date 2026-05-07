@@ -14,12 +14,12 @@ import type {
   ExtractResult,
   NormalizeResult,
 } from '../types.js';
-import type { SourceKind } from '@sediment/shared';
+import type { NodeContentKind } from '@sediment/shared';
 
 export function normalize(
   resolved: ResolvedInput,
   extracted: ExtractResult,
-  sourceKind?: SourceKind,
+  contentKind?: NodeContentKind,
 ): NormalizeResult {
   const canonicalContent = extracted.content ?? resolved.content ?? '';
   const contentHash = computeContentHash(canonicalContent);
@@ -45,7 +45,7 @@ export function normalize(
     : undefined;
 
   // Source ID generation
-  const sourceId = resolveSourceId(resolved, contentHash, sourceKind);
+  const sourceId = resolveSourceId(resolved, contentHash, contentKind);
 
   // Input fingerprint: hash type-specific canonical input to avoid collisions
   // across unrelated nodes (e.g. two empty notes, or image vs frame).
@@ -98,7 +98,7 @@ function computeInputFingerprint(
 function resolveSourceId(
   resolved: ResolvedInput,
   _contentHash: string,
-  _sourceKind?: SourceKind,
+  _contentKind?: NodeContentKind,
 ): string {
   // Source identity is canvas-local: the node id is the source id.
   // An explicit existing id (e.g. supplied by a legacy snapshot) wins
