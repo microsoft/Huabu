@@ -28,16 +28,20 @@ export const NodePreviewContent = (props: NodePreviewContentProps) => {
   const { type, data, ...rest } = props;
 
   const PreviewComponent = NodePreviews[type];
-  const sourceId =
-    typeof data.sourceId === 'string' && data.sourceId ? data.sourceId : null;
 
   if (!PreviewComponent) {
     return <DefaultPreview type={type} />;
   }
 
+  const summary =
+    typeof data.summary === 'string' ? (data.summary as string) : null;
+  const keywords = Array.isArray(data.keywords)
+    ? (data.keywords as string[])
+    : null;
+
   return (
     <div className="flex h-full flex-col">
-      {sourceId && <AiSummaryBanner sourceId={sourceId} />}
+      <AiSummaryBanner summary={summary} keywords={keywords} />
       <div className="relative min-h-0 flex-1">
         <PreviewComponent data={data} {...rest} />
       </div>

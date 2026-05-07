@@ -4,7 +4,6 @@ export {
   SEDIMENT_DND_MIME,
   type WebDragPayload,
   type NoteDragPayload,
-  type SourceDragPayload,
   type ImageDragPayload,
   type DragPayload,
   type DragImageOffset,

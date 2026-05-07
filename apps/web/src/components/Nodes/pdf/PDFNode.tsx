@@ -10,7 +10,6 @@ import 'react-pdf/dist/Page/TextLayer.css';
 import { resolveArtifactUrl } from '@/api/artifact';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { useNodeScale } from '@/hooks/useNodeScale';
-import { useSourceMeta } from '@/hooks/useSourceMeta';
 import useCanvasStore from '@/store/canvasStore';
 
 import { NodeWrapper } from '../NodeWrapper';
@@ -80,12 +79,13 @@ export const PDFNode = memo(
 
     const hasCover = !!data.coverUrl;
     const src = typeof data.src === 'string' ? data.src : '';
-    const sourceId = typeof data.sourceId === 'string' ? data.sourceId : '';
+    const summary =
+      typeof (data as { summary?: unknown }).summary === 'string'
+        ? ((data as { summary?: string }).summary as string)
+        : '';
 
     // Auto-generated thumbnail from the first PDF page (when no manual cover).
     const [thumbnail, setThumbnail] = useState<string | null>(null);
-
-    const { summary } = useSourceMeta(sourceId || null);
 
     // Reset thumbnail when src changes so the new PDF gets a fresh capture.
     useEffect(() => {
