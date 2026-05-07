@@ -7,7 +7,7 @@ import { getNodeIcon, NODE_TYPE_LABEL } from '../../../config/nodeIcons';
 import useCanvasStore from '../../../store/canvasStore';
 import { SidebarPanel } from '../SidebarPanel';
 
-interface DataSourcePanelProps {
+interface CanvasLayerPanelProps {
   isCollapsed?: boolean;
   onToggle?: () => void;
 }
@@ -63,10 +63,10 @@ const buildTreeItems = (nodes: DataSourceNodeLike[]): DataSourceTreeItem[] => {
   return out;
 };
 
-export const DataSourcePanel = ({
+export const CanvasLayerPanel = ({
   isCollapsed,
   onToggle,
-}: DataSourcePanelProps) => {
+}: CanvasLayerPanelProps) => {
   const nodes = useCanvasStore(
     (s) => s.nodes,
   ) as unknown as DataSourceNodeLike[];

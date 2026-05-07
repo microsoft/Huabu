@@ -77,18 +77,12 @@ function serializeContextLight(ctx: AgentBaseContext): string {
     lines.push(`# Currently selected node(s) (${ctx.selectedNodes.length}):`);
     for (const s of ctx.selectedNodes) {
       const label = s.label ? ` "${s.label}"` : '';
-      const content = s.content ? `\n    Content: ${s.content}` : '';
       const src = s.src ? `\n    Source: ${s.src}` : '';
-      lines.push(`- [${s.id}] ${s.type}${label}${content}${src}`);
+      lines.push(`- [${s.id}] ${s.type}${label}${src}`);
       if (s.children && s.children.length > 0) {
         for (const child of s.children) {
           const childLabel = child.label ? ` "${child.label}"` : '';
-          const childContent = child.content
-            ? `\n      Content: ${child.content}`
-            : '';
-          lines.push(
-            `  - [${child.id}] ${child.type}${childLabel}${childContent}`,
-          );
+          lines.push(`  - [${child.id}] ${child.type}${childLabel}`);
         }
       }
     }

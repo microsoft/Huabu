@@ -507,7 +507,7 @@ async function executePromptNode(nodeId: string): Promise<void> {
 ### 6.3 Agent Design
 
 - **Reuses existing chat agent** — own thread per prompt node (created if missing), same system prompt
-- **Reuses existing tools** — `get_node_detail`, `canvas_commands`, `web_search`, `search_knowledge`, etc.
+- **Reuses existing tools** — `get_node_detail`, `canvas_commands`, `web_search`, `ingest_content`, etc.
 - **Spatial context injected** as `[SYSTEM Context]` preamble in the message content
 - **Conversation viewable** in chat panel via `openPromptThread(nodeId, threadId)`
 

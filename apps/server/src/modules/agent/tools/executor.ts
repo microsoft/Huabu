@@ -155,7 +155,6 @@ function extractPreviewFromParsed(
 /** Summary shape returned by buildNodeSummaries. */
 export interface NodePreview {
   nodeId: string;
-  sourceId?: string;
   type: string | undefined;
   title: string | undefined;
   parentId: string | undefined;
@@ -208,7 +207,6 @@ export async function buildNodeSummaries(
 
     return {
       nodeId,
-      sourceId: nodeId,
       type: (n.type ?? data?.type) as string | undefined,
       title: data?.label as string | undefined,
       parentId: n.parentId as string | undefined,
@@ -269,7 +267,6 @@ async function executeGetNodeDetail(args: {
     label: data?.label,
     content,
     src: data?.src ?? nodeContent?.src ?? undefined,
-    sourceId: args.nodeId,
     position: node.position,
     width: node.width,
     height: node.height,

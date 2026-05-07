@@ -6,8 +6,8 @@ import { CenterArea } from '@/pages/CanvasPage/CenterArea.tsx';
 import { MainLayout } from '@/pages/CanvasPage/MainLayout.tsx';
 
 import { LoadingState } from '../../components/Common/LoadingState.tsx';
+import { CanvasLayerPanel } from '../../components/Panels/CanvasLayerPanel';
 import { ChatPanel } from '../../components/Panels/ChatPanel';
-import { DataSourcePanel } from '../../components/Panels/DataSourcePanel';
 import { Header } from '../../components/Panels/Header/Header.tsx';
 import { KeyboardShortcutsModal } from '../../components/Panels/Header/KeyboardShortcutsModal.tsx';
 import useStore from '../../store/canvasStore.ts';
@@ -104,7 +104,7 @@ export default function CanvasPage() {
     <>
       <MainLayout
         header={<Header onOpenHelp={() => setIsShortcutsOpen(true)} />}
-        leftPanel={<DataSourcePanel />}
+        leftPanel={<CanvasLayerPanel />}
         rightPanel={<ChatPanel />}
       >
         <CenterArea canvasShortcutsDisabled={isShortcutsOpen} />

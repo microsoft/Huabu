@@ -84,7 +84,6 @@
 | 粘贴文本      | 自动创建 Note 节点                                    |
 | 上传弹窗      | 批量上传本地文件                                      |
 | 链接弹窗      | 批量粘贴 URL                                          |
-| 侧栏 Sources  | 从 Sources 面板拖一个来源到画布，复用同一个 sourceId  |
 | Chat 面板拖拽 | 从 AI 对话消息拖一段内容到画布，自动创建 Note         |
 | Note 内拖拽   | 在 Note 编辑器里把一个块拖到画布，拆出新节点          |
 | PDF 选区      | 在 PDF 大屏选区，把文字 / 截图拖到画布                |
@@ -135,9 +134,8 @@ AI 在 Operate 模式或意图执行中也会自动创建连线，用于表达"�
 
 画布两侧各有一个可折叠的面板：
 
-- **左侧 · Layers / Sources**（[DataSourcePanel](../../apps/web/src/components/Panels/DataSourcePanel)）
-  - **Canvas Tab**：以树状结构显示当前画布的所有节点 / Frame 层级，可拖拽改变层级、锁定、重命名
-  - **Sources Tab**：当前工作区的所有知识来源，可拖到画布生成对应节点
+- **左侧 · Layers**（[CanvasLayerPanel](../../apps/web/src/components/Panels/CanvasLayerPanel)）
+  - 以树状结构显示当前画布的所有节点 / Frame 层级，可拖拽改变层级、锁定、重命名
 - **右侧 · Chat**（[ChatPanel](../../apps/web/src/components/Panels/ChatPanel)）
   - 与 AI 的对话面板，支持 Ask / Operate 两种模式
 

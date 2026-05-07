@@ -88,7 +88,7 @@ export interface NodePreprocessProfile {
 export interface PreprocessOptions {
   /** Allow LLM calls in the Enrich stage. Default: true. */
   allowLLM?: boolean;
-  /** Allow writing to the knowledge store. Default: true. */
+  /** Allow writing to the per-canvas content store. Default: true. */
   allowPersistence?: boolean;
   /** Force reprocessing even if fingerprint matches. Default: false. */
   force?: boolean;
