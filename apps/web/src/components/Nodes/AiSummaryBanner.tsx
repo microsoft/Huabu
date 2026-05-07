@@ -2,18 +2,22 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useState } from 'react';
 
 import { Button } from '@/components/Common/Button';
-import { useSourceMeta } from '@/hooks/useSourceMeta';
 
 interface AiSummaryBannerProps {
-  sourceId: string;
+  summary?: string | null;
+  keywords?: string[] | null;
 }
 
 /** Collapsible banner showing AI-generated summary and keywords above the preview. */
-export const AiSummaryBanner = ({ sourceId }: AiSummaryBannerProps) => {
-  const { summary, keywords } = useSourceMeta(sourceId);
+export const AiSummaryBanner = ({
+  summary,
+  keywords,
+}: AiSummaryBannerProps) => {
   const [collapsed, setCollapsed] = useState(false);
 
-  if (!summary && !keywords) return null;
+  const hasSummary = typeof summary === 'string' && summary.trim().length > 0;
+  const hasKeywords = Array.isArray(keywords) && keywords.length > 0;
+  if (!hasSummary && !hasKeywords) return null;
 
   return (
     <div className="relative z-10 shrink-0 shadow-[0_1px_2px_rgba(0,0,0,0.08)]">
@@ -28,12 +32,12 @@ export const AiSummaryBanner = ({ sourceId }: AiSummaryBannerProps) => {
       </Button>
       {!collapsed && (
         <div className="animate-in fade-in flex flex-col gap-1.5 px-3 pb-2 duration-150">
-          {summary && (
+          {hasSummary && (
             <p className="text-fg-default text-sm leading-relaxed">{summary}</p>
           )}
-          {keywords && (
+          {hasKeywords && (
             <div className="flex flex-wrap gap-1.5">
-              {keywords.map((kw) => (
+              {keywords!.map((kw) => (
                 <span
                   key={kw}
                   className="bg-hover text-fg-muted rounded-full px-2 py-0.5 text-xs"

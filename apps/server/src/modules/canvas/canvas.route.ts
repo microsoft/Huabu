@@ -120,7 +120,12 @@ function persistAndStripNodes(
       }
     }
 
-    const { content: _omitContent, ...dataRest } = data;
+    const {
+      content: _omitContent,
+      summary: _omitSummary,
+      keywords: _omitKeywords,
+      ...dataRest
+    } = data;
     const keepLabel =
       data['labelSource'] === 'user' || data['labelSource'] === 'agent';
     const cleanData: Record<string, unknown> = { ...dataRest };
@@ -149,6 +154,21 @@ function hydrateNodeContent(store: CanvasStore, nodes: NodeLike[]): NodeLike[] {
 
     const data = { ...(node.data ?? {}) };
     data['content'] = nodeContent.content;
+
+    // Surface preprocessed AI summary / keywords from the per-node markdown
+    // frontmatter so the client can render them without a separate fetch.
+    const meta = nodeContent.metadata as Record<string, unknown> | undefined;
+    if (meta) {
+      if (typeof meta['summary'] === 'string' && meta['summary'].trim()) {
+        data['summary'] = meta['summary'].trim();
+      }
+      if (
+        Array.isArray(meta['keywords']) &&
+        meta['keywords'].every((k) => typeof k === 'string')
+      ) {
+        data['keywords'] = meta['keywords'];
+      }
+    }
 
     if (nodeContent.title) {
       const labelSource = data['labelSource'];
