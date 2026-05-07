@@ -124,9 +124,7 @@ async function buildUserContent(
 
   for (const att of attachments) {
     const label = att.label ?? att.filename ?? 'attachment';
-    const sourceRef = att.originSourceId
-      ? ` (source: ${att.originSourceId})`
-      : '';
+    const sourceRef = att.originNodeId ? ` (source: ${att.originNodeId})` : '';
 
     switch (att.type) {
       case 'image': {
@@ -791,7 +789,7 @@ const agentRoutes: FastifyPluginAsync = async (
       const attMeta = allAttachments.map((a) => ({
         type: a.type,
         source: a.source,
-        ...(a.originSourceId ? { originSourceId: a.originSourceId } : {}),
+        ...(a.originNodeId ? { originNodeId: a.originNodeId } : {}),
         ...(a.url ? { url: a.url } : {}),
         ...(a.label ? { label: a.label } : {}),
         ...(a.filename ? { filename: a.filename } : {}),

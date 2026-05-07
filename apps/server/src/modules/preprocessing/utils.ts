@@ -1,9 +1,7 @@
-import { createHash, randomUUID } from 'node:crypto';
-
-import type { NodeContentKind } from '@sediment/shared';
+import { createHash } from 'node:crypto';
 
 /**
- * Normalize URL for consistent sourceId generation
+ * Normalize URL for consistent hashing of web sources.
  * - Remove query parameters
  * - Normalize protocol (http/https)
  * - Remove trailing slashes
@@ -46,69 +44,4 @@ export function computeContentHash(content: string): string {
 export function computeBufferHash(buffer: Uint8Array): string {
   const hash = createHash('sha256').update(buffer).digest('hex');
   return `sha256:${hash}`;
-}
-
-/**
- * Generate deterministic sourceId from data string.
- * Uses a fixed "default" prefix to remain backward-compatible with
- * previously generated IDs.
- *
- * @param data - Type-specific data for hash generation
- * @returns sourceId in format "src_<hash>"
- */
-function generateDeterministicSourceId(data: string): string {
-  // Keep "default:" prefix so existing web/PDF sourceIds stay stable.
-  const combined = `default:${data}`;
-  const hash = createHash('sha256')
-    .update(combined, 'utf8')
-    .digest('hex')
-    .substring(0, 16); // Use first 16 hex chars for reasonable length
-  return `src_${hash}`;
-}
-
-/**
- * Generate sourceId for a data source
- *
- * Generation rules:
- * - Note/Text: UUID (editable content, hash unstable)
- * - Web: hash(normalizedUri)
- * - PDF: hash(fileContentHash)
- *
- * @param options - Generation options
- * @returns Generated sourceId
- */
-export function generateSourceId(options: {
-  type: NodeContentKind;
-  uri?: string;
-  fileHash?: string;
-}): string {
-  const { type, uri, fileHash } = options;
-
-  switch (type) {
-    case 'note':
-    case 'text': {
-      // Editable types: use UUID for simplicity and stability
-      return `src_${randomUUID()}`;
-    }
-
-    case 'web': {
-      // Web: deterministic based on normalized URI
-      if (!uri) {
-        throw new Error('URI required for web source');
-      }
-      const normalized = normalizeUrl(uri);
-      return generateDeterministicSourceId(`web:${normalized}`);
-    }
-
-    case 'pdf': {
-      // PDF: deterministic based on file content hash
-      if (!fileHash) {
-        throw new Error('File hash required for PDF source');
-      }
-      return generateDeterministicSourceId(`pdf:${fileHash}`);
-    }
-
-    default:
-      throw new Error(`Unsupported source type: ${type}`);
-  }
 }

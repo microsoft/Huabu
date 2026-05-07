@@ -40,7 +40,6 @@ Huabu 的 AI 与你**共享同一块画布**。它能读到画布的整体语境
 | ----------------- | -------------------------------------------------- |
 | `web_search`      | 通过 Tavily 搜索互联网                             |
 | `get_node_detail` | 拉取某个节点的完整内容（用于深入读选中之外的节点） |
-| `read_source`     | 按 sourceId 读取入库内容                           |
 
 ### Operate 模式
 
@@ -61,9 +60,7 @@ Huabu 的 AI 与你**共享同一块画布**。它能读到画布的整体语境
 | `get_canvas_state` | 拉取整张画布的概览（节点 / 连线 / Frame）               |
 | `get_node_detail`  | 拉取单个节点完整内容                                    |
 | `canvas_commands`  | 应用一组结构化的画布命令（创建 / 移动 / 连线 / 分组 …） |
-| `read_source`      | 读取入库内容                                            |
-| `search_knowledge` | 在工作区 Sources 中按关键词检索                         |
-| `ingest_content`   | 让某个节点立刻入库（用于 AI 决定先把材料入库再综合）    |
+| `ingest_content`   | 让某个节点立刻进行内容抽取与摘要生成                    |
 | `use_skill`        | 加载某个技能（skill）的详细指引                         |
 
 ### 两种模式的选用建议

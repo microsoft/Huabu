@@ -62,7 +62,7 @@ function toMessage(error: unknown): string {
 
 /**
  * Persist node markdown into the canvas store and return canvas-state
- * nodes with the bulky `content` / `contentSnapshot` fields stripped.
+ * nodes with the bulky `content` field stripped.
  *
  * Labels intentionally set by a user or the agent are preserved on the
  * canvas node so they survive save/load cycles without depending on the
@@ -603,8 +603,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
       const response: ImportCanvasResponse = {
         canvasId: targetCanvasId,
-        importedSources: 0,
-        importedArtifacts: 0,
       };
       return reply.send(response);
     } catch (err) {

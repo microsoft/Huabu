@@ -136,7 +136,7 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
       url: imageUrl,
       content: hasText ? text : undefined,
       label: 'PDF capture',
-      originSourceId: expandedNodeId ?? undefined,
+      originNodeId: expandedNodeId ?? undefined,
     };
     onSendToChat(attachment);
     onDismiss();

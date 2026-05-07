@@ -76,11 +76,11 @@ export interface NodeSummary {
  * Rich representation of a node explicitly selected by the user.
  *
  * Selection is a strong intent signal — the user is telling the agent
- * "focus on this". Unlike NodeSummary (which is truncated for efficiency),
- * SelectedNodeDetail carries the full content so the agent can reason about
- * it without needing a follow-up tool call.
+ * "focus on this". `SelectedNodeDetail` carries lightweight metadata only;
+ * full node content is fetched on demand via the `get_node_detail` tool to
+ * keep the base context small.
  *
- * For frame nodes, `children` contains the full detail of every direct child,
+ * For frame nodes, `children` contains the detail of every direct child,
  * so the agent understands the entire group the user is referring to.
  */
 export interface SelectedNodeDetail {
@@ -88,12 +88,10 @@ export interface SelectedNodeDetail {
   type: CanvasNodeType;
   label?: string;
   origin?: NodeOrigin;
-  /** Full plain-text content — not truncated. Undefined for nodes with no text. */
-  content?: string;
-  /** Source URL for web / pdf / video / image nodes */
+  /** Source URL for image nodes (used by the server to build vision attachments). */
   src?: string;
   /**
-   * Direct children of a frame node, each carrying their own full detail.
+   * Direct children of a frame node, each carrying their own detail.
    * Undefined for non-frame nodes.
    */
   children?: SelectedNodeDetail[];

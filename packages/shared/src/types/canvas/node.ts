@@ -155,7 +155,7 @@ export interface BaseNodeData {
   style?: NodeStyle;
 }
 
-/** Note node: rich content that can be ingested into knowledge base */
+/** Note node: rich Markdown content authored on the canvas */
 export interface NoteNodeData extends BaseNodeData {
   type: 'note';
   /**

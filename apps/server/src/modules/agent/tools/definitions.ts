@@ -460,7 +460,7 @@ Create and connect: CREATE_NODES (multiple nodes with explicit ids) + CONNECT_NO
 export const ingestContentTool: Tool = {
   name: 'ingest_content',
   description:
-    'Trigger content ingestion for a canvas node, loading its web/PDF content into the knowledge base.',
+    'Trigger content ingestion for a canvas node, loading its web/PDF content into the per-canvas content store.',
   parameters: Type.Object({
     canvasId: Type.Optional(
       Type.String({

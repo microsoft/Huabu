@@ -113,10 +113,9 @@ components/
 │   │   ├── ModeSelector.tsx
 │   │   ├── SelectedNodeRefs.tsx
 │   │   └── ContextUsageRing.tsx
-│   ├── DataSourcePanel/     # Data sources sidebar
+│   ├── CanvasLayerPanel/     # Canvas layer sidebar
 │   │   ├── index.tsx
 │   │   ├── CanvasLayerTree.tsx
-│   │   ├── SourceLibraryTree.tsx
 │   │   ├── TreeRowItem.tsx
 │   │   └── types.ts
 │   └── Header/              # Top header bar

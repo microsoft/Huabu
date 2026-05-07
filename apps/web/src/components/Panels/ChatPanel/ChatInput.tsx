@@ -250,7 +250,7 @@ export const ChatInput = ({
               {selectionAttachment &&
                 (() => {
                   const att = selectionAttachment;
-                  const sourceNodeId = att.originSourceId;
+                  const sourceNodeId = att.originNodeId;
                   const previewText = att.content ?? att.label ?? 'text';
 
                   const tooltipParts: React.ReactNode[] = [];
@@ -332,7 +332,7 @@ export const ChatInput = ({
 
               {/* Regular pending attachments */}
               {pendingAttachments.map((att, idx) => {
-                const sourceNodeId = att.originSourceId;
+                const sourceNodeId = att.originNodeId;
 
                 // Text preview for the tile
                 const previewText =
