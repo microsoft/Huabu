@@ -2,7 +2,7 @@
   "name": "sediment",
   "private": true,
   "scripts": {
-    "dev": "pnpm -r --parallel dev",
+    "dev": "node scripts/dev.mjs",
     "dev:server": "pnpm --filter @sediment/server dev",
     "dev:web": "pnpm --filter @sediment/web dev",
     "dev:shared": "pnpm --filter @sediment/shared dev",

@@ -113,6 +113,7 @@ export default typescriptEslint.config(
       'vite.config.ts',
       '*.config.js',
       '*.config.mjs',
+      'scripts/**/*.{js,mjs,cjs}',
     ],
     languageOptions: {
       globals: {
