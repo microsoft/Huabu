@@ -4,6 +4,20 @@
 
 ---
 
+## 2026-05-07 · 修复：Canvas 上传 PDF / 图片 / 视频失败
+
+**What Changed**
+
+- 修复了通过 toolbar、复制粘贴、拖拽上传 PDF / 图片 / 视频时返回 `500 Failed to save file` 的问题。
+- 服务端 artifact 上传路由现在调用 `CanvasStore.writeArtifactStream()`，会在写入前自动创建 `<canvasId>/artifacts/` 目录。
+
+**Notes**
+
+- 起因：上传路由直接对 `artifacts/` 目录做 `createWriteStream`，但没有 `mkdirp`。任何还没写入过 artifact 的 canvas（包括所有新建 canvas）首次上传都会因为目录不存在而失败。
+- 无需用户操作；重启 server 后即可恢复上传。
+
+---
+
 ## 2026-04-30 · Annotation 识别管线精简：删除规则路径
 
 **What Changed**
