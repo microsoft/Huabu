@@ -243,7 +243,7 @@ import always creates a new canvas.
 ### PR 1 — `storage/` module (no callers wired)
 
 4. `storage/io.ts`
-5. `storage/frontmatter.ts` (extract from `knowledge/file.repository.ts`)
+5. `storage/frontmatter.ts` (extracted from the former `knowledge/file.repository.ts`)
 6. `storage/paths.ts`
 7. `storage/canvas-store.ts`
 8. `storage/index.ts` (LRU cache, max 16)
