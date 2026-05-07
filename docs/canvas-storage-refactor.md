@@ -166,7 +166,7 @@ All other canvas / preprocess / intent / agent routes keep their URLs.
 `CreateSourceInput`, `ExportedSource`, `BaseNodeData.sourceId`,
 `hasSourceId`, `BaseNodeData.contentSnapshot`.
 
-**Rename**: `NodeOrigin.user-excerpt.sourceId` → `parentNodeId` (canvas-local).
+**Rename**: `NodeOrigin.user-excerpt.sourceId` → `excerptFromNodeId` (canvas-local).
 
 **Add**: `NodeContent`, `NodeContentSummary`, `UserPreferences`,
 `CanvasEvent { ts: number; kind: string; payload: unknown }`,
@@ -192,7 +192,7 @@ For each old `canvas/<id>.json`:
      rewrite the URL to `/api/canvas/<id>/artifact/<file>`.
    - If `node.data.origin.sourceId` is present (excerpt origin), look up
      the canvas-local node id that wraps that knowledge source and
-     replace the field with `origin.parentNodeId`.
+     replace the field with `origin.excerptFromNodeId`.
 3. Write the rewritten state to `<id>/canvas.json` (preserve original
    `version` / `createdAt` / `updatedAt`).
 4. Move `<workspace>/.history/<id>/thread-*.json` → `<id>/.history/chat/`
@@ -323,7 +323,7 @@ import always creates a new canvas.
 45. Remove the `components/Panels/DataSourcePanel/` folder (or rewrite
     it as "current canvas nodes" if still desired).
 46. Update `handler/autoLayout/graphModel.ts` (and its tests) to follow
-    `origin.parentNodeId` instead of `origin.sourceId`.
+    `origin.excerptFromNodeId` instead of `origin.sourceId`.
 47. Lint / format / typecheck.
 
 ### PR 9 — Documentation
@@ -385,14 +385,14 @@ import always creates a new canvas.
 ### 10.6 Auto-layout
 
 - `handler/autoLayout/graphModel.ts`: remove the `nodeByDataSourceId`
-  reverse lookup. Excerpt links use `origin.parentNodeId` directly.
+  reverse lookup. Excerpt links use `origin.excerptFromNodeId` directly.
 - Update `handler/autoLayout/__tests__/graphModel.test.ts`.
 
 ### 10.7 Tests
 
 - Drop tests covering `SourceListPage` / `DataSourcePanel`.
 - Update artifact-URL parsing tests to expect canvas-scoped URLs.
-- Update graph-model test fixtures (`origin.parentNodeId`).
+- Update graph-model test fixtures (`origin.excerptFromNodeId`).
 
 ## 11. User-Visible Behaviour Changes
 

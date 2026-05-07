@@ -34,7 +34,7 @@ export type NodeOrigin =
   | { type: 'user-pasted' }
   | { type: 'user-from-library' }
   | { type: 'user-from-chat'; threadId?: string }
-  | { type: 'user-excerpt'; sourceId?: string }
+  | { type: 'user-excerpt'; excerptFromNodeId?: string }
   // Annotation recognition
   | { type: 'annotation-recognized' };
 
@@ -181,7 +181,6 @@ export interface NoteNodeData extends BaseNodeData {
    * When `contentJsonSource === content`, `contentJson` is authoritative.
    */
   contentJsonSource?: string;
-  sourceId?: string;
   style?: NodeStyle;
   /**
    * Block-level content provenance map.
@@ -231,7 +230,6 @@ export interface TextNodeData extends BaseNodeData {
 export interface WebNodeData extends BaseNodeData {
   type: 'web';
   src: string;
-  sourceId?: string;
 }
 
 /** A single highlight annotation on a PDF page. */
@@ -247,7 +245,6 @@ export interface PdfHighlight {
 export interface PdfNodeData extends BaseNodeData {
   type: 'pdf';
   src: string;
-  sourceId?: string;
   /** When set, the canvas node displays this image instead of the PDF preview. */
   coverUrl?: string;
   /** Persistent text highlights drawn by the user. */
@@ -258,14 +255,12 @@ export interface PdfNodeData extends BaseNodeData {
 export interface VideoNodeData extends BaseNodeData {
   type: 'video';
   src: string;
-  sourceId?: string;
 }
 
 /** Image node: image content */
 export interface ImageNodeData extends BaseNodeData {
   type: 'image';
   src: string;
-  sourceId?: string;
 }
 
 /** Frame node: container for grouping other nodes */
@@ -363,17 +358,6 @@ export function isFrameNode(data: NodeData): data is FrameNodeData {
 
 export function isAnnotationNode(data: NodeData): data is AnnotationNodeData {
   return data.type === 'annotation';
-}
-
-export function hasSourceId(
-  data: NodeData,
-): data is
-  | NoteNodeData
-  | WebNodeData
-  | PdfNodeData
-  | VideoNodeData
-  | ImageNodeData {
-  return 'sourceId' in data;
 }
 
 export function isQuestionNode(data: NodeData): data is QuestionNodeData {

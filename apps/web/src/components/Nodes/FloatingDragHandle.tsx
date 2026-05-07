@@ -22,8 +22,8 @@ type FloatingDragHandleProps = {
   /** Text extracted from the selected region via pdfjs getTextContent(). Empty string = no text found. */
   text: string;
 
-  /** Source ID of the parent node being captured from (e.g. a PDF node). */
-  sourceId?: string;
+  /** Parent canvas node id this capture was taken from (e.g. a PDF node). */
+  excerptFromNodeId?: string;
 
   /** Uploaded image URL. Null while still capturing. */
   imageUrl?: string | null;
@@ -47,7 +47,7 @@ type FloatingDragHandleProps = {
 export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
   position,
   text,
-  sourceId,
+  excerptFromNodeId,
   imageUrl,
   capturing = false,
   onDismiss,
@@ -77,7 +77,7 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
     draggingRef.current = true;
     setDragPayload(e, {
       kind: 'note',
-      origin: { type: 'user-excerpt', sourceId },
+      origin: { type: 'user-excerpt', excerptFromNodeId },
       data: { content: text },
     });
   };
@@ -87,7 +87,7 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
     draggingRef.current = true;
     setDragPayload(e, {
       kind: 'image',
-      origin: { type: 'user-excerpt', sourceId },
+      origin: { type: 'user-excerpt', excerptFromNodeId },
       data: { src: imageUrl },
     });
   };
@@ -104,11 +104,11 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
       nodeType: 'note',
       data: {
         content: text,
-        origin: { type: 'user-excerpt', sourceId },
+        origin: { type: 'user-excerpt', excerptFromNodeId },
       },
     });
     onDismiss();
-  }, [text, sourceId, addNode, onDismiss]);
+  }, [text, excerptFromNodeId, addNode, onDismiss]);
 
   const handleAddImage = useCallback(() => {
     if (!imageUrl) return;
@@ -116,11 +116,11 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
       nodeType: 'image',
       data: {
         src: imageUrl,
-        origin: { type: 'user-excerpt', sourceId },
+        origin: { type: 'user-excerpt', excerptFromNodeId },
       },
     });
     onDismiss();
-  }, [imageUrl, sourceId, addNode, onDismiss]);
+  }, [imageUrl, excerptFromNodeId, addNode, onDismiss]);
 
   // Guard dismiss: ignore outside-click while a drag is active
   const guardedDismiss = useCallback(() => {

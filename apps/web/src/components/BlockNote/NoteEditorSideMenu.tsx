@@ -19,12 +19,15 @@ import {
 } from '@/utils/io/dragDrop';
 
 /**
- * Context that supplies the knowledge-base sourceId to the side menu.
+ * Context that supplies the parent canvas node id to the side menu.
  * Provided by the parent NotePreview so the drag payload records correct
  * provenance without an expensive store lookup.
  */
-const NoteSourceIdContext = createContext<string | undefined>(undefined);
-export const NoteSourceIdProvider = NoteSourceIdContext.Provider;
+const NoteExcerptFromNodeIdContext = createContext<string | undefined>(
+  undefined,
+);
+export const NoteExcerptFromNodeIdProvider =
+  NoteExcerptFromNodeIdContext.Provider;
 
 const BTN_CLASS =
   'bn-button h-4.5 w-4.5 p-px! text-fg-subtle hover:text-fg-default rounded';
@@ -112,7 +115,7 @@ const DragHandleButton: FC = () => {
     selector: (state) => state?.block,
   });
   const selectedBlocks = useSelectedBlocks(editor);
-  const sourceId = useContext(NoteSourceIdContext);
+  const excerptFromNodeId = useContext(NoteExcerptFromNodeIdContext);
 
   // Capture the block reference at drag-start so we can use it in drag-end
   // even if the SideMenu state changes mid-drag.
@@ -161,7 +164,7 @@ const DragHandleButton: FC = () => {
           kind: 'note',
           origin: {
             type: 'user-excerpt',
-            ...(sourceId ? { sourceId } : {}),
+            ...(excerptFromNodeId ? { excerptFromNodeId } : {}),
           },
           data: {
             content: md,

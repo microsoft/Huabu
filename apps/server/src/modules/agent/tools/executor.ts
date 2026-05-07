@@ -429,30 +429,26 @@ async function executeIngestContent(args: {
       title: data?.label as string | undefined,
       content: data?.content as string | undefined,
       src: data?.src as string | undefined,
-      sourceId: data?.sourceId as string | undefined,
     },
     options: { allowLLM: false },
   });
 
-  // If no source was persisted (image/frame/video or extraction failure),
-  // report clearly to the agent so it doesn't misinterpret success.
-  const sourceId = result.persistence?.sourceId;
+  // Surface persistence outcome to the agent so it doesn't misinterpret success.
+  const persisted = Boolean(result.persistence);
   const errors = result.diagnostics
     .filter((d) => d.level === 'error')
     .map((d) => `${d.code}: ${d.message}`);
   const errorString = errors.length > 0 ? errors.join('; ') : undefined;
 
-  if (!sourceId && result.success) {
+  if (!persisted && result.success) {
     return JSON.stringify({
-      sourceId: null,
       success: true,
       title: result.extracted?.title,
-      note: `Node type '${type}' does not persist to the knowledge base`,
+      note: `Node type '${type}' does not persist content to the canvas store`,
     });
   }
 
   return JSON.stringify({
-    sourceId: sourceId ?? null,
     success: result.success,
     title: result.extracted?.title,
     error: errorString,

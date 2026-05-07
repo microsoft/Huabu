@@ -24,11 +24,6 @@ export function project(
 ): PreprocessNodeResult {
   const patch: Record<string, unknown> = {};
 
-  // Apply sourceId from persist stage
-  if (ctx.persisted?.sourceId) {
-    patch.sourceId = ctx.persisted.sourceId;
-  }
-
   // Apply suggested label from enrich or extract stage, but only when the
   // user has not manually set the label.
   // Prefer extracted title (e.g. HTML <title>), fallback to LLM-generated label.
@@ -87,7 +82,6 @@ export function project(
     persistence: ctx.persisted?.skipped
       ? undefined
       : {
-          sourceId: ctx.persisted?.sourceId,
           contentKind,
           isNew: ctx.persisted?.isNew,
           contentChanged: ctx.persisted?.contentChanged,

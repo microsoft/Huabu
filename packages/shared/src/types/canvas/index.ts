@@ -55,7 +55,6 @@ export {
   isFrameNode,
   isAnnotationNode,
   isQuestionNode,
-  hasSourceId,
   normalizeOrigin,
 } from './node.js';
 
@@ -71,8 +70,6 @@ export { EDGE_STROKE_WIDTHS } from './edge.js';
 
 // Source types
 export type {
-  UpsertNodeRequest,
-  UpsertNodeResponse,
   DeleteNodeResponse,
   ResolveLabelRequest,
   ResolveLabelResponse,

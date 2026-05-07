@@ -101,7 +101,5 @@ function resolveSourceId(
   _contentKind?: NodeContentKind,
 ): string {
   // Source identity is canvas-local: the node id is the source id.
-  // An explicit existing id (e.g. supplied by a legacy snapshot) wins
-  // when present, otherwise fall back to the resolved node id.
-  return resolved.existingSourceId ?? resolved.nodeId;
+  return resolved.nodeId;
 }

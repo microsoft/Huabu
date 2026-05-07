@@ -616,7 +616,6 @@ const useCanvasStore = create<RFState>()(
           type: nodeType,
           label: data?.label as string | undefined,
           origin: data?.origin as SelectedNodeDetail['origin'],
-          sourceId: data?.sourceId as string | undefined,
           position: { x: n.position.x, y: n.position.y },
           ...(size.width > 0 || size.height > 0
             ? { size: { width: size.width, height: size.height } }
@@ -1328,7 +1327,6 @@ function flushOnUnload(): void {
             labelSource: (nodeData?.labelSource as string) || undefined,
             content: (nodeData?.content as string) || undefined,
             src: (nodeData?.src as string) || undefined,
-            sourceId: (nodeData?.sourceId as string) || undefined,
           };
 
     void preprocessNode(
