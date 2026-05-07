@@ -94,7 +94,6 @@ export default function resolvePasteClipboard(
 
     // Clone data.
     const clonedData = JSON.parse(JSON.stringify(node.data ?? {}));
-    delete clonedData.sourceId;
     clonedData.label = label;
     clonedData.origin = { type: 'user-pasted' };
 

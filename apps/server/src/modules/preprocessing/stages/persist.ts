@@ -23,7 +23,7 @@ export function persist(
     return { skipped: true };
   }
 
-  const nodeId = normalized.sourceId;
+  const nodeId = normalized.nodeId;
   const existing = store.readNode(nodeId);
 
   // Hash-based dedup inside this canvas: skip rewrite when canonical
@@ -36,7 +36,7 @@ export function persist(
       });
     }
     return {
-      sourceId: nodeId,
+      nodeId,
       isNew: false,
       contentChanged: false,
     };
@@ -54,7 +54,7 @@ export function persist(
   });
 
   return {
-    sourceId: nodeId,
+    nodeId,
     isNew: !existing,
     contentChanged: true,
   };

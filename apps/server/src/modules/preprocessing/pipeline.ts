@@ -182,7 +182,8 @@ export async function runPipeline(
   // Stage 5 — Persist
   // When extraction failed the node is still visible on the canvas, so we
   // persist a placeholder source (empty content + error metadata) to ensure
-  // the node gets a stable sourceId and can be retried later.
+  // the node still has a stable record under its nodeId and can be retried
+  // later.
   const extractFailed = diagnostics.some(
     (d) => d.code === 'EXTRACT_FAILED' && d.level === 'error',
   );
@@ -193,8 +194,9 @@ export async function runPipeline(
         const src = ctx.resolved?.normalizedUri ?? ctx.resolved?.artifactUri;
 
         if (extractFailed) {
-          // Persist a placeholder with empty content so the node still gets
-          // a sourceId. Store the extraction error in metadata for debugging.
+          // Persist a placeholder with empty content so the node still has
+          // a record keyed by its nodeId. Store the extraction error in
+          // metadata for debugging.
           const placeholderNormalized = {
             ...ctx.normalized,
             canonicalContent: '',

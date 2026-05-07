@@ -455,7 +455,7 @@ Create and connect: CREATE_NODES (multiple nodes with explicit ids) + CONNECT_NO
   }),
 };
 
-// ==================== Knowledge Tools ====================
+// ==================== Content Ingestion Tools ====================
 
 export const ingestContentTool: Tool = {
   name: 'ingest_content',
@@ -492,7 +492,7 @@ export const useSkillTool: Tool = {
 
 /**
  * Tools available in chat mode.
- * Includes read-only canvas/knowledge access so the agent can
+ * Includes read-only canvas/content access so the agent can
  * lazily fetch full content of selected nodes on demand.
  */
 export const chatTools: Tool[] = [webSearchTool, getNodeDetailTool];

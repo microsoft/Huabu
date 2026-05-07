@@ -396,7 +396,7 @@ async function executeCanvasCommands(
   });
 }
 
-// ==================== Knowledge Operations ====================
+// ==================== Content Ingestion Operations ====================
 
 async function executeIngestContent(args: {
   canvasId: string;

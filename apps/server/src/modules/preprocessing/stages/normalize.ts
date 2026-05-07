@@ -2,9 +2,9 @@
  * Stage 3 — Normalize
  *
  * Produces canonical content hash, stable nodeId, title, and merged
- * metadata. No external calls, no LLM. Source identity is now
- * canvas-local: the `sourceId` field carries the canvas node id, which
- * is what `nodes/<nodeId>.md` is keyed by.
+ * metadata. No external calls, no LLM. Source identity is canvas-local:
+ * the `nodeId` field carries the canvas node id, which is what
+ * `nodes/<nodeId>.md` is keyed by.
  */
 
 import { computeContentHash } from '../utils.js';
@@ -44,8 +44,8 @@ export function normalize(
     ? { ...(extracted.metadata as Record<string, unknown>) }
     : undefined;
 
-  // Source ID generation
-  const sourceId = resolveSourceId(resolved, contentHash, contentKind);
+  // Node id resolution (source identity is canvas-local).
+  const nodeId = resolveNodeId(resolved, contentHash, contentKind);
 
   // Input fingerprint: hash type-specific canonical input to avoid collisions
   // across unrelated nodes (e.g. two empty notes, or image vs frame).
@@ -53,7 +53,7 @@ export function normalize(
 
   return {
     contentHash,
-    sourceId,
+    nodeId,
     title,
     metadata,
     canonicalContent,
@@ -95,7 +95,7 @@ function computeInputFingerprint(
   }
 }
 
-function resolveSourceId(
+function resolveNodeId(
   resolved: ResolvedInput,
   _contentHash: string,
   _contentKind?: NodeContentKind,

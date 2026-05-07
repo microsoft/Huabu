@@ -131,7 +131,7 @@ export default function WorkspaceSetupPage() {
 
         {/* Hint */}
         <p className="text-fg-subtle mt-8 text-center text-[11px] leading-relaxed">
-          This folder will contain your canvas files, knowledge sources, and
+          This folder will contain your canvas files, node content, and
           artifacts. You can change it later in Settings.
         </p>
       </div>

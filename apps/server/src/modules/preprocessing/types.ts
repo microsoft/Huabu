@@ -60,7 +60,8 @@ export interface ExtractResult {
 /** Result produced by the Normalize stage. */
 export interface NormalizeResult {
   contentHash: string;
-  sourceId: string;
+  /** Canvas node id (source identity is canvas-local). */
+  nodeId: string;
   title?: string;
   metadata?: NodeContentMetadata;
   canonicalContent: string;
@@ -86,7 +87,8 @@ export interface EnrichResult {
 
 /** Result produced by the Persist stage. */
 export interface PersistResult {
-  sourceId?: string;
+  /** Canvas node id under which content was persisted. */
+  nodeId?: string;
   isNew?: boolean;
   contentChanged?: boolean;
   placeholder?: boolean;
