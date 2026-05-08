@@ -6,7 +6,7 @@ import type { IntentCandidate } from './intent.js';
 export interface ChatAttachment {
   type: 'image' | 'pdf' | 'text' | 'file' | 'web';
   source: 'upload' | 'excerpt' | 'selection';
-  originSourceId?: string;
+  originNodeId?: string;
   url?: string;
   content?: string;
   label?: string;

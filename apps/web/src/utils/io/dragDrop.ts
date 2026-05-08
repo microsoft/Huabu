@@ -21,17 +21,6 @@ export type NoteDragPayload = {
   };
 };
 
-export type SourceDragPayload = {
-  kind: 'source';
-  data: {
-    sourceId: string;
-    type?: string;
-    label?: string;
-    src?: string;
-    [key: string]: unknown;
-  };
-};
-
 export type ImageDragPayload = {
   kind: 'image';
   data: {
@@ -45,7 +34,7 @@ export type DragPayload = {
   dragId: string;
   // Where the drag originated from, e.g. 'user-from-chat', 'user-from-library', 'user-excerpt'.
   origin: NodeOrigin;
-} & (WebDragPayload | NoteDragPayload | SourceDragPayload | ImageDragPayload);
+} & (WebDragPayload | NoteDragPayload | ImageDragPayload);
 
 export const createDragId = () => {
   const uuid = globalThis.crypto?.randomUUID?.();
@@ -210,26 +199,6 @@ export const getSedimentPayload = (dt: DataTransfer): DragPayload | null => {
         data: {
           content,
           ...(typeof contentJson === 'string' ? { contentJson } : {}),
-        },
-        dragId: normalizedDragId,
-        origin: normalizedOrigin,
-      };
-    }
-
-    if (kind === 'source' && data && typeof data === 'object') {
-      const sourceId = (data as { sourceId?: unknown }).sourceId;
-      if (typeof sourceId !== 'string' || sourceId.trim() === '') return null;
-
-      const type = (data as { type?: unknown }).type;
-      const label = (data as { label?: unknown }).label;
-
-      return {
-        kind: 'source',
-        data: {
-          ...(data as Record<string, unknown>),
-          sourceId: sourceId.trim(),
-          type: typeof type === 'string' ? type : undefined,
-          label: typeof label === 'string' ? label : undefined,
         },
         dragId: normalizedDragId,
         origin: normalizedOrigin,

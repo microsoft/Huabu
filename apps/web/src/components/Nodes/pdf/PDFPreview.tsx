@@ -8,6 +8,7 @@ import {
   computeHighlightUpdate,
   mergeLineRects,
 } from '@/handler/pdfHighlight/highlight';
+import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 
 import { FloatingDragHandle } from '../FloatingDragHandle';
@@ -40,11 +41,13 @@ type PendingCaptureDrag = {
   captureRect: NormalizedRect;
 };
 
-export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
+export const PDFPreview = ({
+  id,
+  data,
+  onDataChange,
+}: PreviewComponentProps) => {
   const src = typeof data.src === 'string' ? data.src : '';
   const resolvedSrc = resolveArtifactUrl(src);
-  const sourceId =
-    typeof data.sourceId === 'string' ? data.sourceId : undefined;
   const addPendingAttachment = useChatStore((s) => s.addPendingAttachment);
   const [numPages, setNumPages] = useState<number | null>(null);
   const [docLoaded, setDocLoaded] = useState(false);
@@ -310,7 +313,9 @@ export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
           const file = new File([blob], 'pdf-capture.png', {
             type: 'image/png',
           });
-          const url = await uploadImage(file);
+          const canvasId = useCanvasStore.getState().canvasId;
+          if (!canvasId) throw new Error('No active canvas');
+          const url = await uploadImage(file, canvasId);
 
           setPendingCapture((prev) => {
             if (!prev) return prev;
@@ -450,7 +455,7 @@ export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
       {/* ── Floating drag handle (area capture) */}
       {pendingCapture && (
         <FloatingDragHandle
-          sourceId={sourceId}
+          excerptFromNodeId={id}
           text={pendingCapture.text}
           imageUrl={pendingCapture.imageUrl}
           capturing={pendingCapture.capturing}
@@ -464,7 +469,7 @@ export const PDFPreview = ({ data, onDataChange }: PreviewComponentProps) => {
       {/* ── Floating drag handle (native text selection) */}
       {pendingTextSelection && !pendingCapture && (
         <FloatingDragHandle
-          sourceId={sourceId}
+          excerptFromNodeId={id}
           text={pendingTextSelection.text}
           imageUrl={null}
           capturing={false}

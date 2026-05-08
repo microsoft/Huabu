@@ -1,6 +1,6 @@
 import { Download, Plus, Trash2, Upload } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 
 import {
   listCanvases,
@@ -9,7 +9,6 @@ import {
   importCanvas,
   deleteCanvasById,
 } from '../api/canvas';
-import { getSources } from '../api/knowledge';
 import { Button } from '../components/Common/Button';
 import { EmptyState } from '../components/Common/EmptyState';
 import { LoadingState } from '../components/Common/LoadingState';
@@ -21,7 +20,7 @@ import { Header } from '../components/Panels/Header/Header';
 import { APP_NAME } from '../config/app';
 import { useWorkspaceStore } from '../store/workspaceStore';
 
-import type { CanvasExportBundle, CanvasSummary } from '@sediment/shared';
+import type { CanvasSummary } from '@sediment/shared';
 
 /**
  * Home page that shows all canvases in the workspace.
@@ -38,7 +37,6 @@ export default function CanvasListPage() {
   } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [exportingId, setExportingId] = useState<string | null>(null);
-  const [sourceCount, setSourceCount] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const confirmDeleteButtonRef = useRef<HTMLButtonElement>(null);
   const navigate = useNavigate();
@@ -47,12 +45,8 @@ export default function CanvasListPage() {
   const fetchCanvases = useCallback(async () => {
     try {
       setIsLoading(true);
-      const [response, sources] = await Promise.all([
-        listCanvases(),
-        getSources(),
-      ]);
+      const response = await listCanvases();
       setCanvases(response.canvases);
-      setSourceCount(sources.length);
     } catch (error) {
       console.error('Failed to list canvases:', error);
     } finally {
@@ -141,9 +135,7 @@ export default function CanvasListPage() {
     setIsImporting(true);
 
     try {
-      const text = await file.text();
-      const bundle = JSON.parse(text) as CanvasExportBundle;
-      const result = await importCanvas(bundle);
+      const result = await importCanvas(file);
       // Navigate to the newly created canvas
       navigate(`/canvas/${result.canvasId}`);
     } catch (err) {
@@ -216,7 +208,7 @@ export default function CanvasListPage() {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".json,application/json"
+        accept=".zip,application/zip"
         className="hidden"
         onChange={(e) => void handleFileChange(e)}
       />
@@ -232,8 +224,7 @@ export default function CanvasListPage() {
               <div className="text-center">
                 <div>Path: {workspacePath}</div>
                 <div>
-                  {canvases.length} canvas{canvases.length !== 1 ? 'es' : ''},{' '}
-                  {sourceCount} source{sourceCount !== 1 ? 's' : ''}
+                  {canvases.length} canvas{canvases.length !== 1 ? 'es' : ''}
                 </div>
               </div>
             }
@@ -250,16 +241,7 @@ export default function CanvasListPage() {
         <main className="mx-auto w-full max-w-4xl px-6 py-10">
           <div className="mb-8 flex items-center justify-between">
             <div>
-              <div className="flex items-baseline gap-2">
-                <h2 className="text-fg-default text-2xl font-bold">Canvases</h2>
-                <span className="text-fg-subtle text-sm">/</span>
-                <Link
-                  to="/sources"
-                  className="text-fg-subtle hover:text-fg-default text-sm font-medium"
-                >
-                  Sources
-                </Link>
-              </div>
+              <h2 className="text-fg-default text-2xl font-bold">Canvases</h2>
               <p className="text-fg-subtle mt-1 text-sm">
                 Select a canvas to open, or create a new one.
               </p>

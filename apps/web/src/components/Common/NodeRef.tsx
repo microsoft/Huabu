@@ -43,8 +43,8 @@ export function NodeRef({
   const selectNodes = useCanvasStore((s) => s.selectNodes);
   const rfInstance = useCanvasStore((s) => s.rfInstance);
 
-  // Resolve the effective node ID: explicit prop or attachment's originSourceId
-  const resolvedNodeId = nodeId ?? attachment?.originSourceId;
+  // Resolve the effective node ID: explicit prop or attachment's originNodeId
+  const resolvedNodeId = nodeId ?? attachment?.originNodeId;
 
   const node = resolvedNodeId
     ? nodes.find((n) => n.id === resolvedNodeId)

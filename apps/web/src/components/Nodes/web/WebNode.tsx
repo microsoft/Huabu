@@ -19,6 +19,7 @@ export const WebNode = memo(
   ({ id, data, selected }: NodeProps<WebNodeType>) => {
     const scale = useNodeScale(id, 'web');
     const openExpanded = useCanvasStore((s) => s.openExpanded);
+    const canvasId = useCanvasStore((s) => s.canvasId);
     const ingestion = useCanvasStore((state) => state.ingestionByNodeId[id]);
 
     const [refreshKey] = useState(0);
@@ -30,7 +31,11 @@ export const WebNode = memo(
     const [previewError, setPreviewError] = useState<string | null>(null);
 
     const src = typeof data?.src === 'string' ? data.src : '';
-    const sourceId = typeof data?.sourceId === 'string' ? data.sourceId : '';
+    // Preview artifact only exists after preprocessing has persisted it.
+    // `data.content` is hydrated from the per-node .md so its presence
+    // is a reliable "web preview is ready" signal.
+    const hasIngestedContent =
+      typeof data?.content === 'string' && data.content.length > 0;
 
     const hostname = useMemo(() => {
       if (!src) return '';
@@ -56,7 +61,14 @@ export const WebNode = memo(
         return;
       }
 
-      if (!sourceId) {
+      if (!hasIngestedContent) {
+        setPreview(null);
+        setPreviewError(null);
+        setPreviewLoading(false);
+        return;
+      }
+
+      if (!canvasId) {
         setPreview(null);
         setPreviewError(null);
         setPreviewLoading(false);
@@ -69,7 +81,7 @@ export const WebNode = memo(
 
       void (async () => {
         try {
-          const result = await getWebPreview({ sourceId });
+          const result = await getWebPreview({ canvasId, nodeId: id });
           if (cancelled) return;
           setPreview(result);
         } catch (error) {
@@ -86,7 +98,7 @@ export const WebNode = memo(
       return () => {
         cancelled = true;
       };
-    }, [src, sourceId, refreshKey, ingestion?.status]);
+    }, [src, hasIngestedContent, canvasId, refreshKey, ingestion?.status, id]);
 
     const WebToolbar = (
       <>

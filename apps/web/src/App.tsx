@@ -6,7 +6,6 @@ import { useInputModeListener } from './hooks/useInputMode';
 import CanvasListPage from './pages/CanvasListPage';
 import CanvasPage from './pages/CanvasPage/CanvasPage.tsx';
 import ComponentShowcasePage from './pages/ComponentShowcasePage';
-import SourceListPage from './pages/SourceListPage';
 import WorkspaceSetupPage from './pages/WorkspaceSetupPage';
 import { useWorkspaceStore } from './store/workspaceStore';
 
@@ -53,7 +52,6 @@ export default function App() {
       <WorkspaceGuard>
         <Routes>
           <Route path="/" element={<CanvasListPage />} />
-          <Route path="/sources" element={<SourceListPage />} />
           <Route
             path="/playground/components"
             element={<ComponentShowcasePage />}

@@ -7,7 +7,7 @@
 
 import path from 'node:path';
 
-import { normalizeUrl } from '../../knowledge/utils.js';
+import { normalizeUrl } from '../utils.js';
 
 import type { ResolvedInput } from '../types.js';
 import type { PreprocessNodeRequest } from '@sediment/shared';
@@ -39,7 +39,6 @@ export function inputResolve(
     nodeType,
     title: snapshot.title as string | undefined,
     labelSource: snapshot.labelSource as string | undefined,
-    existingSourceId: snapshot.sourceId as string | undefined,
   };
 
   switch (nodeType) {

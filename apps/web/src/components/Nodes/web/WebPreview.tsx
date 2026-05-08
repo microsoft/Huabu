@@ -2,13 +2,19 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { getWebReader } from '@/api/web';
 
+import useCanvasStore from '../../../store/canvasStore.ts';
 import { LoadingState } from '../../Common/LoadingState';
 
 import type { PreviewComponentProps } from '../note/NotePreview';
 
-export const WebPreview = ({ data }: PreviewComponentProps) => {
+export const WebPreview = ({ id, data }: PreviewComponentProps) => {
   const src = typeof data.src === 'string' ? data.src : '';
-  const sourceId = typeof data.sourceId === 'string' ? data.sourceId : '';
+  // The reader artifact only exists after preprocessing has persisted it.
+  // `data.content` is hydrated from the per-node .md frontmatter on read,
+  // so its presence is a reliable "reader is ready" signal.
+  const hasIngestedContent =
+    typeof data.content === 'string' && data.content.length > 0;
+  const canvasId = useCanvasStore((s) => s.canvasId);
 
   const [readerHtml, setReaderHtml] = useState<string>('');
   const [loading, setLoading] = useState(false);
@@ -26,9 +32,16 @@ export const WebPreview = ({ data }: PreviewComponentProps) => {
       return;
     }
 
-    if (!sourceId) {
+    if (!id || !hasIngestedContent) {
       setReaderHtml('');
-      setError('Source not ingested');
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
+    if (!canvasId) {
+      setReaderHtml('');
+      setError(null);
       setLoading(false);
       return;
     }
@@ -40,7 +53,7 @@ export const WebPreview = ({ data }: PreviewComponentProps) => {
 
     void (async () => {
       try {
-        const result = await getWebReader({ sourceId });
+        const result = await getWebReader({ canvasId, nodeId: id });
         if (cancelled) return;
         setReaderHtml(result.html);
       } catch (e) {
@@ -55,7 +68,7 @@ export const WebPreview = ({ data }: PreviewComponentProps) => {
     return () => {
       cancelled = true;
     };
-  }, [src, sourceId]);
+  }, [src, id, hasIngestedContent, canvasId]);
 
   // Listen for height reports from the iframe to auto-size it
   useEffect(() => {

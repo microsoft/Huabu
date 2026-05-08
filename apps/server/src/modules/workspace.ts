@@ -1,25 +1,28 @@
 /**
  * Centralised workspace path management.
  *
- * Every storage layer (canvas, knowledge sources, artifacts) resolves its
- * directory relative to a single workspace root.  The root is set at
- * runtime by the client via `PUT /api/workspace` and persisted in the
- * browser's localStorage.  There is no default — the user must pick a
- * folder on first launch.
+ * Every storage layer resolves its directory relative to a single
+ * workspace root. The root is set at runtime by the client via
+ * `PUT /api/workspace` and persisted in the browser's localStorage.
+ * There is no default — the user must pick a folder on first launch.
  *
- * Directory layout inside the workspace:
+ * Directory layout inside the workspace (canvas-centric):
  *
  *   <workspace>/
- *     canvas/
- *       default-canvas.json     – canvas state (nodes, edges, version)
- *     sources/
- *       <Title>.md              – knowledge sources (Markdown + YAML frontmatter; id in frontmatter, optional dedup suffix)
- *     artifacts/
- *       artifact-<uuid>.<ext>   – binary files (images, PDFs, videos)
+ *     <canvasId>/
+ *       canvas.json
+ *       nodes/<nodeId>.md
+ *       artifacts/<file>
+ *       memory/preferences.md
+ *       .history/{chat/<threadId>.json,intent.json,events.json}
  */
 
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
+
+// @deprecated Launch-only legacy migration. Remove once all workspaces have
+// been migrated to the canvas-centric layout.
+import { runMigrationIfNeeded } from './storage/migrate.js';
 
 let _workspacePath: string | null = null;
 
@@ -47,33 +50,19 @@ export function getWorkspacePath(): string {
 }
 
 /**
- * Set the workspace root path at runtime and create subdirectories.
+ * Set the workspace root path at runtime and create the workspace folder.
  * Called by the workspace settings API when the user picks a folder.
+ *
+ * Also runs the legacy → canvas-centric layout migration on the new
+ * workspace (no-op once it has been migrated).
+ *
+ * @deprecated The migration side effect is launch-only. Remove the migration
+ * call and this note once all workspaces have been migrated.
  */
 export function setWorkspacePath(newPath: string): void {
   _workspacePath = path.resolve(newPath);
-  ensureWorkspaceDirs();
-}
-
-export function getCanvasDir(): string {
-  return path.join(getWorkspacePath(), 'canvas');
-}
-
-export function getSourcesDir(): string {
-  return path.join(getWorkspacePath(), 'sources');
-}
-
-export function getArtifactsDir(): string {
-  return path.join(getWorkspacePath(), 'artifacts');
-}
-
-/**
- * Ensure all workspace subdirectories exist.
- * Called once at server startup from app.ts.
- */
-export function ensureWorkspaceDirs(): void {
-  const dirs = [getCanvasDir(), getSourcesDir(), getArtifactsDir()];
-  for (const dir of dirs) {
-    mkdirSync(dir, { recursive: true });
-  }
+  mkdirSync(_workspacePath, { recursive: true });
+  // @deprecated Launch-only legacy migration. Remove once all workspaces have
+  // been migrated to the canvas-centric layout.
+  runMigrationIfNeeded(_workspacePath);
 }

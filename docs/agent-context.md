@@ -41,7 +41,7 @@ POST /api/agent  body = AgentRequest {
    └─ llmStream(context)                     # 进入 LLM
    │
    ▼ 工具循环
-read_source / get_node_detail / search_knowledge / canvas_commands ...
+get_node_detail / canvas_commands / ingest_content / web_search / use_skill ...
 ```
 
 ---
@@ -50,18 +50,18 @@ read_source / get_node_detail / search_knowledge / canvas_commands ...
 
 ### 2.1 节点级信号
 
-| 字段                                  | 范围         | 内容                                                                                                                                                                 | 来源                                                                   |
-| ------------------------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `nodes: NodeSummary[]`                | **全部节点** | `id` / `type` / `label` / `snippet`(前 120 字符)/ `frameLabel` / `position` / `size`                                                                                 | [extractSnippet](../apps/web/src/handler/canvasCommand/utils/index.ts) |
-| `selectedNodes: SelectedNodeDetail[]` | **当前选中** | `id` / `type` / `label` / `origin` / `sourceId` / `position` / `size`,image 节点带 `src`,frame 节点带 `children`(递归)。**不携带 `content`**——节点正文要靠工具按需取 | [buildSelectedDetail](../apps/web/src/store/canvasStore.ts)            |
+| 字段                                  | 范围         | 内容                                                                                                                                                    | 来源                                                                   |
+| ------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `nodes: NodeSummary[]`                | **全部节点** | `id` / `type` / `label` / `snippet`(前 120 字符)/ `frameLabel` / `position` / `size`                                                                    | [extractSnippet](../apps/web/src/handler/canvasCommand/utils/index.ts) |
+| `selectedNodes: SelectedNodeDetail[]` | **当前选中** | `id` / `type` / `label` / `origin` / `position` / `size`,image 节点带 `src`,frame 节点带 `children`(递归)。**不携带 `content`**——节点正文要靠工具按需取 | [buildSelectedDetail](../apps/web/src/store/canvasStore.ts)            |
 
 > **关键限制 1**:`NodeSummary.snippet` 是 `content.slice(0, 120)` 的纯截断
 > (见 [extractSnippet](../apps/web/src/handler/canvasCommand/utils/index.ts)),
 > **不会**使用 enrich 阶段生成的 `summary`。
 >
-> **关键限制 2**:`SelectedNodeDetail` 同样**不发节点正文**,只是
-> "哪些节点被选中 + 这些节点的元数据"。Agent 想读完整内容必须调用
-> `get_node_detail(nodeId)` 或对带 `sourceId` 的节点调 `read_source(sourceId)`。
+> 关键限制 2：`SelectedNodeDetail` 同样**不发节点正文**，只是
+> “哪些节点被选中 + 这些节点的元数据”。Agent 想读完整内容必须调用
+> `get_node_detail(nodeId)`。
 > 对选中节点而言,服务端还会通过 `buildNodeSummaries` 把 enrich 的
 > `summary + keywords` 注入一条**单独的系统消息**(见 §2.5)。
 
@@ -101,23 +101,21 @@ read_source / get_node_detail / search_knowledge / canvas_commands ...
 - `selectedNodeIds[]`:除了 `canvasContext.selectedNodes` 外,在 `AgentRequest`
   顶层另带一份 id 列表。服务端会用它调用 `buildNodeSummaries`,把
   **预处理 enrich 出的 `summary + keywords`** 拼进一条
-  `[SYSTEM Context]\n[Selected Nodes (previews only — use get_node_detail or read_source for full content)]`
+  `[SYSTEM Context]\n[Selected Nodes (previews only — use get_node_detail for full content)]`
   系统消息。
   > **这是目前唯一一条让 enrich 摘要进入上下文的路径**,且只覆盖选中节点。
 - `attachments[]`:用户聊天时显式贴入的图 / PDF / 文本 / 链接。
 - `intentData`:候选意图列表 + 用户最终选定的那一条 —
   [packages/shared/src/types/agent.ts](../packages/shared/src/types/agent.ts)。
 
-### 2.6 知识库信号(默认不进上下文)
+### 2.6 节点内容信号(默认不进上下文)
 
-知识库内容默认 **不进** 初始上下文,Agent 通过工具按需获取:
+节点正文与 enrich 摘要默认 **不进** 初始上下文,Agent 通过工具按需获取:
 
 | 工具                          | 返回                              | 何时调用                     |
 | ----------------------------- | --------------------------------- | ---------------------------- |
-| `read_source(sourceId)`       | 完整源文档 + 元数据               | 需要原文                     |
-| `search_knowledge(query)`     | 标题 / 内容 / 关键词命中,Top 10   | 没有具体 sourceId 时浏览     |
-| `ingest_content(nodeId)`      | 触发预处理流水线把节点写入 KB     | 手动触发摄取                 |
 | `get_node_detail(nodeId)`     | 节点完整内容 + 元数据             | NodeSummary 截断不够用时     |
+| `ingest_content(nodeId)`      | 触发预处理流水线抽取与摘要        | 手动触发摄取                 |
 | `get_canvas_state(canvasId?)` | 全画布节点 + 边                   | operate 模式需要全量画布     |
 | `canvas_commands(commands[])` | 执行 CREATE / DELETE / CONNECT 等 | operate 模式做实际改动       |
 | `use_skill(skillId)`          | 技能引导文本                      | 复杂工作流(画流程图、提纲等) |
@@ -152,7 +150,7 @@ read_source / get_node_detail / search_knowledge / canvas_commands ...
 | ---------------------- | ------------------------ | ------------------------------------ | ------------------------------------ |
 | 全部节点               | ✓ `NodeSummary[]`        | snippet 120 字符 (无 enrich summary) | `AgentBaseContext.nodes`             |
 | 选中节点元数据         | ✓ `SelectedNodeDetail[]` | 仅元数据,**不含正文**                | `AgentBaseContext.selectedNodes`     |
-| 选中节点完整正文       | ✗ 必须工具               | —                                    | `get_node_detail` / `read_source`    |
+| 选中节点完整正文       | ✗ 必须工具               | —                                    | `get_node_detail`                    |
 | 边                     | ✓ source/target 对       | —                                    | `AgentBaseContext.edges`             |
 | 空间布局               | ✓ clusters + arrangement | —                                    | `AgentBaseContext.spatialSummary`    |
 | 最近动作               | ✓ 最近 10 条             | 无时间戳                             | `AgentBaseContext.recentActions`     |
@@ -160,7 +158,7 @@ read_source / get_node_detail / search_knowledge / canvas_commands ...
 | 聊天历史               | ✓ pi-ai Context 加载     | —                                    | 磁盘 `.history`                      |
 | 截图                   | ✗(仅 intent)             | —                                    | intent 端点 / 工具调用               |
 | 节点完整文本           | ✗ 必须工具               | —                                    | `get_node_detail(nodeId)`            |
-| 知识库源               | ✗ previews only          | 摘要 + 关键词                        | `read_source` / `search_knowledge`   |
+| 预处理摘要 / 关键词    | 选中节点 ✓、其他 ✗       | 需重跑 preprocess                    | `ingest_content` / hydrate           |
 | 选中节点的 enrich 摘要 | ✓ 单独一条系统消息       | —                                    | `buildNodeSummaries`                 |
 | 视口 / 缩放            | ✗ 未暴露                 | —                                    | —                                    |
 | 用户偏好               | ✗ 未暴露                 | —                                    | —                                    |
@@ -343,7 +341,7 @@ L0 是"画布的骨架",L1 是"画布的语义索引",L2 是"画布的全文"。
 | Annotation 语义(T3-C)                 | ✅        | ✅        | ✅              | ✅                | ✗             | ✗           |
 | `recentActions` + 时间戳              | ✅        | ✅        | ✅              | ✗                 | ✗             | ✗           |
 | 聊天历史                              | ✅        | ✅        | ✗               | ✗                 | ✗             | ✗           |
-| 知识库源全文                          | 🛠        | 🛠        | ✗               | ✗                 | ✗             | 🛠          |
+| 节点正文全文                          | 🛠        | 🛠        | ✗               | ✗                 | ✗             | 🛠          |
 | 节点 provenance                       | 🛠        | 🛠        | ✗               | ✗                 | ✗             | ✗           |
 | 跨 canvas 索引(T4-B)                  | 🛠        | 🛠        | ✗               | ✗                 | ✗             | ✗           |
 | 用户偏好                              | ✅(精简)  | ✅(精简)  | ✗               | ✗                 | ✗             | ✗           |
@@ -356,7 +354,7 @@ L0 是"画布的骨架",L1 是"画布的语义索引",L2 是"画布的全文"。
   - `recentActions`(带时间戳)+ 聊天历史 + viewport。
 - **可选**:截图(用户开关 / 当问句含"看一下""这片区域"等关键词时自动附带)。
 - **工具**:`get_node_detail`(单节点)/ `get_node_details_batch`(新增,多节点合并取)
-  / `read_source` / `search_knowledge` / `web_search` / `get_provenance`。
+  / `web_search` / `get_provenance`。
 - **要点**:Ask 重在"读"和"答",**不发任何节点正文**,把 token 留给上下文广度
   和后续工具调用。
 
@@ -375,9 +373,8 @@ L0 是"画布的骨架",L1 是"画布的语义索引",L2 是"画布的全文"。
 
 - **默认**:L0 + L1 + 选中节点元数据 + spatialSummary + 截图(带最近动作高亮)
   - `recentActions`(短窗口,3–5 条)+ viewport。
-- **不发**:聊天历史(意图是"此刻的画布",和聊天分支无关)、节点正文、
-  knowledge 源(若需要 → 由后续被选中的 intent 触发的 ask/operate 阶段去取)。
-- **工具**:基本不走工具(单 LLM 调用,流式返回 JSON);若必要可读 `read_source`。
+- **不发**:聊天历史(意图是"此刻的画布",和聊天分支无关)、节点正文。
+- **工具**:基本不走工具(单 LLM 调用,流式返回 JSON)。
 - **要点**:Intent 是**最贵**的"看一眼就要给五个建议"的功能,**视觉信号(截图)
   是它的核心**,文字 context 应当**精简到 L0 + L1**。
 
@@ -434,7 +431,6 @@ L0 是"画布的骨架",L1 是"画布的语义索引",L2 是"画布的全文"。
 - BlockNote 完整 contentJson
 - BlockProvenance 全量(per-block 修改记录)
 - Annotation 节点的原始 `points` 几何数组
-- 知识库源的全文
 - 跨 canvas 的全画布状态
 - 历史 checkpoint 的完整序列(只暴露必要切片)
 
@@ -479,4 +475,3 @@ L0 是"画布的骨架",L1 是"画布的语义索引",L2 是"画布的全文"。
 | Intent prompt               | [apps/server/src/prompt/intent.ts](../apps/server/src/prompt/intent.ts)                                             |
 | 预处理流水线                | [apps/server/src/modules/preprocessing/pipeline.ts](../apps/server/src/modules/preprocessing/pipeline.ts)           |
 | Enrich 阶段                 | [apps/server/src/modules/preprocessing/stages/enrich.ts](../apps/server/src/modules/preprocessing/stages/enrich.ts) |
-| 知识库 context-builder      | [apps/server/src/modules/knowledge/context-builder.ts](../apps/server/src/modules/knowledge/context-builder.ts)     |

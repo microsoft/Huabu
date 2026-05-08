@@ -21,7 +21,8 @@ import { IMAGE_MIME_MAP } from '../../utils/mime.js';
 import { runAgent } from '../agent/agent.service.js';
 import { loadContext, saveContext } from '../agent/store/chat-store.js';
 import { buildNodeSummaries } from '../agent/tools/executor.js';
-import { getArtifactsDir } from '../artifact/utils.js';
+import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
+import { getCanvasStore } from '../storage/index.js';
 
 import type { AssistantMessage, Context } from '@mariozechner/pi-ai';
 import type {
@@ -55,13 +56,20 @@ function getSystemPrompt(mode: AgentMode): string {
 async function resolveImageUrl(url: string): Promise<string> {
   if (url.startsWith('data:')) return url;
 
-  const artifactMatch = /\/api\/artifact\/([^/?#]+)/.exec(url);
+  const artifactMatch = ARTIFACT_URL_REGEX.exec(url);
   if (artifactMatch) {
-    const filename = path.basename(artifactMatch[1]);
-    const filePath = path.resolve(getArtifactsDir(), filename);
+    const canvasId = artifactMatch[1];
+    const filename = path.basename(artifactMatch[2]);
+    let artifactsDir: string;
+    try {
+      artifactsDir = getCanvasStore(canvasId).artifactsDir();
+    } catch {
+      return url;
+    }
+    const filePath = path.resolve(artifactsDir, filename);
 
-    if (!filePath.startsWith(path.resolve(getArtifactsDir()))) {
-      console.warn(`Blocked path traversal attempt: ${artifactMatch[1]}`);
+    if (!filePath.startsWith(path.resolve(artifactsDir))) {
+      console.warn(`Blocked path traversal attempt: ${artifactMatch[2]}`);
       return url;
     }
 
@@ -121,8 +129,8 @@ async function buildUserContent(
 
   for (const att of attachments) {
     const label = att.label ?? att.filename ?? 'attachment';
-    const sourceRef = att.originSourceId
-      ? ` (source: ${att.originSourceId})`
+    const originRef = att.originNodeId
+      ? ` (origin node id: ${att.originNodeId})`
       : '';
 
     switch (att.type) {
@@ -145,7 +153,7 @@ async function buildUserContent(
         if (att.content && att.content.trim().length > 0) {
           parts.push({
             type: 'text',
-            text: `[Attached Text from ${label}${sourceRef}]:\n${att.content}`,
+            text: `[Attached Text from ${label}${originRef}]:\n${att.content}`,
           });
         }
         break;
@@ -155,7 +163,7 @@ async function buildUserContent(
         if (att.content && att.content.trim().length > 0) {
           parts.push({
             type: 'text',
-            text: `[Attached PDF: ${label}${sourceRef}]:\n${att.content}`,
+            text: `[Attached PDF: ${label}${originRef}]:\n${att.content}`,
           });
         } else {
           parts.push({
@@ -171,7 +179,7 @@ async function buildUserContent(
         if (att.content && att.content.trim().length > 0) {
           parts.push({
             type: 'text',
-            text: `[Attached Excerpt from ${sourceRef}]:\n${att.content}`,
+            text: `[Attached Excerpt from ${originRef}]:\n${att.content}`,
           });
         }
         break;
@@ -199,20 +207,26 @@ async function buildUserContent(
         if (att.content && att.content.trim().length > 0) {
           parts.push({
             type: 'text',
-            text: `[Attached File: ${label}${sourceRef}]:\n${att.content}`,
+            text: `[Attached File: ${label}${originRef}]:\n${att.content}`,
           });
         } else if (att.url) {
           let fileContent: string | null = null;
-          const artifactMatch = /\/api\/artifact\/([^/?#]+)/.exec(att.url);
+          const artifactMatch = ARTIFACT_URL_REGEX.exec(att.url);
           if (artifactMatch) {
-            const filename = path.basename(artifactMatch[1]);
-            const filePath = path.resolve(getArtifactsDir(), filename);
-            if (filePath.startsWith(path.resolve(getArtifactsDir()))) {
-              try {
-                fileContent = await readFile(filePath, 'utf-8');
-              } catch {
-                /* file not readable as text */
+            const canvasId = artifactMatch[1];
+            const filename = path.basename(artifactMatch[2]);
+            try {
+              const artifactsDir = getCanvasStore(canvasId).artifactsDir();
+              const filePath = path.resolve(artifactsDir, filename);
+              if (filePath.startsWith(path.resolve(artifactsDir))) {
+                try {
+                  fileContent = await readFile(filePath, 'utf-8');
+                } catch {
+                  /* file not readable as text */
+                }
               }
+            } catch {
+              /* invalid artifact URL; fall back to including the URL */
             }
           }
           if (fileContent) {
@@ -742,8 +756,8 @@ const agentRoutes: FastifyPluginAsync = async (
     let userContent = await buildUserContent(content, allAttachments);
 
     // Inject lightweight selected-node previews as a system message.
-    // Full content is NOT included — the agent uses get_node_detail or
-    // read_source on demand, saving potentially thousands of tokens.
+    // Full content is NOT included — the agent uses get_node_detail on
+    // demand, saving potentially thousands of tokens.
     if (
       canvasContext?.selectedNodes &&
       canvasContext.selectedNodes.length > 0 &&
@@ -764,7 +778,7 @@ const agentRoutes: FastifyPluginAsync = async (
         if (summaries && summaries.nodes.length > 0) {
           context.messages.push({
             role: 'user',
-            content: `[SYSTEM Context]\n[Selected Nodes (previews only — use get_node_detail or read_source for full content)]\n${JSON.stringify(summaries.nodes, null, 2)}`,
+            content: `[SYSTEM Context]\n[Selected Nodes (previews only — use get_node_detail for full content)]\n${JSON.stringify(summaries.nodes, null, 2)}`,
             timestamp: Date.now(),
           });
         }
@@ -786,7 +800,7 @@ const agentRoutes: FastifyPluginAsync = async (
       const attMeta = allAttachments.map((a) => ({
         type: a.type,
         source: a.source,
-        ...(a.originSourceId ? { originSourceId: a.originSourceId } : {}),
+        ...(a.originNodeId ? { originNodeId: a.originNodeId } : {}),
         ...(a.url ? { url: a.url } : {}),
         ...(a.label ? { label: a.label } : {}),
         ...(a.filename ? { filename: a.filename } : {}),

@@ -1,5 +1,6 @@
 export interface WebLookupQuery {
-  sourceId: string;
+  canvasId: string;
+  nodeId: string;
 }
 
 export interface WebPreviewResponse {

@@ -3,7 +3,7 @@ export * from './types/canvas.js';
 export * from './types/chat.js';
 export * from './types/context.js';
 export * from './types/intent.js';
-export * from './types/knowledge.js';
+export * from './types/node-content.js';
 export * from './types/llm.js';
 export * from './types/preprocessing.js';
 

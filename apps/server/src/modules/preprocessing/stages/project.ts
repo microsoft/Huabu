@@ -11,7 +11,7 @@ import type {
   PreprocessDiagnostic,
   PreprocessNodeRequest,
   PreprocessNodeResult,
-  SourceKind,
+  NodeContentKind,
 } from '@sediment/shared';
 
 export function project(
@@ -20,14 +20,9 @@ export function project(
   usedCapabilities: Capability[],
   ctx: PipelineContext,
   diagnostics: PreprocessDiagnostic[],
-  sourceKind?: SourceKind,
+  contentKind?: NodeContentKind,
 ): PreprocessNodeResult {
   const patch: Record<string, unknown> = {};
-
-  // Apply sourceId from persist stage
-  if (ctx.persisted?.sourceId) {
-    patch.sourceId = ctx.persisted.sourceId;
-  }
 
   // Apply suggested label from enrich or extract stage, but only when the
   // user has not manually set the label.
@@ -87,8 +82,7 @@ export function project(
     persistence: ctx.persisted?.skipped
       ? undefined
       : {
-          sourceId: ctx.persisted?.sourceId,
-          sourceKind,
+          contentKind,
           isNew: ctx.persisted?.isNew,
           contentChanged: ctx.persisted?.contentChanged,
           placeholder: ctx.persisted?.placeholder,

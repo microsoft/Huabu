@@ -2,7 +2,7 @@ import { marked } from 'marked';
 import sanitizeHtml from 'sanitize-html';
 import { z } from 'zod';
 
-import { getKnowledgeRepository } from '../knowledge/knowledge.repository.js';
+import { getCanvasStore } from '../storage/index.js';
 
 import type {
   WebLookupQuery,
@@ -11,25 +11,24 @@ import type {
 } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
+const ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
+
 const querySchema = z
   .object({
-    sourceId: z.string().min(1),
+    canvasId: z.string().min(1).regex(ID_PATTERN),
+    nodeId: z.string().min(1).regex(ID_PATTERN),
   })
   .strict();
 
 type Querystring = WebLookupQuery;
 
-function safeParseMetaJson(metaJson: string | null): Record<string, unknown> {
-  if (!metaJson) return {};
-  try {
-    const parsed = JSON.parse(metaJson) as unknown;
-    if (parsed && typeof parsed === 'object') {
-      return parsed as Record<string, unknown>;
-    }
-    return {};
-  } catch {
-    return {};
+function safeParseMeta(
+  metadata: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  if (metadata && typeof metadata === 'object') {
+    return metadata;
   }
+  return {};
 }
 
 function toReaderHtml(markdown: string): string {
@@ -170,15 +169,14 @@ const webRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.code(400).send({ message: 'Invalid query' });
       }
 
-      const { sourceId } = parsed.data;
+      const { canvasId, nodeId } = parsed.data;
 
-      const repository = await getKnowledgeRepository();
-      const source = repository.findSourceById(sourceId);
+      const source = getCanvasStore(canvasId).readNode(nodeId);
       if (!source || source.type !== 'web') {
         return reply.code(404).send({ message: 'Source not ingested' });
       }
 
-      const meta = safeParseMetaJson(source.metaJson);
+      const meta = safeParseMeta(source.metadata);
       const uri = source.src ?? '';
 
       const hostname = (() => {
@@ -224,10 +222,9 @@ const webRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.code(400).send({ message: 'Invalid query' });
       }
 
-      const { sourceId } = parsed.data;
+      const { canvasId, nodeId } = parsed.data;
 
-      const repository = await getKnowledgeRepository();
-      const source = repository.findSourceById(sourceId);
+      const source = getCanvasStore(canvasId).readNode(nodeId);
       if (!source || source.type !== 'web') {
         return reply.code(404).send({ message: 'Source not ingested' });
       }
@@ -237,7 +234,7 @@ const webRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.code(404).send({ message: 'Source has no content yet' });
       }
 
-      const meta = safeParseMetaJson(source.metaJson);
+      const meta = safeParseMeta(source.metadata);
       const uri = source.src ?? '';
       const hostname = (() => {
         try {

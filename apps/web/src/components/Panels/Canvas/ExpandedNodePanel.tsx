@@ -52,8 +52,8 @@ export const ExpandedNodePanel = () => {
 
   // Handling conflicts:
   // If preview is newly opened, we want to ensure canvas expand is closed?
-  // Probably better handled at the trigger site (in SourceLibraryTree).
-  // Here we just render based on priority.
+  // Probably better handled at the trigger site (the component that opens
+  // the preview). Here we just render based on priority.
 
   const activeItem = useMemo(() => {
     if (isPreview && previewType && previewData) {
@@ -151,7 +151,7 @@ export const ExpandedNodePanel = () => {
     setSelectionAttachment({
       type: 'text',
       source: 'excerpt',
-      originSourceId: expandedNodeId ?? undefined,
+      originNodeId: expandedNodeId ?? undefined,
       content: text,
       label: text.length > 12 ? text.slice(0, 12) + '…' : text,
     });
@@ -236,6 +236,7 @@ export const ExpandedNodePanel = () => {
       <div className="flex-1 overflow-hidden">
         <NodePreviewContent
           key={expandedNodeId ?? previewType}
+          id={expandedNodeId ?? undefined}
           type={activeItem.type}
           data={activeItem.data}
           readOnly={activeItem.readOnly}

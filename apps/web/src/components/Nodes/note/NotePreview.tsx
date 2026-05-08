@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { loadBlockNoteContent } from '@/components/BlockNote/blockNoteContent';
 import {
   NoteEditorSideMenu,
-  NoteSourceIdProvider,
+  NoteExcerptFromNodeIdProvider,
 } from '@/components/BlockNote/NoteEditorSideMenu';
 import { blockNoteShadcnOverrides } from '@/components/BlockNote/shadcnOverrides';
 import { Button } from '@/components/Common/Button';
@@ -30,6 +30,8 @@ import type { DeletedBlockInfo, ProvenanceBlock } from '@/utils/provenance';
 import type { BlockProvenance, BlockProvenanceMap } from '@sediment/shared';
 
 export interface PreviewComponentProps {
+  /** Canvas node id, when this preview is bound to a real node. */
+  id?: string;
   data: Record<string, unknown>;
   readOnly?: boolean;
   /** Called with a plain string for backward-compat consumers. */
@@ -43,6 +45,7 @@ export interface PreviewComponentProps {
 
 /** Extract an auto-title from a BlockNote document. Prefers H1, then any heading, then the first non-empty block text. */
 export const NotePreview = ({
+  id,
   data,
   readOnly,
   onContentChange,
@@ -597,9 +600,7 @@ export const NotePreview = ({
         className="custom-scrollbar bg-surface relative h-full w-full overflow-auto py-3"
       >
         {provenanceCss && <style>{provenanceCss}</style>}
-        <NoteSourceIdProvider
-          value={typeof data.sourceId === 'string' ? data.sourceId : undefined}
-        >
+        <NoteExcerptFromNodeIdProvider value={id}>
           <BlockNoteView
             className="block-note-view"
             editor={editor}
@@ -732,7 +733,7 @@ export const NotePreview = ({
           >
             {!readOnly && <SideMenuController sideMenu={NoteEditorSideMenu} />}
           </BlockNoteView>
-        </NoteSourceIdProvider>
+        </NoteExcerptFromNodeIdProvider>
         {!readOnly && (blockDiffMap.size > 0 || deletedBlocks.length > 0) && (
           <InlineBlockDiffs
             blockDiffMap={blockDiffMap}

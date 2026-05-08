@@ -2,14 +2,15 @@
  * Preprocessing Dispatcher
  *
  * Accepts a PreprocessNodeRequest, looks up the node profile, builds a
- * minimal execution plan, and runs the pipeline.
+ * minimal execution plan, and runs the pipeline against the canvas
+ * store identified by `request.canvasId`.
  */
 
 import { runPipeline, type PipelineDeps } from './pipeline.js';
 import { getProfile } from './profiles.js';
 import { ProviderManager } from './provider-manager.js';
+import { getCanvasStore } from '../storage/index.js';
 
-import type { IKnowledgeRepository } from '../knowledge/knowledge.interface.js';
 import type {
   Capability,
   NodePreprocessProfile,
@@ -61,11 +62,6 @@ function buildPlan(
 export class PreprocessDispatcher {
   private provider = new ProviderManager();
 
-  constructor(
-    private repository: IKnowledgeRepository,
-    private artifactsDir: string,
-  ) {}
-
   async preprocess(
     request: PreprocessNodeRequest,
   ): Promise<PreprocessNodeResult> {
@@ -95,11 +91,10 @@ export class PreprocessDispatcher {
     const plan = buildPlan(profile, request);
 
     const deps: PipelineDeps = {
-      repository: this.repository,
+      store: getCanvasStore(request.canvasId),
       provider: this.provider,
-      artifactsDir: this.artifactsDir,
     };
 
-    return runPipeline(request, plan, profile.sourceKind, deps);
+    return runPipeline(request, plan, profile.contentKind, deps);
   }
 }

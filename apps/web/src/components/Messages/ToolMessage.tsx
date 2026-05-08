@@ -5,10 +5,8 @@ import {
   ChevronRight,
   Command,
   LayoutList,
-  Library,
   PackagePlus,
   ScanText,
-  Search,
   Undo2,
   X as XIcon,
 } from 'lucide-react';
@@ -37,9 +35,7 @@ const truncate = (s: string, n: number) =>
 
 const TOOL_ICON: Record<string, typeof ScanText> = {
   get_node_detail: ScanText,
-  read_source: Library,
   get_canvas_state: LayoutList,
-  search_knowledge: Search,
   ingest_content: PackagePlus,
   canvas_commands: Command,
 };
@@ -642,33 +638,10 @@ function MergedAgentToolRow({
       };
     }
 
-    if (tool === 'read_source') {
-      const refs = entries.map((e) => {
-        const d =
-          e.toolResponse.status === 'success'
-            ? ((e.toolResponse.data ?? {}) as Record<string, unknown>)
-            : {};
-        return {
-          nodeId: undefined as string | undefined,
-          label: (d.title as string) || undefined,
-        };
-      });
-      return {
-        title: count === 1 ? 'Read source' : `Read ${count} sources`,
-        nodeRefs: refs,
-      };
-    }
-
     const emptyRefs: { nodeId?: string; label?: string }[] = [];
 
     if (tool === 'get_canvas_state') {
       return { title: 'Read canvas state', nodeRefs: emptyRefs };
-    }
-    if (tool === 'search_knowledge') {
-      return {
-        title: count === 1 ? 'Search knowledge' : `Search ${count} knowledge`,
-        nodeRefs: emptyRefs,
-      };
     }
     if (tool === 'ingest_content') {
       return {
@@ -708,24 +681,6 @@ function MergedAgentToolRow({
                 nodeId={nodeRefs[0].nodeId}
                 fallbackLabel={nodeRefs[0].label}
               />
-            </span>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Single entry with read_source
-  if (count === 1 && tool === 'read_source') {
-    return (
-      <div className="flex justify-start">
-        <div className="w-full">
-          <div className="text-fg-muted hover:bg-hover flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors">
-            {statusIcon}
-            {icon && <span className="text-fg-muted/60">{icon}</span>}
-            <span className="flex-1 truncate">
-              Read source{' '}
-              {nodeRefs[0]?.label ? truncate(nodeRefs[0].label, 20) : ''}
             </span>
           </div>
         </div>
@@ -795,18 +750,6 @@ function MergedAgentToolRow({
                   </div>
                 );
               }
-              if (tool === 'read_source') {
-                return (
-                  <div
-                    key={e.messageId}
-                    className="text-fg-muted flex items-center gap-1.5 text-xs"
-                  >
-                    <span className="truncate">
-                      {truncate((d.title as string) ?? '?', 30)}
-                    </span>
-                  </div>
-                );
-              }
               return null;
             })}
           </div>
@@ -844,8 +787,6 @@ function isAgentTool(tool: string): boolean {
     'get_node_detail',
     'get_canvas_state',
     'canvas_commands',
-    'read_source',
-    'search_knowledge',
     'ingest_content',
   ].includes(tool);
 }

@@ -22,7 +22,7 @@ export interface AgentRequest {
   threadId?: string;
   /** Agent mode */
   mode?: AgentMode;
-  /** Canvas context for tool access and knowledge retrieval */
+  /** Canvas context for tool access and node lookup */
   canvasContext?: AgentBaseContext;
   /** Canvas ID (required for operate mode) */
   canvasId?: string;

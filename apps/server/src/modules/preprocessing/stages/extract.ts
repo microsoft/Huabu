@@ -5,7 +5,7 @@
  * No LLM, no persistence.
  */
 
-import { DocumentLoaderFactory } from '../../knowledge/loaders/index.js';
+import { DocumentLoaderFactory } from '../loaders/index.js';
 
 import type { ResolvedInput, ExtractResult } from '../types.js';
 

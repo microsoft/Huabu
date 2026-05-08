@@ -125,17 +125,17 @@ describe('buildLayoutGraph — Edge Aggregation', () => {
   });
 
   it('creates edge from captured node to its source node with weight 0.4', () => {
-    // origin.sourceId is a knowledge-base sourceId (data.sourceId), not a node ID
+    // origin.excerptFromNodeId references the canvas node the excerpt came from.
     const nodes = [
-      makeNode('source-node', { data: { sourceId: 'kb-src-1' } }),
+      makeNode('source-node'),
       makeNode('c1', {
         data: {
-          origin: { type: 'user-excerpt', sourceId: 'kb-src-1' },
+          origin: { type: 'user-excerpt', excerptFromNodeId: 'source-node' },
         },
       }),
       makeNode('c2', {
         data: {
-          origin: { type: 'user-excerpt', sourceId: 'kb-src-1' },
+          origin: { type: 'user-excerpt', excerptFromNodeId: 'source-node' },
         },
       }),
     ];

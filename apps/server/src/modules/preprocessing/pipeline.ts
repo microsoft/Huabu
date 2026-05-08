@@ -16,20 +16,19 @@ import { project } from './stages/project.js';
 
 import type { ProviderManager } from './provider-manager.js';
 import type { PipelineContext } from './types.js';
-import type { IKnowledgeRepository } from '../knowledge/knowledge.interface.js';
+import type { CanvasStore } from '../storage/canvas-store.js';
 import type {
   Capability,
   PreprocessDiagnostic,
   PreprocessNodeRequest,
   PreprocessNodeResult,
-  SourceKind,
+  NodeContentKind,
 } from '@sediment/shared';
 
 /** Dependencies injected into the pipeline runner. */
 export interface PipelineDeps {
-  repository: IKnowledgeRepository;
+  store: CanvasStore;
   provider: ProviderManager;
-  artifactsDir: string;
 }
 
 /**
@@ -38,7 +37,7 @@ export interface PipelineDeps {
 export async function runPipeline(
   request: PreprocessNodeRequest,
   plan: Capability[],
-  sourceKind: SourceKind | undefined,
+  contentKind: NodeContentKind | undefined,
   deps: PipelineDeps,
 ): Promise<PreprocessNodeResult> {
   const requestId = randomUUID();
@@ -51,7 +50,7 @@ export async function runPipeline(
   // Stage 1 — Input Resolve
   if (has('resolve_input')) {
     try {
-      ctx.resolved = inputResolve(request, deps.artifactsDir);
+      ctx.resolved = inputResolve(request, deps.store.artifactsDir());
       usedCapabilities.push('resolve_input');
     } catch (error) {
       diagnostics.push({
@@ -69,7 +68,7 @@ export async function runPipeline(
       usedCapabilities,
       ctx,
       diagnostics,
-      sourceKind,
+      contentKind,
     );
   }
 
@@ -100,7 +99,7 @@ export async function runPipeline(
       ctx.normalized = normalize(
         ctx.resolved,
         ctx.extracted ?? { skipped: true },
-        sourceKind,
+        contentKind,
       );
       if (has('compute_fingerprint'))
         usedCapabilities.push('compute_fingerprint');
@@ -132,6 +131,7 @@ export async function runPipeline(
           ctx.normalized,
           plan,
           deps.provider,
+          deps.store.artifactsDir(),
         );
         if (has('generate_label')) usedCapabilities.push('generate_label');
         if (has('generate_summary')) usedCapabilities.push('generate_summary');
@@ -182,7 +182,8 @@ export async function runPipeline(
   // Stage 5 — Persist
   // When extraction failed the node is still visible on the canvas, so we
   // persist a placeholder source (empty content + error metadata) to ensure
-  // the node gets a stable sourceId and can be retried later.
+  // the node still has a stable record under its nodeId and can be retried
+  // later.
   const extractFailed = diagnostics.some(
     (d) => d.code === 'EXTRACT_FAILED' && d.level === 'error',
   );
@@ -193,8 +194,9 @@ export async function runPipeline(
         const src = ctx.resolved?.normalizedUri ?? ctx.resolved?.artifactUri;
 
         if (extractFailed) {
-          // Persist a placeholder with empty content so the node still gets
-          // a sourceId. Store the extraction error in metadata for debugging.
+          // Persist a placeholder with empty content so the node still has
+          // a record keyed by its nodeId. Store the extraction error in
+          // metadata for debugging.
           const placeholderNormalized = {
             ...ctx.normalized,
             canonicalContent: '',
@@ -209,8 +211,8 @@ export async function runPipeline(
           };
           ctx.persisted = persist(
             placeholderNormalized,
-            sourceKind,
-            deps.repository,
+            contentKind,
+            deps.store,
             src,
           );
           ctx.persisted.placeholder = true;
@@ -221,12 +223,7 @@ export async function runPipeline(
               'Persisted placeholder source because extraction failed — content is empty',
           });
         } else {
-          ctx.persisted = persist(
-            ctx.normalized,
-            sourceKind,
-            deps.repository,
-            src,
-          );
+          ctx.persisted = persist(ctx.normalized, contentKind, deps.store, src);
         }
         usedCapabilities.push('persist_source');
       } catch (error) {
@@ -252,6 +249,6 @@ export async function runPipeline(
     usedCapabilities,
     ctx,
     diagnostics,
-    sourceKind,
+    contentKind,
   );
 }

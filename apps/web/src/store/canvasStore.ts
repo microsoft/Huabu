@@ -598,7 +598,7 @@ const useCanvasStore = create<RFState>()(
       /**
        * Build a SelectedNodeDetail for a single node.
        * Only sends lightweight metadata — the agent uses get_node_detail
-       * or read_source to fetch full content on demand, saving tokens.
+       * to fetch full content on demand, saving tokens.
        * Image nodes keep `src` so the server can build vision attachments.
        * For frame nodes, recursively include direct children as `children` details
        */
@@ -616,7 +616,6 @@ const useCanvasStore = create<RFState>()(
           type: nodeType,
           label: data?.label as string | undefined,
           origin: data?.origin as SelectedNodeDetail['origin'],
-          sourceId: data?.sourceId as string | undefined,
           position: { x: n.position.x, y: n.position.y },
           ...(size.width > 0 || size.height > 0
             ? { size: { width: size.width, height: size.height } }
@@ -695,14 +694,27 @@ const useCanvasStore = create<RFState>()(
         };
         canvasHistoryManager.clear();
 
+        const loadedNodes = state.nodes ?? [];
         set({
-          nodes: state.nodes ?? [],
+          nodes: loadedNodes,
           edges: state.edges ?? [],
           canvasTitle: response.title || 'Untitled',
           version: response.version,
           isLoading: false,
           ingestionByNodeId: {},
         });
+
+        // Backfill: any node that participates in preprocessing but has
+        // no label after load (e.g. frame auto-labels lost in older data,
+        // or media nodes whose initial preprocess never completed) gets
+        // re-queued so the server can regenerate one.
+        for (const node of loadedNodes) {
+          if (!needsPreprocessing(node.type ?? '')) continue;
+          const data = node.data as Record<string, unknown> | undefined;
+          const label = typeof data?.label === 'string' ? data.label : '';
+          if (label.trim().length > 0) continue;
+          triggerPreprocessing(node);
+        }
       } catch (error) {
         console.error('Failed to load canvas:', error);
         set({ isLoading: false });
@@ -1328,7 +1340,6 @@ function flushOnUnload(): void {
             labelSource: (nodeData?.labelSource as string) || undefined,
             content: (nodeData?.content as string) || undefined,
             src: (nodeData?.src as string) || undefined,
-            sourceId: (nodeData?.sourceId as string) || undefined,
           };
 
     void preprocessNode(

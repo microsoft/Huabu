@@ -1,4 +1,3 @@
-import { createId } from '@sediment/shared';
 import {
   ReactFlow,
   Background,
@@ -34,7 +33,6 @@ import { NodeToolbar } from './CanvasToolbar.tsx';
 import { EdgeStyleToolbar } from './EdgeStyleToolbar.tsx';
 import { IntentPopover } from './IntentPopover.tsx';
 import { MultiSelectToolbar } from './MultiSelectToolbar.tsx';
-import { getSource } from '../../../api/knowledge.ts';
 import { GRID_SIZE } from '../../../config/canvas.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import {
@@ -64,8 +62,6 @@ const nodeTypes = {
   annotation: AnnotationNode,
   question: QuestionNode,
 } as const;
-
-const VALID_NODE_TYPES = Object.keys(nodeTypes);
 
 /**
  * Renders a dashed-border preview overlay showing the target frame size
@@ -156,13 +152,13 @@ export const Canvas: React.FC<CanvasProps> = ({
   const frameFitPreviews = useCanvasStore((state) => state.frameFitPreviews);
   const addNode = useCanvasStore((state) => state.addNode);
   const addNodes = useCanvasStore((state) => state.addNodes);
-  const patchNodeSilent = useCanvasStore((state) => state.patchNodeSilent);
   const setRfInstance = useCanvasStore((state) => state.setRfInstance);
   const openExpanded = useCanvasStore((state) => state.openExpanded);
   const expandedNodeId = useCanvasStore((state) => state.expandedNodeId);
   const expandMode = useCanvasStore((state) => state.expandMode);
   const frameNodesInRect = useCanvasStore((state) => state.frameNodesInRect);
   const pendingNodeType = useCanvasStore((state) => state.pendingNodeType);
+  const canvasId = useCanvasStore((state) => state.canvasId);
   const setPendingNodeType = useCanvasStore(
     (state) => state.setPendingNodeType,
   );
@@ -559,57 +555,6 @@ export const Canvas: React.FC<CanvasProps> = ({
             return;
           }
 
-          if (payload.kind === 'source') {
-            const { type, sourceId, label, ...rest } = payload.data;
-
-            let nodeType = 'text';
-            if (typeof type === 'string' && VALID_NODE_TYPES.includes(type)) {
-              nodeType = type;
-            }
-
-            // For note/text sources, async-load content
-            if ((nodeType === 'note' || nodeType === 'text') && sourceId) {
-              const tempNodeId = createId('node');
-              addNode({
-                id: tempNodeId,
-                nodeType: nodeType as 'note' | 'text',
-                placementPoint: dropPos,
-                data: {
-                  ...rest,
-                  label,
-                  sourceId,
-                  origin: payload.origin,
-                  content: 'Loading...',
-                },
-              });
-
-              getSource(sourceId)
-                .then((fullSource) => {
-                  patchNodeSilent(tempNodeId, {
-                    content: fullSource.content || '',
-                  });
-                })
-                .catch((error) => {
-                  console.error('Failed to load source content:', error);
-                  patchNodeSilent(tempNodeId, {
-                    content: 'Failed to load content',
-                  });
-                });
-              return;
-            }
-
-            newNodeInput = {
-              nodeType: nodeType as keyof typeof nodeTypes,
-              placementPoint: dropPos,
-              data: {
-                ...rest,
-                label,
-                sourceId,
-                origin: payload.origin,
-              },
-            };
-          }
-
           if (newNodeInput) addNode(newNodeInput);
           return;
         }
@@ -617,6 +562,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         // ============ 2. Native file drops (from desktop / Finder) ============
         const nativeFiles = Array.from(e.dataTransfer.files);
         if (nativeFiles.length > 0) {
+          if (!canvasId) return;
           void (async () => {
             const inputs = (
               await Promise.all(
@@ -626,9 +572,12 @@ export const Canvas: React.FC<CanvasProps> = ({
                     x: dropPos.x + offset,
                     y: dropPos.y + offset,
                   };
-                  return uploadFileToNodeInput(file, pos, {
-                    type: 'user-uploaded',
-                  });
+                  return uploadFileToNodeInput(
+                    file,
+                    pos,
+                    { type: 'user-uploaded' },
+                    canvasId,
+                  );
                 }),
               )
             ).filter((input): input is AddNodeInput => input !== null);

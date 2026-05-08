@@ -130,7 +130,6 @@ function buildSnapshot(
     labelSource: (data?.labelSource as string) || undefined,
     content: (data?.content as string) || undefined,
     src: (data?.src as string) || undefined,
-    sourceId: (data?.sourceId as string) || undefined,
   };
 }
 
@@ -184,7 +183,6 @@ export async function preprocessNodeIfNeeded({
 
     // Apply results from the backend.
     const patch: Record<string, unknown> = {};
-    if (response.sourceId) patch.sourceId = response.sourceId;
     if (response.suggestedLabel) {
       patch.label = response.suggestedLabel;
       patch.labelSource = 'auto';

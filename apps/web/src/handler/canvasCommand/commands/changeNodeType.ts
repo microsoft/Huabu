@@ -15,12 +15,6 @@ type Cmd = Extract<CanvasCommand, { type: 'CHANGE_NODE_TYPE' }>;
  * because it has no meaning on a plain text node. Any loss is recoverable
  * via undo.
  *
- * Intentionally NOT stripped:
- *   - `sourceId` — points to a knowledge-base source that may be referenced
- *     by other canvases / panels. Tearing down that link on a UI-only type
- *     toggle would orphan the KB record. The link is preserved so that
- *     toggling back to `note` restores the original ingest binding.
- *
  * For `note → text`, the Markdown content is also flattened to plain text via
  * `stripMarkdown` — otherwise users would see literal `**bold**` / `# heading`
  * markers in a node that has no Markdown renderer.

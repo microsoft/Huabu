@@ -6,7 +6,6 @@
  * - color.ts: Shared color palettes and background color presets
  * - node.ts: Node data structures and type guards
  * - edge.ts: Edge types and styling
- * - source.ts: Knowledge source and ingestion types
  * - layout.ts: CanvasPage calculation types
  * - operation.ts: Canvas operation types (for programmatic manipulation)
  * - canvas-api.ts: REST API request/response types
@@ -55,7 +54,6 @@ export {
   isFrameNode,
   isAnnotationNode,
   isQuestionNode,
-  hasSourceId,
   normalizeOrigin,
 } from './node.js';
 
@@ -68,15 +66,6 @@ export type {
   EdgeStrokeWidth,
 } from './edge.js';
 export { EDGE_STROKE_WIDTHS } from './edge.js';
-
-// Source types
-export type {
-  UpsertNodeRequest,
-  UpsertNodeResponse,
-  DeleteNodeResponse,
-  ResolveLabelRequest,
-  ResolveLabelResponse,
-} from './source.js';
 
 // CanvasPage types
 export type {
@@ -134,12 +123,10 @@ export type {
   GetCanvasResponse,
   PutCanvasRequest,
   PutCanvasResponse,
+  DeleteNodeResponse,
   CanvasVersionMismatchError,
   UpdateCanvasStateParams,
   UpdateCanvasStateResult,
-  ExportedSource,
-  ExportedArtifact,
-  CanvasExportBundle,
   ImportCanvasResponse,
   CanvasSummary,
   ListCanvasesResponse,

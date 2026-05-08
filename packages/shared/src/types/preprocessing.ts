@@ -7,16 +7,13 @@
  */
 
 import type { CanvasNodeType } from './canvas/node.js';
-import type { SourceType } from './knowledge.js';
+import type { NodeContentKind } from './node-content.js';
 
-// Re-export for convenience — preprocessing consumers use these aliases
+// Re-export for convenience — preprocessing consumers use this alias
 // to emphasize the preprocessing-specific semantics.
 
 /** Canvas-side node type (what the node looks like on the canvas). */
 export type CanvasNodeKind = CanvasNodeType;
-
-/** Knowledge-store source type (whether and how the node persists). */
-export type SourceKind = SourceType;
 
 // ---------------------------------------------------------------------------
 // Capabilities — organized by pipeline stage
@@ -77,7 +74,7 @@ export type TriggerReason =
  */
 export interface NodePreprocessProfile {
   nodeType: CanvasNodeKind;
-  sourceKind?: SourceKind;
+  contentKind?: NodeContentKind;
   capabilities: Capability[];
   /** Node data fields that, when changed, should trigger preprocessing. */
   watchFields: string[];
@@ -91,7 +88,7 @@ export interface NodePreprocessProfile {
 export interface PreprocessOptions {
   /** Allow LLM calls in the Enrich stage. Default: true. */
   allowLLM?: boolean;
-  /** Allow writing to the knowledge store. Default: true. */
+  /** Allow writing to the per-canvas content store. Default: true. */
   allowPersistence?: boolean;
   /** Force reprocessing even if fingerprint matches. Default: false. */
   force?: boolean;
@@ -150,8 +147,7 @@ export interface PreprocessNodeResult {
   };
 
   persistence?: {
-    sourceId?: string;
-    sourceKind?: SourceKind;
+    contentKind?: NodeContentKind;
     isNew?: boolean;
     contentChanged?: boolean;
     placeholder?: boolean;
@@ -169,13 +165,10 @@ export interface PreprocessNodeResult {
 
 /**
  * Simplified response returned by the unified preprocess endpoint.
- * Clients use this instead of UpsertNodeResponse / ResolveLabelResponse.
  */
 export interface PreprocessNodeResponse {
   nodeId: string;
   success: boolean;
-  /** Source ID from the Persist stage (for note/text/web/pdf). */
-  sourceId?: string;
   /** LLM-suggested label from the Enrich stage (for image/frame, or title-derived for ingest types). */
   suggestedLabel?: string;
   /** Structured error description, if any. */

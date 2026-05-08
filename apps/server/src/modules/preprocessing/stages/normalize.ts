@@ -1,23 +1,25 @@
 /**
  * Stage 3 — Normalize
  *
- * Produces canonical content hash, stable sourceId, title, and merged metadata.
- * No external calls, no LLM.
+ * Produces canonical content hash, stable nodeId, title, and merged
+ * metadata. No external calls, no LLM. Source identity is canvas-local:
+ * the `nodeId` field carries the canvas node id, which is what
+ * `nodes/<nodeId>.md` is keyed by.
  */
 
-import { computeContentHash, generateSourceId } from '../../knowledge/utils.js';
+import { computeContentHash } from '../utils.js';
 
 import type {
   ResolvedInput,
   ExtractResult,
   NormalizeResult,
 } from '../types.js';
-import type { SourceKind } from '@sediment/shared';
+import type { NodeContentKind } from '@sediment/shared';
 
 export function normalize(
   resolved: ResolvedInput,
   extracted: ExtractResult,
-  sourceKind?: SourceKind,
+  contentKind?: NodeContentKind,
 ): NormalizeResult {
   const canonicalContent = extracted.content ?? resolved.content ?? '';
   const contentHash = computeContentHash(canonicalContent);
@@ -42,8 +44,8 @@ export function normalize(
     ? { ...(extracted.metadata as Record<string, unknown>) }
     : undefined;
 
-  // Source ID generation
-  const sourceId = resolveSourceId(resolved, contentHash, sourceKind);
+  // Node id resolution (source identity is canvas-local).
+  const nodeId = resolveNodeId(resolved, contentHash, contentKind);
 
   // Input fingerprint: hash type-specific canonical input to avoid collisions
   // across unrelated nodes (e.g. two empty notes, or image vs frame).
@@ -51,7 +53,7 @@ export function normalize(
 
   return {
     contentHash,
-    sourceId,
+    nodeId,
     title,
     metadata,
     canonicalContent,
@@ -93,63 +95,11 @@ function computeInputFingerprint(
   }
 }
 
-function resolveSourceId(
+function resolveNodeId(
   resolved: ResolvedInput,
-  contentHash: string,
-  sourceKind?: SourceKind,
+  _contentHash: string,
+  _contentKind?: NodeContentKind,
 ): string {
-  // If an existing sourceId was provided, keep it
-  if (resolved.existingSourceId) {
-    return resolved.existingSourceId;
-  }
-
-  if (!sourceKind) {
-    // No source kind — generate a content-based fingerprint for cache keying
-    return `pp_${contentHash.replace('sha256:', '').substring(0, 16)}`;
-  }
-
-  const type = sourceKind;
-
-  // Fallback identifier using artifactUri or nodeId
-  const fallbackIdentifier =
-    resolved.artifactUri ?? resolved.nodeId ?? contentHash;
-  const generateFallbackId = () =>
-    `fallback_${type}_${fallbackIdentifier.replace('sha256:', '').substring(0, 16)}`;
-
-  try {
-    switch (type) {
-      case 'web':
-        if (!resolved.normalizedUri) {
-          return generateSourceId({
-            type: 'web',
-            uri: `missing:${resolved.nodeId}`,
-          });
-        }
-        return generateSourceId({
-          type: 'web',
-          uri: resolved.normalizedUri,
-        });
-
-      case 'pdf': {
-        const emptyHash = computeContentHash('');
-        let hashToUse = contentHash;
-        if (!contentHash || contentHash === emptyHash) {
-          hashToUse = fallbackIdentifier;
-        }
-        return generateSourceId({
-          type: 'pdf',
-          fileHash: hashToUse,
-        });
-      }
-
-      case 'note':
-      case 'text':
-        return generateSourceId({ type });
-
-      default:
-        return generateFallbackId();
-    }
-  } catch {
-    return generateFallbackId();
-  }
+  // Source identity is canvas-local: the node id is the source id.
+  return resolved.nodeId;
 }

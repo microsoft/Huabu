@@ -11,7 +11,6 @@ import intentRoutes from './modules/agent/intent.route.js';
 import llmRoutes from './modules/agent/llm.route.js';
 import artifactRoute from './modules/artifact/artifact.route.js';
 import canvasRoutes from './modules/canvas/canvas.route.js';
-import knowledgeRoute from './modules/knowledge/knowledge.route.js';
 import webRoutes from './modules/web/web.route.js';
 import { isWorkspaceConfigured } from './modules/workspace.js';
 import workspaceRoutes from './modules/workspace.route.js';
@@ -68,8 +67,7 @@ app.addHook('preHandler', async (request, reply) => {
 app.register(agentRoutes, { prefix: '/api/agent' });
 app.register(canvasRoutes, { prefix: '/api/canvas' });
 app.register(webRoutes, { prefix: '/api/web' });
-app.register(artifactRoute, { prefix: '/api' });
-app.register(knowledgeRoute, { prefix: '/api' });
+app.register(artifactRoute, { prefix: '/api/canvas' });
 
 app.register(intentRoutes, { prefix: '/api/intent' });
 app.register(llmRoutes, { prefix: '/api' });

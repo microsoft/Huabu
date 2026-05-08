@@ -1,36 +1,43 @@
-import { createReadStream, existsSync } from 'node:fs';
-import { readFile, unlink, writeFile } from 'node:fs/promises';
+import { createWriteStream, existsSync, mkdirSync } from 'node:fs';
+import { mkdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { createId } from '@sediment/shared';
+import archiver from 'archiver';
+import yauzl from 'yauzl';
 import { z } from 'zod';
 
+import { getPreprocessDispatcher } from '../preprocessing/index.js';
 import {
-  readCanvas,
-  writeCanvas,
-  listCanvases,
   createCanvas,
   deleteCanvas,
+  getCanvasStore,
+  listCanvases,
   type CanvasFile,
-  type NodeLike,
-} from './canvas.filestore.js';
-import { getExtFromMime, getMimeType } from '../../utils/mime.js';
-import { ARTIFACT_API_PREFIX } from '../artifact/utils.js';
-import { getKnowledgeRepository } from '../knowledge/index.js';
-import { getPreprocessDispatcher } from '../preprocessing/index.js';
-import { getArtifactsDir } from '../workspace.js';
+} from '../storage/index.js';
+import { getWorkspacePath } from '../workspace.js';
 
+import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
 import type {
-  CanvasExportBundle,
   CanvasNodeKind,
-  ExportedSource,
   ImportCanvasResponse,
   PreprocessNodeRequest,
   PreprocessNodeResponse,
   TriggerReason,
 } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
+
+/**
+ * Loose node type for processing unknown/untyped node structures.
+ * Used when iterating over canvas state before validation.
+ */
+interface NodeLike {
+  id?: string;
+  type?: string;
+  data?: Record<string, unknown>;
+  [key: string]: unknown;
+}
 
 function nowMs(): number {
   return Date.now();
@@ -54,85 +61,149 @@ function toMessage(error: unknown): string {
 }
 
 /**
- * Strip derived `content` and `label` from nodes that already have a `sourceId`.
- * This avoids storing redundant copies in the canvas JSON - the knowledge
- * store is the single source of truth for content and title/label.
+ * Persist node markdown into the canvas store and return canvas-state
+ * nodes with the bulky `content` field stripped.
  *
- * Labels that were intentionally set by a user or the AI agent are preserved
- * in the canvas JSON so they survive save/load cycles without relying on
- * hydration from the knowledge store.
+ * Labels intentionally set by a user or the agent are preserved on the
+ * canvas node so they survive save/load cycles without depending on the
+ * node markdown.
  */
-function stripManagedContent(nodes: NodeLike[]): NodeLike[] {
+function persistAndStripNodes(
+  store: CanvasStore,
+  nodes: NodeLike[],
+): NodeLike[] {
   return nodes.map((node) => {
-    if (!node.data?.sourceId) {
-      return node;
+    const data = node.data ?? {};
+    const nodeId = typeof node.id === 'string' ? node.id : '';
+    const content =
+      typeof data['content'] === 'string'
+        ? (data['content'] as string)
+        : undefined;
+
+    // Tracks whether per-node markdown has a title we can re-hydrate from
+    // on read. When false (e.g. frame nodes have no markdown), the auto
+    // label MUST be kept on the canvas node, otherwise it is lost on reload.
+    let hasPersistedTitle = false;
+    let existing: NodeContent | null = null;
+    if (nodeId) {
+      try {
+        existing = store.readNode(nodeId);
+      } catch {
+        existing = null;
+      }
     }
 
-    // Strip `content`; the knowledge store owns it.
-    // Preserve `content` as `contentSnapshot` for fallback.
-    // Only strip `label` when it is auto-derived; keep intentional labels.
-    const { content, label, ...dataRest } = node.data;
-    const keepLabel =
-      node.data.labelSource === 'user' || node.data.labelSource === 'agent';
-    return {
-      ...node,
-      data: {
-        ...dataRest,
-        ...(keepLabel && label != null ? { label } : {}),
-        ...(typeof content === 'string' ? { contentSnapshot: content } : {}),
-      },
-    };
+    if (nodeId && typeof content === 'string') {
+      const nodeType =
+        typeof node.type === 'string' ? node.type : (existing?.type ?? 'note');
+      // Guard against accidental content wipes: if the incoming content is
+      // an empty string but the persisted markdown already has non-empty
+      // content for a text-bearing node, skip the write. This prevents
+      // races (e.g. autosave firing before the editor flushes its buffer)
+      // from clobbering real content with "".
+      const isTextBearing = nodeType === 'note' || nodeType === 'text';
+      const wouldClobber =
+        content.length === 0 &&
+        isTextBearing &&
+        typeof existing?.content === 'string' &&
+        existing.content.length > 0;
+
+      if (!wouldClobber) {
+        const title =
+          typeof data['label'] === 'string'
+            ? (data['label'] as string)
+            : (existing?.title ?? null);
+        const nodeContent: NodeContent = {
+          nodeId,
+          type: nodeType,
+          title,
+          src:
+            typeof data['src'] === 'string'
+              ? (data['src'] as string)
+              : (existing?.src ?? null),
+          content,
+          contentHash: existing?.contentHash ?? '',
+          metadata: existing?.metadata ?? {},
+        };
+        try {
+          store.writeNode(nodeId, nodeContent);
+          hasPersistedTitle = !!title;
+        } catch {
+          // Best effort — skip nodes whose id fails sanitisation.
+        }
+      } else {
+        hasPersistedTitle = !!existing?.title;
+      }
+    } else {
+      hasPersistedTitle = !!existing?.title;
+    }
+
+    const {
+      content: _omitContent,
+      summary: _omitSummary,
+      keywords: _omitKeywords,
+      ...dataRest
+    } = data;
+    const labelSource = data['labelSource'];
+    const isUserOrAgent = labelSource === 'user' || labelSource === 'agent';
+    // Drop the auto label only when per-node markdown can provide it back
+    // on hydration. For nodes without persisted markdown (e.g. frames whose
+    // label is generated by preprocessing), keep the label on canvas.json
+    // so it survives reload.
+    const keepLabel = isUserOrAgent || !hasPersistedTitle;
+    const cleanData: Record<string, unknown> = { ...dataRest };
+    if (!keepLabel) delete cleanData['label'];
+    return { ...node, data: cleanData };
   });
 }
 
 /**
- * Hydrate node `content` from the knowledge store for nodes that reference a source.
- * Only applies to note/text nodes that have a `sourceId`.
+ * Hydrate node content from the canvas store. Reads the per-node
+ * markdown file and re-attaches `content` / `label` (when auto-derived)
+ * onto each node so callers see fresh data.
  */
-async function hydrateNodeContent(nodes: NodeLike[]): Promise<NodeLike[]> {
-  const repository = await getKnowledgeRepository();
-
+function hydrateNodeContent(store: CanvasStore, nodes: NodeLike[]): NodeLike[] {
   return nodes.map((node) => {
-    const sourceId = node.data?.sourceId as string | undefined;
-    if (!sourceId) {
-      return node;
+    const nodeId = typeof node.id === 'string' ? node.id : '';
+    if (!nodeId) return node;
+
+    let nodeContent: NodeContent | null = null;
+    try {
+      nodeContent = store.readNode(nodeId);
+    } catch {
+      nodeContent = null;
     }
+    if (!nodeContent) return node;
 
-    const source = repository.findSourceById(sourceId);
+    const data = { ...(node.data ?? {}) };
+    data['content'] = nodeContent.content;
 
-    // Fall back to contentSnapshot when the source cannot be found
-    const content =
-      source?.content ??
-      (node.data?.contentSnapshot as string | undefined) ??
-      '';
-
-    // Hydrate label from source title.
-    // When labelSource is 'auto' (or absent): always sync from the knowledge store.
-    // When labelSource is 'user' or 'agent': only restore if the label was
-    // stripped (missing) from a previous save cycle — preserves the
-    // original labelSource so we don't downgrade to 'auto'.
-    const labelPatch: Record<string, unknown> = {};
-    if (source?.title) {
+    // Surface preprocessed AI summary / keywords from the per-node markdown
+    // frontmatter so the client can render them without a separate fetch.
+    const meta = nodeContent.metadata as Record<string, unknown> | undefined;
+    if (meta) {
+      if (typeof meta['summary'] === 'string' && meta['summary'].trim()) {
+        data['summary'] = meta['summary'].trim();
+      }
       if (
-        node.data?.labelSource !== 'user' &&
-        node.data?.labelSource !== 'agent'
+        Array.isArray(meta['keywords']) &&
+        meta['keywords'].every((k) => typeof k === 'string')
       ) {
-        labelPatch.label = source.title;
-        labelPatch.labelSource = 'auto';
-      } else if (!node.data?.label) {
-        // Intentional label was stripped — restore from source as fallback
-        labelPatch.label = source.title;
+        data['keywords'] = meta['keywords'];
       }
     }
 
-    return {
-      ...node,
-      data: {
-        ...node.data,
-        content,
-        ...labelPatch,
-      },
-    };
+    if (nodeContent.title) {
+      const labelSource = data['labelSource'];
+      if (labelSource !== 'user' && labelSource !== 'agent') {
+        data['label'] = nodeContent.title;
+        data['labelSource'] = 'auto';
+      } else if (!data['label']) {
+        data['label'] = nodeContent.title;
+      }
+    }
+
+    return { ...node, data };
   });
 }
 
@@ -206,10 +277,43 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     },
   );
 
-  // Delete a node
+  // Delete a node — removes its markdown, plus the node and any
+  // incident edges from the canvas JSON.
   fastify.delete<{
     Params: { canvasId: string; nodeId: string };
-  }>('/:canvasId/nodes/:nodeId', async function (_request, reply) {
+  }>('/:canvasId/nodes/:nodeId', async function (request, reply) {
+    const { canvasId, nodeId } = request.params;
+    const store = getCanvasStore(canvasId);
+    const canvas = store.read();
+    if (!canvas) {
+      return reply.code(404).send({ message: 'Canvas not found' });
+    }
+
+    store.deleteNode(nodeId);
+
+    const nodes = (canvas.state.nodes ?? []) as NodeLike[];
+    const remainingNodes = nodes.filter((n) => n.id !== nodeId);
+    const edges = (canvas.state.edges ?? []) as Array<Record<string, unknown>>;
+    const remainingEdges = edges.filter(
+      (e) => e.source !== nodeId && e.target !== nodeId,
+    );
+
+    if (
+      remainingNodes.length !== nodes.length ||
+      remainingEdges.length !== edges.length
+    ) {
+      store.write({
+        ...canvas,
+        version: canvas.version + 1,
+        state: {
+          ...canvas.state,
+          nodes: remainingNodes,
+          edges: remainingEdges,
+        },
+        updatedAt: nowMs(),
+      });
+    }
+
     return reply.send({ success: true });
   });
 
@@ -243,7 +347,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const { nodeType, trigger, snapshot, options } = parsed.data;
-    const dispatcher = await getPreprocessDispatcher();
+    const dispatcher = getPreprocessDispatcher();
 
     try {
       const ppRequest: PreprocessNodeRequest = {
@@ -264,7 +368,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.send({
         nodeId,
         success: result.success,
-        sourceId: result.persistence?.sourceId ?? undefined,
         suggestedLabel:
           typeof result.patch.label === 'string'
             ? result.patch.label
@@ -294,15 +397,17 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     '/:canvasId',
     async function (request, reply) {
       const { canvasId } = request.params;
-      const canvas = readCanvas(canvasId);
+      const store = getCanvasStore(canvasId);
+      const canvas = store.read();
 
       if (!canvas) {
         return reply.code(404).send({ message: 'Canvas not found' });
       }
 
-      // Hydrate node content from knowledge store so clients always get fresh data
+      // Hydrate node content from the per-canvas store so clients always
+      // receive fresh markdown bodies.
       const nodes = canvas.state.nodes as NodeLike[];
-      const hydratedNodes = await hydrateNodeContent(nodes);
+      const hydratedNodes = hydrateNodeContent(store, nodes);
 
       return reply.send({
         canvasId: canvas.canvasId,
@@ -329,7 +434,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
       const { version: clientVersion, state, title } = parsed.data;
 
-      const existing = readCanvas(canvasId);
+      const store = getCanvasStore(canvasId);
+      const existing = store.read();
       const serverVersion = existing?.version ?? 0;
       if (clientVersion !== serverVersion) {
         return reply
@@ -346,7 +452,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         [key: string]: unknown;
       };
 
-      const leanNodes = stripManagedContent(
+      const leanNodes = persistAndStripNodes(
+        store,
         (rawState?.nodes ?? []) as NodeLike[],
       );
 
@@ -363,7 +470,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         updatedAt: timestamp,
       };
 
-      writeCanvas(canvasFile);
+      store.write(canvasFile);
 
       return reply.send({
         canvasId,
@@ -372,347 +479,220 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     },
   );
 
-  // --- Export Canvas ---
+  // --- Export Canvas (zip) ---
 
-  fastify.get<{ Params: { canvasId: string } }>(
-    '/:canvasId/export',
-    async function (request, reply) {
-      const { canvasId } = request.params;
-      const canvas = readCanvas(canvasId);
+  /**
+   * Stream the entire `<canvasId>/` directory as a `.sediment.zip` archive.
+   *
+   * The zip mirrors the on-disk layout (canvas.json, nodes/, artifacts/,
+   * memory/, .history/) with a `manifest.json` at the root identifying
+   * the export version and source canvas id.
+   */
+  fastify.get<{
+    Params: { canvasId: string };
+    Querystring: { includeHistory?: string };
+  }>('/:canvasId/export', async function (request, reply) {
+    const { canvasId } = request.params;
+    const includeHistory = request.query.includeHistory !== 'false';
 
-      if (!canvas) {
-        return reply.code(404).send({ message: 'Canvas not found' });
-      }
+    const store = getCanvasStore(canvasId);
+    const canvas = store.read();
+    if (!canvas) {
+      return reply.code(404).send({ message: 'Canvas not found' });
+    }
 
-      const nodes = (canvas.state.nodes ?? []) as NodeLike[];
-      const edges = canvas.state.edges ?? [];
+    const canvasDir = path.join(getWorkspacePath(), canvasId);
+    if (!existsSync(canvasDir)) {
+      return reply.code(404).send({ message: 'Canvas directory not found' });
+    }
 
-      // Collect all sourceIds referenced by nodes
-      const sourceIds = nodes
-        .map((n) => n.data?.sourceId as string | undefined)
-        .filter((id): id is string => typeof id === 'string' && id.length > 0);
+    const manifest = {
+      version: '2',
+      exportedAt: new Date().toISOString(),
+      sourceCanvasId: canvasId,
+      title: canvas.title,
+    };
 
-      // Fetch corresponding knowledge sources
-      const repository = await getKnowledgeRepository();
-      const sources: ExportedSource[] = sourceIds
-        .map((id) => repository.findSourceById(id))
-        .filter((s): s is NonNullable<typeof s> => s !== null)
-        .map((s) => ({
-          sourceId: s.sourceId,
-          type: s.type,
-          title: s.title ?? null,
-          src: s.src ?? null,
-          content: s.content,
-          contentHash: s.contentHash,
-          metaJson:
-            (s as unknown as { metaJson?: string | null }).metaJson ?? null,
-        }));
+    const rawName = `${canvas.title ?? canvasId}.sediment.zip`;
+    const asciiFallback = rawName
+      .replace(/[^\x20-\x7E]/g, '_')
+      .replace(/[;'"\\]/g, '_');
+    const encodedName = encodeURIComponent(rawName);
 
-      // Collect PDF, image, and video artifacts
-      const artifactsDir = getArtifactsDir();
-      const artifactEntries: CanvasExportBundle['artifacts'] = [];
+    reply
+      .header(
+        'Content-Disposition',
+        `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodedName}`,
+      )
+      .header('Content-Type', 'application/zip');
 
-      for (const node of nodes) {
-        if (
-          node.type !== 'pdf' &&
-          node.type !== 'image' &&
-          node.type !== 'video'
-        )
-          continue;
-        const src = node.data?.src as string | undefined;
-        if (!src) continue;
+    const archive = archiver('zip', { zlib: { level: 6 } });
+    archive.on('warning', (err) => {
+      request.log.warn({ err }, 'archiver warning during export');
+    });
+    archive.on('error', (err) => {
+      request.log.error({ err }, 'archiver error during export');
+    });
 
-        const filename = path.basename(src);
-        const filePath = path.join(artifactsDir, filename);
+    archive.append(JSON.stringify(manifest, null, 2), {
+      name: 'manifest.json',
+    });
+    archive.glob('**/*', {
+      cwd: canvasDir,
+      dot: includeHistory,
+      ignore: includeHistory ? [] : ['.history/**'],
+    });
 
-        try {
-          const data = await readFile(filePath);
-          artifactEntries.push({
-            filename,
-            data: data.toString('base64'),
-            mimeType: getMimeType(filename),
-          });
-        } catch {
-          request.log.warn(
-            { filename, nodeType: node.type },
-            'Artifact not found during export',
-          );
-        }
-      }
-
-      // Normalise artifact src to portable relative paths (strip any absolute origin)
-      for (const node of nodes) {
-        if (
-          node.type !== 'pdf' &&
-          node.type !== 'image' &&
-          node.type !== 'video'
-        )
-          continue;
-        const src = node.data?.src as string | undefined;
-        if (!src) continue;
-        const artifactIdx = src.indexOf(ARTIFACT_API_PREFIX);
-        if (artifactIdx !== -1) {
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          node.data!.src = src.slice(artifactIdx);
-        }
-      }
-
-      // Convert PDF cover URLs to inline data URLs for cross-machine portability
-      for (const node of nodes) {
-        if (node.type !== 'pdf') continue;
-        const coverUrl = node.data?.coverUrl as string | undefined;
-        if (!coverUrl || coverUrl.startsWith('data:')) continue;
-
-        const coverFilename = path.basename(coverUrl);
-        const coverPath = path.join(artifactsDir, coverFilename);
-        try {
-          const coverData = await readFile(coverPath);
-          const coverMime = getMimeType(coverFilename);
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          node.data!.coverUrl = `data:${coverMime};base64,${coverData.toString('base64')}`;
-        } catch {
-          request.log.warn(
-            { filename: coverFilename },
-            'Cover image not found during export, removing coverUrl',
-          );
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          delete node.data!.coverUrl;
-        }
-      }
-
-      const bundle: CanvasExportBundle = {
-        manifest: {
-          version: '1.0',
-          exportedAt: new Date().toISOString(),
-          canvasId,
-          title: canvas.title ?? 'Untitled',
-        },
-        canvas: {
-          nodes,
-          edges,
-        },
-        sources,
-        artifacts: artifactEntries,
-      };
-
-      // Write bundle to a temp file, then stream it to avoid holding the
-      // entire serialised JSON (which can be huge due to base64 artifacts)
-      // in memory for the duration of the HTTP transfer.
-      const rawName = `${canvas.title ?? canvasId}.sediment.json`;
-      const asciiFallback = rawName
-        .replace(/[^\x20-\x7E]/g, '_')
-        .replace(/[;'"\\]/g, '_');
-      const encodedName = encodeURIComponent(rawName);
-      const tmpFile = path.join(tmpdir(), `${createId('tmp')}.json`);
-      await writeFile(tmpFile, JSON.stringify(bundle));
-
-      const stream = createReadStream(tmpFile);
-      stream.on('close', () => {
-        unlink(tmpFile).catch(() => {});
-      });
-
-      return reply
-        .header(
-          'Content-Disposition',
-          `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodedName}`,
-        )
-        .header('Content-Type', 'application/json')
-        .send(stream);
-    },
-  );
-
-  // --- Import Canvas ---
-
-  const importBodySchema = z.object({
-    manifest: z.object({
-      version: z.string(),
-      exportedAt: z.string(),
-      canvasId: z.string(),
-      title: z.string().nullable().optional(),
-    }),
-    canvas: z.object({
-      nodes: z.array(z.unknown()),
-      edges: z.array(z.unknown()),
-    }),
-    sources: z.array(
-      z.object({
-        sourceId: z.string(),
-        type: z.string(),
-        title: z.string().nullable(),
-        src: z.string().nullable(),
-        content: z.string(),
-        contentHash: z.string(),
-        metaJson: z.string().nullable(),
-      }),
-    ),
-    artifacts: z.array(
-      z.object({
-        filename: z.string().min(1).max(255),
-        data: z.string(),
-        mimeType: z.string(),
-      }),
-    ),
+    void archive.finalize();
+    return reply.send(archive);
   });
 
-  fastify.post<{ Body: unknown }>('/import', async function (request, reply) {
-    const parsed = importBodySchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.code(400).send({
-        message: 'Invalid import bundle',
-        details: parsed.error.format(),
+  // --- Import Canvas (zip) ---
+
+  fastify.post('/import', async function (request, reply) {
+    const file = await request.file();
+    if (!file) {
+      return reply.code(400).send({ message: 'No file provided' });
+    }
+
+    // Stream the upload to a temp zip file
+    const tmpZip = path.join(tmpdir(), `${createId('import')}.zip`);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const ws = createWriteStream(tmpZip);
+        file.file.pipe(ws);
+        ws.on('finish', () => resolve());
+        ws.on('error', reject);
+        file.file.on('error', reject);
       });
-    }
 
-    const bundle = parsed.data;
-    // Always generate a new canvas ID so imports never overwrite existing canvases
-    const targetCanvasId = createId('canvas');
+      const targetCanvasId = createId('canvas');
+      const targetDir = path.join(getWorkspacePath(), targetCanvasId);
+      mkdirSync(targetDir, { recursive: true });
 
-    // 0. Normalise PDF cover images — convert inline base64 data URLs to files
-    const artifactsDir = getArtifactsDir();
-    const bundleArtifactFilenames = new Set(
-      bundle.artifacts.map((a) => path.basename(a.filename)),
-    );
+      type ImportManifest = {
+        version?: string;
+        sourceCanvasId?: string;
+        title?: string | null;
+      };
+      let manifest: ImportManifest | null = null;
 
-    for (const raw of bundle.canvas.nodes) {
-      const node = raw as NodeLike;
-      if (node.type !== 'pdf') continue;
-      const coverUrl = node.data?.coverUrl as string | undefined;
-      if (!coverUrl) continue;
-
-      if (coverUrl.startsWith('data:')) {
-        const match = coverUrl.match(/^data:([^;]+);base64,(.+)$/);
-        if (!match) continue;
-
-        const [, mimeType, base64Data] = match;
-        const ext = getExtFromMime(mimeType);
-        const artifactId = createId('artifact');
-        const filename = `${artifactId}${ext}`;
-        const destPath = path.join(artifactsDir, filename);
-
-        try {
-          await writeFile(
-            destPath,
-            new Uint8Array(Buffer.from(base64Data, 'base64')),
-          );
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          node.data!.coverUrl = `${ARTIFACT_API_PREFIX}/${filename}`;
-        } catch (err) {
-          request.log.error(
-            { filename, err },
-            'Failed to write cover image during import',
-          );
+      await extractZip(tmpZip, async (entryPath, readEntry) => {
+        if (entryPath === 'manifest.json') {
+          const buf = await readEntry();
+          try {
+            manifest = JSON.parse(buf.toString('utf-8')) as ImportManifest;
+          } catch {
+            manifest = null;
+          }
+          return;
         }
-      } else {
-        // Normalise cover URL to relative path
-        const coverFilename = path.basename(coverUrl);
-        const willExist =
-          bundleArtifactFilenames.has(coverFilename) ||
-          existsSync(path.join(artifactsDir, coverFilename));
-
-        if (willExist) {
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          node.data!.coverUrl = `${ARTIFACT_API_PREFIX}/${coverFilename}`;
-        } else {
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          delete node.data!.coverUrl;
-          request.log.warn(
-            { coverFilename },
-            'Cover image not available during import, removed coverUrl',
-          );
+        const dest = path.join(targetDir, entryPath);
+        if (!dest.startsWith(targetDir + path.sep)) {
+          // Path traversal guard
+          return;
         }
-      }
-    }
-
-    // 0b. Normalise artifact src to relative paths
-    for (const raw of bundle.canvas.nodes) {
-      const node = raw as NodeLike;
-      if (node.type !== 'image' && node.type !== 'video' && node.type !== 'pdf')
-        continue;
-      const src = node.data?.src as string | undefined;
-      if (!src) continue;
-
-      const srcFilename = path.basename(src);
-      const willExist =
-        bundleArtifactFilenames.has(srcFilename) ||
-        existsSync(path.join(artifactsDir, srcFilename));
-
-      if (willExist) {
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        node.data!.src = `${ARTIFACT_API_PREFIX}/${srcFilename}`;
-      }
-    }
-
-    // 1. Write canvas state atomically
-    const existing = readCanvas(targetCanvasId);
-    const nextVersion = (existing?.version ?? 0) + 1;
-    const timestamp = nowMs();
-
-    const leanNodes = stripManagedContent(
-      (bundle.canvas.nodes ?? []) as NodeLike[],
-    );
-
-    const canvasFile: CanvasFile = {
-      canvasId: targetCanvasId,
-      title: bundle.manifest.title ?? null,
-      version: nextVersion,
-      state: {
-        nodes: leanNodes,
-        edges: bundle.canvas.edges ?? [],
-      },
-      createdAt: existing?.createdAt ?? timestamp,
-      updatedAt: timestamp,
-    };
-
-    writeCanvas(canvasFile);
-
-    // 2. Write sources into knowledge store (skip if sourceId already exists)
-    const repository = await getKnowledgeRepository();
-    let importedSources = 0;
-    for (const src of bundle.sources) {
-      if (repository.findSourceById(src.sourceId)) continue;
-
-      repository.createSource({
-        sourceId: src.sourceId,
-        type: src.type as 'note' | 'text' | 'web' | 'pdf',
-        title: src.title ?? undefined,
-        src: src.src ?? undefined,
-        content: src.content,
-        contentHash: src.contentHash,
-        metadata: src.metaJson
-          ? (JSON.parse(src.metaJson) as Record<string, unknown>)
-          : undefined,
+        await mkdir(path.dirname(dest), { recursive: true });
+        const buf = await readEntry();
+        await writeFile(dest, new Uint8Array(buf));
       });
-      importedSources++;
-    }
 
-    // 3. Write artifacts to disk (best-effort)
-    let importedArtifacts = 0;
-    for (const artifact of bundle.artifacts) {
-      const safeFilename = path.basename(artifact.filename);
-      if (!safeFilename) continue;
-
-      const destPath = path.join(artifactsDir, safeFilename);
-      try {
-        await writeFile(
-          destPath,
-          new Uint8Array(Buffer.from(artifact.data, 'base64')),
-        );
-        importedArtifacts++;
-      } catch (err) {
-        request.log.error(
-          { filename: safeFilename, err },
-          'Failed to write artifact during import',
-        );
+      // Rewrite canvas.json so canvasId matches the new directory.
+      const canvasJsonPath = path.join(targetDir, 'canvas.json');
+      if (!existsSync(canvasJsonPath)) {
+        await rm(targetDir, { recursive: true, force: true });
+        return reply.code(400).send({
+          message: 'Invalid bundle: missing canvas.json',
+        });
       }
-    }
+      const raw = await readFile(canvasJsonPath, 'utf-8');
+      const parsed = JSON.parse(raw) as CanvasFile;
+      const sourceCanvasId = parsed.canvasId;
+      const importedManifest = manifest as ImportManifest | null;
+      const targetTitle =
+        importedManifest?.title ?? parsed.title ?? 'Imported canvas';
 
-    const response: ImportCanvasResponse = {
-      canvasId: targetCanvasId,
-      importedSources,
-      importedArtifacts,
-    };
-    return reply.send(response);
+      const remapped: CanvasFile = {
+        ...parsed,
+        canvasId: targetCanvasId,
+        title: targetTitle,
+        state: rewriteCanvasArtifactUrls(
+          parsed.state,
+          sourceCanvasId,
+          targetCanvasId,
+        ),
+      };
+      await writeFile(canvasJsonPath, JSON.stringify(remapped));
+
+      const response: ImportCanvasResponse = {
+        canvasId: targetCanvasId,
+      };
+      return reply.send(response);
+    } catch (err) {
+      request.log.error({ err }, 'Failed to import canvas zip');
+      return reply.code(500).send({ message: 'Failed to import canvas' });
+    } finally {
+      void unlink(tmpZip).catch(() => {});
+    }
   });
 };
+
+/**
+ * Rewrite `/api/canvas/<old>/artifact/<file>` URLs inside canvas state to
+ * point at the freshly-allocated canvas id. Mutates and returns the input.
+ */
+function rewriteCanvasArtifactUrls<T>(
+  state: T,
+  fromCanvasId: string,
+  toCanvasId: string,
+): T {
+  const fromPrefix = `/api/canvas/${fromCanvasId}/artifact/`;
+  const toPrefix = `/api/canvas/${toCanvasId}/artifact/`;
+  const json = JSON.stringify(state).split(fromPrefix).join(toPrefix);
+  return JSON.parse(json) as T;
+}
+
+/**
+ * Iterate over zip entries via `yauzl`, calling `onEntry(path, read)` for
+ * each file. `read()` returns a buffer of the entry's full content.
+ */
+async function extractZip(
+  zipPath: string,
+  onEntry: (entryPath: string, read: () => Promise<Buffer>) => Promise<void>,
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    yauzl.open(zipPath, { lazyEntries: true }, (err, zipfile) => {
+      if (err || !zipfile)
+        return reject(err ?? new Error('Failed to open zip'));
+      zipfile.on('entry', (entry) => {
+        if (/\/$/.test(entry.fileName)) {
+          // Directory entry — skip.
+          zipfile.readEntry();
+          return;
+        }
+        zipfile.openReadStream(entry, (err2, stream) => {
+          if (err2 || !stream) {
+            zipfile.close();
+            return reject(err2 ?? new Error('Failed to open entry'));
+          }
+          const chunks: Buffer[] = [];
+          stream.on('data', (c: Buffer) => chunks.push(c));
+          stream.on('end', () => {
+            void onEntry(entry.fileName, async () => Buffer.concat(chunks))
+              .then(() => zipfile.readEntry())
+              .catch((e) => {
+                zipfile.close();
+                reject(e);
+              });
+          });
+          stream.on('error', reject);
+        });
+      });
+      zipfile.on('end', () => resolve());
+      zipfile.on('error', reject);
+      zipfile.readEntry();
+    });
+  });
+}
 
 export default canvasRoutes;

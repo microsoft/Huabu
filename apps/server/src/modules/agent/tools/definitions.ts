@@ -455,36 +455,12 @@ Create and connect: CREATE_NODES (multiple nodes with explicit ids) + CONNECT_NO
   }),
 };
 
-// ==================== Knowledge Tools ====================
-
-export const readSourceTool: Tool = {
-  name: 'read_source',
-  description: 'Read the full content of a knowledge source by its source ID.',
-  parameters: Type.Object({
-    sourceId: Type.String({
-      description: 'The knowledge base source ID to read',
-    }),
-  }),
-};
-
-export const searchKnowledgeTool: Tool = {
-  name: 'search_knowledge',
-  description:
-    'Search the knowledge base for sources matching a query (by title or content keywords). When canvasId is provided, results include nodeId/parentId if the source exists on that canvas.',
-  parameters: Type.Object({
-    query: Type.String({ description: 'Search query' }),
-    canvasId: Type.Optional(
-      Type.String({
-        description: 'Current canvas ID to resolve node positions',
-      }),
-    ),
-  }),
-};
+// ==================== Content Ingestion Tools ====================
 
 export const ingestContentTool: Tool = {
   name: 'ingest_content',
   description:
-    'Trigger content ingestion for a canvas node, loading its web/PDF content into the knowledge base.',
+    'Trigger content ingestion for a canvas node, loading its web/PDF content into the per-canvas content store.',
   parameters: Type.Object({
     canvasId: Type.Optional(
       Type.String({
@@ -516,14 +492,10 @@ export const useSkillTool: Tool = {
 
 /**
  * Tools available in chat mode.
- * Includes read-only canvas/knowledge access so the agent can
+ * Includes read-only canvas/content access so the agent can
  * lazily fetch full content of selected nodes on demand.
  */
-export const chatTools: Tool[] = [
-  webSearchTool,
-  getNodeDetailTool,
-  readSourceTool,
-];
+export const chatTools: Tool[] = [webSearchTool, getNodeDetailTool];
 
 /**
  * Tools available in operate mode.
@@ -535,7 +507,5 @@ export const operateTools: Tool[] = [
   getNodeDetailTool,
   canvasCommandsTool,
   useSkillTool,
-  readSourceTool,
-  searchKnowledgeTool,
   ingestContentTool,
 ];

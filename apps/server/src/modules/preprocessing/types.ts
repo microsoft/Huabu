@@ -4,7 +4,7 @@
  * These types flow between pipeline stages and are not part of the public API.
  */
 
-import type { SourceMetadata } from '@sediment/shared';
+import type { NodeContentMetadata } from '@sediment/shared';
 
 // ---------------------------------------------------------------------------
 // Stage 1 — Input Resolve
@@ -38,7 +38,6 @@ export interface ResolvedInput {
   // Passthrough fields
   title?: string;
   labelSource?: string;
-  existingSourceId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -61,9 +60,10 @@ export interface ExtractResult {
 /** Result produced by the Normalize stage. */
 export interface NormalizeResult {
   contentHash: string;
-  sourceId: string;
+  /** Canvas node id (source identity is canvas-local). */
+  nodeId: string;
   title?: string;
-  metadata?: SourceMetadata;
+  metadata?: NodeContentMetadata;
   canonicalContent: string;
   inputFingerprint: string;
 }
@@ -87,7 +87,8 @@ export interface EnrichResult {
 
 /** Result produced by the Persist stage. */
 export interface PersistResult {
-  sourceId?: string;
+  /** Canvas node id under which content was persisted. */
+  nodeId?: string;
   isNew?: boolean;
   contentChanged?: boolean;
   placeholder?: boolean;

@@ -58,8 +58,9 @@ Around these primitives Huabu adds:
   moves based on what is currently on the canvas.
 - **Auto layout** — semantic, force-directed arrangement so the canvas stays
   legible as it grows.
-- **Knowledge base** — canvas content can be promoted into a searchable
-  knowledge source the AI can draw on later.
+- **Per-canvas node content storage** — each canvas owns its node content
+  locally, so the AI can read and write directly against the same material
+  the user is working on without a separate indexing step.
 - **AI chat side panel** — a conversational surface whose actions land back
   on the canvas as nodes and edges, not just as text replies.
 
@@ -75,7 +76,7 @@ This is a pnpm workspace.
 ```
 apps/
   web/      React + Vite canvas client
-  server/   Fastify backend: agent, canvas, knowledge, preprocessing
+  server/   Fastify backend: agent, canvas, storage, preprocessing, artifact
   data/     Local working data (sqlite, vault, artifacts)
 packages/
   shared/   Shared types and utilities
@@ -86,7 +87,7 @@ Key backend modules ([apps/server/src/modules](apps/server/src/modules)):
 
 - `agent/` — the AI agent runtime that reads and writes the canvas
 - `canvas/` — canvas state, commands, and persistence
-- `knowledge/` — knowledge base indexing and retrieval
+- `storage/` — per-canvas node content storage
 - `preprocessing/` — ingestion pipeline (e.g. PDF → structured content)
 - `artifact/` — generated artifacts produced by the agent
 - `web/` — web fetching utilities used by node ingestion
