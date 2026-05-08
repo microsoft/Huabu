@@ -168,24 +168,56 @@ type AgentMessage = Message | CustomAgentMessages[keyof CustomAgentMessages];
 
 新增依赖：`@earendil-works/pi-coding-agent@^0.74.0`
 
-> ⚠️ 注意：`pi-coding-agent` 带有 `pi-tui`、`@silvia-odwyer/photon-node`、
-> `extract-zip` 等较重的 CLI 依赖。
->
-> 推荐策略：从其源码中复制 `read.ts`、`write.ts`、`edit.ts`、`grep.ts`、
-> `find.ts`、`ls.ts`、`truncate.ts`、`edit-diff.ts` 到
-> `apps/server/src/modules/agent/tools/file/` 下，避免拖入 TUI 依赖。
-> 这几个文件本身只依赖 `pi-agent-core` + `typebox` + `node:fs`。
+#### 推荐落地方案：facade + 整包依赖（短期）→ 上游协作（长期）
 
-每个工具支持 `*Operations` 注入：
+**短期（Step 2 当下落地）**：
 
-```ts
-createReadTool(canvasArtifactsDir, {
-  operations: {
-    readFile: sandboxedRead,
-    access: sandboxedAccess,
-  },
-});
-```
+1. `apps/server/package.json` 直接添加 `@earendil-works/pi-coding-agent@^0.74.0`
+2. 新建 `apps/server/src/modules/agent/tools/file/index.ts` 作为唯一 facade，
+   集中 re-import 所需工厂并注入 sandbox operations：
+
+   ```ts
+   import {
+     createReadTool,
+     createWriteTool,
+     createEditTool,
+     createGrepTool,
+     createFindTool,
+     createLsTool,
+   } from '@earendil-works/pi-coding-agent';
+
+   export function buildFileTools(opts: { cwd: string; ops: SandboxOps }) {
+     return [
+       createReadTool(opts.cwd, { operations: opts.ops.read }),
+       createWriteTool(opts.cwd, { operations: opts.ops.write }),
+       createEditTool(opts.cwd, { operations: opts.ops.edit }),
+       createGrepTool(opts.cwd, { operations: opts.ops.grep }),
+       createFindTool(opts.cwd, { operations: opts.ops.find }),
+       createLsTool(opts.cwd, { operations: opts.ops.ls }),
+     ];
+   }
+   ```
+
+3. 业务层只 import 这一个 facade，不直接 `import '@earendil-works/pi-coding-agent'`。
+   未来切换实现（上游拆 headless 包 / 自维护 fork / patch）只改这一个文件。
+
+**中期（与 Step 2 并行推进）**：
+
+去 [`@earendil-works/pi-coding-agent` 仓库](https://github.com/earendil-works) 提 issue/PR，
+请求把 file tools 拆成 headless 子包（去掉 pi-tui hard dep），或者最低限度提供
+subpath export `./tools/file/*`。论证点：
+
+- server-side / non-TTY 场景下 pi-tui render 是 dead code
+- file tools 的 execute 逻辑与 render 是清晰可分的（`wrapToolDefinition`
+  本身就是把 schema/execute/render 三件套组合，render 完全可以是 optional）
+
+**长期（基于上游响应）**：
+
+- 上游接受拆包 → facade 里 swap 一行 import path 即可
+- 上游不接受 → 评估在 monorepo 里通过 `pnpm patch` 改写 file tools 的 render
+  imports 为 no-op stub。patch 范围可控，且我们的 facade 已经隔离了 blast radius
+
+#### 行为上的副作用
 
 > 💡 文件工具会通过 `throw` 抛错，pi-agent-core 会自动包成 `isError: true`。
 > Step 1 已经在 `tool_execution_end` 分支预留了 `event.isError` 的 log
