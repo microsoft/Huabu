@@ -15,7 +15,7 @@ export type FrameNodeType = Node<CanvasFrameNodeData, 'frame'>;
 export const FrameNode = memo(
   ({ id, data, selected }: NodeProps<FrameNodeType>) => {
     const unframe = useCanvasStore((state) => state.unframe);
-    const updateNodeData = useCanvasStore((state) => state.updateNodeData);
+    const tryRename = useCanvasStore((state) => state.tryRename);
     const layoutGroup = useCanvasStore((state) => state.layoutGroup);
 
     const FrameToolbar = (
@@ -66,7 +66,11 @@ export const FrameNode = memo(
 
     const commitLabel = () => {
       const next = draftLabel.trim() || 'Frame';
-      updateNodeData(id, { label: next, labelSource: 'user' });
+      // Route through tryRename so a sibling-label collision triggers the
+      // shared alert + revert flow instead of silently overwriting state.
+      void tryRename('node', id, next).then((accepted) => {
+        if (!accepted) setDraftLabel(label);
+      });
       setIsEditingLabel(false);
     };
 
