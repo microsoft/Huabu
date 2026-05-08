@@ -20,6 +20,8 @@
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 
+// @deprecated Launch-only legacy migration. Remove once all workspaces have
+// been migrated to the canvas-centric layout.
 import { runMigrationIfNeeded } from './storage/migrate.js';
 
 let _workspacePath: string | null = null;
@@ -53,9 +55,14 @@ export function getWorkspacePath(): string {
  *
  * Also runs the legacy → canvas-centric layout migration on the new
  * workspace (no-op once it has been migrated).
+ *
+ * @deprecated The migration side effect is launch-only. Remove the migration
+ * call and this note once all workspaces have been migrated.
  */
 export function setWorkspacePath(newPath: string): void {
   _workspacePath = path.resolve(newPath);
   mkdirSync(_workspacePath, { recursive: true });
+  // @deprecated Launch-only legacy migration. Remove once all workspaces have
+  // been migrated to the canvas-centric layout.
   runMigrationIfNeeded(_workspacePath);
 }

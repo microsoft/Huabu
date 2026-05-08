@@ -19,6 +19,9 @@
  * The migration is idempotent: per-canvas steps are skipped when the
  * target `<id>/canvas.json` already exists.  After every canvas has
  * been migrated, empty legacy top-level directories are removed.
+ *
+ * @deprecated Launch-only legacy migration. Remove this file once all
+ * workspaces have been migrated to the canvas-centric layout.
  */
 
 import {
@@ -65,7 +68,12 @@ function dirExists(p: string): boolean {
   }
 }
 
-/** Returns true when the workspace looks like the legacy layout. */
+/**
+ * Returns true when the workspace looks like the legacy layout.
+ *
+ * @deprecated Launch-only legacy migration helper. Remove with this file once
+ * all workspaces have been migrated to the canvas-centric layout.
+ */
 export function needsMigration(workspace: string): boolean {
   const legacy = ['canvas', 'sources', 'artifacts', '.history'].some((d) =>
     dirExists(path.join(workspace, d)),
@@ -413,6 +421,9 @@ function migrateOneCanvas(
 /**
  * Run the migration when the workspace is in the legacy layout.
  * Safe to call multiple times — it short-circuits when no work is left.
+ *
+ * @deprecated Launch-only legacy migration entry point. Remove once all
+ * workspaces have been migrated to the canvas-centric layout.
  */
 export function runMigrationIfNeeded(
   workspace: string,
