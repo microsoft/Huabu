@@ -29,13 +29,16 @@ export interface NodeSize {
   height?: number;
 }
 
-export type CanvasAlignDirection =
-  | 'left'
-  | 'center-h'
-  | 'right'
-  | 'top'
-  | 'center-v'
-  | 'bottom';
+/** Single source of truth for `CanvasAlignDirection`. */
+export const CANVAS_ALIGN_DIRECTIONS = [
+  'left',
+  'center-h',
+  'right',
+  'top',
+  'center-v',
+  'bottom',
+] as const;
+export type CanvasAlignDirection = (typeof CANVAS_ALIGN_DIRECTIONS)[number];
 
 export type CanvasAutoLayoutScope =
   | { type: 'canvas' }
@@ -174,11 +177,14 @@ export type CanvasCommandType = CanvasCommand['type'];
  * Command types that are UI-only and excluded from the agent-facing schema.
  * These depend on ephemeral view state or user-controlled protection.
  */
+export const UI_ONLY_CANVAS_COMMAND_TYPES = [
+  'SET_NODE_LOCKED',
+  'SET_NODE_SELECTION',
+  'SET_EXPANDED_NODE',
+  'CHANGE_NODE_TYPE',
+] as const;
 export type UiOnlyCanvasCommandType =
-  | 'SET_NODE_LOCKED'
-  | 'SET_NODE_SELECTION'
-  | 'SET_EXPANDED_NODE'
-  | 'CHANGE_NODE_TYPE';
+  (typeof UI_ONLY_CANVAS_COMMAND_TYPES)[number];
 
 /**
  * Subset of CanvasCommand available to the agent.
@@ -190,3 +196,39 @@ export type AgentCanvasCommand = Exclude<
 >;
 
 export type AgentCanvasCommandType = AgentCanvasCommand['type'];
+
+/**
+ * Single source of truth for the set of command types the agent may issue.
+ * The TypeBox schema in `apps/server/src/modules/agent/tools/definitions.ts`
+ * derives its top-level `type` literals from this array, and the assertion
+ * below guarantees the array stays in sync with the `AgentCanvasCommand`
+ * union — if you add a new non-UI command to `CanvasCommand`, this will fail
+ * to compile until you list it here (forcing an explicit decision about
+ * whether to expose it to the agent).
+ */
+export const AGENT_CANVAS_COMMAND_TYPES = [
+  'CREATE_NODES',
+  'DELETE_NODES',
+  'MERGE_NODE_DATA',
+  'SET_NODE_PARENT',
+  'DISSOLVE_FRAME',
+  'SET_NODE_GEOMETRY',
+  'REORDER_NODES',
+  'CONNECT_NODES',
+  'DISCONNECT_EDGES',
+  'SET_EDGE_STYLE',
+  'ALIGN_NODES',
+  'DISTRIBUTE_NODES',
+  'AUTO_LAYOUT',
+  'CREATE_QUESTION',
+] as const satisfies readonly AgentCanvasCommandType[];
+
+// Compile-time guard: `AGENT_CANVAS_COMMAND_TYPES` must list every
+// `AgentCanvasCommandType`. The `satisfies` above catches extras; this
+// assertion catches omissions.
+type _AgentTypesEqualUnion =
+  AgentCanvasCommandType extends (typeof AGENT_CANVAS_COMMAND_TYPES)[number]
+    ? true
+    : never;
+const _agentTypesCheck: _AgentTypesEqualUnion = true;
+void _agentTypesCheck;

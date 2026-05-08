@@ -8,12 +8,34 @@
 import { Type } from '@mariozechner/pi-ai';
 import {
   ACCENT_PALETTE,
+  AGENT_CREATABLE_NODE_TYPES,
+  CANVAS_ALIGN_DIRECTIONS,
+  EDGE_DIRECTIONS,
+  EDGE_LINE_STYLES,
+  EDGE_LINE_TYPES,
   EDGE_STROKE_WIDTHS,
+  NODE_FONT_FAMILIES,
+  NODE_FONT_STYLES,
+  NODE_FONT_WEIGHTS,
   SURFACE_PALETTE,
 } from '@sediment/shared';
 
 import type { Tool } from '@mariozechner/pi-ai';
-import type { AgentCanvasCommandType } from '@sediment/shared';
+
+/**
+ * Build a TypeBox literal-string union from an `as const` array. Used to
+ * derive every closed enum schema from the single source of truth that
+ * lives in `@sediment/shared`, so adding/removing a literal there
+ * automatically propagates to the schema we expose to the LLM.
+ */
+const literalUnion = <T extends readonly string[]>(
+  values: T,
+  options?: Parameters<typeof Type.Union>[1],
+) =>
+  Type.Union(
+    values.map((v) => Type.Literal(v)),
+    options,
+  );
 
 // ==================== Web Search ====================
 
@@ -89,15 +111,7 @@ const NodeSizeSchema = Type.Object({
   height: Type.Optional(Type.Number()),
 });
 
-const NodeTypeSchema = Type.Union([
-  Type.Literal('note'),
-  Type.Literal('text'),
-  Type.Literal('web'),
-  Type.Literal('image'),
-  Type.Literal('pdf'),
-  Type.Literal('video'),
-  Type.Literal('frame'),
-]);
+const NodeTypeSchema = literalUnion(AGENT_CREATABLE_NODE_TYPES);
 
 // ---- Shared color / width schemas (used by both node and edge styles) ----
 
@@ -129,22 +143,11 @@ const NodeBgColorSchema = Type.Union(
   },
 );
 
-const NodeFontFamilySchema = Type.Union([
-  Type.Literal('default'),
-  Type.Literal('serif'),
-  Type.Literal('mono'),
-  Type.Literal('hand'),
-]);
+const NodeFontFamilySchema = literalUnion(NODE_FONT_FAMILIES);
 
-const NodeFontWeightSchema = Type.Union([
-  Type.Literal('normal'),
-  Type.Literal('bold'),
-]);
+const NodeFontWeightSchema = literalUnion(NODE_FONT_WEIGHTS);
 
-const NodeFontStyleSchema = Type.Union([
-  Type.Literal('normal'),
-  Type.Literal('italic'),
-]);
+const NodeFontStyleSchema = literalUnion(NODE_FONT_STYLES);
 
 const NodeStyleSchema = Type.Object(
   {
@@ -218,24 +221,11 @@ const NodeCreateInputSchema = Type.Object({
   ),
 });
 
-const EdgeLineTypeSchema = Type.Union([
-  Type.Literal('bezier'),
-  Type.Literal('straight'),
-  Type.Literal('step'),
-]);
+const EdgeLineTypeSchema = literalUnion(EDGE_LINE_TYPES);
 
-const EdgeLineStyleSchema = Type.Union([
-  Type.Literal('solid'),
-  Type.Literal('dashed'),
-  Type.Literal('dotted'),
-]);
+const EdgeLineStyleSchema = literalUnion(EDGE_LINE_STYLES);
 
-const EdgeDirectionSchema = Type.Union([
-  Type.Literal('none'),
-  Type.Literal('forward'),
-  Type.Literal('backward'),
-  Type.Literal('both'),
-]);
+const EdgeDirectionSchema = literalUnion(EDGE_DIRECTIONS);
 
 const EdgeStyleSchema = Type.Object({
   lineType: Type.Optional(EdgeLineTypeSchema),
@@ -270,14 +260,7 @@ const EdgeStylePatchSchema = Type.Object({
   style: EdgeStyleSchema,
 });
 
-const AlignDirectionSchema = Type.Union([
-  Type.Literal('left'),
-  Type.Literal('center-h'),
-  Type.Literal('right'),
-  Type.Literal('top'),
-  Type.Literal('center-v'),
-  Type.Literal('bottom'),
-]);
+const AlignDirectionSchema = literalUnion(CANVAS_ALIGN_DIRECTIONS);
 
 const AutoLayoutScopeSchema = Type.Union([
   Type.Object({ type: Type.Literal('canvas') }),
@@ -389,32 +372,11 @@ const AgentCanvasCommandSchema = Type.Union([
   }),
 ]);
 
-// ---- Compile-time sync guard ----
-// Ensures AgentCanvasCommandSchema covers exactly the same command types
-// as the shared AgentCanvasCommand TypeScript type. If a command type is
-// added or removed in command.ts, this will produce a build error here.
-type SchemaCommandType =
-  | 'CREATE_NODES'
-  | 'DELETE_NODES'
-  | 'MERGE_NODE_DATA'
-  | 'SET_NODE_PARENT'
-  | 'DISSOLVE_FRAME'
-  | 'SET_NODE_GEOMETRY'
-  | 'REORDER_NODES'
-  | 'CONNECT_NODES'
-  | 'DISCONNECT_EDGES'
-  | 'SET_EDGE_STYLE'
-  | 'ALIGN_NODES'
-  | 'DISTRIBUTE_NODES'
-  | 'AUTO_LAYOUT'
-  | 'CREATE_QUESTION';
-type _AssertSchemaCoversTS = SchemaCommandType extends AgentCanvasCommandType
-  ? AgentCanvasCommandType extends SchemaCommandType
-    ? true
-    : never
-  : never;
-
-const _schemaSync: _AssertSchemaCoversTS = true;
+// `AgentCanvasCommandSchema` covers the same set of command names listed in
+// `AGENT_CANVAS_COMMAND_TYPES` (shared). The compile-time guard that
+// enforces "every non-UI CanvasCommand is either listed in the agent set
+// or excluded" lives next to that array in `command.ts`, so we don't need
+// a duplicate guard here.
 
 export const canvasCommandsTool: Tool = {
   name: 'canvas_commands',

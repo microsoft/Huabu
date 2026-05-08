@@ -34,6 +34,7 @@ export {
 // Node types
 export type {
   CanvasNodeType,
+  AgentCreatableNodeType,
   NodeOrigin,
   NodeOriginType,
   NodeStyle,
@@ -60,6 +61,11 @@ export type {
 } from './node.js';
 
 export {
+  CANVAS_NODE_TYPES,
+  AGENT_CREATABLE_NODE_TYPES,
+  NODE_FONT_FAMILIES,
+  NODE_FONT_WEIGHTS,
+  NODE_FONT_STYLES,
   isNoteNode,
   isTextNode,
   isMediaNode,
@@ -77,7 +83,12 @@ export type {
   EdgeDirection,
   EdgeStrokeWidth,
 } from './edge.js';
-export { EDGE_STROKE_WIDTHS } from './edge.js';
+export {
+  EDGE_STROKE_WIDTHS,
+  EDGE_LINE_TYPES,
+  EDGE_LINE_STYLES,
+  EDGE_DIRECTIONS,
+} from './edge.js';
 
 // CanvasPage types
 export type {
@@ -111,6 +122,11 @@ export type {
   UiOnlyCanvasCommandType,
   AgentCanvasCommand,
   AgentCanvasCommandType,
+} from './command.js';
+export {
+  CANVAS_ALIGN_DIRECTIONS,
+  UI_ONLY_CANVAS_COMMAND_TYPES,
+  AGENT_CANVAS_COMMAND_TYPES,
 } from './command.js';
 
 // Execution types
