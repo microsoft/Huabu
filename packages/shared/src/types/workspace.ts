@@ -5,6 +5,12 @@
  * client (in free mode) point the server at an absolute path. These types
  * are the single source of truth for both `apps/server/src/modules/workspace.route.ts`
  * and `apps/web/src/api/workspace.ts`.
+ *
+ * Errors use the shared {@link ApiErrorBody} envelope with HTTP status
+ * codes (4xx / 5xx) — there is no in-body `ok` discriminator on the
+ * error path. The only place a `{ ok }` shape appears is `PickFolderResult`,
+ * which uses it for *business* outcomes ("cancelled" / "no-picker") that
+ * are returned with HTTP 200.
  */
 
 export type WorkspaceMode = 'free' | 'managed';
@@ -29,11 +35,14 @@ export interface WorkspaceInfo {
 /**
  * Result of `POST /api/workspace/pick-folder`.
  *
- * Returns a discriminated result rather than throwing for the two
- * "expected non-success" cases:
+ * Returns a discriminated result rather than an HTTP error for the two
+ * "expected non-success" business outcomes:
  *   - `{ ok: false, reason: 'cancelled' }` — user dismissed the dialog
  *   - `{ ok: false, reason: 'no-picker' }` — server is headless; the
  *     caller should fall back to a text-input UI.
+ *
+ * Genuine failures (managed mode, non-localhost, etc.) come back as
+ * normal HTTP 4xx with an {@link ApiErrorBody}.
  */
 export type PickFolderResult =
   | { ok: true; path: string }
@@ -51,7 +60,6 @@ export interface ValidatePathRequest {
 
 /** Response for `POST /api/workspace/validate-path`. */
 export interface ValidatePathResponse {
-  ok: true;
   path: string;
   exists: boolean;
 }
