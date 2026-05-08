@@ -5,7 +5,7 @@
  * the relative positions of source and target nodes.
  */
 
-import { EDGE_STROKE_WIDTHS } from '@sediment/shared';
+import { EDGE_STROKE_WIDTHS, resolveAccent } from '@sediment/shared';
 import { MarkerType, type Node, type Edge } from '@xyflow/react';
 
 import { getLayoutNodeSize } from '@/utils/node/size';
@@ -158,7 +158,9 @@ export function applyEdgeStyle(edge: Edge, style?: EdgeStyle): Edge {
     ...(typeof edge.style === 'object' ? edge.style : {}),
   };
 
-  if (style.stroke) rfStyle.stroke = style.stroke;
+  // Stored as palette token (or legacy hex); resolve to CSS color for SVG.
+  const resolvedStroke = resolveAccent(style.stroke);
+  if (resolvedStroke) rfStyle.stroke = resolvedStroke;
   const w = style.strokeWidth ?? DEFAULT_EDGE_STROKE_WIDTH;
   rfStyle.strokeWidth = w;
   if (style.lineStyle === 'dashed') {
@@ -182,7 +184,7 @@ export function applyEdgeStyle(edge: Edge, style?: EdgeStyle): Edge {
 
   // Build arrow markers based on direction
   const direction = style.direction ?? 'none';
-  const markerColor = style.stroke ? { color: style.stroke } : {};
+  const markerColor = resolvedStroke ? { color: resolvedStroke } : {};
   const arrowMarker = { type: MarkerType.ArrowClosed, ...markerColor };
 
   return {

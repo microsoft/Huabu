@@ -1,133 +1,170 @@
+import { useMemo } from 'react';
 import { create } from 'zustand';
 
-import { getWorkspacePath, putWorkspacePath } from '../api/workspace';
+import {
+  getWorkspaceInfo,
+  putWorkspacePath,
+  type WorkspaceCapabilities,
+  type WorkspaceInfo,
+  type WorkspaceMode,
+} from '../api/workspace';
 
-const STORAGE_KEY = 'sediment:workspace-path';
-const RECENT_KEY = 'sediment:recent-workspaces';
+const FREE_PATH_KEY = 'sediment:workspace-path';
+const RECENT_PATHS_KEY = 'sediment:recent-workspaces';
 const MAX_RECENT = 5;
 
-/** Read recent workspace paths from localStorage. */
+/** Read recent free-mode workspace paths from localStorage. */
 function loadRecentWorkspaces(): string[] {
   try {
-    const raw = localStorage.getItem(RECENT_KEY);
+    const raw = localStorage.getItem(RECENT_PATHS_KEY);
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     if (Array.isArray(parsed))
-      return parsed.filter((p) => typeof p === 'string');
+      return parsed.filter((p): p is string => typeof p === 'string');
   } catch {
-    // Corrupted data – ignore
+    // ignore corrupt JSON
   }
   return [];
 }
 
-/** Persist a workspace path to the recent list (most recent first, deduplicated). */
+/** Persist a path to the free-mode recent list (most recent first, deduped). */
 function pushRecentWorkspace(path: string): string[] {
   const list = loadRecentWorkspaces().filter((p) => p !== path);
   list.unshift(path);
   const trimmed = list.slice(0, MAX_RECENT);
-  localStorage.setItem(RECENT_KEY, JSON.stringify(trimmed));
+  localStorage.setItem(RECENT_PATHS_KEY, JSON.stringify(trimmed));
   return trimmed;
 }
 
 interface WorkspaceState {
-  /** The workspace folder path, or null if not yet configured. */
+  /** Server operating mode. `null` until the first `init()` call. */
+  mode: WorkspaceMode | null;
+  /** Server-reported capabilities. */
+  capabilities: WorkspaceCapabilities | null;
+
+  /** The active absolute workspace path (free mode), or null. */
   workspacePath: string | null;
-  /** Whether the workspace has been synced to the server this session. */
-  isReady: boolean;
-  /** Whether the initial sync is in progress. */
-  isSyncing: boolean;
-  /** Error from the last sync attempt. */
-  error: string | null;
-  /** Recently used workspace paths (most recent first). */
+  /** Display label (basename of the active workspace), or null. */
+  workspaceName: string | null;
+  /** Recently used free-mode paths (most recent first). */
   recentWorkspaces: string[];
 
+  /** Whether a workspace is ready for the app to use. */
+  isReady: boolean;
+  /** Whether an init/select call is in progress. */
+  isSyncing: boolean;
+  /** Last sync error, if any. */
+  error: string | null;
+
   /**
-   * Initialise workspace on app boot.
-   * 1. If localStorage has a saved path → push it to the server.
-   * 2. Otherwise ask the server if a path was already configured
-   *    (e.g. by another tab).
-   * Returns `true` when a workspace is ready, `false` if setup is needed.
+   * Initialise workspace state on app boot.
+   * Returns `true` when a workspace is ready, `false` if free-mode setup
+   * is needed (managed mode is always ready after a successful init).
    */
   init: () => Promise<boolean>;
 
-  /**
-   * Set the workspace path (picked by user), persist to localStorage,
-   * and push to the server.
-   */
+  /** (Free mode) Activate an absolute path. */
   selectWorkspace: (path: string) => Promise<void>;
 
-  /** Remove a path from the recent workspaces list. */
+  /** (Free mode) Remove a path from the recent list. */
   removeRecentWorkspace: (path: string) => void;
 }
 
-export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
-  workspacePath: localStorage.getItem(STORAGE_KEY),
+/** Apply a fresh WorkspaceInfo snapshot to local state. */
+function fromInfo(info: WorkspaceInfo): Partial<WorkspaceState> {
+  return {
+    mode: info.mode,
+    capabilities: info.capabilities,
+    workspacePath: info.path,
+    workspaceName: info.name,
+    isReady: info.configured,
+  };
+}
+
+export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
+  mode: null,
+  capabilities: null,
+  workspacePath: localStorage.getItem(FREE_PATH_KEY),
+  workspaceName: null,
+  recentWorkspaces: loadRecentWorkspaces(),
   isReady: false,
   isSyncing: false,
   error: null,
-  recentWorkspaces: loadRecentWorkspaces(),
 
   init: async () => {
-    const saved = localStorage.getItem(STORAGE_KEY);
+    set({ isSyncing: true, error: null });
+    let info: WorkspaceInfo;
+    try {
+      info = await getWorkspaceInfo();
+    } catch (err) {
+      set({
+        error: err instanceof Error ? err.message : 'Server unreachable',
+        isSyncing: false,
+      });
+      return false;
+    }
 
-    // Fast path: localStorage has a path → sync it to the server
-    if (saved) {
-      set({ isSyncing: true, error: null });
+    set(fromInfo(info));
+
+    // ── Managed mode: server has already activated; nothing to do. ──
+    if (info.mode === 'managed') {
+      // Free-mode leftovers are meaningless here.
+      localStorage.removeItem(FREE_PATH_KEY);
+      set({ isSyncing: false });
+      return info.configured;
+    }
+
+    // ── Free mode ──
+    // Server already activated (e.g. another tab beat us to it).
+    if (info.configured && info.path) {
+      localStorage.setItem(FREE_PATH_KEY, info.path);
+      const recent = pushRecentWorkspace(info.path);
+      set({ recentWorkspaces: recent, isSyncing: false });
+      return true;
+    }
+
+    // Try to auto-activate using a remembered absolute path.
+    const savedPath = localStorage.getItem(FREE_PATH_KEY);
+    if (savedPath) {
       try {
-        await putWorkspacePath(saved);
-        const recent = pushRecentWorkspace(saved);
+        const next = await putWorkspacePath(savedPath);
+        const recent = pushRecentWorkspace(savedPath);
         set({
-          workspacePath: saved,
-          isReady: true,
-          isSyncing: false,
+          ...fromInfo(next),
           recentWorkspaces: recent,
+          isSyncing: false,
         });
         return true;
       } catch (err) {
-        const message =
-          err instanceof Error ? err.message : 'Failed to sync workspace';
-        set({ error: message, isSyncing: false });
-        return false;
-      }
-    }
-
-    // Slow path: check if the server already has a configured workspace
-    try {
-      const info = await getWorkspacePath();
-      if (info.configured && info.path) {
-        localStorage.setItem(STORAGE_KEY, info.path);
-        const recent = pushRecentWorkspace(info.path);
+        // Stored path is invalid (e.g. cross-platform leftover). Drop it
+        // and fall through to setup so the user picks a fresh one.
+        localStorage.removeItem(FREE_PATH_KEY);
         set({
-          workspacePath: info.path,
-          isReady: true,
-          isSyncing: false,
-          recentWorkspaces: recent,
+          error:
+            err instanceof Error
+              ? `Saved workspace is no longer valid: ${err.message}`
+              : 'Saved workspace is no longer valid',
         });
-        return true;
       }
-    } catch {
-      // Server unreachable — fall through to setup
     }
 
-    set({ isReady: false, isSyncing: false });
+    set({ isSyncing: false });
     return false;
   },
 
   selectWorkspace: async (path: string) => {
+    if (get().mode === 'managed') {
+      throw new Error('Workspace is locked by the server (managed mode)');
+    }
     set({ isSyncing: true, error: null });
     try {
-      await putWorkspacePath(path);
-      localStorage.setItem(STORAGE_KEY, path);
+      const info = await putWorkspacePath(path);
+      localStorage.setItem(FREE_PATH_KEY, path);
       const recent = pushRecentWorkspace(path);
-      set({
-        workspacePath: path,
-        isReady: true,
-        isSyncing: false,
-        recentWorkspaces: recent,
-      });
+      set({ ...fromInfo(info), recentWorkspaces: recent, isSyncing: false });
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : 'Failed to set workspace';
+        err instanceof Error ? err.message : 'Failed to update workspace';
       set({ error: message, isSyncing: false });
       throw err;
     }
@@ -135,7 +172,25 @@ export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
 
   removeRecentWorkspace: (path: string) => {
     const list = loadRecentWorkspaces().filter((p) => p !== path);
-    localStorage.setItem(RECENT_KEY, JSON.stringify(list));
+    localStorage.setItem(RECENT_PATHS_KEY, JSON.stringify(list));
     set({ recentWorkspaces: list });
   },
 }));
+
+/**
+ * Convenience hook: short label for the active workspace, suitable for
+ * display in the page header. Returns `null` until a workspace is active.
+ *
+ * In both modes this is the basename reported by the server. (We also
+ * derive it from `workspacePath` as a safety net for the brief moment
+ * before the first `GET /workspace` reply lands.)
+ */
+export function useWorkspaceLabel(): string | null {
+  const name = useWorkspaceStore((s) => s.workspaceName);
+  const path = useWorkspaceStore((s) => s.workspacePath);
+  return useMemo(() => {
+    if (name) return name;
+    if (path) return path.split(/[\\/]/).filter(Boolean).pop() ?? null;
+    return null;
+  }, [name, path]);
+}

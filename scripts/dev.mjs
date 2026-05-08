@@ -12,41 +12,42 @@
  * but we only need SERVER_PORT / PORT here.
  */
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import dotenv from 'dotenv';
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..');
 
-/** Minimal `.env` parser — just KEY=VALUE lines, ignores comments / blanks. */
-function readEnvFile(file) {
-  if (!existsSync(file)) return {};
-  const out = {};
-  for (const raw of readFileSync(file, 'utf8').split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line || line.startsWith('#')) continue;
-    const eq = line.indexOf('=');
-    if (eq < 0) continue;
-    const key = line.slice(0, eq).trim();
-    let value = line.slice(eq + 1).trim();
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-    out[key] = value;
+/**
+ * Parse `.env` files into a plain object without touching `process.env`.
+ * We use the same `dotenv` parser as the server (apps/server/src/load-env.ts)
+ * and Vite (`loadEnv`), so multi-line values, quoting and comments behave
+ * identically across all three entry points.
+ *
+ * Files are read in lowest-to-highest precedence; later keys win.
+ */
+function loadEnv(...files) {
+  const merged = {};
+  for (const file of files) {
+    const parsed = dotenv.config({
+      path: file,
+      processEnv: {},
+      quiet: true,
+    }).parsed;
+    if (parsed) Object.assign(merged, parsed);
   }
-  return out;
+  // Real `process.env` always wins (CLI overrides like
+  // `SERVER_PORT=4000 pnpm dev` must not be shadowed by .env files).
+  return { ...merged, ...process.env };
 }
 
-const env = {
-  ...readEnvFile(path.join(repoRoot, '.env')),
-  ...readEnvFile(path.join(repoRoot, 'apps/web/.env')),
-  ...process.env,
-};
+const env = loadEnv(
+  path.join(repoRoot, '.env'),
+  path.join(repoRoot, 'apps/web/.env'),
+);
 
 const SERVER_PORT = Number.parseInt(env.SERVER_PORT || env.PORT || '3001', 10);
 const SERVER_HOST = '127.0.0.1';
@@ -83,14 +84,53 @@ function waitForPort(host, port, timeoutMs) {
 const children = [];
 let shuttingDown = false;
 
+/**
+ * Kill a child *and its descendants*. `pnpm --filter X dev` spawns nested
+ * processes (node → tsc -w / vite); a plain `child.kill('SIGTERM')` only
+ * reaches the pnpm wrapper and orphans tsc / vite (which keep ports busy).
+ *
+ * On POSIX we put each child in its own process group (`detached: true` +
+ * `setsid`) and signal the whole group with `kill(-pid)`. On Windows we
+ * fall back to `taskkill /T` to walk the process tree.
+ */
+function killTree(child, signal) {
+  if (!child || child.killed || child.exitCode !== null) return;
+  if (process.platform === 'win32') {
+    try {
+      spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], {
+        stdio: 'ignore',
+      });
+    } catch {
+      /* best-effort */
+    }
+    return;
+  }
+  try {
+    process.kill(-child.pid, signal);
+  } catch {
+    // Process group may already be gone — fall back to direct kill.
+    try {
+      child.kill(signal);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 function shutdown(code = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
   for (const child of children) {
-    if (!child.killed) child.kill('SIGTERM');
+    killTree(child, 'SIGTERM');
   }
-  // Give children a moment to exit cleanly before we do.
-  setTimeout(() => process.exit(code), 200);
+  // Give children a moment to exit cleanly, then escalate to SIGKILL
+  // for any stragglers before we exit ourselves.
+  setTimeout(() => {
+    for (const child of children) {
+      killTree(child, 'SIGKILL');
+    }
+    process.exit(code);
+  }, 1000);
 }
 
 process.on('SIGINT', () => shutdown(0));
@@ -102,6 +142,8 @@ function spawnPnpmDev(filter, label) {
     cwd: repoRoot,
     stdio: 'inherit',
     shell: process.platform === 'win32',
+    // POSIX: own process group so we can signal the whole subtree.
+    detached: process.platform !== 'win32',
   });
   children.push(child);
   child.on('exit', (code, signal) => {

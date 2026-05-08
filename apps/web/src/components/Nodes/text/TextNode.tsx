@@ -1,10 +1,14 @@
+import {
+  resolveAccent,
+  ACCENT_PALETTE,
+  SURFACE_PALETTE,
+} from '@sediment/shared';
 import { type Node, type NodeProps } from '@xyflow/react';
 import { clsx } from 'clsx';
 import { Baseline, Bold, Italic, Underline, Strikethrough } from 'lucide-react';
 import { memo, useCallback, useState, useRef, useMemo, useEffect } from 'react';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
-import { NODE_BG_COLORS, COLOR_PALETTE } from '@/config/colors';
 import { useTextAutoSize } from '@/hooks/useTextAutoSize';
 import useCanvasStore from '@/store/canvasStore.ts';
 
@@ -72,7 +76,8 @@ export const TextNode = memo(
     const fontFamily = FONT_FAMILY_CSS[style.fontFamily ?? 'default'];
     const isBold = style.fontWeight === 'bold';
     const isItalic = style.fontStyle === 'italic';
-    const textColor = style.textColor;
+    // Stored as palette token (or legacy hex); resolve to CSS color.
+    const textColor = resolveAccent(style.textColor) ?? undefined;
     const textDecoration = style.textDecoration || '';
 
     const fontOpts = useMemo(
@@ -188,27 +193,27 @@ export const TextNode = memo(
         <FloatingToolbar.Divider />
 
         <FloatingToolbar.ColorPicker
-          colors={COLOR_PALETTE}
-          value={data.style?.textColor ?? COLOR_PALETTE[0].value}
-          onSelect={(v) =>
+          colors={ACCENT_PALETTE}
+          value={data.style?.textColor ?? ACCENT_PALETTE[0].token}
+          onSelect={(t) =>
             updateNodeData(id, {
-              style: { ...data.style, textColor: v },
+              style: { ...data.style, textColor: t },
             })
           }
           title="Text Color"
         >
           <Baseline
             style={{
-              color: data.style?.textColor || COLOR_PALETTE[0].value,
+              color: textColor || ACCENT_PALETTE[0].value,
             }}
           />
         </FloatingToolbar.ColorPicker>
         <FloatingToolbar.ColorPicker
-          colors={NODE_BG_COLORS}
-          value={data.style?.backgroundColor ?? NODE_BG_COLORS[0].value}
-          onSelect={(v) =>
+          colors={SURFACE_PALETTE}
+          value={data.style?.backgroundColor ?? SURFACE_PALETTE[0].token}
+          onSelect={(t) =>
             updateNodeData(id, {
-              style: { ...data.style, backgroundColor: v },
+              style: { ...data.style, backgroundColor: t },
             })
           }
           title="Background Color"

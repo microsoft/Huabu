@@ -375,6 +375,9 @@ async function executeCanvasCommands(
         }),
       };
     }
+    if (cmd.type === 'CONNECT_NODES' || cmd.type === 'SET_EDGE_STYLE') {
+      return cmd;
+    }
     if (cmd.type === 'CREATE_QUESTION') {
       const raw = cmd as Record<string, unknown>;
       return {

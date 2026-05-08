@@ -12,8 +12,15 @@ import llmRoutes from './modules/agent/llm.route.js';
 import artifactRoute from './modules/artifact/artifact.route.js';
 import canvasRoutes from './modules/canvas/canvas.route.js';
 import webRoutes from './modules/web/web.route.js';
-import { isWorkspaceConfigured } from './modules/workspace.js';
+import {
+  initWorkspaceFromEnv,
+  isWorkspaceConfigured,
+} from './modules/workspace.js';
 import workspaceRoutes from './modules/workspace.route.js';
+
+// Lock the workspace at startup if SEDIMENT_WORKSPACE is set (managed mode).
+// In free mode this is a no-op and the client will activate at runtime.
+initWorkspaceFromEnv();
 
 export const app = fastify({
   logger: {

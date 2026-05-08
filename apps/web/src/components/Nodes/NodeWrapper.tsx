@@ -1,4 +1,9 @@
 import {
+  resolveSurface,
+  resolveAccent,
+  ACCENT_PALETTE,
+} from '@sediment/shared';
+import {
   Handle,
   Position,
   NodeResizer,
@@ -25,7 +30,6 @@ import {
 } from '@/components/Common/FloatingToolbar.tsx';
 import { Spinner } from '@/components/Common/Spinner.tsx';
 import { Tooltip } from '@/components/Common/Tooltip.tsx';
-import { COLOR_PALETTE } from '@/config/colors.ts';
 import { NODE_ICON } from '@/config/nodeIcons.ts';
 import { useCornerZoomResize } from '@/hooks/useCornerZoomResize.ts';
 import { useIsTouch } from '@/hooks/useInputMode.ts';
@@ -39,11 +43,14 @@ import { SemanticPlaceholder } from './SemanticPlaceholder.tsx';
 import type { CanvasNodeType, NodeData } from './types.ts';
 import type { BlockProvenanceMap } from '@sediment/shared';
 
-/** Sentinel value representing "no accent". */
-const ACCENT_NONE = 'transparent';
+/** Sentinel token representing "no accent". */
+const ACCENT_NONE = 'none';
 
-/** Accent palette: the shared color palette with a leading "None" entry. */
-const ACCENT_PALETTE = [{ name: 'None', value: ACCENT_NONE }, ...COLOR_PALETTE];
+/** Accent palette options for the picker: shared palette with a leading "None" entry. */
+const ACCENT_PICKER_OPTIONS = [
+  { token: ACCENT_NONE, name: 'None', value: 'transparent' },
+  ...ACCENT_PALETTE,
+];
 
 /** Connection handle definitions – source + target on each side. */
 const HANDLE_DEFS = [
@@ -383,7 +390,8 @@ export const NodeWrapper = memo(
 
     // Derive accent-tinted tokens once so border/shadow stay in sync with
     // the rest of the canvas (PreviewCard, SemanticPlaceholder, ...).
-    const accent = data.style?.accent;
+    // Stored value is a palette token (or legacy hex); resolve to CSS color.
+    const accent = resolveAccent(data.style?.accent);
     const accentTokens = accent ? getAccentTokens(accent) : null;
 
     return (
@@ -456,13 +464,13 @@ export const NodeWrapper = memo(
               <>
                 <FloatingToolbar.Divider />
                 <FloatingToolbar.ColorPicker
-                  colors={ACCENT_PALETTE}
+                  colors={ACCENT_PICKER_OPTIONS}
                   value={data.style?.accent ?? ACCENT_NONE}
-                  onSelect={(v) =>
+                  onSelect={(t) =>
                     updateNodeData(id, {
                       style: {
                         ...data.style,
-                        accent: v === ACCENT_NONE ? null : v,
+                        accent: t === ACCENT_NONE ? null : t,
                       },
                     })
                   }
@@ -516,10 +524,10 @@ export const NodeWrapper = memo(
             className,
           )}
           style={{
-            ...(data.style?.backgroundColor &&
-              data.style.backgroundColor !== 'transparent' && {
-                backgroundColor: data.style.backgroundColor,
-              }),
+            ...(() => {
+              const bg = resolveSurface(data.style?.backgroundColor);
+              return bg && bg !== 'transparent' ? { backgroundColor: bg } : {};
+            })(),
             ...(accentTokens && {
               borderColor:
                 type === 'frame'

@@ -1,5 +1,11 @@
 import { useEffect, useState } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import {
+  BrowserRouter,
+  Navigate,
+  Outlet,
+  Route,
+  Routes,
+} from 'react-router-dom';
 
 import { ToastContainer } from './components/Common/Toast';
 import { useInputModeListener } from './hooks/useInputMode';
@@ -24,13 +30,24 @@ function LoadingScreen() {
 }
 
 /**
- * Guard component that ensures a workspace is configured before
- * rendering child routes.  Keeps the BrowserRouter mounted at all
- * times so route history is preserved across workspace switches.
+ * Layout-route guard: renders the workspace setup page or the matched
+ * child route via `<Outlet/>`. Initialisation is driven by the top-level
+ * `App` effect so that `/setup` (which lives outside this layout) also
+ * sees a populated store — otherwise managed-mode users who land on
+ * `/setup` directly would be stuck on the free-mode UI because the
+ * managed-mode redirect depends on `mode` being known.
  */
-function WorkspaceGuard({ children }: { children: React.ReactNode }) {
-  const workspacePath = useWorkspaceStore((s) => s.workspacePath);
+function WorkspaceGuardLayout({ initialising }: { initialising: boolean }) {
   const isReady = useWorkspaceStore((s) => s.isReady);
+
+  if (initialising) return <LoadingScreen />;
+  if (!isReady) return <WorkspaceSetupPage />;
+  return <Outlet />;
+}
+
+export default function App() {
+  useInputModeListener();
+
   const init = useWorkspaceStore((s) => s.init);
   const [initialising, setInitialising] = useState(true);
 
@@ -38,19 +55,18 @@ function WorkspaceGuard({ children }: { children: React.ReactNode }) {
     void init().finally(() => setInitialising(false));
   }, [init]);
 
-  if (initialising) return <LoadingScreen />;
-  if (!workspacePath || !isReady) return <WorkspaceSetupPage />;
-
-  return <>{children}</>;
-}
-
-export default function App() {
-  useInputModeListener();
-
   return (
     <BrowserRouter>
-      <WorkspaceGuard>
-        <Routes>
+      <Routes>
+        {/* Setup route lives outside the guard so the user can still
+            reach it to switch workspaces in free mode. The page itself
+            redirects to "/" in managed mode. */}
+        <Route
+          path="/setup"
+          element={initialising ? <LoadingScreen /> : <WorkspaceSetupPage />}
+        />
+
+        <Route element={<WorkspaceGuardLayout initialising={initialising} />}>
           <Route path="/" element={<CanvasListPage />} />
           <Route
             path="/playground/components"
@@ -58,8 +74,8 @@ export default function App() {
           />
           <Route path="/canvas/:canvasId" element={<CanvasPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </WorkspaceGuard>
+        </Route>
+      </Routes>
       <ToastContainer />
     </BrowserRouter>
   );

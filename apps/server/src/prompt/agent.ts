@@ -69,7 +69,7 @@ When creating structured diagrams (architecture diagrams, flowcharts, mind maps,
 - Use different stroke colors to distinguish relationship types.
 
 ### Visual grouping with accent colors
-- Set style.accent (a hex color from the shared palette) via MERGE_NODE_DATA to give nodes or frames a colored shadow accent.
+- Set style.accent (a palette token from the shared palette, e.g. "purple") via MERGE_NODE_DATA to give nodes or frames a colored shadow accent.
 - Use the same accent color for all nodes within a logical group/layer for visual cohesion.
 - The accent stripe is visible at all zoom levels including the zoomed-out placeholder view.
 

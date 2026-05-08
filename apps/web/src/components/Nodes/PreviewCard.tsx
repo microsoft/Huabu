@@ -1,3 +1,5 @@
+import { resolveAccent } from '@sediment/shared';
+
 import { getAccentTokens } from './accentTokens';
 import { getNodeIcon } from '../../config/nodeIcons.ts';
 import { SkeletonLines } from '../Common/SkeletonLines';
@@ -38,7 +40,9 @@ export function PreviewCard({
 }: PreviewCardProps) {
   const NodeTypeIcon = getNodeIcon(nodeType);
 
-  const accentTokens = accentColor ? getAccentTokens(accentColor) : null;
+  // accentColor may be a palette token, legacy hex, or null.
+  const resolvedAccent = resolveAccent(accentColor);
+  const accentTokens = resolvedAccent ? getAccentTokens(resolvedAccent) : null;
 
   const borderColor = accentTokens?.divider ?? 'var(--edge-default)';
 

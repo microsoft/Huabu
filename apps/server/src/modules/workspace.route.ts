@@ -1,30 +1,38 @@
-import { execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { promisify } from 'node:util';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
 import { z } from 'zod';
 
 import { resetPreprocessDispatcher } from './preprocessing/index.js';
 import { resetStorageCache } from './storage/index.js';
 import {
+  getWorkspaceName,
   getWorkspacePath,
+  isManagedMode,
   isWorkspaceConfigured,
   setWorkspacePath,
 } from './workspace.js';
 
-import type { FastifyPluginAsync } from 'fastify';
-
-const execFileAsync = promisify(execFile);
+import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 
 /**
- * Run a command asynchronously and return trimmed stdout, or `null` on error.
+ * Run a command and return its stdout, or null on failure.
+ * Used to detect optional helpers like `osascript` / `zenity` / `kdialog`.
  */
 async function runAndTrim(cmd: string, args: string[]): Promise<string | null> {
   try {
-    const { stdout } = await execFileAsync(cmd, args, {
-      encoding: 'utf-8',
-      timeout: 120_000,
+    const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'ignore'] });
+    let stdout = '';
+    child.stdout?.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString('utf8');
     });
+    const code: number = await new Promise((resolve) => {
+      child.on('close', (c) => resolve(c ?? 1));
+      child.on('error', () => resolve(1));
+    });
+    if (code !== 0) return null;
     return stdout.trim() || null;
   } catch {
     return null;
@@ -32,136 +40,192 @@ async function runAndTrim(cmd: string, args: string[]): Promise<string | null> {
 }
 
 /**
- * Open a native OS folder-picker dialog and return the selected path.
- * Runs the dialog process asynchronously so the Node event loop is not blocked.
- * Returns `null` when the user cancels.
+ * Whether the server can actually display a native folder picker.
+ * On headless Linux (no $DISPLAY) we short-circuit so the client can
+ * fall back to a text-input UI immediately instead of waiting 120s.
  */
-async function pickFolderNative(): Promise<string | null> {
-  const platform = process.platform;
-
-  try {
-    if (platform === 'win32') {
-      // PowerShell folder browser dialog — returns the selected path or empty
-      const ps = [
-        'Add-Type -AssemblyName System.Windows.Forms',
-        '$d = New-Object System.Windows.Forms.FolderBrowserDialog',
-        "$d.Description = 'Select Sediment workspace folder'",
-        '$d.ShowNewFolderButton = $true',
-        "if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath } else { '' }",
-      ].join('; ');
-      return await runAndTrim('powershell', ['-NoProfile', '-Command', ps]);
-    }
-
-    if (platform === 'darwin') {
-      // macOS: AppleScript folder chooser (top-level to avoid Automation permissions)
-      return await runAndTrim('osascript', [
-        '-e',
-        'POSIX path of (choose folder with prompt "Select Sediment workspace folder")',
-      ]);
-    }
-
-    // Linux: zenity or kdialog
-    const zenity = await runAndTrim('zenity', [
-      '--file-selection',
-      '--directory',
-      '--title=Select Sediment workspace folder',
-    ]);
-    if (zenity) return zenity;
-
-    return await runAndTrim('kdialog', [
-      '--getexistingdirectory',
-      process.env.HOME ?? '/',
-      '--title',
-      'Select Sediment workspace folder',
-    ]);
-  } catch {
-    // User cancelled or dialog failed
-    return null;
+function canShowNativePicker(): boolean {
+  if (process.platform === 'win32' || process.platform === 'darwin') {
+    return true;
   }
+  return !!process.env.DISPLAY || !!process.env.WAYLAND_DISPLAY;
 }
 
 /**
- * Guard: only allow requests from localhost.
+ * Open a native OS folder-picker dialog and return the selected path.
+ */
+async function pickFolderNative(): Promise<string | null> {
+  if (process.platform === 'darwin') {
+    const script =
+      'POSIX path of (choose folder with prompt "Select Sediment workspace folder")';
+    return runAndTrim('osascript', ['-e', script]);
+  }
+  if (process.platform === 'win32') {
+    // PowerShell FolderBrowserDialog
+    const ps = [
+      'Add-Type -AssemblyName System.Windows.Forms;',
+      '$f = New-Object System.Windows.Forms.FolderBrowserDialog;',
+      '$f.Description = "Select Sediment workspace folder";',
+      'if ($f.ShowDialog() -eq "OK") { Write-Output $f.SelectedPath }',
+    ].join(' ');
+    return runAndTrim('powershell', ['-NoProfile', '-Command', ps]);
+  }
+  // Linux: try zenity then kdialog
+  const zenity = await runAndTrim('zenity', [
+    '--file-selection',
+    '--directory',
+    '--title=Select Sediment workspace folder',
+  ]);
+  if (zenity) return zenity;
+  const kdialog = await runAndTrim('kdialog', [
+    '--getexistingdirectory',
+    process.env.HOME ?? tmpdir(),
+    '--title',
+    'Select Sediment workspace folder',
+  ]);
+  return kdialog;
+}
+
+/**
+ * Free-mode admin operations touch the host filesystem (folder picker,
+ * arbitrary path validation). Restrict them to localhost so a LAN peer
+ * cannot redirect storage to an arbitrary location on the host.
+ *
+ * In managed mode these endpoints remain registered but return 403.
  */
 function isLocalhost(ip: string): boolean {
   return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
 }
 
+// ────────────────────────────────────────────────────────────────────
+// Unified response shape
+//
+// Every workspace endpoint replies with a discriminated union keyed by
+// `ok`. Success responses spread the payload alongside `ok: true`;
+// error responses are always `{ ok: false, message }`. HTTP status code
+// stays meaningful (200 / 400 / 403) and is redundant with `ok`, so
+// clients can branch on either — but having an in-body discriminator
+// keeps the shape regular for future Fastify response schemas.
+// ────────────────────────────────────────────────────────────────────
+
+function sendError(
+  reply: FastifyReply,
+  status: number,
+  message: string,
+): FastifyReply {
+  return reply.status(status).send({ ok: false, message });
+}
+
+/** Build the canonical success payload describing the current workspace. */
+function buildWorkspaceState() {
+  const managed = isManagedMode();
+  const configured = isWorkspaceConfigured();
+  return {
+    ok: true as const,
+    mode: managed ? ('managed' as const) : ('free' as const),
+    configured,
+    // Free-mode active absolute path. Never exposed in managed mode.
+    path: configured && !managed ? getWorkspacePath() : null,
+    // Display label (basename). Safe to send in either mode.
+    name: configured ? getWorkspaceName() : null,
+    capabilities: {
+      canChangeWorkspace: !managed,
+      nativePicker: !managed && canShowNativePicker(),
+    },
+  };
+}
+
 const workspaceRoutes: FastifyPluginAsync = async (app) => {
-  // GET /api/workspace – return current workspace path and config status
-  app.get('/workspace', async () => {
-    const configured = isWorkspaceConfigured();
-    return {
-      path: configured ? getWorkspacePath() : null,
-      configured,
-    };
-  });
+  // ────────────────────────────────────────────────────────────────
+  // GET /api/workspace — read-only state + capabilities
+  // Always available (clients need to know the mode).
+  // ────────────────────────────────────────────────────────────────
+  app.get('/workspace', async () => buildWorkspaceState());
 
-  // POST /api/workspace/pick-folder – open native folder picker
+  // ────────────────────────────────────────────────────────────────
+  // The endpoints below mutate the active workspace and only exist
+  // in free mode. Managed mode rejects them with 403.
+  // ────────────────────────────────────────────────────────────────
+
   app.post('/workspace/pick-folder', async (request, reply) => {
-    if (!isLocalhost(request.ip)) {
-      return reply.status(403).send({
-        message:
-          'Forbidden: workspace settings can only be changed from localhost',
-      });
+    if (isManagedMode()) {
+      return sendError(reply, 403, 'Workspace is locked');
     }
-
+    if (!isLocalhost(request.ip)) {
+      return sendError(
+        reply,
+        403,
+        'Forbidden: workspace settings can only be changed from localhost',
+      );
+    }
+    if (!canShowNativePicker()) {
+      // Not a true error — the client falls back to a manual path input.
+      return reply.send({ ok: false, reason: 'no-picker' as const });
+    }
     const selected = await pickFolderNative();
     if (!selected) {
-      return reply.send({ cancelled: true, path: null });
+      return reply.send({ ok: false, reason: 'cancelled' as const });
     }
-
-    return reply.send({ cancelled: false, path: selected });
+    return reply.send({ ok: true, path: selected });
   });
 
-  // POST /api/workspace/validate-path – check if a path exists on disk
   app.post('/workspace/validate-path', async (request, reply) => {
-    if (!isLocalhost(request.ip)) {
-      return reply.status(403).send({ message: 'Forbidden' });
+    if (isManagedMode()) {
+      return sendError(reply, 403, 'Workspace is locked');
     }
-
+    if (!isLocalhost(request.ip)) {
+      return sendError(reply, 403, 'Forbidden');
+    }
     const schema = z.object({
       path: z.string().min(1, 'Path is required'),
     });
     const parsed = schema.safeParse(request.body);
     if (!parsed.success) {
-      return reply
-        .status(400)
-        .send({ message: parsed.error.issues[0]?.message });
+      return sendError(
+        reply,
+        400,
+        parsed.error.issues[0]?.message ?? 'Invalid request body',
+      );
     }
-
-    const pathExists = existsSync(parsed.data.path);
-    return reply.send({ path: parsed.data.path, exists: pathExists });
+    const pathExists = existsSync(path.resolve(parsed.data.path));
+    return reply.send({ ok: true, path: parsed.data.path, exists: pathExists });
   });
 
-  // PUT /api/workspace – update workspace path.
-  // Restricted to requests originating from localhost: this server is a
-  // local-only process and we do not want LAN peers to be able to redirect
-  // storage to an arbitrary path on the user's machine.
   app.put('/workspace', async (request, reply) => {
-    if (!isLocalhost(request.ip)) {
-      return reply.status(403).send({
-        message:
-          'Forbidden: workspace settings can only be changed from localhost',
-      });
+    if (isManagedMode()) {
+      return sendError(
+        reply,
+        403,
+        'Workspace is locked by the server (managed mode). Restart with a different SEDIMENT_WORKSPACE to switch.',
+      );
     }
-
+    if (!isLocalhost(request.ip)) {
+      return sendError(
+        reply,
+        403,
+        'Forbidden: workspace settings can only be changed from localhost',
+      );
+    }
     const schema = z.object({
       path: z.string().min(1, 'Workspace path is required'),
     });
-
     const parsed = schema.safeParse(request.body);
     if (!parsed.success) {
-      return reply
-        .status(400)
-        .send({ message: parsed.error.issues[0]?.message });
+      return sendError(
+        reply,
+        400,
+        parsed.error.issues[0]?.message ?? 'Invalid request body',
+      );
     }
-
-    setWorkspacePath(parsed.data.path);
-    // Reset cached singletons so they re-initialise against the new path
-    resetStorageCache();
-    resetPreprocessDispatcher();
-    return { path: getWorkspacePath() };
+    try {
+      setWorkspacePath(parsed.data.path);
+      // Reset singletons that cache filesystem handles for the old workspace.
+      resetStorageCache();
+      resetPreprocessDispatcher();
+      return buildWorkspaceState();
+    } catch (e) {
+      return sendError(reply, 400, (e as Error).message);
+    }
   });
 };
 
