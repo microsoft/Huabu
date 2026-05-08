@@ -10,7 +10,6 @@ import { getPreprocessDispatcher } from '../../preprocessing/index.js';
 import { getCanvasStore } from '../../storage/index.js';
 
 import type {
-  AgentMode,
   BlockProvenanceMap,
   CanvasNodeType,
   NodeOrigin,
@@ -18,16 +17,14 @@ import type {
 
 // ==================== Origin Helper ====================
 
-function agentModeToOrigin(_mode?: AgentMode): NodeOrigin {
-  return { type: 'ai-operate' };
-}
+/** Origin assigned to every node created by the agent. */
+const AI_OPERATE_ORIGIN: NodeOrigin = { type: 'ai-operate' };
 
 /** Build an `__all__` sentinel provenance map for AI-generated content. */
-function buildAIProvenance(mode?: AgentMode): BlockProvenanceMap {
+function buildAIProvenance(): BlockProvenanceMap {
   return {
     __all__: {
       author: 'ai',
-      agentMode: mode ?? 'operate',
       createdAt: new Date().toISOString(),
     },
   };
@@ -295,14 +292,11 @@ async function executeGetCanvasState(args: {
 
 // ==================== Canvas Commands ====================
 
-async function executeCanvasCommands(
-  args: {
-    canvasId: string;
-    commands: Array<Record<string, unknown>>;
-  },
-  context?: { mode?: AgentMode },
-): Promise<string> {
-  const origin = agentModeToOrigin(context?.mode);
+async function executeCanvasCommands(args: {
+  canvasId: string;
+  commands: Array<Record<string, unknown>>;
+}): Promise<string> {
+  const origin = AI_OPERATE_ORIGIN;
 
   // Read canvas state once so we can resolve node types for provenance injection.
   const canvas = getCanvasStore(args.canvasId).read();
@@ -339,9 +333,7 @@ async function executeCanvasCommands(
             data: {
               ...data,
               origin,
-              ...(hasContent
-                ? { provenance: buildAIProvenance(context?.mode) }
-                : {}),
+              ...(hasContent ? { provenance: buildAIProvenance() } : {}),
               ...(hasLabel ? { labelSource: 'agent' as const } : {}),
             },
           };
@@ -363,7 +355,7 @@ async function executeCanvasCommands(
             patch.content.length > 0;
           const hasLabel = typeof patch.label === 'string';
           const extra: Record<string, unknown> = {};
-          if (hasContent) extra.provenance = buildAIProvenance(context?.mode);
+          if (hasContent) extra.provenance = buildAIProvenance();
           if (hasLabel) extra.labelSource = 'agent';
           if (Object.keys(extra).length > 0) {
             return {
@@ -467,7 +459,7 @@ async function executeIngestContent(args: {
 export async function executeTool(
   name: string,
   args: Record<string, unknown>,
-  context?: { mode?: AgentMode; canvasId?: string },
+  context?: { canvasId?: string },
 ): Promise<string> {
   const resolveCanvasArgs = <T extends Record<string, unknown>>(
     value: T,
@@ -516,7 +508,6 @@ export async function executeTool(
       }
       return executeCanvasCommands(
         resolvedArgs as Parameters<typeof executeCanvasCommands>[0],
-        context,
       );
     }
     case 'ingest_content': {

@@ -7,7 +7,7 @@
  * `apps/server/src/modules/preprocessing/types.ts`.
  */
 
-import type { CanvasNodeType } from './canvas/node.js';
+import type { CanvasNodeType } from '../canvas/node.js';
 
 // ---------------------------------------------------------------------------
 // Trigger

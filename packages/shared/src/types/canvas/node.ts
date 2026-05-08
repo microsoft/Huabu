@@ -3,7 +3,6 @@
  * Node data structures and type guards
  */
 
-import type { AgentMode } from '../agent.js';
 import type { AccentToken, SurfaceToken } from './color.js';
 
 // ==================== Basic Node Types ====================
@@ -100,14 +99,11 @@ export interface NodeStyle {
 export interface BlockProvenance {
   /** Who originally created this block */
   author: 'ai' | 'user';
-  /** Agent mode when AI-authored (omitted for user-authored) */
-  agentMode?: AgentMode;
   /** ISO timestamp of creation */
   createdAt: string;
   /** Chronological list of modifications after initial creation */
   modifications?: Array<{
     by: 'ai' | 'user';
-    agentMode?: AgentMode;
     at: string;
   }>;
   /**

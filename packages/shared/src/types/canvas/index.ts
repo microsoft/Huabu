@@ -7,7 +7,7 @@
  * - node.ts: Node data structures and type guards
  * - edge.ts: Edge types and styling
  * - layout.ts: CanvasPage calculation types
- * - canvas-api.ts: REST API request/response types
+ * - command.ts / execution.ts: Canvas command schema and execution layer
  */
 
 // Color types
@@ -120,20 +120,3 @@ export type {
   CanvasCommandFailureReason,
   CanvasCommandResult,
 } from './execution.js';
-
-// Canvas API types
-export type {
-  GetCanvasResponse,
-  PutCanvasRequest,
-  PutCanvasResponse,
-  DeleteNodeResponse,
-  DeleteCanvasResponse,
-  CanvasVersionMismatchError,
-  UpdateCanvasStateParams,
-  UpdateCanvasStateResult,
-  ImportCanvasResponse,
-  CanvasSummary,
-  ListCanvasesResponse,
-  CreateCanvasRequest,
-  CreateCanvasResponse,
-} from './canvas-api.js';

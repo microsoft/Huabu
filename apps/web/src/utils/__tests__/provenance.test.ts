@@ -48,7 +48,6 @@ function makeUserEntry(overrides?: Partial<BlockProvenance>): BlockProvenance {
 
 const sentinel: BlockProvenance = {
   author: 'ai',
-  agentMode: 'operate',
   createdAt: '2025-06-01T00:00:00Z',
 };
 

@@ -204,7 +204,7 @@ export async function* runAgent(
           toolResultText = await executeTool(
             call.name,
             validatedArgs as Record<string, unknown>,
-            { mode, canvasId },
+            { canvasId },
           );
         } catch (err) {
           isError = true;

@@ -1,6 +1,6 @@
-import type { CanvasCommand } from './canvas/command.js';
 import type { AgentBaseContext } from './context.js';
-import type { Rect } from '../utils/spatial.js';
+import type { Rect } from '../../utils/spatial.js';
+import type { CanvasCommand } from '../canvas/command.js';
 
 // ==================== Intent Recognition ====================
 

@@ -1,5 +1,5 @@
-import type { CanvasNodeType, NodeOrigin } from './canvas/node.js';
-import type { SpatialSummary } from '../utils/spatial.js';
+import type { SpatialSummary } from '../../utils/spatial.js';
+import type { CanvasNodeType, NodeOrigin } from '../canvas/node.js';
 
 // ==================== Node Reference ====================
 
