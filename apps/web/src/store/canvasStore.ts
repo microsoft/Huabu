@@ -356,6 +356,7 @@ type RFState = {
   pasteNodes: (
     flowPosition: { x: number; y: number },
     clipboardNodes: Node[],
+    clipboardEdges?: Edge[],
   ) => void;
 
   /** Undo / Redo */
@@ -1329,7 +1330,7 @@ const useCanvasStore = create<RFState>()(
     },
 
     copySelectedNodes: () => {
-      const { nodes } = get();
+      const { nodes, edges } = get();
       const selected = nodes.filter((n) => n.selected);
       if (selected.length === 0) return;
 
@@ -1369,14 +1370,32 @@ const useCanvasStore = create<RFState>()(
         };
       });
 
-      // Write serialized node data to system clipboard
-      const payload = JSON.stringify({ __sediment_nodes__: cloned });
+      // Capture edges whose BOTH endpoints are in the copied set, so the
+      // paste helper can remap them onto the freshly-created node ids.
+      // Edges that straddle the selection boundary are dropped (no remote
+      // endpoint to point at on the destination canvas).
+      const clonedEdges: Edge[] = edges
+        .filter((e) => selectedIds.has(e.source) && selectedIds.has(e.target))
+        .map((e) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          ...(e.data ? { data: JSON.parse(JSON.stringify(e.data)) } : {}),
+        }));
+
+      // Write serialized node + edge data to system clipboard. Edges are
+      // optional; older paste handlers that only know `__sediment_nodes__`
+      // will still produce valid results (just without the connections).
+      const payload = JSON.stringify({
+        __sediment_nodes__: cloned,
+        __sediment_edges__: clonedEdges,
+      });
       void navigator.clipboard.writeText(payload).catch(() => {
         // Clipboard API unavailable
       });
     },
 
-    pasteNodes: (flowPosition, clipboardNodes) => {
+    pasteNodes: (flowPosition, clipboardNodes, clipboardEdges) => {
       const dstCanvasId = get().canvasId;
       if (!dstCanvasId || clipboardNodes.length === 0) return;
 
@@ -1402,6 +1421,9 @@ const useCanvasStore = create<RFState>()(
           type: 'PASTE_CLIPBOARD',
           flowPosition,
           clipboardNodes: nodes,
+          ...(clipboardEdges && clipboardEdges.length > 0
+            ? { clipboardEdges }
+            : {}),
         });
       };
 

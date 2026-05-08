@@ -17,7 +17,7 @@ import { useIntentStore } from '../store/intentStore';
 import { looksLikeUrl } from '../utils/io/media';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
-import type { Node, ReactFlowInstance } from '@xyflow/react';
+import type { Edge, Node, ReactFlowInstance } from '@xyflow/react';
 
 /** Returns true when the target is an editable element (input/textarea/contentEditable). */
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -29,16 +29,25 @@ function isEditableTarget(target: EventTarget | null): boolean {
   );
 }
 
-// Marker key used to identify serialized canvas nodes in the system clipboard.
+// Marker keys used to identify serialized canvas nodes / edges in the
+// system clipboard. Older payloads only have `__sediment_nodes__`; the
+// edges key is optional and absent for paste-from-other-app cases.
 const SEDIMENT_NODES_KEY = '__sediment_nodes__';
+const SEDIMENT_EDGES_KEY = '__sediment_edges__';
+
+interface SedimentClipboard {
+  nodes: unknown[];
+  edges: unknown[];
+}
 
 /**
- * Try to parse system clipboard text as serialized Sediment canvas nodes.
- * Returns the node array if valid, otherwise null.
+ * Try to parse system clipboard text as serialized Sediment canvas
+ * nodes (and optionally edges). Returns the payload when valid,
+ * otherwise null.
  */
 function parseSedimentClipboard(
   text: string | null | undefined,
-): unknown[] | null {
+): SedimentClipboard | null {
   if (!text) return null;
   try {
     const parsed = JSON.parse(text);
@@ -48,7 +57,10 @@ function parseSedimentClipboard(
       Array.isArray(parsed[SEDIMENT_NODES_KEY]) &&
       parsed[SEDIMENT_NODES_KEY].length > 0
     ) {
-      return parsed[SEDIMENT_NODES_KEY];
+      const edges = Array.isArray(parsed[SEDIMENT_EDGES_KEY])
+        ? parsed[SEDIMENT_EDGES_KEY]
+        : [];
+      return { nodes: parsed[SEDIMENT_NODES_KEY], edges };
     }
   } catch {
     // Not JSON — not sediment data
@@ -329,9 +341,13 @@ export function useCanvasShortcuts(
             const sysText = await navigator.clipboard.readText();
 
             // Check for serialized canvas nodes
-            const nodes = parseSedimentClipboard(sysText);
-            if (nodes) {
-              pasteNodes(getFlowPos(), nodes as Node[]);
+            const parsed = parseSedimentClipboard(sysText);
+            if (parsed) {
+              pasteNodes(
+                getFlowPos(),
+                parsed.nodes as Node[],
+                parsed.edges as Edge[],
+              );
               return;
             }
 
@@ -412,10 +428,14 @@ export function useCanvasShortcuts(
       const text = dt.getData('text/plain');
 
       // Check for serialized canvas nodes
-      const nodes = parseSedimentClipboard(text);
-      if (nodes) {
+      const parsed = parseSedimentClipboard(text);
+      if (parsed) {
         e.preventDefault();
-        pasteNodes(getFlowPos(), nodes as Node[]);
+        pasteNodes(
+          getFlowPos(),
+          parsed.nodes as Node[],
+          parsed.edges as Edge[],
+        );
         return;
       }
 

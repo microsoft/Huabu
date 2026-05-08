@@ -1,8 +1,10 @@
 import {
   createId,
   type CanvasCommand,
+  type CanvasEdgeId,
   type CanvasNodeId,
   type CanvasNodeType,
+  type EdgeStyle,
   type Point,
 } from '@sediment/shared';
 
@@ -146,8 +148,37 @@ export default function resolvePasteClipboard(
     traceNodes.push({ id: nodeId, nodeType, label });
   }
 
+  // Remap clipboard edges onto the freshly created node ids. Endpoints
+  // that point outside the clipboard set (e.g. a half-copied selection
+  // where only the source was selected) are dropped silently.
+  const createdEdges: Extract<
+    CanvasCommand,
+    { type: 'CONNECT_NODES' }
+  >['edges'] = [];
+  for (const edge of intent.clipboardEdges ?? []) {
+    const newSource = idMap.get(edge.source);
+    const newTarget = idMap.get(edge.target);
+    if (!newSource || !newTarget) continue;
+    // EdgeStyle is the source of truth, persisted on `edge.data.edgeStyle`
+    // by `applyEdgeStyle`. Cloning it (when present) preserves color,
+    // line-style, direction, etc. across paste.
+    const rawStyle = (edge.data as { edgeStyle?: EdgeStyle } | undefined)
+      ?.edgeStyle;
+    createdEdges.push({
+      id: createId('edge') as CanvasEdgeId,
+      source: newSource,
+      target: newTarget,
+      ...(rawStyle ? { style: JSON.parse(JSON.stringify(rawStyle)) } : {}),
+    });
+  }
+
+  const commands: CanvasCommand[] = [{ type: 'CREATE_NODES', nodes: created }];
+  if (createdEdges.length > 0) {
+    commands.push({ type: 'CONNECT_NODES', edges: createdEdges });
+  }
+
   return {
-    commands: [{ type: 'CREATE_NODES', nodes: created }],
+    commands,
     trace:
       traceNodes.length > 0
         ? [{ action: 'node_created', nodes: traceNodes }]

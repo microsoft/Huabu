@@ -68,7 +68,12 @@ export type CanvasUiIntent =
       flowRect: CanvasFlowRect;
       frameLabel?: string;
     }
-  | { type: 'PASTE_CLIPBOARD'; flowPosition?: Point; clipboardNodes: Node[] }
+  | {
+      type: 'PASTE_CLIPBOARD';
+      flowPosition?: Point;
+      clipboardNodes: Node[];
+      clipboardEdges?: Edge[];
+    }
   | { type: 'NODE_DRAG_STOP'; draggedNodeIds: string[] }
   | {
       type: 'SELECT_NODES';
