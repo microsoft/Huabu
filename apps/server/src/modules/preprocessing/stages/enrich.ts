@@ -8,8 +8,13 @@
  */
 
 import type { ProviderManager } from '../provider-manager.js';
-import type { EnrichResult, NormalizeResult, ResolvedInput } from '../types.js';
-import type { Capability, CanvasNodeKind } from '@sediment/shared';
+import type {
+  Capability,
+  EnrichResult,
+  NormalizeResult,
+  ResolvedInput,
+} from '../types.js';
+import type { CanvasNodeType } from '@sediment/shared';
 
 const TEXT_NODE_TYPES: ReadonlySet<string> = new Set([
   'web',
@@ -19,7 +24,7 @@ const TEXT_NODE_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 export async function enrich(
-  nodeType: CanvasNodeKind,
+  nodeType: CanvasNodeType,
   resolved: ResolvedInput,
   normalized: NormalizeResult | undefined,
   capabilities: Capability[],

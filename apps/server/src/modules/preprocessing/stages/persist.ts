@@ -10,8 +10,11 @@
  */
 
 import type { CanvasStore } from '../../storage/canvas-store.js';
-import type { NormalizeResult, PersistResult } from '../types.js';
-import type { NodeContentKind } from '@sediment/shared';
+import type {
+  NodeContentKind,
+  NormalizeResult,
+  PersistResult,
+} from '../types.js';
 
 export function persist(
   normalized: NormalizeResult,
@@ -49,8 +52,7 @@ export function persist(
     src: src ?? null,
     content: normalized.canonicalContent,
     contentHash: normalized.contentHash,
-    metadata:
-      (normalized.metadata as Record<string, unknown> | undefined) ?? {},
+    metadata: normalized.metadata ?? {},
   });
 
   return {

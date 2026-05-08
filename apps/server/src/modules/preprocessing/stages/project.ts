@@ -5,14 +5,14 @@
  * from the outputs of all previous stages.
  */
 
-import type { PipelineContext } from '../types.js';
 import type {
   Capability,
-  PreprocessDiagnostic,
-  PreprocessNodeRequest,
-  PreprocessNodeResult,
   NodeContentKind,
-} from '@sediment/shared';
+  PipelineContext,
+  PreprocessDiagnostic,
+  PreprocessNodeResult,
+} from '../types.js';
+import type { PreprocessNodeRequest } from '@sediment/shared';
 
 export function project(
   request: PreprocessNodeRequest,

@@ -15,15 +15,15 @@ import { persist } from './stages/persist.js';
 import { project } from './stages/project.js';
 
 import type { ProviderManager } from './provider-manager.js';
-import type { PipelineContext } from './types.js';
-import type { CanvasStore } from '../storage/canvas-store.js';
 import type {
   Capability,
-  PreprocessDiagnostic,
-  PreprocessNodeRequest,
-  PreprocessNodeResult,
   NodeContentKind,
-} from '@sediment/shared';
+  PipelineContext,
+  PreprocessDiagnostic,
+  PreprocessNodeResult,
+} from './types.js';
+import type { CanvasStore } from '../storage/canvas-store.js';
+import type { PreprocessNodeRequest } from '@sediment/shared';
 
 /** Dependencies injected into the pipeline runner. */
 export interface PipelineDeps {

@@ -5,9 +5,10 @@
  * capabilities and watched fields.
  */
 
-import type { CanvasNodeKind, NodePreprocessProfile } from '@sediment/shared';
+import type { NodePreprocessProfile } from './types.js';
+import type { CanvasNodeType } from '@sediment/shared';
 
-export const profiles: Record<CanvasNodeKind, NodePreprocessProfile> = {
+export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
   note: {
     nodeType: 'note',
     contentKind: 'note',
@@ -112,7 +113,7 @@ export const profiles: Record<CanvasNodeKind, NodePreprocessProfile> = {
  * Returns undefined for unknown node types.
  */
 export function getProfile(
-  nodeType: CanvasNodeKind,
+  nodeType: CanvasNodeType,
 ): NodePreprocessProfile | undefined {
   return profiles[nodeType];
 }

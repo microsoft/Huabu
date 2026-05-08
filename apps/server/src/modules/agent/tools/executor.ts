@@ -12,7 +12,7 @@ import { getCanvasStore } from '../../storage/index.js';
 import type {
   AgentMode,
   BlockProvenanceMap,
-  CanvasNodeKind,
+  CanvasNodeType,
   NodeOrigin,
 } from '@sediment/shared';
 
@@ -423,7 +423,7 @@ async function executeIngestContent(args: {
   const result = await dispatcher.preprocess({
     canvasId: args.canvasId,
     nodeId: args.nodeId,
-    nodeType: type as CanvasNodeKind,
+    nodeType: type as CanvasNodeType,
     trigger: 'manual',
     snapshot: {
       title: data?.label as string | undefined,

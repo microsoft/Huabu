@@ -20,7 +20,7 @@ import { getWorkspacePath } from '../workspace.js';
 
 import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
 import type {
-  CanvasNodeKind,
+  CanvasNodeType,
   ImportCanvasResponse,
   PreprocessNodeRequest,
   PreprocessNodeResponse,
@@ -353,7 +353,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       const ppRequest: PreprocessNodeRequest = {
         canvasId,
         nodeId,
-        nodeType: nodeType as CanvasNodeKind,
+        nodeType: nodeType as CanvasNodeType,
         trigger: (trigger ?? 'node_updated') as TriggerReason,
         snapshot,
         options: {

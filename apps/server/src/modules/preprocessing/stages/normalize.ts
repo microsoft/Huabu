@@ -13,8 +13,8 @@ import type {
   ResolvedInput,
   ExtractResult,
   NormalizeResult,
+  NodeContentKind,
 } from '../types.js';
-import type { NodeContentKind } from '@sediment/shared';
 
 export function normalize(
   resolved: ResolvedInput,
