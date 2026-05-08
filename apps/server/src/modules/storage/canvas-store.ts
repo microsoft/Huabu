@@ -45,7 +45,7 @@ import {
   prefsPath,
 } from './paths.js';
 
-import type { Context } from '@mariozechner/pi-ai';
+import type { Context } from '@earendil-works/pi-ai';
 import type { IntentEpisode } from '@sediment/shared';
 
 // ─── Local types ────────────────────────────────────────────────────────────

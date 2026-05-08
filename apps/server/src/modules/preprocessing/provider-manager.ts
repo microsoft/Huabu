@@ -19,7 +19,7 @@ import {
 import { llmComplete } from '../agent/llm.js';
 import { resolveArtifactImageUrl } from '../artifact/utils.js';
 
-import type { Context } from '@mariozechner/pi-ai';
+import type { Context } from '@earendil-works/pi-ai';
 
 export class ProviderManager {
   /**

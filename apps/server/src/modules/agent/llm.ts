@@ -22,7 +22,7 @@ import {
   getModel,
   getModels,
   getProviders,
-} from '@mariozechner/pi-ai';
+} from '@earendil-works/pi-ai';
 
 import {
   getCopilotApiKey,
@@ -36,7 +36,7 @@ import type {
   KnownProvider,
   Model,
   ProviderStreamOptions,
-} from '@mariozechner/pi-ai';
+} from '@earendil-works/pi-ai';
 import type {
   LLMConfig,
   LLMConfigUpdate,

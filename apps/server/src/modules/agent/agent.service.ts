@@ -9,7 +9,7 @@
  * Replaces LangGraph's StateGraph, checkpointer, and BaseAgent entirely.
  */
 
-import { validateToolCall } from '@mariozechner/pi-ai';
+import { validateToolCall } from '@earendil-works/pi-ai';
 
 import { llmStream } from './llm.js';
 import { chatTools, operateTools, executeTool } from './tools/index.js';
@@ -19,7 +19,7 @@ import type {
   Tool,
   AssistantMessage,
   ToolCall,
-} from '@mariozechner/pi-ai';
+} from '@earendil-works/pi-ai';
 import type { AgentMode, AgentStreamEvent } from '@sediment/shared';
 
 /**

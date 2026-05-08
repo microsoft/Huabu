@@ -5,7 +5,7 @@
  * Each tool is a pi-ai Tool with a TypeBox schema for validation.
  */
 
-import { Type } from '@mariozechner/pi-ai';
+import { Type } from '@earendil-works/pi-ai';
 import {
   ACCENT_PALETTE,
   AGENT_CREATABLE_NODE_TYPES,
@@ -20,7 +20,7 @@ import {
   SURFACE_PALETTE,
 } from '@sediment/shared';
 
-import type { Tool } from '@mariozechner/pi-ai';
+import type { Tool } from '@earendil-works/pi-ai';
 
 /**
  * Build a TypeBox literal-string union from an `as const` array. Used to

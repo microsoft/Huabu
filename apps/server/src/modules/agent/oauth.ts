@@ -2,7 +2,7 @@
  * GitHub Copilot OAuth — thin wrapper around pi-ai's OAuth implementation.
  *
  * Delegates the device code flow, token refresh, and model modification
- * to @mariozechner/pi-ai/oauth. Credentials are persisted to
+ * to @earendil-works/pi-ai/oauth. Credentials are persisted to
  * data/oauth-credentials.json.
  */
 
@@ -19,10 +19,10 @@ import {
   getOAuthApiKey,
   getOAuthProvider,
   loginGitHubCopilot,
-} from '@mariozechner/pi-ai/oauth';
+} from '@earendil-works/pi-ai/oauth';
 
-import type { OAuthCredentials } from '@mariozechner/pi-ai';
-import type { Api, Model } from '@mariozechner/pi-ai';
+import type { OAuthCredentials } from '@earendil-works/pi-ai';
+import type { Api, Model } from '@earendil-works/pi-ai';
 
 // ==================== Persisted Credentials ====================
 

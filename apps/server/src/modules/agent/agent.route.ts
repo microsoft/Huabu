@@ -29,7 +29,7 @@ import { buildNodeSummaries } from '../agent/tools/executor.js';
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getCanvasStore } from '../storage/index.js';
 
-import type { AssistantMessage, Context } from '@mariozechner/pi-ai';
+import type { AssistantMessage, Context } from '@earendil-works/pi-ai';
 import type {
   AgentCanvasIdQuery,
   AgentMode,

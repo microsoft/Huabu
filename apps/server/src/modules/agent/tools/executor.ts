@@ -15,7 +15,7 @@ import type {
   ingestContentParamsSchema,
   webSearchParamsSchema,
 } from './definitions.js';
-import type { Static } from '@mariozechner/pi-ai';
+import type { Static } from '@earendil-works/pi-ai';
 import type {
   BlockProvenanceMap,
   NodeOrigin,
