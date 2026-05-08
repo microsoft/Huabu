@@ -1,3 +1,4 @@
+import { ACCENT_PALETTE } from '@sediment/shared';
 import { useStore, useViewport } from '@xyflow/react';
 import {
   AlignStartVertical,
@@ -12,7 +13,6 @@ import { useMemo } from 'react';
 import { createPortal } from 'react-dom';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
-import { COLOR_PALETTE } from '@/config/colors';
 import {
   getAbsolutePosition,
   type NestableNode,
@@ -23,13 +23,13 @@ import type { ColorPreset } from '@/components/Common/ColorPicker';
 import type { CanvasNode } from '@/components/Nodes/types';
 import type { CanvasNodeId } from '@sediment/shared';
 
-/** Sentinel value representing "no accent". */
-const ACCENT_NONE = 'transparent';
+/** Sentinel token representing "no accent". */
+const ACCENT_NONE = 'none';
 
-/** Accent palette: the shared color palette with a leading "None" entry. */
-const ACCENT_PALETTE: ColorPreset[] = [
-  { name: 'None', value: ACCENT_NONE },
-  ...COLOR_PALETTE,
+/** Accent palette options for the picker: shared palette with a leading "None" entry. */
+const ACCENT_PICKER_OPTIONS: ColorPreset[] = [
+  { token: ACCENT_NONE, name: 'None', value: 'transparent' },
+  ...ACCENT_PALETTE,
 ];
 
 /**
@@ -177,10 +177,10 @@ export const MultiSelectToolbar = () => {
 
         {/* Accent color for all selected nodes */}
         <FloatingToolbar.ColorPicker
-          colors={ACCENT_PALETTE}
+          colors={ACCENT_PICKER_OPTIONS}
           value={commonAccent}
-          onSelect={(v) => {
-            const accent = v === ACCENT_NONE ? null : v;
+          onSelect={(t) => {
+            const accent = t === ACCENT_NONE ? null : t;
             if (selectedNodes.length === 0) return;
 
             executeCommands([

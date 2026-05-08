@@ -177,11 +177,14 @@ function ToolbarSelect<T extends string = string>({
 
 interface ToolbarColorPickerProps {
   /** Palette of selectable colors. */
-  colors: ColorPreset[];
-  /** Currently selected value (matches ColorPreset.value). */
-  value: string;
-  /** Called when the user picks a color. */
-  onSelect: (value: string) => void;
+  colors: readonly ColorPreset[];
+  /**
+   * Currently selected token. Legacy hex strings (pre-token data) are also
+   * accepted and used directly as the trigger swatch's CSS color.
+   */
+  value: string | null | undefined;
+  /** Called with the picked token. */
+  onSelect: (token: string) => void;
   /** Tooltip label for the trigger button. */
   title?: string;
   /**
@@ -220,10 +223,15 @@ function ToolbarColorPicker({
     return () => document.removeEventListener('mousedown', handler);
   }, [isOpen]);
 
+  // Resolve the token to a CSS color for the trigger swatch.
+  // Legacy hex / CSS keyword passes through unchanged.
+  const triggerColor =
+    colors.find((c) => c.token === value)?.value ?? value ?? 'transparent';
+
   const defaultTrigger = (
     <div
       className="border-edge-default h-3.5 w-3.5 rounded-full border"
-      style={{ backgroundColor: value }}
+      style={{ backgroundColor: triggerColor }}
     />
   );
 
@@ -258,9 +266,9 @@ function ToolbarColorPicker({
           >
             <ColorPicker
               colors={colors}
-              activeValue={value}
-              onSelect={(v) => {
-                onSelect(v);
+              activeToken={value}
+              onSelect={(t) => {
+                onSelect(t);
                 setIsOpen(false);
               }}
             />

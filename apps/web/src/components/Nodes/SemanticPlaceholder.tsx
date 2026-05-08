@@ -1,3 +1,5 @@
+import { resolveAccent } from '@sediment/shared';
+
 import { cn } from '@/components/Common/cn';
 import { NODE_TYPE_LABEL } from '@/config/nodeIcons';
 import { useClusterFontSize } from '@/hooks/useClusterFontSize';
@@ -48,7 +50,8 @@ export function SemanticPlaceholder({
 
   const label = insertSoftBreaks(rawLabel);
 
-  const accent = data.style?.accent;
+  // Stored value is a palette token (or legacy hex); resolve to CSS color.
+  const accent = resolveAccent(data.style?.accent);
   const accentTokens = accent ? getAccentTokens(accent) : null;
 
   const fontSize = useClusterFontSize(nodeId, label, width, height);

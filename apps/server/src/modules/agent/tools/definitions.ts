@@ -7,9 +7,9 @@
 
 import { Type } from '@mariozechner/pi-ai';
 import {
-  COLOR_PALETTE,
+  ACCENT_PALETTE,
   EDGE_STROKE_WIDTHS,
-  NODE_BG_COLORS,
+  SURFACE_PALETTE,
 } from '@sediment/shared';
 
 import type { Tool } from '@mariozechner/pi-ai';
@@ -101,10 +101,15 @@ const NodeTypeSchema = Type.Union([
 
 // ---- Shared color / width schemas (used by both node and edge styles) ----
 
+// Palette colors are referenced by stable tokens (e.g. "purple"), not raw
+// hex values. Tokens map to a current hex via @sediment/shared/ACCENT_PALETTE
+// at render time, so re-skinning the app does not require migrating every
+// stored canvas. The description embeds the current token ↔ hex map so the
+// LLM can pick by visual appearance without us spelling out hex anywhere else.
 const PaletteColorSchema = Type.Union(
-  COLOR_PALETTE.map((c) => Type.Literal(c.value)),
+  ACCENT_PALETTE.map((c) => Type.Literal(c.token)),
   {
-    description: `Color hex. Allowed: ${COLOR_PALETTE.map((c) => `"${c.value}" (${c.name})`).join(', ')}`,
+    description: `Palette color token. Tokens map to: ${ACCENT_PALETTE.map((c) => `"${c.token}"=${c.value} (${c.name})`).join(', ')}`,
   },
 );
 
@@ -118,9 +123,9 @@ const StrokeWidthSchema = Type.Union(
 // ---- Node style schemas ----
 
 const NodeBgColorSchema = Type.Union(
-  NODE_BG_COLORS.map((c) => Type.Literal(c.value)),
+  SURFACE_PALETTE.map((c) => Type.Literal(c.token)),
   {
-    description: `Background color (hex / keyword). Allowed: ${NODE_BG_COLORS.map((c) => `"${c.value}" (${c.name})`).join(', ')}`,
+    description: `Node background color token. Tokens map to: ${SURFACE_PALETTE.map((c) => `"${c.token}"=${c.value} (${c.name})`).join(', ')}`,
   },
 );
 
@@ -147,10 +152,10 @@ const NodeStyleSchema = Type.Object(
     textColor: Type.Optional(PaletteColorSchema),
     accent: Type.Optional(
       Type.Union(
-        [...COLOR_PALETTE.map((c) => Type.Literal(c.value)), Type.Null()],
+        [...ACCENT_PALETTE.map((c) => Type.Literal(c.token)), Type.Null()],
         {
           description:
-            'Accent color shown as a colored shadow on the bottom-right. Use a palette hex value, or null to remove. Shared palette with edge stroke colors.',
+            'Accent color token shown as a colored shadow on the bottom-right. Use a palette token (e.g. "purple") or null to remove. Shared palette with edge stroke and text color.',
         },
       ),
     ),

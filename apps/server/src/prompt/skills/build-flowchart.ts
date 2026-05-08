@@ -18,18 +18,13 @@ Horizontal: header at x=0 (text node, w=250, bold), main nodes at x=300,750,1200
 Sizes: header w=250, main w=400, sub w=350. Always set skipAutoLayout:true + explicit position.
 
 ## Color per track
-Assign one accent color to all nodes in a track:
-Purple #A08FC0 | Blue #5F8F9B | Red #D07C74 | Orange #D89A5B | Green #7FB38A
+Pick **one palette token** per track and apply it to every node's data.style.accent in that track.
+Use distinct tokens across tracks for visual separation; reserve "grey" for de-emphasized / neutral tracks.
+Allowed tokens are enumerated in the CREATE_NODES schema (data.style.accent) — no hex needed.
 
 ## Edges
-Keep edges minimal — use spatial position (proximity, alignment) to imply relationships. Only connect nodes where the relationship isn't obvious from layout or very important.
-Edge style options (all optional):
-- lineType: bezier|straight|step
-- lineStyle: solid|dashed|dotted
-- stroke: palette hex (same colors as before)
-- strokeWidth: 1-4 px
-- animated: true|false
-- direction: forward|backward|both|none (controls arrow markers)
+Keep edges minimal — use spatial position (proximity, alignment) to imply relationships. Only connect nodes where the relationship isn't obvious from layout or is semantically important.
+All edge styling fields (lineType, lineStyle, stroke, strokeWidth, animated, direction) are optional and fully described by the CONNECT_NODES.edges[].style schema — pick values from the schema's enums.
 
 ## Cleanup
 ALIGN_NODES "center-v" per row. DISTRIBUTE_NODES per row for even spacing.

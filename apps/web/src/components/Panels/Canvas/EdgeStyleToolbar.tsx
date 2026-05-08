@@ -1,9 +1,8 @@
-import { EDGE_STROKE_WIDTHS } from '@sediment/shared';
+import { ACCENT_PALETTE, EDGE_STROKE_WIDTHS } from '@sediment/shared';
 import { useStore, useViewport } from '@xyflow/react';
 import { useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 
-import { COLOR_PALETTE } from '@/config/colors';
 import { DEFAULT_EDGE_STROKE_WIDTH } from '@/handler/canvasCommand/utils/edge';
 import useCanvasStore from '@/store/canvasStore';
 
@@ -243,7 +242,7 @@ export const EdgeStyleToolbar = () => {
 
   const currentLineType: EdgeLineType = style.lineType ?? 'bezier';
   const currentLineStyle: EdgeLineStyle = style.lineStyle ?? 'solid';
-  const currentStroke = style.stroke ?? COLOR_PALETTE[0].value;
+  const currentStroke = style.stroke ?? ACCENT_PALETTE[0].token;
   const currentWidth = style.strokeWidth ?? DEFAULT_EDGE_STROKE_WIDTH;
   const currentDirection: EdgeDirection = style.direction ?? 'none';
 
@@ -301,9 +300,9 @@ export const EdgeStyleToolbar = () => {
 
         {/* Color picker */}
         <FloatingToolbar.ColorPicker
-          colors={COLOR_PALETTE}
+          colors={ACCENT_PALETTE}
           value={currentStroke}
-          onSelect={(v) => setStyle({ stroke: v })}
+          onSelect={(t) => setStyle({ stroke: t })}
           title="Edge color"
         />
       </FloatingToolbar>

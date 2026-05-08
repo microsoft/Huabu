@@ -1,37 +1,43 @@
 import { clsx } from 'clsx';
 
+/**
+ * One selectable entry in a `ColorPicker`.
+ * - `token`: stable identifier persisted to canvas data.
+ * - `name`:  display label shown as a tooltip.
+ * - `value`: CSS color used to render the swatch (hex / keyword / `var(...)`).
+ */
 export interface ColorPreset {
+  token: string;
   name: string;
-  /** Visual representation — a hex value or CSS color keyword. */
   value: string;
 }
 
 export interface ColorPickerProps {
-  colors: ColorPreset[];
-  /** Currently selected value (matches ColorPreset.value). */
-  activeValue: string;
-  onSelect: (value: string) => void;
+  colors: readonly ColorPreset[];
+  /** Currently selected token (matches `ColorPreset.token`). */
+  activeToken: string | null | undefined;
+  /** Called with the picked token. */
+  onSelect: (token: string) => void;
 }
 
 /**
  * Reusable color picker palette — a row of circular swatches.
- * All color values are hex strings or CSS color keywords rendered via
- * inline `backgroundColor`.
+ * Identity is by `token`; the swatch background uses `value` for display only.
  */
 export const ColorPicker = ({
   colors,
-  activeValue,
+  activeToken,
   onSelect,
 }: ColorPickerProps) => {
   return (
     <div className="flex gap-2">
       {colors.map((c) => (
         <button
-          key={c.name}
-          onClick={() => onSelect(c.value)}
+          key={c.token}
+          onClick={() => onSelect(c.token)}
           className={clsx(
             'h-4 w-4 rounded-full border-2 transition-all hover:scale-110',
-            activeValue === c.value
+            activeToken === c.token
               ? 'border-info scale-110'
               : 'border-edge-default',
           )}

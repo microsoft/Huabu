@@ -1,6 +1,6 @@
 import { Download, Plus, Trash2, Upload } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 
 import {
   listCanvases,
@@ -18,7 +18,7 @@ import { toast } from '../components/Common/Toast';
 import { Tooltip } from '../components/Common/Tooltip';
 import { Header } from '../components/Panels/Header/Header';
 import { APP_NAME } from '../config/app';
-import { useWorkspaceStore } from '../store/workspaceStore';
+import { useWorkspaceLabel, useWorkspaceStore } from '../store/workspaceStore';
 
 import type { CanvasSummary } from '@sediment/shared';
 
@@ -41,6 +41,10 @@ export default function CanvasListPage() {
   const confirmDeleteButtonRef = useRef<HTMLButtonElement>(null);
   const navigate = useNavigate();
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
+  const workspaceLabel = useWorkspaceLabel();
+  const canChangeWorkspace = useWorkspaceStore(
+    (s) => s.capabilities?.canChangeWorkspace ?? true,
+  );
 
   const fetchCanvases = useCallback(async () => {
     try {
@@ -218,20 +222,38 @@ export default function CanvasListPage() {
         <h1 className="text-fg-default pl-1 text-lg font-semibold">
           {APP_NAME}
         </h1>
-        {workspacePath && (
+        {workspaceLabel && (
           <Tooltip
             content={
               <div className="text-center">
-                <div>Path: {workspacePath}</div>
+                <div>
+                  {workspacePath
+                    ? `Path: ${workspacePath}`
+                    : `Workspace: ${workspaceLabel}`}
+                </div>
                 <div>
                   {canvases.length} canvas{canvases.length !== 1 ? 'es' : ''}
                 </div>
+                {canChangeWorkspace && (
+                  <div className="text-fg-subtle mt-1">Click to switch</div>
+                )}
               </div>
             }
           >
-            <span className="text-fg-subtle hover:text-fg-default mt-0.5 ml-1 cursor-default truncate text-xs transition-colors">
-              Path: {workspacePath.split(/[\\/]/).filter(Boolean).pop()}
-            </span>
+            {canChangeWorkspace ? (
+              <Link
+                to="/setup"
+                className="text-fg-subtle hover:text-fg-default mt-0.5 ml-1 truncate text-xs transition-colors"
+              >
+                {workspacePath ? 'Path: ' : 'Workspace: '}
+                {workspaceLabel}
+              </Link>
+            ) : (
+              <span className="text-fg-subtle mt-0.5 ml-1 cursor-default truncate text-xs">
+                {workspacePath ? 'Path: ' : 'Workspace: '}
+                {workspaceLabel}
+              </span>
+            )}
           </Tooltip>
         )}
       </Header>

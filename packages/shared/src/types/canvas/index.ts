@@ -13,11 +13,24 @@
 
 // Color types
 export type {
-  PaletteColorValue,
-  StrokeColorValue,
-  NodeBgColorValue,
+  AccentEntry,
+  AccentToken,
+  AccentValue,
+  SurfaceEntry,
+  SurfaceToken,
+  SurfaceValue,
 } from './color.js';
-export { COLOR_PALETTE, STROKE_COLORS, NODE_BG_COLORS } from './color.js';
+export {
+  ACCENT_PALETTE,
+  SURFACE_PALETTE,
+  isAccentToken,
+  isSurfaceToken,
+  isHexColor,
+  resolveAccent,
+  resolveSurface,
+  accentName,
+  surfaceName,
+} from './color.js';
 
 // Node types
 export type {

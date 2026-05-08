@@ -96,7 +96,7 @@ export const LLMSettings: React.FC = () => {
   const isOAuth = selectedProvider?.authType === 'oauth';
 
   return (
-    <div className="border-edge-default mb-3 border-t pt-3">
+    <div className="mb-3">
       <label className="text-fg-muted mb-1.5 block text-xs font-medium">
         LLM Provider
       </label>
