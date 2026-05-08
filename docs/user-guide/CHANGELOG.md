@@ -21,6 +21,23 @@
 
 ---
 
+## 2026-05-08 · 跨画布复制粘贴含 artifact 节点
+
+**What Changed**
+
+- 在画布 A 选中一个 PDF / 图片 / 视频节点复制（Cmd+C），切到画布 B 粘贴（Cmd+V）：现在会真的把 artifact 文件本身复制一份到 B 的 `artifacts/` 目录下，并给 B 分配一个新的 artifact id。新节点的 `data.src` 自动改写成指向 B 的 URL，不再「借用」A 的文件。
+- 同一画布内复制粘贴的行为不变：两个节点共享同一个 artifact 文件，避免无意义的磁盘副本。
+- PDF 节点的 `coverUrl`（封面图）也会一起跨画布克隆。
+- 新后端接口 `POST /api/canvas/<dst>/artifact/clone-from`，body `{ srcCanvasId, srcKey }`，返回新 artifact 的 `{ id, uri, filename, displayName, mimetype }`。
+
+**Notes**
+
+- 克隆走的是字节复制，所以源文件如果之后被删，目标画布不受影响。
+- 如果源 artifact 已经不存在（比如源画布被删了），克隆请求会 404；前端会保留原 URL 并 console.warn，节点会显示 "File missing" 占位。
+- 同名 artifact 在目标画布中通过 `<新 displayName> (2).ext` 自动去重。
+
+---
+
 ## 2026-05-08 · 文件系统外部改动的兜底机制
 
 **What Changed**

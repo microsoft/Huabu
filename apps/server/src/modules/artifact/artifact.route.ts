@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { createId } from '@sediment/shared';
@@ -102,6 +103,85 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
       }
     },
   );
+
+  /**
+   * Copy an artifact from one canvas into another.
+   *
+   * Used by the cross-canvas copy/paste flow: when a user pastes a node
+   * carrying a `data.src` (or `data.coverUrl`) URL that points at a
+   * different canvas's artifact, the frontend asks us to clone the
+   * underlying file so the destination canvas owns its own copy.
+   *
+   * The destination receives a freshly-allocated artifact id; the source
+   * remains untouched. The response shape mirrors the upload route so
+   * callers can swap in the new `uri` directly.
+   */
+  fastify.post<{
+    Params: { canvasId: string };
+    Body: {
+      srcCanvasId?: string;
+      srcKey?: string;
+      displayName?: string;
+    };
+  }>('/:canvasId/artifact/clone-from', async (request, reply) => {
+    const { canvasId: dstCanvasId } = request.params;
+    const {
+      srcCanvasId,
+      srcKey,
+      displayName: requestedDisplayName,
+    } = request.body ?? {};
+
+    if (!srcCanvasId || !srcKey) {
+      return reply
+        .code(400)
+        .send({ error: 'srcCanvasId and srcKey are required' });
+    }
+
+    const srcStore = getCanvasStore(srcCanvasId);
+    const srcRecord = srcStore.resolveArtifactByKey(srcKey);
+    const srcPath = srcStore.resolveArtifactFilePath(srcKey);
+    if (!srcRecord || !srcPath) {
+      return reply.code(404).send({ error: 'Source artifact not found' });
+    }
+
+    let buffer: Buffer;
+    try {
+      buffer = await readFile(srcPath);
+    } catch (err) {
+      request.log.error({ err }, 'Failed to read source artifact for clone');
+      return reply.code(500).send({ error: 'Failed to read source artifact' });
+    }
+
+    const dstStore = getCanvasStore(dstCanvasId);
+    const id = createId('artifact');
+    const displayName =
+      (requestedDisplayName ?? srcRecord.displayName)?.trim() || id;
+
+    let record;
+    try {
+      record = await dstStore.writeArtifactBuffer(
+        {
+          id,
+          displayName,
+          source: srcRecord.displayNameSource ?? 'original',
+          ext: srcRecord.ext,
+          mimeType: srcRecord.mimeType,
+        },
+        buffer,
+      );
+    } catch (err) {
+      request.log.error({ err }, 'Failed to clone artifact');
+      return reply.code(500).send({ error: 'Failed to save cloned artifact' });
+    }
+
+    return {
+      id,
+      uri: artifactApiPath(dstCanvasId, `${id}${record.ext}`),
+      filename: record.displayName + record.ext,
+      displayName: record.displayName,
+      mimetype: record.mimeType,
+    };
+  });
 };
 
 export default artifactRoute;

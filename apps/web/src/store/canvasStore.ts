@@ -56,6 +56,7 @@ import {
 
 import { canvasHistoryManager } from './canvasHistoryManager';
 import { getCanvas, preprocessNode, putCanvas } from '../api';
+import { cloneArtifactToCanvas, parseArtifactUrl } from '../api/artifact';
 import { CanvasConflictError } from '../api/canvas';
 import { getNodeSize } from '../utils/node/size';
 
@@ -1376,11 +1377,73 @@ const useCanvasStore = create<RFState>()(
     },
 
     pasteNodes: (flowPosition, clipboardNodes) => {
-      get().dispatchUiIntent({
-        type: 'PASTE_CLIPBOARD',
-        flowPosition,
-        clipboardNodes,
+      const dstCanvasId = get().canvasId;
+      if (!dstCanvasId || clipboardNodes.length === 0) return;
+
+      // Fields on `data` that may carry a canvas-scoped artifact URL.
+      // Same-canvas pastes leave the URL as-is (the artifact is already
+      // owned by this canvas). Cross-canvas pastes clone the underlying
+      // file so the destination canvas owns its own copy — otherwise
+      // deleting the source canvas would orphan the pasted node.
+      const ARTIFACT_FIELDS = ['src', 'coverUrl'] as const;
+
+      const needsClone = clipboardNodes.some((node) => {
+        const data = (node.data ?? {}) as Record<string, unknown>;
+        return ARTIFACT_FIELDS.some((field) => {
+          const value = data[field];
+          if (typeof value !== 'string') return false;
+          const parsed = parseArtifactUrl(value);
+          return parsed !== null && parsed.canvasId !== dstCanvasId;
+        });
       });
+
+      const dispatch = (nodes: Node[]) => {
+        get().dispatchUiIntent({
+          type: 'PASTE_CLIPBOARD',
+          flowPosition,
+          clipboardNodes: nodes,
+        });
+      };
+
+      // Fast path: nothing to clone — preserve the prior synchronous
+      // behaviour so simple intra-canvas pastes feel instant.
+      if (!needsClone) {
+        dispatch(clipboardNodes);
+        return;
+      }
+
+      void (async () => {
+        const remapped = await Promise.all(
+          clipboardNodes.map(async (node) => {
+            const data = { ...((node.data ?? {}) as Record<string, unknown>) };
+            let mutated = false;
+            for (const field of ARTIFACT_FIELDS) {
+              const value = data[field];
+              if (typeof value !== 'string') continue;
+              const parsed = parseArtifactUrl(value);
+              if (!parsed || parsed.canvasId === dstCanvasId) continue;
+              try {
+                const newUrl = await cloneArtifactToCanvas(value, dstCanvasId);
+                if (newUrl && newUrl !== value) {
+                  data[field] = newUrl;
+                  mutated = true;
+                }
+              } catch (err) {
+                // Best effort — fall back to the original URL. The new
+                // node will render with the missing-file placeholder
+                // (artifactMissing flag from the server) so the user can
+                // still remove it.
+                console.warn(
+                  '[paste] Failed to clone artifact for cross-canvas paste',
+                  err,
+                );
+              }
+            }
+            return mutated ? { ...node, data } : node;
+          }),
+        );
+        dispatch(remapped);
+      })();
     },
 
     canUndo: false,
