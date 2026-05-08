@@ -88,7 +88,11 @@ function toMessage(error: unknown): string {
  * surfaces as a 409.
  */
 type PersistResult =
-  | { kind: 'ok'; nodes: NodeLike[] }
+  | {
+      kind: 'ok';
+      nodes: NodeLike[];
+      renamed: Array<{ nodeId: string; label: string }>;
+    }
   | {
       kind: 'conflict';
       nodeId: string;
@@ -101,6 +105,7 @@ function persistAndStripNodes(
   nodes: NodeLike[],
 ): PersistResult {
   const out: NodeLike[] = [];
+  const renamed: Array<{ nodeId: string; label: string }> = [];
   for (const node of nodes) {
     const data = node.data ?? {};
     const nodeId = typeof node.id === 'string' ? node.id : '';
@@ -154,12 +159,18 @@ function persistAndStripNodes(
           content,
         };
         try {
-          // Strict rename when the user (or agent) intentionally chose
-          // this label. Auto labels keep the existing auto-dedupe path
-          // so AI-suggested titles never block a save.
+          // Strict rename only when the *user* intentionally typed this
+          // label — those go through the `tryRename` flow, which surfaces
+          // collisions as a window.alert and reverts the input.
+          //
+          // Agent-sourced labels are auto-deduped instead. AI runs in a
+          // batched, fire-and-forget loop and has no way to react to a
+          // 409, so refusing the save would silently drop the AI's
+          // changes (and every subsequent autosave too). Auto-dedup keeps
+          // the canvas saveable; we sync the bumped name back to
+          // `data.label` below so the canvas display stays unique.
           const labelSource = data['labelSource'];
-          const strictRename =
-            labelSource === 'user' || labelSource === 'agent';
+          const strictRename = labelSource === 'user';
           const result = store.writeNode(nodeId, nodeContent, {
             strictRename,
           });
@@ -170,6 +181,19 @@ function persistAndStripNodes(
               label: title ?? '',
               conflictWith: result.conflictWith.filename,
             };
+          }
+          // When the on-disk filename was bumped (e.g. `Foo (2).md`),
+          // mirror the bumped stem back into the node's display label so
+          // sibling labels stay unique on the canvas. Only do this for
+          // text-bearing nodes that actually persist a markdown title;
+          // frame nodes (no markdown) are dedup'd at the canvas-state
+          // level by other code paths.
+          if (result.ok && title) {
+            const stem = result.filename.replace(/\.md$/, '');
+            if (stem !== title) {
+              data['label'] = stem;
+              renamed.push({ nodeId, label: stem });
+            }
           }
           hasPersistedTitle = !!title;
         } catch {
@@ -199,7 +223,7 @@ function persistAndStripNodes(
     if (!keepLabel) delete cleanData['label'];
     out.push({ ...node, data: cleanData });
   }
-  return { kind: 'ok', nodes: out };
+  return { kind: 'ok', nodes: out, renamed };
 }
 
 /**
@@ -542,6 +566,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     return reply.send({
       canvasId,
       version: nextVersion,
+      ...(persistResult.renamed.length > 0
+        ? { renamedNodes: persistResult.renamed }
+        : {}),
     });
   });
 

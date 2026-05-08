@@ -26,6 +26,16 @@ export type PutCanvasRequest = z.infer<typeof putCanvasBodySchema>;
 export interface PutCanvasResponse {
   canvasId: string;
   version: number;
+  /**
+   * Nodes whose `label` was changed by the server during persist (typically
+   * because an agent-sourced label collided with a sibling and was
+   * auto-deduped to a unique name like `Foo (2)`). The client should patch
+   * its in-memory state with these to keep the canvas display in sync with
+   * what was persisted.
+   *
+   * Empty / omitted when no labels were rewritten.
+   */
+  renamedNodes?: Array<{ nodeId: string; label: string }>;
 }
 
 export interface DeleteNodeResponse {

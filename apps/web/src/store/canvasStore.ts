@@ -798,6 +798,26 @@ const useCanvasStore = create<RFState>()(
           state: { nodes, edges },
         });
         set({ version: response.version });
+
+        // The server may have auto-deduped one or more node labels (typically
+        // when an agent-sourced label collided with a sibling and was bumped
+        // to `Foo (2)`). Patch those into our in-memory state so the canvas
+        // display matches what was persisted, without waiting for a reload.
+        if (response.renamedNodes && response.renamedNodes.length > 0) {
+          const renames = new Map(
+            response.renamedNodes.map((r) => [r.nodeId, r.label]),
+          );
+          set({
+            nodes: get().nodes.map((n) => {
+              const next = renames.get(n.id);
+              if (next === undefined) return n;
+              return {
+                ...n,
+                data: { ...(n.data ?? {}), label: next },
+              };
+            }),
+          });
+        }
       } catch (error) {
         if (error instanceof CanvasConflictError) {
           // Surface conflict to caller (e.g. tryRename) so it can revert
