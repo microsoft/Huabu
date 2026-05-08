@@ -21,6 +21,26 @@
 
 ---
 
+## 2026-05-08 · 文件名改用语义化命名 + 重命名重名校验
+
+**What Changed**
+
+- 工作区目录、节点 markdown 文件、artifact 文件名都改成「用 label / 标题 / 文件名」直接做文件名，不再使用 ID。canvas 目录从 `<workspace>/<canvasId>/` 改成 `<workspace>/<canvas 标题>/`；节点文件从 `nodes/<nodeId>.md` 改成 `nodes/<节点 label>.md`，节点 frontmatter 新增 `id:` 字段保留稳定标识；artifact 文件从 `<artifactId>.<ext>` 改成 `<上传时的文件名>.<ext>`，多了一个 `artifacts.json` manifest 记录 id ↔ displayName 映射。
+- artifact 命名优先级：用户改名 > AI 改名 > 上传原文件名 > 兜底 ID。AI 不会覆盖用户改过的名字。
+- 重命名 canvas / 节点时如果会和同级别的同名项冲突（大小写不敏感、Unicode 归一化），后端返回 409，前端弹一个浏览器 alert，名字会自动恢复成原值。
+- artifact URL 仍然是 `/api/canvas/<canvasId>/artifact/<artifactId>.<ext>`，不会因为改名而失效。
+- 老的工作区第一次打开时会自动跑一次幂等的迁移脚本，把目录和文件名换成新的语义化名字，并把 artifact 写进 manifest。
+
+**Notes**
+
+- macOS / Windows 文件系统大小写处理不一致，所以重名比对一律走「全小写 + NFC 归一化」。Windows 保留名（`CON`、`PRN` 等）会被自动加 `_` 后缀。
+- 文件名长度上限 120 字符；超长名字会被截断。原始 `displayName` 完整保留在 manifest 里，前端 UI 看到的仍然是完整名字。
+- 节点 markdown 文件遇到重名时（在前端通过 alert 拦截之外的边界情况），后端会自动追加 `(2)`、`(3)` 之类的后缀。Frame 类型节点没有 label 时，文件名仍然回退到 ID。
+- 取消编辑可以按 ESC 或者点开输入框外面：canvas 标题输入按 Enter 提交，按 ESC 还原；节点 label 双击进入编辑，按 Enter 提交，按 ESC 还原。
+- 已发布给 LLM 或聊天附件的 artifact URL 不会因为后续改名而失效，因为后端通过 manifest 把 URL 里的 `<id>.ext` 反查回当前真实文件路径。
+
+---
+
 ## 2026-05-07 · 自动补齐：缺 label 的节点加载时自动触发 preprocessing
 
 **What Changed**
