@@ -255,8 +255,6 @@ async function buildUserContent(
       }
     }
   }
-
-  console.log('[!!!] Built user content parts:', parts);
   return parts;
 }
 

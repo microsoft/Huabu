@@ -39,61 +39,67 @@ const literalUnion = <T extends readonly string[]>(
 
 // ==================== Web Search ====================
 
+export const webSearchParamsSchema = Type.Object({
+  query: Type.String({ description: 'The search query keywords' }),
+  max_results: Type.Optional(
+    Type.Number({
+      description: 'Maximum number of results (1-10). Default: 5.',
+      minimum: 1,
+      maximum: 10,
+    }),
+  ),
+  search_depth: Type.Optional(
+    Type.Union([Type.Literal('basic'), Type.Literal('advanced')], {
+      description: "Search depth. Default: 'basic'.",
+    }),
+  ),
+  include_answer: Type.Optional(
+    Type.Boolean({
+      description: 'Whether to include Tavily answer summary. Default: true.',
+    }),
+  ),
+});
+
 export const webSearchTool: Tool = {
   name: 'web_search',
   description:
     'Search the internet for up-to-date facts, documentation, or news using Tavily.',
-  parameters: Type.Object({
-    query: Type.String({ description: 'The search query keywords' }),
-    max_results: Type.Optional(
-      Type.Number({
-        description: 'Maximum number of results (1-10). Default: 5.',
-        minimum: 1,
-        maximum: 10,
-      }),
-    ),
-    search_depth: Type.Optional(
-      Type.Union([Type.Literal('basic'), Type.Literal('advanced')], {
-        description: "Search depth. Default: 'basic'.",
-      }),
-    ),
-    include_answer: Type.Optional(
-      Type.Boolean({
-        description: 'Whether to include Tavily answer summary. Default: true.',
-      }),
-    ),
-  }),
+  parameters: webSearchParamsSchema,
 };
 
 // ==================== Canvas Read-Only Tools ====================
+
+export const getNodeDetailParamsSchema = Type.Object({
+  nodeId: Type.String({ description: 'The ID of the canvas node to read' }),
+  canvasId: Type.Optional(
+    Type.String({
+      description:
+        'Optional canvas ID override. When omitted, the current request canvas is used.',
+    }),
+  ),
+});
 
 export const getNodeDetailTool: Tool = {
   name: 'get_node_detail',
   description:
     'Get the full content and metadata of a specific canvas node by its ID.',
-  parameters: Type.Object({
-    nodeId: Type.String({ description: 'The ID of the canvas node to read' }),
-    canvasId: Type.Optional(
-      Type.String({
-        description:
-          'Optional canvas ID override. When omitted, the current request canvas is used.',
-      }),
-    ),
-  }),
+  parameters: getNodeDetailParamsSchema,
 };
+
+export const getCanvasStateParamsSchema = Type.Object({
+  canvasId: Type.Optional(
+    Type.String({
+      description:
+        'Optional canvas ID override. When omitted, the current request canvas is used.',
+    }),
+  ),
+});
 
 export const getCanvasStateTool: Tool = {
   name: 'get_canvas_state',
   description:
     'Get a summary of the current canvas state including all nodes, edges, and frames.',
-  parameters: Type.Object({
-    canvasId: Type.Optional(
-      Type.String({
-        description:
-          'Optional canvas ID override. When omitted, the current request canvas is used.',
-      }),
-    ),
-  }),
+  parameters: getCanvasStateParamsSchema,
 };
 
 // ==================== Canvas Commands ====================
@@ -378,6 +384,18 @@ const AgentCanvasCommandSchema = Type.Union([
 // or excluded" lives next to that array in `command.ts`, so we don't need
 // a duplicate guard here.
 
+export const canvasCommandsParamsSchema = Type.Object({
+  canvasId: Type.Optional(
+    Type.String({
+      description:
+        'Optional canvas ID override. When omitted, the current request canvas is used.',
+    }),
+  ),
+  commands: Type.Array(AgentCanvasCommandSchema, {
+    description: 'Array of canvas commands to execute as a batch',
+  }),
+});
+
 export const canvasCommandsTool: Tool = {
   name: 'canvas_commands',
   description: `Execute a batch of canvas commands atomically. All commands in a single call are applied as one undo step.
@@ -409,50 +427,44 @@ export const canvasCommandsTool: Tool = {
 
 Group into frame: CREATE_NODES (frame) + SET_NODE_PARENT (children → frame)
 Create and connect: CREATE_NODES (multiple nodes with explicit ids) + CONNECT_NODES (edges referencing those ids)`,
-  parameters: Type.Object({
-    canvasId: Type.Optional(
-      Type.String({
-        description:
-          'Optional canvas ID override. When omitted, the current request canvas is used.',
-      }),
-    ),
-    commands: Type.Array(AgentCanvasCommandSchema, {
-      description: 'Array of canvas commands to execute as a batch',
-    }),
-  }),
+  parameters: canvasCommandsParamsSchema,
 };
 
 // ==================== Content Ingestion Tools ====================
+
+export const ingestContentParamsSchema = Type.Object({
+  canvasId: Type.Optional(
+    Type.String({
+      description:
+        'Optional canvas ID override. When omitted, the current request canvas is used.',
+    }),
+  ),
+  nodeId: Type.String({
+    description: 'The node ID to trigger ingestion for',
+  }),
+});
 
 export const ingestContentTool: Tool = {
   name: 'ingest_content',
   description:
     'Trigger content ingestion for a canvas node, loading its web/PDF content into the per-canvas content store.',
-  parameters: Type.Object({
-    canvasId: Type.Optional(
-      Type.String({
-        description:
-          'Optional canvas ID override. When omitted, the current request canvas is used.',
-      }),
-    ),
-    nodeId: Type.String({
-      description: 'The node ID to trigger ingestion for',
-    }),
-  }),
+  parameters: ingestContentParamsSchema,
 };
 
 // ==================== Skill Tool ====================
+
+export const useSkillParamsSchema = Type.Object({
+  skillId: Type.String({
+    description:
+      'The skill ID to load. See the skill catalogue in the system prompt for available IDs.',
+  }),
+});
 
 export const useSkillTool: Tool = {
   name: 'use_skill',
   description:
     'Load detailed guidance for a specific skill before executing complex canvas operations. Call this when you need step-by-step guidance for tasks like building flowcharts, creating structured layouts, synthesizing nodes, etc. The skill content will be returned as the tool result.',
-  parameters: Type.Object({
-    skillId: Type.String({
-      description:
-        'The skill ID to load. See the skill catalogue in the system prompt for available IDs.',
-    }),
-  }),
+  parameters: useSkillParamsSchema,
 };
 
 // ==================== Tool Sets by Mode ====================

@@ -10,10 +10,51 @@ import { getPreprocessDispatcher } from '../../preprocessing/index.js';
 import { getCanvasStore } from '../../storage/index.js';
 
 import type {
+  getCanvasStateParamsSchema,
+  getNodeDetailParamsSchema,
+  ingestContentParamsSchema,
+  webSearchParamsSchema,
+} from './definitions.js';
+import type { Static } from '@mariozechner/pi-ai';
+import type {
   BlockProvenanceMap,
   NodeOrigin,
   PreprocessableNodeType,
 } from '@sediment/shared';
+
+// ==================== Tool Argument Types ====================
+//
+// Derived from the same TypeBox schemas we register with the LLM, so a
+// schema change automatically reshapes the executor signature. `canvasId`
+// is `Optional` in the schemas (the agent may omit it and let the server
+// fall back to the request canvas), but every executor branch only runs
+// after `resolveCanvasArgs` below has guaranteed a non-empty value, so we
+// intersect a required `canvasId` to skip a redundant nullish check.
+
+type WebSearchArgs = Static<typeof webSearchParamsSchema>;
+type GetNodeDetailArgs = Static<typeof getNodeDetailParamsSchema> & {
+  canvasId: string;
+};
+type GetCanvasStateArgs = Static<typeof getCanvasStateParamsSchema> & {
+  canvasId: string;
+};
+type IngestContentArgs = Static<typeof ingestContentParamsSchema> & {
+  canvasId: string;
+};
+
+/**
+ * Args type for `executeCanvasCommands`. Intentionally kept loose
+ * (`commands: Array<Record<string, unknown>>`) instead of being derived
+ * from `canvasCommandsParamsSchema` because the body walks each command
+ * with runtime `cmd.type === '...'` narrowing and augments shapes the
+ * schema does not describe (injected `origin`, `provenance`,
+ * `labelSource`). The schema still validates LLM input upstream via
+ * `validateToolCall` — the looseness here is only on the executor side.
+ */
+type CanvasCommandsArgs = {
+  canvasId: string;
+  commands: Array<Record<string, unknown>>;
+};
 
 // ==================== Origin Helper ====================
 
@@ -32,12 +73,7 @@ function buildAIProvenance(): BlockProvenanceMap {
 
 // ==================== Web Search ====================
 
-async function executeWebSearch(args: {
-  query: string;
-  max_results?: number;
-  search_depth?: 'basic' | 'advanced';
-  include_answer?: boolean;
-}): Promise<string> {
+async function executeWebSearch(args: WebSearchArgs): Promise<string> {
   const apiKey = process.env.TAVILY_API_KEY;
   if (!apiKey) {
     return JSON.stringify({
@@ -221,10 +257,7 @@ export async function buildNodeSummaries(
   return { nodes: nodeSummaries, edges, version: canvas.version };
 }
 
-async function executeGetNodeDetail(args: {
-  nodeId: string;
-  canvasId: string;
-}): Promise<string> {
+async function executeGetNodeDetail(args: GetNodeDetailArgs): Promise<string> {
   const store = getCanvasStore(args.canvasId);
   const canvas = store.read();
   if (!canvas) {
@@ -272,9 +305,9 @@ async function executeGetNodeDetail(args: {
   });
 }
 
-async function executeGetCanvasState(args: {
-  canvasId: string;
-}): Promise<string> {
+async function executeGetCanvasState(
+  args: GetCanvasStateArgs,
+): Promise<string> {
   const result = await buildNodeSummaries(args.canvasId);
   if (!result) {
     return JSON.stringify({ error: `Canvas ${args.canvasId} not found` });
@@ -292,10 +325,9 @@ async function executeGetCanvasState(args: {
 
 // ==================== Canvas Commands ====================
 
-async function executeCanvasCommands(args: {
-  canvasId: string;
-  commands: Array<Record<string, unknown>>;
-}): Promise<string> {
+async function executeCanvasCommands(
+  args: CanvasCommandsArgs,
+): Promise<string> {
   const origin = AI_OPERATE_ORIGIN;
 
   // Read canvas state once so we can resolve node types for provenance injection.
@@ -393,10 +425,7 @@ async function executeCanvasCommands(args: {
 
 // ==================== Content Ingestion Operations ====================
 
-async function executeIngestContent(args: {
-  canvasId: string;
-  nodeId: string;
-}): Promise<string> {
+async function executeIngestContent(args: IngestContentArgs): Promise<string> {
   const canvas = getCanvasStore(args.canvasId).read();
   if (!canvas) {
     return JSON.stringify({ error: `Canvas ${args.canvasId} not found` });
@@ -474,7 +503,7 @@ export async function executeTool(
 
   switch (name) {
     case 'web_search':
-      return executeWebSearch(args as Parameters<typeof executeWebSearch>[0]);
+      return executeWebSearch(args as WebSearchArgs);
     case 'get_node_detail': {
       const resolvedArgs = resolveCanvasArgs(args);
       if (!resolvedArgs) {
@@ -482,9 +511,7 @@ export async function executeTool(
           error: 'canvasId is required for get_node_detail',
         });
       }
-      return executeGetNodeDetail(
-        resolvedArgs as Parameters<typeof executeGetNodeDetail>[0],
-      );
+      return executeGetNodeDetail(resolvedArgs as GetNodeDetailArgs);
     }
     case 'get_canvas_state': {
       const resolvedArgs = resolveCanvasArgs(args);
@@ -493,9 +520,7 @@ export async function executeTool(
           error: 'canvasId is required for get_canvas_state',
         });
       }
-      return executeGetCanvasState(
-        resolvedArgs as Parameters<typeof executeGetCanvasState>[0],
-      );
+      return executeGetCanvasState(resolvedArgs as GetCanvasStateArgs);
     }
     case 'canvas_commands': {
       const resolvedArgs = resolveCanvasArgs(args);
@@ -506,9 +531,7 @@ export async function executeTool(
           error: 'canvasId is required for canvas_commands',
         });
       }
-      return executeCanvasCommands(
-        resolvedArgs as Parameters<typeof executeCanvasCommands>[0],
-      );
+      return executeCanvasCommands(resolvedArgs as CanvasCommandsArgs);
     }
     case 'ingest_content': {
       const resolvedArgs = resolveCanvasArgs(args);
@@ -517,9 +540,7 @@ export async function executeTool(
           error: 'canvasId is required for ingest_content',
         });
       }
-      return executeIngestContent(
-        resolvedArgs as Parameters<typeof executeIngestContent>[0],
-      );
+      return executeIngestContent(resolvedArgs as IngestContentArgs);
     }
     case 'use_skill': {
       const skillId =

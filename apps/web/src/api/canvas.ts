@@ -3,6 +3,7 @@ import { routes } from './_routes';
 
 import type {
   ApiErrorBody,
+  DeleteCanvasResponse,
   GetCanvasResponse,
   PutCanvasRequest,
   PutCanvasResponse,
@@ -132,8 +133,8 @@ export async function importCanvas(file: File): Promise<ImportCanvasResponse> {
  */
 export async function deleteCanvasById(
   canvasId: string,
-): Promise<{ success: boolean }> {
-  return apiFetch<{ success: boolean }>(routes.canvas(canvasId), {
+): Promise<DeleteCanvasResponse> {
+  return apiFetch<DeleteCanvasResponse>(routes.canvas(canvasId), {
     method: 'DELETE',
     fallbackMessage: 'Failed to delete canvas',
   });
