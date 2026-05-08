@@ -24,12 +24,12 @@ function isLocalhost(ip: string): boolean {
 
 const llmRoutes: FastifyPluginAsync = async (app) => {
   // GET /api/llm/config — return current provider/model config
-  app.get('/llm/config', async () => {
+  app.get('/config', async () => {
     return getLLMConfig();
   });
 
   // PUT /api/llm/config — update provider/model config
-  app.put('/llm/config', async (request, reply) => {
+  app.put('/config', async (request, reply) => {
     if (!isLocalhost(request.ip)) {
       return reply.status(403).send({
         message: 'Forbidden: LLM settings can only be changed from localhost',
@@ -55,12 +55,12 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
   });
 
   // GET /api/llm/providers — list available providers
-  app.get('/llm/providers', async () => {
+  app.get('/providers', async () => {
     return { providers: getAvailableProviders() };
   });
 
   // GET /api/llm/models — list available models for a provider
-  app.get('/llm/models', async (request, reply) => {
+  app.get('/models', async (request, reply) => {
     const schema = z.object({
       provider: z.string().min(1, 'Provider query param is required'),
     });
@@ -79,7 +79,7 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
   // ── OAuth (GitHub Copilot) ──
 
   // POST /api/llm/oauth/device-code — start device code flow
-  app.post('/llm/oauth/device-code', async (request, reply) => {
+  app.post('/oauth/device-code', async (request, reply) => {
     if (!isLocalhost(request.ip)) {
       return reply.status(403).send({ message: 'Forbidden' });
     }
@@ -95,7 +95,7 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
   });
 
   // POST /api/llm/oauth/poll — poll for authorization result
-  app.post('/llm/oauth/poll', async (request, reply) => {
+  app.post('/oauth/poll', async (request, reply) => {
     if (!isLocalhost(request.ip)) {
       return reply.status(403).send({ message: 'Forbidden' });
     }
@@ -112,7 +112,7 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
   });
 
   // GET /api/llm/oauth/status — check if OAuth credentials exist
-  app.get('/llm/oauth/status', async (request, reply) => {
+  app.get('/oauth/status', async (request, reply) => {
     const schema = z.object({
       provider: z.string().min(1),
     });
@@ -125,7 +125,7 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
   });
 
   // POST /api/llm/oauth/logout — clear OAuth credentials
-  app.post('/llm/oauth/logout', async (request, reply) => {
+  app.post('/oauth/logout', async (request, reply) => {
     if (!isLocalhost(request.ip)) {
       return reply.status(403).send({ message: 'Forbidden' });
     }

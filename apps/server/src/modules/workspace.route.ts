@@ -15,6 +15,7 @@ import {
   setWorkspacePath,
 } from './workspace.js';
 
+import type { WorkspaceInfo } from '@sediment/shared';
 import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 
 /**
@@ -117,12 +118,12 @@ function sendError(
 }
 
 /** Build the canonical success payload describing the current workspace. */
-function buildWorkspaceState() {
+function buildWorkspaceState(): { ok: true } & WorkspaceInfo {
   const managed = isManagedMode();
   const configured = isWorkspaceConfigured();
   return {
-    ok: true as const,
-    mode: managed ? ('managed' as const) : ('free' as const),
+    ok: true,
+    mode: managed ? 'managed' : 'free',
     configured,
     // Free-mode active absolute path. Never exposed in managed mode.
     path: configured && !managed ? getWorkspacePath() : null,
@@ -140,14 +141,14 @@ const workspaceRoutes: FastifyPluginAsync = async (app) => {
   // GET /api/workspace — read-only state + capabilities
   // Always available (clients need to know the mode).
   // ────────────────────────────────────────────────────────────────
-  app.get('/workspace', async () => buildWorkspaceState());
+  app.get('/', async () => buildWorkspaceState());
 
   // ────────────────────────────────────────────────────────────────
   // The endpoints below mutate the active workspace and only exist
   // in free mode. Managed mode rejects them with 403.
   // ────────────────────────────────────────────────────────────────
 
-  app.post('/workspace/pick-folder', async (request, reply) => {
+  app.post('/pick-folder', async (request, reply) => {
     if (isManagedMode()) {
       return sendError(reply, 403, 'Workspace is locked');
     }
@@ -169,7 +170,7 @@ const workspaceRoutes: FastifyPluginAsync = async (app) => {
     return reply.send({ ok: true, path: selected });
   });
 
-  app.post('/workspace/validate-path', async (request, reply) => {
+  app.post('/validate-path', async (request, reply) => {
     if (isManagedMode()) {
       return sendError(reply, 403, 'Workspace is locked');
     }
@@ -191,7 +192,7 @@ const workspaceRoutes: FastifyPluginAsync = async (app) => {
     return reply.send({ ok: true, path: parsed.data.path, exists: pathExists });
   });
 
-  app.put('/workspace', async (request, reply) => {
+  app.put('/', async (request, reply) => {
     if (isManagedMode()) {
       return sendError(
         reply,

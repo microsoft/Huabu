@@ -1,0 +1,57 @@
+/**
+ * Workspace API wire types.
+ *
+ * The workspace endpoints describe the server's storage mode and let the
+ * client (in free mode) point the server at an absolute path. These types
+ * are the single source of truth for both `apps/server/src/modules/workspace.route.ts`
+ * and `apps/web/src/api/workspace.ts`.
+ */
+
+export type WorkspaceMode = 'free' | 'managed';
+
+export interface WorkspaceCapabilities {
+  /** Whether the user is allowed to change workspace at runtime. */
+  canChangeWorkspace: boolean;
+  /** Whether the server can show a native folder picker. */
+  nativePicker: boolean;
+}
+
+export interface WorkspaceInfo {
+  mode: WorkspaceMode;
+  configured: boolean;
+  /** Free-mode active absolute path. Always null in managed mode. */
+  path: string | null;
+  /** Display label (basename of the active path), or null. */
+  name: string | null;
+  capabilities: WorkspaceCapabilities;
+}
+
+/**
+ * Result of `POST /api/workspace/pick-folder`.
+ *
+ * Returns a discriminated result rather than throwing for the two
+ * "expected non-success" cases:
+ *   - `{ ok: false, reason: 'cancelled' }` — user dismissed the dialog
+ *   - `{ ok: false, reason: 'no-picker' }` — server is headless; the
+ *     caller should fall back to a text-input UI.
+ */
+export type PickFolderResult =
+  | { ok: true; path: string }
+  | { ok: false; reason: 'cancelled' | 'no-picker' };
+
+/** Body for `PUT /api/workspace`. */
+export interface WorkspacePathRequest {
+  path: string;
+}
+
+/** Body for `POST /api/workspace/validate-path`. */
+export interface ValidatePathRequest {
+  path: string;
+}
+
+/** Response for `POST /api/workspace/validate-path`. */
+export interface ValidatePathResponse {
+  ok: true;
+  path: string;
+  exists: boolean;
+}

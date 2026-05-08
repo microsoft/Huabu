@@ -77,5 +77,5 @@ app.register(webRoutes, { prefix: '/api/web' });
 app.register(artifactRoute, { prefix: '/api/canvas' });
 
 app.register(intentRoutes, { prefix: '/api/intent' });
-app.register(llmRoutes, { prefix: '/api' });
-app.register(workspaceRoutes, { prefix: '/api' });
+app.register(llmRoutes, { prefix: '/api/llm' });
+app.register(workspaceRoutes, { prefix: '/api/workspace' });

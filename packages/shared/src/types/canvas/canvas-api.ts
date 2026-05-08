@@ -25,9 +25,16 @@ export interface DeleteNodeResponse {
   success: boolean;
 }
 
+/**
+ * 409 Conflict body returned by `PUT /api/canvas/:canvasId` when the
+ * client's version doesn't match the server's. Shaped like an
+ * `ApiErrorBody` so the canonical client (`apiFetch`) surfaces it as a
+ * normal `ApiError` and the caller can read `details.serverVersion`.
+ */
 export interface CanvasVersionMismatchError {
   message: string;
-  serverVersion: number;
+  code: 'CANVAS_VERSION_MISMATCH';
+  details: { serverVersion: number };
 }
 
 export interface UpdateCanvasStateParams {

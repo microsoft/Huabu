@@ -1,11 +1,13 @@
 /**
  * Unified Agent API Client
  *
- * Communicates with the new unified /api/agent endpoint that handles
- * all modes (chat, agent) with pi-ai streaming.
+ * Communicates with the unified `/api/agent` endpoint that handles all
+ * modes (chat, agent) with pi-ai streaming.
  */
 
-import { API_CONFIG } from '../config/api';
+import { ApiError, apiFetch, apiUrl } from './_client';
+import { routes } from './_routes';
+import { readSSEStream } from './_sse';
 
 import type {
   AgentMode,
@@ -14,32 +16,10 @@ import type {
   AgentBaseContext,
   ChatAttachment,
   ChatHistoryResponse,
+  ContextTokensResponse,
+  IntentCandidate,
+  StopThreadResponse,
 } from '@sediment/shared';
-
-// ==================== SSE Parser ====================
-
-function parseSSEChunk(
-  part: string,
-): { eventType: string; data: string } | null {
-  if (!part.trim()) return null;
-
-  const lines = part.split('\n');
-  let eventType = '';
-  const dataLines: string[] = [];
-
-  for (const line of lines) {
-    if (line.startsWith('event: ')) {
-      eventType = line.substring(7).trim();
-    } else if (line.startsWith('data: ')) {
-      dataLines.push(line.substring(6).trim());
-    }
-  }
-
-  const data = dataLines.join('\n');
-  if (!eventType || !data) return null;
-
-  return { eventType, data };
-}
 
 // ==================== Stream Callbacks ====================
 
@@ -52,6 +32,53 @@ export interface AgentStreamCallbacks {
   onComplete: () => void;
 }
 
+/**
+ * Drive `callbacks` from a streaming SSE Response. Centralised so
+ * `streamMessage` and `reconnectStream` share the same parsing rules.
+ *
+ * `event: end` and `event: error` terminate the stream and short-circuit
+ * the callbacks. The optional `meta` event is suppressed for reconnects
+ * (it carries thread-binding info, not user-visible content).
+ */
+async function pumpAgentStream(
+  response: Response,
+  callbacks: AgentStreamCallbacks,
+  signal?: AbortSignal,
+  options?: { suppressMeta?: boolean },
+): Promise<boolean> {
+  let terminated = false;
+
+  await readSSEStream<Record<string, unknown>>(
+    response,
+    (event) => {
+      if (terminated) return;
+      const { type, data } = event;
+
+      if (type === 'end') {
+        terminated = true;
+        callbacks.onComplete();
+        return;
+      }
+      if (type === 'error') {
+        terminated = true;
+        const message =
+          (data.error as string | undefined) ?? 'Unknown server error';
+        callbacks.onError(new Error(message));
+        return;
+      }
+      if (options?.suppressMeta && type === 'meta') return;
+
+      callbacks.onEvent({
+        type: type as AgentStreamEvent['type'],
+        data,
+      });
+    },
+    signal,
+  );
+
+  return terminated;
+}
+
 // ==================== API ====================
 
 export const agentApi = {
@@ -62,30 +89,31 @@ export const agentApi = {
     threadId: string,
     canvasId?: string,
   ): Promise<ChatHistoryResponse> => {
-    const params = canvasId ? `?canvasId=${encodeURIComponent(canvasId)}` : '';
-    const response = await fetch(
-      `${API_CONFIG.API_URL}/agent/history/${encodeURIComponent(threadId)}${params}`,
-    );
-
-    if (response.status === 404) {
-      throw new Error('Thread not found');
+    try {
+      return await apiFetch<ChatHistoryResponse>(
+        routes.agentHistory(threadId, canvasId),
+        { fallbackMessage: 'Failed to load history' },
+      );
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        throw new Error('Thread not found');
+      }
+      throw err;
     }
-
-    if (!response.ok) {
-      throw new Error(`Failed to load history: ${response.status}`);
-    }
-
-    return response.json() as Promise<ChatHistoryResponse>;
   },
 
   /**
    * Explicitly stop an active agent run on the server.
+   * Best-effort — swallow transport errors so the UI never blocks on stop.
    */
   stopThread: async (threadId: string): Promise<void> => {
-    await fetch(
-      `${API_CONFIG.API_URL}/agent/stop/${encodeURIComponent(threadId)}`,
-      { method: 'POST' },
-    );
+    try {
+      await apiFetch<StopThreadResponse>(routes.agentStop(threadId), {
+        method: 'POST',
+      });
+    } catch {
+      /* best-effort */
+    }
   },
 
   /**
@@ -98,54 +126,17 @@ export const agentApi = {
     signal?: AbortSignal,
   ): Promise<boolean> => {
     try {
-      const response = await fetch(
-        `${API_CONFIG.API_URL}/agent/stream/${encodeURIComponent(threadId)}`,
-        { signal },
-      );
+      const response = await fetch(apiUrl(routes.agentStream(threadId)), {
+        signal,
+      });
 
       if (response.status === 404) return false;
       if (!response.ok || !response.body) return false;
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split('\n\n');
-        buffer = parts.pop() || '';
-
-        for (const part of parts) {
-          const parsed = parseSSEChunk(part);
-          if (!parsed) continue;
-
-          const { eventType, data } = parsed;
-          try {
-            const eventData = JSON.parse(data) as Record<string, unknown>;
-            if (eventType === 'end') {
-              callbacks.onComplete();
-              return true;
-            } else if (eventType === 'error') {
-              callbacks.onError(
-                new Error((eventData.error as string) ?? 'Unknown error'),
-              );
-              return true;
-            } else if (eventType !== 'meta') {
-              callbacks.onEvent({
-                type: eventType as AgentStreamEvent['type'],
-                data: eventData,
-              });
-            }
-          } catch (e) {
-            console.error(`[agent] Failed to parse reconnect ${eventType}:`, e);
-          }
-        }
-      }
-
-      callbacks.onComplete();
+      const terminated = await pumpAgentStream(response, callbacks, signal, {
+        suppressMeta: true,
+      });
+      if (!terminated) callbacks.onComplete();
       return true;
     } catch {
       return false;
@@ -167,7 +158,7 @@ export const agentApi = {
       attachments?: ChatAttachment[];
       selectedNodeIds?: string[];
       intentData?: {
-        candidates: { label: string; description?: string }[];
+        candidates: IntentCandidate[];
         selectedIntent: string;
       };
       signal?: AbortSignal;
@@ -189,7 +180,7 @@ export const agentApi = {
     };
 
     try {
-      const response = await fetch(`${API_CONFIG.API_URL}/agent`, {
+      const response = await fetch(apiUrl(routes.agent), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -199,56 +190,16 @@ export const agentApi = {
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-
       if (!response.body) {
         throw new Error('Response body is null');
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-        buffer += chunk;
-
-        const parts = buffer.split('\n\n');
-        buffer = parts.pop() || '';
-
-        for (const part of parts) {
-          const parsed = parseSSEChunk(part);
-          if (!parsed) continue;
-
-          const { eventType, data } = parsed;
-
-          try {
-            const eventData = JSON.parse(data) as Record<string, unknown>;
-            const event: AgentStreamEvent = {
-              type: eventType as AgentStreamEvent['type'],
-              data: eventData,
-            };
-
-            if (eventType === 'end') {
-              callbacks.onComplete();
-              return;
-            } else if (eventType === 'error') {
-              const errorMsg =
-                (eventData.error as string) ?? 'Unknown server error';
-              callbacks.onError(new Error(errorMsg));
-              return;
-            } else {
-              callbacks.onEvent(event);
-            }
-          } catch (e) {
-            console.error(`[agent] Failed to parse ${eventType} event:`, e);
-          }
-        }
-      }
-
-      callbacks.onComplete();
+      const terminated = await pumpAgentStream(
+        response,
+        callbacks,
+        options?.signal,
+      );
+      if (!terminated) callbacks.onComplete();
     } catch (error) {
       // Treat any error while the signal is aborted as an intentional stop
       if (options?.signal?.aborted) {
@@ -269,18 +220,10 @@ export const agentApi = {
     threadId: string,
     canvasId?: string,
     signal?: AbortSignal,
-  ): Promise<{ contextTokens: number; contextWindow: number }> => {
-    const params = canvasId ? `?canvasId=${encodeURIComponent(canvasId)}` : '';
-    const response = await fetch(
-      `${API_CONFIG.API_URL}/agent/context-tokens/${encodeURIComponent(threadId)}${params}`,
-      { signal },
+  ): Promise<ContextTokensResponse> => {
+    return apiFetch<ContextTokensResponse>(
+      routes.agentContextTokens(threadId, canvasId),
+      { signal, fallbackMessage: 'Failed to fetch context tokens' },
     );
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    return response.json() as Promise<{
-      contextTokens: number;
-      contextWindow: number;
-    }>;
   },
 };

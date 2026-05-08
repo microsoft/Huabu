@@ -438,9 +438,13 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       const existing = store.read();
       const serverVersion = existing?.version ?? 0;
       if (clientVersion !== serverVersion) {
-        return reply
-          .code(409)
-          .send({ message: 'Canvas version mismatch', serverVersion });
+        // Surface the conflict via the canonical ApiErrorBody so the client
+        // can recover the authoritative version from `details.serverVersion`.
+        return reply.code(409).send({
+          message: 'Canvas version mismatch',
+          code: 'CANVAS_VERSION_MISMATCH',
+          details: { serverVersion },
+        });
       }
 
       const timestamp = nowMs();

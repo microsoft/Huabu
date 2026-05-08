@@ -31,7 +31,7 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       if (!canvasContext) {
         return reply
           .code(400)
-          .send({ error: 'canvasContext is required' } as never);
+          .send({ message: 'canvasContext is required' } as never);
       }
 
       const intentCandidates = await recognizeIntent(canvasContext);
@@ -48,7 +48,7 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       if (!canvasContext) {
         return reply
           .code(400)
-          .send({ error: 'canvasContext is required' } as never);
+          .send({ message: 'canvasContext is required' } as never);
       }
 
       reply.hijack();
@@ -93,13 +93,13 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       if (!screenshot) {
         return reply
           .code(400)
-          .send({ error: 'screenshot is required' } as never);
+          .send({ message: 'screenshot is required' } as never);
       }
 
       if (!clusterContext) {
         return reply
           .code(400)
-          .send({ error: 'clusterContext is required' } as never);
+          .send({ message: 'clusterContext is required' } as never);
       }
 
       try {
@@ -113,7 +113,7 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
         request.log.error(err, 'Annotation command recognition failed');
         return reply
           .code(500)
-          .send({ error: 'Annotation command recognition failed' } as never);
+          .send({ message: 'Annotation command recognition failed' } as never);
       }
     },
   );
@@ -123,7 +123,9 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     async (request, reply) => {
       const { episode, canvasId } = request.body;
       if (!episode?.id) {
-        return reply.code(400).send({ error: 'episode is required' } as never);
+        return reply
+          .code(400)
+          .send({ message: 'episode is required' } as never);
       }
       logIntentEpisode(episode, canvasId);
       return reply.send({ success: true });

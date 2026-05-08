@@ -1,27 +1,19 @@
 import { API_CONFIG } from '../config/api';
 
-export type WorkspaceMode = 'free' | 'managed';
+import type {
+  ApiErrorBody,
+  PickFolderResult,
+  WorkspaceInfo,
+  WorkspacePathRequest,
+} from '@sediment/shared';
 
-export interface WorkspaceCapabilities {
-  /** Whether the user is allowed to change workspace at runtime. */
-  canChangeWorkspace: boolean;
-  /** Whether the server can show a native folder picker. */
-  nativePicker: boolean;
-}
-
-export interface WorkspaceInfo {
-  mode: WorkspaceMode;
-  configured: boolean;
-  /** Free-mode active absolute path. Always null in managed mode. */
-  path: string | null;
-  /** Display label (basename of the active path), or null. */
-  name: string | null;
-  capabilities: WorkspaceCapabilities;
-}
-
-export type PickFolderResult =
-  | { ok: true; path: string }
-  | { ok: false; reason: 'cancelled' | 'no-picker' };
+// Re-export so call sites can keep importing the wire types from `../api/workspace`.
+export type {
+  PickFolderResult,
+  WorkspaceCapabilities,
+  WorkspaceInfo,
+  WorkspaceMode,
+} from '@sediment/shared';
 
 // ────────────────────────────────────────────────────────────────────
 // Wire-format types
@@ -33,19 +25,16 @@ export type PickFolderResult =
 // (or vice versa) still surface as a thrown error.
 // ────────────────────────────────────────────────────────────────────
 
-interface ApiError {
-  ok: false;
-  message: string;
-}
-
-type ApiResponse<T> = ({ ok: true } & T) | ApiError;
+type WorkspaceApiResponse<T> =
+  | ({ ok: true } & T)
+  | ({ ok: false } & ApiErrorBody);
 
 async function unwrap<T>(response: Response, fallback: string): Promise<T> {
   const body = (await response.json().catch(() => ({}))) as
-    | ApiResponse<T>
-    | Partial<ApiError>;
+    | WorkspaceApiResponse<T>
+    | Partial<ApiErrorBody>;
 
-  if (response.ok && (body as ApiResponse<T>).ok === true) {
+  if (response.ok && (body as WorkspaceApiResponse<T>).ok === true) {
     // Strip the discriminator so callers see a clean payload type.
     const { ok: _ok, ...payload } = body as { ok: true } & T;
     return payload as T;
@@ -70,10 +59,11 @@ export async function getWorkspaceInfo(): Promise<WorkspaceInfo> {
 export async function putWorkspacePath(
   newPath: string,
 ): Promise<WorkspaceInfo> {
+  const body: WorkspacePathRequest = { path: newPath };
   const response = await fetch(`${API_CONFIG.API_URL}/workspace`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path: newPath }),
+    body: JSON.stringify(body),
   });
   return unwrap<WorkspaceInfo>(
     response,
@@ -98,7 +88,9 @@ export async function pickFolder(): Promise<PickFolderResult> {
     method: 'POST',
   });
   if (!response.ok) {
-    const body = (await response.json().catch(() => ({}))) as Partial<ApiError>;
+    const body = (await response
+      .json()
+      .catch(() => ({}))) as Partial<ApiErrorBody>;
     throw new Error(
       body.message ?? `Failed to open folder picker: ${response.statusText}`,
     );

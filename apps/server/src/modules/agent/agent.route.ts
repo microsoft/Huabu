@@ -570,7 +570,7 @@ const agentRoutes: FastifyPluginAsync = async (
 
     if (!threadId || threadId.trim().length === 0) {
       return reply.code(400).send({
-        error: 'threadId is required',
+        message: 'threadId is required',
       } as unknown as ChatHistoryResponse);
     }
 
@@ -622,7 +622,7 @@ const agentRoutes: FastifyPluginAsync = async (
       // Completed runs have already been fully persisted via flushSave(),
       // so the history endpoint returns complete data — no need to replay.
       if (!run || run.completed) {
-        return reply.code(404).send({ error: 'No active run' });
+        return reply.code(404).send({ message: 'No active run' });
       }
 
       // SSE setup
@@ -672,7 +672,7 @@ const agentRoutes: FastifyPluginAsync = async (
     const CONTEXT_WINDOW = 128_000;
 
     if (!threadId || threadId.trim().length === 0) {
-      return reply.code(400).send({ error: 'threadId is required' });
+      return reply.code(400).send({ message: 'threadId is required' });
     }
 
     const context = loadContext(threadId, canvasId);

@@ -6,6 +6,8 @@ import { type FastifyPluginAsync } from 'fastify';
 import { artifactApiPath } from './utils.js';
 import { getCanvasStore } from '../storage/index.js';
 
+import type { ArtifactUploadResponse } from '@sediment/shared';
+
 /**
  * Canvas-scoped artifact route. Mount under `/api/canvas`.
  *
@@ -27,12 +29,12 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
       if (!typeExtMap[type]) {
         return reply
           .code(400)
-          .send({ error: 'Invalid type. Must be image, pdf, or video' });
+          .send({ message: 'Invalid type. Must be image, pdf, or video' });
       }
 
       const data = await request.file();
       if (!data) {
-        return reply.code(400).send({ error: 'No file provided' });
+        return reply.code(400).send({ message: 'No file provided' });
       }
 
       const store = getCanvasStore(canvasId);
@@ -45,7 +47,7 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
         await store.writeArtifactStream(filename, data.file);
       } catch (error) {
         request.log.error({ err: error }, 'Failed to stream artifact to disk');
-        return reply.code(500).send({ error: 'Failed to save file' });
+        return reply.code(500).send({ message: 'Failed to save file' });
       }
 
       return {
@@ -53,7 +55,7 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
         uri: artifactApiPath(canvasId, filename),
         filename: data.filename,
         mimetype: data.mimetype,
-      };
+      } satisfies ArtifactUploadResponse;
     },
   );
 
@@ -66,7 +68,7 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
       try {
         return reply.sendFile(filename, store.artifactsDir());
       } catch {
-        return reply.code(404).send({ error: 'Artifact not found' });
+        return reply.code(404).send({ message: 'Artifact not found' });
       }
     },
   );

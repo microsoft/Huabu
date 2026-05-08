@@ -86,11 +86,6 @@ export type ChatHistoryItem =
       role: 'intent-select';
       candidates: IntentCandidate[];
       selectedIntent: string;
-    }
-  | {
-      role: 'intent-select';
-      candidates: IntentCandidate[];
-      selectedIntent: string;
     };
 
 /** Response from GET /api/chat/history/:threadId */

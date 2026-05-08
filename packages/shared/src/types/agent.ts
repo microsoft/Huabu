@@ -71,17 +71,3 @@ export interface AgentStreamEvent {
     meta?: Record<string, unknown>;
   };
 }
-
-// ==================== History ====================
-
-export interface AgentHistoryItem {
-  role: 'user' | 'assistant' | 'tool';
-  content?: string;
-  toolName?: string;
-  toolResult?: string;
-}
-
-export interface AgentHistoryResponse {
-  threadId: string;
-  messages: AgentHistoryItem[];
-}
