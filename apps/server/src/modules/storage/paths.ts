@@ -7,24 +7,31 @@
  *
  * Layout under `<workspace>/`:
  *
- *   <canvasId>/
- *     canvas.json
- *     nodes/<nodeId>.md
+ *   <canvasDir>/                    ← name = sanitized canvas title
+ *     canvas.json                   (carries the stable canvasId)
+ *     nodes/<nodeFile>.md           ← name = sanitized node label
  *     artifacts/<filename>
  *     memory/preferences.md
  *     .history/
  *       chat/<threadId>.json
  *       intent.json
  *       events.json
+ *
+ * Stable identifiers (canvasId, nodeId) live inside the file payloads
+ * (canvas.json, frontmatter), never as filenames. The directory and
+ * file names are derived from user-facing labels via {@link
+ * ./canvas-dirs.ts} and the per-canvas node index.
  */
 
 import path from 'node:path';
 
+import { canvasDirName } from './canvas-dirs.js';
 import { sanitizeId } from './io.js';
 import { getWorkspacePath } from '../workspace.js';
 
 export function canvasRoot(canvasId: string): string {
-  return path.join(getWorkspacePath(), sanitizeId(canvasId, 'canvasId'));
+  const safeId = sanitizeId(canvasId, 'canvasId');
+  return path.join(getWorkspacePath(), canvasDirName(safeId));
 }
 
 export function canvasJsonPath(canvasId: string): string {
@@ -35,8 +42,17 @@ export function nodesDir(canvasId: string): string {
   return path.join(canvasRoot(canvasId), 'nodes');
 }
 
-export function nodeMdPath(canvasId: string, nodeId: string): string {
-  return path.join(nodesDir(canvasId), `${sanitizeId(nodeId, 'nodeId')}.md`);
+/**
+ * Resolve a node markdown filename to an absolute path. The `filename`
+ * argument is the user-facing label-derived name held in the per-canvas
+ * node index, e.g. `My Note.md`.
+ */
+export function nodeFilePath(canvasId: string, filename: string): string {
+  const base = path.basename(filename);
+  if (!base || base === '.' || base === '..') {
+    throw new Error(`Invalid node filename: "${filename}"`);
+  }
+  return path.join(nodesDir(canvasId), base);
 }
 
 export function artifactsDir(canvasId: string): string {

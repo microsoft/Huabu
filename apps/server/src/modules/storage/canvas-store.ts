@@ -20,6 +20,7 @@ import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
+import { unregisterCanvasDir } from './canvas-dirs.js';
 import { parseFrontmatter, toFrontmatter } from './frontmatter.js';
 import {
   appendJsonArray,
@@ -30,6 +31,8 @@ import {
   readText,
   sanitizeId,
 } from './io.js';
+import { NameIndex } from './name-index.js';
+import { toSafeFilename } from './naming.js';
 import {
   artifactPath,
   artifactsDir,
@@ -40,13 +43,20 @@ import {
   eventsPath,
   intentPath,
   memoryDir,
-  nodeMdPath,
+  nodeFilePath,
   nodesDir,
   prefsPath,
 } from './paths.js';
 
 import type { Context } from '@earendil-works/pi-ai';
 import type { IntentEpisode } from '@sediment/shared';
+
+interface NodeFileEntry {
+  /** Stable node id (carried in frontmatter `id:`). */
+  id: string;
+  /** Filename inside `<canvas>/nodes/`, e.g. `My Note.md`. */
+  filename: string;
+}
 
 // ─── Local types ────────────────────────────────────────────────────────────
 // These mirror what will land in `@sediment/shared` in PR 8. Keeping them
@@ -130,21 +140,23 @@ export interface UserPreferences {
 const LEGACY_FRONTMATTER_KEYS = ['content_hash', 'meta_json'] as const;
 
 function nodeContentToMarkdown(c: NodeContent): string {
-  // `nodeId` is encoded in the filename; `content` is the markdown body.
+  // `nodeId` is carried in frontmatter `id:` (NameIndex needs it to map
+  // labels back to stable ids); `content` is the markdown body.
   // Everything else lives in the frontmatter as native YAML.
-  const { nodeId: _nodeId, content, ...frontmatter } = c;
+  const { nodeId, content, ...rest } = c;
+  const frontmatter: Record<string, unknown> = { id: nodeId, ...rest };
   // Drop any legacy keys a caller may still be passing through; we never
   // want to reintroduce them once a workspace has been migrated.
   for (const key of LEGACY_FRONTMATTER_KEYS) {
-    delete (frontmatter as Record<string, unknown>)[key];
+    delete frontmatter[key];
   }
   // Drop nullish frontmatter entries so optional fields (e.g. `src` on
   // note/text/frame nodes) never serialize to `key: null`. Callers are
   // free to pass `undefined` to mean "omit".
   for (const key of Object.keys(frontmatter)) {
-    const v = (frontmatter as Record<string, unknown>)[key];
+    const v = frontmatter[key];
     if (v === null || v === undefined) {
-      delete (frontmatter as Record<string, unknown>)[key];
+      delete frontmatter[key];
     }
   }
   return `${toFrontmatter(frontmatter)}\n${content}`;
@@ -176,10 +188,27 @@ function markdownToNodeContent(nodeId: string, raw: string): NodeContent {
   return out;
 }
 
+/**
+ * Derive the on-disk filename for a node from its label.
+ *
+ * Frame nodes (and any other label-less / placeholder nodes) fall back
+ * to the stable node id so two different nodes never collide on a
+ * generated default name.
+ */
+function nodeFilenameFor(nodeId: string, label: string | null): string {
+  const stem = toSafeFilename(label, nodeId);
+  return `${stem}.md`;
+}
+
 // ─── CanvasStore ────────────────────────────────────────────────────────────
 
 export class CanvasStore {
   readonly canvasId: string;
+  /**
+   * Lazily-built `nodeId ↔ filename` index for `<canvas>/nodes/`. Read
+   * via {@link nodeIndex}; never accessed directly.
+   */
+  private nodes: NameIndex<NodeFileEntry> | null = null;
 
   constructor(canvasId: string) {
     this.canvasId = sanitizeId(canvasId, 'canvasId');
@@ -206,8 +235,57 @@ export class CanvasStore {
 
   // ── Node content ─────────────────────────────────────────────────────────
 
+  /**
+   * Build (or return) the per-canvas node index. The index is populated
+   * by scanning `nodes/*.md` and reading each frontmatter `id:` field;
+   * legacy files without an `id:` fall back to using the filename stem
+   * (which equals the legacy nodeId) so reads keep working until the
+   * one-shot migration rewrites them.
+   */
+  private nodeIndex(): NameIndex<NodeFileEntry> {
+    if (this.nodes) return this.nodes;
+    const idx = new NameIndex<NodeFileEntry>();
+    const dir = nodesDir(this.canvasId);
+    if (existsSync(dir)) {
+      for (const file of readdirSync(dir)) {
+        if (!file.endsWith('.md')) continue;
+        const raw = readText(path.join(dir, file));
+        if (raw == null) continue;
+        const { meta } = parseFrontmatter(raw);
+        const id =
+          typeof meta['id'] === 'string' && meta['id'].length > 0
+            ? meta['id']
+            : file.replace(/\.md$/, '');
+        const result = idx.add({ id, filename: file });
+        if (!result.ok) {
+          // Two files claim the same logical id — keep the first
+          // (deterministic) and ignore the rest. PR3 migration will
+          // de-dupe these.
+          continue;
+        }
+      }
+    }
+    this.nodes = idx;
+    return idx;
+  }
+
+  /** Drop the cached node index; next access re-scans the directory. */
+  invalidateNodeIndex(): void {
+    this.nodes = null;
+  }
+
+  /**
+   * Resolve a node id to its on-disk filename. Falls back to the legacy
+   * `<nodeId>.md` shape so callers do not 404 before migration.
+   */
+  private nodeFilenameOf(nodeId: string): string {
+    const entry = this.nodeIndex().get(nodeId);
+    return entry?.filename ?? `${sanitizeId(nodeId, 'nodeId')}.md`;
+  }
+
   readNode(nodeId: string): NodeContent | null {
-    const raw = readText(nodeMdPath(this.canvasId, nodeId));
+    const filename = this.nodeFilenameOf(nodeId);
+    const raw = readText(nodeFilePath(this.canvasId, filename));
     if (raw == null) return null;
     return markdownToNodeContent(nodeId, raw);
   }
@@ -219,17 +297,53 @@ export class CanvasStore {
       );
     }
     mkdirp(nodesDir(this.canvasId));
+
+    const idx = this.nodeIndex();
+    const existing = idx.get(nodeId);
+    const desired = nodeFilenameFor(nodeId, content.title);
+
+    // Decide the final on-disk filename. PR2 keeps the existing slot
+    // when the desired name collides with someone else (auto-dedupe);
+    // PR4 layers strict 409 conflict reporting on top.
+    let target = existing?.filename ?? desired;
+    if (!existing || existing.filename !== desired) {
+      const conflict = idx.findByName(desired);
+      if (!conflict || conflict.id === nodeId) {
+        target = desired;
+      } else {
+        target = idx.suggestUnique(desired, true, nodeId);
+      }
+    }
+
+    if (existing && existing.filename !== target) {
+      // Renamed on disk: drop the stale file before writing the new one.
+      try {
+        unlinkSync(nodeFilePath(this.canvasId, existing.filename));
+      } catch {
+        // best effort; the index update below still keeps things consistent
+      }
+      idx.rename(nodeId, target);
+    } else if (!existing) {
+      idx.add({ id: nodeId, filename: target });
+    }
+
     atomicWriteText(
-      nodeMdPath(this.canvasId, nodeId),
+      nodeFilePath(this.canvasId, target),
       nodeContentToMarkdown(content),
     );
   }
 
   deleteNode(nodeId: string): boolean {
-    const filePath = nodeMdPath(this.canvasId, nodeId);
-    if (!existsSync(filePath)) return false;
+    const idx = this.nodeIndex();
+    const filename = idx.get(nodeId)?.filename ?? this.nodeFilenameOf(nodeId);
+    const filePath = nodeFilePath(this.canvasId, filename);
+    if (!existsSync(filePath)) {
+      idx.remove(nodeId);
+      return false;
+    }
     try {
       unlinkSync(filePath);
+      idx.remove(nodeId);
       return true;
     } catch {
       return false;
@@ -240,14 +354,12 @@ export class CanvasStore {
     const dir = nodesDir(this.canvasId);
     if (!existsSync(dir)) return [];
     const out: NodeContentSummary[] = [];
-    for (const file of readdirSync(dir)) {
-      if (!file.endsWith('.md')) continue;
-      const nodeId = file.replace(/\.md$/, '');
-      const raw = readText(path.join(dir, file));
+    for (const entry of this.nodeIndex().list()) {
+      const raw = readText(path.join(dir, entry.filename));
       if (raw == null) continue;
       const { meta } = parseFrontmatter(raw);
       out.push({
-        nodeId,
+        nodeId: entry.id,
         type: typeof meta['type'] === 'string' ? meta['type'] : 'note',
         title: typeof meta['title'] === 'string' ? meta['title'] : null,
       });
@@ -392,8 +504,14 @@ export class CanvasStore {
   /** Recursively delete the entire canvas directory. */
   destroy(): boolean {
     const root = canvasRoot(this.canvasId);
-    if (!existsSync(root)) return false;
+    if (!existsSync(root)) {
+      unregisterCanvasDir(this.canvasId);
+      this.invalidateNodeIndex();
+      return false;
+    }
     rmSync(root, { recursive: true, force: true });
+    unregisterCanvasDir(this.canvasId);
+    this.invalidateNodeIndex();
     return true;
   }
 }
