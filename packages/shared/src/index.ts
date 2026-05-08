@@ -6,6 +6,7 @@ export * from './types/context.js';
 export * from './types/intent.js';
 export * from './types/llm.js';
 export * from './types/preprocessing.js';
+export * from './types/tools.js';
 
 export * from './types/web.js';
 export * from './types/workspace.js';
