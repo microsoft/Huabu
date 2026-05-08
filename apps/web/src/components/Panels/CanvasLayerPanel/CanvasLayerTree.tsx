@@ -34,7 +34,7 @@ interface SortableRowProps {
   getIcon: (nodeType: string | undefined) => React.ReactNode;
   getDisplayName: (node: DataSourceNodeLike) => string;
   onSelect: (id: string, event: React.MouseEvent) => void;
-  onRename: (id: string, newName: string) => void;
+  onRename: (id: string, newName: string) => Promise<boolean>;
   onToggleCollapse: (id: string) => void;
   onToggleLock: (id: string) => void;
 }
@@ -112,7 +112,7 @@ export const CanvasLayerTree = ({
   const nodes = useCanvasStore((state) => state.nodes);
   const selectNodes = useCanvasStore((state) => state.selectNodes);
   const reorderNodes = useCanvasStore((state) => state.reorderNodes);
-  const updateNodeData = useCanvasStore((state) => state.updateNodeData);
+  const tryRename = useCanvasStore((state) => state.tryRename);
   const rfInstance = useCanvasStore((state) => state.rfInstance);
   const moveNodeIntoFrame = useCanvasStore((state) => state.moveNodeIntoFrame);
   const moveNodeOutOfFrame = useCanvasStore(
@@ -302,7 +302,7 @@ export const CanvasLayerTree = ({
   };
 
   const handleRename = (id: string, newName: string) => {
-    updateNodeData(id, { label: newName, labelSource: 'user' });
+    return tryRename('node', id, newName);
   };
 
   const handleToggleCollapse = (id: string) => {

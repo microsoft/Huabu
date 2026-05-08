@@ -14,7 +14,7 @@ import { toast } from '../../Common/Toast.tsx';
  */
 export const CanvasMenu: React.FC = () => {
   const canvasTitle = useCanvasStore((s) => s.canvasTitle);
-  const setCanvasTitle = useCanvasStore((s) => s.setCanvasTitle);
+  const tryRename = useCanvasStore((s) => s.tryRename);
   const canvasId = useCanvasStore((s) => s.canvasId);
   const undo = useCanvasStore((s) => s.undo);
   const redo = useCanvasStore((s) => s.redo);
@@ -22,16 +22,35 @@ export const CanvasMenu: React.FC = () => {
   const canRedo = useCanvasStore((s) => s.canRedo);
 
   const [isOpen, setIsOpen] = useState(false);
+  // Local draft of the title shown in the input. We only commit to the
+  // store via `tryRename` on blur / Enter, so a rejected name (collision)
+  // can be reverted without ever flowing through autosave.
+  const [draftTitle, setDraftTitle] = useState(canvasTitle);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const sizerRef = useRef<HTMLSpanElement>(null);
+
+  // Sync the local draft whenever the store title changes (e.g. on canvas
+  // switch, undo, or a rejected rename revert).
+  useEffect(() => {
+    setDraftTitle(canvasTitle);
+  }, [canvasTitle]);
 
   // Keep input width in sync with its content
   useEffect(() => {
     if (sizerRef.current && inputRef.current) {
       inputRef.current.style.width = `${sizerRef.current.offsetWidth}px`;
     }
-  }, [canvasTitle]);
+  }, [draftTitle]);
+
+  const commitTitle = useCallback(async () => {
+    const accepted = await tryRename('canvas', canvasId, draftTitle);
+    if (!accepted) {
+      // Restore the input to whatever the store currently holds — either
+      // the previous title (if reverted) or unchanged.
+      setDraftTitle(useCanvasStore.getState().canvasTitle);
+    }
+  }, [canvasId, draftTitle, tryRename]);
 
   // ─── Export ──────────────────────────────────────────────────────────────
 
@@ -55,15 +74,21 @@ export const CanvasMenu: React.FC = () => {
         aria-hidden
         className="invisible absolute px-1 text-lg font-medium whitespace-pre"
       >
-        {canvasTitle || '\u00a0'}
+        {draftTitle || '\u00a0'}
       </span>
       <input
         ref={inputRef}
         className="text-fg-default focus:shadow-bottom m-0 min-w-8 bg-transparent px-1 py-1 text-lg font-medium outline-none focus:rounded-md"
-        value={canvasTitle}
-        onChange={(e) => setCanvasTitle(e.target.value)}
+        value={draftTitle}
+        onChange={(e) => setDraftTitle(e.target.value)}
+        onBlur={() => void commitTitle()}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') inputRef.current?.blur();
+          if (e.key === 'Enter') {
+            inputRef.current?.blur();
+          } else if (e.key === 'Escape') {
+            setDraftTitle(canvasTitle);
+            inputRef.current?.blur();
+          }
         }}
         aria-label="Canvas title"
       />

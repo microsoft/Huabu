@@ -56,6 +56,7 @@ import {
 
 import { canvasHistoryManager } from './canvasHistoryManager';
 import { getCanvas, preprocessNode, putCanvas } from '../api';
+import { CanvasConflictError } from '../api/canvas';
 import { getNodeSize } from '../utils/node/size';
 
 import type { AlignDirection } from '@/handler/canvasCommand/utils/alignment';
@@ -71,7 +72,15 @@ const flushAutoSave = async (saveCanvas: () => Promise<void>) => {
   if (saveTimeout) {
     clearTimeout(saveTimeout);
     saveTimeout = null;
-    await saveCanvas();
+    // Swallow conflicts here — `tryRename` is the path that surfaces
+    // them to the user. Autosave should never break canvas switching.
+    try {
+      await saveCanvas();
+    } catch (err) {
+      if (!(err instanceof CanvasConflictError)) {
+        console.error('Failed to flush autosave:', err);
+      }
+    }
   }
 };
 
@@ -358,6 +367,25 @@ type RFState = {
   switchCanvas: (canvasId: string) => Promise<void>;
   saveCanvas: () => Promise<void>;
 
+  /**
+   * Attempt to rename a canvas or node, with collision detection.
+   *
+   * - `kind: 'canvas'` commits the title to the server immediately;
+   *   on a backend 409 (`CANVAS_TITLE_CONFLICT`) the previous title is
+   *   restored and an alert is shown.
+   * - `kind: 'node'` performs a local case-insensitive sibling check
+   *   first; on conflict an alert is shown and the call returns false
+   *   without dispatching any state change. Otherwise the node label
+   *   is updated as a user-sourced rename.
+   *
+   * Returns `true` when the rename was accepted, `false` on conflict.
+   */
+  tryRename: (
+    kind: 'canvas' | 'node',
+    id: string,
+    nextName: string,
+  ) => Promise<boolean>;
+
   actionHistory: RecentAction[];
   /** @internal Execute a batch of shared CanvasCommands. Do not call from outside the store. */
   executeCommands: (
@@ -374,7 +402,11 @@ let saveTimeout: ReturnType<typeof setTimeout> | null = null;
 const scheduleAutoSave = (saveCanvas: () => Promise<void>) => {
   if (saveTimeout) clearTimeout(saveTimeout);
   saveTimeout = setTimeout(() => {
-    saveCanvas();
+    saveCanvas().catch((err) => {
+      if (!(err instanceof CanvasConflictError)) {
+        console.error('Autosave failed:', err);
+      }
+    });
   }, AUTOSAVE_DEBOUNCE_MS);
 };
 
@@ -767,6 +799,12 @@ const useCanvasStore = create<RFState>()(
         });
         set({ version: response.version });
       } catch (error) {
+        if (error instanceof CanvasConflictError) {
+          // Surface conflict to caller (e.g. tryRename) so it can revert
+          // optimistic UI state. Plain autosaves catch & ignore via
+          // void get().saveCanvas().
+          throw error;
+        }
         console.error('Failed to save canvas:', error);
         // TODO: Handle version conflict (409) - reload and prompt user
       } finally {
@@ -776,9 +814,90 @@ const useCanvasStore = create<RFState>()(
         if (pendingSave) {
           set({ pendingSave: false });
           // Fire-and-forget: re-save the latest state after the in-flight save completes.
-          void get().saveCanvas();
+          // Conflict errors are surfaced via tryRename; ignore them here so
+          // the rejection doesn't escape into the runtime as unhandled.
+          void get()
+            .saveCanvas()
+            .catch((err) => {
+              if (!(err instanceof CanvasConflictError)) {
+                console.error('Re-save after pending failed:', err);
+              }
+            });
         }
       }
+    },
+
+    tryRename: async (kind, id, nextName) => {
+      const trimmed = nextName.trim();
+      if (!trimmed) return false;
+
+      // Case-insensitive + Unicode-normalized comparison, matching the
+      // backend (`normalizeForCompare` in storage/naming.ts).
+      const normalize = (s: string) => s.normalize('NFC').toLowerCase();
+
+      if (kind === 'canvas') {
+        const { canvasId, canvasTitle } = get();
+        if (id !== canvasId) return false;
+        if (normalize(canvasTitle) === normalize(trimmed)) {
+          // No-op rename: still update local label casing without a roundtrip.
+          if (canvasTitle !== trimmed) set({ canvasTitle: trimmed });
+          return true;
+        }
+        const previous = canvasTitle;
+        set({ canvasTitle: trimmed });
+        try {
+          await get().saveCanvas();
+          return true;
+        } catch (err) {
+          if (
+            err instanceof CanvasConflictError &&
+            err.code === 'CANVAS_TITLE_CONFLICT'
+          ) {
+            set({ canvasTitle: previous });
+            const target = err.conflictWith ?? trimmed;
+            window.alert(
+              `Canvas name "${target}" is already in use. Please choose a different name.`,
+            );
+            return false;
+          }
+          // Other errors (network etc.) — leave optimistic title; caller
+          // can retry. Log so the failure isn't silent.
+          console.error('Failed to rename canvas:', err);
+          return true;
+        }
+      }
+
+      // kind === 'node'
+      const { nodes } = get();
+      const target = nodes.find((n) => n.id === id);
+      if (!target) return false;
+      const currentLabel =
+        typeof target.data?.['label'] === 'string'
+          ? (target.data['label'] as string)
+          : '';
+      if (normalize(currentLabel) === normalize(trimmed)) {
+        // No-op: avoid a needless dispatch.
+        if (currentLabel !== trimmed) {
+          get().updateNodeData(id, { label: trimmed, labelSource: 'user' });
+        }
+        return true;
+      }
+      // Local sibling pre-check. Only compare against nodes the user can see;
+      // the backend re-validates on persist.
+      const collision = nodes.find((n) => {
+        if (n.id === id) return false;
+        const label = n.data?.['label'];
+        if (typeof label !== 'string') return false;
+        return normalize(label) === normalize(trimmed);
+      });
+      if (collision) {
+        window.alert(
+          `Name "${trimmed}" is already used by another node on this canvas. Please choose a different name.`,
+        );
+        return false;
+      }
+      get().updateNodeData(id, { label: trimmed, labelSource: 'user' });
+      return true;
     },
 
     onNodeDragStart: () => {
