@@ -6,7 +6,6 @@
  * - color.ts: Shared color palettes and background color presets
  * - node.ts: Node data structures and type guards
  * - edge.ts: Edge types and styling
- * - source.ts: Per-canvas API response types
  * - layout.ts: CanvasPage calculation types
  * - operation.ts: Canvas operation types (for programmatic manipulation)
  * - canvas-api.ts: REST API request/response types
@@ -68,9 +67,6 @@ export type {
 } from './edge.js';
 export { EDGE_STROKE_WIDTHS } from './edge.js';
 
-// Source types
-export type { DeleteNodeResponse } from './source.js';
-
 // CanvasPage types
 export type {
   Point,
@@ -127,6 +123,7 @@ export type {
   GetCanvasResponse,
   PutCanvasRequest,
   PutCanvasResponse,
+  DeleteNodeResponse,
   CanvasVersionMismatchError,
   UpdateCanvasStateParams,
   UpdateCanvasStateResult,

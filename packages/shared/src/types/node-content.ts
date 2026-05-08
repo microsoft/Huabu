@@ -1,5 +1,5 @@
 /**
- * Source Types
+ * Node content types
  * Shared types describing the kind of content a node holds and the
  * metadata produced by the preprocessing pipeline.
  */
@@ -7,7 +7,7 @@
 export type NodeContentKind = 'web' | 'pdf' | 'note' | 'text';
 
 /**
- * Source metadata (parsed from the per-node markdown frontmatter).
+ * Node content metadata (parsed from the per-node markdown frontmatter).
  */
 export interface NodeContentMetadata {
   // Web-specific

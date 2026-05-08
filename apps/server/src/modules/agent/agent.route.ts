@@ -60,7 +60,12 @@ async function resolveImageUrl(url: string): Promise<string> {
   if (artifactMatch) {
     const canvasId = artifactMatch[1];
     const filename = path.basename(artifactMatch[2]);
-    const artifactsDir = getCanvasStore(canvasId).artifactsDir();
+    let artifactsDir: string;
+    try {
+      artifactsDir = getCanvasStore(canvasId).artifactsDir();
+    } catch {
+      return url;
+    }
     const filePath = path.resolve(artifactsDir, filename);
 
     if (!filePath.startsWith(path.resolve(artifactsDir))) {
@@ -124,7 +129,9 @@ async function buildUserContent(
 
   for (const att of attachments) {
     const label = att.label ?? att.filename ?? 'attachment';
-    const sourceRef = att.originNodeId ? ` (source: ${att.originNodeId})` : '';
+    const originRef = att.originNodeId
+      ? ` (origin node id: ${att.originNodeId})`
+      : '';
 
     switch (att.type) {
       case 'image': {
@@ -146,7 +153,7 @@ async function buildUserContent(
         if (att.content && att.content.trim().length > 0) {
           parts.push({
             type: 'text',
-            text: `[Attached Text from ${label}${sourceRef}]:\n${att.content}`,
+            text: `[Attached Text from ${label}${originRef}]:\n${att.content}`,
           });
         }
         break;
@@ -156,7 +163,7 @@ async function buildUserContent(
         if (att.content && att.content.trim().length > 0) {
           parts.push({
             type: 'text',
-            text: `[Attached PDF: ${label}${sourceRef}]:\n${att.content}`,
+            text: `[Attached PDF: ${label}${originRef}]:\n${att.content}`,
           });
         } else {
           parts.push({
@@ -172,7 +179,7 @@ async function buildUserContent(
         if (att.content && att.content.trim().length > 0) {
           parts.push({
             type: 'text',
-            text: `[Attached Excerpt from ${sourceRef}]:\n${att.content}`,
+            text: `[Attached Excerpt from ${originRef}]:\n${att.content}`,
           });
         }
         break;
@@ -200,7 +207,7 @@ async function buildUserContent(
         if (att.content && att.content.trim().length > 0) {
           parts.push({
             type: 'text',
-            text: `[Attached File: ${label}${sourceRef}]:\n${att.content}`,
+            text: `[Attached File: ${label}${originRef}]:\n${att.content}`,
           });
         } else if (att.url) {
           let fileContent: string | null = null;
@@ -208,14 +215,18 @@ async function buildUserContent(
           if (artifactMatch) {
             const canvasId = artifactMatch[1];
             const filename = path.basename(artifactMatch[2]);
-            const artifactsDir = getCanvasStore(canvasId).artifactsDir();
-            const filePath = path.resolve(artifactsDir, filename);
-            if (filePath.startsWith(path.resolve(artifactsDir))) {
-              try {
-                fileContent = await readFile(filePath, 'utf-8');
-              } catch {
-                /* file not readable as text */
+            try {
+              const artifactsDir = getCanvasStore(canvasId).artifactsDir();
+              const filePath = path.resolve(artifactsDir, filename);
+              if (filePath.startsWith(path.resolve(artifactsDir))) {
+                try {
+                  fileContent = await readFile(filePath, 'utf-8');
+                } catch {
+                  /* file not readable as text */
+                }
               }
+            } catch {
+              /* invalid artifact URL; fall back to including the URL */
             }
           }
           if (fileContent) {

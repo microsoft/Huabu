@@ -51,4 +51,4 @@
 ## Intentionally preserved
 
 - **Preprocessing internals** (`apps/server/src/modules/preprocessing/`) still dispatch on a `sourceType` discriminator inside loaders. This is the loader plugin contract and is unrelated to the removed Source pool.
-- **Canvas export/import bundle** (`packages/shared/src/types/canvas/canvas-api.ts`) keeps `ExportedSource[]` for round-trip compatibility with previously exported `.sediment.json` files.
+- **Canvas export/import API** (`packages/shared/src/types/canvas/canvas-api.ts`) keeps `ImportCanvasResponse` for the new zip-based `.sediment` bundle format. The legacy `ExportedSource[]` / `CanvasExportBundle` JSON types have been removed along with the Source pool; round-trip compatibility is now provided by the zip bundle, which packages canvas state together with each node's content files.

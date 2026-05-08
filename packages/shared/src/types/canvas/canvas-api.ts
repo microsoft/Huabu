@@ -21,6 +21,10 @@ export interface PutCanvasResponse {
   version: number;
 }
 
+export interface DeleteNodeResponse {
+  success: boolean;
+}
+
 export interface CanvasVersionMismatchError {
   message: string;
   serverVersion: number;

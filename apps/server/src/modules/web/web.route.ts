@@ -11,10 +11,12 @@ import type {
 } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
+const ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
+
 const querySchema = z
   .object({
-    canvasId: z.string().min(1),
-    nodeId: z.string().min(1),
+    canvasId: z.string().min(1).regex(ID_PATTERN),
+    nodeId: z.string().min(1).regex(ID_PATTERN),
   })
   .strict();
 
