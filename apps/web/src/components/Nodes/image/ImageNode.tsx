@@ -5,6 +5,7 @@ import { resolveArtifactUrl } from '@/api/artifact';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import useCanvasStore from '@/store/canvasStore.ts';
 
+import { MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
 
 import type { CanvasImageNodeData } from '../types';
@@ -39,7 +40,13 @@ export const ImageNode = memo(
       >
         <div className="flex h-full flex-col">
           <div className="relative h-full w-full overflow-hidden">
-            {data?.src ? (
+            {data?.artifactMissing ? (
+              <MissingFileBanner
+                nodeId={id}
+                title="Image file missing"
+                description="The artifact for this node was deleted or renamed outside the app."
+              />
+            ) : data?.src ? (
               <img
                 src={resolveArtifactUrl(data.src)}
                 alt={data.label || 'Node image'}

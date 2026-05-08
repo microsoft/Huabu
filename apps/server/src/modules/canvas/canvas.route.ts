@@ -13,6 +13,7 @@ import {
 import archiver from 'archiver';
 import yauzl from 'yauzl';
 
+import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getPreprocessDispatcher } from '../preprocessing/index.js';
 import {
   createCanvas,
@@ -227,24 +228,83 @@ function persistAndStripNodes(
 }
 
 /**
- * Hydrate node content from the canvas store. Reads the per-node
+ * Node types whose primary content lives in `nodes/<safe(label)>.md`.
+ * For these, a missing markdown file means the node body is empty and we
+ * surface a `contentMissing` flag so the client can prompt the user.
+ */
+const CONTENT_BACKED_NODE_TYPES = new Set(['note', 'text']);
+
+/**
+ * Node types that reference an artifact file via `data.src`. When the
+ * referenced file is gone from disk we surface an `artifactMissing` flag
+ * so the client can show a placeholder + Remove button.
+ */
+const ARTIFACT_BACKED_NODE_TYPES = new Set(['pdf', 'image', 'video']);
+
+/**
+ * Inspect a node's `data.src` and report whether the underlying artifact
+ * file still exists on disk. Returns `false` (not missing) for nodes
+ * without a canvas-scoped artifact URL — remote URLs and data URLs are
+ * out of scope for this check.
+ */
+function isArtifactMissing(
+  store: CanvasStore,
+  data: Record<string, unknown>,
+): boolean {
+  const src = typeof data['src'] === 'string' ? (data['src'] as string) : '';
+  if (!src) return false;
+  const match = src.match(ARTIFACT_URL_REGEX);
+  if (!match) return false;
+  const filename = match[2];
+  if (!filename) return false;
+  return store.resolveArtifactFilePath(filename) === null;
+}
+
+/**
+ * Hydrate persisted nodes with side-channel content. Reads each node's
  * markdown file and re-attaches `content` / `label` (when auto-derived)
- * onto each node so callers see fresh data.
+ * onto each node so callers see fresh data. Also sets `contentMissing` /
+ * `artifactMissing` hints when the underlying file has been deleted or
+ * renamed outside the app, so the client can render a non-blocking
+ * placeholder instead of silently rendering an empty / broken node.
  */
 function hydrateNodeContent(store: CanvasStore, nodes: NodeLike[]): NodeLike[] {
   return nodes.map((node) => {
     const nodeId = typeof node.id === 'string' ? node.id : '';
     if (!nodeId) return node;
 
+    const nodeType = typeof node.type === 'string' ? node.type : '';
+    const data: Record<string, unknown> = { ...(node.data ?? {}) };
+
+    // ----- Artifact-backed nodes: flag missing src file -----
+    if (ARTIFACT_BACKED_NODE_TYPES.has(nodeType)) {
+      if (isArtifactMissing(store, data)) {
+        data['artifactMissing'] = true;
+      } else if ('artifactMissing' in data) {
+        delete data['artifactMissing'];
+      }
+    }
+
+    // ----- Content-backed nodes: read markdown side-file -----
     let nodeContent: NodeContent | null = null;
     try {
       nodeContent = store.readNode(nodeId);
     } catch {
       nodeContent = null;
     }
-    if (!nodeContent) return node;
 
-    const data = { ...(node.data ?? {}) };
+    if (!nodeContent) {
+      if (CONTENT_BACKED_NODE_TYPES.has(nodeType)) {
+        data['contentMissing'] = true;
+      }
+      // Return early only when we actually mutated something; otherwise
+      // preserve the original node reference to keep diffs minimal.
+      return data === node.data ? node : { ...node, data };
+    }
+
+    if ('contentMissing' in data) {
+      delete data['contentMissing'];
+    }
     data['content'] = nodeContent.content;
 
     // Surface preprocessed AI summary / keywords from the per-node markdown

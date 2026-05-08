@@ -21,6 +21,24 @@
 
 ---
 
+## 2026-05-08 · 文件系统外部改动的兜底机制
+
+**What Changed**
+
+- 用户在 Finder 里直接**改名 canvas 目录**：下次加载时后端会发现 dir 名跟 `canvas.json` 里的 title 不一致，把 title 同步成 dir 名（filesystem 是 source of truth），不再卡在「Canvas not found」。
+- 用户在 Finder 里**改名 / 删除节点 .md 文件**：缓存的文件名索引会失效一次并重新扫盘；如果文件确实没了，节点保留在画布上，会在节点顶部显示一条「Note file missing — type to recreate it」的小条，用户随便敲几个字就会重新生成 .md；右上角带一个 Remove 按钮可以一键移除整个节点。
+- 用户在 Finder 里**改名 / 删除 artifact 文件**：媒体节点（PDF / 图片 / 视频）会渲染成一个「File missing」的占位卡片，附带 Remove 按钮。
+- 删除整个 `artifacts.json` manifest：下次访问 artifact 时索引会重建，loose 文件会被自动「领养」回 manifest（已有逻辑，未变）。
+
+**Notes**
+
+- 自愈走的是「先按缓存查 → 没找到就扫盘 → 再查一次」模式，命中率高时不会有性能损耗。
+- `data.contentMissing` / `data.artifactMissing` 是后端 GET 时贴在 node data 上的 hint，前端读到就显示占位 UI；下次成功读到文件就会自动清掉，不会持久化。
+- Note / Text 节点的 banner 只在内容为空时显示。一旦用户敲了字，banner 自动消失，重新写入 .md 文件。
+- 这套兜底**不会**做模糊匹配 / 重链接，避免把不相关的文件错配到节点上。
+
+---
+
 ## 2026-05-08 · 文件名改用语义化命名 + 重命名重名校验
 
 **What Changed**

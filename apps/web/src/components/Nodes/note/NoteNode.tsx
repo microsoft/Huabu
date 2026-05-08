@@ -12,6 +12,7 @@ import { useNodeScale } from '@/hooks/useNodeScale';
 import useCanvasStore from '@/store/canvasStore';
 
 import { loadBlockNoteContent } from '../../BlockNote/blockNoteContent';
+import { MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
 
 import type { CanvasNoteNodeData } from '../types';
@@ -339,6 +340,22 @@ export const NoteNode = memo(
         toolbar={NoteToolbar}
         keepAspectRatio={false}
       >
+        {/*
+          Server flagged the per-node markdown file as missing on disk
+          (deleted/renamed outside the app). Show a non-blocking banner
+          while the editor is empty so the user can recreate the file by
+          typing, or remove the orphaned node entirely.
+        */}
+        {data.contentMissing &&
+          !(typeof data.content === 'string' && data.content.trim()) && (
+            <div className="absolute top-1.5 right-1.5 left-1.5 z-10">
+              <MissingFileBanner
+                nodeId={id}
+                title="Note file missing — type to recreate it"
+                variant="inline"
+              />
+            </div>
+          )}
         <div
           className={clsx(
             'bg-surface relative w-full',

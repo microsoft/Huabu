@@ -23,6 +23,7 @@ import { pipeline } from 'node:stream/promises';
 
 import {
   patchCanvasDirTitle,
+  refreshCanvasDirIndex,
   registerCanvasDir,
   renameCanvasDirOnDisk,
   unregisterCanvasDir,
@@ -281,8 +282,50 @@ export class CanvasStore {
 
   // ── Canvas structure ─────────────────────────────────────────────────────
 
+  /**
+   * Read this canvas's `canvas.json`.
+   *
+   * The directory name is the source of truth for the canvas title — if
+   * the user renamed the directory in Finder we adopt the new name and
+   * persist it back into `canvas.json` so the in-memory title and the
+   * on-disk layout stay aligned.
+   *
+   * If the cached directory entry no longer exists on disk (the user
+   * renamed or moved the folder), force a workspace re-scan and try
+   * again before giving up. Returning `null` is reserved for the
+   * genuinely-deleted case, where the GET handler emits a 404.
+   */
   read(): CanvasFile | null {
-    return readJson<CanvasFile>(canvasJsonPath(this.canvasId));
+    let file = readJson<CanvasFile>(canvasJsonPath(this.canvasId));
+    if (!file) {
+      // Cached dir name may be stale. Re-scan once and retry.
+      refreshCanvasDirIndex();
+      file = readJson<CanvasFile>(canvasJsonPath(this.canvasId));
+      if (!file) return null;
+    }
+
+    // Sync the dir name into the canvas title. The filesystem wins — if
+    // the user dragged the folder to "My Cool Canvas" in Finder, the
+    // app should reflect that on the next load.
+    const dirName = path.basename(canvasRoot(this.canvasId));
+    if (dirName && file.title !== dirName) {
+      const next: CanvasFile = {
+        ...file,
+        title: dirName,
+        updatedAt: Date.now(),
+      };
+      try {
+        atomicWriteJson(canvasJsonPath(this.canvasId), next);
+        patchCanvasDirTitle(this.canvasId, dirName);
+        return next;
+      } catch {
+        // If the writeback fails (read-only fs, race, ...), still return
+        // the in-memory synced view; next save will retry.
+        return { ...file, title: dirName };
+      }
+    }
+
+    return file;
   }
 
   write(canvas: CanvasFile): void {
@@ -391,8 +434,18 @@ export class CanvasStore {
 
   readNode(nodeId: string): NodeContent | null {
     const filename = this.nodeFilenameOf(nodeId);
-    const raw = readText(nodeFilePath(this.canvasId, filename));
-    if (raw == null) return null;
+    const fullPath = nodeFilePath(this.canvasId, filename);
+    let raw = readText(fullPath);
+    if (raw === null) {
+      // The cached index may be stale — the user could have renamed or
+      // deleted the file in Finder. Re-scan once and retry.
+      this.invalidateNodeIndex();
+      const retryFilename = this.nodeFilenameOf(nodeId);
+      if (retryFilename !== filename) {
+        raw = readText(nodeFilePath(this.canvasId, retryFilename));
+      }
+      if (raw === null) return null;
+    }
     return markdownToNodeContent(nodeId, raw);
   }
 
@@ -720,11 +773,27 @@ export class CanvasStore {
   /**
    * Resolve a URL key to an absolute on-disk path of the stored artifact,
    * using the manifest so renames don't break existing URLs. Returns
-   * `null` when the key has no matching record.
+   * `null` when the key has no matching record OR when the manifest's
+   * recorded filename no longer exists on disk (e.g. the user deleted
+   * or renamed the file outside the app).
+   *
+   * On a miss we invalidate the cached artifact index and retry once
+   * so a Finder-side rename ( `Foo.pdf` → `Bar.pdf` while the manifest
+   * still points at `Foo.pdf`) is detected as a deletion rather than a
+   * stale-cache phantom hit.
    */
   resolveArtifactFilePath(key: string): string | null {
-    const record = this.resolveArtifactByKey(key);
-    return record ? this.artifactPath(record.filename) : null;
+    const tryResolve = (): string | null => {
+      const record = this.resolveArtifactByKey(key);
+      if (!record) return null;
+      const fullPath = this.artifactPath(record.filename);
+      return existsSync(fullPath) ? fullPath : null;
+    };
+
+    const first = tryResolve();
+    if (first) return first;
+    this.invalidateArtifactIndex();
+    return tryResolve();
   }
 
   async deleteArtifact(artifactId: string): Promise<boolean> {
