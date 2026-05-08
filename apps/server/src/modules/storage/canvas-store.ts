@@ -12,6 +12,7 @@ import {
   createWriteStream,
   existsSync,
   readdirSync,
+  renameSync,
   rmSync,
   statSync,
   unlinkSync,
@@ -20,7 +21,12 @@ import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
-import { unregisterCanvasDir } from './canvas-dirs.js';
+import {
+  patchCanvasDirTitle,
+  registerCanvasDir,
+  renameCanvasDirOnDisk,
+  unregisterCanvasDir,
+} from './canvas-dirs.js';
 import { parseFrontmatter, toFrontmatter } from './frontmatter.js';
 import {
   appendJsonArray,
@@ -32,8 +38,14 @@ import {
   sanitizeId,
 } from './io.js';
 import { NameIndex } from './name-index.js';
-import { toSafeFilename } from './naming.js';
 import {
+  applyProposedName,
+  composeArtifactFilename,
+  toSafeFilename,
+  type NameSource,
+} from './naming.js';
+import {
+  artifactManifestPath,
   artifactPath,
   artifactsDir,
   canvasJsonPath,
@@ -57,6 +69,19 @@ interface NodeFileEntry {
   /** Filename inside `<canvas>/nodes/`, e.g. `My Note.md`. */
   filename: string;
 }
+
+interface ArtifactEntry {
+  id: string;
+  /** Stored filename inside `<canvas>/artifacts/`, e.g. `Yearly Report.pdf`. */
+  filename: string;
+  displayName: string;
+  displayNameSource: NameSource;
+  ext: string;
+  mimeType: string | null;
+  createdAt: number;
+}
+
+export type ArtifactRecord = ArtifactEntry;
 
 // ─── Local types ────────────────────────────────────────────────────────────
 // These mirror what will land in `@sediment/shared` in PR 8. Keeping them
@@ -120,6 +145,41 @@ export interface CanvasEvent {
 export interface UserPreferences {
   metadata: Record<string, unknown>;
   body: string;
+}
+
+// ─── Result shapes for rename-aware writes ─────────────────────────────────
+
+/**
+ * Result of a strict rename / write. Conflicts include the existing
+ * holder's id + filename so the route layer can return a useful 409.
+ */
+export type RenameResult =
+  | { ok: true; filename: string }
+  | {
+      ok: false;
+      reason: 'conflict';
+      conflictWith: { id: string; filename: string };
+    }
+  | { ok: false; reason: 'not-found' }
+  | { ok: false; reason: 'fs-error'; message: string };
+
+export type RenameSelfResult =
+  | { ok: true; dirName: string }
+  | { ok: false; reason: 'conflict'; conflictWith: string }
+  | { ok: false; reason: 'not-found' }
+  | { ok: false; reason: 'fs-error'; message: string };
+
+export interface WriteArtifactInput {
+  /** Stable artifact id (e.g. `art_xY9z2`). Doubles as the URL key stem. */
+  id: string;
+  /** User-facing display name (without extension), or null to fall back. */
+  displayName?: string | null;
+  /** Origin of `displayName`. Defaults to `'original'`. */
+  source?: NameSource;
+  /** File extension including the dot, e.g. `.pdf`. */
+  ext: string;
+  /** MIME type to remember for downloads / agent context. */
+  mimeType?: string | null;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -209,6 +269,11 @@ export class CanvasStore {
    * via {@link nodeIndex}; never accessed directly.
    */
   private nodes: NameIndex<NodeFileEntry> | null = null;
+  /**
+   * Lazily-built `artifactId ↔ stored filename` index, backed by
+   * `<canvas>/artifacts.json`. Read via {@link artifactIndex}.
+   */
+  private artifacts: NameIndex<ArtifactEntry> | null = null;
 
   constructor(canvasId: string) {
     this.canvasId = sanitizeId(canvasId, 'canvasId');
@@ -231,6 +296,47 @@ export class CanvasStore {
 
   readVersion(): number | null {
     return this.read()?.version ?? null;
+  }
+
+  /**
+   * Rename the on-disk directory backing this canvas to match `newTitle`.
+   *
+   * Strict: returns `{ ok: false, reason: 'conflict' }` when another
+   * canvas already owns the sanitised directory slot. Callers (the PUT
+   * handler) translate that into a 409. Auto-dedup is intentionally
+   * NOT done here — that's the system's job at create time, not when
+   * the user has explicitly typed a new name.
+   *
+   * Returns the new directory name on success.
+   */
+  renameSelf(newTitle: string | null): RenameSelfResult {
+    const desired = toSafeFilename(newTitle, this.canvasId);
+
+    // Make sure this canvas is in the dir index even if `read()` was
+    // never called (e.g. brand-new canvas in this process).
+    if (!existsSync(canvasRoot(this.canvasId))) {
+      return { ok: false, reason: 'not-found' };
+    }
+
+    const result = renameCanvasDirOnDisk(this.canvasId, desired);
+    if (result.ok) {
+      patchCanvasDirTitle(this.canvasId, newTitle);
+      return { ok: true, dirName: result.dirName };
+    }
+    if (result.reason === 'not-found') {
+      // Index missed the entry — register against the current dir and retry.
+      const current = path.basename(canvasRoot(this.canvasId));
+      registerCanvasDir(this.canvasId, current, newTitle);
+      return this.renameSelf(newTitle);
+    }
+    if (result.reason === 'conflict') {
+      return {
+        ok: false,
+        reason: 'conflict',
+        conflictWith: result.conflictWith,
+      };
+    }
+    return { ok: false, reason: 'fs-error', message: result.message };
   }
 
   // ── Node content ─────────────────────────────────────────────────────────
@@ -290,7 +396,11 @@ export class CanvasStore {
     return markdownToNodeContent(nodeId, raw);
   }
 
-  writeNode(nodeId: string, content: NodeContent): void {
+  writeNode(
+    nodeId: string,
+    content: NodeContent,
+    opts: { strictRename?: boolean } = {},
+  ): RenameResult {
     if (content.nodeId !== nodeId) {
       throw new Error(
         `nodeId mismatch: argument="${nodeId}" payload="${content.nodeId}"`,
@@ -302,14 +412,22 @@ export class CanvasStore {
     const existing = idx.get(nodeId);
     const desired = nodeFilenameFor(nodeId, content.title);
 
-    // Decide the final on-disk filename. PR2 keeps the existing slot
-    // when the desired name collides with someone else (auto-dedupe);
-    // PR4 layers strict 409 conflict reporting on top.
+    // Decide the final on-disk filename.
+    //  - When the desired slot is free (or already ours), use it as-is.
+    //  - Otherwise: strict callers (user/agent rename) get a conflict
+    //    result; non-strict callers (auto labels, AI preprocessing)
+    //    fall back to a deduped " (n)" filename.
     let target = existing?.filename ?? desired;
     if (!existing || existing.filename !== desired) {
       const conflict = idx.findByName(desired);
       if (!conflict || conflict.id === nodeId) {
         target = desired;
+      } else if (opts.strictRename) {
+        return {
+          ok: false,
+          reason: 'conflict',
+          conflictWith: { id: conflict.id, filename: conflict.filename },
+        };
       } else {
         target = idx.suggestUnique(desired, true, nodeId);
       }
@@ -331,6 +449,7 @@ export class CanvasStore {
       nodeFilePath(this.canvasId, target),
       nodeContentToMarkdown(content),
     );
+    return { ok: true, filename: target };
   }
 
   deleteNode(nodeId: string): boolean {
@@ -369,43 +488,267 @@ export class CanvasStore {
 
   // ── Artifacts ────────────────────────────────────────────────────────────
 
-  artifactPath(filename: string): string {
-    return artifactPath(this.canvasId, filename);
-  }
-
   /** Absolute path of the canvas artifacts directory. */
   artifactsDir(): string {
     return artifactsDir(this.canvasId);
   }
 
+  /** Absolute path for a stored artifact filename. */
+  artifactPath(filename: string): string {
+    return artifactPath(this.canvasId, filename);
+  }
+
+  /**
+   * Build (or return) the per-canvas artifact index.
+   *
+   * The manifest at `<canvas>/artifacts.json` is the source of truth for
+   * `id → { displayName, source, storedFilename, … }`. When the manifest
+   * is missing or empty, every loose file in `artifacts/` is promoted to
+   * a synthetic entry with its filename stem treated as both id and
+   * display name (`source: 'auto'`). This keeps legacy URLs resolvable
+   * while letting future migrations populate the manifest.
+   */
+  private artifactIndex(): NameIndex<ArtifactEntry> {
+    if (this.artifacts) return this.artifacts;
+    const idx = new NameIndex<ArtifactEntry>();
+
+    const manifest = readJson<Record<string, Omit<ArtifactEntry, 'id'>>>(
+      artifactManifestPath(this.canvasId),
+    );
+    if (manifest) {
+      for (const [id, entry] of Object.entries(manifest)) {
+        idx.add({ id, ...entry });
+      }
+    }
+
+    // Promote any loose files we don't yet know about.
+    const dir = artifactsDir(this.canvasId);
+    if (existsSync(dir)) {
+      for (const file of readdirSync(dir)) {
+        if (idx.findByName(file)) continue;
+        const ext = path.extname(file);
+        const stem = ext ? file.slice(0, -ext.length) : file;
+        idx.add({
+          id: stem,
+          filename: file,
+          displayName: stem,
+          displayNameSource: 'auto',
+          ext,
+          mimeType: null,
+          createdAt: 0,
+        });
+      }
+    }
+
+    this.artifacts = idx;
+    return idx;
+  }
+
+  /** Drop the cached artifact index; next access re-scans manifest + dir. */
+  invalidateArtifactIndex(): void {
+    this.artifacts = null;
+  }
+
+  /** Persist the in-memory artifact index back to `artifacts.json`. */
+  private saveArtifactManifest(): void {
+    if (!this.artifacts) return;
+    const out: Record<string, Omit<ArtifactEntry, 'id'>> = {};
+    for (const entry of this.artifacts.list()) {
+      const { id, ...rest } = entry;
+      out[id] = rest;
+    }
+    mkdirp(artifactsDir(this.canvasId));
+    atomicWriteJson(artifactManifestPath(this.canvasId), out);
+  }
+
+  /**
+   * Decide the on-disk filename for a new artifact. Auto-dedupes the
+   * sanitised display name; never throws on conflict (artifacts are
+   * always created by the system, not typed by the user).
+   */
+  private planArtifactFilename(input: WriteArtifactInput): {
+    filename: string;
+    displayName: string;
+    source: NameSource;
+  } {
+    const idx = this.artifactIndex();
+    const source = input.source ?? 'original';
+    const displayName = (input.displayName ?? '').trim() || input.id;
+    const stem = toSafeFilename(displayName, input.id);
+    const desired = composeArtifactFilename(stem, input.ext);
+    const target = idx.suggestUnique(desired, true, input.id);
+    return { filename: target, displayName, source };
+  }
+
   async writeArtifactStream(
-    filename: string,
+    input: WriteArtifactInput,
     src: NodeJS.ReadableStream,
-  ): Promise<void> {
+  ): Promise<ArtifactRecord> {
     mkdirp(artifactsDir(this.canvasId));
+    const { filename, displayName, source } = this.planArtifactFilename(input);
     await pipeline(src, createWriteStream(this.artifactPath(filename)));
+    return this.commitArtifact(input, filename, displayName, source);
   }
 
-  async writeArtifactBuffer(filename: string, data: Buffer): Promise<void> {
+  async writeArtifactBuffer(
+    input: WriteArtifactInput,
+    data: Buffer,
+  ): Promise<ArtifactRecord> {
     mkdirp(artifactsDir(this.canvasId));
+    const { filename, displayName, source } = this.planArtifactFilename(input);
     await writeFile(this.artifactPath(filename), data);
+    return this.commitArtifact(input, filename, displayName, source);
   }
 
-  async deleteArtifact(filename: string): Promise<boolean> {
-    const filePath = this.artifactPath(filename);
-    if (!existsSync(filePath)) return false;
+  /** Update / add the manifest entry after the file landed on disk. */
+  private commitArtifact(
+    input: WriteArtifactInput,
+    filename: string,
+    displayName: string,
+    source: NameSource,
+  ): ArtifactRecord {
+    const idx = this.artifactIndex();
+    const entry: ArtifactEntry = {
+      id: input.id,
+      filename,
+      displayName,
+      displayNameSource: source,
+      ext: input.ext,
+      mimeType: input.mimeType ?? null,
+      createdAt: Date.now(),
+    };
+    const existing = idx.get(input.id);
+    if (existing && existing.filename !== filename) {
+      // We renamed on disk; drop the old file.
+      try {
+        unlinkSync(this.artifactPath(existing.filename));
+      } catch {
+        // best effort
+      }
+      idx.rename(input.id, filename);
+      idx.patch(input.id, entry);
+    } else if (existing) {
+      idx.patch(input.id, entry);
+    } else {
+      idx.add(entry);
+    }
+    this.saveArtifactManifest();
+    return entry;
+  }
+
+  /**
+   * Strict rename of an artifact's display name. Honours the
+   * source-priority rules: an `auto` proposal cannot overwrite a `user`
+   * or `agent` name. Returns the resolved record on success.
+   */
+  renameArtifact(
+    artifactId: string,
+    newDisplayName: string,
+    source: NameSource,
+  ): RenameResult {
+    const idx = this.artifactIndex();
+    const existing = idx.get(artifactId);
+    if (!existing) return { ok: false, reason: 'not-found' };
+
+    const nextState = applyProposedName(
+      { name: newDisplayName, source },
+      {
+        displayName: existing.displayName,
+        source: existing.displayNameSource,
+      },
+    );
+    if (
+      !nextState ||
+      (nextState.displayName === existing.displayName &&
+        nextState.source === existing.displayNameSource)
+    ) {
+      return { ok: true, filename: existing.filename };
+    }
+
+    const stem = toSafeFilename(nextState.displayName, existing.id);
+    const desired = composeArtifactFilename(stem, existing.ext);
+    if (desired !== existing.filename) {
+      const conflict = idx.findByName(desired);
+      if (conflict && conflict.id !== artifactId) {
+        return {
+          ok: false,
+          reason: 'conflict',
+          conflictWith: { id: conflict.id, filename: conflict.filename },
+        };
+      }
+      try {
+        const fromAbs = this.artifactPath(existing.filename);
+        const toAbs = this.artifactPath(desired);
+        if (existsSync(fromAbs)) renameSync(fromAbs, toAbs);
+      } catch (err) {
+        return {
+          ok: false,
+          reason: 'fs-error',
+          message: err instanceof Error ? err.message : String(err),
+        };
+      }
+      idx.rename(artifactId, desired);
+    }
+    idx.patch(artifactId, {
+      displayName: nextState.displayName,
+      displayNameSource: nextState.source,
+    });
+    this.saveArtifactManifest();
+    return { ok: true, filename: desired };
+  }
+
+  /** Look up an artifact by id (does not touch the filesystem). */
+  readArtifactById(artifactId: string): ArtifactRecord | null {
+    return this.artifactIndex().get(artifactId) ?? null;
+  }
+
+  /**
+   * Resolve a URL key (the `:filename` segment of
+   * `/api/canvas/:canvasId/artifact/:filename`) back to a stored record.
+   * The key is `<artifactId><ext>` for new uploads; legacy URLs that
+   * already match a stored filename also resolve correctly.
+   */
+  resolveArtifactByKey(key: string): ArtifactRecord | null {
+    const idx = this.artifactIndex();
+    const direct = idx.findByName(key);
+    if (direct) return direct;
+    const ext = path.extname(key);
+    const stem = ext ? key.slice(0, -ext.length) : key;
+    return idx.get(stem) ?? null;
+  }
+
+  /**
+   * Resolve a URL key to an absolute on-disk path of the stored artifact,
+   * using the manifest so renames don't break existing URLs. Returns
+   * `null` when the key has no matching record.
+   */
+  resolveArtifactFilePath(key: string): string | null {
+    const record = this.resolveArtifactByKey(key);
+    return record ? this.artifactPath(record.filename) : null;
+  }
+
+  async deleteArtifact(artifactId: string): Promise<boolean> {
+    const idx = this.artifactIndex();
+    const entry = idx.get(artifactId);
+    if (!entry) return false;
+    const filePath = this.artifactPath(entry.filename);
     try {
-      unlinkSync(filePath);
-      return true;
+      if (existsSync(filePath)) unlinkSync(filePath);
     } catch {
       return false;
     }
+    idx.remove(artifactId);
+    this.saveArtifactManifest();
+    return true;
   }
 
+  listArtifactRecords(): ArtifactRecord[] {
+    return this.artifactIndex().list();
+  }
+
+  /** @deprecated Returns plain filenames; prefer {@link listArtifactRecords}. */
   listArtifacts(): string[] {
-    const dir = artifactsDir(this.canvasId);
-    if (!existsSync(dir)) return [];
-    return readdirSync(dir);
+    return this.listArtifactRecords().map((r) => r.filename);
   }
 
   // ── Chat ─────────────────────────────────────────────────────────────────

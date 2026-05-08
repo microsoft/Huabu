@@ -31,7 +31,7 @@ function extractArtifactFilename(artifactUri: string): string {
 
 export function inputResolve(
   request: PreprocessNodeRequest,
-  artifactsDir?: string,
+  resolveArtifact?: (filename: string) => string | null,
 ): ResolvedInput {
   const { nodeId, nodeType, snapshot } = request;
   const base: ResolvedInput = {
@@ -63,13 +63,11 @@ export function inputResolve(
       const src = ((snapshot.src as string) ?? '').trim();
       const filename = extractArtifactFilename(src);
       const filePath =
-        filename && artifactsDir
-          ? path.join(artifactsDir, filename)
-          : undefined;
+        filename && resolveArtifact ? resolveArtifact(filename) : null;
       return {
         ...base,
         artifactUri: src || undefined,
-        filePath,
+        filePath: filePath ?? undefined,
       };
     }
 

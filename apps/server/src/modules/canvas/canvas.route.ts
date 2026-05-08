@@ -26,6 +26,7 @@ import { getWorkspacePath } from '../workspace.js';
 import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
 import type {
   ApiResult,
+  CanvasConflictResponse,
   CreateCanvasRequest,
   CreateCanvasResponse,
   DeleteCanvasResponse,
@@ -81,12 +82,26 @@ function toMessage(error: unknown): string {
  * Labels intentionally set by a user or the agent are preserved on the
  * canvas node so they survive save/load cycles without depending on the
  * node markdown.
+ *
+ * Returns either the cleaned node list or, on the first label collision
+ * caused by a user/agent rename, a structured conflict the route
+ * surfaces as a 409.
  */
+type PersistResult =
+  | { kind: 'ok'; nodes: NodeLike[] }
+  | {
+      kind: 'conflict';
+      nodeId: string;
+      label: string;
+      conflictWith: string;
+    };
+
 function persistAndStripNodes(
   store: CanvasStore,
   nodes: NodeLike[],
-): NodeLike[] {
-  return nodes.map((node) => {
+): PersistResult {
+  const out: NodeLike[] = [];
+  for (const node of nodes) {
     const data = node.data ?? {};
     const nodeId = typeof node.id === 'string' ? node.id : '';
     const content =
@@ -139,7 +154,23 @@ function persistAndStripNodes(
           content,
         };
         try {
-          store.writeNode(nodeId, nodeContent);
+          // Strict rename when the user (or agent) intentionally chose
+          // this label. Auto labels keep the existing auto-dedupe path
+          // so AI-suggested titles never block a save.
+          const labelSource = data['labelSource'];
+          const strictRename =
+            labelSource === 'user' || labelSource === 'agent';
+          const result = store.writeNode(nodeId, nodeContent, {
+            strictRename,
+          });
+          if (!result.ok && result.reason === 'conflict') {
+            return {
+              kind: 'conflict',
+              nodeId,
+              label: title ?? '',
+              conflictWith: result.conflictWith.filename,
+            };
+          }
           hasPersistedTitle = !!title;
         } catch {
           // Best effort — skip nodes whose id fails sanitisation.
@@ -166,8 +197,9 @@ function persistAndStripNodes(
     const keepLabel = isUserOrAgent || !hasPersistedTitle;
     const cleanData: Record<string, unknown> = { ...dataRest };
     if (!keepLabel) delete cleanData['label'];
-    return { ...node, data: cleanData };
-  });
+    out.push({ ...node, data: cleanData });
+  }
+  return { kind: 'ok', nodes: out };
 }
 
 /**
@@ -427,7 +459,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.put<{
     Params: { canvasId: string };
     Body: PutCanvasRequest;
-    Reply: ApiResult<PutCanvasResponse>;
+    Reply: ApiResult<PutCanvasResponse> | CanvasConflictResponse;
   }>('/:canvasId', async function (request, reply) {
     const { canvasId } = request.params;
     const parsed = putCanvasBodySchema.safeParse(request.body);
@@ -441,13 +473,33 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     const existing = store.read();
     const serverVersion = existing?.version ?? 0;
     if (clientVersion !== serverVersion) {
-      // Surface the conflict via the canonical ApiErrorBody so the client
-      // can recover the authoritative version from `details.serverVersion`.
       return reply.code(409).send({
+        code: 'CANVAS_VERSION_CONFLICT',
         message: 'Canvas version mismatch',
-        code: 'CANVAS_VERSION_MISMATCH',
-        details: { serverVersion },
-      });
+        serverVersion,
+      } satisfies CanvasConflictResponse);
+    }
+
+    // Title rename (and the directory rename it implies) happens
+    // before any node persistence so a 409 doesn't half-apply changes.
+    const previousTitle = existing?.title ?? null;
+    const nextTitle = title ?? previousTitle;
+    if (typeof title === 'string' && title !== previousTitle) {
+      const renameResult = store.renameSelf(title);
+      if (!renameResult.ok && renameResult.reason === 'conflict') {
+        return reply.code(409).send({
+          code: 'CANVAS_TITLE_CONFLICT',
+          message: `Another canvas already uses the directory name "${renameResult.conflictWith}"`,
+          conflictWith: renameResult.conflictWith,
+        } satisfies CanvasConflictResponse);
+      }
+      if (!renameResult.ok && renameResult.reason === 'fs-error') {
+        request.log.error(
+          { canvasId, err: renameResult.message },
+          'Failed to rename canvas directory',
+        );
+        return reply.code(500).send({ message: 'Failed to rename canvas' });
+      }
     }
 
     const timestamp = nowMs();
@@ -459,18 +511,26 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       [key: string]: unknown;
     };
 
-    const leanNodes = persistAndStripNodes(
+    const persistResult = persistAndStripNodes(
       store,
       (rawState?.nodes ?? []) as NodeLike[],
     );
+    if (persistResult.kind === 'conflict') {
+      return reply.code(409).send({
+        code: 'NODE_LABEL_CONFLICT',
+        message: `Another node already uses the label "${persistResult.label}"`,
+        nodeId: persistResult.nodeId,
+        conflictWith: persistResult.conflictWith,
+      } satisfies CanvasConflictResponse);
+    }
 
     const canvasFile: CanvasFile = {
       canvasId,
-      title: title ?? existing?.title ?? null,
+      title: nextTitle,
       version: nextVersion,
       state: {
         ...rawState,
-        nodes: leanNodes,
+        nodes: persistResult.nodes,
         edges: rawState?.edges ?? [],
       },
       createdAt: existing?.createdAt ?? timestamp,

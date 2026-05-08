@@ -24,11 +24,14 @@ export const ARTIFACT_URL_REGEX =
  *
  * Local canvas-scoped artifact URLs are read from disk and converted to
  * inline data URLs so the LLM API can see them. Already-valid data URLs or
- * remote URLs are returned as-is.
+ * remote URLs are returned as-is. The `resolvePath` callback may return
+ * `null` to signal that the URL key has no matching stored artifact (e.g.
+ * a stale URL after the file was deleted), in which case the original URL
+ * is returned unchanged.
  */
 export async function resolveArtifactImageUrl(
   url: string,
-  resolvePath: (canvasId: string, filename: string) => string,
+  resolvePath: (canvasId: string, filename: string) => string | null,
 ): Promise<string> {
   if (url.startsWith('data:')) return url;
 
@@ -38,10 +41,11 @@ export async function resolveArtifactImageUrl(
   const canvasId = match[1];
   const filename = path.basename(match[2]);
   const filePath = resolvePath(canvasId, filename);
+  if (!filePath) return url;
 
   try {
     const buffer = await readFile(filePath);
-    const ext = path.extname(filename).toLowerCase();
+    const ext = path.extname(filePath).toLowerCase();
     const mime = IMAGE_MIME_MAP[ext] ?? 'image/png';
     return `data:${mime};base64,${buffer.toString('base64')}`;
   } catch (err) {

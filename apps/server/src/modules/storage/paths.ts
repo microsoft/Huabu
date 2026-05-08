@@ -60,6 +60,14 @@ export function artifactsDir(canvasId: string): string {
 }
 
 /**
+ * Path of the per-canvas artifact manifest. Owned by `CanvasStore`,
+ * created on first write.
+ */
+export function artifactManifestPath(canvasId: string): string {
+  return path.join(canvasRoot(canvasId), 'artifacts.json');
+}
+
+/**
  * Resolve an artifact filename to an absolute path. The filename is
  * forced to its basename and validated against path traversal.
  */

@@ -70,22 +70,17 @@ async function resolveImageUrl(url: string): Promise<string> {
   if (artifactMatch) {
     const canvasId = artifactMatch[1];
     const filename = path.basename(artifactMatch[2]);
-    let artifactsDir: string;
+    let filePath: string | null;
     try {
-      artifactsDir = getCanvasStore(canvasId).artifactsDir();
+      filePath = getCanvasStore(canvasId).resolveArtifactFilePath(filename);
     } catch {
       return url;
     }
-    const filePath = path.resolve(artifactsDir, filename);
-
-    if (!filePath.startsWith(path.resolve(artifactsDir))) {
-      console.warn(`Blocked path traversal attempt: ${artifactMatch[2]}`);
-      return url;
-    }
+    if (!filePath) return url;
 
     try {
       const buffer = await readFile(filePath);
-      const ext = path.extname(filename).toLowerCase();
+      const ext = path.extname(filePath).toLowerCase();
       const mime = IMAGE_MIME_MAP[ext] ?? 'image/png';
       return `data:${mime};base64,${buffer.toString('base64')}`;
     } catch {
@@ -226,9 +221,9 @@ async function buildUserContent(
             const canvasId = artifactMatch[1];
             const filename = path.basename(artifactMatch[2]);
             try {
-              const artifactsDir = getCanvasStore(canvasId).artifactsDir();
-              const filePath = path.resolve(artifactsDir, filename);
-              if (filePath.startsWith(path.resolve(artifactsDir))) {
+              const filePath =
+                getCanvasStore(canvasId).resolveArtifactFilePath(filename);
+              if (filePath) {
                 try {
                   fileContent = await readFile(filePath, 'utf-8');
                 } catch {

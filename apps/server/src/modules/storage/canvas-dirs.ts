@@ -10,12 +10,12 @@
  * refactor backwards compatible until the one-shot migration runs.
  */
 
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, renameSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 import { readJson } from './io.js';
 import { NameIndex, type NameIndexResult } from './name-index.js';
-import { toSafeFilename } from './naming.js';
+import { normalizeForCompare, toSafeFilename } from './naming.js';
 import { getWorkspacePath } from '../workspace.js';
 
 export interface CanvasDirEntry {
@@ -126,4 +126,59 @@ export function patchCanvasDirTitle(
 export function unregisterCanvasDir(canvasId: string): void {
   ensureScanned();
   index.remove(canvasId);
+}
+
+/**
+ * Result of a strict on-disk rename. `conflictWith` carries the
+ * directory name that already owns the target slot so the caller can
+ * surface it in a 409 response.
+ */
+export type CanvasDirRenameResult =
+  | { ok: true; dirName: string }
+  | { ok: false; reason: 'conflict'; conflictWith: string }
+  | { ok: false; reason: 'not-found' }
+  | { ok: false; reason: 'fs-error'; message: string };
+
+/**
+ * Rename a canvas directory both on disk and in the index.
+ *
+ * - Same-slot renames (case-only) update the stored casing without
+ *   touching the filesystem (avoids macOS/Windows case-insensitive
+ *   pitfalls).
+ * - Hard collisions return `{ ok: false, reason: 'conflict' }`; the
+ *   caller decides whether to 409 or auto-dedupe.
+ */
+export function renameCanvasDirOnDisk(
+  canvasId: string,
+  newDirName: string,
+): CanvasDirRenameResult {
+  ensureScanned();
+  const entry = index.get(canvasId);
+  if (!entry) return { ok: false, reason: 'not-found' };
+
+  if (normalizeForCompare(entry.filename) === normalizeForCompare(newDirName)) {
+    if (entry.filename !== newDirName) index.rename(canvasId, newDirName);
+    return { ok: true, dirName: newDirName };
+  }
+
+  const conflict = index.findByName(newDirName);
+  if (conflict && conflict.id !== canvasId) {
+    return { ok: false, reason: 'conflict', conflictWith: conflict.filename };
+  }
+
+  const ws = getWorkspacePath();
+  const from = path.join(ws, entry.filename);
+  const to = path.join(ws, newDirName);
+  try {
+    renameSync(from, to);
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'fs-error',
+      message: err instanceof Error ? err.message : String(err),
+    };
+  }
+
+  index.rename(canvasId, newDirName);
+  return { ok: true, dirName: newDirName };
 }

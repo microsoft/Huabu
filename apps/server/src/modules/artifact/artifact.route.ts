@@ -12,7 +12,12 @@ import type { ApiResult, ArtifactUploadResponse } from '@sediment/shared';
  * Canvas-scoped artifact route. Mount under `/api/canvas`.
  *
  *   POST /:canvasId/artifact/:type   → upload (image | pdf | video)
- *   GET  /:canvasId/artifact/:filename → serve
+ *   GET  /:canvasId/artifact/:key    → serve (key = `<artifactId><ext>`)
+ *
+ * The on-disk filename is derived from the upload's display name (the
+ * client-supplied filename, falling back to the generated id) and may
+ * differ from the URL key. Both old `<id><ext>` URLs and the new
+ * label-named files resolve through the per-canvas artifact manifest.
  */
 const artifactRoute: FastifyPluginAsync = async (fastify) => {
   fastify.post<{
@@ -42,10 +47,28 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
     const id = createId('artifact');
     const uploadedExt = path.extname(data.filename ?? '');
     const ext = uploadedExt || typeExtMap[type];
-    const filename = `${id}${ext}`;
 
+    // Display name defaults to the user's original filename (without
+    // extension); falls back to the generated id when nothing was
+    // provided. The URL key always stays `<id><ext>` so persisted
+    // node references remain stable.
+    const uploadStem = data.filename
+      ? path.basename(data.filename, path.extname(data.filename))
+      : '';
+    const displayName = uploadStem || id;
+
+    let record;
     try {
-      await store.writeArtifactStream(filename, data.file);
+      record = await store.writeArtifactStream(
+        {
+          id,
+          displayName,
+          source: uploadStem ? 'original' : 'auto',
+          ext,
+          mimeType: data.mimetype ?? null,
+        },
+        data.file,
+      );
     } catch (error) {
       request.log.error({ err: error }, 'Failed to stream artifact to disk');
       return reply.code(500).send({ message: 'Failed to save file' });
@@ -53,8 +76,10 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
 
     const response: ArtifactUploadResponse = {
       id,
-      uri: artifactApiPath(canvasId, filename),
-      filename: data.filename,
+      // URL key is the stable `<id><ext>` so node `data.src` survives
+      // any future display-name renames.
+      uri: artifactApiPath(canvasId, `${id}${ext}`),
+      filename: record.displayName + ext,
       mimetype: data.mimetype,
     };
     return reply.send(response);
@@ -66,8 +91,12 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
       const { canvasId, filename } = request.params;
       const store = getCanvasStore(canvasId);
 
+      // Resolve the URL key (`<id><ext>` or legacy raw filename) to a
+      // stored record so a renamed display name doesn't break old URLs.
+      const record = store.resolveArtifactByKey(filename);
+      const served = record?.filename ?? filename;
       try {
-        return reply.sendFile(filename, store.artifactsDir());
+        return reply.sendFile(served, store.artifactsDir());
       } catch {
         return reply.code(404).send({ message: 'Artifact not found' });
       }

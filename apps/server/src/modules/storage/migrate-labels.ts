@@ -35,7 +35,7 @@ import path from 'node:path';
 
 import { refreshCanvasDirIndex } from './canvas-dirs.js';
 import { parseFrontmatter, toFrontmatter } from './frontmatter.js';
-import { readJson } from './io.js';
+import { atomicWriteJson, readJson } from './io.js';
 import {
   dedupeArtifactFilename,
   dedupeName,
@@ -202,6 +202,51 @@ function renameNodeFiles(
 }
 
 /**
+ * Step 3 — seed `<canvasDir>/artifacts.json` for any loose files in
+ * `artifacts/`. Existing filenames are kept as-is so URLs survive; the
+ * manifest entries simply teach `CanvasStore` how to resolve them.
+ */
+function seedArtifactManifest(
+  canvasDir: string,
+  canvasId: string,
+  logger: MigrationLogger,
+): void {
+  const artifactsDir = path.join(canvasDir, 'artifacts');
+  if (!existsSync(artifactsDir)) return;
+  const manifestPath = path.join(canvasDir, 'artifacts.json');
+
+  const existing =
+    readJson<Record<string, Record<string, unknown>>>(manifestPath) ?? {};
+
+  const knownFiles = new Set<string>();
+  for (const entry of Object.values(existing)) {
+    const name = entry['filename'];
+    if (typeof name === 'string') knownFiles.add(name);
+  }
+
+  let added = 0;
+  for (const file of readdirSync(artifactsDir)) {
+    if (knownFiles.has(file)) continue;
+    const ext = path.extname(file);
+    const stem = ext ? file.slice(0, -ext.length) : file;
+    existing[stem] = {
+      filename: file,
+      displayName: stem,
+      displayNameSource: 'auto',
+      ext,
+      mimeType: null,
+      createdAt: 0,
+    };
+    added++;
+  }
+
+  if (added > 0 || !existsSync(manifestPath)) {
+    atomicWriteJson(manifestPath, existing);
+    logger.info('seeded artifact manifest', { canvasId, added });
+  }
+}
+
+/**
  * Apply the V2 → V3 rename migration to the given workspace.
  *
  * The function is intentionally tolerant: malformed canvases are
@@ -239,6 +284,11 @@ export function migrateLabeledNames(
   renameCanvasDirs(workspace, entries, logger);
   for (const entry of entries) {
     renameNodeFiles(
+      path.join(workspace, entry.currentDir),
+      entry.canvasId,
+      logger,
+    );
+    seedArtifactManifest(
       path.join(workspace, entry.currentDir),
       entry.canvasId,
       logger,

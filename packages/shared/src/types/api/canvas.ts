@@ -49,6 +49,36 @@ export interface CanvasVersionMismatchError {
   details: { serverVersion: number };
 }
 
+// ─── Rename / conflict errors ─────────────────────────────────────────────
+
+/**
+ * Structured 4xx error codes returned from canvas mutation endpoints.
+ * Front-end uses the `code` discriminator to pick a UX (toast vs alert
+ * vs reload).
+ */
+export type CanvasErrorCode =
+  | 'CANVAS_TITLE_CONFLICT'
+  | 'NODE_LABEL_CONFLICT'
+  | 'CANVAS_VERSION_CONFLICT'
+  | 'INVALID_REQUEST';
+
+/**
+ * Body shape for 4xx responses from canvas mutation endpoints.
+ *
+ * Conflicts return enough context for the client to revert the offending
+ * field and tell the user what name they collided with.
+ */
+export interface CanvasConflictResponse {
+  code: CanvasErrorCode;
+  message: string;
+  /** Existing label / title that the new value collided with. */
+  conflictWith?: string;
+  /** For node-level conflicts. */
+  nodeId?: string;
+  /** For version conflicts. */
+  serverVersion?: number;
+}
+
 export interface UpdateCanvasStateParams {
   canvasId: string;
   version: number;
