@@ -7,7 +7,6 @@
  * - node.ts: Node data structures and type guards
  * - edge.ts: Edge types and styling
  * - layout.ts: CanvasPage calculation types
- * - operation.ts: Canvas operation types (for programmatic manipulation)
  * - canvas-api.ts: REST API request/response types
  */
 
@@ -121,15 +120,6 @@ export type {
   CanvasCommandFailureReason,
   CanvasCommandResult,
 } from './execution.js';
-
-// Operation types
-export type {
-  CreateNodeParams,
-  CreateNodeResult,
-  CreateFrameParams,
-  CreateEdgeParams,
-  CreateEdgeResult,
-} from './operation.js';
 
 // Canvas API types
 export type {
