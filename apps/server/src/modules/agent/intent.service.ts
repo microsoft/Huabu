@@ -498,7 +498,7 @@ async function runAnnotationAgent(
         toolResultText = await executeTool(
           call.name,
           validatedArgs as Record<string, unknown>,
-          { mode: 'ask', canvasId },
+          { canvasId },
         );
       } catch (err) {
         isError = true;

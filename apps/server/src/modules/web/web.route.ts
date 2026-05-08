@@ -1,6 +1,6 @@
+import { webLookupQuerySchema } from '@sediment/shared';
 import { marked } from 'marked';
 import sanitizeHtml from 'sanitize-html';
-import { z } from 'zod';
 
 import { getCanvasStore } from '../storage/index.js';
 
@@ -10,15 +10,6 @@ import type {
   WebReaderResponse,
 } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
-
-const ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
-
-const querySchema = z
-  .object({
-    canvasId: z.string().min(1).regex(ID_PATTERN),
-    nodeId: z.string().min(1).regex(ID_PATTERN),
-  })
-  .strict();
 
 type Querystring = WebLookupQuery;
 
@@ -164,7 +155,7 @@ const webRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get<{ Querystring: Querystring }>(
     '/preview',
     async (request, reply) => {
-      const parsed = querySchema.safeParse(request.query);
+      const parsed = webLookupQuerySchema.safeParse(request.query);
       if (!parsed.success) {
         return reply.code(400).send({ message: 'Invalid query' });
       }
@@ -217,7 +208,7 @@ const webRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get<{ Querystring: Querystring }>(
     '/reader',
     async (request, reply) => {
-      const parsed = querySchema.safeParse(request.query);
+      const parsed = webLookupQuerySchema.safeParse(request.query);
       if (!parsed.success) {
         return reply.code(400).send({ message: 'Invalid query' });
       }

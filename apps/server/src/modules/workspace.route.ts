@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { z } from 'zod';
+import { validatePathSchema, workspacePathSchema } from '@sediment/shared';
 
 import { resetPreprocessDispatcher } from './preprocessing/index.js';
 import { resetStorageCache } from './storage/index.js';
@@ -15,6 +15,15 @@ import {
   setWorkspacePath,
 } from './workspace.js';
 
+import type {
+  ApiErrorBody,
+  ApiResult,
+  PickFolderResult,
+  ValidatePathRequest,
+  ValidatePathResponse,
+  WorkspaceInfo,
+  WorkspacePathRequest,
+} from '@sediment/shared';
 import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 
 /**
@@ -100,12 +109,13 @@ function isLocalhost(ip: string): boolean {
 // ────────────────────────────────────────────────────────────────────
 // Unified response shape
 //
-// Every workspace endpoint replies with a discriminated union keyed by
-// `ok`. Success responses spread the payload alongside `ok: true`;
-// error responses are always `{ ok: false, message }`. HTTP status code
-// stays meaningful (200 / 400 / 403) and is redundant with `ok`, so
-// clients can branch on either — but having an in-body discriminator
-// keeps the shape regular for future Fastify response schemas.
+// Success bodies are returned as plain payloads (`WorkspaceInfo`,
+// `ValidatePathResponse`, `PickFolderResult`). Errors use the shared
+// `ApiErrorBody` envelope with HTTP 4xx status codes — the same shape
+// the rest of the API uses, so the client's `apiFetch` handles them
+// uniformly. `PickFolderResult` retains its own `{ ok }` discriminator
+// because "cancelled" / "no-picker" are *business* outcomes returned
+// with HTTP 200, not error conditions.
 // ────────────────────────────────────────────────────────────────────
 
 function sendError(
@@ -113,16 +123,16 @@ function sendError(
   status: number,
   message: string,
 ): FastifyReply {
-  return reply.status(status).send({ ok: false, message });
+  const body: ApiErrorBody = { message };
+  return reply.status(status).send(body);
 }
 
 /** Build the canonical success payload describing the current workspace. */
-function buildWorkspaceState() {
+function buildWorkspaceState(): WorkspaceInfo {
   const managed = isManagedMode();
   const configured = isWorkspaceConfigured();
   return {
-    ok: true as const,
-    mode: managed ? ('managed' as const) : ('free' as const),
+    mode: managed ? 'managed' : 'free',
     configured,
     // Free-mode active absolute path. Never exposed in managed mode.
     path: configured && !managed ? getWorkspacePath() : null,
@@ -140,46 +150,51 @@ const workspaceRoutes: FastifyPluginAsync = async (app) => {
   // GET /api/workspace — read-only state + capabilities
   // Always available (clients need to know the mode).
   // ────────────────────────────────────────────────────────────────
-  app.get('/workspace', async () => buildWorkspaceState());
+  app.get<{ Reply: ApiResult<WorkspaceInfo> }>('/', async () =>
+    buildWorkspaceState(),
+  );
 
-  // ────────────────────────────────────────────────────────────────
+  // ────────────────────────────────────────────────────────────
   // The endpoints below mutate the active workspace and only exist
   // in free mode. Managed mode rejects them with 403.
-  // ────────────────────────────────────────────────────────────────
+  // ────────────────────────────────────────────────────────────
 
-  app.post('/workspace/pick-folder', async (request, reply) => {
-    if (isManagedMode()) {
-      return sendError(reply, 403, 'Workspace is locked');
-    }
-    if (!isLocalhost(request.ip)) {
-      return sendError(
-        reply,
-        403,
-        'Forbidden: workspace settings can only be changed from localhost',
-      );
-    }
-    if (!canShowNativePicker()) {
-      // Not a true error — the client falls back to a manual path input.
-      return reply.send({ ok: false, reason: 'no-picker' as const });
-    }
-    const selected = await pickFolderNative();
-    if (!selected) {
-      return reply.send({ ok: false, reason: 'cancelled' as const });
-    }
-    return reply.send({ ok: true, path: selected });
-  });
+  app.post<{ Reply: ApiResult<PickFolderResult> }>(
+    '/pick-folder',
+    async (request, reply) => {
+      if (isManagedMode()) {
+        return sendError(reply, 403, 'Workspace is locked');
+      }
+      if (!isLocalhost(request.ip)) {
+        return sendError(
+          reply,
+          403,
+          'Forbidden: workspace settings can only be changed from localhost',
+        );
+      }
+      if (!canShowNativePicker()) {
+        // Not a true error — the client falls back to a manual path input.
+        return reply.send({ ok: false, reason: 'no-picker' as const });
+      }
+      const selected = await pickFolderNative();
+      if (!selected) {
+        return reply.send({ ok: false, reason: 'cancelled' as const });
+      }
+      return reply.send({ ok: true, path: selected });
+    },
+  );
 
-  app.post('/workspace/validate-path', async (request, reply) => {
+  app.post<{
+    Body: ValidatePathRequest;
+    Reply: ApiResult<ValidatePathResponse>;
+  }>('/validate-path', async (request, reply) => {
     if (isManagedMode()) {
       return sendError(reply, 403, 'Workspace is locked');
     }
     if (!isLocalhost(request.ip)) {
       return sendError(reply, 403, 'Forbidden');
     }
-    const schema = z.object({
-      path: z.string().min(1, 'Path is required'),
-    });
-    const parsed = schema.safeParse(request.body);
+    const parsed = validatePathSchema.safeParse(request.body);
     if (!parsed.success) {
       return sendError(
         reply,
@@ -188,10 +203,13 @@ const workspaceRoutes: FastifyPluginAsync = async (app) => {
       );
     }
     const pathExists = existsSync(path.resolve(parsed.data.path));
-    return reply.send({ ok: true, path: parsed.data.path, exists: pathExists });
+    return reply.send({ path: parsed.data.path, exists: pathExists });
   });
 
-  app.put('/workspace', async (request, reply) => {
+  app.put<{
+    Body: WorkspacePathRequest;
+    Reply: ApiResult<WorkspaceInfo>;
+  }>('/', async (request, reply) => {
     if (isManagedMode()) {
       return sendError(
         reply,
@@ -206,10 +224,7 @@ const workspaceRoutes: FastifyPluginAsync = async (app) => {
         'Forbidden: workspace settings can only be changed from localhost',
       );
     }
-    const schema = z.object({
-      path: z.string().min(1, 'Workspace path is required'),
-    });
-    const parsed = schema.safeParse(request.body);
+    const parsed = workspacePathSchema.safeParse(request.body);
     if (!parsed.success) {
       return sendError(
         reply,

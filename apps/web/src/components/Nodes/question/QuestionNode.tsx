@@ -1,4 +1,3 @@
-import { type Node, type NodeProps } from '@xyflow/react';
 import { clsx } from 'clsx';
 import {
   Check,
@@ -22,6 +21,7 @@ import { usePanelStore } from '@/store/panelStore.ts';
 import { NodeWrapper } from '../NodeWrapper';
 
 import type { CanvasQuestionNodeData } from '../types';
+import type { Node, NodeProps } from '@xyflow/react';
 
 export type QuestionNodeType = Node<CanvasQuestionNodeData, 'question'>;
 

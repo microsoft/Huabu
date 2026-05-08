@@ -1,7 +1,12 @@
 /**
  * Canvas API Types
- * REST API request/response types for canvas operations
+ * REST API request/response types for canvas operations.
+ *
+ * Per docs/api-design.md: schemas are the single source of truth, types
+ * derived via `z.infer`.
  */
+
+import { z } from 'zod';
 
 export interface GetCanvasResponse {
   canvasId: string;
@@ -10,11 +15,13 @@ export interface GetCanvasResponse {
   state: unknown;
 }
 
-export interface PutCanvasRequest {
-  version: number;
-  title?: string;
-  state: unknown;
-}
+/** Body for `PUT /api/canvas/:canvasId`. */
+export const putCanvasBodySchema = z.object({
+  version: z.number().int().nonnegative(),
+  state: z.unknown(),
+  title: z.string().min(1).optional(),
+});
+export type PutCanvasRequest = z.infer<typeof putCanvasBodySchema>;
 
 export interface PutCanvasResponse {
   canvasId: string;
@@ -25,9 +32,21 @@ export interface DeleteNodeResponse {
   success: boolean;
 }
 
+/** Response for DELETE /api/canvas/:canvasId. */
+export interface DeleteCanvasResponse {
+  success: boolean;
+}
+
+/**
+ * 409 Conflict body returned by `PUT /api/canvas/:canvasId` when the
+ * client's version doesn't match the server's. Shaped like an
+ * `ApiErrorBody` so the canonical client (`apiFetch`) surfaces it as a
+ * normal `ApiError` and the caller can read `details.serverVersion`.
+ */
 export interface CanvasVersionMismatchError {
   message: string;
-  serverVersion: number;
+  code: 'CANVAS_VERSION_MISMATCH';
+  details: { serverVersion: number };
 }
 
 export interface UpdateCanvasStateParams {
@@ -42,6 +61,18 @@ export interface UpdateCanvasStateResult {
 }
 
 // ─── Canvas Export / Import ───────────────────────────────────────────────────
+
+/**
+ * Querystring for `GET /api/canvas/:canvasId/export`.
+ *
+ * `includeHistory` arrives as a string ("true" / "false") because all
+ * querystring values are strings on the wire. Defaults to true when
+ * omitted, mirroring the pre-schema behaviour.
+ */
+export const exportCanvasQuerySchema = z.object({
+  includeHistory: z.enum(['true', 'false']).optional(),
+});
+export type ExportCanvasQuery = z.infer<typeof exportCanvasQuerySchema>;
 
 /**
  * Response returned after a successful import.
@@ -68,9 +99,10 @@ export interface ListCanvasesResponse {
 }
 
 /** Request body for POST /api/canvas (create a new canvas). */
-export interface CreateCanvasRequest {
-  title?: string;
-}
+export const createCanvasBodySchema = z.object({
+  title: z.string().min(1).optional(),
+});
+export type CreateCanvasRequest = z.infer<typeof createCanvasBodySchema>;
 
 /** Response for POST /api/canvas (create a new canvas). */
 export interface CreateCanvasResponse {

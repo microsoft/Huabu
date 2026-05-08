@@ -1,84 +1,50 @@
-import { API_CONFIG } from '../config/api';
+import { apiFetch } from './_client';
+import { routes } from './_routes';
 
-export type WorkspaceMode = 'free' | 'managed';
+import type {
+  PickFolderResult,
+  WorkspaceInfo,
+  WorkspacePathRequest,
+} from '@sediment/shared';
 
-export interface WorkspaceCapabilities {
-  /** Whether the user is allowed to change workspace at runtime. */
-  canChangeWorkspace: boolean;
-  /** Whether the server can show a native folder picker. */
-  nativePicker: boolean;
-}
-
-export interface WorkspaceInfo {
-  mode: WorkspaceMode;
-  configured: boolean;
-  /** Free-mode active absolute path. Always null in managed mode. */
-  path: string | null;
-  /** Display label (basename of the active path), or null. */
-  name: string | null;
-  capabilities: WorkspaceCapabilities;
-}
-
-export type PickFolderResult =
-  | { ok: true; path: string }
-  | { ok: false; reason: 'cancelled' | 'no-picker' };
+// Re-export so call sites can keep importing the wire types from `../api/workspace`.
+export type {
+  PickFolderResult,
+  WorkspaceCapabilities,
+  WorkspaceInfo,
+  WorkspaceMode,
+} from '@sediment/shared';
 
 // ────────────────────────────────────────────────────────────────────
-// Wire-format types
+// Wire format
 //
-// Every workspace endpoint replies with a discriminated union keyed by
-// `ok`. The HTTP status is redundant with `ok` but still meaningful
-// (200 / 400 / 403). `unwrap` accepts either signal so we don't depend
-// on both being in sync — server bugs that send `ok: true` with a 4xx
-// (or vice versa) still surface as a thrown error.
+// Workspace endpoints follow the same convention as the rest of the
+// API: success bodies are returned as plain payloads, errors come back
+// as HTTP 4xx with the shared `ApiErrorBody` envelope. `apiFetch`
+// transparently throws an `ApiError` for non-2xx responses.
+//
+// `pickFolder` is the one exception: its `{ ok }` discriminator carries
+// *business* outcomes ("cancelled" / "no-picker") that are returned with
+// HTTP 200, so callers must branch on `result.ok` themselves.
 // ────────────────────────────────────────────────────────────────────
-
-interface ApiError {
-  ok: false;
-  message: string;
-}
-
-type ApiResponse<T> = ({ ok: true } & T) | ApiError;
-
-async function unwrap<T>(response: Response, fallback: string): Promise<T> {
-  const body = (await response.json().catch(() => ({}))) as
-    | ApiResponse<T>
-    | Partial<ApiError>;
-
-  if (response.ok && (body as ApiResponse<T>).ok === true) {
-    // Strip the discriminator so callers see a clean payload type.
-    const { ok: _ok, ...payload } = body as { ok: true } & T;
-    return payload as T;
-  }
-  const message =
-    typeof body === 'object' && body && 'message' in body && body.message
-      ? body.message
-      : fallback;
-  throw new Error(message);
-}
 
 /** Fetch current workspace mode/state and server capabilities. */
 export async function getWorkspaceInfo(): Promise<WorkspaceInfo> {
-  const response = await fetch(`${API_CONFIG.API_URL}/workspace`);
-  return unwrap<WorkspaceInfo>(
-    response,
-    `Failed to get workspace info: ${response.statusText}`,
-  );
+  return apiFetch<WorkspaceInfo>(routes.workspace, {
+    fallbackMessage: 'Failed to get workspace info',
+  });
 }
 
 /** (Free mode) Activate an absolute path on the server. */
 export async function putWorkspacePath(
   newPath: string,
 ): Promise<WorkspaceInfo> {
-  const response = await fetch(`${API_CONFIG.API_URL}/workspace`, {
+  const body: WorkspacePathRequest = { path: newPath };
+  return apiFetch<WorkspaceInfo>(routes.workspace, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path: newPath }),
+    json: body,
+    fallbackMessage: 'Failed to update workspace path',
   });
-  return unwrap<WorkspaceInfo>(
-    response,
-    `Failed to update workspace path: ${response.statusText}`,
-  );
 }
 
 /**
@@ -90,18 +56,12 @@ export async function putWorkspacePath(
  *   - `{ ok: false, reason: 'no-picker' }` — server is headless; the
  *     caller should fall back to a text-input UI.
  *
- * Genuine HTTP errors (non-2xx) are thrown so callers don't have to
- * pattern-match three states.
+ * Genuine HTTP errors (managed mode, non-localhost, etc.) are thrown
+ * by `apiFetch` so callers don't have to pattern-match three states.
  */
 export async function pickFolder(): Promise<PickFolderResult> {
-  const response = await fetch(`${API_CONFIG.API_URL}/workspace/pick-folder`, {
+  return apiFetch<PickFolderResult>(routes.workspacePickFolder, {
     method: 'POST',
+    fallbackMessage: 'Failed to open folder picker',
   });
-  if (!response.ok) {
-    const body = (await response.json().catch(() => ({}))) as Partial<ApiError>;
-    throw new Error(
-      body.message ?? `Failed to open folder picker: ${response.statusText}`,
-    );
-  }
-  return (await response.json()) as PickFolderResult;
 }

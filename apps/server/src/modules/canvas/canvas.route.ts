@@ -3,10 +3,15 @@ import { mkdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { createId } from '@sediment/shared';
+import {
+  createCanvasBodySchema,
+  createId,
+  exportCanvasQuerySchema,
+  preprocessNodeBodySchema,
+  putCanvasBodySchema,
+} from '@sediment/shared';
 import archiver from 'archiver';
 import yauzl from 'yauzl';
-import { z } from 'zod';
 
 import { getPreprocessDispatcher } from '../preprocessing/index.js';
 import {
@@ -20,11 +25,20 @@ import { getWorkspacePath } from '../workspace.js';
 
 import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
 import type {
-  CanvasNodeKind,
+  ApiResult,
+  CreateCanvasRequest,
+  CreateCanvasResponse,
+  DeleteCanvasResponse,
+  DeleteNodeResponse,
+  ExportCanvasQuery,
+  GetCanvasResponse,
   ImportCanvasResponse,
+  ListCanvasesResponse,
+  PreprocessNodeBody,
   PreprocessNodeRequest,
   PreprocessNodeResponse,
-  TriggerReason,
+  PutCanvasRequest,
+  PutCanvasResponse,
 } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
@@ -207,39 +221,35 @@ function hydrateNodeContent(store: CanvasStore, nodes: NodeLike[]): NodeLike[] {
   });
 }
 
-const putCanvasBodySchema = z.object({
-  version: z.number().int().nonnegative(),
-  state: z.unknown(),
-  title: z.string().min(1).optional(),
-});
-
-const createCanvasBodySchema = z.object({
-  title: z.string().min(1).optional(),
-});
-
 const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   // --- List all canvases ---
 
-  fastify.get('/', async function (_request, reply) {
-    const canvases = listCanvases();
+  fastify.get<{ Reply: ApiResult<ListCanvasesResponse> }>(
+    '/',
+    async function (_request, reply) {
+      const canvases = listCanvases();
 
-    const summaries = canvases.map((c) => ({
-      canvasId: c.canvasId,
-      title: c.title,
-      nodeCount: Array.isArray(c.state.nodes) ? c.state.nodes.length : 0,
-      createdAt: c.createdAt,
-      updatedAt: c.updatedAt,
-    }));
+      const summaries = canvases.map((c) => ({
+        canvasId: c.canvasId,
+        title: c.title,
+        nodeCount: Array.isArray(c.state.nodes) ? c.state.nodes.length : 0,
+        createdAt: c.createdAt,
+        updatedAt: c.updatedAt,
+      }));
 
-    // Sort by most recently updated first
-    summaries.sort((a, b) => b.updatedAt - a.updatedAt);
+      // Sort by most recently updated first
+      summaries.sort((a, b) => b.updatedAt - a.updatedAt);
 
-    return reply.send({ canvases: summaries });
-  });
+      return reply.send({ canvases: summaries });
+    },
+  );
 
   // --- Create a new canvas ---
 
-  fastify.post<{ Body: unknown }>('/', async function (request, reply) {
+  fastify.post<{
+    Body: CreateCanvasRequest;
+    Reply: ApiResult<CreateCanvasResponse>;
+  }>('/', async function (request, reply) {
     const parsed = createCanvasBodySchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.code(400).send({ message: 'Invalid request body' });
@@ -263,24 +273,25 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
   // --- Delete a canvas ---
 
-  fastify.delete<{ Params: { canvasId: string } }>(
-    '/:canvasId',
-    async function (request, reply) {
-      const { canvasId } = request.params;
-      const deleted = deleteCanvas(canvasId);
+  fastify.delete<{
+    Params: { canvasId: string };
+    Reply: ApiResult<DeleteCanvasResponse>;
+  }>('/:canvasId', async function (request, reply) {
+    const { canvasId } = request.params;
+    const deleted = deleteCanvas(canvasId);
 
-      if (!deleted) {
-        return reply.code(404).send({ message: 'Canvas not found' });
-      }
+    if (!deleted) {
+      return reply.code(404).send({ message: 'Canvas not found' });
+    }
 
-      return reply.send({ success: true });
-    },
-  );
+    return reply.send({ success: true });
+  });
 
   // Delete a node — removes its markdown, plus the node and any
   // incident edges from the canvas JSON.
   fastify.delete<{
     Params: { canvasId: string; nodeId: string };
+    Reply: ApiResult<DeleteNodeResponse>;
   }>('/:canvasId/nodes/:nodeId', async function (request, reply) {
     const { canvasId, nodeId } = request.params;
     const store = getCanvasStore(canvasId);
@@ -321,51 +332,42 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   // Single route that handles all node types (note/text/web/pdf/image/frame/video).
   // Replaces the split between PUT /:canvasId/nodes/:nodeId and POST /resolve-label.
 
-  const preprocessBodySchema = z.object({
-    nodeType: z.enum(['note', 'text', 'web', 'pdf', 'image', 'video', 'frame']),
-    trigger: z
-      .enum(['node_inserted', 'node_updated', 'flush', 'manual', 'repair'])
-      .optional(),
-    snapshot: z.record(z.string(), z.unknown()),
-    options: z
-      .object({
-        allowLLM: z.boolean().optional(),
-        allowPersistence: z.boolean().optional(),
-        force: z.boolean().optional(),
-      })
-      .optional(),
-  });
-
   fastify.post<{
     Params: { canvasId: string; nodeId: string };
-    Body: unknown;
+    Body: PreprocessNodeBody;
+    Reply: ApiResult<PreprocessNodeResponse>;
   }>('/:canvasId/nodes/:nodeId/preprocess', async function (request, reply) {
     const { canvasId, nodeId } = request.params;
-    const parsed = preprocessBodySchema.safeParse(request.body);
+    const parsed = preprocessNodeBodySchema.safeParse(request.body);
     if (!parsed.success) {
-      return reply.code(400).send({ message: 'Invalid request body' });
+      return reply.code(400).send({
+        message: parsed.error.issues[0]?.message ?? 'Invalid request body',
+      });
     }
 
-    const { nodeType, trigger, snapshot, options } = parsed.data;
+    const { nodeType, trigger, snapshot, previousSnapshot, options } =
+      parsed.data;
     const dispatcher = getPreprocessDispatcher();
 
     try {
       const ppRequest: PreprocessNodeRequest = {
         canvasId,
         nodeId,
-        nodeType: nodeType as CanvasNodeKind,
-        trigger: (trigger ?? 'node_updated') as TriggerReason,
+        nodeType,
+        trigger: trigger ?? 'node_updated',
         snapshot,
+        previousSnapshot,
         options: {
           allowLLM: options?.allowLLM ?? true,
           allowPersistence: options?.allowPersistence ?? true,
           force: options?.force ?? false,
+          mode: options?.mode,
         },
       };
 
       const result = await dispatcher.preprocess(ppRequest);
 
-      return reply.send({
+      const response: PreprocessNodeResponse = {
         nodeId,
         success: result.success,
         suggestedLabel:
@@ -377,7 +379,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
             .filter((d) => d.level === 'error')
             .map((d) => `${d.code}: ${d.message}`)
             .join('; ') || undefined,
-      } satisfies PreprocessNodeResponse);
+      };
+      return reply.send(response);
     } catch (error) {
       const message = toMessage(error);
       request.log.error(
@@ -393,91 +396,96 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
   // --- GET Canvas ---
 
-  fastify.get<{ Params: { canvasId: string } }>(
-    '/:canvasId',
-    async function (request, reply) {
-      const { canvasId } = request.params;
-      const store = getCanvasStore(canvasId);
-      const canvas = store.read();
+  fastify.get<{
+    Params: { canvasId: string };
+    Reply: ApiResult<GetCanvasResponse>;
+  }>('/:canvasId', async function (request, reply) {
+    const { canvasId } = request.params;
+    const store = getCanvasStore(canvasId);
+    const canvas = store.read();
 
-      if (!canvas) {
-        return reply.code(404).send({ message: 'Canvas not found' });
-      }
+    if (!canvas) {
+      return reply.code(404).send({ message: 'Canvas not found' });
+    }
 
-      // Hydrate node content from the per-canvas store so clients always
-      // receive fresh markdown bodies.
-      const nodes = canvas.state.nodes as NodeLike[];
-      const hydratedNodes = hydrateNodeContent(store, nodes);
+    // Hydrate node content from the per-canvas store so clients always
+    // receive fresh markdown bodies.
+    const nodes = canvas.state.nodes as NodeLike[];
+    const hydratedNodes = hydrateNodeContent(store, nodes);
 
-      return reply.send({
-        canvasId: canvas.canvasId,
-        title: canvas.title,
-        version: canvas.version,
-        state: {
-          ...canvas.state,
-          nodes: hydratedNodes,
-        },
-      });
-    },
-  );
+    return reply.send({
+      canvasId: canvas.canvasId,
+      title: canvas.title,
+      version: canvas.version,
+      state: {
+        ...canvas.state,
+        nodes: hydratedNodes,
+      },
+    });
+  });
 
   // --- PUT Canvas ---
 
-  fastify.put<{ Params: { canvasId: string }; Body: unknown }>(
-    '/:canvasId',
-    async function (request, reply) {
-      const { canvasId } = request.params;
-      const parsed = putCanvasBodySchema.safeParse(request.body);
-      if (!parsed.success) {
-        return reply.code(400).send({ message: 'Invalid request body' });
-      }
+  fastify.put<{
+    Params: { canvasId: string };
+    Body: PutCanvasRequest;
+    Reply: ApiResult<PutCanvasResponse>;
+  }>('/:canvasId', async function (request, reply) {
+    const { canvasId } = request.params;
+    const parsed = putCanvasBodySchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ message: 'Invalid request body' });
+    }
 
-      const { version: clientVersion, state, title } = parsed.data;
+    const { version: clientVersion, state, title } = parsed.data;
 
-      const store = getCanvasStore(canvasId);
-      const existing = store.read();
-      const serverVersion = existing?.version ?? 0;
-      if (clientVersion !== serverVersion) {
-        return reply
-          .code(409)
-          .send({ message: 'Canvas version mismatch', serverVersion });
-      }
-
-      const timestamp = nowMs();
-      const nextVersion = serverVersion + 1;
-
-      const rawState = state as {
-        nodes?: NodeLike[];
-        edges?: unknown[];
-        [key: string]: unknown;
-      };
-
-      const leanNodes = persistAndStripNodes(
-        store,
-        (rawState?.nodes ?? []) as NodeLike[],
-      );
-
-      const canvasFile: CanvasFile = {
-        canvasId,
-        title: title ?? existing?.title ?? null,
-        version: nextVersion,
-        state: {
-          ...rawState,
-          nodes: leanNodes,
-          edges: rawState?.edges ?? [],
-        },
-        createdAt: existing?.createdAt ?? timestamp,
-        updatedAt: timestamp,
-      };
-
-      store.write(canvasFile);
-
-      return reply.send({
-        canvasId,
-        version: nextVersion,
+    const store = getCanvasStore(canvasId);
+    const existing = store.read();
+    const serverVersion = existing?.version ?? 0;
+    if (clientVersion !== serverVersion) {
+      // Surface the conflict via the canonical ApiErrorBody so the client
+      // can recover the authoritative version from `details.serverVersion`.
+      return reply.code(409).send({
+        message: 'Canvas version mismatch',
+        code: 'CANVAS_VERSION_MISMATCH',
+        details: { serverVersion },
       });
-    },
-  );
+    }
+
+    const timestamp = nowMs();
+    const nextVersion = serverVersion + 1;
+
+    const rawState = state as {
+      nodes?: NodeLike[];
+      edges?: unknown[];
+      [key: string]: unknown;
+    };
+
+    const leanNodes = persistAndStripNodes(
+      store,
+      (rawState?.nodes ?? []) as NodeLike[],
+    );
+
+    const canvasFile: CanvasFile = {
+      canvasId,
+      title: title ?? existing?.title ?? null,
+      version: nextVersion,
+      state: {
+        ...rawState,
+        nodes: leanNodes,
+        edges: rawState?.edges ?? [],
+      },
+      createdAt: existing?.createdAt ?? timestamp,
+      updatedAt: timestamp,
+    };
+
+    store.write(canvasFile);
+
+    return reply.send({
+      canvasId,
+      version: nextVersion,
+    });
+  });
 
   // --- Export Canvas (zip) ---
 
@@ -490,10 +498,16 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
    */
   fastify.get<{
     Params: { canvasId: string };
-    Querystring: { includeHistory?: string };
+    Querystring: ExportCanvasQuery;
   }>('/:canvasId/export', async function (request, reply) {
     const { canvasId } = request.params;
-    const includeHistory = request.query.includeHistory !== 'false';
+    const parsedQuery = exportCanvasQuerySchema.safeParse(request.query);
+    if (!parsedQuery.success) {
+      return reply.code(400).send({
+        message: parsedQuery.error.issues[0]?.message ?? 'Invalid query',
+      });
+    }
+    const includeHistory = parsedQuery.data.includeHistory !== 'false';
 
     const store = getCanvasStore(canvasId);
     const canvas = store.read();
@@ -549,92 +563,95 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
   // --- Import Canvas (zip) ---
 
-  fastify.post('/import', async function (request, reply) {
-    const file = await request.file();
-    if (!file) {
-      return reply.code(400).send({ message: 'No file provided' });
-    }
-
-    // Stream the upload to a temp zip file
-    const tmpZip = path.join(tmpdir(), `${createId('import')}.zip`);
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const ws = createWriteStream(tmpZip);
-        file.file.pipe(ws);
-        ws.on('finish', () => resolve());
-        ws.on('error', reject);
-        file.file.on('error', reject);
-      });
-
-      const targetCanvasId = createId('canvas');
-      const targetDir = path.join(getWorkspacePath(), targetCanvasId);
-      mkdirSync(targetDir, { recursive: true });
-
-      type ImportManifest = {
-        version?: string;
-        sourceCanvasId?: string;
-        title?: string | null;
-      };
-      let manifest: ImportManifest | null = null;
-
-      await extractZip(tmpZip, async (entryPath, readEntry) => {
-        if (entryPath === 'manifest.json') {
-          const buf = await readEntry();
-          try {
-            manifest = JSON.parse(buf.toString('utf-8')) as ImportManifest;
-          } catch {
-            manifest = null;
-          }
-          return;
-        }
-        const dest = path.join(targetDir, entryPath);
-        if (!dest.startsWith(targetDir + path.sep)) {
-          // Path traversal guard
-          return;
-        }
-        await mkdir(path.dirname(dest), { recursive: true });
-        const buf = await readEntry();
-        await writeFile(dest, new Uint8Array(buf));
-      });
-
-      // Rewrite canvas.json so canvasId matches the new directory.
-      const canvasJsonPath = path.join(targetDir, 'canvas.json');
-      if (!existsSync(canvasJsonPath)) {
-        await rm(targetDir, { recursive: true, force: true });
-        return reply.code(400).send({
-          message: 'Invalid bundle: missing canvas.json',
-        });
+  fastify.post<{ Reply: ApiResult<ImportCanvasResponse> }>(
+    '/import',
+    async function (request, reply) {
+      const file = await request.file();
+      if (!file) {
+        return reply.code(400).send({ message: 'No file provided' });
       }
-      const raw = await readFile(canvasJsonPath, 'utf-8');
-      const parsed = JSON.parse(raw) as CanvasFile;
-      const sourceCanvasId = parsed.canvasId;
-      const importedManifest = manifest as ImportManifest | null;
-      const targetTitle =
-        importedManifest?.title ?? parsed.title ?? 'Imported canvas';
 
-      const remapped: CanvasFile = {
-        ...parsed,
-        canvasId: targetCanvasId,
-        title: targetTitle,
-        state: rewriteCanvasArtifactUrls(
-          parsed.state,
-          sourceCanvasId,
-          targetCanvasId,
-        ),
-      };
-      await writeFile(canvasJsonPath, JSON.stringify(remapped));
+      // Stream the upload to a temp zip file
+      const tmpZip = path.join(tmpdir(), `${createId('import')}.zip`);
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const ws = createWriteStream(tmpZip);
+          file.file.pipe(ws);
+          ws.on('finish', () => resolve());
+          ws.on('error', reject);
+          file.file.on('error', reject);
+        });
 
-      const response: ImportCanvasResponse = {
-        canvasId: targetCanvasId,
-      };
-      return reply.send(response);
-    } catch (err) {
-      request.log.error({ err }, 'Failed to import canvas zip');
-      return reply.code(500).send({ message: 'Failed to import canvas' });
-    } finally {
-      void unlink(tmpZip).catch(() => {});
-    }
-  });
+        const targetCanvasId = createId('canvas');
+        const targetDir = path.join(getWorkspacePath(), targetCanvasId);
+        mkdirSync(targetDir, { recursive: true });
+
+        type ImportManifest = {
+          version?: string;
+          sourceCanvasId?: string;
+          title?: string | null;
+        };
+        let manifest: ImportManifest | null = null;
+
+        await extractZip(tmpZip, async (entryPath, readEntry) => {
+          if (entryPath === 'manifest.json') {
+            const buf = await readEntry();
+            try {
+              manifest = JSON.parse(buf.toString('utf-8')) as ImportManifest;
+            } catch {
+              manifest = null;
+            }
+            return;
+          }
+          const dest = path.join(targetDir, entryPath);
+          if (!dest.startsWith(targetDir + path.sep)) {
+            // Path traversal guard
+            return;
+          }
+          await mkdir(path.dirname(dest), { recursive: true });
+          const buf = await readEntry();
+          await writeFile(dest, new Uint8Array(buf));
+        });
+
+        // Rewrite canvas.json so canvasId matches the new directory.
+        const canvasJsonPath = path.join(targetDir, 'canvas.json');
+        if (!existsSync(canvasJsonPath)) {
+          await rm(targetDir, { recursive: true, force: true });
+          return reply.code(400).send({
+            message: 'Invalid bundle: missing canvas.json',
+          });
+        }
+        const raw = await readFile(canvasJsonPath, 'utf-8');
+        const parsed = JSON.parse(raw) as CanvasFile;
+        const sourceCanvasId = parsed.canvasId;
+        const importedManifest = manifest as ImportManifest | null;
+        const targetTitle =
+          importedManifest?.title ?? parsed.title ?? 'Imported canvas';
+
+        const remapped: CanvasFile = {
+          ...parsed,
+          canvasId: targetCanvasId,
+          title: targetTitle,
+          state: rewriteCanvasArtifactUrls(
+            parsed.state,
+            sourceCanvasId,
+            targetCanvasId,
+          ),
+        };
+        await writeFile(canvasJsonPath, JSON.stringify(remapped));
+
+        const response: ImportCanvasResponse = {
+          canvasId: targetCanvasId,
+        };
+        return reply.send(response);
+      } catch (err) {
+        request.log.error({ err }, 'Failed to import canvas zip');
+        return reply.code(500).send({ message: 'Failed to import canvas' });
+      } finally {
+        void unlink(tmpZip).catch(() => {});
+      }
+    },
+  );
 };
 
 /**

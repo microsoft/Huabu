@@ -1,4 +1,3 @@
-import { type Node, type NodeProps } from '@xyflow/react';
 import { Fullscreen } from 'lucide-react';
 import { memo } from 'react';
 
@@ -9,6 +8,7 @@ import useCanvasStore from '@/store/canvasStore.ts';
 import { NodeWrapper } from '../NodeWrapper';
 
 import type { CanvasImageNodeData } from '../types';
+import type { Node, NodeProps } from '@xyflow/react';
 
 export type ImageNodeType = Node<CanvasImageNodeData, 'image'>;
 

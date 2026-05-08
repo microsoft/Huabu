@@ -1,4 +1,3 @@
-import { type Node, type NodeProps } from '@xyflow/react';
 import { clsx } from 'clsx';
 import { Download, Fullscreen, ImageOff } from 'lucide-react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
@@ -16,6 +15,7 @@ import { NodeWrapper } from '../NodeWrapper';
 import { PreviewCard } from '../PreviewCard';
 
 import type { CanvasPdfNodeData } from '../types';
+import type { Node, NodeProps } from '@xyflow/react';
 
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 

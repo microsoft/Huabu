@@ -1,5 +1,4 @@
-import { type CommandDefinition } from './types';
-
+import type { CommandDefinition } from './types';
 import type { CanvasCommand } from '@sediment/shared';
 
 type Cmd = Extract<CanvasCommand, { type: 'SET_NODE_SELECTION' }>;

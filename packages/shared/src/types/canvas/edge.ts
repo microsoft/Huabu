@@ -5,9 +5,21 @@
 
 import type { AccentToken } from './color.js';
 
-export type EdgeLineType = 'bezier' | 'straight' | 'step';
-export type EdgeLineStyle = 'solid' | 'dashed' | 'dotted';
-export type EdgeDirection = 'none' | 'forward' | 'backward' | 'both';
+/**
+ * Allowed line shapes for edges. The `as const` array is the single source
+ * of truth — both the TypeScript union and the agent-facing TypeBox schema
+ * are derived from it, so adding a value here automatically propagates.
+ */
+export const EDGE_LINE_TYPES = ['bezier', 'straight', 'step'] as const;
+export type EdgeLineType = (typeof EDGE_LINE_TYPES)[number];
+
+/** Allowed dash patterns. Source of truth for both TS union and schema. */
+export const EDGE_LINE_STYLES = ['solid', 'dashed', 'dotted'] as const;
+export type EdgeLineStyle = (typeof EDGE_LINE_STYLES)[number];
+
+/** Allowed arrow directions. Source of truth for both TS union and schema. */
+export const EDGE_DIRECTIONS = ['none', 'forward', 'backward', 'both'] as const;
+export type EdgeDirection = (typeof EDGE_DIRECTIONS)[number];
 
 /** Edge stroke width presets (px). */
 export const EDGE_STROKE_WIDTHS = [2, 4, 8, 16] as const;

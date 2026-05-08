@@ -12,7 +12,12 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { createId } from '@sediment/shared';
+import {
+  AGENT_SSE_EVENTS,
+  agentCanvasIdQuerySchema,
+  agentRequestSchema,
+  createId,
+} from '@sediment/shared';
 import { encode } from 'gpt-tokenizer';
 
 import { buildOperatePrompt } from '../../prompt/agent.js';
@@ -26,12 +31,17 @@ import { getCanvasStore } from '../storage/index.js';
 
 import type { AssistantMessage, Context } from '@mariozechner/pi-ai';
 import type {
+  AgentCanvasIdQuery,
   AgentMode,
   AgentRequest,
+  AgentStreamEvent,
+  ApiResult,
   ChatAttachment,
   ChatHistoryItem,
   ChatHistoryResponse,
+  ContextTokensResponse,
   SelectedNodeDetail,
+  StopThreadResponse,
   ToolResponse,
 } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
@@ -245,8 +255,6 @@ async function buildUserContent(
       }
     }
   }
-
-  console.log('[!!!] Built user content parts:', parts);
   return parts;
 }
 
@@ -276,12 +284,8 @@ function collectImageAttachments(
   return attachments;
 }
 
-function writeSSE(
-  raw: NodeJS.WritableStream,
-  eventType: string,
-  data: unknown,
-) {
-  raw.write(`event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`);
+function writeSSE(raw: NodeJS.WritableStream, event: AgentStreamEvent): void {
+  raw.write(`event: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`);
 }
 
 /**
@@ -345,19 +349,13 @@ function cleanUpAbortedContext(context: Context): void {
 
 // ==================== Route ====================
 
-/** An SSE event buffered for reconnecting clients. */
-interface BufferedEvent {
-  type: string;
-  data: unknown;
-}
-
 /** State for an active agent run, supporting client reconnection. */
 interface ActiveRun {
   abortController: AbortController;
   /** All events emitted so far — replayed to reconnecting clients. */
-  eventBuffer: BufferedEvent[];
+  eventBuffer: AgentStreamEvent[];
   /** Live subscribers (reconnected SSE clients). */
-  subscribers: Set<(type: string, data: unknown) => void>;
+  subscribers: Set<(event: AgentStreamEvent) => void>;
   /** Whether the run has finished (success, error, or abort). */
   completed: boolean;
 }
@@ -562,16 +560,20 @@ const agentRoutes: FastifyPluginAsync = async (
    */
   fastify.get<{
     Params: { threadId: string };
-    Querystring: { canvasId?: string };
-    Reply: ChatHistoryResponse;
+    Querystring: AgentCanvasIdQuery;
+    Reply: ApiResult<ChatHistoryResponse>;
   }>('/history/:threadId', async function (request, reply) {
     const { threadId } = request.params;
-    const { canvasId } = request.query;
+    const parsedQuery = agentCanvasIdQuerySchema.safeParse(request.query);
+    if (!parsedQuery.success) {
+      return reply.code(400).send({
+        message: parsedQuery.error.issues[0]?.message ?? 'Invalid query',
+      });
+    }
+    const { canvasId } = parsedQuery.data;
 
     if (!threadId || threadId.trim().length === 0) {
-      return reply.code(400).send({
-        error: 'threadId is required',
-      } as unknown as ChatHistoryResponse);
+      return reply.code(400).send({ message: 'threadId is required' });
     }
 
     const context = loadContext(threadId, canvasId);
@@ -594,18 +596,18 @@ const agentRoutes: FastifyPluginAsync = async (
    * Explicitly stop an active agent run. Only this endpoint triggers
    * the interrupted state — client disconnects (e.g. page refresh) do not.
    */
-  fastify.post<{ Params: { threadId: string } }>(
-    '/stop/:threadId',
-    async function (request, reply) {
-      const { threadId } = request.params;
-      const run = activeRuns.get(threadId);
-      if (run && !run.abortController.signal.aborted) {
-        run.abortController.abort();
-        return reply.send({ stopped: true });
-      }
-      return reply.send({ stopped: false });
-    },
-  );
+  fastify.post<{
+    Params: { threadId: string };
+    Reply: ApiResult<StopThreadResponse>;
+  }>('/stop/:threadId', async function (request, reply) {
+    const { threadId } = request.params;
+    const run = activeRuns.get(threadId);
+    if (run && !run.abortController.signal.aborted) {
+      run.abortController.abort();
+      return reply.send({ stopped: true });
+    }
+    return reply.send({ stopped: false });
+  });
 
   /**
    * GET /agent/stream/:threadId
@@ -622,7 +624,7 @@ const agentRoutes: FastifyPluginAsync = async (
       // Completed runs have already been fully persisted via flushSave(),
       // so the history endpoint returns complete data — no need to replay.
       if (!run || run.completed) {
-        return reply.code(404).send({ error: 'No active run' });
+        return reply.code(404).send({ message: 'No active run' });
       }
 
       // SSE setup
@@ -639,13 +641,16 @@ const agentRoutes: FastifyPluginAsync = async (
 
       // Replay all buffered events
       for (const ev of run.eventBuffer) {
-        writeSSE(reply.raw, ev.type, ev.data);
+        writeSSE(reply.raw, ev);
       }
 
       // Subscribe for new live events
-      const subscriber = (type: string, data: unknown) => {
-        writeSSE(reply.raw, type, data);
-        if (type === 'end' || type === 'error') {
+      const subscriber = (event: AgentStreamEvent) => {
+        writeSSE(reply.raw, event);
+        if (
+          event.type === AGENT_SSE_EVENTS.End ||
+          event.type === AGENT_SSE_EVENTS.Error
+        ) {
           reply.raw.end();
           run.subscribers.delete(subscriber);
         }
@@ -665,14 +670,21 @@ const agentRoutes: FastifyPluginAsync = async (
    */
   fastify.get<{
     Params: { threadId: string };
-    Querystring: { canvasId?: string };
+    Querystring: AgentCanvasIdQuery;
+    Reply: ApiResult<ContextTokensResponse>;
   }>('/context-tokens/:threadId', async function (request, reply) {
     const { threadId } = request.params;
-    const { canvasId } = request.query;
+    const parsedQuery = agentCanvasIdQuerySchema.safeParse(request.query);
+    if (!parsedQuery.success) {
+      return reply.code(400).send({
+        message: parsedQuery.error.issues[0]?.message ?? 'Invalid query',
+      });
+    }
+    const { canvasId } = parsedQuery.data;
     const CONTEXT_WINDOW = 128_000;
 
     if (!threadId || threadId.trim().length === 0) {
-      return reply.code(400).send({ error: 'threadId is required' });
+      return reply.code(400).send({ message: 'threadId is required' });
     }
 
     const context = loadContext(threadId, canvasId);
@@ -716,6 +728,18 @@ const agentRoutes: FastifyPluginAsync = async (
    * Unified streaming endpoint for all agent modes.
    */
   fastify.post<{ Body: AgentRequest }>('/', async function (request, reply) {
+    const parsed = agentRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply
+        .code(400)
+        .send({ message: parsed.error.issues[0]?.message ?? 'Invalid body' });
+    }
+    // TODO: `request.body.intentData` is sent by
+    // the client (see `apps/web/src/api/agent.ts` and
+    // `apps/web/src/hooks/useAgentStream.ts`) but is intentionally NOT
+    // destructured here — it is silently dropped. Either inject it as a
+    // `[SYSTEM IntentSelect]` user-role message before `runAgent`, or
+    // remove `intentData` from `AgentRequest` and the client.
     const {
       content,
       threadId,
@@ -724,7 +748,7 @@ const agentRoutes: FastifyPluginAsync = async (
       canvasId,
       attachments,
       selectedNodeIds,
-    } = request.body;
+    } = parsed.data;
 
     const resolvedThreadId = getOrCreateThreadId(threadId);
 
@@ -834,16 +858,18 @@ const agentRoutes: FastifyPluginAsync = async (
     reply.raw.write(': ok\n\n');
 
     // Send thread ID
-    writeSSE(reply.raw, 'meta', { threadId: resolvedThreadId, mode });
+    const metaEvent: AgentStreamEvent = {
+      type: AGENT_SSE_EVENTS.Meta,
+      data: { threadId: resolvedThreadId, mode },
+    };
+    writeSSE(reply.raw, metaEvent);
 
     // Abort controller — only triggered by the explicit /stop endpoint,
     // NOT by client disconnect (so page refreshes don't interrupt the run).
     const abortController = new AbortController();
     const run: ActiveRun = {
       abortController,
-      eventBuffer: [
-        { type: 'meta', data: { threadId: resolvedThreadId, mode } },
-      ],
+      eventBuffer: [metaEvent],
       subscribers: new Set(),
       completed: false,
     };
@@ -877,13 +903,13 @@ const agentRoutes: FastifyPluginAsync = async (
     };
 
     // Emit an event: buffer it, write to original client, forward to subscribers.
-    const emit = (type: string, data: unknown) => {
-      run.eventBuffer.push({ type, data });
+    const emit = (event: AgentStreamEvent) => {
+      run.eventBuffer.push(event);
       if (clientConnected) {
-        writeSSE(reply.raw, type, data);
+        writeSSE(reply.raw, event);
       }
       for (const sub of run.subscribers) {
-        sub(type, data);
+        sub(event);
       }
     };
 
@@ -915,25 +941,22 @@ const agentRoutes: FastifyPluginAsync = async (
 
       for await (const event of stream) {
         if (abortController.signal.aborted) break;
-        emit(event.type, event.data);
+        emit(event);
 
         // Accumulate streamed text so partial replies survive interruption
-        if (
-          event.type === 'text_delta' &&
-          typeof event.data.content === 'string'
-        ) {
+        if (event.type === AGENT_SSE_EVENTS.TextDelta) {
           partialText += event.data.content;
         }
 
         // Reset partial text when a complete assistant message lands in context
         // (runAgent pushes the result after s.result() completes)
-        if (event.type === 'done') {
+        if (event.type === AGENT_SSE_EVENTS.Done) {
           partialText = '';
         }
 
         // When the agent yields an error event, persist it in the context
         // so buildHistoryItems() can reconstruct it on history reload.
-        if (event.type === 'error' && event.data.error) {
+        if (event.type === AGENT_SSE_EVENTS.Error && event.data.error) {
           context.messages.push({
             role: 'user',
             content: `[SYSTEM Error] ${event.data.error}`,
@@ -999,14 +1022,14 @@ const agentRoutes: FastifyPluginAsync = async (
       );
 
       if (!abortController.signal.aborted) {
-        emit('end', {});
+        emit({ type: AGENT_SSE_EVENTS.End, data: {} });
       }
     } catch (error) {
       if (!abortController.signal.aborted) {
         request.log.error(error);
         const errorMsg =
           error instanceof Error ? error.message : 'Internal Error';
-        emit('error', { error: errorMsg });
+        emit({ type: AGENT_SSE_EVENTS.Error, data: { error: errorMsg } });
 
         // Persist error in context so it shows up when history is reloaded
         context.messages.push({

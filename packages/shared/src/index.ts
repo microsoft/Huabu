@@ -1,12 +1,5 @@
-export * from './types/agent.js';
-export * from './types/canvas.js';
-export * from './types/chat.js';
-export * from './types/context.js';
-export * from './types/intent.js';
-export * from './types/node-content.js';
-export * from './types/llm.js';
-export * from './types/preprocessing.js';
-
-export * from './types/web.js';
+export * from './types/canvas/index.js';
+export * from './types/api/index.js';
+export * from './types/agent/index.js';
 export * from './utils/id.js';
 export * from './utils/spatial.js';

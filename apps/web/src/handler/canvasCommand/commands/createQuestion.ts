@@ -4,7 +4,6 @@ import { getNodeDefaultSize } from '@/config/nodeSizes';
 import { placeNode } from '@/handler/autoLayout';
 import { deduplicateLabel, generateNextLabel } from '@/utils/node/labels';
 
-import { type CommandDefinition } from './types';
 import { selectOnly } from '../utils';
 import {
   fitFrames,
@@ -12,6 +11,7 @@ import {
   type NestableNode,
 } from '../utils/frame';
 
+import type { CommandDefinition } from './types';
 import type { Node } from '@xyflow/react';
 
 type Cmd = Extract<CanvasCommand, { type: 'CREATE_QUESTION' }>;

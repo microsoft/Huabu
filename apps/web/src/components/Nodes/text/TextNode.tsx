@@ -3,7 +3,6 @@ import {
   ACCENT_PALETTE,
   SURFACE_PALETTE,
 } from '@sediment/shared';
-import { type Node, type NodeProps } from '@xyflow/react';
 import { clsx } from 'clsx';
 import { Baseline, Bold, Italic, Underline, Strikethrough } from 'lucide-react';
 import { memo, useCallback, useState, useRef, useMemo, useEffect } from 'react';
@@ -16,6 +15,7 @@ import { NodeWrapper } from '../NodeWrapper';
 
 import type { CanvasTextNodeData, NodeStyle } from '../types';
 import type { NodeFontFamily } from '@sediment/shared';
+import type { Node, NodeProps } from '@xyflow/react';
 
 /** Map logical font family names to CSS font stacks. */
 const FONT_FAMILY_CSS: Record<NodeFontFamily, string> = {

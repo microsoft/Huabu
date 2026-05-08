@@ -9,13 +9,13 @@ import {
 import { deduplicateLabel, generateNextLabel } from '@/utils/node/labels';
 
 import { canvasSizeFromStyle, resolveFrameAtPoint } from '../utils';
-import { type NestableNode } from '../utils/frame';
 
 import type {
   CanvasUiIntent,
   UiIntentResolution,
   UiResolverState,
 } from '../uiIntent';
+import type { NestableNode } from '../utils/frame';
 
 const DEFAULT_PASTE_OFFSET = 40;
 

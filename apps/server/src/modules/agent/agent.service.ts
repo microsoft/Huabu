@@ -20,40 +20,15 @@ import type {
   AssistantMessage,
   ToolCall,
 } from '@mariozechner/pi-ai';
-import type { AgentMode } from '@sediment/shared';
+import type { AgentMode, AgentStreamEvent } from '@sediment/shared';
 
 /**
- * Unified streaming event emitted to the frontend via SSE.
- * Simplified from the old AgentEvent — the frontend just needs to know
- * what kind of data is arriving.
+ * SSE events yielded by `runAgent`.
+ *
+ * `runAgent` only emits the in-stream variants — `meta` and `end` are
+ * synthesized by the route handler that owns the HTTP connection.
  */
-export type StreamEventType =
-  | 'text_delta'
-  | 'tool_start'
-  | 'tool_result'
-  | 'thinking_delta'
-  | 'done'
-  | 'error';
-
-export interface StreamEvent {
-  type: StreamEventType;
-  data: {
-    /** Incremental text content (for text_delta / thinking_delta) */
-    content?: string;
-    /** Tool name (for tool_start / tool_result) */
-    toolName?: string;
-    /** Tool call arguments (for tool_start) */
-    toolArgs?: Record<string, unknown>;
-    /** Tool execution result (for tool_result) */
-    toolResult?: string;
-    /** Final complete message (for done) */
-    message?: string;
-    /** Error message (for error) */
-    error?: string;
-    /** Extra metadata */
-    meta?: Record<string, unknown>;
-  };
-}
+export type StreamEvent = Exclude<AgentStreamEvent, { type: 'meta' | 'end' }>;
 
 interface AgentLogger {
   info: (message: string) => void;
@@ -229,7 +204,7 @@ export async function* runAgent(
           toolResultText = await executeTool(
             call.name,
             validatedArgs as Record<string, unknown>,
-            { mode, canvasId },
+            { canvasId },
           );
         } catch (err) {
           isError = true;

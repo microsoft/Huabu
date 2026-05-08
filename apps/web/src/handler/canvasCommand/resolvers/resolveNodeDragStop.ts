@@ -1,9 +1,3 @@
-import {
-  type CanvasCommand,
-  type CanvasNodeId,
-  type RecentAction,
-} from '@sediment/shared';
-
 import { extractNodeRef, canvasSizeFromStyle } from '../utils';
 import {
   autoFrameNodeByOverlap,
@@ -17,6 +11,11 @@ import type {
   UiIntentResolution,
   UiResolverState,
 } from '../uiIntent';
+import type {
+  CanvasCommand,
+  CanvasNodeId,
+  RecentAction,
+} from '@sediment/shared';
 import type { Node } from '@xyflow/react';
 
 export default function resolveNodeDragStop(

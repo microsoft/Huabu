@@ -1,4 +1,3 @@
-import { type Node, type NodeProps } from '@xyflow/react';
 import { PlayCircle, Fullscreen, Play } from 'lucide-react';
 import { memo } from 'react';
 
@@ -9,6 +8,7 @@ import { FloatingToolbar } from '../../Common/FloatingToolbar.tsx';
 import { NodeWrapper } from '../NodeWrapper.tsx';
 
 import type { CanvasVideoNodeData } from '../types.ts';
+import type { Node, NodeProps } from '@xyflow/react';
 
 export type VideoNodeType = Node<CanvasVideoNodeData, 'video'>;
 

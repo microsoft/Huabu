@@ -10,16 +10,6 @@
  */
 
 import {
-  type CanvasAlignDirection,
-  type CanvasCommand,
-  type CanvasNodeId,
-  type NodeSize,
-  type CanvasNodeType,
-  type Point,
-  type RecentAction,
-} from '@sediment/shared';
-
-import {
   resolveAddNodes,
   resolveDisconnectEdge,
   resolveGroupRectIntoFrame,
@@ -30,6 +20,15 @@ import {
 } from './resolvers';
 import { extractNodeRef, extractSnippet, getSelectedNodeIds } from './utils';
 
+import type {
+  CanvasAlignDirection,
+  CanvasCommand,
+  CanvasNodeId,
+  NodeSize,
+  CanvasNodeType,
+  Point,
+  RecentAction,
+} from '@sediment/shared';
 import type { Edge, Node } from '@xyflow/react';
 
 // ---------------------------------------------------------------------------

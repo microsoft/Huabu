@@ -1,8 +1,12 @@
 /**
  * LLM Provider & Model Configuration Types
  *
- * Shared types for dynamic provider/model switching between web and server.
+ * Shared types & schemas for dynamic provider/model switching between
+ * web and server. Per docs/api-design.md: schemas are the single source
+ * of truth, types derived via `z.infer`.
  */
+
+import { z } from 'zod';
 
 // ==================== Provider Registry ====================
 
@@ -64,15 +68,35 @@ export interface LLMConfig {
 }
 
 /**
- * Payload for updating the LLM configuration.
+ * Body for `PUT /api/llm/config`.
  */
-export interface LLMConfigUpdate {
-  provider: string;
-  model: string;
+export const llmConfigUpdateSchema = z.object({
+  provider: z.string().min(1, 'Provider is required'),
+  model: z.string().min(1, 'Model is required'),
   /** API key — only sent when setting a new key; never returned by GET. */
-  apiKey?: string;
+  apiKey: z.string().optional(),
   /** Optional base URL override. */
-  baseUrl?: string;
+  baseUrl: z.string().optional(),
+});
+export type LLMConfigUpdate = z.infer<typeof llmConfigUpdateSchema>;
+
+/** Querystring for `GET /api/llm/models`. */
+export const llmModelsQuerySchema = z.object({
+  provider: z.string().min(1, 'Provider query param is required'),
+});
+export type LLMModelsQuery = z.infer<typeof llmModelsQuerySchema>;
+
+/** Querystring for `GET /api/llm/oauth/status`. */
+export const oauthStatusQuerySchema = z.object({
+  provider: z.string().min(1),
+});
+export type OAuthStatusQuery = z.infer<typeof oauthStatusQuerySchema>;
+
+/**
+ * Response from GET /api/llm/providers
+ */
+export interface LLMProvidersResponse {
+  providers: LLMProviderInfo[];
 }
 
 /**

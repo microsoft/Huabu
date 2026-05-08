@@ -7,8 +7,7 @@
  * - node.ts: Node data structures and type guards
  * - edge.ts: Edge types and styling
  * - layout.ts: CanvasPage calculation types
- * - operation.ts: Canvas operation types (for programmatic manipulation)
- * - canvas-api.ts: REST API request/response types
+ * - command.ts / execution.ts: Canvas command schema and execution layer
  */
 
 // Color types
@@ -35,6 +34,7 @@ export {
 // Node types
 export type {
   CanvasNodeType,
+  AgentCreatableNodeType,
   NodeOrigin,
   NodeOriginType,
   NodeStyle,
@@ -61,6 +61,11 @@ export type {
 } from './node.js';
 
 export {
+  CANVAS_NODE_TYPES,
+  AGENT_CREATABLE_NODE_TYPES,
+  NODE_FONT_FAMILIES,
+  NODE_FONT_WEIGHTS,
+  NODE_FONT_STYLES,
   isNoteNode,
   isTextNode,
   isMediaNode,
@@ -78,7 +83,12 @@ export type {
   EdgeDirection,
   EdgeStrokeWidth,
 } from './edge.js';
-export { EDGE_STROKE_WIDTHS } from './edge.js';
+export {
+  EDGE_STROKE_WIDTHS,
+  EDGE_LINE_TYPES,
+  EDGE_LINE_STYLES,
+  EDGE_DIRECTIONS,
+} from './edge.js';
 
 // CanvasPage types
 export type {
@@ -113,6 +123,11 @@ export type {
   AgentCanvasCommand,
   AgentCanvasCommandType,
 } from './command.js';
+export {
+  CANVAS_ALIGN_DIRECTIONS,
+  UI_ONLY_CANVAS_COMMAND_TYPES,
+  AGENT_CANVAS_COMMAND_TYPES,
+} from './command.js';
 
 // Execution types
 export type {
@@ -121,28 +136,3 @@ export type {
   CanvasCommandFailureReason,
   CanvasCommandResult,
 } from './execution.js';
-
-// Operation types
-export type {
-  CreateNodeParams,
-  CreateNodeResult,
-  CreateFrameParams,
-  CreateEdgeParams,
-  CreateEdgeResult,
-} from './operation.js';
-
-// Canvas API types
-export type {
-  GetCanvasResponse,
-  PutCanvasRequest,
-  PutCanvasResponse,
-  DeleteNodeResponse,
-  CanvasVersionMismatchError,
-  UpdateCanvasStateParams,
-  UpdateCanvasStateResult,
-  ImportCanvasResponse,
-  CanvasSummary,
-  ListCanvasesResponse,
-  CreateCanvasRequest,
-  CreateCanvasResponse,
-} from './canvas-api.js';

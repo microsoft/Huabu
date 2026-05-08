@@ -1,10 +1,13 @@
-import { API_CONFIG } from '../config/api';
+import { apiFetch } from './_client';
+import { routes } from './_routes';
 
 import type {
   LLMConfig,
+  LLMConfigUpdate,
   LLMModelInfo,
   LLMModelsResponse,
   LLMProviderInfo,
+  LLMProvidersResponse,
   OAuthDeviceCodeResponse,
   OAuthPollResponse,
   OAuthStatusResponse,
@@ -14,45 +17,29 @@ import type {
 
 /** Fetch the current LLM provider/model configuration. */
 export async function getLLMConfig(): Promise<LLMConfig> {
-  const response = await fetch(`${API_CONFIG.API_URL}/llm/config`);
-  if (!response.ok) {
-    throw new Error(`Failed to get LLM config: ${response.statusText}`);
-  }
-  return (await response.json()) as LLMConfig;
+  return apiFetch<LLMConfig>(routes.llmConfig, {
+    fallbackMessage: 'Failed to get LLM config',
+  });
 }
 
 /** Update the LLM provider/model configuration. */
-export async function putLLMConfig(update: {
-  provider: string;
-  model: string;
-  apiKey?: string;
-  baseUrl?: string;
-}): Promise<LLMConfig> {
-  const response = await fetch(`${API_CONFIG.API_URL}/llm/config`, {
+export async function putLLMConfig(
+  update: LLMConfigUpdate,
+): Promise<LLMConfig> {
+  return apiFetch<LLMConfig>(routes.llmConfig, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(update),
+    json: update,
+    fallbackMessage: 'Failed to update LLM config',
   });
-  if (!response.ok) {
-    const err = (await response.json().catch(() => ({}))) as {
-      message?: string;
-    };
-    throw new Error(
-      err.message ?? `Failed to update LLM config: ${response.statusText}`,
-    );
-  }
-  return (await response.json()) as LLMConfig;
 }
 
 // ==================== Providers ====================
 
 /** Fetch the list of available LLM providers. */
 export async function getLLMProviders(): Promise<LLMProviderInfo[]> {
-  const response = await fetch(`${API_CONFIG.API_URL}/llm/providers`);
-  if (!response.ok) {
-    throw new Error(`Failed to get LLM providers: ${response.statusText}`);
-  }
-  const data = (await response.json()) as { providers: LLMProviderInfo[] };
+  const data = await apiFetch<LLMProvidersResponse>(routes.llmProviders, {
+    fallbackMessage: 'Failed to get LLM providers',
+  });
   return data.providers;
 }
 
@@ -60,13 +47,9 @@ export async function getLLMProviders(): Promise<LLMProviderInfo[]> {
 
 /** Fetch the available models for a given provider. */
 export async function getLLMModels(provider: string): Promise<LLMModelInfo[]> {
-  const response = await fetch(
-    `${API_CONFIG.API_URL}/llm/models?provider=${encodeURIComponent(provider)}`,
-  );
-  if (!response.ok) {
-    throw new Error(`Failed to get LLM models: ${response.statusText}`);
-  }
-  const data = (await response.json()) as LLMModelsResponse;
+  const data = await apiFetch<LLMModelsResponse>(routes.llmModels(provider), {
+    fallbackMessage: 'Failed to get LLM models',
+  });
   return data.models;
 }
 
@@ -74,46 +57,32 @@ export async function getLLMModels(provider: string): Promise<LLMModelInfo[]> {
 
 /** Start a GitHub device code OAuth flow. */
 export async function startOAuthLogin(): Promise<OAuthDeviceCodeResponse> {
-  const response = await fetch(`${API_CONFIG.API_URL}/llm/oauth/device-code`, {
+  return apiFetch<OAuthDeviceCodeResponse>(routes.llmOAuthDeviceCode, {
     method: 'POST',
+    fallbackMessage: 'Failed to start OAuth flow',
   });
-  if (!response.ok) {
-    const err = (await response.json().catch(() => ({}))) as {
-      message?: string;
-    };
-    throw new Error(
-      err.message ?? `Failed to start OAuth flow: ${response.statusText}`,
-    );
-  }
-  return (await response.json()) as OAuthDeviceCodeResponse;
 }
 
 /** Poll the OAuth device code flow for completion. */
 export async function pollOAuthLogin(): Promise<OAuthPollResponse> {
-  const response = await fetch(`${API_CONFIG.API_URL}/llm/oauth/poll`, {
+  return apiFetch<OAuthPollResponse>(routes.llmOAuthPoll, {
     method: 'POST',
+    fallbackMessage: 'Failed to poll OAuth',
   });
-  if (!response.ok) {
-    throw new Error(`Failed to poll OAuth: ${response.statusText}`);
-  }
-  return (await response.json()) as OAuthPollResponse;
 }
 
 /** Get the current OAuth authentication status. */
 export async function getOAuthStatus(): Promise<OAuthStatusResponse> {
-  const response = await fetch(`${API_CONFIG.API_URL}/llm/oauth/status`);
-  if (!response.ok) {
-    throw new Error(`Failed to get OAuth status: ${response.statusText}`);
-  }
-  return (await response.json()) as OAuthStatusResponse;
+  return apiFetch<OAuthStatusResponse>(routes.llmOAuthStatus, {
+    fallbackMessage: 'Failed to get OAuth status',
+  });
 }
 
 /** Logout from the OAuth provider. */
 export async function logoutOAuth(): Promise<void> {
-  const response = await fetch(`${API_CONFIG.API_URL}/llm/oauth/logout`, {
+  await apiFetch<void>(routes.llmOAuthLogout, {
     method: 'POST',
+    fallbackMessage: 'Failed to logout',
+    raw: true,
   });
-  if (!response.ok) {
-    throw new Error(`Failed to logout: ${response.statusText}`);
-  }
 }

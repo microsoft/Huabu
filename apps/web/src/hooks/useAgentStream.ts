@@ -314,7 +314,7 @@ export function handleStreamEvent(
   const { addMessage, updateMessage } = useChatStore.getState();
 
   if (event.type === 'text_delta') {
-    const delta = event.data.content ?? '';
+    const delta = event.data.content;
     const existing = useChatStore
       .getState()
       .messages.find((m) => m.id === ctx.assistantId);
@@ -332,22 +332,21 @@ export function handleStreamEvent(
       });
     }
   } else if (event.type === 'tool_start') {
-    const toolName = event.data.toolName ?? 'unknown';
     const msgId = createId('tool');
     ctx.toolQueue.push(msgId);
     addMessage({
       id: msgId,
       role: 'tool',
       toolResponse: {
-        tool: toolName,
+        tool: event.data.toolName,
         status: 'success',
-        data: event.data.toolArgs ?? {},
+        data: event.data.toolArgs,
       },
       isExecuting: true,
     });
   } else if (event.type === 'tool_result') {
     const toolResponse = parseToolResponse(
-      event.data.toolName ?? 'unknown',
+      event.data.toolName,
       event.data.toolResult,
     );
     if (!toolResponse) return;
@@ -388,7 +387,7 @@ export function handleStreamEvent(
     }
 
     // Execute canvas_commands locally
-    if ((event.data.toolName ?? '') === 'canvas_commands') {
+    if (event.data.toolName === 'canvas_commands') {
       const result = applyCanvasCommandsFromToolResult(event.data.toolResult);
       if (result) {
         // Attach changes to the tool message

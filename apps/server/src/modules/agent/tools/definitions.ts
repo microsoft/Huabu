@@ -8,70 +8,98 @@
 import { Type } from '@mariozechner/pi-ai';
 import {
   ACCENT_PALETTE,
+  AGENT_CREATABLE_NODE_TYPES,
+  CANVAS_ALIGN_DIRECTIONS,
+  EDGE_DIRECTIONS,
+  EDGE_LINE_STYLES,
+  EDGE_LINE_TYPES,
   EDGE_STROKE_WIDTHS,
+  NODE_FONT_FAMILIES,
+  NODE_FONT_STYLES,
+  NODE_FONT_WEIGHTS,
   SURFACE_PALETTE,
 } from '@sediment/shared';
 
 import type { Tool } from '@mariozechner/pi-ai';
-import type { AgentCanvasCommandType } from '@sediment/shared';
+
+/**
+ * Build a TypeBox literal-string union from an `as const` array. Used to
+ * derive every closed enum schema from the single source of truth that
+ * lives in `@sediment/shared`, so adding/removing a literal there
+ * automatically propagates to the schema we expose to the LLM.
+ */
+const literalUnion = <T extends readonly string[]>(
+  values: T,
+  options?: Parameters<typeof Type.Union>[1],
+) =>
+  Type.Union(
+    values.map((v) => Type.Literal(v)),
+    options,
+  );
 
 // ==================== Web Search ====================
+
+export const webSearchParamsSchema = Type.Object({
+  query: Type.String({ description: 'The search query keywords' }),
+  max_results: Type.Optional(
+    Type.Number({
+      description: 'Maximum number of results (1-10). Default: 5.',
+      minimum: 1,
+      maximum: 10,
+    }),
+  ),
+  search_depth: Type.Optional(
+    Type.Union([Type.Literal('basic'), Type.Literal('advanced')], {
+      description: "Search depth. Default: 'basic'.",
+    }),
+  ),
+  include_answer: Type.Optional(
+    Type.Boolean({
+      description: 'Whether to include Tavily answer summary. Default: true.',
+    }),
+  ),
+});
 
 export const webSearchTool: Tool = {
   name: 'web_search',
   description:
     'Search the internet for up-to-date facts, documentation, or news using Tavily.',
-  parameters: Type.Object({
-    query: Type.String({ description: 'The search query keywords' }),
-    max_results: Type.Optional(
-      Type.Number({
-        description: 'Maximum number of results (1-10). Default: 5.',
-        minimum: 1,
-        maximum: 10,
-      }),
-    ),
-    search_depth: Type.Optional(
-      Type.Union([Type.Literal('basic'), Type.Literal('advanced')], {
-        description: "Search depth. Default: 'basic'.",
-      }),
-    ),
-    include_answer: Type.Optional(
-      Type.Boolean({
-        description: 'Whether to include Tavily answer summary. Default: true.',
-      }),
-    ),
-  }),
+  parameters: webSearchParamsSchema,
 };
 
 // ==================== Canvas Read-Only Tools ====================
+
+export const getNodeDetailParamsSchema = Type.Object({
+  nodeId: Type.String({ description: 'The ID of the canvas node to read' }),
+  canvasId: Type.Optional(
+    Type.String({
+      description:
+        'Optional canvas ID override. When omitted, the current request canvas is used.',
+    }),
+  ),
+});
 
 export const getNodeDetailTool: Tool = {
   name: 'get_node_detail',
   description:
     'Get the full content and metadata of a specific canvas node by its ID.',
-  parameters: Type.Object({
-    nodeId: Type.String({ description: 'The ID of the canvas node to read' }),
-    canvasId: Type.Optional(
-      Type.String({
-        description:
-          'Optional canvas ID override. When omitted, the current request canvas is used.',
-      }),
-    ),
-  }),
+  parameters: getNodeDetailParamsSchema,
 };
+
+export const getCanvasStateParamsSchema = Type.Object({
+  canvasId: Type.Optional(
+    Type.String({
+      description:
+        'Optional canvas ID override. When omitted, the current request canvas is used.',
+    }),
+  ),
+});
 
 export const getCanvasStateTool: Tool = {
   name: 'get_canvas_state',
   description:
     'Get a summary of the current canvas state including all nodes, edges, and frames.',
-  parameters: Type.Object({
-    canvasId: Type.Optional(
-      Type.String({
-        description:
-          'Optional canvas ID override. When omitted, the current request canvas is used.',
-      }),
-    ),
-  }),
+  parameters: getCanvasStateParamsSchema,
 };
 
 // ==================== Canvas Commands ====================
@@ -89,15 +117,7 @@ const NodeSizeSchema = Type.Object({
   height: Type.Optional(Type.Number()),
 });
 
-const NodeTypeSchema = Type.Union([
-  Type.Literal('note'),
-  Type.Literal('text'),
-  Type.Literal('web'),
-  Type.Literal('image'),
-  Type.Literal('pdf'),
-  Type.Literal('video'),
-  Type.Literal('frame'),
-]);
+const NodeTypeSchema = literalUnion(AGENT_CREATABLE_NODE_TYPES);
 
 // ---- Shared color / width schemas (used by both node and edge styles) ----
 
@@ -129,22 +149,11 @@ const NodeBgColorSchema = Type.Union(
   },
 );
 
-const NodeFontFamilySchema = Type.Union([
-  Type.Literal('default'),
-  Type.Literal('serif'),
-  Type.Literal('mono'),
-  Type.Literal('hand'),
-]);
+const NodeFontFamilySchema = literalUnion(NODE_FONT_FAMILIES);
 
-const NodeFontWeightSchema = Type.Union([
-  Type.Literal('normal'),
-  Type.Literal('bold'),
-]);
+const NodeFontWeightSchema = literalUnion(NODE_FONT_WEIGHTS);
 
-const NodeFontStyleSchema = Type.Union([
-  Type.Literal('normal'),
-  Type.Literal('italic'),
-]);
+const NodeFontStyleSchema = literalUnion(NODE_FONT_STYLES);
 
 const NodeStyleSchema = Type.Object(
   {
@@ -218,24 +227,11 @@ const NodeCreateInputSchema = Type.Object({
   ),
 });
 
-const EdgeLineTypeSchema = Type.Union([
-  Type.Literal('bezier'),
-  Type.Literal('straight'),
-  Type.Literal('step'),
-]);
+const EdgeLineTypeSchema = literalUnion(EDGE_LINE_TYPES);
 
-const EdgeLineStyleSchema = Type.Union([
-  Type.Literal('solid'),
-  Type.Literal('dashed'),
-  Type.Literal('dotted'),
-]);
+const EdgeLineStyleSchema = literalUnion(EDGE_LINE_STYLES);
 
-const EdgeDirectionSchema = Type.Union([
-  Type.Literal('none'),
-  Type.Literal('forward'),
-  Type.Literal('backward'),
-  Type.Literal('both'),
-]);
+const EdgeDirectionSchema = literalUnion(EDGE_DIRECTIONS);
 
 const EdgeStyleSchema = Type.Object({
   lineType: Type.Optional(EdgeLineTypeSchema),
@@ -270,14 +266,7 @@ const EdgeStylePatchSchema = Type.Object({
   style: EdgeStyleSchema,
 });
 
-const AlignDirectionSchema = Type.Union([
-  Type.Literal('left'),
-  Type.Literal('center-h'),
-  Type.Literal('right'),
-  Type.Literal('top'),
-  Type.Literal('center-v'),
-  Type.Literal('bottom'),
-]);
+const AlignDirectionSchema = literalUnion(CANVAS_ALIGN_DIRECTIONS);
 
 const AutoLayoutScopeSchema = Type.Union([
   Type.Object({ type: Type.Literal('canvas') }),
@@ -389,32 +378,23 @@ const AgentCanvasCommandSchema = Type.Union([
   }),
 ]);
 
-// ---- Compile-time sync guard ----
-// Ensures AgentCanvasCommandSchema covers exactly the same command types
-// as the shared AgentCanvasCommand TypeScript type. If a command type is
-// added or removed in command.ts, this will produce a build error here.
-type SchemaCommandType =
-  | 'CREATE_NODES'
-  | 'DELETE_NODES'
-  | 'MERGE_NODE_DATA'
-  | 'SET_NODE_PARENT'
-  | 'DISSOLVE_FRAME'
-  | 'SET_NODE_GEOMETRY'
-  | 'REORDER_NODES'
-  | 'CONNECT_NODES'
-  | 'DISCONNECT_EDGES'
-  | 'SET_EDGE_STYLE'
-  | 'ALIGN_NODES'
-  | 'DISTRIBUTE_NODES'
-  | 'AUTO_LAYOUT'
-  | 'CREATE_QUESTION';
-type _AssertSchemaCoversTS = SchemaCommandType extends AgentCanvasCommandType
-  ? AgentCanvasCommandType extends SchemaCommandType
-    ? true
-    : never
-  : never;
+// `AgentCanvasCommandSchema` covers the same set of command names listed in
+// `AGENT_CANVAS_COMMAND_TYPES` (shared). The compile-time guard that
+// enforces "every non-UI CanvasCommand is either listed in the agent set
+// or excluded" lives next to that array in `command.ts`, so we don't need
+// a duplicate guard here.
 
-const _schemaSync: _AssertSchemaCoversTS = true;
+export const canvasCommandsParamsSchema = Type.Object({
+  canvasId: Type.Optional(
+    Type.String({
+      description:
+        'Optional canvas ID override. When omitted, the current request canvas is used.',
+    }),
+  ),
+  commands: Type.Array(AgentCanvasCommandSchema, {
+    description: 'Array of canvas commands to execute as a batch',
+  }),
+});
 
 export const canvasCommandsTool: Tool = {
   name: 'canvas_commands',
@@ -447,50 +427,44 @@ export const canvasCommandsTool: Tool = {
 
 Group into frame: CREATE_NODES (frame) + SET_NODE_PARENT (children → frame)
 Create and connect: CREATE_NODES (multiple nodes with explicit ids) + CONNECT_NODES (edges referencing those ids)`,
-  parameters: Type.Object({
-    canvasId: Type.Optional(
-      Type.String({
-        description:
-          'Optional canvas ID override. When omitted, the current request canvas is used.',
-      }),
-    ),
-    commands: Type.Array(AgentCanvasCommandSchema, {
-      description: 'Array of canvas commands to execute as a batch',
-    }),
-  }),
+  parameters: canvasCommandsParamsSchema,
 };
 
 // ==================== Content Ingestion Tools ====================
+
+export const ingestContentParamsSchema = Type.Object({
+  canvasId: Type.Optional(
+    Type.String({
+      description:
+        'Optional canvas ID override. When omitted, the current request canvas is used.',
+    }),
+  ),
+  nodeId: Type.String({
+    description: 'The node ID to trigger ingestion for',
+  }),
+});
 
 export const ingestContentTool: Tool = {
   name: 'ingest_content',
   description:
     'Trigger content ingestion for a canvas node, loading its web/PDF content into the per-canvas content store.',
-  parameters: Type.Object({
-    canvasId: Type.Optional(
-      Type.String({
-        description:
-          'Optional canvas ID override. When omitted, the current request canvas is used.',
-      }),
-    ),
-    nodeId: Type.String({
-      description: 'The node ID to trigger ingestion for',
-    }),
-  }),
+  parameters: ingestContentParamsSchema,
 };
 
 // ==================== Skill Tool ====================
+
+export const useSkillParamsSchema = Type.Object({
+  skillId: Type.String({
+    description:
+      'The skill ID to load. See the skill catalogue in the system prompt for available IDs.',
+  }),
+});
 
 export const useSkillTool: Tool = {
   name: 'use_skill',
   description:
     'Load detailed guidance for a specific skill before executing complex canvas operations. Call this when you need step-by-step guidance for tasks like building flowcharts, creating structured layouts, synthesizing nodes, etc. The skill content will be returned as the tool result.',
-  parameters: Type.Object({
-    skillId: Type.String({
-      description:
-        'The skill ID to load. See the skill catalogue in the system prompt for available IDs.',
-    }),
-  }),
+  parameters: useSkillParamsSchema,
 };
 
 // ==================== Tool Sets by Mode ====================

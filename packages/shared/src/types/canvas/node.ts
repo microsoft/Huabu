@@ -3,21 +3,46 @@
  * Node data structures and type guards
  */
 
-import type { AgentMode } from '../agent.js';
 import type { AccentToken, SurfaceToken } from './color.js';
 
 // ==================== Basic Node Types ====================
 
-export type CanvasNodeType =
-  | 'note'
-  | 'text'
-  | 'image'
-  | 'pdf'
-  | 'video'
-  | 'web'
-  | 'frame'
-  | 'annotation'
-  | 'question';
+/**
+ * All node kinds the canvas supports. The `as const` array is the single
+ * source of truth — both the TypeScript union and any derived schema must
+ * use it so adding/removing a kind propagates without manual sync.
+ */
+export const CANVAS_NODE_TYPES = [
+  'note',
+  'text',
+  'image',
+  'pdf',
+  'video',
+  'web',
+  'frame',
+  'annotation',
+  'question',
+] as const;
+export type CanvasNodeType = (typeof CANVAS_NODE_TYPES)[number];
+
+/**
+ * Node kinds the agent is allowed to construct via `CREATE_NODES`.
+ * Excludes:
+ * - `annotation` — produced only by the freehand drawing tool.
+ * - `question` — created via the dedicated `CREATE_QUESTION` command,
+ *   which carries question-specific fields.
+ */
+export const AGENT_CREATABLE_NODE_TYPES = [
+  'note',
+  'text',
+  'web',
+  'image',
+  'pdf',
+  'video',
+  'frame',
+] as const;
+export type AgentCreatableNodeType =
+  (typeof AGENT_CREATABLE_NODE_TYPES)[number];
 
 /**
  * Discriminated union describing how a canvas node was created.
@@ -61,10 +86,15 @@ export function normalizeOrigin(raw: unknown): NodeOrigin | undefined {
 export type LabelSource = 'auto' | 'user' | 'agent';
 
 /** Font family logical names. CSS font stacks are resolved on the UI side. */
-export type NodeFontFamily = 'default' | 'serif' | 'mono' | 'hand';
+export const NODE_FONT_FAMILIES = ['default', 'serif', 'mono', 'hand'] as const;
+export type NodeFontFamily = (typeof NODE_FONT_FAMILIES)[number];
 
-export type NodeFontWeight = 'normal' | 'bold';
-export type NodeFontStyle = 'normal' | 'italic';
+export const NODE_FONT_WEIGHTS = ['normal', 'bold'] as const;
+export type NodeFontWeight = (typeof NODE_FONT_WEIGHTS)[number];
+
+export const NODE_FONT_STYLES = ['normal', 'italic'] as const;
+export type NodeFontStyle = (typeof NODE_FONT_STYLES)[number];
+
 export type NodeTextDecoration = 'underline' | 'line-through';
 
 export interface NodeStyle {
@@ -100,14 +130,11 @@ export interface NodeStyle {
 export interface BlockProvenance {
   /** Who originally created this block */
   author: 'ai' | 'user';
-  /** Agent mode when AI-authored (omitted for user-authored) */
-  agentMode?: AgentMode;
   /** ISO timestamp of creation */
   createdAt: string;
   /** Chronological list of modifications after initial creation */
   modifications?: Array<{
     by: 'ai' | 'user';
-    agentMode?: AgentMode;
     at: string;
   }>;
   /**

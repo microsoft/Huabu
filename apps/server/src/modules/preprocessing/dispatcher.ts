@@ -14,9 +14,9 @@ import { getCanvasStore } from '../storage/index.js';
 import type {
   Capability,
   NodePreprocessProfile,
-  PreprocessNodeRequest,
   PreprocessNodeResult,
-} from '@sediment/shared';
+} from './types.js';
+import type { PreprocessNodeRequest } from '@sediment/shared';
 
 /**
  * Build the execution plan: which capabilities need to run given the request.

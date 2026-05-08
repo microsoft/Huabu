@@ -1,4 +1,8 @@
+import { apiFetch, apiUrl } from './_client';
+import { routes } from './_routes';
 import { API_CONFIG } from '../config/api';
+
+import type { ArtifactUploadResponse } from '@sediment/shared';
 
 type ArtifactType = 'image' | 'pdf' | 'video';
 
@@ -41,20 +45,15 @@ async function uploadArtifact(
   const formData = new FormData();
   formData.append('file', file);
 
-  const response = await fetch(
-    `${API_CONFIG.API_URL}/canvas/${canvasId}/artifact/${type}`,
+  const data = await apiFetch<ArtifactUploadResponse>(
+    routes.canvasArtifact(canvasId, type),
     {
       method: 'POST',
-      body: formData,
+      formData,
+      fallbackMessage: `Failed to upload ${type}`,
     },
   );
-
-  if (!response.ok) {
-    throw new Error(`Failed to upload ${type}: ${response.statusText}`);
-  }
-
-  const data = await response.json();
-  return data.uri as string;
+  return data.uri;
 }
 
 export async function uploadImage(
@@ -74,3 +73,7 @@ export async function uploadVideo(
 ): Promise<string> {
   return uploadArtifact(file, 'video', canvasId);
 }
+
+// `apiUrl` is re-exported so callers (e.g. download links) can build the
+// same absolute URLs the API helpers use without importing the config.
+export { apiUrl };

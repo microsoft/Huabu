@@ -1,6 +1,5 @@
-import type { CanvasCommand } from './canvas/command.js';
-import type { AgentBaseContext } from './context.js';
-import type { Rect } from '../utils/spatial.js';
+import type { Rect } from '../../utils/spatial.js';
+import type { CanvasCommand } from '../canvas/command.js';
 
 // ==================== Intent Recognition ====================
 
@@ -33,16 +32,6 @@ export interface IntentEpisode {
     | { type: 'dismissed' };
 }
 
-// ==================== Request / Response ====================
-
-/**
- * Request body sent from the frontend to trigger intent recognition.
- */
-export interface IntentRequest {
-  /** The lightweight canvas snapshot used for context-aware analysis */
-  canvasContext: AgentBaseContext;
-}
-
 /**
  * Response returned by the backend after intent recognition.
  */
@@ -50,6 +39,37 @@ export interface IntentResponse {
   /** Ordered list of candidate intents (highest confidence first) */
   intentCandidates: IntentCandidate[];
 }
+
+// ==================== Streaming Events ====================
+//
+// SSE events emitted by `/api/intent/recognize-stream`. Modelled as a
+// discriminated union so server emit and client consume share one shape.
+
+/** `event: candidate` — one ranked intent candidate. */
+export type IntentCandidateEventData = IntentCandidate;
+
+/** `event: done` — terminator (no payload). */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface IntentDoneEventData {}
+
+/** `event: error` — recognition failed. */
+export interface IntentErrorEventData {
+  error: string;
+}
+
+export type IntentStreamEvent =
+  | { type: 'candidate'; data: IntentCandidateEventData }
+  | { type: 'done'; data: IntentDoneEventData }
+  | { type: 'error'; data: IntentErrorEventData };
+
+export type IntentStreamEventType = IntentStreamEvent['type'];
+
+/** Canonical event-name constants for the intent SSE stream. */
+export const INTENT_SSE_EVENTS = {
+  Candidate: 'candidate',
+  Done: 'done',
+  Error: 'error',
+} as const satisfies Record<string, IntentStreamEventType>;
 
 // ==================== Annotation Pipeline Types ====================
 
@@ -98,19 +118,6 @@ export interface AnnotationClusterContext {
 }
 
 /**
- * Request body for annotation intent recognition.
- * Carries a screenshot plus minimal cluster context from the client.
- */
-export interface AnnotationIntentRequest {
-  /** Base64 screenshot of the annotation area (no data: prefix). */
-  screenshot: string;
-  /** Structured context from the client-side pipeline. */
-  clusterContext: AnnotationClusterContext;
-  /** Canvas the gesture was drawn on; used by `get_node_detail` lookups. */
-  canvasId?: string;
-}
-
-/**
  * Response body for the one-step annotation → canvas commands endpoint.
  * The LLM reasons about the user's intent and emits the executable command
  * batch directly — no separate intent label, no operate-agent roundtrip.
@@ -120,14 +127,6 @@ export interface AnnotationCommandResponse {
   reasoning: string;
   /** Atomic batch of canvas commands to execute. */
   commands: CanvasCommand[];
-}
-
-/**
- * Request body to log an intent episode outcome.
- */
-export interface IntentEpisodeRequest {
-  episode: IntentEpisode;
-  canvasId?: string;
 }
 
 // ==================== Annotation Pipeline Context ====================

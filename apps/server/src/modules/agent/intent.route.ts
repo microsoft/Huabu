@@ -8,6 +8,13 @@
  */
 
 import {
+  INTENT_SSE_EVENTS,
+  annotationIntentRequestSchema,
+  intentEpisodeRequestSchema,
+  intentRequestSchema,
+} from '@sediment/shared';
+
+import {
   recognizeIntent,
   recognizeIntentStream,
   recognizeAnnotationCommands,
@@ -15,26 +22,37 @@ import {
 } from './intent.service.js';
 
 import type {
+  AnnotationCommandResponse,
+  ApiResult,
+  IntentEpisodeAck,
+  IntentEpisodeRequest,
   IntentRequest,
   IntentResponse,
-  IntentEpisodeRequest,
+  IntentStreamEvent,
   AnnotationIntentRequest,
 } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
+/** Write a single typed SSE frame. */
+function writeIntentSSE(
+  raw: NodeJS.WritableStream,
+  event: IntentStreamEvent,
+): void {
+  raw.write(`event: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`);
+}
+
 const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
-  fastify.post<{ Body: IntentRequest; Reply: IntentResponse }>(
+  fastify.post<{ Body: IntentRequest; Reply: ApiResult<IntentResponse> }>(
     '/recognize',
     async (request, reply) => {
-      const { canvasContext } = request.body;
-
-      if (!canvasContext) {
-        return reply
-          .code(400)
-          .send({ error: 'canvasContext is required' } as never);
+      const parsed = intentRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          message: parsed.error.issues[0]?.message ?? 'Invalid body',
+        });
       }
 
-      const intentCandidates = await recognizeIntent(canvasContext);
+      const intentCandidates = await recognizeIntent(parsed.data.canvasContext);
 
       return reply.send({ intentCandidates });
     },
@@ -43,13 +61,14 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   fastify.post<{ Body: IntentRequest }>(
     '/recognize-stream',
     async (request, reply) => {
-      const { canvasContext } = request.body;
-
-      if (!canvasContext) {
-        return reply
-          .code(400)
-          .send({ error: 'canvasContext is required' } as never);
+      const parsed = intentRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          message: parsed.error.issues[0]?.message ?? 'Invalid body',
+        });
       }
+
+      const { canvasContext } = parsed.data;
 
       reply.hijack();
 
@@ -66,16 +85,21 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
 
       try {
         for await (const candidate of recognizeIntentStream(canvasContext)) {
-          reply.raw.write(
-            `event: candidate\ndata: ${JSON.stringify(candidate)}\n\n`,
-          );
+          writeIntentSSE(reply.raw, {
+            type: INTENT_SSE_EVENTS.Candidate,
+            data: candidate,
+          });
         }
-        reply.raw.write('event: done\ndata: {}\n\n');
+        writeIntentSSE(reply.raw, {
+          type: INTENT_SSE_EVENTS.Done,
+          data: {},
+        });
       } catch (err) {
         request.log.error(err, 'Intent streaming failed');
-        reply.raw.write(
-          `event: error\ndata: ${JSON.stringify({ error: 'Intent recognition failed' })}\n\n`,
-        );
+        writeIntentSSE(reply.raw, {
+          type: INTENT_SSE_EVENTS.Error,
+          data: { error: 'Intent recognition failed' },
+        });
       }
 
       reply.raw.end();
@@ -85,50 +109,47 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   // Annotation → canvas commands (one-step, no SSE).
   // Receives screenshot + structured cluster context, asks LLM to reason
   // and return an executable batch of canvas commands.
-  fastify.post<{ Body: AnnotationIntentRequest }>(
-    '/recognize-annotation',
-    async (request, reply) => {
-      const { screenshot, clusterContext, canvasId } = request.body;
+  fastify.post<{
+    Body: AnnotationIntentRequest;
+    Reply: ApiResult<AnnotationCommandResponse>;
+  }>('/recognize-annotation', async (request, reply) => {
+    const parsed = annotationIntentRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        message: parsed.error.issues[0]?.message ?? 'Invalid body',
+      });
+    }
+    const { screenshot, clusterContext, canvasId } = parsed.data;
 
-      if (!screenshot) {
-        return reply
-          .code(400)
-          .send({ error: 'screenshot is required' } as never);
-      }
+    try {
+      const result = await recognizeAnnotationCommands(
+        screenshot,
+        clusterContext,
+        canvasId,
+      );
+      return reply.send(result);
+    } catch (err) {
+      request.log.error(err, 'Annotation command recognition failed');
+      return reply
+        .code(500)
+        .send({ message: 'Annotation command recognition failed' });
+    }
+  });
 
-      if (!clusterContext) {
-        return reply
-          .code(400)
-          .send({ error: 'clusterContext is required' } as never);
-      }
-
-      try {
-        const result = await recognizeAnnotationCommands(
-          screenshot,
-          clusterContext,
-          canvasId,
-        );
-        return reply.send(result);
-      } catch (err) {
-        request.log.error(err, 'Annotation command recognition failed');
-        return reply
-          .code(500)
-          .send({ error: 'Annotation command recognition failed' } as never);
-      }
-    },
-  );
-
-  fastify.post<{ Body: IntentEpisodeRequest }>(
-    '/episode',
-    async (request, reply) => {
-      const { episode, canvasId } = request.body;
-      if (!episode?.id) {
-        return reply.code(400).send({ error: 'episode is required' } as never);
-      }
-      logIntentEpisode(episode, canvasId);
-      return reply.send({ success: true });
-    },
-  );
+  fastify.post<{
+    Body: IntentEpisodeRequest;
+    Reply: ApiResult<IntentEpisodeAck>;
+  }>('/episode', async (request, reply) => {
+    const parsed = intentEpisodeRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        message: parsed.error.issues[0]?.message ?? 'Invalid body',
+      });
+    }
+    const { episode, canvasId } = parsed.data;
+    logIntentEpisode(episode, canvasId);
+    return reply.send({ success: true });
+  });
 };
 
 export default intentRoutes;

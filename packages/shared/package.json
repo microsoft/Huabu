@@ -2,6 +2,7 @@
   "name": "@sediment/shared",
   "private": true,
   "type": "module",
+  "sideEffects": false,
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
@@ -19,5 +20,8 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "tsc -w -p tsconfig.json"
+  },
+  "dependencies": {
+    "zod": "^4.3.6"
   }
 }
