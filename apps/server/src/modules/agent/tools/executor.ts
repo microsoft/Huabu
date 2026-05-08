@@ -11,8 +11,8 @@ import { getCanvasStore } from '../../storage/index.js';
 
 import type {
   BlockProvenanceMap,
-  CanvasNodeType,
   NodeOrigin,
+  PreprocessableNodeType,
 } from '@sediment/shared';
 
 // ==================== Origin Helper ====================
@@ -415,7 +415,7 @@ async function executeIngestContent(args: {
   const result = await dispatcher.preprocess({
     canvasId: args.canvasId,
     nodeId: args.nodeId,
-    nodeType: type as CanvasNodeType,
+    nodeType: type as PreprocessableNodeType,
     trigger: 'manual',
     snapshot: {
       title: data?.label as string | undefined,

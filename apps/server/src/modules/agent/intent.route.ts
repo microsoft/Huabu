@@ -7,7 +7,12 @@
  * POST /api/intent/episode
  */
 
-import { INTENT_SSE_EVENTS } from '@sediment/shared';
+import {
+  INTENT_SSE_EVENTS,
+  annotationIntentRequestSchema,
+  intentEpisodeRequestSchema,
+  intentRequestSchema,
+} from '@sediment/shared';
 
 import {
   recognizeIntent,
@@ -40,13 +45,14 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   fastify.post<{ Body: IntentRequest; Reply: ApiResult<IntentResponse> }>(
     '/recognize',
     async (request, reply) => {
-      const { canvasContext } = request.body;
-
-      if (!canvasContext) {
-        return reply.code(400).send({ message: 'canvasContext is required' });
+      const parsed = intentRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          message: parsed.error.issues[0]?.message ?? 'Invalid body',
+        });
       }
 
-      const intentCandidates = await recognizeIntent(canvasContext);
+      const intentCandidates = await recognizeIntent(parsed.data.canvasContext);
 
       return reply.send({ intentCandidates });
     },
@@ -55,11 +61,14 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   fastify.post<{ Body: IntentRequest }>(
     '/recognize-stream',
     async (request, reply) => {
-      const { canvasContext } = request.body;
-
-      if (!canvasContext) {
-        return reply.code(400).send({ message: 'canvasContext is required' });
+      const parsed = intentRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          message: parsed.error.issues[0]?.message ?? 'Invalid body',
+        });
       }
+
+      const { canvasContext } = parsed.data;
 
       reply.hijack();
 
@@ -104,15 +113,13 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     Body: AnnotationIntentRequest;
     Reply: ApiResult<AnnotationCommandResponse>;
   }>('/recognize-annotation', async (request, reply) => {
-    const { screenshot, clusterContext, canvasId } = request.body;
-
-    if (!screenshot) {
-      return reply.code(400).send({ message: 'screenshot is required' });
+    const parsed = annotationIntentRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        message: parsed.error.issues[0]?.message ?? 'Invalid body',
+      });
     }
-
-    if (!clusterContext) {
-      return reply.code(400).send({ message: 'clusterContext is required' });
-    }
+    const { screenshot, clusterContext, canvasId } = parsed.data;
 
     try {
       const result = await recognizeAnnotationCommands(
@@ -133,10 +140,13 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     Body: IntentEpisodeRequest;
     Reply: ApiResult<IntentEpisodeAck>;
   }>('/episode', async (request, reply) => {
-    const { episode, canvasId } = request.body;
-    if (!episode?.id) {
-      return reply.code(400).send({ message: 'episode is required' });
+    const parsed = intentEpisodeRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        message: parsed.error.issues[0]?.message ?? 'Invalid body',
+      });
     }
+    const { episode, canvasId } = parsed.data;
     logIntentEpisode(episode, canvasId);
     return reply.send({ success: true });
   });

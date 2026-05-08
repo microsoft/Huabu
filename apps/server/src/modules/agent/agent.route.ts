@@ -12,7 +12,12 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { AGENT_SSE_EVENTS, createId } from '@sediment/shared';
+import {
+  AGENT_SSE_EVENTS,
+  agentCanvasIdQuerySchema,
+  agentRequestSchema,
+  createId,
+} from '@sediment/shared';
 import { encode } from 'gpt-tokenizer';
 
 import { buildOperatePrompt } from '../../prompt/agent.js';
@@ -26,6 +31,7 @@ import { getCanvasStore } from '../storage/index.js';
 
 import type { AssistantMessage, Context } from '@mariozechner/pi-ai';
 import type {
+  AgentCanvasIdQuery,
   AgentMode,
   AgentRequest,
   AgentStreamEvent,
@@ -556,11 +562,17 @@ const agentRoutes: FastifyPluginAsync = async (
    */
   fastify.get<{
     Params: { threadId: string };
-    Querystring: { canvasId?: string };
+    Querystring: AgentCanvasIdQuery;
     Reply: ApiResult<ChatHistoryResponse>;
   }>('/history/:threadId', async function (request, reply) {
     const { threadId } = request.params;
-    const { canvasId } = request.query;
+    const parsedQuery = agentCanvasIdQuerySchema.safeParse(request.query);
+    if (!parsedQuery.success) {
+      return reply.code(400).send({
+        message: parsedQuery.error.issues[0]?.message ?? 'Invalid query',
+      });
+    }
+    const { canvasId } = parsedQuery.data;
 
     if (!threadId || threadId.trim().length === 0) {
       return reply.code(400).send({ message: 'threadId is required' });
@@ -660,11 +672,17 @@ const agentRoutes: FastifyPluginAsync = async (
    */
   fastify.get<{
     Params: { threadId: string };
-    Querystring: { canvasId?: string };
+    Querystring: AgentCanvasIdQuery;
     Reply: ApiResult<ContextTokensResponse>;
   }>('/context-tokens/:threadId', async function (request, reply) {
     const { threadId } = request.params;
-    const { canvasId } = request.query;
+    const parsedQuery = agentCanvasIdQuerySchema.safeParse(request.query);
+    if (!parsedQuery.success) {
+      return reply.code(400).send({
+        message: parsedQuery.error.issues[0]?.message ?? 'Invalid query',
+      });
+    }
+    const { canvasId } = parsedQuery.data;
     const CONTEXT_WINDOW = 128_000;
 
     if (!threadId || threadId.trim().length === 0) {
@@ -712,6 +730,12 @@ const agentRoutes: FastifyPluginAsync = async (
    * Unified streaming endpoint for all agent modes.
    */
   fastify.post<{ Body: AgentRequest }>('/', async function (request, reply) {
+    const parsed = agentRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply
+        .code(400)
+        .send({ message: parsed.error.issues[0]?.message ?? 'Invalid body' });
+    }
     // TODO: `request.body.intentData` is sent by
     // the client (see `apps/web/src/api/agent.ts` and
     // `apps/web/src/hooks/useAgentStream.ts`) but is intentionally NOT
@@ -726,7 +750,7 @@ const agentRoutes: FastifyPluginAsync = async (
       canvasId,
       attachments,
       selectedNodeIds,
-    } = request.body;
+    } = parsed.data;
 
     const resolvedThreadId = getOrCreateThreadId(threadId);
 

@@ -16,7 +16,6 @@ import {
 import { getNodeDefaultSize } from '@/config/nodeSizes';
 
 import { resolveFrameAtPoint } from '../utils';
-import { type NestableNode } from '../utils/frame';
 
 import type {
   AddNodeInput,
@@ -24,6 +23,7 @@ import type {
   UiIntentResolution,
   UiResolverState,
 } from '../uiIntent';
+import type { NestableNode } from '../utils/frame';
 
 // ---------------------------------------------------------------------------
 // Sizing & placement helpers

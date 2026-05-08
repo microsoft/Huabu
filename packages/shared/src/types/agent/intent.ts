@@ -1,4 +1,3 @@
-import type { AgentBaseContext } from './context.js';
 import type { Rect } from '../../utils/spatial.js';
 import type { CanvasCommand } from '../canvas/command.js';
 
@@ -31,16 +30,6 @@ export interface IntentEpisode {
   outcome:
     | { type: 'selected'; chosenIndex: number; chosenLabel: string }
     | { type: 'dismissed' };
-}
-
-// ==================== Request / Response ====================
-
-/**
- * Request body sent from the frontend to trigger intent recognition.
- */
-export interface IntentRequest {
-  /** The lightweight canvas snapshot used for context-aware analysis */
-  canvasContext: AgentBaseContext;
 }
 
 /**
@@ -129,19 +118,6 @@ export interface AnnotationClusterContext {
 }
 
 /**
- * Request body for annotation intent recognition.
- * Carries a screenshot plus minimal cluster context from the client.
- */
-export interface AnnotationIntentRequest {
-  /** Base64 screenshot of the annotation area (no data: prefix). */
-  screenshot: string;
-  /** Structured context from the client-side pipeline. */
-  clusterContext: AnnotationClusterContext;
-  /** Canvas the gesture was drawn on; used by `get_node_detail` lookups. */
-  canvasId?: string;
-}
-
-/**
  * Response body for the one-step annotation → canvas commands endpoint.
  * The LLM reasons about the user's intent and emits the executable command
  * batch directly — no separate intent label, no operate-agent roundtrip.
@@ -151,14 +127,6 @@ export interface AnnotationCommandResponse {
   reasoning: string;
   /** Atomic batch of canvas commands to execute. */
   commands: CanvasCommand[];
-}
-
-/**
- * Request body to log an intent episode outcome.
- */
-export interface IntentEpisodeRequest {
-  episode: IntentEpisode;
-  canvasId?: string;
 }
 
 // ==================== Annotation Pipeline Context ====================

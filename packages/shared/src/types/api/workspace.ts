@@ -1,10 +1,10 @@
 /**
- * Workspace API wire types.
+ * Workspace API wire types & schemas.
  *
  * The workspace endpoints describe the server's storage mode and let the
- * client (in free mode) point the server at an absolute path. These types
- * are the single source of truth for both `apps/server/src/modules/workspace.route.ts`
- * and `apps/web/src/api/workspace.ts`.
+ * client (in free mode) point the server at an absolute path. Per
+ * docs/api-design.md: schemas are the single source of truth, types
+ * derived via `z.infer`.
  *
  * Errors use the shared {@link ApiErrorBody} envelope with HTTP status
  * codes (4xx / 5xx) — there is no in-body `ok` discriminator on the
@@ -12,6 +12,8 @@
  * which uses it for *business* outcomes ("cancelled" / "no-picker") that
  * are returned with HTTP 200.
  */
+
+import { z } from 'zod';
 
 export type WorkspaceMode = 'free' | 'managed';
 
@@ -49,14 +51,16 @@ export type PickFolderResult =
   | { ok: false; reason: 'cancelled' | 'no-picker' };
 
 /** Body for `PUT /api/workspace`. */
-export interface WorkspacePathRequest {
-  path: string;
-}
+export const workspacePathSchema = z.object({
+  path: z.string().min(1, 'Workspace path is required'),
+});
+export type WorkspacePathRequest = z.infer<typeof workspacePathSchema>;
 
 /** Body for `POST /api/workspace/validate-path`. */
-export interface ValidatePathRequest {
-  path: string;
-}
+export const validatePathSchema = z.object({
+  path: z.string().min(1, 'Path is required'),
+});
+export type ValidatePathRequest = z.infer<typeof validatePathSchema>;
 
 /** Response for `POST /api/workspace/validate-path`. */
 export interface ValidatePathResponse {

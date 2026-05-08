@@ -144,6 +144,10 @@ export default typescriptEslint.config(
       'react/jsx-uses-react': 'off',
       'react-hooks/rules-of-hooks': 'error',
       'react-hooks/exhaustive-deps': 'warn',
+      // Keep zod (and any future runtime dep of @sediment/shared) out of
+      // the web bundle. Schemas may only be imported as `import type`
+      // from web code — see docs/api-design.md §Rules #5.
+      '@typescript-eslint/no-import-type-side-effects': 'error',
     },
   },
   eslintConfigPrettier,

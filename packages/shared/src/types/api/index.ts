@@ -11,3 +11,4 @@ export * from './workspace.js';
 export * from './web.js';
 export * from './llm.js';
 export * from './preprocessing.js';
+export * from './agent.js';

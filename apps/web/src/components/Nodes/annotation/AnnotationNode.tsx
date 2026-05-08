@@ -1,10 +1,10 @@
-import { type Node, type NodeProps } from '@xyflow/react';
 import { memo, useMemo } from 'react';
 
 import { NodeWrapper } from '../NodeWrapper';
 import { pointsToPath } from './annotationPath';
 
 import type { CanvasAnnotationNodeData } from '../types';
+import type { Node, NodeProps } from '@xyflow/react';
 
 export type AnnotationNodeType = Node<CanvasAnnotationNodeData, 'annotation'>;
 

@@ -3,10 +3,15 @@ import { mkdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { createId } from '@sediment/shared';
+import {
+  createCanvasBodySchema,
+  createId,
+  exportCanvasQuerySchema,
+  preprocessNodeBodySchema,
+  putCanvasBodySchema,
+} from '@sediment/shared';
 import archiver from 'archiver';
 import yauzl from 'yauzl';
-import { z } from 'zod';
 
 import { getPreprocessDispatcher } from '../preprocessing/index.js';
 import {
@@ -21,19 +26,19 @@ import { getWorkspacePath } from '../workspace.js';
 import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
 import type {
   ApiResult,
-  CanvasNodeType,
   CreateCanvasRequest,
   CreateCanvasResponse,
   DeleteCanvasResponse,
   DeleteNodeResponse,
+  ExportCanvasQuery,
   GetCanvasResponse,
   ImportCanvasResponse,
   ListCanvasesResponse,
+  PreprocessNodeBody,
   PreprocessNodeRequest,
   PreprocessNodeResponse,
   PutCanvasRequest,
   PutCanvasResponse,
-  TriggerReason,
 } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
@@ -216,16 +221,6 @@ function hydrateNodeContent(store: CanvasStore, nodes: NodeLike[]): NodeLike[] {
   });
 }
 
-const putCanvasBodySchema = z.object({
-  version: z.number().int().nonnegative(),
-  state: z.unknown(),
-  title: z.string().min(1).optional(),
-});
-
-const createCanvasBodySchema = z.object({
-  title: z.string().min(1).optional(),
-});
-
 const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   // --- List all canvases ---
 
@@ -337,46 +332,36 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   // Single route that handles all node types (note/text/web/pdf/image/frame/video).
   // Replaces the split between PUT /:canvasId/nodes/:nodeId and POST /resolve-label.
 
-  const preprocessBodySchema = z.object({
-    nodeType: z.enum(['note', 'text', 'web', 'pdf', 'image', 'video', 'frame']),
-    trigger: z
-      .enum(['node_inserted', 'node_updated', 'flush', 'manual', 'repair'])
-      .optional(),
-    snapshot: z.record(z.string(), z.unknown()),
-    options: z
-      .object({
-        allowLLM: z.boolean().optional(),
-        allowPersistence: z.boolean().optional(),
-        force: z.boolean().optional(),
-      })
-      .optional(),
-  });
-
   fastify.post<{
     Params: { canvasId: string; nodeId: string };
-    Body: PreprocessNodeRequest;
+    Body: PreprocessNodeBody;
     Reply: ApiResult<PreprocessNodeResponse>;
   }>('/:canvasId/nodes/:nodeId/preprocess', async function (request, reply) {
     const { canvasId, nodeId } = request.params;
-    const parsed = preprocessBodySchema.safeParse(request.body);
+    const parsed = preprocessNodeBodySchema.safeParse(request.body);
     if (!parsed.success) {
-      return reply.code(400).send({ message: 'Invalid request body' });
+      return reply.code(400).send({
+        message: parsed.error.issues[0]?.message ?? 'Invalid request body',
+      });
     }
 
-    const { nodeType, trigger, snapshot, options } = parsed.data;
+    const { nodeType, trigger, snapshot, previousSnapshot, options } =
+      parsed.data;
     const dispatcher = getPreprocessDispatcher();
 
     try {
       const ppRequest: PreprocessNodeRequest = {
         canvasId,
         nodeId,
-        nodeType: nodeType as CanvasNodeType,
-        trigger: (trigger ?? 'node_updated') as TriggerReason,
+        nodeType,
+        trigger: trigger ?? 'node_updated',
         snapshot,
+        previousSnapshot,
         options: {
           allowLLM: options?.allowLLM ?? true,
           allowPersistence: options?.allowPersistence ?? true,
           force: options?.force ?? false,
+          mode: options?.mode,
         },
       };
 
@@ -513,10 +498,16 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
    */
   fastify.get<{
     Params: { canvasId: string };
-    Querystring: { includeHistory?: string };
+    Querystring: ExportCanvasQuery;
   }>('/:canvasId/export', async function (request, reply) {
     const { canvasId } = request.params;
-    const includeHistory = request.query.includeHistory !== 'false';
+    const parsedQuery = exportCanvasQuerySchema.safeParse(request.query);
+    if (!parsedQuery.success) {
+      return reply.code(400).send({
+        message: parsedQuery.error.issues[0]?.message ?? 'Invalid query',
+      });
+    }
+    const includeHistory = parsedQuery.data.includeHistory !== 'false';
 
     const store = getCanvasStore(canvasId);
     const canvas = store.read();

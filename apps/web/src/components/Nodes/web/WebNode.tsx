@@ -1,4 +1,3 @@
-import { type Node, type NodeProps } from '@xyflow/react';
 import { Fullscreen, ArrowUpRight } from 'lucide-react';
 import { memo, useState, useEffect, useMemo } from 'react';
 
@@ -12,6 +11,7 @@ import { NodeWrapper } from '../NodeWrapper.tsx';
 import { PreviewCard } from '../PreviewCard.tsx';
 
 import type { CanvasWebNodeData } from '../types.ts';
+import type { Node, NodeProps } from '@xyflow/react';
 
 export type WebNodeType = Node<CanvasWebNodeData, 'web'>;
 

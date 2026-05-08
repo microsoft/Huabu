@@ -45,7 +45,6 @@ import {
   extractSnippet,
   pushAction,
 } from '@/handler/canvasCommand/utils';
-import { type AlignDirection } from '@/handler/canvasCommand/utils/alignment';
 import {
   computeFrameFit,
   getAbsolutePosition as getFrameAbsolutePosition,
@@ -58,6 +57,8 @@ import {
 import { canvasHistoryManager } from './canvasHistoryManager';
 import { getCanvas, preprocessNode, putCanvas } from '../api';
 import { getNodeSize } from '../utils/node/size';
+
+import type { AlignDirection } from '@/handler/canvasCommand/utils/alignment';
 
 const AUTOSAVE_DEBOUNCE_MS = 1000;
 const PREPROCESS_DEBOUNCE_MS = 1000;

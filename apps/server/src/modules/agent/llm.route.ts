@@ -1,4 +1,8 @@
-import { z } from 'zod';
+import {
+  llmConfigUpdateSchema,
+  llmModelsQuerySchema,
+  oauthStatusQuerySchema,
+} from '@sediment/shared';
 
 import {
   getAvailableProviders,
@@ -17,11 +21,13 @@ import type {
   ApiResult,
   LLMConfig,
   LLMConfigUpdate,
+  LLMModelsQuery,
   LLMModelsResponse,
   LLMProvidersResponse,
   OAuthDeviceCodeResponse,
   OAuthLogoutResponse,
   OAuthPollResponse,
+  OAuthStatusQuery,
   OAuthStatusResponse,
 } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
@@ -49,14 +55,7 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
         });
       }
 
-      const schema = z.object({
-        provider: z.string().min(1, 'Provider is required'),
-        model: z.string().min(1, 'Model is required'),
-        apiKey: z.string().optional(),
-        baseUrl: z.string().optional(),
-      });
-
-      const parsed = schema.safeParse(request.body);
+      const parsed = llmConfigUpdateSchema.safeParse(request.body);
       if (!parsed.success) {
         return reply
           .status(400)
@@ -78,14 +77,10 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
 
   // GET /api/llm/models — list available models for a provider
   app.get<{
-    Querystring: { provider?: string };
+    Querystring: LLMModelsQuery;
     Reply: ApiResult<LLMModelsResponse>;
   }>('/models', async (request, reply) => {
-    const schema = z.object({
-      provider: z.string().min(1, 'Provider query param is required'),
-    });
-
-    const parsed = schema.safeParse(request.query);
+    const parsed = llmModelsQuerySchema.safeParse(request.query);
     if (!parsed.success) {
       return reply
         .status(400)
@@ -139,14 +134,10 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
 
   // GET /api/llm/oauth/status — check if OAuth credentials exist
   app.get<{
-    Querystring: { provider?: string };
+    Querystring: OAuthStatusQuery;
     Reply: ApiResult<OAuthStatusResponse>;
   }>('/oauth/status', async (request, reply) => {
-    const schema = z.object({
-      provider: z.string().min(1),
-    });
-
-    const parsed = schema.safeParse(request.query);
+    const parsed = oauthStatusQuerySchema.safeParse(request.query);
     const provider = parsed.success ? parsed.data.provider : 'github-copilot';
 
     const authenticated = hasOAuthCredentials(provider);

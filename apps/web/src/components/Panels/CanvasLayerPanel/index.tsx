@@ -2,10 +2,11 @@ import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { useMemo } from 'react';
 
 import { CanvasLayerTree } from './CanvasLayerTree';
-import { type DataSourceNodeLike, type DataSourceTreeItem } from './types';
 import { getNodeIcon, NODE_TYPE_LABEL } from '../../../config/nodeIcons';
 import useCanvasStore from '../../../store/canvasStore';
 import { SidebarPanel } from '../SidebarPanel';
+
+import type { DataSourceNodeLike, DataSourceTreeItem } from './types';
 
 interface CanvasLayerPanelProps {
   isCollapsed?: boolean;

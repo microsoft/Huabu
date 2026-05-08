@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { z } from 'zod';
+import { validatePathSchema, workspacePathSchema } from '@sediment/shared';
 
 import { resetPreprocessDispatcher } from './preprocessing/index.js';
 import { resetStorageCache } from './storage/index.js';
@@ -194,10 +194,7 @@ const workspaceRoutes: FastifyPluginAsync = async (app) => {
     if (!isLocalhost(request.ip)) {
       return sendError(reply, 403, 'Forbidden');
     }
-    const schema = z.object({
-      path: z.string().min(1, 'Path is required'),
-    });
-    const parsed = schema.safeParse(request.body);
+    const parsed = validatePathSchema.safeParse(request.body);
     if (!parsed.success) {
       return sendError(
         reply,
@@ -227,10 +224,7 @@ const workspaceRoutes: FastifyPluginAsync = async (app) => {
         'Forbidden: workspace settings can only be changed from localhost',
       );
     }
-    const schema = z.object({
-      path: z.string().min(1, 'Workspace path is required'),
-    });
-    const parsed = schema.safeParse(request.body);
+    const parsed = workspacePathSchema.safeParse(request.body);
     if (!parsed.success) {
       return sendError(
         reply,

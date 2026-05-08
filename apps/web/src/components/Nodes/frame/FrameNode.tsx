@@ -1,4 +1,3 @@
-import { type Node, type NodeProps } from '@xyflow/react';
 import clsx from 'clsx';
 import { LayoutGrid, Ungroup } from 'lucide-react';
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
@@ -9,6 +8,7 @@ import { NodeWrapper } from '@/components/Nodes/NodeWrapper.tsx';
 import useCanvasStore from '@/store/canvasStore.ts';
 
 import type { CanvasFrameNodeData } from '@/components/Nodes/types.ts';
+import type { Node, NodeProps } from '@xyflow/react';
 
 export type FrameNodeType = Node<CanvasFrameNodeData, 'frame'>;
 

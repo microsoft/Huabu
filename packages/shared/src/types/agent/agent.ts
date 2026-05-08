@@ -1,7 +1,3 @@
-import type { ChatAttachment } from './chat.js';
-import type { AgentBaseContext } from './context.js';
-import type { IntentCandidate } from './intent.js';
-
 /**
  * Unified Agent Types
  *
@@ -12,30 +8,6 @@ import type { IntentCandidate } from './intent.js';
 // ==================== Agent Modes ====================
 
 export type AgentMode = 'ask' | 'operate';
-
-// ==================== Request ====================
-
-export interface AgentRequest {
-  /** User message text */
-  content: string;
-  /** Thread ID for conversation persistence */
-  threadId?: string;
-  /** Agent mode */
-  mode?: AgentMode;
-  /** Canvas context for tool access and node lookup */
-  canvasContext?: AgentBaseContext;
-  /** Canvas ID (required for operate mode) */
-  canvasId?: string;
-  /** Image/file attachments */
-  attachments?: ChatAttachment[];
-  /** IDs of canvas nodes selected when the message was sent */
-  selectedNodeIds?: string[];
-  /** Intent-select data for operate mode triggered by intent recognition */
-  intentData?: {
-    candidates: IntentCandidate[];
-    selectedIntent: string;
-  };
-}
 
 // ==================== Streaming Events ====================
 //
