@@ -82,11 +82,7 @@ export default function CanvasPage() {
             Canvas not found
           </h2>
           <p className="text-fg-subtle mt-1 text-sm">
-            The canvas{' '}
-            <code className="bg-surface rounded px-1.5 py-0.5 text-xs">
-              {canvasId}
-            </code>{' '}
-            does not exist or may have been deleted.
+            This canvas doesn&apos;t exist or may have been deleted.
           </p>
         </div>
         <Link
