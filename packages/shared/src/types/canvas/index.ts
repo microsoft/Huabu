@@ -127,6 +127,7 @@ export type {
   PutCanvasRequest,
   PutCanvasResponse,
   DeleteNodeResponse,
+  DeleteCanvasResponse,
   CanvasVersionMismatchError,
   UpdateCanvasStateParams,
   UpdateCanvasStateResult,

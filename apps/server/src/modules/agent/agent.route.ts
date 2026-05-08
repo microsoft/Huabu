@@ -29,10 +29,13 @@ import type {
   AgentMode,
   AgentRequest,
   AgentStreamEvent,
+  ApiResult,
   ChatAttachment,
   ChatHistoryItem,
   ChatHistoryResponse,
+  ContextTokensResponse,
   SelectedNodeDetail,
+  StopThreadResponse,
   ToolResponse,
 } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
@@ -554,15 +557,13 @@ const agentRoutes: FastifyPluginAsync = async (
   fastify.get<{
     Params: { threadId: string };
     Querystring: { canvasId?: string };
-    Reply: ChatHistoryResponse;
+    Reply: ApiResult<ChatHistoryResponse>;
   }>('/history/:threadId', async function (request, reply) {
     const { threadId } = request.params;
     const { canvasId } = request.query;
 
     if (!threadId || threadId.trim().length === 0) {
-      return reply.code(400).send({
-        message: 'threadId is required',
-      } as unknown as ChatHistoryResponse);
+      return reply.code(400).send({ message: 'threadId is required' });
     }
 
     const context = loadContext(threadId, canvasId);
@@ -585,18 +586,18 @@ const agentRoutes: FastifyPluginAsync = async (
    * Explicitly stop an active agent run. Only this endpoint triggers
    * the interrupted state — client disconnects (e.g. page refresh) do not.
    */
-  fastify.post<{ Params: { threadId: string } }>(
-    '/stop/:threadId',
-    async function (request, reply) {
-      const { threadId } = request.params;
-      const run = activeRuns.get(threadId);
-      if (run && !run.abortController.signal.aborted) {
-        run.abortController.abort();
-        return reply.send({ stopped: true });
-      }
-      return reply.send({ stopped: false });
-    },
-  );
+  fastify.post<{
+    Params: { threadId: string };
+    Reply: ApiResult<StopThreadResponse>;
+  }>('/stop/:threadId', async function (request, reply) {
+    const { threadId } = request.params;
+    const run = activeRuns.get(threadId);
+    if (run && !run.abortController.signal.aborted) {
+      run.abortController.abort();
+      return reply.send({ stopped: true });
+    }
+    return reply.send({ stopped: false });
+  });
 
   /**
    * GET /agent/stream/:threadId
@@ -660,6 +661,7 @@ const agentRoutes: FastifyPluginAsync = async (
   fastify.get<{
     Params: { threadId: string };
     Querystring: { canvasId?: string };
+    Reply: ApiResult<ContextTokensResponse>;
   }>('/context-tokens/:threadId', async function (request, reply) {
     const { threadId } = request.params;
     const { canvasId } = request.query;

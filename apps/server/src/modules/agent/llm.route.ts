@@ -13,6 +13,17 @@ import {
   startDeviceCodeFlow,
 } from './oauth.js';
 
+import type {
+  ApiResult,
+  LLMConfig,
+  LLMConfigUpdate,
+  LLMModelsResponse,
+  LLMProvidersResponse,
+  OAuthDeviceCodeResponse,
+  OAuthLogoutResponse,
+  OAuthPollResponse,
+  OAuthStatusResponse,
+} from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
 /**
@@ -24,43 +35,52 @@ function isLocalhost(ip: string): boolean {
 
 const llmRoutes: FastifyPluginAsync = async (app) => {
   // GET /api/llm/config — return current provider/model config
-  app.get('/config', async () => {
+  app.get<{ Reply: ApiResult<LLMConfig> }>('/config', async () => {
     return getLLMConfig();
   });
 
   // PUT /api/llm/config — update provider/model config
-  app.put('/config', async (request, reply) => {
-    if (!isLocalhost(request.ip)) {
-      return reply.status(403).send({
-        message: 'Forbidden: LLM settings can only be changed from localhost',
+  app.put<{ Body: LLMConfigUpdate; Reply: ApiResult<LLMConfig> }>(
+    '/config',
+    async (request, reply) => {
+      if (!isLocalhost(request.ip)) {
+        return reply.status(403).send({
+          message: 'Forbidden: LLM settings can only be changed from localhost',
+        });
+      }
+
+      const schema = z.object({
+        provider: z.string().min(1, 'Provider is required'),
+        model: z.string().min(1, 'Model is required'),
+        apiKey: z.string().optional(),
+        baseUrl: z.string().optional(),
       });
-    }
 
-    const schema = z.object({
-      provider: z.string().min(1, 'Provider is required'),
-      model: z.string().min(1, 'Model is required'),
-      apiKey: z.string().optional(),
-      baseUrl: z.string().optional(),
-    });
+      const parsed = schema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply
+          .status(400)
+          .send({ message: parsed.error.issues[0]?.message ?? 'Invalid body' });
+      }
 
-    const parsed = schema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply
-        .status(400)
-        .send({ message: parsed.error.issues[0]?.message });
-    }
-
-    const result = setLLMConfig(parsed.data);
-    return reply.send(result);
-  });
+      const result = setLLMConfig(parsed.data);
+      return reply.send(result);
+    },
+  );
 
   // GET /api/llm/providers — list available providers
-  app.get('/providers', async () => {
-    return { providers: getAvailableProviders() };
-  });
+  app.get<{ Reply: ApiResult<LLMProvidersResponse> }>(
+    '/providers',
+    async () => {
+      return { providers: getAvailableProviders() };
+    },
+  );
 
   // GET /api/llm/models — list available models for a provider
-  app.get('/models', async (request, reply) => {
+  app.get<{
+    Querystring: { provider?: string };
+    Reply: ApiResult<LLMModelsResponse>;
+  }>('/models', async (request, reply) => {
     const schema = z.object({
       provider: z.string().min(1, 'Provider query param is required'),
     });
@@ -69,7 +89,7 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
     if (!parsed.success) {
       return reply
         .status(400)
-        .send({ message: parsed.error.issues[0]?.message });
+        .send({ message: parsed.error.issues[0]?.message ?? 'Invalid query' });
     }
 
     const models = getModelsForProvider(parsed.data.provider);
@@ -79,40 +99,49 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
   // ── OAuth (GitHub Copilot) ──
 
   // POST /api/llm/oauth/device-code — start device code flow
-  app.post('/oauth/device-code', async (request, reply) => {
-    if (!isLocalhost(request.ip)) {
-      return reply.status(403).send({ message: 'Forbidden' });
-    }
+  app.post<{ Reply: ApiResult<OAuthDeviceCodeResponse> }>(
+    '/oauth/device-code',
+    async (request, reply) => {
+      if (!isLocalhost(request.ip)) {
+        return reply.status(403).send({ message: 'Forbidden' });
+      }
 
-    try {
-      const result = await startDeviceCodeFlow();
-      return reply.send(result);
-    } catch (err) {
-      return reply.status(500).send({
-        message: err instanceof Error ? err.message : 'OAuth flow failed',
-      });
-    }
-  });
+      try {
+        const result = await startDeviceCodeFlow();
+        return reply.send(result);
+      } catch (err) {
+        return reply.status(500).send({
+          message: err instanceof Error ? err.message : 'OAuth flow failed',
+        });
+      }
+    },
+  );
 
   // POST /api/llm/oauth/poll — poll for authorization result
-  app.post('/oauth/poll', async (request, reply) => {
-    if (!isLocalhost(request.ip)) {
-      return reply.status(403).send({ message: 'Forbidden' });
-    }
+  app.post<{ Reply: ApiResult<OAuthPollResponse> }>(
+    '/oauth/poll',
+    async (request, reply) => {
+      if (!isLocalhost(request.ip)) {
+        return reply.status(403).send({ message: 'Forbidden' });
+      }
 
-    try {
-      const status = await pollDeviceCode();
-      return reply.send({ status });
-    } catch (err) {
-      return reply.send({
-        status: 'error',
-        error: err instanceof Error ? err.message : 'Poll failed',
-      });
-    }
-  });
+      try {
+        const status = await pollDeviceCode();
+        return reply.send({ status });
+      } catch (err) {
+        return reply.send({
+          status: 'error',
+          error: err instanceof Error ? err.message : 'Poll failed',
+        });
+      }
+    },
+  );
 
   // GET /api/llm/oauth/status — check if OAuth credentials exist
-  app.get('/oauth/status', async (request, reply) => {
+  app.get<{
+    Querystring: { provider?: string };
+    Reply: ApiResult<OAuthStatusResponse>;
+  }>('/oauth/status', async (request, reply) => {
     const schema = z.object({
       provider: z.string().min(1),
     });
@@ -125,14 +154,17 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
   });
 
   // POST /api/llm/oauth/logout — clear OAuth credentials
-  app.post('/oauth/logout', async (request, reply) => {
-    if (!isLocalhost(request.ip)) {
-      return reply.status(403).send({ message: 'Forbidden' });
-    }
+  app.post<{ Reply: ApiResult<OAuthLogoutResponse> }>(
+    '/oauth/logout',
+    async (request, reply) => {
+      if (!isLocalhost(request.ip)) {
+        return reply.status(403).send({ message: 'Forbidden' });
+      }
 
-    logoutOAuth();
-    return reply.send({ ok: true });
-  });
+      logoutOAuth();
+      return reply.send({ ok: true });
+    },
+  );
 };
 
 export default llmRoutes;

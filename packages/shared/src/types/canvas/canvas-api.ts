@@ -25,6 +25,11 @@ export interface DeleteNodeResponse {
   success: boolean;
 }
 
+/** Response for DELETE /api/canvas/:canvasId. */
+export interface DeleteCanvasResponse {
+  success: boolean;
+}
+
 /**
  * 409 Conflict body returned by `PUT /api/canvas/:canvasId` when the
  * client's version doesn't match the server's. Shaped like an

@@ -21,6 +21,16 @@ export interface ApiErrorBody {
   details?: unknown;
 }
 
+/**
+ * Discriminated reply type for any JSON route that may return either a
+ * success body `T` or the canonical {@link ApiErrorBody} on failure.
+ *
+ * Use this as the `Reply` generic in Fastify route declarations so that
+ * `reply.send(...)` is type-checked for both branches without resorting to
+ * `as never` casts on the error path.
+ */
+export type ApiResult<T> = T | ApiErrorBody;
+
 /** Response for `POST /api/canvas/:canvasId/artifact/:type`. */
 export interface ArtifactUploadResponse {
   /** Stable artifact id. */

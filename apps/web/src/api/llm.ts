@@ -7,6 +7,7 @@ import type {
   LLMModelInfo,
   LLMModelsResponse,
   LLMProviderInfo,
+  LLMProvidersResponse,
   OAuthDeviceCodeResponse,
   OAuthPollResponse,
   OAuthStatusResponse,
@@ -36,10 +37,9 @@ export async function putLLMConfig(
 
 /** Fetch the list of available LLM providers. */
 export async function getLLMProviders(): Promise<LLMProviderInfo[]> {
-  const data = await apiFetch<{ providers: LLMProviderInfo[] }>(
-    routes.llmProviders,
-    { fallbackMessage: 'Failed to get LLM providers' },
-  );
+  const data = await apiFetch<LLMProvidersResponse>(routes.llmProviders, {
+    fallbackMessage: 'Failed to get LLM providers',
+  });
   return data.providers;
 }
 

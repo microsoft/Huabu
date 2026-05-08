@@ -76,6 +76,13 @@ export interface LLMConfigUpdate {
 }
 
 /**
+ * Response from GET /api/llm/providers
+ */
+export interface LLMProvidersResponse {
+  providers: LLMProviderInfo[];
+}
+
+/**
  * Response from GET /api/llm/models?provider=xxx
  */
 export interface LLMModelsResponse {
