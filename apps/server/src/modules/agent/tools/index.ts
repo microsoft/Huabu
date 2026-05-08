@@ -13,7 +13,6 @@ import { executeTool } from './executor.js';
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import type { AgentMode } from '@sediment/shared';
 
-export { chatTools, operateTools } from './definitions.js';
 export { executeTool } from './executor.js';
 export type { ToolDefinition } from './definitions.js';
 

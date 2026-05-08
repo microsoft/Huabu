@@ -7,8 +7,7 @@
  * `AsyncGenerator<StreamEvent>` shape the route layer already consumes.
  *
  * Public surface (signature-compatible with the previous self-rolled loop):
- *  - {@link runAgent}     — yields SSE-shaped events, mutates `context.messages`
- *  - {@link createContext} — fresh empty Context for a given mode
+ *  - {@link runAgent} — yields SSE-shaped events, mutates `context.messages`
  */
 
 import { Agent } from '@earendil-works/pi-agent-core';
@@ -52,8 +51,9 @@ export interface AgentRunOptions {
   /** Abort signal for cancellation */
   signal?: AbortSignal;
   /**
-   * Soft cap on agent turns (LLM call + tool batch) before we forcibly
-   * abort the run. Mirrors the previous self-rolled `maxIterations`.
+   * Soft cap on agent turns (LLM call + tool batch). When reached, the
+   * agent loop is aborted internally and a cap-out error is emitted.
+   * Mirrors the previous self-rolled `maxIterations`.
    */
   maxIterations?: number;
 }
@@ -95,6 +95,17 @@ export async function* runAgent(
 
   const tools = buildToolsForMode(mode, { canvasId });
 
+  // Soft turn cap: replaces the old self-rolled `maxIterations` counter.
+  // pi-agent-core 0.74's `Agent` class doesn't expose `shouldStopAfterTurn`
+  // (only the lower-level `runAgentLoop` does), so we count `turn_end`
+  // events and call `agent.abort()` after the cap. This calls the
+  // *agent's* internal AbortController, not the route's — so the route's
+  // `cleanUpAbortedContext` does not fire, and we trim the trailing
+  // aborted-empty assistant message that the loop appends as a side
+  // effect (see the `agent_end` branch below).
+  let turnCount = 0;
+  let cappedOut = false;
+
   const agent = new Agent({
     initialState: {
       systemPrompt: context.systemPrompt,
@@ -119,13 +130,23 @@ export async function* runAgent(
     toolExecution: 'sequential',
   });
 
-  // ------- Event queue bridging subscribe() → AsyncGenerator -------
+  // ------- Single subscribe: queue events, flag agent_end, count turns -------
   type Resolver = (value: AgentEvent | null) => void;
   const eventQueue: AgentEvent[] = [];
   const waiters: Resolver[] = [];
   let agentEnded = false;
 
   const unsubscribe = agent.subscribe((event) => {
+    if (event.type === 'turn_end') {
+      turnCount++;
+      if (turnCount >= maxIterations && !cappedOut) {
+        cappedOut = true;
+        logger?.info(
+          `[agent] Reached maxIterations (${maxIterations}), aborting after current turn`,
+        );
+        agent.abort();
+      }
+    }
     if (event.type === 'agent_end') agentEnded = true;
     const w = waiters.shift();
     if (w) w(event);
@@ -157,22 +178,6 @@ export async function* runAgent(
   } else {
     signal?.addEventListener('abort', onAbort, { once: true });
   }
-
-  // ------- Soft turn cap (replaces the old maxIterations counter) -------
-  let turnCount = 0;
-  let cappedOut = false;
-  const unsubscribeTurnCap = agent.subscribe((event) => {
-    if (event.type === 'turn_end') {
-      turnCount++;
-      if (turnCount >= maxIterations && !cappedOut) {
-        cappedOut = true;
-        logger?.info(
-          `[agent] Reached maxIterations (${maxIterations}), aborting`,
-        );
-        agent.abort();
-      }
-    }
-  });
 
   // ------- Kick off the run -------
   // `continue()` resumes from existing context (last message must be user
@@ -222,6 +227,16 @@ export async function* runAgent(
         case 'tool_execution_end': {
           const result = event.result as AgentToolResult<unknown> | undefined;
           const toolText = result?.content ? joinText(result.content) : '';
+          // pi-agent-core wraps thrown executor errors as `isError: true`.
+          // Today's tools encode failures inside the JSON payload instead
+          // of throwing, so this only surfaces in logs — but Step 2's file
+          // tools (which throw) will benefit from the breadcrumb without
+          // any further wiring.
+          if (event.isError) {
+            logger?.info(
+              `[agent] Tool ${event.toolName} returned isError=true: ${toolText.slice(0, 200)}`,
+            );
+          }
           yield {
             type: 'tool_result',
             data: { toolName: event.toolName, toolResult: toolText },
@@ -232,6 +247,25 @@ export async function* runAgent(
         case 'agent_end': {
           // Look at the final assistant message to decide done vs. error.
           const messages = agent.state.messages;
+
+          // When `cappedOut` is true, `agent.abort()` was called from the
+          // turn_end listener. If the just-finished turn had pending tool
+          // calls, the loop entered one more iteration where the LLM
+          // stream got cancelled — appending an empty assistant message
+          // with `stopReason: 'aborted'`. Trim it so the user sees the
+          // last *useful* assistant text on cap-out (and so we don't leak
+          // an empty "AI response" row into history).
+          if (cappedOut) {
+            const tail = messages[messages.length - 1];
+            if (
+              tail?.role === 'assistant' &&
+              tail.stopReason === 'aborted' &&
+              joinText(tail.content).length === 0
+            ) {
+              messages.pop();
+            }
+          }
+
           const lastAssistant = [...messages]
             .reverse()
             .find((m): m is AssistantMessage => m.role === 'assistant');
@@ -248,18 +282,34 @@ export async function* runAgent(
                 error: agent.state.errorMessage ?? 'LLM streaming error',
               },
             };
-          } else if (stopReason === 'aborted') {
-            // Route handles abort UX (cleanUpAbortedContext + status row).
-            // Surface a soft notice when the abort came from our turn cap
-            // so the user sees why the agent stopped.
-            if (cappedOut) {
+          } else if (cappedOut) {
+            // Soft turn cap hit. Surface the last useful assistant text
+            // (if any) followed by an error event explaining why we
+            // stopped. The route's `cleanUpAbortedContext` does NOT fire
+            // here because the *route's* AbortController was never
+            // tripped — only the agent's internal one was.
+            if (finalText) {
               yield {
-                type: 'error',
+                type: 'done',
                 data: {
-                  error: `Agent loop exceeded maximum iterations (${maxIterations})`,
+                  message: finalText,
+                  meta: {
+                    stopReason,
+                    usage: lastAssistant?.usage,
+                    iterations: turnCount,
+                  },
                 },
               };
             }
+            yield {
+              type: 'error',
+              data: {
+                error: `Agent loop exceeded maximum iterations (${maxIterations})`,
+              },
+            };
+          } else if (stopReason === 'aborted') {
+            // Real user-initiated abort: route handles UX
+            // (cleanUpAbortedContext + status row). Nothing to emit.
           } else {
             yield {
               type: 'done',
@@ -285,7 +335,6 @@ export async function* runAgent(
     }
   } finally {
     unsubscribe();
-    unsubscribeTurnCap();
     signal?.removeEventListener('abort', onAbort);
 
     // Make sure the run has fully settled (and `agent_end` listeners
@@ -300,18 +349,4 @@ export async function* runAgent(
     context.messages.length = 0;
     context.messages.push(...agent.state.messages);
   }
-}
-
-/**
- * Create a fresh pi-ai Context for a given mode.
- *
- * `tools` are intentionally omitted here: the runtime tool list is rebuilt
- * by `runAgent` per-request via `buildToolsForMode`, since each tool needs
- * a fresh `canvasId`-bound `execute` closure.
- */
-export function createContext(_mode: AgentMode, systemPrompt: string): Context {
-  return {
-    systemPrompt,
-    messages: [],
-  };
 }

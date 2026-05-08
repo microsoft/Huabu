@@ -936,9 +936,6 @@ const agentRoutes: FastifyPluginAsync = async (
         signal: abortController.signal,
       });
 
-      // Track partial assistant text so we can persist it on abort
-      let partialText = '';
-
       // Track the latest agent error so we can persist it AFTER the stream
       // exits. We can't push into `context.messages` mid-loop because the
       // pi-agent-core wrapper in `runAgent()` performs a final
@@ -951,17 +948,6 @@ const agentRoutes: FastifyPluginAsync = async (
       for await (const event of stream) {
         if (abortController.signal.aborted) break;
         emit(event);
-
-        // Accumulate streamed text so partial replies survive interruption
-        if (event.type === AGENT_SSE_EVENTS.TextDelta) {
-          partialText += event.data.content;
-        }
-
-        // Reset partial text when a complete assistant message lands in context
-        // (runAgent pushes the result after s.result() completes)
-        if (event.type === AGENT_SSE_EVENTS.Done) {
-          partialText = '';
-        }
 
         // Capture the latest error; we persist it post-loop (see comment above).
         if (event.type === AGENT_SSE_EVENTS.Error && event.data.error) {
@@ -984,19 +970,12 @@ const agentRoutes: FastifyPluginAsync = async (
       }
 
       // On explicit abort (user clicked stop), clean up context.
+      // Partial assistant text streamed before abort is already preserved
+      // by pi-agent-core: its agent-loop finalizes the in-flight message
+      // via `response.result()` (with `stopReason: 'aborted'`) and pushes
+      // it to `state.messages`, which `runAgent`'s finally syncs back
+      // into `context.messages`. No re-injection needed here.
       if (abortController.signal.aborted) {
-        // If there was partial assistant text that never made it into context
-        // (because s.result() was never called), inject it now so the user
-        // sees the partial reply after reload.
-        if (partialText) {
-          context.messages.push({
-            role: 'assistant',
-            content: [{ type: 'text', text: partialText }],
-            stopReason: 'stop',
-            timestamp: Date.now(),
-          } as unknown as Context['messages'][number]);
-        }
-
         request.log.info(
           '[agent] Abort detected — cleaning up context (%d messages before cleanup)',
           context.messages.length,

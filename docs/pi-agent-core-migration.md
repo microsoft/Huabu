@@ -25,7 +25,7 @@
 
 | 项                                                             | 状态                  |
 | -------------------------------------------------------------- | --------------------- |
-| 替换 agent loop（`runAgent` 内部实现）                         | ✅ 本次（Step 1）     |
+| 替换 agent loop（`runAgent` 内部实现）                         | ✅ 已落地（Step 1）   |
 | 引入 `pi-coding-agent` 的 read / write / edit 等工具           | ⏳ 后续（Step 2）     |
 | 决定文件工具的沙箱边界（per-canvas / 全局工作区）              | ⏳ 后续（Step 3）     |
 | 启用 steering / parallel / terminate 等高级特性                | ⏳ 后续（Step 4）     |
@@ -74,7 +74,7 @@ type AgentMessage = Message | CustomAgentMessages[keyof CustomAgentMessages];
 
 ## 详细 Step 列表
 
-### Step 1：替换 agent loop（本期目标）
+### Step 1：替换 agent loop ✅ 已落地
 
 #### 新增依赖
 
@@ -89,21 +89,22 @@ type AgentMessage = Message | CustomAgentMessages[keyof CustomAgentMessages];
 }
 ```
 
-#### 改造点
+#### 实际改造点
 
 1. **[apps/server/src/modules/agent/tools/definitions.ts](../apps/server/src/modules/agent/tools/definitions.ts)**
-   把每个 `Tool`（`webSearchTool`、`getNodeDetailTool`、`getCanvasStateTool`、
-   `canvasCommandsTool`、`ingestContentTool`、`useSkillTool`）升级为 `AgentTool`：
-   - 新增 `label: string`（UI 展示名，本期内只用于 pi-agent-core 自己内部）
-   - 新增 `execute: (toolCallId, params, signal, onUpdate) => Promise<AgentToolResult<T>>`
-     内部转调 `executor.ts` 的 `executeTool(name, params, { canvasId })`
+   每个 `Tool`（`webSearchTool`、`getNodeDetailTool`、`getCanvasStateTool`、
+   `canvasCommandsTool`、`ingestContentTool`、`useSkillTool`）升级为带
+   `label: string` 的 `ToolDefinition`（pi-ai `Tool` + UI label）。
+   `execute` 不写在这里——保持纯 schema/description，便于复用。
 
 2. **[apps/server/src/modules/agent/tools/index.ts](../apps/server/src/modules/agent/tools/index.ts)**
    导出工厂 `buildToolsForMode(mode, ctx: { canvasId? }) → AgentTool[]`，
-   把 `canvasId` 注入到每个 tool 的 `execute` 闭包；
-   `chatTools` / `operateTools` 由"静态数组"改为"工厂函数"。
+   把 `canvasId` 注入到每个 tool 的 `execute` 闭包；`execute` 内部转调
+   `executor.ts` 的 `executeTool(name, params, { canvasId })` 并把结果
+   包成 `AgentToolResult<undefined>` 的 text content。
+   工具抛错由 pi-agent-core 自动包成 `isError: true` 的 toolResult。
 
-3. **[apps/server/src/modules/agent/agent.service.ts](../apps/server/src/modules/agent/agent.service.ts) 整体重写**（逻辑等价）：
+3. **[apps/server/src/modules/agent/agent.service.ts](../apps/server/src/modules/agent/agent.service.ts) 整体重写**：
 
    ```ts
    const agent = new Agent({
@@ -114,26 +115,37 @@ type AgentMessage = Message | CustomAgentMessages[keyof CustomAgentMessages];
        messages: context.messages,
      },
      convertToLlm: (msgs) => msgs as Message[],
-     streamFn: (model, ctx, opts) => piStream(model, ctx, opts),
+     // pi-agent-core 在每次 LLM 调用前都会 await 这个 callback——长跑工具
+     // 期间 OAuth token 该刷新就刷新。
      getApiKey: () => ensureApiKey(),
-     toolExecution: 'sequential', // 与现状一致，先不开 parallel
+     toolExecution: 'sequential', // Step 4 再考虑 'parallel'
    });
    ```
 
    - 保留 `runAgent` 的 `AsyncGenerator<StreamEvent>` 签名，route 端零改动
-   - 内部用 `agent.subscribe()` 收集事件后通过队列转 `yield`
-   - 退出条件：`agent_end` 事件 + `await agent.waitForIdle()`
+   - **不传 `streamFn`**：pi-agent-core 默认走 pi-ai 的 `streamSimple`，已经
+     是我们想要的行为；包一层只会多一层 OAuth 流程
+   - 内部用一条 `agent.subscribe()` 同时做三件事：
+     1. 收集 `agent_end` 用于桥接 generator 退出
+     2. 计 `turn_end` 数实现 maxIterations 软上限
+     3. 把事件 push 进队列供 generator `await` 取走
+   - 退出条件：`agent_end` 事件 + `await runPromise` + `await agent.waitForIdle()`
    - **完成后必须把 `agent.state.messages` 同步回入参 `context.messages`**
      （route 层依赖 mutate 后的 context 做 saveContext）
+     —— 用 `context.messages.length = 0; context.messages.push(...)` 保数组 identity
 
 4. **[apps/server/src/modules/agent/agent.route.ts](../apps/server/src/modules/agent/agent.route.ts)** 几乎不动：
    - `runAgent({ mode, canvasId, context, signal, ... })` 签名保持
    - `cleanUpAbortedContext` 仍直接 mutate `context.messages` 数组
    - `saveContext` / `debouncedSave` / `flushSave` 全部保留
+   - **删掉了 abort 时手动注入 `partialText` 的旧逻辑** —— pi-agent-core 在
+     stream 被取消时会 `await response.result()` 拿到带 `stopReason: 'aborted'`
+     的 final assistant message（包含中断前累计的文本），由 `runAgent` finally
+     同步进 `context.messages`，刷新后 chat panel 仍能看到中断前的文本
 
 5. **[apps/server/src/modules/agent/llm.ts](../apps/server/src/modules/agent/llm.ts) 不变**
-   `llmStream` / `llmComplete` 仍然导出。
-   `llmStream` 作为 `Agent` 的 `streamFn` 适配器。
+   `llmStream` / `llmComplete` 仍然导出，供 `intent.service.ts` 使用。
+   新增 `ensureApiKey()` 导出（`runAgent` 的 `getApiKey` callback 复用它）。
 
 6. **[apps/server/src/modules/agent/intent.service.ts](../apps/server/src/modules/agent/intent.service.ts) 不变**
    它走 `llmComplete` + 自己处理 `validateToolCall`，不经过 agent loop。
@@ -141,11 +153,12 @@ type AgentMessage = Message | CustomAgentMessages[keyof CustomAgentMessages];
 7. **[apps/server/src/modules/preprocessing/provider-manager.ts](../apps/server/src/modules/preprocessing/provider-manager.ts) 不变**
    也是 `llmComplete` 单次调用。
 
-#### 验收标准
+#### 验收标准 ✅
 
-- `pnpm typecheck` 通过
-- `pnpm lint` 通过
-- 手动跑 ask 模式 + operate 模式各一条消息，确认：
+- `pnpm typecheck` 通过 ✅
+- `pnpm lint` 通过（0 errors，pre-existing warnings 无新增）✅
+- `pnpm format` 通过 ✅
+- 手动跑 ask 模式 + operate 模式各一条消息（待用户复测）：
   - SSE 事件序列与现状视觉一致
   - history 重放正确
   - stop（abort）后 cleanUpAbortedContext 仍能裁剪 orphan toolCall
@@ -174,6 +187,10 @@ createReadTool(canvasArtifactsDir, {
 });
 ```
 
+> 💡 文件工具会通过 `throw` 抛错，pi-agent-core 会自动包成 `isError: true`。
+> Step 1 已经在 `tool_execution_end` 分支预留了 `event.isError` 的 log
+> breadcrumb，Step 2 不需要再补线。
+
 ### Step 3（后续）：决定 sandbox 边界
 
 | 选项          | 说明                                                                               |
@@ -194,11 +211,11 @@ createReadTool(canvasArtifactsDir, {
 | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | `Agent` 类的事件流是异步推送，要桥到 `AsyncGenerator`，可能漏事件             | 用 `subscribe()` 内部 push 到队列，generator 端 `await` 取队列；最后 `await agent.waitForIdle()` 保证全部 listener 收尾 |
 | `cleanUpAbortedContext` 直接 mutate `assistant.content` 数组                  | 仍有效；Agent 的 setter 只对**整体重新赋值**做浅复制，元素 mutate 不受影响                                              |
-| `validateToolCall` 当前在 service 层做；Agent 内部已自己做 schema 校验        | 删掉 service 层的重复校验；错误会自动包成 `toolResult.isError`                                                          |
-| 未来想用 `streamProxy`（让 web 端直连 LLM proxy）                             | 本期不动；`streamFn` 仍走服务端 `piStream`                                                                              |
-| `getApiKey` callback 与现在的"先 build model 后 await ensureApiKey"流程不一致 | 让 `streamFn` 适配器在调用 `piStream` 前先 `await ensureApiKey()`；`getApiKey` 留作 OAuth 长跑期 token 刷新备用         |
+| `validateToolCall` 在 service 层做；Agent 内部已自己做 schema 校验            | 统一 agent 走 pi-agent-core 内置校验；`intent.service.ts` 是独立的非 Agent 路径，仍保留自己的 `validateToolCall` 调用   |
+| 未来想用 `streamProxy`（让 web 端直连 LLM proxy）                             | 本期不动；本期甚至连 `streamFn` 都不传，直接用 pi-agent-core 默认的 `streamSimple`                                      |
+| `getApiKey` callback 与现在的"先 build model 后 await ensureApiKey"流程不一致 | 直接把 `getApiKey: () => ensureApiKey()` 传给 `Agent`，每次 LLM 调用前都会 await，OAuth token 长跑期可刷新              |
 
-## 副作用清单（执行 Step 1 时会实际修改的行为）
+## 副作用清单（执行 Step 1 后实际改变的行为）
 
 > 这是给 reviewer 看的"哪些行为变了"清单，不是文件清单。
 
@@ -213,34 +230,29 @@ createReadTool(canvasArtifactsDir, {
 3. **工具异常处理**
    - **旧**：service 层 try/catch，把 `Error.message` 作为 `tool_result` 内容
    - **新**：tool `execute` 直接 throw，pi-agent-core 自动包成 `isError: true` 的 toolResult
-   - **影响**：错误内容仍以 `tool_result` event 流出，但 payload 结构稍有变化（`isError` 通过 toolResult 消息体携带，不再走 SSE 单独字段）
+   - **影响**：今天所有 executor 仍把错误编码成 JSON `status: 'error'` payload，
+     前端表现完全一致；`runAgent` 在 `tool_execution_end` 分支已经把
+     `event.isError` 接到 `logger.info` 上做 breadcrumb，Step 2 引入会 throw 的
+     文件工具时，错误会自动通过这条 log 出现，无需额外接线
 4. **Context 同步**（这里的 `Context` 指 pi-ai 的 `{ systemPrompt, messages, tools? }` 对象，也是 `.history/<canvasId>/<threadId>.json` 持久化的形态）
    - **旧**：service 内每一轮直接 `context.messages.push(assistantMsg / toolResultMsg)`，route 端任何时候读到的都是最新值
    - **新**：`Agent` 在内部维护自己的 `state.messages`（构造时浅拷贝入参，之后不再回写）；`runAgent` 退出前显式 `context.messages.length = 0; context.messages.push(...agent.state.messages)` 把最终结果灌回入参
    - **影响**：route 端 `cleanUpAbortedContext` 与 `saveContext` 行为不变；入参 `context` 对象引用 + `messages` 数组引用都保持稳定（只是元素被原地替换）。**唯一可观察差异**：route 端的 `debouncedSave` 在中途事件触发时，磁盘上看到的可能仍是上一轮的 messages，直到 `runAgent` 退出后才一次性灌回；`flushSave()` 仍然保证最终一致
 5. **abort 后的 partial assistant text 持久化**
    - **旧**：route 层 `partialText` 累加 `text_delta`，abort 时手动塞 assistant message
-   - **新**：pi-agent-core 在 abort 时已经把 `streamingMessage` 写入 `state.messages`（stopReason 为 `aborted`）
-   - **影响**：route 层那段"abort 时手工注入 partial assistant"逻辑可以**简化或删除**；本期为稳健起见**保留**，等 Step 4 再删
-6. **`maxIterations` 概念消失**
-   - **旧**：`runAgent` 自己有 `maxIterations = 20` 计数
-   - **新**：pi-agent-core 没有等价概念（它走的是工具执行驱动的自然终止）
-   - **影响**：理论上工具调用可能跑更长。**缓解**：service 层用 `shouldStopAfterTurn` callback 复刻一个 turn 上限（默认 20）
-
-## CHANGELOG 草稿
-
-```markdown
-### 2026-05-08 — Agent loop 升级到 pi-agent-core
-
-**What Changed**
-
-- 服务端 agent 循环从自研 `while` 循环切换到 `@earendil-works/pi-agent-core`，
-  为后续引入 read / write / edit 等文件工具铺路。
-- SSE 协议、UI、历史会话格式全部保持兼容，**用户感知为零**。
-
-**Notes**
-
-- 工具卡片出现时间会**略微滞后几十毫秒**（现在精确到工具实际开始执行的时刻）。
-- 老会话 `.history/chat/*.json` 直接兼容，无需迁移。
-- 新依赖：`@earendil-works/pi-agent-core@^0.74.0`，与已有 `pi-ai` 同版本。
-```
+   - **新**：pi-agent-core 在 abort 时已经把 final assistant message
+     （`stopReason: 'aborted'`，含中断前累计文本）写入 `state.messages`，由
+     `runAgent` finally 同步回 `context.messages`
+   - **本次实施**：route 层那段「abort 时手工注入 partial assistant」**已删除**
+     （包括相关的 `partialText` 累加 / 重置逻辑），避免出现同一段文字写两次
+     （一条 `aborted` + 一条 `stop`）的重复
+6. **`maxIterations` 概念**
+   - **旧**：`runAgent` 自己有 `maxIterations = 20` 计数，超过就 `break`
+   - **新**：pi-agent-core `Agent` 类**没有** expose `shouldStopAfterTurn`
+     （只有底层 `runAgentLoop` 函数才有），所以 service 层在 subscribe
+     里 count `turn_end` 事件，到上限调用 `agent.abort()`
+   - **副作用**：`agent.abort()` 触发的是 _agent 内部_ 的 AbortController，
+     不是 route 的；所以 route 的 `cleanUpAbortedContext` 不会被牵连。
+     pi-agent-core 在这种 abort 下会追加一条空的 `aborted` assistant
+     占位，service 层在 `agent_end` 分支检测并 `messages.pop()` 掉它，
+     再 emit `done`（最后一条有用 assistant 文本）+ `error`（cap-out 提示）
