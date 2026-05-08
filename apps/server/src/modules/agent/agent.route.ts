@@ -710,6 +710,12 @@ const agentRoutes: FastifyPluginAsync = async (
    * Unified streaming endpoint for all agent modes.
    */
   fastify.post<{ Body: AgentRequest }>('/', async function (request, reply) {
+    // TODO: `request.body.intentData` is sent by
+    // the client (see `apps/web/src/api/agent.ts` and
+    // `apps/web/src/hooks/useAgentStream.ts`) but is intentionally NOT
+    // destructured here — it is silently dropped. Either inject it as a
+    // `[SYSTEM IntentSelect]` user-role message before `runAgent`, or
+    // remove `intentData` from `AgentRequest` and the client.
     const {
       content,
       threadId,
