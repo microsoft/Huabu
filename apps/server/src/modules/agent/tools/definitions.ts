@@ -3,6 +3,10 @@
  *
  * All tools the AI can call across ask and operate modes.
  * Each tool is a pi-ai Tool with a TypeBox schema for validation.
+ *
+ * Definitions here are pure schema + description pairs. The runnable
+ * `AgentTool` form (with `execute` closures bound to a request-scoped
+ * `canvasId`) is built by `buildToolsForMode` in `./index.ts`.
  */
 
 import { Type } from '@earendil-works/pi-ai';
@@ -21,6 +25,16 @@ import {
 } from '@sediment/shared';
 
 import type { Tool } from '@earendil-works/pi-ai';
+
+/**
+ * Definition shape we author here: a pi-ai `Tool` plus a UI-facing
+ * `label`. The runnable `execute` field is added later by `buildToolsForMode`,
+ * which closes over the request-scoped `canvasId`.
+ */
+export interface ToolDefinition extends Tool {
+  /** Human-readable label, surfaced to pi-agent-core's UI hooks. */
+  label: string;
+}
 
 /**
  * Build a TypeBox literal-string union from an `as const` array. Used to
@@ -60,8 +74,9 @@ export const webSearchParamsSchema = Type.Object({
   ),
 });
 
-export const webSearchTool: Tool = {
+export const webSearchTool: ToolDefinition = {
   name: 'web_search',
+  label: 'Web Search',
   description:
     'Search the internet for up-to-date facts, documentation, or news using Tavily.',
   parameters: webSearchParamsSchema,
@@ -79,8 +94,9 @@ export const getNodeDetailParamsSchema = Type.Object({
   ),
 });
 
-export const getNodeDetailTool: Tool = {
+export const getNodeDetailTool: ToolDefinition = {
   name: 'get_node_detail',
+  label: 'Get Node Detail',
   description:
     'Get the full content and metadata of a specific canvas node by its ID.',
   parameters: getNodeDetailParamsSchema,
@@ -95,8 +111,9 @@ export const getCanvasStateParamsSchema = Type.Object({
   ),
 });
 
-export const getCanvasStateTool: Tool = {
+export const getCanvasStateTool: ToolDefinition = {
   name: 'get_canvas_state',
+  label: 'Get Canvas State',
   description:
     'Get a summary of the current canvas state including all nodes, edges, and frames.',
   parameters: getCanvasStateParamsSchema,
@@ -396,8 +413,9 @@ export const canvasCommandsParamsSchema = Type.Object({
   }),
 });
 
-export const canvasCommandsTool: Tool = {
+export const canvasCommandsTool: ToolDefinition = {
   name: 'canvas_commands',
+  label: 'Canvas Commands',
   description: `Execute a batch of canvas commands atomically. All commands in a single call are applied as one undo step.
 
 ## Command types
@@ -444,8 +462,9 @@ export const ingestContentParamsSchema = Type.Object({
   }),
 });
 
-export const ingestContentTool: Tool = {
+export const ingestContentTool: ToolDefinition = {
   name: 'ingest_content',
+  label: 'Ingest Content',
   description:
     'Trigger content ingestion for a canvas node, loading its web/PDF content into the per-canvas content store.',
   parameters: ingestContentParamsSchema,
@@ -460,8 +479,9 @@ export const useSkillParamsSchema = Type.Object({
   }),
 });
 
-export const useSkillTool: Tool = {
+export const useSkillTool: ToolDefinition = {
   name: 'use_skill',
+  label: 'Use Skill',
   description:
     'Load detailed guidance for a specific skill before executing complex canvas operations. Call this when you need step-by-step guidance for tasks like building flowcharts, creating structured layouts, synthesizing nodes, etc. The skill content will be returned as the tool result.',
   parameters: useSkillParamsSchema,
@@ -474,13 +494,13 @@ export const useSkillTool: Tool = {
  * Includes read-only canvas/content access so the agent can
  * lazily fetch full content of selected nodes on demand.
  */
-export const chatTools: Tool[] = [webSearchTool, getNodeDetailTool];
+export const chatTools: ToolDefinition[] = [webSearchTool, getNodeDetailTool];
 
 /**
  * Tools available in operate mode.
  * Full set of canvas manipulation tools for intent execution.
  */
-export const operateTools: Tool[] = [
+export const operateTools: ToolDefinition[] = [
   webSearchTool,
   getCanvasStateTool,
   getNodeDetailTool,

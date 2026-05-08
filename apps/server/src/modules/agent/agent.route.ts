@@ -939,6 +939,15 @@ const agentRoutes: FastifyPluginAsync = async (
       // Track partial assistant text so we can persist it on abort
       let partialText = '';
 
+      // Track the latest agent error so we can persist it AFTER the stream
+      // exits. We can't push into `context.messages` mid-loop because the
+      // pi-agent-core wrapper in `runAgent()` performs a final
+      // `context.messages = [...agent.state.messages]` sync in its `finally`
+      // block — which would wipe anything we pushed inside the loop.
+      // Persisting after the loop ensures `buildHistoryItems()` can
+      // reconstruct the error status row on history reload.
+      let lastErrorDetail: string | null = null;
+
       for await (const event of stream) {
         if (abortController.signal.aborted) break;
         emit(event);
@@ -954,18 +963,24 @@ const agentRoutes: FastifyPluginAsync = async (
           partialText = '';
         }
 
-        // When the agent yields an error event, persist it in the context
-        // so buildHistoryItems() can reconstruct it on history reload.
+        // Capture the latest error; we persist it post-loop (see comment above).
         if (event.type === AGENT_SSE_EVENTS.Error && event.data.error) {
-          context.messages.push({
-            role: 'user',
-            content: `[SYSTEM Error] ${event.data.error}`,
-            timestamp: Date.now(),
-          });
+          lastErrorDetail = event.data.error;
         }
 
         // Periodically save context so partial progress survives refreshes
         debouncedSave();
+      }
+
+      // Persist the agent error AFTER the for-await exits — by which point
+      // runAgent's `finally` has already synced agent.state.messages back
+      // into `context.messages`, so our push survives the final flushSave.
+      if (lastErrorDetail) {
+        context.messages.push({
+          role: 'user',
+          content: `[SYSTEM Error] ${lastErrorDetail}`,
+          timestamp: Date.now(),
+        });
       }
 
       // On explicit abort (user clicked stop), clean up context.

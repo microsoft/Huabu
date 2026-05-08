@@ -1,24 +1,30 @@
 /**
  * Unified Agent Service
  *
- * Core agent loop using pi-ai. Handles all modes (chat, agent)
- * with a shared tool-calling framework. The LLM streams tokens and can
- * invoke tools; the agent loop automatically executes tools and continues
- * until the LLM produces a final text response.
+ * Drives the agent loop using `@earendil-works/pi-agent-core`'s `Agent`
+ * class. The class owns the transcript, executes tools, and emits
+ * lifecycle events; this module bridges those events into the
+ * `AsyncGenerator<StreamEvent>` shape the route layer already consumes.
  *
- * Replaces LangGraph's StateGraph, checkpointer, and BaseAgent entirely.
+ * Public surface (signature-compatible with the previous self-rolled loop):
+ *  - {@link runAgent}     — yields SSE-shaped events, mutates `context.messages`
+ *  - {@link createContext} — fresh empty Context for a given mode
  */
 
-import { validateToolCall } from '@earendil-works/pi-ai';
+import { Agent } from '@earendil-works/pi-agent-core';
 
-import { llmStream } from './llm.js';
-import { chatTools, operateTools, executeTool } from './tools/index.js';
+import { ensureApiKey, getLLMModel } from './llm.js';
+import { buildToolsForMode } from './tools/index.js';
 
 import type {
-  Context,
-  Tool,
+  AgentEvent,
+  AgentToolResult,
+} from '@earendil-works/pi-agent-core';
+import type {
   AssistantMessage,
-  ToolCall,
+  Context,
+  Message,
+  TextContent,
 } from '@earendil-works/pi-ai';
 import type { AgentMode, AgentStreamEvent } from '@sediment/shared';
 
@@ -39,27 +45,27 @@ export interface AgentRunOptions {
   mode: AgentMode;
   /** Current canvas ID available as implicit context for canvas-aware tools. */
   canvasId?: string;
-  /** pi-ai Context (systemPrompt + messages + tools). Will be mutated with responses. */
+  /** pi-ai Context (systemPrompt + messages). Will be mutated with responses. */
   context: Context;
   /** Structured logger for request-scoped diagnostics */
   logger?: AgentLogger;
   /** Abort signal for cancellation */
   signal?: AbortSignal;
-  /** Maximum number of tool-calling rounds (default: 20) */
+  /**
+   * Soft cap on agent turns (LLM call + tool batch) before we forcibly
+   * abort the run. Mirrors the previous self-rolled `maxIterations`.
+   */
   maxIterations?: number;
 }
 
-// ==================== Tool Sets ====================
+// ==================== Helpers ====================
 
-function getToolsForMode(mode: AgentMode): Tool[] {
-  switch (mode) {
-    case 'ask':
-      return chatTools;
-    case 'operate':
-      return operateTools;
-    default:
-      return chatTools;
-  }
+/** Concatenate every TextContent block into a single string. */
+function joinText(content: ReadonlyArray<{ type: string }>): string {
+  return content
+    .filter((b): b is TextContent => b.type === 'text')
+    .map((b) => b.text)
+    .join('');
 }
 
 // ==================== Agent Loop ====================
@@ -67,17 +73,13 @@ function getToolsForMode(mode: AgentMode): Tool[] {
 /**
  * Run the agent loop, streaming events as an async generator.
  *
- * The loop:
- * 1. Sends context to LLM via pi-ai stream()
- * 2. Streams text_delta events for token-level updates
- * 3. When LLM requests tool calls (stopReason === 'toolUse'):
- *    a. Emit tool_start events
- *    b. Execute each tool
- *    c. Emit tool_result events
- *    d. Add assistant message + tool results to context
- *    e. Call the LLM again (goto 1)
- * 4. When LLM finishes (stopReason === 'stop'):
- *    a. Emit done event with final message
+ * Internally:
+ * 1. Constructs a pi-agent-core `Agent` over `context.messages`
+ * 2. Calls `agent.continue()` (the user message is already on context)
+ * 3. Bridges agent events into our `AgentStreamEvent` discriminated union
+ * 4. After `agent_end`, syncs `agent.state.messages` back into
+ *    `context.messages` so the route's existing `saveContext` /
+ *    `cleanUpAbortedContext` keep working.
  */
 export async function* runAgent(
   options: AgentRunOptions,
@@ -91,188 +93,225 @@ export async function* runAgent(
     maxIterations = 20,
   } = options;
 
-  const tools = getToolsForMode(mode);
+  const tools = buildToolsForMode(mode, { canvasId });
 
-  // Ensure tools are set on the context
-  context.tools = tools;
+  const agent = new Agent({
+    initialState: {
+      systemPrompt: context.systemPrompt,
+      model: getLLMModel(),
+      tools,
+      // The Agent setter copies the top-level array; element references
+      // stay identical, so route-side mutations on individual messages
+      // continue to work — but the array identity differs after
+      // construction, which is why we re-sync below in the `finally`.
+      messages: context.messages,
+    },
+    convertToLlm: (msgs) => msgs as Message[],
+    // pi-agent-core invokes this before every LLM call, including across
+    // long-running tool batches — that's exactly when OAuth tokens (e.g.
+    // GitHub Copilot's short-lived bearer) may need refreshing. Reusing
+    // our existing resolver keeps env / persisted-config / OAuth flows
+    // working unchanged.
+    getApiKey: () => ensureApiKey(),
+    // Match the previous self-rolled loop, which executed tool batches one
+    // call at a time. Step 4 of the migration plan will flip this to
+    // 'parallel' once we audit canvas_commands for race-free batching.
+    toolExecution: 'sequential',
+  });
 
-  let iteration = 0;
+  // ------- Event queue bridging subscribe() → AsyncGenerator -------
+  type Resolver = (value: AgentEvent | null) => void;
+  const eventQueue: AgentEvent[] = [];
+  const waiters: Resolver[] = [];
+  let agentEnded = false;
 
-  while (iteration < maxIterations) {
-    iteration++;
+  const unsubscribe = agent.subscribe((event) => {
+    if (event.type === 'agent_end') agentEnded = true;
+    const w = waiters.shift();
+    if (w) w(event);
+    else eventQueue.push(event);
+  });
 
-    if (signal?.aborted) {
-      logger?.info('[agent] Signal aborted at iteration start, stopping');
-      return;
+  function nextEvent(): Promise<AgentEvent | null> {
+    const queued = eventQueue.shift();
+    if (queued !== undefined) {
+      return Promise.resolve(queued);
     }
+    if (agentEnded) {
+      return Promise.resolve(null);
+    }
+    return new Promise<AgentEvent | null>((resolve) => waiters.push(resolve));
+  }
 
-    // Stream from the LLM
-    const s = await llmStream(context, {
-      signal,
-    });
+  // ------- Abort wiring -------
+  const onAbort = () => {
+    logger?.info('[agent] Signal aborted, propagating to pi-agent-core');
+    agent.abort();
+    // Wake any pending waiter so the generator can drain and exit.
+    const w = waiters.shift();
+    if (w) w(null);
+  };
+  if (signal?.aborted) {
+    // Already aborted before we started.
+    onAbort();
+  } else {
+    signal?.addEventListener('abort', onAbort, { once: true });
+  }
 
-    // Track whether we already yielded an error (to avoid calling s.result)
-    let streamErrored = false;
+  // ------- Soft turn cap (replaces the old maxIterations counter) -------
+  let turnCount = 0;
+  let cappedOut = false;
+  const unsubscribeTurnCap = agent.subscribe((event) => {
+    if (event.type === 'turn_end') {
+      turnCount++;
+      if (turnCount >= maxIterations && !cappedOut) {
+        cappedOut = true;
+        logger?.info(
+          `[agent] Reached maxIterations (${maxIterations}), aborting`,
+        );
+        agent.abort();
+      }
+    }
+  });
 
-    // Forward streaming events
-    for await (const event of s) {
+  // ------- Kick off the run -------
+  // `continue()` resumes from existing context (last message must be user
+  // or toolResult, which the route guarantees by pushing the user message
+  // before calling runAgent).
+  const runPromise = agent.continue().catch((err: unknown) => {
+    // pi-agent-core's contract is that streamFn never throws and errors
+    // are encoded into the stream. But just in case, surface the error
+    // through the queue so the generator emits an `error` event.
+    logger?.info(
+      `[agent] continue() rejected: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    agentEnded = true;
+    const w = waiters.shift();
+    if (w) w(null);
+  });
+
+  try {
+    while (true) {
+      const event = await nextEvent();
+      if (event === null) break;
+
       switch (event.type) {
-        case 'text_delta':
-          yield {
-            type: 'text_delta',
-            data: { content: event.delta },
-          };
+        case 'message_update': {
+          const inner = event.assistantMessageEvent;
+          if (inner.type === 'text_delta') {
+            yield { type: 'text_delta', data: { content: inner.delta } };
+          } else if (inner.type === 'thinking_delta') {
+            yield { type: 'thinking_delta', data: { content: inner.delta } };
+          }
           break;
+        }
 
-        case 'thinking_delta':
-          yield {
-            type: 'thinking_delta',
-            data: { content: event.delta },
-          };
-          break;
-
-        case 'toolcall_start':
-          break;
-
-        case 'toolcall_end':
+        case 'tool_execution_start': {
           yield {
             type: 'tool_start',
             data: {
-              toolName: event.toolCall.name,
-              toolArgs: event.toolCall.arguments as Record<string, unknown>,
+              toolName: event.toolName,
+              toolArgs: (event.args ?? {}) as Record<string, unknown>,
             },
           };
           break;
+        }
 
-        case 'error':
-          streamErrored = true;
+        case 'tool_execution_end': {
+          const result = event.result as AgentToolResult<unknown> | undefined;
+          const toolText = result?.content ? joinText(result.content) : '';
           yield {
-            type: 'error',
-            data: {
-              error: event.error?.errorMessage ?? 'LLM streaming error',
-            },
+            type: 'tool_result',
+            data: { toolName: event.toolName, toolResult: toolText },
           };
+          break;
+        }
+
+        case 'agent_end': {
+          // Look at the final assistant message to decide done vs. error.
+          const messages = agent.state.messages;
+          const lastAssistant = [...messages]
+            .reverse()
+            .find((m): m is AssistantMessage => m.role === 'assistant');
+
+          const stopReason = lastAssistant?.stopReason;
+          const finalText = lastAssistant
+            ? joinText(lastAssistant.content)
+            : '';
+
+          if (stopReason === 'error') {
+            yield {
+              type: 'error',
+              data: {
+                error: agent.state.errorMessage ?? 'LLM streaming error',
+              },
+            };
+          } else if (stopReason === 'aborted') {
+            // Route handles abort UX (cleanUpAbortedContext + status row).
+            // Surface a soft notice when the abort came from our turn cap
+            // so the user sees why the agent stopped.
+            if (cappedOut) {
+              yield {
+                type: 'error',
+                data: {
+                  error: `Agent loop exceeded maximum iterations (${maxIterations})`,
+                },
+              };
+            }
+          } else {
+            yield {
+              type: 'done',
+              data: {
+                message: finalText,
+                meta: {
+                  stopReason,
+                  usage: lastAssistant?.usage,
+                  iterations: turnCount,
+                },
+              },
+            };
+          }
+          break;
+        }
+
+        // Other events (agent_start, turn_start/end, message_start/end,
+        // tool_execution_update) are intentionally not surfaced — the
+        // route + UI never relied on them.
+        default:
           break;
       }
     }
+  } finally {
+    unsubscribe();
+    unsubscribeTurnCap();
+    signal?.removeEventListener('abort', onAbort);
 
-    // If the stream errored, stop the loop
-    if (streamErrored) {
-      return;
-    }
+    // Make sure the run has fully settled (and `agent_end` listeners
+    // drained) before we sync state back. `runPromise` already resolves
+    // at that point; `waitForIdle` is a belt-and-suspenders.
+    await runPromise;
+    await agent.waitForIdle();
 
-    // Get the final assistant message
-    let result: AssistantMessage;
-    try {
-      result = await s.result();
-    } catch (err) {
-      yield {
-        type: 'error',
-        data: {
-          error: err instanceof Error ? err.message : 'Failed to get result',
-        },
-      };
-      return;
-    }
-
-    // Add assistant message to context
-    context.messages.push(result);
-
-    // Check if the LLM wants to call tools
-    if (result.stopReason === 'toolUse') {
-      const toolCalls = result.content.filter(
-        (b): b is ToolCall => b.type === 'toolCall',
-      );
-
-      for (const call of toolCalls) {
-        // Check abort before executing each tool
-        if (signal?.aborted) {
-          logger?.info(
-            '[agent] Signal aborted before tool execution, stopping',
-          );
-          return;
-        }
-
-        // Execute the tool
-        let toolResultText: string;
-        let isError = false;
-        try {
-          // Validate arguments against the tool's TypeBox schema.
-          // AJV will coerce types where possible; throws on invalid args
-          // so the LLM receives the error and can retry.
-          const validatedArgs = validateToolCall(tools, call);
-          toolResultText = await executeTool(
-            call.name,
-            validatedArgs as Record<string, unknown>,
-            { canvasId },
-          );
-        } catch (err) {
-          isError = true;
-          toolResultText = JSON.stringify({
-            error: err instanceof Error ? err.message : 'Tool execution failed',
-          });
-        }
-
-        // Emit tool result to frontend
-        yield {
-          type: 'tool_result',
-          data: {
-            toolName: call.name,
-            toolResult: toolResultText,
-          },
-        };
-
-        // Add tool result to context for next iteration
-        context.messages.push({
-          role: 'toolResult',
-          toolCallId: call.id,
-          toolName: call.name,
-          content: [{ type: 'text', text: toolResultText }],
-          isError,
-          timestamp: Date.now(),
-        });
-      }
-
-      // Continue the loop — LLM will be called again with tool results
-      continue;
-    }
-
-    // LLM finished (stop, length, or error) — extract final text
-    const finalText = result.content
-      .filter((b) => b.type === 'text')
-      .map((b) => (b as { type: 'text'; text: string }).text)
-      .join('');
-
-    yield {
-      type: 'done',
-      data: {
-        message: finalText,
-        meta: {
-          stopReason: result.stopReason,
-          usage: result.usage,
-          iterations: iteration,
-        },
-      },
-    };
-    return;
+    // Sync the agent's final transcript back into `context.messages`. The
+    // route layer (saveContext / cleanUpAbortedContext) reads `context`
+    // directly, so we mutate the array in place to preserve identity.
+    context.messages.length = 0;
+    context.messages.push(...agent.state.messages);
   }
-
-  // Max iterations exceeded
-  yield {
-    type: 'error',
-    data: {
-      error: `Agent loop exceeded maximum iterations (${maxIterations})`,
-    },
-  };
 }
 
 /**
  * Create a fresh pi-ai Context for a given mode.
+ *
+ * `tools` are intentionally omitted here: the runtime tool list is rebuilt
+ * by `runAgent` per-request via `buildToolsForMode`, since each tool needs
+ * a fresh `canvasId`-bound `execute` closure.
  */
-export function createContext(mode: AgentMode, systemPrompt: string): Context {
+export function createContext(_mode: AgentMode, systemPrompt: string): Context {
   return {
     systemPrompt,
     messages: [],
-    tools: getToolsForMode(mode),
   };
 }

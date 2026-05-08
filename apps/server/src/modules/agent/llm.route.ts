@@ -11,10 +11,10 @@ import {
   setLLMConfig,
 } from './llm.js';
 import {
-  hasOAuthCredentials,
   logoutOAuth,
   pollDeviceCode,
   startDeviceCodeFlow,
+  verifyOAuthCredentials,
 } from './oauth.js';
 
 import type {
@@ -42,7 +42,7 @@ function isLocalhost(ip: string): boolean {
 const llmRoutes: FastifyPluginAsync = async (app) => {
   // GET /api/llm/config — return current provider/model config
   app.get<{ Reply: ApiResult<LLMConfig> }>('/config', async () => {
-    return getLLMConfig();
+    return await getLLMConfig();
   });
 
   // PUT /api/llm/config — update provider/model config
@@ -62,7 +62,7 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
           .send({ message: parsed.error.issues[0]?.message ?? 'Invalid body' });
       }
 
-      const result = setLLMConfig(parsed.data);
+      const result = await setLLMConfig(parsed.data);
       return reply.send(result);
     },
   );
@@ -132,7 +132,7 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
     },
   );
 
-  // GET /api/llm/oauth/status — check if OAuth credentials exist
+  // GET /api/llm/oauth/status — check if OAuth credentials exist AND are usable
   app.get<{
     Querystring: OAuthStatusQuery;
     Reply: ApiResult<OAuthStatusResponse>;
@@ -140,7 +140,11 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
     const parsed = oauthStatusQuerySchema.safeParse(request.query);
     const provider = parsed.success ? parsed.data.provider : 'github-copilot';
 
-    const authenticated = hasOAuthCredentials(provider);
+    // Authoritative check: refreshes the access token if it has expired
+    // so the Settings UI never reports "authenticated" while the next
+    // agent call would 401. Cost: single network call only when the
+    // cached access token is past its expiry.
+    const authenticated = await verifyOAuthCredentials(provider);
     return reply.send({ authenticated, provider });
   });
 

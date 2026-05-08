@@ -26,7 +26,7 @@ import {
 
 import {
   getCopilotApiKey,
-  hasOAuthCredentials,
+  verifyOAuthCredentials,
   applyCopilotModelOverrides,
 } from './oauth.js';
 
@@ -357,17 +357,25 @@ export function getModelsForProvider(providerId: string): LLMModelInfo[] {
 
 /**
  * Get the current LLM configuration.
+ *
+ * For OAuth providers this performs an authoritative `authenticated` check
+ * (refreshing the access token if needed) so the Settings UI can't show
+ * "logged in" while the persisted credentials no longer work. Cost: a
+ * single network round-trip only when the access token is past its expiry;
+ * otherwise it's a local memory check.
  */
-export function getLLMConfig(): LLMConfig {
+export async function getLLMConfig(): Promise<LLMConfig> {
   try {
     const cfg = ensureConfig();
     const catalog = getProviderCatalog();
     const providerInfo = catalog.find((p) => p.id === cfg.provider);
     const isOAuth = providerInfo?.authType === 'oauth';
 
-    // For OAuth providers, check OAuth credentials
+    // For OAuth providers, verify credentials are actually usable
+    // (not just present on disk) — fixes the bug where Settings
+    // displayed "logged in" while the agent failed at request time.
     const authenticated = isOAuth
-      ? hasOAuthCredentials(cfg.provider)
+      ? await verifyOAuthCredentials(cfg.provider)
       : !!resolveApiKey(cfg.provider);
 
     return {
@@ -392,8 +400,13 @@ export function getLLMConfig(): LLMConfig {
 /**
  * Update the active LLM provider/model configuration.
  * Clears cached model so the next call uses the new config.
+ *
+ * Returns an authoritative `authenticated` flag for OAuth providers —
+ * see {@link getLLMConfig} for the rationale.
  */
-export function setLLMConfig(update: LLMConfigUpdate): LLMConfig {
+export async function setLLMConfig(
+  update: LLMConfigUpdate,
+): Promise<LLMConfig> {
   const persisted: PersistedConfig = {
     provider: update.provider,
     model: update.model,
@@ -419,7 +432,7 @@ export function setLLMConfig(update: LLMConfigUpdate): LLMConfig {
   );
   const isOAuth = providerInfo?.authType === 'oauth';
   const authenticated = isOAuth
-    ? hasOAuthCredentials(persisted.provider)
+    ? await verifyOAuthCredentials(persisted.provider)
     : !!resolveApiKey(persisted.provider, persisted.apiKey);
 
   return {
@@ -457,8 +470,12 @@ export function getLLMModel(): Model<Api> {
 
 /**
  * Ensure we have a valid API key, refreshing OAuth tokens if needed.
+ *
+ * Exported so callers that own their own LLM call (e.g. pi-agent-core's
+ * `getApiKey` callback) can reuse the same provider-aware resolution and
+ * OAuth refresh logic without going through `llmStream` / `llmComplete`.
  */
-async function ensureApiKey(): Promise<string> {
+export async function ensureApiKey(): Promise<string> {
   const cfg = ensureConfig();
   const key = await resolveApiKeyAsync(cfg.provider, cfg.apiKey);
   if (!key) {

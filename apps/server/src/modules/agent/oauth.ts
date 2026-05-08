@@ -188,20 +188,35 @@ export async function pollDeviceCode(): Promise<
 /**
  * Get a valid Copilot API key, refreshing if expired.
  * Delegates expiry detection and token refresh to pi-ai's getOAuthApiKey.
+ *
+ * Errors from pi-ai (network failure, refresh-token expiry, malformed
+ * persisted creds, etc.) are logged before being swallowed so the caller
+ * — which only knows about "got a key / didn't" — can still surface a
+ * useful diagnostic via the server logs. Returning `null` then triggers
+ * the upstream "Please log in via Settings." message.
  */
 export async function getCopilotApiKey(): Promise<string | null> {
   const creds = loadCredentials();
-  if (!creds) return null;
+  if (!creds) {
+    console.warn('[oauth] No persisted GitHub Copilot credentials found.');
+    return null;
+  }
 
   try {
     const result = await getOAuthApiKey('github-copilot', {
       'github-copilot': creds,
     });
-    if (!result) return null;
+    if (!result) {
+      console.warn(
+        '[oauth] pi-ai getOAuthApiKey returned no result for github-copilot.',
+      );
+      return null;
+    }
     // Persist potentially refreshed credentials
     saveCredentials(result.newCredentials);
     return result.apiKey;
-  } catch {
+  } catch (err) {
+    console.error('[oauth] getCopilotApiKey failed:', err);
     return null;
   }
 }
@@ -219,11 +234,40 @@ export function applyCopilotModelOverrides(models: Model<Api>[]): Model<Api>[] {
 }
 
 /**
- * Check if we have persisted OAuth credentials.
+ * Check whether persisted OAuth credentials exist on disk.
+ *
+ * Synchronous and cheap — it does NOT verify the credentials still work.
+ * Use this for fast guards (e.g. "do we have anything to log out?") where
+ * the cost of a network call is unjustified. For an authoritative check
+ * (one that catches revoked or unrefreshable tokens), use
+ * {@link verifyOAuthCredentials}.
  */
 export function hasOAuthCredentials(provider: string): boolean {
   if (provider !== 'github-copilot') return false;
   return !!loadCredentials();
+}
+
+/**
+ * Verify that persisted OAuth credentials are usable RIGHT NOW.
+ *
+ * Returns `true` only if either:
+ *   - the access token is still valid, OR
+ *   - the refresh token successfully produced a fresh access token.
+ *
+ * Returns `false` when no credentials are stored, or when the refresh
+ * fails (revoked / expired refresh token, network error, etc.). In the
+ * latter case the caller should prompt the user to re-login.
+ *
+ * Reuses {@link getCopilotApiKey}, which performs the refresh-if-expired
+ * dance and persists the rotated credentials — so a successful verify
+ * also leaves the on-disk creds fresh for the next caller.
+ */
+export async function verifyOAuthCredentials(
+  provider: string,
+): Promise<boolean> {
+  if (provider !== 'github-copilot') return false;
+  const key = await getCopilotApiKey();
+  return key !== null;
 }
 
 /**

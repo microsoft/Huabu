@@ -99,8 +99,6 @@ Huabu 的 AI 与你**共享同一块画布**。它能读到画布的整体语境
 - 关闭并重新打开应用后历史仍在
 - 不同主题建议开新线程，避免上下文混杂
 
-> 📌 旧文档曾提及 LangGraph checkpoints，已不再使用 —— 现在的实现是自研 agent loop（[agent.service.ts](../../apps/server/src/modules/agent/agent.service.ts)）+ pi-ai 作为 LLM 网关。
-
 ---
 
 ## 从对话到画布
