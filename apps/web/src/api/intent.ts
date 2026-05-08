@@ -2,9 +2,11 @@
  * Intent recognition API client.
  */
 
+import { INTENT_SSE_EVENTS } from '@sediment/shared';
+
 import { apiFetch, apiFetchVoid, apiUrl } from './_client';
 import { routes } from './_routes';
-import { readSSEStream } from './_sse';
+import { readTypedSSEStream } from './_sse';
 
 import type {
   AgentBaseContext,
@@ -12,6 +14,7 @@ import type {
   AnnotationCommandResponse,
   IntentCandidate,
   IntentEpisode,
+  IntentStreamEvent,
 } from '@sediment/shared';
 
 /**
@@ -38,14 +41,13 @@ export async function recognizeIntentStream(
     );
   }
 
-  await readSSEStream<IntentCandidate | { error?: string }>(
+  await readTypedSSEStream<IntentStreamEvent>(
     response,
     (event) => {
-      if (event.type === 'candidate') {
-        onCandidate(event.data as IntentCandidate);
-      } else if (event.type === 'error') {
-        const data = event.data as { error?: string };
-        throw new Error(data.error ?? 'Intent recognition failed');
+      if (event.type === INTENT_SSE_EVENTS.Candidate) {
+        onCandidate(event.data);
+      } else if (event.type === INTENT_SSE_EVENTS.Error) {
+        throw new Error(event.data.error || 'Intent recognition failed');
       }
     },
     signal,

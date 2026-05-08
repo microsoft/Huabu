@@ -7,6 +7,8 @@
  * POST /api/intent/episode
  */
 
+import { INTENT_SSE_EVENTS } from '@sediment/shared';
+
 import {
   recognizeIntent,
   recognizeIntentStream,
@@ -18,9 +20,18 @@ import type {
   IntentRequest,
   IntentResponse,
   IntentEpisodeRequest,
+  IntentStreamEvent,
   AnnotationIntentRequest,
 } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
+
+/** Write a single typed SSE frame. */
+function writeIntentSSE(
+  raw: NodeJS.WritableStream,
+  event: IntentStreamEvent,
+): void {
+  raw.write(`event: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`);
+}
 
 const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   fastify.post<{ Body: IntentRequest; Reply: IntentResponse }>(
@@ -66,16 +77,21 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
 
       try {
         for await (const candidate of recognizeIntentStream(canvasContext)) {
-          reply.raw.write(
-            `event: candidate\ndata: ${JSON.stringify(candidate)}\n\n`,
-          );
+          writeIntentSSE(reply.raw, {
+            type: INTENT_SSE_EVENTS.Candidate,
+            data: candidate,
+          });
         }
-        reply.raw.write('event: done\ndata: {}\n\n');
+        writeIntentSSE(reply.raw, {
+          type: INTENT_SSE_EVENTS.Done,
+          data: {},
+        });
       } catch (err) {
         request.log.error(err, 'Intent streaming failed');
-        reply.raw.write(
-          `event: error\ndata: ${JSON.stringify({ error: 'Intent recognition failed' })}\n\n`,
-        );
+        writeIntentSSE(reply.raw, {
+          type: INTENT_SSE_EVENTS.Error,
+          data: { error: 'Intent recognition failed' },
+        });
       }
 
       reply.raw.end();

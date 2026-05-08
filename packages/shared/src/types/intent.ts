@@ -51,6 +51,37 @@ export interface IntentResponse {
   intentCandidates: IntentCandidate[];
 }
 
+// ==================== Streaming Events ====================
+//
+// SSE events emitted by `/api/intent/recognize-stream`. Modelled as a
+// discriminated union so server emit and client consume share one shape.
+
+/** `event: candidate` — one ranked intent candidate. */
+export type IntentCandidateEventData = IntentCandidate;
+
+/** `event: done` — terminator (no payload). */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface IntentDoneEventData {}
+
+/** `event: error` — recognition failed. */
+export interface IntentErrorEventData {
+  error: string;
+}
+
+export type IntentStreamEvent =
+  | { type: 'candidate'; data: IntentCandidateEventData }
+  | { type: 'done'; data: IntentDoneEventData }
+  | { type: 'error'; data: IntentErrorEventData };
+
+export type IntentStreamEventType = IntentStreamEvent['type'];
+
+/** Canonical event-name constants for the intent SSE stream. */
+export const INTENT_SSE_EVENTS = {
+  Candidate: 'candidate',
+  Done: 'done',
+  Error: 'error',
+} as const satisfies Record<string, IntentStreamEventType>;
+
 // ==================== Annotation Pipeline Types ====================
 
 /** Lightweight representation of an annotation node for clustering. */

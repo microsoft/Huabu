@@ -80,3 +80,26 @@ export function parseSSEChunk<T = unknown>(part: string): SSEEvent<T> | null {
     return null;
   }
 }
+
+/**
+ * Typed variant of {@link readSSEStream} for SSE protocols that are modelled
+ * as a discriminated union (e.g. `AgentStreamEvent`, `IntentStreamEvent`).
+ *
+ * Each parsed frame is forwarded as `E` so consumers can `switch` on
+ * `event.type` and have `event.data` narrowed automatically. The runtime
+ * cannot validate the union shape — callers should treat unknown event
+ * types as a no-op (or throw) in the default branch.
+ */
+export async function readTypedSSEStream<
+  E extends { type: string; data: unknown },
+>(
+  response: Response,
+  onEvent: (event: E) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  await readSSEStream<unknown>(
+    response,
+    (event) => onEvent(event as unknown as E),
+    signal,
+  );
+}

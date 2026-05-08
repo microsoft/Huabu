@@ -5,9 +5,11 @@
  * modes (chat, agent) with pi-ai streaming.
  */
 
+import { AGENT_SSE_EVENTS } from '@sediment/shared';
+
 import { ApiError, apiFetch, apiUrl } from './_client';
 import { routes } from './_routes';
-import { readSSEStream } from './_sse';
+import { readTypedSSEStream } from './_sse';
 
 import type {
   AgentMode,
@@ -48,30 +50,28 @@ async function pumpAgentStream(
 ): Promise<boolean> {
   let terminated = false;
 
-  await readSSEStream<Record<string, unknown>>(
+  await readTypedSSEStream<AgentStreamEvent>(
     response,
     (event) => {
       if (terminated) return;
-      const { type, data } = event;
 
-      if (type === 'end') {
+      if (event.type === AGENT_SSE_EVENTS.End) {
         terminated = true;
         callbacks.onComplete();
         return;
       }
-      if (type === 'error') {
+      if (event.type === AGENT_SSE_EVENTS.Error) {
         terminated = true;
-        const message =
-          (data.error as string | undefined) ?? 'Unknown server error';
-        callbacks.onError(new Error(message));
+        callbacks.onError(
+          new Error(event.data.error || 'Unknown server error'),
+        );
         return;
       }
-      if (options?.suppressMeta && type === 'meta') return;
+      if (options?.suppressMeta && event.type === AGENT_SSE_EVENTS.Meta) {
+        return;
+      }
 
-      callbacks.onEvent({
-        type: type as AgentStreamEvent['type'],
-        data,
-      });
+      callbacks.onEvent(event);
     },
     signal,
   );
