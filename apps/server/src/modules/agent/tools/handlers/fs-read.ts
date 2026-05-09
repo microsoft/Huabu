@@ -49,6 +49,15 @@ export type ReadArgs = Static<typeof readParamsSchema> & { canvasId: string };
 const DEFAULT_MAX_LINES = 2000;
 const DEFAULT_MAX_BYTES = 50 * 1024;
 
+/**
+ * Hard cap on file size we are willing to load into memory. The output
+ * envelope tops out at ~50 KB anyway (see `DEFAULT_MAX_BYTES`), so any
+ * file larger than this is either binary noise (caught separately) or
+ * a multi-MB log/dump that the agent should be using `grep` against
+ * rather than loading whole. Keeps the event loop responsive.
+ */
+const MAX_READ_FILE_BYTES = 10 * 1024 * 1024;
+
 // ─── Implementation ─────────────────────────────────────────────────────────
 
 export async function handleRead(args: ReadArgs): Promise<string> {
@@ -77,6 +86,13 @@ export async function handleRead(args: ReadArgs): Promise<string> {
   }
   if (!stat.isFile()) {
     throw new Error(`Not a regular file: ${rel}`);
+  }
+  if (stat.size > MAX_READ_FILE_BYTES) {
+    throw new Error(
+      `"${rel}" is ${(stat.size / (1024 * 1024)).toFixed(1)} MB, exceeds the ${
+        MAX_READ_FILE_BYTES / (1024 * 1024)
+      } MB read limit. Use grep to search inside it instead.`,
+    );
   }
 
   // Read as UTF-8. Binary detection here is intentionally light:

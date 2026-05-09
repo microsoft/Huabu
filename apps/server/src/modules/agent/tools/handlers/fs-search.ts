@@ -72,6 +72,26 @@ const DEFAULT_LS_LIMIT = 500;
 /** Per-line truncation so a single long line cannot blow the budget. */
 const MAX_LINE_LENGTH = 500;
 
+// ─── ReDoS / DoS guardrails ─────────────────────────────────────────────────
+//
+// Node's RegExp has no built-in execution timeout, so a malicious or
+// just careless pattern like `(a+)+$` can pin the event loop. We rely
+// on three layered caps:
+//   1. Hard ceiling on the pattern itself — kills the most obvious
+//      pathological inputs at the door.
+//   2. Hard ceiling on the per-line slice fed to `regex.test()` — even
+//      a catastrophic-backtracking pattern is bounded by input length.
+//   3. Per-file size cap so a 100 MB blob cannot block the event loop
+//      on `readFileSync` alone.
+//   4. Soft wall-clock deadline across the whole grep call as a final
+//      backstop; on hit, we bail with `truncated:true`.
+
+const MAX_PATTERN_LENGTH = 1000;
+const MAX_GLOB_LENGTH = 1000;
+const MAX_LINE_BYTES_TO_SCAN = 8 * 1024;
+const MAX_GREP_FILE_BYTES = 5 * 1024 * 1024;
+const GREP_DEADLINE_MS = 5000;
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function truncateLine(s: string): string {
@@ -95,6 +115,17 @@ export async function handleGrep(args: GrepArgs): Promise<string> {
     limit,
   } = args;
 
+  if (pattern.length > MAX_PATTERN_LENGTH) {
+    throw new Error(
+      `Pattern is ${pattern.length} chars, exceeds the ${MAX_PATTERN_LENGTH} char limit. Narrow the pattern.`,
+    );
+  }
+  if (glob && glob.length > MAX_GLOB_LENGTH) {
+    throw new Error(
+      `Glob is ${glob.length} chars, exceeds the ${MAX_GLOB_LENGTH} char limit.`,
+    );
+  }
+
   const walkRootRel = normalizeRel(effectivePath(searchPath));
   // safeResolve throws on sandbox escape; let pi-agent-core wrap that.
   const root = safeResolve(args.canvasId, walkRootRel);
@@ -116,6 +147,7 @@ export async function handleGrep(args: GrepArgs): Promise<string> {
   const effectiveLimit = Math.max(1, limit ?? DEFAULT_GREP_LIMIT);
   const ctxN = Math.max(0, ctxLines ?? 0);
   const lookup = makeNodeLookup(args.canvasId);
+  const deadline = Date.now() + GREP_DEADLINE_MS;
 
   // Enumerate candidate files, recording each as a canvas-relative
   // path so enrichment can recognise node files.
@@ -136,6 +168,19 @@ export async function handleGrep(args: GrepArgs): Promise<string> {
   let truncated = false;
 
   outer: for (const ent of candidates) {
+    if (Date.now() > deadline) {
+      truncated = true;
+      break;
+    }
+    // Skip oversized files entirely — they cannot give useful matches
+    // through this tool and would block the event loop on read+split.
+    let fileSize: number;
+    try {
+      fileSize = statSync(ent.absPath).size;
+    } catch {
+      continue;
+    }
+    if (fileSize > MAX_GREP_FILE_BYTES) continue;
     let text: string;
     try {
       text = readFileSync(ent.absPath, 'utf8');
@@ -144,12 +189,24 @@ export async function handleGrep(args: GrepArgs): Promise<string> {
     }
     const lines = text.split('\n');
     for (let i = 0; i < lines.length; i++) {
-      const line = lines[i] ?? '';
+      // Wall-clock backstop: if a previous line's regex.test spent too
+      // long, bail out before scanning more.
+      if ((i & 0xff) === 0 && Date.now() > deadline) {
+        truncated = true;
+        break outer;
+      }
+      const rawLine = lines[i] ?? '';
+      // Cap the slice handed to regex.test so even pathological
+      // backtracking on a malicious one-liner cannot blow up.
+      const line =
+        rawLine.length > MAX_LINE_BYTES_TO_SCAN
+          ? rawLine.slice(0, MAX_LINE_BYTES_TO_SCAN)
+          : rawLine;
       if (!regex.test(line)) continue;
       const match: Record<string, unknown> = {
         path: ent.canvasRel,
         line: i + 1,
-        text: truncateLine(line),
+        text: truncateLine(rawLine),
       };
       if (ctxN > 0) {
         match.before = lines.slice(Math.max(0, i - ctxN), i).map(truncateLine);
@@ -180,6 +237,12 @@ export async function handleGrep(args: GrepArgs): Promise<string> {
 
 export async function handleFind(args: FindArgs): Promise<string> {
   const { pattern, path: searchPath, limit } = args;
+
+  if (pattern.length > MAX_GLOB_LENGTH) {
+    throw new Error(
+      `Pattern is ${pattern.length} chars, exceeds the ${MAX_GLOB_LENGTH} char limit.`,
+    );
+  }
 
   const walkRootRel = normalizeRel(effectivePath(searchPath));
   // safeResolve throws on sandbox escape; let pi-agent-core wrap that.

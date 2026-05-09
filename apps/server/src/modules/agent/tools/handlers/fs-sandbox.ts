@@ -192,9 +192,14 @@ export function* walk(rootAbs: string): Generator<WalkEntry> {
 /**
  * Match a canvas-relative path of the form
  *   "nodes/<nodeId>.md"
- * Used to recognise node files within the active canvas.
+ * Used to recognise node files within the active canvas. The capture
+ * group is the bare filename stem — any `.md` file directly under
+ * `nodes/` qualifies, regardless of node id naming convention. The
+ * lookup itself (see `makeNodeLookup`) decides whether the captured
+ * id actually maps to a node, so a stricter prefix here would only
+ * silently swallow valid matches when the id scheme evolves.
  */
-export const CANVAS_NODE_RE = /^nodes\/(node-[^/]+)\.md$/;
+export const CANVAS_NODE_RE = /^nodes\/([^/]+)\.md$/;
 
 /**
  * Compose a canvas-relative path from the walk root (canvas-relative)
