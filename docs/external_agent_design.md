@@ -731,7 +731,7 @@ const canvasTools = [
       /* ... */
     },
     handler: async () => {
-      return await executeTool('get_canvas_state', {}, { canvasId });
+      return await executeTool('get_canvas_outline', {}, { canvasId });
     },
   }),
 ];

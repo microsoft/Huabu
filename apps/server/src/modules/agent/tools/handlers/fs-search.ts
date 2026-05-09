@@ -329,21 +329,23 @@ export async function handleLs(args: LsArgs): Promise<string> {
   entries.sort((a, b) =>
     a.name.toLowerCase().localeCompare(b.name.toLowerCase()),
   );
+  // Eligible entries (after symlink filter) — used to populate `total`
+  // so the agent can tell whether `truncated:true` means "raise limit"
+  // is worthwhile (and by how much).
+  const eligible = entries.filter((e) => !e.isSymbolicLink());
   const out: string[] = [];
-  let truncated = false;
-  for (const ent of entries) {
-    if (out.length >= effectiveLimit) {
-      truncated = true;
-      break;
-    }
-    if (ent.isSymbolicLink()) continue;
+  for (const ent of eligible) {
+    if (out.length >= effectiveLimit) break;
     out.push(ent.isDirectory() ? `${ent.name}/` : ent.name);
   }
+  const total = eligible.length;
+  const truncated = total > out.length;
 
   return JSON.stringify({
     path: walkRootRel,
     entries: out,
     count: out.length,
+    total,
     truncated,
   });
 }

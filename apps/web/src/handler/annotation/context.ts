@@ -4,9 +4,10 @@
  * For each annotation cluster we collect just the IDs of nearby nodes /
  * enclosed nodes / nearby edges. The actual node content (title, type,
  * src, summary, ...) is fetched on demand by the LLM via the `read` tool
- * on "<canvasId>/nodes/<nodeId>.md", and node layout (position / size /
- * parent / style) via `get_node_geometry`. We no longer pre-pack labels,
- * positions, distances, or any shape inference into the request payload.
+ * on "nodes/<nodeId>.md", node layout (position / size / parent / style)
+ * via `inspect_nodes`, and edge style via `inspect_edges`. We no longer
+ * pre-pack labels, positions, distances, or any shape inference into the
+ * request payload.
  */
 
 import {
@@ -99,8 +100,8 @@ function segmentRectDistance(
 /**
  * Extract the IDs of canvas nodes / edges spatially related to the cluster.
  * No labels, positions, or distances are returned — the LLM fetches any
- * node content it needs via the `read` tool, and any layout it needs via
- * the `get_node_geometry` tool.
+ * node content it needs via the `read` tool, node layout via the
+ * `inspect_nodes` tool, and edge style via the `inspect_edges` tool.
  */
 export function extractAnnotationContext(
   cluster: AnnotationCluster,

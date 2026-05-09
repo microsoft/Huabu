@@ -9,7 +9,11 @@ import { validateToolCall } from '@earendil-works/pi-ai';
 
 import { llmComplete, llmStream } from './llm.js';
 import { logIntentEpisode as storeEpisode } from './store/intent-store.js';
-import { inspectNodesTool, readTool } from './tools/definitions.js';
+import {
+  inspectEdgesTool,
+  inspectNodesTool,
+  readTool,
+} from './tools/definitions.js';
 import { executeTool } from './tools/executor.js';
 import {
   INTENT_SYSTEM_PROMPT,
@@ -366,10 +370,12 @@ function tryParsePartialCandidates(raw: string): IntentCandidate[] {
 //
 // The client sends a screenshot plus a minimal context payload (cluster
 // bbox + ID lists for nearby/enclosed nodes and nearby edges). The LLM is
-// driven through a small tool-calling loop with two tools exposed:
+// driven through a small tool-calling loop with three tools exposed:
 //   - `read` for node text content ("nodes/<nodeId>.md")
 //   - `inspect_nodes` for position / size / parent / style and any
 //     spatial / topological lookup it needs around the cluster
+//   - `inspect_edges` for edge direction / line style / stroke when
+//     the gesture targets an edge
 // before producing the final JSON command batch.
 // ---------------------------------------------------------------------------
 
@@ -464,15 +470,15 @@ function extractJsonObject(raw: string): string | null {
 const ANNOTATION_MAX_ITERATIONS = 6;
 
 /**
- * Drive the LLM through a tool-calling loop limited to `read` and
- * `inspect_nodes`, then parse the final assistant text as
- * `{ reasoning, commands }`.
+ * Drive the LLM through a tool-calling loop limited to `read`,
+ * `inspect_nodes`, and `inspect_edges`, then parse the final
+ * assistant text as `{ reasoning, commands }`.
  */
 async function runAnnotationAgent(
   piContext: Context,
   canvasId?: string,
 ): Promise<string> {
-  const tools = [readTool, inspectNodesTool];
+  const tools = [readTool, inspectNodesTool, inspectEdgesTool];
   piContext.tools = tools;
 
   let iteration = 0;
@@ -545,9 +551,9 @@ async function runAnnotationAgent(
 /**
  * Recognize annotation intent and return executable canvas commands.
  *
- * The LLM may issue several `read` and/or `inspect_nodes` tool calls
- * before producing the final JSON answer; we parse that JSON for the
- * client to execute.
+ * The LLM may issue several `read`, `inspect_nodes`, and/or
+ * `inspect_edges` tool calls before producing the final JSON answer;
+ * we parse that JSON for the client to execute.
  */
 export async function recognizeAnnotationCommands(
   screenshot: string,
@@ -564,7 +570,7 @@ export async function recognizeAnnotationCommands(
     { type: 'image', data: base64, mimeType: 'image/png' },
     {
       type: 'text',
-      text: `Annotation context (IDs only — use \`read\` on "nodes/<nodeId>.md" for any node whose content you need, and \`inspect_nodes({ ids: ["<nodeId>"] })\` for position/size/parent/style. inspect_nodes also handles spatial/topological lookups (nearNode, connectedTo, inRect, ...) when you need to understand neighbours):\n\n${contextText}\n\nUse the screenshot to read the gesture, fetch any node content/geometry you need via the tools, then output the final JSON object {"reasoning": ..., "commands": [...]}.`,
+      text: `Annotation context (IDs only — use \`read\` on "nodes/<nodeId>.md" for any node whose content you need, \`inspect_nodes({ ids: ["<nodeId>"] })\` for position/size/parent/style (also handles spatial/topological lookups: nearNode, connectedTo, inRect, ...), and \`inspect_edges({ ids: ["<edgeId>"] })\` for an edge's direction / line style / stroke):\n\n${contextText}\n\nUse the screenshot to read the gesture, fetch any node content/geometry/edge style you need via the tools, then output the final JSON object {"reasoning": ..., "commands": [...]}.`,
     },
   ];
 

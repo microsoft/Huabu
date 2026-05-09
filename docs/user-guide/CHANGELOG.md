@@ -4,6 +4,22 @@
 
 ---
 
+## 2026-05-09 · Annotation Agent 接入 `inspect_edges`，删除冗余 `spatialSummary`，工具补 `total` 字段
+
+**What Changed**
+
+- **Annotation 智能体可看到边了**：`recognizeAnnotationCommands` 的工具数组只挂了 `read` + `inspect_nodes`，但系统提示词却宣传 `inspect_edges` 已可用。模型一旦真去调就会得到 `unknown tool` 错误。本次把 `inspect_edges` 加进 annotation agent 的工具清单，跟提示词对齐。
+- **删除死字段 `AgentBaseContext.spatialSummary`**：前端 `getAgentContext` 一直在每次发请求时算并发送 `clusters / arrangement` 描述，但服务端从未读它（agent 路由只看 `nodes` / `edges` / `selectedNodes` / `recentActions`）。本次从 wire-type、前端缓存（`SpatialCache`）和 `getCachedSpatialData` 输出里彻底删除；agent 想知道空间布局请走 `get_canvas_outline()` / `inspect_nodes`。
+- **`inspect_nodes` / `inspect_edges` / `ls` 新增 `total` 字段**：原先只有 `count` + `truncated:true/false`，模型无法判断"被截断了到底丢了多少条"。三个工具现在都返回 `total`（截断前的命中总数）。`grep` / `find` 因为是早退式扫描（hit limit 即停），无法廉价知道 total，工具描述里明确写"`count` = 实际返回数；`truncated:true` 表示还有更多但不知道具体多少"。
+
+**Notes**
+
+- 兼容性：`AgentBaseContext.spatialSummary` 是前端 → 服务端 wire field，删除属于 wire-format 变更。已确认服务端 `agent.route.ts` / `intent.route.ts` 没有任何处读它，前端也没有其它消费方。
+- 文档：`docs/agent-context.md`、`docs/prompt-node-design.md`、`docs/external_agent_design.md`、`docs/user-guide/05-sources-and-knowledge.md`、`docs/user-guide/06-ai-collaboration.md` 中所有 `get_canvas_state` / `get_node_detail` / `get_node_geometry` / `read_source` 的过期引用一并更新成新工具名（`get_canvas_outline` / `read("nodes/<id>.md")` / `inspect_nodes`）。
+- `docs/agent-spatial-tools-plan.md` §7 已展开为后续 TODO（`describe_node_position`、视觉信号 ↔ 空间工具协同等）。
+
+---
+
 ## 2026-05-09 · Agent 工具调用改为并行执行（写工具除外）
 
 **What Changed**

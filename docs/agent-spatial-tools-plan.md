@@ -284,21 +284,74 @@
 - `pnpm -w typecheck`（如果可用）。
 - 不写新单测；现有 spatial 库已经在 shared 包里，逻辑未改。
 
-## 7. 不在本 PR 范围
+## 7. 不在本 PR 范围（后续 TODO）
 
-- 前端 `getCachedSpatialData` 与 `AgentBaseContext.spatialSummary`：保留作为
-  outline 的"预热缓存"，不再是 agent 唯一的空间信息来源；本次不动。
-- `describe_node_position`（场景 10）：观察 trace 后再决定是否要 wrap
-  `buildQuestionNodeContext`。
-- 视觉信号（screenshot）：与本设计正交。
+> 这一节是把 §1–§6 之外、被刻意推后的工作显化成 TODO。每条都给出
+> **触发条件**（什么时候做）、**范围**（要改哪些文件 / 行为）、
+> **验证方式**（怎么算做完了），方便后续直接拉成 PR。
 
-## 8. TODO — 后续覆盖范围补强
+### 7.1 ~~`AgentBaseContext.spatialSummary` 收编~~ · DONE 2026-05-09
 
-### TODO #11 — `describe_node_position`（低优 — 等 trace）
+> 计划阶段的"保留作 outline 预热缓存"想法在落地时被否决：服务端从未消费
+> 该字段，纯属带宽浪费。已在 main 分支移除。
 
-**现状**：[`buildQuestionNodeContext`](../packages/shared/src/utils/spatial.ts)
-已经能生成"X 在 frame Y 的右上角，靠近 Z" 的自然语言描述，前端 question
-node 已在用，agent 这边没暴露。
+- **完成项**
+  - `packages/shared/src/types/agent/context.ts` — 删除 `spatialSummary`
+    字段，改文档注释提示走 `get_canvas_outline()` / `inspect_nodes`。
+  - `apps/web/src/store/canvasStore.ts` —
+    `SpatialCache.summary` 字段删除；`getCachedSpatialData()` 仅返回
+    `{ spatialNodes }`（仍被 `useQuestionRunner` 用于 prompt 节点上下文）。
+  - `apps/web/src/store/canvasStore.ts:getAgentContext` 不再发送
+    `spatialSummary`。
+  - `docs/agent-context.md` §2.2 / §3 / §6 已更新。
+- **遗留**：无。前端缓存彻底变成 prompt-node 内部预算，与 agent 工具循环
+  解耦。
 
-**判定**：观察 trace 后决定是否值得加 `describe_node_position(id)` 工具，
-或者 inline 进 `inspect_nodes({ ids })` 的派生字段里。
+### 7.2 `describe_node_position` 工具（场景 10）— TODO
+
+> 当 agent 在 prompt 节点 / annotation cluster 等"以一个节点为锚点向外
+> 扩散"的语境下需要"这个节点周围有什么"时，目前必须组合
+> `inspect_nodes({ near: id })` + `inspect_nodes({ ids })` + 自己拼描述。
+> `describe_node_position` 把这一拼装步骤做成一次调用，输出已渲染好的
+> "natural-language 邻居描述"。
+
+- **触发条件**：观察 prompt 节点 / annotation cluster trace 后，发现连续
+  多次 `inspect_nodes` 都在做同一种拼装（near + ids + 描述生成）。
+- **范围**
+  - 新增 `apps/server/src/modules/agent/tools/handlers/canvas-describe.ts`
+    包装 `buildQuestionNodeContext()`（现有于 prompt 节点路径）。
+  - 在 `apps/server/src/modules/agent/tools/definitions.ts` 注册一个
+    `describeNodePositionTool`，schema 仅含 `nodeId` + 可选 `radius`。
+  - 输出：`{ description: string, neighbors: NodeRef[], cluster?: ... }`。
+    `description` 是已渲染的 natural-language 段（如"该节点位于 Frame
+    'Plans' 的横向序列中第 2 位，左侧是 'Goals'，右侧是 'Risks'"）。
+  - 服务端实现尽量复用 `buildPromptNodeContext` / `buildSpatialSummary`，
+    不允许再新写一份空间算法。
+- **验证方式**
+  - `get_errors` 干净。
+  - 在 prompt 节点 / annotation cluster 的 trace 里，预期会看到 agent
+    在自然语言场景下用一次 `describe_node_position` 替代多次
+    `inspect_nodes`。
+  - 用户文档：在 `docs/user-guide/06-ai-collaboration.md` 工具表里追加
+    一行（不必单开章节）。
+
+### 7.3 视觉信号 ↔ 空间工具协同 — TODO
+
+> 当前截图（intent / annotation intent 路径）与空间工具（`get_canvas_outline`
+> / `inspect_nodes`）是两条平行通道。Annotation intent 已在 §1 fix 中
+> 接入了 `inspect_edges`，但**截图与空间工具的 ID 对齐**仍是隐式约定。
+
+- **触发条件**：当 LLM 出现"截图里看到的 X 节点 vs 工具返回的 nodeId 对
+  不上"类型 trace 时；或当我们要给 prompt 节点也加截图通道时。
+- **范围**
+  - 在截图增强时显式把 nodeId 角标化（部分路径已经做了，需要审计
+    `apps/web/src/handler/canvasCommand/utils/screenshot.ts`）。
+  - 在 `inspect_nodes({ rect })` 输出里追加 `viewportRelative?:
+{ x, y, w, h }`，让 agent 能把"截图里的某个区域" 直接喂给 rect 查询。
+  - 评估是否给 chat agent 增加 opt-in 的 `take_viewport_snapshot` 工具
+    （目前只有 intent 端点用截图）。
+- **验证方式**
+  - 不在本 TODO 内强制给 chat agent 加视觉通道；先把 ID 对齐做扎实，
+    再决定。
+  - 如果引入 `take_viewport_snapshot`，需要补 `docs/agent-context.md`
+    §2.3 的"普通对话不发截图"条目。

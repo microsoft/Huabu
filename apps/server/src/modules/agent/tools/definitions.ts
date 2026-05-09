@@ -239,7 +239,7 @@ export const inspectNodesParamsSchema = Type.Object({
 export const inspectNodesTool: ToolDefinition = {
   name: 'inspect_nodes',
   label: 'Inspect Nodes',
-  description: `Find canvas nodes by predicate (attribute / spatial / topological) and return each match with full geometry + visual style + derived fields. Predicates AND together. **Always supply at least one predicate** — calling with no predicates returns every node, which is wasteful; for whole-canvas reads use get_canvas_outline instead. Returns JSON: { count, truncated, arrangement?, nodes: [{ id, type, label, parentId, position, width, height, style?, distance?, centerDistance?, direction?, edgeIds?, hops?, clusterId? }] }. When truncated:true, raise limit or refine your query. Note on connectedTo: the target node itself is excluded from results. Use this for "where is X?" (ids), "what's near X?" (nearNode), "what connects to X?" (connectedTo), "what's in this region?" (inRect), or any combination. For full node content (label/text/summary/keywords) call read on "nodes/<nodeId>.md" — only canvas.json fields are surfaced here.`,
+  description: `Find canvas nodes by predicate (attribute / spatial / topological) and return each match with full geometry + visual style + derived fields. Predicates AND together. **Always supply at least one predicate** — calling with no predicates returns every node, which is wasteful; for whole-canvas reads use get_canvas_outline instead. Returns JSON: { count, total, truncated, arrangement?, nodes: [{ id, type, label, parentId, position, width, height, style?, distance?, centerDistance?, direction?, edgeIds?, hops?, clusterId? }] }. \`count\` is items in this response (≤ limit); \`total\` is the full match count before \`limit\` was applied — when \`truncated:true\`, raise \`limit\` to ≥\`total\` or refine your query. Note on connectedTo: the target node itself is excluded from results. Use this for "where is X?" (ids), "what's near X?" (nearNode), "what connects to X?" (connectedTo), "what's in this region?" (inRect), or any combination. For full node content (label/text/summary/keywords) call read on "nodes/<nodeId>.md" — only canvas.json fields are surfaced here.`,
   parameters: inspectNodesParamsSchema,
 };
 
@@ -299,7 +299,7 @@ export const inspectEdgesParamsSchema = Type.Object({
 export const inspectEdgesTool: ToolDefinition = {
   name: 'inspect_edges',
   label: 'Inspect Edges',
-  description: `Find canvas edges by predicate (id / endpoints / EdgeStyle attributes) and return each match with its full EdgeStyle. Predicates AND together; with no predicate, every edge is returned (subject to \`limit\`). Returns JSON: { count, truncated, edges: [{ id?, source, target, lineType?, lineStyle?, stroke?, strokeWidth?, direction? }] }. EdgeStyle fields are omitted when unset on disk (defaults: \`direction='none'\`, \`lineStyle='solid'\`, \`lineType='bezier'\`); the \`by*\` predicates apply these same defaults so a query like \`byLineStyle:'solid'\` matches edges with no explicit \`lineStyle\` too. Use this when you need styling info — outline only carries topology. Common flows: pass \`edgeIds\` from \`inspect_nodes({ connectedTo })\` via \`ids\`; or query \`byDirection:'forward'\` to find directed edges; or \`byLineStyle:['dashed','dotted']\` to find annotation edges.`,
+  description: `Find canvas edges by predicate (id / endpoints / EdgeStyle attributes) and return each match with its full EdgeStyle. Predicates AND together; with no predicate, every edge is returned (subject to \`limit\`). Returns JSON: { count, total, truncated, edges: [{ id?, source, target, lineType?, lineStyle?, stroke?, strokeWidth?, direction? }] }. \`count\` is items in this response (≤ limit); \`total\` is the full match count before \`limit\` was applied — when \`truncated:true\`, raise \`limit\` to ≥\`total\` or refine your query. EdgeStyle fields are omitted when unset on disk (defaults: \`direction='none'\`, \`lineStyle='solid'\`, \`lineType='bezier'\`); the \`by*\` predicates apply these same defaults so a query like \`byLineStyle:'solid'\` matches edges with no explicit \`lineStyle\` too. Use this when you need styling info — outline only carries topology. Common flows: pass \`edgeIds\` from \`inspect_nodes({ connectedTo })\` via \`ids\`; or query \`byDirection:'forward'\` to find directed edges; or \`byLineStyle:['dashed','dotted']\` to find annotation edges.`,
   parameters: inspectEdgesParamsSchema,
 };
 
@@ -461,7 +461,7 @@ export const grepParamsSchema = Type.Object({
 export const grepTool: ToolDefinition = {
   name: 'grep',
   label: 'Grep',
-  description: `Search file contents for a pattern within the current canvas folder. Paths are canvas-relative; when omitted, search defaults to the canvas root. Returns JSON with matching paths, line numbers, and matched text, plus a \`truncated\` flag (raise \`limit\` or refine the pattern when true). Skips .history/, .git/, and node_modules/. When a match is in nodes/<nodeId>.md, the result also includes nodeId, label, and nodeType — chain straight into read (for the rest of the file) or inspect_nodes / canvas_commands without a second lookup. Output is capped at 100 matches by default.`,
+  description: `Search file contents for a pattern within the current canvas folder. Paths are canvas-relative; when omitted, search defaults to the canvas root. Returns JSON: { matches: [...], count, truncated }. \`count\` is matches in this response (≤ limit); \`truncated:true\` means scanning was stopped early (\`limit\` reached or wall-clock budget exhausted) so more matches may exist — raise \`limit\` or refine the pattern. Skips .history/, .git/, and node_modules/. When a match is in nodes/<nodeId>.md, the result also includes nodeId, label, and nodeType — chain straight into read (for the rest of the file) or inspect_nodes / canvas_commands without a second lookup. Output is capped at 100 matches by default.`,
   parameters: grepParamsSchema,
 };
 
@@ -486,7 +486,7 @@ export const findParamsSchema = Type.Object({
 export const findTool: ToolDefinition = {
   name: 'find',
   label: 'Find',
-  description: `Find files by glob pattern within the current canvas folder. Paths are canvas-relative; when omitted, search defaults to the canvas root. Returns JSON with matching paths and a \`truncated\` flag (raise \`limit\` or narrow the pattern when true). When a result is nodes/<nodeId>.md, the entry also includes nodeId, label, and nodeType. Skips .history/, .git/, and node_modules/.`,
+  description: `Find files by glob pattern within the current canvas folder. Paths are canvas-relative; when omitted, search defaults to the canvas root. Returns JSON: { paths: [...], count, truncated }. \`count\` is paths in this response (≤ limit); \`truncated:true\` means the walk stopped early at \`limit\` so more files may match — raise \`limit\` or narrow the pattern. When a result is nodes/<nodeId>.md, the entry also includes nodeId, label, and nodeType. Skips .history/, .git/, and node_modules/.`,
   parameters: findParamsSchema,
 };
 
@@ -507,7 +507,7 @@ export const lsParamsSchema = Type.Object({
 export const lsTool: ToolDefinition = {
   name: 'ls',
   label: 'Ls',
-  description: `List directory contents within the current canvas folder. When path is omitted, lists the canvas root. Returns JSON with entries sorted alphabetically (directories carry a trailing "/") plus a \`truncated\` flag (raise \`limit\` when true). A canvas folder typically contains canvas.json plus subdirectories such as nodes/, artifacts/, and memory/.`,
+  description: `List directory contents within the current canvas folder. When path is omitted, lists the canvas root. Returns JSON: { path, entries: [...], count, total, truncated }. Entries are sorted alphabetically with a trailing "/" on directories; \`count\` is entries in this response (≤ limit), \`total\` is the full eligible entry count, \`truncated:true\` means \`total > count\` — raise \`limit\` to ≥\`total\`. A canvas folder typically contains canvas.json plus subdirectories such as nodes/, artifacts/, and memory/.`,
   parameters: lsParamsSchema,
 };
 

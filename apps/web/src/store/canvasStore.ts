@@ -1,18 +1,4 @@
 import {
-  type AgentBaseContext,
-  type CanvasCommand,
-  type CanvasCommandType,
-  type CanvasEventInput,
-  type CanvasExecution,
-  type CanvasExecutionSource,
-  type CanvasNodeType,
-  type NodeSummary,
-  type RecentAction,
-  type SelectedNodeDetail,
-  buildSpatialSummary,
-  type SpatialNode,
-} from '@sediment/shared';
-import {
   applyNodeChanges,
   applyEdgeChanges,
   type Node,
@@ -60,6 +46,19 @@ import { getCanvas, postCanvasEvents, preprocessNode, putCanvas } from '../api';
 import { getNodeSize } from '../utils/node/size';
 
 import type { AlignDirection } from '@/handler/canvasCommand/utils/alignment';
+import type {
+  AgentBaseContext,
+  CanvasCommand,
+  CanvasCommandType,
+  CanvasExecution,
+  CanvasExecutionSource,
+  CanvasNodeType,
+  NodeSummary,
+  RecentAction,
+  SelectedNodeDetail,
+  SpatialNode,
+  CanvasEventInput
+} from '@sediment/shared';
 
 const AUTOSAVE_DEBOUNCE_MS = 1000;
 const PREPROCESS_DEBOUNCE_MS = 1000;
@@ -106,14 +105,13 @@ const triggerPreprocessing = (node: Node) => {
 
 // ── Spatial cache ──────────────────────────────────────────────
 // Module-level cache keyed by a lightweight fingerprint of
-// node positions + edge endpoints.  Avoids re-running the O(n²)
-// clustering in buildSpatialSummary on every getAgentContext call
-// when the canvas hasn't changed.
+// node positions + edge endpoints.  Avoids re-running the
+// `toSpatialNodes` traversal on every consumer call (prompt-node
+// context builder etc.) when the canvas hasn't changed.
 
 interface SpatialCache {
   fingerprint: number;
   spatialNodes: SpatialNode[];
-  summary: ReturnType<typeof buildSpatialSummary>;
 }
 
 let _spatialCache: SpatialCache | null = null;
@@ -180,26 +178,22 @@ function toSpatialNodes(nodes: Node[]): SpatialNode[] {
 }
 
 /**
- * Get (or compute) cached spatial nodes + summary for the current canvas.
- * Safe to call from anywhere (components, handlers).
+ * Get (or compute) cached spatial nodes for the current canvas.
+ * Safe to call from anywhere (components, handlers). Returns absolute
+ * positions and resolved sizes, ready to feed shared `spatial`
+ * helpers (e.g. `findNearbyNodes`, `buildQuestionNodeContext`).
  */
 export function getCachedSpatialData(): {
   spatialNodes: SpatialNode[];
-  summary: ReturnType<typeof buildSpatialSummary>;
 } {
   const { nodes, edges } = useCanvasStore.getState();
   const fp = spatialFingerprint(nodes, edges);
   if (_spatialCache && _spatialCache.fingerprint === fp) {
-    return {
-      spatialNodes: _spatialCache.spatialNodes,
-      summary: _spatialCache.summary,
-    };
+    return { spatialNodes: _spatialCache.spatialNodes };
   }
   const spatialNodes = toSpatialNodes(nodes);
-  const edgeList = edges.map((e) => ({ source: e.source, target: e.target }));
-  const summary = buildSpatialSummary(spatialNodes, edgeList);
-  _spatialCache = { fingerprint: fp, spatialNodes, summary };
-  return { spatialNodes, summary };
+  _spatialCache = { fingerprint: fp, spatialNodes };
+  return { spatialNodes };
 }
 
 type RFState = {
@@ -772,7 +766,6 @@ const useCanvasStore = create<RFState>()(
         }),
         recentActions: actionHistory,
         selectedNodes: nodes.filter((n) => n.selected).map(buildSelectedDetail),
-        spatialSummary: getCachedSpatialData().summary,
       };
     },
 

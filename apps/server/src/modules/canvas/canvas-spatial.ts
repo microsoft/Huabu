@@ -422,7 +422,11 @@ export interface InspectNodeResult {
 }
 
 export interface InspectNodesResult {
+  /** Number of nodes returned in this response (`<= limit`). */
   count: number;
+  /** Total number of matches before `limit` was applied. */
+  total: number;
+  /** True when `total > count`; raise `limit` or refine the query. */
   truncated: boolean;
   /** Arrangement description; emitted only when `count >= 2`. */
   arrangement?: string;
@@ -687,7 +691,8 @@ export function inspectNodes(
   }
 
   const limit = Math.max(1, args.limit ?? DEFAULT_INSPECT_LIMIT);
-  const truncated = resultNodes.length > limit;
+  const total = resultNodes.length;
+  const truncated = total > limit;
   if (truncated) resultNodes = resultNodes.slice(0, limit);
 
   const nodes: InspectNodeResult[] = resultNodes.map((s) => {
@@ -721,6 +726,7 @@ export function inspectNodes(
 
   return {
     count: nodes.length,
+    total,
     truncated,
     ...(arrangement ? { arrangement } : {}),
     nodes,
@@ -763,7 +769,11 @@ export interface InspectEdgeResult {
 }
 
 export interface InspectEdgesResult {
+  /** Number of edges returned in this response (`<= limit`). */
   count: number;
+  /** Total number of matches before `limit` was applied. */
+  total: number;
+  /** True when `total > count`; raise `limit` or refine the query. */
   truncated: boolean;
   edges: InspectEdgeResult[];
 }
@@ -880,7 +890,8 @@ export function inspectEdges(
   }
 
   const limit = Math.max(1, args.limit ?? DEFAULT_INSPECT_LIMIT);
-  const truncated = matched.length > limit;
+  const total = matched.length;
+  const truncated = total > limit;
   const edges = truncated ? matched.slice(0, limit) : matched;
-  return { count: edges.length, truncated, edges };
+  return { count: edges.length, total, truncated, edges };
 }
