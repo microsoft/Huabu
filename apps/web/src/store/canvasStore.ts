@@ -56,10 +56,9 @@ import {
 } from '@/handler/canvasCommand/utils/frame';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
-import { getCanvas, preprocessNode, putCanvas } from '../api';
+import { getCanvas, postCanvasEvents, preprocessNode, putCanvas } from '../api';
 import { cloneArtifactToCanvas, parseArtifactUrl } from '../api/artifact';
 import { CanvasConflictError } from '../api/canvas';
-import { getCanvas, postCanvasEvents, preprocessNode, putCanvas } from '../api';
 import { getNodeSize } from '../utils/node/size';
 
 import type { AlignDirection } from '@/handler/canvasCommand/utils/alignment';
@@ -955,6 +954,13 @@ const useCanvasStore = create<RFState>()(
             });
         }
       }
+
+      // Piggy-back the action-log flush on the autosave cadence so we
+      // don't open a separate timer just for events. Fire-and-forget —
+      // failures are retried on the next flush trigger.
+      if (saveSucceeded) {
+        void flushCanvasEventsFor(get().canvasId);
+      }
     },
 
     tryRename: async (kind, id, nextName) => {
@@ -1028,13 +1034,6 @@ const useCanvasStore = create<RFState>()(
       }
       get().updateNodeData(id, { label: trimmed, labelSource: 'user' });
       return true;
-
-      // Piggy-back the action-log flush on the autosave cadence so we
-      // don't open a separate timer just for events. Fire-and-forget —
-      // failures are retried on the next flush trigger.
-      if (saveSucceeded) {
-        void flushCanvasEventsFor(get().canvasId);
-      }
     },
 
     flushCanvasEvents: async () => {
