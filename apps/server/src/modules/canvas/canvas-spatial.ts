@@ -598,10 +598,15 @@ export function inspectNodes(
       setDerived(nid, { edgeIds: eids, hops: 1 });
     }
 
-    // Optional 2-hop expansion. Only adds nodes not already in hop-1.
+    // Optional 2-hop expansion. Only adds nodes not already in hop-1, but
+    // collects every edge that reaches each 2-hop node (a node may be
+    // reachable through multiple hop-1 neighbours, and the model relies on
+    // edgeIds to enumerate connectors).
     if (depth === 2) {
-      const seen = new Set<string>([targetId, ...ids]);
-      for (const hop1Id of [...ids]) {
+      const hop1Set = new Set<string>(ids);
+      const excluded = new Set<string>([targetId, ...ids]);
+      const hop2Edges = new Map<string, string[]>();
+      for (const hop1Id of ids) {
         for (const e of bundle.rawEdges) {
           const other =
             e.source === hop1Id
@@ -609,13 +614,18 @@ export function inspectNodes(
               : e.target === hop1Id
                 ? e.source
                 : null;
-          if (!other || seen.has(other)) continue;
-          seen.add(other);
+          if (!other || excluded.has(other)) continue;
+          // Skip edges that link two hop-1 nodes (already represented in hop-1).
+          if (hop1Set.has(other)) continue;
           const eid = e.id ?? `${e.source}->${e.target}`;
-          const prev = derived.get(other)?.edgeIds ?? [];
-          setDerived(other, { edgeIds: [...prev, eid], hops: 2 });
-          ids.push(other);
+          const list = hop2Edges.get(other) ?? [];
+          if (!list.includes(eid)) list.push(eid);
+          hop2Edges.set(other, list);
         }
+      }
+      for (const [nid, eids] of hop2Edges) {
+        setDerived(nid, { edgeIds: eids, hops: 2 });
+        ids.push(nid);
       }
     }
     intersect(ids);
