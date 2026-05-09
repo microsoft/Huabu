@@ -1,0 +1,135 @@
+/**
+ * `CanvasCommand` discriminated union schema for the agent.
+ *
+ * Covers exactly the command names listed in
+ * `AGENT_CANVAS_COMMAND_TYPES` (shared). The compile-time guard that
+ * enforces "every non-UI CanvasCommand is either listed in the agent
+ * set or excluded" lives next to that array in `command.ts` (shared),
+ * so we don't need a duplicate guard here.
+ */
+
+import { Type } from '@earendil-works/pi-ai';
+import { CANVAS_ALIGN_DIRECTIONS } from '@sediment/shared';
+
+import { literalUnion, NodeSizeSchema, PointSchema } from './common.js';
+import {
+  EdgeCreateInputSchema,
+  EdgeRefSchema,
+  EdgeStylePatchSchema,
+} from './edge.js';
+import { NodeCreateInputSchema, NodeDataSchema } from './node.js';
+
+export const AlignDirectionSchema = literalUnion(CANVAS_ALIGN_DIRECTIONS);
+
+/** Scope passed to `AUTO_LAYOUT` — either the whole canvas or one frame. */
+export const AutoLayoutScopeSchema = Type.Union([
+  Type.Object({ type: Type.Literal('canvas') }),
+  Type.Object({
+    type: Type.Literal('frame'),
+    frameId: Type.String(),
+  }),
+]);
+
+/**
+ * The 14-arm discriminated union of agent-allowed canvas commands.
+ * Order here mirrors the order documented in `canvasCommandsTool`'s
+ * description so the LLM-facing schema and prose stay in sync.
+ */
+export const AgentCanvasCommandSchema = Type.Union([
+  Type.Object({
+    type: Type.Literal('CREATE_NODES'),
+    nodes: Type.Array(NodeCreateInputSchema),
+  }),
+  Type.Object({
+    type: Type.Literal('DELETE_NODES'),
+    nodeIds: Type.Array(Type.String()),
+  }),
+  Type.Object({
+    type: Type.Literal('MERGE_NODE_DATA'),
+    patches: Type.Array(
+      Type.Object({
+        nodeId: Type.String(),
+        patch: NodeDataSchema,
+      }),
+    ),
+  }),
+  Type.Object({
+    type: Type.Literal('SET_NODE_PARENT'),
+    nodeIds: Type.Array(Type.String()),
+    parentId: Type.Union([Type.String(), Type.Null()]),
+  }),
+  Type.Object({
+    type: Type.Literal('DISSOLVE_FRAME'),
+    frameId: Type.String(),
+  }),
+  Type.Object({
+    type: Type.Literal('SET_NODE_GEOMETRY'),
+    items: Type.Array(
+      Type.Object({
+        nodeId: Type.String(),
+        position: Type.Optional(PointSchema),
+        size: Type.Optional(NodeSizeSchema),
+      }),
+    ),
+  }),
+  Type.Object({
+    type: Type.Literal('REORDER_NODES'),
+    nodeIds: Type.Array(Type.String()),
+    to: Type.Union([
+      Type.Literal('top'),
+      Type.Literal('bottom'),
+      Type.Object({ before: Type.String() }),
+      Type.Object({ after: Type.String() }),
+    ]),
+  }),
+  Type.Object({
+    type: Type.Literal('CONNECT_NODES'),
+    edges: Type.Array(EdgeCreateInputSchema),
+  }),
+  Type.Object({
+    type: Type.Literal('DISCONNECT_EDGES'),
+    edges: Type.Array(EdgeRefSchema),
+  }),
+  Type.Object({
+    type: Type.Literal('SET_EDGE_STYLE'),
+    edges: Type.Array(EdgeStylePatchSchema),
+  }),
+  Type.Object({
+    type: Type.Literal('ALIGN_NODES'),
+    nodeIds: Type.Array(Type.String()),
+    direction: AlignDirectionSchema,
+  }),
+  Type.Object({
+    type: Type.Literal('DISTRIBUTE_NODES'),
+    nodeIds: Type.Array(Type.String()),
+  }),
+  Type.Object({
+    type: Type.Literal('AUTO_LAYOUT'),
+    scope: AutoLayoutScopeSchema,
+    options: Type.Optional(
+      Type.Object({
+        animate: Type.Optional(Type.Boolean()),
+      }),
+    ),
+  }),
+  Type.Object({
+    type: Type.Literal('CREATE_QUESTION'),
+    id: Type.Optional(
+      Type.String({ description: 'Explicit node ID (node-<uuid>)' }),
+    ),
+    content: Type.String({ description: 'The question text content' }),
+    position: Type.Optional(PointSchema),
+    size: Type.Optional(NodeSizeSchema),
+    parentId: Type.Optional(
+      Type.Union([Type.String(), Type.Null()], {
+        description: 'Parent frame id, or null for root',
+      }),
+    ),
+    skipAutoLayout: Type.Optional(
+      Type.Boolean({
+        description:
+          'When true, skip auto-placement so the explicit position is preserved exactly.',
+      }),
+    ),
+  }),
+]);
