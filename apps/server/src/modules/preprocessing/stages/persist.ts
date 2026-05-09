@@ -29,9 +29,9 @@ export function persist(
   const nodeId = normalized.nodeId;
   const existing = store.readNode(nodeId);
 
-  // Hash-based dedup inside this canvas: skip rewrite when canonical
+  // Content-based dedup inside this canvas: skip rewrite when canonical
   // content has not changed. Title may still drift, so refresh it.
-  if (existing && existing.contentHash === normalized.contentHash) {
+  if (existing && existing.content === normalized.canonicalContent) {
     if (normalized.title && existing.title !== normalized.title) {
       store.writeNode(nodeId, {
         ...existing,
@@ -46,13 +46,12 @@ export function persist(
   }
 
   store.writeNode(nodeId, {
+    ...(normalized.metadata ?? {}),
     nodeId,
     type: contentKind,
     title: normalized.title ?? null,
     src: src ?? null,
     content: normalized.canonicalContent,
-    contentHash: normalized.contentHash,
-    metadata: normalized.metadata ?? {},
   });
 
   return {

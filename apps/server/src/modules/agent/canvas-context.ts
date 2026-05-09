@@ -62,7 +62,7 @@ function extractPreviewFromParsed(
  * Build lightweight preview summaries for canvas nodes.
  *
  * Each node gets at most a `summary`/`keywords` pair from preprocessed
- * metaJson, or a 120-char content snippet — never the full content.
+ * frontmatter, or a 120-char content snippet — never the full content.
  *
  * @param canvasId       Canvas to read.
  * @param filterNodeIds  When provided, only return previews for these
@@ -95,10 +95,13 @@ export async function buildNodeSummaries(
     const nodeContent = nodeId ? store.readNode(nodeId) : null;
     const content =
       nodeContent?.content ?? (data?.content as string | undefined);
-    const meta = (nodeContent?.metadata ?? null) as Record<
-      string,
-      unknown
-    > | null;
+    // Frontmatter fields (summary / keywords / …) are now top-level keys
+    // on `nodeContent`. Pass the whole record through — extractPreviewFromParsed
+    // only reads `summary` and `keywords` from it.
+    const meta =
+      nodeContent !== null
+        ? (nodeContent as unknown as Record<string, unknown>)
+        : null;
     const preview = extractPreviewFromParsed(meta, content);
 
     return {

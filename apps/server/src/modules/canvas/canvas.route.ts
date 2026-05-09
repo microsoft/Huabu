@@ -128,6 +128,7 @@ function persistAndStripNodes(
             ? (data['label'] as string)
             : (existing?.title ?? null);
         const nodeContent: NodeContent = {
+          ...existing,
           nodeId,
           type: nodeType,
           title,
@@ -136,8 +137,6 @@ function persistAndStripNodes(
               ? (data['src'] as string)
               : (existing?.src ?? null),
           content,
-          contentHash: existing?.contentHash ?? '',
-          metadata: existing?.metadata ?? {},
         };
         try {
           store.writeNode(nodeId, nodeContent);
@@ -194,17 +193,16 @@ function hydrateNodeContent(store: CanvasStore, nodes: NodeLike[]): NodeLike[] {
 
     // Surface preprocessed AI summary / keywords from the per-node markdown
     // frontmatter so the client can render them without a separate fetch.
-    const meta = nodeContent.metadata as Record<string, unknown> | undefined;
-    if (meta) {
-      if (typeof meta['summary'] === 'string' && meta['summary'].trim()) {
-        data['summary'] = meta['summary'].trim();
-      }
-      if (
-        Array.isArray(meta['keywords']) &&
-        meta['keywords'].every((k) => typeof k === 'string')
-      ) {
-        data['keywords'] = meta['keywords'];
-      }
+    const summary = nodeContent['summary'];
+    if (typeof summary === 'string' && summary.trim()) {
+      data['summary'] = summary.trim();
+    }
+    const keywords = nodeContent['keywords'];
+    if (
+      Array.isArray(keywords) &&
+      keywords.every((k) => typeof k === 'string')
+    ) {
+      data['keywords'] = keywords;
     }
 
     if (nodeContent.title) {

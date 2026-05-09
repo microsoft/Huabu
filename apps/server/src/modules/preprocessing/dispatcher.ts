@@ -76,7 +76,6 @@ export class PreprocessDispatcher {
         success: false,
         status: 'error',
         usedCapabilities: [],
-        fingerprints: { input: '' },
         patch: {},
         diagnostics: [
           {

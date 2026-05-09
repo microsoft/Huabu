@@ -95,11 +95,6 @@ export interface PreprocessNodeResult {
 
   usedCapabilities: Capability[];
 
-  fingerprints: {
-    input: string;
-    output?: string;
-  };
-
   extracted?: {
     title?: string;
     content?: string;
@@ -178,7 +173,6 @@ export interface ExtractResult {
 
 /** Result produced by the Normalize stage. */
 export interface NormalizeResult {
-  contentHash: string;
   /** Canvas node id (source identity is canvas-local). */
   nodeId: string;
   title?: string;
@@ -191,7 +185,6 @@ export interface NormalizeResult {
    */
   metadata?: Record<string, unknown>;
   canonicalContent: string;
-  inputFingerprint: string;
 }
 
 // ---------------------------------------------------------------------------

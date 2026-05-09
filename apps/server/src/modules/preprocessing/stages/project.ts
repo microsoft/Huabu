@@ -61,10 +61,6 @@ export function project(
     success: !hasError,
     status,
     usedCapabilities,
-    fingerprints: {
-      input: ctx.normalized?.inputFingerprint ?? '',
-      output: ctx.normalized?.contentHash,
-    },
     extracted: ctx.extracted?.skipped
       ? undefined
       : {
