@@ -166,6 +166,13 @@ function markdownToNodeContent(nodeId: string, raw: string): NodeContent {
     title: typeof meta['title'] === 'string' ? meta['title'] : null,
     content,
   };
+  // Normalize `src`: it must be a string when present, otherwise omitted.
+  // Older / hand-edited node files may carry `src: null` or other non-string
+  // scalars, which would otherwise leak into pipeline state and cause
+  // cache-miss / comparison bugs against the declared `string | undefined`.
+  if (typeof out.src !== 'string') {
+    delete out.src;
+  }
   return out;
 }
 

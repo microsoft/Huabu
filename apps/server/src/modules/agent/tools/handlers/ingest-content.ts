@@ -1,6 +1,6 @@
 /**
  * `ingest_content` handler — manually triggers the per-node
- * preprocessing pipeline (extract / enrich / persist).
+ * preprocessing pipeline.
  */
 
 import { getPreprocessDispatcher } from '../../../preprocessing/index.js';
