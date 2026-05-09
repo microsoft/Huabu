@@ -46,12 +46,13 @@ export function persist(
   }
 
   store.writeNode(nodeId, {
-    ...(normalized.metadata ?? {}),
     nodeId,
     type: contentKind,
     title: normalized.title ?? null,
-    src,
+    src: src ?? null,
     content: normalized.canonicalContent,
+    contentHash: existing?.contentHash ?? '',
+    metadata: normalized.metadata ?? existing?.metadata ?? {},
   });
 
   return {

@@ -260,12 +260,13 @@ function migrateOneCanvas(
     const src = sourceId ? sourceIndex.get(sourceId) : undefined;
     if (src) {
       const nodeContent: NodeContent = {
-        ...src.metadata,
         nodeId,
         type: typeof node.type === 'string' ? node.type : src.type,
         title: src.title,
-        src: src.src ?? undefined,
+        src: src.src ?? null,
         content: src.content,
+        contentHash: '',
+        metadata: src.metadata ?? {},
       };
       try {
         store.writeNode(nodeId, nodeContent);
@@ -283,9 +284,10 @@ function migrateOneCanvas(
         type: typeof node.type === 'string' ? node.type : 'note',
         title:
           typeof data['label'] === 'string' ? (data['label'] as string) : null,
-        src:
-          typeof data['src'] === 'string' ? (data['src'] as string) : undefined,
+        src: typeof data['src'] === 'string' ? (data['src'] as string) : null,
         content: data['content'] as string,
+        contentHash: '',
+        metadata: {},
       };
       try {
         store.writeNode(nodeId, nodeContent);

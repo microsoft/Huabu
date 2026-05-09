@@ -12,13 +12,12 @@ import type { ApiResult, ArtifactUploadResponse } from '@sediment/shared';
 /**
  * Canvas-scoped artifact route. Mount under `/api/canvas`.
  *
- *   POST /:canvasId/artifact/:type   → upload (image | pdf | video)
- *   GET  /:canvasId/artifact/:key    → serve (key = `<artifactId><ext>`)
+ *   POST /:canvasId/artifact/:type          → upload (image | pdf | video)
+ *   GET  /:canvasId/artifact/:filename      → serve (filename = `<id><ext>`)
+ *   POST /:canvasId/artifact/clone-from     → cross-canvas copy
  *
- * The on-disk filename is derived from the upload's display name (the
- * client-supplied filename, falling back to the generated id) and may
- * differ from the URL key. Both old `<id><ext>` URLs and the new
- * label-named files resolve through the per-canvas artifact manifest.
+ * The on-disk filename equals the URL key, so a node's `data.src` resolves
+ * directly without any indirection.
  */
 const artifactRoute: FastifyPluginAsync = async (fastify) => {
   fastify.post<{
@@ -49,25 +48,10 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
     const uploadedExt = path.extname(data.filename ?? '');
     const ext = uploadedExt || typeExtMap[type];
 
-    // Display name defaults to the user's original filename (without
-    // extension); falls back to the generated id when nothing was
-    // provided. The URL key always stays `<id><ext>` so persisted
-    // node references remain stable.
-    const uploadStem = data.filename
-      ? path.basename(data.filename, path.extname(data.filename))
-      : '';
-    const displayName = uploadStem || id;
-
     let record;
     try {
       record = await store.writeArtifactStream(
-        {
-          id,
-          displayName,
-          source: uploadStem ? 'original' : 'auto',
-          ext,
-          mimeType: data.mimetype ?? null,
-        },
+        { id, ext, mimeType: data.mimetype ?? null },
         data.file,
       );
     } catch (error) {
@@ -77,10 +61,8 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
 
     const response: ArtifactUploadResponse = {
       id,
-      // URL key is the stable `<id><ext>` so node `data.src` survives
-      // any future display-name renames.
-      uri: artifactApiPath(canvasId, `${id}${ext}`),
-      filename: record.displayName + ext,
+      uri: artifactApiPath(canvasId, record.filename),
+      filename: data.filename ?? record.filename,
       mimetype: data.mimetype,
     };
     return reply.send(response);
@@ -91,13 +73,8 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
     async (request, reply) => {
       const { canvasId, filename } = request.params;
       const store = getCanvasStore(canvasId);
-
-      // Resolve the URL key (`<id><ext>` or legacy raw filename) to a
-      // stored record so a renamed display name doesn't break old URLs.
-      const record = store.resolveArtifactByKey(filename);
-      const served = record?.filename ?? filename;
       try {
-        return reply.sendFile(served, store.artifactsDir());
+        return reply.sendFile(path.basename(filename), store.artifactsDir());
       } catch {
         return reply.code(404).send({ message: 'Artifact not found' });
       }
@@ -118,30 +95,22 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
    */
   fastify.post<{
     Params: { canvasId: string };
-    Body: {
-      srcCanvasId?: string;
-      srcKey?: string;
-      displayName?: string;
-    };
+    Body: { srcCanvasId?: string; srcKey?: string };
+    Reply: ApiResult<ArtifactUploadResponse>;
   }>('/:canvasId/artifact/clone-from', async (request, reply) => {
     const { canvasId: dstCanvasId } = request.params;
-    const {
-      srcCanvasId,
-      srcKey,
-      displayName: requestedDisplayName,
-    } = request.body ?? {};
+    const { srcCanvasId, srcKey } = request.body ?? {};
 
     if (!srcCanvasId || !srcKey) {
       return reply
         .code(400)
-        .send({ error: 'srcCanvasId and srcKey are required' });
+        .send({ message: 'srcCanvasId and srcKey are required' });
     }
 
     const srcStore = getCanvasStore(srcCanvasId);
-    const srcRecord = srcStore.resolveArtifactByKey(srcKey);
     const srcPath = srcStore.resolveArtifactFilePath(srcKey);
-    if (!srcRecord || !srcPath) {
-      return reply.code(404).send({ error: 'Source artifact not found' });
+    if (!srcPath) {
+      return reply.code(404).send({ message: 'Source artifact not found' });
     }
 
     let buffer: Buffer;
@@ -149,38 +118,35 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
       buffer = await readFile(srcPath);
     } catch (err) {
       request.log.error({ err }, 'Failed to read source artifact for clone');
-      return reply.code(500).send({ error: 'Failed to read source artifact' });
+      return reply
+        .code(500)
+        .send({ message: 'Failed to read source artifact' });
     }
 
     const dstStore = getCanvasStore(dstCanvasId);
     const id = createId('artifact');
-    const displayName =
-      (requestedDisplayName ?? srcRecord.displayName)?.trim() || id;
+    const ext = path.extname(srcKey);
 
     let record;
     try {
       record = await dstStore.writeArtifactBuffer(
-        {
-          id,
-          displayName,
-          source: srcRecord.displayNameSource ?? 'original',
-          ext: srcRecord.ext,
-          mimeType: srcRecord.mimeType,
-        },
+        { id, ext, mimeType: null },
         buffer,
       );
     } catch (err) {
       request.log.error({ err }, 'Failed to clone artifact');
-      return reply.code(500).send({ error: 'Failed to save cloned artifact' });
+      return reply
+        .code(500)
+        .send({ message: 'Failed to save cloned artifact' });
     }
 
-    return {
+    const response: ArtifactUploadResponse = {
       id,
-      uri: artifactApiPath(dstCanvasId, `${id}${record.ext}`),
-      filename: record.displayName + record.ext,
-      displayName: record.displayName,
-      mimetype: record.mimeType,
+      uri: artifactApiPath(dstCanvasId, record.filename),
+      filename: record.filename,
+      mimetype: record.mimeType ?? undefined,
     };
+    return reply.send(response);
   });
 };
 

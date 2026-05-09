@@ -1,26 +1,18 @@
 /**
- * Storage paths
- *
- * The single place that knows how the on-disk layout maps to canvas /
- * node / thread identifiers. Every other module composes paths via
- * these helpers.
+ * Storage paths.
  *
  * Layout under `<workspace>/`:
  *
- *   <canvasDir>/                    ← name = sanitized canvas title
- *     canvas.json                   (carries the stable canvasId)
- *     nodes/<nodeFile>.md           ← name = sanitized node label
- *     artifacts/<filename>
+ *   <canvasDir>/                    name = sanitised canvas title
+ *     canvas.json                   carries the stable canvasId
+ *     nodes/<safe(label)>.md        per-node markdown (id in frontmatter)
+ *     .artifacts/<artifactId><ext>  raw uploads (hidden dir)
  *     memory/preferences.md
- *     .history/
- *       chat/<threadId>.json
- *       intent.json
- *       events.json
+ *     .history/{chat/<thread>.json,intent.json,events.json}
  *
- * Stable identifiers (canvasId, nodeId) live inside the file payloads
- * (canvas.json, frontmatter), never as filenames. The directory and
- * file names are derived from user-facing labels via {@link
- * ./canvas-dirs.ts} and the per-canvas node index.
+ * Stable identifiers (canvasId, nodeId) live inside the file payloads.
+ * Artifact filenames carry the stable artifactId directly so URL keys
+ * never need an indirection layer.
  */
 
 import path from 'node:path';
@@ -42,11 +34,6 @@ export function nodesDir(canvasId: string): string {
   return path.join(canvasRoot(canvasId), 'nodes');
 }
 
-/**
- * Resolve a node markdown filename to an absolute path. The `filename`
- * argument is the user-facing label-derived name held in the per-canvas
- * node index, e.g. `My Note.md`.
- */
 export function nodeFilePath(canvasId: string, filename: string): string {
   const base = path.basename(filename);
   if (!base || base === '.' || base === '..') {
@@ -55,22 +42,13 @@ export function nodeFilePath(canvasId: string, filename: string): string {
   return path.join(nodesDir(canvasId), base);
 }
 
+/** Hidden directory holding raw uploaded files keyed by artifactId. */
+export const ARTIFACTS_DIR_NAME = '.artifacts';
+
 export function artifactsDir(canvasId: string): string {
-  return path.join(canvasRoot(canvasId), 'artifacts');
+  return path.join(canvasRoot(canvasId), ARTIFACTS_DIR_NAME);
 }
 
-/**
- * Path of the per-canvas artifact manifest. Owned by `CanvasStore`,
- * created on first write.
- */
-export function artifactManifestPath(canvasId: string): string {
-  return path.join(canvasRoot(canvasId), 'artifacts.json');
-}
-
-/**
- * Resolve an artifact filename to an absolute path. The filename is
- * forced to its basename and validated against path traversal.
- */
 export function artifactPath(canvasId: string, filename: string): string {
   const base = path.basename(filename);
   if (!base || base === '.' || base === '..') {

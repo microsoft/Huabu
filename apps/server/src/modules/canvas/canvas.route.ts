@@ -22,6 +22,7 @@ import {
   listCanvases,
   type CanvasFile,
 } from '../storage/index.js';
+import { canvasRoot } from '../storage/paths.js';
 import { getWorkspacePath } from '../workspace.js';
 
 import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
@@ -77,6 +78,24 @@ function toMessage(error: unknown): string {
 }
 
 /**
+ * Node types that have a sibling `nodes/<safe(label)>.md`. The body is
+ * markdown content for note/text/web/pdf and empty for image/video/frame
+ * (which only carry frontmatter).
+ */
+const MD_BACKED_NODE_TYPES = new Set([
+  'note',
+  'text',
+  'web',
+  'pdf',
+  'image',
+  'video',
+  'frame',
+]);
+
+/** Subset that carries a textual body in the markdown. */
+const TEXT_BEARING_NODE_TYPES = new Set(['note', 'text', 'web', 'pdf']);
+
+/**
  * Persist node markdown into the canvas store and return canvas-state
  * nodes with the bulky `content` field stripped.
  *
@@ -84,9 +103,10 @@ function toMessage(error: unknown): string {
  * canvas node so they survive save/load cycles without depending on the
  * node markdown.
  *
- * Returns either the cleaned node list or, on the first label collision
- * caused by a user/agent rename, a structured conflict the route
- * surfaces as a 409.
+ * Strict (user-typed) renames are validated in a pre-pass against the
+ * existing on-disk index AND against other strict renames in the same
+ * batch, so a mid-batch conflict cannot leave canvas.json out of sync
+ * with the freshly renamed `.md` files.
  */
 type PersistResult =
   | {
@@ -105,19 +125,59 @@ function persistAndStripNodes(
   store: CanvasStore,
   nodes: NodeLike[],
 ): PersistResult {
+  // Pre-pass: validate every strict (user-typed) rename against the
+  // existing on-disk index AND against other strict renames in this
+  // same batch. We surface a 409 BEFORE touching disk so a mid-batch
+  // conflict can't leave canvas.json out of sync with the freshly
+  // renamed `.md` files.
+  const normalize = (s: string) => s.normalize('NFC').toLowerCase();
+  const reservedSlots = new Map<string, string>(); // norm(filename) → nodeId
+  for (const node of nodes) {
+    const data = node.data ?? {};
+    const nodeId = typeof node.id === 'string' ? node.id : '';
+    const nodeType = typeof node.type === 'string' ? node.type : '';
+    if (!nodeId || !MD_BACKED_NODE_TYPES.has(nodeType)) continue;
+    if (data['labelSource'] !== 'user') continue;
+    const label =
+      typeof data['label'] === 'string' ? (data['label'] as string) : null;
+    let preview: ReturnType<CanvasStore['checkNodeRename']>;
+    try {
+      preview = store.checkNodeRename(nodeId, label);
+    } catch {
+      continue; // bad nodeId — let the write loop's catch handle it
+    }
+    if (preview.conflict) {
+      return {
+        kind: 'conflict',
+        nodeId,
+        label: label ?? '',
+        conflictWith: preview.conflict.filename,
+      };
+    }
+    const slot = normalize(preview.desired);
+    const owner = reservedSlots.get(slot);
+    if (owner && owner !== nodeId) {
+      return {
+        kind: 'conflict',
+        nodeId,
+        label: label ?? '',
+        conflictWith: preview.desired,
+      };
+    }
+    reservedSlots.set(slot, nodeId);
+  }
+
   const out: NodeLike[] = [];
   const renamed: Array<{ nodeId: string; label: string }> = [];
   for (const node of nodes) {
     const data = node.data ?? {};
     const nodeId = typeof node.id === 'string' ? node.id : '';
-    const content =
+    const nodeType = typeof node.type === 'string' ? node.type : '';
+    const incomingContent =
       typeof data['content'] === 'string'
         ? (data['content'] as string)
         : undefined;
 
-    // Tracks whether per-node markdown has a title we can re-hydrate from
-    // on read. When false (e.g. frame nodes have no markdown), the auto
-    // label MUST be kept on the canvas node, otherwise it is lost on reload.
     let hasPersistedTitle = false;
     let existing: NodeContent | null = null;
     if (nodeId) {
@@ -128,80 +188,82 @@ function persistAndStripNodes(
       }
     }
 
-    if (nodeId && typeof content === 'string') {
-      const nodeType =
-        typeof node.type === 'string' ? node.type : (existing?.type ?? 'note');
-      // Guard against accidental content wipes: if the incoming content is
-      // an empty string but the persisted markdown already has non-empty
-      // content for a text-bearing node, skip the write. This prevents
-      // races (e.g. autosave firing before the editor flushes its buffer)
-      // from clobbering real content with "".
-      const isTextBearing = nodeType === 'note' || nodeType === 'text';
-      const wouldClobber =
-        content.length === 0 &&
-        isTextBearing &&
-        typeof existing?.content === 'string' &&
-        existing.content.length > 0;
+    const shouldPersistMd = !!nodeId && MD_BACKED_NODE_TYPES.has(nodeType);
+    const isTextBearing = TEXT_BEARING_NODE_TYPES.has(nodeType);
+    const body = isTextBearing ? (incomingContent ?? '') : '';
+    // Guard against accidental content wipes: if the incoming content is
+    // an empty string but the persisted markdown already has non-empty
+    // content for a text-bearing node, skip the write. This prevents
+    // races (e.g. autosave firing before the editor flushes its buffer)
+    // from clobbering real content with "".
+    const wouldClobber =
+      isTextBearing &&
+      incomingContent === '' &&
+      typeof existing?.content === 'string' &&
+      existing.content.length > 0;
 
-      if (!wouldClobber) {
-        const title =
-          typeof data['label'] === 'string'
-            ? (data['label'] as string)
-            : (existing?.title ?? null);
-        const nodeContent: NodeContent = {
-          ...existing,
-          nodeId,
-          type: nodeType,
-          title,
-          src:
-            typeof data['src'] === 'string'
-              ? (data['src'] as string)
-              : existing?.src,
-          content,
-        };
-        try {
-          // Strict rename only when the *user* intentionally typed this
-          // label — those go through the `tryRename` flow, which surfaces
-          // collisions as a window.alert and reverts the input.
-          //
-          // Agent-sourced labels are auto-deduped instead. AI runs in a
-          // batched, fire-and-forget loop and has no way to react to a
-          // 409, so refusing the save would silently drop the AI's
-          // changes (and every subsequent autosave too). Auto-dedup keeps
-          // the canvas saveable; we sync the bumped name back to
-          // `data.label` below so the canvas display stays unique.
-          const labelSource = data['labelSource'];
-          const strictRename = labelSource === 'user';
-          const result = store.writeNode(nodeId, nodeContent, {
-            strictRename,
-          });
-          if (!result.ok && result.reason === 'conflict') {
-            return {
-              kind: 'conflict',
-              nodeId,
-              label: title ?? '',
-              conflictWith: result.conflictWith.filename,
-            };
-          }
-          // When the on-disk filename was bumped (e.g. `Foo (2).md`),
-          // mirror the bumped stem back into the node's display label so
-          // sibling labels stay unique on the canvas. Only do this for
-          // text-bearing nodes that actually persist a markdown title;
-          // frame nodes (no markdown) are dedup'd at the canvas-state
-          // level by other code paths.
-          if (result.ok && title) {
-            const stem = result.filename.replace(/\.md$/, '');
-            if (stem !== title) {
-              data['label'] = stem;
-              renamed.push({ nodeId, label: stem });
-            }
-          }
-          hasPersistedTitle = !!title;
-        } catch {
-          // Best effort — skip nodes whose id fails sanitisation.
+    if (
+      shouldPersistMd &&
+      !wouldClobber &&
+      // For text-bearing nodes only persist when caller actually sent
+      // content (or we're creating a fresh file). For image/video/frame
+      // the markdown is metadata-only — always persist so src / label
+      // changes land.
+      (incomingContent !== undefined || !isTextBearing || !existing)
+    ) {
+      const title =
+        typeof data['label'] === 'string'
+          ? (data['label'] as string)
+          : (existing?.title ?? null);
+      const nodeContent: NodeContent = {
+        nodeId,
+        type: nodeType || existing?.type || 'note',
+        title,
+        src:
+          typeof data['src'] === 'string'
+            ? (data['src'] as string)
+            : (existing?.src ?? null),
+        content: body,
+        contentHash: existing?.contentHash ?? '',
+        metadata: existing?.metadata ?? {},
+      };
+      try {
+        // Strict rename only when the *user* intentionally typed this
+        // label — those go through the `tryRename` flow, which surfaces
+        // collisions as a window.alert and reverts the input.
+        //
+        // Agent-sourced labels are auto-deduped instead. AI runs in a
+        // batched, fire-and-forget loop and has no way to react to a
+        // 409, so refusing the save would silently drop the AI's
+        // changes (and every subsequent autosave too). Auto-dedup keeps
+        // the canvas saveable; we sync the bumped name back to
+        // `data.label` below so the canvas display stays unique.
+        const labelSource = data['labelSource'];
+        const strictRename = labelSource === 'user';
+        const result = store.writeNode(nodeId, nodeContent, {
+          strictRename,
+        });
+        if (!result.ok && result.reason === 'conflict') {
+          return {
+            kind: 'conflict',
+            nodeId,
+            label: title ?? '',
+            conflictWith: result.conflictWith.filename,
+          };
         }
-      } else {
-        hasPersistedTitle = !!existing?.title;
+        // When the on-disk filename was bumped (e.g. `Foo (2).md`),
+        // mirror the bumped stem back into the node's display label so
+        // sibling labels stay unique on the canvas.
+        if (result.ok && title) {
+          const stem = result.filename.replace(/\.md$/, '');
+          if (stem !== title) {
+            data['label'] = stem;
+            renamed.push({ nodeId, label: stem });
+          }
+        }
+        hasPersistedTitle = !!title;
+      } catch {
+        // Best effort — skip nodes whose id fails sanitisation.
       }
     } else {
       hasPersistedTitle = !!existing?.title;
@@ -216,9 +278,9 @@ function persistAndStripNodes(
     const labelSource = data['labelSource'];
     const isUserOrAgent = labelSource === 'user' || labelSource === 'agent';
     // Drop the auto label only when per-node markdown can provide it back
-    // on hydration. For nodes without persisted markdown (e.g. frames whose
-    // label is generated by preprocessing), keep the label on canvas.json
-    // so it survives reload.
+    // on hydration. For nodes without persisted markdown (e.g. annotation
+    // / question nodes whose label is generated by preprocessing), keep
+    // the label on canvas.json so it survives reload.
     const keepLabel = isUserOrAgent || !hasPersistedTitle;
     const cleanData: Record<string, unknown> = { ...dataRest };
     if (!keepLabel) delete cleanData['label'];
@@ -305,20 +367,29 @@ function hydrateNodeContent(store: CanvasStore, nodes: NodeLike[]): NodeLike[] {
     if ('contentMissing' in data) {
       delete data['contentMissing'];
     }
-    data['content'] = nodeContent.content;
-
-    // Surface preprocessed AI summary / keywords from the per-node markdown
-    // frontmatter so the client can render them without a separate fetch.
-    const summary = nodeContent['summary'];
-    if (typeof summary === 'string' && summary.trim()) {
-      data['summary'] = summary.trim();
+    // Only restore body for text-bearing types — image/video/frame
+    // markdown is metadata-only and the canvas state does not carry
+    // a content field for them.
+    if (TEXT_BEARING_NODE_TYPES.has(nodeType)) {
+      data['content'] = nodeContent.content;
     }
-    const keywords = nodeContent['keywords'];
-    if (
-      Array.isArray(keywords) &&
-      keywords.every((k) => typeof k === 'string')
-    ) {
-      data['keywords'] = keywords;
+
+    // Surface preprocessed AI summary / keywords from the per-node
+    // markdown frontmatter so the client can render them without a
+    // separate fetch.
+    const meta = nodeContent.metadata;
+    if (meta) {
+      const summary = meta['summary'];
+      if (typeof summary === 'string' && summary.trim()) {
+        data['summary'] = summary.trim();
+      }
+      const keywords = meta['keywords'];
+      if (
+        Array.isArray(keywords) &&
+        keywords.every((k) => typeof k === 'string')
+      ) {
+        data['keywords'] = keywords;
+      }
     }
 
     if (nodeContent.title) {
@@ -660,7 +731,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
 
-    const canvasDir = path.join(getWorkspacePath(), canvasId);
+    const canvasDir = canvasRoot(canvasId);
     if (!existsSync(canvasDir)) {
       return reply.code(404).send({ message: 'Canvas directory not found' });
     }
@@ -696,9 +767,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     archive.append(JSON.stringify(manifest, null, 2), {
       name: 'manifest.json',
     });
+    // dot:true so the hidden `.artifacts/` directory is always included;
+    // `.history/` is opted out unless the caller explicitly requests it.
     archive.glob('**/*', {
       cwd: canvasDir,
-      dot: includeHistory,
+      dot: true,
       ignore: includeHistory ? [] : ['.history/**'],
     });
 

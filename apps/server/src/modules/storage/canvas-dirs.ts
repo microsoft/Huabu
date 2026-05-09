@@ -1,13 +1,7 @@
 /**
  * Workspace-level canvas directory index.
- *
- * Maps stable `canvasId`s to the directory name used on disk. Built by
- * scanning every immediate subdirectory of the workspace for a
- * `canvas.json` and reading the `canvasId` field from inside.
- *
- * Read paths fall back to the canvas id itself when the index has no
- * entry (legacy layout where `dirName === canvasId`). This keeps the
- * refactor backwards compatible until the one-shot migration runs.
+ * Maps `canvasId` → on-disk directory name. Falls back to the id itself
+ * when an entry is missing (legacy layout where dirName === canvasId).
  */
 
 import { existsSync, readdirSync, renameSync, statSync } from 'node:fs';
@@ -20,7 +14,6 @@ import { getWorkspacePath } from '../workspace.js';
 
 export interface CanvasDirEntry {
   id: string;
-  /** Directory name relative to the workspace root. */
   filename: string;
   title: string | null;
 }
@@ -65,11 +58,6 @@ export function refreshCanvasDirIndex(): void {
   scanned = false;
 }
 
-/**
- * Resolve a canvas id to its directory name. Falls back to the id
- * itself when the index has no entry (legacy directories whose name
- * already equals the canvas id remain readable).
- */
 export function canvasDirName(canvasId: string): string {
   ensureScanned();
   return index.get(canvasId)?.filename ?? canvasId;
@@ -86,8 +74,8 @@ export function findCanvasIdByDir(dirName: string): string | null {
 }
 
 /**
- * Suggest a directory name for a new canvas. Sanitises the requested
- * `title` and adds a numeric suffix on collision.
+ * Suggest a directory name for a new canvas: sanitised title with a
+ * numeric suffix on collision.
  */
 export function suggestCanvasDir(
   title: string | null,
@@ -128,11 +116,7 @@ export function unregisterCanvasDir(canvasId: string): void {
   index.remove(canvasId);
 }
 
-/**
- * Result of a strict on-disk rename. `conflictWith` carries the
- * directory name that already owns the target slot so the caller can
- * surface it in a 409 response.
- */
+/** Result of a strict on-disk rename. */
 export type CanvasDirRenameResult =
   | { ok: true; dirName: string }
   | { ok: false; reason: 'conflict'; conflictWith: string }
@@ -140,13 +124,9 @@ export type CanvasDirRenameResult =
   | { ok: false; reason: 'fs-error'; message: string };
 
 /**
- * Rename a canvas directory both on disk and in the index.
- *
- * - Same-slot renames (case-only) update the stored casing without
- *   touching the filesystem (avoids macOS/Windows case-insensitive
- *   pitfalls).
- * - Hard collisions return `{ ok: false, reason: 'conflict' }`; the
- *   caller decides whether to 409 or auto-dedupe.
+ * Rename a canvas directory both on disk and in the index. Same-slot
+ * renames (case-only) update the stored casing without touching the
+ * filesystem. Hard collisions return `{ ok: false, reason: 'conflict' }`.
  */
 export function renameCanvasDirOnDisk(
   canvasId: string,
@@ -157,7 +137,27 @@ export function renameCanvasDirOnDisk(
   if (!entry) return { ok: false, reason: 'not-found' };
 
   if (normalizeForCompare(entry.filename) === normalizeForCompare(newDirName)) {
-    if (entry.filename !== newDirName) index.rename(canvasId, newDirName);
+    if (entry.filename !== newDirName) {
+      // Case-only rename. Without a real `renameSync` the on-disk
+      // basename keeps its old casing, so the next `scanWorkspace()`
+      // (e.g. via `listCanvases()`) re-reads the original casing and
+      // silently reverts the user's change. On case-insensitive
+      // filesystems (APFS / NTFS) `renameSync` updates the casing in
+      // place; on case-sensitive ones it's a regular rename.
+      const ws = getWorkspacePath();
+      const from = path.join(ws, entry.filename);
+      const to = path.join(ws, newDirName);
+      try {
+        renameSync(from, to);
+      } catch (err) {
+        return {
+          ok: false,
+          reason: 'fs-error',
+          message: err instanceof Error ? err.message : String(err),
+        };
+      }
+      index.rename(canvasId, newDirName);
+    }
     return { ok: true, dirName: newDirName };
   }
 

@@ -4,6 +4,54 @@
 
 ---
 
+## 2026-05-09 · Frame 节点也生成 `.md` 文件
+
+**What Changed**
+
+- frame 节点不再是“完全只存在 `canvas.json` 里”了，会在 `nodes/` 目录下生成一个对应的 `.md`，格式与 image / video 一致——只有 frontmatter（`id`、`type: frame`、`title`），没有正文。
+- 现在会生成 `.md` 的节点类型全集：note / text / web / pdf / image / video / **frame**。
+- 打开旧工作区时会自动补齐：scan `canvas.json` 里现有的 frame 节点，谁没有对应 `.md` 就为谁生成一份。
+
+**Notes**
+
+- frame 重命名会跟着改它的 `.md` 文件名，同样会被 `tryRename` 检查同画布内重名冲突。
+- frame 在 `canvas.json` 里仍然保留子节点层级等拓扑信息，`.md` 只是多一份可读的元数据限定。
+- 仍然不生成 `.md` 的节点类型：annotation、question、intent。
+
+---
+
+## 2026-05-09 · Note 文件缺失占位 UI 与媒体节点对齐
+
+**What Changed**
+
+- Note 节点的 `.md` 文件在 Finder 里被删掉 / 改名后，原本顶部那条小灰带「Note file missing — type to recreate it」改成跟 PDF / 图片 / 视频节点一致的居中占位卡片：图标 + 「Note file missing」标题 + 一句说明 + 醒目的「Remove from canvas」按钮。
+- 占位状态下编辑器不再显示，节点工具栏也会临时隐藏，避免在「文件已经没了」的节点上做编辑操作。
+
+**Notes**
+
+- 触发条件不变：只有当后端给的 `data.contentMissing` 为 true **且** 节点目前没有可回退的内存内容时才会显示这张卡片。
+- 「敲字直接重建 .md」的旧行为下线了：现在只能选择「Remove from canvas」清掉孤儿节点，或者直接在 Finder 里把 .md 放回来。
+
+---
+
+## 2026-05-09 · Artifact 存储改造：隐藏目录 + 节点级 .md
+
+**What Changed**
+
+- 工作区里 `artifacts/` 目录现在改名为 `.artifacts/`（隐藏），并且 `artifacts.json` 清单文件被彻底删除。文件名不再依赖 displayName，统一就是 `<artifactId><ext>`，URL 与磁盘路径一一对应。
+- 每一个有原始文件的节点（pdf / image / video / web / note / text）现在都会在 `nodes/` 下生成一个对应的 `.md`：text / web / pdf / note 的 `.md` 里有正文 + frontmatter；image / video 的 `.md` 只有 frontmatter（指向 `.artifacts/` 里的文件）。
+- 不会生成 `.md` 的节点类型：**annotation、question、intent**。它们的全部信息只存在 `canvas.json` 里。（frame 节点随后也加入了 `.md` 体系，详见上面的条目。）
+- 打开旧工作区时会自动迁移：`artifacts/` 重命名为 `.artifacts/`、按清单把文件名改为 `<artifactId><ext>`、清单文件删除、所有 image / video 节点补齐对应的 `.md`。整个过程是幂等的，重复打开不会出问题。
+
+**Notes**
+
+- 上传 / 克隆 artifact 的接口签名简化：不再接受 `displayName` / `source` 字段；服务端只关心 id 和扩展名。前端没有用到这些字段，行为没有可见变化。
+- 节点 `.md` 的文件名仍然按节点标题生成（清理过非法字符），改名节点会改 `.md` 文件名；artifact 的文件名固定为 id，不会跟着节点标题走。
+- 导出 `.sediment.zip` 时会一并打包 `.artifacts/`，对方导入后所有附件都能直接用。
+- 如果你以前手动改过 artifact 文件名，迁移会保留你的改动（因为 URL 键 = 文件名）。
+
+---
+
 ## 2026-05-08 · Agent 循环升级到 pi-agent-core
 
 **What Changed**

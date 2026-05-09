@@ -9,26 +9,33 @@ Huabu 的数据分两类：
 
 ## 工作区目录结构
 
-工作区目录由 [apps/server/src/modules/workspace.ts](../../apps/server/src/modules/workspace.ts) 在你选定文件夹时自动创建。
+工作区采用**画布自包含**布局：每张画布是一个目录，画布相关的全部资料都在它自己的目录里。
 
 ```text
 <workspace>/
-├── canvas/
-│   └── <canvasId>.json              画布状态（节点、连线、版本号）
-├── sources/
-│   └── <Title>.md                   知识来源（Markdown + YAML frontmatter）
-├── artifacts/
-│   └── artifact-<uuid>.<ext>        二进制附件（图片、PDF、视频）
-└── .history/
-    └── <canvasId>/<threadId>.json   每个画布的对话历史，按线程分文件
+└── <canvas-title>/                    # 目录名按画布标题生成（清理过非法字符）
+    ├── canvas.json                    # 画布状态（节点、连线、版本号、标题）
+    ├── nodes/
+    │   └── <node-title>.md            # 每个节点对应一个 .md（frontmatter + 正文）
+    ├── .artifacts/                    # 隐藏：原始二进制文件
+    │   └── <artifactId><ext>          # 文件名固定为 artifactId（pdf / 图片 / 视频）
+    ├── memory/
+    │   └── preferences.md             # 画布的偏好 / 备注（YAML frontmatter + 正文）
+    └── .history/                      # 隐藏：对话与意图历史
+        ├── chat/<threadId>.json
+        ├── intent.json
+        └── events.json
 ```
 
-| 组件     | 格式                        | 说明                                                     |
-| -------- | --------------------------- | -------------------------------------------------------- |
-| 画布     | JSON（原子写入）            | 每次保存先写 `.tmp` 再 `rename`，避免中途崩溃损坏文件    |
-| 知识来源 | Markdown + YAML frontmatter | 可用任意 Markdown 编辑器查看 / 编辑；`id` 字段勿手动修改 |
-| 附件     | 原始二进制                  | 通过 `/api/artifact/` 静态托管                           |
-| 对话历史 | JSON                        | pi-ai Context 序列化；删除画布时该画布目录会被一并清理   |
+| 组件          | 格式                        | 说明                                                                                                     |
+| ------------- | --------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `canvas.json` | JSON（原子写入）            | 每次保存先写 `.tmp` 再 rename，避免崩溃损坏                                                              |
+| `nodes/*.md`  | Markdown + YAML frontmatter | note / text / web / pdf / image / video / frame 节点都各有一个文件；frontmatter 里的 `id` 字段勿手动修改 |
+| `.artifacts/` | 原始二进制                  | 通过 `/api/canvas/<canvasId>/artifact/<artifactId><ext>` 静态托管，文件名 = artifactId                   |
+| `memory/`     | Markdown + frontmatter      | 画布级偏好 / 上下文，可手动编辑                                                                          |
+| `.history/`   | JSON                        | 对话、意图、事件历史；删除画布时整个目录会被清掉                                                         |
+
+> 哪些节点没有 `.md`？**annotation、question、intent** 节点没有对应的 `.md`，它们的所有信息都直接存在 `canvas.json` 里。frame 节点有一个仅含 frontmatter（标题、类型）的 `.md`，身为容器不存正文。
 
 ---
 
@@ -57,22 +64,24 @@ Huabu 的数据分两类：
 | 跨设备同步   | 放进 iCloud / Dropbox / OneDrive / Syncthing 等同步盘             |
 | 版本控制     | 直接 `git init`，工作区每一次保存都会变成一次可 diff 的 JSON 改动 |
 | 切换工作区   | 在应用里选另一个文件夹即可，旧文件夹保持不动                      |
-| 单张画布分享 | 用画布列表页的"导出"得到 `.canvas.json`，对方可"导入"             |
+| 单张画布分享 | 在画布菜单里"导出"得到 `.sediment.zip`，对方可"导入"              |
 
-> 💡 如果想分享带有附件的画布，对方需要同时拿到 `artifacts/` 下被引用的文件；目前导出包不会自动打包附件。
+> 💡 导出的 `.sediment.zip` 会把整个画布目录（包括 `.artifacts/`）都打包进去，对方导入后所有附件都能直接用，不用额外传文件。
 
 ---
 
 ## 手动编辑文件
 
-| 文件                                  | 是否可手动改                                      |
-| ------------------------------------- | ------------------------------------------------- |
-| `canvas/<id>.json`                    | 不建议；改坏会被前端校验拒绝。备份后再实验        |
-| `sources/<Title>.md` 正文             | ✅ 可以，AI 后续检索会读到新内容                  |
-| `sources/<Title>.md` frontmatter `id` | ❌ 切勿修改，节点引用靠它建立                     |
-| `.history/.../*.json`                 | 不建议；对话格式遵循 pi-ai Context schema         |
-| `llm-config.json`                     | 可以，等价于在 Settings 里改                      |
-| `oauth-credentials.json`              | ❌ 不要手改；用 Settings 里的 Logout / Login 流程 |
+| 文件                                | 是否可手动改                                          |
+| ----------------------------------- | ----------------------------------------------------- |
+| `canvas.json`                       | 不建议；改坏会被前端校验拒绝。备份后再实验            |
+| `nodes/<title>.md` 正文             | ✅ 可以；下次画布加载就会看到                         |
+| `nodes/<title>.md` frontmatter `id` | ❌ 切勿修改，节点引用靠它建立                         |
+| `nodes/<title>.md` 文件名           | ✅ 改名等同于改节点标题；下次打开应用会被一并迁移     |
+| `.artifacts/` 文件名                | ❌ 不要修改；文件名 = artifactId，是节点 `src` 的引用 |
+| `.history/.../*.json`               | 不建议；对话格式遵循 pi-ai Context schema             |
+| `llm-config.json`                   | 可以，等价于在 Settings 里改                          |
+| `oauth-credentials.json`            | ❌ 不要手改；用 Settings 里的 Logout / Login 流程     |
 
 ---
 

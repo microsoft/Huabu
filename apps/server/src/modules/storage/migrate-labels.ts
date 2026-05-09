@@ -1,33 +1,23 @@
 /**
- * One-shot rename migration that converts the V2 layout (where canvas
- * directories and node markdown files were named after their stable
- * ids) to the V3 layout where every on-disk name is derived from a
- * user-facing label.
+ * One-shot rename migration.
  *
- * Idempotent: each entry is checked against its desired name and only
- * renamed when it differs. Safe to call on every `setWorkspacePath`.
+ *   V2 → V3: stable-id directories / files renamed to label-derived names,
+ *            node frontmatter gains `id:`.
+ *   V3 → V4: `artifacts/` → `.artifacts/`, manifest dropped, files renamed
+ *            back to `<artifactId><ext>`. image / video / frame nodes get
+ *            a sibling `.md` if they don't already have one.
  *
- * What it does, in order:
- *
- *   1. For every `<workspace>/<dir>/canvas.json`, read the `canvasId`
- *      and `title`, then rename the directory to a sanitised version
- *      of the title (de-duplicated against siblings).
- *   2. For every node markdown file inside the renamed directory:
- *        - backfill `id: <legacy-filename-stem>` into the frontmatter
- *          when missing, so the per-canvas index can resolve nodes by
- *          their stable id;
- *        - rename the file to `safe(meta.title).md` (or `<id>.md`
- *          when there is no title yet, e.g. for frame nodes).
- *
- * Artifact filenames are intentionally untouched — that lives in PR 4
- * along with the per-canvas artifact manifest.
+ * Idempotent: every step short-circuits when its target state is reached.
+ * Safe to run on every workspace open.
  */
 
 import {
   existsSync,
+  mkdirSync,
   readFileSync,
   readdirSync,
   renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
@@ -35,7 +25,7 @@ import path from 'node:path';
 
 import { refreshCanvasDirIndex } from './canvas-dirs.js';
 import { parseFrontmatter, toFrontmatter } from './frontmatter.js';
-import { atomicWriteJson, readJson } from './io.js';
+import { readJson } from './io.js';
 import {
   dedupeArtifactFilename,
   dedupeName,
@@ -54,13 +44,11 @@ const defaultLogger: MigrationLogger = {
 
 interface CanvasDirRecord {
   canvasId: string;
-  /** Mutable: updated as the directory is renamed. */
   currentDir: string;
   title: string | null;
 }
 
 interface NodeFileRecord {
-  /** Mutable: updated as the file is renamed. */
   currentFile: string;
   id: string;
   title: string | null;
@@ -87,7 +75,6 @@ function renameCanvasDirs(
     const desired = toSafeFilename(entry.title, entry.canvasId);
     if (entry.currentDir === desired) continue;
 
-    // Collide-against everything except this entry itself.
     const siblings: string[] = [];
     for (const name of taken) {
       if (name !== entry.currentDir) siblings.push(name);
@@ -139,10 +126,10 @@ function renameNodeFiles(
     }
     const { meta, content } = parseFrontmatter(raw);
     const stem = file.replace(/\.md$/, '');
-    const id = meta['id'] || stem;
+    const rawId = meta['id'];
+    const id = typeof rawId === 'string' && rawId ? rawId : stem;
 
     if (!meta['id']) {
-      // Put id first so the file is self-describing on inspection.
       const reordered: Record<string, unknown> = { id };
       for (const [k, v] of Object.entries(meta)) reordered[k] = v;
       try {
@@ -160,7 +147,12 @@ function renameNodeFiles(
       }
     }
 
-    records.push({ currentFile: file, id, title: meta['title'] ?? null });
+    const rawTitle = meta['title'];
+    records.push({
+      currentFile: file,
+      id,
+      title: typeof rawTitle === 'string' ? rawTitle : null,
+    });
   }
 
   const taken = new Set<string>();
@@ -202,56 +194,172 @@ function renameNodeFiles(
 }
 
 /**
- * Step 3 — seed `<canvasDir>/artifacts.json` for any loose files in
- * `artifacts/`. Existing filenames are kept as-is so URLs survive; the
- * manifest entries simply teach `CanvasStore` how to resolve them.
+ * Step 3 — switch to the `.artifacts/` layout:
+ *   - move `artifacts/` → `.artifacts/`,
+ *   - rename files via `artifacts.json` so each becomes `<id><ext>`,
+ *   - delete the manifest.
+ *
+ * Loose files without a manifest entry are left alone — their existing
+ * filename already equals the URL key under the new scheme.
  */
-function seedArtifactManifest(
+function migrateArtifactsLayout(
   canvasDir: string,
   canvasId: string,
   logger: MigrationLogger,
 ): void {
-  const artifactsDir = path.join(canvasDir, 'artifacts');
-  if (!existsSync(artifactsDir)) return;
+  const oldDir = path.join(canvasDir, 'artifacts');
+  const newDir = path.join(canvasDir, '.artifacts');
+
+  if (existsSync(oldDir) && !existsSync(newDir)) {
+    try {
+      renameSync(oldDir, newDir);
+      logger.info('moved artifacts dir', { canvasId });
+    } catch (err) {
+      logger.warn('failed to move artifacts dir', {
+        canvasId,
+        err: String(err),
+      });
+      return;
+    }
+  }
+
   const manifestPath = path.join(canvasDir, 'artifacts.json');
-
-  const existing =
-    readJson<Record<string, Record<string, unknown>>>(manifestPath) ?? {};
-
-  const knownFiles = new Set<string>();
-  for (const entry of Object.values(existing)) {
-    const name = entry['filename'];
-    if (typeof name === 'string') knownFiles.add(name);
-  }
-
-  let added = 0;
-  for (const file of readdirSync(artifactsDir)) {
-    if (knownFiles.has(file)) continue;
-    const ext = path.extname(file);
-    const stem = ext ? file.slice(0, -ext.length) : file;
-    existing[stem] = {
-      filename: file,
-      displayName: stem,
-      displayNameSource: 'auto',
-      ext,
-      mimeType: null,
-      createdAt: 0,
-    };
-    added++;
-  }
-
-  if (added > 0 || !existsSync(manifestPath)) {
-    atomicWriteJson(manifestPath, existing);
-    logger.info('seeded artifact manifest', { canvasId, added });
+  if (existsSync(manifestPath) && existsSync(newDir)) {
+    interface ManifestEntry {
+      filename?: string;
+      ext?: string;
+    }
+    const manifest = readJson<Record<string, ManifestEntry>>(manifestPath);
+    if (manifest) {
+      for (const [id, entry] of Object.entries(manifest)) {
+        const oldName = entry.filename;
+        const ext = entry.ext ?? (oldName ? path.extname(oldName) : '');
+        if (!oldName) continue;
+        const newName = `${id}${ext}`;
+        if (oldName === newName) continue;
+        const fromAbs = path.join(newDir, oldName);
+        const toAbs = path.join(newDir, newName);
+        if (!existsSync(fromAbs) || existsSync(toAbs)) continue;
+        try {
+          renameSync(fromAbs, toAbs);
+          logger.info('renamed artifact', {
+            canvasId,
+            from: oldName,
+            to: newName,
+          });
+        } catch (err) {
+          logger.warn('failed to rename artifact', {
+            canvasId,
+            from: oldName,
+            to: newName,
+            err: String(err),
+          });
+        }
+      }
+    }
+    try {
+      rmSync(manifestPath);
+      logger.info('removed artifacts manifest', { canvasId });
+    } catch (err) {
+      logger.warn('failed to remove artifacts manifest', {
+        canvasId,
+        err: String(err),
+      });
+    }
   }
 }
 
 /**
- * Apply the V2 → V3 rename migration to the given workspace.
- *
- * The function is intentionally tolerant: malformed canvases are
- * skipped with a warning, individual rename failures don't abort the
- * batch, and re-runs are safe.
+ * Step 4 — every metadata-only node (image / video / frame) in canvas.json
+ * gets a `nodes/<safe(label)>.md` if one doesn't already exist. The body
+ * is empty; the frontmatter carries `id`, `type`, `title`, `src`.
+ */
+function backfillMetadataOnlyNodeMd(
+  canvasDir: string,
+  canvasId: string,
+  logger: MigrationLogger,
+): void {
+  const canvasJsonPath = path.join(canvasDir, 'canvas.json');
+  if (!existsSync(canvasJsonPath)) return;
+
+  interface CanvasJson {
+    state?: { nodes?: Array<Record<string, unknown>> };
+  }
+  const json = readJson<CanvasJson>(canvasJsonPath);
+  const nodes = json?.state?.nodes;
+  if (!Array.isArray(nodes) || nodes.length === 0) return;
+
+  const nodesDir = path.join(canvasDir, 'nodes');
+  const existingByNodeId = new Map<string, string>();
+  if (existsSync(nodesDir)) {
+    for (const file of readdirSync(nodesDir)) {
+      if (!file.endsWith('.md')) continue;
+      let raw: string;
+      try {
+        raw = readFileSync(path.join(nodesDir, file), 'utf-8');
+      } catch {
+        continue;
+      }
+      const { meta } = parseFrontmatter(raw);
+      const rawId = meta['id'];
+      const id =
+        typeof rawId === 'string' && rawId ? rawId : file.replace(/\.md$/, '');
+      existingByNodeId.set(id, file);
+    }
+  }
+
+  const usedFilenames = new Set<string>(existingByNodeId.values());
+  let created = 0;
+
+  for (const node of nodes) {
+    const id = typeof node['id'] === 'string' ? node['id'] : '';
+    const type = typeof node['type'] === 'string' ? node['type'] : '';
+    if (!id || (type !== 'image' && type !== 'video' && type !== 'frame'))
+      continue;
+    if (existingByNodeId.has(id)) continue;
+
+    const data = (node['data'] as Record<string, unknown>) ?? {};
+    const title =
+      typeof data['label'] === 'string' ? (data['label'] as string) : null;
+    const src =
+      typeof data['src'] === 'string' ? (data['src'] as string) : null;
+
+    const stem = toSafeFilename(title, id);
+    const desired = `${stem}.md`;
+    const target = dedupeArtifactFilename(desired, usedFilenames);
+    usedFilenames.add(target);
+
+    const fm = toFrontmatter({
+      id,
+      type,
+      title,
+      src,
+      content_hash: '',
+      meta_json: null,
+    });
+    try {
+      mkdirSync(nodesDir, { recursive: true });
+      writeFileSync(path.join(nodesDir, target), `${fm}\n`, 'utf-8');
+      created++;
+    } catch (err) {
+      logger.warn('failed to backfill node md', {
+        canvasId,
+        nodeId: id,
+        target,
+        err: String(err),
+      });
+    }
+  }
+
+  if (created > 0) {
+    logger.info('backfilled node md', { canvasId, created });
+  }
+}
+
+/**
+ * Apply the rename migration to the given workspace. Tolerant: malformed
+ * canvases are skipped with a warning, individual failures don't abort
+ * the batch, and re-runs are safe.
  */
 export function migrateLabeledNames(
   workspace: string,
@@ -259,7 +367,6 @@ export function migrateLabeledNames(
 ): void {
   if (!existsSync(workspace)) return;
 
-  // Collect (canvasId, currentDir, title) for every well-formed canvas.
   const entries: CanvasDirRecord[] = [];
   for (const name of readdirSync(workspace)) {
     if (name.startsWith('.')) continue;
@@ -283,19 +390,12 @@ export function migrateLabeledNames(
 
   renameCanvasDirs(workspace, entries, logger);
   for (const entry of entries) {
-    renameNodeFiles(
-      path.join(workspace, entry.currentDir),
-      entry.canvasId,
-      logger,
-    );
-    seedArtifactManifest(
-      path.join(workspace, entry.currentDir),
-      entry.canvasId,
-      logger,
-    );
+    const dir = path.join(workspace, entry.currentDir);
+    renameNodeFiles(dir, entry.canvasId, logger);
+    migrateArtifactsLayout(dir, entry.canvasId, logger);
+    backfillMetadataOnlyNodeMd(dir, entry.canvasId, logger);
   }
 
-  // Force a re-scan so subsequent index lookups reflect the new layout.
   refreshCanvasDirIndex();
   logger.info('label-based naming migration complete', {
     workspace,

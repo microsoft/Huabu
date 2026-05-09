@@ -116,18 +116,10 @@ export async function runPipeline(
         level: 'info',
         message: `Reused cached ${request.nodeType} content; src unchanged.`,
       });
-      // The persisted markdown is now flat YAML — frontmatter fields like
-      // `summary` / `keywords` live as top-level properties on the node.
-      // Strip the structural fields (nodeId/type/title/src/content) before
-      // treating the rest as the metadata bag the pipeline expects.
-      const {
-        nodeId: _nid,
-        type: _t,
-        title: _tt,
-        src: _s,
-        content: _c,
-        ...meta
-      } = existing;
+      // The persisted markdown carries pipeline metadata (summary,
+      // keywords, …) in its `metadata` bag — pull those out here so the
+      // cached short-circuit reproduces what a fresh run would produce.
+      const meta = existing.metadata ?? {};
       ctx.extracted = {
         content: existing.content,
         title: existing.title ?? undefined,
