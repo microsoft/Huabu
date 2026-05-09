@@ -108,29 +108,29 @@ export async function runPipeline(
       });
       // The persisted markdown is now flat YAML — frontmatter fields like
       // `summary` / `keywords` live as top-level properties on the node.
-      // Strip the structural fields (nodeId/type/title/src/content) before
+      // Strip the structural fields (nodeId/type/label/src/content) before
       // treating the rest as the metadata bag the pipeline expects.
       const {
         nodeId: _nid,
         type: _t,
-        title: _tt,
+        label: _tt,
         src: _s,
         content: _c,
         ...meta
       } = existing;
       ctx.extracted = {
         content: existing.content,
-        title: existing.title ?? undefined,
+        title: existing.label ?? undefined,
         metadata: meta,
       };
       ctx.normalized = {
         nodeId: request.nodeId,
-        title: existing.title ?? undefined,
+        label: existing.label ?? undefined,
         metadata: meta,
         canonicalContent: existing.content,
       };
       ctx.enriched = {
-        suggestedLabel: existing.title ?? undefined,
+        suggestedLabel: existing.label ?? undefined,
         summary:
           typeof meta['summary'] === 'string' ? meta['summary'] : undefined,
         keywords: Array.isArray(meta['keywords'])
@@ -233,14 +233,15 @@ export async function runPipeline(
           };
         }
 
-        // When extracted title is missing, use the LLM-generated label as
-        // the persisted Source.title so canvas list and source list stay in sync.
+        // When the extracted document has no title, use the LLM-generated
+        // label as the normalized label so the canvas list and source list
+        // stay in sync.
         if (
-          !ctx.normalized?.title &&
+          !ctx.normalized?.label &&
           ctx.enriched?.suggestedLabel &&
           ctx.normalized
         ) {
-          ctx.normalized.title = ctx.enriched.suggestedLabel;
+          ctx.normalized.label = ctx.enriched.suggestedLabel;
         }
       } catch (error) {
         diagnostics.push({
