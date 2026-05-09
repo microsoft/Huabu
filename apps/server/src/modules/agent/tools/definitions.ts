@@ -73,7 +73,7 @@ export const webSearchTool: ToolDefinition = {
 //     style + per-predicate derived fields.
 //
 // Boundary with `read`: anything in the node markdown frontmatter
-// (title/label, type, src, content, summary, keywords) lives in
+// (label, type, src, content, summary, keywords) lives in
 // `<canvasId>/nodes/<nodeId>.md` and is owned by `read`. These two
 // tools own everything in `canvas.json` (position/size/parent/style)
 // plus derived spatial/topological metadata.
@@ -318,7 +318,7 @@ export const readParamsSchema = Type.Object({
 export const readTool: ToolDefinition = {
   name: 'read',
   label: 'Read',
-  description: `Read the contents of a single text file under the workspace root. Returns JSON: { path, startLine, endLine, totalLines, truncated, nextOffset?, content, frontmatter? }. When the file begins with a YAML frontmatter block ("---" fences), the parsed frontmatter is also returned as a structured object so you don't have to parse YAML yourself. Output is truncated to 2000 lines or 50 KB, whichever is hit first; when truncated, "nextOffset" tells you the offset to use to continue. Binary files (images, archives) are rejected with an error. For a node's textual attributes (title, content, type, src, summary, keywords) read "<canvasId>/nodes/<nodeId>.md" — they all live here. For a node's canvas placement (position, size, parent, style) call inspect_nodes({ ids: ["<nodeId>"] }) instead; those fields live in canvas.json.`,
+  description: `Read the contents of a single text file under the workspace root. Returns JSON: { path, startLine, endLine, totalLines, truncated, nextOffset?, content, frontmatter? }. When the file begins with a YAML frontmatter block ("---" fences), the parsed frontmatter is also returned as a structured object so you don't have to parse YAML yourself. Output is truncated to 2000 lines or 50 KB, whichever is hit first; when truncated, "nextOffset" tells you the offset to use to continue. Binary files (images, archives) are rejected with an error. For a node's textual attributes (label, content, type, src, summary, keywords) read "<canvasId>/nodes/<nodeId>.md" — they all live here. For a node's canvas placement (position, size, parent, style) call inspect_nodes({ ids: ["<nodeId>"] }) instead; those fields live in canvas.json.`,
   parameters: readParamsSchema,
 };
 

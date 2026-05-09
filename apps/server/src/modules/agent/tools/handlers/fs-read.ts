@@ -19,7 +19,7 @@
  * verbatim, including the fences. `frontmatter` is purely additive.
  *
  * Note vs `inspect_nodes`: read owns everything that lives in the
- * node markdown frontmatter (title, type, src, summary, keywords, ...).
+ * node markdown frontmatter (label, type, src, summary, keywords, ...).
  * Position / size / parent / style live in `canvas.json` and are owned
  * by `inspect_nodes` — see that handler for the boundary.
  */

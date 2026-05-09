@@ -1,12 +1,13 @@
 /**
  * Canvas → agent context helpers.
  *
- * Lives outside `tools/` because two unrelated callers need it:
- *  1. `tools/handlers/canvas-read.ts` (the `get_canvas_state` tool body).
- *  2. `agent.route.ts`, which injects an enrich-summary block for the
- *     user-selected nodes before the LLM call.
+ * Used by `agent.route.ts` to inject an enrich-summary block for the
+ * user-selected nodes before the LLM call. The agent itself reaches
+ * for richer canvas data via the read-only tools
+ * (`get_canvas_outline`, `inspect_nodes`, `read`); this helper only
+ * powers the up-front context block.
  *
- * Keeping it under `modules/agent/` (not `modules/storage/`) preserves
+ * Lives under `modules/agent/` (not `modules/storage/`) to preserve
  * the framing: this is the "what does the agent see when it looks at
  * the canvas" layer, not raw storage IO.
  */
