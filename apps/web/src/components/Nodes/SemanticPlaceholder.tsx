@@ -2,7 +2,7 @@ import { resolveAccent } from '@sediment/shared';
 
 import { cn } from '@/components/Common/cn';
 import { NODE_TYPE_LABEL } from '@/config/nodeIcons';
-import { useClusterFontSize } from '@/hooks/useClusterFontSize';
+import { useFitText } from '@/hooks/useFitText';
 
 import { getAccentTokens } from './accentTokens';
 
@@ -20,8 +20,6 @@ function insertSoftBreaks(text: string): string {
 }
 
 interface SemanticPlaceholderProps {
-  /** ReactFlow node ID — used for cluster-based font size normalisation. */
-  nodeId: string;
   type: CanvasNodeType;
   data: NodeData;
   /** Canvas-space width of the node. */
@@ -30,13 +28,16 @@ interface SemanticPlaceholderProps {
   height: number;
 }
 
+/** Padding (px) reserved on each side inside the placeholder. */
+const PAD_X = 16;
+const PAD_Y = 16;
+
 /**
  * Lightweight placeholder rendered when a node is in 'minimal' LOD.
  * Shows a type icon + label with a font size dynamically computed
  * (via pretext) to fill the available space.
  */
 export function SemanticPlaceholder({
-  nodeId,
   type,
   data,
   width,
@@ -54,7 +55,11 @@ export function SemanticPlaceholder({
   const accent = resolveAccent(data.style?.accent);
   const accentTokens = accent ? getAccentTokens(accent) : null;
 
-  const fontSize = useClusterFontSize(nodeId, label, width, height);
+  const fontSize = useFitText(
+    label,
+    Math.max(0, width - PAD_X * 2),
+    Math.max(0, height - PAD_Y * 2),
+  );
 
   return (
     <div

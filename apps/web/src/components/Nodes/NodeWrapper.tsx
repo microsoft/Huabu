@@ -491,7 +491,6 @@ export const NodeWrapper = memo(
         {/* Semantic zoom: placeholder overlay when in minimal LOD */}
         {isMinimal && (
           <SemanticPlaceholder
-            nodeId={id}
             type={type}
             data={data}
             width={nodeWidth}
