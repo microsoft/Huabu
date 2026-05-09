@@ -4,6 +4,23 @@
 
 ---
 
+## 2026-05-08 · Agent 循环升级到 pi-agent-core
+
+**What Changed**
+
+- 服务端 agent 循环从自研 `while` 循环切换到 `@earendil-works/pi-agent-core` 的 `Agent` 类，为后续引入 read / write / edit 等文件工具铺路。
+- 工具卡片现在在工具**真正开始执行**时出现（参数已通过 schema 校验），比之前模型完成 toolcall 序列化时触发更准确。
+- 「最大轮次（默认 20）」从硬性 abort 改为优雅停止：到达上限时仍会完成当前 turn，把最后一条 assistant 文本送达，再附带一条「超出最大轮次」提示，而不是把整个会话标记为 interrupted。
+- 中途按 Stop 中断后，刷新页面仍能在 chat panel 看到中断前已经打到一半的 AI 文本。
+
+**Notes**
+
+- SSE 协议、UI 组件、历史会话格式全部保持兼容；老的 `.history/<canvasId>/<threadId>.json` 直接可用，无需迁移。
+- 工具卡片出现时间会**略微滞后几十毫秒**。
+- 新依赖：`@earendil-works/pi-agent-core@^0.74.0`，与已有 `pi-ai` 同版本。
+
+---
+
 ## 2026-05-07 · 自动补齐：缺 label 的节点加载时自动触发 preprocessing
 
 **What Changed**

@@ -45,7 +45,7 @@ import {
   prefsPath,
 } from './paths.js';
 
-import type { Context } from '@mariozechner/pi-ai';
+import type { Context } from '@earendil-works/pi-ai';
 import type { IntentEpisode } from '@sediment/shared';
 
 // ─── Local types ────────────────────────────────────────────────────────────
@@ -66,20 +66,30 @@ export interface CanvasFile {
   updatedAt: number;
 }
 
-/** Canonical content of a single node (one `nodes/<nodeId>.md` file). */
+/**
+ * Canonical content of a single node (one `nodes/<nodeId>.md` file).
+ *
+ * The shape is a 1:1 mirror of the markdown file: `nodeId` comes from
+ * the filename, `content` is the markdown body, and every other field
+ * is a YAML frontmatter entry. Loaders/enrichers may attach arbitrary
+ * extra fields (e.g. `summary`, `keywords`, `pageCount`) — they round-
+ * trip through frontmatter via the index signature.
+ */
 export interface NodeContent {
   nodeId: string;
   /** CanvasNodeType — kept loose here to avoid the shared dependency. */
   type: string;
   title: string | null;
-  /** External URL or `artifacts/<file>` reference. */
-  src: string | null;
+  /**
+   * External URL or `artifacts/<file>` reference. Optional: only meaningful
+   * for source-backed nodes (web/pdf/image/audio/video). Note/text/frame
+   * nodes omit it entirely so it never lands in their frontmatter.
+   */
+  src?: string;
   /** Canonical markdown body. */
   content: string;
-  /** Hash used to skip re-processing when content has not changed. */
-  contentHash: string;
-  /** Free-form metadata stored as JSON in the frontmatter. */
-  metadata: Record<string, unknown>;
+  /** Loader/enrich-supplied frontmatter fields. */
+  [key: string]: unknown;
 }
 
 /** Lightweight projection of node content for listings. */
@@ -87,7 +97,6 @@ export interface NodeContentSummary {
   nodeId: string;
   type: string;
   title: string | null;
-  contentHash: string;
 }
 
 /** Append-only behavioural event for a canvas. */
@@ -99,42 +108,72 @@ export interface CanvasEvent {
 
 /** Per-canvas user preferences (frontmatter + markdown body). */
 export interface UserPreferences {
-  metadata: Record<string, string | null>;
+  metadata: Record<string, unknown>;
   body: string;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
+/**
+ * Frontmatter keys that older canvases wrote but the current schema no
+ * longer recognizes. They are stripped on read so they never round-trip
+ * back into a freshly-written file.
+ *
+ * @deprecated Kept only as a defensive filter for legacy `nodes/*.md`
+ * files; remove once `migrate.ts` has rewritten every workspace.
+ *  - `content_hash`: previously used to dedupe extraction work; now we
+ *    compare canonical content directly in `persist.ts`.
+ *  - `meta_json`:    previously a JSON-stringified bag containing
+ *    `summary` / `keywords` / etc.; those fields are now stored as
+ *    flat top-level YAML keys.
+ */
+const LEGACY_FRONTMATTER_KEYS = ['content_hash', 'meta_json'] as const;
+
 function nodeContentToMarkdown(c: NodeContent): string {
-  const meta: Record<string, unknown> = {
-    type: c.type,
-    title: c.title ?? null,
-    src: c.src ?? null,
-    content_hash: c.contentHash,
-    meta_json: c.metadata ? JSON.stringify(c.metadata) : null,
-  };
-  return `${toFrontmatter(meta)}\n${c.content}`;
+  // `nodeId` is encoded in the filename; `content` is the markdown body.
+  // Everything else lives in the frontmatter as native YAML.
+  const { nodeId: _nodeId, content, ...frontmatter } = c;
+  // Drop any legacy keys a caller may still be passing through; we never
+  // want to reintroduce them once a workspace has been migrated.
+  for (const key of LEGACY_FRONTMATTER_KEYS) {
+    delete (frontmatter as Record<string, unknown>)[key];
+  }
+  // Drop nullish frontmatter entries so optional fields (e.g. `src` on
+  // note/text/frame nodes) never serialize to `key: null`. Callers are
+  // free to pass `undefined` to mean "omit".
+  for (const key of Object.keys(frontmatter)) {
+    const v = (frontmatter as Record<string, unknown>)[key];
+    if (v === null || v === undefined) {
+      delete (frontmatter as Record<string, unknown>)[key];
+    }
+  }
+  return `${toFrontmatter(frontmatter)}\n${content}`;
 }
 
 function markdownToNodeContent(nodeId: string, raw: string): NodeContent {
   const { meta, content } = parseFrontmatter(raw);
-  let metadata: Record<string, unknown> = {};
-  if (meta['meta_json']) {
-    try {
-      metadata = JSON.parse(meta['meta_json']) as Record<string, unknown>;
-    } catch {
-      metadata = {};
-    }
+  // Strip legacy frontmatter keys so they don't leak into pipeline state
+  // (and therefore back into freshly-written files via cache-hit / persist
+  // paths). Older `nodes/*.md` files written before the flat-frontmatter
+  // refactor may still carry these.
+  for (const key of LEGACY_FRONTMATTER_KEYS) {
+    delete meta[key];
   }
-  return {
+  const out: NodeContent = {
+    ...meta,
     nodeId,
-    type: meta['type'] ?? 'note',
-    title: meta['title'] ?? null,
-    src: meta['src'] ?? null,
+    type: typeof meta['type'] === 'string' ? meta['type'] : 'note',
+    title: typeof meta['title'] === 'string' ? meta['title'] : null,
     content,
-    contentHash: meta['content_hash'] ?? '',
-    metadata,
   };
+  // Normalize `src`: it must be a string when present, otherwise omitted.
+  // Older / hand-edited node files may carry `src: null` or other non-string
+  // scalars, which would otherwise leak into pipeline state and cause
+  // cache-miss / comparison bugs against the declared `string | undefined`.
+  if (typeof out.src !== 'string') {
+    delete out.src;
+  }
+  return out;
 }
 
 // ─── CanvasStore ────────────────────────────────────────────────────────────
@@ -209,9 +248,8 @@ export class CanvasStore {
       const { meta } = parseFrontmatter(raw);
       out.push({
         nodeId,
-        type: meta['type'] ?? 'note',
-        title: meta['title'] ?? null,
-        contentHash: meta['content_hash'] ?? '',
+        type: typeof meta['type'] === 'string' ? meta['type'] : 'note',
+        title: typeof meta['title'] === 'string' ? meta['title'] : null,
       });
     }
     return out;

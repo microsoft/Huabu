@@ -24,12 +24,12 @@ import { buildOperatePrompt } from '../../prompt/agent.js';
 import { SYSTEM_PROMPT } from '../../prompt/system.js';
 import { IMAGE_MIME_MAP } from '../../utils/mime.js';
 import { runAgent } from '../agent/agent.service.js';
+import { buildNodeSummaries } from '../agent/canvas-context.js';
 import { loadContext, saveContext } from '../agent/store/chat-store.js';
-import { buildNodeSummaries } from '../agent/tools/executor.js';
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getCanvasStore } from '../storage/index.js';
 
-import type { AssistantMessage, Context } from '@mariozechner/pi-ai';
+import type { AssistantMessage, Context } from '@earendil-works/pi-ai';
 import type {
   AgentCanvasIdQuery,
   AgentMode,
@@ -936,52 +936,46 @@ const agentRoutes: FastifyPluginAsync = async (
         signal: abortController.signal,
       });
 
-      // Track partial assistant text so we can persist it on abort
-      let partialText = '';
+      // Track the latest agent error so we can persist it AFTER the stream
+      // exits. We can't push into `context.messages` mid-loop because the
+      // pi-agent-core wrapper in `runAgent()` performs a final
+      // `context.messages = [...agent.state.messages]` sync in its `finally`
+      // block — which would wipe anything we pushed inside the loop.
+      // Persisting after the loop ensures `buildHistoryItems()` can
+      // reconstruct the error status row on history reload.
+      let lastErrorDetail: string | null = null;
 
       for await (const event of stream) {
         if (abortController.signal.aborted) break;
         emit(event);
 
-        // Accumulate streamed text so partial replies survive interruption
-        if (event.type === AGENT_SSE_EVENTS.TextDelta) {
-          partialText += event.data.content;
-        }
-
-        // Reset partial text when a complete assistant message lands in context
-        // (runAgent pushes the result after s.result() completes)
-        if (event.type === AGENT_SSE_EVENTS.Done) {
-          partialText = '';
-        }
-
-        // When the agent yields an error event, persist it in the context
-        // so buildHistoryItems() can reconstruct it on history reload.
+        // Capture the latest error; we persist it post-loop (see comment above).
         if (event.type === AGENT_SSE_EVENTS.Error && event.data.error) {
-          context.messages.push({
-            role: 'user',
-            content: `[SYSTEM Error] ${event.data.error}`,
-            timestamp: Date.now(),
-          });
+          lastErrorDetail = event.data.error;
         }
 
         // Periodically save context so partial progress survives refreshes
         debouncedSave();
       }
 
-      // On explicit abort (user clicked stop), clean up context.
-      if (abortController.signal.aborted) {
-        // If there was partial assistant text that never made it into context
-        // (because s.result() was never called), inject it now so the user
-        // sees the partial reply after reload.
-        if (partialText) {
-          context.messages.push({
-            role: 'assistant',
-            content: [{ type: 'text', text: partialText }],
-            stopReason: 'stop',
-            timestamp: Date.now(),
-          } as unknown as Context['messages'][number]);
-        }
+      // Persist the agent error AFTER the for-await exits — by which point
+      // runAgent's `finally` has already synced agent.state.messages back
+      // into `context.messages`, so our push survives the final flushSave.
+      if (lastErrorDetail) {
+        context.messages.push({
+          role: 'user',
+          content: `[SYSTEM Error] ${lastErrorDetail}`,
+          timestamp: Date.now(),
+        });
+      }
 
+      // On explicit abort (user clicked stop), clean up context.
+      // Partial assistant text streamed before abort is already preserved
+      // by pi-agent-core: its agent-loop finalizes the in-flight message
+      // via `response.result()` (with `stopReason: 'aborted'`) and pushes
+      // it to `state.messages`, which `runAgent`'s finally syncs back
+      // into `context.messages`. No re-injection needed here.
+      if (abortController.signal.aborted) {
         request.log.info(
           '[agent] Abort detected — cleaning up context (%d messages before cleanup)',
           context.messages.length,

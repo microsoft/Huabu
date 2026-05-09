@@ -101,7 +101,6 @@ interface SourceRecord {
   title: string | null;
   src: string | null;
   content: string;
-  contentHash: string;
   metadata: Record<string, unknown>;
 }
 
@@ -138,8 +137,9 @@ function buildSourceIndex(sourcesDir: string): Map<string, SourceRecord> {
       try {
         const raw = readFileSync(full, 'utf-8');
         const { meta, content } = parseFrontmatter(raw);
+        const metaIdRaw = meta['id'];
         const sourceId =
-          meta['id'] ??
+          (typeof metaIdRaw === 'string' ? metaIdRaw : null) ??
           path
             .relative(sourcesDir, full)
             .replace(/\\/g, '/')
@@ -147,20 +147,20 @@ function buildSourceIndex(sourcesDir: string): Map<string, SourceRecord> {
         if (!sourceId) continue;
         const title = path.basename(full, '.md');
         let metadata: Record<string, unknown> = {};
-        if (meta['meta_json']) {
+        const metaJsonRaw = meta['meta_json'];
+        if (typeof metaJsonRaw === 'string' && metaJsonRaw) {
           try {
-            metadata = JSON.parse(meta['meta_json']) as Record<string, unknown>;
+            metadata = JSON.parse(metaJsonRaw) as Record<string, unknown>;
           } catch {
             metadata = {};
           }
         }
         index.set(sourceId, {
           sourceId,
-          type: meta['type'] ?? 'note',
+          type: typeof meta['type'] === 'string' ? meta['type'] : 'note',
           title,
-          src: meta['src'] ?? null,
+          src: typeof meta['src'] === 'string' ? meta['src'] : null,
           content,
-          contentHash: meta['content_hash'] ?? '',
           metadata,
         });
       } catch {
@@ -260,13 +260,12 @@ function migrateOneCanvas(
     const src = sourceId ? sourceIndex.get(sourceId) : undefined;
     if (src) {
       const nodeContent: NodeContent = {
+        ...src.metadata,
         nodeId,
         type: typeof node.type === 'string' ? node.type : src.type,
         title: src.title,
-        src: src.src,
+        src: src.src ?? undefined,
         content: src.content,
-        contentHash: src.contentHash,
-        metadata: src.metadata,
       };
       try {
         store.writeNode(nodeId, nodeContent);
@@ -284,10 +283,9 @@ function migrateOneCanvas(
         type: typeof node.type === 'string' ? node.type : 'note',
         title:
           typeof data['label'] === 'string' ? (data['label'] as string) : null,
-        src: typeof data['src'] === 'string' ? (data['src'] as string) : null,
+        src:
+          typeof data['src'] === 'string' ? (data['src'] as string) : undefined,
         content: data['content'] as string,
-        contentHash: '',
-        metadata: {},
       };
       try {
         store.writeNode(nodeId, nodeContent);
@@ -474,4 +472,114 @@ export function runMigrationIfNeeded(
   }
 
   logger.info('workspace migration complete');
+}
+
+// ─── Flat-YAML metadata migration ──────────────────────────────────────────
+//
+// Historic node files stored their metadata bag as a JSON-stringified blob
+// under a single `meta_json:` frontmatter key. The new layout writes those
+// fields flat as native YAML so external agents reading `nodes/*.md` see
+// `summary:` / `keywords:` / `pageCount:` directly without a second decode.
+//
+// The migration is one-shot per workspace, gated by a sentinel file so
+// subsequent boots don't re-scan every node. Idempotent: re-running with
+// the sentinel deleted is safe.
+
+const FLAT_YAML_SENTINEL = '.flat-yaml-v1';
+
+function listCanvasDirs(workspace: string): string[] {
+  if (!dirExists(workspace)) return [];
+  const out: string[] = [];
+  for (const entry of readdirSync(workspace)) {
+    if (entry.startsWith('.')) continue;
+    const full = path.join(workspace, entry);
+    if (!dirExists(full)) continue;
+    if (existsSync(path.join(full, 'canvas.json'))) {
+      out.push(entry);
+    }
+  }
+  return out;
+}
+
+/**
+ * Rewrite every `<workspace>/<canvasId>/nodes/*.md` so the legacy
+ * `meta_json:` JSON blob becomes flat YAML fields. Skips the workspace
+ * once `<workspace>/.flat-yaml-v1` exists.
+ *
+ * Safe to call on every server boot.
+ */
+export function flattenLegacyMetaJson(
+  workspace: string,
+  logger: MigrationLogger = defaultLogger,
+): void {
+  if (!dirExists(workspace)) return;
+  const sentinel = path.join(workspace, FLAT_YAML_SENTINEL);
+  if (existsSync(sentinel)) return;
+
+  const canvasIds = listCanvasDirs(workspace);
+  let rewritten = 0;
+  let scanned = 0;
+
+  for (const canvasId of canvasIds) {
+    const dir = path.join(workspace, canvasId, 'nodes');
+    if (!dirExists(dir)) continue;
+    const store = new CanvasStore(canvasId);
+    for (const file of readdirSync(dir)) {
+      if (!file.endsWith('.md')) continue;
+      scanned++;
+      const nodeId = file.replace(/\.md$/, '');
+      try {
+        // Read directly via parseFrontmatter so we can detect the legacy
+        // key explicitly. `store.readNode` already strips it from the
+        // metadata bag, which would prevent us from noticing.
+        const raw = readFileSync(path.join(dir, file), 'utf-8');
+        const { meta } = parseFrontmatter(raw);
+        const metaJsonRaw = meta['meta_json'];
+        if (typeof metaJsonRaw !== 'string' || metaJsonRaw.length === 0) {
+          continue;
+        }
+        const node = store.readNode(nodeId);
+        if (!node) continue;
+        // `readNode` ignores `meta_json`, so merge the legacy blob into
+        // the node's frontmatter fields before writing back. Existing
+        // flat keys win in case of overlap.
+        let legacy: Record<string, unknown> = {};
+        try {
+          legacy = JSON.parse(metaJsonRaw) as Record<string, unknown>;
+        } catch (err) {
+          logger.warn('failed to parse legacy meta_json', {
+            canvasId,
+            nodeId,
+            err: String(err),
+          });
+          continue;
+        }
+        store.writeNode(nodeId, { ...legacy, ...node });
+        rewritten++;
+      } catch (err) {
+        logger.warn('failed to flatten node frontmatter', {
+          canvasId,
+          nodeId,
+          err: String(err),
+        });
+      }
+    }
+  }
+
+  try {
+    writeFileSync(sentinel, `migrated ${rewritten}/${scanned} nodes\n`);
+  } catch (err) {
+    logger.warn('failed to write flat-yaml sentinel', {
+      sentinel,
+      err: String(err),
+    });
+  }
+
+  if (rewritten > 0) {
+    logger.info('flattened legacy meta_json frontmatter', {
+      workspace,
+      rewritten,
+      scanned,
+    });
+  }
 }

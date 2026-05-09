@@ -38,7 +38,10 @@ import path from 'node:path';
 
 // @deprecated Launch-only legacy migration. Remove once all workspaces have
 // been migrated to the canvas-centric layout.
-import { runMigrationIfNeeded } from './storage/migrate.js';
+import {
+  flattenLegacyMetaJson,
+  runMigrationIfNeeded,
+} from './storage/migrate.js';
 
 const ENV_KEY = 'SEDIMENT_WORKSPACE';
 
@@ -84,6 +87,8 @@ export function initWorkspaceFromEnv(): void {
   // @deprecated Launch-only legacy migration. Remove once all workspaces have
   // been migrated to the canvas-centric layout.
   runMigrationIfNeeded(_workspacePath);
+  // One-shot meta_json -> flat YAML rewrite (sentinel-gated, idempotent).
+  flattenLegacyMetaJson(_workspacePath);
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -141,6 +146,8 @@ export function setWorkspacePath(newPath: string): void {
   // @deprecated Launch-only legacy migration. Remove once all workspaces have
   // been migrated to the canvas-centric layout.
   runMigrationIfNeeded(_workspacePath);
+  // One-shot meta_json -> flat YAML rewrite (sentinel-gated, idempotent).
+  flattenLegacyMetaJson(_workspacePath);
 }
 
 // ──────────────────────────────────────────────────────────────────────

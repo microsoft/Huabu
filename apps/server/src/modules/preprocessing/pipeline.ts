@@ -72,6 +72,87 @@ export async function runPipeline(
     );
   }
 
+  // Stage 1.5 — Cache short-circuit (web/pdf only).
+  //
+  // Re-fetching a web page (Tavily Extract) or re-parsing a PDF is the most
+  // expensive work in the pipeline, and Stage 4 enrichment (LLM summary +
+  // keywords) compounds the cost. When the node already has cached content
+  // on disk and `src` has not changed, skip Stages 2-5 entirely and project
+  // from the cached node instead.
+  //
+  // We deliberately gate this on `src` equality rather than a content hash:
+  // before extract runs we have no fresh content to compare against, so the
+  // input identity (URL / artifact URI) is the only signal we can trust.
+  // `force=true` overrides this — repair / manual triggers may explicitly
+  // want a re-extract even when src is unchanged.
+  if (
+    !request.options?.force &&
+    contentKind &&
+    (request.nodeType === 'web' || request.nodeType === 'pdf')
+  ) {
+    const targetSrc =
+      request.nodeType === 'web'
+        ? ctx.resolved.normalizedUri
+        : ctx.resolved.artifactUri;
+    const existing = targetSrc ? deps.store.readNode(request.nodeId) : null;
+    if (
+      existing &&
+      existing.content.length > 0 &&
+      existing.src &&
+      existing.src === targetSrc
+    ) {
+      diagnostics.push({
+        code: 'CACHE_HIT',
+        level: 'info',
+        message: `Reused cached ${request.nodeType} content; src unchanged.`,
+      });
+      // The persisted markdown is now flat YAML — frontmatter fields like
+      // `summary` / `keywords` live as top-level properties on the node.
+      // Strip the structural fields (nodeId/type/title/src/content) before
+      // treating the rest as the metadata bag the pipeline expects.
+      const {
+        nodeId: _nid,
+        type: _t,
+        title: _tt,
+        src: _s,
+        content: _c,
+        ...meta
+      } = existing;
+      ctx.extracted = {
+        content: existing.content,
+        title: existing.title ?? undefined,
+        metadata: meta,
+      };
+      ctx.normalized = {
+        nodeId: request.nodeId,
+        title: existing.title ?? undefined,
+        metadata: meta,
+        canonicalContent: existing.content,
+      };
+      ctx.enriched = {
+        suggestedLabel: existing.title ?? undefined,
+        summary:
+          typeof meta['summary'] === 'string' ? meta['summary'] : undefined,
+        keywords: Array.isArray(meta['keywords'])
+          ? (meta['keywords'] as string[])
+          : undefined,
+      };
+      ctx.persisted = {
+        nodeId: request.nodeId,
+        isNew: false,
+        contentChanged: false,
+      };
+      return project(
+        request,
+        requestId,
+        usedCapabilities,
+        ctx,
+        diagnostics,
+        contentKind,
+      );
+    }
+  }
+
   // Stage 2 — Extract
   if (has('extract_text') || has('fetch_remote_content')) {
     try {

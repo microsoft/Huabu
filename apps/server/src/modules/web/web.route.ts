@@ -13,15 +13,6 @@ import type { FastifyPluginAsync } from 'fastify';
 
 type Querystring = WebLookupQuery;
 
-function safeParseMeta(
-  metadata: Record<string, unknown> | null | undefined,
-): Record<string, unknown> {
-  if (metadata && typeof metadata === 'object') {
-    return metadata;
-  }
-  return {};
-}
-
 function toReaderHtml(markdown: string): string {
   const rawHtml = marked.parse(markdown) as string;
 
@@ -167,7 +158,7 @@ const webRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.code(404).send({ message: 'Source not ingested' });
       }
 
-      const meta = safeParseMeta(source.metadata);
+      const meta = source as unknown as Record<string, unknown>;
       const uri = source.src ?? '';
 
       const hostname = (() => {
@@ -225,7 +216,7 @@ const webRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.code(404).send({ message: 'Source has no content yet' });
       }
 
-      const meta = safeParseMeta(source.metadata);
+      const meta = source as unknown as Record<string, unknown>;
       const uri = source.src ?? '';
       const hostname = (() => {
         try {

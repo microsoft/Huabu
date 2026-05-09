@@ -1,0 +1,139 @@
+/**
+ * Canvas write tool handler — `canvas_commands`.
+ *
+ * Translates the LLM's command batch into the SSE-bound payload the
+ * frontend executes. The handler does not touch the filesystem itself;
+ * it only annotates each command with `origin` / `provenance` /
+ * `labelSource` so downstream apply logic knows the change came from
+ * the agent. The actual canvas mutation happens client-side via the
+ * existing canvas-command pipeline once the SSE event lands.
+ */
+
+import { getCanvasStore } from '../../../storage/index.js';
+
+import type { BlockProvenanceMap, NodeOrigin } from '@sediment/shared';
+
+/**
+ * Args type for `handleCanvasCommands`. Intentionally kept loose
+ * (`commands: Array<Record<string, unknown>>`) instead of being derived
+ * from `canvasCommandsParamsSchema` because the body walks each command
+ * with runtime `cmd.type === '...'` narrowing and augments shapes the
+ * schema does not describe (injected `origin`, `provenance`,
+ * `labelSource`). The schema still validates LLM input upstream via
+ * `validateToolCall` — the looseness here is only on the executor side.
+ */
+export type CanvasCommandsArgs = {
+  canvasId: string;
+  commands: Array<Record<string, unknown>>;
+};
+
+/** Origin assigned to every node created by the agent. */
+const AI_OPERATE_ORIGIN: NodeOrigin = { type: 'ai-operate' };
+
+/** Build an `__all__` sentinel provenance map for AI-generated content. */
+function buildAIProvenance(): BlockProvenanceMap {
+  return {
+    __all__: {
+      author: 'ai',
+      createdAt: new Date().toISOString(),
+    },
+  };
+}
+
+export async function handleCanvasCommands(
+  args: CanvasCommandsArgs,
+): Promise<string> {
+  const origin = AI_OPERATE_ORIGIN;
+
+  // Read canvas state once so we can resolve node types for provenance injection.
+  const canvas = getCanvasStore(args.canvasId).read();
+  const nodeTypeMap = new Map<string, string>();
+  if (canvas) {
+    for (const n of (canvas.state.nodes ?? []) as Array<
+      Record<string, unknown>
+    >) {
+      const data = (n.data as Record<string, unknown> | undefined) ?? {};
+      const nodeType = (n.nodeType ?? n.type ?? data.type) as
+        | string
+        | undefined;
+      if (typeof n.id === 'string' && typeof nodeType === 'string') {
+        nodeTypeMap.set(n.id, nodeType);
+      }
+    }
+  }
+
+  const commands = args.commands.map((cmd) => {
+    if (cmd.type === 'CREATE_NODES') {
+      const nodes = cmd.nodes as Array<Record<string, unknown>>;
+      return {
+        ...cmd,
+        nodes: nodes.map((node) => {
+          const data = (node.data as Record<string, unknown> | undefined) ?? {};
+          const isNote = node.nodeType === 'note';
+          const hasContent =
+            isNote &&
+            typeof data.content === 'string' &&
+            data.content.length > 0;
+          const hasLabel = typeof data.label === 'string';
+          return {
+            ...node,
+            data: {
+              ...data,
+              origin,
+              ...(hasContent ? { provenance: buildAIProvenance() } : {}),
+              ...(hasLabel ? { labelSource: 'agent' as const } : {}),
+            },
+          };
+        }),
+      };
+    }
+    if (cmd.type === 'MERGE_NODE_DATA') {
+      const patches = cmd.patches as Array<Record<string, unknown>>;
+      return {
+        ...cmd,
+        patches: patches.map((entry) => {
+          const patch =
+            (entry.patch as Record<string, unknown> | undefined) ?? {};
+          const nodeId = entry.nodeId as string | undefined;
+          const isNote = nodeId ? nodeTypeMap.get(nodeId) === 'note' : false;
+          const hasContent =
+            isNote &&
+            typeof patch.content === 'string' &&
+            patch.content.length > 0;
+          const hasLabel = typeof patch.label === 'string';
+          const extra: Record<string, unknown> = {};
+          if (hasContent) extra.provenance = buildAIProvenance();
+          if (hasLabel) extra.labelSource = 'agent';
+          if (Object.keys(extra).length > 0) {
+            return {
+              ...entry,
+              patch: { ...patch, ...extra },
+            };
+          }
+          return entry;
+        }),
+      };
+    }
+    if (cmd.type === 'CONNECT_NODES' || cmd.type === 'SET_EDGE_STYLE') {
+      return cmd;
+    }
+    if (cmd.type === 'CREATE_QUESTION') {
+      const raw = cmd as Record<string, unknown>;
+      return {
+        ...raw,
+        origin,
+      };
+    }
+    return cmd;
+  });
+
+  return JSON.stringify({
+    tool: 'canvas_commands',
+    status: 'success',
+    data: {
+      source: 'agent',
+      canvasId: args.canvasId,
+      commands,
+    },
+  });
+}

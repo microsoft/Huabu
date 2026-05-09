@@ -7,7 +7,7 @@
 
 import { getCanvasStore } from '../../storage/index.js';
 
-import type { Context } from '@mariozechner/pi-ai';
+import type { Context } from '@earendil-works/pi-ai';
 
 /**
  * Save a pi-ai Context for a given thread on a canvas.

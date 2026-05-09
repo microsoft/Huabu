@@ -5,7 +5,7 @@
  * by calling the LLM to analyze the canvas state and recent user actions.
  */
 
-import { validateToolCall } from '@mariozechner/pi-ai';
+import { validateToolCall } from '@earendil-works/pi-ai';
 
 import { llmComplete, llmStream } from './llm.js';
 import { logIntentEpisode as storeEpisode } from './store/intent-store.js';
@@ -16,7 +16,11 @@ import {
   ANNOTATION_INTENT_SYSTEM_PROMPT,
 } from '../../prompt/intent.js';
 
-import type { AssistantMessage, Context, ToolCall } from '@mariozechner/pi-ai';
+import type {
+  AssistantMessage,
+  Context,
+  ToolCall,
+} from '@earendil-works/pi-ai';
 import type {
   AgentBaseContext,
   AnnotationClusterContext,
