@@ -18,7 +18,12 @@ import {
   resolvePasteClipboard,
   resolveSelectNodes,
 } from './resolvers';
-import { extractNodeRef, extractSnippet, getSelectedNodeIds } from './utils';
+import {
+  computeNodeEditDiff,
+  extractNodeRef,
+  extractSnippet,
+  getSelectedNodeIds,
+} from './utils';
 
 import type {
   CanvasAlignDirection,
@@ -332,6 +337,16 @@ function resolveUpdateNodeData(
   ui: UiResolverState,
 ): UiIntentResolution {
   const node = ui.nodes.find((n) => n.id === intent.nodeId);
+  // Compute a structural diff when the patch touches the `content`
+  // string field — gives the agent a sense of what kind of edit
+  // happened (append vs rewrite vs trim) without leaking node body
+  // text into the action log.
+  const beforeContent = (node?.data as Record<string, unknown> | undefined)
+    ?.content;
+  const editDiff =
+    intent.patch.content !== undefined
+      ? computeNodeEditDiff(beforeContent, intent.patch.content)
+      : undefined;
   return {
     commands: [
       {
@@ -341,7 +356,15 @@ function resolveUpdateNodeData(
         ],
       },
     ],
-    trace: node ? [{ action: 'node_edited', node: extractNodeRef(node) }] : [],
+    trace: node
+      ? [
+          {
+            action: 'node_edited',
+            node: extractNodeRef(node),
+            ...(editDiff ? { edit: editDiff } : {}),
+          },
+        ]
+      : [],
   };
 }
 
