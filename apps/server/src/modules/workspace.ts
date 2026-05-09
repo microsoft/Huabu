@@ -38,6 +38,7 @@ import path from 'node:path';
 
 // @deprecated Launch-only legacy migration. Remove once all workspaces have
 // been migrated to the canvas-centric layout.
+import { refreshCanvasDirIndex } from './storage/canvas-dirs.js';
 import { migrateLabeledNames } from './storage/migrate-labels.js';
 import {
   flattenLegacyMetaJson,
@@ -85,6 +86,9 @@ export function initWorkspaceFromEnv(): void {
   _workspacePath = path.resolve(fromEnv);
   _managed = true;
   mkdirSync(_workspacePath, { recursive: true });
+  // Drop the cached canvas-dir index so subsequent lookups (used by
+  // migrations and route handlers) reflect the new workspace.
+  refreshCanvasDirIndex();
   // @deprecated Launch-only legacy migration. Remove once all workspaces have
   // been migrated to the canvas-centric layout.
   runMigrationIfNeeded(_workspacePath);
@@ -150,6 +154,9 @@ export function setWorkspacePath(newPath: string): void {
   validateAbsolutePath(newPath);
   _workspacePath = path.resolve(newPath);
   mkdirSync(_workspacePath, { recursive: true });
+  // Drop the cached canvas-dir index so subsequent lookups (used by
+  // migrations and route handlers) reflect the new workspace.
+  refreshCanvasDirIndex();
   // @deprecated Launch-only legacy migration. Remove once all workspaces have
   // been migrated to the canvas-centric layout.
   runMigrationIfNeeded(_workspacePath);

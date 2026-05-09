@@ -2,7 +2,10 @@ import { apiFetch, apiUrl } from './_client';
 import { routes } from './_routes';
 import { API_CONFIG } from '../config/api';
 
-import type { ArtifactUploadResponse } from '@sediment/shared';
+import type {
+  ArtifactUploadResponse,
+  CloneArtifactRequest,
+} from '@sediment/shared';
 
 type ArtifactType = 'image' | 'pdf' | 'video';
 
@@ -118,14 +121,15 @@ export async function cloneArtifactToCanvas(
   if (!parsed) return null;
   if (parsed.canvasId === dstCanvasId) return srcUrl;
 
-  const data = await apiFetch<{ uri: string }>(
+  const body: CloneArtifactRequest = {
+    srcCanvasId: parsed.canvasId,
+    srcKey: parsed.key,
+  };
+  const data = await apiFetch<ArtifactUploadResponse>(
     routes.canvasArtifactCloneFrom(dstCanvasId),
     {
       method: 'POST',
-      json: {
-        srcCanvasId: parsed.canvasId,
-        srcKey: parsed.key,
-      },
+      json: body,
       fallbackMessage: 'Failed to clone artifact',
     },
   );

@@ -1,13 +1,17 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { createId } from '@sediment/shared';
+import { cloneArtifactBodySchema, createId } from '@sediment/shared';
 import { type FastifyPluginAsync } from 'fastify';
 
 import { artifactApiPath } from './utils.js';
 import { getCanvasStore } from '../storage/index.js';
 
-import type { ApiResult, ArtifactUploadResponse } from '@sediment/shared';
+import type {
+  ApiResult,
+  ArtifactUploadResponse,
+  CloneArtifactRequest,
+} from '@sediment/shared';
 
 /**
  * Canvas-scoped artifact route. Mount under `/api/canvas`.
@@ -95,17 +99,17 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
    */
   fastify.post<{
     Params: { canvasId: string };
-    Body: { srcCanvasId?: string; srcKey?: string };
+    Body: CloneArtifactRequest;
     Reply: ApiResult<ArtifactUploadResponse>;
   }>('/:canvasId/artifact/clone-from', async (request, reply) => {
     const { canvasId: dstCanvasId } = request.params;
-    const { srcCanvasId, srcKey } = request.body ?? {};
-
-    if (!srcCanvasId || !srcKey) {
-      return reply
-        .code(400)
-        .send({ message: 'srcCanvasId and srcKey are required' });
+    const parsed = cloneArtifactBodySchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        message: parsed.error.issues[0]?.message ?? 'Invalid request body',
+      });
     }
+    const { srcCanvasId, srcKey } = parsed.data;
 
     const srcStore = getCanvasStore(srcCanvasId);
     const srcPath = srcStore.resolveArtifactFilePath(srcKey);
