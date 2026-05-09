@@ -6,6 +6,7 @@
  */
 
 import {
+  appendFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -92,4 +93,69 @@ export function appendJsonArray<T>(filePath: string, item: T): void {
   const existing = readJson<T[]>(filePath);
   const next = Array.isArray(existing) ? [...existing, item] : [item];
   atomicWriteJson(filePath, next);
+}
+
+/**
+ * Append a single JSON object as one line (JSONL).
+ *
+ * Uses a single `appendFileSync`, which maps to one `write(2)` syscall on
+ * POSIX — atomic at the line boundary, so a crash mid-write at worst
+ * leaves a truncated final line that `readJsonLines` will skip. Suited
+ * for high-volume append-only logs (canvas events).
+ */
+export function appendJsonLine<T>(filePath: string, item: T): void {
+  mkdirp(path.dirname(filePath));
+  appendFileSync(filePath, `${JSON.stringify(item)}\n`, 'utf-8');
+}
+
+/**
+ * Append many JSON objects as JSONL lines in a single write.
+ *
+ * Builds one buffer of `N` lines and issues a single `appendFileSync`.
+ * Either every line lands or (on crash mid-write) the trailing partial
+ * line is dropped by the reader. No-op when `items` is empty.
+ */
+export function appendJsonLines<T>(
+  filePath: string,
+  items: readonly T[],
+): void {
+  if (items.length === 0) return;
+  mkdirp(path.dirname(filePath));
+  let buf = '';
+  for (const item of items) {
+    buf += `${JSON.stringify(item)}\n`;
+  }
+  appendFileSync(filePath, buf, 'utf-8');
+}
+
+/**
+ * Read a JSONL file and parse each non-empty line. Malformed lines are
+ * skipped silently (they typically come from a crash-truncated tail).
+ *
+ * When `limit` is set, only the last `limit` parsed records are returned.
+ * The scan still walks the whole file but starts JSON-parsing from a
+ * position that gives us at most ~`limit` lines, keeping tail reads fast
+ * for typical "show me the last N events" calls.
+ */
+export function readJsonLines<T>(filePath: string, limit?: number): T[] {
+  if (!existsSync(filePath)) return [];
+  let raw: string;
+  try {
+    raw = readFileSync(filePath, 'utf-8');
+  } catch {
+    return [];
+  }
+  const lines = raw.split('\n');
+  const start = limit != null ? Math.max(0, lines.length - limit - 1) : 0;
+  const out: T[] = [];
+  for (let i = start; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    try {
+      out.push(JSON.parse(line) as T);
+    } catch {
+      // Skip malformed (likely a crash-truncated tail line).
+    }
+  }
+  return limit != null && out.length > limit ? out.slice(-limit) : out;
 }

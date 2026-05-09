@@ -22,11 +22,13 @@ import { pipeline } from 'node:stream/promises';
 
 import { parseFrontmatter, toFrontmatter } from './frontmatter.js';
 import {
-  appendJsonArray,
+  appendJsonLine,
+  appendJsonLines,
   atomicWriteJson,
   atomicWriteText,
   mkdirp,
   readJson,
+  readJsonLines,
   readText,
   sanitizeId,
 } from './io.js';
@@ -46,7 +48,11 @@ import {
 } from './paths.js';
 
 import type { Context } from '@earendil-works/pi-ai';
-import type { IntentEpisode } from '@sediment/shared';
+import type {
+  CanvasEventRecord,
+  IntentEpisode,
+  RecentAction,
+} from '@sediment/shared';
 
 // ─── Local types ────────────────────────────────────────────────────────────
 // These mirror what will land in `@sediment/shared` in PR 8. Keeping them
@@ -99,12 +105,8 @@ export interface NodeContentSummary {
   title: string | null;
 }
 
-/** Append-only behavioural event for a canvas. */
-export interface CanvasEvent {
-  ts: number;
-  kind: string;
-  payload: unknown;
-}
+/** Append-only behavioural event for a canvas (re-export of shared schema). */
+export type CanvasEvent = CanvasEventRecord;
 
 /** Per-canvas user preferences (frontmatter + markdown body). */
 export interface UserPreferences {
@@ -357,19 +359,42 @@ export class CanvasStore {
 
   // ── Events ───────────────────────────────────────────────────────────────
 
-  appendEvent(kind: string, payload: unknown): void {
-    mkdirp(path.dirname(eventsPath(this.canvasId)));
-    appendJsonArray<CanvasEvent>(eventsPath(this.canvasId), {
+  /**
+   * Append one behavioural event as a single JSONL line.
+   * One `write(2)` per call — line-atomic on POSIX.
+   */
+  appendEvent(payload: RecentAction): void {
+    appendJsonLine<CanvasEvent>(eventsPath(this.canvasId), {
       ts: Date.now(),
-      kind,
       payload,
     });
   }
 
+  /**
+   * Bulk append used by the batch upload endpoint. Builds a single
+   * buffer of N lines and issues exactly one `write(2)` so the whole
+   * batch either lands or (on crash mid-write) the trailing partial
+   * line is dropped by the reader. `ts` defaults to server time when
+   * the caller omits it.
+   */
+  appendEvents(
+    events: ReadonlyArray<{ payload: RecentAction; ts?: number }>,
+  ): void {
+    if (events.length === 0) return;
+    const now = Date.now();
+    const records: CanvasEvent[] = events.map((e) => ({
+      ts: e.ts ?? now,
+      payload: e.payload,
+    }));
+    appendJsonLines<CanvasEvent>(eventsPath(this.canvasId), records);
+  }
+
+  /**
+   * Read events in chronological order. When `limit` is set, only the
+   * most recent `limit` records are returned (tail read).
+   */
   readEvents(limit?: number): CanvasEvent[] {
-    const all = readJson<CanvasEvent[]>(eventsPath(this.canvasId)) ?? [];
-    if (limit == null) return all;
-    return all.slice(-limit);
+    return readJsonLines<CanvasEvent>(eventsPath(this.canvasId), limit);
   }
 
   // ── Preferences ──────────────────────────────────────────────────────────

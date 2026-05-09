@@ -15,7 +15,7 @@
  *     .history/
  *       chat/<threadId>.json
  *       intent.json
- *       events.json
+ *       events.jsonl
  */
 
 import path from 'node:path';
@@ -83,5 +83,5 @@ export function intentPath(canvasId: string): string {
 }
 
 export function eventsPath(canvasId: string): string {
-  return path.join(historyDir(canvasId), 'events.json');
+  return path.join(historyDir(canvasId), 'events.jsonl');
 }
