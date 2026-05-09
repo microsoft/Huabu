@@ -6,6 +6,7 @@
  */
 
 import {
+  appendFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -83,13 +84,80 @@ export function atomicWriteJson(filePath: string, data: unknown): void {
 }
 
 /**
- * Append an item to a JSON array file. Creates the file with `[item]`
- * when it does not yet exist. Reads-modifies-writes the whole array; this
- * is intentionally simple and is suitable for low-volume logs (events,
- * intents).
+ * Append a single JSON object as one line (JSONL).
+ *
+ * Uses a single `appendFileSync`, which maps to one `write(2)` syscall on
+ * POSIX — atomic at the line boundary, so a crash mid-write at worst
+ * leaves a truncated final line that `readJsonLines` will skip. Suited
+ * for high-volume append-only logs (canvas events).
  */
-export function appendJsonArray<T>(filePath: string, item: T): void {
-  const existing = readJson<T[]>(filePath);
-  const next = Array.isArray(existing) ? [...existing, item] : [item];
-  atomicWriteJson(filePath, next);
+export function appendJsonLine<T>(filePath: string, item: T): void {
+  mkdirp(path.dirname(filePath));
+  appendFileSync(filePath, `${JSON.stringify(item)}\n`, 'utf-8');
+}
+
+/**
+ * Append many JSON objects as JSONL lines in a single write.
+ *
+ * Builds one buffer of `N` lines and issues a single `appendFileSync`.
+ * Either every line lands or (on crash mid-write) the trailing partial
+ * line is dropped by the reader. No-op when `items` is empty.
+ */
+export function appendJsonLines<T>(
+  filePath: string,
+  items: readonly T[],
+): void {
+  if (items.length === 0) return;
+  mkdirp(path.dirname(filePath));
+  let buf = '';
+  for (const item of items) {
+    buf += `${JSON.stringify(item)}\n`;
+  }
+  appendFileSync(filePath, buf, 'utf-8');
+}
+
+/**
+ * Read a JSONL file and parse each non-empty line. Malformed lines are
+ * skipped silently (they typically come from a crash-truncated tail).
+ *
+ * When `limit` is set, only the last `limit` parsed records are returned.
+ * For tail reads the function scans backwards from the end of the raw
+ * string to locate the start of the last `limit` lines before splitting,
+ * so only a small slice of the buffer is materialised into strings.
+ */
+export function readJsonLines<T>(filePath: string, limit?: number): T[] {
+  if (!existsSync(filePath)) return [];
+  let raw: string;
+  try {
+    raw = readFileSync(filePath, 'utf-8');
+  } catch {
+    return [];
+  }
+
+  let slice = raw;
+  if (limit != null && raw.length > 0) {
+    // Scan backwards to find the byte offset where the last `limit` lines begin.
+    // This avoids splitting the entire file into an array of strings.
+    let newlines = 0;
+    let pos = raw.length - 1;
+    if (raw[pos] === '\n') pos--; // skip trailing newline
+    while (pos >= 0 && newlines < limit) {
+      if (raw[pos] === '\n') newlines++;
+      pos--;
+    }
+    // pos is now one position before the start of the first kept line.
+    slice = raw.slice(pos + 1);
+  }
+
+  const out: T[] = [];
+  for (const line of slice.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      out.push(JSON.parse(trimmed) as T);
+    } catch {
+      // Skip malformed (likely a crash-truncated tail line).
+    }
+  }
+  return limit != null && out.length > limit ? out.slice(-limit) : out;
 }

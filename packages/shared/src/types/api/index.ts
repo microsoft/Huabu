@@ -7,6 +7,7 @@
 
 export * from './common.js';
 export * from './canvas.js';
+export * from './canvas-events.js';
 export * from './workspace.js';
 export * from './web.js';
 export * from './llm.js';

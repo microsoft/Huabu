@@ -8,11 +8,10 @@
  *     nodes/<safe(label)>.md        per-node markdown (id in frontmatter)
  *     .artifacts/<artifactId><ext>  raw uploads (hidden dir)
  *     memory/preferences.md
- *     .history/{chat/<thread>.json,intent.json,events.json}
- *
- * Stable identifiers (canvasId, nodeId) live inside the file payloads.
- * Artifact filenames carry the stable artifactId directly so URL keys
- * never need an indirection layer.
+ *     .history/
+ *       chat/<threadId>.json
+ *       intent.json
+ *       events.jsonl
  */
 
 import path from 'node:path';
@@ -85,5 +84,5 @@ export function intentPath(canvasId: string): string {
 }
 
 export function eventsPath(canvasId: string): string {
-  return path.join(historyDir(canvasId), 'events.json');
+  return path.join(historyDir(canvasId), 'events.jsonl');
 }

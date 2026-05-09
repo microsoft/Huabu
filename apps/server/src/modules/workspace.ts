@@ -30,7 +30,7 @@
  *       nodes/<nodeId>.md
  *       artifacts/<file>
  *       memory/preferences.md
- *       .history/{chat/<threadId>.json,intent.json,events.json}
+ *       .history/{chat/<threadId>.json,intent.json,events.jsonl}
  */
 
 import { mkdirSync } from 'node:fs';

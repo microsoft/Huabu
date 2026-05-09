@@ -541,6 +541,12 @@ export function useAgentStream(): UseAgentStreamReturn {
       const abortController = new AbortController();
       abortControllerRef.current = abortController;
 
+      // Make sure any buffered behavioural events have hit the server
+      // before the agent builds its request context. Failures are
+      // swallowed inside the flush helper — we never want a transient
+      // network blip to block the agent call.
+      await useCanvasStore.getState().flushCanvasEvents();
+
       try {
         await agentApi.streamMessage(
           prompt,

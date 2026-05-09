@@ -109,8 +109,18 @@ function formatAction(a: RecentAction): string {
         .join(', ');
       return `Deleted ${a.nodes.length} node(s): ${labels}`;
     }
-    case 'node_edited':
-      return `Edited ${a.node.nodeType} "${a.node.label ?? a.node.id}"`;
+    case 'node_edited': {
+      const target = `${a.node.nodeType} "${a.node.label ?? a.node.id}"`;
+      if (!a.edit) return `Edited ${target}`;
+      const { op, beforeLen, afterLen, charsAdded, charsRemoved } = a.edit;
+      const delta =
+        charsAdded && charsRemoved
+          ? `+${charsAdded}/-${charsRemoved}`
+          : charsAdded
+            ? `+${charsAdded}`
+            : `-${charsRemoved}`;
+      return `Edited ${target} [${op} ${delta} chars, ${beforeLen}→${afterLen}]`;
+    }
     case 'node_selected':
       return `Selected ${a.node.nodeType} "${a.node.label ?? a.node.id}"`;
     case 'nodes_selected': {

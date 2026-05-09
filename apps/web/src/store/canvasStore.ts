@@ -2,6 +2,7 @@ import {
   type AgentBaseContext,
   type CanvasCommand,
   type CanvasCommandType,
+  type CanvasEventInput,
   type CanvasExecution,
   type CanvasExecutionSource,
   type CanvasNodeType,
@@ -58,6 +59,7 @@ import { canvasHistoryManager } from './canvasHistoryManager';
 import { getCanvas, preprocessNode, putCanvas } from '../api';
 import { cloneArtifactToCanvas, parseArtifactUrl } from '../api/artifact';
 import { CanvasConflictError } from '../api/canvas';
+import { getCanvas, postCanvasEvents, preprocessNode, putCanvas } from '../api';
 import { getNodeSize } from '../utils/node/size';
 
 import type { AlignDirection } from '@/handler/canvasCommand/utils/alignment';
@@ -397,6 +399,16 @@ type RFState = {
   /** @internal Resolve a web-only UiIntent and execute the resulting commands. */
   dispatchUiIntent: (intent: CanvasUiIntent) => void;
   getAgentContext: () => AgentBaseContext;
+
+  /**
+   * Force-flush any buffered behavioural events to the server.
+   *
+   * Call this immediately before kicking off an agent or intent
+   * request so the server-side action log is current when it builds
+   * the request context. Resolves once the in-flight POST settles
+   * (success or fail); a failed flush is retried on the next trigger.
+   */
+  flushCanvasEvents: () => Promise<void>;
 };
 
 let saveTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -411,6 +423,96 @@ const scheduleAutoSave = (saveCanvas: () => Promise<void>) => {
     });
   }, AUTOSAVE_DEBOUNCE_MS);
 };
+
+// ─── Outgoing event buffer ────────────────────────────────────────────────
+//
+// Every `RecentAction` produced by a UI intent / undo / redo is mirrored
+// into this in-memory buffer (keyed by canvasId) and uploaded to the
+// server via `POST /api/canvas/:id/events` on three triggers:
+//
+//   1. Autosave piggy-back — `saveCanvas` flushes after a successful save
+//      so events ride the same 1s debounce as canvas state.
+//   2. Pre-agent flush     — `flushCanvasEvents` is called immediately
+//      before any agent / intent request so the server-side action log
+//      is up to date before the request builds context from it.
+//   3. Page unload         — a `beforeunload` listener fires a
+//      `keepalive` POST so the trailing tail is not lost.
+//
+// The buffer drains on success and is *kept* on failure, so a transient
+// network blip doesn't lose events — the next flush trigger retries.
+//
+// Per-batch caps mirror the server (200 events; the 64 KB body cap is
+// enforced server-side via Fastify's `bodyLimit`).
+
+const EVENT_BATCH_MAX = 200;
+const eventBuffer = new Map<string, CanvasEventInput[]>();
+
+function bufferEvent(canvasId: string, action: RecentAction): void {
+  if (!canvasId) return;
+  const list = eventBuffer.get(canvasId) ?? [];
+  list.push({ ts: Date.now(), payload: action });
+  eventBuffer.set(canvasId, list);
+}
+
+function bufferEvents(canvasId: string, actions: RecentAction[]): void {
+  if (!canvasId || actions.length === 0) return;
+  const list = eventBuffer.get(canvasId) ?? [];
+  const now = Date.now();
+  for (const action of actions) list.push({ ts: now, payload: action });
+  eventBuffer.set(canvasId, list);
+}
+
+/**
+ * Drain the buffer for `canvasId` and POST it to the server.
+ *
+ * On success, the drained events are removed. On failure, they are
+ * re-prepended so the next flush trigger retries them; this trades a
+ * small risk of duplicate-on-double-write for never silently losing a
+ * user action. `keepalive` should only be set for the unload path —
+ * the browser caps keepalive bodies at ~64 KB.
+ */
+async function flushCanvasEventsFor(
+  canvasId: string,
+  opts?: { keepalive?: boolean },
+): Promise<void> {
+  if (!canvasId) return;
+  const queued = eventBuffer.get(canvasId);
+  if (!queued || queued.length === 0) return;
+
+  // Take at most EVENT_BATCH_MAX off the front; leave the rest for the
+  // next flush. Keeps each request under both server-side caps.
+  const batch = queued.slice(0, EVENT_BATCH_MAX);
+  const remainder = queued.slice(batch.length);
+  if (remainder.length > 0) {
+    eventBuffer.set(canvasId, remainder);
+  } else {
+    eventBuffer.delete(canvasId);
+  }
+
+  try {
+    await postCanvasEvents(canvasId, batch, { keepalive: opts?.keepalive });
+  } catch (error) {
+    // Restore the failed batch so the next flush retries it. We push
+    // it back to the *front* to preserve the original ordering.
+    const current = eventBuffer.get(canvasId) ?? [];
+    eventBuffer.set(canvasId, [...batch, ...current]);
+    console.warn('[canvas-events] flush failed, will retry:', error);
+  }
+}
+
+// Best-effort flush for *all* canvases — used by the `beforeunload`
+// listener so we don't lose the tail of any open canvas.
+function flushAllCanvasEventsKeepalive(): void {
+  for (const canvasId of Array.from(eventBuffer.keys())) {
+    void flushCanvasEventsFor(canvasId, { keepalive: true });
+  }
+}
+
+// Module-scoped singleton listener: intentionally registered once at module
+// load time and never removed. Safe for this app's single-page lifecycle.
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', flushAllCanvasEventsKeepalive);
+}
 
 const PERSISTED_KEYS = ['nodes', 'edges', 'canvasTitle'] as const;
 type PersistedKey = (typeof PERSISTED_KEYS)[number];
@@ -622,6 +724,10 @@ const useCanvasStore = create<RFState>()(
           history = pushAction(history, action);
         }
         set({ actionHistory: history });
+        // Mirror the trace into the outgoing event buffer so the server
+        // builds up a long-window action log alongside the short
+        // in-memory ring buffer.
+        bufferEvents(get().canvasId, execution.trace);
       }
     },
 
@@ -792,6 +898,7 @@ const useCanvasStore = create<RFState>()(
       }
 
       set({ isSaving: true });
+      let saveSucceeded = false;
       try {
         const { nodes, edges, version, canvasId, canvasTitle } = get();
         const response = await putCanvas(canvasId, {
@@ -820,6 +927,7 @@ const useCanvasStore = create<RFState>()(
             }),
           });
         }
+        saveSucceeded = true;
       } catch (error) {
         if (error instanceof CanvasConflictError) {
           // Surface conflict to caller (e.g. tryRename) so it can revert
@@ -920,6 +1028,17 @@ const useCanvasStore = create<RFState>()(
       }
       get().updateNodeData(id, { label: trimmed, labelSource: 'user' });
       return true;
+
+      // Piggy-back the action-log flush on the autosave cadence so we
+      // don't open a separate timer just for events. Fire-and-forget —
+      // failures are retried on the next flush trigger.
+      if (saveSucceeded) {
+        void flushCanvasEventsFor(get().canvasId);
+      }
+    },
+
+    flushCanvasEvents: async () => {
+      await flushCanvasEventsFor(get().canvasId);
     },
 
     onNodeDragStart: () => {
@@ -1476,11 +1595,13 @@ const useCanvasStore = create<RFState>()(
       const snapshot = canvasHistoryManager.undo(nodes, edges);
       if (!snapshot) return;
 
+      const action: RecentAction = { action: 'canvas_undone' };
       set({
         nodes: snapshot.nodes,
         edges: snapshot.edges,
-        actionHistory: pushAction(actionHistory, { action: 'canvas_undone' }),
+        actionHistory: pushAction(actionHistory, action),
       });
+      bufferEvent(canvasId, action);
 
       canvasHistoryManager.syncServerAfterRestore(
         canvasId,
@@ -1495,11 +1616,13 @@ const useCanvasStore = create<RFState>()(
       const snapshot = canvasHistoryManager.redo(nodes, edges);
       if (!snapshot) return;
 
+      const action: RecentAction = { action: 'canvas_redone' };
       set({
         nodes: snapshot.nodes,
         edges: snapshot.edges,
-        actionHistory: pushAction(actionHistory, { action: 'canvas_redone' }),
+        actionHistory: pushAction(actionHistory, action),
       });
+      bufferEvent(canvasId, action);
 
       canvasHistoryManager.syncServerAfterRestore(
         canvasId,
