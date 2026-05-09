@@ -131,8 +131,8 @@ export async function* runAgent(
     // Audit notes (see docs/agent-spatial-tools-plan.md TODO #11 and
     // docs/pi-agent-core-migration.md Step 4):
     //   - Read-only tools (`read`, `grep`, `find`, `ls`,
-    //     `get_canvas_outline`, `inspect_nodes`, `web_search`,
-    //     `use_skill`) are trivially safe.
+    //     `get_canvas_outline`, `inspect_nodes`, `inspect_edges`,
+    //     `web_search`, `use_skill`) are trivially safe.
     //   - `canvas_commands` is opted OUT of parallelism via
     //     `executionMode: 'sequential'` on its tool definition.
     //     Server-side, its handler reads canvas state once to build a

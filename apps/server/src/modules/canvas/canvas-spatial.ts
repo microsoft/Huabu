@@ -1,21 +1,27 @@
 /**
  * Canvas → spatial / topological helpers.
  *
- * Backs the `get_canvas_outline` and `inspect_nodes` agent tools. The
- * design split is deliberate (see docs/agent-spatial-tools-plan.md):
+ * Backs the `get_canvas_outline`, `inspect_nodes`, and `inspect_edges`
+ * agent tools. The split is deliberate (see
+ * docs/agent-spatial-tools-plan.md):
  *
- *  - `get_canvas_outline`  →  `buildCanvasOutline()` — one-shot "map" of
- *    the whole canvas: every node's geometry/parent/(opt-in) style +
- *    edge list + pre-computed spatial clusters.
- *  - `inspect_nodes`        →  `inspectNodes()` — predicate-driven node
- *    lookup (attribute / spatial / topological), returning each match
- *    with its full geometry + style + per-predicate derived fields
- *    (distance, direction, edgeIds, …).
+ *  - `get_canvas_outline`  →  `buildCanvasOutline()` — one-shot "map"
+ *    of the whole canvas: every node's geometry/parent/(opt-in) style
+ *    + topology-only edge list (`{id, source, target}`) + pre-computed
+ *    spatial clusters.
+ *  - `inspect_nodes`        →  `inspectNodes()` — predicate-driven
+ *    node lookup (attribute / spatial / topological), returning each
+ *    match with its full geometry + style + per-predicate derived
+ *    fields (distance, direction, edgeIds, …).
+ *  - `inspect_edges`        →  `inspectEdges()` — predicate-driven
+ *    edge lookup (by id / endpoints / EdgeStyle attributes). Use this
+ *    when you need the visual style or want to filter edges by
+ *    direction / line style — outline only carries topology.
  *
- * Heavy lifting (clustering, proximity, arrangement detection) lives in
- * the zero-dep shared library `@sediment/shared/utils/spatial`. This
- * module is just an adapter: it loads `canvas.json`, normalizes node
- * sizes (mirroring `apps/web/src/utils/node/size.ts`), resolves
+ * Heavy lifting (clustering, proximity, arrangement detection) lives
+ * in the zero-dep shared library `@sediment/shared/utils/spatial`.
+ * This module is just an adapter: it loads `canvas.json`, normalizes
+ * node sizes (mirroring `apps/web/src/utils/node/size.ts`), resolves
  * absolute positions for nested nodes, then forwards to the shared
  * primitives.
  *
@@ -23,10 +29,10 @@
  *   - `read("nodes/<nodeId>.md")` owns content/label/summary/
  *     keywords (the markdown frontmatter).
  *   - This module owns whatever lives in `canvas.json`: position, size,
- *     parent, visual style on `data.style`, plus all derived
- *     spatial/topological metadata.
- *   - When `includePreviews` is set, outline pulls the preview text via
- *     `CanvasStore.readNode` — the only place it crosses into the
+ *     parent, visual style on `data.style`, edge endpoints +
+ *     `data.edgeStyle`, plus all derived spatial/topological metadata.
+ *   - When `includePreviews` is set, outline pulls the preview text
+ *     via `CanvasStore.readNode` — the only place it crosses into the
  *     markdown side, kept gated behind an opt-in flag.
  */
 
@@ -41,7 +47,15 @@ import {
 import { getCanvasStore } from '../storage/index.js';
 
 import type { CanvasFile } from '../storage/canvas-store.js';
-import type { CardinalDirection, SpatialNode } from '@sediment/shared';
+import type {
+  CardinalDirection,
+  EdgeDirection,
+  EdgeLineStyle,
+  EdgeLineType,
+  EdgeStrokeWidth,
+  EdgeStyle,
+  SpatialNode,
+} from '@sediment/shared';
 
 // ─── Raw shapes parsed loosely from canvas.json ─────────────────────────────
 //
@@ -79,7 +93,18 @@ interface RawEdge {
   id?: string;
   source: string;
   target: string;
+  /**
+   * React Flow render props (stroke, strokeWidth, strokeDasharray, ...)
+   * — derived from `data.edgeStyle` by `applyEdgeStyle`. Do **not**
+   * surface this to agents; it duplicates and partially mirrors
+   * `data.edgeStyle`, which is the canonical source of truth.
+   */
   style?: Record<string, unknown>;
+  data?: {
+    /** Source-of-truth `EdgeStyle` written by `applyEdgeStyle`. */
+    edgeStyle?: EdgeStyle;
+    [key: string]: unknown;
+  };
   [key: string]: unknown;
 }
 
@@ -229,10 +254,16 @@ export interface CanvasOutlineNode {
 }
 
 export interface CanvasOutlineEdge {
+  /**
+   * Outline carries only topology (id + endpoints). For an edge's
+   * EdgeStyle fields (lineType / lineStyle / direction / stroke /
+   * strokeWidth), use `inspect_edges` — keeps outline lean and avoids
+   * paying the EdgeStyle vocabulary cost on every "orient yourself"
+   * call.
+   */
   id?: string;
   source: string;
   target: string;
-  style?: Record<string, unknown>;
 }
 
 export interface CanvasOutlineCluster {
@@ -312,7 +343,6 @@ export function buildCanvasOutline(
   const edges: CanvasOutlineEdge[] = bundle.rawEdges.map((e) => {
     const out: CanvasOutlineEdge = { source: e.source, target: e.target };
     if (e.id) out.id = e.id;
-    if (e.style && typeof e.style === 'object') out.style = e.style;
     return out;
   });
 
@@ -695,4 +725,162 @@ export function inspectNodes(
     ...(arrangement ? { arrangement } : {}),
     nodes,
   };
+}
+
+// ─── Public: inspect_edges ──────────────────────────────────────────────────
+
+export interface InspectEdgesArgs {
+  // Identity / endpoint predicates
+  ids?: string[];
+  /** Match all edges incident to this node (source OR target). */
+  connectedTo?: string;
+  /** Match outgoing edges of this node. */
+  bySource?: string;
+  /** Match incoming edges of this node. */
+  byTarget?: string;
+  /** Match edges between these two nodes (either direction). */
+  between?: { a: string; b: string };
+
+  // EdgeStyle predicates
+  byDirection?: EdgeDirection | EdgeDirection[];
+  byLineStyle?: EdgeLineStyle | EdgeLineStyle[];
+  byLineType?: EdgeLineType | EdgeLineType[];
+
+  limit?: number;
+}
+
+export interface InspectEdgeResult {
+  id?: string;
+  source: string;
+  target: string;
+  // EdgeStyle fields, omitted when unset on disk.
+  lineType?: EdgeLineType;
+  lineStyle?: EdgeLineStyle;
+  /** Palette accent token (e.g. `'purple'`) or a literal CSS color. */
+  stroke?: string;
+  strokeWidth?: EdgeStrokeWidth | number;
+  direction?: EdgeDirection;
+}
+
+export interface InspectEdgesResult {
+  count: number;
+  truncated: boolean;
+  edges: InspectEdgeResult[];
+}
+
+export type InspectEdgesError = { error: string };
+
+/**
+ * Run a multi-predicate query against a canvas's edges.
+ *
+ * Predicates are *ANDed*. With no predicate at all, every edge is
+ * returned (subject to `limit`) — agents typically end up here from
+ * `inspect_nodes({ connectedTo }).edgeIds` or directly from a styling
+ * task, so even the unfiltered case is bounded in practice.
+ */
+export function inspectEdges(
+  canvasId: string,
+  args: InspectEdgesArgs,
+): InspectEdgesResult | InspectEdgesError {
+  const store = getCanvasStore(canvasId);
+  const canvas = store.read();
+  if (!canvas) return { error: `Canvas ${canvasId} not found` };
+
+  const bundle = buildSpatialBundle(canvas);
+  const nodeIds = new Set(bundle.spatialNodes.map((s) => s.id));
+
+  // Validate referenced nodes up front so the agent gets a clear
+  // error instead of a silent zero-hit result.
+  const checkNode = (id: string, where: string): InspectEdgesError | null =>
+    nodeIds.has(id)
+      ? null
+      : { error: `Node ${id} not found (used in ${where})` };
+
+  if (args.connectedTo) {
+    const err = checkNode(args.connectedTo, 'connectedTo');
+    if (err) return err;
+  }
+  if (args.bySource) {
+    const err = checkNode(args.bySource, 'bySource');
+    if (err) return err;
+  }
+  if (args.byTarget) {
+    const err = checkNode(args.byTarget, 'byTarget');
+    if (err) return err;
+  }
+  if (args.between) {
+    const errA = checkNode(args.between.a, 'between.a');
+    if (errA) return errA;
+    const errB = checkNode(args.between.b, 'between.b');
+    if (errB) return errB;
+  }
+
+  const idsFilter = args.ids ? new Set(args.ids) : null;
+  const directions = args.byDirection
+    ? new Set(
+        Array.isArray(args.byDirection) ? args.byDirection : [args.byDirection],
+      )
+    : null;
+  const lineStyles = args.byLineStyle
+    ? new Set(
+        Array.isArray(args.byLineStyle) ? args.byLineStyle : [args.byLineStyle],
+      )
+    : null;
+  const lineTypes = args.byLineType
+    ? new Set(
+        Array.isArray(args.byLineType) ? args.byLineType : [args.byLineType],
+      )
+    : null;
+
+  const matched: InspectEdgeResult[] = [];
+  for (const e of bundle.rawEdges) {
+    if (idsFilter) {
+      if (!e.id || !idsFilter.has(e.id)) continue;
+    }
+    if (args.connectedTo) {
+      if (e.source !== args.connectedTo && e.target !== args.connectedTo) {
+        continue;
+      }
+    }
+    if (args.bySource && e.source !== args.bySource) continue;
+    if (args.byTarget && e.target !== args.byTarget) continue;
+    if (args.between) {
+      const { a, b } = args.between;
+      const matches =
+        (e.source === a && e.target === b) ||
+        (e.source === b && e.target === a);
+      if (!matches) continue;
+    }
+
+    const style = e.data?.edgeStyle;
+    if (directions) {
+      // Treat absence as 'none' (the default direction).
+      const d = style?.direction ?? 'none';
+      if (!directions.has(d)) continue;
+    }
+    if (lineStyles) {
+      const ls = style?.lineStyle ?? 'solid';
+      if (!lineStyles.has(ls)) continue;
+    }
+    if (lineTypes) {
+      const lt = style?.lineType ?? 'bezier';
+      if (!lineTypes.has(lt)) continue;
+    }
+
+    const out: InspectEdgeResult = { source: e.source, target: e.target };
+    if (e.id) out.id = e.id;
+    if (style && typeof style === 'object') {
+      if (style.lineType) out.lineType = style.lineType;
+      if (style.lineStyle) out.lineStyle = style.lineStyle;
+      if (style.stroke !== undefined) out.stroke = style.stroke;
+      if (style.strokeWidth !== undefined) out.strokeWidth = style.strokeWidth;
+      if (style.direction) out.direction = style.direction;
+    }
+    matched.push(out);
+  }
+
+  const limit = Math.max(1, args.limit ?? DEFAULT_INSPECT_LIMIT);
+  const truncated = matched.length > limit;
+  const edges = truncated ? matched.slice(0, limit) : matched;
+  return { count: edges.length, truncated, edges };
 }

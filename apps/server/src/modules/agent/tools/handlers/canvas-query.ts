@@ -1,17 +1,18 @@
 /**
  * Canvas read-only tool handlers.
  *
- * Today: `get_canvas_outline`, `inspect_nodes`. Future read-side tools
- * (e.g. `describe_node_position` if scenario 10 in the design doc
- * proves frequent) land here too — anything the agent calls to
- * *understand* the canvas without mutating it.
+ * Today: `get_canvas_outline`, `inspect_nodes`, `inspect_edges`. Future
+ * read-side tools (e.g. `describe_node_position` if scenario 10 in
+ * the design doc proves frequent) land here too — anything the agent
+ * calls to *understand* the canvas without mutating it.
  *
  * Split with the filesystem `read` tool: these handlers expose what
  * lives in `canvas.json` (position, size, parentId, visual style on
- * `data.style`, plus derived spatial / topological metadata).
- * Anything that round-trips through `nodes/<id>.md` (label, type, src,
- * content, summary, keywords) is owned by `read` — agents should call
- * `read("nodes/<nodeId>.md")` for those.
+ * `data.style`, edge endpoints + `data.edgeStyle`, plus derived
+ * spatial / topological metadata). Anything that round-trips through
+ * `nodes/<id>.md` (label, type, src, content, summary, keywords) is
+ * owned by `read` — agents should call `read("nodes/<nodeId>.md")`
+ * for those.
  *
  * The actual computation (size normalization, absolute-position walk,
  * predicate filtering, distance / cluster / arrangement logic) lives
@@ -21,11 +22,13 @@
 
 import {
   buildCanvasOutline,
+  inspectEdges,
   inspectNodes,
 } from '../../../canvas/canvas-spatial.js';
 
 import type {
   getCanvasOutlineParamsSchema,
+  inspectEdgesParamsSchema,
   inspectNodesParamsSchema,
 } from '../definitions.js';
 import type { Static } from '@earendil-works/pi-ai';
@@ -43,6 +46,9 @@ export type GetCanvasOutlineArgs = Static<
   canvasId: string;
 };
 export type InspectNodesArgs = Static<typeof inspectNodesParamsSchema> & {
+  canvasId: string;
+};
+export type InspectEdgesArgs = Static<typeof inspectEdgesParamsSchema> & {
   canvasId: string;
 };
 
@@ -67,6 +73,17 @@ export async function handleInspectNodes(
   // `inspectNodes` returns either a result object or `{ error }` when a
   // referenced node is missing. Promote the error case to a throw so
   // pi-agent-core flags the tool result as `isError: true`.
+  if ('error' in result) {
+    throw new Error(result.error);
+  }
+  return JSON.stringify(result);
+}
+
+export async function handleInspectEdges(
+  args: InspectEdgesArgs,
+): Promise<string> {
+  const { canvasId, ...predicates } = args;
+  const result = inspectEdges(canvasId, predicates);
   if ('error' in result) {
     throw new Error(result.error);
   }

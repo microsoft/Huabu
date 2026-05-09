@@ -16,6 +16,11 @@
 import { Type } from '@earendil-works/pi-ai';
 
 import { AgentCanvasCommandSchema } from './schemas/command.js';
+import {
+  EdgeDirectionSchema,
+  EdgeLineStyleSchema,
+  EdgeLineTypeSchema,
+} from './schemas/edge.js';
 
 import type { ToolExecutionMode } from '@earendil-works/pi-agent-core';
 import type { Tool } from '@earendil-works/pi-ai';
@@ -73,20 +78,25 @@ export const webSearchTool: ToolDefinition = {
 
 // ==================== Canvas Read-Only Tools ====================
 //
-// Two-tool surface for "understand the canvas without mutating it":
+// Three-tool surface for "understand the canvas without mutating it":
 //
 //   - `get_canvas_outline`  — one-shot map of the whole canvas
-//     (geometry + edges + spatial clusters). Call once per canvas to
-//     orient yourself.
-//   - `inspect_nodes`        — predicate-driven node lookup (attribute /
-//     spatial / topological), returning each match with full geometry +
-//     style + per-predicate derived fields.
+//     (geometry + topology-only edges + spatial clusters). Call once
+//     per canvas to orient yourself.
+//   - `inspect_nodes`        — predicate-driven node lookup (attribute
+//     / spatial / topological), returning each match with full
+//     geometry + style + per-predicate derived fields.
+//   - `inspect_edges`        — predicate-driven edge lookup (by id /
+//     endpoints / EdgeStyle attributes). Call when you need edge
+//     direction / line style / stroke — outline carries only
+//     `{ id, source, target }` to keep the orient-yourself call lean.
 //
 // Boundary with `read`: anything in the node markdown frontmatter
 // (label, type, src, content, summary, keywords) lives in
-// `nodes/<nodeId>.md` and is owned by `read`. These two
-// tools own everything in `canvas.json` (position/size/parent/style)
-// plus derived spatial/topological metadata.
+// `nodes/<nodeId>.md` and is owned by `read`. The three canvas tools
+// own everything in `canvas.json` (position/size/parent/style on
+// nodes, EdgeStyle on edges) plus derived spatial/topological
+// metadata.
 //
 // Every canvas tool is implicitly scoped to the current request's canvas
 // — there is no `canvasId` argument.
@@ -109,7 +119,7 @@ export const getCanvasOutlineParamsSchema = Type.Object({
 export const getCanvasOutlineTool: ToolDefinition = {
   name: 'get_canvas_outline',
   label: 'Get Canvas Outline',
-  description: `One-shot map of the whole canvas. Returns JSON: { canvasId, version, bbox, nodes: [{ id, type, label, parentId, position, width, height, style?, preview? }], edges: [{ id?, source, target, style? }], spatial: { clusters: [{ frameId?, frameLabel?, nodeIds (reading-order), arrangement }] } }. Call this once when you enter a canvas to orient yourself; later, drill in with inspect_nodes / read. Frame nodes are entries in \`nodes\` with type='frame' — group by parentId to recover the frame tree. Isolated nodes = all node ids minus the union of cluster nodeIds. \`preview\` and \`style\` are opt-in via the matching flags. For full content of any node, call read on "nodes/<nodeId>.md".`,
+  description: `One-shot map of the whole canvas. Returns JSON: { canvasId, version, bbox, nodes: [{ id, type, label, parentId, position, width, height, style?, preview? }], edges: [{ id?, source, target }], spatial: { clusters: [{ frameId?, frameLabel?, nodeIds (reading-order), arrangement }] } }. Edges are topology-only here — for an edge's direction / line style / stroke / strokeWidth call \`inspect_edges\` instead. Call this once when you enter a canvas to orient yourself; later, drill in with inspect_nodes / inspect_edges / read. Frame nodes are entries in \`nodes\` with type='frame' — group by parentId to recover the frame tree. Isolated nodes = all node ids minus the union of cluster nodeIds. \`preview\` and \`style\` are opt-in via the matching flags. For full content of any node, call read on "nodes/<nodeId>.md".`,
   parameters: getCanvasOutlineParamsSchema,
 };
 
@@ -201,7 +211,7 @@ export const inspectNodesParamsSchema = Type.Object({
       },
       {
         description:
-          'Find nodes connected to the given node via edges (the target node itself is excluded from results). Each match carries `edgeIds` and `hops`.',
+          "Find nodes connected to the given node via edges (the target node itself is excluded from results). Each match carries `edgeIds` and `hops`. To inspect an edge's direction / line style / stroke, pass those `edgeIds` to inspect_edges.",
       },
     ),
   ),
@@ -231,6 +241,66 @@ export const inspectNodesTool: ToolDefinition = {
   label: 'Inspect Nodes',
   description: `Find canvas nodes by predicate (attribute / spatial / topological) and return each match with full geometry + visual style + derived fields. Predicates AND together. **Always supply at least one predicate** — calling with no predicates returns every node, which is wasteful; for whole-canvas reads use get_canvas_outline instead. Returns JSON: { count, truncated, arrangement?, nodes: [{ id, type, label, parentId, position, width, height, style?, distance?, centerDistance?, direction?, edgeIds?, hops?, clusterId? }] }. When truncated:true, raise limit or refine your query. Note on connectedTo: the target node itself is excluded from results. Use this for "where is X?" (ids), "what's near X?" (nearNode), "what connects to X?" (connectedTo), "what's in this region?" (inRect), or any combination. For full node content (label/text/summary/keywords) call read on "nodes/<nodeId>.md" — only canvas.json fields are surfaced here.`,
   parameters: inspectNodesParamsSchema,
+};
+
+export const inspectEdgesParamsSchema = Type.Object({
+  // ── Identity / endpoint predicates ──
+  ids: Type.Optional(
+    Type.Array(Type.String(), {
+      description:
+        'Match these edge IDs explicitly. Pair with the `edgeIds` returned by `inspect_nodes({ connectedTo })` to fetch full styling for known edges.',
+    }),
+  ),
+  connectedTo: Type.Optional(
+    Type.String({
+      description: 'Match all edges incident to this node (source OR target).',
+    }),
+  ),
+  bySource: Type.Optional(
+    Type.String({ description: 'Match edges originating from this node.' }),
+  ),
+  byTarget: Type.Optional(
+    Type.String({ description: 'Match edges terminating at this node.' }),
+  ),
+  between: Type.Optional(
+    Type.Object(
+      { a: Type.String(), b: Type.String() },
+      {
+        description:
+          'Match edges connecting these two nodes (in either direction).',
+      },
+    ),
+  ),
+  // ── EdgeStyle predicates ──
+  byDirection: Type.Optional(
+    Type.Union([EdgeDirectionSchema, Type.Array(EdgeDirectionSchema)], {
+      description:
+        "Filter by arrow direction. Treats unset as 'none'. Use 'forward'/'backward'/'both' to find directed edges; 'none' for plain undirected lines.",
+    }),
+  ),
+  byLineStyle: Type.Optional(
+    Type.Union([EdgeLineStyleSchema, Type.Array(EdgeLineStyleSchema)], {
+      description:
+        "Filter by dash pattern. Treats unset as 'solid'. Useful for finding annotation edges (commonly dashed/dotted).",
+    }),
+  ),
+  byLineType: Type.Optional(
+    Type.Union([EdgeLineTypeSchema, Type.Array(EdgeLineTypeSchema)], {
+      description: "Filter by line shape. Treats unset as 'bezier'.",
+    }),
+  ),
+  limit: Type.Optional(
+    Type.Number({
+      description: 'Maximum number of edges to return. Default: 50.',
+    }),
+  ),
+});
+
+export const inspectEdgesTool: ToolDefinition = {
+  name: 'inspect_edges',
+  label: 'Inspect Edges',
+  description: `Find canvas edges by predicate (id / endpoints / EdgeStyle attributes) and return each match with its full EdgeStyle. Predicates AND together; with no predicate, every edge is returned (subject to \`limit\`). Returns JSON: { count, truncated, edges: [{ id?, source, target, lineType?, lineStyle?, stroke?, strokeWidth?, direction? }] }. EdgeStyle fields are omitted when unset on disk (defaults: \`direction='none'\`, \`lineStyle='solid'\`, \`lineType='bezier'\`); the \`by*\` predicates apply these same defaults so a query like \`byLineStyle:'solid'\` matches edges with no explicit \`lineStyle\` too. Use this when you need styling info — outline only carries topology. Common flows: pass \`edgeIds\` from \`inspect_nodes({ connectedTo })\` via \`ids\`; or query \`byDirection:'forward'\` to find directed edges; or \`byLineStyle:['dashed','dotted']\` to find annotation edges.`,
+  parameters: inspectEdgesParamsSchema,
 };
 
 // ==================== Canvas Commands ====================
@@ -469,6 +539,7 @@ export const chatTools: ToolDefinition[] = [
   webSearchTool,
   getCanvasOutlineTool,
   inspectNodesTool,
+  inspectEdgesTool,
   readTool,
   grepTool,
   findTool,
@@ -485,6 +556,7 @@ export const operateTools: ToolDefinition[] = [
   webSearchTool,
   getCanvasOutlineTool,
   inspectNodesTool,
+  inspectEdgesTool,
   readTool,
   grepTool,
   findTool,

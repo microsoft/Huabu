@@ -36,11 +36,14 @@
 | 变化 | 工具                                                                                                |
 | ---- | --------------------------------------------------------------------------------------------------- |
 | 删   | `get_canvas_state`、`get_node_geometry`                                                             |
-| 加   | `get_canvas_outline`、`inspect_nodes`                                                               |
+| 加   | `get_canvas_outline`、`inspect_nodes`、`inspect_edges`                                              |
 | 不动 | `read` / `grep` / `find` / `ls` / `canvas_commands` / `ingest_content` / `web_search` / `use_skill` |
 
-工具总数 9 → 9。`get_node_geometry` 等价于 `inspect_nodes({ ids: [id] })`
-的退化形式（包含 style），不再单独存在。
+工具总数 9 → 10。`get_node_geometry` 等价于 `inspect_nodes({ ids: [id] })`
+的退化形式（包含 style），不再单独存在。`inspect_edges` 与 `inspect_nodes`
+对称：outline 只留 edge 拓扑（`{ id, source, target }`），带 EdgeStyle
+的查询（方向 / 线型 / 笔触）都走 `inspect_edges`，避免 outline 描述被
+边语义词典污染。
 
 ## 4. 工具签名
 
@@ -72,7 +75,7 @@
     style?: object,                                // includeStyle=true 才送
     preview?: string,                              // includePreviews=true 才送
   }>,
-  edges: Array<{ id, source, target, style? }>,
+  edges: Array<{ id?, source, target }>,           // 拓扑只；EdgeStyle 走 inspect_edges
   spatial: {
     clusters: Array<{
       frameId?, frameLabel?,
@@ -154,6 +157,60 @@
 { count: 0, truncated: false, nodes: [] }   // 合法查询、零命中
 ```
 
+### 4.3 `inspect_edges`
+
+> 与 `inspect_nodes` 对称的 edge 查询入口。Outline 只提供拓扑，这里
+> 负责返回 EdgeStyle 的全集。谓词 mutually combinable，全部为空时
+> 返回所有 edge（受 `limit` 限制）。
+
+**参数**
+
+```ts
+{
+  canvasId?: string,
+  // ── 身份 / 端点 ──
+  ids?: string[],                                  // 与 inspect_nodes.edgeIds 结合使用
+  connectedTo?: string,                            // node 的所有 incident edges
+  bySource?: string,
+  byTarget?: string,
+  between?: { a: string, b: string },              // a ↔ b（任意方向）
+  // ── EdgeStyle 谓词 ──
+  byDirection?: EdgeDirection | EdgeDirection[],   // 未设 = 'none'
+  byLineStyle?: EdgeLineStyle | EdgeLineStyle[],   // 未设 = 'solid'
+  byLineType?: EdgeLineType | EdgeLineType[],      // 未设 = 'bezier'
+  // ── 输出 ──
+  limit?: number,                                  // 默认 50
+}
+```
+
+**返回**
+
+```ts
+{
+  count: number,
+  truncated: boolean,
+  edges: Array<{
+    id?: string,                                   // 磁盘上缺失时不出
+    source: string,
+    target: string,
+    // EdgeStyle 字段；未设时省略
+    lineType?: EdgeLineType,
+    lineStyle?: EdgeLineStyle,
+    direction?: EdgeDirection,
+    stroke?: string,                               // AccentToken | CSS color
+    strokeWidth?: EdgeStrokeWidth | number,
+  }>,
+}
+```
+
+错误约定：
+
+```ts
+{ error: "Canvas <id> not found" }
+{ error: "Node <id> not found (used in connectedTo/bySource/byTarget/between)" }
+{ count: 0, truncated: false, edges: [] }
+```
+
 ## 5. 谓词到场景的覆盖矩阵
 
 | #   | 场景                                          | 调用                                                                                                                                                                                             |
@@ -168,6 +225,8 @@
 | 8   | 所有 image 节点？                             | `inspect_nodes({ byType: 'image' })`                                                                                                                                                             |
 | 9   | 孤立节点？                                    | 全部 `nodes[*].id` 减 `spatial.clusters[*].nodeIds` 的并集                                                                                                                                       |
 | 10  | "X 在 frame A 内偏右；frame A 在画布中央偏下" | 现阶段不加专门工具；agent 用 outline + nearNode 自己拼。如果后续 trace 显示高频需要，再 wrap [`buildQuestionNodeContext`](../packages/shared/src/utils/spatial.ts) 为 `describe_node_position`。 |
+| 11  | 某边是有箭头的还是虚线注释？                  | `inspect_edges({ ids: ['edge-…'] })` 或 `inspect_edges({ connectedTo: 'node-…' })`                                                                                                               |
+| 12  | 画布上所有虚线边 / 有向边？                   | `inspect_edges({ byLineStyle: ['dashed','dotted'] })` / `inspect_edges({ byDirection: ['forward','backward','both'] })`                                                                          |
 
 ## 6. 落地步骤
 
@@ -234,56 +293,6 @@
 - 视觉信号（screenshot）：与本设计正交。
 
 ## 8. TODO — 后续覆盖范围补强
-
-主线（删 `get_canvas_state` / `get_node_geometry`，加 `get_canvas_outline` /
-`inspect_nodes`）已经落地，描述清晰度批次（footgun 警告、`truncated` 命名统
-一、`read` 文件类型枚举、frontmatter shape 示例、`nextOffset` 1-indexed 语义、
-`connectedTo` 排除 self）也已修。剩下四项是 review 阶段定为"覆盖缺口"的中长
-期 todo，按优先级记录在此：
-
-### TODO #9 — Edge 的非 style 属性透传（高优）
-
-**现状**：[`get_canvas_outline`](../apps/server/src/modules/agent/tools/handlers/canvas-query.ts)
-和 [`inspect_nodes.connectedTo`](../apps/server/src/modules/canvas/canvas-spatial.ts)
-里的 edge 输出只暴露 `{ source, target, id?, style? }`
-（[canvas-spatial.ts §"Outline edge mapper"](../apps/server/src/modules/canvas/canvas-spatial.ts#L317-L322)）。
-
-**缺口**：React Flow 的 edge 还有 `data.label`、`type`
-（'default'/'smoothstep'/'step'/...）、`animated`、`markerEnd` / `markerStart`
-（箭头方向）等语义关键字段。Agent 想区分"有箭头的因果关系" vs "无方向关联"
-或"虚线注释"时拿不到。
-
-**建议**：在 outline 的 edge 里直接透传：
-
-```ts
-{
-  id?: string;
-  source: string;
-  target: string;
-  label?: string;       // data.label
-  type?: string;        // 'default' | 'smoothstep' | 'step' | ...
-  animated?: boolean;
-  markerEnd?: unknown;  // 透传 React Flow 的 marker 配置
-  markerStart?: unknown;
-  style?: { stroke?, strokeWidth?, strokeDasharray? };
-}
-```
-
-`inspect_nodes` 的 `connectedTo` 派生 `edgeIds` 已经够用，但若 agent 想"按
-类型筛边"，可以考虑加 `byEdgeType?: string | string[]` 谓词。
-
-**风险**：需要先和前端核对 React Flow 实际写盘的字段名（部分在 `data.*`
-下）。
-
-### TODO #10 — Node `zIndex` 暴露（中优）
-
-**现状**：`REORDER_NODES` command 已经存在，但 `inspect_nodes` 不告诉当前
-z-order，agent 没法判断"X 是不是已经在最上层"。
-
-**建议**：在 `inspect_nodes` 输出里加 `zIndex?: number`（取自
-`node.zIndex`，缺省 0）。outline 暂不加，避免每次全量都带这字段。
-
-**风险**：低；只读扩展。
 
 ### TODO #11 — `describe_node_position`（低优 — 等 trace）
 

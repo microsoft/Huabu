@@ -74,6 +74,12 @@ You will receive:
   \`connectedTo\`, \`inSameClusterAs\` when you need spatial or
   topological relations to interpret the gesture (e.g. "is this node
   already inside that frame?").
+- \`inspect_edges(args)\` — predicate-driven edge lookup. Use this when
+  the gesture targets an edge and the edge's direction / line style /
+  stroke matters (e.g. "is this an arrowed connection or a dashed
+  annotation?"). Common entry points: \`{ ids: ["<edgeId>"] }\` from
+  the context payload, or \`{ connectedTo: "<nodeId>" }\` for all
+  edges incident to a node.
 
 You may call tools across multiple iterations before giving your final answer.
 

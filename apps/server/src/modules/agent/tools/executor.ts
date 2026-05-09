@@ -24,8 +24,10 @@
 
 import {
   handleGetCanvasOutline,
+  handleInspectEdges,
   handleInspectNodes,
   type GetCanvasOutlineArgs,
+  type InspectEdgesArgs,
   type InspectNodesArgs,
 } from './handlers/canvas-query.js';
 import {
@@ -89,6 +91,11 @@ export async function executeTool(
     case 'inspect_nodes':
       return handleInspectNodes(
         withCanvasId<InspectNodesArgs>(args, 'inspect_nodes'),
+      );
+
+    case 'inspect_edges':
+      return handleInspectEdges(
+        withCanvasId<InspectEdgesArgs>(args, 'inspect_edges'),
       );
 
     case 'grep':
