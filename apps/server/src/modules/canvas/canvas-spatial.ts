@@ -20,7 +20,7 @@
  * primitives.
  *
  * Boundary with `read`:
- *   - `read("<canvasId>/nodes/<nodeId>.md")` owns content/label/summary/
+ *   - `read("nodes/<nodeId>.md")` owns content/label/summary/
  *     keywords (the markdown frontmatter).
  *   - This module owns whatever lives in `canvas.json`: position, size,
  *     parent, visual style on `data.style`, plus all derived

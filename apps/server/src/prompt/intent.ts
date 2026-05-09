@@ -37,7 +37,7 @@ Sorted by confidence descending.`;
  *
  * It must FIRST reason about user intent (using the screenshot as the
  * primary signal — the IDs are just pointers), call `read` on
- * "<canvasId>/nodes/<nodeId>.md" for any nodes whose content matters to
+ * "nodes/<nodeId>.md" for any nodes whose content matters to
  * the decision (and `inspect_nodes` for any whose layout / spatial
  * relations matter), THEN emit a single JSON object containing the
  * executable canvas commands.
@@ -53,7 +53,7 @@ You will receive:
    IMPORTANT: This payload contains NO labels, NO positions, NO distances,
    NO shape inference. The IDs are just pointers — use the screenshot to
    understand the gesture, and call \`read\` on
-   "<canvasId>/nodes/<nodeId>.md" whenever you need to know what a
+   "nodes/<nodeId>.md" whenever you need to know what a
    referenced node actually contains, or \`inspect_nodes\` when you
    need its position / size / parent / style — or to look up neighbours
    / connections.
@@ -61,7 +61,7 @@ You will receive:
 ## Tools
 
 - \`read({ path })\` — fetch a node's label / content / type / src /
-  summary / keywords by reading "<canvasId>/nodes/<nodeId>.md". The
+  summary / keywords by reading "nodes/<nodeId>.md". The
   response includes both the raw markdown body and a parsed
   \`frontmatter\` object so you don't have to parse YAML yourself.
   Call this for any node whose content materially affects your decision

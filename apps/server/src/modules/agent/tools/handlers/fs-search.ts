@@ -1,5 +1,5 @@
 /**
- * Filesystem tools — grep, find, ls — scoped to the active workspace.
+ * Filesystem tools — grep, find, ls — scoped to the current canvas.
  *
  *
  * Implementation is pure Node — no `child_process`, no `ripgrep`, no
@@ -7,21 +7,20 @@
  *  - the server must run on minimal Docker / Edge runtimes;
  *  - workspace data volumes are small (tens to thousands of files,
  *    KB each);
- *  - sandboxing a child process to one workspace is harder than just
+ *  - sandboxing a child process to one canvas is harder than just
  *    keeping every path resolution in-process.
  *
  * The sandbox itself (path resolution, walk, glob, node lookup) lives
- * in `./sandbox.ts` so that `read` and any future fs tool inherit the
- * exact same security model.
+ * in `./fs-sandbox.ts` so that `read` and any future fs tool inherit
+ * the exact same security model.
  *
- * Enrichment: when a result file is `<canvasId>/nodes/<nodeId>.md`,
- * the response includes `canvasId`, `nodeId`, `label`, and `nodeType`
- * from that canvas's `canvas.json` so the LLM can chain straight into
- * `read` (for the rest of the file), `inspect_nodes` (for layout / style /
- * spatial relations),
- * or `canvas_commands` (for writes) without a second lookup. This is
- * the one place we deviate from pi: pi returns raw `path:line: text`,
- * we return JSON with optional canvas metadata.
+ * Enrichment: when a result file is `nodes/<nodeId>.md`, the response
+ * includes `nodeId`, `label`, and `nodeType` from the canvas's
+ * `canvas.json` so the LLM can chain straight into `read` (for the
+ * rest of the file), `inspect_nodes` (for layout / style / spatial
+ * relations), or `canvas_commands` (for writes) without a second
+ * lookup. This is the one place we deviate from pi: pi returns raw
+ * `path:line: text`, we return JSON with optional node metadata.
  *
  * Errors throw — pi-agent-core's executor catches and surfaces them
  * as `isError: true` tool results (see its `AgentTool.execute`
@@ -39,10 +38,10 @@ import {
 import {
   effectivePath,
   globToRegExp,
+  joinCanvasRel,
   makeNodeLookup,
   normalizeRel,
   safeResolve,
-  toWorkspaceRel,
   walk,
 } from './fs-sandbox.js';
 
@@ -55,19 +54,13 @@ import type { Static } from '@earendil-works/pi-ai';
 
 // ─── Argument types ─────────────────────────────────────────────────────────
 //
-// `currentCanvasId` is injected by the executor from the request
-// context; it is *not* part of the LLM-visible schema. It only
-// determines the implicit default search path.
+// `canvasId` is injected by the executor from the request context;
+// it is *not* part of the LLM-visible schema. It scopes every fs
+// operation to the current canvas folder.
 
-export type GrepArgs = Static<typeof grepParamsSchema> & {
-  currentCanvasId?: string;
-};
-export type FindArgs = Static<typeof findParamsSchema> & {
-  currentCanvasId?: string;
-};
-export type LsArgs = Static<typeof lsParamsSchema> & {
-  currentCanvasId?: string;
-};
+export type GrepArgs = Static<typeof grepParamsSchema> & { canvasId: string };
+export type FindArgs = Static<typeof findParamsSchema> & { canvasId: string };
+export type LsArgs = Static<typeof lsParamsSchema> & { canvasId: string };
 
 // ─── Tunables ───────────────────────────────────────────────────────────────
 
@@ -102,11 +95,9 @@ export async function handleGrep(args: GrepArgs): Promise<string> {
     limit,
   } = args;
 
-  const walkRootRel = normalizeRel(
-    effectivePath(searchPath, args.currentCanvasId),
-  );
+  const walkRootRel = normalizeRel(effectivePath(searchPath));
   // safeResolve throws on sandbox escape; let pi-agent-core wrap that.
-  const root = safeResolve(walkRootRel);
+  const root = safeResolve(args.canvasId, walkRootRel);
   if (!existsSync(root)) {
     throw new Error(`Path not found: ${walkRootRel}`);
   }
@@ -124,20 +115,20 @@ export async function handleGrep(args: GrepArgs): Promise<string> {
   const globRe = glob ? globToRegExp(glob) : null;
   const effectiveLimit = Math.max(1, limit ?? DEFAULT_GREP_LIMIT);
   const ctxN = Math.max(0, ctxLines ?? 0);
-  const lookup = makeNodeLookup();
+  const lookup = makeNodeLookup(args.canvasId);
 
-  // Enumerate candidate files, recording each as a workspace-relative
-  // path so enrichment can look up its canvasId.
-  const candidates: Array<{ workspaceRel: string; absPath: string }> = [];
+  // Enumerate candidate files, recording each as a canvas-relative
+  // path so enrichment can recognise node files.
+  const candidates: Array<{ canvasRel: string; absPath: string }> = [];
   const stat = statSync(root);
   if (stat.isFile()) {
-    candidates.push({ workspaceRel: walkRootRel, absPath: root });
+    candidates.push({ canvasRel: walkRootRel, absPath: root });
   } else {
     for (const e of walk(root)) {
       if (e.isDirectory) continue;
-      const workspaceRel = toWorkspaceRel(walkRootRel, e.relPath);
-      if (globRe && !globRe.test(workspaceRel)) continue;
-      candidates.push({ workspaceRel, absPath: e.absPath });
+      const canvasRel = joinCanvasRel(walkRootRel, e.relPath);
+      if (globRe && !globRe.test(canvasRel)) continue;
+      candidates.push({ canvasRel, absPath: e.absPath });
     }
   }
 
@@ -156,7 +147,7 @@ export async function handleGrep(args: GrepArgs): Promise<string> {
       const line = lines[i] ?? '';
       if (!regex.test(line)) continue;
       const match: Record<string, unknown> = {
-        path: ent.workspaceRel,
+        path: ent.canvasRel,
         line: i + 1,
         text: truncateLine(line),
       };
@@ -164,9 +155,8 @@ export async function handleGrep(args: GrepArgs): Promise<string> {
         match.before = lines.slice(Math.max(0, i - ctxN), i).map(truncateLine);
         match.after = lines.slice(i + 1, i + 1 + ctxN).map(truncateLine);
       }
-      const meta = lookup(ent.workspaceRel);
+      const meta = lookup(ent.canvasRel);
       if (meta) {
-        match.canvasId = meta.canvasId;
         match.nodeId = meta.nodeId;
         if (meta.nodeType !== undefined) match.nodeType = meta.nodeType;
         if (meta.label !== undefined) match.label = meta.label;
@@ -191,11 +181,9 @@ export async function handleGrep(args: GrepArgs): Promise<string> {
 export async function handleFind(args: FindArgs): Promise<string> {
   const { pattern, path: searchPath, limit } = args;
 
-  const walkRootRel = normalizeRel(
-    effectivePath(searchPath, args.currentCanvasId),
-  );
+  const walkRootRel = normalizeRel(effectivePath(searchPath));
   // safeResolve throws on sandbox escape; let pi-agent-core wrap that.
-  const root = safeResolve(walkRootRel);
+  const root = safeResolve(args.canvasId, walkRootRel);
   if (!existsSync(root)) {
     throw new Error(`Path not found: ${walkRootRel}`);
   }
@@ -211,22 +199,19 @@ export async function handleFind(args: FindArgs): Promise<string> {
   }
 
   const effectiveLimit = Math.max(1, limit ?? DEFAULT_FIND_LIMIT);
-  const lookup = makeNodeLookup();
+  const lookup = makeNodeLookup(args.canvasId);
 
   const results: Array<Record<string, unknown>> = [];
   let truncated = false;
   for (const e of walk(root)) {
     if (e.isDirectory) continue;
     // Match the glob against the path *as the walk surfaces it* so that
-    // user patterns like "nodes/*.md" still behave as expected even
-    // when path is set to "<canvasId>" — they expect to match relative
-    // to the search path, not the workspace.
+    // user patterns like "nodes/*.md" still behave as expected.
     if (!regex.test(e.relPath)) continue;
-    const workspaceRel = toWorkspaceRel(walkRootRel, e.relPath);
-    const entry: Record<string, unknown> = { path: workspaceRel };
-    const meta = lookup(workspaceRel);
+    const canvasRel = joinCanvasRel(walkRootRel, e.relPath);
+    const entry: Record<string, unknown> = { path: canvasRel };
+    const meta = lookup(canvasRel);
     if (meta) {
-      entry.canvasId = meta.canvasId;
       entry.nodeId = meta.nodeId;
       if (meta.nodeType !== undefined) entry.nodeType = meta.nodeType;
       if (meta.label !== undefined) entry.label = meta.label;
@@ -251,11 +236,9 @@ export async function handleFind(args: FindArgs): Promise<string> {
 export async function handleLs(args: LsArgs): Promise<string> {
   const { path: dirPath, limit } = args;
 
-  const walkRootRel = normalizeRel(
-    effectivePath(dirPath, args.currentCanvasId),
-  );
+  const walkRootRel = normalizeRel(effectivePath(dirPath));
   // safeResolve throws on sandbox escape; let pi-agent-core wrap that.
-  const root = safeResolve(walkRootRel);
+  const root = safeResolve(args.canvasId, walkRootRel);
   if (!existsSync(root)) {
     throw new Error(`Path not found: ${walkRootRel}`);
   }

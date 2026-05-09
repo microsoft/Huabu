@@ -781,7 +781,7 @@ const agentRoutes: FastifyPluginAsync = async (
 
     // Inject lightweight selected-node previews as a system message.
     // Full content is NOT included — the agent uses `read` on
-    // "<canvasId>/nodes/<nodeId>.md" on demand, saving potentially
+    // "nodes/<nodeId>.md" on demand, saving potentially
     // thousands of tokens per turn.
     if (
       canvasContext?.selectedNodes &&
@@ -803,7 +803,7 @@ const agentRoutes: FastifyPluginAsync = async (
         if (summaries && summaries.nodes.length > 0) {
           context.messages.push({
             role: 'user',
-            content: `[SYSTEM Context]\n[Selected Nodes (previews only — read "<canvasId>/nodes/<nodeId>.md" for full content, or inspect_nodes({ ids: [...] }) for layout / style / spatial relations)]\n${JSON.stringify(summaries.nodes, null, 2)}`,
+            content: `[SYSTEM Context]\n[Selected Nodes (previews only — read "nodes/<nodeId>.md" for full content, or inspect_nodes({ ids: [...] }) for layout / style / spatial relations)]\n${JSON.stringify(summaries.nodes, null, 2)}`,
             timestamp: Date.now(),
           });
         }

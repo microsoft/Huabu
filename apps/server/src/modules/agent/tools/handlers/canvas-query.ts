@@ -11,7 +11,7 @@
  * `data.style`, plus derived spatial / topological metadata).
  * Anything that round-trips through `nodes/<id>.md` (label, type, src,
  * content, summary, keywords) is owned by `read` — agents should call
- * `read("<canvasId>/nodes/<nodeId>.md")` for those.
+ * `read("nodes/<nodeId>.md")` for those.
  *
  * The actual computation (size normalization, absolute-position walk,
  * predicate filtering, distance / cluster / arrangement logic) lives

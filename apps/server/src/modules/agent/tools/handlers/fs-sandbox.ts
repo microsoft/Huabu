@@ -1,14 +1,17 @@
 /**
- * Shared sandbox + filesystem primitives for workspace-scoped tools.
+ * Shared sandbox + filesystem primitives for canvas-scoped tools.
  *
  * Every tool that touches disk (`grep`, `find`, `ls`, `read`, future
  * `write`/`edit`) routes through these helpers so the security model
  * is defined exactly once:
  *
  *  - `safeResolve` is the only place that maps a user-supplied
- *    relative path to an absolute path. Any escape attempt throws.
+ *    relative path to an absolute path. It always resolves under the
+ *    **current canvas folder** (`<workspace>/<canvasId>/`). Any escape
+ *    attempt throws — the agent cannot read or list anything outside
+ *    the active canvas.
  *  - `walk` is the only directory traversal. It skips symlinks so an
- *    attacker cannot point a symlink outside the workspace.
+ *    attacker cannot point a symlink outside the sandbox.
  *  - `ALWAYS_SKIP` is a single source of truth for "directories the
  *    agent should never see" (`.history`, `.git`, `node_modules`).
  *
@@ -16,9 +19,8 @@
  * and every tool inherits it automatically.
  *
  * The file also owns the small glob dialect (`globToRegExp`) and the
- * canvas-aware path conventions (`WORKSPACE_NODE_RE`,
- * `toWorkspaceRel`, `makeNodeLookup`) since both `grep`/`find` and
- * `read` need to recognise node files.
+ * canvas-aware path conventions (`CANVAS_NODE_RE`, `makeNodeLookup`)
+ * since both `grep`/`find` and `read` need to recognise node files.
  */
 
 import { readdirSync, type Dirent } from 'node:fs';
@@ -39,44 +41,50 @@ export const ALWAYS_SKIP: ReadonlySet<string> = new Set([
 // ─── Path defaulting ────────────────────────────────────────────────────────
 
 /**
- * Choose the effective relative path. When the caller omits `path`,
- * default to the current canvas folder (so a bare grep/find/ls stays
- * scoped to the active canvas). When neither is available, default to
- * the workspace root.
+ * Choose the effective canvas-relative path. When the caller omits
+ * `path`, default to the canvas root (".") so a bare grep/find/ls
+ * walks the whole canvas folder.
  */
-export function effectivePath(
-  userPath: string | undefined,
-  currentCanvasId: string | undefined,
-): string {
+export function effectivePath(userPath: string | undefined): string {
   if (userPath !== undefined && userPath.length > 0) return userPath;
-  if (currentCanvasId) return currentCanvasId;
   return '.';
 }
 
 // ─── Sandbox resolution ─────────────────────────────────────────────────────
 
 /**
- * Resolve a user-supplied path against the workspace root, refusing
- * any value that escapes the sandbox. Returns an absolute path that
- * lives under the workspace root.
+ * Resolve a user-supplied path against the current canvas folder,
+ * refusing any value that escapes the sandbox. Returns an absolute
+ * path that lives under `<workspace>/<canvasId>/`.
  *
- * The check is intentionally a strict prefix match on
- * `root + path.sep` so that a path that happens to *start with the
- * workspace name* (e.g. a sibling `huabu-evil/` next to `huabu/`)
- * cannot be accepted.
+ * The check is intentionally a strict prefix match on `root + path.sep`
+ * so that a path that happens to *start with the canvas folder name*
+ * (e.g. a sibling `huabu-evil/` next to `huabu/`) cannot be accepted.
+ *
+ * `canvasId` itself is also validated to prevent traversal via the
+ * canvas id (e.g. `..`, `foo/bar`).
  */
-export function safeResolve(rel: string): string {
-  const root = getWorkspacePath();
+export function safeResolve(canvasId: string, rel: string): string {
+  if (
+    !canvasId ||
+    canvasId.includes('/') ||
+    canvasId.includes('\\') ||
+    canvasId === '.' ||
+    canvasId === '..'
+  ) {
+    throw new Error(`Invalid canvasId: ${canvasId}`);
+  }
+  const root = path.join(getWorkspacePath(), canvasId);
   const target = path.resolve(root, rel);
   if (target !== root && !target.startsWith(root + path.sep)) {
     throw new Error(
-      `Path "${rel}" escapes the workspace root and is not allowed.`,
+      `Path "${rel}" escapes the canvas root and is not allowed.`,
     );
   }
   return target;
 }
 
-/** Normalise a workspace-relative path to forward slashes. */
+/** Normalise a relative path to forward slashes. */
 export function normalizeRel(rel: string): string {
   return rel.split(path.sep).join('/');
 }
@@ -179,58 +187,48 @@ export function* walk(rootAbs: string): Generator<WalkEntry> {
   }
 }
 
-// ─── Workspace-relative path conventions ────────────────────────────────────
+// ─── Canvas-relative path conventions ──────────────────────────────────────
 
 /**
- * Match `<workspace-relative-path>` of the form
- *   "<canvasId>/nodes/<nodeId>.md"
- * The `<canvasId>` segment is whatever came in from disk; the executor
- * only ever opens canvases that live directly under the workspace root.
+ * Match a canvas-relative path of the form
+ *   "nodes/<nodeId>.md"
+ * Used to recognise node files within the active canvas.
  */
-export const WORKSPACE_NODE_RE = /^([^/]+)\/nodes\/(node-[^/]+)\.md$/;
+export const CANVAS_NODE_RE = /^nodes\/(node-[^/]+)\.md$/;
 
 /**
- * Reconstruct a relative path *as the LLM should see it* given the
- * walk root and a path relative to that walk root. The LLM's mental
- * model is "paths are relative to the workspace root", so we always
- * report the workspace-relative form, regardless of which subtree the
- * walk started in.
+ * Compose a canvas-relative path from the walk root (canvas-relative)
+ * and a path relative to that walk root.
  */
-export function toWorkspaceRel(
-  walkRootRelToWorkspace: string,
+export function joinCanvasRel(
+  walkRootCanvasRel: string,
   walkRel: string,
 ): string {
-  if (!walkRel) return walkRootRelToWorkspace;
-  if (!walkRootRelToWorkspace || walkRootRelToWorkspace === '.') return walkRel;
-  return `${walkRootRelToWorkspace}/${walkRel}`;
+  if (!walkRel) return walkRootCanvasRel;
+  if (!walkRootCanvasRel || walkRootCanvasRel === '.') return walkRel;
+  return `${walkRootCanvasRel}/${walkRel}`;
 }
 
 // ─── Node enrichment ────────────────────────────────────────────────────────
 
 export interface NodeMeta {
-  canvasId: string;
   nodeId: string;
   nodeType: string | undefined;
   label: string | undefined;
 }
 
 /**
- * Per-call cache of `<canvasId> → Map<nodeId, NodeMeta>`. Lazily
- * populated the first time we see a node file from a given canvas, so
- * a single grep/find never reads `canvas.json` more than once per
- * canvas.
- *
- * Returned closure: given a workspace-relative path, return its
- * NodeMeta if the path matches `<canvasId>/nodes/<nodeId>.md` AND the
- * node exists in that canvas's `canvas.json`. Otherwise `null`.
+ * Lazy single-canvas node lookup. Reads `canvas.json` at most once,
+ * returning a closure that maps a canvas-relative path to its
+ * `NodeMeta` if it matches `nodes/<nodeId>.md` AND that node exists.
+ * Returns `null` otherwise.
  */
-export function makeNodeLookup(): (
-  workspaceRelPath: string,
-) => NodeMeta | null {
-  const caches = new Map<string, Map<string, NodeMeta>>();
-  const ensure = (canvasId: string): Map<string, NodeMeta> => {
-    const cached = caches.get(canvasId);
-    if (cached) return cached;
+export function makeNodeLookup(
+  canvasId: string,
+): (canvasRelPath: string) => NodeMeta | null {
+  let cache: Map<string, NodeMeta> | null = null;
+  const ensure = (): Map<string, NodeMeta> => {
+    if (cache) return cache;
     const built = new Map<string, NodeMeta>();
     let file;
     try {
@@ -246,15 +244,15 @@ export function makeNodeLookup(): (
         const data = n.data as Record<string, unknown> | undefined;
         const nodeType = (n.type ?? data?.type) as string | undefined;
         const label = typeof data?.label === 'string' ? data.label : undefined;
-        built.set(id, { canvasId, nodeId: id, nodeType, label });
+        built.set(id, { nodeId: id, nodeType, label });
       }
     }
-    caches.set(canvasId, built);
+    cache = built;
     return built;
   };
-  return (workspaceRelPath) => {
-    const m = workspaceRelPath.match(WORKSPACE_NODE_RE);
-    if (!m || !m[1] || !m[2]) return null;
-    return ensure(m[1]).get(m[2]) ?? null;
+  return (canvasRelPath) => {
+    const m = canvasRelPath.match(CANVAS_NODE_RE);
+    if (!m || !m[1]) return null;
+    return ensure().get(m[1]) ?? null;
   };
 }

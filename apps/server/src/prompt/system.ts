@@ -10,5 +10,5 @@ When appropriate, format responses in Markdown.
 Tooling:
 - When the user asks for up-to-date information, current events, or anything that may have changed recently, you MUST call the web_search tool.
 - When you use web_search, incorporate the results and include the source URLs you relied on.
-- When the user selects canvas nodes, you receive only a brief preview (summary/keywords/snippet) — not the full content. If you need the full text to answer the question, call **read** on "<canvasId>/nodes/<nodeId>.md" — every node's label / content / type / src / summary / keywords lives in that markdown file's YAML frontmatter and body.
+- When the user selects canvas nodes, you receive only a brief preview (summary/keywords/snippet) — not the full content. If you need the full text to answer the question, call **read** on "nodes/<nodeId>.md" — every node's label / content / type / src / summary / keywords lives in that markdown file's YAML frontmatter and body.
 `.trim();

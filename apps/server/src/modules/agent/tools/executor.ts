@@ -3,8 +3,9 @@
  *
  * Each tool's body lives in its own `handlers/<name>.ts` file. This
  * module's job is just:
- *  1. Resolve the implicit `canvasId` (request context fallback) for
- *     canvas-aware tools.
+ *  1. Inject the request-scoped `canvasId` so every canvas-aware
+ *     tool runs against the active canvas. The LLM never sees a
+ *     `canvasId` argument — cross-canvas access is not exposed.
  *  2. Dispatch the call to the matching handler.
  *  3. Return a string result that pi-agent-core wraps into a
  *     `toolResult` content block.
@@ -58,27 +59,23 @@ import { handleWebSearch, type WebSearchArgs } from './handlers/web-search.js';
  * @param name    Tool name (matches `ToolDefinition.name`).
  * @param args    Validated tool arguments — already passed pi-ai's
  *                schema check by the time this runs.
- * @param context Per-request context; today only `canvasId` (used as
- *                the implicit fallback when the LLM omits it).
+ * @param context Per-request context; today only `canvasId` (always
+ *                injected into canvas-aware handlers).
  */
 export async function executeTool(
   name: string,
   args: Record<string, unknown>,
   context?: { canvasId?: string },
 ): Promise<string> {
-  const resolveCanvasArgs = <T extends Record<string, unknown>>(
-    value: T,
-    toolName: string,
-  ): T & { canvasId: string } => {
-    const canvasId =
-      typeof value.canvasId === 'string' && value.canvasId.trim().length > 0
-        ? value.canvasId
-        : context?.canvasId;
+  const requireCanvasId = (toolName: string): string => {
+    const canvasId = context?.canvasId;
     if (!canvasId) {
       throw new Error(`canvasId is required for ${toolName}`);
     }
-    return { ...value, canvasId };
+    return canvasId;
   };
+  const withCanvasId = <T>(value: Record<string, unknown>, toolName: string) =>
+    ({ ...value, canvasId: requireCanvasId(toolName) }) as unknown as T;
 
   switch (name) {
     case 'web_search':
@@ -86,50 +83,34 @@ export async function executeTool(
 
     case 'get_canvas_outline':
       return handleGetCanvasOutline(
-        resolveCanvasArgs(args, 'get_canvas_outline') as GetCanvasOutlineArgs,
+        withCanvasId<GetCanvasOutlineArgs>(args, 'get_canvas_outline'),
       );
 
     case 'inspect_nodes':
       return handleInspectNodes(
-        resolveCanvasArgs(args, 'inspect_nodes') as InspectNodesArgs,
+        withCanvasId<InspectNodesArgs>(args, 'inspect_nodes'),
       );
 
-    case 'grep': {
-      // grep/find/ls/read do *not* take canvasId from the schema.
-      // They use the workspace as their cwd. grep/find/ls fall back
-      // to the request-scoped canvas folder when `path` is omitted;
-      // read requires an explicit `path`.
-      return handleGrep({
-        ...(args as Omit<GrepArgs, 'currentCanvasId'>),
-        currentCanvasId: context?.canvasId,
-      });
-    }
+    case 'grep':
+      return handleGrep(withCanvasId<GrepArgs>(args, 'grep'));
 
-    case 'find': {
-      return handleFind({
-        ...(args as Omit<FindArgs, 'currentCanvasId'>),
-        currentCanvasId: context?.canvasId,
-      });
-    }
+    case 'find':
+      return handleFind(withCanvasId<FindArgs>(args, 'find'));
 
-    case 'ls': {
-      return handleLs({
-        ...(args as Omit<LsArgs, 'currentCanvasId'>),
-        currentCanvasId: context?.canvasId,
-      });
-    }
+    case 'ls':
+      return handleLs(withCanvasId<LsArgs>(args, 'ls'));
 
     case 'read':
-      return handleRead(args as ReadArgs);
+      return handleRead(withCanvasId<ReadArgs>(args, 'read'));
 
     case 'canvas_commands':
       return handleCanvasCommands(
-        resolveCanvasArgs(args, 'canvas_commands') as CanvasCommandsArgs,
+        withCanvasId<CanvasCommandsArgs>(args, 'canvas_commands'),
       );
 
     case 'ingest_content':
       return handleIngestContent(
-        resolveCanvasArgs(args, 'ingest_content') as IngestContentArgs,
+        withCanvasId<IngestContentArgs>(args, 'ingest_content'),
       );
 
     case 'use_skill':

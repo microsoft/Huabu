@@ -1,12 +1,12 @@
 /**
- * Read tool — return the contents of a single file under the workspace.
+ * Read tool — return the contents of a single file under the current canvas.
  *
  * File-level primitive (pi/Claude-Code style). Path is resolved against
- * the workspace root via the shared sandbox, so it can address any file
- * the agent has access to:
- *   - "<canvasId>/canvas.json"
- *   - "<canvasId>/nodes/<nodeId>.md"
- *   - sources, artifacts, memory, etc.
+ * the **current canvas folder** via the shared sandbox, so it can
+ * address any file the agent has access to within that canvas:
+ *   - "canvas.json"
+ *   - "nodes/<nodeId>.md"
+ *   - artifacts, memory, etc.
  *
  * Output is a JSON envelope with the same truncation budget as pi:
  * 2000 lines / 50 KB, whichever fires first; `nextOffset` lets the
@@ -37,8 +37,12 @@ import type { readParamsSchema } from '../definitions.js';
 import type { Static } from '@earendil-works/pi-ai';
 
 // ─── Argument types ─────────────────────────────────────────────────────────
+//
+// `canvasId` is injected by the executor from the request context;
+// it is *not* part of the LLM-visible schema. It scopes every read
+// to the current canvas folder.
 
-export type ReadArgs = Static<typeof readParamsSchema>;
+export type ReadArgs = Static<typeof readParamsSchema> & { canvasId: string };
 
 // ─── Tunables (mirror pi-coding-agent) ──────────────────────────────────────
 
@@ -55,9 +59,9 @@ export async function handleRead(args: ReadArgs): Promise<string> {
   }
   const rel = normalizeRel(requested);
 
-  // safeResolve throws when the path escapes the workspace sandbox; let
+  // safeResolve throws when the path escapes the canvas sandbox; let
   // pi-agent-core wrap that as an isError tool result.
-  const abs = safeResolve(rel);
+  const abs = safeResolve(args.canvasId, rel);
 
   // Stat first so we can give a better error than ENOENT spam.
   let stat;
@@ -88,7 +92,7 @@ export async function handleRead(args: ReadArgs): Promise<string> {
   const head = buf.subarray(0, Math.min(1024, buf.length));
   if (head.includes(0)) {
     throw new Error(
-      `"${rel}" appears to be a binary file. The read tool only handles text. Image / pdf / video nodes store their bytes under <canvasId>/artifacts/ \u2014 use the canvas UI to view them; the agent only sees their src URL via the node markdown frontmatter.`,
+      `"${rel}" appears to be a binary file. The read tool only handles text. Image / pdf / video nodes store their bytes under artifacts/ — use the canvas UI to view them; the agent only sees their src URL via the node markdown frontmatter.`,
     );
   }
 

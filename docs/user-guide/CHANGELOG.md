@@ -4,6 +4,23 @@
 
 ---
 
+## 2026-05-10 · Agent 工具改为画布隔离（移除跨画布访问）
+
+**What Changed**
+
+- 所有 agent 工具的运行范围从「整个 workspace」收紧到「当前画布」。`canvas_commands`、`get_canvas_outline`、`inspect_nodes`、`ingest_content` 不再接受 `canvasId` 参数；文件类工具 `read` / `grep` / `find` / `ls` 的 `path` 改为相对当前画布根目录，无法寻址其他画布。
+- 节点文件路径从 `<canvasId>/nodes/<nodeId>.md` 简化为 `nodes/<nodeId>.md`；`canvas.json`、`memory/*.md`、`artifacts/*` 等同理。
+- 沙箱层 `safeResolve(canvasId, path)` 现在以画布目录为根做严格前缀校验，并校验 `canvasId` 本身不能含 `/` `\` `..` 等穿越字符。
+- 所有 prompt、agent route 注入的「Selected Nodes」上下文消息、annotation intent 用户消息中的示例路径都同步更新。
+
+**Notes**
+
+- 用户感知：解决了模型把字面量 `<canvasId>/...` 当作真实路径来调用的偶发故障；agent 调用 `read`/`grep` 类工具更稳定。
+- 跨画布读写能力**完全移除**——如果未来需要让 agent 跨画布工作，需要重新引入显式的 canvas 切换或聚合工具。
+- Wire 改动：`grep` / `find` 返回的命中 enrichment 不再包含 `canvasId` 字段（改为隐式 = 当前画布），仅保留 `nodeId` / `label` / `nodeType`。目前没有 web 端消费这些字段，安全。
+
+---
+
 ## 2026-05-09 · Agent 工具描述清晰度修复 + 错误协议对齐 pi-agent-core
 
 **What Changed**
