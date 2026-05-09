@@ -17,9 +17,10 @@
  * Enrichment: when a result file is `<canvasId>/nodes/<nodeId>.md`,
  * the response includes `canvasId`, `nodeId`, `label`, and `nodeType`
  * from that canvas's `canvas.json` so the LLM can chain straight into
- * `get_node_detail` / `canvas_commands` without a second lookup. This
- * is the one place we deviate from pi: pi returns raw
- * `path:line: text`, we return JSON with optional canvas metadata.
+ * `read` (for the rest of the file), `get_node_geometry` (for layout),
+ * or `canvas_commands` (for writes) without a second lookup. This is
+ * the one place we deviate from pi: pi returns raw `path:line: text`,
+ * we return JSON with optional canvas metadata.
  */
 
 import {

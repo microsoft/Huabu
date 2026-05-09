@@ -26,9 +26,9 @@ import {
 } from './handlers/canvas-fs.js';
 import {
   handleGetCanvasState,
-  handleGetNodeDetail,
+  handleGetNodeGeometry,
   type GetCanvasStateArgs,
-  type GetNodeDetailArgs,
+  type GetNodeGeometryArgs,
 } from './handlers/canvas-read.js';
 import {
   handleCanvasCommands,
@@ -71,14 +71,14 @@ export async function executeTool(
     case 'web_search':
       return handleWebSearch(args as WebSearchArgs);
 
-    case 'get_node_detail': {
+    case 'get_node_geometry': {
       const resolvedArgs = resolveCanvasArgs(args);
       if (!resolvedArgs) {
         return JSON.stringify({
-          error: 'canvasId is required for get_node_detail',
+          error: 'canvasId is required for get_node_geometry',
         });
       }
-      return handleGetNodeDetail(resolvedArgs as GetNodeDetailArgs);
+      return handleGetNodeGeometry(resolvedArgs as GetNodeGeometryArgs);
     }
 
     case 'get_canvas_state': {

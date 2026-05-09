@@ -2,8 +2,8 @@
  * Synthesize a ChatMessage[] timeline for an annotation cluster.
  *
  * Annotation recognition runs as a single server-side vision-LLM call (with
- * on-demand `get_node_detail` tool access), so there is no real chat thread
- * to replay. Instead we fake one by emitting:
+ * on-demand `read` + `get_node_geometry` tool access), so there is no real
+ * chat thread to replay. Instead we fake one by emitting:
  *
  *  1. A user message describing the gesture (stroke count + ID context).
  *  2. An assistant message with the LLM's reasoning.

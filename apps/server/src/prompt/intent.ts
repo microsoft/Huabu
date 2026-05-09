@@ -36,9 +36,11 @@ Sorted by confidence descending.`;
  *      nearby / enclosed nodes and nearby edges
  *
  * It must FIRST reason about user intent (using the screenshot as the
- * primary signal — the IDs are just pointers), call `get_node_detail`
- * for any nodes whose content matters to the decision, THEN emit a
- * single JSON object containing the executable canvas commands.
+ * primary signal — the IDs are just pointers), call `read` on
+ * "<canvasId>/nodes/<nodeId>.md" for any nodes whose content matters to
+ * the decision (and `get_node_geometry` for any whose layout matters),
+ * THEN emit a single JSON object containing the executable canvas
+ * commands.
  */
 export const ANNOTATION_INTENT_SYSTEM_PROMPT = `You convert freehand canvas annotations into executable canvas commands.
 
@@ -50,16 +52,24 @@ You will receive:
    - Lists of canvas edge IDs near the gesture
    IMPORTANT: This payload contains NO labels, NO positions, NO distances,
    NO shape inference. The IDs are just pointers — use the screenshot to
-   understand the gesture, and call \`get_node_detail\` whenever you need
-   to know what a referenced node actually contains.
+   understand the gesture, and call \`read\` on
+   "<canvasId>/nodes/<nodeId>.md" whenever you need to know what a
+   referenced node actually contains, or \`get_node_geometry\` when you
+   need its position / size / parent / style.
 
 ## Tools
 
-- \`get_node_detail({ nodeId })\` — fetch a node's label / content / metadata.
+- \`read({ path })\` — fetch a node's title / content / type / src /
+  summary / keywords by reading "<canvasId>/nodes/<nodeId>.md". The
+  response includes both the raw markdown body and a parsed
+  \`frontmatter\` object so you don't have to parse YAML yourself.
   Call this for any node whose content materially affects your decision
   (e.g. before merging two notes, before deciding whether a circle should
   become a frame). Do NOT call it for every nearby node — only the ones
   you actually need.
+- \`get_node_geometry({ nodeId })\` — fetch a node's position, width,
+  height, parentId, and style. Call this only if your decision depends
+  on layout (e.g. "is this node already inside that frame?").
 
 You may call tools across multiple iterations before giving your final answer.
 
@@ -107,7 +117,7 @@ Common patterns (not exhaustive, not deterministic rules):
 - Cross / X / scribble OVER an edge (and not over any node) →
   DISCONNECT_EDGES that edge ID (use the nearby edges list)
 - "?" near a node → CREATE_QUESTION about that node (call
-  \`get_node_detail\` first to phrase a sensible question)
+  \`read\` on its node markdown first to phrase a sensible question)
 - "!" / star / underline marking a single node → MERGE_NODE_DATA with a
   highlight patch, OR CREATE a sibling note expanding on the topic
 - Empty / ambiguous gesture far from any node or edge → return

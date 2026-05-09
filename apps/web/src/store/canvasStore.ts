@@ -703,8 +703,9 @@ const useCanvasStore = create<RFState>()(
 
       /**
        * Build a SelectedNodeDetail for a single node.
-       * Only sends lightweight metadata — the agent uses get_node_detail
-       * to fetch full content on demand, saving tokens.
+       * Only sends lightweight metadata — the agent uses `read` on
+       * "<canvasId>/nodes/<nodeId>.md" to fetch full content on demand,
+       * saving tokens.
        * Image nodes keep `src` so the server can build vision attachments.
        * For frame nodes, recursively include direct children as `children` details
        */

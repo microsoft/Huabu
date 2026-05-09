@@ -5,7 +5,8 @@
  *   1. clusterAnnotations — group strokes into spatial clusters
  *   2. extractAnnotationContext — collect IDs of nearby/enclosed nodes + edges
  *   3. recognizeAnnotationCommands (server) — vision LLM with on-demand
- *      `get_node_detail` tool access produces the canvas command batch
+ *      `read` (for node content) and `get_node_geometry` (for node layout)
+ *      tool access produces the canvas command batch
  *
  * The previous rule-based shape classifier and dispatch layer have been
  * removed: the LLM now decides the intent purely from the screenshot plus

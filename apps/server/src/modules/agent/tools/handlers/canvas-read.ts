@@ -1,10 +1,17 @@
 /**
  * Canvas read-only tool handlers.
  *
- * Today: `get_node_detail`, `get_canvas_state`. Future read tools
+ * Today: `get_node_geometry`, `get_canvas_state`. Future read tools
  * (`get_canvas_outline`, `get_node_neighbors`, `search_nodes`, etc.)
  * land here too — anything the agent calls to *understand* the canvas
  * without mutating it.
+ *
+ * Split with the filesystem `read` tool: `get_node_geometry` returns
+ * only fields that live in `canvas.json` and are NOT in the node's
+ * markdown frontmatter (position, size, parent, z-order rank, style).
+ * Anything that round-trips through `nodes/<id>.md` (title/label, type,
+ * src, content, summary, keywords) is owned by `read` — agents should
+ * call `read("<canvasId>/nodes/<nodeId>.md")` for those.
  */
 
 import { getCanvasStore } from '../../../storage/index.js';
@@ -12,7 +19,7 @@ import { buildNodeSummaries } from '../../canvas-context.js';
 
 import type {
   getCanvasStateParamsSchema,
-  getNodeDetailParamsSchema,
+  getNodeGeometryParamsSchema,
 } from '../definitions.js';
 import type { Static } from '@earendil-works/pi-ai';
 
@@ -23,15 +30,15 @@ import type { Static } from '@earendil-works/pi-ai';
 // dispatcher's `resolveCanvasArgs` step, so we intersect a required
 // `canvasId` and skip a redundant nullish check inside the body.
 
-export type GetNodeDetailArgs = Static<typeof getNodeDetailParamsSchema> & {
+export type GetNodeGeometryArgs = Static<typeof getNodeGeometryParamsSchema> & {
   canvasId: string;
 };
 export type GetCanvasStateArgs = Static<typeof getCanvasStateParamsSchema> & {
   canvasId: string;
 };
 
-export async function handleGetNodeDetail(
-  args: GetNodeDetailArgs,
+export async function handleGetNodeGeometry(
+  args: GetNodeGeometryArgs,
 ): Promise<string> {
   const store = getCanvasStore(args.canvasId);
   const canvas = store.read();
@@ -47,36 +54,21 @@ export async function handleGetNodeDetail(
     });
   }
 
+  // `style` lives on `data.style` in canvas.json. We surface it here
+  // because no other tool can reach it: it never round-trips through
+  // the node markdown frontmatter (which carries content-shaped fields
+  // like title/type/src/summary). Other `data.*` keys are intentionally
+  // dropped — they belong to the `read` tool's frontmatter view.
   const data = node.data as Record<string, unknown> | undefined;
-  const nodeContent = store.readNode(args.nodeId);
-  const persistedContent = nodeContent?.content;
-  const inlineContent = data?.content as string | undefined;
-  // Prefer persisted markdown, but if it is missing OR an empty string
-  // fall back to whatever inline content the canvas JSON still has.
-  // Plain `??` would treat "" as a valid value and skip the fallback.
-  const content =
-    persistedContent && persistedContent.length > 0
-      ? persistedContent
-      : (inlineContent ?? persistedContent ?? '');
-
-  const nodeType = (node.type ?? data?.type) as string | undefined;
-  const isTextBearing = nodeType === 'note' || nodeType === 'text';
-  const warning =
-    isTextBearing && content.length === 0
-      ? 'No persisted content found for this node.'
-      : undefined;
+  const style = data && typeof data === 'object' ? data.style : undefined;
 
   return JSON.stringify({
     id: node.id,
-    type: nodeType,
-    label: data?.label,
-    content,
-    src: data?.src ?? nodeContent?.src ?? undefined,
     position: node.position,
     width: node.width,
     height: node.height,
     parentId: node.parentId,
-    ...(warning ? { warning } : {}),
+    ...(style !== undefined ? { style } : {}),
   });
 }
 

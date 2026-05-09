@@ -780,8 +780,9 @@ const agentRoutes: FastifyPluginAsync = async (
     let userContent = await buildUserContent(content, allAttachments);
 
     // Inject lightweight selected-node previews as a system message.
-    // Full content is NOT included — the agent uses get_node_detail on
-    // demand, saving potentially thousands of tokens.
+    // Full content is NOT included — the agent uses `read` on
+    // "<canvasId>/nodes/<nodeId>.md" on demand, saving potentially
+    // thousands of tokens per turn.
     if (
       canvasContext?.selectedNodes &&
       canvasContext.selectedNodes.length > 0 &&
@@ -802,7 +803,7 @@ const agentRoutes: FastifyPluginAsync = async (
         if (summaries && summaries.nodes.length > 0) {
           context.messages.push({
             role: 'user',
-            content: `[SYSTEM Context]\n[Selected Nodes (previews only — use get_node_detail for full content)]\n${JSON.stringify(summaries.nodes, null, 2)}`,
+            content: `[SYSTEM Context]\n[Selected Nodes (previews only — read "<canvasId>/nodes/<nodeId>.md" for full content, or get_node_geometry for layout)]\n${JSON.stringify(summaries.nodes, null, 2)}`,
             timestamp: Date.now(),
           });
         }

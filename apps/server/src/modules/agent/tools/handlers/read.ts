@@ -1,15 +1,33 @@
 /**
  * Read tool — return the contents of a single file under the workspace.
  *
+ * File-level primitive (pi/Claude-Code style). Path is resolved against
+ * the workspace root via the shared sandbox, so it can address any file
+ * the agent has access to:
+ *   - "<canvasId>/canvas.json"
+ *   - "<canvasId>/nodes/<nodeId>.md"
+ *   - sources, artifacts, memory, etc.
  *
- * Why no node-meta enrichment here: `read` is a *file* primitive. If
- * the model wants the node's label / position / src it should call
- * `get_node_detail`. Keeping `read` pure preserves composability.
+ * Output is a JSON envelope with the same truncation budget as pi:
+ * 2000 lines / 50 KB, whichever fires first; `nextOffset` lets the
+ * agent page through long files.
+ *
+ * Frontmatter convenience: if the file starts with a YAML frontmatter
+ * block ("---" fences), the parsed object is attached as `frontmatter`
+ * so the LLM doesn't have to parse YAML itself (which it does badly).
+ * The raw `content` field is unchanged — the file is reproduced
+ * verbatim, including the fences. `frontmatter` is purely additive.
+ *
+ * Note vs `get_node_geometry`: read owns everything that lives in the
+ * node markdown frontmatter (title, type, src, summary, keywords, ...).
+ * Position / size / parent / style live in `canvas.json` and are owned
+ * by `get_node_geometry` — see that handler for the boundary.
  */
 
 import { readFileSync, statSync } from 'node:fs';
 
 import { normalizeRel, safeResolve } from './sandbox.js';
+import { parseFrontmatter } from '../../../storage/frontmatter.js';
 
 import type { readParamsSchema } from '../definitions.js';
 import type { Static } from '@earendil-works/pi-ai';
@@ -71,11 +89,26 @@ export async function handleRead(args: ReadArgs): Promise<string> {
   const head = buf.subarray(0, Math.min(1024, buf.length));
   if (head.includes(0)) {
     return JSON.stringify({
-      error: `"${rel}" appears to be a binary file. The read tool only handles text. For node images, use get_node_detail and inspect the src field.`,
+      error: `"${rel}" appears to be a binary file. The read tool only handles text. Image / pdf / video nodes store their bytes under <canvasId>/artifacts/ \u2014 use the canvas UI to view them; the agent only sees their src URL via the node markdown frontmatter.`,
     });
   }
 
   const text = buf.toString('utf8');
+
+  // Parse frontmatter from the whole file (not the slice) so the structured
+  // metadata is surfaced even when the agent pages through the body. The
+  // raw fence block is still present in `content` when the slice covers
+  // the file head \u2014 we don't strip it, so the file remains reproduced
+  // verbatim. Empty `meta` (no fences, or unparseable YAML) means "not a
+  // frontmatter file" and we omit the field entirely.
+  let frontmatter: Record<string, unknown> | undefined;
+  if (text.startsWith('---')) {
+    const parsed = parseFrontmatter(text);
+    if (parsed.meta && Object.keys(parsed.meta).length > 0) {
+      frontmatter = parsed.meta;
+    }
+  }
+
   const allLines = text.split('\n');
   const totalLines = allLines.length;
 
@@ -136,6 +169,7 @@ export async function handleRead(args: ReadArgs): Promise<string> {
     totalLines,
     truncated,
     ...(nextOffset !== undefined ? { nextOffset } : {}),
+    ...(frontmatter !== undefined ? { frontmatter } : {}),
     content,
   });
 }

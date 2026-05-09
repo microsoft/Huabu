@@ -63,17 +63,16 @@ export const webSearchTool: ToolDefinition = {
 
 // ==================== Canvas Read-Only Tools ====================
 
-export const getNodeDetailParamsSchema = Type.Object({
-  nodeId: Type.String({ description: 'The ID of the canvas node to read' }),
+export const getNodeGeometryParamsSchema = Type.Object({
+  nodeId: Type.String({ description: 'The ID of the canvas node' }),
   ...OptionalCanvasIdField,
 });
 
-export const getNodeDetailTool: ToolDefinition = {
-  name: 'get_node_detail',
-  label: 'Get Node Detail',
-  description:
-    'Get the full content and metadata of a specific canvas node by its ID.',
-  parameters: getNodeDetailParamsSchema,
+export const getNodeGeometryTool: ToolDefinition = {
+  name: 'get_node_geometry',
+  label: 'Get Node Geometry',
+  description: `Get a node's canvas-only attributes: position, width, height, parentId, and style (accent / backgroundColor / text styling). Use this when you need where a node *is* on the canvas, how big it is, what frame contains it, or its visual styling. For a node's textual attributes (title, content, type, src, summary, keywords) call read on "<canvasId>/nodes/<nodeId>.md" — those fields live in the node's markdown frontmatter, not here.`,
+  parameters: getNodeGeometryParamsSchema,
 };
 
 export const getCanvasStateParamsSchema = Type.Object({
@@ -184,7 +183,7 @@ export const readParamsSchema = Type.Object({
 export const readTool: ToolDefinition = {
   name: 'read',
   label: 'Read',
-  description: `Read the contents of a single text file under the workspace root. Returns JSON: { path, startLine, endLine, totalLines, truncated, nextOffset?, content }. Output is truncated to 2000 lines or 50 KB, whichever is hit first; when truncated, "nextOffset" tells you the offset to use to continue. Binary files (images, archives) are rejected with an error — for node images use get_node_detail and inspect the "src" field. The read tool returns raw file contents only; for node metadata (label, position, parent) chain into get_node_detail.`,
+  description: `Read the contents of a single text file under the workspace root. Returns JSON: { path, startLine, endLine, totalLines, truncated, nextOffset?, content, frontmatter? }. When the file begins with a YAML frontmatter block ("---" fences), the parsed frontmatter is also returned as a structured object so you don't have to parse YAML yourself. Output is truncated to 2000 lines or 50 KB, whichever is hit first; when truncated, "nextOffset" tells you the offset to use to continue. Binary files (images, archives) are rejected with an error. For a node's textual attributes (title, content, type, src, summary, keywords) read "<canvasId>/nodes/<nodeId>.md" — they all live here. For a node's canvas placement (position, size, parent, style) call get_node_geometry instead; those fields live in canvas.json.`,
   parameters: readParamsSchema,
 };
 
@@ -230,7 +229,7 @@ export const grepParamsSchema = Type.Object({
 export const grepTool: ToolDefinition = {
   name: 'grep',
   label: 'Grep',
-  description: `Search file contents for a pattern. Paths are relative to the workspace root; when omitted, search defaults to the current canvas folder. Returns JSON with matching paths, line numbers, and matched text. Skips .history/, .git/, and node_modules/. When a match is in <canvasId>/nodes/<nodeId>.md, the result also includes canvasId, nodeId, label, and nodeType — chain straight into get_node_detail or canvas_commands without a second lookup. Output is capped at 100 matches by default.`,
+  description: `Search file contents for a pattern. Paths are relative to the workspace root; when omitted, search defaults to the current canvas folder. Returns JSON with matching paths, line numbers, and matched text. Skips .history/, .git/, and node_modules/. When a match is in <canvasId>/nodes/<nodeId>.md, the result also includes canvasId, nodeId, label, and nodeType — chain straight into read (for the rest of the file) or get_node_geometry / canvas_commands without a second lookup. Output is capped at 100 matches by default.`,
   parameters: grepParamsSchema,
 };
 
@@ -307,7 +306,7 @@ export const useSkillTool: ToolDefinition = {
 export const chatTools: ToolDefinition[] = [
   webSearchTool,
   getCanvasStateTool,
-  getNodeDetailTool,
+  getNodeGeometryTool,
   readTool,
   grepTool,
   findTool,
@@ -323,7 +322,7 @@ export const chatTools: ToolDefinition[] = [
 export const operateTools: ToolDefinition[] = [
   webSearchTool,
   getCanvasStateTool,
-  getNodeDetailTool,
+  getNodeGeometryTool,
   readTool,
   grepTool,
   findTool,

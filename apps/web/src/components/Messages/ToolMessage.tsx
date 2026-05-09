@@ -34,7 +34,8 @@ const truncate = (s: string, n: number) =>
 // ==================== Tool Icon Mapping ====================
 
 const TOOL_ICON: Record<string, typeof ScanText> = {
-  get_node_detail: ScanText,
+  read: ScanText,
+  get_node_geometry: LayoutList,
   get_canvas_state: LayoutList,
   ingest_content: PackagePlus,
   canvas_commands: Command,
@@ -621,24 +622,42 @@ function MergedAgentToolRow({
 
   // Build merged title and content
   const { title, nodeRefs } = useMemo(() => {
-    if (tool === 'get_node_detail') {
+    if (tool === 'get_node_geometry') {
       const refs = entries.map((e) => {
         const d =
           e.toolResponse.status === 'success'
             ? ((e.toolResponse.data ?? {}) as Record<string, unknown>)
             : {};
         return {
-          nodeId: ((d.id ?? d.nodeId) as string) || undefined,
-          label: (d.label as string) || undefined,
+          nodeId: (d.id as string) || undefined,
+          label: undefined,
         };
       });
       return {
-        title: count === 1 ? 'Read node' : `Read ${count} nodes`,
+        title:
+          count === 1 ? 'Get node geometry' : `Get geometry of ${count} nodes`,
         nodeRefs: refs,
       };
     }
 
     const emptyRefs: { nodeId?: string; label?: string }[] = [];
+
+    if (tool === 'read') {
+      const first =
+        entries[0]?.toolResponse.status === 'success'
+          ? ((entries[0].toolResponse.data ?? {}) as Record<string, unknown>)
+          : {};
+      const firstPath = (first.path as string) || '';
+      return {
+        title:
+          count === 1
+            ? firstPath
+              ? `Read ${truncate(firstPath, 60)}`
+              : 'Read file'
+            : `Read ${count} files`,
+        nodeRefs: emptyRefs,
+      };
+    }
 
     if (tool === 'get_canvas_state') {
       return { title: 'Read canvas state', nodeRefs: emptyRefs };
@@ -668,7 +687,7 @@ function MergedAgentToolRow({
   }, [tool]);
 
   // Single entry with node ref → inline badge
-  if (count === 1 && tool === 'get_node_detail' && nodeRefs[0]?.nodeId) {
+  if (count === 1 && tool === 'get_node_geometry' && nodeRefs[0]?.nodeId) {
     return (
       <div className="flex justify-start">
         <div className="w-full">
@@ -676,7 +695,7 @@ function MergedAgentToolRow({
             {statusIcon}
             {icon && <span className="text-fg-muted/60">{icon}</span>}
             <span className="flex-1 truncate">
-              Read node{' '}
+              Geometry of{' '}
               <NodeRef
                 nodeId={nodeRefs[0].nodeId}
                 fallbackLabel={nodeRefs[0].label}
@@ -729,20 +748,17 @@ function MergedAgentToolRow({
                 e.toolResponse.status === 'success'
                   ? ((e.toolResponse.data ?? {}) as Record<string, unknown>)
                   : {};
-              if (tool === 'get_node_detail') {
-                const nodeId = ((d.id ?? d.nodeId) as string) || undefined;
+              if (tool === 'get_node_geometry') {
+                const nodeId = (d.id as string) || undefined;
                 return (
                   <div
                     key={e.messageId}
                     className="text-fg-muted flex items-center gap-1.5 text-xs"
                   >
                     <span className="truncate">
-                      Read:{' '}
+                      Geometry:{' '}
                       {nodeId ? (
-                        <NodeRef
-                          nodeId={nodeId}
-                          fallbackLabel={d.label as string}
-                        />
+                        <NodeRef nodeId={nodeId} />
                       ) : (
                         (nodeRefs[i]?.label ?? '?')
                       )}
@@ -784,7 +800,8 @@ export const ToolMessage = ({
 /** Tools used by the operate mode that should show as collapsible cards. */
 function isAgentTool(tool: string): boolean {
   return [
-    'get_node_detail',
+    'read',
+    'get_node_geometry',
     'get_canvas_state',
     'canvas_commands',
     'ingest_content',
