@@ -17,6 +17,14 @@
  */
 
 import {
+  handleFind,
+  handleGrep,
+  handleLs,
+  type FindArgs,
+  type GrepArgs,
+  type LsArgs,
+} from './handlers/canvas-fs.js';
+import {
   handleGetCanvasState,
   handleGetNodeDetail,
   type GetCanvasStateArgs,
@@ -30,6 +38,7 @@ import {
   handleIngestContent,
   type IngestContentArgs,
 } from './handlers/ingest-content.js';
+import { handleRead, type ReadArgs } from './handlers/read.js';
 import { handleUseSkill } from './handlers/use-skill.js';
 import { handleWebSearch, type WebSearchArgs } from './handlers/web-search.js';
 
@@ -80,6 +89,35 @@ export async function executeTool(
         });
       }
       return handleGetCanvasState(resolvedArgs as GetCanvasStateArgs);
+    }
+
+    case 'grep': {
+      // grep/find/ls/read do *not* take canvasId from the schema.
+      // They use the workspace as their cwd. grep/find/ls fall back
+      // to the request-scoped canvas folder when `path` is omitted;
+      // read requires an explicit `path`.
+      return handleGrep({
+        ...(args as Omit<GrepArgs, 'currentCanvasId'>),
+        currentCanvasId: context?.canvasId,
+      });
+    }
+
+    case 'find': {
+      return handleFind({
+        ...(args as Omit<FindArgs, 'currentCanvasId'>),
+        currentCanvasId: context?.canvasId,
+      });
+    }
+
+    case 'ls': {
+      return handleLs({
+        ...(args as Omit<LsArgs, 'currentCanvasId'>),
+        currentCanvasId: context?.canvasId,
+      });
+    }
+
+    case 'read': {
+      return handleRead(args as ReadArgs);
     }
 
     case 'canvas_commands': {
