@@ -7,6 +7,8 @@ import {
   createCanvasBodySchema,
   createId,
   exportCanvasQuerySchema,
+  getCanvasEventsQuerySchema,
+  postCanvasEventsBodySchema,
   preprocessNodeBodySchema,
   putCanvasBodySchema,
 } from '@sediment/shared';
@@ -31,9 +33,13 @@ import type {
   DeleteCanvasResponse,
   DeleteNodeResponse,
   ExportCanvasQuery,
+  GetCanvasEventsQuery,
+  GetCanvasEventsResponse,
   GetCanvasResponse,
   ImportCanvasResponse,
   ListCanvasesResponse,
+  PostCanvasEventsRequest,
+  PostCanvasEventsResponse,
   PreprocessNodeBody,
   PreprocessNodeRequest,
   PreprocessNodeResponse,
@@ -285,8 +291,18 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     return reply.send({ success: true });
   });
 
-  // Delete a node — removes its markdown, plus the node and any
-  // incident edges from the canvas JSON.
+  // Delete a node — removes its markdown sidecar.
+  //
+  // Note: this endpoint deliberately does *not* mutate `canvas.json`.
+  // The client owns the canvas state (nodes / edges) and will persist
+  // the updated state via the autosave PUT on `/:canvasId`. Touching
+  // `canvas.json` here would race with that PUT and surface as a
+  // spurious 409 (CANVAS_VERSION_MISMATCH) on the very next autosave.
+  //
+  // What only the server can do — and therefore what this route
+  // exists for — is unlink the per-node markdown sidecar in
+  // `<canvasId>/nodes/<nodeId>.md`, since that file is invisible to
+  // the client's `state` payload.
   fastify.delete<{
     Params: { canvasId: string; nodeId: string };
     Reply: ApiResult<DeleteNodeResponse>;
@@ -299,29 +315,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     store.deleteNode(nodeId);
-
-    const nodes = (canvas.state.nodes ?? []) as NodeLike[];
-    const remainingNodes = nodes.filter((n) => n.id !== nodeId);
-    const edges = (canvas.state.edges ?? []) as Array<Record<string, unknown>>;
-    const remainingEdges = edges.filter(
-      (e) => e.source !== nodeId && e.target !== nodeId,
-    );
-
-    if (
-      remainingNodes.length !== nodes.length ||
-      remainingEdges.length !== edges.length
-    ) {
-      store.write({
-        ...canvas,
-        version: canvas.version + 1,
-        state: {
-          ...canvas.state,
-          nodes: remainingNodes,
-          edges: remainingEdges,
-        },
-        updatedAt: nowMs(),
-      });
-    }
 
     return reply.send({ success: true });
   });
@@ -483,6 +476,83 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       canvasId,
       version: nextVersion,
     });
+  });
+
+  // --- Canvas events: append-only behavioural log -----------------------
+  //
+  // The frontend buffers `RecentAction` records and POSTs them in
+  // batches (autosave piggy-back, pre-agent flush, beforeunload). Each
+  // request is capped to 200 events / 64 KB body; oversize uploads
+  // should be split client-side.
+
+  const EVENTS_BODY_LIMIT_BYTES = 64 * 1024;
+
+  fastify.post<{
+    Params: { canvasId: string };
+    Body: PostCanvasEventsRequest;
+    Reply: ApiResult<PostCanvasEventsResponse>;
+  }>(
+    '/:canvasId/events',
+    { bodyLimit: EVENTS_BODY_LIMIT_BYTES },
+    async function (request, reply) {
+      const { canvasId } = request.params;
+      const parsed = postCanvasEventsBodySchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          message: parsed.error.issues[0]?.message ?? 'Invalid request body',
+        });
+      }
+
+      const store = getCanvasStore(canvasId);
+      if (!store.read()) {
+        return reply.code(404).send({ message: 'Canvas not found' });
+      }
+
+      try {
+        store.appendEvents(parsed.data.events);
+      } catch (error) {
+        request.log.error(
+          { canvasId, error },
+          'Failed to append canvas events',
+        );
+        return reply.code(500).send({
+          message: 'Failed to append canvas events',
+          details: toMessage(error),
+        });
+      }
+
+      return reply.send({ appended: parsed.data.events.length });
+    },
+  );
+
+  fastify.get<{
+    Params: { canvasId: string };
+    Querystring: GetCanvasEventsQuery;
+    Reply: ApiResult<GetCanvasEventsResponse>;
+  }>('/:canvasId/events', async function (request, reply) {
+    const { canvasId } = request.params;
+    const parsedQuery = getCanvasEventsQuerySchema.safeParse(request.query);
+    if (!parsedQuery.success) {
+      return reply.code(400).send({
+        message: parsedQuery.error.issues[0]?.message ?? 'Invalid query',
+      });
+    }
+
+    const store = getCanvasStore(canvasId);
+    if (!store.read()) {
+      return reply.code(404).send({ message: 'Canvas not found' });
+    }
+
+    const limit = parsedQuery.data.limit ?? 100;
+    const since = parsedQuery.data.since;
+    // Read a slightly larger tail when filtering by `since` so we can
+    // still return up to `limit` records after the filter pass.
+    const events = store.readEvents(since != null ? undefined : limit);
+    const filtered =
+      since != null ? events.filter((e) => e.ts >= since) : events;
+    const trimmed = filtered.length > limit ? filtered.slice(-limit) : filtered;
+
+    return reply.send({ events: trimmed });
   });
 
   // --- Export Canvas (zip) ---
