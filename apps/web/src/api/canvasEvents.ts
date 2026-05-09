@@ -55,10 +55,10 @@ export async function getCanvasEvents(
   if (params?.limit != null) search.set('limit', String(params.limit));
   if (params?.since != null) search.set('since', String(params.since));
   const qs = search.toString();
-  const path = qs
+  const url = qs
     ? `${routes.canvasEvents(canvasId)}?${qs}`
     : routes.canvasEvents(canvasId);
-  const response = await apiFetch<GetCanvasEventsResponse>(path, {
+  const response = await apiFetch<GetCanvasEventsResponse>(url, {
     fallbackMessage: 'Failed to read canvas events',
   });
   return response.events;

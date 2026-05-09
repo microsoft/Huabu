@@ -473,6 +473,8 @@ function flushAllCanvasEventsKeepalive(): void {
   }
 }
 
+// Module-scoped singleton listener: intentionally registered once at module
+// load time and never removed. Safe for this app's single-page lifecycle.
 if (typeof window !== 'undefined') {
   window.addEventListener('beforeunload', flushAllCanvasEventsKeepalive);
 }

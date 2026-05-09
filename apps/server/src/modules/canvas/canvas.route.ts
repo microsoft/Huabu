@@ -486,6 +486,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   // should be split client-side.
 
   const EVENTS_BODY_LIMIT_BYTES = 64 * 1024;
+  const DEFAULT_EVENTS_LIMIT = 100;
 
   fastify.post<{
     Params: { canvasId: string };
@@ -543,11 +544,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
 
-    const limit = parsedQuery.data.limit ?? 100;
+    const limit = parsedQuery.data.limit ?? DEFAULT_EVENTS_LIMIT;
     const since = parsedQuery.data.since;
-    // Read a slightly larger tail when filtering by `since` so we can
-    // still return up to `limit` records after the filter pass.
-    const events = store.readEvents(since != null ? undefined : limit);
+    const events = store.readEvents(limit);
     const filtered =
       since != null ? events.filter((e) => e.ts >= since) : events;
     const trimmed = filtered.length > limit ? filtered.slice(-limit) : filtered;

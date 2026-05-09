@@ -84,18 +84,6 @@ export function atomicWriteJson(filePath: string, data: unknown): void {
 }
 
 /**
- * Append an item to a JSON array file. Creates the file with `[item]`
- * when it does not yet exist. Reads-modifies-writes the whole array; this
- * is intentionally simple and is suitable for low-volume logs (events,
- * intents).
- */
-export function appendJsonArray<T>(filePath: string, item: T): void {
-  const existing = readJson<T[]>(filePath);
-  const next = Array.isArray(existing) ? [...existing, item] : [item];
-  atomicWriteJson(filePath, next);
-}
-
-/**
  * Append a single JSON object as one line (JSONL).
  *
  * Uses a single `appendFileSync`, which maps to one `write(2)` syscall on
@@ -133,9 +121,9 @@ export function appendJsonLines<T>(
  * skipped silently (they typically come from a crash-truncated tail).
  *
  * When `limit` is set, only the last `limit` parsed records are returned.
- * The scan still walks the whole file but starts JSON-parsing from a
- * position that gives us at most ~`limit` lines, keeping tail reads fast
- * for typical "show me the last N events" calls.
+ * For tail reads the function scans backwards from the end of the raw
+ * string to locate the start of the last `limit` lines before splitting,
+ * so only a small slice of the buffer is materialised into strings.
  */
 export function readJsonLines<T>(filePath: string, limit?: number): T[] {
   if (!existsSync(filePath)) return [];
@@ -145,14 +133,28 @@ export function readJsonLines<T>(filePath: string, limit?: number): T[] {
   } catch {
     return [];
   }
-  const lines = raw.split('\n');
-  const start = limit != null ? Math.max(0, lines.length - limit - 1) : 0;
+
+  let slice = raw;
+  if (limit != null && raw.length > 0) {
+    // Scan backwards to find the byte offset where the last `limit` lines begin.
+    // This avoids splitting the entire file into an array of strings.
+    let newlines = 0;
+    let pos = raw.length - 1;
+    if (raw[pos] === '\n') pos--; // skip trailing newline
+    while (pos >= 0 && newlines < limit) {
+      if (raw[pos] === '\n') newlines++;
+      pos--;
+    }
+    // pos is now one position before the start of the first kept line.
+    slice = raw.slice(pos + 1);
+  }
+
   const out: T[] = [];
-  for (let i = start; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
+  for (const line of slice.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
     try {
-      out.push(JSON.parse(line) as T);
+      out.push(JSON.parse(trimmed) as T);
     } catch {
       // Skip malformed (likely a crash-truncated tail line).
     }
