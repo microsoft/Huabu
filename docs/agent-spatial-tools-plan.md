@@ -285,15 +285,7 @@ z-order，agent 没法判断"X 是不是已经在最上层"。
 
 **风险**：低；只读扩展。
 
-### TODO #11 — 批量 `read_nodes(ids[])`（低优 — 等 trace）
-
-**现状**：读 N 个节点要 N 次 round-trip `read`。
-
-**判定**：先收集真实 trace。如果 agent 频繁连续 read 同 canvas 下的多个
-`nodes/<id>.md`，再考虑加 `read_nodes(ids: string[]) → { results: [...] }`。
-否则保持单 file 工具不动。
-
-### TODO #12 — `describe_node_position`（低优 — 等 trace）
+### TODO #11 — `describe_node_position`（低优 — 等 trace）
 
 **现状**：[`buildQuestionNodeContext`](../packages/shared/src/utils/spatial.ts)
 已经能生成"X 在 frame Y 的右上角，靠近 Z" 的自然语言描述，前端 question

@@ -17,6 +17,7 @@ import { Type } from '@earendil-works/pi-ai';
 
 import { AgentCanvasCommandSchema } from './schemas/command.js';
 
+import type { ToolExecutionMode } from '@earendil-works/pi-agent-core';
 import type { Tool } from '@earendil-works/pi-ai';
 
 /**
@@ -27,6 +28,16 @@ import type { Tool } from '@earendil-works/pi-ai';
 export interface ToolDefinition extends Tool {
   /** Human-readable label, surfaced to pi-agent-core's UI hooks. */
   label: string;
+  /**
+   * Optional per-tool execution mode override forwarded to pi-agent-core's
+   * `AgentTool.executionMode`. Set `'sequential'` for tools whose batched
+   * calls must preserve declared order (e.g. write tools where a later
+   * call depends on an earlier call's effect, either server-side or via
+   * client-side SSE apply ordering). When omitted, the agent's default
+   * `toolExecution` mode applies. pi-agent-core falls back to a fully
+   * serial batch as soon as **any** tool call in the batch is sequential.
+   */
+  executionMode?: ToolExecutionMode;
 }
 
 // ==================== Web Search ====================
@@ -263,6 +274,19 @@ export const canvasCommandsTool: ToolDefinition = {
 Group into frame: CREATE_NODES (frame) + SET_NODE_PARENT (children → frame)
 Create and connect: CREATE_NODES (multiple nodes with explicit ids) + CONNECT_NODES (edges referencing those ids)`,
   parameters: canvasCommandsParamsSchema,
+  // Force serial execution: two canvas_commands in the same batch can
+  // race in two ways. Server-side, the handler reads canvas state once
+  // at entry to build a nodeTypeMap — a parallel B that depends on a
+  // node freshly created by parallel A wouldn't see it (lost provenance
+  // injection). Client-side, SSE tool_result completion order ≠ declared
+  // order, and useAgentStream applies commands the moment each result
+  // lands (apps/web/src/hooks/useAgentStream.ts), so a MERGE arriving
+  // before its CREATE would dispatch against a missing node. Serializing
+  // canvas_commands sidesteps both. pi-agent-core's batch behavior means
+  // any mixed [read, canvas_commands] batch also runs serial; in
+  // practice the agent reads first and writes in a later turn, so the
+  // read+write mix is rare and the cost is small.
+  executionMode: 'sequential',
 };
 
 // ==================== Content Ingestion Tools ====================

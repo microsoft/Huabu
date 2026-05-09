@@ -4,6 +4,21 @@
 
 ---
 
+## 2026-05-09 · Agent 工具调用改为并行执行（写工具除外）
+
+**What Changed**
+
+- 同一轮 LLM 响应里发出的多个独立工具调用现在会**并发**派发，而不再像之前一样一个接一个串行跑。常见收益：模型同批发 N 个 `read` / `inspect_nodes` / `web_search` 时，总耗时从「累加」变成「最大值」。
+- `canvas_commands` 单独保持串行（在工具定义里挂了 `executionMode: 'sequential'`），避免 server-side handler 共用 nodeTypeMap 的 race，以及 client-side SSE 完成顺序 ≠ LLM 声明顺序导致 MERGE 抢在 CREATE 前 apply 的问题。
+
+**Notes**
+
+- 用户感知：复杂问答（agent 需要批量读多个节点 / 跨多个 source 搜索）的响应明显更快。
+- 实现细节：pi-agent-core 的 `toolExecution` 切到 `'parallel'`（见 [agent.service.ts](../../apps/server/src/modules/agent/agent.service.ts) `toolExecution` 字段附近的 audit 注释）。pi-agent-core 的 batch 行为是「批里任一 sequential 工具就整批退化为串行」，所以混合 `[read, canvas_commands]` 批次会回到串行——但 trace 里 agent 通常先读后写、读写分轮，混合批罕见，损失可接受。
+- `ingest_content` 仍走并行：跨节点并发安全（不同文件），同节点并发由 `atomicWriteJson` / `atomicWriteText` 兜底为 last-writer-wins。
+
+---
+
 ## 2026-05-10 · Agent 工具改为画布隔离（移除跨画布访问）
 
 **What Changed**
