@@ -140,7 +140,7 @@ export function rerouteAllEdges<
  * Convert an EdgeStyle to React Flow edge properties.
  *
  * Stores the EdgeStyle as source of truth in `edge.data.edgeStyle` and
- * derives the React Flow rendering props (`type`, `style`, `animated`).
+ * derives the React Flow rendering props (`type`, `style`, markers).
  */
 /** Default stroke width applied to every new edge. */
 export const DEFAULT_EDGE_STROKE_WIDTH = EDGE_STROKE_WIDTHS[1];
@@ -190,7 +190,6 @@ export function applyEdgeStyle(edge: Edge, style?: EdgeStyle): Edge {
   return {
     ...edge,
     type: rfType ?? edge.type,
-    animated: style.animated ?? edge.animated,
     style: rfStyle,
     markerEnd:
       direction === 'forward' || direction === 'both' ? arrowMarker : undefined,
@@ -216,7 +215,6 @@ export function mergeEdgeStyle(edge: Edge, patch: Partial<EdgeStyle>): Edge {
       // Clear previously set RF style so applyEdgeStyle starts fresh
       style: {},
       type: undefined,
-      animated: undefined,
     },
     merged,
   );

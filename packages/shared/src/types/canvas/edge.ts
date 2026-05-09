@@ -37,6 +37,5 @@ export interface EdgeStyle {
    */
   stroke?: AccentToken | (string & {});
   strokeWidth?: EdgeStrokeWidth | number;
-  animated?: boolean;
   direction?: EdgeDirection;
 }
