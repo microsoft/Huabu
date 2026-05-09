@@ -24,8 +24,8 @@ import { buildOperatePrompt } from '../../prompt/agent.js';
 import { SYSTEM_PROMPT } from '../../prompt/system.js';
 import { IMAGE_MIME_MAP } from '../../utils/mime.js';
 import { runAgent } from '../agent/agent.service.js';
+import { buildNodeSummaries } from '../agent/canvas-context.js';
 import { loadContext, saveContext } from '../agent/store/chat-store.js';
-import { buildNodeSummaries } from '../agent/tools/executor.js';
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getCanvasStore } from '../storage/index.js';
 
