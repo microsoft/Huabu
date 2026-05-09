@@ -135,7 +135,7 @@ function persistAndStripNodes(
           src:
             typeof data['src'] === 'string'
               ? (data['src'] as string)
-              : (existing?.src ?? null),
+              : existing?.src,
           content,
         };
         try {

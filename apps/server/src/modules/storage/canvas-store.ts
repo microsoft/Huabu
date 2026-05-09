@@ -80,8 +80,12 @@ export interface NodeContent {
   /** CanvasNodeType — kept loose here to avoid the shared dependency. */
   type: string;
   title: string | null;
-  /** External URL or `artifacts/<file>` reference. */
-  src: string | null;
+  /**
+   * External URL or `artifacts/<file>` reference. Optional: only meaningful
+   * for source-backed nodes (web/pdf/image/audio/video). Note/text/frame
+   * nodes omit it entirely so it never lands in their frontmatter.
+   */
+  src?: string;
   /** Canonical markdown body. */
   content: string;
   /** Loader/enrich-supplied frontmatter fields. */
@@ -134,6 +138,15 @@ function nodeContentToMarkdown(c: NodeContent): string {
   for (const key of LEGACY_FRONTMATTER_KEYS) {
     delete (frontmatter as Record<string, unknown>)[key];
   }
+  // Drop nullish frontmatter entries so optional fields (e.g. `src` on
+  // note/text/frame nodes) never serialize to `key: null`. Callers are
+  // free to pass `undefined` to mean "omit".
+  for (const key of Object.keys(frontmatter)) {
+    const v = (frontmatter as Record<string, unknown>)[key];
+    if (v === null || v === undefined) {
+      delete (frontmatter as Record<string, unknown>)[key];
+    }
+  }
   return `${toFrontmatter(frontmatter)}\n${content}`;
 }
 
@@ -146,14 +159,14 @@ function markdownToNodeContent(nodeId: string, raw: string): NodeContent {
   for (const key of LEGACY_FRONTMATTER_KEYS) {
     delete meta[key];
   }
-  return {
+  const out: NodeContent = {
     ...meta,
     nodeId,
     type: typeof meta['type'] === 'string' ? meta['type'] : 'note',
     title: typeof meta['title'] === 'string' ? meta['title'] : null,
-    src: typeof meta['src'] === 'string' ? meta['src'] : null,
     content,
   };
+  return out;
 }
 
 // ─── CanvasStore ────────────────────────────────────────────────────────────

@@ -50,7 +50,7 @@ export function persist(
     nodeId,
     type: contentKind,
     title: normalized.title ?? null,
-    src: src ?? null,
+    src,
     content: normalized.canonicalContent,
   });
 
