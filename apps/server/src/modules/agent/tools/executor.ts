@@ -9,6 +9,11 @@
  *  3. Return a string result that pi-agent-core wraps into a
  *     `toolResult` content block.
  *
+ * Failures throw — pi-agent-core's `executePreparedToolCall` catches
+ * them and emits a tool result with `isError: true`, with the thrown
+ * `Error.message` as the text content. Handlers MUST NOT encode
+ * errors inside the JSON payload.
+ *
  * Adding a new tool is a four-step change:
  *  - schema in `./schemas/`
  *  - definition + `*ParamsSchema` in `./definitions.ts`
@@ -45,6 +50,11 @@ import { handleWebSearch, type WebSearchArgs } from './handlers/web-search.js';
 /**
  * Execute a tool call and return the result as a string.
  *
+ * Per the pi-agent-core `AgentTool.execute` contract, failures throw
+ * — the agent loop catches the throw and emits a tool result with
+ * `isError: true` (see node_modules/.../pi-agent-core/dist/agent-loop.js
+ * `executePreparedToolCall`). Successful calls return a JSON string.
+ *
  * @param name    Tool name (matches `ToolDefinition.name`).
  * @param args    Validated tool arguments — already passed pi-ai's
  *                schema check by the time this runs.
@@ -58,12 +68,15 @@ export async function executeTool(
 ): Promise<string> {
   const resolveCanvasArgs = <T extends Record<string, unknown>>(
     value: T,
-  ): (T & { canvasId: string }) | null => {
+    toolName: string,
+  ): T & { canvasId: string } => {
     const canvasId =
       typeof value.canvasId === 'string' && value.canvasId.trim().length > 0
         ? value.canvasId
         : context?.canvasId;
-    if (!canvasId) return null;
+    if (!canvasId) {
+      throw new Error(`canvasId is required for ${toolName}`);
+    }
     return { ...value, canvasId };
   };
 
@@ -71,25 +84,15 @@ export async function executeTool(
     case 'web_search':
       return handleWebSearch(args as WebSearchArgs);
 
-    case 'get_canvas_outline': {
-      const resolvedArgs = resolveCanvasArgs(args);
-      if (!resolvedArgs) {
-        return JSON.stringify({
-          error: 'canvasId is required for get_canvas_outline',
-        });
-      }
-      return handleGetCanvasOutline(resolvedArgs as GetCanvasOutlineArgs);
-    }
+    case 'get_canvas_outline':
+      return handleGetCanvasOutline(
+        resolveCanvasArgs(args, 'get_canvas_outline') as GetCanvasOutlineArgs,
+      );
 
-    case 'inspect_nodes': {
-      const resolvedArgs = resolveCanvasArgs(args);
-      if (!resolvedArgs) {
-        return JSON.stringify({
-          error: 'canvasId is required for inspect_nodes',
-        });
-      }
-      return handleInspectNodes(resolvedArgs as InspectNodesArgs);
-    }
+    case 'inspect_nodes':
+      return handleInspectNodes(
+        resolveCanvasArgs(args, 'inspect_nodes') as InspectNodesArgs,
+      );
 
     case 'grep': {
       // grep/find/ls/read do *not* take canvasId from the schema.
@@ -116,31 +119,18 @@ export async function executeTool(
       });
     }
 
-    case 'read': {
+    case 'read':
       return handleRead(args as ReadArgs);
-    }
 
-    case 'canvas_commands': {
-      const resolvedArgs = resolveCanvasArgs(args);
-      if (!resolvedArgs) {
-        return JSON.stringify({
-          tool: 'canvas_commands',
-          status: 'error',
-          error: 'canvasId is required for canvas_commands',
-        });
-      }
-      return handleCanvasCommands(resolvedArgs as CanvasCommandsArgs);
-    }
+    case 'canvas_commands':
+      return handleCanvasCommands(
+        resolveCanvasArgs(args, 'canvas_commands') as CanvasCommandsArgs,
+      );
 
-    case 'ingest_content': {
-      const resolvedArgs = resolveCanvasArgs(args);
-      if (!resolvedArgs) {
-        return JSON.stringify({
-          error: 'canvasId is required for ingest_content',
-        });
-      }
-      return handleIngestContent(resolvedArgs as IngestContentArgs);
-    }
+    case 'ingest_content':
+      return handleIngestContent(
+        resolveCanvasArgs(args, 'ingest_content') as IngestContentArgs,
+      );
 
     case 'use_skill':
       return handleUseSkill({
@@ -148,6 +138,6 @@ export async function executeTool(
       });
 
     default:
-      return JSON.stringify({ error: `Unknown tool: ${name}` });
+      throw new Error(`Unknown tool: ${name}`);
   }
 }

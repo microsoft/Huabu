@@ -25,8 +25,16 @@ export interface ToolBuildContext {
 /**
  * Wrap a `ToolDefinition` into a runnable `AgentTool` by attaching an
  * `execute` closure that delegates to the existing `executeTool`
- * dispatcher. Errors are thrown so pi-agent-core marks the resulting
- * toolResult as `isError: true` (its standard convention).
+ * dispatcher.
+ *
+ * Per the pi-agent-core `AgentTool.execute` contract, failures throw.
+ * We deliberately do NOT wrap `executeTool` in a try/catch here:
+ * pi-agent-core's `executePreparedToolCall` catches the throw, builds
+ * an error tool result via `createErrorToolResult`, and sets
+ * `isError: true` on the resulting toolResult message and
+ * `tool_execution_end` event. The web SSE bridge in
+ * `agent.service.ts` lifts that flag into a
+ * `ToolResponse<status: 'error'>` envelope.
  */
 function toAgentTool(def: ToolDefinition, ctx: ToolBuildContext): AgentTool {
   return {

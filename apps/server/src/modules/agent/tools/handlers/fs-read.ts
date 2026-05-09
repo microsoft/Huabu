@@ -12,6 +12,10 @@
  * 2000 lines / 50 KB, whichever fires first; `nextOffset` lets the
  * agent page through long files.
  *
+ * Errors throw — pi-agent-core's executor catches and surfaces them
+ * as `isError: true` tool results (see its `AgentTool.execute`
+ * contract). Successful calls return the JSON envelope as a string.
+ *
  * Frontmatter convenience: if the file starts with a YAML frontmatter
  * block ("---" fences), the parsed object is attached as `frontmatter`
  * so the LLM doesn't have to parse YAML itself (which it does badly).
@@ -47,31 +51,28 @@ export async function handleRead(args: ReadArgs): Promise<string> {
   const { path: requested, offset, limit } = args;
 
   if (typeof requested !== 'string' || requested.length === 0) {
-    return JSON.stringify({ error: 'path is required' });
+    throw new Error('path is required');
   }
   const rel = normalizeRel(requested);
 
-  let abs: string;
-  try {
-    abs = safeResolve(rel);
-  } catch (e) {
-    return JSON.stringify({ error: (e as Error).message });
-  }
+  // safeResolve throws when the path escapes the workspace sandbox; let
+  // pi-agent-core wrap that as an isError tool result.
+  const abs = safeResolve(rel);
 
   // Stat first so we can give a better error than ENOENT spam.
   let stat;
   try {
     stat = statSync(abs);
   } catch {
-    return JSON.stringify({ error: `Path not found: ${rel}` });
+    throw new Error(`Path not found: ${rel}`);
   }
   if (stat.isDirectory()) {
-    return JSON.stringify({
-      error: `"${rel}" is a directory. Use the ls tool to list directory contents.`,
-    });
+    throw new Error(
+      `"${rel}" is a directory. Use the ls tool to list directory contents.`,
+    );
   }
   if (!stat.isFile()) {
-    return JSON.stringify({ error: `Not a regular file: ${rel}` });
+    throw new Error(`Not a regular file: ${rel}`);
   }
 
   // Read as UTF-8. Binary detection here is intentionally light:
@@ -82,15 +83,13 @@ export async function handleRead(args: ReadArgs): Promise<string> {
   try {
     buf = readFileSync(abs);
   } catch (e) {
-    return JSON.stringify({
-      error: `Failed to read file: ${(e as Error).message}`,
-    });
+    throw new Error(`Failed to read file: ${(e as Error).message}`);
   }
   const head = buf.subarray(0, Math.min(1024, buf.length));
   if (head.includes(0)) {
-    return JSON.stringify({
-      error: `"${rel}" appears to be a binary file. The read tool only handles text. Image / pdf / video nodes store their bytes under <canvasId>/artifacts/ \u2014 use the canvas UI to view them; the agent only sees their src URL via the node markdown frontmatter.`,
-    });
+    throw new Error(
+      `"${rel}" appears to be a binary file. The read tool only handles text. Image / pdf / video nodes store their bytes under <canvasId>/artifacts/ \u2014 use the canvas UI to view them; the agent only sees their src URL via the node markdown frontmatter.`,
+    );
   }
 
   const text = buf.toString('utf8');
@@ -115,9 +114,9 @@ export async function handleRead(args: ReadArgs): Promise<string> {
   // Convert pi's 1-indexed offset into a 0-indexed slice start.
   const startLine = offset && offset > 0 ? offset - 1 : 0;
   if (startLine >= totalLines) {
-    return JSON.stringify({
-      error: `Offset ${offset} is beyond end of file (${totalLines} lines total).`,
-    });
+    throw new Error(
+      `Offset ${offset} is beyond end of file (${totalLines} lines total).`,
+    );
   }
 
   // Step 1: honour the user-supplied `limit` (pi semantics — soft cap
@@ -147,11 +146,11 @@ export async function handleRead(args: ReadArgs): Promise<string> {
     bytesUsed += cost;
   }
   if (firstLineExceedsLimit) {
-    return JSON.stringify({
-      error: `Line ${startLine + 1} alone exceeds the ${
+    throw new Error(
+      `Line ${startLine + 1} alone exceeds the ${
         DEFAULT_MAX_BYTES / 1024
       } KB output limit. Try a narrower window with grep, or use a tighter offset/limit.`,
-    });
+    );
   }
   if (byteCutLine !== null) {
     endLineExclusive = byteCutLine;

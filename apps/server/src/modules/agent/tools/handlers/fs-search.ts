@@ -22,6 +22,10 @@
  * or `canvas_commands` (for writes) without a second lookup. This is
  * the one place we deviate from pi: pi returns raw `path:line: text`,
  * we return JSON with optional canvas metadata.
+ *
+ * Errors throw — pi-agent-core's executor catches and surfaces them
+ * as `isError: true` tool results (see its `AgentTool.execute`
+ * contract).
  */
 
 import {
@@ -101,14 +105,10 @@ export async function handleGrep(args: GrepArgs): Promise<string> {
   const walkRootRel = normalizeRel(
     effectivePath(searchPath, args.currentCanvasId),
   );
-  let root: string;
-  try {
-    root = safeResolve(walkRootRel);
-  } catch (e) {
-    return JSON.stringify({ error: (e as Error).message });
-  }
+  // safeResolve throws on sandbox escape; let pi-agent-core wrap that.
+  const root = safeResolve(walkRootRel);
   if (!existsSync(root)) {
-    return JSON.stringify({ error: `Path not found: ${walkRootRel}` });
+    throw new Error(`Path not found: ${walkRootRel}`);
   }
 
   let regex: RegExp;
@@ -118,9 +118,7 @@ export async function handleGrep(args: GrepArgs): Promise<string> {
       ignoreCase ? 'i' : '',
     );
   } catch (e) {
-    return JSON.stringify({
-      error: `Invalid pattern: ${(e as Error).message}`,
-    });
+    throw new Error(`Invalid pattern: ${(e as Error).message}`);
   }
 
   const globRe = glob ? globToRegExp(glob) : null;
@@ -196,14 +194,10 @@ export async function handleFind(args: FindArgs): Promise<string> {
   const walkRootRel = normalizeRel(
     effectivePath(searchPath, args.currentCanvasId),
   );
-  let root: string;
-  try {
-    root = safeResolve(walkRootRel);
-  } catch (e) {
-    return JSON.stringify({ error: (e as Error).message });
-  }
+  // safeResolve throws on sandbox escape; let pi-agent-core wrap that.
+  const root = safeResolve(walkRootRel);
   if (!existsSync(root)) {
-    return JSON.stringify({ error: `Path not found: ${walkRootRel}` });
+    throw new Error(`Path not found: ${walkRootRel}`);
   }
 
   // Mirror pi/fd: a pattern without "/" matches any depth. With "/" it
@@ -213,7 +207,7 @@ export async function handleFind(args: FindArgs): Promise<string> {
   try {
     regex = globToRegExp(effectivePattern);
   } catch (e) {
-    return JSON.stringify({ error: `Invalid glob: ${(e as Error).message}` });
+    throw new Error(`Invalid glob: ${(e as Error).message}`);
   }
 
   const effectiveLimit = Math.max(1, limit ?? DEFAULT_FIND_LIMIT);
@@ -260,24 +254,20 @@ export async function handleLs(args: LsArgs): Promise<string> {
   const walkRootRel = normalizeRel(
     effectivePath(dirPath, args.currentCanvasId),
   );
-  let root: string;
-  try {
-    root = safeResolve(walkRootRel);
-  } catch (e) {
-    return JSON.stringify({ error: (e as Error).message });
-  }
+  // safeResolve throws on sandbox escape; let pi-agent-core wrap that.
+  const root = safeResolve(walkRootRel);
   if (!existsSync(root)) {
-    return JSON.stringify({ error: `Path not found: ${walkRootRel}` });
+    throw new Error(`Path not found: ${walkRootRel}`);
   }
 
   let stat;
   try {
     stat = statSync(root);
   } catch (e) {
-    return JSON.stringify({ error: `Cannot stat: ${(e as Error).message}` });
+    throw new Error(`Cannot stat: ${(e as Error).message}`);
   }
   if (!stat.isDirectory()) {
-    return JSON.stringify({ error: `Not a directory: ${walkRootRel}` });
+    throw new Error(`Not a directory: ${walkRootRel}`);
   }
 
   const effectiveLimit = Math.max(1, limit ?? DEFAULT_LS_LIMIT);
@@ -285,9 +275,7 @@ export async function handleLs(args: LsArgs): Promise<string> {
   try {
     entries = readdirSync(root, { withFileTypes: true });
   } catch (e) {
-    return JSON.stringify({
-      error: `Cannot read directory: ${(e as Error).message}`,
-    });
+    throw new Error(`Cannot read directory: ${(e as Error).message}`);
   }
 
   // Match pi: alphabetical case-insensitive, dotfiles included, '/'

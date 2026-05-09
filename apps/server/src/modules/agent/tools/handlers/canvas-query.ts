@@ -54,7 +54,7 @@ export async function handleGetCanvasOutline(
     includeStyle: args.includeStyle,
   });
   if (!outline) {
-    return JSON.stringify({ error: `Canvas ${args.canvasId} not found` });
+    throw new Error(`Canvas ${args.canvasId} not found`);
   }
   return JSON.stringify(outline);
 }
@@ -64,5 +64,11 @@ export async function handleInspectNodes(
 ): Promise<string> {
   const { canvasId, ...predicates } = args;
   const result = inspectNodes(canvasId, predicates);
+  // `inspectNodes` returns either a result object or `{ error }` when a
+  // referenced node is missing. Promote the error case to a throw so
+  // pi-agent-core flags the tool result as `isError: true`.
+  if ('error' in result) {
+    throw new Error(result.error);
+  }
   return JSON.stringify(result);
 }

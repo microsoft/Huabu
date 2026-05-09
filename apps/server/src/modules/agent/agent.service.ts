@@ -227,19 +227,28 @@ export async function* runAgent(
         case 'tool_execution_end': {
           const result = event.result as AgentToolResult<unknown> | undefined;
           const toolText = result?.content ? joinText(result.content) : '';
-          // pi-agent-core wraps thrown executor errors as `isError: true`.
-          // Today's tools encode failures inside the JSON payload instead
-          // of throwing, so this only surfaces in logs — but Step 2's file
-          // tools (which throw) will benefit from the breadcrumb without
-          // any further wiring.
+          // pi-agent-core wraps thrown handler errors as tool results
+          // with `isError: true` and the `Error.message` as text content.
+          // Lift that into the standard `ToolResponse<status: 'error'>`
+          // envelope so the web client renders it as an error tool row
+          // (see apps/web/src/components/Messages/ToolMessage.tsx).
+          // Successful results stay verbatim — the web's
+          // `parseToolResponse` either reads their existing envelope or
+          // auto-wraps plain JSON as `{ status: 'success', data: ... }`.
+          let payload = toolText;
           if (event.isError) {
             logger?.info(
               `[agent] Tool ${event.toolName} returned isError=true: ${toolText.slice(0, 200)}`,
             );
+            payload = JSON.stringify({
+              tool: event.toolName,
+              status: 'error',
+              error: toolText || 'Tool execution failed',
+            });
           }
           yield {
             type: 'tool_result',
-            data: { toolName: event.toolName, toolResult: toolText },
+            data: { toolName: event.toolName, toolResult: payload },
           };
           break;
         }
