@@ -4,6 +4,24 @@
 
 ---
 
+## 2026-05-09 · Agent 工具描述清晰度修复 + 错误协议对齐 pi-agent-core
+
+**What Changed**
+
+- 所有 read 类工具的失败现在通过 `throw` 上抛，由 pi-agent-core 自动包成 `isError: true` 的 tool result；服务端 SSE bridge 把 `isError` 提升为统一的 `{ tool, status: 'error', error }` envelope，UI 上失败工具卡片可以渲染成红色错误态。
+- `inspect_nodes` 描述里加了 footgun 警告：不带任何 predicate 时会扫全表，建议改用 `get_canvas_outline`。
+- `read` 描述补全了可读文件类型清单（`canvas.json` / `nodes/<id>.md` / `chat/*.json` / `intent.json` / `events.jsonl` / `memory/*.md` / `artifacts/*` 元数据等），并明确「单文件 only，不支持 glob」、`frontmatter` 字段对节点文件的实际 shape（`label, type, src?, summary?, keywords?`）、`nextOffset` 是「下一行未读行的 1-indexed 行号」。
+- `connectedTo` 描述显式写明「不包含目标节点本身」。
+- `find` / `grep` / `ls` 的 `limitReached` 字段改名为 `truncated`，与 `read` / `inspect_nodes` 保持一致；描述里也补了「true 时请抬高 limit 或精化 query」。
+
+**Notes**
+
+- 这些是**给 LLM 看的提示**，不影响前端 UI 行为；用户感知主要在 agent 调用工具更准、不再幻觉调用已删除的工具，以及失败工具卡片正确显示错误态。
+- `truncated` 字段重命名是 wire-format 改动，但目前没有 web/shared 端消费这个字段，安全。
+- 后续 agent 工具覆盖范围扩展（edge 非-style 属性、node `zIndex`、批量 `read_nodes`、`describe_node_position`）记录在 [docs/agent-spatial-tools-plan.md §8](../agent-spatial-tools-plan.md) 的 TODO 列表里。
+
+---
+
 ## 2026-05-08 · Agent 循环升级到 pi-agent-core
 
 **What Changed**

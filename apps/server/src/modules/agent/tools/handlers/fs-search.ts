@@ -142,7 +142,7 @@ export async function handleGrep(args: GrepArgs): Promise<string> {
   }
 
   const matches: Array<Record<string, unknown>> = [];
-  let limitReached = false;
+  let truncated = false;
 
   outer: for (const ent of candidates) {
     let text: string;
@@ -173,7 +173,7 @@ export async function handleGrep(args: GrepArgs): Promise<string> {
       }
       matches.push(match);
       if (matches.length >= effectiveLimit) {
-        limitReached = true;
+        truncated = true;
         break outer;
       }
     }
@@ -182,7 +182,7 @@ export async function handleGrep(args: GrepArgs): Promise<string> {
   return JSON.stringify({
     matches,
     count: matches.length,
-    limitReached,
+    truncated,
   });
 }
 
@@ -214,7 +214,7 @@ export async function handleFind(args: FindArgs): Promise<string> {
   const lookup = makeNodeLookup();
 
   const results: Array<Record<string, unknown>> = [];
-  let limitReached = false;
+  let truncated = false;
   for (const e of walk(root)) {
     if (e.isDirectory) continue;
     // Match the glob against the path *as the walk surfaces it* so that
@@ -233,7 +233,7 @@ export async function handleFind(args: FindArgs): Promise<string> {
     }
     results.push(entry);
     if (results.length >= effectiveLimit) {
-      limitReached = true;
+      truncated = true;
       break;
     }
   }
@@ -242,7 +242,7 @@ export async function handleFind(args: FindArgs): Promise<string> {
   return JSON.stringify({
     paths: results,
     count: results.length,
-    limitReached,
+    truncated,
   });
 }
 
@@ -284,10 +284,10 @@ export async function handleLs(args: LsArgs): Promise<string> {
     a.name.toLowerCase().localeCompare(b.name.toLowerCase()),
   );
   const out: string[] = [];
-  let limitReached = false;
+  let truncated = false;
   for (const ent of entries) {
     if (out.length >= effectiveLimit) {
-      limitReached = true;
+      truncated = true;
       break;
     }
     if (ent.isSymbolicLink()) continue;
@@ -298,6 +298,6 @@ export async function handleLs(args: LsArgs): Promise<string> {
     path: walkRootRel,
     entries: out,
     count: out.length,
-    limitReached,
+    truncated,
   });
 }

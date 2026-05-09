@@ -4,9 +4,12 @@ import {
   ChevronDown,
   ChevronRight,
   Command,
+  FolderOpen,
   LayoutList,
   PackagePlus,
   ScanText,
+  Search,
+  SearchCode,
   Undo2,
   X as XIcon,
 } from 'lucide-react';
@@ -35,8 +38,11 @@ const truncate = (s: string, n: number) =>
 
 const TOOL_ICON: Record<string, typeof ScanText> = {
   read: ScanText,
-  get_node_geometry: LayoutList,
-  get_canvas_state: LayoutList,
+  grep: SearchCode,
+  find: Search,
+  ls: FolderOpen,
+  inspect_nodes: LayoutList,
+  get_canvas_outline: LayoutList,
   ingest_content: PackagePlus,
   canvas_commands: Command,
 };
@@ -622,25 +628,40 @@ function MergedAgentToolRow({
 
   // Build merged title and content
   const { title, nodeRefs } = useMemo(() => {
-    if (tool === 'get_node_geometry') {
-      const refs = entries.map((e) => {
+    const emptyRefs: { nodeId?: string; label?: string }[] = [];
+
+    if (tool === 'inspect_nodes') {
+      // inspect_nodes returns `{ count, nodes: [{ id, label, ... }] }`.
+      // One call may match many nodes; flatten across all calls so the
+      // expanded view lists every matched node.
+      const refs: { nodeId?: string; label?: string }[] = [];
+      let totalMatched = 0;
+      for (const e of entries) {
         const d =
           e.toolResponse.status === 'success'
             ? ((e.toolResponse.data ?? {}) as Record<string, unknown>)
             : {};
-        return {
-          nodeId: (d.id as string) || undefined,
-          label: undefined,
-        };
-      });
+        const nodes = Array.isArray(d.nodes)
+          ? (d.nodes as Array<Record<string, unknown>>)
+          : [];
+        totalMatched += nodes.length;
+        for (const n of nodes) {
+          refs.push({
+            nodeId: typeof n.id === 'string' ? n.id : undefined,
+            label: typeof n.label === 'string' ? n.label : undefined,
+          });
+        }
+      }
       return {
         title:
-          count === 1 ? 'Get node geometry' : `Get geometry of ${count} nodes`,
+          count === 1
+            ? totalMatched === 1
+              ? 'Inspected 1 node'
+              : `Inspected ${totalMatched} nodes`
+            : `Inspected nodes (×${count})`,
         nodeRefs: refs,
       };
     }
-
-    const emptyRefs: { nodeId?: string; label?: string }[] = [];
 
     if (tool === 'read') {
       const first =
@@ -659,8 +680,73 @@ function MergedAgentToolRow({
       };
     }
 
-    if (tool === 'get_canvas_state') {
-      return { title: 'Read canvas state', nodeRefs: emptyRefs };
+    if (tool === 'grep') {
+      // grep returns `{ matches, count, limitReached }`. Sum match counts
+      // across calls for a self-describing title.
+      const totalMatches = entries.reduce((sum, e) => {
+        const d =
+          e.toolResponse.status === 'success'
+            ? ((e.toolResponse.data ?? {}) as Record<string, unknown>)
+            : {};
+        return sum + (typeof d.count === 'number' ? d.count : 0);
+      }, 0);
+      const matchLabel = totalMatches === 1 ? 'match' : 'matches';
+      return {
+        title:
+          count === 1
+            ? `Grep — ${totalMatches} ${matchLabel}`
+            : `Grep (×${count}) — ${totalMatches} ${matchLabel}`,
+        nodeRefs: emptyRefs,
+      };
+    }
+
+    if (tool === 'find') {
+      // find returns `{ paths, count, limitReached }`.
+      const totalPaths = entries.reduce((sum, e) => {
+        const d =
+          e.toolResponse.status === 'success'
+            ? ((e.toolResponse.data ?? {}) as Record<string, unknown>)
+            : {};
+        return sum + (typeof d.count === 'number' ? d.count : 0);
+      }, 0);
+      const fileLabel = totalPaths === 1 ? 'file' : 'files';
+      return {
+        title:
+          count === 1
+            ? `Find — ${totalPaths} ${fileLabel}`
+            : `Find (×${count}) — ${totalPaths} ${fileLabel}`,
+        nodeRefs: emptyRefs,
+      };
+    }
+
+    if (tool === 'ls') {
+      // ls returns `{ path, entries, count, limitReached }`.
+      const first =
+        entries[0]?.toolResponse.status === 'success'
+          ? ((entries[0].toolResponse.data ?? {}) as Record<string, unknown>)
+          : {};
+      const firstPath = (first.path as string) || '';
+      const firstCount = typeof first.count === 'number' ? first.count : 0;
+      const entryLabel = firstCount === 1 ? 'entry' : 'entries';
+      return {
+        title:
+          count === 1
+            ? firstPath
+              ? `Ls ${truncate(firstPath, 40)} — ${firstCount} ${entryLabel}`
+              : `Ls — ${firstCount} ${entryLabel}`
+            : `Ls (×${count})`,
+        nodeRefs: emptyRefs,
+      };
+    }
+
+    if (tool === 'get_canvas_outline') {
+      return {
+        title:
+          count === 1
+            ? 'Read canvas outline'
+            : `Read canvas outline (×${count})`,
+        nodeRefs: emptyRefs,
+      };
     }
     if (tool === 'ingest_content') {
       return {
@@ -686,8 +772,13 @@ function MergedAgentToolRow({
     return null;
   }, [tool]);
 
-  // Single entry with node ref → inline badge
-  if (count === 1 && tool === 'get_node_geometry' && nodeRefs[0]?.nodeId) {
+  // Single inspect_nodes call that matched a single node → inline badge
+  if (
+    count === 1 &&
+    tool === 'inspect_nodes' &&
+    nodeRefs.length === 1 &&
+    nodeRefs[0]?.nodeId
+  ) {
     return (
       <div className="flex justify-start">
         <div className="w-full">
@@ -695,7 +786,7 @@ function MergedAgentToolRow({
             {statusIcon}
             {icon && <span className="text-fg-muted/60">{icon}</span>}
             <span className="flex-1 truncate">
-              Geometry of{' '}
+              Inspected{' '}
               <NodeRef
                 nodeId={nodeRefs[0].nodeId}
                 fallbackLabel={nodeRefs[0].label}
@@ -743,31 +834,32 @@ function MergedAgentToolRow({
         </div>
         {isExpanded && (
           <div className="border-edge-default/40 ml-4 flex flex-col gap-1 border-l py-1 pl-3">
-            {entries.map((e, i) => {
-              const d =
-                e.toolResponse.status === 'success'
-                  ? ((e.toolResponse.data ?? {}) as Record<string, unknown>)
-                  : {};
-              if (tool === 'get_node_geometry') {
-                const nodeId = (d.id as string) || undefined;
-                return (
-                  <div
-                    key={e.messageId}
-                    className="text-fg-muted flex items-center gap-1.5 text-xs"
-                  >
-                    <span className="truncate">
-                      Geometry:{' '}
-                      {nodeId ? (
-                        <NodeRef nodeId={nodeId} />
-                      ) : (
-                        (nodeRefs[i]?.label ?? '?')
-                      )}
-                    </span>
-                  </div>
-                );
-              }
-              return null;
-            })}
+            {tool === 'inspect_nodes'
+              ? // inspect_nodes flattens nodes across calls into nodeRefs;
+                // render each matched node as its own row.
+                nodeRefs.map((ref, i) =>
+                  ref.nodeId ? (
+                    <div
+                      key={`${ref.nodeId}-${i}`}
+                      className="text-fg-muted flex items-center gap-1.5 text-xs"
+                    >
+                      <span className="truncate">
+                        <NodeRef
+                          nodeId={ref.nodeId}
+                          fallbackLabel={ref.label}
+                        />
+                      </span>
+                    </div>
+                  ) : (
+                    <div
+                      key={`unknown-${i}`}
+                      className="text-fg-muted flex items-center gap-1.5 text-xs"
+                    >
+                      <span className="truncate">{ref.label ?? '?'}</span>
+                    </div>
+                  ),
+                )
+              : null}
           </div>
         )}
       </div>
@@ -801,8 +893,11 @@ export const ToolMessage = ({
 function isAgentTool(tool: string): boolean {
   return [
     'read',
-    'get_node_geometry',
-    'get_canvas_state',
+    'grep',
+    'find',
+    'ls',
+    'inspect_nodes',
+    'get_canvas_outline',
     'canvas_commands',
     'ingest_content',
   ].includes(tool);

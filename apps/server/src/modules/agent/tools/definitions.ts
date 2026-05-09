@@ -190,7 +190,7 @@ export const inspectNodesParamsSchema = Type.Object({
       },
       {
         description:
-          'Find nodes connected to the given node via edges. Each match carries `edgeIds` and `hops`.',
+          'Find nodes connected to the given node via edges (the target node itself is excluded from results). Each match carries `edgeIds` and `hops`.',
       },
     ),
   ),
@@ -218,7 +218,7 @@ export const inspectNodesParamsSchema = Type.Object({
 export const inspectNodesTool: ToolDefinition = {
   name: 'inspect_nodes',
   label: 'Inspect Nodes',
-  description: `Find canvas nodes by predicate (attribute / spatial / topological) and return each match with full geometry + visual style + derived fields. Predicates AND together; no predicate returns every node. Returns JSON: { count, truncated, arrangement?, nodes: [{ id, type, label, parentId, position, width, height, style?, distance?, centerDistance?, direction?, edgeIds?, hops?, clusterId? }] }. Use this for "where is X?" (ids), "what's near X?" (nearNode), "what connects to X?" (connectedTo), "what's in this region?" (inRect), or any combination. For full node content (label/text/summary/keywords) call read on "<canvasId>/nodes/<nodeId>.md" — only canvas.json fields are surfaced here.`,
+  description: `Find canvas nodes by predicate (attribute / spatial / topological) and return each match with full geometry + visual style + derived fields. Predicates AND together. **Always supply at least one predicate** — calling with no predicates returns every node, which is wasteful; for whole-canvas reads use get_canvas_outline instead. Returns JSON: { count, truncated, arrangement?, nodes: [{ id, type, label, parentId, position, width, height, style?, distance?, centerDistance?, direction?, edgeIds?, hops?, clusterId? }] }. When truncated:true, raise limit or refine your query. Note on connectedTo: the target node itself is excluded from results. Use this for "where is X?" (ids), "what's near X?" (nearNode), "what connects to X?" (connectedTo), "what's in this region?" (inRect), or any combination. For full node content (label/text/summary/keywords) call read on "<canvasId>/nodes/<nodeId>.md" — only canvas.json fields are surfaced here.`,
   parameters: inspectNodesParamsSchema,
 };
 
@@ -318,7 +318,13 @@ export const readParamsSchema = Type.Object({
 export const readTool: ToolDefinition = {
   name: 'read',
   label: 'Read',
-  description: `Read the contents of a single text file under the workspace root. Returns JSON: { path, startLine, endLine, totalLines, truncated, nextOffset?, content, frontmatter? }. When the file begins with a YAML frontmatter block ("---" fences), the parsed frontmatter is also returned as a structured object so you don't have to parse YAML yourself. Output is truncated to 2000 lines or 50 KB, whichever is hit first; when truncated, "nextOffset" tells you the offset to use to continue. Binary files (images, archives) are rejected with an error. For a node's textual attributes (label, content, type, src, summary, keywords) read "<canvasId>/nodes/<nodeId>.md" — they all live here. For a node's canvas placement (position, size, parent, style) call inspect_nodes({ ids: ["<nodeId>"] }) instead; those fields live in canvas.json.`,
+  description: `Read the contents of a **single** text file under the workspace root — no globs (use find to enumerate, then read each match). Returns JSON: { path, startLine, endLine, totalLines, truncated, nextOffset?, content, frontmatter? }. Output is truncated to 2000 lines or 50 KB, whichever is hit first; when truncated:true, nextOffset is the 1-indexed line number of the next unread line — pass it as the next offset to keep paging. Binary files (images, archives) are rejected with an error.
+
+Readable file types include: "<canvasId>/canvas.json" (geometry, edges); "<canvasId>/nodes/<nodeId>.md" (per-node markdown with frontmatter); "<canvasId>/chat/<thread>.json" (saved chat threads); "<canvasId>/intent.json" / "<canvasId>/events.jsonl" (intent + event logs); "<canvasId>/memory/*.md" (long-form memory); "<canvasId>/artifacts/*" metadata. Sources / images / pdfs are stored as binary under artifacts/ and are not readable here.
+
+When the file begins with a YAML frontmatter block ("---" fences), the parsed frontmatter is also returned as a structured object so you don't have to parse YAML yourself. For node files the frontmatter object includes: label, type, src?, summary?, keywords?.
+
+Boundary: a node's textual attributes (label, content, type, src, summary, keywords) live in "<canvasId>/nodes/<nodeId>.md" — read them here. A node's canvas placement (position, size, parent, style) lives in canvas.json — call inspect_nodes({ ids: ["<nodeId>"] }) instead.`,
   parameters: readParamsSchema,
 };
 
@@ -364,7 +370,7 @@ export const grepParamsSchema = Type.Object({
 export const grepTool: ToolDefinition = {
   name: 'grep',
   label: 'Grep',
-  description: `Search file contents for a pattern. Paths are relative to the workspace root; when omitted, search defaults to the current canvas folder. Returns JSON with matching paths, line numbers, and matched text. Skips .history/, .git/, and node_modules/. When a match is in <canvasId>/nodes/<nodeId>.md, the result also includes canvasId, nodeId, label, and nodeType — chain straight into read (for the rest of the file) or inspect_nodes / canvas_commands without a second lookup. Output is capped at 100 matches by default.`,
+  description: `Search file contents for a pattern. Paths are relative to the workspace root; when omitted, search defaults to the current canvas folder. Returns JSON with matching paths, line numbers, and matched text, plus a \`truncated\` flag (raise \`limit\` or refine the pattern when true). Skips .history/, .git/, and node_modules/. When a match is in <canvasId>/nodes/<nodeId>.md, the result also includes canvasId, nodeId, label, and nodeType — chain straight into read (for the rest of the file) or inspect_nodes / canvas_commands without a second lookup. Output is capped at 100 matches by default.`,
   parameters: grepParamsSchema,
 };
 
@@ -389,7 +395,7 @@ export const findParamsSchema = Type.Object({
 export const findTool: ToolDefinition = {
   name: 'find',
   label: 'Find',
-  description: `Find files by glob pattern. Paths are relative to the workspace root; when omitted, search defaults to the current canvas folder. Returns JSON with matching paths. When a result is <canvasId>/nodes/<nodeId>.md, the entry also includes canvasId, nodeId, label, and nodeType. Skips .history/, .git/, and node_modules/.`,
+  description: `Find files by glob pattern. Paths are relative to the workspace root; when omitted, search defaults to the current canvas folder. Returns JSON with matching paths and a \`truncated\` flag (raise \`limit\` or narrow the pattern when true). When a result is <canvasId>/nodes/<nodeId>.md, the entry also includes canvasId, nodeId, label, and nodeType. Skips .history/, .git/, and node_modules/.`,
   parameters: findParamsSchema,
 };
 
@@ -410,7 +416,7 @@ export const lsParamsSchema = Type.Object({
 export const lsTool: ToolDefinition = {
   name: 'ls',
   label: 'Ls',
-  description: `List directory contents under the workspace root. When path is omitted, lists the current canvas folder. Returns JSON with entries sorted alphabetically; directories carry a trailing "/". A canvas folder typically contains canvas.json plus subdirectories such as nodes/, artifacts/, and memory/.`,
+  description: `List directory contents under the workspace root. When path is omitted, lists the current canvas folder. Returns JSON with entries sorted alphabetically (directories carry a trailing "/") plus a \`truncated\` flag (raise \`limit\` when true). A canvas folder typically contains canvas.json plus subdirectories such as nodes/, artifacts/, and memory/.`,
   parameters: lsParamsSchema,
 };
 
