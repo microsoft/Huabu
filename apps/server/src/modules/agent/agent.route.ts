@@ -803,7 +803,7 @@ const agentRoutes: FastifyPluginAsync = async (
         if (summaries && summaries.nodes.length > 0) {
           context.messages.push({
             role: 'user',
-            content: `[SYSTEM Context]\n[Selected Nodes (previews only — read "<canvasId>/nodes/<nodeId>.md" for full content, or get_node_geometry for layout)]\n${JSON.stringify(summaries.nodes, null, 2)}`,
+            content: `[SYSTEM Context]\n[Selected Nodes (previews only — read "<canvasId>/nodes/<nodeId>.md" for full content, or inspect_nodes({ ids: [...] }) for layout / style / spatial relations)]\n${JSON.stringify(summaries.nodes, null, 2)}`,
             timestamp: Date.now(),
           });
         }

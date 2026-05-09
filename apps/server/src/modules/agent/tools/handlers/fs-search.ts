@@ -17,7 +17,8 @@
  * Enrichment: when a result file is `<canvasId>/nodes/<nodeId>.md`,
  * the response includes `canvasId`, `nodeId`, `label`, and `nodeType`
  * from that canvas's `canvas.json` so the LLM can chain straight into
- * `read` (for the rest of the file), `get_node_geometry` (for layout),
+ * `read` (for the rest of the file), `inspect_nodes` (for layout / style /
+ * spatial relations),
  * or `canvas_commands` (for writes) without a second lookup. This is
  * the one place we deviate from pi: pi returns raw `path:line: text`,
  * we return JSON with optional canvas metadata.
@@ -39,7 +40,7 @@ import {
   safeResolve,
   toWorkspaceRel,
   walk,
-} from './sandbox.js';
+} from './fs-sandbox.js';
 
 import type {
   findParamsSchema,

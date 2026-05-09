@@ -17,28 +17,28 @@
  */
 
 import {
+  handleGetCanvasOutline,
+  handleInspectNodes,
+  type GetCanvasOutlineArgs,
+  type InspectNodesArgs,
+} from './handlers/canvas-query.js';
+import {
+  handleCanvasCommands,
+  type CanvasCommandsArgs,
+} from './handlers/canvas-write.js';
+import { handleRead, type ReadArgs } from './handlers/fs-read.js';
+import {
   handleFind,
   handleGrep,
   handleLs,
   type FindArgs,
   type GrepArgs,
   type LsArgs,
-} from './handlers/canvas-fs.js';
-import {
-  handleGetCanvasState,
-  handleGetNodeGeometry,
-  type GetCanvasStateArgs,
-  type GetNodeGeometryArgs,
-} from './handlers/canvas-read.js';
-import {
-  handleCanvasCommands,
-  type CanvasCommandsArgs,
-} from './handlers/canvas-write.js';
+} from './handlers/fs-search.js';
 import {
   handleIngestContent,
   type IngestContentArgs,
 } from './handlers/ingest-content.js';
-import { handleRead, type ReadArgs } from './handlers/read.js';
 import { handleUseSkill } from './handlers/use-skill.js';
 import { handleWebSearch, type WebSearchArgs } from './handlers/web-search.js';
 
@@ -71,24 +71,24 @@ export async function executeTool(
     case 'web_search':
       return handleWebSearch(args as WebSearchArgs);
 
-    case 'get_node_geometry': {
+    case 'get_canvas_outline': {
       const resolvedArgs = resolveCanvasArgs(args);
       if (!resolvedArgs) {
         return JSON.stringify({
-          error: 'canvasId is required for get_node_geometry',
+          error: 'canvasId is required for get_canvas_outline',
         });
       }
-      return handleGetNodeGeometry(resolvedArgs as GetNodeGeometryArgs);
+      return handleGetCanvasOutline(resolvedArgs as GetCanvasOutlineArgs);
     }
 
-    case 'get_canvas_state': {
+    case 'inspect_nodes': {
       const resolvedArgs = resolveCanvasArgs(args);
       if (!resolvedArgs) {
         return JSON.stringify({
-          error: 'canvasId is required for get_canvas_state',
+          error: 'canvasId is required for inspect_nodes',
         });
       }
-      return handleGetCanvasState(resolvedArgs as GetCanvasStateArgs);
+      return handleInspectNodes(resolvedArgs as InspectNodesArgs);
     }
 
     case 'grep': {

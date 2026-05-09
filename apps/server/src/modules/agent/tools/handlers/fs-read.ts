@@ -18,15 +18,15 @@
  * The raw `content` field is unchanged — the file is reproduced
  * verbatim, including the fences. `frontmatter` is purely additive.
  *
- * Note vs `get_node_geometry`: read owns everything that lives in the
+ * Note vs `inspect_nodes`: read owns everything that lives in the
  * node markdown frontmatter (title, type, src, summary, keywords, ...).
  * Position / size / parent / style live in `canvas.json` and are owned
- * by `get_node_geometry` — see that handler for the boundary.
+ * by `inspect_nodes` — see that handler for the boundary.
  */
 
 import { readFileSync, statSync } from 'node:fs';
 
-import { normalizeRel, safeResolve } from './sandbox.js';
+import { normalizeRel, safeResolve } from './fs-sandbox.js';
 import { parseFrontmatter } from '../../../storage/frontmatter.js';
 
 import type { readParamsSchema } from '../definitions.js';

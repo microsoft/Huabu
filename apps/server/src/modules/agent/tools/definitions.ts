@@ -62,29 +62,164 @@ export const webSearchTool: ToolDefinition = {
 };
 
 // ==================== Canvas Read-Only Tools ====================
+//
+// Two-tool surface for "understand the canvas without mutating it":
+//
+//   - `get_canvas_outline`  — one-shot map of the whole canvas
+//     (geometry + edges + spatial clusters). Call once per canvas to
+//     orient yourself.
+//   - `inspect_nodes`        — predicate-driven node lookup (attribute /
+//     spatial / topological), returning each match with full geometry +
+//     style + per-predicate derived fields.
+//
+// Boundary with `read`: anything in the node markdown frontmatter
+// (title/label, type, src, content, summary, keywords) lives in
+// `<canvasId>/nodes/<nodeId>.md` and is owned by `read`. These two
+// tools own everything in `canvas.json` (position/size/parent/style)
+// plus derived spatial/topological metadata.
 
-export const getNodeGeometryParamsSchema = Type.Object({
-  nodeId: Type.String({ description: 'The ID of the canvas node' }),
+export const getCanvasOutlineParamsSchema = Type.Object({
   ...OptionalCanvasIdField,
+  includePreviews: Type.Optional(
+    Type.Boolean({
+      description:
+        'Attach a short text preview (summary / keywords / first 120 chars) to every node. Default: false. Skip unless you need a quick overview of contents — for full text use read on "<canvasId>/nodes/<nodeId>.md".',
+    }),
+  ),
+  includeStyle: Type.Optional(
+    Type.Boolean({
+      description:
+        "Attach each node's visual style (accent / backgroundColor / text styling). Default: false. Set true only for visual / styling tasks.",
+    }),
+  ),
 });
 
-export const getNodeGeometryTool: ToolDefinition = {
-  name: 'get_node_geometry',
-  label: 'Get Node Geometry',
-  description: `Get a node's canvas-only attributes: position, width, height, parentId, and style (accent / backgroundColor / text styling). Use this when you need where a node *is* on the canvas, how big it is, what frame contains it, or its visual styling. For a node's textual attributes (title, content, type, src, summary, keywords) call read on "<canvasId>/nodes/<nodeId>.md" — those fields live in the node's markdown frontmatter, not here.`,
-  parameters: getNodeGeometryParamsSchema,
+export const getCanvasOutlineTool: ToolDefinition = {
+  name: 'get_canvas_outline',
+  label: 'Get Canvas Outline',
+  description: `One-shot map of the whole canvas. Returns JSON: { canvasId, version, bbox, nodes: [{ id, type, label, parentId, position, width, height, style?, preview? }], edges: [{ id?, source, target, style? }], spatial: { clusters: [{ frameId?, frameLabel?, nodeIds (reading-order), arrangement }] } }. Call this once when you enter a canvas to orient yourself; later, drill in with inspect_nodes / read. Frame nodes are entries in \`nodes\` with type='frame' — group by parentId to recover the frame tree. Isolated nodes = all node ids minus the union of cluster nodeIds. \`preview\` and \`style\` are opt-in via the matching flags. For full content of any node, call read on "<canvasId>/nodes/<nodeId>.md".`,
+  parameters: getCanvasOutlineParamsSchema,
 };
 
-export const getCanvasStateParamsSchema = Type.Object({
+export const inspectNodesParamsSchema = Type.Object({
   ...OptionalCanvasIdField,
+  // ── Attribute predicates ──
+  ids: Type.Optional(
+    Type.Array(Type.String(), {
+      description:
+        'Match these node IDs explicitly. Combinable with other filters.',
+    }),
+  ),
+  byType: Type.Optional(
+    Type.Union([Type.String(), Type.Array(Type.String())], {
+      description:
+        'Filter by node type, e.g. "image" or ["image","pdf"]. Common types: note, text, image, pdf, web, video, frame, question.',
+    }),
+  ),
+  byParent: Type.Optional(
+    Type.Union([Type.String(), Type.Null()], {
+      description:
+        'Filter by parent (frame) ID. Pass null to match top-level nodes only.',
+    }),
+  ),
+  labelPattern: Type.Optional(
+    Type.String({
+      description:
+        'Regex matched against the node label (data.label). For full-text search inside node bodies use the grep tool instead.',
+    }),
+  ),
+  // ── Spatial predicates ──
+  inRect: Type.Optional(
+    Type.Object(
+      {
+        x: Type.Number(),
+        y: Type.Number(),
+        width: Type.Number(),
+        height: Type.Number(),
+      },
+      {
+        description:
+          'Match nodes whose center lies inside this rectangle (absolute canvas coordinates).',
+      },
+    ),
+  ),
+  nearNode: Type.Optional(
+    Type.Object(
+      {
+        id: Type.String(),
+        maxDistance: Type.Optional(Type.Number()),
+        maxCount: Type.Optional(Type.Number()),
+        sameParent: Type.Optional(Type.Boolean()),
+      },
+      {
+        description:
+          "Find nodes near the given node by edge-to-edge distance. Each match carries derived `distance`, `centerDistance`, `direction`. `sameParent` restricts to the target's siblings.",
+      },
+    ),
+  ),
+  nearPoint: Type.Optional(
+    Type.Object(
+      {
+        x: Type.Number(),
+        y: Type.Number(),
+        maxDistance: Type.Optional(Type.Number()),
+        maxCount: Type.Optional(Type.Number()),
+      },
+      {
+        description:
+          'Find nodes near a canvas point. Each match carries derived `distance`, `centerDistance`, `direction`.',
+      },
+    ),
+  ),
+  inSameClusterAs: Type.Optional(
+    Type.String({
+      description:
+        'Return the other nodes in the same spatial cluster as this node (excluding the node itself). Each match carries `clusterId`.',
+    }),
+  ),
+  // ── Topological predicates ──
+  connectedTo: Type.Optional(
+    Type.Object(
+      {
+        id: Type.String(),
+        depth: Type.Optional(
+          Type.Union([Type.Literal(1), Type.Literal(2)], {
+            description: 'Hop depth, 1 (direct neighbors) or 2. Default: 1.',
+          }),
+        ),
+      },
+      {
+        description:
+          'Find nodes connected to the given node via edges. Each match carries `edgeIds` and `hops`.',
+      },
+    ),
+  ),
+  // ── Output controls ──
+  sort: Type.Optional(
+    Type.Union(
+      [
+        Type.Literal('distance'),
+        Type.Literal('reading-order'),
+        Type.Literal('area'),
+      ],
+      {
+        description:
+          'Result ordering. Defaults to `distance` when nearNode/nearPoint is used, otherwise insertion order.',
+      },
+    ),
+  ),
+  limit: Type.Optional(
+    Type.Number({
+      description: 'Maximum number of nodes to return. Default: 50.',
+    }),
+  ),
 });
 
-export const getCanvasStateTool: ToolDefinition = {
-  name: 'get_canvas_state',
-  label: 'Get Canvas State',
-  description:
-    'Get a summary of the current canvas state including all nodes, edges, and frames.',
-  parameters: getCanvasStateParamsSchema,
+export const inspectNodesTool: ToolDefinition = {
+  name: 'inspect_nodes',
+  label: 'Inspect Nodes',
+  description: `Find canvas nodes by predicate (attribute / spatial / topological) and return each match with full geometry + visual style + derived fields. Predicates AND together; no predicate returns every node. Returns JSON: { count, truncated, arrangement?, nodes: [{ id, type, label, parentId, position, width, height, style?, distance?, centerDistance?, direction?, edgeIds?, hops?, clusterId? }] }. Use this for "where is X?" (ids), "what's near X?" (nearNode), "what connects to X?" (connectedTo), "what's in this region?" (inRect), or any combination. For full node content (label/text/summary/keywords) call read on "<canvasId>/nodes/<nodeId>.md" — only canvas.json fields are surfaced here.`,
+  parameters: inspectNodesParamsSchema,
 };
 
 // ==================== Canvas Commands ====================
@@ -158,9 +293,9 @@ export const ingestContentTool: ToolDefinition = {
 // canvas folder. To address a different canvas, pass an explicit
 // `path: "<canvasId>/..."`.
 //
-// See `handlers/canvas-fs.ts` and `handlers/read.ts` for sandbox +
+// See `handlers/fs-search.ts` and `handlers/fs-read.ts` for sandbox +
 // enrichment details. Shared sandbox primitives live in
-// `handlers/sandbox.ts`.
+// `handlers/fs-sandbox.ts`.
 
 export const readParamsSchema = Type.Object({
   path: Type.String({
@@ -183,7 +318,7 @@ export const readParamsSchema = Type.Object({
 export const readTool: ToolDefinition = {
   name: 'read',
   label: 'Read',
-  description: `Read the contents of a single text file under the workspace root. Returns JSON: { path, startLine, endLine, totalLines, truncated, nextOffset?, content, frontmatter? }. When the file begins with a YAML frontmatter block ("---" fences), the parsed frontmatter is also returned as a structured object so you don't have to parse YAML yourself. Output is truncated to 2000 lines or 50 KB, whichever is hit first; when truncated, "nextOffset" tells you the offset to use to continue. Binary files (images, archives) are rejected with an error. For a node's textual attributes (title, content, type, src, summary, keywords) read "<canvasId>/nodes/<nodeId>.md" — they all live here. For a node's canvas placement (position, size, parent, style) call get_node_geometry instead; those fields live in canvas.json.`,
+  description: `Read the contents of a single text file under the workspace root. Returns JSON: { path, startLine, endLine, totalLines, truncated, nextOffset?, content, frontmatter? }. When the file begins with a YAML frontmatter block ("---" fences), the parsed frontmatter is also returned as a structured object so you don't have to parse YAML yourself. Output is truncated to 2000 lines or 50 KB, whichever is hit first; when truncated, "nextOffset" tells you the offset to use to continue. Binary files (images, archives) are rejected with an error. For a node's textual attributes (title, content, type, src, summary, keywords) read "<canvasId>/nodes/<nodeId>.md" — they all live here. For a node's canvas placement (position, size, parent, style) call inspect_nodes({ ids: ["<nodeId>"] }) instead; those fields live in canvas.json.`,
   parameters: readParamsSchema,
 };
 
@@ -229,7 +364,7 @@ export const grepParamsSchema = Type.Object({
 export const grepTool: ToolDefinition = {
   name: 'grep',
   label: 'Grep',
-  description: `Search file contents for a pattern. Paths are relative to the workspace root; when omitted, search defaults to the current canvas folder. Returns JSON with matching paths, line numbers, and matched text. Skips .history/, .git/, and node_modules/. When a match is in <canvasId>/nodes/<nodeId>.md, the result also includes canvasId, nodeId, label, and nodeType — chain straight into read (for the rest of the file) or get_node_geometry / canvas_commands without a second lookup. Output is capped at 100 matches by default.`,
+  description: `Search file contents for a pattern. Paths are relative to the workspace root; when omitted, search defaults to the current canvas folder. Returns JSON with matching paths, line numbers, and matched text. Skips .history/, .git/, and node_modules/. When a match is in <canvasId>/nodes/<nodeId>.md, the result also includes canvasId, nodeId, label, and nodeType — chain straight into read (for the rest of the file) or inspect_nodes / canvas_commands without a second lookup. Output is capped at 100 matches by default.`,
   parameters: grepParamsSchema,
 };
 
@@ -305,8 +440,8 @@ export const useSkillTool: ToolDefinition = {
  */
 export const chatTools: ToolDefinition[] = [
   webSearchTool,
-  getCanvasStateTool,
-  getNodeGeometryTool,
+  getCanvasOutlineTool,
+  inspectNodesTool,
   readTool,
   grepTool,
   findTool,
@@ -321,8 +456,8 @@ export const chatTools: ToolDefinition[] = [
  */
 export const operateTools: ToolDefinition[] = [
   webSearchTool,
-  getCanvasStateTool,
-  getNodeGeometryTool,
+  getCanvasOutlineTool,
+  inspectNodesTool,
   readTool,
   grepTool,
   findTool,
