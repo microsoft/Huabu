@@ -129,15 +129,15 @@ function persistAndStripNodes(
         existing.content.length > 0;
 
       if (!wouldClobber) {
-        const title =
+        const label =
           typeof data['label'] === 'string'
             ? (data['label'] as string)
-            : (existing?.title ?? null);
+            : (existing?.label ?? null);
         const nodeContent: NodeContent = {
           ...existing,
           nodeId,
           type: nodeType,
-          title,
+          label,
           src:
             typeof data['src'] === 'string'
               ? (data['src'] as string)
@@ -146,15 +146,15 @@ function persistAndStripNodes(
         };
         try {
           store.writeNode(nodeId, nodeContent);
-          hasPersistedTitle = !!title;
+          hasPersistedTitle = !!label;
         } catch {
           // Best effort — skip nodes whose id fails sanitisation.
         }
       } else {
-        hasPersistedTitle = !!existing?.title;
+        hasPersistedTitle = !!existing?.label;
       }
     } else {
-      hasPersistedTitle = !!existing?.title;
+      hasPersistedTitle = !!existing?.label;
     }
 
     const {
@@ -211,13 +211,13 @@ function hydrateNodeContent(store: CanvasStore, nodes: NodeLike[]): NodeLike[] {
       data['keywords'] = keywords;
     }
 
-    if (nodeContent.title) {
+    if (nodeContent.label) {
       const labelSource = data['labelSource'];
       if (labelSource !== 'user' && labelSource !== 'agent') {
-        data['label'] = nodeContent.title;
+        data['label'] = nodeContent.label;
         data['labelSource'] = 'auto';
       } else if (!data['label']) {
-        data['label'] = nodeContent.title;
+        data['label'] = nodeContent.label;
       }
     }
 

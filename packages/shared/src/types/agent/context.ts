@@ -1,4 +1,3 @@
-import type { SpatialSummary } from '../../utils/spatial.js';
 import type { CanvasNodeType, NodeOrigin } from '../canvas/node.js';
 
 // ==================== Node Reference ====================
@@ -6,7 +5,8 @@ import type { CanvasNodeType, NodeOrigin } from '../canvas/node.js';
 /**
  * Lightweight reference to a canvas node.
  * Used in RecentAction to avoid duplicating full NodeSummary data.
- * AI can use `id` to call get_node_content tool for full content.
+ * AI can use `id` to call `read` on "nodes/<nodeId>.md" for full content,
+ * or `inspect_nodes({ ids: [<id>] })` for layout / style.
  */
 export interface NodeRef {
   id: string;
@@ -120,8 +120,9 @@ export interface NodeSummary {
  *
  * Selection is a strong intent signal — the user is telling the agent
  * "focus on this". `SelectedNodeDetail` carries lightweight metadata only;
- * full node content is fetched on demand via the `get_node_detail` tool to
- * keep the base context small.
+ * full node content is fetched on demand via `read` on
+ * "nodes/<nodeId>.md" (and layout via `inspect_nodes`) to keep the base
+ * context small.
  *
  * For frame nodes, `children` contains the detail of every direct child,
  * so the agent understands the entire group the user is referring to.
@@ -130,7 +131,6 @@ export interface SelectedNodeDetail {
   id: string;
   type: CanvasNodeType;
   label?: string;
-  origin?: NodeOrigin;
   /** Source URL for image nodes (used by the server to build vision attachments). */
   src?: string;
   /**
@@ -138,16 +138,12 @@ export interface SelectedNodeDetail {
    * Undefined for non-frame nodes.
    */
   children?: SelectedNodeDetail[];
-  /** Absolute position on canvas (top-left corner). */
-  position?: { x: number; y: number };
-  /** Measured or styled dimensions. */
-  size?: { width: number; height: number };
 }
 
 /**
  * The base context sent with every agent request.
  * Designed to be lightweight: nodes carry only label + snippet,
- * full content is fetched on demand via the get_node_content tool.
+ * full content is fetched on demand via `read` on "nodes/<nodeId>.md".
  */
 export interface AgentBaseContext {
   /** Snapshot of all current canvas nodes */
@@ -174,11 +170,4 @@ export interface AgentBaseContext {
    * Empty array means "no explicit selection; use the full canvas as context".
    */
   selectedNodes: SelectedNodeDetail[];
-  /**
-   * Pre-computed spatial summary of the canvas layout.
-   * Contains clusters (groups of nearby nodes) with their arrangement
-   * patterns and isolated nodes. Used to give the AI spatial awareness
-   * without it having to reason about raw coordinates.
-   */
-  spatialSummary?: SpatialSummary;
 }

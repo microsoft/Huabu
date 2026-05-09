@@ -1,7 +1,7 @@
 /**
  * Stage 3 — Normalize
  *
- * Produces canonical content, stable nodeId, title, and merged metadata.
+ * Produces canonical content, stable nodeId, label, and merged metadata.
  * No external calls, no LLM. Source identity is canvas-local: the
  * `nodeId` field carries the canvas node id, which is what
  * `nodes/<nodeId>.md` is keyed by.
@@ -21,7 +21,7 @@ export function normalize(
 ): NormalizeResult {
   const canonicalContent = extracted.content ?? resolved.content ?? '';
 
-  // Title resolution:
+  // Label resolution:
   // - User-set labels always take precedence.
   // - For web/pdf nodes whose titles come from extraction (HTML <title>, PDF
   //   metadata), do NOT fall back to resolved.title — it may carry a stale
@@ -29,7 +29,7 @@ export function normalize(
   //   LLM-generated label later via the pipeline backfill.
   // - For note/text nodes, resolved.title (derived from content) is a
   //   reasonable fallback.
-  const title =
+  const label =
     resolved.labelSource === 'user' || resolved.labelSource === 'agent'
       ? (resolved.title ?? extracted.title)
       : resolved.nodeType === 'web' || resolved.nodeType === 'pdf'
@@ -46,7 +46,7 @@ export function normalize(
 
   return {
     nodeId,
-    title,
+    label,
     metadata,
     canonicalContent,
   };

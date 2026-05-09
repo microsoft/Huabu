@@ -124,10 +124,34 @@ export async function* runAgent(
     // our existing resolver keeps env / persisted-config / OAuth flows
     // working unchanged.
     getApiKey: () => ensureApiKey(),
-    // Match the previous self-rolled loop, which executed tool batches one
-    // call at a time. Step 4 of the migration plan will flip this to
-    // 'parallel' once we audit canvas_commands for race-free batching.
-    toolExecution: 'sequential',
+    // Run independent tool calls in the same batch concurrently. The
+    // common win is the LLM emitting N parallel `read` / `inspect_nodes`
+    // / `web_search` calls — total latency drops from sum to max.
+    //
+    // Audit notes (see docs/agent-spatial-tools-plan.md TODO #11 and
+    // docs/pi-agent-core-migration.md Step 4):
+    //   - Read-only tools (`read`, `grep`, `find`, `ls`,
+    //     `get_canvas_outline`, `inspect_nodes`, `inspect_edges`,
+    //     `web_search`, `use_skill`) are trivially safe.
+    //   - `canvas_commands` is opted OUT of parallelism via
+    //     `executionMode: 'sequential'` on its tool definition.
+    //     Server-side, its handler reads canvas state once to build a
+    //     nodeTypeMap; a parallel CREATE+MERGE pair on the same id
+    //     would lose provenance injection on the merge. Client-side,
+    //     SSE tool_result completion order ≠ declared order and
+    //     `useAgentStream` applies each result the moment it lands,
+    //     so a parallel MERGE could land before its CREATE. The
+    //     per-tool override means any batch containing a
+    //     `canvas_commands` call falls back to serial — acceptable
+    //     because mixed read+write batches are rare in practice
+    //     (the agent typically reads first, writes later).
+    //   - `ingest_content` writes via the preprocess dispatcher.
+    //     Concurrent calls on different nodes touch different files;
+    //     concurrent calls on the same node fall back to atomic
+    //     last-writer-wins via `atomicWriteJson` / `atomicWriteText`,
+    //     which is no worse than serial. Same-node concurrent
+    //     ingestion is also rare in practice.
+    toolExecution: 'parallel',
   });
 
   // ------- Single subscribe: queue events, flag agent_end, count turns -------
@@ -227,19 +251,28 @@ export async function* runAgent(
         case 'tool_execution_end': {
           const result = event.result as AgentToolResult<unknown> | undefined;
           const toolText = result?.content ? joinText(result.content) : '';
-          // pi-agent-core wraps thrown executor errors as `isError: true`.
-          // Today's tools encode failures inside the JSON payload instead
-          // of throwing, so this only surfaces in logs — but Step 2's file
-          // tools (which throw) will benefit from the breadcrumb without
-          // any further wiring.
+          // pi-agent-core wraps thrown handler errors as tool results
+          // with `isError: true` and the `Error.message` as text content.
+          // Lift that into the standard `ToolResponse<status: 'error'>`
+          // envelope so the web client renders it as an error tool row
+          // (see apps/web/src/components/Messages/ToolMessage.tsx).
+          // Successful results stay verbatim — the web's
+          // `parseToolResponse` either reads their existing envelope or
+          // auto-wraps plain JSON as `{ status: 'success', data: ... }`.
+          let payload = toolText;
           if (event.isError) {
             logger?.info(
               `[agent] Tool ${event.toolName} returned isError=true: ${toolText.slice(0, 200)}`,
             );
+            payload = JSON.stringify({
+              tool: event.toolName,
+              status: 'error',
+              error: toolText || 'Tool execution failed',
+            });
           }
           yield {
             type: 'tool_result',
-            data: { toolName: event.toolName, toolResult: toolText },
+            data: { toolName: event.toolName, toolResult: payload },
           };
           break;
         }

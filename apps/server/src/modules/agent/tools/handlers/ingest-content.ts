@@ -19,13 +19,13 @@ export async function handleIngestContent(
 ): Promise<string> {
   const canvas = getCanvasStore(args.canvasId).read();
   if (!canvas) {
-    return JSON.stringify({ error: `Canvas ${args.canvasId} not found` });
+    throw new Error(`Canvas ${args.canvasId} not found`);
   }
 
   const nodes = (canvas.state.nodes ?? []) as Array<Record<string, unknown>>;
   const node = nodes.find((n) => n.id === args.nodeId);
   if (!node) {
-    return JSON.stringify({ error: `Node ${args.nodeId} not found` });
+    throw new Error(`Node ${args.nodeId} not found`);
   }
 
   const data = node.data as Record<string, unknown> | undefined;
@@ -52,7 +52,15 @@ export async function handleIngestContent(
     .map((d) => `${d.code}: ${d.message}`);
   const errorString = errors.length > 0 ? errors.join('; ') : undefined;
 
-  if (!persisted && result.success) {
+  // Failure → throw so pi-agent-core flags the tool result as `isError: true`.
+  if (!result.success) {
+    throw new Error(
+      errorString ??
+        `Ingestion failed for node ${args.nodeId} (type '${type}')`,
+    );
+  }
+
+  if (!persisted) {
     return JSON.stringify({
       success: true,
       title: result.extracted?.title,
@@ -61,8 +69,7 @@ export async function handleIngestContent(
   }
 
   return JSON.stringify({
-    success: result.success,
+    success: true,
     title: result.extracted?.title,
-    error: errorString,
   });
 }

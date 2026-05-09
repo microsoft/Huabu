@@ -37,26 +37,6 @@ export const NodeSizeSchema = Type.Object({
 });
 
 /**
- * Canonical "optional canvas id" tool argument.
- *
- * Every canvas-aware tool accepts this field so the LLM can target a
- * canvas other than the request's default. When omitted, the route
- * layer falls back to the request-scoped canvas id (see
- * `executeTool`'s `resolveCanvasArgs`).
- *
- * Spread into a `Type.Object({...})` rather than nested as a property
- * so each tool can compose it alongside its own params.
- */
-export const OptionalCanvasIdField = {
-  canvasId: Type.Optional(
-    Type.String({
-      description:
-        'Optional canvas ID override. When omitted, the current request canvas is used.',
-    }),
-  ),
-} as const;
-
-/**
  * Palette colour token shared by node text/accent and edge stroke.
  *
  * Tokens (e.g. "purple") map to the current hex via

@@ -467,7 +467,9 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
 // Stage 1: Cluster annotation strokes spatially
 // Stage 2: Collect IDs of nearby/enclosed nodes + edges (no labels/positions)
 // Stage 3: Send screenshot + IDs to the server-side LLM agent which fetches
-//          additional node content on demand via `get_node_detail`
+//          additional node content on demand via `read` (markdown body),
+//          node layout via `inspect_nodes` (canvas.json fields), and
+//          edge style via `inspect_edges`.
 //
 // Each call to `triggerAnnotationRecognition` owns its own AbortController
 // and runs independently of any other in-flight batches. Two consecutive
@@ -569,7 +571,8 @@ function collectStrokes(
 /**
  * Convert an AnnotationContext to the wire payload sent to the server.
  * Only IDs + the cluster bbox cross the wire — the LLM fetches any node
- * content it needs via the `get_node_detail` tool.
+ * content it needs via `read`, layout via `inspect_nodes`, and edge
+ * style via `inspect_edges`.
  */
 function toClusterContextPayload(
   ctx: AnnotationContext,
@@ -701,9 +704,9 @@ async function triggerAnnotationRecognition(
 
     // ── Stage 3: Resolve every cluster via the server-side LLM agent ──
     // The rule-based fast path was removed because its false-positive rate
-    // was too high — the LLM (with on-demand `get_node_detail` access) now
-    // makes every call. Per-cluster requests are independent and fire in
-    // parallel under the shared AbortSignal.
+    // was too high — the LLM (with on-demand `read` / `inspect_nodes` /
+    // `inspect_edges` access) now makes every call. Per-cluster requests
+    // are independent and fire in parallel under the shared AbortSignal.
     const resolvedIntents: Array<{
       clusterId: string;
       intent: ResolvedAnnotationIntent;

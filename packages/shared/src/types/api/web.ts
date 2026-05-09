@@ -19,7 +19,8 @@ export type WebLookupQuery = z.infer<typeof webLookupQuerySchema>;
 
 export interface WebPreviewResponse {
   url: string;
-  title?: string;
+  /** Display label for the node (mirrors `NodeContent.label` on the server). */
+  label?: string;
   contentHtml?: string;
   summary?: string;
   image?: string;
@@ -29,7 +30,8 @@ export interface WebPreviewResponse {
 
 export interface WebReaderResponse {
   url: string;
-  title: string;
+  /** Display label for the node (mirrors `NodeContent.label` on the server). */
+  label: string;
   html: string;
   contentMarkdown?: string;
   siteName?: string;

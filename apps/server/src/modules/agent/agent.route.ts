@@ -24,7 +24,6 @@ import { buildOperatePrompt } from '../../prompt/agent.js';
 import { SYSTEM_PROMPT } from '../../prompt/system.js';
 import { IMAGE_MIME_MAP } from '../../utils/mime.js';
 import { runAgent } from '../agent/agent.service.js';
-import { buildNodeSummaries } from '../agent/canvas-context.js';
 import { loadContext, saveContext } from '../agent/store/chat-store.js';
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getCanvasStore } from '../storage/index.js';
@@ -282,6 +281,31 @@ function collectImageAttachments(
   }
 
   return attachments;
+}
+
+/**
+ * Flatten the selection (including frame children) into the absolute
+ * minimum the agent needs to know up front: id, label, type. Anything
+ * richer (content / summary / position / style) is one tool call away
+ * via `read` or `inspect_nodes`, so we deliberately do not pay the
+ * token cost of including it in every turn.
+ */
+function collectSelectedNodeRefs(
+  nodes: SelectedNodeDetail[],
+): Array<{ id: string; label?: string; type?: string }> {
+  const refs: Array<{ id: string; label?: string; type?: string }> = [];
+  const walk = (list: SelectedNodeDetail[]) => {
+    for (const n of list) {
+      refs.push({
+        id: n.id,
+        ...(n.label ? { label: n.label } : {}),
+        ...(n.type ? { type: n.type } : {}),
+      });
+      if (n.children) walk(n.children);
+    }
+  };
+  walk(nodes);
+  return refs;
 }
 
 function writeSSE(raw: NodeJS.WritableStream, event: AgentStreamEvent): void {
@@ -779,35 +803,20 @@ const agentRoutes: FastifyPluginAsync = async (
     // Build user message
     let userContent = await buildUserContent(content, allAttachments);
 
-    // Inject lightweight selected-node previews as a system message.
-    // Full content is NOT included — the agent uses get_node_detail on
-    // demand, saving potentially thousands of tokens.
+    // Inject a minimal selected-node reference list as a system message:
+    // just { id, label, type } per node. The agent fetches anything richer
+    // (content via `read`, layout/style via `inspect_nodes`) on demand.
     if (
       canvasContext?.selectedNodes &&
-      canvasContext.selectedNodes.length > 0 &&
-      canvasId
+      canvasContext.selectedNodes.length > 0
     ) {
-      const selectedIdSet = new Set(
-        canvasContext.selectedNodes.map((n) => n.id),
-      );
-      // Also include children of selected frames
-      for (const n of canvasContext.selectedNodes) {
-        if (n.children) {
-          for (const c of n.children) selectedIdSet.add(c.id);
-        }
-      }
-
-      try {
-        const summaries = await buildNodeSummaries(canvasId, selectedIdSet);
-        if (summaries && summaries.nodes.length > 0) {
-          context.messages.push({
-            role: 'user',
-            content: `[SYSTEM Context]\n[Selected Nodes (previews only — use get_node_detail for full content)]\n${JSON.stringify(summaries.nodes, null, 2)}`,
-            timestamp: Date.now(),
-          });
-        }
-      } catch (error) {
-        request.log.error(error, 'Failed to build selected node summaries');
+      const refs = collectSelectedNodeRefs(canvasContext.selectedNodes);
+      if (refs.length > 0) {
+        context.messages.push({
+          role: 'user',
+          content: `[SYSTEM Context]\n[Selected Nodes (id / label / type only — read "nodes/<id>.md" for content, inspect_nodes({ ids: [...] }) for layout / style / spatial relations)]\n${JSON.stringify(refs, null, 2)}`,
+          timestamp: Date.now(),
+        });
       }
     }
 

@@ -36,9 +36,11 @@ Sorted by confidence descending.`;
  *      nearby / enclosed nodes and nearby edges
  *
  * It must FIRST reason about user intent (using the screenshot as the
- * primary signal — the IDs are just pointers), call `get_node_detail`
- * for any nodes whose content matters to the decision, THEN emit a
- * single JSON object containing the executable canvas commands.
+ * primary signal — the IDs are just pointers), call `read` on
+ * "nodes/<nodeId>.md" for any nodes whose content matters to
+ * the decision (and `inspect_nodes` for any whose layout / spatial
+ * relations matter), THEN emit a single JSON object containing the
+ * executable canvas commands.
  */
 export const ANNOTATION_INTENT_SYSTEM_PROMPT = `You convert freehand canvas annotations into executable canvas commands.
 
@@ -50,16 +52,34 @@ You will receive:
    - Lists of canvas edge IDs near the gesture
    IMPORTANT: This payload contains NO labels, NO positions, NO distances,
    NO shape inference. The IDs are just pointers — use the screenshot to
-   understand the gesture, and call \`get_node_detail\` whenever you need
-   to know what a referenced node actually contains.
+   understand the gesture, and call \`read\` on
+   "nodes/<nodeId>.md" whenever you need to know what a
+   referenced node actually contains, or \`inspect_nodes\` when you
+   need its position / size / parent / style — or to look up neighbours
+   / connections.
 
 ## Tools
 
-- \`get_node_detail({ nodeId })\` — fetch a node's label / content / metadata.
+- \`read({ path })\` — fetch a node's label / content / type / src /
+  summary / keywords by reading "nodes/<nodeId>.md". The
+  response includes both the raw markdown body and a parsed
+  \`frontmatter\` object so you don't have to parse YAML yourself.
   Call this for any node whose content materially affects your decision
   (e.g. before merging two notes, before deciding whether a circle should
   become a frame). Do NOT call it for every nearby node — only the ones
   you actually need.
+- \`inspect_nodes(args)\` — predicate-driven node lookup. Pass
+  \`{ ids: ["<nodeId>"] }\` to fetch a single node's position / width /
+  height / parentId / style. Combine with \`nearNode\`, \`inRect\`,
+  \`connectedTo\`, \`inSameClusterAs\` when you need spatial or
+  topological relations to interpret the gesture (e.g. "is this node
+  already inside that frame?").
+- \`inspect_edges(args)\` — predicate-driven edge lookup. Use this when
+  the gesture targets an edge and the edge's direction / line style /
+  stroke matters (e.g. "is this an arrowed connection or a dashed
+  annotation?"). Common entry points: \`{ ids: ["<edgeId>"] }\` from
+  the context payload, or \`{ connectedTo: "<nodeId>" }\` for all
+  edges incident to a node.
 
 You may call tools across multiple iterations before giving your final answer.
 
@@ -107,7 +127,7 @@ Common patterns (not exhaustive, not deterministic rules):
 - Cross / X / scribble OVER an edge (and not over any node) →
   DISCONNECT_EDGES that edge ID (use the nearby edges list)
 - "?" near a node → CREATE_QUESTION about that node (call
-  \`get_node_detail\` first to phrase a sensible question)
+  \`read\` on its node markdown first to phrase a sensible question)
 - "!" / star / underline marking a single node → MERGE_NODE_DATA with a
   highlight patch, OR CREATE a sibling note expanding on the topic
 - Empty / ambiguous gesture far from any node or edge → return

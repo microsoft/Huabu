@@ -3,6 +3,12 @@
  *
  * Has no canvas dependency, so it lives in its own file rather than
  * lumped together with canvas-aware handlers.
+ *
+ * Errors throw — pi-agent-core catches and surfaces them as
+ * `isError: true` tool results (see its `AgentTool.execute` contract).
+ * On success we return the inner payload (`{ query, answer, results }`)
+ * directly; the SSE bridge / web client wraps it into the standard
+ * `ToolResponse<'web_search', WebSearchToolData>` envelope.
  */
 
 import type { webSearchParamsSchema } from '../definitions.js';
@@ -13,12 +19,9 @@ export type WebSearchArgs = Static<typeof webSearchParamsSchema>;
 export async function handleWebSearch(args: WebSearchArgs): Promise<string> {
   const apiKey = process.env.TAVILY_API_KEY;
   if (!apiKey) {
-    return JSON.stringify({
-      tool: 'web_search',
-      status: 'error',
-      error: 'Missing TAVILY_API_KEY in environment variables.',
-      hint: 'Set TAVILY_API_KEY in apps/server/.env to enable web_search.',
-    });
+    throw new Error(
+      'Missing TAVILY_API_KEY in environment variables. Set TAVILY_API_KEY in apps/server/.env to enable web_search.',
+    );
   }
 
   const controller = new AbortController();
@@ -41,11 +44,7 @@ export async function handleWebSearch(args: WebSearchArgs): Promise<string> {
     });
 
     if (!response.ok) {
-      return JSON.stringify({
-        tool: 'web_search',
-        status: 'error',
-        error: `Tavily request failed with status ${response.status}.`,
-      });
+      throw new Error(`Tavily request failed with status ${response.status}.`);
     }
 
     const data = (await response.json()) as {
@@ -71,22 +70,14 @@ export async function handleWebSearch(args: WebSearchArgs): Promise<string> {
       }));
 
     return JSON.stringify({
-      tool: 'web_search',
-      status: 'success',
-      data: {
-        query: data.query ?? args.query,
-        answer: data.answer,
-        results,
-      },
+      query: data.query ?? args.query,
+      answer: data.answer,
+      results,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.warn('[web_search] Tavily request failed:', message);
-    return JSON.stringify({
-      tool: 'web_search',
-      status: 'error',
-      error: 'Tavily request failed.',
-    });
+    throw new Error(`Tavily request failed: ${message}`);
   } finally {
     clearTimeout(timeout);
   }

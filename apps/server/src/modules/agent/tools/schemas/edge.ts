@@ -32,9 +32,6 @@ export const EdgeStyleSchema = Type.Object({
   lineStyle: Type.Optional(EdgeLineStyleSchema),
   stroke: Type.Optional(PaletteColorSchema),
   strokeWidth: Type.Optional(StrokeWidthSchema),
-  animated: Type.Optional(
-    Type.Boolean({ description: 'Animated flowing dots' }),
-  ),
   direction: Type.Optional(EdgeDirectionSchema),
 });
 

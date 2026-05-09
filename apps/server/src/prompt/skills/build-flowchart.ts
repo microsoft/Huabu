@@ -24,7 +24,7 @@ Allowed tokens are enumerated in the CREATE_NODES schema (data.style.accent) —
 
 ## Edges
 Keep edges minimal — use spatial position (proximity, alignment) to imply relationships. Only connect nodes where the relationship isn't obvious from layout or is semantically important.
-All edge styling fields (lineType, lineStyle, stroke, strokeWidth, animated, direction) are optional and fully described by the CONNECT_NODES.edges[].style schema — pick values from the schema's enums.
+All edge styling fields (lineType, lineStyle, stroke, strokeWidth, direction) are optional and fully described by the CONNECT_NODES.edges[].style schema — pick values from the schema's enums.
 
 ## Cleanup
 ALIGN_NODES "center-v" per row. DISTRIBUTE_NODES per row for even spacing.

@@ -4,6 +4,72 @@
 
 ---
 
+## 2026-05-09 · Annotation Agent 接入 `inspect_edges`，删除冗余 `spatialSummary`，工具补 `total` 字段
+
+**What Changed**
+
+- **Annotation 智能体可看到边了**：`recognizeAnnotationCommands` 的工具数组只挂了 `read` + `inspect_nodes`，但系统提示词却宣传 `inspect_edges` 已可用。模型一旦真去调就会得到 `unknown tool` 错误。本次把 `inspect_edges` 加进 annotation agent 的工具清单，跟提示词对齐。
+- **删除死字段 `AgentBaseContext.spatialSummary`**：前端 `getAgentContext` 一直在每次发请求时算并发送 `clusters / arrangement` 描述，但服务端从未读它（agent 路由只看 `nodes` / `edges` / `selectedNodes` / `recentActions`）。本次从 wire-type、前端缓存（`SpatialCache`）和 `getCachedSpatialData` 输出里彻底删除；agent 想知道空间布局请走 `get_canvas_outline()` / `inspect_nodes`。
+- **`inspect_nodes` / `inspect_edges` / `ls` 新增 `total` 字段**：原先只有 `count` + `truncated:true/false`，模型无法判断"被截断了到底丢了多少条"。三个工具现在都返回 `total`（截断前的命中总数）。`grep` / `find` 因为是早退式扫描（hit limit 即停），无法廉价知道 total，工具描述里明确写"`count` = 实际返回数；`truncated:true` 表示还有更多但不知道具体多少"。
+
+**Notes**
+
+- 兼容性：`AgentBaseContext.spatialSummary` 是前端 → 服务端 wire field，删除属于 wire-format 变更。已确认服务端 `agent.route.ts` / `intent.route.ts` 没有任何处读它，前端也没有其它消费方。
+- 文档：`docs/agent-context.md`、`docs/prompt-node-design.md`、`docs/external_agent_design.md`、`docs/user-guide/05-sources-and-knowledge.md`、`docs/user-guide/06-ai-collaboration.md` 中所有 `get_canvas_state` / `get_node_detail` / `get_node_geometry` / `read_source` 的过期引用一并更新成新工具名（`get_canvas_outline` / `read("nodes/<id>.md")` / `inspect_nodes`）。
+- `docs/agent-spatial-tools-plan.md` §7 已展开为后续 TODO（`describe_node_position`、视觉信号 ↔ 空间工具协同等）。
+
+---
+
+## 2026-05-09 · Agent 工具调用改为并行执行（写工具除外）
+
+**What Changed**
+
+- 同一轮 LLM 响应里发出的多个独立工具调用现在会**并发**派发，而不再像之前一样一个接一个串行跑。常见收益：模型同批发 N 个 `read` / `inspect_nodes` / `web_search` 时，总耗时从「累加」变成「最大值」。
+- `canvas_commands` 单独保持串行（在工具定义里挂了 `executionMode: 'sequential'`），避免 server-side handler 共用 nodeTypeMap 的 race，以及 client-side SSE 完成顺序 ≠ LLM 声明顺序导致 MERGE 抢在 CREATE 前 apply 的问题。
+
+**Notes**
+
+- 用户感知：复杂问答（agent 需要批量读多个节点 / 跨多个 source 搜索）的响应明显更快。
+- 实现细节：pi-agent-core 的 `toolExecution` 切到 `'parallel'`（见 [agent.service.ts](../../apps/server/src/modules/agent/agent.service.ts) `toolExecution` 字段附近的 audit 注释）。pi-agent-core 的 batch 行为是「批里任一 sequential 工具就整批退化为串行」，所以混合 `[read, canvas_commands]` 批次会回到串行——但 trace 里 agent 通常先读后写、读写分轮，混合批罕见，损失可接受。
+- `ingest_content` 仍走并行：跨节点并发安全（不同文件），同节点并发由 `atomicWriteJson` / `atomicWriteText` 兜底为 last-writer-wins。
+
+---
+
+## 2026-05-10 · Agent 工具改为画布隔离（移除跨画布访问）
+
+**What Changed**
+
+- 所有 agent 工具的运行范围从「整个 workspace」收紧到「当前画布」。`canvas_commands`、`get_canvas_outline`、`inspect_nodes`、`ingest_content` 不再接受 `canvasId` 参数；文件类工具 `read` / `grep` / `find` / `ls` 的 `path` 改为相对当前画布根目录，无法寻址其他画布。
+- 节点文件路径从 `<canvasId>/nodes/<nodeId>.md` 简化为 `nodes/<nodeId>.md`；`canvas.json`、`memory/*.md`、`artifacts/*` 等同理。
+- 沙箱层 `safeResolve(canvasId, path)` 现在以画布目录为根做严格前缀校验，并校验 `canvasId` 本身不能含 `/` `\` `..` 等穿越字符。
+- 所有 prompt、agent route 注入的「Selected Nodes」上下文消息、annotation intent 用户消息中的示例路径都同步更新。
+
+**Notes**
+
+- 用户感知：解决了模型把字面量 `<canvasId>/...` 当作真实路径来调用的偶发故障；agent 调用 `read`/`grep` 类工具更稳定。
+- 跨画布读写能力**完全移除**——如果未来需要让 agent 跨画布工作，需要重新引入显式的 canvas 切换或聚合工具。
+- Wire 改动：`grep` / `find` 返回的命中 enrichment 不再包含 `canvasId` 字段（改为隐式 = 当前画布），仅保留 `nodeId` / `label` / `nodeType`。目前没有 web 端消费这些字段，安全。
+
+---
+
+## 2026-05-09 · Agent 工具描述清晰度修复 + 错误协议对齐 pi-agent-core
+
+**What Changed**
+
+- 所有 read 类工具的失败现在通过 `throw` 上抛，由 pi-agent-core 自动包成 `isError: true` 的 tool result；服务端 SSE bridge 把 `isError` 提升为统一的 `{ tool, status: 'error', error }` envelope，UI 上失败工具卡片可以渲染成红色错误态。
+- `inspect_nodes` 描述里加了 footgun 警告：不带任何 predicate 时会扫全表，建议改用 `get_canvas_outline`。
+- `read` 描述补全了可读文件类型清单（`canvas.json` / `nodes/<id>.md` / `chat/*.json` / `intent.json` / `events.jsonl` / `memory/*.md` / `artifacts/*` 元数据等），并明确「单文件 only，不支持 glob」、`frontmatter` 字段对节点文件的实际 shape（`label, type, src?, summary?, keywords?`）、`nextOffset` 是「下一行未读行的 1-indexed 行号」。
+- `connectedTo` 描述显式写明「不包含目标节点本身」。
+- `find` / `grep` / `ls` 的 `limitReached` 字段改名为 `truncated`，与 `read` / `inspect_nodes` 保持一致；描述里也补了「true 时请抬高 limit 或精化 query」。
+
+**Notes**
+
+- 这些是**给 LLM 看的提示**，不影响前端 UI 行为；用户感知主要在 agent 调用工具更准、不再幻觉调用已删除的工具，以及失败工具卡片正确显示错误态。
+- `truncated` 字段重命名是 wire-format 改动，但目前没有 web/shared 端消费这个字段，安全。
+- 后续 agent 工具覆盖范围扩展（edge 非-style 属性、node `zIndex`、批量 `read_nodes`、`describe_node_position`）记录在 [docs/agent-spatial-tools-plan.md §8](../agent-spatial-tools-plan.md) 的 TODO 列表里。
+
+---
+
 ## 2026-05-08 · Agent 循环升级到 pi-agent-core
 
 **What Changed**

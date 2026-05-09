@@ -7,6 +7,11 @@
  * `labelSource` so downstream apply logic knows the change came from
  * the agent. The actual canvas mutation happens client-side via the
  * existing canvas-command pipeline once the SSE event lands.
+ *
+ * Returns the inner payload (`{ source, canvasId, commands }`) on
+ * success; the SSE bridge / web client wraps it into the standard
+ * `ToolResponse<'canvas_commands', ...>` envelope. Errors throw —
+ * pi-agent-core catches and surfaces them as `isError: true`.
  */
 
 import { getCanvasStore } from '../../../storage/index.js';
@@ -128,12 +133,8 @@ export async function handleCanvasCommands(
   });
 
   return JSON.stringify({
-    tool: 'canvas_commands',
-    status: 'success',
-    data: {
-      source: 'agent',
-      canvasId: args.canvasId,
-      commands,
-    },
+    source: 'agent',
+    canvasId: args.canvasId,
+    commands,
   });
 }

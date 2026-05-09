@@ -1,0 +1,357 @@
+# Agent 空间/拓扑工具重构 Plan
+
+> 目标：在 agent 已有 `read` / `grep` / `find` / `ls`（按文本/文件名找节点 + 取正文）
+> 之上，把"按空间关系或拓扑结构理解 canvas"这一面用最少的工具集补齐。
+
+## 1. 背景
+
+现状只有两块碎片：
+
+- [`get_node_geometry`](../apps/server/src/modules/agent/tools/handlers/canvas-read.ts) — 单节点 position/size/parentId/style。
+- [`get_canvas_state`](../apps/server/src/modules/agent/tools/handlers/canvas-read.ts) — 全量节点摘要 + edges，**无 position/size/style**，**无空间结构**。
+
+而 [packages/shared/src/utils/spatial.ts](../packages/shared/src/utils/spatial.ts)
+已经有一套零依赖、前后端共用的空间推理库：`rectEdgeDistance` /
+`relativeDirection` / `findNearbyNodes` / `findClusters` / `nodesInRect` /
+`sortByReadingOrder` / `detectArrangement` / `buildSpatialSummary` /
+`buildQuestionNodeContext`。今天只在前端 [`canvasStore.getCachedSpatialData`](../apps/web/src/store/canvasStore.ts)
+里被调用，作为静态 `spatialSummary` 塞进 `AgentBaseContext` —— agent 在 tool loop
+里没法主动查。
+
+服务端只是缺一层薄薄的"工具入口"，计算逻辑无需重写。
+
+## 2. 设计原则
+
+1. **磁盘可读的不重复造**：node 的 label/content/summary/keywords 已经在
+   `nodes/<id>.md`，由 `read` 拿；空间工具只暴露 canvas.json 里的字段
+   （position/size/parentId/style）+ 派生的几何关系。
+2. **几何字段一次给齐**：outline 直接带 position/size，agent 拿到地图就能粗略
+   空间推理，不用每节点 round-trip 一次。
+3. **少量参数化谓词覆盖多种问题**，避免 14 个 `find_xxx_by_yyy`。
+4. **结构化 JSON 优先，自然语言次之**：返回 ID + 数字（distance、direction），
+   让 agent 自己组合下一步。
+
+## 3. 工具集变更
+
+| 变化 | 工具                                                                                                |
+| ---- | --------------------------------------------------------------------------------------------------- |
+| 删   | `get_canvas_state`、`get_node_geometry`                                                             |
+| 加   | `get_canvas_outline`、`inspect_nodes`、`inspect_edges`                                              |
+| 不动 | `read` / `grep` / `find` / `ls` / `canvas_commands` / `ingest_content` / `web_search` / `use_skill` |
+
+工具总数 9 → 10。`get_node_geometry` 等价于 `inspect_nodes({ ids: [id] })`
+的退化形式（包含 style），不再单独存在。`inspect_edges` 与 `inspect_nodes`
+对称：outline 只留 edge 拓扑（`{ id, source, target }`），带 EdgeStyle
+的查询（方向 / 线型 / 笔触）都走 `inspect_edges`，避免 outline 描述被
+边语义词典污染。
+
+## 4. 工具签名
+
+### 4.1 `get_canvas_outline`
+
+> 整张画布的"地图"。Agent 第一次进场或换画布时调用一次，之后基本不再需要全量。
+
+**参数**
+
+```ts
+{
+  canvasId?: string,          // 复用 OptionalCanvasIdField
+  includePreviews?: boolean,  // 默认 false；预览交给 read/grep
+  includeStyle?: boolean,     // 默认 false；视觉任务才需要
+}
+```
+
+**返回**
+
+```ts
+{
+  canvasId: string,
+  version: number,
+  bbox: { x, y, width, height } | null,            // 全画布 bbox（无节点时 null）
+  nodes: Array<{
+    id, type, label, parentId,                    // type='frame' 的条目就是 frame
+    position: { x, y },                            // 绝对坐标
+    width, height,                                 // 来自 measured ?? style ?? 0
+    style?: object,                                // includeStyle=true 才送
+    preview?: string,                              // includePreviews=true 才送
+  }>,
+  edges: Array<{ id?, source, target }>,           // 拓扑只；EdgeStyle 走 inspect_edges
+  spatial: {
+    clusters: Array<{
+      frameId?, frameLabel?,
+      nodeIds: string[],                           // 已 reading-order
+      arrangement: string,                         // detectArrangement()
+    }>,
+  },
+}
+```
+
+> **Frame 树为什么不显式给**：frame 也是 node（`type='frame'`），自带几何；
+> "哪些 node 在哪个 frame 里" 完全可由 `nodes[*].parentId` 派生，agent
+> 一次 `groupBy(parentId)` 就有。再加一个 `frames` 字段会和 `nodes` 信息
+> 重叠，徒增 schema 表面积。`spatial.clusters` 已经把 `frameId` /
+> `frameLabel` 标好，定位 frame 不用再扫一遍。
+>
+> **Isolated 同理不取**：孤立节点 = 全部 nodeIds 减 `clusters[*].nodeIds`
+> 的并集，agent 一行 setDiff 就出来。`clusters` 本身是 O(n²) 单链聚类
+> 的结果，不能派生、必须服务端给。
+
+### 4.2 `inspect_nodes`
+
+> 一个工具承包"按属性 / 按拓扑 / 按空间"找节点的所有变体，并返回节点的
+> 完整属性（几何 + style + 派生拓扑信息）。谓词 mutually combinable，未填
+> 字段忽略。名字选 `inspect`（而非 `filter`）是为了同时表达"找"和"看清楚"
+> 两件事。
+
+**参数**
+
+```ts
+{
+  canvasId?: string,
+  // ── 属性谓词 ──
+  ids?: string[],
+  byType?: string | string[],
+  byParent?: string | null,                        // null = 仅顶层
+  labelPattern?: string,                           // 正则；和 grep 互补
+  // ── 空间谓词 ──
+  inRect?: { x, y, width, height },                // nodesInRect（中心命中）
+  nearNode?: { id: string, maxDistance?: number, maxCount?: number, sameParent?: boolean },
+  nearPoint?: { x: number, y: number, maxDistance?: number, maxCount?: number },
+  inSameClusterAs?: string,                        // 复用 buildSpatialSummary
+  // ── 拓扑谓词 ──
+  connectedTo?: { id: string, depth?: 1 | 2 },     // 边邻接（默认 1 跳）
+  // ── 输出 ──
+  sort?: 'distance' | 'reading-order' | 'area',
+  limit?: number,                                  // 默认 50
+}
+```
+
+**返回**
+
+```ts
+{
+  count: number,                                   // 命中数量（≤ limit）
+  truncated: boolean,                              // 实际匹配 > limit 时为 true
+  arrangement?: string,                            // detectArrangement，count ≥ 2 时
+  nodes: Array<{
+    id, type, label, parentId,
+    position: { x, y },
+    width, height,
+    style?: object,                                // 替代 get_node_geometry
+    // 派生字段（按谓词附加）
+    distance?: number,                             // 边到边，nearNode/nearPoint
+    centerDistance?: number,
+    direction?: 'left'|'right'|'above'|'below',
+    edgeIds?: string[],                            // connectedTo
+    hops?: 1 | 2,                                  // connectedTo 且 depth=2 时
+    clusterId?: string,                            // inSameClusterAs
+  }>,
+}
+```
+
+错误约定：
+
+```ts
+{ error: "Canvas <id> not found" }
+{ error: "Node <id> not found (used in nearNode/connectedTo)" }
+{ count: 0, truncated: false, nodes: [] }   // 合法查询、零命中
+```
+
+### 4.3 `inspect_edges`
+
+> 与 `inspect_nodes` 对称的 edge 查询入口。Outline 只提供拓扑，这里
+> 负责返回 EdgeStyle 的全集。谓词 mutually combinable，全部为空时
+> 返回所有 edge（受 `limit` 限制）。
+
+**参数**
+
+```ts
+{
+  canvasId?: string,
+  // ── 身份 / 端点 ──
+  ids?: string[],                                  // 与 inspect_nodes.edgeIds 结合使用
+  connectedTo?: string,                            // node 的所有 incident edges
+  bySource?: string,
+  byTarget?: string,
+  between?: { a: string, b: string },              // a ↔ b（任意方向）
+  // ── EdgeStyle 谓词 ──
+  byDirection?: EdgeDirection | EdgeDirection[],   // 未设 = 'none'
+  byLineStyle?: EdgeLineStyle | EdgeLineStyle[],   // 未设 = 'solid'
+  byLineType?: EdgeLineType | EdgeLineType[],      // 未设 = 'bezier'
+  // ── 输出 ──
+  limit?: number,                                  // 默认 50
+}
+```
+
+**返回**
+
+```ts
+{
+  count: number,
+  truncated: boolean,
+  edges: Array<{
+    id?: string,                                   // 磁盘上缺失时不出
+    source: string,
+    target: string,
+    // EdgeStyle 字段；未设时省略
+    lineType?: EdgeLineType,
+    lineStyle?: EdgeLineStyle,
+    direction?: EdgeDirection,
+    stroke?: string,                               // AccentToken | CSS color
+    strokeWidth?: EdgeStrokeWidth | number,
+  }>,
+}
+```
+
+错误约定：
+
+```ts
+{ error: "Canvas <id> not found" }
+{ error: "Node <id> not found (used in connectedTo/bySource/byTarget/between)" }
+{ count: 0, truncated: false, edges: [] }
+```
+
+## 5. 谓词到场景的覆盖矩阵
+
+| #   | 场景                                          | 调用                                                                                                                                                                                             |
+| --- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | 画布大概长什么样？几个 frame、几片簇？        | `get_canvas_outline()` → `nodes` 里 filter `type='frame'` + `spatial.clusters`                                                                                                                   |
+| 2   | 节点 X 在哪？多大？属于哪个 frame？           | `inspect_nodes({ ids: ['…'] })`                                                                                                                                                                  |
+| 3   | X 周围有什么？最近 5 个邻居 + 方向？          | `inspect_nodes({ nearNode: { id, maxCount: 5 } })`                                                                                                                                               |
+| 4   | X 在 graph 上连了谁？                         | `inspect_nodes({ connectedTo: { id } })`                                                                                                                                                         |
+| 5   | 和 X 同 frame 的兄弟？                        | `inspect_nodes({ byParent: 'frame-…' })`                                                                                                                                                         |
+| 6   | frame 内按什么形式排列？                      | `inspect_nodes({ byParent: 'frame-…', sort: 'reading-order' })` → `arrangement`                                                                                                                  |
+| 7   | 区域 (x,y,w,h) 里有什么？                     | `inspect_nodes({ inRect: {…} })`                                                                                                                                                                 |
+| 8   | 所有 image 节点？                             | `inspect_nodes({ byType: 'image' })`                                                                                                                                                             |
+| 9   | 孤立节点？                                    | 全部 `nodes[*].id` 减 `spatial.clusters[*].nodeIds` 的并集                                                                                                                                       |
+| 10  | "X 在 frame A 内偏右；frame A 在画布中央偏下" | 现阶段不加专门工具；agent 用 outline + nearNode 自己拼。如果后续 trace 显示高频需要，再 wrap [`buildQuestionNodeContext`](../packages/shared/src/utils/spatial.ts) 为 `describe_node_position`。 |
+| 11  | 某边是有箭头的还是虚线注释？                  | `inspect_edges({ ids: ['edge-…'] })` 或 `inspect_edges({ connectedTo: 'node-…' })`                                                                                                               |
+| 12  | 画布上所有虚线边 / 有向边？                   | `inspect_edges({ byLineStyle: ['dashed','dotted'] })` / `inspect_edges({ byDirection: ['forward','backward','both'] })`                                                                          |
+
+## 6. 落地步骤
+
+### Step 1 — 服务端空间助手（新文件）
+
+`apps/server/src/modules/agent/canvas-spatial.ts`
+
+- `buildSpatialNodes(canvasFile)`：把 canvas.json 的 nodes 转 `SpatialNode[]`。
+  - 大小取 `measured ?? style ?? top-level ?? 0`，对齐前端 [`getNodeSize`](../apps/web/src/utils/node/size.ts)。
+  - 位置解析为绝对坐标（顺着 parentId 累加）。
+  - 透传 `type` / `parentId` / `label`。
+- `buildCanvasOutline(canvasId, opts)`：返回 §4.1 形状。
+- `inspectNodes(canvasId, args)`：返回 §4.2 形状。
+
+### Step 2 — schema + tool definition
+
+`apps/server/src/modules/agent/tools/definitions.ts`：
+
+- 删 `getCanvasStateParamsSchema/getCanvasStateTool`、
+  `getNodeGeometryParamsSchema/getNodeGeometryTool`。
+- 加 `getCanvasOutlineParamsSchema/getCanvasOutlineTool`、
+  `inspectNodesParamsSchema/inspectNodesTool`。
+- description 写清三件事：
+  1. 数据来源是 canvas.json，不读 nodes/<id>.md；
+  2. 内容（label/content/summary/keywords）→ 用 `read`；
+  3. 子谓词的边界（什么时候用 outline、什么时候用 inspect_nodes）。
+- `chatTools` / `operateTools` 列表替换。
+
+### Step 3 — handler
+
+`apps/server/src/modules/agent/tools/handlers/canvas-read.ts`：
+
+- 删 `handleGetCanvasState`、`handleGetNodeGeometry`。
+- 加 `handleGetCanvasOutline`、`handleInspectNodes`，body 极薄，调 Step 1 的助手。
+
+### Step 4 — dispatcher
+
+`apps/server/src/modules/agent/tools/executor.ts`：替换 case 分支。
+
+### Step 5 — annotation intent agent 切换
+
+[`apps/server/src/modules/agent/intent.service.ts`](../apps/server/src/modules/agent/intent.service.ts)
+把 `getNodeGeometryTool` 换成 `inspectNodesTool`，prompt 文案同步更新。
+
+### Step 6 — 提示文案与注释扫尾
+
+- `agent.route.ts` 中提及 `get_node_geometry` 的 SYSTEM Context 文案。
+- `read.ts` / `canvas-fs.ts` 头注释中"对照 `get_node_geometry`"的部分。
+- `canvas-read.ts` 头注释整体改写。
+- `definitions.ts` 中 `read` / `grep` 工具描述里提到 `get_node_geometry` 的地方。
+
+### Step 7 — 验证
+
+- `get_errors` 跑全仓库。
+- `pnpm -w typecheck`（如果可用）。
+- 不写新单测；现有 spatial 库已经在 shared 包里，逻辑未改。
+
+## 7. 不在本 PR 范围（后续 TODO）
+
+> 这一节是把 §1–§6 之外、被刻意推后的工作显化成 TODO。每条都给出
+> **触发条件**（什么时候做）、**范围**（要改哪些文件 / 行为）、
+> **验证方式**（怎么算做完了），方便后续直接拉成 PR。
+
+### 7.1 ~~`AgentBaseContext.spatialSummary` 收编~~ · DONE 2026-05-09
+
+> 计划阶段的"保留作 outline 预热缓存"想法在落地时被否决：服务端从未消费
+> 该字段，纯属带宽浪费。已在 main 分支移除。
+
+- **完成项**
+  - `packages/shared/src/types/agent/context.ts` — 删除 `spatialSummary`
+    字段，改文档注释提示走 `get_canvas_outline()` / `inspect_nodes`。
+  - `apps/web/src/store/canvasStore.ts` —
+    `SpatialCache.summary` 字段删除；`getCachedSpatialData()` 仅返回
+    `{ spatialNodes }`（仍被 `useQuestionRunner` 用于 prompt 节点上下文）。
+  - `apps/web/src/store/canvasStore.ts:getAgentContext` 不再发送
+    `spatialSummary`。
+  - `docs/agent-context.md` §2.2 / §3 / §6 已更新。
+- **遗留**：无。前端缓存彻底变成 prompt-node 内部预算，与 agent 工具循环
+  解耦。
+
+### 7.2 `describe_node_position` 工具（场景 10）— TODO
+
+> 当 agent 在 prompt 节点 / annotation cluster 等"以一个节点为锚点向外
+> 扩散"的语境下需要"这个节点周围有什么"时，目前必须组合
+> `inspect_nodes({ near: id })` + `inspect_nodes({ ids })` + 自己拼描述。
+> `describe_node_position` 把这一拼装步骤做成一次调用，输出已渲染好的
+> "natural-language 邻居描述"。
+
+- **触发条件**：观察 prompt 节点 / annotation cluster trace 后，发现连续
+  多次 `inspect_nodes` 都在做同一种拼装（near + ids + 描述生成）。
+- **范围**
+  - 新增 `apps/server/src/modules/agent/tools/handlers/canvas-describe.ts`
+    包装 `buildQuestionNodeContext()`（现有于 prompt 节点路径）。
+  - 在 `apps/server/src/modules/agent/tools/definitions.ts` 注册一个
+    `describeNodePositionTool`，schema 仅含 `nodeId` + 可选 `radius`。
+  - 输出：`{ description: string, neighbors: NodeRef[], cluster?: ... }`。
+    `description` 是已渲染的 natural-language 段（如"该节点位于 Frame
+    'Plans' 的横向序列中第 2 位，左侧是 'Goals'，右侧是 'Risks'"）。
+  - 服务端实现尽量复用 `buildPromptNodeContext` / `buildSpatialSummary`，
+    不允许再新写一份空间算法。
+- **验证方式**
+  - `get_errors` 干净。
+  - 在 prompt 节点 / annotation cluster 的 trace 里，预期会看到 agent
+    在自然语言场景下用一次 `describe_node_position` 替代多次
+    `inspect_nodes`。
+  - 用户文档：在 `docs/user-guide/06-ai-collaboration.md` 工具表里追加
+    一行（不必单开章节）。
+
+### 7.3 视觉信号 ↔ 空间工具协同 — TODO
+
+> 当前截图（intent / annotation intent 路径）与空间工具（`get_canvas_outline`
+> / `inspect_nodes`）是两条平行通道。Annotation intent 已在 §1 fix 中
+> 接入了 `inspect_edges`，但**截图与空间工具的 ID 对齐**仍是隐式约定。
+
+- **触发条件**：当 LLM 出现"截图里看到的 X 节点 vs 工具返回的 nodeId 对
+  不上"类型 trace 时；或当我们要给 prompt 节点也加截图通道时。
+- **范围**
+  - 在截图增强时显式把 nodeId 角标化（部分路径已经做了，需要审计
+    `apps/web/src/handler/canvasCommand/utils/screenshot.ts`）。
+  - 在 `inspect_nodes({ rect })` 输出里追加 `viewportRelative?:
+{ x, y, w, h }`，让 agent 能把"截图里的某个区域" 直接喂给 rect 查询。
+  - 评估是否给 chat agent 增加 opt-in 的 `take_viewport_snapshot` 工具
+    （目前只有 intent 端点用截图）。
+- **验证方式**
+  - 不在本 TODO 内强制给 chat agent 加视觉通道；先把 ID 对齐做扎实，
+    再决定。
+  - 如果引入 `take_viewport_snapshot`，需要补 `docs/agent-context.md`
+    §2.3 的"普通对话不发截图"条目。

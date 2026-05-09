@@ -263,7 +263,7 @@ function migrateOneCanvas(
         ...src.metadata,
         nodeId,
         type: typeof node.type === 'string' ? node.type : src.type,
-        title: src.title,
+        label: src.title,
         src: src.src ?? undefined,
         content: src.content,
       };
@@ -281,7 +281,7 @@ function migrateOneCanvas(
       const nodeContent: NodeContent = {
         nodeId,
         type: typeof node.type === 'string' ? node.type : 'note',
-        title:
+        label:
           typeof data['label'] === 'string' ? (data['label'] as string) : null,
         src:
           typeof data['src'] === 'string' ? (data['src'] as string) : undefined,

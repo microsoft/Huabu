@@ -118,7 +118,7 @@ type AgentMessage = Message | CustomAgentMessages[keyof CustomAgentMessages];
      // pi-agent-core 在每次 LLM 调用前都会 await 这个 callback——长跑工具
      // 期间 OAuth token 该刷新就刷新。
      getApiKey: () => ensureApiKey(),
-     toolExecution: 'sequential', // Step 4 再考虑 'parallel'
+     toolExecution: 'parallel',
    });
    ```
 
@@ -231,11 +231,22 @@ subpath export `./tools/file/*`。论证点：
 | B             | mode 区分，operate 模式下解锁更广目录                                              |
 | C             | 用 `beforeToolCall` hook 做白名单 / 黑名单                                         |
 
-### Step 4（后续）：启用高级特性
+### Step 4：启用高级特性
 
+- ✅ 用 `toolExecution: 'parallel'` 让同一批独立工具并发执行（已落地，见
+  [agent.service.ts](../apps/server/src/modules/agent/agent.service.ts) 内
+  `toolExecution` 字段附近的 audit 注释）。read-only 工具自然并行安全；
+  `canvas_commands` 因为 server-side handler 共用 nodeTypeMap、client-side
+  SSE 完成顺序 ≠ 声明顺序两条 race 路径，单独挂了
+  `executionMode: 'sequential'`（见
+  [definitions.ts](../apps/server/src/modules/agent/tools/definitions.ts)
+  里 `canvasCommandsTool`）；`ingest_content` 走 atomicWrite，跨节点并发
+  天然安全，同节点并发是 last-writer-wins，沿用 parallel。pi-agent-core
+  的 batch 行为是"批里任一 sequential 工具就整批退化为串行"——所以混合
+  `[read, canvas_commands]` 批次会回到串行，但实际 trace 里 agent 通常
+  先读后写、读写分轮，混合批罕见，损失可接受。
 - 接 `agent.steer()` 用于"边跑边插话"
 - 让 `canvas_commands` 在用户取消后通过 `terminate: true` 立刻停 loop
-- 用 `toolExecution: 'parallel'` 让独立的 `web_search` + `get_node_detail` 同时跑
 
 ## 风险与缓解
 

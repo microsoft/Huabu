@@ -85,7 +85,11 @@ export interface NodeContent {
   nodeId: string;
   /** CanvasNodeType — kept loose here to avoid the shared dependency. */
   type: string;
-  title: string | null;
+  /**
+   * Display label shown on the canvas (`data.label` at runtime). Persisted
+   * as `label:` in the markdown frontmatter.
+   */
+  label: string | null;
   /**
    * External URL or `artifacts/<file>` reference. Optional: only meaningful
    * for source-backed nodes (web/pdf/image/audio/video). Note/text/frame
@@ -102,7 +106,7 @@ export interface NodeContent {
 export interface NodeContentSummary {
   nodeId: string;
   type: string;
-  title: string | null;
+  label: string | null;
 }
 
 /** Append-only behavioural event for a canvas (re-export of shared schema). */
@@ -161,11 +165,21 @@ function markdownToNodeContent(nodeId: string, raw: string): NodeContent {
   for (const key of LEGACY_FRONTMATTER_KEYS) {
     delete meta[key];
   }
+  // Backward compat: pre-rename files wrote `title:`. Read either, but
+  // strip `title` from the frontmatter bag so it never round-trips back.
+  const labelMeta =
+    typeof meta['label'] === 'string'
+      ? meta['label']
+      : typeof meta['title'] === 'string'
+        ? meta['title']
+        : null;
+  delete meta['title'];
+  delete meta['label'];
   const out: NodeContent = {
     ...meta,
     nodeId,
     type: typeof meta['type'] === 'string' ? meta['type'] : 'note',
-    title: typeof meta['title'] === 'string' ? meta['title'] : null,
+    label: labelMeta,
     content,
   };
   // Normalize `src`: it must be a string when present, otherwise omitted.
@@ -248,10 +262,17 @@ export class CanvasStore {
       const raw = readText(path.join(dir, file));
       if (raw == null) continue;
       const { meta } = parseFrontmatter(raw);
+      // @deprecated Backward compat: pre-rename files wrote `title:`.
+      const label =
+        typeof meta['label'] === 'string'
+          ? meta['label']
+          : typeof meta['title'] === 'string'
+            ? meta['title']
+            : null;
       out.push({
         nodeId,
         type: typeof meta['type'] === 'string' ? meta['type'] : 'note',
-        title: typeof meta['title'] === 'string' ? meta['title'] : null,
+        label,
       });
     }
     return out;

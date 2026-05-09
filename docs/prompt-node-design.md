@@ -208,20 +208,20 @@ Convert `SpatialSummary` to natural-language text before injecting into LLM prom
 | Layer                                        | Purpose                            | Source                                               | Consumers                                                |
 | -------------------------------------------- | ---------------------------------- | ---------------------------------------------------- | -------------------------------------------------------- |
 | **Pre-computed topology** (natural language) | LLM reasoning — "what's near what" | `buildSpatialSummary()` / `buildPromptNodeContext()` | System prompt, prompt node context                       |
-| **Raw coordinates** (x, y, w, h)             | Agent placing new nodes precisely  | `get_canvas_state` tool response                     | Agent tool calls for `SET_NODE_GEOMETRY`, `CREATE_NODES` |
+| **Raw coordinates** (x, y, w, h)             | Agent placing new nodes precisely  | `get_canvas_outline` / `inspect_nodes` tool response | Agent tool calls for `SET_NODE_GEOMETRY`, `CREATE_NODES` |
 
-The LLM receives natural-language descriptions like "3 nodes in a horizontal row" for reasoning, and retrieves raw coordinates on-demand through the `get_canvas_state` tool when it needs to calculate exact placement.
+The LLM receives natural-language descriptions like "3 nodes in a horizontal row" for reasoning, and retrieves raw coordinates on-demand through the `get_canvas_outline` and `inspect_nodes` tools when it needs to calculate exact placement.
 
 ### 2.5 Beneficiaries Beyond Prompt Node
 
-| Consumer                       | Current           | After Phase 0                                    |
-| ------------------------------ | ----------------- | ------------------------------------------------ |
-| Chat Agent (`getAgentContext`) | No spatial info   | Clusters + arrangement descriptions              |
-| Intent Recognition             | No position data  | Can describe "user selected the left group"      |
-| `get_canvas_state` tool        | No positions      | Returns coordinates for precise placement        |
-| Frame auto-nesting             | Own rect code     | Can reuse `rectsOverlap`, `rectIntersectionArea` |
-| Edge smart routing             | Own distance calc | Can reuse `relativeDirection`                    |
-| Auto-layout solver             | Own absolute pos  | Can reuse `rectCenter`, `pointDistance`          |
+| Consumer                                     | Current           | After Phase 0                                    |
+| -------------------------------------------- | ----------------- | ------------------------------------------------ |
+| Chat Agent (`getAgentContext`)               | No spatial info   | Clusters + arrangement descriptions              |
+| Intent Recognition                           | No position data  | Can describe "user selected the left group"      |
+| `get_canvas_outline` / `inspect_nodes` tools | No positions      | Return coordinates for precise placement         |
+| Frame auto-nesting                           | Own rect code     | Can reuse `rectsOverlap`, `rectIntersectionArea` |
+| Edge smart routing                           | Own distance calc | Can reuse `relativeDirection`                    |
+| Auto-layout solver                           | Own absolute pos  | Can reuse `rectCenter`, `pointDistance`          |
 
 ---
 
@@ -389,11 +389,11 @@ Per-node `autoRunDelay` field is supported but no UI selector has been built yet
 
 ### 5.1 Three-Priority Spatial Layers
 
-| Priority           | Source                     | Detail Level                         | Why                                      |
-| ------------------ | -------------------------- | ------------------------------------ | ---------------------------------------- |
-| **P0 — Connected** | Edges touching prompt node | Full content (via `get_node_detail`) | User drew a line = explicit intent       |
-| **P1 — Siblings**  | Same frame as prompt node  | Summary + keywords                   | Same group = topically related           |
-| **P2 — Nearby**    | Distance-sorted top-N      | Label + snippet only                 | Spatial proximity ≈ conceptual relevance |
+| Priority           | Source                     | Detail Level                               | Why                                      |
+| ------------------ | -------------------------- | ------------------------------------------ | ---------------------------------------- |
+| **P0 — Connected** | Edges touching prompt node | Full content (via `read("nodes/<id>.md")`) | User drew a line = explicit intent       |
+| **P1 — Siblings**  | Same frame as prompt node  | Summary + keywords                         | Same group = topically related           |
+| **P2 — Nearby**    | Distance-sorted top-N      | Label + snippet only                       | Spatial proximity ≈ conceptual relevance |
 
 ### 5.2 Dual Modality: Vision + Text
 
@@ -507,7 +507,7 @@ async function executePromptNode(nodeId: string): Promise<void> {
 ### 6.3 Agent Design
 
 - **Reuses existing chat agent** — own thread per prompt node (created if missing), same system prompt
-- **Reuses existing tools** — `get_node_detail`, `canvas_commands`, `web_search`, `ingest_content`, etc.
+- **Reuses existing tools** — `read`, `inspect_nodes`, `canvas_commands`, `web_search`, `ingest_content`, etc.
 - **Spatial context injected** as `[SYSTEM Context]` preamble in the message content
 - **Conversation viewable** in chat panel via `openPromptThread(nodeId, threadId)`
 
@@ -701,7 +701,7 @@ Prompt nodes **do not enter the knowledge base**. They have no `sourceId`, do no
 
 ### 10.4 Agent Visibility
 
-Prompt nodes **are visible** to other agents (chat agent, other prompt nodes) via `get_canvas_state`. Their `type: 'prompt'` distinguishes them from content nodes. This lets agents understand "a user asked a question here" as part of the canvas context.
+Prompt nodes **are visible** to other agents (chat agent, other prompt nodes) via `get_canvas_outline`. Their `type: 'prompt'` distinguishes them from content nodes. This lets agents understand "a user asked a question here" as part of the canvas context.
 
 ---
 
