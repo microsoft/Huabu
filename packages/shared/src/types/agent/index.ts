@@ -8,5 +8,6 @@
 export * from './agent.js';
 export * from './chat.js';
 export * from './context.js';
+export * from './events.js';
 export * from './intent.js';
 export * from './tools.js';

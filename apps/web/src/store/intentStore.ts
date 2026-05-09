@@ -168,6 +168,10 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
     });
 
     try {
+      // Flush buffered behavioural events first so the intent
+      // recogniser sees the most up-to-date action history.
+      await useCanvasStore.getState().flushCanvasEvents();
+
       const canvasContext = useCanvasStore.getState().getAgentContext();
 
       const lastAction =
