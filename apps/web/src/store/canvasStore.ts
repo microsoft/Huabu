@@ -57,7 +57,7 @@ import type {
   RecentAction,
   SelectedNodeDetail,
   SpatialNode,
-  CanvasEventInput
+  CanvasEventInput,
 } from '@sediment/shared';
 
 const AUTOSAVE_DEBOUNCE_MS = 1000;
@@ -697,11 +697,14 @@ const useCanvasStore = create<RFState>()(
 
       /**
        * Build a SelectedNodeDetail for a single node.
-       * Only sends lightweight metadata — the agent uses `read` on
-       * "<canvasId>/nodes/<nodeId>.md" to fetch full content on demand,
-       * saving tokens.
+       * Only sends lightweight metadata — the agent uses `read`
+       * to fetch full content on demand, saving tokens.
        * Image nodes keep `src` so the server can build vision attachments.
-       * For frame nodes, recursively include direct children as `children` details
+       * For frame nodes, recursively include direct children as `children` details.
+       *
+       * Layout (`position` / `size`) and provenance (`origin`) are deliberately
+       * omitted: the server consumes neither. Spatial info is fetched on demand
+       * via `get_canvas_outline()` / `inspect_nodes`.
        */
       const buildSelectedDetail = (n: Node): SelectedNodeDetail => {
         const data = n.data as Record<string, unknown> | undefined;
@@ -711,16 +714,10 @@ const useCanvasStore = create<RFState>()(
         const src =
           n.type === 'image' ? (data?.src as string | undefined) : undefined;
 
-        const size = getNodeSize(n);
         const detail: SelectedNodeDetail = {
           id: n.id,
           type: nodeType,
           label: data?.label as string | undefined,
-          origin: data?.origin as SelectedNodeDetail['origin'],
-          position: { x: n.position.x, y: n.position.y },
-          ...(size.width > 0 || size.height > 0
-            ? { size: { width: size.width, height: size.height } }
-            : {}),
           ...(src !== undefined ? { src } : {}),
         };
 

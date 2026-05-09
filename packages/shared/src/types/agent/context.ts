@@ -131,7 +131,6 @@ export interface SelectedNodeDetail {
   id: string;
   type: CanvasNodeType;
   label?: string;
-  origin?: NodeOrigin;
   /** Source URL for image nodes (used by the server to build vision attachments). */
   src?: string;
   /**
@@ -139,10 +138,6 @@ export interface SelectedNodeDetail {
    * Undefined for non-frame nodes.
    */
   children?: SelectedNodeDetail[];
-  /** Absolute position on canvas (top-left corner). */
-  position?: { x: number; y: number };
-  /** Measured or styled dimensions. */
-  size?: { width: number; height: number };
 }
 
 /**

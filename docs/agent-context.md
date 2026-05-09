@@ -51,10 +51,10 @@ canvas_commands / ingest_content / web_search / use_skill ...
 
 ### 2.1 节点级信号
 
-| 字段                                  | 范围         | 内容                                                                                                                                                    | 来源                                                                   |
-| ------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `nodes: NodeSummary[]`                | **全部节点** | `id` / `type` / `label` / `snippet`(前 120 字符)/ `frameLabel` / `position` / `size`                                                                    | [extractSnippet](../apps/web/src/handler/canvasCommand/utils/index.ts) |
-| `selectedNodes: SelectedNodeDetail[]` | **当前选中** | `id` / `type` / `label` / `origin` / `position` / `size`,image 节点带 `src`,frame 节点带 `children`(递归)。**不携带 `content`**——节点正文要靠工具按需取 | [buildSelectedDetail](../apps/web/src/store/canvasStore.ts)            |
+| 字段                                  | 范围         | 内容                                                                                                                                                          | 来源                                                                   |
+| ------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `nodes: NodeSummary[]`                | **全部节点** | `id` / `type` / `label` / `snippet`(前 120 字符)/ `frameLabel` / `position` / `size`                                                                          | [extractSnippet](../apps/web/src/handler/canvasCommand/utils/index.ts) |
+| `selectedNodes: SelectedNodeDetail[]` | **当前选中** | `id` / `type` / `label`,image 节点带 `src`,frame 节点带 `children`(递归)。**不携带 `content` / `position` / `size` / `origin`**——节点正文与布局都靠工具按需取 | [buildSelectedDetail](../apps/web/src/store/canvasStore.ts)            |
 
 > **关键限制 1**:`NodeSummary.snippet` 是 `content.slice(0, 120)` 的纯截断
 > (见 [extractSnippet](../apps/web/src/handler/canvasCommand/utils/index.ts)),
