@@ -69,13 +69,17 @@ export async function handleRead(args: ReadArgs): Promise<string> {
   }
   const rel = normalizeRel(requested);
 
-  // Skill paths get a two-tier resolver: per-canvas override under
+  // Skill file paths get a two-tier resolver: per-canvas override under
   // <workspace>/<canvasId>/skills/... wins; otherwise we fall back to
   // the global skill set shipped with the server. This lets every agent
   // — including external ones that mount the canvas folder via raw FS
   // — discover skills with the same `read("skills/<id>/SKILL.md")` call.
+  //
+  // Intentionally do not special-case the bare `skills` path here:
+  // `read` is file-only, so a directory read should fall through to the
+  // normal sandbox path and surface the later directory-specific error.
   let abs: string;
-  if (rel === 'skills' || rel.startsWith('skills/')) {
+  if (rel.startsWith('skills/')) {
     const probeLocal = (probeRel: string): string | null => {
       try {
         const candidate = safeResolve(args.canvasId, probeRel);
