@@ -495,11 +495,11 @@ export const lsTool: ToolDefinition = {
 // ==================== Tool Sets by Mode ====================
 
 /**
- * Tools available in chat mode.
+ * Tools available in ask mode.
  * Includes read-only canvas/content access so the agent can
  * lazily fetch full content of selected nodes on demand.
  */
-export const chatTools: ToolDefinition[] = [
+export const askTools: ToolDefinition[] = [
   webSearchTool,
   getCanvasOutlineTool,
   inspectNodesTool,

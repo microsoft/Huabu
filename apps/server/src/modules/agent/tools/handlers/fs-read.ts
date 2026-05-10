@@ -73,7 +73,7 @@ export async function handleRead(args: ReadArgs): Promise<string> {
   // <workspace>/<canvasId>/skills/... wins; otherwise we fall back to
   // the global skill set shipped with the server. This lets every agent
   // — including external ones that mount the canvas folder via raw FS
-  // — discover skills with the same `read("skills/<id>.md")` call.
+  // — discover skills with the same `read("skills/<id>/SKILL.md")` call.
   let abs: string;
   if (rel === 'skills' || rel.startsWith('skills/')) {
     const probeLocal = (probeRel: string): string | null => {
@@ -85,6 +85,11 @@ export async function handleRead(args: ReadArgs): Promise<string> {
         return null;
       }
     };
+    // `resolveSkillPath` returns `null` for "not found" and throws
+    // `SkillPathEscapeError` when the requested path tries to break out
+    // of the global skill directory via `..`. Let the escape error
+    // propagate so pi-agent-core can surface it as a security-relevant
+    // tool error distinct from the generic "Path not found" miss.
     const resolved = resolveSkillPath(rel, probeLocal);
     if (!resolved) {
       throw new Error(`Path not found: ${rel}`);

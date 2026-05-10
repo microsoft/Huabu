@@ -3,7 +3,8 @@
  *
  * Skills live as directories under `<thisDir>/skills/<id>/SKILL.md` (the
  * "global" set, shipped with the server) and may be overridden per-canvas
- * at `<workspace>/<canvasId>/skills/<id>.md`. The per-canvas resolution
+ * at `<workspace>/<canvasId>/skills/<id>/SKILL.md` (and any companion
+ * `references/*.md` under that directory). The per-canvas resolution
  * lives in `resolveSkillPath` so the canvas FS sandbox can keep enforcing
  * its existing rules; this module only owns the global set.
  *
@@ -11,7 +12,7 @@
  *   - id          string, must match the directory name
  *   - name        human-readable label
  *   - description short catalogue blurb
- *   - appliesTo   array of agent modes (chat | operate | annotation | external)
+ *   - appliesTo   array of agent surfaces (ask | operate | annotation | external)
  * Optional:
  *   - triggers    string[] (catalogue ranking hints, unused in phase 1)
  *   - version     number
@@ -204,23 +205,32 @@ export function getSkill(id: string): LoadedSkill | undefined {
 }
 
 /**
- * Resolve a `read("skills/<id>...")` path against per-canvas overrides
+ * Resolve a `read("skills/<id>/...")` path against per-canvas overrides
  * first, then the global skill set. Returns the absolute file path or
  * `null` if neither layer has it.
  *
- * Supported global forms:
- *   - `skills/<id>.md`              → the skill's SKILL.md
- *   - `skills/<id>/SKILL.md`        → same file, explicit form
+ * Supported forms:
+ *   - `skills/<id>/SKILL.md`        → the skill's entry-point markdown.
  *   - `skills/<id>/<subpath>`       → arbitrary file under the skill
  *                                     directory (typically `references/foo.md`).
  *                                     The `<subpath>` is resolved within the
  *                                     skill directory and must not escape it
- *                                     via `..` segments.
+ *                                     via `..` segments — escapes throw
+ *                                     `SkillPathEscapeError` so callers can
+ *                                     surface the security violation as a
+ *                                     distinct error from "not found".
  *
  * Per-canvas resolution is delegated to a caller-supplied probe so this
  * module stays free of canvas FS / sandbox dependencies (avoiding a
  * cycle with `tools/handlers/fs-sandbox.ts`).
  */
+export class SkillPathEscapeError extends Error {
+  constructor(rel: string) {
+    super(`Skill path "${rel}" escapes the skill directory.`);
+    this.name = 'SkillPathEscapeError';
+  }
+}
+
 export function resolveSkillPath(
   rel: string,
   perCanvasProbe?: (rel: string) => string | null,
@@ -230,23 +240,23 @@ export function resolveSkillPath(
     if (local) return local;
   }
 
-  // Match: `skills/<id>.md`  OR  `skills/<id>/<subpath>` (subpath non-empty).
-  const m = rel.match(/^skills\/([^/]+)(?:\.md$|\/(.+))$/);
-  if (!m || !m[1]) return null;
+  // Match: `skills/<id>/<subpath>` (subpath non-empty).
+  // The legacy flat form `skills/<id>.md` was retired with Phase 3; every
+  // prompt now references `skills/<id>/SKILL.md` and per-canvas overrides
+  // live under the same directory layout.
+  const m = rel.match(/^skills\/([^/]+)\/(.+)$/);
+  if (!m || !m[1] || !m[2]) return null;
   const skill = ensureCache().get(m[1]);
   if (!skill) return null;
 
-  // `skills/<id>.md` → return the SKILL.md file directly.
-  if (m[2] === undefined) return skill.sourcePath;
-
-  // `skills/<id>/<subpath>` → resolve under the skill directory.
-  // Reject any path that escapes the skill directory (defence-in-depth
-  // against `..` segments — the canvas FS sandbox already does this for
-  // per-canvas paths, but the global skill dir lives outside that sandbox).
+  // Resolve `<subpath>` under the skill directory. Reject any path that
+  // escapes via `..` segments — the canvas FS sandbox already does this
+  // for per-canvas paths, but the global skill dir lives outside that
+  // sandbox so we enforce it here too.
   const skillDir = path.dirname(skill.sourcePath);
   const resolved = path.resolve(skillDir, m[2]);
   if (resolved !== skillDir && !resolved.startsWith(skillDir + path.sep)) {
-    return null;
+    throw new SkillPathEscapeError(rel);
   }
   if (!existsSync(resolved)) return null;
   const stat = statSync(resolved);
@@ -264,13 +274,4 @@ export function getSkillBody(id: string): string | null {
 /** Validate the global skill directory eagerly (call once at boot). */
 export function preloadSkills(): void {
   ensureCache();
-}
-
-/** Internal helper exported for unit tests; do not use in production code. */
-export function _statSkillDir(): { count: number; dir: string } {
-  const dir = GLOBAL_SKILLS_DIR;
-  if (!existsSync(dir)) return { count: 0, dir };
-  const stat = statSync(dir);
-  if (!stat.isDirectory()) return { count: 0, dir };
-  return { count: ensureCache().size, dir };
 }

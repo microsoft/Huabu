@@ -17,10 +17,18 @@ import {
   isWorkspaceConfigured,
 } from './modules/workspace.js';
 import workspaceRoutes from './modules/workspace.route.js';
+import { preloadSkills } from './prompt/skill-loader.js';
 
 // Lock the workspace at startup if SEDIMENT_WORKSPACE is set (managed mode).
 // In free mode this is a no-op and the client will activate at runtime.
 initWorkspaceFromEnv();
+
+// Eagerly scan + validate every SKILL.md frontmatter at boot so a malformed
+// skill (missing `appliesTo`, mismatched `id`, etc.) crashes the process at
+// startup instead of surfacing as a 500 on the first agent request. The
+// catalogue rendered into every system prompt depends on this metadata
+// being consistent — see apps/server/src/prompt/skill-loader.ts.
+preloadSkills();
 
 export const app = fastify({
   logger: {

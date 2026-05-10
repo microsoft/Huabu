@@ -255,17 +255,22 @@ function applyCanvasCommandsFromToolResult(toolResult: string | undefined): {
   try {
     const parsed = JSON.parse(toolResult ?? '{}') as {
       status?: string;
-      commands?: CanvasCommand[];
+      commands?: unknown;
     };
 
     // Error envelopes produced by the SSE bridge — nothing to apply.
     if (parsed.status === 'error') return null;
 
+    // Be strict about shape: the field must be an array. Anything else
+    // (object, string, missing) is treated as "no commands". This
+    // protects the for-of loop below from a server-side regression
+    // where `commands` accidentally becomes an array-like or arg-pass-
+    // through value with a numeric `length` property.
     const commands = parsed.commands;
-    if (!commands?.length) return null;
+    if (!Array.isArray(commands) || commands.length === 0) return null;
 
     // Pre-assign IDs to nodes/edges that don't have them
-    for (const cmd of commands) {
+    for (const cmd of commands as CanvasCommand[]) {
       if (cmd.type === 'CREATE_NODES') {
         for (const node of cmd.nodes) {
           if (!node.id) {
@@ -282,14 +287,15 @@ function applyCanvasCommandsFromToolResult(toolResult: string | undefined): {
     }
 
     // Snapshot BEFORE execution so revert commands capture current state
-    const changes = snapshotAndExtractChanges(commands);
+    const typedCommands = commands as CanvasCommand[];
+    const changes = snapshotAndExtractChanges(typedCommands);
 
-    useCanvasStore.getState().executeCommands(commands, 'agent');
+    useCanvasStore.getState().executeCommands(typedCommands, 'agent');
 
     // Staggered entrance animation following command execution order
-    animateAgentBatch(commands);
+    animateAgentBatch(typedCommands);
 
-    return { commands, changes };
+    return { commands: typedCommands, changes };
   } catch (err) {
     console.error(
       '[useAgentStream] Failed to parse canvas_commands result:',

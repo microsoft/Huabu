@@ -7,7 +7,7 @@
  * `AgentTool[]` that pi-agent-core's `Agent` consumes.
  */
 
-import { chatTools, operateTools, type ToolDefinition } from './definitions.js';
+import { askTools, operateTools, type ToolDefinition } from './definitions.js';
 import { executeTool } from './executor.js';
 
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
@@ -59,13 +59,13 @@ function toAgentTool(def: ToolDefinition, ctx: ToolBuildContext): AgentTool {
 /**
  * Build the runnable tool set for an agent run.
  *
- * The returned array shape mirrors `definitions.ts`'s `chatTools` /
+ * The returned array shape mirrors `definitions.ts`'s `askTools` /
  * `operateTools`, just with `execute` bound to the request context.
  */
 export function buildToolsForMode(
   mode: AgentMode,
   ctx: ToolBuildContext,
 ): AgentTool[] {
-  const defs = mode === 'operate' ? operateTools : chatTools;
+  const defs = mode === 'operate' ? operateTools : askTools;
   return defs.map((def) => toAgentTool(def, ctx));
 }
