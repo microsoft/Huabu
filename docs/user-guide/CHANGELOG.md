@@ -58,13 +58,13 @@
 
 ---
 
-## 2026-05-10 · Agent skill 系统数据化：`use_skill` 工具下线，改用 `read("skills/<id>.md")`
+## 2026-05-10 · Agent skill 系统数据化：`use_skill` 工具下线，改用 `read("skills/<id>/SKILL.md")`
 
 **What Changed**
 
 - **Skill 内容从 TS 字符串迁到磁盘 markdown**。每个 skill 现在是一个 `apps/server/src/prompt/skills/<id>/SKILL.md` 文件，带 YAML frontmatter（`id / name / description / appliesTo / triggers? / version?`）。新增加载器 `skill-loader.ts` 在启动期扫盘 + 校验，frontmatter 不合法直接抛错。
-- **`use_skill` 工具被删除**。Agent 不再通过专门的工具调用拿 skill，而是用现有的 `read` 工具读 `skills/<id>.md`。所有 agent（内置 / Copilot / Codex / Claude Code）只要有文件读权限就能用，不再需要专门集成。
-- **支持 per-canvas skill 覆盖**：`<canvas>/skills/<id>.md` 优先于全局 skill。
+- **`use_skill` 工具被删除**。Agent 不再通过专门的工具调用拿 skill，而是用现有的 `read` 工具读 `skills/<id>/SKILL.md`。所有 agent（内置 / Copilot / Codex / Claude Code）只要有文件读权限就能用，不再需要专门集成。
+- **支持 per-canvas skill 覆盖**：`<canvas>/skills/<id>/SKILL.md` 优先于全局 skill；skill 的补充材料可放在同目录下的 `skills/<id>/references/...`。
 - **抽出两个 skill**：`canvas-commands`（命令语义 + 组合套路）和 `canvas-tools`（read / inspect_nodes / inspect_edges / grep 边界与决策矩阵）。`agent.ts` 与 `intent.ts` 中对应的长段已替换为指向 skill 的一句话；`canvas_commands` 工具描述也大幅瘦身，schema 仍由 TypeBox 单一来源决定。
 
 **Notes**
