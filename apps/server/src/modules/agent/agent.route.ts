@@ -22,11 +22,13 @@ import { encode } from 'gpt-tokenizer';
 
 import { buildOperatePrompt } from '../../prompt/agent.js';
 import { SYSTEM_PROMPT } from '../../prompt/system.js';
-import { IMAGE_MIME_MAP } from '../../utils/mime.js';
 import { runAgent } from '../agent/agent.service.js';
 import { buildNodeSummaries } from '../agent/canvas-context.js';
 import { loadContext, saveContext } from '../agent/store/chat-store.js';
-import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
+import {
+  ARTIFACT_URL_REGEX,
+  resolveArtifactImageUrl,
+} from '../artifact/utils.js';
 import { getCanvasStore } from '../storage/index.js';
 
 import type { AssistantMessage, Context } from '@earendil-works/pi-ai';
@@ -64,45 +66,35 @@ function getSystemPrompt(mode: AgentMode): string {
 }
 
 async function resolveImageUrl(url: string): Promise<string> {
-  if (url.startsWith('data:')) return url;
-
-  const artifactMatch = ARTIFACT_URL_REGEX.exec(url);
-  if (artifactMatch) {
-    const canvasId = artifactMatch[1];
-    const filename = path.basename(artifactMatch[2]);
-    let filePath: string | null;
+  // Canvas-scoped artifacts + already-baked data: URLs go through the
+  // shared helper. It returns the input unchanged for unrelated URLs
+  // (external http(s), bare paths, etc.).
+  const resolved = await resolveArtifactImageUrl(url, (canvasId, filename) => {
     try {
-      filePath = getCanvasStore(canvasId).resolveArtifactFilePath(filename);
+      return getCanvasStore(canvasId).resolveArtifactFilePath(filename);
     } catch {
-      return url;
+      return null;
     }
-    if (!filePath) return url;
+  });
+  if (resolved.startsWith('data:')) return resolved;
 
+  // External image URLs: fetch and inline as base64 so the LLM can see them.
+  if (resolved.startsWith('http://') || resolved.startsWith('https://')) {
     try {
-      const buffer = await readFile(filePath);
-      const ext = path.extname(filePath).toLowerCase();
-      const mime = IMAGE_MIME_MAP[ext] ?? 'image/png';
-      return `data:${mime};base64,${buffer.toString('base64')}`;
-    } catch {
-      return url;
-    }
-  }
-
-  // Fetch external image URLs and convert to base64
-  if (url.startsWith('http://') || url.startsWith('https://')) {
-    try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
-      if (!res.ok) return url;
+      const res = await fetch(resolved, {
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) return resolved;
       const contentType = res.headers.get('content-type') ?? '';
-      if (!contentType.startsWith('image/')) return url;
+      if (!contentType.startsWith('image/')) return resolved;
       const buffer = Buffer.from(await res.arrayBuffer());
       return `data:${contentType.split(';')[0]};base64,${buffer.toString('base64')}`;
     } catch {
-      return url;
+      return resolved;
     }
   }
 
-  return url;
+  return resolved;
 }
 
 /**
