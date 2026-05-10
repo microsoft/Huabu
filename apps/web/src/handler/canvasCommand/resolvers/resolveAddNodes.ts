@@ -44,25 +44,13 @@ function computeMediaSize(
   };
 }
 
-const AUTO_HEIGHT_Y_OFFSET = 20;
 function nodePositionFromPlacementPoint(
   point: Point,
-  nodeType: string,
-  size?: NodeSize | null,
+  _nodeType: string,
+  _size?: NodeSize | null,
 ): Point {
-  const resolvedSize = size ?? getNodeDefaultSize(nodeType);
-
-  if (typeof resolvedSize.height !== 'number') {
-    return {
-      x: point.x - resolvedSize.width / 2,
-      y: point.y - AUTO_HEIGHT_Y_OFFSET,
-    };
-  }
-
-  return {
-    x: point.x - resolvedSize.width / 2,
-    y: point.y - resolvedSize.height / 2,
-  };
+  // Anchor the new node with its top-left corner at the cursor position.
+  return { x: point.x, y: point.y };
 }
 
 // ---------------------------------------------------------------------------
