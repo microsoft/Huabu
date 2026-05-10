@@ -4,6 +4,44 @@
 
 ---
 
+## 2026-05-10 · Skill 体系收敛为 `canvas` + `annotation` 两层结构
+
+**What Changed**
+
+- **从三个 flat skill 收敛为一个核心 skill + references 的层级结构**。原来的 `canvas-commands` / `canvas-tools` / `build-flowchart` 三个 SKILL 合并为单一 `skills/canvas/SKILL.md`：心智模型 + 工具决策矩阵 + 命令目录都在入口文件里，深度内容下沉到 `references/`：
+  - `skills/canvas/references/command-cookbook.md` — 组合 batch 套路（brainstorm / merge / 入框 / restyle / tidy …）。
+  - `skills/canvas/references/layout-recipes.md` — 坐标系 + 层级 / 流向 / 网格布局 + 行轨道 flowchart 配方。
+- **annotation 流水线独立成 `skills/annotation/SKILL.md`**，frontmatter `appliesTo: [annotation]`，只在 annotation prompt 的 catalogue 里出现，不污染 operate / chat / external 上下文。
+- **`resolveSkillPath` 支持 references 子路径**：`read("skills/<id>/references/<file>.md")` 走和 `read("skills/<id>/SKILL.md")` 完全相同的解析路径（per-canvas override → global），并加了路径转义防御（`..` 越界返回 null）。
+- **`agent.ts` 删除 inline 的 Layout strategies 段**（≈30 行），改为指向 `skills/canvas/SKILL.md`；catalogue 现在自动渲染为单行 `- canvas — …`。
+- **`intent.ts` 的 ANNOTATION prompt 删除 inline 的 Gesture interpretation / Rules / CanvasCommand reference 段**（≈40 行），改为同一个指向 skill 的提示。
+- **`canvas_commands` 工具描述里的 skill 链接** 同步从 `skills/canvas-commands.md` 改为 `skills/canvas/SKILL.md`。
+
+**Notes**
+
+- 兼容性：旧路径 `read("skills/canvas-commands.md")` / `read("skills/canvas-tools.md")` / `read("skills/build-flowchart.md")` 不再可用。仓库内已无残留引用，per-canvas override 若曾使用同名文件需要随之改名（一般情况下用户层不会有）。
+- Catalogue 内容：`operate` / `ask` / `external` 各看到 1 个 skill（`canvas`）；`annotation` 看到 2 个（`annotation` + `canvas`）。
+- 详见设计文档 [docs/skill-system-refactor.md](../skill-system-refactor.md)（Phase 1 ✓ Phase 2 ✓ Phase 3 ✓）。
+
+---
+
+## 2026-05-10 · Agent skill 系统数据化：`use_skill` 工具下线，改用 `read("skills/<id>.md")`
+
+**What Changed**
+
+- **Skill 内容从 TS 字符串迁到磁盘 markdown**。每个 skill 现在是一个 `apps/server/src/prompt/skills/<id>/SKILL.md` 文件，带 YAML frontmatter（`id / name / description / appliesTo / triggers? / version?`）。新增加载器 `skill-loader.ts` 在启动期扫盘 + 校验，frontmatter 不合法直接抛错。
+- **`use_skill` 工具被删除**。Agent 不再通过专门的工具调用拿 skill，而是用现有的 `read` 工具读 `skills/<id>.md`。所有 agent（内置 / Copilot / Codex / Claude Code）只要有文件读权限就能用，不再需要专门集成。
+- **支持 per-canvas skill 覆盖**：`<canvas>/skills/<id>.md` 优先于全局 skill。
+- **抽出两个 skill**：`canvas-commands`（命令语义 + 组合套路）和 `canvas-tools`（read / inspect_nodes / inspect_edges / grep 边界与决策矩阵）。`agent.ts` 与 `intent.ts` 中对应的长段已替换为指向 skill 的一句话；`canvas_commands` 工具描述也大幅瘦身，schema 仍由 TypeBox 单一来源决定。
+
+**Notes**
+
+- 兼容性：`use_skill` 是 LLM 可见的工具名，移除属于 agent 接口变更。已检查全 repo 无前端 / shared 调用。任何残留的旧 prompt 提到 `use_skill` 都已替换。
+- 提示词体积：operate prompt 5106 字符（含动态 catalogue），annotation prompt 3650 字符，`canvas_commands` 工具描述从 ~1.7K 降到 912 字符。
+- 详见设计文档 [docs/skill-system-refactor.md](../skill-system-refactor.md)（Phase 1 ✓ Phase 2 ✓，Phase 3+ 待办）。
+
+---
+
 ## 2026-05-09 · Annotation Agent 接入 `inspect_edges`，删除冗余 `spatialSummary`，工具补 `total` 字段
 
 **What Changed**

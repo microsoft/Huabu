@@ -132,7 +132,7 @@ export async function* runAgent(
     // docs/pi-agent-core-migration.md Step 4):
     //   - Read-only tools (`read`, `grep`, `find`, `ls`,
     //     `get_canvas_outline`, `inspect_nodes`, `inspect_edges`,
-    //     `web_search`, `use_skill`) are trivially safe.
+    //     `web_search`) are trivially safe.
     //   - `canvas_commands` is opted OUT of parallelism via
     //     `executionMode: 'sequential'` on its tool definition.
     //     Server-side, its handler reads canvas state once to build a

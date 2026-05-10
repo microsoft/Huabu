@@ -31,6 +31,7 @@
 import { readFileSync, statSync } from 'node:fs';
 
 import { normalizeRel, safeResolve } from './fs-sandbox.js';
+import { resolveSkillPath } from '../../../../prompt/skill-loader.js';
 import { parseFrontmatter } from '../../../storage/frontmatter.js';
 
 import type { readParamsSchema } from '../definitions.js';
@@ -68,9 +69,32 @@ export async function handleRead(args: ReadArgs): Promise<string> {
   }
   const rel = normalizeRel(requested);
 
-  // safeResolve throws when the path escapes the canvas sandbox; let
-  // pi-agent-core wrap that as an isError tool result.
-  const abs = safeResolve(args.canvasId, rel);
+  // Skill paths get a two-tier resolver: per-canvas override under
+  // <workspace>/<canvasId>/skills/... wins; otherwise we fall back to
+  // the global skill set shipped with the server. This lets every agent
+  // — including external ones that mount the canvas folder via raw FS
+  // — discover skills with the same `read("skills/<id>.md")` call.
+  let abs: string;
+  if (rel === 'skills' || rel.startsWith('skills/')) {
+    const probeLocal = (probeRel: string): string | null => {
+      try {
+        const candidate = safeResolve(args.canvasId, probeRel);
+        const stat = statSync(candidate);
+        return stat.isFile() ? candidate : null;
+      } catch {
+        return null;
+      }
+    };
+    const resolved = resolveSkillPath(rel, probeLocal);
+    if (!resolved) {
+      throw new Error(`Path not found: ${rel}`);
+    }
+    abs = resolved;
+  } else {
+    // safeResolve throws when the path escapes the canvas sandbox; let
+    // pi-agent-core wrap that as an isError tool result.
+    abs = safeResolve(args.canvasId, rel);
+  }
 
   // Stat first so we can give a better error than ENOENT spam.
   let stat;
