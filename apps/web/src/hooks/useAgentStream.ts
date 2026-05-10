@@ -241,6 +241,12 @@ function animateAgentBatch(commands: CanvasCommand[]): void {
  * Parse a canvas_commands tool result, pre-assign missing IDs,
  * snapshot current state for revert, execute commands, and return
  * the enriched commands plus change entries.
+ *
+ * The server's canvas_commands handler returns a flat
+ * `{ source, canvasId, commands }` JSON payload (see
+ * apps/server/src/modules/agent/tools/handlers/canvas-write.ts). On
+ * tool errors, agent.service.ts wraps the payload as
+ * `{ tool, status: 'error', error }` — we skip those here.
  */
 function applyCanvasCommandsFromToolResult(toolResult: string | undefined): {
   commands: CanvasCommand[];
@@ -249,38 +255,41 @@ function applyCanvasCommandsFromToolResult(toolResult: string | undefined): {
   try {
     const parsed = JSON.parse(toolResult ?? '{}') as {
       status?: string;
-      data?: { commands?: CanvasCommand[] };
+      commands?: CanvasCommand[];
     };
-    if (parsed.status === 'success' && parsed.data?.commands?.length) {
-      const commands = parsed.data.commands;
 
-      // Pre-assign IDs to nodes/edges that don't have them
-      for (const cmd of commands) {
-        if (cmd.type === 'CREATE_NODES') {
-          for (const node of cmd.nodes) {
-            if (!node.id) {
-              node.id = createId('node') as CanvasNodeId;
-            }
+    // Error envelopes produced by the SSE bridge — nothing to apply.
+    if (parsed.status === 'error') return null;
+
+    const commands = parsed.commands;
+    if (!commands?.length) return null;
+
+    // Pre-assign IDs to nodes/edges that don't have them
+    for (const cmd of commands) {
+      if (cmd.type === 'CREATE_NODES') {
+        for (const node of cmd.nodes) {
+          if (!node.id) {
+            node.id = createId('node') as CanvasNodeId;
           }
-        } else if (cmd.type === 'CONNECT_NODES') {
-          for (const edge of cmd.edges) {
-            if (!edge.id) {
-              edge.id = createId('edge') as CanvasEdgeId;
-            }
+        }
+      } else if (cmd.type === 'CONNECT_NODES') {
+        for (const edge of cmd.edges) {
+          if (!edge.id) {
+            edge.id = createId('edge') as CanvasEdgeId;
           }
         }
       }
-
-      // Snapshot BEFORE execution so revert commands capture current state
-      const changes = snapshotAndExtractChanges(commands);
-
-      useCanvasStore.getState().executeCommands(commands, 'agent');
-
-      // Staggered entrance animation following command execution order
-      animateAgentBatch(commands);
-
-      return { commands, changes };
     }
+
+    // Snapshot BEFORE execution so revert commands capture current state
+    const changes = snapshotAndExtractChanges(commands);
+
+    useCanvasStore.getState().executeCommands(commands, 'agent');
+
+    // Staggered entrance animation following command execution order
+    animateAgentBatch(commands);
+
+    return { commands, changes };
   } catch (err) {
     console.error(
       '[useAgentStream] Failed to parse canvas_commands result:',

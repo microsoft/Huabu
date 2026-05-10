@@ -6,6 +6,7 @@
  */
 
 import { validateToolCall } from '@earendil-works/pi-ai';
+import { AGENT_CANVAS_COMMAND_TYPES } from '@sediment/shared';
 
 import { llmComplete, llmStream } from './llm.js';
 import { logIntentEpisode as storeEpisode } from './store/intent-store.js';
@@ -33,6 +34,10 @@ import type {
   IntentEpisode,
   RecentAction,
 } from '@sediment/shared';
+
+const AGENT_CANVAS_COMMAND_TYPE_SET = new Set<string>(
+  AGENT_CANVAS_COMMAND_TYPES,
+);
 
 // ---------------------------------------------------------------------------
 // Context → natural-language serialization
@@ -473,6 +478,30 @@ const ANNOTATION_MAX_ITERATIONS = 6;
  * Drive the LLM through a tool-calling loop limited to `read`,
  * `inspect_nodes`, and `inspect_edges`, then parse the final
  * assistant text as `{ reasoning, commands }`.
+ *
+ * TODO(annotation-unify): Unify command emission with the operate agent.
+ * Today annotation makes the LLM hand back commands as a final JSON text
+ * blob, while operate has the LLM call the `canvas_commands` tool — which
+ * means operate gets free TypeBox validation via `validateToolCall`, while
+ * annotation has to hand-roll JSON.parse + ad-hoc filtering (see
+ * `recognizeAnnotationCommands` below) and silently drops anything malformed.
+ *
+ * Plan:
+ *   1. Add `canvasCommandsTool` to this loop's `tools`.
+ *   2. Make "the model called canvas_commands" the loop's terminal
+ *      condition (instead of "the model produced a `{`-prefixed text").
+ *   3. Pull `commands` from the validated tool args; require/optional a
+ *      `reasoning` string in the tool schema (or keep it as a leading
+ *      assistant text block) so the existing `AnnotationCommandResponse`
+ *      shape `{ reasoning, commands }` still works.
+ *   4. Delete `extractJsonObject`, the AGENT_CANVAS_COMMAND_TYPE_SET
+ *      filter in `recognizeAnnotationCommands`, and the "output a single
+ *      JSON object" prose in ANNOTATION_INTENT_SYSTEM_PROMPT.
+ *   5. Skip `handleCanvasCommands`' provenance injection — annotation
+ *      changes are user-authored, not AI-authored.
+ *
+ * After this, both agents share one schema, one validator, one error
+ * channel, and one set of prompt instructions for emitting canvas commands.
  */
 async function runAnnotationAgent(
   piContext: Context,
@@ -596,9 +625,27 @@ export async function recognizeAnnotationCommands(
     };
     const reasoning =
       typeof parsed.reasoning === 'string' ? parsed.reasoning : '';
-    const commands = Array.isArray(parsed.commands)
-      ? (parsed.commands as CanvasCommand[])
+    const rawCommands = Array.isArray(parsed.commands)
+      ? (parsed.commands as Array<Record<string, unknown>>)
       : [];
+
+    // Drop commands whose `type` is not in the agent-allowed catalogue.
+    // The annotation LLM occasionally hallucinates command names (e.g.
+    // typos, lowercased variants, or non-existent verbs); letting them
+    // reach the client crashes the executor since no handler is
+    // registered for unknown types.
+    const commands: CanvasCommand[] = [];
+    for (const cmd of rawCommands) {
+      const type = typeof cmd?.type === 'string' ? cmd.type : '';
+      if (AGENT_CANVAS_COMMAND_TYPE_SET.has(type)) {
+        commands.push(cmd as unknown as CanvasCommand);
+      } else {
+        console.warn(
+          '[annotation-intent] dropping unknown command type from LLM output:',
+          type,
+        );
+      }
+    }
     return { reasoning, commands };
   } catch (err) {
     console.error('[annotation-intent] failed to parse JSON:', err, jsonText);

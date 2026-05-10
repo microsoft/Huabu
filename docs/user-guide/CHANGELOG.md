@@ -4,6 +4,39 @@
 
 ---
 
+## 2026-05-10 · 修复：Annotation Agent 偶尔触发 `handler is not a function` 崩溃
+
+**What Changed**
+
+- **修复 annotation agent 返回未知命令类型时画布执行器崩溃的问题**。当 LLM 在批注识别（红色手绘 → canvas 命令）阶段产出一个超出 schema 的 `type`（拼写错误、小写、或臆造的命令名）时，前端 `executor.ts` 直接拿 `HANDLERS[cmd.type]` 当函数调用，触发 `Uncaught TypeError: handler is not a function`，整批命令全部丢失且后续 annotation 流水线状态卡死。
+- 修复方式：
+  - **服务端 `apps/server/src/modules/agent/intent.service.ts`**：在 `recognizeAnnotationCommands` 解析 LLM JSON 后，按共享常量 `AGENT_CANVAS_COMMAND_TYPES` 过滤命令，对未知 `type` 记 `console.warn` 并丢弃，再返回给前端。
+  - **前端 `apps/web/src/handler/canvasCommand/executor.ts`**：作为兜底，若 `HANDLERS[cmd.type]` 不存在则 `console.warn` 并把该命令记为 `applied: false, reason: 'no-op'` 后跳过；同步给 `COMMAND_META` 的下游读取加上可选链。
+
+**Notes**
+
+- 影响范围：annotation agent（手绘红色批注 → 自动转成画布命令）。Operate agent 走 `canvas_commands` 工具时本来就经过 TypeBox `validateToolCall`，不会遇到这个问题。
+- 当 LLM 偶尔产出错命令时，现在会跳过该条但其余正确命令仍会执行；overlay 状态会进入 `done`，方便用户接受/撤销其余有效部分。
+- 控制台会打印 `[annotation-intent] dropping unknown command type from LLM output: …` 和 `[canvas-executor] Unknown command type — skipping: …` 帮助定位 prompt / skill 中导致 LLM 走偏的指令。
+
+---
+
+## 2026-05-10 · 修复：Agent 在 operate 模式下声称已修改画布但实际未生效
+
+**What Changed**
+
+- **修复 `canvas_commands` 工具结果被前端静默丢弃的问题**。Agent 调用 `canvas_commands`（连接节点、修改节点内容、创建节点等）后，消息列表会显示"已执行"，但画布上没有任何变化。
+- 根因：服务端 `handleCanvasCommands` 在错误处理重构（提交 `056f4f3`）时去掉了 `{ tool, status: 'success', data: { … } }` 外层包装，直接返回 `{ source, canvasId, commands }`；但前端 `useAgentStream` 的 `applyCanvasCommandsFromToolResult` 仍然按旧 schema 检查 `parsed.status === 'success' && parsed.data.commands`，匹配失败 → 静默返回 `null` → `executeCommands` 从未被调用。
+- 修复方式：在 `apps/web/src/hooks/useAgentStream.ts` 中调整解析器，按服务端当前真实输出形状读取顶层 `commands` 字段，并通过 `status === 'error'` 显式跳过错误信封。
+
+**Notes**
+
+- 影响范围：所有 operate 模式下经 `canvas_commands` 工具产生的画布变更（CREATE_NODES / CONNECT_NODES / MERGE_NODE_DATA / DELETE_NODES / SET_NODE_PARENT / DISSOLVE_FRAME / SET_NODE_GEOMETRY / REORDER_NODES / DISCONNECT_EDGES / SET_EDGE_STYLE / ALIGN_NODES / DISTRIBUTE_NODES / AUTO_LAYOUT）。
+- Annotation / sketch intent 流不受影响 — 这些路径不经 `canvas_commands` 工具，命令以 JSON 形式从 LLM 直接返回。
+- 历史会话回放：之前 Agent "假装"执行过的命令已经在服务端记录中标记为成功，但磁盘上没落盘。重新触发同一指令即可让 Agent 重新生成命令并真正执行。
+
+---
+
 ## 2026-05-10 · Skill 体系收敛为 `canvas` + `annotation` 两层结构
 
 **What Changed**
