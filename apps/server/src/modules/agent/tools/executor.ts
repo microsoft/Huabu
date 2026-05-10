@@ -47,7 +47,6 @@ import {
   handleIngestContent,
   type IngestContentArgs,
 } from './handlers/ingest-content.js';
-import { handleUseSkill } from './handlers/use-skill.js';
 import { handleWebSearch, type WebSearchArgs } from './handlers/web-search.js';
 
 /**
@@ -119,11 +118,6 @@ export async function executeTool(
       return handleIngestContent(
         withCanvasId<IngestContentArgs>(args, 'ingest_content'),
       );
-
-    case 'use_skill':
-      return handleUseSkill({
-        skillId: typeof args.skillId === 'string' ? args.skillId : '',
-      });
 
     default:
       throw new Error(`Unknown tool: ${name}`);

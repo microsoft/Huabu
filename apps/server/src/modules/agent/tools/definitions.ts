@@ -316,33 +316,14 @@ export const canvasCommandsTool: ToolDefinition = {
   label: 'Canvas Commands',
   description: `Execute a batch of canvas commands atomically. All commands in a single call are applied as one undo step.
 
-## Command types
+Supported command types: CREATE_NODES, CREATE_QUESTION, DELETE_NODES, MERGE_NODE_DATA, SET_NODE_PARENT, DISSOLVE_FRAME, SET_NODE_GEOMETRY, REORDER_NODES, CONNECT_NODES, DISCONNECT_EDGES, SET_EDGE_STYLE, ALIGN_NODES, DISTRIBUTE_NODES, AUTO_LAYOUT. Field-level requirements (which fields each command takes) are described by this tool's parameter schema.
 
-- CREATE_NODES — create one or more nodes. Set skipAutoLayout: true when you provide explicit positions.
-- CREATE_QUESTION — create a question node on the canvas. The agent uses this to pose follow-up questions or prompts to the user. Provide the question text as content.
-- DELETE_NODES — delete nodes by ID (also removes incident edges)
-- MERGE_NODE_DATA — shallow-merge a patch into node data (label, content, style). Style supports accent (hex color for top border stripe, shared palette with edge strokes) and backgroundColor on all node types; text-related style fields only apply to text nodes.
-- SET_NODE_PARENT — move nodes into/out of a frame
-- DISSOLVE_FRAME — ungroup a frame, keeping child nodes
-- SET_NODE_GEOMETRY — set position and/or size of nodes
-- REORDER_NODES — change z-order of nodes
-- CONNECT_NODES — create edges between nodes (with optional style)
-- DISCONNECT_EDGES — remove edges by ID or source/target pair
-- SET_EDGE_STYLE — update visual style of existing edges
-- ALIGN_NODES — align selected nodes along an axis
-- DISTRIBUTE_NODES — evenly distribute selected nodes
-- AUTO_LAYOUT — run force-directed layout on canvas or frame
+ID conventions:
+- Node IDs: \`node-<uuid>\` (use crypto.randomUUID()).
+- Edge IDs: \`edge-<uuid>\`.
+- When a later command in the batch references a node created earlier in the same batch, give that node an explicit \`id\` on its CREATE_NODES entry.
 
-## ID conventions
-
-- Node IDs: "node-<uuid>" (use crypto.randomUUID())
-- Edge IDs: "edge-<uuid>"
-- When a later command in the batch needs to reference a node created by an earlier command, provide an explicit id in CREATE_NODES.
-
-## Common patterns
-
-Group into frame: CREATE_NODES (frame) + SET_NODE_PARENT (children → frame)
-Create and connect: CREATE_NODES (multiple nodes with explicit ids) + CONNECT_NODES (edges referencing those ids)`,
+For per-command semantics, idiomatic compositions, and worked examples (group into frame, brainstorm-and-connect, merge/synthesize, restyle a cluster, tidy a row), call \`read("skills/canvas/SKILL.md")\` and follow its links into \`skills/canvas/references/\`.`,
   parameters: canvasCommandsParamsSchema,
   // Force serial execution: two canvas_commands in the same batch can
   // race in two ways. Server-side, the handler reads canvas state once
@@ -511,31 +492,14 @@ export const lsTool: ToolDefinition = {
   parameters: lsParamsSchema,
 };
 
-// ==================== Skill Tool ====================
-
-export const useSkillParamsSchema = Type.Object({
-  skillId: Type.String({
-    description:
-      'The skill ID to load. See the skill catalogue in the system prompt for available IDs.',
-  }),
-});
-
-export const useSkillTool: ToolDefinition = {
-  name: 'use_skill',
-  label: 'Use Skill',
-  description:
-    'Load detailed guidance for a specific skill before executing complex canvas operations. Call this when you need step-by-step guidance for tasks like building flowcharts, creating structured layouts, synthesizing nodes, etc. The skill content will be returned as the tool result.',
-  parameters: useSkillParamsSchema,
-};
-
 // ==================== Tool Sets by Mode ====================
 
 /**
- * Tools available in chat mode.
+ * Tools available in ask mode.
  * Includes read-only canvas/content access so the agent can
  * lazily fetch full content of selected nodes on demand.
  */
-export const chatTools: ToolDefinition[] = [
+export const askTools: ToolDefinition[] = [
   webSearchTool,
   getCanvasOutlineTool,
   inspectNodesTool,
@@ -544,7 +508,6 @@ export const chatTools: ToolDefinition[] = [
   grepTool,
   findTool,
   lsTool,
-  useSkillTool,
   ingestContentTool,
 ];
 
@@ -562,6 +525,5 @@ export const operateTools: ToolDefinition[] = [
   findTool,
   lsTool,
   canvasCommandsTool,
-  useSkillTool,
   ingestContentTool,
 ];

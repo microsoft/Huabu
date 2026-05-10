@@ -241,6 +241,12 @@ function animateAgentBatch(commands: CanvasCommand[]): void {
  * Parse a canvas_commands tool result, pre-assign missing IDs,
  * snapshot current state for revert, execute commands, and return
  * the enriched commands plus change entries.
+ *
+ * The server's canvas_commands handler returns a flat
+ * `{ source, canvasId, commands }` JSON payload (see
+ * apps/server/src/modules/agent/tools/handlers/canvas-write.ts). On
+ * tool errors, agent.service.ts wraps the payload as
+ * `{ tool, status: 'error', error }` — we skip those here.
  */
 function applyCanvasCommandsFromToolResult(toolResult: string | undefined): {
   commands: CanvasCommand[];
@@ -249,38 +255,47 @@ function applyCanvasCommandsFromToolResult(toolResult: string | undefined): {
   try {
     const parsed = JSON.parse(toolResult ?? '{}') as {
       status?: string;
-      data?: { commands?: CanvasCommand[] };
+      commands?: unknown;
     };
-    if (parsed.status === 'success' && parsed.data?.commands?.length) {
-      const commands = parsed.data.commands;
 
-      // Pre-assign IDs to nodes/edges that don't have them
-      for (const cmd of commands) {
-        if (cmd.type === 'CREATE_NODES') {
-          for (const node of cmd.nodes) {
-            if (!node.id) {
-              node.id = createId('node') as CanvasNodeId;
-            }
+    // Error envelopes produced by the SSE bridge — nothing to apply.
+    if (parsed.status === 'error') return null;
+
+    // Be strict about shape: the field must be an array. Anything else
+    // (object, string, missing) is treated as "no commands". This
+    // protects the for-of loop below from a server-side regression
+    // where `commands` accidentally becomes an array-like or arg-pass-
+    // through value with a numeric `length` property.
+    const commands = parsed.commands;
+    if (!Array.isArray(commands) || commands.length === 0) return null;
+
+    // Pre-assign IDs to nodes/edges that don't have them
+    for (const cmd of commands as CanvasCommand[]) {
+      if (cmd.type === 'CREATE_NODES') {
+        for (const node of cmd.nodes) {
+          if (!node.id) {
+            node.id = createId('node') as CanvasNodeId;
           }
-        } else if (cmd.type === 'CONNECT_NODES') {
-          for (const edge of cmd.edges) {
-            if (!edge.id) {
-              edge.id = createId('edge') as CanvasEdgeId;
-            }
+        }
+      } else if (cmd.type === 'CONNECT_NODES') {
+        for (const edge of cmd.edges) {
+          if (!edge.id) {
+            edge.id = createId('edge') as CanvasEdgeId;
           }
         }
       }
-
-      // Snapshot BEFORE execution so revert commands capture current state
-      const changes = snapshotAndExtractChanges(commands);
-
-      useCanvasStore.getState().executeCommands(commands, 'agent');
-
-      // Staggered entrance animation following command execution order
-      animateAgentBatch(commands);
-
-      return { commands, changes };
     }
+
+    // Snapshot BEFORE execution so revert commands capture current state
+    const typedCommands = commands as CanvasCommand[];
+    const changes = snapshotAndExtractChanges(typedCommands);
+
+    useCanvasStore.getState().executeCommands(typedCommands, 'agent');
+
+    // Staggered entrance animation following command execution order
+    animateAgentBatch(typedCommands);
+
+    return { commands: typedCommands, changes };
   } catch (err) {
     console.error(
       '[useAgentStream] Failed to parse canvas_commands result:',

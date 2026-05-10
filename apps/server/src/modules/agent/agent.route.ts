@@ -20,8 +20,7 @@ import {
 } from '@sediment/shared';
 import { encode } from 'gpt-tokenizer';
 
-import { buildOperatePrompt } from '../../prompt/agent.js';
-import { SYSTEM_PROMPT } from '../../prompt/system.js';
+import { buildAgentPrompt } from '../../prompt/agent.js';
 import { IMAGE_MIME_MAP } from '../../utils/mime.js';
 import { runAgent } from '../agent/agent.service.js';
 import { loadContext, saveContext } from '../agent/store/chat-store.js';
@@ -31,7 +30,6 @@ import { getCanvasStore } from '../storage/index.js';
 import type { AssistantMessage, Context } from '@earendil-works/pi-ai';
 import type {
   AgentCanvasIdQuery,
-  AgentMode,
   AgentRequest,
   AgentStreamEvent,
   ApiResult,
@@ -50,16 +48,6 @@ import type { FastifyPluginAsync } from 'fastify';
 function getOrCreateThreadId(value: unknown): string {
   if (typeof value === 'string' && value.trim().length > 0) return value;
   return createId('thread');
-}
-
-function getSystemPrompt(mode: AgentMode): string {
-  switch (mode) {
-    case 'operate':
-      return buildOperatePrompt();
-    case 'ask':
-    default:
-      return SYSTEM_PROMPT;
-  }
 }
 
 async function resolveImageUrl(url: string): Promise<string> {
@@ -781,13 +769,13 @@ const agentRoutes: FastifyPluginAsync = async (
 
     if (!context) {
       context = {
-        systemPrompt: getSystemPrompt(mode),
+        systemPrompt: buildAgentPrompt(mode),
         messages: [],
         tools: [],
       };
     } else {
       // Update system prompt if mode changed
-      context.systemPrompt = getSystemPrompt(mode);
+      context.systemPrompt = buildAgentPrompt(mode);
     }
 
     // Collect image attachments from selected canvas nodes for vision analysis

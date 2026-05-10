@@ -83,10 +83,23 @@ export function executeCanvasCommands(
     // ------------------------------------------------------------------
     // All other commands — dispatch to the handler registry.
     // ------------------------------------------------------------------
-    const handler = HANDLERS[cmd.type] as (
-      cmd: CanvasCommand,
-      state: CanvasReadState,
-    ) => CommandHandlerResult;
+    const handler = HANDLERS[cmd.type as keyof typeof HANDLERS] as
+      | ((cmd: CanvasCommand, state: CanvasReadState) => CommandHandlerResult)
+      | undefined;
+
+    // Defensive guard: skip commands with no registered handler so a
+    // hallucinated / out-of-schema type from an upstream source (e.g. an
+    // LLM) doesn't crash the whole batch. Record as not-applied so the
+    // caller can surface the failure instead of silently dropping it.
+    if (!handler) {
+      console.warn(
+        '[canvas-executor] Unknown command type — skipping:',
+        cmd.type,
+        cmd,
+      );
+      commandResults.push({ command: cmd, applied: false, reason: 'no-op' });
+      continue;
+    }
 
     if (execution.source === 'agent') {
       if (cmd.type === 'CREATE_NODES') {
@@ -209,20 +222,22 @@ export function executeCanvasCommands(
 
   // Snapshot is needed if any command in the batch has snapshot:'yes'
   // and the execution doesn't declare caller-handled snapshots.
+  // (Optional chaining tolerates unknown command types skipped above.)
   const snapshotNeeded =
     anyApplied &&
-    execution.commands.some((c) => COMMAND_META[c.type].snapshot === 'yes');
+    execution.commands.some((c) => COMMAND_META[c.type]?.snapshot === 'yes');
 
   // Edge reroute is needed if any *applied* command requires it.
   const requiresEdgeReroute = execution.commands.some(
     (c, i) =>
-      commandResults[i]?.applied && COMMAND_META[c.type].requiresEdgeReroute,
+      commandResults[i]?.applied && COMMAND_META[c.type]?.requiresEdgeReroute,
   );
 
   // Transition cleanup is needed if any *applied* command declares it.
   const needsTransitionCleanup = execution.commands.some(
     (c, i) =>
-      commandResults[i]?.applied && COMMAND_META[c.type].needsTransitionCleanup,
+      commandResults[i]?.applied &&
+      COMMAND_META[c.type]?.needsTransitionCleanup,
   );
 
   // Set the derived flag on pendingEffects.
