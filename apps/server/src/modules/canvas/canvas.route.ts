@@ -179,9 +179,26 @@ function persistAndStripNodes(
     reservedSlots.set(slot, nodeId);
   }
 
-  const out: NodeLike[] = [];
+  const out: NodeLike[] = new Array(nodes.length);
   const renamed: RenamedNode[] = [];
-  for (const node of nodes) {
+  // Process user-sourced MD-backed renames FIRST so they claim their
+  // requested filenames before any agent-sourced node in the same batch
+  // can lazily auto-dedup into that slot. Without this, when a batch
+  // contains two nodes pointing at the same label — one user-sourced,
+  // one agent-sourced — the outcome was order-dependent: an
+  // agent-sourced node landing earlier in `nodes` would take the slot,
+  // and the user-sourced node would then 409 on its strict rename.
+  const writeOrder = nodes
+    .map((_, i) => i)
+    .sort((a, b) => {
+      const aUser = (nodes[a]?.data?.['labelSource'] ?? null) === 'user';
+      const bUser = (nodes[b]?.data?.['labelSource'] ?? null) === 'user';
+      if (aUser === bUser) return a - b;
+      return aUser ? -1 : 1;
+    });
+  for (const i of writeOrder) {
+    const node = nodes[i];
+    if (!node) continue;
     const data = node.data ?? {};
     const nodeId = typeof node.id === 'string' ? node.id : '';
     const nodeType = typeof node.type === 'string' ? node.type : '';
@@ -296,7 +313,7 @@ function persistAndStripNodes(
     const keepLabel = isUserOrAgent || !hasPersistedTitle;
     const cleanData: Record<string, unknown> = { ...dataRest };
     if (!keepLabel) delete cleanData['label'];
-    out.push({ ...node, data: cleanData });
+    out[i] = { ...node, data: cleanData };
   }
   return { kind: 'ok', nodes: out, renamed };
 }
