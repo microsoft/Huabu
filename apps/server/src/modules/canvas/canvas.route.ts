@@ -1,4 +1,4 @@
-import { createWriteStream, existsSync, mkdirSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, renameSync } from 'node:fs';
 import { mkdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -17,6 +17,11 @@ import yauzl from 'yauzl';
 
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getPreprocessDispatcher } from '../preprocessing/index.js';
+import {
+  refreshCanvasDirIndex,
+  registerCanvasDir,
+  suggestCanvasDir,
+} from '../storage/canvas-dirs.js';
 import {
   createCanvas,
   deleteCanvas,
@@ -861,6 +866,15 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
       // Stream the upload to a temp zip file
       const tmpZip = path.join(tmpdir(), `${createId('import')}.zip`);
+      const targetCanvasId = createId('canvas');
+      // Extract into a hidden staging dir so `scanWorkspace()` ignores it
+      // (it skips dot-prefixed entries) and the as-yet-unrenamed dir cannot
+      // be picked up by `read()`'s self-heal as a canvas titled `<canvasId>`.
+      const stagingDir = path.join(
+        getWorkspacePath(),
+        `.import-${targetCanvasId}`,
+      );
+      let stagingCleanedUp = false;
       try {
         await new Promise<void>((resolve, reject) => {
           const ws = createWriteStream(tmpZip);
@@ -870,9 +884,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           file.file.on('error', reject);
         });
 
-        const targetCanvasId = createId('canvas');
-        const targetDir = path.join(getWorkspacePath(), targetCanvasId);
-        mkdirSync(targetDir, { recursive: true });
+        mkdirSync(stagingDir, { recursive: true });
 
         type ImportManifest = {
           version?: string;
@@ -891,8 +903,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
             }
             return;
           }
-          const dest = path.join(targetDir, entryPath);
-          if (!dest.startsWith(targetDir + path.sep)) {
+          const dest = path.join(stagingDir, entryPath);
+          if (!dest.startsWith(stagingDir + path.sep)) {
             // Path traversal guard
             return;
           }
@@ -902,14 +914,15 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         });
 
         // Rewrite canvas.json so canvasId matches the new directory.
-        const canvasJsonPath = path.join(targetDir, 'canvas.json');
-        if (!existsSync(canvasJsonPath)) {
-          await rm(targetDir, { recursive: true, force: true });
+        const stagedJsonPath = path.join(stagingDir, 'canvas.json');
+        if (!existsSync(stagedJsonPath)) {
+          await rm(stagingDir, { recursive: true, force: true });
+          stagingCleanedUp = true;
           return reply.code(400).send({
             message: 'Invalid bundle: missing canvas.json',
           });
         }
-        const raw = await readFile(canvasJsonPath, 'utf-8');
+        const raw = await readFile(stagedJsonPath, 'utf-8');
         const parsed = JSON.parse(raw) as CanvasFile;
         const sourceCanvasId = parsed.canvasId;
         const importedManifest = manifest as ImportManifest | null;
@@ -926,7 +939,18 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
             targetCanvasId,
           ),
         };
-        await writeFile(canvasJsonPath, JSON.stringify(remapped));
+        await writeFile(stagedJsonPath, JSON.stringify(remapped));
+
+        // Move the staged dir into its final, title-derived location so
+        // the on-disk basename matches the title and `read()` will not
+        // self-heal-overwrite the title with the staging dir basename on
+        // the next access.
+        const finalDirName = suggestCanvasDir(targetTitle, targetCanvasId);
+        const finalDir = path.join(getWorkspacePath(), finalDirName);
+        renameSync(stagingDir, finalDir);
+        stagingCleanedUp = true;
+        registerCanvasDir(targetCanvasId, finalDirName, targetTitle);
+        refreshCanvasDirIndex();
 
         const response: ImportCanvasResponse = {
           canvasId: targetCanvasId,
@@ -937,6 +961,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.code(500).send({ message: 'Failed to import canvas' });
       } finally {
         void unlink(tmpZip).catch(() => {});
+        if (!stagingCleanedUp && existsSync(stagingDir)) {
+          await rm(stagingDir, { recursive: true, force: true }).catch(
+            () => {},
+          );
+        }
       }
     },
   );
