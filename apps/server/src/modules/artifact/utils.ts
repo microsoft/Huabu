@@ -1,23 +1,14 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { ARTIFACT_URL_REGEX } from '@sediment/shared';
+
 import { IMAGE_MIME_MAP } from '../../utils/mime.js';
 
-/**
- * Canvas-scoped artifact API prefix template.
- *
- * Resolves to `/api/canvas/<canvasId>/artifact`. Use {@link artifactApiPath}
- * to compose a full URL for a single file.
- */
-export const ARTIFACT_API_PREFIX_TEMPLATE = '/api/canvas/:canvasId/artifact';
-
-export function artifactApiPath(canvasId: string, filename: string): string {
-  return `/api/canvas/${canvasId}/artifact/${filename}`;
-}
-
-/** Regex capturing (canvasId, filename) from a canvas-scoped artifact URL. */
-export const ARTIFACT_URL_REGEX =
-  /\/api\/canvas\/([^/?#]+)\/artifact\/([^/?#]+)/;
+// Re-export the canonical wire helpers so existing server-side imports
+// (`./utils.js`) keep working without each call site reaching into the
+// shared package directly.
+export { ARTIFACT_URL_REGEX, artifactApiPath } from '@sediment/shared';
 
 /**
  * Resolve an artifact image URL to a base64 data URL.

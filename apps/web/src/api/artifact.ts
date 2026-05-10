@@ -1,3 +1,5 @@
+import { parseArtifactUrl } from '@sediment/shared';
+
 import { apiFetch, apiUrl } from './_client';
 import { routes } from './_routes';
 import { API_CONFIG } from '../config/api';
@@ -6,6 +8,10 @@ import type {
   ArtifactUploadResponse,
   CloneArtifactRequest,
 } from '@sediment/shared';
+
+// Re-export the canonical wire helper from shared so the rest of the
+// web bundle has one obvious place to import from.
+export { parseArtifactUrl };
 
 type ArtifactType = 'image' | 'pdf' | 'video';
 
@@ -80,27 +86,6 @@ export async function uploadVideo(
 // `apiUrl` is re-exported so callers (e.g. download links) can build the
 // same absolute URLs the API helpers use without importing the config.
 export { apiUrl };
-
-/**
- * Regex capturing (canvasId, key) from a canvas-scoped artifact URL.
- * Mirrors `ARTIFACT_URL_REGEX` on the server.
- */
-const ARTIFACT_URL_RE = /\/api\/canvas\/([^/?#]+)\/artifact\/([^/?#]+)/;
-
-/**
- * Parse a canvas-scoped artifact URL into its (canvasId, key) parts.
- * Returns `null` for unrelated URLs (data:, https://external, plain
- * paths). Accepts both relative paths and absolute URLs (the latter is
- * used by legacy data that was persisted with a hardcoded port).
- */
-export function parseArtifactUrl(
-  url: string,
-): { canvasId: string; key: string } | null {
-  if (!url || url.startsWith('data:')) return null;
-  const match = url.match(ARTIFACT_URL_RE);
-  if (!match || !match[1] || !match[2]) return null;
-  return { canvasId: match[1], key: match[2] };
-}
 
 /**
  * Copy an artifact from one canvas into another. Returns the new
