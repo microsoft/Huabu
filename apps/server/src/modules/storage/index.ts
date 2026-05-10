@@ -17,6 +17,7 @@ import {
 } from './canvas-dirs.js';
 import { CanvasStore } from './canvas-store.js';
 import { atomicWriteJson, mkdirp, sanitizeId } from './io.js';
+import { toSafeFilename } from './naming.js';
 import { canvasJsonPath } from './paths.js';
 import { getWorkspacePath } from '../workspace.js';
 
@@ -109,17 +110,27 @@ export function createCanvas(
   const dirPath = path.join(getWorkspacePath(), dirName);
   mkdirp(dirPath);
 
+  // If `dedupeName` appended a " (N)" suffix to avoid a collision, mirror
+  // it into the persisted title so `read()`'s self-heal step (which copies
+  // the on-disk basename back into `title`) does not later mutate the
+  // user's chosen title behind their back.
+  const safeFromTitle = toSafeFilename(title, safeId);
+  const dedupeSuffix =
+    dirName === safeFromTitle ? '' : dirName.slice(safeFromTitle.length);
+  const resolvedTitle =
+    title == null || dedupeSuffix === '' ? title : title + dedupeSuffix;
+
   const now = Date.now();
   const canvas: CanvasFile = {
     canvasId: safeId,
-    title,
+    title: resolvedTitle,
     version: 0,
     state: { nodes: [], edges: [] },
     createdAt: now,
     updatedAt: now,
   };
   atomicWriteJson(path.join(dirPath, 'canvas.json'), canvas);
-  registerCanvasDir(safeId, dirName, title);
+  registerCanvasDir(safeId, dirName, resolvedTitle);
   return canvas;
 }
 
