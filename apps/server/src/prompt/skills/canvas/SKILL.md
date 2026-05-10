@@ -10,6 +10,8 @@ version: 1
 
 This is the canonical reference for working with a Sediment canvas. It covers the filesystem layout, how to choose between query tools, and the full command catalogue. Deeper material lives in `references/` and is loaded only when needed.
 
+> **Mode awareness.** This skill is loaded by both ask and operate agents. If `canvas_commands` is **not** in your available tool list, you are in read-only (ask) mode — use `read` / `inspect_nodes` / `inspect_edges` / `grep` / `find` / `ls` to answer the user's question, and treat the "Command catalogue" section below as background context only. Do **not** attempt mutations and do **not** claim in your reply that you performed any.
+
 > **Schemas are the source of truth.** This skill explains _semantics_ and _idioms_. Field names, types, and required parameters live on the corresponding tool / command schema. When in doubt about a field, trust the schema.
 
 ## Mental model: where data lives
@@ -56,7 +58,7 @@ Boundary rule of thumb:
 - **No cross-canvas access.** All paths are scoped to the active canvas.
 - **Binary files are rejected by `read`.** Image / PDF / video bytes live under `artifacts/`; the `src` URL is in the node markdown frontmatter.
 
-## Command catalogue
+## Command catalogue _(requires `canvas_commands`)_
 
 `canvas_commands` takes one batch of `CanvasCommand` objects and applies them as a **single atomic undo step**. One batch per user intent — fewer batches means fewer re-renders and a cleaner undo history.
 
