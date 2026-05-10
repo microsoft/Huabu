@@ -48,6 +48,7 @@ import type {
   PreprocessNodeResponse,
   PutCanvasRequest,
   PutCanvasResponse,
+  RenamedNode,
 } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
@@ -118,7 +119,7 @@ type PersistResult =
   | {
       kind: 'ok';
       nodes: NodeLike[];
-      renamed: Array<{ nodeId: string; label: string }>;
+      renamed: RenamedNode[];
     }
   | {
       kind: 'conflict';
@@ -174,7 +175,7 @@ function persistAndStripNodes(
   }
 
   const out: NodeLike[] = [];
-  const renamed: Array<{ nodeId: string; label: string }> = [];
+  const renamed: RenamedNode[] = [];
   for (const node of nodes) {
     const data = node.data ?? {};
     const nodeId = typeof node.id === 'string' ? node.id : '';

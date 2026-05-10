@@ -35,7 +35,16 @@ export interface PutCanvasResponse {
    *
    * Empty / omitted when no labels were rewritten.
    */
-  renamedNodes?: Array<{ nodeId: string; label: string }>;
+  renamedNodes?: RenamedNode[];
+}
+
+/**
+ * Single entry in {@link PutCanvasResponse.renamedNodes}. Carries the
+ * stable `nodeId` plus the new sanitized `label` the server settled on.
+ */
+export interface RenamedNode {
+  nodeId: string;
+  label: string;
 }
 
 export interface DeleteNodeResponse {
