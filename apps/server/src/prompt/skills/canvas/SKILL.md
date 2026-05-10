@@ -21,7 +21,7 @@ Each canvas is a folder on disk. The two files that matter most:
 - `canvas.json` — geometry, parents, edges. The **layout** of the canvas.
 - `nodes/<nodeId>.md` — per-node markdown with YAML frontmatter (`label`, `type`, `src?`, `summary?`, `keywords?`) plus a Markdown body.
 
-Other paths the agent may encounter: `chat/<thread>.json` (saved threads), `intent.json` / `events.jsonl` (intent + event logs), `memory/*.md` (long-form memory), `artifacts/*` (binary blobs — only their metadata is readable here), `skills/<id>/SKILL.md` (per-canvas skill overrides).
+Other paths the agent may encounter: `.history/chat/<threadId>.json` (saved threads), `.history/intent.json` / `.history/events.jsonl` (intent + event logs), `memory/*.md` (long-form memory), `artifacts/*` (binary blobs — only their metadata is readable here), `skills/<id>/SKILL.md` (per-canvas skill overrides).
 
 Boundary rule of thumb:
 
