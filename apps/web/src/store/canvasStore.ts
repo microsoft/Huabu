@@ -222,6 +222,14 @@ type RFState = {
   isSaving: boolean;
   pendingSave: boolean;
 
+  /**
+   * Apply a partial state update without triggering autosave or the
+   * canUndo/canRedo sync. Reserved for acknowledging server-driven
+   * updates (e.g. labels the server auto-deduped on save) so the patch
+   * doesn't ping-pong back into another autosave.
+   */
+  _setStateNoAutosave: (partial: Partial<RFState>) => void;
+
   canvasTitle: string;
   setCanvasTitle: (title: string) => void;
 
@@ -569,7 +577,16 @@ const autoSaveMiddleware =
       afterSet(prev);
     };
 
-    return config(wrappedSet, get, api);
+    const baseState = config(wrappedSet, get, api);
+    // Inject a raw setter that skips both autosave scheduling AND the
+    // canUndo/canRedo sync. Use this when the store is acknowledging
+    // server-driven updates that should not feed back into another save.
+    return {
+      ...baseState,
+      _setStateNoAutosave: (partial) => {
+        (set as (p: Partial<RFState>) => void)(partial);
+      },
+    };
   };
 
 // rAF handle for throttling the heavy preview computation inside onNodeDrag.
@@ -587,6 +604,12 @@ const useCanvasStore = create<RFState>()(
     canvasNotFound: false,
     isSaving: false,
     pendingSave: false,
+
+    // Placeholder — the autoSaveMiddleware injects the real raw setter
+    // that bypasses autosave scheduling. Calling it before middleware has
+    // wrapped the store would be a programmer error, so fall back to the
+    // wrapped `set` (which still works, just without the suppression).
+    _setStateNoAutosave: (partial) => set(partial),
 
     canvasTitle: '',
     setCanvasTitle: (title) => {
@@ -911,11 +934,13 @@ const useCanvasStore = create<RFState>()(
         // when an agent-sourced label collided with a sibling and was bumped
         // to `Foo (2)`). Patch those into our in-memory state so the canvas
         // display matches what was persisted, without waiting for a reload.
+        // Use `_setStateNoAutosave` so applying these server-told labels
+        // doesn't trigger another autosave round-trip.
         if (response.renamedNodes && response.renamedNodes.length > 0) {
           const renames = new Map(
             response.renamedNodes.map((r) => [r.nodeId, r.label]),
           );
-          set({
+          get()._setStateNoAutosave({
             nodes: get().nodes.map((n) => {
               const next = renames.get(n.id);
               if (next === undefined) return n;
