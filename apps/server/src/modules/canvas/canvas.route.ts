@@ -807,6 +807,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get<{
     Params: { canvasId: string };
     Querystring: ExportCanvasQuery;
+    // Success path streams a zip archive (Readable). Failure path is the
+    // canonical ApiErrorBody — declared here so the 400/404 branches
+    // type-check via the same `reply.send(...)` machinery the JSON
+    // routes use.
+    Reply: ApiResult<NodeJS.ReadableStream>;
   }>('/:canvasId/export', async function (request, reply) {
     const { canvasId } = request.params;
     const parsedQuery = exportCanvasQuerySchema.safeParse(request.query);
