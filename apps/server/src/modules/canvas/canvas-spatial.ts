@@ -3,7 +3,7 @@
  *
  * Backs the `get_canvas_outline`, `inspect_nodes`, and `inspect_edges`
  * agent tools. The split is deliberate (see
- * docs/agent-spatial-tools-plan.md):
+ * docs/agent-architecture.md):
  *
  *  - `get_canvas_outline`  →  `buildCanvasOutline()` — one-shot "map"
  *    of the whole canvas: every node's geometry/parent/(opt-in) style

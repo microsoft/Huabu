@@ -1,10 +1,6 @@
 /**
  * Canvas read-only tool handlers.
- *
- * Today: `get_canvas_outline`, `inspect_nodes`, `inspect_edges`. Future
- * read-side tools (e.g. `describe_node_position` if scenario 10 in
- * the design doc proves frequent) land here too — anything the agent
- * calls to *understand* the canvas without mutating it.
+ * Design doc: docs/agent-architecture.md
  *
  * Split with the filesystem `read` tool: these handlers expose what
  * lives in `canvas.json` (position, size, parentId, visual style on

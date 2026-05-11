@@ -128,8 +128,7 @@ export async function* runAgent(
     // common win is the LLM emitting N parallel `read` / `inspect_nodes`
     // / `web_search` calls — total latency drops from sum to max.
     //
-    // Audit notes (see docs/agent-spatial-tools-plan.md TODO #11 and
-    // docs/pi-agent-core-migration.md Step 4):
+    // Audit notes (see docs/agent-architecture.md"):
     //   - Read-only tools (`read`, `grep`, `find`, `ls`,
     //     `get_canvas_outline`, `inspect_nodes`, `inspect_edges`,
     //     `web_search`) are trivially safe.
