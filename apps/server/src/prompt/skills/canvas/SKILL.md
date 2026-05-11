@@ -1,6 +1,6 @@
 ---
 id: canvas
-name: Canvas
+name: canvas
 description: Canvas mental model, tool boundaries, and command reference. The single entry point for any agent operating on a Sediment canvas.
 appliesTo: [ask, operate, annotation, external]
 version: 1

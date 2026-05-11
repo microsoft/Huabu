@@ -1,6 +1,6 @@
 ---
 id: annotation
-name: Annotation Gestures
+name: annotation-gestures
 description: Convert freehand canvas annotation gestures (lines, loops, scribbles, "?" / "!" marks) into atomic canvas command batches. Pipeline-only — not loaded by chat / operate / external agents.
 appliesTo: [annotation]
 version: 1
