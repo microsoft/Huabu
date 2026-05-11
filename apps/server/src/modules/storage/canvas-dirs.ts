@@ -68,11 +68,6 @@ export function listCanvasDirEntries(): CanvasDirEntry[] {
   return index.list();
 }
 
-export function findCanvasIdByDir(dirName: string): string | null {
-  ensureScanned();
-  return index.findByName(dirName)?.id ?? null;
-}
-
 /**
  * Suggest a directory name for a new canvas: sanitised title with a
  * numeric suffix on collision.
@@ -93,14 +88,6 @@ export function registerCanvasDir(
 ): NameIndexResult<CanvasDirEntry> {
   ensureScanned();
   return index.add({ id: canvasId, filename: dirName, title });
-}
-
-export function renameCanvasDir(
-  canvasId: string,
-  newDirName: string,
-): NameIndexResult<CanvasDirEntry> {
-  ensureScanned();
-  return index.rename(canvasId, newDirName);
 }
 
 export function patchCanvasDirTitle(

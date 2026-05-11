@@ -231,7 +231,6 @@ type RFState = {
   _setStateNoAutosave: (partial: Partial<RFState>) => void;
 
   canvasTitle: string;
-  setCanvasTitle: (title: string) => void;
 
   ingestionByNodeId: Record<string, NodeIngestionInfo>;
   setNodeIngestion: (nodeId: string, info: NodeIngestionInfo) => void;
@@ -612,9 +611,6 @@ const useCanvasStore = create<RFState>()(
     _setStateNoAutosave: (partial) => set(partial),
 
     canvasTitle: '',
-    setCanvasTitle: (title) => {
-      set({ canvasTitle: title });
-    },
 
     ingestionByNodeId: {},
     setNodeIngestion: (nodeId, info) => {

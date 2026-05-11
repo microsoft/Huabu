@@ -490,39 +490,10 @@ export class CanvasStore {
     };
   }
 
-  /** Resolve a URL key (`<id><ext>`) to a record. Trivial — name == key. */
-  resolveArtifactByKey(key: string): ArtifactRecord | null {
-    return this.buildRecord(path.basename(key));
-  }
-
   /** Resolve a URL key to an absolute path, or null when the file is gone. */
   resolveArtifactFilePath(key: string): string | null {
     const fullPath = this.artifactPath(path.basename(key));
     return existsSync(fullPath) ? fullPath : null;
-  }
-
-  async deleteArtifact(artifactId: string): Promise<boolean> {
-    const dir = artifactsDir(this.canvasId);
-    if (!existsSync(dir)) return false;
-    let removed = false;
-    for (const file of readdirSync(dir)) {
-      const ext = path.extname(file);
-      const stem = ext ? file.slice(0, -ext.length) : file;
-      if (stem !== artifactId) continue;
-      try {
-        unlinkSync(path.join(dir, file));
-        removed = true;
-      } catch {
-        // best effort
-      }
-    }
-    return removed;
-  }
-
-  listArtifactRecords(): ArtifactRecord[] {
-    const dir = artifactsDir(this.canvasId);
-    if (!existsSync(dir)) return [];
-    return readdirSync(dir).map((f) => this.buildRecord(f));
   }
 
   // ── Chat ─────────────────────────────────────────────────────────────────
