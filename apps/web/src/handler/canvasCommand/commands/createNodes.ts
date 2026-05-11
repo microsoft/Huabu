@@ -17,6 +17,22 @@ import type { Node } from '@xyflow/react';
 
 type Cmd = Extract<CanvasCommand, { type: 'CREATE_NODES' }>;
 
+/**
+ * Per-type default accent applied at creation time when the caller did not
+ * provide one. Fresh frames and notes start on a clean white card; text
+ * nodes intentionally start transparent so they read as a typographic
+ * overlay on the canvas.
+ *
+ * Only types listed here get a default. Any value already present on
+ * `data.style.accent` (including an explicit `null`) is preserved — this
+ * keeps clipboard paste, undo/redo, and other passthroughs lossless.
+ */
+const DEFAULT_ACCENT_BY_TYPE: Partial<Record<string, string | null>> = {
+  frame: 'white',
+  note: 'white',
+  text: null,
+};
+
 const createNodes: CommandDefinition<Cmd> = {
   meta: {
     snapshot: 'yes',
@@ -74,11 +90,29 @@ const createNodes: CommandDefinition<Cmd> = {
       // ---------------------------------------------------------------
       const size = input.size ?? getNodeDefaultSize(nodeType);
 
+      // Apply the per-type default accent, but only if the caller did
+      // not explicitly set one (preserves clipboard paste / undo data).
+      const inputData = (input.data ?? {}) as Record<string, unknown>;
+      const inputStyle = (inputData.style ?? {}) as Record<string, unknown>;
+      const hasExplicitAccent = 'accent' in inputStyle;
+      const defaultAccent = DEFAULT_ACCENT_BY_TYPE[nodeType];
+      const styleWithAccent =
+        !hasExplicitAccent && defaultAccent !== undefined
+          ? { ...inputStyle, accent: defaultAccent }
+          : inputStyle;
+
       const node: Node = {
         id: nodeId,
         type: nodeType,
         position: input.position ?? { x: 0, y: 0 },
-        data: { ...(input.data ?? {}), label, type: nodeType },
+        data: {
+          ...inputData,
+          ...(Object.keys(styleWithAccent).length > 0
+            ? { style: styleWithAccent }
+            : {}),
+          label,
+          type: nodeType,
+        },
         ...(size
           ? {
               style:

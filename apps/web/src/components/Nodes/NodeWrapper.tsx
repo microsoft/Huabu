@@ -228,6 +228,15 @@ interface NodeWrapperProps {
   keepAspectRatio?: boolean;
   resizable?: boolean;
 
+  /**
+   * Optional override for the outer accent border color. When provided,
+   * this wins over the auto-derived `accentTokens.border` (which is a
+   * 50%-transparent mix of the accent over `transparent`). Useful for
+   * accents like `white` where the default mix is effectively invisible
+   * and a node wants the border to match the swatch exactly.
+   */
+  borderColor?: string;
+
   onResizeStart?: () => void;
   onResize?: (width: number, height: number) => void;
   onResizeEnd?: (width: number, height: number) => void;
@@ -251,6 +260,8 @@ export const NodeWrapper = memo(
     resizable = true,
 
     allowOverflow = false,
+
+    borderColor,
 
     onResizeStart,
     onResize: onResizeProp,
@@ -508,10 +519,14 @@ export const NodeWrapper = memo(
         <div
           className={cn(
             'group relative flex h-full w-full flex-col rounded transition-all duration-120',
+            // Drop shadow whenever there is no *visible* colored accent.
+            // A `white` accent is visually neutral (its 50%-mix border is
+            // effectively invisible against the canvas), so it should keep
+            // the same soft edge as "no accent".
             type !== 'text' &&
               type !== 'annotation' &&
               type !== 'question' &&
-              !data.style?.accent &&
+              (!data.style?.accent || data.style.accent === 'white') &&
               'shadow',
             !data.style?.backgroundColor && 'bg-transparent',
             selected
@@ -540,6 +555,9 @@ export const NodeWrapper = memo(
             ...(type === 'question' && {
               borderColor: 'transparent',
             }),
+            // Node-level override (e.g. NoteNode forces solid white when
+            // the picked accent is `white`). Applied last so it always wins.
+            ...(borderColor && { borderColor }),
           }}
           onDoubleClick={onDoubleClick}
         >

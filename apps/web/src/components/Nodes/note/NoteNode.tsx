@@ -337,6 +337,13 @@ export const NoteNode = memo(
       data.contentMissing &&
       !(typeof data.content === 'string' && data.content.trim());
 
+    // When the picked accent is `white`, the wrapper's default border —
+    // a 50%-transparent mix of white over `transparent` — is effectively
+    // invisible. Force a solid white border instead so the swatch and the
+    // rendered border match exactly.
+    const borderColorOverride =
+      data.style?.accent === 'white' ? '#ffffff' : undefined;
+
     return (
       <NodeWrapper
         id={id}
@@ -345,6 +352,7 @@ export const NoteNode = memo(
         selected={selected}
         toolbar={isContentMissing ? undefined : NoteToolbar}
         keepAspectRatio={false}
+        borderColor={borderColorOverride}
       >
         {isContentMissing ? (
           <MissingFileBanner

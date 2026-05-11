@@ -227,11 +227,24 @@ function ToolbarColorPicker({
   // Legacy hex / CSS keyword passes through unchanged.
   const triggerColor =
     colors.find((c) => c.token === value)?.value ?? value ?? 'transparent';
+  const isTransparent = !triggerColor || triggerColor === 'transparent';
 
+  // Mirror the checkerboard rendering used by the picker swatches so a
+  // "transparent" selection is visually distinct from a solid white swatch.
   const defaultTrigger = (
     <div
       className="border-edge-default h-3.5 w-3.5 rounded-full border"
-      style={{ backgroundColor: triggerColor }}
+      style={
+        isTransparent
+          ? {
+              backgroundColor: 'var(--bg-surface)',
+              backgroundImage:
+                'linear-gradient(45deg, var(--fg-subtle) 25%, transparent 25%, transparent 75%, var(--fg-subtle) 75%), linear-gradient(45deg, var(--fg-subtle) 25%, transparent 25%, transparent 75%, var(--fg-subtle) 75%)',
+              backgroundSize: '6px 6px',
+              backgroundPosition: '0 0, 3px 3px',
+            }
+          : { backgroundColor: triggerColor }
+      }
     />
   );
 
