@@ -144,12 +144,6 @@ export async function* runAgent(
     //     `canvas_commands` call falls back to serial — acceptable
     //     because mixed read+write batches are rare in practice
     //     (the agent typically reads first, writes later).
-    //   - `ingest_content` writes via the preprocess dispatcher.
-    //     Concurrent calls on different nodes touch different files;
-    //     concurrent calls on the same node fall back to atomic
-    //     last-writer-wins via `atomicWriteJson` / `atomicWriteText`,
-    //     which is no worse than serial. Same-node concurrent
-    //     ingestion is also rare in practice.
     toolExecution: 'parallel',
   });
 

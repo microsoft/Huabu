@@ -43,10 +43,6 @@ import {
   type GrepArgs,
   type LsArgs,
 } from './handlers/fs-search.js';
-import {
-  handleIngestContent,
-  type IngestContentArgs,
-} from './handlers/ingest-content.js';
 import { handleWebSearch, type WebSearchArgs } from './handlers/web-search.js';
 
 /**
@@ -112,11 +108,6 @@ export async function executeTool(
     case 'canvas_commands':
       return handleCanvasCommands(
         withCanvasId<CanvasCommandsArgs>(args, 'canvas_commands'),
-      );
-
-    case 'ingest_content':
-      return handleIngestContent(
-        withCanvasId<IngestContentArgs>(args, 'ingest_content'),
       );
 
     default:

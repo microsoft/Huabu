@@ -42,7 +42,7 @@ POST /api/agent  body = AgentRequest {
    │
    ▼ 工具循环
 read / grep / find / ls / get_canvas_outline / inspect_nodes / inspect_edges /
-canvas_commands / ingest_content / web_search / use_skill ...
+canvas_commands / web_search / use_skill ...
 ```
 
 ---
@@ -127,7 +127,6 @@ canvas_commands / ingest_content / web_search / use_skill ...
 | `get_canvas_outline()`        | 一次取全画布几何 + 连线 + 空间 cluster                 | 刚进入画布需要一份“地图”       |
 | `inspect_nodes(args)`         | 谓词驱动的节点查找 + 完整几何 / 样式 / 派生字段        | 查某个节点位置、邻近、连接 …   |
 | `inspect_edges(args)`         | 边的完整 EdgeStyle（方向 / 虚线 / 颜色 …）             | 边的样式 / 过滤                |
-| `ingest_content(nodeId)`      | 触发预处理流水线抽取与摘要                             | 手动触发摄取                   |
 | `canvas_commands(commands[])` | 执行 CREATE / DELETE / CONNECT 等                      | operate 模式做实际改动         |
 | `use_skill(skillId)`          | 技能引导文本                                           | 复杂工作流（画流程图、提纲等） |
 | `web_search(query)`           | Tavily 网络搜索结果                                    | 需要时新信息                   |
@@ -169,7 +168,7 @@ canvas_commands / ingest_content / web_search / use_skill ...
 | 聊天历史               | ✓ pi-ai Context 加载     | —                                    | 磁盘 `.history`                          |
 | 截图                   | ✗(仅 intent)             | —                                    | intent 端点 / 工具调用                   |
 | 节点完整文本           | ✗ 必须工具               | —                                    | `read("nodes/<id>.md")`                  |
-| 预处理摘要 / 关键词    | 选中节点 ✓、其他 ✗       | 需重跑 preprocess                    | `ingest_content` / hydrate               |
+| 预处理摘要 / 关键词    | 选中节点 ✓、其他 ✗       | —                                    | `buildNodeSummaries` / hydrate           |
 | 选中节点的 enrich 摘要 | ✓ 单独一条系统消息       | —                                    | `buildNodeSummaries`                     |
 | 视口 / 缩放            | ✗ 未暴露                 | —                                    | —                                        |
 | 用户偏好               | ✗ 未暴露                 | —                                    | —                                        |

@@ -340,22 +340,6 @@ For per-command semantics, idiomatic compositions, and worked examples (group in
   executionMode: 'sequential',
 };
 
-// ==================== Content Ingestion Tools ====================
-
-export const ingestContentParamsSchema = Type.Object({
-  nodeId: Type.String({
-    description: 'The node ID to trigger ingestion for',
-  }),
-});
-
-export const ingestContentTool: ToolDefinition = {
-  name: 'ingest_content',
-  label: 'Ingest Content',
-  description:
-    'Trigger content ingestion for a canvas node, loading its web/PDF content into the per-canvas content store.',
-  parameters: ingestContentParamsSchema,
-};
-
 // ==================== Canvas Filesystem Tools ====================
 //
 // Tool names and parameter shapes mirror pi-coding-agent / Claude Code
@@ -506,7 +490,6 @@ export const askTools: ToolDefinition[] = [
   grepTool,
   findTool,
   lsTool,
-  ingestContentTool,
 ];
 
 /**
@@ -523,5 +506,4 @@ export const operateTools: ToolDefinition[] = [
   findTool,
   lsTool,
   canvasCommandsTool,
-  ingestContentTool,
 ];

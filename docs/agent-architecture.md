@@ -43,11 +43,10 @@ apps/server/src/modules/agent/tools/
     fs-read.ts          ← read
     fs-search.ts        ← grep / find / ls
     fs-sandbox.ts       ← 画布隔离的路径解析（含 skills/ resolver）
-    ingest-content.ts   ← ingest_content
     web-search.ts       ← web_search
 ```
 
-### 2.2 工具清单（10）
+### 2.2 工具清单（9）
 
 | Tool                 | 类别      | 说明                                                                                                                                                                                      |
 | -------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -60,11 +59,10 @@ apps/server/src/modules/agent/tools/
 | `ls`                 | 读 · 文件 | 目录列举（`count/total/truncated`）。                                                                                                                                                     |
 | `canvas_commands`    | 写        | 单工具承包 14 个命令；handler 不直接落盘，注入 `origin / provenance / labelSource` 后由 SSE → 前端 `useAgentStream` 走 `executeCanvasCommands` 生效。                                     |
 | `web_search`         | 其他      | Tavily。                                                                                                                                                                                  |
-| `ingest_content`     | 其他      | 触发节点内容入库 (TODO:可删)。                                                                                                                                                            |
 
 **模式划分**（[definitions.ts](../apps/server/src/modules/agent/tools/definitions.ts) 末尾）：
 
-- `askTools`：所有读 + `web_search` + `ingest_content`，**无** `canvas_commands`。
+- `askTools`：所有读 + `web_search`，**无** `canvas_commands`。
 - `operateTools`：在 ask 之上加 `canvas_commands`。
 - `annotation`：read + inspect_nodes + inspect_edges（在 [intent.service.ts](../apps/server/src/modules/agent/intent.service.ts) 显式装配）。
 

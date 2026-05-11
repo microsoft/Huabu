@@ -79,7 +79,7 @@ keywords: [transformer, attention, ...]
 1. **被选节点的入库内容自动注入上下文**
    选中的节点若已有 `nodes/<nodeId>.md`，其完整文本会作为上下文传给 AI（不截断）。
 2. **AI 主动读取**
-   AI 可调用 `read("nodes/<nodeId>.md")` 按需读取某个节点的完整内容（label / 正文 / summary / keywords），用 `inspect_nodes({ ids: ["<nodeId>"] })` 拿位置 / 大小 / 父 frame / 样式；在 Operate 模式下还可调用 `ingest_content` 主动让某个尚未入库的节点入库。
+   AI 可调用 `read("nodes/<nodeId>.md")` 按需读取某个节点的完整内容（label / 正文 / summary / keywords），用 `inspect_nodes({ ids: ["<nodeId>"] })` 拿位置 / 大小 / 父 frame / 样式。节点创建、修改 `src` / `content` 后会由后台预处理流水线自动抽取并入库，Agent 不需也不能手动触发。
 
 ---
 

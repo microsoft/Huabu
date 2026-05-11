@@ -66,7 +66,6 @@ ${task}
 ## Core tools
 ${mutationToolLine}- **get_canvas_outline / inspect_nodes / inspect_edges / read / grep / find / ls** — read-only canvas access.
 - **web_search** — search the internet for up-to-date information.
-- **ingest_content** — load a node's web/PDF content into the canvas store.
 
 The canvas command catalogue, tool decision matrix, and layout recipes live in the canvas skill — load it with \`read("skills/canvas/SKILL.md")\` when you need it. Deeper recipes are linked from there.${operateLoop}
 
