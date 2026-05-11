@@ -4,6 +4,21 @@
 
 ---
 
+## 2026-05-11 · Question / Annotation 状态徽标统一为 `StatusBadge`
+
+**What Changed**
+
+- 将 question 节点和 annotation cluster 上的“状态胶囊徽标”（Pending / Running / Done / Error / Preparing）抽离为通用组件 `apps/web/src/components/Common/StatusBadge.tsx`，两处调用统一从这里渲染。
+- 现在两处徽标都采用 annotation 原本的「画布缩放时徽标尺寸保持不变」表现：徽标会按当前 React Flow zoom 反向缩放，所以无论你把画布放多大或缩多小，状态胶囊在屏幕上看起来都是同一个尺寸。
+
+**Notes**
+
+- 视觉表现：100% 缩放下与之前完全一致（颜色、图标、文本、阴影、抖动 / 旋转动画都没变）。
+- 行为变化：question 节点的状态徽标之前会随节点一起被画布缩放放大或缩小，现在和 annotation cluster 一致——尺寸固定。如果你过去刻意把画布放大来「看清状态文字」，现在不需要这么做了。
+- 没有迁移步骤，也没有任何数据 / 配置变更。
+
+---
+
 ## 2026-05-11 · Node label 与文件名解耦：frontmatter 保留原文
 
 **What Changed**
