@@ -116,6 +116,10 @@ export interface PreprocessNodeResponse {
   success: boolean;
   /** LLM-suggested label from the Enrich stage (for image/frame, or title-derived for ingest types). */
   suggestedLabel?: string;
+  /** LLM-generated summary of the node content (from the Enrich stage). */
+  summary?: string;
+  /** LLM-generated keywords for the node content (from the Enrich stage). */
+  keywords?: string[];
   /** Structured error description, if any. */
   error?: string;
 }

@@ -365,6 +365,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           typeof result.patch.label === 'string'
             ? result.patch.label
             : undefined,
+        summary: result.enriched?.summary,
+        keywords: result.enriched?.keywords,
         error:
           result.diagnostics
             .filter((d) => d.level === 'error')
