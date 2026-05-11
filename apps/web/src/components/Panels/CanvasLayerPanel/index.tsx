@@ -81,7 +81,7 @@ export const CanvasLayerPanel = ({
 
   return (
     <SidebarPanel
-      title="Contents"
+      title="Layers"
       isCollapsed={isCollapsed}
       onToggle={onToggle}
       iconCollapsed={<PanelLeftOpen size={16} />}
