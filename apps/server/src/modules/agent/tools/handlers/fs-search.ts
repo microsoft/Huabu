@@ -14,7 +14,7 @@
  * in `./fs-sandbox.ts` so that `read` and any future fs tool inherit
  * the exact same security model.
  *
- * Enrichment: when a result file is `nodes/<nodeId>.md`, the response
+ * Enrichment: when a result file is `nodes/<filename>.md`, the response
  * includes `nodeId`, `label`, and `nodeType` from the canvas's
  * `canvas.json` so the LLM can chain straight into `read` (for the
  * rest of the file), `inspect_nodes` (for layout / style / spatial

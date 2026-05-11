@@ -1,27 +1,27 @@
 # Command Cookbook
 
-Composed `canvas_commands` batches for common user intents. Each recipe is a single batch unless noted, and every recipe assumes the conventions in [`SKILL.md`](../SKILL.md): explicit ids when later commands reference earlier creations, `skipAutoLayout: true` whenever you set positions, one batch per user intent.
+Composed `canvas_commands` batches for common user intents. Each recipe is a single batch unless noted, and every recipe assumes the conventions in [`commands.md`](commands.md): explicit ids when later commands reference earlier creations, `skipAutoLayout: true` whenever you set positions, one batch per user intent.
 
 > **Schema is the source of truth.** Field names below come from the `canvas_commands` schemas; this file is about _which commands to compose_, not which fields to type.
 
 ## Quick patterns
 
-| Intent                            | Batch composition                                                                                                                       |
-| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| Group existing nodes into a frame | `CREATE_NODES` (frame) → `SET_NODE_PARENT` (children → frame)                                                                           |
-| Brainstorm from a source          | `CREATE_NODES` (multiple ideas with explicit ids) → `CONNECT_NODES` (each → source)                                                     |
-| Merge / synthesize                | `read("nodes/<id>.md")` for inputs → `CREATE_NODES` (synthesised note) → `DELETE_NODES` (originals) → `CONNECT_NODES` (link to context) |
-| Restyle a cluster                 | `MERGE_NODE_DATA` with `style.accent` on each member                                                                                    |
-| Tidy a row of nodes               | `ALIGN_NODES` (axis) → `DISTRIBUTE_NODES`                                                                                               |
-| Convert a frame back to siblings  | `DISSOLVE_FRAME`                                                                                                                        |
-| Move a node into a frame          | `SET_NODE_PARENT { nodeId, parentId }`                                                                                                  |
-| Detach a node from its frame      | `SET_NODE_PARENT { nodeId, parentId: null }`                                                                                            |
+| Intent                            | Batch composition                                                                                                                             |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Group existing nodes into a frame | `CREATE_NODES` (frame) → `SET_NODE_PARENT` (children → frame)                                                                                 |
+| Brainstorm from a source          | `CREATE_NODES` (multiple ideas with explicit ids) → `CONNECT_NODES` (each → source)                                                           |
+| Merge / synthesize                | `read("nodes/<filename>.md")` for inputs → `CREATE_NODES` (synthesised note) → `DELETE_NODES` (originals) → `CONNECT_NODES` (link to context) |
+| Restyle a cluster                 | `MERGE_NODE_DATA` with `style.accent` on each member                                                                                          |
+| Tidy a row of nodes               | `ALIGN_NODES` (axis) → `DISTRIBUTE_NODES`                                                                                                     |
+| Convert a frame back to siblings  | `DISSOLVE_FRAME`                                                                                                                              |
+| Move a node into a frame          | `SET_NODE_PARENT { nodeId, parentId }`                                                                                                        |
+| Detach a node from its frame      | `SET_NODE_PARENT { nodeId, parentId: null }`                                                                                                  |
 
 ## Recipe: brainstorm from a source
 
 Goal: turn one node into a fan of related ideas.
 
-1. `read("nodes/<sourceId>.md")` if you need its actual content.
+1. `read("nodes/<filename>.md")` if you need its actual content.
 2. Single batch:
    - `CREATE_NODES` — N idea nodes with explicit ids and `skipAutoLayout: true` placed in a fan around the source. Same `style.accent` so they read as a group.
    - `CONNECT_NODES` — one edge per idea, source → idea. Use `direction: "forward"` if the cause→effect direction is obvious.
@@ -31,7 +31,7 @@ Goal: turn one node into a fan of related ideas.
 
 Goal: replace a noisy cluster with a single distilled note.
 
-1. `read("nodes/<id>.md")` for **every** input — synthesis must be grounded in the actual text, not the labels.
+1. `read("nodes/<filename>.md")` for **every** input — synthesis must be grounded in the actual text, not the labels.
 2. Single batch:
    - `CREATE_NODES` — one synthesised `note` with substantive Markdown body and a clear label. Position near the cluster centroid (use the outline you fetched when entering the canvas).
    - `DELETE_NODES` — the originals.

@@ -376,7 +376,7 @@ function tryParsePartialCandidates(raw: string): IntentCandidate[] {
 // The client sends a screenshot plus a minimal context payload (cluster
 // bbox + ID lists for nearby/enclosed nodes and nearby edges). The LLM is
 // driven through a small tool-calling loop with three tools exposed:
-//   - `read` for node text content ("nodes/<nodeId>.md")
+//   - `find`/`grep` + `read` for node text content ("nodes/<filename>.md")
 //   - `inspect_nodes` for position / size / parent / style and any
 //     spatial / topological lookup it needs around the cluster
 //   - `inspect_edges` for edge direction / line style / stroke when
@@ -599,7 +599,7 @@ export async function recognizeAnnotationCommands(
     { type: 'image', data: base64, mimeType: 'image/png' },
     {
       type: 'text',
-      text: `Annotation context (IDs only — use \`read\` on "nodes/<nodeId>.md" for any node whose content you need, \`inspect_nodes({ ids: ["<nodeId>"] })\` for position/size/parent/style (also handles spatial/topological lookups: nearNode, connectedTo, inRect, ...), and \`inspect_edges({ ids: ["<edgeId>"] })\` for an edge's direction / line style / stroke):\n\n${contextText}\n\nUse the screenshot to read the gesture, fetch any node content/geometry/edge style you need via the tools, then output the final JSON object {"reasoning": ..., "commands": [...]}.`,
+      text: `Annotation context (IDs only — use \`find("nodes/*.md")\` / \`grep\` then \`read\` on "nodes/<filename>.md" for any node whose content you need, \`inspect_nodes({ ids: ["<nodeId>"] })\` for position/size/parent/style (also handles spatial/topological lookups: nearNode, connectedTo, inRect, ...), and \`inspect_edges({ ids: ["<edgeId>"] })\` for an edge's direction / line style / stroke):\n\n${contextText}\n\nUse the screenshot to read the gesture, fetch any node content/geometry/edge style you need via the tools, then output the final JSON object {"reasoning": ..., "commands": [...]}.`,
     },
   ];
 

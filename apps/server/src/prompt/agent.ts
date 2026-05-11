@@ -77,7 +77,7 @@ The canvas command catalogue, tool decision matrix, and layout recipes live in t
 
 ## Guidelines
 - When the user asks for up-to-date information, current events, or anything that may have changed recently, you MUST call \`web_search\` and cite the URLs you relied on.
-- **Selected-node context is sparse**: id + label + type only. When you need the full text, \`read("nodes/<nodeId>.md")\` — every node's label / content / type / src / summary / keywords lives in that file's YAML frontmatter and body. For position / size / parent / style, \`inspect_nodes({ ids: ["<nodeId>"] })\`.${operateGuidelines}`.trim();
+- **Selected-node context is sparse**: id + label + type only. When you need full text, **read the node file directly** — the filename is deterministically derived from the label: \`read("nodes/<safeLabel>.md")\` where \`safeLabel\` swaps \`\\ / : * ? " < > |\` for \`_\` and trims surrounding dots/spaces. Every node's label / content / type / src / summary / keywords lives in that file's YAML frontmatter and body. Only fall back to \`find("nodes/*.md")\` / \`grep\` if the direct read returns ENOENT. For position / size / parent / style, call \`inspect_nodes({ ids: ["<nodeId>"] })\`.${operateGuidelines}`.trim();
 
   const catalogue = getSkillCatalogue(mode);
   if (!catalogue) return base;

@@ -93,7 +93,7 @@ export const webSearchTool: ToolDefinition = {
 //
 // Boundary with `read`: anything in the node markdown frontmatter
 // (label, type, src, content, summary, keywords) lives in
-// `nodes/<nodeId>.md` and is owned by `read`. The three canvas tools
+// `nodes/*.md` and is owned by `read`. The three canvas tools
 // own everything in `canvas.json` (position/size/parent/style on
 // nodes, EdgeStyle on edges) plus derived spatial/topological
 // metadata.
@@ -105,7 +105,7 @@ export const getCanvasOutlineParamsSchema = Type.Object({
   includePreviews: Type.Optional(
     Type.Boolean({
       description:
-        'Attach a short text preview (summary / keywords / first 120 chars) to every node. Default: false. Skip unless you need a quick overview of contents — for full text use read on "nodes/<nodeId>.md".',
+        'Attach a short text preview (summary / keywords / first 120 chars) to every node. Default: false. Skip unless you need a quick overview of contents — for full text use read on "nodes/*.md".',
     }),
   ),
   includeStyle: Type.Optional(
@@ -119,7 +119,7 @@ export const getCanvasOutlineParamsSchema = Type.Object({
 export const getCanvasOutlineTool: ToolDefinition = {
   name: 'get_canvas_outline',
   label: 'Get Canvas Outline',
-  description: `One-shot map of the whole canvas. Returns JSON: { canvasId, version, bbox, nodes: [{ id, type, label, parentId, position, width, height, style?, preview? }], edges: [{ id?, source, target }], spatial: { clusters: [{ frameId?, frameLabel?, nodeIds (reading-order), arrangement }] } }. Edges are topology-only here — for an edge's direction / line style / stroke / strokeWidth call \`inspect_edges\` instead. Call this once when you enter a canvas to orient yourself; later, drill in with inspect_nodes / inspect_edges / read. Frame nodes are entries in \`nodes\` with type='frame' — group by parentId to recover the frame tree. Isolated nodes = all node ids minus the union of cluster nodeIds. \`preview\` and \`style\` are opt-in via the matching flags. For full content of any node, call read on "nodes/<nodeId>.md".`,
+  description: `One-shot map of the whole canvas. Returns JSON: { canvasId, version, bbox, nodes: [{ id, type, label, parentId, position, width, height, style?, preview? }], edges: [{ id?, source, target }], spatial: { clusters: [{ frameId?, frameLabel?, nodeIds (reading-order), arrangement }] } }. Edges are topology-only here — for an edge's direction / line style / stroke / strokeWidth call \`inspect_edges\` instead. Call this once when you enter a canvas to orient yourself; later, drill in with inspect_nodes / inspect_edges / read. Frame nodes are entries in \`nodes\` with type='frame' — group by parentId to recover the frame tree. Isolated nodes = all node ids minus the union of cluster nodeIds. \`preview\` and \`style\` are opt-in via the matching flags. For full content of any node, call read on "nodes/*.md".`,
   parameters: getCanvasOutlineParamsSchema,
 };
 
@@ -239,7 +239,7 @@ export const inspectNodesParamsSchema = Type.Object({
 export const inspectNodesTool: ToolDefinition = {
   name: 'inspect_nodes',
   label: 'Inspect Nodes',
-  description: `Find canvas nodes by predicate (attribute / spatial / topological) and return each match with full geometry + visual style + derived fields. Predicates AND together. **Always supply at least one predicate** — calling with no predicates returns every node, which is wasteful; for whole-canvas reads use get_canvas_outline instead. Returns JSON: { count, total, truncated, arrangement?, nodes: [{ id, type, label, parentId, position, width, height, style?, distance?, centerDistance?, direction?, edgeIds?, hops?, clusterId? }] }. \`count\` is items in this response (≤ limit); \`total\` is the full match count before \`limit\` was applied — when \`truncated:true\`, raise \`limit\` to ≥\`total\` or refine your query. Note on connectedTo: the target node itself is excluded from results. Use this for "where is X?" (ids), "what's near X?" (nearNode), "what connects to X?" (connectedTo), "what's in this region?" (inRect), or any combination. For full node content (label/text/summary/keywords) call read on "nodes/<nodeId>.md" — only canvas.json fields are surfaced here.`,
+  description: `Find canvas nodes by predicate (attribute / spatial / topological) and return each match with full geometry + visual style + derived fields. Predicates AND together. **Always supply at least one predicate** — calling with no predicates returns every node, which is wasteful; for whole-canvas reads use get_canvas_outline instead. Returns JSON: { count, total, truncated, arrangement?, nodes: [{ id, type, label, parentId, position, width, height, style?, distance?, centerDistance?, direction?, edgeIds?, hops?, clusterId? }] }. \`count\` is items in this response (≤ limit); \`total\` is the full match count before \`limit\` was applied — when \`truncated:true\`, raise \`limit\` to ≥\`total\` or refine your query. Note on connectedTo: the target node itself is excluded from results. Use this for "where is X?" (ids), "what's near X?" (nearNode), "what connects to X?" (connectedTo), "what's in this region?" (inRect), or any combination. For full node content (label/text/summary/keywords) call read on "nodes/*.md" — only canvas.json fields are surfaced here.`,
   parameters: inspectNodesParamsSchema,
 };
 
@@ -372,7 +372,7 @@ export const ingestContentTool: ToolDefinition = {
 export const readParamsSchema = Type.Object({
   path: Type.String({
     description:
-      'File path relative to the current canvas folder, e.g. "canvas.json" or "nodes/<nodeId>.md".',
+      'File path relative to the current canvas folder, e.g. "canvas.json" or "nodes/<safeLabel>.md".',
   }),
   offset: Type.Optional(
     Type.Number({
@@ -390,13 +390,11 @@ export const readParamsSchema = Type.Object({
 export const readTool: ToolDefinition = {
   name: 'read',
   label: 'Read',
-  description: `Read the contents of a **single** text file under the current canvas folder — no globs (use find to enumerate, then read each match). Returns JSON: { path, startLine, endLine, totalLines, truncated, nextOffset?, content, frontmatter? }. Output is truncated to 2000 lines or 50 KB, whichever is hit first; when truncated:true, nextOffset is the 1-indexed line number of the next unread line — pass it as the next offset to keep paging. Binary files (images, archives) are rejected with an error.
+  description: `Read the contents of a **single** text file under the current canvas folder — no globs (use find to enumerate, then read each match). Returns JSON: { path, startLine, endLine, totalLines, truncated, nextOffset?, content, frontmatter? }. Output is truncated to 2000 lines or 50 KB, whichever is hit first; when truncated:true, nextOffset is the 1-indexed line number of the next unread line — pass it as the next offset to keep paging. Binary files (images, archives, .artifacts/*) are rejected with an error.
 
-Readable file types include: "canvas.json" (geometry, edges); "nodes/<nodeId>.md" (per-node markdown with frontmatter); "chat/<thread>.json" (saved chat threads); "intent.json" / "events.jsonl" (intent + event logs); "memory/*.md" (long-form memory); "artifacts/*" metadata. Sources / images / pdfs are stored as binary under artifacts/ and are not readable here.
+When the file begins with a YAML frontmatter block ("---" fences), the parsed frontmatter is also returned as a structured object so you don't have to parse YAML yourself.
 
-When the file begins with a YAML frontmatter block ("---" fences), the parsed frontmatter is also returned as a structured object so you don't have to parse YAML yourself. For node files the frontmatter object includes: label, type, src?, summary?, keywords?.
-
-Boundary: a node's textual attributes (label, content, type, src, summary, keywords) live in "nodes/<nodeId>.md" — read them here. A node's canvas placement (position, size, parent, style) lives in canvas.json — call inspect_nodes({ ids: ["<nodeId>"] }) instead.`,
+See 'skills/canvas/SKILL.md' for the canvas folder layout, frontmatter fields per file type, the node filename ↔ label derivation rule, and the read vs inspect_nodes boundary.`,
   parameters: readParamsSchema,
 };
 
@@ -442,7 +440,7 @@ export const grepParamsSchema = Type.Object({
 export const grepTool: ToolDefinition = {
   name: 'grep',
   label: 'Grep',
-  description: `Search file contents for a pattern within the current canvas folder. Paths are canvas-relative; when omitted, search defaults to the canvas root. Returns JSON: { matches: [...], count, truncated }. \`count\` is matches in this response (≤ limit); \`truncated:true\` means scanning was stopped early (\`limit\` reached or wall-clock budget exhausted) so more matches may exist — raise \`limit\` or refine the pattern. Skips .history/, .git/, and node_modules/. When a match is in nodes/<nodeId>.md, the result also includes nodeId, label, and nodeType — chain straight into read (for the rest of the file) or inspect_nodes / canvas_commands without a second lookup. Output is capped at 100 matches by default.`,
+  description: `Search file contents for a pattern within the current canvas folder. Paths are canvas-relative; when omitted, search defaults to the canvas root. Returns JSON: { matches: [...], count, truncated }. \`count\` is matches in this response (≤ limit); \`truncated:true\` means scanning was stopped early (\`limit\` reached or wall-clock budget exhausted) so more matches may exist — raise \`limit\` or refine the pattern. Skips .history/, .git/, and node_modules/. When a match is in nodes/*.md, the result also includes nodeId, label, and nodeType — chain straight into read (for the rest of the file) or inspect_nodes / canvas_commands without a second lookup. Output is capped at 100 matches by default.`,
   parameters: grepParamsSchema,
 };
 
@@ -467,7 +465,7 @@ export const findParamsSchema = Type.Object({
 export const findTool: ToolDefinition = {
   name: 'find',
   label: 'Find',
-  description: `Find files by glob pattern within the current canvas folder. Paths are canvas-relative; when omitted, search defaults to the canvas root. Returns JSON: { paths: [...], count, truncated }. \`count\` is paths in this response (≤ limit); \`truncated:true\` means the walk stopped early at \`limit\` so more files may match — raise \`limit\` or narrow the pattern. When a result is nodes/<nodeId>.md, the entry also includes nodeId, label, and nodeType. Skips .history/, .git/, and node_modules/.`,
+  description: `Find files by glob pattern within the current canvas folder. Paths are canvas-relative; when omitted, search defaults to the canvas root. Returns JSON: { paths: [...], count, truncated }. \`count\` is paths in this response (≤ limit); \`truncated:true\` means the walk stopped early at \`limit\` so more files may match — raise \`limit\` or narrow the pattern. When a result is nodes/*.md, the entry also includes nodeId, label, and nodeType. Skips .history/, .git/, and node_modules/.`,
   parameters: findParamsSchema,
 };
 
@@ -488,7 +486,7 @@ export const lsParamsSchema = Type.Object({
 export const lsTool: ToolDefinition = {
   name: 'ls',
   label: 'Ls',
-  description: `List directory contents within the current canvas folder. When path is omitted, lists the canvas root. Returns JSON: { path, entries: [...], count, total, truncated }. Entries are sorted alphabetically with a trailing "/" on directories; \`count\` is entries in this response (≤ limit), \`total\` is the full eligible entry count, \`truncated:true\` means \`total > count\` — raise \`limit\` to ≥\`total\`. A canvas folder typically contains canvas.json plus subdirectories such as nodes/, artifacts/, and memory/.`,
+  description: `List directory contents within the current canvas folder. When path is omitted, lists the canvas root. Returns JSON: { path, entries: [...], count, total, truncated }. Entries are sorted alphabetically with a trailing "/" on directories; \`count\` is entries in this response (≤ limit), \`total\` is the full eligible entry count, \`truncated:true\` means \`total > count\` — raise \`limit\` to ≥\`total\`. A canvas folder typically contains canvas.json plus subdirectories such as nodes/, .artifacts/, .history/, and memory/.`,
   parameters: lsParamsSchema,
 };
 

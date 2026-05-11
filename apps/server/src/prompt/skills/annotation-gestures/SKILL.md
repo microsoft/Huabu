@@ -1,5 +1,5 @@
 ---
-id: annotation
+id: annotation-gestures
 name: annotation-gestures
 description: Convert freehand canvas annotation gestures (lines, loops, scribbles, "?" / "!" marks) into atomic canvas command batches. Pipeline-only — not loaded by chat / operate / external agents.
 appliesTo: [annotation]
@@ -18,7 +18,7 @@ The screenshot is the **primary signal**. The cluster payload only tells you _wh
 
 - The gesture's _shape_ (line, loop, cross, "?", "!", underline, …) → comes from looking at the screenshot.
 - The gesture's _targets_ → from the nearby / enclosed ID lists in the payload.
-- The gesture's _meaning_ for nodes you do not yet understand → call `read("nodes/<id>.md")` for content and `inspect_nodes({ ids: [...] })` for layout / style.
+- The gesture's _meaning_ for nodes you do not yet understand → call `read("nodes/<filename>.md")` for content (or use `find("nodes/*.md")` / `grep` if only id is known) and `inspect_nodes({ ids: [...] })` for layout / style.
 
 You may iterate tool calls before producing the final JSON. Tool boundaries: see `skills/canvas/SKILL.md` § "Tool decision matrix".
 
@@ -30,7 +30,7 @@ These are common patterns, not deterministic rules. Trust the screenshot.
 - **Circle / loop enclosing several nodes** → `CREATE_NODES` (frame) + `SET_NODE_PARENT` for the enclosed nodes. Inspect at least one of them to choose a meaningful frame label.
 - **Cross / X / scribble OVER a node** → `DELETE_NODES` that node.
 - **Cross / X / scribble OVER an edge** (and not over any node) → `DISCONNECT_EDGES` that edge id (use the nearby edges list).
-- **"?" near a node** → `CREATE_QUESTION` about that node. Call `read("nodes/<id>.md")` first to phrase a sensible question.
+- **"?" near a node** → `CREATE_QUESTION` about that node. Call `read("nodes/<filename>.md")` first (or locate it via `grep`/`find`) to phrase a sensible question.
 - **"!" / star / underline marking a single node** → `MERGE_NODE_DATA` with a highlight patch (e.g. `style.accent`), OR `CREATE_NODES` with a sibling note expanding on the topic.
 - **Empty / ambiguous gesture far from any node or edge** → return `commands: []` with a one-sentence reasoning explaining why no action was warranted.
 

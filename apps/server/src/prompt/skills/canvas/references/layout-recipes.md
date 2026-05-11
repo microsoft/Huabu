@@ -1,6 +1,6 @@
 # Layout Recipes
 
-Opinionated layouts for structured diagrams (architecture diagrams, flowcharts, mind maps, hierarchies, roadmaps). Load this when the user asks for a structured diagram or you are building one from scratch. The mental model and command catalogue live in [`SKILL.md`](../SKILL.md); this file is purely about geometry and visual grouping.
+Opinionated layouts for structured diagrams (architecture diagrams, flowcharts, mind maps, hierarchies, roadmaps). Load this when the user asks for a structured diagram or you are building one from scratch. The mental model lives in [`SKILL.md`](../SKILL.md) and the command catalogue in [`commands.md`](commands.md); this file is purely about geometry and visual grouping.
 
 ## Coordinate system
 

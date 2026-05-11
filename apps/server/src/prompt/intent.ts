@@ -36,8 +36,8 @@ Sorted by confidence descending.`;
  *      nearby / enclosed nodes and nearby edges
  *
  * It must FIRST reason about user intent (using the screenshot as the
- * primary signal — the IDs are just pointers), call `read` on
- * "nodes/<nodeId>.md" for any nodes whose content matters to
+ * primary signal — the IDs are just pointers), call `find`/`grep` + `read` on
+ * "nodes/<filename>.md" for any nodes whose content matters to
  * the decision (and `inspect_nodes` for any whose layout / spatial
  * relations matter), THEN emit a single JSON object containing the
  * executable canvas commands.
@@ -58,8 +58,8 @@ You will receive:
    - Lists of canvas edge IDs near the gesture
    IMPORTANT: This payload contains NO labels, NO positions, NO distances,
    NO shape inference. The IDs are just pointers — use the screenshot to
-   understand the gesture, and call \`read\` on
-   "nodes/<nodeId>.md" whenever you need to know what a
+  understand the gesture, and call \`find\`/\`grep\` + \`read\` on
+  "nodes/<filename>.md" whenever you need to know what a
    referenced node actually contains, or \`inspect_nodes\` when you
    need its position / size / parent / style — or to look up neighbours
    / connections.

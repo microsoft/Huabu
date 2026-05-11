@@ -5,7 +5,7 @@
  * the **current canvas folder** via the shared sandbox, so it can
  * address any file the agent has access to within that canvas:
  *   - "canvas.json"
- *   - "nodes/<nodeId>.md"
+ *   - "nodes/<filename>.md"
  *   - artifacts, memory, etc.
  *
  * Output is a JSON envelope with the same truncation budget as pi:
@@ -70,7 +70,7 @@ export async function handleRead(args: ReadArgs): Promise<string> {
   const rel = normalizeRel(requested);
 
   // Skill file paths get a two-tier resolver: per-canvas override under
-  // <workspace>/<canvasId>/skills/... wins; otherwise we fall back to
+  // <workspace>/<canvasDir>/skills/... wins; otherwise we fall back to
   // the global skill set shipped with the server. This lets every agent
   // — including external ones that mount the canvas folder via raw FS
   // — discover skills with the same `read("skills/<id>/SKILL.md")` call.
@@ -141,7 +141,7 @@ export async function handleRead(args: ReadArgs): Promise<string> {
   const head = buf.subarray(0, Math.min(1024, buf.length));
   if (head.includes(0)) {
     throw new Error(
-      `"${rel}" appears to be a binary file. The read tool only handles text. Image / pdf / video nodes store their bytes under artifacts/ — use the canvas UI to view them; the agent only sees their src URL via the node markdown frontmatter.`,
+      `"${rel}" appears to be a binary file. The read tool only handles text. Image / pdf / video nodes store their bytes under .artifacts/ — use the canvas UI to view them; the agent only sees their src URL via the node markdown frontmatter.`,
     );
   }
 

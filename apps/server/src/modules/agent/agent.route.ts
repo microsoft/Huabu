@@ -789,7 +789,7 @@ const agentRoutes: FastifyPluginAsync = async (
       if (refs.length > 0) {
         context.messages.push({
           role: 'user',
-          content: `[SYSTEM Context]\n[Selected Nodes (id / label / type only — read "nodes/<id>.md" for content, inspect_nodes({ ids: [...] }) for layout / style / spatial relations)]\n${JSON.stringify(refs, null, 2)}`,
+          content: `[SYSTEM Context]\n[Selected Nodes (id / label / type only — for content read directly via read("nodes/<safeLabel>.md") since filename is derived 1:1 from label; for layout / style / spatial relations call inspect_nodes({ ids: [...] }))]\n${JSON.stringify(refs, null, 2)}`,
           timestamp: Date.now(),
         });
       }
