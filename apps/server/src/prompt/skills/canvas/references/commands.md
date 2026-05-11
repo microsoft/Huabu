@@ -51,12 +51,21 @@ Everything you need to mutate a canvas. **Load this before issuing your first `c
 
 ## 5. Style hints
 
+**Labels & content**
+
 - Always set a concise `data.label` on every node — it is what the user sees when zoomed out.
 - For `note` nodes, `data.content` is Markdown — write substantive, well-formatted bodies.
 - For `frame` nodes, set `data.label`; size the frame to enclose its children with ~40px padding.
-- Use the same `style.accent` for nodes that belong to the same logical group; reserve `grey` for de-emphasised material.
+
+**Accent tokens (`data.style.accent`)**
+
+- The accent renders as a coloured stripe / shadow that stays visible at low zoom — it is the primary visual signal for "these nodes belong together".
+- Use the **same accent** for every node in one logical group; use **distinct accents** to separate groups.
+- Reserve `"grey"` for de-emphasised / neutral material.
+- Allowed tokens are enumerated on the `CREATE_NODES` schema (`data.style.accent`, e.g. `"purple"`, `"cyan"`, `"amber"`). **Never invent hex values.**
+- Apply via `CREATE_NODES` (on creation) or `MERGE_NODE_DATA` (on existing nodes); the merge is shallow on `data` so a `{ data: { style: { accent: "purple" } } }` patch leaves every other field untouched.
 
 ## See also
 
 - [`command-cookbook.md`](command-cookbook.md) — composed batch patterns for common user intents (brainstorm, merge / synthesize, group into a frame, restyle a cluster, tidy a row, …).
-- [`layout-recipes.md`](layout-recipes.md) — coordinate system, hierarchical / left-to-right / grid layouts, frames, accent palettes, and the row-track flowchart / roadmap recipe.
+- [`layout-recipes.md`](layout-recipes.md) — coordinate system, hierarchical / left-to-right / grid layouts, frames, and the row-track flowchart / roadmap recipe.

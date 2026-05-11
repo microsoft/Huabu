@@ -14,11 +14,13 @@ The canonical reference for working with a Huabu canvas. This file covers the **
 
 ---
 
-## Mental model: a canvas has two faces
+## A canvas has two surfaces
 
-A canvas exposes two complementary surfaces to the agent:
+A canvas exposes two complementary surfaces, each owned by its own family of tools. Pick the family by what you want to know, not by which tool feels familiar.
 
-**A. A folder of files you can read directly:**
+### Surface A — A folder of text files
+
+Node text, frontmatter, skill files, memory, history. Read with `read`, `find`, `ls`, `grep`.
 
 ```
 <canvas>/
@@ -30,19 +32,7 @@ A canvas exposes two complementary surfaces to the agent:
   .history/                # saved threads, intent, event log (rarely needed)
 ```
 
-**B. A layout state queried through dedicated tools** — every node's position, size, parent, visual style; every edge with its endpoints and EdgeStyle; spatial clusters. This state is **not** exposed as a file you read; use `get_canvas_outline` / `inspect_nodes` / `inspect_edges` instead.
-
-This split drives every read decision: **textual content → filesystem tools**, **spatial / topological / style → indexed query tools**.
-
-## Two families of read tools
-
-The read surface is intentionally split in two:
-
-**A. Filesystem tools — `read`, `find`, `ls`, `grep`**
-
-For anything that lives _in a file_: node text, frontmatter, skill files, memory, history.
-
-A node's filename is deterministically derived from its `label` and kept in 1:1 sync — you can build the path yourself when you know the label:
+A node's filename is deterministically derived from its `label` and kept in 1:1 sync, so when you have the label you can build the path yourself:
 
 ```
 nodes/<safeLabel>.md
@@ -54,11 +44,11 @@ nodes/<safeLabel>.md
 - Have only the nodeId → `find("nodes/*.md")` or `grep` (results carry `nodeId`, `label`, `nodeType`); the stable id also lives in each file's `id:` frontmatter.
 - A direct read returns ENOENT (rare — usually means the label was just edited mid-flight) → fall back to `find` / `grep`.
 
-**B. Indexed query tools — `get_canvas_outline`, `inspect_nodes`, `inspect_edges`**
+### Surface B — Layout & connectivity data (`canvas.json`)
 
-For the canvas's layout state: position, size, parent, visual style, edges, spatial clusters. This state is not file-shaped — it's served from an in-memory index and includes derived fields (distance, direction, hops, clusterId, …) you can't compute by reading raw files.
+Where each node sits, how big it is, which frame it belongs to, what colour it's painted; every edge's endpoints and style. Stored as one `canvas.json` per canvas, served through `get_canvas_outline`, `inspect_nodes`, `inspect_edges`. These tools also expose **derived fields you can't read off disk** — `distance`, `direction`, `hops`, `clusterId`, `arrangement` — computed on the fly from the same data, which is why you should query through them rather than `read("canvas.json")` and parse it yourself.
 
-**Boundary rule of thumb:**
+### Boundary rule of thumb
 
 | Property                                | Tool                 |
 | --------------------------------------- | -------------------- |
@@ -85,7 +75,7 @@ For the canvas's layout state: position, size, parent, visual style, edges, spat
 
 ## Gotchas
 
-- **Selected-node context is sparse.** The agent only receives `id + label + type` for selected nodes — no content, no summary, no geometry. Build the markdown path from the label (see § "Two families of read tools", A) and `read` it; use `inspect_nodes({ ids: ["<id>"] })` for spatial / structural info.
+- **Selected-node context is sparse.** The agent only receives `id + label + type` for selected nodes — no content, no summary, no geometry. Build the markdown path from the label (see § "Surface A — A folder of text files") and `read` it; use `inspect_nodes({ ids: ["<id>"] })` for spatial / structural info.
 - **No cross-canvas access.** All paths are scoped to the active canvas.
 - **Binary files are rejected by `read`.** Image / PDF / video bytes live under `.artifacts/`; the `src` URL is in the node markdown frontmatter.
 
@@ -106,4 +96,4 @@ Load on demand when the situation calls for it:
 
 - `read("skills/canvas/references/commands.md")` — **read this before any mutation.** The full `canvas_commands` catalogue, ID conventions, batch ordering, style hints.
 - `read("skills/canvas/references/command-cookbook.md")` — composed batch patterns: brainstorm, merge / synthesize, group into a frame, restyle a cluster, tidy a row, …
-- `read("skills/canvas/references/layout-recipes.md")` — coordinate system, hierarchical / left-to-right / grid layouts, frames, accent palettes, and the row-track flowchart / roadmap recipe.
+- `read("skills/canvas/references/layout-recipes.md")` — coordinate system, hierarchical / left-to-right / grid layouts, frames, and the row-track flowchart / roadmap recipe.

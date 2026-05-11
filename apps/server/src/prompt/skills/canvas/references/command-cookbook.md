@@ -48,12 +48,6 @@ Goal: take a loose group of nodes and put them in a frame with a meaningful titl
    - `SET_NODE_PARENT` — each member → the new frame.
 3. Optional: `MERGE_NODE_DATA` to give every member the same `style.accent` for visual cohesion with the frame.
 
-## Recipe: restyle a cluster
-
-Goal: visually mark a group of nodes as a single logical theme.
-
-Single batch of `MERGE_NODE_DATA` patches, one per member, all setting the same `style.accent` (a palette token from the schema enum, e.g. `"purple"`). Reserve `"grey"` for de-emphasised material. The accent stripe is visible at all zoom levels, including the zoomed-out placeholder view.
-
 ## Recipe: tidy a row / column
 
 Goal: pixel-perfect alignment after manual placement.
