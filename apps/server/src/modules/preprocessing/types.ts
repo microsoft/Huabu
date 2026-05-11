@@ -48,13 +48,20 @@ export type Capability =
 // ---------------------------------------------------------------------------
 
 /**
- * Subset of canvas node types that carry extractable content and therefore
- * flow through the full preprocessing pipeline (extract → normalize → ...).
+ * Subset of canvas node types that carry extractable or persistable content
+ * and therefore flow through (a portion of) the preprocessing pipeline.
  *
- * Excludes purely visual/structural nodes (image, video, frame, annotation,
- * question) which either skip extraction or have no textual payload.
+ * Includes media nodes (image, video) so they can persist their source
+ * artifact and gain a metadata-only sidecar markdown. Excludes purely
+ * structural nodes (frame, annotation, question).
  */
-export type NodeContentKind = 'web' | 'pdf' | 'note' | 'text';
+export type NodeContentKind =
+  | 'web'
+  | 'pdf'
+  | 'note'
+  | 'text'
+  | 'image'
+  | 'video';
 
 /**
  * Declarative preprocessing profile for a canvas node type.

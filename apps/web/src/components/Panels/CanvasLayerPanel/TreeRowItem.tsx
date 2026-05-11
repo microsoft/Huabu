@@ -35,7 +35,13 @@ export interface TreeRowItemProps extends React.HTMLAttributes<HTMLDivElement> {
 
   // Editing functionality
   editable?: boolean;
-  onRename?: (newName: string) => void;
+  /**
+   * Called when the user commits a rename. May be sync or async, and may
+   * return `false` (or resolve to `false`) to signal that the rename was
+   * rejected (e.g. by a backend collision check). When rejected the
+   * editor exits and the displayed label reverts to `label`.
+   */
+  onRename?: (newName: string) => void | boolean | Promise<boolean | void>;
 
   // DnD refs and props
   forwardedRef?: React.Ref<HTMLDivElement>;
@@ -87,7 +93,18 @@ export const TreeRowItem = React.memo(
 
     const handleSave = () => {
       if (editValue.trim() && editValue !== label) {
-        onRename?.(editValue.trim());
+        const result = onRename?.(editValue.trim());
+        // Reset the local edit value to the persisted label whenever the
+        // parent rejects the rename (sync `false` or resolved `false`).
+        // The editor closes either way; the label prop will rerun the
+        // `useEffect(setEditValue(label))` sync above on next render.
+        if (result instanceof Promise) {
+          void result.then((accepted) => {
+            if (accepted === false) setEditValue(label);
+          });
+        } else if (result === false) {
+          setEditValue(label);
+        }
       }
       setIsEditing(false);
     };

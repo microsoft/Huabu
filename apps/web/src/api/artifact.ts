@@ -1,8 +1,17 @@
+import { parseArtifactUrl } from '@sediment/shared';
+
 import { apiFetch, apiUrl } from './_client';
 import { routes } from './_routes';
 import { API_CONFIG } from '../config/api';
 
-import type { ArtifactUploadResponse } from '@sediment/shared';
+import type {
+  ArtifactUploadResponse,
+  CloneArtifactRequest,
+} from '@sediment/shared';
+
+// Re-export the canonical wire helper from shared so the rest of the
+// web bundle has one obvious place to import from.
+export { parseArtifactUrl };
 
 type ArtifactType = 'image' | 'pdf' | 'video';
 
@@ -77,3 +86,37 @@ export async function uploadVideo(
 // `apiUrl` is re-exported so callers (e.g. download links) can build the
 // same absolute URLs the API helpers use without importing the config.
 export { apiUrl };
+
+/**
+ * Copy an artifact from one canvas into another. Returns the new
+ * artifact URL (relative `/api/canvas/<dstCanvasId>/artifact/<id><ext>`)
+ * which the caller can drop into the pasted node's `data.src` /
+ * `data.coverUrl`.
+ *
+ * Returns `null` for non-artifact URLs (caller should leave them
+ * untouched). Returns the input unchanged when the source canvas equals
+ * the destination canvas, since a same-canvas paste keeps sharing the
+ * original artifact (no need to duplicate the file on disk).
+ */
+export async function cloneArtifactToCanvas(
+  srcUrl: string,
+  dstCanvasId: string,
+): Promise<string | null> {
+  const parsed = parseArtifactUrl(srcUrl);
+  if (!parsed) return null;
+  if (parsed.canvasId === dstCanvasId) return srcUrl;
+
+  const body: CloneArtifactRequest = {
+    srcCanvasId: parsed.canvasId,
+    srcKey: parsed.key,
+  };
+  const data = await apiFetch<ArtifactUploadResponse>(
+    routes.canvasArtifactCloneFrom(dstCanvasId),
+    {
+      method: 'POST',
+      json: body,
+      fallbackMessage: 'Failed to clone artifact',
+    },
+  );
+  return data.uri;
+}

@@ -11,6 +11,7 @@ import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { useNodeScale } from '@/hooks/useNodeScale';
 import useCanvasStore from '@/store/canvasStore';
 
+import { MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
 import { PreviewCard } from '../PreviewCard';
 
@@ -160,7 +161,7 @@ export const PDFNode = memo(
       >
         <div className="relative flex h-full w-full flex-col overflow-hidden rounded">
           {/* Render the first page off-screen to capture a thumbnail when no manual cover exists */}
-          {!hasCover && src && !thumbnail && (
+          {!hasCover && src && !thumbnail && !data.artifactMissing && (
             <FirstPageThumbnail src={src} onCapture={handleThumbnailCapture} />
           )}
 
@@ -172,7 +173,13 @@ export const PDFNode = memo(
               height: `${100 / scale}%`,
             }}
           >
-            {src ? (
+            {data.artifactMissing ? (
+              <MissingFileBanner
+                nodeId={id}
+                title="PDF file missing"
+                description="The artifact for this node was deleted or renamed outside the app."
+              />
+            ) : src ? (
               <PreviewCard
                 image={coverImage}
                 imageAlt={data.label || 'PDF cover'}

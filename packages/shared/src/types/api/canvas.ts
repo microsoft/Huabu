@@ -26,6 +26,25 @@ export type PutCanvasRequest = z.infer<typeof putCanvasBodySchema>;
 export interface PutCanvasResponse {
   canvasId: string;
   version: number;
+  /**
+   * Nodes whose `label` was changed by the server during persist (typically
+   * because an agent-sourced label collided with a sibling and was
+   * auto-deduped to a unique name like `Foo (2)`). The client should patch
+   * its in-memory state with these to keep the canvas display in sync with
+   * what was persisted.
+   *
+   * Empty / omitted when no labels were rewritten.
+   */
+  renamedNodes?: RenamedNode[];
+}
+
+/**
+ * Single entry in {@link PutCanvasResponse.renamedNodes}. Carries the
+ * stable `nodeId` plus the new sanitized `label` the server settled on.
+ */
+export interface RenamedNode {
+  nodeId: string;
+  label: string;
 }
 
 export interface DeleteNodeResponse {
@@ -47,6 +66,36 @@ export interface CanvasVersionMismatchError {
   message: string;
   code: 'CANVAS_VERSION_MISMATCH';
   details: { serverVersion: number };
+}
+
+// ─── Rename / conflict errors ─────────────────────────────────────────────
+
+/**
+ * Structured 4xx error codes returned from canvas mutation endpoints.
+ * Front-end uses the `code` discriminator to pick a UX (toast vs alert
+ * vs reload).
+ */
+export type CanvasErrorCode =
+  | 'CANVAS_TITLE_CONFLICT'
+  | 'NODE_LABEL_CONFLICT'
+  | 'CANVAS_VERSION_CONFLICT'
+  | 'INVALID_REQUEST';
+
+/**
+ * Body shape for 4xx responses from canvas mutation endpoints.
+ *
+ * Conflicts return enough context for the client to revert the offending
+ * field and tell the user what name they collided with.
+ */
+export interface CanvasConflictResponse {
+  code: CanvasErrorCode;
+  message: string;
+  /** Existing label / title that the new value collided with. */
+  conflictWith?: string;
+  /** For node-level conflicts. */
+  nodeId?: string;
+  /** For version conflicts. */
+  serverVersion?: number;
 }
 
 export interface UpdateCanvasStateParams {

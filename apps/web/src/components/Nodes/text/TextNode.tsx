@@ -11,6 +11,7 @@ import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
 import { useTextAutoSize } from '@/hooks/useTextAutoSize';
 import useCanvasStore from '@/store/canvasStore.ts';
 
+import { MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
 
 import type { CanvasTextNodeData, NodeStyle } from '../types';
@@ -234,6 +235,20 @@ export const TextNode = memo(
         onResizeEnd={handleResizeEnd}
         className="transition-all duration-200"
       >
+        {/*
+          Server flagged the per-node markdown file as missing on disk.
+          Surface a small inline banner while the editor is empty so the
+          user can recreate the file by typing or remove the node.
+        */}
+        {data.contentMissing && !draftContent.trim() && (
+          <div className="absolute top-1 right-1 left-1 z-10">
+            <MissingFileBanner
+              nodeId={id}
+              title="Text file missing — type to recreate it"
+              variant="inline"
+            />
+          </div>
+        )}
         <div
           className={clsx(
             'relative overflow-hidden',

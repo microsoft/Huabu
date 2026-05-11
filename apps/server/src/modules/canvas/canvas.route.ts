@@ -1,4 +1,4 @@
-import { createWriteStream, existsSync, mkdirSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, renameSync } from 'node:fs';
 import { mkdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -15,7 +15,13 @@ import {
 import archiver from 'archiver';
 import yauzl from 'yauzl';
 
+import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getPreprocessDispatcher } from '../preprocessing/index.js';
+import {
+  refreshCanvasDirIndex,
+  registerCanvasDir,
+  suggestCanvasDir,
+} from '../storage/canvas-dirs.js';
 import {
   createCanvas,
   deleteCanvas,
@@ -23,11 +29,13 @@ import {
   listCanvases,
   type CanvasFile,
 } from '../storage/index.js';
+import { canvasRoot } from '../storage/paths.js';
 import { getWorkspacePath } from '../workspace.js';
 
 import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
 import type {
   ApiResult,
+  CanvasConflictResponse,
   CreateCanvasRequest,
   CreateCanvasResponse,
   DeleteCanvasResponse,
@@ -45,6 +53,7 @@ import type {
   PreprocessNodeResponse,
   PutCanvasRequest,
   PutCanvasResponse,
+  RenamedNode,
 } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
@@ -81,28 +90,123 @@ function toMessage(error: unknown): string {
 }
 
 /**
+ * Node types that have a sibling `nodes/<safe(label)>.md`. The body is
+ * markdown content for note/text/web/pdf and empty for image/video/frame
+ * (which only carry frontmatter).
+ */
+const MD_BACKED_NODE_TYPES = new Set([
+  'note',
+  'text',
+  'web',
+  'pdf',
+  'image',
+  'video',
+  'frame',
+]);
+
+/** Subset that carries a textual body in the markdown. */
+const TEXT_BEARING_NODE_TYPES = new Set(['note', 'text', 'web', 'pdf']);
+
+/**
  * Persist node markdown into the canvas store and return canvas-state
  * nodes with the bulky `content` field stripped.
  *
  * Labels intentionally set by a user or the agent are preserved on the
  * canvas node so they survive save/load cycles without depending on the
  * node markdown.
+ *
+ * Strict (user-typed) renames are validated in a pre-pass against the
+ * existing on-disk index AND against other strict renames in the same
+ * batch, so a mid-batch conflict cannot leave canvas.json out of sync
+ * with the freshly renamed `.md` files.
  */
+type PersistResult =
+  | {
+      kind: 'ok';
+      nodes: NodeLike[];
+      renamed: RenamedNode[];
+    }
+  | {
+      kind: 'conflict';
+      nodeId: string;
+      label: string;
+      conflictWith: string;
+    };
+
 function persistAndStripNodes(
   store: CanvasStore,
   nodes: NodeLike[],
-): NodeLike[] {
-  return nodes.map((node) => {
+): PersistResult {
+  // Pre-pass: validate every strict (user-typed) rename against the
+  // existing on-disk index AND against other strict renames in this
+  // same batch. We surface a 409 BEFORE touching disk so a mid-batch
+  // conflict can't leave canvas.json out of sync with the freshly
+  // renamed `.md` files.
+  const normalize = (s: string) => s.normalize('NFC').toLowerCase();
+  const reservedSlots = new Map<string, string>(); // norm(filename) → nodeId
+  for (const node of nodes) {
     const data = node.data ?? {};
     const nodeId = typeof node.id === 'string' ? node.id : '';
-    const content =
+    const nodeType = typeof node.type === 'string' ? node.type : '';
+    if (!nodeId || !MD_BACKED_NODE_TYPES.has(nodeType)) continue;
+    if (data['labelSource'] !== 'user') continue;
+    const label =
+      typeof data['label'] === 'string' ? (data['label'] as string) : null;
+    let preview: ReturnType<CanvasStore['checkNodeRename']>;
+    try {
+      preview = store.checkNodeRename(nodeId, label);
+    } catch {
+      continue; // bad nodeId — let the write loop's catch handle it
+    }
+    if (preview.conflict) {
+      return {
+        kind: 'conflict',
+        nodeId,
+        label: label ?? '',
+        conflictWith: preview.conflict.filename,
+      };
+    }
+    const slot = normalize(preview.desired);
+    const owner = reservedSlots.get(slot);
+    if (owner && owner !== nodeId) {
+      return {
+        kind: 'conflict',
+        nodeId,
+        label: label ?? '',
+        conflictWith: preview.desired,
+      };
+    }
+    reservedSlots.set(slot, nodeId);
+  }
+
+  const out: NodeLike[] = new Array(nodes.length);
+  const renamed: RenamedNode[] = [];
+  // Process user-sourced MD-backed renames FIRST so they claim their
+  // requested filenames before any agent-sourced node in the same batch
+  // can lazily auto-dedup into that slot. Without this, when a batch
+  // contains two nodes pointing at the same label — one user-sourced,
+  // one agent-sourced — the outcome was order-dependent: an
+  // agent-sourced node landing earlier in `nodes` would take the slot,
+  // and the user-sourced node would then 409 on its strict rename.
+  const writeOrder = nodes
+    .map((_, i) => i)
+    .sort((a, b) => {
+      const aUser = (nodes[a]?.data?.['labelSource'] ?? null) === 'user';
+      const bUser = (nodes[b]?.data?.['labelSource'] ?? null) === 'user';
+      if (aUser === bUser) return a - b;
+      return aUser ? -1 : 1;
+    });
+  for (const i of writeOrder) {
+    const node = nodes[i];
+    if (!node) continue;
+    const data = node.data ?? {};
+    const nodeId = typeof node.id === 'string' ? node.id : '';
+    const nodeType = typeof node.type === 'string' ? node.type : '';
+    const incomingContent =
       typeof data['content'] === 'string'
         ? (data['content'] as string)
         : undefined;
 
-    // Tracks whether per-node markdown has a title we can re-hydrate from
-    // on read. When false (e.g. frame nodes have no markdown), the auto
-    // label MUST be kept on the canvas node, otherwise it is lost on reload.
     let hasPersistedTitle = false;
     let existing: NodeContent | null = null;
     if (nodeId) {
@@ -113,45 +217,83 @@ function persistAndStripNodes(
       }
     }
 
-    if (nodeId && typeof content === 'string') {
-      const nodeType =
-        typeof node.type === 'string' ? node.type : (existing?.type ?? 'note');
-      // Guard against accidental content wipes: if the incoming content is
-      // an empty string but the persisted markdown already has non-empty
-      // content for a text-bearing node, skip the write. This prevents
-      // races (e.g. autosave firing before the editor flushes its buffer)
-      // from clobbering real content with "".
-      const isTextBearing = nodeType === 'note' || nodeType === 'text';
-      const wouldClobber =
-        content.length === 0 &&
-        isTextBearing &&
-        typeof existing?.content === 'string' &&
-        existing.content.length > 0;
+    const shouldPersistMd = !!nodeId && MD_BACKED_NODE_TYPES.has(nodeType);
+    const isTextBearing = TEXT_BEARING_NODE_TYPES.has(nodeType);
+    const body = isTextBearing ? (incomingContent ?? '') : '';
+    // Guard against accidental content wipes: if the incoming content is
+    // an empty string but the persisted markdown already has non-empty
+    // content for a text-bearing node, skip the write. This prevents
+    // races (e.g. autosave firing before the editor flushes its buffer)
+    // from clobbering real content with "".
+    const wouldClobber =
+      isTextBearing &&
+      incomingContent === '' &&
+      typeof existing?.content === 'string' &&
+      existing.content.length > 0;
 
-      if (!wouldClobber) {
-        const label =
-          typeof data['label'] === 'string'
-            ? (data['label'] as string)
-            : (existing?.label ?? null);
-        const nodeContent: NodeContent = {
-          ...existing,
-          nodeId,
-          type: nodeType,
-          label,
-          src:
-            typeof data['src'] === 'string'
-              ? (data['src'] as string)
-              : existing?.src,
-          content,
-        };
-        try {
-          store.writeNode(nodeId, nodeContent);
-          hasPersistedTitle = !!label;
-        } catch {
-          // Best effort — skip nodes whose id fails sanitisation.
+    if (
+      shouldPersistMd &&
+      !wouldClobber &&
+      // For text-bearing nodes only persist when caller actually sent
+      // content (or we're creating a fresh file). For image/video/frame
+      // the markdown is metadata-only — always persist so src / label
+      // changes land.
+      (incomingContent !== undefined || !isTextBearing || !existing)
+    ) {
+      const incomingLabel =
+        typeof data['label'] === 'string' &&
+        (data['label'] as string).length > 0
+          ? (data['label'] as string)
+          : null;
+      const label = incomingLabel ?? existing?.label ?? null;
+      const nodeContent: NodeContent = {
+        ...(existing ?? {}),
+        nodeId,
+        type: nodeType || existing?.type || 'note',
+        label,
+        src:
+          typeof data['src'] === 'string'
+            ? (data['src'] as string)
+            : existing?.src,
+        content: body,
+      };
+      try {
+        // Strict rename only when the *user* intentionally typed this
+        // label — those go through the `tryRename` flow, which surfaces
+        // collisions as a window.alert and reverts the input.
+        //
+        // Agent-sourced labels are auto-deduped instead. AI runs in a
+        // batched, fire-and-forget loop and has no way to react to a
+        // 409, so refusing the save would silently drop the AI's
+        // changes (and every subsequent autosave too). Auto-dedup keeps
+        // the canvas saveable; we sync the bumped name back to
+        // `data.label` below so the canvas display stays unique.
+        const labelSource = data['labelSource'];
+        const strictRename = labelSource === 'user';
+        const result = store.writeNode(nodeId, nodeContent, {
+          strictRename,
+        });
+        if (!result.ok && result.reason === 'conflict') {
+          return {
+            kind: 'conflict',
+            nodeId,
+            label: label ?? '',
+            conflictWith: result.conflictWith.filename,
+          };
         }
-      } else {
-        hasPersistedTitle = !!existing?.label;
+        // When the on-disk filename was bumped (e.g. `Foo (2).md`),
+        // mirror the bumped stem back into the node's display label so
+        // sibling labels stay unique on the canvas.
+        if (result.ok && label) {
+          const stem = result.filename.replace(/\.md$/, '');
+          if (stem !== label) {
+            data['label'] = stem;
+            renamed.push({ nodeId, label: stem });
+          }
+        }
+        hasPersistedTitle = !!label;
+      } catch {
+        // Best effort — skip nodes whose id fails sanitisation.
       }
     } else {
       hasPersistedTitle = !!existing?.label;
@@ -166,39 +308,105 @@ function persistAndStripNodes(
     const labelSource = data['labelSource'];
     const isUserOrAgent = labelSource === 'user' || labelSource === 'agent';
     // Drop the auto label only when per-node markdown can provide it back
-    // on hydration. For nodes without persisted markdown (e.g. frames whose
-    // label is generated by preprocessing), keep the label on canvas.json
-    // so it survives reload.
+    // on hydration. For nodes without persisted markdown (e.g. annotation
+    // / question nodes whose label is generated by preprocessing), keep
+    // the label on canvas.json so it survives reload.
     const keepLabel = isUserOrAgent || !hasPersistedTitle;
     const cleanData: Record<string, unknown> = { ...dataRest };
     if (!keepLabel) delete cleanData['label'];
-    return { ...node, data: cleanData };
-  });
+    out[i] = { ...node, data: cleanData };
+  }
+  return { kind: 'ok', nodes: out, renamed };
 }
 
 /**
- * Hydrate node content from the canvas store. Reads the per-node
+ * Node types whose primary content lives in `nodes/<safe(label)>.md`.
+ * For these, a missing markdown file means the node body is empty and we
+ * surface a `contentMissing` flag so the client can prompt the user.
+ */
+const CONTENT_BACKED_NODE_TYPES = new Set(['note', 'text']);
+
+/**
+ * Node types that reference an artifact file via `data.src`. When the
+ * referenced file is gone from disk we surface an `artifactMissing` flag
+ * so the client can show a placeholder + Remove button.
+ */
+const ARTIFACT_BACKED_NODE_TYPES = new Set(['pdf', 'image', 'video']);
+
+/**
+ * Inspect a node's `data.src` and report whether the underlying artifact
+ * file still exists on disk. Returns `false` (not missing) for nodes
+ * without a canvas-scoped artifact URL — remote URLs and data URLs are
+ * out of scope for this check.
+ */
+function isArtifactMissing(
+  store: CanvasStore,
+  data: Record<string, unknown>,
+): boolean {
+  const src = typeof data['src'] === 'string' ? (data['src'] as string) : '';
+  if (!src) return false;
+  const match = src.match(ARTIFACT_URL_REGEX);
+  if (!match) return false;
+  const filename = match[2];
+  if (!filename) return false;
+  return store.resolveArtifactFilePath(filename) === null;
+}
+
+/**
+ * Hydrate persisted nodes with side-channel content. Reads each node's
  * markdown file and re-attaches `content` / `label` (when auto-derived)
- * onto each node so callers see fresh data.
+ * onto each node so callers see fresh data. Also sets `contentMissing` /
+ * `artifactMissing` hints when the underlying file has been deleted or
+ * renamed outside the app, so the client can render a non-blocking
+ * placeholder instead of silently rendering an empty / broken node.
  */
 function hydrateNodeContent(store: CanvasStore, nodes: NodeLike[]): NodeLike[] {
   return nodes.map((node) => {
     const nodeId = typeof node.id === 'string' ? node.id : '';
     if (!nodeId) return node;
 
+    const nodeType = typeof node.type === 'string' ? node.type : '';
+    const data: Record<string, unknown> = { ...(node.data ?? {}) };
+
+    // ----- Artifact-backed nodes: flag missing src file -----
+    if (ARTIFACT_BACKED_NODE_TYPES.has(nodeType)) {
+      if (isArtifactMissing(store, data)) {
+        data['artifactMissing'] = true;
+      } else if ('artifactMissing' in data) {
+        delete data['artifactMissing'];
+      }
+    }
+
+    // ----- Content-backed nodes: read markdown side-file -----
     let nodeContent: NodeContent | null = null;
     try {
       nodeContent = store.readNode(nodeId);
     } catch {
       nodeContent = null;
     }
-    if (!nodeContent) return node;
 
-    const data = { ...(node.data ?? {}) };
-    data['content'] = nodeContent.content;
+    if (!nodeContent) {
+      if (CONTENT_BACKED_NODE_TYPES.has(nodeType)) {
+        data['contentMissing'] = true;
+      }
+      // Return early only when we actually mutated something; otherwise
+      // preserve the original node reference to keep diffs minimal.
+      return data === node.data ? node : { ...node, data };
+    }
 
-    // Surface preprocessed AI summary / keywords from the per-node markdown
-    // frontmatter so the client can render them without a separate fetch.
+    if ('contentMissing' in data) {
+      delete data['contentMissing'];
+    }
+    // Only restore body for text-bearing types — image/video/frame
+    // markdown is metadata-only and the canvas state does not carry
+    // a content field for them.
+    if (TEXT_BEARING_NODE_TYPES.has(nodeType)) {
+      data['content'] = nodeContent.content;
+    }
+
+    // Surface preprocessed AI summary / keywords from the per-node
+    // markdown frontmatter so the client can render them without a
+    // separate fetch.
     const summary = nodeContent['summary'];
     if (typeof summary === 'string' && summary.trim()) {
       data['summary'] = summary.trim();
@@ -420,7 +628,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.put<{
     Params: { canvasId: string };
     Body: PutCanvasRequest;
-    Reply: ApiResult<PutCanvasResponse>;
+    Reply: ApiResult<PutCanvasResponse> | CanvasConflictResponse;
   }>('/:canvasId', async function (request, reply) {
     const { canvasId } = request.params;
     const parsed = putCanvasBodySchema.safeParse(request.body);
@@ -434,13 +642,33 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     const existing = store.read();
     const serverVersion = existing?.version ?? 0;
     if (clientVersion !== serverVersion) {
-      // Surface the conflict via the canonical ApiErrorBody so the client
-      // can recover the authoritative version from `details.serverVersion`.
       return reply.code(409).send({
+        code: 'CANVAS_VERSION_CONFLICT',
         message: 'Canvas version mismatch',
-        code: 'CANVAS_VERSION_MISMATCH',
-        details: { serverVersion },
-      });
+        serverVersion,
+      } satisfies CanvasConflictResponse);
+    }
+
+    // Title rename (and the directory rename it implies) happens
+    // before any node persistence so a 409 doesn't half-apply changes.
+    const previousTitle = existing?.title ?? null;
+    const nextTitle = title ?? previousTitle;
+    if (typeof title === 'string' && title !== previousTitle) {
+      const renameResult = store.renameSelf(title);
+      if (!renameResult.ok && renameResult.reason === 'conflict') {
+        return reply.code(409).send({
+          code: 'CANVAS_TITLE_CONFLICT',
+          message: `Another canvas already uses the directory name "${renameResult.conflictWith}"`,
+          conflictWith: renameResult.conflictWith,
+        } satisfies CanvasConflictResponse);
+      }
+      if (!renameResult.ok && renameResult.reason === 'fs-error') {
+        request.log.error(
+          { canvasId, err: renameResult.message },
+          'Failed to rename canvas directory',
+        );
+        return reply.code(500).send({ message: 'Failed to rename canvas' });
+      }
     }
 
     const timestamp = nowMs();
@@ -452,18 +680,26 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       [key: string]: unknown;
     };
 
-    const leanNodes = persistAndStripNodes(
+    const persistResult = persistAndStripNodes(
       store,
       (rawState?.nodes ?? []) as NodeLike[],
     );
+    if (persistResult.kind === 'conflict') {
+      return reply.code(409).send({
+        code: 'NODE_LABEL_CONFLICT',
+        message: `Another node already uses the label "${persistResult.label}"`,
+        nodeId: persistResult.nodeId,
+        conflictWith: persistResult.conflictWith,
+      } satisfies CanvasConflictResponse);
+    }
 
     const canvasFile: CanvasFile = {
       canvasId,
-      title: title ?? existing?.title ?? null,
+      title: nextTitle,
       version: nextVersion,
       state: {
         ...rawState,
-        nodes: leanNodes,
+        nodes: persistResult.nodes,
         edges: rawState?.edges ?? [],
       },
       createdAt: existing?.createdAt ?? timestamp,
@@ -475,6 +711,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     return reply.send({
       canvasId,
       version: nextVersion,
+      ...(persistResult.renamed.length > 0
+        ? { renamedNodes: persistResult.renamed }
+        : {}),
     });
   });
 
@@ -566,6 +805,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get<{
     Params: { canvasId: string };
     Querystring: ExportCanvasQuery;
+    // Success path streams a zip archive (Readable). Failure path is the
+    // canonical ApiErrorBody — declared here so the 400/404 branches
+    // type-check via the same `reply.send(...)` machinery the JSON
+    // routes use.
+    Reply: ApiResult<NodeJS.ReadableStream>;
   }>('/:canvasId/export', async function (request, reply) {
     const { canvasId } = request.params;
     const parsedQuery = exportCanvasQuerySchema.safeParse(request.query);
@@ -582,7 +826,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
 
-    const canvasDir = path.join(getWorkspacePath(), canvasId);
+    const canvasDir = canvasRoot(canvasId);
     if (!existsSync(canvasDir)) {
       return reply.code(404).send({ message: 'Canvas directory not found' });
     }
@@ -618,9 +862,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     archive.append(JSON.stringify(manifest, null, 2), {
       name: 'manifest.json',
     });
+    // dot:true so the hidden `.artifacts/` directory is always included;
+    // `.history/` is opted out unless the caller explicitly requests it.
     archive.glob('**/*', {
       cwd: canvasDir,
-      dot: includeHistory,
+      dot: true,
       ignore: includeHistory ? [] : ['.history/**'],
     });
 
@@ -640,6 +886,15 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
       // Stream the upload to a temp zip file
       const tmpZip = path.join(tmpdir(), `${createId('import')}.zip`);
+      const targetCanvasId = createId('canvas');
+      // Extract into a hidden staging dir so `scanWorkspace()` ignores it
+      // (it skips dot-prefixed entries) and the as-yet-unrenamed dir cannot
+      // be picked up by `read()`'s self-heal as a canvas titled `<canvasId>`.
+      const stagingDir = path.join(
+        getWorkspacePath(),
+        `.import-${targetCanvasId}`,
+      );
+      let stagingCleanedUp = false;
       try {
         await new Promise<void>((resolve, reject) => {
           const ws = createWriteStream(tmpZip);
@@ -649,9 +904,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           file.file.on('error', reject);
         });
 
-        const targetCanvasId = createId('canvas');
-        const targetDir = path.join(getWorkspacePath(), targetCanvasId);
-        mkdirSync(targetDir, { recursive: true });
+        mkdirSync(stagingDir, { recursive: true });
 
         type ImportManifest = {
           version?: string;
@@ -670,9 +923,21 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
             }
             return;
           }
-          const dest = path.join(targetDir, entryPath);
-          if (!dest.startsWith(targetDir + path.sep)) {
-            // Path traversal guard
+          // Path traversal guard: resolve to absolute paths, then use
+          // path.relative to detect any escape from the staging dir
+          // (a `..` segment or absolute entry would surface as a
+          // relative path that starts with `..` or is itself absolute).
+          // This is more robust than a `startsWith(prefix)` check, which
+          // can be fooled by paths that share a directory-name prefix
+          // (e.g. `/ws/import-foo` vs `/ws/import-foo-bar`).
+          const resolvedRoot = path.resolve(stagingDir);
+          const dest = path.resolve(resolvedRoot, entryPath);
+          const rel = path.relative(resolvedRoot, dest);
+          if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) {
+            request.log.warn(
+              { entryPath },
+              'Refusing zip entry with traversal',
+            );
             return;
           }
           await mkdir(path.dirname(dest), { recursive: true });
@@ -681,14 +946,15 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         });
 
         // Rewrite canvas.json so canvasId matches the new directory.
-        const canvasJsonPath = path.join(targetDir, 'canvas.json');
-        if (!existsSync(canvasJsonPath)) {
-          await rm(targetDir, { recursive: true, force: true });
+        const stagedJsonPath = path.join(stagingDir, 'canvas.json');
+        if (!existsSync(stagedJsonPath)) {
+          await rm(stagingDir, { recursive: true, force: true });
+          stagingCleanedUp = true;
           return reply.code(400).send({
             message: 'Invalid bundle: missing canvas.json',
           });
         }
-        const raw = await readFile(canvasJsonPath, 'utf-8');
+        const raw = await readFile(stagedJsonPath, 'utf-8');
         const parsed = JSON.parse(raw) as CanvasFile;
         const sourceCanvasId = parsed.canvasId;
         const importedManifest = manifest as ImportManifest | null;
@@ -705,7 +971,18 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
             targetCanvasId,
           ),
         };
-        await writeFile(canvasJsonPath, JSON.stringify(remapped));
+        await writeFile(stagedJsonPath, JSON.stringify(remapped));
+
+        // Move the staged dir into its final, title-derived location so
+        // the on-disk basename matches the title and `read()` will not
+        // self-heal-overwrite the title with the staging dir basename on
+        // the next access.
+        const finalDirName = suggestCanvasDir(targetTitle, targetCanvasId);
+        const finalDir = path.join(getWorkspacePath(), finalDirName);
+        renameSync(stagingDir, finalDir);
+        stagingCleanedUp = true;
+        registerCanvasDir(targetCanvasId, finalDirName, targetTitle);
+        refreshCanvasDirIndex();
 
         const response: ImportCanvasResponse = {
           canvasId: targetCanvasId,
@@ -716,6 +993,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.code(500).send({ message: 'Failed to import canvas' });
       } finally {
         void unlink(tmpZip).catch(() => {});
+        if (!stagingCleanedUp && existsSync(stagingDir)) {
+          await rm(stagingDir, { recursive: true, force: true }).catch(
+            () => {},
+          );
+        }
       }
     },
   );

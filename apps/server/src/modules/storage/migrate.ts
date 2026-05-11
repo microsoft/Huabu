@@ -37,9 +37,12 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 
+import { ARTIFACT_DATA_FIELDS } from '@sediment/shared';
+
 import { CanvasStore } from './canvas-store.js';
 import { parseFrontmatter } from './frontmatter.js';
 import { atomicWriteJson, mkdirp } from './io.js';
+import { readJson } from './io.js';
 import { canvasJsonPath, canvasRoot } from './paths.js';
 
 import type { CanvasFile, NodeContent } from './canvas-store.js';
@@ -260,7 +263,7 @@ function migrateOneCanvas(
     const src = sourceId ? sourceIndex.get(sourceId) : undefined;
     if (src) {
       const nodeContent: NodeContent = {
-        ...src.metadata,
+        ...(src.metadata ?? {}),
         nodeId,
         type: typeof node.type === 'string' ? node.type : src.type,
         label: src.title,
@@ -303,7 +306,7 @@ function migrateOneCanvas(
     delete data['content'];
 
     // (b) Rewrite artifact references and copy bytes into the canvas.
-    for (const field of ['src', 'coverUrl'] as const) {
+    for (const field of ARTIFACT_DATA_FIELDS) {
       const value = data[field];
       if (typeof value !== 'string') continue;
       const match = LEGACY_ARTIFACT_RE.exec(value);
@@ -487,16 +490,27 @@ export function runMigrationIfNeeded(
 
 const FLAT_YAML_SENTINEL = '.flat-yaml-v1';
 
-function listCanvasDirs(workspace: string): string[] {
+/**
+ * One-shot scan: returns each canvas's `(dirName, canvasId)`. We can't
+ * assume `dirName === canvasId` anymore — the V3 label-based naming
+ * pass renames directories to safe(title), which can contain spaces and
+ * non-ASCII characters that fail `sanitizeId`. The stable id only lives
+ * inside `canvas.json`.
+ */
+function listCanvasDirs(
+  workspace: string,
+): Array<{ dirName: string; canvasId: string }> {
   if (!dirExists(workspace)) return [];
-  const out: string[] = [];
+  const out: Array<{ dirName: string; canvasId: string }> = [];
   for (const entry of readdirSync(workspace)) {
     if (entry.startsWith('.')) continue;
     const full = path.join(workspace, entry);
     if (!dirExists(full)) continue;
-    if (existsSync(path.join(full, 'canvas.json'))) {
-      out.push(entry);
-    }
+    const jsonPath = path.join(full, 'canvas.json');
+    if (!existsSync(jsonPath)) continue;
+    const json = readJson<{ canvasId?: string }>(jsonPath);
+    if (!json?.canvasId) continue;
+    out.push({ dirName: entry, canvasId: json.canvasId });
   }
   return out;
 }
@@ -516,18 +530,22 @@ export function flattenLegacyMetaJson(
   const sentinel = path.join(workspace, FLAT_YAML_SENTINEL);
   if (existsSync(sentinel)) return;
 
-  const canvasIds = listCanvasDirs(workspace);
+  const canvases = listCanvasDirs(workspace);
   let rewritten = 0;
   let scanned = 0;
 
-  for (const canvasId of canvasIds) {
-    const dir = path.join(workspace, canvasId, 'nodes');
+  for (const { dirName, canvasId } of canvases) {
+    const dir = path.join(workspace, dirName, 'nodes');
     if (!dirExists(dir)) continue;
     const store = new CanvasStore(canvasId);
     for (const file of readdirSync(dir)) {
       if (!file.endsWith('.md')) continue;
       scanned++;
-      const nodeId = file.replace(/\.md$/, '');
+      // Declared outside the `try` so the catch handler can still log it.
+      // V3 label-based files are named `safe(title).md`, so the filename
+      // stem is no longer a valid id; the stable id lives in the
+      // frontmatter and is read below. Fall back to the stem for V2.
+      let nodeId = file.replace(/\.md$/, '');
       try {
         // Read directly via parseFrontmatter so we can detect the legacy
         // key explicitly. `store.readNode` already strips it from the
@@ -538,6 +556,8 @@ export function flattenLegacyMetaJson(
         if (typeof metaJsonRaw !== 'string' || metaJsonRaw.length === 0) {
           continue;
         }
+        const rawId = meta['id'];
+        if (typeof rawId === 'string' && rawId) nodeId = rawId;
         const node = store.readNode(nodeId);
         if (!node) continue;
         // `readNode` ignores `meta_json`, so merge the legacy blob into

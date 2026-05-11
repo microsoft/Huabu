@@ -1,11 +1,5 @@
 /**
- * Per-canvas storage facade.
- *
- * One `CanvasStore` instance maps to a single `<workspace>/<canvasId>/`
- * directory. All file I/O for that canvas — structure, node content,
- * artifacts, chat history, intent log, events, preferences — flows
- * through this class. The rest of the server depends on this facade
- * instead of the raw filesystem.
+ * Per-canvas storage facade. One instance per `<canvasDir>/`.
  */
 
 import {
@@ -20,6 +14,13 @@ import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
+import {
+  patchCanvasDirTitle,
+  refreshCanvasDirIndex,
+  registerCanvasDir,
+  renameCanvasDirOnDisk,
+  unregisterCanvasDir,
+} from './canvas-dirs.js';
 import { parseFrontmatter, toFrontmatter } from './frontmatter.js';
 import {
   appendJsonLine,
@@ -32,6 +33,8 @@ import {
   readText,
   sanitizeId,
 } from './io.js';
+import { NameIndex } from './name-index.js';
+import { toSafeFilename } from './naming.js';
 import {
   artifactPath,
   artifactsDir,
@@ -42,7 +45,7 @@ import {
   eventsPath,
   intentPath,
   memoryDir,
-  nodeMdPath,
+  nodeFilePath,
   nodesDir,
   prefsPath,
 } from './paths.js';
@@ -54,11 +57,20 @@ import type {
   RecentAction,
 } from '@sediment/shared';
 
-// ─── Local types ────────────────────────────────────────────────────────────
-// These mirror what will land in `@sediment/shared` in PR 8. Keeping them
-// local for now lets PR 1 stand on its own without touching shared types.
+interface NodeFileEntry {
+  id: string;
+  filename: string;
+}
 
-/** On-disk shape of `<canvasId>/canvas.json`. */
+/** On-disk artifact descriptor. Filename is always `<id><ext>`. */
+export interface ArtifactRecord {
+  id: string;
+  ext: string;
+  filename: string;
+  mimeType: string | null;
+}
+
+/** On-disk shape of `<canvasDir>/canvas.json`. */
 export interface CanvasFile {
   canvasId: string;
   title: string | null;
@@ -72,18 +84,9 @@ export interface CanvasFile {
   updatedAt: number;
 }
 
-/**
- * Canonical content of a single node (one `nodes/<nodeId>.md` file).
- *
- * The shape is a 1:1 mirror of the markdown file: `nodeId` comes from
- * the filename, `content` is the markdown body, and every other field
- * is a YAML frontmatter entry. Loaders/enrichers may attach arbitrary
- * extra fields (e.g. `summary`, `keywords`, `pageCount`) — they round-
- * trip through frontmatter via the index signature.
- */
+/** Canonical content of a single node markdown file. */
 export interface NodeContent {
   nodeId: string;
-  /** CanvasNodeType — kept loose here to avoid the shared dependency. */
   type: string;
   /**
    * Display label shown on the canvas (`data.label` at runtime). Persisted
@@ -98,11 +101,10 @@ export interface NodeContent {
   src?: string;
   /** Canonical markdown body. */
   content: string;
-  /** Loader/enrich-supplied frontmatter fields. */
+  /** Loader/enrich-supplied frontmatter fields (summary, keywords, …). */
   [key: string]: unknown;
 }
 
-/** Lightweight projection of node content for listings. */
 export interface NodeContentSummary {
   nodeId: string;
   type: string;
@@ -112,56 +114,74 @@ export interface NodeContentSummary {
 /** Append-only behavioural event for a canvas (re-export of shared schema). */
 export type CanvasEvent = CanvasEventRecord;
 
-/** Per-canvas user preferences (frontmatter + markdown body). */
 export interface UserPreferences {
-  metadata: Record<string, unknown>;
+  metadata: Record<string, string | null>;
   body: string;
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
+export type RenameResult =
+  | { ok: true; filename: string }
+  | {
+      ok: false;
+      reason: 'conflict';
+      conflictWith: { id: string; filename: string };
+    }
+  | { ok: false; reason: 'not-found' }
+  | { ok: false; reason: 'fs-error'; message: string };
+
+export type RenameSelfResult =
+  | { ok: true; dirName: string }
+  | { ok: false; reason: 'conflict'; conflictWith: string }
+  | { ok: false; reason: 'not-found' }
+  | { ok: false; reason: 'fs-error'; message: string };
+
+export interface WriteArtifactInput {
+  /** Stable artifact id. Doubles as the URL key stem. */
+  id: string;
+  /** File extension including the dot, e.g. `.pdf`. */
+  ext: string;
+  mimeType?: string | null;
+}
 
 /**
  * Frontmatter keys that older canvases wrote but the current schema no
  * longer recognizes. They are stripped on read so they never round-trip
  * back into a freshly-written file.
  *
- * @deprecated Kept only as a defensive filter for legacy `nodes/*.md`
- * files; remove once `migrate.ts` has rewritten every workspace.
- *  - `content_hash`: previously used to dedupe extraction work; now we
+ * @deprecated Defensive filter for legacy `nodes/*.md` files.
+ *  - `content_hash`: previously used to dedupe extraction work; we now
  *    compare canonical content directly in `persist.ts`.
- *  - `meta_json`:    previously a JSON-stringified bag containing
- *    `summary` / `keywords` / etc.; those fields are now stored as
- *    flat top-level YAML keys.
+ *  - `meta_json`:    previously a JSON-stringified bag of summary /
+ *    keywords / etc.; those fields are now stored as flat top-level
+ *    YAML keys.
  */
 const LEGACY_FRONTMATTER_KEYS = ['content_hash', 'meta_json'] as const;
 
 function nodeContentToMarkdown(c: NodeContent): string {
-  // `nodeId` is encoded in the filename; `content` is the markdown body.
-  // Everything else lives in the frontmatter as native YAML.
-  const { nodeId: _nodeId, content, ...frontmatter } = c;
-  // Drop any legacy keys a caller may still be passing through; we never
-  // want to reintroduce them once a workspace has been migrated.
+  // `nodeId` is the stable identifier; we explicitly inject it as the
+  // frontmatter `id:` field so the on-disk filename (which is derived
+  // from the user-facing label and may collide / be deduped) can always
+  // be mapped back to the canonical id by `nodeIndex()`. `content` is
+  // the markdown body. Everything else lives in the frontmatter as
+  // native YAML.
+  const { nodeId, content, ...frontmatter } = c;
+  const fm: Record<string, unknown> = { id: nodeId, ...frontmatter };
   for (const key of LEGACY_FRONTMATTER_KEYS) {
-    delete (frontmatter as Record<string, unknown>)[key];
+    delete fm[key];
   }
   // Drop nullish frontmatter entries so optional fields (e.g. `src` on
-  // note/text/frame nodes) never serialize to `key: null`. Callers are
-  // free to pass `undefined` to mean "omit".
-  for (const key of Object.keys(frontmatter)) {
-    const v = (frontmatter as Record<string, unknown>)[key];
+  // note/text/frame nodes) never serialize to `key: null`.
+  for (const key of Object.keys(fm)) {
+    const v = fm[key];
     if (v === null || v === undefined) {
-      delete (frontmatter as Record<string, unknown>)[key];
+      delete fm[key];
     }
   }
-  return `${toFrontmatter(frontmatter)}\n${content}`;
+  return `${toFrontmatter(fm)}\n${content}`;
 }
 
 function markdownToNodeContent(nodeId: string, raw: string): NodeContent {
   const { meta, content } = parseFrontmatter(raw);
-  // Strip legacy frontmatter keys so they don't leak into pipeline state
-  // (and therefore back into freshly-written files via cache-hit / persist
-  // paths). Older `nodes/*.md` files written before the flat-frontmatter
-  // refactor may still carry these.
   for (const key of LEGACY_FRONTMATTER_KEYS) {
     delete meta[key];
   }
@@ -175,6 +195,9 @@ function markdownToNodeContent(nodeId: string, raw: string): NodeContent {
         : null;
   delete meta['title'];
   delete meta['label'];
+  // Drop the synthetic `id` we used to write into frontmatter — the canonical
+  // id is the function argument (derived from filename / index).
+  delete meta['id'];
   const out: NodeContent = {
     ...meta,
     nodeId,
@@ -183,19 +206,25 @@ function markdownToNodeContent(nodeId: string, raw: string): NodeContent {
     content,
   };
   // Normalize `src`: it must be a string when present, otherwise omitted.
-  // Older / hand-edited node files may carry `src: null` or other non-string
-  // scalars, which would otherwise leak into pipeline state and cause
-  // cache-miss / comparison bugs against the declared `string | undefined`.
   if (typeof out.src !== 'string') {
     delete out.src;
   }
   return out;
 }
 
+/**
+ * Filename for a node's markdown. Frame and other label-less nodes
+ * fall back to the stable id so two nodes never collide on a default.
+ */
+function nodeFilenameFor(nodeId: string, label: string | null): string {
+  return `${toSafeFilename(label, nodeId)}.md`;
+}
+
 // ─── CanvasStore ────────────────────────────────────────────────────────────
 
 export class CanvasStore {
   readonly canvasId: string;
+  private nodes: NameIndex<NodeFileEntry> | null = null;
 
   constructor(canvasId: string) {
     this.canvasId = sanitizeId(canvasId, 'canvasId');
@@ -203,8 +232,41 @@ export class CanvasStore {
 
   // ── Canvas structure ─────────────────────────────────────────────────────
 
+  /**
+   * Read this canvas's `canvas.json`. When the on-disk directory name
+   * cannot be derived from the persisted title via {@link toSafeFilename}
+   * we treat that as a Finder-side rename and adopt `dirName` as the new
+   * title (persisted back into `canvas.json`). The common case where
+   * `dirName === safe(title)` (e.g. title contains `?` / `:` / `/` that
+   * was sanitised at create time) is left alone — overwriting there
+   * would silently strip the user's typed characters from the title.
+   */
   read(): CanvasFile | null {
-    return readJson<CanvasFile>(canvasJsonPath(this.canvasId));
+    let file = readJson<CanvasFile>(canvasJsonPath(this.canvasId));
+    if (!file) {
+      refreshCanvasDirIndex();
+      file = readJson<CanvasFile>(canvasJsonPath(this.canvasId));
+      if (!file) return null;
+    }
+
+    const dirName = path.basename(canvasRoot(this.canvasId));
+    const expectedDir = toSafeFilename(file.title, this.canvasId);
+    if (dirName && dirName !== expectedDir) {
+      const next: CanvasFile = {
+        ...file,
+        title: dirName,
+        updatedAt: Date.now(),
+      };
+      try {
+        atomicWriteJson(canvasJsonPath(this.canvasId), next);
+        patchCanvasDirTitle(this.canvasId, dirName);
+        return next;
+      } catch {
+        return { ...file, title: dirName };
+      }
+    }
+
+    return file;
   }
 
   write(canvas: CanvasFile): void {
@@ -220,32 +282,192 @@ export class CanvasStore {
     return this.read()?.version ?? null;
   }
 
+  /**
+   * Strict directory rename. Returns a structured conflict instead of
+   * throwing so the route layer can map it to a 409.
+   */
+  renameSelf(newTitle: string | null): RenameSelfResult {
+    const desired = toSafeFilename(newTitle, this.canvasId);
+    if (!existsSync(canvasRoot(this.canvasId))) {
+      return { ok: false, reason: 'not-found' };
+    }
+
+    const result = renameCanvasDirOnDisk(this.canvasId, desired);
+    if (result.ok) {
+      patchCanvasDirTitle(this.canvasId, newTitle);
+      return { ok: true, dirName: result.dirName };
+    }
+    if (result.reason === 'not-found') {
+      const current = path.basename(canvasRoot(this.canvasId));
+      registerCanvasDir(this.canvasId, current, newTitle);
+      return this.renameSelf(newTitle);
+    }
+    if (result.reason === 'conflict') {
+      return {
+        ok: false,
+        reason: 'conflict',
+        conflictWith: result.conflictWith,
+      };
+    }
+    return { ok: false, reason: 'fs-error', message: result.message };
+  }
+
   // ── Node content ─────────────────────────────────────────────────────────
 
+  private nodeIndex(): NameIndex<NodeFileEntry> {
+    if (this.nodes) return this.nodes;
+    const idx = new NameIndex<NodeFileEntry>();
+    const dir = nodesDir(this.canvasId);
+    if (existsSync(dir)) {
+      for (const file of readdirSync(dir)) {
+        if (!file.endsWith('.md')) continue;
+        const raw = readText(path.join(dir, file));
+        if (raw == null) continue;
+        const { meta } = parseFrontmatter(raw);
+        const rawId = meta['id'];
+        const id =
+          typeof rawId === 'string' && rawId
+            ? rawId
+            : file.replace(/\.md$/, '');
+        idx.add({ id, filename: file });
+      }
+    }
+    this.nodes = idx;
+    return idx;
+  }
+
+  invalidateNodeIndex(): void {
+    this.nodes = null;
+  }
+
+  private nodeFilenameOf(nodeId: string): string {
+    const entry = this.nodeIndex().get(nodeId);
+    return entry?.filename ?? `${sanitizeId(nodeId, 'nodeId')}.md`;
+  }
+
   readNode(nodeId: string): NodeContent | null {
-    const raw = readText(nodeMdPath(this.canvasId, nodeId));
-    if (raw == null) return null;
+    const filename = this.nodeFilenameOf(nodeId);
+    const fullPath = nodeFilePath(this.canvasId, filename);
+    let raw = readText(fullPath);
+    if (raw === null) {
+      this.invalidateNodeIndex();
+      const retryFilename = this.nodeFilenameOf(nodeId);
+      if (retryFilename !== filename) {
+        raw = readText(nodeFilePath(this.canvasId, retryFilename));
+      }
+      if (raw === null) return null;
+    }
     return markdownToNodeContent(nodeId, raw);
   }
 
-  writeNode(nodeId: string, content: NodeContent): void {
+  /**
+   * Predict whether a strict {@link writeNode} for `nodeId` with `label`
+   * would collide with another node on disk. Pure: never touches the
+   * filesystem or mutates state. Returns `desired` (the filename that
+   * would land on disk) plus a non-null `conflict` when the slot is
+   * already owned by a different node.
+   *
+   * Used by the route layer to pre-validate a batch PUT and 409 before
+   * any partial writes happen.
+   */
+  checkNodeRename(
+    nodeId: string,
+    label: string | null,
+  ): { desired: string; conflict: { id: string; filename: string } | null } {
+    const idx = this.nodeIndex();
+    const existing = idx.get(nodeId);
+    const desired = nodeFilenameFor(nodeId, label);
+    if (existing && existing.filename === desired) {
+      return { desired, conflict: null };
+    }
+    const conflict = idx.findByName(desired);
+    if (!conflict || conflict.id === nodeId) {
+      return { desired, conflict: null };
+    }
+    return {
+      desired,
+      conflict: { id: conflict.id, filename: conflict.filename },
+    };
+  }
+
+  /**
+   * Write a node's markdown. Strict mode refuses sibling-label
+   * collisions; lazy mode auto-dedupes with `(2)` / `(3)` suffixes.
+   */
+  writeNode(
+    nodeId: string,
+    content: NodeContent,
+    opts: { strictRename?: boolean } = {},
+  ): RenameResult {
     if (content.nodeId !== nodeId) {
       throw new Error(
         `nodeId mismatch: argument="${nodeId}" payload="${content.nodeId}"`,
       );
     }
     mkdirp(nodesDir(this.canvasId));
+
+    const idx = this.nodeIndex();
+    const existing = idx.get(nodeId);
+    // Empty / nullish label → fall back to whatever filename is already on
+    // disk for this nodeId (don't churn it into `<nodeId>.md`). Only on a
+    // genuine first write do we let `nodeFilenameFor` pick the nodeId
+    // fallback. This protects the file name from being clobbered by an
+    // intermediate save whose `data.label` is briefly empty (e.g. canvas
+    // autosave racing with the LLM enrich result).
+    const trimmedLabel =
+      typeof content.label === 'string' && content.label.trim().length > 0
+        ? content.label
+        : null;
+    const desired =
+      trimmedLabel === null && existing
+        ? existing.filename
+        : nodeFilenameFor(nodeId, trimmedLabel);
+
+    let target = existing?.filename ?? desired;
+    if (!existing || existing.filename !== desired) {
+      const conflict = idx.findByName(desired);
+      if (!conflict || conflict.id === nodeId) {
+        target = desired;
+      } else if (opts.strictRename) {
+        return {
+          ok: false,
+          reason: 'conflict',
+          conflictWith: { id: conflict.id, filename: conflict.filename },
+        };
+      } else {
+        target = idx.suggestUnique(desired, true, nodeId);
+      }
+    }
+
+    if (existing && existing.filename !== target) {
+      try {
+        unlinkSync(nodeFilePath(this.canvasId, existing.filename));
+      } catch {
+        // best effort; index update below keeps things consistent
+      }
+      idx.rename(nodeId, target);
+    } else if (!existing) {
+      idx.add({ id: nodeId, filename: target });
+    }
+
     atomicWriteText(
-      nodeMdPath(this.canvasId, nodeId),
+      nodeFilePath(this.canvasId, target),
       nodeContentToMarkdown(content),
     );
+    return { ok: true, filename: target };
   }
 
   deleteNode(nodeId: string): boolean {
-    const filePath = nodeMdPath(this.canvasId, nodeId);
-    if (!existsSync(filePath)) return false;
+    const idx = this.nodeIndex();
+    const filename = idx.get(nodeId)?.filename ?? this.nodeFilenameOf(nodeId);
+    const filePath = nodeFilePath(this.canvasId, filename);
+    if (!existsSync(filePath)) {
+      idx.remove(nodeId);
+      return false;
+    }
     try {
       unlinkSync(filePath);
+      idx.remove(nodeId);
       return true;
     } catch {
       return false;
@@ -256,10 +478,8 @@ export class CanvasStore {
     const dir = nodesDir(this.canvasId);
     if (!existsSync(dir)) return [];
     const out: NodeContentSummary[] = [];
-    for (const file of readdirSync(dir)) {
-      if (!file.endsWith('.md')) continue;
-      const nodeId = file.replace(/\.md$/, '');
-      const raw = readText(path.join(dir, file));
+    for (const entry of this.nodeIndex().list()) {
+      const raw = readText(path.join(dir, entry.filename));
       if (raw == null) continue;
       const { meta } = parseFrontmatter(raw);
       // @deprecated Backward compat: pre-rename files wrote `title:`.
@@ -270,7 +490,7 @@ export class CanvasStore {
             ? meta['title']
             : null;
       out.push({
-        nodeId,
+        nodeId: entry.id,
         type: typeof meta['type'] === 'string' ? meta['type'] : 'note',
         label,
       });
@@ -279,44 +499,60 @@ export class CanvasStore {
   }
 
   // ── Artifacts ────────────────────────────────────────────────────────────
+  //
+  // Files live in `<canvasDir>/.artifacts/` named `<artifactId><ext>`.
+  // The on-disk filename equals the URL key, so no manifest indirection
+  // is needed — `data.src` on a node carries the URL directly and the
+  // node's markdown carries it in frontmatter.
+
+  artifactsDir(): string {
+    return artifactsDir(this.canvasId);
+  }
 
   artifactPath(filename: string): string {
     return artifactPath(this.canvasId, filename);
   }
 
-  /** Absolute path of the canvas artifacts directory. */
-  artifactsDir(): string {
-    return artifactsDir(this.canvasId);
+  private buildRecord(filename: string): ArtifactRecord {
+    const ext = path.extname(filename);
+    const id = ext ? filename.slice(0, -ext.length) : filename;
+    return { id, ext, filename, mimeType: null };
   }
 
   async writeArtifactStream(
-    filename: string,
+    input: WriteArtifactInput,
     src: NodeJS.ReadableStream,
-  ): Promise<void> {
+  ): Promise<ArtifactRecord> {
     mkdirp(artifactsDir(this.canvasId));
+    const filename = `${input.id}${input.ext}`;
     await pipeline(src, createWriteStream(this.artifactPath(filename)));
+    return {
+      id: input.id,
+      ext: input.ext,
+      filename,
+      mimeType: input.mimeType ?? null,
+    };
   }
 
-  async writeArtifactBuffer(filename: string, data: Buffer): Promise<void> {
+  async writeArtifactBuffer(
+    input: WriteArtifactInput,
+    data: Buffer,
+  ): Promise<ArtifactRecord> {
     mkdirp(artifactsDir(this.canvasId));
+    const filename = `${input.id}${input.ext}`;
     await writeFile(this.artifactPath(filename), data);
+    return {
+      id: input.id,
+      ext: input.ext,
+      filename,
+      mimeType: input.mimeType ?? null,
+    };
   }
 
-  async deleteArtifact(filename: string): Promise<boolean> {
-    const filePath = this.artifactPath(filename);
-    if (!existsSync(filePath)) return false;
-    try {
-      unlinkSync(filePath);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  listArtifacts(): string[] {
-    const dir = artifactsDir(this.canvasId);
-    if (!existsSync(dir)) return [];
-    return readdirSync(dir);
+  /** Resolve a URL key to an absolute path, or null when the file is gone. */
+  resolveArtifactFilePath(key: string): string | null {
+    const fullPath = this.artifactPath(path.basename(key));
+    return existsSync(fullPath) ? fullPath : null;
   }
 
   // ── Chat ─────────────────────────────────────────────────────────────────
@@ -424,7 +660,11 @@ export class CanvasStore {
     const raw = readText(prefsPath(this.canvasId));
     if (raw == null) return { metadata: {}, body: '' };
     const { meta, content } = parseFrontmatter(raw);
-    return { metadata: meta, body: content };
+    const metadata: Record<string, string | null> = {};
+    for (const [k, v] of Object.entries(meta)) {
+      metadata[k] = typeof v === 'string' ? v : null;
+    }
+    return { metadata, body: content };
   }
 
   writePreferences(prefs: UserPreferences): void {
@@ -438,8 +678,14 @@ export class CanvasStore {
   /** Recursively delete the entire canvas directory. */
   destroy(): boolean {
     const root = canvasRoot(this.canvasId);
-    if (!existsSync(root)) return false;
+    if (!existsSync(root)) {
+      unregisterCanvasDir(this.canvasId);
+      this.invalidateNodeIndex();
+      return false;
+    }
     rmSync(root, { recursive: true, force: true });
+    unregisterCanvasDir(this.canvasId);
+    this.invalidateNodeIndex();
     return true;
   }
 }

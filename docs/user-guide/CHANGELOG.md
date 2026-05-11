@@ -4,6 +4,54 @@
 
 ---
 
+## 2026-05-09 · Frame 节点也生成 `.md` 文件
+
+**What Changed**
+
+- frame 节点不再是“完全只存在 `canvas.json` 里”了，会在 `nodes/` 目录下生成一个对应的 `.md`，格式与 image / video 一致——只有 frontmatter（`id`、`type: frame`、`title`），没有正文。
+- 现在会生成 `.md` 的节点类型全集：note / text / web / pdf / image / video / **frame**。
+- 打开旧工作区时会自动补齐：scan `canvas.json` 里现有的 frame 节点，谁没有对应 `.md` 就为谁生成一份。
+
+**Notes**
+
+- frame 重命名会跟着改它的 `.md` 文件名，同样会被 `tryRename` 检查同画布内重名冲突。
+- frame 在 `canvas.json` 里仍然保留子节点层级等拓扑信息，`.md` 只是多一份可读的元数据限定。
+- 仍然不生成 `.md` 的节点类型：annotation、question、intent。
+
+---
+
+## 2026-05-09 · Note 文件缺失占位 UI 与媒体节点对齐
+
+**What Changed**
+
+- Note 节点的 `.md` 文件在 Finder 里被删掉 / 改名后，原本顶部那条小灰带「Note file missing — type to recreate it」改成跟 PDF / 图片 / 视频节点一致的居中占位卡片：图标 + 「Note file missing」标题 + 一句说明 + 醒目的「Remove from canvas」按钮。
+- 占位状态下编辑器不再显示，节点工具栏也会临时隐藏，避免在「文件已经没了」的节点上做编辑操作。
+
+**Notes**
+
+- 触发条件不变：只有当后端给的 `data.contentMissing` 为 true **且** 节点目前没有可回退的内存内容时才会显示这张卡片。
+- 「敲字直接重建 .md」的旧行为下线了：现在只能选择「Remove from canvas」清掉孤儿节点，或者直接在 Finder 里把 .md 放回来。
+
+---
+
+## 2026-05-09 · Artifact 存储改造：隐藏目录 + 节点级 .md
+
+**What Changed**
+
+- 工作区里 `artifacts/` 目录现在改名为 `.artifacts/`（隐藏），并且 `artifacts.json` 清单文件被彻底删除。文件名不再依赖 displayName，统一就是 `<artifactId><ext>`，URL 与磁盘路径一一对应。
+- 每一个有原始文件的节点（pdf / image / video / web / note / text）现在都会在 `nodes/` 下生成一个对应的 `.md`：text / web / pdf / note 的 `.md` 里有正文 + frontmatter；image / video 的 `.md` 只有 frontmatter（指向 `.artifacts/` 里的文件）。
+- 不会生成 `.md` 的节点类型：**annotation、question、intent**。它们的全部信息只存在 `canvas.json` 里。（frame 节点随后也加入了 `.md` 体系，详见上面的条目。）
+- 打开旧工作区时会自动迁移：`artifacts/` 重命名为 `.artifacts/`、按清单把文件名改为 `<artifactId><ext>`、清单文件删除、所有 image / video 节点补齐对应的 `.md`。整个过程是幂等的，重复打开不会出问题。
+
+**Notes**
+
+- 上传 / 克隆 artifact 的接口签名简化：不再接受 `displayName` / `source` 字段；服务端只关心 id 和扩展名。前端没有用到这些字段，行为没有可见变化。
+- 节点 `.md` 的文件名仍然按节点标题生成（清理过非法字符），改名节点会改 `.md` 文件名；artifact 的文件名固定为 id，不会跟着节点标题走。
+- 导出 `.sediment.zip` 时会一并打包 `.artifacts/`，对方导入后所有附件都能直接用。
+- 如果你以前手动改过 artifact 文件名，迁移会保留你的改动（因为 URL 键 = 文件名）。
+
+---
+
 ## 2026-05-10 · 修复：Annotation Agent 偶尔触发 `handler is not a function` 崩溃
 
 **What Changed**
@@ -89,6 +137,77 @@
 - SSE 协议、UI 组件、历史会话格式全部保持兼容；老的 `.history/<canvasId>/<threadId>.json` 直接可用，无需迁移。
 - 工具卡片出现时间会**略微滞后几十毫秒**。
 - 新依赖：`@earendil-works/pi-agent-core@^0.74.0`，与已有 `pi-ai` 同版本。
+
+---
+
+## 2026-05-08 · 复制粘贴节点时连同边一起带走
+
+**What Changed**
+
+- 选中多个节点 Cmd+C 复制 → Cmd+V 粘贴：现在如果被选中的节点之间有连线，连线也会一起被复制过去（包括同画布粘贴和跨画布粘贴）。边的样式（颜色、虚实线、箭头方向、粗细）都会原样保留。
+- 只有「两端都在选区里」的边会被带走。半截在选区外的边（比如只选了 source 没选 target）会被静默丢弃 —— 因为目标画布上没有那个对端节点可连。
+- 之前只复制节点不复制边的旧行为已替换。
+
+**Notes**
+
+- 剪贴板 payload 新增 `__sediment_edges__` 字段（旧字段 `__sediment_nodes__` 不变），向后兼容：旧版客户端读不到 edges 字段也只会少连线、不会出错。
+- Frame 节点连带子节点一起复制时，子节点之间的连线同样会跟着复制。
+- 边的 ID 会重新生成（`edge-…`），不会撞到目标画布已有的边。
+
+---
+
+## 2026-05-08 · 跨画布复制粘贴含 artifact 节点
+
+**What Changed**
+
+- 在画布 A 选中一个 PDF / 图片 / 视频节点复制（Cmd+C），切到画布 B 粘贴（Cmd+V）：现在会真的把 artifact 文件本身复制一份到 B 的 `artifacts/` 目录下，并给 B 分配一个新的 artifact id。新节点的 `data.src` 自动改写成指向 B 的 URL，不再「借用」A 的文件。
+- 同一画布内复制粘贴的行为不变：两个节点共享同一个 artifact 文件，避免无意义的磁盘副本。
+- PDF 节点的 `coverUrl`（封面图）也会一起跨画布克隆。
+- 新后端接口 `POST /api/canvas/<dst>/artifact/clone-from`，body `{ srcCanvasId, srcKey }`，返回新 artifact 的 `{ id, uri, filename, displayName, mimetype }`。
+
+**Notes**
+
+- 克隆走的是字节复制，所以源文件如果之后被删，目标画布不受影响。
+- 如果源 artifact 已经不存在（比如源画布被删了），克隆请求会 404；前端会保留原 URL 并 console.warn，节点会显示 "File missing" 占位。
+- 同名 artifact 在目标画布中通过 `<新 displayName> (2).ext` 自动去重。
+
+---
+
+## 2026-05-08 · 文件系统外部改动的兜底机制
+
+**What Changed**
+
+- 用户在 Finder 里直接**改名 canvas 目录**：下次加载时后端会发现 dir 名跟 `canvas.json` 里的 title 不一致，把 title 同步成 dir 名（filesystem 是 source of truth），不再卡在「Canvas not found」。
+- 用户在 Finder 里**改名 / 删除节点 .md 文件**：缓存的文件名索引会失效一次并重新扫盘；如果文件确实没了，节点保留在画布上，会在节点顶部显示一条「Note file missing — type to recreate it」的小条，用户随便敲几个字就会重新生成 .md；右上角带一个 Remove 按钮可以一键移除整个节点。
+- 用户在 Finder 里**改名 / 删除 artifact 文件**：媒体节点（PDF / 图片 / 视频）会渲染成一个「File missing」的占位卡片，附带 Remove 按钮。
+- 删除整个 `artifacts.json` manifest：下次访问 artifact 时索引会重建，loose 文件会被自动「领养」回 manifest（已有逻辑，未变）。
+
+**Notes**
+
+- 自愈走的是「先按缓存查 → 没找到就扫盘 → 再查一次」模式，命中率高时不会有性能损耗。
+- `data.contentMissing` / `data.artifactMissing` 是后端 GET 时贴在 node data 上的 hint，前端读到就显示占位 UI；下次成功读到文件就会自动清掉，不会持久化。
+- Note / Text 节点的 banner 只在内容为空时显示。一旦用户敲了字，banner 自动消失，重新写入 .md 文件。
+- 这套兜底**不会**做模糊匹配 / 重链接，避免把不相关的文件错配到节点上。
+
+---
+
+## 2026-05-08 · 文件名改用语义化命名 + 重命名重名校验
+
+**What Changed**
+
+- 工作区目录、节点 markdown 文件、artifact 文件名都改成「用 label / 标题 / 文件名」直接做文件名，不再使用 ID。canvas 目录从 `<workspace>/<canvasId>/` 改成 `<workspace>/<canvas 标题>/`；节点文件从 `nodes/<nodeId>.md` 改成 `nodes/<节点 label>.md`，节点 frontmatter 新增 `id:` 字段保留稳定标识；artifact 文件从 `<artifactId>.<ext>` 改成 `<上传时的文件名>.<ext>`，多了一个 `artifacts.json` manifest 记录 id ↔ displayName 映射。
+- artifact 命名优先级：用户改名 > AI 改名 > 上传原文件名 > 兜底 ID。AI 不会覆盖用户改过的名字。
+- 重命名 canvas / 节点时如果会和同级别的同名项冲突（大小写不敏感、Unicode 归一化），后端返回 409，前端弹一个浏览器 alert，名字会自动恢复成原值。
+- artifact URL 仍然是 `/api/canvas/<canvasId>/artifact/<artifactId>.<ext>`，不会因为改名而失效。
+- 老的工作区第一次打开时会自动跑一次幂等的迁移脚本，把目录和文件名换成新的语义化名字，并把 artifact 写进 manifest。
+
+**Notes**
+
+- macOS / Windows 文件系统大小写处理不一致，所以重名比对一律走「全小写 + NFC 归一化」。Windows 保留名（`CON`、`PRN` 等）会被自动加 `_` 后缀。
+- 文件名长度上限 120 字符；超长名字会被截断。原始 `displayName` 完整保留在 manifest 里，前端 UI 看到的仍然是完整名字。
+- 节点 markdown 文件遇到重名时（在前端通过 alert 拦截之外的边界情况），后端会自动追加 `(2)`、`(3)` 之类的后缀。Frame 类型节点没有 label 时，文件名仍然回退到 ID。
+- 取消编辑可以按 ESC 或者点开输入框外面：canvas 标题输入按 Enter 提交，按 ESC 还原；节点 label 双击进入编辑，按 Enter 提交，按 ESC 还原。
+- 已发布给 LLM 或聊天附件的 artifact URL 不会因为后续改名而失效，因为后端通过 manifest 把 URL 里的 `<id>.ext` 反查回当前真实文件路径。
 
 ---
 

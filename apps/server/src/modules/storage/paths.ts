@@ -1,16 +1,12 @@
 /**
- * Storage paths
- *
- * The single place that knows how the on-disk layout maps to canvas /
- * node / thread identifiers. Every other module composes paths via
- * these helpers.
+ * Storage paths.
  *
  * Layout under `<workspace>/`:
  *
- *   <canvasId>/
- *     canvas.json
- *     nodes/<nodeId>.md
- *     artifacts/<filename>
+ *   <canvasDir>/                    name = sanitised canvas title
+ *     canvas.json                   carries the stable canvasId
+ *     nodes/<safe(label)>.md        per-node markdown (id in frontmatter)
+ *     .artifacts/<artifactId><ext>  raw uploads (hidden dir)
  *     memory/preferences.md
  *     .history/
  *       chat/<threadId>.json
@@ -20,11 +16,13 @@
 
 import path from 'node:path';
 
+import { canvasDirName } from './canvas-dirs.js';
 import { sanitizeId } from './io.js';
 import { getWorkspacePath } from '../workspace.js';
 
 export function canvasRoot(canvasId: string): string {
-  return path.join(getWorkspacePath(), sanitizeId(canvasId, 'canvasId'));
+  const safeId = sanitizeId(canvasId, 'canvasId');
+  return path.join(getWorkspacePath(), canvasDirName(safeId));
 }
 
 export function canvasJsonPath(canvasId: string): string {
@@ -35,18 +33,21 @@ export function nodesDir(canvasId: string): string {
   return path.join(canvasRoot(canvasId), 'nodes');
 }
 
-export function nodeMdPath(canvasId: string, nodeId: string): string {
-  return path.join(nodesDir(canvasId), `${sanitizeId(nodeId, 'nodeId')}.md`);
+export function nodeFilePath(canvasId: string, filename: string): string {
+  const base = path.basename(filename);
+  if (!base || base === '.' || base === '..') {
+    throw new Error(`Invalid node filename: "${filename}"`);
+  }
+  return path.join(nodesDir(canvasId), base);
 }
+
+/** Hidden directory holding raw uploaded files keyed by artifactId. */
+export const ARTIFACTS_DIR_NAME = '.artifacts';
 
 export function artifactsDir(canvasId: string): string {
-  return path.join(canvasRoot(canvasId), 'artifacts');
+  return path.join(canvasRoot(canvasId), ARTIFACTS_DIR_NAME);
 }
 
-/**
- * Resolve an artifact filename to an absolute path. The filename is
- * forced to its basename and validated against path traversal.
- */
 export function artifactPath(canvasId: string, filename: string): string {
   const base = path.basename(filename);
   if (!base || base === '.' || base === '..') {

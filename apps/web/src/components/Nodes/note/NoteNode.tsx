@@ -12,6 +12,7 @@ import { useNodeScale } from '@/hooks/useNodeScale';
 import useCanvasStore from '@/store/canvasStore';
 
 import { loadBlockNoteContent } from '../../BlockNote/blockNoteContent';
+import { MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
 
 import type { CanvasNoteNodeData } from '../types';
@@ -330,86 +331,102 @@ export const NoteNode = memo(
       patchNodeSilent(id, { measuredHeight: contentHeight });
     }, [contentHeight, data.measuredHeight, id, patchNodeSilent]);
 
+    // Markdown file missing on disk + no in-memory fallback → replace
+    // the editor with a full-card placeholder.
+    const isContentMissing =
+      data.contentMissing &&
+      !(typeof data.content === 'string' && data.content.trim());
+
     return (
       <NodeWrapper
         id={id}
         data={data}
         type={'note'}
         selected={selected}
-        toolbar={NoteToolbar}
+        toolbar={isContentMissing ? undefined : NoteToolbar}
         keepAspectRatio={false}
       >
-        <div
-          className={clsx(
-            'bg-surface relative w-full',
-            hasFixedHeight && 'h-full overflow-hidden',
-          )}
-          // In auto-height mode the inner content is visually scaled via
-          // CSS `transform: scale(scale)`, but transforms do NOT affect
-          // layout — the parent would only reserve the *unscaled* height
-          // and clip the bottom of the (visually larger) content. Reserve
-          // the scaled height explicitly so the node grows to fit.
-          //
-          // We also pin a `minHeight` from the very first paint (even
-          // before `contentHeight` has been measured) so the node never
-          // visibly collapses from the shadow host's intrinsic min-height
-          // down to a smaller measured content height once the
-          // ResizeObserver fires.
-          style={
-            !hasFixedHeight
-              ? {
-                  minHeight: AUTO_HEIGHT_MIN,
-                  height:
-                    contentHeight > 0
-                      ? Math.max(contentHeight, AUTO_HEIGHT_MIN) * scale
-                      : undefined,
-                }
-              : undefined
-          }
-        >
-          <div
-            style={{
-              transform: `scale(${scale})`,
-              transformOrigin: 'top left',
-              width: `${100 / scale}%`,
-              ...(hasFixedHeight ? { height: `${100 / scale}%` } : {}),
-            }}
-          >
+        {isContentMissing ? (
+          <MissingFileBanner
+            nodeId={id}
+            title="Note file missing"
+            description="The note file for this node was deleted or renamed outside the app."
+          />
+        ) : (
+          <>
             <div
-              ref={shadowHostRef}
-              className={clsx('w-full', hasFixedHeight && 'h-full')}
-            />
-          </div>
-          {isTruncated && (
-            <div
-              role="button"
-              tabIndex={0}
-              onClick={handleToggleAutoHeight}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  handleToggleAutoHeight(e as unknown as React.MouseEvent);
-                }
-              }}
-              className="group absolute right-0 bottom-0 left-0 flex h-10 cursor-pointer items-end justify-center pb-1"
-              aria-label="Show all content"
+              className={clsx(
+                'bg-surface relative w-full',
+                hasFixedHeight && 'h-full overflow-hidden',
+              )}
+              // In auto-height mode the inner content is visually scaled via
+              // CSS `transform: scale(scale)`, but transforms do NOT affect
+              // layout — the parent would only reserve the *unscaled* height
+              // and clip the bottom of the (visually larger) content. Reserve
+              // the scaled height explicitly so the node grows to fit.
+              //
+              // We also pin a `minHeight` from the very first paint (even
+              // before `contentHeight` has been measured) so the node never
+              // visibly collapses from the shadow host's intrinsic min-height
+              // down to a smaller measured content height once the
+              // ResizeObserver fires.
+              style={
+                !hasFixedHeight
+                  ? {
+                      minHeight: AUTO_HEIGHT_MIN,
+                      height:
+                        contentHeight > 0
+                          ? Math.max(contentHeight, AUTO_HEIGHT_MIN) * scale
+                          : undefined,
+                    }
+                  : undefined
+              }
             >
-              {/* Fade gradient — deepens on hover */}
               <div
-                aria-hidden
-                className="from-fg-subtle/30 group-hover:from-fg-muted/30 absolute inset-0 bg-linear-to-t to-transparent transition-colors"
-              />
-              <div
-                className="text-fg-subtle group-hover:text-fg-muted relative z-10 transition-colors"
                 style={{
-                  transform: `scale(${counterZoomScale})`,
-                  transformOrigin: 'bottom center',
+                  transform: `scale(${scale})`,
+                  transformOrigin: 'top left',
+                  width: `${100 / scale}%`,
+                  ...(hasFixedHeight ? { height: `${100 / scale}%` } : {}),
                 }}
               >
-                <ChevronsDown size={14} />
+                <div
+                  ref={shadowHostRef}
+                  className={clsx('w-full', hasFixedHeight && 'h-full')}
+                />
               </div>
+              {isTruncated && (
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={handleToggleAutoHeight}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      handleToggleAutoHeight(e as unknown as React.MouseEvent);
+                    }
+                  }}
+                  className="group absolute right-0 bottom-0 left-0 flex h-10 cursor-pointer items-end justify-center pb-1"
+                  aria-label="Show all content"
+                >
+                  {/* Fade gradient — deepens on hover */}
+                  <div
+                    aria-hidden
+                    className="from-fg-subtle/30 group-hover:from-fg-muted/30 absolute inset-0 bg-linear-to-t to-transparent transition-colors"
+                  />
+                  <div
+                    className="text-fg-subtle group-hover:text-fg-muted relative z-10 transition-colors"
+                    style={{
+                      transform: `scale(${counterZoomScale})`,
+                      transformOrigin: 'bottom center',
+                    }}
+                  >
+                    <ChevronsDown size={14} />
+                  </div>
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </>
+        )}
       </NodeWrapper>
     );
   },

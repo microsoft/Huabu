@@ -3,6 +3,8 @@ import { routes } from './_routes';
 
 import type {
   ApiErrorBody,
+  CanvasConflictResponse,
+  CanvasErrorCode,
   DeleteCanvasResponse,
   GetCanvasResponse,
   PutCanvasRequest,
@@ -15,6 +17,35 @@ import type {
   PreprocessNodeRequest,
   PreprocessNodeResponse,
 } from '@sediment/shared';
+
+/**
+ * Error thrown when a canvas mutation is rejected by the server with a
+ * structured 409 conflict (`CanvasConflictResponse`). Callers can branch on
+ * `code` to distinguish title / node-label collisions from version drift.
+ */
+export class CanvasConflictError extends Error {
+  readonly code: CanvasErrorCode;
+  readonly conflictWith?: string;
+  readonly nodeId?: string;
+  readonly serverVersion?: number;
+
+  constructor(payload: CanvasConflictResponse) {
+    super(payload.message);
+    this.name = 'CanvasConflictError';
+    this.code = payload.code;
+    this.conflictWith = payload.conflictWith;
+    this.nodeId = payload.nodeId;
+    this.serverVersion = payload.serverVersion;
+  }
+}
+
+function isCanvasConflictResponse(
+  value: unknown,
+): value is CanvasConflictResponse {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  return typeof v.code === 'string' && typeof v.message === 'string';
+}
 
 /**
  * List all canvases in the workspace.
@@ -57,22 +88,30 @@ export async function putCanvas(
   request: PutCanvasRequest,
   options?: { keepalive?: boolean },
 ): Promise<PutCanvasResponse> {
-  try {
-    return await apiFetch<PutCanvasResponse>(routes.canvas(canvasId), {
-      method: 'PUT',
-      json: request,
-      keepalive: options?.keepalive ?? false,
-      fallbackMessage: 'Failed to save canvas',
-    });
-  } catch (error) {
-    if (error instanceof ApiError && error.status === 409) {
-      const details = error.details as { serverVersion?: number } | undefined;
-      throw new Error(
-        `Canvas version mismatch. Server version: ${details?.serverVersion ?? 'unknown'}`,
-      );
+  // We can't use `apiFetch` directly because the structured 409
+  // `CanvasConflictResponse` carries `conflictWith` / `nodeId` /
+  // `serverVersion` at the top level, while `ApiError` only preserves
+  // `code` + `details` from the canonical `ApiErrorBody`. Fall back to
+  // a raw `fetch` so we can throw a `CanvasConflictError` with the
+  // full payload intact.
+  const response = await fetch(apiUrl(routes.canvas(canvasId)), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+    keepalive: options?.keepalive ?? false,
+  });
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as unknown;
+    if (response.status === 409 && isCanvasConflictResponse(body)) {
+      throw new CanvasConflictError(body);
     }
-    throw error;
+    const errBody =
+      body && typeof body === 'object' ? (body as Partial<ApiErrorBody>) : {};
+    throw new ApiError(response.status, errBody, 'Failed to save canvas');
   }
+
+  return (await response.json()) as PutCanvasResponse;
 }
 
 export async function deleteNode(

@@ -38,6 +38,8 @@ import path from 'node:path';
 
 // @deprecated Launch-only legacy migration. Remove once all workspaces have
 // been migrated to the canvas-centric layout.
+import { refreshCanvasDirIndex } from './storage/canvas-dirs.js';
+import { migrateLabeledNames } from './storage/migrate-labels.js';
 import {
   flattenLegacyMetaJson,
   runMigrationIfNeeded,
@@ -84,11 +86,16 @@ export function initWorkspaceFromEnv(): void {
   _workspacePath = path.resolve(fromEnv);
   _managed = true;
   mkdirSync(_workspacePath, { recursive: true });
+  // Drop the cached canvas-dir index so subsequent lookups (used by
+  // migrations and route handlers) reflect the new workspace.
+  refreshCanvasDirIndex();
   // @deprecated Launch-only legacy migration. Remove once all workspaces have
   // been migrated to the canvas-centric layout.
   runMigrationIfNeeded(_workspacePath);
   // One-shot meta_json -> flat YAML rewrite (sentinel-gated, idempotent).
   flattenLegacyMetaJson(_workspacePath);
+  // V2 -> V3 label-based rename pass (idempotent; stays long-term).
+  migrateLabeledNames(_workspacePath);
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -128,11 +135,15 @@ export function getWorkspaceName(): string | null {
  * create the workspace folder. Rejected in managed mode — the workspace
  * is locked at boot.
  *
- * Also runs the legacy → canvas-centric layout migration on the new
- * workspace (no-op once it has been migrated).
+ * Also runs two storage migrations on the new workspace:
+ *   - the legacy `<ws>/canvas/<id>.json` → `<ws>/<id>/canvas.json`
+ *     restructuring (deprecated, launch-only);
+ *   - the V2 → V3 label-based rename pass that turns `<id>`-named
+ *     directories and `<nodeId>.md` files into label-derived names.
+ *     This second pass is idempotent and stays in the codebase.
  *
- * @deprecated The migration side effect is launch-only. Remove the migration
- * call and this note once all workspaces have been migrated.
+ * @deprecated The first migration is launch-only. Remove the
+ * `runMigrationIfNeeded` call once all workspaces have been migrated.
  */
 export function setWorkspacePath(newPath: string): void {
   if (_managed) {
@@ -143,11 +154,16 @@ export function setWorkspacePath(newPath: string): void {
   validateAbsolutePath(newPath);
   _workspacePath = path.resolve(newPath);
   mkdirSync(_workspacePath, { recursive: true });
+  // Drop the cached canvas-dir index so subsequent lookups (used by
+  // migrations and route handlers) reflect the new workspace.
+  refreshCanvasDirIndex();
   // @deprecated Launch-only legacy migration. Remove once all workspaces have
   // been migrated to the canvas-centric layout.
   runMigrationIfNeeded(_workspacePath);
   // One-shot meta_json -> flat YAML rewrite (sentinel-gated, idempotent).
   flattenLegacyMetaJson(_workspacePath);
+  // V2 -> V3 label-based rename pass (idempotent; stays long-term).
+  migrateLabeledNames(_workspacePath);
 }
 
 // ──────────────────────────────────────────────────────────────────────

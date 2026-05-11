@@ -47,10 +47,20 @@ export async function runPipeline(
 
   const has = (cap: Capability) => plan.includes(cap);
 
+  // Manifest-aware artifact resolver. URL keys (`<artifactId><ext>`) are
+  // mapped to absolute on-disk paths via the canvas artifact index, so
+  // display-name renames don't break preprocessing.
+  const resolveArtifactByName = (filename: string): string | null =>
+    deps.store.resolveArtifactFilePath(filename);
+  const resolveArtifactForCanvas = (
+    _canvasId: string,
+    filename: string,
+  ): string | null => resolveArtifactByName(filename);
+
   // Stage 1 — Input Resolve
   if (has('resolve_input')) {
     try {
-      ctx.resolved = inputResolve(request, deps.store.artifactsDir());
+      ctx.resolved = inputResolve(request, resolveArtifactByName);
       usedCapabilities.push('resolve_input');
     } catch (error) {
       diagnostics.push({
@@ -212,7 +222,7 @@ export async function runPipeline(
           ctx.normalized,
           plan,
           deps.provider,
-          deps.store.artifactsDir(),
+          resolveArtifactForCanvas,
         );
         if (has('generate_label')) usedCapabilities.push('generate_label');
         if (has('generate_summary')) usedCapabilities.push('generate_summary');

@@ -73,17 +73,25 @@ export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
   },
   image: {
     nodeType: 'image',
+    contentKind: 'image',
     capabilities: [
       'resolve_input',
       'compute_fingerprint',
       'generate_label',
+      'persist_source',
       'build_patch',
     ],
     watchFields: ['src', 'labelSource'],
   },
   video: {
     nodeType: 'video',
-    capabilities: ['resolve_input', 'compute_fingerprint', 'build_patch'],
+    contentKind: 'video',
+    capabilities: [
+      'resolve_input',
+      'compute_fingerprint',
+      'persist_source',
+      'build_patch',
+    ],
     watchFields: ['src'],
   },
   frame: {

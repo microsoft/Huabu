@@ -1,4 +1,8 @@
 import {
+  ARTIFACT_DATA_FIELDS,
+  isCrossCanvasArtifactUrl,
+} from '@sediment/shared';
+import {
   applyNodeChanges,
   applyEdgeChanges,
   type Node,
@@ -43,6 +47,8 @@ import {
 
 import { canvasHistoryManager } from './canvasHistoryManager';
 import { getCanvas, postCanvasEvents, preprocessNode, putCanvas } from '../api';
+import { cloneArtifactToCanvas } from '../api/artifact';
+import { CanvasConflictError } from '../api/canvas';
 import { getNodeSize } from '../utils/node/size';
 
 import type { AlignDirection } from '@/handler/canvasCommand/utils/alignment';
@@ -71,7 +77,15 @@ const flushAutoSave = async (saveCanvas: () => Promise<void>) => {
   if (saveTimeout) {
     clearTimeout(saveTimeout);
     saveTimeout = null;
-    await saveCanvas();
+    // Swallow conflicts here — `tryRename` is the path that surfaces
+    // them to the user. Autosave should never break canvas switching.
+    try {
+      await saveCanvas();
+    } catch (err) {
+      if (!(err instanceof CanvasConflictError)) {
+        console.error('Failed to flush autosave:', err);
+      }
+    }
   }
 };
 
@@ -206,8 +220,15 @@ type RFState = {
   isSaving: boolean;
   pendingSave: boolean;
 
+  /**
+   * Apply a partial state update without triggering autosave or the
+   * canUndo/canRedo sync. Reserved for acknowledging server-driven
+   * updates (e.g. labels the server auto-deduped on save) so the patch
+   * doesn't ping-pong back into another autosave.
+   */
+  _setStateNoAutosave: (partial: Partial<RFState>) => void;
+
   canvasTitle: string;
-  setCanvasTitle: (title: string) => void;
 
   ingestionByNodeId: Record<string, NodeIngestionInfo>;
   setNodeIngestion: (nodeId: string, info: NodeIngestionInfo) => void;
@@ -341,6 +362,7 @@ type RFState = {
   pasteNodes: (
     flowPosition: { x: number; y: number },
     clipboardNodes: Node[],
+    clipboardEdges?: Edge[],
   ) => void;
 
   /** Undo / Redo */
@@ -352,6 +374,25 @@ type RFState = {
   loadCanvas: (canvasId?: string) => Promise<void>;
   switchCanvas: (canvasId: string) => Promise<void>;
   saveCanvas: () => Promise<void>;
+
+  /**
+   * Attempt to rename a canvas or node, with collision detection.
+   *
+   * - `kind: 'canvas'` commits the title to the server immediately;
+   *   on a backend 409 (`CANVAS_TITLE_CONFLICT`) the previous title is
+   *   restored and an alert is shown.
+   * - `kind: 'node'` performs a local case-insensitive sibling check
+   *   first; on conflict an alert is shown and the call returns false
+   *   without dispatching any state change. Otherwise the node label
+   *   is updated as a user-sourced rename.
+   *
+   * Returns `true` when the rename was accepted, `false` on conflict.
+   */
+  tryRename: (
+    kind: 'canvas' | 'node',
+    id: string,
+    nextName: string,
+  ) => Promise<boolean>;
 
   actionHistory: RecentAction[];
   /** @internal Execute a batch of shared CanvasCommands. Do not call from outside the store. */
@@ -379,7 +420,11 @@ let saveTimeout: ReturnType<typeof setTimeout> | null = null;
 const scheduleAutoSave = (saveCanvas: () => Promise<void>) => {
   if (saveTimeout) clearTimeout(saveTimeout);
   saveTimeout = setTimeout(() => {
-    saveCanvas();
+    saveCanvas().catch((err) => {
+      if (!(err instanceof CanvasConflictError)) {
+        console.error('Autosave failed:', err);
+      }
+    });
   }, AUTOSAVE_DEBOUNCE_MS);
 };
 
@@ -529,7 +574,16 @@ const autoSaveMiddleware =
       afterSet(prev);
     };
 
-    return config(wrappedSet, get, api);
+    const baseState = config(wrappedSet, get, api);
+    // Inject a raw setter that skips both autosave scheduling AND the
+    // canUndo/canRedo sync. Use this when the store is acknowledging
+    // server-driven updates that should not feed back into another save.
+    return {
+      ...baseState,
+      _setStateNoAutosave: (partial) => {
+        (set as (p: Partial<RFState>) => void)(partial);
+      },
+    };
   };
 
 // rAF handle for throttling the heavy preview computation inside onNodeDrag.
@@ -548,10 +602,13 @@ const useCanvasStore = create<RFState>()(
     isSaving: false,
     pendingSave: false,
 
+    // Placeholder — the autoSaveMiddleware injects the real raw setter
+    // that bypasses autosave scheduling. Calling it before middleware has
+    // wrapped the store would be a programmer error, so fall back to the
+    // wrapped `set` (which still works, just without the suppression).
+    _setStateNoAutosave: (partial) => set(partial),
+
     canvasTitle: '',
-    setCanvasTitle: (title) => {
-      set({ canvasTitle: title });
-    },
 
     ingestionByNodeId: {},
     setNodeIngestion: (nodeId, info) => {
@@ -863,8 +920,36 @@ const useCanvasStore = create<RFState>()(
           state: { nodes, edges },
         });
         set({ version: response.version });
+
+        // The server may have auto-deduped one or more node labels (typically
+        // when an agent-sourced label collided with a sibling and was bumped
+        // to `Foo (2)`). Patch those into our in-memory state so the canvas
+        // display matches what was persisted, without waiting for a reload.
+        // Use `_setStateNoAutosave` so applying these server-told labels
+        // doesn't trigger another autosave round-trip.
+        if (response.renamedNodes && response.renamedNodes.length > 0) {
+          const renames = new Map(
+            response.renamedNodes.map((r) => [r.nodeId, r.label]),
+          );
+          get()._setStateNoAutosave({
+            nodes: get().nodes.map((n) => {
+              const next = renames.get(n.id);
+              if (next === undefined) return n;
+              return {
+                ...n,
+                data: { ...(n.data ?? {}), label: next },
+              };
+            }),
+          });
+        }
         saveSucceeded = true;
       } catch (error) {
+        if (error instanceof CanvasConflictError) {
+          // Surface conflict to caller (e.g. tryRename) so it can revert
+          // optimistic UI state. Plain autosaves catch & ignore via
+          // void get().saveCanvas().
+          throw error;
+        }
         console.error('Failed to save canvas:', error);
         // TODO: Handle version conflict (409) - reload and prompt user
       } finally {
@@ -874,7 +959,15 @@ const useCanvasStore = create<RFState>()(
         if (pendingSave) {
           set({ pendingSave: false });
           // Fire-and-forget: re-save the latest state after the in-flight save completes.
-          void get().saveCanvas();
+          // Conflict errors are surfaced via tryRename; ignore them here so
+          // the rejection doesn't escape into the runtime as unhandled.
+          void get()
+            .saveCanvas()
+            .catch((err) => {
+              if (!(err instanceof CanvasConflictError)) {
+                console.error('Re-save after pending failed:', err);
+              }
+            });
         }
       }
 
@@ -884,6 +977,79 @@ const useCanvasStore = create<RFState>()(
       if (saveSucceeded) {
         void flushCanvasEventsFor(get().canvasId);
       }
+    },
+
+    tryRename: async (kind, id, nextName) => {
+      const trimmed = nextName.trim();
+      if (!trimmed) return false;
+
+      // Case-insensitive + Unicode-normalized comparison, matching the
+      // backend (`normalizeForCompare` in storage/naming.ts).
+      const normalize = (s: string) => s.normalize('NFC').toLowerCase();
+
+      if (kind === 'canvas') {
+        const { canvasId, canvasTitle } = get();
+        if (id !== canvasId) return false;
+        if (normalize(canvasTitle) === normalize(trimmed)) {
+          // No-op rename: still update local label casing without a roundtrip.
+          if (canvasTitle !== trimmed) set({ canvasTitle: trimmed });
+          return true;
+        }
+        const previous = canvasTitle;
+        set({ canvasTitle: trimmed });
+        try {
+          await get().saveCanvas();
+          return true;
+        } catch (err) {
+          if (
+            err instanceof CanvasConflictError &&
+            err.code === 'CANVAS_TITLE_CONFLICT'
+          ) {
+            set({ canvasTitle: previous });
+            const target = err.conflictWith ?? trimmed;
+            window.alert(
+              `Canvas name "${target}" is already in use. Please choose a different name.`,
+            );
+            return false;
+          }
+          // Other errors (network etc.) — leave optimistic title; caller
+          // can retry. Log so the failure isn't silent.
+          console.error('Failed to rename canvas:', err);
+          return true;
+        }
+      }
+
+      // kind === 'node'
+      const { nodes } = get();
+      const target = nodes.find((n) => n.id === id);
+      if (!target) return false;
+      const currentLabel =
+        typeof target.data?.['label'] === 'string'
+          ? (target.data['label'] as string)
+          : '';
+      if (normalize(currentLabel) === normalize(trimmed)) {
+        // No-op: avoid a needless dispatch.
+        if (currentLabel !== trimmed) {
+          get().updateNodeData(id, { label: trimmed, labelSource: 'user' });
+        }
+        return true;
+      }
+      // Local sibling pre-check. Only compare against nodes the user can see;
+      // the backend re-validates on persist.
+      const collision = nodes.find((n) => {
+        if (n.id === id) return false;
+        const label = n.data?.['label'];
+        if (typeof label !== 'string') return false;
+        return normalize(label) === normalize(trimmed);
+      });
+      if (collision) {
+        window.alert(
+          `Name "${trimmed}" is already used by another node on this canvas. Please choose a different name.`,
+        );
+        return false;
+      }
+      get().updateNodeData(id, { label: trimmed, labelSource: 'user' });
+      return true;
     },
 
     flushCanvasEvents: async () => {
@@ -1298,7 +1464,7 @@ const useCanvasStore = create<RFState>()(
     },
 
     copySelectedNodes: () => {
-      const { nodes } = get();
+      const { nodes, edges } = get();
       const selected = nodes.filter((n) => n.selected);
       if (selected.length === 0) return;
 
@@ -1338,19 +1504,99 @@ const useCanvasStore = create<RFState>()(
         };
       });
 
-      // Write serialized node data to system clipboard
-      const payload = JSON.stringify({ __sediment_nodes__: cloned });
+      // Capture edges whose BOTH endpoints are in the copied set, so the
+      // paste helper can remap them onto the freshly-created node ids.
+      // Edges that straddle the selection boundary are dropped (no remote
+      // endpoint to point at on the destination canvas).
+      const clonedEdges: Edge[] = edges
+        .filter((e) => selectedIds.has(e.source) && selectedIds.has(e.target))
+        .map((e) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          ...(e.data ? { data: JSON.parse(JSON.stringify(e.data)) } : {}),
+        }));
+
+      // Write serialized node + edge data to system clipboard. Edges are
+      // optional; older paste handlers that only know `__sediment_nodes__`
+      // will still produce valid results (just without the connections).
+      const payload = JSON.stringify({
+        __sediment_nodes__: cloned,
+        __sediment_edges__: clonedEdges,
+      });
       void navigator.clipboard.writeText(payload).catch(() => {
         // Clipboard API unavailable
       });
     },
 
-    pasteNodes: (flowPosition, clipboardNodes) => {
-      get().dispatchUiIntent({
-        type: 'PASTE_CLIPBOARD',
-        flowPosition,
-        clipboardNodes,
+    pasteNodes: (flowPosition, clipboardNodes, clipboardEdges) => {
+      const dstCanvasId = get().canvasId;
+      if (!dstCanvasId || clipboardNodes.length === 0) return;
+
+      // Same-canvas pastes leave artifact URLs as-is (the artifact is
+      // already owned by this canvas). Cross-canvas pastes clone the
+      // underlying file so the destination canvas owns its own copy —
+      // otherwise deleting the source canvas would orphan the pasted
+      // node. The set of fields that may carry a canvas-scoped artifact
+      // URL is the shared `ARTIFACT_DATA_FIELDS` constant.
+      const needsClone = clipboardNodes.some((node) => {
+        const data = (node.data ?? {}) as Record<string, unknown>;
+        return ARTIFACT_DATA_FIELDS.some((field) =>
+          isCrossCanvasArtifactUrl(data[field], dstCanvasId),
+        );
       });
+
+      const dispatch = (nodes: Node[]) => {
+        get().dispatchUiIntent({
+          type: 'PASTE_CLIPBOARD',
+          flowPosition,
+          clipboardNodes: nodes,
+          ...(clipboardEdges && clipboardEdges.length > 0
+            ? { clipboardEdges }
+            : {}),
+        });
+      };
+
+      // Fast path: nothing to clone — preserve the prior synchronous
+      // behaviour so simple intra-canvas pastes feel instant.
+      if (!needsClone) {
+        dispatch(clipboardNodes);
+        return;
+      }
+
+      void (async () => {
+        const remapped = await Promise.all(
+          clipboardNodes.map(async (node) => {
+            const data = { ...((node.data ?? {}) as Record<string, unknown>) };
+            let mutated = false;
+            for (const field of ARTIFACT_DATA_FIELDS) {
+              const value = data[field];
+              if (!isCrossCanvasArtifactUrl(value, dstCanvasId)) continue;
+              try {
+                const newUrl = await cloneArtifactToCanvas(
+                  value as string,
+                  dstCanvasId,
+                );
+                if (newUrl && newUrl !== value) {
+                  data[field] = newUrl;
+                  mutated = true;
+                }
+              } catch (err) {
+                // Best effort — fall back to the original URL. The new
+                // node will render with the missing-file placeholder
+                // (artifactMissing flag from the server) so the user can
+                // still remove it.
+                console.warn(
+                  '[paste] Failed to clone artifact for cross-canvas paste',
+                  err,
+                );
+              }
+            }
+            return mutated ? { ...node, data } : node;
+          }),
+        );
+        dispatch(remapped);
+      })();
     },
 
     canUndo: false,

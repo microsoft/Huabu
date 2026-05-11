@@ -9,17 +9,19 @@ Huabu 把每个节点的"摄入内容"（PDF 正文、网页正文、Note 文字
 每张画布对应一个文件夹：
 
 ```
-<workspace>/<canvasId>/
-├── canvas.json          # 画布拓扑（节点位置、连线、frame 层级等）
-├── nodes/<nodeId>.md    # 每个节点的摄入内容 + 元数据
-├── artifacts/           # 二进制原文件（PDF、图片等）
-└── chat/                # 对话记录
+<workspace>/<canvas-title>/
+├── canvas.json              # 画布拓扑（节点位置、连线、frame 层级等）
+├── nodes/<node-title>.md    # 每个节点的摄入内容 + 元数据
+├── .artifacts/              # 隐藏：二进制原文件（PDF、图片、视频）、文件名 = artifactId
+└── .history/                # 隐藏：对话 / 意图 / 事件历史
 ```
 
 节点的"内容"和"画布上的可视位置"是**两份分离的状态**：
 
 - `canvas.json` 由前端 store 同步，描述画布拓扑
-- `nodes/<nodeId>.md` 由预处理流水线写入，描述节点的可被 AI 读取的内容
+- `nodes/<node-title>.md` 由预处理流水线写入，描述节点的可被 AI 读取的内容
+
+> 哪些节点会生成 `.md`？**note / text / web / pdf / image / video / frame** 都会。其中 image / video / frame 的 `.md` 只存元数据（image / video 指向 `.artifacts/` 里的原始文件，frame 仅记录标题）。annotation / question / intent 不生成 `.md`。
 
 > 早期版本中存在跨画布共享的 `sources/` 池，现已移除。每张画布独立存储自己的节点内容。
 

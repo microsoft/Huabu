@@ -5,6 +5,7 @@ import { resolveArtifactUrl } from '@/api/artifact';
 import useCanvasStore from '@/store/canvasStore.ts';
 
 import { FloatingToolbar } from '../../Common/FloatingToolbar.tsx';
+import { MissingFileBanner } from '../MissingFileBanner.tsx';
 import { NodeWrapper } from '../NodeWrapper.tsx';
 
 import type { CanvasVideoNodeData } from '../types.ts';
@@ -39,7 +40,13 @@ export const VideoNode = memo(
       >
         <div className="bg-fg-default/5 group flex h-full flex-col justify-center rounded border-0">
           <div className="relative h-full w-full overflow-hidden rounded">
-            {data?.src ? (
+            {data?.artifactMissing ? (
+              <MissingFileBanner
+                nodeId={id}
+                title="Video file missing"
+                description="The artifact for this node was deleted or renamed outside the app."
+              />
+            ) : data?.src ? (
               <>
                 <video
                   src={resolveArtifactUrl(data.src)}

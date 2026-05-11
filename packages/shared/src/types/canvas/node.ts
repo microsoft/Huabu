@@ -190,6 +190,21 @@ export interface BaseNodeData {
    * used by note and text nodes.
    */
   style?: NodeStyle;
+  /**
+   * Server-set hint: the per-node markdown file backing this node was not
+   * found on disk during the last GET. Frontend renders a "file missing"
+   * banner so the user can recreate it (by typing) or remove the node.
+   * Cleared automatically on the next GET once the file is present again.
+   * Only meaningful for node types that persist content (note / text).
+   */
+  contentMissing?: boolean;
+  /**
+   * Server-set hint: the artifact file referenced by `data.src` was not
+   * found on disk during the last GET. Frontend renders a placeholder
+   * with a Remove button. Only meaningful for media nodes (pdf / image /
+   * video) whose `src` points to a canvas-scoped artifact URL.
+   */
+  artifactMissing?: boolean;
 }
 
 /** Note node: rich Markdown content authored on the canvas */
