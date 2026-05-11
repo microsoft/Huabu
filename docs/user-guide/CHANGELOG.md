@@ -4,6 +4,24 @@
 
 ---
 
+## 2026-05-11 · Node label 与文件名解耦：frontmatter 保留原文
+
+**What Changed**
+
+- `nodes/*.md` 的 frontmatter `label:` 现在严格保存**用户/Agent 看到的原始 label**（含 `:` `?` `/` `\` 等标点和非 ASCII 字符），不再被「翻译」成文件系统安全形态。
+- 文件系统里的 `.md` 文件名继续使用 `toSafeFilename(label)` 的安全形态，并在冲突时自动追加 `(2)` / `(3)` 后缀。
+- 自动 dedupe 触发时，画布上显示的 label 也会跟着追加 `(2)` 后缀，但保留原始标点：例如 `"Hello: World?"` 冲突后显示为 `Hello: World? (2)`，而不再是之前那个把冒号和问号都替换成 `_` 的 `Hello_ World_ (2)`。
+- 系统所有读取节点的路径（`readNode` / `listNodes` / canvas 水合 / Web 路由 / Agent 工具）都以 frontmatter `label:` 为准，不再回退到从文件名反推 label。
+
+**Notes**
+
+- 旧工作区的迁移修了两个会破坏文件名的 bug：
+  1. 在已经迁移到新格式（只有 `label:`）的工作区上重新跑 label-naming 迁移时，原先只读 `meta.title` 会把 `My Note.md` 重命名成 `<nodeId>.md`，现在会优先读 `meta.label` 再回退到 `meta.title`，幂等安全。
+  2. 为旧的 image / video / frame 节点补 `.md` 时，frontmatter 现在写新的 `label:` key 并不再写已废弃的 `content_hash` / `meta_json`。
+- 这是一个保留语义的改动：现存的 `.md` 文件名不会被改动，但下一次保存这个节点时，frontmatter 里的 `label:` 会被刷新成原始（带标点）形态。
+
+---
+
 ## 2026-05-09 · Frame 节点也生成 `.md` 文件
 
 **What Changed**

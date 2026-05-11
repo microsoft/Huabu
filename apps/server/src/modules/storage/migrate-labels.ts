@@ -154,11 +154,23 @@ function renameNodeFiles(
       }
     }
 
+    // Read the display label from either key. New-format files write
+    // only `label:`, so checking `title:` alone treated them as
+    // labelless and renamed `My Note.md` back to `<nodeId>.md` on the
+    // next migration pass — corrupting filenames that were already
+    // correct. Prefer the new key, fall back to the legacy one.
+    const rawLabel = meta['label'];
     const rawTitle = meta['title'];
+    const labelOrTitle =
+      typeof rawLabel === 'string'
+        ? rawLabel
+        : typeof rawTitle === 'string'
+          ? rawTitle
+          : null;
     records.push({
       currentFile: file,
       id,
-      title: typeof rawTitle === 'string' ? rawTitle : null,
+      title: labelOrTitle,
     });
   }
 
@@ -336,13 +348,15 @@ function backfillMetadataOnlyNodeMd(
     const target = dedupeArtifactFilename(desired, usedFilenames);
     usedFilenames.add(target);
 
+    // Frontmatter mirrors the canvas-store schema: `label:` (the
+    // original, untransformed label), `src:` only when present, and no
+    // legacy `content_hash` / `meta_json` keys (the canvas-store
+    // strips them on read anyway).
     const fm = toFrontmatter({
       id,
       type,
-      title,
-      src,
-      content_hash: '',
-      meta_json: null,
+      ...(title ? { label: title } : {}),
+      ...(src ? { src } : {}),
     });
     try {
       mkdirSync(nodesDir, { recursive: true });

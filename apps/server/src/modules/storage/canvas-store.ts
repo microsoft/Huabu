@@ -120,7 +120,19 @@ export interface UserPreferences {
 }
 
 export type RenameResult =
-  | { ok: true; filename: string }
+  | {
+      ok: true;
+      /** Filesystem-safe filename (`safe(label) [(N)].md`). */
+      filename: string;
+      /**
+       * The label as actually persisted to the markdown frontmatter — the
+       * caller-provided label with any dedupe suffix (e.g. ` (2)`) appended
+       * but with all original punctuation / non-ASCII characters preserved.
+       * Mirror this back into `data.label` on the canvas so the runtime
+       * label matches the frontmatter (which is the source of truth).
+       */
+      label: string | null;
+    }
   | {
       ok: false;
       reason: 'conflict';
@@ -450,11 +462,29 @@ export class CanvasStore {
       idx.add({ id: nodeId, filename: target });
     }
 
+    // Compute the dedupe suffix (e.g. ` (2)`) by diffing the desired
+    // safe-filename stem against the actual on-disk stem and apply it to
+    // the *original* label. The frontmatter `label:` keeps all
+    // user-typed punctuation / non-ASCII characters; only the filename
+    // gets the sanitised + suffixed form. This way every reader sees
+    // `Hello: World? (2)` rather than the safe `Hello_ World_ (2)`.
+    const desiredStem = desired.replace(/\.md$/, '');
+    const targetStem = target.replace(/\.md$/, '');
+    const suffix =
+      targetStem.length > desiredStem.length &&
+      targetStem.startsWith(desiredStem)
+        ? targetStem.slice(desiredStem.length)
+        : '';
+    const finalLabel =
+      suffix && trimmedLabel ? `${trimmedLabel}${suffix}` : trimmedLabel;
+    const finalContent: NodeContent =
+      suffix && trimmedLabel ? { ...content, label: finalLabel } : content;
+
     atomicWriteText(
       nodeFilePath(this.canvasId, target),
-      nodeContentToMarkdown(content),
+      nodeContentToMarkdown(finalContent),
     );
-    return { ok: true, filename: target };
+    return { ok: true, filename: target, label: finalLabel };
   }
 
   deleteNode(nodeId: string): boolean {
