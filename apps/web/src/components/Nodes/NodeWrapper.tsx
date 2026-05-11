@@ -46,9 +46,16 @@ import type { BlockProvenanceMap } from '@sediment/shared';
 /** Sentinel token representing "no accent". */
 const ACCENT_NONE = 'none';
 
-/** Accent palette options for the picker: shared palette with a leading "None" entry. */
+/**
+ * Accent palette options for the picker: a leading "None" (transparent),
+ * then a true "White" swatch, then the saturated palette. White is rendered
+ * via the same `getAccentTokens` formula as every other accent — under the
+ * light theme `--bg-surface` is `#ffffff`, so `mix(white 10%, surface)`
+ * resolves to a clean white card background.
+ */
 const ACCENT_PICKER_OPTIONS = [
-  { token: ACCENT_NONE, name: 'None', value: 'transparent' },
+  { token: ACCENT_NONE, name: 'Transparent', value: 'transparent' },
+  { token: 'white', name: 'White', value: '#ffffff' },
   ...ACCENT_PALETTE,
 ];
 
@@ -528,13 +535,7 @@ export const NodeWrapper = memo(
               return bg && bg !== 'transparent' ? { backgroundColor: bg } : {};
             })(),
             ...(accentTokens && {
-              borderColor:
-                type === 'frame'
-                  ? `color-mix(in srgb, var(--color-fg-default) 0%, transparent)`
-                  : accentTokens.border,
-              ...(type === 'frame' && {
-                boxShadow: `4px 4px 3px 3px ${accentTokens.shadow}`,
-              }),
+              borderColor: accentTokens.border,
             }),
             ...(type === 'question' && {
               borderColor: 'transparent',

@@ -26,9 +26,11 @@ import type { CanvasNodeId } from '@sediment/shared';
 /** Sentinel token representing "no accent". */
 const ACCENT_NONE = 'none';
 
-/** Accent palette options for the picker: shared palette with a leading "None" entry. */
+/** Accent palette options for the picker: leading "Transparent" + true
+ *  "White" + saturated accents. Mirrors the per-node picker in NodeWrapper. */
 const ACCENT_PICKER_OPTIONS: ColorPreset[] = [
-  { token: ACCENT_NONE, name: 'None', value: 'transparent' },
+  { token: ACCENT_NONE, name: 'Transparent', value: 'transparent' },
+  { token: 'white', name: 'White', value: '#ffffff' },
   ...ACCENT_PALETTE,
 ];
 

@@ -23,6 +23,10 @@ export interface ColorPickerProps {
 /**
  * Reusable color picker palette — a row of circular swatches.
  * Identity is by `token`; the swatch background uses `value` for display only.
+ *
+ * Swatches whose `value` is `transparent` are rendered with a checkerboard
+ * pattern so the "no fill / clear" option is visually distinct from a solid
+ * white swatch.
  */
 export const ColorPicker = ({
   colors,
@@ -31,22 +35,35 @@ export const ColorPicker = ({
 }: ColorPickerProps) => {
   return (
     <div className="flex gap-2">
-      {colors.map((c) => (
-        <button
-          key={c.token}
-          onClick={() => onSelect(c.token)}
-          className={clsx(
-            'h-4 w-4 rounded-full border-2 transition-all hover:scale-110',
-            activeToken === c.token
-              ? 'border-info scale-110'
-              : 'border-edge-default',
-          )}
-          style={{
-            backgroundColor: c.value || 'var(--fg-subtle)',
-          }}
-          title={c.name}
-        />
-      ))}
+      {colors.map((c) => {
+        const isTransparent = c.value === 'transparent' || !c.value;
+        return (
+          <button
+            key={c.token}
+            onClick={() => onSelect(c.token)}
+            className={clsx(
+              'h-4 w-4 rounded-full border-2 transition-all hover:scale-110',
+              activeToken === c.token
+                ? 'border-info scale-110'
+                : 'border-edge-default',
+            )}
+            style={
+              isTransparent
+                ? {
+                    // Checkerboard pattern: makes "no fill" instantly
+                    // recognisable instead of looking like a white swatch.
+                    backgroundColor: 'var(--bg-surface)',
+                    backgroundImage:
+                      'linear-gradient(45deg, var(--fg-subtle) 25%, transparent 25%, transparent 75%, var(--fg-subtle) 75%), linear-gradient(45deg, var(--fg-subtle) 25%, transparent 25%, transparent 75%, var(--fg-subtle) 75%)',
+                    backgroundSize: '6px 6px',
+                    backgroundPosition: '0 0, 3px 3px',
+                  }
+                : { backgroundColor: c.value }
+            }
+            title={c.name}
+          />
+        );
+      })}
     </div>
   );
 };

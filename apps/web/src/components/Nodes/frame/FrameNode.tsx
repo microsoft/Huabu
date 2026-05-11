@@ -1,9 +1,11 @@
+import { resolveAccent } from '@sediment/shared';
 import clsx from 'clsx';
 import { LayoutGrid, Ungroup } from 'lucide-react';
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
 import { Input } from '@/components/Common/Input.tsx';
+import { getAccentTokens } from '@/components/Nodes/accentTokens.ts';
 import { NodeWrapper } from '@/components/Nodes/NodeWrapper.tsx';
 import useCanvasStore from '@/store/canvasStore.ts';
 
@@ -17,6 +19,22 @@ export const FrameNode = memo(
     const unframe = useCanvasStore((state) => state.unframe);
     const tryRename = useCanvasStore((state) => state.tryRename);
     const layoutGroup = useCanvasStore((state) => state.layoutGroup);
+
+    // Single source of styling: the accent picker (added by NodeWrapper).
+    // When an accent is set, derive the same `bg` token used by
+    // SemanticPlaceholder and inject it as the wrapper's backgroundColor so
+    // the frame fills with the chosen tint. When no accent is set we
+    // explicitly null the backgroundColor so any legacy persisted value can
+    // not leak through and make Transparent appear coloured.
+    const accent = resolveAccent(data.style?.accent);
+    const accentTokens = accent ? getAccentTokens(accent) : null;
+    const wrapperData = useMemo(() => {
+      const baseStyle = data.style ?? {};
+      const nextStyle = accentTokens
+        ? { ...baseStyle, backgroundColor: accentTokens.bg }
+        : { ...baseStyle, backgroundColor: undefined };
+      return { ...data, style: nextStyle };
+    }, [data, accentTokens]);
 
     const FrameToolbar = (
       <>
@@ -127,7 +145,7 @@ export const FrameNode = memo(
     return (
       <NodeWrapper
         id={id}
-        data={data}
+        data={wrapperData}
         type={'frame'}
         selected={selected && !isEditingLabel}
         toolbar={FrameToolbar}
@@ -135,7 +153,6 @@ export const FrameNode = memo(
         overlayOffsetY={-24}
         keepAspectRatio={false}
         allowOverflow
-        className="bg-surface"
       >
         <div className="h-full" />
       </NodeWrapper>
