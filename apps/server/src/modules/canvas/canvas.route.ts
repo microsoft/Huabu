@@ -920,9 +920,21 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
             }
             return;
           }
-          const dest = path.join(stagingDir, entryPath);
-          if (!dest.startsWith(stagingDir + path.sep)) {
-            // Path traversal guard
+          // Path traversal guard: resolve to absolute paths, then use
+          // path.relative to detect any escape from the staging dir
+          // (a `..` segment or absolute entry would surface as a
+          // relative path that starts with `..` or is itself absolute).
+          // This is more robust than a `startsWith(prefix)` check, which
+          // can be fooled by paths that share a directory-name prefix
+          // (e.g. `/ws/import-foo` vs `/ws/import-foo-bar`).
+          const resolvedRoot = path.resolve(stagingDir);
+          const dest = path.resolve(resolvedRoot, entryPath);
+          const rel = path.relative(resolvedRoot, dest);
+          if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) {
+            request.log.warn(
+              { entryPath },
+              'Refusing zip entry with traversal',
+            );
             return;
           }
           await mkdir(path.dirname(dest), { recursive: true });
