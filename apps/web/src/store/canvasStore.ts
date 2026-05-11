@@ -1,11 +1,13 @@
 import {
   type AgentBaseContext,
+  ARTIFACT_DATA_FIELDS,
   type CanvasCommand,
   type CanvasCommandType,
   type CanvasEventInput,
   type CanvasExecution,
   type CanvasExecutionSource,
   type CanvasNodeType,
+  isCrossCanvasArtifactUrl,
   type NodeSummary,
   type RecentAction,
   type SelectedNodeDetail,
@@ -57,7 +59,7 @@ import {
 
 import { canvasHistoryManager } from './canvasHistoryManager';
 import { getCanvas, postCanvasEvents, preprocessNode, putCanvas } from '../api';
-import { cloneArtifactToCanvas, parseArtifactUrl } from '../api/artifact';
+import { cloneArtifactToCanvas } from '../api/artifact';
 import { CanvasConflictError } from '../api/canvas';
 import { getNodeSize } from '../utils/node/size';
 
@@ -1538,21 +1540,17 @@ const useCanvasStore = create<RFState>()(
       const dstCanvasId = get().canvasId;
       if (!dstCanvasId || clipboardNodes.length === 0) return;
 
-      // Fields on `data` that may carry a canvas-scoped artifact URL.
-      // Same-canvas pastes leave the URL as-is (the artifact is already
-      // owned by this canvas). Cross-canvas pastes clone the underlying
-      // file so the destination canvas owns its own copy — otherwise
-      // deleting the source canvas would orphan the pasted node.
-      const ARTIFACT_FIELDS = ['src', 'coverUrl'] as const;
-
+      // Same-canvas pastes leave artifact URLs as-is (the artifact is
+      // already owned by this canvas). Cross-canvas pastes clone the
+      // underlying file so the destination canvas owns its own copy —
+      // otherwise deleting the source canvas would orphan the pasted
+      // node. The set of fields that may carry a canvas-scoped artifact
+      // URL is the shared `ARTIFACT_DATA_FIELDS` constant.
       const needsClone = clipboardNodes.some((node) => {
         const data = (node.data ?? {}) as Record<string, unknown>;
-        return ARTIFACT_FIELDS.some((field) => {
-          const value = data[field];
-          if (typeof value !== 'string') return false;
-          const parsed = parseArtifactUrl(value);
-          return parsed !== null && parsed.canvasId !== dstCanvasId;
-        });
+        return ARTIFACT_DATA_FIELDS.some((field) =>
+          isCrossCanvasArtifactUrl(data[field], dstCanvasId),
+        );
       });
 
       const dispatch = (nodes: Node[]) => {
@@ -1578,13 +1576,14 @@ const useCanvasStore = create<RFState>()(
           clipboardNodes.map(async (node) => {
             const data = { ...((node.data ?? {}) as Record<string, unknown>) };
             let mutated = false;
-            for (const field of ARTIFACT_FIELDS) {
+            for (const field of ARTIFACT_DATA_FIELDS) {
               const value = data[field];
-              if (typeof value !== 'string') continue;
-              const parsed = parseArtifactUrl(value);
-              if (!parsed || parsed.canvasId === dstCanvasId) continue;
+              if (!isCrossCanvasArtifactUrl(value, dstCanvasId)) continue;
               try {
-                const newUrl = await cloneArtifactToCanvas(value, dstCanvasId);
+                const newUrl = await cloneArtifactToCanvas(
+                  value as string,
+                  dstCanvasId,
+                );
                 if (newUrl && newUrl !== value) {
                   data[field] = newUrl;
                   mutated = true;

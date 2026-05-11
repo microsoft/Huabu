@@ -36,3 +36,27 @@ export function parseArtifactUrl(
   if (!match || !match[1] || !match[2]) return null;
   return { canvasId: match[1], key: match[2] };
 }
+
+/**
+ * Node `data` field names that may carry a canvas-scoped artifact URL.
+ * Single source of truth for paste-clone logic, legacy migration, and
+ * any code path that needs to walk the artifact references attached to
+ * a node. Kept narrow on purpose — adding a field here will broaden the
+ * surface that the cross-canvas paste-clone treats as cloneable.
+ */
+export const ARTIFACT_DATA_FIELDS = ['src', 'coverUrl'] as const;
+
+/**
+ * Return true when `value` is a canvas-scoped artifact URL whose
+ * canvasId is different from `currentCanvasId`. Used by paste-clone to
+ * decide whether the underlying file must be copied into the
+ * destination canvas before the pasted node can render.
+ */
+export function isCrossCanvasArtifactUrl(
+  value: unknown,
+  currentCanvasId: string,
+): boolean {
+  if (typeof value !== 'string') return false;
+  const parsed = parseArtifactUrl(value);
+  return parsed !== null && parsed.canvasId !== currentCanvasId;
+}

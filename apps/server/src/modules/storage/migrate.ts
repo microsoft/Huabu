@@ -37,6 +37,8 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 
+import { ARTIFACT_DATA_FIELDS } from '@sediment/shared';
+
 import { CanvasStore } from './canvas-store.js';
 import { parseFrontmatter } from './frontmatter.js';
 import { atomicWriteJson, mkdirp } from './io.js';
@@ -306,7 +308,7 @@ function migrateOneCanvas(
     delete data['content'];
 
     // (b) Rewrite artifact references and copy bytes into the canvas.
-    for (const field of ['src', 'coverUrl'] as const) {
+    for (const field of ARTIFACT_DATA_FIELDS) {
       const value = data[field];
       if (typeof value !== 'string') continue;
       const match = LEGACY_ARTIFACT_RE.exec(value);
