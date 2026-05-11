@@ -286,7 +286,10 @@ export const QuestionNode = memo(
           {/* Status pill badge (top-left). Zoom-invariant via StatusBadge —
               the on-screen size + offset stay constant when the canvas zooms.
               The `viewed` glow effect is driven by the
-              `question-node-done-unviewed` class on the wrapper above. */}
+              `question-node-done-unviewed` class on the wrapper above.
+              When a chat thread exists (status=done/error), clicking the
+              badge opens the conversation in the right panel — same single-
+              click affordance used by the annotation overlay badge. */}
           {status !== 'idle' && (
             <StatusBadge
               status={status}
@@ -302,6 +305,8 @@ export const QuestionNode = memo(
                   ? data.errorMessage
                   : undefined
               }
+              onClick={hasRun && data.threadId ? openInChat : undefined}
+              title={hasRun && data.threadId ? 'Open conversation' : undefined}
             />
           )}
 

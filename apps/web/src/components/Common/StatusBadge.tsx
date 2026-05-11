@@ -146,9 +146,8 @@ export function StatusBadge({
       onClick={onClick}
       title={interactive ? title : undefined}
       className={cn(
-        'flex items-center gap-1 rounded-full py-0.5 pr-2 pl-0.5 shadow-sm',
-        interactive &&
-          'hover:ring-edge-default pointer-events-auto cursor-pointer transition hover:ring-2',
+        'flex items-center gap-1 rounded-full py-0.5 pr-2 pl-0.5 whitespace-nowrap shadow-sm',
+        interactive && 'pointer-events-auto cursor-pointer',
         className,
       )}
       style={{

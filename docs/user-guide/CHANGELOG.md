@@ -10,11 +10,14 @@
 
 - 将 question 节点和 annotation cluster 上的“状态胶囊徽标”（Pending / Running / Done / Error / Preparing）抽离为通用组件 `apps/web/src/components/Common/StatusBadge.tsx`，两处调用统一从这里渲染。
 - 现在两处徽标都采用 annotation 原本的「画布缩放时徽标尺寸保持不变」表现：徽标会按当前 React Flow zoom 反向缩放，所以无论你把画布放多大或缩多小，状态胶囊在屏幕上看起来都是同一个尺寸。
+- question 节点上的徽标在 `Done` / `Error` 状态下现在可以**单击打开右侧 chat panel** 查看会话回复，跟 annotation cluster 徽标的「点击打开识别详情」是一致的入口（之前 question 节点必须双击节点本体才能打开会话）。
 
 **Notes**
 
 - 视觉表现：100% 缩放下与之前完全一致（颜色、图标、文本、阴影、抖动 / 旋转动画都没变）。
-- 行为变化：question 节点的状态徽标之前会随节点一起被画布缩放放大或缩小，现在和 annotation cluster 一致——尺寸固定。如果你过去刻意把画布放大来「看清状态文字」，现在不需要这么做了。
+- 行为变化：
+  - question 节点的状态徽标之前会随节点一起被画布缩放放大或缩小，现在和 annotation cluster 一致——尺寸固定。如果你过去刻意把画布放大来「看清状态文字」，现在不需要这么做了。
+  - 单击 question 节点的 `Done` / `Error` 徽标会打开右侧 chat panel；之前单击 badge 没有任何反应（只能双击节点本体打开）。双击节点本体的旧入口仍然保留。
 - 没有迁移步骤，也没有任何数据 / 配置变更。
 
 ---
