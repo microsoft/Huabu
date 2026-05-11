@@ -80,6 +80,10 @@ export function useTextAutoSize({
 
   const computedFontSize = useMemo(() => {
     if (hasFixedSize && width != null && height != null) {
+      // Empty content -> render the placeholder at the base size (a small
+      // hint, not a fill-the-box title). Scaling the placeholder up would
+      // either wrap it onto multiple lines or clip it.
+      if (!text.trim()) return baseFontSize;
       const cw = width - inset * 2;
       const ch = height - inset * 2;
       return computeFontSizeForHeight(text, cw, ch, fontOpts);
@@ -129,12 +133,16 @@ export function useTextAutoSize({
 
   const handleResize = useCallback(
     (w: number, h: number) => {
+      if (!text.trim()) {
+        setLiveFontSize(baseFontSize);
+        return;
+      }
       const cw = w - inset * 2;
       const ch = h - inset * 2;
       const fs = computeFontSizeForHeight(text, cw, ch, fontOpts);
       setLiveFontSize(fs);
     },
-    [text, fontOpts, inset],
+    [text, baseFontSize, fontOpts, inset],
   );
 
   const handleResizeEnd = useCallback(() => {

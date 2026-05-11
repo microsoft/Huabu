@@ -11,7 +11,10 @@ const DEFAULT_SIZES: Record<string, NodeSize> = {
   video: { width: 400, height: 300 },
   image: { width: 400, height: 300 },
   frame: { width: 400, height: 300 },
-  question: { width: 280, height: 160 },
+  // Question nodes auto-size to content (height-driven by text), matching
+  // the behaviour of text/note nodes. The width sets the wrap width when
+  // a question is created with content; empty questions shrink to one line.
+  question: { width: 200 },
 };
 
 /**

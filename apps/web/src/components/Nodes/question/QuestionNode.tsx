@@ -275,7 +275,7 @@ export const QuestionNode = memo(
         onResize={handleResize}
         onResizeEnd={handleResizeEnd}
         className={clsx(
-          'question-sticky rounded-2xl transition-all duration-200',
+          'question-sticky rounded transition-all duration-200',
           isDoneUnviewed && 'question-node-done-unviewed',
         )}
       >
