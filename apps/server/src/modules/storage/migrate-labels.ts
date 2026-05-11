@@ -29,6 +29,7 @@ import { readJson } from './io.js';
 import {
   dedupeArtifactFilename,
   dedupeName,
+  normalizeForCompare,
   toSafeFilename,
 } from './naming.js';
 
@@ -73,14 +74,20 @@ function renameCanvasDirs(
 
   for (const entry of entries) {
     const desired = toSafeFilename(entry.title, entry.canvasId);
-    if (entry.currentDir === desired) continue;
+    // Compare via normalizeForCompare (NFC + lowercase) so we don't try
+    // to rename when the on-disk name only differs in Unicode form (NFD
+    // vs NFC) or letter case — both of which the rest of the storage
+    // layer treats as the same slot.
+    if (normalizeForCompare(entry.currentDir) === normalizeForCompare(desired))
+      continue;
 
     const siblings: string[] = [];
     for (const name of taken) {
       if (name !== entry.currentDir) siblings.push(name);
     }
     const target = dedupeName(desired, siblings);
-    if (target === entry.currentDir) continue;
+    if (normalizeForCompare(target) === normalizeForCompare(entry.currentDir))
+      continue;
 
     const from = path.join(workspace, entry.currentDir);
     const to = path.join(workspace, target);
