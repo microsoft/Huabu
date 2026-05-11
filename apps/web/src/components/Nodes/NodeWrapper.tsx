@@ -1,7 +1,9 @@
 import {
   resolveSurface,
   resolveAccent,
-  ACCENT_PALETTE,
+  ACCENT_NONE_TOKEN,
+  ACCENT_PICKER_OPTIONS,
+  ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT,
 } from '@sediment/shared';
 import {
   Handle,
@@ -44,20 +46,19 @@ import type { CanvasNodeType, NodeData } from './types.ts';
 import type { BlockProvenanceMap } from '@sediment/shared';
 
 /** Sentinel token representing "no accent". */
-const ACCENT_NONE = 'none';
+const ACCENT_NONE = ACCENT_NONE_TOKEN;
 
 /**
- * Accent palette options for the picker: a leading "None" (transparent),
- * then a true "White" swatch, then the saturated palette. White is rendered
- * via the same `getAccentTokens` formula as every other accent — under the
- * light theme `--bg-surface` is `#ffffff`, so `mix(white 10%, surface)`
- * resolves to a clean white card background.
+ * Global node background opacity, in percent. The wrapper composites every
+ * resolved `backgroundColor` against `transparent` at this percentage so the
+ * canvas grid faintly shows through every node — making overlapping cards
+ * read more like layered translucent paper than fully opaque tiles.
+ *
+ * Centralised here so the same value applies to every node type
+ * (SURFACE_PALETTE tints, accent-derived `color-mix(...)` fills, and
+ * one-off `var(...)` backgrounds like QuestionNode's).
  */
-const ACCENT_PICKER_OPTIONS = [
-  { token: ACCENT_NONE, name: 'Transparent', value: 'transparent' },
-  { token: 'white', name: 'White', value: '#ffffff' },
-  ...ACCENT_PALETTE,
-];
+const NODE_BG_OPACITY_PCT = 100;
 
 /** Connection handle definitions – source + target on each side. */
 const HANDLE_DEFS = [
@@ -482,7 +483,11 @@ export const NodeWrapper = memo(
               <>
                 <FloatingToolbar.Divider />
                 <FloatingToolbar.ColorPicker
-                  colors={ACCENT_PICKER_OPTIONS}
+                  colors={
+                    type === 'text'
+                      ? ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT
+                      : ACCENT_PICKER_OPTIONS
+                  }
                   value={data.style?.accent ?? ACCENT_NONE}
                   onSelect={(t) =>
                     updateNodeData(id, {
@@ -547,7 +552,16 @@ export const NodeWrapper = memo(
           style={{
             ...(() => {
               const bg = resolveSurface(data.style?.backgroundColor);
-              return bg && bg !== 'transparent' ? { backgroundColor: bg } : {};
+              if (!bg || bg === 'transparent') return {};
+              // Composite every node background against transparent so the
+              // canvas grid faintly shows through. `color-mix` accepts any
+              // valid CSS color (hex, keyword, nested color-mix, var(...)),
+              // so this works uniformly across SURFACE_PALETTE tints,
+              // accent-derived fills (FrameNode / TextNode), and one-off
+              // var(...) colors (QuestionNode).
+              return {
+                backgroundColor: `color-mix(in srgb, ${bg} ${NODE_BG_OPACITY_PCT}%, transparent)`,
+              };
             })(),
             ...(accentTokens && {
               borderColor: accentTokens.border,

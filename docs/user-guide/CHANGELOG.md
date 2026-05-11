@@ -4,6 +4,38 @@
 
 ---
 
+## 2026-05-11 · 所有节点背景统一为 90% 不透明度
+
+**What Changed**
+
+- 在 `NodeWrapper` 里统一把渲染 `backgroundColor` 时的颜色用 `color-mix(in srgb, <bg> 90%, transparent)` 包了一层，让所有节点的背景色都变成 90% 不透明（即 10% 让画布网格透出来）。
+- 新增常量 `NODE_BG_OPACITY_PCT = 90` 集中控制这个百分比，以后想整体调整透明度只改这一个数字。
+
+**Notes**
+
+- 这个改动只在「节点本来就有 backgroundColor」时生效。完全没颜色（`backgroundColor` 为空或 `transparent`）的节点和原来一样直接透明，不受影响。
+- 覆盖的所有路径：SURFACE_PALETTE 的浅色填充、frame / text 节点的 accent 派生色（`color-mix(...)` 嵌套包裹仍然合法）、以及 question 节点的 `var(--question-bg)` 这种特殊值——都自动变成 90% 不透明。
+- 视觉变化：画布上重叠的卡片现在会有非常轻微的「叠层透出」效果，看起来更接近半透明纸张而非实色色块；单个非重叠节点几乎看不出区别。
+
+---
+
+## 2026-05-11 · 仅 Text 节点保留 “透明” accent；其它节点 picker 移除该选项
+
+**What Changed**
+
+- 之前 toolbar accent color picker 默认带一个首位的 “Transparent” 透明色块。现在这个色块**只保留给 `text` 节点**——因为 text 是直接漂浮在画布上的纯文字，透明背景是常用的、有意义的选择。
+- 其它所有节点类型（`note` / `frame` / `image` / `pdf` / `video` / `web` / `annotation`）的 accent picker 都不再展示透明色块；可选颜色从 `White` 开始 + 完整 accent palette。
+- 多选 toolbar 的 accent picker 跟随同样规则：只有当**选中集合里全部都是 text** 时，picker 才展示 “Transparent”；只要混入任何其它类型就隐藏。
+- 调色板常量统一搬到了 `@sediment/shared` 的 `types/canvas/color.ts`：新增 `ACCENT_NONE_TOKEN`、`ACCENT_PICKER_OPTIONS`（无透明色，默认）、`ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT`（含透明色，仅 text 用）。`NodeWrapper` / `MultiSelectToolbar` 不再各自定义同样的常量数组。
+
+**Notes**
+
+- 不影响已有数据。原本就被设为 `accent: null`（未选过颜色）的 note / frame / 等节点，渲染依旧是默认背景；只是在 picker 里再也看不到「主动选透明」的入口了。
+- 设计动机：除了 text 之外，其它节点的视觉身份都依赖于一块实色背景——容器（frame）、便签（note）、媒体卡片（image / pdf / video / web）、识别区（annotation）一旦填透明就在画布上「消失」，没有可点中的实体边界。
+- 重构动机：调色板属于跨包通用的 design token 数据，不应该在 web 层每个 toolbar 文件里各 copy 一份，否则增删一种 accent 要改好几处。
+
+---
+
 ## 2026-05-11 · Question / Annotation 状态徽标统一为 `StatusBadge`
 
 **What Changed**

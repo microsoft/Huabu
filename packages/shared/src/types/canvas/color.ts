@@ -69,6 +69,49 @@ export type AccentToken = AccentEntry['token'];
 export type AccentValue = AccentEntry['value'];
 
 /**
+ * Sentinel token used by accent pickers to represent "no accent" in their
+ * selected-value field. Canvas data still encodes "no accent" as
+ * `style.accent: null`; the toolbar maps `null ↔ ACCENT_NONE_TOKEN` at the
+ * UI boundary so the picker's selected value can stay a plain string.
+ */
+export const ACCENT_NONE_TOKEN = 'none' as const;
+
+/**
+ * One swatch entry as consumed by the accent / surface color pickers.
+ * Mirrors the structural shape of `ACCENT_PALETTE` / `SURFACE_PALETTE`
+ * entries and the web app's `ColorPreset` interface.
+ */
+export interface ColorPickerOption {
+  token: string;
+  name: string;
+  value: string;
+}
+
+/**
+ * Default accent picker swatches. Starts with a true "White" swatch followed
+ * by the saturated palette. **Does not** include a "Transparent" option —
+ * used by every node type whose visual identity depends on a solid
+ * background (frame, note, image, pdf, video, web, annotation), since a
+ * transparent fill would make those nodes effectively invisible.
+ */
+export const ACCENT_PICKER_OPTIONS: readonly ColorPickerOption[] = [
+  { token: 'white', name: 'White', value: '#ffffff' },
+  ...ACCENT_PALETTE,
+];
+
+/**
+ * Accent picker swatches **with** a leading "Transparent" sentinel.
+ * Used only by node types that render as plain floating content on the
+ * canvas (currently `text`), where "no background fill" is a meaningful and
+ * common selection.
+ */
+export const ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT: readonly ColorPickerOption[] =
+  [
+    { token: ACCENT_NONE_TOKEN, name: 'Transparent', value: 'transparent' },
+    ...ACCENT_PICKER_OPTIONS,
+  ];
+
+/**
  * Surface palette — very light tinted fills for node backgrounds.
  * Used by `style.backgroundColor`.
  *
