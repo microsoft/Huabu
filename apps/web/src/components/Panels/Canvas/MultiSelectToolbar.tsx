@@ -1,4 +1,8 @@
-import { ACCENT_PALETTE } from '@sediment/shared';
+import {
+  ACCENT_NONE_TOKEN,
+  ACCENT_PICKER_OPTIONS,
+  ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT,
+} from '@sediment/shared';
 import { useStore, useViewport } from '@xyflow/react';
 import {
   AlignStartVertical,
@@ -19,18 +23,11 @@ import {
 } from '@/handler/canvasCommand/utils/frame';
 import useCanvasStore from '@/store/canvasStore';
 
-import type { ColorPreset } from '@/components/Common/ColorPicker';
 import type { CanvasNode } from '@/components/Nodes/types';
 import type { CanvasNodeId } from '@sediment/shared';
 
 /** Sentinel token representing "no accent". */
-const ACCENT_NONE = 'none';
-
-/** Accent palette options for the picker: shared palette with a leading "None" entry. */
-const ACCENT_PICKER_OPTIONS: ColorPreset[] = [
-  { token: ACCENT_NONE, name: 'None', value: 'transparent' },
-  ...ACCENT_PALETTE,
-];
+const ACCENT_NONE = ACCENT_NONE_TOKEN;
 
 /**
  * A floating toolbar that appears horizontally centred above the
@@ -62,6 +59,18 @@ export const MultiSelectToolbar = () => {
     );
     return allSame ? (first ?? ACCENT_NONE) : ACCENT_NONE;
   }, [selectedNodes]);
+
+  // Only expose the "Transparent" swatch when *every* selected node is a
+  // text node. The moment the selection contains any other type (frame,
+  // note, image, pdf, video, web, annotation), transparent is hidden
+  // because those types need a solid background to remain visible.
+  const accentPickerOptions = useMemo(
+    () =>
+      selectedNodes.length > 0 && selectedNodes.every((n) => n.type === 'text')
+        ? ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT
+        : ACCENT_PICKER_OPTIONS,
+    [selectedNodes],
+  );
 
   // Compute bounding box of selected nodes in flow (absolute) coordinates
   const selectionBounds = useMemo(() => {
@@ -177,7 +186,7 @@ export const MultiSelectToolbar = () => {
 
         {/* Accent color for all selected nodes */}
         <FloatingToolbar.ColorPicker
-          colors={ACCENT_PICKER_OPTIONS}
+          colors={accentPickerOptions}
           value={commonAccent}
           onSelect={(t) => {
             const accent = t === ACCENT_NONE ? null : t;

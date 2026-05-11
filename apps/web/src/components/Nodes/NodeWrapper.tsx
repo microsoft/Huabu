@@ -1,7 +1,9 @@
 import {
   resolveSurface,
   resolveAccent,
-  ACCENT_PALETTE,
+  ACCENT_NONE_TOKEN,
+  ACCENT_PICKER_OPTIONS,
+  ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT,
 } from '@sediment/shared';
 import {
   Handle,
@@ -44,13 +46,19 @@ import type { CanvasNodeType, NodeData } from './types.ts';
 import type { BlockProvenanceMap } from '@sediment/shared';
 
 /** Sentinel token representing "no accent". */
-const ACCENT_NONE = 'none';
+const ACCENT_NONE = ACCENT_NONE_TOKEN;
 
-/** Accent palette options for the picker: shared palette with a leading "None" entry. */
-const ACCENT_PICKER_OPTIONS = [
-  { token: ACCENT_NONE, name: 'None', value: 'transparent' },
-  ...ACCENT_PALETTE,
-];
+/**
+ * Global node background opacity, in percent. The wrapper composites every
+ * resolved `backgroundColor` against `transparent` at this percentage so the
+ * canvas grid faintly shows through every node — making overlapping cards
+ * read more like layered translucent paper than fully opaque tiles.
+ *
+ * Centralised here so the same value applies to every node type
+ * (SURFACE_PALETTE tints, accent-derived `color-mix(...)` fills, and
+ * one-off `var(...)` backgrounds like QuestionNode's).
+ */
+const NODE_BG_OPACITY_PCT = 100;
 
 /** Connection handle definitions – source + target on each side. */
 const HANDLE_DEFS = [
@@ -221,6 +229,15 @@ interface NodeWrapperProps {
   keepAspectRatio?: boolean;
   resizable?: boolean;
 
+  /**
+   * Optional override for the outer accent border color. When provided,
+   * this wins over the auto-derived `accentTokens.border` (which is a
+   * 50%-transparent mix of the accent over `transparent`). Useful for
+   * accents like `white` where the default mix is effectively invisible
+   * and a node wants the border to match the swatch exactly.
+   */
+  borderColor?: string;
+
   onResizeStart?: () => void;
   onResize?: (width: number, height: number) => void;
   onResizeEnd?: (width: number, height: number) => void;
@@ -244,6 +261,8 @@ export const NodeWrapper = memo(
     resizable = true,
 
     allowOverflow = false,
+
+    borderColor,
 
     onResizeStart,
     onResize: onResizeProp,
@@ -464,7 +483,11 @@ export const NodeWrapper = memo(
               <>
                 <FloatingToolbar.Divider />
                 <FloatingToolbar.ColorPicker
-                  colors={ACCENT_PICKER_OPTIONS}
+                  colors={
+                    type === 'text'
+                      ? ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT
+                      : ACCENT_PICKER_OPTIONS
+                  }
                   value={data.style?.accent ?? ACCENT_NONE}
                   onSelect={(t) =>
                     updateNodeData(id, {
@@ -501,10 +524,14 @@ export const NodeWrapper = memo(
         <div
           className={cn(
             'group relative flex h-full w-full flex-col rounded transition-all duration-120',
+            // Drop shadow whenever there is no *visible* colored accent.
+            // A `white` accent is visually neutral (its 50%-mix border is
+            // effectively invisible against the canvas), so it should keep
+            // the same soft edge as "no accent".
             type !== 'text' &&
               type !== 'annotation' &&
               type !== 'question' &&
-              !data.style?.accent &&
+              (!data.style?.accent || data.style.accent === 'white') &&
               'shadow',
             !data.style?.backgroundColor && 'bg-transparent',
             selected
@@ -525,20 +552,26 @@ export const NodeWrapper = memo(
           style={{
             ...(() => {
               const bg = resolveSurface(data.style?.backgroundColor);
-              return bg && bg !== 'transparent' ? { backgroundColor: bg } : {};
+              if (!bg || bg === 'transparent') return {};
+              // Composite every node background against transparent so the
+              // canvas grid faintly shows through. `color-mix` accepts any
+              // valid CSS color (hex, keyword, nested color-mix, var(...)),
+              // so this works uniformly across SURFACE_PALETTE tints,
+              // accent-derived fills (FrameNode / TextNode), and one-off
+              // var(...) colors (QuestionNode).
+              return {
+                backgroundColor: `color-mix(in srgb, ${bg} ${NODE_BG_OPACITY_PCT}%, transparent)`,
+              };
             })(),
             ...(accentTokens && {
-              borderColor:
-                type === 'frame'
-                  ? `color-mix(in srgb, var(--color-fg-default) 0%, transparent)`
-                  : accentTokens.border,
-              ...(type === 'frame' && {
-                boxShadow: `4px 4px 3px 3px ${accentTokens.shadow}`,
-              }),
+              borderColor: accentTokens.border,
             }),
             ...(type === 'question' && {
               borderColor: 'transparent',
             }),
+            // Node-level override (e.g. NoteNode forces solid white when
+            // the picked accent is `white`). Applied last so it always wins.
+            ...(borderColor && { borderColor }),
           }}
           onDoubleClick={onDoubleClick}
         >

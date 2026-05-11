@@ -1,16 +1,13 @@
-import {
-  resolveAccent,
-  ACCENT_PALETTE,
-  SURFACE_PALETTE,
-} from '@sediment/shared';
+import { resolveAccent } from '@sediment/shared';
 import { clsx } from 'clsx';
-import { Baseline, Bold, Italic, Underline, Strikethrough } from 'lucide-react';
+import { Bold, Italic, Underline, Strikethrough } from 'lucide-react';
 import { memo, useCallback, useState, useRef, useMemo, useEffect } from 'react';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
 import { useTextAutoSize } from '@/hooks/useTextAutoSize';
 import useCanvasStore from '@/store/canvasStore.ts';
 
+import { getAccentTokens } from '../accentTokens';
 import { MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
 
@@ -77,9 +74,32 @@ export const TextNode = memo(
     const fontFamily = FONT_FAMILY_CSS[style.fontFamily ?? 'default'];
     const isBold = style.fontWeight === 'bold';
     const isItalic = style.fontStyle === 'italic';
-    // Stored as palette token (or legacy hex); resolve to CSS color.
-    const textColor = resolveAccent(style.textColor) ?? undefined;
     const textDecoration = style.textDecoration || '';
+
+    // Accent is the single source of color styling. The dedicated text-color
+    // and background-color pickers were removed in favour of one accent token,
+    // which derives both fg and bg via the same formulas as SemanticPlaceholder
+    // (so full LOD and minimal LOD stay in sync across semantic zoom).
+    const accent = resolveAccent(style.accent);
+    const accentTokens = accent ? getAccentTokens(accent) : null;
+    const textColor = accentTokens?.fg ?? undefined;
+
+    // Build the data object passed to NodeWrapper so its existing rendering
+    // path tints the card. When no accent is set we explicitly null out any
+    // legacy persisted backgroundColor / textColor so toggling back to
+    // Transparent really clears the card instead of falling through to a
+    // stale value from the pre-picker era.
+    const wrapperData = useMemo(() => {
+      const baseStyle = data.style ?? {};
+      const nextStyle = accentTokens
+        ? {
+            ...baseStyle,
+            backgroundColor: accentTokens.bg,
+            textColor: undefined,
+          }
+        : { ...baseStyle, backgroundColor: undefined, textColor: undefined };
+      return { ...data, style: nextStyle };
+    }, [data, accentTokens]);
 
     const fontOpts = useMemo(
       () => ({
@@ -190,42 +210,13 @@ export const TextNode = memo(
         >
           <Strikethrough />
         </FloatingToolbar.ToggleButton>
-
-        <FloatingToolbar.Divider />
-
-        <FloatingToolbar.ColorPicker
-          colors={ACCENT_PALETTE}
-          value={data.style?.textColor ?? ACCENT_PALETTE[0].token}
-          onSelect={(t) =>
-            updateNodeData(id, {
-              style: { ...data.style, textColor: t },
-            })
-          }
-          title="Text Color"
-        >
-          <Baseline
-            style={{
-              color: textColor || ACCENT_PALETTE[0].value,
-            }}
-          />
-        </FloatingToolbar.ColorPicker>
-        <FloatingToolbar.ColorPicker
-          colors={SURFACE_PALETTE}
-          value={data.style?.backgroundColor ?? SURFACE_PALETTE[0].token}
-          onSelect={(t) =>
-            updateNodeData(id, {
-              style: { ...data.style, backgroundColor: t },
-            })
-          }
-          title="Background Color"
-        />
       </>
     );
 
     return (
       <NodeWrapper
         id={id}
-        data={data}
+        data={wrapperData}
         type={'text'}
         selected={selected}
         toolbar={TextToolbar}

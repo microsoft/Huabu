@@ -501,7 +501,7 @@ body,
 }
 
 .question-sticky {
-  --depth-offset: 12px;
+  --depth-offset: 8px;
   position: relative;
   overflow: visible !important;
 }
@@ -513,7 +513,21 @@ body,
   inset: var(--depth-offset) calc(var(--depth-offset) * -1)
     calc(var(--depth-offset) * -1) var(--depth-offset);
   background: var(--question-border);
-  border-radius: 1rem;
+  /* Match the front card's border-radius (Tailwind `rounded` = 0.25rem). */
+  border-radius: 0.25rem;
   z-index: -1;
   pointer-events: none;
+}
+
+/* ===================================================================
+  Smooth layout transitions for collapsible / resizable containers.
+  Opt-in via `data-animate-width`. Drag handlers must set
+  `data-resizing="true"` on the same element to suspend animation
+  while the user drags, otherwise width updates would lag the cursor.
+  =================================================================== */
+[data-animate-width] {
+  transition: width 220ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+[data-animate-width][data-resizing='true'] {
+  transition: none;
 }

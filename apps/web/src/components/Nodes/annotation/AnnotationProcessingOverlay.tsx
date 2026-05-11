@@ -7,12 +7,13 @@
  *  - Computes its bounding box live from the canvas-store annotation nodes
  *    so it grows as the user keeps drawing and disappears when strokes are
  *    deleted.
- *  - Carries a status pill in its top-left corner, identical in style to the
- *    QuestionNode status badge: preparing → pending → running → done.
+ *  - Carries a status pill in its top-left corner via the shared
+ *    `StatusBadge` component (zoom-invariant): preparing → pending →
+ *    running → done.
  */
 
-import { ViewportPortal, useStore } from '@xyflow/react';
-import { Blend, Check, Clock, Loader, Pencil, Undo2 } from 'lucide-react';
+import { ViewportPortal } from '@xyflow/react';
+import { Blend, Check, Undo2 } from 'lucide-react';
 import { memo, useMemo } from 'react';
 
 import useCanvasStore from '@/store/canvasStore';
@@ -22,53 +23,10 @@ import { usePanelStore } from '@/store/panelStore';
 
 import { useCanvasChangePreview } from '../../../hooks/useCanvasChanges';
 import { Button } from '../../Common/Button';
+import { StatusBadge } from '../../Common/StatusBadge';
 
-import type {
-  AnnotationProcessingCluster,
-  AnnotationProcessingStatus,
-} from '@/store/intentStore';
+import type { AnnotationProcessingCluster } from '@/store/intentStore';
 import type { Node } from '@xyflow/react';
-
-interface StatusConfig {
-  icon: typeof Clock;
-  label: string;
-  iconBg: string;
-  pillBg: string;
-  pillFg: string;
-  spin?: boolean;
-}
-
-const STATUS_CONFIG: Record<AnnotationProcessingStatus, StatusConfig> = {
-  preparing: {
-    icon: Pencil,
-    label: 'Preparing',
-    iconBg: 'var(--fg-subtle)',
-    pillBg: 'color-mix(in srgb, var(--fg-subtle) 10%, white 20%)',
-    pillFg: 'var(--fg-subtle)',
-  },
-  pending: {
-    icon: Clock,
-    label: 'Pending',
-    iconBg: 'var(--warning)',
-    pillBg: 'color-mix(in srgb, var(--warning) 10%, white 20%)',
-    pillFg: 'var(--warning)',
-  },
-  running: {
-    icon: Loader,
-    label: 'Running',
-    iconBg: 'var(--info)',
-    pillBg: 'color-mix(in srgb, var(--info) 10%, white 20%)',
-    pillFg: 'var(--info)',
-    spin: true,
-  },
-  done: {
-    icon: Check,
-    label: 'Done',
-    iconBg: 'var(--success)',
-    pillBg: 'color-mix(in srgb, var(--success) 10%, white 20%)',
-    pillFg: 'var(--success)',
-  },
-};
 
 /** Walk the parent chain to compute a node's absolute flow-space position. */
 function absolutePosition(
@@ -146,11 +104,6 @@ AnnotationProcessingOverlay.displayName = 'AnnotationProcessingOverlay';
 
 const ClusterOverlay = memo(
   ({ cluster }: { cluster: AnnotationProcessingCluster }) => {
-    // Counter-scale the status pill so it stays visually constant while the
-    // canvas zooms (the rectangle itself scales naturally with the viewport).
-    const zoom = useStore((s) => s.transform[2]);
-    const inverseZoom = zoom > 0 ? 1 / zoom : 1;
-
     // Subscribe to the canvas nodes so the bbox follows live edits and
     // disappears when the strokes are deleted.
     const nodes = useCanvasStore((s) => s.nodes);
@@ -178,9 +131,6 @@ const ClusterOverlay = memo(
 
     if (!bbox) return null;
 
-    const cfg = STATUS_CONFIG[cluster.status];
-    const Icon = cfg.icon;
-
     return (
       <div
         className="border-fg-subtle/30 pointer-events-none absolute rounded-md border border-dashed bg-white/40"
@@ -191,80 +141,52 @@ const ClusterOverlay = memo(
           height: bbox.height,
         }}
       >
-        {/* Status pill + action bar — top-left, zoom-invariant. Action bar
-            sits immediately to the right of the pill once recognition is done. */}
-        <div
-          className="absolute z-10 flex items-center gap-1"
-          style={{
-            top: -22 * inverseZoom,
-            left: -2 * inverseZoom,
-            transform: `scale(${inverseZoom})`,
-            transformOrigin: 'top left',
-          }}
-        >
-          <button
-            type="button"
-            onClick={handleOpenInspector}
-            title="Open recognition details in chat panel"
-            className="hover:ring-edge-default pointer-events-auto flex cursor-pointer items-center gap-1 rounded-full py-0.5 pr-2 pl-0.5 shadow-sm transition hover:ring-2"
-            style={{
-              backgroundColor: cfg.pillBg,
-              color: cfg.pillFg,
-            }}
-          >
-            <div
-              className="flex h-5 w-5 items-center justify-center rounded-full"
-              style={{ backgroundColor: cfg.iconBg }}
-            >
-              <Icon
-                size={12}
-                color="white"
-                style={
-                  cfg.spin
-                    ? { animation: 'question-icon-spin 4s linear infinite' }
-                    : undefined
-                }
-              />
-            </div>
-            <span className="text-xs font-semibold">{cfg.label}</span>
-          </button>
-
-          {showActions && (
-            <div className="pointer-events-auto flex items-center gap-0.5 rounded-md p-0.5">
-              <Button
-                variant="ghost"
-                iconOnly
-                size="sm"
-                title="Keep changes"
-                onClick={() => acceptCluster(cluster.id)}
-              >
-                <Check />
-              </Button>
-              <Button
-                variant="ghost"
-                iconOnly
-                size="sm"
-                title="Revert changes"
-                disabled={!anyRevertible}
-                onClick={() => revertCluster(cluster.id)}
-              >
-                <Undo2 />
-              </Button>
-              <Button
-                variant="ghost"
-                iconOnly
-                size="sm"
-                title="Hold to preview before"
-                disabled={!anyRevertible}
-                onPointerDown={handlePreviewAllDown}
-                onPointerUp={handlePreviewUp}
-                onPointerLeave={handlePreviewUp}
-              >
-                <Blend />
-              </Button>
-            </div>
-          )}
-        </div>
+        {/* Status pill + action bar — top-left, zoom-invariant via the shared
+            StatusBadge. Action bar sits immediately to the right of the pill
+            once recognition is done. */}
+        <StatusBadge
+          status={cluster.status}
+          offset={{ top: -22, left: -2 }}
+          onClick={handleOpenInspector}
+          title="Open recognition details in chat panel"
+          trailing={
+            showActions && (
+              <div className="pointer-events-auto flex items-center gap-0.5 rounded-md p-0.5">
+                <Button
+                  variant="ghost"
+                  iconOnly
+                  size="sm"
+                  title="Keep changes"
+                  onClick={() => acceptCluster(cluster.id)}
+                >
+                  <Check />
+                </Button>
+                <Button
+                  variant="ghost"
+                  iconOnly
+                  size="sm"
+                  title="Revert changes"
+                  disabled={!anyRevertible}
+                  onClick={() => revertCluster(cluster.id)}
+                >
+                  <Undo2 />
+                </Button>
+                <Button
+                  variant="ghost"
+                  iconOnly
+                  size="sm"
+                  title="Hold to preview before"
+                  disabled={!anyRevertible}
+                  onPointerDown={handlePreviewAllDown}
+                  onPointerUp={handlePreviewUp}
+                  onPointerLeave={handlePreviewUp}
+                >
+                  <Blend />
+                </Button>
+              </div>
+            )
+          }
+        />
       </div>
     );
   },

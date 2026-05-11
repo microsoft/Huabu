@@ -1,18 +1,9 @@
 import { clsx } from 'clsx';
-import {
-  Check,
-  Clock,
-  Loader,
-  MessageSquare,
-  Pencil,
-  Play,
-  Square,
-  X,
-} from 'lucide-react';
+import { MessageSquare, Pencil, Play, Square } from 'lucide-react';
 import { memo, useCallback, useState, useRef, useEffect, useMemo } from 'react';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
-import { Tooltip } from '@/components/Common/Tooltip.tsx';
+import { StatusBadge } from '@/components/Common/StatusBadge.tsx';
 import { useTextAutoSize } from '@/hooks/useTextAutoSize';
 import useCanvasStore from '@/store/canvasStore.ts';
 import { useChatStore } from '@/store/chatStore.ts';
@@ -275,7 +266,7 @@ export const QuestionNode = memo(
         onResize={handleResize}
         onResizeEnd={handleResizeEnd}
         className={clsx(
-          'question-sticky rounded-2xl transition-all duration-200',
+          'question-sticky rounded transition-all duration-200',
           isDoneUnviewed && 'question-node-done-unviewed',
         )}
       >
@@ -292,85 +283,32 @@ export const QuestionNode = memo(
               : undefined),
           }}
         >
-          {/* Status pill badge (top-left) */}
-          {status !== 'idle' &&
-            (() => {
-              const isViewed = status === 'done' && viewed;
-              const cfg = {
-                pending: {
-                  icon: Clock,
-                  label:
-                    countdownSecs > 0
-                      ? `Starts in ${countdownSecs}s`
-                      : 'Pending',
-                  iconBg: 'var(--warning)',
-                  pillBg: 'color-mix(in srgb, var(--warning) 10%, white 20%)',
-                  pillFg: 'var(--warning)',
-                },
-                running: {
-                  icon: Loader,
-                  label: 'Running',
-                  iconBg: 'var(--info)',
-                  pillBg: 'color-mix(in srgb, var(--info) 10%, white 20%)',
-                  pillFg: 'var(--info)',
-                },
-                done: {
-                  icon: Check,
-                  label: isViewed ? 'Done' : 'Done',
-                  iconBg: 'var(--success)',
-                  pillBg: 'color-mix(in srgb, var(--success) 10%, white 20%)',
-                  pillFg: 'var(--success)',
-                },
-                error: {
-                  icon: X,
-                  label: 'Error',
-                  iconBg: 'var(--danger)',
-                  pillBg: 'color-mix(in srgb, var(--danger) 10%, white 20%)',
-                  pillFg: 'var(--danger)',
-                },
-              }[status];
-              if (!cfg) return null;
-              const Icon = cfg.icon;
-
-              const badgeAnimation =
-                status === 'error'
-                  ? 'question-badge-shake 0.5s ease-in-out'
-                  : undefined;
-
-              const iconAnimation =
-                status === 'running'
-                  ? 'question-icon-spin 4s linear infinite'
-                  : undefined;
-
-              const badge = (
-                <div
-                  className="absolute -top-8 -left-1 z-10 flex items-center gap-1.5 rounded-full py-1 pr-3 pl-1 shadow-sm"
-                  style={{
-                    backgroundColor: cfg.pillBg,
-                    color: cfg.pillFg,
-                    ...(badgeAnimation && { animation: badgeAnimation }),
-                  }}
-                >
-                  <div
-                    className="flex h-9 w-9 items-center justify-center rounded-full"
-                    style={{ backgroundColor: cfg.iconBg }}
-                  >
-                    <Icon
-                      size={20}
-                      color="white"
-                      style={
-                        iconAnimation ? { animation: iconAnimation } : undefined
-                      }
-                    />
-                  </div>
-                  <span className="text-lg font-semibold">{cfg.label}</span>
-                </div>
-              );
-              if (status === 'error' && data.errorMessage) {
-                return <Tooltip content={data.errorMessage}>{badge}</Tooltip>;
+          {/* Status pill badge (top-left). Zoom-invariant via StatusBadge —
+              the on-screen size + offset stay constant when the canvas zooms.
+              The `viewed` glow effect is driven by the
+              `question-node-done-unviewed` class on the wrapper above.
+              When a chat thread exists (status=done/error), clicking the
+              badge opens the conversation in the right panel — same single-
+              click affordance used by the annotation overlay badge. */}
+          {status !== 'idle' && (
+            <StatusBadge
+              status={status}
+              offset={{ top: -22, left: -2 }}
+              label={
+                status === 'pending' && countdownSecs > 0
+                  ? `Starts in ${countdownSecs}s`
+                  : undefined
               }
-              return badge;
-            })()}
+              shake={status === 'error'}
+              tooltip={
+                status === 'error' && data.errorMessage
+                  ? data.errorMessage
+                  : undefined
+              }
+              onClick={hasRun && data.threadId ? openInChat : undefined}
+              title={hasRun && data.threadId ? 'Open conversation' : undefined}
+            />
+          )}
 
           {/* Input area */}
           {!isEditing && (
