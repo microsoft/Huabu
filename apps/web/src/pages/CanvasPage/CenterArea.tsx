@@ -30,6 +30,8 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const splitRatioRef = useRef(SPLIT_DEFAULT_RATIO);
   const [splitRatio, setSplitRatio] = React.useState(SPLIT_DEFAULT_RATIO);
+  // Suspends width transition during drag so the split bar tracks the cursor.
+  const [isResizing, setIsResizing] = React.useState(false);
 
   const hasPreview = !!previewData && !!previewType;
   const hasExpanded = !!expandedNodeId || hasPreview;
@@ -49,6 +51,7 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
       e.preventDefault();
       const target = e.currentTarget;
       target.setPointerCapture(e.pointerId);
+      setIsResizing(true);
 
       const startX = e.clientX;
       const startRatio = splitRatioRef.current;
@@ -74,6 +77,7 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
       const onUp = () => {
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
+        setIsResizing(false);
       };
 
       window.addEventListener('pointermove', onMove);
@@ -99,6 +103,8 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
       {/* Canvas – always mounted; width controlled via CSS */}
       <div
         className="h-full shrink-0 overflow-hidden"
+        data-animate-width
+        data-resizing={isResizing ? 'true' : undefined}
         style={{ width: canvasWidth }}
       >
         <Canvas shortcutsDisabled={canvasShortcutsDisabled} />

@@ -37,6 +37,9 @@ export const MainLayout = ({
 
   const [leftWidthPx, setLeftWidthPx] = useState(LEFT_DEFAULT_WIDTH_PX);
   const [rightWidthPx, setRightWidthPx] = useState(RIGHT_DEFAULT_WIDTH_PX);
+  // Suspends width transition while the user drags a resize handle so the
+  // panel tracks the cursor 1:1 instead of animating each pointer-move.
+  const [isResizing, setIsResizing] = useState(false);
 
   const effectiveLeftWidthPx = isLeftCollapsed
     ? COLLAPSED_WIDTH_PX
@@ -102,6 +105,7 @@ export const MainLayout = ({
 
     const target = e.currentTarget;
     target.setPointerCapture(e.pointerId);
+    setIsResizing(true);
 
     const onMove = (ev: PointerEvent) => {
       const totalWidth =
@@ -122,6 +126,7 @@ export const MainLayout = ({
     const onUp = () => {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
+      setIsResizing(false);
     };
 
     window.addEventListener('pointermove', onMove);
@@ -136,6 +141,7 @@ export const MainLayout = ({
 
     const target = e.currentTarget;
     target.setPointerCapture(e.pointerId);
+    setIsResizing(true);
 
     const onMove = (ev: PointerEvent) => {
       const totalWidth =
@@ -157,6 +163,7 @@ export const MainLayout = ({
     const onUp = () => {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
+      setIsResizing(false);
     };
 
     window.addEventListener('pointermove', onMove);
@@ -173,6 +180,8 @@ export const MainLayout = ({
         {/* Left Panel */}
         <div
           className="shrink-0"
+          data-animate-width
+          data-resizing={isResizing ? 'true' : undefined}
           style={{
             width: `${effectiveLeftWidthPx}px`,
           }}
@@ -211,6 +220,8 @@ export const MainLayout = ({
         {/* Right Panel */}
         <div
           className="shrink-0"
+          data-animate-width
+          data-resizing={isResizing ? 'true' : undefined}
           style={{
             width: `${effectiveRightWidthPx}px`,
           }}
