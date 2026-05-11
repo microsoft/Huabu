@@ -158,21 +158,26 @@ export interface WriteArtifactInput {
 const LEGACY_FRONTMATTER_KEYS = ['content_hash', 'meta_json'] as const;
 
 function nodeContentToMarkdown(c: NodeContent): string {
-  // `nodeId` is encoded in the filename; `content` is the markdown body.
-  // Everything else lives in the frontmatter as native YAML.
-  const { nodeId: _nodeId, content, ...frontmatter } = c;
+  // `nodeId` is the stable identifier; we explicitly inject it as the
+  // frontmatter `id:` field so the on-disk filename (which is derived
+  // from the user-facing label and may collide / be deduped) can always
+  // be mapped back to the canonical id by `nodeIndex()`. `content` is
+  // the markdown body. Everything else lives in the frontmatter as
+  // native YAML.
+  const { nodeId, content, ...frontmatter } = c;
+  const fm: Record<string, unknown> = { id: nodeId, ...frontmatter };
   for (const key of LEGACY_FRONTMATTER_KEYS) {
-    delete (frontmatter as Record<string, unknown>)[key];
+    delete fm[key];
   }
   // Drop nullish frontmatter entries so optional fields (e.g. `src` on
   // note/text/frame nodes) never serialize to `key: null`.
-  for (const key of Object.keys(frontmatter)) {
-    const v = (frontmatter as Record<string, unknown>)[key];
+  for (const key of Object.keys(fm)) {
+    const v = fm[key];
     if (v === null || v === undefined) {
-      delete (frontmatter as Record<string, unknown>)[key];
+      delete fm[key];
     }
   }
-  return `${toFrontmatter(frontmatter)}\n${content}`;
+  return `${toFrontmatter(fm)}\n${content}`;
 }
 
 function markdownToNodeContent(nodeId: string, raw: string): NodeContent {
