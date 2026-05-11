@@ -240,10 +240,12 @@ function persistAndStripNodes(
       // changes land.
       (incomingContent !== undefined || !isTextBearing || !existing)
     ) {
-      const label =
-        typeof data['label'] === 'string'
+      const incomingLabel =
+        typeof data['label'] === 'string' &&
+        (data['label'] as string).length > 0
           ? (data['label'] as string)
-          : (existing?.label ?? null);
+          : null;
+      const label = incomingLabel ?? existing?.label ?? null;
       const nodeContent: NodeContent = {
         ...(existing ?? {}),
         nodeId,

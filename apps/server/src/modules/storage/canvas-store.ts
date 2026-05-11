@@ -408,7 +408,20 @@ export class CanvasStore {
 
     const idx = this.nodeIndex();
     const existing = idx.get(nodeId);
-    const desired = nodeFilenameFor(nodeId, content.label);
+    // Empty / nullish label → fall back to whatever filename is already on
+    // disk for this nodeId (don't churn it into `<nodeId>.md`). Only on a
+    // genuine first write do we let `nodeFilenameFor` pick the nodeId
+    // fallback. This protects the file name from being clobbered by an
+    // intermediate save whose `data.label` is briefly empty (e.g. canvas
+    // autosave racing with the LLM enrich result).
+    const trimmedLabel =
+      typeof content.label === 'string' && content.label.trim().length > 0
+        ? content.label
+        : null;
+    const desired =
+      trimmedLabel === null && existing
+        ? existing.filename
+        : nodeFilenameFor(nodeId, trimmedLabel);
 
     let target = existing?.filename ?? desired;
     if (!existing || existing.filename !== desired) {
