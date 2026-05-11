@@ -282,14 +282,15 @@ function persistAndStripNodes(
           };
         }
         // When the on-disk filename was bumped (e.g. `Foo (2).md`),
-        // mirror the bumped stem back into the node's display label so
-        // sibling labels stay unique on the canvas.
-        if (result.ok && label) {
-          const stem = result.filename.replace(/\.md$/, '');
-          if (stem !== label) {
-            data['label'] = stem;
-            renamed.push({ nodeId, label: stem });
-          }
+        // mirror the dedupe suffix back into the node's display label
+        // so sibling labels stay unique on the canvas. We use the
+        // resolved label returned by `writeNode` (which is the original
+        // label with the suffix appended) rather than the filename
+        // stem, so user-typed punctuation / non-ASCII characters
+        // survive instead of being replaced with `_`.
+        if (result.ok && result.label && result.label !== label) {
+          data['label'] = result.label;
+          renamed.push({ nodeId, label: result.label });
         }
         hasPersistedTitle = !!label;
       } catch {
