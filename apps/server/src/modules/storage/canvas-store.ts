@@ -88,19 +88,27 @@ export interface CanvasFile {
 export interface NodeContent {
   nodeId: string;
   type: string;
-  title: string | null;
-  /** External URL or `/api/canvas/<id>/artifact/<artifactId><ext>` reference. */
-  src: string | null;
+  /**
+   * Display label shown on the canvas (`data.label` at runtime). Persisted
+   * as `label:` in the markdown frontmatter.
+   */
+  label: string | null;
+  /**
+   * External URL or `artifacts/<file>` reference. Optional: only meaningful
+   * for source-backed nodes (web/pdf/image/audio/video). Note/text/frame
+   * nodes omit it entirely so it never lands in their frontmatter.
+   */
+  src?: string;
+  /** Canonical markdown body. */
   content: string;
-  contentHash: string;
-  metadata: Record<string, unknown>;
+  /** Loader/enrich-supplied frontmatter fields (summary, keywords, …). */
+  [key: string]: unknown;
 }
 
 export interface NodeContentSummary {
   nodeId: string;
   type: string;
-  title: string | null;
-  contentHash: string;
+  label: string | null;
 }
 
 /** Append-only behavioural event for a canvas (re-export of shared schema). */
@@ -135,39 +143,68 @@ export interface WriteArtifactInput {
   mimeType?: string | null;
 }
 
+/**
+ * Frontmatter keys that older canvases wrote but the current schema no
+ * longer recognizes. They are stripped on read so they never round-trip
+ * back into a freshly-written file.
+ *
+ * @deprecated Defensive filter for legacy `nodes/*.md` files.
+ *  - `content_hash`: previously used to dedupe extraction work; we now
+ *    compare canonical content directly in `persist.ts`.
+ *  - `meta_json`:    previously a JSON-stringified bag of summary /
+ *    keywords / etc.; those fields are now stored as flat top-level
+ *    YAML keys.
+ */
+const LEGACY_FRONTMATTER_KEYS = ['content_hash', 'meta_json'] as const;
+
 function nodeContentToMarkdown(c: NodeContent): string {
-  const meta: Record<string, unknown> = {
-    id: c.nodeId,
-    type: c.type,
-    title: c.title ?? null,
-    src: c.src ?? null,
-    content_hash: c.contentHash,
-    meta_json: c.metadata ? JSON.stringify(c.metadata) : null,
-  };
-  return `${toFrontmatter(meta)}\n${c.content}`;
+  // `nodeId` is encoded in the filename; `content` is the markdown body.
+  // Everything else lives in the frontmatter as native YAML.
+  const { nodeId: _nodeId, content, ...frontmatter } = c;
+  for (const key of LEGACY_FRONTMATTER_KEYS) {
+    delete (frontmatter as Record<string, unknown>)[key];
+  }
+  // Drop nullish frontmatter entries so optional fields (e.g. `src` on
+  // note/text/frame nodes) never serialize to `key: null`.
+  for (const key of Object.keys(frontmatter)) {
+    const v = (frontmatter as Record<string, unknown>)[key];
+    if (v === null || v === undefined) {
+      delete (frontmatter as Record<string, unknown>)[key];
+    }
+  }
+  return `${toFrontmatter(frontmatter)}\n${content}`;
 }
 
 function markdownToNodeContent(nodeId: string, raw: string): NodeContent {
   const { meta, content } = parseFrontmatter(raw);
-  const str = (v: unknown): string | null => (typeof v === 'string' ? v : null);
-  let metadata: Record<string, unknown> = {};
-  const metaJson = str(meta['meta_json']);
-  if (metaJson) {
-    try {
-      metadata = JSON.parse(metaJson) as Record<string, unknown>;
-    } catch {
-      metadata = {};
-    }
+  for (const key of LEGACY_FRONTMATTER_KEYS) {
+    delete meta[key];
   }
-  return {
+  // Backward compat: pre-rename files wrote `title:`. Read either, but
+  // strip `title` from the frontmatter bag so it never round-trips back.
+  const labelMeta =
+    typeof meta['label'] === 'string'
+      ? meta['label']
+      : typeof meta['title'] === 'string'
+        ? meta['title']
+        : null;
+  delete meta['title'];
+  delete meta['label'];
+  // Drop the synthetic `id` we used to write into frontmatter — the canonical
+  // id is the function argument (derived from filename / index).
+  delete meta['id'];
+  const out: NodeContent = {
+    ...meta,
     nodeId,
-    type: str(meta['type']) ?? 'note',
-    title: str(meta['title']),
-    src: str(meta['src']),
+    type: typeof meta['type'] === 'string' ? meta['type'] : 'note',
+    label: labelMeta,
     content,
-    contentHash: str(meta['content_hash']) ?? '',
-    metadata,
   };
+  // Normalize `src`: it must be a string when present, otherwise omitted.
+  if (typeof out.src !== 'string') {
+    delete out.src;
+  }
+  return out;
 }
 
 /**
@@ -366,7 +403,7 @@ export class CanvasStore {
 
     const idx = this.nodeIndex();
     const existing = idx.get(nodeId);
-    const desired = nodeFilenameFor(nodeId, content.title);
+    const desired = nodeFilenameFor(nodeId, content.label);
 
     let target = existing?.filename ?? desired;
     if (!existing || existing.filename !== desired) {
@@ -427,13 +464,17 @@ export class CanvasStore {
       const raw = readText(path.join(dir, entry.filename));
       if (raw == null) continue;
       const { meta } = parseFrontmatter(raw);
-      const str = (v: unknown): string | null =>
-        typeof v === 'string' ? v : null;
+      // @deprecated Backward compat: pre-rename files wrote `title:`.
+      const label =
+        typeof meta['label'] === 'string'
+          ? meta['label']
+          : typeof meta['title'] === 'string'
+            ? meta['title']
+            : null;
       out.push({
         nodeId: entry.id,
-        type: str(meta['type']) ?? 'note',
-        title: str(meta['title']),
-        contentHash: str(meta['content_hash']) ?? '',
+        type: typeof meta['type'] === 'string' ? meta['type'] : 'note',
+        label,
       });
     }
     return out;

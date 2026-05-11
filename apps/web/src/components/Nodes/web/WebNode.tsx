@@ -165,7 +165,7 @@ export const WebNode = memo(
                         image={preview.image}
                         nodeType="web"
                         favicon={preview.favicon}
-                        title={preview.title || data?.label || src}
+                        title={preview.label || data?.label || src}
                         accentColor={data.style?.accent}
                       >
                         {preview.summary ? (

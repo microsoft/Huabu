@@ -173,7 +173,7 @@ const webRoutes: FastifyPluginAsync = async (fastify) => {
 
       const payload: WebPreviewResponse = {
         url: uri,
-        title: (source.title ?? '').trim() || undefined,
+        label: (source.label ?? '').trim() || undefined,
         contentHtml: content ? toPreviewHtml(content) : undefined,
         summary:
           typeof meta.summary === 'string' && meta.summary.trim()
@@ -229,7 +229,7 @@ const webRoutes: FastifyPluginAsync = async (fastify) => {
       const html = toReaderHtml(markdown);
       const payload: WebReaderResponse = {
         url: uri,
-        title: (source.title ?? '').trim(),
+        label: (source.label ?? '').trim(),
         html,
         contentMarkdown: markdown,
         siteName:

@@ -182,7 +182,12 @@ export interface ExtractResult {
 export interface NormalizeResult {
   /** Canvas node id (source identity is canvas-local). */
   nodeId: string;
-  title?: string;
+  /**
+   * Display label persisted as `label:` in the node markdown frontmatter.
+   * Resolved from the source-document title (HTML <title>, PDF metadata,
+   * etc.) and overridden by user/agent-set labels.
+   */
+  label?: string;
   /**
    * Frontmatter-bound metadata bag. Intentionally untyped — historically
    * known keys include `author`, `publishDate`, `siteName`, `image`,

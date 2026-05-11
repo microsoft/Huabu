@@ -6,10 +6,15 @@
  */
 
 import { validateToolCall } from '@earendil-works/pi-ai';
+import { AGENT_CANVAS_COMMAND_TYPES } from '@sediment/shared';
 
 import { llmComplete, llmStream } from './llm.js';
 import { logIntentEpisode as storeEpisode } from './store/intent-store.js';
-import { getNodeDetailTool } from './tools/definitions.js';
+import {
+  inspectEdgesTool,
+  inspectNodesTool,
+  readTool,
+} from './tools/definitions.js';
 import { executeTool } from './tools/executor.js';
 import {
   INTENT_SYSTEM_PROMPT,
@@ -29,6 +34,10 @@ import type {
   IntentEpisode,
   RecentAction,
 } from '@sediment/shared';
+
+const AGENT_CANVAS_COMMAND_TYPE_SET = new Set<string>(
+  AGENT_CANVAS_COMMAND_TYPES,
+);
 
 // ---------------------------------------------------------------------------
 // Context → natural-language serialization
@@ -366,15 +375,20 @@ function tryParsePartialCandidates(raw: string): IntentCandidate[] {
 //
 // The client sends a screenshot plus a minimal context payload (cluster
 // bbox + ID lists for nearby/enclosed nodes and nearby edges). The LLM is
-// driven through a small tool-calling loop with a single tool exposed:
-// `get_node_detail`, which it can call iteratively to fetch any node's
-// content before producing the final JSON command batch.
+// driven through a small tool-calling loop with three tools exposed:
+//   - `read` for node text content ("nodes/<nodeId>.md")
+//   - `inspect_nodes` for position / size / parent / style and any
+//     spatial / topological lookup it needs around the cluster
+//   - `inspect_edges` for edge direction / line style / stroke when
+//     the gesture targets an edge
+// before producing the final JSON command batch.
 // ---------------------------------------------------------------------------
 
 /**
  * Render the minimal cluster payload as a short text block. We deliberately
  * include nothing beyond IDs — the LLM is expected to use the screenshot
- * for visual reasoning and `get_node_detail` for content lookups.
+ * for visual reasoning and to call `read` / `inspect_nodes` on demand
+ * when it needs node content or layout details.
  */
 function serializeClusterContext(ctx: AnnotationClusterContext): string {
   const lines: string[] = [];
@@ -461,14 +475,39 @@ function extractJsonObject(raw: string): string | null {
 const ANNOTATION_MAX_ITERATIONS = 6;
 
 /**
- * Drive the LLM through a tool-calling loop limited to `get_node_detail`,
- * then parse the final assistant text as `{ reasoning, commands }`.
+ * Drive the LLM through a tool-calling loop limited to `read`,
+ * `inspect_nodes`, and `inspect_edges`, then parse the final
+ * assistant text as `{ reasoning, commands }`.
+ *
+ * TODO(annotation-unify): Unify command emission with the operate agent.
+ * Today annotation makes the LLM hand back commands as a final JSON text
+ * blob, while operate has the LLM call the `canvas_commands` tool — which
+ * means operate gets free TypeBox validation via `validateToolCall`, while
+ * annotation has to hand-roll JSON.parse + ad-hoc filtering (see
+ * `recognizeAnnotationCommands` below) and silently drops anything malformed.
+ *
+ * Plan:
+ *   1. Add `canvasCommandsTool` to this loop's `tools`.
+ *   2. Make "the model called canvas_commands" the loop's terminal
+ *      condition (instead of "the model produced a `{`-prefixed text").
+ *   3. Pull `commands` from the validated tool args; require/optional a
+ *      `reasoning` string in the tool schema (or keep it as a leading
+ *      assistant text block) so the existing `AnnotationCommandResponse`
+ *      shape `{ reasoning, commands }` still works.
+ *   4. Delete `extractJsonObject`, the AGENT_CANVAS_COMMAND_TYPE_SET
+ *      filter in `recognizeAnnotationCommands`, and the "output a single
+ *      JSON object" prose in ANNOTATION_INTENT_SYSTEM_PROMPT.
+ *   5. Skip `handleCanvasCommands`' provenance injection — annotation
+ *      changes are user-authored, not AI-authored.
+ *
+ * After this, both agents share one schema, one validator, one error
+ * channel, and one set of prompt instructions for emitting canvas commands.
  */
 async function runAnnotationAgent(
   piContext: Context,
   canvasId?: string,
 ): Promise<string> {
-  const tools = [getNodeDetailTool];
+  const tools = [readTool, inspectNodesTool, inspectEdgesTool];
   piContext.tools = tools;
 
   let iteration = 0;
@@ -541,8 +580,9 @@ async function runAnnotationAgent(
 /**
  * Recognize annotation intent and return executable canvas commands.
  *
- * The LLM may issue several `get_node_detail` tool calls before producing
- * the final JSON answer; we parse that JSON for the client to execute.
+ * The LLM may issue several `read`, `inspect_nodes`, and/or
+ * `inspect_edges` tool calls before producing the final JSON answer;
+ * we parse that JSON for the client to execute.
  */
 export async function recognizeAnnotationCommands(
   screenshot: string,
@@ -559,7 +599,7 @@ export async function recognizeAnnotationCommands(
     { type: 'image', data: base64, mimeType: 'image/png' },
     {
       type: 'text',
-      text: `Annotation context (IDs only — call get_node_detail for any node whose content you need):\n\n${contextText}\n\nUse the screenshot to read the gesture, fetch any node content you need via get_node_detail, then output the final JSON object {"reasoning": ..., "commands": [...]}.`,
+      text: `Annotation context (IDs only — use \`read\` on "nodes/<nodeId>.md" for any node whose content you need, \`inspect_nodes({ ids: ["<nodeId>"] })\` for position/size/parent/style (also handles spatial/topological lookups: nearNode, connectedTo, inRect, ...), and \`inspect_edges({ ids: ["<edgeId>"] })\` for an edge's direction / line style / stroke):\n\n${contextText}\n\nUse the screenshot to read the gesture, fetch any node content/geometry/edge style you need via the tools, then output the final JSON object {"reasoning": ..., "commands": [...]}.`,
     },
   ];
 
@@ -585,9 +625,27 @@ export async function recognizeAnnotationCommands(
     };
     const reasoning =
       typeof parsed.reasoning === 'string' ? parsed.reasoning : '';
-    const commands = Array.isArray(parsed.commands)
-      ? (parsed.commands as CanvasCommand[])
+    const rawCommands = Array.isArray(parsed.commands)
+      ? (parsed.commands as Array<Record<string, unknown>>)
       : [];
+
+    // Drop commands whose `type` is not in the agent-allowed catalogue.
+    // The annotation LLM occasionally hallucinates command names (e.g.
+    // typos, lowercased variants, or non-existent verbs); letting them
+    // reach the client crashes the executor since no handler is
+    // registered for unknown types.
+    const commands: CanvasCommand[] = [];
+    for (const cmd of rawCommands) {
+      const type = typeof cmd?.type === 'string' ? cmd.type : '';
+      if (AGENT_CANVAS_COMMAND_TYPE_SET.has(type)) {
+        commands.push(cmd as unknown as CanvasCommand);
+      } else {
+        console.warn(
+          '[annotation-intent] dropping unknown command type from LLM output:',
+          type,
+        );
+      }
+    }
     return { reasoning, commands };
   } catch (err) {
     console.error('[annotation-intent] failed to parse JSON:', err, jsonText);

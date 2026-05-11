@@ -52,6 +52,143 @@
 
 ---
 
+## 2026-05-10 · 修复：Annotation Agent 偶尔触发 `handler is not a function` 崩溃
+
+**What Changed**
+
+- **修复 annotation agent 返回未知命令类型时画布执行器崩溃的问题**。当 LLM 在批注识别（红色手绘 → canvas 命令）阶段产出一个超出 schema 的 `type`（拼写错误、小写、或臆造的命令名）时，前端 `executor.ts` 直接拿 `HANDLERS[cmd.type]` 当函数调用，触发 `Uncaught TypeError: handler is not a function`，整批命令全部丢失且后续 annotation 流水线状态卡死。
+- 修复方式：
+  - **服务端 `apps/server/src/modules/agent/intent.service.ts`**：在 `recognizeAnnotationCommands` 解析 LLM JSON 后，按共享常量 `AGENT_CANVAS_COMMAND_TYPES` 过滤命令，对未知 `type` 记 `console.warn` 并丢弃，再返回给前端。
+  - **前端 `apps/web/src/handler/canvasCommand/executor.ts`**：作为兜底，若 `HANDLERS[cmd.type]` 不存在则 `console.warn` 并把该命令记为 `applied: false, reason: 'no-op'` 后跳过；同步给 `COMMAND_META` 的下游读取加上可选链。
+
+**Notes**
+
+- 影响范围：annotation agent（手绘红色批注 → 自动转成画布命令）。Operate agent 走 `canvas_commands` 工具时本来就经过 TypeBox `validateToolCall`，不会遇到这个问题。
+- 当 LLM 偶尔产出错命令时，现在会跳过该条但其余正确命令仍会执行；overlay 状态会进入 `done`，方便用户接受/撤销其余有效部分。
+- 控制台会打印 `[annotation-intent] dropping unknown command type from LLM output: …` 和 `[canvas-executor] Unknown command type — skipping: …` 帮助定位 prompt / skill 中导致 LLM 走偏的指令。
+
+---
+
+## 2026-05-10 · 修复：Agent 在 operate 模式下声称已修改画布但实际未生效
+
+**What Changed**
+
+- **修复 `canvas_commands` 工具结果被前端静默丢弃的问题**。Agent 调用 `canvas_commands`（连接节点、修改节点内容、创建节点等）后，消息列表会显示"已执行"，但画布上没有任何变化。
+- 根因：服务端 `handleCanvasCommands` 在错误处理重构（提交 `056f4f3`）时去掉了 `{ tool, status: 'success', data: { … } }` 外层包装，直接返回 `{ source, canvasId, commands }`；但前端 `useAgentStream` 的 `applyCanvasCommandsFromToolResult` 仍然按旧 schema 检查 `parsed.status === 'success' && parsed.data.commands`，匹配失败 → 静默返回 `null` → `executeCommands` 从未被调用。
+- 修复方式：在 `apps/web/src/hooks/useAgentStream.ts` 中调整解析器，按服务端当前真实输出形状读取顶层 `commands` 字段，并通过 `status === 'error'` 显式跳过错误信封。
+
+**Notes**
+
+- 影响范围：所有 operate 模式下经 `canvas_commands` 工具产生的画布变更（CREATE_NODES / CONNECT_NODES / MERGE_NODE_DATA / DELETE_NODES / SET_NODE_PARENT / DISSOLVE_FRAME / SET_NODE_GEOMETRY / REORDER_NODES / DISCONNECT_EDGES / SET_EDGE_STYLE / ALIGN_NODES / DISTRIBUTE_NODES / AUTO_LAYOUT）。
+- Annotation / sketch intent 流不受影响 — 这些路径不经 `canvas_commands` 工具，命令以 JSON 形式从 LLM 直接返回。
+- 历史会话回放：之前 Agent "假装"执行过的命令已经在服务端记录中标记为成功，但磁盘上没落盘。重新触发同一指令即可让 Agent 重新生成命令并真正执行。
+
+---
+
+## 2026-05-10 · Skill 体系收敛为 `canvas` + `annotation` 两层结构
+
+**What Changed**
+
+- **从三个 flat skill 收敛为一个核心 skill + references 的层级结构**。原来的 `canvas-commands` / `canvas-tools` / `build-flowchart` 三个 SKILL 合并为单一 `skills/canvas/SKILL.md`：心智模型 + 工具决策矩阵 + 命令目录都在入口文件里，深度内容下沉到 `references/`：
+  - `skills/canvas/references/command-cookbook.md` — 组合 batch 套路（brainstorm / merge / 入框 / restyle / tidy …）。
+  - `skills/canvas/references/layout-recipes.md` — 坐标系 + 层级 / 流向 / 网格布局 + 行轨道 flowchart 配方。
+- **annotation 流水线独立成 `skills/annotation/SKILL.md`**，frontmatter `appliesTo: [annotation]`，只在 annotation prompt 的 catalogue 里出现，不污染 operate / chat / external 上下文。
+- **`resolveSkillPath` 支持 references 子路径**：`read("skills/<id>/references/<file>.md")` 走和 `read("skills/<id>/SKILL.md")` 完全相同的解析路径（per-canvas override → global），并加了路径转义防御（`..` 越界返回 null）。
+- **`agent.ts` 删除 inline 的 Layout strategies 段**（≈30 行），改为指向 `skills/canvas/SKILL.md`；catalogue 现在自动渲染为单行 `- canvas — …`。
+- **`intent.ts` 的 ANNOTATION prompt 删除 inline 的 Gesture interpretation / Rules / CanvasCommand reference 段**（≈40 行），改为同一个指向 skill 的提示。
+- **`canvas_commands` 工具描述里的 skill 链接** 同步从 `skills/canvas-commands.md` 改为 `skills/canvas/SKILL.md`。
+
+**Notes**
+
+- 兼容性：旧路径 `read("skills/canvas-commands.md")` / `read("skills/canvas-tools.md")` / `read("skills/build-flowchart.md")` 不再可用。仓库内已无残留引用，per-canvas override 若曾使用同名文件需要随之改名（一般情况下用户层不会有）。
+- Catalogue 内容：`operate` / `ask` / `external` 各看到 1 个 skill（`canvas`）；`annotation` 看到 2 个（`annotation` + `canvas`）。
+- 详见设计文档 [docs/skill-system-refactor.md](../skill-system-refactor.md)（Phase 1 ✓ Phase 2 ✓ Phase 3 ✓）。
+
+---
+
+## 2026-05-10 · Agent skill 系统数据化：`use_skill` 工具下线，改用 `read("skills/<id>/SKILL.md")`
+
+**What Changed**
+
+- **Skill 内容从 TS 字符串迁到磁盘 markdown**。每个 skill 现在是一个 `apps/server/src/prompt/skills/<id>/SKILL.md` 文件，带 YAML frontmatter（`id / name / description / appliesTo / triggers? / version?`）。新增加载器 `skill-loader.ts` 在启动期扫盘 + 校验，frontmatter 不合法直接抛错。
+- **`use_skill` 工具被删除**。Agent 不再通过专门的工具调用拿 skill，而是用现有的 `read` 工具读 `skills/<id>/SKILL.md`。所有 agent（内置 / Copilot / Codex / Claude Code）只要有文件读权限就能用，不再需要专门集成。
+- **支持 per-canvas skill 覆盖**：`<canvas>/skills/<id>/SKILL.md` 优先于全局 skill；skill 的补充材料可放在同目录下的 `skills/<id>/references/...`。
+- **抽出两个 skill**：`canvas-commands`（命令语义 + 组合套路）和 `canvas-tools`（read / inspect_nodes / inspect_edges / grep 边界与决策矩阵）。`agent.ts` 与 `intent.ts` 中对应的长段已替换为指向 skill 的一句话；`canvas_commands` 工具描述也大幅瘦身，schema 仍由 TypeBox 单一来源决定。
+
+**Notes**
+
+- 兼容性：`use_skill` 是 LLM 可见的工具名，移除属于 agent 接口变更。已检查全 repo 无前端 / shared 调用。任何残留的旧 prompt 提到 `use_skill` 都已替换。
+- 提示词体积：operate prompt 5106 字符（含动态 catalogue），annotation prompt 3650 字符，`canvas_commands` 工具描述从 ~1.7K 降到 912 字符。
+- 详见设计文档 [docs/skill-system-refactor.md](../skill-system-refactor.md)（Phase 1 ✓ Phase 2 ✓，Phase 3+ 待办）。
+
+---
+
+## 2026-05-09 · Annotation Agent 接入 `inspect_edges`，删除冗余 `spatialSummary`，工具补 `total` 字段
+
+**What Changed**
+
+- **Annotation 智能体可看到边了**：`recognizeAnnotationCommands` 的工具数组只挂了 `read` + `inspect_nodes`，但系统提示词却宣传 `inspect_edges` 已可用。模型一旦真去调就会得到 `unknown tool` 错误。本次把 `inspect_edges` 加进 annotation agent 的工具清单，跟提示词对齐。
+- **删除死字段 `AgentBaseContext.spatialSummary`**：前端 `getAgentContext` 一直在每次发请求时算并发送 `clusters / arrangement` 描述，但服务端从未读它（agent 路由只看 `nodes` / `edges` / `selectedNodes` / `recentActions`）。本次从 wire-type、前端缓存（`SpatialCache`）和 `getCachedSpatialData` 输出里彻底删除；agent 想知道空间布局请走 `get_canvas_outline()` / `inspect_nodes`。
+- **`inspect_nodes` / `inspect_edges` / `ls` 新增 `total` 字段**：原先只有 `count` + `truncated:true/false`，模型无法判断"被截断了到底丢了多少条"。三个工具现在都返回 `total`（截断前的命中总数）。`grep` / `find` 因为是早退式扫描（hit limit 即停），无法廉价知道 total，工具描述里明确写"`count` = 实际返回数；`truncated:true` 表示还有更多但不知道具体多少"。
+
+**Notes**
+
+- 兼容性：`AgentBaseContext.spatialSummary` 是前端 → 服务端 wire field，删除属于 wire-format 变更。已确认服务端 `agent.route.ts` / `intent.route.ts` 没有任何处读它，前端也没有其它消费方。
+- 文档：`docs/agent-context.md`、`docs/prompt-node-design.md`、`docs/external_agent_design.md`、`docs/user-guide/05-sources-and-knowledge.md`、`docs/user-guide/06-ai-collaboration.md` 中所有 `get_canvas_state` / `get_node_detail` / `get_node_geometry` / `read_source` 的过期引用一并更新成新工具名（`get_canvas_outline` / `read("nodes/<id>.md")` / `inspect_nodes`）。
+- `docs/agent-spatial-tools-plan.md` §7 已展开为后续 TODO（`describe_node_position`、视觉信号 ↔ 空间工具协同等）。
+
+---
+
+## 2026-05-09 · Agent 工具调用改为并行执行（写工具除外）
+
+**What Changed**
+
+- 同一轮 LLM 响应里发出的多个独立工具调用现在会**并发**派发，而不再像之前一样一个接一个串行跑。常见收益：模型同批发 N 个 `read` / `inspect_nodes` / `web_search` 时，总耗时从「累加」变成「最大值」。
+- `canvas_commands` 单独保持串行（在工具定义里挂了 `executionMode: 'sequential'`），避免 server-side handler 共用 nodeTypeMap 的 race，以及 client-side SSE 完成顺序 ≠ LLM 声明顺序导致 MERGE 抢在 CREATE 前 apply 的问题。
+
+**Notes**
+
+- 用户感知：复杂问答（agent 需要批量读多个节点 / 跨多个 source 搜索）的响应明显更快。
+- 实现细节：pi-agent-core 的 `toolExecution` 切到 `'parallel'`（见 [agent.service.ts](../../apps/server/src/modules/agent/agent.service.ts) `toolExecution` 字段附近的 audit 注释）。pi-agent-core 的 batch 行为是「批里任一 sequential 工具就整批退化为串行」，所以混合 `[read, canvas_commands]` 批次会回到串行——但 trace 里 agent 通常先读后写、读写分轮，混合批罕见，损失可接受。
+- `ingest_content` 仍走并行：跨节点并发安全（不同文件），同节点并发由 `atomicWriteJson` / `atomicWriteText` 兜底为 last-writer-wins。
+
+---
+
+## 2026-05-10 · Agent 工具改为画布隔离（移除跨画布访问）
+
+**What Changed**
+
+- 所有 agent 工具的运行范围从「整个 workspace」收紧到「当前画布」。`canvas_commands`、`get_canvas_outline`、`inspect_nodes`、`ingest_content` 不再接受 `canvasId` 参数；文件类工具 `read` / `grep` / `find` / `ls` 的 `path` 改为相对当前画布根目录，无法寻址其他画布。
+- 节点文件路径从 `<canvasId>/nodes/<nodeId>.md` 简化为 `nodes/<nodeId>.md`；`canvas.json`、`memory/*.md`、`artifacts/*` 等同理。
+- 沙箱层 `safeResolve(canvasId, path)` 现在以画布目录为根做严格前缀校验，并校验 `canvasId` 本身不能含 `/` `\` `..` 等穿越字符。
+- 所有 prompt、agent route 注入的「Selected Nodes」上下文消息、annotation intent 用户消息中的示例路径都同步更新。
+
+**Notes**
+
+- 用户感知：解决了模型把字面量 `<canvasId>/...` 当作真实路径来调用的偶发故障；agent 调用 `read`/`grep` 类工具更稳定。
+- 跨画布读写能力**完全移除**——如果未来需要让 agent 跨画布工作，需要重新引入显式的 canvas 切换或聚合工具。
+- Wire 改动：`grep` / `find` 返回的命中 enrichment 不再包含 `canvasId` 字段（改为隐式 = 当前画布），仅保留 `nodeId` / `label` / `nodeType`。目前没有 web 端消费这些字段，安全。
+
+---
+
+## 2026-05-09 · Agent 工具描述清晰度修复 + 错误协议对齐 pi-agent-core
+
+**What Changed**
+
+- 所有 read 类工具的失败现在通过 `throw` 上抛，由 pi-agent-core 自动包成 `isError: true` 的 tool result；服务端 SSE bridge 把 `isError` 提升为统一的 `{ tool, status: 'error', error }` envelope，UI 上失败工具卡片可以渲染成红色错误态。
+- `inspect_nodes` 描述里加了 footgun 警告：不带任何 predicate 时会扫全表，建议改用 `get_canvas_outline`。
+- `read` 描述补全了可读文件类型清单（`canvas.json` / `nodes/<id>.md` / `chat/*.json` / `intent.json` / `events.jsonl` / `memory/*.md` / `artifacts/*` 元数据等），并明确「单文件 only，不支持 glob」、`frontmatter` 字段对节点文件的实际 shape（`label, type, src?, summary?, keywords?`）、`nextOffset` 是「下一行未读行的 1-indexed 行号」。
+- `connectedTo` 描述显式写明「不包含目标节点本身」。
+- `find` / `grep` / `ls` 的 `limitReached` 字段改名为 `truncated`，与 `read` / `inspect_nodes` 保持一致；描述里也补了「true 时请抬高 limit 或精化 query」。
+
+**Notes**
+
+- 这些是**给 LLM 看的提示**，不影响前端 UI 行为；用户感知主要在 agent 调用工具更准、不再幻觉调用已删除的工具，以及失败工具卡片正确显示错误态。
+- `truncated` 字段重命名是 wire-format 改动，但目前没有 web/shared 端消费这个字段，安全。
+- 后续 agent 工具覆盖范围扩展（edge 非-style 属性、node `zIndex`、批量 `read_nodes`、`describe_node_position`）记录在 [docs/agent-spatial-tools-plan.md §8](../agent-spatial-tools-plan.md) 的 TODO 列表里。
+
+---
+
 ## 2026-05-08 · Agent 循环升级到 pi-agent-core
 
 **What Changed**

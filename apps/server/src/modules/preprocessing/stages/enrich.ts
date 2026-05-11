@@ -50,7 +50,7 @@ export async function enrich(
     }
 
     const result = await provider.generateContentMeta(content, {
-      title: normalized?.title ?? resolved.title,
+      title: normalized?.label ?? resolved.title,
       needLabel: needsLabel,
       needSummary: needsSummary,
       needKeywords: needsKeywords,

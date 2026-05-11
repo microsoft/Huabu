@@ -240,21 +240,20 @@ function persistAndStripNodes(
       // changes land.
       (incomingContent !== undefined || !isTextBearing || !existing)
     ) {
-      const title =
+      const label =
         typeof data['label'] === 'string'
           ? (data['label'] as string)
-          : (existing?.title ?? null);
+          : (existing?.label ?? null);
       const nodeContent: NodeContent = {
+        ...(existing ?? {}),
         nodeId,
         type: nodeType || existing?.type || 'note',
-        title,
+        label,
         src:
           typeof data['src'] === 'string'
             ? (data['src'] as string)
-            : (existing?.src ?? null),
+            : existing?.src,
         content: body,
-        contentHash: existing?.contentHash ?? '',
-        metadata: existing?.metadata ?? {},
       };
       try {
         // Strict rename only when the *user* intentionally typed this
@@ -276,26 +275,26 @@ function persistAndStripNodes(
           return {
             kind: 'conflict',
             nodeId,
-            label: title ?? '',
+            label: label ?? '',
             conflictWith: result.conflictWith.filename,
           };
         }
         // When the on-disk filename was bumped (e.g. `Foo (2).md`),
         // mirror the bumped stem back into the node's display label so
         // sibling labels stay unique on the canvas.
-        if (result.ok && title) {
+        if (result.ok && label) {
           const stem = result.filename.replace(/\.md$/, '');
-          if (stem !== title) {
+          if (stem !== label) {
             data['label'] = stem;
             renamed.push({ nodeId, label: stem });
           }
         }
-        hasPersistedTitle = !!title;
+        hasPersistedTitle = !!label;
       } catch {
         // Best effort — skip nodes whose id fails sanitisation.
       }
     } else {
-      hasPersistedTitle = !!existing?.title;
+      hasPersistedTitle = !!existing?.label;
     }
 
     const {
@@ -406,28 +405,25 @@ function hydrateNodeContent(store: CanvasStore, nodes: NodeLike[]): NodeLike[] {
     // Surface preprocessed AI summary / keywords from the per-node
     // markdown frontmatter so the client can render them without a
     // separate fetch.
-    const meta = nodeContent.metadata;
-    if (meta) {
-      const summary = meta['summary'];
-      if (typeof summary === 'string' && summary.trim()) {
-        data['summary'] = summary.trim();
-      }
-      const keywords = meta['keywords'];
-      if (
-        Array.isArray(keywords) &&
-        keywords.every((k) => typeof k === 'string')
-      ) {
-        data['keywords'] = keywords;
-      }
+    const summary = nodeContent['summary'];
+    if (typeof summary === 'string' && summary.trim()) {
+      data['summary'] = summary.trim();
+    }
+    const keywords = nodeContent['keywords'];
+    if (
+      Array.isArray(keywords) &&
+      keywords.every((k) => typeof k === 'string')
+    ) {
+      data['keywords'] = keywords;
     }
 
-    if (nodeContent.title) {
+    if (nodeContent.label) {
       const labelSource = data['labelSource'];
       if (labelSource !== 'user' && labelSource !== 'agent') {
-        data['label'] = nodeContent.title;
+        data['label'] = nodeContent.label;
         data['labelSource'] = 'auto';
       } else if (!data['label']) {
-        data['label'] = nodeContent.title;
+        data['label'] = nodeContent.label;
       }
     }
 

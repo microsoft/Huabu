@@ -41,7 +41,8 @@ POST /api/agent  body = AgentRequest {
    └─ llmStream(context)                     # 进入 LLM
    │
    ▼ 工具循环
-get_node_detail / canvas_commands / ingest_content / web_search / use_skill ...
+read / grep / find / ls / get_canvas_outline / inspect_nodes / inspect_edges /
+canvas_commands / ingest_content / web_search / use_skill ...
 ```
 
 ---
@@ -50,10 +51,10 @@ get_node_detail / canvas_commands / ingest_content / web_search / use_skill ...
 
 ### 2.1 节点级信号
 
-| 字段                                  | 范围         | 内容                                                                                                                                                    | 来源                                                                   |
-| ------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `nodes: NodeSummary[]`                | **全部节点** | `id` / `type` / `label` / `snippet`(前 120 字符)/ `frameLabel` / `position` / `size`                                                                    | [extractSnippet](../apps/web/src/handler/canvasCommand/utils/index.ts) |
-| `selectedNodes: SelectedNodeDetail[]` | **当前选中** | `id` / `type` / `label` / `origin` / `position` / `size`,image 节点带 `src`,frame 节点带 `children`(递归)。**不携带 `content`**——节点正文要靠工具按需取 | [buildSelectedDetail](../apps/web/src/store/canvasStore.ts)            |
+| 字段                                  | 范围         | 内容                                                                                                                                                          | 来源                                                                   |
+| ------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `nodes: NodeSummary[]`                | **全部节点** | `id` / `type` / `label` / `snippet`(前 120 字符)/ `frameLabel` / `position` / `size`                                                                          | [extractSnippet](../apps/web/src/handler/canvasCommand/utils/index.ts) |
+| `selectedNodes: SelectedNodeDetail[]` | **当前选中** | `id` / `type` / `label`,image 节点带 `src`,frame 节点带 `children`(递归)。**不携带 `content` / `position` / `size` / `origin`**——节点正文与布局都靠工具按需取 | [buildSelectedDetail](../apps/web/src/store/canvasStore.ts)            |
 
 > **关键限制 1**:`NodeSummary.snippet` 是 `content.slice(0, 120)` 的纯截断
 > (见 [extractSnippet](../apps/web/src/handler/canvasCommand/utils/index.ts)),
@@ -61,17 +62,24 @@ get_node_detail / canvas_commands / ingest_content / web_search / use_skill ...
 >
 > 关键限制 2：`SelectedNodeDetail` 同样**不发节点正文**，只是
 > “哪些节点被选中 + 这些节点的元数据”。Agent 想读完整内容必须调用
-> `get_node_detail(nodeId)`。
+> `read("nodes/<nodeId>.md")`，布局 / 样式 / 空间关系调
+> `inspect_nodes({ ids: ["<nodeId>"] })`。
 > 对选中节点而言,服务端还会通过 `buildNodeSummaries` 把 enrich 的
 > `summary + keywords` 注入一条**单独的系统消息**(见 §2.5)。
 
 ### 2.2 结构信号
 
-| 字段             | 内容                                                                                                                                                                                                                                                        |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `edges`          | 仅 `{ source, target }` 对。**无关系语义、无方向语义、无标签**                                                                                                                                                                                              |
-| `spatialSummary` | `{ clusters, isolated }`,见 [packages/shared/src/utils/spatial.ts](../packages/shared/src/utils/spatial.ts)。每个 cluster 含 `frameId` / `frameLabel`、`nodeIds`(按阅读顺序)、`arrangement`(如 `horizontal row`、`vertical stack`、`grid (2×2)` 等文字描述) |
-| Frame 包含关系   | **隐式**:通过 `NodeSummary.frameLabel` 与 `SelectedNodeDetail.children` 表达,没有显式 `frameTree`                                                                                                                                                           |
+| 字段           | 内容                                                                                              |
+| -------------- | ------------------------------------------------------------------------------------------------- |
+| `edges`        | 仅 `{ source, target }` 对。**无关系语义、无方向语义、无标签**                                    |
+| Frame 包含关系 | **隐式**:通过 `NodeSummary.frameLabel` 与 `SelectedNodeDetail.children` 表达,没有显式 `frameTree` |
+
+> **空间结构（clusters / arrangement / 几何）现在不再随 `AgentBaseContext` 下发**。
+> Agent 通过 `get_canvas_outline()` 拿一次"画布地图"（节点几何 + 边 + 聚类），
+> 用 `inspect_nodes` / `inspect_edges` 做按需查询。底层算法仍是
+> [packages/shared/src/utils/spatial.ts](../packages/shared/src/utils/spatial.ts)
+> 的 `buildSpatialSummary` 等函数，封装在
+> [apps/server/src/modules/canvas/canvas-spatial.ts](../apps/server/src/modules/canvas/canvas-spatial.ts)。
 
 ### 2.3 视觉信号
 
@@ -101,7 +109,7 @@ get_node_detail / canvas_commands / ingest_content / web_search / use_skill ...
 - `selectedNodeIds[]`:除了 `canvasContext.selectedNodes` 外,在 `AgentRequest`
   顶层另带一份 id 列表。服务端会用它调用 `buildNodeSummaries`,把
   **预处理 enrich 出的 `summary + keywords`** 拼进一条
-  `[SYSTEM Context]\n[Selected Nodes (previews only — use get_node_detail for full content)]`
+  `[SYSTEM Context]\n[Selected Nodes (id / label / type only — read "nodes/<id>.md" for content, inspect_nodes({ ids: [...] }) for layout / style / spatial relations)]`
   系统消息。
   > **这是目前唯一一条让 enrich 摘要进入上下文的路径**,且只覆盖选中节点。
 - `attachments[]`:用户聊天时显式贴入的图 / PDF / 文本 / 链接。
@@ -112,14 +120,17 @@ get_node_detail / canvas_commands / ingest_content / web_search / use_skill ...
 
 节点正文与 enrich 摘要默认 **不进** 初始上下文,Agent 通过工具按需获取:
 
-| 工具                          | 返回                              | 何时调用                     |
-| ----------------------------- | --------------------------------- | ---------------------------- |
-| `get_node_detail(nodeId)`     | 节点完整内容 + 元数据             | NodeSummary 截断不够用时     |
-| `ingest_content(nodeId)`      | 触发预处理流水线抽取与摘要        | 手动触发摄取                 |
-| `get_canvas_state(canvasId?)` | 全画布节点 + 边                   | operate 模式需要全量画布     |
-| `canvas_commands(commands[])` | 执行 CREATE / DELETE / CONNECT 等 | operate 模式做实际改动       |
-| `use_skill(skillId)`          | 技能引导文本                      | 复杂工作流(画流程图、提纲等) |
-| `web_search(query)`           | Tavily 网络搜索结果               | 需要时新信息                 |
+| 工具                          | 返回                                                   | 何时调用                       |
+| ----------------------------- | ------------------------------------------------------ | ------------------------------ |
+| `read(path)`                  | 画布文件完整内容 + frontmatter（常用 `nodes/<id>.md`） | NodeSummary 截断不够用时       |
+| `grep` / `find` / `ls`        | 在画布文件夹内检索 / 列出文件                          | 需要跨节点查找或枚举文件时     |
+| `get_canvas_outline()`        | 一次取全画布几何 + 连线 + 空间 cluster                 | 刚进入画布需要一份“地图”       |
+| `inspect_nodes(args)`         | 谓词驱动的节点查找 + 完整几何 / 样式 / 派生字段        | 查某个节点位置、邻近、连接 …   |
+| `inspect_edges(args)`         | 边的完整 EdgeStyle（方向 / 虚线 / 颜色 …）             | 边的样式 / 过滤                |
+| `ingest_content(nodeId)`      | 触发预处理流水线抽取与摘要                             | 手动触发摄取                   |
+| `canvas_commands(commands[])` | 执行 CREATE / DELETE / CONNECT 等                      | operate 模式做实际改动         |
+| `use_skill(skillId)`          | 技能引导文本                                           | 复杂工作流（画流程图、提纲等） |
+| `web_search(query)`           | Tavily 网络搜索结果                                    | 需要时新信息                   |
 
 工具定义见 [apps/server/src/modules/agent/tools/definitions.ts](../apps/server/src/modules/agent/tools/definitions.ts)。
 
@@ -146,23 +157,23 @@ get_node_detail / canvas_commands / ingest_content / web_search / use_skill ...
 
 ## 3. 信号汇总速查表
 
-| 类别                   | 是否进入初始上下文       | 是否截断                             | 获取方式                             |
-| ---------------------- | ------------------------ | ------------------------------------ | ------------------------------------ |
-| 全部节点               | ✓ `NodeSummary[]`        | snippet 120 字符 (无 enrich summary) | `AgentBaseContext.nodes`             |
-| 选中节点元数据         | ✓ `SelectedNodeDetail[]` | 仅元数据,**不含正文**                | `AgentBaseContext.selectedNodes`     |
-| 选中节点完整正文       | ✗ 必须工具               | —                                    | `get_node_detail`                    |
-| 边                     | ✓ source/target 对       | —                                    | `AgentBaseContext.edges`             |
-| 空间布局               | ✓ clusters + arrangement | —                                    | `AgentBaseContext.spatialSummary`    |
-| 最近动作               | ✓ 最近 10 条             | 无时间戳                             | `AgentBaseContext.recentActions`     |
-| Frame 层级             | ✓ 隐式(label + children) | —                                    | `NodeSummary` / `SelectedNodeDetail` |
-| 聊天历史               | ✓ pi-ai Context 加载     | —                                    | 磁盘 `.history`                      |
-| 截图                   | ✗(仅 intent)             | —                                    | intent 端点 / 工具调用               |
-| 节点完整文本           | ✗ 必须工具               | —                                    | `get_node_detail(nodeId)`            |
-| 预处理摘要 / 关键词    | 选中节点 ✓、其他 ✗       | 需重跑 preprocess                    | `ingest_content` / hydrate           |
-| 选中节点的 enrich 摘要 | ✓ 单独一条系统消息       | —                                    | `buildNodeSummaries`                 |
-| 视口 / 缩放            | ✗ 未暴露                 | —                                    | —                                    |
-| 用户偏好               | ✗ 未暴露                 | —                                    | —                                    |
-| 工作区上下文           | ✗ 仅 canvasId            | —                                    | —                                    |
+| 类别                   | 是否进入初始上下文       | 是否截断                             | 获取方式                                 |
+| ---------------------- | ------------------------ | ------------------------------------ | ---------------------------------------- |
+| 全部节点               | ✓ `NodeSummary[]`        | snippet 120 字符 (无 enrich summary) | `AgentBaseContext.nodes`                 |
+| 选中节点元数据         | ✓ `SelectedNodeDetail[]` | 仅元数据,**不含正文**                | `AgentBaseContext.selectedNodes`         |
+| 选中节点完整正文       | ✗ 必须工具               | —                                    | `read("nodes/<id>.md")`                  |
+| 边                     | ✓ source/target 对       | —                                    | `AgentBaseContext.edges`                 |
+| 空间布局               | ✗ 必须工具               | —                                    | `get_canvas_outline()` / `inspect_nodes` |
+| 最近动作               | ✓ 最近 10 条             | 无时间戳                             | `AgentBaseContext.recentActions`         |
+| Frame 层级             | ✓ 隐式(label + children) | —                                    | `NodeSummary` / `SelectedNodeDetail`     |
+| 聊天历史               | ✓ pi-ai Context 加载     | —                                    | 磁盘 `.history`                          |
+| 截图                   | ✗(仅 intent)             | —                                    | intent 端点 / 工具调用                   |
+| 节点完整文本           | ✗ 必须工具               | —                                    | `read("nodes/<id>.md")`                  |
+| 预处理摘要 / 关键词    | 选中节点 ✓、其他 ✗       | 需重跑 preprocess                    | `ingest_content` / hydrate               |
+| 选中节点的 enrich 摘要 | ✓ 单独一条系统消息       | —                                    | `buildNodeSummaries`                     |
+| 视口 / 缩放            | ✗ 未暴露                 | —                                    | —                                        |
+| 用户偏好               | ✗ 未暴露                 | —                                    | —                                        |
+| 工作区上下文           | ✗ 仅 canvasId            | —                                    | —                                        |
 
 ---
 
@@ -170,10 +181,10 @@ get_node_detail / canvas_commands / ingest_content / web_search / use_skill ...
 
 1. **Snippet 截断且未用 enrich**:`NodeSummary.snippet` 是 `content` 的前
    120 字符纯截断,**没有**使用 enrich 阶段已生成的 `summary`。Agent 想要更
-   完整的理解必须额外调 `get_node_detail`,大画布场景下 tool call 次数
+   完整的理解必须额外调 `read("nodes/<id>.md")`，大画布场景下 tool call 次数
    显著增加。
-2. **选中节点也不发正文**:`SelectedNodeDetail` 仅含元数据,Agent 即便
-   面对用户明确选中的节点,要读正文也要再发一次 `get_node_detail`。
+2. **选中节点也不发正文**：`SelectedNodeDetail` 仅含元数据，Agent 即便
+   面对用户明确选中的节点，要读正文也要再发一次 `read`。
    服务端虽然为选中节点注入了 enrich 的 `summary + keywords` 系统消息,
    但完整正文仍走工具。
 3. **Enrich 摘要利用不充分**:预处理流水线
@@ -186,8 +197,9 @@ get_node_detail / canvas_commands / ingest_content / web_search / use_skill ...
    建模,无法被 Agent 区分对待。
 6. **Provenance 丢失**:节点上的 BlockProvenance(作者、时间、AI 修改痕迹、
    pending diff)未传给 Agent,可能导致 AI 反复改自己的草稿、误覆盖用户内容。
-7. **视觉布局对 LLM 不可见**:常规对话不发截图,Agent 只能从坐标和
-   spatialSummary 文字推断画布外观;sketch / annotation 的几何意图丢失。
+7. **视觉布局对 LLM 不可见**：常规对话不发截图，Agent 只能从坐标和
+   `get_canvas_outline` / `inspect_nodes` 的输出推断画布外观；sketch /
+   annotation 的几何意图丢失。
 8. **动作无时间戳**:`recentActions` 不含 timestamp,Agent 看不出节奏
    (连续操作 vs 隔了很久才回来)。
 9. **跨 canvas 隔离**:Agent 不知道工作区还有哪些 canvas,无法形成跨画布
@@ -305,11 +317,11 @@ get_node_detail / canvas_commands / ingest_content / web_search / use_skill ...
 
 ### 6.1 思想分层(再次明确)
 
-| 层  | 字段                                                             | 谁产生            | 默认是否进上下文       | 真要的时候怎么拿          |
-| --- | ---------------------------------------------------------------- | ----------------- | ---------------------- | ------------------------- |
-| L0  | `id` / `type` / `label` / `frameId` / `position` / `size`        | 用户 + 系统       | **总是**(Always-on)    | —                         |
-| L1  | `summary`(1–3 句)/ `keywords` / `origin` / `epistemicStatus`     | enrich + 用户标注 | **大多数 AI 功能默认** | 工具 `get_node_digest`    |
-| L2  | `content`(markdown)/ `contentJson` / `provenance` / `highlights` | 节点本体 + 历史   | **永远不默认**         | 工具 `get_node_detail` 等 |
+| 层  | 字段                                                             | 谁产生            | 默认是否进上下文       | 真要的时候怎么拿                               |
+| --- | ---------------------------------------------------------------- | ----------------- | ---------------------- | ---------------------------------------------- |
+| L0  | `id` / `type` / `label` / `frameId` / `position` / `size`        | 用户 + 系统       | **总是**(Always-on)    | —                                              |
+| L1  | `summary`(1–3 句)/ `keywords` / `origin` / `epistemicStatus`     | enrich + 用户标注 | **大多数 AI 功能默认** | 工具 `get_node_digest`                         |
+| L2  | `content`(markdown)/ `contentJson` / `provenance` / `highlights` | 节点本体 + 历史   | **永远不默认**         | 工具 `read("nodes/<id>.md")` / `inspect_nodes` |
 
 L0 是"画布的骨架",L1 是"画布的语义索引",L2 是"画布的全文"。
 
@@ -335,7 +347,7 @@ L0 是"画布的骨架",L1 是"画布的语义索引",L2 是"画布的全文"。
 | 边(source/target)                     | ✅        | ✅        | ✅              | ✗                 | ✗             | 邻接边      |
 | 边语义(T2-B)                          | ✅        | ✅        | ✅              | ✗                 | ✗             | ✅          |
 | Frame 树(T2-A)                        | ✅        | ✅        | ✅              | ✗                 | ✗             | ✅(本枝)    |
-| 空间聚类 `spatialSummary`             | ✅        | ✅        | ✅              | ✗                 | ✗             | ✗           |
+| 空间聚类（outline / cluster）         | 🛠        | 🛠        | 🛠              | ✗                 | ✗             | ✗           |
 | 视口 `viewport`(T3-A)                 | ✅        | ✅        | ✅              | 隐含于截图        | ✗             | ✗           |
 | 截图                                  | 🛠 opt-in | 🛠 opt-in | ✅(标注增强)    | ✅(主输入)        | ✗             | ✗           |
 | Annotation 语义(T3-C)                 | ✅        | ✅        | ✅              | ✅                | ✗             | ✗           |
@@ -350,12 +362,12 @@ L0 是"画布的骨架",L1 是"画布的语义索引",L2 是"画布的全文"。
 
 #### A. Ask(对话答疑)
 
-- **默认**:L0 全部 + L1 全部 + 选中节点元数据 + 边 + spatialSummary
-  - `recentActions`(带时间戳)+ 聊天历史 + viewport。
-- **可选**:截图(用户开关 / 当问句含"看一下""这片区域"等关键词时自动附带)。
-- **工具**:`get_node_detail`(单节点)/ `get_node_details_batch`(新增,多节点合并取)
-  / `web_search` / `get_provenance`。
-- **要点**:Ask 重在"读"和"答",**不发任何节点正文**,把 token 留给上下文广度
+- **默认**：L0 全部 + L1 全部 + 选中节点元数据 + 边
+  - `recentActions`（带时间戳）+ 聊天历史 + viewport。
+- **可选**：截图（用户开关 / 当问句含“看一下”“这片区域”等关键词时自动附带）。
+- **空间信息**：不默认下发，需要时 Agent 先调 `get_canvas_outline()` 拿一份“画布地图”，再用 `inspect_nodes` / `inspect_edges` 做精查。
+- **工具**：`read("nodes/<id>.md")` / `inspect_nodes` / `web_search` / `get_provenance`。
+- **要点**：Ask 重在“读”和“答”，**不发任何节点正文**，把 token 留给上下文广度
   和后续工具调用。
 
 #### B. Operate(画布改写)
@@ -371,8 +383,8 @@ L0 是"画布的骨架",L1 是"画布的语义索引",L2 是"画布的全文"。
 
 #### C. Intent(Ctrl+I)
 
-- **默认**:L0 + L1 + 选中节点元数据 + spatialSummary + 截图(带最近动作高亮)
-  - `recentActions`(短窗口,3–5 条)+ viewport。
+- **默认**：L0 + L1 + 选中节点元数据 + 截图（带最近动作高亮）
+  - `recentActions`（短窗口，3–5 条）+ viewport。空间层面主要靠截图。
 - **不发**:聊天历史(意图是"此刻的画布",和聊天分支无关)、节点正文。
 - **工具**:基本不走工具(单 LLM 调用,流式返回 JSON)。
 - **要点**:Intent 是**最贵**的"看一眼就要给五个建议"的功能,**视觉信号(截图)
@@ -413,7 +425,7 @@ L0 是"画布的骨架",L1 是"画布的语义索引",L2 是"画布的全文"。
 
 | 工具                                  | 输入                | 返回                                                   | 解决的问题                                        |
 | ------------------------------------- | ------------------- | ------------------------------------------------------ | ------------------------------------------------- |
-| `get_node_details_batch`              | `nodeIds: string[]` | `Array<{ nodeId, content, contentJson?, sourceId? }>`  | 一次取多节点正文,避免 N 次 `get_node_detail`      |
+| `get_node_details_batch`              | `nodeIds: string[]` | `Array<{ nodeId, content, contentJson?, sourceId? }>`  | 一次取多节点正文，避免 N 次 `read`                |
 | `get_node_provenance(nodeId)`         | `nodeId`            | BlockProvenance(作者/时间/AI 修改/pending diff)        | Operate 前的安全检查,避免误覆盖用户内容           |
 | `get_block_tree(nodeId)`              | `nodeId`            | BlockNote 结构化树(标题/段落/列表/code 块)             | 让模型理解文档结构而不必再 parse markdown         |
 | `get_annotation_strokes(nodeId)`      | `nodeId`            | 简化几何(包围盒 / 圈中节点 / 形状粗判)                 | Annotation 节点的语义解读,不必依赖整张截图        |

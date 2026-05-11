@@ -36,9 +36,17 @@ Sorted by confidence descending.`;
  *      nearby / enclosed nodes and nearby edges
  *
  * It must FIRST reason about user intent (using the screenshot as the
- * primary signal — the IDs are just pointers), call `get_node_detail`
- * for any nodes whose content matters to the decision, THEN emit a
- * single JSON object containing the executable canvas commands.
+ * primary signal — the IDs are just pointers), call `read` on
+ * "nodes/<nodeId>.md" for any nodes whose content matters to
+ * the decision (and `inspect_nodes` for any whose layout / spatial
+ * relations matter), THEN emit a single JSON object containing the
+ * executable canvas commands.
+ *
+ * Gesture interpretation, command catalogue, and tool boundaries all
+ * live in `skills/annotation/SKILL.md` (which itself points at
+ * `skills/canvas/SKILL.md` for shared canvas knowledge). This prompt
+ * keeps only the input contract, the final-answer contract, and a
+ * pointer to the skill.
  */
 export const ANNOTATION_INTENT_SYSTEM_PROMPT = `You convert freehand canvas annotations into executable canvas commands.
 
@@ -50,18 +58,24 @@ You will receive:
    - Lists of canvas edge IDs near the gesture
    IMPORTANT: This payload contains NO labels, NO positions, NO distances,
    NO shape inference. The IDs are just pointers — use the screenshot to
-   understand the gesture, and call \`get_node_detail\` whenever you need
-   to know what a referenced node actually contains.
-
-## Tools
-
-- \`get_node_detail({ nodeId })\` — fetch a node's label / content / metadata.
-  Call this for any node whose content materially affects your decision
-  (e.g. before merging two notes, before deciding whether a circle should
-  become a frame). Do NOT call it for every nearby node — only the ones
-  you actually need.
+   understand the gesture, and call \`read\` on
+   "nodes/<nodeId>.md" whenever you need to know what a
+   referenced node actually contains, or \`inspect_nodes\` when you
+   need its position / size / parent / style — or to look up neighbours
+   / connections.
 
 You may call tools across multiple iterations before giving your final answer.
+
+## Skill
+
+Gesture interpretation guidance, the rules for emitting commands, the
+canvas command catalogue, and the read / inspect / grep tool boundaries
+all live in skills. Load them on demand:
+
+- \`read("skills/annotation/SKILL.md")\` — gesture → command mapping +
+  rules specific to this pipeline.
+- \`read("skills/canvas/SKILL.md")\` — canvas filesystem, tool decision
+  matrix, and command reference (linked from the annotation skill).
 
 ## Final answer
 
@@ -74,55 +88,4 @@ markdown fences, no commentary outside the JSON:
 }
 
 The presence of a \`{\`-prefixed JSON object terminates the loop. While you
-still want to call tools, do NOT emit a final JSON — emit a tool call.
-
-## Available CanvasCommand types
-
-- CREATE_NODES — { type: "CREATE_NODES", nodes: [{ id?, nodeType, data?, position?, size?, parentId?, skipAutoLayout? }] }
-  - nodeType ∈ "note" | "text" | "frame" | "question" | …
-  - For "note": data.label (string), data.content (string)
-  - For "frame": data.label (string)
-  - Provide explicit id ("node-<uuid>") when later commands need to reference it
-  - Set skipAutoLayout: true when you provide an explicit position
-- DELETE_NODES — { type: "DELETE_NODES", nodeIds: ["node-..."] }
-- CONNECT_NODES — { type: "CONNECT_NODES", edges: [{ source, target, id?, style? }] }
-- DISCONNECT_EDGES — { type: "DISCONNECT_EDGES", edges: ["edge-..."] }
-- SET_NODE_PARENT — { type: "SET_NODE_PARENT", nodeIds: [...], parentId: "node-..." | null }
-- CREATE_QUESTION — { type: "CREATE_QUESTION", content, position?, parentId?, skipAutoLayout? }
-- MERGE_NODE_DATA — { type: "MERGE_NODE_DATA", patches: [{ nodeId, patch: { label?, content?, ... } }] }
-- AUTO_LAYOUT — { type: "AUTO_LAYOUT", scope: { type: "canvas" } | { type: "frame", frameId } }
-
-## Gesture interpretation guidance
-
-Read the screenshot carefully — let the visual gesture drive the decision.
-Common patterns (not exhaustive, not deterministic rules):
-
-- Line / arrow connecting two nodes → CONNECT_NODES with one edge
-  (for plain lines without an arrow head, pick whichever direction makes
-  more semantic sense after inspecting node contents)
-- Circle / loop enclosing several nodes → CREATE a frame + SET_NODE_PARENT
-  for the enclosed nodes. Inspect at least one of them to choose a
-  meaningful frame label.
-- Cross / X / scribble OVER a node → DELETE_NODES that node
-- Cross / X / scribble OVER an edge (and not over any node) →
-  DISCONNECT_EDGES that edge ID (use the nearby edges list)
-- "?" near a node → CREATE_QUESTION about that node (call
-  \`get_node_detail\` first to phrase a sensible question)
-- "!" / star / underline marking a single node → MERGE_NODE_DATA with a
-  highlight patch, OR CREATE a sibling note expanding on the topic
-- Empty / ambiguous gesture far from any node or edge → return
-  commands: [] with reasoning explaining why no action was warranted
-
-## Rules
-
-- Never invent node or edge IDs. Only reference IDs that appear in the
-  context payload, plus IDs you create in the same batch.
-- Edge IDs always start with "edge-" and only come from the nearby edges list.
-- Use the cluster bbox center for any newly created node and set
-  skipAutoLayout: true when you set an explicit position.
-- Keep "reasoning" under 20 words. It is shown to the user.
-
-## Output format reminder
-
-Once tool calls are done, output exactly one JSON object as your final
-message. NO leading text. NO markdown fences. NO trailing text.`;
+still want to call tools, do NOT emit a final JSON — emit a tool call.`;

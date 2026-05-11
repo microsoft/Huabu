@@ -98,8 +98,9 @@ export interface AnnotationCluster {
 //
 // The pipeline intentionally sends the LLM only IDs + bounding boxes — no
 // labels, positions, distances, or shape inference. The LLM is expected to
-// call the `get_node_detail` tool when it needs the actual content of a
-// referenced node, and to reason about the gesture purely from the
+// call `read` (for node text content), `inspect_nodes` (for node geometry
+// / style / spatial relations), and `inspect_edges` (for edge style)
+// when it needs more, and to reason about the gesture primarily from the
 // screenshot. This avoids the false-positive cascades we saw with the old
 // rule-based classifier.
 
