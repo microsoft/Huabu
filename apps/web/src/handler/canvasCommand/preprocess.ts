@@ -187,6 +187,12 @@ export async function preprocessNodeIfNeeded({
       patch.label = response.suggestedLabel;
       patch.labelSource = 'auto';
     }
+    if (typeof response.summary === 'string' && response.summary.length > 0) {
+      patch.summary = response.summary;
+    }
+    if (Array.isArray(response.keywords) && response.keywords.length > 0) {
+      patch.keywords = response.keywords;
+    }
     if (Object.keys(patch).length > 0) {
       patchNodeSilent(node.id, patch);
     }

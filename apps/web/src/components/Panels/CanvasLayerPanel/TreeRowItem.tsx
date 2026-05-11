@@ -75,7 +75,6 @@ export const TreeRowItem = React.memo(
   }: TreeRowItemProps) => {
     const [isEditing, setIsEditing] = useState(false);
     const [editValue, setEditValue] = useState(label);
-    const [isHovered, setIsHovered] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
@@ -142,8 +141,6 @@ export const TreeRowItem = React.memo(
       position: 'relative',
     };
 
-    const iconStroke = 1.5;
-
     return (
       <div
         ref={forwardedRef}
@@ -152,8 +149,6 @@ export const TreeRowItem = React.memo(
         {...(!isEditing ? dndListeners : {})}
         onClick={onClick}
         onDoubleClick={handleDoubleClick}
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
         className={clsx(
           'bg-surface flex h-9 w-full cursor-pointer touch-none items-center gap-1 px-2',
           className,
@@ -162,31 +157,33 @@ export const TreeRowItem = React.memo(
       >
         <div
           className={clsx(
-            'flex w-full items-center gap-1 rounded px-1 py-1 text-sm transition-colors',
+            'group flex w-full items-center gap-1 rounded px-1 py-1 text-sm transition-colors',
             bgColor,
           )}
         >
-          {/* Chevron icon for collapsible items (frames/groups) */}
-          {isCollapsible && (
-            <Button
-              variant="ghost"
-              iconOnly
-              size="sm"
-              onClick={handleToggleCollapse}
-              className="shrink-0 hover:!bg-transparent"
-              aria-label={isCollapsed ? 'Expand' : 'Collapse'}
-              aria-expanded={!isCollapsed}
-            >
-              {isCollapsed ? (
-                <ChevronRight strokeWidth={iconStroke} />
-              ) : (
-                <ChevronDown strokeWidth={iconStroke} />
-              )}
-            </Button>
-          )}
+          {/* Chevron — always reserves space to keep sibling indentation stable */}
+          <span className="flex h-2 w-2 shrink-0 items-center justify-center">
+            {isCollapsible && (
+              <Button
+                variant="ghost"
+                iconOnly
+                size="sm"
+                onClick={handleToggleCollapse}
+                className="text-fg-subtle opacity-0 transition-opacity group-hover:opacity-100 hover:!bg-transparent"
+                aria-label={isCollapsed ? 'Expand' : 'Collapse'}
+                aria-expanded={!isCollapsed}
+              >
+                {isCollapsed ? (
+                  <ChevronRight className="!h-2.5 !w-2.5" />
+                ) : (
+                  <ChevronDown className="!h-2.5 !w-2.5" />
+                )}
+              </Button>
+            )}
+          </span>
 
           {/* Node type icon */}
-          <span className="text-fg-subtle pointer-events-none flex shrink-0 items-center">
+          <span className="text-fg-muted pointer-events-none mr-1 flex shrink-0 items-center">
             {icon}
           </span>
 
@@ -212,22 +209,21 @@ export const TreeRowItem = React.memo(
           {/* Action buttons on the right */}
           <div className="ml-auto flex shrink-0 items-center gap-1">
             {/* Lock button - always visible if locked, hover visible if unlocked */}
-            {(isLocked || isHovered) && onToggleLock && (
+            {onToggleLock && (
               <Button
                 variant="ghost"
                 iconOnly
                 size="sm"
                 onClick={handleToggleLock}
                 className={clsx(
-                  isLocked ? 'text-fg-default' : 'hover:text-fg-default',
+                  'transition-opacity',
+                  isLocked
+                    ? 'text-fg-default opacity-100'
+                    : 'hover:text-fg-default opacity-0 group-hover:opacity-100',
                 )}
                 aria-label={isLocked ? 'Unlock' : 'Lock'}
               >
-                {isLocked ? (
-                  <Lock strokeWidth={iconStroke} />
-                ) : (
-                  <Unlock strokeWidth={iconStroke} />
-                )}
+                {isLocked ? <Lock /> : <Unlock />}
               </Button>
             )}
           </div>
