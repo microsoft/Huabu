@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/Common/Button';
 import { Select } from '@/components/Common/Select';
 import { useLLMStore } from '@/store/llmStore';
+import { copyToClipboard } from '@/utils/io/clipboard';
 
 /**
  * LLM provider/model configuration section.
@@ -174,9 +175,7 @@ export const LLMSettings: React.FC = () => {
                   size="sm"
                   tone="info"
                   title="Copy code"
-                  onClick={() =>
-                    void navigator.clipboard.writeText(oauthUserCode)
-                  }
+                  onClick={() => void copyToClipboard(oauthUserCode)}
                 >
                   <ClipboardCopy />
                 </Button>

@@ -49,6 +49,7 @@ import { canvasHistoryManager } from './canvasHistoryManager';
 import { getCanvas, postCanvasEvents, preprocessNode, putCanvas } from '../api';
 import { cloneArtifactToCanvas } from '../api/artifact';
 import { CanvasConflictError } from '../api/canvas';
+import { copyToClipboard } from '../utils/io/clipboard';
 import { getNodeSize } from '../utils/node/size';
 
 import type { AlignDirection } from '@/handler/canvasCommand/utils/alignment';
@@ -1524,9 +1525,10 @@ const useCanvasStore = create<RFState>()(
         __sediment_nodes__: cloned,
         __sediment_edges__: clonedEdges,
       });
-      void navigator.clipboard.writeText(payload).catch(() => {
-        // Clipboard API unavailable
-      });
+      // `copyToClipboard` guards against `navigator.clipboard` being
+      // undefined (insecure contexts, older browsers) and falls back to
+      // a hidden textarea + `document.execCommand('copy')`.
+      void copyToClipboard(payload);
     },
 
     pasteNodes: (flowPosition, clipboardNodes, clipboardEdges) => {
