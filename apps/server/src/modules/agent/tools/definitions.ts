@@ -395,7 +395,7 @@ export const grepParamsSchema = Type.Object({
   glob: Type.Optional(
     Type.String({
       description:
-        'Filter files by glob pattern, e.g. "*.md", "nodes/*.md", "**/*.json". Supports *, **, ?, and {a,b} alternation.',
+        'Filter files by glob pattern, e.g. "*.md", "**/*.json", "{src,docs}/**". Supports *, **, ?, and {a,b} alternation. Matched against each file\'s path relative to `path` (so `grep({ path: "nodes", glob: "*.md" })` finds every `.md` under `nodes/`). Patterns without "/" auto-match at any depth.',
     }),
   ),
   ignoreCase: Type.Optional(

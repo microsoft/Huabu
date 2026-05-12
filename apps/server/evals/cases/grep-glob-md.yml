@@ -1,0 +1,52 @@
+id: grep-glob-md
+description: |
+  Agent uses grep with a `*.md` glob to scope its search to markdown
+  files. Today the glob silently zero-matches because it is anchored to
+  the canvas root rather than to the `path` argument, forcing the agent
+  to retry with `**/*.md` or fall back to other tools. After the fix
+  (matching glob against the path-relative path, with bare patterns
+  treated as recursive — same as `find`) a single grep call should
+  suffice.
+mode: ask
+fixture: grep-glob-md
+canvasId: default-canvas
+seeds: 3
+maxIterations: 6
+
+# Phrased to nudge the LLM toward grep + a glob (rather than reading
+# every node markdown). "Markdown files" is the trigger for adding a
+# `*.md` glob; "every node that mentions" is the trigger for grep
+# rather than read.
+prompt: |
+  Use grep — with a glob limited to markdown files — to find every node
+  on this canvas whose body mentions the word "corridor". Then list,
+  in one short sentence, the labels of the matching nodes.
+
+assertions:
+  # 1. grep must be reached for at all (vs a chain of `read`s).
+  - kind: tool_called
+    name: grep
+
+  # 2. grep must succeed (no thrown error). Note: this assertion is
+  #    deliberately weak — `tool_succeeded` only checks `ok: true`,
+  #    not whether matches were returned. The 0-match bug *passes*
+  #    this gate. The real bug-detector lives in (4) below.
+  - kind: tool_succeeded
+    name: grep
+
+  # 3. The reply must mention both nodes by label. If the agent
+  #    silently zero-matched and gave up, this fails.
+  - kind: response_contains
+    anyOf:
+      - Dolphin Migration
+      - Whale Sightings
+
+  # 4. **Primary regression detector.** With the `*.md` glob bug, the
+  #    agent typically: grep(*.md) → 0 matches → grep(**/*.md) or
+  #    `find` retry → second grep / `read` → answer. That's ≥ 4 turns.
+  #    With the fix a single grep + final answer is 2 turns. Allow 3
+  #    for occasional "let me also check the other file" follow-ups.
+  - kind: max_turns
+    max: 3
+
+  - kind: no_error
