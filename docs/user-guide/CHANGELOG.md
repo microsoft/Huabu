@@ -51,6 +51,20 @@
   - question 节点的状态徽标之前会随节点一起被画布缩放放大或缩小，现在和 annotation cluster 一致——尺寸固定。如果你过去刻意把画布放大来「看清状态文字」，现在不需要这么做了。
   - 单击 question 节点的 `Done` / `Error` 徽标会打开右侧 chat panel；之前单击 badge 没有任何反应（只能双击节点本体打开）。双击节点本体的旧入口仍然保留。
 - 没有迁移步骤，也没有任何数据 / 配置变更。
+## 2026-05-12 · Agent 配置统一为 AGENT.md 单文件
+
+**What Changed**
+
+- 每个 agent（`ask` / `operate` / `intent` / `annotation`）的系统提示词、可用工具列表、运行时参数（`maxIterations` / `toolExecution` / `defaultOrigin`）现在统一写在一份 `apps/server/src/prompt/agents/<id>/AGENT.md` 配置文件里——YAML frontmatter 声明元信息与工具，Markdown body 即系统提示词。
+- 调用端通过新的 `loadAgent(id)` API 读取配置，原本散落在 `prompt/agent.ts`、`prompt/intent.ts` 中的硬编码字符串、以及 `tools/index.ts` 里硬编码的 `askTools / operateTools / annotationTools` 工具数组都已删除。
+- 模板支持 `{{skillCatalogue}}` 变量（自动按 `skillScope` 注入 SKILL.md 目录摘要），以及 `{{#skillCatalogue}}…{{/skillCatalogue}}` 条件块（无技能时整段省略）。
+
+**Notes**
+
+- 修改 prompt 或工具组合现在只需编辑对应的 `AGENT.md`，不再需要改 TS 代码——加载器在启动时严格校验 frontmatter，错误会立即抛出。
+- 工具的 TypeBox schema 与 handler 仍然在 `modules/agent/tools/definitions.ts` 用 TypeScript 编写并注册到 `TOOL_REGISTRY`，AGENT.md 只通过 `name` 引用——schema 形态不适合塞进 YAML。
+- 此前硬编码在 `annotation.service.ts` 中的 `ANNOTATION_MAX_ITERATIONS = 6` 与 `origin: { type: 'annotation-recognized' }` 现在分别由 `annotation/AGENT.md` 的 `runtime.maxIterations` 和 `runtime.defaultOrigin` 提供。
+- 没有用户可见的运行时行为变化——是纯重构。
 
 ---
 

@@ -12,7 +12,7 @@
  */
 
 import { runAgent } from '../src/modules/agent/agent.service.js';
-import { buildAgentPrompt } from '../src/prompt/agent.js';
+import { loadAgent } from '../src/prompt/agent-loader.js';
 
 import type { Context } from '@earendil-works/pi-ai';
 import type { AgentMode } from '@sediment/shared';
@@ -75,7 +75,7 @@ export async function recordTrace(opts: RecordOptions): Promise<Trace> {
   const startedAt = new Date(startedAtMs).toISOString();
 
   const context: Context = {
-    systemPrompt: buildAgentPrompt(opts.mode),
+    systemPrompt: loadAgent(opts.mode).systemPrompt,
     messages: [
       {
         role: 'user',

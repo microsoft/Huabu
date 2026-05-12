@@ -1,4 +1,4 @@
-import type { Rect } from '../../utils/spatial.js';
+import type { Rect } from '../../utils/spatial/index.js';
 import type { CanvasCommand } from '../canvas/command.js';
 import type { CanvasNodeType } from '../canvas/node.js';
 

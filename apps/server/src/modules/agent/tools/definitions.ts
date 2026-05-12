@@ -474,59 +474,30 @@ export const lsTool: ToolDefinition = {
   parameters: lsParamsSchema,
 };
 
-// ==================== Tool Sets by Mode ====================
+// ==================== Tool Registry ====================
 
 /**
- * Tools available in ask mode.
- * Includes read-only canvas/content access so the agent can
- * lazily fetch full content of selected nodes on demand.
- */
-export const askTools: ToolDefinition[] = [
-  webSearchTool,
-  getCanvasOutlineTool,
-  inspectNodesTool,
-  inspectEdgesTool,
-  readTool,
-  grepTool,
-  findTool,
-  lsTool,
-];
-
-/**
- * Tools available in operate mode.
- * Full set of canvas manipulation tools for intent execution.
- */
-export const operateTools: ToolDefinition[] = [
-  webSearchTool,
-  getCanvasOutlineTool,
-  inspectNodesTool,
-  inspectEdgesTool,
-  readTool,
-  grepTool,
-  findTool,
-  lsTool,
-  canvasCommandsTool,
-];
-
-/**
- * Tools available in the annotation pipeline.
+ * Name → definition lookup used by `buildAgentToolsByNames` to resolve
+ * the `tools:` list declared in each agent's `AGENT.md` frontmatter.
  *
- * Mirrors `operateTools` minus `web_search`: annotation reasons
- * locally about the cluster (screenshot + nearby/enclosed nodes /
- * edges) and never needs the open internet. Keeping the rest of
- * the surface (filesystem + canvas inspection + `canvas_commands`)
- * means the same prompt patterns transfer between operate and
- * annotation; the only behavioural difference is that
- * `canvas_commands` runs with `origin: { type: 'annotation-recognized' }`
- * — see `buildToolsForScope` for how that is wired.
+ * Per-agent tool selection (which tools `ask` / `operate` /
+ * `annotation` get) lives in `prompt/agents/<id>/AGENT.md` and is no
+ * longer hard-coded here. Adding a tool: append it below + reference
+ * its `name` from any AGENT.md that should expose it.
  */
-export const annotationTools: ToolDefinition[] = [
-  getCanvasOutlineTool,
-  inspectNodesTool,
-  inspectEdgesTool,
-  readTool,
-  grepTool,
-  findTool,
-  lsTool,
-  canvasCommandsTool,
-];
+export const TOOL_REGISTRY: Readonly<Record<string, ToolDefinition>> =
+  Object.freeze(
+    Object.fromEntries(
+      [
+        webSearchTool,
+        getCanvasOutlineTool,
+        inspectNodesTool,
+        inspectEdgesTool,
+        canvasCommandsTool,
+        readTool,
+        grepTool,
+        findTool,
+        lsTool,
+      ].map((t) => [t.name, t] as const),
+    ),
+  );

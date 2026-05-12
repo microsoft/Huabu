@@ -3,17 +3,17 @@
  *
  * `definitions.ts` holds pure schema/description pairs (no canvasId, no
  * IO). This file binds those definitions to the request-scoped
- * `canvasId` and the existing `executeTool` dispatcher, producing the
- * `AgentTool[]` that pi-agent-core's `Agent` consumes.
+ * `canvasId` / `origin` and the existing `executeTool` dispatcher,
+ * producing the `AgentTool[]` that pi-agent-core's `Agent` consumes.
+ *
+ * Tool *selection* per agent is no longer hard-coded here — each
+ * agent's `AGENT.md` declares its `tools:` list by name, and
+ * {@link buildAgentToolsByNames} resolves names against `TOOL_REGISTRY`.
  */
 
-import {
-  annotationTools,
-  askTools,
-  operateTools,
-  type ToolDefinition,
-} from './definitions.js';
+import { TOOL_REGISTRY, type ToolDefinition } from './definitions.js';
 import { executeTool } from './executor.js';
+import { loadAgent, type AgentId } from '../../../prompt/agent-loader.js';
 
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import type { AgentMode, NodeOrigin } from '@sediment/shared';
@@ -84,21 +84,39 @@ function toAgentTool(def: ToolDefinition, ctx: ToolBuildContext): AgentTool {
 }
 
 /**
+ * Resolve a list of tool names against `TOOL_REGISTRY` and bind each
+ * to the request context. Throws on unknown names so a typo in
+ * `AGENT.md` fails loudly at startup rather than silently dropping a
+ * tool.
+ */
+export function buildAgentToolsByNames(
+  names: readonly string[],
+  ctx: ToolBuildContext,
+): AgentTool[] {
+  return names.map((name) => {
+    const def = TOOL_REGISTRY[name];
+    if (!def) {
+      throw new Error(
+        `[tools] Unknown tool name "${name}" — not in TOOL_REGISTRY (definitions.ts)`,
+      );
+    }
+    return toAgentTool(def, ctx);
+  });
+}
+
+/**
  * Build the runnable tool set for an agent run.
  *
- * The returned array shape mirrors `definitions.ts`'s `askTools` /
- * `operateTools` / `annotationTools`, just with `execute` bound to
- * the request context.
+ * Resolves the agent's `tools:` list (declared in AGENT.md) via
+ * {@link loadAgent} and binds each one to the request context. The
+ * per-scope tool composition is owned by `prompt/agents/<id>/AGENT.md`.
  */
 export function buildToolsForScope(
   scope: ToolScope,
   ctx: ToolBuildContext,
 ): AgentTool[] {
-  const defs =
-    scope === 'operate'
-      ? operateTools
-      : scope === 'annotation'
-        ? annotationTools
-        : askTools;
-  return defs.map((def) => toAgentTool(def, ctx));
+  // ToolScope ⊂ AgentId (intent has no tools and never reaches here),
+  // so the cast is sound.
+  const cfg = loadAgent(scope as AgentId);
+  return buildAgentToolsByNames(cfg.toolNames, ctx);
 }

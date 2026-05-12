@@ -84,11 +84,13 @@ canvas_commands / web_search / use_skill ...
 
 > **空间结构（clusters / arrangement / 几何）现在不随 `AgentChatContext` 下发**。
 > intent recogniser 仍从 `IntentContext.nodes` / `.edges` 拿到节点骨架，但 chat agent
-> 通过 `get_canvas_outline()` 拿一次"画布地图"（节点几何 + 边 + 聚类），
-> 用 `inspect_nodes` / `inspect_edges` 做按需查询。底层算法仍是
+> 通过 `get_canvas_outline()` 拿一次“画布地图”（节点几何 + 边 + 聚类），
+> 用 `inspect_nodes` / `inspect_edges` 做按需查询。底层几何 / 聚类原语仍是
 > [packages/shared/src/utils/spatial.ts](../packages/shared/src/utils/spatial.ts)
-> 的 `buildSpatialSummary` 等函数，封装在
-> [apps/server/src/modules/canvas/canvas-spatial.ts](../apps/server/src/modules/canvas/canvas-spatial.ts)。
+> 的 `buildSpatialSummary` 等函数，在
+> [apps/server/src/modules/canvas/canvas-spatial.ts](../apps/server/src/modules/canvas/canvas-spatial.ts) 里装成工具。“某节点周边”的
+> 调词专属管道则在
+> [apps/server/src/modules/agent/node-neighbourhood.ts](../apps/server/src/modules/agent/node-neighbourhood.ts)。
 
 ### 2.3 视觉信号
 
@@ -477,21 +479,22 @@ L0 是"画布的骨架",L1 是"画布的语义索引",L2 是"画布的全文"。
 
 ## 附录:关键文件索引
 
-| 关注点                      | 文件                                                                                                                   |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| 上下文类型定义              | [packages/shared/src/types/context.ts](../packages/shared/src/types/context.ts)                                        |
-| 浏览器拼装上下文            | [apps/web/src/store/canvasStore.ts](../apps/web/src/store/canvasStore.ts) (`getAgentChatContext` / `getIntentContext`) |
-| Snippet 抽取 / RecentAction | [apps/web/src/handler/canvasCommand/utils/index.ts](../apps/web/src/handler/canvasCommand/utils/index.ts)              |
-| 截图                        | [apps/web/src/handler/canvasCommand/utils/screenshot.ts](../apps/web/src/handler/canvasCommand/utils/screenshot.ts)    |
-| 空间聚类                    | [packages/shared/src/utils/spatial.ts](../packages/shared/src/utils/spatial.ts)                                        |
-| Agent 请求类型              | [packages/shared/src/types/agent.ts](../packages/shared/src/types/agent.ts)                                            |
-| 浏览器请求入口              | [apps/web/src/api/agent.ts](../apps/web/src/api/agent.ts)                                                              |
-| 服务端路由                  | [apps/server/src/modules/agent/agent.route.ts](../apps/server/src/modules/agent/agent.route.ts)                        |
-| 聊天历史持久化              | [apps/server/src/modules/agent/store/chat-store.ts](../apps/server/src/modules/agent/store/chat-store.ts)              |
-| 工具定义                    | [apps/server/src/modules/agent/tools/definitions.ts](../apps/server/src/modules/agent/tools/definitions.ts)            |
-| 工具执行                    | [apps/server/src/modules/agent/tools/executor.ts](../apps/server/src/modules/agent/tools/executor.ts)                  |
-| 系统 prompt(ask)            | [apps/server/src/prompt/system.ts](../apps/server/src/prompt/system.ts)                                                |
-| 系统 prompt(operate)        | [apps/server/src/prompt/agent.ts](../apps/server/src/prompt/agent.ts)                                                  |
-| Intent prompt               | [apps/server/src/prompt/intent.ts](../apps/server/src/prompt/intent.ts)                                                |
-| 预处理流水线                | [apps/server/src/modules/preprocessing/pipeline.ts](../apps/server/src/modules/preprocessing/pipeline.ts)              |
-| Enrich 阶段                 | [apps/server/src/modules/preprocessing/stages/enrich.ts](../apps/server/src/modules/preprocessing/stages/enrich.ts)    |
+| 关注点                      | 文件                                                                                                                              |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| 上下文类型定义              | [packages/shared/src/types/context.ts](../packages/shared/src/types/context.ts)                                                   |
+| 浏览器拼装上下文            | [apps/web/src/store/canvasStore.ts](../apps/web/src/store/canvasStore.ts) (`getAgentChatContext` / `getIntentContext`)            |
+| Snippet 抽取 / RecentAction | [apps/web/src/handler/canvasCommand/utils/index.ts](../apps/web/src/handler/canvasCommand/utils/index.ts)                         |
+| 截图                        | [apps/web/src/handler/canvasCommand/utils/screenshot.ts](../apps/web/src/handler/canvasCommand/utils/screenshot.ts)               |
+| 空间聚类与几何              | [packages/shared/src/utils/spatial.ts](../packages/shared/src/utils/spatial.ts) (几何 + 聚类小工具)                               |
+| 节点邻域描述管道            | [apps/server/src/modules/agent/node-neighbourhood.ts](../apps/server/src/modules/agent/node-neighbourhood.ts) (算法+adapter+渲染) |
+| Agent 请求类型              | [packages/shared/src/types/agent.ts](../packages/shared/src/types/agent.ts)                                                       |
+| 浏览器请求入口              | [apps/web/src/api/agent.ts](../apps/web/src/api/agent.ts)                                                                         |
+| 服务端路由                  | [apps/server/src/modules/agent/agent.route.ts](../apps/server/src/modules/agent/agent.route.ts)                                   |
+| 聊天历史持久化              | [apps/server/src/modules/agent/store/chat-store.ts](../apps/server/src/modules/agent/store/chat-store.ts)                         |
+| 工具定义                    | [apps/server/src/modules/agent/tools/definitions.ts](../apps/server/src/modules/agent/tools/definitions.ts)                       |
+| 工具执行                    | [apps/server/src/modules/agent/tools/executor.ts](../apps/server/src/modules/agent/tools/executor.ts)                             |
+| 系统 prompt(ask)            | [apps/server/src/prompt/system.ts](../apps/server/src/prompt/system.ts)                                                           |
+| 系统 prompt(operate)        | [apps/server/src/prompt/agent.ts](../apps/server/src/prompt/agent.ts)                                                             |
+| Intent prompt               | [apps/server/src/prompt/intent.ts](../apps/server/src/prompt/intent.ts)                                                           |
+| 预处理流水线                | [apps/server/src/modules/preprocessing/pipeline.ts](../apps/server/src/modules/preprocessing/pipeline.ts)                         |
+| Enrich 阶段                 | [apps/server/src/modules/preprocessing/stages/enrich.ts](../apps/server/src/modules/preprocessing/stages/enrich.ts)               |

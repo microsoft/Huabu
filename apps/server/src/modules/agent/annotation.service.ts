@@ -15,7 +15,7 @@
  */
 
 import { runAgent } from './agent.service.js';
-import { ANNOTATION_INTENT_SYSTEM_PROMPT } from '../../prompt/intent.js';
+import { loadAgent, renderAgentTemplate } from '../../prompt/agent-loader.js';
 import { toSafeFilename } from '../storage/naming.js';
 
 import type { Context } from '@earendil-works/pi-ai';
@@ -86,9 +86,6 @@ function serializeClusterContext(ctx: AnnotationClusterContext): string {
 // Public API
 // ---------------------------------------------------------------------------
 
-/** Maximum tool-calling iterations for a single annotation request. */
-const ANNOTATION_MAX_ITERATIONS = 6;
-
 /**
  * Recognize annotation intent and return executable canvas commands.
  *
@@ -110,6 +107,7 @@ export async function recognizeAnnotationCommands(
   clusterContext: AnnotationClusterContext,
   canvasId?: string,
 ): Promise<AnnotationCommandResponse> {
+  const agentCfg = loadAgent('annotation');
   const base64 = screenshot.startsWith('data:')
     ? screenshot.replace(/^data:[^;]+;base64,/, '')
     : screenshot;
@@ -120,12 +118,14 @@ export async function recognizeAnnotationCommands(
     { type: 'image', data: base64, mimeType: 'image/png' },
     {
       type: 'text',
-      text: `Annotation context:\n\n${contextText}.`,
+      text: renderAgentTemplate(agentCfg, 'annotationClusterPreamble', {
+        contextText,
+      }),
     },
   ];
 
   const piContext: Context = {
-    systemPrompt: ANNOTATION_INTENT_SYSTEM_PROMPT,
+    systemPrompt: agentCfg.systemPrompt,
     messages: [{ role: 'user', content: userContent, timestamp: Date.now() }],
   };
 
@@ -144,9 +144,9 @@ export async function recognizeAnnotationCommands(
   const stream = runAgent({
     scope: 'annotation',
     canvasId,
-    origin: { type: 'annotation-recognized' },
+    origin: agentCfg.runtime.defaultOrigin ?? { type: 'annotation-recognized' },
     context: piContext,
-    maxIterations: ANNOTATION_MAX_ITERATIONS,
+    maxIterations: agentCfg.runtime.maxIterations,
   });
 
   for await (const event of stream) {

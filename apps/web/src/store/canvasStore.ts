@@ -64,7 +64,6 @@ import type {
   NodeSummary,
   RecentAction,
   SelectionPayload,
-  SpatialNode,
   CanvasEventInput,
 } from '@sediment/shared';
 
@@ -119,98 +118,16 @@ const triggerPreprocessing = (node: Node) => {
   preprocessTimers.set(nodeId, timer);
 };
 
-// ── Spatial cache ──────────────────────────────────────────────
-// Module-level cache keyed by a lightweight fingerprint of
-// node positions + edge endpoints.  Avoids re-running the
-// `toSpatialNodes` traversal on every consumer call (prompt-node
-// context builder etc.) when the canvas hasn't changed.
-
-interface SpatialCache {
-  fingerprint: number;
-  spatialNodes: SpatialNode[];
-}
-
-let _spatialCache: SpatialCache | null = null;
-
-/** FNV-1a 32-bit hash — fast, non-cryptographic, good distribution. */
-function fnv1a(str: string): number {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < str.length; i++) {
-    hash ^= str.charCodeAt(i);
-    hash = (hash * 0x01000193) >>> 0;
-  }
-  return hash;
-}
-
-/** Build a fast fingerprint from positions + edges for cache invalidation. */
-function spatialFingerprint(nodes: Node[], edges: Edge[]): number {
-  const parts: string[] = [String(nodes.length)];
-  for (const n of nodes) {
-    const sz = getNodeSize(n);
-    parts.push(
-      `${n.id}:${n.position.x},${n.position.y},${sz.width},${sz.height}`,
-    );
-  }
-  parts.push(String(edges.length));
-  for (const e of edges) {
-    parts.push(`${e.source}>${e.target}`);
-  }
-  return fnv1a(parts.join('|'));
-}
-
-function resolveAbsolutePosition(
-  node: Node,
-  byId: Map<string, Node>,
-): { x: number; y: number } {
-  let x = node.position.x;
-  let y = node.position.y;
-  let cur = node.parentId ? byId.get(node.parentId) : undefined;
-  while (cur) {
-    x += cur.position.x;
-    y += cur.position.y;
-    cur = cur.parentId ? byId.get(cur.parentId) : undefined;
-  }
-  return { x, y };
-}
-
-function toSpatialNodes(nodes: Node[]): SpatialNode[] {
-  const byId = new Map(nodes.map((n) => [n.id, n]));
-  return nodes.map((n) => {
-    const sz = getNodeSize(n);
-    const abs = resolveAbsolutePosition(n, byId);
-    return {
-      id: n.id,
-      rect: {
-        x: abs.x,
-        y: abs.y,
-        width: sz.width || 200,
-        height: sz.height || 100,
-      },
-      type: n.type,
-      parentId: n.parentId ?? null,
-      label: (n.data as Record<string, unknown>)?.label as string | undefined,
-    };
-  });
-}
-
-/**
- * Get (or compute) cached spatial nodes for the current canvas.
- * Safe to call from anywhere (components, handlers). Returns absolute
- * positions and resolved sizes, ready to feed shared `spatial`
- * helpers (e.g. `findNearbyNodes`, `buildQuestionNodeContext`).
- */
-export function getCachedSpatialData(): {
-  spatialNodes: SpatialNode[];
-} {
-  const { nodes, edges } = useCanvasStore.getState();
-  const fp = spatialFingerprint(nodes, edges);
-  if (_spatialCache && _spatialCache.fingerprint === fp) {
-    return { spatialNodes: _spatialCache.spatialNodes };
-  }
-  const spatialNodes = toSpatialNodes(nodes);
-  _spatialCache = { fingerprint: fp, spatialNodes };
-  return { spatialNodes };
-}
+// ── Spatial data ──────────────────────────────────────────────
+//
+// The frontend no longer normalises spatial data for the LLM.
+// `/api/agent` resolves the anchor node's neighbourhood server-side
+// from `canvas.json` (see `apps/server/src/modules/agent/
+// node-neighbourhood.ts`); the web bundle only sends `anchorNodeId`.
+//
+// Existing UI-side proximity queries (annotation clustering, frame
+// drop targets) call shared geometry helpers directly with their own
+// React Flow nodes — no central cache is needed.
 
 type RFState = {
   nodes: Node[];

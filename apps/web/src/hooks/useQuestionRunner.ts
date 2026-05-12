@@ -2,92 +2,18 @@
  * Hook that manages the execution lifecycle of question nodes.
  *
  * Watches for question nodes with status==='pending' whose runAt has
- * expired, then sends the question + spatial context to the existing
- * /api/agent endpoint and updates node status throughout.
+ * expired, then sends the question (plus the node id, so the server
+ * can resolve its spatial neighbourhood from `canvas.json`) to the
+ * `/api/agent` endpoint and updates node status throughout.
  *
  * Mount once in the Canvas component — it is canvas-scoped.
  */
 
-import {
-  buildQuestionNodeContext,
-  createId,
-  type QuestionSpatialContext,
-  type SpatialNode,
-} from '@sediment/shared';
+import { createId } from '@sediment/shared';
 import { useEffect, useRef } from 'react';
 
 import { agentApi } from '@/api/agent';
-import useCanvasStore, { getCachedSpatialData } from '@/store/canvasStore';
-
-// ── Serialise spatial context to natural-language text ──────────
-
-function serializeSpatialContext(ctx: QuestionSpatialContext): string {
-  const sections: string[] = [];
-
-  sections.push(`### Spatial Position\n\n${ctx.semanticPosition}`);
-
-  for (const layer of ctx.layers) {
-    const heading = layer.frameLabel
-      ? `### Inside "${layer.frameLabel}" frame`
-      : '### Canvas Level';
-    const groups = layer.groups
-      .map((g) => {
-        const dir =
-          g.dx === 0 && g.dy === 0
-            ? 'overlapping'
-            : g.dy < -50
-              ? 'above'
-              : g.dy > 50
-                ? 'below'
-                : g.dx < 0
-                  ? 'to the left'
-                  : 'to the right';
-        const nodeLines = g.nodes
-          .map(
-            (n) =>
-              `- "${n.label ?? n.id}" [${n.type ?? 'unknown'}]${n.snippet ? ` — ${n.snippet}` : ''}`,
-          )
-          .join('\n');
-        return `**${dir}** (${g.arrangement}):\n${nodeLines}`;
-      })
-      .join('\n\n');
-    sections.push(`${heading}\n\n${groups}`);
-  }
-
-  if (ctx.relevantEdges.length > 0) {
-    const edgeLines = ctx.relevantEdges
-      .map(
-        (e) =>
-          `- "${e.sourceLabel ?? e.source}" → "${e.targetLabel ?? e.target}"`,
-      )
-      .join('\n');
-    sections.push(`### Connections\n\n${edgeLines}`);
-  }
-
-  return sections.join('\n\n');
-}
-
-// ── Build the text that gets injected as [SYSTEM Context] ──────
-
-function buildContextMessage(
-  question: string,
-  spatialCtx: QuestionSpatialContext,
-): {
-  content: string;
-} {
-  const spatial = serializeSpatialContext(spatialCtx);
-
-  const content = [
-    '[SYSTEM Context]',
-    '## Question Node Context',
-    '',
-    `### Your Question\n\n"${question}"`,
-    '',
-    spatial,
-  ].join('\n');
-
-  return { content };
-}
+import useCanvasStore from '@/store/canvasStore';
 
 // ── Active run tracking (abort on cancel / node delete) ────────
 
@@ -133,48 +59,17 @@ async function executeQuestionNode(nodeId: string): Promise<void> {
   activeRuns.set(nodeId, abortController);
 
   try {
-    // Build spatial context
-    const { spatialNodes } = getCachedSpatialData();
-    const target = spatialNodes.find((n: SpatialNode) => n.id === nodeId);
-
-    let spatialCtx: QuestionSpatialContext | undefined;
-    if (target) {
-      const edges = state.edges.map((e) => ({
-        source: e.source,
-        target: e.target,
-      }));
-      const snippets = new Map<string, string>();
-      for (const n of state.nodes) {
-        const d = n.data as Record<string, unknown> | undefined;
-        const snippet =
-          (d?.label as string) ??
-          (d?.content as string)?.slice(0, 120) ??
-          (d?.src as string) ??
-          '';
-        if (snippet) snippets.set(n.id, snippet);
-      }
-      spatialCtx = buildQuestionNodeContext(
-        target,
-        spatialNodes,
-        edges,
-        snippets,
-      );
-    }
-
-    // Build context message (injected before user message on server)
-    const contextMsg = spatialCtx
-      ? buildContextMessage(question, spatialCtx)
-      : undefined;
-
-    // The actual user message is just the question.
-    // Spatial context is prepended so buildHistoryItems strips it (starts with [SYSTEM).
-    const messageContent = contextMsg
-      ? `${contextMsg.content}\n\n${question}`
-      : question;
-
-    // Stream to existing /api/agent endpoint
+    // Stream to existing /api/agent endpoint.
+    //
+    // The user message is just the bare question. The server resolves
+    // the question node's neighbourhood from `canvas.json` (see
+    // `getNodeNeighbourhood` / `renderNodeNeighbourhoodMarkdown`) and
+    // prepends a `[SYSTEM Context]` preamble rendered from the Ask
+    // agent's `nodeNeighbourhoodPreamble` template — so neither the
+    // prompt wording nor the spatial graph travels through the
+    // frontend.
     await agentApi.streamMessage(
-      messageContent,
+      question,
       threadId,
       'ask',
       {
@@ -200,6 +95,7 @@ async function executeQuestionNode(nodeId: string): Promise<void> {
       },
       {
         canvasId,
+        anchorNodeId: nodeId,
         signal: abortController.signal,
       },
     );

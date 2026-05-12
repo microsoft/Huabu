@@ -20,8 +20,9 @@ import {
 } from '@sediment/shared';
 import { encode } from 'gpt-tokenizer';
 
-import { buildAgentPrompt } from '../../prompt/agent.js';
+import { loadAgent, renderAgentTemplate } from '../../prompt/agent-loader.js';
 import { runAgent } from '../agent/agent.service.js';
+import { renderNodeNeighbourhoodMarkdown } from '../agent/node-neighbourhood.js';
 import { loadContext, saveContext } from '../agent/store/chat-store.js';
 import {
   ARTIFACT_URL_REGEX,
@@ -752,6 +753,7 @@ const agentRoutes: FastifyPluginAsync = async (
       canvasId,
       attachments,
       selectedNodeIds,
+      anchorNodeId,
     } = parsed.data;
 
     const resolvedThreadId = getOrCreateThreadId(threadId);
@@ -761,14 +763,18 @@ const agentRoutes: FastifyPluginAsync = async (
 
     if (!context) {
       context = {
-        systemPrompt: buildAgentPrompt(mode),
+        systemPrompt: loadAgent(mode).systemPrompt,
         messages: [],
         tools: [],
       };
     } else {
       // Update system prompt if mode changed
-      context.systemPrompt = buildAgentPrompt(mode);
+      context.systemPrompt = loadAgent(mode).systemPrompt;
     }
+
+    // Cached so the SYSTEM-context preambles below can render their
+    // message templates without re-loading the agent each time.
+    const agentCfg = loadAgent(mode);
 
     // Collect image attachments from selected canvas nodes for vision analysis
     const selectedImageAttachments = canvasContext?.selectedNodes
@@ -797,7 +803,29 @@ const agentRoutes: FastifyPluginAsync = async (
       if (refs.length > 0) {
         context.messages.push({
           role: 'user',
-          content: `[SYSTEM Context]\n[Selected Nodes — pass \`filename\` straight to read() for full content; use \`id\` with inspect_nodes() for layout / style / spatial relations]\n${JSON.stringify(refs, null, 2)}`,
+          content: renderAgentTemplate(agentCfg, 'selectedNodesPreamble', {
+            refsJson: JSON.stringify(refs, null, 2),
+          }),
+          timestamp: Date.now(),
+        });
+      }
+    }
+
+    // Node-neighbourhood preamble. The actual user message arrives as
+    // the next pipeline push, so this preamble carries ONLY the
+    // surrounding-canvas markdown. The server resolves the
+    // neighbourhood from canvas.json — the client just supplies the
+    // anchor node id, no graph data on the wire. Empty result
+    // (canvas/node missing, or no useful context) means we skip the
+    // push entirely — no orphan `[SYSTEM Context]`.
+    if (anchorNodeId && canvasId) {
+      const spatial = renderNodeNeighbourhoodMarkdown(canvasId, anchorNodeId);
+      if (spatial) {
+        context.messages.push({
+          role: 'user',
+          content: renderAgentTemplate(agentCfg, 'nodeNeighbourhoodPreamble', {
+            spatial,
+          }),
           timestamp: Date.now(),
         });
       }

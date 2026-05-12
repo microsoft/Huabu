@@ -157,12 +157,14 @@ function resolveAbsolutePosition(
 
 // ─── Bundle: one-pass parse for both outline and inspect ────────────────────
 
-interface SpatialBundle {
+export interface SpatialBundle {
   /** Shared-lib-shaped spatial nodes (already absolute, with size fallbacks). */
   spatialNodes: SpatialNode[];
   /** Edge endpoints in the shape the shared spatial helpers expect. */
   edges: Array<{ source: string; target: string }>;
-  /** Lookup back to the raw on-disk node (for style / data.label / etc.). */
+  /**
+   * Lookup back to the raw on-disk node (for style / data.label / etc.).
+   */
   rawById: Map<string, RawNode>;
   /** Lookup of spatial nodes by id — handy for proximity targets. */
   spatialById: Map<string, SpatialNode>;
@@ -170,7 +172,13 @@ interface SpatialBundle {
   rawEdges: RawEdge[];
 }
 
-function buildSpatialBundle(canvas: CanvasFile): SpatialBundle {
+/**
+ * Parse a canvas file into the normalised spatial shape consumed by
+ * outline / inspect / node-neighbourhood. Exported so server modules
+ * outside this file can build the bundle once and forward to their
+ * own analysis (instead of re-implementing size + position fallbacks).
+ */
+export function buildSpatialBundle(canvas: CanvasFile): SpatialBundle {
   const rawNodes = (canvas.state.nodes ?? []) as RawNode[];
   const rawEdges = (canvas.state.edges ?? []) as RawEdge[];
   const byId = new Map(rawNodes.map((n) => [n.id, n]));

@@ -56,6 +56,18 @@ export const agentRequestSchema = z.object({
       selectedIntent: z.string().min(1),
     })
     .optional(),
+  /**
+   * Anchor a node-neighbourhood preamble to this node id. When set,
+   * the server resolves the node's surrounding-canvas context (see
+   * `getNodeNeighbourhood` / `renderNodeNeighbourhoodMarkdown`) and
+   * pushes a `[SYSTEM Context]` preamble — rendered from the Ask
+   * agent's `nodeNeighbourhoodPreamble` template — before the actual
+   * user message. Sent today by `useQuestionRunner` so the prompt
+   * wording and the (potentially large) spatial graph stay off the
+   * wire and out of the frontend bundle. Anchor-type agnostic; can
+   * back any future "describe what's around X" flow.
+   */
+  anchorNodeId: z.string().min(1).optional(),
 });
 export type AgentRequest = z.infer<typeof agentRequestSchema>;
 

@@ -29,7 +29,7 @@ The chat panel is **spatially detached** — the user has to manually pick conte
         ▼
 [useQuestionRunner] ──timer fires──▶ executeQuestionNode(id)
         │                                │
-        │                                ├─ build spatial ctx via buildQuestionNodeContext()
+        │                                ├─ build spatial ctx via buildNodeNeighbourhoodContext()
         │                                ├─ prepend as [SYSTEM Context] block
         │                                └─ agentApi.streamMessage(... , 'ask', ...)
         ▼                                            │
@@ -42,15 +42,14 @@ The chat panel is **spatially detached** — the user has to manually pick conte
 
 Key files (everything else is a config/registration touchpoint):
 
-| Concern            | File                                                               |
-| ------------------ | ------------------------------------------------------------------ |
-| Component          | `apps/web/src/components/Nodes/question/QuestionNode.tsx`          |
-| Auto-run + execute | `apps/web/src/hooks/useQuestionRunner.ts`                          |
-| Create command     | `apps/web/src/handler/canvasCommand/commands/createQuestion.ts`    |
-| Spatial primitives | `packages/shared/src/utils/spatial.ts`                             |
-| Shared types       | `packages/shared/src/types/canvas/node.ts` (`QuestionNodeData`, …) |
-| Spatial cache      | `apps/web/src/store/canvasStore.ts` → `getCachedSpatialData()`     |
-| Open in chat panel | `apps/web/src/store/chatStore.ts` → `openQuestionThread()`         |
+| Concern            | File                                                                                   |
+| ------------------ | -------------------------------------------------------------------------------------- |
+| Component          | `apps/web/src/components/Nodes/question/QuestionNode.tsx`                              |
+| Auto-run + execute | `apps/web/src/hooks/useQuestionRunner.ts`                                              |
+| Create command     | `apps/web/src/handler/canvasCommand/commands/createQuestion.ts`                        |
+| Spatial primitives | `apps/server/src/modules/agent/node-neighbourhood.ts` (algorithm + adapter + renderer) |
+| Shared types       | `packages/shared/src/types/canvas/node.ts` (`QuestionNodeData`, …)                     |
+| Open in chat panel | `apps/web/src/store/chatStore.ts` → `openQuestionThread()`                             |
 
 ---
 
@@ -90,10 +89,10 @@ Visual: sticky-note style, `var(--question-bg)`, cursive font, status pill (top-
 
 ## 4. Spatial context
 
-A shared layer in `packages/shared/src/utils/spatial.ts` (zero-deps; runs both sides). Two concepts the runner uses:
+Resolved entirely server-side. The frontend posts `{anchorNodeId, canvasId}` to `/api/agent` and the server pipeline in `apps/server/src/modules/agent/node-neighbourhood.ts` does the rest:
 
-- **`getCachedSpatialData()`** — module-level cache in `canvasStore.ts`, FNV-1a fingerprint invalidation, avoids O(n²) clustering on every call.
-- **`buildQuestionNodeContext(target, allNodes, edges, snippets)`** — produces a `QuestionSpatialContext` with three priority layers:
+1. Adapter loads `canvas.json`, normalises geometry via `buildSpatialBundle` (shared with `get_canvas_outline` / `inspect_nodes`), and extracts a `label > content[:120] > src` snippet per node.
+2. **`buildNodeNeighbourhoodContext(target, allNodes, edges, snippets)`** walks inside-out (frame → grandframe → canvas) and produces a `NodeNeighbourhoodContext` made of nested `SpatialLayer`s. Each layer carries the anchor's nearest groups (clusters of co-located nodes) plus connection edges. Three priority signals seed the layers:
 
 | Priority           | Source                       | Detail               | Why                                |
 | ------------------ | ---------------------------- | -------------------- | ---------------------------------- |
@@ -101,7 +100,9 @@ A shared layer in `packages/shared/src/utils/spatial.ts` (zero-deps; runs both s
 | **P1 — Siblings**  | Same frame as question node  | Summary + label      | Same group = topically related     |
 | **P2 — Nearby**    | Distance-sorted top-N        | Label + snippet only | Proximity ≈ relevance              |
 
-The runner serializes this into a natural-language `[SYSTEM Context]` block (see `useQuestionRunner.ts → serializeSpatialContext`), prepends it to the user's question, and sends one message. `buildHistoryItems` later strips the preamble from chat history.
+3. Renderer serialises the context as Markdown (`### Inside "X" frame`, `### Canvas Level`, `### Connections`) and the route substitutes it into the Ask agent's `nodeNeighbourhoodPreamble` template.
+
+Neither the prompt wording nor the spatial graph crosses the wire — the web bundle has no spatial computation for the LLM path at all. (UI-only proximity work like annotation clustering still uses shared geometry helpers locally; that's separate.)
 
 > **Two-layer info design**: the LLM gets natural-language topology ("3 nodes in a 2×2 grid"). For precise placement of new nodes, the agent fetches raw coordinates on demand via the existing `get_canvas_outline` / `inspect_nodes` tools.
 
@@ -152,6 +153,6 @@ Saved to canvas JSON: `type`, `input`, `status`, `autoRunDelay`, `threadId`, `er
 3. **`responseSummary` on the node** — extract a short answer from the SSE stream and patch it back so the node shows a teaser.
 4. **Vision channel** — local-screenshot capture is deferred. Worth adding for canvases with strong visual layout cues (color groupings, hand-drawn arrows).
 5. **Re-run cleanup** — should previous results (created nodes) be removed when the user re-runs the same question?
-6. **Token budget** — benchmark serialized `QuestionSpatialContext` size for large canvases (50+ nodes).
+6. **Token budget** — benchmark serialized `NodeNeighbourhoodContext` size for large canvases (50+ nodes).
 7. **Dedicated system prompt** — currently reuses the chat agent's. A question-node-specific prompt could bias the agent toward placing answers as new notes near the question.
 8. **More input kinds** — `QuestionInput` is a discriminated union but only has `'text'`. Planned shapes: `sketch` (hand strokes), `voice` (transcription), `selection` (highlighted nodes). Frontend switches renderer by `input.kind`; backend adapts context-building.

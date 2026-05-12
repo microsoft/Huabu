@@ -7,7 +7,7 @@
 
 import { llmComplete, llmStream } from './llm.js';
 import { logIntentEpisode as storeEpisode } from './store/intent-store.js';
-import { INTENT_SYSTEM_PROMPT } from '../../prompt/intent.js';
+import { loadAgent } from '../../prompt/agent-loader.js';
 
 import type { Context } from '@earendil-works/pi-ai';
 import type {
@@ -204,7 +204,7 @@ async function llmIntentRecognition(
   appendScreenshot(userContentParts, ctx.screenshot, SCREENSHOT_CAPTION);
 
   const piContext: Context = {
-    systemPrompt: INTENT_SYSTEM_PROMPT,
+    systemPrompt: loadAgent('intent').systemPrompt,
     messages: [
       { role: 'user', content: userContentParts, timestamp: Date.now() },
     ],
@@ -260,7 +260,7 @@ export async function* recognizeIntentStream(
   appendScreenshot(userContentParts, ctx.screenshot, SCREENSHOT_CAPTION);
 
   const piContext: Context = {
-    systemPrompt: INTENT_SYSTEM_PROMPT,
+    systemPrompt: loadAgent('intent').systemPrompt,
     messages: [
       { role: 'user', content: userContentParts, timestamp: Date.now() },
     ],
