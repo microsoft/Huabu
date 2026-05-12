@@ -920,7 +920,7 @@ const agentRoutes: FastifyPluginAsync = async (
 
     try {
       const stream = runAgent({
-        mode,
+        scope: mode,
         canvasId,
         context,
         logger: request.log,

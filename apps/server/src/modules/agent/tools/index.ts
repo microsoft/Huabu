@@ -7,19 +7,43 @@
  * `AgentTool[]` that pi-agent-core's `Agent` consumes.
  */
 
-import { askTools, operateTools, type ToolDefinition } from './definitions.js';
+import {
+  annotationTools,
+  askTools,
+  operateTools,
+  type ToolDefinition,
+} from './definitions.js';
 import { executeTool } from './executor.js';
 
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
-import type { AgentMode } from '@sediment/shared';
+import type { AgentMode, NodeOrigin } from '@sediment/shared';
 
 export { executeTool } from './executor.js';
 export type { ToolDefinition } from './definitions.js';
+
+/**
+ * Surfaces the tool builder understands.
+ *
+ * Mirrors `AgentMode` plus `'annotation'` for the freehand-gesture
+ * pipeline. Kept local rather than reusing `SkillScope` from the
+ * skill loader because `'external'` agents bring their own tooling
+ * and should never go through this builder.
+ */
+export type ToolScope = AgentMode | 'annotation';
 
 /** Per-request context closed over by every tool's `execute`. */
 export interface ToolBuildContext {
   /** Current canvas id; tools that omit it in args fall back to this value. */
   canvasId?: string;
+  /**
+   * `NodeOrigin` stamp injected onto every node created by the
+   * `canvas_commands` tool. Defaults to `{ type: 'ai-operate' }`
+   * inside the handler when unset; the annotation pipeline overrides
+   * it to `{ type: 'annotation-recognized' }` so user-authored
+   * gestures are not mis-tagged as AI-initiated. Other tools ignore
+   * this field.
+   */
+  origin?: NodeOrigin;
 }
 
 /**
@@ -46,7 +70,10 @@ function toAgentTool(def: ToolDefinition, ctx: ToolBuildContext): AgentTool {
       const text = await executeTool(
         def.name,
         params as Record<string, unknown>,
-        { canvasId: ctx.canvasId },
+        {
+          canvasId: ctx.canvasId,
+          origin: ctx.origin,
+        },
       );
       return {
         content: [{ type: 'text', text }],
@@ -60,12 +87,18 @@ function toAgentTool(def: ToolDefinition, ctx: ToolBuildContext): AgentTool {
  * Build the runnable tool set for an agent run.
  *
  * The returned array shape mirrors `definitions.ts`'s `askTools` /
- * `operateTools`, just with `execute` bound to the request context.
+ * `operateTools` / `annotationTools`, just with `execute` bound to
+ * the request context.
  */
-export function buildToolsForMode(
-  mode: AgentMode,
+export function buildToolsForScope(
+  scope: ToolScope,
   ctx: ToolBuildContext,
 ): AgentTool[] {
-  const defs = mode === 'operate' ? operateTools : askTools;
+  const defs =
+    scope === 'operate'
+      ? operateTools
+      : scope === 'annotation'
+        ? annotationTools
+        : askTools;
   return defs.map((def) => toAgentTool(def, ctx));
 }

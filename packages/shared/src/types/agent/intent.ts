@@ -1,5 +1,6 @@
 import type { Rect } from '../../utils/spatial.js';
 import type { CanvasCommand } from '../canvas/command.js';
+import type { CanvasNodeType } from '../canvas/node.js';
 
 // ==================== Intent Recognition ====================
 
@@ -96,24 +97,42 @@ export interface AnnotationCluster {
 
 // ==================== Annotation Recognition ====================
 //
-// The pipeline intentionally sends the LLM only IDs + bounding boxes — no
-// labels, positions, distances, or shape inference. The LLM is expected to
-// call `read` (for node text content), `inspect_nodes` (for node geometry
-// / style / spatial relations), and `inspect_edges` (for edge style)
-// when it needs more, and to reason about the gesture primarily from the
-// screenshot. This avoids the false-positive cascades we saw with the old
-// rule-based classifier.
+// The pipeline sends the LLM **node refs** (id + type + label) for
+// nearby / enclosed nodes plus **bare ids** for nearby edges, alongside
+// the cluster bbox and stroke count. Positions, distances, geometry,
+// and shape inference are deliberately omitted — the LLM reads gesture
+// shape from the screenshot, then uses `read` (node text), `inspect_nodes`
+// (geometry / style / spatial), and `inspect_edges` (style / direction)
+// on demand. Carrying labels saves a `read` round-trip on most simple
+// gestures (the model knows what each id refers to without looking it
+// up); we still avoid the false-positive cascades the old rule-based
+// classifier suffered from because the model never sees positions or
+// pre-computed shape guesses.
 
-/** Structured context for one annotation cluster (IDs only). */
+/**
+ * Lightweight node reference passed to the annotation LLM.
+ *
+ * `label` is optional because frame nodes (and freshly created notes)
+ * may have no label yet. The server expands this into the LLM-facing
+ * form by appending the pre-computed `nodes/<safeLabel>.md` path so
+ * the model can `read` content without re-deriving filenames.
+ */
+export interface AnnotationNodeRef {
+  id: string;
+  type: CanvasNodeType;
+  label?: string;
+}
+
+/** Structured context for one annotation cluster. */
 export interface AnnotationClusterContext {
   /** Bounding box of the gesture in flow coordinates. */
   bbox: { x: number; y: number; width: number; height: number };
   /** Number of distinct strokes in the cluster. */
   strokeCount: number;
-  /** IDs of canvas nodes near the cluster bbox, ordered by proximity. */
-  nearbyNodeIds: string[];
-  /** IDs of canvas nodes whose bounding box overlaps the cluster bbox. */
-  enclosedNodeIds: string[];
+  /** Canvas nodes near the cluster bbox, ordered by proximity. */
+  nearbyNodes: AnnotationNodeRef[];
+  /** Canvas nodes whose bounding box overlaps the cluster bbox. */
+  enclosedNodes: AnnotationNodeRef[];
   /** IDs of canvas edges that intersect or are very close to the cluster bbox. */
   nearbyEdgeIds: string[];
 }
@@ -135,10 +154,10 @@ export interface AnnotationCommandResponse {
 /** Context extracted for a clustered set of annotation strokes. */
 export interface AnnotationContext {
   cluster: AnnotationCluster;
-  /** IDs of canvas nodes near the cluster bbox, ordered by proximity. */
-  nearbyNodeIds: string[];
-  /** IDs of canvas nodes whose bounding box overlaps the cluster bbox. */
-  enclosedNodeIds: string[];
+  /** Canvas nodes near the cluster bbox, ordered by proximity. */
+  nearbyNodes: AnnotationNodeRef[];
+  /** Canvas nodes whose bounding box overlaps the cluster bbox. */
+  enclosedNodes: AnnotationNodeRef[];
   /** IDs of canvas edges that intersect or are very close to the cluster bbox. */
   nearbyEdgeIds: string[];
 }

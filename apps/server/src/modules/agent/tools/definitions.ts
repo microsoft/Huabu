@@ -1,12 +1,13 @@
 /**
  * Tool Definitions for the Unified Agent
  *
- * All tools the AI can call across ask and operate modes.
- * Each tool is a pi-ai Tool with a TypeBox schema for validation.
+ * All tools the AI can call across ask, operate, and annotation
+ * scopes. Each tool is a pi-ai Tool with a TypeBox schema for
+ * validation.
  *
  * Definitions here are pure schema + description pairs. The runnable
  * `AgentTool` form (with `execute` closures bound to a request-scoped
- * `canvasId`) is built by `buildToolsForMode` in `./index.ts`.
+ * `canvasId`) is built by `buildToolsForScope` in `./index.ts`.
  *
  * Building-block schemas (node / edge / command primitives) live under
  * `./schemas/`. This file only composes them into the per-tool
@@ -27,7 +28,7 @@ import type { Tool } from '@earendil-works/pi-ai';
 
 /**
  * Definition shape we author here: a pi-ai `Tool` plus a UI-facing
- * `label`. The runnable `execute` field is added later by `buildToolsForMode`,
+ * `label`. The runnable `execute` field is added later by `buildToolsForScope`,
  * which closes over the request-scoped `canvasId`.
  */
 export interface ToolDefinition extends Tool {
@@ -497,6 +498,29 @@ export const askTools: ToolDefinition[] = [
  */
 export const operateTools: ToolDefinition[] = [
   webSearchTool,
+  getCanvasOutlineTool,
+  inspectNodesTool,
+  inspectEdgesTool,
+  readTool,
+  grepTool,
+  findTool,
+  lsTool,
+  canvasCommandsTool,
+];
+
+/**
+ * Tools available in the annotation pipeline.
+ *
+ * Mirrors `operateTools` minus `web_search`: annotation reasons
+ * locally about the cluster (screenshot + nearby/enclosed nodes /
+ * edges) and never needs the open internet. Keeping the rest of
+ * the surface (filesystem + canvas inspection + `canvas_commands`)
+ * means the same prompt patterns transfer between operate and
+ * annotation; the only behavioural difference is that
+ * `canvas_commands` runs with `origin: { type: 'annotation-recognized' }`
+ * — see `buildToolsForScope` for how that is wired.
+ */
+export const annotationTools: ToolDefinition[] = [
   getCanvasOutlineTool,
   inspectNodesTool,
   inspectEdgesTool,

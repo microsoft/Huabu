@@ -4,16 +4,19 @@
  * Drives the agent loop using `@earendil-works/pi-agent-core`'s `Agent`
  * class. The class owns the transcript, executes tools, and emits
  * lifecycle events; this module bridges those events into the
- * `AsyncGenerator<StreamEvent>` shape the route layer already consumes.
+ * `AsyncGenerator<StreamEvent>` shape every consumer (chat / operate
+ * SSE route, annotation pipeline) consumes.
  *
- * Public surface (signature-compatible with the previous self-rolled loop):
- *  - {@link runAgent} — yields SSE-shaped events, mutates `context.messages`
+ * Public surface:
+ *  - {@link runAgent} — yields SSE-shaped events. Callers that need
+ *    structured output (e.g. annotation) drain the generator
+ *    themselves and pull the relevant `tool_result` payload.
  */
 
 import { Agent } from '@earendil-works/pi-agent-core';
 
 import { ensureApiKey, getLLMModel } from './llm.js';
-import { buildToolsForMode } from './tools/index.js';
+import { buildToolsForScope, type ToolScope } from './tools/index.js';
 
 import type {
   AgentEvent,
@@ -25,7 +28,7 @@ import type {
   Message,
   TextContent,
 } from '@earendil-works/pi-ai';
-import type { AgentMode, AgentStreamEvent } from '@sediment/shared';
+import type { AgentStreamEvent, NodeOrigin } from '@sediment/shared';
 
 /**
  * SSE events yielded by `runAgent`.
@@ -40,10 +43,22 @@ interface AgentLogger {
 }
 
 export interface AgentRunOptions {
-  /** Agent mode determines available tools and system prompt */
-  mode: AgentMode;
+  /**
+   * Tool surface the agent runs against. Drives both the available
+   * tool set and (via {@link buildToolsForScope}) any scope-specific
+   * tool wiring.
+   */
+  scope: ToolScope;
   /** Current canvas ID available as implicit context for canvas-aware tools. */
   canvasId?: string;
+  /**
+   * `NodeOrigin` stamp forwarded to `canvas_commands` (and ignored by
+   * other tools). Defaults inside the handler to `{ type: 'ai-operate' }`;
+   * the annotation pipeline overrides to
+   * `{ type: 'annotation-recognized' }` so user-authored gestures are
+   * not mis-tagged as AI-initiated.
+   */
+  origin?: NodeOrigin;
   /** pi-ai Context (systemPrompt + messages). Will be mutated with responses. */
   context: Context;
   /** Structured logger for request-scoped diagnostics */
@@ -85,15 +100,16 @@ export async function* runAgent(
   options: AgentRunOptions,
 ): AsyncGenerator<StreamEvent, void, unknown> {
   const {
-    mode,
+    scope,
     canvasId,
+    origin,
     context,
     logger,
     signal,
     maxIterations = 20,
   } = options;
 
-  const tools = buildToolsForMode(mode, { canvasId });
+  const tools = buildToolsForScope(scope, { canvasId, origin });
 
   // Soft turn cap: replaces the old self-rolled `maxIterations` counter.
   // pi-agent-core 0.74's `Agent` class doesn't expose `shouldStopAfterTurn`

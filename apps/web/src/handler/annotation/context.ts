@@ -1,13 +1,16 @@
 /**
- * Stage 2: Context extraction (IDs only).
+ * Stage 2: Context extraction.
  *
- * For each annotation cluster we collect just the IDs of nearby nodes /
- * enclosed nodes / nearby edges. The actual node content (title, type,
- * src, summary, ...) is fetched on demand by the LLM via the `read` tool
- * on "nodes/<nodeId>.md", node layout (position / size / parent / style)
- * via `inspect_nodes`, and edge style via `inspect_edges`. We no longer
- * pre-pack labels, positions, distances, or any shape inference into the
- * request payload.
+ * For each annotation cluster we collect lightweight refs (id + type +
+ * label) for nearby nodes / enclosed nodes plus the IDs of nearby edges.
+ * Carrying type + label saves the LLM a `read` round-trip on simple
+ * gestures (it knows what each id refers to without looking it up); the
+ * server further annotates each ref with the pre-computed file path.
+ *
+ * Positions, distances, geometry, and shape inference are still NOT in
+ * the payload — the LLM reads gesture shape from the screenshot. It can
+ * pull node text via `read`, node layout via `inspect_nodes`, and edge
+ * style via `inspect_edges` on demand.
  */
 
 import {
@@ -17,7 +20,12 @@ import {
   rectIntersectionArea,
 } from '@sediment/shared';
 
-import type { AnnotationCluster, AnnotationContext } from '@sediment/shared';
+import type {
+  AnnotationCluster,
+  AnnotationContext,
+  AnnotationNodeRef,
+  CanvasNodeType,
+} from '@sediment/shared';
 import type { Rect } from '@sediment/shared';
 import type { Edge, Node } from '@xyflow/react';
 
@@ -98,11 +106,8 @@ function segmentRectDistance(
 // ── Public API ───────────────────────────────────────────────────
 
 /**
- * Extract the IDs of canvas nodes / edges spatially related to the cluster.
- * No labels, positions, or distances are returned — the LLM fetches any
- * node content it needs via the `read` tool, node layout via the
- * `inspect_nodes` tool, and edge style via the `inspect_edges` tool.
- */
+ * Extract refs of canvas nodes / IDs of canvas edges spatially related
+ * to the cluster. Each node ref carries id + type + label so the LLM\n * can address nodes without an extra `read`; positions, distances, and\n * shape inference are still NOT included \u2014 the LLM reads those off the\n * screenshot.\n */
 export function extractAnnotationContext(
   cluster: AnnotationCluster,
   allNodes: Node[],
@@ -127,12 +132,26 @@ export function extractAnnotationContext(
     });
   }
 
+  // Build a NodeRef from a react-flow Node, pulling label out of node.data.
+  const toRef = (n: Node): AnnotationNodeRef => {
+    const data = (n.data as Record<string, unknown> | undefined) ?? {};
+    const label =
+      typeof data.label === 'string' && data.label.length > 0
+        ? data.label
+        : undefined;
+    return {
+      id: n.id,
+      type: (n.type ?? 'note') as CanvasNodeType,
+      ...(label ? { label } : {}),
+    };
+  };
+
   // Nearby nodes (sorted by edge distance, capped).
-  const nearbyNodeIds = candidateNodes
+  const nearbyNodes = candidateNodes
     .filter((c) => c.distance <= NEARBY_RADIUS)
     .sort((a, b) => a.distance - b.distance)
     .slice(0, MAX_NEARBY_NODES)
-    .map((c) => c.node.id);
+    .map((c) => toRef(c.node));
 
   // Enclosed nodes (≥40% of node area inside the padded cluster bbox).
   const paddedRect: Rect = {
@@ -141,13 +160,13 @@ export function extractAnnotationContext(
     width: clusterRect.width + ENCLOSURE_PADDING * 2,
     height: clusterRect.height + ENCLOSURE_PADDING * 2,
   };
-  const enclosedNodeIds: string[] = [];
+  const enclosedNodes: AnnotationNodeRef[] = [];
   for (const { node, rect } of candidateNodes) {
     if (!rectsOverlap(paddedRect, rect)) continue;
     const intersection = rectIntersectionArea(paddedRect, rect);
     const area = rect.width * rect.height;
     if (area > 0 && intersection / area >= 0.4) {
-      enclosedNodeIds.push(node.id);
+      enclosedNodes.push(toRef(node));
     }
   }
 
@@ -180,8 +199,8 @@ export function extractAnnotationContext(
 
   return {
     cluster,
-    nearbyNodeIds,
-    enclosedNodeIds,
+    nearbyNodes,
+    enclosedNodes,
     nearbyEdgeIds,
   };
 }

@@ -32,8 +32,8 @@ export type CanvasCommandsArgs = {
   commands: Array<Record<string, unknown>>;
 };
 
-/** Origin assigned to every node created by the agent. */
-const AI_OPERATE_ORIGIN: NodeOrigin = { type: 'ai-operate' };
+/** Default origin assigned to every node created by the operate agent. */
+const DEFAULT_ORIGIN: NodeOrigin = { type: 'ai-operate' };
 
 /** Build an `__all__` sentinel provenance map for AI-generated content. */
 function buildAIProvenance(): BlockProvenanceMap {
@@ -45,10 +45,24 @@ function buildAIProvenance(): BlockProvenanceMap {
   };
 }
 
+/**
+ * Execute a batch of canvas commands and return the SSE-bound payload.
+ *
+ * `origin` controls the `NodeOrigin` stamp injected onto every CREATE /
+ * MERGE / CREATE_QUESTION command. Defaults to `{ type: 'ai-operate' }`
+ * for the chat/operate agent; the annotation pipeline overrides this to
+ * `{ type: 'annotation-recognized' }` so user-authored gestures are not
+ * mis-tagged as AI-initiated. Provenance (`author: 'ai'`) and
+ * `labelSource: 'agent'` are still injected regardless of `origin` —
+ * they describe who *wrote* the content, which is the LLM in both cases.
+ */
 export async function handleCanvasCommands(
   args: CanvasCommandsArgs,
+  origin: NodeOrigin = DEFAULT_ORIGIN,
 ): Promise<string> {
-  const origin = AI_OPERATE_ORIGIN;
+  console.log(
+    `[canvas_commands] handler invoked: canvasId=${args.canvasId ?? '(none)'}, origin=${origin.type}, commandCount=${args.commands?.length ?? 0}, types=[${(args.commands ?? []).map((c) => c.type).join(', ')}]`,
+  );
 
   // Read canvas state once so we can resolve node types for provenance injection.
   const canvas = getCanvasStore(args.canvasId).read();

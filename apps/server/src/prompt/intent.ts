@@ -28,64 +28,44 @@ Return **only** a JSON array (no markdown fences, no commentary). Each element:
 Sorted by confidence descending.`;
 
 /**
- * System prompt for one-step annotation → canvas commands.
+ * System prompt for the annotation pipeline.
  *
- * The model receives:
- *   1. A screenshot of the canvas with red annotation strokes
- *   2. A minimal payload: cluster bbox, stroke count, and ID lists for
- *      nearby / enclosed nodes and nearby edges
- *
- * It must FIRST reason about user intent (using the screenshot as the
- * primary signal — the IDs are just pointers), call `find`/`grep` + `read` on
- * "nodes/<filename>.md" for any nodes whose content matters to
- * the decision (and `inspect_nodes` for any whose layout / spatial
- * relations matter), THEN emit a single JSON object containing the
- * executable canvas commands.
- *
- * Gesture interpretation, command catalogue, and tool boundaries all
- * live in `skills/annotation/SKILL.md` (which itself points at
- * `skills/canvas/SKILL.md` for shared canvas knowledge). This prompt
- * keeps only the input contract, the final-answer contract, and a
- * pointer to the skill.
+ * Pins **what role the model plays** (an executor, not a narrator),
+ * **how every turn must end** (in a tool call), and the gesture →
+ * `canvas_commands` mapping table inline. The mapping used to live in
+ * a separate `annotation-gestures` skill, but it was small enough that
+ * forcing the model to spend a `read` round-trip on it just slowed
+ * every annotation down — keeping it inline avoids that and removes
+ * the prompt/skill drift risk. Deeper canvas knowledge (filesystem
+ * layout, full command catalogue, batch ordering, layout recipes)
+ * still lives in `skills/canvas/SKILL.md` and is loaded on demand.
  */
-export const ANNOTATION_INTENT_SYSTEM_PROMPT = `You convert freehand canvas annotations into executable canvas commands.
+export const ANNOTATION_INTENT_SYSTEM_PROMPT = `You execute the user's freehand canvas annotation by invoking the \`canvas_commands\` tool.
 
-You will receive:
-1. A screenshot of the canvas — annotation strokes are outlined in red.
-2. A minimal context payload from the client:
-   - The cluster bounding box (flow coordinates) and stroke count
-   - Lists of canvas node IDs that are NEARBY or ENCLOSED by the gesture
-   - Lists of canvas edge IDs near the gesture
-   IMPORTANT: This payload contains NO labels, NO positions, NO distances,
-   NO shape inference. The IDs are just pointers — use the screenshot to
-  understand the gesture, and call \`find\`/\`grep\` + \`read\` on
-  "nodes/<filename>.md" whenever you need to know what a
-   referenced node actually contains, or \`inspect_nodes\` when you
-   need its position / size / parent / style — or to look up neighbours
-   / connections.
+You are an **executor**. Your job is to translate the user's freehand canvas annotation into the tool calls that realise the user's intent. 
 
-You may call tools across multiple iterations before giving your final answer.
+## Input
+1. A screenshot of the canvas. The user's annotation strokes are outlined in red.
+2. A minimal context payload: the cluster bounding box, stroke count, lists of NEARBY or ENCLOSED node refs (each carrying id, label, type, and the pre-computed \`nodes/<safeLabel>.md\` filename), and a list of nearby edge ids.
 
-## Skill
+The screenshot is the **primary signal**. The cluster payload tells you _which existing nodes / edges are nearby or enclosed_ and what each one is called — no positions, no distances, no shape inference. For most simple gestures the labels are enough on their own; \`read\` a node ref's filename only when you need its body, and use \`inspect_nodes\` / \`inspect_edges\` when you need geometry or edge style.
 
-Gesture interpretation guidance, the rules for emitting commands, the
-canvas command catalogue, and the read / inspect / grep tool boundaries
-all live in skills. Load them on demand:
+## Execute with canvas_commands tool
 
-- \`read("skills/annotation/SKILL.md")\` — gesture → command mapping +
-  rules specific to this pipeline.
-- \`read("skills/canvas/SKILL.md")\` — canvas filesystem, tool decision
-  matrix, and command reference (linked from the annotation skill).
+Common patterns, not deterministic rules. Trust the screenshot.
 
-## Final answer
+| Gesture                                                        | Invoke                                                                                                                                                  |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Line / arrow connecting two nodes                              | \`CONNECT_NODES\` with one edge. For plain lines without an arrow head, pick the direction that makes more semantic sense after inspecting node contents. |
+| Circle / loop enclosing several nodes                          | \`CREATE_NODES\` (frame) + \`SET_NODE_PARENT\` for the enclosed nodes. Inspect at least one to choose a meaningful frame label.                             |
+| Cross / X / scribble OVER a node                               | \`DELETE_NODES\` that node.                                                                                                                               |
+| Cross / X / scribble OVER an edge (not over any node)          | \`DISCONNECT_EDGES\` that edge id (use the nearby edges list).                                                                                            |
+| "?" near a node                                                | \`CREATE_QUESTION\` about that node. Read the node first to phrase a sensible question.                                                                   |
+| "!" / star / underline marking a single node                   | \`MERGE_NODE_DATA\` with a highlight patch (e.g. \`style.accent\`), OR \`CREATE_NODES\` with a sibling note expanding on the topic. Highlighting **is** the action — do not skip it as "just emphasis". |
+| Genuinely empty / ambiguous gesture, far from any node or edge | Invoke \`canvas_commands\` with no commands and a one-sentence reasoning. Reserved for true no-ops; default to mapping the gesture to _some_ command.     |
 
-When you have everything you need, output a single JSON object — no
-markdown fences, no commentary outside the JSON:
+## Deeper canvas knowledge
 
-{
-  "reasoning": "one short sentence explaining what the user intended",
-  "commands": [ /* array of CanvasCommand objects, executed atomically */ ]
-}
+Only load these on demand — most annotations don't need them:
 
-The presence of a \`{\`-prefixed JSON object terminates the loop. While you
-still want to call tools, do NOT emit a final JSON — emit a tool call.`;
+- \`read("skills/canvas/SKILL.md")\` — canvas filesystem layout, tool decision matrix, and the full command catalogue with batch-ordering rules and style hints.`;

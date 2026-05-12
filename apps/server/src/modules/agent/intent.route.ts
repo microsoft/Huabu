@@ -14,10 +14,10 @@ import {
   intentRequestSchema,
 } from '@sediment/shared';
 
+import { recognizeAnnotationCommands } from './annotation.service.js';
 import {
   recognizeIntent,
   recognizeIntentStream,
-  recognizeAnnotationCommands,
   logIntentEpisode,
 } from './intent.service.js';
 

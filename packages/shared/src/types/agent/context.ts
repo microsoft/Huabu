@@ -164,6 +164,7 @@ export interface SelectionPayload {
 export interface LlmSelectionRef {
   id: string;
   type: CanvasNodeType;
+  /** Display name; omitted when the node has no label (e.g. fresh frame). */
   label?: string;
   filename: string;
 }
