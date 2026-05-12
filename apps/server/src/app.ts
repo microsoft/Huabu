@@ -53,6 +53,29 @@ app.register(multipart, {
   },
 });
 
+// ── HTTP Basic Auth gate ─────────────────────────────────────────────
+// When SEDIMENT_BASIC_AUTH_USER and SEDIMENT_BASIC_AUTH_PASS are both set,
+// every request (except CORS preflight) must include matching Basic Auth
+// credentials. The Vite dev server applies the same check at the edge,
+// but the backend must enforce it independently because port 3001 may be
+// reachable directly (e.g. when bound to 0.0.0.0 on a public IP).
+const basicAuthUser = process.env.SEDIMENT_BASIC_AUTH_USER;
+const basicAuthPass = process.env.SEDIMENT_BASIC_AUTH_PASS;
+if (basicAuthUser && basicAuthPass) {
+  const expected =
+    'Basic ' +
+    Buffer.from(`${basicAuthUser}:${basicAuthPass}`, 'utf8').toString('base64');
+  app.addHook('onRequest', async (request, reply) => {
+    if (request.method === 'OPTIONS') return;
+    if (request.headers.authorization === expected) return;
+    reply
+      .header('WWW-Authenticate', 'Basic realm="Sediment"')
+      .status(401)
+      .send({ message: 'Authentication required' });
+  });
+  app.log.info('Basic Auth enabled for all routes');
+}
+
 // Register @fastify/static to enable `reply.sendFile()`.
 // Actual artifact serving uses a dynamic root resolved at request time
 // (see artifact.route.ts), so we pass `serve: false` here and use the
