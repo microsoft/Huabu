@@ -119,15 +119,17 @@ export interface NodeSummary {
  * Rich representation of a node explicitly selected by the user.
  *
  * Selection is a strong intent signal — the user is telling the agent
- * "focus on this". `SelectedNodeDetail` carries lightweight metadata only;
- * full node content is fetched on demand via `read` on
- * "nodes/<nodeId>.md" (and layout via `inspect_nodes`) to keep the base
- * context small.
+ * "focus on this". `SelectionPayload` is the **wire shape** posted by
+ * the web client: it can recurse into frame `children` and carries
+ * `src` for image nodes (so the server can build vision attachments).
+ * Full node content / layout is fetched on demand via `read` /
+ * `inspect_nodes`, keeping the request body small.
  *
- * For frame nodes, `children` contains the detail of every direct child,
- * so the agent understands the entire group the user is referring to.
+ * The server flattens this into {@link LlmSelectionRef} entries before
+ * handing the selection to the LLM — see `collectSelectedNodeRefs`
+ * in the agent route.
  */
-export interface SelectedNodeDetail {
+export interface SelectionPayload {
   id: string;
   type: CanvasNodeType;
   label?: string;
@@ -137,7 +139,33 @@ export interface SelectedNodeDetail {
    * Direct children of a frame node, each carrying their own detail.
    * Undefined for non-frame nodes.
    */
-  children?: SelectedNodeDetail[];
+  children?: SelectionPayload[];
+}
+
+/**
+ * Minimal node reference handed to the LLM as selection context.
+ *
+ * Distinct from {@link SelectionPayload}: that's the wire format
+ * sent from the web client (carries `src` for vision + frame
+ * `children`); this is the flattened, LLM-facing form built by the
+ * agent route. Carries everything the model needs to address a node
+ * without further derivation:
+ *  - `id`       — stable handle for `inspect_nodes`, `MERGE_NODE_DATA`, etc.
+ *  - `label`    — display name (omitted when blank).
+ *  - `type`     — `note` / `web` / `pdf` / `image` / `video` / `frame` /
+ *                 `text`.
+ *  - `filename` — pre-computed `nodes/<safeLabel>.md` path, ready to
+ *                 hand straight to `read`. The server derives this so
+ *                 the LLM never has to compute `safeLabel` itself
+ *                 (a frequent source of bad guesses around spaces and
+ *                 special characters). Falls back to `nodes/<id>.md`
+ *                 for label-less nodes (e.g. fresh frames).
+ */
+export interface LlmSelectionRef {
+  id: string;
+  type: CanvasNodeType;
+  label?: string;
+  filename: string;
 }
 
 /**
@@ -164,10 +192,7 @@ export interface AgentBaseContext {
    * Nodes explicitly selected by the user at the time of the request.
    *
    * Selection is the primary intent signal — it overrides the general canvas
-   * snapshot. Each entry carries full content (no truncation) and, for frame
-   * nodes, a recursive `children` array so the agent sees the entire group.
-   *
-   * Empty array means "no explicit selection; use the full canvas as context".
+   * snapshot.
    */
-  selectedNodes: SelectedNodeDetail[];
+  selectedNodes: SelectionPayload[];
 }

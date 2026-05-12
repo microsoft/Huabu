@@ -38,7 +38,16 @@ A node's filename is deterministically derived from its `label` and kept in 1:1 
 nodes/<safeLabel>.md
 ```
 
-`safeLabel` = the label with characters `\ / : * ? " < > |` (and ASCII control chars) replaced by `_`, then leading/trailing dots and spaces trimmed, then truncated to 120 chars. Empty / missing labels fall back to the stable `nodeId`.
+`safeLabel` = the label with characters `\ / : * ? " < > |` (and ASCII control chars) replaced by `_`. **Spaces, hyphens, parentheses, dots, and any other character are kept verbatim** — do not substitute them. Only leading/trailing dots and spaces are stripped, and the result is truncated to 120 chars. Empty / missing labels fall back to the stable `nodeId`.
+
+Examples:
+
+| label               | safeLabel           | path                         |
+| ------------------- | ------------------- | ---------------------------- |
+| `Dolphin Migration` | `Dolphin Migration` | `nodes/Dolphin Migration.md` |
+| `Notes (draft)`     | `Notes (draft)`     | `nodes/Notes (draft).md`     |
+| `Foo: Bar / Baz`    | `Foo_ Bar _ Baz`    | `nodes/Foo_ Bar _ Baz.md`    |
+| `   trailing.`      | `trailing`          | `nodes/trailing.md`          |
 
 - Have the label → `read("nodes/<safeLabel>.md")` directly. **Don't** `find` first when you already have the label — build the path.
 - Have only the nodeId → `find("nodes/*.md")` or `grep` (results carry `nodeId`, `label`, `nodeType`); the stable id also lives in each file's `id:` frontmatter.
@@ -75,7 +84,7 @@ Where each node sits, how big it is, which frame it belongs to, what colour it's
 
 ## Gotchas
 
-- **Selected-node context is sparse.** The agent only receives `id + label + type` for selected nodes — no content, no summary, no geometry. Build the markdown path from the label (see § "Surface A — A folder of text files") and `read` it; use `inspect_nodes({ ids: ["<id>"] })` for spatial / structural info.
+- **Selected-node context carries `{ id, type, label, filename }`.** Pass the supplied `filename` straight to `read` for the body — do NOT re-derive it from the label. Only when a node is mentioned outside the selection (e.g. it appears in a canvas snapshot but wasn't selected) do you need to build the path yourself via the safeLabel rule above. For spatial / structural info, call `inspect_nodes({ ids: ["<id>"] })`.
 - **No cross-canvas access.** All paths are scoped to the active canvas.
 - **Binary files are rejected by `read`.** Image / PDF / video bytes live under `.artifacts/`; the `src` URL is in the node markdown frontmatter.
 

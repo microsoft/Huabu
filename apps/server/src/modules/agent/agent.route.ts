@@ -28,6 +28,7 @@ import {
   resolveArtifactImageUrl,
 } from '../artifact/utils.js';
 import { getCanvasStore } from '../storage/index.js';
+import { toSafeFilename } from '../storage/naming.js';
 
 import type { AssistantMessage, Context } from '@earendil-works/pi-ai';
 import type {
@@ -39,7 +40,8 @@ import type {
   ChatHistoryItem,
   ChatHistoryResponse,
   ContextTokensResponse,
-  SelectedNodeDetail,
+  SelectionPayload,
+  LlmSelectionRef,
   StopThreadResponse,
   ToolResponse,
 } from '@sediment/shared';
@@ -236,9 +238,7 @@ async function buildUserContent(
  * Collect image attachments from selected canvas nodes (including frame children).
  * Enables vision analysis when users select image nodes on the canvas.
  */
-function collectImageAttachments(
-  nodes: SelectedNodeDetail[],
-): ChatAttachment[] {
+function collectImageAttachments(nodes: SelectionPayload[]): ChatAttachment[] {
   const attachments: ChatAttachment[] = [];
 
   for (const node of nodes) {
@@ -260,21 +260,26 @@ function collectImageAttachments(
 
 /**
  * Flatten the selection (including frame children) into the absolute
- * minimum the agent needs to know up front: id, label, type. Anything
- * richer (content / summary / position / style) is one tool call away
- * via `read` or `inspect_nodes`, so we deliberately do not pay the
- * token cost of including it in every turn.
+ * minimum the agent needs to know up front: id, type, label, and the
+ * pre-computed `nodes/<safeLabel>.md` filename. Anything richer
+ * (content / summary / position / style) is one tool call away via
+ * `read` or `inspect_nodes`, so we deliberately do not pay the token
+ * cost of including it in every turn.
+ *
+ * `filename` is derived server-side via {@link toSafeFilename} so the
+ * LLM never has to apply the safeLabel rule itself — empirically it
+ * mis-handles spaces and other kept-as-is characters often enough to
+ * waste a turn on a 404'd `read`.
  */
-function collectSelectedNodeRefs(
-  nodes: SelectedNodeDetail[],
-): Array<{ id: string; label?: string; type?: string }> {
-  const refs: Array<{ id: string; label?: string; type?: string }> = [];
-  const walk = (list: SelectedNodeDetail[]) => {
+function collectSelectedNodeRefs(nodes: SelectionPayload[]): LlmSelectionRef[] {
+  const refs: LlmSelectionRef[] = [];
+  const walk = (list: SelectionPayload[]) => {
     for (const n of list) {
       refs.push({
         id: n.id,
+        type: n.type,
         ...(n.label ? { label: n.label } : {}),
-        ...(n.type ? { type: n.type } : {}),
+        filename: `nodes/${toSafeFilename(n.label, n.id)}.md`,
       });
       if (n.children) walk(n.children);
     }
@@ -778,9 +783,12 @@ const agentRoutes: FastifyPluginAsync = async (
     // Build user message
     let userContent = await buildUserContent(content, allAttachments);
 
-    // Inject a minimal selected-node reference list as a system message:
-    // just { id, label, type } per node. The agent fetches anything richer
-    // (content via `read`, layout/style via `inspect_nodes`) on demand.
+    // Inject a minimal selected-node reference list as a system message.
+    // Each entry carries { id, type, label?, filename } — the `filename`
+    // is pre-computed (`nodes/<safeLabel>.md`) so the agent can `read`
+    // it verbatim without re-deriving the safeLabel rule. Anything
+    // richer (content via `read`, layout/style via `inspect_nodes`) is
+    // fetched on demand.
     if (
       canvasContext?.selectedNodes &&
       canvasContext.selectedNodes.length > 0
@@ -789,7 +797,7 @@ const agentRoutes: FastifyPluginAsync = async (
       if (refs.length > 0) {
         context.messages.push({
           role: 'user',
-          content: `[SYSTEM Context]\n[Selected Nodes (id / label / type only — for content read directly via read("nodes/<safeLabel>.md") since filename is derived 1:1 from label; for layout / style / spatial relations call inspect_nodes({ ids: [...] }))]\n${JSON.stringify(refs, null, 2)}`,
+          content: `[SYSTEM Context]\n[Selected Nodes — pass \`filename\` straight to read() for full content; use \`id\` with inspect_nodes() for layout / style / spatial relations]\n${JSON.stringify(refs, null, 2)}`,
           timestamp: Date.now(),
         });
       }

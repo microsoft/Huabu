@@ -355,8 +355,7 @@ For per-command semantics, idiomatic compositions, and worked examples (group in
 
 export const readParamsSchema = Type.Object({
   path: Type.String({
-    description:
-      'File path relative to the current canvas folder, e.g. "canvas.json" or "nodes/<safeLabel>.md".',
+    description: 'File path relative to the current canvas folder.',
   }),
   offset: Type.Optional(
     Type.Number({

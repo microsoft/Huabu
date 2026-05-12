@@ -62,7 +62,7 @@ import type {
   CanvasNodeType,
   NodeSummary,
   RecentAction,
-  SelectedNodeDetail,
+  SelectionPayload,
   SpatialNode,
   CanvasEventInput,
 } from '@sediment/shared';
@@ -754,7 +754,7 @@ const useCanvasStore = create<RFState>()(
       const nodeMap = new Map(nodes.map((n) => [n.id, n]));
 
       /**
-       * Build a SelectedNodeDetail for a single node.
+       * Build a SelectionPayload for a single node.
        * Only sends lightweight metadata — the agent uses `read`
        * to fetch full content on demand, saving tokens.
        * Image nodes keep `src` so the server can build vision attachments.
@@ -764,7 +764,7 @@ const useCanvasStore = create<RFState>()(
        * omitted: the server consumes neither. Spatial info is fetched on demand
        * via `get_canvas_outline()` / `inspect_nodes`.
        */
-      const buildSelectedDetail = (n: Node): SelectedNodeDetail => {
+      const buildSelectedDetail = (n: Node): SelectionPayload => {
         const data = n.data as Record<string, unknown> | undefined;
         const nodeType = (n.type ?? 'note') as CanvasNodeType;
 
@@ -772,7 +772,7 @@ const useCanvasStore = create<RFState>()(
         const src =
           n.type === 'image' ? (data?.src as string | undefined) : undefined;
 
-        const detail: SelectedNodeDetail = {
+        const detail: SelectionPayload = {
           id: n.id,
           type: nodeType,
           label: data?.label as string | undefined,
