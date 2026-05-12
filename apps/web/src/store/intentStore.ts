@@ -172,7 +172,7 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
       // recogniser sees the most up-to-date action history.
       await useCanvasStore.getState().flushCanvasEvents();
 
-      const canvasContext = useCanvasStore.getState().getAgentContext();
+      const canvasContext = useCanvasStore.getState().getIntentContext();
 
       const lastAction =
         canvasContext.recentActions.length > 0

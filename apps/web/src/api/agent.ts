@@ -15,7 +15,7 @@ import type {
   AgentMode,
   AgentRequest,
   AgentStreamEvent,
-  AgentBaseContext,
+  AgentChatContext,
   ChatAttachment,
   ChatHistoryResponse,
   ContextTokensResponse,
@@ -153,7 +153,7 @@ export const agentApi = {
     mode: AgentMode,
     callbacks: AgentStreamCallbacks,
     options?: {
-      canvasContext?: AgentBaseContext;
+      canvasContext?: AgentChatContext;
       canvasId?: string;
       attachments?: ChatAttachment[];
       selectedNodeIds?: string[];

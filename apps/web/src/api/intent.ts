@@ -9,10 +9,10 @@ import { routes } from './_routes';
 import { readTypedSSEStream } from './_sse';
 
 import type {
-  AgentBaseContext,
   AnnotationClusterContext,
   AnnotationCommandResponse,
   IntentCandidate,
+  IntentContext,
   IntentEpisode,
   IntentStreamEvent,
 } from '@sediment/shared';
@@ -22,7 +22,7 @@ import type {
  * as it arrives from the LLM token stream.
  */
 export async function recognizeIntentStream(
-  canvasContext: AgentBaseContext,
+  canvasContext: IntentContext,
   onCandidate: (candidate: IntentCandidate) => void,
   signal?: AbortSignal,
 ): Promise<void> {

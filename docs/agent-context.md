@@ -9,38 +9,46 @@
 
 ## 1. 总览
 
-Agent 接收的所有上下文最终都收敛到一个结构体:
+Agent 接收的上下文目前分成 **两种 wire shape**,按消费方拆开:
 
-- **类型**: `AgentBaseContext` —
-  [packages/shared/src/types/context.ts](../packages/shared/src/types/context.ts)
-- **拼装位置**(浏览器): `useCanvasStore.getAgentContext()` —
+- **`AgentChatContext`** — 给聊天 agent 的瘦载荷,只携带 `selectedNodes`。
+  其余画布信息(几何 / 边 / 最近动作 / 截图)由 agent 通过工具按需取。
+  类型定义:[packages/shared/src/types/agent/context.ts](../packages/shared/src/types/agent/context.ts)
+  · 拼装位置:`useCanvasStore.getAgentChatContext()` —
   [apps/web/src/store/canvasStore.ts](../apps/web/src/store/canvasStore.ts)
-- **请求入口**: `POST /api/agent`,请求体为 `AgentRequest` —
-  [apps/web/src/api/agent.ts](../apps/web/src/api/agent.ts)
-- **服务端拼接进 prompt**: [apps/server/src/modules/agent/agent.route.ts](../apps/server/src/modules/agent/agent.route.ts)
+  · 入口:`POST /api/agent`,请求体 `AgentRequest`。
+- **`IntentContext`** — 给 intent recogniser 的全量快照:`nodes` /
+  `edges` / `recentActions` / `screenshot` / `selectedNodes`。intent
+  识别是单次 LLM 调用,无法走工具,因此一次性下发。
+  类型同上,拼装位置:`useCanvasStore.getIntentContext()`
+  · 入口:`POST /api/intent/recognize{,-stream}`。
+- **服务端拼接进 prompt**:[apps/server/src/modules/agent/agent.route.ts](../apps/server/src/modules/agent/agent.route.ts)(chat)、
+  [apps/server/src/modules/agent/intent.service.ts](../apps/server/src/modules/agent/intent.service.ts)(intent)。
 
 整体数据流:
 
 ```
-浏览器 canvasStore.getAgentContext()
-   │   抽取 snippet / selected / spatial / recentActions
-   ▼
-POST /api/agent  body = AgentRequest {
-    content, threadId, mode,
-    canvasContext: AgentBaseContext,
+[Chat]                                  [Intent]
+  canvasStore.getAgentChatContext()       canvasStore.getIntentContext()
+      │   只拽selected                       │   拽 snapshot+actions+截图
+      ▼                                       ▼
+POST /api/agent                           POST /api/intent/recognize
+  body = AgentRequest {                     body = IntentRequest {
+    content, threadId, mode,                  canvasContext: IntentContext
+    canvasContext: AgentChatContext,        }
     canvasId, attachments,
     selectedNodeIds, intentData
-}
-   │
-服务端 agent.route.ts
-   ├─ loadContext(threadId, canvasId)        # 从磁盘加载历史 pi-ai Context
-   ├─ collectImageAttachments()              # 选中的 image 节点抽 URL
-   ├─ buildNodeSummaries(canvasId, ids)      # 仅对选中节点注入 enrich 摘要
-   │     └─ 推一条 [SYSTEM Context] 系统消息
-   ├─ buildUserContent(text, attachments)    # 构造多模态 user message
-   └─ llmStream(context)                     # 进入 LLM
-   │
-   ▼ 工具循环
+  }
+  │
+  ▼服务端 agent.route.ts
+  ├─ loadContext(threadId, canvasId)        # 从磁盘加载历史 pi-ai Context
+  ├─ collectImageAttachments()              # 选中的 image 节点抽 URL
+  ├─ buildNodeSummaries(canvasId, ids)      # 仅对选中节点注入 enrich 摘要
+  │     └─ 推一条 [SYSTEM Context] 系统消息
+  ├─ buildUserContent(text, attachments)    # 构造多模态 user message
+  └─ llmStream(context)                     # 进入 LLM
+  │
+  ▼ 工具循环
 read / grep / find / ls / get_canvas_outline / inspect_nodes / inspect_edges /
 canvas_commands / web_search / use_skill ...
 ```
@@ -53,7 +61,7 @@ canvas_commands / web_search / use_skill ...
 
 | 字段                                  | 范围         | 内容                                                                                                                                                          | 来源                                                                   |
 | ------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `nodes: NodeSummary[]`                | **全部节点** | `id` / `type` / `label` / `snippet`(前 120 字符)/ `frameLabel` / `position` / `size`                                                                          | [extractSnippet](../apps/web/src/handler/canvasCommand/utils/index.ts) |
+| `nodes: NodeSummary[]`                | **全部节点** | `id` / `type` / `label` / `snippet`(前 120 字符)/ `frameLabel` / `position` / `size` — **仅 IntentContext 下发**;chat agent 走 `get_canvas_outline()`。       | [extractSnippet](../apps/web/src/handler/canvasCommand/utils/index.ts) |
 | `selectedNodes: SelectedNodeDetail[]` | **当前选中** | `id` / `type` / `label`,image 节点带 `src`,frame 节点带 `children`(递归)。**不携带 `content` / `position` / `size` / `origin`**——节点正文与布局都靠工具按需取 | [buildSelectedDetail](../apps/web/src/store/canvasStore.ts)            |
 
 > **关键限制 1**:`NodeSummary.snippet` 是 `content.slice(0, 120)` 的纯截断
@@ -74,8 +82,9 @@ canvas_commands / web_search / use_skill ...
 | `edges`        | 仅 `{ source, target }` 对。**无关系语义、无方向语义、无标签**                                    |
 | Frame 包含关系 | **隐式**:通过 `NodeSummary.frameLabel` 与 `SelectedNodeDetail.children` 表达,没有显式 `frameTree` |
 
-> **空间结构（clusters / arrangement / 几何）现在不再随 `AgentBaseContext` 下发**。
-> Agent 通过 `get_canvas_outline()` 拿一次"画布地图"（节点几何 + 边 + 聚类），
+> **空间结构（clusters / arrangement / 几何）现在不随 `AgentChatContext` 下发**。
+> intent recogniser 仍从 `IntentContext.nodes` / `.edges` 拿到节点骨架，但 chat agent
+> 通过 `get_canvas_outline()` 拿一次"画布地图"（节点几何 + 边 + 聚类），
 > 用 `inspect_nodes` / `inspect_edges` 做按需查询。底层算法仍是
 > [packages/shared/src/utils/spatial.ts](../packages/shared/src/utils/spatial.ts)
 > 的 `buildSpatialSummary` 等函数，封装在
@@ -158,12 +167,12 @@ canvas_commands / web_search / use_skill ...
 
 | 类别                   | 是否进入初始上下文       | 是否截断                             | 获取方式                                 |
 | ---------------------- | ------------------------ | ------------------------------------ | ---------------------------------------- |
-| 全部节点               | ✓ `NodeSummary[]`        | snippet 120 字符 (无 enrich summary) | `AgentBaseContext.nodes`                 |
-| 选中节点元数据         | ✓ `SelectedNodeDetail[]` | 仅元数据,**不含正文**                | `AgentBaseContext.selectedNodes`         |
+| 全部节点               | ✓ `NodeSummary[]`        | snippet 120 字符 (无 enrich summary) | `IntentContext.nodes` (intent only)      |
+| 选中节点元数据         | ✓ `SelectionPayload[]`   | 仅元数据,**不含正文**                | `AgentChatContext.selectedNodes`         |
 | 选中节点完整正文       | ✗ 必须工具               | —                                    | `read("nodes/<id>.md")`                  |
-| 边                     | ✓ source/target 对       | —                                    | `AgentBaseContext.edges`                 |
+| 边                     | ✓ source/target 对       | —                                    | `IntentContext.edges` (intent only)      |
 | 空间布局               | ✗ 必须工具               | —                                    | `get_canvas_outline()` / `inspect_nodes` |
-| 最近动作               | ✓ 最近 10 条             | 无时间戳                             | `AgentBaseContext.recentActions`         |
+| 最近动作               | ✓ 最近 10 条             | 无时间戳                             | `IntentContext.recentActions` (intent)   |
 | Frame 层级             | ✓ 隐式(label + children) | —                                    | `NodeSummary` / `SelectedNodeDetail`     |
 | 聊天历史               | ✓ pi-ai Context 加载     | —                                    | 磁盘 `.history`                          |
 | 截图                   | ✗(仅 intent)             | —                                    | intent 端点 / 工具调用                   |
@@ -239,7 +248,7 @@ canvas_commands / web_search / use_skill ...
 
 - **T2-A 显式结构索引**:
   ```ts
-  interface AgentBaseContext {
+  interface IntentContext {
     structure?: {
       frameTree: Array<{
         frameId: string;
@@ -269,7 +278,7 @@ canvas_commands / web_search / use_skill ...
 
 - **T3-A 视口 / 焦点信号**:
   ```ts
-  interface AgentBaseContext {
+  interface IntentContext {
     viewport?: { x: number; y: number; zoom: number; visibleNodeIds: string[] };
   }
   ```
@@ -292,7 +301,7 @@ canvas_commands / web_search / use_skill ...
     真正实现"画布是共享认知空间"。
 - **T4-B 跨 canvas 轻索引**:
   ```ts
-  interface AgentBaseContext {
+  interface IntentContext {
     workspaceContext?: {
       canvases: Array<{
         canvasId: string;
@@ -468,21 +477,21 @@ L0 是"画布的骨架",L1 是"画布的语义索引",L2 是"画布的全文"。
 
 ## 附录:关键文件索引
 
-| 关注点                      | 文件                                                                                                                |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| 上下文类型定义              | [packages/shared/src/types/context.ts](../packages/shared/src/types/context.ts)                                     |
-| 浏览器拼装上下文            | [apps/web/src/store/canvasStore.ts](../apps/web/src/store/canvasStore.ts) (`getAgentContext`)                       |
-| Snippet 抽取 / RecentAction | [apps/web/src/handler/canvasCommand/utils/index.ts](../apps/web/src/handler/canvasCommand/utils/index.ts)           |
-| 截图                        | [apps/web/src/handler/canvasCommand/utils/screenshot.ts](../apps/web/src/handler/canvasCommand/utils/screenshot.ts) |
-| 空间聚类                    | [packages/shared/src/utils/spatial.ts](../packages/shared/src/utils/spatial.ts)                                     |
-| Agent 请求类型              | [packages/shared/src/types/agent.ts](../packages/shared/src/types/agent.ts)                                         |
-| 浏览器请求入口              | [apps/web/src/api/agent.ts](../apps/web/src/api/agent.ts)                                                           |
-| 服务端路由                  | [apps/server/src/modules/agent/agent.route.ts](../apps/server/src/modules/agent/agent.route.ts)                     |
-| 聊天历史持久化              | [apps/server/src/modules/agent/store/chat-store.ts](../apps/server/src/modules/agent/store/chat-store.ts)           |
-| 工具定义                    | [apps/server/src/modules/agent/tools/definitions.ts](../apps/server/src/modules/agent/tools/definitions.ts)         |
-| 工具执行                    | [apps/server/src/modules/agent/tools/executor.ts](../apps/server/src/modules/agent/tools/executor.ts)               |
-| 系统 prompt(ask)            | [apps/server/src/prompt/system.ts](../apps/server/src/prompt/system.ts)                                             |
-| 系统 prompt(operate)        | [apps/server/src/prompt/agent.ts](../apps/server/src/prompt/agent.ts)                                               |
-| Intent prompt               | [apps/server/src/prompt/intent.ts](../apps/server/src/prompt/intent.ts)                                             |
-| 预处理流水线                | [apps/server/src/modules/preprocessing/pipeline.ts](../apps/server/src/modules/preprocessing/pipeline.ts)           |
-| Enrich 阶段                 | [apps/server/src/modules/preprocessing/stages/enrich.ts](../apps/server/src/modules/preprocessing/stages/enrich.ts) |
+| 关注点                      | 文件                                                                                                                   |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| 上下文类型定义              | [packages/shared/src/types/context.ts](../packages/shared/src/types/context.ts)                                        |
+| 浏览器拼装上下文            | [apps/web/src/store/canvasStore.ts](../apps/web/src/store/canvasStore.ts) (`getAgentChatContext` / `getIntentContext`) |
+| Snippet 抽取 / RecentAction | [apps/web/src/handler/canvasCommand/utils/index.ts](../apps/web/src/handler/canvasCommand/utils/index.ts)              |
+| 截图                        | [apps/web/src/handler/canvasCommand/utils/screenshot.ts](../apps/web/src/handler/canvasCommand/utils/screenshot.ts)    |
+| 空间聚类                    | [packages/shared/src/utils/spatial.ts](../packages/shared/src/utils/spatial.ts)                                        |
+| Agent 请求类型              | [packages/shared/src/types/agent.ts](../packages/shared/src/types/agent.ts)                                            |
+| 浏览器请求入口              | [apps/web/src/api/agent.ts](../apps/web/src/api/agent.ts)                                                              |
+| 服务端路由                  | [apps/server/src/modules/agent/agent.route.ts](../apps/server/src/modules/agent/agent.route.ts)                        |
+| 聊天历史持久化              | [apps/server/src/modules/agent/store/chat-store.ts](../apps/server/src/modules/agent/store/chat-store.ts)              |
+| 工具定义                    | [apps/server/src/modules/agent/tools/definitions.ts](../apps/server/src/modules/agent/tools/definitions.ts)            |
+| 工具执行                    | [apps/server/src/modules/agent/tools/executor.ts](../apps/server/src/modules/agent/tools/executor.ts)                  |
+| 系统 prompt(ask)            | [apps/server/src/prompt/system.ts](../apps/server/src/prompt/system.ts)                                                |
+| 系统 prompt(operate)        | [apps/server/src/prompt/agent.ts](../apps/server/src/prompt/agent.ts)                                                  |
+| Intent prompt               | [apps/server/src/prompt/intent.ts](../apps/server/src/prompt/intent.ts)                                                |
+| 预处理流水线                | [apps/server/src/modules/preprocessing/pipeline.ts](../apps/server/src/modules/preprocessing/pipeline.ts)              |
+| Enrich 阶段                 | [apps/server/src/modules/preprocessing/stages/enrich.ts](../apps/server/src/modules/preprocessing/stages/enrich.ts)    |

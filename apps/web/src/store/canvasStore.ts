@@ -54,12 +54,13 @@ import { getNodeSize } from '../utils/node/size';
 
 import type { AlignDirection } from '@/handler/canvasCommand/utils/alignment';
 import type {
-  AgentBaseContext,
+  AgentChatContext,
   CanvasCommand,
   CanvasCommandType,
   CanvasExecution,
   CanvasExecutionSource,
   CanvasNodeType,
+  IntentContext,
   NodeSummary,
   RecentAction,
   SelectionPayload,
@@ -403,7 +404,23 @@ type RFState = {
   ) => void;
   /** @internal Resolve a web-only UiIntent and execute the resulting commands. */
   dispatchUiIntent: (intent: CanvasUiIntent) => void;
-  getAgentContext: () => AgentBaseContext;
+  /**
+   * Build the slim context attached to every chat-agent request.
+   *
+   * Only carries `selectedNodes` — full canvas / spatial / recent
+   * action data is fetched on demand by the agent through tools
+   * (`get_canvas_outline`, `inspect_nodes`, `inspect_edges`, `read`).
+   */
+  getAgentChatContext: () => AgentChatContext;
+  /**
+   * Build the rich context consumed by the intent recogniser.
+   *
+   * Carries the full canvas snapshot (nodes + edges), the recent
+   * action ring buffer, the user selection, and (when available) a
+   * viewport screenshot — the recogniser is a one-shot LLM call and
+   * cannot pull data through tools.
+   */
+  getIntentContext: () => IntentContext;
 
   /**
    * Force-flush any buffered behavioural events to the server.
@@ -592,6 +609,48 @@ const autoSaveMiddleware =
 // onNodeDragStop cancel any pending frame reliably.
 let _dragPreviewRafId: number | null = null;
 
+/**
+ * Build a recursive `SelectionPayload` factory bound to the current
+ * node list (so `frame` nodes can resolve their direct children).
+ *
+ * Only sends lightweight metadata — the agent uses `read` to fetch
+ * full content on demand, saving tokens. Image nodes keep `src` so
+ * the server can build vision attachments.
+ *
+ * Layout (`position` / `size`) and provenance (`origin`) are
+ * deliberately omitted: the server consumes neither. Spatial info is
+ * fetched on demand via `get_canvas_outline()` / `inspect_nodes`.
+ */
+function makeBuildSelectedDetail(
+  allNodes: Node[],
+): (n: Node) => SelectionPayload {
+  const build = (n: Node): SelectionPayload => {
+    const data = n.data as Record<string, unknown> | undefined;
+    const nodeType = (n.type ?? 'note') as CanvasNodeType;
+
+    // Only keep src for image nodes (needed for vision analysis).
+    const src =
+      n.type === 'image' ? (data?.src as string | undefined) : undefined;
+
+    const detail: SelectionPayload = {
+      id: n.id,
+      type: nodeType,
+      label: data?.label as string | undefined,
+      ...(src !== undefined ? { src } : {}),
+    };
+
+    if (n.type === 'frame') {
+      const children = allNodes
+        .filter((child) => child.parentId === n.id)
+        .map(build);
+      if (children.length > 0) detail.children = children;
+    }
+
+    return detail;
+  };
+  return build;
+}
+
 const useCanvasStore = create<RFState>()(
   autoSaveMiddleware((set, get) => ({
     nodes: [],
@@ -748,46 +807,19 @@ const useCanvasStore = create<RFState>()(
       }
     },
 
-    getAgentContext: (): AgentBaseContext => {
+    getAgentChatContext: (): AgentChatContext => {
+      const { nodes } = get();
+      const buildSelectedDetail = makeBuildSelectedDetail(nodes);
+      return {
+        selectedNodes: nodes.filter((n) => n.selected).map(buildSelectedDetail),
+      };
+    },
+
+    getIntentContext: (): IntentContext => {
       const { nodes, edges, actionHistory } = get();
       // Build a lookup map once to avoid O(n²) scans inside edges.map.
       const nodeMap = new Map(nodes.map((n) => [n.id, n]));
-
-      /**
-       * Build a SelectionPayload for a single node.
-       * Only sends lightweight metadata — the agent uses `read`
-       * to fetch full content on demand, saving tokens.
-       * Image nodes keep `src` so the server can build vision attachments.
-       * For frame nodes, recursively include direct children as `children` details.
-       *
-       * Layout (`position` / `size`) and provenance (`origin`) are deliberately
-       * omitted: the server consumes neither. Spatial info is fetched on demand
-       * via `get_canvas_outline()` / `inspect_nodes`.
-       */
-      const buildSelectedDetail = (n: Node): SelectionPayload => {
-        const data = n.data as Record<string, unknown> | undefined;
-        const nodeType = (n.type ?? 'note') as CanvasNodeType;
-
-        // Only keep src for image nodes (needed for vision analysis)
-        const src =
-          n.type === 'image' ? (data?.src as string | undefined) : undefined;
-
-        const detail: SelectionPayload = {
-          id: n.id,
-          type: nodeType,
-          label: data?.label as string | undefined,
-          ...(src !== undefined ? { src } : {}),
-        };
-
-        if (n.type === 'frame') {
-          const children = nodes
-            .filter((child) => child.parentId === n.id)
-            .map(buildSelectedDetail);
-          if (children.length > 0) detail.children = children;
-        }
-
-        return detail;
-      };
+      const buildSelectedDetail = makeBuildSelectedDetail(nodes);
 
       return {
         nodes: nodes.map((n): NodeSummary => {

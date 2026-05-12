@@ -7,18 +7,20 @@
  * are the single source of truth, types derived via `z.infer`.
  *
  * Complex nested shapes that already have rich TypeScript interfaces
- * (e.g. `AgentBaseContext`, `AnnotationClusterContext`, `IntentEpisode`)
- * are accepted via `z.custom<T>()` — top-level structure is validated
- * to reject malformed wrappers, but the inner objects are trusted to
- * conform to their existing types because they are produced by the
- * same client codebase that compiles against those interfaces.
+ * (e.g. `AgentChatContext`, `IntentContext`, `AnnotationClusterContext`,
+ * `IntentEpisode`) are accepted via `z.custom<T>()` — top-level
+ * structure is validated to reject malformed wrappers, but the inner
+ * objects are trusted to conform to their existing types because they
+ * are produced by the same client codebase that compiles against those
+ * interfaces.
  */
 
 import { z } from 'zod';
 
 import type {
-  AgentBaseContext,
+  AgentChatContext,
   AnnotationClusterContext,
+  IntentContext,
   IntentEpisode,
 } from '../agent/index.js';
 
@@ -44,7 +46,7 @@ export const agentRequestSchema = z.object({
   content: z.string().min(1, 'Message content is required'),
   threadId: z.string().min(1).optional(),
   mode: z.enum(['ask', 'operate']).optional(),
-  canvasContext: z.custom<AgentBaseContext>().optional(),
+  canvasContext: z.custom<AgentChatContext>().optional(),
   canvasId: z.string().min(1).optional(),
   attachments: z.array(chatAttachmentSchema).optional(),
   selectedNodeIds: z.array(z.string().min(1)).optional(),
@@ -65,7 +67,7 @@ export type AgentCanvasIdQuery = z.infer<typeof agentCanvasIdQuerySchema>;
 
 /** Body for `POST /api/intent/recognize` and `/recognize-stream`. */
 export const intentRequestSchema = z.object({
-  canvasContext: z.custom<AgentBaseContext>(
+  canvasContext: z.custom<IntentContext>(
     (v) => v !== null && typeof v === 'object',
     'canvasContext is required',
   ),

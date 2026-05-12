@@ -169,30 +169,56 @@ export interface LlmSelectionRef {
 }
 
 /**
- * The base context sent with every agent request.
- * Designed to be lightweight: nodes carry only label + snippet,
- * full content is fetched on demand via `read` on "nodes/<nodeId>.md".
+ * Context sent with every chat-agent request (`POST /api/agent`).
+ *
+ * Deliberately minimal: only the user's **explicit selection** travels
+ * with the request. The rest of the canvas (nodes / edges / spatial
+ * layout / recent actions / screenshot) is fetched on demand by the
+ * agent through tools — `get_canvas_outline`, `inspect_nodes`,
+ * `inspect_edges`, `read`, etc. — so we don't pay the upload cost on
+ * every turn for data the model usually doesn't need.
+ *
+ * Selection is the primary intent signal: "focus on this". The server
+ * flattens it into `LlmSelectionRef[]` and pre-computes per-node
+ * `filename` so the agent can `read` content without re-deriving the
+ * `nodes/<safeLabel>.md` path.
  */
-export interface AgentBaseContext {
-  /** Snapshot of all current canvas nodes */
+export interface AgentChatContext {
+  /**
+   * Nodes explicitly selected by the user at the time of the request.
+   * Empty array means "no explicit selection; the agent should pull
+   * canvas state via tools as needed".
+   */
+  selectedNodes: SelectionPayload[];
+}
+
+/**
+ * Context sent to the intent recogniser (`POST /api/intent/recognize*`).
+ *
+ * Distinct from {@link AgentChatContext}: intent recognition is a
+ * one-shot LLM call that has to classify what the user is *about* to
+ * do, so it cannot rely on tool-driven exploration. It needs the full
+ * canvas snapshot, the recent action ring buffer, and an optional
+ * viewport screenshot — all up-front, all in one payload.
+ */
+export interface IntentContext {
+  /** Snapshot of all current canvas nodes. */
   nodes: NodeSummary[];
-  /** Semantic edges between nodes (label pairs, no coordinates) */
+  /** Semantic edges between nodes (label pairs, no coordinates). */
   edges: Array<{ source: NodeRef; target: NodeRef }>;
   /**
-   * Ring buffer of the last ~10 user actions (maintained by the frontend).
-   * Ordered from oldest to newest.
+   * Ring buffer of the last ~10 user actions (maintained by the
+   * frontend). Ordered from oldest to newest.
    */
   recentActions: RecentAction[];
   /**
    * Base64-encoded PNG screenshot of the current canvas viewport.
-   * Optional — captured on-demand (e.g. intent recognition) for visual reasoning.
+   * Optional — captured on demand for visual reasoning.
    */
   screenshot?: string;
   /**
    * Nodes explicitly selected by the user at the time of the request.
-   *
-   * Selection is the primary intent signal — it overrides the general canvas
-   * snapshot.
+   * Same shape as {@link AgentChatContext.selectedNodes}.
    */
   selectedNodes: SelectionPayload[];
 }

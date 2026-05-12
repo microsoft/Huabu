@@ -467,7 +467,9 @@ export function useAgentStream(): UseAgentStreamReturn {
     (state) => state.clearPendingAttachments,
   );
 
-  const getAgentContext = useCanvasStore((state) => state.getAgentContext);
+  const getAgentChatContext = useCanvasStore(
+    (state) => state.getAgentChatContext,
+  );
   const canvasId = useCanvasStore((state) => state.canvasId);
 
   // Track resources across the current agent run
@@ -612,7 +614,7 @@ export function useAgentStream(): UseAgentStreamReturn {
             },
           },
           {
-            canvasContext: getAgentContext(),
+            canvasContext: getAgentChatContext(),
             canvasId: canvasId || undefined,
             attachments,
             selectedNodeIds:
@@ -652,7 +654,7 @@ export function useAgentStream(): UseAgentStreamReturn {
       setLastAction,
       threadId,
       updateMessage,
-      getAgentContext,
+      getAgentChatContext,
       canvasId,
     ],
   );

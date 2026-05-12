@@ -1,7 +1,7 @@
 /**
  * Intent Recognition Service
  *
- * Receives an AgentBaseContext and returns a ranked list of intent candidates
+ * Receives an IntentContext and returns a ranked list of intent candidates
  * by calling the LLM to analyze the canvas state and recent user actions.
  */
 
@@ -27,10 +27,10 @@ import type {
   ToolCall,
 } from '@earendil-works/pi-ai';
 import type {
-  AgentBaseContext,
   AnnotationClusterContext,
   CanvasCommand,
   IntentCandidate,
+  IntentContext,
   IntentEpisode,
   RecentAction,
 } from '@sediment/shared';
@@ -43,7 +43,7 @@ const AGENT_CANVAS_COMMAND_TYPE_SET = new Set<string>(
 // Context → natural-language serialization
 // ---------------------------------------------------------------------------
 
-function serializeContextLight(ctx: AgentBaseContext): string {
+function serializeContextLight(ctx: IntentContext): string {
   const lines: string[] = [];
 
   if (ctx.nodes.length > 0) {
@@ -215,7 +215,7 @@ const SCREENSHOT_CAPTION =
   'Above is a screenshot of the current canvas viewport. Nodes are labeled with their IDs. The last user action is annotated in red: a banner at the top-left reads "Last step: ...", affected nodes have red borders, and arrows show directional relationships (connect, frame). Use these visual signals to infer intent.';
 
 async function llmIntentRecognition(
-  ctx: AgentBaseContext,
+  ctx: IntentContext,
 ): Promise<IntentCandidate[]> {
   const contextText = serializeContextLight(ctx);
 
@@ -260,7 +260,7 @@ async function llmIntentRecognition(
 // ---------------------------------------------------------------------------
 
 export async function recognizeIntent(
-  ctx: AgentBaseContext,
+  ctx: IntentContext,
 ): Promise<IntentCandidate[]> {
   try {
     return await llmIntentRecognition(ctx);
@@ -271,7 +271,7 @@ export async function recognizeIntent(
 }
 
 export async function* recognizeIntentStream(
-  ctx: AgentBaseContext,
+  ctx: IntentContext,
 ): AsyncGenerator<IntentCandidate> {
   const contextText = serializeContextLight(ctx);
 
