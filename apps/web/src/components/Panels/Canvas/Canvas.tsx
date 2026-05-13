@@ -140,9 +140,6 @@ export const Canvas: React.FC<CanvasProps> = ({
   const nodes = useCanvasStore((state) => state.nodes);
   const edges = useCanvasStore((state) => state.edges);
   const [isBoxSelecting, setIsBoxSelecting] = useState(false);
-  const [lassoPreviewNodeIdSet, setLassoPreviewNodeIdSet] = useState<
-    Set<string>
-  >(() => new Set());
   const selectedNodeIds = useMemo(
     () => new Set(nodes.filter((node) => node.selected).map((node) => node.id)),
     [nodes],
@@ -286,12 +283,29 @@ export const Canvas: React.FC<CanvasProps> = ({
   } = useCanvasLasso({
     active: !pendingNodeType && tool === 'lasso',
     wrapperRef,
+    rfInstanceRef,
     edges,
     onSelect: (nodeIds) => selectNodes(nodeIds),
   });
+  const lassoPreviewNodeIdSet = useMemo(
+    () => new Set(previewNodeIds),
+    [previewNodeIds],
+  );
   const lassoPreviewEdgeIdSet = useMemo(
     () => new Set(previewEdgeIds),
     [previewEdgeIds],
+  );
+  const displayNodes = useMemo<typeof nodes>(
+    () =>
+      nodes.map((node) => {
+        const className = clsx(
+          node.className,
+          lassoPreviewNodeIdSet.has(node.id) && 'canvas-lasso-preview',
+        );
+
+        return className ? { ...node, className } : node;
+      }),
+    [lassoPreviewNodeIdSet, nodes],
   );
 
   // Override marker colors on selected edges so arrows match the selection
@@ -341,32 +355,6 @@ export const Canvas: React.FC<CanvasProps> = ({
     selectedEdgeIdSet,
     selectedNodeIds,
   ]);
-
-  useEffect(() => {
-    setLassoPreviewNodeIdSet(new Set(previewNodeIds));
-  }, [previewNodeIds]);
-
-  useEffect(() => {
-    const wrapper = wrapperRef.current;
-    if (!wrapper) return;
-
-    const nodeElements = wrapper.querySelectorAll<HTMLElement>(
-      '.react-flow__node[data-id]',
-    );
-
-    nodeElements.forEach((nodeElement) => {
-      const nodeId = nodeElement.dataset.id;
-      const shouldPreview =
-        typeof nodeId === 'string' && lassoPreviewNodeIdSet.has(nodeId);
-      nodeElement.classList.toggle('canvas-lasso-preview', shouldPreview);
-    });
-
-    return () => {
-      nodeElements.forEach((nodeElement) => {
-        nodeElement.classList.remove('canvas-lasso-preview');
-      });
-    };
-  }, [lassoPreviewNodeIdSet]);
 
   // Cancel any other pending node placement (note / text / question) with Escape.
   useEffect(() => {
@@ -608,7 +596,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       <ReactFlow
         deleteKeyCode={null}
         fitView={true}
-        nodes={nodes}
+        nodes={displayNodes}
         edges={displayEdges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}

@@ -9,7 +9,7 @@ import {
 
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
-import type { Edge } from '@xyflow/react';
+import type { Edge, ReactFlowInstance } from '@xyflow/react';
 
 type Point = {
   x: number;
@@ -30,6 +30,7 @@ const MIN_LASSO_SPAN = 10;
 interface UseCanvasLassoOptions {
   active: boolean;
   wrapperRef: MutableRefObject<HTMLDivElement | null>;
+  rfInstanceRef: MutableRefObject<ReactFlowInstance | null>;
   edges: Edge[];
   onSelect: (nodeIds: string[]) => void;
 }
@@ -166,36 +167,52 @@ function hasEnoughArea(points: Point[]) {
   );
 }
 
+function getNodeRect(instance: ReactFlowInstance, nodeId: string): Rect | null {
+  const internalNode = instance.getInternalNode(nodeId);
+  if (!internalNode || internalNode.hidden) return null;
+
+  const width =
+    internalNode.measured.width ??
+    internalNode.width ??
+    internalNode.initialWidth;
+  const height =
+    internalNode.measured.height ??
+    internalNode.height ??
+    internalNode.initialHeight;
+
+  if (!width || !height) return null;
+
+  return {
+    x: internalNode.internals.positionAbsolute.x,
+    y: internalNode.internals.positionAbsolute.y,
+    width,
+    height,
+  };
+}
+
 function getSelectedNodeIdsFromPolygon(
   polygon: Point[],
-  wrapperRef: MutableRefObject<HTMLDivElement | null>,
+  instance: ReactFlowInstance | null,
 ) {
-  const nodeElements = Array.from(
-    wrapperRef.current?.querySelectorAll<HTMLElement>(
-      '.react-flow__node[data-id]',
-    ) ?? [],
+  if (!instance) return [];
+
+  const flowPolygon = polygon.map((point) =>
+    instance.screenToFlowPosition(point),
   );
 
-  return nodeElements
-    .filter((nodeElement) => {
-      const bounds = nodeElement.getBoundingClientRect();
-      const rect = {
-        x: bounds.left,
-        y: bounds.top,
-        width: bounds.width,
-        height: bounds.height,
-      };
-
-      if (rect.width <= 0 || rect.height <= 0) return false;
-      return polygonIntersectsRect(polygon, rect);
+  return instance
+    .getNodes()
+    .filter((node) => {
+      const rect = getNodeRect(instance, node.id);
+      return rect ? polygonIntersectsRect(flowPolygon, rect) : false;
     })
-    .map((nodeElement) => nodeElement.dataset.id)
-    .filter((id): id is string => Boolean(id));
+    .map((node) => node.id);
 }
 
 export function useCanvasLasso({
   active,
   wrapperRef,
+  rfInstanceRef,
   edges,
   onSelect,
 }: UseCanvasLassoOptions): UseCanvasLassoResult {
@@ -272,12 +289,17 @@ export function useCanvasLasso({
         finalScreenPoints.length >= MIN_LASSO_POINTS &&
         hasEnoughArea(finalScreenPoints)
       ) {
-        onSelect(getSelectedNodeIdsFromPolygon(finalScreenPoints, wrapperRef));
+        onSelect(
+          getSelectedNodeIdsFromPolygon(
+            finalScreenPoints,
+            rfInstanceRef.current,
+          ),
+        );
       }
 
       cancel();
     },
-    [cancel, onSelect, screenPoints, wrapperRef],
+    [cancel, onSelect, rfInstanceRef, screenPoints],
   );
 
   const onPointerCancel = useCallback(
@@ -310,8 +332,8 @@ export function useCanvasLasso({
     if (!screenPoints || screenPoints.length < MIN_LASSO_POINTS) return [];
     if (!hasEnoughArea(screenPoints)) return [];
 
-    return getSelectedNodeIdsFromPolygon(screenPoints, wrapperRef);
-  }, [screenPoints, wrapperRef]);
+    return getSelectedNodeIdsFromPolygon(screenPoints, rfInstanceRef.current);
+  }, [rfInstanceRef, screenPoints]);
 
   const previewEdgeIds = useMemo(
     () => getEdgeIdsBetweenSelectedNodes(previewNodeIds, edges),
