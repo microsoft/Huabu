@@ -16,6 +16,14 @@ export const FRAME_PADDING = 48;
 export const SNAP_GRID: [number, number] = [GRID_SIZE, GRID_SIZE];
 
 /**
+ * Zoom range applied to React Flow as well as our custom trackpad-pinch and
+ * touch-pinch handlers. Keeping a single source of truth ensures all gesture
+ * paths clamp to the same limits.
+ */
+export const MIN_ZOOM = 0.1;
+export const MAX_ZOOM = 5;
+
+/**
  * Round a coordinate to the nearest grid line.
  *
  * Used by the layout engine and alignment helpers so that programmatically
