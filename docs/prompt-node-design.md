@@ -42,14 +42,14 @@ The chat panel is **spatially detached** — the user has to manually pick conte
 
 Key files (everything else is a config/registration touchpoint):
 
-| Concern            | File                                                                                   |
-| ------------------ | -------------------------------------------------------------------------------------- |
-| Component          | `apps/web/src/components/Nodes/question/QuestionNode.tsx`                              |
-| Auto-run + execute | `apps/web/src/hooks/useQuestionRunner.ts`                                              |
-| Create command     | `apps/web/src/handler/canvasCommand/commands/createQuestion.ts`                        |
-| Spatial primitives | `apps/server/src/modules/agent/node-neighbourhood.ts` (algorithm + adapter + renderer) |
-| Shared types       | `packages/shared/src/types/canvas/node.ts` (`QuestionNodeData`, …)                     |
-| Open in chat panel | `apps/web/src/store/chatStore.ts` → `openQuestionThread()`                             |
+| Concern            | File                                                                                    |
+| ------------------ | --------------------------------------------------------------------------------------- |
+| Component          | `apps/web/src/components/Nodes/question/QuestionNode.tsx`                               |
+| Auto-run + execute | `apps/web/src/hooks/useQuestionRunner.ts`                                               |
+| Create command     | `apps/web/src/handler/canvasCommand/commands/createQuestion.ts`                         |
+| Spatial primitives | `apps/server/src/modules/canvas/node-neighbourhood.ts` (algorithm + adapter + renderer) |
+| Shared types       | `packages/shared/src/types/canvas/node.ts` (`QuestionNodeData`, …)                      |
+| Open in chat panel | `apps/web/src/store/chatStore.ts` → `openQuestionThread()`                              |
 
 ---
 
@@ -89,7 +89,7 @@ Visual: sticky-note style, `var(--question-bg)`, cursive font, status pill (top-
 
 ## 4. Spatial context
 
-Resolved entirely server-side. The frontend posts `{anchorNodeId, canvasId}` to `/api/agent` and the server pipeline in `apps/server/src/modules/agent/node-neighbourhood.ts` does the rest:
+Resolved entirely server-side. The frontend posts `{anchorNodeId, canvasId}` to `/api/agent` and the server pipeline in `apps/server/src/modules/canvas/node-neighbourhood.ts` does the rest:
 
 1. Adapter loads `canvas.json`, normalises geometry via `buildSpatialBundle` (shared with `get_canvas_outline` / `inspect_nodes`), and extracts a `label > content[:120] > src` snippet per node.
 2. **`buildNodeNeighbourhoodContext(target, allNodes, edges, snippets)`** walks inside-out (frame → grandframe → canvas) and produces a `NodeNeighbourhoodContext` made of nested `SpatialLayer`s. Each layer carries the anchor's nearest groups (clusters of co-located nodes) plus connection edges. Three priority signals seed the layers:

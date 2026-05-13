@@ -22,12 +22,12 @@ import { encode } from 'gpt-tokenizer';
 
 import { loadAgent, renderAgentTemplate } from '../../prompt/agent-loader.js';
 import { runAgent } from '../agent/agent.service.js';
-import { renderNodeNeighbourhoodMarkdown } from '../agent/node-neighbourhood.js';
 import { loadContext, saveContext } from '../agent/store/chat-store.js';
 import {
   ARTIFACT_URL_REGEX,
   resolveArtifactImageUrl,
 } from '../artifact/utils.js';
+import { renderNodeNeighbourhoodMarkdown } from '../canvas/node-neighbourhood.js';
 import { getCanvasStore } from '../storage/index.js';
 import { toSafeFilename } from '../storage/naming.js';
 

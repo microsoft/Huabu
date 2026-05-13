@@ -121,9 +121,9 @@ Per-canvas 覆盖：`<workspace>/<canvasId>/skills/<id>/SKILL.md`（含 `referen
 
 ### 4.1 Tool 覆盖范围扩展 (low-priority)
 
-| #   | 项                            | 触发条件                                                                                                                | 范围                                                                                                                                                                                                                                    |
-| --- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| T1  | `describe_node_position` 工具 | prompt 节点 / annotation cluster trace 上看到反复用 `inspect_nodes({nearNode}) + inspect_nodes({ids}) + 自己拼自然语言` | 新增 `handlers/canvas-describe.ts` 包装现有 `buildNodeNeighbourhoodContext()`（`apps/server/src/modules/agent/node-neighbourhood.ts`）；schema 仅 `nodeId + radius?`；输出 `{description, neighbors, cluster?}`。**严禁**新写空间算法。 |
+| #   | 项                            | 触发条件                                                                                                                | 范围                                                                                                                                                                                                                                     |
+| --- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| T1  | `describe_node_position` 工具 | prompt 节点 / annotation cluster trace 上看到反复用 `inspect_nodes({nearNode}) + inspect_nodes({ids}) + 自己拼自然语言` | 新增 `handlers/canvas-describe.ts` 包装现有 `buildNodeNeighbourhoodContext()`（`apps/server/src/modules/canvas/node-neighbourhood.ts`）；schema 仅 `nodeId + radius?`；输出 `{description, neighbors, cluster?}`。**严禁**新写空间算法。 |
 
 ### 4.2 视觉信号 ↔ 空间工具协同 (medium-priority)
 

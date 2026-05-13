@@ -22,8 +22,9 @@
  * question node id as the anchor), but anchor-type agnostic.
  *
  * Lives outside `packages/shared` because nothing on the web bundle
- * currently consumes it; keeping it server-side keeps the prompt-
- * shaped algorithm beside its sole call site.
+ * currently consumes it. Sits next to `canvas-spatial.ts` (its
+ * geometry dependency) rather than next to its sole consumer
+ * (`agent/agent.route.ts`) so the spatial layer stays self-contained.
  */
 
 import {
@@ -34,7 +35,7 @@ import {
   sortByReadingOrder,
 } from '@sediment/shared';
 
-import { buildSpatialBundle } from '../canvas/canvas-spatial.js';
+import { buildSpatialBundle } from './canvas-spatial.js';
 import { getCanvasStore } from '../storage/index.js';
 
 import type { SpatialNode } from '@sediment/shared';
