@@ -38,18 +38,15 @@ export default function resolvePasteClipboard(
   }
 
   // Compute the uniform offset for root nodes.
-  // Center the anchor node at flowPosition (like addNode centers at placementPoint).
+  // Anchor the chosen root node's top-left corner at flowPosition
+  // (matches addNode placement semantics).
   const rootNodes = clipboard.filter((node) => !node.parentId);
   const anchorNode = rootNodes[0] ?? clipboard[0];
-  const anchorSize = canvasSizeFromStyle(anchorNode.style);
-  const anchorW = anchorSize?.width ?? 0;
-  const anchorH =
-    typeof anchorSize?.height === 'number' ? anchorSize.height : 0;
   const offsetX = intent.flowPosition
-    ? intent.flowPosition.x - anchorNode.position.x - anchorW / 2
+    ? intent.flowPosition.x - anchorNode.position.x
     : DEFAULT_PASTE_OFFSET;
   const offsetY = intent.flowPosition
-    ? intent.flowPosition.y - anchorNode.position.y - anchorH / 2
+    ? intent.flowPosition.y - anchorNode.position.y
     : DEFAULT_PASTE_OFFSET;
 
   // Frame hit-test once at flowPosition — all root nodes go into the

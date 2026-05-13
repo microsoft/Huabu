@@ -56,7 +56,7 @@ export interface AddNodeInput {
   size?: NodeSize;
   naturalDimensions?: { width: number; height: number };
   parentId?: CanvasNodeId | null;
-  /** Placement anchor used for centering and frame hit-testing. */
+  /** Top-left anchor of the new node and the point used for frame hit-testing. */
   placementPoint?: Point;
   skipAutoLayout?: boolean;
 }

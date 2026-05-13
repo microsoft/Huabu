@@ -10,7 +10,6 @@ import {
   type CanvasNodeId,
   type CanvasNodeType,
   type NodeSize,
-  type Point,
 } from '@sediment/shared';
 
 import { getNodeDefaultSize } from '@/config/nodeSizes';
@@ -26,7 +25,7 @@ import type {
 import type { NestableNode } from '../utils/frame';
 
 // ---------------------------------------------------------------------------
-// Sizing & placement helpers
+// Sizing helpers
 // ---------------------------------------------------------------------------
 function computeMediaSize(
   nodeType: CanvasNodeType,
@@ -42,15 +41,6 @@ function computeMediaSize(
     width: targetWidth,
     height: Math.round(targetWidth * (naturalHeight / naturalWidth)),
   };
-}
-
-function nodePositionFromPlacementPoint(
-  point: Point,
-  _nodeType: string,
-  _size?: NodeSize | null,
-): Point {
-  // Anchor the new node with its top-left corner at the cursor position.
-  return { x: point.x, y: point.y };
 }
 
 // ---------------------------------------------------------------------------
@@ -78,8 +68,9 @@ function materializeAddNode(
         input.naturalDimensions.height,
       ));
 
+  // Anchor the new node with its top-left corner at the cursor position.
   let position = input.placementPoint
-    ? nodePositionFromPlacementPoint(input.placementPoint, input.nodeType, size)
+    ? { x: input.placementPoint.x, y: input.placementPoint.y }
     : undefined;
 
   let parentId = input.parentId;
