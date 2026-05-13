@@ -25,6 +25,7 @@ import {
   urlToNodeInput,
   textToNoteNodeInput,
 } from '@/handler/canvasCommand/nodeInputBuilders';
+import { useCanvasGestures } from '@/hooks/useCanvasGestures';
 import { useCanvasShortcuts } from '@/hooks/useCanvasShortcuts';
 import { useIsTouch } from '@/hooks/useInputMode';
 import { useQuestionRunner } from '@/hooks/useQuestionRunner';
@@ -33,7 +34,7 @@ import { NodeToolbar } from './CanvasToolbar.tsx';
 import { EdgeStyleToolbar } from './EdgeStyleToolbar.tsx';
 import { IntentPopover } from './IntentPopover.tsx';
 import { MultiSelectToolbar } from './MultiSelectToolbar.tsx';
-import { GRID_SIZE } from '../../../config/canvas.ts';
+import { GRID_SIZE, MAX_ZOOM, MIN_ZOOM } from '../../../config/canvas.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import {
   canReadSedimentPayload,
@@ -111,6 +112,19 @@ const FrameFitPreviewOverlay: React.FC<{
 
 /** Node types that support expand-on-double-click. */
 const EXPANDABLE_TYPES = new Set(['image', 'video', 'web', 'pdf', 'note']);
+
+/**
+ * Inner component that owns canvas-wide touch / trackpad gesture wiring.
+ * Lives inside `<ReactFlow>` so the gesture hook (which calls
+ * `useStoreApi`) can reach React Flow's store context.
+ */
+const CanvasGestures: React.FC<{
+  wrapperRef: React.MutableRefObject<HTMLDivElement | null>;
+  rfInstanceRef: React.MutableRefObject<ReactFlowInstance | null>;
+}> = ({ wrapperRef, rfInstanceRef }) => {
+  useCanvasGestures(wrapperRef, rfInstanceRef);
+  return null;
+};
 
 type CanvasProps = {
   shortcutsDisabled?: boolean;
@@ -395,59 +409,6 @@ export const Canvas: React.FC<CanvasProps> = ({
     return () => clearTimeout(timer);
   }, [expandedNodeId, expandMode]);
 
-  // Boost trackpad pinch-to-zoom sensitivity.
-  // Windows touchpads emit ctrlKey+wheel events with very small deltaY values,
-  // resulting in sluggish, non-continuous zoom under d3-zoom's default
-  // sensitivity (0.002). We intercept these events in the capture phase
-  // (before d3-zoom sees them), apply a higher multiplier, and zoom towards
-  // the cursor position for a natural feel.
-  useEffect(() => {
-    const el = wrapperRef.current;
-    if (!el) return;
-
-    const handleWheel = (e: WheelEvent) => {
-      // Only handle pinch-to-zoom (ctrlKey + wheel)
-      if (!e.ctrlKey) return;
-
-      const instance = rfInstanceRef.current;
-      if (!instance) return;
-
-      // 10× the default d3-zoom wheel sensitivity
-      const SENSITIVITY = 0.02;
-      const { x, y, zoom } = instance.getViewport();
-      const factor = Math.pow(2, -e.deltaY * SENSITIVITY);
-      const newZoom = Math.max(0.1, Math.min(5, zoom * factor));
-
-      if (newZoom === zoom) return;
-
-      e.preventDefault();
-      e.stopPropagation();
-
-      // Zoom towards the cursor position
-      const rect = el.getBoundingClientRect();
-      const cx = e.clientX - rect.left;
-      const cy = e.clientY - rect.top;
-      const flowX = (cx - x) / zoom;
-      const flowY = (cy - y) / zoom;
-
-      instance.setViewport(
-        {
-          x: cx - flowX * newZoom,
-          y: cy - flowY * newZoom,
-          zoom: newZoom,
-        },
-        { duration: 0 },
-      );
-    };
-
-    el.addEventListener('wheel', handleWheel, {
-      capture: true,
-      passive: false,
-    });
-    return () =>
-      el.removeEventListener('wheel', handleWheel, { capture: true });
-  }, []);
-
   useEffect(() => {
     return () => {
       rfInstanceRef.current = null;
@@ -639,21 +600,20 @@ export const Canvas: React.FC<CanvasProps> = ({
             : tool === 'pan'
               ? true
               : isTouch
-                ? true
-                : [1] /* 1 = middle mouse button */
+                ? false /* touch + select tool → drag creates selection rect */
+                : [1] /* desktop + select tool → middle mouse button pans */
         }
-        selectionOnDrag={
-          pendingNodeType ? false : isTouch ? false : tool === 'select'
-        }
+        selectionOnDrag={pendingNodeType ? false : tool === 'select'}
         nodesDraggable={!pendingNodeType}
         elementsSelectable={!pendingNodeType}
         panOnScroll={!isTouch}
         zoomOnScroll={true}
         zoomOnPinch={true}
-        minZoom={0.1}
-        maxZoom={5}
+        minZoom={MIN_ZOOM}
+        maxZoom={MAX_ZOOM}
         onlyRenderVisibleElements
       >
+        <CanvasGestures wrapperRef={wrapperRef} rfInstanceRef={rfInstanceRef} />
         <Panel position="bottom-center" className="mb-6">
           <NodeToolbar activeTool={tool} onToolChange={setTool} />
         </Panel>
