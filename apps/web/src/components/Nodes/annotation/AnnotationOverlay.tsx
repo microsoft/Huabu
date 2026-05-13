@@ -131,11 +131,11 @@ export function AnnotationOverlay({
       addNode({
         id: nodeId,
         nodeType: 'annotation',
-        // placementPoint is treated as the CENTER of the node by the intent
-        // system, so offset by half the bounding box dimensions.
+        // placementPoint is the top-left of the new node, which here is
+        // the top-left of the stroke's bounding box.
         placementPoint: {
-          x: result.position.x + result.width / 2,
-          y: result.position.y + result.height / 2,
+          x: result.position.x,
+          y: result.position.y,
         },
         size: { width: result.width, height: result.height },
         data: {
