@@ -31,7 +31,7 @@ interface UseCanvasLassoOptions {
   active: boolean;
   wrapperRef: MutableRefObject<HTMLDivElement | null>;
   edges: Edge[];
-  onSelect: (nodeIds: string[], edgeIds: string[]) => void;
+  onSelect: (nodeIds: string[]) => void;
 }
 
 interface UseCanvasLassoResult {
@@ -242,7 +242,7 @@ export function useCanvasLasso({
       event.stopPropagation();
       event.currentTarget.setPointerCapture(event.pointerId);
 
-      onSelect([], []);
+      onSelect([]);
       setScreenPoints([{ x: event.clientX, y: event.clientY }]);
     },
     [active, onSelect],
@@ -272,21 +272,12 @@ export function useCanvasLasso({
         finalScreenPoints.length >= MIN_LASSO_POINTS &&
         hasEnoughArea(finalScreenPoints)
       ) {
-        const selectedNodeIds = getSelectedNodeIdsFromPolygon(
-          finalScreenPoints,
-          wrapperRef,
-        );
-        const selectedEdgeIds = getEdgeIdsBetweenSelectedNodes(
-          selectedNodeIds,
-          edges,
-        );
-
-        onSelect(selectedNodeIds, selectedEdgeIds);
+        onSelect(getSelectedNodeIdsFromPolygon(finalScreenPoints, wrapperRef));
       }
 
       cancel();
     },
-    [cancel, edges, onSelect, screenPoints, wrapperRef],
+    [cancel, onSelect, screenPoints, wrapperRef],
   );
 
   const onPointerCancel = useCallback(

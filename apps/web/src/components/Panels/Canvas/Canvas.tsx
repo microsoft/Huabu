@@ -143,52 +143,17 @@ export const Canvas: React.FC<CanvasProps> = ({
   const [lassoPreviewNodeIdSet, setLassoPreviewNodeIdSet] = useState<
     Set<string>
   >(() => new Set());
-  const [lassoPreviewEdgeIdSet, setLassoPreviewEdgeIdSet] = useState<
-    Set<string>
-  >(() => new Set());
   const selectedNodeIds = useMemo(
     () => new Set(nodes.filter((node) => node.selected).map((node) => node.id)),
     [nodes],
   );
-
-  // Override marker colors on selected edges so arrows match the selection
-  // highlight color (--color-info). CSS cannot style SVG <marker> referenced
-  // via url() from <defs>, so we swap the marker config in JS.
-  const displayEdges = useMemo(() => {
-    const infoColor = getComputedStyle(document.documentElement)
-      .getPropertyValue('--color-info')
-      .trim();
-    if (!infoColor) return edges;
-    return edges.map((e) => {
-      const isLassoPreviewSelected = lassoPreviewEdgeIdSet.has(e.id);
-      const shouldStaySelected =
-        !isBoxSelecting ||
-        (selectedNodeIds.has(e.source) && selectedNodeIds.has(e.target));
-      const isVisuallySelected =
-        isLassoPreviewSelected || (e.selected && shouldStaySelected);
-
-      if (!isVisuallySelected) {
-        if (!e.selected) return e;
-
-        return {
-          ...e,
-          selected: false,
-        };
-      }
-
-      const recolor = (m: typeof e.markerEnd) => {
-        if (!m || typeof m === 'string') return m;
-        return { ...m, color: infoColor };
-      };
-
-      return {
-        ...e,
-        selected: true,
-        markerEnd: recolor(e.markerEnd),
-        markerStart: recolor(e.markerStart),
-      };
-    });
-  }, [edges, isBoxSelecting, lassoPreviewEdgeIdSet, selectedNodeIds]);
+  const selectedEdgeIdSet = useMemo(
+    () =>
+      new Set(
+        getEdgeIdsBetweenSelectedNodes(Array.from(selectedNodeIds), edges),
+      ),
+    [edges, selectedNodeIds],
+  );
   const onNodesChange = useCanvasStore((state) => state.onNodesChange);
   const onEdgesChange = useCanvasStore((state) => state.onEdgesChange);
   const onConnect = useCanvasStore((state) => state.onConnect);
@@ -205,6 +170,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   const frameNodesInRect = useCanvasStore((state) => state.frameNodesInRect);
   const pendingNodeType = useCanvasStore((state) => state.pendingNodeType);
   const canvasId = useCanvasStore((state) => state.canvasId);
+  const selectNodes = useCanvasStore((state) => state.selectNodes);
   const selectElements = useCanvasStore((state) => state.selectElements);
   const setPendingNodeType = useCanvasStore(
     (state) => state.setPendingNodeType,
@@ -321,13 +287,64 @@ export const Canvas: React.FC<CanvasProps> = ({
     active: !pendingNodeType && tool === 'lasso',
     wrapperRef,
     edges,
-    onSelect: (nodeIds, edgeIds) => selectElements(nodeIds, edgeIds),
+    onSelect: (nodeIds) => selectNodes(nodeIds),
   });
+  const lassoPreviewEdgeIdSet = useMemo(
+    () => new Set(previewEdgeIds),
+    [previewEdgeIds],
+  );
+
+  // Override marker colors on selected edges so arrows match the selection
+  // highlight color (--color-info). CSS cannot style SVG <marker> referenced
+  // via url() from <defs>, so we swap the marker config in JS.
+  const displayEdges = useMemo(() => {
+    const infoColor = getComputedStyle(document.documentElement)
+      .getPropertyValue('--color-info')
+      .trim();
+    if (!infoColor) return edges;
+    return edges.map((e) => {
+      const isLassoPreviewSelected = lassoPreviewEdgeIdSet.has(e.id);
+      const isNodeSelectionSelected = selectedEdgeIdSet.has(e.id);
+      const shouldStaySelected =
+        !isBoxSelecting ||
+        (selectedNodeIds.has(e.source) && selectedNodeIds.has(e.target));
+      const isVisuallySelected =
+        isLassoPreviewSelected ||
+        isNodeSelectionSelected ||
+        (e.selected && shouldStaySelected);
+
+      if (!isVisuallySelected) {
+        if (!e.selected) return e;
+
+        return {
+          ...e,
+          selected: false,
+        };
+      }
+
+      const recolor = (m: typeof e.markerEnd) => {
+        if (!m || typeof m === 'string') return m;
+        return { ...m, color: infoColor };
+      };
+
+      return {
+        ...e,
+        selected: true,
+        markerEnd: recolor(e.markerEnd),
+        markerStart: recolor(e.markerStart),
+      };
+    });
+  }, [
+    edges,
+    isBoxSelecting,
+    lassoPreviewEdgeIdSet,
+    selectedEdgeIdSet,
+    selectedNodeIds,
+  ]);
 
   useEffect(() => {
     setLassoPreviewNodeIdSet(new Set(previewNodeIds));
-    setLassoPreviewEdgeIdSet(new Set(previewEdgeIds));
-  }, [previewEdgeIds, previewNodeIds]);
+  }, [previewNodeIds]);
 
   useEffect(() => {
     const wrapper = wrapperRef.current;
