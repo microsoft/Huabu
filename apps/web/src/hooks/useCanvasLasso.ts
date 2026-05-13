@@ -7,6 +7,8 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 
+import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
+
 import type { Edge } from '@xyflow/react';
 
 type Point = {
@@ -40,6 +42,8 @@ interface UseCanvasLassoResult {
     onPointerCancel: (e: ReactPointerEvent<HTMLDivElement>) => void;
   };
   previewPath: string | null;
+  previewNodeIds: string[];
+  previewEdgeIds: string[];
 }
 
 function distance(a: Point, b: Point) {
@@ -162,6 +166,33 @@ function hasEnoughArea(points: Point[]) {
   );
 }
 
+function getSelectedNodeIdsFromPolygon(
+  polygon: Point[],
+  wrapperRef: MutableRefObject<HTMLDivElement | null>,
+) {
+  const nodeElements = Array.from(
+    wrapperRef.current?.querySelectorAll<HTMLElement>(
+      '.react-flow__node[data-id]',
+    ) ?? [],
+  );
+
+  return nodeElements
+    .filter((nodeElement) => {
+      const bounds = nodeElement.getBoundingClientRect();
+      const rect = {
+        x: bounds.left,
+        y: bounds.top,
+        width: bounds.width,
+        height: bounds.height,
+      };
+
+      if (rect.width <= 0 || rect.height <= 0) return false;
+      return polygonIntersectsRect(polygon, rect);
+    })
+    .map((nodeElement) => nodeElement.dataset.id)
+    .filter((id): id is string => Boolean(id));
+}
+
 export function useCanvasLasso({
   active,
   wrapperRef,
@@ -211,9 +242,10 @@ export function useCanvasLasso({
       event.stopPropagation();
       event.currentTarget.setPointerCapture(event.pointerId);
 
+      onSelect([], []);
       setScreenPoints([{ x: event.clientX, y: event.clientY }]);
     },
-    [active],
+    [active, onSelect],
   );
 
   const onPointerMove = useCallback(
@@ -240,34 +272,14 @@ export function useCanvasLasso({
         finalScreenPoints.length >= MIN_LASSO_POINTS &&
         hasEnoughArea(finalScreenPoints)
       ) {
-        const nodeElements = Array.from(
-          wrapperRef.current?.querySelectorAll<HTMLElement>(
-            '.react-flow__node[data-id]',
-          ) ?? [],
+        const selectedNodeIds = getSelectedNodeIdsFromPolygon(
+          finalScreenPoints,
+          wrapperRef,
         );
-        const selectedNodeIds = nodeElements
-          .filter((nodeElement) => {
-            const bounds = nodeElement.getBoundingClientRect();
-            const rect = {
-              x: bounds.left,
-              y: bounds.top,
-              width: bounds.width,
-              height: bounds.height,
-            };
-
-            if (rect.width <= 0 || rect.height <= 0) return false;
-            return polygonIntersectsRect(finalScreenPoints, rect);
-          })
-          .map((nodeElement) => nodeElement.dataset.id)
-          .filter((id): id is string => Boolean(id));
-        const selectedNodeIdSet = new Set(selectedNodeIds);
-        const selectedEdgeIds = edges
-          .filter(
-            (edge) =>
-              selectedNodeIdSet.has(edge.source) &&
-              selectedNodeIdSet.has(edge.target),
-          )
-          .map((edge) => edge.id);
+        const selectedEdgeIds = getEdgeIdsBetweenSelectedNodes(
+          selectedNodeIds,
+          edges,
+        );
 
         onSelect(selectedNodeIds, selectedEdgeIds);
       }
@@ -303,6 +315,18 @@ export function useCanvasLasso({
     return `${path} Z`;
   }, [screenPoints, wrapperRef]);
 
+  const previewNodeIds = useMemo(() => {
+    if (!screenPoints || screenPoints.length < MIN_LASSO_POINTS) return [];
+    if (!hasEnoughArea(screenPoints)) return [];
+
+    return getSelectedNodeIdsFromPolygon(screenPoints, wrapperRef);
+  }, [screenPoints, wrapperRef]);
+
+  const previewEdgeIds = useMemo(
+    () => getEdgeIdsBetweenSelectedNodes(previewNodeIds, edges),
+    [edges, previewNodeIds],
+  );
+
   return {
     pointerHandlers: {
       onPointerDown,
@@ -311,5 +335,7 @@ export function useCanvasLasso({
       onPointerCancel,
     },
     previewPath,
+    previewNodeIds,
+    previewEdgeIds,
   };
 }

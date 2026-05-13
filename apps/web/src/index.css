@@ -320,6 +320,13 @@ body,
   filter: drop-shadow(0 0 2px var(--color-info-light));
 }
 
+/* Live lasso preview uses a visual-only highlight without mutating selection state. */
+.react-flow__node.canvas-lasso-preview > div {
+  box-shadow:
+    0 0 0 1px var(--color-info),
+    0 0 0 3px color-mix(in srgb, var(--color-info) 18%, transparent);
+}
+
 /* Smooth frame resize animation when children are added/removed.
    Disabled during active drag (ReactFlow adds `.dragging` to dragged nodes)
    and during manual resize (NodeResizer adds inline transforms). */

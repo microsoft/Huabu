@@ -8,7 +8,13 @@ import {
   Panel,
 } from '@xyflow/react';
 import clsx from 'clsx';
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import '@xyflow/react/dist/style.css';
 
 import { ImageNode } from '@/components/Nodes/image/ImageNode';
@@ -26,6 +32,7 @@ import { useCanvasShortcuts } from '@/hooks/useCanvasShortcuts';
 import { useFrameDragToCreate } from '@/hooks/useFrameDragToCreate';
 import { useIsTouch } from '@/hooks/useInputMode';
 import { useQuestionRunner } from '@/hooks/useQuestionRunner';
+import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
 import { NodeToolbar } from './CanvasToolbar.tsx';
 import { EdgeStyleToolbar } from './EdgeStyleToolbar.tsx';
@@ -132,6 +139,17 @@ export const Canvas: React.FC<CanvasProps> = ({
 }) => {
   const nodes = useCanvasStore((state) => state.nodes);
   const edges = useCanvasStore((state) => state.edges);
+  const [isBoxSelecting, setIsBoxSelecting] = useState(false);
+  const [lassoPreviewNodeIdSet, setLassoPreviewNodeIdSet] = useState<
+    Set<string>
+  >(() => new Set());
+  const [lassoPreviewEdgeIdSet, setLassoPreviewEdgeIdSet] = useState<
+    Set<string>
+  >(() => new Set());
+  const selectedNodeIds = useMemo(
+    () => new Set(nodes.filter((node) => node.selected).map((node) => node.id)),
+    [nodes],
+  );
 
   // Override marker colors on selected edges so arrows match the selection
   // highlight color (--color-info). CSS cannot style SVG <marker> referenced
@@ -142,18 +160,35 @@ export const Canvas: React.FC<CanvasProps> = ({
       .trim();
     if (!infoColor) return edges;
     return edges.map((e) => {
-      if (!e.selected) return e;
+      const isLassoPreviewSelected = lassoPreviewEdgeIdSet.has(e.id);
+      const shouldStaySelected =
+        !isBoxSelecting ||
+        (selectedNodeIds.has(e.source) && selectedNodeIds.has(e.target));
+      const isVisuallySelected =
+        isLassoPreviewSelected || (e.selected && shouldStaySelected);
+
+      if (!isVisuallySelected) {
+        if (!e.selected) return e;
+
+        return {
+          ...e,
+          selected: false,
+        };
+      }
+
       const recolor = (m: typeof e.markerEnd) => {
         if (!m || typeof m === 'string') return m;
         return { ...m, color: infoColor };
       };
+
       return {
         ...e,
+        selected: true,
         markerEnd: recolor(e.markerEnd),
         markerStart: recolor(e.markerStart),
       };
     });
-  }, [edges]);
+  }, [edges, isBoxSelecting, lassoPreviewEdgeIdSet, selectedNodeIds]);
   const onNodesChange = useCanvasStore((state) => state.onNodesChange);
   const onEdgesChange = useCanvasStore((state) => state.onEdgesChange);
   const onConnect = useCanvasStore((state) => state.onConnect);
@@ -193,6 +228,30 @@ export const Canvas: React.FC<CanvasProps> = ({
   );
 
   const isTouch = useIsTouch();
+
+  const normalizeBoxSelection = useCallback(() => {
+    if (tool !== 'select') return;
+
+    const selectedNodeIds = nodes
+      .filter((node) => node.selected)
+      .map((node) => node.id);
+    const selectedEdgeIds = getEdgeIdsBetweenSelectedNodes(
+      selectedNodeIds,
+      edges,
+    );
+
+    selectElements(selectedNodeIds, selectedEdgeIds);
+  }, [edges, nodes, selectElements, tool]);
+
+  const handleSelectionStart = useCallback(() => {
+    if (tool !== 'select') return;
+    setIsBoxSelecting(true);
+  }, [tool]);
+
+  const handleSelectionEnd = useCallback(() => {
+    setIsBoxSelecting(false);
+    normalizeBoxSelection();
+  }, [normalizeBoxSelection]);
 
   // Run question nodes when their timers expire.
   useQuestionRunner();
@@ -256,12 +315,41 @@ export const Canvas: React.FC<CanvasProps> = ({
   const {
     pointerHandlers: lassoPointerHandlers,
     previewPath: lassoPreviewPath,
+    previewNodeIds,
+    previewEdgeIds,
   } = useCanvasLasso({
     active: !pendingNodeType && tool === 'lasso',
     wrapperRef,
     edges,
     onSelect: (nodeIds, edgeIds) => selectElements(nodeIds, edgeIds),
   });
+
+  useEffect(() => {
+    setLassoPreviewNodeIdSet(new Set(previewNodeIds));
+    setLassoPreviewEdgeIdSet(new Set(previewEdgeIds));
+  }, [previewEdgeIds, previewNodeIds]);
+
+  useEffect(() => {
+    const wrapper = wrapperRef.current;
+    if (!wrapper) return;
+
+    const nodeElements = wrapper.querySelectorAll<HTMLElement>(
+      '.react-flow__node[data-id]',
+    );
+
+    nodeElements.forEach((nodeElement) => {
+      const nodeId = nodeElement.dataset.id;
+      const shouldPreview =
+        typeof nodeId === 'string' && lassoPreviewNodeIdSet.has(nodeId);
+      nodeElement.classList.toggle('canvas-lasso-preview', shouldPreview);
+    });
+
+    return () => {
+      nodeElements.forEach((nodeElement) => {
+        nodeElement.classList.remove('canvas-lasso-preview');
+      });
+    };
+  }, [lassoPreviewNodeIdSet]);
 
   // Cancel any other pending node placement (note / text / question) with Escape.
   useEffect(() => {
@@ -538,6 +626,8 @@ export const Canvas: React.FC<CanvasProps> = ({
         }
         selectionOnDrag={pendingNodeType ? false : tool === 'select'}
         selectionMode={SelectionMode.Partial}
+        onSelectionStart={handleSelectionStart}
+        onSelectionEnd={handleSelectionEnd}
         nodesDraggable={!pendingNodeType && tool !== 'lasso'}
         elementsSelectable={!pendingNodeType}
         panOnScroll={!isTouch}
