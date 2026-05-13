@@ -7,13 +7,7 @@ import {
   Panel,
 } from '@xyflow/react';
 import clsx from 'clsx';
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import '@xyflow/react/dist/style.css';
 
 import { ImageNode } from '@/components/Nodes/image/ImageNode';
@@ -27,6 +21,7 @@ import {
 } from '@/handler/canvasCommand/nodeInputBuilders';
 import { useCanvasGestures } from '@/hooks/useCanvasGestures';
 import { useCanvasShortcuts } from '@/hooks/useCanvasShortcuts';
+import { useFrameDragToCreate } from '@/hooks/useFrameDragToCreate';
 import { useIsTouch } from '@/hooks/useInputMode';
 import { useQuestionRunner } from '@/hooks/useQuestionRunner';
 
@@ -241,34 +236,29 @@ export const Canvas: React.FC<CanvasProps> = ({
     [onConnect],
   );
 
-  // --- Frame drag-to-create state ---
-  const [frameDragStart, setFrameDragStart] = useState<{
-    x: number;
-    y: number;
-  } | null>(null);
-  const [frameDragEnd, setFrameDragEnd] = useState<{
-    x: number;
-    y: number;
-  } | null>(null);
-  const isDraggingFrame = frameDragStart !== null;
+  // --- Frame drag-to-create gesture (mouse / pen / touch) ---
+  const exitPendingNodeType = useCallback(
+    () => setPendingNodeType(null),
+    [setPendingNodeType],
+  );
+  const { pointerHandlers: framePointerHandlers, previewRect: frameDragRect } =
+    useFrameDragToCreate({
+      active: pendingNodeType === 'frame',
+      wrapperRef,
+      rfInstanceRef,
+      onCreate: frameNodesInRect,
+      onEnd: exitPendingNodeType,
+    });
 
-  const resetFrameDrag = useCallback(() => {
-    setFrameDragStart(null);
-    setFrameDragEnd(null);
-    setPendingNodeType(null);
-  }, [setPendingNodeType]);
-
-  // Cancel pending node placement with Escape key
+  // Cancel any other pending node placement (note / text / question) with Escape.
   useEffect(() => {
-    if (!pendingNodeType) return;
+    if (!pendingNodeType || pendingNodeType === 'frame') return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        resetFrameDrag();
-      }
+      if (e.key === 'Escape') exitPendingNodeType();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [pendingNodeType, resetFrameDrag]);
+  }, [pendingNodeType, exitPendingNodeType]);
 
   // Handle click-to-place for note, text, and question
   const handlePaneClick = useCallback(
@@ -310,90 +300,6 @@ export const Canvas: React.FC<CanvasProps> = ({
     [pendingNodeType, addNode, setPendingNodeType],
   );
 
-  // --- Frame drag-to-create handlers ---
-  const handleFrameMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      if (pendingNodeType !== 'frame') return;
-      // Only left button
-      if (e.button !== 0) return;
-      // Ignore clicks on toolbar / modals
-      const target = e.target as HTMLElement;
-      if (target.closest('.react-flow__panel')) return;
-
-      e.preventDefault();
-      e.stopPropagation();
-      setFrameDragStart({ x: e.clientX, y: e.clientY });
-      setFrameDragEnd({ x: e.clientX, y: e.clientY });
-    },
-    [pendingNodeType],
-  );
-
-  const handleFrameMouseMove = useCallback(
-    (e: React.MouseEvent) => {
-      if (!isDraggingFrame) return;
-      setFrameDragEnd({ x: e.clientX, y: e.clientY });
-    },
-    [isDraggingFrame],
-  );
-
-  const handleFrameMouseUp = useCallback(
-    (e: React.MouseEvent) => {
-      if (!isDraggingFrame || !frameDragStart || !frameDragEnd) return;
-
-      const instance = rfInstanceRef.current;
-      if (!instance) {
-        resetFrameDrag();
-        return;
-      }
-
-      const startFlow = instance.screenToFlowPosition({
-        x: frameDragStart.x,
-        y: frameDragStart.y,
-      });
-      const endFlow = instance.screenToFlowPosition({
-        x: e.clientX,
-        y: e.clientY,
-      });
-
-      const x = Math.min(startFlow.x, endFlow.x);
-      const y = Math.min(startFlow.y, endFlow.y);
-      const w = Math.abs(endFlow.x - startFlow.x);
-      const h = Math.abs(endFlow.y - startFlow.y);
-
-      // Minimum size threshold (in screen px) to avoid accidental tiny frames
-      const MIN_SIZE = 20;
-      if (w >= MIN_SIZE && h >= MIN_SIZE) {
-        frameNodesInRect({ x, y, width: w, height: h });
-      }
-
-      resetFrameDrag();
-    },
-    [
-      isDraggingFrame,
-      frameDragStart,
-      frameDragEnd,
-      frameNodesInRect,
-      resetFrameDrag,
-    ],
-  );
-
-  // Compute the preview rectangle in screen-space
-  const frameDragRect = (() => {
-    if (!frameDragStart || !frameDragEnd) return null;
-    const wrapperBounds = wrapperRef.current?.getBoundingClientRect();
-    if (!wrapperBounds) return null;
-    const x1 = frameDragStart.x - wrapperBounds.left;
-    const y1 = frameDragStart.y - wrapperBounds.top;
-    const x2 = frameDragEnd.x - wrapperBounds.left;
-    const y2 = frameDragEnd.y - wrapperBounds.top;
-    return {
-      left: Math.min(x1, x2),
-      top: Math.min(y1, y2),
-      width: Math.abs(x2 - x1),
-      height: Math.abs(y2 - y1),
-    };
-  })();
-
   // When a node is expanded in split mode, pan the canvas so the node stays visible.
   useEffect(() => {
     if (!expandedNodeId || expandMode !== 'split') return;
@@ -427,9 +333,10 @@ export const Canvas: React.FC<CanvasProps> = ({
         pendingNodeType === 'annotation' && 'cursor-crosshair',
         pendingNodeType === 'question' && 'canvas-pending-question',
       )}
-      onMouseDown={handleFrameMouseDown}
-      onMouseMove={handleFrameMouseMove}
-      onMouseUp={handleFrameMouseUp}
+      onPointerDown={framePointerHandlers.onPointerDown}
+      onPointerMove={framePointerHandlers.onPointerMove}
+      onPointerUp={framePointerHandlers.onPointerUp}
+      onPointerCancel={framePointerHandlers.onPointerCancel}
       onDragOver={(e) => {
         // Accept both internal Sediment payloads and native file/URL drops
         const isSediment = canReadSedimentPayload(e.dataTransfer);
@@ -634,7 +541,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       </ReactFlow>
 
       {/* Frame drag preview overlay */}
-      {isDraggingFrame && frameDragRect && frameDragRect.width > 2 && (
+      {frameDragRect && frameDragRect.width > 2 && (
         <div
           className="border-info bg-info-bg/40 pointer-events-none absolute z-50 rounded border-1 border-dashed"
           style={{
