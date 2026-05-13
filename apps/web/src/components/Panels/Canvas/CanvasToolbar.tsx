@@ -11,7 +11,7 @@ import {
   Redo2,
   Trash2,
 } from 'lucide-react';
-import { useRef, useState, type ChangeEvent } from 'react';
+import { useMemo, useRef, useState, type ChangeEvent } from 'react';
 
 import { uploadImage, uploadPdf, uploadVideo } from '@/api/artifact';
 import { useIsTouch } from '@/hooks/useInputMode';
@@ -22,6 +22,7 @@ import useCanvasStore from '../../../store/canvasStore.ts';
 import { detectNodeType } from '../../../utils/io/media.ts';
 import { Button } from '../../Common/Button.tsx';
 import { Modal } from '../../Common/Modal.tsx';
+import { Select, type SelectOption } from '../../Common/Select.tsx';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
 
@@ -61,6 +62,15 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
     null,
   );
   const [linkText, setLinkText] = useState('');
+
+  // Pan/Select tool options for the merged dropdown trigger.
+  const toolOptions = useMemo<SelectOption<'select' | 'pan'>[]>(
+    () => [
+      { value: 'select', label: 'Select', icon: <MousePointer2 /> },
+      { value: 'pan', label: 'Pan', icon: <Hand /> },
+    ],
+    [],
+  );
 
   const getImageDimensions = (
     file: File,
@@ -197,26 +207,21 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
       <div className="text-fg-muted shadow-bottom bg-surface pointer-events-auto relative flex w-max items-center gap-1.5 rounded-lg border-0 px-4 py-2">
         {/* Group 1: Tools */}
         <div className="flex items-center gap-1.5">
-          <Button
+          <Select<'select' | 'pan'>
+            options={toolOptions}
+            value={activeTool}
+            onChange={(t) => {
+              // Switching to a canvas tool cancels any pending node placement.
+              if (pendingNodeType) setPendingNodeType(null);
+              onToolChange(t);
+            }}
             variant="ghost"
+            tone="neutral"
+            size="md"
             iconOnly
-            title="Select"
-            className={clsx(
-              activeTool === 'select' && 'text-info bg-bg-default',
-            )}
-            onClick={() => onToolChange('select')}
-          >
-            <MousePointer2 />
-          </Button>
-          <Button
-            variant="ghost"
-            iconOnly
-            title="Pan"
-            className={clsx(activeTool === 'pan' && 'text-info bg-bg-default')}
-            onClick={() => onToolChange('pan')}
-          >
-            <Hand />
-          </Button>
+            align="top-left"
+            className={clsx(!pendingNodeType && 'text-info bg-bg-default')}
+          />
         </div>
 
         <div className="bg-border mx-1 h-4 w-px" />

@@ -122,10 +122,15 @@ export function useFrameDragToCreate({
 
   const commitAndEnd = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
+      // Pointer-up fires for every click on the wrapper, even when the user
+      // wasn't drawing a frame (e.g. tapping the pane to place a Note). Bail
+      // out early so we don't run `cancel()` and clobber `pendingNodeType`,
+      // which would prevent click-to-place handlers from creating the node.
+      if (!drag) return;
       e.currentTarget.releasePointerCapture(e.pointerId);
 
       const instance = rfInstanceRef.current;
-      if (drag && instance) {
+      if (instance) {
         const startFlow = instance.screenToFlowPosition(drag.start);
         const endFlow = instance.screenToFlowPosition({
           x: e.clientX,
