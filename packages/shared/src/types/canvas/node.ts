@@ -327,8 +327,14 @@ export interface AnnotationNodeData extends BaseNodeData {
   points: number[][];
   /** Original bounding box size when the stroke was created */
   initialSize: { width: number; height: number };
-  /** Stroke color (hex) */
+  /** Stroke color (hex). Defaults to black when omitted. */
   strokeColor?: string;
+  /**
+   * Stroke thickness in flow-space units (matches `perfect-freehand`'s
+   * `size` option). Defaults to `4` when omitted, which is the historical
+   * value the renderer used before the field existed.
+   */
+  strokeSize?: number;
   /**
    * True after the intent pipeline has consumed this annotation. The
    * renderer no longer changes appearance based on this marker; it is kept

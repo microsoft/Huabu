@@ -273,6 +273,17 @@ type RFState = {
     type: 'note' | 'text' | 'frame' | 'annotation' | 'question' | null,
   ) => void;
 
+  /**
+   * Active sketch tool settings — color and thickness used by the live
+   * AnnotationOverlay preview and persisted onto each new sketch node so
+   * the same look replays after reload. Per-node values are still editable
+   * after-the-fact via the sketch node's toolbar.
+   */
+  sketchDraft: { strokeColor: string; strokeSize: number };
+  setSketchDraft: (
+    patch: Partial<{ strokeColor: string; strokeSize: number }>,
+  ) => void;
+
   copySelectedNodes: () => void;
   pasteNodes: (
     flowPosition: { x: number; y: number },
@@ -609,6 +620,10 @@ const useCanvasStore = create<RFState>()(
 
     pendingNodeType: null,
     setPendingNodeType: (type) => set({ pendingNodeType: type }),
+
+    sketchDraft: { strokeColor: 'black', strokeSize: 4 },
+    setSketchDraft: (patch) =>
+      set((state) => ({ sketchDraft: { ...state.sketchDraft, ...patch } })),
 
     collapsedFrameIds: new Set<string>(),
     toggleFrameCollapse: (frameId) => {

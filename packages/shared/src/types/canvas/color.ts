@@ -88,13 +88,20 @@ export interface ColorPickerOption {
 }
 
 /**
- * Default accent picker swatches. Starts with a true "White" swatch followed
- * by the saturated palette. **Does not** include a "Transparent" option —
- * used by every node type whose visual identity depends on a solid
+ * Default accent picker swatches. Starts with neutral Black + White swatches
+ * followed by the saturated palette. **Does not** include a "Transparent"
+ * option — used by every node type whose visual identity depends on a solid
  * background (frame, note, image, pdf, video, web, annotation), since a
  * transparent fill would make those nodes effectively invisible.
+ *
+ * Black and White are picker-only entries (not part of `ACCENT_PALETTE`):
+ * neither token resolves through `ACCENT_BY_TOKEN`, so they fall through
+ * `resolveAccent`'s passthrough branch and render as the literal CSS color
+ * keyword. That's intentional — they're fixed neutrals that should not
+ * shift with theme re-skins of the saturated palette.
  */
 export const ACCENT_PICKER_OPTIONS: readonly ColorPickerOption[] = [
+  { token: 'black', name: 'Black', value: '#000000' },
   { token: 'white', name: 'White', value: '#ffffff' },
   ...ACCENT_PALETTE,
 ];

@@ -1,11 +1,18 @@
+import { resolveAccent } from '@sediment/shared';
 import { Sparkles } from 'lucide-react';
 import { memo, useMemo } from 'react';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
+import useCanvasStore from '@/store/canvasStore';
 import { useIntentStore } from '@/store/intentStore';
 
 import { NodeWrapper } from '../NodeWrapper';
-import { pointsToPath } from './annotationPath';
+import {
+  pointsToPath,
+  DEFAULT_STROKE_COLOR,
+  DEFAULT_STROKE_SIZE,
+} from './annotationPath';
+import { SketchControls } from './SketchControls';
 
 import type { CanvasAnnotationNodeData } from '../types';
 import type { Node, NodeProps } from '@xyflow/react';
@@ -22,6 +29,7 @@ export const AnnotationNode = memo(
     const requestSketchRecognition = useIntentStore(
       (s) => s.requestSketchRecognition,
     );
+    const updateNodeData = useCanvasStore((s) => s.updateNodeData);
 
     const scaledPoints = useMemo(
       () =>
@@ -33,19 +41,36 @@ export const AnnotationNode = memo(
       [data.points, scaleX, scaleY],
     );
 
-    const pathD = useMemo(() => pointsToPath(scaledPoints), [scaledPoints]);
-    const strokeColor = data.strokeColor ?? '#000000';
+    const strokeColor = data.strokeColor ?? DEFAULT_STROKE_COLOR;
+    const strokeSize = data.strokeSize ?? DEFAULT_STROKE_SIZE;
+    // Resolve the stored palette token to a CSS color for the SVG fill.
+    // `resolveAccent` passes legacy hex strings through unchanged.
+    const resolvedColor = resolveAccent(strokeColor) ?? strokeColor;
+
+    const pathD = useMemo(
+      () => pointsToPath(scaledPoints, 1, strokeSize),
+      [scaledPoints, strokeSize],
+    );
 
     const sketchToolbar = (
-      <FloatingToolbar.ActionButton
-        title="Apply Sketch (interpret stroke with AI)"
-        onClick={(e) => {
-          e.stopPropagation();
-          requestSketchRecognition([id]);
-        }}
-      >
-        <Sparkles />
-      </FloatingToolbar.ActionButton>
+      <>
+        <SketchControls
+          color={strokeColor}
+          size={strokeSize}
+          onColorChange={(color) => updateNodeData(id, { strokeColor: color })}
+          onSizeChange={(size) => updateNodeData(id, { strokeSize: size })}
+        />
+        <FloatingToolbar.Divider />
+        <FloatingToolbar.ActionButton
+          title="Apply Sketch (interpret stroke with AI)"
+          onClick={(e) => {
+            e.stopPropagation();
+            requestSketchRecognition([id]);
+          }}
+        >
+          <Sparkles />
+        </FloatingToolbar.ActionButton>
+      </>
     );
 
     return (
@@ -65,7 +90,7 @@ export const AnnotationNode = memo(
         >
           <path
             d={pathD}
-            fill={strokeColor}
+            fill={resolvedColor}
             className="pointer-events-auto cursor-pointer"
           />
         </svg>

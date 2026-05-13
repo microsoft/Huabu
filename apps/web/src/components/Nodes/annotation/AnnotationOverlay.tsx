@@ -1,9 +1,13 @@
-import { createId } from '@sediment/shared';
+import { createId, resolveAccent } from '@sediment/shared';
 import { useCallback, useRef, useState } from 'react';
 
 import useCanvasStore from '@/store/canvasStore';
 
-import { pointsToPath, ANNOTATION_OPTIONS } from './annotationPath';
+import {
+  pointsToPath,
+  DEFAULT_STROKE_COLOR,
+  DEFAULT_STROKE_SIZE,
+} from './annotationPath';
 
 import type { ReactFlowInstance } from '@xyflow/react';
 /**
@@ -16,6 +20,7 @@ function processPoints(
     x: number;
     y: number;
   },
+  strokeSize: number,
 ) {
   let x1 = Infinity;
   let y1 = Infinity;
@@ -33,8 +38,9 @@ function processPoints(
     flowPoints.push([x, y, pt[2]]);
   }
 
-  // Add stroke thickness padding
-  const pad = ANNOTATION_OPTIONS.size * 0.5;
+  // Add stroke thickness padding so the bounding box leaves room for the
+  // halo of the painted stroke (perfect-freehand paints up to `size` wide).
+  const pad = strokeSize * 0.5;
   x1 -= pad;
   y1 -= pad;
   x2 += pad;
@@ -69,6 +75,12 @@ export function AnnotationOverlay({
   rfInstance: ReactFlowInstance | null;
 }) {
   const addNode = useCanvasStore((s) => s.addNode);
+  const sketchDraft = useCanvasStore((s) => s.sketchDraft);
+  const strokeColor = sketchDraft.strokeColor || DEFAULT_STROKE_COLOR;
+  const strokeSize = sketchDraft.strokeSize || DEFAULT_STROKE_SIZE;
+  // Live-preview fill: resolve the stored palette token to a CSS color.
+  // `resolveAccent` passes legacy hex strings through unchanged.
+  const resolvedColor = resolveAccent(strokeColor) ?? strokeColor;
 
   // Two parallel arrays:
   // - screenPtsRef: raw clientX/clientY for screenToFlowPosition (node creation)
@@ -122,6 +134,7 @@ export function AnnotationOverlay({
       const result = processPoints(
         pts,
         (pos) => rfInstance?.screenToFlowPosition(pos) ?? pos,
+        strokeSize,
       );
 
       const nodeId = createId('node');
@@ -140,6 +153,8 @@ export function AnnotationOverlay({
           type: 'annotation',
           points: result.points,
           initialSize: result.initialSize,
+          strokeColor,
+          strokeSize,
           origin: { type: 'user-created' },
         },
         skipAutoLayout: true,
@@ -152,7 +167,7 @@ export function AnnotationOverlay({
       screenPtsRef.current = [];
       setPoints([]);
     },
-    [rfInstance, addNode],
+    [rfInstance, addNode, strokeColor, strokeSize],
   );
 
   const zoom = rfInstance?.getViewport().zoom ?? 1;
@@ -175,7 +190,10 @@ export function AnnotationOverlay({
     >
       <svg className="h-full w-full">
         {points.length > 0 && (
-          <path d={pointsToPath(points, zoom)} fill="#000000" />
+          <path
+            d={pointsToPath(points, zoom, strokeSize)}
+            fill={resolvedColor}
+          />
         )}
       </svg>
     </div>
