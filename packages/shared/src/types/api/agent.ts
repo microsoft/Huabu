@@ -6,16 +6,20 @@
  * annotation, intent episode logging). Per docs/api-design.md: schemas
  * are the single source of truth, types derived via `z.infer`.
  *
- * Complex nested shapes that already have rich TypeScript interfaces
- * (e.g. `AgentChatContext`, `IntentContext`, `AnnotationClusterContext`,
- * `IntentEpisode`) are accepted via `z.custom<T>()` — top-level
- * structure is validated to reject malformed wrappers, but the inner
- * objects are trusted to conform to their existing types because they
- * are produced by the same client codebase that compiles against those
- * interfaces.
+ * Wire-only node payloads (`WireNodeRef` / `WireSelectionNode` /
+ * `WireCanvasNode`) and the request envelopes that wrap them
+ * (`AgentChatContext`, `IntentContext`, `AnnotationClusterContext`)
+ * have explicit zod schemas so every public HTTP boundary gets
+ * field-level validation — no payload reaches business logic via a
+ * trust-the-caller `z.custom`. The richer `IntentEpisode` log shape
+ * still uses `z.custom` because it is replayed verbatim from
+ * client-owned storage and we only check the discriminator.
  */
 
 import { z } from 'zod';
+
+import { recentActionSchema } from './canvas-events.js';
+import { CANVAS_NODE_TYPES } from '../canvas/node.js';
 
 import type {
   AgentChatContext,
@@ -23,7 +27,6 @@ import type {
   IntentContext,
   IntentEpisode,
 } from '../agent/index.js';
-import type { CanvasNodeType } from '../canvas/node.js';
 
 // ─── Wire-only node payloads ──────────────────────────────────────────────
 //
@@ -40,12 +43,19 @@ import type { CanvasNodeType } from '../canvas/node.js';
 // shape (preview length, filename rule, opt-in fields) does not
 // require a frontend deploy.
 
+const positionSchema = z.object({ x: z.number(), y: z.number() });
+const sizeSchema = z.object({
+  width: z.number().nonnegative(),
+  height: z.number().nonnegative(),
+});
+
 /** Bare node identity payload — every wire ref starts here. */
-export interface WireNodeRef {
-  id: string;
-  type: CanvasNodeType;
-  label?: string;
-}
+export const wireNodeRefSchema = z.object({
+  id: z.string().min(1),
+  type: z.enum(CANVAS_NODE_TYPES),
+  label: z.string().optional(),
+});
+export type WireNodeRef = z.infer<typeof wireNodeRefSchema>;
 
 /**
  * Selection wire shape posted from the web client to `/api/agent` and
@@ -69,6 +79,17 @@ export interface WireSelectionNode extends WireNodeRef {
   children?: WireSelectionNode[];
 }
 
+export const wireSelectionNodeSchema: z.ZodType<WireSelectionNode> = z.lazy(
+  () =>
+    z.object({
+      id: z.string().min(1),
+      type: z.enum(CANVAS_NODE_TYPES),
+      label: z.string().optional(),
+      src: z.string().optional(),
+      children: z.array(wireSelectionNodeSchema).optional(),
+    }),
+);
+
 /**
  * Wire shape for one node inside `IntentContext.nodes` (the full
  * canvas snapshot sent to the intent recogniser). Carries the raw
@@ -82,18 +103,22 @@ export interface WireSelectionNode extends WireNodeRef {
  * Deliberately **does not** carry `filename`, `preview`, or
  * `parentFrame.label` — those are server-side decisions.
  */
-export interface WireCanvasNode extends WireNodeRef {
+export const wireCanvasNodeSchema = z.object({
+  id: z.string().min(1),
+  type: z.enum(CANVAS_NODE_TYPES),
+  label: z.string().optional(),
   /** Inline node body (markdown / plain text), when present. */
-  content?: string;
+  content: z.string().optional(),
   /** Source URL — meaningful for image / pdf / web / video nodes. */
-  src?: string;
+  src: z.string().optional(),
   /** Parent frame id (web has already done absolute-position resolution). */
-  parentId?: string;
+  parentId: z.string().optional(),
   /** Absolute position on canvas (top-left corner). */
-  position: { x: number; y: number };
+  position: positionSchema,
   /** Effective dimensions (measured > styled > 0 fallback). */
-  size: { width: number; height: number };
-}
+  size: sizeSchema,
+});
+export type WireCanvasNode = z.infer<typeof wireCanvasNodeSchema>;
 
 /** A single attachment carried with a chat message. */
 export const chatAttachmentSchema = z.object({
@@ -112,12 +137,54 @@ export const intentCandidateSchema = z.object({
   description: z.string().optional(),
 });
 
+// ─── Request-context schemas ──────────────────────────────────────────────
+//
+// Field-level validators for the `canvasContext` / `clusterContext`
+// envelopes posted to `/api/agent` and `/api/intent/*`. Each carries
+// only wire shapes (above) plus pre-existing schemas — no runtime
+// dependency on the rich TS interfaces in `agent/context.ts` and
+// `agent/intent.ts`. The `satisfies` checks below pin the schema
+// against the canonical TS interface so any drift fails the build.
+
+const wireEdgeSchema = z.object({
+  source: z.string().min(1),
+  target: z.string().min(1),
+});
+
+/** Wire shape of {@link AgentChatContext}. */
+export const agentChatContextSchema = z.object({
+  selectedNodes: z.array(wireSelectionNodeSchema),
+}) satisfies z.ZodType<AgentChatContext>;
+
+/** Wire shape of {@link IntentContext}. */
+export const intentContextSchema = z.object({
+  nodes: z.array(wireCanvasNodeSchema),
+  edges: z.array(wireEdgeSchema),
+  recentActions: z.array(recentActionSchema),
+  screenshot: z.string().optional(),
+  selectedNodes: z.array(wireSelectionNodeSchema),
+}) satisfies z.ZodType<IntentContext>;
+
+/** Wire shape of {@link AnnotationClusterContext}. */
+export const annotationClusterContextSchema = z.object({
+  bbox: z.object({
+    x: z.number(),
+    y: z.number(),
+    width: z.number().nonnegative(),
+    height: z.number().nonnegative(),
+  }),
+  strokeCount: z.number().int().nonnegative(),
+  nearbyNodes: z.array(wireNodeRefSchema),
+  enclosedNodes: z.array(wireNodeRefSchema),
+  nearbyEdgeIds: z.array(z.string().min(1)),
+}) satisfies z.ZodType<AnnotationClusterContext>;
+
 /** Body for `POST /api/agent`. */
 export const agentRequestSchema = z.object({
   content: z.string().min(1, 'Message content is required'),
   threadId: z.string().min(1).optional(),
   mode: z.enum(['ask', 'operate']).optional(),
-  canvasContext: z.custom<AgentChatContext>().optional(),
+  canvasContext: agentChatContextSchema.optional(),
   canvasId: z.string().min(1).optional(),
   attachments: z.array(chatAttachmentSchema).optional(),
   selectedNodeIds: z.array(z.string().min(1)).optional(),
@@ -150,20 +217,14 @@ export type AgentCanvasIdQuery = z.infer<typeof agentCanvasIdQuerySchema>;
 
 /** Body for `POST /api/intent/recognize` and `/recognize-stream`. */
 export const intentRequestSchema = z.object({
-  canvasContext: z.custom<IntentContext>(
-    (v) => v !== null && typeof v === 'object',
-    'canvasContext is required',
-  ),
+  canvasContext: intentContextSchema,
 });
 export type IntentRequest = z.infer<typeof intentRequestSchema>;
 
 /** Body for `POST /api/intent/recognize-annotation`. */
 export const annotationIntentRequestSchema = z.object({
   screenshot: z.string().min(1, 'screenshot is required'),
-  clusterContext: z.custom<AnnotationClusterContext>(
-    (v) => v !== null && typeof v === 'object',
-    'clusterContext is required',
-  ),
+  clusterContext: annotationClusterContextSchema,
   canvasId: z.string().min(1).optional(),
 });
 export type AnnotationIntentRequest = z.infer<

@@ -101,7 +101,7 @@ export async function recordTrace(opts: RecordOptions): Promise<Trace> {
   let usage: Trace['usage'] = null;
 
   const stream = runAgent({
-    mode: opts.mode,
+    scope: opts.mode,
     canvasId: opts.canvasId,
     context,
     maxIterations: opts.maxIterations,

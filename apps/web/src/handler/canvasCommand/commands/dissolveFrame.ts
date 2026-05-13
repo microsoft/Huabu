@@ -23,6 +23,11 @@ const dissolveFrame: CommandDefinition<Cmd> = {
       applied: true,
       nodes: result.nodes,
       edges: result.edges,
+      // The frame node itself is removed from canvas state — its
+      // sibling `<safe(label)>.md` (frontmatter-only, written by the
+      // autosave PUT for every MD-backed node type, frame included)
+      // would otherwise be left orphaned in `<canvasDir>/nodes/`.
+      deletedNodeIds: [frameId],
     };
   },
 };
