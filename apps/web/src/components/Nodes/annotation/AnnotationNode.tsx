@@ -1,4 +1,8 @@
+import { Sparkles } from 'lucide-react';
 import { memo, useMemo } from 'react';
+
+import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
+import { useIntentStore } from '@/store/intentStore';
 
 import { NodeWrapper } from '../NodeWrapper';
 import { pointsToPath } from './annotationPath';
@@ -15,6 +19,10 @@ export const AnnotationNode = memo(
     const scaleX = w / (data.initialSize?.width || 1);
     const scaleY = h / (data.initialSize?.height || 1);
 
+    const requestSketchRecognition = useIntentStore(
+      (s) => s.requestSketchRecognition,
+    );
+
     const scaledPoints = useMemo(
       () =>
         (data.points ?? []).map((pt: number[]) => [
@@ -27,9 +35,18 @@ export const AnnotationNode = memo(
 
     const pathD = useMemo(() => pointsToPath(scaledPoints), [scaledPoints]);
     const strokeColor = data.strokeColor ?? '#000000';
-    // Executed strokes are dimmed but kept on the canvas so the user can
-    // still see the gesture they drew.
-    const isExecuted = data.executed ?? false;
+
+    const sketchToolbar = (
+      <FloatingToolbar.ActionButton
+        title="Apply Sketch (interpret stroke with AI)"
+        onClick={(e) => {
+          e.stopPropagation();
+          requestSketchRecognition([id]);
+        }}
+      >
+        <Sparkles />
+      </FloatingToolbar.ActionButton>
+    );
 
     return (
       <NodeWrapper
@@ -38,13 +55,13 @@ export const AnnotationNode = memo(
         type="annotation"
         selected={selected}
         resizable={true}
+        toolbar={sketchToolbar}
       >
         <svg
           width={w}
           height={h}
           viewBox={`0 0 ${w} ${h}`}
           className="pointer-events-none h-full w-full"
-          style={isExecuted ? { opacity: 0.25 } : undefined}
         >
           <path
             d={pathD}

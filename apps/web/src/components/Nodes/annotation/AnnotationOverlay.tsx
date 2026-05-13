@@ -2,7 +2,6 @@ import { createId } from '@sediment/shared';
 import { useCallback, useRef, useState } from 'react';
 
 import useCanvasStore from '@/store/canvasStore';
-import { useIntentStore } from '@/store/intentStore';
 
 import { pointsToPath, ANNOTATION_OPTIONS } from './annotationPath';
 
@@ -70,7 +69,6 @@ export function AnnotationOverlay({
   rfInstance: ReactFlowInstance | null;
 }) {
   const addNode = useCanvasStore((s) => s.addNode);
-  const onAnnotationCreated = useIntentStore((s) => s.onAnnotationCreated);
 
   // Two parallel arrays:
   // - screenPtsRef: raw clientX/clientY for screenToFlowPosition (node creation)
@@ -147,21 +145,30 @@ export function AnnotationOverlay({
         skipAutoLayout: true,
       });
 
-      // Notify the recognition store so the 5 s idle timer starts/resets
-      onAnnotationCreated(nodeId);
+      // Sketch is now a normal persisted node. AI recognition is no longer
+      // triggered by an idle timer — the user invokes it explicitly via the
+      // toolbar's `Apply Sketch` button (see `requestSketchRecognition`).
 
       screenPtsRef.current = [];
       setPoints([]);
     },
-    [rfInstance, addNode, onAnnotationCreated],
+    [rfInstance, addNode],
   );
 
   const zoom = rfInstance?.getViewport().zoom ?? 1;
 
+  // Pencil cursor with white outline (drawn first, thick) + black inner
+  // stroke (drawn on top, thin) so it stays legible on any background.
+  // The pencil tip in the SVG sits near (3, 21), so we hot-spot the cursor
+  // there: drawing starts exactly under the rendered tip.
+  const pencilCursor =
+    "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke-linecap='round' stroke-linejoin='round'><g stroke='white' stroke-width='3.5'><path d='M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z'/><path d='m15 5 4 4'/></g><g stroke='black' stroke-width='1.5'><path d='M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z'/><path d='m15 5 4 4'/></g></svg>\") 3 21, crosshair";
+
   return (
     <div
       ref={overlayRef}
-      className="absolute inset-0 z-[4] cursor-crosshair"
+      className="absolute inset-0 z-4"
+      style={{ cursor: pencilCursor }}
       onPointerDown={handlePointerDown}
       onPointerMove={points.length > 0 ? handlePointerMove : undefined}
       onPointerUp={handlePointerUp}

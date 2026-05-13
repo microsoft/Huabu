@@ -10,6 +10,7 @@ import {
   AlignStartHorizontal,
   AlignCenterHorizontal,
   AlignEndHorizontal,
+  Sparkles,
   Trash2,
   Ungroup,
 } from 'lucide-react';
@@ -26,6 +27,7 @@ import {
 } from '@/handler/canvasCommand/utils/frame';
 import { useIsNotMouse } from '@/hooks/useInputMode';
 import useCanvasStore from '@/store/canvasStore';
+import { useIntentStore } from '@/store/intentStore';
 
 import type { CanvasNode } from '@/components/Nodes/types';
 import type { CanvasNodeId } from '@sediment/shared';
@@ -43,11 +45,27 @@ export const MultiSelectToolbar = () => {
   const spreadSelectedNodes = useCanvasStore((s) => s.spreadSelectedNodes);
   const executeCommands = useCanvasStore((s) => s.executeCommands);
   const deleteNodes = useCanvasStore((s) => s.deleteNodes);
+  const requestSketchRecognition = useIntentStore(
+    (s) => s.requestSketchRecognition,
+  );
   const isNotMouse = useIsNotMouse();
 
   const selectedNodes = useMemo(
     () => nodes.filter((n) => n.selected) as CanvasNode[],
     [nodes],
+  );
+
+  // Sketch (annotation) selections expose an `Apply Sketch` action that
+  // hands the selected stroke ids to the vision-LLM recognition pipeline.
+  // Shown only when *every* selected node is a sketch — mixing in regular
+  // nodes would make the gesture's intent ambiguous.
+  const sketchIds = useMemo(
+    () =>
+      selectedNodes.length > 0 &&
+      selectedNodes.every((n) => n.type === 'annotation')
+        ? selectedNodes.map((n) => n.id)
+        : null,
+    [selectedNodes],
   );
 
   // Determine the common accent among selected nodes (empty string if mixed)
@@ -171,6 +189,18 @@ export const MultiSelectToolbar = () => {
       >
         <Ungroup />
       </FloatingToolbar.ActionButton>
+
+      {sketchIds && (
+        <>
+          <FloatingToolbar.Divider />
+          <FloatingToolbar.ActionButton
+            title="Apply Sketch (interpret strokes with AI)"
+            onClick={() => requestSketchRecognition(sketchIds)}
+          >
+            <Sparkles />
+          </FloatingToolbar.ActionButton>
+        </>
+      )}
 
       <FloatingToolbar.Divider />
 

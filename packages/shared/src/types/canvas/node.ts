@@ -330,9 +330,9 @@ export interface AnnotationNodeData extends BaseNodeData {
   /** Stroke color (hex) */
   strokeColor?: string;
   /**
-   * True after the intent pipeline has consumed this annotation. Executed
-   * strokes are dimmed on the canvas instead of being deleted, so the user
-   * can still see what they drew.
+   * True after the intent pipeline has consumed this annotation. The
+   * renderer no longer changes appearance based on this marker; it is kept
+   * as bookkeeping (analytics, future migrations).
    */
   executed?: boolean;
 }
