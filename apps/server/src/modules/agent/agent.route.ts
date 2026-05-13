@@ -20,15 +20,18 @@ import {
 } from '@sediment/shared';
 import { encode } from 'gpt-tokenizer';
 
-import { buildAgentPrompt } from '../../prompt/agent.js';
+import { loadAgent, renderAgentTemplate } from '../../prompt/agent-loader.js';
 import { runAgent } from '../agent/agent.service.js';
+import { buildAgentNodeRef } from '../agent/node-ref.js';
 import { loadContext, saveContext } from '../agent/store/chat-store.js';
 import {
   ARTIFACT_URL_REGEX,
   resolveArtifactImageUrl,
 } from '../artifact/utils.js';
+import { renderNodeNeighbourhoodMarkdown } from '../canvas/node-neighbourhood.js';
 import { getCanvasStore } from '../storage/index.js';
 
+import type { AgentNodeRef } from '../agent/node-ref.js';
 import type { AssistantMessage, Context } from '@earendil-works/pi-ai';
 import type {
   AgentCanvasIdQuery,
@@ -39,9 +42,9 @@ import type {
   ChatHistoryItem,
   ChatHistoryResponse,
   ContextTokensResponse,
-  SelectedNodeDetail,
   StopThreadResponse,
   ToolResponse,
+  WireSelectionNode,
 } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
@@ -236,9 +239,7 @@ async function buildUserContent(
  * Collect image attachments from selected canvas nodes (including frame children).
  * Enables vision analysis when users select image nodes on the canvas.
  */
-function collectImageAttachments(
-  nodes: SelectedNodeDetail[],
-): ChatAttachment[] {
+function collectImageAttachments(nodes: WireSelectionNode[]): ChatAttachment[] {
   const attachments: ChatAttachment[] = [];
 
   for (const node of nodes) {
@@ -259,23 +260,23 @@ function collectImageAttachments(
 }
 
 /**
- * Flatten the selection (including frame children) into the absolute
- * minimum the agent needs to know up front: id, label, type. Anything
- * richer (content / summary / position / style) is one tool call away
+ * Flatten the wire selection (including frame children) into the
+ * absolute minimum the agent needs to know up front: the L0
+ * `AgentNodeRef` payload of `{ id, type, label?, filename }`. Anything
+ * richer (content / preview / position / style) is one tool call away
  * via `read` or `inspect_nodes`, so we deliberately do not pay the
  * token cost of including it in every turn.
+ *
+ * `filename` is derived server-side via `buildAgentNodeRef` so the LLM
+ * never has to apply the safeLabel rule itself — empirically it
+ * mis-handles spaces and other kept-as-is characters often enough to
+ * waste a turn on a 404'd `read`.
  */
-function collectSelectedNodeRefs(
-  nodes: SelectedNodeDetail[],
-): Array<{ id: string; label?: string; type?: string }> {
-  const refs: Array<{ id: string; label?: string; type?: string }> = [];
-  const walk = (list: SelectedNodeDetail[]) => {
+function collectSelectedNodeRefs(nodes: WireSelectionNode[]): AgentNodeRef[] {
+  const refs: AgentNodeRef[] = [];
+  const walk = (list: WireSelectionNode[]) => {
     for (const n of list) {
-      refs.push({
-        id: n.id,
-        ...(n.label ? { label: n.label } : {}),
-        ...(n.type ? { type: n.type } : {}),
-      });
+      refs.push(buildAgentNodeRef({ id: n.id, type: n.type, label: n.label }));
       if (n.children) walk(n.children);
     }
   };
@@ -747,6 +748,7 @@ const agentRoutes: FastifyPluginAsync = async (
       canvasId,
       attachments,
       selectedNodeIds,
+      anchorNodeId,
     } = parsed.data;
 
     const resolvedThreadId = getOrCreateThreadId(threadId);
@@ -756,14 +758,18 @@ const agentRoutes: FastifyPluginAsync = async (
 
     if (!context) {
       context = {
-        systemPrompt: buildAgentPrompt(mode),
+        systemPrompt: loadAgent(mode).systemPrompt,
         messages: [],
         tools: [],
       };
     } else {
       // Update system prompt if mode changed
-      context.systemPrompt = buildAgentPrompt(mode);
+      context.systemPrompt = loadAgent(mode).systemPrompt;
     }
+
+    // Cached so the SYSTEM-context preambles below can render their
+    // message templates without re-loading the agent each time.
+    const agentCfg = loadAgent(mode);
 
     // Collect image attachments from selected canvas nodes for vision analysis
     const selectedImageAttachments = canvasContext?.selectedNodes
@@ -778,9 +784,12 @@ const agentRoutes: FastifyPluginAsync = async (
     // Build user message
     let userContent = await buildUserContent(content, allAttachments);
 
-    // Inject a minimal selected-node reference list as a system message:
-    // just { id, label, type } per node. The agent fetches anything richer
-    // (content via `read`, layout/style via `inspect_nodes`) on demand.
+    // Inject a minimal selected-node reference list as a system message.
+    // Each entry carries { id, type, label?, filename } — the `filename`
+    // is pre-computed (`nodes/<safeLabel>.md`) so the agent can `read`
+    // it verbatim without re-deriving the safeLabel rule. Anything
+    // richer (content via `read`, layout/style via `inspect_nodes`) is
+    // fetched on demand.
     if (
       canvasContext?.selectedNodes &&
       canvasContext.selectedNodes.length > 0
@@ -789,7 +798,29 @@ const agentRoutes: FastifyPluginAsync = async (
       if (refs.length > 0) {
         context.messages.push({
           role: 'user',
-          content: `[SYSTEM Context]\n[Selected Nodes (id / label / type only — read "nodes/<id>.md" for content, inspect_nodes({ ids: [...] }) for layout / style / spatial relations)]\n${JSON.stringify(refs, null, 2)}`,
+          content: renderAgentTemplate(agentCfg, 'selectedNodesPreamble', {
+            refsJson: JSON.stringify(refs, null, 2),
+          }),
+          timestamp: Date.now(),
+        });
+      }
+    }
+
+    // Node-neighbourhood preamble. The actual user message arrives as
+    // the next pipeline push, so this preamble carries ONLY the
+    // surrounding-canvas markdown. The server resolves the
+    // neighbourhood from canvas.json — the client just supplies the
+    // anchor node id, no graph data on the wire. Empty result
+    // (canvas/node missing, or no useful context) means we skip the
+    // push entirely — no orphan `[SYSTEM Context]`.
+    if (anchorNodeId && canvasId) {
+      const spatial = renderNodeNeighbourhoodMarkdown(canvasId, anchorNodeId);
+      if (spatial) {
+        context.messages.push({
+          role: 'user',
+          content: renderAgentTemplate(agentCfg, 'nodeNeighbourhoodPreamble', {
+            spatial,
+          }),
           timestamp: Date.now(),
         });
       }
@@ -912,7 +943,7 @@ const agentRoutes: FastifyPluginAsync = async (
 
     try {
       const stream = runAgent({
-        mode,
+        scope: mode,
         canvasId,
         context,
         logger: request.log,

@@ -43,11 +43,25 @@ import {
   type GrepArgs,
   type LsArgs,
 } from './handlers/fs-search.js';
-import {
-  handleIngestContent,
-  type IngestContentArgs,
-} from './handlers/ingest-content.js';
 import { handleWebSearch, type WebSearchArgs } from './handlers/web-search.js';
+
+import type { NodeOrigin } from '@sediment/shared';
+
+/**
+ * Per-request context every handler call receives.
+ *
+ * - `canvasId` is injected into every canvas-aware handler. The LLM
+ *   never sees a `canvasId` argument — cross-canvas access is not
+ *   exposed.
+ * - `origin` is forwarded to `canvas_commands` only; other handlers
+ *   ignore it. It controls the `NodeOrigin` stamp on AI-generated
+ *   nodes (defaults to `'ai-operate'` when unset; the annotation
+ *   pipeline overrides it to `'annotation-recognized'`).
+ */
+export interface ExecuteContext {
+  canvasId?: string;
+  origin?: NodeOrigin;
+}
 
 /**
  * Execute a tool call and return the result as a string.
@@ -60,13 +74,12 @@ import { handleWebSearch, type WebSearchArgs } from './handlers/web-search.js';
  * @param name    Tool name (matches `ToolDefinition.name`).
  * @param args    Validated tool arguments — already passed pi-ai's
  *                schema check by the time this runs.
- * @param context Per-request context; today only `canvasId` (always
- *                injected into canvas-aware handlers).
+ * @param context Per-request context (see `ExecuteContext`).
  */
 export async function executeTool(
   name: string,
   args: Record<string, unknown>,
-  context?: { canvasId?: string },
+  context?: ExecuteContext,
 ): Promise<string> {
   const requireCanvasId = (toolName: string): string => {
     const canvasId = context?.canvasId;
@@ -112,11 +125,7 @@ export async function executeTool(
     case 'canvas_commands':
       return handleCanvasCommands(
         withCanvasId<CanvasCommandsArgs>(args, 'canvas_commands'),
-      );
-
-    case 'ingest_content':
-      return handleIngestContent(
-        withCanvasId<IngestContentArgs>(args, 'ingest_content'),
+        context?.origin,
       );
 
     default:

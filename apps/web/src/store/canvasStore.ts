@@ -31,11 +31,7 @@ import {
   type CanvasUiIntent,
   type UiResolverState,
 } from '@/handler/canvasCommand/uiIntent';
-import {
-  extractNodeRef,
-  extractSnippet,
-  pushAction,
-} from '@/handler/canvasCommand/utils';
+import { pushAction } from '@/handler/canvasCommand/utils';
 import {
   computeFrameFit,
   getAbsolutePosition as getFrameAbsolutePosition,
@@ -49,20 +45,21 @@ import { canvasHistoryManager } from './canvasHistoryManager';
 import { getCanvas, postCanvasEvents, preprocessNode, putCanvas } from '../api';
 import { cloneArtifactToCanvas } from '../api/artifact';
 import { CanvasConflictError } from '../api/canvas';
+import { copyToClipboard } from '../utils/io/clipboard';
 import { getNodeSize } from '../utils/node/size';
 
 import type { AlignDirection } from '@/handler/canvasCommand/utils/alignment';
 import type {
-  AgentBaseContext,
+  AgentChatContext,
   CanvasCommand,
   CanvasCommandType,
   CanvasExecution,
   CanvasExecutionSource,
   CanvasNodeType,
-  NodeSummary,
+  IntentContext,
   RecentAction,
-  SelectedNodeDetail,
-  SpatialNode,
+  WireCanvasNode,
+  WireSelectionNode,
   CanvasEventInput,
 } from '@sediment/shared';
 
@@ -117,98 +114,16 @@ const triggerPreprocessing = (node: Node) => {
   preprocessTimers.set(nodeId, timer);
 };
 
-// ── Spatial cache ──────────────────────────────────────────────
-// Module-level cache keyed by a lightweight fingerprint of
-// node positions + edge endpoints.  Avoids re-running the
-// `toSpatialNodes` traversal on every consumer call (prompt-node
-// context builder etc.) when the canvas hasn't changed.
-
-interface SpatialCache {
-  fingerprint: number;
-  spatialNodes: SpatialNode[];
-}
-
-let _spatialCache: SpatialCache | null = null;
-
-/** FNV-1a 32-bit hash — fast, non-cryptographic, good distribution. */
-function fnv1a(str: string): number {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < str.length; i++) {
-    hash ^= str.charCodeAt(i);
-    hash = (hash * 0x01000193) >>> 0;
-  }
-  return hash;
-}
-
-/** Build a fast fingerprint from positions + edges for cache invalidation. */
-function spatialFingerprint(nodes: Node[], edges: Edge[]): number {
-  const parts: string[] = [String(nodes.length)];
-  for (const n of nodes) {
-    const sz = getNodeSize(n);
-    parts.push(
-      `${n.id}:${n.position.x},${n.position.y},${sz.width},${sz.height}`,
-    );
-  }
-  parts.push(String(edges.length));
-  for (const e of edges) {
-    parts.push(`${e.source}>${e.target}`);
-  }
-  return fnv1a(parts.join('|'));
-}
-
-function resolveAbsolutePosition(
-  node: Node,
-  byId: Map<string, Node>,
-): { x: number; y: number } {
-  let x = node.position.x;
-  let y = node.position.y;
-  let cur = node.parentId ? byId.get(node.parentId) : undefined;
-  while (cur) {
-    x += cur.position.x;
-    y += cur.position.y;
-    cur = cur.parentId ? byId.get(cur.parentId) : undefined;
-  }
-  return { x, y };
-}
-
-function toSpatialNodes(nodes: Node[]): SpatialNode[] {
-  const byId = new Map(nodes.map((n) => [n.id, n]));
-  return nodes.map((n) => {
-    const sz = getNodeSize(n);
-    const abs = resolveAbsolutePosition(n, byId);
-    return {
-      id: n.id,
-      rect: {
-        x: abs.x,
-        y: abs.y,
-        width: sz.width || 200,
-        height: sz.height || 100,
-      },
-      type: n.type,
-      parentId: n.parentId ?? null,
-      label: (n.data as Record<string, unknown>)?.label as string | undefined,
-    };
-  });
-}
-
-/**
- * Get (or compute) cached spatial nodes for the current canvas.
- * Safe to call from anywhere (components, handlers). Returns absolute
- * positions and resolved sizes, ready to feed shared `spatial`
- * helpers (e.g. `findNearbyNodes`, `buildQuestionNodeContext`).
- */
-export function getCachedSpatialData(): {
-  spatialNodes: SpatialNode[];
-} {
-  const { nodes, edges } = useCanvasStore.getState();
-  const fp = spatialFingerprint(nodes, edges);
-  if (_spatialCache && _spatialCache.fingerprint === fp) {
-    return { spatialNodes: _spatialCache.spatialNodes };
-  }
-  const spatialNodes = toSpatialNodes(nodes);
-  _spatialCache = { fingerprint: fp, spatialNodes };
-  return { spatialNodes };
-}
+// ── Spatial data ──────────────────────────────────────────────
+//
+// The frontend no longer normalises spatial data for the LLM.
+// `/api/agent` resolves the anchor node's neighbourhood server-side
+// from `canvas.json` (see `apps/server/src/modules/agent/
+// node-neighbourhood.ts`); the web bundle only sends `anchorNodeId`.
+//
+// Existing UI-side proximity queries (annotation clustering, frame
+// drop targets) call shared geometry helpers directly with their own
+// React Flow nodes — no central cache is needed.
 
 type RFState = {
   nodes: Node[];
@@ -402,7 +317,23 @@ type RFState = {
   ) => void;
   /** @internal Resolve a web-only UiIntent and execute the resulting commands. */
   dispatchUiIntent: (intent: CanvasUiIntent) => void;
-  getAgentContext: () => AgentBaseContext;
+  /**
+   * Build the slim context attached to every chat-agent request.
+   *
+   * Only carries `selectedNodes` — full canvas / spatial / recent
+   * action data is fetched on demand by the agent through tools
+   * (`get_canvas_outline`, `inspect_nodes`, `inspect_edges`, `read`).
+   */
+  getAgentChatContext: () => AgentChatContext;
+  /**
+   * Build the rich context consumed by the intent recogniser.
+   *
+   * Carries the full canvas snapshot (nodes + edges), the recent
+   * action ring buffer, the user selection, and (when available) a
+   * viewport screenshot — the recogniser is a one-shot LLM call and
+   * cannot pull data through tools.
+   */
+  getIntentContext: () => IntentContext;
 
   /**
    * Force-flush any buffered behavioural events to the server.
@@ -591,6 +522,48 @@ const autoSaveMiddleware =
 // onNodeDragStop cancel any pending frame reliably.
 let _dragPreviewRafId: number | null = null;
 
+/**
+ * Build a recursive `WireSelectionNode` factory bound to the current
+ * node list (so `frame` nodes can resolve their direct children).
+ *
+ * Only sends lightweight metadata — the agent uses `read` to fetch
+ * full content on demand, saving tokens. Image nodes keep `src` so
+ * the server can build vision attachments.
+ *
+ * Layout (`position` / `size`) and provenance (`origin`) are
+ * deliberately omitted: the server consumes neither. Spatial info is
+ * fetched on demand via `get_canvas_outline()` / `inspect_nodes`.
+ */
+function makeBuildSelectedDetail(
+  allNodes: Node[],
+): (n: Node) => WireSelectionNode {
+  const build = (n: Node): WireSelectionNode => {
+    const data = n.data as Record<string, unknown> | undefined;
+    const nodeType = (n.type ?? 'note') as CanvasNodeType;
+
+    // Only keep src for image nodes (needed for vision analysis).
+    const src =
+      n.type === 'image' ? (data?.src as string | undefined) : undefined;
+
+    const detail: WireSelectionNode = {
+      id: n.id,
+      type: nodeType,
+      label: data?.label as string | undefined,
+      ...(src !== undefined ? { src } : {}),
+    };
+
+    if (n.type === 'frame') {
+      const children = allNodes
+        .filter((child) => child.parentId === n.id)
+        .map(build);
+      if (children.length > 0) detail.children = children;
+    }
+
+    return detail;
+  };
+  return build;
+}
+
 const useCanvasStore = create<RFState>()(
   autoSaveMiddleware((set, get) => ({
     nodes: [],
@@ -747,77 +720,41 @@ const useCanvasStore = create<RFState>()(
       }
     },
 
-    getAgentContext: (): AgentBaseContext => {
-      const { nodes, edges, actionHistory } = get();
-      // Build a lookup map once to avoid O(n²) scans inside edges.map.
-      const nodeMap = new Map(nodes.map((n) => [n.id, n]));
-
-      /**
-       * Build a SelectedNodeDetail for a single node.
-       * Only sends lightweight metadata — the agent uses `read`
-       * to fetch full content on demand, saving tokens.
-       * Image nodes keep `src` so the server can build vision attachments.
-       * For frame nodes, recursively include direct children as `children` details.
-       *
-       * Layout (`position` / `size`) and provenance (`origin`) are deliberately
-       * omitted: the server consumes neither. Spatial info is fetched on demand
-       * via `get_canvas_outline()` / `inspect_nodes`.
-       */
-      const buildSelectedDetail = (n: Node): SelectedNodeDetail => {
-        const data = n.data as Record<string, unknown> | undefined;
-        const nodeType = (n.type ?? 'note') as CanvasNodeType;
-
-        // Only keep src for image nodes (needed for vision analysis)
-        const src =
-          n.type === 'image' ? (data?.src as string | undefined) : undefined;
-
-        const detail: SelectedNodeDetail = {
-          id: n.id,
-          type: nodeType,
-          label: data?.label as string | undefined,
-          ...(src !== undefined ? { src } : {}),
-        };
-
-        if (n.type === 'frame') {
-          const children = nodes
-            .filter((child) => child.parentId === n.id)
-            .map(buildSelectedDetail);
-          if (children.length > 0) detail.children = children;
-        }
-
-        return detail;
-      };
-
+    getAgentChatContext: (): AgentChatContext => {
+      const { nodes } = get();
+      const buildSelectedDetail = makeBuildSelectedDetail(nodes);
       return {
-        nodes: nodes.map((n): NodeSummary => {
+        selectedNodes: nodes.filter((n) => n.selected).map(buildSelectedDetail),
+      };
+    },
+
+    getIntentContext: (): IntentContext => {
+      const { nodes, edges, actionHistory } = get();
+      const buildSelectedDetail = makeBuildSelectedDetail(nodes);
+
+      // Wire shape: raw canvas state only. The server enriches into
+      // `AgentNodeOutline` (with `filename`, `preview`,
+      // `parentFrame.label`) before any prompt rendering.
+      return {
+        nodes: nodes.map((n): WireCanvasNode => {
           const size = getNodeSize(n);
-          return {
+          const data = n.data as Record<string, unknown> | undefined;
+          const node: WireCanvasNode = {
             id: n.id,
             type: (n.type ?? 'note') as CanvasNodeType,
-            label: n.data?.label as string | undefined,
-            snippet: extractSnippet(n),
-            frameLabel: n.parentId
-              ? (nodeMap.get(n.parentId)?.data?.label as string | undefined)
-              : undefined,
             position: { x: n.position.x, y: n.position.y },
-            size:
-              size.width > 0 || size.height > 0
-                ? { width: size.width, height: size.height }
-                : undefined,
+            size: { width: size.width, height: size.height },
           };
+          const label = data?.label as string | undefined;
+          if (label) node.label = label;
+          const content = data?.content as string | undefined;
+          if (content) node.content = content;
+          const src = data?.src as string | undefined;
+          if (src) node.src = src;
+          if (n.parentId) node.parentId = n.parentId;
+          return node;
         }),
-        edges: edges.map((e) => {
-          const sourceNode = nodeMap.get(e.source);
-          const targetNode = nodeMap.get(e.target);
-          return {
-            source: sourceNode
-              ? extractNodeRef(sourceNode)
-              : { id: e.source, nodeType: 'note' as CanvasNodeType },
-            target: targetNode
-              ? extractNodeRef(targetNode)
-              : { id: e.target, nodeType: 'note' as CanvasNodeType },
-          };
-        }),
+        edges: edges.map((e) => ({ source: e.source, target: e.target })),
         recentActions: actionHistory,
         selectedNodes: nodes.filter((n) => n.selected).map(buildSelectedDetail),
       };
@@ -1524,9 +1461,10 @@ const useCanvasStore = create<RFState>()(
         __sediment_nodes__: cloned,
         __sediment_edges__: clonedEdges,
       });
-      void navigator.clipboard.writeText(payload).catch(() => {
-        // Clipboard API unavailable
-      });
+      // `copyToClipboard` guards against `navigator.clipboard` being
+      // undefined (insecure contexts, older browsers) and falls back to
+      // a hidden textarea + `document.execCommand('copy')`.
+      void copyToClipboard(payload);
     },
 
     pasteNodes: (flowPosition, clipboardNodes, clipboardEdges) => {

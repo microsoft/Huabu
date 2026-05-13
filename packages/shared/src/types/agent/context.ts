@@ -1,20 +1,5 @@
-import type { CanvasNodeType, NodeOrigin } from '../canvas/node.js';
-
-// ==================== Node Reference ====================
-
-/**
- * Lightweight reference to a canvas node.
- * Used in RecentAction to avoid duplicating full NodeSummary data.
- * AI can use `id` to call `read` on "nodes/<nodeId>.md" for full content,
- * or `inspect_nodes({ ids: [<id>] })` for layout / style.
- */
-export interface NodeRef {
-  id: string;
-  nodeType: CanvasNodeType;
-  label?: string;
-  /** How this node came to exist — helps the agent understand user intent. */
-  origin?: NodeOrigin;
-}
+import type { NodeRef } from './node-ref.js';
+import type { WireCanvasNode, WireSelectionNode } from '../api/agent.js';
 
 // ==================== Recent Actions ====================
 
@@ -93,81 +78,67 @@ export type RecentAction =
   | { action: 'canvas_undone' }
   | { action: 'canvas_redone' };
 
-// ==================== Canvas Snapshot ====================
+// ==================== Agent Chat / Intent contexts ====================
 
 /**
- * Lightweight summary of a canvas node injected into the agent context.
- * `snippet` is the first ~120 chars of plain-text content (or src for web/pdf).
- */
-export interface NodeSummary {
-  id: string;
-  type: CanvasNodeType;
-  label?: string;
-  /** First ~120 chars of plain-text content; src URL for web/pdf/video/image nodes */
-  snippet?: string;
-  /** Label of the parent frame, if any */
-  frameLabel?: string;
-  /** Absolute position on canvas (top-left corner). */
-  position?: { x: number; y: number };
-  /** Measured or styled dimensions. */
-  size?: { width: number; height: number };
-}
-
-// ==================== Selected Nodes ====================
-
-/**
- * Rich representation of a node explicitly selected by the user.
+ * Context sent with every chat-agent request (`POST /api/agent`).
  *
- * Selection is a strong intent signal — the user is telling the agent
- * "focus on this". `SelectedNodeDetail` carries lightweight metadata only;
- * full node content is fetched on demand via `read` on
- * "nodes/<nodeId>.md" (and layout via `inspect_nodes`) to keep the base
- * context small.
+ * Deliberately minimal: only the user's **explicit selection** travels
+ * with the request. The rest of the canvas (nodes / edges / spatial
+ * layout / recent actions / screenshot) is fetched on demand by the
+ * agent through tools — `get_canvas_outline`, `inspect_nodes`,
+ * `inspect_edges`, `read`, etc. — so we don't pay the upload cost on
+ * every turn for data the model usually doesn't need.
  *
- * For frame nodes, `children` contains the detail of every direct child,
- * so the agent understands the entire group the user is referring to.
+ * Selection is the primary intent signal: "focus on this". Wire shape
+ * stays raw; the server enriches into `AgentNodeRef[]` before any
+ * prompt rendering so the LLM gets the pre-computed
+ * `nodes/<safeLabel>.md` filename without web having to apply the
+ * safeLabel rule.
  */
-export interface SelectedNodeDetail {
-  id: string;
-  type: CanvasNodeType;
-  label?: string;
-  /** Source URL for image nodes (used by the server to build vision attachments). */
-  src?: string;
+export interface AgentChatContext {
   /**
-   * Direct children of a frame node, each carrying their own detail.
-   * Undefined for non-frame nodes.
+   * Nodes explicitly selected by the user at the time of the request.
+   * Empty array means "no explicit selection; the agent should pull
+   * canvas state via tools as needed".
    */
-  children?: SelectedNodeDetail[];
+  selectedNodes: WireSelectionNode[];
 }
 
 /**
- * The base context sent with every agent request.
- * Designed to be lightweight: nodes carry only label + snippet,
- * full content is fetched on demand via `read` on "nodes/<nodeId>.md".
+ * Context sent to the intent recogniser (`POST /api/intent/recognize*`).
+ *
+ * Distinct from {@link AgentChatContext}: intent recognition is a
+ * one-shot LLM call that has to classify what the user is *about* to
+ * do, so it cannot rely on tool-driven exploration. It needs the full
+ * canvas snapshot, the recent action ring buffer, and an optional
+ * viewport screenshot — all up-front, all in one payload.
+ *
+ * Wire shape stays raw — `nodes` are {@link WireCanvasNode} (no
+ * `filename`/`preview`/`parentFrame.label`), `edges` are bare id
+ * pairs. The server enriches as needed before formatting the prompt.
  */
-export interface AgentBaseContext {
-  /** Snapshot of all current canvas nodes */
-  nodes: NodeSummary[];
-  /** Semantic edges between nodes (label pairs, no coordinates) */
-  edges: Array<{ source: NodeRef; target: NodeRef }>;
+export interface IntentContext {
+  /** Snapshot of all current canvas nodes (raw wire shape). */
+  nodes: WireCanvasNode[];
   /**
-   * Ring buffer of the last ~10 user actions (maintained by the frontend).
-   * Ordered from oldest to newest.
+   * Edge endpoints as bare node ids. The server resolves type/label
+   * from `nodes[]` when rendering the prompt.
+   */
+  edges: Array<{ source: string; target: string }>;
+  /**
+   * Ring buffer of the last ~10 user actions (maintained by the
+   * frontend). Ordered from oldest to newest.
    */
   recentActions: RecentAction[];
   /**
    * Base64-encoded PNG screenshot of the current canvas viewport.
-   * Optional — captured on-demand (e.g. intent recognition) for visual reasoning.
+   * Optional — captured on demand for visual reasoning.
    */
   screenshot?: string;
   /**
    * Nodes explicitly selected by the user at the time of the request.
-   *
-   * Selection is the primary intent signal — it overrides the general canvas
-   * snapshot. Each entry carries full content (no truncation) and, for frame
-   * nodes, a recursive `children` array so the agent sees the entire group.
-   *
-   * Empty array means "no explicit selection; use the full canvas as context".
+   * Same shape as {@link AgentChatContext.selectedNodes}.
    */
-  selectedNodes: SelectedNodeDetail[];
+  selectedNodes: WireSelectionNode[];
 }

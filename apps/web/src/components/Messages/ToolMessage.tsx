@@ -6,7 +6,6 @@ import {
   Command,
   FolderOpen,
   LayoutList,
-  PackagePlus,
   ScanText,
   Search,
   SearchCode,
@@ -43,7 +42,6 @@ const TOOL_ICON: Record<string, typeof ScanText> = {
   ls: FolderOpen,
   inspect_nodes: LayoutList,
   get_canvas_outline: LayoutList,
-  ingest_content: PackagePlus,
   canvas_commands: Command,
 };
 
@@ -748,12 +746,6 @@ function MergedAgentToolRow({
         nodeRefs: emptyRefs,
       };
     }
-    if (tool === 'ingest_content') {
-      return {
-        title: count === 1 ? 'Ingest content' : `Ingest content (×${count})`,
-        nodeRefs: emptyRefs,
-      };
-    }
 
     return { title: tool, nodeRefs: emptyRefs };
   }, [tool, entries, count]);
@@ -899,7 +891,6 @@ function isAgentTool(tool: string): boolean {
     'inspect_nodes',
     'get_canvas_outline',
     'canvas_commands',
-    'ingest_content',
   ].includes(tool);
 }
 

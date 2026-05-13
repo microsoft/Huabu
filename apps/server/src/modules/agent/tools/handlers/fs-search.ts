@@ -14,7 +14,7 @@
  * in `./fs-sandbox.ts` so that `read` and any future fs tool inherit
  * the exact same security model.
  *
- * Enrichment: when a result file is `nodes/<nodeId>.md`, the response
+ * Enrichment: when a result file is `nodes/<filename>.md`, the response
  * includes `nodeId`, `label`, and `nodeType` from the canvas's
  * `canvas.json` so the LLM can chain straight into `read` (for the
  * rest of the file), `inspect_nodes` (for layout / style / spatial
@@ -143,7 +143,19 @@ export async function handleGrep(args: GrepArgs): Promise<string> {
     throw new Error(`Invalid pattern: ${(e as Error).message}`);
   }
 
-  const globRe = glob ? globToRegExp(glob) : null;
+  // Glob is matched against each file's path **relative to the search
+  // root** (`e.relPath`), not its canvas-relative path. This mirrors
+  // `find` (and ripgrep / fd) and matches the directory the user
+  // already targeted via `path:` — otherwise a natural call like
+  // `grep({ path: "nodes", glob: "*.md" })` would silently 0-match
+  // because every candidate is `nodes/<file>.md` (containing a `/`)
+  // while `*.md` compiles to `^[^/]*\.md$`.
+  //
+  // Also: a glob without `/` is treated as "match at any depth" so
+  // `*.md` finds `nodes/sub/foo.md`. Same convention as `find`.
+  const effectiveGlob =
+    glob && !glob.includes('/') && !glob.startsWith('**') ? `**/${glob}` : glob;
+  const globRe = effectiveGlob ? globToRegExp(effectiveGlob) : null;
   const effectiveLimit = Math.max(1, limit ?? DEFAULT_GREP_LIMIT);
   const ctxN = Math.max(0, ctxLines ?? 0);
   const lookup = makeNodeLookup(args.canvasId);
@@ -158,8 +170,8 @@ export async function handleGrep(args: GrepArgs): Promise<string> {
   } else {
     for (const e of walk(root)) {
       if (e.isDirectory) continue;
+      if (globRe && !globRe.test(e.relPath)) continue;
       const canvasRel = joinCanvasRel(walkRootRel, e.relPath);
-      if (globRe && !globRe.test(canvasRel)) continue;
       candidates.push({ canvasRel, absPath: e.absPath });
     }
   }

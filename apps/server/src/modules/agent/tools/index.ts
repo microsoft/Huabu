@@ -3,23 +3,47 @@
  *
  * `definitions.ts` holds pure schema/description pairs (no canvasId, no
  * IO). This file binds those definitions to the request-scoped
- * `canvasId` and the existing `executeTool` dispatcher, producing the
- * `AgentTool[]` that pi-agent-core's `Agent` consumes.
+ * `canvasId` / `origin` and the existing `executeTool` dispatcher,
+ * producing the `AgentTool[]` that pi-agent-core's `Agent` consumes.
+ *
+ * Tool *selection* per agent is no longer hard-coded here — each
+ * agent's `AGENT.md` declares its `tools:` list by name, and
+ * {@link buildAgentToolsByNames} resolves names against `TOOL_REGISTRY`.
  */
 
-import { askTools, operateTools, type ToolDefinition } from './definitions.js';
+import { TOOL_REGISTRY, type ToolDefinition } from './definitions.js';
 import { executeTool } from './executor.js';
+import { loadAgent, type AgentId } from '../../../prompt/agent-loader.js';
 
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
-import type { AgentMode } from '@sediment/shared';
+import type { AgentMode, NodeOrigin } from '@sediment/shared';
 
 export { executeTool } from './executor.js';
 export type { ToolDefinition } from './definitions.js';
+
+/**
+ * Surfaces the tool builder understands.
+ *
+ * Mirrors `AgentMode` plus `'annotation'` for the freehand-gesture
+ * pipeline. Kept local rather than reusing `SkillScope` from the
+ * skill loader because `'external'` agents bring their own tooling
+ * and should never go through this builder.
+ */
+export type ToolScope = AgentMode | 'annotation';
 
 /** Per-request context closed over by every tool's `execute`. */
 export interface ToolBuildContext {
   /** Current canvas id; tools that omit it in args fall back to this value. */
   canvasId?: string;
+  /**
+   * `NodeOrigin` stamp injected onto every node created by the
+   * `canvas_commands` tool. Defaults to `{ type: 'ai-operate' }`
+   * inside the handler when unset; the annotation pipeline overrides
+   * it to `{ type: 'annotation-recognized' }` so user-authored
+   * gestures are not mis-tagged as AI-initiated. Other tools ignore
+   * this field.
+   */
+  origin?: NodeOrigin;
 }
 
 /**
@@ -46,7 +70,10 @@ function toAgentTool(def: ToolDefinition, ctx: ToolBuildContext): AgentTool {
       const text = await executeTool(
         def.name,
         params as Record<string, unknown>,
-        { canvasId: ctx.canvasId },
+        {
+          canvasId: ctx.canvasId,
+          origin: ctx.origin,
+        },
       );
       return {
         content: [{ type: 'text', text }],
@@ -57,15 +84,39 @@ function toAgentTool(def: ToolDefinition, ctx: ToolBuildContext): AgentTool {
 }
 
 /**
- * Build the runnable tool set for an agent run.
- *
- * The returned array shape mirrors `definitions.ts`'s `askTools` /
- * `operateTools`, just with `execute` bound to the request context.
+ * Resolve a list of tool names against `TOOL_REGISTRY` and bind each
+ * to the request context. Throws on unknown names so a typo in
+ * `AGENT.md` fails loudly at startup rather than silently dropping a
+ * tool.
  */
-export function buildToolsForMode(
-  mode: AgentMode,
+export function buildAgentToolsByNames(
+  names: readonly string[],
   ctx: ToolBuildContext,
 ): AgentTool[] {
-  const defs = mode === 'operate' ? operateTools : askTools;
-  return defs.map((def) => toAgentTool(def, ctx));
+  return names.map((name) => {
+    const def = TOOL_REGISTRY[name];
+    if (!def) {
+      throw new Error(
+        `[tools] Unknown tool name "${name}" — not in TOOL_REGISTRY (definitions.ts)`,
+      );
+    }
+    return toAgentTool(def, ctx);
+  });
+}
+
+/**
+ * Build the runnable tool set for an agent run.
+ *
+ * Resolves the agent's `tools:` list (declared in AGENT.md) via
+ * {@link loadAgent} and binds each one to the request context. The
+ * per-scope tool composition is owned by `prompt/agents/<id>/AGENT.md`.
+ */
+export function buildToolsForScope(
+  scope: ToolScope,
+  ctx: ToolBuildContext,
+): AgentTool[] {
+  // ToolScope ⊂ AgentId (intent has no tools and never reaches here),
+  // so the cast is sound.
+  const cfg = loadAgent(scope as AgentId);
+  return buildAgentToolsByNames(cfg.toolNames, ctx);
 }

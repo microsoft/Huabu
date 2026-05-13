@@ -4,53 +4,56 @@
 
 ---
 
-## 2026-05-11 · 所有节点背景统一为 90% 不透明度
+## 2026-05-13 · Wire/Server 边界拆分：prompt-shape 类型从 shared 退到 server
 
 **What Changed**
 
-- 在 `NodeWrapper` 里统一把渲染 `backgroundColor` 时的颜色用 `color-mix(in srgb, <bg> 90%, transparent)` 包了一层，让所有节点的背景色都变成 90% 不透明（即 10% 让画布网格透出来）。
-- 新增常量 `NODE_BG_OPACITY_PCT = 90` 集中控制这个百分比，以后想整体调整透明度只改这一个数字。
+- 把「LLM 看到的节点形态」（`AgentNodeRef` / `AgentNodePreview` / `AgentNodeOutline` 三段阶梯 + `buildAgentNode*` 构造器 + `extractAgentNodePreview` ladder + `toSafeFilename` 文件名规则）整体下沉到 `apps/server/src/modules/agent/node-ref.ts`，从 `@sediment/shared` 移除。前端打包不再带任何 prompt 形态相关代码。
+- `@sediment/shared/types/api/agent.ts` 新增三种「线上」类型：`WireNodeRef`（id+type+label?）、`WireSelectionNode`（+ src + recursive children）、`WireCanvasNode`（+ content + src + position + size + parentId）。这些是 web 实际 POST 给服务端的形状——只搬「画布原始数据」，不计算 `filename`、不抽 `preview`、不做 `parentFrame.label` 父帧反查。
+- `IntentContext.nodes` 由 `AgentNodeOutline[]` 改为 `WireCanvasNode[]`；`IntentContext.edges` 由 `Array<{source: NodeRef, target: NodeRef}>` 改为 `Array<{source: string, target: string}>`（端点只送节点 id，服务端按需查类型/标签）。
+- `AnnotationClusterContext` 与 `AnnotationContext` 的 `nearbyNodes` / `enclosedNodes` 由 `AgentNodeRef[]` 改为 `WireNodeRef[]`，服务端在拼 prompt 之前再调 `buildAgentNodeRef` 加上 `nodes/<safeLabel>.md` 路径。
+- 顺手修了一个老 bug：`resolveAddNodes` / `resolvePasteClipboard` 写入 `RecentAction.node_created.nodes` 时字段名一直是 `nodeType`（应为 `type`），所以服务端 intent 上下文渲染时读到的一直是 `undefined`。
 
 **Notes**
 
-- 这个改动只在「节点本来就有 backgroundColor」时生效。完全没颜色（`backgroundColor` 为空或 `transparent`）的节点和原来一样直接透明，不受影响。
-- 覆盖的所有路径：SURFACE_PALETTE 的浅色填充、frame / text 节点的 accent 派生色（`color-mix(...)` 嵌套包裹仍然合法）、以及 question 节点的 `var(--question-bg)` 这种特殊值——都自动变成 90% 不透明。
-- 视觉变化：画布上重叠的卡片现在会有非常轻微的「叠层透出」效果，看起来更接近半透明纸张而非实色色块；单个非重叠节点几乎看不出区别。
+- 没有持久化数据迁移：所有变化都在「画布到服务端的 JSON 报文形状」与「服务端到 LLM 的 prompt 形状」两层之间发生，磁盘上的 `canvas.json` / `nodes/*.md` / `events.jsonl` 无任何字段调整。
+- 行为收益：之后想改 prompt 形状（preview 长度、`filename` 命名规则、是否带 `parentFrame.label`），只改 server 不需要 web 重新发布。
+- 对外部脚本/工具的影响：直接 POST `/api/intent/recognize*` 的脚本，`nodes[i]` 字段名从 `parentFrame: {id, label?}` 退到 `parentId: string`，且不再带 `filename` / `preview`。`edges[i].source` / `edges[i].target` 从对象退化为字符串 nodeId。
 
 ---
 
-## 2026-05-11 · 仅 Text 节点保留 “透明” accent；其它节点 picker 移除该选项
+## 2026-05-13 · Agent 节点引用统一为 AgentNodeRef 阶梯（外部协议变更）
 
 **What Changed**
 
-- 之前 toolbar accent color picker 默认带一个首位的 “Transparent” 透明色块。现在这个色块**只保留给 `text` 节点**——因为 text 是直接漂浮在画布上的纯文字，透明背景是常用的、有意义的选择。
-- 其它所有节点类型（`note` / `frame` / `image` / `pdf` / `video` / `web` / `annotation`）的 accent picker 都不再展示透明色块；可选颜色从 `White` 开始 + 完整 accent palette。
-- 多选 toolbar 的 accent picker 跟随同样规则：只有当**选中集合里全部都是 text** 时，picker 才展示 “Transparent”；只要混入任何其它类型就隐藏。
-- 调色板常量统一搬到了 `@sediment/shared` 的 `types/canvas/color.ts`：新增 `ACCENT_NONE_TOKEN`、`ACCENT_PICKER_OPTIONS`（无透明色，默认）、`ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT`（含透明色，仅 text 用）。`NodeWrapper` / `MultiSelectToolbar` 不再各自定义同样的常量数组。
+- 所有传给 LLM 的「这是一个节点」载荷现在共用一条阶梯：`AgentNodeRef`（id+type+label?+filename，最小集合）→ `AgentNodePreview`（+ preview 文本）→ `AgentNodeOutline`（+ position+size+parentFrame?）。`get_canvas_outline` / `inspect_nodes` 返回的节点字段名从 `parentId` / `width` / `height` 改为 `parentFrame: { id, label? }` / `size: { width, height }`，并新增 `filename` 字段（pre-computed `nodes/<safeLabel>.md`，可直接喂给 `read`）。
+- 选中节点（`AgentChatContext.selectedNodes` / `IntentContext.selectedNodes`）的线上类型从 `SelectionPayload` 改名为 `WireSelectionNode`，shape 不变。Annotation cluster context 的 `nearbyNodes` / `enclosedNodes` 改用 `AgentNodeRef`。
+- 节点 preview 抽取规则简化为 `summary > content[:120] > src`——**舍弃了 `keywords` 拼接回退**：之前没有 summary 但有 keywords 的节点会回退成 `kw1, kw2, kw3` 字符串，现在直接落到 `content[:120]` 或 `src`。
+- 共享构造器 `buildAgentNodeRef` / `buildAgentNodePreview` / `buildAgentNodeOutline` 从 `@sediment/shared` 导出，server 与 web 各自的临时拼装代码（agent.route.ts / annotation.service.ts / canvas-spatial.ts / node-neighbourhood.ts / canvasStore.ts / annotation/context.ts）全部改用统一构造器。
+- `IntentContext.edges` 的 `NodeRef` 字段从 `nodeType` 改名为 `type`。
 
 **Notes**
 
-- 不影响已有数据。原本就被设为 `accent: null`（未选过颜色）的 note / frame / 等节点，渲染依旧是默认背景；只是在 picker 里再也看不到「主动选透明」的入口了。
-- 设计动机：除了 text 之外，其它节点的视觉身份都依赖于一块实色背景——容器（frame）、便签（note）、媒体卡片（image / pdf / video / web）、识别区（annotation）一旦填透明就在画布上「消失」，没有可点中的实体边界。
-- 重构动机：调色板属于跨包通用的 design token 数据，不应该在 web 层每个 toolbar 文件里各 copy 一份，否则增删一种 accent 要改好几处。
+- 这是一次纯类型/字段重构 + 一次 Agent 工具响应 schema 变更：调用 `get_canvas_outline` 或 `inspect_nodes` 的本地脚本/外部工具如果硬编码读 `nodes[i].parentId` / `nodes[i].width` / `nodes[i].height`，必须改为 `nodes[i].parentFrame?.id` / `nodes[i].size.width` / `nodes[i].size.height`。
+- 关键收益：先前**不带 keywords 兜底**的 outline preview 与节点邻域 preview 现在保持一致，且 LLM 拿到节点 ref 时会同时拿到 `filename` 字段——再也不用根据 label 推 safeFilename，避免之前因空格/标点拼错 path 而 404 的 `read`。
+- 数据盘上不存在迁移：所有变化都是「在内存中拼装给 LLM 的 JSON 形态」。无需重启或重建索引。
 
 ---
 
-## 2026-05-11 · Question / Annotation 状态徽标统一为 `StatusBadge`
+## 2026-05-12 · Agent 配置统一为 AGENT.md 单文件
 
 **What Changed**
 
-- 将 question 节点和 annotation cluster 上的“状态胶囊徽标”（Pending / Running / Done / Error / Preparing）抽离为通用组件 `apps/web/src/components/Common/StatusBadge.tsx`，两处调用统一从这里渲染。
-- 现在两处徽标都采用 annotation 原本的「画布缩放时徽标尺寸保持不变」表现：徽标会按当前 React Flow zoom 反向缩放，所以无论你把画布放多大或缩多小，状态胶囊在屏幕上看起来都是同一个尺寸。
-- question 节点上的徽标在 `Done` / `Error` 状态下现在可以**单击打开右侧 chat panel** 查看会话回复，跟 annotation cluster 徽标的「点击打开识别详情」是一致的入口（之前 question 节点必须双击节点本体才能打开会话）。
+- 每个 agent（`ask` / `operate` / `intent` / `annotation`）的系统提示词、可用工具列表、运行时参数（`maxIterations` / `toolExecution` / `defaultOrigin`）现在统一写在一份 `apps/server/src/prompt/agents/<id>/AGENT.md` 配置文件里——YAML frontmatter 声明元信息与工具，Markdown body 即系统提示词。
+- 调用端通过新的 `loadAgent(id)` API 读取配置，原本散落在 `prompt/agent.ts`、`prompt/intent.ts` 中的硬编码字符串、以及 `tools/index.ts` 里硬编码的 `askTools / operateTools / annotationTools` 工具数组都已删除。
+- 模板支持 `{{skillCatalogue}}` 变量（自动按 `skillScope` 注入 SKILL.md 目录摘要），以及 `{{#skillCatalogue}}…{{/skillCatalogue}}` 条件块（无技能时整段省略）。
 
 **Notes**
 
-- 视觉表现：100% 缩放下与之前完全一致（颜色、图标、文本、阴影、抖动 / 旋转动画都没变）。
-- 行为变化：
-  - question 节点的状态徽标之前会随节点一起被画布缩放放大或缩小，现在和 annotation cluster 一致——尺寸固定。如果你过去刻意把画布放大来「看清状态文字」，现在不需要这么做了。
-  - 单击 question 节点的 `Done` / `Error` 徽标会打开右侧 chat panel；之前单击 badge 没有任何反应（只能双击节点本体打开）。双击节点本体的旧入口仍然保留。
-- 没有迁移步骤，也没有任何数据 / 配置变更。
+- 修改 prompt 或工具组合现在只需编辑对应的 `AGENT.md`，不再需要改 TS 代码——加载器在启动时严格校验 frontmatter，错误会立即抛出。
+- 工具的 TypeBox schema 与 handler 仍然在 `modules/agent/tools/definitions.ts` 用 TypeScript 编写并注册到 `TOOL_REGISTRY`，AGENT.md 只通过 `name` 引用——schema 形态不适合塞进 YAML。
+- 此前硬编码在 `annotation.service.ts` 中的 `ANNOTATION_MAX_ITERATIONS = 6` 与 `origin: { type: 'annotation-recognized' }` 现在分别由 `annotation/AGENT.md` 的 `runtime.maxIterations` 和 `runtime.defaultOrigin` 提供。
+- 没有用户可见的运行时行为变化——是纯重构。
 
 ---
 

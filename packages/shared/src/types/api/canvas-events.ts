@@ -37,7 +37,7 @@ const nodeOriginSchema = z
 
 const nodeRefSchema = z.object({
   id: z.string().min(1),
-  nodeType: z.enum(CANVAS_NODE_TYPES),
+  type: z.enum(CANVAS_NODE_TYPES),
   label: z.string().optional(),
   origin: nodeOriginSchema.optional(),
 });

@@ -3,7 +3,7 @@
  *
  * Skills live as directories under `<thisDir>/skills/<id>/SKILL.md` (the
  * "global" set, shipped with the server) and may be overridden per-canvas
- * at `<workspace>/<canvasId>/skills/<id>/SKILL.md` (and any companion
+ * at `<workspace>/<canvasDir>/skills/<id>/SKILL.md` (and any companion
  * `references/*.md` under that directory). The per-canvas resolution
  * lives in `resolveSkillPath` so the canvas FS sandbox can keep enforcing
  * its existing rules; this module only owns the global set.

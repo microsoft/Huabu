@@ -6,21 +6,119 @@
  * annotation, intent episode logging). Per docs/api-design.md: schemas
  * are the single source of truth, types derived via `z.infer`.
  *
- * Complex nested shapes that already have rich TypeScript interfaces
- * (e.g. `AgentBaseContext`, `AnnotationClusterContext`, `IntentEpisode`)
- * are accepted via `z.custom<T>()` — top-level structure is validated
- * to reject malformed wrappers, but the inner objects are trusted to
- * conform to their existing types because they are produced by the
- * same client codebase that compiles against those interfaces.
+ * Wire-only node payloads (`WireNodeRef` / `WireSelectionNode` /
+ * `WireCanvasNode`) and the request envelopes that wrap them
+ * (`AgentChatContext`, `IntentContext`, `AnnotationClusterContext`)
+ * have explicit zod schemas so every public HTTP boundary gets
+ * field-level validation — no payload reaches business logic via a
+ * trust-the-caller `z.custom`. The richer `IntentEpisode` log shape
+ * still uses `z.custom` because it is replayed verbatim from
+ * client-owned storage and we only check the discriminator.
  */
 
 import { z } from 'zod';
 
+import { recentActionSchema } from './canvas-events.js';
+import { CANVAS_NODE_TYPES } from '../canvas/node.js';
+
 import type {
-  AgentBaseContext,
+  AgentChatContext,
   AnnotationClusterContext,
+  IntentContext,
   IntentEpisode,
 } from '../agent/index.js';
+
+// ─── Wire-only node payloads ──────────────────────────────────────────────
+//
+// Wire shapes posted from the web client to `/api/agent` and
+// `/api/intent/*`. Deliberately thin: only **raw canvas state**
+// (id / type / label / content / src / parentId / position / size)
+// crosses the wire — no server-side enrichment fields like
+// `filename` (storage convention), `preview` (prompt formatting), or
+// `parentFrame.label` (server-side lookup). The server enriches into
+// `AgentNodeRef` / `AgentNodePreview` / `AgentNodeOutline` as needed
+// before any prompt rendering.
+//
+// Keeping the wire payload thin means changing the LLM-facing prompt
+// shape (preview length, filename rule, opt-in fields) does not
+// require a frontend deploy.
+
+const positionSchema = z.object({ x: z.number(), y: z.number() });
+const sizeSchema = z.object({
+  width: z.number().nonnegative(),
+  height: z.number().nonnegative(),
+});
+
+/** Bare node identity payload — every wire ref starts here. */
+export const wireNodeRefSchema = z.object({
+  id: z.string().min(1),
+  type: z.enum(CANVAS_NODE_TYPES),
+  label: z.string().optional(),
+});
+export type WireNodeRef = z.infer<typeof wireNodeRefSchema>;
+
+/**
+ * Selection wire shape posted from the web client to `/api/agent` and
+ * `/api/intent/*`.
+ *
+ * Two things make this distinct from {@link WireNodeRef}:
+ *
+ *  1. **Recursive `children`** — frame nodes carry their direct
+ *     children so the server can flatten the selection without a
+ *     follow-up canvas read.
+ *  2. **`src` for image nodes** — the server uses it to build
+ *     vision attachments before the LLM ever sees the selection.
+ *
+ * The server normalises this into `AgentNodeRef[]` server-side
+ * before any prompt rendering. Never sent to the LLM directly.
+ */
+export interface WireSelectionNode extends WireNodeRef {
+  /** Source URL — only present for `type === 'image'`. */
+  src?: string;
+  /** Direct frame children; undefined for non-frame nodes. */
+  children?: WireSelectionNode[];
+}
+
+export const wireSelectionNodeSchema: z.ZodType<WireSelectionNode> = z.lazy(
+  () =>
+    z.object({
+      id: z.string().min(1),
+      type: z.enum(CANVAS_NODE_TYPES),
+      label: z.string().optional(),
+      src: z.string().optional(),
+      children: z.array(wireSelectionNodeSchema).optional(),
+    }),
+);
+
+/**
+ * Wire shape for one node inside `IntentContext.nodes` (the full
+ * canvas snapshot sent to the intent recogniser). Carries the raw
+ * canvas-state fields the server needs to enrich into an
+ * `AgentNodeOutline`:
+ *
+ *  - `content` / `src`  — fed into the preview ladder server-side
+ *  - `parentId`         — server resolves into `parentFrame.label`
+ *  - `position` / `size` — already resolved to absolute coords by web
+ *
+ * Deliberately **does not** carry `filename`, `preview`, or
+ * `parentFrame.label` — those are server-side decisions.
+ */
+export const wireCanvasNodeSchema = z.object({
+  id: z.string().min(1),
+  type: z.enum(CANVAS_NODE_TYPES),
+  label: z.string().optional(),
+  /** Inline node body (markdown / plain text), when present. */
+  content: z.string().optional(),
+  /** Source URL — meaningful for image / pdf / web / video nodes. */
+  src: z.string().optional(),
+  /** Parent frame id (web has already done absolute-position resolution). */
+  parentId: z.string().optional(),
+  /** Absolute position on canvas (top-left corner). */
+  position: positionSchema,
+  /** Effective dimensions (measured > styled > 0 fallback). */
+  size: sizeSchema,
+});
+export type WireCanvasNode = z.infer<typeof wireCanvasNodeSchema>;
 
 /** A single attachment carried with a chat message. */
 export const chatAttachmentSchema = z.object({
@@ -39,12 +137,54 @@ export const intentCandidateSchema = z.object({
   description: z.string().optional(),
 });
 
+// ─── Request-context schemas ──────────────────────────────────────────────
+//
+// Field-level validators for the `canvasContext` / `clusterContext`
+// envelopes posted to `/api/agent` and `/api/intent/*`. Each carries
+// only wire shapes (above) plus pre-existing schemas — no runtime
+// dependency on the rich TS interfaces in `agent/context.ts` and
+// `agent/intent.ts`. The `satisfies` checks below pin the schema
+// against the canonical TS interface so any drift fails the build.
+
+const wireEdgeSchema = z.object({
+  source: z.string().min(1),
+  target: z.string().min(1),
+});
+
+/** Wire shape of {@link AgentChatContext}. */
+export const agentChatContextSchema = z.object({
+  selectedNodes: z.array(wireSelectionNodeSchema),
+}) satisfies z.ZodType<AgentChatContext>;
+
+/** Wire shape of {@link IntentContext}. */
+export const intentContextSchema = z.object({
+  nodes: z.array(wireCanvasNodeSchema),
+  edges: z.array(wireEdgeSchema),
+  recentActions: z.array(recentActionSchema),
+  screenshot: z.string().optional(),
+  selectedNodes: z.array(wireSelectionNodeSchema),
+}) satisfies z.ZodType<IntentContext>;
+
+/** Wire shape of {@link AnnotationClusterContext}. */
+export const annotationClusterContextSchema = z.object({
+  bbox: z.object({
+    x: z.number(),
+    y: z.number(),
+    width: z.number().nonnegative(),
+    height: z.number().nonnegative(),
+  }),
+  strokeCount: z.number().int().nonnegative(),
+  nearbyNodes: z.array(wireNodeRefSchema),
+  enclosedNodes: z.array(wireNodeRefSchema),
+  nearbyEdgeIds: z.array(z.string().min(1)),
+}) satisfies z.ZodType<AnnotationClusterContext>;
+
 /** Body for `POST /api/agent`. */
 export const agentRequestSchema = z.object({
   content: z.string().min(1, 'Message content is required'),
   threadId: z.string().min(1).optional(),
   mode: z.enum(['ask', 'operate']).optional(),
-  canvasContext: z.custom<AgentBaseContext>().optional(),
+  canvasContext: agentChatContextSchema.optional(),
   canvasId: z.string().min(1).optional(),
   attachments: z.array(chatAttachmentSchema).optional(),
   selectedNodeIds: z.array(z.string().min(1)).optional(),
@@ -54,6 +194,18 @@ export const agentRequestSchema = z.object({
       selectedIntent: z.string().min(1),
     })
     .optional(),
+  /**
+   * Anchor a node-neighbourhood preamble to this node id. When set,
+   * the server resolves the node's surrounding-canvas context (see
+   * `getNodeNeighbourhood` / `renderNodeNeighbourhoodMarkdown`) and
+   * pushes a `[SYSTEM Context]` preamble — rendered from the Ask
+   * agent's `nodeNeighbourhoodPreamble` template — before the actual
+   * user message. Sent today by `useQuestionRunner` so the prompt
+   * wording and the (potentially large) spatial graph stay off the
+   * wire and out of the frontend bundle. Anchor-type agnostic; can
+   * back any future "describe what's around X" flow.
+   */
+  anchorNodeId: z.string().min(1).optional(),
 });
 export type AgentRequest = z.infer<typeof agentRequestSchema>;
 
@@ -65,20 +217,14 @@ export type AgentCanvasIdQuery = z.infer<typeof agentCanvasIdQuerySchema>;
 
 /** Body for `POST /api/intent/recognize` and `/recognize-stream`. */
 export const intentRequestSchema = z.object({
-  canvasContext: z.custom<AgentBaseContext>(
-    (v) => v !== null && typeof v === 'object',
-    'canvasContext is required',
-  ),
+  canvasContext: intentContextSchema,
 });
 export type IntentRequest = z.infer<typeof intentRequestSchema>;
 
 /** Body for `POST /api/intent/recognize-annotation`. */
 export const annotationIntentRequestSchema = z.object({
   screenshot: z.string().min(1, 'screenshot is required'),
-  clusterContext: z.custom<AnnotationClusterContext>(
-    (v) => v !== null && typeof v === 'object',
-    'clusterContext is required',
-  ),
+  clusterContext: annotationClusterContextSchema,
   canvasId: z.string().min(1).optional(),
 });
 export type AnnotationIntentRequest = z.infer<

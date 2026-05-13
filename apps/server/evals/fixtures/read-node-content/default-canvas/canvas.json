@@ -1,0 +1,23 @@
+{
+  "canvasId": "default-canvas",
+  "title": "Read-Node-Content Eval",
+  "version": 1,
+  "state": {
+    "nodes": [
+      {
+        "id": "node-dolphin-001",
+        "type": "note",
+        "position": { "x": 0, "y": 0 },
+        "data": {
+          "type": "note",
+          "label": "Dolphin Migration"
+        },
+        "style": { "width": 400, "height": 300 },
+        "measured": { "width": 400, "height": 300 }
+      }
+    ],
+    "edges": []
+  },
+  "createdAt": 1714000000000,
+  "updatedAt": 1714000000000
+}

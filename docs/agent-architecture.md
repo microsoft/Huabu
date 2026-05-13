@@ -43,15 +43,14 @@ apps/server/src/modules/agent/tools/
     fs-read.ts          ← read
     fs-search.ts        ← grep / find / ls
     fs-sandbox.ts       ← 画布隔离的路径解析（含 skills/ resolver）
-    ingest-content.ts   ← ingest_content
     web-search.ts       ← web_search
 ```
 
-### 2.2 工具清单（10）
+### 2.2 工具清单（9）
 
 | Tool                 | 类别      | 说明                                                                                                                                                                                      |
 | -------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `get_canvas_outline` | 读 · 几何 | 整张画布 map：每节点 `id/type/label/parentId/position/width/height` + 拓扑-only edges + 预计算 `spatial.clusters`。`includePreviews` / `includeStyle` opt-in。                            |
+| `get_canvas_outline` | 读 · 几何 | 整张画布 map：每节点 `id/type/label/filename/parentFrame?/position/size/style?/preview?` + 拓扑-only edges + 预计算 `spatial.clusters`。`includePreviews` / `includeStyle` opt-in。       |
 | `inspect_nodes`      | 读 · 几何 | 谓词 AND：`ids / byType / byParent / labelPattern / inRect / nearNode / nearPoint / inSameClusterAs / connectedTo`。返回派生字段（`distance / direction / edgeIds / hops / clusterId`）。 |
 | `inspect_edges`      | 读 · 几何 | EdgeStyle 谓词：`ids / connectedTo / bySource / byTarget / between / byDirection / byLineStyle / byLineType`。                                                                            |
 | `read`               | 读 · 文件 | 单文件文本读取，2000 行 / 50 KB 截断 + `nextOffset` 分页；自动解析 YAML frontmatter；二进制拒绝。                                                                                         |
@@ -60,11 +59,10 @@ apps/server/src/modules/agent/tools/
 | `ls`                 | 读 · 文件 | 目录列举（`count/total/truncated`）。                                                                                                                                                     |
 | `canvas_commands`    | 写        | 单工具承包 14 个命令；handler 不直接落盘，注入 `origin / provenance / labelSource` 后由 SSE → 前端 `useAgentStream` 走 `executeCanvasCommands` 生效。                                     |
 | `web_search`         | 其他      | Tavily。                                                                                                                                                                                  |
-| `ingest_content`     | 其他      | 触发节点内容入库 (TODO:可删)。                                                                                                                                                            |
 
 **模式划分**（[definitions.ts](../apps/server/src/modules/agent/tools/definitions.ts) 末尾）：
 
-- `askTools`：所有读 + `web_search` + `ingest_content`，**无** `canvas_commands`。
+- `askTools`：所有读 + `web_search`，**无** `canvas_commands`。
 - `operateTools`：在 ask 之上加 `canvas_commands`。
 - `annotation`：read + inspect_nodes + inspect_edges（在 [intent.service.ts](../apps/server/src/modules/agent/intent.service.ts) 显式装配）。
 
@@ -123,9 +121,9 @@ Per-canvas 覆盖：`<workspace>/<canvasId>/skills/<id>/SKILL.md`（含 `referen
 
 ### 4.1 Tool 覆盖范围扩展 (low-priority)
 
-| #   | 项                            | 触发条件                                                                                                                | 范围                                                                                                                                                                      |
-| --- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| T1  | `describe_node_position` 工具 | prompt 节点 / annotation cluster trace 上看到反复用 `inspect_nodes({nearNode}) + inspect_nodes({ids}) + 自己拼自然语言` | 新增 `handlers/canvas-describe.ts` 包装现有 `buildQuestionNodeContext()`；schema 仅 `nodeId + radius?`；输出 `{description, neighbors, cluster?}`。**严禁**新写空间算法。 |
+| #   | 项                            | 触发条件                                                                                                                | 范围                                                                                                                                                                                                                                     |
+| --- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| T1  | `describe_node_position` 工具 | prompt 节点 / annotation cluster trace 上看到反复用 `inspect_nodes({nearNode}) + inspect_nodes({ids}) + 自己拼自然语言` | 新增 `handlers/canvas-describe.ts` 包装现有 `buildNodeNeighbourhoodContext()`（`apps/server/src/modules/canvas/node-neighbourhood.ts`）；schema 仅 `nodeId + radius?`；输出 `{description, neighbors, cluster?}`。**严禁**新写空间算法。 |
 
 ### 4.2 视觉信号 ↔ 空间工具协同 (medium-priority)
 

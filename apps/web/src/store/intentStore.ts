@@ -172,7 +172,7 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
       // recogniser sees the most up-to-date action history.
       await useCanvasStore.getState().flushCanvasEvents();
 
-      const canvasContext = useCanvasStore.getState().getAgentContext();
+      const canvasContext = useCanvasStore.getState().getIntentContext();
 
       const lastAction =
         canvasContext.recentActions.length > 0
@@ -496,14 +496,16 @@ function buildContextSummary(ctx: AnnotationContext): string {
     `Strokes: ${ctx.cluster.strokeIds.length}`,
     `Bbox: ${Math.round(ctx.cluster.bbox.width)}×${Math.round(ctx.cluster.bbox.height)}px`,
   ];
-  if (ctx.enclosedNodeIds.length > 0) {
+  const refLabel = (r: { label?: string; id: string }): string =>
+    r.label && r.label.length > 0 ? r.label : r.id;
+  if (ctx.enclosedNodes.length > 0) {
     parts.push(
-      `Enclosed (${ctx.enclosedNodeIds.length}): ${ctx.enclosedNodeIds.slice(0, 5).join(', ')}${ctx.enclosedNodeIds.length > 5 ? '…' : ''}`,
+      `Enclosed (${ctx.enclosedNodes.length}): ${ctx.enclosedNodes.slice(0, 5).map(refLabel).join(', ')}${ctx.enclosedNodes.length > 5 ? '…' : ''}`,
     );
   }
-  if (ctx.nearbyNodeIds.length > 0) {
+  if (ctx.nearbyNodes.length > 0) {
     parts.push(
-      `Nearby nodes (${ctx.nearbyNodeIds.length}): ${ctx.nearbyNodeIds.slice(0, 5).join(', ')}${ctx.nearbyNodeIds.length > 5 ? '…' : ''}`,
+      `Nearby nodes (${ctx.nearbyNodes.length}): ${ctx.nearbyNodes.slice(0, 5).map(refLabel).join(', ')}${ctx.nearbyNodes.length > 5 ? '…' : ''}`,
     );
   }
   if (ctx.nearbyEdgeIds.length > 0) {
@@ -570,9 +572,10 @@ function collectStrokes(
 
 /**
  * Convert an AnnotationContext to the wire payload sent to the server.
- * Only IDs + the cluster bbox cross the wire — the LLM fetches any node
- * content it needs via `read`, layout via `inspect_nodes`, and edge
- * style via `inspect_edges`.
+ * Carries id+type+label refs for nodes (so the LLM doesn't need a `read`
+ * round-trip just to know what each id refers to) and bare ids for
+ * edges. The LLM still fetches body text via `read`, layout via
+ * `inspect_nodes`, and edge style via `inspect_edges` on demand.
  */
 function toClusterContextPayload(
   ctx: AnnotationContext,
@@ -585,8 +588,8 @@ function toClusterContextPayload(
       height: Math.round(ctx.cluster.bbox.height),
     },
     strokeCount: ctx.cluster.strokeIds.length,
-    nearbyNodeIds: ctx.nearbyNodeIds,
-    enclosedNodeIds: ctx.enclosedNodeIds,
+    nearbyNodes: ctx.nearbyNodes,
+    enclosedNodes: ctx.enclosedNodes,
     nearbyEdgeIds: ctx.nearbyEdgeIds,
   };
 }

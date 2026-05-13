@@ -10,4 +10,5 @@ export * from './chat.js';
 export * from './context.js';
 export * from './events.js';
 export * from './intent.js';
+export * from './node-ref.js';
 export * from './tools.js';

@@ -75,7 +75,7 @@ function materializeAddNode(
   node: Extract<CanvasCommand, { type: 'CREATE_NODES' }>['nodes'][number];
   traceNode: {
     id: CanvasNodeId;
-    nodeType: CanvasNodeType;
+    type: CanvasNodeType;
     label?: string;
   };
 } {
@@ -128,7 +128,7 @@ function materializeAddNode(
     },
     traceNode: {
       id: nodeId,
-      nodeType: input.nodeType,
+      type: input.nodeType,
       label: input.data?.label as string | undefined,
     },
   };

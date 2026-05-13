@@ -73,7 +73,7 @@ export default function resolvePasteClipboard(
   const created: Extract<CanvasCommand, { type: 'CREATE_NODES' }>['nodes'] = [];
   const traceNodes: Array<{
     id: CanvasNodeId;
-    nodeType: CanvasNodeType;
+    type: CanvasNodeType;
     label?: string;
   }> = [];
 
@@ -145,7 +145,7 @@ export default function resolvePasteClipboard(
       ...(parentId && { parentId }),
       skipAutoLayout: true,
     });
-    traceNodes.push({ id: nodeId, nodeType, label });
+    traceNodes.push({ id: nodeId, type: nodeType, label });
   }
 
   // Remap clipboard edges onto the freshly created node ids. Endpoints

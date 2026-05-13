@@ -55,7 +55,7 @@ import type { Node } from '@xyflow/react';
 export function extractNodeRef(node: Node): NodeRef {
   return {
     id: node.id,
-    nodeType: (node.type ?? 'note') as CanvasNodeType,
+    type: (node.type ?? 'note') as CanvasNodeType,
     label: node.data?.label as string | undefined,
     origin: (node.data as Record<string, unknown> | undefined)
       ?.origin as NodeRef['origin'],

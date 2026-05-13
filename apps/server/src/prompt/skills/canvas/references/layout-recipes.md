@@ -1,6 +1,6 @@
 # Layout Recipes
 
-Opinionated layouts for structured diagrams (architecture diagrams, flowcharts, mind maps, hierarchies, roadmaps). Load this when the user asks for a structured diagram or you are building one from scratch. The mental model and command catalogue live in [`SKILL.md`](../SKILL.md); this file is purely about geometry and visual grouping.
+Opinionated layouts for structured diagrams (architecture diagrams, flowcharts, mind maps, hierarchies, roadmaps). Load this when the user asks for a structured diagram or you are building one from scratch. The mental model lives in [`SKILL.md`](../SKILL.md) and the command catalogue in [`commands.md`](commands.md); this file is purely about geometry and visual grouping.
 
 ## Coordinate system
 
@@ -41,12 +41,9 @@ Place the centre at `(cx, cy)`; place N children on a ring of radius `r`. For ev
 - Use distinct `stroke` palette tokens to distinguish relationship types (e.g. one colour for "data flow", another for "control flow").
 - **Edges are noise.** Only draw an edge when the relationship is not obvious from layout. A clean column of nodes implies "these belong together"; you do not need a chain of arrows to say so.
 
-## Visual grouping with accent colours
+## Accent tokens as a layout signal
 
-- Set `style.accent` (a palette token from the schema enum, e.g. `"purple"`, `"cyan"`, `"amber"`) via `MERGE_NODE_DATA` on every member of a logical group.
-- Use the **same accent** for every node within a layer / track / cluster — this is what makes the group readable at low zoom levels.
-- Reserve `"grey"` for de-emphasised / neutral material.
-- Allowed tokens are enumerated in the `CREATE_NODES` schema (`data.style.accent`) — no hex values needed.
+In structured layouts, accent doubles as a layout primitive: pick **one accent token per layer / track / cluster** so the structure stays readable when the user zooms out. Use **distinct tokens across groups** for separation; reserve `"grey"` for de-emphasised material.
 
 ## Post-layout cleanup
 
@@ -72,7 +69,7 @@ Determine: number of tracks (rows), nodes per track, sub-nodes per main node, re
 
 ### Colour per track
 
-Pick **one palette token** per track and apply it to every node's `data.style.accent` in that track. Use distinct tokens across tracks for separation; reserve `"grey"` for de-emphasised / neutral tracks.
+Pick **one accent token** per track and apply it to every node in that track; use distinct tokens across tracks.
 
 ### Edges
 

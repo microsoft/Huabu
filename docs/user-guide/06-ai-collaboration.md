@@ -63,7 +63,6 @@ Huabu 的 AI 与你**共享同一块画布**。它能读到画布的整体语境
 | `web_search`                                                                               | 同上                                                    |
 | `get_canvas_outline` / `inspect_nodes` / `inspect_edges` / `read` / `grep` / `find` / `ls` | 同 Ask 模式                                             |
 | `canvas_commands`                                                                          | 应用一组结构化的画布命令（创建 / 移动 / 连线 / 分组 …） |
-| `ingest_content`                                                                           | 让某个节点立刻进行内容抽取与摘要生成                    |
 | `use_skill`                                                                                | 加载某个技能（skill）的详细指引                         |
 
 ### 两种模式的选用建议

@@ -6,8 +6,8 @@
  * lives in `canvas.json` (position, size, parentId, visual style on
  * `data.style`, edge endpoints + `data.edgeStyle`, plus derived
  * spatial / topological metadata). Anything that round-trips through
- * `nodes/<id>.md` (label, type, src, content, summary, keywords) is
- * owned by `read` — agents should call `read("nodes/<nodeId>.md")`
+ * `nodes/*.md` (label, type, src, content, summary, keywords) is
+ * owned by `read` — agents should call `read("nodes/<filename>.md")`
  * for those.
  *
  * The actual computation (size normalization, absolute-position walk,

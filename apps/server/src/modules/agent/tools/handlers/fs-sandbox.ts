@@ -7,7 +7,7 @@
  *
  *  - `safeResolve` is the only place that maps a user-supplied
  *    relative path to an absolute path. It always resolves under the
- *    **current canvas folder** (`<workspace>/<canvasId>/`). Any escape
+ *    **current canvas folder** (`<workspace>/<canvasDir>/`). Any escape
  *    attempt throws — the agent cannot read or list anything outside
  *    the active canvas.
  *  - `walk` is the only directory traversal. It skips symlinks so an
@@ -23,11 +23,12 @@
  * since both `grep`/`find` and `read` need to recognise node files.
  */
 
-import { readdirSync, type Dirent } from 'node:fs';
+import { readFileSync, readdirSync, statSync, type Dirent } from 'node:fs';
 import path from 'node:path';
 
+import { parseFrontmatter } from '../../../storage/frontmatter.js';
 import { getCanvasStore } from '../../../storage/index.js';
-import { getWorkspacePath } from '../../../workspace.js';
+import { canvasRoot } from '../../../storage/paths.js';
 
 // ─── Always-skipped directory names ─────────────────────────────────────────
 
@@ -55,7 +56,7 @@ export function effectivePath(userPath: string | undefined): string {
 /**
  * Resolve a user-supplied path against the current canvas folder,
  * refusing any value that escapes the sandbox. Returns an absolute
- * path that lives under `<workspace>/<canvasId>/`.
+ * path that lives under `<workspace>/<canvasDir>/`.
  *
  * The check is intentionally a strict prefix match on `root + path.sep`
  * so that a path that happens to *start with the canvas folder name*
@@ -74,7 +75,7 @@ export function safeResolve(canvasId: string, rel: string): string {
   ) {
     throw new Error(`Invalid canvasId: ${canvasId}`);
   }
-  const root = path.join(getWorkspacePath(), canvasId);
+  const root = canvasRoot(canvasId);
   const target = path.resolve(root, rel);
   if (target !== root && !target.startsWith(root + path.sep)) {
     throw new Error(
@@ -191,15 +192,11 @@ export function* walk(rootAbs: string): Generator<WalkEntry> {
 
 /**
  * Match a canvas-relative path of the form
- *   "nodes/<nodeId>.md"
- * Used to recognise node files within the active canvas. The capture
- * group is the bare filename stem — any `.md` file directly under
- * `nodes/` qualifies, regardless of node id naming convention. The
- * lookup itself (see `makeNodeLookup`) decides whether the captured
- * id actually maps to a node, so a stricter prefix here would only
- * silently swallow valid matches when the id scheme evolves.
+ *   "nodes/<filename>.md"
+ * Used to recognise node files within the active canvas. Filenames are
+ * label-derived and not stable identifiers.
  */
-export const CANVAS_NODE_RE = /^nodes\/([^/]+)\.md$/;
+export const CANVAS_NODE_RE = /^nodes\/[^/]+\.md$/;
 
 /**
  * Compose a canvas-relative path from the walk root (canvas-relative)
@@ -225,7 +222,8 @@ export interface NodeMeta {
 /**
  * Lazy single-canvas node lookup. Reads `canvas.json` at most once,
  * returning a closure that maps a canvas-relative path to its
- * `NodeMeta` if it matches `nodes/<nodeId>.md` AND that node exists.
+ * `NodeMeta` if it matches `nodes/<filename>.md` and can be resolved via
+ * frontmatter `id:` plus canvas.json metadata.
  * Returns `null` otherwise.
  */
 export function makeNodeLookup(
@@ -234,7 +232,10 @@ export function makeNodeLookup(
   let cache: Map<string, NodeMeta> | null = null;
   const ensure = (): Map<string, NodeMeta> => {
     if (cache) return cache;
-    const built = new Map<string, NodeMeta>();
+
+    const byId = new Map<string, NodeMeta>();
+    const byPath = new Map<string, NodeMeta>();
+
     let file;
     try {
       file = getCanvasStore(canvasId).read();
@@ -249,15 +250,66 @@ export function makeNodeLookup(
         const data = n.data as Record<string, unknown> | undefined;
         const nodeType = (n.type ?? data?.type) as string | undefined;
         const label = typeof data?.label === 'string' ? data.label : undefined;
-        built.set(id, { nodeId: id, nodeType, label });
+        byId.set(id, { nodeId: id, nodeType, label });
       }
     }
-    cache = built;
-    return built;
+
+    let nodesRoot: string;
+    try {
+      nodesRoot = safeResolve(canvasId, 'nodes');
+    } catch {
+      cache = byPath;
+      return byPath;
+    }
+
+    let nodesStat;
+    try {
+      nodesStat = statSync(nodesRoot);
+    } catch {
+      cache = byPath;
+      return byPath;
+    }
+    if (!nodesStat.isDirectory()) {
+      cache = byPath;
+      return byPath;
+    }
+
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(nodesRoot, { withFileTypes: true });
+    } catch {
+      cache = byPath;
+      return byPath;
+    }
+
+    for (const ent of entries) {
+      if (!ent.isFile() || !ent.name.endsWith('.md')) continue;
+      const abs = path.join(nodesRoot, ent.name);
+      let raw: string;
+      try {
+        raw = readFileSync(abs, 'utf8');
+      } catch {
+        continue;
+      }
+      const { meta } = parseFrontmatter(raw);
+      const fallbackId = ent.name.replace(/\.md$/, '');
+      const fmId = typeof meta['id'] === 'string' ? meta['id'] : null;
+      const nodeId = fmId && fmId.length > 0 ? fmId : fallbackId;
+      const metaFromCanvas = byId.get(nodeId) ?? {
+        nodeId,
+        nodeType: undefined,
+        label: undefined,
+      };
+      byPath.set(`nodes/${ent.name}`, metaFromCanvas);
+    }
+
+    cache = byPath;
+    return byPath;
   };
+
   return (canvasRelPath) => {
-    const m = canvasRelPath.match(CANVAS_NODE_RE);
-    if (!m || !m[1]) return null;
-    return ensure().get(m[1]) ?? null;
+    const normalized = canvasRelPath.replace(/^\.\//, '');
+    if (!CANVAS_NODE_RE.test(normalized)) return null;
+    return ensure().get(normalized) ?? null;
   };
 }
