@@ -31,11 +31,7 @@ import {
   type CanvasUiIntent,
   type UiResolverState,
 } from '@/handler/canvasCommand/uiIntent';
-import {
-  extractNodeRef,
-  extractSnippet,
-  pushAction,
-} from '@/handler/canvasCommand/utils';
+import { pushAction } from '@/handler/canvasCommand/utils';
 import {
   computeFrameFit,
   getAbsolutePosition as getFrameAbsolutePosition,
@@ -61,9 +57,9 @@ import type {
   CanvasExecutionSource,
   CanvasNodeType,
   IntentContext,
-  NodeSummary,
   RecentAction,
-  SelectionPayload,
+  WireCanvasNode,
+  WireSelectionNode,
   CanvasEventInput,
 } from '@sediment/shared';
 
@@ -527,7 +523,7 @@ const autoSaveMiddleware =
 let _dragPreviewRafId: number | null = null;
 
 /**
- * Build a recursive `SelectionPayload` factory bound to the current
+ * Build a recursive `WireSelectionNode` factory bound to the current
  * node list (so `frame` nodes can resolve their direct children).
  *
  * Only sends lightweight metadata — the agent uses `read` to fetch
@@ -540,8 +536,8 @@ let _dragPreviewRafId: number | null = null;
  */
 function makeBuildSelectedDetail(
   allNodes: Node[],
-): (n: Node) => SelectionPayload {
-  const build = (n: Node): SelectionPayload => {
+): (n: Node) => WireSelectionNode {
+  const build = (n: Node): WireSelectionNode => {
     const data = n.data as Record<string, unknown> | undefined;
     const nodeType = (n.type ?? 'note') as CanvasNodeType;
 
@@ -549,7 +545,7 @@ function makeBuildSelectedDetail(
     const src =
       n.type === 'image' ? (data?.src as string | undefined) : undefined;
 
-    const detail: SelectionPayload = {
+    const detail: WireSelectionNode = {
       id: n.id,
       type: nodeType,
       label: data?.label as string | undefined,
@@ -734,40 +730,31 @@ const useCanvasStore = create<RFState>()(
 
     getIntentContext: (): IntentContext => {
       const { nodes, edges, actionHistory } = get();
-      // Build a lookup map once to avoid O(n²) scans inside edges.map.
-      const nodeMap = new Map(nodes.map((n) => [n.id, n]));
       const buildSelectedDetail = makeBuildSelectedDetail(nodes);
 
+      // Wire shape: raw canvas state only. The server enriches into
+      // `AgentNodeOutline` (with `filename`, `preview`,
+      // `parentFrame.label`) before any prompt rendering.
       return {
-        nodes: nodes.map((n): NodeSummary => {
+        nodes: nodes.map((n): WireCanvasNode => {
           const size = getNodeSize(n);
-          return {
+          const data = n.data as Record<string, unknown> | undefined;
+          const node: WireCanvasNode = {
             id: n.id,
             type: (n.type ?? 'note') as CanvasNodeType,
-            label: n.data?.label as string | undefined,
-            snippet: extractSnippet(n),
-            frameLabel: n.parentId
-              ? (nodeMap.get(n.parentId)?.data?.label as string | undefined)
-              : undefined,
             position: { x: n.position.x, y: n.position.y },
-            size:
-              size.width > 0 || size.height > 0
-                ? { width: size.width, height: size.height }
-                : undefined,
+            size: { width: size.width, height: size.height },
           };
+          const label = data?.label as string | undefined;
+          if (label) node.label = label;
+          const content = data?.content as string | undefined;
+          if (content) node.content = content;
+          const src = data?.src as string | undefined;
+          if (src) node.src = src;
+          if (n.parentId) node.parentId = n.parentId;
+          return node;
         }),
-        edges: edges.map((e) => {
-          const sourceNode = nodeMap.get(e.source);
-          const targetNode = nodeMap.get(e.target);
-          return {
-            source: sourceNode
-              ? extractNodeRef(sourceNode)
-              : { id: e.source, nodeType: 'note' as CanvasNodeType },
-            target: targetNode
-              ? extractNodeRef(targetNode)
-              : { id: e.target, nodeType: 'note' as CanvasNodeType },
-          };
-        }),
+        edges: edges.map((e) => ({ source: e.source, target: e.target })),
         recentActions: actionHistory,
         selectedNodes: nodes.filter((n) => n.selected).map(buildSelectedDetail),
       };

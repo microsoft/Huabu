@@ -44,10 +44,13 @@ import {
   sortByReadingOrder,
 } from '@sediment/shared';
 
+import { buildAgentNodeOutline } from '../agent/node-ref.js';
 import { getCanvasStore } from '../storage/index.js';
 
+import type { AgentNodeOutline } from '../agent/node-ref.js';
 import type { CanvasFile } from '../storage/canvas-store.js';
 import type {
+  CanvasNodeType,
   CardinalDirection,
   EdgeDirection,
   EdgeLineStyle,
@@ -229,13 +232,6 @@ function readPreview(
   if (meta) {
     const summary = (meta as Record<string, unknown>).summary;
     if (typeof summary === 'string' && summary.trim()) return summary.trim();
-    const keywords = (meta as Record<string, unknown>).keywords;
-    if (Array.isArray(keywords)) {
-      const kws = keywords.filter(
-        (k): k is string => typeof k === 'string' && k.trim().length > 0,
-      );
-      if (kws.length > 0) return kws.join(', ');
-    }
     if (typeof meta.content === 'string' && meta.content.trim()) {
       return meta.content.slice(0, 120);
     }
@@ -247,19 +243,16 @@ function readPreview(
 
 // ─── Public: get_canvas_outline ─────────────────────────────────────────────
 
-export interface CanvasOutlineNode {
-  id: string;
-  type: string;
-  label: string | null;
-  parentId: string | null;
-  position: { x: number; y: number };
-  width: number;
-  height: number;
-  /** Visual style on `data.style`; only emitted when `includeStyle` is set. */
-  style?: Record<string, unknown>;
-  /** Short text preview; only emitted when `includePreviews` is set. */
-  preview?: string;
-}
+/**
+ * Outline node payload. Aliased to {@link AgentNodeOutline} so every
+ * canvas → LLM hand-off shares the same `id / type / label / filename
+ * / preview? / parentFrame? / position / size / style?` shape — the
+ * unified L2 rung of the agent node-ref ladder.
+ *
+ * `style` and `preview` remain opt-in (gated by `CanvasOutlineOpts`)
+ * to keep the default outline payload lean.
+ */
+export type CanvasOutlineNode = AgentNodeOutline;
 
 export interface CanvasOutlineEdge {
   /**
@@ -328,22 +321,54 @@ export function buildCanvasOutline(
 
   const nodes: CanvasOutlineNode[] = bundle.spatialNodes.map((s) => {
     const raw = bundle.rawById.get(s.id);
-    const out: CanvasOutlineNode = {
+    const label = readLabel(raw) ?? undefined;
+    const parentRaw = s.parentId ? bundle.rawById.get(s.parentId) : undefined;
+    const parentLabel = parentRaw
+      ? (readLabel(parentRaw) ?? undefined)
+      : undefined;
+    const out: CanvasOutlineNode = buildAgentNodeOutline({
       id: s.id,
-      type: s.type ?? raw?.type ?? 'note',
-      label: readLabel(raw),
-      parentId: s.parentId ?? null,
+      type: (s.type ?? raw?.type ?? 'note') as CanvasNodeType,
+      label,
+      content:
+        typeof raw?.data?.content === 'string' ? raw.data.content : undefined,
+      // src lives on `data.src` for image/pdf/video/web nodes.
+      src:
+        typeof (raw?.data as Record<string, unknown> | undefined)?.src ===
+        'string'
+          ? ((raw?.data as Record<string, unknown>).src as string)
+          : undefined,
       position: { x: s.rect.x, y: s.rect.y },
-      width: s.rect.width,
-      height: s.rect.height,
-    };
+      size: { width: s.rect.width, height: s.rect.height },
+      ...(s.parentId
+        ? {
+            parentFrame: {
+              id: s.parentId,
+              ...(parentLabel ? { label: parentLabel } : {}),
+            },
+          }
+        : {}),
+    });
     if (opts.includeStyle) {
       const style = readVisualStyle(raw);
       if (style) out.style = style;
     }
-    if (opts.includePreviews) {
-      const preview = readPreview(canvasId, s.id, raw);
-      if (preview) out.preview = preview;
+    // The shared builder already attaches `preview` from
+    // `summary > content[:120] > src`; if the caller did not opt in to
+    // previews, strip it back out so the outline payload stays lean.
+    if (!opts.includePreviews) {
+      delete out.preview;
+    } else {
+      // When previews are explicitly requested, prefer the full-fidelity
+      // path that consults the on-disk `summary` frontmatter via
+      // `readPreview` — it knows about `nodes/<id>.md` summaries that
+      // are not visible to the in-memory `data.content` field.
+      const richer = readPreview(canvasId, s.id, raw);
+      if (richer) {
+        out.preview = richer;
+      } else {
+        delete out.preview;
+      }
     }
     return out;
   });
@@ -409,17 +434,19 @@ export interface InspectNodesArgs {
   limit?: number;
 }
 
-export interface InspectNodeResult {
-  id: string;
-  type: string;
-  label: string | null;
-  parentId: string | null;
-  position: { x: number; y: number };
-  width: number;
-  height: number;
-  /** Visual style from `data.style`, when present. Always emitted by inspect. */
-  style?: Record<string, unknown>;
-
+/**
+ * Per-match inspect row. Extends the unified {@link AgentNodeOutline}
+ * shape so callers see the same `id / type / label / filename /
+ * preview? / parentFrame? / position / size / style?` fields they get
+ * from `get_canvas_outline`, plus the predicate-derived spatial /
+ * topological annotations below.
+ *
+ * `style` is always emitted by inspect (no opt-in flag — predicate
+ * queries already imply the caller wants per-node detail). `preview`
+ * is omitted; use `get_canvas_outline({ includePreviews: true })` or
+ * `read("nodes/<file>.md")` for content.
+ */
+export interface InspectNodeResult extends AgentNodeOutline {
   // Per-predicate derived fields (only set when relevant predicate ran).
   distance?: number;
   centerDistance?: number;
@@ -705,15 +732,30 @@ export function inspectNodes(
 
   const nodes: InspectNodeResult[] = resultNodes.map((s) => {
     const raw = bundle.rawById.get(s.id);
-    const result: InspectNodeResult = {
+    const label = readLabel(raw) ?? undefined;
+    const parentRaw = s.parentId ? bundle.rawById.get(s.parentId) : undefined;
+    const parentLabel = parentRaw
+      ? (readLabel(parentRaw) ?? undefined)
+      : undefined;
+    const base = buildAgentNodeOutline({
       id: s.id,
-      type: s.type ?? raw?.type ?? 'note',
-      label: readLabel(raw),
-      parentId: s.parentId ?? null,
+      type: (s.type ?? raw?.type ?? 'note') as CanvasNodeType,
+      label,
       position: { x: s.rect.x, y: s.rect.y },
-      width: s.rect.width,
-      height: s.rect.height,
-    };
+      size: { width: s.rect.width, height: s.rect.height },
+      ...(s.parentId
+        ? {
+            parentFrame: {
+              id: s.parentId,
+              ...(parentLabel ? { label: parentLabel } : {}),
+            },
+          }
+        : {}),
+    });
+    // Inspect deliberately omits `preview`; agents that need text use
+    // `get_canvas_outline({ includePreviews: true })` or `read`.
+    delete base.preview;
+    const result: InspectNodeResult = base;
     const style = readVisualStyle(raw);
     if (style) result.style = style;
     const d = derived.get(s.id);

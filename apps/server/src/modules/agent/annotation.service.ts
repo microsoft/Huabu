@@ -15,15 +15,15 @@
  */
 
 import { runAgent } from './agent.service.js';
+import { buildAgentNodeRef } from './node-ref.js';
 import { loadAgent, renderAgentTemplate } from '../../prompt/agent-loader.js';
-import { toSafeFilename } from '../storage/naming.js';
 
 import type { Context } from '@earendil-works/pi-ai';
 import type {
   AnnotationClusterContext,
   AnnotationCommandResponse,
-  AnnotationNodeRef,
   CanvasCommand,
+  WireNodeRef,
 } from '@sediment/shared';
 
 // ---------------------------------------------------------------------------
@@ -37,12 +37,10 @@ type ContentPart =
 /**
  * Render the cluster payload as a short text block for the user message.
  *
- * Each node ref expands to one line carrying id + label + type + the
- * pre-computed `nodes/<safeLabel>.md` path. The filename is derived
- * server-side via {@link toSafeFilename} so the LLM can hand it
- * straight to `read` without re-doing safeLabel character escaping (a
- * frequent source of 404'd reads). Edges stay as bare ids — they have
- * no label, and the model uses `inspect_edges` for direction / style.
+ * Each wire ref is enriched server-side via {@link buildAgentNodeRef}
+ * to derive the `nodes/<safeLabel>.md` path the model can pass
+ * straight to `read`. Edges stay as bare ids — they have no label,
+ * and the model uses `inspect_edges` for direction / style.
  */
 function serializeClusterContext(ctx: AnnotationClusterContext): string {
   const lines: string[] = [];
@@ -51,10 +49,10 @@ function serializeClusterContext(ctx: AnnotationClusterContext): string {
   );
   lines.push(`Stroke count: ${ctx.strokeCount}`);
 
-  const renderRef = (r: AnnotationNodeRef): string => {
-    const filename = `nodes/${toSafeFilename(r.label, r.id)}.md`;
-    const labelPart = r.label ? ` "${r.label}"` : '';
-    return `  - ${r.id}${labelPart} (${r.type}) → ${filename}`;
+  const renderRef = (r: WireNodeRef): string => {
+    const ref = buildAgentNodeRef(r);
+    const labelPart = ref.label ? ` "${ref.label}"` : '';
+    return `  - ${ref.id}${labelPart} (${ref.type}) → ${ref.filename}`;
   };
 
   if (ctx.enclosedNodes.length > 0) {

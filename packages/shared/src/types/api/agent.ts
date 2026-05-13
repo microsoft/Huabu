@@ -23,6 +23,77 @@ import type {
   IntentContext,
   IntentEpisode,
 } from '../agent/index.js';
+import type { CanvasNodeType } from '../canvas/node.js';
+
+// ─── Wire-only node payloads ──────────────────────────────────────────────
+//
+// Wire shapes posted from the web client to `/api/agent` and
+// `/api/intent/*`. Deliberately thin: only **raw canvas state**
+// (id / type / label / content / src / parentId / position / size)
+// crosses the wire — no server-side enrichment fields like
+// `filename` (storage convention), `preview` (prompt formatting), or
+// `parentFrame.label` (server-side lookup). The server enriches into
+// `AgentNodeRef` / `AgentNodePreview` / `AgentNodeOutline` as needed
+// before any prompt rendering.
+//
+// Keeping the wire payload thin means changing the LLM-facing prompt
+// shape (preview length, filename rule, opt-in fields) does not
+// require a frontend deploy.
+
+/** Bare node identity payload — every wire ref starts here. */
+export interface WireNodeRef {
+  id: string;
+  type: CanvasNodeType;
+  label?: string;
+}
+
+/**
+ * Selection wire shape posted from the web client to `/api/agent` and
+ * `/api/intent/*`.
+ *
+ * Two things make this distinct from {@link WireNodeRef}:
+ *
+ *  1. **Recursive `children`** — frame nodes carry their direct
+ *     children so the server can flatten the selection without a
+ *     follow-up canvas read.
+ *  2. **`src` for image nodes** — the server uses it to build
+ *     vision attachments before the LLM ever sees the selection.
+ *
+ * The server normalises this into `AgentNodeRef[]` server-side
+ * before any prompt rendering. Never sent to the LLM directly.
+ */
+export interface WireSelectionNode extends WireNodeRef {
+  /** Source URL — only present for `type === 'image'`. */
+  src?: string;
+  /** Direct frame children; undefined for non-frame nodes. */
+  children?: WireSelectionNode[];
+}
+
+/**
+ * Wire shape for one node inside `IntentContext.nodes` (the full
+ * canvas snapshot sent to the intent recogniser). Carries the raw
+ * canvas-state fields the server needs to enrich into an
+ * `AgentNodeOutline`:
+ *
+ *  - `content` / `src`  — fed into the preview ladder server-side
+ *  - `parentId`         — server resolves into `parentFrame.label`
+ *  - `position` / `size` — already resolved to absolute coords by web
+ *
+ * Deliberately **does not** carry `filename`, `preview`, or
+ * `parentFrame.label` — those are server-side decisions.
+ */
+export interface WireCanvasNode extends WireNodeRef {
+  /** Inline node body (markdown / plain text), when present. */
+  content?: string;
+  /** Source URL — meaningful for image / pdf / web / video nodes. */
+  src?: string;
+  /** Parent frame id (web has already done absolute-position resolution). */
+  parentId?: string;
+  /** Absolute position on canvas (top-left corner). */
+  position: { x: number; y: number };
+  /** Effective dimensions (measured > styled > 0 fallback). */
+  size: { width: number; height: number };
+}
 
 /** A single attachment carried with a chat message. */
 export const chatAttachmentSchema = z.object({

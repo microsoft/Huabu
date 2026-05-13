@@ -1,6 +1,6 @@
 import type { Rect } from '../../utils/spatial/index.js';
+import type { WireNodeRef } from '../api/agent.js';
 import type { CanvasCommand } from '../canvas/command.js';
-import type { CanvasNodeType } from '../canvas/node.js';
 
 // ==================== Intent Recognition ====================
 
@@ -97,31 +97,24 @@ export interface AnnotationCluster {
 
 // ==================== Annotation Recognition ====================
 //
-// The pipeline sends the LLM **node refs** (id + type + label) for
-// nearby / enclosed nodes plus **bare ids** for nearby edges, alongside
-// the cluster bbox and stroke count. Positions, distances, geometry,
-// and shape inference are deliberately omitted — the LLM reads gesture
-// shape from the screenshot, then uses `read` (node text), `inspect_nodes`
-// (geometry / style / spatial), and `inspect_edges` (style / direction)
-// on demand. Carrying labels saves a `read` round-trip on most simple
-// gestures (the model knows what each id refers to without looking it
-// up); we still avoid the false-positive cascades the old rule-based
-// classifier suffered from because the model never sees positions or
-// pre-computed shape guesses.
-
-/**
- * Lightweight node reference passed to the annotation LLM.
- *
- * `label` is optional because frame nodes (and freshly created notes)
- * may have no label yet. The server expands this into the LLM-facing
- * form by appending the pre-computed `nodes/<safeLabel>.md` path so
- * the model can `read` content without re-deriving filenames.
- */
-export interface AnnotationNodeRef {
-  id: string;
-  type: CanvasNodeType;
-  label?: string;
-}
+// The pipeline ships **bare wire refs** (id + type + label?) for
+// nearby / enclosed nodes plus **bare ids** for nearby edges,
+// alongside the cluster bbox and stroke count. The server enriches
+// each ref into an `AgentNodeRef` (adding the pre-computed
+// `nodes/<safeLabel>.md` filename) before rendering the prompt, so
+// the LLM never has to apply the safeLabel rule itself — empirically
+// it mishandles spaces / punctuation often enough to waste a turn on
+// a 404'd `read`.
+//
+// Positions, distances, geometry, and shape inference are
+// deliberately omitted from the wire payload — the LLM reads gesture
+// shape from the screenshot, then uses `read` (node text),
+// `inspect_nodes` (geometry / style / spatial), and `inspect_edges`
+// (style / direction) on demand. Carrying labels saves a `read`
+// round-trip on most simple gestures (the model knows what each id
+// refers to without looking it up); we still avoid the false-positive
+// cascades the old rule-based classifier suffered from because the
+// model never sees positions or pre-computed shape guesses.
 
 /** Structured context for one annotation cluster. */
 export interface AnnotationClusterContext {
@@ -130,9 +123,9 @@ export interface AnnotationClusterContext {
   /** Number of distinct strokes in the cluster. */
   strokeCount: number;
   /** Canvas nodes near the cluster bbox, ordered by proximity. */
-  nearbyNodes: AnnotationNodeRef[];
+  nearbyNodes: WireNodeRef[];
   /** Canvas nodes whose bounding box overlaps the cluster bbox. */
-  enclosedNodes: AnnotationNodeRef[];
+  enclosedNodes: WireNodeRef[];
   /** IDs of canvas edges that intersect or are very close to the cluster bbox. */
   nearbyEdgeIds: string[];
 }
@@ -155,9 +148,9 @@ export interface AnnotationCommandResponse {
 export interface AnnotationContext {
   cluster: AnnotationCluster;
   /** Canvas nodes near the cluster bbox, ordered by proximity. */
-  nearbyNodes: AnnotationNodeRef[];
+  nearbyNodes: WireNodeRef[];
   /** Canvas nodes whose bounding box overlaps the cluster bbox. */
-  enclosedNodes: AnnotationNodeRef[];
+  enclosedNodes: WireNodeRef[];
   /** IDs of canvas edges that intersect or are very close to the cluster bbox. */
   nearbyEdgeIds: string[];
 }

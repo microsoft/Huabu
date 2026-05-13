@@ -50,7 +50,7 @@ apps/server/src/modules/agent/tools/
 
 | Tool                 | 类别      | 说明                                                                                                                                                                                      |
 | -------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `get_canvas_outline` | 读 · 几何 | 整张画布 map：每节点 `id/type/label/parentId/position/width/height` + 拓扑-only edges + 预计算 `spatial.clusters`。`includePreviews` / `includeStyle` opt-in。                            |
+| `get_canvas_outline` | 读 · 几何 | 整张画布 map：每节点 `id/type/label/filename/parentFrame?/position/size/style?/preview?` + 拓扑-only edges + 预计算 `spatial.clusters`。`includePreviews` / `includeStyle` opt-in。       |
 | `inspect_nodes`      | 读 · 几何 | 谓词 AND：`ids / byType / byParent / labelPattern / inRect / nearNode / nearPoint / inSameClusterAs / connectedTo`。返回派生字段（`distance / direction / edgeIds / hops / clusterId`）。 |
 | `inspect_edges`      | 读 · 几何 | EdgeStyle 谓词：`ids / connectedTo / bySource / byTarget / between / byDirection / byLineStyle / byLineType`。                                                                            |
 | `read`               | 读 · 文件 | 单文件文本读取，2000 行 / 50 KB 截断 + `nextOffset` 分页；自动解析 YAML frontmatter；二进制拒绝。                                                                                         |

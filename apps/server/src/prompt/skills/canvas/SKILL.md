@@ -59,12 +59,12 @@ Where each node sits, how big it is, which frame it belongs to, what colour it's
 
 ### Boundary rule of thumb
 
-| Property                                | Tool                 |
-| --------------------------------------- | -------------------- |
-| label, content, summary, keywords, src  | `read` / `grep`      |
-| position, size, parentId, visual style  | `inspect_nodes`      |
-| edge direction / lineStyle / stroke     | `inspect_edges`      |
-| whole-canvas overview, spatial clusters | `get_canvas_outline` |
+| Property                                  | Tool                 |
+| ----------------------------------------- | -------------------- |
+| label, content, summary, keywords, src    | `read` / `grep`      |
+| position, size, parentFrame, visual style | `inspect_nodes`      |
+| edge direction / lineStyle / stroke       | `inspect_edges`      |
+| whole-canvas overview, spatial clusters   | `get_canvas_outline` |
 
 ## Tool decision matrix
 

@@ -1,11 +1,13 @@
 /**
  * Stage 2: Context extraction.
  *
- * For each annotation cluster we collect lightweight refs (id + type +
- * label) for nearby nodes / enclosed nodes plus the IDs of nearby edges.
- * Carrying type + label saves the LLM a `read` round-trip on simple
- * gestures (it knows what each id refers to without looking it up); the
- * server further annotates each ref with the pre-computed file path.
+ * For each annotation cluster we collect lightweight wire refs (id +
+ * type + label) for nearby nodes / enclosed nodes plus the IDs of
+ * nearby edges. Carrying type + label saves the LLM a `read`
+ * round-trip on simple gestures (it knows what each id refers to
+ * without looking it up); the server enriches each ref into an
+ * `AgentNodeRef` (with the pre-computed `nodes/<safeLabel>.md` path)
+ * before any prompt rendering.
  *
  * Positions, distances, geometry, and shape inference are still NOT in
  * the payload — the LLM reads gesture shape from the screenshot. It can
@@ -23,8 +25,8 @@ import {
 import type {
   AnnotationCluster,
   AnnotationContext,
-  AnnotationNodeRef,
   CanvasNodeType,
+  WireNodeRef,
 } from '@sediment/shared';
 import type { Rect } from '@sediment/shared';
 import type { Edge, Node } from '@xyflow/react';
@@ -132,18 +134,21 @@ export function extractAnnotationContext(
     });
   }
 
-  // Build a NodeRef from a react-flow Node, pulling label out of node.data.
-  const toRef = (n: Node): AnnotationNodeRef => {
+  // Build a wire ref from a react-flow Node, pulling label out of
+  // node.data. Server enriches into `AgentNodeRef` (with
+  // `nodes/<safeLabel>.md`) before rendering.
+  const toRef = (n: Node): WireNodeRef => {
     const data = (n.data as Record<string, unknown> | undefined) ?? {};
     const label =
       typeof data.label === 'string' && data.label.length > 0
         ? data.label
         : undefined;
-    return {
+    const ref: WireNodeRef = {
       id: n.id,
       type: (n.type ?? 'note') as CanvasNodeType,
-      ...(label ? { label } : {}),
     };
+    if (label) ref.label = label;
+    return ref;
   };
 
   // Nearby nodes (sorted by edge distance, capped).
@@ -160,7 +165,7 @@ export function extractAnnotationContext(
     width: clusterRect.width + ENCLOSURE_PADDING * 2,
     height: clusterRect.height + ENCLOSURE_PADDING * 2,
   };
-  const enclosedNodes: AnnotationNodeRef[] = [];
+  const enclosedNodes: WireNodeRef[] = [];
   for (const { node, rect } of candidateNodes) {
     if (!rectsOverlap(paddedRect, rect)) continue;
     const intersection = rectIntersectionArea(paddedRect, rect);

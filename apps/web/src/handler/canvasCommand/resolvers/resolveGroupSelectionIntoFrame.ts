@@ -66,7 +66,7 @@ export default function resolveGroupSelectionIntoFrame(
     trace: [
       {
         action: 'node_created' as const,
-        nodes: [{ id: frameId, nodeType: 'frame' as const, label: 'Frame' }],
+        nodes: [{ id: frameId, type: 'frame' as const, label: 'Frame' }],
       },
     ],
   };

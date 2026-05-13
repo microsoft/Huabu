@@ -22,6 +22,7 @@ import { encode } from 'gpt-tokenizer';
 
 import { loadAgent, renderAgentTemplate } from '../../prompt/agent-loader.js';
 import { runAgent } from '../agent/agent.service.js';
+import { buildAgentNodeRef } from '../agent/node-ref.js';
 import { loadContext, saveContext } from '../agent/store/chat-store.js';
 import {
   ARTIFACT_URL_REGEX,
@@ -29,8 +30,8 @@ import {
 } from '../artifact/utils.js';
 import { renderNodeNeighbourhoodMarkdown } from '../canvas/node-neighbourhood.js';
 import { getCanvasStore } from '../storage/index.js';
-import { toSafeFilename } from '../storage/naming.js';
 
+import type { AgentNodeRef } from '../agent/node-ref.js';
 import type { AssistantMessage, Context } from '@earendil-works/pi-ai';
 import type {
   AgentCanvasIdQuery,
@@ -41,10 +42,9 @@ import type {
   ChatHistoryItem,
   ChatHistoryResponse,
   ContextTokensResponse,
-  SelectionPayload,
-  LlmSelectionRef,
   StopThreadResponse,
   ToolResponse,
+  WireSelectionNode,
 } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
@@ -239,7 +239,7 @@ async function buildUserContent(
  * Collect image attachments from selected canvas nodes (including frame children).
  * Enables vision analysis when users select image nodes on the canvas.
  */
-function collectImageAttachments(nodes: SelectionPayload[]): ChatAttachment[] {
+function collectImageAttachments(nodes: WireSelectionNode[]): ChatAttachment[] {
   const attachments: ChatAttachment[] = [];
 
   for (const node of nodes) {
@@ -260,28 +260,23 @@ function collectImageAttachments(nodes: SelectionPayload[]): ChatAttachment[] {
 }
 
 /**
- * Flatten the selection (including frame children) into the absolute
- * minimum the agent needs to know up front: id, type, label, and the
- * pre-computed `nodes/<safeLabel>.md` filename. Anything richer
- * (content / summary / position / style) is one tool call away via
- * `read` or `inspect_nodes`, so we deliberately do not pay the token
- * cost of including it in every turn.
+ * Flatten the wire selection (including frame children) into the
+ * absolute minimum the agent needs to know up front: the L0
+ * `AgentNodeRef` payload of `{ id, type, label?, filename }`. Anything
+ * richer (content / preview / position / style) is one tool call away
+ * via `read` or `inspect_nodes`, so we deliberately do not pay the
+ * token cost of including it in every turn.
  *
- * `filename` is derived server-side via {@link toSafeFilename} so the
- * LLM never has to apply the safeLabel rule itself — empirically it
+ * `filename` is derived server-side via `buildAgentNodeRef` so the LLM
+ * never has to apply the safeLabel rule itself — empirically it
  * mis-handles spaces and other kept-as-is characters often enough to
  * waste a turn on a 404'd `read`.
  */
-function collectSelectedNodeRefs(nodes: SelectionPayload[]): LlmSelectionRef[] {
-  const refs: LlmSelectionRef[] = [];
-  const walk = (list: SelectionPayload[]) => {
+function collectSelectedNodeRefs(nodes: WireSelectionNode[]): AgentNodeRef[] {
+  const refs: AgentNodeRef[] = [];
+  const walk = (list: WireSelectionNode[]) => {
     for (const n of list) {
-      refs.push({
-        id: n.id,
-        type: n.type,
-        ...(n.label ? { label: n.label } : {}),
-        filename: `nodes/${toSafeFilename(n.label, n.id)}.md`,
-      });
+      refs.push(buildAgentNodeRef({ id: n.id, type: n.type, label: n.label }));
       if (n.children) walk(n.children);
     }
   };

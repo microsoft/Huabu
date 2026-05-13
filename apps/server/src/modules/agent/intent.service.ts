@@ -24,6 +24,10 @@ import type {
 function serializeContextLight(ctx: IntentContext): string {
   const lines: string[] = [];
 
+  // Map for resolving `parentId` → parent label without making the
+  // wire payload carry a pre-computed `parentFrame.label`.
+  const nodeById = new Map(ctx.nodes.map((n) => [n.id, n] as const));
+
   if (ctx.nodes.length > 0) {
     const byType = new Map<string, typeof ctx.nodes>();
     for (const n of ctx.nodes) {
@@ -37,7 +41,10 @@ function serializeContextLight(ctx: IntentContext): string {
     for (const [type, nodes] of byType) {
       const labels = nodes
         .map((n) => {
-          const frame = n.frameLabel ? ` (in "${n.frameLabel}")` : '';
+          const parentLabel = n.parentId
+            ? nodeById.get(n.parentId)?.label
+            : undefined;
+          const frame = parentLabel ? ` (in "${parentLabel}")` : '';
           return `[${n.id}] ${n.label ? `"${n.label}"` : '(untitled)'}${frame}`;
         })
         .join(', ');
@@ -51,7 +58,7 @@ function serializeContextLight(ctx: IntentContext): string {
     lines.push('');
     lines.push('# Connections:');
     for (const e of ctx.edges) {
-      lines.push(`- [${e.source.id}] → [${e.target.id}]`);
+      lines.push(`- [${e.source}] → [${e.target}]`);
     }
   }
 
@@ -86,18 +93,18 @@ function formatAction(a: RecentAction): string {
   switch (a.action) {
     case 'node_created': {
       const labels = a.nodes
-        .map((n) => `${n.nodeType} "${n.label ?? n.id}"`)
+        .map((n) => `${n.type} "${n.label ?? n.id}"`)
         .join(', ');
       return `Created ${a.nodes.length} node(s): ${labels}`;
     }
     case 'nodes_deleted': {
       const labels = a.nodes
-        .map((n) => `${n.nodeType} "${n.label ?? n.id}"`)
+        .map((n) => `${n.type} "${n.label ?? n.id}"`)
         .join(', ');
       return `Deleted ${a.nodes.length} node(s): ${labels}`;
     }
     case 'node_edited': {
-      const target = `${a.node.nodeType} "${a.node.label ?? a.node.id}"`;
+      const target = `${a.node.type} "${a.node.label ?? a.node.id}"`;
       if (!a.edit) return `Edited ${target}`;
       const { op, beforeLen, afterLen, charsAdded, charsRemoved } = a.edit;
       const delta =
@@ -109,13 +116,13 @@ function formatAction(a: RecentAction): string {
       return `Edited ${target} [${op} ${delta} chars, ${beforeLen}→${afterLen}]`;
     }
     case 'node_selected':
-      return `Selected ${a.node.nodeType} "${a.node.label ?? a.node.id}"`;
+      return `Selected ${a.node.type} "${a.node.label ?? a.node.id}"`;
     case 'nodes_selected': {
       const labels = a.nodes.map((n) => `"${n.label ?? n.id}"`).join(', ');
       return `Selected ${a.nodes.length} nodes: ${labels}`;
     }
     case 'node_expanded':
-      return `Expanded ${a.node.nodeType} "${a.node.label ?? a.node.id}"`;
+      return `Expanded ${a.node.type} "${a.node.label ?? a.node.id}"`;
     case 'node_connected':
       return `Connected "${a.source.label ?? a.source.id}" → "${
         a.target.label ?? a.target.id

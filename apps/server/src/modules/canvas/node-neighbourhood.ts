@@ -11,7 +11,7 @@
  *      `NodeNeighbourhoodContext`.
  *   2. Adapter  — `getNodeNeighbourhood(canvasId, anchorNodeId)`
  *      loads the canvas, normalises geometry via the shared
- *      `buildSpatialBundle`, owns the snippet-extraction policy
+ *      `buildSpatialBundle`, owns the preview-extraction policy
  *      (label > content[:120] > src), and feeds the algorithm.
  *   3. Renderer — `renderNodeNeighbourhoodMarkdown(canvasId,
  *      anchorNodeId)` is the public entry point: serialises the
@@ -36,9 +36,14 @@ import {
 } from '@sediment/shared';
 
 import { buildSpatialBundle } from './canvas-spatial.js';
+import {
+  buildAgentNodePreview,
+  extractAgentNodePreview,
+} from '../agent/node-ref.js';
 import { getCanvasStore } from '../storage/index.js';
 
-import type { SpatialNode } from '@sediment/shared';
+import type { AgentNodePreview } from '../agent/node-ref.js';
+import type { CanvasNodeType, SpatialNode } from '@sediment/shared';
 
 // ─── Public entry point ─────────────────────────────────────────────────────
 
@@ -67,19 +72,13 @@ export function renderNodeNeighbourhoodMarkdown(
  * — e.g. the node was deleted between the client firing and the
  * request landing. Callers should treat this as "no neighbourhood".
  *
- * Owns the snippet-extraction policy. The ladder mirrors what the
- * canvas surfaces visually, so the agent sees the same sliver that
- * anchors each surrounding node:
- *
- *   1. Inline `data.label / data.content / data.src` — text-on-canvas
- *      nodes (text/image/web/...) carry their visible content here.
- *   2. Markdown frontmatter via `readNode`: `summary > keywords > content[:120]`
- *      — note nodes (and other source-backed nodes) keep their body in
- *      `nodes/<file>.md`, so the inline shape is empty and we have to
- *      reach into storage.
- *
- * The disk hit is wrapped in a memoized resolver so we only pay for
- * nodes the algorithm actually surfaces (typically ≪ canvas size).
+ * Owns the preview-extraction policy. Forwards each node through the
+ * shared {@link extractAgentNodePreview} ladder
+ * (`summary > content[:120] > src`) with two inputs merged in one
+ * pass: the on-disk frontmatter (via `readNode` — canonical for note
+ * nodes whose body lives in `nodes/<file>.md`) and the inline
+ * `data.content` / `data.src` (text-on-canvas nodes whose body never
+ * touches disk). Per-node disk reads are memoized.
  */
 export function getNodeNeighbourhood(
   canvasId: string,
@@ -93,62 +92,52 @@ export function getNodeNeighbourhood(
 
   const store = getCanvasStore(canvasId);
   const cache = new Map<string, string | undefined>();
-  const getSnippet = (nodeId: string): string | undefined => {
+  const getPreview = (nodeId: string): string | undefined => {
     if (cache.has(nodeId)) return cache.get(nodeId);
 
     const raw = bundle.rawById.get(nodeId);
     const data = raw?.data;
+    // Always consult the on-disk frontmatter: note-style nodes keep
+    // their body there, and the cost is amortised by the per-call
+    // cache above. `readNode` returns `null` for nodes without a
+    // sidecar (e.g. transient image/web nodes) — that's fine, we just
+    // fall through to inline `data.content` / `data.src`.
+    const meta = store.readNode(nodeId);
+    const metaRecord = meta as Record<string, unknown> | null;
+    const dataRecord = data as Record<string, unknown> | undefined;
 
-    // 1) Inline data — covers text/image/web/etc. without a disk read.
-    const inlineLabel =
-      typeof data?.label === 'string' && data.label.trim()
-        ? data.label
-        : undefined;
-    const inlineContent =
-      typeof data?.content === 'string' && data.content.trim()
-        ? data.content.slice(0, 120)
-        : undefined;
-    const inlineSrc =
-      typeof data?.src === 'string' && data.src.trim() ? data.src : undefined;
-    let snippet = inlineLabel ?? inlineContent ?? inlineSrc;
+    // Single shared ladder: summary > content[:120] > src. `content`
+    // prefers the on-disk body (canonical for note nodes); inline
+    // `data.content` covers text-on-canvas nodes whose body never
+    // touches disk.
+    const preview = extractAgentNodePreview({
+      id: nodeId,
+      type: (raw?.type ?? 'note') as CanvasNodeType,
+      summary:
+        typeof metaRecord?.summary === 'string'
+          ? (metaRecord.summary as string)
+          : undefined,
+      content:
+        typeof meta?.content === 'string' && meta.content
+          ? meta.content
+          : typeof data?.content === 'string'
+            ? data.content
+            : undefined,
+      src:
+        typeof dataRecord?.src === 'string'
+          ? (dataRecord.src as string)
+          : undefined,
+    });
 
-    // 2) Markdown frontmatter ladder — for nodes whose body lives on
-    //    disk (note nodes typically). Mirrors `readPreview` in
-    //    canvas-spatial so the two surfaces stay consistent.
-    if (!snippet) {
-      const meta = store.readNode(nodeId);
-      if (meta) {
-        const summary = (meta as Record<string, unknown>).summary;
-        if (typeof summary === 'string' && summary.trim()) {
-          snippet = summary.trim();
-        } else {
-          const keywords = (meta as Record<string, unknown>).keywords;
-          if (Array.isArray(keywords)) {
-            const kws = keywords.filter(
-              (k): k is string => typeof k === 'string' && k.trim().length > 0,
-            );
-            if (kws.length > 0) snippet = kws.join(', ');
-          }
-          if (
-            !snippet &&
-            typeof meta.content === 'string' &&
-            meta.content.trim()
-          ) {
-            snippet = meta.content.slice(0, 120);
-          }
-        }
-      }
-    }
-
-    cache.set(nodeId, snippet);
-    return snippet;
+    cache.set(nodeId, preview);
+    return preview;
   };
 
   return buildNodeNeighbourhoodContext(
     target,
     bundle.spatialNodes,
     bundle.edges,
-    getSnippet,
+    getPreview,
   );
 }
 
@@ -172,13 +161,13 @@ export interface SpatialGroup {
   frameId?: string;
   /** Parent frame label (human-readable). */
   frameLabel?: string;
-  /** Nodes in reading order with lightweight metadata. */
-  nodes: Array<{
-    id: string;
-    type?: string;
-    label?: string;
-    snippet?: string;
-  }>;
+  /**
+   * Nodes in reading order, each shaped as the unified L1
+   * {@link AgentNodePreview}: identity + pre-computed `filename` so
+   * the agent can `read` straight away, plus the `preview` line
+   * picked by the shared `extractAgentNodePreview` ladder.
+   */
+  nodes: AgentNodePreview[];
   /**
    * Minimum edge-to-edge distance (px) from the reference to the
    * closest node in this group. Used internally for filtering and
@@ -240,7 +229,7 @@ export function buildNodeNeighbourhoodContext(
   anchorNode: SpatialNode,
   allNodes: SpatialNode[],
   edges: ReadonlyArray<{ source: string; target: string }>,
-  getSnippet?: (nodeId: string) => string | undefined,
+  getPreview?: (nodeId: string) => string | undefined,
   opts?: { maxDistance?: number },
 ): NodeNeighbourhoodContext {
   const nodeById = new Map(allNodes.map((n) => [n.id, n]));
@@ -270,7 +259,7 @@ export function buildNodeNeighbourhoodContext(
         currentRef,
         siblings,
         nodeById,
-        getSnippet,
+        getPreview,
       ).filter((g) => g._minEdgeDist <= maxDistance);
       layers.push({
         frameId: frame.id,
@@ -348,11 +337,11 @@ export function buildNodeNeighbourhoodContext(
           frameId: f.id,
           frameLabel: f.label,
           nodes: [
-            {
+            buildAgentNodePreview({
               id: f.id,
-              type: 'frame',
+              type: 'frame' as CanvasNodeType,
               label: f.label,
-            },
+            }),
           ],
         });
       }
@@ -362,7 +351,7 @@ export function buildNodeNeighbourhoodContext(
         currentRef,
         looseNodes,
         nodeById,
-        getSnippet,
+        getPreview,
       );
       outerGroups.push(...looseGroups);
 
@@ -409,7 +398,7 @@ function buildGroupsFromNodes(
   ref: SpatialNode,
   nodes: SpatialNode[],
   nodeById: Map<string, SpatialNode>,
-  getSnippet?: (nodeId: string) => string | undefined,
+  getPreview?: (nodeId: string) => string | undefined,
 ): SpatialGroup[] {
   if (nodes.length === 0) return [];
 
@@ -442,12 +431,16 @@ function buildGroupsFromNodes(
         dy: offset.dy,
         _minEdgeDist: edgeDist,
         arrangement,
-        nodes: ordered.map((n) => ({
-          id: n.id,
-          type: n.type,
-          label: n.label,
-          snippet: getSnippet?.(n.id),
-        })),
+        nodes: ordered.map((n) => {
+          const preview = getPreview?.(n.id);
+          const ref = buildAgentNodePreview({
+            id: n.id,
+            type: (n.type ?? 'note') as CanvasNodeType,
+            label: n.label,
+          });
+          if (preview) ref.preview = preview;
+          return ref;
+        }),
       };
 
       // Only set frame fields when a parent frame exists.
@@ -527,7 +520,7 @@ function serializeNodeNeighbourhoodContext(
         const nodeLines = g.nodes
           .map(
             (n) =>
-              `- "${n.label ?? n.id}" [${n.type ?? 'unknown'}]${n.snippet ? ` — ${n.snippet}` : ''}`,
+              `- "${n.label ?? n.id}" [${n.type}]${n.preview ? ` — ${n.preview}` : ''}`,
           )
           .join('\n');
         return `**${dir}** (${g.arrangement}):\n${nodeLines}`;

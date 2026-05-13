@@ -1,20 +1,5 @@
-import type { CanvasNodeType, NodeOrigin } from '../canvas/node.js';
-
-// ==================== Node Reference ====================
-
-/**
- * Lightweight reference to a canvas node.
- * Used in RecentAction to avoid duplicating full NodeSummary data.
- * AI can use `id` to call `read` on "nodes/<nodeId>.md" for full content,
- * or `inspect_nodes({ ids: [<id>] })` for layout / style.
- */
-export interface NodeRef {
-  id: string;
-  nodeType: CanvasNodeType;
-  label?: string;
-  /** How this node came to exist — helps the agent understand user intent. */
-  origin?: NodeOrigin;
-}
+import type { NodeRef } from './node-ref.js';
+import type { WireCanvasNode, WireSelectionNode } from '../api/agent.js';
 
 // ==================== Recent Actions ====================
 
@@ -93,81 +78,7 @@ export type RecentAction =
   | { action: 'canvas_undone' }
   | { action: 'canvas_redone' };
 
-// ==================== Canvas Snapshot ====================
-
-/**
- * Lightweight summary of a canvas node injected into the agent context.
- * `snippet` is the first ~120 chars of plain-text content (or src for web/pdf).
- */
-export interface NodeSummary {
-  id: string;
-  type: CanvasNodeType;
-  label?: string;
-  /** First ~120 chars of plain-text content; src URL for web/pdf/video/image nodes */
-  snippet?: string;
-  /** Label of the parent frame, if any */
-  frameLabel?: string;
-  /** Absolute position on canvas (top-left corner). */
-  position?: { x: number; y: number };
-  /** Measured or styled dimensions. */
-  size?: { width: number; height: number };
-}
-
-// ==================== Selected Nodes ====================
-
-/**
- * Rich representation of a node explicitly selected by the user.
- *
- * Selection is a strong intent signal — the user is telling the agent
- * "focus on this". `SelectionPayload` is the **wire shape** posted by
- * the web client: it can recurse into frame `children` and carries
- * `src` for image nodes (so the server can build vision attachments).
- * Full node content / layout is fetched on demand via `read` /
- * `inspect_nodes`, keeping the request body small.
- *
- * The server flattens this into {@link LlmSelectionRef} entries before
- * handing the selection to the LLM — see `collectSelectedNodeRefs`
- * in the agent route.
- */
-export interface SelectionPayload {
-  id: string;
-  type: CanvasNodeType;
-  label?: string;
-  /** Source URL for image nodes (used by the server to build vision attachments). */
-  src?: string;
-  /**
-   * Direct children of a frame node, each carrying their own detail.
-   * Undefined for non-frame nodes.
-   */
-  children?: SelectionPayload[];
-}
-
-/**
- * Minimal node reference handed to the LLM as selection context.
- *
- * Distinct from {@link SelectionPayload}: that's the wire format
- * sent from the web client (carries `src` for vision + frame
- * `children`); this is the flattened, LLM-facing form built by the
- * agent route. Carries everything the model needs to address a node
- * without further derivation:
- *  - `id`       — stable handle for `inspect_nodes`, `MERGE_NODE_DATA`, etc.
- *  - `label`    — display name (omitted when blank).
- *  - `type`     — `note` / `web` / `pdf` / `image` / `video` / `frame` /
- *                 `text`.
- *  - `filename` — pre-computed `nodes/<safeLabel>.md` path, ready to
- *                 hand straight to `read`. The server derives this so
- *                 the LLM never has to compute `safeLabel` itself
- *                 (a frequent source of bad guesses around spaces and
- *                 special characters). Falls back to `nodes/<id>.md`
- *                 for label-less nodes (e.g. fresh frames).
- */
-export interface LlmSelectionRef {
-  id: string;
-  type: CanvasNodeType;
-  /** Display name; omitted when the node has no label (e.g. fresh frame). */
-  label?: string;
-  filename: string;
-}
+// ==================== Agent Chat / Intent contexts ====================
 
 /**
  * Context sent with every chat-agent request (`POST /api/agent`).
@@ -179,10 +90,11 @@ export interface LlmSelectionRef {
  * `inspect_edges`, `read`, etc. — so we don't pay the upload cost on
  * every turn for data the model usually doesn't need.
  *
- * Selection is the primary intent signal: "focus on this". The server
- * flattens it into `LlmSelectionRef[]` and pre-computes per-node
- * `filename` so the agent can `read` content without re-deriving the
- * `nodes/<safeLabel>.md` path.
+ * Selection is the primary intent signal: "focus on this". Wire shape
+ * stays raw; the server enriches into `AgentNodeRef[]` before any
+ * prompt rendering so the LLM gets the pre-computed
+ * `nodes/<safeLabel>.md` filename without web having to apply the
+ * safeLabel rule.
  */
 export interface AgentChatContext {
   /**
@@ -190,7 +102,7 @@ export interface AgentChatContext {
    * Empty array means "no explicit selection; the agent should pull
    * canvas state via tools as needed".
    */
-  selectedNodes: SelectionPayload[];
+  selectedNodes: WireSelectionNode[];
 }
 
 /**
@@ -201,12 +113,19 @@ export interface AgentChatContext {
  * do, so it cannot rely on tool-driven exploration. It needs the full
  * canvas snapshot, the recent action ring buffer, and an optional
  * viewport screenshot — all up-front, all in one payload.
+ *
+ * Wire shape stays raw — `nodes` are {@link WireCanvasNode} (no
+ * `filename`/`preview`/`parentFrame.label`), `edges` are bare id
+ * pairs. The server enriches as needed before formatting the prompt.
  */
 export interface IntentContext {
-  /** Snapshot of all current canvas nodes. */
-  nodes: NodeSummary[];
-  /** Semantic edges between nodes (label pairs, no coordinates). */
-  edges: Array<{ source: NodeRef; target: NodeRef }>;
+  /** Snapshot of all current canvas nodes (raw wire shape). */
+  nodes: WireCanvasNode[];
+  /**
+   * Edge endpoints as bare node ids. The server resolves type/label
+   * from `nodes[]` when rendering the prompt.
+   */
+  edges: Array<{ source: string; target: string }>;
   /**
    * Ring buffer of the last ~10 user actions (maintained by the
    * frontend). Ordered from oldest to newest.
@@ -221,5 +140,5 @@ export interface IntentContext {
    * Nodes explicitly selected by the user at the time of the request.
    * Same shape as {@link AgentChatContext.selectedNodes}.
    */
-  selectedNodes: SelectionPayload[];
+  selectedNodes: WireSelectionNode[];
 }
