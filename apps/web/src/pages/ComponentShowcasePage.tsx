@@ -1,6 +1,8 @@
 import {
   Download,
   FileText,
+  Hand,
+  MousePointer2,
   Plus,
   Redo2,
   Search,
@@ -22,6 +24,7 @@ import { Modal } from '../components/Common/Modal';
 import { Popover } from '../components/Common/Popover';
 import { Select } from '../components/Common/Select';
 import { Spinner } from '../components/Common/Spinner';
+import { SplitSelect } from '../components/Common/SplitSelect';
 import { TabGroup } from '../components/Common/TabGroup';
 import { toast } from '../components/Common/Toast';
 import { Tooltip } from '../components/Common/Tooltip';
@@ -146,6 +149,67 @@ function SelectDemo() {
           onChange={() => {}}
           disabled
         />
+      </SubSection>
+    </div>
+  );
+}
+
+function SplitSelectDemo() {
+  const [tool, setTool] = useState<'select' | 'pan'>('select');
+  const [lastPrimaryAction, setLastPrimaryAction] = useState<
+    'select' | 'pan' | null
+  >(null);
+
+  const toolOptions = [
+    {
+      value: 'select' as const,
+      label: 'Select',
+      icon: <MousePointer2 size={14} />,
+    },
+    {
+      value: 'pan' as const,
+      label: 'Pan',
+      icon: <Hand size={14} />,
+    },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <SubSection label="Separated trigger: left side acts, right side opens menu">
+        <SplitSelect
+          options={toolOptions}
+          value={tool}
+          onChange={setTool}
+          onPrimaryAction={setLastPrimaryAction}
+          primaryTitle="Apply current tool"
+          menuTitle="Choose tool"
+        />
+        <span className="text-fg-muted text-sm">
+          Active tool: <strong className="text-fg-default">{tool}</strong>
+          {' · '}
+          Last primary action:{' '}
+          <strong className="text-fg-default">
+            {lastPrimaryAction ?? 'none'}
+          </strong>
+        </span>
+      </SubSection>
+      <SubSection label="Toolbar-style icon only">
+        <div className="shadow-bottom bg-surface inline-flex rounded-lg p-1">
+          <SplitSelect
+            options={toolOptions}
+            value={tool}
+            onChange={setTool}
+            onPrimaryAction={setLastPrimaryAction}
+            variant="ghost"
+            size="md"
+            align="top-left"
+            iconOnly
+            primaryTitle="Activate current tool"
+            menuTitle="Switch tool"
+            primaryButtonClassName="text-info bg-bg-default enabled:hover:bg-bg-default"
+            menuButtonClassName="enabled:hover:bg-bg-default"
+          />
+        </div>
       </SubSection>
     </div>
   );
@@ -445,6 +509,13 @@ export default function ComponentShowcasePage() {
             description="Custom select control with Button trigger and Popover option panel. Supports up/down direction, icons, and all Button variants."
           >
             <SelectDemo />
+          </Section>
+
+          <Section
+            title="SplitSelect"
+            description="Split trigger select with a primary action button on the left and a dedicated menu toggle on the right. Useful for select/pan style tool switchers where changing value must not auto-open the menu."
+          >
+            <SplitSelectDemo />
           </Section>
 
           {/* ────────────────────── TabGroup ────────────────────── */}

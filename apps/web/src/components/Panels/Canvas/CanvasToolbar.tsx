@@ -22,7 +22,10 @@ import useCanvasStore from '../../../store/canvasStore.ts';
 import { detectNodeType } from '../../../utils/io/media.ts';
 import { Button } from '../../Common/Button.tsx';
 import { Modal } from '../../Common/Modal.tsx';
-import { Select, type SelectOption } from '../../Common/Select.tsx';
+import {
+  SplitSelect,
+  type SplitSelectOption,
+} from '../../Common/SplitSelect.tsx';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
 
@@ -64,7 +67,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
   const [linkText, setLinkText] = useState('');
 
   // Pan/Select tool options for the merged dropdown trigger.
-  const toolOptions = useMemo<SelectOption<'select' | 'pan'>[]>(
+  const toolOptions = useMemo<SplitSelectOption<'select' | 'pan'>[]>(
     () => [
       { value: 'select', label: 'Select', icon: <MousePointer2 /> },
       { value: 'pan', label: 'Pan', icon: <Hand /> },
@@ -207,11 +210,14 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
       <div className="text-fg-muted shadow-bottom bg-surface pointer-events-auto relative flex w-max items-center gap-1.5 rounded-lg border-0 px-4 py-2">
         {/* Group 1: Tools */}
         <div className="flex items-center gap-1.5">
-          <Select<'select' | 'pan'>
+          <SplitSelect<'select' | 'pan'>
             options={toolOptions}
             value={activeTool}
+            onPrimaryAction={(tool) => {
+              if (pendingNodeType) setPendingNodeType(null);
+              onToolChange(tool);
+            }}
             onChange={(t) => {
-              // Switching to a canvas tool cancels any pending node placement.
               if (pendingNodeType) setPendingNodeType(null);
               onToolChange(t);
             }}
@@ -220,7 +226,13 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             size="md"
             iconOnly
             align="top-left"
-            className={clsx(!pendingNodeType && 'text-info bg-bg-default')}
+            primaryTitle={activeTool === 'select' ? 'Select' : 'Pan'}
+            menuTitle="More Tools"
+            primaryButtonClassName={clsx(
+              !pendingNodeType &&
+                'text-info bg-bg-default enabled:hover:bg-bg-default',
+            )}
+            menuButtonClassName="enabled:hover:bg-bg-default"
           />
         </div>
 
