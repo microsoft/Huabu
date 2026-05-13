@@ -1,5 +1,6 @@
 import clsx from 'clsx';
 import {
+  Lasso,
   MousePointer2,
   Hand,
   LayoutDashboard,
@@ -30,8 +31,8 @@ import {
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
 
 interface NodeToolbarProps {
-  activeTool: 'select' | 'pan';
-  onToolChange: (tool: 'select' | 'pan') => void;
+  activeTool: 'select' | 'lasso' | 'pan';
+  onToolChange: (tool: 'select' | 'lasso' | 'pan') => void;
 }
 
 export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
@@ -66,10 +67,11 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
   );
   const [linkText, setLinkText] = useState('');
 
-  // Pan/Select tool options for the merged dropdown trigger.
-  const toolOptions = useMemo<SplitSelectOption<'select' | 'pan'>[]>(
+  // Selection / pan tool options for the merged dropdown trigger.
+  const toolOptions = useMemo<SplitSelectOption<'select' | 'lasso' | 'pan'>[]>(
     () => [
       { value: 'select', label: 'Select', icon: <MousePointer2 /> },
+      { value: 'lasso', label: 'Lasso', icon: <Lasso /> },
       { value: 'pan', label: 'Pan', icon: <Hand /> },
     ],
     [],
@@ -210,7 +212,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
       <div className="text-fg-muted shadow-bottom bg-surface pointer-events-auto relative flex w-max items-center gap-1.5 rounded-lg border-0 px-4 py-2">
         {/* Group 1: Tools */}
         <div className="flex items-center gap-1.5">
-          <SplitSelect<'select' | 'pan'>
+          <SplitSelect<'select' | 'lasso' | 'pan'>
             options={toolOptions}
             value={activeTool}
             onPrimaryAction={(tool) => {
@@ -226,7 +228,13 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             size="md"
             iconOnly
             align="top-left"
-            primaryTitle={activeTool === 'select' ? 'Select' : 'Pan'}
+            primaryTitle={
+              activeTool === 'select'
+                ? 'Select'
+                : activeTool === 'lasso'
+                  ? 'Lasso'
+                  : 'Pan'
+            }
             menuTitle="More Tools"
             primaryButtonClassName={clsx(
               !pendingNodeType &&

@@ -3,6 +3,7 @@ import {
   Background,
   Controls,
   ConnectionMode,
+  SelectionMode,
   type ReactFlowInstance,
   Panel,
 } from '@xyflow/react';
@@ -20,6 +21,7 @@ import {
   textToNoteNodeInput,
 } from '@/handler/canvasCommand/nodeInputBuilders';
 import { useCanvasGestures } from '@/hooks/useCanvasGestures';
+import { useCanvasLasso } from '@/hooks/useCanvasLasso';
 import { useCanvasShortcuts } from '@/hooks/useCanvasShortcuts';
 import { useFrameDragToCreate } from '@/hooks/useFrameDragToCreate';
 import { useIsTouch } from '@/hooks/useInputMode';
@@ -168,6 +170,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   const frameNodesInRect = useCanvasStore((state) => state.frameNodesInRect);
   const pendingNodeType = useCanvasStore((state) => state.pendingNodeType);
   const canvasId = useCanvasStore((state) => state.canvasId);
+  const selectElements = useCanvasStore((state) => state.selectElements);
   const setPendingNodeType = useCanvasStore(
     (state) => state.setPendingNodeType,
   );
@@ -249,6 +252,16 @@ export const Canvas: React.FC<CanvasProps> = ({
       onCreate: frameNodesInRect,
       onEnd: exitPendingNodeType,
     });
+
+  const {
+    pointerHandlers: lassoPointerHandlers,
+    previewPath: lassoPreviewPath,
+  } = useCanvasLasso({
+    active: !pendingNodeType && tool === 'lasso',
+    wrapperRef,
+    edges,
+    onSelect: (nodeIds, edgeIds) => selectElements(nodeIds, edgeIds),
+  });
 
   // Cancel any other pending node placement (note / text / question) with Escape.
   useEffect(() => {
@@ -332,11 +345,24 @@ export const Canvas: React.FC<CanvasProps> = ({
         pendingNodeType === 'frame' && 'canvas-pending-frame',
         pendingNodeType === 'annotation' && 'cursor-crosshair',
         pendingNodeType === 'question' && 'canvas-pending-question',
+        tool === 'lasso' && 'cursor-crosshair',
       )}
-      onPointerDown={framePointerHandlers.onPointerDown}
-      onPointerMove={framePointerHandlers.onPointerMove}
-      onPointerUp={framePointerHandlers.onPointerUp}
-      onPointerCancel={framePointerHandlers.onPointerCancel}
+      onPointerDown={(event) => {
+        framePointerHandlers.onPointerDown(event);
+        lassoPointerHandlers.onPointerDown(event);
+      }}
+      onPointerMove={(event) => {
+        framePointerHandlers.onPointerMove(event);
+        lassoPointerHandlers.onPointerMove(event);
+      }}
+      onPointerUp={(event) => {
+        framePointerHandlers.onPointerUp(event);
+        lassoPointerHandlers.onPointerUp(event);
+      }}
+      onPointerCancel={(event) => {
+        framePointerHandlers.onPointerCancel(event);
+        lassoPointerHandlers.onPointerCancel(event);
+      }}
       onDragOver={(e) => {
         // Accept both internal Sediment payloads and native file/URL drops
         const isSediment = canReadSedimentPayload(e.dataTransfer);
@@ -508,10 +534,11 @@ export const Canvas: React.FC<CanvasProps> = ({
               ? true
               : isTouch
                 ? false /* touch + select tool → drag creates selection rect */
-                : [1] /* desktop + select tool → middle mouse button pans */
+                : [1] /* desktop + selection tools → middle mouse button pans */
         }
         selectionOnDrag={pendingNodeType ? false : tool === 'select'}
-        nodesDraggable={!pendingNodeType}
+        selectionMode={SelectionMode.Partial}
+        nodesDraggable={!pendingNodeType && tool !== 'lasso'}
         elementsSelectable={!pendingNodeType}
         panOnScroll={!isTouch}
         zoomOnScroll={true}
@@ -540,10 +567,26 @@ export const Canvas: React.FC<CanvasProps> = ({
         <AnnotationProcessingOverlay />
       </ReactFlow>
 
+      {lassoPreviewPath && (
+        <svg
+          className="pointer-events-none absolute inset-0 z-50 h-full w-full"
+          aria-hidden="true"
+        >
+          <path
+            d={lassoPreviewPath}
+            fill="color-mix(in srgb, var(--color-info) 14%, transparent)"
+            stroke="var(--color-info)"
+            strokeWidth={1.5}
+            strokeLinejoin="round"
+            strokeLinecap="round"
+          />
+        </svg>
+      )}
+
       {/* Frame drag preview overlay */}
       {frameDragRect && frameDragRect.width > 2 && (
         <div
-          className="border-info bg-info-bg/40 pointer-events-none absolute z-50 rounded border-1 border-dashed"
+          className="border-info bg-info-bg/40 pointer-events-none absolute z-50 rounded border border-dashed"
           style={{
             left: frameDragRect.left,
             top: frameDragRect.top,

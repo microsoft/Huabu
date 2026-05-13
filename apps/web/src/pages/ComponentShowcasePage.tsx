@@ -2,6 +2,7 @@ import {
   Download,
   FileText,
   Hand,
+  Lasso,
   MousePointer2,
   Plus,
   Redo2,
@@ -155,9 +156,9 @@ function SelectDemo() {
 }
 
 function SplitSelectDemo() {
-  const [tool, setTool] = useState<'select' | 'pan'>('select');
+  const [tool, setTool] = useState<'select' | 'lasso' | 'pan'>('select');
   const [lastPrimaryAction, setLastPrimaryAction] = useState<
-    'select' | 'pan' | null
+    'select' | 'lasso' | 'pan' | null
   >(null);
 
   const toolOptions = [
@@ -165,6 +166,11 @@ function SplitSelectDemo() {
       value: 'select' as const,
       label: 'Select',
       icon: <MousePointer2 size={14} />,
+    },
+    {
+      value: 'lasso' as const,
+      label: 'Lasso',
+      icon: <Lasso size={14} />,
     },
     {
       value: 'pan' as const,
