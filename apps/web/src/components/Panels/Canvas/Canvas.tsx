@@ -576,7 +576,9 @@ export const Canvas: React.FC<CanvasProps> = ({
         // ============ 4. Plain text drop ============
         if (plainText) {
           addNode(
-            textToNoteNodeInput(plainText, dropPos, { type: 'user-uploaded' }),
+            textToNoteNodeInput(plainText, dropPos, {
+              type: 'user-uploaded',
+            }),
           );
         }
       }}
@@ -634,8 +636,8 @@ export const Canvas: React.FC<CanvasProps> = ({
         <Panel position="bottom-center" className="mb-6">
           <NodeToolbar activeTool={tool} onToolChange={setTool} />
         </Panel>
-        <MultiSelectToolbar />
-        <EdgeStyleToolbar />
+        {!isBoxSelecting && <MultiSelectToolbar />}
+        {!isBoxSelecting && <EdgeStyleToolbar />}
         <IntentPopover />
         <Background color="var(--canvas-grid)" gap={GRID_SIZE} />
 
