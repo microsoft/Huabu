@@ -17,7 +17,7 @@ import { NODE_ICON } from '@/config/nodeIcons';
 import { useIsNotMouse } from '@/hooks/useInputMode';
 import useCanvasStore from '@/store/canvasStore';
 
-import type { CanvasNodeType, NodeData } from '@/components/Nodes/types';
+import type { CanvasNodeType, NodeData } from './types';
 
 /** Sentinel token representing "no accent". */
 const ACCENT_NONE = ACCENT_NONE_TOKEN;

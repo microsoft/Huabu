@@ -8,7 +8,7 @@ import {
   FLOATING_TOOLBAR_CLASS,
 } from '@/components/Common/FloatingToolbar';
 import { DEFAULT_EDGE_STROKE_WIDTH } from '@/handler/canvasCommand/utils/edge';
-import { useIsTouch } from '@/hooks/useInputMode';
+import { useIsNotMouse } from '@/hooks/useInputMode';
 import useCanvasStore from '@/store/canvasStore';
 
 import type { SelectOption } from '@/components/Common/Select';
@@ -202,7 +202,7 @@ export const EdgeStyleToolbar = () => {
   const edges = useCanvasStore((s) => s.edges);
   const executeCommands = useCanvasStore((s) => s.executeCommands);
   const disconnectEdges = useCanvasStore((s) => s.disconnectEdges);
-  const isTouch = useIsTouch();
+  const isNotMouse = useIsNotMouse();
 
   const selectedEdge = useMemo(() => {
     const sel = edges.filter((e) => e.selected);
@@ -306,8 +306,8 @@ export const EdgeStyleToolbar = () => {
         title="Edge color"
       />
 
-      {/* Touch-only: pointer users have keyboard Delete / Backspace. */}
-      {isTouch && (
+      {/* Non-mouse only: mouse users have keyboard Delete / Backspace. */}
+      {isNotMouse && (
         <>
           <FloatingToolbar.Divider />
           <FloatingToolbar.ActionButton

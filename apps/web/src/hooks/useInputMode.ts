@@ -29,6 +29,9 @@ export function useIsTouch(): boolean {
   return useInputModeStore((s) => s.mode === 'touch');
 }
 
+export function useIsNotMouse(): boolean {
+  return useInputModeStore((s) => s.mode !== 'mouse');
+}
 /**
  * Call once near the app root to install the global `pointerdown` listener.
  * Safe to call multiple times — the listener is idempotent.

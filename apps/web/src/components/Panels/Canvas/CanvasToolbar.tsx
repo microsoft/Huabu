@@ -14,7 +14,7 @@ import {
 import { useMemo, useRef, useState, type ChangeEvent } from 'react';
 
 import { uploadImage, uploadPdf, uploadVideo } from '@/api/artifact';
-import { useIsTouch } from '@/hooks/useInputMode';
+import { useIsNotMouse } from '@/hooks/useInputMode';
 import { useIntentStore } from '@/store/intentStore';
 
 import { NODE_ICON } from '../../../config/nodeIcons.ts';
@@ -42,8 +42,8 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
   const autoLayoutEnabled = useCanvasStore((s) => s.autoLayoutEnabled);
   const toggleAutoLayout = useCanvasStore((s) => s.toggleAutoLayout);
 
-  // Touch-mode undo / redo (delete now lives on the per-context floating toolbars)
-  const isTouch = useIsTouch();
+  // Non-mouse undo / redo (delete now lives on the per-context floating toolbars)
+  const isNotMouse = useIsNotMouse();
   const undo = useCanvasStore((s) => s.undo);
   const redo = useCanvasStore((s) => s.redo);
   const canUndo = useCanvasStore((s) => s.canUndo);
@@ -387,8 +387,8 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           </Button>
         </div>
 
-        {/* Touch-only: Undo / Redo (Delete lives on the per-context floating toolbars) */}
-        {isTouch && (
+        {/* Non-mouse only: Undo / Redo (Delete lives on the per-context floating toolbars) */}
+        {isNotMouse && (
           <>
             <div className="bg-border mx-1 h-4 w-px" />
             <div className="flex items-center gap-1.5">

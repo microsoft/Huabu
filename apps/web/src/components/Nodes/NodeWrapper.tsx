@@ -23,7 +23,7 @@ import { Spinner } from '@/components/Common/Spinner.tsx';
 import { Tooltip } from '@/components/Common/Tooltip.tsx';
 import { NodeFloatingToolbar } from '@/components/Panels/Canvas/FloatingToolbars/NodeFloatingToolbar.tsx';
 import { useCornerZoomResize } from '@/hooks/useCornerZoomResize.ts';
-import { useIsTouch } from '@/hooks/useInputMode.ts';
+import { useIsNotMouse } from '@/hooks/useInputMode.ts';
 import { useNodeLOD } from '@/hooks/useNodeLOD.ts';
 import useCanvasStore from '@/store/canvasStore.ts';
 import { summarizeProvenance } from '@/utils/provenance.ts';
@@ -276,14 +276,14 @@ export const NodeWrapper = memo(
       type !== 'frame' && ingestion?.status === 'pending';
 
     const renderMode = useNodeLOD(id, type);
-    const isTouch = useIsTouch();
+    const isNotMouse = useIsNotMouse();
 
     // Zoom-invariant handle style: scale up width/height directly so React
     // Flow's getBoundingClientRect-based edge routing stays centred on the
     // handle.  React Flow's default `transform: translate(-50%, -50%)`
     // already centres handles at any size, so no margin compensation is
     // needed.
-    const baseHandleSize = isTouch ? 10 : 4;
+    const baseHandleSize = isNotMouse ? 10 : 4;
     const handleStyle: React.CSSProperties = useStore((s) => {
       const factor = Math.max(1 / s.transform[2], 1);
       const size = baseHandleSize * factor;
@@ -399,8 +399,8 @@ export const NodeWrapper = memo(
           onResize={handleResize}
           onResizeEnd={handleResizeEnd}
           handleStyle={{
-            width: isTouch ? 12 : 8,
-            height: isTouch ? 12 : 8,
+            width: isNotMouse ? 12 : 8,
+            height: isNotMouse ? 12 : 8,
             borderRadius: 0,
           }}
           lineClassName="!border-transparent"
@@ -532,7 +532,7 @@ export const NodeWrapper = memo(
               style={handleStyle}
               className={cn(
                 'bg-info! z-20 border-none! transition-opacity',
-                isTouch
+                isNotMouse
                   ? cn(
                       selected
                         ? 'opacity-40 active:opacity-100'

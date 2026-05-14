@@ -30,7 +30,7 @@ import { useCanvasGestures } from '@/hooks/useCanvasGestures';
 import { useCanvasLasso } from '@/hooks/useCanvasLasso';
 import { useCanvasShortcuts } from '@/hooks/useCanvasShortcuts';
 import { useFrameDragToCreate } from '@/hooks/useFrameDragToCreate';
-import { useIsTouch } from '@/hooks/useInputMode';
+import { useIsNotMouse } from '@/hooks/useInputMode';
 import { useQuestionRunner } from '@/hooks/useQuestionRunner';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
@@ -189,7 +189,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     },
   );
 
-  const isTouch = useIsTouch();
+  const isNotMouse = useIsNotMouse();
 
   const handleSelectionStart = useCallback(() => {
     if (tool !== 'select') return;
@@ -615,9 +615,9 @@ export const Canvas: React.FC<CanvasProps> = ({
             ? false
             : tool === 'pan'
               ? true
-              : isTouch
-                ? false /* touch + select tool → drag creates selection rect */
-                : [1] /* desktop + selection tools → middle mouse button pans */
+              : isNotMouse
+                ? false /* non-mouse + select tool → drag creates selection rect */
+                : [1] /* mouse + selection tools → middle mouse button pans */
         }
         selectionOnDrag={pendingNodeType ? false : tool === 'select'}
         selectionMode={SelectionMode.Partial}
@@ -625,7 +625,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         onSelectionEnd={handleSelectionEnd}
         nodesDraggable={!pendingNodeType && tool !== 'lasso'}
         elementsSelectable={!pendingNodeType}
-        panOnScroll={!isTouch}
+        panOnScroll={!isNotMouse}
         zoomOnScroll={true}
         zoomOnPinch={true}
         minZoom={MIN_ZOOM}
