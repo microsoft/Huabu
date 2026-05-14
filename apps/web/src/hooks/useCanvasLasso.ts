@@ -245,6 +245,25 @@ export function useCanvasLasso({
       if (!active) return;
       if (event.button !== 0 || !event.isPrimary) return;
       const target = event.target as HTMLElement;
+
+      // Touch devices: React Flow's synthetic click selection on nodes is
+      // unreliable while the lasso tool is active (`nodesDraggable={false}`
+      // detaches d3-drag, and the pane/wrapper pointer flow swallows the tap
+      // before a click is synthesised). Mouse already works via React Flow's
+      // own onClick handler, so only intercept touch / pen taps here.
+      if (event.pointerType !== 'mouse') {
+        const nodeEl = target.closest<HTMLElement>('.react-flow__node');
+        if (nodeEl) {
+          const nodeId = nodeEl.getAttribute('data-id');
+          if (nodeId) {
+            event.preventDefault();
+            event.stopPropagation();
+            onSelect([nodeId]);
+          }
+          return;
+        }
+      }
+
       if (!target.closest('.react-flow__pane')) return;
       if (target.closest('.react-flow__panel')) return;
       if (
