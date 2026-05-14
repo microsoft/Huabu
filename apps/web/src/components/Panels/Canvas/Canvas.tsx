@@ -168,7 +168,6 @@ export const Canvas: React.FC<CanvasProps> = ({
   const pendingNodeType = useCanvasStore((state) => state.pendingNodeType);
   const canvasId = useCanvasStore((state) => state.canvasId);
   const selectNodes = useCanvasStore((state) => state.selectNodes);
-  const selectElements = useCanvasStore((state) => state.selectElements);
   const setPendingNodeType = useCanvasStore(
     (state) => state.setPendingNodeType,
   );
@@ -192,29 +191,18 @@ export const Canvas: React.FC<CanvasProps> = ({
 
   const isTouch = useIsTouch();
 
-  const normalizeBoxSelection = useCallback(() => {
-    if (tool !== 'select') return;
-
-    const selectedNodeIds = nodes
-      .filter((node) => node.selected)
-      .map((node) => node.id);
-    const selectedEdgeIds = getEdgeIdsBetweenSelectedNodes(
-      selectedNodeIds,
-      edges,
-    );
-
-    selectElements(selectedNodeIds, selectedEdgeIds);
-  }, [edges, nodes, selectElements, tool]);
-
   const handleSelectionStart = useCallback(() => {
     if (tool !== 'select') return;
     setIsBoxSelecting(true);
   }, [tool]);
 
+  // Sync the box-selected nodes back through the standard SELECT_NODES intent
+  // so action history and event buffer stay in step with the visible selection.
   const handleSelectionEnd = useCallback(() => {
     setIsBoxSelecting(false);
-    normalizeBoxSelection();
-  }, [normalizeBoxSelection]);
+    if (tool !== 'select') return;
+    selectNodes(nodes.filter((n) => n.selected).map((n) => n.id));
+  }, [nodes, selectNodes, tool]);
 
   // Run question nodes when their timers expire.
   useQuestionRunner();

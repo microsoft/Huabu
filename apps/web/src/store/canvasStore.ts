@@ -215,7 +215,6 @@ type RFState = {
   patchNodeSilent: (nodeId: string, patch: Record<string, unknown>) => void;
 
   selectNodes: (ids: string[], multiSelect?: boolean) => void;
-  selectElements: (nodeIds: string[], edgeIds: string[]) => void;
 
   reorderNodes: (
     activeId: string,
@@ -1295,22 +1294,6 @@ const useCanvasStore = create<RFState>()(
         type: 'SELECT_NODES',
         nodeIds: ids,
         mode: multiSelect ? 'toggle' : 'replace',
-      });
-    },
-
-    selectElements: (nodeIds, edgeIds) => {
-      const selectedNodeIds = new Set(nodeIds);
-      const selectedEdgeIds = new Set(edgeIds);
-
-      set({
-        nodes: get().nodes.map((node) => ({
-          ...node,
-          selected: selectedNodeIds.has(node.id),
-        })),
-        edges: get().edges.map((edge) => ({
-          ...edge,
-          selected: selectedEdgeIds.has(edge.id),
-        })),
       });
     },
 

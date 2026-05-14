@@ -31,8 +31,8 @@ import {
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
 
 interface NodeToolbarProps {
-  activeTool: 'select' | 'lasso' | 'pan';
-  onToolChange: (tool: 'select' | 'lasso' | 'pan') => void;
+  activeTool: 'select' | 'pan' | 'lasso';
+  onToolChange: (tool: 'select' | 'pan' | 'lasso') => void;
 }
 
 export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
@@ -68,11 +68,11 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
   const [linkText, setLinkText] = useState('');
 
   // Selection / pan tool options for the merged dropdown trigger.
-  const toolOptions = useMemo<SplitSelectOption<'select' | 'lasso' | 'pan'>[]>(
+  const toolOptions = useMemo<SplitSelectOption<'select' | 'pan' | 'lasso'>[]>(
     () => [
       { value: 'select', label: 'Select', icon: <MousePointer2 /> },
-      { value: 'lasso', label: 'Lasso', icon: <Lasso /> },
       { value: 'pan', label: 'Pan', icon: <Hand /> },
+      { value: 'lasso', label: 'Lasso', icon: <Lasso /> },
     ],
     [],
   );
@@ -212,7 +212,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
       <div className="text-fg-muted shadow-bottom bg-surface pointer-events-auto relative flex w-max items-center gap-1.5 rounded-lg border-0 px-4 py-2">
         {/* Group 1: Tools */}
         <div className="flex items-center gap-1.5">
-          <SplitSelect<'select' | 'lasso' | 'pan'>
+          <SplitSelect<'select' | 'pan' | 'lasso'>
             options={toolOptions}
             value={activeTool}
             onPrimaryAction={(tool) => {
