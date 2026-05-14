@@ -16,11 +16,15 @@ const setNodeSelection: CommandDefinition<Cmd> = {
       ...n,
       selected: selectedIds.has(n.id),
     }));
+    const nextEdges = state.edges.map((edge) => ({
+      ...edge,
+      selected: false,
+    }));
 
     return {
       applied: true,
       nodes: nextNodes,
-      edges: state.edges,
+      edges: nextEdges,
     };
   },
 };

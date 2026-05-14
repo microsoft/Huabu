@@ -1,5 +1,6 @@
 import clsx from 'clsx';
 import {
+  Lasso,
   MousePointer2,
   Hand,
   LayoutDashboard,
@@ -11,7 +12,7 @@ import {
   Redo2,
   Trash2,
 } from 'lucide-react';
-import { useRef, useState, type ChangeEvent } from 'react';
+import { useMemo, useRef, useState, type ChangeEvent } from 'react';
 
 import { uploadImage, uploadPdf, uploadVideo } from '@/api/artifact';
 import { useIsTouch } from '@/hooks/useInputMode';
@@ -22,12 +23,16 @@ import useCanvasStore from '../../../store/canvasStore.ts';
 import { detectNodeType } from '../../../utils/io/media.ts';
 import { Button } from '../../Common/Button.tsx';
 import { Modal } from '../../Common/Modal.tsx';
+import {
+  SplitSelect,
+  type SplitSelectOption,
+} from '../../Common/SplitSelect.tsx';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
 
 interface NodeToolbarProps {
-  activeTool: 'select' | 'pan';
-  onToolChange: (tool: 'select' | 'pan') => void;
+  activeTool: 'select' | 'pan' | 'lasso';
+  onToolChange: (tool: 'select' | 'pan' | 'lasso') => void;
 }
 
 export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
@@ -61,6 +66,16 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
     null,
   );
   const [linkText, setLinkText] = useState('');
+
+  // Selection / pan tool options for the merged dropdown trigger.
+  const toolOptions = useMemo<SplitSelectOption<'select' | 'pan' | 'lasso'>[]>(
+    () => [
+      { value: 'select', label: 'Select', icon: <MousePointer2 /> },
+      { value: 'pan', label: 'Pan', icon: <Hand /> },
+      { value: 'lasso', label: 'Lasso', icon: <Lasso /> },
+    ],
+    [],
+  );
 
   const getImageDimensions = (
     file: File,
@@ -197,26 +212,36 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
       <div className="text-fg-muted shadow-bottom bg-surface pointer-events-auto relative flex w-max items-center gap-1.5 rounded-lg border-0 px-4 py-2">
         {/* Group 1: Tools */}
         <div className="flex items-center gap-1.5">
-          <Button
+          <SplitSelect<'select' | 'pan' | 'lasso'>
+            options={toolOptions}
+            value={activeTool}
+            onPrimaryAction={(tool) => {
+              if (pendingNodeType) setPendingNodeType(null);
+              onToolChange(tool);
+            }}
+            onChange={(t) => {
+              if (pendingNodeType) setPendingNodeType(null);
+              onToolChange(t);
+            }}
             variant="ghost"
+            tone="neutral"
+            size="md"
             iconOnly
-            title="Select"
-            className={clsx(
-              activeTool === 'select' && 'text-info bg-bg-default',
+            align="top-left"
+            primaryTitle={
+              activeTool === 'select'
+                ? 'Select'
+                : activeTool === 'lasso'
+                  ? 'Lasso'
+                  : 'Pan'
+            }
+            menuTitle="More Tools"
+            primaryButtonClassName={clsx(
+              !pendingNodeType &&
+                'text-info bg-bg-default enabled:hover:bg-bg-default',
             )}
-            onClick={() => onToolChange('select')}
-          >
-            <MousePointer2 />
-          </Button>
-          <Button
-            variant="ghost"
-            iconOnly
-            title="Pan"
-            className={clsx(activeTool === 'pan' && 'text-info bg-bg-default')}
-            onClick={() => onToolChange('pan')}
-          >
-            <Hand />
-          </Button>
+            menuButtonClassName="enabled:hover:bg-bg-default"
+          />
         </div>
 
         <div className="bg-border mx-1 h-4 w-px" />

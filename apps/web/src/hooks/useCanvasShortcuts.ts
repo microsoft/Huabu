@@ -80,7 +80,7 @@ export interface UseCanvasShortcutsOptions {
   disabled?: boolean;
 }
 
-export type CanvasTool = 'select' | 'pan';
+export type CanvasTool = 'select' | 'lasso' | 'pan';
 
 /**
  * All keyboard / paste handling for the canvas, extracted from Canvas.tsx.
@@ -117,8 +117,15 @@ export function useCanvasShortcuts(
   const toggleAutoLayout = useCanvasStore((s) => s.toggleAutoLayout);
   const canvasId = useCanvasStore((s) => s.canvasId);
 
-  // --- Tool state (select / pan) ---
+  // --- Tool state (select / lasso / pan) ---
   const [tool, setTool] = useState<CanvasTool>('select');
+  const previousToolRef = useRef<Exclude<CanvasTool, 'pan'>>('select');
+
+  useEffect(() => {
+    if (tool !== 'pan') {
+      previousToolRef.current = tool;
+    }
+  }, [tool]);
 
   // Space key: temporarily switch to pan mode while held
   useEffect(() => {
@@ -135,7 +142,7 @@ export function useCanvasShortcuts(
     };
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.key !== ' ') return;
-      setTool((prev) => (prev === 'pan' ? 'select' : prev));
+      setTool((prev) => (prev === 'pan' ? previousToolRef.current : prev));
     };
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);

@@ -3,6 +3,7 @@ import {
   Background,
   Controls,
   ConnectionMode,
+  SelectionMode,
   type ReactFlowInstance,
   Panel,
 } from '@xyflow/react';
@@ -26,9 +27,12 @@ import {
   textToNoteNodeInput,
 } from '@/handler/canvasCommand/nodeInputBuilders';
 import { useCanvasGestures } from '@/hooks/useCanvasGestures';
+import { useCanvasLasso } from '@/hooks/useCanvasLasso';
 import { useCanvasShortcuts } from '@/hooks/useCanvasShortcuts';
+import { useFrameDragToCreate } from '@/hooks/useFrameDragToCreate';
 import { useIsTouch } from '@/hooks/useInputMode';
 import { useQuestionRunner } from '@/hooks/useQuestionRunner';
+import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
 import { NodeToolbar } from './CanvasToolbar.tsx';
 import { EdgeStyleToolbar } from './EdgeStyleToolbar.tsx';
@@ -135,28 +139,18 @@ export const Canvas: React.FC<CanvasProps> = ({
 }) => {
   const nodes = useCanvasStore((state) => state.nodes);
   const edges = useCanvasStore((state) => state.edges);
-
-  // Override marker colors on selected edges so arrows match the selection
-  // highlight color (--color-info). CSS cannot style SVG <marker> referenced
-  // via url() from <defs>, so we swap the marker config in JS.
-  const displayEdges = useMemo(() => {
-    const infoColor = getComputedStyle(document.documentElement)
-      .getPropertyValue('--color-info')
-      .trim();
-    if (!infoColor) return edges;
-    return edges.map((e) => {
-      if (!e.selected) return e;
-      const recolor = (m: typeof e.markerEnd) => {
-        if (!m || typeof m === 'string') return m;
-        return { ...m, color: infoColor };
-      };
-      return {
-        ...e,
-        markerEnd: recolor(e.markerEnd),
-        markerStart: recolor(e.markerStart),
-      };
-    });
-  }, [edges]);
+  const [isBoxSelecting, setIsBoxSelecting] = useState(false);
+  const selectedNodeIds = useMemo(
+    () => new Set(nodes.filter((node) => node.selected).map((node) => node.id)),
+    [nodes],
+  );
+  const selectedEdgeIdSet = useMemo(
+    () =>
+      new Set(
+        getEdgeIdsBetweenSelectedNodes(Array.from(selectedNodeIds), edges),
+      ),
+    [edges, selectedNodeIds],
+  );
   const onNodesChange = useCanvasStore((state) => state.onNodesChange);
   const onEdgesChange = useCanvasStore((state) => state.onEdgesChange);
   const onConnect = useCanvasStore((state) => state.onConnect);
@@ -173,6 +167,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   const frameNodesInRect = useCanvasStore((state) => state.frameNodesInRect);
   const pendingNodeType = useCanvasStore((state) => state.pendingNodeType);
   const canvasId = useCanvasStore((state) => state.canvasId);
+  const selectNodes = useCanvasStore((state) => state.selectNodes);
   const setPendingNodeType = useCanvasStore(
     (state) => state.setPendingNodeType,
   );
@@ -195,6 +190,19 @@ export const Canvas: React.FC<CanvasProps> = ({
   );
 
   const isTouch = useIsTouch();
+
+  const handleSelectionStart = useCallback(() => {
+    if (tool !== 'select') return;
+    setIsBoxSelecting(true);
+  }, [tool]);
+
+  // Sync the box-selected nodes back through the standard SELECT_NODES intent
+  // so action history and event buffer stay in step with the visible selection.
+  const handleSelectionEnd = useCallback(() => {
+    setIsBoxSelecting(false);
+    if (tool !== 'select') return;
+    selectNodes(nodes.filter((n) => n.selected).map((n) => n.id));
+  }, [nodes, selectNodes, tool]);
 
   // Run question nodes when their timers expire.
   useQuestionRunner();
@@ -241,34 +249,110 @@ export const Canvas: React.FC<CanvasProps> = ({
     [onConnect],
   );
 
-  // --- Frame drag-to-create state ---
-  const [frameDragStart, setFrameDragStart] = useState<{
-    x: number;
-    y: number;
-  } | null>(null);
-  const [frameDragEnd, setFrameDragEnd] = useState<{
-    x: number;
-    y: number;
-  } | null>(null);
-  const isDraggingFrame = frameDragStart !== null;
+  // --- Frame drag-to-create gesture (mouse / pen / touch) ---
+  const exitPendingNodeType = useCallback(
+    () => setPendingNodeType(null),
+    [setPendingNodeType],
+  );
+  const { pointerHandlers: framePointerHandlers, previewRect: frameDragRect } =
+    useFrameDragToCreate({
+      active: pendingNodeType === 'frame',
+      wrapperRef,
+      rfInstanceRef,
+      onCreate: frameNodesInRect,
+      onEnd: exitPendingNodeType,
+    });
 
-  const resetFrameDrag = useCallback(() => {
-    setFrameDragStart(null);
-    setFrameDragEnd(null);
-    setPendingNodeType(null);
-  }, [setPendingNodeType]);
+  const {
+    pointerHandlers: lassoPointerHandlers,
+    previewPath: lassoPreviewPath,
+    previewNodeIds,
+    previewEdgeIds,
+  } = useCanvasLasso({
+    active: !pendingNodeType && tool === 'lasso',
+    wrapperRef,
+    rfInstanceRef,
+    edges,
+    onSelect: (nodeIds) => selectNodes(nodeIds),
+  });
+  const lassoPreviewNodeIdSet = useMemo(
+    () => new Set(previewNodeIds),
+    [previewNodeIds],
+  );
+  const lassoPreviewEdgeIdSet = useMemo(
+    () => new Set(previewEdgeIds),
+    [previewEdgeIds],
+  );
+  const displayNodes = useMemo<typeof nodes>(
+    () =>
+      nodes.map((node) => {
+        const className = clsx(
+          node.className,
+          lassoPreviewNodeIdSet.has(node.id) && 'canvas-lasso-preview',
+        );
 
-  // Cancel pending node placement with Escape key
-  useEffect(() => {
-    if (!pendingNodeType) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        resetFrameDrag();
+        return className ? { ...node, className } : node;
+      }),
+    [lassoPreviewNodeIdSet, nodes],
+  );
+
+  // Override marker colors on selected edges so arrows match the selection
+  // highlight color (--color-info). CSS cannot style SVG <marker> referenced
+  // via url() from <defs>, so we swap the marker config in JS.
+  const displayEdges = useMemo(() => {
+    const infoColor = getComputedStyle(document.documentElement)
+      .getPropertyValue('--color-info')
+      .trim();
+    if (!infoColor) return edges;
+    return edges.map((e) => {
+      const isLassoPreviewSelected = lassoPreviewEdgeIdSet.has(e.id);
+      const isNodeSelectionSelected = selectedEdgeIdSet.has(e.id);
+      const shouldStaySelected =
+        !isBoxSelecting ||
+        (selectedNodeIds.has(e.source) && selectedNodeIds.has(e.target));
+      const isVisuallySelected =
+        isLassoPreviewSelected ||
+        isNodeSelectionSelected ||
+        (e.selected && shouldStaySelected);
+
+      if (!isVisuallySelected) {
+        if (!e.selected) return e;
+
+        return {
+          ...e,
+          selected: false,
+        };
       }
+
+      const recolor = (m: typeof e.markerEnd) => {
+        if (!m || typeof m === 'string') return m;
+        return { ...m, color: infoColor };
+      };
+
+      return {
+        ...e,
+        selected: true,
+        markerEnd: recolor(e.markerEnd),
+        markerStart: recolor(e.markerStart),
+      };
+    });
+  }, [
+    edges,
+    isBoxSelecting,
+    lassoPreviewEdgeIdSet,
+    selectedEdgeIdSet,
+    selectedNodeIds,
+  ]);
+
+  // Cancel any other pending node placement (note / text / question) with Escape.
+  useEffect(() => {
+    if (!pendingNodeType || pendingNodeType === 'frame') return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') exitPendingNodeType();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [pendingNodeType, resetFrameDrag]);
+  }, [pendingNodeType, exitPendingNodeType]);
 
   // Handle click-to-place for note, text, and question
   const handlePaneClick = useCallback(
@@ -310,90 +394,6 @@ export const Canvas: React.FC<CanvasProps> = ({
     [pendingNodeType, addNode, setPendingNodeType],
   );
 
-  // --- Frame drag-to-create handlers ---
-  const handleFrameMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      if (pendingNodeType !== 'frame') return;
-      // Only left button
-      if (e.button !== 0) return;
-      // Ignore clicks on toolbar / modals
-      const target = e.target as HTMLElement;
-      if (target.closest('.react-flow__panel')) return;
-
-      e.preventDefault();
-      e.stopPropagation();
-      setFrameDragStart({ x: e.clientX, y: e.clientY });
-      setFrameDragEnd({ x: e.clientX, y: e.clientY });
-    },
-    [pendingNodeType],
-  );
-
-  const handleFrameMouseMove = useCallback(
-    (e: React.MouseEvent) => {
-      if (!isDraggingFrame) return;
-      setFrameDragEnd({ x: e.clientX, y: e.clientY });
-    },
-    [isDraggingFrame],
-  );
-
-  const handleFrameMouseUp = useCallback(
-    (e: React.MouseEvent) => {
-      if (!isDraggingFrame || !frameDragStart || !frameDragEnd) return;
-
-      const instance = rfInstanceRef.current;
-      if (!instance) {
-        resetFrameDrag();
-        return;
-      }
-
-      const startFlow = instance.screenToFlowPosition({
-        x: frameDragStart.x,
-        y: frameDragStart.y,
-      });
-      const endFlow = instance.screenToFlowPosition({
-        x: e.clientX,
-        y: e.clientY,
-      });
-
-      const x = Math.min(startFlow.x, endFlow.x);
-      const y = Math.min(startFlow.y, endFlow.y);
-      const w = Math.abs(endFlow.x - startFlow.x);
-      const h = Math.abs(endFlow.y - startFlow.y);
-
-      // Minimum size threshold (in screen px) to avoid accidental tiny frames
-      const MIN_SIZE = 20;
-      if (w >= MIN_SIZE && h >= MIN_SIZE) {
-        frameNodesInRect({ x, y, width: w, height: h });
-      }
-
-      resetFrameDrag();
-    },
-    [
-      isDraggingFrame,
-      frameDragStart,
-      frameDragEnd,
-      frameNodesInRect,
-      resetFrameDrag,
-    ],
-  );
-
-  // Compute the preview rectangle in screen-space
-  const frameDragRect = (() => {
-    if (!frameDragStart || !frameDragEnd) return null;
-    const wrapperBounds = wrapperRef.current?.getBoundingClientRect();
-    if (!wrapperBounds) return null;
-    const x1 = frameDragStart.x - wrapperBounds.left;
-    const y1 = frameDragStart.y - wrapperBounds.top;
-    const x2 = frameDragEnd.x - wrapperBounds.left;
-    const y2 = frameDragEnd.y - wrapperBounds.top;
-    return {
-      left: Math.min(x1, x2),
-      top: Math.min(y1, y2),
-      width: Math.abs(x2 - x1),
-      height: Math.abs(y2 - y1),
-    };
-  })();
-
   // When a node is expanded in split mode, pan the canvas so the node stays visible.
   useEffect(() => {
     if (!expandedNodeId || expandMode !== 'split') return;
@@ -426,10 +426,24 @@ export const Canvas: React.FC<CanvasProps> = ({
         pendingNodeType === 'frame' && 'canvas-pending-frame',
         pendingNodeType === 'annotation' && 'cursor-crosshair',
         pendingNodeType === 'question' && 'canvas-pending-question',
+        tool === 'lasso' && 'cursor-crosshair',
       )}
-      onMouseDown={handleFrameMouseDown}
-      onMouseMove={handleFrameMouseMove}
-      onMouseUp={handleFrameMouseUp}
+      onPointerDown={(event) => {
+        framePointerHandlers.onPointerDown(event);
+        lassoPointerHandlers.onPointerDown(event);
+      }}
+      onPointerMove={(event) => {
+        framePointerHandlers.onPointerMove(event);
+        lassoPointerHandlers.onPointerMove(event);
+      }}
+      onPointerUp={(event) => {
+        framePointerHandlers.onPointerUp(event);
+        lassoPointerHandlers.onPointerUp(event);
+      }}
+      onPointerCancel={(event) => {
+        framePointerHandlers.onPointerCancel(event);
+        lassoPointerHandlers.onPointerCancel(event);
+      }}
       onDragOver={(e) => {
         // Accept both internal Sediment payloads and native file/URL drops
         const isSediment = canReadSedimentPayload(e.dataTransfer);
@@ -570,7 +584,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       <ReactFlow
         deleteKeyCode={null}
         fitView={true}
-        nodes={nodes}
+        nodes={displayNodes}
         edges={displayEdges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
@@ -601,10 +615,13 @@ export const Canvas: React.FC<CanvasProps> = ({
               ? true
               : isTouch
                 ? false /* touch + select tool → drag creates selection rect */
-                : [1] /* desktop + select tool → middle mouse button pans */
+                : [1] /* desktop + selection tools → middle mouse button pans */
         }
         selectionOnDrag={pendingNodeType ? false : tool === 'select'}
-        nodesDraggable={!pendingNodeType}
+        selectionMode={SelectionMode.Partial}
+        onSelectionStart={handleSelectionStart}
+        onSelectionEnd={handleSelectionEnd}
+        nodesDraggable={!pendingNodeType && tool !== 'lasso'}
         elementsSelectable={!pendingNodeType}
         panOnScroll={!isTouch}
         zoomOnScroll={true}
@@ -633,10 +650,26 @@ export const Canvas: React.FC<CanvasProps> = ({
         <AnnotationProcessingOverlay />
       </ReactFlow>
 
+      {lassoPreviewPath && (
+        <svg
+          className="pointer-events-none absolute inset-0 z-50 h-full w-full"
+          aria-hidden="true"
+        >
+          <path
+            d={lassoPreviewPath}
+            fill="color-mix(in srgb, var(--color-info) 14%, transparent)"
+            stroke="var(--color-info)"
+            strokeWidth={1.5}
+            strokeLinejoin="round"
+            strokeLinecap="round"
+          />
+        </svg>
+      )}
+
       {/* Frame drag preview overlay */}
-      {isDraggingFrame && frameDragRect && frameDragRect.width > 2 && (
+      {frameDragRect && frameDragRect.width > 2 && (
         <div
-          className="border-info bg-info-bg/40 pointer-events-none absolute z-50 rounded border-1 border-dashed"
+          className="border-info bg-info-bg/40 pointer-events-none absolute z-50 rounded border border-dashed"
           style={{
             left: frameDragRect.left,
             top: frameDragRect.top,
