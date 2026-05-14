@@ -4,7 +4,7 @@ import {
   SKETCH_COLOR_OPTIONS,
   SKETCH_SIZE_MAX,
   SKETCH_SIZE_MIN,
-} from './annotationPath';
+} from './sketchPath';
 
 interface SketchControlsProps {
   /** Current stroke color (accent palette token; legacy hex also accepted). */
@@ -21,9 +21,9 @@ interface SketchControlsProps {
  * Reusable color + thickness controls for the sketch tool.
  *
  * Used in two places:
- * 1. Pre-draw — mounted by `Canvas.tsx` while the annotation tool is the
+ * 1. Pre-draw — mounted by `Canvas.tsx` while the sketch tool is the
  *    pending node type; bound to `canvasStore.sketchDraft`.
- * 2. Post-draw — embedded in `AnnotationNode`'s floating toolbar; bound to
+ * 2. Post-draw — embedded in `SketchNode`'s floating toolbar; bound to
  *    that node's `data.strokeColor` / `data.strokeSize`.
  *
  * The component itself is presentation-only. It does not know about the

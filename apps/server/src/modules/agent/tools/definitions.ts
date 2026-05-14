@@ -1,7 +1,7 @@
 /**
  * Tool Definitions for the Unified Agent
  *
- * All tools the AI can call across ask, operate, and annotation
+ * All tools the AI can call across ask, operate, and sketch
  * scopes. Each tool is a pi-ai Tool with a TypeBox schema for
  * validation.
  *
@@ -481,7 +481,7 @@ export const lsTool: ToolDefinition = {
  * the `tools:` list declared in each agent's `AGENT.md` frontmatter.
  *
  * Per-agent tool selection (which tools `ask` / `operate` /
- * `annotation` get) lives in `prompt/agents/<id>/AGENT.md` and is no
+ * `sketch` get) lives in `prompt/agents/<id>/AGENT.md` and is no
  * longer hard-coded here. Adding a tool: append it below + reference
  * its `name` from any AGENT.md that should expose it.
  */

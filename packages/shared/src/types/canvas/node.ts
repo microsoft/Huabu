@@ -20,7 +20,7 @@ export const CANVAS_NODE_TYPES = [
   'video',
   'web',
   'frame',
-  'annotation',
+  'sketch',
   'question',
 ] as const;
 export type CanvasNodeType = (typeof CANVAS_NODE_TYPES)[number];
@@ -28,7 +28,7 @@ export type CanvasNodeType = (typeof CANVAS_NODE_TYPES)[number];
 /**
  * Node kinds the agent is allowed to construct via `CREATE_NODES`.
  * Excludes:
- * - `annotation` — produced only by the freehand drawing tool.
+ * - `sketch` — produced only by the freehand drawing tool.
  * - `question` — created via the dedicated `CREATE_QUESTION` command,
  *   which carries question-specific fields.
  */
@@ -57,8 +57,8 @@ export type NodeOrigin =
   | { type: 'user-from-library' }
   | { type: 'user-from-chat'; threadId?: string }
   | { type: 'user-excerpt'; excerptFromNodeId?: string }
-  // Annotation recognition
-  | { type: 'annotation-recognized' };
+  // Sketch recognition
+  | { type: 'sketch-recognized' };
 
 /** All possible values of `NodeOrigin['type']`. */
 export type NodeOriginType = NodeOrigin['type'];
@@ -320,9 +320,9 @@ export interface FrameNodeData extends BaseNodeData {
   type: 'frame';
 }
 
-/** Annotation node: freehand drawing stored as pressure-sensitive points */
-export interface AnnotationNodeData extends BaseNodeData {
-  type: 'annotation';
+/** Sketch node: freehand drawing stored as pressure-sensitive points */
+export interface SketchNodeData extends BaseNodeData {
+  type: 'sketch';
   /** Array of [x, y, pressure] points in local node coordinates */
   points: number[][];
   /** Original bounding box size when the stroke was created */
@@ -336,7 +336,7 @@ export interface AnnotationNodeData extends BaseNodeData {
    */
   strokeSize?: number;
   /**
-   * True after the intent pipeline has consumed this annotation. The
+   * True after the intent pipeline has consumed this sketch. The
    * renderer no longer changes appearance based on this marker; it is kept
    * as bookkeeping (analytics, future migrations).
    */
@@ -354,7 +354,7 @@ export type QuestionNodeStatus =
 
 /**
  * Extensible input union for question nodes.
- * Discriminated on `kind` — add new modalities (annotation, voice, etc.) here.
+ * Discriminated on `kind` — add new modalities (sketch, voice, etc.) here.
  */
 export type QuestionInput = { kind: 'text'; content: string };
 
@@ -391,7 +391,7 @@ export type NodeData =
   | VideoNodeData
   | ImageNodeData
   | FrameNodeData
-  | AnnotationNodeData
+  | SketchNodeData
   | QuestionNodeData;
 
 // ==================== Type Guards ====================
@@ -414,8 +414,8 @@ export function isFrameNode(data: NodeData): data is FrameNodeData {
   return data.type === 'frame';
 }
 
-export function isAnnotationNode(data: NodeData): data is AnnotationNodeData {
-  return data.type === 'annotation';
+export function isSketchNode(data: NodeData): data is SketchNodeData {
+  return data.type === 'sketch';
 }
 
 export function isQuestionNode(data: NodeData): data is QuestionNodeData {

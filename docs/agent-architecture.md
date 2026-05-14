@@ -9,11 +9,11 @@
 
 服务端 agent 循环跑在 `@earendil-works/pi-agent-core` 的 `Agent` 类上。三条调用入口共用同一套工具 / skill 体系，但触发方式不同：
 
-| 入口                   | 模式                             | 入口文件                                                                                                                                                                                 |
-| ---------------------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Chat                   | `ask` / `operate`（`AgentMode`） | [agent.route.ts](../apps/server/src/modules/agent/agent.route.ts) → [agent.service.ts](../apps/server/src/modules/agent/agent.service.ts) `runAgent()`                                   |
-| Annotation 识别        | `annotation`                     | [intent.route.ts](../apps/server/src/modules/agent/intent.route.ts) → [intent.service.ts](../apps/server/src/modules/agent/intent.service.ts)（`llmComplete` 单次调用，不进 agent loop） |
-| Prompt 节点 / Question | 复用 chat                        | 走 chat 入口                                                                                                                                                                             |
+| 入口                   | 模式                             | 入口文件                                                                                                                                                                      |
+| ---------------------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Chat                   | `ask` / `operate`（`AgentMode`） | [agent.route.ts](../apps/server/src/modules/agent/agent.route.ts) → [agent.service.ts](../apps/server/src/modules/agent/agent.service.ts) `runAgent()`                        |
+| Sketch 识别            | `sketch`                         | [intent.route.ts](../apps/server/src/modules/agent/intent.route.ts) → [sketch.service.ts](../apps/server/src/modules/agent/sketch.service.ts)（`runAgent` 多轮 tool-calling） |
+| Prompt 节点 / Question | 复用 chat                        | 走 chat 入口                                                                                                                                                                  |
 
 **SSE 协议**：服务端只发 [`AgentStreamEvent`](../packages/shared/src/types/agent/agent.ts) 自定义事件（`meta` / `text_delta` / `thinking_delta` / `tool_start` / `tool_result` / `done` / `error` / `end`）；pi-agent-core 的内部事件被 `runAgent` 映射后转出，前端 [useAgentStream.ts](../apps/web/src/hooks/useAgentStream.ts) 不感知 pi-agent-core。
 
@@ -64,7 +64,7 @@ apps/server/src/modules/agent/tools/
 
 - `askTools`：所有读 + `web_search`，**无** `canvas_commands`。
 - `operateTools`：在 ask 之上加 `canvas_commands`。
-- `annotation`：read + inspect_nodes + inspect_edges（在 [intent.service.ts](../apps/server/src/modules/agent/intent.service.ts) 显式装配）。
+- `sketch`：read + inspect_nodes + inspect_edges + canvas_commands（在 [agents/sketch/AGENT.md](../apps/server/src/prompt/agents/sketch/AGENT.md) 声明）。
 
 ### 2.3 设计原则
 
@@ -90,12 +90,12 @@ apps/server/src/prompt/
   skill-loader.ts       ← 启动期扫盘 + frontmatter 校验
   skills/
     index.ts            ← getSkillCatalogue(scope) — 渲染 system prompt 用的 catalogue
-    canvas/             ← 唯一对 ask/operate/annotation/external 都生效的核心 skill
+    canvas/             ← 唯一对 ask/operate/sketch/external 都生效的核心 skill
       SKILL.md          (≤ ~200 行：心智模型 + 工具决策矩阵 + 命令目录)
       references/
         layout-recipes.md
         command-cookbook.md
-    annotation/         ← 仅 annotation 流水线
+    sketch-gestures/    ← 仅 sketch 流水线
       SKILL.md
 ```
 
@@ -103,14 +103,14 @@ Per-canvas 覆盖：`<workspace>/<canvasId>/skills/<id>/SKILL.md`（含 `referen
 
 ### 3.2 加载机制
 
-- 启动期 `preloadSkills()` 扫每个 `<id>/SKILL.md` 并校验 frontmatter（`id / name / description / appliesTo` 必填，`appliesTo ∈ {ask, operate, annotation, external}`），不合法直接抛错。
+- 启动期 `preloadSkills()` 扫每个 `<id>/SKILL.md` 并校验 frontmatter（`id / name / description / appliesTo` 必填，`appliesTo ∈ {ask, operate, sketch, external}`），不合法直接抛错。
 - `references/*.md` **不**经 loader，只作为 `read` 的可达文件存在。
 - catalogue 通过 `getSkillCatalogue(scope)` 注入 system prompt（一行 `- **id** — description`），agent 自助调用 `read("skills/<id>/SKILL.md")` 加载完整内容；`use_skill` 工具已下线。
 
 ### 3.3 Skill 内容约束
 
 - SKILL.md 写**语义和 idiom**；schema / 字段名以 [schemas/](../apps/server/src/modules/agent/tools/schemas/) 为唯一来源，skill 不内联 TypeBox。
-- 跨 surface 复用的canvas 读取与操作知识放 `canvas`；pipeline 专属（如 annotation 手势 → 命令映射）独立 skill 并 `appliesTo` 收紧。
+- 跨 surface 复用的canvas 读取与操作知识放 `canvas`；pipeline 专属（如 sketch 手势 → 命令映射）独立 skill 并 `appliesTo` 收紧。
 - 长内容下沉到 `references/`，从 SKILL.md 用 `read("skills/<id>/references/<file>.md")` 显式链接。
 
 ---
@@ -121,9 +121,9 @@ Per-canvas 覆盖：`<workspace>/<canvasId>/skills/<id>/SKILL.md`（含 `referen
 
 ### 4.1 Tool 覆盖范围扩展 (low-priority)
 
-| #   | 项                            | 触发条件                                                                                                                | 范围                                                                                                                                                                                                                                     |
-| --- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| T1  | `describe_node_position` 工具 | prompt 节点 / annotation cluster trace 上看到反复用 `inspect_nodes({nearNode}) + inspect_nodes({ids}) + 自己拼自然语言` | 新增 `handlers/canvas-describe.ts` 包装现有 `buildNodeNeighbourhoodContext()`（`apps/server/src/modules/canvas/node-neighbourhood.ts`）；schema 仅 `nodeId + radius?`；输出 `{description, neighbors, cluster?}`。**严禁**新写空间算法。 |
+| #   | 项                            | 触发条件                                                                                                            | 范围                                                                                                                                                                                                                                     |
+| --- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| T1  | `describe_node_position` 工具 | prompt 节点 / sketch cluster trace 上看到反复用 `inspect_nodes({nearNode}) + inspect_nodes({ids}) + 自己拼自然语言` | 新增 `handlers/canvas-describe.ts` 包装现有 `buildNodeNeighbourhoodContext()`（`apps/server/src/modules/canvas/node-neighbourhood.ts`）；schema 仅 `nodeId + radius?`；输出 `{description, neighbors, cluster?}`。**严禁**新写空间算法。 |
 
 ### 4.2 视觉信号 ↔ 空间工具协同 (medium-priority)
 
@@ -167,5 +167,5 @@ Per-canvas 覆盖：`<workspace>/<canvasId>/skills/<id>/SKILL.md`（含 `referen
 
 - [canvas-command-architecture.md](./canvas-command-architecture.md) — `CanvasUiIntent / CanvasCommand / CanvasExecution` 三层模型。
 - [agent-context.md](./agent-context.md) — 注入 system prompt 的上下文构造。
-- [annotation-intent-pipeline.md](./annotation-intent-pipeline.md) — Annotation 识别完整链路。
+- [sketch-intent-pipeline.md](./sketch-intent-pipeline.md) — Sketch 识别完整链路。
 - [external_agent_design.md](./external_agent_design.md) — 外部 agent 适配设计。

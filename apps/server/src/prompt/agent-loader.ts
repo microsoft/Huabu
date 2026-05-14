@@ -39,13 +39,13 @@ import type { NodeOrigin } from '@sediment/shared';
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 /** Agent identifiers backed by an `AGENT.md` config file. */
-export type AgentId = 'ask' | 'operate' | 'intent' | 'annotation';
+export type AgentId = 'ask' | 'operate' | 'intent' | 'sketch';
 
 const VALID_AGENT_IDS: ReadonlySet<AgentId> = new Set<AgentId>([
   'ask',
   'operate',
   'intent',
-  'annotation',
+  'sketch',
 ]);
 
 /** Runtime knobs forwarded to `runAgent` / direct LLM callers. */
@@ -60,7 +60,7 @@ export interface AgentRuntimeConfig {
   toolExecution?: ToolExecutionMode;
   /**
    * `NodeOrigin` stamp injected onto every node created by
-   * `canvas_commands`. Used by the annotation pipeline to mark nodes
+   * `canvas_commands`. Used by the sketch pipeline to mark nodes
    * as user-authored rather than AI-initiated.
    */
   defaultOrigin?: NodeOrigin;
@@ -121,7 +121,7 @@ export const AGENTS_DIR = path.join(HERE, 'agents');
 const VALID_SKILL_SCOPES: ReadonlySet<SkillScope> = new Set<SkillScope>([
   'ask',
   'operate',
-  'annotation',
+  'sketch',
   'external',
 ]);
 
@@ -138,7 +138,7 @@ const VALID_ORIGIN_TYPES: ReadonlySet<NodeOrigin['type']> = new Set<
   'user-from-library',
   'user-from-chat',
   'user-excerpt',
-  'annotation-recognized',
+  'sketch-recognized',
 ]);
 
 function validateRuntime(raw: unknown, sourcePath: string): AgentRuntimeConfig {

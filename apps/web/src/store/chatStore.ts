@@ -24,11 +24,11 @@ interface ChatState {
   viewingQuestionThread: { nodeId: string; threadId: string } | null;
 
   /**
-   * When set, the chat panel is inspecting a single annotation cluster
+   * When set, the chat panel is inspecting a single sketch cluster
    * (showing its synthesized tool-call style trace). Mutually exclusive
    * with `viewingQuestionThread`.
    */
-  viewingAnnotationCluster: { clusterId: string } | null;
+  viewingSketchCluster: { clusterId: string } | null;
 
   /** @internal Stashed canvas thread ID while viewing a question thread. */
   _stashedThreadId?: string;
@@ -78,10 +78,10 @@ interface ChatState {
   /** Close question thread replay and return to normal canvas chat. */
   closeQuestionThread: () => void;
 
-  /** Open the inspector view for a single annotation cluster. */
-  openAnnotationCluster: (clusterId: string) => void;
-  /** Close the annotation cluster inspector view. */
-  closeAnnotationCluster: () => void;
+  /** Open the inspector view for a single sketch cluster. */
+  openSketchCluster: (clusterId: string) => void;
+  /** Close the sketch cluster inspector view. */
+  closeSketchCluster: () => void;
 }
 
 export const useChatStore = create<ChatState>()(
@@ -95,7 +95,7 @@ export const useChatStore = create<ChatState>()(
       pendingAttachments: [],
       selectionAttachment: null,
       viewingQuestionThread: null,
-      viewingAnnotationCluster: null,
+      viewingSketchCluster: null,
 
       addMessage: (message) =>
         set((state) => ({ messages: [...state.messages, message] })),
@@ -201,8 +201,8 @@ export const useChatStore = create<ChatState>()(
         });
       },
 
-      openAnnotationCluster: (clusterId) => {
-        // Annotation inspector is a pure overlay over the existing chat
+      openSketchCluster: (clusterId) => {
+        // Sketch inspector is a pure overlay over the existing chat
         // state — no thread switch, no message stash needed. We just flip a
         // flag and the ChatPanel renders synthesized messages from the
         // intent store instead of `state.messages`. Closing any active
@@ -218,11 +218,11 @@ export const useChatStore = create<ChatState>()(
             _stashedMessages: undefined,
           });
         }
-        set({ viewingAnnotationCluster: { clusterId } });
+        set({ viewingSketchCluster: { clusterId } });
       },
 
-      closeAnnotationCluster: () => {
-        set({ viewingAnnotationCluster: null });
+      closeSketchCluster: () => {
+        set({ viewingSketchCluster: null });
       },
     }),
     {

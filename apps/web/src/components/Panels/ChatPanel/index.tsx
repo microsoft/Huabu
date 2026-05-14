@@ -8,7 +8,7 @@ import { useIntentStore } from '@/store/intentStore';
 
 import { SidebarPanel } from '../SidebarPanel';
 import { ChatInput } from './ChatInput';
-import { useAnnotationClusterMessages } from './useAnnotationClusterMessages';
+import { useSketchClusterMessages } from './useSketchClusterMessages';
 import { useAgentStream } from '../../../hooks/useAgentStream';
 import { useChatHistory } from '../../../hooks/useChatHistory';
 import { MessageList } from '../../Messages/MessageList';
@@ -41,15 +41,13 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const viewingQuestionThread = useChatStore((s) => s.viewingQuestionThread);
   const closeQuestionThread = useChatStore((s) => s.closeQuestionThread);
 
-  // Annotation cluster inspector mode (mutually exclusive with question
+  // Sketch cluster inspector mode (mutually exclusive with question
   // replay). When set, MessageList renders synthesized messages built from
   // the live cluster state instead of the canvas chat.
-  const viewingAnnotationCluster = useChatStore(
-    (s) => s.viewingAnnotationCluster,
-  );
-  const closeAnnotationCluster = useChatStore((s) => s.closeAnnotationCluster);
-  const annotationMessages = useAnnotationClusterMessages(
-    viewingAnnotationCluster?.clusterId ?? null,
+  const viewingSketchCluster = useChatStore((s) => s.viewingSketchCluster);
+  const closeSketchCluster = useChatStore((s) => s.closeSketchCluster);
+  const sketchMessages = useSketchClusterMessages(
+    viewingSketchCluster?.clusterId ?? null,
   );
 
   // Register intent callback — when user selects an intent in the popover,
@@ -66,7 +64,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       // Switch mode to operate
       setMode('operate');
       // Send as operate mode message with intent-select widget.
-      // Return the promise so callers (e.g. annotation recognition) can
+      // Return the promise so callers (e.g. sketch recognition) can
       // await agent completion before cleaning up.
       await startStream(intent, 'operate', {
         candidates,
@@ -106,8 +104,8 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   return (
     <SidebarPanel
       title={
-        viewingAnnotationCluster
-          ? 'Annotation Recognition'
+        viewingSketchCluster
+          ? 'Sketch Recognition'
           : viewingQuestionThread
             ? 'Question Replay'
             : 'Chat'
@@ -118,11 +116,11 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       iconExpanded={<PanelRightClose size={16} />}
       className="border-edge-default border-l"
       tools={
-        viewingAnnotationCluster ? (
+        viewingSketchCluster ? (
           <Button
             variant="ghost"
             iconOnly
-            onClick={closeAnnotationCluster}
+            onClick={closeSketchCluster}
             title="Back to chat"
           >
             <ArrowLeft />
@@ -151,11 +149,11 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     >
       <div className="flex h-full flex-col gap-2 overflow-visible">
         <MessageList
-          messages={viewingAnnotationCluster ? annotationMessages : messages}
+          messages={viewingSketchCluster ? sketchMessages : messages}
           isLoading={
-            viewingAnnotationCluster ? false : isLoading || !isHistoryLoaded
+            viewingSketchCluster ? false : isLoading || !isHistoryLoaded
           }
-          hideAIActions={mode === 'operate' || !!viewingAnnotationCluster}
+          hideAIActions={mode === 'operate' || !!viewingSketchCluster}
           onIntentReselect={handleIntentReselect}
           onRetry={() => {
             // Find the last user message and re-send it
@@ -168,8 +166,8 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           }}
         />
 
-        {/* Input is hidden in annotation inspector mode — it's a read-only view. */}
-        {!viewingAnnotationCluster && (
+        {/* Input is hidden in sketch inspector mode — it's a read-only view. */}
+        {!viewingSketchCluster && (
           <ChatInput
             value={input}
             onChange={setInput}

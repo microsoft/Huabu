@@ -8,7 +8,7 @@
 //   proximity   SpatialNode + nearby / inRect queries
 //   clustering  union-find clusters, reading order, summary
 //
-// Web only consumes geometry primitives (annotation stroke
+// Web only consumes geometry primitives (sketch stroke
 // clustering); the rest is server-side spatial agent context.
 
 export * from './geometry.js';

@@ -121,7 +121,7 @@ const triggerPreprocessing = (node: Node) => {
 // from `canvas.json` (see `apps/server/src/modules/agent/
 // node-neighbourhood.ts`); the web bundle only sends `anchorNodeId`.
 //
-// Existing UI-side proximity queries (annotation clustering, frame
+// Existing UI-side proximity queries (sketch clustering, frame
 // drop targets) call shared geometry helpers directly with their own
 // React Flow nodes — no central cache is needed.
 
@@ -268,14 +268,14 @@ type RFState = {
   ) => void;
 
   /** The node type awaiting placement on canvas via click or drawing. */
-  pendingNodeType: 'note' | 'text' | 'frame' | 'annotation' | 'question' | null;
+  pendingNodeType: 'note' | 'text' | 'frame' | 'sketch' | 'question' | null;
   setPendingNodeType: (
-    type: 'note' | 'text' | 'frame' | 'annotation' | 'question' | null,
+    type: 'note' | 'text' | 'frame' | 'sketch' | 'question' | null,
   ) => void;
 
   /**
    * Active sketch tool settings — color and thickness used by the live
-   * AnnotationOverlay preview and persisted onto each new sketch node so
+   * SketchOverlay preview and persisted onto each new sketch node so
    * the same look replays after reload. Per-node values are still editable
    * after-the-fact via the sketch node's toolbar.
    */

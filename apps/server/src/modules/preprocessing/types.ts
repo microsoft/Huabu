@@ -53,7 +53,7 @@ export type Capability =
  *
  * Includes media nodes (image, video) so they can persist their source
  * artifact and gain a metadata-only sidecar markdown. Excludes purely
- * structural nodes (frame, annotation, question).
+ * structural nodes (frame, sketch, question).
  */
 export type NodeContentKind =
   | 'web'

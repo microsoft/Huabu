@@ -1,12 +1,12 @@
 ---
-id: annotation-gestures
-name: annotation-gestures
-description: Map freehand canvas annotation gestures (lines, loops, scribbles, "?" / "!" marks) to the canvas_commands invocations that realise them. Pipeline-only — not loaded by chat / operate / external agents.
-appliesTo: [annotation]
+id: sketch-gestures
+name: sketch-gestures
+description: Map freehand canvas sketch gestures (lines, loops, scribbles, "?" / "!" marks) to the canvas_commands invocations that realise them. Pipeline-only — not loaded by chat / operate / external agents.
+appliesTo: [sketch]
 version: 1
 ---
 
-# Annotation Gestures
+# Sketch Gestures
 
 The host system prompt already pinned **what role you play** (executor, not narrator) and **how every turn must end** (in a tool call — prose alone is a silent no-op). This skill is purely **how to read each gesture and pick the right `canvas_commands` to invoke**.
 

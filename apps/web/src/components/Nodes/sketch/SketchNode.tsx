@@ -7,20 +7,20 @@ import useCanvasStore from '@/store/canvasStore';
 import { useIntentStore } from '@/store/intentStore';
 
 import { NodeWrapper } from '../NodeWrapper';
+import { SketchControls } from './SketchControls';
 import {
   pointsToPath,
   DEFAULT_STROKE_COLOR,
   DEFAULT_STROKE_SIZE,
-} from './annotationPath';
-import { SketchControls } from './SketchControls';
+} from './sketchPath';
 
-import type { CanvasAnnotationNodeData } from '../types';
+import type { CanvasSketchNodeData } from '../types';
 import type { Node, NodeProps } from '@xyflow/react';
 
-export type AnnotationNodeType = Node<CanvasAnnotationNodeData, 'annotation'>;
+export type SketchNodeType = Node<CanvasSketchNodeData, 'sketch'>;
 
-export const AnnotationNode = memo(
-  ({ id, data, selected, width, height }: NodeProps<AnnotationNodeType>) => {
+export const SketchNode = memo(
+  ({ id, data, selected, width, height }: NodeProps<SketchNodeType>) => {
     const w = width ?? data.initialSize?.width ?? 1;
     const h = height ?? data.initialSize?.height ?? 1;
     const scaleX = w / (data.initialSize?.width || 1);
@@ -77,7 +77,7 @@ export const AnnotationNode = memo(
       <NodeWrapper
         id={id}
         data={data}
-        type="annotation"
+        type="sketch"
         selected={selected}
         resizable={true}
         toolbar={sketchToolbar}

@@ -436,16 +436,16 @@ export const NodeWrapper = memo(
             // effectively invisible against the canvas), so it should keep
             // the same soft edge as "no accent".
             type !== 'text' &&
-              type !== 'annotation' &&
+              type !== 'sketch' &&
               type !== 'question' &&
               (!data.style?.accent || data.style.accent === 'white') &&
               'shadow',
             !data.style?.backgroundColor && 'bg-transparent',
             selected
-              ? type === 'annotation'
+              ? type === 'sketch'
                 ? 'ring-info/50 ring'
                 : 'ring-info ring'
-              : type === 'annotation'
+              : type === 'sketch'
                 ? ''
                 : 'ring-border hover:ring',
             // Always reserve a 3px border so toggling accent on/off does

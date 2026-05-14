@@ -139,7 +139,7 @@ export const NodeFloatingToolbar = memo(
 
         {children}
 
-        {type !== 'question' && type !== 'annotation' && (
+        {type !== 'question' && type !== 'sketch' && (
           <>
             <FloatingToolbar.Divider />
             <FloatingToolbar.ColorPicker

@@ -45,11 +45,11 @@ import {
   getSedimentPayload,
 } from '../../../utils/io/dragDrop.ts';
 import { looksLikeUrl } from '../../../utils/io/media.ts';
-import { AnnotationNode } from '../../Nodes/annotation/AnnotationNode.tsx';
-import { AnnotationOverlay } from '../../Nodes/annotation/AnnotationOverlay.tsx';
-import { AnnotationProcessingOverlay } from '../../Nodes/annotation/AnnotationProcessingOverlay.tsx';
 import { FrameNode } from '../../Nodes/frame/FrameNode.tsx';
 import { QuestionNode } from '../../Nodes/question/QuestionNode.tsx';
+import { SketchNode } from '../../Nodes/sketch/SketchNode.tsx';
+import { SketchOverlay } from '../../Nodes/sketch/SketchOverlay.tsx';
+import { SketchProcessingOverlay } from '../../Nodes/sketch/SketchProcessingOverlay.tsx';
 import { VideoNode } from '../../Nodes/video/VideoNode.tsx';
 import { WebNode } from '../../Nodes/web/WebNode.tsx';
 
@@ -64,7 +64,7 @@ const nodeTypes = {
   web: WebNode,
   pdf: PDFNode,
   frame: FrameNode,
-  annotation: AnnotationNode,
+  sketch: SketchNode,
   question: QuestionNode,
 } as const;
 
@@ -360,7 +360,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       if (
         !pendingNodeType ||
         pendingNodeType === 'frame' ||
-        pendingNodeType === 'annotation'
+        pendingNodeType === 'sketch'
       )
         return;
       const instance = rfInstanceRef.current;
@@ -424,7 +424,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         pendingNodeType === 'note' && 'canvas-pending-note',
         pendingNodeType === 'text' && 'canvas-pending-text',
         pendingNodeType === 'frame' && 'canvas-pending-frame',
-        pendingNodeType === 'annotation' && 'cursor-crosshair',
+        pendingNodeType === 'sketch' && 'cursor-crosshair',
         pendingNodeType === 'question' && 'canvas-pending-question',
         tool === 'lasso' && 'cursor-crosshair',
       )}
@@ -643,13 +643,13 @@ export const Canvas: React.FC<CanvasProps> = ({
 
         <Controls position="bottom-left" />
 
-        {/* Annotation overlay inside ReactFlow so it shares stacking context with Panel */}
-        {pendingNodeType === 'annotation' && (
-          <AnnotationOverlay rfInstance={rfInstanceRef.current} />
+        {/* Sketch overlay inside ReactFlow so it shares stacking context with Panel */}
+        {pendingNodeType === 'sketch' && (
+          <SketchOverlay rfInstance={rfInstanceRef.current} />
         )}
 
-        {/* Annotation intent processing overlay — lives in flow space so it pans/zooms with the canvas */}
-        <AnnotationProcessingOverlay />
+        {/* Sketch intent processing overlay — lives in flow space so it pans/zooms with the canvas */}
+        <SketchProcessingOverlay />
       </ReactFlow>
 
       {lassoPreviewPath && (

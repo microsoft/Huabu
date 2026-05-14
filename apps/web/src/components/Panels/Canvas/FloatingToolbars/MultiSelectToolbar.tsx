@@ -62,7 +62,7 @@ export const MultiSelectToolbar = () => {
   const sketchIds = useMemo(
     () =>
       selectedNodes.length > 0 &&
-      selectedNodes.every((n) => n.type === 'annotation')
+      selectedNodes.every((n) => n.type === 'sketch')
         ? selectedNodes.map((n) => n.id)
         : null,
     [selectedNodes],

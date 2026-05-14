@@ -3,7 +3,7 @@
 // Pure rectangle / point math. Zero dependencies, no concept of
 // canvas nodes — just numbers and shapes.
 //
-// Used by both web (annotation stroke clustering) and server
+// Used by both web (sketch stroke clustering) and server
 // (spatial agent tools).
 
 import type { Point } from '../../types/canvas/layout.js';

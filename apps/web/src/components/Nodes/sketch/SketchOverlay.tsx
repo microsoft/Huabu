@@ -7,7 +7,7 @@ import {
   pointsToPath,
   DEFAULT_STROKE_COLOR,
   DEFAULT_STROKE_SIZE,
-} from './annotationPath';
+} from './sketchPath';
 
 import type { ReactFlowInstance } from '@xyflow/react';
 /**
@@ -66,10 +66,10 @@ function processPoints(
 
 /**
  * Full-screen overlay that captures pointer events for freehand drawing.
- * Renders a live SVG preview of the current stroke, then creates an
- * annotation node on pointer-up.
+ * Renders a live SVG preview of the current stroke, then creates a
+ * sketch node on pointer-up.
  */
-export function AnnotationOverlay({
+export function SketchOverlay({
   rfInstance,
 }: {
   rfInstance: ReactFlowInstance | null;
@@ -141,7 +141,7 @@ export function AnnotationOverlay({
 
       addNode({
         id: nodeId,
-        nodeType: 'annotation',
+        nodeType: 'sketch',
         // placementPoint is the top-left of the new node, which here is
         // the top-left of the stroke's bounding box.
         placementPoint: {
@@ -150,7 +150,7 @@ export function AnnotationOverlay({
         },
         size: { width: result.width, height: result.height },
         data: {
-          type: 'annotation',
+          type: 'sketch',
           points: result.points,
           initialSize: result.initialSize,
           strokeColor,

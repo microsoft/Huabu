@@ -9,8 +9,8 @@ import { routes } from './_routes';
 import { readTypedSSEStream } from './_sse';
 
 import type {
-  AnnotationClusterContext,
-  AnnotationCommandResponse,
+  SketchClusterContext,
+  SketchCommandResponse,
   IntentCandidate,
   IntentContext,
   IntentEpisode,
@@ -68,22 +68,22 @@ export async function logIntentEpisode(
 }
 
 /**
- * One-step annotation → canvas commands.
+ * One-step sketch → canvas commands.
  *
  * Sends a screenshot + structured cluster context to the server. The LLM
  * reasons about the user's intent and returns an executable batch of canvas
  * commands, ready to be applied via `executeCommands`.
  */
-export async function recognizeAnnotationCommands(
+export async function recognizeSketchCommands(
   screenshot: string,
-  clusterContext: AnnotationClusterContext,
+  clusterContext: SketchClusterContext,
   signal?: AbortSignal,
   canvasId?: string,
-): Promise<AnnotationCommandResponse> {
-  return apiFetch<AnnotationCommandResponse>(routes.intentRecognizeAnnotation, {
+): Promise<SketchCommandResponse> {
+  return apiFetch<SketchCommandResponse>(routes.intentRecognizeSketch, {
     method: 'POST',
     json: { screenshot, clusterContext, canvasId },
     signal,
-    fallbackMessage: 'Annotation command recognition failed',
+    fallbackMessage: 'Sketch command recognition failed',
   });
 }

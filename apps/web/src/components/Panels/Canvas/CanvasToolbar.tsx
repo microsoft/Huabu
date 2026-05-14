@@ -26,7 +26,7 @@ import {
   SplitSelect,
   type SplitSelectOption,
 } from '../../Common/SplitSelect.tsx';
-import { SketchSettingsPanel } from '../../Nodes/annotation/SketchSettingsPanel.tsx';
+import { SketchSettingsPanel } from '../../Nodes/sketch/SketchSettingsPanel.tsx';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
 
@@ -356,21 +356,21 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             <NODE_ICON.question />
           </Button>
           <div className="relative flex items-center">
-            {pendingNodeType === 'annotation' && <SketchSettingsPanel />}
+            {pendingNodeType === 'sketch' && <SketchSettingsPanel />}
             <Button
               variant="ghost"
               iconOnly
-              title="Annotation"
+              title="Sketch"
               className={clsx(
-                pendingNodeType === 'annotation' && 'text-info bg-bg-default',
+                pendingNodeType === 'sketch' && 'text-info bg-bg-default',
               )}
               onClick={() =>
                 setPendingNodeType(
-                  pendingNodeType === 'annotation' ? null : 'annotation',
+                  pendingNodeType === 'sketch' ? null : 'sketch',
                 )
               }
             >
-              <NODE_ICON.annotation />
+              <NODE_ICON.sketch />
             </Button>
           </div>
           <Button

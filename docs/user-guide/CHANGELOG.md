@@ -4,6 +4,23 @@
 
 ---
 
+## 2026-05-14 · Annotation 节点全量重命名为 Sketch
+
+**What Changed**
+
+- 节点类型 `'annotation'` 重命名为 `'sketch'`：包含 `CanvasNodeType`、`AnnotationNodeData → SketchNodeData`、`isAnnotationNode → isSketchNode` 等共享类型；以及 `AnnotationStroke / AnnotationCluster / AnnotationClusterContext / AnnotationContext / AnnotationCommandResponse / ResolvedAnnotationIntent / AnnotationIntentRequest` 全部去掉 `Annotation` 前缀改为 `Sketch`。
+- `NodeOrigin` 中的 `'annotation-recognized'` 改为 `'sketch-recognized'`；canvas-event `'annotation-recognized'` 同步更新；`ToolScope` / `SkillScope` / `AgentId` 中的 `'annotation'` 改为 `'sketch'`。
+- 服务端：`apps/server/src/modules/agent/annotation.service.ts → sketch.service.ts`，`recognizeAnnotationCommands → recognizeSketchCommands`；`prompt/agents/annotation/ → prompt/agents/sketch/`（AGENT.md 中 `id / name / description` 同步）；skill `prompt/skills/annotation-gestures/ → sketch-gestures/`；`recognizeAnnotationCommands` 的日志前缀 `[annotation]` 改为 `[sketch]`；preprocessing profile key `annotation → sketch`。
+- API：`POST /api/intent/recognize-annotation → /api/intent/recognize-sketch`；`annotationIntentRequestSchema → sketchIntentRequestSchema`；`annotationClusterContextSchema → sketchClusterContextSchema`。
+- Web：`apps/web/src/components/Nodes/annotation/ → sketch/`（含 `AnnotationNode → SketchNode`、`AnnotationOverlay → SketchOverlay`、`AnnotationProcessingOverlay → SketchProcessingOverlay`、`AnnotationPreview → SketchPreview`、`annotationPath → sketchPath`、`ANNOTATION_OPTIONS → SKETCH_OPTIONS`）；`apps/web/src/handler/annotation/ → sketch/`（含 `clusterAnnotations → clusterSketches`、`extractAnnotationContext → extractSketchContext`）；`apps/web/src/components/Panels/ChatPanel/useAnnotationClusterMessages → useSketchClusterMessages`；`intentStore` 中的 `triggerAnnotationRecognition / cancelAnnotationRecognition / pendingAnnotationIds / onAnnotationCreated / AnnotationProcessingCluster / AnnotationProcessingStatus` 全部去掉 `Annotation` 改为 `Sketch`；`chatStore` 的 `viewingAnnotationCluster / openAnnotationCluster / closeAnnotationCluster` 同步重命名；`NODE_ICON.annotation → NODE_ICON.sketch`，工具栏按钮标题 `"Annotation" → "Sketch"`、面板标题 `"Annotation Recognition" → "Sketch Recognition"`。
+- 文档：`docs/annotation-intent-pipeline.md → sketch-intent-pipeline.md`，`docs/annotation-intent-performance.md → sketch-intent-performance.md`；其余设计 / 用户文档中所有 sketch-相关的「annotation」表述都改为 sketch。
+
+**Notes**
+
+- 这是破坏性变更：旧 `canvas.json` 中 `type: 'annotation'` 的节点不会自动迁移；`{ origin: { type: 'annotation-recognized' } }` 同样不再被识别。开发期内可接受。
+- PDF 节点的 `react-pdf` 第三方 API（`renderAnnotationLayer` / `AnnotationLayer.css`）以及截图工具中绘制 highlight 用的 `getActionAnnotation` / `ANNOTATION_COLOR` 都属于「在图像上画 annotation 标注」语义，与 sketch 节点无关，**保留未改**。
+- 历史 CHANGELOG 条目保留旧名称，反映各时间点的真实状态。
+
 ## 2026-05-13 · Canvas 工具集新增 Lasso 工具
 
 **What Changed**

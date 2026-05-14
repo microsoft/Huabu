@@ -1,15 +1,15 @@
 /**
- * Annotation Recognition Service
+ * Sketch Recognition Service
  *
- * Converts a freehand annotation cluster (screenshot + minimal context
+ * Converts a freehand sketch cluster (screenshot + minimal context
  * payload) into the canvas commands that realise the user's gesture.
- * Runs the unified `runAgent` loop with the `'annotation'` tool scope
- * and the `'annotation-recognized'` origin stamp, then drains the
+ * Runs the unified `runAgent` loop with the `'sketch'` tool scope
+ * and the `'sketch-recognized'` origin stamp, then drains the
  * SSE-shaped event stream to assemble the JSON response the route
  * returns.
  *
  * The tool set, system prompt, and `NodeOrigin` stamp differ from the
- * chat / operate agent (annotation is user-authored, not AI-authored),
+ * chat / operate agent (sketch is user-authored, not AI-authored),
  * but everything else — model selection, abort wiring, turn cap,
  * `canvas_commands` server-side execution — is shared with `runAgent`.
  */
@@ -20,8 +20,8 @@ import { loadAgent, renderAgentTemplate } from '../../prompt/agent-loader.js';
 
 import type { Context } from '@earendil-works/pi-ai';
 import type {
-  AnnotationClusterContext,
-  AnnotationCommandResponse,
+  SketchClusterContext,
+  SketchCommandResponse,
   CanvasCommand,
   WireNodeRef,
 } from '@sediment/shared';
@@ -42,10 +42,10 @@ type ContentPart =
  * straight to `read`. Edges stay as bare ids — they have no label,
  * and the model uses `inspect_edges` for direction / style.
  */
-function serializeClusterContext(ctx: AnnotationClusterContext): string {
+function serializeClusterContext(ctx: SketchClusterContext): string {
   const lines: string[] = [];
   lines.push(
-    `Annotation bbox: (${ctx.bbox.x}, ${ctx.bbox.y}) ${ctx.bbox.width}x${ctx.bbox.height}px`,
+    `Sketch bbox: (${ctx.bbox.x}, ${ctx.bbox.y}) ${ctx.bbox.width}x${ctx.bbox.height}px`,
   );
   lines.push(`Stroke count: ${ctx.strokeCount}`);
 
@@ -85,10 +85,10 @@ function serializeClusterContext(ctx: AnnotationClusterContext): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Recognize annotation intent and return executable canvas commands.
+ * Recognize sketch intent and return executable canvas commands.
  *
- * Runs the unified `runAgent` loop with the annotation tool scope and
- * the `'annotation-recognized'` origin stamp. The model issues read /
+ * Runs the unified `runAgent` loop with the sketch tool scope and
+ * the `'sketch-recognized'` origin stamp. The model issues read /
  * inspect calls as needed and then invokes `canvas_commands` for
  * real — `handleCanvasCommands` runs server-side and injects origin /
  * provenance / labelSource onto every CREATE / MERGE entry. We drain
@@ -100,12 +100,12 @@ function serializeClusterContext(ctx: AnnotationClusterContext): string {
  * invoking `canvas_commands` (e.g. it judged the gesture ambiguous);
  * `reasoning` still carries any explanation the model wrote.
  */
-export async function recognizeAnnotationCommands(
+export async function recognizeSketchCommands(
   screenshot: string,
-  clusterContext: AnnotationClusterContext,
+  clusterContext: SketchClusterContext,
   canvasId?: string,
-): Promise<AnnotationCommandResponse> {
-  const agentCfg = loadAgent('annotation');
+): Promise<SketchCommandResponse> {
+  const agentCfg = loadAgent('sketch');
   const base64 = screenshot.startsWith('data:')
     ? screenshot.replace(/^data:[^;]+;base64,/, '')
     : screenshot;
@@ -116,7 +116,7 @@ export async function recognizeAnnotationCommands(
     { type: 'image', data: base64, mimeType: 'image/png' },
     {
       type: 'text',
-      text: renderAgentTemplate(agentCfg, 'annotationClusterPreamble', {
+      text: renderAgentTemplate(agentCfg, 'sketchClusterPreamble', {
         contextText,
       }),
     },
@@ -140,9 +140,9 @@ export async function recognizeAnnotationCommands(
   let canvasCommandsErrorPayload: string | null = null;
 
   const stream = runAgent({
-    scope: 'annotation',
+    scope: 'sketch',
     canvasId,
-    origin: agentCfg.runtime.defaultOrigin ?? { type: 'annotation-recognized' },
+    origin: agentCfg.runtime.defaultOrigin ?? { type: 'sketch-recognized' },
     context: piContext,
     maxIterations: agentCfg.runtime.maxIterations,
   });
@@ -153,19 +153,19 @@ export async function recognizeAnnotationCommands(
       toolStartCounts.set(event.data.toolName, n);
       const argsStr = JSON.stringify(event.data.toolArgs ?? {});
       console.log(
-        `[annotation] → tool_start #${n} ${event.data.toolName} args=${argsStr.length > 800 ? argsStr.slice(0, 800) + `…(${argsStr.length} chars total)` : argsStr}`,
+        `[sketch] → tool_start #${n} ${event.data.toolName} args=${argsStr.length > 800 ? argsStr.slice(0, 800) + `…(${argsStr.length} chars total)` : argsStr}`,
       );
     } else if (event.type === 'tool_result') {
       const n = (toolResultCounts.get(event.data.toolName) ?? 0) + 1;
       toolResultCounts.set(event.data.toolName, n);
       const result = event.data.toolResult ?? '';
       console.log(
-        `[annotation] ← tool_result #${n} ${event.data.toolName} (${result.length} chars): ${result.length > 800 ? result.slice(0, 800) + '…' : result}`,
+        `[sketch] ← tool_result #${n} ${event.data.toolName} (${result.length} chars): ${result.length > 800 ? result.slice(0, 800) + '…' : result}`,
       );
       if (event.data.toolName === 'canvas_commands') {
         const extracted = extractCommandsFromToolResult(result);
         console.log(
-          `[annotation]   ↳ canvas_commands extracted ${extracted.length} command(s): [${extracted.map((c) => c.type).join(', ')}]`,
+          `[sketch]   ↳ canvas_commands extracted ${extracted.length} command(s): [${extracted.map((c) => c.type).join(', ')}]`,
         );
         if (extracted.length === 0) {
           canvasCommandsErrorPayload = result;
@@ -180,12 +180,12 @@ export async function recognizeAnnotationCommands(
       // turn cap (no `done` event in that branch).
       reasoningParts.push(event.data.content);
     } else if (event.type === 'error') {
-      console.warn('[annotation] error event:', event.data.error);
+      console.warn('[sketch] error event:', event.data.error);
     }
   }
 
   const reasoningText = reasoningParts.join('').trim();
-  console.log('[annotation] run summary', {
+  console.log('[sketch] run summary', {
     toolStarts: Object.fromEntries(toolStartCounts),
     toolResults: Object.fromEntries(toolResultCounts),
     canvasCommandsCalled: (toolStartCounts.get('canvas_commands') ?? 0) > 0,
@@ -210,7 +210,7 @@ export async function recognizeAnnotationCommands(
  * payload. The handler returns `{ source, canvasId, commands }` JSON;
  * pi-agent-core wraps thrown errors in a `{ status: 'error', ... }`
  * envelope (see `runAgent`'s `tool_execution_end` branch). We tolerate
- * both shapes and silently drop malformed payloads — annotation
+ * both shapes and silently drop malformed payloads — sketch
  * already handles "no commands" as a valid no-op outcome.
  */
 function extractCommandsFromToolResult(payload: string): CanvasCommand[] {

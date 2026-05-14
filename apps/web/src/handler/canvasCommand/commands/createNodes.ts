@@ -144,7 +144,7 @@ const createNodes: CommandDefinition<Cmd> = {
     // ---------------------------------------------------------------
     // 4. Normalize tree order and select new nodes.
     //
-    // Sketch (annotation) nodes are intentionally excluded from
+    // Sketch nodes are intentionally excluded from
     // auto-selection: drawing many strokes in a row should not keep
     // hijacking the selection (which would dismiss other toolbars and
     // scroll the canvas around). When the entire batch is sketches we
@@ -156,7 +156,7 @@ const createNodes: CommandDefinition<Cmd> = {
       ...newNodes,
     ] as NestableNode[]);
     const newSelectedIds = newNodes
-      .filter((n) => n.type !== 'annotation')
+      .filter((n) => n.type !== 'sketch')
       .map((n) => n.id);
     let finalNodes =
       newSelectedIds.length > 0

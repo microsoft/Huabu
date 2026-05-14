@@ -91,7 +91,7 @@ export interface ColorPickerOption {
  * Default accent picker swatches. Starts with neutral Black + White swatches
  * followed by the saturated palette. **Does not** include a "Transparent"
  * option — used by every node type whose visual identity depends on a solid
- * background (frame, note, image, pdf, video, web, annotation), since a
+ * background (frame, note, image, pdf, video, web, sketch), since a
  * transparent fill would make those nodes effectively invisible.
  *
  * Black and White are picker-only entries (not part of `ACCENT_PALETTE`):

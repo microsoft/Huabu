@@ -5,11 +5,11 @@
  * class. The class owns the transcript, executes tools, and emits
  * lifecycle events; this module bridges those events into the
  * `AsyncGenerator<StreamEvent>` shape every consumer (chat / operate
- * SSE route, annotation pipeline) consumes.
+ * SSE route, sketch pipeline) consumes.
  *
  * Public surface:
  *  - {@link runAgent} — yields SSE-shaped events. Callers that need
- *    structured output (e.g. annotation) drain the generator
+ *    structured output (e.g. sketch) drain the generator
  *    themselves and pull the relevant `tool_result` payload.
  */
 
@@ -54,8 +54,8 @@ export interface AgentRunOptions {
   /**
    * `NodeOrigin` stamp forwarded to `canvas_commands` (and ignored by
    * other tools). Defaults inside the handler to `{ type: 'ai-operate' }`;
-   * the annotation pipeline overrides to
-   * `{ type: 'annotation-recognized' }` so user-authored gestures are
+   * the sketch pipeline overrides to
+   * `{ type: 'sketch-recognized' }` so user-authored gestures are
    * not mis-tagged as AI-initiated.
    */
   origin?: NodeOrigin;

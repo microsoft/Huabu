@@ -1,7 +1,7 @@
 import { ACCENT_PICKER_OPTIONS } from '@sediment/shared';
 import getStroke from 'perfect-freehand';
 
-export const ANNOTATION_OPTIONS = {
+export const SKETCH_OPTIONS = {
   size: 4,
   thinning: 0.5,
   smoothing: 0.5,
@@ -22,7 +22,7 @@ export const ANNOTATION_OPTIONS = {
 export const DEFAULT_STROKE_COLOR = 'black';
 
 /** Default stroke thickness when `data.strokeSize` is unset (legacy data). */
-export const DEFAULT_STROKE_SIZE = ANNOTATION_OPTIONS.size;
+export const DEFAULT_STROKE_SIZE = SKETCH_OPTIONS.size;
 
 /** UI bounds for the stroke-size slider. */
 export const SKETCH_SIZE_MIN = 1;
@@ -33,7 +33,7 @@ export const SKETCH_SIZE_MAX = 32;
  * strokes share the canvas's emphasis-color vocabulary (grey / red /
  * orange / amber / green / blue / purple, plus white).
  *
- * Stored as a palette **token** on `AnnotationNodeData.strokeColor`;
+ * Stored as a palette **token** on `SketchNodeData.strokeColor`;
  * resolved to a CSS color at render time via `resolveAccent` so a future
  * theme swap propagates automatically. Legacy hex strings still render
  * thanks to `resolveAccent`'s passthrough behaviour.
@@ -77,7 +77,7 @@ export function pointsToPath(
   size: number = DEFAULT_STROKE_SIZE,
 ): string {
   const stroke = getStroke(points, {
-    ...ANNOTATION_OPTIONS,
+    ...SKETCH_OPTIONS,
     size: size * zoom,
   });
   return getSvgPathFromStroke(stroke);

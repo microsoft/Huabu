@@ -17,7 +17,7 @@ import { listSkills, type SkillScope } from '../skill-loader.js';
  * Format: one skill per line, "- **{id}** — {description}".
  *
  * Pass `scope` to filter by agent surface (e.g. `'operate'` so the
- * operate-mode prompt doesn't list annotation-only skills).
+ * operate-mode prompt doesn't list sketch-only skills).
  *
  * The catalogue is intentionally instruction-free — the prompt that
  * embeds it (see `agent.ts`, `intent.ts`) tells the agent how to load

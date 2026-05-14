@@ -55,8 +55,8 @@ import type { NodeOrigin } from '@sediment/shared';
  *   exposed.
  * - `origin` is forwarded to `canvas_commands` only; other handlers
  *   ignore it. It controls the `NodeOrigin` stamp on AI-generated
- *   nodes (defaults to `'ai-operate'` when unset; the annotation
- *   pipeline overrides it to `'annotation-recognized'`).
+ *   nodes (defaults to `'ai-operate'` when unset; the sketch
+ *   pipeline overrides it to `'sketch-recognized'`).
  */
 export interface ExecuteContext {
   canvasId?: string;

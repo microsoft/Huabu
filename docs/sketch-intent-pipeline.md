@@ -1,6 +1,6 @@
-h-partners.com# Annotation Intent Pipeline 设计
+# Sketch Intent Pipeline 设计
 
-> 当用户在画布上手绘批注（圈、线、叉…）后，系统如何把这些笔迹理解为「用户想做的操作」并自动执行。
+> 当用户在画布上手绘 sketch（圈、线、叉…）后，系统如何把这些笔迹理解为「用户想做的操作」并自动执行。
 
 ---
 
@@ -19,32 +19,29 @@ h-partners.com# Annotation Intent Pipeline 设计
 ## 2. 总体架构（三阶段管线）
 
 ```
-[AnnotationOverlay] 用户画完一笔
+[SketchOverlay] 用户画完一笔
         │
         ▼
-useIntentStore.onAnnotationCreated(id)        ← 收集 pending IDs
+useIntentStore.onSketchCreated(id)            ← 收集 pending IDs
         │ debounce 3s
         ▼
-triggerAnnotationRecognition()
+triggerSketchRecognition()
         │
         ├── Stage 1: 笔迹聚类
-        │       clusterAnnotations(strokes)            // utils/annotation/clustering.ts
+        │       clusterSketches(strokes)                // handler/sketch/sketchClustering.ts
         │
-        ├── Stage 2: 形状分类 + 上下文抽取
-        │       classifyShape(cluster)                 // utils/annotation/classification.ts
-        │       extractAnnotationContext(cluster, ...) // utils/annotation/context.ts
+        ├── Stage 2: 上下文抽取
+        │       extractSketchContext(cluster, ...)      // handler/sketch/sketchContext.ts
         │
-        └── Stage 3: 意图解析（先规则，后 LLM）
-                resolveByRules(ctx)                    // utils/annotation/rules.ts
-                ↓ 失败
-                resolveByLLM(ctx, screenshot)          // 调用 server SSE
-                                                       // server: intent.service.ts
+        └── Stage 3: 意图解析（vision LLM）
+                resolveByLLM(ctx, screenshot)              // 调用 server
+                                                           // server: sketch.service.ts
         │
         ▼
 _onIntentChosen(combinedLabel, candidates)    ← 交给 operate agent 执行
         │
         ▼
-deleteNodes(annotationIds)                    ← 执行完后清理 annotation node
+deleteNodes(sketchIds)                        ← 执行完后清理 sketch node
 ```
 
 ---
@@ -53,19 +50,19 @@ deleteNodes(annotationIds)                    ← 执行完后清理 annotation 
 
 ### Stage 1 · 笔迹聚类
 
-文件：[apps/web/src/utils/annotation/clustering.ts](../apps/web/src/utils/annotation/clustering.ts)
+文件：[apps/web/src/handler/sketch/sketchClustering.ts](../apps/web/src/handler/sketch/sketchClustering.ts)
 
 - 算法：Union-Find 单连接聚类（single-linkage）
-- 距离度量：annotation node bounding box 之间的最小欧氏距离 (`rectEdgeDistance`)
+- 距离度量：sketch node bounding box 之间的最小欧氏距离 (`rectEdgeDistance`)
 - 阈值：`CLUSTER_DISTANCE_THRESHOLD = 200`（flow 像素）
-- 输入：`AnnotationStroke[]`（包含 `id / rect / points / initialSize`）
-- 输出：`AnnotationCluster[]`（包含 `strokeIds / strokes / bbox`）
+- 输入：`SketchStroke[]`（包含 `id / rect / points / initialSize`）
+- 输出：`SketchCluster[]`（包含 `strokeIds / strokes / bbox`）
 
 为什么这么做：用户在画布左上画了个圈、又跑去右下画个叉时，这两组手势必须独立解析；空间相距越远越不应当合并。
 
 ### Stage 2a · 形状分类
 
-文件：[apps/web/src/utils/annotation/classification.ts](../apps/web/src/utils/annotation/classification.ts)
+文件：[apps/web/src/utils/sketch/classification.ts](../apps/web/src/utils/sketch/classification.ts)
 
 支持类型：
 
@@ -82,11 +79,11 @@ deleteNodes(annotationIds)                    ← 执行完后清理 annotation 
 
 ### Stage 2b · 上下文抽取
 
-文件：[apps/web/src/utils/annotation/context.ts](../apps/web/src/utils/annotation/context.ts)
+文件：[apps/web/src/handler/sketch/sketchContext.ts](../apps/web/src/handler/sketch/sketchContext.ts)
 
-输出 `AnnotationContext`：
+输出 `SketchContext`：
 
-- `nearbyNodes`：cluster bbox 周围 `NEARBY_RADIUS=300px` 内的非 annotation 节点（最多 8 个，按距离排序）
+- `nearbyNodes`：cluster bbox 周围 `NEARBY_RADIUS=300px` 内的非 sketch 节点（最多 8 个，按距离排序）
 - `enclosedNodes`：与 padded bbox 相交且 ≥40% 面积被覆盖的节点
 - `startNode / endNode`：当形状是 line/arrow 时，分别为线段两端最近的节点（自动避免同一节点同时充当起止点）
 
@@ -94,7 +91,7 @@ deleteNodes(annotationIds)                    ← 执行完后清理 annotation 
 
 ### Stage 3a · 规则引擎（高速路径）
 
-文件：[apps/web/src/utils/annotation/rules.ts](../apps/web/src/utils/annotation/rules.ts)
+文件：[apps/web/src/utils/sketch/rules.ts](../apps/web/src/utils/sketch/rules.ts)
 
 | 形状           | 规则                                    | 输出 label                           |
 | -------------- | --------------------------------------- | ------------------------------------ |
@@ -110,7 +107,7 @@ deleteNodes(annotationIds)                    ← 执行完后清理 annotation 
 
 调用链：
 
-- 客户端：[apps/web/src/api/intent.ts](../apps/web/src/api/intent.ts) → `recognizeAnnotationIntentStream(screenshot, ids, clusterContext, onCandidate, signal)`
+- 客户端：[apps/web/src/api/intent.ts](../apps/web/src/api/intent.ts) → `recognizeSketchCommands(screenshot, clusterContext, canvasId, signal)`
 - 服务端 route：[apps/server/src/modules/agent/intent.route.ts](../apps/server/src/modules/agent/intent.route.ts)
 - 服务端 service：[apps/server/src/modules/agent/intent.service.ts](../apps/server/src/modules/agent/intent.service.ts)
 - 系统提示词：[apps/server/src/prompt/intent.ts](../apps/server/src/prompt/intent.ts)
@@ -118,10 +115,10 @@ deleteNodes(annotationIds)                    ← 执行完后清理 annotation 
 请求体：
 
 ```ts
-interface AnnotationIntentRequest {
+interface SketchIntentRequest {
   screenshot: string; // base64
-  annotationNodeIds: string[];
-  clusterContext: AnnotationClusterContext; // shape + nearbyNodes + enclosed + endpoints + position
+  clusterContext: SketchClusterContext; // bbox + strokeCount + nearby/enclosed nodes + nearby edge ids
+  canvasId?: string;
 }
 ```
 
@@ -143,14 +140,12 @@ interface AnnotationIntentRequest {
 
 ## 5. 关键代码入口
 
-| 模块                | 路径                                                                                                  |
-| ------------------- | ----------------------------------------------------------------------------------------------------- |
-| 触发入口（store）   | [apps/web/src/store/intentStore.ts](../apps/web/src/store/intentStore.ts)                             |
-| Stage 1 聚类        | [apps/web/src/utils/annotation/clustering.ts](../apps/web/src/utils/annotation/clustering.ts)         |
-| Stage 2a 形状分类   | [apps/web/src/utils/annotation/classification.ts](../apps/web/src/utils/annotation/classification.ts) |
-| Stage 2b 上下文抽取 | [apps/web/src/utils/annotation/context.ts](../apps/web/src/utils/annotation/context.ts)               |
-| Stage 3a 规则引擎   | [apps/web/src/utils/annotation/rules.ts](../apps/web/src/utils/annotation/rules.ts)                   |
-| API 客户端          | [apps/web/src/api/intent.ts](../apps/web/src/api/intent.ts)                                           |
-| 服务端 route        | [apps/server/src/modules/agent/intent.route.ts](../apps/server/src/modules/agent/intent.route.ts)     |
-| 服务端 service      | [apps/server/src/modules/agent/intent.service.ts](../apps/server/src/modules/agent/intent.service.ts) |
-| 共享类型            | [packages/shared/src/types/intent.ts](../packages/shared/src/types/intent.ts)                         |
+| 模块               | 路径                                                                                                  |
+| ------------------ | ----------------------------------------------------------------------------------------------------- |
+| 触发入口（store）  | [apps/web/src/store/intentStore.ts](../apps/web/src/store/intentStore.ts)                             |
+| Stage 1 聚类       | [apps/web/src/handler/sketch/sketchClustering.ts](../apps/web/src/handler/sketch/sketchClustering.ts) |
+| Stage 2 上下文抽取 | [apps/web/src/handler/sketch/sketchContext.ts](../apps/web/src/handler/sketch/sketchContext.ts)       |
+| API 客户端         | [apps/web/src/api/intent.ts](../apps/web/src/api/intent.ts)                                           |
+| 服务端 route       | [apps/server/src/modules/agent/intent.route.ts](../apps/server/src/modules/agent/intent.route.ts)     |
+| 服务端 service     | [apps/server/src/modules/agent/sketch.service.ts](../apps/server/src/modules/agent/sketch.service.ts) |
+| 共享类型           | [packages/shared/src/types/agent/intent.ts](../packages/shared/src/types/agent/intent.ts)             |
