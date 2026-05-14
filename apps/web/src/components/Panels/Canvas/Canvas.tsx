@@ -38,6 +38,7 @@ import { NodeToolbar } from './CanvasToolbar.tsx';
 import { EdgeStyleToolbar } from './FloatingToolbars/EdgeStyleToolbar.tsx';
 import { MultiSelectToolbar } from './FloatingToolbars/MultiSelectToolbar.tsx';
 import { IntentPopover } from './IntentPopover.tsx';
+import { MultiSelectResizer } from './MultiSelectResizer.tsx';
 import { GRID_SIZE, MAX_ZOOM, MIN_ZOOM } from '../../../config/canvas.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import {
@@ -636,6 +637,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         <Panel position="bottom-center" className="mb-6">
           <NodeToolbar activeTool={tool} onToolChange={setTool} />
         </Panel>
+        {!isBoxSelecting && <MultiSelectResizer />}
         {!isBoxSelecting && <MultiSelectToolbar />}
         {!isBoxSelecting && <EdgeStyleToolbar />}
         <IntentPopover />

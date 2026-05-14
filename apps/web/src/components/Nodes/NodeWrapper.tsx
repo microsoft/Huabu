@@ -390,7 +390,12 @@ export const NodeWrapper = memo(
       <>
         <NodeResizer
           color="var(--color-info-light)"
-          isVisible={selected && resizable && !data.locked}
+          // Per-node handles only when this is the sole selected node.
+          // For multi-selection, a single set of handles is rendered on
+          // the selection bounding box by `MultiSelectResizer` instead.
+          isVisible={
+            selected && resizable && !data.locked && selectedCount === 1
+          }
           minWidth={minWidth}
           minHeight={minHeight}
           keepAspectRatio={keepAspectRatio}
