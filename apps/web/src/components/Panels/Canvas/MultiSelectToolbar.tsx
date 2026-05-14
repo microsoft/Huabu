@@ -3,7 +3,6 @@ import {
   ACCENT_PICKER_OPTIONS,
   ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT,
 } from '@sediment/shared';
-import { useStore, useViewport } from '@xyflow/react';
 import {
   AlignStartVertical,
   AlignCenterVertical,
@@ -14,9 +13,12 @@ import {
   Ungroup,
 } from 'lucide-react';
 import { useMemo } from 'react';
-import { createPortal } from 'react-dom';
 
-import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
+import { CanvasFloatingPopover } from '@/components/Common/CanvasFloatingPopover';
+import {
+  FloatingToolbar,
+  FLOATING_TOOLBAR_CLASS,
+} from '@/components/Common/FloatingToolbar';
 import {
   getAbsolutePosition,
   type NestableNode,
@@ -38,12 +40,6 @@ export const MultiSelectToolbar = () => {
   const alignSelectedNodes = useCanvasStore((s) => s.alignSelectedNodes);
   const spreadSelectedNodes = useCanvasStore((s) => s.spreadSelectedNodes);
   const executeCommands = useCanvasStore((s) => s.executeCommands);
-
-  const { zoom, x: vpX, y: vpY } = useViewport();
-
-  // The root .react-flow wrapper – we portal into it so our absolute
-  // positioning is relative to the flow container, not the transformed viewport.
-  const domNode = useStore((s) => s.domNode);
 
   const selectedNodes = useMemo(
     () => nodes.filter((n) => n.selected) as CanvasNode[],
@@ -72,8 +68,9 @@ export const MultiSelectToolbar = () => {
     [selectedNodes],
   );
 
-  // Compute bounding box of selected nodes in flow (absolute) coordinates
-  const selectionBounds = useMemo(() => {
+  // Compute bounding box of selected nodes in flow (absolute) coordinates.
+  // Returned as a `CanvasFloatingPopover` anchor rect.
+  const anchor = useMemo(() => {
     if (selectedNodes.length < 2) return null;
 
     let minX = Infinity;
@@ -103,112 +100,98 @@ export const MultiSelectToolbar = () => {
       maxY = Math.max(maxY, pos.y + h);
     }
 
-    return { minX, minY, maxX, maxY };
+    return {
+      x: minX,
+      y: minY,
+      width: maxX - minX,
+      height: maxY - minY,
+    };
   }, [selectedNodes, nodes]);
 
-  if (!selectionBounds || selectedNodes.length < 2 || !domNode) return null;
-
-  // Horizontal center & top edge of the bounding box, converted to
-  // screen-space pixels relative to the .react-flow container.
-  const centerFlowX = (selectionBounds.minX + selectionBounds.maxX) / 2;
-  const topFlowY = selectionBounds.minY;
-
-  // flow → pixel inside container:  px = flowCoord * zoom + viewportOffset
-  const pxCenterX = centerFlowX * zoom + vpX;
-  const pxTopY = topFlowY * zoom + vpY;
-
-  // 48 px above the top edge so the toolbar floats above the selection box
-  const TOOLBAR_OFFSET = 48;
-
-  const toolbar = (
-    <div
-      className="pointer-events-auto absolute z-[1000]"
-      style={{
-        left: pxCenterX,
-        top: pxTopY - TOOLBAR_OFFSET,
-        transform: 'translateX(-50%)',
-      }}
+  return (
+    <CanvasFloatingPopover
+      anchor={anchor}
+      open={selectedNodes.length >= 2}
+      offset={12}
+      side="top"
+      className={FLOATING_TOOLBAR_CLASS}
     >
-      <FloatingToolbar>
-        {/* Horizontal alignment */}
-        <FloatingToolbar.ActionButton
-          title="Align Left"
-          onClick={() => alignSelectedNodes('left')}
-        >
-          <AlignStartVertical />
-        </FloatingToolbar.ActionButton>
-        <FloatingToolbar.ActionButton
-          title="Align Center"
-          onClick={() => alignSelectedNodes('center-h')}
-        >
-          <AlignCenterVertical />
-        </FloatingToolbar.ActionButton>
-        <FloatingToolbar.ActionButton
-          title="Align Right"
-          onClick={() => alignSelectedNodes('right')}
-        >
-          <AlignEndVertical />
-        </FloatingToolbar.ActionButton>
+      {/* Horizontal alignment */}
+      <FloatingToolbar.ActionButton
+        title="Align Left"
+        onClick={() => alignSelectedNodes('left')}
+      >
+        <AlignStartVertical />
+      </FloatingToolbar.ActionButton>
+      <FloatingToolbar.ActionButton
+        title="Align Center"
+        onClick={() => alignSelectedNodes('center-h')}
+      >
+        <AlignCenterVertical />
+      </FloatingToolbar.ActionButton>
+      <FloatingToolbar.ActionButton
+        title="Align Right"
+        onClick={() => alignSelectedNodes('right')}
+      >
+        <AlignEndVertical />
+      </FloatingToolbar.ActionButton>
 
-        <FloatingToolbar.Divider />
+      <FloatingToolbar.Divider />
 
-        {/* Vertical alignment */}
-        <FloatingToolbar.ActionButton
-          title="Align Top"
-          onClick={() => alignSelectedNodes('top')}
-        >
-          <AlignStartHorizontal />
-        </FloatingToolbar.ActionButton>
-        <FloatingToolbar.ActionButton
-          title="Align Middle"
-          onClick={() => alignSelectedNodes('center-v')}
-        >
-          <AlignCenterHorizontal />
-        </FloatingToolbar.ActionButton>
-        <FloatingToolbar.ActionButton
-          title="Align Bottom"
-          onClick={() => alignSelectedNodes('bottom')}
-        >
-          <AlignEndHorizontal />
-        </FloatingToolbar.ActionButton>
+      {/* Vertical alignment */}
+      <FloatingToolbar.ActionButton
+        title="Align Top"
+        onClick={() => alignSelectedNodes('top')}
+      >
+        <AlignStartHorizontal />
+      </FloatingToolbar.ActionButton>
+      <FloatingToolbar.ActionButton
+        title="Align Middle"
+        onClick={() => alignSelectedNodes('center-v')}
+      >
+        <AlignCenterHorizontal />
+      </FloatingToolbar.ActionButton>
+      <FloatingToolbar.ActionButton
+        title="Align Bottom"
+        onClick={() => alignSelectedNodes('bottom')}
+      >
+        <AlignEndHorizontal />
+      </FloatingToolbar.ActionButton>
 
-        <FloatingToolbar.Divider />
+      <FloatingToolbar.Divider />
 
-        {/* Spread apart overlapping nodes */}
-        <FloatingToolbar.ActionButton
-          title="Spread Apart"
-          onClick={() => spreadSelectedNodes()}
-        >
-          <Ungroup />
-        </FloatingToolbar.ActionButton>
+      {/* Spread apart overlapping nodes */}
+      <FloatingToolbar.ActionButton
+        title="Spread Apart"
+        onClick={() => spreadSelectedNodes()}
+      >
+        <Ungroup />
+      </FloatingToolbar.ActionButton>
 
-        <FloatingToolbar.Divider />
+      <FloatingToolbar.Divider />
 
-        {/* Accent color for all selected nodes */}
-        <FloatingToolbar.ColorPicker
-          colors={accentPickerOptions}
-          value={commonAccent}
-          onSelect={(t) => {
-            const accent = t === ACCENT_NONE ? null : t;
-            if (selectedNodes.length === 0) return;
+      {/* Accent color for all selected nodes */}
+      <FloatingToolbar.ColorPicker
+        colors={accentPickerOptions}
+        value={commonAccent}
+        onSelect={(t) => {
+          const accent = t === ACCENT_NONE ? null : t;
+          if (selectedNodes.length === 0) return;
 
-            executeCommands([
-              {
-                type: 'MERGE_NODE_DATA',
-                patches: selectedNodes.map((node) => ({
-                  nodeId: node.id as CanvasNodeId,
-                  patch: {
-                    style: { ...node.data?.style, accent },
-                  },
-                })),
-              },
-            ]);
-          }}
-          title="Accent Color"
-        />
-      </FloatingToolbar>
-    </div>
+          executeCommands([
+            {
+              type: 'MERGE_NODE_DATA',
+              patches: selectedNodes.map((node) => ({
+                nodeId: node.id as CanvasNodeId,
+                patch: {
+                  style: { ...node.data?.style, accent },
+                },
+              })),
+            },
+          ]);
+        }}
+        title="Accent Color"
+      />
+    </CanvasFloatingPopover>
   );
-
-  return createPortal(toolbar, domNode);
 };

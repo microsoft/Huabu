@@ -1,15 +1,8 @@
-import {
-  resolveSurface,
-  resolveAccent,
-  ACCENT_NONE_TOKEN,
-  ACCENT_PICKER_OPTIONS,
-  ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT,
-} from '@sediment/shared';
+import { resolveSurface, resolveAccent } from '@sediment/shared';
 import {
   Handle,
   Position,
   NodeResizer,
-  NodeToolbar,
   useInternalNode,
   useViewport,
   useStore,
@@ -26,13 +19,8 @@ import React, {
 import { createPortal } from 'react-dom';
 
 import { cn } from '@/components/Common/cn.ts';
-import {
-  FloatingToolbar,
-  FLOATING_TOOLBAR_CLASS,
-} from '@/components/Common/FloatingToolbar.tsx';
 import { Spinner } from '@/components/Common/Spinner.tsx';
 import { Tooltip } from '@/components/Common/Tooltip.tsx';
-import { NODE_ICON } from '@/config/nodeIcons.ts';
 import { useCornerZoomResize } from '@/hooks/useCornerZoomResize.ts';
 import { useIsTouch } from '@/hooks/useInputMode.ts';
 import { useNodeLOD } from '@/hooks/useNodeLOD.ts';
@@ -40,13 +28,11 @@ import useCanvasStore from '@/store/canvasStore.ts';
 import { summarizeProvenance } from '@/utils/provenance.ts';
 
 import { getAccentTokens } from './accentTokens.ts';
+import { NodeFloatingToolbar } from './NodeFloatingToolbar.tsx';
 import { SemanticPlaceholder } from './SemanticPlaceholder.tsx';
 
 import type { CanvasNodeType, NodeData } from './types.ts';
 import type { BlockProvenanceMap } from '@sediment/shared';
-
-/** Sentinel token representing "no accent". */
-const ACCENT_NONE = ACCENT_NONE_TOKEN;
 
 /**
  * Global node background opacity, in percent. The wrapper composites every
@@ -202,6 +188,7 @@ const OverlayPortal = memo(
     );
   },
 );
+OverlayPortal.displayName = 'OverlayPortal';
 
 interface NodeWrapperProps {
   id: string;
@@ -272,8 +259,6 @@ export const NodeWrapper = memo(
     const selectedCount = useCanvasStore(
       (state) => state.nodes.filter((node) => node.selected).length,
     );
-    const updateNodeData = useCanvasStore((state) => state.updateNodeData);
-    const convertNodeType = useCanvasStore((state) => state.convertNodeType);
     const { tryStartZoom, shouldResize } = useCornerZoomResize();
 
     const setNodeGeometry = useCanvasStore((state) => state.setNodeGeometry);
@@ -289,18 +274,6 @@ export const NodeWrapper = memo(
     const ingestion = useCanvasStore((state) => state.ingestionByNodeId[id]);
     const showIngestionOverlay =
       type !== 'frame' && ingestion?.status === 'pending';
-    const expandedNodeId = useCanvasStore((state) => state.expandedNodeId);
-    // Disable the text/note toggle while the large-view editor is open on
-    // this node (BlockNote dirty state would otherwise overwrite the
-    // conversion) or while an ingest is in flight.
-    const isTypeToggleDisabled =
-      expandedNodeId === id || ingestion?.status === 'pending';
-    const typeToggleDisabledReason =
-      expandedNodeId === id
-        ? 'Close the editor to change type'
-        : ingestion?.status === 'pending'
-          ? 'Ingestion in progress'
-          : null;
 
     const renderMode = useNodeLOD(id, type);
     const isTouch = useIsTouch();
@@ -432,76 +405,10 @@ export const NodeWrapper = memo(
           }}
           lineClassName="!border-transparent"
         />
-        {toolbar && (
-          <NodeToolbar
-            isVisible={selected && selectedCount === 1}
-            position={Position.Top}
-            offset={12}
-            className={FLOATING_TOOLBAR_CLASS}
-          >
-            {/* Node type indicator. For text/note, render as a segmented
-                toggle so users can convert between the two with one click;
-                other types show a read-only badge. */}
-            {type === 'text' || type === 'note' ? (
-              <FloatingToolbar.Group>
-                <FloatingToolbar.ToggleButton
-                  active={type === 'text'}
-                  disabled={isTypeToggleDisabled}
-                  title={
-                    typeToggleDisabledReason ??
-                    (type === 'text' ? 'Text' : 'Convert to Text')
-                  }
-                  onClick={() => convertNodeType(id, 'text')}
-                >
-                  <NODE_ICON.text />
-                </FloatingToolbar.ToggleButton>
-                <FloatingToolbar.ToggleButton
-                  active={type === 'note'}
-                  disabled={isTypeToggleDisabled}
-                  title={
-                    typeToggleDisabledReason ??
-                    (type === 'note' ? 'Note' : 'Convert to Note')
-                  }
-                  onClick={() => convertNodeType(id, 'note')}
-                >
-                  <NODE_ICON.note />
-                </FloatingToolbar.ToggleButton>
-              </FloatingToolbar.Group>
-            ) : (
-              <Tooltip content={type}>
-                <div className="text-fg-subtle flex items-center px-1">
-                  {(() => {
-                    const TypeIcon = NODE_ICON[type];
-                    return <TypeIcon size={14} />;
-                  })()}
-                </div>
-              </Tooltip>
-            )}
-            <div className="bg-border mx-0.5 h-4 w-px" />
+        {toolbar && selected && selectedCount === 1 && (
+          <NodeFloatingToolbar id={id} type={type} data={data}>
             {toolbar}
-            {type !== 'question' && (
-              <>
-                <FloatingToolbar.Divider />
-                <FloatingToolbar.ColorPicker
-                  colors={
-                    type === 'text'
-                      ? ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT
-                      : ACCENT_PICKER_OPTIONS
-                  }
-                  value={data.style?.accent ?? ACCENT_NONE}
-                  onSelect={(t) =>
-                    updateNodeData(id, {
-                      style: {
-                        ...data.style,
-                        accent: t === ACCENT_NONE ? null : t,
-                      },
-                    })
-                  }
-                  title="Accent Color"
-                />
-              </>
-            )}
-          </NodeToolbar>
+          </NodeFloatingToolbar>
         )}
 
         {/* Zoom-invariant overlay portal — isolated component to avoid re-rendering the entire NodeWrapper on pan/zoom */}

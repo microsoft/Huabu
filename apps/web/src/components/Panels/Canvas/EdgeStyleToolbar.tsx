@@ -1,12 +1,13 @@
 import { ACCENT_PALETTE, EDGE_STROKE_WIDTHS } from '@sediment/shared';
-import { useStore, useViewport } from '@xyflow/react';
 import { useCallback, useMemo } from 'react';
-import { createPortal } from 'react-dom';
 
+import { CanvasFloatingPopover } from '@/components/Common/CanvasFloatingPopover';
+import {
+  FloatingToolbar,
+  FLOATING_TOOLBAR_CLASS,
+} from '@/components/Common/FloatingToolbar';
 import { DEFAULT_EDGE_STROKE_WIDTH } from '@/handler/canvasCommand/utils/edge';
 import useCanvasStore from '@/store/canvasStore';
-
-import { FloatingToolbar } from '../../Common/FloatingToolbar';
 
 import type { SelectOption } from '../../Common/Select';
 import type { CanvasEdgeId } from '@sediment/shared';
@@ -199,9 +200,6 @@ export const EdgeStyleToolbar = () => {
   const edges = useCanvasStore((s) => s.edges);
   const executeCommands = useCanvasStore((s) => s.executeCommands);
 
-  const { zoom, x: vpX, y: vpY } = useViewport();
-  const domNode = useStore((s) => s.domNode);
-
   const selectedEdge = useMemo(() => {
     const sel = edges.filter((e) => e.selected);
     return sel.length === 1 ? sel[0] : null;
@@ -232,13 +230,13 @@ export const EdgeStyleToolbar = () => {
 
   const midpoint = useEdgeMidpoint(selectedEdge, nodes);
 
-  if (!selectedEdge || !midpoint || !domNode) return null;
-
-  // flow → screen pixel (same formula as MultiSelectToolbar)
-  const pxX = midpoint.x * zoom + vpX;
-  const pxY = midpoint.y * zoom + vpY;
-
-  const TOOLBAR_OFFSET = 48;
+  // Treat the midpoint as a 0×0 anchor rect so `CanvasFloatingPopover`
+  // centres the toolbar on the point and clamps it inside the viewport.
+  const anchor = useMemo(
+    () =>
+      midpoint ? { x: midpoint.x, y: midpoint.y, width: 0, height: 0 } : null,
+    [midpoint],
+  );
 
   const currentLineType: EdgeLineType = style.lineType ?? 'bezier';
   const currentLineStyle: EdgeLineStyle = style.lineStyle ?? 'solid';
@@ -246,68 +244,63 @@ export const EdgeStyleToolbar = () => {
   const currentWidth = style.strokeWidth ?? DEFAULT_EDGE_STROKE_WIDTH;
   const currentDirection: EdgeDirection = style.direction ?? 'none';
 
-  const toolbar = (
-    <div
-      className="pointer-events-auto absolute z-[1000]"
-      style={{
-        left: pxX,
-        top: pxY - TOOLBAR_OFFSET,
-        transform: 'translateX(-50%)',
-      }}
+  return (
+    <CanvasFloatingPopover
+      anchor={anchor}
+      open={!!selectedEdge && !!anchor}
+      offset={12}
+      side="top"
+      className={FLOATING_TOOLBAR_CLASS}
     >
-      <FloatingToolbar>
-        <FloatingToolbar.Select
-          label="Type"
-          options={LINE_TYPE_OPTIONS}
-          value={currentLineType}
-          onChange={(v) => setStyle({ lineType: v })}
-          iconOnly
-        />
+      <FloatingToolbar.Select
+        label="Type"
+        options={LINE_TYPE_OPTIONS}
+        value={currentLineType}
+        onChange={(v) => setStyle({ lineType: v })}
+        iconOnly
+      />
 
-        <FloatingToolbar.Divider />
+      <FloatingToolbar.Divider />
 
-        <FloatingToolbar.Select
-          label="Style"
-          options={LINE_STYLE_OPTIONS}
-          value={currentLineStyle}
-          onChange={(v) => setStyle({ lineStyle: v })}
-          iconOnly
-        />
+      <FloatingToolbar.Select
+        label="Style"
+        options={LINE_STYLE_OPTIONS}
+        value={currentLineStyle}
+        onChange={(v) => setStyle({ lineStyle: v })}
+        iconOnly
+      />
 
-        <FloatingToolbar.Divider />
+      <FloatingToolbar.Divider />
 
-        <FloatingToolbar.Select
-          label="Arrow"
-          options={DIRECTION_OPTIONS}
-          value={currentDirection}
-          onChange={(v) => setStyle({ direction: v })}
-          iconOnly
-        />
+      <FloatingToolbar.Select
+        label="Arrow"
+        options={DIRECTION_OPTIONS}
+        value={currentDirection}
+        onChange={(v) => setStyle({ direction: v })}
+        iconOnly
+      />
 
-        <FloatingToolbar.Divider />
+      <FloatingToolbar.Divider />
 
-        <FloatingToolbar.Select
-          label="Width"
-          options={STROKE_WIDTH_OPTIONS}
-          value={`${currentWidth}`}
-          onChange={(v) =>
-            setStyle({ strokeWidth: Number(v) as EdgeStrokeWidth })
-          }
-          iconOnly
-        />
+      <FloatingToolbar.Select
+        label="Width"
+        options={STROKE_WIDTH_OPTIONS}
+        value={`${currentWidth}`}
+        onChange={(v) =>
+          setStyle({ strokeWidth: Number(v) as EdgeStrokeWidth })
+        }
+        iconOnly
+      />
 
-        <FloatingToolbar.Divider />
+      <FloatingToolbar.Divider />
 
-        {/* Color picker */}
-        <FloatingToolbar.ColorPicker
-          colors={ACCENT_PALETTE}
-          value={currentStroke}
-          onSelect={(t) => setStyle({ stroke: t })}
-          title="Edge color"
-        />
-      </FloatingToolbar>
-    </div>
+      {/* Color picker */}
+      <FloatingToolbar.ColorPicker
+        colors={ACCENT_PALETTE}
+        value={currentStroke}
+        onSelect={(t) => setStyle({ stroke: t })}
+        title="Edge color"
+      />
+    </CanvasFloatingPopover>
   );
-
-  return createPortal(toolbar, domNode);
 };
