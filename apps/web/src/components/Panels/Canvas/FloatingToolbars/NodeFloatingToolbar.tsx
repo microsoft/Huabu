@@ -4,6 +4,7 @@ import {
   ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT,
 } from '@sediment/shared';
 import { useInternalNode } from '@xyflow/react';
+import { Trash2 } from 'lucide-react';
 import { memo, useMemo, type ReactNode } from 'react';
 
 import { CanvasFloatingPopover } from '@/components/Common/CanvasFloatingPopover';
@@ -13,9 +14,10 @@ import {
 } from '@/components/Common/FloatingToolbar';
 import { Tooltip } from '@/components/Common/Tooltip';
 import { NODE_ICON } from '@/config/nodeIcons';
+import { useIsTouch } from '@/hooks/useInputMode';
 import useCanvasStore from '@/store/canvasStore';
 
-import type { CanvasNodeType, NodeData } from './types';
+import type { CanvasNodeType, NodeData } from '@/components/Nodes/types';
 
 /** Sentinel token representing "no accent". */
 const ACCENT_NONE = ACCENT_NONE_TOKEN;
@@ -53,8 +55,10 @@ export const NodeFloatingToolbar = memo(
     const internalNode = useInternalNode(id);
     const updateNodeData = useCanvasStore((s) => s.updateNodeData);
     const convertNodeType = useCanvasStore((s) => s.convertNodeType);
+    const deleteNodes = useCanvasStore((s) => s.deleteNodes);
     const expandedNodeId = useCanvasStore((s) => s.expandedNodeId);
     const ingestion = useCanvasStore((s) => s.ingestionByNodeId[id]);
+    const isTouch = useIsTouch();
 
     // Disable the text/note toggle while the large-view editor is open
     // on this node (BlockNote dirty state would otherwise overwrite the
@@ -155,6 +159,20 @@ export const NodeFloatingToolbar = memo(
               }
               title="Accent Color"
             />
+          </>
+        )}
+
+        {/* Touch-only: pointer users have keyboard Delete / Backspace. */}
+        {isTouch && (
+          <>
+            <FloatingToolbar.Divider />
+            <FloatingToolbar.ActionButton
+              title="Delete"
+              tone="danger"
+              onClick={() => deleteNodes([id])}
+            >
+              <Trash2 />
+            </FloatingToolbar.ActionButton>
           </>
         )}
       </CanvasFloatingPopover>

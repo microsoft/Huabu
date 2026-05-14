@@ -94,22 +94,29 @@ interface ActionButtonProps {
   onClick: (e: React.MouseEvent) => void;
   children: ReactNode;
   className?: string;
+  /** Visual tone — `danger` is used for destructive actions like Delete. */
+  tone?: 'neutral' | 'danger';
+  disabled?: boolean;
 }
 
-/** A stateless action button (e.g. Fullscreen, Download, Copy). */
+/** A stateless action button (e.g. Fullscreen, Download, Copy, Delete). */
 function ActionButton({
   title,
   onClick,
   children,
   className,
+  tone = 'neutral',
+  disabled,
 }: ActionButtonProps) {
   return (
     <Button
       variant="ghost"
+      tone={tone}
       iconOnly
       size="sm"
       title={title}
       onClick={onClick}
+      disabled={disabled}
       className={className}
     >
       {children}

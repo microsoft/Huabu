@@ -21,6 +21,7 @@ import { createPortal } from 'react-dom';
 import { cn } from '@/components/Common/cn.ts';
 import { Spinner } from '@/components/Common/Spinner.tsx';
 import { Tooltip } from '@/components/Common/Tooltip.tsx';
+import { NodeFloatingToolbar } from '@/components/Panels/Canvas/FloatingToolbars/NodeFloatingToolbar.tsx';
 import { useCornerZoomResize } from '@/hooks/useCornerZoomResize.ts';
 import { useIsTouch } from '@/hooks/useInputMode.ts';
 import { useNodeLOD } from '@/hooks/useNodeLOD.ts';
@@ -28,7 +29,6 @@ import useCanvasStore from '@/store/canvasStore.ts';
 import { summarizeProvenance } from '@/utils/provenance.ts';
 
 import { getAccentTokens } from './accentTokens.ts';
-import { NodeFloatingToolbar } from './NodeFloatingToolbar.tsx';
 import { SemanticPlaceholder } from './SemanticPlaceholder.tsx';
 
 import type { CanvasNodeType, NodeData } from './types.ts';

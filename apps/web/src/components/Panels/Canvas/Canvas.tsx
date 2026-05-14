@@ -35,9 +35,9 @@ import { useQuestionRunner } from '@/hooks/useQuestionRunner';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
 import { NodeToolbar } from './CanvasToolbar.tsx';
-import { EdgeStyleToolbar } from './EdgeStyleToolbar.tsx';
+import { EdgeStyleToolbar } from './FloatingToolbars/EdgeStyleToolbar.tsx';
+import { MultiSelectToolbar } from './FloatingToolbars/MultiSelectToolbar.tsx';
 import { IntentPopover } from './IntentPopover.tsx';
-import { MultiSelectToolbar } from './MultiSelectToolbar.tsx';
 import { GRID_SIZE, MAX_ZOOM, MIN_ZOOM } from '../../../config/canvas.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import {

@@ -10,7 +10,6 @@ import {
   Sparkles,
   Undo2,
   Redo2,
-  Trash2,
 } from 'lucide-react';
 import { useMemo, useRef, useState, type ChangeEvent } from 'react';
 
@@ -43,16 +42,12 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
   const autoLayoutEnabled = useCanvasStore((s) => s.autoLayoutEnabled);
   const toggleAutoLayout = useCanvasStore((s) => s.toggleAutoLayout);
 
-  // Touch-mode undo / redo / delete
+  // Touch-mode undo / redo (delete now lives on the per-context floating toolbars)
   const isTouch = useIsTouch();
   const undo = useCanvasStore((s) => s.undo);
   const redo = useCanvasStore((s) => s.redo);
   const canUndo = useCanvasStore((s) => s.canUndo);
   const canRedo = useCanvasStore((s) => s.canRedo);
-  const nodes = useCanvasStore((s) => s.nodes);
-  const edges = useCanvasStore((s) => s.edges);
-  const deleteNodes = useCanvasStore((s) => s.deleteNodes);
-  const disconnectEdges = useCanvasStore((s) => s.disconnectEdges);
   const canvasId = useCanvasStore((s) => s.canvasId);
 
   // Refs
@@ -392,7 +387,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           </Button>
         </div>
 
-        {/* Touch-only: Undo / Redo / Delete (keyboard shortcuts are unreachable) */}
+        {/* Touch-only: Undo / Redo (Delete lives on the per-context floating toolbars) */}
         {isTouch && (
           <>
             <div className="bg-border mx-1 h-4 w-px" />
@@ -414,24 +409,6 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
                 onClick={() => redo()}
               >
                 <Redo2 />
-              </Button>
-              <Button
-                variant="ghost"
-                iconOnly
-                title="Delete selected"
-                onClick={() => {
-                  const selectedNodeIds = nodes
-                    .filter((n) => n.selected)
-                    .map((n) => n.id);
-                  const selectedEdgeIds = edges
-                    .filter((e) => e.selected)
-                    .map((e) => e.id);
-                  if (selectedNodeIds.length > 0) deleteNodes(selectedNodeIds);
-                  if (selectedEdgeIds.length > 0)
-                    disconnectEdges(selectedEdgeIds);
-                }}
-              >
-                <Trash2 />
               </Button>
             </div>
           </>

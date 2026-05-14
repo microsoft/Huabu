@@ -10,6 +10,7 @@ import {
   AlignStartHorizontal,
   AlignCenterHorizontal,
   AlignEndHorizontal,
+  Trash2,
   Ungroup,
 } from 'lucide-react';
 import { useMemo } from 'react';
@@ -23,6 +24,7 @@ import {
   getAbsolutePosition,
   type NestableNode,
 } from '@/handler/canvasCommand/utils/frame';
+import { useIsTouch } from '@/hooks/useInputMode';
 import useCanvasStore from '@/store/canvasStore';
 
 import type { CanvasNode } from '@/components/Nodes/types';
@@ -40,6 +42,8 @@ export const MultiSelectToolbar = () => {
   const alignSelectedNodes = useCanvasStore((s) => s.alignSelectedNodes);
   const spreadSelectedNodes = useCanvasStore((s) => s.spreadSelectedNodes);
   const executeCommands = useCanvasStore((s) => s.executeCommands);
+  const deleteNodes = useCanvasStore((s) => s.deleteNodes);
+  const isTouch = useIsTouch();
 
   const selectedNodes = useMemo(
     () => nodes.filter((n) => n.selected) as CanvasNode[],
@@ -192,6 +196,23 @@ export const MultiSelectToolbar = () => {
         }}
         title="Accent Color"
       />
+
+      {/* Touch-only: pointer users have keyboard Delete / Backspace. */}
+      {isTouch && (
+        <>
+          <FloatingToolbar.Divider />
+          <FloatingToolbar.ActionButton
+            title="Delete Selected"
+            tone="danger"
+            onClick={() => {
+              if (selectedNodes.length === 0) return;
+              deleteNodes(selectedNodes.map((n) => n.id));
+            }}
+          >
+            <Trash2 />
+          </FloatingToolbar.ActionButton>
+        </>
+      )}
     </CanvasFloatingPopover>
   );
 };

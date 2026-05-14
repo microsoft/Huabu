@@ -1,4 +1,5 @@
 import { ACCENT_PALETTE, EDGE_STROKE_WIDTHS } from '@sediment/shared';
+import { Trash2 } from 'lucide-react';
 import { useCallback, useMemo } from 'react';
 
 import { CanvasFloatingPopover } from '@/components/Common/CanvasFloatingPopover';
@@ -7,9 +8,10 @@ import {
   FLOATING_TOOLBAR_CLASS,
 } from '@/components/Common/FloatingToolbar';
 import { DEFAULT_EDGE_STROKE_WIDTH } from '@/handler/canvasCommand/utils/edge';
+import { useIsTouch } from '@/hooks/useInputMode';
 import useCanvasStore from '@/store/canvasStore';
 
-import type { SelectOption } from '../../Common/Select';
+import type { SelectOption } from '@/components/Common/Select';
 import type { CanvasEdgeId } from '@sediment/shared';
 import type {
   EdgeLineType,
@@ -199,6 +201,8 @@ export const EdgeStyleToolbar = () => {
   const nodes = useCanvasStore((s) => s.nodes);
   const edges = useCanvasStore((s) => s.edges);
   const executeCommands = useCanvasStore((s) => s.executeCommands);
+  const disconnectEdges = useCanvasStore((s) => s.disconnectEdges);
+  const isTouch = useIsTouch();
 
   const selectedEdge = useMemo(() => {
     const sel = edges.filter((e) => e.selected);
@@ -301,6 +305,22 @@ export const EdgeStyleToolbar = () => {
         onSelect={(t) => setStyle({ stroke: t })}
         title="Edge color"
       />
+
+      {/* Touch-only: pointer users have keyboard Delete / Backspace. */}
+      {isTouch && (
+        <>
+          <FloatingToolbar.Divider />
+          <FloatingToolbar.ActionButton
+            title="Delete Edge"
+            tone="danger"
+            onClick={() => {
+              if (selectedEdge) disconnectEdges([selectedEdge.id]);
+            }}
+          >
+            <Trash2 />
+          </FloatingToolbar.ActionButton>
+        </>
+      )}
     </CanvasFloatingPopover>
   );
 };
