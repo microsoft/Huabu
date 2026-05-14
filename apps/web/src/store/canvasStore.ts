@@ -274,14 +274,25 @@ type RFState = {
   ) => void;
 
   /**
-   * Active sketch tool settings — color and thickness used by the live
-   * SketchOverlay preview and persisted onto each new sketch node so
-   * the same look replays after reload. Per-node values are still editable
-   * after-the-fact via the sketch node's toolbar.
+   * Active sketch tool settings — color, thickness, and tool mode used by
+   * the live SketchOverlay preview and persisted onto each new sketch node
+   * so the same look replays after reload. Per-node values are still
+   * editable after-the-fact via the sketch node's toolbar.
+   *
+   * `mode` switches the overlay between drawing new strokes (`'draw'`) and
+   * erasing existing sketch nodes (`'erase'`).
    */
-  sketchDraft: { strokeColor: string; strokeSize: number };
+  sketchDraft: {
+    strokeColor: string;
+    strokeSize: number;
+    mode: 'draw' | 'erase';
+  };
   setSketchDraft: (
-    patch: Partial<{ strokeColor: string; strokeSize: number }>,
+    patch: Partial<{
+      strokeColor: string;
+      strokeSize: number;
+      mode: 'draw' | 'erase';
+    }>,
   ) => void;
 
   copySelectedNodes: () => void;
@@ -621,7 +632,7 @@ const useCanvasStore = create<RFState>()(
     pendingNodeType: null,
     setPendingNodeType: (type) => set({ pendingNodeType: type }),
 
-    sketchDraft: { strokeColor: 'black', strokeSize: 4 },
+    sketchDraft: { strokeColor: 'black', strokeSize: 4, mode: 'draw' },
     setSketchDraft: (patch) =>
       set((state) => ({ sketchDraft: { ...state.sketchDraft, ...patch } })),
 

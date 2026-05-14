@@ -1,5 +1,5 @@
 import { createId, resolveAccent } from '@sediment/shared';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 
 import useCanvasStore from '@/store/canvasStore';
 
@@ -9,6 +9,7 @@ import {
   DEFAULT_STROKE_SIZE,
 } from './sketchPath';
 
+import type { CanvasSketchNodeData } from '../types';
 import type { ReactFlowInstance } from '@xyflow/react';
 /**
  * Process raw screen-space points into flow-space node data.
@@ -68,6 +69,10 @@ function processPoints(
  * Full-screen overlay that captures pointer events for freehand drawing.
  * Renders a live SVG preview of the current stroke, then creates a
  * sketch node on pointer-up.
+ *
+ * When `sketchDraft.mode === 'erase'` the overlay switches into eraser
+ * mode: dragging the pointer over existing sketch nodes deletes any whose
+ * strokes intersect the eraser path.
  */
 export function SketchOverlay({
   rfInstance,
@@ -75,9 +80,14 @@ export function SketchOverlay({
   rfInstance: ReactFlowInstance | null;
 }) {
   const addNode = useCanvasStore((s) => s.addNode);
+  const deleteNodes = useCanvasStore((s) => s.deleteNodes);
   const sketchDraft = useCanvasStore((s) => s.sketchDraft);
   const strokeColor = sketchDraft.strokeColor || DEFAULT_STROKE_COLOR;
   const strokeSize = sketchDraft.strokeSize || DEFAULT_STROKE_SIZE;
+  const mode = sketchDraft.mode ?? 'draw';
+  // Eraser hit radius scales loosely with stroke size so a fat brush also
+  // erases over a wider area, with a sensible minimum for fine strokes.
+  const eraserRadius = Math.max(strokeSize * 3, 12);
   // Live-preview fill: resolve the stored palette token to a CSS color.
   // `resolveAccent` passes legacy hex strings through unchanged.
   const resolvedColor = resolveAccent(strokeColor) ?? strokeColor;
@@ -88,6 +98,12 @@ export function SketchOverlay({
   const screenPtsRef = useRef<number[][]>([]);
   const overlayRef = useRef<HTMLDivElement>(null);
   const [points, setPoints] = useState<number[][]>([]);
+  // Whether the eraser is actively being dragged (mouse / pen / touch held).
+  const [erasing, setErasing] = useState(false);
+  // Last cursor position in overlay-relative coords for the eraser indicator.
+  const [eraserPos, setEraserPos] = useState<{ x: number; y: number } | null>(
+    null,
+  );
 
   /** Convert clientX/clientY to overlay-relative coordinates */
   const toLocal = useCallback((clientX: number, clientY: number) => {
@@ -170,20 +186,157 @@ export function SketchOverlay({
     [rfInstance, addNode, strokeColor, strokeSize],
   );
 
+  /**
+   * Find every sketch node whose stroke is hit by an eraser circle of
+   * radius `eraserRadius` centred at the given flow-space point.
+   *
+   * Uses a quick bounding-box reject, then walks the stroke's points
+   * (scaled by any user resize) and tests against the distance from the
+   * eraser centre. The half-stroke thickness is folded into the radius so
+   * thicker strokes are easier to hit.
+   */
+  const findHitSketchNodes = useCallback(
+    (flowX: number, flowY: number): string[] => {
+      const nodes = useCanvasStore.getState().nodes;
+      const hits: string[] = [];
+      for (const node of nodes) {
+        if (node.type !== 'sketch') continue;
+        const data = node.data as CanvasSketchNodeData;
+        const baseW = data.initialSize?.width || 1;
+        const baseH = data.initialSize?.height || 1;
+        const w = node.measured?.width ?? node.width ?? baseW;
+        const h = node.measured?.height ?? node.height ?? baseH;
+        const x0 = node.position.x;
+        const y0 = node.position.y;
+        const halfStroke = (data.strokeSize ?? DEFAULT_STROKE_SIZE) / 2;
+        const r = eraserRadius + halfStroke;
+
+        // Bounding box reject (expanded by hit radius).
+        if (
+          flowX < x0 - r ||
+          flowX > x0 + w + r ||
+          flowY < y0 - r ||
+          flowY > y0 + h + r
+        ) {
+          continue;
+        }
+
+        const scaleX = w / baseW;
+        const scaleY = h / baseH;
+        const r2 = r * r;
+        const pts = data.points ?? [];
+        for (const pt of pts) {
+          const px = x0 + pt[0] * scaleX;
+          const py = y0 + pt[1] * scaleY;
+          const dx = px - flowX;
+          const dy = py - flowY;
+          if (dx * dx + dy * dy <= r2) {
+            hits.push(node.id);
+            break;
+          }
+        }
+      }
+      return hits;
+    },
+    [eraserRadius],
+  );
+
+  const eraseAtClient = useCallback(
+    (clientX: number, clientY: number) => {
+      const flow = rfInstance?.screenToFlowPosition({
+        x: clientX,
+        y: clientY,
+      });
+      if (!flow) return;
+      const ids = findHitSketchNodes(flow.x, flow.y);
+      if (ids.length > 0) deleteNodes(ids);
+    },
+    [rfInstance, findHitSketchNodes, deleteNodes],
+  );
+
+  const handleEraserPointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      e.currentTarget.setPointerCapture(e.pointerId);
+      setErasing(true);
+      const { lx, ly } = toLocal(e.clientX, e.clientY);
+      setEraserPos({ x: lx, y: ly });
+      eraseAtClient(e.clientX, e.clientY);
+    },
+    [toLocal, eraseAtClient],
+  );
+
+  const handleEraserPointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      const { lx, ly } = toLocal(e.clientX, e.clientY);
+      setEraserPos({ x: lx, y: ly });
+      if (e.buttons !== 1) return;
+      eraseAtClient(e.clientX, e.clientY);
+    },
+    [toLocal, eraseAtClient],
+  );
+
+  const handleEraserPointerUp = useCallback((e: React.PointerEvent) => {
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    setErasing(false);
+  }, []);
+
+  const handleEraserPointerLeave = useCallback(() => {
+    setEraserPos(null);
+  }, []);
+
   const zoom = rfInstance?.getViewport().zoom ?? 1;
 
-  // Pencil cursor with white outline (drawn first, thick) + black inner
-  // stroke (drawn on top, thin) so it stays legible on any background.
-  // The pencil tip in the SVG sits near (3, 21), so we hot-spot the cursor
-  // there: drawing starts exactly under the rendered tip.
-  const pencilCursor =
-    "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke-linecap='round' stroke-linejoin='round'><g stroke='white' stroke-width='3.5'><path d='M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z'/><path d='m15 5 4 4'/></g><g stroke='black' stroke-width='1.5'><path d='M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z'/><path d='m15 5 4 4'/></g></svg>\") 3 21, crosshair";
+  // Draw-mode cursor: a small filled dot in the active stroke color, with
+  // a white halo so it stays visible on dark backgrounds. Hot-spot is the
+  // dot's centre so the painted stroke starts exactly under the cursor.
+  const dotCursor = useMemo(() => {
+    // Only `#` from hex colors needs URL-encoding inside an SVG data URI;
+    // palette tokens like `rgb(...)` / named colors pass through fine.
+    const safeColor = resolvedColor.replace(/#/g, '%23');
+    const svg =
+      `<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14'>` +
+      `<circle cx='7' cy='7' r='5' fill='white'/>` +
+      `<circle cx='7' cy='7' r='4' fill='${safeColor}'/>` +
+      `</svg>`;
+    return `url("data:image/svg+xml;utf8,${svg}") 7 7, crosshair`;
+  }, [resolvedColor]);
+
+  if (mode === 'erase') {
+    // Eraser cursor radius is in screen-space px; flow-space radius is
+    // multiplied by zoom so the indicator visually matches the hit area.
+    const cursorRadius = eraserRadius * zoom;
+    return (
+      <div
+        ref={overlayRef}
+        className="absolute inset-0 z-4"
+        style={{ cursor: 'none' }}
+        onPointerDown={handleEraserPointerDown}
+        onPointerMove={handleEraserPointerMove}
+        onPointerUp={handleEraserPointerUp}
+        onPointerLeave={handleEraserPointerLeave}
+      >
+        {eraserPos && (
+          <svg className="pointer-events-none h-full w-full">
+            <circle
+              cx={eraserPos.x}
+              cy={eraserPos.y}
+              r={cursorRadius}
+              fill={erasing ? 'rgba(0,0,0,0.08)' : 'none'}
+              stroke="currentColor"
+              strokeWidth={1.5}
+              className="text-fg-muted"
+            />
+          </svg>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div
       ref={overlayRef}
       className="absolute inset-0 z-4"
-      style={{ cursor: pencilCursor }}
+      style={{ cursor: dotCursor }}
       onPointerDown={handlePointerDown}
       onPointerMove={points.length > 0 ? handlePointerMove : undefined}
       onPointerUp={handlePointerUp}

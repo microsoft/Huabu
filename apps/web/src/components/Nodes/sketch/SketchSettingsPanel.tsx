@@ -1,10 +1,18 @@
-import { FLOATING_TOOLBAR_CLASS } from '@/components/Common/FloatingToolbar';
+import clsx from 'clsx';
+import { Eraser } from 'lucide-react';
+
+import { Button } from '@/components/Common/Button';
+import {
+  FLOATING_TOOLBAR_CLASS,
+  FloatingToolbar,
+} from '@/components/Common/FloatingToolbar';
 import useCanvasStore from '@/store/canvasStore';
 
 import { SketchControls } from './SketchControls';
 
 /**
- * Floating panel that hosts the sketch tool's color + thickness controls.
+ * Floating panel that hosts the sketch tool's color + thickness controls
+ * plus a draw / erase mode toggle.
  *
  * Mounted by `CanvasToolbar` directly above the Sketch button while
  * the sketch tool is active (`pendingNodeType === 'sketch'`).
@@ -18,6 +26,7 @@ import { SketchControls } from './SketchControls';
 export function SketchSettingsPanel() {
   const sketchDraft = useCanvasStore((s) => s.sketchDraft);
   const setSketchDraft = useCanvasStore((s) => s.setSketchDraft);
+  const isErasing = sketchDraft.mode === 'erase';
 
   return (
     <div
@@ -28,9 +37,26 @@ export function SketchSettingsPanel() {
       <SketchControls
         color={sketchDraft.strokeColor}
         size={sketchDraft.strokeSize}
-        onColorChange={(strokeColor) => setSketchDraft({ strokeColor })}
-        onSizeChange={(strokeSize) => setSketchDraft({ strokeSize })}
+        onColorChange={(strokeColor) =>
+          // Picking a color implies the user wants to draw, not erase.
+          setSketchDraft({ strokeColor, mode: 'draw' })
+        }
+        onSizeChange={(strokeSize) =>
+          // Adjusting thickness implies the user wants to draw, not erase.
+          setSketchDraft({ strokeSize, mode: 'draw' })
+        }
       />
+      <FloatingToolbar.Divider />
+      <Button
+        variant="ghost"
+        iconOnly
+        size="sm"
+        title={isErasing ? 'Switch to draw mode' : 'Switch to eraser mode'}
+        onClick={() => setSketchDraft({ mode: isErasing ? 'draw' : 'erase' })}
+        className={clsx(isErasing && 'text-info bg-bg-default')}
+      >
+        <Eraser />
+      </Button>
     </div>
   );
 }
