@@ -28,7 +28,7 @@ const nodeOriginSchema = z
       'user-from-library',
       'user-from-chat',
       'user-excerpt',
-      'annotation-recognized',
+      'sketch-recognized',
     ]),
     threadId: z.string().optional(),
     excerptFromNodeId: z.string().optional(),

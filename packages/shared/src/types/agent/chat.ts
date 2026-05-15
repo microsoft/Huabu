@@ -7,7 +7,14 @@ import type { ToolResponse } from './tools.js';
 export interface ChatAttachment {
   type: 'image' | 'pdf' | 'text' | 'file' | 'web';
   source: 'upload' | 'excerpt' | 'selection';
+  /** Single source node (1:1 attachments such as PDF excerpts). */
   originNodeId?: string;
+  /**
+   * Multiple source nodes (1:N attachments such as a single image
+   * rendered from a cluster of sketch strokes). Coexists with
+   * `originNodeId`.
+   */
+  originNodeIds?: string[];
   url?: string;
   content?: string;
   label?: string;

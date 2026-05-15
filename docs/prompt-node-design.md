@@ -102,7 +102,7 @@ Resolved entirely server-side. The frontend posts `{anchorNodeId, canvasId}` to 
 
 3. Renderer serialises the context as Markdown (`### Inside "X" frame`, `### Canvas Level`, `### Connections`) and the route substitutes it into the Ask agent's `nodeNeighbourhoodPreamble` template.
 
-Neither the prompt wording nor the spatial graph crosses the wire — the web bundle has no spatial computation for the LLM path at all. (UI-only proximity work like annotation clustering still uses shared geometry helpers locally; that's separate.)
+Neither the prompt wording nor the spatial graph crosses the wire — the web bundle has no spatial computation for the LLM path at all. (UI-only proximity work like sketch clustering still uses shared geometry helpers locally; that's separate.)
 
 > **Two-layer info design**: the LLM gets natural-language topology ("3 nodes in a 2×2 grid"). For precise placement of new nodes, the agent fetches raw coordinates on demand via the existing `get_canvas_outline` / `inspect_nodes` tools.
 

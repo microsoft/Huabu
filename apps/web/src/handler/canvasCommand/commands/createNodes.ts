@@ -143,11 +143,25 @@ const createNodes: CommandDefinition<Cmd> = {
 
     // ---------------------------------------------------------------
     // 4. Normalize tree order and select new nodes.
+    //
+    // Sketch nodes are intentionally excluded from
+    // auto-selection: drawing many strokes in a row should not keep
+    // hijacking the selection (which would dismiss other toolbars and
+    // scroll the canvas around). When the entire batch is sketches we
+    // skip `selectOnly` entirely so any pre-existing selection is
+    // preserved.
     // ---------------------------------------------------------------
-    let finalNodes = selectOnly(
-      normalizeTreeOrder([...state.nodes, ...newNodes] as NestableNode[]),
-      newNodes.map((n) => n.id),
-    );
+    const orderedNodes = normalizeTreeOrder([
+      ...state.nodes,
+      ...newNodes,
+    ] as NestableNode[]);
+    const newSelectedIds = newNodes
+      .filter((n) => n.type !== 'sketch')
+      .map((n) => n.id);
+    let finalNodes =
+      newSelectedIds.length > 0
+        ? selectOnly(orderedNodes, newSelectedIds)
+        : orderedNodes;
 
     // ---------------------------------------------------------------
     // 5. Resolve position: if not provided, use force-directed

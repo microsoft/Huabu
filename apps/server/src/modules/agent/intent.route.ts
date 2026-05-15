@@ -3,33 +3,33 @@
  *
  * POST /api/intent/recognize
  * POST /api/intent/recognize-stream
- * POST /api/intent/recognize-annotation-stream
+ * POST /api/intent/recognize-sketch
  * POST /api/intent/episode
  */
 
 import {
   INTENT_SSE_EVENTS,
-  annotationIntentRequestSchema,
+  sketchIntentRequestSchema,
   intentEpisodeRequestSchema,
   intentRequestSchema,
 } from '@sediment/shared';
 
-import { recognizeAnnotationCommands } from './annotation.service.js';
 import {
   recognizeIntent,
   recognizeIntentStream,
   logIntentEpisode,
 } from './intent.service.js';
+import { recognizeSketchCommands } from './sketch.service.js';
 
 import type {
-  AnnotationCommandResponse,
+  SketchCommandResponse,
   ApiResult,
   IntentEpisodeAck,
   IntentEpisodeRequest,
   IntentRequest,
   IntentResponse,
   IntentStreamEvent,
-  AnnotationIntentRequest,
+  SketchIntentRequest,
 } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
@@ -106,14 +106,14 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     },
   );
 
-  // Annotation → canvas commands (one-step, no SSE).
+  // Sketch → canvas commands (one-step, no SSE).
   // Receives screenshot + structured cluster context, asks LLM to reason
   // and return an executable batch of canvas commands.
   fastify.post<{
-    Body: AnnotationIntentRequest;
-    Reply: ApiResult<AnnotationCommandResponse>;
-  }>('/recognize-annotation', async (request, reply) => {
-    const parsed = annotationIntentRequestSchema.safeParse(request.body);
+    Body: SketchIntentRequest;
+    Reply: ApiResult<SketchCommandResponse>;
+  }>('/recognize-sketch', async (request, reply) => {
+    const parsed = sketchIntentRequestSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.code(400).send({
         message: parsed.error.issues[0]?.message ?? 'Invalid body',
@@ -122,17 +122,17 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     const { screenshot, clusterContext, canvasId } = parsed.data;
 
     try {
-      const result = await recognizeAnnotationCommands(
+      const result = await recognizeSketchCommands(
         screenshot,
         clusterContext,
         canvasId,
       );
       return reply.send(result);
     } catch (err) {
-      request.log.error(err, 'Annotation command recognition failed');
+      request.log.error(err, 'Sketch command recognition failed');
       return reply
         .code(500)
-        .send({ message: 'Annotation command recognition failed' });
+        .send({ message: 'Sketch command recognition failed' });
     }
   });
 

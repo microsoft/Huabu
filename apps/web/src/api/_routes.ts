@@ -48,7 +48,7 @@ export const routes = {
 
   // ── Intent ────────────────────────────────────────────────────────
   intentRecognizeStream: '/intent/recognize-stream',
-  intentRecognizeAnnotation: '/intent/recognize-annotation',
+  intentRecognizeSketch: '/intent/recognize-sketch',
   intentEpisode: '/intent/episode',
 
   // ── Agent ─────────────────────────────────────────────────────────

@@ -35,7 +35,7 @@ Huabu 的数据分两类：
 | `memory/`     | Markdown + frontmatter      | 画布级偏好 / 上下文，可手动编辑                                                                          |
 | `.history/`   | JSON                        | 对话、意图、事件历史；删除画布时整个目录会被清掉                                                         |
 
-> 哪些节点没有 `.md`？**annotation、question、intent** 节点没有对应的 `.md`，它们的所有信息都直接存在 `canvas.json` 里。frame 节点有一个仅含 frontmatter（标题、类型）的 `.md`，身为容器不存正文。
+> 哪些节点没有 `.md`？**sketch、question、intent** 节点没有对应的 `.md`，它们的所有信息都直接存在 `canvas.json` 里。frame 节点有一个仅含 frontmatter（标题、类型）的 `.md`，身为容器不存正文。
 
 ---
 

@@ -1,10 +1,10 @@
 /**
- * On-canvas overlay shown around in-progress annotation clusters.
+ * On-canvas overlay shown around in-progress sketch clusters.
  *
  * Each overlay rectangle:
  *  - Lives in flow coordinates (renders inside <ViewportPortal> so it pans
- *    and zooms with the canvas, just like the annotation strokes themselves).
- *  - Computes its bounding box live from the canvas-store annotation nodes
+ *    and zooms with the canvas, just like the sketch strokes themselves).
+ *  - Computes its bounding box live from the canvas-store sketch nodes
  *    so it grows as the user keeps drawing and disappears when strokes are
  *    deleted.
  *  - Carries a status pill in its top-left corner via the shared
@@ -25,7 +25,7 @@ import { useCanvasChangePreview } from '../../../hooks/useCanvasChanges';
 import { Button } from '../../Common/Button';
 import { StatusBadge } from '../../Common/StatusBadge';
 
-import type { AnnotationProcessingCluster } from '@/store/intentStore';
+import type { SketchProcessingCluster } from '@/store/intentStore';
 import type { Node } from '@xyflow/react';
 
 /** Walk the parent chain to compute a node's absolute flow-space position. */
@@ -45,7 +45,7 @@ function absolutePosition(
 }
 
 /**
- * Compute the union bbox (in absolute flow coordinates) of all annotation
+ * Compute the union bbox (in absolute flow coordinates) of all sketch
  * nodes whose ids appear in `strokeIds`. Returns `null` when every stroke
  * has been deleted.
  */
@@ -61,7 +61,7 @@ function computeBbox(
 
   for (const id of strokeIds) {
     const node = byId.get(id);
-    if (!node || node.type !== 'annotation') continue;
+    if (!node || node.type !== 'sketch') continue;
     const { x, y } = absolutePosition(node, byId);
     const initialSize = (
       node.data as { initialSize?: { width: number; height: number } }
@@ -87,7 +87,7 @@ function computeBbox(
  * Mounts a flow-space rectangle + status pill for every cluster currently
  * tracked in the intent store. Renders nothing when no clusters are active.
  */
-export const AnnotationProcessingOverlay = memo(() => {
+export const SketchProcessingOverlay = memo(() => {
   const clusters = useIntentStore((s) => s.processingClusters);
 
   if (clusters.length === 0) return null;
@@ -100,10 +100,10 @@ export const AnnotationProcessingOverlay = memo(() => {
     </ViewportPortal>
   );
 });
-AnnotationProcessingOverlay.displayName = 'AnnotationProcessingOverlay';
+SketchProcessingOverlay.displayName = 'SketchProcessingOverlay';
 
 const ClusterOverlay = memo(
-  ({ cluster }: { cluster: AnnotationProcessingCluster }) => {
+  ({ cluster }: { cluster: SketchProcessingCluster }) => {
     // Subscribe to the canvas nodes so the bbox follows live edits and
     // disappears when the strokes are deleted.
     const nodes = useCanvasStore((s) => s.nodes);
@@ -114,11 +114,11 @@ const ClusterOverlay = memo(
 
     const acceptCluster = useIntentStore((s) => s.acceptCluster);
     const revertCluster = useIntentStore((s) => s.revertCluster);
-    const openAnnotationCluster = useChatStore((s) => s.openAnnotationCluster);
+    const openSketchCluster = useChatStore((s) => s.openSketchCluster);
     const requestOpenRightPanel = usePanelStore((s) => s.requestOpenRightPanel);
 
     const handleOpenInspector = () => {
-      openAnnotationCluster(cluster.id);
+      openSketchCluster(cluster.id);
       requestOpenRightPanel();
     };
 

@@ -336,6 +336,44 @@ body,
     height 0.2s ease-out;
 }
 
+/* Sketch nodes: hit-test only the painted stroke pixels so clicks in the
+   blank area of the bounding box "drill through" to nodes underneath
+   (Figma-like behaviour for overlapping freehand strokes).
+
+   Default state: every sketch wrapper (and its descendants) is
+   pointer-event-transparent — ReactFlow still renders, but the bounding
+   box does not intercept clicks. Selection / drag / connection require
+   the cursor to be over an actual stroke.
+
+   Active state: `useSketchHoverRouting` performs a JS hit test against
+   stored stroke points (same geometry as the eraser). When the cursor is
+   on a stroke, it tags the matching node with `data-sketch-hover` and
+   the rules below flip pointer-events back on plus draw a soft hover
+   ring so the user can see what they will grab. `!important` is needed
+   because ReactFlow's own stylesheet sets `pointer-events: all` on
+   `.react-flow__node` with the same specificity.
+
+   Resize handles and connection handles always remain clickable so a
+   selected sketch can be resized / connected without first hovering its
+   stroke. */
+.react-flow__node-sketch,
+.react-flow__node-sketch * {
+  pointer-events: none !important;
+}
+.react-flow__node-sketch[data-sketch-hover='true'],
+.react-flow__node-sketch[data-sketch-hover='true'] * {
+  pointer-events: auto !important;
+}
+.react-flow__node-sketch .react-flow__handle,
+.react-flow__node-sketch .react-flow__resize-control {
+  pointer-events: auto !important;
+}
+/* Soft glow on the hovered sketch so the user sees which stroke they
+   are about to grab when several sketches overlap. */
+.react-flow__node-sketch[data-sketch-hover='true'] svg path {
+  filter: drop-shadow(0 0 2px var(--color-info-light));
+}
+
 /* Keep pdf.js text-layer spans invisible during text selection so the
   HTML text (which uses system fonts) doesn't bleed through the canvas
   rendering that shows the actual PDF fonts.  A semi-transparent background

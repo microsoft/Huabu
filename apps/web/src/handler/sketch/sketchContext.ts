@@ -1,7 +1,7 @@
 /**
  * Stage 2: Context extraction.
  *
- * For each annotation cluster we collect lightweight wire refs (id +
+ * For each sketch cluster we collect lightweight wire refs (id +
  * type + label) for nearby nodes / enclosed nodes plus the IDs of
  * nearby edges. Carrying type + label saves the LLM a `read`
  * round-trip on simple gestures (it knows what each id refers to
@@ -23,8 +23,8 @@ import {
 } from '@sediment/shared';
 
 import type {
-  AnnotationCluster,
-  AnnotationContext,
+  SketchCluster,
+  SketchContext,
   CanvasNodeType,
   WireNodeRef,
 } from '@sediment/shared';
@@ -109,22 +109,26 @@ function segmentRectDistance(
 
 /**
  * Extract refs of canvas nodes / IDs of canvas edges spatially related
- * to the cluster. Each node ref carries id + type + label so the LLM\n * can address nodes without an extra `read`; positions, distances, and\n * shape inference are still NOT included \u2014 the LLM reads those off the\n * screenshot.\n */
-export function extractAnnotationContext(
-  cluster: AnnotationCluster,
+ * to the cluster. Each node ref carries id + type + label so the LLM
+ * can address nodes without an extra `read`; positions, distances, and
+ * shape inference are still NOT included — the LLM reads those off the
+ * screenshot.
+ */
+export function extractSketchContext(
+  cluster: SketchCluster,
   allNodes: Node[],
   allEdges: Edge[] = [],
-): AnnotationContext {
+): SketchContext {
   const clusterRect = cluster.bbox;
-  const annotationIds = new Set(cluster.strokeIds);
+  const sketchIds = new Set(cluster.strokeIds);
 
-  // Filter out annotation nodes from candidates. Frame nodes ARE included
+  // Filter out sketch nodes from candidates. Frame nodes ARE included
   // because the LLM may want to reason about them (e.g. delete a frame).
   const candidateNodes: Array<{ node: Node; rect: Rect; distance: number }> =
     [];
   for (const node of allNodes) {
-    if (annotationIds.has(node.id)) continue;
-    if (node.type === 'annotation') continue;
+    if (sketchIds.has(node.id)) continue;
+    if (node.type === 'sketch') continue;
     const rect = nodeToRect(node);
     if (rect.width === 0 && rect.height === 0) continue;
     candidateNodes.push({

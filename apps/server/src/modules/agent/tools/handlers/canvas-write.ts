@@ -50,8 +50,8 @@ function buildAIProvenance(): BlockProvenanceMap {
  *
  * `origin` controls the `NodeOrigin` stamp injected onto every CREATE /
  * MERGE / CREATE_QUESTION command. Defaults to `{ type: 'ai-operate' }`
- * for the chat/operate agent; the annotation pipeline overrides this to
- * `{ type: 'annotation-recognized' }` so user-authored gestures are not
+ * for the chat/operate agent; the sketch pipeline overrides this to
+ * `{ type: 'sketch-recognized' }` so user-authored gestures are not
  * mis-tagged as AI-initiated. Provenance (`author: 'ai'`) and
  * `labelSource: 'agent'` are still injected regardless of `origin` —
  * they describe who *wrote* the content, which is the LLM in both cases.

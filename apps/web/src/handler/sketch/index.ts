@@ -1,10 +1,10 @@
 /**
- * Annotation intent pipeline — barrel export.
+ * Sketch intent pipeline — barrel export.
  *
  * Pipeline (post-simplification):
- *   1. clusterAnnotations — group strokes into spatial clusters
- *   2. extractAnnotationContext — collect IDs of nearby/enclosed nodes + edges
- *   3. recognizeAnnotationCommands (server) — vision LLM with on-demand
+ *   1. clusterSketches — group strokes into spatial clusters
+ *   2. extractSketchContext — collect IDs of nearby/enclosed nodes + edges
+ *   3. recognizeSketchCommands (server) — vision LLM with on-demand
  *      `read` (for node content), `inspect_nodes` (for node layout /
  *      style / spatial relations), and `inspect_edges` (for edge style)
  *      tool access produces the canvas command batch
@@ -15,5 +15,5 @@
  * content. This eliminated the high false-positive rate of the rule path.
  */
 
-export { clusterAnnotations } from './clustering';
-export { extractAnnotationContext } from './context';
+export { clusterSketches } from './sketchClustering';
+export { extractSketchContext } from './sketchContext';

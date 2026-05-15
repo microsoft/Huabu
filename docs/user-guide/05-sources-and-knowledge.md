@@ -21,7 +21,7 @@ Huabu 把每个节点的"摄入内容"（PDF 正文、网页正文、Note 文字
 - `canvas.json` 由前端 store 同步，描述画布拓扑
 - `nodes/<node-title>.md` 由预处理流水线写入，描述节点的可被 AI 读取的内容
 
-> 哪些节点会生成 `.md`？**note / text / web / pdf / image / video / frame** 都会。其中 image / video / frame 的 `.md` 只存元数据（image / video 指向 `.artifacts/` 里的原始文件，frame 仅记录标题）。annotation / question / intent 不生成 `.md`。
+> 哪些节点会生成 `.md`？**note / text / web / pdf / image / video / frame** 都会。其中 image / video / frame 的 `.md` 只存元数据（image / video 指向 `.artifacts/` 里的原始文件，frame 仅记录标题）。sketch / question / intent 不生成 `.md`。
 
 > 早期版本中存在跨画布共享的 `sources/` 池，现已移除。每张画布独立存储自己的节点内容。
 

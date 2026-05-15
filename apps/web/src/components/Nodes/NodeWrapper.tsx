@@ -390,7 +390,12 @@ export const NodeWrapper = memo(
       <>
         <NodeResizer
           color="var(--color-info-light)"
-          isVisible={selected && resizable && !data.locked}
+          // Per-node handles only when this is the sole selected node.
+          // For multi-selection, a single set of handles is rendered on
+          // the selection bounding box by `MultiSelectResizer` instead.
+          isVisible={
+            selected && resizable && !data.locked && selectedCount === 1
+          }
           minWidth={minWidth}
           minHeight={minHeight}
           keepAspectRatio={keepAspectRatio}
@@ -436,22 +441,26 @@ export const NodeWrapper = memo(
             // effectively invisible against the canvas), so it should keep
             // the same soft edge as "no accent".
             type !== 'text' &&
-              type !== 'annotation' &&
+              type !== 'sketch' &&
               type !== 'question' &&
               (!data.style?.accent || data.style.accent === 'white') &&
               'shadow',
             !data.style?.backgroundColor && 'bg-transparent',
             selected
-              ? type === 'annotation'
+              ? type === 'sketch'
                 ? 'ring-info/50 ring'
                 : 'ring-info ring'
-              : type === 'annotation'
+              : type === 'sketch'
                 ? ''
                 : 'ring-border hover:ring',
             // Always reserve a 3px border so toggling accent on/off does
             // not shift inner content. Default border is transparent;
             // accent (or other states) override `borderColor` via style.
-            'border-3 border-transparent',
+            // Sketch nodes have no accent picker and no visible border, so
+            // skip the reservation — otherwise the 3px inset shrinks the
+            // SVG viewBox area vs the on-overlay preview, making the
+            // committed stroke jump and shrink at pointer-up.
+            type !== 'sketch' && 'border-3 border-transparent',
             // Question nodes need visible overflow for status badges and progress bar
             type === 'question' && 'overflow-visible',
             className,

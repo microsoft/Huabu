@@ -2,7 +2,7 @@
 id: canvas
 name: canvas
 description: Canvas mental model, tool boundaries, and command reference. The single entry point for any agent operating on a Huabu canvas.
-appliesTo: [ask, operate, annotation, external]
+appliesTo: [ask, operate, sketch, external]
 version: 1
 ---
 

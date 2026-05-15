@@ -32,7 +32,7 @@ export type TriggerReason = z.infer<typeof triggerReasonSchema>;
 
 /**
  * Subset of `CanvasNodeType` that the preprocess endpoint actually handles.
- * Excludes 'annotation' and 'question' which never carry preprocessable
+ * Excludes 'sketch' and 'question' which never carry preprocessable
  * payloads. Kept as its own enum so wire validation is tight and the
  * server doesn't have to defensively reject those types at runtime.
  */

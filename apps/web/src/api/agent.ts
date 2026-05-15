@@ -156,7 +156,6 @@ export const agentApi = {
       canvasContext?: AgentChatContext;
       canvasId?: string;
       attachments?: ChatAttachment[];
-      selectedNodeIds?: string[];
       intentData?: {
         candidates: IntentCandidate[];
         selectedIntent: string;
@@ -181,9 +180,6 @@ export const agentApi = {
       canvasId: options?.canvasId,
       attachments: options?.attachments?.length
         ? options.attachments
-        : undefined,
-      selectedNodeIds: options?.selectedNodeIds?.length
-        ? options.selectedNodeIds
         : undefined,
       intentData: options?.intentData,
       anchorNodeId: options?.anchorNodeId,

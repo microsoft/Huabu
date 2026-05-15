@@ -18,7 +18,7 @@
  * Replaces the four parallel implementations of "compute filename +
  * pick a preview line" that previously lived in:
  *   - agent.route.ts (selected nodes)
- *   - annotation.service.ts (annotation refs)
+ *   - sketch.service.ts (sketch refs)
  *   - canvas/canvas-spatial.ts (outline)
  *   - canvas/node-neighbourhood.ts (neighbourhood)
  *
@@ -44,7 +44,7 @@ import type { CanvasNodeType, WireNodeRef } from '@sediment/shared';
  *
  * Used by:
  *  - selected-node preamble (chat agent)
- *  - annotation cluster nearby/enclosed lists
+ *  - sketch cluster nearby/enclosed lists
  *  - any future "here is a node, do something with it" injection
  */
 export interface AgentNodeRef extends WireNodeRef {

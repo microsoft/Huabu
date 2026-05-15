@@ -1,4 +1,4 @@
-# Annotation Intent — 性能优化方案
+# Sketch Intent — 性能优化方案
 
 > 现状：即使规则命中，从“画完一笔”到“看到结果”仍然要 ≥ 3s（debounce） + 截图 + LLM。
 > 目标：**常见手势 < 500ms 出结果，疑难手势 < 3s**，且不损失准确率。
@@ -15,7 +15,7 @@
 | 网络上传               | **100–500 ms**   | 同上                   |
 | LLM vision 推理        | **2000–6000 ms** | 即使简单手势           |
 | operate agent 执行     | **1000–3000 ms** | 与本次优化无关，先不动 |
-| 删除 annotation node   | <10 ms           |                        |
+| 删除 sketch node       | <10 ms           |                        |
 
 **关键洞察**：debounce + 截图 + LLM 三项就吃掉了 5–10 秒。其中 90% 的常见手势（连线/圈/叉）走规则路径其实**根本不需要截图也不需要 LLM**。
 
@@ -41,13 +41,13 @@
 
 ## 3. O1 · 规则路径跳过截图 & 提前触发 ⭐️ 最高优先级
 
-**当前问题**：`triggerAnnotationRecognition` 总是先等 3s debounce，然后才开始判定走规则还是 LLM。规则命中时仍然先 `captureCanvasScreenshot()`（其实根本不用）。
+**当前问题**：`triggerSketchRecognition` 总是先等 3s debounce，然后才开始判定走规则还是 LLM。规则命中时仍然先 `captureCanvasScreenshot()`（其实根本不用）。
 
 **改造方案**：
 
 ```ts
 // 伪代码
-onAnnotationCreated(id) {
+onSketchCreated(id) {
   pendingIds.push(id);
   // 1. 立即跑 Stage 1+2+3a（纯客户端、毫秒级）
   const tentative = tryResolveImmediately(pendingIds);
@@ -83,7 +83,7 @@ onAnnotationCreated(id) {
 | 多条 stroke 但已稳定（500ms 无新增）    | 500 ms        |
 | 复杂、未识别                            | 2500 ms       |
 
-实现点：在 `onAnnotationCreated` 里根据 `tryResolveImmediately()` 的输出动态调整 `setTimeout` 延时。
+实现点：在 `onSketchCreated` 里根据 `tryResolveImmediately()` 的输出动态调整 `setTimeout` 延时。
 
 ---
 
@@ -132,11 +132,11 @@ captureCanvasScreenshot({
 
 ## 7. O5 · LLM 选模
 
-annotation 是「短输入 + 单结构化输出」任务，不需要最强模型。
+sketch 是「短输入 + 单结构化输出」任务，不需要最强模型。
 
 **改造方案**：
 
-- 在 LLM 配置里允许为 `annotation-intent` 任务单独绑定模型
+- 在 LLM 配置里允许为 `sketch-intent` 任务单独绑定模型
 - 推荐：小尺寸、视觉能力够、延迟低的模型（按当前供应商择优）
 - 输出格式可以进一步约束为 JSON Schema，提升解析稳定性
 
@@ -146,7 +146,7 @@ annotation 是「短输入 + 单结构化输出」任务，不需要最强模型
 
 ## 8. O6 · 多 cluster 并行 LLM
 
-**当前问题**：`triggerAnnotationRecognition` 中 LLM clusters 是 sequential 顺序处理。
+**当前问题**：`triggerSketchRecognition` 中 LLM clusters 是 sequential 顺序处理。
 
 **改造方案**：
 
@@ -177,7 +177,7 @@ const llmResults = await Promise.allSettled(
 风险：
 
 - 规则误判会立刻看见错误，需要 undo 体验顺滑
-- 需要在 store 里新增 `executeAnnotationIntentDirectly(resolved)`，把规则结果直接转成 `CanvasUiIntent`
+- 需要在 store 里新增 `executeSketchIntentDirectly(resolved)`，把规则结果直接转成 `CanvasUiIntent`
 
 ---
 

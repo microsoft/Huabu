@@ -3,12 +3,12 @@
  *
  * Validation contracts for the unified `/api/agent` endpoint and its
  * sibling routes (chat history, context tokens, intent recognition,
- * annotation, intent episode logging). Per docs/api-design.md: schemas
+ * sketch, intent episode logging). Per docs/api-design.md: schemas
  * are the single source of truth, types derived via `z.infer`.
  *
  * Wire-only node payloads (`WireNodeRef` / `WireSelectionNode` /
  * `WireCanvasNode`) and the request envelopes that wrap them
- * (`AgentChatContext`, `IntentContext`, `AnnotationClusterContext`)
+ * (`AgentChatContext`, `IntentContext`, `SketchClusterContext`)
  * have explicit zod schemas so every public HTTP boundary gets
  * field-level validation — no payload reaches business logic via a
  * trust-the-caller `z.custom`. The richer `IntentEpisode` log shape
@@ -23,7 +23,7 @@ import { CANVAS_NODE_TYPES } from '../canvas/node.js';
 
 import type {
   AgentChatContext,
-  AnnotationClusterContext,
+  SketchClusterContext,
   IntentContext,
   IntentEpisode,
 } from '../agent/index.js';
@@ -124,7 +124,21 @@ export type WireCanvasNode = z.infer<typeof wireCanvasNodeSchema>;
 export const chatAttachmentSchema = z.object({
   type: z.enum(['image', 'pdf', 'text', 'file', 'web']),
   source: z.enum(['upload', 'excerpt', 'selection']),
+  /**
+   * Single source node — used for 1:1 attachments (PDF excerpt, text
+   * selection, image node send-to-chat). The chat UI renders a
+   * clickable badge linking back to this node.
+   */
   originNodeId: z.string().optional(),
+  /**
+   * Multiple source nodes — used for attachments derived from a group
+   * of nodes (e.g. one image rendered from a sketch cluster of N
+   * strokes). Coexists with `originNodeId`; consumers that only
+   * understand the singular field still get a clickable badge for the
+   * primary node, while `originNodeIds` carries the full set for the
+   * agent and for richer UI rendering.
+   */
+  originNodeIds: z.array(z.string()).optional(),
   url: z.string().optional(),
   content: z.string().optional(),
   label: z.string().optional(),
@@ -165,8 +179,8 @@ export const intentContextSchema = z.object({
   selectedNodes: z.array(wireSelectionNodeSchema),
 }) satisfies z.ZodType<IntentContext>;
 
-/** Wire shape of {@link AnnotationClusterContext}. */
-export const annotationClusterContextSchema = z.object({
+/** Wire shape of {@link SketchClusterContext}. */
+export const sketchClusterContextSchema = z.object({
   bbox: z.object({
     x: z.number(),
     y: z.number(),
@@ -177,7 +191,7 @@ export const annotationClusterContextSchema = z.object({
   nearbyNodes: z.array(wireNodeRefSchema),
   enclosedNodes: z.array(wireNodeRefSchema),
   nearbyEdgeIds: z.array(z.string().min(1)),
-}) satisfies z.ZodType<AnnotationClusterContext>;
+}) satisfies z.ZodType<SketchClusterContext>;
 
 /** Body for `POST /api/agent`. */
 export const agentRequestSchema = z.object({
@@ -187,7 +201,6 @@ export const agentRequestSchema = z.object({
   canvasContext: agentChatContextSchema.optional(),
   canvasId: z.string().min(1).optional(),
   attachments: z.array(chatAttachmentSchema).optional(),
-  selectedNodeIds: z.array(z.string().min(1)).optional(),
   intentData: z
     .object({
       candidates: z.array(intentCandidateSchema),
@@ -221,15 +234,13 @@ export const intentRequestSchema = z.object({
 });
 export type IntentRequest = z.infer<typeof intentRequestSchema>;
 
-/** Body for `POST /api/intent/recognize-annotation`. */
-export const annotationIntentRequestSchema = z.object({
+/** Body for `POST /api/intent/recognize-sketch`. */
+export const sketchIntentRequestSchema = z.object({
   screenshot: z.string().min(1, 'screenshot is required'),
-  clusterContext: annotationClusterContextSchema,
+  clusterContext: sketchClusterContextSchema,
   canvasId: z.string().min(1).optional(),
 });
-export type AnnotationIntentRequest = z.infer<
-  typeof annotationIntentRequestSchema
->;
+export type SketchIntentRequest = z.infer<typeof sketchIntentRequestSchema>;
 
 /** Body for `POST /api/intent/episode`. */
 export const intentEpisodeRequestSchema = z.object({

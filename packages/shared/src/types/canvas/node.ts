@@ -20,7 +20,7 @@ export const CANVAS_NODE_TYPES = [
   'video',
   'web',
   'frame',
-  'annotation',
+  'sketch',
   'question',
 ] as const;
 export type CanvasNodeType = (typeof CANVAS_NODE_TYPES)[number];
@@ -28,7 +28,7 @@ export type CanvasNodeType = (typeof CANVAS_NODE_TYPES)[number];
 /**
  * Node kinds the agent is allowed to construct via `CREATE_NODES`.
  * Excludes:
- * - `annotation` — produced only by the freehand drawing tool.
+ * - `sketch` — produced only by the freehand drawing tool.
  * - `question` — created via the dedicated `CREATE_QUESTION` command,
  *   which carries question-specific fields.
  */
@@ -57,8 +57,8 @@ export type NodeOrigin =
   | { type: 'user-from-library' }
   | { type: 'user-from-chat'; threadId?: string }
   | { type: 'user-excerpt'; excerptFromNodeId?: string }
-  // Annotation recognition
-  | { type: 'annotation-recognized' };
+  // Sketch recognition
+  | { type: 'sketch-recognized' };
 
 /** All possible values of `NodeOrigin['type']`. */
 export type NodeOriginType = NodeOrigin['type'];
@@ -320,21 +320,50 @@ export interface FrameNodeData extends BaseNodeData {
   type: 'frame';
 }
 
-/** Annotation node: freehand drawing stored as pressure-sensitive points */
-export interface AnnotationNodeData extends BaseNodeData {
-  type: 'annotation';
-  /** Array of [x, y, pressure] points in local node coordinates */
+/**
+ * One pen-down → pen-up trace inside a {@link SketchNodeData}.
+ *
+ * Stored in node-local coordinates (origin = node bbox top-left). When
+ * the user draws a new stroke close in space + time to an existing
+ * sketch node, the new stroke is appended to that node's `strokes`
+ * array (see `SketchOverlay.handlePointerUp`); otherwise a fresh node
+ * is created with a single-stroke array.
+ */
+export interface SketchStroke {
+  /** Stable id, generated with `createId('stroke')`. */
+  id: string;
+  /** [x, y, pressure] points in node-local coordinates. */
   points: number[][];
-  /** Original bounding box size when the stroke was created */
-  initialSize: { width: number; height: number };
-  /** Stroke color (hex) */
-  strokeColor?: string;
+  /** Stroke color — palette token (e.g. `'red'`) or hex string. */
+  color: string;
   /**
-   * True after the intent pipeline has consumed this annotation. Executed
-   * strokes are dimmed on the canvas instead of being deleted, so the user
-   * can still see what they drew.
+   * Stroke thickness in flow-space units (matches `perfect-freehand`'s
+   * `size` option).
    */
-  executed?: boolean;
+  size: number;
+  /**
+   * Wall-clock ms at pointer-up. Used by the merge window in
+   * `SketchOverlay` to decide whether a new stroke joins this node.
+   */
+  createdAt: number;
+}
+
+/** Sketch node: freehand drawing stored as one or more pressure-sensitive strokes. */
+export interface SketchNodeData extends BaseNodeData {
+  type: 'sketch';
+  /**
+   * Strokes painted into this node, in document order (back → front).
+   * A live sketch node always has at least one stroke; the eraser deletes
+   * the node when the last stroke is removed.
+   */
+  strokes: SketchStroke[];
+  /**
+   * Reference bbox in node-local coords — the size at which `strokes`
+   * are unscaled. The renderer compares the node's current measured
+   * size to this to derive `scaleX` / `scaleY`. Updated whenever the
+   * bbox is recomputed (new stroke merged in, eraser deletes a stroke).
+   */
+  initialSize: { width: number; height: number };
 }
 // ==================== Question Node ====================
 
@@ -348,7 +377,7 @@ export type QuestionNodeStatus =
 
 /**
  * Extensible input union for question nodes.
- * Discriminated on `kind` — add new modalities (annotation, voice, etc.) here.
+ * Discriminated on `kind` — add new modalities (sketch, voice, etc.) here.
  */
 export type QuestionInput = { kind: 'text'; content: string };
 
@@ -385,7 +414,7 @@ export type NodeData =
   | VideoNodeData
   | ImageNodeData
   | FrameNodeData
-  | AnnotationNodeData
+  | SketchNodeData
   | QuestionNodeData;
 
 // ==================== Type Guards ====================
@@ -408,8 +437,8 @@ export function isFrameNode(data: NodeData): data is FrameNodeData {
   return data.type === 'frame';
 }
 
-export function isAnnotationNode(data: NodeData): data is AnnotationNodeData {
-  return data.type === 'annotation';
+export function isSketchNode(data: NodeData): data is SketchNodeData {
+  return data.type === 'sketch';
 }
 
 export function isQuestionNode(data: NodeData): data is QuestionNodeData {

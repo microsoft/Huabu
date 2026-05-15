@@ -37,7 +37,7 @@ POST /api/agent                           POST /api/intent/recognize
     content, threadId, mode,                  canvasContext: IntentContext
     canvasContext: AgentChatContext,        }
     canvasId, attachments,
-    selectedNodeIds, intentData
+    intentData, anchorNodeId
   }
   │
   ▼服务端 agent.route.ts
@@ -99,8 +99,8 @@ canvas_commands / web_search / use_skill ...
   - 通过 `html-to-image` 截 `.react-flow__viewport`,3× 倍率,base64 PNG。
   - **普通对话不发**;仅在 [intent 识别](../apps/server/src/prompt/intent.ts) 时附带。
   - 截图会做"标注增强":最近动作的节点画红框、左上角红色 banner 写
-    `Last step: <action description>`,annotation 笔触以红色高亮。
-- **annotation 笔触**:作为节点存在,但 `points` 几何数据 **不进 Agent 上下文**;
+    `Last step: <action description>`，sketch 笔触以红色高亮。
+- **sketch 笔触**:作为节点存在,但 `points` 几何数据 **不进 Agent 上下文**;
   仅在 intent 截图里以红色笔触可见。
 
 ### 2.4 时间 / 动作信号
@@ -117,12 +117,13 @@ canvas_commands / web_search / use_skill ...
 
 ### 2.5 用户意图 / 选择信号
 
-- `selectedNodeIds[]`:除了 `canvasContext.selectedNodes` 外,在 `AgentRequest`
-  顶层另带一份 id 列表。服务端会用它调用 `buildNodeSummaries`,把
-  **预处理 enrich 出的 `summary + keywords`** 拼进一条
+- `canvasContext.selectedNodes`：唯一的选中信号来源。服务端用
+  `collectSelectedNodeRefs(canvasContext.selectedNodes)` 拼出
   `[SYSTEM Context]\n[Selected Nodes (id / label / type only — read "nodes/<id>.md" for content, inspect_nodes({ ids: [...] }) for layout / style / spatial relations)]`
-  系统消息。
-  > **这是目前唯一一条让 enrich 摘要进入上下文的路径**,且只覆盖选中节点。
+  系统消息；同时通过 `collectSelectedNodeIds` 派生 id 列表，作为
+  `[SYSTEM selectedNodeIds:[...]]` metadata tag 嵌入持久化的 user message，
+  仅供后续 history 回读时给前端渲染选中节点徽标使用——**id 列表不进 prompt**，
+  线上也不再单独传一份。
 - `attachments[]`:用户聊天时显式贴入的图 / PDF / 文本 / 链接。
 - `intentData`:候选意图列表 + 用户最终选定的那一条 —
   [packages/shared/src/types/agent.ts](../packages/shared/src/types/agent.ts)。
@@ -158,7 +159,7 @@ canvas_commands / web_search / use_skill ...
 - 鼠标 hover、cursor 位置
 - 节点 provenance(BlockProvenance:作者、时间、AI 修改痕迹、pending diff)
 - 节点 **认知状态**(草稿 / 已确认 / 问题 / 归档)——尚未建模
-- annotation 笔触的几何或语义解读(只在截图里给 LLM 看)
+- sketch 笔触的几何或语义解读(只在截图里给 LLM 看)
 - **非选中节点**的 enrich summary(只对选中节点注入)
 - 工作区路径、其他 canvas 列表、canvas title
 - 用户偏好 / 设置
@@ -209,7 +210,7 @@ canvas_commands / web_search / use_skill ...
    pending diff)未传给 Agent,可能导致 AI 反复改自己的草稿、误覆盖用户内容。
 7. **视觉布局对 LLM 不可见**：常规对话不发截图，Agent 只能从坐标和
    `get_canvas_outline` / `inspect_nodes` 的输出推断画布外观；sketch /
-   annotation 的几何意图丢失。
+   sketch 的几何意图丢失。
 8. **动作无时间戳**:`recentActions` 不含 timestamp,Agent 看不出节奏
    (连续操作 vs 隔了很久才回来)。
 9. **跨 canvas 隔离**:Agent 不知道工作区还有哪些 canvas,无法形成跨画布
@@ -288,9 +289,9 @@ canvas_commands / web_search / use_skill ...
 - **T3-B 常规对话可选附带视口截图**(opt-in 开关):
   复用现有 [screenshot.ts](../apps/web/src/handler/canvasCommand/utils/screenshot.ts),
   对"帮我看看这片区域"类问题提升巨大。
-- **T3-C Annotation 几何 → 结构化语义**:
+- **T3-C Sketch 几何 → 结构化语义**：
   把 strokes 经一层简化(包围盒 / 圈住的节点 ids / 形状粗判:
-  circle / arrow / cross),作为 `annotationSemantic` 字段。
+  circle / arrow / cross），作为 `sketchSemantic` 字段。
   Agent 不必依赖图像也能理解"用户圈住了 A、B、C"。
 
 ### Tier 4 · 让"思考的轨迹"外化(长远)
@@ -348,7 +349,7 @@ L0 是"画布的骨架",L1 是"画布的语义索引",L2 是"画布的全文"。
 
 > ✅ 默认提供 / 🛠 通过工具按需 / ✗ 不暴露 / 👁 通过视觉(截图)
 
-| 信号                                  | Ask       | Operate   | Intent (Ctrl+I) | Annotation Intent | Preprocessing | Prompt Node |
+| 信号                                  | Ask       | Operate   | Intent (Ctrl+I) | Sketch Intent     | Preprocessing | Prompt Node |
 | ------------------------------------- | --------- | --------- | --------------- | ----------------- | ------------- | ----------- |
 | L0 节点骨架 (`NodeSummary` 全集)      | ✅        | ✅        | ✅              | 👁 + 节点 id 角标 | ✗(单节点)     | ✅(邻居)    |
 | L1 摘要 (`aiDigest`)                  | ✅        | ✅        | ✅              | ✗                 | ✗             | ✅(邻居)    |
@@ -360,7 +361,7 @@ L0 是"画布的骨架",L1 是"画布的语义索引",L2 是"画布的全文"。
 | 空间聚类（outline / cluster）         | 🛠        | 🛠        | 🛠              | ✗                 | ✗             | ✗           |
 | 视口 `viewport`(T3-A)                 | ✅        | ✅        | ✅              | 隐含于截图        | ✗             | ✗           |
 | 截图                                  | 🛠 opt-in | 🛠 opt-in | ✅(标注增强)    | ✅(主输入)        | ✗             | ✗           |
-| Annotation 语义(T3-C)                 | ✅        | ✅        | ✅              | ✅                | ✗             | ✗           |
+| Sketch 语义(T3-C)                     | ✅        | ✅        | ✅              | ✅                | ✗             | ✗           |
 | `recentActions` + 时间戳              | ✅        | ✅        | ✅              | ✗                 | ✗             | ✗           |
 | 聊天历史                              | ✅        | ✅        | ✗               | ✗                 | ✗             | ✗           |
 | 节点正文全文                          | 🛠        | 🛠        | ✗               | ✗                 | ✗             | 🛠          |
@@ -400,12 +401,12 @@ L0 是"画布的骨架",L1 是"画布的语义索引",L2 是"画布的全文"。
 - **要点**:Intent 是**最贵**的"看一眼就要给五个建议"的功能,**视觉信号(截图)
   是它的核心**,文字 context 应当**精简到 L0 + L1**。
 
-#### D. Annotation Intent(笔触意图)
+#### D. Sketch Intent(笔触意图)
 
 - **默认**:截图(带红色笔触和被圈节点 id 角标)+ 被圈节点的 L0(id/type/label
-  即可,不带 L1)+ Annotation 语义字段(T3-C 提供的圈选/箭头/划掉粗判)。
+  即可,不带 L1)+ Sketch 语义字段(T3-C 提供的圈选/箭头/划掉粗判)。
 - **不发**:任何文本上下文。
-- **要点**:这是**视觉优先**的功能,文字越少越好,**Annotation 语义字段**
+- **要点**:这是**视觉优先**的功能,文字越少越好,**Sketch 语义字段**
   让模型不必完全依赖图像识别也能稳定理解"用户圈住了 A、B、C"。
 
 #### E. Preprocessing(后台 enrich)
@@ -438,7 +439,7 @@ L0 是"画布的骨架",L1 是"画布的语义索引",L2 是"画布的全文"。
 | `get_node_details_batch`              | `nodeIds: string[]` | `Array<{ nodeId, content, contentJson?, sourceId? }>`  | 一次取多节点正文，避免 N 次 `read`                |
 | `get_node_provenance(nodeId)`         | `nodeId`            | BlockProvenance(作者/时间/AI 修改/pending diff)        | Operate 前的安全检查,避免误覆盖用户内容           |
 | `get_block_tree(nodeId)`              | `nodeId`            | BlockNote 结构化树(标题/段落/列表/code 块)             | 让模型理解文档结构而不必再 parse markdown         |
-| `get_annotation_strokes(nodeId)`      | `nodeId`            | 简化几何(包围盒 / 圈中节点 / 形状粗判)                 | Annotation 节点的语义解读,不必依赖整张截图        |
+| `get_sketch_strokes(nodeId)`          | `nodeId`            | 简化几何（包围盒 / 圈中节点 / 形状粗判）               | Sketch 节点的语义解读，不必依赖整张截图           |
 | `get_recent_history(canvasId, since)` | `since: ts`         | 超出 ring buffer 的更长动作历史                        | 复盘"昨天我做了什么"                              |
 | `list_canvases(workspace)`            | —                   | `Array<{ canvasId, title, lastUpdated, topKeywords }>` | 让 Agent 知道工作区还有哪些 canvas                |
 | `get_canvas_digest(canvasId)`         | `canvasId`          | 该 canvas 的 L0+L1 + 顶层 frame 树                     | 跨 canvas 跳转的"轻量观察"                        |
@@ -452,7 +453,7 @@ L0 是"画布的骨架",L1 是"画布的语义索引",L2 是"画布的全文"。
 - 节点正文(L2 markdown)
 - BlockNote 完整 contentJson
 - BlockProvenance 全量(per-block 修改记录)
-- Annotation 节点的原始 `points` 几何数组
+- Sketch 节点的原始 `points` 几何数组
 - 跨 canvas 的全画布状态
 - 历史 checkpoint 的完整序列(只暴露必要切片)
 
@@ -470,7 +471,7 @@ L0 是"画布的骨架",L1 是"画布的语义索引",L2 是"画布的全文"。
 2. **T2-C**(epistemicStatus) — 把"思考状态"显化,直接对齐
    Externalize Thinking。
 3. **T2-A / T2-B**(结构索引 + 边语义) — 让结构变成一等公民。
-4. **T3-A / T3-C**(viewport + annotation 语义) — 让 Agent 真正"在场"。
+4. **T3-A / T3-C**(viewport + sketch 语义) — 让 Agent 真正"在场"。
 5. **新增 Tool**(`get_node_details_batch` / `get_provenance` / `get_canvas_digest`)
    — 把"L2 走工具"的契约真正闭环。
 6. **T4**(vault 镜像、跨 canvas) — 长期愿景。

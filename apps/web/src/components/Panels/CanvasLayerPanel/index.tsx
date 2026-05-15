@@ -2,11 +2,13 @@ import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { useMemo } from 'react';
 
 import { CanvasLayerTree } from './CanvasLayerTree';
-import { getNodeIcon, NODE_TYPE_LABEL } from '../../../config/nodeIcons';
+import { getNodeIcon } from '../../../config/nodeIcons';
 import useCanvasStore from '../../../store/canvasStore';
+import { SketchIcon } from '../../Nodes/sketch/SketchIcon';
 import { SidebarPanel } from '../SidebarPanel';
 
 import type { DataSourceNodeLike, DataSourceTreeItem } from './types';
+import type { SketchStroke } from '@sediment/shared';
 
 interface CanvasLayerPanelProps {
   isCollapsed?: boolean;
@@ -16,16 +18,28 @@ interface CanvasLayerPanelProps {
 const ICON_SIZE = 14;
 const ICON_STROKE_WIDTH = 1.5;
 
-const getNodeTitleAndIcon = (nodeType: string | undefined) => {
-  const Icon = getNodeIcon(nodeType);
-  const title =
-    nodeType && nodeType in NODE_TYPE_LABEL
-      ? NODE_TYPE_LABEL[nodeType as keyof typeof NODE_TYPE_LABEL]
-      : 'Block';
-  return {
-    title,
-    icon: <Icon size={ICON_SIZE} strokeWidth={ICON_STROKE_WIDTH} />,
-  };
+const renderNodeIcon = (node: DataSourceNodeLike) => {
+  // Sketch nodes render a tiny polyline preview of their strokes so the
+  // layer panel reflects each drawing's actual shape. Falls back to the
+  // lucide Pencil icon if the node has no strokes yet (legacy / empty).
+  if (node.type === 'sketch') {
+    const strokes = node.data.strokes as SketchStroke[] | undefined;
+    const initialSize = node.data.initialSize as
+      | { width: number; height: number }
+      | undefined;
+    if (strokes && strokes.length > 0 && initialSize) {
+      return (
+        <SketchIcon
+          strokes={strokes}
+          initialSize={initialSize}
+          size={ICON_SIZE}
+        />
+      );
+    }
+  }
+
+  const Icon = getNodeIcon(node.type);
+  return <Icon size={ICON_SIZE} strokeWidth={ICON_STROKE_WIDTH} />;
 };
 
 const getNodeDisplayName = (node: DataSourceNodeLike): string => {
@@ -75,10 +89,6 @@ export const CanvasLayerPanel = ({
   // Canvas layer tree: use original node order (hierarchy-based)
   const layerItems = useMemo(() => buildTreeItems(nodes), [nodes]);
 
-  const getIcon = (nodeType: string | undefined) => {
-    return getNodeTitleAndIcon(nodeType).icon;
-  };
-
   return (
     <SidebarPanel
       title="Layers"
@@ -90,7 +100,7 @@ export const CanvasLayerPanel = ({
     >
       <CanvasLayerTree
         items={layerItems}
-        getIcon={getIcon}
+        getIcon={renderNodeIcon}
         getDisplayName={getNodeDisplayName}
       />
     </SidebarPanel>

@@ -27,7 +27,7 @@ export function toScreenshotDataUrl(screenshot: string): string {
 interface NodeLabel {
   id: string;
   label: string;
-  /** Node type (e.g. 'note', 'annotation'). */
+  /** Node type (e.g. 'note', 'sketch'). */
   nodeType: string;
   /** Position relative to the viewport element, already scaled by CAPTURE_RATIO. */
   x: number;
@@ -298,10 +298,10 @@ function drawAnnotatedImage(
     }
   }
 
-  // --- Pass 2: Draw ID badges on all non-annotation nodes ---
-  // Annotation nodes don't get badges — they are drawn in Pass 5.
+  // --- Pass 2: Draw ID badges on all non-sketch nodes ---
+  // Sketch nodes don't get badges — they are drawn in Pass 5.
   for (const nl of labels) {
-    if (nl.nodeType === 'annotation') continue;
+    if (nl.nodeType === 'sketch') continue;
 
     const isHighlighted = highlightIds.has(nl.id);
     const text = nl.label;
@@ -373,19 +373,19 @@ function drawAnnotatedImage(
     }
   }
 
-  // --- Pass 5: Draw a single red bounding box around all annotation nodes ---
-  // Annotation strokes are ephemeral gestures; grouping them into one box
+  // --- Pass 5: Draw a single red bounding box around all sketch nodes ---
+  // Sketch strokes are ephemeral gestures; grouping them into one box
   // keeps the visual layer clean and avoids cluttering with individual IDs.
-  const annotationNodes = labels.filter((nl) => nl.nodeType === 'annotation');
-  if (annotationNodes.length > 0) {
-    const annotationBorder = 3 * CAPTURE_RATIO;
+  const sketchNodes = labels.filter((nl) => nl.nodeType === 'sketch');
+  if (sketchNodes.length > 0) {
+    const sketchBorder = 3 * CAPTURE_RATIO;
     const pad = 6 * CAPTURE_RATIO;
 
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
-    for (const nl of annotationNodes) {
+    for (const nl of sketchNodes) {
       minX = Math.min(minX, nl.x);
       minY = Math.min(minY, nl.y);
       maxX = Math.max(maxX, nl.x + nl.w);
@@ -393,7 +393,7 @@ function drawAnnotatedImage(
     }
 
     ctx.strokeStyle = '#ef4444';
-    ctx.lineWidth = annotationBorder;
+    ctx.lineWidth = sketchBorder;
     ctx.setLineDash([]);
     ctx.beginPath();
     ctx.roundRect(

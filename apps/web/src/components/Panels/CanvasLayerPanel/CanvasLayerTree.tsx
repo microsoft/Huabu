@@ -31,7 +31,7 @@ interface SortableRowProps {
   isCollapsed: boolean;
   isLocked: boolean;
   isDraggingDisabled: boolean;
-  getIcon: (nodeType: string | undefined) => React.ReactNode;
+  getIcon: (node: DataSourceNodeLike) => React.ReactNode;
   getDisplayName: (node: DataSourceNodeLike) => string;
   onSelect: (id: string, event: React.MouseEvent) => void;
   onRename: (id: string, newName: string) => Promise<boolean>;
@@ -72,7 +72,7 @@ const SortableRow = React.memo(
     return (
       <TreeRowItem
         depth={item.depth}
-        icon={getIcon(item.node.type)}
+        icon={getIcon(item.node)}
         label={getDisplayName(item.node)}
         isSelected={isDirectlySelected}
         isHighlighted={isHighlighted}
@@ -98,7 +98,7 @@ SortableRow.displayName = 'SortableRow';
 
 export interface CanvasLayerTreeProps {
   items: DataSourceTreeItem[];
-  getIcon: (nodeType: string | undefined) => React.ReactNode;
+  getIcon: (node: DataSourceNodeLike) => React.ReactNode;
   getDisplayName: (node: DataSourceNodeLike) => string;
   emptyText?: string;
 }

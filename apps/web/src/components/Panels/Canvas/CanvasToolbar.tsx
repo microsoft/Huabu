@@ -26,6 +26,7 @@ import {
   SplitSelect,
   type SplitSelectOption,
 } from '../../Common/SplitSelect.tsx';
+import { SketchSettingsPanel } from '../../Nodes/sketch/SketchSettingsPanel.tsx';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
 
@@ -38,6 +39,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
   const addNodes = useCanvasStore((s) => s.addNodes);
   const pendingNodeType = useCanvasStore((s) => s.pendingNodeType);
   const setPendingNodeType = useCanvasStore((s) => s.setPendingNodeType);
+  const setSketchDraft = useCanvasStore((s) => s.setSketchDraft);
   const layoutAll = useCanvasStore((s) => s.layoutAll);
   const autoLayoutEnabled = useCanvasStore((s) => s.autoLayoutEnabled);
   const toggleAutoLayout = useCanvasStore((s) => s.toggleAutoLayout);
@@ -282,6 +284,27 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           >
             <NODE_ICON.text />
           </Button>
+          <div className="relative flex items-center">
+            {pendingNodeType === 'sketch' && <SketchSettingsPanel />}
+            <Button
+              variant="ghost"
+              iconOnly
+              title="Sketch"
+              className={clsx(
+                pendingNodeType === 'sketch' && 'text-info bg-bg-default',
+              )}
+              onClick={() => {
+                // Clicking the Sketch button always resets the tool to draw
+                // mode so the eraser doesn't silently persist between sessions.
+                setSketchDraft({ mode: 'draw' });
+                setPendingNodeType(
+                  pendingNodeType === 'sketch' ? null : 'sketch',
+                );
+              }}
+            >
+              <NODE_ICON.sketch />
+            </Button>
+          </div>
         </div>
 
         <div className="bg-border mx-1 h-4 w-px" />
@@ -354,21 +377,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           >
             <NODE_ICON.question />
           </Button>
-          <Button
-            variant="ghost"
-            iconOnly
-            title="Annotation"
-            className={clsx(
-              pendingNodeType === 'annotation' && 'text-info bg-bg-default',
-            )}
-            onClick={() =>
-              setPendingNodeType(
-                pendingNodeType === 'annotation' ? null : 'annotation',
-              )
-            }
-          >
-            <NODE_ICON.annotation />
-          </Button>
+
           <Button
             variant="ghost"
             iconOnly

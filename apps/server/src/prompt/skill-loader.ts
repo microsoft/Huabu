@@ -12,7 +12,7 @@
  *   - id          string, must match the directory name
  *   - name        human-readable label
  *   - description short catalogue blurb
- *   - appliesTo   array of agent surfaces (ask | operate | annotation | external)
+ *   - appliesTo   array of agent surfaces (ask | operate | sketch | external)
  * Optional:
  *   - triggers    string[] (catalogue ranking hints, unused in phase 1)
  *   - version     number
@@ -40,11 +40,11 @@ import { parseFrontmatter } from '../modules/storage/frontmatter.js';
  * Agent surfaces a skill is intended for.
  *
  * `ask` / `operate` mirror the public `AgentMode` enum from
- * `@sediment/shared`; `annotation` is the annotation-intent
+ * `@sediment/shared`; `sketch` is the sketch-intent
  * pipeline; `external` is reserved for skills that should also be
  * advertised to external agents (Copilot / Codex / Claude Code).
  */
-export type SkillScope = 'ask' | 'operate' | 'annotation' | 'external';
+export type SkillScope = 'ask' | 'operate' | 'sketch' | 'external';
 
 export interface SkillFrontmatter {
   id: string;
@@ -81,7 +81,7 @@ const REQUIRED_FRONTMATTER_KEYS = [
 const VALID_SCOPES: ReadonlySet<SkillScope> = new Set<SkillScope>([
   'ask',
   'operate',
-  'annotation',
+  'sketch',
   'external',
 ]);
 

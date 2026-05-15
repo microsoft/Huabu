@@ -24,12 +24,12 @@ export type { ToolDefinition } from './definitions.js';
 /**
  * Surfaces the tool builder understands.
  *
- * Mirrors `AgentMode` plus `'annotation'` for the freehand-gesture
+ * Mirrors `AgentMode` plus `'sketch'` for the freehand-gesture
  * pipeline. Kept local rather than reusing `SkillScope` from the
  * skill loader because `'external'` agents bring their own tooling
  * and should never go through this builder.
  */
-export type ToolScope = AgentMode | 'annotation';
+export type ToolScope = AgentMode | 'sketch';
 
 /** Per-request context closed over by every tool's `execute`. */
 export interface ToolBuildContext {
@@ -38,8 +38,8 @@ export interface ToolBuildContext {
   /**
    * `NodeOrigin` stamp injected onto every node created by the
    * `canvas_commands` tool. Defaults to `{ type: 'ai-operate' }`
-   * inside the handler when unset; the annotation pipeline overrides
-   * it to `{ type: 'annotation-recognized' }` so user-authored
+   * inside the handler when unset; the sketch pipeline overrides
+   * it to `{ type: 'sketch-recognized' }` so user-authored
    * gestures are not mis-tagged as AI-initiated. Other tools ignore
    * this field.
    */

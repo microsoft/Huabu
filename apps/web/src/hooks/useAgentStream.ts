@@ -8,6 +8,7 @@ import {
 import { useState, useCallback, useRef, useEffect } from 'react';
 
 import { agentApi } from '@/api/agent';
+import { buildSketchAttachmentsFromSelection } from '@/handler/sketch/buildSketchAttachments';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 
@@ -17,6 +18,7 @@ import type { ResourceLabel } from '../components/Messages/types';
 import type {
   AgentMode,
   AgentStreamEvent,
+  ChatAttachment,
   IntentCandidate,
 } from '@sediment/shared';
 
@@ -24,6 +26,15 @@ import type {
 
 /**
  * Parse a tool result string into a proper ToolResponse.
+ *
+ * The server already wraps every tool result in a
+ * `{ tool, status, ... }` envelope (see
+ * apps/server/src/modules/agent/agent.service.ts). We accept that
+ * envelope verbatim, accept bare JSON values as `{ status: 'success',
+ * data }`, and treat parse failures as an error envelope so a
+ * malformed payload can never masquerade as a successful tool result
+ * (which would mislead canvas-write style tools that downstream code
+ * applies blind).
  */
 function parseToolResponse(
   toolName: string,
@@ -40,9 +51,25 @@ function parseToolResponse(
     ) {
       return parsed as ToolResponse<string, unknown>;
     }
+    // Valid JSON but not the standard envelope — treat as a successful
+    // result whose payload IS the parsed value.
     return { tool: toolName, status: 'success', data: parsed };
-  } catch {
-    return { tool: toolName, status: 'success', data: { content: raw } };
+  } catch (err) {
+    // Truncate the raw text in the error message to keep the chat
+    // bubble readable; the full raw value is preserved on `data.raw`
+    // for debugging.
+    const preview = raw.length > 200 ? `${raw.slice(0, 200)}…` : raw;
+    console.error(
+      '[useAgentStream] tool result was not valid JSON',
+      toolName,
+      err,
+    );
+    return {
+      tool: toolName,
+      status: 'error',
+      error: `Tool returned non-JSON output: ${preview}`,
+      data: { raw },
+    } as ToolResponse<string, unknown>;
   }
 }
 
@@ -510,16 +537,36 @@ export function useAgentStream(): UseAgentStreamReturn {
         ...pendingAttachments,
         ...(selectionAttachment ? [selectionAttachment] : []),
       ];
-      const attachments = allPending.length > 0 ? allPending : undefined;
-      if (attachments) {
+
+      const allNodes = useCanvasStore.getState().nodes;
+      const selectedNodeIds = allNodes
+        .filter((n) => n.selected)
+        .map((n) => n.id);
+
+      // If the user selected sketch nodes, rasterise each spatial cluster
+      // (scoped per parent frame) into a PNG attachment so the vision
+      // pipeline can see the gesture without a separate sketch-recognition
+      // round-trip. Failure here must not block the chat send — we log
+      // and proceed with whatever attachments did succeed.
+      let sketchAttachments: ChatAttachment[] = [];
+      if (selectedNodeIds.length > 0) {
+        try {
+          sketchAttachments = await buildSketchAttachmentsFromSelection(
+            selectedNodeIds,
+            allNodes,
+          );
+        } catch (err) {
+          console.error('[useAgentStream] sketch attachment build failed', err);
+        }
+      }
+
+      const mergedAttachments = [...allPending, ...sketchAttachments];
+      const attachments =
+        mergedAttachments.length > 0 ? mergedAttachments : undefined;
+      if (allPending.length > 0) {
         clearPendingAttachments();
         useChatStore.getState().setSelectionAttachment(null);
       }
-
-      const selectedNodeIds = useCanvasStore
-        .getState()
-        .nodes.filter((n) => n.selected)
-        .map((n) => n.id);
 
       // For intent-driven operate calls, show an intent-select widget instead of user bubble
       if (intentData && agentMode === 'operate') {
@@ -617,8 +664,6 @@ export function useAgentStream(): UseAgentStreamReturn {
             canvasContext: getAgentChatContext(),
             canvasId: canvasId || undefined,
             attachments,
-            selectedNodeIds:
-              selectedNodeIds.length > 0 ? selectedNodeIds : undefined,
             intentData,
             signal: abortController.signal,
           },

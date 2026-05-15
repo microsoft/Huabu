@@ -1,7 +1,7 @@
 /**
- * Synthesize a ChatMessage[] timeline for an annotation cluster.
+ * Synthesize a ChatMessage[] timeline for a sketch cluster.
  *
- * Annotation recognition runs as a single server-side vision-LLM call (with
+ * Sketch recognition runs as a single server-side vision-LLM call (with
  * on-demand `read` / `inspect_nodes` / `inspect_edges` tool access), so
  * there is no real chat thread to replay. Instead we fake one by emitting:
  *
@@ -21,13 +21,13 @@ import { useMemo } from 'react';
 import { useIntentStore } from '@/store/intentStore';
 
 import type { ChatMessage } from '../../Messages/types';
-import type { AnnotationProcessingCluster } from '@/store/intentStore';
+import type { SketchProcessingCluster } from '@/store/intentStore';
 
 /**
  * Build the ChatMessage[] timeline for the given cluster.
  * Returns an empty array if the cluster no longer exists.
  */
-export function useAnnotationClusterMessages(
+export function useSketchClusterMessages(
   clusterId: string | null,
 ): ChatMessage[] {
   const cluster = useIntentStore((s) =>
@@ -40,12 +40,12 @@ export function useAnnotationClusterMessages(
   }, [cluster]);
 }
 
-function buildMessages(cluster: AnnotationProcessingCluster): ChatMessage[] {
+function buildMessages(cluster: SketchProcessingCluster): ChatMessage[] {
   const messages: ChatMessage[] = [];
 
   // 1. User message: describe the gesture
   const userParts: string[] = [
-    `Annotation gesture · ${cluster.strokeIds.length} stroke${cluster.strokeIds.length === 1 ? '' : 's'}`,
+    `Sketch gesture · ${cluster.strokeIds.length} stroke${cluster.strokeIds.length === 1 ? '' : 's'}`,
   ];
   if (cluster.contextSummary) {
     userParts.push('', cluster.contextSummary);

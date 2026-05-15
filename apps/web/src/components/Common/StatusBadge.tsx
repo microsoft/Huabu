@@ -1,13 +1,13 @@
 /**
  * StatusBadge — pill-shaped status indicator used to annotate canvas nodes
- * and overlays (currently QuestionNode and the annotation processing
+ * and overlays (currently QuestionNode and the sketch processing
  * overlay).
  *
  * Behavior
  *  - Zoom-invariant: lives in React Flow's flow space but counter-scales
  *    `1 / zoom` so its on-screen size + offset stay constant at every
  *    viewport zoom level. This matches the preferred behavior originally
- *    implemented in `AnnotationProcessingOverlay`.
+ *    implemented in `SketchProcessingOverlay`.
  *  - Status drives icon, label and colors via the canvas semantic tokens
  *    (`--success`, `--warning`, `--info`, `--danger`, `--fg-subtle`).
  *  - Optional `trailing` slot renders adjacent content (e.g. accept /
@@ -44,7 +44,7 @@ interface StatusVisual {
   spin?: boolean;
 }
 
-// Single visual identity — both QuestionNode and the annotation overlay
+// Single visual identity — both QuestionNode and the sketch overlay
 // render at exactly these dimensions, then counter-scale so the on-screen
 // size stays constant at every zoom level.
 const ICON_BOX_PX = 20;

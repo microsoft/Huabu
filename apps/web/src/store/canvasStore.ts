@@ -121,7 +121,7 @@ const triggerPreprocessing = (node: Node) => {
 // from `canvas.json` (see `apps/server/src/modules/agent/
 // node-neighbourhood.ts`); the web bundle only sends `anchorNodeId`.
 //
-// Existing UI-side proximity queries (annotation clustering, frame
+// Existing UI-side proximity queries (sketch clustering, frame
 // drop targets) call shared geometry helpers directly with their own
 // React Flow nodes — no central cache is needed.
 
@@ -268,9 +268,31 @@ type RFState = {
   ) => void;
 
   /** The node type awaiting placement on canvas via click or drawing. */
-  pendingNodeType: 'note' | 'text' | 'frame' | 'annotation' | 'question' | null;
+  pendingNodeType: 'note' | 'text' | 'frame' | 'sketch' | 'question' | null;
   setPendingNodeType: (
-    type: 'note' | 'text' | 'frame' | 'annotation' | 'question' | null,
+    type: 'note' | 'text' | 'frame' | 'sketch' | 'question' | null,
+  ) => void;
+
+  /**
+   * Active sketch tool settings — color, thickness, and tool mode used by
+   * the live SketchOverlay preview and persisted onto each new sketch node
+   * so the same look replays after reload. Per-node values are still
+   * editable after-the-fact via the sketch node's toolbar.
+   *
+   * `mode` switches the overlay between drawing new strokes (`'draw'`) and
+   * erasing existing sketch nodes (`'erase'`).
+   */
+  sketchDraft: {
+    strokeColor: string;
+    strokeSize: number;
+    mode: 'draw' | 'erase';
+  };
+  setSketchDraft: (
+    patch: Partial<{
+      strokeColor: string;
+      strokeSize: number;
+      mode: 'draw' | 'erase';
+    }>,
   ) => void;
 
   copySelectedNodes: () => void;
@@ -609,6 +631,10 @@ const useCanvasStore = create<RFState>()(
 
     pendingNodeType: null,
     setPendingNodeType: (type) => set({ pendingNodeType: type }),
+
+    sketchDraft: { strokeColor: 'black', strokeSize: 4, mode: 'draw' },
+    setSketchDraft: (patch) =>
+      set((state) => ({ sketchDraft: { ...state.sketchDraft, ...patch } })),
 
     collapsedFrameIds: new Set<string>(),
     toggleFrameCollapse: (frameId) => {

@@ -32,12 +32,14 @@ import { useCanvasShortcuts } from '@/hooks/useCanvasShortcuts';
 import { useFrameDragToCreate } from '@/hooks/useFrameDragToCreate';
 import { useIsNotMouse } from '@/hooks/useInputMode';
 import { useQuestionRunner } from '@/hooks/useQuestionRunner';
+import { useSketchHoverRouting } from '@/hooks/useSketchHoverRouting';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
 import { NodeToolbar } from './CanvasToolbar.tsx';
 import { EdgeStyleToolbar } from './FloatingToolbars/EdgeStyleToolbar.tsx';
 import { MultiSelectToolbar } from './FloatingToolbars/MultiSelectToolbar.tsx';
 import { IntentPopover } from './IntentPopover.tsx';
+import { MultiSelectResizer } from './MultiSelectResizer.tsx';
 import { GRID_SIZE, MAX_ZOOM, MIN_ZOOM } from '../../../config/canvas.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import {
@@ -45,11 +47,11 @@ import {
   getSedimentPayload,
 } from '../../../utils/io/dragDrop.ts';
 import { looksLikeUrl } from '../../../utils/io/media.ts';
-import { AnnotationNode } from '../../Nodes/annotation/AnnotationNode.tsx';
-import { AnnotationOverlay } from '../../Nodes/annotation/AnnotationOverlay.tsx';
-import { AnnotationProcessingOverlay } from '../../Nodes/annotation/AnnotationProcessingOverlay.tsx';
 import { FrameNode } from '../../Nodes/frame/FrameNode.tsx';
 import { QuestionNode } from '../../Nodes/question/QuestionNode.tsx';
+import { SketchNode } from '../../Nodes/sketch/SketchNode.tsx';
+import { SketchOverlay } from '../../Nodes/sketch/SketchOverlay.tsx';
+import { SketchProcessingOverlay } from '../../Nodes/sketch/SketchProcessingOverlay.tsx';
 import { VideoNode } from '../../Nodes/video/VideoNode.tsx';
 import { WebNode } from '../../Nodes/web/WebNode.tsx';
 
@@ -64,7 +66,7 @@ const nodeTypes = {
   web: WebNode,
   pdf: PDFNode,
   frame: FrameNode,
-  annotation: AnnotationNode,
+  sketch: SketchNode,
   question: QuestionNode,
 } as const;
 
@@ -275,6 +277,16 @@ export const Canvas: React.FC<CanvasProps> = ({
     edges,
     onSelect: (nodeIds) => selectNodes(nodeIds),
   });
+
+  // Sketch hover routing: hit-test the cursor against painted strokes so
+  // clicks on the blank area of an upper sketch's bounding box drill
+  // through to whatever is below. Disabled while the sketch tool is
+  // active (the SketchOverlay owns all pointer input then) or while
+  // box-selecting, where ReactFlow needs the default selection box.
+  useSketchHoverRouting(wrapperRef, rfInstanceRef, {
+    enabled:
+      pendingNodeType !== 'sketch' && tool !== 'lasso' && !isBoxSelecting,
+  });
   const lassoPreviewNodeIdSet = useMemo(
     () => new Set(previewNodeIds),
     [previewNodeIds],
@@ -360,7 +372,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       if (
         !pendingNodeType ||
         pendingNodeType === 'frame' ||
-        pendingNodeType === 'annotation'
+        pendingNodeType === 'sketch'
       )
         return;
       const instance = rfInstanceRef.current;
@@ -424,7 +436,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         pendingNodeType === 'note' && 'canvas-pending-note',
         pendingNodeType === 'text' && 'canvas-pending-text',
         pendingNodeType === 'frame' && 'canvas-pending-frame',
-        pendingNodeType === 'annotation' && 'cursor-crosshair',
+        pendingNodeType === 'sketch' && 'cursor-crosshair',
         pendingNodeType === 'question' && 'canvas-pending-question',
         tool === 'lasso' && 'cursor-crosshair',
       )}
@@ -612,7 +624,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         attributionPosition="bottom-right"
         panOnDrag={
           pendingNodeType
-            ? false
+            ? [1] /* creation tool active → middle mouse button still pans */
             : tool === 'pan'
               ? true
               : isNotMouse
@@ -636,6 +648,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         <Panel position="bottom-center" className="mb-6">
           <NodeToolbar activeTool={tool} onToolChange={setTool} />
         </Panel>
+        {!isBoxSelecting && <MultiSelectResizer />}
         {!isBoxSelecting && <MultiSelectToolbar />}
         {!isBoxSelecting && <EdgeStyleToolbar />}
         <IntentPopover />
@@ -643,13 +656,13 @@ export const Canvas: React.FC<CanvasProps> = ({
 
         <Controls position="bottom-left" />
 
-        {/* Annotation overlay inside ReactFlow so it shares stacking context with Panel */}
-        {pendingNodeType === 'annotation' && (
-          <AnnotationOverlay rfInstance={rfInstanceRef.current} />
+        {/* Sketch overlay inside ReactFlow so it shares stacking context with Panel */}
+        {pendingNodeType === 'sketch' && (
+          <SketchOverlay rfInstance={rfInstanceRef.current} />
         )}
 
-        {/* Annotation intent processing overlay — lives in flow space so it pans/zooms with the canvas */}
-        <AnnotationProcessingOverlay />
+        {/* Sketch intent processing overlay — lives in flow space so it pans/zooms with the canvas */}
+        <SketchProcessingOverlay />
       </ReactFlow>
 
       {lassoPreviewPath && (

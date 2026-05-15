@@ -1,17 +1,17 @@
 /**
  * Stage 1: Stroke Clustering
  *
- * Groups annotation nodes into spatial clusters using single-linkage
+ * Groups sketch nodes into spatial clusters using single-linkage
  * agglomerative clustering on bounding-box edge distance.
  *
  * Strokes that are spatially close belong to the same "gesture" and
  * should be interpreted together. Strokes far apart are independent
- * annotations that get separate intent resolution.
+ * sketches that get separate intent resolution.
  */
 
 import { rectEdgeDistance } from '@sediment/shared';
 
-import type { AnnotationStroke, AnnotationCluster } from '@sediment/shared';
+import type { SketchNodeRef, SketchCluster } from '@sediment/shared';
 import type { Rect } from '@sediment/shared';
 
 /**
@@ -30,14 +30,14 @@ function mergeRects(a: Rect, b: Rect): Rect {
 }
 
 /**
- * Cluster annotation strokes using Union-Find with single-linkage distance.
+ * Cluster sketch strokes using Union-Find with single-linkage distance.
  *
  * Complexity: O(n²) pairwise distance — fine for the expected <20 strokes.
  */
-export function clusterAnnotations(
-  strokes: AnnotationStroke[],
+export function clusterSketches(
+  strokes: SketchNodeRef[],
   threshold = CLUSTER_DISTANCE_THRESHOLD,
-): AnnotationCluster[] {
+): SketchCluster[] {
   if (strokes.length === 0) return [];
   if (strokes.length === 1) {
     return [
@@ -88,7 +88,7 @@ export function clusterAnnotations(
     }
   }
 
-  const clusters: AnnotationCluster[] = [];
+  const clusters: SketchCluster[] = [];
   for (const indices of groups.values()) {
     const clusterStrokes = indices.map((i) => strokes[i]);
     let bbox = clusterStrokes[0].rect;

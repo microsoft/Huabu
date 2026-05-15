@@ -72,30 +72,41 @@ export const INTENT_SSE_EVENTS = {
   Error: 'error',
 } as const satisfies Record<string, IntentStreamEventType>;
 
-// ==================== Annotation Pipeline Types ====================
+// ==================== Sketch Pipeline Types ====================
 
-/** Lightweight representation of an annotation node for clustering. */
-export interface AnnotationStroke {
+/**
+ * Lightweight wire/clustering view of a sketch node.
+ *
+ * Distinct from {@link import('../canvas/node.js').SketchStroke}, which
+ * is the per-stroke record stored *inside* a node's `data.strokes`
+ * array. `SketchNodeRef` describes a whole sketch node and is what the
+ * spatial clusterer + AI pipeline operate on. Its `points` field is
+ * the **flattened concatenation** of every stroke in the node — the
+ * AI side (and the clusterer) only need bounding-box geometry, so
+ * stroke boundaries are intentionally collapsed away here.
+ */
+export interface SketchNodeRef {
+  /** Sketch node id. */
   id: string;
   /** Bounding box in flow coordinates. */
   rect: Rect;
-  /** Raw [x, y, pressure] points in local node coordinates. */
+  /** All strokes' [x, y, pressure] points concatenated, in node-local coords. */
   points: number[][];
-  /** Original bounding box size when the stroke was created. */
+  /** Reference bbox the points were stored against (matches `SketchNodeData.initialSize`). */
   initialSize: { width: number; height: number };
 }
 
-/** A cluster of one or more spatially related annotation strokes. */
-export interface AnnotationCluster {
-  /** IDs of all annotation nodes in this cluster. */
+/** A cluster of one or more spatially related sketch nodes. */
+export interface SketchCluster {
+  /** IDs of all sketch nodes in this cluster. */
   strokeIds: string[];
-  /** All strokes in the cluster. */
-  strokes: AnnotationStroke[];
+  /** All sketch node refs in the cluster. */
+  strokes: SketchNodeRef[];
   /** Merged bounding box of all strokes. */
   bbox: Rect;
 }
 
-// ==================== Annotation Recognition ====================
+// ==================== Sketch Recognition ====================
 //
 // The pipeline ships **bare wire refs** (id + type + label?) for
 // nearby / enclosed nodes plus **bare ids** for nearby edges,
@@ -116,8 +127,8 @@ export interface AnnotationCluster {
 // cascades the old rule-based classifier suffered from because the
 // model never sees positions or pre-computed shape guesses.
 
-/** Structured context for one annotation cluster. */
-export interface AnnotationClusterContext {
+/** Structured context for one sketch cluster. */
+export interface SketchClusterContext {
   /** Bounding box of the gesture in flow coordinates. */
   bbox: { x: number; y: number; width: number; height: number };
   /** Number of distinct strokes in the cluster. */
@@ -131,22 +142,22 @@ export interface AnnotationClusterContext {
 }
 
 /**
- * Response body for the one-step annotation → canvas commands endpoint.
+ * Response body for the one-step sketch → canvas commands endpoint.
  * The LLM reasons about the user's intent and emits the executable command
  * batch directly — no separate intent label, no operate-agent roundtrip.
  */
-export interface AnnotationCommandResponse {
+export interface SketchCommandResponse {
   /** One-sentence reason describing what the user meant. */
   reasoning: string;
   /** Atomic batch of canvas commands to execute. */
   commands: CanvasCommand[];
 }
 
-// ==================== Annotation Pipeline Context ====================
+// ==================== Sketch Pipeline Context ====================
 
-/** Context extracted for a clustered set of annotation strokes. */
-export interface AnnotationContext {
-  cluster: AnnotationCluster;
+/** Context extracted for a clustered set of sketch strokes. */
+export interface SketchContext {
+  cluster: SketchCluster;
   /** Canvas nodes near the cluster bbox, ordered by proximity. */
   nearbyNodes: WireNodeRef[];
   /** Canvas nodes whose bounding box overlaps the cluster bbox. */
@@ -155,12 +166,12 @@ export interface AnnotationContext {
   nearbyEdgeIds: string[];
 }
 
-/** A resolved annotation intent — directly executable canvas commands. */
-export interface ResolvedAnnotationIntent {
+/** A resolved sketch intent — directly executable canvas commands. */
+export interface ResolvedSketchIntent {
   /** Atomic batch of canvas commands to execute. */
   commands: CanvasCommand[];
   /** One-sentence explanation of what the user meant. */
   reasoning: string;
-  /** The annotation cluster that produced this intent. */
-  cluster: AnnotationCluster;
+  /** The sketch cluster that produced this intent. */
+  cluster: SketchCluster;
 }

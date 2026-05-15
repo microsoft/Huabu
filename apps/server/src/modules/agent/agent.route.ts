@@ -50,6 +50,16 @@ import type { FastifyPluginAsync } from 'fastify';
 
 // ==================== Helpers ====================
 
+/**
+ * Hard cap on the byte size of an external image we are willing to
+ * inline as base64 in a vision content part. Anything larger is
+ * returned as a bare URL (the model will see the link but not the
+ * pixels) so a hostile or accidentally-huge URL cannot blow up the
+ * Node process. 10 MB comfortably accommodates UI screenshots while
+ * keeping memory pressure bounded.
+ */
+const MAX_INLINE_IMAGE_BYTES = 10 * 1024 * 1024;
+
 function getOrCreateThreadId(value: unknown): string {
   if (typeof value === 'string' && value.trim().length > 0) return value;
   return createId('thread');
@@ -77,7 +87,46 @@ async function resolveImageUrl(url: string): Promise<string> {
       if (!res.ok) return resolved;
       const contentType = res.headers.get('content-type') ?? '';
       if (!contentType.startsWith('image/')) return resolved;
-      const buffer = Buffer.from(await res.arrayBuffer());
+
+      // Cap the inlined payload so a hostile / accidentally-huge URL
+      // (e.g. a multi-GB camera RAW served from a CDN) cannot exhaust
+      // the Node process's heap. We honour Content-Length up-front when
+      // present, and stream-read otherwise so we can stop reading the
+      // moment the cap is exceeded — without this, `arrayBuffer()`
+      // happily buffers the whole response regardless of size.
+      const declaredSize = Number(res.headers.get('content-length') ?? '');
+      if (
+        Number.isFinite(declaredSize) &&
+        declaredSize > MAX_INLINE_IMAGE_BYTES
+      ) {
+        return resolved;
+      }
+
+      const body = res.body;
+      if (!body) {
+        // No streamable body — fall back to the buffered path but still
+        // bound the result.
+        const buffer = Buffer.from(await res.arrayBuffer());
+        if (buffer.byteLength > MAX_INLINE_IMAGE_BYTES) return resolved;
+        return `data:${contentType.split(';')[0]};base64,${buffer.toString('base64')}`;
+      }
+
+      const reader = body.getReader();
+      const chunks: Uint8Array[] = [];
+      let total = 0;
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (!value) continue;
+        total += value.byteLength;
+        if (total > MAX_INLINE_IMAGE_BYTES) {
+          // Release the stream so the underlying connection can close.
+          await reader.cancel().catch(() => {});
+          return resolved;
+        }
+        chunks.push(value);
+      }
+      const buffer = Buffer.concat(chunks);
       return `data:${contentType.split(';')[0]};base64,${buffer.toString('base64')}`;
     } catch {
       return resolved;
@@ -116,12 +165,36 @@ async function buildUserContent(
 
   for (const att of attachments) {
     const label = att.label ?? att.filename ?? 'attachment';
-    const originRef = att.originNodeId
-      ? ` (origin node id: ${att.originNodeId})`
-      : '';
+    // Collapse the singular `originNodeId` and the plural `originNodeIds`
+    // into one list. Singular is the historical 1:1 case (PDF excerpt,
+    // text selection, image-node send-to-chat); plural was added so a
+    // single attachment can advertise N source nodes (e.g. one image
+    // rendered from a sketch cluster of multiple strokes).
+    const originIds = att.originNodeIds?.length
+      ? att.originNodeIds
+      : att.originNodeId
+        ? [att.originNodeId]
+        : [];
+    const originRef =
+      originIds.length === 0
+        ? ''
+        : originIds.length === 1
+          ? ` (origin node id: ${originIds[0]})`
+          : ` (origin node ids: ${originIds.join(', ')})`;
 
     switch (att.type) {
       case 'image': {
+        // Caption the image with its source node ids so the model can
+        // follow up via `inspect_nodes` / `get_canvas_outline` for
+        // surrounding context (parent frame, position, neighbours).
+        // Without this the image part is opaque — the model sees
+        // pixels but does not know which canvas nodes they came from.
+        if (originIds.length > 0) {
+          parts.push({
+            type: 'text',
+            text: `[Attached Image: ${label}${originRef}]`,
+          });
+        }
         // Resolve image URL to base64 for vision
         if (att.url) {
           const resolved = await resolveImageUrl(att.url);
@@ -282,6 +355,25 @@ function collectSelectedNodeRefs(nodes: WireSelectionNode[]): AgentNodeRef[] {
   };
   walk(nodes);
   return refs;
+}
+
+/**
+ * Flatten the wire selection (frame children included) into a unique
+ * id list. Used to materialise the `[SYSTEM selectedNodeIds:[...]]`
+ * metadata tag on the persisted user message — the same selection
+ * info already lives in `canvasContext.selectedNodes`, so the wire
+ * never has to carry the id list separately.
+ */
+function collectSelectedNodeIds(nodes: WireSelectionNode[]): string[] {
+  const seen = new Set<string>();
+  const walk = (list: WireSelectionNode[]) => {
+    for (const n of list) {
+      seen.add(n.id);
+      if (n.children) walk(n.children);
+    }
+  };
+  walk(nodes);
+  return Array.from(seen);
 }
 
 function writeSSE(raw: NodeJS.WritableStream, event: AgentStreamEvent): void {
@@ -747,7 +839,6 @@ const agentRoutes: FastifyPluginAsync = async (
       canvasContext,
       canvasId,
       attachments,
-      selectedNodeIds,
       anchorNodeId,
     } = parsed.data;
 
@@ -827,9 +918,14 @@ const agentRoutes: FastifyPluginAsync = async (
     }
 
     // Add user message to context
-    // Embed selectedNodeIds and attachments as metadata tags so they survive round-trip
+    // Embed selectedNodeIds and attachments as metadata tags so they survive round-trip.
+    // selectedNodeIds is derived from `canvasContext.selectedNodes` (recursive over
+    // frame children) — the wire never carries the id list separately.
     const metadataTags: string[] = [];
-    if (selectedNodeIds && selectedNodeIds.length > 0) {
+    const selectedNodeIds = canvasContext?.selectedNodes
+      ? collectSelectedNodeIds(canvasContext.selectedNodes)
+      : [];
+    if (selectedNodeIds.length > 0) {
       metadataTags.push(
         `[SYSTEM selectedNodeIds:${JSON.stringify(selectedNodeIds)}]`,
       );
@@ -840,6 +936,9 @@ const agentRoutes: FastifyPluginAsync = async (
         type: a.type,
         source: a.source,
         ...(a.originNodeId ? { originNodeId: a.originNodeId } : {}),
+        ...(a.originNodeIds && a.originNodeIds.length > 0
+          ? { originNodeIds: a.originNodeIds }
+          : {}),
         ...(a.url ? { url: a.url } : {}),
         ...(a.label ? { label: a.label } : {}),
         ...(a.filename ? { filename: a.filename } : {}),

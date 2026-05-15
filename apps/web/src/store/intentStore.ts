@@ -9,54 +9,51 @@
 import { createId } from '@sediment/shared';
 import { create } from 'zustand';
 
-import {
-  clusterAnnotations,
-  extractAnnotationContext,
-} from '@/handler/annotation';
 import { captureCanvasScreenshot } from '@/handler/canvasCommand/utils/screenshot';
+import { clusterSketches, extractSketchContext } from '@/handler/sketch';
 import { snapshotAndExtractChanges } from '@/hooks/useCanvasChanges';
 
 import useCanvasStore from './canvasStore';
 import {
   recognizeIntentStream,
-  recognizeAnnotationCommands,
+  recognizeSketchCommands,
   logIntentEpisode,
 } from '../api/intent';
 
 import type { CanvasChange } from '@/hooks/useCanvasChanges';
 import type {
-  AnnotationStroke,
-  AnnotationContext,
-  AnnotationCluster,
-  ResolvedAnnotationIntent,
+  SketchNodeRef,
+  SketchContext,
+  SketchCluster,
+  ResolvedSketchIntent,
   CanvasCommand,
   CanvasNodeId,
   IntentCandidate,
-  AnnotationClusterContext,
+  SketchClusterContext,
 } from '@sediment/shared';
 import type { Node } from '@xyflow/react';
 
 /**
- * Lifecycle status for an annotation cluster currently being recognised.
+ * Lifecycle status for a sketch cluster currently being recognised.
  *
  * - `preparing` — user is still drawing; idle timer not yet fired.
  * - `pending`   — idle timer fired; running rule resolution + screenshot capture.
  * - `running`   — LLM request is in flight (or commands are being applied).
  * - `done`      — finished; overlay stays visible until the next batch.
  */
-export type AnnotationProcessingStatus =
+export type SketchProcessingStatus =
   | 'preparing'
   | 'pending'
   | 'running'
   | 'done';
 
-/** A single annotation cluster currently visible in the processing overlay. */
-export interface AnnotationProcessingCluster {
-  /** Stable id derived from the cluster's annotation node ids. */
+/** A single sketch cluster currently visible in the processing overlay. */
+export interface SketchProcessingCluster {
+  /** Stable id derived from the cluster's sketch node ids. */
   id: string;
-  /** Annotation node ids contained in this cluster. */
+  /** Sketch node ids contained in this cluster. */
   strokeIds: string[];
-  status: AnnotationProcessingStatus;
+  status: SketchProcessingStatus;
   /**
    * Canvas changes produced by this cluster's intent commands. Captured at
    * recognition time (pre-execution) so each entry carries its revert data.
@@ -99,23 +96,26 @@ interface IntentState {
   setCustomIntent: (text: string) => void;
   dismiss: () => void;
 
-  // ── Annotation recognition ──
-  /** Annotation node IDs waiting for the 5 s idle timer. */
-  pendingAnnotationIds: string[];
+  // ── Sketch recognition ──
   /** Clusters currently being processed; drives the on-canvas overlay. */
-  processingClusters: AnnotationProcessingCluster[];
-  /** Called by AnnotationOverlay after each stroke finishes. Resets the 5 s idle timer. */
-  onAnnotationCreated: (annotationNodeId: string) => void;
-  /** Cancel any pending annotation recognition (e.g. user switches away from annotation tool). */
-  cancelAnnotationRecognition: () => void;
+  processingClusters: SketchProcessingCluster[];
+  /**
+   * Explicit user-triggered recognition: the user selected one or more
+   * sketch nodes and clicked the toolbar's `Apply Sketch` button.
+   * Sketch IDs are clustered, contextualised and sent to the server-side
+   * vision LLM. There is no idle timer — nothing fires automatically.
+   */
+  requestSketchRecognition: (sketchIds: string[]) => void;
+  /** Cancel any in-flight sketch recognition (e.g. canvas switch). */
+  cancelSketchRecognition: () => void;
   /**
    * Keep the cluster's intent commands and remove both the overlay and the
-   * annotation strokes from the canvas.
+   * sketch strokes from the canvas.
    */
   acceptCluster: (clusterId: string) => void;
   /**
    * Revert the cluster's intent commands to restore the canvas state, then
-   * remove both the overlay and the annotation strokes from the canvas.
+   * remove both the overlay and the sketch strokes from the canvas.
    */
   revertCluster: (clusterId: string) => void;
 
@@ -136,10 +136,6 @@ interface IntentState {
   ) => void;
 }
 
-/** Idle time (ms) after the last annotation stroke before triggering recognition. */
-const ANNOTATION_RECOGNITION_DELAY_MS = 3_000;
-let _annotationTimer: ReturnType<typeof setTimeout> | null = null;
-
 export const useIntentStore = create<IntentState>()((set, get) => ({
   isOpen: false,
   isLoading: false,
@@ -149,7 +145,6 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
   customIntent: '',
   position: null,
   contextSummary: '',
-  pendingAnnotationIds: [],
   processingClusters: [],
 
   _onIntentChosen: null,
@@ -323,83 +318,18 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
     });
   },
 
-  // ── Annotation recognition ────────────────────────────────────────
+  // ── Sketch recognition ────────────────────────────────────────────
 
-  onAnnotationCreated: (annotationNodeId: string) => {
-    const state = get();
-    const current = state.pendingAnnotationIds;
-    const nextPending = current.includes(annotationNodeId)
-      ? current
-      : [...current, annotationNodeId];
-
-    // Preserve any `done` overlays from previous batches — they carry the
-    // only UI to Accept/Revert already-applied commands, so silently
-    // dropping them would strand those changes on the canvas.
-    const doneClusters = state.processingClusters.filter(
-      (c) => c.status === 'done',
-    );
-    // Preserve in-progress clusters that belong to ALREADY-RUNNING batches.
-    // Those batches cleared `pendingAnnotationIds` when they fired, so their
-    // strokeIds are no longer in `nextPending`. They must not be dropped just
-    // because the user kept drawing — only the live "preparing" cluster(s)
-    // built from the current pending set should be recomputed below.
-    const pendingSet = new Set(nextPending);
-    const otherBatchInProgress = state.processingClusters.filter(
-      (c) =>
-        c.status !== 'done' && !c.strokeIds.some((id) => pendingSet.has(id)),
-    );
-    const prevInProgress = state.processingClusters.filter(
-      (c) =>
-        c.status !== 'done' && c.strokeIds.some((id) => pendingSet.has(id)),
-    );
-
-    // Recompute in-progress overlay clusters from the live pending stroke
-    // set so the overlay grows immediately as the user keeps drawing.
-    const { nodes } = useCanvasStore.getState();
-    const strokes = collectStrokes(nextPending, nodes);
-    const clusters = clusterAnnotations(strokes);
-
-    // Preserve status from existing in-progress clusters keyed by stroke
-    // ids; new clusters start in 'preparing' (user is still drawing).
-    const prevById = new Map(prevInProgress.map((c) => [c.id, c]));
-    const inProgress: AnnotationProcessingCluster[] = clusters.map((c) => {
-      const id = clusterKey(c);
-      const prev = prevById.get(id);
-      return {
-        id,
-        strokeIds: c.strokeIds,
-        // Preserve a non-preparing status if a re-cluster overlaps it; otherwise
-        // the user is still drawing → 'preparing'.
-        status: prev && prev.status !== 'preparing' ? prev.status : 'preparing',
-      };
-    });
-
-    set({
-      pendingAnnotationIds: nextPending,
-      processingClusters: [
-        ...doneClusters,
-        ...otherBatchInProgress,
-        ...inProgress,
-      ],
-    });
-
-    // Reset the idle timer
-    if (_annotationTimer) clearTimeout(_annotationTimer);
-    _annotationTimer = setTimeout(() => {
-      _annotationTimer = null;
-      void triggerAnnotationRecognition(get, set);
-    }, ANNOTATION_RECOGNITION_DELAY_MS);
+  requestSketchRecognition: (sketchIds: string[]) => {
+    if (sketchIds.length === 0) return;
+    void triggerSketchRecognition(get, set, sketchIds);
   },
 
-  cancelAnnotationRecognition: () => {
-    if (_annotationTimer) {
-      clearTimeout(_annotationTimer);
-      _annotationTimer = null;
-    }
+  cancelSketchRecognition: () => {
     // Abort every currently in-flight batch and drop the registry.
     for (const ctrl of _activeRecognitions) ctrl.abort();
     _activeRecognitions.clear();
-    set({ pendingAnnotationIds: [], processingClusters: [] });
+    set({ processingClusters: [] });
   },
 
   acceptCluster: (clusterId: string) => {
@@ -441,7 +371,7 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
       else if (c.revertCommand) revertCmds.push(c.revertCommand);
     }
 
-    // Always also delete the annotation strokes themselves on revert.
+    // Always also delete the sketch strokes themselves on revert.
     if (cluster.strokeIds.length > 0) {
       revertCmds.push({
         type: 'DELETE_NODES',
@@ -462,28 +392,31 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
 }));
 
 // ---------------------------------------------------------------------------
-// Annotation recognition — three-stage pipeline
+// Sketch recognition — three-stage pipeline
 //
-// Stage 1: Cluster annotation strokes spatially
+// Triggered explicitly by the user via the toolbar's `Apply Sketch` button
+// (no idle timer). The store entry point is `requestSketchRecognition(ids)`.
+//
+// Stage 1: Cluster sketch strokes spatially
 // Stage 2: Collect IDs of nearby/enclosed nodes + edges (no labels/positions)
 // Stage 3: Send screenshot + IDs to the server-side LLM agent which fetches
 //          additional node content on demand via `read` (markdown body),
 //          node layout via `inspect_nodes` (canvas.json fields), and
 //          edge style via `inspect_edges`.
 //
-// Each call to `triggerAnnotationRecognition` owns its own AbortController
+// Each call to `triggerSketchRecognition` owns its own AbortController
 // and runs independently of any other in-flight batches. Two consecutive
 // batches can therefore execute in parallel — the second one does NOT cancel
-// the first. Bulk cancellation (e.g. user leaves the annotation tool, canvas
-// switch) goes through `cancelAnnotationRecognition`, which aborts every
-// currently-registered controller.
+// the first. Bulk cancellation (e.g. canvas switch) goes through
+// `cancelSketchRecognition`, which aborts every currently-registered
+// controller.
 // ---------------------------------------------------------------------------
 
 /** Registry of in-flight recognition batches, one entry per active call. */
 const _activeRecognitions: Set<AbortController> = new Set();
 
-/** Stable id for a cluster derived from its annotation node ids. */
-function clusterKey(cluster: AnnotationCluster): string {
+/** Stable id for a cluster derived from its sketch node ids. */
+function clusterKey(cluster: SketchCluster): string {
   return cluster.strokeIds.slice().sort().join('|');
 }
 
@@ -491,7 +424,7 @@ function clusterKey(cluster: AnnotationCluster): string {
  * Build a short human-readable summary of the spatial context used by the
  * resolver. Used by the cluster inspector to explain "what the AI saw".
  */
-function buildContextSummary(ctx: AnnotationContext): string {
+function buildContextSummary(ctx: SketchContext): string {
   const parts: string[] = [
     `Strokes: ${ctx.cluster.strokeIds.length}`,
     `Bbox: ${Math.round(ctx.cluster.bbox.width)}×${Math.round(ctx.cluster.bbox.height)}px`,
@@ -515,15 +448,16 @@ function buildContextSummary(ctx: AnnotationContext): string {
 }
 
 /**
- * Build AnnotationStroke descriptors from annotation node IDs.
+ * Build {@link SketchNodeRef} descriptors from sketch node IDs.
+ *
  * Positions are converted to absolute flow coordinates by walking up the
- * parent chain, so strokes drawn on top of frames / parented nodes still
- * report a correctly-placed bounding box.
+ * parent chain, so sketches drawn on top of frames / parented nodes still
+ * report a correctly-placed bounding box. Per-stroke records inside each
+ * node (`data.strokes`) are flattened into a single `points` array — the
+ * AI side only needs aggregate geometry, so stroke boundaries are
+ * intentionally collapsed here.
  */
-function collectStrokes(
-  annotationIds: string[],
-  nodes: Node[],
-): AnnotationStroke[] {
+function collectStrokes(sketchIds: string[], nodes: Node[]): SketchNodeRef[] {
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const absoluteOffset = (n: Node): { x: number; y: number } => {
     let dx = 0;
@@ -537,13 +471,18 @@ function collectStrokes(
     return { x: dx, y: dy };
   };
 
-  const strokes: AnnotationStroke[] = [];
-  for (const id of annotationIds) {
+  const strokes: SketchNodeRef[] = [];
+  for (const id of sketchIds) {
     const node = byId.get(id);
-    if (!node || node.type !== 'annotation') continue;
+    if (!node || node.type !== 'sketch') continue;
 
     const data = node.data as Record<string, unknown>;
-    const points = (data.points as number[][]) ?? [];
+    // Flatten every stroke's points into one array \u2014 the AI side only
+    // needs node-level bounding boxes, so individual stroke boundaries
+    // are intentionally collapsed.
+    const nodeStrokes =
+      (data.strokes as Array<{ points: number[][] }> | undefined) ?? [];
+    const points: number[][] = nodeStrokes.flatMap((s) => s.points ?? []);
     const initialSize = (data.initialSize as {
       width: number;
       height: number;
@@ -571,15 +510,13 @@ function collectStrokes(
 }
 
 /**
- * Convert an AnnotationContext to the wire payload sent to the server.
+ * Convert a SketchContext to the wire payload sent to the server.
  * Carries id+type+label refs for nodes (so the LLM doesn't need a `read`
  * round-trip just to know what each id refers to) and bare ids for
  * edges. The LLM still fetches body text via `read`, layout via
  * `inspect_nodes`, and edge style via `inspect_edges` on demand.
  */
-function toClusterContextPayload(
-  ctx: AnnotationContext,
-): AnnotationClusterContext {
+function toClusterContextPayload(ctx: SketchContext): SketchClusterContext {
   return {
     bbox: {
       x: Math.round(ctx.cluster.bbox.x),
@@ -595,16 +532,16 @@ function toClusterContextPayload(
 }
 
 /**
- * Send the cluster + screenshot to the server-side annotation agent and
+ * Send the cluster + screenshot to the server-side sketch agent and
  * return the executable command batch it produced.
  */
 async function resolveByLLM(
-  ctx: AnnotationContext,
+  ctx: SketchContext,
   screenshot: string,
   signal: AbortSignal,
   canvasId?: string,
-): Promise<ResolvedAnnotationIntent | null> {
-  const response = await recognizeAnnotationCommands(
+): Promise<ResolvedSketchIntent | null> {
+  const response = await recognizeSketchCommands(
     screenshot,
     toClusterContextPayload(ctx),
     signal,
@@ -623,16 +560,15 @@ async function resolveByLLM(
   };
 }
 
-async function triggerAnnotationRecognition(
+async function triggerSketchRecognition(
   get: () => IntentState,
   set: (partial: Partial<IntentState>) => void,
+  explicitIds: string[],
 ): Promise<void> {
-  const { pendingAnnotationIds } = get();
-  if (pendingAnnotationIds.length === 0) return;
+  if (explicitIds.length === 0) return;
 
-  // Grab the batch and clear
-  const annotationIds = [...pendingAnnotationIds];
-  set({ pendingAnnotationIds: [] });
+  // Dedupe and snapshot the batch.
+  const sketchIds = Array.from(new Set(explicitIds));
 
   // Bind this recognition run to the current canvas. If the user switches
   // canvases (or the canvas reloads) before we commit, we must abandon the
@@ -654,7 +590,7 @@ async function triggerAnnotationRecognition(
   };
 
   // Each batch owns its own AbortController. Concurrent batches do NOT
-  // cancel each other; only an explicit `cancelAnnotationRecognition`
+  // cancel each other; only an explicit `cancelSketchRecognition`
   // (e.g. tool teardown / canvas switch) aborts everything.
   const controller = new AbortController();
   _activeRecognitions.add(controller);
@@ -664,7 +600,7 @@ async function triggerAnnotationRecognition(
     const { nodes, edges } = useCanvasStore.getState();
 
     // ── Stage 1: Cluster ──────────────────────────────────────────
-    const strokes = collectStrokes(annotationIds, nodes);
+    const strokes = collectStrokes(sketchIds, nodes);
     if (strokes.length === 0) {
       // Strokes were deleted before recognition fired — drop the leftover
       // 'preparing'/'pending' overlays so they don't linger forever.
@@ -672,22 +608,24 @@ async function triggerAnnotationRecognition(
       return;
     }
 
-    const clusters = clusterAnnotations(strokes);
+    const clusters = clusterSketches(strokes);
     // Set of cluster ids owned by THIS batch. All subsequent state updates
     // are scoped to these ids so unrelated `done` overlays are preserved.
     const batchIds = new Set(clusters.map((c) => clusterKey(c)));
 
     // ── Stage 2: Extract spatial context (IDs only) ───────────────
-    const contextsByCluster: AnnotationContext[] = clusters.map((cluster) =>
-      extractAnnotationContext(cluster, nodes, edges),
+    const contextsByCluster: SketchContext[] = clusters.map((cluster) =>
+      extractSketchContext(cluster, nodes, edges),
     );
     const ctxByClusterId = new Map(
       contextsByCluster.map((c) => [clusterKey(c.cluster), c]),
     );
 
-    // Refresh the overlay clusters and flip them to 'pending' — the idle timer
-    // has fired, so we are now actively preparing the request.
-    const initialBatch: AnnotationProcessingCluster[] = clusters.map((c) => {
+    // Refresh the overlay clusters and flip them to 'pending' — recognition
+    // is preparing the request (capturing screenshot, etc.). The legacy
+    // 'preparing' status set by the (now-removed) idle timer is no longer
+    // produced; clusters jump straight from creation to 'pending'.
+    const initialBatch: SketchProcessingCluster[] = clusters.map((c) => {
       const cid = clusterKey(c);
       const ctx = ctxByClusterId.get(cid);
       return {
@@ -712,7 +650,7 @@ async function triggerAnnotationRecognition(
     // are independent and fire in parallel under the shared AbortSignal.
     const resolvedIntents: Array<{
       clusterId: string;
-      intent: ResolvedAnnotationIntent;
+      intent: ResolvedSketchIntent;
     }> = [];
     const errorByCluster = new Map<string, string>();
 
@@ -729,7 +667,7 @@ async function triggerAnnotationRecognition(
         contextsByCluster.map(async (ctx) => {
           const cid = clusterKey(ctx.cluster);
           if (signal.aborted)
-            return { cid, value: null as ResolvedAnnotationIntent | null };
+            return { cid, value: null as ResolvedSketchIntent | null };
           const screenshot = await captureCanvasScreenshot({
             stripPrefix: true,
           });
@@ -755,7 +693,7 @@ async function triggerAnnotationRecognition(
         } else {
           const err = r.reason as Error | undefined;
           if (err?.name !== 'AbortError') {
-            console.error('[Annotation Intent] LLM call failed:', err);
+            console.error('[Sketch Intent] LLM call failed:', err);
           }
           // We don't know which cluster failed (allSettled erased the index);
           // mark all still-unresolved clusters with the error.
@@ -786,14 +724,9 @@ async function triggerAnnotationRecognition(
       return;
     }
 
-    // All annotation node IDs across all clusters
-    const allAnnotationIds = clusters.flatMap((c) => c.strokeIds);
-
     // Capture per-cluster CanvasChanges BEFORE executing anything, so each
-    // entry's revert data reflects the canvas state that existed prior to the
-    // intent batch. The strokes' `executed: true` marker is appended to the
-    // execution batch separately and intentionally excluded from change
-    // capture (it's internal bookkeeping, not a user-facing change).
+    // entry's revert data reflects the canvas state that existed prior to
+    // the intent batch.
     const changesByCluster = new Map<string, CanvasChange[]>();
     for (const { clusterId: cid, intent } of resolvedIntents) {
       if (intent.commands.length === 0) continue;
@@ -803,27 +736,19 @@ async function triggerAnnotationRecognition(
     }
 
     // Aggregate all resolved commands and execute atomically as one batch.
-    // Mark the annotation strokes as `executed` (instead of deleting them) so
-    // the user can still see the gesture they drew. The AnnotationNode renderer
-    // dims executed strokes to a faint grey.
+    // Sketch nodes are kept on the canvas as ordinary nodes after
+    // recognition \u2014 the user may invoke recognition repeatedly on the
+    // same node (e.g. after editing nearby context). The Accept / Revert
+    // buttons in `SketchProcessingOverlay` still let the user delete the
+    // strokes when the resolution is committed.
     const allCommands: CanvasCommand[] = resolvedIntents.flatMap(
       (r) => r.intent.commands,
     );
 
-    if (allAnnotationIds.length > 0) {
-      allCommands.push({
-        type: 'MERGE_NODE_DATA',
-        patches: allAnnotationIds.map((id) => ({
-          nodeId: id as never,
-          patch: { executed: true },
-        })),
-      });
-    }
-
     if (allCommands.length > 0) {
       if (resolvedIntents.length > 0) {
         console.log(
-          '[Annotation Intent] Executing',
+          '[Sketch Intent] Executing',
           resolvedIntents.length,
           'resolved intent(s):',
           resolvedIntents.map((r) => r.intent.reasoning).join(' | '),
@@ -853,7 +778,7 @@ async function triggerAnnotationRecognition(
 
     // Index resolved intents by cluster so the final write can attach
     // source / reasoning / commands per overlay.
-    const intentByCluster = new Map<string, ResolvedAnnotationIntent>();
+    const intentByCluster = new Map<string, ResolvedSketchIntent>();
     for (const { clusterId, intent } of resolvedIntents) {
       intentByCluster.set(clusterId, intent);
     }

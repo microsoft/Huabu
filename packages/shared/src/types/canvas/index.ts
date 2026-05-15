@@ -57,7 +57,8 @@ export type {
   VideoNodeData,
   ImageNodeData,
   FrameNodeData,
-  AnnotationNodeData,
+  SketchNodeData,
+  SketchStroke,
   QuestionNodeData,
   QuestionNodeStatus,
   QuestionInput,
@@ -74,7 +75,7 @@ export {
   isTextNode,
   isMediaNode,
   isFrameNode,
-  isAnnotationNode,
+  isSketchNode,
   isQuestionNode,
   normalizeOrigin,
 } from './node.js';
