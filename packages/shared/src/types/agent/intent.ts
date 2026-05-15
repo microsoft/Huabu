@@ -74,23 +74,34 @@ export const INTENT_SSE_EVENTS = {
 
 // ==================== Sketch Pipeline Types ====================
 
-/** Lightweight representation of a sketch node for clustering. */
-export interface SketchStroke {
+/**
+ * Lightweight wire/clustering view of a sketch node.
+ *
+ * Distinct from {@link import('../canvas/node.js').SketchStroke}, which
+ * is the per-stroke record stored *inside* a node's `data.strokes`
+ * array. `SketchNodeRef` describes a whole sketch node and is what the
+ * spatial clusterer + AI pipeline operate on. Its `points` field is
+ * the **flattened concatenation** of every stroke in the node — the
+ * AI side (and the clusterer) only need bounding-box geometry, so
+ * stroke boundaries are intentionally collapsed away here.
+ */
+export interface SketchNodeRef {
+  /** Sketch node id. */
   id: string;
   /** Bounding box in flow coordinates. */
   rect: Rect;
-  /** Raw [x, y, pressure] points in local node coordinates. */
+  /** All strokes' [x, y, pressure] points concatenated, in node-local coords. */
   points: number[][];
-  /** Original bounding box size when the stroke was created. */
+  /** Reference bbox the points were stored against (matches `SketchNodeData.initialSize`). */
   initialSize: { width: number; height: number };
 }
 
-/** A cluster of one or more spatially related sketch strokes. */
+/** A cluster of one or more spatially related sketch nodes. */
 export interface SketchCluster {
   /** IDs of all sketch nodes in this cluster. */
   strokeIds: string[];
-  /** All strokes in the cluster. */
-  strokes: SketchStroke[];
+  /** All sketch node refs in the cluster. */
+  strokes: SketchNodeRef[];
   /** Merged bounding box of all strokes. */
   bbox: Rect;
 }

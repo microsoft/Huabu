@@ -320,27 +320,50 @@ export interface FrameNodeData extends BaseNodeData {
   type: 'frame';
 }
 
-/** Sketch node: freehand drawing stored as pressure-sensitive points */
-export interface SketchNodeData extends BaseNodeData {
-  type: 'sketch';
-  /** Array of [x, y, pressure] points in local node coordinates */
+/**
+ * One pen-down → pen-up trace inside a {@link SketchNodeData}.
+ *
+ * Stored in node-local coordinates (origin = node bbox top-left). When
+ * the user draws a new stroke close in space + time to an existing
+ * sketch node, the new stroke is appended to that node's `strokes`
+ * array (see `SketchOverlay.handlePointerUp`); otherwise a fresh node
+ * is created with a single-stroke array.
+ */
+export interface SketchStroke {
+  /** Stable id, generated with `createId('stroke')`. */
+  id: string;
+  /** [x, y, pressure] points in node-local coordinates. */
   points: number[][];
-  /** Original bounding box size when the stroke was created */
-  initialSize: { width: number; height: number };
-  /** Stroke color (hex). Defaults to black when omitted. */
-  strokeColor?: string;
+  /** Stroke color — palette token (e.g. `'red'`) or hex string. */
+  color: string;
   /**
    * Stroke thickness in flow-space units (matches `perfect-freehand`'s
-   * `size` option). Defaults to `4` when omitted, which is the historical
-   * value the renderer used before the field existed.
+   * `size` option).
    */
-  strokeSize?: number;
+  size: number;
   /**
-   * True after the intent pipeline has consumed this sketch. The
-   * renderer no longer changes appearance based on this marker; it is kept
-   * as bookkeeping (analytics, future migrations).
+   * Wall-clock ms at pointer-up. Used by the merge window in
+   * `SketchOverlay` to decide whether a new stroke joins this node.
    */
-  executed?: boolean;
+  createdAt: number;
+}
+
+/** Sketch node: freehand drawing stored as one or more pressure-sensitive strokes. */
+export interface SketchNodeData extends BaseNodeData {
+  type: 'sketch';
+  /**
+   * Strokes painted into this node, in document order (back → front).
+   * A live sketch node always has at least one stroke; the eraser deletes
+   * the node when the last stroke is removed.
+   */
+  strokes: SketchStroke[];
+  /**
+   * Reference bbox in node-local coords — the size at which `strokes`
+   * are unscaled. The renderer compares the node's current measured
+   * size to this to derive `scaleX` / `scaleY`. Updated whenever the
+   * bbox is recomputed (new stroke merged in, eraser deletes a stroke).
+   */
+  initialSize: { width: number; height: number };
 }
 // ==================== Question Node ====================
 

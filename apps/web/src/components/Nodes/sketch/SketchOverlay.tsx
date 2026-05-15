@@ -215,10 +215,16 @@ export function SketchOverlay({
         size: { width: result.width, height: result.height },
         data: {
           type: 'sketch',
-          points: result.points,
+          strokes: [
+            {
+              id: createId('stroke'),
+              points: result.points,
+              color: strokeColor,
+              size: strokeSize,
+              createdAt: Date.now(),
+            },
+          ],
           initialSize: result.initialSize,
-          strokeColor,
-          strokeSize,
           origin: { type: 'user-created' },
         },
         skipAutoLayout: true,

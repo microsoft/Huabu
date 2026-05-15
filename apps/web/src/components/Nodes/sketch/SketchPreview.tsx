@@ -1,24 +1,38 @@
+import { resolveAccent } from '@sediment/shared';
 import { memo, useMemo } from 'react';
 
-import { pointsToPath } from './sketchPath';
+import {
+  pointsToPath,
+  DEFAULT_STROKE_COLOR,
+  DEFAULT_STROKE_SIZE,
+} from './sketchPath';
 
 import type { PreviewComponentProps } from '../note/NotePreview';
+import type { SketchStroke } from '@sediment/shared';
 
 /**
  * Lightweight preview card for sketch nodes (used in search results, etc.).
  */
 export const SketchPreview = memo(({ data }: PreviewComponentProps) => {
   const sketchData = data as {
-    points?: number[][];
+    strokes?: SketchStroke[];
     initialSize?: { width: number; height: number };
-    strokeColor?: string;
   };
-  const points = sketchData.points ?? [];
+  const strokes = sketchData.strokes ?? [];
   const initialSize = sketchData.initialSize ?? {
     width: 200,
     height: 100,
   };
-  const pathD = useMemo(() => pointsToPath(points), [points]);
+
+  const renderedStrokes = useMemo(
+    () =>
+      strokes.map((s) => ({
+        id: s.id,
+        d: pointsToPath(s.points, 1, s.size ?? DEFAULT_STROKE_SIZE),
+        fill: resolveAccent(s.color) ?? s.color ?? DEFAULT_STROKE_COLOR,
+      })),
+    [strokes],
+  );
 
   return (
     <div className="flex h-full w-full items-center justify-center p-2">
@@ -27,7 +41,9 @@ export const SketchPreview = memo(({ data }: PreviewComponentProps) => {
         className="h-full w-full"
         preserveAspectRatio="xMidYMid meet"
       >
-        <path d={pathD} fill={sketchData.strokeColor ?? 'currentColor'} />
+        {renderedStrokes.map((s) => (
+          <path key={s.id} d={s.d} fill={s.fill} />
+        ))}
       </svg>
     </div>
   );

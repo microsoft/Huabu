@@ -11,7 +11,7 @@
 
 import { rectEdgeDistance } from '@sediment/shared';
 
-import type { SketchStroke, SketchCluster } from '@sediment/shared';
+import type { SketchNodeRef, SketchCluster } from '@sediment/shared';
 import type { Rect } from '@sediment/shared';
 
 /**
@@ -35,7 +35,7 @@ function mergeRects(a: Rect, b: Rect): Rect {
  * Complexity: O(n²) pairwise distance — fine for the expected <20 strokes.
  */
 export function clusterSketches(
-  strokes: SketchStroke[],
+  strokes: SketchNodeRef[],
   threshold = CLUSTER_DISTANCE_THRESHOLD,
 ): SketchCluster[] {
   if (strokes.length === 0) return [];

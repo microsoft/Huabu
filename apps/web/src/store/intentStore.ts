@@ -22,7 +22,7 @@ import {
 
 import type { CanvasChange } from '@/hooks/useCanvasChanges';
 import type {
-  SketchStroke,
+  SketchNodeRef,
   SketchContext,
   SketchCluster,
   ResolvedSketchIntent,
@@ -448,12 +448,16 @@ function buildContextSummary(ctx: SketchContext): string {
 }
 
 /**
- * Build SketchStroke descriptors from sketch node IDs.
+ * Build {@link SketchNodeRef} descriptors from sketch node IDs.
+ *
  * Positions are converted to absolute flow coordinates by walking up the
- * parent chain, so strokes drawn on top of frames / parented nodes still
- * report a correctly-placed bounding box.
+ * parent chain, so sketches drawn on top of frames / parented nodes still
+ * report a correctly-placed bounding box. Per-stroke records inside each
+ * node (`data.strokes`) are flattened into a single `points` array — the
+ * AI side only needs aggregate geometry, so stroke boundaries are
+ * intentionally collapsed here.
  */
-function collectStrokes(sketchIds: string[], nodes: Node[]): SketchStroke[] {
+function collectStrokes(sketchIds: string[], nodes: Node[]): SketchNodeRef[] {
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const absoluteOffset = (n: Node): { x: number; y: number } => {
     let dx = 0;
@@ -467,13 +471,18 @@ function collectStrokes(sketchIds: string[], nodes: Node[]): SketchStroke[] {
     return { x: dx, y: dy };
   };
 
-  const strokes: SketchStroke[] = [];
+  const strokes: SketchNodeRef[] = [];
   for (const id of sketchIds) {
     const node = byId.get(id);
     if (!node || node.type !== 'sketch') continue;
 
     const data = node.data as Record<string, unknown>;
-    const points = (data.points as number[][]) ?? [];
+    // Flatten every stroke's points into one array \u2014 the AI side only
+    // needs node-level bounding boxes, so individual stroke boundaries
+    // are intentionally collapsed.
+    const nodeStrokes =
+      (data.strokes as Array<{ points: number[][] }> | undefined) ?? [];
+    const points: number[][] = nodeStrokes.flatMap((s) => s.points ?? []);
     const initialSize = (data.initialSize as {
       width: number;
       height: number;
@@ -715,14 +724,9 @@ async function triggerSketchRecognition(
       return;
     }
 
-    // All sketch node IDs across all clusters
-    const allSketchIds = clusters.flatMap((c) => c.strokeIds);
-
     // Capture per-cluster CanvasChanges BEFORE executing anything, so each
-    // entry's revert data reflects the canvas state that existed prior to the
-    // intent batch. The strokes' `executed: true` marker is appended to the
-    // execution batch separately and intentionally excluded from change
-    // capture (it's internal bookkeeping, not a user-facing change).
+    // entry's revert data reflects the canvas state that existed prior to
+    // the intent batch.
     const changesByCluster = new Map<string, CanvasChange[]>();
     for (const { clusterId: cid, intent } of resolvedIntents) {
       if (intent.commands.length === 0) continue;
@@ -732,23 +736,14 @@ async function triggerSketchRecognition(
     }
 
     // Aggregate all resolved commands and execute atomically as one batch.
-    // Mark the sketch strokes as `executed` (instead of deleting them) so
-    // they remain on the canvas as ordinary nodes. The renderer no longer
-    // changes their appearance based on this flag — it's kept as bookkeeping
-    // for analytics and future migration paths.
+    // Sketch nodes are kept on the canvas as ordinary nodes after
+    // recognition \u2014 the user may invoke recognition repeatedly on the
+    // same node (e.g. after editing nearby context). The Accept / Revert
+    // buttons in `SketchProcessingOverlay` still let the user delete the
+    // strokes when the resolution is committed.
     const allCommands: CanvasCommand[] = resolvedIntents.flatMap(
       (r) => r.intent.commands,
     );
-
-    if (allSketchIds.length > 0) {
-      allCommands.push({
-        type: 'MERGE_NODE_DATA',
-        patches: allSketchIds.map((id) => ({
-          nodeId: id as never,
-          patch: { executed: true },
-        })),
-      });
-    }
 
     if (allCommands.length > 0) {
       if (resolvedIntents.length > 0) {

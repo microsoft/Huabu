@@ -58,6 +58,7 @@ export type {
   ImageNodeData,
   FrameNodeData,
   SketchNodeData,
+  SketchStroke,
   QuestionNodeData,
   QuestionNodeStatus,
   QuestionInput,
