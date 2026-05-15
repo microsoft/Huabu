@@ -30,14 +30,14 @@ import { useCanvasGestures } from '@/hooks/useCanvasGestures';
 import { useCanvasLasso } from '@/hooks/useCanvasLasso';
 import { useCanvasShortcuts } from '@/hooks/useCanvasShortcuts';
 import { useFrameDragToCreate } from '@/hooks/useFrameDragToCreate';
-import { useIsTouch } from '@/hooks/useInputMode';
+import { useIsNotMouse } from '@/hooks/useInputMode';
 import { useQuestionRunner } from '@/hooks/useQuestionRunner';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
 import { NodeToolbar } from './CanvasToolbar.tsx';
-import { EdgeStyleToolbar } from './EdgeStyleToolbar.tsx';
+import { EdgeStyleToolbar } from './FloatingToolbars/EdgeStyleToolbar.tsx';
+import { MultiSelectToolbar } from './FloatingToolbars/MultiSelectToolbar.tsx';
 import { IntentPopover } from './IntentPopover.tsx';
-import { MultiSelectToolbar } from './MultiSelectToolbar.tsx';
 import { GRID_SIZE, MAX_ZOOM, MIN_ZOOM } from '../../../config/canvas.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import {
@@ -189,7 +189,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     },
   );
 
-  const isTouch = useIsTouch();
+  const isNotMouse = useIsNotMouse();
 
   const handleSelectionStart = useCallback(() => {
     if (tool !== 'select') return;
@@ -576,7 +576,9 @@ export const Canvas: React.FC<CanvasProps> = ({
         // ============ 4. Plain text drop ============
         if (plainText) {
           addNode(
-            textToNoteNodeInput(plainText, dropPos, { type: 'user-uploaded' }),
+            textToNoteNodeInput(plainText, dropPos, {
+              type: 'user-uploaded',
+            }),
           );
         }
       }}
@@ -613,9 +615,9 @@ export const Canvas: React.FC<CanvasProps> = ({
             ? false
             : tool === 'pan'
               ? true
-              : isTouch
-                ? false /* touch + select tool → drag creates selection rect */
-                : [1] /* desktop + selection tools → middle mouse button pans */
+              : isNotMouse
+                ? false /* non-mouse + select tool → drag creates selection rect */
+                : [1] /* mouse + selection tools → middle mouse button pans */
         }
         selectionOnDrag={pendingNodeType ? false : tool === 'select'}
         selectionMode={SelectionMode.Partial}
@@ -623,7 +625,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         onSelectionEnd={handleSelectionEnd}
         nodesDraggable={!pendingNodeType && tool !== 'lasso'}
         elementsSelectable={!pendingNodeType}
-        panOnScroll={!isTouch}
+        panOnScroll={!isNotMouse}
         zoomOnScroll={true}
         zoomOnPinch={true}
         minZoom={MIN_ZOOM}
@@ -634,8 +636,8 @@ export const Canvas: React.FC<CanvasProps> = ({
         <Panel position="bottom-center" className="mb-6">
           <NodeToolbar activeTool={tool} onToolChange={setTool} />
         </Panel>
-        <MultiSelectToolbar />
-        <EdgeStyleToolbar />
+        {!isBoxSelecting && <MultiSelectToolbar />}
+        {!isBoxSelecting && <EdgeStyleToolbar />}
         <IntentPopover />
         <Background color="var(--canvas-grid)" gap={GRID_SIZE} />
 
