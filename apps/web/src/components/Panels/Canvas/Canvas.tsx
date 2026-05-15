@@ -624,7 +624,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         attributionPosition="bottom-right"
         panOnDrag={
           pendingNodeType
-            ? false
+            ? [1] /* creation tool active → middle mouse button still pans */
             : tool === 'pan'
               ? true
               : isNotMouse

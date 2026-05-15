@@ -51,8 +51,15 @@ export function snapToGrid(value: number): number {
 export const SKETCH_STROKE_MERGE_MAX_GAP_MS = 5000;
 
 /**
- * Maximum gap (in flow-space px) between the new stroke's bbox and a
- * candidate node's current bbox. Distance is axis-aligned and collapses
- * to zero whenever the two rectangles overlap.
+ * Maximum gap (in **screen-space px**) between the new stroke's bbox
+ * and a candidate node's current bbox. Distance is axis-aligned and
+ * collapses to zero whenever the two rectangles overlap.
+ *
+ * Defined in screen-space so the on-screen "snap radius" stays the
+ * same regardless of zoom (matches user intuition: "this much space on
+ * my screen"). The caller is expected to convert it to flow-space via
+ * `SKETCH_STROKE_MERGE_MAX_DISTANCE_SCREEN_PX / zoom` before passing
+ * it to `findMergeTarget`. Mirrors the same screen-space treatment the
+ * eraser brush radius uses (see `SketchOverlay.eraserScreenRadius`).
  */
-export const SKETCH_STROKE_MERGE_MAX_DISTANCE_PX = 80;
+export const SKETCH_STROKE_MERGE_MAX_DISTANCE_SCREEN_PX = 80;

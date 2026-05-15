@@ -10,11 +10,16 @@
  * Decision rules (tuned per plan v2.1):
  *  - Time window: the candidate's most-recent stroke must have been
  *    drawn in the last `SKETCH_STROKE_MERGE_MAX_GAP_MS` ms.
- *  - Proximity: the new stroke's flow-space bbox must be within
- *    `SKETCH_STROKE_MERGE_MAX_DISTANCE_PX` flow units of the candidate's
- *    current bbox (axis-aligned distance, zero on overlap).
- *  - Same parent only: cross-frame merging is forbidden \u2014 a sketch
+ *  - Proximity: the new stroke's bbox must be within `maxDistance`
+ *    units of the candidate's current bbox (axis-aligned, zero on
+ *    overlap). The caller chooses the unit — typically by converting
+ *    `SKETCH_STROKE_MERGE_MAX_DISTANCE_SCREEN_PX / zoom` so the
+ *    threshold stays constant on screen as the user pans / zooms.
+ *  - Same parent only: cross-frame merging is forbidden — a sketch
  *    inside a frame never merges with one outside, and vice versa.
+ *    The caller is responsible for converting `newBboxFlow` into the
+ *    parent's local coordinate space (i.e. the same space
+ *    `node.position` uses for parented nodes) before calling this.
  *  - Cross-color is allowed: merging a black scribble onto a red one
  *    just produces a node with mixed-color strokes, since each stroke
  *    keeps its own `color` / `size`.
@@ -25,10 +30,7 @@
  * sketch node.
  */
 
-import {
-  SKETCH_STROKE_MERGE_MAX_DISTANCE_PX,
-  SKETCH_STROKE_MERGE_MAX_GAP_MS,
-} from '@/config/canvas';
+import { SKETCH_STROKE_MERGE_MAX_GAP_MS } from '@/config/canvas';
 import useCanvasStore from '@/store/canvasStore';
 
 import type { CanvasSketchNodeData } from '../types';
@@ -80,16 +82,24 @@ function latestStrokeAt(strokes: readonly SketchStroke[]): number {
  * Find an eligible sketch node to merge a brand-new stroke into, or
  * `null` if no candidate qualifies.
  *
- * @param newBboxFlow  Flow-space bbox of the just-finished stroke.
+ * @param newBboxFlow  Bbox of the just-finished stroke, in the same
+ *                     coordinate space as the candidates' `node.position`
+ *                     (i.e. flow-space for top-level strokes,
+ *                     parent-local for strokes inside a frame).
  * @param newParentId  Parent frame ID of the new stroke (or `null` for
  *                     top-level). Cross-frame matches are rejected.
  * @param now          Wall-clock timestamp of the pointer-up event,
  *                     in ms (typically `Date.now()`).
+ * @param maxDistance  Maximum allowed bbox-to-bbox distance, in the
+ *                     same units as `newBboxFlow`. Callers converting
+ *                     a screen-space threshold should pass
+ *                     `SKETCH_STROKE_MERGE_MAX_DISTANCE_SCREEN_PX / zoom`.
  */
 export function findMergeTarget(
   newBboxFlow: FlowBBox,
   newParentId: CanvasNodeId | null,
   now: number,
+  maxDistance: number,
 ): CanvasNodeId | null {
   const nodes = useCanvasStore.getState().nodes;
 
@@ -118,7 +128,7 @@ export function findMergeTarget(
     };
 
     const dist = bboxDistance(newBboxFlow, candBbox);
-    if (dist > SKETCH_STROKE_MERGE_MAX_DISTANCE_PX) continue;
+    if (dist > maxDistance) continue;
 
     if (
       !best ||
@@ -150,20 +160,31 @@ export function findMergeTarget(
  * call). Caller is responsible for `beginGesture('SET_NODE_GEOMETRY')`
  * beforehand so the geometry change is captured by undo.
  *
- * @param targetNodeId    Sketch node returned by {@link findMergeTarget}.
- * @param newStrokePoints New stroke's points, *local to its own bbox*
- *                        (i.e. exactly what `processPoints` returns:
- *                        [x, y, pressure?] tuples in [0..width] \u00d7
- *                        [0..height]).
- * @param newBboxFlow     Flow-space bbox of the new stroke.
- * @param color           New stroke's color.
- * @param size            New stroke's nominal size.
- * @param now             Pointer-up timestamp.
- * @param newStrokeId     Pre-allocated id for the new stroke (so the
- *                        caller can reference it later if needed).
+ * @param targetNodeId      Sketch node returned by {@link findMergeTarget}.
+ * @param expectedParentId  Parent the caller believes `targetNodeId`
+ *                          lives under (or `null` for top-level). If
+ *                          this disagrees with the node's actual
+ *                          `parentId`, the merge is refused (returns
+ *                          `[]` and warns) — mismatched coord spaces
+ *                          would otherwise put the merged geometry in
+ *                          the wrong place. Same-parent invariant is
+ *                          also what {@link findMergeTarget} enforces.
+ * @param newStrokePoints   New stroke's points, *local to its own bbox*
+ *                          (i.e. exactly what `processPoints` returns:
+ *                          [x, y, pressure?] tuples in [0..width] ×
+ *                          [0..height]).
+ * @param newBboxFlow       Bbox of the new stroke, in the same coordinate
+ *                          space as `node.position` (flow-space for
+ *                          top-level, parent-local for parented).
+ * @param color             New stroke's color.
+ * @param size              New stroke's nominal size.
+ * @param now               Pointer-up timestamp.
+ * @param newStrokeId       Pre-allocated id for the new stroke (so the
+ *                          caller can reference it later if needed).
  */
 export function buildMergeCommands(
   targetNodeId: CanvasNodeId,
+  expectedParentId: CanvasNodeId | null,
   newStrokePoints: number[][],
   newBboxFlow: FlowBBox,
   color: string,
@@ -175,6 +196,17 @@ export function buildMergeCommands(
     .getState()
     .nodes.find((n) => n.id === targetNodeId);
   if (!node || node.type !== 'sketch') return [];
+
+  // Guard against coord-space mismatch — see param doc above.
+  const actualParentId = (node.parentId ?? null) as CanvasNodeId | null;
+  if (actualParentId !== expectedParentId) {
+    console.warn(
+      '[sketchMerge] buildMergeCommands: parentId mismatch on target',
+      targetNodeId,
+      { expected: expectedParentId, actual: actualParentId },
+    );
+    return [];
+  }
 
   const data = node.data as CanvasSketchNodeData;
   const baseW = data.initialSize?.width || 1;

@@ -1,6 +1,8 @@
 import { createId, resolveAccent } from '@sediment/shared';
 import { useCallback, useMemo, useRef, useState } from 'react';
 
+import { SKETCH_STROKE_MERGE_MAX_DISTANCE_SCREEN_PX } from '@/config/canvas';
+import { resolveFrameAtPoint } from '@/handler/canvasCommand/utils';
 import useCanvasStore from '@/store/canvasStore';
 
 import { findSketchStrokeHits } from './sketchHitTest';
@@ -127,6 +129,18 @@ export function SketchOverlay({
   // the first finger's coordinates being dragged around by the gesture and
   // leaving stray strokes behind.
   const activePointerIdRef = useRef<number | null>(null);
+  // Middle-mouse pan state. The overlay sits on top of ReactFlow and
+  // swallows all pointer events, so ReactFlow's built-in `panOnDrag={[1]}`
+  // never sees a middle-mouse press. We re-implement that gesture here
+  // by tracking the drag and driving `rfInstance.setViewport` directly,
+  // so middle-mouse pan keeps working while the sketch / eraser tool is
+  // active.
+  const panStateRef = useRef<{
+    pointerId: number;
+    startClientX: number;
+    startClientY: number;
+    startViewport: { x: number; y: number; zoom: number };
+  } | null>(null);
   // Whether the eraser is actively being dragged (mouse / pen / touch held).
   const [erasing, setErasing] = useState(false);
   // Last cursor position in overlay-relative coords for the eraser indicator.
@@ -141,8 +155,83 @@ export function SketchOverlay({
     return { lx: clientX - rect.left, ly: clientY - rect.top };
   }, []);
 
+  /**
+   * Begin a middle-mouse pan. Returns true if the event was consumed as
+   * a pan-start so the caller can short-circuit its draw/erase path.
+   * Browsers default middle-button-down to the auto-scroll cursor, which
+   * we suppress with `preventDefault()`.
+   */
+  const tryStartPan = useCallback(
+    (e: React.PointerEvent): boolean => {
+      if (e.button !== 1 || !rfInstance) return false;
+      e.preventDefault();
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        // Capture may fail on some pen / touch backends; ignore and
+        // rely on bubbling pointermove/up.
+      }
+      panStateRef.current = {
+        pointerId: e.pointerId,
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+        startViewport: rfInstance.getViewport(),
+      };
+      return true;
+    },
+    [rfInstance],
+  );
+
+  /**
+   * Drive the in-progress middle-mouse pan from a pointermove. Returns
+   * true if the event belongs to the active pan (so the caller can
+   * short-circuit its draw/erase path).
+   */
+  const tryUpdatePan = useCallback(
+    (e: React.PointerEvent): boolean => {
+      const s = panStateRef.current;
+      if (!s || e.pointerId !== s.pointerId || !rfInstance) return false;
+      const dx = e.clientX - s.startClientX;
+      const dy = e.clientY - s.startClientY;
+      rfInstance.setViewport(
+        {
+          x: s.startViewport.x + dx,
+          y: s.startViewport.y + dy,
+          zoom: s.startViewport.zoom,
+        },
+        { duration: 0 },
+      );
+      return true;
+    },
+    [rfInstance],
+  );
+
+  /**
+   * End the middle-mouse pan on pointerup / pointercancel. Returns true
+   * if the event belongs to the active pan.
+   */
+  const tryEndPan = useCallback((e: React.PointerEvent): boolean => {
+    const s = panStateRef.current;
+    if (!s || e.pointerId !== s.pointerId) return false;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      // Capture may already be lost; ignore.
+    }
+    panStateRef.current = null;
+    return true;
+  }, []);
+
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
+      // Middle mouse button → start a viewport pan instead of a stroke.
+      // We have to handle this here because the overlay sits on top of
+      // ReactFlow and swallows the event before its built-in panOnDrag
+      // handler can see it.
+      if (tryStartPan(e)) return;
+      // Only the primary button (left mouse / pen tip / first touch) draws.
+      // Other buttons (right click etc.) fall through with no action.
+      if (e.button !== 0 || !e.isPrimary) return;
       // Single-touch only: if another pointer is already drawing, treat
       // this as the second finger of a pinch-zoom / pan gesture. Abort the
       // in-progress stroke (release capture, drop preview) so the gesture
@@ -169,11 +258,12 @@ export function SketchOverlay({
       screenPtsRef.current = [[e.clientX, e.clientY, e.pressure]];
       setPoints([[lx, ly, e.pressure]]);
     },
-    [toLocal],
+    [toLocal, tryStartPan],
   );
 
   const handlePointerMove = useCallback(
     (e: React.PointerEvent) => {
+      if (tryUpdatePan(e)) return;
       if (e.pointerId !== activePointerIdRef.current) return;
       if (e.buttons !== 1) return;
       const { lx, ly } = toLocal(e.clientX, e.clientY);
@@ -183,11 +273,12 @@ export function SketchOverlay({
       ];
       setPoints((prev) => [...prev, [lx, ly, e.pressure]]);
     },
-    [toLocal],
+    [toLocal, tryUpdatePan],
   );
 
   const handlePointerUp = useCallback(
     (e: React.PointerEvent) => {
+      if (tryEndPan(e)) return;
       if (e.pointerId !== activePointerIdRef.current) return;
       activePointerIdRef.current = null;
       e.currentTarget.releasePointerCapture(e.pointerId);
@@ -207,26 +298,52 @@ export function SketchOverlay({
       );
 
       const now = Date.now();
-      const newBboxFlow = {
-        x: result.position.x,
-        y: result.position.y,
-        width: result.width,
-        height: result.height,
-      };
-
       // Microsoft Whiteboard-style stroke merging: if the user just
       // doodled on a nearby sketch within
       // SKETCH_STROKE_MERGE_MAX_GAP_MS, append this stroke onto that
-      // node instead of creating a fresh one. Top-level only —
-      // cross-frame merging is forbidden so a sketch trapped inside a
-      // frame can't unexpectedly absorb a freshly-drawn one outside
-      // it. See sketchMerge.ts.
-      const targetId = findMergeTarget(newBboxFlow, null, now);
+      // node instead of creating a fresh one. Cross-frame merging is
+      // forbidden so a sketch trapped inside a frame can't unexpectedly
+      // absorb a freshly-drawn one outside it. See sketchMerge.ts.
+      //
+      // Resolve the parent frame (if any) from the new stroke's bbox
+      // top-left so we match the exact same auto-nesting that
+      // `addNode` (via resolveAddNodes) would do for the fallback path.
+      // Both `findMergeTarget` and `buildMergeCommands` compare
+      // against `node.position`, which is parent-local for parented
+      // nodes \u2014 so for the parented case we convert `newBboxFlow`
+      // into the parent's local space before passing it down.
+      const storeNodes = useCanvasStore.getState().nodes;
+      const frameHit = resolveFrameAtPoint(
+        storeNodes as never,
+        result.position,
+      );
+      const newParentId = (frameHit?.parentId ?? null) as CanvasNodeId | null;
+      const parentOrigin = frameHit?.absolutePosition ?? { x: 0, y: 0 };
+      const newBboxFlow = {
+        x: result.position.x - parentOrigin.x,
+        y: result.position.y - parentOrigin.y,
+        width: result.width,
+        height: result.height,
+      };
+      // Zoom-aware proximity threshold: keep the snap radius constant
+      // on screen by converting the screen-space constant to flow-space
+      // via the current zoom (mirrors how `eraserScreenRadius` /
+      // `eraserFlowRadius` are tied together below).
+      const mergeMaxDistance =
+        SKETCH_STROKE_MERGE_MAX_DISTANCE_SCREEN_PX / zoom;
+
+      const targetId = findMergeTarget(
+        newBboxFlow,
+        newParentId,
+        now,
+        mergeMaxDistance,
+      );
 
       if (targetId) {
         const strokeId = createId('stroke');
         const commands = buildMergeCommands(
           targetId,
+          newParentId,
           result.points,
           newBboxFlow,
           strokeColor,
@@ -249,7 +366,10 @@ export function SketchOverlay({
           id: nodeId,
           nodeType: 'sketch',
           // placementPoint is the top-left of the new node, which here
-          // is the top-left of the stroke's bounding box.
+          // is the top-left of the stroke's bounding box. Passed in
+          // flow-space coords; resolveAddNodes re-runs the same
+          // resolveFrameAtPoint hit-test and converts to parent-local
+          // coords if it lands inside a frame.
           placementPoint: {
             x: result.position.x,
             y: result.position.y,
@@ -296,7 +416,7 @@ export function SketchOverlay({
         });
       });
     },
-    [rfInstance, addNode, strokeColor, strokeSize],
+    [rfInstance, addNode, strokeColor, strokeSize, zoom, tryEndPan],
   );
 
   const eraseAtClient = useCallback(
@@ -345,6 +465,10 @@ export function SketchOverlay({
 
   const handleEraserPointerDown = useCallback(
     (e: React.PointerEvent) => {
+      // Middle mouse button → viewport pan (see handlePointerDown).
+      if (tryStartPan(e)) return;
+      // Only the primary button (left mouse / pen tip / first touch) erases.
+      if (e.button !== 0 || !e.isPrimary) return;
       // Single-touch only: a second finger lands -> abort the eraser drag
       // and let the underlying canvas handle the pinch / pan gesture.
       if (activePointerIdRef.current !== null) {
@@ -364,28 +488,36 @@ export function SketchOverlay({
       setEraserPos({ x: lx, y: ly });
       eraseAtClient(e.clientX, e.clientY);
     },
-    [toLocal, eraseAtClient],
+    [toLocal, eraseAtClient, tryStartPan],
   );
 
   const handleEraserPointerMove = useCallback(
     (e: React.PointerEvent) => {
-      // Always update the visual indicator position for hover feedback,
-      // but only erase / track drag for the active pointer.
+      // Always update the visual indicator position first, regardless of
+      // whether this move belongs to a middle-mouse pan. Otherwise the
+      // indicator stays frozen at the pre-pan position throughout the
+      // drag and snaps to the cursor only on the next move after pan
+      // ends \u2014 a visible jump.
       const { lx, ly } = toLocal(e.clientX, e.clientY);
       setEraserPos({ x: lx, y: ly });
+      if (tryUpdatePan(e)) return;
       if (e.pointerId !== activePointerIdRef.current) return;
       if (e.buttons !== 1) return;
       eraseAtClient(e.clientX, e.clientY);
     },
-    [toLocal, eraseAtClient],
+    [toLocal, eraseAtClient, tryUpdatePan],
   );
 
-  const handleEraserPointerUp = useCallback((e: React.PointerEvent) => {
-    if (e.pointerId !== activePointerIdRef.current) return;
-    activePointerIdRef.current = null;
-    e.currentTarget.releasePointerCapture(e.pointerId);
-    setErasing(false);
-  }, []);
+  const handleEraserPointerUp = useCallback(
+    (e: React.PointerEvent) => {
+      if (tryEndPan(e)) return;
+      if (e.pointerId !== activePointerIdRef.current) return;
+      activePointerIdRef.current = null;
+      e.currentTarget.releasePointerCapture(e.pointerId);
+      setErasing(false);
+    },
+    [tryEndPan],
+  );
 
   const handleEraserPointerLeave = useCallback(() => {
     setEraserPos(null);
@@ -418,6 +550,7 @@ export function SketchOverlay({
         onPointerDown={handleEraserPointerDown}
         onPointerMove={handleEraserPointerMove}
         onPointerUp={handleEraserPointerUp}
+        onPointerCancel={handleEraserPointerUp}
         onPointerLeave={handleEraserPointerLeave}
       >
         {eraserPos && (
@@ -443,8 +576,9 @@ export function SketchOverlay({
       className="absolute inset-0 z-4"
       style={{ cursor: dotCursor }}
       onPointerDown={handlePointerDown}
-      onPointerMove={points.length > 0 ? handlePointerMove : undefined}
+      onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
     >
       <svg className="h-full w-full">
         {points.length > 0 && (
