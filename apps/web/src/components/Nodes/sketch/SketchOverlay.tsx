@@ -3,13 +3,13 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 
 import useCanvasStore from '@/store/canvasStore';
 
+import { findSketchHits } from './sketchHitTest';
 import {
   pointsToPath,
   DEFAULT_STROKE_COLOR,
   DEFAULT_STROKE_SIZE,
 } from './sketchPath';
 
-import type { CanvasSketchNodeData } from '../types';
 import type { ReactFlowInstance } from '@xyflow/react';
 /**
  * Process raw screen-space points into flow-space node data.
@@ -85,9 +85,23 @@ export function SketchOverlay({
   const strokeColor = sketchDraft.strokeColor || DEFAULT_STROKE_COLOR;
   const strokeSize = sketchDraft.strokeSize || DEFAULT_STROKE_SIZE;
   const mode = sketchDraft.mode ?? 'draw';
-  // Eraser hit radius scales loosely with stroke size so a fat brush also
-  // erases over a wider area, with a sensible minimum for fine strokes.
-  const eraserRadius = Math.max(strokeSize * 3, 12);
+  const zoom = rfInstance?.getViewport().zoom ?? 1;
+  // Eraser hit radius is defined in **screen-space px** so the on-screen
+  // target stays the same size regardless of canvas zoom (matches user
+  // intuition: "the brush is this big on my screen"). The radius scales
+  // loosely with the picked stroke size so a fat brush also erases over a
+  // wider visual area, with a sensible minimum for fine strokes.
+  //
+  // Note: `strokeSize` is nominally in flow units (1–32), but here we use
+  // it directly as a screen-px multiplier — i.e. the eraser is sized to
+  // match the *picked* stroke thickness rather than its zoom-projected
+  // on-screen thickness. Multiplying by `zoom` here would make the eraser
+  // grow on zoom-in / shrink on zoom-out, which is exactly what we want
+  // to avoid.
+  //
+  // Flow-space radius (used by `findSketchHits`) is `screenRadius / zoom`.
+  const eraserScreenRadius = Math.max(strokeSize * 2, 12);
+  const eraserFlowRadius = eraserScreenRadius / zoom;
   // Live-preview fill: resolve the stored palette token to a CSS color.
   // `resolveAccent` passes legacy hex strings through unchanged.
   const resolvedColor = resolveAccent(strokeColor) ?? strokeColor;
@@ -101,6 +115,13 @@ export function SketchOverlay({
   // Monotonic token to invalidate pending "clear preview" callbacks when a
   // new stroke starts before the previous clear runs (see `handlePointerUp`).
   const clearTokenRef = useRef(0);
+  // ID of the pointer currently driving the stroke / eraser drag. Used to
+  // enforce single-touch interaction: a second finger landing while we're
+  // already tracking one cancels the in-progress action so the underlying
+  // ReactFlow can handle the pinch-zoom / two-finger pan cleanly, without
+  // the first finger's coordinates being dragged around by the gesture and
+  // leaving stray strokes behind.
+  const activePointerIdRef = useRef<number | null>(null);
   // Whether the eraser is actively being dragged (mouse / pen / touch held).
   const [erasing, setErasing] = useState(false);
   // Last cursor position in overlay-relative coords for the eraser indicator.
@@ -117,6 +138,24 @@ export function SketchOverlay({
 
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
+      // Single-touch only: if another pointer is already drawing, treat
+      // this as the second finger of a pinch-zoom / pan gesture. Abort the
+      // in-progress stroke (release capture, drop preview) so the gesture
+      // is handled cleanly by ReactFlow underneath instead of producing a
+      // jittery line as the first finger gets dragged around.
+      if (activePointerIdRef.current !== null) {
+        try {
+          e.currentTarget.releasePointerCapture(activePointerIdRef.current);
+        } catch {
+          // Capture may already be lost; ignore.
+        }
+        activePointerIdRef.current = null;
+        screenPtsRef.current = [];
+        setPoints([]);
+        clearTokenRef.current++;
+        return;
+      }
+      activePointerIdRef.current = e.pointerId;
       e.currentTarget.setPointerCapture(e.pointerId);
       // Invalidate any pending "clear preview" callback from the previous
       // stroke so it can't wipe the first point of the new one.
@@ -130,6 +169,7 @@ export function SketchOverlay({
 
   const handlePointerMove = useCallback(
     (e: React.PointerEvent) => {
+      if (e.pointerId !== activePointerIdRef.current) return;
       if (e.buttons !== 1) return;
       const { lx, ly } = toLocal(e.clientX, e.clientY);
       screenPtsRef.current = [
@@ -143,6 +183,8 @@ export function SketchOverlay({
 
   const handlePointerUp = useCallback(
     (e: React.PointerEvent) => {
+      if (e.pointerId !== activePointerIdRef.current) return;
+      activePointerIdRef.current = null;
       e.currentTarget.releasePointerCapture(e.pointerId);
       const pts = screenPtsRef.current;
 
@@ -208,61 +250,6 @@ export function SketchOverlay({
     [rfInstance, addNode, strokeColor, strokeSize],
   );
 
-  /**
-   * Find every sketch node whose stroke is hit by an eraser circle of
-   * radius `eraserRadius` centred at the given flow-space point.
-   *
-   * Uses a quick bounding-box reject, then walks the stroke's points
-   * (scaled by any user resize) and tests against the distance from the
-   * eraser centre. The half-stroke thickness is folded into the radius so
-   * thicker strokes are easier to hit.
-   */
-  const findHitSketchNodes = useCallback(
-    (flowX: number, flowY: number): string[] => {
-      const nodes = useCanvasStore.getState().nodes;
-      const hits: string[] = [];
-      for (const node of nodes) {
-        if (node.type !== 'sketch') continue;
-        const data = node.data as CanvasSketchNodeData;
-        const baseW = data.initialSize?.width || 1;
-        const baseH = data.initialSize?.height || 1;
-        const w = node.measured?.width ?? node.width ?? baseW;
-        const h = node.measured?.height ?? node.height ?? baseH;
-        const x0 = node.position.x;
-        const y0 = node.position.y;
-        const halfStroke = (data.strokeSize ?? DEFAULT_STROKE_SIZE) / 2;
-        const r = eraserRadius + halfStroke;
-
-        // Bounding box reject (expanded by hit radius).
-        if (
-          flowX < x0 - r ||
-          flowX > x0 + w + r ||
-          flowY < y0 - r ||
-          flowY > y0 + h + r
-        ) {
-          continue;
-        }
-
-        const scaleX = w / baseW;
-        const scaleY = h / baseH;
-        const r2 = r * r;
-        const pts = data.points ?? [];
-        for (const pt of pts) {
-          const px = x0 + pt[0] * scaleX;
-          const py = y0 + pt[1] * scaleY;
-          const dx = px - flowX;
-          const dy = py - flowY;
-          if (dx * dx + dy * dy <= r2) {
-            hits.push(node.id);
-            break;
-          }
-        }
-      }
-      return hits;
-    },
-    [eraserRadius],
-  );
-
   const eraseAtClient = useCallback(
     (clientX: number, clientY: number) => {
       const flow = rfInstance?.screenToFlowPosition({
@@ -270,14 +257,27 @@ export function SketchOverlay({
         y: clientY,
       });
       if (!flow) return;
-      const ids = findHitSketchNodes(flow.x, flow.y);
-      if (ids.length > 0) deleteNodes(ids);
+      const { hits } = findSketchHits(flow.x, flow.y, eraserFlowRadius);
+      if (hits.length > 0) deleteNodes(hits);
     },
-    [rfInstance, findHitSketchNodes, deleteNodes],
+    [rfInstance, eraserFlowRadius, deleteNodes],
   );
 
   const handleEraserPointerDown = useCallback(
     (e: React.PointerEvent) => {
+      // Single-touch only: a second finger lands -> abort the eraser drag
+      // and let the underlying canvas handle the pinch / pan gesture.
+      if (activePointerIdRef.current !== null) {
+        try {
+          e.currentTarget.releasePointerCapture(activePointerIdRef.current);
+        } catch {
+          // Capture may already be lost; ignore.
+        }
+        activePointerIdRef.current = null;
+        setErasing(false);
+        return;
+      }
+      activePointerIdRef.current = e.pointerId;
       e.currentTarget.setPointerCapture(e.pointerId);
       setErasing(true);
       const { lx, ly } = toLocal(e.clientX, e.clientY);
@@ -289,8 +289,11 @@ export function SketchOverlay({
 
   const handleEraserPointerMove = useCallback(
     (e: React.PointerEvent) => {
+      // Always update the visual indicator position for hover feedback,
+      // but only erase / track drag for the active pointer.
       const { lx, ly } = toLocal(e.clientX, e.clientY);
       setEraserPos({ x: lx, y: ly });
+      if (e.pointerId !== activePointerIdRef.current) return;
       if (e.buttons !== 1) return;
       eraseAtClient(e.clientX, e.clientY);
     },
@@ -298,6 +301,8 @@ export function SketchOverlay({
   );
 
   const handleEraserPointerUp = useCallback((e: React.PointerEvent) => {
+    if (e.pointerId !== activePointerIdRef.current) return;
+    activePointerIdRef.current = null;
     e.currentTarget.releasePointerCapture(e.pointerId);
     setErasing(false);
   }, []);
@@ -305,8 +310,6 @@ export function SketchOverlay({
   const handleEraserPointerLeave = useCallback(() => {
     setEraserPos(null);
   }, []);
-
-  const zoom = rfInstance?.getViewport().zoom ?? 1;
 
   // Draw-mode cursor: a small filled dot in the active stroke color, with
   // a white halo so it stays visible on dark backgrounds. Hot-spot is the
@@ -324,9 +327,9 @@ export function SketchOverlay({
   }, [resolvedColor]);
 
   if (mode === 'erase') {
-    // Eraser cursor radius is in screen-space px; flow-space radius is
-    // multiplied by zoom so the indicator visually matches the hit area.
-    const cursorRadius = eraserRadius * zoom;
+    // Eraser indicator and hit area are both defined in screen-space px
+    // (`eraserScreenRadius`), so they match exactly and stay constant on
+    // screen as the user pans/zooms.
     return (
       <div
         ref={overlayRef}
@@ -342,7 +345,7 @@ export function SketchOverlay({
             <circle
               cx={eraserPos.x}
               cy={eraserPos.y}
-              r={cursorRadius}
+              r={eraserScreenRadius}
               fill={erasing ? 'rgba(0,0,0,0.08)' : 'none'}
               stroke="currentColor"
               strokeWidth={1.5}

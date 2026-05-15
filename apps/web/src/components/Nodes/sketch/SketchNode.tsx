@@ -87,13 +87,17 @@ export const SketchNode = memo(
           width={w}
           height={h}
           viewBox={`0 0 ${w} ${h}`}
-          className="pointer-events-none h-full w-full"
+          className="h-full w-full"
         >
-          <path
-            d={pathD}
-            fill={resolvedColor}
-            className="pointer-events-auto cursor-pointer"
-          />
+          {/*
+            Hit-testing: the wrapper `.react-flow__node-sketch` is set to
+            `pointer-events: none` in `index.css` so blank areas of the
+            stroke's bounding box drill through to nodes beneath. This
+            <path> uses the SVG default `pointer-events: visiblePainted`,
+            which only registers hits on actual rendered fill — i.e. the
+            painted stroke shape itself. No Tailwind override needed.
+          */}
+          <path d={pathD} fill={resolvedColor} className="cursor-pointer" />
         </svg>
       </NodeWrapper>
     );

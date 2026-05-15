@@ -32,6 +32,7 @@ import { useCanvasShortcuts } from '@/hooks/useCanvasShortcuts';
 import { useFrameDragToCreate } from '@/hooks/useFrameDragToCreate';
 import { useIsNotMouse } from '@/hooks/useInputMode';
 import { useQuestionRunner } from '@/hooks/useQuestionRunner';
+import { useSketchHoverRouting } from '@/hooks/useSketchHoverRouting';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
 import { NodeToolbar } from './CanvasToolbar.tsx';
@@ -275,6 +276,16 @@ export const Canvas: React.FC<CanvasProps> = ({
     rfInstanceRef,
     edges,
     onSelect: (nodeIds) => selectNodes(nodeIds),
+  });
+
+  // Sketch hover routing: hit-test the cursor against painted strokes so
+  // clicks on the blank area of an upper sketch's bounding box drill
+  // through to whatever is below. Disabled while the sketch tool is
+  // active (the SketchOverlay owns all pointer input then) or while
+  // box-selecting, where ReactFlow needs the default selection box.
+  useSketchHoverRouting(wrapperRef, rfInstanceRef, {
+    enabled:
+      pendingNodeType !== 'sketch' && tool !== 'lasso' && !isBoxSelecting,
   });
   const lassoPreviewNodeIdSet = useMemo(
     () => new Set(previewNodeIds),

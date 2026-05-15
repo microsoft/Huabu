@@ -34,18 +34,34 @@ export function SketchSettingsPanel() {
       onClick={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
     >
-      <SketchControls
-        color={sketchDraft.strokeColor}
-        size={sketchDraft.strokeSize}
-        onColorChange={(strokeColor) =>
-          // Picking a color implies the user wants to draw, not erase.
-          setSketchDraft({ strokeColor, mode: 'draw' })
-        }
-        onSizeChange={(strokeSize) =>
-          // Adjusting thickness implies the user wants to draw, not erase.
-          setSketchDraft({ strokeSize, mode: 'draw' })
-        }
-      />
+      {/*
+        Wrapper uses `display: contents` so the toolbar layout is unchanged,
+        while still letting us intercept pointerdown on any of the sketch
+        controls. In erase mode, *touching* these controls (including just
+        opening the color popover, which by itself does not fire
+        `onColorChange`) implies the user wants to draw again — switch back
+        immediately so a single click matches the user's mental model
+        instead of requiring them to click the eraser button first.
+      */}
+      <div
+        className="contents"
+        onPointerDown={() => {
+          if (isErasing) setSketchDraft({ mode: 'draw' });
+        }}
+      >
+        <SketchControls
+          color={sketchDraft.strokeColor}
+          size={sketchDraft.strokeSize}
+          onColorChange={(strokeColor) =>
+            // Picking a color implies the user wants to draw, not erase.
+            setSketchDraft({ strokeColor, mode: 'draw' })
+          }
+          onSizeChange={(strokeSize) =>
+            // Adjusting thickness implies the user wants to draw, not erase.
+            setSketchDraft({ strokeSize, mode: 'draw' })
+          }
+        />
+      </div>
       <FloatingToolbar.Divider />
       <Button
         variant="ghost"
