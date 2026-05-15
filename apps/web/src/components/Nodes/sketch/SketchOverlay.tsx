@@ -22,6 +22,30 @@ import {
 
 import type { CanvasCommand, CanvasNodeId } from '@sediment/shared';
 import type { ReactFlowInstance } from '@xyflow/react';
+
+/**
+ * Number of animation frames to wait before clearing the live overlay
+ * preview after a stroke commits. Two frames is the smallest delay
+ * that reliably covers ReactFlow's node sync (one commit later via
+ * useEffect) AND its `onlyRenderVisibleElements` ResizeObserver pass
+ * (next paint). Anything less causes a brief "flash" where the
+ * preview vanishes one paint before the committed SketchNode renders.
+ */
+const PREVIEW_CLEAR_DELAY_FRAMES = 2;
+
+/**
+ * Run `cb` after `frames` animation frames have elapsed. Used to defer
+ * preview cleanup until ReactFlow has actually mounted the new node
+ * (see {@link PREVIEW_CLEAR_DELAY_FRAMES}).
+ */
+function runAfterFrames(frames: number, cb: () => void): void {
+  if (frames <= 0) {
+    cb();
+    return;
+  }
+  requestAnimationFrame(() => runAfterFrames(frames - 1, cb));
+}
+
 /**
  * Process raw screen-space points into flow-space node data.
  * Returns bounding box position/size and normalised point array.
@@ -333,6 +357,13 @@ export function SketchOverlay({
         mergeMaxDistance,
       );
 
+      // Try the Whiteboard-style merge first; only fall through to a
+      // fresh node when no candidate was found OR the builder declined
+      // to produce commands (e.g. the candidate's `parentId` shifted
+      // between `findMergeTarget` and `buildMergeCommands` so the
+      // coord-space invariant no longer holds). Without this fallback
+      // the user's stroke would be silently dropped on the rare race.
+      let merged = false;
       if (targetId) {
         const strokeId = createId('stroke');
         const commands = buildMergeCommands(
@@ -352,8 +383,18 @@ export function SketchOverlay({
           // executor warns about a missing beginGesture.
           useCanvasStore.getState().beginGesture('SET_NODE_GEOMETRY');
           useCanvasStore.getState().executeCommands(commands, 'ui');
+          merged = true;
+        } else {
+          // The builder already logged the specific reason; this just
+          // surfaces that we're recovering by creating a fresh node.
+          console.warn(
+            '[SketchOverlay] merge target rejected by builder; falling back to a fresh sketch node so the stroke is preserved',
+            targetId,
+          );
         }
-      } else {
+      }
+
+      if (!merged) {
         const nodeId = createId('node');
 
         addNode({
@@ -392,22 +433,15 @@ export function SketchOverlay({
       // toolbar's `Apply Sketch` button (see `requestSketchRecognition`).
 
       // Keep the overlay preview painted until ReactFlow has actually
-      // mounted and measured the new SketchNode. Clearing it
-      // synchronously creates a brief "flash": the preview vanishes one
-      // commit before the committed node renders, because ReactFlow
-      // syncs external `nodes` via a useEffect (one commit later) and
-      // `onlyRenderVisibleElements` waits on ResizeObserver
-      // measurement (next frame). Two rAFs is the smallest delay that
-      // covers both steps in practice. The token guard prevents a stale
+      // mounted and measured the new SketchNode (see
+      // PREVIEW_CLEAR_DELAY_FRAMES). The token guard prevents a stale
       // clear from wiping a brand-new stroke if the user starts drawing
-      // again before the rAF fires.
+      // again before the deferred callback fires.
       const token = ++clearTokenRef.current;
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          if (clearTokenRef.current !== token) return;
-          screenPtsRef.current = [];
-          setPoints([]);
-        });
+      runAfterFrames(PREVIEW_CLEAR_DELAY_FRAMES, () => {
+        if (clearTokenRef.current !== token) return;
+        screenPtsRef.current = [];
+        setPoints([]);
       });
     },
     [rfInstance, addNode, strokeColor, strokeSize, zoom, tryEndPan],

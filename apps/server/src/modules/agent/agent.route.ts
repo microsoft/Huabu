@@ -50,6 +50,16 @@ import type { FastifyPluginAsync } from 'fastify';
 
 // ==================== Helpers ====================
 
+/**
+ * Hard cap on the byte size of an external image we are willing to
+ * inline as base64 in a vision content part. Anything larger is
+ * returned as a bare URL (the model will see the link but not the
+ * pixels) so a hostile or accidentally-huge URL cannot blow up the
+ * Node process. 10 MB comfortably accommodates UI screenshots while
+ * keeping memory pressure bounded.
+ */
+const MAX_INLINE_IMAGE_BYTES = 10 * 1024 * 1024;
+
 function getOrCreateThreadId(value: unknown): string {
   if (typeof value === 'string' && value.trim().length > 0) return value;
   return createId('thread');
@@ -77,7 +87,46 @@ async function resolveImageUrl(url: string): Promise<string> {
       if (!res.ok) return resolved;
       const contentType = res.headers.get('content-type') ?? '';
       if (!contentType.startsWith('image/')) return resolved;
-      const buffer = Buffer.from(await res.arrayBuffer());
+
+      // Cap the inlined payload so a hostile / accidentally-huge URL
+      // (e.g. a multi-GB camera RAW served from a CDN) cannot exhaust
+      // the Node process's heap. We honour Content-Length up-front when
+      // present, and stream-read otherwise so we can stop reading the
+      // moment the cap is exceeded — without this, `arrayBuffer()`
+      // happily buffers the whole response regardless of size.
+      const declaredSize = Number(res.headers.get('content-length') ?? '');
+      if (
+        Number.isFinite(declaredSize) &&
+        declaredSize > MAX_INLINE_IMAGE_BYTES
+      ) {
+        return resolved;
+      }
+
+      const body = res.body;
+      if (!body) {
+        // No streamable body — fall back to the buffered path but still
+        // bound the result.
+        const buffer = Buffer.from(await res.arrayBuffer());
+        if (buffer.byteLength > MAX_INLINE_IMAGE_BYTES) return resolved;
+        return `data:${contentType.split(';')[0]};base64,${buffer.toString('base64')}`;
+      }
+
+      const reader = body.getReader();
+      const chunks: Uint8Array[] = [];
+      let total = 0;
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (!value) continue;
+        total += value.byteLength;
+        if (total > MAX_INLINE_IMAGE_BYTES) {
+          // Release the stream so the underlying connection can close.
+          await reader.cancel().catch(() => {});
+          return resolved;
+        }
+        chunks.push(value);
+      }
+      const buffer = Buffer.concat(chunks);
       return `data:${contentType.split(';')[0]};base64,${buffer.toString('base64')}`;
     } catch {
       return resolved;

@@ -59,32 +59,38 @@ function nodeReject(
 }
 
 /**
- * Find every sketch node whose stroke is within `hitRadius` of the given
- * flow-space point.
+ * Return value of the per-hit callback used by {@link walkSketchHits}.
  *
- * Mirrors the geometry the eraser uses (see {@link findSketchStrokeHits}):
- *  - cheap bounding-box reject (expanded by hit radius + max stroke half)
- *  - then iterate every stroke's stored input points (scaled by any user
- *    resize)
- *  - distance test folds in half stroke thickness so thicker strokes are
- *    easier to hit
- *
- * Used by node-level consumers: hover routing for click-through, sketch
- * selection. The eraser uses the per-stroke variant below.
- *
- * @param flowX     Flow-space X coordinate of the test point.
- * @param flowY     Flow-space Y coordinate of the test point.
- * @param hitRadius Extra radius around the point in flow-space units.
- *                  Use a small value (e.g. 2\u20134) for hover, larger (12+)
- *                  for the eraser brush.
+ * - `'next-node'` skips the rest of the current node's strokes (used by
+ *   node-level consumers that only need to know "this node was hit").
+ * - `'continue'` keeps walking the remaining strokes on the same node
+ *   (used by the per-stroke eraser to collect every match).
  */
-export function findSketchHits(
+type HitWalkAction = 'next-node' | 'continue';
+
+/**
+ * Shared hit-test driver for sketch nodes. Walks every sketch in
+ * z-order, rejects via expanded bounding box, then fires `onHit` once
+ * per matching stroke. The callback's return value controls whether
+ * we keep scanning the node's remaining strokes or jump to the next
+ * node.
+ *
+ * Geometry mirrors the eraser brush:
+ *  - bbox inflated by `hitRadius + maxHalfStroke` so a thick stroke's
+ *    bulge that pokes past the stored points' bbox still hits;
+ *  - per-stroke distance test inflates by `hitRadius + halfStroke`
+ *    for the same reason.
+ *
+ * Iteration stops at the first matching point on a stroke (callers
+ * never need a per-point list).
+ */
+function walkSketchHits(
   flowX: number,
   flowY: number,
   hitRadius: number,
-): SketchHitResult {
+  onHit: (nodeId: string, strokeId: string) => HitWalkAction,
+): void {
   const nodes = useCanvasStore.getState().nodes;
-  const hits: string[] = [];
 
   for (const node of nodes) {
     if (node.type !== 'sketch') continue;
@@ -103,9 +109,9 @@ export function findSketchHits(
     const reject = nodeReject(node, data, flowX, flowY, r);
     if (!reject) continue;
 
-    let hitFound = false;
+    let advanceToNextNode = false;
     for (const stroke of strokes) {
-      if (hitFound) break;
+      if (advanceToNextNode) break;
       const halfStroke = (stroke.size ?? 0) / 2;
       const sr = hitRadius + halfStroke;
       const sr2 = sr * sr;
@@ -115,14 +121,39 @@ export function findSketchHits(
         const dx = px - flowX;
         const dy = py - flowY;
         if (dx * dx + dy * dy <= sr2) {
-          hits.push(node.id);
-          hitFound = true;
+          if (onHit(node.id, stroke.id) === 'next-node') {
+            advanceToNextNode = true;
+          }
           break;
         }
       }
     }
   }
+}
 
+/**
+ * Find every sketch node whose stroke is within `hitRadius` of the given
+ * flow-space point.
+ *
+ * Used by node-level consumers: hover routing for click-through, sketch
+ * selection. The eraser uses the per-stroke variant below.
+ *
+ * @param flowX     Flow-space X coordinate of the test point.
+ * @param flowY     Flow-space Y coordinate of the test point.
+ * @param hitRadius Extra radius around the point in flow-space units.
+ *                  Use a small value (e.g. 2\u20134) for hover, larger (12+)
+ *                  for the eraser brush.
+ */
+export function findSketchHits(
+  flowX: number,
+  flowY: number,
+  hitRadius: number,
+): SketchHitResult {
+  const hits: string[] = [];
+  walkSketchHits(flowX, flowY, hitRadius, (nodeId) => {
+    hits.push(nodeId);
+    return 'next-node';
+  });
   return {
     hits,
     topmost: hits.length > 0 ? hits[hits.length - 1] : null,
@@ -142,39 +173,10 @@ export function findSketchStrokeHits(
   flowY: number,
   hitRadius: number,
 ): SketchStrokeHit[] {
-  const nodes = useCanvasStore.getState().nodes;
   const out: SketchStrokeHit[] = [];
-
-  for (const node of nodes) {
-    if (node.type !== 'sketch') continue;
-    const data = node.data as CanvasSketchNodeData;
-    const strokes = data.strokes ?? [];
-    if (strokes.length === 0) continue;
-
-    const maxHalfStroke = strokes.reduce(
-      (m, s) => Math.max(m, (s.size ?? 0) / 2),
-      0,
-    );
-    const r = hitRadius + maxHalfStroke;
-    const reject = nodeReject(node, data, flowX, flowY, r);
-    if (!reject) continue;
-
-    for (const stroke of strokes) {
-      const halfStroke = (stroke.size ?? 0) / 2;
-      const sr = hitRadius + halfStroke;
-      const sr2 = sr * sr;
-      for (const pt of stroke.points) {
-        const px = reject.x0 + pt[0] * reject.scaleX;
-        const py = reject.y0 + pt[1] * reject.scaleY;
-        const dx = px - flowX;
-        const dy = py - flowY;
-        if (dx * dx + dy * dy <= sr2) {
-          out.push({ nodeId: node.id, strokeId: stroke.id });
-          break;
-        }
-      }
-    }
-  }
-
+  walkSketchHits(flowX, flowY, hitRadius, (nodeId, strokeId) => {
+    out.push({ nodeId, strokeId });
+    return 'continue';
+  });
   return out;
 }

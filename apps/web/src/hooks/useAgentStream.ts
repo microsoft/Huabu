@@ -26,6 +26,15 @@ import type {
 
 /**
  * Parse a tool result string into a proper ToolResponse.
+ *
+ * The server already wraps every tool result in a
+ * `{ tool, status, ... }` envelope (see
+ * apps/server/src/modules/agent/agent.service.ts). We accept that
+ * envelope verbatim, accept bare JSON values as `{ status: 'success',
+ * data }`, and treat parse failures as an error envelope so a
+ * malformed payload can never masquerade as a successful tool result
+ * (which would mislead canvas-write style tools that downstream code
+ * applies blind).
  */
 function parseToolResponse(
   toolName: string,
@@ -42,9 +51,25 @@ function parseToolResponse(
     ) {
       return parsed as ToolResponse<string, unknown>;
     }
+    // Valid JSON but not the standard envelope — treat as a successful
+    // result whose payload IS the parsed value.
     return { tool: toolName, status: 'success', data: parsed };
-  } catch {
-    return { tool: toolName, status: 'success', data: { content: raw } };
+  } catch (err) {
+    // Truncate the raw text in the error message to keep the chat
+    // bubble readable; the full raw value is preserved on `data.raw`
+    // for debugging.
+    const preview = raw.length > 200 ? `${raw.slice(0, 200)}…` : raw;
+    console.error(
+      '[useAgentStream] tool result was not valid JSON',
+      toolName,
+      err,
+    );
+    return {
+      tool: toolName,
+      status: 'error',
+      error: `Tool returned non-JSON output: ${preview}`,
+      data: { raw },
+    } as ToolResponse<string, unknown>;
   }
 }
 
