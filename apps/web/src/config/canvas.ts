@@ -32,3 +32,27 @@ export const MAX_ZOOM = 5;
 export function snapToGrid(value: number): number {
   return Math.round(value / GRID_SIZE) * GRID_SIZE;
 }
+
+/**
+ * Sketch tool — pointer-up stroke merging (Microsoft Whiteboard /
+ * Procreate behaviour). When the user finishes a stroke, instead of
+ * always creating a brand-new sketch node, we look for a recent
+ * nearby sketch node and append the stroke onto it. The two thresholds
+ * below decide what "recent" and "nearby" mean. See
+ * `apps/web/src/components/Nodes/sketch/sketchMerge.ts` for the
+ * matching algorithm.
+ */
+
+/**
+ * Maximum gap (ms) between a candidate sketch node's most-recent stroke
+ * and the new stroke's pointer-up. Beyond this the new stroke starts a
+ * fresh sketch node instead of merging.
+ */
+export const SKETCH_STROKE_MERGE_MAX_GAP_MS = 5000;
+
+/**
+ * Maximum gap (in flow-space px) between the new stroke's bbox and a
+ * candidate node's current bbox. Distance is axis-aligned and collapses
+ * to zero whenever the two rectangles overlap.
+ */
+export const SKETCH_STROKE_MERGE_MAX_DISTANCE_PX = 80;

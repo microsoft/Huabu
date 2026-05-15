@@ -215,11 +215,12 @@ export function SketchOverlay({
       };
 
       // Microsoft Whiteboard-style stroke merging: if the user just
-      // doodled on a nearby sketch within the last MERGE_TIME_WINDOW_MS,
-      // append this stroke onto that node instead of creating a fresh
-      // one. Top-level only \u2014 cross-frame merging is forbidden so a
-      // sketch trapped inside a frame can't unexpectedly absorb a
-      // freshly-drawn one outside it. See sketchMerge.ts.
+      // doodled on a nearby sketch within
+      // SKETCH_STROKE_MERGE_MAX_GAP_MS, append this stroke onto that
+      // node instead of creating a fresh one. Top-level only —
+      // cross-frame merging is forbidden so a sketch trapped inside a
+      // frame can't unexpectedly absorb a freshly-drawn one outside
+      // it. See sketchMerge.ts.
       const targetId = findMergeTarget(newBboxFlow, null, now);
 
       if (targetId) {

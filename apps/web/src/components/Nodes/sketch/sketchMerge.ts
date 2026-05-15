@@ -9,10 +9,10 @@
  *
  * Decision rules (tuned per plan v2.1):
  *  - Time window: the candidate's most-recent stroke must have been
- *    drawn in the last `MERGE_TIME_WINDOW_MS` ms.
+ *    drawn in the last `SKETCH_STROKE_MERGE_MAX_GAP_MS` ms.
  *  - Proximity: the new stroke's flow-space bbox must be within
- *    `MERGE_PROXIMITY_PX` flow units of the candidate's current bbox
- *    (axis-aligned distance, zero on overlap).
+ *    `SKETCH_STROKE_MERGE_MAX_DISTANCE_PX` flow units of the candidate's
+ *    current bbox (axis-aligned distance, zero on overlap).
  *  - Same parent only: cross-frame merging is forbidden \u2014 a sketch
  *    inside a frame never merges with one outside, and vice versa.
  *  - Cross-color is allowed: merging a black scribble onto a red one
@@ -25,6 +25,10 @@
  * sketch node.
  */
 
+import {
+  SKETCH_STROKE_MERGE_MAX_DISTANCE_PX,
+  SKETCH_STROKE_MERGE_MAX_GAP_MS,
+} from '@/config/canvas';
 import useCanvasStore from '@/store/canvasStore';
 
 import type { CanvasSketchNodeData } from '../types';
@@ -33,20 +37,6 @@ import type {
   CanvasNodeId,
   SketchStroke,
 } from '@sediment/shared';
-
-/**
- * Maximum gap, in ms, between the candidate's most-recent stroke and
- * the new stroke's pointer-up. Beyond this, the new stroke starts a
- * fresh sketch node.
- */
-export const MERGE_TIME_WINDOW_MS = 1500;
-
-/**
- * Maximum distance, in flow-space pixels, between the new stroke's
- * bbox and the candidate's current bbox. Distance is axis-aligned and
- * collapses to zero whenever the bboxes overlap.
- */
-export const MERGE_PROXIMITY_PX = 80;
 
 /** Axis-aligned bounding box in flow-space coordinates. */
 export interface FlowBBox {
@@ -114,7 +104,7 @@ export function findMergeTarget(
     if (strokes.length === 0) continue;
 
     const touchedAt = latestStrokeAt(strokes);
-    if (now - touchedAt > MERGE_TIME_WINDOW_MS) continue;
+    if (now - touchedAt > SKETCH_STROKE_MERGE_MAX_GAP_MS) continue;
 
     const w =
       node.measured?.width ?? node.width ?? data.initialSize?.width ?? 0;
@@ -128,7 +118,7 @@ export function findMergeTarget(
     };
 
     const dist = bboxDistance(newBboxFlow, candBbox);
-    if (dist > MERGE_PROXIMITY_PX) continue;
+    if (dist > SKETCH_STROKE_MERGE_MAX_DISTANCE_PX) continue;
 
     if (
       !best ||
