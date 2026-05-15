@@ -517,20 +517,39 @@ export function SketchOverlay({
     setEraserPos(null);
   }, []);
 
-  // Draw-mode cursor: a small filled dot in the active stroke color, with
-  // a white halo so it stays visible on dark backgrounds. Hot-spot is the
-  // dot's centre so the painted stroke starts exactly under the cursor.
+  // Draw-mode cursor: a filled dot in the active stroke color sized to
+  // match the on-screen stroke thickness (`strokeSize * zoom`, mirroring
+  // `pointsToPath`), with a 1px white halo so it stays visible on dark
+  // backgrounds. Hot-spot is the dot's centre so the painted stroke
+  // starts exactly under the cursor.
+  //
+  // Visual diameter is clamped to a usable range: a hard min keeps the
+  // cursor findable for hairline strokes, and the max stays inside the
+  // ~128px ceiling that browsers reliably honour for custom cursors
+  // (Chromium silently falls back to the system cursor above that).
   const dotCursor = useMemo(() => {
+    const CURSOR_MIN_PX = 4;
+    const CURSOR_MAX_PX = 64;
+    const diameter = Math.max(
+      CURSOR_MIN_PX,
+      Math.min(CURSOR_MAX_PX, Math.round(strokeSize * zoom)),
+    );
+    // 1px halo on each side; +1 extra so the antialiased edge isn't
+    // clipped by the SVG bounds.
+    const svgSize = diameter + 3;
+    const center = svgSize / 2;
+    const dotRadius = diameter / 2;
+    const haloRadius = dotRadius + 1;
     // Only `#` from hex colors needs URL-encoding inside an SVG data URI;
     // palette tokens like `rgb(...)` / named colors pass through fine.
     const safeColor = resolvedColor.replace(/#/g, '%23');
     const svg =
-      `<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14'>` +
-      `<circle cx='7' cy='7' r='5' fill='white'/>` +
-      `<circle cx='7' cy='7' r='4' fill='${safeColor}'/>` +
+      `<svg xmlns='http://www.w3.org/2000/svg' width='${svgSize}' height='${svgSize}' viewBox='0 0 ${svgSize} ${svgSize}'>` +
+      `<circle cx='${center}' cy='${center}' r='${haloRadius}' fill='white'/>` +
+      `<circle cx='${center}' cy='${center}' r='${dotRadius}' fill='${safeColor}'/>` +
       `</svg>`;
-    return `url("data:image/svg+xml;utf8,${svg}") 7 7, crosshair`;
-  }, [resolvedColor]);
+    return `url("data:image/svg+xml;utf8,${svg}") ${center} ${center}, crosshair`;
+  }, [resolvedColor, strokeSize, zoom]);
 
   if (mode === 'erase') {
     // Eraser indicator and hit area are both defined in screen-space px
