@@ -81,6 +81,7 @@ export const SketchNode = memo(
         selected={selected}
         resizable={true}
         toolbar={sketchToolbar}
+        allowOverflow
       >
         <svg
           width={w}

@@ -98,6 +98,9 @@ export function SketchOverlay({
   const screenPtsRef = useRef<number[][]>([]);
   const overlayRef = useRef<HTMLDivElement>(null);
   const [points, setPoints] = useState<number[][]>([]);
+  // Monotonic token to invalidate pending "clear preview" callbacks when a
+  // new stroke starts before the previous clear runs (see `handlePointerUp`).
+  const clearTokenRef = useRef(0);
   // Whether the eraser is actively being dragged (mouse / pen / touch held).
   const [erasing, setErasing] = useState(false);
   // Last cursor position in overlay-relative coords for the eraser indicator.
@@ -115,6 +118,9 @@ export function SketchOverlay({
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
       e.currentTarget.setPointerCapture(e.pointerId);
+      // Invalidate any pending "clear preview" callback from the previous
+      // stroke so it can't wipe the first point of the new one.
+      clearTokenRef.current++;
       const { lx, ly } = toLocal(e.clientX, e.clientY);
       screenPtsRef.current = [[e.clientX, e.clientY, e.pressure]];
       setPoints([[lx, ly, e.pressure]]);
@@ -180,8 +186,24 @@ export function SketchOverlay({
       // triggered by an idle timer — the user invokes it explicitly via the
       // toolbar's `Apply Sketch` button (see `requestSketchRecognition`).
 
-      screenPtsRef.current = [];
-      setPoints([]);
+      // Keep the overlay preview painted until ReactFlow has actually
+      // mounted and measured the new SketchNode. Clearing it
+      // synchronously creates a brief "flash": the preview vanishes one
+      // commit before the committed node renders, because ReactFlow
+      // syncs external `nodes` via a useEffect (one commit later) and
+      // `onlyRenderVisibleElements` waits on ResizeObserver
+      // measurement (next frame). Two rAFs is the smallest delay that
+      // covers both steps in practice. The token guard prevents a stale
+      // clear from wiping a brand-new stroke if the user starts drawing
+      // again before the rAF fires.
+      const token = ++clearTokenRef.current;
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (clearTokenRef.current !== token) return;
+          screenPtsRef.current = [];
+          setPoints([]);
+        });
+      });
     },
     [rfInstance, addNode, strokeColor, strokeSize],
   );

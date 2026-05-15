@@ -456,7 +456,11 @@ export const NodeWrapper = memo(
             // Always reserve a 3px border so toggling accent on/off does
             // not shift inner content. Default border is transparent;
             // accent (or other states) override `borderColor` via style.
-            'border-3 border-transparent',
+            // Sketch nodes have no accent picker and no visible border, so
+            // skip the reservation — otherwise the 3px inset shrinks the
+            // SVG viewBox area vs the on-overlay preview, making the
+            // committed stroke jump and shrink at pointer-up.
+            type !== 'sketch' && 'border-3 border-transparent',
             // Question nodes need visible overflow for status badges and progress bar
             type === 'question' && 'overflow-visible',
             className,
