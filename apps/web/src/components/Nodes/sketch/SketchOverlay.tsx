@@ -4,6 +4,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import useCanvasStore from '@/store/canvasStore';
 
 import { findSketchHits } from './sketchHitTest';
+import { buildMergeCommands, findMergeTarget } from './sketchMerge';
 import {
   pointsToPath,
   DEFAULT_STROKE_COLOR,
@@ -201,34 +202,71 @@ export function SketchOverlay({
         strokeSize,
       );
 
-      const nodeId = createId('node');
+      const now = Date.now();
+      const newBboxFlow = {
+        x: result.position.x,
+        y: result.position.y,
+        width: result.width,
+        height: result.height,
+      };
 
-      addNode({
-        id: nodeId,
-        nodeType: 'sketch',
-        // placementPoint is the top-left of the new node, which here is
-        // the top-left of the stroke's bounding box.
-        placementPoint: {
-          x: result.position.x,
-          y: result.position.y,
-        },
-        size: { width: result.width, height: result.height },
-        data: {
-          type: 'sketch',
-          strokes: [
-            {
-              id: createId('stroke'),
-              points: result.points,
-              color: strokeColor,
-              size: strokeSize,
-              createdAt: Date.now(),
-            },
-          ],
-          initialSize: result.initialSize,
-          origin: { type: 'user-created' },
-        },
-        skipAutoLayout: true,
-      });
+      // Microsoft Whiteboard-style stroke merging: if the user just
+      // doodled on a nearby sketch within the last MERGE_TIME_WINDOW_MS,
+      // append this stroke onto that node instead of creating a fresh
+      // one. Top-level only \u2014 cross-frame merging is forbidden so a
+      // sketch trapped inside a frame can't unexpectedly absorb a
+      // freshly-drawn one outside it. See sketchMerge.ts.
+      const targetId = findMergeTarget(newBboxFlow, null, now);
+
+      if (targetId) {
+        const strokeId = createId('stroke');
+        const commands = buildMergeCommands(
+          targetId,
+          result.points,
+          newBboxFlow,
+          strokeColor,
+          strokeSize,
+          now,
+          strokeId,
+        );
+        if (commands.length > 0) {
+          // SET_NODE_GEOMETRY uses snapshot:'caller' \u2014 take the undo
+          // snapshot now so the merge folds into a single undo entry
+          // alongside the data merge. Without this, the canvasStore
+          // executor warns about a missing beginGesture.
+          useCanvasStore.getState().beginGesture('SET_NODE_GEOMETRY');
+          useCanvasStore.getState().executeCommands(commands, 'ui');
+        }
+      } else {
+        const nodeId = createId('node');
+
+        addNode({
+          id: nodeId,
+          nodeType: 'sketch',
+          // placementPoint is the top-left of the new node, which here
+          // is the top-left of the stroke's bounding box.
+          placementPoint: {
+            x: result.position.x,
+            y: result.position.y,
+          },
+          size: { width: result.width, height: result.height },
+          data: {
+            type: 'sketch',
+            strokes: [
+              {
+                id: createId('stroke'),
+                points: result.points,
+                color: strokeColor,
+                size: strokeSize,
+                createdAt: now,
+              },
+            ],
+            initialSize: result.initialSize,
+            origin: { type: 'user-created' },
+          },
+          skipAutoLayout: true,
+        });
+      }
 
       // Sketch is now a normal persisted node. AI recognition is no longer
       // triggered by an idle timer — the user invokes it explicitly via the
