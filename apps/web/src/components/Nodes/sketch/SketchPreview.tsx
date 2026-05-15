@@ -18,21 +18,19 @@ export const SketchPreview = memo(({ data }: PreviewComponentProps) => {
     strokes?: SketchStroke[];
     initialSize?: { width: number; height: number };
   };
-  const strokes = sketchData.strokes ?? [];
   const initialSize = sketchData.initialSize ?? {
     width: 200,
     height: 100,
   };
 
-  const renderedStrokes = useMemo(
-    () =>
-      strokes.map((s) => ({
-        id: s.id,
-        d: pointsToPath(s.points, 1, s.size ?? DEFAULT_STROKE_SIZE),
-        fill: resolveAccent(s.color) ?? s.color ?? DEFAULT_STROKE_COLOR,
-      })),
-    [strokes],
-  );
+  const renderedStrokes = useMemo(() => {
+    const strokes = sketchData.strokes ?? [];
+    return strokes.map((s) => ({
+      id: s.id,
+      d: pointsToPath(s.points, 1, s.size ?? DEFAULT_STROKE_SIZE),
+      fill: resolveAccent(s.color) ?? s.color ?? DEFAULT_STROKE_COLOR,
+    }));
+  }, [sketchData.strokes]);
 
   return (
     <div className="flex h-full w-full items-center justify-center p-2">

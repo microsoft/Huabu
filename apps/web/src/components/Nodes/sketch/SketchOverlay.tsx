@@ -3,14 +3,19 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 
 import useCanvasStore from '@/store/canvasStore';
 
-import { findSketchHits } from './sketchHitTest';
-import { buildMergeCommands, findMergeTarget } from './sketchMerge';
+import { findSketchStrokeHits } from './sketchHitTest';
+import {
+  buildEraseCommands,
+  buildMergeCommands,
+  findMergeTarget,
+} from './sketchMerge';
 import {
   pointsToPath,
   DEFAULT_STROKE_COLOR,
   DEFAULT_STROKE_SIZE,
 } from './sketchPath';
 
+import type { CanvasCommand, CanvasNodeId } from '@sediment/shared';
 import type { ReactFlowInstance } from '@xyflow/react';
 /**
  * Process raw screen-space points into flow-space node data.
@@ -81,7 +86,6 @@ export function SketchOverlay({
   rfInstance: ReactFlowInstance | null;
 }) {
   const addNode = useCanvasStore((s) => s.addNode);
-  const deleteNodes = useCanvasStore((s) => s.deleteNodes);
   const sketchDraft = useCanvasStore((s) => s.sketchDraft);
   const strokeColor = sketchDraft.strokeColor || DEFAULT_STROKE_COLOR;
   const strokeSize = sketchDraft.strokeSize || DEFAULT_STROKE_SIZE;
@@ -100,7 +104,7 @@ export function SketchOverlay({
   // grow on zoom-in / shrink on zoom-out, which is exactly what we want
   // to avoid.
   //
-  // Flow-space radius (used by `findSketchHits`) is `screenRadius / zoom`.
+  // Flow-space radius (used by `findSketchStrokeHits`) is `screenRadius / zoom`.
   const eraserScreenRadius = Math.max(strokeSize * 2, 12);
   const eraserFlowRadius = eraserScreenRadius / zoom;
   // Live-preview fill: resolve the stored palette token to a CSS color.
@@ -301,10 +305,41 @@ export function SketchOverlay({
         y: clientY,
       });
       if (!flow) return;
-      const { hits } = findSketchHits(flow.x, flow.y, eraserFlowRadius);
-      if (hits.length > 0) deleteNodes(hits);
+      // Per-stroke eraser: a swipe over a single stroke removes ONLY
+      // that stroke, leaving the rest of the (possibly multi-stroke)
+      // sketch node intact. If every stroke in a node ends up erased,
+      // buildEraseCommands returns a DELETE_NODES command instead.
+      const hits = findSketchStrokeHits(flow.x, flow.y, eraserFlowRadius);
+      if (hits.length === 0) return;
+
+      // Group hits by node so each node produces a single coherent
+      // pair of (MERGE_NODE_DATA, SET_NODE_GEOMETRY) commands rather
+      // than one per stroke.
+      const byNode = new Map<string, Set<string>>();
+      for (const h of hits) {
+        let set = byNode.get(h.nodeId);
+        if (!set) {
+          set = new Set();
+          byNode.set(h.nodeId, set);
+        }
+        set.add(h.strokeId);
+      }
+
+      const commands: CanvasCommand[] = [];
+      for (const [nodeId, strokeIds] of byNode) {
+        commands.push(...buildEraseCommands(nodeId as CanvasNodeId, strokeIds));
+      }
+      if (commands.length === 0) return;
+
+      // SET_NODE_GEOMETRY uses snapshot:'caller'. If the brush only
+      // produced full deletes we don't need beginGesture, but it's
+      // cheap and harmless to call when there's any geometry change.
+      const hasGeometry = commands.some((c) => c.type === 'SET_NODE_GEOMETRY');
+      const store = useCanvasStore.getState();
+      if (hasGeometry) store.beginGesture('SET_NODE_GEOMETRY');
+      store.executeCommands(commands, 'ui');
     },
-    [rfInstance, eraserFlowRadius, deleteNodes],
+    [rfInstance, eraserFlowRadius],
   );
 
   const handleEraserPointerDown = useCallback(

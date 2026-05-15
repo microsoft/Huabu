@@ -275,3 +275,124 @@ export function buildMergeCommands(
     },
   ];
 }
+
+/**
+ * Build the commands needed to erase one or more strokes from a sketch
+ * node.
+ *
+ * Two outcomes:
+ *  - All of the node's strokes are erased \u2192 returns a single
+ *    `DELETE_NODES` command. The whole node is gone.
+ *  - Some strokes survive \u2192 returns `[MERGE_NODE_DATA, SET_NODE_GEOMETRY]`
+ *    that:
+ *      1. Bakes any user resize into the survivors' coordinates.
+ *      2. Reframes the node tightly around the survivors (padded by
+ *         each stroke's own thickness so the visual halo stays
+ *         enclosed).
+ *      3. Resets `initialSize` so the node's local scale starts at 1
+ *         again.
+ *
+ * If no strokes are actually being removed (e.g. the brush hit
+ * something the store already knows nothing about), returns `[]`.
+ *
+ * The geometry change uses snapshot:'caller'. Caller is responsible
+ * for `beginGesture('SET_NODE_GEOMETRY')` before `executeCommands`.
+ *
+ * @param targetNodeId      Sketch node to erase from.
+ * @param removedStrokeIds  Set of stroke ids to remove.
+ */
+export function buildEraseCommands(
+  targetNodeId: CanvasNodeId,
+  removedStrokeIds: Set<string>,
+): CanvasCommand[] {
+  if (removedStrokeIds.size === 0) return [];
+
+  const node = useCanvasStore
+    .getState()
+    .nodes.find((n) => n.id === targetNodeId);
+  if (!node || node.type !== 'sketch') return [];
+
+  const data = node.data as CanvasSketchNodeData;
+  const remaining = data.strokes.filter((s) => !removedStrokeIds.has(s.id));
+
+  // No survivors \u2014 the whole node goes.
+  if (remaining.length === 0) {
+    return [{ type: 'DELETE_NODES', nodeIds: [targetNodeId] }];
+  }
+
+  // Same length \u2014 nothing actually changed (target ids didn't match any
+  // current stroke). Skip silently rather than emit a no-op undo entry.
+  if (remaining.length === data.strokes.length) return [];
+
+  const baseW = data.initialSize?.width || 1;
+  const baseH = data.initialSize?.height || 1;
+  const curW = node.measured?.width ?? node.width ?? baseW;
+  const curH = node.measured?.height ?? node.height ?? baseH;
+  const scaleX = curW / baseW;
+  const scaleY = curH / baseH;
+  const O = { x: node.position.x, y: node.position.y };
+
+  // Tight bbox of survivor strokes in flow coords, padded per stroke by
+  // its own size/2 (perfect-freehand can paint up to `size` wide).
+  let x1 = Infinity;
+  let y1 = Infinity;
+  let x2 = -Infinity;
+  let y2 = -Infinity;
+
+  for (const s of remaining) {
+    const pad = (s.size ?? 0) / 2;
+    for (const p of s.points) {
+      const fx = O.x + p[0] * scaleX;
+      const fy = O.y + p[1] * scaleY;
+      if (fx - pad < x1) x1 = fx - pad;
+      if (fy - pad < y1) y1 = fy - pad;
+      if (fx + pad > x2) x2 = fx + pad;
+      if (fy + pad > y2) y2 = fy + pad;
+    }
+  }
+
+  // All survivors are degenerate (empty point arrays) \u2014 treat as full
+  // delete since there's nothing left to draw.
+  if (!Number.isFinite(x1)) {
+    return [{ type: 'DELETE_NODES', nodeIds: [targetNodeId] }];
+  }
+
+  const unionW = x2 - x1;
+  const unionH = y2 - y1;
+
+  // Bake scale + reframe each survivor's points into the new local
+  // coordinate space (top-left = (x1, y1)).
+  const baked: SketchStroke[] = remaining.map((s) => ({
+    ...s,
+    points: s.points.map((p) => {
+      const px = p[0] * scaleX + (O.x - x1);
+      const py = p[1] * scaleY + (O.y - y1);
+      return p.length > 2 ? [px, py, ...p.slice(2)] : [px, py];
+    }),
+  }));
+
+  return [
+    {
+      type: 'MERGE_NODE_DATA',
+      patches: [
+        {
+          nodeId: targetNodeId,
+          patch: {
+            strokes: baked,
+            initialSize: { width: unionW, height: unionH },
+          },
+        },
+      ],
+    },
+    {
+      type: 'SET_NODE_GEOMETRY',
+      items: [
+        {
+          nodeId: targetNodeId,
+          position: { x: x1, y: y1 },
+          size: { width: unionW, height: unionH },
+        },
+      ],
+    },
+  ];
+}
