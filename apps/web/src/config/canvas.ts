@@ -60,6 +60,16 @@ export const SKETCH_STROKE_MERGE_MAX_GAP_MS = 5000;
  * my screen"). The caller is expected to convert it to flow-space via
  * `SKETCH_STROKE_MERGE_MAX_DISTANCE_SCREEN_PX / zoom` before passing
  * it to `findMergeTarget`. Mirrors the same screen-space treatment the
- * eraser brush radius uses (see `SketchOverlay.eraserScreenRadius`).
+ * eraser brush radius uses (see `SKETCH_ERASER_RADIUS_SCREEN_PX`).
  */
 export const SKETCH_STROKE_MERGE_MAX_DISTANCE_SCREEN_PX = 80;
+
+/**
+ * Eraser brush radius (in **screen-space px**) used by the sketch tool's
+ * erase mode. Defined in screen-space — and intentionally decoupled from
+ * the picked stroke size — so the on-screen target stays predictable
+ * regardless of canvas zoom or whatever thickness the user last drew
+ * with. `SketchOverlay` converts to flow-space (`/ zoom`) before hit-
+ * testing existing strokes.
+ */
+export const SKETCH_ERASER_RADIUS_SCREEN_PX = 16;

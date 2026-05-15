@@ -1,7 +1,10 @@
 import { createId, resolveAccent } from '@sediment/shared';
 import { useCallback, useMemo, useRef, useState } from 'react';
 
-import { SKETCH_STROKE_MERGE_MAX_DISTANCE_SCREEN_PX } from '@/config/canvas';
+import {
+  SKETCH_ERASER_RADIUS_SCREEN_PX,
+  SKETCH_STROKE_MERGE_MAX_DISTANCE_SCREEN_PX,
+} from '@/config/canvas';
 import { resolveFrameAtPoint } from '@/handler/canvasCommand/utils';
 import useCanvasStore from '@/store/canvasStore';
 
@@ -93,21 +96,12 @@ export function SketchOverlay({
   const strokeSize = sketchDraft.strokeSize || DEFAULT_STROKE_SIZE;
   const mode = sketchDraft.mode ?? 'draw';
   const zoom = rfInstance?.getViewport().zoom ?? 1;
-  // Eraser hit radius is defined in **screen-space px** so the on-screen
-  // target stays the same size regardless of canvas zoom (matches user
-  // intuition: "the brush is this big on my screen"). The radius scales
-  // loosely with the picked stroke size so a fat brush also erases over a
-  // wider visual area, with a sensible minimum for fine strokes.
-  //
-  // Note: `strokeSize` is nominally in flow units (1–32), but here we use
-  // it directly as a screen-px multiplier — i.e. the eraser is sized to
-  // match the *picked* stroke thickness rather than its zoom-projected
-  // on-screen thickness. Multiplying by `zoom` here would make the eraser
-  // grow on zoom-in / shrink on zoom-out, which is exactly what we want
-  // to avoid.
-  //
-  // Flow-space radius (used by `findSketchStrokeHits`) is `screenRadius / zoom`.
-  const eraserScreenRadius = Math.max(strokeSize * 2, 12);
+  // Eraser hit radius is a fixed screen-space size (decoupled from the
+  // picked stroke thickness), so the on-screen target stays predictable
+  // regardless of zoom or whatever the user last drew with. The flow-
+  // space radius (used by `findSketchStrokeHits`) divides out zoom so
+  // the brush always covers the same number of on-screen pixels.
+  const eraserScreenRadius = SKETCH_ERASER_RADIUS_SCREEN_PX;
   const eraserFlowRadius = eraserScreenRadius / zoom;
   // Live-preview fill: resolve the stored palette token to a CSS color.
   // `resolveAccent` passes legacy hex strings through unchanged.

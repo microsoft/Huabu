@@ -21,13 +21,13 @@ interface SketchControlsProps {
  * Reusable color + thickness controls for the sketch tool.
  *
  * Used in two places:
- * 1. Pre-draw — mounted by `Canvas.tsx` while the sketch tool is the
- *    pending node type; bound to `canvasStore.sketchDraft`.
+ * 1. Pre-draw — mounted by `SketchSettingsPanel` (only in draw mode)
+ *    and bound to `canvasStore.sketchDraft`.
  * 2. Post-draw — embedded in `SketchNode`'s floating toolbar; bound to
- *    that node's `data.strokeColor` / `data.strokeSize`.
+ *    that node's stroke data.
  *
- * The component itself is presentation-only. It does not know about the
- * store; the parent decides where the values come from and where edits go.
+ * Presentation-only: the parent decides where the values come from and
+ * where edits go.
  */
 export function SketchControls({
   color,
