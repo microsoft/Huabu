@@ -116,12 +116,36 @@ async function buildUserContent(
 
   for (const att of attachments) {
     const label = att.label ?? att.filename ?? 'attachment';
-    const originRef = att.originNodeId
-      ? ` (origin node id: ${att.originNodeId})`
-      : '';
+    // Collapse the singular `originNodeId` and the plural `originNodeIds`
+    // into one list. Singular is the historical 1:1 case (PDF excerpt,
+    // text selection, image-node send-to-chat); plural was added so a
+    // single attachment can advertise N source nodes (e.g. one image
+    // rendered from a sketch cluster of multiple strokes).
+    const originIds = att.originNodeIds?.length
+      ? att.originNodeIds
+      : att.originNodeId
+        ? [att.originNodeId]
+        : [];
+    const originRef =
+      originIds.length === 0
+        ? ''
+        : originIds.length === 1
+          ? ` (origin node id: ${originIds[0]})`
+          : ` (origin node ids: ${originIds.join(', ')})`;
 
     switch (att.type) {
       case 'image': {
+        // Caption the image with its source node ids so the model can
+        // follow up via `inspect_nodes` / `get_canvas_outline` for
+        // surrounding context (parent frame, position, neighbours).
+        // Without this the image part is opaque — the model sees
+        // pixels but does not know which canvas nodes they came from.
+        if (originIds.length > 0) {
+          parts.push({
+            type: 'text',
+            text: `[Attached Image: ${label}${originRef}]`,
+          });
+        }
         // Resolve image URL to base64 for vision
         if (att.url) {
           const resolved = await resolveImageUrl(att.url);
@@ -282,6 +306,25 @@ function collectSelectedNodeRefs(nodes: WireSelectionNode[]): AgentNodeRef[] {
   };
   walk(nodes);
   return refs;
+}
+
+/**
+ * Flatten the wire selection (frame children included) into a unique
+ * id list. Used to materialise the `[SYSTEM selectedNodeIds:[...]]`
+ * metadata tag on the persisted user message — the same selection
+ * info already lives in `canvasContext.selectedNodes`, so the wire
+ * never has to carry the id list separately.
+ */
+function collectSelectedNodeIds(nodes: WireSelectionNode[]): string[] {
+  const seen = new Set<string>();
+  const walk = (list: WireSelectionNode[]) => {
+    for (const n of list) {
+      seen.add(n.id);
+      if (n.children) walk(n.children);
+    }
+  };
+  walk(nodes);
+  return Array.from(seen);
 }
 
 function writeSSE(raw: NodeJS.WritableStream, event: AgentStreamEvent): void {
@@ -747,7 +790,6 @@ const agentRoutes: FastifyPluginAsync = async (
       canvasContext,
       canvasId,
       attachments,
-      selectedNodeIds,
       anchorNodeId,
     } = parsed.data;
 
@@ -827,9 +869,14 @@ const agentRoutes: FastifyPluginAsync = async (
     }
 
     // Add user message to context
-    // Embed selectedNodeIds and attachments as metadata tags so they survive round-trip
+    // Embed selectedNodeIds and attachments as metadata tags so they survive round-trip.
+    // selectedNodeIds is derived from `canvasContext.selectedNodes` (recursive over
+    // frame children) — the wire never carries the id list separately.
     const metadataTags: string[] = [];
-    if (selectedNodeIds && selectedNodeIds.length > 0) {
+    const selectedNodeIds = canvasContext?.selectedNodes
+      ? collectSelectedNodeIds(canvasContext.selectedNodes)
+      : [];
+    if (selectedNodeIds.length > 0) {
       metadataTags.push(
         `[SYSTEM selectedNodeIds:${JSON.stringify(selectedNodeIds)}]`,
       );
@@ -840,6 +887,9 @@ const agentRoutes: FastifyPluginAsync = async (
         type: a.type,
         source: a.source,
         ...(a.originNodeId ? { originNodeId: a.originNodeId } : {}),
+        ...(a.originNodeIds && a.originNodeIds.length > 0
+          ? { originNodeIds: a.originNodeIds }
+          : {}),
         ...(a.url ? { url: a.url } : {}),
         ...(a.label ? { label: a.label } : {}),
         ...(a.filename ? { filename: a.filename } : {}),

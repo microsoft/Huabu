@@ -8,6 +8,7 @@ import {
 import { useState, useCallback, useRef, useEffect } from 'react';
 
 import { agentApi } from '@/api/agent';
+import { buildSketchAttachmentsFromSelection } from '@/handler/sketch/buildSketchAttachments';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 
@@ -17,6 +18,7 @@ import type { ResourceLabel } from '../components/Messages/types';
 import type {
   AgentMode,
   AgentStreamEvent,
+  ChatAttachment,
   IntentCandidate,
 } from '@sediment/shared';
 
@@ -510,16 +512,36 @@ export function useAgentStream(): UseAgentStreamReturn {
         ...pendingAttachments,
         ...(selectionAttachment ? [selectionAttachment] : []),
       ];
-      const attachments = allPending.length > 0 ? allPending : undefined;
-      if (attachments) {
+
+      const allNodes = useCanvasStore.getState().nodes;
+      const selectedNodeIds = allNodes
+        .filter((n) => n.selected)
+        .map((n) => n.id);
+
+      // If the user selected sketch nodes, rasterise each spatial cluster
+      // (scoped per parent frame) into a PNG attachment so the vision
+      // pipeline can see the gesture without a separate sketch-recognition
+      // round-trip. Failure here must not block the chat send — we log
+      // and proceed with whatever attachments did succeed.
+      let sketchAttachments: ChatAttachment[] = [];
+      if (selectedNodeIds.length > 0) {
+        try {
+          sketchAttachments = await buildSketchAttachmentsFromSelection(
+            selectedNodeIds,
+            allNodes,
+          );
+        } catch (err) {
+          console.error('[useAgentStream] sketch attachment build failed', err);
+        }
+      }
+
+      const mergedAttachments = [...allPending, ...sketchAttachments];
+      const attachments =
+        mergedAttachments.length > 0 ? mergedAttachments : undefined;
+      if (allPending.length > 0) {
         clearPendingAttachments();
         useChatStore.getState().setSelectionAttachment(null);
       }
-
-      const selectedNodeIds = useCanvasStore
-        .getState()
-        .nodes.filter((n) => n.selected)
-        .map((n) => n.id);
 
       // For intent-driven operate calls, show an intent-select widget instead of user bubble
       if (intentData && agentMode === 'operate') {
@@ -617,8 +639,6 @@ export function useAgentStream(): UseAgentStreamReturn {
             canvasContext: getAgentChatContext(),
             canvasId: canvasId || undefined,
             attachments,
-            selectedNodeIds:
-              selectedNodeIds.length > 0 ? selectedNodeIds : undefined,
             intentData,
             signal: abortController.signal,
           },

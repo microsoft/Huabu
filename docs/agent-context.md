@@ -37,7 +37,7 @@ POST /api/agent                           POST /api/intent/recognize
     content, threadId, mode,                  canvasContext: IntentContext
     canvasContext: AgentChatContext,        }
     canvasId, attachments,
-    selectedNodeIds, intentData
+    intentData, anchorNodeId
   }
   │
   ▼服务端 agent.route.ts
@@ -117,12 +117,13 @@ canvas_commands / web_search / use_skill ...
 
 ### 2.5 用户意图 / 选择信号
 
-- `selectedNodeIds[]`:除了 `canvasContext.selectedNodes` 外,在 `AgentRequest`
-  顶层另带一份 id 列表。服务端会用它调用 `buildNodeSummaries`,把
-  **预处理 enrich 出的 `summary + keywords`** 拼进一条
+- `canvasContext.selectedNodes`：唯一的选中信号来源。服务端用
+  `collectSelectedNodeRefs(canvasContext.selectedNodes)` 拼出
   `[SYSTEM Context]\n[Selected Nodes (id / label / type only — read "nodes/<id>.md" for content, inspect_nodes({ ids: [...] }) for layout / style / spatial relations)]`
-  系统消息。
-  > **这是目前唯一一条让 enrich 摘要进入上下文的路径**,且只覆盖选中节点。
+  系统消息；同时通过 `collectSelectedNodeIds` 派生 id 列表，作为
+  `[SYSTEM selectedNodeIds:[...]]` metadata tag 嵌入持久化的 user message，
+  仅供后续 history 回读时给前端渲染选中节点徽标使用——**id 列表不进 prompt**，
+  线上也不再单独传一份。
 - `attachments[]`:用户聊天时显式贴入的图 / PDF / 文本 / 链接。
 - `intentData`:候选意图列表 + 用户最终选定的那一条 —
   [packages/shared/src/types/agent.ts](../packages/shared/src/types/agent.ts)。

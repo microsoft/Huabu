@@ -124,7 +124,21 @@ export type WireCanvasNode = z.infer<typeof wireCanvasNodeSchema>;
 export const chatAttachmentSchema = z.object({
   type: z.enum(['image', 'pdf', 'text', 'file', 'web']),
   source: z.enum(['upload', 'excerpt', 'selection']),
+  /**
+   * Single source node — used for 1:1 attachments (PDF excerpt, text
+   * selection, image node send-to-chat). The chat UI renders a
+   * clickable badge linking back to this node.
+   */
   originNodeId: z.string().optional(),
+  /**
+   * Multiple source nodes — used for attachments derived from a group
+   * of nodes (e.g. one image rendered from a sketch cluster of N
+   * strokes). Coexists with `originNodeId`; consumers that only
+   * understand the singular field still get a clickable badge for the
+   * primary node, while `originNodeIds` carries the full set for the
+   * agent and for richer UI rendering.
+   */
+  originNodeIds: z.array(z.string()).optional(),
   url: z.string().optional(),
   content: z.string().optional(),
   label: z.string().optional(),
@@ -187,7 +201,6 @@ export const agentRequestSchema = z.object({
   canvasContext: agentChatContextSchema.optional(),
   canvasId: z.string().min(1).optional(),
   attachments: z.array(chatAttachmentSchema).optional(),
-  selectedNodeIds: z.array(z.string().min(1)).optional(),
   intentData: z
     .object({
       candidates: z.array(intentCandidateSchema),
