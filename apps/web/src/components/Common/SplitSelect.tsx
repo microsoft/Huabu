@@ -194,7 +194,7 @@ export function SplitSelect<T extends string = string>({
               key={option.value}
               variant="ghost"
               tone="neutral"
-              size="sm"
+              size={size}
               role="option"
               aria-selected={option.value === value}
               onClick={() => handleSelect(option.value)}
@@ -205,7 +205,7 @@ export function SplitSelect<T extends string = string>({
             >
               {option.icon && <span className="shrink-0">{option.icon}</span>}
               <span className="flex-1">{option.label}</span>
-              {option.value === value && <Check size={14} />}
+              {option.value === value && <Check />}
             </Button>
           ))}
         </Popover>
