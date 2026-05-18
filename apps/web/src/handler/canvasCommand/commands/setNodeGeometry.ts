@@ -39,9 +39,34 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
           delete nextStyle.height;
         }
 
+        // Mirror the explicitly-set dimensions into `measured` so the
+        // immediately-following `fitFrames` pass sees the new size. Without
+        // this the parent frame would fit to the *previous* size (one step
+        // behind) because `getNodeSize` prefers `measured` over `style`, and
+        // ReactFlow's ResizeObserver hasn't reconciled the DOM yet at this
+        // point. The RO will re-write the same number on the next frame, so
+        // there's no jitter.
+        //
+        // For `height: undefined` (clearing a pinned height to revert to
+        // content-driven sizing, e.g. note auto-fit) we leave `measured.height`
+        // alone — the new content height is unknown until the next render,
+        // and overwriting with 0 here would briefly collapse the node.
+        const prevMeasured = (updated.measured ?? {}) as {
+          width?: number;
+          height?: number;
+        };
+        const nextMeasured: { width?: number; height?: number } = {
+          ...prevMeasured,
+          width: update.size.width,
+        };
+        if (typeof update.size.height === 'number') {
+          nextMeasured.height = update.size.height;
+        }
+
         updated = {
           ...updated,
           style: nextStyle,
+          measured: nextMeasured,
         };
       }
       if (updated.parentId) affectedFrameIds.add(updated.parentId);

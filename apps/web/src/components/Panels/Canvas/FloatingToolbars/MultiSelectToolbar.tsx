@@ -14,20 +14,19 @@ import {
   Trash2,
   Ungroup,
 } from 'lucide-react';
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 
 import { CanvasFloatingPopover } from '@/components/Common/CanvasFloatingPopover';
 import {
   FloatingToolbar,
   FLOATING_TOOLBAR_CLASS,
 } from '@/components/Common/FloatingToolbar';
-import {
-  getAbsolutePosition,
-  type NestableNode,
-} from '@/handler/canvasCommand/utils/frame';
+import { getSelectionBounds } from '@/handler/canvasCommand/utils/bounds';
 import { useIsNotMouse } from '@/hooks/useInputMode';
 import useCanvasStore from '@/store/canvasStore';
 import { useIntentStore } from '@/store/intentStore';
+import { resolveGeometryEdit } from '@/utils/node/geometry';
+import { getNodeSize } from '@/utils/node/size';
 
 import type { CanvasNode } from '@/components/Nodes/types';
 import type { CanvasNodeId } from '@sediment/shared';
@@ -44,6 +43,9 @@ export const MultiSelectToolbar = () => {
   const alignSelectedNodes = useCanvasStore((s) => s.alignSelectedNodes);
   const spreadSelectedNodes = useCanvasStore((s) => s.spreadSelectedNodes);
   const executeCommands = useCanvasStore((s) => s.executeCommands);
+  const setNodeGeometry = useCanvasStore((s) => s.setNodeGeometry);
+  const setNoteHeightMode = useCanvasStore((s) => s.setNoteHeightMode);
+  const beginGesture = useCanvasStore((s) => s.beginGesture);
   const deleteNodes = useCanvasStore((s) => s.deleteNodes);
   const requestSketchRecognition = useIntentStore(
     (s) => s.requestSketchRecognition,
@@ -90,43 +92,68 @@ export const MultiSelectToolbar = () => {
     [selectedNodes],
   );
 
+  // Common width / height across selected nodes. `null` when the
+  // selected nodes do not all share the same value — the size picker
+  // shows a "—" placeholder and the user can fill in either field to
+  // apply just that dimension uniformly.
+  const commonSize = useMemo(() => {
+    if (selectedNodes.length === 0) return { width: null, height: null };
+    const sizes = selectedNodes.map((n) => getNodeSize(n));
+    const firstW = sizes[0].width;
+    const firstH = sizes[0].height;
+    const sameW =
+      firstW > 0 &&
+      sizes.every((s) => Math.round(s.width) === Math.round(firstW));
+    const sameH =
+      firstH > 0 &&
+      sizes.every((s) => Math.round(s.height) === Math.round(firstH));
+    return {
+      width: sameW ? firstW : null,
+      height: sameH ? firstH : null,
+    };
+  }, [selectedNodes]);
+
+  // Note auto-fit toggle: only exposed when *every* selected node is a
+  // note AND they all share the same auto/fixed state. Mixed states
+  // would make a single toggle ambiguous, so we hide it instead.
+  const noteAutoState = useMemo(() => {
+    if (selectedNodes.length === 0) return null;
+    if (!selectedNodes.every((n) => n.type === 'note')) return null;
+    const firstAuto =
+      (selectedNodes[0].style?.height as number | undefined) === undefined;
+    const allSame = selectedNodes.every(
+      (n) =>
+        ((n.style?.height as number | undefined) === undefined) === firstAuto,
+    );
+    return allSame ? { active: firstAuto } : null;
+  }, [selectedNodes]);
+
+  // "Last pinned height" memory is owned by the shared `noteHeightMemory`
+  // module (populated by `useTrackNoteFixedHeight` on each NoteNode), so
+  // this toolbar doesn't need a parallel per-node map — `setNoteHeightMode`
+  // reads from the same source whether the toggle was fired here, from the
+  // single-select toolbar, or from the corner affordance.
+  const toggleNotesAutoHeight = useCallback(() => {
+    if (!noteAutoState) return;
+    setNoteHeightMode(
+      selectedNodes.map((n) => n.id),
+      noteAutoState.active ? 'fixed' : 'auto',
+    );
+  }, [noteAutoState, selectedNodes, setNoteHeightMode]);
+
   // Compute bounding box of selected nodes in flow (absolute) coordinates.
-  // Returned as a `CanvasFloatingPopover` anchor rect.
+  // Returned as a `CanvasFloatingPopover` anchor rect. Uses the shared
+  // `getSelectionBounds` helper so the anchor stays in lock-step with
+  // the multi-select resizer's outline.
   const anchor = useMemo(() => {
     if (selectedNodes.length < 2) return null;
-
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-
-    for (const node of selectedNodes) {
-      const absPos = getAbsolutePosition(nodes as NestableNode[], node.id);
-      const pos = absPos ?? node.position;
-
-      const style = node.style as
-        | { width?: number; height?: number }
-        | undefined;
-      const w =
-        typeof style?.width === 'number'
-          ? style.width
-          : (node.measured?.width ?? 200);
-      const h =
-        typeof style?.height === 'number'
-          ? style.height
-          : (node.measured?.height ?? 100);
-
-      minX = Math.min(minX, pos.x);
-      minY = Math.min(minY, pos.y);
-      maxX = Math.max(maxX, pos.x + w);
-      maxY = Math.max(maxY, pos.y + h);
-    }
-
+    const bounds = getSelectionBounds(selectedNodes, nodes);
+    if (!bounds) return null;
     return {
-      x: minX,
-      y: minY,
-      width: maxX - minX,
-      height: maxY - minY,
+      x: bounds.minX,
+      y: bounds.minY,
+      width: bounds.width,
+      height: bounds.height,
     };
   }, [selectedNodes, nodes]);
 
@@ -189,6 +216,56 @@ export const MultiSelectToolbar = () => {
       >
         <Ungroup />
       </FloatingToolbar.ActionButton>
+
+      <FloatingToolbar.Divider />
+
+      {/* Size editor: set width / height of every selected node. */}
+      <FloatingToolbar.SizePicker
+        width={commonSize.width}
+        height={commonSize.height}
+        onApply={({ width, height }) => {
+          if (selectedNodes.length === 0) return;
+          if (width === undefined && height === undefined) return;
+          // Resolve per-node via the shared helper, which:
+          //  - falls back to each node's existing width when only height
+          //    was edited (and skips nodes whose width can't be resolved);
+          //  - preserves each node's pinned-vs-auto height state when the
+          //    user didn't enter a height.
+          const items = selectedNodes
+            .map((node) => {
+              const resolved = resolveGeometryEdit(node, { width, height });
+              if (!resolved) return null;
+              return {
+                nodeId: node.id as CanvasNodeId,
+                size: { width: resolved.width, height: resolved.height },
+              };
+            })
+            .filter(
+              (
+                item,
+              ): item is {
+                nodeId: CanvasNodeId;
+                size: { width: number; height: number | undefined };
+              } => item !== null,
+            );
+          if (items.length === 0) return;
+          // SET_NODE_GEOMETRY uses snapshot:'caller' — open a gesture so
+          // the resize folds into one undo entry and the store doesn't warn.
+          beginGesture('SET_NODE_GEOMETRY');
+          setNodeGeometry(items);
+        }}
+        heightAuto={
+          noteAutoState
+            ? {
+                active: noteAutoState.active,
+                onToggle: toggleNotesAutoHeight,
+                title: noteAutoState.active
+                  ? 'Switch to fixed height'
+                  : 'Fit height to content',
+              }
+            : undefined
+        }
+      />
 
       {sketchIds && (
         <>

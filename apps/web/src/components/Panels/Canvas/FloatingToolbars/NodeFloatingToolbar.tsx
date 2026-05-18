@@ -5,7 +5,7 @@ import {
 } from '@sediment/shared';
 import { useInternalNode } from '@xyflow/react';
 import { Trash2 } from 'lucide-react';
-import { memo, useMemo, type ReactNode } from 'react';
+import { memo, useCallback, useMemo, type ReactNode } from 'react';
 
 import { CanvasFloatingPopover } from '@/components/Common/CanvasFloatingPopover';
 import {
@@ -16,6 +16,7 @@ import { Tooltip } from '@/components/Common/Tooltip';
 import { NODE_ICON } from '@/config/nodeIcons';
 import { useIsNotMouse } from '@/hooks/useInputMode';
 import useCanvasStore from '@/store/canvasStore';
+import { resolveGeometryEdit } from '@/utils/node/geometry';
 
 import type { CanvasNodeType, NodeData } from '@/components/Nodes/types';
 
@@ -56,6 +57,8 @@ export const NodeFloatingToolbar = memo(
     const updateNodeData = useCanvasStore((s) => s.updateNodeData);
     const convertNodeType = useCanvasStore((s) => s.convertNodeType);
     const deleteNodes = useCanvasStore((s) => s.deleteNodes);
+    const setNodeGeometry = useCanvasStore((s) => s.setNodeGeometry);
+    const setNoteHeightMode = useCanvasStore((s) => s.setNoteHeightMode);
     const expandedNodeId = useCanvasStore((s) => s.expandedNodeId);
     const ingestion = useCanvasStore((s) => s.ingestionByNodeId[id]);
     const isNotMouse = useIsNotMouse();
@@ -89,6 +92,41 @@ export const NodeFloatingToolbar = memo(
         0;
       return { x, y, width, height };
     }, [internalNode]);
+
+    // Current size shown in the size picker. Use measured dimensions
+    // (browser-actual) as the source of truth so the popup reflects the
+    // node's true on-screen size, including content-driven auto-sizing.
+    const currentWidth =
+      internalNode?.measured?.width ??
+      (internalNode?.style?.width as number | undefined) ??
+      null;
+    const currentHeight =
+      internalNode?.measured?.height ??
+      (internalNode?.style?.height as number | undefined) ??
+      null;
+
+    // ─── Note: fit-height ↔ H input linkage ────────────────────────────
+    //
+    // For note nodes, the H input shares state with the dedicated
+    // auto-fit toggle (mirrors `handleToggleAutoHeight` in NoteNode):
+    //  - Auto mode  → `style.height` is undefined, node grows with content.
+    //  - Fixed mode → `style.height` is a pinned number.
+    //
+    // Both this toggle and the corner "show all content" affordance in
+    // NoteNode observe the same store state, so they stay in sync
+    // automatically. The "last pinned height" memory used by the
+    // auto → fixed seed lives in the shared `noteHeightMemory` module
+    // (populated by `useTrackNoteFixedHeight` on each NoteNode), so this
+    // toolbar doesn't need to track it locally — `setNoteHeightMode`
+    // reads from the same map regardless of which entry point triggers
+    // the toggle.
+    const styleHeight = internalNode?.style?.height as number | undefined;
+
+    const beginGesture = useCanvasStore((s) => s.beginGesture);
+    const isNoteAutoHeight = type === 'note' && styleHeight === undefined;
+    const toggleNoteAutoHeight = useCallback(() => {
+      setNoteHeightMode([id], isNoteAutoHeight ? 'fixed' : 'auto');
+    }, [id, isNoteAutoHeight, setNoteHeightMode]);
 
     return (
       <CanvasFloatingPopover
@@ -138,6 +176,45 @@ export const NodeFloatingToolbar = memo(
         <div className="bg-border mx-0.5 h-4 w-px" />
 
         {children}
+
+        <FloatingToolbar.Divider />
+
+        <FloatingToolbar.SizePicker
+          width={currentWidth}
+          height={currentHeight}
+          onApply={({ width, height }) => {
+            if (!internalNode) return;
+            // `resolveGeometryEdit` falls back to existing width when only
+            // height was edited, preserves pinned-vs-auto height when the
+            // user didn't enter a height, and rejects items whose width
+            // can't be resolved to a positive number.
+            const resolved = resolveGeometryEdit(internalNode, {
+              width,
+              height,
+            });
+            if (!resolved) return;
+            // SET_NODE_GEOMETRY uses snapshot:'caller' — open a gesture so
+            // the resize is captured as one undo entry without warnings.
+            beginGesture('SET_NODE_GEOMETRY');
+            setNodeGeometry([
+              {
+                nodeId: id,
+                size: { width: resolved.width, height: resolved.height },
+              },
+            ]);
+          }}
+          heightAuto={
+            type === 'note'
+              ? {
+                  active: isNoteAutoHeight,
+                  onToggle: toggleNoteAutoHeight,
+                  title: isNoteAutoHeight
+                    ? 'Switch to fixed height'
+                    : 'Fit height to content',
+                }
+              : undefined
+          }
+        />
 
         {type !== 'question' && type !== 'sketch' && (
           <>

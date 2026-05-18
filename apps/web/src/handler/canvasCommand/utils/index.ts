@@ -1,5 +1,7 @@
 export { type AlignDirection, alignNodes, spreadNodes } from './alignment';
 
+export { type SelectionBounds, getSelectionBounds } from './bounds';
+
 export {
   type NestableNode,
   type UnframeResult,

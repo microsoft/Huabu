@@ -1,3 +1,4 @@
+import { MoveVertical } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 import { Button } from './Button';
@@ -299,6 +300,208 @@ function ToolbarColorPicker({
   );
 }
 
+// ─── ToolbarSizePicker ────────────────────────────────────────────────────────
+
+interface ToolbarSizePickerProps {
+  /**
+   * Current width in canvas pixels. `null` means "mixed / unknown"
+   * (e.g. multi-selection where selected nodes have different widths).
+   */
+  width: number | null;
+  /**
+   * Current height in canvas pixels. `null` means "mixed / unknown".
+   */
+  height: number | null;
+  /**
+   * Called with the committed width or height. Only the edited
+   * dimension is included so the host can preserve the other one's
+   * current value (e.g. fall back to each node's own height in a
+   * multi-selection).
+   */
+  onApply: (size: { width?: number; height?: number }) => void;
+  /** Lower bound enforced on both inputs. Defaults to 20. */
+  minSize?: number;
+  /**
+   * When provided, renders a small toggle next to the H input that
+   * flips the node between fixed (pinned) and auto-fit height modes.
+   *
+   * - `active: true`  → currently in auto-fit mode; the H input is
+   *   styled as a hint (subtle text) and any value the user types
+   *   automatically pins the height.
+   * - `active: false` → currently fixed; toggle hands control back to
+   *   auto-fit.
+   */
+  heightAuto?: {
+    active: boolean;
+    onToggle: () => void;
+    title?: string;
+  };
+}
+
+const SIZE_INPUT_CLASS =
+  'border-edge-default focus:border-info nodrag w-12 rounded border bg-transparent px-1.5 py-0.5 text-xs outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none';
+
+/**
+ * Inline width / height editor for a node's geometry.
+ *
+ * Renders directly into the toolbar row (no popover) so the user can
+ * see the current dimensions at a glance and edit either value with
+ * one click.
+ *
+ * Apply semantics:
+ *  - Commits on Enter or input blur.
+ *  - Empty input restores the displayed value (no dispatch).
+ *  - Each dimension is dispatched independently — the host should fall
+ *    back to the node's existing value for the dimension that wasn't
+ *    edited.
+ *  - Out-of-range values are clamped to `minSize`.
+ *
+ * When `heightAuto` is provided, the H input doubles as the auto-fit
+ * toggle's value display: typing pins the height and the toggle button
+ * lets the user flip back to content-driven sizing.
+ */
+function ToolbarSizePicker({
+  width,
+  height,
+  onApply,
+  minSize = 20,
+  heightAuto,
+}: ToolbarSizePickerProps) {
+  // Local draft state per input. Synced from the canonical canvas value
+  // whenever it changes externally (drag-resize, undo, auto/fixed toggle).
+  // Kept separate from the prop so the user can type freely without the
+  // value reformatting itself on every keystroke.
+  const [wText, setWText] = useState('');
+  const [hText, setHText] = useState('');
+
+  useEffect(() => {
+    setWText(typeof width === 'number' ? String(Math.round(width)) : '');
+  }, [width]);
+
+  useEffect(() => {
+    setHText(typeof height === 'number' ? String(Math.round(height)) : '');
+  }, [height]);
+
+  const commitW = () => {
+    const trimmed = wText.trim();
+    if (trimmed === '') {
+      // Empty: restore the displayed value rather than dispatching.
+      setWText(typeof width === 'number' ? String(Math.round(width)) : '');
+      return;
+    }
+    const parsed = Number.parseFloat(trimmed);
+    if (!Number.isFinite(parsed)) {
+      setWText(typeof width === 'number' ? String(Math.round(width)) : '');
+      return;
+    }
+    const next = Math.max(minSize, Math.round(parsed));
+    setWText(String(next));
+    if (typeof width !== 'number' || next !== Math.round(width)) {
+      onApply({ width: next });
+    }
+  };
+
+  const commitH = () => {
+    const trimmed = hText.trim();
+    if (trimmed === '') {
+      setHText(typeof height === 'number' ? String(Math.round(height)) : '');
+      return;
+    }
+    const parsed = Number.parseFloat(trimmed);
+    if (!Number.isFinite(parsed)) {
+      setHText(typeof height === 'number' ? String(Math.round(height)) : '');
+      return;
+    }
+    const next = Math.max(minSize, Math.round(parsed));
+    setHText(String(next));
+    // In auto-fit mode, always dispatch so typing pins the height even
+    // when the typed value matches the current measured size.
+    const isAuto = heightAuto?.active === true;
+    if (isAuto || typeof height !== 'number' || next !== Math.round(height)) {
+      onApply({ height: next });
+    }
+  };
+
+  const isAuto = heightAuto?.active === true;
+
+  return (
+    <div className="flex items-center gap-1">
+      <label className="flex items-center gap-1">
+        <span className="text-fg-subtle text-xs" aria-hidden="true">
+          W
+        </span>
+        <input
+          type="number"
+          inputMode="numeric"
+          aria-label="Width"
+          min={minSize}
+          step={1}
+          value={wText}
+          placeholder={typeof width === 'number' ? '' : '—'}
+          onChange={(e) => setWText(e.target.value)}
+          onBlur={commitW}
+          onMouseDown={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === 'Enter') {
+              commitW();
+              (e.target as HTMLInputElement).blur();
+            } else if (e.key === 'Escape') {
+              setWText(
+                typeof width === 'number' ? String(Math.round(width)) : '',
+              );
+              (e.target as HTMLInputElement).blur();
+            }
+          }}
+          className={SIZE_INPUT_CLASS}
+        />
+      </label>
+      <label className="flex items-center gap-1">
+        <span className="text-fg-subtle text-xs" aria-hidden="true">
+          H
+        </span>
+        <input
+          type="number"
+          inputMode="numeric"
+          aria-label="Height"
+          min={minSize}
+          step={1}
+          value={hText}
+          placeholder={typeof height === 'number' ? '' : '—'}
+          onChange={(e) => setHText(e.target.value)}
+          onBlur={commitH}
+          onMouseDown={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === 'Enter') {
+              commitH();
+              (e.target as HTMLInputElement).blur();
+            } else if (e.key === 'Escape') {
+              setHText(
+                typeof height === 'number' ? String(Math.round(height)) : '',
+              );
+              (e.target as HTMLInputElement).blur();
+            }
+          }}
+          className={cn(SIZE_INPUT_CLASS, isAuto && 'text-fg-subtle italic')}
+        />
+      </label>
+      {heightAuto && (
+        <ToggleButton
+          active={isAuto}
+          title={
+            heightAuto.title ??
+            (isAuto ? 'Switch to fixed height' : 'Fit height to content')
+          }
+          onClick={heightAuto.onToggle}
+        >
+          <MoveVertical />
+        </ToggleButton>
+      )}
+    </div>
+  );
+}
+
 // ─── Compound export ──────────────────────────────────────────────────────────
 
 export const FloatingToolbar = Object.assign(Root, {
@@ -308,4 +511,5 @@ export const FloatingToolbar = Object.assign(Root, {
   Group,
   Select: ToolbarSelect,
   ColorPicker: ToolbarColorPicker,
+  SizePicker: ToolbarSizePicker,
 });
