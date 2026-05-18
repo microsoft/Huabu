@@ -1,4 +1,14 @@
-import { MoveVertical } from 'lucide-react';
+import {
+  AlignCenterHorizontal,
+  AlignCenterVertical,
+  AlignEndHorizontal,
+  AlignEndVertical,
+  AlignHorizontalDistributeCenter,
+  AlignStartHorizontal,
+  AlignStartVertical,
+  MoveVertical,
+  Ungroup,
+} from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 import { Button } from './Button';
@@ -10,6 +20,21 @@ import {
 } from './Select';
 
 import type { ReactNode } from 'react';
+
+/**
+ * Alignment directions supported by `ToolbarAlignPicker`.
+ *
+ * Mirrors the canvas store's `AlignDirection` union so the picker stays
+ * decoupled from `@/handler/...` (which would create a Common → app
+ * import cycle). The two definitions must stay in sync.
+ */
+export type ToolbarAlignDirection =
+  | 'left'
+  | 'center-h'
+  | 'right'
+  | 'top'
+  | 'center-v'
+  | 'bottom';
 
 // ─── Shared style tokens ──────────────────────────────────────────────────────
 
@@ -502,6 +527,195 @@ function ToolbarSizePicker({
   );
 }
 
+// ─── ToolbarAlignPicker ───────────────────────────────────────────────────────
+
+interface ToolbarAlignPickerProps {
+  /** Called when the user picks a horizontal or vertical alignment. */
+  onAlign: (direction: ToolbarAlignDirection) => void;
+  /** Called when the user clicks "Spread Apart". */
+  onSpread: () => void;
+  /** Tooltip on the trigger button. */
+  title?: string;
+}
+
+/**
+ * A single-trigger picker that collapses the 6 alignment actions and
+ * the "Spread Apart" action into one toolbar button.
+ *
+ * Trigger:  one ghost icon-only button (saves ~180px on the parent
+ *           toolbar versus rendering all 7 actions inline).
+ * Popover:  a 3-column grid with the 6 alignment buttons (row 1 =
+ *           horizontal alignment, row 2 = vertical alignment),
+ *           followed by a divider and a centered Spread button.
+ *
+ * Behaviour mirrors `ToolbarColorPicker`:
+ *  - Opens on trigger click, closes on outside click, Escape, or after
+ *    any action is picked.
+ *  - Uses `bottom-full ... mb-2` so the popover floats above the
+ *    toolbar — matches the multi-select toolbar's "lives above the
+ *    selection" placement.
+ */
+function ToolbarAlignPicker({
+  onAlign,
+  onSpread,
+  title = 'Align & Distribute',
+}: ToolbarAlignPickerProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Close on outside click. Mirrors the dismissal model used by
+  // `ToolbarColorPicker` so all toolbar popovers behave identically.
+  useEffect(() => {
+    if (!isOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(e.target as HTMLElement)
+      ) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [isOpen]);
+
+  // Close on Escape — the popover sits over the canvas, so Escape
+  // should dismiss the picker without deselecting nodes.
+  useEffect(() => {
+    if (!isOpen) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [isOpen]);
+
+  const pick = (direction: ToolbarAlignDirection) => {
+    onAlign(direction);
+    setIsOpen(false);
+  };
+
+  const spread = () => {
+    onSpread();
+    setIsOpen(false);
+  };
+
+  // Static config — kept inside the component so the icons resolve at
+  // render time (lucide tree-shakes per-icon imports).
+  const alignButtons: ReadonlyArray<{
+    direction: ToolbarAlignDirection;
+    title: string;
+    Icon: typeof AlignStartVertical;
+  }> = [
+    { direction: 'left', title: 'Align Left', Icon: AlignStartVertical },
+    {
+      direction: 'center-h',
+      title: 'Align Center',
+      Icon: AlignCenterVertical,
+    },
+    { direction: 'right', title: 'Align Right', Icon: AlignEndVertical },
+    { direction: 'top', title: 'Align Top', Icon: AlignStartHorizontal },
+    {
+      direction: 'center-v',
+      title: 'Align Middle',
+      Icon: AlignCenterHorizontal,
+    },
+    { direction: 'bottom', title: 'Align Bottom', Icon: AlignEndHorizontal },
+  ];
+
+  return (
+    <div ref={containerRef} className="relative flex items-center">
+      <Button
+        variant="ghost"
+        iconOnly
+        size="sm"
+        title={title}
+        onClick={(e) => {
+          e.stopPropagation();
+          setIsOpen(!isOpen);
+        }}
+        className="text-fg-muted hover:bg-bg-default"
+      >
+        <AlignHorizontalDistributeCenter />
+      </Button>
+
+      {isOpen && (
+        <>
+          <div
+            className="fixed inset-0 z-40"
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsOpen(false);
+            }}
+          />
+          <div
+            className="border-edge-default shadow-bottom animate-in fade-in zoom-in bg-surface absolute bottom-full left-1/2 z-50 mb-2 -translate-x-1/2 rounded-lg border p-1.5 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Two flex rows (not CSS grid): grid-cols-3 with
+                minmax(0,1fr) would let columns collapse below the
+                button's intrinsic width and overlap the icons. Flex
+                lets each button render at its natural ~21px width
+                with consistent gaps, matching the outer toolbar. */}
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-1">
+                {alignButtons
+                  .slice(0, 3)
+                  .map(({ direction, title: btnTitle, Icon }) => (
+                    <Button
+                      key={direction}
+                      variant="ghost"
+                      iconOnly
+                      size="sm"
+                      title={btnTitle}
+                      onClick={() => pick(direction)}
+                      className="text-fg-muted hover:bg-bg-default"
+                    >
+                      <Icon />
+                    </Button>
+                  ))}
+              </div>
+              <div className="flex items-center gap-1">
+                {alignButtons
+                  .slice(3, 6)
+                  .map(({ direction, title: btnTitle, Icon }) => (
+                    <Button
+                      key={direction}
+                      variant="ghost"
+                      iconOnly
+                      size="sm"
+                      title={btnTitle}
+                      onClick={() => pick(direction)}
+                      className="text-fg-muted hover:bg-bg-default"
+                    >
+                      <Icon />
+                    </Button>
+                  ))}
+              </div>
+            </div>
+            <div className="bg-border my-1.5 h-px w-full" />
+            <div className="flex justify-center">
+              <Button
+                variant="ghost"
+                iconOnly
+                size="sm"
+                title="Spread Apart"
+                onClick={spread}
+                className="text-fg-muted hover:bg-bg-default"
+              >
+                <Ungroup />
+              </Button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Compound export ──────────────────────────────────────────────────────────
 
 export const FloatingToolbar = Object.assign(Root, {
@@ -512,4 +726,5 @@ export const FloatingToolbar = Object.assign(Root, {
   Select: ToolbarSelect,
   ColorPicker: ToolbarColorPicker,
   SizePicker: ToolbarSizePicker,
+  AlignPicker: ToolbarAlignPicker,
 });

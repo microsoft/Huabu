@@ -3,17 +3,7 @@ import {
   ACCENT_PICKER_OPTIONS,
   ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT,
 } from '@sediment/shared';
-import {
-  AlignStartVertical,
-  AlignCenterVertical,
-  AlignEndVertical,
-  AlignStartHorizontal,
-  AlignCenterHorizontal,
-  AlignEndHorizontal,
-  Sparkles,
-  Trash2,
-  Ungroup,
-} from 'lucide-react';
+import { Sparkles, Trash2 } from 'lucide-react';
 import { useCallback, useMemo } from 'react';
 
 import { CanvasFloatingPopover } from '@/components/Common/CanvasFloatingPopover';
@@ -165,57 +155,13 @@ export const MultiSelectToolbar = () => {
       side="top"
       className={FLOATING_TOOLBAR_CLASS}
     >
-      {/* Horizontal alignment */}
-      <FloatingToolbar.ActionButton
-        title="Align Left"
-        onClick={() => alignSelectedNodes('left')}
-      >
-        <AlignStartVertical />
-      </FloatingToolbar.ActionButton>
-      <FloatingToolbar.ActionButton
-        title="Align Center"
-        onClick={() => alignSelectedNodes('center-h')}
-      >
-        <AlignCenterVertical />
-      </FloatingToolbar.ActionButton>
-      <FloatingToolbar.ActionButton
-        title="Align Right"
-        onClick={() => alignSelectedNodes('right')}
-      >
-        <AlignEndVertical />
-      </FloatingToolbar.ActionButton>
-
-      <FloatingToolbar.Divider />
-
-      {/* Vertical alignment */}
-      <FloatingToolbar.ActionButton
-        title="Align Top"
-        onClick={() => alignSelectedNodes('top')}
-      >
-        <AlignStartHorizontal />
-      </FloatingToolbar.ActionButton>
-      <FloatingToolbar.ActionButton
-        title="Align Middle"
-        onClick={() => alignSelectedNodes('center-v')}
-      >
-        <AlignCenterHorizontal />
-      </FloatingToolbar.ActionButton>
-      <FloatingToolbar.ActionButton
-        title="Align Bottom"
-        onClick={() => alignSelectedNodes('bottom')}
-      >
-        <AlignEndHorizontal />
-      </FloatingToolbar.ActionButton>
-
-      <FloatingToolbar.Divider />
-
-      {/* Spread apart overlapping nodes */}
-      <FloatingToolbar.ActionButton
-        title="Spread Apart"
-        onClick={() => spreadSelectedNodes()}
-      >
-        <Ungroup />
-      </FloatingToolbar.ActionButton>
+      {/* Align & distribute — collapsed into a single popover trigger
+          to keep the multi-select toolbar compact. Houses the 6 align
+          actions in a 3×2 grid plus the Spread Apart action. */}
+      <FloatingToolbar.AlignPicker
+        onAlign={(direction) => alignSelectedNodes(direction)}
+        onSpread={() => spreadSelectedNodes()}
+      />
 
       <FloatingToolbar.Divider />
 
