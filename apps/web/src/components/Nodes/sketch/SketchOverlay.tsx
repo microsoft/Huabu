@@ -4,6 +4,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { SKETCH_STROKE_MERGE_MAX_DISTANCE_SCREEN_PX } from '@/config/canvas';
 import { resolveFrameAtPoint } from '@/handler/canvasCommand/utils';
 import useCanvasStore from '@/store/canvasStore';
+import { useToolStore } from '@/store/toolStore';
 
 import { findSketchStrokeHits } from './sketchHitTest';
 import {
@@ -112,7 +113,7 @@ export function SketchOverlay({
   rfInstance: ReactFlowInstance | null;
 }) {
   const addNode = useCanvasStore((s) => s.addNode);
-  const sketchDraft = useCanvasStore((s) => s.sketchDraft);
+  const sketchDraft = useToolStore((s) => s.sketchDraft);
   const strokeColor = sketchDraft.strokeColor || DEFAULT_STROKE_COLOR;
   const strokeSize = sketchDraft.strokeSize || DEFAULT_STROKE_SIZE;
   const mode = sketchDraft.mode ?? 'draw';

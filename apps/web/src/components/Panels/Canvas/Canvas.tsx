@@ -42,6 +42,8 @@ import { IntentPopover } from './IntentPopover.tsx';
 import { MultiSelectResizer } from './MultiSelectResizer.tsx';
 import { GRID_SIZE, MAX_ZOOM, MIN_ZOOM } from '../../../config/canvas.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
+import { useDragPreviewStore } from '../../../store/dragPreviewStore.ts';
+import { useToolStore } from '../../../store/toolStore.ts';
 import {
   canReadSedimentPayload,
   getSedimentPayload,
@@ -159,7 +161,9 @@ export const Canvas: React.FC<CanvasProps> = ({
   const onNodeDragStart = useCanvasStore((state) => state.onNodeDragStart);
   const onNodeDrag = useCanvasStore((state) => state.onNodeDrag);
   const onNodeDragStop = useCanvasStore((state) => state.onNodeDragStop);
-  const frameFitPreviews = useCanvasStore((state) => state.frameFitPreviews);
+  const frameFitPreviews = useDragPreviewStore(
+    (state) => state.frameFitPreviews,
+  );
   const addNode = useCanvasStore((state) => state.addNode);
   const addNodes = useCanvasStore((state) => state.addNodes);
   const setRfInstance = useCanvasStore((state) => state.setRfInstance);
@@ -167,12 +171,10 @@ export const Canvas: React.FC<CanvasProps> = ({
   const expandedNodeId = useCanvasStore((state) => state.expandedNodeId);
   const expandMode = useCanvasStore((state) => state.expandMode);
   const frameNodesInRect = useCanvasStore((state) => state.frameNodesInRect);
-  const pendingNodeType = useCanvasStore((state) => state.pendingNodeType);
   const canvasId = useCanvasStore((state) => state.canvasId);
   const selectNodes = useCanvasStore((state) => state.selectNodes);
-  const setPendingNodeType = useCanvasStore(
-    (state) => state.setPendingNodeType,
-  );
+  const pendingNodeType = useToolStore((state) => state.pendingNodeType);
+  const setPendingNodeType = useToolStore((state) => state.setPendingNodeType);
 
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const rfInstanceRef = useRef<ReactFlowInstance | null>(null);

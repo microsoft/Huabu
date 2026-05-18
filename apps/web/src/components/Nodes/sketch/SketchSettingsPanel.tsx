@@ -10,7 +10,7 @@ import {
   SKETCH_ERASER_RADIUS_MIN_PX,
 } from '@/config/canvas';
 import { NODE_ICON } from '@/config/nodeIcons';
-import useCanvasStore from '@/store/canvasStore';
+import { useToolStore } from '@/store/toolStore';
 
 import { SketchControls } from './SketchControls';
 
@@ -28,13 +28,13 @@ const PenIcon = NODE_ICON.sketch;
  * settings on the right, which swap based on the active mode so
  * the controls always match the selected tool.
  *
- * Bound directly to `canvasStore.sketchDraft`; the values are then
+ * Bound directly to `toolStore.sketchDraft`; the values are then
  * read by `SketchOverlay` for the live preview / cursor and persisted
  * onto each new sketch node so the chosen look survives reload.
  */
 export function SketchSettingsPanel() {
-  const sketchDraft = useCanvasStore((s) => s.sketchDraft);
-  const setSketchDraft = useCanvasStore((s) => s.setSketchDraft);
+  const sketchDraft = useToolStore((s) => s.sketchDraft);
+  const setSketchDraft = useToolStore((s) => s.setSketchDraft);
   const isErasing = sketchDraft.mode === 'erase';
 
   return (

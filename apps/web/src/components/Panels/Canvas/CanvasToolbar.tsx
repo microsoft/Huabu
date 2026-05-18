@@ -16,6 +16,7 @@ import { useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { uploadImage, uploadPdf, uploadVideo } from '@/api/artifact';
 import { useIsNotMouse } from '@/hooks/useInputMode';
 import { useIntentStore } from '@/store/intentStore';
+import { useToolStore } from '@/store/toolStore';
 
 import { NODE_ICON } from '../../../config/nodeIcons.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
@@ -37,9 +38,9 @@ interface NodeToolbarProps {
 
 export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
   const addNodes = useCanvasStore((s) => s.addNodes);
-  const pendingNodeType = useCanvasStore((s) => s.pendingNodeType);
-  const setPendingNodeType = useCanvasStore((s) => s.setPendingNodeType);
-  const setSketchDraft = useCanvasStore((s) => s.setSketchDraft);
+  const pendingNodeType = useToolStore((s) => s.pendingNodeType);
+  const setPendingNodeType = useToolStore((s) => s.setPendingNodeType);
+  const setSketchDraft = useToolStore((s) => s.setSketchDraft);
   const layoutAll = useCanvasStore((s) => s.layoutAll);
   const autoLayoutEnabled = useCanvasStore((s) => s.autoLayoutEnabled);
   const toggleAutoLayout = useCanvasStore((s) => s.toggleAutoLayout);

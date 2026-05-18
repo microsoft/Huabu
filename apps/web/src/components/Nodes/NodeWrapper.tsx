@@ -26,6 +26,7 @@ import { useCornerZoomResize } from '@/hooks/useCornerZoomResize.ts';
 import { useIsNotMouse } from '@/hooks/useInputMode.ts';
 import { useNodeLOD } from '@/hooks/useNodeLOD.ts';
 import useCanvasStore from '@/store/canvasStore.ts';
+import { useDragPreviewStore } from '@/store/dragPreviewStore.ts';
 import { summarizeProvenance } from '@/utils/provenance.ts';
 
 import { getAccentTokens } from './accentTokens.ts';
@@ -268,7 +269,7 @@ export const NodeWrapper = memo(
     const updateResizePreview = useCanvasStore(
       (state) => state.updateResizePreview,
     );
-    const clearFrameFitPreview = useCanvasStore(
+    const clearFrameFitPreview = useDragPreviewStore(
       (state) => state.clearFrameFitPreview,
     );
     const ingestion = useCanvasStore((state) => state.ingestionByNodeId[id]);

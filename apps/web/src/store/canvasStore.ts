@@ -17,7 +17,6 @@ import {
 } from '@xyflow/react';
 import { create, type StateCreator } from 'zustand';
 
-import { SKETCH_ERASER_RADIUS_SCREEN_PX } from '@/config/canvas';
 import { COMMAND_META } from '@/handler/canvasCommand/commands';
 import { executeCanvasCommands } from '@/handler/canvasCommand/executor';
 import { runPostEffects } from '@/handler/canvasCommand/postEffects';
@@ -43,6 +42,8 @@ import {
 } from '@/handler/canvasCommand/utils/frame';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
+import { useDragPreviewStore } from './dragPreviewStore';
+import { useToolStore } from './toolStore';
 import { getCanvas, postCanvasEvents, preprocessNode, putCanvas } from '../api';
 import { cloneArtifactToCanvas } from '../api/artifact';
 import { CanvasConflictError } from '../api/canvas';
@@ -168,23 +169,13 @@ type RFState = {
   onNodeDragStart: OnNodeDrag;
   onNodeDrag: OnNodeDrag;
   onNodeDragStop: OnNodeDrag;
-
   /**
-   * Previews of how frames would resize based on the current drag/resize.
-   * One entry per affected frame — allows showing both the source frame
-   * shrinking and the target frame expanding simultaneously.
-   * Computed in `onNodeDrag`, rendered as dashed overlays,
-   * and cleared in `onNodeDragStop`.
-   */
-  frameFitPreviews: FrameFitResult[];
-  /**
-   * Update the frame fit preview while a child node is being resized.
-   * Called on every resize tick from NodeWrapper so the dashed overlay
-   * stays in sync with the handle. Respects `autoLayoutEnabled`.
+   * Recompute the frame-fit preview while a child node is being
+   * resized. Called on every resize tick from `NodeWrapper` so the
+   * dashed overlay stays in sync with the handle. The result is
+   * pushed to `dragPreviewStore`. No-op when auto-layout is disabled.
    */
   updateResizePreview: (nodeId: string) => void;
-  /** Clear the frame fit previews (e.g. when resize ends). */
-  clearFrameFitPreview: () => void;
 
   addNodes: (inputs: AddNodeInput[]) => void;
   addNode: (input: AddNodeInput) => void;
@@ -293,41 +284,6 @@ type RFState = {
   moveNodeOutOfFrame: (
     nodeId: string,
     reorderTarget?: { nodeId: string; position: 'before' | 'after' },
-  ) => void;
-
-  /** The node type awaiting placement on canvas via click or drawing. */
-  pendingNodeType: 'note' | 'text' | 'frame' | 'sketch' | 'question' | null;
-  setPendingNodeType: (
-    type: 'note' | 'text' | 'frame' | 'sketch' | 'question' | null,
-  ) => void;
-
-  /**
-   * Active sketch tool settings — color, thickness, and tool mode used by
-   * the live SketchOverlay preview and persisted onto each new sketch node
-   * so the same look replays after reload. Per-node values are still
-   * editable after-the-fact via the sketch node's toolbar.
-   *
-   * `mode` switches the overlay between drawing new strokes (`'draw'`) and
-   * erasing existing sketch nodes (`'erase'`).
-   */
-  sketchDraft: {
-    strokeColor: string;
-    strokeSize: number;
-    /**
-     * Eraser brush radius (screen-space px) used by the sketch tool's
-     * erase mode. Independent of `strokeSize` so changing the eraser
-     * size doesn't disturb the active draw thickness, and vice versa.
-     */
-    eraserSize: number;
-    mode: 'draw' | 'erase';
-  };
-  setSketchDraft: (
-    patch: Partial<{
-      strokeColor: string;
-      strokeSize: number;
-      eraserSize: number;
-      mode: 'draw' | 'erase';
-    }>,
   ) => void;
 
   copySelectedNodes: () => void;
@@ -664,18 +620,6 @@ const useCanvasStore = create<RFState>()(
     closeExpanded: () => set({ expandedNodeId: null }),
     setExpandMode: (mode) => set({ expandMode: mode }),
 
-    pendingNodeType: null,
-    setPendingNodeType: (type) => set({ pendingNodeType: type }),
-
-    sketchDraft: {
-      strokeColor: 'black',
-      strokeSize: 4,
-      eraserSize: SKETCH_ERASER_RADIUS_SCREEN_PX,
-      mode: 'draw',
-    },
-    setSketchDraft: (patch) =>
-      set((state) => ({ sketchDraft: { ...state.sketchDraft, ...patch } })),
-
     collapsedFrameIds: new Set<string>(),
     toggleFrameCollapse: (frameId) => {
       const { collapsedFrameIds } = get();
@@ -894,12 +838,12 @@ const useCanvasStore = create<RFState>()(
       // Reset state for clean slate
       set({
         expandedNodeId: null,
-        pendingNodeType: null,
         actionHistory: [],
-        frameFitPreviews: [],
         collapsedFrameIds: new Set(),
         canvasNotFound: false,
       });
+      useToolStore.getState().resetForCanvasSwitch();
+      useDragPreviewStore.getState().clearFrameFitPreview();
       canvasHistoryManager.clear();
 
       // Load the new canvas
@@ -1069,14 +1013,12 @@ const useCanvasStore = create<RFState>()(
       get().beginGesture('SET_NODE_GEOMETRY');
     },
 
-    frameFitPreviews: [],
-
     onNodeDrag: (_event, draggedNode, draggedNodes) => {
       const { autoLayoutEnabled } = get();
 
       // Frame auto-resize preview only applies when auto-layout is enabled.
       if (!autoLayoutEnabled) {
-        set({ frameFitPreviews: [] });
+        useDragPreviewStore.getState().clearFrameFitPreview();
         return;
       }
 
@@ -1199,7 +1141,7 @@ const useCanvasStore = create<RFState>()(
           });
         }
 
-        set({ frameFitPreviews: previews });
+        useDragPreviewStore.getState().setFrameFitPreviews(previews);
       });
     },
 
@@ -1209,7 +1151,7 @@ const useCanvasStore = create<RFState>()(
         cancelAnimationFrame(_dragPreviewRafId);
         _dragPreviewRafId = null;
       }
-      set({ frameFitPreviews: [] });
+      useDragPreviewStore.getState().clearFrameFitPreview();
       get().dispatchUiIntent({
         type: 'NODE_DRAG_STOP',
         draggedNodeIds: draggedNodes.map((n) => n.id),
@@ -1242,20 +1184,14 @@ const useCanvasStore = create<RFState>()(
         }
       }
 
-      set({
-        frameFitPreviews: [
-          {
-            frameId: node.parentId,
-            position: { x: absX, y: absY },
-            width: fit.width,
-            height: fit.height,
-          },
-        ],
-      });
-    },
-
-    clearFrameFitPreview: () => {
-      set({ frameFitPreviews: [] });
+      useDragPreviewStore.getState().setFrameFitPreviews([
+        {
+          frameId: node.parentId,
+          position: { x: absX, y: absY },
+          width: fit.width,
+          height: fit.height,
+        },
+      ]);
     },
 
     onNodesChange: (changes) => {
