@@ -20,6 +20,16 @@ const ACCENT_BORDER_MIX = 50;
 /** % of accent over transparent for a thin accent divider. */
 const ACCENT_DIVIDER_MIX = 25;
 
+/**
+ * Matches "white-ish" accent strings (CSS keyword `white`, `#fff`, `#ffffff`).
+ * White is an achromatic accent: mixing it into the default dark foreground
+ * just lightens it into a mid-gray that reads as a washed-out, "wrong"
+ * color — especially in `SemanticPlaceholder` where the whole card is a
+ * single tinted label. For these inputs we skip the `fg` mix and fall back
+ * to the regular foreground color, which reads correctly in both themes.
+ */
+const WHITE_ACCENT_RE = /^\s*(white|#fff|#ffffff)\s*$/i;
+
 export interface AccentTokens {
   /** Foreground color for text and icons on accent-tinted surfaces. */
   fg: string;
@@ -38,8 +48,14 @@ export interface AccentTokens {
 }
 
 export function getAccentTokens(accent: string): AccentTokens {
+  // White accent: keep text at the regular foreground color so it reads as
+  // black (light theme) / white (dark theme) instead of mid-gray.
+  const fg = WHITE_ACCENT_RE.test(accent)
+    ? 'var(--fg-default)'
+    : `color-mix(in srgb, ${accent} ${ACCENT_FG_MIX}%, var(--fg-default))`;
+
   return {
-    fg: `color-mix(in srgb, ${accent} ${ACCENT_FG_MIX}%, var(--fg-default))`,
+    fg,
     bg: `color-mix(in srgb, ${accent} ${ACCENT_BG_MIX}%, var(--bg-surface))`,
     // Use color-mix for alpha so any valid CSS color works (hex, keywords
     // like `white`, `var(...)`, etc.). The previous hex-suffix approach
