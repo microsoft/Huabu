@@ -83,3 +83,23 @@ export const SKETCH_ERASER_RADIUS_MIN_PX = 4;
 
 /** Maximum eraser brush radius (screen-space px) exposed to the user. */
 export const SKETCH_ERASER_RADIUS_MAX_PX = 64;
+
+/**
+ * Smart-snap — alignment guide & auto-snap behaviour shown while a
+ * user is dragging one or more nodes.
+ *
+ * Defined in screen-space (rather than flow-space) so the perceived
+ * "snap radius" stays constant regardless of zoom — same treatment
+ * the sketch eraser radius uses. The engine converts to flow-space
+ * via `SNAP_THRESHOLD_SCREEN_PX / zoom` before running candidate
+ * comparisons.
+ */
+export const SNAP_THRESHOLD_SCREEN_PX = 6;
+
+/**
+ * Maximum number of guide overlays rendered per frame. The engine
+ * already collapses overlapping guides per-axis, but a hard cap keeps
+ * the SVG layer cheap on dense canvases where many candidates would
+ * tie for the same snap distance.
+ */
+export const SNAP_MAX_GUIDES_PER_FRAME = 8;

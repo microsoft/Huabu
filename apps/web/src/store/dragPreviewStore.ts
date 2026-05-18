@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 
 import type { FrameFitResult } from '@/handler/canvasCommand/utils/frame';
+import type { Guide } from '@/handler/snap/types';
 
 type DragPreviewState = {
   /**
@@ -22,6 +23,19 @@ type DragPreviewState = {
 
   /** Clear the frame fit previews (e.g. when drag or resize ends). */
   clearFrameFitPreview: () => void;
+
+  /**
+   * Smart-snap guide lines to render this frame. Written by
+   * `canvasStore.onNodesChange` after the snap engine evaluates the
+   * current drag tick; cleared in `onNodeDragStop`.
+   */
+  snapGuides: Guide[];
+
+  /** Replace the guide list (called every drag tick). */
+  setSnapGuides: (guides: Guide[]) => void;
+
+  /** Clear the guide list when the drag ends. */
+  clearSnapGuides: () => void;
 };
 
 /**
@@ -47,4 +61,7 @@ export const useDragPreviewStore = create<DragPreviewState>()((set) => ({
   frameFitPreviews: [],
   setFrameFitPreviews: (previews) => set({ frameFitPreviews: previews }),
   clearFrameFitPreview: () => set({ frameFitPreviews: [] }),
+  snapGuides: [],
+  setSnapGuides: (guides) => set({ snapGuides: guides }),
+  clearSnapGuides: () => set({ snapGuides: [] }),
 }));

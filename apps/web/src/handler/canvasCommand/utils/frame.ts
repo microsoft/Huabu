@@ -66,7 +66,7 @@ function subPos(a: XYPosition, b: XYPosition): XYPosition {
   return { x: a.x - b.x, y: a.y - b.y };
 }
 
-function indexById(nodes: NestableNode[]): Map<string, NestableNode> {
+export function indexById(nodes: NestableNode[]): Map<string, NestableNode> {
   return new Map(nodes.map((n) => [n.id, n] as const));
 }
 
@@ -173,7 +173,7 @@ function getTopLevelIds(nodes: NestableNode[], ids: string[]): string[] {
   });
 }
 
-function createAbsolutePositionGetter(byId: Map<string, NestableNode>) {
+export function createAbsolutePositionGetter(byId: Map<string, NestableNode>) {
   const absById = new Map<string, XYPosition | null>();
 
   return (nodeId: string): XYPosition | null => {

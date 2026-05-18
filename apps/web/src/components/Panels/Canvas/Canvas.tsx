@@ -40,6 +40,7 @@ import { EdgeStyleToolbar } from './FloatingToolbars/EdgeStyleToolbar.tsx';
 import { MultiSelectToolbar } from './FloatingToolbars/MultiSelectToolbar.tsx';
 import { IntentPopover } from './IntentPopover.tsx';
 import { MultiSelectResizer } from './MultiSelectResizer.tsx';
+import { SnapGuidesOverlay } from './SnapGuidesOverlay.tsx';
 import { GRID_SIZE, MAX_ZOOM, MIN_ZOOM } from '../../../config/canvas.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import { useDragPreviewStore } from '../../../store/dragPreviewStore.ts';
@@ -705,6 +706,12 @@ export const Canvas: React.FC<CanvasProps> = ({
           wrapperRef={wrapperRef}
         />
       ))}
+
+      {/* Smart-snap alignment guides — shown while dragging nodes */}
+      <SnapGuidesOverlay
+        rfInstance={rfInstanceRef.current}
+        wrapperRef={wrapperRef}
+      />
     </div>
   );
 };
