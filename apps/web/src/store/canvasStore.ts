@@ -17,6 +17,7 @@ import {
 } from '@xyflow/react';
 import { create, type StateCreator } from 'zustand';
 
+import { SKETCH_ERASER_RADIUS_SCREEN_PX } from '@/config/canvas';
 import { COMMAND_META } from '@/handler/canvasCommand/commands';
 import { executeCanvasCommands } from '@/handler/canvasCommand/executor';
 import { runPostEffects } from '@/handler/canvasCommand/postEffects';
@@ -312,12 +313,19 @@ type RFState = {
   sketchDraft: {
     strokeColor: string;
     strokeSize: number;
+    /**
+     * Eraser brush radius (screen-space px) used by the sketch tool's
+     * erase mode. Independent of `strokeSize` so changing the eraser
+     * size doesn't disturb the active draw thickness, and vice versa.
+     */
+    eraserSize: number;
     mode: 'draw' | 'erase';
   };
   setSketchDraft: (
     patch: Partial<{
       strokeColor: string;
       strokeSize: number;
+      eraserSize: number;
       mode: 'draw' | 'erase';
     }>,
   ) => void;
@@ -659,7 +667,12 @@ const useCanvasStore = create<RFState>()(
     pendingNodeType: null,
     setPendingNodeType: (type) => set({ pendingNodeType: type }),
 
-    sketchDraft: { strokeColor: 'black', strokeSize: 4, mode: 'draw' },
+    sketchDraft: {
+      strokeColor: 'black',
+      strokeSize: 4,
+      eraserSize: SKETCH_ERASER_RADIUS_SCREEN_PX,
+      mode: 'draw',
+    },
     setSketchDraft: (patch) =>
       set((state) => ({ sketchDraft: { ...state.sketchDraft, ...patch } })),
 

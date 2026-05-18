@@ -1,27 +1,36 @@
-import clsx from 'clsx';
 import { Eraser } from 'lucide-react';
 
-import { Button } from '@/components/Common/Button';
 import {
   FLOATING_TOOLBAR_CLASS,
   FloatingToolbar,
 } from '@/components/Common/FloatingToolbar';
+import { RangeSlider } from '@/components/Common/RangeSlider';
+import {
+  SKETCH_ERASER_RADIUS_MAX_PX,
+  SKETCH_ERASER_RADIUS_MIN_PX,
+} from '@/config/canvas';
+import { NODE_ICON } from '@/config/nodeIcons';
 import useCanvasStore from '@/store/canvasStore';
 
 import { SketchControls } from './SketchControls';
 
+const PenIcon = NODE_ICON.sketch;
+
 /**
- * Floating panel that hosts the sketch tool's color + thickness controls
- * plus a draw / erase mode toggle.
+ * Floating panel that hosts the sketch tool's settings.
  *
- * Mounted by `CanvasToolbar` directly above the Sketch button while
- * the sketch tool is active (`pendingNodeType === 'sketch'`).
- * Anchoring to the button keeps the panel visually attached to the action
- * that opened it, regardless of toolbar width / screen size.
+ * Single-row layout:
  *
- * Bound directly to `canvasStore.sketchDraft`; the values are then read by
- * `SketchOverlay` for the live preview and persisted onto each new
- * sketch node so the chosen look survives reload.
+ *   [Pen][Eraser] | <settings for active tool>
+ *
+ * The two icon-only buttons on the left act as a compact mode
+ * switcher. A vertical divider separates them from the per-tool
+ * settings on the right, which swap based on the active mode so
+ * the controls always match the selected tool.
+ *
+ * Bound directly to `canvasStore.sketchDraft`; the values are then
+ * read by `SketchOverlay` for the live preview / cursor and persisted
+ * onto each new sketch node so the chosen look survives reload.
  */
 export function SketchSettingsPanel() {
   const sketchDraft = useCanvasStore((s) => s.sketchDraft);
@@ -34,45 +43,51 @@ export function SketchSettingsPanel() {
       onClick={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
     >
-      {/*
-        Wrapper uses `display: contents` so the toolbar layout is unchanged,
-        while still letting us intercept pointerdown on any of the sketch
-        controls. In erase mode, *touching* these controls (including just
-        opening the color popover, which by itself does not fire
-        `onColorChange`) implies the user wants to draw again — switch back
-        immediately so a single click matches the user's mental model
-        instead of requiring them to click the eraser button first.
-      */}
-      <div
-        className="contents"
-        onPointerDown={() => {
-          if (isErasing) setSketchDraft({ mode: 'draw' });
-        }}
+      {/* Mode switcher: icon-only, on the left. */}
+      <FloatingToolbar.ToggleButton
+        active={!isErasing}
+        title="Pen"
+        size="md"
+        onClick={() => setSketchDraft({ mode: 'draw' })}
       >
-        <SketchControls
-          color={sketchDraft.strokeColor}
-          size={sketchDraft.strokeSize}
-          onColorChange={(strokeColor) =>
-            // Picking a color implies the user wants to draw, not erase.
-            setSketchDraft({ strokeColor, mode: 'draw' })
-          }
-          onSizeChange={(strokeSize) =>
-            // Adjusting thickness implies the user wants to draw, not erase.
-            setSketchDraft({ strokeSize, mode: 'draw' })
-          }
-        />
-      </div>
+        <PenIcon size={16} />
+      </FloatingToolbar.ToggleButton>
+      <FloatingToolbar.ToggleButton
+        active={isErasing}
+        title="Eraser"
+        size="md"
+        onClick={() => setSketchDraft({ mode: 'erase' })}
+      >
+        <Eraser size={16} />
+      </FloatingToolbar.ToggleButton>
+
       <FloatingToolbar.Divider />
-      <Button
-        variant="ghost"
-        iconOnly
-        size="sm"
-        title={isErasing ? 'Switch to draw mode' : 'Switch to eraser mode'}
-        onClick={() => setSketchDraft({ mode: isErasing ? 'draw' : 'erase' })}
-        className={clsx(isErasing && 'text-info bg-bg-default')}
-      >
-        <Eraser />
-      </Button>
+
+      {/*
+        Settings for the active tool only. The wrapper keeps a stable
+        width so the toolbar doesn't visibly resize when switching
+        between pen and eraser modes (pen has an extra color picker).
+      */}
+      <div className="flex h-9 min-w-52 items-center justify-end gap-2">
+        {isErasing ? (
+          <RangeSlider
+            value={sketchDraft.eraserSize}
+            min={SKETCH_ERASER_RADIUS_MIN_PX}
+            max={SKETCH_ERASER_RADIUS_MAX_PX}
+            label="Eraser size"
+            size="md"
+            onChange={(eraserSize) => setSketchDraft({ eraserSize })}
+          />
+        ) : (
+          <SketchControls
+            color={sketchDraft.strokeColor}
+            size={sketchDraft.strokeSize}
+            sliderSize="md"
+            onColorChange={(strokeColor) => setSketchDraft({ strokeColor })}
+            onSizeChange={(strokeSize) => setSketchDraft({ strokeSize })}
+          />
+        )}
+      </div>
     </div>
   );
 }

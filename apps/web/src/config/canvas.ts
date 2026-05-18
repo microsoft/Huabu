@@ -71,5 +71,15 @@ export const SKETCH_STROKE_MERGE_MAX_DISTANCE_SCREEN_PX = 80;
  * regardless of canvas zoom or whatever thickness the user last drew
  * with. `SketchOverlay` converts to flow-space (`/ zoom`) before hit-
  * testing existing strokes.
+ *
+ * This is the *default* eraser radius applied to a fresh `sketchDraft`.
+ * The actual radius is user-adjustable via the eraser slider in
+ * `SketchSettingsPanel` and lives on `canvasStore.sketchDraft.eraserSize`.
  */
 export const SKETCH_ERASER_RADIUS_SCREEN_PX = 16;
+
+/** Minimum eraser brush radius (screen-space px) exposed to the user. */
+export const SKETCH_ERASER_RADIUS_MIN_PX = 4;
+
+/** Maximum eraser brush radius (screen-space px) exposed to the user. */
+export const SKETCH_ERASER_RADIUS_MAX_PX = 64;
