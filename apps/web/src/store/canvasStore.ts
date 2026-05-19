@@ -44,6 +44,8 @@ import {
   applySnap,
   beginSnapSession,
   endSnapSession,
+  getResizeContext,
+  getResizeSnappedRect,
   isSnapSessionActive,
   isSnapSessionDragEndCommit,
   isSnapSessionResizeEndCommit,
@@ -1355,7 +1357,41 @@ const useCanvasStore = create<RFState>()(
         ? applySnap(sanitized, get().rfInstance?.getZoom() ?? 1)
         : sanitized;
 
-      set({ nodes: applyNodeChanges(snappedChanges, get().nodes) });
+      let nextNodes = applyNodeChanges(snappedChanges, get().nodes) as Node[];
+
+      // ── Live-resize style sync ─────────────────────────────────────
+      // RF's `applyChange` writes a `dimensions` change to
+      // `node.measured.{width,height}` only — and the `setAttributes`
+      // strip above prevents it from writing the top-level
+      // `node.{width,height}` either (those would shadow our
+      // `style.{width,height}` source of truth on commit). But the
+      // rendered DOM's inline size comes from
+      // `node.{width,height} ?? node.style?.{width,height}`, so
+      // without a style mirror the node would render at its
+      // pre-resize size for the entire drag and only "snap" to the
+      // committed size on mouseup (when `SET_NODE_GEOMETRY` writes
+      // `style`). Mirror the snap session's authoritative
+      // post-snap rect onto `style` + `position` for the resized
+      // node, in the same `set` that `applyNodeChanges` writes.
+      const resizeCtx = getResizeContext();
+      const snappedRect = resizeCtx ? getResizeSnappedRect() : null;
+      if (resizeCtx && snappedRect) {
+        nextNodes = nextNodes.map((n) =>
+          n.id === resizeCtx.nodeId
+            ? {
+                ...n,
+                position: { x: snappedRect.local.x, y: snappedRect.local.y },
+                style: {
+                  ...n.style,
+                  width: snappedRect.size.width,
+                  height: snappedRect.size.height,
+                },
+              }
+            : n,
+        );
+      }
+
+      set({ nodes: nextNodes });
 
       // Drag-end detection: if this batch contained the final
       // `dragging:false` commit for any node the snap session is

@@ -349,11 +349,16 @@ export const NodeWrapper = memo(
     //     text font-size) gets the snapped values with no frame lag.
     //   • The store write happens once in `canvasStore.onNodesChange`
     //     via `applySnap`, which reads the cached snapped rect and
-    //     rewrites RF's emitted dim/pos NodeChanges. This component
-    //     no longer issues its own `setState` for resize — a single
-    //     `applyNodeChanges` per frame is the only writer, which
-    //     keeps the autosave middleware happy and avoids the
-    //     double-render the previous inline write produced.
+    //     rewrites RF's emitted dim/pos NodeChanges. The same
+    //     reducer then mirrors the (possibly snapped) live dim/pos
+    //     values onto `node.style.{width,height}` + `position` so
+    //     the rendered DOM tracks the drag — `applyChange` itself
+    //     only writes `node.measured`, which RF does not read for
+    //     inline sizing. This component no longer issues its own
+    //     `setState` for resize: a single `applyNodeChanges`-based
+    //     write per frame is the only writer, which keeps the
+    //     autosave middleware happy and avoids the double-render the
+    //     previous inline write produced.
     //   • `handleResizeEnd` reads the cached snapped rect via
     //     `getResizeSnappedRect` to commit the final geometry through
     //     the undoable `setNodeGeometry` intent.
