@@ -9,13 +9,20 @@
  *
  *   • Drag      — `applySnap(changes, zoom)` rewrites the React Flow
  *                 `NodeChange[]` batch on each `onNodesChange`.
- *   • Resize    — `computeSnapForRect(rect, activeEdges, zoom)` is
- *                 called directly from `NodeWrapper.handleResize`
- *                 and the consumer writes the snapped
- *                 position/size to the store itself. `applySnap`
- *                 then SUPPRESSES the matching dim/pos changes RF
- *                 emits for the resize node so applyNodeChanges
- *                 doesn't overwrite the snapped inline write.
+ *   • Resize    — `applyResizeProposal(rawLocal, zoom)` is called
+ *                 from `NodeWrapper.handleResize` (which fires
+ *                 *before* RF emits its NodeChange batch — see
+ *                 XYResizer drag callback in @xyflow/system). It
+ *                 derives `activeEdges` from the cached start rect,
+ *                 runs the snap engine, anchors the non-moving edge,
+ *                 caches the snapped result, and returns it so the
+ *                 child auto-fit listener (e.g. text font-size) gets
+ *                 the snapped values immediately. `applySnap` then
+ *                 reads that cache to REWRITE the dim/pos changes RF
+ *                 emits for the resize node, so a single
+ *                 `applyNodeChanges` write delivers the snapped
+ *                 geometry to the store — no inline `setState` from
+ *                 the wrapper, no double-write per frame.
  *
  * ── Why a plain module instead of a Zustand store ──────────────────
  *
@@ -70,6 +77,22 @@ import type {
 
 /** Which gesture is currently driving the snap session. */
 export type GestureKind = 'drag' | 'resize';
+
+/**
+ * Pre-resize geometry captured at `handleResizeStart`. Stable for
+ * the entire gesture: the resized node's bounds in absolute
+ * flow-space (`startRect`), the resized node's pre-resize local
+ * position (so `applySnap` can detect whether snap moved it without
+ * a sentinel comparison), and the parent's absolute offset (used to
+ * convert per-frame proposals from local → absolute before feeding
+ * the snap engine).
+ */
+export type ResizeContext = {
+  nodeId: string;
+  startRect: Rect;
+  startLocalPos: XYPosition;
+  parentOffset: XYPosition;
+};
 
 /**
  * Candidate index built once per gesture from the non-gesture sibling
@@ -145,6 +168,26 @@ let _abortController: AbortController | null = null;
  */
 let _kind: GestureKind = 'drag';
 
+/**
+ * Per-resize-gesture context captured at `handleResizeStart`. Holds
+ * the pre-resize bounds + parent offset for the single resized node.
+ * `null` outside a resize session.
+ */
+let _resizeContext: ResizeContext | null = null;
+
+/**
+ * Cache of the most recent per-frame snap result for the active
+ * resize gesture, in node-local coordinates (what RF expects to
+ * receive in NodeChanges). Written by `applyResizeProposal` each
+ * frame, read by `applySnap` (to rewrite RF's dim/pos changes) and
+ * by `getResizeSnappedRect` (to commit on resize-end). `null` until
+ * the first proposal arrives, or outside a resize session.
+ */
+let _lastResizeSnapped: {
+  local: XYPosition;
+  size: { width: number; height: number };
+} | null = null;
+
 export interface BeginSnapSessionOptions {
   /**
    * Snapshot of the canvas nodes at gesture-start. Used to build the
@@ -169,6 +212,18 @@ export interface BeginSnapSessionOptions {
    * with the original drag-only call sites.
    */
   kind?: GestureKind;
+  /**
+   * Required when `kind === 'resize'`. Pre-resize bounds for the
+   * single resized node in absolute flow-space, plus the parent's
+   * absolute offset (stable for the duration of the gesture). The
+   * engine uses this to derive `activeEdges` by diffing each
+   * proposed rect against the start rect, and to cache the snapped
+   * result so the commit at `handleResizeEnd` doesn't need to
+   * re-derive anything.
+   *
+   * Ignored when `kind === 'drag'`.
+   */
+  resizeContext?: ResizeContext;
 }
 
 /**
@@ -184,7 +239,7 @@ export function beginSnapSession(opts: BeginSnapSessionOptions): void {
   // Defensive cleanup — see comments above. Cheap when idle.
   endSnapSession();
 
-  const { nodes, gestureIds, altPressed, kind = 'drag' } = opts;
+  const { nodes, gestureIds, altPressed, kind = 'drag', resizeContext } = opts;
 
   // One shared id→node index reused by:
   //   • the mixed-parent detection below,
@@ -221,6 +276,12 @@ export function beginSnapSession(opts: BeginSnapSessionOptions): void {
     : buildCandidateIndex(nodes, gestureIds, _parentId);
   _bypass = altPressed;
   _kind = kind;
+  // Resize-only state. Callers that pass `kind: 'resize'` MUST also
+  // pass `resizeContext`; we don't synthesise it from `nodes` because
+  // the start rect must be captured from RF's resize handle params,
+  // not from the (already mutating mid-gesture) store state.
+  _resizeContext = kind === 'resize' ? (resizeContext ?? null) : null;
+  _lastResizeSnapped = null;
 
   // Attach window-level Alt listeners so users can toggle bypass
   // mid-drag. Bound to a fresh AbortController whose `signal` is
@@ -278,6 +339,8 @@ export function endSnapSession(): void {
   _nodeById = null;
   _absPosGetter = null;
   _kind = 'drag';
+  _resizeContext = null;
+  _lastResizeSnapped = null;
   // Aborting the controller detaches every listener registered with
   // its signal in one shot. Safe to call when null (no active drag)
   // or when the controller is already aborted (idempotent).
@@ -409,22 +472,42 @@ export function applySnap(changes: NodeChange[], zoom: number): NodeChange[] {
   if (_index === null) return changes;
 
   if (_kind === 'resize') {
-    // Resize path: NodeWrapper.handleResize has already written the
-    // snapped position+style to the store. Strip RF's own dim/pos
-    // changes for the resize node so applyNodeChanges (called by the
-    // canvasStore consumer) doesn't clobber the snapped values with
-    // RF's raw cursor-derived numbers. Non-tracked changes pass
-    // through untouched. The final `resizing:false` dimension change
-    // is preserved so downstream can observe end-of-gesture via
-    // `isSnapSessionResizeEndCommit`.
-    return changes.filter((c) => {
-      if (!('id' in c) || !_gestureIds.has(c.id)) return true;
-      if (c.type === 'position') return false;
+    // Resize path: `applyResizeProposal` (called by
+    // `NodeWrapper.handleResize` earlier in the same XYResizer drag
+    // tick — see XYResizer in @xyflow/system which fires `onResize`
+    // before `onChange`) has cached the snapped local rect in
+    // `_lastResizeSnapped`. We rewrite RF's raw dim/pos changes for
+    // the resize node to use those snapped values, so the single
+    // `applyNodeChanges` write that lands in the store delivers a
+    // pre-snapped geometry. Non-tracked changes pass through, and the
+    // final `resizing:false` flag is preserved so end-of-gesture
+    // detection still works.
+    const ctx = _resizeContext;
+    const snapped = _lastResizeSnapped;
+    if (!ctx) return changes;
+    if (!snapped) return changes;
+    return changes.map((c) => {
+      if (!('id' in c) || c.id !== ctx.nodeId) return c;
       if (c.type === 'dimensions') {
         const dim = c as NodeDimensionChange;
-        return dim.resizing === false;
+        if (!dim.dimensions) return c;
+        return {
+          ...dim,
+          dimensions: {
+            width: snapped.size.width,
+            height: snapped.size.height,
+          },
+        } satisfies NodeDimensionChange;
       }
-      return true;
+      if (c.type === 'position') {
+        const pos = c as NodePositionChange;
+        if (!pos.position) return c;
+        return {
+          ...pos,
+          position: { x: snapped.local.x, y: snapped.local.y },
+        } satisfies NodePositionChange;
+      }
+      return c;
     });
   }
 
@@ -498,4 +581,138 @@ export function applySnap(changes: NodeChange[], zoom: number): NodeChange[] {
       },
     };
   });
+}
+
+/**
+ * Per-frame resize handler called by `NodeWrapper.handleResize` with
+ * RF's raw NodeResizer proposal (node-local coordinates).
+ *
+ * Pipeline:
+ *
+ *   1. Convert local → absolute using the cached `parentOffset`.
+ *   2. Diff against the cached `startRect` (eps = 0.5 px) to derive
+ *      which edge(s) are moving this frame — only the active edge(s)
+ *      participate in the snap probe so e.g. dragging the right
+ *      handle never snaps the left edge.
+ *   3. Run `computeSnapForRect` to get a correction delta and push
+ *      alignment guides into `dragPreviewStore`.
+ *   4. Anchor the non-moving edge: `'min'` shifts position by the
+ *      delta and shrinks size by the same amount; `'max'` grows size
+ *      only. The `'both'` branch is unreachable in practice (no
+ *      handle moves both min and max on one axis) and is omitted —
+ *      its prior conservative translate-only path was dead code.
+ *   5. Cache the snapped local rect in `_lastResizeSnapped` so the
+ *      subsequent `applySnap` call (later in the same XYResizer
+ *      drag tick, when RF emits its NodeChange batch) rewrites
+ *      RF's raw dim/pos changes with the snapped values.
+ *   6. Return the snapped local rect so the caller can forward the
+ *      snapped width/height to the child auto-fit listener (e.g.
+ *      text font-size) without a 1-frame lag.
+ *
+ * No-op (returns the input unchanged) when no resize session is
+ * active or the snap index was disabled (e.g. parent context
+ * inconsistent at gesture start).
+ */
+export function applyResizeProposal(
+  rawLocal: { x: number; y: number; width: number; height: number },
+  zoom: number,
+): { x: number; y: number; width: number; height: number } {
+  const ctx = _resizeContext;
+  if (_kind !== 'resize' || !ctx) return rawLocal;
+
+  const absX = ctx.parentOffset.x + rawLocal.x;
+  const absY = ctx.parentOffset.y + rawLocal.y;
+
+  // 0.5 flow-px tolerance prevents floating-point noise on the
+  // non-moving edge from registering as movement. The active-edge
+  // narrowing is what makes the engine ignore alignment targets on
+  // the static edge during edge-handle resizes.
+  const eps = 0.5;
+  const minXMoved = Math.abs(absX - ctx.startRect.x) > eps;
+  const maxXMoved =
+    Math.abs(absX + rawLocal.width - (ctx.startRect.x + ctx.startRect.w)) > eps;
+  const minYMoved = Math.abs(absY - ctx.startRect.y) > eps;
+  const maxYMoved =
+    Math.abs(absY + rawLocal.height - (ctx.startRect.y + ctx.startRect.h)) >
+    eps;
+
+  const activeX: ActiveEdges['x'] =
+    minXMoved && maxXMoved
+      ? 'both'
+      : minXMoved
+        ? 'min'
+        : maxXMoved
+          ? 'max'
+          : 'none';
+  const activeY: ActiveEdges['y'] =
+    minYMoved && maxYMoved
+      ? 'both'
+      : minYMoved
+        ? 'min'
+        : maxYMoved
+          ? 'max'
+          : 'none';
+
+  // computeSnapForRect side-effects guides into dragPreviewStore and
+  // returns zero deltas when no candidate is in range or bypass is on.
+  const { deltaX, deltaY } = computeSnapForRect(
+    { x: absX, y: absY, w: rawLocal.width, h: rawLocal.height },
+    { x: activeX, y: activeY },
+    zoom,
+  );
+
+  let snappedX = rawLocal.x;
+  let snappedY = rawLocal.y;
+  let snappedW = rawLocal.width;
+  let snappedH = rawLocal.height;
+
+  if (deltaX !== 0) {
+    if (activeX === 'min') {
+      snappedX = rawLocal.x + deltaX;
+      snappedW = rawLocal.width - deltaX;
+    } else if (activeX === 'max') {
+      snappedW = rawLocal.width + deltaX;
+    }
+  }
+  if (deltaY !== 0) {
+    if (activeY === 'min') {
+      snappedY = rawLocal.y + deltaY;
+      snappedH = rawLocal.height - deltaY;
+    } else if (activeY === 'max') {
+      snappedH = rawLocal.height + deltaY;
+    }
+  }
+
+  _lastResizeSnapped = {
+    local: { x: snappedX, y: snappedY },
+    size: { width: snappedW, height: snappedH },
+  };
+
+  return { x: snappedX, y: snappedY, width: snappedW, height: snappedH };
+}
+
+/**
+ * Read-only accessor for the active resize context (captured at
+ * `handleResizeStart`). Returns `null` when no resize session is
+ * active. Used by `handleResizeEnd` to decide whether the final
+ * commit needs a position update (snap may not have moved the node's
+ * top-left, in which case dispatching a position change would create
+ * a no-op undo entry).
+ */
+export function getResizeContext(): ResizeContext | null {
+  return _resizeContext;
+}
+
+/**
+ * Read-only accessor for the most recent snapped resize result (in
+ * node-local coordinates). Returns `null` when no resize session is
+ * active or no proposal has been processed yet. Used by
+ * `handleResizeEnd` to commit the snapped values via
+ * `setNodeGeometry` rather than RF's raw cursor-derived params.
+ */
+export function getResizeSnappedRect(): {
+  local: XYPosition;
+  size: { width: number; height: number };
+} | null {
+  return _lastResizeSnapped;
 }
