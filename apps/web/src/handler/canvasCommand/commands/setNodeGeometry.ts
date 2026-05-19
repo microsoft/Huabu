@@ -19,6 +19,11 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
       cmd.items.map((item) => [item.nodeId as string, item]),
     );
     const affectedFrameIds = new Set<string>();
+    // Parent frames whose child just had its explicit height cleared
+    // (revert to content-driven sizing). The new content height is
+    // unknown until BlockNote reflows + RF re-measures, so we ask the
+    // executor's post-effect to refit after the next render cycle.
+    const deferredFitFrameIds = new Set<string>();
 
     let nextNodes = state.nodes.map((n) => {
       const update = updateMap.get(n.id);
@@ -33,7 +38,8 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
           ...updated.style,
           width: update.size.width,
         };
-        if (typeof update.size.height === 'number') {
+        const heightCleared = typeof update.size.height !== 'number';
+        if (!heightCleared) {
           nextStyle.height = update.size.height;
         } else {
           delete nextStyle.height;
@@ -59,7 +65,7 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
           ...prevMeasured,
           width: update.size.width,
         };
-        if (typeof update.size.height === 'number') {
+        if (!heightCleared) {
           nextMeasured.height = update.size.height;
         }
 
@@ -68,6 +74,13 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
           style: nextStyle,
           measured: nextMeasured,
         };
+
+        // Track the parent for a post-commit refit only when the child's
+        // height was cleared and auto-layout is on. Otherwise the sync
+        // `fitFrames` pass below is sufficient.
+        if (heightCleared && state.autoLayoutEnabled && updated.parentId) {
+          deferredFitFrameIds.add(updated.parentId);
+        }
       }
       if (updated.parentId) affectedFrameIds.add(updated.parentId);
       return updated;
@@ -82,6 +95,9 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
       applied: true,
       nodes: nextNodes,
       edges: state.edges,
+      ...(deferredFitFrameIds.size > 0
+        ? { deferredFitFrameIds: Array.from(deferredFitFrameIds) }
+        : {}),
     };
   },
 };

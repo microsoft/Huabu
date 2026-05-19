@@ -1055,6 +1055,23 @@ export function fitFrameToChildren(
   const deltaX = fit.position.x - frame.position.x;
   const deltaY = fit.position.y - frame.position.y;
 
+  // No-op short-circuit: when the computed fit matches the frame's
+  // current geometry exactly AND there is no origin shift to apply to
+  // children, return the input array reference. This preserves
+  // reference-equality so callers (e.g. `scheduleDeferredFrameFit`'s
+  // `next !== current` guard) can skip a needless `set({ nodes })`
+  // and the rerender it triggers.
+  const currentWidth = frame.style?.width;
+  const currentHeight = frame.style?.height;
+  if (
+    deltaX === 0 &&
+    deltaY === 0 &&
+    currentWidth === fit.width &&
+    currentHeight === fit.height
+  ) {
+    return nodes;
+  }
+
   return nodes.map((n) => {
     if (n.id === frameId) {
       return {

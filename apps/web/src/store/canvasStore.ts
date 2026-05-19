@@ -34,7 +34,6 @@ import {
 import { pushAction } from '@/handler/canvasCommand/utils';
 import {
   computeFrameFit,
-  fitFrames,
   getAbsolutePosition as getFrameAbsolutePosition,
   wouldUnframe,
   wouldAutoFrame,
@@ -209,9 +208,10 @@ type RFState = {
    * entry point reimplementing this with slightly different behaviour —
    * e.g. only some sites deferred a parent-frame refit).
    *
-   * - `mode: 'auto'`  → clears the explicit height; schedules a deferred
-   *   `fitFramesNow(parentIds)` so parent frames shrink to the new
-   *   content height once BlockNote reflows and RF re-measures.
+   * - `mode: 'auto'`  → clears the explicit height. Parent frames shrink
+   *   to the new content height after BlockNote reflows; the deferred
+   *   refit is queued by the `SET_NODE_GEOMETRY` post-effect, so this
+   *   action stays a single dispatch with no rAF dance of its own.
    * - `mode: 'fixed'` → pins height via `seedNoteFixedHeight`, reading
    *   the most recently observed pinned height from the shared
    *   `noteHeightMemory` module so a "collapse → expand → collapse"
@@ -240,15 +240,6 @@ type RFState = {
    * responses, resize dimension metadata) that should not pollute undo.
    */
   patchNodeSilent: (nodeId: string, patch: Record<string, unknown>) => void;
-
-  /**
-   * Re-fit one or more frames to their current children, without recording
-   * undo history. Used for deferred refits after async DOM measurement
-   * settles (e.g. note auto-height toggle, where the new content height is
-   * only known after the next render cycle). No-op when `autoLayoutEnabled`
-   * is false. Safe to call with frame ids that no longer exist.
-   */
-  fitFramesNow: (frameIds: Iterable<string>) => void;
 
   selectNodes: (ids: string[], multiSelect?: boolean) => void;
 
@@ -1339,7 +1330,6 @@ const useCanvasStore = create<RFState>()(
         nodeId: string;
         size: { width: number; height?: number };
       }> = [];
-      const parentIds = new Set<string>();
 
       for (const node of nodes) {
         if (!idSet.has(node.id)) continue;
@@ -1359,7 +1349,6 @@ const useCanvasStore = create<RFState>()(
             nodeId: node.id,
             size: { width: w, height: undefined },
           });
-          if (node.parentId) parentIds.add(node.parentId);
         } else {
           // Auto → fixed: seed from remembered → measured (capped) → default.
           // `getNoteFixedHeight` reads the session-scoped memory populated
@@ -1376,22 +1365,15 @@ const useCanvasStore = create<RFState>()(
       if (items.length === 0) return;
       // SET_NODE_GEOMETRY uses snapshot:'caller'; open a gesture so the
       // batch is captured as one undo entry without warnings.
+      //
+      // Fixed → auto clears the explicit height; the new content height
+      // is only known after the next render cycle (BlockNote reflow +
+      // ReactFlow ResizeObserver). The `SET_NODE_GEOMETRY` handler
+      // detects the cleared height and emits a `deferredFitFrameIds`
+      // post-effect, which `runPostEffects` schedules for double-rAF
+      // refit — so this action doesn't need its own timing dance.
       get().beginGesture('SET_NODE_GEOMETRY');
       get().setNodeGeometry(items);
-
-      // Fixed → auto: the new auto content height is only known after the
-      // next render cycle (BlockNote reflow + ReactFlow ResizeObserver).
-      // Defer a silent refit of each parent frame so it shrinks to the
-      // actual content height instead of staying sized to the previous
-      // pinned height.
-      if (mode === 'auto' && parentIds.size > 0) {
-        const ids = Array.from(parentIds);
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            get().fitFramesNow(ids);
-          });
-        });
-      }
     },
 
     updateNodeData: (nodeId, patch) => {
@@ -1412,16 +1394,6 @@ const useCanvasStore = create<RFState>()(
           };
         }),
       });
-    },
-
-    fitFramesNow: (frameIds) => {
-      const { autoLayoutEnabled, nodes } = get();
-      if (!autoLayoutEnabled) return;
-      const ids = Array.from(frameIds);
-      if (ids.length === 0) return;
-      const next = fitFrames(nodes as NestableNode[], ids);
-      if (next === nodes) return;
-      set({ nodes: next });
     },
 
     selectNodes: (ids, multiSelect = false) => {
