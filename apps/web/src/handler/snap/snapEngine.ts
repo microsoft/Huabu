@@ -204,9 +204,15 @@ type AxisHit = {
 };
 
 /**
- * Evaluate one axis's three source candidates (min/mid/max edge of
- * the source rect) against the candidate index and return the best
- * hit, or null when nothing is within `tolerance`.
+ * Evaluate one axis's source candidates against the candidate index
+ * and return the best hit, or null when nothing is within
+ * `tolerance`.
+ *
+ * `active` controls which source edges contribute probes:
+ *   - `'both'`  → `min`, `mid`, `max` (drag default)
+ *   - `'min'`   → only the `min` edge probes (e.g. left/top resize)
+ *   - `'max'`   → only the `max` edge probes (e.g. right/bottom resize)
+ *   - `'none'`  → axis disabled, returns null immediately
  */
 function bestAxisHit(
   lines: CandidateLine[],
@@ -214,12 +220,22 @@ function bestAxisHit(
   sourceMid: number,
   sourceMax: number,
   tolerance: number,
+  active: 'min' | 'max' | 'both' | 'none',
 ): AxisHit | null {
-  const probes: { value: number; edge: 'min' | 'mid' | 'max' }[] = [
-    { value: sourceMin, edge: 'min' },
-    { value: sourceMid, edge: 'mid' },
-    { value: sourceMax, edge: 'max' },
-  ];
+  if (active === 'none') return null;
+  const probes: { value: number; edge: 'min' | 'mid' | 'max' }[] = [];
+  if (active === 'min' || active === 'both') {
+    probes.push({ value: sourceMin, edge: 'min' });
+  }
+  if (active === 'both') {
+    // `mid` only participates when the whole rect is moving — for a
+    // single-edge resize the centre would slide too and snapping to
+    // it forces the anchor edge to move with it, which is wrong.
+    probes.push({ value: sourceMid, edge: 'mid' });
+  }
+  if (active === 'max' || active === 'both') {
+    probes.push({ value: sourceMax, edge: 'max' });
+  }
 
   let best: AxisHit | null = null;
   for (const probe of probes) {
@@ -488,9 +504,13 @@ export function computeSnap(
   const srcMidY = sourceRect.y + sourceRect.h / 2;
   const srcMaxY = sourceRect.y + sourceRect.h;
 
+  const activeX = options.activeEdges?.x ?? 'both';
+  const activeY = options.activeEdges?.y ?? 'both';
+  const enableEqualSpacing = options.enableEqualSpacing ?? true;
+
   // --- Edge alignment ----------------------------------------------
-  const xHit = bestAxisHit(index.byX, srcMinX, srcMidX, srcMaxX, t);
-  const yHit = bestAxisHit(index.byY, srcMinY, srcMidY, srcMaxY, t);
+  const xHit = bestAxisHit(index.byX, srcMinX, srcMidX, srcMaxX, t, activeX);
+  const yHit = bestAxisHit(index.byY, srcMinY, srcMidY, srcMaxY, t, activeY);
 
   let deltaX = xHit?.delta ?? 0;
   let deltaY = yHit?.delta ?? 0;
@@ -520,7 +540,12 @@ export function computeSnap(
   // siblings with identical gaps on each side) wins; trailing-equal
   // (source extends a rhythm defined by two same-side siblings) only
   // fires when middle-equal did not.
-  if (!xHit) {
+  //
+  // Resize callers typically pass `enableEqualSpacing: false` — the
+  // geometry below assumes the whole rect is moving (so the
+  // perpendicular axis stays fixed), which doesn't hold when only
+  // one edge is being dragged.
+  if (!xHit && enableEqualSpacing && activeX === 'both') {
     const eq = bestEqualSpacingHit(
       'x',
       index.rectsById.values(),
@@ -562,7 +587,7 @@ export function computeSnap(
       }
     }
   }
-  if (!yHit) {
+  if (!yHit && enableEqualSpacing && activeY === 'both') {
     const eq = bestEqualSpacingHit(
       'y',
       index.rectsById.values(),

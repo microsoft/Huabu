@@ -1,19 +1,31 @@
 /**
- * Gesture-scoped drag-time state for the smart-snap engine.
+ * Gesture-scoped state for the smart-snap engine (covers both drag
+ * and single-node resize).
  *
  * Owns the transient cache built by `beginSnapSession` (candidate
  * index, id→node map, absolute-position getter, bypass flag, abort
  * controller for window-level Alt listeners) and the per-frame
- * `applySnap` pass that React Flow drives via `onNodesChange`.
+ * snap pass that downstream consumers invoke:
+ *
+ *   • Drag      — `applySnap(changes, zoom)` rewrites the React Flow
+ *                 `NodeChange[]` batch on each `onNodesChange`.
+ *   • Resize    — `computeSnapForRect(rect, activeEdges, zoom)` is
+ *                 called directly from `NodeWrapper.handleResize`
+ *                 and the consumer writes the snapped
+ *                 position/size to the store itself. `applySnap`
+ *                 then SUPPRESSES the matching dim/pos changes RF
+ *                 emits for the resize node so applyNodeChanges
+ *                 doesn't overwrite the snapped inline write.
  *
  * ── Why a plain module instead of a Zustand store ──────────────────
  *
  * None of this state is React-reactive:
  *
- *   • No component subscribes to the candidate index, dragged-ids
+ *   • No component subscribes to the candidate index, gesture-ids
  *     set, or bypass flag. They're consumed exclusively by command
- *     callbacks (`onNodeDragStart`, `onNodesChange`, `onNodeDragStop`)
- *     and an internal window keyboard listener.
+ *     callbacks (`onNodeDragStart`, `onNodesChange`, `onNodeDragStop`,
+ *     `NodeWrapper.handleResize*`) and an internal window keyboard
+ *     listener.
  *   • Pushing them through `set/get` would churn the canvas autosave
  *     middleware many times per frame for purely transient data.
  *   • The visible part — alignment guides — already lives in
@@ -21,14 +33,14 @@
  *     That split is intentional: render state belongs in Zustand,
  *     engine working memory does not.
  *
- * Lifecycle is fully contained within a single drag gesture:
+ * Lifecycle is fully contained within a single gesture:
  *
- *   beginSnapSession()  ← onNodeDragStart
- *     applySnap(...)    ← onNodesChange   (every drag tick)
- *     applySnap(...)
+ *   beginSnapSession()  ← onNodeDragStart / handleResizeStart
+ *     applySnap(...)            ← drag tick (RF NodeChange[])
+ *     computeSnapForRect(...)   ← resize tick (NodeWrapper)
  *     ...
- *   endSnapSession()    ← onNodesChange (drag-end commit) OR
- *                         onNodeDragStop (safety net) OR
+ *   endSnapSession()    ← dragging:false / resizing:false commit OR
+ *                         onNodeDragStop / handleResizeEnd (safety) OR
  *                         Canvas unmount via endActiveDragSession()
  *
  * `endSnapSession` is idempotent so the "may fire twice" pattern is
@@ -48,23 +60,32 @@ import { buildCandidateIndex, computeSnap } from '@/handler/snap/snapEngine';
 import { useDragPreviewStore } from '@/store/dragPreviewStore';
 import { getNodeSize } from '@/utils/node/size';
 
-import type { SnapIndex } from '@/handler/snap/types';
-import type { NodeChange, NodePositionChange, XYPosition } from '@xyflow/react';
+import type { ActiveEdges, Rect, SnapIndex } from '@/handler/snap/types';
+import type {
+  NodeChange,
+  NodeDimensionChange,
+  NodePositionChange,
+  XYPosition,
+} from '@xyflow/react';
+
+/** Which gesture is currently driving the snap session. */
+export type GestureKind = 'drag' | 'resize';
 
 /**
- * Candidate index built once per drag from the non-dragged sibling
+ * Candidate index built once per gesture from the non-gesture sibling
  * set. `null` when snap is disabled for the gesture (e.g. dragged
  * nodes span multiple parents — see `beginSnapSession`).
  */
 let _index: SnapIndex | null = null;
 
 /**
- * Ids currently being dragged. Used by `applySnap` to filter the
- * React Flow change batch down to position updates that belong to
- * the current gesture (e.g. a hover-induced reflow on an unrelated
- * node mid-drag should not move with the snap delta).
+ * Ids currently participating in the gesture (dragged or resized).
+ * Used by `applySnap` to filter the React Flow change batch down to
+ * updates that belong to the current gesture (e.g. a hover-induced
+ * reflow on an unrelated node mid-drag should not move with the snap
+ * delta).
  */
-let _draggedIds: Set<string> = new Set();
+let _gestureIds: Set<string> = new Set();
 
 /**
  * Common parent id of the dragged set when all dragged nodes share
@@ -97,11 +118,11 @@ let _absPosGetter: ((nodeId: string) => XYPosition | null) | null = null;
 
 /**
  * AbortController bound to every window-level listener attached for
- * the duration of a drag (currently Alt keydown/keyup for bypass).
+ * the duration of a gesture (currently Alt keydown/keyup for bypass).
  *
  * Tracking Alt at window-level (rather than only sampling the
- * drag-start event) lets users press / release Alt mid-drag without
- * dropping the gesture — the same UX Figma offers.
+ * gesture-start event) lets users press / release Alt mid-gesture
+ * without dropping it — the same UX Figma offers.
  *
  * Using a single AbortController per gesture instead of separate
  * handler refs is what makes cleanup robust against:
@@ -110,29 +131,44 @@ let _absPosGetter: ((nodeId: string) => XYPosition | null) | null = null;
  *     drag, mid-drag unmount, browser tab hidden) — the *next*
  *     `beginSnapSession` defensively calls `endSnapSession()` and
  *     aborts the stale controller, so leaked listeners can stack at
- *     most one pair deep instead of growing per drag.
+ *     most one pair deep instead of growing per gesture.
  *   • Component unmount — the consumer (Canvas) calls
  *     `endSnapSession()` on teardown via its own store binding.
  */
 let _abortController: AbortController | null = null;
 
+/**
+ * Which gesture is driving the session. Default `'drag'` matches
+ * the historical behaviour for callers that don't pass `kind`.
+ * `'resize'` enables the dim/pos suppression branch in `applySnap`
+ * and switches the equal-spacing default off.
+ */
+let _kind: GestureKind = 'drag';
+
 export interface BeginSnapSessionOptions {
   /**
-   * Snapshot of the canvas nodes at drag-start. Used to build the
+   * Snapshot of the canvas nodes at gesture-start. Used to build the
    * candidate index and the absolute-position cache. Pass-by-reference
    * is fine; the engine treats this as read-only.
    */
   nodes: NestableNode[];
   /**
-   * Ids of the nodes currently being dragged. Snap candidates are
-   * filtered to exclude these and any descendants of dragged frames.
+   * Ids of the nodes participating in this gesture (dragged set, or
+   * the single resized node). Snap candidates are filtered to
+   * exclude these and any descendants of gestured frames.
    */
-  draggedIds: Set<string>;
+  gestureIds: Set<string>;
   /**
-   * Whether Alt was held when the drag started. Toggled subsequently
-   * by the window-level keyboard listener installed below.
+   * Whether Alt was held when the gesture started. Toggled
+   * subsequently by the window-level keyboard listener installed
+   * below.
    */
   altPressed: boolean;
+  /**
+   * Gesture kind. Defaults to `'drag'` for backward compatibility
+   * with the original drag-only call sites.
+   */
+  kind?: GestureKind;
 }
 
 /**
@@ -148,7 +184,7 @@ export function beginSnapSession(opts: BeginSnapSessionOptions): void {
   // Defensive cleanup — see comments above. Cheap when idle.
   endSnapSession();
 
-  const { nodes, draggedIds, altPressed } = opts;
+  const { nodes, gestureIds, altPressed, kind = 'drag' } = opts;
 
   // One shared id→node index reused by:
   //   • the mixed-parent detection below,
@@ -158,13 +194,14 @@ export function beginSnapSession(opts: BeginSnapSessionOptions): void {
   //     pure module callable from tests).
   const nodeById = indexById(nodes);
 
-  // Compute the common parent of the dragged set. When all dragged
+  // Compute the common parent of the gesture set. When all gesture
   // nodes share one parent we restrict snap candidates to siblings
   // inside that frame; otherwise (mixed parents) we disable snap for
-  // this gesture to avoid cross-context noise.
+  // this gesture to avoid cross-context noise. Resize always has a
+  // single node so this resolves to the resized node's own parent.
   let firstParent: string | null | undefined = undefined;
   let mixedParents = false;
-  for (const id of draggedIds) {
+  for (const id of gestureIds) {
     const parent = nodeById.get(id)?.parentId ?? null;
     if (firstParent === undefined) firstParent = parent;
     else if (firstParent !== parent) {
@@ -176,13 +213,14 @@ export function beginSnapSession(opts: BeginSnapSessionOptions): void {
   _parentId = mixedParents
     ? undefined
     : ((firstParent ?? undefined) as string | undefined);
-  _draggedIds = draggedIds;
+  _gestureIds = gestureIds;
   _nodeById = nodeById;
   _absPosGetter = createAbsolutePositionGetter(nodeById);
   _index = mixedParents
     ? null
-    : buildCandidateIndex(nodes, draggedIds, _parentId);
+    : buildCandidateIndex(nodes, gestureIds, _parentId);
   _bypass = altPressed;
+  _kind = kind;
 
   // Attach window-level Alt listeners so users can toggle bypass
   // mid-drag. Bound to a fresh AbortController whose `signal` is
@@ -234,11 +272,12 @@ export function beginSnapSession(opts: BeginSnapSessionOptions): void {
  */
 export function endSnapSession(): void {
   _index = null;
-  _draggedIds = new Set();
+  _gestureIds = new Set();
   _parentId = undefined;
   _bypass = false;
   _nodeById = null;
   _absPosGetter = null;
+  _kind = 'drag';
   // Aborting the controller detaches every listener registered with
   // its signal in one shot. Safe to call when null (no active drag)
   // or when the controller is already aborted (idempotent).
@@ -248,12 +287,12 @@ export function endSnapSession(): void {
 }
 
 /**
- * Cheap predicate the consumer uses to gate the per-frame `applySnap`
+ * Cheap predicate the consumer uses to gate the per-frame snap
  * call. False when no gesture is active OR when the gesture was
  * started with mixed-parent dragged nodes (snap disabled by design).
  */
 export function isSnapSessionActive(): boolean {
-  return _index !== null && _draggedIds.size > 0;
+  return _index !== null && _gestureIds.size > 0;
 }
 
 /**
@@ -288,48 +327,108 @@ function isDragPositionChange(c: NodeChange): c is NodePositionChange {
  * site (so cleanup runs strictly *after* the last snap pass has
  * landed in the store).
  *
- * Returns false when no session is active.
+ * Returns false when no session is active OR when the active
+ * session is a resize (resize uses `isSnapSessionResizeEndCommit`).
  */
 export function isSnapSessionDragEndCommit(changes: NodeChange[]): boolean {
-  if (_draggedIds.size === 0) return false;
+  if (_kind !== 'drag') return false;
+  if (_gestureIds.size === 0) return false;
   return changes.some(
     (c) =>
       c.type === 'position' &&
       (c as NodePositionChange).dragging === false &&
-      _draggedIds.has(c.id),
+      _gestureIds.has(c.id),
   );
 }
 
 /**
- * Apply the smart-snap correction to a batch of React Flow node
- * changes. Pure with respect to the input array (does not mutate);
- * side-effects are limited to pushing guides into `dragPreviewStore`.
+ * True when `changes` contains the final `resizing:false` commit
+ * for any node the current resize session is tracking. Mirror of
+ * `isSnapSessionDragEndCommit` for the resize lifecycle.
  *
- * Algorithm:
- *   1. Pull the proposed new positions out of `changes` (these are
- *      parent-relative — we add the parent's absolute position to
- *      get the source rect in flow-space).
- *   2. Compute the union bounding rect of the dragged set in
- *      absolute flow-space.
- *   3. Hand that rect to `computeSnap`.
- *   4. Add the returned (deltaX, deltaY) to every dragged position
- *      change.
- *   5. Push the resulting guides into `dragPreviewStore` so the
- *      overlay can render them.
- *
- * When the bounding rect cannot be assembled (e.g. dragged nodes
- * not yet measured) the batch is returned untouched and guides are
- * cleared, so behaviour gracefully degrades to no-snap.
- *
- * @param changes The React Flow change batch from `onNodesChange`.
- * @param zoom    Current viewport zoom (from `rfInstance.getZoom()`).
- *                Passed in by the caller to avoid coupling this
- *                module back to the canvas store — the screen→flow
- *                threshold conversion needs it.
+ * Returns false when no session is active OR when the active
+ * session is a drag.
  */
+export function isSnapSessionResizeEndCommit(changes: NodeChange[]): boolean {
+  if (_kind !== 'resize') return false;
+  if (_gestureIds.size === 0) return false;
+  return changes.some(
+    (c) =>
+      c.type === 'dimensions' &&
+      (c as NodeDimensionChange).resizing === false &&
+      _gestureIds.has(c.id),
+  );
+}
+
+/**
+ * Shared per-frame snap evaluator. Consumed by:
+ *
+ *   • `applySnap` for drag (passes the union bbox of the dragged set,
+ *     activeEdges `{ both, both }`).
+ *   • `NodeWrapper.handleResize` for single-node resize (passes the
+ *     proposed post-resize rect, activeEdges narrowed to the
+ *     actually-moving edge).
+ *
+ * Writes the resulting guides into `dragPreviewStore` as a side
+ * effect so the SVG overlay picks them up. Returns zero deltas and
+ * clears guides when no session is active — callers can call this
+ * unconditionally without a separate `isSnapSessionActive` check
+ * (kept cheap: the bypass branch in `computeSnap` returns early).
+ *
+ * Equal-spacing detection is silently disabled for resize sessions
+ * because its geometry assumes the whole rect moves — a single
+ * growing edge would otherwise produce confusing "≡" guides that
+ * compete with the obvious edge-alignment intent.
+ */
+export function computeSnapForRect(
+  rect: Rect,
+  activeEdges: ActiveEdges,
+  zoom: number,
+): { deltaX: number; deltaY: number } {
+  if (_index === null) {
+    useDragPreviewStore.getState().clearSnapGuides();
+    return { deltaX: 0, deltaY: 0 };
+  }
+  const thresholdFlow = SNAP_THRESHOLD_SCREEN_PX / Math.max(zoom, 0.0001);
+  const result = computeSnap(rect, _index, {
+    thresholdFlow,
+    bypass: _bypass,
+    activeEdges,
+    // Resize callers should never see equal-spacing guides — they
+    // assume the rect moves rigidly, which it doesn't during an
+    // edge-handle resize.
+    enableEqualSpacing: _kind === 'drag',
+  });
+  useDragPreviewStore
+    .getState()
+    .setSnapGuides(result.guides.slice(0, SNAP_MAX_GUIDES_PER_FRAME));
+  return { deltaX: result.deltaX, deltaY: result.deltaY };
+}
+
 export function applySnap(changes: NodeChange[], zoom: number): NodeChange[] {
   if (_index === null) return changes;
 
+  if (_kind === 'resize') {
+    // Resize path: NodeWrapper.handleResize has already written the
+    // snapped position+style to the store. Strip RF's own dim/pos
+    // changes for the resize node so applyNodeChanges (called by the
+    // canvasStore consumer) doesn't clobber the snapped values with
+    // RF's raw cursor-derived numbers. Non-tracked changes pass
+    // through untouched. The final `resizing:false` dimension change
+    // is preserved so downstream can observe end-of-gesture via
+    // `isSnapSessionResizeEndCommit`.
+    return changes.filter((c) => {
+      if (!('id' in c) || !_gestureIds.has(c.id)) return true;
+      if (c.type === 'position') return false;
+      if (c.type === 'dimensions') {
+        const dim = c as NodeDimensionChange;
+        return dim.resizing === false;
+      }
+      return true;
+    });
+  }
+
+  // ── Drag path ────────────────────────────────────────────────────
   const dragChanges = changes.filter(isDragPositionChange);
   if (dragChanges.length === 0) return changes;
 
@@ -349,7 +448,7 @@ export function applySnap(changes: NodeChange[], zoom: number): NodeChange[] {
   let maxY = -Infinity;
 
   for (const c of dragChanges) {
-    if (!_draggedIds.has(c.id)) continue;
+    if (!_gestureIds.has(c.id)) continue;
     const node = nodeById.get(c.id);
     if (!node) continue;
     const size = getNodeSize(node);
@@ -378,39 +477,24 @@ export function applySnap(changes: NodeChange[], zoom: number): NodeChange[] {
     return changes;
   }
 
-  // Convert the screen-space threshold to flow-space using the
-  // current viewport zoom (so the perceived snap radius stays
-  // constant regardless of zoom level).
-  const thresholdFlow = SNAP_THRESHOLD_SCREEN_PX / Math.max(zoom, 0.0001);
+  const { deltaX, deltaY } = computeSnapForRect(
+    { x: minX, y: minY, w: maxX - minX, h: maxY - minY },
+    { x: 'both', y: 'both' },
+    zoom,
+  );
 
-  const sourceRect = {
-    x: minX,
-    y: minY,
-    w: maxX - minX,
-    h: maxY - minY,
-  };
-  const result = computeSnap(sourceRect, _index, {
-    thresholdFlow,
-    bypass: _bypass,
-  });
-
-  // Push guides into the overlay store (sliced to the per-frame cap).
-  useDragPreviewStore
-    .getState()
-    .setSnapGuides(result.guides.slice(0, SNAP_MAX_GUIDES_PER_FRAME));
-
-  if (result.deltaX === 0 && result.deltaY === 0) return changes;
+  if (deltaX === 0 && deltaY === 0) return changes;
 
   return changes.map((c) => {
     if (!isDragPositionChange(c)) return c;
-    if (!_draggedIds.has(c.id)) return c;
+    if (!_gestureIds.has(c.id)) return c;
     const position = c.position;
     if (!position) return c;
     return {
       ...c,
       position: {
-        x: position.x + result.deltaX,
-        y: position.y + result.deltaY,
+        x: position.x + deltaX,
+        y: position.y + deltaY,
       },
     };
   });

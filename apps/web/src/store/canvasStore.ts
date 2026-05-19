@@ -46,6 +46,7 @@ import {
   endSnapSession,
   isSnapSessionActive,
   isSnapSessionDragEndCommit,
+  isSnapSessionResizeEndCommit,
 } from '@/handler/snap/snapSession';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
@@ -1049,7 +1050,7 @@ const useCanvasStore = create<RFState>()(
       // setting up the new gesture), so we don't need to do it here.
       beginSnapSession({
         nodes: get().nodes as NestableNode[],
-        draggedIds: new Set(draggedNodes.map((n) => n.id)),
+        gestureIds: new Set(draggedNodes.map((n) => n.id)),
         altPressed: event.altKey,
       });
     },
@@ -1312,6 +1313,11 @@ const useCanvasStore = create<RFState>()(
       // redundant `endSnapSession` in `onNodeDragStop` is just an
       // idempotent safety net.
       if (isSnapSessionDragEndCommit(sanitized)) endSnapSession();
+      // Same pattern for resize-end (`resizing:false` dimension
+      // change for the tracked node). `NodeWrapper.handleResizeEnd`
+      // calls `endSnapSession` defensively as well; the second call
+      // here is a no-op since the function is idempotent.
+      if (isSnapSessionResizeEndCommit(sanitized)) endSnapSession();
     },
 
     onEdgesChange: (changes) => {

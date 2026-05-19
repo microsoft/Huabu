@@ -22,6 +22,16 @@ import { cn } from '@/components/Common/cn.ts';
 import { Spinner } from '@/components/Common/Spinner.tsx';
 import { Tooltip } from '@/components/Common/Tooltip.tsx';
 import { NodeFloatingToolbar } from '@/components/Panels/Canvas/FloatingToolbars/NodeFloatingToolbar.tsx';
+import {
+  createAbsolutePositionGetter,
+  indexById,
+  type NestableNode,
+} from '@/handler/canvasCommand/utils/frame';
+import {
+  beginSnapSession,
+  computeSnapForRect,
+  endSnapSession,
+} from '@/handler/snap/snapSession.ts';
 import { useCornerZoomResize } from '@/hooks/useCornerZoomResize.ts';
 import { useIsNotMouse } from '@/hooks/useInputMode.ts';
 import { useNodeLOD } from '@/hooks/useNodeLOD.ts';
@@ -328,19 +338,136 @@ export const NodeWrapper = memo(
       return summary;
     }, [provenance]);
 
+    // Smart-snap state for the active resize gesture.
+    //
+    // `startRectRef` captures the node's pre-resize bounds in absolute
+    // flow-space (plus the parent's absolute offset, which is stable
+    // for the duration of the gesture). Used by `handleResize` to
+    // detect which edges have actually moved each frame.
+    //
+    // `lastSnappedRef` stashes the snapped {x, y, width, height} from
+    // the most recent frame in parent-relative coordinates so that
+    // `handleResizeEnd` can commit those values via the undoable
+    // `setNodeGeometry` intent. Falling back to RF's raw `params` here
+    // would land the final commit at the un-snapped position.
+    const startRectRef = useRef<{
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      parentAbsX: number;
+      parentAbsY: number;
+    } | null>(null);
+    const lastSnappedRef = useRef<{
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    } | null>(null);
+
     const handleResize = useCallback(
-      (_event: unknown, params: { width: number; height: number }) => {
-        // Apply dimensions immediately for visual feedback during drag.
-        // This keeps the NodeToolbar and zoom-invariant overlay in sync.
+      (
+        _event: unknown,
+        params: { x: number; y: number; width: number; height: number },
+      ) => {
+        const start = startRectRef.current;
+
+        // ── Snap-aware path ────────────────────────────────────────
+        // When the snap session was successfully begun (start rect
+        // present), derive which edges are actually moving by diffing
+        // against the captured pre-resize bounds, then ask the engine
+        // for a correction.
+        let snappedX = params.x;
+        let snappedY = params.y;
+        let snappedW = params.width;
+        let snappedH = params.height;
+
+        if (start) {
+          const eps = 0.5;
+          const absX = start.parentAbsX + params.x;
+          const absY = start.parentAbsY + params.y;
+
+          const minXMoved = Math.abs(absX - start.x) > eps;
+          const maxXMoved =
+            Math.abs(absX + params.width - (start.x + start.w)) > eps;
+          const minYMoved = Math.abs(absY - start.y) > eps;
+          const maxYMoved =
+            Math.abs(absY + params.height - (start.y + start.h)) > eps;
+
+          const activeX: 'min' | 'max' | 'both' | 'none' =
+            minXMoved && maxXMoved
+              ? 'both'
+              : minXMoved
+                ? 'min'
+                : maxXMoved
+                  ? 'max'
+                  : 'none';
+          const activeY: 'min' | 'max' | 'both' | 'none' =
+            minYMoved && maxYMoved
+              ? 'both'
+              : minYMoved
+                ? 'min'
+                : maxYMoved
+                  ? 'max'
+                  : 'none';
+
+          const zoom = useCanvasStore.getState().rfInstance?.getZoom() ?? 1;
+          const { deltaX, deltaY } = computeSnapForRect(
+            { x: absX, y: absY, w: params.width, h: params.height },
+            { x: activeX, y: activeY },
+            zoom,
+          );
+
+          // Apply the deltas back onto position/size, anchoring the
+          // non-moving edge. For edge handles this touches one axis
+          // only; for corner handles each axis is independent.
+          // 'both' is unreachable in practice (no handle moves both
+          // min and max on one axis), but we conservatively translate
+          // (position only, no size change) just in case.
+          if (deltaX !== 0) {
+            if (activeX === 'min') {
+              snappedX = params.x + deltaX;
+              snappedW = params.width - deltaX;
+            } else if (activeX === 'max') {
+              snappedW = params.width + deltaX;
+            } else if (activeX === 'both') {
+              snappedX = params.x + deltaX;
+            }
+          }
+          if (deltaY !== 0) {
+            if (activeY === 'min') {
+              snappedY = params.y + deltaY;
+              snappedH = params.height - deltaY;
+            } else if (activeY === 'max') {
+              snappedH = params.height + deltaY;
+            } else if (activeY === 'both') {
+              snappedY = params.y + deltaY;
+            }
+          }
+        }
+
+        lastSnappedRef.current = {
+          x: snappedX,
+          y: snappedY,
+          width: snappedW,
+          height: snappedH,
+        };
+
+        // Apply dimensions (and snapped position) immediately for
+        // visual feedback during drag. This keeps the NodeToolbar and
+        // zoom-invariant overlay in sync, and \u2014 critically \u2014
+        // overwrites any raw position RF would have written via
+        // onNodesChange before our suppression filter runs.
         useCanvasStore.setState((state) => ({
           nodes: state.nodes.map((n) =>
             n.id === id
               ? {
                   ...n,
+                  position: { x: snappedX, y: snappedY },
                   style: {
                     ...n.style,
-                    width: params.width,
-                    height: params.height,
+                    width: snappedW,
+                    height: snappedH,
                   },
                 }
               : n,
@@ -349,7 +476,7 @@ export const NodeWrapper = memo(
         // Update the frame fit preview so the dashed overlay reflects the
         // new child size while the resize handle is being dragged.
         updateResizePreview(id);
-        onResizeProp?.(params.width, params.height);
+        onResizeProp?.(snappedW, snappedH);
       },
       [id, onResizeProp, updateResizePreview],
     );
@@ -361,20 +488,87 @@ export const NodeWrapper = memo(
       ) => {
         if (tryStartZoom(event, params)) return;
         onNodeResizeStart();
+
+        // Capture the pre-resize bounds in absolute flow-space so
+        // `handleResize` can detect which edges actually moved each
+        // frame (RF's `direction` field on `OnResize` describes growth
+        // sign, not which edge is moving \u2014 derivation by diff is
+        // the cleanest source of truth).
+        const state = useCanvasStore.getState();
+        const nodes = state.nodes as NestableNode[];
+        const byId = indexById(nodes);
+        const getAbs = createAbsolutePositionGetter(byId);
+        const self = byId.get(id);
+        let parentAbsX = 0;
+        let parentAbsY = 0;
+        if (self?.parentId) {
+          const pa = getAbs(self.parentId);
+          if (pa) {
+            parentAbsX = pa.x;
+            parentAbsY = pa.y;
+          }
+        }
+        startRectRef.current = {
+          x: parentAbsX + params.x,
+          y: parentAbsY + params.y,
+          w: params.width,
+          h: params.height,
+          parentAbsX,
+          parentAbsY,
+        };
+        lastSnappedRef.current = null;
+
+        const altPressed =
+          (event as { altKey?: boolean } | undefined)?.altKey ?? false;
+        beginSnapSession({
+          nodes,
+          gestureIds: new Set([id]),
+          altPressed,
+          kind: 'resize',
+        });
+
         onResizeStart?.();
       },
-      [tryStartZoom, onNodeResizeStart, onResizeStart],
+      [id, tryStartZoom, onNodeResizeStart, onResizeStart],
     );
 
     const handleResizeEnd = useCallback(
-      (_event: unknown, params: { width: number; height: number }) => {
+      (
+        _event: unknown,
+        params: { x: number; y: number; width: number; height: number },
+      ) => {
         // Clear the preview before dispatching so the overlay disappears as
         // the frame animates to its final fitted size.
         clearFrameFitPreview();
+        // Commit the *snapped* values from the last frame (RF's own
+        // `params` here would be the raw cursor-derived numbers, which
+        // would land the final commit at the pre-snap position). If a
+        // snap session never started (e.g. an early return inside
+        // handleResize), fall back to raw params.
+        const snapped = lastSnappedRef.current ?? {
+          x: params.x,
+          y: params.y,
+          width: params.width,
+          height: params.height,
+        };
+        const start = startRectRef.current;
+        const positionChanged =
+          !!start &&
+          (snapped.x !== start.x - start.parentAbsX ||
+            snapped.y !== start.y - start.parentAbsY);
         setNodeGeometry([
-          { nodeId: id, size: { width: params.width, height: params.height } },
+          {
+            nodeId: id,
+            size: { width: snapped.width, height: snapped.height },
+            position: positionChanged
+              ? { x: snapped.x, y: snapped.y }
+              : undefined,
+          },
         ]);
-        onResizeEnd?.(params.width, params.height);
+        endSnapSession();
+        startRectRef.current = null;
+        lastSnappedRef.current = null;
+        onResizeEnd?.(snapped.width, snapped.height);
       },
       [clearFrameFitPreview, setNodeGeometry, id, onResizeEnd],
     );

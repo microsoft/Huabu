@@ -1,8 +1,8 @@
 /**
- * @file Unit tests for `snapSession` — the gesture-scoped wrapper
+ * @file Unit tests for `snapSession` �?the gesture-scoped wrapper
  * around `snapEngine` that owns drag-time state for the canvas.
  *
- * These tests exercise the lifecycle (`begin` → `apply` → `end`)
+ * These tests exercise the lifecycle (`begin` �?`apply` �?`end`)
  * directly against the real implementation. Side effects on
  * `dragPreviewStore` are observed by reading its state.
  */
@@ -49,7 +49,7 @@ function posChange(
 }
 
 // jsdom isn't configured for this test file by default, but
-// `beginSnapSession` only touches `window` when it exists — the
+// `beginSnapSession` only touches `window` when it exists �?the
 // listener block is wrapped in `typeof window !== 'undefined'`.
 // Vitest's default `happy-dom`/`jsdom` environments both expose
 // `window`, so the AbortController path runs and we get to assert
@@ -61,7 +61,7 @@ afterEach(() => {
   endSnapSession();
 });
 
-describe('snapSession — lifecycle', () => {
+describe('snapSession �?lifecycle', () => {
   it('is inactive before any begin', () => {
     expect(isSnapSessionActive()).toBe(false);
   });
@@ -71,7 +71,7 @@ describe('snapSession — lifecycle', () => {
     const B = makeNode('B', { x: 200, y: 0 }, { w: 50, h: 50 });
     beginSnapSession({
       nodes: [A, B],
-      draggedIds: new Set(['B']),
+      gestureIds: new Set(['B']),
       altPressed: false,
     });
     expect(isSnapSessionActive()).toBe(true);
@@ -81,7 +81,7 @@ describe('snapSession — lifecycle', () => {
     const A = makeNode('A', { x: 0, y: 0 }, { w: 50, h: 50 });
     beginSnapSession({
       nodes: [A],
-      draggedIds: new Set(['A']),
+      gestureIds: new Set(['A']),
       altPressed: false,
     });
     endSnapSession();
@@ -96,7 +96,7 @@ describe('snapSession — lifecycle', () => {
 
     beginSnapSession({
       nodes: [A, B],
-      draggedIds: new Set(['B']),
+      gestureIds: new Set(['B']),
       altPressed: false,
     });
     // Push some guide state so we can observe the cleanup.
@@ -107,7 +107,7 @@ describe('snapSession — lifecycle', () => {
 
     beginSnapSession({
       nodes: [A, B],
-      draggedIds: new Set(['B']),
+      gestureIds: new Set(['B']),
       altPressed: false,
     });
     // The defensive endSnapSession inside begin must have cleared
@@ -119,7 +119,7 @@ describe('snapSession — lifecycle', () => {
     const A = makeNode('A', { x: 0, y: 0 }, { w: 50, h: 50 });
     beginSnapSession({
       nodes: [A],
-      draggedIds: new Set(['A']),
+      gestureIds: new Set(['A']),
       altPressed: false,
     });
     useDragPreviewStore
@@ -130,7 +130,7 @@ describe('snapSession — lifecycle', () => {
   });
 });
 
-describe('snapSession — mixed parents disable snap', () => {
+describe('snapSession �?mixed parents disable snap', () => {
   it('isActive is false when dragged ids span multiple parents', () => {
     const frame1 = makeNode(
       'F1',
@@ -159,7 +159,7 @@ describe('snapSession — mixed parents disable snap', () => {
 
     beginSnapSession({
       nodes: [frame1, frame2, child1, child2],
-      draggedIds: new Set(['C1', 'C2']),
+      gestureIds: new Set(['C1', 'C2']),
       altPressed: false,
     });
 
@@ -167,7 +167,7 @@ describe('snapSession — mixed parents disable snap', () => {
   });
 });
 
-describe('snapSession — applySnap', () => {
+describe('snapSession �?applySnap', () => {
   beforeEach(() => {
     useDragPreviewStore.getState().clearSnapGuides();
   });
@@ -178,14 +178,14 @@ describe('snapSession — applySnap', () => {
   });
 
   it('rewrites a dragged position to snap onto a sibling edge', () => {
-    // A=[0,50]. Drag B from x=51 → should snap left-edge to A.right=50
+    // A=[0,50]. Drag B from x=51 �?should snap left-edge to A.right=50
     // (deltaX = -1). T = SNAP_THRESHOLD_SCREEN_PX = 6 at zoom 1.
     const A = makeNode('A', { x: 0, y: 0 }, { w: 50, h: 50 });
     const B = makeNode('B', { x: 51, y: 0 }, { w: 50, h: 50 });
 
     beginSnapSession({
       nodes: [A, B],
-      draggedIds: new Set(['B']),
+      gestureIds: new Set(['B']),
       altPressed: false,
     });
 
@@ -204,7 +204,7 @@ describe('snapSession — applySnap', () => {
 
     beginSnapSession({
       nodes: [A, B],
-      draggedIds: new Set(['B']),
+      gestureIds: new Set(['B']),
       altPressed: false,
     });
 
@@ -216,7 +216,7 @@ describe('snapSession — applySnap', () => {
       type: 'position' as const,
       id: 'B',
       position: { x: 51, y: 0 },
-      // No `dragging` key → not a drag tick.
+      // No `dragging` key �?not a drag tick.
     };
     const result = applySnap([programmatic], 1);
     expect(result[0]).toBe(programmatic);
@@ -228,18 +228,18 @@ describe('snapSession — applySnap', () => {
 
     beginSnapSession({
       nodes: [A, B],
-      draggedIds: new Set(['B']),
+      gestureIds: new Set(['B']),
       altPressed: true,
     });
 
     const changes = [posChange('B', { x: 51, y: 0 }, true)];
     const result = applySnap(changes, 1) as NodePositionChange[];
-    // Bypass active → position stays raw.
+    // Bypass active �?position stays raw.
     expect(result[0].position).toEqual({ x: 51, y: 0 });
   });
 });
 
-describe('snapSession — isSnapSessionDragEndCommit', () => {
+describe('snapSession �?isSnapSessionDragEndCommit', () => {
   it('is false when no session is active', () => {
     expect(
       isSnapSessionDragEndCommit([posChange('X', { x: 0, y: 0 }, false)]),
@@ -251,7 +251,7 @@ describe('snapSession — isSnapSessionDragEndCommit', () => {
     const B = makeNode('B', { x: 200, y: 0 }, { w: 50, h: 50 });
     beginSnapSession({
       nodes: [A, B],
-      draggedIds: new Set(['B']),
+      gestureIds: new Set(['B']),
       altPressed: false,
     });
 
@@ -265,7 +265,7 @@ describe('snapSession — isSnapSessionDragEndCommit', () => {
     const B = makeNode('B', { x: 200, y: 0 }, { w: 50, h: 50 });
     beginSnapSession({
       nodes: [A, B],
-      draggedIds: new Set(['B']),
+      gestureIds: new Set(['B']),
       altPressed: false,
     });
 
@@ -279,7 +279,7 @@ describe('snapSession — isSnapSessionDragEndCommit', () => {
     const B = makeNode('B', { x: 200, y: 0 }, { w: 50, h: 50 });
     beginSnapSession({
       nodes: [A, B],
-      draggedIds: new Set(['B']),
+      gestureIds: new Set(['B']),
       altPressed: false,
     });
 

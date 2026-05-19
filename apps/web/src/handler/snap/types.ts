@@ -90,6 +90,28 @@ export type SnapResult = {
   guides: Guide[];
 };
 
+/**
+ * Per-axis description of which source edges may produce a snap hit.
+ *
+ *   `'both'` — `min`, `mid`, AND `max` edges all probe candidates.
+ *              The drag default: the whole rect moves as a unit, so
+ *              every edge is "live".
+ *   `'min'`  — only the `min` edge (left / top) probes. Used during
+ *              resize when only the top-left-side edge is moving and
+ *              the opposite edge stays pinned as the anchor.
+ *   `'max'`  — only the `max` edge (right / bottom) probes.
+ *   `'none'` — axis disabled (e.g. an edge-handle resize that only
+ *              moves the other axis).
+ *
+ * The `mid` edge is never reported separately for resize because the
+ * centre moves implicitly with the moving edge and snapping to it
+ * would feel ambiguous (anchor edge would have to shift too).
+ */
+export type ActiveEdges = {
+  x: 'min' | 'max' | 'both' | 'none';
+  y: 'min' | 'max' | 'both' | 'none';
+};
+
 /** Options consumed by `computeSnap`. */
 export type SnapOptions = {
   /**
@@ -104,6 +126,21 @@ export type SnapOptions = {
    * disable snapping for fine positioning.
    */
   bypass: boolean;
+  /**
+   * Restrict which source edges the engine probes against candidates.
+   * Default `{ x: 'both', y: 'both' }` preserves drag behaviour
+   * (every edge is live). Resize callers narrow this to the
+   * actually-moving edge so the anchor side never gets snapped.
+   */
+  activeEdges?: ActiveEdges;
+  /**
+   * Toggle the equal-spacing detector. Default `true` for drag.
+   * Resize callers typically disable this — the equal-spacing
+   * geometry assumes the rect as a whole is moving, not just one
+   * edge growing, and otherwise produces confusing guide lines that
+   * compete with the obvious edge-alignment intent.
+   */
+  enableEqualSpacing?: boolean;
 };
 
 /** Convenience extractors. */

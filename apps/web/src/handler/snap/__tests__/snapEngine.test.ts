@@ -545,3 +545,137 @@ describe('snapEngine — guide segments', () => {
     expect(xGuide?.to).toBe(350);
   });
 });
+
+// ── 7. Active-edge filtering (resize support) ────────────────────────
+
+describe('snapEngine — activeEdges (resize support)', () => {
+  it("'min' restricts the x-axis probe to the source min edge", () => {
+    // Candidate at x=100 has min=100, max=150, mid=125.
+    // Source rect: x=98, w=200 → src.min=98, src.max=298, src.mid=198.
+    // With activeEdges.x='min', the engine should only try src.min(98)
+    // against candidate lines — closest is 100 (delta +2). It must
+    // NOT pick a max-edge or mid-edge alignment even if one were
+    // closer in a different layout.
+    const candidate = makeNode('c', { x: 100, y: 0 }, { w: 50, h: 50 });
+    const dragged = makeNode('d', { x: 98, y: 200 }, { w: 200, h: 50 });
+    const idx = buildCandidateIndex(
+      [candidate, dragged],
+      new Set(['d']),
+      undefined,
+    );
+
+    const result = computeSnap(rect(98, 200, 200, 50), idx, {
+      thresholdFlow: T,
+      bypass: false,
+      activeEdges: { x: 'min', y: 'none' },
+      enableEqualSpacing: false,
+    });
+
+    expect(result.deltaX).toBe(2);
+    expect(result.deltaY).toBe(0);
+  });
+
+  it("'max' restricts the x-axis probe to the source max edge", () => {
+    // Candidate at x=300 has min=300. Source rect: x=0, w=298 →
+    // src.max=298. With activeEdges.x='max' the engine snaps src.max
+    // to 300 (delta +2). With activeEdges.x='min' the same layout
+    // would snap src.min(0) → no candidate within tolerance → 0.
+    const candidate = makeNode('c', { x: 300, y: 0 }, { w: 50, h: 50 });
+    const dragged = makeNode('d', { x: 0, y: 200 }, { w: 298, h: 50 });
+    const idx = buildCandidateIndex(
+      [candidate, dragged],
+      new Set(['d']),
+      undefined,
+    );
+
+    const maxOnly = computeSnap(rect(0, 200, 298, 50), idx, {
+      thresholdFlow: T,
+      bypass: false,
+      activeEdges: { x: 'max', y: 'none' },
+      enableEqualSpacing: false,
+    });
+    expect(maxOnly.deltaX).toBe(2);
+
+    const minOnly = computeSnap(rect(0, 200, 298, 50), idx, {
+      thresholdFlow: T,
+      bypass: false,
+      activeEdges: { x: 'min', y: 'none' },
+      enableEqualSpacing: false,
+    });
+    expect(minOnly.deltaX).toBe(0);
+  });
+
+  it("'none' on an axis suppresses snap on that axis entirely", () => {
+    // Even with a perfectly-aligned candidate, activeEdges.x='none'
+    // should never produce an x delta. This is how resize handles
+    // exclude axes the user isn't actually moving (e.g. E/W edge
+    // drags should not snap on y).
+    const candidate = makeNode('c', { x: 100, y: 100 }, { w: 50, h: 50 });
+    const dragged = makeNode('d', { x: 101, y: 101 }, { w: 50, h: 50 });
+    const idx = buildCandidateIndex(
+      [candidate, dragged],
+      new Set(['d']),
+      undefined,
+    );
+
+    const result = computeSnap(rect(101, 101, 50, 50), idx, {
+      thresholdFlow: T,
+      bypass: false,
+      activeEdges: { x: 'none', y: 'none' },
+      enableEqualSpacing: false,
+    });
+
+    expect(result.deltaX).toBe(0);
+    expect(result.deltaY).toBe(0);
+    expect(result.guides).toEqual([]);
+  });
+
+  it("'both' (default) reproduces the existing edge-alignment behaviour", () => {
+    // Sanity check: passing the new option with both axes 'both'
+    // and equal-spacing enabled must match the legacy result for
+    // the same input.
+    const candidate = makeNode('c', { x: 100, y: 0 }, { w: 50, h: 50 });
+    const dragged = makeNode('d', { x: 102, y: 200 }, { w: 50, h: 50 });
+    const idx = buildCandidateIndex(
+      [candidate, dragged],
+      new Set(['d']),
+      undefined,
+    );
+
+    const legacy = computeSnap(rect(102, 200, 50, 50), idx, opts);
+    const explicit = computeSnap(rect(102, 200, 50, 50), idx, {
+      ...opts,
+      activeEdges: { x: 'both', y: 'both' },
+      enableEqualSpacing: true,
+    });
+
+    expect(explicit).toEqual(legacy);
+  });
+});
+
+// ── 8. Equal-spacing toggle ──────────────────────────────────────────
+
+describe('snapEngine — enableEqualSpacing', () => {
+  it('disables equal-spacing detection when false', () => {
+    // Same layout as the "midpoint between two siblings" test: with
+    // equal-spacing OFF the engine must fall back to no-snap (no
+    // edge-alignment candidate is within tolerance).
+    const left = makeNode('L', { x: 0, y: 0 }, { w: 50, h: 50 });
+    const right = makeNode('R', { x: 250, y: 0 }, { w: 50, h: 50 });
+    const dragged = makeNode('d', { x: 130, y: 0 }, { w: 50, h: 50 });
+    const idx = buildCandidateIndex(
+      [left, right, dragged],
+      new Set(['d']),
+      undefined,
+    );
+
+    const result = computeSnap(rect(130, 0, 50, 50), idx, {
+      thresholdFlow: T,
+      bypass: false,
+      enableEqualSpacing: false,
+    });
+
+    expect(result.deltaX).toBe(0);
+    expect(result.guides.every((g) => g.equalSpacing === undefined)).toBe(true);
+  });
+});
