@@ -544,9 +544,9 @@ interface ToolbarAlignPickerProps {
  *
  * Trigger:  one ghost icon-only button (saves ~180px on the parent
  *           toolbar versus rendering all 7 actions inline).
- * Popover:  a 3-column grid with the 6 alignment buttons (row 1 =
- *           horizontal alignment, row 2 = vertical alignment),
- *           followed by a divider and a centered Spread button.
+ * Popover:  a single flex row split into 3 groups by vertical
+ *           dividers — horizontal aligns (left/center/right),
+ *           vertical aligns (top/middle/bottom), and Spread Apart.
  *
  * Behaviour mirrors `ToolbarColorPicker`:
  *  - Opens on trigger click, closes on outside click, Escape, or after
@@ -655,49 +655,43 @@ function ToolbarAlignPicker({
             className="border-edge-default shadow-bottom animate-in fade-in zoom-in bg-surface absolute bottom-full left-1/2 z-50 mb-2 -translate-x-1/2 rounded-lg border p-1.5 duration-200"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Two flex rows (not CSS grid): grid-cols-3 with
-                minmax(0,1fr) would let columns collapse below the
-                button's intrinsic width and overlap the icons. Flex
-                lets each button render at its natural ~21px width
-                with consistent gaps, matching the outer toolbar. */}
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-1">
-                {alignButtons
-                  .slice(0, 3)
-                  .map(({ direction, title: btnTitle, Icon }) => (
-                    <Button
-                      key={direction}
-                      variant="ghost"
-                      iconOnly
-                      size="sm"
-                      title={btnTitle}
-                      onClick={() => pick(direction)}
-                      className="text-fg-muted hover:bg-bg-default"
-                    >
-                      <Icon />
-                    </Button>
-                  ))}
-              </div>
-              <div className="flex items-center gap-1">
-                {alignButtons
-                  .slice(3, 6)
-                  .map(({ direction, title: btnTitle, Icon }) => (
-                    <Button
-                      key={direction}
-                      variant="ghost"
-                      iconOnly
-                      size="sm"
-                      title={btnTitle}
-                      onClick={() => pick(direction)}
-                      className="text-fg-muted hover:bg-bg-default"
-                    >
-                      <Icon />
-                    </Button>
-                  ))}
-              </div>
-            </div>
-            <div className="bg-border my-1.5 h-px w-full" />
-            <div className="flex justify-center">
+            {/* Single flex row: horizontal aligns, vertical divider,
+                vertical aligns, vertical divider, Spread. Flex lets
+                each button render at its natural ~21px width with
+                consistent gaps, matching the outer toolbar. */}
+            <div className="flex items-center gap-1">
+              {alignButtons
+                .slice(0, 3)
+                .map(({ direction, title: btnTitle, Icon }) => (
+                  <Button
+                    key={direction}
+                    variant="ghost"
+                    iconOnly
+                    size="sm"
+                    title={btnTitle}
+                    onClick={() => pick(direction)}
+                    className="text-fg-muted hover:bg-bg-default"
+                  >
+                    <Icon />
+                  </Button>
+                ))}
+              <div className="bg-border mx-1 h-5 w-px" />
+              {alignButtons
+                .slice(3, 6)
+                .map(({ direction, title: btnTitle, Icon }) => (
+                  <Button
+                    key={direction}
+                    variant="ghost"
+                    iconOnly
+                    size="sm"
+                    title={btnTitle}
+                    onClick={() => pick(direction)}
+                    className="text-fg-muted hover:bg-bg-default"
+                  >
+                    <Icon />
+                  </Button>
+                ))}
+              <div className="bg-border mx-1 h-5 w-px" />
               <Button
                 variant="ghost"
                 iconOnly
