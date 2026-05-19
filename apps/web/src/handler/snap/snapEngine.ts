@@ -405,6 +405,17 @@ function bestTrailingSpacingHit(
 
   const minOf = (r: Rect) => (axis === 'x' ? r.x : r.y);
   const maxOf = (r: Rect) => (axis === 'x' ? r.x + r.w : r.y + r.h);
+  const perpMinOf = (r: Rect) => (axis === 'x' ? r.y : r.x);
+  const perpMaxOf = (r: Rect) => (axis === 'x' ? r.y + r.h : r.x + r.w);
+
+  // Both `near` and `far` already passed the perp-overlap test against
+  // the source, but that doesn't guarantee they overlap *each other*.
+  // A tall/thin source can be flanked by two small siblings that sit
+  // at its top and bottom — visually they don't form a row, so we
+  // must not infer a trailing rhythm from them. Figma applies the
+  // same triple-overlap rule.
+  const perpOverlap = (a: Rect, b: Rect) =>
+    !(perpMaxOf(a) <= perpMinOf(b) || perpMinOf(a) >= perpMaxOf(b));
 
   // --- Left side: N is the nearest (rightmost), N' is the next out.
   // Reference gap is between N' (further) and N (nearer). Target:
@@ -414,12 +425,14 @@ function bestTrailingSpacingHit(
     leftOf.sort((a, b) => maxOf(b) - maxOf(a));
     const near = leftOf[0];
     const far = leftOf[1];
-    const refGap = minOf(near) - maxOf(far);
-    if (refGap >= 0) {
-      const snappedSrcMin = maxOf(near) + refGap;
-      const delta = snappedSrcMin - srcMin;
-      if (Math.abs(delta) <= tolerance) {
-        best = { delta, snappedValue: snappedSrcMin, rects: [far, near] };
+    if (perpOverlap(near, far)) {
+      const refGap = minOf(near) - maxOf(far);
+      if (refGap >= 0) {
+        const snappedSrcMin = maxOf(near) + refGap;
+        const delta = snappedSrcMin - srcMin;
+        if (Math.abs(delta) <= tolerance) {
+          best = { delta, snappedValue: snappedSrcMin, rects: [far, near] };
+        }
       }
     }
   }
@@ -431,13 +444,15 @@ function bestTrailingSpacingHit(
     rightOf.sort((a, b) => minOf(a) - minOf(b));
     const near = rightOf[0];
     const far = rightOf[1];
-    const refGap = minOf(far) - maxOf(near);
-    if (refGap >= 0) {
-      const snappedSrcMin = minOf(near) - refGap - srcSize;
-      const delta = snappedSrcMin - srcMin;
-      if (Math.abs(delta) <= tolerance) {
-        if (!best || Math.abs(delta) < Math.abs(best.delta)) {
-          best = { delta, snappedValue: snappedSrcMin, rects: [near, far] };
+    if (perpOverlap(near, far)) {
+      const refGap = minOf(far) - maxOf(near);
+      if (refGap >= 0) {
+        const snappedSrcMin = minOf(near) - refGap - srcSize;
+        const delta = snappedSrcMin - srcMin;
+        if (Math.abs(delta) <= tolerance) {
+          if (!best || Math.abs(delta) < Math.abs(best.delta)) {
+            best = { delta, snappedValue: snappedSrcMin, rects: [near, far] };
+          }
         }
       }
     }

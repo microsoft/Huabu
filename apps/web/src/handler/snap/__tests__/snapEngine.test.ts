@@ -493,6 +493,34 @@ describe('snapEngine — trailing equal spacing', () => {
     const result = computeSnap(rect(199, 0, 50, 50), idx, opts);
     expect(result.deltaX).toBe(1); // snap to 200, the left rhythm extension
   });
+
+  it('does not fire when near and far do not overlap each other on the perp axis', () => {
+    // Regression for "false-positive trailing rhythm" — both A and B
+    // each individually perp-overlap a tall source, but A sits at the
+    // top and B at the bottom so they don't overlap each other. They
+    // therefore do NOT form a row, and the trailing rule must not
+    // infer a rhythm from them.
+    //
+    //                   ┌────────┐
+    //   [A]             │        │     ← source: tall (y 0..300)
+    //                   │        │
+    //                   │        │
+    //   [B]             │        │
+    //                   └────────┘
+    //
+    // A=(x:0, y:0, w:50, h:20),  B=(x:0, y:280, w:50, h:20).
+    // Without the perp-overlap check between A and B, the gap math
+    // would happily snap the tall source to extend a phantom rhythm.
+    const A = makeNode('A', { x: 0, y: 0 }, { w: 50, h: 20 });
+    const B = makeNode('B', { x: 0, y: 280 }, { w: 50, h: 20 });
+    const dragged = makeNode('d', { x: 200, y: 0 }, { w: 40, h: 300 });
+    const idx = buildCandidateIndex([A, B, dragged], new Set(['d']), undefined);
+
+    const result = computeSnap(rect(200, 0, 40, 300), idx, opts);
+
+    expect(result.deltaX).toBe(0);
+    expect(result.guides.every((g) => g.equalSpacing === undefined)).toBe(true);
+  });
 });
 
 // ── 6. Guide segment math ────────────────────────────────────────────
