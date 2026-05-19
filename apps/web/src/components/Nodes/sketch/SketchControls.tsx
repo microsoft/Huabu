@@ -28,7 +28,7 @@ interface SketchControlsProps {
  * Reusable color + thickness controls for the sketch tool.
  *
  * Used by:
- * - `SketchSettingsPanel` (pre-draw, bound to `canvasStore.sketchDraft`)
+ * - `SketchSettingsPanel` (pre-draw, bound to `toolStore.sketchDraft`)
  *   as the pen-mode settings row.
  * - `SketchNode`'s floating toolbar (post-draw, bound to the node's
  *   stroke data).

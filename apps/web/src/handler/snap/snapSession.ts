@@ -29,7 +29,7 @@
  *     ...
  *   endSnapSession()    ← onNodesChange (drag-end commit) OR
  *                         onNodeDragStop (safety net) OR
- *                         Canvas unmount via cancelActiveDrag()
+ *                         Canvas unmount via endActiveDragSession()
  *
  * `endSnapSession` is idempotent so the "may fire twice" pattern is
  * safe.
@@ -221,7 +221,7 @@ export function beginSnapSession(opts: BeginSnapSessionOptions): void {
  *      clean snapped release. Detected via `isDragEndCommit`.
  *   2. `onNodeDragStop` as an idempotent safety net for paths where
  *      RF swallows the final commit (Esc cancel, mid-drag unmount).
- *   3. Canvas component unmount, via the store's `cancelActiveDrag`.
+ *   3. Canvas component unmount, via the store's `endActiveDragSession`.
  *
  * Decoupling cleanup from `onNodeDragStop` is what protects the
  * engine from React Flow's event-ordering. If we cleared snap state

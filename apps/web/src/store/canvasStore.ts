@@ -184,7 +184,8 @@ type RFState = {
    * Flow has a chance to fire `onNodeDragStop`. Without this, a
    * stranded pair of window listeners would survive the unmount.
    */
-  cancelActiveDrag: () => void;
+  endActiveDragSession: () => void;
+
   /**
    * Recompute the frame-fit preview while a child node is being
    * resized. Called on every resize tick from `NodeWrapper` so the
@@ -1049,9 +1050,7 @@ const useCanvasStore = create<RFState>()(
       beginSnapSession({
         nodes: get().nodes as NestableNode[],
         draggedIds: new Set(draggedNodes.map((n) => n.id)),
-        altPressed: Boolean(
-          (event as { altKey?: boolean } | undefined)?.altKey ?? false,
-        ),
+        altPressed: event.altKey,
       });
     },
 
@@ -1215,12 +1214,12 @@ const useCanvasStore = create<RFState>()(
       });
     },
 
-    cancelActiveDrag: () => {
+    endActiveDragSession: () => {
       // Bridges the Canvas component's unmount cleanup into the snap
       // session's lifecycle. Without this, a component teardown
       // mid-drag (route change, canvas swap) would never trigger
-      // `onNodeDragStop`, leaving the window-level Alt listeners and
-      // the candidate-index cache alive.
+      // `onNodeDragStop`, leaving the window-level Alt listeners,
+      // the frame-fit RAF, and the candidate-index cache alive.
       if (_dragPreviewRafId !== null) {
         cancelAnimationFrame(_dragPreviewRafId);
         _dragPreviewRafId = null;

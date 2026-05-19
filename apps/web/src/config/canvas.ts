@@ -74,7 +74,7 @@ export const SKETCH_STROKE_MERGE_MAX_DISTANCE_SCREEN_PX = 80;
  *
  * This is the *default* eraser radius applied to a fresh `sketchDraft`.
  * The actual radius is user-adjustable via the eraser slider in
- * `SketchSettingsPanel` and lives on `canvasStore.sketchDraft.eraserSize`.
+ * `SketchSettingsPanel` and lives on `toolStore.sketchDraft.eraserSize`.
  */
 export const SKETCH_ERASER_RADIUS_SCREEN_PX = 16;
 

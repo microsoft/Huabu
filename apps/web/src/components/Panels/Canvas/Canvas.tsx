@@ -162,7 +162,9 @@ export const Canvas: React.FC<CanvasProps> = ({
   const onNodeDragStart = useCanvasStore((state) => state.onNodeDragStart);
   const onNodeDrag = useCanvasStore((state) => state.onNodeDrag);
   const onNodeDragStop = useCanvasStore((state) => state.onNodeDragStop);
-  const cancelActiveDrag = useCanvasStore((state) => state.cancelActiveDrag);
+  const endActiveDragSession = useCanvasStore(
+    (state) => state.endActiveDragSession,
+  );
   const frameFitPreviews = useDragPreviewStore(
     (state) => state.frameFitPreviews,
   );
@@ -434,9 +436,9 @@ export const Canvas: React.FC<CanvasProps> = ({
       // `onNodeDragStop`, so the snap state and its window-level Alt
       // listeners would leak. Aborting here detaches them in one
       // shot. No-op when no drag is active.
-      cancelActiveDrag();
+      endActiveDragSession();
     };
-  }, [setRfInstance, cancelActiveDrag]);
+  }, [setRfInstance, endActiveDragSession]);
 
   return (
     <div
