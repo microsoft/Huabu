@@ -43,7 +43,7 @@ import { MultiSelectResizer } from './MultiSelectResizer.tsx';
 import { SnapGuidesOverlay } from './SnapGuidesOverlay.tsx';
 import { GRID_SIZE, MAX_ZOOM, MIN_ZOOM } from '../../../config/canvas.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
-import { useDragPreviewStore } from '../../../store/dragPreviewStore.ts';
+import { useGesturePreviewStore } from '../../../store/gesturePreviewStore.ts';
 import { useToolStore } from '../../../store/toolStore.ts';
 import {
   canReadSedimentPayload,
@@ -165,7 +165,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   const endActiveDragSession = useCanvasStore(
     (state) => state.endActiveDragSession,
   );
-  const frameFitPreviews = useDragPreviewStore(
+  const frameFitPreviews = useGesturePreviewStore(
     (state) => state.frameFitPreviews,
   );
   const addNode = useCanvasStore((state) => state.addNode);

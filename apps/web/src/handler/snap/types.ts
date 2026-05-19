@@ -55,8 +55,27 @@ export type SnapIndex = {
   rectsById: Map<string, Rect>;
 };
 
-/** A single guide line to render this frame. */
-export type Guide = {
+/**
+ * A single guide line to render this frame.
+ *
+ * Discriminated by `kind`:
+ *
+ *   • `'alignment'`     — A simple edge-alignment guide drawn through
+ *                         a single candidate-edge value (`buildGuide`
+ *                         in snapEngine emits these).
+ *   • `'equal-spacing'` — Source rect was placed such that the gap
+ *                         to one neighbour equals the gap to a
+ *                         second neighbour (middle-equal pattern) or
+ *                         extends a rhythm defined by two same-side
+ *                         neighbours (trailing-equal). Carries the
+ *                         three participating rects sorted along
+ *                         `axis` so the overlay can render the "= ="
+ *                         tick markers between them.
+ *
+ * Both variants share the `axis` / `value` / `from` / `to` geometry
+ * required to draw the primary line.
+ */
+type GuideBase = {
   axis: 'x' | 'y';
   /** Coordinate of the guide line in absolute flow-space. */
   value: number;
@@ -64,17 +83,19 @@ export type Guide = {
   from: number;
   /** Guide segment end on the parallel axis (absolute flow-space). */
   to: number;
-  /**
-   * Optional secondary annotation — for equal-spacing guides, the two
-   * sibling rects that participate so the overlay can render the
-   * twin "= =" segments between them. Undefined for plain alignment
-   * guides.
-   */
-  equalSpacing?: {
-    /** Rects involved in the equal-spacing chain, sorted along `axis`. */
-    rects: Rect[];
-  };
 };
+
+export type AlignmentGuide = GuideBase & {
+  kind: 'alignment';
+};
+
+export type EqualSpacingGuide = GuideBase & {
+  kind: 'equal-spacing';
+  /** Rects involved in the spacing chain, sorted along `axis`. */
+  rects: Rect[];
+};
+
+export type Guide = AlignmentGuide | EqualSpacingGuide;
 
 /** Result of one snap evaluation. */
 export type SnapResult = {

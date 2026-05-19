@@ -36,7 +36,7 @@
  *   • Pushing them through `set/get` would churn the canvas autosave
  *     middleware many times per frame for purely transient data.
  *   • The visible part — alignment guides — already lives in
- *     `dragPreviewStore`, which IS subscribed by the SVG overlay.
+ *     `gesturePreviewStore`, which IS subscribed by the SVG overlay.
  *     That split is intentional: render state belongs in Zustand,
  *     engine working memory does not.
  *
@@ -64,7 +64,7 @@ import {
   type NestableNode,
 } from '@/handler/canvasCommand/utils/frame';
 import { buildCandidateIndex, computeSnap } from '@/handler/snap/snapEngine';
-import { useDragPreviewStore } from '@/store/dragPreviewStore';
+import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 import { getNodeSize } from '@/utils/node/size';
 
 import type { ActiveEdges, Rect, SnapIndex } from '@/handler/snap/types';
@@ -346,7 +346,7 @@ export function endSnapSession(): void {
   // or when the controller is already aborted (idempotent).
   _abortController?.abort();
   _abortController = null;
-  useDragPreviewStore.getState().clearSnapGuides();
+  useGesturePreviewStore.getState().clearSnapGuides();
 }
 
 /**
@@ -432,7 +432,7 @@ export function isSnapSessionResizeEndCommit(changes: NodeChange[]): boolean {
  *     proposed post-resize rect, activeEdges narrowed to the
  *     actually-moving edge).
  *
- * Writes the resulting guides into `dragPreviewStore` as a side
+ * Writes the resulting guides into `gesturePreviewStore` as a side
  * effect so the SVG overlay picks them up. Returns zero deltas and
  * clears guides when no session is active — callers can call this
  * unconditionally without a separate `isSnapSessionActive` check
@@ -449,7 +449,7 @@ export function computeSnapForRect(
   zoom: number,
 ): { deltaX: number; deltaY: number } {
   if (_index === null) {
-    useDragPreviewStore.getState().clearSnapGuides();
+    useGesturePreviewStore.getState().clearSnapGuides();
     return { deltaX: 0, deltaY: 0 };
   }
   const thresholdFlow = SNAP_THRESHOLD_SCREEN_PX / Math.max(zoom, 0.0001);
@@ -462,7 +462,7 @@ export function computeSnapForRect(
     // edge-handle resize.
     enableEqualSpacing: _kind === 'drag',
   });
-  useDragPreviewStore
+  useGesturePreviewStore
     .getState()
     .setSnapGuides(result.guides.slice(0, SNAP_MAX_GUIDES_PER_FRAME));
   return { deltaX: result.deltaX, deltaY: result.deltaY };
@@ -556,7 +556,7 @@ export function applySnap(changes: NodeChange[], zoom: number): NodeChange[] {
   }
 
   if (!Number.isFinite(minX)) {
-    useDragPreviewStore.getState().clearSnapGuides();
+    useGesturePreviewStore.getState().clearSnapGuides();
     return changes;
   }
 
@@ -595,12 +595,12 @@ export function applySnap(changes: NodeChange[], zoom: number): NodeChange[] {
  *      participate in the snap probe so e.g. dragging the right
  *      handle never snaps the left edge.
  *   3. Run `computeSnapForRect` to get a correction delta and push
- *      alignment guides into `dragPreviewStore`.
+ *      alignment guides into `gesturePreviewStore`.
  *   4. Anchor the non-moving edge: `'min'` shifts position by the
  *      delta and shrinks size by the same amount; `'max'` grows size
- *      only. The `'both'` branch is unreachable in practice (no
- *      handle moves both min and max on one axis) and is omitted —
- *      its prior conservative translate-only path was dead code.
+ *      only. `'none'` means no edge moved enough to register or both
+ *      flags fired (treated as a no-op rather than guessing an anchor
+ *      — see the active-edges derivation below).
  *   5. Cache the snapped local rect in `_lastResizeSnapped` so the
  *      subsequent `applySnap` call (later in the same XYResizer
  *      drag tick, when RF emits its NodeChange batch) rewrites
@@ -627,6 +627,14 @@ export function applyResizeProposal(
   // non-moving edge from registering as movement. The active-edge
   // narrowing is what makes the engine ignore alignment targets on
   // the static edge during edge-handle resizes.
+  //
+  // We deliberately do NOT model a `'both'` outcome here: every
+  // physical NodeResizer handle (edge OR corner) moves at most ONE
+  // edge per axis, and XYResizer pins the static edge to its
+  // start-of-gesture value so it cannot drift. If both flags ever
+  // register on the same axis it would mean a malformed proposal —
+  // we treat that as `'none'` (skip snap on that axis) rather than
+  // guess at an anchor and risk mis-applying the delta.
   const eps = 0.5;
   const minXMoved = Math.abs(absX - ctx.startRect.x) > eps;
   const maxXMoved =
@@ -637,23 +645,11 @@ export function applyResizeProposal(
     eps;
 
   const activeX: ActiveEdges['x'] =
-    minXMoved && maxXMoved
-      ? 'both'
-      : minXMoved
-        ? 'min'
-        : maxXMoved
-          ? 'max'
-          : 'none';
+    minXMoved && !maxXMoved ? 'min' : !minXMoved && maxXMoved ? 'max' : 'none';
   const activeY: ActiveEdges['y'] =
-    minYMoved && maxYMoved
-      ? 'both'
-      : minYMoved
-        ? 'min'
-        : maxYMoved
-          ? 'max'
-          : 'none';
+    minYMoved && !maxYMoved ? 'min' : !minYMoved && maxYMoved ? 'max' : 'none';
 
-  // computeSnapForRect side-effects guides into dragPreviewStore and
+  // computeSnapForRect side-effects guides into gesturePreviewStore and
   // returns zero deltas when no candidate is in range or bypass is on.
   const { deltaX, deltaY } = computeSnapForRect(
     { x: absX, y: absY, w: rawLocal.width, h: rawLocal.height },

@@ -269,6 +269,7 @@ function buildGuide(
   const sourceMax =
     axis === 'x' ? sourceRect.y + sourceRect.h : sourceRect.x + sourceRect.w;
   return {
+    kind: 'alignment',
     axis,
     value: snappedValue,
     from: Math.min(candidate.from, sourceMin),
@@ -556,11 +557,12 @@ export function computeSnap(
       deltaX = eq.delta;
       const eqRect: Rect = { ...snappedRect, x: sourceRect.x + deltaX };
       guides.push({
+        kind: 'equal-spacing',
         axis: 'y', // The "= =" indicator is drawn as a horizontal annotation
         value: eqRect.y + eqRect.h / 2,
         from: Math.min(eq.rects[0].x, eqRect.x),
         to: Math.max(eq.rects[1].x + eq.rects[1].w, eqRect.x + eqRect.w),
-        equalSpacing: { rects: [eq.rects[0], eqRect, eq.rects[1]] },
+        rects: [eq.rects[0], eqRect, eq.rects[1]],
       });
     } else {
       const tr = bestTrailingSpacingHit(
@@ -578,11 +580,12 @@ export function computeSnap(
           (a, b) => a.x - b.x,
         ) as [Rect, Rect, Rect];
         guides.push({
+          kind: 'equal-spacing',
           axis: 'y',
           value: trRect.y + trRect.h / 2,
           from: sorted[0].x,
           to: sorted[2].x + sorted[2].w,
-          equalSpacing: { rects: sorted },
+          rects: sorted,
         });
       }
     }
@@ -598,11 +601,12 @@ export function computeSnap(
       deltaY = eq.delta;
       const eqRect: Rect = { ...snappedRect, y: sourceRect.y + deltaY };
       guides.push({
+        kind: 'equal-spacing',
         axis: 'x', // Vertical annotation between vertically-spaced siblings.
         value: eqRect.x + eqRect.w / 2,
         from: Math.min(eq.rects[0].y, eqRect.y),
         to: Math.max(eq.rects[1].y + eq.rects[1].h, eqRect.y + eqRect.h),
-        equalSpacing: { rects: [eq.rects[0], eqRect, eq.rects[1]] },
+        rects: [eq.rects[0], eqRect, eq.rects[1]],
       });
     } else {
       const tr = bestTrailingSpacingHit(
@@ -618,11 +622,12 @@ export function computeSnap(
           (a, b) => a.y - b.y,
         ) as [Rect, Rect, Rect];
         guides.push({
+          kind: 'equal-spacing',
           axis: 'x',
           value: trRect.x + trRect.w / 2,
           from: sorted[0].y,
           to: sorted[2].y + sorted[2].h,
-          equalSpacing: { rects: sorted },
+          rects: sorted,
         });
       }
     }

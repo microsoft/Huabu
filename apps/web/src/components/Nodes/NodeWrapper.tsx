@@ -38,7 +38,6 @@ import { useCornerZoomResize } from '@/hooks/useCornerZoomResize.ts';
 import { useIsNotMouse } from '@/hooks/useInputMode.ts';
 import { useNodeLOD } from '@/hooks/useNodeLOD.ts';
 import useCanvasStore from '@/store/canvasStore.ts';
-import { useDragPreviewStore } from '@/store/dragPreviewStore.ts';
 import { summarizeProvenance } from '@/utils/provenance.ts';
 
 import { getAccentTokens } from './accentTokens.ts';
@@ -281,9 +280,7 @@ export const NodeWrapper = memo(
     const updateResizePreview = useCanvasStore(
       (state) => state.updateResizePreview,
     );
-    const clearFrameFitPreview = useDragPreviewStore(
-      (state) => state.clearFrameFitPreview,
-    );
+    const endResizePreview = useCanvasStore((state) => state.endResizePreview);
     const ingestion = useCanvasStore((state) => state.ingestionByNodeId[id]);
     const showIngestionOverlay =
       type !== 'frame' && ingestion?.status === 'pending';
@@ -435,8 +432,12 @@ export const NodeWrapper = memo(
         params: { x: number; y: number; width: number; height: number },
       ) => {
         // Clear the preview before dispatching so the overlay disappears as
-        // the frame animates to its final fitted size.
-        clearFrameFitPreview();
+        // the frame animates to its final fitted size. `endResizePreview`
+        // also cancels any pending rAF inside `updateResizePreview` —
+        // otherwise a queued fit-pass scheduled milliseconds before
+        // mouseup could fire *after* `setNodeGeometry` lands and
+        // redraw the overlay against the pre-commit geometry.
+        endResizePreview();
         // Prefer the snapped rect cached by `applyResizeProposal` over
         // RF's raw `params` (which are the cursor-derived pre-snap
         // numbers). Fall back to `params` if no proposal was processed
@@ -468,7 +469,7 @@ export const NodeWrapper = memo(
         endSnapSession();
         onResizeEnd?.(finalSize.width, finalSize.height);
       },
-      [clearFrameFitPreview, setNodeGeometry, id, onResizeEnd],
+      [endResizePreview, setNodeGeometry, id, onResizeEnd],
     );
 
     const isMinimal = renderMode === 'minimal';

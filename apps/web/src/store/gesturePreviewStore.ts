@@ -3,7 +3,7 @@ import { create } from 'zustand';
 import type { FrameFitResult } from '@/handler/canvasCommand/utils/frame';
 import type { Guide } from '@/handler/snap/types';
 
-type DragPreviewState = {
+type GesturePreviewState = {
   /**
    * Previews of how frames would resize based on the current drag/resize.
    * One entry per affected frame — allows showing both the source frame
@@ -25,39 +25,46 @@ type DragPreviewState = {
   clearFrameFitPreview: () => void;
 
   /**
-   * Smart-snap guide lines to render this frame. Written by
-   * `canvasStore.onNodesChange` after the snap engine evaluates the
-   * current drag tick; cleared in `onNodeDragStop`.
+   * Smart-snap guide lines to render this frame. Written by the snap
+   * session during drag (via `canvasStore.onNodesChange`) and during
+   * resize (via `NodeWrapper.handleResize`); cleared on gesture end.
    */
   snapGuides: Guide[];
 
-  /** Replace the guide list (called every drag tick). */
+  /** Replace the guide list (called every drag/resize tick). */
   setSnapGuides: (guides: Guide[]) => void;
 
-  /** Clear the guide list when the drag ends. */
+  /** Clear the guide list when the gesture ends. */
   clearSnapGuides: () => void;
 };
 
 /**
- * Transient drag/resize preview store.
+ * Transient gesture (drag / resize) preview store.
  *
- * Holds the dashed frame-fit overlays shown while a user is dragging
- * a node between frames or resizing a frame's child. Lives in its own
- * store because:
+ * Holds two purely-visual overlays shown while a user is interacting
+ * with nodes:
+ *
+ * - `frameFitPreviews` — dashed outlines previewing how parent frames
+ *   would resize when their children are dragged or resized.
+ * - `snapGuides` — Smart-Snap alignment guides shown for *both* drag
+ *   and resize gestures.
+ *
+ * Lives in its own store because:
  *
  * 1. It is purely visual — never persisted, never undone.
- * 2. Its writers (drag/resize handlers) and readers (the overlay layer
- *    in `Canvas.tsx`) don't need any of the canvas data store's
- *    actions; coupling them caused every drag tick to churn through
- *    the canvas autosave middleware.
+ * 2. Its writers (drag/resize handlers + snap engine) and readers (the
+ *    overlay layer in `Canvas.tsx`) don't need any of the canvas data
+ *    store's actions; coupling them caused every drag tick to churn
+ *    through the canvas autosave middleware.
  *
  * Kept deliberately "dumb": it owns the preview *state* but no
  * geometry knowledge. The frame-fit math lives on `canvasStore` (where
- * the nodes live) and the result is pushed in via `setFrameFitPreviews`.
- * This keeps the dependency direction one-way (canvasStore → dragPreviewStore)
+ * the nodes live) and the snap math lives on `snapSession` / `snapEngine`;
+ * both push results in via the setters. This keeps the dependency
+ * direction one-way (canvasStore / snapSession → gesturePreviewStore)
  * and avoids a circular import.
  */
-export const useDragPreviewStore = create<DragPreviewState>()((set) => ({
+export const useGesturePreviewStore = create<GesturePreviewState>()((set) => ({
   frameFitPreviews: [],
   setFrameFitPreviews: (previews) => set({ frameFitPreviews: previews }),
   clearFrameFitPreview: () => set({ frameFitPreviews: [] }),

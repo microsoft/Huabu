@@ -1,15 +1,15 @@
 /**
- * @file Unit tests for `snapSession` �?the gesture-scoped wrapper
+ * @file Unit tests for `snapSession` — the gesture-scoped wrapper
  * around `snapEngine` that owns drag-time state for the canvas.
  *
- * These tests exercise the lifecycle (`begin` �?`apply` �?`end`)
+ * These tests exercise the lifecycle (`begin` → `apply` → `end`)
  * directly against the real implementation. Side effects on
- * `dragPreviewStore` are observed by reading its state.
+ * `gesturePreviewStore` are observed by reading its state.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { useDragPreviewStore } from '@/store/dragPreviewStore';
+import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 
 import {
   applySnap,
@@ -57,7 +57,7 @@ function posChange(
 }
 
 // jsdom isn't configured for this test file by default, but
-// `beginSnapSession` only touches `window` when it exists �?the
+// `beginSnapSession` only touches `window` when it exists — the
 // listener block is wrapped in `typeof window !== 'undefined'`.
 // Vitest's default `happy-dom`/`jsdom` environments both expose
 // `window`, so the AbortController path runs and we get to assert
@@ -69,7 +69,7 @@ afterEach(() => {
   endSnapSession();
 });
 
-describe('snapSession �?lifecycle', () => {
+describe('snapSession — lifecycle', () => {
   it('is inactive before any begin', () => {
     expect(isSnapSessionActive()).toBe(false);
   });
@@ -108,10 +108,12 @@ describe('snapSession �?lifecycle', () => {
       altPressed: false,
     });
     // Push some guide state so we can observe the cleanup.
-    useDragPreviewStore
+    useGesturePreviewStore
       .getState()
-      .setSnapGuides([{ axis: 'x', value: 10, from: 0, to: 100 }]);
-    expect(useDragPreviewStore.getState().snapGuides).toHaveLength(1);
+      .setSnapGuides([
+        { kind: 'alignment', axis: 'x', value: 10, from: 0, to: 100 },
+      ]);
+    expect(useGesturePreviewStore.getState().snapGuides).toHaveLength(1);
 
     beginSnapSession({
       nodes: [A, B],
@@ -120,25 +122,27 @@ describe('snapSession �?lifecycle', () => {
     });
     // The defensive endSnapSession inside begin must have cleared
     // the previous gesture's guides.
-    expect(useDragPreviewStore.getState().snapGuides).toEqual([]);
+    expect(useGesturePreviewStore.getState().snapGuides).toEqual([]);
   });
 
-  it('clears the dragPreviewStore guides on end', () => {
+  it('clears the gesturePreviewStore guides on end', () => {
     const A = makeNode('A', { x: 0, y: 0 }, { w: 50, h: 50 });
     beginSnapSession({
       nodes: [A],
       gestureIds: new Set(['A']),
       altPressed: false,
     });
-    useDragPreviewStore
+    useGesturePreviewStore
       .getState()
-      .setSnapGuides([{ axis: 'x', value: 10, from: 0, to: 100 }]);
+      .setSnapGuides([
+        { kind: 'alignment', axis: 'x', value: 10, from: 0, to: 100 },
+      ]);
     endSnapSession();
-    expect(useDragPreviewStore.getState().snapGuides).toEqual([]);
+    expect(useGesturePreviewStore.getState().snapGuides).toEqual([]);
   });
 });
 
-describe('snapSession �?mixed parents disable snap', () => {
+describe('snapSession — mixed parents disable snap', () => {
   it('isActive is false when dragged ids span multiple parents', () => {
     const frame1 = makeNode(
       'F1',
@@ -175,9 +179,9 @@ describe('snapSession �?mixed parents disable snap', () => {
   });
 });
 
-describe('snapSession �?applySnap', () => {
+describe('snapSession — applySnap', () => {
   beforeEach(() => {
-    useDragPreviewStore.getState().clearSnapGuides();
+    useGesturePreviewStore.getState().clearSnapGuides();
   });
 
   it('returns the input unchanged when no session is active', () => {
@@ -186,7 +190,7 @@ describe('snapSession �?applySnap', () => {
   });
 
   it('rewrites a dragged position to snap onto a sibling edge', () => {
-    // A=[0,50]. Drag B from x=51 �?should snap left-edge to A.right=50
+    // A=[0,50]. Drag B from x=51 — should snap left-edge to A.right=50
     // (deltaX = -1). T = SNAP_THRESHOLD_SCREEN_PX = 6 at zoom 1.
     const A = makeNode('A', { x: 0, y: 0 }, { w: 50, h: 50 });
     const B = makeNode('B', { x: 51, y: 0 }, { w: 50, h: 50 });
@@ -203,7 +207,9 @@ describe('snapSession �?applySnap', () => {
     // Snapped to x = 50 (delta -1).
     expect(result[0].position).toEqual({ x: 50, y: 0 });
     // Guides should have been pushed.
-    expect(useDragPreviewStore.getState().snapGuides.length).toBeGreaterThan(0);
+    expect(useGesturePreviewStore.getState().snapGuides.length).toBeGreaterThan(
+      0,
+    );
   });
 
   it('passes through non-drag position changes untouched', () => {
@@ -224,7 +230,7 @@ describe('snapSession �?applySnap', () => {
       type: 'position' as const,
       id: 'B',
       position: { x: 51, y: 0 },
-      // No `dragging` key �?not a drag tick.
+      // No `dragging` key — not a drag tick.
     };
     const result = applySnap([programmatic], 1);
     expect(result[0]).toBe(programmatic);
@@ -242,12 +248,12 @@ describe('snapSession �?applySnap', () => {
 
     const changes = [posChange('B', { x: 51, y: 0 }, true)];
     const result = applySnap(changes, 1) as NodePositionChange[];
-    // Bypass active �?position stays raw.
+    // Bypass active — position stays raw.
     expect(result[0].position).toEqual({ x: 51, y: 0 });
   });
 });
 
-describe('snapSession �?isSnapSessionDragEndCommit', () => {
+describe('snapSession — isSnapSessionDragEndCommit', () => {
   it('is false when no session is active', () => {
     expect(
       isSnapSessionDragEndCommit([posChange('X', { x: 0, y: 0 }, false)]),

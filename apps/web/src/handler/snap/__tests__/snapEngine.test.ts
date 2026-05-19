@@ -340,7 +340,7 @@ describe('snapEngine — equal spacing', () => {
 
     expect(result.deltaX).toBe(-5);
     // Equal-spacing guide should be emitted.
-    expect(result.guides.some((g) => g.equalSpacing !== undefined)).toBe(true);
+    expect(result.guides.some((g) => g.kind === 'equal-spacing')).toBe(true);
   });
 
   it('does not emit equal-spacing when edge alignment already snapped that axis', () => {
@@ -360,7 +360,7 @@ describe('snapEngine — equal spacing', () => {
 
     // Should snap to 130 (edge alignment), not 125 (equal spacing).
     expect(result.deltaX).toBe(-1);
-    expect(result.guides.every((g) => g.equalSpacing === undefined)).toBe(true);
+    expect(result.guides.every((g) => g.kind !== 'equal-spacing')).toBe(true);
   });
 
   it('only considers siblings that overlap the source on the perpendicular axis', () => {
@@ -398,9 +398,11 @@ describe('snapEngine — trailing equal spacing', () => {
 
     expect(result.deltaX).toBe(-2);
     expect(result.deltaY).toBe(0);
-    const eqGuide = result.guides.find((g) => g.equalSpacing !== undefined);
+    const eqGuide = result.guides.find((g) => g.kind === 'equal-spacing');
     expect(eqGuide).toBeDefined();
-    expect(eqGuide?.equalSpacing?.rects).toHaveLength(3);
+    expect(eqGuide?.kind === 'equal-spacing' ? eqGuide.rects : []).toHaveLength(
+      3,
+    );
   });
 
   it('snaps a source dragged to the left of two siblings (right-side rhythm)', () => {
@@ -417,7 +419,7 @@ describe('snapEngine — trailing equal spacing', () => {
     const result = computeSnap(rect(102, 0, 50, 50), idx, opts);
     expect(result.deltaX).toBe(-2);
     expect(result.deltaY).toBe(0);
-    expect(result.guides.some((g) => g.equalSpacing !== undefined)).toBe(true);
+    expect(result.guides.some((g) => g.kind === 'equal-spacing')).toBe(true);
   });
 
   it('does not fire trailing when only one sibling exists on the source side', () => {
@@ -428,7 +430,7 @@ describe('snapEngine — trailing equal spacing', () => {
 
     const result = computeSnap(rect(200, 0, 50, 50), idx, opts);
     expect(result.deltaX).toBe(0);
-    expect(result.guides.every((g) => g.equalSpacing === undefined)).toBe(true);
+    expect(result.guides.every((g) => g.kind !== 'equal-spacing')).toBe(true);
   });
 
   it('skips siblings without perpendicular overlap', () => {
@@ -466,11 +468,11 @@ describe('snapEngine — trailing equal spacing', () => {
 
     // Middle-equal target: x=175 → delta -2.
     expect(result.deltaX).toBe(-2);
-    const eqGuide = result.guides.find((g) => g.equalSpacing !== undefined);
+    const eqGuide = result.guides.find((g) => g.kind === 'equal-spacing');
     expect(eqGuide).toBeDefined();
     // The middle-equal rect order is [left, source, right] → source x=175
     // sits between B (x=100) and C (x=250).
-    const rects = eqGuide?.equalSpacing?.rects ?? [];
+    const rects = eqGuide?.kind === 'equal-spacing' ? eqGuide.rects : [];
     expect(rects[1].x).toBe(175);
   });
 
@@ -519,7 +521,7 @@ describe('snapEngine — trailing equal spacing', () => {
     const result = computeSnap(rect(200, 0, 40, 300), idx, opts);
 
     expect(result.deltaX).toBe(0);
-    expect(result.guides.every((g) => g.equalSpacing === undefined)).toBe(true);
+    expect(result.guides.every((g) => g.kind !== 'equal-spacing')).toBe(true);
   });
 });
 
@@ -676,6 +678,6 @@ describe('snapEngine — enableEqualSpacing', () => {
     });
 
     expect(result.deltaX).toBe(0);
-    expect(result.guides.every((g) => g.equalSpacing === undefined)).toBe(true);
+    expect(result.guides.every((g) => g.kind !== 'equal-spacing')).toBe(true);
   });
 });

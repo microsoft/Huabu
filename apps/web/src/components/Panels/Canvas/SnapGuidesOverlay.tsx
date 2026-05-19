@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 
-import { useDragPreviewStore } from '@/store/dragPreviewStore';
+import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 
 import type { Guide } from '@/handler/snap/types';
 import type { ReactFlowInstance } from '@xyflow/react';
@@ -24,7 +24,7 @@ type ScreenSegment = {
 /**
  * Render the active smart-snap alignment guides as an SVG overlay
  * sitting on top of the React Flow canvas. The guide list lives on
- * `dragPreviewStore.snapGuides` and is written by `canvasStore`'s
+ * `gesturePreviewStore.snapGuides` and is written by `canvasStore`'s
  * snap pipeline once per drag tick.
  *
  * Guide coordinates are in absolute flow-space. We convert each end
@@ -37,7 +37,7 @@ export const SnapGuidesOverlay: React.FC<Props> = ({
   rfInstance,
   wrapperRef,
 }) => {
-  const guides = useDragPreviewStore((s) => s.snapGuides);
+  const guides = useGesturePreviewStore((s) => s.snapGuides);
 
   const segments = useMemo<ScreenSegment[]>(() => {
     if (!rfInstance || !wrapperRef.current || guides.length === 0) return [];
@@ -138,26 +138,29 @@ function guideToSegment(
   const start = rfInstance.flowToScreenPosition(startFlow);
   const end = rfInstance.flowToScreenPosition(endFlow);
 
-  const equalRects = guide.equalSpacing?.rects.map((r) => {
-    const tl = rfInstance.flowToScreenPosition({ x: r.x, y: r.y });
-    const br = rfInstance.flowToScreenPosition({
-      x: r.x + r.w,
-      y: r.y + r.h,
-    });
-    return {
-      x: tl.x - wrapperRect.left,
-      y: tl.y - wrapperRect.top,
-      w: br.x - tl.x,
-      h: br.y - tl.y,
-    };
-  });
+  const isEqualSpacing = guide.kind === 'equal-spacing';
+  const equalRects = isEqualSpacing
+    ? guide.rects.map((r) => {
+        const tl = rfInstance.flowToScreenPosition({ x: r.x, y: r.y });
+        const br = rfInstance.flowToScreenPosition({
+          x: r.x + r.w,
+          y: r.y + r.h,
+        });
+        return {
+          x: tl.x - wrapperRect.left,
+          y: tl.y - wrapperRect.top,
+          w: br.x - tl.x,
+          h: br.y - tl.y,
+        };
+      })
+    : undefined;
 
   return {
     x1: start.x - wrapperRect.left,
     y1: start.y - wrapperRect.top,
     x2: end.x - wrapperRect.left,
     y2: end.y - wrapperRect.top,
-    equalSpacing: guide.equalSpacing !== undefined,
+    equalSpacing: isEqualSpacing,
     equalRects,
   };
 }

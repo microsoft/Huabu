@@ -50,7 +50,7 @@ import {
 } from '@/handler/snap/snapSession';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
-import { useDragPreviewStore } from './dragPreviewStore';
+import { useGesturePreviewStore } from './gesturePreviewStore';
 import { useToolStore } from './toolStore';
 import { getCanvas, postCanvasEvents, preprocessNode, putCanvas } from '../api';
 import { cloneArtifactToCanvas } from '../api/artifact';
@@ -190,10 +190,24 @@ type RFState = {
   /**
    * Recompute the frame-fit preview while a child node is being
    * resized. Called on every resize tick from `NodeWrapper` so the
-   * dashed overlay stays in sync with the handle. The result is
-   * pushed to `dragPreviewStore`. No-op when auto-layout is disabled.
+   * dashed overlay stays in sync with the handle. The actual fit
+   * computation is coalesced via rAF so multiple high-frequency
+   * onResize ticks become at most one fit-pass per paint. The result
+   * is pushed to `gesturePreviewStore`. No-op when auto-layout is
+   * disabled.
    */
   updateResizePreview: (nodeId: string) => void;
+
+  /**
+   * Cancel any pending resize-preview rAF and clear the dashed
+   * overlay. Called from `NodeWrapper.handleResizeEnd` and from
+   * Canvas unmount to guarantee the rAF closure (which captures the
+   * latest store snapshot) doesn't fire after the gesture is over
+   * and clobber the now-committed geometry with a stale fit. Mirror
+   * of `endActiveDragSession` but scoped to the resize lifecycle.
+   * Idempotent.
+   */
+  endResizePreview: () => void;
 
   addNodes: (inputs: AddNodeInput[]) => void;
   addNode: (input: AddNodeInput) => void;
@@ -553,6 +567,15 @@ const autoSaveMiddleware =
 // onNodeDragStop cancel any pending frame reliably.
 let _dragPreviewRafId: number | null = null;
 
+// Sibling rAF handle for `updateResizePreview`. Same rationale as the
+// drag-time handle: NodeResizer's onResize callback may fire well
+// above 60 Hz on high-refresh displays, and computeFrameFit walks
+// every node + descendant of the parent frame. Coalescing per-frame
+// calls into a single rAF callback caps the work at one fit-pass per
+// paint without dropping any user-visible state — the rAF callback
+// re-reads the latest store snapshot when it actually runs.
+let _resizePreviewRafId: number | null = null;
+
 /**
  * Smart-snap drag-time state lives in a dedicated module
  * (`handler/snap/snapSession`) rather than on this store. Reasoning:
@@ -563,7 +586,7 @@ let _dragPreviewRafId: number | null = null;
  *     Pushing them through Zustand `set/get` would only churn the
  *     autosave middleware many times per frame.
  *   • The visible part — alignment guides — already lives in
- *     `dragPreviewStore`, which IS subscribed by the SVG overlay.
+ *     `gesturePreviewStore`, which IS subscribed by the SVG overlay.
  *     That split is intentional: render state belongs in Zustand,
  *     transient engine working memory does not.
  *
@@ -880,7 +903,7 @@ const useCanvasStore = create<RFState>()(
         canvasNotFound: false,
       });
       useToolStore.getState().resetForCanvasSwitch();
-      useDragPreviewStore.getState().clearFrameFitPreview();
+      useGesturePreviewStore.getState().clearFrameFitPreview();
       canvasHistoryManager.clear();
 
       // Load the new canvas
@@ -1064,7 +1087,7 @@ const useCanvasStore = create<RFState>()(
 
       // Frame auto-resize preview only applies when auto-layout is enabled.
       if (!autoLayoutEnabled) {
-        useDragPreviewStore.getState().clearFrameFitPreview();
+        useGesturePreviewStore.getState().clearFrameFitPreview();
         return;
       }
 
@@ -1187,7 +1210,7 @@ const useCanvasStore = create<RFState>()(
           });
         }
 
-        useDragPreviewStore.getState().setFrameFitPreviews(previews);
+        useGesturePreviewStore.getState().setFrameFitPreviews(previews);
       });
     },
 
@@ -1197,7 +1220,7 @@ const useCanvasStore = create<RFState>()(
         cancelAnimationFrame(_dragPreviewRafId);
         _dragPreviewRafId = null;
       }
-      useDragPreviewStore.getState().clearFrameFitPreview();
+      useGesturePreviewStore.getState().clearFrameFitPreview();
 
       // Idempotent safety net. The normal cleanup path runs inside
       // `onNodesChange` when the final `dragging:false` commit lands
@@ -1225,44 +1248,75 @@ const useCanvasStore = create<RFState>()(
         cancelAnimationFrame(_dragPreviewRafId);
         _dragPreviewRafId = null;
       }
-      useDragPreviewStore.getState().clearFrameFitPreview();
+      // Same for any in-flight resize preview rAF — unmounting
+      // mid-resize would otherwise let the queued fit-pass fire
+      // against a torn-down canvas.
+      if (_resizePreviewRafId !== null) {
+        cancelAnimationFrame(_resizePreviewRafId);
+        _resizePreviewRafId = null;
+      }
+      useGesturePreviewStore.getState().clearFrameFitPreview();
       endSnapSession();
     },
 
     updateResizePreview: (nodeId: string) => {
-      const { nodes, autoLayoutEnabled } = get();
+      const { autoLayoutEnabled } = get();
       if (!autoLayoutEnabled) return;
-      const node = (nodes as NestableNode[]).find((n) => n.id === nodeId);
-      if (!node?.parentId) return;
-      const frame = (nodes as NestableNode[]).find(
-        (n) => n.id === node.parentId,
-      );
-      if (!frame || frame.type !== 'frame') return;
 
-      const fit = computeFrameFit(nodes as NestableNode[], node.parentId);
-      if (!fit) return;
-
-      let absX = fit.position.x;
-      let absY = fit.position.y;
-      if (frame.parentId) {
-        const parentAbsPos = getFrameAbsolutePosition(
-          nodes as NestableNode[],
-          frame.parentId,
-        );
-        if (parentAbsPos) {
-          absX += parentAbsPos.x;
-          absY += parentAbsPos.y;
-        }
+      // Coalesce all per-frame onResize ticks into one fit-pass per
+      // paint. Cancelling the prior rAF handle (rather than gating on
+      // "already scheduled") means we always recompute against the
+      // *latest* store snapshot — RF may have committed several
+      // intermediate dim changes via applyNodeChanges between this
+      // call and the rAF tick. See the sibling drag preview block
+      // above for the same pattern.
+      if (_resizePreviewRafId !== null) {
+        cancelAnimationFrame(_resizePreviewRafId);
       }
+      _resizePreviewRafId = requestAnimationFrame(() => {
+        _resizePreviewRafId = null;
 
-      useDragPreviewStore.getState().setFrameFitPreviews([
-        {
-          frameId: node.parentId,
-          position: { x: absX, y: absY },
-          width: fit.width,
-          height: fit.height,
-        },
-      ]);
+        const { nodes } = get();
+        const node = (nodes as NestableNode[]).find((n) => n.id === nodeId);
+        if (!node?.parentId) return;
+        const frame = (nodes as NestableNode[]).find(
+          (n) => n.id === node.parentId,
+        );
+        if (!frame || frame.type !== 'frame') return;
+
+        const fit = computeFrameFit(nodes as NestableNode[], node.parentId);
+        if (!fit) return;
+
+        let absX = fit.position.x;
+        let absY = fit.position.y;
+        if (frame.parentId) {
+          const parentAbsPos = getFrameAbsolutePosition(
+            nodes as NestableNode[],
+            frame.parentId,
+          );
+          if (parentAbsPos) {
+            absX += parentAbsPos.x;
+            absY += parentAbsPos.y;
+          }
+        }
+
+        useGesturePreviewStore.getState().setFrameFitPreviews([
+          {
+            frameId: node.parentId,
+            position: { x: absX, y: absY },
+            width: fit.width,
+            height: fit.height,
+          },
+        ]);
+      });
+    },
+
+    endResizePreview: () => {
+      if (_resizePreviewRafId !== null) {
+        cancelAnimationFrame(_resizePreviewRafId);
+        _resizePreviewRafId = null;
+      }
+      useGesturePreviewStore.getState().clearFrameFitPreview();
     },
 
     onNodesChange: (changes) => {
