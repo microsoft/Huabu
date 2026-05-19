@@ -2,6 +2,7 @@ import { useStore, useStoreApi, useViewport } from '@xyflow/react';
 import { useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
+import { getSelectionBounds } from '@/handler/canvasCommand/utils/bounds';
 import {
   getAbsolutePosition,
   type NestableNode,
@@ -21,9 +22,12 @@ import type { CanvasNode } from '@/components/Nodes/types';
  * are suppressed by `NodeWrapper` while a multi-selection is active.
  *
  * Behaviour:
- *  - Always uniform (equiproportional) scaling. The dragged corner is
- *    constrained to the original bounding-box diagonal via projection
- *    so the gesture feels snappy and the aspect ratio is preserved.
+ *  - Default: free-axis scaling — each axis tracks the cursor
+ *    independently (W and H change with the dragged corner's actual
+ *    offset from the anchor).
+ *  - Shift held: uniform (equiproportional) scaling — the dragged
+ *    corner is constrained to the original bounding-box diagonal via
+ *    projection so the aspect ratio is preserved.
  *  - The OPPOSITE corner of the dragged handle acts as the anchor and
  *    stays pinned in flow coordinates throughout the gesture.
  *  - Frame children whose parent is ALSO in the selection are skipped
@@ -51,7 +55,7 @@ type ResizeSnapshot = {
   anchor: { x: number; y: number };
   /** corner0 - anchor, in flow coords */
   diag: { x: number; y: number };
-  /** |diag|^2 — denominator for projection */
+  /** |diag|^2 — denominator for projection when in uniform (Shift) mode */
   diagLen2: number;
   nodes: SnapshotNode[];
 };
@@ -88,25 +92,11 @@ export const MultiSelectResizer = () => {
 
   // Live bounds in absolute flow coords. Recomputes after each
   // setNodeGeometry update so the outline + handles track the resize.
+  // Uses the shared `getSelectionBounds` helper so the rendered box
+  // stays consistent with the multi-select toolbar's anchor.
   const bounds = useMemo(() => {
     if (eligibleNodes.length < 2) return null;
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const n of eligibleNodes) {
-      const abs =
-        getAbsolutePosition(nodes as NestableNode[], n.id) ?? n.position;
-      const { width, height } = getNodeSize(n);
-      const w = width || 200;
-      const h = height || 100;
-      if (abs.x < minX) minX = abs.x;
-      if (abs.y < minY) minY = abs.y;
-      if (abs.x + w > maxX) maxX = abs.x + w;
-      if (abs.y + h > maxY) maxY = abs.y + h;
-    }
-    if (!Number.isFinite(minX)) return null;
-    return { minX, minY, maxX, maxY };
+    return getSelectionBounds(eligibleNodes, nodes);
   }, [eligibleNodes, nodes]);
 
   if (!bounds || !domNode) return null;
@@ -182,15 +172,32 @@ export const MultiSelectResizer = () => {
 
     const offX = cursorFlow.x - snap.anchor.x;
     const offY = cursorFlow.y - snap.anchor.y;
-    // Diagonal projection: keep the dragged corner glued to the original
-    // diagonal direction. This yields uniform scaling without distortion.
-    let scale = (offX * snap.diag.x + offY * snap.diag.y) / snap.diagLen2;
-    if (!Number.isFinite(scale)) scale = 1;
-    if (scale < MIN_SCALE) scale = MIN_SCALE;
+
+    let scaleX: number;
+    let scaleY: number;
+    if (e.shiftKey) {
+      // Uniform mode: project the cursor onto the original diagonal so
+      // the dragged corner stays glued to it. Single shared scale.
+      let scale = (offX * snap.diag.x + offY * snap.diag.y) / snap.diagLen2;
+      if (!Number.isFinite(scale)) scale = 1;
+      if (scale < MIN_SCALE) scale = MIN_SCALE;
+      scaleX = scale;
+      scaleY = scale;
+    } else {
+      // Free-axis mode: each axis tracks the cursor independently.
+      // Matches the convention used by single-node resizing and most
+      // 2D editors (Figma, Sketch, Illustrator).
+      scaleX = snap.diag.x === 0 ? 1 : offX / snap.diag.x;
+      scaleY = snap.diag.y === 0 ? 1 : offY / snap.diag.y;
+      if (!Number.isFinite(scaleX)) scaleX = 1;
+      if (!Number.isFinite(scaleY)) scaleY = 1;
+      if (scaleX < MIN_SCALE) scaleX = MIN_SCALE;
+      if (scaleY < MIN_SCALE) scaleY = MIN_SCALE;
+    }
 
     const items = snap.nodes.map((n) => {
-      const newAbsX = snap.anchor.x + (n.pos0Abs.x - snap.anchor.x) * scale;
-      const newAbsY = snap.anchor.y + (n.pos0Abs.y - snap.anchor.y) * scale;
+      const newAbsX = snap.anchor.x + (n.pos0Abs.x - snap.anchor.x) * scaleX;
+      const newAbsY = snap.anchor.y + (n.pos0Abs.y - snap.anchor.y) * scaleY;
       return {
         nodeId: n.id,
         position: {
@@ -198,8 +205,8 @@ export const MultiSelectResizer = () => {
           y: newAbsY - n.parentAbs.y,
         },
         size: {
-          width: n.size0.width * scale,
-          height: n.size0.height * scale,
+          width: n.size0.width * scaleX,
+          height: n.size0.height * scaleY,
         },
       };
     });

@@ -1,20 +1,19 @@
 import {
-  cloneElement,
-  useCallback,
-  useId,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from 'react';
-import { createPortal } from 'react-dom';
+  autoUpdate,
+  flip,
+  FloatingPortal,
+  offset as offsetMiddleware,
+  shift,
+  useDelayGroup,
+  useDismiss,
+  useFloating,
+  useFocus,
+  useHover,
+  useInteractions,
+} from '@floating-ui/react';
+import { cloneElement, useId, useState } from 'react';
 
 import type { ReactElement, ReactNode } from 'react';
-
-type TooltipPosition = {
-  x: number;
-  y: number;
-  maxWidth: number;
-};
 
 export type TooltipPlacement = 'auto' | 'top' | 'bottom';
 
@@ -26,17 +25,35 @@ export type TooltipProps = {
   offset?: number;
   /**
    * Preferred placement relative to the trigger. Defaults to `'auto'`,
-   * which picks `top` when there's room and falls back to `bottom`.
+   * which is treated the same as `'top'` — both start above and flip
+   * to the opposite side if there isn't enough room.
    */
   placement?: TooltipPlacement;
 };
 
-const clamp = (value: number, min: number, max: number) => {
-  if (value < min) return min;
-  if (value > max) return max;
-  return value;
-};
-
+/**
+ * Hover/focus tooltip implemented on top of `@floating-ui/react`.
+ *
+ * Why Floating UI instead of a hand-rolled portal:
+ *   - `useHover` + `useFocus` + `useDismiss` deliver one consistent
+ *     dismissal model (pointer leave, focus blur, Escape key, ancestor
+ *     scroll, click on the trigger) so a tooltip can never be left
+ *     stranded on screen after the user has moved on.
+ *   - `useDelayGroup` opts every Tooltip into the surrounding
+ *     `<FloatingDelayGroup>` (mounted at the app root). When one
+ *     tooltip becomes visible, every peer in the same group is closed
+ *     instantly — this is the singleton behaviour that the previous
+ *     manual implementation lacked, which is why two tooltips could
+ *     occasionally be visible at the same time (e.g. when a button's
+ *     click handler opened a popover overlay before its own
+ *     `mouseleave` fired).
+ *   - `autoUpdate` + `flip` + `shift` keep the popover anchored as the
+ *     trigger moves, scrolls, or reaches a viewport edge, so we no
+ *     longer have to clamp coordinates manually.
+ *
+ * Public API is intentionally identical to the previous version so no
+ * callsite has to change.
+ */
 export const Tooltip = ({
   content,
   children,
@@ -45,123 +62,98 @@ export const Tooltip = ({
   placement = 'auto',
 }: TooltipProps) => {
   const tooltipId = useId();
-  const triggerRef = useRef<HTMLSpanElement | null>(null);
-  const tooltipRef = useRef<HTMLDivElement | null>(null);
   const [isOpen, setIsOpen] = useState(false);
-  const [position, setPosition] = useState<TooltipPosition | null>(null);
 
   const isDisabled =
     content === null || content === undefined || content === '';
 
-  const updatePosition = useCallback(() => {
-    const triggerEl = triggerRef.current;
-    const tooltipEl = tooltipRef.current;
-    if (!triggerEl || !tooltipEl) return;
+  // 'auto' historically picked 'top' whenever it fit; we therefore
+  // start on 'top' and let `flip` swap to 'bottom' when there isn't
+  // enough room. 'bottom' is the only case that starts on the
+  // opposite side.
+  const initialPlacement: 'top' | 'bottom' =
+    placement === 'bottom' ? 'bottom' : 'top';
 
-    const padding = 8;
-    const offset = offsetProp;
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
+  const { refs, floatingStyles, context } = useFloating({
+    open: isOpen,
+    onOpenChange: setIsOpen,
+    placement: initialPlacement,
+    middleware: [
+      offsetMiddleware(offsetProp),
+      flip({ padding: 8 }),
+      shift({ padding: 8 }),
+    ],
+    whileElementsMounted: autoUpdate,
+  });
 
-    const maxWidth = Math.max(0, viewportWidth - padding * 2);
-    tooltipEl.style.maxWidth = `${maxWidth}px`;
+  // Opt into the surrounding <FloatingDelayGroup>. No-op when one
+  // isn't mounted, but in this app the root <App> wraps the tree so
+  // every Tooltip participates in the same singleton group.
+  useDelayGroup(context, { id: tooltipId });
 
-    const triggerRect = triggerEl.getBoundingClientRect();
-    const tooltipRect = tooltipEl.getBoundingClientRect();
+  const hover = useHover(context, { move: false, delay: { open: 150 } });
+  const focus = useFocus(context);
+  const dismiss = useDismiss(context, {
+    escapeKey: true,
+    // Close as soon as the trigger is pressed. This is the key fix
+    // for the "tooltip lingers after clicking a button that opens a
+    // popover" bug, since the popover's overlay used to intercept the
+    // mouseleave that would otherwise have dismissed the tooltip.
+    referencePress: true,
+    ancestorScroll: true,
+  });
 
-    const idealX =
-      triggerRect.left + triggerRect.width / 2 - tooltipRect.width / 2;
-    const x = clamp(
-      idealX,
-      padding,
-      viewportWidth - padding - tooltipRect.width,
-    );
-
-    const yAbove = triggerRect.top - offset - tooltipRect.height;
-    const yBelow = triggerRect.bottom + offset;
-    const fitsAbove = yAbove >= padding;
-    const fitsBelow = yBelow + tooltipRect.height <= viewportHeight - padding;
-
-    let useAbove: boolean;
-    if (placement === 'top') {
-      useAbove = fitsAbove || !fitsBelow;
-    } else if (placement === 'bottom') {
-      useAbove = !fitsBelow && fitsAbove;
-    } else {
-      useAbove = fitsAbove;
-    }
-
-    const idealY = useAbove ? yAbove : yBelow;
-    const y = clamp(
-      idealY,
-      padding,
-      viewportHeight - padding - tooltipRect.height,
-    );
-
-    setPosition({ x, y, maxWidth });
-  }, [offsetProp, placement]);
-
-  useLayoutEffect(() => {
-    if (!isOpen) return;
-
-    updatePosition();
-
-    const onWindowChange = () => updatePosition();
-    window.addEventListener('resize', onWindowChange);
-    window.addEventListener('scroll', onWindowChange, true);
-
-    return () => {
-      window.removeEventListener('resize', onWindowChange);
-      window.removeEventListener('scroll', onWindowChange, true);
-    };
-  }, [isOpen, updatePosition]);
+  const { getReferenceProps, getFloatingProps } = useInteractions([
+    hover,
+    focus,
+    dismiss,
+  ]);
 
   if (isDisabled) {
     return children;
   }
 
-  const describedBy =
-    isOpen && typeof children.props['aria-describedby'] === 'string'
-      ? `${children.props['aria-describedby']} ${tooltipId}`
-      : isOpen
-        ? tooltipId
-        : children.props['aria-describedby'];
+  // Mirror the previous a11y wiring: attach `aria-describedby` to the
+  // actual interactive child rather than the wrapper span, so screen
+  // readers announce the tooltip text alongside the button label.
+  const existingDescribedBy = children.props['aria-describedby'];
+  const childDescribedBy = isOpen
+    ? typeof existingDescribedBy === 'string'
+      ? `${existingDescribedBy} ${tooltipId}`
+      : tooltipId
+    : existingDescribedBy;
 
   const wrappedChild = cloneElement(children, {
-    'aria-describedby': describedBy,
+    'aria-describedby': childDescribedBy,
   });
 
   return (
     <>
       <span
-        ref={triggerRef}
-        className={wrapperClassName || 'inline-flex'}
-        onMouseEnter={() => setIsOpen(true)}
-        onMouseLeave={() => setIsOpen(false)}
-        onFocusCapture={() => setIsOpen(true)}
-        onBlurCapture={() => setIsOpen(false)}
+        {...getReferenceProps({
+          ref: refs.setReference,
+          className: wrapperClassName || 'inline-flex',
+        })}
       >
         {wrappedChild}
       </span>
 
-      {isOpen && typeof document !== 'undefined'
-        ? createPortal(
-            <div
-              ref={tooltipRef}
-              id={tooltipId}
-              role="tooltip"
-              className="shadow-bottom bg-inverse text-fg-inverse pointer-events-none fixed z-10001 rounded-md px-2 py-1 text-xs"
-              style={{
-                left: position?.x ?? -9999,
-                top: position?.y ?? -9999,
-                maxWidth: position?.maxWidth,
-              }}
-            >
-              {content}
-            </div>,
-            document.body,
-          )
-        : null}
+      {isOpen && (
+        <FloatingPortal>
+          <div
+            ref={refs.setFloating}
+            id={tooltipId}
+            role="tooltip"
+            {...getFloatingProps({
+              className:
+                'shadow-bottom bg-inverse text-fg-inverse pointer-events-none z-10001 max-w-[90vw] rounded-md px-2 py-1 text-xs',
+              style: floatingStyles,
+            })}
+          >
+            {content}
+          </div>
+        </FloatingPortal>
+      )}
     </>
   );
 };

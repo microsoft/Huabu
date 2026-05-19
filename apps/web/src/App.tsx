@@ -1,3 +1,4 @@
+import { FloatingDelayGroup } from '@floating-ui/react';
 import { useEffect, useState } from 'react';
 import {
   BrowserRouter,
@@ -57,26 +58,32 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      <Routes>
-        {/* Setup route lives outside the guard so the user can still
-            reach it to switch workspaces in free mode. The page itself
-            redirects to "/" in managed mode. */}
-        <Route
-          path="/setup"
-          element={initialising ? <LoadingScreen /> : <WorkspaceSetupPage />}
-        />
-
-        <Route element={<WorkspaceGuardLayout initialising={initialising} />}>
-          <Route path="/" element={<CanvasListPage />} />
+      {/* All <Tooltip> instances opt into this group via `useDelayGroup`,
+          which gives them singleton-ish behaviour: opening a new tooltip
+          instantly hides any visible peer, and the close delay is shared
+          so quick traversals between buttons feel snappy without flicker. */}
+      <FloatingDelayGroup delay={{ open: 150, close: 0 }}>
+        <Routes>
+          {/* Setup route lives outside the guard so the user can still
+              reach it to switch workspaces in free mode. The page itself
+              redirects to "/" in managed mode. */}
           <Route
-            path="/playground/components"
-            element={<ComponentShowcasePage />}
+            path="/setup"
+            element={initialising ? <LoadingScreen /> : <WorkspaceSetupPage />}
           />
-          <Route path="/canvas/:canvasId" element={<CanvasPage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Route>
-      </Routes>
-      <ToastContainer />
+
+          <Route element={<WorkspaceGuardLayout initialising={initialising} />}>
+            <Route path="/" element={<CanvasListPage />} />
+            <Route
+              path="/playground/components"
+              element={<ComponentShowcasePage />}
+            />
+            <Route path="/canvas/:canvasId" element={<CanvasPage />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Route>
+        </Routes>
+        <ToastContainer />
+      </FloatingDelayGroup>
     </BrowserRouter>
   );
 }

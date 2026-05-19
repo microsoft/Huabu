@@ -2,7 +2,7 @@ import { useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/shadcn';
 import { type Node, type NodeProps, useStore } from '@xyflow/react';
 import clsx from 'clsx';
-import { ChevronsDown, Fullscreen, MoveVertical } from 'lucide-react';
+import { ChevronsDown, Fullscreen } from 'lucide-react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
@@ -14,38 +14,17 @@ import useCanvasStore from '@/store/canvasStore';
 import { loadBlockNoteContent } from '../../BlockNote/blockNoteContent';
 import { MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
+import { NOTE_AUTO_HEIGHT_MIN } from './autoHeight';
+import { useTrackNoteFixedHeight } from './heightMemory';
 
 import type { CanvasNoteNodeData } from '../types';
 
 export type NoteNodeType = Node<CanvasNoteNodeData, 'note'>;
 
-/**
- * Minimum visible height (px) for a note in auto-height mode. Applied on
- * the outer container so the node has a stable size from the very first
- * paint — without this, a brand-new note would briefly render at the
- * shadow host's intrinsic min-height and then visibly collapse to its
- * measured (small) content height once `ResizeObserver` fires.
- */
-const AUTO_HEIGHT_MIN = 50;
-
-/**
- * Default height (px) used when the user toggles a previously auto-sized
- * note into fixed-height mode and we have no rendered measurement to seed
- * from. The user can resize via NodeResizer afterwards.
- */
-const DEFAULT_FIXED_HEIGHT = 400;
-
-/**
- * Upper bound (px) when seeding the fixed height from the current rendered
- * content height — prevents toggling a very long note into fixed mode from
- * creating a gigantic node on the canvas.
- */
-const MAX_SEED_FIXED_HEIGHT = 800;
-
 export const NoteNode = memo(
   ({ id, data, selected }: NodeProps<NoteNodeType>) => {
     const openExpanded = useCanvasStore((s) => s.openExpanded);
-    const setNodeGeometry = useCanvasStore((s) => s.setNodeGeometry);
+    const setNoteHeightMode = useCanvasStore((s) => s.setNoteHeightMode);
     const patchNodeSilent = useCanvasStore((s) => s.patchNodeSilent);
     const scale = useNodeScale(id, 'note');
     const viewportZoom = useStore((s) => s.transform[2]);
@@ -54,10 +33,6 @@ export const NoteNode = memo(
       (s) =>
         (s.nodeLookup.get(id)?.style?.height as number | undefined) !==
         undefined,
-    );
-    // Width is required by SET_NODE_GEOMETRY when toggling height modes.
-    const styleWidth = useStore(
-      (s) => s.nodeLookup.get(id)?.style?.width as number | undefined,
     );
 
     const shadowHostRef = useRef<HTMLDivElement>(null);
@@ -72,7 +47,7 @@ export const NoteNode = memo(
     // `contentHeight` is seeded from the persisted `data.measuredHeight`
     // hint so an auto-height note paints at its real size on the very
     // first frame after mount — without the seed, the node would briefly
-    // collapse to `AUTO_HEIGHT_MIN` while waiting for BlockNote to mount
+    // collapse to `NOTE_AUTO_HEIGHT_MIN` while waiting for BlockNote to mount
     // and the ResizeObserver to fire (visible flicker during virtualized
     // remounts, zoom changes, and page reloads).
     const seededHeight =
@@ -82,19 +57,12 @@ export const NoteNode = memo(
     const [contentHeight, setContentHeight] = useState(seededHeight);
     const [hostHeight, setHostHeight] = useState(0);
 
-    // Read the current explicit height (if any) so we can remember it as
-    // "the last fixed height" — used to restore on auto → fixed toggles.
-    const styleHeight = useStore(
-      (s) => s.nodeLookup.get(id)?.style?.height as number | undefined,
-    );
-    const lastFixedHeightRef = useRef<number | undefined>(styleHeight);
-    useEffect(() => {
-      // Only remember real fixed heights — never overwrite with `undefined`
-      // (which would erase the memory the moment the user goes to auto).
-      if (typeof styleHeight === 'number') {
-        lastFixedHeightRef.current = styleHeight;
-      }
-    }, [styleHeight]);
+    // Session-scoped memory of "last pinned height" for this note. Lets a
+    // "fixed → auto → fixed" round-trip restore the previous size instead
+    // of snapping to the current rendered measurement. The hook owns the
+    // recording side; `setNoteHeightMode` (called by every toggle entry
+    // point) reads from the same shared map.
+    useTrackNoteFixedHeight(id);
 
     const editor = useCreateBlockNote({
       initialContent: [{ type: 'paragraph', content: '' }],
@@ -103,51 +71,19 @@ export const NoteNode = memo(
 
     // Toggle between fixed and auto height. Both the toolbar button and
     // the corner "show all content" affordance call into this — they are
-    // semantically the same operation.
-    //
-    // Auto → fixed restores the most recent fixed height when known, so
-    // collapsing after a "show all content" click brings the node back to
-    // exactly the size it had before. Falls back to the current rendered
-    // (capped) measurement, then a default, when no memory is available.
+    // semantically the same operation, so they share the store-level
+    // `setNoteHeightMode` orchestration (gesture wrap, parent-frame
+    // refit, width fallback, remembered-height seed, undo batching).
     const handleToggleAutoHeight = useCallback(
       (e: React.MouseEvent) => {
         e.stopPropagation();
-        if (typeof styleWidth !== 'number') return;
-        if (hasFixedHeight) {
-          // Fixed → auto: clear the explicit height. The current value has
-          // already been captured into lastFixedHeightRef by the effect
-          // above, so we can restore it on the way back.
-          setNodeGeometry([
-            { nodeId: id, size: { width: styleWidth, height: undefined } },
-          ]);
-        } else {
-          const remembered = lastFixedHeightRef.current;
-          const measured = shadowHostRef.current?.clientHeight ?? 0;
-          const seed =
-            typeof remembered === 'number' && remembered > 0
-              ? remembered
-              : measured > 0
-                ? Math.min(measured, MAX_SEED_FIXED_HEIGHT)
-                : DEFAULT_FIXED_HEIGHT;
-          setNodeGeometry([
-            { nodeId: id, size: { width: styleWidth, height: seed } },
-          ]);
-        }
+        setNoteHeightMode([id], hasFixedHeight ? 'auto' : 'fixed');
       },
-      [hasFixedHeight, id, setNodeGeometry, styleWidth],
+      [hasFixedHeight, id, setNoteHeightMode],
     );
 
     const NoteToolbar = (
       <FloatingToolbar.Group>
-        <FloatingToolbar.ToggleButton
-          active={!hasFixedHeight}
-          title={
-            hasFixedHeight ? 'Switch to auto height' : 'Switch to fixed height'
-          }
-          onClick={handleToggleAutoHeight}
-        >
-          <MoveVertical />
-        </FloatingToolbar.ToggleButton>
         <FloatingToolbar.ActionButton
           title="Expand"
           onClick={(e) => {
@@ -319,7 +255,7 @@ export const NoteNode = memo(
     // Persist the measured intrinsic content height back into node data so
     // the next mount (virtualization remount, zoom-triggered re-render,
     // page reload) can seed `contentHeight` immediately and skip the
-    // first-frame collapse to `AUTO_HEIGHT_MIN`.
+    // first-frame collapse to `NOTE_AUTO_HEIGHT_MIN`.
     //
     // Silent patch (no undo entry) and gated on a >1px delta to avoid
     // spamming the store with sub-pixel jitter from the ResizeObserver.
@@ -381,10 +317,11 @@ export const NoteNode = memo(
               style={
                 !hasFixedHeight
                   ? {
-                      minHeight: AUTO_HEIGHT_MIN,
+                      minHeight: NOTE_AUTO_HEIGHT_MIN,
                       height:
                         contentHeight > 0
-                          ? Math.max(contentHeight, AUTO_HEIGHT_MIN) * scale
+                          ? Math.max(contentHeight, NOTE_AUTO_HEIGHT_MIN) *
+                            scale
                           : undefined,
                     }
                   : undefined

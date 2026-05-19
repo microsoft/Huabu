@@ -56,6 +56,7 @@ export function executeCanvasCommands(
     preprocessNodes: [],
     deletedNodeIds: [],
     needsTransitionCleanup: false,
+    deferredFitFrameIds: [],
   };
 
   // Evolving state that each command reads from / writes to.
@@ -194,6 +195,9 @@ export function executeCanvasCommands(
       }
       if (result.deletedNodeIds) {
         pendingEffects.deletedNodeIds.push(...result.deletedNodeIds);
+      }
+      if (result.deferredFitFrameIds) {
+        pendingEffects.deferredFitFrameIds.push(...result.deferredFitFrameIds);
       }
     }
   }

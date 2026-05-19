@@ -34,7 +34,7 @@ export interface SemanticZoomConfig {
 
 export const SEMANTIC_ZOOM_CONFIG: SemanticZoomConfig = {
   screenThresholds: {
-    minimal: 200,
+    minimal: 150,
   },
   hysteresis: 10,
 

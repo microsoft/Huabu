@@ -45,6 +45,8 @@ import { canvasHistoryManager } from './canvasHistoryManager';
 import { getCanvas, postCanvasEvents, preprocessNode, putCanvas } from '../api';
 import { cloneArtifactToCanvas } from '../api/artifact';
 import { CanvasConflictError } from '../api/canvas';
+import { seedNoteFixedHeight } from '../components/Nodes/note/autoHeight';
+import { getNoteFixedHeight } from '../components/Nodes/note/heightMemory';
 import { copyToClipboard } from '../utils/io/clipboard';
 import { getNodeSize } from '../utils/node/size';
 
@@ -196,6 +198,31 @@ type RFState = {
       position?: { x: number; y: number };
     }>,
   ) => void;
+  /**
+   * Flip note nodes between fixed (pinned) and auto-fit (content-driven)
+   * height in a single shared code path.
+   *
+   * Single-source-of-truth for the toggle so the corner "show all content"
+   * affordance on NoteNode, the single-select toolbar, and the multi-select
+   * toolbar can never silently diverge (previous duplication had each
+   * entry point reimplementing this with slightly different behaviour —
+   * e.g. only some sites deferred a parent-frame refit).
+   *
+   * - `mode: 'auto'`  → clears the explicit height. Parent frames shrink
+   *   to the new content height after BlockNote reflows; the deferred
+   *   refit is queued by the `SET_NODE_GEOMETRY` post-effect, so this
+   *   action stays a single dispatch with no rAF dance of its own.
+   * - `mode: 'fixed'` → pins height via `seedNoteFixedHeight`, reading
+   *   the most recently observed pinned height from the shared
+   *   `noteHeightMemory` module so a "collapse → expand → collapse"
+   *   round-trip restores the previous fixed size instead of snapping
+   *   to the current rendered measurement.
+   *
+   * Non-note ids and ids whose width can't be resolved are silently
+   * skipped. The whole batch is wrapped in one `SET_NODE_GEOMETRY`
+   * gesture so it collapses into a single undo entry.
+   */
+  setNoteHeightMode: (nodeIds: string[], mode: 'auto' | 'fixed') => void;
   /** Take a pre-resize snapshot so the final SET_NODE_GEOMETRY can be undone. */
   onNodeResizeStart: () => void;
   rfInstance: ReactFlowInstance | null;
@@ -1293,6 +1320,60 @@ const useCanvasStore = create<RFState>()(
 
     setNodeGeometry: (items) => {
       get().dispatchUiIntent({ type: 'RESIZE_NODE', items });
+    },
+
+    setNoteHeightMode: (nodeIds, mode) => {
+      if (nodeIds.length === 0) return;
+      const idSet = new Set(nodeIds);
+      const { nodes } = get();
+      const items: Array<{
+        nodeId: string;
+        size: { width: number; height?: number };
+      }> = [];
+
+      for (const node of nodes) {
+        if (!idSet.has(node.id)) continue;
+        // Silently skip non-note ids — callers may pass mixed selections.
+        if (node.type !== 'note') continue;
+
+        // Prefer the explicit pinned width; fall back to the rendered
+        // (measured) width for auto-width notes so the toggle doesn't
+        // accidentally collapse the node to width 0.
+        const styleW = node.style?.width as number | undefined;
+        const { width: measuredW, height: measuredH } = getNodeSize(node);
+        const w = typeof styleW === 'number' && styleW > 0 ? styleW : measuredW;
+        if (!Number.isFinite(w) || w <= 0) continue;
+
+        if (mode === 'auto') {
+          items.push({
+            nodeId: node.id,
+            size: { width: w, height: undefined },
+          });
+        } else {
+          // Auto → fixed: seed from remembered → measured (capped) → default.
+          // `getNoteFixedHeight` reads the session-scoped memory populated
+          // by `useTrackNoteFixedHeight` (mounted inside each NoteNode).
+          const remembered = getNoteFixedHeight(node.id);
+          const seed = seedNoteFixedHeight(remembered, measuredH);
+          items.push({
+            nodeId: node.id,
+            size: { width: w, height: seed },
+          });
+        }
+      }
+
+      if (items.length === 0) return;
+      // SET_NODE_GEOMETRY uses snapshot:'caller'; open a gesture so the
+      // batch is captured as one undo entry without warnings.
+      //
+      // Fixed → auto clears the explicit height; the new content height
+      // is only known after the next render cycle (BlockNote reflow +
+      // ReactFlow ResizeObserver). The `SET_NODE_GEOMETRY` handler
+      // detects the cleared height and emits a `deferredFitFrameIds`
+      // post-effect, which `runPostEffects` schedules for double-rAF
+      // refit — so this action doesn't need its own timing dance.
+      get().beginGesture('SET_NODE_GEOMETRY');
+      get().setNodeGeometry(items);
     },
 
     updateNodeData: (nodeId, patch) => {

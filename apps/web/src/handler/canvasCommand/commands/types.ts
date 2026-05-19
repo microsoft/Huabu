@@ -36,6 +36,13 @@ export interface CommandHandlerResult {
   preprocessNodes?: Node[];
   /** Node IDs that were deleted and need server-side tracking. */
   deletedNodeIds?: string[];
+  /**
+   * Frame IDs whose children's rendered size will only stabilise after
+   * the next render cycle (e.g. clearing a pinned height to revert to
+   * content-driven sizing). `runPostEffects` schedules a deferred refit
+   * of these frames once the DOM has reflowed.
+   */
+  deferredFitFrameIds?: string[];
 }
 
 export type CommandHandler<T extends CanvasCommand = CanvasCommand> = (

@@ -7,6 +7,7 @@ import { LAYOUT_ANIMATION_DURATION_MS } from '@/handler/autoLayout/applier';
 import { canvasHistoryManager } from '@/store/canvasHistoryManager';
 
 import { rerouteAllEdges } from './utils/edge';
+import { fitFrames, type NestableNode } from './utils/frame';
 
 import type { CanvasEffectCallbacks } from './runtime';
 import type { Node, Edge } from '@xyflow/react';
@@ -19,6 +20,13 @@ export interface PendingEffects {
   deletedNodeIds: string[];
   /** Whether layout animation CSS transitions need cleanup after animation. */
   needsTransitionCleanup: boolean;
+  /**
+   * Frame IDs to re-fit after the next render cycle. Used when a
+   * command (e.g. `SET_NODE_GEOMETRY` clearing a pinned height) leaves
+   * a child node whose new content height is only known once the DOM
+   * has reflowed. De-duplicated by `runPostEffects`.
+   */
+  deferredFitFrameIds: string[];
 }
 
 /**
@@ -65,6 +73,19 @@ export function runPostEffects(
       (nodes) => set({ nodes }),
     );
   }
+
+  // 5. Refit frames whose children need a render cycle to settle their
+  // size (e.g. notes whose pinned height was just cleared). Deferred
+  // via double-rAF so BlockNote can reflow and ReactFlow's
+  // ResizeObserver can update `measured.height` first.
+  if (effects.deferredFitFrameIds.length > 0) {
+    const uniqueIds = Array.from(new Set(effects.deferredFitFrameIds));
+    scheduleDeferredFrameFit(
+      uniqueIds,
+      () => getLatest().nodes,
+      (nodes) => set({ nodes }),
+    );
+  }
 }
 
 /**
@@ -85,4 +106,29 @@ export function scheduleTransitionCleanup(
     });
     setNodes(cleaned);
   }, LAYOUT_ANIMATION_DURATION_MS);
+}
+
+/**
+ * Refit one or more frames to their current children after the next
+ * render cycle. Two `requestAnimationFrame` hops give the DOM time to
+ * reflow (e.g. BlockNote re-laying out a note whose pinned height was
+ * just cleared) and ReactFlow's ResizeObserver time to write the new
+ * measurement into `node.measured` before we read it back.
+ *
+ * Safe to call with frame IDs that no longer exist — `fitFrames`
+ * silently skips them.
+ */
+export function scheduleDeferredFrameFit(
+  frameIds: string[],
+  getNodes: () => Node[],
+  setNodes: (nodes: Node[]) => void,
+): void {
+  if (frameIds.length === 0) return;
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      const current = getNodes();
+      const next = fitFrames(current as NestableNode[], frameIds);
+      if (next !== current) setNodes(next);
+    });
+  });
 }
