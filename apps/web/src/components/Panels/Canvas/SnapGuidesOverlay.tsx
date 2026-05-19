@@ -53,43 +53,53 @@ export const SnapGuidesOverlay: React.FC<Props> = ({
       aria-hidden="true"
       className="pointer-events-none absolute inset-0 z-40 h-full w-full"
     >
-      {segments.map((seg, i) => (
-        <g key={i}>
-          <line
-            x1={seg.x1}
-            y1={seg.y1}
-            x2={seg.x2}
-            y2={seg.y2}
-            stroke="var(--color-info)"
-            strokeWidth={1}
-            strokeDasharray={seg.equalSpacing ? '4 3' : undefined}
-          />
-          {seg.equalRects?.map((r, j) => (
-            <EqualSpacingTick key={j} rect={r} axis={seg} />
-          ))}
-        </g>
-      ))}
+      {segments.map((seg, i) => {
+        const eqRects = seg.equalRects;
+        return (
+          <g key={i}>
+            <line
+              x1={seg.x1}
+              y1={seg.y1}
+              x2={seg.x2}
+              y2={seg.y2}
+              stroke="var(--color-info)"
+              strokeWidth={1}
+              strokeDasharray={seg.equalSpacing ? '4 3' : undefined}
+            />
+            {eqRects?.slice(0, -1).map((a, j) => (
+              <EqualSpacingTick key={j} a={a} b={eqRects[j + 1]} axis={seg} />
+            ))}
+          </g>
+        );
+      })}
     </svg>
   );
 };
 
 /**
- * Small "‖" marker drawn at the midpoint between two equal-spaced
- * rects, indicating that the gap on each side of the dragged source
- * is identical. Mirrors the red double-tick Figma renders on its
- * equal-spacing guides (we use info-tone for visual consistency with
- * the rest of the alignment overlay).
+ * Small "‖" marker drawn at the midpoint of the gap between two
+ * adjacent equal-spaced rects, indicating that the gap on each side
+ * of the dragged source is identical. For a guide spanning N rects
+ * (always 3 in practice — the source plus its two neighbours), the
+ * overlay renders N-1 ticks, one per gap. Mirrors the double-tick
+ * Figma renders on its equal-spacing guides (we use info-tone for
+ * visual consistency with the rest of the alignment overlay).
  */
 const EqualSpacingTick: React.FC<{
-  rect: { x: number; y: number; w: number; h: number };
+  /** Leading rect along the spacing axis. */
+  a: { x: number; y: number; w: number; h: number };
+  /** Trailing rect along the spacing axis (immediately after `a`). */
+  b: { x: number; y: number; w: number; h: number };
   axis: ScreenSegment;
-}> = ({ rect, axis }) => {
+}> = ({ a, b, axis }) => {
   // The segment is either roughly horizontal (y1 == y2) or vertical
-  // (x1 == x2). The tick is drawn perpendicular to the segment at the
-  // centre of the rect's projected extent.
+  // (x1 == x2). The tick is drawn perpendicular to the segment at
+  // the midpoint of the empty gap between `a`'s trailing edge and
+  // `b`'s leading edge along the spacing axis — so it visually sits
+  // *between* the two rects, not on top of either.
   const isVertical = Math.abs(axis.x1 - axis.x2) < 1;
-  const cx = isVertical ? axis.x1 : rect.x + rect.w / 2;
-  const cy = isVertical ? rect.y + rect.h / 2 : axis.y1;
+  const cx = isVertical ? axis.x1 : (a.x + a.w + b.x) / 2;
+  const cy = isVertical ? (a.y + a.h + b.y) / 2 : axis.y1;
   const len = 6;
   if (isVertical) {
     return (
