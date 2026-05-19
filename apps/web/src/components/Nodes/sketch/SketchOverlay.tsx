@@ -1,12 +1,10 @@
 import { createId, resolveAccent } from '@sediment/shared';
 import { useCallback, useMemo, useRef, useState } from 'react';
 
-import {
-  SKETCH_ERASER_RADIUS_SCREEN_PX,
-  SKETCH_STROKE_MERGE_MAX_DISTANCE_SCREEN_PX,
-} from '@/config/canvas';
+import { SKETCH_STROKE_MERGE_MAX_DISTANCE_SCREEN_PX } from '@/config/canvas';
 import { resolveFrameAtPoint } from '@/handler/canvasCommand/utils';
 import useCanvasStore from '@/store/canvasStore';
+import { useToolStore } from '@/store/toolStore';
 
 import { findSketchStrokeHits } from './sketchHitTest';
 import {
@@ -115,17 +113,19 @@ export function SketchOverlay({
   rfInstance: ReactFlowInstance | null;
 }) {
   const addNode = useCanvasStore((s) => s.addNode);
-  const sketchDraft = useCanvasStore((s) => s.sketchDraft);
+  const sketchDraft = useToolStore((s) => s.sketchDraft);
   const strokeColor = sketchDraft.strokeColor || DEFAULT_STROKE_COLOR;
   const strokeSize = sketchDraft.strokeSize || DEFAULT_STROKE_SIZE;
   const mode = sketchDraft.mode ?? 'draw';
   const zoom = rfInstance?.getViewport().zoom ?? 1;
   // Eraser hit radius is a fixed screen-space size (decoupled from the
   // picked stroke thickness), so the on-screen target stays predictable
-  // regardless of zoom or whatever the user last drew with. The flow-
-  // space radius (used by `findSketchStrokeHits`) divides out zoom so
-  // the brush always covers the same number of on-screen pixels.
-  const eraserScreenRadius = SKETCH_ERASER_RADIUS_SCREEN_PX;
+  // regardless of zoom or whatever the user last drew with. The radius
+  // itself is user-tunable via the eraser slider in
+  // `SketchSettingsPanel` (persisted on `sketchDraft.eraserSize`). The
+  // flow-space radius (used by `findSketchStrokeHits`) divides out zoom
+  // so the brush always covers the same number of on-screen pixels.
+  const eraserScreenRadius = sketchDraft.eraserSize;
   const eraserFlowRadius = eraserScreenRadius / zoom;
   // Live-preview fill: resolve the stored palette token to a CSS color.
   // `resolveAccent` passes legacy hex strings through unchanged.

@@ -40,8 +40,11 @@ import { EdgeStyleToolbar } from './FloatingToolbars/EdgeStyleToolbar.tsx';
 import { MultiSelectToolbar } from './FloatingToolbars/MultiSelectToolbar.tsx';
 import { IntentPopover } from './IntentPopover.tsx';
 import { MultiSelectResizer } from './MultiSelectResizer.tsx';
+import { SnapGuidesOverlay } from './SnapGuidesOverlay.tsx';
 import { GRID_SIZE, MAX_ZOOM, MIN_ZOOM } from '../../../config/canvas.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
+import { useGesturePreviewStore } from '../../../store/gesturePreviewStore.ts';
+import { useToolStore } from '../../../store/toolStore.ts';
 import {
   canReadSedimentPayload,
   getSedimentPayload,
@@ -159,7 +162,12 @@ export const Canvas: React.FC<CanvasProps> = ({
   const onNodeDragStart = useCanvasStore((state) => state.onNodeDragStart);
   const onNodeDrag = useCanvasStore((state) => state.onNodeDrag);
   const onNodeDragStop = useCanvasStore((state) => state.onNodeDragStop);
-  const frameFitPreviews = useCanvasStore((state) => state.frameFitPreviews);
+  const endActiveDragSession = useCanvasStore(
+    (state) => state.endActiveDragSession,
+  );
+  const frameFitPreviews = useGesturePreviewStore(
+    (state) => state.frameFitPreviews,
+  );
   const addNode = useCanvasStore((state) => state.addNode);
   const addNodes = useCanvasStore((state) => state.addNodes);
   const setRfInstance = useCanvasStore((state) => state.setRfInstance);
@@ -167,12 +175,10 @@ export const Canvas: React.FC<CanvasProps> = ({
   const expandedNodeId = useCanvasStore((state) => state.expandedNodeId);
   const expandMode = useCanvasStore((state) => state.expandMode);
   const frameNodesInRect = useCanvasStore((state) => state.frameNodesInRect);
-  const pendingNodeType = useCanvasStore((state) => state.pendingNodeType);
   const canvasId = useCanvasStore((state) => state.canvasId);
   const selectNodes = useCanvasStore((state) => state.selectNodes);
-  const setPendingNodeType = useCanvasStore(
-    (state) => state.setPendingNodeType,
-  );
+  const pendingNodeType = useToolStore((state) => state.pendingNodeType);
+  const setPendingNodeType = useToolStore((state) => state.setPendingNodeType);
 
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const rfInstanceRef = useRef<ReactFlowInstance | null>(null);
@@ -425,8 +431,14 @@ export const Canvas: React.FC<CanvasProps> = ({
     return () => {
       rfInstanceRef.current = null;
       setRfInstance(null);
+      // If the canvas is torn down mid-drag (route change, canvas
+      // swap, expanded-view toggle) React Flow never fires
+      // `onNodeDragStop`, so the snap state and its window-level Alt
+      // listeners would leak. Aborting here detaches them in one
+      // shot. No-op when no drag is active.
+      endActiveDragSession();
     };
-  }, [setRfInstance]);
+  }, [setRfInstance, endActiveDragSession]);
 
   return (
     <div
@@ -703,6 +715,12 @@ export const Canvas: React.FC<CanvasProps> = ({
           wrapperRef={wrapperRef}
         />
       ))}
+
+      {/* Smart-snap alignment guides — shown while dragging nodes */}
+      <SnapGuidesOverlay
+        rfInstance={rfInstanceRef.current}
+        wrapperRef={wrapperRef}
+      />
     </div>
   );
 };

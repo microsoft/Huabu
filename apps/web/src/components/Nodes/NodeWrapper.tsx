@@ -22,6 +22,18 @@ import { cn } from '@/components/Common/cn.ts';
 import { Spinner } from '@/components/Common/Spinner.tsx';
 import { Tooltip } from '@/components/Common/Tooltip.tsx';
 import { NodeFloatingToolbar } from '@/components/Panels/Canvas/FloatingToolbars/NodeFloatingToolbar.tsx';
+import {
+  createAbsolutePositionGetter,
+  indexById,
+  type NestableNode,
+} from '@/handler/canvasCommand/utils/frame';
+import {
+  beginSnapSession,
+  endSnapSession,
+  applyResizeProposal,
+  getResizeContext,
+  getResizeSnappedRect,
+} from '@/handler/snap/snapSession.ts';
 import { useCornerZoomResize } from '@/hooks/useCornerZoomResize.ts';
 import { useIsNotMouse } from '@/hooks/useInputMode.ts';
 import { useNodeLOD } from '@/hooks/useNodeLOD.ts';
@@ -268,9 +280,7 @@ export const NodeWrapper = memo(
     const updateResizePreview = useCanvasStore(
       (state) => state.updateResizePreview,
     );
-    const clearFrameFitPreview = useCanvasStore(
-      (state) => state.clearFrameFitPreview,
-    );
+    const endResizePreview = useCanvasStore((state) => state.endResizePreview);
     const ingestion = useCanvasStore((state) => state.ingestionByNodeId[id]);
     const showIngestionOverlay =
       type !== 'frame' && ingestion?.status === 'pending';
@@ -327,28 +337,42 @@ export const NodeWrapper = memo(
       return summary;
     }, [provenance]);
 
+    // Smart-snap during resize is fully delegated to `snapSession`:
+    //   • `handleResizeStart` captures the start rect and opens a
+    //     resize session — all gesture state lives there, not in
+    //     refs on this component.
+    //   • `handleResize` forwards RF's raw proposal to
+    //     `applyResizeProposal`, which derives `activeEdges`, runs
+    //     the snap engine, caches the snapped local rect, and returns
+    //     it. We immediately forward the snapped width/height to the
+    //     optional `onResize` listener so child auto-fit logic (e.g.
+    //     text font-size) gets the snapped values with no frame lag.
+    //   • The store write happens once in `canvasStore.onNodesChange`
+    //     via `applySnap`, which reads the cached snapped rect and
+    //     rewrites RF's emitted dim/pos NodeChanges. The same
+    //     reducer then mirrors the (possibly snapped) live dim/pos
+    //     values onto `node.style.{width,height}` + `position` so
+    //     the rendered DOM tracks the drag — `applyChange` itself
+    //     only writes `node.measured`, which RF does not read for
+    //     inline sizing. This component no longer issues its own
+    //     `setState` for resize: a single `applyNodeChanges`-based
+    //     write per frame is the only writer, which keeps the
+    //     autosave middleware happy and avoids the double-render the
+    //     previous inline write produced.
+    //   • `handleResizeEnd` reads the cached snapped rect via
+    //     `getResizeSnappedRect` to commit the final geometry through
+    //     the undoable `setNodeGeometry` intent.
+
     const handleResize = useCallback(
-      (_event: unknown, params: { width: number; height: number }) => {
-        // Apply dimensions immediately for visual feedback during drag.
-        // This keeps the NodeToolbar and zoom-invariant overlay in sync.
-        useCanvasStore.setState((state) => ({
-          nodes: state.nodes.map((n) =>
-            n.id === id
-              ? {
-                  ...n,
-                  style: {
-                    ...n.style,
-                    width: params.width,
-                    height: params.height,
-                  },
-                }
-              : n,
-          ),
-        }));
-        // Update the frame fit preview so the dashed overlay reflects the
-        // new child size while the resize handle is being dragged.
+      (
+        _event: unknown,
+        params: { x: number; y: number; width: number; height: number },
+      ) => {
+        const zoom = useCanvasStore.getState().rfInstance?.getZoom() ?? 1;
+        const snapped = applyResizeProposal(params, zoom);
+        // Keep the frame-fit overlay aligned with the live resize.
         updateResizePreview(id);
-        onResizeProp?.(params.width, params.height);
+        onResizeProp?.(snapped.width, snapped.height);
       },
       [id, onResizeProp, updateResizePreview],
     );
@@ -360,22 +384,97 @@ export const NodeWrapper = memo(
       ) => {
         if (tryStartZoom(event, params)) return;
         onNodeResizeStart();
+
+        // Capture pre-resize bounds in absolute flow-space so the
+        // snap engine can derive `activeEdges` by diffing each
+        // frame's proposal against this baseline (RF's `direction`
+        // field on `OnResize` describes growth sign, not which edge
+        // is moving — derivation by diff is the cleanest source of
+        // truth). The capture lives inside snapSession for the
+        // duration of the gesture.
+        const state = useCanvasStore.getState();
+        const nodes = state.nodes as NestableNode[];
+        const byId = indexById(nodes);
+        const getAbs = createAbsolutePositionGetter(byId);
+        const self = byId.get(id);
+        const parentOffset = { x: 0, y: 0 };
+        if (self?.parentId) {
+          const pa = getAbs(self.parentId);
+          if (pa) {
+            parentOffset.x = pa.x;
+            parentOffset.y = pa.y;
+          }
+        }
+
+        const altPressed =
+          (event as { altKey?: boolean } | undefined)?.altKey ?? false;
+        beginSnapSession({
+          nodes,
+          gestureIds: new Set([id]),
+          altPressed,
+          kind: 'resize',
+          resizeContext: {
+            nodeId: id,
+            startRect: {
+              x: parentOffset.x + params.x,
+              y: parentOffset.y + params.y,
+              w: params.width,
+              h: params.height,
+            },
+            startLocalPos: { x: params.x, y: params.y },
+            parentOffset,
+          },
+        });
+
         onResizeStart?.();
       },
-      [tryStartZoom, onNodeResizeStart, onResizeStart],
+      [id, tryStartZoom, onNodeResizeStart, onResizeStart],
     );
 
     const handleResizeEnd = useCallback(
-      (_event: unknown, params: { width: number; height: number }) => {
+      (
+        _event: unknown,
+        params: { x: number; y: number; width: number; height: number },
+      ) => {
         // Clear the preview before dispatching so the overlay disappears as
-        // the frame animates to its final fitted size.
-        clearFrameFitPreview();
+        // the frame animates to its final fitted size. `endResizePreview`
+        // also cancels any pending rAF inside `updateResizePreview` —
+        // otherwise a queued fit-pass scheduled milliseconds before
+        // mouseup could fire *after* `setNodeGeometry` lands and
+        // redraw the overlay against the pre-commit geometry.
+        endResizePreview();
+        // Prefer the snapped rect cached by `applyResizeProposal` over
+        // RF's raw `params` (which are the cursor-derived pre-snap
+        // numbers). Fall back to `params` if no proposal was processed
+        // (e.g. handle clicked and released without movement, or the
+        // resize session was disabled at gesture start due to mixed
+        // parents — neither case touches `_lastResizeSnapped`).
+        const snapped = getResizeSnappedRect();
+        const ctx = getResizeContext();
+        const finalSize = snapped
+          ? { width: snapped.size.width, height: snapped.size.height }
+          : { width: params.width, height: params.height };
+        const finalLocalPos = snapped?.local ?? { x: params.x, y: params.y };
+        // Skip the position update when snap (and RF) left the
+        // top-left corner exactly where it started — otherwise we'd
+        // create a no-op undo entry on every plain right/bottom-only
+        // resize. Comparison is in local space against the captured
+        // start position.
+        const positionChanged =
+          !!ctx &&
+          (finalLocalPos.x !== ctx.startLocalPos.x ||
+            finalLocalPos.y !== ctx.startLocalPos.y);
         setNodeGeometry([
-          { nodeId: id, size: { width: params.width, height: params.height } },
+          {
+            nodeId: id,
+            size: finalSize,
+            position: positionChanged ? finalLocalPos : undefined,
+          },
         ]);
-        onResizeEnd?.(params.width, params.height);
+        endSnapSession();
+        onResizeEnd?.(finalSize.width, finalSize.height);
       },
-      [clearFrameFitPreview, setNodeGeometry, id, onResizeEnd],
+      [endResizePreview, setNodeGeometry, id, onResizeEnd],
     );
 
     const isMinimal = renderMode === 'minimal';

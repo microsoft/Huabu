@@ -77,6 +77,8 @@ interface ToggleButtonProps {
   children: ReactNode;
   className?: string;
   disabled?: boolean;
+  /** Underlying button size; defaults to `'sm'` for compact toolbars. */
+  size?: 'sm' | 'md';
 }
 
 /**
@@ -92,12 +94,13 @@ function ToggleButton({
   children,
   className,
   disabled,
+  size = 'sm',
 }: ToggleButtonProps) {
   return (
     <Button
       variant="ghost"
       iconOnly
-      size="sm"
+      size={size}
       title={title}
       onClick={onClick}
       disabled={disabled}

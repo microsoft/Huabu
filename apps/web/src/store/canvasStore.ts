@@ -40,8 +40,20 @@ import {
   type FrameFitResult,
   type NestableNode,
 } from '@/handler/canvasCommand/utils/frame';
+import {
+  applySnap,
+  beginSnapSession,
+  endSnapSession,
+  getResizeContext,
+  getResizeSnappedRect,
+  isSnapSessionActive,
+  isSnapSessionDragEndCommit,
+  isSnapSessionResizeEndCommit,
+} from '@/handler/snap/snapSession';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
+import { useGesturePreviewStore } from './gesturePreviewStore';
+import { useToolStore } from './toolStore';
 import { getCanvas, postCanvasEvents, preprocessNode, putCanvas } from '../api';
 import { cloneArtifactToCanvas } from '../api/artifact';
 import { CanvasConflictError } from '../api/canvas';
@@ -167,23 +179,37 @@ type RFState = {
   onNodeDragStart: OnNodeDrag;
   onNodeDrag: OnNodeDrag;
   onNodeDragStop: OnNodeDrag;
+  /**
+   * Tear down any drag-time snap state and detach the window-level
+   * Alt listeners attached during `onNodeDragStart`. Idempotent.
+   * Called from Canvas unmount to cover the path where the component
+   * is destroyed mid-drag (route change, canvas swap) before React
+   * Flow has a chance to fire `onNodeDragStop`. Without this, a
+   * stranded pair of window listeners would survive the unmount.
+   */
+  endActiveDragSession: () => void;
 
   /**
-   * Previews of how frames would resize based on the current drag/resize.
-   * One entry per affected frame — allows showing both the source frame
-   * shrinking and the target frame expanding simultaneously.
-   * Computed in `onNodeDrag`, rendered as dashed overlays,
-   * and cleared in `onNodeDragStop`.
-   */
-  frameFitPreviews: FrameFitResult[];
-  /**
-   * Update the frame fit preview while a child node is being resized.
-   * Called on every resize tick from NodeWrapper so the dashed overlay
-   * stays in sync with the handle. Respects `autoLayoutEnabled`.
+   * Recompute the frame-fit preview while a child node is being
+   * resized. Called on every resize tick from `NodeWrapper` so the
+   * dashed overlay stays in sync with the handle. The actual fit
+   * computation is coalesced via rAF so multiple high-frequency
+   * onResize ticks become at most one fit-pass per paint. The result
+   * is pushed to `gesturePreviewStore`. No-op when auto-layout is
+   * disabled.
    */
   updateResizePreview: (nodeId: string) => void;
-  /** Clear the frame fit previews (e.g. when resize ends). */
-  clearFrameFitPreview: () => void;
+
+  /**
+   * Cancel any pending resize-preview rAF and clear the dashed
+   * overlay. Called from `NodeWrapper.handleResizeEnd` and from
+   * Canvas unmount to guarantee the rAF closure (which captures the
+   * latest store snapshot) doesn't fire after the gesture is over
+   * and clobber the now-committed geometry with a stale fit. Mirror
+   * of `endActiveDragSession` but scoped to the resize lifecycle.
+   * Idempotent.
+   */
+  endResizePreview: () => void;
 
   addNodes: (inputs: AddNodeInput[]) => void;
   addNode: (input: AddNodeInput) => void;
@@ -292,34 +318,6 @@ type RFState = {
   moveNodeOutOfFrame: (
     nodeId: string,
     reorderTarget?: { nodeId: string; position: 'before' | 'after' },
-  ) => void;
-
-  /** The node type awaiting placement on canvas via click or drawing. */
-  pendingNodeType: 'note' | 'text' | 'frame' | 'sketch' | 'question' | null;
-  setPendingNodeType: (
-    type: 'note' | 'text' | 'frame' | 'sketch' | 'question' | null,
-  ) => void;
-
-  /**
-   * Active sketch tool settings — color, thickness, and tool mode used by
-   * the live SketchOverlay preview and persisted onto each new sketch node
-   * so the same look replays after reload. Per-node values are still
-   * editable after-the-fact via the sketch node's toolbar.
-   *
-   * `mode` switches the overlay between drawing new strokes (`'draw'`) and
-   * erasing existing sketch nodes (`'erase'`).
-   */
-  sketchDraft: {
-    strokeColor: string;
-    strokeSize: number;
-    mode: 'draw' | 'erase';
-  };
-  setSketchDraft: (
-    patch: Partial<{
-      strokeColor: string;
-      strokeSize: number;
-      mode: 'draw' | 'erase';
-    }>,
   ) => void;
 
   copySelectedNodes: () => void;
@@ -571,6 +569,34 @@ const autoSaveMiddleware =
 // onNodeDragStop cancel any pending frame reliably.
 let _dragPreviewRafId: number | null = null;
 
+// Sibling rAF handle for `updateResizePreview`. Same rationale as the
+// drag-time handle: NodeResizer's onResize callback may fire well
+// above 60 Hz on high-refresh displays, and computeFrameFit walks
+// every node + descendant of the parent frame. Coalescing per-frame
+// calls into a single rAF callback caps the work at one fit-pass per
+// paint without dropping any user-visible state — the rAF callback
+// re-reads the latest store snapshot when it actually runs.
+let _resizePreviewRafId: number | null = null;
+
+/**
+ * Smart-snap drag-time state lives in a dedicated module
+ * (`handler/snap/snapSession`) rather than on this store. Reasoning:
+ *
+ *   • No React component subscribes to the candidate index, bypass
+ *     flag, etc. — they're consumed exclusively by the callbacks
+ *     below (`onNodeDragStart`, `onNodesChange`, `onNodeDragStop`).
+ *     Pushing them through Zustand `set/get` would only churn the
+ *     autosave middleware many times per frame.
+ *   • The visible part — alignment guides — already lives in
+ *     `gesturePreviewStore`, which IS subscribed by the SVG overlay.
+ *     That split is intentional: render state belongs in Zustand,
+ *     transient engine working memory does not.
+ *
+ * The store interacts with the session via four entry points:
+ *   `beginSnapSession`, `endSnapSession`, `applySnap`,
+ *   `isSnapSessionDragEndCommit`.
+ */
+
 /**
  * Build a recursive `WireSelectionNode` factory bound to the current
  * node list (so `frame` nodes can resolve their direct children).
@@ -655,13 +681,6 @@ const useCanvasStore = create<RFState>()(
       get().dispatchUiIntent({ type: 'EXPAND_NODE', nodeId }),
     closeExpanded: () => set({ expandedNodeId: null }),
     setExpandMode: (mode) => set({ expandMode: mode }),
-
-    pendingNodeType: null,
-    setPendingNodeType: (type) => set({ pendingNodeType: type }),
-
-    sketchDraft: { strokeColor: 'black', strokeSize: 4, mode: 'draw' },
-    setSketchDraft: (patch) =>
-      set((state) => ({ sketchDraft: { ...state.sketchDraft, ...patch } })),
 
     collapsedFrameIds: new Set<string>(),
     toggleFrameCollapse: (frameId) => {
@@ -881,12 +900,12 @@ const useCanvasStore = create<RFState>()(
       // Reset state for clean slate
       set({
         expandedNodeId: null,
-        pendingNodeType: null,
         actionHistory: [],
-        frameFitPreviews: [],
         collapsedFrameIds: new Set(),
         canvasNotFound: false,
       });
+      useToolStore.getState().resetForCanvasSwitch();
+      useGesturePreviewStore.getState().clearFrameFitPreview();
       canvasHistoryManager.clear();
 
       // Load the new canvas
@@ -1046,24 +1065,31 @@ const useCanvasStore = create<RFState>()(
       await flushCanvasEventsFor(get().canvasId);
     },
 
-    onNodeDragStart: () => {
+    onNodeDragStart: (event, _draggedNode, draggedNodes) => {
       // Snapshot the true pre-drag positions before any intermediate
       // position updates are applied by ReactFlow.
       get().beginGesture('SET_NODE_GEOMETRY');
+
+      // The snap session module owns its own defensive cleanup
+      // (`beginSnapSession` calls `endSnapSession` internally before
+      // setting up the new gesture), so we don't need to do it here.
+      beginSnapSession({
+        nodes: get().nodes as NestableNode[],
+        gestureIds: new Set(draggedNodes.map((n) => n.id)),
+        altPressed: event.altKey,
+      });
     },
 
     onNodeResizeStart: () => {
       get().beginGesture('SET_NODE_GEOMETRY');
     },
 
-    frameFitPreviews: [],
-
     onNodeDrag: (_event, draggedNode, draggedNodes) => {
       const { autoLayoutEnabled } = get();
 
       // Frame auto-resize preview only applies when auto-layout is enabled.
       if (!autoLayoutEnabled) {
-        set({ frameFitPreviews: [] });
+        useGesturePreviewStore.getState().clearFrameFitPreview();
         return;
       }
 
@@ -1186,7 +1212,7 @@ const useCanvasStore = create<RFState>()(
           });
         }
 
-        set({ frameFitPreviews: previews });
+        useGesturePreviewStore.getState().setFrameFitPreviews(previews);
       });
     },
 
@@ -1196,53 +1222,103 @@ const useCanvasStore = create<RFState>()(
         cancelAnimationFrame(_dragPreviewRafId);
         _dragPreviewRafId = null;
       }
-      set({ frameFitPreviews: [] });
+      useGesturePreviewStore.getState().clearFrameFitPreview();
+
+      // Idempotent safety net. The normal cleanup path runs inside
+      // `onNodesChange` when the final `dragging:false` commit lands
+      // — that ordering is what keeps the release frame correctly
+      // snapped. We still end the session here so that aborted
+      // gestures (Esc cancel, mid-drag unmount, RF skipping the final
+      // emit) don't leak the candidate index or Alt listeners between
+      // drags. `endSnapSession` aborts the gesture's AbortController,
+      // which detaches every window-level listener attached during
+      // `beginSnapSession` in one operation.
+      endSnapSession();
       get().dispatchUiIntent({
         type: 'NODE_DRAG_STOP',
         draggedNodeIds: draggedNodes.map((n) => n.id),
       });
     },
 
-    updateResizePreview: (nodeId: string) => {
-      const { nodes, autoLayoutEnabled } = get();
-      if (!autoLayoutEnabled) return;
-      const node = (nodes as NestableNode[]).find((n) => n.id === nodeId);
-      if (!node?.parentId) return;
-      const frame = (nodes as NestableNode[]).find(
-        (n) => n.id === node.parentId,
-      );
-      if (!frame || frame.type !== 'frame') return;
-
-      const fit = computeFrameFit(nodes as NestableNode[], node.parentId);
-      if (!fit) return;
-
-      let absX = fit.position.x;
-      let absY = fit.position.y;
-      if (frame.parentId) {
-        const parentAbsPos = getFrameAbsolutePosition(
-          nodes as NestableNode[],
-          frame.parentId,
-        );
-        if (parentAbsPos) {
-          absX += parentAbsPos.x;
-          absY += parentAbsPos.y;
-        }
+    endActiveDragSession: () => {
+      // Bridges the Canvas component's unmount cleanup into the snap
+      // session's lifecycle. Without this, a component teardown
+      // mid-drag (route change, canvas swap) would never trigger
+      // `onNodeDragStop`, leaving the window-level Alt listeners,
+      // the frame-fit RAF, and the candidate-index cache alive.
+      if (_dragPreviewRafId !== null) {
+        cancelAnimationFrame(_dragPreviewRafId);
+        _dragPreviewRafId = null;
       }
+      // Same for any in-flight resize preview rAF — unmounting
+      // mid-resize would otherwise let the queued fit-pass fire
+      // against a torn-down canvas.
+      if (_resizePreviewRafId !== null) {
+        cancelAnimationFrame(_resizePreviewRafId);
+        _resizePreviewRafId = null;
+      }
+      useGesturePreviewStore.getState().clearFrameFitPreview();
+      endSnapSession();
+    },
 
-      set({
-        frameFitPreviews: [
+    updateResizePreview: (nodeId: string) => {
+      const { autoLayoutEnabled } = get();
+      if (!autoLayoutEnabled) return;
+
+      // Coalesce all per-frame onResize ticks into one fit-pass per
+      // paint. Cancelling the prior rAF handle (rather than gating on
+      // "already scheduled") means we always recompute against the
+      // *latest* store snapshot — RF may have committed several
+      // intermediate dim changes via applyNodeChanges between this
+      // call and the rAF tick. See the sibling drag preview block
+      // above for the same pattern.
+      if (_resizePreviewRafId !== null) {
+        cancelAnimationFrame(_resizePreviewRafId);
+      }
+      _resizePreviewRafId = requestAnimationFrame(() => {
+        _resizePreviewRafId = null;
+
+        const { nodes } = get();
+        const node = (nodes as NestableNode[]).find((n) => n.id === nodeId);
+        if (!node?.parentId) return;
+        const frame = (nodes as NestableNode[]).find(
+          (n) => n.id === node.parentId,
+        );
+        if (!frame || frame.type !== 'frame') return;
+
+        const fit = computeFrameFit(nodes as NestableNode[], node.parentId);
+        if (!fit) return;
+
+        let absX = fit.position.x;
+        let absY = fit.position.y;
+        if (frame.parentId) {
+          const parentAbsPos = getFrameAbsolutePosition(
+            nodes as NestableNode[],
+            frame.parentId,
+          );
+          if (parentAbsPos) {
+            absX += parentAbsPos.x;
+            absY += parentAbsPos.y;
+          }
+        }
+
+        useGesturePreviewStore.getState().setFrameFitPreviews([
           {
             frameId: node.parentId,
             position: { x: absX, y: absY },
             width: fit.width,
             height: fit.height,
           },
-        ],
+        ]);
       });
     },
 
-    clearFrameFitPreview: () => {
-      set({ frameFitPreviews: [] });
+    endResizePreview: () => {
+      if (_resizePreviewRafId !== null) {
+        cancelAnimationFrame(_resizePreviewRafId);
+        _resizePreviewRafId = null;
+      }
+      useGesturePreviewStore.getState().clearFrameFitPreview();
     },
 
     onNodesChange: (changes) => {
@@ -1269,7 +1345,69 @@ const useCanvasStore = create<RFState>()(
         return c;
       });
 
-      set({ nodes: applyNodeChanges(sanitized, get().nodes) });
+      // ── Smart-snap: rewrite drag-time position changes ─────────────
+      // This runs *before* applyNodeChanges commits to the store, so the
+      // snapped position lands in the same React render as the raw
+      // position would have — no 1-frame flicker. The session itself
+      // decides which changes to rewrite (only `dragging:true`
+      // position changes for tracked ids); when no session is active
+      // (or it was disabled due to mixed parents), the call is a
+      // cheap pass-through.
+      const snappedChanges = isSnapSessionActive()
+        ? applySnap(sanitized, get().rfInstance?.getZoom() ?? 1)
+        : sanitized;
+
+      let nextNodes = applyNodeChanges(snappedChanges, get().nodes) as Node[];
+
+      // ── Live-resize style sync ─────────────────────────────────────
+      // RF's `applyChange` writes a `dimensions` change to
+      // `node.measured.{width,height}` only — and the `setAttributes`
+      // strip above prevents it from writing the top-level
+      // `node.{width,height}` either (those would shadow our
+      // `style.{width,height}` source of truth on commit). But the
+      // rendered DOM's inline size comes from
+      // `node.{width,height} ?? node.style?.{width,height}`, so
+      // without a style mirror the node would render at its
+      // pre-resize size for the entire drag and only "snap" to the
+      // committed size on mouseup (when `SET_NODE_GEOMETRY` writes
+      // `style`). Mirror the snap session's authoritative
+      // post-snap rect onto `style` + `position` for the resized
+      // node, in the same `set` that `applyNodeChanges` writes.
+      const resizeCtx = getResizeContext();
+      const snappedRect = resizeCtx ? getResizeSnappedRect() : null;
+      if (resizeCtx && snappedRect) {
+        nextNodes = nextNodes.map((n) =>
+          n.id === resizeCtx.nodeId
+            ? {
+                ...n,
+                position: { x: snappedRect.local.x, y: snappedRect.local.y },
+                style: {
+                  ...n.style,
+                  width: snappedRect.size.width,
+                  height: snappedRect.size.height,
+                },
+              }
+            : n,
+        );
+      }
+
+      set({ nodes: nextNodes });
+
+      // Drag-end detection: if this batch contained the final
+      // `dragging:false` commit for any node the snap session is
+      // tracking, the gesture is done — end it *here* (not in
+      // `onNodeDragStop`). Doing the cleanup at the consumption site
+      // means correctness no longer depends on whether React Flow
+      // fires `onNodeDragStop` before or after this final change:
+      // the snap above already ran with a valid index, and the
+      // redundant `endSnapSession` in `onNodeDragStop` is just an
+      // idempotent safety net.
+      if (isSnapSessionDragEndCommit(sanitized)) endSnapSession();
+      // Same pattern for resize-end (`resizing:false` dimension
+      // change for the tracked node). `NodeWrapper.handleResizeEnd`
+      // calls `endSnapSession` defensively as well; the second call
+      // here is a no-op since the function is idempotent.
+      if (isSnapSessionResizeEndCommit(sanitized)) endSnapSession();
     },
 
     onEdgesChange: (changes) => {
