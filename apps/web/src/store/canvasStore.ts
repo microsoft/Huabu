@@ -57,6 +57,7 @@ import { useToolStore } from './toolStore';
 import { getCanvas, postCanvasEvents, preprocessNode, putCanvas } from '../api';
 import { cloneArtifactToCanvas } from '../api/artifact';
 import { CanvasConflictError } from '../api/canvas';
+import { toast } from '../components/Common/Toast';
 import { seedNoteFixedHeight } from '../components/Nodes/note/autoHeight';
 import { getNoteFixedHeight } from '../components/Nodes/note/heightMemory';
 import { copyToClipboard } from '../utils/io/clipboard';
@@ -148,6 +149,15 @@ type RFState = {
   canvasNotFound: boolean;
   isSaving: boolean;
   pendingSave: boolean;
+
+  /**
+   * True when the server has rejected a save with `CANVAS_VERSION_CONFLICT`
+   * (another tab / device / agent advanced the canvas behind our back).
+   * While set, `saveCanvas` short-circuits so we don't pile up failing
+   * autosaves on top of stale state. Cleared by `loadCanvas` once the
+   * client is re-synced to the latest server snapshot.
+   */
+  versionConflict: boolean;
 
   /**
    * Apply a partial state update without triggering autosave or the
@@ -649,6 +659,7 @@ const useCanvasStore = create<RFState>()(
     canvasNotFound: false,
     isSaving: false,
     pendingSave: false,
+    versionConflict: false,
 
     // Placeholder — the autoSaveMiddleware injects the real raw setter
     // that bypasses autosave scheduling. Calling it before middleware has
@@ -833,7 +844,7 @@ const useCanvasStore = create<RFState>()(
     },
 
     loadCanvas: async (canvasId?: string) => {
-      set({ isLoading: true, canvasNotFound: false });
+      set({ isLoading: true, canvasNotFound: false, versionConflict: false });
       try {
         const targetId = canvasId ?? get().canvasId;
         if (canvasId) {
@@ -913,6 +924,12 @@ const useCanvasStore = create<RFState>()(
     },
 
     saveCanvas: async () => {
+      // Once the server has rejected a save with a version mismatch, our
+      // local `version` is permanently stale until the user reloads. Skip
+      // further attempts so we don't generate a 409 on every autosave tick
+      // (and don't clobber the surfaced toast with more failures).
+      if (get().versionConflict) return;
+
       const { isSaving } = get();
       if (isSaving) {
         set({ pendingSave: true });
@@ -954,13 +971,25 @@ const useCanvasStore = create<RFState>()(
         saveSucceeded = true;
       } catch (error) {
         if (error instanceof CanvasConflictError) {
-          // Surface conflict to caller (e.g. tryRename) so it can revert
-          // optimistic UI state. Plain autosaves catch & ignore via
-          // void get().saveCanvas().
+          if (error.code === 'CANVAS_VERSION_CONFLICT') {
+            // Server is ahead of us (another tab / device / agent wrote
+            // first). Stop the autosave loop and surface a persistent
+            // toast so the user knows their edits aren't being saved.
+            // `loadCanvas` clears the flag once the client re-syncs.
+            if (!get().versionConflict) {
+              set({ versionConflict: true });
+              toast(
+                "This canvas was modified elsewhere. Your recent edits won't be saved — please refresh the page to continue.",
+                { variant: 'error', duration: 0 },
+              );
+            }
+            return;
+          }
+          // Surface other conflicts (e.g. CANVAS_TITLE_CONFLICT) to the
+          // caller — `tryRename` reverts the optimistic UI on those.
           throw error;
         }
         console.error('Failed to save canvas:', error);
-        // TODO: Handle version conflict (409) - reload and prompt user
       } finally {
         set({ isSaving: false });
 
@@ -1008,6 +1037,14 @@ const useCanvasStore = create<RFState>()(
         set({ canvasTitle: trimmed });
         try {
           await get().saveCanvas();
+          // `saveCanvas` swallows `CANVAS_VERSION_CONFLICT` (sets the
+          // store flag + toast). When that path fired, the title we
+          // optimistically applied was never actually persisted, so
+          // revert and report failure to the caller.
+          if (get().versionConflict) {
+            set({ canvasTitle: previous });
+            return false;
+          }
           return true;
         } catch (err) {
           if (
