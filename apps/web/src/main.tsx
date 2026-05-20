@@ -17,26 +17,8 @@ if (!rootElement) {
 
 const root = ReactDOM.createRoot(rootElement);
 
-// Dev-only Milkdown validation harness (Phase 1a). Activated via
-// `?milkdown-validate=1`. Lazy-imported so the Milkdown bundle is
-// excluded from the regular production load.
-if (
-  import.meta.env.DEV &&
-  new URLSearchParams(window.location.search).get('milkdown-validate') === '1'
-) {
-  void import('./components/Milkdown/_validate/MilkdownValidatePage').then(
-    ({ default: MilkdownValidatePage }) => {
-      root.render(
-        <React.StrictMode>
-          <MilkdownValidatePage />
-        </React.StrictMode>,
-      );
-    },
-  );
-} else {
-  root.render(
-    <React.StrictMode>
-      <App />
-    </React.StrictMode>,
-  );
-}
+root.render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+);

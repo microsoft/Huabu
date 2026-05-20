@@ -591,6 +591,19 @@ export function migrateNoteProvenance(node: NoteNodeData): NoteNodeData {
 - **服务端 streaming 输出与最终 markdown 不一致** —— 以最终保存的 markdown 为准重新计算 range
 - **CJK 字符在 line diff 上的边界** —— 只在 `\n` 对齐,不在字符内切;diff-match-patch 默认行为已经满足
 
+### 4.9 性能跟踪 — setMarkdown 流式延迟(从 Phase 1a 延后)
+
+**Phase 1a Gate G5 结论**:7k 字符 `replaceAll` 稳态 median ≈ 50ms,贴线但不阻塞迁移。原因是探针测的是"病态结构 fixture(200+ 块) + 全文 replace",真实节点结构更稀疏。
+
+**Phase 4 接入 AI 流式写入时必须做的评估**:
+
+1. 用真实 Sediment note 形态(30-50 段、若干 list/table/math 混合)的 fixture 重测 setMarkdown 延迟。
+2. 接入服务端实际 chunk 节奏(典型 10-20Hz)做端到端流式压测。
+3. 如果端到端帧时间超过 100ms 或主线程长任务出现,**择一接入**:
+   - `@milkdown/plugin-streaming`(官方增量 append,per-chunk O(chunk) 而非 O(全文))
+   - 上层 chunk buffer + `requestAnimationFrame` 节流(把多个 chunk 合并成一次 setMarkdown)
+4. 该决定不影响 Phase 1b 封装层 API —— `MilkdownEditor.markdown` 受控接口对两种实现方式都兼容。
+
 ---
 
 ## Phase 5 — 拖块到 canvas 重写

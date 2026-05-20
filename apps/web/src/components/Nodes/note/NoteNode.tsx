@@ -6,10 +6,10 @@ import { ChevronsDown, Fullscreen } from 'lucide-react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
-import { applySharedStyles } from '@/components/BlockNote/shadowStyleCache.ts';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { useNodeScale } from '@/hooks/useNodeScale';
 import useCanvasStore from '@/store/canvasStore';
+import { applySharedStyles } from '@/utils/shadowStyleCache';
 
 import { loadBlockNoteContent } from '../../BlockNote/blockNoteContent';
 import { MissingFileBanner } from '../MissingFileBanner';

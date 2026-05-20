@@ -1,0 +1,21 @@
+/**
+ * Public barrel for the Milkdown wrapper.
+ *
+ * Only the symbols exported here may be imported outside
+ * `apps/web/src/components/Milkdown/`. The boundary is enforced by the
+ * grep check in CI (no `@milkdown/*` imports outside this directory).
+ */
+
+export { MilkdownEditor } from './MilkdownEditor';
+export type { MilkdownEditorProps } from './MilkdownEditor';
+
+export { MilkdownPreview } from './MilkdownPreview';
+export type { MilkdownPreviewProps } from './MilkdownPreview';
+
+export {
+  ensureNonEmpty,
+  markdownEquals,
+  normalizeMarkdown,
+} from './markdownUtils';
+
+export type { MilkdownBlockDragEvent, MilkdownDecorationSpec } from './types';
