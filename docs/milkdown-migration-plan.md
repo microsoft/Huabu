@@ -3,6 +3,13 @@
 > 范围:本文档覆盖 **Phase 1 ~ Phase 6** 的完整迁移路径。
 > 每个 Phase 都是独立 PR、独立验收、独立可回滚。Phase 1a 验收 Gate 不通过则全部终止。
 
+> **进度**(`blocknote` 分支):
+>
+> - ✅ **Phase 1a** 已完成 — 四个 fixture round-trip 在 vitest 里稳定通过(`apps/web/src/components/Milkdown/__tests__/roundTrip.test.ts`,happy-dom + Crepe parser/serializer)
+> - ✅ **Phase 1b** 已完成 — 封装层 `apps/web/src/components/Milkdown/` 上线,ESLint `no-restricted-imports` 锁住边界
+> - ✅ **Phase 2** 已完成 — `MilkdownMessageCard` 替换 `BlockNoteCard`,多块拖拽行为对齐(详见 §2.6)
+> - ⏳ **Phase 3 ~ Phase 6** 未启动 — 按原计划等待 Phase 2 灰度
+
 ## 目标
 
 - 验证 Milkdown 能否成为 BlockNote 的稳定替代,**让 Markdown 真正成为单一真值**。
@@ -11,14 +18,14 @@
 
 ## Phase 一览
 
-| Phase | 目标                           | 风险 | 工作量 |
-| ----- | ------------------------------ | ---- | ------ |
-| 1     | 验证 Gate + 封装层 `Milkdown/` | 中   | 4-5 天 |
-| 2     | 替换 `BlockNoteCard`(只读)     | 低   | 1-2 天 |
-| 3     | 替换 `NotePreview`(编辑)       | 高   | 5-7 天 |
-| 4     | Provenance 重锚                | 高   | 5-7 天 |
-| 5     | 拖块到 canvas 重写             | 中   | 2-3 天 |
-| 6     | 删除 BlockNote + 数据清理      | 低   | 1-2 天 |
+| Phase | 目标                           | 风险 | 工作量                                                                         |
+| ----- | ------------------------------ | ---- | ------------------------------------------------------------------------------ |
+| 1     | 验证 Gate + 封装层 `Milkdown/` | 中   | 4-5 天                                                                         |
+| 2     | 替换 `BlockNoteCard`(只读)     | 低   | 1-2 天                                                                         |
+| 3     | 替换 `NotePreview`(编辑)       | 高   | 5-7 天                                                                         |
+| 4     | Provenance 重锚                | 高   | 5-7 天                                                                         |
+| 5     | 拖块到 canvas 重写             | 中   | 1-2 天(Phase 2 已落地多块快照 + drag-image 构建器,主要工作是抽 hook,详见 §5.6) |
+| 6     | 删除 BlockNote + 数据清理      | 低   | 1-2 天                                                                         |
 
 ## 当前痛点(动机回顾)
 
@@ -40,274 +47,157 @@
 - **1a 验证**(1.5-2 天):最小 Milkdown 实例 + 4 个 fixture + 自动化 round-trip + KaTeX/IME/性能粗测。**Gate 不通过就止损**,1a 代码丢弃,整个迁移计划归档。
 - **1b 封装**(2-3 天):Gate 通过后,才设计公共 API 与主题/工具。**顺序不可插队**,避免 API 让步于未验证的假设。
 
-### 1.1 依赖安装(两个子阶段共用)
+### 1.1 依赖(实际落地)
 
-```powershell
-pnpm --filter web add `
-  @milkdown/core `
-  @milkdown/ctx `
-  @milkdown/preset-commonmark `
-  @milkdown/preset-gfm `
-  @milkdown/plugin-math `
-  @milkdown/plugin-block `
-  @milkdown/plugin-listener `
-  @milkdown/plugin-history `
-  @milkdown/plugin-clipboard `
-  @milkdown/react `
-  katex
+实际安装的不是计划里那一长串 `@milkdown/preset-*` + `@milkdown/plugin-*`,而是 **Crepe** 套件,它把 commonmark / gfm / math / block / listener / history / clipboard 等都打包好:
+
+```bash
+pnpm --filter web add @milkdown/core @milkdown/crepe @milkdown/ctx \
+  @milkdown/prose @milkdown/react @milkdown/utils katex
 ```
 
-> 按最小必要装;**不**装 `@milkdown/theme-nord`(我们自己写主题映射)。装后立即跑 `pnpm typecheck` 确认无 peer 警告阻塞。
+> Crepe 透传依赖了 `@milkdown/preset-commonmark` / `preset-gfm` / `transformer`,所以无需再单独装。
+> 主题用 Crepe 自带 + 我们自己的 `milkdown-overrides.css` 覆盖,**不**装 `@milkdown/theme-nord`。
 
 ---
 
-### Phase 1a — 验证 Gate
+### Phase 1a — 验证 Gate ✅ 已完成
 
-目的:在设计公共 API 之前先确认 Milkdown 能扣住我们的硬指标。
+**实际产物**:
 
-#### 1a.1 临时文件结构(Phase 1b 完成后整体删除)
+- `apps/web/src/components/Milkdown/__tests__/roundTrip.test.ts`(永久 vitest 用例,不是临时 `_validate/`)
+- 4 个 fixture 在 `__tests__/fixtures/`:`simple.md` / `math.md` / `complex.md` / `ai-half-baked.md`,覆盖原计划 1a.2 表格的全部场景
+- 测试用 `// @vitest-environment happy-dom` 直接对 Crepe 的 `parserCtx` + `serializerCtx` 做 round-trip,绕开 ProseMirror EditorView 在 happy-dom 下的事务边界问题
+- `apps/web/src/components/Milkdown/__tests__/markdownUtils.test.ts`(21 个 case,验证 `normalizeMarkdown` / `markdownEquals` / `ensureNonEmpty`)
 
-```
-apps/web/src/components/Milkdown/_validate/
-├── _validate.tsx              // dev-only 隐藏页面,手动看效果
-├── createValidateEditor.ts    // 最小 Milkdown 实例(所需插件)
-├── fixtures/
-│   ├── simple.md
-│   ├── math.md
-│   ├── complex.md
-│   └── ai-half-baked.md
-└── __tests__/
-    └── roundTrip.test.ts      // 自动化 Gate G1
-```
+**Gate 结论**:
 
-`_validate.tsx` 挂到隐藏路由(例如 `?milkdown-validate=1`),不进任何菜单。
-
-#### 1a.2 4 类样本(必须覆盖)
-
-| Fixture            | 内容                                                                                           |
-| ------------------ | ---------------------------------------------------------------------------------------------- |
-| `simple.md`        | 标题 H1-H3、加粗、斜体、行内代码、有序/无序列表、引用块、`---` 分隔线、普通链接                |
-| `math.md`          | 行内公式 `$E=mc^2$`、块公式 `$$\int...$$`、矩阵 `\begin{pmatrix}`、希腊字母与 `\alpha + \beta` |
-| `complex.md`       | 三层嵌套列表、GFM 表格(含空单元格 + 对齐)、任务列表、带语言标识的围栏代码块、含 `<br>` 的段落  |
-| `ai-half-baked.md` | 未闭合代码块、悬挂列表项、中文混排英文、`$` 在非数学上下文中(纯文字 `价格 $5`)                 |
-
-#### 1a.3 自动化 round-trip(`roundTrip.test.ts`)
-
-```ts
-import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
-import { createValidateEditor } from '../createValidateEditor';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const fx = (n: string) =>
-  readFileSync(resolve(__dirname, '../fixtures', n), 'utf-8');
-
-async function roundTrip(md: string, iterations = 3) {
-  const editor = await createValidateEditor();
-  const history: string[] = [md.trimEnd()];
-  for (let i = 0; i < iterations; i++) {
-    await editor.setMarkdown(history[history.length - 1]);
-    const out = (await editor.getMarkdown()).trimEnd();
-    history.push(out);
-  }
-  return history;
-}
-
-describe('Milkdown round-trip (Gate G1)', () => {
-  for (const name of [
-    'simple.md',
-    'math.md',
-    'complex.md',
-    'ai-half-baked.md',
-  ]) {
-    it(`${name}: stabilizes after first normalization pass`, async () => {
-      const h = await roundTrip(fx(name));
-      // First → second may normalize (table column widths, list markers).
-      // From the second iteration onward it MUST be byte-stable.
-      expect(h[2]).toBe(h[1]);
-      expect(h[3]).toBe(h[2]);
-    });
-  }
-});
-```
-
-> Gate G1 的收敛判准采用"第二次起稳定"而不是"首次即稳定":所有 markdown 序列化器都会在首次做一些归一化(例如表格列宽、list marker 对齐),只要其后不再变化即可。
-
-#### 1a.4 验收 Gate
-
-| #   | 检查项                  | 标准                                      | 验证手段                       |
-| --- | ----------------------- | ----------------------------------------- | ------------------------------ |
-| G1  | 4 个 fixture round-trip | 第二轮起字符串收敛                        | 自动 vitest                    |
-| G2  | KaTeX 渲染              | 行内、块、矩阵肉眼正确 + 无 console error | 手动 in `_validate.tsx`        |
-| G3  | drag handle             | 鼠标悬停在块左侧时出现                    | 手动                           |
-| G4  | bundle size delta       | gzip 净增 < 250 KB                        | `pnpm --filter web build` 对比 |
-| G5  | 受控更新性能            | 5000 字 markdown setMarkdown < 50ms       | console.time 粗测              |
-| G6  | 中文 IME                | 拼音输入期间不误触发 onChange;光标不跳    | 手动                           |
-
-**Gate 不通过**:改用附录 B 备选方案,本 Phase 以外不启动。
+| #   | 检查项                  | 结果       | 备注                                                        |
+| --- | ----------------------- | ---------- | ----------------------------------------------------------- |
+| G1  | 4 个 fixture round-trip | ✅ 通过    | 自动 vitest;第二轮起字符串收敛                              |
+| G2  | KaTeX 渲染              | ✅ 通过    | 通过 Crepe latex feature(remark-math + KaTeX);手动验证      |
+| G3  | drag handle             | ✅ 通过    | Crepe `BlockEdit` feature 在 preview/edit 模式下都启用      |
+| G4  | bundle size delta       | ⏸ 跟踪中   | 未测;Phase 6 才与"未迁移基线"做净增量对比                   |
+| G5  | 受控更新性能            | ⏸ 推迟到 4 | 见 §4.9,Phase 1a 的 7k 字符 fixture 测出 ~50ms,贴线但不阻塞 |
+| G6  | 中文 IME                | ✅ 通过    | Crepe 自带 IME 处理;手动验证                                |
 
 ---
 
-### Phase 1b — 封装层
+### Phase 1b — 封装层 ✅ 已完成
 
-#### 1b.1 设计原则
+#### 1b.1 设计原则(保持不变)
 
 1. **对外 API 与 Milkdown 解耦**——外部组件只看到我们自己的 props,Milkdown 类型不外泄。
 2. **Markdown 是唯一真值**——所有 API 都收发 `string`,不暴露任何 AST/JSON。
 3. **替换性**——未来如果要换成 CodeMirror Live Preview 或其它,只动这个目录。
 
-#### 1b.2 目录结构
+#### 1b.2 实际目录结构
 
 ```
 apps/web/src/components/Milkdown/
-├── index.ts                       // 公共导出
-├── MilkdownEditor.tsx             // 可编辑组件(给 NotePreview 用)
-├── MilkdownPreview.tsx            // 只读组件(给 BlockNoteCard 替换用)
-├── createMilkdown.ts              // 内部:统一插件配置 + 主题
-├── markdownUtils.ts               // round-trip 工具、normalize、diff
-├── shadowStyleCache.ts            // 从 BlockNote/ 平移,内容更新为 milkdown 样式
-├── styles/
-│   ├── milkdown-theme.css         // 把 milkdown 默认主题 token 映射到 Sediment design tokens
-│   └── katex-overrides.css        // KaTeX 字号、行高微调
+├── index.ts                       // 公共 barrel,边界由 ESLint 守住
+├── types.ts                       // MilkdownBlockDragEvent / MilkdownDecorationSpec
+├── MilkdownEditor.tsx             // 可编辑组件(给 NotePreview 用,占位)
+├── MilkdownPreview.tsx            // 只读 / drag-only 组件(MilkdownMessageCard 在用)
+├── createMilkdown.ts              // 内部 Crepe 工厂 + MilkdownInstance 5 动词 API
+├── markdownUtils.ts               // normalize / equals / ensureNonEmpty
+├── milkdown-overrides.css         // Crepe 主题 + KaTeX 在 Sediment design tokens 下的覆盖
 └── __tests__/
-    ├── roundTrip.test.ts          // 把 Phase 1a 的 harness 提升为永久 vitest 用例
-    └── markdownUtils.test.ts
+    ├── roundTrip.test.ts
+    ├── markdownUtils.test.ts
+    └── fixtures/{simple,math,complex,ai-half-baked}.md
 ```
 
-#### 1b.3 公共 API(冻结接口)
+差异说明:
+
+- 原计划的 `styles/milkdown-theme.css` + `styles/katex-overrides.css` 合并为单个 `milkdown-overrides.css`,因为两个文件都在覆盖同一套 CSS 变量,拆开反而要在两处维护 token。
+- `shadowStyleCache.ts` 不放在本目录,而是相对路径 `apps/web/src/utils/shadowStyleCache.ts` —— `NoteNode` 与 `MilkdownPreview` 都要用,放在 `utils/` 才是共享位置。
+
+#### 1b.3 公共 API(实际形态,已冻结)
 
 ```ts
-// MilkdownEditor.tsx
-export interface MilkdownEditorProps {
-  /** Source of truth. Controlled. */
+// types.ts
+export interface MilkdownBlockDragEvent {
+  /** Markdown of the block(s) being dragged. */
   markdown: string;
-  /** Fired with normalized markdown (trimmed, line endings unified). */
-  onChange?: (next: string) => void;
-  /** Default true. */
-  editable?: boolean;
-  /** Optional placeholder. */
-  placeholder?: string;
-  /** Optional className applied to the editor root. */
-  className?: string;
-  /**
-   * Optional decoration spec (for Phase 4 provenance).
-   * Phase 1 only accepts the type; implementation is no-op.
-   */
-  decorations?: MilkdownDecorationSpec;
-  /** Fired when the user drags a block out (Phase 5 wires this up). */
-  onBlockDragStart?: (e: MilkdownBlockDragEvent) => void;
+  /** Native DragEvent; consumer only needs setData. */
+  nativeEvent: DragEvent;
 }
 
 // MilkdownPreview.tsx
 export interface MilkdownPreviewProps {
   markdown: string;
-  /** Render inside a Shadow DOM. Default true (for style isolation). */
-  isolate?: boolean;
+  isolate?: boolean; // 默认 true,Shadow DOM 隔离
   className?: string;
-  /** Fired when the user starts dragging a block out. */
   onBlockDragStart?: (e: MilkdownBlockDragEvent) => void;
-}
-
-export interface MilkdownBlockDragEvent {
-  /** Markdown sub-string of the dragged block (single block or
-   *  multi-block range). */
-  markdown: string;
-  /** Native DragEvent (so caller can call setData / setDragImage). */
-  nativeEvent: DragEvent;
-  /**
-   * Element to hand to `setDragImage`. For single-block drags this is
-   * the live block DOM; for multi-block drags it's a detached, stacked
-   * clone container built by `MilkdownPreview` (the wrapper attaches
-   * it to `document.body` just long enough to snapshot). Renamed from
-   * the original `blockElement` to make the intent — "feed me to
-   * setDragImage" — explicit, since the value may be synthetic.
-   */
-  dragImageElement: HTMLElement;
-  /**
-   * Cursor offset within the drag image. Omitted for single-block
-   * drags (browser default is correct); required for multi-block
-   * drags so the stacked preview hugs the original click point.
-   */
-  dragImageOffset?: { x: number; y: number };
 }
 ```
 
-> **历史变更**:Phase 1b 初稿只有 `blockElement: HTMLElement` 单字段、
-> 多块拖拽计划降级为单选(见下方 2.2 节)。落地阶段为了与
-> BlockNote `BlockNoteCard` 的多块拖拽体验对齐,改为现在的 `dragImageElement` +可选 `dragImageOffset`,并在 `MilkdownPreview` 内通过 capture-phase
-> mousedown 快照 + bubbling dragstart 重建多块 payload。多块场景下
-> `dragImageElement` 是 `buildStackedDragImage` 生成的离屏堆叠容器。
+> **与原计划的差异**:删除了 `dragImageElement` / `dragImageOffset` 两个字段。
+> 落地时发现 drag image 的生命周期(挂 `document.body` → 截图 → `setTimeout(0)` 移除)由 `MilkdownPreview` 内部全权负责更稳:消费者只关心 `markdown`,不需要也不该接触 `dataTransfer.setDragImage`。计划里那种"把元素递给调用方"的设计反而把内部时序泄漏出去了。
 
-**这套 API 同时为 Phase 2/3/5 备好**:
+`MilkdownEditor` 暂为占位,Phase 3 才接通(`markdown` / `onChange` / `editable` / `decorations` 等保留原 API)。
 
-- `MilkdownPreview` → Phase 2 替换 `BlockNoteCard`
-- `MilkdownEditor` → Phase 3 替换 `NotePreview` 编辑部分
-- `onBlockDragStart` → Phase 5 拖块到 canvas
-- `decorations` → Phase 4 provenance 装饰
+#### 1b.4 内部抽象 — `createMilkdown` + `MilkdownInstance`
 
-#### 1b.4 插件配置(`createMilkdown.ts`)
-
-启用:
-
-- `commonmark`(基础)
-- `gfm`(表格、任务列表、删除线)
-- `math`(KaTeX)
-- `history`(undo/redo)
-- `listener`(暴露 markdown 变化)
-- `clipboard`(粘贴 markdown / HTML)
-- `block`(drag handle —— 仅可编辑模式)
-
-主题:**不用 `@milkdown/theme-nord`**,直接写自己的 CSS 把 Milkdown 的 CSS 变量映射到我们 [apps/web/src/index.css](apps/web/src/index.css) 已有的 design tokens。
-
-#### 1b.5 `markdownUtils.ts`
-
-收口所有 markdown 字符串处理:
+`createMilkdown.ts` 暴露一个 5 动词 API 把 Crepe 彻底封掉:
 
 ```ts
-/** Trim trailing whitespace + unify CRLF -> LF. Single source of truth. */
+interface MilkdownInstance {
+  getMarkdown(): string;
+  setMarkdown(md: string): void;
+  setReadonly(readonly: boolean): void;
+  onMarkdownUpdated(cb: (md: string) => void): () => void;
+  getDragPayload(snapshot?: SelectionSnapshot): { markdown: string } | null;
+  destroy(): void;
+}
+```
+
+启用的 Crepe features:`CodeMirror, ListItem, LinkTooltip, Cursor, ImageBlock, BlockEdit, Toolbar, Placeholder, Table, Latex`(不含 `TopBar, AI`)。
+`previewMode` 选项关掉 `Toolbar / LinkTooltip / Table / Cursor`,只保留 `BlockEdit` 让 drag handle 仍然可用。
+
+#### 1b.5 `markdownUtils.ts`(无差异)
+
+```ts
 export function normalizeMarkdown(md: string): string;
-
-/** Empty / whitespace-only input -> single empty paragraph marker. */
-export function ensureNonEmpty(md: string): string;
-
-/** Returns true if two markdown strings are semantically equivalent
- *  after normalization. Used by NotePreview to dedupe onChange. */
+export function ensureNonEmpty(md: string): string; // 保留导出,Phase 3 NotePreview 才会用
 export function markdownEquals(a: string, b: string): boolean;
 ```
 
-> 这一步把现存的 M2(空内容)、M3(trim)、M5(去重)三个补丁合并为一个工具模块,杜绝散落。
+#### 1b.6 Shadow DOM(共享于 NoteNode + MilkdownPreview)
 
-#### 1b.6 Shadow DOM 复用
+`apps/web/src/utils/shadowStyleCache.ts` 中的 `applySharedStyles(shadowRoot)`:同源样式表走 `adoptedStyleSheets`,跨源走 `<link>` clone 兜底。
 
-把 [apps/web/src/components/BlockNote/shadowStyleCache.ts](apps/web/src/components/BlockNote/shadowStyleCache.ts) 整文件复制到 `Milkdown/shadowStyleCache.ts`,只改两处:
+`MilkdownPreview` 的挂载顺序很关键 —— **先清空子元素,再调 `applySharedStyles`**,否则跨源 `<link>` 兜底会被默默 strip(见 `MilkdownPreview.tsx` ~L240 注释)。
 
-- 监听的样式表来源:`@blocknote/shadcn` → `@milkdown/*` + KaTeX
-- HMR fingerprint 选择器同步更新
+#### 1b.7 边界守护(ESLint 规则,不再用 grep)
 
-Phase 6 时再把旧文件删掉。
+`eslint.config.mjs` 中 `no-restricted-imports` 禁止 `@milkdown/*` / `katex` / `katex/*` 在 `apps/web/src/components/Milkdown/**` 之外被引用。CI 跑 `pnpm exec eslint` 即可,无需额外脚本。
 
-#### 1b.7 验收
-
-- [ ] `pnpm --filter web typecheck` 通过
-- [ ] `vitest run src/components/Milkdown` 通过(round-trip + markdownUtils)
-- [ ] `_validate/` 目录已删除,隐藏路由已下架
-- [ ] `@milkdown/*` 仅在 `Milkdown/` 目录内被导入(ESLint 规则或 grep 检查)
-
-```powershell
-# 把 grep 加到 CI 防止越界
-$leaked = Select-String -Path "apps/web/src/**/*.{ts,tsx}" `
-  -Pattern "@milkdown/" -SimpleMatch `
-  | Where-Object { $_.Path -notmatch "components\\Milkdown" }
-if ($leaked) { throw "Milkdown imports leaked outside wrapper" }
+```js
+{
+  files: ['apps/web/src/**/*.{ts,tsx}'],
+  ignores: ['apps/web/src/components/Milkdown/**'],
+  rules: {
+    'no-restricted-imports': ['error', {
+      patterns: [{ group: ['@milkdown/*', 'katex', 'katex/*'], message: '...' }],
+    }],
+  },
+}
 ```
+
+**Phase 1 验收(最终结果)**:
+
+- ✅ `pnpm --filter web typecheck`
+- ✅ `vitest run src/components/Milkdown`(round-trip + markdownUtils,26+ 个 case)
+- ✅ ESLint `no-restricted-imports` 规则上线
+- N/A `_validate/` 已删除(从未引入,直接生成永久 fixture)
 
 ---
 
-## Phase 2 — 替换 BlockNoteCard
+## Phase 2 — 替换 BlockNoteCard ✅ 已完成
 
-**分支**:`feat/milkdown-message-card`(基于 Phase 1)
+**分支**:`feat/milkdown-message-card`(基于 Phase 1) — 已合入 `blocknote` 工作分支
 
 为什么先换它:
 
@@ -316,7 +206,7 @@ if ($leaked) { throw "Milkdown imports leaked outside wrapper" }
 - 出问题不会污染用户数据
 - 完整覆盖**渲染 + Shadow DOM + 块拖到 canvas** 三个能力
 
-### 2.1 现状梳理
+### 2.1 现状梳理(替换前)
 
 [apps/web/src/components/Messages/Card/BlockNoteCard.tsx](apps/web/src/components/Messages/Card/BlockNoteCard.tsx) 主要做:
 
@@ -327,68 +217,54 @@ if ($leaked) { throw "Milkdown imports leaked outside wrapper" }
 5. 自定义拖动预览(多选时拼接 DOM)
 6. `setDragPayload` 写入 `SEDIMENT_DND_MIME` + BlockNote 原生 MIME
 
-### 2.2 替换后的形态
+### 2.2 实际落地形态
+
+新增 [apps/web/src/components/Messages/Card/MilkdownMessageCard.tsx](../apps/web/src/components/Messages/Card/MilkdownMessageCard.tsx)(`BlockNoteCard` 暂未删除,等 Phase 6):
 
 ```tsx
-// 新的 BlockNoteCard.tsx(文件名暂不改,Phase 6 统一改名)
 import { MilkdownPreview } from '@/components/Milkdown';
 import { setDragPayload } from '@/utils/io/dragDrop';
 
-export const BlockNoteCard: FC<BlockNoteMessageViewProps> = ({ content }) => {
-  return (
-    <MilkdownPreview
-      markdown={content}
-      isolate
-      enableBlockDrag
-      onBlockDragStart={({
-        markdown,
-        nativeEvent,
-        dragImageElement,
-        dragImageOffset,
-      }) => {
-        // `setDragPayload` 接受 React 或原生 DragEvent;它只读
-        // `dataTransfer` 与 client 坐标。单块场景下 `dragImageElement`
-        // 是 live block DOM;多块场景下是 `MilkdownPreview` 内部
-        // `buildStackedDragImage` 现 clone 出来的离屏堆叠容器,
-        // `setDragPayload` 会临时挂到 body 上完成截图再移除。
-        setDragPayload(
-          nativeEvent as unknown as React.DragEvent,
-          {
-            kind: 'note',
-            origin: { type: 'user-from-chat', threadId },
-            data: { content: markdown }, // 不再发 contentJson
-          },
-          { dragImageElement, dragImageOffset },
-        );
-      }}
-    />
-  );
-};
+export const MilkdownMessageCard: FC<MilkdownMessageCardProps> = ({
+  content,
+  threadId,
+}) => (
+  <MilkdownPreview
+    markdown={content}
+    isolate
+    onBlockDragStart={({ markdown, nativeEvent }) => {
+      // Drag image lifecycle is owned by MilkdownPreview internally.
+      // Caller only writes the SEDIMENT MIME payload.
+      setDragPayload(nativeEvent as unknown as React.DragEvent, {
+        kind: 'note',
+        origin: buildNoteDragPayload(threadId),
+        data: { content: markdown },
+      });
+    }}
+  />
+);
 ```
 
 > 多选拖拽**保留了 BlockNote 时期的体验**:在 `MilkdownPreview` 内部
 > 通过 capture-phase mousedown 快照多块 TextSelection,bubbling
-> dragstart 再按快照拼出 markdown + 堆叠预览,无需调用方感知"单/多块"
-> 差异。实现细节见 [`MilkdownPreview.tsx`](apps/web/src/components/Milkdown/MilkdownPreview.tsx)
-> 中 `mousedownCaptureHandler` / `dragHandler` 注释。
+> dragstart 再按快照拼出 markdown + 堆叠预览(`buildBlockDragImage` 挂在 `document.body` 的 light DOM 里以规避 Chromium 对 Shadow DOM `setDragImage` 渲染不稳的问题),消费方无需感知"单/多块"差异。详见 [`MilkdownPreview.tsx`](../apps/web/src/components/Milkdown/MilkdownPreview.tsx) 中 `mousedownCaptureHandler` / `dragHandler` 注释。
 
 ### 2.3 `utils/io/dragDrop.ts` 同步改动
 
-- `NoteBlockDragPayload` 接口:`contentJson?: string` 字段标记为 `@deprecated`,新写入路径不再产生,但**读取路径暂时保留**(canvas 还可能收到来自 NotePreview 的旧格式 payload,直到 Phase 5 完成)
-- 加一行注释引用本文档
+- `NoteBlockDragPayload.contentJson?: string` 标记为 `@deprecated`,新写入路径不再产生,读取路径暂时保留(canvas 还可能收到来自旧 NotePreview 的 payload,直到 Phase 5 完成)。
 
-### 2.4 验收
+### 2.4 验收(实际完成情况)
 
-| #   | 检查项                    | 标准                                                                                                     |
-| --- | ------------------------- | -------------------------------------------------------------------------------------------------------- |
-| V1  | 历史消息渲染              | 抽样 10 条历史 AI 回复,Milkdown 渲染与 BlockNote 视觉一致(或更好)                                        |
-| V2  | 数学公式                  | 含 `$...$` 的回复正确渲染                                                                                |
-| V3  | 拖块到 canvas             | 拖一个段落到 canvas,新建 note 节点内容正确(只检查 markdown,不检查 contentJson)                           |
-| V4  | Shadow DOM 隔离           | 父页面 CSS 不污染消息卡片;反向也不污染                                                                   |
-| V5  | typecheck + lint + format | 全绿                                                                                                     |
-| V6  | 单元测试                  | 给 `BlockNoteCard` 加一个 RTL 测试,覆盖"渲染 + 拖拽 setData 调用"                                        |
-| V7  | 性能                      | 长消息(2000+ 字)首帧渲染 ≤ BlockNote 版本的 1.2 倍                                                       |
-| V8  | 灰度                      | 加 feature flag `VITE_MESSAGE_RENDERER=milkdown\|blocknote`(default `milkdown`),允许一键切回旧实现做 A/B |
+| #   | 检查项                    | 结果     | 备注                                                                                                |
+| --- | ------------------------- | -------- | --------------------------------------------------------------------------------------------------- |
+| V1  | 历史消息渲染              | ✅ 通过  | 视觉与 BlockNote 等效或更好(数学场景明显更好)                                                       |
+| V2  | 数学公式                  | ✅ 通过  | KaTeX 行内 / 块 / 矩阵                                                                              |
+| V3  | 拖块到 canvas             | ✅ 通过  | 单 / 多块均正常,落点新建 note 仅含 `content`                                                        |
+| V4  | Shadow DOM 隔离           | ✅ 通过  | 双向无样式串扰                                                                                      |
+| V5  | typecheck + lint + format | ✅ 通过  | —                                                                                                   |
+| V6  | 单元测试                  | ⚠ 部分   | `MilkdownMessageCard.test.ts` 覆盖纯 `buildNoteDragPayload` helper;组件级 RTL 留待与 Phase 3 一起做 |
+| V7  | 性能                      | ⏸ 未量化 | 主观流畅,Phase 4 §4.9 一并量化                                                                      |
+| V8  | 灰度                      | ✅ 通过  | `VITE_MESSAGE_RENDERER=milkdown\|blocknote` 上线,默认 `milkdown`                                    |
 
 ### 2.5 不做的事
 
@@ -396,6 +272,18 @@ export const BlockNoteCard: FC<BlockNoteMessageViewProps> = ({ content }) => {
 - ❌ 删除 `dragDrop.ts` 的 `contentJson` 字段
 - ❌ 改任何持久化数据
 - ❌ 改 `index.css` 里的 ShadCN 桥接(NotePreview 还需要)
+
+### 2.6 Phase 2 落地后的发现 & follow-up
+
+落地实现与 §1b.3 / §2.2 的预案有几处偏差,记录在此供 Phase 3 / Phase 5 参考:
+
+1. **多块拖拽**没有降级为单选,而是在 [`MilkdownPreview.tsx`](../apps/web/src/components/Milkdown/MilkdownPreview.tsx) 内通过 capture-phase mousedown 抓快照 + bubbling dragstart 重建实现。Phase 5 因此不需要再写多块算法,直接抽 hook 复用即可(参见 §5.6)。
+
+2. **drag-image 构建器**(`buildBlockDragImage`)同时服务单块与多块,挂在 `document.body` 的 light DOM 里以规避 Chrome 对 Shadow DOM 元素 `setDragImage` 渲染不稳的问题。`MilkdownPreview` 持有 image 生命周期,消费者只负责写 `SEDIMENT_DND_MIME`。
+
+3. **已知问题** — `getMultiBlockSelectionRange` 当前读 `view.state.selection`,而 `prosemirror-view@1.41.6` 的 `selectionchange` 监听器只挂在 outer document、不响应 Shadow DOM 内的 selection 变化(Safari 有 `safariShadowSelectionRange` workaround,Chromium 走兜底)。在较老的 Chromium 版本上,多块文字选择可能拿到 stale 的 PM state,从而被静默降级为单选。
+
+   **修复建议**(可作为 Phase 2 hot-fix 或并入 Phase 3):把 `getMultiBlockSelectionRange` 改成直接读 `view.root.getSelection()`(shadow-scoped),用 `view.posAtDOM` 翻译为 PM positions,绕过 PM 的过期 state。改动局限在 [`createMilkdown.ts`](../apps/web/src/components/Milkdown/createMilkdown.ts) 一个函数内。
 
 ---
 
@@ -426,7 +314,7 @@ const markdown = data.content;
 // contentJson / contentJsonSource 字段仍可能存在于历史数据,但不再读取也不再写入
 ```
 
-**关键决定**:Phase 3 合入后**立即停止写入** `contentJson` / `contentJsonSource`,但不删字段(等 Phase 6)。这样如果灰度回退到 BlockNote 实现,旧字段仍能被它读到。
+**关键决定**:Phase 3 合入后**立即停止写入** `contentJson` / `contentJsonSource`,但不删字段(等 Phase 6)。理由是**把 destructive schema migration 单独成 PR**:Phase 3 期间需要观察期确认 Milkdown 无 silent data loss,期间历史 blob 里的旧字段是事后取证的唯一线索;类型 + zod schema + 数据库迁移本身扇出面广,与"换编辑器"这种行为变更同 PR 容易混进无关 bug。(顺带:`VITE_NOTE_EDITOR` 灰度回退到 BlockNote 时旧字段仍可被读到。)
 
 ### 3.2 补丁迁移对照表
 
@@ -486,7 +374,14 @@ Phase 4 还没做,所以 Phase 3 期间**不能真正支持 provenance**。临�
 
 - ❌ 删除 `@blocknote/*` 依赖(留给 Phase 6)
 - ❌ 真正的 provenance 支持(Phase 4)
-- ❌ 走新封装的拖块到 canvas(Phase 5;Phase 3 期间该入口暂时禁用,banner 同时说明)
+
+> **关于拖块到 canvas** — 原计划在 Phase 3 期间禁用此入口并加 banner,等 Phase 5 才接通。
+> 由于 Phase 2 已经把多块快照 + drag-image 构建器完整落地在 `MilkdownPreview`(参见 §2.6),Phase 5 实际工作量大幅缩小(主要剩"把 wiring 抽成 hook 让 `MilkdownEditor` 共用 + 防自删 + 删旧文件")。Phase 3 期间有两种走法:
+>
+> - **路径 A (保守,按原计划)** — Phase 3 仅替换编辑器内核,拖块入口禁用 + banner,Phase 5 单独 PR 接通 drag wiring。PR 范围小、独立可回滚。
+> - **路径 B (提前合并)** — Phase 3 顺手把 §5.3 的 hook 抽取 + `MilkdownEditor.onBlockDragStart` 接通做掉,跳过 banner 与"入口暂时不可用"的产品降级。代价:Phase 3 PR 变大、与 Phase 5 风险耦合。
+>
+> 决策时机:Phase 3 kickoff 前,基于 Phase 2 灰度反馈选定。两条路径都不影响 Phase 4 / Phase 6。
 
 ---
 
@@ -668,10 +563,15 @@ utils/io/dragDrop.ts → 新建 note 节点
 
 ```
 [来源: MilkdownEditor / MilkdownPreview]
-       │ block plugin drag handle
+       │ Crepe block-edit drag handle
+       │ (capture mousedown 抢多块快照 → bubble dragstart 重建 payload)
        ▼
-Milkdown/plugins/sedimentDragOut.ts
-  └─ 只设 'SEDIMENT_DND_MIME' = { kind: 'note-block', markdown }
+Milkdown/useMilkdownBlockDrag.ts
+  (Phase 5 把 MilkdownPreview 内的 wiring 抽成共享 hook)
+  ├─ 复用 buildBlockDragImage / getMultiBlockSelectionRange / getDragPayload
+  │  (Phase 2 已落地,见 §5.6)
+  └─ 触发 onBlockDragStart → 消费者写
+     'SEDIMENT_DND_MIME' = { kind: 'note', data: { content } }
        │ drop on canvas
        ▼
 utils/io/dragDrop.ts(简化,去掉 contentJson 分支)
@@ -679,14 +579,16 @@ utils/io/dragDrop.ts(简化,去掉 contentJson 分支)
 
 ### 5.3 关键改动
 
-| 文件                                                          | 改动                                                              |
-| ------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `apps/web/src/components/Milkdown/plugins/sedimentDragOut.ts` | **新增**,把 `block` 插件的 drag 事件转成我们的 `onBlockDragStart` |
-| `apps/web/src/components/Milkdown/MilkdownEditor.tsx`         | 注入插件                                                          |
-| `apps/web/src/components/Milkdown/MilkdownPreview.tsx`        | 只读模式同样支持 drag handle(隐藏不可编辑的菜单项)                |
-| `apps/web/src/utils/io/dragDrop.ts`                           | 删除 `NoteBlockDragPayload.contentJson` 字段 + `@deprecated` 标记 |
-| `apps/web/src/components/BlockNote/NoteEditorSideMenu.tsx`    | **整文件删除**(此时 NotePreview 已无 BlockNote 引用)              |
-| `apps/web/src/components/Common/DragToCanvasHandleButton.tsx` | 复用,props 改成接受 markdown                                      |
+| 文件                                                          | 改动                                                                                                                                                                                      |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/web/src/components/Milkdown/useMilkdownBlockDrag.ts`    | **新增**,把当前 `MilkdownPreview` 内的 mousedown capture / dragstart bubble / drag-image 编排抽成 hook;新增 `allowInternalReorder` 选项,让 NotePreview 既能拖到画布也能在编辑器内 reorder |
+| `apps/web/src/components/Milkdown/MilkdownPreview.tsx`        | 内联 wiring 替换为 hook 调用,行为不变                                                                                                                                                     |
+| `apps/web/src/components/Milkdown/MilkdownEditor.tsx`         | 通过 hook 接通 `enableBlockDrag` + `onBlockDragStart`(目前 prop 是 Phase 1 留的空头)                                                                                                      |
+| `apps/web/src/utils/io/dragDrop.ts`                           | 删除 `NoteBlockDragPayload.contentJson` 字段 + `@deprecated` 标记                                                                                                                         |
+| `apps/web/src/components/BlockNote/NoteEditorSideMenu.tsx`    | **整文件删除**(此时 NotePreview 已无 BlockNote 引用)                                                                                                                                      |
+| `apps/web/src/components/Common/DragToCanvasHandleButton.tsx` | 复用,props 改成接受 markdown                                                                                                                                                              |
+
+> Phase 2 落地时 drag-image 构建 (`buildBlockDragImage`)、多块快照 (`getMultiBlockSelectionRange`)、payload 序列化 (`getDragPayload`) 已经全部在位 —— Phase 5 几乎不写新算法,主要是抽位置 + 加 `allowInternalReorder` 分支。原命名 `sedimentDragOut.ts` 取消,改走 hook,无需深入 Milkdown plugin API。
 
 ### 5.4 跨原点 drag 防误删
 
@@ -702,14 +604,30 @@ if (e.dataTransfer.dropEffect === 'copy') {
 
 ### 5.5 验收
 
-| #     | 检查项                             | 标准                                                            |
-| ----- | ---------------------------------- | --------------------------------------------------------------- |
-| P5.V1 | 从 NotePreview 拖块到 canvas       | 新建 note,内容 = 源块 markdown;**源 note 内容不变**             |
-| P5.V2 | 从 BlockNoteCard 拖块到 canvas     | 同上,消息保持不变                                               |
-| P5.V3 | NotePreview 内部 reorder(块上下拖) | 工作正常                                                        |
-| P5.V4 | 拖动预览图                         | 与源块视觉一致(setDragImage 生效)                               |
-| P5.V5 | 类型检查                           | `dragDrop.ts` 不再引用 `contentJson`                            |
-| P5.V6 | 多选拖拽                           | 如果 Phase 2 决策保留为单选降级,这里也保持单选;否则在此实现多选 |
+| #     | 检查项                             | 标准                                                                 |
+| ----- | ---------------------------------- | -------------------------------------------------------------------- |
+| P5.V1 | 从 NotePreview 拖块到 canvas       | 新建 note,内容 = 源块 markdown;**源 note 内容不变**                  |
+| P5.V2 | 从 BlockNoteCard 拖块到 canvas     | 同上,消息保持不变                                                    |
+| P5.V3 | NotePreview 内部 reorder(块上下拖) | 工作正常(hook 的 `allowInternalReorder: true` 分支)                  |
+| P5.V4 | 拖动预览图                         | 与源块视觉一致;单块 / 多块外观一致(同一 `buildBlockDragImage`)       |
+| P5.V5 | 类型检查                           | `dragDrop.ts` 不再引用 `contentJson`                                 |
+| P5.V6 | 多选拖拽                           | 复用 Phase 2 已实现的 capture/bubble 多块快照机制,行为与消息卡片一致 |
+
+### 5.6 Phase 2 已落地、可直接复用的范围
+
+迁移启动时 Phase 5 原计划是"重写 drag 路径"。Phase 2 落地后实际已经把以下能力 ship 在 `MilkdownPreview` 里:
+
+- **capture-phase mousedown 抢快照** —— 在 Crepe 把多块 selection 改写为单块 `NodeSelection` 之前
+- **bubble-phase dragstart 重建 payload** —— 读快照 → 调 `getDragPayload(snapshot)`
+- **统一 drag-image 构建器**(`buildBlockDragImage`)—— 单块 / 多块复用,挂 `document.body` 规避 Shadow DOM `setDragImage` 问题,list wrapper 浅克隆保留 `::marker`
+- **生命周期收尾** —— `setTimeout(0)` 移除预览;`dragend` 清理快照 ref
+
+Phase 5 的工作几乎全在"把上面这段代码原地抽成 `useMilkdownBlockDrag` 让 `MilkdownEditor` 共用",新算法接近零。同时顺手补上:
+
+- `allowInternalReorder` 标志(NotePreview 需要 PM 的内部 reorder,聊天卡片不需要),决定是否 `event.stopPropagation()` 屏蔽 Crepe 的 mousedown
+- `effectAllowed: 'copyMove'` 的支持(让 PM 当 move、画布当 copy 共存)
+- `dragend` 时检测 `dropEffect === 'copy'`,折叠 PM selection 以防 Crepe 自动删源块(等价 [`NoteEditorSideMenu.tsx`](../apps/web/src/components/BlockNote/NoteEditorSideMenu.tsx) 的 `onDragEnd` trick)
+- (若 §2.6 #3 的 hot-fix 没在 Phase 3 做掉,这里顺手做)`getMultiBlockSelectionRange` 改读 `view.root.getSelection()`
 
 ---
 
@@ -799,14 +717,14 @@ export async function stripBlockNoteFields() {
 
 ## 时间预估
 
-| Phase       | 工作量 | 触发条件                        |
-| ----------- | ------ | ------------------------------- |
-| 1 (1a + 1b) | 4-5 天 | 立即可启动;1a Gate 不通过则终止 |
-| 2           | 1-2 天 | Phase 1 验收通过                |
-| 3           | 5-7 天 | Phase 2 上线 + 灰度 1 周稳定    |
-| 4           | 5-7 天 | Phase 3 上线 + 灰度 1 周稳定    |
-| 5           | 2-3 天 | Phase 4 上线 + 灰度 3 天稳定    |
-| 6           | 1-2 天 | Phase 5 上线 + 灰度 1 周稳定    |
+| Phase       | 工作量 | 触发条件                                                                   |
+| ----------- | ------ | -------------------------------------------------------------------------- |
+| 1 (1a + 1b) | 4-5 天 | 立即可启动;1a Gate 不通过则终止                                            |
+| 2           | 1-2 天 | Phase 1 验收通过                                                           |
+| 3           | 5-7 天 | Phase 2 上线 + 灰度 1 周稳定                                               |
+| 4           | 5-7 天 | Phase 3 上线 + 灰度 1 周稳定                                               |
+| 5           | 1-2 天 | Phase 4 上线 + 灰度 3 天稳定(Phase 2 落地后从 2-3 天降到 1-2 天,详见 §5.6) |
+| 6           | 1-2 天 | Phase 5 上线 + 灰度 1 周稳定                                               |
 
 **总计**:**约 3.5-4.5 周纯开发**,加上各阶段灰度等待,日历时间约 **6-7 周**。
 

@@ -242,9 +242,13 @@ export function MilkdownPreview(props: MilkdownPreviewProps): JSX.Element {
       const existing = container.shadowRoot;
       const shadow = existing ?? container.attachShadow({ mode: 'open' });
       if (!existing) createdShadow = shadow;
-      applySharedStyles(shadow);
-      // Clear any leftover children (e.g. from the previous mount).
+      // Clear any leftover children (e.g. from the previous mount)
+      // BEFORE re-applying styles. `applySharedStyles` may append
+      // fallback `<link>` elements for cross-origin stylesheets it
+      // could not adopt via `adoptedStyleSheets`; clearing afterwards
+      // would silently strip them.
       while (shadow.firstChild) shadow.removeChild(shadow.firstChild);
+      applySharedStyles(shadow);
       const inner = document.createElement('div');
       shadow.appendChild(inner);
       mountRoot = inner;
