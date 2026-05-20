@@ -58,7 +58,7 @@ export const MilkdownMessageCard: FC<MilkdownMessageCardProps> = ({
     <MilkdownPreview
       markdown={content}
       enableBlockDrag
-      onBlockDragStart={({ markdown, nativeEvent, blockElement }) => {
+      onBlockDragStart={({ markdown, nativeEvent }) => {
         const built = buildNoteDragPayload(markdown, threadId);
         if (!built) return;
 
@@ -67,10 +67,14 @@ export const MilkdownMessageCard: FC<MilkdownMessageCardProps> = ({
         // BlockService uses). `setDragPayload` accepts both React and
         // native DragEvent — it only reads `dataTransfer`, `clientX`,
         // and `clientY`.
+        //
+        // The drag preview image is set by `MilkdownPreview` itself
+        // (it owns the editor's Shadow DOM, where the preview must
+        // live so theme + KaTeX styles apply). We only contribute the
+        // SEDIMENT-mime payload here.
         setDragPayload(
           nativeEvent as unknown as React.DragEvent,
           built.payload,
-          { dragImageElement: blockElement },
         );
       }}
     />

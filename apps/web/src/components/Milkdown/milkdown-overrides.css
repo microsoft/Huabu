@@ -1,0 +1,278 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   Milkdown / Crepe theme overrides
+   ─────────────────────────────────────────────────────────────────────────
+   Crepe ships generous "document editor" defaults (60px ProseMirror
+   padding, 16px paragraph, 42px h1, warm-beige background, Open Sans).
+   That looks great in a standalone editor page but is far too heavy
+   inside our chat message card / note nodes. These overrides bring the
+   surface into parity with the legacy BlockNote treatment.
+
+   This file is imported from `createMilkdown.ts` AFTER the Crepe theme
+   files, so plain selectors (same specificity as Crepe's defaults) win
+   the cascade without `!important`. Do NOT import this file anywhere
+   else — keeping it co-located with `createMilkdown.ts` is what
+   guarantees the load order.
+
+   When `MilkdownPreview` is mounted with `enableBlockDrag`, the mount
+   root gets a `milkdown-preview-host` class so the chat-card-specific
+   block-handle tweaks at the bottom of this file only apply in that
+   context (the standalone `MilkdownEditor` keeps the full Crepe
+   handle). */
+
+.milkdown {
+  /* ── Crepe design-token definitions ──────────────────────────────
+     Crepe's `theme/classic.css` is NOT imported (see
+     `createMilkdown.ts`), so this block is the SOLE source of truth
+     for every `--crepe-*` token Crepe 7.21.x consumes. If a future
+     Crepe release adds a new token, it will render as `initial`
+     here — that's intentional: we want the regression to be
+     visible, not silently inherit an upstream palette.
+
+     Variable inventory mirrors `lib/theme/crepe/style.css` in
+     `@milkdown/crepe@7.21.1`. `--crepe-color-error` is declared but
+     unused by 7.21.x; we still declare it for forward compatibility. */
+
+  /* Typography — inherit so the surrounding surface owns the font. */
+  --crepe-font-default: inherit;
+  --crepe-font-title: inherit;
+  --crepe-font-code:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* Surfaces & text — map onto Sediment design tokens so dark mode
+     follows the app automatically (the `.dark` class on `<html>`
+     re-binds the underlying `--fg-*` / `--bg-*` tokens). */
+  --crepe-color-background: transparent;
+  --crepe-color-on-background: var(--fg-default);
+  --crepe-color-surface: var(--bg-surface);
+  --crepe-color-surface-low: var(--bg-default);
+  --crepe-color-on-surface: var(--fg-default);
+  --crepe-color-on-surface-variant: var(--fg-muted);
+  --crepe-color-outline: var(--edge-default);
+  --crepe-color-hover: var(--bg-hover);
+  --crepe-color-selected: var(--bg-hover);
+  --crepe-color-inverse: var(--bg-inverse);
+  --crepe-color-on-inverse: var(--fg-inverse);
+  --crepe-color-inline-area: var(--bg-hover);
+  --crepe-color-inline-code: var(--fg-default);
+  --crepe-color-error: var(--danger);
+
+  /* Accent palette — Crepe uses `primary` for focus / active states
+     (e.g. selected table column header, code-mirror keywords) and
+     `secondary` as a soft accent fill (latex editor background). */
+  --crepe-color-primary: var(--info);
+  --crepe-color-secondary: var(--info-bg);
+  --crepe-color-on-secondary: var(--fg-default);
+
+  /* Elevation — match Crepe's Material-ish two-step shadow scale. */
+  --crepe-shadow-1:
+    0 1px 3px 1px rgb(0 0 0 / 0.15), 0 1px 2px 0 rgb(0 0 0 / 0.3);
+  --crepe-shadow-2:
+    0 2px 6px 2px rgb(0 0 0 / 0.15), 0 1px 2px 0 rgb(0 0 0 / 0.3);
+
+  /* Belt-and-braces: even though the variables above propagate
+     `background` / `color` / `font-family` through Crepe's own
+     rules, keep these explicit so a future Crepe rule that hard-codes
+     a value still gets neutralized to the parent surface. */
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+}
+
+.milkdown .ProseMirror {
+  /* Zero the 60px×120px editor padding; parents already provide their
+     own padding (e.g. AIMessage's chat card uses `px-4`). */
+  padding: 0;
+}
+
+.milkdown .ProseMirror p {
+  /* 14px base, matching the legacy `.bn-default-styles`. */
+  font-size: 0.875rem;
+  line-height: 1.5;
+  padding: 0.125rem 0; /* 2px y, replaces Crepe's 4px */
+}
+
+/* Headings inherit our app font + scale proportionally to the 14px
+   base, mirroring the `.block-note-view [data-level=…]` ladder in
+   `index.css`. */
+.milkdown .ProseMirror h1,
+.milkdown .ProseMirror h2,
+.milkdown .ProseMirror h3,
+.milkdown .ProseMirror h4,
+.milkdown .ProseMirror h5,
+.milkdown .ProseMirror h6 {
+  font-family: inherit;
+  font-weight: 600;
+  padding: 2px 0;
+}
+.milkdown .ProseMirror h1 {
+  font-size: 1.715em; /* ≈ 24px */
+  line-height: 1.3;
+  margin-top: 0.75rem;
+}
+.milkdown .ProseMirror h2 {
+  font-size: 1.375em; /* ≈ 19.2px */
+  line-height: 1.3;
+  margin-top: 0.625rem;
+}
+.milkdown .ProseMirror h3 {
+  font-size: 1.2em; /* ≈ 16.8px */
+  line-height: 1.35;
+  margin-top: 0.5rem;
+}
+.milkdown .ProseMirror h4 {
+  font-size: 1.085em; /* ≈ 15.2px */
+  line-height: 1.4;
+  margin-top: 0.5rem;
+}
+.milkdown .ProseMirror h5 {
+  font-size: 1em; /* ≈ 14px */
+  line-height: 1.4;
+  margin-top: 0.5rem;
+}
+.milkdown .ProseMirror h6 {
+  font-size: 0.915em; /* ≈ 12.8px */
+  line-height: 1.4;
+  margin-top: 0.5rem;
+}
+
+/* Match BlockNote list density. */
+.milkdown .ProseMirror ul li,
+.milkdown .ProseMirror ol li {
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+/* List marker color — Crepe styles the bullet / number label-wrapper
+   with `color: var(--crepe-color-outline)`, which we map to
+   `--edge-default` (a near-white border color). That makes the marker
+   visually disconnect from the surrounding paragraph. Use
+   `--fg-muted` so bullets and numbers sit a half-step below the
+   surrounding text — visible, but de-emphasized in the traditional
+   typographic convention for list markers.
+
+   Two distinct elements need the override:
+   1. `.label-wrapper` text color  → covers ordered-list numbers, which
+      Crepe renders as `<span class="label">1</span>` inside the wrapper.
+   2. `.bullet svg` fill            → covers the unordered-list dot,
+      which Crepe renders as `<span class="bullet"><svg><circle/></svg>`.
+      Targeting `.bullet` specifically (not all `.label-wrapper svg`)
+      preserves the subtle outline color on task-list checkboxes
+      (`.checked` / `.unchecked` SVGs), where a hollow box reading is
+      the intended affordance for the unchecked state. */
+.milkdown .milkdown-list-item-block li .label-wrapper {
+  color: var(--fg-muted);
+}
+.milkdown .milkdown-list-item-block li .label-wrapper .bullet svg {
+  fill: var(--fg-muted);
+}
+
+/* Code / pre — Crepe ships 10px padding which feels chunky next to
+   14px text. Inline `code` already inherits a sane 87.5%. */
+.milkdown .ProseMirror pre {
+  padding: 0.5rem 0.625rem;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Preview-mode block handle (chat AI messages, read-only previews)
+   ─────────────────────────────────────────────────────────────────────────
+   Crepe's default block handle is two stacked 32×32 buttons ("+ add"
+   on the left, drag grip on the right) positioned 16px to the left of
+   each block. In a chat card (`bg-surface px-4`, `ml-1`) the ~66px
+   handle spills well past the panel's left edge, and the "+ add" has
+   no effect anyway because `MilkdownPreview` suppresses all input
+   mutations when `enableBlockDrag` is set.
+
+   When `MilkdownPreview` mounts with `enableBlockDrag` it adds the
+   `milkdown-preview-host` class to its mount root, scoping the rules
+   below to preview surfaces only — the standalone `MilkdownEditor`
+   keeps the full Crepe handle. */
+
+.milkdown-preview-host .milkdown-block-handle {
+  /* Crepe positions the handle via `transform: translate(…)` so its
+     right edge sits 16px to the left of each block. A positive
+     `margin-left` shifts the absolutely-positioned element to the
+     right BEFORE the transform applies. We use a small offset so the
+     20px grip floats in the chat panel's left gutter, slightly past
+     the card's outer left edge — matching the BlockNote layout where
+     the drag handle hangs outside the message body. */
+  margin-left: 16px;
+  margin-top: 2px;
+  gap: 0;
+}
+
+/* The first `.operation-item` is the "+ add" button (see Crepe's
+   `feature/block-edit/index.js`). Hide it in preview mode. */
+.milkdown-preview-host .milkdown-block-handle .operation-item:first-child {
+  display: none;
+}
+
+/* Compact drag grip — visually mirrors the legacy BlockNote
+   `DragToCanvasHandleButton` (a `Button variant="ghost" tone="neutral"
+   iconOnly` with `text-fg-subtle hover:text-fg-default` and the
+   ghost variant's default `enabled:hover:bg-hover`). The icon glyph
+   itself stays as Crepe's default "dots-six" — visually similar
+   enough to Lucide's GripVertical that we don't need to swap the
+   SVG, which would require routing a custom `handleDragIcon` through
+   Crepe's feature config and reconciling the `fill` vs `stroke`
+   rendering model.
+
+   Sizes:
+   - 16px icon — same as `iconSize={16}` default on the button.
+   - 0.25rem radius — matches Tailwind's default `rounded`. */
+.milkdown-preview-host .milkdown-block-handle .operation-item {
+  width: 1.125rem; /* 18px */
+  height: 1.25rem;
+  padding: 2px 1px;
+  border-radius: 0.25rem;
+  cursor: grab;
+}
+
+.milkdown-preview-host .milkdown-block-handle .operation-item:active {
+  cursor: grabbing;
+}
+
+/* Match the `Button variant="ghost"` hover treatment: paint a
+   `--bg-hover` tile behind the glyph AND darken the glyph itself. */
+.milkdown-preview-host .milkdown-block-handle .operation-item:hover {
+  background: var(--bg-hover);
+}
+
+.milkdown-preview-host .milkdown-block-handle .operation-item svg {
+  width: 16px;
+  height: 16px;
+  fill: var(--fg-subtle);
+  transition: fill 0.15s ease;
+}
+
+.milkdown-preview-host .milkdown-block-handle .operation-item:hover svg {
+  fill: var(--fg-default);
+}
+
+/* ── Drag preview host ──────────────────────────────────────────────
+   `MilkdownPreview.buildBlockDragImage` mounts a fresh
+   `<div class="milkdown-drag-preview-host">` in `document.body` for
+   every block drag (single OR multi). Crepe's theme and our overrides
+   end up in `document.head` via Vite, so all the `.milkdown
+   .ProseMirror …` selectors apply naturally; this block adds the
+   chrome ("lifted card" look) around that content so the drag image
+   reads as a discrete artifact the user is moving — not a stray
+   floating paragraph.
+
+   Tokens come from the global design system (`index.css`) so dark mode
+   tracks automatically. */
+.milkdown-drag-preview-host {
+  background: var(--bg-surface);
+  border: 1px solid var(--edge-default);
+  border-radius: 8px;
+  padding: 8px 12px;
+  /* Subtle ghost effect — the user still sees what they're dragging,
+     but the preview reads as "in motion" rather than "pasted on top". */
+  opacity: 0.9;
+  /* Two-step shadow matches the elevated-card scale used elsewhere
+     in the app (Crepe's `--crepe-shadow-2`). */
+  box-shadow:
+    0 4px 12px rgb(0 0 0 / 0.12),
+    0 2px 4px rgb(0 0 0 / 0.08);
+}

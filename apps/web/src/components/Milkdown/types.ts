@@ -25,16 +25,19 @@ export interface MilkdownDecorationSpec {
 }
 
 /**
- * Fired when the user starts dragging a block out of the editor surface.
+ * Fired when the user starts dragging a block (or multiple blocks) out
+ * of the editor surface.
  *
- * Phase 5 will wire this into the canvas drop targets. Phase 1b leaves
- * the handler unattached (no-op).
+ * `MilkdownPreview` owns the drag-image lifecycle (it builds the
+ * preview inside its Shadow DOM so the editor's full stylesheet stack
+ * — Crepe theme, our overrides, KaTeX — applies to the rendered image
+ * exactly as it appears in the live editor). Consumers only need to
+ * stash `markdown` on the dataTransfer (for the canvas drop handler);
+ * they should NOT call `dataTransfer.setDragImage` themselves.
  */
 export interface MilkdownBlockDragEvent {
-  /** Markdown substring of the block being dragged. */
+  /** Markdown of the block(s) being dragged. */
   markdown: string;
-  /** Native DragEvent, so callers can call setData / setDragImage. */
+  /** Native DragEvent, so callers can call setData. */
   nativeEvent: DragEvent;
-  /** Visible DOM node of the block (useful as a setDragImage fallback). */
-  blockElement: HTMLElement;
 }

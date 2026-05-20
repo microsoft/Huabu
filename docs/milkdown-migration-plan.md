@@ -211,14 +211,34 @@ export interface MilkdownPreviewProps {
 }
 
 export interface MilkdownBlockDragEvent {
-  /** Markdown sub-string of the dragged block. */
+  /** Markdown sub-string of the dragged block (single block or
+   *  multi-block range). */
   markdown: string;
   /** Native DragEvent (so caller can call setData / setDragImage). */
   nativeEvent: DragEvent;
-  /** Visible DOM node of the block (for setDragImage fallback). */
-  blockElement: HTMLElement;
+  /**
+   * Element to hand to `setDragImage`. For single-block drags this is
+   * the live block DOM; for multi-block drags it's a detached, stacked
+   * clone container built by `MilkdownPreview` (the wrapper attaches
+   * it to `document.body` just long enough to snapshot). Renamed from
+   * the original `blockElement` to make the intent — "feed me to
+   * setDragImage" — explicit, since the value may be synthetic.
+   */
+  dragImageElement: HTMLElement;
+  /**
+   * Cursor offset within the drag image. Omitted for single-block
+   * drags (browser default is correct); required for multi-block
+   * drags so the stacked preview hugs the original click point.
+   */
+  dragImageOffset?: { x: number; y: number };
 }
 ```
+
+> **历史变更**:Phase 1b 初稿只有 `blockElement: HTMLElement` 单字段、
+> 多块拖拽计划降级为单选(见下方 2.2 节)。落地阶段为了与
+> BlockNote `BlockNoteCard` 的多块拖拽体验对齐,改为现在的 `dragImageElement` +可选 `dragImageOffset`,并在 `MilkdownPreview` 内通过 capture-phase
+> mousedown 快照 + bubbling dragstart 重建多块 payload。多块场景下
+> `dragImageElement` 是 `buildStackedDragImage` 生成的离屏堆叠容器。
 
 **这套 API 同时为 Phase 2/3/5 备好**:
 
@@ -319,19 +339,38 @@ export const BlockNoteCard: FC<BlockNoteMessageViewProps> = ({ content }) => {
     <MilkdownPreview
       markdown={content}
       isolate
-      onBlockDragStart={({ markdown, nativeEvent, blockElement }) => {
-        setDragPayload(nativeEvent.dataTransfer!, {
-          kind: 'note-block',
-          markdown, // 只发 markdown,不再发 contentJson
-        });
-        nativeEvent.dataTransfer!.setDragImage(blockElement, 0, 0);
+      enableBlockDrag
+      onBlockDragStart={({
+        markdown,
+        nativeEvent,
+        dragImageElement,
+        dragImageOffset,
+      }) => {
+        // `setDragPayload` 接受 React 或原生 DragEvent;它只读
+        // `dataTransfer` 与 client 坐标。单块场景下 `dragImageElement`
+        // 是 live block DOM;多块场景下是 `MilkdownPreview` 内部
+        // `buildStackedDragImage` 现 clone 出来的离屏堆叠容器,
+        // `setDragPayload` 会临时挂到 body 上完成截图再移除。
+        setDragPayload(
+          nativeEvent as unknown as React.DragEvent,
+          {
+            kind: 'note',
+            origin: { type: 'user-from-chat', threadId },
+            data: { content: markdown }, // 不再发 contentJson
+          },
+          { dragImageElement, dragImageOffset },
+        );
       }}
     />
   );
 };
 ```
 
-> 多选拖拽暂时**降级为单选**(Milkdown 的 `plugin-block` 当前对多选 drag 支持有限)。如果用户反馈需要,Phase 5 再补。
+> 多选拖拽**保留了 BlockNote 时期的体验**:在 `MilkdownPreview` 内部
+> 通过 capture-phase mousedown 快照多块 TextSelection,bubbling
+> dragstart 再按快照拼出 markdown + 堆叠预览,无需调用方感知"单/多块"
+> 差异。实现细节见 [`MilkdownPreview.tsx`](apps/web/src/components/Milkdown/MilkdownPreview.tsx)
+> 中 `mousedownCaptureHandler` / `dragHandler` 注释。
 
 ### 2.3 `utils/io/dragDrop.ts` 同步改动
 
