@@ -16,7 +16,14 @@ export type NoteDragPayload = {
   kind: 'note';
   data: {
     content: string;
-    /** Auxiliary BlockNote JSON for lossless editor round-trips. */
+    /**
+     * @deprecated BlockNote-only auxiliary JSON. As of the Milkdown
+     * migration (`docs/milkdown-migration-plan.md` Phase 2) we no
+     * longer produce this field — the markdown in `content` is the
+     * sole source of truth. Readers still accept it so canvas drops
+     * from legacy senders (NotePreview, pre-migration drag images)
+     * keep working. The field will be removed in Phase 6.
+     */
     contentJson?: string;
   };
 };

@@ -439,6 +439,101 @@ body,
   flex-shrink: 0;
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+   Milkdown / Crepe compact theme overrides
+   ─────────────────────────────────────────────────────────────────────────
+   Crepe ships generous "document editor" defaults (60px ProseMirror
+   padding, 16px paragraph, 42px h1, warm-beige background, Open Sans).
+   That looks great in a standalone editor page but is far too heavy
+   inside our chat message card / note nodes. These overrides bring the
+   surface into parity with the legacy BlockNote treatment so the
+   Phase 2 renderer swap is visually invisible.
+
+   Loaded via `index.css` BEFORE Crepe's CSS (which is imported lazily
+   from `createMilkdown.ts`), so most rules need `!important` to win
+   the cascade. Same approach as `.block-note-view-readonly .bn-editor`
+   above. */
+
+.milkdown {
+  /* Drop the warm beige background & Open Sans — inherit from the
+     surrounding surface so the parent's `bg-surface` / typography
+     scale comes through. */
+  background: transparent !important;
+  color: inherit !important;
+  font-family: inherit !important;
+}
+
+.milkdown .ProseMirror {
+  /* Zero the 60px×120px editor padding; the parent card already
+     provides padding via `px-4` (see AIMessage.tsx). */
+  padding: 0 !important;
+}
+
+.milkdown .ProseMirror p {
+  /* 14px base, matching `.bn-default-styles`. */
+  font-size: 0.875rem;
+  line-height: 1.5;
+  padding: 0.125rem 0; /* 2px y, replaces Crepe's 4px */
+}
+
+/* Headings inherit our app font + scale proportionally to the 14px
+   base, mirroring the `.block-note-view [data-level=…]` ladder above. */
+.milkdown .ProseMirror h1,
+.milkdown .ProseMirror h2,
+.milkdown .ProseMirror h3,
+.milkdown .ProseMirror h4,
+.milkdown .ProseMirror h5,
+.milkdown .ProseMirror h6 {
+  font-family: inherit;
+  font-weight: 600;
+  padding: 2px 0;
+}
+.milkdown .ProseMirror h1 {
+  font-size: 1.715em; /* ≈ 24px */
+  line-height: 1.3;
+  margin-top: 0.75rem;
+}
+.milkdown .ProseMirror h2 {
+  font-size: 1.375em; /* ≈ 19.2px */
+  line-height: 1.3;
+  margin-top: 0.625rem;
+}
+.milkdown .ProseMirror h3 {
+  font-size: 1.2em; /* ≈ 16.8px */
+  line-height: 1.35;
+  margin-top: 0.5rem;
+}
+.milkdown .ProseMirror h4 {
+  font-size: 1.085em; /* ≈ 15.2px */
+  line-height: 1.4;
+  margin-top: 0.5rem;
+}
+.milkdown .ProseMirror h5 {
+  font-size: 1em; /* ≈ 14px */
+  line-height: 1.4;
+  margin-top: 0.5rem;
+}
+.milkdown .ProseMirror h6 {
+  font-size: 0.915em; /* ≈ 12.8px */
+  line-height: 1.4;
+  margin-top: 0.5rem;
+}
+
+/* Slightly tighten the list spacing to match BlockNote density. */
+.milkdown .ProseMirror ul li,
+.milkdown .ProseMirror ol li {
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+/* Code / pre — inline code already small enough, but the `pre` block
+   uses 10px padding which feels chunky next to 14px text. */
+.milkdown .ProseMirror pre {
+  padding: 0.5rem 0.625rem;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
 /* Thinking indicator shimmer — gradient slides across text */
 @keyframes thinking-shimmer {
   0% {

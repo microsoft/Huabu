@@ -9,7 +9,9 @@
  *  - Hides the async lifecycle: callers always receive a ready instance.
  */
 
+import { editorViewCtx, serializerCtx } from '@milkdown/core';
 import { Crepe } from '@milkdown/crepe';
+import { NodeSelection } from '@milkdown/prose/state';
 import { replaceAll } from '@milkdown/utils';
 
 import '@milkdown/crepe/theme/common/style.css';
@@ -43,6 +45,13 @@ export interface MilkdownInstance {
    * apply `normalizeMarkdown` before propagating.
    */
   onMarkdownUpdated(listener: (markdown: string) => void): () => void;
+  /**
+   * Resolve the block currently selected by ProseMirror's
+   * `NodeSelection`. Returns `null` when the selection is empty or is
+   * not a node selection (the block handle sets a `NodeSelection` on
+   * mousedown, so this is non-null inside `dragstart` for a block drag).
+   */
+  getBlockAtSelection(): { markdown: string; element: HTMLElement } | null;
   /** Tear down the ProseMirror view and release resources. */
   destroy(): Promise<void>;
 }
@@ -103,6 +112,30 @@ export async function createMilkdown(
       return () => {
         listeners.delete(listener);
       };
+    },
+    getBlockAtSelection: () => {
+      let result: { markdown: string; element: HTMLElement } | null = null;
+      crepe.editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        const selection = view.state.selection;
+        if (!(selection instanceof NodeSelection)) return;
+
+        const node = selection.node;
+        // Serialize the single block by wrapping it in a doc node — the
+        // markdown serializer expects to walk a top-level tree.
+        const docNode = view.state.schema.topNodeType.create(null, node);
+        const serializer = ctx.get(serializerCtx);
+        const markdown = serializer(docNode);
+
+        const domAtPos = view.nodeDOM(selection.from);
+        const element =
+          domAtPos instanceof HTMLElement
+            ? domAtPos
+            : (view.dom as HTMLElement);
+
+        result = { markdown, element };
+      });
+      return result;
     },
     destroy: async () => {
       listeners.clear();
