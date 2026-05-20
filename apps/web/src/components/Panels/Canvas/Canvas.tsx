@@ -26,6 +26,7 @@ import {
   urlToNodeInput,
   textToNoteNodeInput,
 } from '@/handler/canvasCommand/nodeInputBuilders';
+import { useAutoPanDuringSelection } from '@/hooks/useAutoPanDuringSelection';
 import { useCanvasGestures } from '@/hooks/useCanvasGestures';
 import { useCanvasLasso } from '@/hooks/useCanvasLasso';
 import { useCanvasShortcuts } from '@/hooks/useCanvasShortcuts';
@@ -132,6 +133,21 @@ const CanvasGestures: React.FC<{
   rfInstanceRef: React.MutableRefObject<ReactFlowInstance | null>;
 }> = ({ wrapperRef, rfInstanceRef }) => {
   useCanvasGestures(wrapperRef, rfInstanceRef);
+  return null;
+};
+
+/**
+ * Inner component that drives auto-pan while the user is dragging out a
+ * selection (built-in marquee or custom lasso). Mounted inside `<ReactFlow>`
+ * so `useAutoPanDuringSelection` can reach React Flow's store via
+ * `useStoreApi`.
+ */
+const SelectionAutoPan: React.FC<{
+  active: boolean;
+  wrapperRef: React.MutableRefObject<HTMLDivElement | null>;
+  onPan: (dx: number, dy: number) => void;
+}> = ({ active, wrapperRef, onPan }) => {
+  useAutoPanDuringSelection({ active, wrapperRef, onPan });
   return null;
 };
 
@@ -276,6 +292,8 @@ export const Canvas: React.FC<CanvasProps> = ({
     previewPath: lassoPreviewPath,
     previewNodeIds,
     previewEdgeIds,
+    isActive: isLassoActive,
+    shiftScreenPoints: shiftLassoScreenPoints,
   } = useCanvasLasso({
     active: !pendingNodeType && tool === 'lasso',
     wrapperRef,
@@ -657,6 +675,11 @@ export const Canvas: React.FC<CanvasProps> = ({
         onlyRenderVisibleElements
       >
         <CanvasGestures wrapperRef={wrapperRef} rfInstanceRef={rfInstanceRef} />
+        <SelectionAutoPan
+          active={isBoxSelecting || isLassoActive}
+          wrapperRef={wrapperRef}
+          onPan={shiftLassoScreenPoints}
+        />
         <Panel position="bottom-center" className="mb-6">
           <NodeToolbar activeTool={tool} onToolChange={setTool} />
         </Panel>
