@@ -42,9 +42,33 @@ export interface MilkdownEditorProps {
   /** Optional className applied to the editor root. */
   className?: string;
   /**
-   * Reserved for Phase 4 provenance. Accepted but unused in Phase 1b.
+   * Phase 4 provenance. The editor only renders the `blocks` half
+   * (block-level highlights via `Decoration.node`); `tombstones` is
+   * forwarded through the spec only so consumers can render their own
+   * portal-based overlays without re-deriving anchor DOMs.
    */
   decorations?: MilkdownDecorationSpec;
+  /**
+   * Fires immediately BEFORE an external `markdown` prop change is
+   * applied to the editor. Provides snapshots of block fingerprint
+   * keys + their per-block markdown for both the outgoing (current)
+   * and incoming (next) document, so callers can stamp provenance
+   * without having to parse markdown themselves.
+   *
+   * Not fired for user edits (those flow through `onChange`).
+   */
+  onExternalUpdate?: (snap: {
+    oldKeys: string[];
+    newKeys: string[];
+    oldMarkdownByKey: Map<string, string>;
+    newMarkdownByKey: Map<string, string>;
+  }) => void;
+  /**
+   * Receives the underlying instance once it has finished mounting.
+   * Useful for callers that need the block-DOM lookups (tombstone
+   * overlays). Called with `null` on unmount.
+   */
+  onReady?: (instance: MilkdownInstance | null) => void;
   /**
    * Fires when the user drags a block (or a multi-block selection) out
    * of the editor — typically used by note nodes to construct the
@@ -63,6 +87,9 @@ export function MilkdownEditor(props: MilkdownEditorProps): JSX.Element {
     editable = true,
     placeholder,
     className,
+    decorations,
+    onExternalUpdate,
+    onReady,
     onBlockDragStart,
   } = props;
 
@@ -78,6 +105,12 @@ export function MilkdownEditor(props: MilkdownEditorProps): JSX.Element {
   /** Track latest drag callback without re-mounting the editor. */
   const onBlockDragStartRef = useRef(onBlockDragStart);
   onBlockDragStartRef.current = onBlockDragStart;
+  /** Track latest external-update callback. */
+  const onExternalUpdateRef = useRef(onExternalUpdate);
+  onExternalUpdateRef.current = onExternalUpdate;
+  /** Track latest onReady callback. */
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
 
   // Mount the editor once. The async lifecycle is guarded with a
   // `cancelled` flag so React 18 StrictMode's double-effect cleans up
@@ -118,13 +151,14 @@ export function MilkdownEditor(props: MilkdownEditorProps): JSX.Element {
       });
 
       instanceRef.current = instance;
+      onReadyRef.current?.(instance);
 
       // Apply any prop change that landed during the async mount.
       const pending = pendingMarkdownRef.current;
       pendingMarkdownRef.current = null;
       if (pending !== null && pending !== lastSyncedRef.current) {
         lastSyncedRef.current = pending;
-        instance.setMarkdown(pending);
+        applyExternal(instance, pending);
       }
     })();
 
@@ -133,6 +167,7 @@ export function MilkdownEditor(props: MilkdownEditorProps): JSX.Element {
       detachDrag();
       const instance = instanceRef.current;
       instanceRef.current = null;
+      onReadyRef.current?.(null);
       if (instance) void instance.destroy();
     };
     // Intentionally mount-only: `editable`, `placeholder` are handled by
@@ -151,7 +186,7 @@ export function MilkdownEditor(props: MilkdownEditorProps): JSX.Element {
       return;
     }
     lastSyncedRef.current = next;
-    instance.setMarkdown(next);
+    applyExternal(instance, next);
   }, [markdown]);
 
   // Reconcile editable toggle.
@@ -160,6 +195,51 @@ export function MilkdownEditor(props: MilkdownEditorProps): JSX.Element {
     if (!instance) return;
     instance.setReadonly(!editable);
   }, [editable]);
+
+  // Reconcile decorations. Pushed every render with a referentially
+  // stable spec means the consumer should memoize; we do not deep-diff.
+  useEffect(() => {
+    const instance = instanceRef.current;
+    if (!instance) return;
+    instance.setBlockDecorations(decorations?.blocks ?? []);
+  }, [decorations]);
+
+  /**
+   * Apply an external markdown update and emit before/after fingerprint
+   * snapshots so callers can stamp provenance. Used for both the
+   * in-flight-mount catch-up and the steady-state reconcile.
+   *
+   * Both pre- and post-snapshots are taken with `instance.snapshotBlocks()`
+   * which traverses the doc once and lazily resolves per-key markdown,
+   * keeping the whole pass O(N).
+   */
+  function applyExternal(
+    instance: MilkdownInstance,
+    incomingMarkdown: string,
+  ): void {
+    const cb = onExternalUpdateRef.current;
+    let oldKeys: string[] = [];
+    const oldMarkdownByKey = new Map<string, string>();
+    if (cb) {
+      const before = instance.snapshotBlocks();
+      oldKeys = before.keys;
+      for (const k of oldKeys) {
+        const md = before.getMarkdown(k);
+        if (md !== null) oldMarkdownByKey.set(k, md);
+      }
+    }
+    instance.setMarkdown(incomingMarkdown);
+    if (cb) {
+      const after = instance.snapshotBlocks();
+      const newKeys = after.keys;
+      const newMarkdownByKey = new Map<string, string>();
+      for (const k of newKeys) {
+        const md = after.getMarkdown(k);
+        if (md !== null) newMarkdownByKey.set(k, md);
+      }
+      cb({ oldKeys, newKeys, oldMarkdownByKey, newMarkdownByKey });
+    }
+  }
 
   return <div ref={rootRef} className={className} />;
 }

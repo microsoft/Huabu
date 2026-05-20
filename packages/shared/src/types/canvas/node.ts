@@ -121,47 +121,72 @@ export interface NodeStyle {
   textDecoration?: string; // space-separated NodeTextDecoration values
 }
 
-// ==================== Block-Level Provenance ====================
+// ==================== Block-Level Provenance (Phase 4) ====================
 
 /**
- * Provenance record for a single BlockNote block.
- * Tracks who originally authored the block and any subsequent modifications.
+ * Provenance record for a single AI-modified block.
+ *
+ * Phase 4 (Milkdown migration): provenance is keyed by **block fingerprint**
+ * (a stable hash derived from the block's ProseMirror node — see
+ * `apps/web/src/utils/blockProvenance.ts`). When the user edits a flagged
+ * block, its fingerprint changes and the entry is auto-dropped ("user
+ * accepted by editing"). See `docs/milkdown-migration-plan.md` §4.
  */
 export interface BlockProvenance {
-  /** Who originally created this block */
-  author: 'ai' | 'user';
-  /** ISO timestamp of creation */
-  createdAt: string;
-  /** Chronological list of modifications after initial creation */
-  modifications?: Array<{
-    by: 'ai' | 'user';
-    at: string;
-  }>;
+  /** Stable fingerprint key. */
+  key: string;
   /**
-   * Plain text of this block before AI modified it.
-   * Present = has a pending diff to review. Cleared on accept/edit.
-   * Empty string means the block was newly added by AI (no prior content).
+   * How the block came to exist:
+   *  - `'modified'`: the AI edited an existing block. `baselineMarkdown`
+   *    holds the pre-edit content; Reject restores it.
+   *  - `'inserted'`: the AI inserted a brand-new block. `baselineMarkdown`
+   *    is `''`; Reject deletes the block outright.
+   *
+   * Optional for backward-compatibility with records persisted before
+   * this field existed; treated as `'modified'` when absent.
    */
-  baselineText?: string;
+  kind?: 'modified' | 'inserted';
   /**
-   * When true, this entry represents a block that was deleted by AI.
-   * `baselineText` holds the deleted block's original text.
+   * Markdown of the block as it was right before the AI edit. Empty
+   * string for `kind === 'inserted'`.
    */
-  deleted?: boolean;
-  /**
-   * For deleted entries: ID of the surviving block after which the
-   * deletion occurred. `null` = deletion was at the document start.
-   */
-  afterBlockId?: string | null;
+  baselineMarkdown: string;
+  /** ISO timestamp when the AI edit was stamped. */
+  at: string;
 }
 
 /**
- * Map of block ID → provenance.
- * The special key `__all__` is a sentinel used when the server creates/updates
- * content via Markdown (no block IDs available). The client expands this into
- * per-block entries when the editor initializes.
+ * Tombstone for a block deleted by AI. Rendered via React portal anchored
+ * after the surviving `anchorKey` block (or at doc head when `null`).
  */
-export type BlockProvenanceMap = Record<string, BlockProvenance>;
+export interface DeletedBlockInfo {
+  /** Fingerprint the deleted block had at the time of deletion. */
+  key: string;
+  /** Markdown of the block before deletion. */
+  baselineMarkdown: string;
+  /**
+   * Fingerprint of the surviving block this tombstone hangs after.
+   * `null` means the tombstone is at document head.
+   */
+  anchorKey: string | null;
+  /** ISO timestamp when the AI deletion was stamped. */
+  at: string;
+}
+
+/**
+ * Block-level provenance for a note's markdown content.
+ *
+ * Replaces the legacy block-id-keyed `BlockProvenanceMap` (the BlockNote
+ * era used persistent block ids; Milkdown / ProseMirror has none, so we
+ * key by content fingerprint instead).
+ */
+export interface MarkdownProvenance {
+  version: 1;
+  /** Live AI-modified blocks present in the current doc. */
+  blocks: BlockProvenance[];
+  /** Tombstones for blocks deleted by AI. */
+  deletedBlocks: DeletedBlockInfo[];
+}
 
 // ==================== Node Data Types ====================
 
@@ -216,44 +241,17 @@ export interface NoteNodeData extends BaseNodeData {
    * May be empty for brand-new nodes that have not been saved yet.
    */
   content: string;
-  /**
-   * Auxiliary BlockNote native JSON (lossless editor representation).
-   * Should be loaded in preference to `content` when `contentJsonSource === content`,
-   * which means the JSON was generated from the current markdown and is in sync.
-   * When `content` differs from `contentJsonSource` (e.g. edited externally by the
-   * AI agent or an external tool), `content` takes precedence and `contentJson` is
-   * regenerated from it.
-   * Optional: absent for legacy notes or notes created externally.
-   *
-   * @deprecated Phase 3 of the Milkdown migration (see
-   * `docs/milkdown-migration-plan.md`) replaced the BlockNote editor with
-   * a Milkdown surface whose canonical state is the Markdown `content`
-   * field. New writes no longer populate this field; reads still tolerate
-   * it for back-compat with historical records. Scheduled for destructive
-   * removal in Phase 6.
-   */
-  contentJson?: string;
-  /**
-   * The value of `content` at the time `contentJson` was last generated.
-   * Used to detect whether `content` has been modified externally since the last
-   * editor save, without relying on lossy `blocksToMarkdownLossy` round-trips.
-   * When `contentJsonSource === content`, `contentJson` is authoritative.
-   *
-   * @deprecated See `contentJson` — same Phase 3/Phase 6 schedule.
-   */
-  contentJsonSource?: string;
   style?: NodeStyle;
   /**
-   * Block-level content provenance map.
-   * Keys are BlockNote block IDs, or `__all__` as a sentinel when
-   * all blocks share the same provenance (e.g. AI-created content).
+   * Block-level provenance for AI edits (Phase 4, Milkdown migration).
+   * See `apps/web/src/utils/blockProvenance.ts`.
+   *
+   * Historical records may still carry the legacy block-id-keyed shape
+   * (or BlockNote `contentJson` / `contentJsonSource` / `contentBeforeAI`
+   * fields) — the runtime ignores any value that does not parse as
+   * `MarkdownProvenance` (zero-compat per migration plan §4).
    */
-  provenance?: BlockProvenanceMap;
-  /**
-   * @deprecated Use `provenance[blockId].baselineText` instead.
-   * Kept for backward compatibility with existing persisted data.
-   */
-  contentBeforeAI?: string;
+  provenance?: MarkdownProvenance;
   /**
    * Last measured intrinsic content height (in CSS pixels, unscaled) of the
    * rendered note body. Persisted as a paint hint so the node can render at

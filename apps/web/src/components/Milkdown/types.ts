@@ -5,22 +5,27 @@
  * Anything Crepe / ProseMirror specific stays internal.
  */
 
-import type { ReactNode } from 'react';
-
 /**
- * Optional decoration spec (reserved for Phase 4 provenance).
+ * Phase 4 decoration spec.
  *
- * Phase 1b accepts the type but does not render decorations — Phase 4
- * wires this through to ProseMirror `Decoration.node` / `Decoration.widget`.
- * Lines are 0-based; `endLine` is exclusive.
+ * Decorations are keyed by **block fingerprints** (see
+ * `apps/web/src/utils/blockProvenance.ts`) — same identity used by the
+ * provenance engine, so a single map drives both the highlight and any
+ * tombstone overlay drawn by the surrounding component.
+ *
+ * `tombstones` is intentionally part of the spec for symmetry but the
+ * editor itself does not render them — `NotePreview` portals a
+ * `TombstoneOverlay` onto the DOM resolved via
+ * `MilkdownInstance.getBlockDOMByKey(anchorKey)`.
  */
 export interface MilkdownDecorationSpec {
-  ranges: Array<{
-    startLine: number;
-    endLine: number;
-    className: string;
-    /** Optional widget rendered at the block boundary (e.g. accept/reject buttons). */
-    accessory?: ReactNode;
+  /** Highlight a top-level block with `className`. */
+  blocks: Array<{ key: string; className: string }>;
+  /** Reserved for `NotePreview` to consume; the editor ignores this. */
+  tombstones?: Array<{
+    deletedKey: string;
+    anchorKey: string | null;
+    markdown: string;
   }>;
 }
 

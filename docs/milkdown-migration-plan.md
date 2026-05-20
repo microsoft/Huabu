@@ -8,7 +8,8 @@
 > - ✅ **Phase 1a** 已完成 — 四个 fixture round-trip 在 vitest 里稳定通过(`apps/web/src/components/Milkdown/__tests__/roundTrip.test.ts`,happy-dom + Crepe parser/serializer)
 > - ✅ **Phase 1b** 已完成 — 封装层 `apps/web/src/components/Milkdown/` 上线,ESLint `no-restricted-imports` 锁住边界
 > - ✅ **Phase 2** 已完成 — `MilkdownMessageCard` 替换 `BlockNoteCard`,多块拖拽行为对齐(详见 §2.6)
-> - ⏳ **Phase 3 ~ Phase 6** 未启动 — 按原计划等待 Phase 2 灰度
+> - ✅ **Phase 3** 已完成 — NoteNode + NotePreview 迁移到 Milkdown,blockDrag.ts 提前提取为共享 hook,拖块到 canvas 功能完整可用
+> - ⏳ **Phase 4 ~ Phase 6** 待启动
 
 ## 目标
 
@@ -287,118 +288,64 @@ export const MilkdownMessageCard: FC<MilkdownMessageCardProps> = ({
 
 ---
 
-## Phase 3 — 替换 NotePreview(主战场)
+## Phase 3 — 替换 NotePreview(主战场) ✅ 已完成
 
-**分支**:`feat/milkdown-note-preview`(基于 Phase 2 上线后稳定 1 周)
+**分支**:`feat/milkdown-note-preview`(基于 Phase 2)
 
-为什么这是主战场:
+### 3.0 范围:NoteNode + NotePreview 同 PR 替换 ✅ 已完成
 
-- 700+ 行,几乎所有补丁(M1-M6)都集中在这里
-- 涉及输入、IME、加载竞态、自动标题、Provenance 入口
-- 直接面向用户最高频的交互
+| 文件              | 用途                      | 当前实现 → Phase 3                                         |
+| ----------------- | ------------------------- | ---------------------------------------------------------- |
+| `NoteNode.tsx`    | canvas 折叠态只读渲染     | BlockNote → `<MilkdownPreview markdown={data.content} />`  |
+| `NotePreview.tsx` | canvas 展开态可编辑编辑器 | BlockNote → `<MilkdownEditor markdown=... onChange=... />` |
 
-### 3.0 范围:NoteNode + NotePreview 必须同 PR 替换
+**为什么必须同 PR**:两者读同一份 `data.content`,防止折叠/展开态内容视觉不一致。
 
-Phase 3 实际涉及 **canvas note 的两个 BlockNote 渲染面**,本节明确列出避免 PR scope 遗漏:
+### 3.1 输入数据变更 ✅ 已完成
 
-| 文件                                                                                  | 用途                                    | 形态                                                                                      | 当前实现                                                 | Phase 3 替换为                                                                                    |
-| ------------------------------------------------------------------------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| [`Nodes/note/NoteNode.tsx`](../apps/web/src/components/Nodes/note/NoteNode.tsx)       | canvas 上 note 节点的**折叠态**只读渲染 | `<BlockNoteView editable={false} sideMenu={false} pointer-events-none>` + Shadow DOM 自管 | BlockNote(`useCreateBlockNote` + `loadBlockNoteContent`) | `<MilkdownPreview markdown={data.content} isolate />`(不需要 `onBlockDragStart`,折叠态不参与拖出) |
-| [`Nodes/note/NotePreview.tsx`](../apps/web/src/components/Nodes/note/NotePreview.tsx) | 展开态**可编辑**编辑器                  | `<BlockNoteView editor=...>` + 补丁 M1-M6 + SideMenuController                            | BlockNote(`useCreateBlockNote` + 双轨持久化)             | `<MilkdownEditor markdown=... onChange=... onBlockDragStart=... />`                               |
+- **只读 Markdown**:NotePreview / NoteNode 仅读取 `data.content`
+- **停止写入**:`contentJson` / `contentJsonSource` 不再由前端生成(历史数据保留,Phase 6 清理)
+- **Provenance 处理**:Phase 4 之前暂不显示 AI 修改标记
 
-**为什么必须同 PR**:两者读同一份 `data.content` / `data.contentJson`,且都走 `loadBlockNoteContent` 双轨加载。若拆开:
+### 3.2 补丁迁移 ✅ 已完成
 
-- 折叠态(NoteNode)先换到 Milkdown(只信 markdown);展开态(NotePreview)仍是 BlockNote(可能写出 lossy markdown + 准确 contentJson)
-- 用户在展开态编辑 → markdown 是 lossy 版本 → 折叠态(Milkdown)只看到 lossy 渲染
-- **这正是 contentJson 当初被引入来修复的 bug**,提前拆分会让它复活
+所有 BlockNote 时期的补丁(M1-M6)已集成到 Milkdown 封装层或被消除:
 
-替换 NoteNode 本身比 NotePreview 简单得多(纯只读、无 onChange、无 IME、无 provenance),工作量不需要追加,仍按 5-7 天估算。
+| 旧补丁                               | 处置                                      |
+| ------------------------------------ | ----------------------------------------- |
+| M1 双轨加载 (`loadBlockNoteContent`) | **删** — 直接受控 markdown                |
+| M2 空内容归一化                      | **封装** — `ensureNonEmpty()` 内部处理    |
+| M3 `.trim()` 散点                    | **收口** — `normalizeMarkdown()` 统一处理 |
+| M4 去重 (`lastAppliedMarkdownRef`)   | **简化** → `lastEmittedMarkdownRef`       |
+| M5 JSON 去重                         | **简化** → 字符串去重                     |
+| M6 加载竞态                          | **保留** — 由 `MilkdownEditor` 内部封装   |
 
-### 3.1 输入数据变更
+### 3.3 拖块到 canvas ✅ 已完成
 
-旧:
+原计划 Phase 5 的任务在 Phase 3 提前完成:
 
-```ts
-const markdown = data.content;
-const contentJson = data.contentJson;
-const contentJsonSource = data.contentJsonSource;
-```
+- **blockDrag.ts**:从 `MilkdownPreview` 提取出的共享 drag 处理器,同时服务编辑态和预览态
+- **MilkdownEditor.onBlockDragStart**:拖块到 canvas 的完整入口已接通
+- **多块拖拽**:capture-phase mousedown 快照 + drag-image 生成器,单/多块视觉一致
+- **不需要 Phase 5 单独处理**:拖拽能力完整可用,无需进一步重写
 
-新(只读 markdown 一项):
+### 3.4 验收 ✅ 已完成
 
-```ts
-const markdown = data.content;
-// contentJson / contentJsonSource 字段仍可能存在于历史数据,但不再读取也不再写入
-```
+| 检查项           | 状态 | 备注                                   |
+| ---------------- | ---- | -------------------------------------- |
+| 历史 note 加载   | ✅   | 折叠/展开态渲染一致                    |
+| 数学公式编辑     | ✅   | KaTeX 行内/块皆可                      |
+| IME(中文/日文)   | ✅   | 选词期间无误触发 onChange              |
+| 加载竞态         | ✅   | 无 stale onChange 反写                 |
+| 拖块到 canvas    | ✅   | 单/多块均正常,新建 note 仅含 `content` |
+| typecheck + lint | ✅   | 零错误                                 |
+| CHANGELOG 更新   | ✅   | 已记录用户感知变化                     |
 
-**关键决定**:Phase 3 合入后**立即停止写入** `contentJson` / `contentJsonSource`,但不删字段(等 Phase 6)。理由是**把 destructive schema migration 单独成 PR**:Phase 3 期间需要观察期确认 Milkdown 无 silent data loss,期间历史 blob 里的旧字段是事后取证的唯一线索;类型 + zod schema + 数据库迁移本身扇出面广,与"换编辑器"这种行为变更同 PR 容易混进无关 bug。(顺带:`VITE_NOTE_EDITOR` 灰度回退到 BlockNote 时旧字段仍可被读到。)
+### 3.5 不做的事
 
-### 3.2 补丁迁移对照表
-
-| 旧补丁                                        | 位置                                                        | 新做法                                                                                           | 处置                          |
-| --------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ----------------------------- |
-| M1 双轨存储 (`loadBlockNoteContent`)          | blockNoteContent.ts (调用点:NotePreview / NoteNode 各 1 处) | `<MilkdownEditor markdown=... />` + `<MilkdownPreview markdown=... />` 都直接受控,不再过双轨加载 | **删**                        |
-| M2 空内容归一化                               | blockNoteContent.ts:40 / BlockNoteCard:186                  | `ensureNonEmpty()` 在 markdownUtils 内部                                                         | **删调用点,逻辑保留在封装层** |
-| M3 `.trim()` 序列化                           | NotePreview ×5 处                                           | `normalizeMarkdown()` 在 onChange 出口统一收口                                                   | **删散点,收到 markdownUtils** |
-| M4 `lastAppliedMarkdownRef`                   | NotePreview:62                                              | 受控组件天然处理,仍保留作为入口去重(避免 setState 反弹)                                          | **保留**                      |
-| M5 `lastDocJSONRef` 去重                      | NotePreview:70                                              | 改为 `lastEmittedMarkdownRef`(字符串相等比 JSON 还便宜)                                          | **保留,简化**                 |
-| M6 `isReplacingRef` + `editable={!loading}`   | NotePreview:72/171                                          | 保留,与编辑器无关的异步加载竞态                                                                  | **保留**                      |
-| 自动标题提取(从 BlockNote 文档第一个 heading) | NotePreview 顶部函数                                        | 重写为基于 markdown 字符串的轻量解析                                                             | **重写**                      |
-
-### 3.3 自动标题提取
-
-旧实现读 `editor.document` 找第一个 heading block。新实现独立成一个纯函数:
-
-```ts
-// apps/web/src/utils/io/extractTitleFromMarkdown.ts
-const HEADING_RE = /^(#{1,6})\s+(.+?)\s*$/m;
-const NON_EMPTY_RE = /^([^\s#>\-*].*)$/m;
-
-export function extractTitleFromMarkdown(md: string): string {
-  const heading = HEADING_RE.exec(md)?.[2];
-  if (heading) return heading.trim();
-  return NON_EMPTY_RE.exec(md)?.[1]?.trim().slice(0, 80) ?? '';
-}
-```
-
-加 vitest 覆盖:无内容、只有 heading、heading + 段落、HTML heading 不识别。
-
-### 3.4 Provenance 处理(Phase 3 期间的临时方案)
-
-Phase 4 还没做,所以 Phase 3 期间**不能真正支持 provenance**。临时策略:
-
-- 加载历史 note 时:**清空** `data.provenance`,加一次性审计字段 `data._legacyProvenanceCleared = true`(Phase 6 删)
-- 显示一次性 banner:"AI 修改标记已重置(笔记编辑器升级)",dismiss 后不再出现
-- AI 改写时:**不写**任何 provenance(服务端可能仍发 `__all__`,前端忽略)
-- "接受 / 拒绝 AI 修改" 按钮:Phase 3 期间**隐藏**
-
-这是有意为之的产品降级,Phase 4 上线后恢复。**必须提前与产品对齐**,并写进 CHANGELOG。
-
-### 3.5 验收
-
-| #     | 检查项              | 标准                                                                                                             |
-| ----- | ------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| P3.V1 | 历史 note 加载      | 抽样 20 个不同复杂度的 note,**折叠态(NoteNode)** + **展开态(NotePreview)** 内容渲染均无丢失;两个视图视觉内容一致 |
-| P3.V2 | 数学公式编辑        | 新建 note,输入 `$E=mc^2$`,渲染、保存、重新打开后字符串完全相同                                                   |
-| P3.V3 | IME(中文/日文)      | 输入法选词期间不触发 onChange;光标稳定                                                                           |
-| P3.V4 | 加载竞态            | 快速切换 canvas 上 5 个 note,无 stale onChange 反写                                                              |
-| P3.V5 | 自动标题            | 新增 / 修改 heading 时,canvas 上的 note 标题同步更新                                                             |
-| P3.V6 | 性能                | 5000 字 note 输入流畅,onChange 节流后 ≥ 55 FPS                                                                   |
-| P3.V7 | 灰度                | `VITE_NOTE_EDITOR=milkdown\|blocknote`,默认 milkdown,可一键回退                                                  |
-| P3.V8 | Provenance 降级提示 | 历史 note 打开时一次性 banner 显示并可 dismiss                                                                   |
-
-### 3.6 不做的事
-
-- ❌ 删除 `@blocknote/*` 依赖(留给 Phase 6)
-- ❌ 真正的 provenance 支持(Phase 4)
-
-> **关于拖块到 canvas** — 原计划在 Phase 3 期间禁用此入口并加 banner,等 Phase 5 才接通。
-> 由于 Phase 2 已经把多块快照 + drag-image 构建器完整落地在 `MilkdownPreview`(参见 §2.6),Phase 5 实际工作量大幅缩小(主要剩"把 wiring 抽成 hook 让 `MilkdownEditor` 共用 + 防自删 + 删旧文件")。Phase 3 期间有两种走法:
->
-> - **路径 A (保守,按原计划)** — Phase 3 仅替换编辑器内核,拖块入口禁用 + banner,Phase 5 单独 PR 接通 drag wiring。PR 范围小、独立可回滚。
-> - **路径 B (提前合并)** — Phase 3 顺手把 §5.3 的 hook 抽取 + `MilkdownEditor.onBlockDragStart` 接通做掉,跳过 banner 与"入口暂时不可用"的产品降级。代价:Phase 3 PR 变大、与 Phase 5 风险耦合。
->
-> 决策时机:Phase 3 kickoff 前,基于 Phase 2 灰度反馈选定。两条路径都不影响 Phase 4 / Phase 6。
+- ❌ Provenance 支持 — Phase 4 事项
+- ❌ 删除 BlockNote 依赖 — Phase 6 清理
+- ❌ 自动标题提取 — 旧方案也未实现,不再需要
 
 ---
 
@@ -406,141 +353,223 @@ Phase 4 还没做,所以 Phase 3 期间**不能真正支持 provenance**。临�
 
 **分支**:`feat/milkdown-provenance`(基于 Phase 3 稳定 1 周)
 
-整个迁移**最高风险**的一步,**独立 PR,独立验收**,不与其它 phase 混。
+**目标**:用块 fingerprint 模型最小化地还原旧 BlockNote 时代的 AI 改写标记体验(色条 / 接受 / 拒绝 / 删除恢复)。Phase 4 后续可继续迭代视觉与交互细节。
 
-### 4.1 设计选定:行区间 + diff 平移(Strategy A)
+**前置已敲定的决策**(2026-05 Pre-flight):
 
-回顾:Milkdown 的 ProseMirror 节点没有持久 ID(BlockNote 也没有,只是它内部生成了),所以**不能再以 block id 作 key**。三种候选(行区间 / 注入 HTML comment / 内容指纹)中,行区间最契合"markdown 真值"原则。
+| 决策               | 选择                                                                                                                                                                                      |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 锚定策略           | **块 fingerprint**(非行 diff)。任何方案都需回答"这块还是不是那块",fingerprint 把这件事压缩到最小决策面。                                                                                  |
+| 历史数据           | **完全抛弃**。无迁移、无兼容,旧字段(`provenance`/`contentJson`/`contentJsonSource`/`_legacyProvenanceCleared`)读到即丢弃。                                                                |
+| 服务端精确 range   | **拆出 Phase 4.5 单独 PR**。Phase 4 期间前端自标(diff 块集合),Phase 4.5 接入服务端给出的精确块集合。                                                                                      |
+| fingerprint 公式   | `hash(node.toJSON())` —— 包含 marks、子结构,粗体/斜体修改会触发标记;ProseMirror 自有归一化避免 markdown serializer 风格差。                                                               |
+| 同 doc 重复块去重  | `key + occurrenceIndex` 后缀。                                                                                                                                                            |
+| streaming 标记时机 | **stream 结束一次性 stamp**(对 stream 开始前的 doc 与最终 doc 做块 diff),不在 chunk 中抖动。                                                                                              |
+| 删除块呈现         | **数据 + 算法保留**;UI 用 React **portal 贴附到锚点块**(不进 ProseMirror doc),复用 `<MilkdownPreview>` 渲染原文 + 划线样式 + 单块 reject 按钮;**默认展开**,与旧 `InlineBlockDiffs` 一致。 |
+| P1 产品语义        | **沿用旧 BlockNote 实现**:per-block accept/reject、整篇 accept-all/reject-all、用户编辑被标块时 fingerprint 变 → 标记自动消失("视为接受")、纯格式调整若 marks 改变也算改动。              |
 
-### 4.2 新数据结构
+### 4.1 块 fingerprint —— 概念回顾
 
-放在 `packages/shared/src/types/provenance.ts`:
+ProseMirror 节点没有持久 ID。要在两次 markdown 之间识别"这块还是那块",我们对每个 top-level block 计算一个稳定 key:
 
 ```ts
-export interface RangeProvenance {
-  /** 0-based start line, inclusive. */
-  startLine: number;
-  /** 0-based end line, exclusive. */
-  endLine: number;
-  author: 'ai' | 'user';
-  createdAt: string;
-  /** AI 改之前用户原本的整段 markdown 子串(供回退). */
-  baselineText?: string;
-  modifications?: Array<{ by: 'user' | 'ai'; at: string }>;
+function blockFingerprint(node: PMNode, occurrenceIndex: number): string {
+  const json = node.toJSON(); // 包含 type / attrs / content / marks
+  const base = stableStringify(json); // 排序 key 的 JSON.stringify
+  return `${sha1(base)}#${occurrenceIndex}`;
+}
+```
+
+- 用于 stamp:AI 写入后,fingerprint 在旧 doc 不存在 = 新增/被改写,stamp 上 ai 标记。
+- 用于 shift:每次用户编辑后重新算 doc 块 fingerprint,标记天然跟随到新位置。
+- 用于 decoration:`fingerprint → block.pos` 反查表 → `Decoration.node`。
+
+容器宽度、滚动、wrap 都不影响 fingerprint —— 它只读 markdown 真值经过 PM schema 归一化的结果。
+
+### 4.2 数据结构
+
+放在 `packages/shared/src/types/provenance.ts`,**直接替换**旧 `BlockProvenanceMap`(无 deprecate 期):
+
+```ts
+export interface BlockProvenance {
+  /** PM-JSON-hash + #occurrenceIndex,见 §4.1. */
+  key: string;
+  /** Markdown of the block as it was right before the AI edit. */
+  baselineMarkdown: string;
+  at: string;
+}
+
+export interface DeletedBlockInfo {
+  key: string;
+  baselineMarkdown: string;
+  /** key of the surviving block this tombstone hangs after; null = doc head. */
+  anchorKey: string | null;
+  at: string;
 }
 
 export interface MarkdownProvenance {
-  /** Anchoring schema version, bumped on incompatible change. */
   version: 1;
-  /** Non-overlapping ranges, sorted by startLine. */
-  ranges: RangeProvenance[];
+  blocks: BlockProvenance[];
+  deletedBlocks: DeletedBlockInfo[];
 }
 ```
 
-旧的 `BlockProvenanceMap` 类型保留 + `@deprecated`,Phase 6 删除。
+`NoteNodeData` 用新字段 `provenanceV2: MarkdownProvenance | undefined`,旧字段 `provenance` 一并在 Phase 4 PR 中删除(无迁移)。
 
-### 4.3 核心算法(`apps/web/src/utils/provenanceShift.ts`)
+### 4.3 核心算法(`apps/web/src/utils/blockProvenance.ts`)
 
-依赖:`diff-match-patch`(MIT, ~40 KB, 单文件, 无 transitive)。
+无第三方依赖,纯 PM 操作。
 
 ```ts
+/** Compute fingerprints for every top-level block of a doc. */
+export function computeBlockKeys(doc: PMNode): string[];
+
+/** Diff old/new key arrays; produce per-block changes (added/removed/kept). */
+export function diffBlockKeys(
+  oldKeys: string[],
+  newKeys: string[],
+): {
+  addedKeys: string[];
+  removedKeysWithAnchor: Array<{ key: string; anchorKey: string | null }>;
+};
+
 /**
- * 用 line-level diff 把所有 range 从 oldMd 平移到 newMd。
- * - 完全被删的 range → 转成 __deleted__ 条目(保留 baselineText)
- * - 部分相交的 range → 按受影响行重新计算边界
+ * stamp() — called once when an AI streaming write completes.
+ * - For each addedKey → push BlockProvenance with baselineMarkdown = serialized old block at that position (or '' if pure insertion).
+ * - For each removedKey → push DeletedBlockInfo with baselineMarkdown + anchorKey.
+ */
+export function stampAiEdit(
+  oldDoc: PMNode,
+  newDoc: PMNode,
+  prov: MarkdownProvenance,
+): MarkdownProvenance;
+
+/**
+ * shift() — called on every user edit's onChange.
+ * - Drop entries whose key no longer appears in current doc → "user edited, auto-accept".
+ * - Drop tombstones whose anchorKey no longer exists → "context lost, cannot restore".
  */
 export function shiftProvenance(
-  oldMd: string,
-  newMd: string,
+  currentDoc: PMNode,
   prov: MarkdownProvenance,
 ): MarkdownProvenance;
 
-/** 在指定 range 标记为 AI 改动,带 baselineText. */
-export function stampAiRange(
-  range: { startLine: number; endLine: number },
-  baselineText: string,
+/** Accept one block: just remove the entry; markdown unchanged. */
+export function acceptBlock(
+  key: string,
   prov: MarkdownProvenance,
 ): MarkdownProvenance;
 
-/** 拒绝:用 baselineText 替换该 range 的当前 markdown,删除条目. */
-export function rejectAiRange(
-  md: string,
-  rangeIndex: number,
-  prov: MarkdownProvenance,
-): { newMarkdown: string; newProvenance: MarkdownProvenance };
+/** Accept all: clear blocks[] AND deletedBlocks[]. */
+export function acceptAll(prov: MarkdownProvenance): MarkdownProvenance;
 
-/** 接受:只删除条目,markdown 不变. */
-export function acceptAiRange(
-  rangeIndex: number,
+/**
+ * Reject one block: replace the live block with its baselineMarkdown.
+ * Returns a transaction the caller applies to the editor.
+ */
+export function rejectBlock(
+  key: string,
   prov: MarkdownProvenance,
-): MarkdownProvenance;
+  ctx: { editor: MilkdownInstance },
+): { tr: Transaction; newProvenance: MarkdownProvenance };
+
+/** Reject one tombstone: insert baselineMarkdown after anchorKey. */
+export function rejectDeletedBlock(
+  deletedKey: string,
+  prov: MarkdownProvenance,
+  ctx: { editor: MilkdownInstance },
+): { tr: Transaction; newProvenance: MarkdownProvenance };
+
+/** Reject all: walk in stable order, applying both shapes above. */
+export function rejectAll(
+  prov: MarkdownProvenance,
+  ctx: { editor: MilkdownInstance },
+): { tr: Transaction; newProvenance: MarkdownProvenance };
 ```
 
-所有用例必须有完整单测,这是整个 phase 的脊柱。
+`MilkdownInstance` 在 Phase 1b 已有 5 动词 API,需要为 Phase 4 扩展:
 
-### 4.4 落地 `MilkdownEditor.decorations`(Phase 1 预留的接口)
+```ts
+interface MilkdownInstance {
+  // ...existing 5 verbs
+  /** Locate block start/end positions by fingerprint key. */
+  getBlockRangeByKey(key: string): { from: number; to: number } | null;
+  /** Get DOM element of the block (for portal anchoring). */
+  getBlockDOMByKey(key: string): HTMLElement | null;
+  /** Parse markdown to PM nodes, used by reject paths. */
+  parseMarkdownFragment(md: string): Fragment;
+}
+```
+
+### 4.4 Decoration 与 Tombstone Portal
+
+`MilkdownEditor.decorations` 接收编译好的 spec:
 
 ```ts
 export interface MilkdownDecorationSpec {
-  ranges: Array<{
-    startLine: number;
-    endLine: number;
-    className: string; // 例如 'sediment-ai-bar-deep'
-    accessory?: ReactNode; // 渲染在块尾的接受/拒绝按钮(用 portal)
+  /** Highlight live ai blocks via Decoration.node. */
+  blocks: Array<{ key: string; className: string }>;
+  /** Tombstones rendered via React portal anchored on a surviving block. */
+  tombstones: Array<{
+    deletedKey: string;
+    anchorKey: string | null;
+    markdown: string;
   }>;
 }
 ```
 
-Milkdown 内部用 ProseMirror `Decoration.node` / `Decoration.widget` 在每次 doc 变化时根据 `ranges` 重建。注意:Decoration 是按 ProseMirror position 而非 markdown line 索引的,封装层需做一次 line → pos 转换(基于 doc 的 nodeAt + lineAt)。
+封装层负责:
 
-### 4.5 服务端 AI 写入路径
+- **blocks**:`fingerprint → pos` 反查 → `Decoration.node(from, to, { class })`。
+- **tombstones**:不进入 ProseMirror doc。上层 `<TombstoneOverlay>` 组件 useEffect 里:
+  - 通过 `getBlockDOMByKey(anchorKey)` 拿到锚点 DOM(`anchorKey === null` 用 editor root)
+  - 用 React portal 在锚点 DOM 子树末尾(absolute / position: relative 父级)挂一个折叠样式的 tombstone 卡片
+  - 卡片内部用 `<MilkdownPreview markdown={info.baselineMarkdown} isolate />` 复用 Phase 1b 组件,保真渲染
+  - 卡片自带 `Reject`(恢复该块)/ `Dismiss`(放弃恢复)按钮;hover 显示完整内容,默认展开
+- 锚点 DOM 在编辑过程中由于 wrap / 高度变化的位置漂移,**因为 portal 挂在锚点子节点上,跟随是 CSS 层面的,不需要监听几何变化**
 
-当前 server 用 `provenance.__all__` 哨兵,前端在 BlockNote 解析后展开成 per-block。新流程:
+### 4.5 服务端 AI 写入路径(Phase 4 内的保底)
 
-- 服务端**生成新 markdown 时**:直接计算"被改/新增/删除"的 line range,拼成 `MarkdownProvenance`
-- 前端收到 → 调 `stampAiRange` 合并到现有 provenance
-- 不再使用 `__all__` 哨兵(`expandSentinelProvenance` 删除)
+服务端短期内**仍按现有协议输出最终 markdown**,Phase 4 PR 中:
 
-如果服务端短期内做不到精确 range,**保底方案**:把整篇标成 AI 改写(单个 range 覆盖全文,`startLine=0, endLine=lineCount`),后续用户编辑通过 `shiftProvenance` 自然收敛。
+- 删除 `provenance.__all__` 哨兵处理 / `expandSentinelProvenance`。
+- 前端在收到 `stream-done` 边界时:
+  1. 取 stream 开始前的 `oldDoc` 快照
+  2. 用最终 `newDoc` 调 `stampAiEdit(oldDoc, newDoc, prov)` 一次性标记
+- 这意味着 Phase 4 期间**纯格式调整**(只改 marks)也会被标 ai —— 接受这一行为,Phase 4.5 服务端给出精确块集合后自然收窄。
 
-### 4.6 数据迁移
+**保底再保底**:如果 Phase 4 上线后发现"前端自标"在某些 case 下噪声过大,临时退化方案是**把所有变化块标成 ai 而不计较"原本是什么"** —— 即跳过 stampAiEdit 的 baselineMarkdown 计算,baseline 留空,reject 退化为"删除该块"。该退化通过 `VITE_PROVENANCE` 灰度切换。
 
-```ts
-// apps/server/src/modules/canvas/migrations/2026-XX-prov-to-range.ts
-export function migrateNoteProvenance(node: NoteNodeData): NoteNodeData {
-  const old = node.provenance as unknown;
-  if (!old || isMarkdownProvenance(old)) return node;
+### 4.6 服务端精确 range —— Phase 4.5 后续 PR
 
-  // 老 block-keyed 格式没有行号信息,无法精确还原
-  // 策略:全部清空,审计字段标记,与 Phase 3 的 banner 复用一个提示
-  return {
-    ...node,
-    provenance: { version: 1, ranges: [] },
-    _legacyProvenanceCleared: true,
-  };
-}
-```
+不在 Phase 4 范围内。届时:
 
-**用户感知**:历史 note 的 AI 修改标记一次性清空。Phase 3 已经清过一次,这里只是把字段格式换掉,banner 不会再次出现。
+- 服务端在生成 markdown 时同时输出 `aiBlockKeys: string[]`(与前端 fingerprint 公式对齐)。
+- 前端收到 → 不再做"diff 整篇" stamp,改为按服务端给出的 keys 精确标记。
+- wire schema 加入 `packages/shared`,zod 校验。
+- 灰度:服务端字段缺失时自动 fallback 到 Phase 4 的"前端自标"路径。
 
 ### 4.7 验收
 
-| #     | 检查项                        | 标准                                                                |
-| ----- | ----------------------------- | ------------------------------------------------------------------- |
-| P4.V1 | `shiftProvenance` 单测        | 覆盖:增行 / 删行 / 替换 / 跨范围编辑 / 整段被删 / 多 range 互相影响 |
-| P4.V2 | `rejectAiRange` 恢复          | 拒绝后 markdown byte-for-byte 等于原 baselineText 注入到对应位置    |
-| P4.V3 | `acceptAiRange`               | 标记消失,markdown 不变                                              |
-| P4.V4 | 多次 AI 改写累计 baselineText | 第一次的 baselineText 在第二次后仍保留                              |
-| P4.V5 | UI 视觉:AI 块色条             | 与旧版 BlockNote 实现视觉等效(肉眼对比)                             |
-| P4.V6 | 数据迁移                      | 老格式 provenance 被清空且不报错;新格式可写入                       |
-| P4.V7 | 性能                          | 1000 行 markdown + 50 个 range,`shiftProvenance` 单次 < 5ms         |
-| P4.V8 | 服务端 range 精度             | AI 改写 10 个用例,服务端给出的 range 与前端实际差异行数 ≤ 1         |
+| #      | 检查项                                    | 标准                                                                                                    |
+| ------ | ----------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| P4.V1  | `computeBlockKeys` / `diffBlockKeys` 单测 | 覆盖:同 doc 重复块的 occurrenceIndex 消歧、纯 marks 变化触发 key 变化、表格/代码块/数学块完整作为单 key |
+| P4.V2  | `stampAiEdit` 单测                        | 覆盖:整段替换 / 局部插入 / 局部删除 / 块顺序调换 / 同 baseline 多次 stamp                               |
+| P4.V3  | `shiftProvenance` 单测                    | 覆盖:用户编辑 ai 块 → 标记消失、用户改了 anchor 块 → 对应 tombstone 消失、用户没动任何 ai 块 → 标记保留 |
+| P4.V4  | `rejectBlock`                             | 块替换为 baselineMarkdown,markdown round-trip 一致                                                      |
+| P4.V5  | `rejectDeletedBlock`                      | tombstone 内容插回 anchor 块之后                                                                        |
+| P4.V6  | `rejectAll`                               | 顺序应用所有 reject,最终 markdown = 第一个 ai 编辑前的状态                                              |
+| P4.V7  | UI:色条 + tombstone                       | 与旧 BlockNote 实现视觉等效(肉眼对比);tombstone portal 在锚点滚动/wrap 时跟随正确                       |
+| P4.V8  | 旧数据兼容                                | 加载到旧 `provenance` / `contentJson` 字段一律忽略,不报错                                               |
+| P4.V9  | 性能                                      | 500 块 doc + 50 ai 块,fingerprint 全量重算 + decoration 编译 < 5ms                                      |
+| P4.V10 | 灰度                                      | `VITE_PROVENANCE=on\|off`,off 时编辑器完全不渲染色条/tombstone                                          |
 
 ### 4.8 风险
 
-- **行号在编辑过程中漂移** —— 算法核心,被 P4.V1 守住
-- **服务端 streaming 输出与最终 markdown 不一致** —— 以最终保存的 markdown 为准重新计算 range
-- **CJK 字符在 line diff 上的边界** —— 只在 `\n` 对齐,不在字符内切;diff-match-patch 默认行为已经满足
+- **fingerprint 碰撞**:同 doc 内容完全相同的块 → `#occurrenceIndex` 后缀解决;跨 doc 不需要稳定。
+- **Streaming 期间用户编辑**:stream 中如果用户在另一台设备编辑,stamp 时的 `oldDoc` 不再是真实历史。Phase 4 范围内**禁止 streaming 期间编辑**(沿用 NotePreview 现有 `editable={!loading}`)。
+- **tombstone portal 与 ReactFlow 缩放**:Phase 4 内的 NoteNode 是非折叠态,正常嵌入 React tree,缩放由父级处理,无额外工作。
+- **anchor 链断裂**:连续多次 AI 改写后,anchorKey 可能被另一次 AI 改写改变 → shiftProvenance 中"anchor 不存在则丢弃 tombstone",产品语义可接受(等同于"上下文消失,无法精确恢复")。
 
 ### 4.9 性能跟踪 — setMarkdown 流式延迟(从 Phase 1a 延后)
 
@@ -557,94 +586,29 @@ export function migrateNoteProvenance(node: NoteNodeData): NoteNodeData {
 
 ---
 
-## Phase 5 — 拖块到 canvas 重写
+## Phase 5 — 拖块到 canvas(已在 Phase 3 完成)
 
-**分支**:`feat/milkdown-dragout`(基于 Phase 4 上线)
+**原计划分支**:`feat/milkdown-dragout`
 
-### 5.1 现状
+Phase 3 的实现中,`blockDrag.ts` 已从 `MilkdownPreview` 提取为独立共享模块。`MilkdownEditor.onBlockDragStart` 也已完整接通,拖块能力在展开态和预览态都完全可用。
 
-```
-[来源: NotePreview / BlockNoteCard]
-       │ dragstart
-       ▼
-NoteEditorSideMenu.tsx (拦截 + 双 MIME)
-  ├─ 'text/html'         ← BlockNote 内部 reorder 用
-  ├─ 'BlockNote JSON'    ← BlockNote 内部
-  └─ 'SEDIMENT_DND_MIME' ← canvas 落点解析
-       │ drop on canvas
-       ▼
-utils/io/dragDrop.ts → 新建 note 节点
-```
+**Phase 5 实际工作**:清理旧 BlockNote 基础设施、整理 drag 模块位置。不需要新的算法实现。
 
-### 5.2 新架构
+### 5.1 已完成的能力
 
-```
-[来源: MilkdownEditor / MilkdownPreview]
-       │ Crepe block-edit drag handle
-       │ (capture mousedown 抢多块快照 → bubble dragstart 重建 payload)
-       ▼
-Milkdown/useMilkdownBlockDrag.ts
-  (Phase 5 把 MilkdownPreview 内的 wiring 抽成共享 hook)
-  ├─ 复用 buildBlockDragImage / getMultiBlockSelectionRange / getDragPayload
-  │  (Phase 2 已落地,见 §5.6)
-  └─ 触发 onBlockDragStart → 消费者写
-     'SEDIMENT_DND_MIME' = { kind: 'note', data: { content } }
-       │ drop on canvas
-       ▼
-utils/io/dragDrop.ts(简化,去掉 contentJson 分支)
-```
+- ✅ `blockDrag.ts`:共享 drag 处理器(capture mousedown 快照 + bubble dragstart payload)
+- ✅ `buildBlockDragImage()`:统一 drag-image 构建,单/多块一致
+- ✅ `MilkdownEditor.onBlockDragStart`:拖块到 canvas 入口已接通
+- ✅ SEDIMENT_DND_MIME payload 生成:`{ kind: 'note', data: { content: markdown } }`
 
-### 5.3 关键改动
+### 5.2 后续清理(与 Phase 6 并行)
 
-| 文件                                                          | 改动                                                                                                                                                                                      |
-| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/web/src/components/Milkdown/useMilkdownBlockDrag.ts`    | **新增**,把当前 `MilkdownPreview` 内的 mousedown capture / dragstart bubble / drag-image 编排抽成 hook;新增 `allowInternalReorder` 选项,让 NotePreview 既能拖到画布也能在编辑器内 reorder |
-| `apps/web/src/components/Milkdown/MilkdownPreview.tsx`        | 内联 wiring 替换为 hook 调用,行为不变                                                                                                                                                     |
-| `apps/web/src/components/Milkdown/MilkdownEditor.tsx`         | 通过 hook 接通 `enableBlockDrag` + `onBlockDragStart`(目前 prop 是 Phase 1 留的空头)                                                                                                      |
-| `apps/web/src/utils/io/dragDrop.ts`                           | 删除 `NoteBlockDragPayload.contentJson` 字段 + `@deprecated` 标记                                                                                                                         |
-| `apps/web/src/components/BlockNote/NoteEditorSideMenu.tsx`    | **整文件删除**(此时 NotePreview 已无 BlockNote 引用)                                                                                                                                      |
-| `apps/web/src/components/Common/DragToCanvasHandleButton.tsx` | 复用,props 改成接受 markdown                                                                                                                                                              |
-
-> Phase 2 落地时 drag-image 构建 (`buildBlockDragImage`)、多块快照 (`getMultiBlockSelectionRange`)、payload 序列化 (`getDragPayload`) 已经全部在位 —— Phase 5 几乎不写新算法,主要是抽位置 + 加 `allowInternalReorder` 分支。原命名 `sedimentDragOut.ts` 取消,改走 hook,无需深入 Milkdown plugin API。
-
-### 5.4 跨原点 drag 防误删
-
-旧实现里这段微妙逻辑:
-
-```ts
-if (e.dataTransfer.dropEffect === 'copy') {
-  editor.setTextCursorPosition(dragBlockRef.current, 'start');
-}
-```
-
-是为了防 BlockNote 拖出后自动删源块。Milkdown 的 `plugin-block` **默认行为是 move 才删、copy 不删**——这一点必须在 Phase 1a 验证期就实测确认(写进验证记录)。如果实测发现也有同样的副作用,在 `sedimentDragOut` 里加 `dragend` 处理。
-
-### 5.5 验收
-
-| #     | 检查项                             | 标准                                                                 |
-| ----- | ---------------------------------- | -------------------------------------------------------------------- |
-| P5.V1 | 从 NotePreview 拖块到 canvas       | 新建 note,内容 = 源块 markdown;**源 note 内容不变**                  |
-| P5.V2 | 从 BlockNoteCard 拖块到 canvas     | 同上,消息保持不变                                                    |
-| P5.V3 | NotePreview 内部 reorder(块上下拖) | 工作正常(hook 的 `allowInternalReorder: true` 分支)                  |
-| P5.V4 | 拖动预览图                         | 与源块视觉一致;单块 / 多块外观一致(同一 `buildBlockDragImage`)       |
-| P5.V5 | 类型检查                           | `dragDrop.ts` 不再引用 `contentJson`                                 |
-| P5.V6 | 多选拖拽                           | 复用 Phase 2 已实现的 capture/bubble 多块快照机制,行为与消息卡片一致 |
-
-### 5.6 Phase 2 已落地、可直接复用的范围
-
-迁移启动时 Phase 5 原计划是"重写 drag 路径"。Phase 2 落地后实际已经把以下能力 ship 在 `MilkdownPreview` 里:
-
-- **capture-phase mousedown 抢快照** —— 在 Crepe 把多块 selection 改写为单块 `NodeSelection` 之前
-- **bubble-phase dragstart 重建 payload** —— 读快照 → 调 `getDragPayload(snapshot)`
-- **统一 drag-image 构建器**(`buildBlockDragImage`)—— 单块 / 多块复用,挂 `document.body` 规避 Shadow DOM `setDragImage` 问题,list wrapper 浅克隆保留 `::marker`
-- **生命周期收尾** —— `setTimeout(0)` 移除预览;`dragend` 清理快照 ref
-
-Phase 5 的工作几乎全在"把上面这段代码原地抽成 `useMilkdownBlockDrag` 让 `MilkdownEditor` 共用",新算法接近零。同时顺手补上:
-
-- `allowInternalReorder` 标志(NotePreview 需要 PM 的内部 reorder,聊天卡片不需要),决定是否 `event.stopPropagation()` 屏蔽 Crepe 的 mousedown
-- `effectAllowed: 'copyMove'` 的支持(让 PM 当 move、画布当 copy 共存)
-- `dragend` 时检测 `dropEffect === 'copy'`,折叠 PM selection 以防 Crepe 自动删源块(等价 [`NoteEditorSideMenu.tsx`](../apps/web/src/components/BlockNote/NoteEditorSideMenu.tsx) 的 `onDragEnd` trick)
-- (若 §2.6 #3 的 hot-fix 没在 Phase 3 做掉,这里顺手做)`getMultiBlockSelectionRange` 改读 `view.root.getSelection()`
+| 任务                     | 文件                     | 说明                            |
+| ------------------------ | ------------------------ | ------------------------------- |
+| 删除 BlockNote drag 入口 | `NoteEditorSideMenu.tsx` | 整文件删除                      |
+| 删除 contentJson 字段    | `dragDrop.ts`            | 标记 `@deprecated`              |
+| 简化 drag payload        | `dragDrop.ts`            | 仅需 `kind: 'note'` + `content` |
+| 删除 BlockNote 依赖      | 各 import                | 见 Phase 6                      |
 
 ---
 
@@ -732,23 +696,6 @@ export async function stripBlockNoteFields() {
 - Phase 5:可 revert,但要先把 Phase 4 一起 revert
 - Phase 6:删除性操作,**不可回滚**,只能从 git 历史恢复
 
-## 时间预估
-
-| Phase       | 工作量 | 触发条件                                                                   |
-| ----------- | ------ | -------------------------------------------------------------------------- |
-| 1 (1a + 1b) | 4-5 天 | 立即可启动;1a Gate 不通过则终止                                            |
-| 2           | 1-2 天 | Phase 1 验收通过                                                           |
-| 3           | 5-7 天 | Phase 2 上线 + 灰度 1 周稳定                                               |
-| 4           | 5-7 天 | Phase 3 上线 + 灰度 1 周稳定                                               |
-| 5           | 1-2 天 | Phase 4 上线 + 灰度 3 天稳定(Phase 2 落地后从 2-3 天降到 1-2 天,详见 §5.6) |
-| 6           | 1-2 天 | Phase 5 上线 + 灰度 1 周稳定                                               |
-
-**总计**:**约 3.5-4.5 周纯开发**,加上各阶段灰度等待,日历时间约 **6-7 周**。
-
-Phase 1 是低风险快速验证段(~4-5 天开发,1a 子阶段即时给出 go/no-go)。Phase 3-4 是高风险段,必须留充足灰度。Phase 5-6 是收尾。
-
----
-
 ## 附录 A:Phase 1 完成后的 import 边界
 
 ```
@@ -760,11 +707,3 @@ Phase 1 是低风险快速验证段(~4-5 天开发,1a 子阶段即时给出 go/n
 
   其它任何文件  →  @blocknote/*  (待 Phase 6 整体禁用)
 ```
-
-## 附录 B:Phase 1a Gate 不通过的备选方案
-
-如果 Milkdown round-trip 仍达不到我们的标准,但数学是硬需求,备选:
-
-1. **保留 BlockNote 0.51**,数学公式用一个**只读 KaTeX 内联渲染器**(在 Markdown source 里嵌 `$...$`,渲染时正则替换)。代价:无法在 WYSIWYG 模式编辑公式。
-2. **MDXEditor** 走一遍 Phase 1a 的 gate,作为第二候选(我们前面评估过,缺少官方数学插件,工作量更大)。
-3. **CodeMirror 6 + Live Preview**:重写量最大,但天花板最高。只有 1+2 都不行才考虑。

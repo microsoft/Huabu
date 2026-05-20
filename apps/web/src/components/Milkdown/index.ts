@@ -9,6 +9,9 @@
 export { MilkdownEditor } from './MilkdownEditor';
 export type { MilkdownEditorProps } from './MilkdownEditor';
 
+export type { MilkdownInstance } from './createMilkdown';
+export type { MilkdownBlockSnapshot } from './createMilkdown';
+
 export { MilkdownPreview } from './MilkdownPreview';
 export type { MilkdownPreviewProps } from './MilkdownPreview';
 

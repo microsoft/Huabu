@@ -590,3 +590,263 @@
   color: var(--fg-default);
   fill: var(--fg-default);
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Block-type dropdown trigger
+   ─────────────────────────────────────────────────────────────────────────
+   The "Block type" toolbar group we register in `createMilkdown.ts`
+   ships a single dropdown trigger whose icon mirrors the block under
+   the caret (paragraph / H1-H3 / quote / lists / code). We render
+   ALL eight slash-menu SVGs inside the trigger and hide every one
+   except the icon whose `data-key` matches the wrapper's
+   `data-current` attribute — a ProseMirror plugin keeps the
+   attribute synced with the live selection, so a static `icon`
+   string is enough.
+
+   The trigger sits inside Crepe's `.toolbar-item` (a 32x32 square),
+   so we widen the parent button to fit the icon-plus-caret pair. */
+.milkdown .milkdown-toolbar .toolbar-item:has(.mb-block-type-trigger),
+.milkdown .milkdown-toolbar .toolbar-item.mb-block-type-trigger-host {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  padding: 0 6px;
+  gap: 2px;
+  /* Visually move the trigger to the start of the toolbar without
+     reordering the DOM (Crepe's `buildToolbar` only appends groups,
+     so our group is queued LAST). The trailing divider Crepe inserts
+     before our group is hidden and a fresh divider is rendered AFTER
+     our trigger via `::after` so the visual separator follows the
+     same convention as the rest of the toolbar. */
+  order: -1;
+  position: relative;
+  margin-right: 6px;
+}
+
+/* Hide the real divider that, in DOM order, sits immediately before
+   our trigger — once we re-order the trigger to the start, that
+   divider would otherwise float at the right edge of the toolbar. */
+.milkdown
+  .milkdown-toolbar
+  .divider:has(+ .toolbar-item:has(.mb-block-type-trigger)) {
+  display: none;
+}
+
+/* Crepe's default divider is `color-mix(outline, transparent 80%)`
+   which renders ~20% alpha and is barely visible against the toolbar
+   surface. Bump to the design-system edge token so it matches the
+   rest of the app's divider contrast. */
+.milkdown .milkdown-toolbar .divider {
+  background: var(--edge-default);
+}
+
+/* Faux divider rendered to the RIGHT of the trigger (taking the place
+   of the hidden real divider). Geometry mirrors `.divider` from
+   `@milkdown/crepe/lib/theme/common/toolbar.css`. */
+.milkdown .milkdown-toolbar .toolbar-item:has(.mb-block-type-trigger)::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: -6px;
+  width: 1px;
+  height: 24px;
+  background: var(--edge-default);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+/* Crepe wraps every toolbar-item icon in `<span class="milkdown-icon">`,
+   which defaults to `display: inline` — that drops our trigger onto
+   the text baseline (a few px below center). Make the wrapper itself
+   a flex box so the trigger sits at the geometric center of the
+   32px-tall toolbar button. */
+.milkdown
+  .milkdown-toolbar
+  .toolbar-item:has(.mb-block-type-trigger)
+  > .milkdown-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.milkdown .milkdown-toolbar .toolbar-item .mb-block-type-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none; /* clicks bubble to the wrapping <button> */
+  color: var(--fg-muted);
+  transition: color 0.15s ease;
+}
+
+.milkdown .milkdown-toolbar .toolbar-item:hover .mb-block-type-trigger {
+  color: var(--fg-default);
+}
+
+.milkdown .milkdown-toolbar .toolbar-item .mb-block-type-trigger__icon {
+  display: none;
+  width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Show only the icon whose data-key matches the wrapper's data-current. */
+.milkdown
+  .milkdown-toolbar
+  .toolbar-item
+  .mb-block-type-trigger[data-current='paragraph']
+  > .mb-block-type-trigger__icon[data-key='paragraph'],
+.milkdown
+  .milkdown-toolbar
+  .toolbar-item
+  .mb-block-type-trigger[data-current='heading-1']
+  > .mb-block-type-trigger__icon[data-key='heading-1'],
+.milkdown
+  .milkdown-toolbar
+  .toolbar-item
+  .mb-block-type-trigger[data-current='heading-2']
+  > .mb-block-type-trigger__icon[data-key='heading-2'],
+.milkdown
+  .milkdown-toolbar
+  .toolbar-item
+  .mb-block-type-trigger[data-current='heading-3']
+  > .mb-block-type-trigger__icon[data-key='heading-3'],
+.milkdown
+  .milkdown-toolbar
+  .toolbar-item
+  .mb-block-type-trigger[data-current='blockquote']
+  > .mb-block-type-trigger__icon[data-key='blockquote'],
+.milkdown
+  .milkdown-toolbar
+  .toolbar-item
+  .mb-block-type-trigger[data-current='bullet-list']
+  > .mb-block-type-trigger__icon[data-key='bullet-list'],
+.milkdown
+  .milkdown-toolbar
+  .toolbar-item
+  .mb-block-type-trigger[data-current='ordered-list']
+  > .mb-block-type-trigger__icon[data-key='ordered-list'],
+.milkdown
+  .milkdown-toolbar
+  .toolbar-item
+  .mb-block-type-trigger[data-current='code-block']
+  > .mb-block-type-trigger__icon[data-key='code-block'] {
+  display: inline-flex;
+}
+
+.milkdown .milkdown-toolbar .toolbar-item .mb-block-type-trigger__icon svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Block-type dropdown menu (body-mounted)
+   ─────────────────────────────────────────────────────────────────────────
+   Floating menu opened by the trigger. Mounted to `<body>` because
+   Crepe's toolbar uses floating-ui with overflow clipping, so a
+   nested popover would get cut off near the viewport edge. */
+.mb-block-type-menu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 180px;
+  padding: 4px;
+  background: var(--bg-surface);
+  border: 1px solid var(--edge-default);
+  border-radius: 8px;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 8px 24px rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-family: inherit;
+  animation: mb-block-type-menu-in 0.12s ease-out;
+}
+
+@keyframes mb-block-type-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.mb-block-type-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--fg-default);
+  cursor: pointer;
+  text-align: left;
+  font-size: 13px;
+  line-height: 1.2;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.mb-block-type-menu__item:hover {
+  background: var(--bg-hover);
+}
+
+.mb-block-type-menu__item.is-active {
+  color: var(--info);
+}
+
+.mb-block-type-menu__item.is-active .mb-block-type-menu__icon {
+  color: var(--info);
+}
+
+.mb-block-type-menu__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--fg-muted);
+}
+
+.mb-block-type-menu__icon svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+.mb-block-type-menu__label {
+  flex: 1;
+  white-space: nowrap;
+}
+
+/* Phase 4: blocks recently edited by the AI. We render a thin accent
+   bar OUTSIDE the block on the right edge (the editor's own padding
+   area) so it doesn't disturb text flow or selection rendering. The
+   `<ProvenanceOverlay>` portal mounts a hover-triggered diff popover
+   keyed off the same DOM. The colour follows the `--ai` semantic
+   token (soft lavender) — same treatment as the pre-Milkdown editor. */
+.milkdown .ProseMirror .sediment-ai-edited-block {
+  position: relative;
+}
+.milkdown .ProseMirror .sediment-ai-edited-block::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  right: -12px;
+  width: 6px;
+  border-radius: 1px;
+  background-color: var(--ai-light);
+  pointer-events: none;
+  transition: background-color 0.15s ease;
+}
+.milkdown .ProseMirror .sediment-ai-edited-block:hover::after {
+  background-color: var(--ai);
+}

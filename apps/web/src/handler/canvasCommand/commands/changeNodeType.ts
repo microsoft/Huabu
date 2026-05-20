@@ -10,10 +10,9 @@ type Cmd = Extract<CanvasCommand, { type: 'CHANGE_NODE_TYPE' }>;
  * Convert a node between `text` and `note` types.
  *
  * Both types share a `content: string` field, so the textual payload is
- * preserved across conversions. Note-only editor metadata (BlockNote JSON
- * cache, block-level provenance) is stripped when going `note → text`
- * because it has no meaning on a plain text node. Any loss is recoverable
- * via undo.
+ * preserved across conversions. Note-only metadata (block-level
+ * provenance) is stripped when going `note → text` because it has no
+ * meaning on a plain text node. Any loss is recoverable via undo.
  *
  * For `note → text`, the Markdown content is also flattened to plain text via
  * `stripMarkdown` — otherwise users would see literal `**bold**` / `# heading`
@@ -28,12 +27,7 @@ type Cmd = Extract<CanvasCommand, { type: 'CHANGE_NODE_TYPE' }>;
  * pinned an explicit size. This keeps the visual box stable across the
  * toggle; the user can still resize freely afterwards.
  */
-const NOTE_ONLY_DATA_KEYS = [
-  'contentJson',
-  'contentJsonSource',
-  'provenance',
-  'contentBeforeAI',
-] as const;
+const NOTE_ONLY_DATA_KEYS = ['provenance'] as const;
 
 const changeNodeType: CommandDefinition<Cmd> = {
   meta: {
