@@ -10,10 +10,21 @@
  * The `lastSyncedRef` guard is what prevents the classic feedback loop
  * (parent echoes back our `onChange`, we'd `setMarkdown` it back and
  * reset the user's selection).
+ *
+ * Dragging blocks out of the editor onto the canvas works through the
+ * shared `attachBlockDragListeners` helper (same code path the
+ * `MilkdownPreview` chat cards use). When `onBlockDragStart` is
+ * supplied, the helper installs capture/bubble listeners that snapshot
+ * the (possibly multi-block) text selection on mousedown, rebuild a
+ * unified drag preview on dragstart, and forward a markdown payload to
+ * the consumer. Crepe's own internal drag (used for in-editor block
+ * reorder) keeps working because we only wrap, never replace, its
+ * default behavior.
  */
 
 import { useEffect, useRef } from 'react';
 
+import { attachBlockDragListeners } from './blockDrag';
 import { createMilkdown, type MilkdownInstance } from './createMilkdown';
 import { markdownEquals, normalizeMarkdown } from './markdownUtils';
 
@@ -35,13 +46,25 @@ export interface MilkdownEditorProps {
    */
   decorations?: MilkdownDecorationSpec;
   /**
-   * Reserved for Phase 5 drag-to-canvas. Accepted but unwired in Phase 1b.
+   * Fires when the user drags a block (or a multi-block selection) out
+   * of the editor — typically used by note nodes to construct the
+   * canvas drop payload. The Sediment markdown payload is exposed via
+   * `event.markdown`; consumers are responsible for calling
+   * `setData(SEDIMENT_DND_MIME, …)` on `event.nativeEvent.dataTransfer`
+   * (the helper already manages the drag image).
    */
   onBlockDragStart?: (event: MilkdownBlockDragEvent) => void;
 }
 
 export function MilkdownEditor(props: MilkdownEditorProps): JSX.Element {
-  const { markdown, onChange, editable = true, placeholder, className } = props;
+  const {
+    markdown,
+    onChange,
+    editable = true,
+    placeholder,
+    className,
+    onBlockDragStart,
+  } = props;
 
   const rootRef = useRef<HTMLDivElement>(null);
   const instanceRef = useRef<MilkdownInstance | null>(null);
@@ -52,6 +75,9 @@ export function MilkdownEditor(props: MilkdownEditorProps): JSX.Element {
   /** Track latest `onChange` without re-mounting the editor. */
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  /** Track latest drag callback without re-mounting the editor. */
+  const onBlockDragStartRef = useRef(onBlockDragStart);
+  onBlockDragStartRef.current = onBlockDragStart;
 
   // Mount the editor once. The async lifecycle is guarded with a
   // `cancelled` flag so React 18 StrictMode's double-effect cleans up
@@ -60,6 +86,16 @@ export function MilkdownEditor(props: MilkdownEditorProps): JSX.Element {
     let cancelled = false;
     const root = rootRef.current;
     if (!root) return;
+
+    // Install the drag-out listeners up-front: they are no-ops while
+    // `onBlockDragStartRef.current` is undefined, and self-update via
+    // the ref when the prop changes between renders without forcing a
+    // re-mount of Crepe.
+    const detachDrag = attachBlockDragListeners({
+      mountRoot: root,
+      instanceRef,
+      onDragStartRef: onBlockDragStartRef,
+    });
 
     void (async () => {
       const instance = await createMilkdown({
@@ -94,6 +130,7 @@ export function MilkdownEditor(props: MilkdownEditorProps): JSX.Element {
 
     return () => {
       cancelled = true;
+      detachDrag();
       const instance = instanceRef.current;
       instanceRef.current = null;
       if (instance) void instance.destroy();

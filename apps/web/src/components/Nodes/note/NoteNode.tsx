@@ -1,17 +1,13 @@
-import { useCreateBlockNote } from '@blocknote/react';
-import { BlockNoteView } from '@blocknote/shadcn';
 import { type Node, type NodeProps, useStore } from '@xyflow/react';
 import clsx from 'clsx';
 import { ChevronsDown, Fullscreen } from 'lucide-react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
+import { MilkdownPreview } from '@/components/Milkdown';
 import { useNodeScale } from '@/hooks/useNodeScale';
 import useCanvasStore from '@/store/canvasStore';
-import { applySharedStyles } from '@/utils/shadowStyleCache';
 
-import { loadBlockNoteContent } from '../../BlockNote/blockNoteContent';
 import { MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
 import { NOTE_AUTO_HEIGHT_MIN } from './autoHeight';
@@ -35,10 +31,12 @@ export const NoteNode = memo(
         undefined,
     );
 
-    const shadowHostRef = useRef<HTMLDivElement>(null);
-    const shadowRootRef = useRef<ShadowRoot | null>(null);
-    const reactRootRef = useRef<Root | null>(null);
-    const shadowContainerRef = useRef<HTMLDivElement | null>(null);
+    // `MilkdownPreview` provides its own Shadow DOM via the `isolate`
+    // default — the wrapper here only needs to host the height
+    // measurement infrastructure and the fixed/auto layout shell. We
+    // keep a ref to the wrapper so the ResizeObserver / MutationObserver
+    // pair below can re-attach when Milkdown (re)mounts its content.
+    const previewHostRef = useRef<HTMLDivElement>(null);
 
     // Latest measured rendered content height & host (visible) height.
     // Both are kept in state so the truncation indicator re-evaluates when
@@ -47,9 +45,9 @@ export const NoteNode = memo(
     // `contentHeight` is seeded from the persisted `data.measuredHeight`
     // hint so an auto-height note paints at its real size on the very
     // first frame after mount — without the seed, the node would briefly
-    // collapse to `NOTE_AUTO_HEIGHT_MIN` while waiting for BlockNote to mount
-    // and the ResizeObserver to fire (visible flicker during virtualized
-    // remounts, zoom changes, and page reloads).
+    // collapse to `NOTE_AUTO_HEIGHT_MIN` while waiting for the editor to
+    // mount and the ResizeObserver to fire (visible flicker during
+    // virtualized remounts, zoom changes, and page reloads).
     const seededHeight =
       typeof data.measuredHeight === 'number' && data.measuredHeight > 0
         ? data.measuredHeight
@@ -63,11 +61,6 @@ export const NoteNode = memo(
     // recording side; `setNoteHeightMode` (called by every toggle entry
     // point) reads from the same shared map.
     useTrackNoteFixedHeight(id);
-
-    const editor = useCreateBlockNote({
-      initialContent: [{ type: 'paragraph', content: '' }],
-      trailingBlock: false,
-    });
 
     // Toggle between fixed and auto height. Both the toolbar button and
     // the corner "show all content" affordance call into this — they are
@@ -96,112 +89,26 @@ export const NoteNode = memo(
       </FloatingToolbar.Group>
     );
 
-    // Initialize Shadow DOM
-    useEffect(() => {
-      if (!shadowHostRef.current) return;
-
-      // Check if shadow root already exists on the DOM element
-      if (shadowHostRef.current.shadowRoot) {
-        shadowRootRef.current = shadowHostRef.current.shadowRoot;
-        shadowContainerRef.current =
-          shadowHostRef.current.shadowRoot.querySelector('div');
-        return;
-      }
-
-      // Create Shadow DOM
-      const shadowRoot = shadowHostRef.current.attachShadow({ mode: 'open' });
-      shadowRootRef.current = shadowRoot;
-
-      // Create container for React content
-      const container = document.createElement('div');
-      container.className = 'flex flex-col rounded bg-surface p-4';
-      shadowRoot.appendChild(container);
-      shadowContainerRef.current = container;
-
-      // Inject styles into Shadow DOM from shared cache. Same-origin
-      // sheets are attached synchronously via `adoptedStyleSheets`, which
-      // avoids the FOUC that <link> cloning would otherwise cause on the
-      // first paint of a new note (incorrect content height → visible
-      // "tall then short" jump).
-      applySharedStyles(shadowRoot);
-
-      // Create React root in Shadow DOM
-      reactRootRef.current = createRoot(container);
-
-      return () => {
-        // Cleanup on unmount
-        if (reactRootRef.current) {
-          setTimeout(() => {
-            reactRootRef.current?.unmount();
-          }, 0);
-          reactRootRef.current = null;
-        }
-        shadowRootRef.current = null;
-        shadowContainerRef.current = null;
-      };
-    }, []); // Empty deps - only run once on mount
-
-    // Keep shadow DOM container class in sync with fixed/auto height mode.
-    // In fixed mode the container fills the pinned height (so overflow is
-    // clipped at the node bounds); in auto mode it sizes to its content.
-    useEffect(() => {
-      const container = shadowContainerRef.current;
-      if (!container) return;
-      container.className = hasFixedHeight
-        ? 'flex h-full flex-col rounded bg-surface p-2'
-        : 'flex flex-col rounded bg-surface p-2';
-    }, [hasFixedHeight]);
-
-    // Update Shadow DOM content when editor or data changes
-    useEffect(() => {
-      if (!reactRootRef.current) return;
-
-      reactRootRef.current.render(
-        <BlockNoteView
-          className="block-note-view block-note-view-readonly pointer-events-none select-none"
-          editor={editor}
-          editable={false}
-          sideMenu={false}
-        />,
-      );
-    }, [editor]);
-
-    // Update content when data changes.
-    // Prefer contentJson (lossless BlockNote JSON) when available and in sync
-    // with content (Markdown). Fall back to parsing content as Markdown.
-    useEffect(() => {
-      const markdown = typeof data.content === 'string' ? data.content : '';
-      const contentJson =
-        typeof data.contentJson === 'string' ? data.contentJson : null;
-      const contentJsonSource =
-        typeof data.contentJsonSource === 'string'
-          ? data.contentJsonSource
-          : null;
-
-      void loadBlockNoteContent(
-        editor,
-        markdown,
-        contentJson,
-        contentJsonSource,
-      );
-    }, [data.content, data.contentJson, data.contentJsonSource, editor]);
+    const markdown = typeof data.content === 'string' ? data.content : '';
 
     // Track the rendered content height. Used only to decide whether to
     // surface the truncation indicator in fixed-height mode.
     //
-    // Subtlety: in fixed-height mode the shadow DOM container has `h-full`,
-    // so its own layout box never grows when BlockNote content overflows —
-    // a ResizeObserver on the container alone would never fire on content
-    // changes. We instead observe the container's first child (the BlockNote
-    // root, which has a natural intrinsic height) and use a MutationObserver
-    // to (re)attach the observer when that child appears or is replaced.
+    // Subtlety: in fixed-height mode the host carries `h-full`, so its
+    // own layout box never grows when content overflows — a
+    // ResizeObserver on the host alone would never fire on content
+    // changes. We additionally observe the host's first child (the
+    // shadow-host div that `MilkdownPreview` mounts into) and use a
+    // MutationObserver to (re)attach the observer when that child
+    // appears or is replaced. `scrollHeight` reads through the Shadow
+    // DOM boundary, so we still get the intrinsic content height
+    // regardless of the encapsulation.
     useEffect(() => {
-      const host = shadowHostRef.current;
-      const container = shadowContainerRef.current;
-      if (!host || !container) return;
+      const host = previewHostRef.current;
+      if (!host) return;
 
       const measure = () => {
-        const contentH = container.scrollHeight;
+        const contentH = host.scrollHeight;
         const hostH = host.clientHeight;
         if (contentH > 0) setContentHeight(contentH);
         setHostHeight(hostH);
@@ -209,19 +116,18 @@ export const NoteNode = memo(
 
       const ro = new ResizeObserver(measure);
       ro.observe(host);
-      ro.observe(container);
 
       // Track the current first child so we only re-observe when it changes.
       let observedChild: Element | null = null;
       const syncChildObservation = () => {
-        const child = container.firstElementChild;
+        const child = host.firstElementChild;
         if (child === observedChild) return;
         if (observedChild) ro.unobserve(observedChild);
         observedChild = child;
         if (child) ro.observe(child);
       };
 
-      // Initial attempt + a few rAFs to catch async BlockNote mounting.
+      // Initial attempt + a few rAFs to catch async editor mounting.
       syncChildObservation();
       measure();
       const raf1 = requestAnimationFrame(() => {
@@ -229,12 +135,12 @@ export const NoteNode = memo(
         measure();
       });
 
-      // Watch for BlockNote (re)rendering its root inside the container.
+      // Watch for the editor (re)rendering its root inside the host.
       const mo = new MutationObserver(() => {
         syncChildObservation();
         measure();
       });
-      mo.observe(container, { childList: true, subtree: true });
+      mo.observe(host, { childList: true, subtree: true });
 
       return () => {
         cancelAnimationFrame(raf1);
@@ -245,7 +151,7 @@ export const NoteNode = memo(
 
     // Truncation only matters in fixed-height mode. Both heights are state,
     // so this re-evaluates when the user resizes the node or the content
-    // reflows inside the shadow DOM.
+    // reflows inside the editor.
     const isTruncated =
       hasFixedHeight &&
       contentHeight > 0 &&
@@ -269,9 +175,7 @@ export const NoteNode = memo(
 
     // Markdown file missing on disk + no in-memory fallback → replace
     // the editor with a full-card placeholder.
-    const isContentMissing =
-      data.contentMissing &&
-      !(typeof data.content === 'string' && data.content.trim());
+    const isContentMissing = data.contentMissing && !markdown.trim();
 
     // When the picked accent is `white`, the wrapper's default border —
     // a 50%-transparent mix of white over `transparent` — is effectively
@@ -311,8 +215,8 @@ export const NoteNode = memo(
               //
               // We also pin a `minHeight` from the very first paint (even
               // before `contentHeight` has been measured) so the node never
-              // visibly collapses from the shadow host's intrinsic min-height
-              // down to a smaller measured content height once the
+              // visibly collapses from the host's intrinsic min-height down
+              // to a smaller measured content height once the
               // ResizeObserver fires.
               style={
                 !hasFixedHeight
@@ -335,10 +239,27 @@ export const NoteNode = memo(
                   ...(hasFixedHeight ? { height: `${100 / scale}%` } : {}),
                 }}
               >
+                {/*
+                  This card surface is render-only — the expanded editor
+                  opened via the toolbar's Expand button is where the
+                  user actually types. `MilkdownPreview` owns its own
+                  Shadow DOM (via the default `isolate`), which keeps
+                  the Crepe + KaTeX stylesheet stack from leaking into
+                  the surrounding page (and vice-versa) without us
+                  having to thread `applySharedStyles` through manually.
+                */}
                 <div
-                  ref={shadowHostRef}
-                  className={clsx('w-full', hasFixedHeight && 'h-full')}
-                />
+                  ref={previewHostRef}
+                  className={clsx(
+                    'bg-surface rounded p-2',
+                    hasFixedHeight ? 'flex h-full flex-col' : 'flex flex-col',
+                  )}
+                >
+                  <MilkdownPreview
+                    markdown={markdown}
+                    className="pointer-events-none w-full select-none"
+                  />
+                </div>
               </div>
               {isTruncated && (
                 <div

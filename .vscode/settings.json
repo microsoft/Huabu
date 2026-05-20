@@ -51,6 +51,7 @@
   "editor.detectIndentation": false,
   "chat.tools.terminal.autoApprove": {
     "npx tsc": true,
-    "npx vitest": true
+    "npx vitest": true,
+    "pnpm": true
   }
 }

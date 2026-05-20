@@ -224,6 +224,13 @@ export interface NoteNodeData extends BaseNodeData {
    * AI agent or an external tool), `content` takes precedence and `contentJson` is
    * regenerated from it.
    * Optional: absent for legacy notes or notes created externally.
+   *
+   * @deprecated Phase 3 of the Milkdown migration (see
+   * `docs/milkdown-migration-plan.md`) replaced the BlockNote editor with
+   * a Milkdown surface whose canonical state is the Markdown `content`
+   * field. New writes no longer populate this field; reads still tolerate
+   * it for back-compat with historical records. Scheduled for destructive
+   * removal in Phase 6.
    */
   contentJson?: string;
   /**
@@ -231,6 +238,8 @@ export interface NoteNodeData extends BaseNodeData {
    * Used to detect whether `content` has been modified externally since the last
    * editor save, without relying on lossy `blocksToMarkdownLossy` round-trips.
    * When `contentJsonSource === content`, `contentJson` is authoritative.
+   *
+   * @deprecated See `contentJson` — same Phase 3/Phase 6 schedule.
    */
   contentJsonSource?: string;
   style?: NodeStyle;

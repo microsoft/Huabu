@@ -11,6 +11,8 @@
 
 import { editorViewCtx, serializerCtx } from '@milkdown/core';
 import { Crepe } from '@milkdown/crepe';
+import { blockConfig } from '@milkdown/plugin-block';
+import { findParent } from '@milkdown/prose';
 import { NodeSelection } from '@milkdown/prose/state';
 import { replaceAll } from '@milkdown/utils';
 
@@ -233,6 +235,35 @@ export async function createMilkdown(
   crepe.on((api) => {
     api.markdownUpdated((_ctx, markdown) => {
       for (const listener of listeners) listener(markdown);
+    });
+  });
+
+  // Patch the block-handle `filterNodes` AFTER Crepe queues its own
+  // BlockEdit config (so this `ctx.set` wins). Crepe's default filter
+  // only returns `false` when the resolved position has a `table`,
+  // `blockquote`, or `math_inline` ANCESTOR — but `math_inline` is an
+  // `atom: true, inline: true` node, so the cursor can never be INSIDE
+  // it; `findParent` therefore never catches it. The upstream
+  // `selectRootNodeByDom` walk-up only triggers when (a) filterNodes
+  // returns false, or (b) the position is at index 0 of its parent.
+  // Result: hovering anywhere mid-line over a paragraph containing
+  // inline math makes the handle latch onto the math span itself, so
+  // the drag/+ buttons visually float over the formula.
+  //
+  // Fix: also reject any candidate `node` that is `isInline` (or whose
+  // ancestor is one of the original block-level filter targets). That
+  // forces the walk-up to continue until a real block-level ancestor
+  // (paragraph, heading, list_item, …) is reached.
+  crepe.editor.config((ctx) => {
+    ctx.set(blockConfig.key, {
+      filterNodes: (pos, node) => {
+        if (node.isInline) return false;
+        const blockedAncestor = findParent((ancestor) =>
+          ['table', 'blockquote'].includes(ancestor.type.name),
+        )(pos);
+        if (blockedAncestor) return false;
+        return true;
+      },
     });
   });
 

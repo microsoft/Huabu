@@ -4,6 +4,25 @@
 
 ---
 
+## 2026-05-22 · 笔记编辑器迁移到 Milkdown（Phase 3）
+
+**What Changed**
+
+- 画布上笔记节点（折叠/展开态）的编辑器底层由 BlockNote 迁移到 Milkdown，与聊天消息卡片保持一致的渲染栈：
+  - 折叠态（只读预览）和展开态（可编辑编辑器）都采用 Milkdown。
+  - Markdown 现在是唯一真值，不再维护 BlockNote 的辅助 JSON 格式。
+  - 数学公式、表格、代码块等元素无缝渲染，外观与聊天消息卡片一致。
+- 拖拽块到画布的能力保持可用，拖拽预览同样通过 Milkdown 的原生样式生成。
+- Shadow DOM 隔离保留，笔记样式不会污染全局页面。
+
+**Notes**
+
+- **Provenance（AI 修改标记）暂时缩小**：当前阶段不显示 AI 修改的颜色条和 Accept/Reject 按钮，这些能力将在下一阶段（Phase 4）恢复。打开历史笔记时不会看到旧的 AI 标记。
+- **自动标题提取规则变化**：笔记标题仍然由服务端 preprocessing 自动更新（基于内容分析），前端只负责展示。标题的自动识别逻辑与 BlockNote 时期保持一致。
+- 笔记内容存储从双轨（`content` + `contentJson`）简化为单轨（仅 `content`），减少维护负担。历史笔记的 `contentJson` 字段暂予保留，将在 Phase 6 统一清理。
+
+---
+
 ## 2026-05-22 · AI 聊天消息改用 Milkdown 渲染
 
 **What Changed**

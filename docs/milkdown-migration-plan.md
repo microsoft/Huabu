@@ -297,6 +297,23 @@ export const MilkdownMessageCard: FC<MilkdownMessageCardProps> = ({
 - 涉及输入、IME、加载竞态、自动标题、Provenance 入口
 - 直接面向用户最高频的交互
 
+### 3.0 范围:NoteNode + NotePreview 必须同 PR 替换
+
+Phase 3 实际涉及 **canvas note 的两个 BlockNote 渲染面**,本节明确列出避免 PR scope 遗漏:
+
+| 文件                                                                                  | 用途                                    | 形态                                                                                      | 当前实现                                                 | Phase 3 替换为                                                                                    |
+| ------------------------------------------------------------------------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| [`Nodes/note/NoteNode.tsx`](../apps/web/src/components/Nodes/note/NoteNode.tsx)       | canvas 上 note 节点的**折叠态**只读渲染 | `<BlockNoteView editable={false} sideMenu={false} pointer-events-none>` + Shadow DOM 自管 | BlockNote(`useCreateBlockNote` + `loadBlockNoteContent`) | `<MilkdownPreview markdown={data.content} isolate />`(不需要 `onBlockDragStart`,折叠态不参与拖出) |
+| [`Nodes/note/NotePreview.tsx`](../apps/web/src/components/Nodes/note/NotePreview.tsx) | 展开态**可编辑**编辑器                  | `<BlockNoteView editor=...>` + 补丁 M1-M6 + SideMenuController                            | BlockNote(`useCreateBlockNote` + 双轨持久化)             | `<MilkdownEditor markdown=... onChange=... onBlockDragStart=... />`                               |
+
+**为什么必须同 PR**:两者读同一份 `data.content` / `data.contentJson`,且都走 `loadBlockNoteContent` 双轨加载。若拆开:
+
+- 折叠态(NoteNode)先换到 Milkdown(只信 markdown);展开态(NotePreview)仍是 BlockNote(可能写出 lossy markdown + 准确 contentJson)
+- 用户在展开态编辑 → markdown 是 lossy 版本 → 折叠态(Milkdown)只看到 lossy 渲染
+- **这正是 contentJson 当初被引入来修复的 bug**,提前拆分会让它复活
+
+替换 NoteNode 本身比 NotePreview 简单得多(纯只读、无 onChange、无 IME、无 provenance),工作量不需要追加,仍按 5-7 天估算。
+
 ### 3.1 输入数据变更
 
 旧:
@@ -318,15 +335,15 @@ const markdown = data.content;
 
 ### 3.2 补丁迁移对照表
 
-| 旧补丁                                        | 位置                                       | 新做法                                                  | 处置                          |
-| --------------------------------------------- | ------------------------------------------ | ------------------------------------------------------- | ----------------------------- |
-| M1 双轨存储 (`loadBlockNoteContent`)          | blockNoteContent.ts                        | `<MilkdownEditor markdown={data.content} />` 受控       | **删**                        |
-| M2 空内容归一化                               | blockNoteContent.ts:40 / BlockNoteCard:186 | `ensureNonEmpty()` 在 markdownUtils 内部                | **删调用点,逻辑保留在封装层** |
-| M3 `.trim()` 序列化                           | NotePreview ×5 处                          | `normalizeMarkdown()` 在 onChange 出口统一收口          | **删散点,收到 markdownUtils** |
-| M4 `lastAppliedMarkdownRef`                   | NotePreview:62                             | 受控组件天然处理,仍保留作为入口去重(避免 setState 反弹) | **保留**                      |
-| M5 `lastDocJSONRef` 去重                      | NotePreview:70                             | 改为 `lastEmittedMarkdownRef`(字符串相等比 JSON 还便宜) | **保留,简化**                 |
-| M6 `isReplacingRef` + `editable={!loading}`   | NotePreview:72/171                         | 保留,与编辑器无关的异步加载竞态                         | **保留**                      |
-| 自动标题提取(从 BlockNote 文档第一个 heading) | NotePreview 顶部函数                       | 重写为基于 markdown 字符串的轻量解析                    | **重写**                      |
+| 旧补丁                                        | 位置                                                        | 新做法                                                                                           | 处置                          |
+| --------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ----------------------------- |
+| M1 双轨存储 (`loadBlockNoteContent`)          | blockNoteContent.ts (调用点:NotePreview / NoteNode 各 1 处) | `<MilkdownEditor markdown=... />` + `<MilkdownPreview markdown=... />` 都直接受控,不再过双轨加载 | **删**                        |
+| M2 空内容归一化                               | blockNoteContent.ts:40 / BlockNoteCard:186                  | `ensureNonEmpty()` 在 markdownUtils 内部                                                         | **删调用点,逻辑保留在封装层** |
+| M3 `.trim()` 序列化                           | NotePreview ×5 处                                           | `normalizeMarkdown()` 在 onChange 出口统一收口                                                   | **删散点,收到 markdownUtils** |
+| M4 `lastAppliedMarkdownRef`                   | NotePreview:62                                              | 受控组件天然处理,仍保留作为入口去重(避免 setState 反弹)                                          | **保留**                      |
+| M5 `lastDocJSONRef` 去重                      | NotePreview:70                                              | 改为 `lastEmittedMarkdownRef`(字符串相等比 JSON 还便宜)                                          | **保留,简化**                 |
+| M6 `isReplacingRef` + `editable={!loading}`   | NotePreview:72/171                                          | 保留,与编辑器无关的异步加载竞态                                                                  | **保留**                      |
+| 自动标题提取(从 BlockNote 文档第一个 heading) | NotePreview 顶部函数                                        | 重写为基于 markdown 字符串的轻量解析                                                             | **重写**                      |
 
 ### 3.3 自动标题提取
 
@@ -359,16 +376,16 @@ Phase 4 还没做,所以 Phase 3 期间**不能真正支持 provenance**。临�
 
 ### 3.5 验收
 
-| #     | 检查项              | 标准                                                            |
-| ----- | ------------------- | --------------------------------------------------------------- |
-| P3.V1 | 历史 note 加载      | 抽样 20 个不同复杂度的 note,内容渲染无丢失                      |
-| P3.V2 | 数学公式编辑        | 新建 note,输入 `$E=mc^2$`,渲染、保存、重新打开后字符串完全相同  |
-| P3.V3 | IME(中文/日文)      | 输入法选词期间不触发 onChange;光标稳定                          |
-| P3.V4 | 加载竞态            | 快速切换 canvas 上 5 个 note,无 stale onChange 反写             |
-| P3.V5 | 自动标题            | 新增 / 修改 heading 时,canvas 上的 note 标题同步更新            |
-| P3.V6 | 性能                | 5000 字 note 输入流畅,onChange 节流后 ≥ 55 FPS                  |
-| P3.V7 | 灰度                | `VITE_NOTE_EDITOR=milkdown\|blocknote`,默认 milkdown,可一键回退 |
-| P3.V8 | Provenance 降级提示 | 历史 note 打开时一次性 banner 显示并可 dismiss                  |
+| #     | 检查项              | 标准                                                                                                             |
+| ----- | ------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| P3.V1 | 历史 note 加载      | 抽样 20 个不同复杂度的 note,**折叠态(NoteNode)** + **展开态(NotePreview)** 内容渲染均无丢失;两个视图视觉内容一致 |
+| P3.V2 | 数学公式编辑        | 新建 note,输入 `$E=mc^2$`,渲染、保存、重新打开后字符串完全相同                                                   |
+| P3.V3 | IME(中文/日文)      | 输入法选词期间不触发 onChange;光标稳定                                                                           |
+| P3.V4 | 加载竞态            | 快速切换 canvas 上 5 个 note,无 stale onChange 反写                                                              |
+| P3.V5 | 自动标题            | 新增 / 修改 heading 时,canvas 上的 note 标题同步更新                                                             |
+| P3.V6 | 性能                | 5000 字 note 输入流畅,onChange 节流后 ≥ 55 FPS                                                                   |
+| P3.V7 | 灰度                | `VITE_NOTE_EDITOR=milkdown\|blocknote`,默认 milkdown,可一键回退                                                  |
+| P3.V8 | Provenance 降级提示 | 历史 note 打开时一次性 banner 显示并可 dismiss                                                                   |
 
 ### 3.6 不做的事
 
