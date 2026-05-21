@@ -1,7 +1,7 @@
 import { ArrowUp, Square, X } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 
-import { resolveArtifactUrl, uploadImage, uploadPdf } from '@/api/artifact';
+import { uploadImage, uploadPdf } from '@/api/artifact';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 
@@ -143,31 +143,53 @@ export const ChatInput = ({
   const currentPlaceholder =
     mode === 'operate' ? 'Describe the canvas change you want...' : placeholder;
 
-  // Auto-resize textarea
-  useEffect(() => {
+  // Auto-resize textarea.
+  // Runs synchronously before paint to avoid the brief flash where the
+  // textarea looks stretched by the parent flex container.
+  useLayoutEffect(() => {
+    if (mode === 'operate') return;
+
     const textarea = textareaRef.current;
     if (!textarea) return;
 
-    textarea.style.height = 'auto';
-
-    const computedStyle = window.getComputedStyle(textarea);
-    const parsedLineHeight = Number.parseFloat(computedStyle.lineHeight || '');
-    const parsedFontSize = Number.parseFloat(computedStyle.fontSize || '');
-    // Some browsers report line-height as "normal"; derive a stable fallback.
+    const computed = window.getComputedStyle(textarea);
+    const lineHeightRaw = Number.parseFloat(computed.lineHeight);
     const lineHeight =
-      Number.isFinite(parsedLineHeight) && parsedLineHeight > 0
-        ? parsedLineHeight
-        : Number.isFinite(parsedFontSize) && parsedFontSize > 0
-          ? parsedFontSize * 1.5
-          : 24;
-    const maxLines = 5;
-    const maxHeight = lineHeight * maxLines;
+      Number.isFinite(lineHeightRaw) && lineHeightRaw > 0 ? lineHeightRaw : 20;
 
-    const nextHeight = Math.min(textarea.scrollHeight, maxHeight);
+    const paddingY =
+      (Number.parseFloat(computed.paddingTop) || 0) +
+      (Number.parseFloat(computed.paddingBottom) || 0);
+    const borderY =
+      (Number.parseFloat(computed.borderTopWidth) || 0) +
+      (Number.parseFloat(computed.borderBottomWidth) || 0);
+
+    const minLines = 2;
+    const maxLines = 5;
+    // With box-sizing: border-box (Tailwind preflight), style.height must
+    // include padding + border to match the visible row count.
+    const chrome = paddingY + borderY;
+    const minHeight = lineHeight * minLines + chrome;
+    const maxHeight = lineHeight * maxLines + chrome;
+
+    if (!value) {
+      // Empty content — skip scrollHeight measurement because it's unreliable
+      // on first mount (layout / fonts not yet settled) and tends to produce
+      // a value larger than the actual rows={2} default, making the textarea
+      // appear stretched until the user types.
+      textarea.style.height = `${minHeight}px`;
+      textarea.style.overflowY = 'hidden';
+      return;
+    }
+
+    // Reset to auto so scrollHeight reflects the intrinsic content height.
+    textarea.style.height = 'auto';
+    // scrollHeight excludes border per spec — add it back for border-box.
+    const measured = textarea.scrollHeight + borderY;
+    const nextHeight = Math.max(minHeight, Math.min(measured, maxHeight));
     textarea.style.height = `${nextHeight}px`;
-    textarea.style.overflowY =
-      textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
-  }, [value]);
+    textarea.style.overflowY = measured > maxHeight ? 'auto' : 'hidden';
+  }, [mode, value]);
 
   // Handle Enter key for submission and ArrowUp/ArrowDown for prompt history
   const handleKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement> = (
@@ -377,9 +399,9 @@ export const ChatInput = ({
                     key={att.url || `att-${idx}`}
                     className="group border-edge-default relative flex items-center justify-center rounded-md border"
                   >
-                    {att.type === 'image' && att.url ? (
+                    {att.type === 'image' ? (
                       <img
-                        src={resolveArtifactUrl(att.url)}
+                        src={att.url}
                         alt={att.label ?? 'Attached image'}
                         className="h-12 w-12 rounded-md object-contain"
                       />
