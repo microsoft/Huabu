@@ -62,7 +62,6 @@ Composite intent examples:
 
 - `DELETE_NODES` automatically removes incident edges.
 - `SET_NODE_PARENT` rejects invalid targets or cycles.
-- `AUTO_LAYOUT` computes positions from explicit scope.
 - `ALIGN_NODES` aligns provided nodes without relying on selection.
 
 Every `CanvasCommand`:
@@ -77,17 +76,17 @@ Every `CanvasCommand`:
 
 See `packages/shared/src/types/canvas/command.ts` for the full 15-member discriminated union. Summary:
 
-| Category         | Commands                                         |
-| ---------------- | ------------------------------------------------ |
-| Node lifecycle   | `CREATE_NODES`, `DELETE_NODES`                   |
-| Node editing     | `MERGE_NODE_DATA`                                |
-| Structure        | `SET_NODE_PARENT`, `DISSOLVE_FRAME`              |
-| Geometry         | `SET_NODE_GEOMETRY`                              |
-| Selection / view | `SET_NODE_SELECTION`, `SET_EXPANDED_NODE`        |
-| Ordering         | `REORDER_NODES`                                  |
-| Locking          | `SET_NODE_LOCKED`                                |
-| Edge graph       | `CONNECT_NODES`, `DISCONNECT_EDGES`              |
-| Algorithms       | `ALIGN_NODES`, `DISTRIBUTE_NODES`, `AUTO_LAYOUT` |
+| Category         | Commands                                  |
+| ---------------- | ----------------------------------------- |
+| Node lifecycle   | `CREATE_NODES`, `DELETE_NODES`            |
+| Node editing     | `MERGE_NODE_DATA`                         |
+| Structure        | `SET_NODE_PARENT`, `DISSOLVE_FRAME`       |
+| Geometry         | `SET_NODE_GEOMETRY`                       |
+| Selection / view | `SET_NODE_SELECTION`, `SET_EXPANDED_NODE` |
+| Ordering         | `REORDER_NODES`                           |
+| Locking          | `SET_NODE_LOCKED`                         |
+| Edge graph       | `CONNECT_NODES`, `DISCONNECT_EDGES`       |
+| Algorithms       | `ALIGN_NODES`, `DISTRIBUTE_NODES`         |
 
 ### Explicit IDs
 
@@ -141,10 +140,6 @@ Agent: emits `SET_NODE_PARENT` directly.
 Web only: user clicks "Group" → `GROUP_SELECTION_INTO_FRAME` intent → resolver reads selection, computes bounds → emits `CREATE_NODES` + `SET_NODE_PARENT` + `SET_NODE_SELECTION` batch.
 
 No shared `GROUP_SELECTION_INTO_FRAME` command exists because selection lookup is web-only.
-
-### Agent Auto Layout
-
-Agent emits `AUTO_LAYOUT { scope: { type: 'canvas' } }` directly — valid because it depends only on explicit scope + persisted state.
 
 ---
 

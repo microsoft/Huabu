@@ -130,8 +130,6 @@ export type CanvasUiIntent =
     }
   | { type: 'DISSOLVE_FRAME'; frameId: string }
   | { type: 'TOGGLE_NODE_LOCK'; nodeId: string }
-  | { type: 'LAYOUT_ALL' }
-  | { type: 'LAYOUT_GROUP'; frameId: string }
   | {
       type: 'MOVE_NODE_INTO_FRAME';
       nodeId: string;
@@ -233,24 +231,6 @@ export function resolveUiIntent(
       return resolveDissolveFrame(intent, ui);
     case 'TOGGLE_NODE_LOCK':
       return resolveToggleNodeLock(intent, ui);
-    case 'LAYOUT_ALL':
-      return {
-        commands: [{ type: 'AUTO_LAYOUT', scope: { type: 'canvas' } }],
-        trace: [],
-      };
-    case 'LAYOUT_GROUP':
-      return {
-        commands: [
-          {
-            type: 'AUTO_LAYOUT',
-            scope: {
-              type: 'frame',
-              frameId: intent.frameId as CanvasNodeId,
-            },
-          },
-        ],
-        trace: [],
-      };
     case 'MOVE_NODE_INTO_FRAME':
       return resolveMoveNodeIntoFrame(intent, ui);
     case 'MOVE_NODE_OUT_OF_FRAME':

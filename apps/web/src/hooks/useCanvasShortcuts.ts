@@ -113,7 +113,6 @@ export function useCanvasShortcuts(
   const disconnectEdges = useCanvasStore((s) => s.disconnectEdges);
   const addNodes = useCanvasStore((s) => s.addNodes);
   const addNode = useCanvasStore((s) => s.addNode);
-  const layoutAll = useCanvasStore((s) => s.layoutAll);
   const toggleAutoLayout = useCanvasStore((s) => s.toggleAutoLayout);
   const canvasId = useCanvasStore((s) => s.canvasId);
 
@@ -295,14 +294,6 @@ export function useCanvasShortcuts(
         return;
       }
 
-      // Cmd/Ctrl+Shift+L → layout all
-      if (lowerKey === 'l' && e.shiftKey) {
-        if (editable) return;
-        e.preventDefault();
-        layoutAll();
-        return;
-      }
-
       // Cmd/Ctrl+Shift+A → toggle auto layout
       if (lowerKey === 'a' && e.shiftKey) {
         if (editable) return;
@@ -413,7 +404,6 @@ export function useCanvasShortcuts(
     getFlowPos,
     pasteFiles,
     pasteText,
-    layoutAll,
     toggleAutoLayout,
   ]);
 

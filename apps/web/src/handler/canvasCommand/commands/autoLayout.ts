@@ -1,3 +1,11 @@
+/**
+ * @file `AUTO_LAYOUT` command handler.
+ *
+ * @deprecated `AUTO_LAYOUT` is no longer exposed in the UI or to the agent.
+ * The handler is retained only so historical chat threads and any persisted
+ * commands can still replay; do not add new call sites. See
+ * `DEPRECATED_CANVAS_COMMAND_TYPES` in `packages/shared/src/types/canvas/command.ts`.
+ */
 import {
   layoutAll as layoutAllNodes,
   layoutGroup as layoutGroupNodes,

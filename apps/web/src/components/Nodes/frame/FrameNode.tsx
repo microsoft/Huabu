@@ -1,6 +1,6 @@
 import { resolveAccent } from '@sediment/shared';
 import clsx from 'clsx';
-import { LayoutGrid, Ungroup } from 'lucide-react';
+import { Ungroup } from 'lucide-react';
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
@@ -18,7 +18,6 @@ export const FrameNode = memo(
   ({ id, data, selected }: NodeProps<FrameNodeType>) => {
     const unframe = useCanvasStore((state) => state.unframe);
     const tryRename = useCanvasStore((state) => state.tryRename);
-    const layoutGroup = useCanvasStore((state) => state.layoutGroup);
 
     // Single source of styling: the accent picker (added by NodeWrapper).
     // When an accent is set, derive the same `bg` token used by
@@ -38,16 +37,6 @@ export const FrameNode = memo(
 
     const FrameToolbar = (
       <>
-        <FloatingToolbar.ActionButton
-          title="Layout Children"
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            layoutGroup(id);
-          }}
-        >
-          <LayoutGrid />
-        </FloatingToolbar.ActionButton>
         <FloatingToolbar.ActionButton
           title="Unframe"
           onClick={(e) => {

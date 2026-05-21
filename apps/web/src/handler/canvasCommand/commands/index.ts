@@ -58,6 +58,7 @@ export const HANDLERS: HandlerMap = {
   SET_EDGE_STYLE: setEdgeStyle.handler,
   ALIGN_NODES: alignNodes.handler,
   DISTRIBUTE_NODES: distributeNodes.handler,
+  /** @deprecated Retained for historical replay only — see autoLayout.ts. */
   AUTO_LAYOUT: autoLayout.handler,
   CHANGE_NODE_TYPE: changeNodeType.handler,
 };
@@ -83,6 +84,7 @@ export const COMMAND_META: Record<CanvasCommandType, CommandMeta> = {
   SET_EDGE_STYLE: setEdgeStyle.meta,
   ALIGN_NODES: alignNodes.meta,
   DISTRIBUTE_NODES: distributeNodes.meta,
+  /** @deprecated Retained for historical replay only — see autoLayout.ts. */
   AUTO_LAYOUT: autoLayout.meta,
   CHANGE_NODE_TYPE: changeNodeType.meta,
 };

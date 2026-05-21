@@ -26,6 +26,10 @@ const engine = new LayoutEngine();
 /**
  * Full re-layout of all nodes.
  * Returns new nodes array or null if no changes.
+ *
+ * @deprecated No UI or agent entry point invokes this anymore; only the
+ * `AUTO_LAYOUT` command handler keeps it alive for historical replay. Do
+ * not call directly from new code.
  */
 export function layoutAll(
   nodes: Node[],
@@ -40,6 +44,10 @@ export function layoutAll(
 /**
  * Full re-layout within a specific frame only.
  * Returns new nodes array or null if no changes.
+ *
+ * @deprecated No UI or agent entry point invokes this anymore; only the
+ * `AUTO_LAYOUT` command handler keeps it alive for historical replay. Do
+ * not call directly from new code.
  */
 export function layoutGroup(
   nodes: Node[],

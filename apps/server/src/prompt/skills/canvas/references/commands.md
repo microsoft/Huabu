@@ -33,7 +33,6 @@ Everything you need to mutate a canvas. **Load this before issuing your first `c
 - **REORDER_NODES** — change z-order (`top` / `bottom` / `{before|after: id}`).
 - **ALIGN_NODES** — align selected nodes along an axis.
 - **DISTRIBUTE_NODES** — even spacing across ≥3 nodes.
-- **AUTO_LAYOUT** — run force-directed layout on the whole canvas or one frame.
 
 ## 3. ID conventions
 
@@ -47,7 +46,7 @@ Everything you need to mutate a canvas. **Load this before issuing your first `c
 
 1. **Create** everything you need to reference (with explicit ids).
 2. **Wire** it up (`CONNECT_NODES`, `SET_NODE_PARENT`).
-3. **Polish** (`ALIGN_NODES`, `DISTRIBUTE_NODES`, `AUTO_LAYOUT`).
+3. **Polish** (`ALIGN_NODES`, `DISTRIBUTE_NODES`).
 
 ## 5. Style hints
 

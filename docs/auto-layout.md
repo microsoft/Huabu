@@ -4,13 +4,13 @@ The canvas has a force-directed layout system (`apps/web/src/utils/layout/`) tha
 
 ## Layout Actions
 
-Three layout operations are available:
+One layout operation is exposed to users today:
 
-| Action                | Scope                   | Trigger                          | Effect                                                                     |
-| --------------------- | ----------------------- | -------------------------------- | -------------------------------------------------------------------------- |
-| **Layout All**        | All nodes on canvas     | `Ctrl+Shift+L` or toolbar button | Repositions every node; viewport fits to result                            |
-| **Layout Frame**      | All children of a frame | Frame toolbar button             | Repositions only nodes inside that frame                                   |
-| **Place Node** (auto) | Single newly added node | Automatic on node creation       | Inserts the new node near its related nodes; all existing nodes stay fixed |
+| Action                | Scope                   | Trigger                    | Effect                                                                     |
+| --------------------- | ----------------------- | -------------------------- | -------------------------------------------------------------------------- |
+| **Place Node** (auto) | Single newly added node | Automatic on node creation | Inserts the new node near its related nodes; all existing nodes stay fixed |
+
+> `layoutAll` and `layoutGroup` (full canvas / single-frame re-layout) are still implemented under `apps/web/src/handler/autoLayout/coordinator.ts` and the deprecated `AUTO_LAYOUT` command handler, but no UI entry point, keyboard shortcut, or agent tool surface invokes them anymore. They remain only so historical chat threads / persisted commands can still replay.
 
 All layout changes are undoable with a single `Ctrl+Z`.
 
@@ -47,7 +47,7 @@ The pipeline runs in four stages:
 1. **GraphModel** converts ReactFlow nodes and edges into a framework-agnostic `LayoutGraph`. Frame containment (`parentId`) becomes compound-node groups. Explicit and implicit edges are merged here.
 
 2. **LayoutEngine** uses two solvers for different operations:
-   - **WebCola** (stress majorization) for full layout (`layoutAll`, `layoutGroup`) — starts from current positions and monotonically reduces stress, preserving spatial familiarity.
+   - **WebCola** (stress majorization) for full layout (`layoutAll`, `layoutGroup`) — starts from current positions and monotonically reduces stress, preserving spatial familiarity. _Deprecated entry points; retained for historical replay only._
    - **fCoSE** for incremental placement (`placeNode`) — uses hard `fixedNodeConstraint` pins so existing nodes stay perfectly still while the new node is positioned.
 
 3. **Solvers** share the same interface and both handle compound nodes (frames), fixed constraints, disconnected components, and edge weights. All positions are converted to absolute coordinates before the solver runs and back to parent-relative on write-back.
