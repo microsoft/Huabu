@@ -730,15 +730,38 @@ export async function createMilkdown(
     },
   });
 
-  // Register the markdown listener BEFORE `create()`. Crepe's `on()` runs
-  // the callback during editor construction, so subscribers must be queued
-  // up front.
+  // Markdown change listeners.
+  //
+  // We deliberately do NOT use `crepe.on(api => api.markdownUpdated(...))`.
+  // The upstream `@milkdown/plugin-listener` debounces transaction-driven
+  // serialization by 200ms; if the editor is destroyed within that window
+  // (React StrictMode mount/unmount, rapid `setMarkdown` followed by
+  // unmount, last keystroke before route change, etc.) the debounced
+  // callback fires AFTER `ctx.remove(editorViewCtx)`. Crepe's
+  // `paragraphSchema.toMarkdown.runner` reads `ctx.get(editorViewCtx)` to
+  // detect the doc's last child (for empty-line preservation), so the
+  // post-destroy serialize crashes with `Context "editorView" not found`.
+  //
+  // Instead we run the serializer synchronously inside a ProseMirror
+  // plugin's `view.update`. By definition that fires while the editor
+  // view is alive, so `editorViewCtx` is always set.
   const listeners = new Set<(markdown: string) => void>();
-  crepe.on((api) => {
-    api.markdownUpdated((_ctx, markdown) => {
-      for (const listener of listeners) listener(markdown);
-    });
-  });
+  crepe.editor.use(
+    $prose(
+      (ctx) =>
+        new Plugin({
+          view: () => ({
+            update: (view, prevState) => {
+              if (listeners.size === 0) return;
+              if (view.state.doc.eq(prevState.doc)) return;
+              const serializer = ctx.get(serializerCtx);
+              const markdown = serializer(view.state.doc);
+              for (const listener of listeners) listener(markdown);
+            },
+          }),
+        }),
+    ),
+  );
 
   // Patch the block-handle `filterNodes` AFTER Crepe queues its own
   // BlockEdit config (so this `ctx.set` wins). Crepe's default filter
@@ -1080,6 +1103,30 @@ export async function createMilkdown(
 
     destroy: async () => {
       listeners.clear();
+      // Neutralise the EditorView's `dispatch` BEFORE we tear Crepe
+      // down. Crepe internals schedule transactions through several
+      // async paths (tooltip providers' debounced shouldShow that may
+      // commit selection-driven state, the latex inner NodeView's
+      // `requestAnimationFrame(() => view.focus())` after dispatching
+      // a node-update, the virtual cursor plugin, etc.). Any of those
+      // callbacks firing AFTER `crepe.destroy()` has begun removing
+      // ctx slices crashes inside the `MILKDOWN_STATE_TRACKER` plugin
+      // with `Context "editorState" not found`, because the plugin's
+      // `apply` does `ctx.set(editorStateCtx, ...)` on a slice that
+      // was already removed. By overwriting `dispatch` with a no-op
+      // first, we drop those late transactions silently — the editor
+      // is going away so the work is irrelevant anyway.
+      try {
+        crepe.editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          (view as { dispatch: (...args: unknown[]) => void }).dispatch =
+            () => {};
+        });
+      } catch {
+        // The editor may already be in a partially torn-down state
+        // (e.g. another caller invoked destroy concurrently). Nothing
+        // to neutralise — proceed to crepe.destroy().
+      }
       await crepe.destroy();
     },
   };
