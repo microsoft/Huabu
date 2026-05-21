@@ -61,6 +61,7 @@ import { WebNode } from '../../Nodes/web/WebNode.tsx';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
 import type { FrameFitResult } from '@/handler/canvasCommand/utils/frame';
+import type { CanvasViewport } from '@sediment/shared';
 
 const nodeTypes = {
   image: ImageNode,
@@ -193,7 +194,6 @@ export const Canvas: React.FC<CanvasProps> = ({
   const expandMode = useCanvasStore((state) => state.expandMode);
   const frameNodesInRect = useCanvasStore((state) => state.frameNodesInRect);
   const canvasId = useCanvasStore((state) => state.canvasId);
-  const isLoading = useCanvasStore((state) => state.isLoading);
   const selectNodes = useCanvasStore((state) => state.selectNodes);
   const pendingNodeType = useToolStore((state) => state.pendingNodeType);
   const setPendingNodeType = useToolStore((state) => state.setPendingNodeType);
@@ -446,28 +446,32 @@ export const Canvas: React.FC<CanvasProps> = ({
     return () => clearTimeout(timer);
   }, [expandedNodeId, expandMode]);
 
-  // Restore the persisted viewport once per canvas load.
+  // Snapshot the persisted viewport (or decide to fit) at the moment
+  // this component mounts so React Flow's *first* render uses it
+  // directly via the `defaultViewport` / `fitView` props. Eliminates
+  // the visible jump from the default `(0, 0, 1)` viewport to the
+  // restored value that happened when we used to call `setViewport`
+  // after mount.
   //
-  // Triggered on initial mount and on canvas switches — deliberately
-  // keyed off `[canvasId, isLoading]` so adding/removing nodes during
-  // normal editing never re-fits the canvas. For canvases that don't
-  // yet have a saved viewport (old files written before this field
-  // existed), we fall back to a one-shot `fitView` so the user still
-  // lands on their content.
-  const viewportRestoredForRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (isLoading) return;
-    const inst = rfInstanceRef.current;
-    if (!inst) return;
-    if (viewportRestoredForRef.current === canvasId) return;
-    viewportRestoredForRef.current = canvasId;
-    const { viewport, nodes: currentNodes } = useCanvasStore.getState();
-    if (viewport) {
-      inst.setViewport(viewport, { duration: 0 });
-    } else if (currentNodes.length > 0) {
-      inst.fitView({ padding: 0.15, duration: 0 });
+  // `CanvasPage` only mounts `<Canvas>` once the URL canvas matches
+  // the store and `isLoading` is `false`, so reading the store
+  // imperatively here is always safe — the snapshot is taken exactly
+  // once per canvas load and never invalidated by later pan/zoom or
+  // node edits (`defaultViewport`/`fitView` only take effect on the
+  // React Flow instance's first mount anyway).
+  const initialViewportProps = useMemo<{
+    defaultViewport?: CanvasViewport;
+    fitView?: boolean;
+    fitViewOptions?: { padding: number };
+  }>(() => {
+    const { viewport, nodes: snapshotNodes } = useCanvasStore.getState();
+    if (viewport) return { defaultViewport: viewport };
+    if (snapshotNodes.length > 0) {
+      return { fitView: true, fitViewOptions: { padding: 0.15 } };
     }
-  }, [canvasId, isLoading]);
+    return {};
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- snapshot on mount only; `canvasId` is here purely to document intent.
+  }, [canvasId]);
 
   useEffect(() => {
     return () => {
@@ -647,6 +651,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       }}
     >
       <ReactFlow
+        {...initialViewportProps}
         deleteKeyCode={null}
         nodes={displayNodes}
         edges={displayEdges}
@@ -662,24 +667,6 @@ export const Canvas: React.FC<CanvasProps> = ({
         onInit={(instance) => {
           rfInstanceRef.current = instance;
           setRfInstance(instance);
-          // Apply the persisted viewport immediately if the canvas
-          // finished loading before React Flow mounted. The effect
-          // above handles the reverse ordering.
-          if (viewportRestoredForRef.current !== canvasId) {
-            const {
-              viewport,
-              nodes: currentNodes,
-              isLoading: stillLoading,
-            } = useCanvasStore.getState();
-            if (!stillLoading) {
-              viewportRestoredForRef.current = canvasId;
-              if (viewport) {
-                instance.setViewport(viewport, { duration: 0 });
-              } else if (currentNodes.length > 0) {
-                instance.fitView({ padding: 0.15, duration: 0 });
-              }
-            }
-          }
         }}
         onMoveEnd={(_event, viewport) => {
           // Persist pan/zoom so reopening the canvas lands the user in

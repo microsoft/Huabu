@@ -933,6 +933,17 @@ const useCanvasStore = create<RFState>()(
       const currentId = get().canvasId;
       if (canvasId === currentId) return;
 
+      // Flip into the loading state *before* awaiting anything so the
+      // shell shows `LoadingState` on the very next render instead of
+      // briefly painting the previous canvas while `flushAutoSave`
+      // resolves. `loadCanvas` below will set `isLoading: true` again
+      // (idempotent) once it starts the actual fetch.
+      set({
+        isLoading: true,
+        canvasNotFound: false,
+        versionConflict: false,
+      });
+
       // Flush any pending save for the current canvas before switching
       await flushAutoSave(get().saveCanvas);
 

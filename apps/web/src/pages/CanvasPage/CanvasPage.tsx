@@ -23,12 +23,14 @@ export default function CanvasPage() {
   const loadCanvas = useStore((s) => s.loadCanvas);
   const isLoading = useStore((s) => s.isLoading);
   const canvasNotFound = useStore((s) => s.canvasNotFound);
+  // Subscribed so the very first render can detect a mismatch between the
+  // URL canvas and whatever (stale or empty) canvas is currently in the
+  // store — without this we'd flash the previous canvas's `MainLayout`
+  // for one synchronous frame before the mount effect below kicks
+  // `loadCanvas` and flips `isLoading` on.
+  const storeCanvasId = useStore((s) => s.canvasId);
   const initialised = useRef(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
-  // Track the last canvasId we loaded so we can detect URL-driven changes
-  // without subscribing to the Zustand store's canvasId (which would cause
-  // an extra render cycle after loadCanvas/switchCanvas updates it).
-  const prevCanvasIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!canvasId) {
@@ -36,16 +38,18 @@ export default function CanvasPage() {
       return;
     }
 
-    // On first mount, use loadCanvas; on subsequent canvas ID changes use switchCanvas
+    // On first mount, use loadCanvas; on subsequent canvas ID changes
+    // use switchCanvas (which flushes the previous canvas's autosave).
+    // We compare against the store's `canvasId` (already subscribed
+    // above) instead of carrying a separate ref — the subscription
+    // makes any local mirror redundant.
     if (!initialised.current) {
       initialised.current = true;
-      prevCanvasIdRef.current = canvasId;
       void loadCanvas(canvasId);
-    } else if (canvasId !== prevCanvasIdRef.current) {
-      prevCanvasIdRef.current = canvasId;
+    } else if (canvasId !== storeCanvasId) {
       void switchCanvas(canvasId);
     }
-  }, [canvasId, loadCanvas, switchCanvas, navigate]);
+  }, [canvasId, storeCanvasId, loadCanvas, switchCanvas, navigate]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -70,7 +74,13 @@ export default function CanvasPage() {
     return () => window.removeEventListener('keydown', onKeyDown, true);
   }, []);
 
-  if (isLoading) {
+  // Treat any mismatch between the URL canvas and the store canvas as a
+  // loading state — covers the gap between this page mounting and the
+  // effect above calling `loadCanvas`/`switchCanvas` (which is what
+  // actually sets `isLoading: true`). Showing the spinner immediately
+  // also avoids a half-rendered `MainLayout` of the previous canvas
+  // flashing on click-through from the canvas list.
+  if (isLoading || (canvasId && storeCanvasId !== canvasId)) {
     return <LoadingState message="Loading canvas…" fullScreen />;
   }
 
