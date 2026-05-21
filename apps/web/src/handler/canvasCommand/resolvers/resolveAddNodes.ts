@@ -103,7 +103,6 @@ function materializeAddNode(
       ...(position && { position }),
       ...(size && { size }),
       ...(parentId && { parentId }),
-      ...(input.skipAutoLayout && { skipAutoLayout: true }),
     },
     traceNode: {
       id: nodeId,

@@ -26,6 +26,7 @@ import {
   urlToNodeInput,
   textToNoteNodeInput,
 } from '@/handler/canvasCommand/nodeInputBuilders';
+import { useAutoPanDuringSelection } from '@/hooks/useAutoPanDuringSelection';
 import { useCanvasGestures } from '@/hooks/useCanvasGestures';
 import { useCanvasLasso } from '@/hooks/useCanvasLasso';
 import { useCanvasShortcuts } from '@/hooks/useCanvasShortcuts';
@@ -135,6 +136,21 @@ const CanvasGestures: React.FC<{
   return null;
 };
 
+/**
+ * Inner component that drives auto-pan while the user is dragging out a
+ * selection (built-in marquee or custom lasso). Mounted inside `<ReactFlow>`
+ * so `useAutoPanDuringSelection` can reach React Flow's store via
+ * `useStoreApi`.
+ */
+const SelectionAutoPan: React.FC<{
+  active: boolean;
+  wrapperRef: React.MutableRefObject<HTMLDivElement | null>;
+  onPan: (dx: number, dy: number) => void;
+}> = ({ active, wrapperRef, onPan }) => {
+  useAutoPanDuringSelection({ active, wrapperRef, onPan });
+  return null;
+};
+
 type CanvasProps = {
   shortcutsDisabled?: boolean;
 };
@@ -171,11 +187,13 @@ export const Canvas: React.FC<CanvasProps> = ({
   const addNode = useCanvasStore((state) => state.addNode);
   const addNodes = useCanvasStore((state) => state.addNodes);
   const setRfInstance = useCanvasStore((state) => state.setRfInstance);
+  const setViewport = useCanvasStore((state) => state.setViewport);
   const openExpanded = useCanvasStore((state) => state.openExpanded);
   const expandedNodeId = useCanvasStore((state) => state.expandedNodeId);
   const expandMode = useCanvasStore((state) => state.expandMode);
   const frameNodesInRect = useCanvasStore((state) => state.frameNodesInRect);
   const canvasId = useCanvasStore((state) => state.canvasId);
+  const isLoading = useCanvasStore((state) => state.isLoading);
   const selectNodes = useCanvasStore((state) => state.selectNodes);
   const pendingNodeType = useToolStore((state) => state.pendingNodeType);
   const setPendingNodeType = useToolStore((state) => state.setPendingNodeType);
@@ -276,6 +294,8 @@ export const Canvas: React.FC<CanvasProps> = ({
     previewPath: lassoPreviewPath,
     previewNodeIds,
     previewEdgeIds,
+    isActive: isLassoActive,
+    shiftScreenPoints: shiftLassoScreenPoints,
   } = useCanvasLasso({
     active: !pendingNodeType && tool === 'lasso',
     wrapperRef,
@@ -405,7 +425,6 @@ export const Canvas: React.FC<CanvasProps> = ({
         nodeType: pendingNodeType,
         placementPoint: position,
         data,
-        skipAutoLayout: true,
       });
       setPendingNodeType(null);
     },
@@ -426,6 +445,29 @@ export const Canvas: React.FC<CanvasProps> = ({
     }, 100);
     return () => clearTimeout(timer);
   }, [expandedNodeId, expandMode]);
+
+  // Restore the persisted viewport once per canvas load.
+  //
+  // Triggered on initial mount and on canvas switches — deliberately
+  // keyed off `[canvasId, isLoading]` so adding/removing nodes during
+  // normal editing never re-fits the canvas. For canvases that don't
+  // yet have a saved viewport (old files written before this field
+  // existed), we fall back to a one-shot `fitView` so the user still
+  // lands on their content.
+  const viewportRestoredForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (isLoading) return;
+    const inst = rfInstanceRef.current;
+    if (!inst) return;
+    if (viewportRestoredForRef.current === canvasId) return;
+    viewportRestoredForRef.current = canvasId;
+    const { viewport, nodes: currentNodes } = useCanvasStore.getState();
+    if (viewport) {
+      inst.setViewport(viewport, { duration: 0 });
+    } else if (currentNodes.length > 0) {
+      inst.fitView({ padding: 0.15, duration: 0 });
+    }
+  }, [canvasId, isLoading]);
 
   useEffect(() => {
     return () => {
@@ -609,7 +651,6 @@ export const Canvas: React.FC<CanvasProps> = ({
     >
       <ReactFlow
         deleteKeyCode={null}
-        fitView={true}
         nodes={displayNodes}
         edges={displayEdges}
         onNodesChange={onNodesChange}
@@ -624,6 +665,29 @@ export const Canvas: React.FC<CanvasProps> = ({
         onInit={(instance) => {
           rfInstanceRef.current = instance;
           setRfInstance(instance);
+          // Apply the persisted viewport immediately if the canvas
+          // finished loading before React Flow mounted. The effect
+          // above handles the reverse ordering.
+          if (viewportRestoredForRef.current !== canvasId) {
+            const {
+              viewport,
+              nodes: currentNodes,
+              isLoading: stillLoading,
+            } = useCanvasStore.getState();
+            if (!stillLoading) {
+              viewportRestoredForRef.current = canvasId;
+              if (viewport) {
+                instance.setViewport(viewport, { duration: 0 });
+              } else if (currentNodes.length > 0) {
+                instance.fitView({ padding: 0.15, duration: 0 });
+              }
+            }
+          }
+        }}
+        onMoveEnd={(_event, viewport) => {
+          // Persist pan/zoom so reopening the canvas lands the user in
+          // the same spot. Rides the standard 1s autosave debounce.
+          setViewport(viewport);
         }}
         onPaneClick={handlePaneClick}
         onNodeDoubleClick={(e, node) => {
@@ -657,6 +721,11 @@ export const Canvas: React.FC<CanvasProps> = ({
         onlyRenderVisibleElements
       >
         <CanvasGestures wrapperRef={wrapperRef} rfInstanceRef={rfInstanceRef} />
+        <SelectionAutoPan
+          active={isBoxSelecting || isLassoActive}
+          wrapperRef={wrapperRef}
+          onPan={shiftLassoScreenPoints}
+        />
         <Panel position="bottom-center" className="mb-6">
           <NodeToolbar activeTool={tool} onToolChange={setTool} />
         </Panel>

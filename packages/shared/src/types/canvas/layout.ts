@@ -15,6 +15,18 @@ export interface Bounds {
   maxY: number;
 }
 
+/**
+ * Pan + zoom of the React Flow viewport. Persisted in `canvas.json`
+ * (under `state.viewport`) so the user lands back at the same view
+ * when reopening a canvas, and so adding/removing nodes never
+ * silently re-fits the canvas.
+ */
+export interface CanvasViewport {
+  x: number;
+  y: number;
+  zoom: number;
+}
+
 export type LayoutStrategy = 'hierarchical' | 'radial' | 'force-directed';
 
 export interface LayoutConfig {

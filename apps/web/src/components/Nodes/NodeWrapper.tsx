@@ -34,7 +34,6 @@ import {
   getResizeContext,
   getResizeSnappedRect,
 } from '@/handler/snap/snapSession.ts';
-import { useCornerZoomResize } from '@/hooks/useCornerZoomResize.ts';
 import { useIsNotMouse } from '@/hooks/useInputMode.ts';
 import { useNodeLOD } from '@/hooks/useNodeLOD.ts';
 import useCanvasStore from '@/store/canvasStore.ts';
@@ -271,7 +270,6 @@ export const NodeWrapper = memo(
     const selectedCount = useCanvasStore(
       (state) => state.nodes.filter((node) => node.selected).length,
     );
-    const { tryStartZoom, shouldResize } = useCornerZoomResize();
 
     const setNodeGeometry = useCanvasStore((state) => state.setNodeGeometry);
     const onNodeResizeStart = useCanvasStore(
@@ -382,7 +380,6 @@ export const NodeWrapper = memo(
         event: unknown,
         params: { x: number; y: number; width: number; height: number },
       ) => {
-        if (tryStartZoom(event, params)) return;
         onNodeResizeStart();
 
         // Capture pre-resize bounds in absolute flow-space so the
@@ -428,7 +425,7 @@ export const NodeWrapper = memo(
 
         onResizeStart?.();
       },
-      [id, tryStartZoom, onNodeResizeStart, onResizeStart],
+      [id, onNodeResizeStart, onResizeStart],
     );
 
     const handleResizeEnd = useCallback(
@@ -498,7 +495,6 @@ export const NodeWrapper = memo(
           minWidth={minWidth}
           minHeight={minHeight}
           keepAspectRatio={keepAspectRatio}
-          shouldResize={shouldResize}
           onResizeStart={handleResizeStart}
           onResize={handleResize}
           onResizeEnd={handleResizeEnd}

@@ -424,7 +424,6 @@ export function SketchOverlay({
             initialSize: result.initialSize,
             origin: { type: 'user-created' },
           },
-          skipAutoLayout: true,
         });
       }
 

@@ -80,16 +80,12 @@ const createQuestion: CommandDefinition<Cmd> = {
       [node.id],
     );
 
-    // Position: if not explicit, or auto-layout applies, use force-directed.
-    const hasExplicitPosition = !!cmd.position;
-    if (
-      !hasExplicitPosition ||
-      (state.autoLayoutEnabled && !cmd.skipAutoLayout)
-    ) {
-      if (!cmd.skipAutoLayout) {
-        const placed = placeNode(finalNodes, state.edges, node.id);
-        if (placed) finalNodes = placed;
-      }
+    // Position: honour the caller's contract — if `position` is provided
+    // it is used verbatim; otherwise run force-directed `placeNode` to
+    // find a non-overlapping slot.
+    if (!cmd.position) {
+      const placed = placeNode(finalNodes, state.edges, node.id);
+      if (placed) finalNodes = placed;
     }
 
     // Auto-resize parent frames.

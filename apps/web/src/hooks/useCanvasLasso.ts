@@ -45,6 +45,14 @@ interface UseCanvasLassoResult {
   previewPath: string | null;
   previewNodeIds: string[];
   previewEdgeIds: string[];
+  /** True while the user is actively drawing a lasso polygon. */
+  isActive: boolean;
+  /**
+   * Translate every polygon point by `(dx, dy)` in screen px. Used by the
+   * auto-pan-during-selection loop to keep the lasso anchored to flow-space
+   * as the viewport scrolls under it.
+   */
+  shiftScreenPoints: (dx: number, dy: number) => void;
 }
 
 function distance(a: Point, b: Point) {
@@ -330,6 +338,15 @@ export function useCanvasLasso({
     [cancel, screenPoints],
   );
 
+  const shiftScreenPoints = useCallback((dx: number, dy: number) => {
+    if (dx === 0 && dy === 0) return;
+    setScreenPoints((previous) =>
+      previous
+        ? previous.map((point) => ({ x: point.x + dx, y: point.y + dy }))
+        : previous,
+    );
+  }, []);
+
   const previewPath = useMemo(() => {
     if (!screenPoints || screenPoints.length < 2) return null;
 
@@ -369,5 +386,7 @@ export function useCanvasLasso({
     previewPath,
     previewNodeIds,
     previewEdgeIds,
+    isActive: screenPoints !== null,
+    shiftScreenPoints,
   };
 }

@@ -59,11 +59,18 @@ type CanvasNodeCreateInputByType<T extends CanvasNodeType> = {
   id?: CanvasNodeId;
   nodeType: T;
   data?: Partial<Omit<Extract<NodeData, { type: T }>, 'type'>>;
+  /**
+   * Top-left position of the new node.
+   *
+   * Providing `position` is a contract that the caller has chosen where
+   * the node belongs (drag-drop, paste, toolbar placement, group-into-frame,
+   * etc.) — the create handler honours it verbatim. Omit `position` for
+   * programmatic / AI creation paths where the canvas should pick a slot
+   * via force-directed `placeNode`.
+   */
   position?: Point;
   size?: NodeSize;
   parentId?: CanvasNodeId | null;
-  /** When true, skip force-directed auto-placement (e.g. node was explicitly placed by drag). */
-  skipAutoLayout?: boolean;
 };
 
 export type CanvasNodeCreateInput = {
@@ -149,10 +156,13 @@ export type CanvasCommand =
       id?: CanvasNodeId;
       /** The question text content. */
       content: string;
+      /**
+       * Top-left position. Honoured verbatim when provided; when omitted
+       * the canvas picks a slot via force-directed `placeNode`.
+       */
       position?: Point;
       size?: NodeSize;
       parentId?: CanvasNodeId | null;
-      skipAutoLayout?: boolean;
     }
   | { type: 'SET_NODE_SELECTION'; nodeIds: CanvasNodeId[] }
   | { type: 'SET_EXPANDED_NODE'; nodeId: CanvasNodeId | null }

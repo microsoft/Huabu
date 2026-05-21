@@ -164,25 +164,18 @@ const createNodes: CommandDefinition<Cmd> = {
         : orderedNodes;
 
     // ---------------------------------------------------------------
-    // 5. Resolve position: if not provided, use force-directed
-    //    placement to find a non-overlapping position. If provided
-    //    but auto-layout is enabled (and not skipped / parent not
-    //    locked), re-place to optimize layout.
+    // 5. Resolve position. Honour the caller's contract:
+    //    - `position` provided → use it verbatim. The caller (drag-drop,
+    //      paste, toolbar placement, sketch overlay, group-into-frame,
+    //      undo/redo restore, …) has already chosen where the node
+    //      belongs and the canvas must not move it.
+    //    - `position` omitted → no anchor available; run force-directed
+    //      `placeNode` to find a non-overlapping slot. This runs
+    //      independently of `autoLayoutEnabled` since otherwise the
+    //      node would land at (0,0) on top of existing content.
     // ---------------------------------------------------------------
     for (const [i, n] of newNodes.entries()) {
-      const input = cmd.nodes[i];
-      const hasExplicitPosition = !!input.position;
-
-      if (hasExplicitPosition) {
-        // Explicit position: only re-place if auto-layout applies.
-        if (input.skipAutoLayout) continue;
-        if (!state.autoLayoutEnabled) continue;
-        const parentFrame = n.parentId
-          ? state.nodes.find((fn) => fn.id === n.parentId)
-          : undefined;
-        if (parentFrame?.data?.locked === true) continue;
-      }
-
+      if (cmd.nodes[i].position) continue;
       const placed = placeNode(finalNodes, state.edges, n.id);
       if (placed) finalNodes = placed;
     }

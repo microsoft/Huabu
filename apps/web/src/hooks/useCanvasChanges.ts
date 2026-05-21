@@ -88,7 +88,6 @@ function buildNodeRecreateCommand(node: Node): CanvasCommand {
               },
             }
           : {}),
-        skipAutoLayout: true,
       },
     ],
   };

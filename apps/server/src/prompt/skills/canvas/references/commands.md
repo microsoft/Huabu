@@ -14,7 +14,7 @@ Everything you need to mutate a canvas. **Load this before issuing your first `c
 
 **Structural mutations (nodes & edges)**
 
-- **CREATE_NODES** — create one or more nodes. Set `skipAutoLayout: true` whenever you supply an explicit `position` so the force-directed engine does not override it.
+- **CREATE_NODES** — create one or more nodes. If you supply an explicit `position` it is honoured verbatim; omit `position` to let the force-directed engine pick a non-overlapping slot.
 - **CREATE_QUESTION** — create a question node the user is expected to answer. Use this to surface follow-ups instead of asking in chat.
 - **DELETE_NODES** — remove nodes by id. Incident edges are removed automatically.
 - **MERGE_NODE_DATA** — shallow-merge a patch into `node.data` (label / content / style). Style supports `accent` (palette token, top stripe + edge stroke) and `backgroundColor` on every node type; text-only style fields apply only to text nodes.

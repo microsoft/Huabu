@@ -57,6 +57,7 @@ import { useToolStore } from './toolStore';
 import { getCanvas, postCanvasEvents, preprocessNode, putCanvas } from '../api';
 import { cloneArtifactToCanvas } from '../api/artifact';
 import { CanvasConflictError } from '../api/canvas';
+import { toast } from '../components/Common/Toast';
 import { seedNoteFixedHeight } from '../components/Nodes/note/autoHeight';
 import { getNoteFixedHeight } from '../components/Nodes/note/heightMemory';
 import { copyToClipboard } from '../utils/io/clipboard';
@@ -70,6 +71,7 @@ import type {
   CanvasExecution,
   CanvasExecutionSource,
   CanvasNodeType,
+  CanvasViewport,
   IntentContext,
   RecentAction,
   WireCanvasNode,
@@ -148,6 +150,15 @@ type RFState = {
   canvasNotFound: boolean;
   isSaving: boolean;
   pendingSave: boolean;
+
+  /**
+   * True when the server has rejected a save with `CANVAS_VERSION_CONFLICT`
+   * (another tab / device / agent advanced the canvas behind our back).
+   * While set, `saveCanvas` short-circuits so we don't pile up failing
+   * autosaves on top of stale state. Cleared by `loadCanvas` once the
+   * client is re-synced to the latest server snapshot.
+   */
+  versionConflict: boolean;
 
   /**
    * Apply a partial state update without triggering autosave or the
@@ -253,6 +264,25 @@ type RFState = {
   onNodeResizeStart: () => void;
   rfInstance: ReactFlowInstance | null;
   setRfInstance: (instance: ReactFlowInstance | null) => void;
+
+  /**
+   * Last persisted pan + zoom of the React Flow viewport.
+   *
+   * `null` means "no saved viewport yet" — on initial load that triggers a
+   * one-shot `fitView` for backward-compat with old canvases. After the
+   * user pans or zooms, `onMoveEnd` writes the new viewport here through
+   * {@link setViewport}, which rides the standard autosave debounce so it
+   * lands in `canvas.json` as `state.viewport`. Restoring it on reopen
+   * means typical edits (drawing a sketch stroke, dropping a note) no
+   * longer trigger an auto-fit that yanks the canvas around.
+   */
+  viewport: CanvasViewport | null;
+  /**
+   * Record a new viewport. Called from `<ReactFlow onMoveEnd>` after the
+   * user finishes panning/zooming. Triggers autosave via the standard
+   * PERSISTED_KEYS diff.
+   */
+  setViewport: (viewport: CanvasViewport) => void;
 
   /**
    * Commit a user-initiated data edit. Always records an undo snapshot.
@@ -496,7 +526,7 @@ if (typeof window !== 'undefined') {
   window.addEventListener('beforeunload', flushAllCanvasEventsKeepalive);
 }
 
-const PERSISTED_KEYS = ['nodes', 'edges', 'canvasTitle'] as const;
+const PERSISTED_KEYS = ['nodes', 'edges', 'canvasTitle', 'viewport'] as const;
 type PersistedKey = (typeof PERSISTED_KEYS)[number];
 
 /**
@@ -649,6 +679,7 @@ const useCanvasStore = create<RFState>()(
     canvasNotFound: false,
     isSaving: false,
     pendingSave: false,
+    versionConflict: false,
 
     // Placeholder — the autoSaveMiddleware injects the real raw setter
     // that bypasses autosave scheduling. Calling it before middleware has
@@ -833,7 +864,7 @@ const useCanvasStore = create<RFState>()(
     },
 
     loadCanvas: async (canvasId?: string) => {
-      set({ isLoading: true, canvasNotFound: false });
+      set({ isLoading: true, canvasNotFound: false, versionConflict: false });
       try {
         const targetId = canvasId ?? get().canvasId;
         if (canvasId) {
@@ -854,13 +885,26 @@ const useCanvasStore = create<RFState>()(
         const state = response.state as {
           nodes?: Node[];
           edges?: Edge[];
+          viewport?: CanvasViewport;
         };
         canvasHistoryManager.clear();
 
         const loadedNodes = state.nodes ?? [];
+        // Sanity-check the persisted viewport so a corrupt entry can't
+        // strand the canvas at NaN/Infinity. Fall back to a one-shot
+        // fitView in that case (handled in Canvas.tsx).
+        const loadedViewport =
+          state.viewport &&
+          Number.isFinite(state.viewport.x) &&
+          Number.isFinite(state.viewport.y) &&
+          Number.isFinite(state.viewport.zoom) &&
+          state.viewport.zoom > 0
+            ? state.viewport
+            : null;
         set({
           nodes: loadedNodes,
           edges: state.edges ?? [],
+          viewport: loadedViewport,
           canvasTitle: response.title || 'Untitled',
           version: response.version,
           isLoading: false,
@@ -897,12 +941,15 @@ const useCanvasStore = create<RFState>()(
       }
       preprocessTimers.clear();
 
-      // Reset state for clean slate
+      // Reset state for clean slate. `viewport` is cleared so the new
+      // canvas's restore effect either applies its own saved viewport
+      // or, for older canvases without one, runs a one-shot fitView.
       set({
         expandedNodeId: null,
         actionHistory: [],
         collapsedFrameIds: new Set(),
         canvasNotFound: false,
+        viewport: null,
       });
       useToolStore.getState().resetForCanvasSwitch();
       useGesturePreviewStore.getState().clearFrameFitPreview();
@@ -913,6 +960,12 @@ const useCanvasStore = create<RFState>()(
     },
 
     saveCanvas: async () => {
+      // Once the server has rejected a save with a version mismatch, our
+      // local `version` is permanently stale until the user reloads. Skip
+      // further attempts so we don't generate a 409 on every autosave tick
+      // (and don't clobber the surfaced toast with more failures).
+      if (get().versionConflict) return;
+
       const { isSaving } = get();
       if (isSaving) {
         set({ pendingSave: true });
@@ -922,11 +975,15 @@ const useCanvasStore = create<RFState>()(
       set({ isSaving: true });
       let saveSucceeded = false;
       try {
-        const { nodes, edges, version, canvasId, canvasTitle } = get();
+        const { nodes, edges, version, canvasId, canvasTitle, viewport } =
+          get();
         const response = await putCanvas(canvasId, {
           version,
           title: canvasTitle || 'Untitled',
-          state: { nodes, edges },
+          // `viewport` is persisted under `state.viewport` so reopening
+          // the canvas restores pan+zoom verbatim instead of falling
+          // back to a fitView that fights the user's edits.
+          state: viewport ? { nodes, edges, viewport } : { nodes, edges },
         });
         set({ version: response.version });
 
@@ -954,13 +1011,25 @@ const useCanvasStore = create<RFState>()(
         saveSucceeded = true;
       } catch (error) {
         if (error instanceof CanvasConflictError) {
-          // Surface conflict to caller (e.g. tryRename) so it can revert
-          // optimistic UI state. Plain autosaves catch & ignore via
-          // void get().saveCanvas().
+          if (error.code === 'CANVAS_VERSION_CONFLICT') {
+            // Server is ahead of us (another tab / device / agent wrote
+            // first). Stop the autosave loop and surface a persistent
+            // toast so the user knows their edits aren't being saved.
+            // `loadCanvas` clears the flag once the client re-syncs.
+            if (!get().versionConflict) {
+              set({ versionConflict: true });
+              toast(
+                "This canvas was modified elsewhere. Your recent edits won't be saved — please refresh the page to continue.",
+                { variant: 'error', duration: 0 },
+              );
+            }
+            return;
+          }
+          // Surface other conflicts (e.g. CANVAS_TITLE_CONFLICT) to the
+          // caller — `tryRename` reverts the optimistic UI on those.
           throw error;
         }
         console.error('Failed to save canvas:', error);
-        // TODO: Handle version conflict (409) - reload and prompt user
       } finally {
         set({ isSaving: false });
 
@@ -1008,6 +1077,14 @@ const useCanvasStore = create<RFState>()(
         set({ canvasTitle: trimmed });
         try {
           await get().saveCanvas();
+          // `saveCanvas` swallows `CANVAS_VERSION_CONFLICT` (sets the
+          // store flag + toast). When that path fired, the title we
+          // optimistically applied was never actually persisted, so
+          // revert and report failure to the caller.
+          if (get().versionConflict) {
+            set({ canvasTitle: previous });
+            return false;
+          }
           return true;
         } catch (err) {
           if (
@@ -1436,6 +1513,23 @@ const useCanvasStore = create<RFState>()(
 
     rfInstance: null,
     setRfInstance: (instance) => set({ rfInstance: instance }),
+
+    viewport: null,
+    setViewport: (viewport) => {
+      // Skip no-op writes so passive `onMoveEnd` events (e.g. fired
+      // after a programmatic setViewport that already matches the
+      // current state) don't dirty the autosave diff.
+      const current = get().viewport;
+      if (
+        current &&
+        current.x === viewport.x &&
+        current.y === viewport.y &&
+        current.zoom === viewport.zoom
+      ) {
+        return;
+      }
+      set({ viewport });
+    },
 
     addNodes: (inputs) => {
       get().dispatchUiIntent({
