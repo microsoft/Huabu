@@ -4,6 +4,7 @@ import {
 } from '@sediment/shared';
 import {
   COMMAND_META,
+  applySharedPostEffectsFromWriteResult,
   executeCanvasCommands,
   computeFrameFit,
   getAbsolutePosition as getFrameAbsolutePosition,
@@ -29,7 +30,7 @@ import {
 } from '@xyflow/react';
 import { create, type StateCreator } from 'zustand';
 
-import { runPostEffects } from '@/handler/canvasCommand/postEffects';
+import { runWebPostEffects } from '@/handler/canvasCommand/postEffects.web';
 import {
   preprocessNodeIfNeeded,
   needsPreprocessing,
@@ -62,7 +63,6 @@ import { CanvasConflictError } from '../api/canvas';
 import { toast } from '../components/Common/Toast';
 import { seedNoteFixedHeight } from '../components/Nodes/note/autoHeight';
 import { getNoteFixedHeight } from '../components/Nodes/note/heightMemory';
-import { markAiContentEdit } from '../utils/aiEditFlags';
 import { copyToClipboard } from '../utils/io/clipboard';
 
 import type {
@@ -758,27 +758,6 @@ const useCanvasStore = create<RFState>()(
       // Only commit if at least one command was applied.
       if (!commandResults.some((r) => r.applied)) return;
 
-      // Derive AI-edited content node IDs from agent-sourced
-      // MERGE_NODE_DATA patches so `NotePreview` can stamp
-      // `MarkdownProvenance` and distinguish AI rewrites from non-AI
-      // external updates. Pure metadata patches (label/style) are
-      // irrelevant to provenance and excluded.
-      if (resolvedSource === 'agent') {
-        for (const cmd of commands) {
-          if (cmd.type !== 'MERGE_NODE_DATA') continue;
-          for (const entry of cmd.patches) {
-            const patch = entry.patch as Record<string, unknown> | undefined;
-            if (
-              patch &&
-              typeof patch.content === 'string' &&
-              typeof entry.nodeId === 'string'
-            ) {
-              markAiContentEdit(entry.nodeId);
-            }
-          }
-        }
-      }
-
       // Guard: verify that 'caller' snapshot commands were preceded by beginGesture.
       // Skip for agent-originated commands (no UI gesture involved).
       const hasCallerSnapshot = commands.some(
@@ -799,23 +778,27 @@ const useCanvasStore = create<RFState>()(
         canvasHistoryManager.takeSnapshot(state.nodes, state.edges);
       }
 
-      // Commit new state.
-      const updates: Partial<RFState> = {
+      // Apply pure host-agnostic post-commit cleanups (today: edge
+      // handle reroute) BEFORE the state commit so they fold into a
+      // single set() call instead of triggering a second render.
+      const sharedOut = applySharedPostEffectsFromWriteResult(writeResult);
+
+      // Commit new state in one shot.
+      set({
         nodes: writeResult.nodes,
-        edges: writeResult.edges,
-      };
+        edges: sharedOut.edges,
+      });
 
-      set(updates);
-
-      // Run post-commit side effects (edge reroute, ingestion, label resolve, delete tracking).
-      runPostEffects(
-        pendingEffects,
-        { triggerPreprocessing },
-        writeResult.requiresEdgeReroute,
-        state.canvasId,
-        () => ({ nodes: get().nodes, edges: get().edges }),
-        (partial) => set(partial),
-      );
+      // Drain web-only effects (preprocessing trigger, delete
+      // tracking, AI flag, transition cleanup, deferred frame fit).
+      runWebPostEffects({
+        effects: pendingEffects,
+        source: resolvedSource,
+        canvasId: state.canvasId,
+        getNodes: () => get().nodes,
+        setNodes: (nodes) => set({ nodes }),
+        triggerPreprocessing,
+      });
     },
 
     /** Resolve a web-only UiIntent and execute the resulting commands. */
@@ -1638,7 +1621,7 @@ const useCanvasStore = create<RFState>()(
       // is only known after the next render cycle (editor reflow +
       // ReactFlow ResizeObserver). The `SET_NODE_GEOMETRY` handler
       // detects the cleared height and emits a `deferredFitFrameIds`
-      // post-effect, which `runPostEffects` schedules for double-rAF
+      // post-effect, which `runWebPostEffects` schedules for double-rAF
       // refit — so this action doesn't need its own timing dance.
       get().beginGesture('SET_NODE_GEOMETRY');
       get().setNodeGeometry(items);

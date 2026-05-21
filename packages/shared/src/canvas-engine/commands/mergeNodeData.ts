@@ -20,6 +20,7 @@ const mergeNodeData: CommandDefinition<Cmd> = {
       cmd.patches.map((p) => [p.nodeId as string, p.patch]),
     );
     const preprocessNodes: Node[] = [];
+    const contentEditedNodeIds: string[] = [];
     let anyApplied = false;
 
     const nextNodes = state.nodes.map((n) => {
@@ -38,6 +39,12 @@ const mergeNodeData: CommandDefinition<Cmd> = {
       };
       if (shouldPreprocessOnUpdate(n, updated)) {
         preprocessNodes.push(updated);
+      }
+      // Engine-neutral fact: the node's `content` field was rewritten.
+      // Hosts decide what to do with this (web/agent batches use it to
+      // flag AI-authored rewrites for the editor; other hosts ignore it).
+      if (typeof patchRec.content === 'string') {
+        contentEditedNodeIds.push(n.id);
       }
       // When a child's label changes, the parent frame needs re-resolution.
       if (
@@ -64,6 +71,7 @@ const mergeNodeData: CommandDefinition<Cmd> = {
       nodes: nextNodes,
       edges: state.edges,
       preprocessNodes,
+      ...(contentEditedNodeIds.length > 0 ? { contentEditedNodeIds } : {}),
     };
   },
 };

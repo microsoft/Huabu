@@ -34,6 +34,14 @@ export interface CommandHandlerResult {
   /** Node IDs that were deleted and need server-side tracking. */
   deletedNodeIds?: string[];
   /**
+   * Node IDs whose `content` field was just rewritten. Pure fact —
+   * the engine has no notion of "AI authored". Web hosts decide,
+   * based on the batch source, whether to flag these as AI rewrites
+   * (see `runWebPostEffects`). Today only `MERGE_NODE_DATA` populates
+   * this; future content-rewriting commands should follow suit.
+   */
+  contentEditedNodeIds?: string[];
+  /**
    * Parent frame IDs whose children's geometry changed in this command.
    * Handlers no longer call `fitFrames` themselves — they only declare
    * which frames are affected, and the executor performs a single
@@ -45,9 +53,10 @@ export interface CommandHandlerResult {
   /**
    * Frame IDs whose children's rendered size will only stabilise after
    * the next render cycle (e.g. clearing a pinned height to revert to
-   * content-driven sizing). `runPostEffects` schedules a deferred refit
-   * of these frames once the DOM has reflowed. **Web-only semantics** —
-   * server-side hosts of the executor can ignore this field.
+   * content-driven sizing). The web post-effect drain schedules a
+   * deferred refit of these frames once the DOM has reflowed.
+   * **Web-only semantics** — server-side hosts of the executor can
+   * ignore this field.
    */
   deferredFitFrameIds?: string[];
 }

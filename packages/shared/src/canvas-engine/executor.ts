@@ -21,8 +21,9 @@
  * Does NOT:
  * - Call set() on the store.
  * - Take undo snapshots (signals via `snapshotNeeded` instead).
- * - Run post-commit side effects (the store layer does that with
- *   `runPostEffects`).
+ * - Run post-commit side effects (the host layer drains the returned
+ *   `pendingEffects` manifest via `applySharedPostEffects` plus a
+ *   host-specific drain — see `runWebPostEffects`).
  */
 
 import { HANDLERS, COMMAND_META } from './commands/index.js';
@@ -54,7 +55,11 @@ export interface ExecutorOptions {
 export interface ExecutorOutput {
   writeResult: CanvasWriteResult;
   commandResults: CanvasCommandResult[];
-  /** Accumulated side-effect requests for `runPostEffects`. */
+  /**
+   * Pure side-effect manifest for host-specific drains. See
+   * `applySharedPostEffects` (pure cleanups both hosts run) and
+   * `runWebPostEffects` (web-only verbs).
+   */
   pendingEffects: PendingEffects;
 }
 
@@ -62,10 +67,12 @@ export interface ExecutorOutput {
  * Execute a batch of canvas commands against the given state.
  *
  * Returns the new nodes/edges, execution metadata, and accumulated
- * side-effect requests. The caller (store layer) is responsible for:
- * 1. Committing the write result to Zustand state.
+ * side-effect requests. The caller (host layer) is responsible for:
+ * 1. Committing the write result to its state store.
  * 2. Taking an undo snapshot if `writeResult.snapshotNeeded` is true.
- * 3. Calling `runPostEffects` with the pending effects.
+ * 3. Running `applySharedPostEffects` for pure cleanups.
+ * 4. Draining `pendingEffects` via the host-specific post-effect runner
+ *    (`runWebPostEffects` on web; M2 will add a server counterpart).
  */
 export function executeCanvasCommands(
   execution: CanvasExecution,
@@ -77,6 +84,7 @@ export function executeCanvasCommands(
   const pendingEffects: PendingEffects = {
     preprocessNodes: [],
     deletedNodeIds: [],
+    contentEditedNodeIds: [],
     needsTransitionCleanup: false,
     deferredFitFrameIds: [],
   };
@@ -138,6 +146,11 @@ export function executeCanvasCommands(
       }
       if (result.deletedNodeIds) {
         pendingEffects.deletedNodeIds.push(...result.deletedNodeIds);
+      }
+      if (result.contentEditedNodeIds) {
+        pendingEffects.contentEditedNodeIds.push(
+          ...result.contentEditedNodeIds,
+        );
       }
       if (result.deferredFitFrameIds) {
         pendingEffects.deferredFitFrameIds.push(...result.deferredFitFrameIds);

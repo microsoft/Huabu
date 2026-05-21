@@ -28,6 +28,14 @@ export type {
 // ── Pure preprocessing predicates ────────────────────────────────────────
 export { needsPreprocessing, shouldPreprocessOnUpdate } from './preprocess.js';
 
+// ── Shared post-commit cleanups (host-agnostic) ───────────────────────────
+export {
+  applySharedPostEffects,
+  applySharedPostEffectsFromWriteResult,
+  type SharedPostEffectsInput,
+  type SharedPostEffectsOutput,
+} from './postEffects.js';
+
 // ── Command registry (handler / meta maps) ────────────────────────────────
 export {
   HANDLERS,
