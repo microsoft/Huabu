@@ -176,9 +176,8 @@ export interface DeletedBlockInfo {
 /**
  * Block-level provenance for a note's markdown content.
  *
- * Replaces the legacy block-id-keyed `BlockProvenanceMap` (the BlockNote
- * era used persistent block ids; Milkdown / ProseMirror has none, so we
- * key by content fingerprint instead).
+ * Keys blocks by a content fingerprint (Milkdown / ProseMirror does
+ * not expose persistent block ids).
  */
 export interface MarkdownProvenance {
   version: 1;
@@ -243,13 +242,11 @@ export interface NoteNodeData extends BaseNodeData {
   content: string;
   style?: NodeStyle;
   /**
-   * Block-level provenance for AI edits (Phase 4, Milkdown migration).
+   * Block-level provenance for AI edits.
    * See `apps/web/src/utils/blockProvenance.ts`.
    *
-   * Historical records may still carry the legacy block-id-keyed shape
-   * (or BlockNote `contentJson` / `contentJsonSource` / `contentBeforeAI`
-   * fields) — the runtime ignores any value that does not parse as
-   * `MarkdownProvenance` (zero-compat per migration plan §4).
+   * Historical records may carry an unrelated shape — the runtime
+   * ignores any value that does not parse as `MarkdownProvenance`.
    */
   provenance?: MarkdownProvenance;
   /**

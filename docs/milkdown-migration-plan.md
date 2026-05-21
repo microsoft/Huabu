@@ -1,5 +1,7 @@
 # Milkdown 迁移方案 — 完整规划
 
+> Status: ✅ Completed (2026-05). 本文档仅作为历史记录保留。
+>
 > 范围:本文档覆盖 **Phase 1 ~ Phase 6** 的完整迁移路径。
 > 每个 Phase 都是独立 PR、独立验收、独立可回滚。Phase 1a 验收 Gate 不通过则全部终止。
 
@@ -9,6 +11,9 @@
 > - ✅ **Phase 1b** 已完成 — 封装层 `apps/web/src/components/Milkdown/` 上线,ESLint `no-restricted-imports` 锁住边界
 > - ✅ **Phase 2** 已完成 — `MilkdownMessageCard` 替换 `BlockNoteCard`,多块拖拽行为对齐(详见 §2.6)
 > - ✅ **Phase 3** 已完成 — NoteNode + NotePreview 迁移到 Milkdown,blockDrag.ts 提前提取为共享 hook,拖块到 canvas 功能完整可用
+> - ✅ **Phase 4** 已完成 — block-fingerprint provenance + hover 浮层 word-diff + Accept/Reject/Insert Below + tombstone
+> - ✅ **Phase 5** 已完成(在 Phase 3 合并)
+> - ✅ **Phase 6** 已完成 — BlockNote 代码/依赖/CSS 桥接全部下线,`VITE_MESSAGE_RENDERER` 火烬移除
 > - ⏳ **Phase 4 ~ Phase 6** 待启动
 
 ## 目标
@@ -349,7 +354,7 @@ export const MilkdownMessageCard: FC<MilkdownMessageCardProps> = ({
 
 ---
 
-## Phase 4 — Provenance 重锚
+## Phase 4 — Provenance 重锚 ✅ 已完成
 
 **分支**:`feat/milkdown-provenance`(基于 Phase 3 稳定 1 周)
 
@@ -612,7 +617,7 @@ Phase 3 的实现中,`blockDrag.ts` 已从 `MilkdownPreview` 提取为独立共�
 
 ---
 
-## Phase 6 — Cleanup & 数据迁移
+## Phase 6 — Cleanup & 数据迁移 ✅ 已完成
 
 **分支**:`chore/remove-blocknote`(基于 Phase 5)
 

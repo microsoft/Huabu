@@ -1,22 +1,20 @@
 /**
  * Read-only Milkdown surface, optionally isolated in a Shadow DOM.
  *
- * Used wherever we previously rendered `BlockNoteCard` (chat messages,
- * AI previews). The Shadow DOM isolation matches the BlockNote pattern:
- * it keeps Milkdown's CSS from leaking into the surrounding page (and
- * vice-versa) without giving up document-level styles, thanks to
- * `applySharedStyles`.
+ * Used for AI message bubbles and other read-only previews. Shadow DOM
+ * isolation keeps Milkdown's CSS from leaking into the surrounding
+ * page (and vice-versa) without giving up document-level styles,
+ * thanks to `applySharedStyles`.
  *
  * When `enableBlockDrag` is set, the editor is mounted as editable so
  * Crepe's block handle is available, but all input mutations are
- * suppressed via DOM capture handlers (same approach as the legacy
- * BlockNoteCard). The `previewMode` option additionally disables the
- * floating Toolbar / LinkTooltip / Table chrome so the surface looks
- * genuinely read-only without resorting to CSS hacks.
+ * suppressed via DOM capture handlers. The `previewMode` option
+ * additionally disables the floating Toolbar / LinkTooltip / Table
+ * chrome so the surface looks genuinely read-only without resorting
+ * to CSS hacks.
  *
- * Multi-block drag parity with the legacy BlockNoteCard is delegated
- * to `attachBlockDragListeners` (shared with `MilkdownEditor`); see
- * `blockDrag.ts` for the design notes.
+ * Multi-block drag is delegated to `attachBlockDragListeners` (shared
+ * with `MilkdownEditor`); see `blockDrag.ts` for design notes.
  */
 
 import { useCallback, useEffect, useRef } from 'react';
@@ -191,9 +189,8 @@ export function MilkdownPreview(props: MilkdownPreviewProps): JSX.Element {
   }, [markdown]);
 
   // ---- Capture handlers that suppress editing when in drag-only mode ----
-  // These mirror the legacy BlockNoteCard's defensive wrappers. They are
-  // installed on the host div so they catch events even after they leave
-  // the Shadow DOM (events retarget at shadow boundaries).
+  // Installed on the host div so they catch events even after they
+  // leave the Shadow DOM (events retarget at shadow boundaries).
   const onBeforeInputCapture = useCallback(
     (e: React.FormEvent<HTMLDivElement>) => {
       if (!enableBlockDrag) return;

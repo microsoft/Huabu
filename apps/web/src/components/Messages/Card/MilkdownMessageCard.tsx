@@ -1,10 +1,5 @@
 /**
- * Milkdown-backed replacement for `BlockNoteCard`.
- *
- * Selected via the `VITE_MESSAGE_RENDERER` feature flag in
- * `AIMessage.tsx` (default `milkdown`). The legacy BlockNote-based card
- * is kept on disk so we can flip back to it at any time during the
- * migration; Phase 6 of `docs/milkdown-migration-plan.md` removes it.
+ * Milkdown-backed renderer for AI chat messages.
  */
 
 import { MilkdownPreview } from '@/components/Milkdown';
@@ -40,9 +35,6 @@ export function buildNoteDragPayload(
       kind: 'note',
       origin: { type: 'user-from-chat', threadId },
       data: {
-        // Phase 2 ships markdown-only; the legacy `contentJson` field
-        // is preserved on the wire for back-compat but no longer
-        // produced. See Phase 6 in the migration plan.
         content: trimmed,
       },
     },

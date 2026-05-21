@@ -14,9 +14,6 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@blocknote/core": "^0.46.2",
-    "@blocknote/react": "^0.46.2",
-    "@blocknote/shadcn": "^0.46.2",
     "@chenglou/pretext": "^0.0.4",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",

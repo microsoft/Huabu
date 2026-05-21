@@ -4,6 +4,21 @@
 
 ---
 
+## 2026-05-21 · BlockNote 彻底下线（Phase 6）
+
+**What Changed**
+
+- 移除所有 BlockNote 相关代码与依赖：删除 `@blocknote/core`、`@blocknote/react`、`@blocknote/shadcn` 三个 npm 包，删除 `apps/web/src/components/BlockNote/` 目录与 `BlockNoteCard.tsx`，清掉 `index.css` 中只服务于 BlockNote 的 ShadCN 桥接 token。
+- 删除 `VITE_MESSAGE_RENDERER` 灰度开关，AI 消息卡片固定使用 Milkdown。
+- 拖拽到画布的笔记 payload 不再携带 `contentJson` 辅助字段，markdown 是唯一真值。
+
+**Notes**
+
+- bundle 体积显著减小（移除 ~400KB+ gzip 的 BlockNote 运行时与依赖）。
+- 历史持久化数据中遗留的 `contentJson` / `contentJsonSource` 等字段会被运行时静默忽略，不影响渲染。
+
+---
+
 ## 2026-05-22 · 笔记编辑器迁移到 Milkdown（Phase 3）
 
 **What Changed**

@@ -16,15 +16,6 @@ export type NoteDragPayload = {
   kind: 'note';
   data: {
     content: string;
-    /**
-     * @deprecated BlockNote-only auxiliary JSON. As of the Milkdown
-     * migration (`docs/milkdown-migration-plan.md` Phase 2) we no
-     * longer produce this field — the markdown in `content` is the
-     * sole source of truth. Readers still accept it so canvas drops
-     * from legacy senders (NotePreview, pre-migration drag images)
-     * keep working. The field will be removed in Phase 6.
-     */
-    contentJson?: string;
   };
 };
 
@@ -199,13 +190,10 @@ export const getSedimentPayload = (dt: DataTransfer): DragPayload | null => {
       const content = (data as { content?: unknown }).content;
       if (typeof content !== 'string' || content.trim() === '') return null;
 
-      const contentJson = (data as { contentJson?: unknown }).contentJson;
-
       return {
         kind: 'note',
         data: {
           content,
-          ...(typeof contentJson === 'string' ? { contentJson } : {}),
         },
         dragId: normalizedDragId,
         origin: normalizedOrigin,

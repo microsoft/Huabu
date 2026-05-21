@@ -1,6 +1,5 @@
 import { Copy } from 'lucide-react';
 
-import { BlockNoteCard } from './Card/BlockNoteCard';
 import { MilkdownMessageCard } from './Card/MilkdownMessageCard';
 import { NODE_ICON } from '../../config/nodeIcons';
 import useCanvasStore from '../../store/canvasStore';
@@ -20,14 +19,6 @@ interface AIMessageProps {
 
 const NoteIcon = NODE_ICON.note;
 
-// Feature flag — flip to `'blocknote'` to render the legacy BlockNote
-// card while the Milkdown migration is in flight. See
-// docs/milkdown-migration-plan.md (Phase 2.4 / V8). Default `milkdown`.
-const MESSAGE_RENDERER =
-  (import.meta.env.VITE_MESSAGE_RENDERER as string | undefined) ?? 'milkdown';
-const MessageCard =
-  MESSAGE_RENDERER === 'blocknote' ? BlockNoteCard : MilkdownMessageCard;
-
 export const AIMessage = ({
   content,
   isStreaming,
@@ -42,7 +33,7 @@ export const AIMessage = ({
       <div className="flex w-full flex-col gap-1">
         <div className="text-fg-default bg-surface ml-1 rounded-2xl border border-none px-4 text-sm">
           <div className="leading-relaxed">
-            <MessageCard content={content} />
+            <MilkdownMessageCard content={content} />
           </div>
         </div>
 

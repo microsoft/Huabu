@@ -21,11 +21,6 @@ describe('buildNoteDragPayload', () => {
     });
   });
 
-  it('does NOT populate the deprecated contentJson field', () => {
-    const result = buildNoteDragPayload('hello', 'thread-1');
-    expect(result?.payload.data).not.toHaveProperty('contentJson');
-  });
-
   it('preserves multi-line block structure', () => {
     const markdown = '## Heading\n\n- item one\n- item two\n';
     const result = buildNoteDragPayload(markdown, 'thread-1');
