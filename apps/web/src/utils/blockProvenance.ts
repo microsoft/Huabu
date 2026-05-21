@@ -1,10 +1,9 @@
 /**
- * Block-fingerprint provenance engine (Phase 4 of the Milkdown migration).
+ * Block-fingerprint provenance engine for the Milkdown editor.
  *
- * Replaces the BlockNote-era `apps/web/src/utils/provenance.ts`
- * (block-id-keyed). Milkdown / ProseMirror nodes have no persistent ids,
- * so we identify blocks by a stable hash derived from each top-level
- * block's `node.toJSON()` representation.
+ * Milkdown / ProseMirror nodes have no persistent ids, so we identify
+ * blocks by a stable hash derived from each top-level block's
+ * `node.toJSON()` representation.
  *
  * The module is intentionally pure: it operates on `BlockSnapshot[]`
  * (a structural projection of a PM doc's top-level children) and
@@ -437,8 +436,15 @@ export function shiftProvenance(
   };
 }
 
-/** Drop one BlockProvenance entry by key. Markdown is unchanged. */
-export function acceptBlock(
+/**
+ * Drop one `BlockProvenance` entry by key. Markdown is unchanged.
+ *
+ * Pure provenance bookkeeping — used directly by Accept (keep the AI
+ * edit) AND by Reject (the caller mutates the editor to restore the
+ * baseline, then drops the entry). The name "drop" is deliberately
+ * neutral: the function does not encode a user verdict.
+ */
+export function dropBlockEntry(
   prov: MarkdownProvenance,
   key: string,
 ): MarkdownProvenance {

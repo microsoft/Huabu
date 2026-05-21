@@ -4,6 +4,23 @@
 
 ---
 
+## 2026-05-23 · 笔记 AI 修改：批量 Accept / Reject + 来源区分
+
+**What Changed**
+
+- 笔记节点上当 AI 改动多个块时，悬浮区域顶部会显示一条可粘性吸顶的汇总条，包含 `Accept all` 与 `Reject all` 两个按钮：
+  - `Accept all`：保留当前所有 AI 改动，清除全部 provenance 标记和墓碑。
+  - `Reject all`：将每个被改动的块按倒序回滚到 baseline（插入的块删除、修改的块还原），并按原顺序重新插入被 AI 删除的块。
+- 区分"AI 编辑"与"其他面板回写"作为外部内容更新的两种来源：只有真正由 AI 触发的内容变更才会盖上 provenance 标记；同一节点上的其他来源（例如展开面板回写）只会平滑迁移现有标记，不再被误判为新一次 AI 改写。
+- `MilkdownPreview` 在启用块拖拽（只读模式）时增加 `aria-readonly`，向辅助技术宣告只读语义。
+
+**Notes**
+
+- 单块 Accept/Reject 行为保持不变；批量按钮只有在至少存在一条 provenance 条目（块标记或墓碑）时才会出现。
+- 批量 Reject 与单块 Reject 一样会写回 markdown — 期间不会触发"用户编辑"的标记清理逻辑，因为我们随后立刻清空 provenance。
+
+---
+
 ## 2026-05-21 · BlockNote 彻底下线（Phase 6）
 
 **What Changed**

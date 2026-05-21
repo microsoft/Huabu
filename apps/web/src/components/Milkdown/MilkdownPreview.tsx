@@ -237,6 +237,15 @@ export function MilkdownPreview(props: MilkdownPreviewProps): JSX.Element {
     <div
       ref={containerRef}
       className={className}
+      // Surface the read-only nature to assistive tech. In drag mode
+      // we still keep the inner ProseMirror `contenteditable=true` so
+      // the block-drag handle remains hit-testable, but we capture &
+      // swallow every input verb (typing, paste, cut, drop) above —
+      // so the visible behavior is read-only. `aria-readonly` lets
+      // screen readers convey that to the user. Pure-display mode
+      // (no block drag) keeps `aria-readonly` unset because
+      // `contenteditable=false` already communicates read-only.
+      aria-readonly={enableBlockDrag ? true : undefined}
       onBeforeInputCapture={onBeforeInputCapture}
       onKeyDownCapture={onKeyDownCapture}
       onPasteCapture={onPasteCapture}

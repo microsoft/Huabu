@@ -235,9 +235,10 @@ type RFState = {
    * e.g. only some sites deferred a parent-frame refit).
    *
    * - `mode: 'auto'`  → clears the explicit height. Parent frames shrink
-   *   to the new content height after BlockNote reflows; the deferred
-   *   refit is queued by the `SET_NODE_GEOMETRY` post-effect, so this
-   *   action stays a single dispatch with no rAF dance of its own.
+   *   to the new content height after the Milkdown editor reflows; the
+   *   deferred refit is queued by the `SET_NODE_GEOMETRY` post-effect,
+   *   so this action stays a single dispatch with no rAF dance of its
+   *   own.
    * - `mode: 'fixed'` → pins height via `seedNoteFixedHeight`, reading
    *   the most recently observed pinned height from the shared
    *   `noteHeightMemory` module so a "collapse → expand → collapse"
@@ -1505,7 +1506,7 @@ const useCanvasStore = create<RFState>()(
       // batch is captured as one undo entry without warnings.
       //
       // Fixed → auto clears the explicit height; the new content height
-      // is only known after the next render cycle (BlockNote reflow +
+      // is only known after the next render cycle (editor reflow +
       // ReactFlow ResizeObserver). The `SET_NODE_GEOMETRY` handler
       // detects the cleared height and emits a `deferredFitFrameIds`
       // post-effect, which `runPostEffects` schedules for double-rAF
@@ -1579,7 +1580,7 @@ const useCanvasStore = create<RFState>()(
     },
 
     convertNodeType: (nodeId, to) => {
-      // Guard: refuse to mutate the node type while the BlockNote editor is
+      // Guard: refuse to mutate the node type while the inline editor is
       // open on this node. The expanded editor holds dirty state that would
       // otherwise be flushed back onto a node whose type just changed,
       // overwriting the conversion. The toolbar disables the toggle in this

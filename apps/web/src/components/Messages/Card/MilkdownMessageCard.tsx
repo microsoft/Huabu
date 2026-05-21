@@ -3,7 +3,6 @@
  */
 
 import { MilkdownPreview } from '@/components/Milkdown';
-import { useChatStore } from '@/store/chatStore';
 import { setDragPayload } from '@/utils/io/dragDrop';
 
 import type { NoteDragPayload } from '@/utils/io/dragDrop';
@@ -12,6 +11,13 @@ import type { FC } from 'react';
 
 interface MilkdownMessageCardProps {
   content: string;
+  /**
+   * Thread id passed down by the parent message component. Threaded
+   * through props (rather than re-read from `useChatStore` inside this
+   * card) so the parent can keep a single subscription per message and
+   * we don't subscribe N times for N rendered cards.
+   */
+  threadId: string;
 }
 
 /**
@@ -43,9 +49,8 @@ export function buildNoteDragPayload(
 
 export const MilkdownMessageCard: FC<MilkdownMessageCardProps> = ({
   content,
+  threadId,
 }) => {
-  const threadId = useChatStore((s) => s.threadId);
-
   return (
     <MilkdownPreview
       markdown={content}

@@ -1,10 +1,10 @@
 /**
  * Single source of truth for markdown string handling in the Milkdown layer.
  *
- * Consolidates three patches that previously lived scattered across the
- * BlockNote integration (M2 empty handling, M3 trim, M5 dedupe). Every
- * code path that emits or compares markdown produced by `MilkdownEditor`
- * MUST go through these helpers, so equality semantics stay consistent.
+ * Every code path that emits or compares markdown produced by
+ * `MilkdownEditor` MUST go through these helpers, so equality
+ * semantics stay consistent across diffing, persistence, and
+ * provenance tracking.
  */
 
 /**

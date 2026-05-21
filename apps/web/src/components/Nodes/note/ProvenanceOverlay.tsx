@@ -51,6 +51,15 @@ export interface ProvenanceOverlayProps {
     anchorKey: string | null,
   ) => void;
   onDismissTombstone: (deletedKey: string) => void;
+  /**
+   * Bulk verdicts. Optional — when omitted the summary pill is hidden.
+   * `onAcceptAll` drops every marker/tombstone leaving the live doc
+   * untouched; `onRejectAll` rolls every AI block back to its baseline
+   * (delete inserts, restore modifications and tombstones) and clears
+   * the bookkeeping.
+   */
+  onAcceptAll?: () => void;
+  onRejectAll?: () => void;
 }
 
 interface BlockSlot {
@@ -108,6 +117,8 @@ export function ProvenanceOverlay({
   onInsertBelow,
   onRestoreTombstone,
   onDismissTombstone,
+  onAcceptAll,
+  onRejectAll,
 }: ProvenanceOverlayProps): JSX.Element | null {
   const [slots, setSlots] = useState<Slot[]>([]);
   // Tomb groups are identified by their shared anchorKey (`__head__`
@@ -283,7 +294,14 @@ export function ProvenanceOverlay({
     };
   }, [containerRef, editor, blocks, slots, hovered, scheduleHide, cancelHide]);
 
-  if (slots.length === 0) return null;
+  const totalCount = blocks.length + tombstones.length;
+  const showSummary =
+    totalCount > 0 && (onAcceptAll !== undefined || onRejectAll !== undefined);
+
+  // Nothing to render if there are no markers AND nothing for the
+  // summary pill to act on. Otherwise we still need the pill, even
+  // when slot measurement has not completed for the first frame.
+  if (slots.length === 0 && !showSummary) return null;
 
   const tombId = (anchorKey: string | null): string => anchorKey ?? '__head__';
 
@@ -300,6 +318,44 @@ export function ProvenanceOverlay({
 
   return (
     <>
+      {/* Summary pill — sticky-top so it stays in view while the user
+          scrolls a long note. Only rendered when at least one bulk
+          callback is wired AND there is something to act on. */}
+      {showSummary ? (
+        <div
+          className="border-edge-default bg-surface sticky top-1 z-20 mx-auto mb-1 flex w-fit items-center gap-2 rounded-full border px-3 py-1 shadow-sm"
+          role="status"
+          aria-label={`AI made ${totalCount} pending edit${totalCount === 1 ? '' : 's'} on this note`}
+        >
+          <span className="text-fg-muted text-xs">
+            {`AI edited ${blocks.length} block${blocks.length === 1 ? '' : 's'}`}
+            {tombstones.length > 0 ? ` · deleted ${tombstones.length}` : ''}
+          </span>
+          {onRejectAll ? (
+            <Button
+              variant="outline"
+              tone="neutral"
+              size="sm"
+              onClick={onRejectAll}
+              title="Restore all blocks to their pre-AI baseline"
+            >
+              Reject all
+            </Button>
+          ) : null}
+          {onAcceptAll ? (
+            <Button
+              variant="solid"
+              tone="info"
+              size="sm"
+              onClick={onAcceptAll}
+              title="Keep all AI changes and clear the markers"
+            >
+              Accept all
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+
       {/* Tombstone gutter markers (always visible; small red square).
           One marker per anchor group — multiple consecutive deletes at
           the same anchor share a single marker + popover. */}

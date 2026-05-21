@@ -101,7 +101,7 @@ export const ExpandedNodePanel = () => {
   }, [closeExpandedCanvas, expandedNodeId, node, isPreview]);
 
   // Global Escape key handler.
-  // Bubble phase (no capture flag) so child components (e.g. BlockNote menus)
+  // Bubble phase (no capture flag) so child components (e.g. inline editor menus)
   // can call stopPropagation() to handle Escape themselves without closing the
   // panel. Note: Escape inside a cross-origin iframe won't reach this handler
   // due to browser security boundaries – that's an acceptable limitation.

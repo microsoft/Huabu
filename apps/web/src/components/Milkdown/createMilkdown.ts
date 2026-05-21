@@ -502,6 +502,13 @@ function createBlockTypeIndicatorPlugin(): Plugin {
 
 interface BlockTypeMenuState {
   ctx: Ctx;
+  /**
+   * Editor mount root that owns this menu. Used by `createMilkdown`'s
+   * `destroy()` so an unmounting editor can close its own dangling
+   * menu without needing to re-enter `editor.action(ctx)` (which
+   * itself may throw mid-teardown).
+   */
+  ownerRoot: HTMLElement;
   root: HTMLElement;
   cleanup: () => void;
 }
@@ -516,6 +523,16 @@ function closeBlockTypeMenu(): void {
   root.remove();
 }
 
+/**
+ * Close the active menu iff it is owned by `ownerRoot`. Safe to call
+ * from a partially-torn-down editor — performs no editor lookups.
+ */
+function closeBlockTypeMenuIfOwnedBy(ownerRoot: HTMLElement): void {
+  if (activeBlockTypeMenu?.ownerRoot === ownerRoot) {
+    closeBlockTypeMenu();
+  }
+}
+
 function findVisibleTrigger(): HTMLElement | null {
   const triggers = document.querySelectorAll<HTMLElement>(
     '.mb-block-type-trigger',
@@ -527,7 +544,11 @@ function findVisibleTrigger(): HTMLElement | null {
   return null;
 }
 
-function openBlockTypeMenu(ctx: Ctx, triggerEl: HTMLElement): void {
+function openBlockTypeMenu(
+  ctx: Ctx,
+  ownerRoot: HTMLElement,
+  triggerEl: HTMLElement,
+): void {
   closeBlockTypeMenu();
 
   const view = ctx.get(editorViewCtx);
@@ -613,24 +634,27 @@ function openBlockTypeMenu(ctx: Ctx, triggerEl: HTMLElement): void {
     window.removeEventListener('resize', onScrollOrResize, true);
   };
 
-  activeBlockTypeMenu = { ctx, root, cleanup };
+  activeBlockTypeMenu = { ctx, ownerRoot, root, cleanup };
 }
 
-function configureBlockTypeToolbar(builder: {
-  addGroup: (
-    key: string,
-    label: string,
-  ) => {
-    addItem: (
+function configureBlockTypeToolbar(
+  builder: {
+    addGroup: (
       key: string,
-      item: {
-        active: (ctx: Ctx) => boolean;
-        icon: string;
-        onRun?: (ctx: Ctx) => void;
-      },
-    ) => unknown;
-  };
-}): void {
+      label: string,
+    ) => {
+      addItem: (
+        key: string,
+        item: {
+          active: (ctx: Ctx) => boolean;
+          icon: string;
+          onRun?: (ctx: Ctx) => void;
+        },
+      ) => unknown;
+    };
+  },
+  ownerRoot: HTMLElement,
+): void {
   const group = builder.addGroup('block-type', 'Block type');
 
   // Trigger icon: render ALL eight SVGs side-by-side; CSS shows only
@@ -661,7 +685,7 @@ function configureBlockTypeToolbar(builder: {
       }
       const triggerEl = findVisibleTrigger();
       if (!triggerEl) return;
-      openBlockTypeMenu(ctx, triggerEl);
+      openBlockTypeMenu(ctx, ownerRoot, triggerEl);
     },
   });
 }
@@ -726,7 +750,9 @@ export async function createMilkdown(
       // Append a "Block type" group (paragraph / H1-H3 / quote / lists /
       // code) after Crepe's own `formatting` and `function` groups —
       // see `configureBlockTypeToolbar` for the rationale.
-      [Crepe.Feature.Toolbar]: { buildToolbar: configureBlockTypeToolbar },
+      [Crepe.Feature.Toolbar]: {
+        buildToolbar: (builder) => configureBlockTypeToolbar(builder, root),
+      },
     },
   });
 
@@ -1103,6 +1129,13 @@ export async function createMilkdown(
 
     destroy: async () => {
       listeners.clear();
+      // Close any block-type menu still open against THIS editor. The
+      // menu is a body-mounted singleton (only one open at a time
+      // globally) so if the user pops it open and then unmounts the
+      // editor — virtualisation, route change, panel close — we must
+      // take the menu down with us instead of leaving a dangling DOM
+      // node with stale `ctx` references.
+      closeBlockTypeMenuIfOwnedBy(root);
       // Neutralise the EditorView's `dispatch` BEFORE we tear Crepe
       // down. Crepe internals schedule transactions through several
       // async paths (tooltip providers' debounced shouldShow that may

@@ -152,10 +152,11 @@ export default typescriptEslint.config(
   },
   {
     // Milkdown boundary: only files under `components/Milkdown/` may
-    // import `@milkdown/*` or `katex` directly. Every other web file
-    // must go through the wrapper (createMilkdown / MilkdownPreview /
-    // MilkdownMessageCard) so we can swap or upgrade the editor without
-    // touching feature code. See docs/milkdown-migration-plan.md §1b.
+    // import `@milkdown/*`, `prosemirror-*`, or `katex` directly. Every
+    // other web file must go through the wrapper (createMilkdown /
+    // MilkdownPreview / MilkdownMessageCard) so we can swap or upgrade
+    // the editor without touching feature code. See
+    // docs/milkdown-migration-plan.md §1b.
     files: ['apps/web/src/**/*.{ts,tsx}'],
     ignores: ['apps/web/src/components/Milkdown/**'],
     rules: {
@@ -164,9 +165,9 @@ export default typescriptEslint.config(
         {
           patterns: [
             {
-              group: ['@milkdown/*', 'katex', 'katex/*'],
+              group: ['@milkdown/*', 'prosemirror-*', 'katex', 'katex/*'],
               message:
-                'Import Milkdown / KaTeX only from components/Milkdown/. Use the wrapper (createMilkdown, MilkdownPreview, MilkdownMessageCard) instead.',
+                'Import Milkdown / ProseMirror / KaTeX only from components/Milkdown/. Use the wrapper (createMilkdown, MilkdownPreview, MilkdownMessageCard) instead.',
             },
           ],
         },

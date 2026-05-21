@@ -19,6 +19,8 @@
  *   `runPostEffects`).
  */
 
+import { markAiContentEdit } from '@/utils/aiEditFlags';
+
 import { HANDLERS, COMMAND_META, type CommandHandlerResult } from './commands';
 import { fitFrames, type NestableNode } from './utils/frame';
 
@@ -163,6 +165,25 @@ export function executeCanvasCommands(
       } else if (cmd.type === 'CREATE_QUESTION') {
         if (cmd.parentId) {
           agentAffectedFrameIds.add(cmd.parentId as string);
+        }
+      }
+
+      // Mark agent-authored note content edits so `NotePreview` can
+      // distinguish AI rewrites from non-AI external updates (e.g.
+      // another panel echoing a user edit) when deciding whether to
+      // stamp `MarkdownProvenance`. We only flag patches that touch
+      // `content` — pure metadata patches (e.g. label, style) are
+      // irrelevant to provenance.
+      if (cmd.type === 'MERGE_NODE_DATA') {
+        for (const entry of cmd.patches) {
+          const patch = entry.patch as Record<string, unknown> | undefined;
+          if (
+            patch &&
+            typeof patch.content === 'string' &&
+            typeof entry.nodeId === 'string'
+          ) {
+            markAiContentEdit(entry.nodeId);
+          }
         }
       }
     }

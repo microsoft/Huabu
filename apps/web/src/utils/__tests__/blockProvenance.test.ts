@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   acceptAll,
-  acceptBlock,
   type BlockSnapshot,
   coerceProvenance,
   diffBlocks,
   dismissDeletedBlock,
+  dropBlockEntry,
   emptyProvenance,
   findBlockEntry,
   findTombstonesAfter,
@@ -308,8 +308,8 @@ describe('accept / dismiss helpers', () => {
     newMarkdownByKey: new Map(),
   });
 
-  it('acceptBlock removes a single entry', () => {
-    const next = acceptBlock(seed, 'X');
+  it('dropBlockEntry removes a single entry', () => {
+    const next = dropBlockEntry(seed, 'X');
     expect(next.blocks.map((b) => b.key)).toEqual(['Y']);
   });
 

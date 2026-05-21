@@ -622,7 +622,7 @@ export const NodeWrapper = memo(
               'p-0',
               // In fixed-height mode fill the remaining flex track; in
               // auto-height mode size to content so the chain can grow with
-              // the children (e.g. Note's BlockNote content). `min-h-0` is
+              // the children (e.g. a Note's editor content). `min-h-0` is
               // fine while filling but would collapse the auto chain to 0.
               hasFixedNodeHeight ? 'min-h-0 flex-1' : 'min-h-0',
               isMinimal && 'invisible',
