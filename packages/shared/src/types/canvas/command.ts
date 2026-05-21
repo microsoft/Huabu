@@ -172,9 +172,9 @@ export type CanvasCommand =
        * Convert a node between `text` and `note` types. UI-only — used by the
        * one-click toggle in the node toolbar after a paste lands in the
        * "wrong" container. Both types share a `content` string field, so the
-       * conversion is loss-aware: switching `note` → `text` drops rich-text
-       * fields (contentJson, provenance) which is acceptable because users
-       * can undo if the result is unwanted.
+       * conversion is loss-aware: switching `note` → `text` drops the
+       * `provenance` field which is acceptable because users can undo if
+       * the result is unwanted.
        */
       type: 'CHANGE_NODE_TYPE';
       nodeId: CanvasNodeId;

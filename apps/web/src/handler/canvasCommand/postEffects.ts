@@ -76,7 +76,7 @@ export function runPostEffects(
 
   // 5. Refit frames whose children need a render cycle to settle their
   // size (e.g. notes whose pinned height was just cleared). Deferred
-  // via double-rAF so BlockNote can reflow and ReactFlow's
+  // via double-rAF so the inline editor can reflow and ReactFlow's
   // ResizeObserver can update `measured.height` first.
   if (effects.deferredFitFrameIds.length > 0) {
     const uniqueIds = Array.from(new Set(effects.deferredFitFrameIds));
@@ -111,9 +111,10 @@ export function scheduleTransitionCleanup(
 /**
  * Refit one or more frames to their current children after the next
  * render cycle. Two `requestAnimationFrame` hops give the DOM time to
- * reflow (e.g. BlockNote re-laying out a note whose pinned height was
- * just cleared) and ReactFlow's ResizeObserver time to write the new
- * measurement into `node.measured` before we read it back.
+ * reflow (e.g. the inline editor re-laying out a note whose pinned
+ * height was just cleared) and ReactFlow's ResizeObserver time to
+ * write the new measurement into `node.measured` before we read it
+ * back.
  *
  * Safe to call with frame IDs that no longer exist — `fitFrames`
  * silently skips them.

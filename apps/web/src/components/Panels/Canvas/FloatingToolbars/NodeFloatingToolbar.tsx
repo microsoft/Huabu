@@ -64,7 +64,7 @@ export const NodeFloatingToolbar = memo(
     const isNotMouse = useIsNotMouse();
 
     // Disable the text/note toggle while the large-view editor is open
-    // on this node (BlockNote dirty state would otherwise overwrite the
+    // on this node (dirty editor state would otherwise overwrite the
     // conversion) or while an ingest is in flight.
     const isTypeToggleDisabled =
       expandedNodeId === id || ingestion?.status === 'pending';
@@ -173,7 +173,7 @@ export const NodeFloatingToolbar = memo(
           </Tooltip>
         )}
 
-        <div className="bg-border mx-0.5 h-4 w-px" />
+        <div className="bg-edge-default mx-0.5 h-4 w-px" />
 
         {children}
 

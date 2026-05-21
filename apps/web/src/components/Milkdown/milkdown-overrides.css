@@ -1,0 +1,853 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   Milkdown / Crepe theme overrides
+   ─────────────────────────────────────────────────────────────────────────
+   Crepe ships generous "document editor" defaults (60px ProseMirror
+   padding, 16px paragraph, 42px h1, warm-beige background, Open Sans).
+   That looks great in a standalone editor page but is far too heavy
+   inside our chat message card / note nodes. These overrides tighten
+   the surface to match the compact density we use elsewhere in the
+   app.
+
+   This file is imported from `createMilkdown.ts` AFTER the Crepe theme
+   files, so plain selectors (same specificity as Crepe's defaults) win
+   the cascade without `!important`. Do NOT import this file anywhere
+   else — keeping it co-located with `createMilkdown.ts` is what
+   guarantees the load order.
+
+   When `MilkdownPreview` is mounted with `enableBlockDrag`, the mount
+   root gets a `milkdown-preview-host` class so the chat-card-specific
+   block-handle tweaks at the bottom of this file only apply in that
+   context (the standalone `MilkdownEditor` keeps the full Crepe
+   handle). */
+
+.milkdown {
+  /* ── Crepe design-token definitions ──────────────────────────────
+     Crepe's `theme/classic.css` is NOT imported (see
+     `createMilkdown.ts`), so this block is the SOLE source of truth
+     for every `--crepe-*` token Crepe 7.21.x consumes. If a future
+     Crepe release adds a new token, it will render as `initial`
+     here — that's intentional: we want the regression to be
+     visible, not silently inherit an upstream palette.
+
+     Variable inventory mirrors `lib/theme/crepe/style.css` in
+     `@milkdown/crepe@7.21.1`. `--crepe-color-error` is declared but
+     unused by 7.21.x; we still declare it for forward compatibility. */
+
+  /* Typography — inherit so the surrounding surface owns the font. */
+  --crepe-font-default: inherit;
+  --crepe-font-title: inherit;
+  --crepe-font-code:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* Surfaces & text — map onto Sediment design tokens so dark mode
+     follows the app automatically (the `.dark` class on `<html>`
+     re-binds the underlying `--fg-*` / `--bg-*` tokens). */
+  --crepe-color-background: transparent;
+  --crepe-color-on-background: var(--fg-default);
+  --crepe-color-surface: var(--bg-surface);
+  --crepe-color-surface-low: var(--bg-default);
+  --crepe-color-on-surface: var(--fg-default);
+  --crepe-color-on-surface-variant: var(--fg-muted);
+  --crepe-color-outline: var(--edge-default);
+  --crepe-color-hover: var(--bg-hover);
+  --crepe-color-selected: var(--bg-hover);
+  --crepe-color-inverse: var(--bg-inverse);
+  --crepe-color-on-inverse: var(--fg-inverse);
+  --crepe-color-inline-area: var(--bg-hover);
+  --crepe-color-inline-code: var(--fg-default);
+  --crepe-color-error: var(--danger);
+
+  /* Accent palette — Crepe uses `primary` for focus / active states
+     (e.g. selected table column header, code-mirror keywords) and
+     `secondary` as a soft accent fill (latex editor background). */
+  --crepe-color-primary: var(--info);
+  --crepe-color-secondary: var(--info-bg);
+  --crepe-color-on-secondary: var(--fg-default);
+
+  /* Elevation — match Crepe's Material-ish two-step shadow scale. */
+  --crepe-shadow-1:
+    0 1px 3px 1px rgb(0 0 0 / 0.15), 0 1px 2px 0 rgb(0 0 0 / 0.3);
+  --crepe-shadow-2:
+    0 2px 6px 2px rgb(0 0 0 / 0.15), 0 1px 2px 0 rgb(0 0 0 / 0.3);
+
+  /* Belt-and-braces: even though the variables above propagate
+     `background` / `color` / `font-family` through Crepe's own
+     rules, keep these explicit so a future Crepe rule that hard-codes
+     a value still gets neutralized to the parent surface. */
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+}
+
+.milkdown .ProseMirror {
+  /* Zero the 60px×120px editor padding; parents already provide their
+     own padding (e.g. AIMessage's chat card uses `px-4`). */
+  padding: 0;
+}
+
+.milkdown .ProseMirror p {
+  /* 14px base, matching the legacy `.bn-default-styles`. */
+  font-size: 0.875rem;
+  line-height: 1.5;
+  padding: 0.125rem 0; /* 2px y, replaces Crepe's 4px */
+}
+
+/* Headings inherit our app font + scale proportionally to the 14px
+   base, mirroring the `.block-note-view [data-level=…]` ladder in
+   `index.css`. */
+.milkdown .ProseMirror h1,
+.milkdown .ProseMirror h2,
+.milkdown .ProseMirror h3,
+.milkdown .ProseMirror h4,
+.milkdown .ProseMirror h5,
+.milkdown .ProseMirror h6 {
+  font-family: inherit;
+  font-weight: 600;
+  padding: 2px 0;
+}
+.milkdown .ProseMirror h1 {
+  font-size: 1.715em; /* ≈ 24px */
+  line-height: 1.3;
+  margin-top: 0.75rem;
+}
+.milkdown .ProseMirror h2 {
+  font-size: 1.375em; /* ≈ 19.2px */
+  line-height: 1.3;
+  margin-top: 0.625rem;
+}
+.milkdown .ProseMirror h3 {
+  font-size: 1.2em; /* ≈ 16.8px */
+  line-height: 1.35;
+  margin-top: 0.5rem;
+}
+.milkdown .ProseMirror h4 {
+  font-size: 1.085em; /* ≈ 15.2px */
+  line-height: 1.4;
+  margin-top: 0.5rem;
+}
+.milkdown .ProseMirror h5 {
+  font-size: 1em; /* ≈ 14px */
+  line-height: 1.4;
+  margin-top: 0.5rem;
+}
+.milkdown .ProseMirror h6 {
+  font-size: 0.915em; /* ≈ 12.8px */
+  line-height: 1.4;
+  margin-top: 0.5rem;
+}
+
+/* Compact list density to match surrounding chat / note typography. */
+.milkdown .ProseMirror ul li,
+.milkdown .ProseMirror ol li {
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+/* List marker color — Crepe styles the bullet / number label-wrapper
+   with `color: var(--crepe-color-outline)`, which we map to
+   `--edge-default` (a near-white border color). That makes the marker
+   visually disconnect from the surrounding paragraph. Use
+   `--fg-muted` so bullets and numbers sit a half-step below the
+   surrounding text — visible, but de-emphasized in the traditional
+   typographic convention for list markers.
+
+   Two distinct elements need the override:
+   1. `.label-wrapper` text color  → covers ordered-list numbers, which
+      Crepe renders as `<span class="label">1</span>` inside the wrapper.
+   2. `.bullet svg` fill            → covers the unordered-list dot,
+      which Crepe renders as `<span class="bullet"><svg><circle/></svg>`.
+      Targeting `.bullet` specifically (not all `.label-wrapper svg`)
+      preserves the subtle outline color on task-list checkboxes
+      (`.checked` / `.unchecked` SVGs), where a hollow box reading is
+      the intended affordance for the unchecked state. */
+.milkdown .milkdown-list-item-block li .label-wrapper {
+  color: var(--fg-muted);
+}
+.milkdown .milkdown-list-item-block li .label-wrapper .bullet svg {
+  fill: var(--fg-muted);
+}
+
+/* Marker vertical alignment. Crepe hard-codes
+   `.label-wrapper { height: 32px }` and `.label { height: 32px }`,
+   sized for its default 16px / 24px line-box. We render paragraphs at
+   14px / 1.5 (≈ 21px) plus a 2px y-padding (so the actual flex row in
+   the list-item is 25px tall). With `.list-item { align-items: flex-start }`
+   coming from Crepe, that 32px wrapper falls 7px lower than the first
+   text line, and `align-items: center` inside the wrapper centers the
+   marker glyph in the 32px box — which lands well below the baseline
+   of the surrounding text.
+
+   Match the wrapper height to our paragraph row so the marker centers
+   on the first line of text. The bullet SVG is 6×6 and the `.label`
+   numeral is rendered at the inherited 14px, so a 25px row keeps both
+   visually centered against the first line's x-height. */
+.milkdown .milkdown-list-item-block li .label-wrapper,
+.milkdown .milkdown-list-item-block li .label-wrapper .label {
+  height: 1.75em; /* matches `<p>`'s 14×1.5 + 2×2px y-padding row */
+  padding: 0;
+}
+
+/* Code / pre — Crepe ships 10px padding which feels chunky next to
+   14px text. Inline `code` already inherits a sane 87.5%. */
+.milkdown .ProseMirror pre {
+  padding: 0.5rem 0.625rem;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+/* Table borders. Crepe mixes `--crepe-color-outline` with 80%
+   transparency, which makes the cell grid nearly disappear on our
+   light surfaces. Use the app's default edge token at full strength so
+   tables retain a visible structure in both themes. */
+.milkdown .milkdown-table-block th,
+.milkdown .milkdown-table-block td {
+  border-color: var(--edge-default);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Block handle — shared chrome (chat preview + note editor)
+   ─────────────────────────────────────────────────────────────────────────
+   Crepe's default block handle is two stacked 32×32 buttons ("+ add"
+   on the left, drag grip on the right) positioned 16px to the left of
+   each block. That density is meant for a stand-alone document editor;
+   inside our chat cards and the note editor it dominates the page.
+
+   This section ships ONE visual treatment shared by both surfaces so
+   the affordance reads the same wherever a Sediment user sees it:
+     - `.milkdown-preview-host`   → chat AI messages (drag-only)
+     - `.milkdown-note-preview`   → `NotePreview` in `ExpandedNodePanel`
+
+   Per-surface differences (which buttons are visible, where the
+   handle sits relative to the text column) are scoped to their own
+   blocks below. The button look itself stays unified.
+
+   Sizes / colors mirror the app's standard ghost / neutral icon button
+   (matching `Button variant="ghost" tone="neutral" iconOnly`) so the
+   cursor model and hover affordance feel like the rest of the app:
+   - 20×20 square hit area (2px padding all around → 16px glyph fits
+     exactly, no vertical/horizontal imbalance)
+   - 16px glyph, 0.25rem radius
+   - `--fg-subtle` glyph → `--fg-default` on hover
+   - `--bg-hover` background on hover
+   The icon glyphs themselves stay as Crepe's defaults ("plus" /
+   "dots-six") — visually close enough to Lucide that swapping them
+   would only add complexity (custom `handleAddIcon`/`handleDragIcon`
+   config, reconciling fill-vs-stroke SVG rendering). */
+
+.milkdown-preview-host .milkdown-block-handle,
+.milkdown-note-preview .milkdown-block-handle {
+  /* Crepe's `BlockProvider` is hard-coded with `getOffset: () => 16`
+     so the handle's right edge sits 16px to the LEFT of each block.
+     `margin-left` shifts the absolutely-positioned element back to
+     the right; we cancel the full offset so the handle's right edge
+     touches the block's left edge — same tight pairing in BOTH the
+     chat preview and the note editor. */
+  margin-left: 16px;
+  margin-top: 2px;
+  gap: 0;
+}
+
+.milkdown-preview-host .milkdown-block-handle .operation-item,
+.milkdown-note-preview .milkdown-block-handle .operation-item {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.125rem; /* 18px */
+  height: 1.25rem; /* 20px */
+  padding: 2px 1px;
+  border-radius: 0.25rem;
+  cursor: pointer;
+}
+
+.milkdown-preview-host .milkdown-block-handle .operation-item:hover,
+.milkdown-note-preview .milkdown-block-handle .operation-item:hover {
+  background: var(--bg-hover);
+}
+
+.milkdown-preview-host .milkdown-block-handle .operation-item svg,
+.milkdown-note-preview .milkdown-block-handle .operation-item svg {
+  /* Keep the glyph out of inline baseline layout; centering is handled
+     by the parent flex container above. */
+  display: block;
+  width: 16px;
+  height: 16px;
+  fill: var(--fg-subtle);
+  transition: fill 0.15s ease;
+}
+
+.milkdown-preview-host .milkdown-block-handle .operation-item:hover svg,
+.milkdown-note-preview .milkdown-block-handle .operation-item:hover svg {
+  fill: var(--fg-default);
+}
+
+/* ── Chat preview overrides ─────────────────────────────────────────
+   When `MilkdownPreview` mounts with `enableBlockDrag` it adds the
+   `milkdown-preview-host` class. The chat card is read-only, so the
+   "+ add" button has no behaviour wired to it — hide it. The drag
+   grip is the only thing the user can interact with, so it owns the
+   grab cursor. The shared `margin-left: 16px` above already puts the
+   20px grip in the chat panel's left gutter, spilling slightly past
+   the card's outer left edge so the drag handle hangs outside the
+   message body. */
+
+/* The first `.operation-item` is the "+ add" button (see Crepe's
+   `feature/block-edit/index.js`). Hide it in preview mode. */
+.milkdown-preview-host .milkdown-block-handle .operation-item:first-child {
+  display: none;
+}
+
+.milkdown-preview-host .milkdown-block-handle .operation-item {
+  cursor: grab;
+}
+
+.milkdown-preview-host .milkdown-block-handle .operation-item:active {
+  cursor: grabbing;
+}
+
+/* ── Note-editor overrides ──────────────────────────────────────────
+   `MilkdownEditor` (used by `NotePreview` in `ExpandedNodePanel`)
+   mounts with `className="milkdown-note-preview"`. This is the
+   dedicated editing surface so BOTH the "+ add" and drag grip are
+   visible.
+
+   The shared `margin-left: 16px` above makes the handle's right edge
+   touch the block's left edge (zero gap, same as the chat preview).
+   We then pad the ProseMirror left so the handle — which now hangs
+   40px to the LEFT of every block — has room INSIDE the visible
+   editor area; without that, it would be clipped by the outer
+   `overflow-auto` scroller (and ExpandedNodePanel's
+   `overflow-hidden`). Math (must stay in sync with the shared sizing
+   above):
+     handle.width = 20 + 20 = 40px      (gap: 0)
+     padding-left = 44px (2.75rem)
+     handle.right edge = padding-left − 0  = 44px
+     handle.left  edge = 44 − 40           =  4px ✓ */
+
+.milkdown-note-preview .ProseMirror {
+  /* Left: carves the gutter the absolutely-positioned handle lives in.
+     Right: 1rem so text never abuts the outer scroller's track. */
+  padding-left: 2.75rem;
+  padding-right: 1rem;
+}
+
+/* Only the drag grip (second `.operation-item`) initiates a native
+   HTML5 drag, so it owns the grab cursor; the "+ add" stays a regular
+   pointer per the shared default. */
+.milkdown-note-preview .milkdown-block-handle .operation-item:nth-child(2) {
+  cursor: grab;
+}
+
+.milkdown-note-preview
+  .milkdown-block-handle
+  .operation-item:nth-child(2):active {
+  cursor: grabbing;
+}
+
+/* ── Drag preview host ──────────────────────────────────────────────
+   `MilkdownPreview.buildBlockDragImage` mounts a fresh
+   `<div class="milkdown-drag-preview-host">` in `document.body` for
+   every block drag (single OR multi). Crepe's theme and our overrides
+   end up in `document.head` via Vite, so all the `.milkdown
+   .ProseMirror …` selectors apply naturally; this block adds the
+   chrome ("lifted card" look) around that content so the drag image
+   reads as a discrete artifact the user is moving — not a stray
+   floating paragraph.
+
+   Tokens come from the global design system (`index.css`) so dark mode
+   tracks automatically. */
+.milkdown-drag-preview-host {
+  background: var(--bg-surface);
+  border: 1px solid var(--edge-default);
+  border-radius: 8px;
+  padding: 8px 12px;
+  /* Subtle ghost effect — the user still sees what they're dragging,
+     but the preview reads as "in motion" rather than "pasted on top". */
+  opacity: 0.9;
+  /* Two-step shadow matches the elevated-card scale used elsewhere
+     in the app (Crepe's `--crepe-shadow-2`). */
+  box-shadow:
+    0 4px 12px rgb(0 0 0 / 0.12),
+    0 2px 4px rgb(0 0 0 / 0.08);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Code / LaTeX block container
+   ─────────────────────────────────────────────────────────────────────────
+   Crepe's `latex` feature ships as a code-mirror block with
+   `language='latex'`, so both regular fenced code blocks AND block math
+   share `.milkdown-code-block`. The block has two visual modes:
+
+   1. **Preview-only** — the inner `.codemirror-host` carries the
+      `.hidden` class (Crepe toggles it from the "Hide" button, and it
+      starts hidden whenever `previewOnlyByDefault` is true). The block
+      then renders just the KaTeX output / code snippet preview and
+      should read as inline content with the surrounding prose.
+
+   2. **Editing** — `.codemirror-host` is visible. We surface the block
+      as a discrete card with an outline so the user has a clear
+      target for the line-numbered editor.
+
+   Both modes still need their CodeMirror chrome neutralised:
+   `.cm-gutters` / `.cm-activeLine` ship with the stock light-theme
+   greys that read as a darker band over our `bg-surface`, and
+   `.cm-content` inherits CodeMirror's `defaultHighlightStyle` which
+   paints LaTeX command tokens in a faded teal that disappears on
+   white. */
+
+.milkdown .milkdown-code-block {
+  /* At rest: no chrome. Both preview-only renders and the read-only
+     case (chat cards) sit flush with the surrounding prose. */
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 2px 0;
+  margin: 6px 0;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease,
+    padding 0.15s ease;
+}
+
+/* Editing mode — the CodeMirror host is visible. Promote the block to
+   a bordered card so the line-numbered editor reads as a discrete
+   editable surface, not stray text. */
+.milkdown .milkdown-code-block:has(> .codemirror-host:not(.hidden)) {
+  background: var(--bg-surface);
+  border-color: var(--edge-default);
+  padding: 6px 12px 10px;
+}
+
+/* Tighten the CodeMirror surface so its gutter and editor track the
+   outer container instead of re-asserting their stock theme colors
+   (which would visually create a darker band along the left edge).
+   `.cm-activeLineGutter` / `.cm-activeLine` are intentionally NOT in
+   this list — they get their own subtle highlight below. */
+.milkdown .milkdown-code-block .cm-editor,
+.milkdown .milkdown-code-block .cm-gutters,
+.milkdown .milkdown-code-block .cm-gutter,
+.milkdown .milkdown-code-block .cm-panel {
+  background: transparent;
+}
+
+/* Active-line highlight — light gray band that spans BOTH the gutter
+   cell and the content row, so the user can track where the caret is
+   inside dense LaTeX. `bg-hover` (#f2f2f2) is one step below the
+   card's `bg-surface` and stays lighter than the `.selected`-state
+   `bg-default`, so the highlight is never the loudest thing on the
+   block.
+
+   IMPORTANT: CodeMirror paints text selection in `.cm-selectionLayer`
+   at `z-index: -1` (see `@codemirror/view`'s `layer({above: false})`).
+   If we put an opaque background directly on `.cm-activeLine`, the
+   `.cm-line` element (z-index: auto / 0) covers the selection layer
+   and the user's text-selection blue disappears. The workaround is to
+   render the line's highlight in a `::before` pseudo at `z-index: -2`
+   so the selection layer (-1) still sits on top. Stacking math:
+     `.cm-scroller` establishes a stacking context (CM theme sets
+     `zIndex: 0` on it, line 6780 of @codemirror/view dist).
+     `.cm-activeLine` is `position: relative` so its pseudo can be
+     absolutely positioned, but `z-index: auto` means the pseudo's
+     own z-index resolves against `.cm-scroller`'s context — same
+     context as `.cm-selectionLayer`. */
+.milkdown .milkdown-code-block .cm-activeLineGutter {
+  background: var(--bg-hover);
+}
+
+.milkdown .milkdown-code-block .cm-activeLine {
+  background: transparent;
+  position: relative;
+}
+
+.milkdown .milkdown-code-block .cm-activeLine::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--bg-hover);
+  z-index: -2;
+  pointer-events: none;
+}
+
+/* Line numbers stay muted but readable; CodeMirror's default is a
+   washed-out `#999` that fights our edge tokens. */
+.milkdown .milkdown-code-block .cm-lineNumbers .cm-gutterElement {
+  color: var(--fg-muted);
+}
+
+/* Text selection inside the LaTeX / code editor. CodeMirror 6 paints
+   selections via a dedicated `.cm-selectionLayer` (when focused) and
+   falls back to `.cm-selectionBackground` (when unfocused). The stock
+   light theme uses a dark slate (#d9d9d9 → much darker once layered),
+   which reads as near-black against our white card. Replace it with
+   the same translucent-blue tint we use elsewhere for selection
+   (`--info-bg-hover`, #dbeafe) so it harmonises with the focus border
+   and stays readable over `cm-content` (`--fg-default`). */
+.milkdown .milkdown-code-block .cm-editor .cm-selectionBackground,
+.milkdown
+  .milkdown-code-block
+  .cm-editor.cm-focused
+  > .cm-scroller
+  > .cm-selectionLayer
+  .cm-selectionBackground {
+  background: var(--info-bg-hover) !important;
+}
+
+/* Native text selection (used while the user is dragging mid-select,
+   before CodeMirror's overlay catches up). Keep it consistent. */
+.milkdown .milkdown-code-block .cm-content ::selection {
+  background: var(--info-bg-hover);
+}
+
+/* CodeMirror's `defaultHighlightStyle` paints LaTeX command tokens
+   (`\frac`, `\alpha`, …) with a low-contrast teal that disappears
+   against `bg-surface`. Force the editor text to inherit our default
+   foreground; individual highlight tokens still layer on top, but
+   their cascade order leaves the base color at `inherit` so this is
+   the only knob we need. */
+.milkdown .milkdown-code-block .cm-content {
+  color: var(--fg-default);
+}
+
+/* The preview hairline already exists; nudge it to use our edge token
+   so it stays consistent in dark mode. */
+.milkdown .milkdown-code-block .preview-panel .preview-divider {
+  background: var(--edge-default);
+  opacity: 0.6;
+}
+
+/* Active / editing-and-focused state. Scope to blocks whose editor is
+   visible so a preview-only block selected via NodeSelection doesn't
+   suddenly grow a card around it. Override Crepe's stock
+   `outline: 1px solid var(--crepe-color-primary)` on `.selected`
+   since our border is doing the same job. */
+.milkdown
+  .milkdown-code-block:has(> .codemirror-host:not(.hidden)):focus-within,
+.milkdown .milkdown-code-block:has(> .codemirror-host:not(.hidden)).selected {
+  border-color: var(--info);
+  outline: none;
+}
+
+/* NodeSelection on the block (Crepe's `.selected`) — e.g. the user
+   clicked the block boundary without dropping a caret in, or used
+   keyboard nav to land on it as a whole. Tint the card with a faint
+   gray so the selection reads as "the entire block is the target",
+   distinct from a typing-focus state which keeps the white surface so
+   the caret is easy to see. `bg-default` (#f5f5f5) is one step grayer
+   than the resting `bg-surface` (#ffffff) and stays lighter than the
+   `bg-hover` gutter so the line-number band remains visible. */
+.milkdown .milkdown-code-block:has(> .codemirror-host:not(.hidden)).selected {
+  background: var(--bg-default);
+}
+
+/* Force the language pill ("LaTeX" / "javascript" / …) and the
+   tools-button-group ("Copy" / "Hide") to remain visible while the
+   block is being edited. Without this, Crepe's `opacity: 0` only
+   resolves on hover, which fights muscle memory while typing. Like
+   the border, gate on the editor actually being visible. */
+.milkdown
+  .milkdown-code-block:has(> .codemirror-host:not(.hidden)):focus-within
+  .language-button,
+.milkdown
+  .milkdown-code-block:has(> .codemirror-host:not(.hidden)).selected
+  .language-button,
+.milkdown
+  .milkdown-code-block:has(> .codemirror-host:not(.hidden)):focus-within
+  .tools-button-group
+  > button,
+.milkdown
+  .milkdown-code-block:has(> .codemirror-host:not(.hidden)).selected
+  .tools-button-group
+  > button {
+  opacity: 1;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Floating selection toolbar
+   ─────────────────────────────────────────────────────────────────────────
+   Crepe's `theme/common/toolbar.css` paints toolbar-item icons with
+   `color/fill: var(--crepe-color-outline)`. Because we map
+   `--crepe-color-outline` onto `--edge-default` (a near-white border
+   token) to match Sediment's flat surface treatment, those glyphs
+   render almost invisibly against the toolbar's white surface — same
+   class of regression the list-marker block above fixes.
+
+   Re-apply the bullet-marker convention here: muted but readable at
+   rest, full-strength on hover so the affordance reads as
+   interactive. Active state (`--crepe-color-primary`, mapped to
+   `--info`) is already correct and intentionally left alone.
+
+   The toolbar only appears in `MilkdownEditor` — `MilkdownPreview`
+   disables the `Toolbar` feature via Crepe config — so no preview
+   surface is affected. */
+.milkdown .milkdown-toolbar .toolbar-item svg {
+  color: var(--fg-muted);
+  fill: var(--fg-muted);
+  transition:
+    color 0.15s ease,
+    fill 0.15s ease;
+}
+
+.milkdown .milkdown-toolbar .toolbar-item:hover svg {
+  color: var(--fg-default);
+  fill: var(--fg-default);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Block-type dropdown trigger
+   ─────────────────────────────────────────────────────────────────────────
+   The "Block type" toolbar group we register in `createMilkdown.ts`
+   ships a single dropdown trigger whose icon mirrors the block under
+   the caret (paragraph / H1-H3 / quote / lists / code). We render
+   ALL eight slash-menu SVGs inside the trigger and hide every one
+   except the icon whose `data-key` matches the wrapper's
+   `data-current` attribute — a ProseMirror plugin keeps the
+   attribute synced with the live selection, so a static `icon`
+   string is enough.
+
+   The trigger sits inside Crepe's `.toolbar-item` (a 32x32 square),
+   so we widen the parent button to fit the icon-plus-caret pair. */
+.milkdown .milkdown-toolbar .toolbar-item:has(.mb-block-type-trigger),
+.milkdown .milkdown-toolbar .toolbar-item.mb-block-type-trigger-host {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  padding: 0 6px;
+  gap: 2px;
+  /* Visually move the trigger to the start of the toolbar without
+     reordering the DOM (Crepe's `buildToolbar` only appends groups,
+     so our group is queued LAST). The trailing divider Crepe inserts
+     before our group is hidden and a fresh divider is rendered AFTER
+     our trigger via `::after` so the visual separator follows the
+     same convention as the rest of the toolbar. */
+  order: -1;
+  position: relative;
+  margin-right: 6px;
+}
+
+/* Hide the real divider that, in DOM order, sits immediately before
+   our trigger — once we re-order the trigger to the start, that
+   divider would otherwise float at the right edge of the toolbar. */
+.milkdown
+  .milkdown-toolbar
+  .divider:has(+ .toolbar-item:has(.mb-block-type-trigger)) {
+  display: none;
+}
+
+/* Crepe's default divider is `color-mix(outline, transparent 80%)`
+   which renders ~20% alpha and is barely visible against the toolbar
+   surface. Bump to the design-system edge token so it matches the
+   rest of the app's divider contrast. */
+.milkdown .milkdown-toolbar .divider {
+  background: var(--edge-default);
+}
+
+/* Faux divider rendered to the RIGHT of the trigger (taking the place
+   of the hidden real divider). Geometry mirrors `.divider` from
+   `@milkdown/crepe/lib/theme/common/toolbar.css`. */
+.milkdown .milkdown-toolbar .toolbar-item:has(.mb-block-type-trigger)::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: -6px;
+  width: 1px;
+  height: 24px;
+  background: var(--edge-default);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+/* Crepe wraps every toolbar-item icon in `<span class="milkdown-icon">`,
+   which defaults to `display: inline` — that drops our trigger onto
+   the text baseline (a few px below center). Make the wrapper itself
+   a flex box so the trigger sits at the geometric center of the
+   32px-tall toolbar button. */
+.milkdown
+  .milkdown-toolbar
+  .toolbar-item:has(.mb-block-type-trigger)
+  > .milkdown-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.milkdown .milkdown-toolbar .toolbar-item .mb-block-type-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none; /* clicks bubble to the wrapping <button> */
+  color: var(--fg-muted);
+  transition: color 0.15s ease;
+}
+
+.milkdown .milkdown-toolbar .toolbar-item:hover .mb-block-type-trigger {
+  color: var(--fg-default);
+}
+
+.milkdown .milkdown-toolbar .toolbar-item .mb-block-type-trigger__icon {
+  display: none;
+  width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Show only the icon whose data-key matches the wrapper's data-current. */
+.milkdown
+  .milkdown-toolbar
+  .toolbar-item
+  .mb-block-type-trigger[data-current='paragraph']
+  > .mb-block-type-trigger__icon[data-key='paragraph'],
+.milkdown
+  .milkdown-toolbar
+  .toolbar-item
+  .mb-block-type-trigger[data-current='heading-1']
+  > .mb-block-type-trigger__icon[data-key='heading-1'],
+.milkdown
+  .milkdown-toolbar
+  .toolbar-item
+  .mb-block-type-trigger[data-current='heading-2']
+  > .mb-block-type-trigger__icon[data-key='heading-2'],
+.milkdown
+  .milkdown-toolbar
+  .toolbar-item
+  .mb-block-type-trigger[data-current='heading-3']
+  > .mb-block-type-trigger__icon[data-key='heading-3'],
+.milkdown
+  .milkdown-toolbar
+  .toolbar-item
+  .mb-block-type-trigger[data-current='blockquote']
+  > .mb-block-type-trigger__icon[data-key='blockquote'],
+.milkdown
+  .milkdown-toolbar
+  .toolbar-item
+  .mb-block-type-trigger[data-current='bullet-list']
+  > .mb-block-type-trigger__icon[data-key='bullet-list'],
+.milkdown
+  .milkdown-toolbar
+  .toolbar-item
+  .mb-block-type-trigger[data-current='ordered-list']
+  > .mb-block-type-trigger__icon[data-key='ordered-list'],
+.milkdown
+  .milkdown-toolbar
+  .toolbar-item
+  .mb-block-type-trigger[data-current='code-block']
+  > .mb-block-type-trigger__icon[data-key='code-block'] {
+  display: inline-flex;
+}
+
+.milkdown .milkdown-toolbar .toolbar-item .mb-block-type-trigger__icon svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Block-type dropdown menu (body-mounted)
+   ─────────────────────────────────────────────────────────────────────────
+   Floating menu opened by the trigger. Mounted to `<body>` because
+   Crepe's toolbar uses floating-ui with overflow clipping, so a
+   nested popover would get cut off near the viewport edge. */
+.mb-block-type-menu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 180px;
+  padding: 4px;
+  background: var(--bg-surface);
+  border: 1px solid var(--edge-default);
+  border-radius: 8px;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 8px 24px rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-family: inherit;
+  animation: mb-block-type-menu-in 0.12s ease-out;
+}
+
+@keyframes mb-block-type-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.mb-block-type-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--fg-default);
+  cursor: pointer;
+  text-align: left;
+  font-size: 13px;
+  line-height: 1.2;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.mb-block-type-menu__item:hover {
+  background: var(--bg-hover);
+}
+
+.mb-block-type-menu__item.is-active {
+  color: var(--info);
+}
+
+.mb-block-type-menu__item.is-active .mb-block-type-menu__icon {
+  color: var(--info);
+}
+
+.mb-block-type-menu__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--fg-muted);
+}
+
+.mb-block-type-menu__icon svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+.mb-block-type-menu__label {
+  flex: 1;
+  white-space: nowrap;
+}
+
+/* Phase 4: blocks recently edited by the AI. We render a thin accent
+   bar OUTSIDE the block on the right edge (the editor's own padding
+   area) so it doesn't disturb text flow or selection rendering. The
+   `<ProvenanceOverlay>` portal mounts a hover-triggered diff popover
+   keyed off the same DOM. The colour follows the `--ai` semantic
+   token (soft lavender) — same treatment as the pre-Milkdown editor. */
+.milkdown .ProseMirror .sediment-ai-edited-block {
+  position: relative;
+}
+.milkdown .ProseMirror .sediment-ai-edited-block::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  right: -12px;
+  width: 6px;
+  border-radius: 1px;
+  background-color: var(--ai-light);
+  pointer-events: none;
+  transition: background-color 0.15s ease;
+}
+.milkdown .ProseMirror .sediment-ai-edited-block:hover::after {
+  background-color: var(--ai);
+}

@@ -1,0 +1,48 @@
+/**
+ * Public type definitions for the Milkdown wrapper.
+ *
+ * These are the only Milkdown-related types that downstream code sees.
+ * Anything Crepe / ProseMirror specific stays internal.
+ */
+
+/**
+ * Phase 4 decoration spec.
+ *
+ * Decorations are keyed by **block fingerprints** (see
+ * `apps/web/src/utils/blockProvenance.ts`) — same identity used by the
+ * provenance engine, so a single map drives both the highlight and any
+ * tombstone overlay drawn by the surrounding component.
+ *
+ * `tombstones` is intentionally part of the spec for symmetry but the
+ * editor itself does not render them — `NotePreview` portals a
+ * `TombstoneOverlay` onto the DOM resolved via
+ * `MilkdownInstance.getBlockDOMByKey(anchorKey)`.
+ */
+export interface MilkdownDecorationSpec {
+  /** Highlight a top-level block with `className`. */
+  blocks: Array<{ key: string; className: string }>;
+  /** Reserved for `NotePreview` to consume; the editor ignores this. */
+  tombstones?: Array<{
+    deletedKey: string;
+    anchorKey: string | null;
+    markdown: string;
+  }>;
+}
+
+/**
+ * Fired when the user starts dragging a block (or multiple blocks) out
+ * of the editor surface.
+ *
+ * `MilkdownPreview` owns the drag-image lifecycle (it builds the
+ * preview in `document.body` so the editor's full stylesheet stack
+ * — Crepe theme, our overrides, KaTeX — applies to the rendered image
+ * exactly as it appears in the live editor). Consumers only need to
+ * stash `markdown` on the dataTransfer (for the canvas drop handler);
+ * they should NOT call `dataTransfer.setDragImage` themselves.
+ */
+export interface MilkdownBlockDragEvent {
+  /** Markdown of the block(s) being dragged. */
+  markdown: string;
+  /** Native DragEvent, so callers can call setData. */
+  nativeEvent: DragEvent;
+}

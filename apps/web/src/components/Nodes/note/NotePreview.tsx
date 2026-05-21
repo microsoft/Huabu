@@ -1,33 +1,49 @@
-import { SideMenuController, useCreateBlockNote } from '@blocknote/react';
-import { BlockNoteView } from '@blocknote/shadcn';
+/**
+ * Milkdown-backed note preview.
+ *
+ * Implements the `PreviewComponentProps` contract shared by every
+ * preview surface so the rest of the canvas / agent stack treats notes
+ * uniformly.
+ *
+ * Block provenance: when the AI updates `data.content` externally,
+ * MilkdownEditor surfaces before/after fingerprint snapshots via
+ * `onExternalUpdate`. We diff and `stampAiEdit` once at stream-end
+ * (Approach B) — per-chunk stamping is intentionally not supported.
+ * User edits clear markers organically via `shiftProvenance`. Accept
+ * / Reject / Restore / Dismiss UI is rendered by `<ProvenanceOverlay>`.
+ *
+ * Set `VITE_PROVENANCE=off` in `.env` to disable Phase 4 entirely
+ * (decoration-less, overlay-less editor — useful for bisecting bugs
+ * during iteration).
+ */
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { loadBlockNoteContent } from '@/components/BlockNote/blockNoteContent';
+import { MilkdownEditor } from '@/components/Milkdown';
+import { consumeAiContentEdit } from '@/utils/aiEditFlags';
 import {
-  NoteEditorSideMenu,
-  NoteExcerptFromNodeIdProvider,
-} from '@/components/BlockNote/NoteEditorSideMenu';
-import { blockNoteShadcnOverrides } from '@/components/BlockNote/shadcnOverrides';
-import { Button } from '@/components/Common/Button';
-import {
-  clearAllBaselines,
-  clearBaselineText,
-  deriveBlockDiffMap,
-  deriveDeletedBlocks,
-  extractBlockText,
-  getBlockAuthorStatus,
-  getDeletedKeys,
-  hasAnyPendingDiff,
-  recordUserEdits,
-  removeDeletedEntry,
-  repairDeletedBlockAnchors,
-  resolveSentinelProvenance,
-} from '@/utils/provenance';
+  coerceProvenance,
+  dismissDeletedBlock,
+  dropBlockEntry,
+  emptyProvenance,
+  shiftProvenance,
+  stampAiEdit,
+} from '@/utils/blockProvenance';
+import { setDragPayload } from '@/utils/io/dragDrop';
 
-import { InlineBlockDiffs } from './InlineBlockDiffs';
+import { ProvenanceOverlay } from './ProvenanceOverlay';
 
-import type { DeletedBlockInfo, ProvenanceBlock } from '@/utils/provenance';
-import type { BlockProvenance, BlockProvenanceMap } from '@sediment/shared';
+import type {
+  MilkdownBlockDragEvent,
+  MilkdownDecorationSpec,
+  MilkdownInstance,
+} from '@/components/Milkdown';
+import type { NoteDragPayload } from '@/utils/io/dragDrop';
+import type { MarkdownProvenance, NodeOrigin } from '@sediment/shared';
+
+const PROVENANCE_ENABLED = (import.meta.env.VITE_PROVENANCE ?? 'on') !== 'off';
+
+const AI_BLOCK_CLASSNAME = 'sediment-ai-edited-block';
 
 export interface PreviewComponentProps {
   /** Canvas node id, when this preview is bound to a real node. */
@@ -37,13 +53,13 @@ export interface PreviewComponentProps {
   /** Called with a plain string for backward-compat consumers. */
   onContentChange?: (newContent: string) => void;
   /**
-   * Preferred over `onContentChange` when available.
-   * Receives a patch with `content` (Markdown) and `contentJson` (BlockNote JSON).
+   * Preferred over `onContentChange` when available. Phase 4 writes
+   * both `content` (Markdown) and `provenance` (`MarkdownProvenance`)
+   * via this hook.
    */
   onDataChange?: (patch: Record<string, unknown>) => void;
 }
 
-/** Extract an auto-title from a BlockNote document. Prefers H1, then any heading, then the first non-empty block text. */
 export const NotePreview = ({
   id,
   data,
@@ -51,724 +67,333 @@ export const NotePreview = ({
   onContentChange,
   onDataChange,
 }: PreviewComponentProps) => {
-  // `content` is the canonical Markdown string.
-  // `contentJson` is the auxiliary BlockNote JSON (lossless, editor-internal).
-  // `contentJsonSource` is the `content` value at the time `contentJson` was
-  // generated — used to detect external edits (e.g. by the AI agent) without
-  // relying on the lossy `blocksToMarkdownLossy` round-trip.
+  // `content` is the canonical Markdown string. Brand-new note records
+  // may have it absent or non-string; normalise to empty.
   const markdown = typeof data.content === 'string' ? data.content : '';
-  const contentJson =
-    typeof data.contentJson === 'string' ? data.contentJson : null;
-  const contentJsonSource =
-    typeof data.contentJsonSource === 'string' ? data.contentJsonSource : null;
-
-  const editor = useCreateBlockNote({
-    initialContent: [{ type: 'paragraph', content: '' }],
-    trailingBlock: false,
-  });
-
-  // Track the last Markdown we applied so we can skip no-op updates.
-  const lastAppliedMarkdownRef = useRef<string | null>(null);
-  // Track the last document JSON to detect whether onChange was triggered
-  // by an actual content change vs cursor movement / focus / editable toggle.
-  const lastDocJsonRef = useRef<string>('');
-
-  // Disable editing while async content is being loaded to prevent the editor
-  // from accepting input that would immediately be overwritten by replaceBlocks.
-  const [loading, setLoading] = useState(true);
-  // Synchronous ref companion — `loading` state is batched and may be stale in
-  // the onChange closure, so use this ref to reliably suppress provenance
-  // tracking while replaceBlocks is running.
-  const isReplacingRef = useRef(false);
-
-  // Block-level provenance tracking
-  const provenanceRef = useRef<BlockProvenanceMap | undefined>(
-    data.provenance as BlockProvenanceMap | undefined,
-  );
-  const [provenance, setProvenance] = useState<BlockProvenanceMap | undefined>(
-    provenanceRef.current,
-  );
-  // Track which block IDs existed before the last change, to detect new/modified blocks.
-  // Stored as an ordered array so we can find positional predecessors when repairing
-  // stale afterBlockId references in __deleted_* entries.
-  const prevBlockIdsRef = useRef<string[]>([]);
-
-  // Per-block text snapshot used by onChange to detect *all* blocks whose
-  // content changed — not only the cursor block.
-  const prevBlockTextRef = useRef<Map<string, string>>(new Map());
-
-  /** Snapshot both block IDs and per-block text into the prev-refs so that
-   *  the onChange handler doesn't re-process programmatic edits as user input. */
-  const syncPrevRefs = useCallback((blocks: ProvenanceBlock[]) => {
-    prevBlockIdsRef.current = blocks.map((b) => b.id);
-    const snap = new Map<string, string>();
-    for (const b of blocks) {
-      snap.set(b.id, extractBlockText(b));
-    }
-    prevBlockTextRef.current = snap;
-  }, []);
-
-  // Stores the last fully-expanded (per-block) provenance so that it survives
-  // external updates that overwrite provenanceRef with a sentinel map.
-  const lastExpandedProvenanceRef = useRef<BlockProvenanceMap | undefined>(
-    undefined,
+  const provenance: MarkdownProvenance = useMemo(
+    () =>
+      PROVENANCE_ENABLED
+        ? coerceProvenance(data.provenance)
+        : emptyProvenance(),
+    [data.provenance],
   );
 
-  // Sync provenance state when external data.provenance changes (e.g. AI updates)
-  const externalProvenance = data.provenance as BlockProvenanceMap | undefined;
-  useEffect(() => {
-    if (externalProvenance === provenanceRef.current) return;
-    provenanceRef.current = externalProvenance;
-    setProvenance(externalProvenance);
-  }, [externalProvenance]);
+  // Defense-in-depth dedup against parents echoing our own emits.
+  const lastEmittedMarkdownRef = useRef<string>(markdown);
+  lastEmittedMarkdownRef.current = markdown;
 
-  // Ref to the scrollable editor container for DOM queries by InlineBlockDiffs
-  const editorContainerRef = useRef<HTMLDivElement>(null);
+  // Track latest provenance for callback handlers (so they see the
+  // freshest snapshot without re-binding on every render).
+  const provenanceRef = useRef<MarkdownProvenance>(provenance);
+  provenanceRef.current = provenance;
 
-  // Per-block diff map and deleted blocks — derived from provenance.
-  const [blockDiffMap, setBlockDiffMap] = useState<Map<string, string>>(
-    new Map(),
-  );
-  const [deletedBlocks, setDeletedBlocks] = useState<DeletedBlockInfo[]>([]);
+  const [editor, setEditor] = useState<MilkdownInstance | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  // Debounced persistence timer for onChange — serialisation + writePatch are
-  // deferred so provenance state updates stay immediate while expensive work
-  // (blocksToMarkdownLossy, JSON stringify for the patch) batches naturally.
-  const persistTimerRef = useRef(0);
-
-  /** Write a content patch back to the parent. */
-  const writePatch = (
-    newMarkdown: string,
-    newJson: string,
-    provenancePatch?: BlockProvenanceMap,
-    extraPatch?: Record<string, unknown>,
-  ) => {
-    const patch: Record<string, unknown> = {
-      content: newMarkdown,
-      contentJson: newJson,
-      // Record which markdown string this JSON was derived from so we can
-      // detect external edits on next open without a lossy round-trip.
-      contentJsonSource: newMarkdown,
-      ...extraPatch,
-    };
-    if (provenancePatch !== undefined) {
-      patch.provenance = provenancePatch;
-    }
-    if (onDataChange) {
-      onDataChange(patch);
-    } else if (onContentChange) {
-      onContentChange(newMarkdown);
-    }
-  };
-
-  useEffect(() => {
-    if (lastAppliedMarkdownRef.current === markdown) return;
-
-    lastAppliedMarkdownRef.current = markdown;
-    setLoading(true);
-
-    void (async () => {
-      try {
-        // Snapshot old blocks before replacement for provenance diffing.
-        const oldBlocksFromEditor = editor.document.map(
-          (b: {
-            id: string;
-            type: string;
-            content?: unknown;
-            children?: unknown;
-          }) => ({
-            id: b.id,
-            type: b.type,
-            content: b.content,
-            children: b.children,
-          }),
-        );
-
-        isReplacingRef.current = true;
-        const usedJson = await loadBlockNoteContent(
-          editor,
-          markdown,
-          contentJson,
-          contentJsonSource,
-        );
-        isReplacingRef.current = false;
-
-        // Snapshot the document JSON so onChange can detect whether content
-        // actually changed vs mere cursor/focus events.
-        lastDocJsonRef.current = JSON.stringify(editor.document);
-
-        const rawProvenance = data.provenance as BlockProvenanceMap | undefined;
-        const newBlocks = editor.document.map(
-          (b: {
-            id: string;
-            type: string;
-            content?: unknown;
-            children?: unknown;
-          }) => ({
-            id: b.id,
-            type: b.type,
-            content: b.content,
-            children: b.children,
-          }),
-        );
-
-        const resolved = resolveSentinelProvenance(rawProvenance, {
-          fallbackOldProvenance: lastExpandedProvenanceRef.current,
-          newBlocks,
-          oldBlocksFromEditor,
-          contentJson,
-        });
-
-        let effectiveProvenance: BlockProvenanceMap | undefined;
-        if (resolved && resolved !== rawProvenance) {
-          effectiveProvenance = resolved;
-          provenanceRef.current = resolved;
-          setProvenance(resolved);
-          lastExpandedProvenanceRef.current = resolved;
-          if (!readOnly && onDataChange) {
-            // Clear legacy contentBeforeAI during migration
-            const migrationPatch: Record<string, unknown> = {
-              provenance: resolved,
-            };
-            if (typeof data.contentBeforeAI === 'string') {
-              migrationPatch.contentBeforeAI = undefined;
-            }
-            onDataChange(migrationPatch);
-          }
-        } else {
-          effectiveProvenance = rawProvenance;
-          provenanceRef.current = rawProvenance;
-          setProvenance(rawProvenance);
-          if (
-            rawProvenance &&
-            !('__all__' in rawProvenance) &&
-            Object.keys(rawProvenance).length > 0
-          ) {
-            lastExpandedProvenanceRef.current = rawProvenance;
-          }
-        }
-
-        syncPrevRefs(newBlocks as ProvenanceBlock[]);
-
-        if (!usedJson && !readOnly) {
-          const newJson = JSON.stringify(editor.document);
-          writePatch(markdown, newJson, resolved ?? rawProvenance);
-        }
-
-        // Derive diff map and deleted blocks directly from provenance.
-        setBlockDiffMap(deriveBlockDiffMap(effectiveProvenance));
-        setDeletedBlocks(deriveDeletedBlocks(effectiveProvenance));
-      } finally {
-        setLoading(false);
+  const writePatch = useCallback(
+    (patch: Record<string, unknown>) => {
+      if (onDataChange) {
+        onDataChange(patch);
+      } else if (onContentChange && typeof patch.content === 'string') {
+        onContentChange(patch.content);
       }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [markdown, contentJson, editor]);
-
-  // Expand __all__ sentinel after editor loads, even when the content-load
-  // effect skipped (e.g. markdown was already applied on a previous mount).
-  useEffect(() => {
-    if (loading) return;
-    const current = provenanceRef.current;
-    if (!current || !('__all__' in current)) return;
-
-    const currentBlocks = editor.document.map(
-      (b: {
-        id: string;
-        type: string;
-        content?: unknown;
-        children?: unknown;
-      }) => ({
-        id: b.id,
-        type: b.type,
-        content: b.content,
-        children: b.children,
-      }),
-    );
-
-    const expanded = resolveSentinelProvenance(current, {
-      newBlocks: currentBlocks,
-      oldBlocksFromEditor: currentBlocks,
-      contentJson,
-    });
-
-    if (expanded && expanded !== current) {
-      provenanceRef.current = expanded;
-      setProvenance(expanded);
-      lastExpandedProvenanceRef.current = expanded;
-      if (!readOnly && onDataChange) {
-        onDataChange({ provenance: expanded });
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading]);
-
-  // Generate dynamic CSS rules for per-block provenance color bars.
-  // Deep purple = AI block with pending diff; light purple = AI block accepted / no changes.
-  const provenanceCss = useMemo(() => {
-    if (!provenance) return '';
-    const rules: string[] = [];
-    for (const [blockId, entry] of Object.entries(provenance)) {
-      if (blockId === '__all__' || blockId.startsWith('__deleted_')) continue;
-      const safeId = blockId.replace(/[^a-zA-Z0-9_-]/g, '');
-      const status = getBlockAuthorStatus(entry);
-      const hasDiff = blockDiffMap.has(blockId);
-      if (status === 'ai') {
-        const color = hasDiff ? 'var(--color-ai)' : 'var(--color-ai-light)';
-        rules.push(
-          `.bn-block[data-id="${safeId}"] { position: relative; padding-right: 8px; }`,
-        );
-        rules.push(
-          `.bn-block[data-id="${safeId}"]::before { content: ''; position: absolute; top: 0; right: -12px; bottom: 0; width: 6px; background: ${color}; border-radius: 1px; }`,
-        );
-        if (hasDiff) {
-          rules.push(
-            `.bn-block[data-id="${safeId}"]::after { content: ''; position: absolute; top: 0; right: -22px; width: 20px; height: 100%; cursor: pointer; }`,
-          );
-        }
-      }
-    }
-    return rules.join('\n');
-  }, [provenance, blockDiffMap]);
-
-  // --- Accept / Reject callbacks ---
-
-  const handleAcceptAll = useCallback(() => {
-    const cleared = clearAllBaselines(provenanceRef.current);
-    provenanceRef.current = cleared;
-    setProvenance(cleared);
-    setBlockDiffMap(new Map());
-    setDeletedBlocks([]);
-    onDataChange?.({ provenance: cleared });
-  }, [onDataChange]);
-
-  const handleRejectAll = useCallback(() => {
-    const prov = provenanceRef.current;
-    if (!prov) return;
-
-    // Restore each block to its baselineText
-    for (const [blockId, entry] of Object.entries(prov)) {
-      if (blockId.startsWith('__deleted_') || blockId === '__all__') continue;
-      if (entry.baselineText === undefined) continue;
-      try {
-        if (entry.baselineText === '') {
-          // Block was added by AI — remove it
-          editor.removeBlocks([blockId]);
-        } else {
-          editor.updateBlock(blockId, { content: entry.baselineText });
-        }
-      } catch {
-        // Block may not exist in editor
-      }
-    }
-
-    // Re-insert deleted blocks
-    for (const [key, entry] of Object.entries(prov)) {
-      if (!key.startsWith('__deleted_') || !entry.baselineText) continue;
-      try {
-        if (entry.afterBlockId) {
-          editor.insertBlocks(
-            [{ type: 'paragraph', content: entry.baselineText }],
-            entry.afterBlockId,
-            'after',
-          );
-        } else {
-          const first = editor.document[0];
-          if (first) {
-            editor.insertBlocks(
-              [{ type: 'paragraph', content: entry.baselineText }],
-              first.id,
-              'before',
-            );
-          }
-        }
-      } catch {
-        // Anchor block may not exist
-      }
-    }
-
-    // Clear all baselines and persist
-    const cleared = clearAllBaselines(prov);
-    provenanceRef.current = cleared;
-    setProvenance(cleared);
-    setBlockDiffMap(new Map());
-    setDeletedBlocks([]);
-
-    const md = editor.blocksToMarkdownLossy(editor.document);
-    const json = JSON.stringify(editor.document);
-    lastAppliedMarkdownRef.current = md.trim();
-    lastDocJsonRef.current = json;
-    // Sync prev refs so onChange doesn't re-process the programmatic edits
-    syncPrevRefs(editor.document as ProvenanceBlock[]);
-    writePatch(md.trim(), json, cleared);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editor, onDataChange]);
-
-  const handleAcceptBlock = useCallback(
-    (blockId: string) => {
-      const updated = clearBaselineText(provenanceRef.current, blockId);
-      provenanceRef.current = updated;
-      setProvenance(updated);
-
-      const newDiffMap = deriveBlockDiffMap(updated);
-      const newDeletedBlocks = deriveDeletedBlocks(updated);
-      setBlockDiffMap(newDiffMap);
-      setDeletedBlocks(newDeletedBlocks);
-      onDataChange?.({ provenance: updated });
     },
-    [onDataChange],
+    [onDataChange, onContentChange],
+  );
+
+  const handleEditorChange = useCallback(
+    (next: string) => {
+      if (readOnly) return;
+      if (!onContentChange && !onDataChange) return;
+      if (next === lastEmittedMarkdownRef.current) return;
+
+      lastEmittedMarkdownRef.current = next;
+
+      // User edit: shift provenance against the live block keys so any
+      // edited block self-clears its marker.
+      if (PROVENANCE_ENABLED && editor) {
+        const liveKeys = editor.getBlockKeys();
+        const shifted = shiftProvenance(provenanceRef.current, liveKeys);
+        if (
+          shifted.blocks.length !== provenanceRef.current.blocks.length ||
+          shifted.deletedBlocks.length !==
+            provenanceRef.current.deletedBlocks.length
+        ) {
+          provenanceRef.current = shifted;
+          writePatch({ content: next, provenance: shifted });
+          return;
+        }
+      }
+
+      writePatch({ content: next });
+    },
+    [readOnly, onContentChange, onDataChange, editor, writePatch],
+  );
+
+  const handleExternalUpdate = useCallback<
+    NonNullable<React.ComponentProps<typeof MilkdownEditor>['onExternalUpdate']>
+  >(
+    ({ oldKeys, newKeys, oldMarkdownByKey, newMarkdownByKey }) => {
+      // Consume the per-node attribution flag unconditionally so it
+      // does not leak across updates (e.g. when provenance is
+      // disabled or when the keys-equal early-out short-circuits).
+      const aiAuthored = id ? consumeAiContentEdit(id) : false;
+      if (!PROVENANCE_ENABLED) return;
+      // Pure key-equal => nothing to do (e.g. content normalized
+      // round-trip with no actual block change).
+      if (
+        oldKeys.length === newKeys.length &&
+        oldKeys.every((k, i) => k === newKeys[i])
+      ) {
+        return;
+      }
+      if (!aiAuthored) {
+        // External update from a non-AI source — typically another
+        // panel rendering the same node and echoing the user's edit
+        // through the data prop. Realign existing markers against the
+        // new doc shape so they stay attached to live blocks, but do
+        // NOT stamp new AI markers.
+        const shifted = shiftProvenance(provenanceRef.current, newKeys);
+        if (
+          shifted.blocks.length !== provenanceRef.current.blocks.length ||
+          shifted.deletedBlocks.length !==
+            provenanceRef.current.deletedBlocks.length
+        ) {
+          provenanceRef.current = shifted;
+          writePatch({ provenance: shifted });
+        }
+        return;
+      }
+      const next = stampAiEdit(provenanceRef.current, {
+        oldKeys,
+        newKeys,
+        oldMarkdownByKey,
+        newMarkdownByKey,
+      });
+      provenanceRef.current = next;
+      writePatch({ provenance: next });
+    },
+    [id, writePatch],
+  );
+
+  // Build the decoration spec from current provenance. Memoized so
+  // MilkdownEditor's decoration effect doesn't fire on every render.
+  const decorations: MilkdownDecorationSpec | undefined = useMemo(() => {
+    if (!PROVENANCE_ENABLED) return undefined;
+    if (provenance.blocks.length === 0 && provenance.deletedBlocks.length === 0)
+      return undefined;
+    return {
+      blocks: provenance.blocks.map((b) => ({
+        key: b.key,
+        className: AI_BLOCK_CLASSNAME,
+      })),
+    };
+  }, [provenance]);
+
+  // Provenance action handlers.
+  const handleAcceptBlock = useCallback(
+    (key: string) => {
+      // Accept: keep the AI rewrite as-is, just drop the marker.
+      const next = dropBlockEntry(provenanceRef.current, key);
+      provenanceRef.current = next;
+      writePatch({ provenance: next });
+    },
+    [writePatch],
   );
 
   const handleRejectBlock = useCallback(
-    (blockId: string) => {
-      const entry = provenanceRef.current?.[blockId];
-      if (entry?.baselineText === undefined) return;
-
-      try {
-        if (entry.baselineText === '') {
-          // Block was added by AI — remove it
-          editor.removeBlocks([blockId]);
-        } else {
-          editor.updateBlock(blockId, { content: entry.baselineText });
-        }
-      } catch {
-        return;
-      }
-
-      let updated = recordUserEdits(provenanceRef.current, [blockId]);
-      updated = clearBaselineText(updated, blockId);
-      provenanceRef.current = updated;
-      setProvenance(updated);
-
-      setBlockDiffMap(deriveBlockDiffMap(updated));
-      setDeletedBlocks(deriveDeletedBlocks(updated));
-
-      const md = editor.blocksToMarkdownLossy(editor.document);
-      const json = JSON.stringify(editor.document);
-      lastAppliedMarkdownRef.current = md.trim();
-      lastDocJsonRef.current = json;
-      // Sync prev refs so onChange doesn't re-process the reverted block
-      syncPrevRefs(editor.document as ProvenanceBlock[]);
-      writePatch(md.trim(), json, updated);
+    (key: string) => {
+      if (!editor) return;
+      const entry = provenanceRef.current.blocks.find((b) => b.key === key);
+      if (!entry) return;
+      // Reject = restore the block to its pre-AI state AND drop the
+      // provenance entry. The `dropBlockEntry` helper is purely
+      // bookkeeping — the visible mutation happens via the editor
+      // verb below.
+      const next = dropBlockEntry(provenanceRef.current, key);
+      provenanceRef.current = next;
+      // Pure inserts have no baseline — Reject means "delete the block".
+      // Modifications restore the pre-edit content.
+      const ok =
+        entry.kind === 'inserted'
+          ? editor.deleteBlockByKey(key)
+          : editor.replaceBlockByKey(key, entry.baselineMarkdown);
+      if (!ok) return;
+      const newContent = editor.getMarkdown();
+      lastEmittedMarkdownRef.current = newContent;
+      writePatch({ content: newContent, provenance: next });
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [editor],
+    [editor, writePatch],
   );
 
-  const handleAcceptDeletedBlock = useCallback(
-    (index: number) => {
-      const keys = getDeletedKeys(provenanceRef.current);
-      const key = keys[index];
-      if (!key) return;
-
-      const updated = removeDeletedEntry(provenanceRef.current, key);
-      provenanceRef.current = updated;
-      setProvenance(updated);
-      setBlockDiffMap(deriveBlockDiffMap(updated));
-      setDeletedBlocks(deriveDeletedBlocks(updated));
-      onDataChange?.({ provenance: updated });
-    },
-    [onDataChange],
-  );
-
-  const handleRestoreBlock = useCallback(
-    (index: number) => {
-      const keys = getDeletedKeys(provenanceRef.current);
-      const key = keys[index];
-      const entry = provenanceRef.current?.[key];
-      if (!key || !entry?.baselineText) return;
-
-      try {
-        if (entry.afterBlockId) {
-          editor.insertBlocks(
-            [{ type: 'paragraph', content: entry.baselineText }],
-            entry.afterBlockId,
-            'after',
-          );
-        } else {
-          const firstBlock = editor.document[0];
-          if (firstBlock) {
-            editor.insertBlocks(
-              [{ type: 'paragraph', content: entry.baselineText }],
-              firstBlock.id,
-              'before',
-            );
-          }
-        }
-      } catch {
-        return;
-      }
-
-      const updated = removeDeletedEntry(provenanceRef.current, key);
-      provenanceRef.current = updated;
-      setProvenance(updated);
-      setBlockDiffMap(deriveBlockDiffMap(updated));
-      setDeletedBlocks(deriveDeletedBlocks(updated));
-
-      const md = editor.blocksToMarkdownLossy(editor.document);
-      const json = JSON.stringify(editor.document);
-      lastAppliedMarkdownRef.current = md.trim();
-      lastDocJsonRef.current = json;
-      // Sync prev refs so onChange doesn't re-process the restored block
-      syncPrevRefs(editor.document as ProvenanceBlock[]);
-      writePatch(md.trim(), json, updated);
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [editor],
-  );
-
-  const getBlockText = useCallback(
-    (blockId: string): string => {
-      const block = editor.document.find(
-        (b: { id: string }) => b.id === blockId,
-      );
-      if (!block) return '';
-      return extractBlockText(block as ProvenanceBlock);
-    },
-    [editor],
-  );
-
+  // "Insert Below" — restore the original block to its baseline AND
+  // keep the AI version as a new block below it. Net effect: user has
+  // both copies stacked, neither marked. The provenance entry for the
+  // original key is dropped because the new fingerprint no longer
+  // matches. Mirrors the pre-Milkdown behaviour.
   const handleInsertBelow = useCallback(
-    (blockId: string) => {
-      const entry = provenanceRef.current?.[blockId];
-      if (entry?.baselineText === undefined) return;
-
-      // AI-added block (no prior content) — treat as accept
-      if (entry.baselineText === '') {
-        const updated = clearBaselineText(provenanceRef.current, blockId);
-        provenanceRef.current = updated;
-        setProvenance(updated);
-        setBlockDiffMap(deriveBlockDiffMap(updated));
-        setDeletedBlocks(deriveDeletedBlocks(updated));
-        onDataChange?.({ provenance: updated });
-        return;
-      }
-
-      // Capture the current AI text before restoring
-      const aiText = getBlockText(blockId);
-
-      try {
-        // Restore the block to the user's original content
-        editor.updateBlock(blockId, { content: entry.baselineText });
-        // Insert the AI content as a new block below
-        const inserted = editor.insertBlocks(
-          [{ type: 'paragraph', content: aiText }],
-          blockId,
-          'after',
-        );
-        const insertedId = inserted[0]?.id;
-
-        // Update provenance for the original block (same as reject)
-        let updated = recordUserEdits(provenanceRef.current, [blockId]);
-        updated = clearBaselineText(updated, blockId);
-
-        // Stamp provenance for the new AI block
-        if (insertedId) {
-          updated = {
-            ...updated,
-            [insertedId]: {
-              author: 'ai' as const,
-              createdAt: new Date().toISOString(),
-            },
-          };
-        }
-
-        provenanceRef.current = updated;
-        setProvenance(updated);
-        setBlockDiffMap(deriveBlockDiffMap(updated));
-        setDeletedBlocks(deriveDeletedBlocks(updated));
-
-        const md = editor.blocksToMarkdownLossy(editor.document);
-        const json = JSON.stringify(editor.document);
-        lastAppliedMarkdownRef.current = md.trim();
-        lastDocJsonRef.current = json;
-        // Sync prev refs so onChange doesn't treat the inserted block as new
-        syncPrevRefs(editor.document as ProvenanceBlock[]);
-        writePatch(md.trim(), json, undefined, updated);
-      } catch {
-        return;
-      }
+    (key: string, baselineMarkdown: string) => {
+      if (!editor) return;
+      const liveAi = editor.getBlockMarkdownByKey(key);
+      if (liveAi === null) return;
+      // Insert AI version FIRST while `key` is still resolvable; then
+      // replace the original block with the baseline.
+      const insertedOk = editor.insertBlocksAfter(key, liveAi);
+      if (!insertedOk) return;
+      const replacedOk = editor.replaceBlockByKey(key, baselineMarkdown);
+      if (!replacedOk) return;
+      // Drop the entry for `key`; both new fingerprints are unmarked.
+      const next = dropBlockEntry(provenanceRef.current, key);
+      provenanceRef.current = next;
+      const newContent = editor.getMarkdown();
+      lastEmittedMarkdownRef.current = newContent;
+      writePatch({ content: newContent, provenance: next });
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [editor, getBlockText],
+    [editor, writePatch],
+  );
+
+  const handleRestoreTombstone = useCallback(
+    (deletedKey: string, restoreMarkdown: string, anchorKey: string | null) => {
+      if (!editor) return;
+      const next = dismissDeletedBlock(provenanceRef.current, deletedKey);
+      provenanceRef.current = next;
+      const ok = editor.insertBlocksAfter(anchorKey, restoreMarkdown);
+      if (!ok) return;
+      const newContent = editor.getMarkdown();
+      lastEmittedMarkdownRef.current = newContent;
+      writePatch({ content: newContent, provenance: next });
+    },
+    [editor, writePatch],
+  );
+
+  const handleDismissTombstone = useCallback(
+    (deletedKey: string) => {
+      const next = dismissDeletedBlock(provenanceRef.current, deletedKey);
+      provenanceRef.current = next;
+      writePatch({ provenance: next });
+    },
+    [writePatch],
+  );
+
+  // Batch verdicts — apply to every live entry + tombstone in one go.
+  // Useful when the AI has rewritten many blocks and the user just
+  // wants to keep / discard the whole change set without clicking
+  // through each block individually.
+  const handleAcceptAll = useCallback(() => {
+    const prov = provenanceRef.current;
+    if (prov.blocks.length === 0 && prov.deletedBlocks.length === 0) return;
+    // Accept all = keep the live doc, drop every marker / tombstone.
+    const next = emptyProvenance();
+    provenanceRef.current = next;
+    writePatch({ provenance: next });
+  }, [writePatch]);
+
+  const handleRejectAll = useCallback(() => {
+    if (!editor) return;
+    const prov = provenanceRef.current;
+    if (prov.blocks.length === 0 && prov.deletedBlocks.length === 0) return;
+    const blockKeys = editor.getBlockKeys();
+    const liveSet = new Set(blockKeys);
+    const indexByKey = new Map<string, number>();
+    blockKeys.forEach((k, i) => indexByKey.set(k, i));
+
+    // 1. Roll back every live AI edit in REVERSE doc order. Deletes
+    //    shift later positions earlier, and the helpers re-fingerprint
+    //    on each call — walking back-to-front keeps later keys stable
+    //    (incl. `#N` duplicate suffixes) while we mutate earlier ones.
+    //    Stale entries (key no longer in the doc) are silently skipped.
+    const sorted = prov.blocks
+      .filter((b) => liveSet.has(b.key))
+      .slice()
+      .sort(
+        (a, b) => (indexByKey.get(b.key) ?? 0) - (indexByKey.get(a.key) ?? 0),
+      );
+    for (const entry of sorted) {
+      if (entry.kind === 'inserted') {
+        editor.deleteBlockByKey(entry.key);
+      } else {
+        editor.replaceBlockByKey(entry.key, entry.baselineMarkdown);
+      }
+    }
+
+    // 2. Re-insert tombstoned blocks. Multiple deletes sharing the
+    //    same `anchorKey` are restored in REVERSE order so that each
+    //    fresh insertion pushes the previously-restored block down,
+    //    landing the original deletion order from top to bottom.
+    for (const t of prov.deletedBlocks.slice().reverse()) {
+      editor.insertBlocksAfter(t.anchorKey, t.baselineMarkdown);
+    }
+
+    // 3. Clear all bookkeeping — the doc is now baseline-equivalent.
+    const next = emptyProvenance();
+    provenanceRef.current = next;
+    const newContent = editor.getMarkdown();
+    lastEmittedMarkdownRef.current = newContent;
+    writePatch({ content: newContent, provenance: next });
+  }, [editor, writePatch]);
+
+  // Push an extra decoration sync when the editor instance becomes
+  // available (the prop-driven effect inside MilkdownEditor only fires
+  // on subsequent prop changes — not on initial mount when decorations
+  // were already known).
+  useEffect(() => {
+    if (!editor) return;
+    editor.setBlockDecorations(decorations?.blocks ?? []);
+  }, [editor, decorations]);
+
+  const handleBlockDragStart = useCallback(
+    (event: MilkdownBlockDragEvent) => {
+      const trimmed = event.markdown.trim();
+      if (!trimmed) return;
+
+      const origin: NodeOrigin = id
+        ? { type: 'user-excerpt', excerptFromNodeId: id }
+        : { type: 'user-excerpt' };
+
+      const payload: Omit<NoteDragPayload & { origin: NodeOrigin }, 'dragId'> =
+        {
+          kind: 'note',
+          origin,
+          data: { content: trimmed },
+        };
+
+      setDragPayload(event.nativeEvent as unknown as React.DragEvent, payload);
+    },
+    [id],
   );
 
   return (
-    <div className="relative h-full w-full">
+    <div className="bg-surface relative h-full w-full">
       <div
-        ref={editorContainerRef}
-        className="custom-scrollbar bg-surface relative h-full w-full overflow-auto py-3"
+        ref={containerRef}
+        className="custom-scrollbar relative h-full w-full overflow-auto py-3 pr-3"
       >
-        {provenanceCss && <style>{provenanceCss}</style>}
-        <NoteExcerptFromNodeIdProvider value={id}>
-          <BlockNoteView
-            className="block-note-view"
+        <MilkdownEditor
+          markdown={markdown}
+          editable={!readOnly}
+          onChange={handleEditorChange}
+          onExternalUpdate={handleExternalUpdate}
+          onReady={setEditor}
+          onBlockDragStart={readOnly ? undefined : handleBlockDragStart}
+          decorations={decorations}
+          className="milkdown-note-preview"
+        />
+        {PROVENANCE_ENABLED && !readOnly ? (
+          <ProvenanceOverlay
+            blocks={provenance.blocks}
+            tombstones={provenance.deletedBlocks}
             editor={editor}
-            editable={!readOnly && !loading}
-            shadCNComponents={blockNoteShadcnOverrides}
-            sideMenu={false}
-            onChange={() => {
-              if (readOnly) return;
-              if (!onContentChange && !onDataChange) return;
-              if (isReplacingRef.current) return;
-
-              const newJson = JSON.stringify(editor.document);
-
-              if (newJson === lastDocJsonRef.current) return;
-              lastDocJsonRef.current = newJson;
-
-              const currentBlocks = editor.document as Array<{
-                id: string;
-                type: string;
-                content?: unknown;
-                children?: unknown;
-              }>;
-              const currentBlockIds = currentBlocks.map((b) => b.id);
-              const prevIdSet = new Set(prevBlockIdsRef.current);
-
-              // Detect ALL blocks whose content actually changed by
-              // comparing against the previous per-block text snapshot.
-              // This catches edits the cursor-only heuristic misses
-              // (e.g. Enter splitting a block, multi-block paste).
-              //
-              // PERF: Only extract text for blocks that either are new or
-              // have a provenance entry with baselineText (i.e. in the diff
-              // view). This avoids calling extractBlockText on every block
-              // per keystroke.
-              //
-              // INVARIANT: blocks whose provenance has no baselineText are
-              // never shown in the diff view, so skipping them here is safe.
-              // If baselineText is later cleared (e.g. by user-edit accept),
-              // the block leaves the diff view, and we intentionally stop
-              // tracking its text changes until the next AI update re-adds
-              // a baselineText.
-              const prov = provenanceRef.current;
-              const editedBlockIds: string[] = [];
-              const newTextMap = new Map<string, string>();
-              for (const block of currentBlocks) {
-                if (!prevIdSet.has(block.id)) {
-                  // Brand-new block — always record
-                  editedBlockIds.push(block.id);
-                  newTextMap.set(block.id, extractBlockText(block));
-                } else if (prov?.[block.id]?.baselineText !== undefined) {
-                  // Block is in the diff view — compare text
-                  const text = extractBlockText(block);
-                  newTextMap.set(block.id, text);
-                  if (prevBlockTextRef.current.get(block.id) !== text) {
-                    editedBlockIds.push(block.id);
-                  }
-                }
-                // Blocks without baselineText that already existed don't
-                // need text extraction — they can't be in the diff view.
-              }
-
-              let updatedProvenance = recordUserEdits(prov, editedBlockIds);
-
-              // Batch-clear baselineText for all edited blocks in one copy.
-              if (editedBlockIds.length > 0 && updatedProvenance) {
-                const pMap = updatedProvenance;
-                const needsClear = editedBlockIds.filter(
-                  (id) => pMap[id]?.baselineText !== undefined,
-                );
-                if (needsClear.length > 0) {
-                  const copy = { ...updatedProvenance };
-                  for (const id of needsClear) {
-                    const { baselineText: _, ...rest } = copy[id];
-                    copy[id] = rest as BlockProvenance;
-                  }
-                  updatedProvenance = copy;
-                }
-              }
-
-              if (updatedProvenance) {
-                const currentIdSet = new Set(currentBlockIds);
-                const cleaned = { ...updatedProvenance };
-                let didClean = false;
-                for (const key of Object.keys(cleaned)) {
-                  if (
-                    key !== '__all__' &&
-                    !key.startsWith('__deleted_') &&
-                    !currentIdSet.has(key)
-                  ) {
-                    delete cleaned[key];
-                    didClean = true;
-                  }
-                }
-                if (didClean) updatedProvenance = cleaned;
-
-                // Repair __deleted_* entries whose afterBlockId is stale
-                // (the anchor block was removed/merged by the user).
-                updatedProvenance =
-                  repairDeletedBlockAnchors(
-                    updatedProvenance,
-                    currentIdSet,
-                    prevBlockIdsRef.current,
-                  ) ?? updatedProvenance;
-              }
-
-              provenanceRef.current = updatedProvenance;
-              setProvenance(updatedProvenance);
-              lastExpandedProvenanceRef.current = updatedProvenance;
-              prevBlockIdsRef.current = currentBlockIds;
-              prevBlockTextRef.current = newTextMap;
-
-              // Re-derive diffs from updated provenance
-              setBlockDiffMap(deriveBlockDiffMap(updatedProvenance));
-              setDeletedBlocks(deriveDeletedBlocks(updatedProvenance));
-
-              // Debounce the expensive serialisation + persistence path.
-              // Provenance state is already updated above for immediate UI.
-              clearTimeout(persistTimerRef.current);
-              persistTimerRef.current = window.setTimeout(() => {
-                const md = editor.blocksToMarkdownLossy(editor.document);
-                const newMarkdown = md.trim();
-                lastAppliedMarkdownRef.current = newMarkdown;
-
-                const latestJson = JSON.stringify(editor.document);
-                lastDocJsonRef.current = latestJson;
-
-                writePatch(newMarkdown, latestJson, provenanceRef.current);
-              }, 150);
-            }}
-          >
-            {!readOnly && <SideMenuController sideMenu={NoteEditorSideMenu} />}
-          </BlockNoteView>
-        </NoteExcerptFromNodeIdProvider>
-        {!readOnly && (blockDiffMap.size > 0 || deletedBlocks.length > 0) && (
-          <InlineBlockDiffs
-            blockDiffMap={blockDiffMap}
-            deletedBlocks={deletedBlocks}
-            orderedBlockIds={editor.document.map((b: { id: string }) => b.id)}
-            editorContainerRef={editorContainerRef}
-            getBlockText={getBlockText}
+            containerRef={containerRef}
             onAcceptBlock={handleAcceptBlock}
             onRejectBlock={handleRejectBlock}
             onInsertBelow={handleInsertBelow}
-            onAcceptDeletedBlock={handleAcceptDeletedBlock}
-            onRestoreBlock={handleRestoreBlock}
+            onRestoreTombstone={handleRestoreTombstone}
+            onDismissTombstone={handleDismissTombstone}
+            onAcceptAll={handleAcceptAll}
+            onRejectAll={handleRejectAll}
           />
-        )}
+        ) : null}
       </div>
-      {!readOnly && hasAnyPendingDiff(provenance) && (
-        <div className="absolute right-4 bottom-4 flex items-center gap-1">
-          <Button
-            variant="outline"
-            tone="neutral"
-            size="sm"
-            onClick={handleRejectAll}
-          >
-            Reject All
-          </Button>
-          <Button
-            variant="solid"
-            tone="info"
-            size="sm"
-            onClick={handleAcceptAll}
-          >
-            Accept All
-          </Button>
-        </div>
-      )}
     </div>
   );
 };

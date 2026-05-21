@@ -242,7 +242,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           />
         </div>
 
-        <div className="bg-border mx-1 h-4 w-px" />
+        <div className="bg-edge-default mx-1 h-4 w-px" />
 
         {/* Group 2: Nodes */}
         <div className="flex items-center gap-1.5">
@@ -308,7 +308,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           </div>
         </div>
 
-        <div className="bg-border mx-1 h-4 w-px" />
+        <div className="bg-edge-default mx-1 h-4 w-px" />
 
         <div className="flex items-center gap-1.5">
           <Button
@@ -336,7 +336,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           </Button>
         </div>
 
-        <div className="bg-border mx-1 h-4 w-px" />
+        <div className="bg-edge-default mx-1 h-4 w-px" />
 
         <div className="flex items-center gap-1.5">
           <Button
@@ -360,7 +360,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           </Button>
         </div>
 
-        <div className="bg-border mx-1 h-4 w-px" />
+        <div className="bg-edge-default mx-1 h-4 w-px" />
 
         <div ref={intentButtonRef} className="flex items-center gap-1.5">
           <Button
@@ -400,7 +400,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
         {/* Non-mouse only: Undo / Redo (Delete lives on the per-context floating toolbars) */}
         {isNotMouse && (
           <>
-            <div className="bg-border mx-1 h-4 w-px" />
+            <div className="bg-edge-default mx-1 h-4 w-px" />
             <div className="flex items-center gap-1.5">
               <Button
                 variant="ghost"
@@ -479,7 +479,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
       >
         <div className="mt-4 flex flex-col gap-0">
           <textarea
-            className="border-edge-default placeholder:text-border focus:border-info focus:ring-info min-h-25 w-full resize-none rounded-md border bg-transparent px-3 py-2 text-sm focus:outline-none"
+            className="border-edge-default placeholder:text-fg-subtle focus:border-info focus:ring-info min-h-25 w-full resize-none rounded-md border bg-transparent px-3 py-2 text-sm focus:outline-none"
             placeholder={`https://example.com/image.png\nhttps://example.com/doc.pdf\nhttps://google.com`}
             value={linkText}
             onChange={(e) => setLinkText(e.target.value)}

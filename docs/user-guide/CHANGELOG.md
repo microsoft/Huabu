@@ -4,6 +4,74 @@
 
 ---
 
+## 2026-05-23 · 笔记 AI 修改：批量 Accept / Reject + 来源区分
+
+**What Changed**
+
+- 笔记节点上当 AI 改动多个块时，悬浮区域顶部会显示一条可粘性吸顶的汇总条，包含 `Accept all` 与 `Reject all` 两个按钮：
+  - `Accept all`：保留当前所有 AI 改动，清除全部 provenance 标记和墓碑。
+  - `Reject all`：将每个被改动的块按倒序回滚到 baseline（插入的块删除、修改的块还原），并按原顺序重新插入被 AI 删除的块。
+- 区分"AI 编辑"与"其他面板回写"作为外部内容更新的两种来源：只有真正由 AI 触发的内容变更才会盖上 provenance 标记；同一节点上的其他来源（例如展开面板回写）只会平滑迁移现有标记，不再被误判为新一次 AI 改写。
+- `MilkdownPreview` 在启用块拖拽（只读模式）时增加 `aria-readonly`，向辅助技术宣告只读语义。
+
+**Notes**
+
+- 单块 Accept/Reject 行为保持不变；批量按钮只有在至少存在一条 provenance 条目（块标记或墓碑）时才会出现。
+- 批量 Reject 与单块 Reject 一样会写回 markdown — 期间不会触发"用户编辑"的标记清理逻辑，因为我们随后立刻清空 provenance。
+
+---
+
+## 2026-05-21 · BlockNote 彻底下线（Phase 6）
+
+**What Changed**
+
+- 移除所有 BlockNote 相关代码与依赖：删除 `@blocknote/core`、`@blocknote/react`、`@blocknote/shadcn` 三个 npm 包，删除 `apps/web/src/components/BlockNote/` 目录与 `BlockNoteCard.tsx`，清掉 `index.css` 中只服务于 BlockNote 的 ShadCN 桥接 token。
+- 删除 `VITE_MESSAGE_RENDERER` 灰度开关，AI 消息卡片固定使用 Milkdown。
+- 拖拽到画布的笔记 payload 不再携带 `contentJson` 辅助字段，markdown 是唯一真值。
+
+**Notes**
+
+- bundle 体积显著减小（移除 ~400KB+ gzip 的 BlockNote 运行时与依赖）。
+- 历史持久化数据中遗留的 `contentJson` / `contentJsonSource` 等字段会被运行时静默忽略，不影响渲染。
+
+---
+
+## 2026-05-22 · 笔记编辑器迁移到 Milkdown（Phase 3）
+
+**What Changed**
+
+- 画布上笔记节点（折叠/展开态）的编辑器底层由 BlockNote 迁移到 Milkdown，与聊天消息卡片保持一致的渲染栈：
+  - 折叠态（只读预览）和展开态（可编辑编辑器）都采用 Milkdown。
+  - Markdown 现在是唯一真值，不再维护 BlockNote 的辅助 JSON 格式。
+  - 数学公式、表格、代码块等元素无缝渲染，外观与聊天消息卡片一致。
+- 拖拽块到画布的能力保持可用，拖拽预览同样通过 Milkdown 的原生样式生成。
+- Shadow DOM 隔离保留，笔记样式不会污染全局页面。
+
+**Notes**
+
+- **Provenance（AI 修改标记）暂时缩小**：当前阶段不显示 AI 修改的颜色条和 Accept/Reject 按钮，这些能力将在下一阶段（Phase 4）恢复。打开历史笔记时不会看到旧的 AI 标记。
+- **自动标题提取规则变化**：笔记标题仍然由服务端 preprocessing 自动更新（基于内容分析），前端只负责展示。标题的自动识别逻辑与 BlockNote 时期保持一致。
+- 笔记内容存储从双轨（`content` + `contentJson`）简化为单轨（仅 `content`），减少维护负担。历史笔记的 `contentJson` 字段暂予保留，将在 Phase 6 统一清理。
+
+---
+
+## 2026-05-22 · AI 聊天消息改用 Milkdown 渲染
+
+**What Changed**
+
+- AI 聊天回复消息卡片底层渲染器由 BlockNote 迁移到 Milkdown：
+  - 数学公式（KaTeX）、表格、代码块、列表等结构现在直接由 Milkdown 原生渲染，无需经过 BlockNote 的中间块模型。
+  - Shadow DOM 隔离继续保留，消息卡片不会被全局样式污染。
+  - 从消息卡片拖拽单个块到画布生成笔记节点的能力保持可用。
+
+**Notes**
+
+- **多块拖拽暂降级为单块拖拽**：当前阶段一次只能拖拽一个块到画布。在大多数日常使用场景中（拖一个段落、一个代码块、一张表格）行为完全一致；如需把整段回复批量落到画布，请先选中文字使用「复制」或在后续版本中等待恢复多选拖拽。
+- **回退开关**：若新渲染出现问题，可在前端构建时设置环境变量 `VITE_MESSAGE_RENDERER=blocknote` 临时切回原 BlockNote 渲染器（默认值为 `milkdown`）。该回退开关将在迁移收尾阶段（计划中的 Phase 6）随旧依赖一同移除。
+- 历史消息无需迁移：消息内容本来就是 Markdown，直接由新渲染器解析显示。
+
+---
+
 ## 2026-05-21 · 节点缩放也支持智能对齐与吸附
 
 **What Changed**

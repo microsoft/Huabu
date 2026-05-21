@@ -1,7 +1,5 @@
 @import 'tailwindcss';
 
-@source '../node_modules/@blocknote/shadcn';
-
 @custom-variant dark (&:is(.dark *));
 /* ===================================================================
   App design-system tokens — single source of truth.
@@ -71,31 +69,6 @@
   --skeleton-1: #f3f4f6;
   --skeleton-2: #e5e7eb;
   --skeleton-3: #dcdfe4;
-
-  /* ===================================================================
-    ShadCN bridge — consumed by @blocknote/shadcn.
-    Variable NAMES are fixed by ShadCN. Do NOT rename them.
-    Values bridge to system tokens via var() where semantics overlap.
-    =================================================================== */
-  --radius: 0.625rem;
-  --background: var(--bg-default);
-  --foreground: var(--fg-default);
-  --border: var(--edge-default);
-  --primary: var(--bg-inverse);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: var(--bg-default);
-  --muted-foreground: var(--fg-subtle);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --destructive: var(--danger);
-  --input: var(--edge-default);
-  --ring: oklch(0.708 0 0);
 }
 /* Dark theme overrides.
    TODO: migrate system tokens to fg/bg/edge naming in a follow-up pass. */
@@ -153,23 +126,6 @@
   --skeleton-1: oklch(0.2 0 0);
   --skeleton-2: oklch(0.28 0 0);
   --skeleton-3: oklch(0.32 0 0);
-
-  /* --- ShadCN bridge (BlockNote) --- */
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: var(--danger);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
 }
 
 /* Extending Tailwind theme with utility classes.*/
@@ -223,37 +179,6 @@
   --color-question-fg: var(--question-fg);
   --color-question-bg: var(--question-bg);
   --color-question-border: var(--question-border);
-
-  /* --- ShadCN theme mappings (BlockNote) --- */
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-border: var(--border);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-destructive: var(--destructive);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-}
-
-/* Applies some additional necessary border styles within the editor. */
-@layer base {
-  .bn-shadcn * {
-    @apply border-border outline-ring/50;
-  }
 }
 
 @theme {
@@ -381,62 +306,6 @@ body,
 .textLayer span::selection {
   color: transparent;
   background: color-mix(in srgb, var(--pdf-highlight-bg) 45%, transparent);
-}
-
-.block-note-view-readonly .bn-editor {
-  padding: 0 !important;
-}
-
-/* Override BlockNote base font-size (default 16px → 14px).
-   Use `.bn-default-styles` so heading `em` values and side-menu handler
-   positioning stay consistent with the new base. */
-.block-note-view .bn-default-styles {
-  font-size: 0.875rem; /* 14px */
-}
-
-/* Override heading sizes via BlockNote's own --level CSS variable.
-   Values are in `em` relative to the base font-size above (14px). */
-.block-note-view [data-content-type='heading'] {
-  --level: 1.715em; /* h1 ≈ 24px */
-}
-.block-note-view [data-content-type='heading'][data-level='2'] {
-  --level: 1.375em; /* h2 ≈ 19.2px */
-}
-.block-note-view [data-content-type='heading'][data-level='3'] {
-  --level: 1.2em; /* h3 ≈ 16.8px */
-}
-.block-note-view [data-content-type='heading'][data-level='4'] {
-  --level: 1.085em; /* h4 ≈ 15.2px */
-}
-.block-note-view [data-content-type='heading'][data-level='5'] {
-  --level: 1em; /* h5 ≈ 14px */
-}
-.block-note-view [data-content-type='heading'][data-level='6'] {
-  --level: 0.915em; /* h6 ≈ 12.8px */
-}
-
-/* Shrink table row/column drag handles to match the block-level side-menu
-   drag handle (18×18 px, same as h-4.5 w-4.5).
-   Square so the 90° rotation for column handles stays symmetrical.
-   !important overrides the Tailwind h-9/h-fit/w-fit utilities that
-   co-exist on the ShadCN Button (clsx doesn't deduplicate them).
-   No ancestor selector — floating handles may portal outside .block-note-view. */
-.bn-table-handle {
-  width: 1.125rem !important; /* 18px */
-  height: 1.125rem !important; /* 18px */
-  min-height: 0 !important;
-  min-width: 0 !important;
-  padding: 2px !important;
-  gap: 0 !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  border-radius: 3px !important;
-}
-.bn-table-handle svg {
-  width: 16px !important;
-  height: 16px !important;
-  flex-shrink: 0;
 }
 
 /* Thinking indicator shimmer — gradient slides across text */

@@ -569,9 +569,6 @@ export const Canvas: React.FC<CanvasProps> = ({
               placementPoint: dropPos,
               data: {
                 content: payload.data.content,
-                ...(payload.data.contentJson
-                  ? { contentJson: payload.data.contentJson }
-                  : {}),
                 origin: payload.origin,
               },
             };

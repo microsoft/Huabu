@@ -3,10 +3,16 @@
  *
  * Translates the LLM's command batch into the SSE-bound payload the
  * frontend executes. The handler does not touch the filesystem itself;
- * it only annotates each command with `origin` / `provenance` /
- * `labelSource` so downstream apply logic knows the change came from
- * the agent. The actual canvas mutation happens client-side via the
- * existing canvas-command pipeline once the SSE event lands.
+ * it only annotates each command with `origin` / `labelSource` so
+ * downstream apply logic knows the change came from the agent. The
+ * actual canvas mutation happens client-side via the existing
+ * canvas-command pipeline once the SSE event lands.
+ *
+ * Phase 4 (Milkdown migration): block-level `provenance` is now stamped
+ * client-side by `NotePreview` (it owns the markdown→PM parser needed
+ * for fingerprinting). The server therefore no longer injects any
+ * `provenance` field. Range-precise provenance generation is tracked
+ * separately in Phase 4.5 — see `docs/milkdown-migration-plan.md` §4.
  *
  * Returns the inner payload (`{ source, canvasId, commands }`) on
  * success; the SSE bridge / web client wraps it into the standard
@@ -14,18 +20,16 @@
  * pi-agent-core catches and surfaces them as `isError: true`.
  */
 
-import { getCanvasStore } from '../../../storage/index.js';
-
-import type { BlockProvenanceMap, NodeOrigin } from '@sediment/shared';
+import type { NodeOrigin } from '@sediment/shared';
 
 /**
  * Args type for `handleCanvasCommands`. Intentionally kept loose
  * (`commands: Array<Record<string, unknown>>`) instead of being derived
  * from `canvasCommandsParamsSchema` because the body walks each command
  * with runtime `cmd.type === '...'` narrowing and augments shapes the
- * schema does not describe (injected `origin`, `provenance`,
- * `labelSource`). The schema still validates LLM input upstream via
- * `validateToolCall` — the looseness here is only on the executor side.
+ * schema does not describe (injected `origin`, `labelSource`). The
+ * schema still validates LLM input upstream via `validateToolCall` —
+ * the looseness here is only on the executor side.
  */
 export type CanvasCommandsArgs = {
   canvasId: string;
@@ -34,16 +38,6 @@ export type CanvasCommandsArgs = {
 
 /** Default origin assigned to every node created by the operate agent. */
 const DEFAULT_ORIGIN: NodeOrigin = { type: 'ai-operate' };
-
-/** Build an `__all__` sentinel provenance map for AI-generated content. */
-function buildAIProvenance(): BlockProvenanceMap {
-  return {
-    __all__: {
-      author: 'ai',
-      createdAt: new Date().toISOString(),
-    },
-  };
-}
 
 /**
  * Execute a batch of canvas commands and return the SSE-bound payload.
@@ -64,23 +58,6 @@ export async function handleCanvasCommands(
     `[canvas_commands] handler invoked: canvasId=${args.canvasId ?? '(none)'}, origin=${origin.type}, commandCount=${args.commands?.length ?? 0}, types=[${(args.commands ?? []).map((c) => c.type).join(', ')}]`,
   );
 
-  // Read canvas state once so we can resolve node types for provenance injection.
-  const canvas = getCanvasStore(args.canvasId).read();
-  const nodeTypeMap = new Map<string, string>();
-  if (canvas) {
-    for (const n of (canvas.state.nodes ?? []) as Array<
-      Record<string, unknown>
-    >) {
-      const data = (n.data as Record<string, unknown> | undefined) ?? {};
-      const nodeType = (n.nodeType ?? n.type ?? data.type) as
-        | string
-        | undefined;
-      if (typeof n.id === 'string' && typeof nodeType === 'string') {
-        nodeTypeMap.set(n.id, nodeType);
-      }
-    }
-  }
-
   const commands = args.commands.map((cmd) => {
     if (cmd.type === 'CREATE_NODES') {
       const nodes = cmd.nodes as Array<Record<string, unknown>>;
@@ -88,18 +65,12 @@ export async function handleCanvasCommands(
         ...cmd,
         nodes: nodes.map((node) => {
           const data = (node.data as Record<string, unknown> | undefined) ?? {};
-          const isNote = node.nodeType === 'note';
-          const hasContent =
-            isNote &&
-            typeof data.content === 'string' &&
-            data.content.length > 0;
           const hasLabel = typeof data.label === 'string';
           return {
             ...node,
             data: {
               ...data,
               origin,
-              ...(hasContent ? { provenance: buildAIProvenance() } : {}),
               ...(hasLabel ? { labelSource: 'agent' as const } : {}),
             },
           };
@@ -113,20 +84,11 @@ export async function handleCanvasCommands(
         patches: patches.map((entry) => {
           const patch =
             (entry.patch as Record<string, unknown> | undefined) ?? {};
-          const nodeId = entry.nodeId as string | undefined;
-          const isNote = nodeId ? nodeTypeMap.get(nodeId) === 'note' : false;
-          const hasContent =
-            isNote &&
-            typeof patch.content === 'string' &&
-            patch.content.length > 0;
           const hasLabel = typeof patch.label === 'string';
-          const extra: Record<string, unknown> = {};
-          if (hasContent) extra.provenance = buildAIProvenance();
-          if (hasLabel) extra.labelSource = 'agent';
-          if (Object.keys(extra).length > 0) {
+          if (hasLabel) {
             return {
               ...entry,
-              patch: { ...patch, ...extra },
+              patch: { ...patch, labelSource: 'agent' as const },
             };
           }
           return entry;

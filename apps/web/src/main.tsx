@@ -1,8 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 
-import '@blocknote/core/fonts/inter.css';
-import '@blocknote/shadcn/style.css';
 import './index.css';
 
 import App from './App';
@@ -15,7 +13,9 @@ if (!rootElement) {
   throw new Error('Failed to find the root element');
 }
 
-ReactDOM.createRoot(rootElement).render(
+const root = ReactDOM.createRoot(rootElement);
+
+root.render(
   <React.StrictMode>
     <App />
   </React.StrictMode>,

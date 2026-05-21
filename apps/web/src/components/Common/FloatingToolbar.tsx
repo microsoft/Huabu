@@ -64,7 +64,7 @@ function Root({ children, className }: RootProps) {
 
 /** Vertical separator between toolbar sections. */
 function Divider() {
-  return <div className="bg-border mx-0.5 h-4 w-px" />;
+  return <div className="bg-edge-default mx-0.5 h-4 w-px" />;
 }
 
 // ─── ToggleButton ─────────────────────────────────────────────────────────────
@@ -678,7 +678,7 @@ function ToolbarAlignPicker({
                     <Icon />
                   </Button>
                 ))}
-              <div className="bg-border mx-1 h-5 w-px" />
+              <div className="bg-edge-default mx-1 h-5 w-px" />
               {alignButtons
                 .slice(3, 6)
                 .map(({ direction, title: btnTitle, Icon }) => (
@@ -694,7 +694,7 @@ function ToolbarAlignPicker({
                     <Icon />
                   </Button>
                 ))}
-              <div className="bg-border mx-1 h-5 w-px" />
+              <div className="bg-edge-default mx-1 h-5 w-px" />
               <Button
                 variant="ghost"
                 iconOnly

@@ -1,6 +1,6 @@
 import { Copy } from 'lucide-react';
 
-import { BlockNoteCard } from './Card/BlockNoteCard';
+import { MilkdownMessageCard } from './Card/MilkdownMessageCard';
 import { NODE_ICON } from '../../config/nodeIcons';
 import useCanvasStore from '../../store/canvasStore';
 import { useChatStore } from '../../store/chatStore';
@@ -33,7 +33,7 @@ export const AIMessage = ({
       <div className="flex w-full flex-col gap-1">
         <div className="text-fg-default bg-surface ml-1 rounded-2xl border border-none px-4 text-sm">
           <div className="leading-relaxed">
-            <BlockNoteCard content={content} />
+            <MilkdownMessageCard content={content} threadId={threadId} />
           </div>
         </div>
 
@@ -73,7 +73,7 @@ export const AIMessage = ({
 
             {resources && resources.length > 0 && (
               <>
-                <span className="bg-border mx-1 h-3 w-px" />
+                <span className="bg-edge-default mx-1 h-3 w-px" />
                 {resources.map((r, i) => {
                   const Icon =
                     NODE_ICON[r.nodeType as CanvasNodeType] ?? NODE_ICON.note;

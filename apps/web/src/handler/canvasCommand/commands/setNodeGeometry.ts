@@ -21,8 +21,9 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
     const affectedFrameIds = new Set<string>();
     // Parent frames whose child just had its explicit height cleared
     // (revert to content-driven sizing). The new content height is
-    // unknown until BlockNote reflows + RF re-measures, so we ask the
-    // executor's post-effect to refit after the next render cycle.
+    // unknown until the inline editor reflows + RF re-measures, so we
+    // ask the executor's post-effect to refit after the next render
+    // cycle.
     const deferredFitFrameIds = new Set<string>();
 
     let nextNodes = state.nodes.map((n) => {
