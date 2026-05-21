@@ -28,10 +28,19 @@ interface NodeFloatingToolbarProps {
   type: CanvasNodeType;
   data: NodeData;
   /**
-   * Per-node-type toolbar content rendered between the type indicator
-   * and the trailing accent color picker.
+   * Per-node-type toolbar content rendered immediately after the type
+   * indicator. Sits in the same group as the trailing accent color
+   * picker so the color swatch always becomes the last item of this
+   * second-to-last group (no extra divider in between).
    */
-  children: ReactNode;
+  children?: ReactNode;
+  /**
+   * Per-node-type "expand" affordances rendered as the trailing item
+   * of the final group, right after the size picker. Kept separate
+   * from `children` so every node's expand-like action lands in the
+   * same position with no extra divider preceding it.
+   */
+  expand?: ReactNode;
 }
 
 /**
@@ -45,14 +54,23 @@ interface NodeFloatingToolbarProps {
  * Composes three sections:
  *  1. Leading type indicator. For `text` / `note`, renders a segmented
  *     toggle so the user can convert between them with one click.
- *  2. Caller-provided per-node-type actions (`children`).
- *  3. Trailing accent color picker (hidden for `question` nodes).
+ *  2. Caller-provided per-node-type actions (`children`) followed by
+ *     the trailing accent color picker (hidden for `question` /
+ *     `sketch` nodes). These share a single group with no divider
+ *     between them, so the color swatch is always the last item in
+ *     the second-to-last group.
+ *  3. Size picker plus any caller-provided `expand` action. These
+ *     share the final group with no divider between them, so the
+ *     expand button is always the last item in the last group.
+ *
+ * A trailing delete button is appended for non-mouse input as its
+ * own group (mouse users have keyboard Delete / Backspace).
  *
  * Positioning, portal-into-body, and viewport clamping are delegated
  * to `CanvasFloatingPopover`.
  */
 export const NodeFloatingToolbar = memo(
-  ({ id, type, data, children }: NodeFloatingToolbarProps) => {
+  ({ id, type, data, children, expand }: NodeFloatingToolbarProps) => {
     const internalNode = useInternalNode(id);
     const updateNodeData = useCanvasStore((s) => s.updateNodeData);
     const convertNodeType = useCanvasStore((s) => s.convertNodeType);
@@ -177,6 +195,26 @@ export const NodeFloatingToolbar = memo(
 
         {children}
 
+        {type !== 'question' && type !== 'sketch' && (
+          <FloatingToolbar.ColorPicker
+            colors={
+              type === 'text'
+                ? ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT
+                : ACCENT_PICKER_OPTIONS
+            }
+            value={data.style?.accent ?? ACCENT_NONE}
+            onSelect={(t) =>
+              updateNodeData(id, {
+                style: {
+                  ...data.style,
+                  accent: t === ACCENT_NONE ? null : t,
+                },
+              })
+            }
+            title="Accent Color"
+          />
+        )}
+
         <FloatingToolbar.Divider />
 
         <FloatingToolbar.SizePicker
@@ -216,28 +254,7 @@ export const NodeFloatingToolbar = memo(
           }
         />
 
-        {type !== 'question' && type !== 'sketch' && (
-          <>
-            <FloatingToolbar.Divider />
-            <FloatingToolbar.ColorPicker
-              colors={
-                type === 'text'
-                  ? ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT
-                  : ACCENT_PICKER_OPTIONS
-              }
-              value={data.style?.accent ?? ACCENT_NONE}
-              onSelect={(t) =>
-                updateNodeData(id, {
-                  style: {
-                    ...data.style,
-                    accent: t === ACCENT_NONE ? null : t,
-                  },
-                })
-              }
-              title="Accent Color"
-            />
-          </>
-        )}
+        {expand}
 
         {/* Non-mouse only: mouse users have keyboard Delete / Backspace. */}
         {isNotMouse && (

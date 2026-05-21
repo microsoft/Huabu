@@ -101,30 +101,28 @@ export const WebNode = memo(
     }, [src, hasIngestedContent, canvasId, refreshKey, ingestion?.status, id]);
 
     const WebToolbar = (
-      <>
-        <a
-          href={data?.src}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={(e) => e.stopPropagation()}
-          className="nodrag text-fg-muted hover:text-info flex flex-1 cursor-pointer items-center gap-1 overflow-hidden text-xs font-medium transition-colors"
-        >
-          <span className="max-w-24 truncate">{data?.src || 'Website'}</span>
-          <ArrowUpRight size={14} strokeWidth={2} />
-        </a>
+      <a
+        href={data?.src}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={(e) => e.stopPropagation()}
+        className="nodrag text-fg-muted hover:text-info flex flex-1 cursor-pointer items-center gap-1 overflow-hidden text-xs font-medium transition-colors"
+      >
+        <span className="max-w-24 truncate">{data?.src || 'Website'}</span>
+        <ArrowUpRight size={14} strokeWidth={2} />
+      </a>
+    );
 
-        <FloatingToolbar.Divider />
-
-        <FloatingToolbar.ActionButton
-          title="Open Large View"
-          onClick={(e) => {
-            e.stopPropagation();
-            openExpanded(id);
-          }}
-        >
-          <Fullscreen />
-        </FloatingToolbar.ActionButton>
-      </>
+    const WebExpand = (
+      <FloatingToolbar.ActionButton
+        title="Open Large View"
+        onClick={(e) => {
+          e.stopPropagation();
+          openExpanded(id);
+        }}
+      >
+        <Fullscreen />
+      </FloatingToolbar.ActionButton>
     );
 
     return (
@@ -134,6 +132,7 @@ export const WebNode = memo(
         type={'web'}
         selected={selected}
         toolbar={WebToolbar}
+        expand={WebExpand}
         keepAspectRatio={false}
       >
         <div className="h-full w-full overflow-hidden">
@@ -146,7 +145,7 @@ export const WebNode = memo(
             }}
           >
             <div className="flex h-full flex-col">
-              <div className="bg-surface relative h-full w-full overflow-hidden rounded">
+              <div className="bg-surface relative h-full w-full overflow-hidden rounded-lg">
                 {src ? (
                   <div className="flex h-full w-full flex-col gap-2">
                     {previewLoading ? (

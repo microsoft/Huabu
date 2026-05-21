@@ -64,7 +64,7 @@ export function SemanticPlaceholder({
   return (
     <div
       className={cn(
-        'pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded p-2 transition-all duration-120',
+        'pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg p-2 transition-all duration-120',
         !accentTokens && 'bg-surface shadow',
         accentTokens && 'border-4',
       )}

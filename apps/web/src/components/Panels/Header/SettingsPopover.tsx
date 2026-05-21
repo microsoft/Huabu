@@ -6,11 +6,24 @@ import { useLLMStore } from '../../../store/llmStore';
 import { Button } from '../../Common/Button';
 import { Popover } from '../../Common/Popover';
 
+interface SettingsPopoverProps {
+  /**
+   * Visual style of the trigger button. Defaults to `ghost` to match the
+   * in-chat header. Pass `outline` / `pill` to render as a circular outline
+   * button (matches the floating top-right canvas controls).
+   */
+  variant?: 'ghost' | 'outline';
+  shape?: 'default' | 'pill';
+}
+
 /**
  * Settings popover. Currently only exposes LLM provider/model configuration.
  * Workspace switching lives on the home page (`/` and `/setup`).
  */
-export const SettingsPopover: React.FC = () => {
+export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
+  variant = 'ghost',
+  shape = 'default',
+}) => {
   const llmInit = useLLMStore((s) => s.init);
 
   const [isOpen, setIsOpen] = useState(false);
@@ -49,8 +62,8 @@ export const SettingsPopover: React.FC = () => {
     <>
       <div ref={triggerRef}>
         <Button
-          variant="outline"
-          shape="pill"
+          variant={variant}
+          shape={shape}
           iconOnly
           title="Settings"
           onClick={handleToggle}

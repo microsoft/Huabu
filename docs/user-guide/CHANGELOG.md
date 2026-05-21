@@ -20,6 +20,20 @@
 
 ---
 
+## 2026-05-23 · 节点视觉：圆角加大
+
+**What Changed**
+
+- 所有画布节点的外圆角统一从 `rounded` (4px) 提升到 `rounded-lg` (8px)，整体观感更柔和。
+- 同步更新的元素包括：`NodeWrapper` 外框、`SemanticPlaceholder`（缩略 LOD 占位层），以及 Web / Video / PDF / Image / Question 节点中自带背景的"面板"内层容器，避免内层方角与外层圆角错位。
+
+**Notes**
+
+- 纯视觉调整，不影响节点尺寸、对齐、连线 handle 位置或选中态 ring 行为。
+- 节点 hover/selected 时的 ring 由 Tailwind 自动跟随 `border-radius`，无需额外改动。
+
+---
+
 ## 2026-05-23 · 笔记 AI 修改：批量 Accept / Reject + 来源区分
 
 **What Changed**

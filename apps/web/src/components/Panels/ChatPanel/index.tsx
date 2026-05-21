@@ -1,4 +1,9 @@
-import { ArrowLeft, PanelRightClose, PanelRightOpen, Plus } from 'lucide-react';
+import {
+  ArrowLeft,
+  ListIndentIncrease,
+  PanelRightOpen,
+  Plus,
+} from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 
 import { Button } from '@/components/Common/Button';
@@ -113,8 +118,8 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       isCollapsed={isCollapsed}
       onToggle={onToggle}
       iconCollapsed={<PanelRightOpen size={16} />}
-      iconExpanded={<PanelRightClose size={16} />}
-      className="border-edge-default border-l"
+      iconExpanded={<ListIndentIncrease size={16} />}
+      className="border-l border-[#eeece7]"
       tools={
         viewingSketchCluster ? (
           <Button

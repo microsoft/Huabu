@@ -21,8 +21,11 @@ export const MainLayout = ({
   const contentRef = useRef<HTMLDivElement | null>(null);
 
   // Fixed pixel sizes to guarantee that collapsing side panels only affects
-  // the center panel width.
-  const COLLAPSED_WIDTH_PX = 36;
+  // the center panel width. Both sides collapse to 0 so the canvas takes
+  // over the full area; the Header and chat toggle are rendered as floating
+  // overlays in that mode.
+  const COLLAPSED_LEFT_WIDTH_PX = 0;
+  const COLLAPSED_RIGHT_WIDTH_PX = 0;
   const LEFT_MIN_WIDTH_PX = 200;
   const RIGHT_MIN_WIDTH_PX = 264;
   const CENTER_MIN_WIDTH_PX = 100;
@@ -42,10 +45,10 @@ export const MainLayout = ({
   const [isResizing, setIsResizing] = useState(false);
 
   const effectiveLeftWidthPx = isLeftCollapsed
-    ? COLLAPSED_WIDTH_PX
+    ? COLLAPSED_LEFT_WIDTH_PX
     : leftWidthPx;
   const effectiveRightWidthPx = isRightCollapsed
-    ? COLLAPSED_WIDTH_PX
+    ? COLLAPSED_RIGHT_WIDTH_PX
     : rightWidthPx;
 
   const clamp = (value: number, min: number, max: number) =>
@@ -171,68 +174,103 @@ export const MainLayout = ({
   };
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden">
-      {/* Header Area */}
-      <div className="shrink-0">{header}</div>
-
-      {/* Main Content Area */}
-      <div ref={contentRef} className="flex min-h-0 flex-1">
-        {/* Left Panel */}
-        <div
-          className="shrink-0"
-          data-animate-width
-          data-resizing={isResizing ? 'true' : undefined}
-          style={{
-            width: `${effectiveLeftWidthPx}px`,
-          }}
-        >
+    <div ref={contentRef} className="flex h-full w-full overflow-hidden">
+      {/* Left Column: Header on top, Left Panel below — share the same width.
+          When collapsed the column shrinks to 0; the Header is rendered as a
+          floating overlay in the center area below. Children are kept mounted
+          but always in their expanded form so the parent's `overflow-hidden`
+          can cleanly clip them as the width animates to 0 — otherwise the
+          SidebarPanel's own collapsed 36px strip would briefly appear and
+          look like a vertical sliver pinned to the left edge. */}
+      <div
+        className="flex shrink-0 flex-col overflow-hidden"
+        data-animate-width
+        data-resizing={isResizing ? 'true' : undefined}
+        style={{
+          width: `${effectiveLeftWidthPx}px`,
+        }}
+      >
+        <div className="shrink-0">
+          {React.isValidElement(header)
+            ? React.cloneElement(header as React.ReactElement<any>, {
+                isCollapsed: false,
+                onToggle: toggleLeftPanel,
+                compact: true,
+              })
+            : header}
+        </div>
+        <div className="min-h-0 flex-1">
           {React.isValidElement(leftPanel)
             ? React.cloneElement(leftPanel as React.ReactElement<any>, {
-                isCollapsed: isLeftCollapsed,
+                isCollapsed: false,
                 onToggle: toggleLeftPanel,
               })
             : leftPanel}
         </div>
+      </div>
 
-        {/* Left Resize Handle */}
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          className={leftHandleClassName}
-          onPointerDown={onLeftHandlePointerDown}
-        >
-          <div className={resizeHandleInnerClassName} />
-        </div>
+      {/* Left Resize Handle */}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        className={leftHandleClassName}
+        onPointerDown={onLeftHandlePointerDown}
+      >
+        <div className={resizeHandleInnerClassName} />
+      </div>
 
-        {/* Center Editor */}
-        <div className="min-w-0 flex-1">{children}</div>
+      {/* Center Editor — hosts the canvas and the floating Header overlay
+          when the left panel is collapsed. The chat collapse state is
+          forwarded to children so they can render their own top-right
+          floating controls (chat toggle + settings). */}
+      <div className="relative min-w-0 flex-1">
+        {React.isValidElement(children)
+          ? React.cloneElement(children as React.ReactElement<any>, {
+              isChatCollapsed: isRightCollapsed,
+              onToggleChat: toggleRightPanel,
+            })
+          : children}
+        {isLeftCollapsed && React.isValidElement(header) && (
+          <div className="pointer-events-auto absolute top-3 left-2 z-30">
+            {React.cloneElement(header as React.ReactElement<any>, {
+              isCollapsed: true,
+              onToggle: toggleLeftPanel,
+              compact: true,
+            })}
+          </div>
+        )}
+      </div>
 
-        {/* Right Resize Handle */}
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          className={rightHandleClassName}
-          onPointerDown={onRightHandlePointerDown}
-        >
-          <div className={resizeHandleInnerClassName} />
-        </div>
+      {/* Right Resize Handle */}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        className={rightHandleClassName}
+        onPointerDown={onRightHandlePointerDown}
+      >
+        <div className={resizeHandleInnerClassName} />
+      </div>
 
-        {/* Right Panel */}
-        <div
-          className="shrink-0"
-          data-animate-width
-          data-resizing={isResizing ? 'true' : undefined}
-          style={{
-            width: `${effectiveRightWidthPx}px`,
-          }}
-        >
-          {React.isValidElement(rightPanel)
-            ? React.cloneElement(rightPanel as React.ReactElement<any>, {
-                isCollapsed: isRightCollapsed,
-                onToggle: toggleRightPanel,
-              })
-            : rightPanel}
-        </div>
+      {/* Right Panel — spans full height. When collapsed the column shrinks
+          to 0 and `overflow-hidden` clips it; the panel is always rendered
+          in its expanded form so the SidebarPanel's own collapsed strip
+          never flashes during the width animation (mirrors the left
+          column's behavior). The chat-toggle button lives as a floating
+          overlay in the center area when collapsed. */}
+      <div
+        className="shrink-0 overflow-hidden"
+        data-animate-width
+        data-resizing={isResizing ? 'true' : undefined}
+        style={{
+          width: `${effectiveRightWidthPx}px`,
+        }}
+      >
+        {React.isValidElement(rightPanel)
+          ? React.cloneElement(rightPanel as React.ReactElement<any>, {
+              isCollapsed: false,
+              onToggle: toggleRightPanel,
+            })
+          : rightPanel}
       </div>
     </div>
   );

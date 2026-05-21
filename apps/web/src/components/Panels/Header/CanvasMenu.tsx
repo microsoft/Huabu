@@ -36,10 +36,15 @@ export const CanvasMenu: React.FC = () => {
     setDraftTitle(canvasTitle);
   }, [canvasTitle]);
 
-  // Keep input width in sync with its content
+  // Keep input width in sync with its content. The +4px buffer compensates
+  // for subpixel rendering differences between <span> measurement (sizer)
+  // and how <input> lays out its text — browsers reserve a small slice for
+  // the caret that the sizer doesn't see, so without the buffer the last
+  // character is consistently clipped by `text-ellipsis` even for short
+  // titles that should fit comfortably.
   useEffect(() => {
     if (sizerRef.current && inputRef.current) {
-      inputRef.current.style.width = `${sizerRef.current.offsetWidth}px`;
+      inputRef.current.style.width = `${sizerRef.current.offsetWidth + 4}px`;
     }
   }, [draftTitle]);
 
@@ -67,18 +72,18 @@ export const CanvasMenu: React.FC = () => {
   }, [canvasId]);
 
   return (
-    <div className="flex min-w-0 items-center">
+    <div className="flex w-full min-w-0 items-center">
       {/* Hidden sizer span — mirrors input text to measure natural width */}
       <span
         ref={sizerRef}
         aria-hidden
-        className="invisible absolute px-1 text-lg font-medium whitespace-pre"
+        className="invisible absolute px-1 text-base font-medium whitespace-pre"
       >
         {draftTitle || '\u00a0'}
       </span>
       <input
         ref={inputRef}
-        className="text-fg-default focus:shadow-bottom m-0 min-w-8 bg-transparent px-1 py-1 text-lg font-medium outline-none focus:rounded-md"
+        className="text-fg-default focus:shadow-bottom m-0 max-w-full min-w-8 overflow-hidden bg-transparent px-1 py-1 text-base font-medium text-ellipsis outline-none focus:rounded-md"
         value={draftTitle}
         onChange={(e) => setDraftTitle(e.target.value)}
         onBlur={() => void commitTitle()}

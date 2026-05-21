@@ -17,7 +17,7 @@ export const ImageNode = memo(
   ({ id, data, selected }: NodeProps<ImageNodeType>) => {
     const openExpanded = useCanvasStore((s) => s.openExpanded);
 
-    const ImageToolbar = (
+    const ImageExpand = (
       <FloatingToolbar.ActionButton
         title="Open Large View"
         onClick={(e) => {
@@ -35,7 +35,7 @@ export const ImageNode = memo(
         data={data}
         type={'image'}
         selected={selected}
-        toolbar={ImageToolbar}
+        expand={ImageExpand}
         keepAspectRatio={true}
       >
         <div className="flex h-full flex-col">
@@ -50,7 +50,7 @@ export const ImageNode = memo(
               <img
                 src={resolveArtifactUrl(data.src)}
                 alt={data.label || 'Node image'}
-                className="pointer-events-none h-full w-full rounded border-0 object-contain"
+                className="pointer-events-none h-full w-full rounded-lg border-0 object-contain"
               />
             ) : (
               <div className="text-fg-subtle flex h-full w-full items-center justify-center text-sm">

@@ -124,16 +124,7 @@ export const PDFNode = memo(
     }, []);
 
     const PDFToolbar = (
-      <FloatingToolbar.Group>
-        <FloatingToolbar.ActionButton
-          title="Open Large View"
-          onClick={(e) => {
-            e.stopPropagation();
-            openExpanded(id);
-          }}
-        >
-          <Fullscreen />
-        </FloatingToolbar.ActionButton>
+      <>
         <FloatingToolbar.ActionButton title="Download" onClick={handleDownload}>
           <Download />
         </FloatingToolbar.ActionButton>
@@ -145,7 +136,19 @@ export const PDFNode = memo(
             <ImageOff />
           </FloatingToolbar.ActionButton>
         )}
-      </FloatingToolbar.Group>
+      </>
+    );
+
+    const PDFExpand = (
+      <FloatingToolbar.ActionButton
+        title="Open Large View"
+        onClick={(e) => {
+          e.stopPropagation();
+          openExpanded(id);
+        }}
+      >
+        <Fullscreen />
+      </FloatingToolbar.ActionButton>
     );
 
     return (
@@ -155,11 +158,12 @@ export const PDFNode = memo(
         type={'pdf'}
         selected={selected}
         toolbar={PDFToolbar}
+        expand={PDFExpand}
         resizable
         keepAspectRatio={false}
         className={clsx('bg-surface transition-all duration-300 ease-in-out')}
       >
-        <div className="relative flex h-full w-full flex-col overflow-hidden rounded">
+        <div className="relative flex h-full w-full flex-col overflow-hidden rounded-lg">
           {/* Render the first page off-screen to capture a thumbnail when no manual cover exists */}
           {!hasCover && src && !thumbnail && !data.artifactMissing && (
             <FirstPageThumbnail src={src} onCapture={handleThumbnailCapture} />

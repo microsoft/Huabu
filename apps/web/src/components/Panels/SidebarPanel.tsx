@@ -13,6 +13,13 @@ interface SidebarPanelProps {
   iconExpanded: React.ReactNode;
   children?: React.ReactNode;
   className?: string;
+  /**
+   * When true, skip rendering the panel's own header bar in the expanded state.
+   * Useful when the surrounding layout already hosts the collapse / title UI
+   * (e.g. the layer panel shares the top header with the app logo).
+   * The collapsed-state strip is unaffected so users can still re-expand.
+   */
+  hideHeader?: boolean;
 }
 
 export const SidebarPanel = ({
@@ -25,6 +32,7 @@ export const SidebarPanel = ({
   iconExpanded,
   children,
   className,
+  hideHeader,
 }: SidebarPanelProps) => {
   if (isCollapsed) {
     return (
@@ -52,24 +60,26 @@ export const SidebarPanel = ({
   return (
     <div className={clsx('bg-surface flex h-full flex-col', className)}>
       {/* header */}
-      <div className="border-edge-default flex h-12 shrink-0 items-center justify-between border-b px-3">
-        <div className="text-fg-muted flex min-w-0 flex-1 items-center text-sm font-semibold">
-          {tabs ? tabs : title}
+      {!hideHeader && (
+        <div className="border-edge-default flex h-12 shrink-0 items-center justify-between border-b px-3">
+          <div className="text-fg-muted flex min-w-0 flex-1 items-center text-sm font-semibold">
+            {tabs ? tabs : title}
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            {tools && (
+              <div className="text-fg-muted flex items-center">{tools}</div>
+            )}
+            <Button
+              variant="ghost"
+              iconOnly
+              onClick={onToggle}
+              title={`Collapse ${title}`}
+            >
+              {iconExpanded}
+            </Button>
+          </div>
         </div>
-        <div className="flex shrink-0 items-center gap-1">
-          {tools && (
-            <div className="text-fg-muted flex items-center">{tools}</div>
-          )}
-          <Button
-            variant="ghost"
-            iconOnly
-            onClick={onToggle}
-            title={`Collapse ${title}`}
-          >
-            {iconExpanded}
-          </Button>
-        </div>
-      </div>
+      )}
       {/* content */}
       <div className="flex-1 overflow-y-auto p-3">{children}</div>
     </div>

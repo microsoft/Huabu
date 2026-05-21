@@ -17,7 +17,7 @@ export const VideoNode = memo(
   ({ id, data, selected }: NodeProps<VideoNodeType>) => {
     const openExpanded = useCanvasStore((s) => s.openExpanded);
 
-    const VideoToolbar = (
+    const VideoExpand = (
       <FloatingToolbar.ActionButton
         title="Open Large View"
         onClick={(e) => {
@@ -35,11 +35,11 @@ export const VideoNode = memo(
         data={data}
         type={'video'}
         selected={selected}
-        toolbar={VideoToolbar}
+        expand={VideoExpand}
         keepAspectRatio={true}
       >
-        <div className="bg-fg-default/5 group flex h-full flex-col justify-center rounded border-0">
-          <div className="relative h-full w-full overflow-hidden rounded">
+        <div className="bg-fg-default/5 group flex h-full flex-col justify-center rounded-lg border-0">
+          <div className="relative h-full w-full overflow-hidden rounded-lg">
             {data?.artifactMissing ? (
               <MissingFileBanner
                 nodeId={id}
