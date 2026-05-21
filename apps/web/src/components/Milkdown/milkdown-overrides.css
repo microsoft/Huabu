@@ -4,8 +4,9 @@
    Crepe ships generous "document editor" defaults (60px ProseMirror
    padding, 16px paragraph, 42px h1, warm-beige background, Open Sans).
    That looks great in a standalone editor page but is far too heavy
-   inside our chat message card / note nodes. These overrides bring the
-   surface into parity with the legacy BlockNote treatment.
+   inside our chat message card / note nodes. These overrides tighten
+   the surface to match the compact density we use elsewhere in the
+   app.
 
    This file is imported from `createMilkdown.ts` AFTER the Crepe theme
    files, so plain selectors (same specificity as Crepe's defaults) win
@@ -135,7 +136,7 @@
   margin-top: 0.5rem;
 }
 
-/* Match BlockNote list density. */
+/* Compact list density to match surrounding chat / note typography. */
 .milkdown .ProseMirror ul li,
 .milkdown .ProseMirror ol li {
   font-size: 0.875rem;
@@ -220,9 +221,9 @@
    handle sits relative to the text column) are scoped to their own
    blocks below. The button look itself stays unified.
 
-   Sizes / colors mirror the legacy BlockNote `DragToCanvasHandleButton`
-   (`Button variant="ghost" tone="neutral" iconOnly`) so the cursor
-   model and hover affordance feel like the rest of the app:
+   Sizes / colors mirror the app's standard ghost / neutral icon button
+   (matching `Button variant="ghost" tone="neutral" iconOnly`) so the
+   cursor model and hover affordance feel like the rest of the app:
    - 20×20 square hit area (2px padding all around → 16px glyph fits
      exactly, no vertical/horizontal imbalance)
    - 16px glyph, 0.25rem radius
@@ -287,8 +288,8 @@
    grip is the only thing the user can interact with, so it owns the
    grab cursor. The shared `margin-left: 16px` above already puts the
    20px grip in the chat panel's left gutter, spilling slightly past
-   the card's outer left edge — matching the BlockNote layout where
-   the drag handle hangs outside the message body. */
+   the card's outer left edge so the drag handle hangs outside the
+   message body. */
 
 /* The first `.operation-item` is the "+ add" button (see Crepe's
    `feature/block-edit/index.js`). Hide it in preview mode. */

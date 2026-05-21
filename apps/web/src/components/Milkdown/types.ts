@@ -34,7 +34,7 @@ export interface MilkdownDecorationSpec {
  * of the editor surface.
  *
  * `MilkdownPreview` owns the drag-image lifecycle (it builds the
- * preview inside its Shadow DOM so the editor's full stylesheet stack
+ * preview in `document.body` so the editor's full stylesheet stack
  * — Crepe theme, our overrides, KaTeX — applies to the rendered image
  * exactly as it appears in the live editor). Consumers only need to
  * stash `markdown` on the dataTransfer (for the canvas drop handler);

@@ -552,7 +552,7 @@ export const NodeWrapper = memo(
                 : 'ring-info ring'
               : type === 'sketch'
                 ? ''
-                : 'ring-border hover:ring',
+                : 'ring-edge-default hover:ring',
             // Always reserve a 3px border so toggling accent on/off does
             // not shift inner content. Default border is transparent;
             // accent (or other states) override `borderColor` via style.

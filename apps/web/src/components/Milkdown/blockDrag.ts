@@ -11,8 +11,7 @@
  * The helper does NOT decide whether the drag callback fires — that's
  * controlled by the caller via `onDragStartRef`. Callers wire it up
  * inside the same effect that mounts Crepe, after the mount root has
- * been resolved (which differs between the editable editor and the
- * Shadow-DOM-wrapped preview).
+ * been resolved.
  */
 
 import type { MilkdownDragRange, MilkdownInstance } from './createMilkdown';
@@ -26,11 +25,11 @@ import type { MilkdownBlockDragEvent } from './types';
  *
  * Three correctness requirements drive the design:
  *
- *  1. **`setDragImage` must actually render it.** Chrome's drag-image
- *     rasterizer has long-standing quirks with elements that live
- *     inside a Shadow DOM (the snapshot can come out empty even when
- *     the element is otherwise correctly rendered). We therefore mount
- *     the preview in `document.body` (light DOM).
+ *  1. **`setDragImage` must actually render it.** Some browsers have
+ *     historically had quirks rasterizing elements that live inside
+ *     unusual roots (e.g. Shadow DOM in older Chromium). Mounting the
+ *     preview directly in `document.body` (light DOM) sidesteps that
+ *     class of issue and keeps behavior identical across engines.
  *
  *  2. **Editor styling must apply.** Crepe's theme, our
  *     `milkdown-overrides.css`, and the KaTeX stylesheet are all

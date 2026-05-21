@@ -1,10 +1,10 @@
 /**
- * Read-only Milkdown surface, optionally isolated in a Shadow DOM.
+ * Read-only Milkdown surface for AI message bubbles and collapsed note
+ * previews.
  *
- * Used for AI message bubbles and other read-only previews. Shadow DOM
- * isolation keeps Milkdown's CSS from leaking into the surrounding
- * page (and vice-versa) without giving up document-level styles,
- * thanks to `applySharedStyles`.
+ * The editor mounts in plain (light) DOM. All Milkdown / Crepe theme
+ * rules are scoped under `.milkdown` (see `milkdown-overrides.css`),
+ * so no extra style isolation is required around the preview surface.
  *
  * When `enableBlockDrag` is set, the editor is mounted as editable so
  * Crepe's block handle is available, but all input mutations are
@@ -19,8 +19,6 @@
 
 import { useCallback, useEffect, useRef } from 'react';
 
-import { applySharedStyles } from '@/utils/shadowStyleCache';
-
 import { attachBlockDragListeners } from './blockDrag';
 import { createMilkdown, type MilkdownInstance } from './createMilkdown';
 import { markdownEquals, normalizeMarkdown } from './markdownUtils';
@@ -29,8 +27,6 @@ import type { MilkdownBlockDragEvent } from './types';
 
 export interface MilkdownPreviewProps {
   markdown: string;
-  /** Render inside a Shadow DOM. Default `true` for style isolation. */
-  isolate?: boolean;
   className?: string;
   /**
    * Show Crepe's block drag handle and call `onBlockDragStart` when the
@@ -70,7 +66,6 @@ function shouldSwallowKey(e: React.KeyboardEvent): boolean {
 export function MilkdownPreview(props: MilkdownPreviewProps): JSX.Element {
   const {
     markdown,
-    isolate = true,
     className,
     enableBlockDrag = false,
     onBlockDragStart,
@@ -90,30 +85,10 @@ export function MilkdownPreview(props: MilkdownPreviewProps): JSX.Element {
     const container = containerRef.current;
     if (!container) return;
 
-    // Resolve the mount node. With isolation we attach a fresh Shadow
-    // DOM and let Milkdown live inside its own document-style scope.
-    let mountRoot: HTMLElement;
-    let createdShadow: ShadowRoot | null = null;
-    if (isolate) {
-      // attachShadow throws if a shadow root already exists. In React
-      // StrictMode the first effect run may have created one already
-      // (the cleanup keeps the host element). Guard with `shadowRoot`.
-      const existing = container.shadowRoot;
-      const shadow = existing ?? container.attachShadow({ mode: 'open' });
-      if (!existing) createdShadow = shadow;
-      // Clear any leftover children (e.g. from the previous mount)
-      // BEFORE re-applying styles. `applySharedStyles` may append
-      // fallback `<link>` elements for cross-origin stylesheets it
-      // could not adopt via `adoptedStyleSheets`; clearing afterwards
-      // would silently strip them.
-      while (shadow.firstChild) shadow.removeChild(shadow.firstChild);
-      applySharedStyles(shadow);
-      const inner = document.createElement('div');
-      shadow.appendChild(inner);
-      mountRoot = inner;
-    } else {
-      mountRoot = container;
-    }
+    // Milkdown mounts directly into the host container (light DOM).
+    // See the file-level comment for why Shadow DOM isolation was
+    // removed.
+    const mountRoot: HTMLElement = container;
 
     // Class hook used by `milkdown-overrides.css` to scope the compact
     // block-handle (single 18px grip, no "+ add" button) to chat-card
@@ -165,16 +140,9 @@ export function MilkdownPreview(props: MilkdownPreviewProps): JSX.Element {
       const instance = instanceRef.current;
       instanceRef.current = null;
       if (instance) void instance.destroy();
-      // Shadow roots cannot be detached from their host. We just clear
-      // children so a subsequent mount starts fresh.
-      if (createdShadow) {
-        while (createdShadow.firstChild) {
-          createdShadow.removeChild(createdShadow.firstChild);
-        }
-      }
     };
-    // Re-mount when isolation or drag mode toggles (rare, expected).
-  }, [isolate, enableBlockDrag]);
+    // Re-mount when drag mode toggles (rare, expected).
+  }, [enableBlockDrag]);
 
   useEffect(() => {
     if (markdownEquals(markdown, lastSyncedRef.current)) return;
@@ -189,8 +157,8 @@ export function MilkdownPreview(props: MilkdownPreviewProps): JSX.Element {
   }, [markdown]);
 
   // ---- Capture handlers that suppress editing when in drag-only mode ----
-  // Installed on the host div so they catch events even after they
-  // leave the Shadow DOM (events retarget at shadow boundaries).
+  // Installed on the host div so they intercept input verbs before
+  // ProseMirror sees them.
   const onBeforeInputCapture = useCallback(
     (e: React.FormEvent<HTMLDivElement>) => {
       if (!enableBlockDrag) return;

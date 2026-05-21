@@ -31,11 +31,10 @@ export const NoteNode = memo(
         undefined,
     );
 
-    // `MilkdownPreview` provides its own Shadow DOM via the `isolate`
-    // default — the wrapper here only needs to host the height
-    // measurement infrastructure and the fixed/auto layout shell. We
-    // keep a ref to the wrapper so the ResizeObserver / MutationObserver
-    // pair below can re-attach when Milkdown (re)mounts its content.
+    // The wrapper hosts the height-measurement infrastructure and the
+    // fixed/auto layout shell; `MilkdownPreview` mounts the editor
+    // directly into it (light DOM). The ResizeObserver / MutationObserver
+    // pair below re-attaches when Milkdown (re)mounts its content.
     const previewHostRef = useRef<HTMLDivElement>(null);
 
     // Latest measured rendered content height & host (visible) height.
@@ -98,11 +97,11 @@ export const NoteNode = memo(
     // own layout box never grows when content overflows — a
     // ResizeObserver on the host alone would never fire on content
     // changes. We additionally observe the host's first child (the
-    // shadow-host div that `MilkdownPreview` mounts into) and use a
+    // div that `MilkdownPreview` mounts into) and use a
     // MutationObserver to (re)attach the observer when that child
-    // appears or is replaced. `scrollHeight` reads through the Shadow
-    // DOM boundary, so we still get the intrinsic content height
-    // regardless of the encapsulation.
+    // appears or is replaced. `scrollHeight` on the host always reports
+    // the intrinsic content height, so the truncation check stays
+    // accurate even when the editor reflows internally.
     useEffect(() => {
       const host = previewHostRef.current;
       if (!host) return;
@@ -242,11 +241,11 @@ export const NoteNode = memo(
                 {/*
                   This card surface is render-only — the expanded editor
                   opened via the toolbar's Expand button is where the
-                  user actually types. `MilkdownPreview` owns its own
-                  Shadow DOM (via the default `isolate`), which keeps
-                  the Crepe + KaTeX stylesheet stack from leaking into
-                  the surrounding page (and vice-versa) without us
-                  having to thread `applySharedStyles` through manually.
+                  user actually types. `MilkdownPreview` mounts Milkdown
+                  in light DOM directly into this wrapper; Crepe +
+                  KaTeX styles are already scoped under `.milkdown` (see
+                  `milkdown-overrides.css`) so no extra isolation is
+                  required.
                 */}
                 <div
                   ref={previewHostRef}
