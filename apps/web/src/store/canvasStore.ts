@@ -71,6 +71,7 @@ import type {
   CanvasExecution,
   CanvasExecutionSource,
   CanvasNodeType,
+  CanvasViewport,
   IntentContext,
   RecentAction,
   WireCanvasNode,
@@ -263,6 +264,25 @@ type RFState = {
   onNodeResizeStart: () => void;
   rfInstance: ReactFlowInstance | null;
   setRfInstance: (instance: ReactFlowInstance | null) => void;
+
+  /**
+   * Last persisted pan + zoom of the React Flow viewport.
+   *
+   * `null` means "no saved viewport yet" — on initial load that triggers a
+   * one-shot `fitView` for backward-compat with old canvases. After the
+   * user pans or zooms, `onMoveEnd` writes the new viewport here through
+   * {@link setViewport}, which rides the standard autosave debounce so it
+   * lands in `canvas.json` as `state.viewport`. Restoring it on reopen
+   * means typical edits (drawing a sketch stroke, dropping a note) no
+   * longer trigger an auto-fit that yanks the canvas around.
+   */
+  viewport: CanvasViewport | null;
+  /**
+   * Record a new viewport. Called from `<ReactFlow onMoveEnd>` after the
+   * user finishes panning/zooming. Triggers autosave via the standard
+   * PERSISTED_KEYS diff.
+   */
+  setViewport: (viewport: CanvasViewport) => void;
 
   /**
    * Commit a user-initiated data edit. Always records an undo snapshot.
@@ -506,7 +526,7 @@ if (typeof window !== 'undefined') {
   window.addEventListener('beforeunload', flushAllCanvasEventsKeepalive);
 }
 
-const PERSISTED_KEYS = ['nodes', 'edges', 'canvasTitle'] as const;
+const PERSISTED_KEYS = ['nodes', 'edges', 'canvasTitle', 'viewport'] as const;
 type PersistedKey = (typeof PERSISTED_KEYS)[number];
 
 /**
@@ -865,13 +885,26 @@ const useCanvasStore = create<RFState>()(
         const state = response.state as {
           nodes?: Node[];
           edges?: Edge[];
+          viewport?: CanvasViewport;
         };
         canvasHistoryManager.clear();
 
         const loadedNodes = state.nodes ?? [];
+        // Sanity-check the persisted viewport so a corrupt entry can't
+        // strand the canvas at NaN/Infinity. Fall back to a one-shot
+        // fitView in that case (handled in Canvas.tsx).
+        const loadedViewport =
+          state.viewport &&
+          Number.isFinite(state.viewport.x) &&
+          Number.isFinite(state.viewport.y) &&
+          Number.isFinite(state.viewport.zoom) &&
+          state.viewport.zoom > 0
+            ? state.viewport
+            : null;
         set({
           nodes: loadedNodes,
           edges: state.edges ?? [],
+          viewport: loadedViewport,
           canvasTitle: response.title || 'Untitled',
           version: response.version,
           isLoading: false,
@@ -908,12 +941,15 @@ const useCanvasStore = create<RFState>()(
       }
       preprocessTimers.clear();
 
-      // Reset state for clean slate
+      // Reset state for clean slate. `viewport` is cleared so the new
+      // canvas's restore effect either applies its own saved viewport
+      // or, for older canvases without one, runs a one-shot fitView.
       set({
         expandedNodeId: null,
         actionHistory: [],
         collapsedFrameIds: new Set(),
         canvasNotFound: false,
+        viewport: null,
       });
       useToolStore.getState().resetForCanvasSwitch();
       useGesturePreviewStore.getState().clearFrameFitPreview();
@@ -939,11 +975,15 @@ const useCanvasStore = create<RFState>()(
       set({ isSaving: true });
       let saveSucceeded = false;
       try {
-        const { nodes, edges, version, canvasId, canvasTitle } = get();
+        const { nodes, edges, version, canvasId, canvasTitle, viewport } =
+          get();
         const response = await putCanvas(canvasId, {
           version,
           title: canvasTitle || 'Untitled',
-          state: { nodes, edges },
+          // `viewport` is persisted under `state.viewport` so reopening
+          // the canvas restores pan+zoom verbatim instead of falling
+          // back to a fitView that fights the user's edits.
+          state: viewport ? { nodes, edges, viewport } : { nodes, edges },
         });
         set({ version: response.version });
 
@@ -1473,6 +1513,23 @@ const useCanvasStore = create<RFState>()(
 
     rfInstance: null,
     setRfInstance: (instance) => set({ rfInstance: instance }),
+
+    viewport: null,
+    setViewport: (viewport) => {
+      // Skip no-op writes so passive `onMoveEnd` events (e.g. fired
+      // after a programmatic setViewport that already matches the
+      // current state) don't dirty the autosave diff.
+      const current = get().viewport;
+      if (
+        current &&
+        current.x === viewport.x &&
+        current.y === viewport.y &&
+        current.zoom === viewport.zoom
+      ) {
+        return;
+      }
+      set({ viewport });
+    },
 
     addNodes: (inputs) => {
       get().dispatchUiIntent({

@@ -99,6 +99,7 @@ export {
 export type {
   Point,
   Bounds,
+  CanvasViewport,
   LayoutStrategy,
   LayoutConfig,
   PlacementStrategy,
