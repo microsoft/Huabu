@@ -115,10 +115,4 @@ export const NodeCreateInputSchema = Type.Object({
       description: 'Parent frame id, or null for root',
     }),
   ),
-  skipAutoLayout: Type.Optional(
-    Type.Boolean({
-      description:
-        'When true, skip auto-placement so the explicit position is preserved exactly.',
-    }),
-  ),
 });

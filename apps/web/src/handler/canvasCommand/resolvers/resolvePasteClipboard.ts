@@ -140,7 +140,6 @@ export default function resolvePasteClipboard(
       position,
       ...(size && { size }),
       ...(parentId && { parentId }),
-      skipAutoLayout: true,
     });
     traceNodes.push({ id: nodeId, type: nodeType, label });
   }

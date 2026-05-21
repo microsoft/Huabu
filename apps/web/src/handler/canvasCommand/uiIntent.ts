@@ -56,9 +56,16 @@ export interface AddNodeInput {
   size?: NodeSize;
   naturalDimensions?: { width: number; height: number };
   parentId?: CanvasNodeId | null;
-  /** Top-left anchor of the new node and the point used for frame hit-testing. */
+  /**
+   * Top-left anchor of the new node and the point used for frame
+   * hit-testing.
+   *
+   * Providing `placementPoint` is a contract that the caller has chosen
+   * the node's position (drag-drop, paste, toolbar click, sketch overlay,
+   * group-into-frame, etc.). Omit it for programmatic / AI creation where
+   * the canvas should pick a slot via force-directed `placeNode`.
+   */
   placementPoint?: Point;
-  skipAutoLayout?: boolean;
 }
 
 // ---------------------------------------------------------------------------

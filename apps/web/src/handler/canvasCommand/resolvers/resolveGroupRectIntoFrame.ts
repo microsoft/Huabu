@@ -42,7 +42,6 @@ export default function resolveGroupRectIntoFrame(
               (frameNode.style as Record<string, number>)?.height ??
               intent.flowRect.height,
           },
-          skipAutoLayout: true,
         },
       ],
     });

@@ -7,7 +7,7 @@ Opinionated layouts for structured diagrams (architecture diagrams, flowcharts, 
 - The canvas uses x (right = positive) and y (down = positive) coordinates.
 - A standard node is about **400px wide** and **300px tall**. Use a gap of **~50px** between nodes.
 - Headers / labels can be narrower (≈250px wide).
-- **Always set `skipAutoLayout: true`** on every node when you supply an explicit `position`, otherwise the force-directed engine will overwrite your layout.
+- **Always set an explicit `position`** on every node in a structured layout. Positions are honoured verbatim by `CREATE_NODES`; omit `position` only when you actively want the force-directed engine to pick a slot.
 
 ## Positioning patterns
 
@@ -65,7 +65,7 @@ Determine: number of tracks (rows), nodes per track, sub-nodes per main node, re
 - Sub-nodes: `+250px below their main row`.
 - Horizontal: header at `x = 0` (text node, w=250, bold), main nodes at `x = 300, 750, 1200, 1650` (450px spacing). Sub-nodes centred horizontally below their parent.
 - Sizes: header w=250, main w=400, sub w=350.
-- Always set `skipAutoLayout: true` + explicit `position`.
+- Always set an explicit `position` on every node — it is honoured verbatim.
 
 ### Colour per track
 

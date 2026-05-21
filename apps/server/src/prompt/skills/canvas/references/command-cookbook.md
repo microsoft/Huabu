@@ -1,6 +1,6 @@
 # Command Cookbook
 
-Composed `canvas_commands` batches for common user intents. Each recipe is a single batch unless noted, and every recipe assumes the conventions in [`commands.md`](commands.md): explicit ids when later commands reference earlier creations, `skipAutoLayout: true` whenever you set positions, one batch per user intent.
+Composed `canvas_commands` batches for common user intents. Each recipe is a single batch unless noted, and every recipe assumes the conventions in [`commands.md`](commands.md): explicit ids when later commands reference earlier creations, an explicit `position` whenever you care about layout (it is honoured verbatim), one batch per user intent.
 
 > **Schema is the source of truth.** Field names below come from the `canvas_commands` schemas; this file is about _which commands to compose_, not which fields to type.
 
@@ -23,7 +23,7 @@ Goal: turn one node into a fan of related ideas.
 
 1. `read("nodes/<filename>.md")` if you need its actual content.
 2. Single batch:
-   - `CREATE_NODES` — N idea nodes with explicit ids and `skipAutoLayout: true` placed in a fan around the source. Same `style.accent` so they read as a group.
+   - `CREATE_NODES` — N idea nodes with explicit ids and explicit positions placed in a fan around the source. Same `style.accent` so they read as a group.
    - `CONNECT_NODES` — one edge per idea, source → idea. Use `direction: "forward"` if the cause→effect direction is obvious.
 3. Optional polish: `ALIGN_NODES` if the fan should sit on a clean line, then `DISTRIBUTE_NODES`.
 
@@ -44,7 +44,7 @@ Goal: take a loose group of nodes and put them in a frame with a meaningful titl
 
 1. Use `inspect_nodes({ inSameClusterAs: "<anchorId>" })` (or `inRect` if you have a region) to enumerate members and pick a bounding box.
 2. Single batch:
-   - `CREATE_NODES` — one `frame` with explicit id, `skipAutoLayout: true`, position = top-left of the bbox minus ~40px padding, size = bbox + ~80px padding. Set `data.label` to a meaningful theme name.
+   - `CREATE_NODES` — one `frame` with explicit id, position = top-left of the bbox minus ~40px padding, size = bbox + ~80px padding. Set `data.label` to a meaningful theme name.
    - `SET_NODE_PARENT` — each member → the new frame.
 3. Optional: `MERGE_NODE_DATA` to give every member the same `style.accent` for visual cohesion with the frame.
 
@@ -83,6 +83,6 @@ Single `SET_NODE_PARENT { nodeId: "<child>", parentId: null }`. Keeps the node's
 ## Anti-patterns
 
 - **Splitting a coherent intent across two batches.** Each batch is one undo step — splitting forces the user to undo twice and may cause an intermediate render flash.
-- **Forgetting `skipAutoLayout: true` on `CREATE_NODES` with positions.** The force-directed engine will overwrite the position and your layout vanishes.
+- **Omitting `position` on `CREATE_NODES` when you care about layout.** Without a `position`, the force-directed engine picks a slot and your intended geometry is lost. Always set explicit `position` for structured layouts.
 - **Inventing edge ids.** Edge ids only come from existing canvas state (via `inspect_nodes` / `inspect_edges`) or from edges you create in the same batch.
 - **Restyling via `MERGE_NODE_DATA` with `data: { style: { accent: ... } }` plus other fields you did not mean to touch.** Merge is shallow on `data` — keep the patch minimal and explicit.

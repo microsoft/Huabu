@@ -425,7 +425,6 @@ export const Canvas: React.FC<CanvasProps> = ({
         nodeType: pendingNodeType,
         placementPoint: position,
         data,
-        skipAutoLayout: true,
       });
       setPendingNodeType(null);
     },
