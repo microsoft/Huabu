@@ -336,10 +336,6 @@ type RFState = {
   /** Auto-layout: whether new nodes are automatically placed. */
   autoLayoutEnabled: boolean;
   toggleAutoLayout: () => void;
-  /** Full re-layout of all nodes (user-triggered). */
-  layoutAll: () => void;
-  /** Re-layout children of a specific frame. */
-  layoutGroup: (frameId: string) => void;
 
   moveNodeIntoFrame: (
     nodeId: string,
@@ -1722,16 +1718,6 @@ const useCanvasStore = create<RFState>()(
     autoLayoutEnabled: true,
     toggleAutoLayout: () => {
       set({ autoLayoutEnabled: !get().autoLayoutEnabled });
-    },
-    layoutAll: () => {
-      get().dispatchUiIntent({ type: 'LAYOUT_ALL' });
-      // Fit view slightly after layout so the animation is already in motion.
-      setTimeout(() => {
-        get().rfInstance?.fitView({ duration: 300, padding: 0.15 });
-      }, 50);
-    },
-    layoutGroup: (frameId) => {
-      get().dispatchUiIntent({ type: 'LAYOUT_GROUP', frameId });
     },
 
     moveNodeIntoFrame: (nodeId, frameId, reorderTarget) => {

@@ -73,11 +73,11 @@ apps/server/src/modules/agent/tools/
 3. **错误协议**：handler 失败 `throw`，pi-agent-core 包成 `isError: true` 的 toolResult；服务端 SSE bridge 提升为 `{ tool, status:'error', error }` envelope。**禁止**把 error 编码进 success JSON。
 4. **截断契约**：所有读工具返回 `count + truncated`，能廉价拿到全集时再返回 `total`；`grep` / `find` 是早退式扫描，无 `total`。
 
-### 2.4 `canvas_commands` 14 个命令
+### 2.4 `canvas_commands` 13 个命令
 
-CREATE_NODES, CREATE_QUESTION, DELETE_NODES, MERGE_NODE_DATA, SET_NODE_PARENT, DISSOLVE_FRAME, SET_NODE_GEOMETRY, REORDER_NODES, CONNECT_NODES, DISCONNECT_EDGES, SET_EDGE_STYLE, ALIGN_NODES, DISTRIBUTE_NODES, AUTO_LAYOUT。
+CREATE_NODES, CREATE_QUESTION, DELETE_NODES, MERGE_NODE_DATA, SET_NODE_PARENT, DISSOLVE_FRAME, SET_NODE_GEOMETRY, REORDER_NODES, CONNECT_NODES, DISCONNECT_EDGES, SET_EDGE_STYLE, ALIGN_NODES, DISTRIBUTE_NODES。
 
-Schema 在 [schemas/command.ts](../apps/server/src/modules/agent/tools/schemas/command.ts)，是 [`CanvasCommand`](../packages/shared/src/types/canvas/command.ts) 的 agent 子集（排除 UI-only 的 `SET_NODE_LOCKED / SET_NODE_SELECTION / SET_EXPANDED_NODE`）。详见 [canvas-command-architecture.md](./canvas-command-architecture.md)。
+Schema 在 [schemas/command.ts](../apps/server/src/modules/agent/tools/schemas/command.ts)，是 [`CanvasCommand`](../packages/shared/src/types/canvas/command.ts) 的 agent 子集（排除 UI-only 的 `SET_NODE_LOCKED / SET_NODE_SELECTION / SET_EXPANDED_NODE / CHANGE_NODE_TYPE`，以及已废弃的 `AUTO_LAYOUT`）。详见 [canvas-command-architecture.md](./canvas-command-architecture.md)。
 
 ---
 

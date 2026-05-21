@@ -4,6 +4,22 @@
 
 ---
 
+## 2026-05-24 · 下线 AUTO_LAYOUT 命令（按钮 / 快捷键 / Agent 工具）
+
+**What Changed**
+
+- 移除画布工具栏的 **⊞ 布局全部** 按钮以及 Frame 工具栏的 **Layout Children** 按钮；对应的 `Ctrl/Cmd+Shift+L` 全局快捷键一并下线。
+- `canvas_commands` 工具的允许集从 14 个命令收窄到 13 个，AI 不再能直接发出 `AUTO_LAYOUT`；用户引导文档（03 / 07 / 08）也同步删除相关行。
+- `AUTO_LAYOUT` 命令本身在 `CanvasCommand` 联合类型中保留，但已标注 `@deprecated`，并加入新增的 `DEPRECATED_CANVAS_COMMAND_TYPES` 桶，从 `AgentCanvasCommand` 中排除；执行器、change extractor、历史 `ToolMessage` 渲染分支也都保留并打上 `@deprecated`，以便历史会话和已持久化的命令仍能正常回放。
+
+**Notes**
+
+- ✨ **自动布局开关**（`Ctrl/Cmd+Shift+A` / 工具栏开关）的行为完全保留 —— 它控制的是新节点创建时的"自动放置"（fCoSE 增量布局），与已下线的"一键全图重排"是两套机制。
+- 撤销/重做不受影响；历史会话中 AI 曾经发出过 `AUTO_LAYOUT` 的工具卡片仍然显示为不可回滚的"Auto layout"条目。
+- 如果将来要把"一键重排"再上线，需要先解决 `docs/headless-executor-plan.md` 里提到的 fCoSE 服务端确定性问题（位置必须由服务端权威决定，不能依赖浏览器内非确定性算法）。
+
+---
+
 ## 2026-05-23 · 笔记 AI 修改：批量 Accept / Reject + 来源区分
 
 **What Changed**

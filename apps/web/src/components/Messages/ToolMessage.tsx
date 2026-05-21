@@ -288,6 +288,9 @@ function reconstructChangesFromCommands(
         break;
       }
       case 'AUTO_LAYOUT': {
+        // Deprecated command — retained so historical chat threads keep
+        // rendering a recognisable entry instead of falling through to
+        // the generic "Unknown command" branch.
         changes.push({
           id: `hist-${counter++}`,
           tool: 'canvas_commands',

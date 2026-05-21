@@ -503,10 +503,17 @@ function extractDistributeNodes(
   ];
 }
 
+/**
+ * @deprecated Retained for historical replay only. The `AUTO_LAYOUT` command
+ * is no longer emitted by any UI or agent entry point; this extractor stays
+ * so historical chat threads continue to render a revert affordance.
+ */
 function extractAutoLayout(
   cmd: Extract<CanvasCommand, { type: 'AUTO_LAYOUT' }>,
   nodes: Node[],
 ): CanvasChange[] {
+  // Deprecated alongside the AUTO_LAYOUT command; the extractor is
+  // retained so historical chat threads still render revert affordances.
   const scope = cmd.scope;
   const scopeNodes =
     scope.type === 'frame'

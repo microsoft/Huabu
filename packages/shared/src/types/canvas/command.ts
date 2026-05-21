@@ -147,11 +147,6 @@ export type CanvasCommand =
       nodeIds: CanvasNodeId[];
     }
   | {
-      type: 'AUTO_LAYOUT';
-      scope: CanvasAutoLayoutScope;
-      options?: CanvasAutoLayoutOptions;
-    }
-  | {
       type: 'CREATE_QUESTION';
       id?: CanvasNodeId;
       /** The question text content. */
@@ -179,6 +174,17 @@ export type CanvasCommand =
       type: 'CHANGE_NODE_TYPE';
       nodeId: CanvasNodeId;
       to: 'text' | 'note';
+    }
+  | {
+      /**
+       * @deprecated No UI button, keyboard shortcut, or agent tool surface
+       * emits this command anymore. The branch and its handler are retained
+       * only so historical chat threads and any persisted commands keep
+       * replaying. See `DEPRECATED_CANVAS_COMMAND_TYPES` below.
+       */
+      type: 'AUTO_LAYOUT';
+      scope: CanvasAutoLayoutScope;
+      options?: CanvasAutoLayoutOptions;
     };
 
 export type CanvasCommandType = CanvasCommand['type'];
@@ -197,12 +203,23 @@ export type UiOnlyCanvasCommandType =
   (typeof UI_ONLY_CANVAS_COMMAND_TYPES)[number];
 
 /**
+ * Command types that remain executable for backwards compatibility but are
+ * no longer surfaced to either the agent or the UI. New code must not emit
+ * them; the handler implementations are retained only so historical chat
+ * threads and any persisted commands keep rendering / replaying.
+ */
+export const DEPRECATED_CANVAS_COMMAND_TYPES = ['AUTO_LAYOUT'] as const;
+export type DeprecatedCanvasCommandType =
+  (typeof DEPRECATED_CANVAS_COMMAND_TYPES)[number];
+
+/**
  * Subset of CanvasCommand available to the agent.
- * Excludes UI-only commands that depend on ephemeral frontend state.
+ * Excludes UI-only commands that depend on ephemeral frontend state, plus
+ * any deprecated commands that are no longer exposed to callers.
  */
 export type AgentCanvasCommand = Exclude<
   CanvasCommand,
-  { type: UiOnlyCanvasCommandType }
+  { type: UiOnlyCanvasCommandType | DeprecatedCanvasCommandType }
 >;
 
 export type AgentCanvasCommandType = AgentCanvasCommand['type'];
@@ -229,7 +246,6 @@ export const AGENT_CANVAS_COMMAND_TYPES = [
   'SET_EDGE_STYLE',
   'ALIGN_NODES',
   'DISTRIBUTE_NODES',
-  'AUTO_LAYOUT',
   'CREATE_QUESTION',
 ] as const satisfies readonly AgentCanvasCommandType[];
 

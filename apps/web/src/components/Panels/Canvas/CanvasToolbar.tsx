@@ -3,7 +3,6 @@ import {
   Lasso,
   MousePointer2,
   Hand,
-  LayoutDashboard,
   UploadCloud,
   Link as LinkIcon,
   Sprout,
@@ -41,7 +40,6 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
   const pendingNodeType = useToolStore((s) => s.pendingNodeType);
   const setPendingNodeType = useToolStore((s) => s.setPendingNodeType);
   const setSketchDraft = useToolStore((s) => s.setSketchDraft);
-  const layoutAll = useCanvasStore((s) => s.layoutAll);
   const autoLayoutEnabled = useCanvasStore((s) => s.autoLayoutEnabled);
   const toggleAutoLayout = useCanvasStore((s) => s.toggleAutoLayout);
 
@@ -339,14 +337,6 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
         <div className="bg-edge-default mx-1 h-4 w-px" />
 
         <div className="flex items-center gap-1.5">
-          <Button
-            variant="ghost"
-            iconOnly
-            title="Auto Layout All"
-            onClick={() => layoutAll()}
-          >
-            <LayoutDashboard />
-          </Button>
           <Button
             variant="ghost"
             iconOnly
