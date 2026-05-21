@@ -3,6 +3,18 @@ import {
   isCrossCanvasArtifactUrl,
 } from '@sediment/shared';
 import {
+  COMMAND_META,
+  executeCanvasCommands,
+  computeFrameFit,
+  getAbsolutePosition as getFrameAbsolutePosition,
+  wouldUnframe,
+  wouldAutoFrame,
+  getNodeSize,
+  type AlignDirection,
+  type FrameFitResult,
+  type NestableNode,
+} from '@sediment/shared/canvas-engine';
+import {
   applyNodeChanges,
   applyEdgeChanges,
   type Node,
@@ -17,8 +29,6 @@ import {
 } from '@xyflow/react';
 import { create, type StateCreator } from 'zustand';
 
-import { COMMAND_META } from '@/handler/canvasCommand/commands';
-import { executeCanvasCommands } from '@/handler/canvasCommand/executor';
 import { runPostEffects } from '@/handler/canvasCommand/postEffects';
 import {
   preprocessNodeIfNeeded,
@@ -32,14 +42,6 @@ import {
   type UiResolverState,
 } from '@/handler/canvasCommand/uiIntent';
 import { pushAction } from '@/handler/canvasCommand/utils';
-import {
-  computeFrameFit,
-  getAbsolutePosition as getFrameAbsolutePosition,
-  wouldUnframe,
-  wouldAutoFrame,
-  type FrameFitResult,
-  type NestableNode,
-} from '@/handler/canvasCommand/utils/frame';
 import {
   applySnap,
   beginSnapSession,
@@ -60,10 +62,9 @@ import { CanvasConflictError } from '../api/canvas';
 import { toast } from '../components/Common/Toast';
 import { seedNoteFixedHeight } from '../components/Nodes/note/autoHeight';
 import { getNoteFixedHeight } from '../components/Nodes/note/heightMemory';
+import { markAiContentEdit } from '../utils/aiEditFlags';
 import { copyToClipboard } from '../utils/io/clipboard';
-import { getNodeSize } from '../utils/node/size';
 
-import type { AlignDirection } from '@/handler/canvasCommand/utils/alignment';
 import type {
   AgentChatContext,
   CanvasCommand,
@@ -735,8 +736,9 @@ const useCanvasStore = create<RFState>()(
 
     /** Execute a batch of shared CanvasCommands. Source defaults to 'ui'. */
     executeCommands: (commands, source) => {
+      const resolvedSource = source ?? 'ui';
       const execution: CanvasExecution = {
-        source: source ?? 'ui',
+        source: resolvedSource,
         commands,
       };
       const state = {
@@ -747,17 +749,42 @@ const useCanvasStore = create<RFState>()(
       };
 
       const { writeResult, commandResults, pendingEffects } =
-        executeCanvasCommands(execution, state);
+        executeCanvasCommands(execution, state, {
+          // Agent batches must always refit parent frames because the
+          // LLM cannot accurately predict rendered dimensions.
+          forceFitFrames: resolvedSource === 'agent',
+        });
 
       // Only commit if at least one command was applied.
       if (!commandResults.some((r) => r.applied)) return;
+
+      // Derive AI-edited content node IDs from agent-sourced
+      // MERGE_NODE_DATA patches so `NotePreview` can stamp
+      // `MarkdownProvenance` and distinguish AI rewrites from non-AI
+      // external updates. Pure metadata patches (label/style) are
+      // irrelevant to provenance and excluded.
+      if (resolvedSource === 'agent') {
+        for (const cmd of commands) {
+          if (cmd.type !== 'MERGE_NODE_DATA') continue;
+          for (const entry of cmd.patches) {
+            const patch = entry.patch as Record<string, unknown> | undefined;
+            if (
+              patch &&
+              typeof patch.content === 'string' &&
+              typeof entry.nodeId === 'string'
+            ) {
+              markAiContentEdit(entry.nodeId);
+            }
+          }
+        }
+      }
 
       // Guard: verify that 'caller' snapshot commands were preceded by beginGesture.
       // Skip for agent-originated commands (no UI gesture involved).
       const hasCallerSnapshot = commands.some(
         (c) => COMMAND_META[c.type].snapshot === 'caller',
       );
-      if (hasCallerSnapshot && (source ?? 'ui') !== 'agent') {
+      if (hasCallerSnapshot && resolvedSource !== 'agent') {
         if (!canvasHistoryManager.gestureSnapshotTaken) {
           console.warn(
             '[canvasStore] snapshot:"caller" command executed without beginGesture():',
@@ -777,10 +804,6 @@ const useCanvasStore = create<RFState>()(
         nodes: writeResult.nodes,
         edges: writeResult.edges,
       };
-
-      if (writeResult.expandedNodeId !== undefined) {
-        updates.expandedNodeId = writeResult.expandedNodeId;
-      }
 
       set(updates);
 
@@ -805,6 +828,11 @@ const useCanvasStore = create<RFState>()(
       const execution = resolveUiIntent(intent, uiState);
       if (execution.commands.length > 0) {
         get().executeCommands(execution.commands);
+      }
+      // Apply UI-only state mutations (e.g. expand-overlay toggle) that
+      // bypass the command pipeline.
+      if (execution.expandedNodeId !== undefined) {
+        set({ expandedNodeId: execution.expandedNodeId });
       }
       // Push trace from intent resolution to action history.
       if (execution.trace.length > 0) {

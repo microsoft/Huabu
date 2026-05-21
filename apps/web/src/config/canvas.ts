@@ -6,11 +6,15 @@
  * always align to the same visual grid.
  */
 
-/** Size (in px) of each grid cell. Matches the `<Background gap>` prop. */
-export const GRID_SIZE = 18;
+// Layout-grid primitives are owned by the shared canvas-engine so that
+// the headless executor and the web renderer agree on snapping & padding.
+export {
+  GRID_SIZE,
+  FRAME_PADDING,
+  snapToGrid,
+} from '@sediment/shared/canvas-engine';
 
-/** Default internal padding (in px) for frame nodes wrapping their children. */
-export const FRAME_PADDING = 48;
+import { GRID_SIZE } from '@sediment/shared/canvas-engine';
 
 /** Convenience tuple expected by React Flow's `snapGrid` prop. */
 export const SNAP_GRID: [number, number] = [GRID_SIZE, GRID_SIZE];
@@ -22,16 +26,6 @@ export const SNAP_GRID: [number, number] = [GRID_SIZE, GRID_SIZE];
  */
 export const MIN_ZOOM = 0.1;
 export const MAX_ZOOM = 5;
-
-/**
- * Round a coordinate to the nearest grid line.
- *
- * Used by the layout engine and alignment helpers so that programmatically
- * positioned nodes snap to the same grid the user sees.
- */
-export function snapToGrid(value: number): number {
-  return Math.round(value / GRID_SIZE) * GRID_SIZE;
-}
 
 /**
  * Sketch tool — pointer-up stroke merging (Microsoft Whiteboard /

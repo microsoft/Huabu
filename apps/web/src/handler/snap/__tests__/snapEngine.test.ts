@@ -10,8 +10,8 @@ import { describe, it, expect } from 'vitest';
 
 import { buildCandidateIndex, computeSnap } from '../snapEngine';
 
-import type { NestableNode } from '../../canvasCommand/utils/frame';
 import type { Rect, SnapOptions } from '../types';
+import type { NestableNode } from '@sediment/shared/canvas-engine';
 
 // ── Helpers ───────────────────────────────────────────────────────────
 

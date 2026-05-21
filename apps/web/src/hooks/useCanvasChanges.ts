@@ -162,9 +162,6 @@ export function snapshotAndExtractChanges(
       case 'DISTRIBUTE_NODES':
         changes.push(...extractDistributeNodes(cmd, nodes));
         break;
-      case 'AUTO_LAYOUT':
-        changes.push(...extractAutoLayout(cmd, nodes));
-        break;
       default:
         break;
     }
@@ -494,40 +491,6 @@ function extractDistributeNodes(
       id: nextChangeId(),
       tool: 'canvas_commands',
       label: `Distributed ${cmd.nodeIds.length} node(s)`,
-      revertible: revertItems.length > 0,
-      revertCommand:
-        revertItems.length > 0
-          ? { type: 'SET_NODE_GEOMETRY', items: revertItems }
-          : undefined,
-    },
-  ];
-}
-
-/**
- * @deprecated Retained for historical replay only. The `AUTO_LAYOUT` command
- * is no longer emitted by any UI or agent entry point; this extractor stays
- * so historical chat threads continue to render a revert affordance.
- */
-function extractAutoLayout(
-  cmd: Extract<CanvasCommand, { type: 'AUTO_LAYOUT' }>,
-  nodes: Node[],
-): CanvasChange[] {
-  // Deprecated alongside the AUTO_LAYOUT command; the extractor is
-  // retained so historical chat threads still render revert affordances.
-  const scope = cmd.scope;
-  const scopeNodes =
-    scope.type === 'frame'
-      ? nodes.filter((n) => n.parentId === scope.frameId)
-      : nodes;
-  const revertItems: CanvasNodeGeometryUpdate[] = scopeNodes.map((n) => ({
-    nodeId: n.id as CanvasNodeId,
-    position: { ...n.position },
-  }));
-  return [
-    {
-      id: nextChangeId(),
-      tool: 'canvas_commands',
-      label: cmd.scope.type === 'frame' ? 'Auto layout (frame)' : 'Auto layout',
       revertible: revertItems.length > 0,
       revertCommand:
         revertItems.length > 0

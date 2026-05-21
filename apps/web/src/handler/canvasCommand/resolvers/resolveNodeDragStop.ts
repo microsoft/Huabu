@@ -1,10 +1,11 @@
-import { extractNodeRef, canvasSizeFromStyle } from '../utils';
 import {
   autoFrameNodeByOverlap,
   autoUnframeNodeByNonOverlap,
   fitFrames,
   type NestableNode,
-} from '../utils/frame';
+} from '@sediment/shared/canvas-engine';
+
+import { extractNodeRef, canvasSizeFromStyle } from '../utils';
 
 import type {
   CanvasUiIntent,

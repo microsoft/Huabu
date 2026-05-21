@@ -3,7 +3,7 @@
  */
 
 import type { EdgeStyle } from './edge.js';
-import type { LayoutStrategy, Point } from './layout.js';
+import type { Point } from './layout.js';
 import type { CanvasNodeType, NodeData } from './node.js';
 import type { PrefixedId } from '../../utils/id.js';
 
@@ -39,16 +39,6 @@ export const CANVAS_ALIGN_DIRECTIONS = [
   'bottom',
 ] as const;
 export type CanvasAlignDirection = (typeof CANVAS_ALIGN_DIRECTIONS)[number];
-
-export type CanvasAutoLayoutScope =
-  | { type: 'canvas' }
-  | { type: 'frame'; frameId: CanvasNodeId };
-
-export interface CanvasAutoLayoutOptions {
-  strategy?: LayoutStrategy;
-  spacing?: Partial<NodeSize>;
-  animate?: boolean;
-}
 
 type CanvasNodeCreateInputByType<T extends CanvasNodeType> = {
   /**
@@ -160,7 +150,6 @@ export type CanvasCommand =
       parentId?: CanvasNodeId | null;
     }
   | { type: 'SET_NODE_SELECTION'; nodeIds: CanvasNodeId[] }
-  | { type: 'SET_EXPANDED_NODE'; nodeId: CanvasNodeId | null }
   | { type: 'SET_NODE_LOCKED'; items: CanvasNodeLockUpdate[] }
   | {
       /**
@@ -174,17 +163,6 @@ export type CanvasCommand =
       type: 'CHANGE_NODE_TYPE';
       nodeId: CanvasNodeId;
       to: 'text' | 'note';
-    }
-  | {
-      /**
-       * @deprecated No UI button, keyboard shortcut, or agent tool surface
-       * emits this command anymore. The branch and its handler are retained
-       * only so historical chat threads and any persisted commands keep
-       * replaying. See `DEPRECATED_CANVAS_COMMAND_TYPES` below.
-       */
-      type: 'AUTO_LAYOUT';
-      scope: CanvasAutoLayoutScope;
-      options?: CanvasAutoLayoutOptions;
     };
 
 export type CanvasCommandType = CanvasCommand['type'];
@@ -196,30 +174,18 @@ export type CanvasCommandType = CanvasCommand['type'];
 export const UI_ONLY_CANVAS_COMMAND_TYPES = [
   'SET_NODE_LOCKED',
   'SET_NODE_SELECTION',
-  'SET_EXPANDED_NODE',
   'CHANGE_NODE_TYPE',
 ] as const;
 export type UiOnlyCanvasCommandType =
   (typeof UI_ONLY_CANVAS_COMMAND_TYPES)[number];
 
 /**
- * Command types that remain executable for backwards compatibility but are
- * no longer surfaced to either the agent or the UI. New code must not emit
- * them; the handler implementations are retained only so historical chat
- * threads and any persisted commands keep rendering / replaying.
- */
-export const DEPRECATED_CANVAS_COMMAND_TYPES = ['AUTO_LAYOUT'] as const;
-export type DeprecatedCanvasCommandType =
-  (typeof DEPRECATED_CANVAS_COMMAND_TYPES)[number];
-
-/**
  * Subset of CanvasCommand available to the agent.
- * Excludes UI-only commands that depend on ephemeral frontend state, plus
- * any deprecated commands that are no longer exposed to callers.
+ * Excludes UI-only commands that depend on ephemeral frontend state.
  */
 export type AgentCanvasCommand = Exclude<
   CanvasCommand,
-  { type: UiOnlyCanvasCommandType | DeprecatedCanvasCommandType }
+  { type: UiOnlyCanvasCommandType }
 >;
 
 export type AgentCanvasCommandType = AgentCanvasCommand['type'];

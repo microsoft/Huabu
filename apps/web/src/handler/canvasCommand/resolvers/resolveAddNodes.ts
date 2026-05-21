@@ -11,8 +11,7 @@ import {
   type CanvasNodeType,
   type NodeSize,
 } from '@sediment/shared';
-
-import { getNodeDefaultSize } from '@/config/nodeSizes';
+import { getNodeDefaultSize } from '@sediment/shared/canvas-engine';
 
 import { resolveFrameAtPoint } from '../utils';
 
@@ -22,7 +21,7 @@ import type {
   UiIntentResolution,
   UiResolverState,
 } from '../uiIntent';
-import type { NestableNode } from '../utils/frame';
+import type { NestableNode } from '@sediment/shared/canvas-engine';
 
 // ---------------------------------------------------------------------------
 // Sizing helpers

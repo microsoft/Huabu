@@ -3,30 +3,31 @@
  * a command batch and the store has committed the new state.
  */
 
-import { LAYOUT_ANIMATION_DURATION_MS } from '@/handler/autoLayout/applier';
+import {
+  LAYOUT_ANIMATION_DURATION_MS,
+  fitFrames,
+  rerouteAllEdges,
+  type NestableNode,
+  type PendingEffects,
+} from '@sediment/shared/canvas-engine';
+
 import { canvasHistoryManager } from '@/store/canvasHistoryManager';
 
-import { rerouteAllEdges } from './utils/edge';
-import { fitFrames, type NestableNode } from './utils/frame';
-
-import type { CanvasEffectCallbacks } from './runtime';
 import type { Node, Edge } from '@xyflow/react';
 
-/** Accumulated side-effect requests collected during a batch execution. */
-export interface PendingEffects {
-  /** Nodes that need preprocessing (ingestion, label resolution, or both). */
-  preprocessNodes: Node[];
-  /** Node IDs that were deleted and need server-side tracking. */
-  deletedNodeIds: string[];
-  /** Whether layout animation CSS transitions need cleanup after animation. */
-  needsTransitionCleanup: boolean;
-  /**
-   * Frame IDs to re-fit after the next render cycle. Used when a
-   * command (e.g. `SET_NODE_GEOMETRY` clearing a pinned height) leaves
-   * a child node whose new content height is only known once the DOM
-   * has reflowed. De-duplicated by `runPostEffects`.
-   */
-  deferredFitFrameIds: string[];
+export type { PendingEffects };
+
+/**
+ * Post-commit side-effect callbacks provided by the host (web store).
+ *
+ * Lives in the web layer because it describes a host concern (the
+ * debounced HTTP fetch that triggers preprocessing in the browser),
+ * not engine semantics. The shared canvas-engine never invokes these
+ * callbacks — it only emits `PendingEffects`, which `runPostEffects`
+ * drains here using the host-provided callbacks.
+ */
+export interface CanvasEffectCallbacks {
+  triggerPreprocessing: (node: Node) => void;
 }
 
 /**
@@ -90,7 +91,6 @@ export function runPostEffects(
 
 /**
  * Schedule cleanup of CSS transition styles after a layout animation completes.
- * Extracted from the duplicated setTimeout blocks in layoutAll / layoutGroup.
  */
 export function scheduleTransitionCleanup(
   getNodes: () => Node[],

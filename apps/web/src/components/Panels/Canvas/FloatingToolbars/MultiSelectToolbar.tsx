@@ -3,6 +3,10 @@ import {
   ACCENT_PICKER_OPTIONS,
   ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT,
 } from '@sediment/shared';
+import {
+  getSelectionBounds,
+  getNodeSize,
+} from '@sediment/shared/canvas-engine';
 import { Sparkles, Trash2 } from 'lucide-react';
 import { useCallback, useMemo } from 'react';
 
@@ -11,12 +15,10 @@ import {
   FloatingToolbar,
   FLOATING_TOOLBAR_CLASS,
 } from '@/components/Common/FloatingToolbar';
-import { getSelectionBounds } from '@/handler/canvasCommand/utils/bounds';
 import { useIsNotMouse } from '@/hooks/useInputMode';
 import useCanvasStore from '@/store/canvasStore';
 import { useIntentStore } from '@/store/intentStore';
 import { resolveGeometryEdit } from '@/utils/node/geometry';
-import { getNodeSize } from '@/utils/node/size';
 
 import type { CanvasNode } from '@/components/Nodes/types';
 import type { CanvasNodeId } from '@sediment/shared';

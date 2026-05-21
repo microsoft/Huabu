@@ -3,9 +3,9 @@ import {
   type CanvasCommand,
   type CanvasNodeId,
 } from '@sediment/shared';
+import { frameNodes, type NestableNode } from '@sediment/shared/canvas-engine';
 
 import { getSelectedNodeIds } from '../utils';
-import { frameNodes, type NestableNode } from '../utils/frame';
 
 import type {
   CanvasUiIntent,

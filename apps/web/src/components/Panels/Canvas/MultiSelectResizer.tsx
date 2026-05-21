@@ -1,15 +1,15 @@
+import {
+  getSelectionBounds,
+  getNodeSize,
+  getAbsolutePosition,
+  type NestableNode,
+} from '@sediment/shared/canvas-engine';
 import { useStore, useStoreApi, useViewport } from '@xyflow/react';
 import { useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
-import { getSelectionBounds } from '@/handler/canvasCommand/utils/bounds';
-import {
-  getAbsolutePosition,
-  type NestableNode,
-} from '@/handler/canvasCommand/utils/frame';
 import { useIsTouch } from '@/hooks/useInputMode.ts';
 import useCanvasStore from '@/store/canvasStore';
-import { getNodeSize } from '@/utils/node/size';
 
 import type { CanvasNode } from '@/components/Nodes/types';
 

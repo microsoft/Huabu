@@ -25,14 +25,13 @@
  * parent-relative when a node is inside a frame).
  */
 
-import { getNodeSize } from '@/utils/node/size';
-
 import {
+  getNodeSize,
   createAbsolutePositionGetter,
   getDescendantIds,
   indexById,
   type NestableNode,
-} from '../canvasCommand/utils/frame';
+} from '@sediment/shared/canvas-engine';
 
 import type {
   CandidateLine,
