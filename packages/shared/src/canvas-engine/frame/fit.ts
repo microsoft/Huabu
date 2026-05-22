@@ -22,9 +22,9 @@ import type { XYPosition } from '@xyflow/react';
 export type FitFrameOptions = {
   /** Padding around the bounding box of children. Default: FRAME_PADDING (48). */
   padding?: number;
-  /** Minimum frame width. Default: 240. */
+  /** Minimum frame width. Default: 20. */
   minWidth?: number;
-  /** Minimum frame height. Default: 160. */
+  /** Minimum frame height. Default: 20. */
   minHeight?: number;
   /** Children to exclude from the bounding-box calculation (e.g. nodes about to leave). */
   excludeNodeIds?: ReadonlySet<string>;
