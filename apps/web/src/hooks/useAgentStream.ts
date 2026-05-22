@@ -336,7 +336,20 @@ function applyCanvasCommandsFromToolResult(toolResult: string | undefined): {
 
 interface StreamEventContext {
   assistantId: string;
-  toolQueue: string[];
+  /**
+   * Pending tool-start message IDs awaiting their `tool_result`.
+   *
+   * Primary lookup is by `toolCallId` (a stable per-call identifier
+   * the server forwards from the LLM tool-call protocol). The
+   * `fifo` array preserves emission order as a fallback for older
+   * servers that don't yet send `toolCallId` — without it, parallel
+   * tool execution could swap results onto the wrong message bubble
+   * because completion order ≠ start order.
+   */
+  toolQueue: {
+    byCallId: Map<string, string>;
+    fifo: string[];
+  };
   /** Called after canvas_commands are applied. */
   onCanvasCommands?: (
     commands: CanvasCommand[],
@@ -375,7 +388,10 @@ export function handleStreamEvent(
     }
   } else if (event.type === 'tool_start') {
     const msgId = createId('tool');
-    ctx.toolQueue.push(msgId);
+    if (event.data.toolCallId) {
+      ctx.toolQueue.byCallId.set(event.data.toolCallId, msgId);
+    }
+    ctx.toolQueue.fifo.push(msgId);
     addMessage({
       id: msgId,
       role: 'tool',
@@ -393,8 +409,23 @@ export function handleStreamEvent(
     );
     if (!toolResponse) return;
 
-    // Merge original tool args with the result data
-    const pendingMsgId = ctx.toolQueue.shift();
+    // Resolve the pending tool message. Prefer toolCallId so parallel
+    // tool execution stays correct (completion order ≠ start order).
+    // Fall back to FIFO only when toolCallId is absent (older servers
+    // / synthetic events in tests).
+    let pendingMsgId: string | undefined;
+    const callId = event.data.toolCallId;
+    if (callId && ctx.toolQueue.byCallId.has(callId)) {
+      pendingMsgId = ctx.toolQueue.byCallId.get(callId);
+      ctx.toolQueue.byCallId.delete(callId);
+      if (pendingMsgId) {
+        const idx = ctx.toolQueue.fifo.indexOf(pendingMsgId);
+        if (idx !== -1) ctx.toolQueue.fifo.splice(idx, 1);
+      }
+    } else {
+      pendingMsgId = ctx.toolQueue.fifo.shift();
+    }
+
     let finalResponse = toolResponse;
     if (pendingMsgId) {
       const existingMsg = useChatStore
@@ -596,7 +627,10 @@ export function useAgentStream(): UseAgentStreamReturn {
       const assistantId = createId('message');
       assistantIdRef.current = assistantId;
 
-      const toolMsgQueue: string[] = [];
+      const toolMsgQueue: StreamEventContext['toolQueue'] = {
+        byCallId: new Map<string, string>(),
+        fifo: [],
+      };
 
       // Guard: ensure only one of onError / catch adds an error status
       let errorHandled = false;

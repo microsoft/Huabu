@@ -33,12 +33,25 @@ export interface AgentThinkingDeltaEventData {
 
 /** `event: tool_start` — model decided to call a tool. */
 export interface AgentToolStartEventData {
+  /**
+   * Stable per-call identifier supplied by the LLM tool-call protocol.
+   * Pairs a `tool_start` with its eventual `tool_result` even when
+   * tools execute in parallel and complete out of declaration order.
+   * Optional for backward compatibility with older server builds.
+   */
+  toolCallId?: string;
   toolName: string;
   toolArgs: Record<string, unknown>;
 }
 
 /** `event: tool_result` — server finished executing the tool. */
 export interface AgentToolResultEventData {
+  /**
+   * Stable per-call identifier matching the `toolCallId` on the
+   * corresponding `tool_start` event. Optional for backward
+   * compatibility with older server builds.
+   */
+  toolCallId?: string;
   toolName: string;
   /** Raw tool result payload (usually a JSON-stringified value). */
   toolResult: string;

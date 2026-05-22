@@ -250,6 +250,7 @@ export async function* runAgent(
           yield {
             type: 'tool_start',
             data: {
+              toolCallId: event.toolCallId,
               toolName: event.toolName,
               toolArgs: (event.args ?? {}) as Record<string, unknown>,
             },
@@ -281,7 +282,11 @@ export async function* runAgent(
           }
           yield {
             type: 'tool_result',
-            data: { toolName: event.toolName, toolResult: payload },
+            data: {
+              toolCallId: event.toolCallId,
+              toolName: event.toolName,
+              toolResult: payload,
+            },
           };
           break;
         }
