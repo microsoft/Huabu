@@ -56,6 +56,7 @@ import { createNodeContentQueue } from './canvasStore/save/nodeContentQueue';
 import { createPreprocessQueue } from './canvasStore/save/preprocessQueue';
 import { shouldScheduleStructureSave } from './canvasStore/save/structureDirtyDetector';
 import { createStructureScheduler } from './canvasStore/save/structureScheduler';
+import { createUnloadFlush } from './canvasStore/save/unloadFlush';
 import { useGesturePreviewStore } from './gesturePreviewStore';
 import { useToolStore } from './toolStore';
 import { getCanvas, putCanvas } from '../api';
@@ -538,12 +539,17 @@ const nodeContentQueue = createNodeContentQueue({
 
 // Module-scoped singleton listener: intentionally registered once at module
 // load time and never removed. Safe for this app's single-page lifecycle.
+// All keepalive drains live in `./canvasStore/save/unloadFlush.ts`.
 if (typeof window !== 'undefined') {
-  window.addEventListener('beforeunload', () =>
-    canvasEvents.flushAllKeepalive(),
-  );
-  window.addEventListener('beforeunload', () =>
-    nodeContentQueue.flushAllKeepalive(),
+  window.addEventListener(
+    'beforeunload',
+    createUnloadFlush({
+      events: canvasEvents,
+      nodeContent: nodeContentQueue,
+      preprocess: preprocessQueue,
+      structure: structureScheduler,
+      getSaveCanvas: () => useCanvasStore.getState().saveCanvas,
+    }),
   );
 }
 
@@ -2035,39 +2041,5 @@ const useCanvasStore = create<RFState>()(
     },
   })),
 );
-
-/**
- * Flush only the work that hasn't reached the server yet when the page
- * is about to be unloaded. We deliberately do NOT unconditionally
- * re-send the canvas structure here — every store mutation already
- * schedules a debounced `saveCanvas`, so unload only needs to drain
- * the trailing tail of pending debounces (preprocess + structure).
- * Per-node content debounces are drained by their own keepalive
- * listener (`nodeContentQueue.flushAllKeepalive`); the canvas event
- * buffer is drained by `canvasEvents.flushAllKeepalive()`.
- */
-function flushOnUnload(): void {
-  const state = useCanvasStore.getState();
-
-  // 1. Drain pending preprocess debounces. The queue owns the
-  //    keepalive POST per pending node (with `trigger: 'flush'`)
-  //    so AI label/summary work the user just triggered isn't lost
-  //    on close.
-  preprocessQueue.flushKeepalive();
-
-  // 2. Drain a pending structure-save debounce, if any.
-  //    `cancelPending()` returns `false` when no timer was queued,
-  //    meaning the latest structural state is already on the wire
-  //    (or never differed from what's on disk), so we skip the PUT
-  //    entirely — no more empty diffs bumping `version` on every
-  //    page close.
-  if (structureScheduler.cancelPending()) {
-    void state.saveCanvas({ keepalive: true }).catch(() => undefined);
-  }
-}
-
-if (typeof window !== 'undefined') {
-  window.addEventListener('beforeunload', flushOnUnload);
-}
 
 export default useCanvasStore;
