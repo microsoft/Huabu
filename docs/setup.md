@@ -301,3 +301,64 @@ pnpm -F "./apps/web" dev
 pnpm -F @sediment/server dev
 pnpm -F @sediment/web dev
 ```
+
+---
+
+## 7. External agent (ACP client) 开发依赖
+
+Sediment 通过 [agentlet](https://github.com/hai-team/agentlet) 接入外部 ACP agent（claude / cursor-cli / copilot-cli 等）。
+agentlet 暂未发布到 npm，v1 用 pnpm 的 `link:` 协议直接消费本地仓库。
+详细架构见 [huabu-acp-client-plan.md](./huabu-acp-client-plan.md)。
+
+### 7.1 仓库布局约定
+
+```
+~/
+├── Sediment/    # 本仓库
+└── agentlet/    # 必须与 Sediment 同级克隆
+```
+
+`apps/server/package.json` 里写死的是相对路径
+`link:../../../agentlet/packages/server`，所以 agentlet 必须放在上面这个位置。
+
+### 7.2 首次准备
+
+```bash
+# 1) 克隆并构建 agentlet（必须 build，因为 link: 指向 dist/）
+git clone git@github.com:hai-team/agentlet.git ~/agentlet
+cd ~/agentlet && pnpm install && pnpm build
+
+# 2) Sediment 安装时 pnpm 自动 symlink 到 ../../../agentlet/packages/*
+cd ~/Sediment && pnpm install
+```
+
+### 7.3 改 agentlet 源码后
+
+```bash
+cd ~/agentlet && pnpm build    # 只需 rebuild dist/，Sediment 不用重装
+```
+
+`tsx watch` 不会自动检测 symlink 外的文件变更——改完 agentlet 之后手动重启 Sediment server。
+
+### 7.4 启用 ACP bridge
+
+默认 **关闭**，避免影响普通开发。设置环境变量打开：
+
+```bash
+SEDIMENT_ENABLE_ACP=1 pnpm -F @sediment/server dev
+```
+
+启用后 Sediment server 会在 `ws://<host>:<port>/api/acp/agent` 监听 agentlet 连接。
+Phase 0 的 token 验证是 placeholder（任何非空 token 都通过）——真正的 token store
+在 Phase 3 落地。
+
+### 7.5 等 agentlet 发布到 npm 之后
+
+把 `apps/server/package.json` 里的两行：
+
+```jsonc
+"@agentlet/protocol": "link:../../../agentlet/packages/protocol",
+"@agentlet/server": "link:../../../agentlet/packages/server",
+```
+
+改成正式版本号即可，其他代码无侵入。
