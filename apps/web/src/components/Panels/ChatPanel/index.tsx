@@ -4,12 +4,13 @@ import {
   PanelRightOpen,
   Plus,
 } from 'lucide-react';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 
 import { Button } from '@/components/Common/Button';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import { useIntentStore } from '@/store/intentStore';
+import { useLLMStore } from '@/store/llmStore';
 
 import { SidebarPanel } from '../SidebarPanel';
 import { ChatInput } from './ChatInput';
@@ -41,6 +42,10 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const updateMessage = useChatStore((state) => state.updateMessage);
   const clearMessages = useChatStore((state) => state.clearMessages);
   const canvasId = useCanvasStore((state) => state.canvasId);
+  const llmConfig = useLLMStore((state) => state.config);
+  const llmModels = useLLMStore((state) => state.models);
+  const llmLoading = useLLMStore((state) => state.loading);
+  const llmInit = useLLMStore((state) => state.init);
 
   // Question thread replay mode
   const viewingQuestionThread = useChatStore((s) => s.viewingQuestionThread);
@@ -54,6 +59,25 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const sketchMessages = useSketchClusterMessages(
     viewingSketchCluster?.clusterId ?? null,
   );
+
+  useEffect(() => {
+    if (!llmConfig && !llmLoading) {
+      void llmInit();
+    }
+  }, [llmConfig, llmLoading, llmInit]);
+
+  const activeModelName = useMemo(() => {
+    const activeModelId = llmConfig?.model?.trim();
+    if (!activeModelId) return '';
+    const matchedModel = llmModels.find((m) => m.id === activeModelId);
+    return matchedModel?.name?.trim() || activeModelId;
+  }, [llmConfig?.model, llmModels]);
+
+  const panelTitle = useMemo(() => {
+    if (viewingSketchCluster) return 'Sketch Recognition';
+    if (viewingQuestionThread) return 'Question Replay';
+    return activeModelName ? `Chat with ${activeModelName}` : 'Chat';
+  }, [activeModelName, viewingQuestionThread, viewingSketchCluster]);
 
   // Register intent callback — when user selects an intent in the popover,
   // it's sent here and executed as an agent chat message.
@@ -108,12 +132,11 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
 
   return (
     <SidebarPanel
-      title={
-        viewingSketchCluster
-          ? 'Sketch Recognition'
-          : viewingQuestionThread
-            ? 'Question Replay'
-            : 'Chat'
+      title={panelTitle}
+      tabs={
+        <span className="block min-w-0 flex-1 truncate" title={panelTitle}>
+          {panelTitle}
+        </span>
       }
       isCollapsed={isCollapsed}
       onToggle={onToggle}
