@@ -5,6 +5,8 @@
  * from the outputs of all previous stages.
  */
 
+import { normalizeForCompare } from '../../storage/naming.js';
+
 import type {
   Capability,
   NodeContentKind,
@@ -26,15 +28,37 @@ export function project(
 
   // Apply suggested label from enrich or extract stage, but only when the
   // user has not manually set the label.
-  // Prefer extracted title (e.g. HTML <title>), fallback to LLM-generated label.
+  //
+  // Prefer the post-dedup label from the Persist stage when available:
+  // `writeNode` returns the actually-on-disk label (e.g. "Huabu (3)" when
+  // another node already owns "Huabu"). Surfacing that as the suggestion
+  // means the client applies the final form in one step, instead of
+  // briefly rendering the un-deduped base ("Huabu") and then snapping to
+  // the deduped form once the next content-save round-trips. For nodes
+  // that skip Persist (image, frame, …) fall back to the raw extracted /
+  // enriched label.
   const snapshotLabelSource = request.snapshot.labelSource as
     | string
     | undefined;
   if (snapshotLabelSource !== 'user' && snapshotLabelSource !== 'agent') {
-    const autoLabel = ctx.extracted?.title ?? ctx.enriched?.suggestedLabel;
+    const rawAutoLabel = ctx.extracted?.title ?? ctx.enriched?.suggestedLabel;
+    const autoLabel = ctx.persisted?.persistedLabel ?? rawAutoLabel;
     if (autoLabel) {
-      patch.label = autoLabel;
-      patch.labelSource = 'auto';
+      // Skip when the suggestion already matches the snapshot label
+      // (case-insensitive, NFC-normalized to match `dedupeName`'s
+      // own comparison key). This avoids a redundant `patch.label`
+      // round-trip on every preprocess pass for stable nodes.
+      const snapshotLabel =
+        typeof request.snapshot.title === 'string'
+          ? request.snapshot.title
+          : '';
+      const isSame =
+        snapshotLabel !== '' &&
+        normalizeForCompare(snapshotLabel) === normalizeForCompare(autoLabel);
+      if (!isSame) {
+        patch.label = autoLabel;
+        patch.labelSource = 'auto';
+      }
     }
   }
 

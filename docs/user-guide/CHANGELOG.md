@@ -4,6 +4,35 @@
 
 ---
 
+## 2026-05-25 · 优化：画布视口（pan / zoom）改为按标签页存储，不再触发结构保存
+
+**What Changed**
+
+- 画布的平移 + 缩放（viewport）不再持久化到服务端 `canvas.json`，改为写入当前浏览器标签页的 `sessionStorage`（key 形如 `sediment.viewport.<canvasId>`）。同一画布在不同标签页 / 不同设备里可以各自滚到不同位置，互不打架。
+- 同时把 `viewport` 从结构 autosave 的 diff 集合里移除。之前每次 `onMoveEnd`（包括编辑 note 时编辑器内部滚动、frame 子节点尺寸 settling 触发的隐式 pan 等）都会跑一次 `PUT /api/canvas/:canvasId`，bump 一次 canvas `version`，还可能跟 agent 写入抢版本号；现在 pan / zoom 完全不进结构 PUT。
+
+**Notes**
+
+- 旧画布 `canvas.json` 里残留的 `state.viewport` 字段在下次结构保存时会被自然覆盖丢弃；本次发布前那一次 viewport 仍会作为新标签页打开画布时的一次性回落，避免你"第一次打开就被强制 fitView"。
+- 因为 sessionStorage 是按标签页隔离的，**关闭标签页就会丢失当前画布的 pan / zoom**。如果你重度依赖"上次离开时的视图"，可以让 issue 反馈，未来可以提供切换到 localStorage 的选项。
+- 这也顺便修复了用户反馈的"编辑 note 时网络面板里看到 PUT /api/canvas 被反复发出"的现象 —— 那条请求几乎都是被 viewport 自动保存触发的。
+
+---
+
+## 2026-05-25 · 修复：note 节点 label 在「base 名」与「带 (N) 后缀的去重名」之间高频抖动
+
+**What Changed**
+
+- 服务端的预处理流水线 `Persist → Project` 现在会把 `writeNode` 真正落盘时使用的最终文件名（含 ` (2)` / ` (3)` 等去重后缀）回传给客户端作为 `suggestedLabel`，而不是把 `extract / enrich` 阶段产出的"原始 base 名"再次推回前端。
+- 同一画布上若已存在同名节点，新建/重命名为该名字的节点会在一次预处理回合内就直接显示最终的 `Foo (2)`，而不是先短暂显示 `Foo`、紧接着又被服务端 dedup 反推成 `Foo (2)` 这样的"两步抖动"。
+
+**Notes**
+
+- 用户视角：高频自动重命名抖动消失。如果你之前看到节点标题在 `Foo` 和 `Foo (2)` 之间来回闪烁，这次会一次到位。
+- 没有数据迁移成本，旧 canvas.json 不需要改动；行为差异只发生在新一轮预处理触发后。
+
+---
+
 ## 2026-05-25 · 优化：拖动节点 / AI 入场动画不再触发结构保存调度
 
 **What Changed**

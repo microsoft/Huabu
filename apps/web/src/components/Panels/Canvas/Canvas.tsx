@@ -669,8 +669,9 @@ export const Canvas: React.FC<CanvasProps> = ({
           setRfInstance(instance);
         }}
         onMoveEnd={(_event, viewport) => {
-          // Persist pan/zoom so reopening the canvas lands the user in
-          // the same spot. Rides the standard 1s autosave debounce.
+          // Mirror pan/zoom into sessionStorage (per tab, per canvas)
+          // so a refresh restores the same view. Does NOT participate
+          // in the structure autosave.
           setViewport(viewport);
         }}
         onPaneClick={handlePaneClick}

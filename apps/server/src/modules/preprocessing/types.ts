@@ -225,6 +225,15 @@ export interface PersistResult {
   placeholder?: boolean;
   /** True when persistence was skipped (e.g. image node). */
   skipped?: boolean;
+  /**
+   * Final on-disk label after `writeNode`'s dedup pass — mirrors
+   * `RenameResult.label` from `canvas-store.ts`. When another node
+   * already owns the desired filename, this is the suffixed form
+   * (e.g. `"Huabu (2)"`). Project stage prefers this over the raw
+   * extracted / enriched suggestion so the client never momentarily
+   * renders the un-deduped base label.
+   */
+  persistedLabel?: string;
 }
 
 // ---------------------------------------------------------------------------
