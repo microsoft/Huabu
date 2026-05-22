@@ -29,8 +29,12 @@ export interface CommandHandlerResult {
   reason?: CanvasCommandFailureReason;
   nodes: Node[];
   edges: Edge[];
-  /** Nodes that need preprocessing after commit. */
-  preprocessNodes?: Node[];
+  /**
+   * Nodes created or mutated by this command — forwarded to the host
+   * as candidates for preprocessing. The engine never filters by
+   * node type / watched fields; that's the server's job.
+   */
+  mutatedNodes?: Node[];
   /** Node IDs that were deleted and need server-side tracking. */
   deletedNodeIds?: string[];
   /**

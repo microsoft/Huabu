@@ -82,7 +82,7 @@ export function executeCanvasCommands(
   // Mutable accumulators — built up as commands are processed.
   const commandResults: CanvasCommandResult[] = [];
   const pendingEffects: PendingEffects = {
-    preprocessNodes: [],
+    mutatedNodes: [],
     deletedNodeIds: [],
     contentEditedNodeIds: [],
     needsTransitionCleanup: false,
@@ -141,8 +141,8 @@ export function executeCanvasCommands(
       currentEdges = result.edges;
 
       // Collect pending effects.
-      if (result.preprocessNodes) {
-        pendingEffects.preprocessNodes.push(...result.preprocessNodes);
+      if (result.mutatedNodes) {
+        pendingEffects.mutatedNodes.push(...result.mutatedNodes);
       }
       if (result.deletedNodeIds) {
         pendingEffects.deletedNodeIds.push(...result.deletedNodeIds);

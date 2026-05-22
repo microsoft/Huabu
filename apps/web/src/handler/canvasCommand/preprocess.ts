@@ -3,25 +3,17 @@
  *
  * ALL node types (note/text/web/pdf/image/frame) flow through the single
  * POST /:canvasId/nodes/:nodeId/preprocess endpoint. The server pipeline
- * decides which stages to execute based on the node profile.
+ * decides which stages to execute based on the node profile — the
+ * client no longer maintains its own "which types need preprocessing"
+ * whitelist or watched-field comparison (those duplicated the server's
+ * `profiles` registry and tended to drift).
  *
  * This module replaces both the old `ingest.ts` and `resolveLabel.ts`.
  */
 
-import {
-  needsPreprocessing,
-  shouldPreprocessOnUpdate,
-} from '@sediment/shared/canvas-engine';
-
 import { preprocessNode } from '@/api/canvas';
 
 import type { Node } from '@xyflow/react';
-
-// Re-export the pure predicates from the shared canvas-engine so the web
-// and engine agree on which node types (and which field changes) require
-// preprocessing.
-
-export { needsPreprocessing, shouldPreprocessOnUpdate };
 
 // Re-export the ingestion status types (unchanged interface for canvasStore)
 export type NodeIngestionStatus = 'pending' | 'success' | 'error';
@@ -98,26 +90,6 @@ export async function preprocessNodeIfNeeded({
   patchNodeSilent,
 }: PreprocessHelperDeps): Promise<void> {
   const nodeType = node.type ?? '';
-  if (!needsPreprocessing(nodeType)) return;
-
-  const nodeData = node.data as Record<string, unknown> | undefined;
-
-  // For frame nodes: skip if there are no meaningful child labels.
-  if (nodeType === 'frame') {
-    const children = getChildNodes(node.id);
-    const hasLabels = children.some((c) => {
-      const cData = c.data as Record<string, unknown> | undefined;
-      const label = typeof cData?.label === 'string' ? cData.label : '';
-      return label.trim().length > 0;
-    });
-    if (!hasLabels) return;
-  }
-
-  // For image nodes: skip if there is no src.
-  if (nodeType === 'image') {
-    const src = typeof nodeData?.src === 'string' ? nodeData.src : '';
-    if (!src) return;
-  }
 
   setNodeIngestion(node.id, { status: 'pending', updatedAt: Date.now() });
 

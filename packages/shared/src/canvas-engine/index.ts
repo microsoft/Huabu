@@ -25,9 +25,6 @@ export type {
   PendingEffects,
 } from './runtime.js';
 
-// ── Pure preprocessing predicates ────────────────────────────────────────
-export { needsPreprocessing, shouldPreprocessOnUpdate } from './preprocess.js';
-
 // ── Shared post-commit cleanups (host-agnostic) ───────────────────────────
 export {
   applySharedPostEffects,

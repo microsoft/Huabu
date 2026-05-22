@@ -1,7 +1,6 @@
+import { noop, type CommandDefinition } from './types.js';
 import { createId, type CanvasCommand } from '../../index.js';
 import { placeNode } from '../autoLayout/index.js';
-import { needsPreprocessing } from '../preprocess.js';
-import { noop, type CommandDefinition } from './types.js';
 import { normalizeTreeOrder, type NestableNode } from '../utils/frame.js';
 import { deduplicateLabel, generateNextLabel } from '../utils/labels.js';
 import { getNodeDefaultSize } from '../utils/nodeSizes.js';
@@ -41,7 +40,9 @@ const createNodes: CommandDefinition<Cmd> = {
       (n) => n.data?.label as string | undefined,
     );
     const newNodes: Node[] = [];
-    const preprocessNodes: Node[] = [];
+    // Parent frames whose group label may need re-resolution because a
+    // new child was added. The server decides whether to actually run.
+    const affectedParentFrames: Node[] = [];
 
     for (const input of cmd.nodes) {
       const nodeId = input.id ?? createId('node');
@@ -126,9 +127,9 @@ const createNodes: CommandDefinition<Cmd> = {
         const parentFrame = state.nodes.find((n) => n.id === input.parentId);
         if (
           parentFrame &&
-          !preprocessNodes.some((p) => p.id === parentFrame.id)
+          !affectedParentFrames.some((p) => p.id === parentFrame.id)
         ) {
-          preprocessNodes.push(parentFrame);
+          affectedParentFrames.push(parentFrame);
         }
       }
 
@@ -187,12 +188,10 @@ const createNodes: CommandDefinition<Cmd> = {
       applied: true,
       nodes: finalNodes,
       edges: state.edges,
-      preprocessNodes: [
-        // Only include new nodes that need preprocessing.
-        ...newNodes.filter((n) => needsPreprocessing(n.type ?? '')),
-        // Include parent frames that need label re-resolution.
-        ...preprocessNodes,
-      ],
+      // All newly-created nodes + any parent frames whose group label
+      // may need to be regenerated. The server's preprocessing
+      // dispatcher filters by node profile, so the engine doesn't.
+      mutatedNodes: [...newNodes, ...affectedParentFrames],
       ...(affectedFrameIds.size > 0
         ? { affectedFrameIds: Array.from(affectedFrameIds) }
         : {}),

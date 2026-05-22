@@ -74,16 +74,20 @@ export interface CanvasWriteResult {
  */
 export interface PendingEffects {
   /**
-   * Nodes whose content/source changed in a way that may warrant
-   * preprocessing (ingestion, embeddings, label resolution).
+   * Nodes that were created or had their `data` mutated in this batch.
+   *
+   * Hosts forward these to the preprocessing pipeline (web → POST
+   * `/preprocess`, future server host → in-process dispatcher). The
+   * engine does **not** filter by node type or watched fields — that
+   * decision lives server-side in `dispatcher.buildPlan()` against the
+   * declarative `profiles` registry, so the engine never has to know
+   * which fields are interesting for which node type.
    *
    * Carries full `CanvasNode` objects — not just IDs — because the
    * preprocessing pipeline branches on `data.fileType`, `data.src`,
-   * etc. that live on the node. Until M2 moves preprocessing
-   * server-side, web is the active consumer; server-side consumers can
-   * inspect or queue these directly.
+   * etc. that live on the node.
    */
-  preprocessNodes: CanvasNode[];
+  mutatedNodes: CanvasNode[];
 
   /** Node IDs that were deleted in this batch. */
   deletedNodeIds: string[];

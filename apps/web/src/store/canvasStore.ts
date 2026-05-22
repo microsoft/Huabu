@@ -33,7 +33,6 @@ import { create, type StateCreator } from 'zustand';
 import { runWebPostEffects } from '@/handler/canvasCommand/postEffects.web';
 import {
   preprocessNodeIfNeeded,
-  needsPreprocessing,
   type NodeIngestionInfo,
 } from '@/handler/canvasCommand/preprocess';
 import {
@@ -919,12 +918,11 @@ const useCanvasStore = create<RFState>()(
           ingestionByNodeId: {},
         });
 
-        // Backfill: any node that participates in preprocessing but has
-        // no label after load (e.g. frame auto-labels lost in older data,
-        // or media nodes whose initial preprocess never completed) gets
-        // re-queued so the server can regenerate one.
+        // Backfill: any node with an empty label gets re-queued so the
+        // server can regenerate one. The server's preprocessing
+        // dispatcher decides per node profile whether there's any
+        // actual work to do, so we don't filter by type here.
         for (const node of loadedNodes) {
-          if (!needsPreprocessing(node.type ?? '')) continue;
           const data = node.data as Record<string, unknown> | undefined;
           const label = typeof data?.label === 'string' ? data.label : '';
           if (label.trim().length > 0) continue;
@@ -1958,7 +1956,7 @@ function flushOnUnload(): void {
   // Fire preprocessNode with keepalive for every queued node.
   for (const nodeId of pendingNodeIds) {
     const node = nodes.find((n) => n.id === nodeId);
-    if (!node || !needsPreprocessing(node.type ?? '')) continue;
+    if (!node) continue;
 
     const nodeData = node.data as Record<string, unknown> | undefined;
     const nodeType = node.type ?? '';

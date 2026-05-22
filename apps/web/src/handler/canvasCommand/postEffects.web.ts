@@ -78,8 +78,9 @@ export function runWebPostEffects(input: RunWebPostEffectsInput): void {
     triggerPreprocessing,
   } = input;
 
-  // 1. Trigger preprocessing for affected nodes.
-  for (const node of effects.preprocessNodes) {
+  // 1. Trigger preprocessing for created / mutated nodes. The server
+  // decides per node profile whether any actual work runs.
+  for (const node of effects.mutatedNodes) {
     triggerPreprocessing(node);
   }
 

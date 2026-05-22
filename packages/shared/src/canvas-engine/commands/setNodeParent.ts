@@ -21,7 +21,10 @@ const setNodeParent: CommandDefinition<Cmd> = {
     if (cmd.nodeIds.length === 0) return noop(state);
 
     let result = state.nodes as NestableNode[];
-    const preprocessNodes: Node[] = [];
+    // Frames whose group label may need re-resolution because their
+    // child set changed. The server's preprocessing dispatcher decides
+    // whether to actually run.
+    const mutatedNodes: Node[] = [];
     const affectedFrameIds = new Set<string>();
     const parentId = cmd.parentId as string | null;
 
@@ -43,19 +46,13 @@ const setNodeParent: CommandDefinition<Cmd> = {
         }
         // Queue affected frames for label re-resolution.
         const targetFrame = result.find((n) => n.id === parentId);
-        if (
-          targetFrame &&
-          !preprocessNodes.some((p) => p.id === targetFrame.id)
-        ) {
-          preprocessNodes.push(targetFrame as Node);
+        if (targetFrame && !mutatedNodes.some((p) => p.id === targetFrame.id)) {
+          mutatedNodes.push(targetFrame as Node);
         }
         if (prevParentId && prevParentId !== parentId) {
           const prevFrame = result.find((n) => n.id === prevParentId);
-          if (
-            prevFrame &&
-            !preprocessNodes.some((p) => p.id === prevFrame.id)
-          ) {
-            preprocessNodes.push(prevFrame as Node);
+          if (prevFrame && !mutatedNodes.some((p) => p.id === prevFrame.id)) {
+            mutatedNodes.push(prevFrame as Node);
           }
         }
       } else {
@@ -66,8 +63,8 @@ const setNodeParent: CommandDefinition<Cmd> = {
         result = moveNodeOutOfFrame(result, id);
         if (frame) {
           affectedFrameIds.add(frame.id);
-          if (!preprocessNodes.some((p) => p.id === frame.id)) {
-            preprocessNodes.push(frame);
+          if (!mutatedNodes.some((p) => p.id === frame.id)) {
+            mutatedNodes.push(frame);
           }
         }
       }
@@ -77,7 +74,7 @@ const setNodeParent: CommandDefinition<Cmd> = {
       applied: true,
       nodes: result,
       edges: state.edges,
-      preprocessNodes,
+      mutatedNodes,
       ...(affectedFrameIds.size > 0
         ? { affectedFrameIds: Array.from(affectedFrameIds) }
         : {}),

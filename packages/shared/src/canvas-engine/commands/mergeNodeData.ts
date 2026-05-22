@@ -1,4 +1,3 @@
-import { shouldPreprocessOnUpdate } from '../preprocess.js';
 import { noop, type CommandDefinition } from './types.js';
 
 import type { CanvasCommand } from '../../index.js';
@@ -19,7 +18,11 @@ const mergeNodeData: CommandDefinition<Cmd> = {
     const patchMap = new Map(
       cmd.patches.map((p) => [p.nodeId as string, p.patch]),
     );
-    const preprocessNodes: Node[] = [];
+    // Every node whose data we actually patched, plus any parent frame
+    // whose child label changed. The engine doesn't filter by watched
+    // fields — the server's preprocessing dispatcher does that against
+    // the per-type profile.
+    const mutatedNodes: Node[] = [];
     const contentEditedNodeIds: string[] = [];
     let anyApplied = false;
 
@@ -37,9 +40,7 @@ const mergeNodeData: CommandDefinition<Cmd> = {
           ...patchRec,
         },
       };
-      if (shouldPreprocessOnUpdate(n, updated)) {
-        preprocessNodes.push(updated);
-      }
+      mutatedNodes.push(updated);
       // Engine-neutral fact: the node's `content` field was rewritten.
       // Hosts decide what to do with this (web/agent batches use it to
       // flag AI-authored rewrites for the editor; other hosts ignore it).
@@ -54,11 +55,8 @@ const mergeNodeData: CommandDefinition<Cmd> = {
         const parentFrame = state.nodes.find(
           (pn) => pn.id === updated.parentId,
         );
-        if (
-          parentFrame &&
-          !preprocessNodes.some((p) => p.id === parentFrame.id)
-        ) {
-          preprocessNodes.push(parentFrame);
+        if (parentFrame && !mutatedNodes.some((p) => p.id === parentFrame.id)) {
+          mutatedNodes.push(parentFrame);
         }
       }
       return updated;
@@ -70,7 +68,7 @@ const mergeNodeData: CommandDefinition<Cmd> = {
       applied: true,
       nodes: nextNodes,
       edges: state.edges,
-      preprocessNodes,
+      mutatedNodes,
       ...(contentEditedNodeIds.length > 0 ? { contentEditedNodeIds } : {}),
     };
   },
