@@ -791,7 +791,14 @@ type RFState = {
 
   loadCanvas: (canvasId?: string) => Promise<void>;
   switchCanvas: (canvasId: string) => Promise<void>;
-  saveCanvas: () => Promise<void>;
+  /**
+   * Persist the canvas structure (geometry, parenthood, viewport).
+   * Pass `{ keepalive: true }` from the `beforeunload` flush so the
+   * request survives the page close. Per-node content (markdown,
+   * label, src, summary, …) is stripped before sending — it rides
+   * the per-node content PUT, not this one.
+   */
+  saveCanvas: (options?: { keepalive?: boolean }) => Promise<void>;
 
   /**
    * Attempt to rename a canvas or node, with collision detection.
@@ -1431,7 +1438,7 @@ const useCanvasStore = create<RFState>()(
       await get().loadCanvas(canvasId);
     },
 
-    saveCanvas: async () => {
+    saveCanvas: async (options) => {
       // Once the server has rejected a save with a version mismatch, our
       // local `version` is permanently stale until the user reloads. Skip
       // further attempts so we don't generate a 409 on every autosave tick
@@ -1454,16 +1461,20 @@ const useCanvasStore = create<RFState>()(
         // now and ride the per-node content PUT, so the structure PUT
         // body shrinks to pure geometry + parenthood + viewport.
         const slimNodes = stripNodeContentForStructurePut(nodes);
-        const response = await putCanvas(canvasId, {
-          version,
-          title: canvasTitle || 'Untitled',
-          // `viewport` is persisted under `state.viewport` so reopening
-          // the canvas restores pan+zoom verbatim instead of falling
-          // back to a fitView that fights the user's edits.
-          state: viewport
-            ? { nodes: slimNodes, edges, viewport }
-            : { nodes: slimNodes, edges },
-        });
+        const response = await putCanvas(
+          canvasId,
+          {
+            version,
+            title: canvasTitle || 'Untitled',
+            // `viewport` is persisted under `state.viewport` so reopening
+            // the canvas restores pan+zoom verbatim instead of falling
+            // back to a fitView that fights the user's edits.
+            state: viewport
+              ? { nodes: slimNodes, edges, viewport }
+              : { nodes: slimNodes, edges },
+          },
+          { keepalive: options?.keepalive },
+        );
         set({ version: response.version });
         saveSucceeded = true;
       } catch (error) {
@@ -2425,79 +2436,81 @@ const useCanvasStore = create<RFState>()(
 );
 
 /**
- * Flush all pending changes when the page is about to be unloaded.
- * Uses keepalive:true so requests survive page close/refresh.
- *
- * 1. Cancel all pending preprocessing debounce timers.
- * 2. Fire preprocessNode (keepalive) for every node that was still queued.
- * 3. Fire putCanvas (keepalive) with the latest canvas state.
+ * Flush only the work that hasn't reached the server yet when the page
+ * is about to be unloaded. We deliberately do NOT unconditionally
+ * re-send the canvas structure here — every store mutation already
+ * schedules a debounced `saveCanvas`, so unload only needs to drain
+ * the trailing tail of pending debounces (preprocess + structure).
+ * Per-node content debounces are drained by their own keepalive
+ * listener (`flushAllNodeContentSavesKeepalive`); the canvas event
+ * buffer is drained by `flushAllCanvasEventsKeepalive`.
  */
 function flushOnUnload(): void {
   const state = useCanvasStore.getState();
+  const { canvasId, nodes } = state;
 
-  const { canvasId, nodes, edges, version, canvasTitle } = state;
-
-  // Collect node IDs that had a pending debounce timer before clearing them.
+  // 1. Drain pending preprocess debounces.
+  //    Each queued node has a debounce timer that hasn't fired yet;
+  //    fire its `preprocessNode` with `keepalive` so AI label/summary
+  //    work the user just triggered isn't lost on close.
   const pendingNodeIds = Array.from(preprocessTimers.keys());
   for (const timer of preprocessTimers.values()) {
     clearTimeout(timer);
   }
   preprocessTimers.clear();
 
-  // Nothing else to flush if no canvas is loaded.
-  if (!canvasId) return;
+  if (canvasId) {
+    for (const nodeId of pendingNodeIds) {
+      const node = nodes.find((n) => n.id === nodeId);
+      if (!node) continue;
 
-  // Fire preprocessNode with keepalive for every queued node.
-  for (const nodeId of pendingNodeIds) {
-    const node = nodes.find((n) => n.id === nodeId);
-    if (!node) continue;
+      const nodeData = node.data as Record<string, unknown> | undefined;
+      const nodeType = node.type ?? '';
 
-    const nodeData = node.data as Record<string, unknown> | undefined;
-    const nodeType = node.type ?? '';
+      // Build a minimal snapshot matching what preprocessNodeIfNeeded sends.
+      const snapshot: Record<string, unknown> =
+        nodeType === 'frame'
+          ? {
+              childLabels: nodes
+                .filter((n) => n.parentId === nodeId)
+                .map((c) => {
+                  const cData = c.data as Record<string, unknown> | undefined;
+                  const label =
+                    typeof cData?.label === 'string' ? cData.label : '';
+                  return label.trim();
+                })
+                .filter((l) => l.length > 0),
+              labelSource: (nodeData?.labelSource as string) || undefined,
+            }
+          : {
+              title:
+                (nodeData?.label as string) ||
+                (nodeData?.title as string) ||
+                undefined,
+              labelSource: (nodeData?.labelSource as string) || undefined,
+              content: (nodeData?.content as string) || undefined,
+              src: (nodeData?.src as string) || undefined,
+            };
 
-    // Build a minimal snapshot matching what preprocessNodeIfNeeded would send.
-    const snapshot: Record<string, unknown> =
-      nodeType === 'frame'
-        ? {
-            childLabels: nodes
-              .filter((n) => n.parentId === nodeId)
-              .map((c) => {
-                const cData = c.data as Record<string, unknown> | undefined;
-                const label =
-                  typeof cData?.label === 'string' ? cData.label : '';
-                return label.trim();
-              })
-              .filter((l) => l.length > 0),
-            labelSource: (nodeData?.labelSource as string) || undefined,
-          }
-        : {
-            title:
-              (nodeData?.label as string) ||
-              (nodeData?.title as string) ||
-              undefined,
-            labelSource: (nodeData?.labelSource as string) || undefined,
-            content: (nodeData?.content as string) || undefined,
-            src: (nodeData?.src as string) || undefined,
-          };
-
-    void preprocessNode(
-      canvasId,
-      nodeId,
-      { nodeType, trigger: 'flush', snapshot },
-      { keepalive: true },
-    ).catch(() => {
-      // Best-effort on unload – ignore errors.
-    });
+      void preprocessNode(
+        canvasId,
+        nodeId,
+        { nodeType, trigger: 'flush', snapshot },
+        { keepalive: true },
+      ).catch(() => undefined);
+    }
   }
 
-  // Flush canvas save.
-  void putCanvas(
-    canvasId,
-    { version, title: canvasTitle || 'Untitled', state: { nodes, edges } },
-    { keepalive: true },
-  ).catch(() => {
-    // Best-effort on unload – ignore errors.
-  });
+  // 2. Drain a pending structure-save debounce, if any.
+  //    If `saveTimeout` is null, the latest structural state is
+  //    already on the wire (or never differed from what's on disk),
+  //    so we skip the PUT entirely — no more empty diffs bumping
+  //    `version` on every page close.
+  if (saveTimeout) {
+    clearTimeout(saveTimeout);
+    saveTimeout = null;
+    void state.saveCanvas({ keepalive: true }).catch(() => undefined);
+  }
 }
 
 if (typeof window !== 'undefined') {
