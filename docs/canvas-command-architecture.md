@@ -74,7 +74,7 @@ Every `CanvasCommand`:
 
 ### Command Catalog
 
-See `packages/shared/src/types/canvas/command.ts` for the full 15-member discriminated union. Summary:
+See `packages/shared/src/types/canvas/command.ts` for the full discriminated union (currently 16 command types). Summary (non-exhaustive):
 
 | Category         | Commands                            |
 | ---------------- | ----------------------------------- |
