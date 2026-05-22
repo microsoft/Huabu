@@ -127,6 +127,58 @@ const TEXT_BEARING_NODE_TYPES: ReadonlySet<string> = new Set([
   'pdf',
 ]);
 
+// ─── Viewport sessionStorage ──────────────────────────────────────────────
+//
+// Pan + zoom is a per-tab view preference, not canvas data: persisting it
+// server-side forced every tab/device on the same canvas to share one
+// view and turned each `onMoveEnd` into a structure PUT that bumped
+// `version` (and could collide with the agent). We store it in
+// `sessionStorage` keyed by canvasId so each tab keeps its own scroll
+// position across refreshes without touching the server.
+
+const viewportStorageKey = (canvasId: string) =>
+  `sediment.viewport.${canvasId}`;
+
+function readViewportFromSession(canvasId: string): CanvasViewport | null {
+  if (!canvasId) return null;
+  try {
+    const raw = sessionStorage.getItem(viewportStorageKey(canvasId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<CanvasViewport> | null;
+    if (
+      parsed &&
+      Number.isFinite(parsed.x) &&
+      Number.isFinite(parsed.y) &&
+      Number.isFinite(parsed.zoom) &&
+      (parsed.zoom as number) > 0
+    ) {
+      return {
+        x: parsed.x as number,
+        y: parsed.y as number,
+        zoom: parsed.zoom as number,
+      };
+    }
+  } catch {
+    // Private mode / quota / corrupt entry — fall back to fitView.
+  }
+  return null;
+}
+
+function writeViewportToSession(
+  canvasId: string,
+  viewport: CanvasViewport,
+): void {
+  if (!canvasId) return;
+  try {
+    sessionStorage.setItem(
+      viewportStorageKey(canvasId),
+      JSON.stringify(viewport),
+    );
+  } catch {
+    // Ignore: viewport is a UX nicety, never block the user on it.
+  }
+}
+
 /**
  * Flush pending autosave immediately (synchronous cancel + fire).
  * Used before switching canvases to avoid losing edits.
@@ -696,21 +748,20 @@ type RFState = {
   setRfInstance: (instance: ReactFlowInstance | null) => void;
 
   /**
-   * Last persisted pan + zoom of the React Flow viewport.
+   * Current pan + zoom of the React Flow viewport.
    *
    * `null` means "no saved viewport yet" — on initial load that triggers a
-   * one-shot `fitView` for backward-compat with old canvases. After the
-   * user pans or zooms, `onMoveEnd` writes the new viewport here through
-   * {@link setViewport}, which rides the standard autosave debounce so it
-   * lands in `canvas.json` as `state.viewport`. Restoring it on reopen
-   * means typical edits (drawing a sketch stroke, dropping a note) no
-   * longer trigger an auto-fit that yanks the canvas around.
+   * one-shot `fitView`. After the user pans or zooms, `onMoveEnd` writes
+   * the new viewport here through {@link setViewport}, which also
+   * mirrors it into `sessionStorage` (per-tab, per-canvas) so a refresh
+   * lands back at the same view without going through the server.
    */
   viewport: CanvasViewport | null;
   /**
    * Record a new viewport. Called from `<ReactFlow onMoveEnd>` after the
-   * user finishes panning/zooming. Triggers autosave via the standard
-   * PERSISTED_KEYS diff.
+   * user finishes panning/zooming. Writes to `sessionStorage` directly;
+   * does NOT participate in the structure autosave (`viewport` is not in
+   * {@link PERSISTED_KEYS}).
    */
   setViewport: (viewport: CanvasViewport) => void;
 
@@ -792,11 +843,12 @@ type RFState = {
   loadCanvas: (canvasId?: string) => Promise<void>;
   switchCanvas: (canvasId: string) => Promise<void>;
   /**
-   * Persist the canvas structure (geometry, parenthood, viewport).
+   * Persist the canvas structure (geometry, parenthood, edges).
    * Pass `{ keepalive: true }` from the `beforeunload` flush so the
    * request survives the page close. Per-node content (markdown,
    * label, src, summary, …) is stripped before sending — it rides
-   * the per-node content PUT, not this one.
+   * the per-node content PUT, not this one. Viewport is intentionally
+   * excluded: it lives in `sessionStorage` per tab.
    */
   saveCanvas: (options?: { keepalive?: boolean }) => Promise<void>;
 
@@ -960,7 +1012,7 @@ if (typeof window !== 'undefined') {
   window.addEventListener('beforeunload', flushAllNodeContentSavesKeepalive);
 }
 
-const PERSISTED_KEYS = ['nodes', 'edges', 'canvasTitle', 'viewport'] as const;
+const PERSISTED_KEYS = ['nodes', 'edges', 'canvasTitle'] as const;
 type PersistedKey = (typeof PERSISTED_KEYS)[number];
 
 /**
@@ -1351,15 +1403,21 @@ const useCanvasStore = create<RFState>()(
         const state = response.state as {
           nodes?: Node[];
           edges?: Edge[];
+          // Legacy field: older canvases still carry a server-side
+          // viewport. Used only as a one-shot fallback when this tab
+          // has no sessionStorage entry yet; the next structure PUT
+          // strips it from `canvas.json` for good.
           viewport?: CanvasViewport;
         };
         canvasHistoryManager.clear();
 
         const loadedNodes = state.nodes ?? [];
-        // Sanity-check the persisted viewport so a corrupt entry can't
-        // strand the canvas at NaN/Infinity. Fall back to a one-shot
-        // fitView in that case (handled in Canvas.tsx).
-        const loadedViewport =
+        // Prefer this tab's sessionStorage; fall back to whatever the
+        // server still has from before viewport was moved client-side.
+        // A corrupt entry on either side falls through to `null`, which
+        // Canvas.tsx interprets as "do a one-shot fitView".
+        const sessionViewport = readViewportFromSession(targetId);
+        const legacyServerViewport =
           state.viewport &&
           Number.isFinite(state.viewport.x) &&
           Number.isFinite(state.viewport.y) &&
@@ -1367,6 +1425,7 @@ const useCanvasStore = create<RFState>()(
           state.viewport.zoom > 0
             ? state.viewport
             : null;
+        const loadedViewport = sessionViewport ?? legacyServerViewport;
         set({
           nodes: loadedNodes,
           edges: state.edges ?? [],
@@ -1454,24 +1513,20 @@ const useCanvasStore = create<RFState>()(
       set({ isSaving: true });
       let saveSucceeded = false;
       try {
-        const { nodes, edges, version, canvasId, canvasTitle, viewport } =
-          get();
+        const { nodes, edges, version, canvasId, canvasTitle } = get();
         // Strip every per-node content / label / src / summary / etc.
         // field from the body. Those live in `nodes/<safe(label)>.md`
         // now and ride the per-node content PUT, so the structure PUT
-        // body shrinks to pure geometry + parenthood + viewport.
+        // body shrinks to pure geometry + parenthood.
+        // Viewport is intentionally omitted: it's a per-tab UX state
+        // mirrored into `sessionStorage`, not canvas data.
         const slimNodes = stripNodeContentForStructurePut(nodes);
         const response = await putCanvas(
           canvasId,
           {
             version,
             title: canvasTitle || 'Untitled',
-            // `viewport` is persisted under `state.viewport` so reopening
-            // the canvas restores pan+zoom verbatim instead of falling
-            // back to a fitView that fights the user's edits.
-            state: viewport
-              ? { nodes: slimNodes, edges, viewport }
-              : { nodes: slimNodes, edges },
+            state: { nodes: slimNodes, edges },
           },
           { keepalive: options?.keepalive },
         );
@@ -2074,6 +2129,9 @@ const useCanvasStore = create<RFState>()(
         return;
       }
       set({ viewport });
+      // Mirror into sessionStorage so a refresh restores this tab's
+      // pan + zoom without a server round-trip.
+      writeViewportToSession(get().canvasId, viewport);
     },
 
     addNodes: (inputs) => {

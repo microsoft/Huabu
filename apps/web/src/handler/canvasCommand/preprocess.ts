@@ -102,7 +102,10 @@ export async function preprocessNodeIfNeeded({
       snapshot,
     });
 
-    // Apply results from the backend.
+    // Apply results from the backend. The server is responsible for
+    // suppressing label suggestions that would just re-trigger its own
+    // ` (N)` dedup (see `apps/server/src/modules/preprocessing/stages/project.ts`),
+    // so the client can apply whatever it receives verbatim.
     const patch: Record<string, unknown> = {};
     if (response.suggestedLabel) {
       patch.label = response.suggestedLabel;
