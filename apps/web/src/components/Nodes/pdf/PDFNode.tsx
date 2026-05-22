@@ -123,8 +123,17 @@ export const PDFNode = memo(
       setThumbnail(dataUrl);
     }, []);
 
-    const PDFToolbar = (
+    const PDFActions = (
       <>
+        <FloatingToolbar.ActionButton
+          title="Open Large View"
+          onClick={(e) => {
+            e.stopPropagation();
+            openExpanded(id);
+          }}
+        >
+          <Fullscreen />
+        </FloatingToolbar.ActionButton>
         <FloatingToolbar.ActionButton title="Download" onClick={handleDownload}>
           <Download />
         </FloatingToolbar.ActionButton>
@@ -139,26 +148,13 @@ export const PDFNode = memo(
       </>
     );
 
-    const PDFExpand = (
-      <FloatingToolbar.ActionButton
-        title="Open Large View"
-        onClick={(e) => {
-          e.stopPropagation();
-          openExpanded(id);
-        }}
-      >
-        <Fullscreen />
-      </FloatingToolbar.ActionButton>
-    );
-
     return (
       <NodeWrapper
         id={id}
         data={data}
         type={'pdf'}
         selected={selected}
-        toolbar={PDFToolbar}
-        expand={PDFExpand}
+        actions={PDFActions}
         resizable
         keepAspectRatio={false}
         className={clsx('bg-surface transition-all duration-300 ease-in-out')}

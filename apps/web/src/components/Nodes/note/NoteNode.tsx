@@ -74,7 +74,7 @@ export const NoteNode = memo(
       [hasFixedHeight, id, setNoteHeightMode],
     );
 
-    const NoteExpand = (
+    const NoteActions = (
       <FloatingToolbar.ActionButton
         title="Expand"
         onClick={(e) => {
@@ -187,7 +187,7 @@ export const NoteNode = memo(
         data={data}
         type={'note'}
         selected={selected}
-        expand={isContentMissing ? undefined : NoteExpand}
+        actions={isContentMissing ? undefined : NoteActions}
         keepAspectRatio={false}
         borderColor={borderColorOverride}
       >

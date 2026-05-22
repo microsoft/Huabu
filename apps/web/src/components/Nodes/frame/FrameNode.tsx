@@ -35,7 +35,7 @@ export const FrameNode = memo(
       return { ...data, style: nextStyle };
     }, [data, accentTokens]);
 
-    const FrameToolbar = (
+    const FrameActions = (
       <>
         <FloatingToolbar.ActionButton
           title="Unframe"
@@ -137,7 +137,7 @@ export const FrameNode = memo(
         data={wrapperData}
         type={'frame'}
         selected={selected && !isEditingLabel}
-        toolbar={FrameToolbar}
+        actions={FrameActions}
         overlayContent={labelOverlay}
         overlayOffsetY={-24}
         keepAspectRatio={false}

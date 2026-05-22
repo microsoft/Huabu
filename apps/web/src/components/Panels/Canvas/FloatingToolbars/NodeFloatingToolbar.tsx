@@ -28,19 +28,21 @@ interface NodeFloatingToolbarProps {
   type: CanvasNodeType;
   data: NodeData;
   /**
-   * Per-node-type toolbar content rendered immediately after the type
-   * indicator. Sits in the same group as the trailing accent color
-   * picker so the color swatch always becomes the last item of this
-   * second-to-last group (no extra divider in between).
+   * Group 3 — canvas display effects.
+   * Buttons/controls that change how the node renders on the canvas:
+   * text formatting (bold/italic/font), sketch stroke controls,
+   * frame layout, note height mode, etc.
+   * Rendered between the color+size group and the actions group.
    */
-  children?: ReactNode;
+  toolbar?: ReactNode;
   /**
-   * Per-node-type "expand" affordances rendered as the trailing item
-   * of the final group, right after the size picker. Kept separate
-   * from `children` so every node's expand-like action lands in the
-   * same position with no extra divider preceding it.
+   * Group 4 — node actions.
+   * Buttons that trigger operations on the node: open large/fullscreen
+   * view, apply AI sketch recognition, download, unframe, start/cancel
+   * AI runs, open conversation thread, etc.
+   * Rendered as the last group before the optional delete button.
    */
-  expand?: ReactNode;
+  actions?: ReactNode;
 }
 
 /**
@@ -51,26 +53,26 @@ interface NodeFloatingToolbarProps {
  * node subscriptions inside this component scoped to one canvas, not
  * one per node.
  *
- * Composes three sections:
- *  1. Leading type indicator. For `text` / `note`, renders a segmented
- *     toggle so the user can convert between them with one click.
- *  2. Caller-provided per-node-type actions (`children`) followed by
- *     the trailing accent color picker (hidden for `question` /
- *     `sketch` nodes). These share a single group with no divider
- *     between them, so the color swatch is always the last item in
- *     the second-to-last group.
- *  3. Size picker plus any caller-provided `expand` action. These
- *     share the final group with no divider between them, so the
- *     expand button is always the last item in the last group.
+ * Composes four groups separated by dividers:
+ *  1. Type indicator. For `text` / `note`, a toggle to convert between them;
+ *     for other nodes, a plain type icon.
+ *  2. Style: accent color picker (hidden for `question` / `sketch`) + size
+ *     picker. Always present.
+ *  3. Canvas display (`toolbar` prop). Controls that change how the node is
+ *     rendered on the canvas — text formatting, sketch stroke controls, frame
+ *     child layout, etc. Omitted when the prop is undefined.
+ *  4. Actions (`actions` prop). Buttons that trigger operations — open
+ *     large/fullscreen view, AI sketch recognition, download, unframe, run /
+ *     cancel AI question, etc. Omitted when the prop is undefined.
  *
- * A trailing delete button is appended for non-mouse input as its
- * own group (mouse users have keyboard Delete / Backspace).
+ * A trailing delete button is appended for non-mouse input (mouse users have
+ * keyboard Delete / Backspace).
  *
- * Positioning, portal-into-body, and viewport clamping are delegated
- * to `CanvasFloatingPopover`.
+ * Positioning, portal-into-body, and viewport clamping are delegated to
+ * `CanvasFloatingPopover`.
  */
 export const NodeFloatingToolbar = memo(
-  ({ id, type, data, children, expand }: NodeFloatingToolbarProps) => {
+  ({ id, type, data, toolbar, actions }: NodeFloatingToolbarProps) => {
     const internalNode = useInternalNode(id);
     const updateNodeData = useCanvasStore((s) => s.updateNodeData);
     const convertNodeType = useCanvasStore((s) => s.convertNodeType);
@@ -193,8 +195,7 @@ export const NodeFloatingToolbar = memo(
 
         <div className="bg-edge-default mx-0.5 h-4 w-px" />
 
-        {children}
-
+        {/* ── Group 2: Style — color + size ── */}
         {type !== 'question' && type !== 'sketch' && (
           <FloatingToolbar.ColorPicker
             colors={
@@ -215,24 +216,16 @@ export const NodeFloatingToolbar = memo(
           />
         )}
 
-        <FloatingToolbar.Divider />
-
         <FloatingToolbar.SizePicker
           width={currentWidth}
           height={currentHeight}
           onApply={({ width, height }) => {
             if (!internalNode) return;
-            // `resolveGeometryEdit` falls back to existing width when only
-            // height was edited, preserves pinned-vs-auto height when the
-            // user didn't enter a height, and rejects items whose width
-            // can't be resolved to a positive number.
             const resolved = resolveGeometryEdit(internalNode, {
               width,
               height,
             });
             if (!resolved) return;
-            // SET_NODE_GEOMETRY uses snapshot:'caller' — open a gesture so
-            // the resize is captured as one undo entry without warnings.
             beginGesture('SET_NODE_GEOMETRY');
             setNodeGeometry([
               {
@@ -254,7 +247,21 @@ export const NodeFloatingToolbar = memo(
           }
         />
 
-        {expand}
+        {/* ── Group 3: Canvas display effects ── */}
+        {toolbar && (
+          <>
+            <FloatingToolbar.Divider />
+            {toolbar}
+          </>
+        )}
+
+        {/* ── Group 4: Actions ── */}
+        {actions && (
+          <>
+            <FloatingToolbar.Divider />
+            {actions}
+          </>
+        )}
 
         {/* Non-mouse only: mouse users have keyboard Delete / Backspace. */}
         {isNotMouse && (

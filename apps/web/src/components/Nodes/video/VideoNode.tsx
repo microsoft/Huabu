@@ -17,7 +17,7 @@ export const VideoNode = memo(
   ({ id, data, selected }: NodeProps<VideoNodeType>) => {
     const openExpanded = useCanvasStore((s) => s.openExpanded);
 
-    const VideoExpand = (
+    const VideoActions = (
       <FloatingToolbar.ActionButton
         title="Open Large View"
         onClick={(e) => {
@@ -35,7 +35,7 @@ export const VideoNode = memo(
         data={data}
         type={'video'}
         selected={selected}
-        expand={VideoExpand}
+        actions={VideoActions}
         keepAspectRatio={true}
       >
         <div className="bg-fg-default/5 group flex h-full flex-col justify-center rounded-lg border-0">

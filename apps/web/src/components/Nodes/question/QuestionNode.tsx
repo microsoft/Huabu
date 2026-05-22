@@ -259,7 +259,7 @@ export const QuestionNode = memo(
         data={{ ...data, style: { ...data.style, backgroundColor: STICKY_BG } }}
         type={'question'}
         selected={selected}
-        toolbar={questionToolbar}
+        actions={questionToolbar}
         keepAspectRatio={false}
         allowOverflow
         onResizeStart={handleResizeStart}

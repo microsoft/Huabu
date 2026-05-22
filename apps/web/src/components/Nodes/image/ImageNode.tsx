@@ -17,7 +17,7 @@ export const ImageNode = memo(
   ({ id, data, selected }: NodeProps<ImageNodeType>) => {
     const openExpanded = useCanvasStore((s) => s.openExpanded);
 
-    const ImageExpand = (
+    const ImageActions = (
       <FloatingToolbar.ActionButton
         title="Open Large View"
         onClick={(e) => {
@@ -35,7 +35,7 @@ export const ImageNode = memo(
         data={data}
         type={'image'}
         selected={selected}
-        expand={ImageExpand}
+        actions={ImageActions}
         keepAspectRatio={true}
       >
         <div className="flex h-full flex-col">

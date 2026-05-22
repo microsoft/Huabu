@@ -7,7 +7,7 @@
  */
 
 import {
-  BadgeQuestionMark,
+  // BadgeQuestionMark,
   BookOpen,
   Film,
   Globe,
@@ -16,6 +16,7 @@ import {
   Clipboard,
   Type,
   Pencil,
+  MessageCircleQuestionMark,
 } from 'lucide-react';
 
 import type { CanvasNodeType } from '@sediment/shared';
@@ -40,7 +41,8 @@ export const NODE_ICON: Record<CanvasNodeType, LucideIcon> = {
   web: Globe,
   frame: Frame,
   sketch: Pencil,
-  question: BadgeQuestionMark,
+  question: MessageCircleQuestionMark,
+  // question: BadgeQuestionMark,<Sticker />
 };
 
 /**

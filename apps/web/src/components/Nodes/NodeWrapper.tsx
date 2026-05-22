@@ -212,14 +212,18 @@ interface NodeWrapperProps {
   className?: string;
   minWidth?: number;
   minHeight?: number;
+  /**
+   * Group 3 content for the floating toolbar: controls that affect
+   * how the node is displayed on the canvas (text formatting, sketch
+   * stroke controls, frame layout, etc.).
+   */
   toolbar?: React.ReactNode;
   /**
-   * Optional "expand" action(s) for the floating toolbar. Rendered as
-   * the trailing item of the final toolbar group (after the size
-   * picker) so every node's expand affordance lands in the same spot
-   * with no extra divider preceding it.
+   * Group 4 content for the floating toolbar: action buttons that
+   * trigger operations (open large view, apply AI sketch, download,
+   * unframe, run / cancel AI question, etc.).
    */
-  expand?: React.ReactNode;
+  actions?: React.ReactNode;
 
   /**
    * Content to render in the zoom-invariant overlay layer.
@@ -259,7 +263,7 @@ export const NodeWrapper = memo(
     minWidth,
     minHeight,
     toolbar,
-    expand,
+    actions,
     overlayContent,
     overlayOffsetY = 0,
     keepAspectRatio = false,
@@ -514,17 +518,13 @@ export const NodeWrapper = memo(
           }}
           lineClassName="!border-transparent"
         />
-        {toolbar && selected && selectedCount === 1 && (
-          <NodeFloatingToolbar id={id} type={type} data={data} expand={expand}>
-            {toolbar}
-          </NodeFloatingToolbar>
-        )}
-        {!toolbar && expand && selected && selectedCount === 1 && (
+        {selected && selectedCount === 1 && (
           <NodeFloatingToolbar
             id={id}
             type={type}
             data={data}
-            expand={expand}
+            toolbar={toolbar}
+            actions={actions}
           />
         )}
 
