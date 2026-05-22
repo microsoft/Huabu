@@ -85,7 +85,6 @@ export function executeCanvasCommands(
     mutatedNodes: [],
     deletedNodeIds: [],
     contentEditedNodeIds: [],
-    needsTransitionCleanup: false,
     deferredFitFrameIds: [],
   };
 
@@ -196,16 +195,6 @@ export function executeCanvasCommands(
     (c, i) =>
       commandResults[i]?.applied && COMMAND_META[c.type]?.requiresEdgeReroute,
   );
-
-  // Transition cleanup is needed if any *applied* command declares it.
-  const needsTransitionCleanup = execution.commands.some(
-    (c, i) =>
-      commandResults[i]?.applied &&
-      COMMAND_META[c.type]?.needsTransitionCleanup,
-  );
-
-  // Set the derived flag on pendingEffects.
-  pendingEffects.needsTransitionCleanup = needsTransitionCleanup;
 
   return {
     writeResult: {

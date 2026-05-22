@@ -50,11 +50,7 @@ export {
 // module-load time and crashes Node-only test runs. Command handlers that
 // need them import `./autoLayout/index.js` directly; web/server consumers
 // only need the lighter pieces below.
-export {
-  applyLayoutResult,
-  LAYOUT_ANIMATION_DURATION_MS,
-  type ApplyOptions,
-} from './autoLayout/applier.js';
+export { applyLayoutResult } from './autoLayout/applier.js';
 export type {
   LayoutOptions,
   LayoutResult,
