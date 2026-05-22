@@ -1,4 +1,4 @@
-import { ArrowLeft, Columns2, X } from 'lucide-react';
+import { ArrowLeft, Bot, Columns2, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 
 import { getNodeIcon } from '../../../config/nodeIcons.ts';
@@ -24,7 +24,15 @@ const getOverlayMeta = (type: string, data: Record<string, unknown>) => {
 /*  the canvas.                                 */
 /* ------------------------------------------------------------------ */
 
-export const ExpandedNodePanel = () => {
+type ExpandedNodePanelProps = {
+  isChatCollapsed?: boolean;
+  onToggleChat?: () => void;
+};
+
+export const ExpandedNodePanel = ({
+  isChatCollapsed,
+  onToggleChat,
+}: ExpandedNodePanelProps) => {
   // Canvas Store State
   const expandedNodeId = useCanvasStore((s) => s.expandedNodeId);
   const canvasExpandMode = useCanvasStore((s) => s.expandMode);
@@ -206,6 +214,27 @@ export const ExpandedNodePanel = () => {
 
         {/* Right: mode toggle + close */}
         <div className="text-fg-muted flex items-center gap-1">
+          {isReplace && onToggleChat && (
+            <Button
+              variant="ghost"
+              iconOnly
+              size="md"
+              className={
+                !isChatCollapsed
+                  ? 'text-info bg-info-bg enabled:hover:bg-info-bg-hover'
+                  : ''
+              }
+              title={isChatCollapsed ? 'Open Chat' : 'Close Chat'}
+              aria-label={
+                isChatCollapsed ? 'Open chat panel' : 'Close chat panel'
+              }
+              aria-pressed={!isChatCollapsed}
+              onClick={onToggleChat}
+            >
+              <Bot />
+            </Button>
+          )}
+
           <Button
             variant="ghost"
             iconOnly

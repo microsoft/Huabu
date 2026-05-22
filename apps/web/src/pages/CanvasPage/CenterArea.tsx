@@ -1,4 +1,4 @@
-import { BotMessageSquare, HelpCircle } from 'lucide-react';
+import { Bot, HelpCircle } from 'lucide-react';
 import React, { useCallback, useRef } from 'react';
 
 import { Button } from '../../components/Common/Button';
@@ -171,7 +171,7 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
                   'text-info bg-info-bg border-info-light enabled:hover:bg-info-bg-hover',
               )}
             >
-              <BotMessageSquare />
+              <Bot />
             </Button>
           )}
         </div>
@@ -191,8 +191,15 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
 
       {/* Expanded panel – rendered only when needed */}
       {hasExpanded && (
-        <div className={isReplace ? 'h-full w-full' : 'h-full min-w-0 flex-1'}>
-          <ExpandedNodePanel />
+        <div
+          className={
+            isReplace ? 'relative z-40 h-full w-full' : 'h-full min-w-0 flex-1'
+          }
+        >
+          <ExpandedNodePanel
+            isChatCollapsed={isChatCollapsed}
+            onToggleChat={onToggleChat}
+          />
         </div>
       )}
     </div>

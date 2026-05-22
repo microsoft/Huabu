@@ -35,6 +35,22 @@
 
 ---
 
+## 2026-05-22 · 全屏 Preview 顶部控制与遮挡修复
+
+**What Changed**
+
+- 全屏 Preview（replace 模式）现在提升了面板层级，优先级高于画布浮动 Header，避免左上 Header 遮挡 Preview 内容与标题栏。
+- 在全屏 Preview 的右上角新增了一个 Chat 面板开关 icon button（样式与现有展开/收缩按钮一致）：
+  - Chat 折叠时显示“打开 Chat”图标。
+  - Chat 展开时显示“收起 Chat”图标。
+
+**Notes**
+
+- 该按钮仅在 Preview 全屏模式下显示；分栏（split）模式仍沿用画布右上角的 Chat 按钮。
+- 仅涉及交互与显示层级调整，不影响节点数据、预览内容或存储格式。
+
+---
+
 ## 2026-05-23 · 节点视觉：圆角加大
 
 **What Changed**
