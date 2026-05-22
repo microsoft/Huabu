@@ -20,6 +20,21 @@
 
 ---
 
+## 2026-05-22 · Canvas 工具栏与设置入口调整
+
+**What Changed**
+
+- Canvas 底部工具栏移除了 `Auto Layout All` 按钮。
+- `Enable/Disable Auto Layout` 开关从底部工具栏迁移到画布右上角 `Settings` 弹层中的 `Canvas` 分组。
+- 底部工具栏中的 `Upload Files` 与 `Add Links` 合并为一个 split 下拉入口（主按钮 + 下拉箭头），交互方式与现有工具切换一致。
+
+**Notes**
+
+- 仅调整入口位置与交互分组，不影响自动布局逻辑本身。
+- `Upload Files` 与 `Add Links` 的实际能力保持不变，仍分别通过原有上传与链接弹窗执行。
+
+---
+
 ## 2026-05-23 · 节点视觉：圆角加大
 
 **What Changed**

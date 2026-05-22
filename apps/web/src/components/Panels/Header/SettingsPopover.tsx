@@ -1,7 +1,8 @@
-import { Settings } from 'lucide-react';
+import { Settings, Sparkles } from 'lucide-react';
 import React, { useCallback, useRef, useState } from 'react';
 
 import { LLMSettings } from './LLMSettings';
+import useCanvasStore from '../../../store/canvasStore';
 import { useLLMStore } from '../../../store/llmStore';
 import { Button } from '../../Common/Button';
 import { Popover } from '../../Common/Popover';
@@ -25,6 +26,8 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
   shape = 'default',
 }) => {
   const llmInit = useLLMStore((s) => s.init);
+  const autoLayoutEnabled = useCanvasStore((s) => s.autoLayoutEnabled);
+  const toggleAutoLayout = useCanvasStore((s) => s.toggleAutoLayout);
 
   const [isOpen, setIsOpen] = useState(false);
 
@@ -84,6 +87,38 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
           <h3 className="text-fg-default mb-3 text-sm font-semibold">
             Settings
           </h3>
+
+          <div className="border-edge-default mb-3 border-b pb-3">
+            <label className="text-fg-muted mb-1.5 block text-xs font-medium">
+              Canvas
+            </label>
+            <div className="border-edge-default bg-bg-default flex items-center justify-between rounded-md border px-2 py-1.5">
+              <div className="flex min-w-0 items-center gap-2">
+                <Sparkles size={14} className="text-fg-muted shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-fg-default text-xs font-medium">
+                    Auto Layout
+                  </p>
+                  <p className="text-fg-subtle text-[11px]">
+                    {autoLayoutEnabled ? 'Enabled' : 'Disabled'}
+                  </p>
+                </div>
+              </div>
+              <Button
+                variant={autoLayoutEnabled ? 'solid' : 'outline'}
+                tone={autoLayoutEnabled ? 'info' : 'neutral'}
+                size="sm"
+                onClick={() => toggleAutoLayout()}
+                title={
+                  autoLayoutEnabled
+                    ? 'Disable Auto Layout'
+                    : 'Enable Auto Layout'
+                }
+              >
+                {autoLayoutEnabled ? 'Disable' : 'Enable'}
+              </Button>
+            </div>
+          </div>
 
           <LLMSettings />
 
