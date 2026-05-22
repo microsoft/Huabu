@@ -54,6 +54,12 @@ import {
 } from '@/handler/snap/snapSession';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
+import {
+  MD_BACKED_NODE_TYPES,
+  NODE_CONTENT_KEYS,
+  TEXT_BEARING_NODE_TYPES,
+} from './canvasStore/save/nodeContentFields';
+import { shouldScheduleStructureSave } from './canvasStore/save/structureDirtyDetector';
 import { useGesturePreviewStore } from './gesturePreviewStore';
 import { useToolStore } from './toolStore';
 import { getCanvas, postCanvasEvents, preprocessNode, putCanvas } from '../api';
@@ -83,49 +89,6 @@ import type {
 const AUTOSAVE_DEBOUNCE_MS = 1000;
 const PREPROCESS_DEBOUNCE_MS = 1000;
 const NODE_CONTENT_DEBOUNCE_MS = 500;
-
-/**
- * `data` keys whose values live in the per-node markdown sidecar
- * (`nodes/<safe(label)>.md`), not in `canvas.json`. A patch touching any
- * of these schedules a per-node content save (see
- * {@link scheduleNodeContentSave}) and the key is stripped from the
- * structure PUT body so a viewport drag does not rewrite content.
- *
- * Keep in sync with `MD_BACKED_NODE_TYPES` / `putNodeContentBodySchema`
- * server-side. See `docs/node-content-api-split.md`.
- */
-const NODE_CONTENT_KEYS: ReadonlySet<string> = new Set([
-  'content',
-  'label',
-  'labelSource',
-  'src',
-  'summary',
-  'keywords',
-  'provenance',
-]);
-
-/**
- * Node types that own a markdown sidecar. Mirrors the server-side
- * `MD_BACKED_NODE_TYPES`. Patches to nodes whose type is not in this
- * set still update the in-memory store but do not schedule a content
- * save (there is no `.md` to write).
- */
-const MD_BACKED_NODE_TYPES: ReadonlySet<string> = new Set([
-  'note',
-  'text',
-  'web',
-  'pdf',
-  'image',
-  'video',
-  'frame',
-]);
-
-const TEXT_BEARING_NODE_TYPES: ReadonlySet<string> = new Set([
-  'note',
-  'text',
-  'web',
-  'pdf',
-]);
 
 // ─── Viewport sessionStorage ──────────────────────────────────────────────
 //
@@ -486,98 +449,6 @@ function stripNodeContentForStructurePut(nodes: readonly Node[]): Node[] {
   });
 }
 
-/**
- * Top-level `Node` keys the structure PUT does not care about.
- * `data` is diffed separately below (with its own ignore set); the
- * rest are ReactFlow internal UI state. Most of these now bypass the
- * gate entirely via `_setStateNoAutosave`; they remain here as a
- * defensive filter for the few engine paths that still touch them
- * (e.g. `SET_NODE_SELECTION` flipping `selected`).
- */
-const NODE_TOPLEVEL_IGNORE = new Set([
-  'data',
-  'dragging',
-  'selected',
-  'measured',
-  'handles',
-  'internals',
-]);
-
-/**
- * Reference-diff two records, ignoring an allow-list of keys. Returns
- * `true` on the first key whose values differ by `!==`, or when one
- * side has a non-ignored key the other does not.
- */
-function recordsDifferIgnoring(
-  a: Record<string, unknown>,
-  b: Record<string, unknown>,
-  ignore: ReadonlySet<string>,
-): boolean {
-  const seen = new Set<string>();
-  for (const k of Object.keys(a)) {
-    if (ignore.has(k)) continue;
-    seen.add(k);
-    if (a[k] !== b[k]) return true;
-  }
-  for (const k of Object.keys(b)) {
-    if (ignore.has(k)) continue;
-    if (!seen.has(k)) return true;
-  }
-  return false;
-}
-
-/**
- * Decide whether two `nodes` arrays differ in any field the structure
- * PUT actually cares about (id, type, position, parenthood, dimensions,
- * non-content `data` keys).
- *
- * Returns `false` when the only differences live inside
- * {@link NODE_CONTENT_KEYS} (or {@link NODE_TOPLEVEL_IGNORE}) — those
- * edits ride the per-node content PUT (or are pure UI state) and must
- * NOT bump the canvas `version`. Without this gate every keystroke
- * inside the editor would produce a new `nodes` array reference and
- * trigger a full structure save with an empty diff.
- *
- * `position` is compared by reference because after the Plan A cleanup
- * every 60 fps drag tick bypasses the gate via `_setStateNoAutosave`;
- * the only `position` mutations that reach here are engine commands
- * (`SET_NODE_GEOMETRY`, `ALIGN_NODES`, `SET_NODE_PARENT`) which always
- * change the underlying values, not just the object reference.
- */
-function haveNodesChangedStructurally(
-  prev: readonly Node[],
-  next: readonly Node[],
-): boolean {
-  if (prev === next) return false;
-  const len = next.length;
-  if (prev.length !== len) return true;
-  for (let i = 0; i < len; i++) {
-    const before = prev[i];
-    const after = next[i];
-    if (before === after) continue;
-    if (!before || !after) return true;
-    if (before.id !== after.id) return true;
-    if (
-      recordsDifferIgnoring(
-        before as unknown as Record<string, unknown>,
-        after as unknown as Record<string, unknown>,
-        NODE_TOPLEVEL_IGNORE,
-      )
-    ) {
-      return true;
-    }
-    const beforeData = (before.data ?? {}) as Record<string, unknown>;
-    const afterData = (after.data ?? {}) as Record<string, unknown>;
-    if (
-      beforeData !== afterData &&
-      recordsDifferIgnoring(beforeData, afterData, NODE_CONTENT_KEYS)
-    ) {
-      return true;
-    }
-  }
-  return false;
-}
-
 // Per-node debounce timers so rapid edits only fire one preprocessing request
 // after the user stops typing, rather than on every keystroke.
 const preprocessTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -760,8 +631,9 @@ type RFState = {
   /**
    * Record a new viewport. Called from `<ReactFlow onMoveEnd>` after the
    * user finishes panning/zooming. Writes to `sessionStorage` directly;
-   * does NOT participate in the structure autosave (`viewport` is not in
-   * {@link PERSISTED_KEYS}).
+   * does NOT participate in the structure autosave (`viewport` is not
+   * one of the persisted fields tracked by
+   * `./canvasStore/save/structureDirtyDetector.ts`).
    */
   setViewport: (viewport: CanvasViewport) => void;
 
@@ -1012,9 +884,6 @@ if (typeof window !== 'undefined') {
   window.addEventListener('beforeunload', flushAllNodeContentSavesKeepalive);
 }
 
-const PERSISTED_KEYS = ['nodes', 'edges', 'canvasTitle'] as const;
-type PersistedKey = (typeof PERSISTED_KEYS)[number];
-
 /**
  * Middleware that:
  * 1. Automatically schedules a canvas save whenever a persisted field
@@ -1043,20 +912,11 @@ const autoSaveMiddleware =
       // --- Autosave diff ---
       if (!prev.isLoading) {
         const next = get();
-        const changed = (PERSISTED_KEYS as readonly PersistedKey[]).some(
-          (k) => {
-            if (k === 'nodes') {
-              // A new `nodes` reference fires on every keystroke inside
-              // a note/text node because `updateNodeData` rebuilds the
-              // array. Gate the structure autosave on a real structural
-              // diff so pure content edits do NOT bump the canvas
-              // `version` — they ride the per-node content PUT instead.
-              return haveNodesChangedStructurally(prev.nodes, next.nodes);
-            }
-            return prev[k] !== next[k];
-          },
-        );
-        if (changed) {
+        // Gate the structure autosave on a real structural diff so pure
+        // content edits do NOT bump the canvas `version` — they ride
+        // the per-node content PUT instead. See
+        // `./canvasStore/save/structureDirtyDetector.ts`.
+        if (shouldScheduleStructureSave(prev, next)) {
           scheduleAutoSave(next.saveCanvas);
         }
         // --- Per-node content diff ---
@@ -2036,8 +1896,8 @@ const useCanvasStore = create<RFState>()(
       // geometry commit happens in `onNodeDragStop` via the
       // `SET_NODE_GEOMETRY` engine command, which DOES schedule
       // autosave. Routing this hot 60 fps drag-tick path through the
-      // no-autosave setter avoids running `haveNodesChangedStructurally`
-      // (and resetting the autosave debounce) on every frame.
+      // no-autosave setter avoids running the structure dirty
+      // detector (and resetting the autosave debounce) on every frame.
       get()._setStateNoAutosave({ nodes: nextNodes });
 
       // Drag-end detection: if this batch contained the final
