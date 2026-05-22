@@ -1,5 +1,7 @@
 import { AgentletServer } from '@agentlet/server';
 
+import { getTokenStore } from './token-store.js';
+
 import type { AgentletServerOptions } from '@agentlet/protocol';
 import type { FastifyInstance } from 'fastify';
 
@@ -22,9 +24,10 @@ let instance: AgentletServer | null = null;
 
 export interface MountAcpOptions {
   /**
-   * Override the default placeholder authenticator. Phase 3 will inject a
-   * canvas-scoped TokenStore here. Until then, any non-empty token is accepted
-   * so end-to-end wiring can be tested in dev.
+   * Override the default authenticator. By default we delegate to the
+   * process-wide `TokenStore` (see `./token-store.ts`), which Phase 1 seeds
+   * from `SEDIMENT_ACP_DEV_TOKEN`. Phase 3 will replace the store with a
+   * canvas-scoped backing.
    */
   authenticate?: AgentletServerOptions['authenticate'];
 }
@@ -42,14 +45,12 @@ export function mountAgentletServer(
 ): AgentletServer {
   if (instance) return instance;
 
+  const tokenStore = getTokenStore();
+
   const server = new AgentletServer({
     authenticate:
       opts.authenticate ??
-      (async (token) => {
-        // Phase 0 placeholder. Replaced by canvas-scoped TokenStore in Phase 3.
-        if (!token) throw new Error('Token required');
-        return { metadata: {} };
-      }),
+      (async (token, meta) => tokenStore.validate(token, meta)),
     onConnection: (agent) => {
       app.log.info(
         { agentId: agent.agentId, agentInfo: agent.agentInfo },

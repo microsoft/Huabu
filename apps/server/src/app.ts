@@ -6,6 +6,7 @@ import multipart from '@fastify/multipart';
 import staticPlugin from '@fastify/static';
 import { fastify } from 'fastify';
 
+import debugAcpRoutes from './modules/agent/acp/debug.route.js';
 import { mountAgentletServer } from './modules/agent/acp/index.js';
 import agentRoutes from './modules/agent/agent.route.js';
 import intentRoutes from './modules/agent/intent.route.js';
@@ -113,10 +114,12 @@ app.register(llmRoutes, { prefix: '/api/llm' });
 app.register(workspaceRoutes, { prefix: '/api/workspace' });
 
 // ── External agent (ACP) bridge ───────────────────────────────────────
-// Phase 0 wiring: mount @agentlet/server behind a feature flag so the
-// default startup path is unchanged. Set SEDIMENT_ENABLE_ACP=1 to enable
-// the WS endpoint at /acp/agent. See modules/agent/acp/README.md.
+// Phase 0+1 wiring: mount @agentlet/server (WS upgrade at /api/acp/agent)
+// and the Phase 1 debug endpoint (POST /api/debug/acp-prompt) behind the
+// same feature flag so the default startup path is unchanged. Set
+// SEDIMENT_ENABLE_ACP=1 to enable. See modules/agent/acp/README.md.
 if (process.env.SEDIMENT_ENABLE_ACP === '1') {
   mountAgentletServer(app);
-  app.log.info('ACP (external agent) bridge enabled');
+  app.register(debugAcpRoutes, { prefix: '/api/debug' });
+  app.log.info('ACP (external agent) bridge + debug route enabled');
 }
