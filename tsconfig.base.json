@@ -7,7 +7,10 @@
     "skipLibCheck": true,
     "baseUrl": ".",
     "paths": {
-      "@sediment/shared": ["./packages/shared/src/index.ts"]
+      "@sediment/shared": ["./packages/shared/src/index.ts"],
+      "@sediment/shared/canvas-engine": [
+        "./packages/shared/src/canvas-engine/index.ts"
+      ]
     }
   }
 }

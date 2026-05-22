@@ -152,6 +152,15 @@ export interface UiIntentResolution {
   commands: CanvasCommand[];
   /** Trace entries to record for this intent. */
   trace: RecentAction[];
+  /**
+   * UI-only state mutation that bypasses the command pipeline.
+   *
+   * Used for view-state toggles (currently only the expand-overlay) that
+   * are not part of the canvas graph but still flow through the intent
+   * system for trace-uniformity. The store's `dispatchUiIntent` applies
+   * this directly via `set({ expandedNodeId })`.
+   */
+  expandedNodeId?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -238,9 +247,8 @@ export function resolveUiIntent(
     case 'EXPAND_NODE': {
       const node = ui.nodes.find((n) => n.id === intent.nodeId);
       return {
-        commands: [
-          { type: 'SET_EXPANDED_NODE', nodeId: intent.nodeId as CanvasNodeId },
-        ],
+        commands: [],
+        expandedNodeId: intent.nodeId,
         trace: node
           ? [{ action: 'node_expanded', node: extractNodeRef(node) }]
           : [],

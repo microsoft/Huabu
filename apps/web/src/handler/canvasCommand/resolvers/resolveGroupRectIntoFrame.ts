@@ -3,8 +3,10 @@ import {
   type CanvasCommand,
   type CanvasNodeId,
 } from '@sediment/shared';
-
-import { frameNodesInRect, type NestableNode } from '../utils/frame';
+import {
+  frameNodesInRect,
+  type NestableNode,
+} from '@sediment/shared/canvas-engine';
 
 import type {
   CanvasUiIntent,

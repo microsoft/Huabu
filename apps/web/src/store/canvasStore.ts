@@ -3,6 +3,19 @@ import {
   isCrossCanvasArtifactUrl,
 } from '@sediment/shared';
 import {
+  COMMAND_META,
+  applySharedPostEffectsFromWriteResult,
+  executeCanvasCommands,
+  computeFrameFit,
+  getAbsolutePosition as getFrameAbsolutePosition,
+  wouldUnframe,
+  wouldAutoFrame,
+  getNodeSize,
+  type AlignDirection,
+  type FrameFitResult,
+  type NestableNode,
+} from '@sediment/shared/canvas-engine';
+import {
   applyNodeChanges,
   applyEdgeChanges,
   type Node,
@@ -17,12 +30,9 @@ import {
 } from '@xyflow/react';
 import { create, type StateCreator } from 'zustand';
 
-import { COMMAND_META } from '@/handler/canvasCommand/commands';
-import { executeCanvasCommands } from '@/handler/canvasCommand/executor';
-import { runPostEffects } from '@/handler/canvasCommand/postEffects';
+import { runWebPostEffects } from '@/handler/canvasCommand/postEffects.web';
 import {
   preprocessNodeIfNeeded,
-  needsPreprocessing,
   type NodeIngestionInfo,
 } from '@/handler/canvasCommand/preprocess';
 import {
@@ -32,14 +42,6 @@ import {
   type UiResolverState,
 } from '@/handler/canvasCommand/uiIntent';
 import { pushAction } from '@/handler/canvasCommand/utils';
-import {
-  computeFrameFit,
-  getAbsolutePosition as getFrameAbsolutePosition,
-  wouldUnframe,
-  wouldAutoFrame,
-  type FrameFitResult,
-  type NestableNode,
-} from '@/handler/canvasCommand/utils/frame';
 import {
   applySnap,
   beginSnapSession,
@@ -61,9 +63,7 @@ import { toast } from '../components/Common/Toast';
 import { seedNoteFixedHeight } from '../components/Nodes/note/autoHeight';
 import { getNoteFixedHeight } from '../components/Nodes/note/heightMemory';
 import { copyToClipboard } from '../utils/io/clipboard';
-import { getNodeSize } from '../utils/node/size';
 
-import type { AlignDirection } from '@/handler/canvasCommand/utils/alignment';
 import type {
   AgentChatContext,
   CanvasCommand,
@@ -735,8 +735,9 @@ const useCanvasStore = create<RFState>()(
 
     /** Execute a batch of shared CanvasCommands. Source defaults to 'ui'. */
     executeCommands: (commands, source) => {
+      const resolvedSource = source ?? 'ui';
       const execution: CanvasExecution = {
-        source: source ?? 'ui',
+        source: resolvedSource,
         commands,
       };
       const state = {
@@ -747,7 +748,11 @@ const useCanvasStore = create<RFState>()(
       };
 
       const { writeResult, commandResults, pendingEffects } =
-        executeCanvasCommands(execution, state);
+        executeCanvasCommands(execution, state, {
+          // Agent batches must always refit parent frames because the
+          // LLM cannot accurately predict rendered dimensions.
+          forceFitFrames: resolvedSource === 'agent',
+        });
 
       // Only commit if at least one command was applied.
       if (!commandResults.some((r) => r.applied)) return;
@@ -757,7 +762,7 @@ const useCanvasStore = create<RFState>()(
       const hasCallerSnapshot = commands.some(
         (c) => COMMAND_META[c.type].snapshot === 'caller',
       );
-      if (hasCallerSnapshot && (source ?? 'ui') !== 'agent') {
+      if (hasCallerSnapshot && resolvedSource !== 'agent') {
         if (!canvasHistoryManager.gestureSnapshotTaken) {
           console.warn(
             '[canvasStore] snapshot:"caller" command executed without beginGesture():',
@@ -772,27 +777,27 @@ const useCanvasStore = create<RFState>()(
         canvasHistoryManager.takeSnapshot(state.nodes, state.edges);
       }
 
-      // Commit new state.
-      const updates: Partial<RFState> = {
+      // Apply pure host-agnostic post-commit cleanups (today: edge
+      // handle reroute) BEFORE the state commit so they fold into a
+      // single set() call instead of triggering a second render.
+      const sharedOut = applySharedPostEffectsFromWriteResult(writeResult);
+
+      // Commit new state in one shot.
+      set({
         nodes: writeResult.nodes,
-        edges: writeResult.edges,
-      };
+        edges: sharedOut.edges,
+      });
 
-      if (writeResult.expandedNodeId !== undefined) {
-        updates.expandedNodeId = writeResult.expandedNodeId;
-      }
-
-      set(updates);
-
-      // Run post-commit side effects (edge reroute, ingestion, label resolve, delete tracking).
-      runPostEffects(
-        pendingEffects,
-        { triggerPreprocessing },
-        writeResult.requiresEdgeReroute,
-        state.canvasId,
-        () => ({ nodes: get().nodes, edges: get().edges }),
-        (partial) => set(partial),
-      );
+      // Drain web-only effects (preprocessing trigger, delete
+      // tracking, AI flag, transition cleanup, deferred frame fit).
+      runWebPostEffects({
+        effects: pendingEffects,
+        source: resolvedSource,
+        canvasId: state.canvasId,
+        getNodes: () => get().nodes,
+        setNodes: (nodes) => set({ nodes }),
+        triggerPreprocessing,
+      });
     },
 
     /** Resolve a web-only UiIntent and execute the resulting commands. */
@@ -805,6 +810,11 @@ const useCanvasStore = create<RFState>()(
       const execution = resolveUiIntent(intent, uiState);
       if (execution.commands.length > 0) {
         get().executeCommands(execution.commands);
+      }
+      // Apply UI-only state mutations (e.g. expand-overlay toggle) that
+      // bypass the command pipeline.
+      if (execution.expandedNodeId !== undefined) {
+        set({ expandedNodeId: execution.expandedNodeId });
       }
       // Push trace from intent resolution to action history.
       if (execution.trace.length > 0) {
@@ -908,12 +918,11 @@ const useCanvasStore = create<RFState>()(
           ingestionByNodeId: {},
         });
 
-        // Backfill: any node that participates in preprocessing but has
-        // no label after load (e.g. frame auto-labels lost in older data,
-        // or media nodes whose initial preprocess never completed) gets
-        // re-queued so the server can regenerate one.
+        // Backfill: any node with an empty label gets re-queued so the
+        // server can regenerate one. The server's preprocessing
+        // dispatcher decides per node profile whether there's any
+        // actual work to do, so we don't filter by type here.
         for (const node of loadedNodes) {
-          if (!needsPreprocessing(node.type ?? '')) continue;
           const data = node.data as Record<string, unknown> | undefined;
           const label = typeof data?.label === 'string' ? data.label : '';
           if (label.trim().length > 0) continue;
@@ -1610,7 +1619,7 @@ const useCanvasStore = create<RFState>()(
       // is only known after the next render cycle (editor reflow +
       // ReactFlow ResizeObserver). The `SET_NODE_GEOMETRY` handler
       // detects the cleared height and emits a `deferredFitFrameIds`
-      // post-effect, which `runPostEffects` schedules for double-rAF
+      // post-effect, which `runWebPostEffects` schedules for double-rAF
       // refit — so this action doesn't need its own timing dance.
       get().beginGesture('SET_NODE_GEOMETRY');
       get().setNodeGeometry(items);
@@ -1947,7 +1956,7 @@ function flushOnUnload(): void {
   // Fire preprocessNode with keepalive for every queued node.
   for (const nodeId of pendingNodeIds) {
     const node = nodes.find((n) => n.id === nodeId);
-    if (!node || !needsPreprocessing(node.type ?? '')) continue;
+    if (!node) continue;
 
     const nodeData = node.data as Record<string, unknown> | undefined;
     const nodeType = node.type ?? '';

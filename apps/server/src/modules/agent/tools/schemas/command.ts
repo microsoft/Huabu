@@ -25,10 +25,6 @@ export const AlignDirectionSchema = literalUnion(CANVAS_ALIGN_DIRECTIONS);
  * The 13-arm discriminated union of agent-allowed canvas commands.
  * Order here mirrors the order documented in `canvasCommandsTool`'s
  * description so the LLM-facing schema and prose stay in sync.
- *
- * Note: `AUTO_LAYOUT` is intentionally absent — it is listed in
- * `DEPRECATED_CANVAS_COMMAND_TYPES` (shared) and no longer exposed to the
- * agent. The handler still exists for replay of historical commands.
  */
 export const AgentCanvasCommandSchema = Type.Union([
   Type.Object({

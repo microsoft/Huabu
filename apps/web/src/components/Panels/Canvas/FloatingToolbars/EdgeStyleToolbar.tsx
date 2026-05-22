@@ -1,4 +1,5 @@
 import { ACCENT_PALETTE, EDGE_STROKE_WIDTHS } from '@sediment/shared';
+import { DEFAULT_EDGE_STROKE_WIDTH } from '@sediment/shared/canvas-engine';
 import { Trash2 } from 'lucide-react';
 import { useCallback, useMemo } from 'react';
 
@@ -7,7 +8,6 @@ import {
   FloatingToolbar,
   FLOATING_TOOLBAR_CLASS,
 } from '@/components/Common/FloatingToolbar';
-import { DEFAULT_EDGE_STROKE_WIDTH } from '@/handler/canvasCommand/utils/edge';
 import { useIsNotMouse } from '@/hooks/useInputMode';
 import useCanvasStore from '@/store/canvasStore';
 

@@ -60,8 +60,8 @@ import { VideoNode } from '../../Nodes/video/VideoNode.tsx';
 import { WebNode } from '../../Nodes/web/WebNode.tsx';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
-import type { FrameFitResult } from '@/handler/canvasCommand/utils/frame';
 import type { CanvasViewport } from '@sediment/shared';
+import type { FrameFitResult } from '@sediment/shared/canvas-engine';
 
 const nodeTypes = {
   image: ImageNode,

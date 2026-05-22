@@ -122,6 +122,36 @@ export default typescriptEslint.config(
     },
   },
   {
+    // @sediment/shared boundary: the shared package is server-portable
+    // and must not pull in browser-only runtime deps. `@xyflow/react`
+    // types are allowed (Node/Edge shapes), but the runtime entry is
+    // banned. Web-side aliases (`@/`) are also disallowed here because
+    // shared has no `paths` mapping.
+    files: ['packages/shared/src/**/*.{ts,tsx}'],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: '@xyflow/react',
+              message:
+                '@sediment/shared is server-portable. Use `import type` for Node/Edge shapes only.',
+              allowTypeImports: true,
+            },
+          ],
+          patterns: [
+            {
+              group: ['@/*'],
+              message:
+                '@sediment/shared has no @/ alias. Use relative imports inside the package.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // Browser Env (Web App)
     files: ['apps/web/src/**/*.{ts,tsx,js,jsx}'],
     plugins: {

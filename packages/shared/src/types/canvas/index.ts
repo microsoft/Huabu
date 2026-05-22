@@ -115,8 +115,6 @@ export type {
   CanvasEdgeRef,
   NodeSize,
   CanvasAlignDirection,
-  CanvasAutoLayoutScope,
-  CanvasAutoLayoutOptions,
   CanvasNodeCreateInput,
   CanvasNodeDataMergePatch,
   CanvasNodeParentUpdate,

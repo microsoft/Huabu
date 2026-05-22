@@ -1,5 +1,10 @@
 import { resolveSurface, resolveAccent } from '@sediment/shared';
 import {
+  createAbsolutePositionGetter,
+  indexById,
+  type NestableNode,
+} from '@sediment/shared/canvas-engine';
+import {
   Handle,
   Position,
   NodeResizer,
@@ -22,11 +27,6 @@ import { cn } from '@/components/Common/cn.ts';
 import { Spinner } from '@/components/Common/Spinner.tsx';
 import { Tooltip } from '@/components/Common/Tooltip.tsx';
 import { NodeFloatingToolbar } from '@/components/Panels/Canvas/FloatingToolbars/NodeFloatingToolbar.tsx';
-import {
-  createAbsolutePositionGetter,
-  indexById,
-  type NestableNode,
-} from '@/handler/canvasCommand/utils/frame';
 import {
   beginSnapSession,
   endSnapSession,

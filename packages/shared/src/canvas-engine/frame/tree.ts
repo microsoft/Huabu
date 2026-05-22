@@ -1,0 +1,236 @@
+/**
+ * Frame Tree - Hierarchy & coordinate primitives
+ *
+ * Pure topology helpers for the canvas node forest:
+ * - Node lookup / ordering invariants required by React Flow.
+ * - Absolute-coordinate resolution through the parent chain.
+ * - Descendant / ancestor traversal.
+ *
+ * No "frame" semantics live here; everything in this module operates on the
+ * generic parent/child graph and is reused by the detection, mutation, and
+ * fit submodules.
+ */
+
+import type { Node, XYPosition } from '@xyflow/react';
+
+export type NestableNode = Node & {
+  parentId?: string;
+  data?: Record<string, unknown>;
+};
+
+// ---------------------------------------------------------------------------
+// Internal position helpers (re-exported for sibling submodules only).
+// Kept out of the public barrel.
+// ---------------------------------------------------------------------------
+
+export function addPos(a: XYPosition, b: XYPosition): XYPosition {
+  return { x: a.x + b.x, y: a.y + b.y };
+}
+
+export function subPos(a: XYPosition, b: XYPosition): XYPosition {
+  return { x: a.x - b.x, y: a.y - b.y };
+}
+
+export function indexById(nodes: NestableNode[]): Map<string, NestableNode> {
+  return new Map(nodes.map((n) => [n.id, n] as const));
+}
+
+/**
+ * Ensures nodes are ordered so parents appear before their children.
+ * This is required by React Flow to avoid "parent node not found" errors.
+ * Also removes dangling parent references and breaks cycles.
+ */
+export function normalizeTreeOrder(nodes: NestableNode[]): NestableNode[] {
+  const byId = indexById(nodes);
+  const originalIndex = new Map(nodes.map((n, i) => [n.id, i] as const));
+
+  // Drop dangling parent links to avoid runtime errors and ensure frame
+  // children share the same zIndex as their parent frame.
+  const normalized = nodes.map((n) => {
+    if (!n.parentId) {
+      // Top-level non-frame node should not carry the frame zIndex.
+      if (n.type !== 'frame' && n.zIndex === -1) {
+        const { zIndex: _zIndex, ...rest } = n;
+        return rest;
+      }
+      return n;
+    }
+    if (!byId.has(n.parentId)) {
+      const { parentId: _parentId, ...rest } = n;
+      // Also strip frame-level zIndex when the parent disappears.
+      if (rest.zIndex === -1 && rest.type !== 'frame') {
+        const { zIndex: _zIndex, ...clean } = rest;
+        return clean;
+      }
+      return rest;
+    }
+    // Ensure child nodes of a frame share the frame's zIndex.
+    const parent = byId.get(n.parentId);
+    if (parent?.type === 'frame' && n.zIndex !== -1) {
+      return { ...n, zIndex: -1 };
+    }
+    return n;
+  });
+
+  const normalizedById = indexById(normalized);
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const result: NestableNode[] = [];
+
+  const visit = (id: string) => {
+    if (visited.has(id)) return;
+    if (visiting.has(id)) {
+      // Break cycles defensively by treating the node as root.
+      const node = normalizedById.get(id);
+      if (node?.parentId) {
+        const { parentId: _parentId, ...rest } = node;
+        normalizedById.set(id, rest);
+      }
+      visiting.delete(id);
+    }
+
+    const node = normalizedById.get(id);
+    if (!node) return;
+
+    visiting.add(id);
+    if (node.parentId) visit(node.parentId);
+    visiting.delete(id);
+
+    visited.add(id);
+    result.push(node);
+  };
+
+  // Stable-ish order: iterate by original index.
+  const ids = [...normalizedById.keys()].sort((a, b) => {
+    return (originalIndex.get(a) ?? 0) - (originalIndex.get(b) ?? 0);
+  });
+  for (const id of ids) visit(id);
+
+  return result;
+}
+
+export function getAncestorIds(
+  byId: Map<string, NestableNode>,
+  nodeId: string,
+): string[] {
+  const result: string[] = [];
+
+  let current = byId.get(nodeId);
+  const visited = new Set<string>([nodeId]);
+
+  while (current?.parentId) {
+    const parentId = current.parentId;
+    if (visited.has(parentId)) break;
+    visited.add(parentId);
+    result.push(parentId);
+    current = byId.get(parentId);
+  }
+
+  return result;
+}
+
+export function getTopLevelIds(nodes: NestableNode[], ids: string[]): string[] {
+  const byId = indexById(nodes);
+  const selected = new Set(ids);
+  return ids.filter((id) => {
+    const ancestors = getAncestorIds(byId, id);
+    return !ancestors.some((a) => selected.has(a));
+  });
+}
+
+export function createAbsolutePositionGetter(byId: Map<string, NestableNode>) {
+  const absById = new Map<string, XYPosition | null>();
+
+  return (nodeId: string): XYPosition | null => {
+    if (absById.has(nodeId)) return absById.get(nodeId) ?? null;
+
+    const chain: NestableNode[] = [];
+    const visited = new Set<string>();
+
+    let currentId: string | undefined = nodeId;
+    let baseAbs: XYPosition = { x: 0, y: 0 };
+
+    while (currentId) {
+      if (absById.has(currentId)) {
+        baseAbs = absById.get(currentId) ?? { x: 0, y: 0 };
+        break;
+      }
+
+      const current = byId.get(currentId);
+      if (!current) {
+        absById.set(nodeId, null);
+        return null;
+      }
+
+      chain.push(current);
+      visited.add(current.id);
+
+      const parentId = current.parentId;
+      if (!parentId) break;
+
+      // Match getAbsolutePosition semantics:
+      // - dangling parentId: stop walking
+      // - cycles: stop walking
+      if (!byId.has(parentId)) break;
+      if (visited.has(parentId)) break;
+
+      if (absById.has(parentId)) {
+        baseAbs = absById.get(parentId) ?? { x: 0, y: 0 };
+        break;
+      }
+
+      currentId = parentId;
+    }
+
+    let abs = baseAbs;
+    for (let i = chain.length - 1; i >= 0; i -= 1) {
+      const n = chain[i];
+      abs = addPos(abs, n.position);
+      absById.set(n.id, abs);
+    }
+
+    return absById.get(nodeId) ?? null;
+  };
+}
+
+/**
+ * Computes a node's absolute position in the flow coordinate space.
+ * Works for nested frames by walking the parent chain.
+ *
+ * Delegates to createAbsolutePositionGetter for consistent logic.
+ */
+export function getAbsolutePosition(
+  nodes: NestableNode[],
+  nodeId: string,
+): XYPosition | null {
+  const byId = indexById(nodes);
+  const getAbs = createAbsolutePositionGetter(byId);
+  return getAbs(nodeId);
+}
+
+export function getDescendantIds(
+  nodes: NestableNode[],
+  rootId: string,
+): string[] {
+  const childrenByParent = new Map<string, string[]>();
+  for (const n of nodes) {
+    if (!n.parentId) continue;
+    const arr = childrenByParent.get(n.parentId) ?? [];
+    arr.push(n.id);
+    childrenByParent.set(n.parentId, arr);
+  }
+
+  const result: string[] = [];
+  const stack: string[] = [...(childrenByParent.get(rootId) ?? [])];
+
+  while (stack.length) {
+    const id = stack.pop();
+    if (!id) continue;
+    result.push(id);
+
+    const kids = childrenByParent.get(id);
+    if (kids?.length) stack.push(...kids);
+  }
+
+  return result;
+}

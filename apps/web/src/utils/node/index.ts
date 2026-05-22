@@ -1,10 +1,9 @@
-export { getNodeSize as getMeasuredNodeSize, getLayoutNodeSize } from './size';
-
 export {
+  getNodeSize as getMeasuredNodeSize,
+  getLayoutNodeSize,
   NODE_TYPE_TO_PREFIX,
   extractLabelNumber,
   generateNextLabel,
   deduplicateLabel,
-} from './labels';
-
-export { getNodeDefaultSize } from '@/config/nodeSizes';
+  getNodeDefaultSize,
+} from '@sediment/shared/canvas-engine';

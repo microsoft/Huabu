@@ -9,6 +9,10 @@
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts"
+    },
+    "./canvas-engine": {
+      "types": "./src/canvas-engine/index.ts",
+      "import": "./src/canvas-engine/index.ts"
     }
   },
   "files": [
@@ -22,6 +26,14 @@
     "dev": "tsc -w -p tsconfig.json"
   },
   "dependencies": {
+    "@xyflow/react": "^12.10.0",
+    "cytoscape": "^3.33.1",
+    "cytoscape-fcose": "^2.2.0",
+    "cytoscape-layout-utilities": "^1.1.1",
+    "webcola": "^3.4.0",
     "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "vitest": "^4.0.18"
   }
 }

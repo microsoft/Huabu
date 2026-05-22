@@ -55,17 +55,18 @@
  */
 
 import {
+  createAbsolutePositionGetter,
+  indexById,
+  getNodeSize,
+  type NestableNode,
+} from '@sediment/shared/canvas-engine';
+
+import {
   SNAP_MAX_GUIDES_PER_FRAME,
   SNAP_THRESHOLD_SCREEN_PX,
 } from '@/config/canvas';
-import {
-  createAbsolutePositionGetter,
-  indexById,
-  type NestableNode,
-} from '@/handler/canvasCommand/utils/frame';
 import { buildCandidateIndex, computeSnap } from '@/handler/snap/snapEngine';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
-import { getNodeSize } from '@/utils/node/size';
 
 import type { ActiveEdges, Rect, SnapIndex } from '@/handler/snap/types';
 import type {

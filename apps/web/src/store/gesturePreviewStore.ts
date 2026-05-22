@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 
-import type { FrameFitResult } from '@/handler/canvasCommand/utils/frame';
 import type { Guide } from '@/handler/snap/types';
+import type { FrameFitResult } from '@sediment/shared/canvas-engine';
 
 type GesturePreviewState = {
   /**

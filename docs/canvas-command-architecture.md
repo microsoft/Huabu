@@ -74,19 +74,19 @@ Every `CanvasCommand`:
 
 ### Command Catalog
 
-See `packages/shared/src/types/canvas/command.ts` for the full 15-member discriminated union. Summary:
+See `packages/shared/src/types/canvas/command.ts` for the full discriminated union (currently 16 command types). Summary (non-exhaustive):
 
-| Category         | Commands                                  |
-| ---------------- | ----------------------------------------- |
-| Node lifecycle   | `CREATE_NODES`, `DELETE_NODES`            |
-| Node editing     | `MERGE_NODE_DATA`                         |
-| Structure        | `SET_NODE_PARENT`, `DISSOLVE_FRAME`       |
-| Geometry         | `SET_NODE_GEOMETRY`                       |
-| Selection / view | `SET_NODE_SELECTION`, `SET_EXPANDED_NODE` |
-| Ordering         | `REORDER_NODES`                           |
-| Locking          | `SET_NODE_LOCKED`                         |
-| Edge graph       | `CONNECT_NODES`, `DISCONNECT_EDGES`       |
-| Algorithms       | `ALIGN_NODES`, `DISTRIBUTE_NODES`         |
+| Category         | Commands                            |
+| ---------------- | ----------------------------------- |
+| Node lifecycle   | `CREATE_NODES`, `DELETE_NODES`      |
+| Node editing     | `MERGE_NODE_DATA`                   |
+| Structure        | `SET_NODE_PARENT`, `DISSOLVE_FRAME` |
+| Geometry         | `SET_NODE_GEOMETRY`                 |
+| Selection / view | `SET_NODE_SELECTION`                |
+| Ordering         | `REORDER_NODES`                     |
+| Locking          | `SET_NODE_LOCKED`                   |
+| Edge graph       | `CONNECT_NODES`, `DISCONNECT_EDGES` |
+| Algorithms       | `ALIGN_NODES`, `DISTRIBUTE_NODES`   |
 
 ### Explicit IDs
 
@@ -149,7 +149,7 @@ Agent and web now converge on the same `CanvasCommand` pipeline. The server neve
 
 ### Agent Command Schema
 
-The agent exposes a single `canvas_commands` tool (`apps/server/src/modules/agent/tools/definitions.ts`). Its parameter schema is a TypeBox-validated subset of `CanvasCommand` — the 12 agent-allowed command types (excludes UI-only commands `SET_NODE_LOCKED`, `SET_NODE_SELECTION`, `SET_EXPANDED_NODE`).
+The agent exposes a single `canvas_commands` tool (`apps/server/src/modules/agent/tools/definitions.ts`). Its parameter schema is a TypeBox-validated subset of `CanvasCommand` — the agent-allowed command types (excludes UI-only commands `SET_NODE_LOCKED`, `SET_NODE_SELECTION`, `CHANGE_NODE_TYPE`).
 
 The LLM emits `CanvasCommand` JSON directly from the tool-call layer; no server adapter is needed.
 
