@@ -60,6 +60,7 @@ import {
   TEXT_BEARING_NODE_TYPES,
 } from './canvasStore/save/nodeContentFields';
 import { shouldScheduleStructureSave } from './canvasStore/save/structureDirtyDetector';
+import { createStructureScheduler } from './canvasStore/save/structureScheduler';
 import { useGesturePreviewStore } from './gesturePreviewStore';
 import { useToolStore } from './toolStore';
 import { getCanvas, postCanvasEvents, preprocessNode, putCanvas } from '../api';
@@ -141,26 +142,6 @@ function writeViewportToSession(
     // Ignore: viewport is a UX nicety, never block the user on it.
   }
 }
-
-/**
- * Flush pending autosave immediately (synchronous cancel + fire).
- * Used before switching canvases to avoid losing edits.
- */
-const flushAutoSave = async (saveCanvas: () => Promise<void>) => {
-  if (saveTimeout) {
-    clearTimeout(saveTimeout);
-    saveTimeout = null;
-    // Swallow conflicts here — `tryRename` is the path that surfaces
-    // them to the user. Autosave should never break canvas switching.
-    try {
-      await saveCanvas();
-    } catch (err) {
-      if (!(err instanceof CanvasConflictError)) {
-        console.error('Failed to flush autosave:', err);
-      }
-    }
-  }
-};
 
 // ─── Per-node content flush ────────────────────────────────────────────────
 //
@@ -331,8 +312,8 @@ function scheduleNodeContentSave(canvasId: string, nodeId: string): void {
 /**
  * Promote every pending debounced content save into an immediate
  * flush, then wait for every in-flight PUT (including the new ones)
- * to settle. Used by `flushAutoSave` so canvas switches do not
- * orphan editor edits.
+ * to settle. Used by `switchCanvas` alongside the structure-save
+ * flush so canvas switches do not orphan editor edits.
  */
 async function flushAllNodeContentSaves(): Promise<void> {
   const canvasId = useCanvasStore.getState().canvasId;
@@ -780,18 +761,19 @@ type RFState = {
   flushCanvasEvents: () => Promise<void>;
 };
 
-let saveTimeout: ReturnType<typeof setTimeout> | null = null;
-
-const scheduleAutoSave = (saveCanvas: () => Promise<void>) => {
-  if (saveTimeout) clearTimeout(saveTimeout);
-  saveTimeout = setTimeout(() => {
-    saveCanvas().catch((err) => {
-      if (!(err instanceof CanvasConflictError)) {
-        console.error('Autosave failed:', err);
-      }
-    });
-  }, AUTOSAVE_DEBOUNCE_MS);
-};
+/**
+ * Module-scoped structure-save scheduler. Owns the debounce timer
+ * for `PUT /api/canvas/:id`; the actual save action lives on the
+ * store slice (`saveCanvas`) because it touches OCC state.
+ *
+ * `getSaveCanvas` is a lazy getter so the scheduler always picks up
+ * the freshest closure (matters for HMR and for tests that swap the
+ * store).
+ */
+const structureScheduler = createStructureScheduler({
+  getSaveCanvas: () => useCanvasStore.getState().saveCanvas,
+  delayMs: AUTOSAVE_DEBOUNCE_MS,
+});
 
 // ─── Outgoing event buffer ────────────────────────────────────────────────
 //
@@ -917,7 +899,7 @@ const autoSaveMiddleware =
         // the per-node content PUT instead. See
         // `./canvasStore/save/structureDirtyDetector.ts`.
         if (shouldScheduleStructureSave(prev, next)) {
-          scheduleAutoSave(next.saveCanvas);
+          structureScheduler.schedule();
         }
         // --- Per-node content diff ---
         // Independent of the structure autosave so editor edits flush
@@ -1318,9 +1300,9 @@ const useCanvasStore = create<RFState>()(
 
       // Flip into the loading state *before* awaiting anything so the
       // shell shows `LoadingState` on the very next render instead of
-      // briefly painting the previous canvas while `flushAutoSave`
-      // resolves. `loadCanvas` below will set `isLoading: true` again
-      // (idempotent) once it starts the actual fetch.
+      // briefly painting the previous canvas while the structure save
+      // flush resolves. `loadCanvas` below will set `isLoading: true`
+      // again (idempotent) once it starts the actual fetch.
       set({
         isLoading: true,
         canvasNotFound: false,
@@ -1328,7 +1310,7 @@ const useCanvasStore = create<RFState>()(
       });
 
       // Flush any pending save for the current canvas before switching
-      await flushAutoSave(get().saveCanvas);
+      await structureScheduler.flushAsync();
       // Also drain any pending per-node content PUTs so editor edits
       // made on the outgoing canvas land before we tear its state down.
       await flushAllNodeContentSaves();
@@ -2420,13 +2402,12 @@ function flushOnUnload(): void {
   }
 
   // 2. Drain a pending structure-save debounce, if any.
-  //    If `saveTimeout` is null, the latest structural state is
-  //    already on the wire (or never differed from what's on disk),
-  //    so we skip the PUT entirely — no more empty diffs bumping
-  //    `version` on every page close.
-  if (saveTimeout) {
-    clearTimeout(saveTimeout);
-    saveTimeout = null;
+  //    `cancelPending()` returns `false` when no timer was queued,
+  //    meaning the latest structural state is already on the wire
+  //    (or never differed from what's on disk), so we skip the PUT
+  //    entirely — no more empty diffs bumping `version` on every
+  //    page close.
+  if (structureScheduler.cancelPending()) {
     void state.saveCanvas({ keepalive: true }).catch(() => undefined);
   }
 }
