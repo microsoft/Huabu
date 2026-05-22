@@ -51,11 +51,8 @@ import {
 
 import { canvasHistoryManager } from './canvasHistoryManager';
 import { createCanvasEventBuffer } from './canvasStore/save/eventBuffer';
-import {
-  MD_BACKED_NODE_TYPES,
-  NODE_CONTENT_KEYS,
-  TEXT_BEARING_NODE_TYPES,
-} from './canvasStore/save/nodeContentFields';
+import { NODE_CONTENT_KEYS } from './canvasStore/save/nodeContentFields';
+import { createNodeContentQueue } from './canvasStore/save/nodeContentQueue';
 import { createPreprocessQueue } from './canvasStore/save/preprocessQueue';
 import { shouldScheduleStructureSave } from './canvasStore/save/structureDirtyDetector';
 import { createStructureScheduler } from './canvasStore/save/structureScheduler';
@@ -63,7 +60,7 @@ import { useGesturePreviewStore } from './gesturePreviewStore';
 import { useToolStore } from './toolStore';
 import { getCanvas, putCanvas } from '../api';
 import { cloneArtifactToCanvas } from '../api/artifact';
-import { CanvasConflictError, putNodeContent } from '../api/canvas';
+import { CanvasConflictError } from '../api/canvas';
 import { toast } from '../components/Common/Toast';
 import { seedNoteFixedHeight } from '../components/Nodes/note/autoHeight';
 import { getNoteFixedHeight } from '../components/Nodes/note/heightMemory';
@@ -79,7 +76,6 @@ import type {
   CanvasNodeType,
   CanvasViewport,
   IntentContext,
-  PutNodeContentRequest,
   RecentAction,
   WireCanvasNode,
   WireSelectionNode,
@@ -143,264 +139,11 @@ function writeViewportToSession(
 
 // ─── Per-node content flush ────────────────────────────────────────────────
 //
-// Edits to a node's markdown sidecar (content / label / src / summary /
-// keywords / provenance) are persisted via a dedicated per-node endpoint
-// (`PUT /api/canvas/:canvasId/nodes/:nodeId/content`) that never bumps the
-// canvas-level `version` counter. This decouples editor typing from
-// viewport drags / structure autosaves so the two flows can never collide
-// on the optimistic-concurrency check.
-//
-// Each node gets:
-//   • a 500ms debounce timer (`nodeContentTimers`) so trailing keystrokes
-//     coalesce into one PUT.
-//   • a serialized in-flight chain (`nodeContentInFlight`) so a node can
-//     have at most one PUT in flight at a time. The next flush always
-//     reads `useCanvasStore.getState()` at the moment it actually runs,
-//     so a queue of pending bodies never builds up — trailing edits
-//     collapse into a single later PUT.
-//
-// See `docs/node-content-api-split.md`.
-
-const nodeContentTimers = new Map<string, ReturnType<typeof setTimeout>>();
-const nodeContentInFlight = new Map<string, Promise<void>>();
-
-/**
- * Build the `PutNodeContentRequest` body for `nodeId` from the latest
- * store snapshot. Returns `null` when the node has gone away (e.g.
- * deleted between debounce-schedule and flush) or its type is not
- * markdown-backed.
- */
-function buildNodeContentRequest(nodeId: string): PutNodeContentRequest | null {
-  const node = useCanvasStore.getState().nodes.find((n) => n.id === nodeId);
-  if (!node) return null;
-  const nodeType = typeof node.type === 'string' ? node.type : '';
-  if (!MD_BACKED_NODE_TYPES.has(nodeType)) return null;
-
-  const data = (node.data ?? {}) as Record<string, unknown>;
-  const body: PutNodeContentRequest = { nodeType };
-
-  if (TEXT_BEARING_NODE_TYPES.has(nodeType)) {
-    const content = data['content'];
-    if (typeof content === 'string') body.content = content;
-  }
-
-  const label = data['label'];
-  if (typeof label === 'string') body.label = label;
-  else if (label === null) body.label = null;
-
-  const labelSource = data['labelSource'];
-  if (
-    labelSource === 'user' ||
-    labelSource === 'auto' ||
-    labelSource === 'agent'
-  ) {
-    body.labelSource = labelSource;
-  }
-
-  const src = data['src'];
-  if (typeof src === 'string') body.src = src;
-
-  const summary = data['summary'];
-  if (typeof summary === 'string') body.summary = summary;
-
-  const keywords = data['keywords'];
-  if (Array.isArray(keywords) && keywords.every((k) => typeof k === 'string')) {
-    body.keywords = keywords as string[];
-  }
-
-  if ('provenance' in data) {
-    body.provenance = data['provenance'];
-  }
-
-  return body;
-}
-
-/**
- * Execute a single per-node content PUT. Reads the store at call time
- * so trailing edits collapse into one body. On success, mirrors the
- * server-resolved label back into the store (for agent auto-dedupe
- * suffixes) without scheduling another autosave round-trip.
- *
- * Throws `CanvasConflictError` on `NODE_LABEL_CONFLICT` so
- * `tryRename`'s awaited path can revert the optimistic label + alert.
- */
-async function performNodeContentSave(
-  canvasId: string,
-  nodeId: string,
-  opts?: { keepalive?: boolean },
-): Promise<void> {
-  const body = buildNodeContentRequest(nodeId);
-  if (!body) return;
-  const response = await putNodeContent(canvasId, nodeId, body, opts);
-  // Only patch when the resolved label actually differs from what's in
-  // the store right now — avoids spurious re-renders when the server
-  // echoes back exactly what we sent.
-  const state = useCanvasStore.getState();
-  const currentNode = state.nodes.find((n) => n.id === nodeId);
-  if (!currentNode) return;
-  const currentLabel =
-    typeof currentNode.data?.['label'] === 'string'
-      ? (currentNode.data['label'] as string)
-      : null;
-  if (response.label !== null && response.label !== currentLabel) {
-    state._setStateNoAutosave({
-      nodes: state.nodes.map((n) =>
-        n.id === nodeId
-          ? {
-              ...n,
-              data: { ...(n.data ?? {}), label: response.label },
-            }
-          : n,
-      ),
-    });
-  }
-}
-
-/**
- * Serialize per-node PUTs: chain each new flush onto any pending one so
- * the server never sees two writes for the same node in flight at
- * once. Always exposes the latest in-flight promise via
- * {@link nodeContentInFlight} so `tryRename` can `await` it.
- */
-function serializedNodeContentFlush(
-  canvasId: string,
-  nodeId: string,
-  opts?: { keepalive?: boolean },
-): Promise<void> {
-  const prev = nodeContentInFlight.get(nodeId) ?? Promise.resolve();
-  const next = prev
-    // Detach from prev's rejection so a previous 409 doesn't poison the
-    // chain — tryRename has already handled that error via its own await.
-    .catch(() => undefined)
-    .then(() => performNodeContentSave(canvasId, nodeId, opts));
-  nodeContentInFlight.set(nodeId, next);
-  void next.finally(() => {
-    if (nodeContentInFlight.get(nodeId) === next) {
-      nodeContentInFlight.delete(nodeId);
-    }
-  });
-  return next;
-}
-
-/**
- * Schedule a debounced content save for `nodeId`. Coalesces rapid
- * patches into a single PUT after the debounce window. The captured
- * `canvasId` makes mid-debounce canvas switches safe — the timer
- * always targets the canvas the edit was made on, even if the user
- * has since navigated away.
- */
-function scheduleNodeContentSave(canvasId: string, nodeId: string): void {
-  if (!canvasId || !nodeId) return;
-  const existing = nodeContentTimers.get(nodeId);
-  if (existing) clearTimeout(existing);
-  const timer = setTimeout(() => {
-    nodeContentTimers.delete(nodeId);
-    serializedNodeContentFlush(canvasId, nodeId).catch((err) => {
-      // Conflicts are surfaced via `tryRename`'s own await path; only
-      // log non-conflict errors here so the fire-and-forget rejection
-      // doesn't escape into the runtime as unhandled.
-      if (!(err instanceof CanvasConflictError)) {
-        console.error('Node content save failed:', err);
-      }
-    });
-  }, NODE_CONTENT_DEBOUNCE_MS);
-  nodeContentTimers.set(nodeId, timer);
-}
-
-/**
- * Promote every pending debounced content save into an immediate
- * flush, then wait for every in-flight PUT (including the new ones)
- * to settle. Used by `switchCanvas` alongside the structure-save
- * flush so canvas switches do not orphan editor edits.
- */
-async function flushAllNodeContentSaves(): Promise<void> {
-  const canvasId = useCanvasStore.getState().canvasId;
-  for (const [nodeId, timer] of nodeContentTimers) {
-    clearTimeout(timer);
-    nodeContentTimers.delete(nodeId);
-    void serializedNodeContentFlush(canvasId, nodeId).catch(() => undefined);
-  }
-  await Promise.all(
-    Array.from(nodeContentInFlight.values()).map((p) =>
-      p.catch(() => undefined),
-    ),
-  );
-}
-
-/**
- * Force an immediate flush of `nodeId`'s pending content save and
- * return a promise that resolves after the server PUT settles. Used by
- * `tryRename('node')` so the caller can observe (and react to) a
- * `NODE_LABEL_CONFLICT` instead of waiting on a fire-and-forget
- * debounced save. Awaits any previously in-flight write so the latest
- * label is the one tested for collision on the server.
- */
-function flushNodeContentSaveNow(
-  canvasId: string,
-  nodeId: string,
-): Promise<void> {
-  const timer = nodeContentTimers.get(nodeId);
-  if (timer) {
-    clearTimeout(timer);
-    nodeContentTimers.delete(nodeId);
-  }
-  return serializedNodeContentFlush(canvasId, nodeId);
-}
-
-/**
- * `beforeunload` best-effort flush of pending content saves via
- * `keepalive` so the trailing tail of editor edits is not lost when
- * the user closes the tab. Mirrors the canvas-event buffer's
- * `flushAllKeepalive` pattern.
- */
-function flushAllNodeContentSavesKeepalive(): void {
-  const canvasId = useCanvasStore.getState().canvasId;
-  for (const [nodeId, timer] of nodeContentTimers) {
-    clearTimeout(timer);
-    nodeContentTimers.delete(nodeId);
-    // Fire-and-forget keepalive PUT — browser caps these at ~64 KB
-    // per request, which is plenty for a single node's markdown.
-    void serializedNodeContentFlush(canvasId, nodeId, {
-      keepalive: true,
-    }).catch(() => undefined);
-  }
-}
-
-/**
- * Diff `prev.nodes` against `next.nodes` and schedule a per-node
- * content save for every node whose markdown-backed `data` keys
- * actually changed. New nodes always schedule (their `.md` does not
- * exist yet); deleted nodes are ignored — the DELETE endpoint handles
- * unlink, and a stale debounced timer for a deleted node no-ops on
- * `buildNodeContentRequest` returning `null`.
- */
-function scheduleContentSavesForChangedNodes(
-  canvasId: string,
-  prevNodes: readonly Node[],
-  nextNodes: readonly Node[],
-): void {
-  if (!canvasId || prevNodes === nextNodes) return;
-  const prevById = new Map(prevNodes.map((n) => [n.id, n]));
-  for (const next of nextNodes) {
-    const nodeType = typeof next.type === 'string' ? next.type : '';
-    if (!MD_BACKED_NODE_TYPES.has(nodeType)) continue;
-    const before = prevById.get(next.id);
-    if (!before) {
-      // Brand new node — its `.md` does not exist yet.
-      scheduleNodeContentSave(canvasId, next.id);
-      continue;
-    }
-    if (before.data === next.data) continue;
-    const beforeData = (before.data ?? {}) as Record<string, unknown>;
-    const afterData = (next.data ?? {}) as Record<string, unknown>;
-    for (const key of NODE_CONTENT_KEYS) {
-      if (beforeData[key] !== afterData[key]) {
-        scheduleNodeContentSave(canvasId, next.id);
-        break;
-      }
-    }
-  }
-}
+// Markdown sidecar persistence (debounced per-node PUT + serialized
+// in-flight chain) lives in `./canvasStore/save/nodeContentQueue.ts`.
+// The factory call is in the module-scope singletons section below;
+// `stripNodeContentForStructurePut` is the only piece that stays here
+// because it's only used inside the `saveCanvas` action body.
 
 /**
  * Remove every {@link NODE_CONTENT_KEYS} member from each node's
@@ -783,13 +526,25 @@ const preprocessQueue = createPreprocessQueue({
   getState: () => useCanvasStore.getState(),
 });
 
+/**
+ * Module-scoped per-node markdown sidecar save queue. Coalesces rapid
+ * editor edits into one PUT per node and serializes in-flight writes
+ * so the server never sees two PUTs for the same node concurrently.
+ */
+const nodeContentQueue = createNodeContentQueue({
+  delayMs: NODE_CONTENT_DEBOUNCE_MS,
+  getState: () => useCanvasStore.getState(),
+});
+
 // Module-scoped singleton listener: intentionally registered once at module
 // load time and never removed. Safe for this app's single-page lifecycle.
 if (typeof window !== 'undefined') {
   window.addEventListener('beforeunload', () =>
     canvasEvents.flushAllKeepalive(),
   );
-  window.addEventListener('beforeunload', flushAllNodeContentSavesKeepalive);
+  window.addEventListener('beforeunload', () =>
+    nodeContentQueue.flushAllKeepalive(),
+  );
 }
 
 /**
@@ -832,7 +587,7 @@ const autoSaveMiddleware =
         // on their own (faster) debounce and never participate in the
         // canvas-level `version` counter.
         if (prev.nodes !== next.nodes) {
-          scheduleContentSavesForChangedNodes(
+          nodeContentQueue.scheduleChanges(
             next.canvasId,
             prev.nodes,
             next.nodes,
@@ -1239,7 +994,7 @@ const useCanvasStore = create<RFState>()(
       await structureScheduler.flushAsync();
       // Also drain any pending per-node content PUTs so editor edits
       // made on the outgoing canvas land before we tear its state down.
-      await flushAllNodeContentSaves();
+      await nodeContentQueue.flushAll();
 
       // Cancel all pending preprocessing timers
       preprocessQueue.cancelAll();
@@ -1427,7 +1182,7 @@ const useCanvasStore = create<RFState>()(
       // 409 alert at rename time rather than ~500 ms later.
       get().updateNodeData(id, { label: trimmed, labelSource: 'user' });
       try {
-        await flushNodeContentSaveNow(canvasId, id);
+        await nodeContentQueue.flushNow(canvasId, id);
         return true;
       } catch (err) {
         if (
@@ -2265,7 +2020,7 @@ const useCanvasStore = create<RFState>()(
  * schedules a debounced `saveCanvas`, so unload only needs to drain
  * the trailing tail of pending debounces (preprocess + structure).
  * Per-node content debounces are drained by their own keepalive
- * listener (`flushAllNodeContentSavesKeepalive`); the canvas event
+ * listener (`nodeContentQueue.flushAllKeepalive`); the canvas event
  * buffer is drained by `canvasEvents.flushAllKeepalive()`.
  */
 function flushOnUnload(): void {
