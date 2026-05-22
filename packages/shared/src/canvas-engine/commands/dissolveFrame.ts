@@ -1,5 +1,5 @@
 import { noop, type CommandDefinition } from './types.js';
-import { unframe, type NestableNode } from '../utils/frame.js';
+import { unframe, type NestableNode } from '../frame/index.js';
 
 import type { CanvasCommand } from '../../index.js';
 

@@ -1,7 +1,7 @@
 import { noop, type CommandDefinition } from './types.js';
 import { createId, type CanvasCommand } from '../../index.js';
 import { placeNode } from '../autoLayout/index.js';
-import { normalizeTreeOrder, type NestableNode } from '../utils/frame.js';
+import { normalizeTreeOrder, type NestableNode } from '../frame/index.js';
 import { deduplicateLabel, generateNextLabel } from '../utils/labels.js';
 import { getNodeDefaultSize } from '../utils/nodeSizes.js';
 import { selectOnly } from '../utils/selection.js';

@@ -8,8 +8,8 @@
  * box" meant.
  */
 
-import { getAbsolutePosition, type NestableNode } from './frame.js';
 import { getNodeSize } from './nodeSizes.js';
+import { getAbsolutePosition, type NestableNode } from '../frame/index.js';
 
 import type { Node } from '@xyflow/react';
 

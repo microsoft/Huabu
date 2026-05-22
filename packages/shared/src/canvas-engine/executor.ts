@@ -27,7 +27,7 @@
  */
 
 import { HANDLERS, COMMAND_META } from './commands/index.js';
-import { fitFrames, type NestableNode } from './utils/frame.js';
+import { fitFrames, type NestableNode } from './frame/index.js';
 
 import type {
   CanvasReadState,

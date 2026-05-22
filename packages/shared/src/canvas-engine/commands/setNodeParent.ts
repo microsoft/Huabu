@@ -3,7 +3,7 @@ import {
   moveNodeIntoFrame,
   moveNodeOutOfFrame,
   type NestableNode,
-} from '../utils/frame.js';
+} from '../frame/index.js';
 
 import type { CanvasCommand } from '../../index.js';
 import type { Node } from '@xyflow/react';

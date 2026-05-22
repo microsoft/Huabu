@@ -1,5 +1,5 @@
 import { noop, type CommandDefinition } from './types.js';
-import { normalizeTreeOrder, type NestableNode } from '../utils/frame.js';
+import { normalizeTreeOrder, type NestableNode } from '../frame/index.js';
 
 import type { CanvasCommand } from '../../index.js';
 import type { Node } from '@xyflow/react';

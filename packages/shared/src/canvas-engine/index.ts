@@ -110,7 +110,7 @@ export {
   fitFrameToChildren,
   fitFrames,
   moveNodeOutOfFrame,
-} from './utils/frame.js';
+} from './frame/index.js';
 export {
   DEFAULT_EDGE_STROKE_WIDTH,
   applyEdgeStyle,

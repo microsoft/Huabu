@@ -1,9 +1,9 @@
+import { getLayoutNodeSize } from './nodeSizes.js';
 import {
   getAbsolutePosition,
   getDescendantIds,
   type NestableNode,
-} from './frame.js';
-import { getLayoutNodeSize } from './nodeSizes.js';
+} from '../frame/index.js';
 
 import type { Node } from '@xyflow/react';
 
