@@ -42,8 +42,13 @@ export type PreprocessHelperDeps = {
  * Build the snapshot object sent to the server for a given node.
  * For frame nodes we include child labels so the Enrich stage can
  * generate a group-level label.
+ *
+ * Exported so the unload-time keepalive path (in `preprocessQueue`)
+ * can produce the same snapshot shape without going through the full
+ * `preprocessNodeIfNeeded` flow (which mutates ingestion state — a
+ * no-op during page unload).
  */
-function buildSnapshot(
+export function buildPreprocessSnapshot(
   node: Node,
   getChildNodes: (frameId: string) => Node[],
 ): Record<string, unknown> {
@@ -94,7 +99,7 @@ export async function preprocessNodeIfNeeded({
   setNodeIngestion(node.id, { status: 'pending', updatedAt: Date.now() });
 
   try {
-    const snapshot = buildSnapshot(node, getChildNodes);
+    const snapshot = buildPreprocessSnapshot(node, getChildNodes);
 
     const response = await preprocessNode(canvasId, node.id, {
       nodeType,

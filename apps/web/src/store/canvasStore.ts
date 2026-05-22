@@ -32,10 +32,6 @@ import { create, type StateCreator } from 'zustand';
 
 import { runWebPostEffects } from '@/handler/canvasCommand/postEffects.web';
 import {
-  preprocessNodeIfNeeded,
-  type NodeIngestionInfo,
-} from '@/handler/canvasCommand/preprocess';
-import {
   resolveUiIntent,
   type AddNodeInput,
   type CanvasUiIntent,
@@ -60,11 +56,12 @@ import {
   NODE_CONTENT_KEYS,
   TEXT_BEARING_NODE_TYPES,
 } from './canvasStore/save/nodeContentFields';
+import { createPreprocessQueue } from './canvasStore/save/preprocessQueue';
 import { shouldScheduleStructureSave } from './canvasStore/save/structureDirtyDetector';
 import { createStructureScheduler } from './canvasStore/save/structureScheduler';
 import { useGesturePreviewStore } from './gesturePreviewStore';
 import { useToolStore } from './toolStore';
-import { getCanvas, preprocessNode, putCanvas } from '../api';
+import { getCanvas, putCanvas } from '../api';
 import { cloneArtifactToCanvas } from '../api/artifact';
 import { CanvasConflictError, putNodeContent } from '../api/canvas';
 import { toast } from '../components/Common/Toast';
@@ -72,6 +69,7 @@ import { seedNoteFixedHeight } from '../components/Nodes/note/autoHeight';
 import { getNoteFixedHeight } from '../components/Nodes/note/heightMemory';
 import { copyToClipboard } from '../utils/io/clipboard';
 
+import type { NodeIngestionInfo } from '@/handler/canvasCommand/preprocess';
 import type {
   AgentChatContext,
   CanvasCommand,
@@ -430,34 +428,6 @@ function stripNodeContentForStructurePut(nodes: readonly Node[]): Node[] {
   });
 }
 
-// Per-node debounce timers so rapid edits only fire one preprocessing request
-// after the user stops typing, rather than on every keystroke.
-const preprocessTimers = new Map<string, ReturnType<typeof setTimeout>>();
-
-const triggerPreprocessing = (node: Node) => {
-  const nodeId = node.id;
-  const existing = preprocessTimers.get(nodeId);
-  if (existing) clearTimeout(existing);
-
-  const timer = setTimeout(() => {
-    preprocessTimers.delete(nodeId);
-    const state = useCanvasStore.getState();
-    // Re-fetch the latest node so we send the most up-to-date content.
-    const latestNode = state.nodes.find((n) => n.id === nodeId) ?? node;
-    void preprocessNodeIfNeeded({
-      canvasId: state.canvasId,
-      node: latestNode,
-      setNodeIngestion: state.setNodeIngestion,
-      clearNodeIngestion: state.clearNodeIngestion,
-      getChildNodes: (frameId) =>
-        state.nodes.filter((n) => n.parentId === frameId),
-      patchNodeSilent: state.patchNodeSilent,
-    });
-  }, PREPROCESS_DEBOUNCE_MS);
-
-  preprocessTimers.set(nodeId, timer);
-};
-
 // ── Spatial data ──────────────────────────────────────────────
 //
 // The frontend no longer normalises spatial data for the LLM.
@@ -803,6 +773,16 @@ const structureScheduler = createStructureScheduler({
  */
 const canvasEvents = createCanvasEventBuffer();
 
+/**
+ * Module-scoped per-node preprocessing queue. Each store mutation
+ * that affects a markdown-backed node schedules a debounced
+ * `preprocessNode` POST through this queue.
+ */
+const preprocessQueue = createPreprocessQueue({
+  delayMs: PREPROCESS_DEBOUNCE_MS,
+  getState: () => useCanvasStore.getState(),
+});
+
 // Module-scoped singleton listener: intentionally registered once at module
 // load time and never removed. Safe for this app's single-page lifecycle.
 if (typeof window !== 'undefined') {
@@ -1095,7 +1075,7 @@ const useCanvasStore = create<RFState>()(
         canvasId: state.canvasId,
         getNodes: () => get().nodes,
         setNodes: (nodes) => set({ nodes }),
-        triggerPreprocessing,
+        triggerPreprocessing: preprocessQueue.schedule,
       });
     },
 
@@ -1232,7 +1212,7 @@ const useCanvasStore = create<RFState>()(
           const data = node.data as Record<string, unknown> | undefined;
           const label = typeof data?.label === 'string' ? data.label : '';
           if (label.trim().length > 0) continue;
-          triggerPreprocessing(node);
+          preprocessQueue.schedule(node);
         }
       } catch (error) {
         console.error('Failed to load canvas:', error);
@@ -1262,10 +1242,7 @@ const useCanvasStore = create<RFState>()(
       await flushAllNodeContentSaves();
 
       // Cancel all pending preprocessing timers
-      for (const timer of preprocessTimers.values()) {
-        clearTimeout(timer);
-      }
-      preprocessTimers.clear();
+      preprocessQueue.cancelAll();
 
       // Reset state for clean slate. `viewport` is cleared so the new
       // canvas's restore effect either applies its own saved viewport
@@ -2254,7 +2231,7 @@ const useCanvasStore = create<RFState>()(
         canvasId,
         nodes,
         snapshot.nodes,
-        triggerPreprocessing,
+        preprocessQueue.schedule,
       );
     },
 
@@ -2275,7 +2252,7 @@ const useCanvasStore = create<RFState>()(
         canvasId,
         nodes,
         snapshot.nodes,
-        triggerPreprocessing,
+        preprocessQueue.schedule,
       );
     },
   })),
@@ -2293,59 +2270,12 @@ const useCanvasStore = create<RFState>()(
  */
 function flushOnUnload(): void {
   const state = useCanvasStore.getState();
-  const { canvasId, nodes } = state;
 
-  // 1. Drain pending preprocess debounces.
-  //    Each queued node has a debounce timer that hasn't fired yet;
-  //    fire its `preprocessNode` with `keepalive` so AI label/summary
-  //    work the user just triggered isn't lost on close.
-  const pendingNodeIds = Array.from(preprocessTimers.keys());
-  for (const timer of preprocessTimers.values()) {
-    clearTimeout(timer);
-  }
-  preprocessTimers.clear();
-
-  if (canvasId) {
-    for (const nodeId of pendingNodeIds) {
-      const node = nodes.find((n) => n.id === nodeId);
-      if (!node) continue;
-
-      const nodeData = node.data as Record<string, unknown> | undefined;
-      const nodeType = node.type ?? '';
-
-      // Build a minimal snapshot matching what preprocessNodeIfNeeded sends.
-      const snapshot: Record<string, unknown> =
-        nodeType === 'frame'
-          ? {
-              childLabels: nodes
-                .filter((n) => n.parentId === nodeId)
-                .map((c) => {
-                  const cData = c.data as Record<string, unknown> | undefined;
-                  const label =
-                    typeof cData?.label === 'string' ? cData.label : '';
-                  return label.trim();
-                })
-                .filter((l) => l.length > 0),
-              labelSource: (nodeData?.labelSource as string) || undefined,
-            }
-          : {
-              title:
-                (nodeData?.label as string) ||
-                (nodeData?.title as string) ||
-                undefined,
-              labelSource: (nodeData?.labelSource as string) || undefined,
-              content: (nodeData?.content as string) || undefined,
-              src: (nodeData?.src as string) || undefined,
-            };
-
-      void preprocessNode(
-        canvasId,
-        nodeId,
-        { nodeType, trigger: 'flush', snapshot },
-        { keepalive: true },
-      ).catch(() => undefined);
-    }
-  }
+  // 1. Drain pending preprocess debounces. The queue owns the
+  //    keepalive POST per pending node (with `trigger: 'flush'`)
+  //    so AI label/summary work the user just triggered isn't lost
+  //    on close.
+  preprocessQueue.flushKeepalive();
 
   // 2. Drain a pending structure-save debounce, if any.
   //    `cancelPending()` returns `false` when no timer was queued,
