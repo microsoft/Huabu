@@ -8,7 +8,6 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
   meta: {
     snapshot: 'caller',
     requiresEdgeReroute: true,
-    needsTransitionCleanup: false,
   },
 
   handler(cmd, state) {

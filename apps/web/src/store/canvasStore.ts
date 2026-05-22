@@ -58,7 +58,7 @@ import { useGesturePreviewStore } from './gesturePreviewStore';
 import { useToolStore } from './toolStore';
 import { getCanvas, postCanvasEvents, preprocessNode, putCanvas } from '../api';
 import { cloneArtifactToCanvas } from '../api/artifact';
-import { CanvasConflictError } from '../api/canvas';
+import { CanvasConflictError, putNodeContent } from '../api/canvas';
 import { toast } from '../components/Common/Toast';
 import { seedNoteFixedHeight } from '../components/Nodes/note/autoHeight';
 import { getNoteFixedHeight } from '../components/Nodes/note/heightMemory';
@@ -73,6 +73,7 @@ import type {
   CanvasNodeType,
   CanvasViewport,
   IntentContext,
+  PutNodeContentRequest,
   RecentAction,
   WireCanvasNode,
   WireSelectionNode,
@@ -81,6 +82,50 @@ import type {
 
 const AUTOSAVE_DEBOUNCE_MS = 1000;
 const PREPROCESS_DEBOUNCE_MS = 1000;
+const NODE_CONTENT_DEBOUNCE_MS = 500;
+
+/**
+ * `data` keys whose values live in the per-node markdown sidecar
+ * (`nodes/<safe(label)>.md`), not in `canvas.json`. A patch touching any
+ * of these schedules a per-node content save (see
+ * {@link scheduleNodeContentSave}) and the key is stripped from the
+ * structure PUT body so a viewport drag does not rewrite content.
+ *
+ * Keep in sync with `MD_BACKED_NODE_TYPES` / `putNodeContentBodySchema`
+ * server-side. See `docs/node-content-api-split.md`.
+ */
+const NODE_CONTENT_KEYS: ReadonlySet<string> = new Set([
+  'content',
+  'label',
+  'labelSource',
+  'src',
+  'summary',
+  'keywords',
+  'provenance',
+]);
+
+/**
+ * Node types that own a markdown sidecar. Mirrors the server-side
+ * `MD_BACKED_NODE_TYPES`. Patches to nodes whose type is not in this
+ * set still update the in-memory store but do not schedule a content
+ * save (there is no `.md` to write).
+ */
+const MD_BACKED_NODE_TYPES: ReadonlySet<string> = new Set([
+  'note',
+  'text',
+  'web',
+  'pdf',
+  'image',
+  'video',
+  'frame',
+]);
+
+const TEXT_BEARING_NODE_TYPES: ReadonlySet<string> = new Set([
+  'note',
+  'text',
+  'web',
+  'pdf',
+]);
 
 /**
  * Flush pending autosave immediately (synchronous cancel + fire).
@@ -101,6 +146,385 @@ const flushAutoSave = async (saveCanvas: () => Promise<void>) => {
     }
   }
 };
+
+// ─── Per-node content flush ────────────────────────────────────────────────
+//
+// Edits to a node's markdown sidecar (content / label / src / summary /
+// keywords / provenance) are persisted via a dedicated per-node endpoint
+// (`PUT /api/canvas/:canvasId/nodes/:nodeId/content`) that never bumps the
+// canvas-level `version` counter. This decouples editor typing from
+// viewport drags / structure autosaves so the two flows can never collide
+// on the optimistic-concurrency check.
+//
+// Each node gets:
+//   • a 500ms debounce timer (`nodeContentTimers`) so trailing keystrokes
+//     coalesce into one PUT.
+//   • a serialized in-flight chain (`nodeContentInFlight`) so a node can
+//     have at most one PUT in flight at a time. The next flush always
+//     reads `useCanvasStore.getState()` at the moment it actually runs,
+//     so a queue of pending bodies never builds up — trailing edits
+//     collapse into a single later PUT.
+//
+// See `docs/node-content-api-split.md`.
+
+const nodeContentTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const nodeContentInFlight = new Map<string, Promise<void>>();
+
+/**
+ * Build the `PutNodeContentRequest` body for `nodeId` from the latest
+ * store snapshot. Returns `null` when the node has gone away (e.g.
+ * deleted between debounce-schedule and flush) or its type is not
+ * markdown-backed.
+ */
+function buildNodeContentRequest(nodeId: string): PutNodeContentRequest | null {
+  const node = useCanvasStore.getState().nodes.find((n) => n.id === nodeId);
+  if (!node) return null;
+  const nodeType = typeof node.type === 'string' ? node.type : '';
+  if (!MD_BACKED_NODE_TYPES.has(nodeType)) return null;
+
+  const data = (node.data ?? {}) as Record<string, unknown>;
+  const body: PutNodeContentRequest = { nodeType };
+
+  if (TEXT_BEARING_NODE_TYPES.has(nodeType)) {
+    const content = data['content'];
+    if (typeof content === 'string') body.content = content;
+  }
+
+  const label = data['label'];
+  if (typeof label === 'string') body.label = label;
+  else if (label === null) body.label = null;
+
+  const labelSource = data['labelSource'];
+  if (
+    labelSource === 'user' ||
+    labelSource === 'auto' ||
+    labelSource === 'agent'
+  ) {
+    body.labelSource = labelSource;
+  }
+
+  const src = data['src'];
+  if (typeof src === 'string') body.src = src;
+
+  const summary = data['summary'];
+  if (typeof summary === 'string') body.summary = summary;
+
+  const keywords = data['keywords'];
+  if (Array.isArray(keywords) && keywords.every((k) => typeof k === 'string')) {
+    body.keywords = keywords as string[];
+  }
+
+  if ('provenance' in data) {
+    body.provenance = data['provenance'];
+  }
+
+  return body;
+}
+
+/**
+ * Execute a single per-node content PUT. Reads the store at call time
+ * so trailing edits collapse into one body. On success, mirrors the
+ * server-resolved label back into the store (for agent auto-dedupe
+ * suffixes) without scheduling another autosave round-trip.
+ *
+ * Throws `CanvasConflictError` on `NODE_LABEL_CONFLICT` so
+ * `tryRename`'s awaited path can revert the optimistic label + alert.
+ */
+async function performNodeContentSave(
+  canvasId: string,
+  nodeId: string,
+  opts?: { keepalive?: boolean },
+): Promise<void> {
+  const body = buildNodeContentRequest(nodeId);
+  if (!body) return;
+  const response = await putNodeContent(canvasId, nodeId, body, opts);
+  // Only patch when the resolved label actually differs from what's in
+  // the store right now — avoids spurious re-renders when the server
+  // echoes back exactly what we sent.
+  const state = useCanvasStore.getState();
+  const currentNode = state.nodes.find((n) => n.id === nodeId);
+  if (!currentNode) return;
+  const currentLabel =
+    typeof currentNode.data?.['label'] === 'string'
+      ? (currentNode.data['label'] as string)
+      : null;
+  if (response.label !== null && response.label !== currentLabel) {
+    state._setStateNoAutosave({
+      nodes: state.nodes.map((n) =>
+        n.id === nodeId
+          ? {
+              ...n,
+              data: { ...(n.data ?? {}), label: response.label },
+            }
+          : n,
+      ),
+    });
+  }
+}
+
+/**
+ * Serialize per-node PUTs: chain each new flush onto any pending one so
+ * the server never sees two writes for the same node in flight at
+ * once. Always exposes the latest in-flight promise via
+ * {@link nodeContentInFlight} so `tryRename` can `await` it.
+ */
+function serializedNodeContentFlush(
+  canvasId: string,
+  nodeId: string,
+  opts?: { keepalive?: boolean },
+): Promise<void> {
+  const prev = nodeContentInFlight.get(nodeId) ?? Promise.resolve();
+  const next = prev
+    // Detach from prev's rejection so a previous 409 doesn't poison the
+    // chain — tryRename has already handled that error via its own await.
+    .catch(() => undefined)
+    .then(() => performNodeContentSave(canvasId, nodeId, opts));
+  nodeContentInFlight.set(nodeId, next);
+  void next.finally(() => {
+    if (nodeContentInFlight.get(nodeId) === next) {
+      nodeContentInFlight.delete(nodeId);
+    }
+  });
+  return next;
+}
+
+/**
+ * Schedule a debounced content save for `nodeId`. Coalesces rapid
+ * patches into a single PUT after the debounce window. The captured
+ * `canvasId` makes mid-debounce canvas switches safe — the timer
+ * always targets the canvas the edit was made on, even if the user
+ * has since navigated away.
+ */
+function scheduleNodeContentSave(canvasId: string, nodeId: string): void {
+  if (!canvasId || !nodeId) return;
+  const existing = nodeContentTimers.get(nodeId);
+  if (existing) clearTimeout(existing);
+  const timer = setTimeout(() => {
+    nodeContentTimers.delete(nodeId);
+    serializedNodeContentFlush(canvasId, nodeId).catch((err) => {
+      // Conflicts are surfaced via `tryRename`'s own await path; only
+      // log non-conflict errors here so the fire-and-forget rejection
+      // doesn't escape into the runtime as unhandled.
+      if (!(err instanceof CanvasConflictError)) {
+        console.error('Node content save failed:', err);
+      }
+    });
+  }, NODE_CONTENT_DEBOUNCE_MS);
+  nodeContentTimers.set(nodeId, timer);
+}
+
+/**
+ * Promote every pending debounced content save into an immediate
+ * flush, then wait for every in-flight PUT (including the new ones)
+ * to settle. Used by `flushAutoSave` so canvas switches do not
+ * orphan editor edits.
+ */
+async function flushAllNodeContentSaves(): Promise<void> {
+  const canvasId = useCanvasStore.getState().canvasId;
+  for (const [nodeId, timer] of nodeContentTimers) {
+    clearTimeout(timer);
+    nodeContentTimers.delete(nodeId);
+    void serializedNodeContentFlush(canvasId, nodeId).catch(() => undefined);
+  }
+  await Promise.all(
+    Array.from(nodeContentInFlight.values()).map((p) =>
+      p.catch(() => undefined),
+    ),
+  );
+}
+
+/**
+ * Force an immediate flush of `nodeId`'s pending content save and
+ * return a promise that resolves after the server PUT settles. Used by
+ * `tryRename('node')` so the caller can observe (and react to) a
+ * `NODE_LABEL_CONFLICT` instead of waiting on a fire-and-forget
+ * debounced save. Awaits any previously in-flight write so the latest
+ * label is the one tested for collision on the server.
+ */
+function flushNodeContentSaveNow(
+  canvasId: string,
+  nodeId: string,
+): Promise<void> {
+  const timer = nodeContentTimers.get(nodeId);
+  if (timer) {
+    clearTimeout(timer);
+    nodeContentTimers.delete(nodeId);
+  }
+  return serializedNodeContentFlush(canvasId, nodeId);
+}
+
+/**
+ * `beforeunload` best-effort flush of pending content saves via
+ * `keepalive` so the trailing tail of editor edits is not lost when
+ * the user closes the tab. Mirrors the existing
+ * `flushAllCanvasEventsKeepalive` pattern.
+ */
+function flushAllNodeContentSavesKeepalive(): void {
+  const canvasId = useCanvasStore.getState().canvasId;
+  for (const [nodeId, timer] of nodeContentTimers) {
+    clearTimeout(timer);
+    nodeContentTimers.delete(nodeId);
+    // Fire-and-forget keepalive PUT — browser caps these at ~64 KB
+    // per request, which is plenty for a single node's markdown.
+    void serializedNodeContentFlush(canvasId, nodeId, {
+      keepalive: true,
+    }).catch(() => undefined);
+  }
+}
+
+/**
+ * Diff `prev.nodes` against `next.nodes` and schedule a per-node
+ * content save for every node whose markdown-backed `data` keys
+ * actually changed. New nodes always schedule (their `.md` does not
+ * exist yet); deleted nodes are ignored — the DELETE endpoint handles
+ * unlink, and a stale debounced timer for a deleted node no-ops on
+ * `buildNodeContentRequest` returning `null`.
+ */
+function scheduleContentSavesForChangedNodes(
+  canvasId: string,
+  prevNodes: readonly Node[],
+  nextNodes: readonly Node[],
+): void {
+  if (!canvasId || prevNodes === nextNodes) return;
+  const prevById = new Map(prevNodes.map((n) => [n.id, n]));
+  for (const next of nextNodes) {
+    const nodeType = typeof next.type === 'string' ? next.type : '';
+    if (!MD_BACKED_NODE_TYPES.has(nodeType)) continue;
+    const before = prevById.get(next.id);
+    if (!before) {
+      // Brand new node — its `.md` does not exist yet.
+      scheduleNodeContentSave(canvasId, next.id);
+      continue;
+    }
+    if (before.data === next.data) continue;
+    const beforeData = (before.data ?? {}) as Record<string, unknown>;
+    const afterData = (next.data ?? {}) as Record<string, unknown>;
+    for (const key of NODE_CONTENT_KEYS) {
+      if (beforeData[key] !== afterData[key]) {
+        scheduleNodeContentSave(canvasId, next.id);
+        break;
+      }
+    }
+  }
+}
+
+/**
+ * Remove every {@link NODE_CONTENT_KEYS} member from each node's
+ * `data` before sending a structure PUT — those fields live in the
+ * `.md` sidecar now and are persisted exclusively via the per-node
+ * content endpoint. Structure-only fields (`id`, `type`, geometry,
+ * `parentId`, custom data) are preserved verbatim. Returns the
+ * original `node` reference when nothing was stripped so the array
+ * stays identity-stable for downstream diffing.
+ */
+function stripNodeContentForStructurePut(nodes: readonly Node[]): Node[] {
+  return nodes.map((node) => {
+    const data = node.data;
+    if (!data) return node;
+    let mutated = false;
+    const slim: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(data)) {
+      if (NODE_CONTENT_KEYS.has(k)) {
+        mutated = true;
+        continue;
+      }
+      slim[k] = v;
+    }
+    return mutated ? { ...node, data: slim } : node;
+  });
+}
+
+/**
+ * Top-level `Node` keys the structure PUT does not care about.
+ * `data` is diffed separately below (with its own ignore set); the
+ * rest are ReactFlow internal UI state. Most of these now bypass the
+ * gate entirely via `_setStateNoAutosave`; they remain here as a
+ * defensive filter for the few engine paths that still touch them
+ * (e.g. `SET_NODE_SELECTION` flipping `selected`).
+ */
+const NODE_TOPLEVEL_IGNORE = new Set([
+  'data',
+  'dragging',
+  'selected',
+  'measured',
+  'handles',
+  'internals',
+]);
+
+/**
+ * Reference-diff two records, ignoring an allow-list of keys. Returns
+ * `true` on the first key whose values differ by `!==`, or when one
+ * side has a non-ignored key the other does not.
+ */
+function recordsDifferIgnoring(
+  a: Record<string, unknown>,
+  b: Record<string, unknown>,
+  ignore: ReadonlySet<string>,
+): boolean {
+  const seen = new Set<string>();
+  for (const k of Object.keys(a)) {
+    if (ignore.has(k)) continue;
+    seen.add(k);
+    if (a[k] !== b[k]) return true;
+  }
+  for (const k of Object.keys(b)) {
+    if (ignore.has(k)) continue;
+    if (!seen.has(k)) return true;
+  }
+  return false;
+}
+
+/**
+ * Decide whether two `nodes` arrays differ in any field the structure
+ * PUT actually cares about (id, type, position, parenthood, dimensions,
+ * non-content `data` keys).
+ *
+ * Returns `false` when the only differences live inside
+ * {@link NODE_CONTENT_KEYS} (or {@link NODE_TOPLEVEL_IGNORE}) — those
+ * edits ride the per-node content PUT (or are pure UI state) and must
+ * NOT bump the canvas `version`. Without this gate every keystroke
+ * inside the editor would produce a new `nodes` array reference and
+ * trigger a full structure save with an empty diff.
+ *
+ * `position` is compared by reference because after the Plan A cleanup
+ * every 60 fps drag tick bypasses the gate via `_setStateNoAutosave`;
+ * the only `position` mutations that reach here are engine commands
+ * (`SET_NODE_GEOMETRY`, `ALIGN_NODES`, `SET_NODE_PARENT`) which always
+ * change the underlying values, not just the object reference.
+ */
+function haveNodesChangedStructurally(
+  prev: readonly Node[],
+  next: readonly Node[],
+): boolean {
+  if (prev === next) return false;
+  const len = next.length;
+  if (prev.length !== len) return true;
+  for (let i = 0; i < len; i++) {
+    const before = prev[i];
+    const after = next[i];
+    if (before === after) continue;
+    if (!before || !after) return true;
+    if (before.id !== after.id) return true;
+    if (
+      recordsDifferIgnoring(
+        before as unknown as Record<string, unknown>,
+        after as unknown as Record<string, unknown>,
+        NODE_TOPLEVEL_IGNORE,
+      )
+    ) {
+      return true;
+    }
+    const beforeData = (before.data ?? {}) as Record<string, unknown>;
+    const afterData = (after.data ?? {}) as Record<string, unknown>;
+    if (
+      beforeData !== afterData &&
+      recordsDifferIgnoring(beforeData, afterData, NODE_CONTENT_KEYS)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
 
 // Per-node debounce timers so rapid edits only fire one preprocessing request
 // after the user stops typing, rather than on every keystroke.
@@ -163,10 +587,15 @@ type RFState = {
   /**
    * Apply a partial state update without triggering autosave or the
    * canUndo/canRedo sync. Reserved for acknowledging server-driven
-   * updates (e.g. labels the server auto-deduped on save) so the patch
-   * doesn't ping-pong back into another autosave.
+   * updates (e.g. labels the server auto-deduped on save) and for
+   * purely transient visual writes (ReactFlow internal change ticks,
+   * agent entrance animations) that must not feed back into another
+   * save. Accepts both an object partial and Zustand's functional
+   * updater form, mirroring the wrapped `set`.
    */
-  _setStateNoAutosave: (partial: Partial<RFState>) => void;
+  _setStateNoAutosave: (
+    partial: Partial<RFState> | ((state: RFState) => Partial<RFState>),
+  ) => void;
 
   canvasTitle: string;
 
@@ -521,6 +950,7 @@ function flushAllCanvasEventsKeepalive(): void {
 // load time and never removed. Safe for this app's single-page lifecycle.
 if (typeof window !== 'undefined') {
   window.addEventListener('beforeunload', flushAllCanvasEventsKeepalive);
+  window.addEventListener('beforeunload', flushAllNodeContentSavesKeepalive);
 }
 
 const PERSISTED_KEYS = ['nodes', 'edges', 'canvasTitle', 'viewport'] as const;
@@ -555,10 +985,31 @@ const autoSaveMiddleware =
       if (!prev.isLoading) {
         const next = get();
         const changed = (PERSISTED_KEYS as readonly PersistedKey[]).some(
-          (k) => prev[k] !== next[k],
+          (k) => {
+            if (k === 'nodes') {
+              // A new `nodes` reference fires on every keystroke inside
+              // a note/text node because `updateNodeData` rebuilds the
+              // array. Gate the structure autosave on a real structural
+              // diff so pure content edits do NOT bump the canvas
+              // `version` — they ride the per-node content PUT instead.
+              return haveNodesChangedStructurally(prev.nodes, next.nodes);
+            }
+            return prev[k] !== next[k];
+          },
         );
         if (changed) {
           scheduleAutoSave(next.saveCanvas);
+        }
+        // --- Per-node content diff ---
+        // Independent of the structure autosave so editor edits flush
+        // on their own (faster) debounce and never participate in the
+        // canvas-level `version` counter.
+        if (prev.nodes !== next.nodes) {
+          scheduleContentSavesForChangedNodes(
+            next.canvasId,
+            prev.nodes,
+            next.nodes,
+          );
         }
       }
     };
@@ -586,7 +1037,7 @@ const autoSaveMiddleware =
     return {
       ...baseState,
       _setStateNoAutosave: (partial) => {
-        (set as (p: Partial<RFState>) => void)(partial);
+        (set as (p: typeof partial) => void)(partial);
       },
     };
   };
@@ -682,7 +1133,8 @@ const useCanvasStore = create<RFState>()(
     // that bypasses autosave scheduling. Calling it before middleware has
     // wrapped the store would be a programmer error, so fall back to the
     // wrapped `set` (which still works, just without the suppression).
-    _setStateNoAutosave: (partial) => set(partial),
+    _setStateNoAutosave: (partial) =>
+      (set as (p: typeof partial) => void)(partial),
 
     canvasTitle: '',
 
@@ -951,6 +1403,9 @@ const useCanvasStore = create<RFState>()(
 
       // Flush any pending save for the current canvas before switching
       await flushAutoSave(get().saveCanvas);
+      // Also drain any pending per-node content PUTs so editor edits
+      // made on the outgoing canvas land before we tear its state down.
+      await flushAllNodeContentSaves();
 
       // Cancel all pending preprocessing timers
       for (const timer of preprocessTimers.values()) {
@@ -994,37 +1449,22 @@ const useCanvasStore = create<RFState>()(
       try {
         const { nodes, edges, version, canvasId, canvasTitle, viewport } =
           get();
+        // Strip every per-node content / label / src / summary / etc.
+        // field from the body. Those live in `nodes/<safe(label)>.md`
+        // now and ride the per-node content PUT, so the structure PUT
+        // body shrinks to pure geometry + parenthood + viewport.
+        const slimNodes = stripNodeContentForStructurePut(nodes);
         const response = await putCanvas(canvasId, {
           version,
           title: canvasTitle || 'Untitled',
           // `viewport` is persisted under `state.viewport` so reopening
           // the canvas restores pan+zoom verbatim instead of falling
           // back to a fitView that fights the user's edits.
-          state: viewport ? { nodes, edges, viewport } : { nodes, edges },
+          state: viewport
+            ? { nodes: slimNodes, edges, viewport }
+            : { nodes: slimNodes, edges },
         });
         set({ version: response.version });
-
-        // The server may have auto-deduped one or more node labels (typically
-        // when an agent-sourced label collided with a sibling and was bumped
-        // to `Foo (2)`). Patch those into our in-memory state so the canvas
-        // display matches what was persisted, without waiting for a reload.
-        // Use `_setStateNoAutosave` so applying these server-told labels
-        // doesn't trigger another autosave round-trip.
-        if (response.renamedNodes && response.renamedNodes.length > 0) {
-          const renames = new Map(
-            response.renamedNodes.map((r) => [r.nodeId, r.label]),
-          );
-          get()._setStateNoAutosave({
-            nodes: get().nodes.map((n) => {
-              const next = renames.get(n.id);
-              if (next === undefined) return n;
-              return {
-                ...n,
-                data: { ...(n.data ?? {}), label: next },
-              };
-            }),
-          });
-        }
         saveSucceeded = true;
       } catch (error) {
         if (error instanceof CanvasConflictError) {
@@ -1123,7 +1563,7 @@ const useCanvasStore = create<RFState>()(
       }
 
       // kind === 'node'
-      const { nodes } = get();
+      const { nodes, canvasId } = get();
       const target = nodes.find((n) => n.id === id);
       if (!target) return false;
       const currentLabel =
@@ -1151,8 +1591,48 @@ const useCanvasStore = create<RFState>()(
         );
         return false;
       }
+      // Optimistic patch — the per-node content middleware schedules a
+      // debounced PUT. We force-flush immediately so the user sees the
+      // 409 alert at rename time rather than ~500 ms later.
       get().updateNodeData(id, { label: trimmed, labelSource: 'user' });
-      return true;
+      try {
+        await flushNodeContentSaveNow(canvasId, id);
+        return true;
+      } catch (err) {
+        if (
+          err instanceof CanvasConflictError &&
+          err.code === 'NODE_LABEL_CONFLICT'
+        ) {
+          // Revert the optimistic label and surface the same alert UX
+          // the legacy structure-PUT path used. `_setStateNoAutosave`
+          // skips both autosave scheduling and the content-diff hook
+          // so reverting doesn't schedule another doomed PUT.
+          get()._setStateNoAutosave({
+            nodes: get().nodes.map((n) =>
+              n.id === id
+                ? {
+                    ...n,
+                    data: {
+                      ...(n.data ?? {}),
+                      label: currentLabel,
+                      // Restore original label source so we don't keep
+                      // strict-validating a reverted label on future
+                      // saves.
+                      labelSource: 'auto',
+                    },
+                  }
+                : n,
+            ),
+          });
+          const taken = err.conflictWith ?? trimmed;
+          window.alert(
+            `Name "${taken}" is already used by another node on this canvas. Please choose a different name.`,
+          );
+          return false;
+        }
+        console.error('Failed to rename node:', err);
+        return false;
+      }
     },
 
     flushCanvasEvents: async () => {
@@ -1485,7 +1965,14 @@ const useCanvasStore = create<RFState>()(
         );
       }
 
-      set({ nodes: nextNodes });
+      // Internal RF changes (position mid-drag, select, dimensions /
+      // measured) are purely transient UI state. The authoritative
+      // geometry commit happens in `onNodeDragStop` via the
+      // `SET_NODE_GEOMETRY` engine command, which DOES schedule
+      // autosave. Routing this hot 60 fps drag-tick path through the
+      // no-autosave setter avoids running `haveNodesChangedStructurally`
+      // (and resetting the autosave debounce) on every frame.
+      get()._setStateNoAutosave({ nodes: nextNodes });
 
       // Drag-end detection: if this batch contained the final
       // `dragging:false` commit for any node the snap session is
@@ -1516,7 +2003,14 @@ const useCanvasStore = create<RFState>()(
       }
       const internalChanges = changes.filter((c) => c.type !== 'remove');
       if (internalChanges.length > 0) {
-        set({ edges: applyEdgeChanges(internalChanges, get().edges) });
+        // Only edge `select` reaches this path (other persisted edge
+        // mutations go through `CONNECT_NODES` / `DISCONNECT_EDGE`
+        // commands above). Selection is transient UI state — bypass
+        // autosave so toggling edge selection never schedules an empty
+        // structure PUT.
+        get()._setStateNoAutosave({
+          edges: applyEdgeChanges(internalChanges, get().edges),
+        });
       }
     },
 
