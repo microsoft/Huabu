@@ -33,7 +33,7 @@ import type {
   CanvasReadState,
   CanvasWriteResult,
   PendingEffects,
-} from './runtime.js';
+} from './interfaces.js';
 import type {
   CanvasCommand,
   CanvasExecution,

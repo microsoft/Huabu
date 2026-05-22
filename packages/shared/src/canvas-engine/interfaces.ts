@@ -1,6 +1,11 @@
 /**
- * Minimal runtime interfaces for the canvas command executor.
- * Keeps the executor decoupled from the full Zustand store.
+ * Interface contracts for the canvas command engine.
+ *
+ * Type-only definitions consumed by the executor, command handlers, and
+ * hosts. There is **no runtime code** in this file — the name is
+ * deliberately `interfaces.ts` (not `runtime.ts`) to avoid confusion
+ * with the package's "type-only vs runtime import" rule for
+ * `@xyflow/react`.
  */
 
 import type { Node, Edge } from '@xyflow/react';

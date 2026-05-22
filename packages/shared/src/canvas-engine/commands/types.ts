@@ -7,7 +7,7 @@
  */
 
 import type { CanvasCommand, CanvasCommandFailureReason } from '../../index.js';
-import type { CanvasReadState } from '../runtime.js';
+import type { CanvasReadState } from '../interfaces.js';
 import type { Node, Edge } from '@xyflow/react';
 
 // ---------------------------------------------------------------------------

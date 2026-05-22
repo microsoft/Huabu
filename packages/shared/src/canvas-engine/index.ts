@@ -23,7 +23,7 @@ export type {
   CanvasReadState,
   CanvasWriteResult,
   PendingEffects,
-} from './runtime.js';
+} from './interfaces.js';
 
 // ── Shared post-commit cleanups (host-agnostic) ───────────────────────────
 export {

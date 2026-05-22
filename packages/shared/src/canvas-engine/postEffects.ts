@@ -15,7 +15,11 @@
 
 import { rerouteAllEdges } from './utils/edge.js';
 
-import type { CanvasNode, CanvasEdge, CanvasWriteResult } from './runtime.js';
+import type {
+  CanvasNode,
+  CanvasEdge,
+  CanvasWriteResult,
+} from './interfaces.js';
 
 export interface SharedPostEffectsInput {
   /** Newly-committed node array. */
