@@ -293,6 +293,7 @@ export const QuestionNode = memo(
                   : undefined
               }
               shake={status === 'error'}
+              className={isDoneUnviewed ? 'question-done-pill' : undefined}
               tooltip={
                 status === 'error' && data.errorMessage
                   ? data.errorMessage

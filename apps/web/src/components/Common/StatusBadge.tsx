@@ -76,9 +76,9 @@ const STATUS_VISUALS: Record<StatusBadgeStatus, StatusVisual> = {
   done: {
     icon: Check,
     defaultLabel: 'Done',
-    iconBg: 'var(--success)',
-    pillBg: 'color-mix(in srgb, var(--success) 10%, white 20%)',
-    pillFg: 'var(--success)',
+    iconBg: '#93BB6E',
+    pillBg: 'color-mix(in srgb, #93BB6E 10%, white 20%)',
+    pillFg: '#93BB6E',
   },
   error: {
     icon: X,
