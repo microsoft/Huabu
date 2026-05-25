@@ -13,10 +13,12 @@
  *    `baselineMarkdown` and the live block markdown, with `Accept`
  *    and `Reject` buttons.
  *
- *  • Deleted block: a small red square marker sits in the gutter
- *    immediately below the surviving anchor block. Hovering it
- *    reveals a popover with the strike-through deleted text and
- *    `Reject` (restore) / `Accept` (dismiss) buttons.
+ *  • Deleted block: a thin danger-coloured accent bar straddles the
+ *    boundary just below the surviving anchor block, in the same
+ *    gutter column as the edit bar so the three provenance states
+ *    visually belong to one family. Hovering it reveals a popover
+ *    with the strike-through deleted text and `Reject` (restore) /
+ *    `Accept` (dismiss) buttons.
  *
  * The overlay is absolutely positioned inside `containerRef` (the
  * NotePreview scroll wrapper) and re-measured on editor mutations,
@@ -51,15 +53,6 @@ export interface ProvenanceOverlayProps {
     anchorKey: string | null,
   ) => void;
   onDismissTombstone: (deletedKey: string) => void;
-  /**
-   * Bulk verdicts. Optional — when omitted the summary pill is hidden.
-   * `onAcceptAll` drops every marker/tombstone leaving the live doc
-   * untouched; `onRejectAll` rolls every AI block back to its baseline
-   * (delete inserts, restore modifications and tombstones) and clears
-   * the bookkeeping.
-   */
-  onAcceptAll?: () => void;
-  onRejectAll?: () => void;
 }
 
 interface BlockSlot {
@@ -117,8 +110,6 @@ export function ProvenanceOverlay({
   onInsertBelow,
   onRestoreTombstone,
   onDismissTombstone,
-  onAcceptAll,
-  onRejectAll,
 }: ProvenanceOverlayProps): JSX.Element | null {
   const [slots, setSlots] = useState<Slot[]>([]);
   // Tomb groups are identified by their shared anchorKey (`__head__`
@@ -294,14 +285,10 @@ export function ProvenanceOverlay({
     };
   }, [containerRef, editor, blocks, slots, hovered, scheduleHide, cancelHide]);
 
-  const totalCount = blocks.length + tombstones.length;
-  const showSummary =
-    totalCount > 0 && (onAcceptAll !== undefined || onRejectAll !== undefined);
-
-  // Nothing to render if there are no markers AND nothing for the
-  // summary pill to act on. Otherwise we still need the pill, even
-  // when slot measurement has not completed for the first frame.
-  if (slots.length === 0 && !showSummary) return null;
+  // Nothing to render if no slots have been measured yet. The bulk
+  // summary pill lives in the outer (non-scrolling) panel and is
+  // rendered by `<NotePreview>` directly.
+  if (slots.length === 0) return null;
 
   const tombId = (anchorKey: string | null): string => anchorKey ?? '__head__';
 
@@ -318,61 +305,31 @@ export function ProvenanceOverlay({
 
   return (
     <>
-      {/* Summary pill — sticky-top so it stays in view while the user
-          scrolls a long note. Only rendered when at least one bulk
-          callback is wired AND there is something to act on. */}
-      {showSummary ? (
-        <div
-          className="border-edge-default bg-surface sticky top-1 z-20 mx-auto mb-1 flex w-fit items-center gap-2 rounded-full border px-3 py-1 shadow-sm"
-          role="status"
-          aria-label={`AI made ${totalCount} pending edit${totalCount === 1 ? '' : 's'} on this note`}
-        >
-          <span className="text-fg-muted text-xs">
-            {`AI edited ${blocks.length} block${blocks.length === 1 ? '' : 's'}`}
-            {tombstones.length > 0 ? ` · deleted ${tombstones.length}` : ''}
-          </span>
-          {onRejectAll ? (
-            <Button
-              variant="outline"
-              tone="neutral"
-              size="sm"
-              onClick={onRejectAll}
-              title="Restore all blocks to their pre-AI baseline"
-            >
-              Reject all
-            </Button>
-          ) : null}
-          {onAcceptAll ? (
-            <Button
-              variant="solid"
-              tone="info"
-              size="sm"
-              onClick={onAcceptAll}
-              title="Keep all AI changes and clear the markers"
-            >
-              Accept all
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
-
-      {/* Tombstone gutter markers (always visible; small red square).
-          One marker per anchor group — multiple consecutive deletes at
-          the same anchor share a single marker + popover. */}
+      {/* Tombstone gutter markers (always visible). One marker per
+          anchor group — multiple consecutive deletes at the same
+          anchor share a single bar + popover. Shape mirrors the
+          modify/insert accent bar so the three provenance states read
+          as a unified family in the gutter. */}
       {slots.map((slot) => {
         if (slot.kind !== 'tomb') return null;
         const id = tombId(slot.anchorKey);
         const active = hovered?.kind === 'tomb' && hovered.key === id;
         const count = slot.entries.length;
+        // Mirror the `.sediment-ai-edited-block::after` accent bar
+        // (see `milkdown-overrides.css`): 6 px wide vertical bar with
+        // 1 px border-radius, sitting in the same gutter column as the
+        // modify/insert bars but using the `--danger` token. A wider
+        // invisible hit area (12 px) keeps the marker comfortably
+        // hoverable without making the visible bar feel chunky.
         return (
           <div
             key={`tm:${id}`}
-            className="absolute z-10 cursor-pointer"
+            className="absolute z-10 flex cursor-pointer items-center"
             style={{
-              top: slot.top,
-              left: slot.right + GUTTER_OFFSET - 6,
-              width: 16,
-              height: 12,
+              top: slot.top - 2,
+              left: slot.right + 3,
+              width: 12,
+              height: 16,
             }}
             onMouseEnter={() => {
               cancelHide();
@@ -386,15 +343,16 @@ export function ProvenanceOverlay({
             }
           >
             <div
-              className="rounded-sm transition-colors"
               style={{
-                width: 4,
-                height: 8,
-                marginLeft: 6,
-                marginTop: 2,
+                width: 6,
+                height: 16,
+                marginLeft: 3,
+                borderRadius: 1,
                 backgroundColor: active
                   ? 'var(--danger)'
                   : 'var(--danger-light)',
+                transition: 'background-color 0.15s ease',
+                pointerEvents: 'none',
               }}
             />
           </div>
