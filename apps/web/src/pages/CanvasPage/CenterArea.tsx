@@ -137,11 +137,12 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
             collapse control. All three buttons use the pill shape so
             they read as a uniform floating control group on top of the
             canvas. */}
-        <div className="pointer-events-auto absolute top-3 right-3 z-30 flex items-center gap-1">
+        <div className="pointer-events-auto absolute top-3 right-2 z-30 flex items-center gap-1">
           {onOpenHelp && (
             <Button
               variant="outline"
               shape="pill"
+              size="lg"
               iconOnly
               onClick={onOpenHelp}
               title="Keyboard Shortcuts (?)"
@@ -150,12 +151,13 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
               <HelpCircle />
             </Button>
           )}
-          <SettingsPopover variant="outline" shape="pill" />
+          <SettingsPopover variant="outline" shape="pill" size="lg" />
           {onToggleChat && (
             <Button
               variant="outline"
               shape="pill"
               iconOnly
+              size="lg"
               onClick={onToggleChat}
               title={isChatCollapsed ? 'Open Chat' : 'Close Chat'}
               aria-label={
