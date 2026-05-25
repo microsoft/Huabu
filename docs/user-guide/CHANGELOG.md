@@ -4,6 +4,53 @@
 
 ---
 
+## 2026-05-25 · Question 节点完成提示改为药丸摆动
+
+**What Changed**
+
+- 移除 Question 节点「已完成但未查看」时的整体绿色发光呼吸动画（原 `question-node-glow` 关键帧）。
+- 改为让 done 状态的状态药丸 (`StatusBadge`) 做一段轻微的左右摆动 (`question-done-pill-wobble`)，吸引用户注意；一旦用户查看 (`viewed = true`)，摆动立即停止。
+
+**Notes**
+
+- 摆动动画仅在 `.question-node-done-unviewed` 容器下激活，只对 Question 节点生效；其余 `StatusBadge` 使用位置不会摆动。
+
+---
+
+## 2026-05-25 · 修复 Frame 内 Sketch 节点无法选中 / 删除
+
+**What Changed**
+
+- 修复 Sketch 节点放入 Frame 后无法被悬停、选中、拖拽或删除的问题。
+
+**Notes**
+
+- 原因：Sketch 命中测试使用了节点的 `position`，但在 Frame 内该坐标是相对父节点的；现已改为基于绝对坐标计算，与悬停高亮 / 选中路由保持一致。
+- 影响范围：仅 Sketch 的命中测试逻辑；橡皮擦 (`findSketchStrokeHits`) 同样受益，可正确擦除 Frame 内的笔画。
+
+---
+
+## 2026-05-25 · Frame 节点支持 Free / Column / Row 三种布局
+
+**What Changed**
+
+- Frame 工具栏新增一个 layout 下拉，三个选项：
+  - **Free** — 子节点保留当前位置（默认）。
+  - **Column** — N 列纵向打包：每列内部上下堆叠、**左对齐**；列宽自适应该列最宽节点。
+  - **Row** — N 行横向打包：每行内部左右堆叠、**上对齐**；行高自适应该行最高节点。
+- 选择 Column 或 Row 时工具栏多出一个数字选择（默认 **1**，范围 1–12），分别表示列数或行数。
+- 用户拖拽节点松手时，鼠标停在哪一列 / 哪一行就归属哪一列 / 行；列内节点间距 24px、列与列之间间距 12px（Row 模式同理）。
+- 永远不会出现空列 / 空行：如果子节点数 ≥ 轨道数但某条轨道是空的，layout 会自动从邻近的最忙轨道里挤一个过来填，保证视觉稳定。
+- Column / Row 模式下 Frame 自身的 resize 手柄会隐藏（容器尺寸由内容决定），切回 Free 模式后恢复手动 resize。
+
+**Notes**
+
+- 子节点的 `data.frameSlot` 字段表示所在轨道索引（Column 模式存列号，Row 模式存行号），由 layout 自动写回，关闭和重新打开画布后视觉不会跳。
+- 由于 `AUTO_LAYOUT` 命令已被移除，结构化重排通过组合 `SET_NODE_GEOMETRY` + `MERGE_NODE_DATA` 实现，与触发它的操作共享同一个 undo 步。
+- 锁定的 Frame 仍然跳过所有结构化算法；锁定的子节点不参与重排。
+
+---
+
 ## 2026-05-24 · 下线 AUTO_LAYOUT 命令（按钮 / 快捷键 / Agent 工具）
 
 **What Changed**

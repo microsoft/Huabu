@@ -2,10 +2,14 @@ import {
   autoFrameNodeByOverlap,
   autoUnframeNodeByNonOverlap,
   fitFrames,
+  pickColumnSlotFromFramePoint,
+  pickRowSlotFromFramePoint,
+  readFrameGridConfig,
   type NestableNode,
 } from '@sediment/shared/canvas-engine';
 
 import { extractNodeRef, canvasSizeFromStyle } from '../utils';
+import { buildStructuredFrameRelayoutCommands } from '../utils/frameLayout';
 
 import type {
   CanvasUiIntent,
@@ -74,6 +78,13 @@ export default function resolveNodeDragStop(
     result = fitFrames(result, affectedFrameIds);
   }
 
+  const cellsSlotPatches = collectGridSlotPatches(
+    intent.draggedNodeIds,
+    result,
+    ui.nodes,
+    intent.pointerFlowPosition,
+  );
+
   if (parentChanges.size === 0) {
     if (affectedFrameIds.size > 0) {
       for (const n of result) {
@@ -94,6 +105,10 @@ export default function resolveNodeDragStop(
         commands.push({ type: 'SET_NODE_GEOMETRY', items: geometryUpdates });
       }
     }
+    pushSlotCommand(commands, cellsSlotPatches);
+    commands.push(
+      ...buildStructuredFrameRelayoutCommands(affectedFrameIds, ui.nodes),
+    );
     const movedNodes = intent.draggedNodeIds
       .map((id) => nodes.find((n) => n.id === id))
       .filter((n): n is Node => !!n);
@@ -128,6 +143,11 @@ export default function resolveNodeDragStop(
   if (geometryUpdates.length > 0) {
     commands.push({ type: 'SET_NODE_GEOMETRY', items: geometryUpdates });
   }
+
+  pushSlotCommand(commands, cellsSlotPatches);
+  commands.push(
+    ...buildStructuredFrameRelayoutCommands(affectedFrameIds, ui.nodes),
+  );
 
   // Build trace: framed/unframed + moved.
   const trace: RecentAction[] = [];
@@ -168,4 +188,117 @@ export default function resolveNodeDragStop(
   }
 
   return { commands, trace };
+}
+
+// ── Local helpers ──────────────────────────────────────────────────────
+
+interface GridSlotPatch {
+  nodeId: CanvasNodeId;
+  slot: number;
+}
+
+/**
+ * For each dragged node that lands inside a structured frame, pick the
+ * slot it should occupy based on the drop point:
+ *
+ *  - Column masonry → the column under the cursor (mouse X).
+ *  - Row masonry    → the row under the cursor (mouse Y).
+ *
+ * Falls back to the child's own top-left when the cursor isn't
+ * available (programmatic emits, touch). All dragged nodes in a
+ * multi-select share the same cursor point — matches ReactFlow's
+ * single-cursor model.
+ *
+ * Returns at most one patch per dragged node, and only when the new
+ * slot differs from the stored one (avoids no-op `MERGE_NODE_DATA`
+ * rounds).
+ */
+function collectGridSlotPatches(
+  draggedIds: string[],
+  postDragNodes: NestableNode[],
+  preDragNodes: Node[],
+  pointerFlowPosition?: { x: number; y: number },
+): GridSlotPatch[] {
+  const patches: GridSlotPatch[] = [];
+  for (const id of draggedIds) {
+    const post = postDragNodes.find((n) => n.id === id);
+    if (!post?.parentId) continue;
+    const frame = preDragNodes.find((n) => n.id === post.parentId);
+    if (!frame) continue;
+    const cfg = readFrameGridConfig(frame);
+    if (!cfg) continue;
+
+    // Convert cursor → frame-local space; fall back to child top-left.
+    const framePoint = pointerFlowPosition
+      ? {
+          x: pointerFlowPosition.x - absoluteX(preDragNodes, frame.id),
+          y: pointerFlowPosition.y - absoluteY(preDragNodes, frame.id),
+        }
+      : { x: post.position.x, y: post.position.y };
+
+    const slot =
+      cfg.axis === 'column'
+        ? pickColumnSlotFromFramePoint(
+            preDragNodes,
+            frame.id,
+            framePoint,
+            id,
+            cfg.count,
+          )
+        : pickRowSlotFromFramePoint(
+            preDragNodes,
+            frame.id,
+            framePoint,
+            id,
+            cfg.count,
+          );
+
+    const prior = (post.data as { frameSlot?: number } | undefined)?.frameSlot;
+    if (typeof prior === 'number' && prior === slot) continue;
+
+    patches.push({ nodeId: id as CanvasNodeId, slot });
+  }
+  return patches;
+}
+
+function pushSlotCommand(
+  commands: CanvasCommand[],
+  patches: GridSlotPatch[],
+): void {
+  if (patches.length === 0) return;
+  commands.push({
+    type: 'MERGE_NODE_DATA',
+    patches: patches.map((p) => ({
+      nodeId: p.nodeId,
+      patch: { frameSlot: p.slot },
+    })),
+  });
+}
+
+function absoluteX(nodes: Node[], nodeId: string): number {
+  let sum = 0;
+  let cursor: string | undefined = nodeId;
+  const guard = new Set<string>();
+  while (cursor && !guard.has(cursor)) {
+    guard.add(cursor);
+    const node = nodes.find((n) => n.id === cursor);
+    if (!node) break;
+    sum += node.position.x;
+    cursor = node.parentId;
+  }
+  return sum;
+}
+
+function absoluteY(nodes: Node[], nodeId: string): number {
+  let sum = 0;
+  let cursor: string | undefined = nodeId;
+  const guard = new Set<string>();
+  while (cursor && !guard.has(cursor)) {
+    guard.add(cursor);
+    const node = nodes.find((n) => n.id === cursor);
+    if (!node) break;
+    sum += node.position.y;
+    cursor = node.parentId;
+  }
+  return sum;
 }

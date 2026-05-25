@@ -60,6 +60,17 @@ export type {
   LayoutResult,
   LayoutGraph,
 } from './autoLayout/types.js';
+export {
+  applyColumnLayout,
+  applyRowLayout,
+  clampGridCount,
+  readFrameGridConfig,
+  pickColumnSlotFromFramePoint,
+  pickRowSlotFromFramePoint,
+  GRID_INTRA_TRACK_GAP,
+  GRID_INTER_TRACK_GAP,
+  type FrameGridLayoutResult,
+} from './autoLayout/gridLayout.js';
 
 // ── Pure utilities re-exported for web consumers ──────────────────────────
 export { GRID_SIZE, FRAME_PADDING, snapToGrid } from './utils/constants.js';

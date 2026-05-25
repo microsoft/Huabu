@@ -13,8 +13,9 @@
   --fg-inverse: #ffffff;
 
   /* Backgrounds */
-  --bg-default: #fcfbf7;
+  /* --bg-default: #fcfbf7; */
   /* --bg-surface: #ffffff; */
+  --bg-default: #f5f3ed;
   --bg-surface: #fefefb;
 
   --bg-hover: #f2f2f2;
@@ -426,20 +427,34 @@ body,
 
 /* ── Sticky-note styling ── */
 
-/* Done: glow via drop-shadow on the outer RF node (avoids stacking context on .question-sticky) */
-.react-flow__node:has(.question-node-done-unviewed) {
-  animation: question-node-glow 2.5s ease-in-out infinite;
+/* Done & not yet viewed: gentle wobble on the badge pill to draw the eye
+   without the loud green glow. Stops as soon as the user marks it viewed
+   (parent `.question-node-done-unviewed` class is removed). */
+.question-node-done-unviewed .question-done-pill {
+  transform-origin: 50% 50%;
+  animation: question-done-pill-wobble 2.4s ease-in-out infinite;
 }
 
-@keyframes question-node-glow {
+@keyframes question-done-pill-wobble {
   0%,
+  55%,
   100% {
-    filter: drop-shadow(0 0 6px rgba(22, 163, 74, 0.3))
-      drop-shadow(0 0 14px rgba(22, 163, 74, 0.15));
+    transform: rotate(0deg);
+  }
+  10% {
+    transform: rotate(-6deg);
+  }
+  20% {
+    transform: rotate(5deg);
+  }
+  30% {
+    transform: rotate(-4deg);
+  }
+  40% {
+    transform: rotate(3deg);
   }
   50% {
-    filter: drop-shadow(0 0 10px rgba(22, 163, 74, 0.5))
-      drop-shadow(0 0 24px rgba(22, 163, 74, 0.25));
+    transform: rotate(0deg);
   }
 }
 

@@ -19,6 +19,7 @@ import {
   resolveSelectNodes,
 } from './resolvers';
 import {
+  buildStructuredFrameRelayoutCommands,
   computeNodeEditDiff,
   extractNodeRef,
   extractSnippet,
@@ -29,6 +30,7 @@ import type {
   CanvasAlignDirection,
   CanvasCommand,
   CanvasNodeId,
+  FrameLayoutMode,
   NodeSize,
   CanvasNodeType,
   Point,
@@ -86,7 +88,11 @@ export type CanvasUiIntent =
       clipboardNodes: Node[];
       clipboardEdges?: Edge[];
     }
-  | { type: 'NODE_DRAG_STOP'; draggedNodeIds: string[] }
+  | {
+      type: 'NODE_DRAG_STOP';
+      draggedNodeIds: string[];
+      pointerFlowPosition?: Point;
+    }
   | {
       type: 'SELECT_NODES';
       nodeIds: string[];
@@ -130,6 +136,18 @@ export type CanvasUiIntent =
     }
   | { type: 'DISSOLVE_FRAME'; frameId: string }
   | { type: 'TOGGLE_NODE_LOCK'; nodeId: string }
+  | {
+      /**
+       * Change a frame's layout mode and (when switching into `column`
+       * or `row`) the track count. The resolver folds the data patch
+       * and the resulting re-flow into one batch so they share an
+       * undo step.
+       */
+      type: 'SET_FRAME_LAYOUT_MODE';
+      frameId: string;
+      mode: FrameLayoutMode;
+      gridCount?: number;
+    }
   | {
       type: 'MOVE_NODE_INTO_FRAME';
       nodeId: string;
@@ -240,6 +258,8 @@ export function resolveUiIntent(
       return resolveDissolveFrame(intent, ui);
     case 'TOGGLE_NODE_LOCK':
       return resolveToggleNodeLock(intent, ui);
+    case 'SET_FRAME_LAYOUT_MODE':
+      return resolveSetFrameLayoutMode(intent, ui);
     case 'MOVE_NODE_INTO_FRAME':
       return resolveMoveNodeIntoFrame(intent, ui);
     case 'MOVE_NODE_OUT_OF_FRAME':
@@ -527,6 +547,16 @@ function resolveMoveNodeIntoFrame(
           : { before: intent.reorderTarget.nodeId as CanvasNodeId },
     });
   }
+  // Re-flow the destination frame when it opted into a structured
+  // layout. Also re-flow the source frame (if any) since it just lost
+  // a child.
+  const affectedFrameIds = [intent.frameId];
+  if (node?.parentId && node.parentId !== intent.frameId) {
+    affectedFrameIds.push(node.parentId);
+  }
+  commands.push(
+    ...buildStructuredFrameRelayoutCommands(affectedFrameIds, ui.nodes),
+  );
   return {
     commands,
     trace:
@@ -567,6 +597,13 @@ function resolveMoveNodeOutOfFrame(
           : { before: intent.reorderTarget.nodeId as CanvasNodeId },
     });
   }
+  // Re-flow the source frame when it opted into a structured layout —
+  // it just lost a child and the remaining slots should reflow.
+  if (node?.parentId) {
+    commands.push(
+      ...buildStructuredFrameRelayoutCommands([node.parentId], ui.nodes),
+    );
+  }
   return {
     commands,
     trace:
@@ -580,4 +617,39 @@ function resolveMoveNodeOutOfFrame(
           ]
         : [],
   };
+}
+
+function resolveSetFrameLayoutMode(
+  intent: Extract<CanvasUiIntent, { type: 'SET_FRAME_LAYOUT_MODE' }>,
+  ui: UiResolverState,
+): UiIntentResolution {
+  // Apply the layout-mode patch first so the follow-up re-flow sees
+  // the new mode. We rebuild the nodes array locally to mirror what
+  // the executor will see after `MERGE_NODE_DATA` lands.
+  const patch: Record<string, unknown> = { layoutMode: intent.mode };
+  if (typeof intent.gridCount === 'number') {
+    patch.gridCount = intent.gridCount;
+  }
+
+  const patchedNodes = ui.nodes.map((n) =>
+    n.id === intent.frameId
+      ? {
+          ...n,
+          data: {
+            ...(n.data ?? {}),
+            ...patch,
+          },
+        }
+      : n,
+  );
+
+  const commands: CanvasCommand[] = [
+    {
+      type: 'MERGE_NODE_DATA',
+      patches: [{ nodeId: intent.frameId as CanvasNodeId, patch }],
+    },
+    ...buildStructuredFrameRelayoutCommands([intent.frameId], patchedNodes),
+  ];
+
+  return { commands, trace: [] };
 }
