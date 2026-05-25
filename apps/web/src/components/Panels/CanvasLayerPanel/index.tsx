@@ -4,6 +4,7 @@ import { useMemo, useRef } from 'react';
 import { CanvasLayerTree } from './CanvasLayerTree';
 import { getNodeIcon } from '../../../config/nodeIcons';
 import useCanvasStore from '../../../store/canvasStore';
+import { usePanelStore } from '../../../store/panelStore';
 import { SketchIcon } from '../../Nodes/sketch/SketchIcon';
 import { SidebarPanel } from '../SidebarPanel';
 
@@ -106,9 +107,26 @@ export const CanvasLayerPanel = ({
   isCollapsed,
   onToggle,
 }: CanvasLayerPanelProps) => {
-  const nodes = useCanvasStore(
+  // `MainLayout` keeps this subtree mounted while the column animates to
+  // width 0 (to avoid a content-swap flash mid-animation), so the local
+  // `isCollapsed` prop is always `false`. We read the real collapse state
+  // from `panelStore` and use it to freeze the `nodes` reference fed to
+  // `buildTreeItems`. While collapsed, selection bumps on the canvas
+  // (which rebuild `state.nodes` on every toggle) skip the O(N) tree
+  // walk — but no DOM is unmounted, so the 220ms width animation stays
+  // smooth.
+  const isLeftCollapsed = usePanelStore((s) => s.isLeftCollapsed);
+  const rawNodes = useCanvasStore(
     (s) => s.nodes,
   ) as unknown as DataSourceNodeLike[];
+  const frozenNodesRef = useRef(rawNodes);
+  if (!isLeftCollapsed) {
+    // Keep the cached reference in step with the live store whenever the
+    // panel is visible. Writing the same ref value during render is safe
+    // (no extra render scheduled).
+    frozenNodesRef.current = rawNodes;
+  }
+  const nodes = isLeftCollapsed ? frozenNodesRef.current : rawNodes;
 
   // Canvas layer tree: use original node order (hierarchy-based).
   // We cache per-id item refs by content so that selection-only changes

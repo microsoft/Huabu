@@ -15,7 +15,12 @@ export const MainLayout = ({
   rightPanel,
   children,
 }: MainLayoutProps) => {
-  const [isLeftCollapsed, setIsLeftCollapsed] = useState(true);
+  // Left collapse lives in `panelStore` so the layer panel subtree can
+  // read it and freeze its `nodes` ref while collapsed (skipping the
+  // O(N) tree rebuild). Right collapse remains local because nothing
+  // outside `MainLayout` needs to read it today.
+  const isLeftCollapsed = usePanelStore((s) => s.isLeftCollapsed);
+  const toggleLeftPanel = usePanelStore((s) => s.toggleLeftPanel);
   const [isRightCollapsed, setIsRightCollapsed] = useState(true);
 
   const contentRef = useRef<HTMLDivElement | null>(null);
@@ -73,10 +78,6 @@ export const MainLayout = ({
       ? 'pointer-events-none w-0 opacity-0'
       : 'cursor-col-resize'
   }`;
-
-  const toggleLeftPanel = () => {
-    setIsLeftCollapsed((prev) => !prev);
-  };
 
   const toggleRightPanel = () => {
     setIsRightCollapsed((prev) => !prev);
@@ -181,31 +182,44 @@ export const MainLayout = ({
           but always in their expanded form so the parent's `overflow-hidden`
           can cleanly clip them as the width animates to 0 — otherwise the
           SidebarPanel's own collapsed 36px strip would briefly appear and
-          look like a vertical sliver pinned to the left edge. */}
+          look like a vertical sliver pinned to the left edge.
+
+          The inner content is absolutely positioned at the natural expanded
+          width (`leftWidthPx`). Pinning the inner width decouples row
+          layout (truncate ellipsis, `ml-auto` action cluster, icon flex)
+          from the animated outer width — otherwise every frame of the
+          220ms transition would re-truncate labels and shift the action
+          cluster, producing visible jank. The outer simply clips the
+          inner via `overflow-hidden`. */}
       <div
-        className="flex shrink-0 flex-col overflow-hidden"
+        className="relative shrink-0 overflow-hidden"
         data-animate-width
         data-resizing={isResizing ? 'true' : undefined}
         style={{
           width: `${effectiveLeftWidthPx}px`,
         }}
       >
-        <div className="shrink-0">
-          {React.isValidElement(header)
-            ? React.cloneElement(header as React.ReactElement<any>, {
-                isCollapsed: false,
-                onToggle: toggleLeftPanel,
-                compact: true,
-              })
-            : header}
-        </div>
-        <div className="min-h-0 flex-1">
-          {React.isValidElement(leftPanel)
-            ? React.cloneElement(leftPanel as React.ReactElement<any>, {
-                isCollapsed: false,
-                onToggle: toggleLeftPanel,
-              })
-            : leftPanel}
+        <div
+          className="absolute top-0 left-0 flex h-full flex-col"
+          style={{ width: `${leftWidthPx}px` }}
+        >
+          <div className="shrink-0">
+            {React.isValidElement(header)
+              ? React.cloneElement(header as React.ReactElement<any>, {
+                  isCollapsed: false,
+                  onToggle: toggleLeftPanel,
+                  compact: true,
+                })
+              : header}
+          </div>
+          <div className="min-h-0 flex-1">
+            {React.isValidElement(leftPanel)
+              ? React.cloneElement(leftPanel as React.ReactElement<any>, {
+                  isCollapsed: false,
+                  onToggle: toggleLeftPanel,
+                })
+              : leftPanel}
+          </div>
         </div>
       </div>
 

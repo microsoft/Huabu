@@ -37,7 +37,6 @@ import {
   type CanvasUiIntent,
   type UiResolverState,
 } from '@/handler/canvasCommand/uiIntent';
-import { pushAction } from '@/handler/canvasCommand/utils';
 import {
   applySnap,
   beginSnapSession,
@@ -50,6 +49,7 @@ import {
 } from '@/handler/snap/snapSession';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
+import { createIntentActionWindow } from './canvasStore/intentActionWindow';
 import { createCanvasEventBuffer } from './canvasStore/save/eventBuffer';
 import { NODE_CONTENT_KEYS } from './canvasStore/save/nodeContentFields';
 import { createNodeContentQueue } from './canvasStore/save/nodeContentQueue';
@@ -438,7 +438,6 @@ type RFState = {
     nextName: string,
   ) => Promise<boolean>;
 
-  actionHistory: RecentAction[];
   /** @internal Execute a batch of shared CanvasCommands. Do not call from outside the store. */
   executeCommands: (
     commands: CanvasCommand[],
@@ -536,6 +535,23 @@ const nodeContentQueue = createNodeContentQueue({
   delayMs: NODE_CONTENT_DEBOUNCE_MS,
   getState: () => useCanvasStore.getState(),
 });
+
+// ─── Action-history ring ──────────────────────────────────────────────────
+//
+// The short, in-memory action trail (cap 10, no timestamps) that
+// rides on agent / intent request bodies. Deliberately kept OUTSIDE
+// the Zustand store: no React component subscribes to it, but a
+// store-resident field would force `dispatchUiIntent` to fire a
+// *second* `set({ actionHistory })` right after `executeCommands`
+// already committed nodes/edges. That second commit makes every
+// remaining store subscriber re-run its selector for a value none of
+// them care about — wasted work on every UI click.
+//
+// The full server-bound action log still flows through `canvasEvents`
+// (see above); this window is read exactly once per intent request
+// via `getIntentContext`. See `intentActionWindow.ts` for the
+// memory-pipeline cleanup path that will eventually delete it.
+const intentActionWindow = createIntentActionWindow();
 
 // Module-scoped singleton listener: intentionally registered once at module
 // load time and never removed. Safe for this app's single-page lifecycle.
@@ -769,8 +785,6 @@ const useCanvasStore = create<RFState>()(
     // Action history & agent context
     // -----------------------------------------------------------------------
 
-    actionHistory: [],
-
     // --- Internal: not exposed in the public CanvasStore interface ---
 
     /** Execute a batch of shared CanvasCommands. Source defaults to 'ui'. */
@@ -856,16 +870,13 @@ const useCanvasStore = create<RFState>()(
       if (execution.expandedNodeId !== undefined) {
         set({ expandedNodeId: execution.expandedNodeId });
       }
-      // Push trace from intent resolution to action history.
+      // Push trace from intent resolution to the module-scoped
+      // window and mirror into the server-bound event buffer. Both
+      // are store-external on purpose — no Zustand subscriber
+      // observes them, so writing them through `set` would only
+      // cost every other selector a re-run per click.
       if (execution.trace.length > 0) {
-        let history = get().actionHistory;
-        for (const action of execution.trace) {
-          history = pushAction(history, action);
-        }
-        set({ actionHistory: history });
-        // Mirror the trace into the outgoing event buffer so the server
-        // builds up a long-window action log alongside the short
-        // in-memory ring buffer.
+        intentActionWindow.pushMany(execution.trace);
         canvasEvents.bufferMany(get().canvasId, execution.trace);
       }
     },
@@ -879,7 +890,7 @@ const useCanvasStore = create<RFState>()(
     },
 
     getIntentContext: (): IntentContext => {
-      const { nodes, edges, actionHistory } = get();
+      const { nodes, edges } = get();
       const buildSelectedDetail = makeBuildSelectedDetail(nodes);
 
       // Wire shape: raw canvas state only. The server enriches into
@@ -905,7 +916,7 @@ const useCanvasStore = create<RFState>()(
           return node;
         }),
         edges: edges.map((e) => ({ source: e.source, target: e.target })),
-        recentActions: actionHistory,
+        recentActions: intentActionWindow.snapshot(),
         selectedNodes: nodes.filter((n) => n.selected).map(buildSelectedDetail),
       };
     },
@@ -1010,11 +1021,14 @@ const useCanvasStore = create<RFState>()(
       // or, for older canvases without one, runs a one-shot fitView.
       set({
         expandedNodeId: null,
-        actionHistory: [],
         collapsedFrameIds: new Set(),
         canvasNotFound: false,
         viewport: null,
       });
+      // The intent action window lives outside the store; clear it
+      // alongside the in-store reset so the new canvas doesn't
+      // inherit the previous canvas's recent-action trail.
+      intentActionWindow.clear();
       useToolStore.getState().resetForCanvasSwitch();
       useGesturePreviewStore.getState().clearFrameFitPreview();
       canvasHistoryManager.clear();
@@ -2015,7 +2029,7 @@ const useCanvasStore = create<RFState>()(
     canRedo: false,
 
     undo: () => {
-      const { nodes, edges, canvasId, actionHistory } = get();
+      const { nodes, edges, canvasId } = get();
       const snapshot = canvasHistoryManager.undo(nodes, edges);
       if (!snapshot) return;
 
@@ -2023,8 +2037,8 @@ const useCanvasStore = create<RFState>()(
       set({
         nodes: snapshot.nodes,
         edges: snapshot.edges,
-        actionHistory: pushAction(actionHistory, action),
       });
+      intentActionWindow.push(action);
       canvasEvents.buffer(canvasId, action);
 
       canvasHistoryManager.syncServerAfterRestore(
@@ -2036,7 +2050,7 @@ const useCanvasStore = create<RFState>()(
     },
 
     redo: () => {
-      const { nodes, edges, canvasId, actionHistory } = get();
+      const { nodes, edges, canvasId } = get();
       const snapshot = canvasHistoryManager.redo(nodes, edges);
       if (!snapshot) return;
 
@@ -2044,8 +2058,8 @@ const useCanvasStore = create<RFState>()(
       set({
         nodes: snapshot.nodes,
         edges: snapshot.edges,
-        actionHistory: pushAction(actionHistory, action),
       });
+      intentActionWindow.push(action);
       canvasEvents.buffer(canvasId, action);
 
       canvasHistoryManager.syncServerAfterRestore(
