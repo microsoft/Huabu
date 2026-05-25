@@ -221,11 +221,18 @@ export function createNodeContentQueue(opts: {
       .catch(() => undefined)
       .then(() => performSave(canvasId, nodeId, kOpts));
     inflight.set(nodeId, next);
-    void next.finally(() => {
-      if (inflight.get(nodeId) === next) {
-        inflight.delete(nodeId);
-      }
-    });
+    // `.finally()` returns a new promise that re-rejects when `next`
+    // rejects. The outer caller (`schedule` / `flushNow` / `flushAll`)
+    // attaches its own `.catch` to `next` itself, but this cleanup
+    // chain is a separate promise — without the trailing `.catch` it
+    // would fire `window.onunhandledrejection` on every 409 / 5xx.
+    void next
+      .finally(() => {
+        if (inflight.get(nodeId) === next) {
+          inflight.delete(nodeId);
+        }
+      })
+      .catch(() => undefined);
     return next;
   }
 
