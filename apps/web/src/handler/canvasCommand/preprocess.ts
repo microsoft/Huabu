@@ -116,6 +116,14 @@ export async function preprocessNodeIfNeeded({
       patch.label = response.suggestedLabel;
       patch.labelSource = 'auto';
     }
+    // Adopt the server-canonical `src` whenever the pipeline normalized
+    // it (e.g. URL canonicalization for web, artifact URL rewrite for
+    // pdf). The server only emits this field when it actually diverged
+    // from the snapshot we sent, so any value here is meaningful — no
+    // need to re-compare on the client.
+    if (typeof response.src === 'string' && response.src.length > 0) {
+      patch.src = response.src;
+    }
     if (typeof response.summary === 'string' && response.summary.length > 0) {
       patch.summary = response.summary;
     }

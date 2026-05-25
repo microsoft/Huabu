@@ -151,6 +151,10 @@ export async function runPipeline(
         nodeId: request.nodeId,
         isNew: false,
         contentChanged: false,
+        // Cache-hit path: `existing.src === targetSrc` by the guard
+        // above. Surface it so Project can still patch the client when
+        // its in-memory `data.src` lags behind the canonical form.
+        persistedSrc: existing.src ?? undefined,
       };
       return project(
         request,

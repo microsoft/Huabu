@@ -4,6 +4,21 @@
 
 ---
 
+## 2026-05-25 · 修复：web / pdf 节点的 `src` 在预处理后客户端与磁盘短暂不一致
+
+**What Changed**
+
+- 服务端预处理流水线（`Persist → Project`）现在会把规范化后的 `src` 通过 `PreprocessNodeResponse.src` 回传给前端：web 节点是规范化后的 URL（去 utm / 去 fragment / 去尾斜杠等），pdf 节点是 canvas 域内的 artifact URL。前端 `preprocessNodeIfNeeded` 在收到该字段后会静默 patch 节点 `data.src`，与磁盘 `.md` 里持久化的形式一致。
+- 该字段只在"持久化后的 src 与客户端 snapshot 里的 src 不同"时出现，所以不会触发多余的内容保存。
+
+**Notes**
+
+- 用户视角：粘贴一条带 `?utm_source=...` 的 URL 后，节点上显示的链接会立刻收敛到规范化版本，而不需要刷新整个画布才看到一致结果。
+- pdf 类节点的临时本地路径在预处理完后也会被自动替换为 `/api/canvas/.../artifact/...`，预览不再依赖那个会失效的临时 src。
+- 无数据迁移成本；仅作用于下一次预处理触发后的回合。
+
+---
+
 ## 2026-05-25 · 优化：画布视口（pan / zoom）改为按标签页存储，不再触发结构保存
 
 **What Changed**
