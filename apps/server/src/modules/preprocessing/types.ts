@@ -234,6 +234,16 @@ export interface PersistResult {
    * renders the un-deduped base label.
    */
   persistedLabel?: string;
+  /**
+   * Final on-disk `src` after Persist — the normalized URI for web
+   * nodes or the canvas-scoped artifact URL for pdf nodes. Captured
+   * so the Project stage can surface it as `patch.src` whenever the
+   * server-canonical form differs from the snapshot `src` the client
+   * sent; without this round-trip the client's `data.src` would
+   * silently disagree with the markdown sidecar until the next
+   * canvas reload re-hydrates the field.
+   */
+  persistedSrc?: string;
 }
 
 // ---------------------------------------------------------------------------

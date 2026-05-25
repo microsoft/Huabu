@@ -62,6 +62,26 @@ export function project(
     }
   }
 
+  // Surface the post-Persist canonical `src` whenever it diverges from
+  // what the client sent in the snapshot. Typical sources of divergence:
+  //   • web nodes: URL normalization strips utm / fragment / trailing
+  //     slashes, so the persisted form may differ from the user-pasted
+  //     URL.
+  //   • pdf nodes: the snapshot may carry a transient local path while
+  //     the persisted form is the canvas-scoped artifact URL.
+  // Without this patch the client keeps its un-normalized `data.src`
+  // until the next canvas reload re-hydrates it from the markdown
+  // sidecar — visible as a brief disagreement between the URL the user
+  // sees on the node and the one that was actually saved.
+  const persistedSrc = ctx.persisted?.persistedSrc;
+  if (typeof persistedSrc === 'string' && persistedSrc.length > 0) {
+    const snapshotSrc =
+      typeof request.snapshot.src === 'string' ? request.snapshot.src : '';
+    if (snapshotSrc !== persistedSrc) {
+      patch.src = persistedSrc;
+    }
+  }
+
   const hasError = diagnostics.some((d) => d.level === 'error');
   const hasPersist = ctx.persisted && !ctx.persisted.skipped;
   const hasEnrich = ctx.enriched && !ctx.enriched.skipped;

@@ -116,6 +116,17 @@ export interface PreprocessNodeResponse {
   success: boolean;
   /** LLM-suggested label from the Enrich stage (for image/frame, or title-derived for ingest types). */
   suggestedLabel?: string;
+  /**
+   * Server-canonical `src` after the Persist stage — present when the
+   * pipeline normalized the input URL (web → canonical URI; pdf →
+   * canvas-scoped artifact URL) into a value that differs from the
+   * snapshot `src` the client sent. The client should patch `data.src`
+   * to this value so the in-memory canvas state matches what is now
+   * persisted in the markdown sidecar; without this round-trip the
+   * client would silently disagree with the server until the next
+   * canvas reload re-hydrates the field.
+   */
+  src?: string;
   /** LLM-generated summary of the node content (from the Enrich stage). */
   summary?: string;
   /** LLM-generated keywords for the node content (from the Enrich stage). */

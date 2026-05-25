@@ -1162,6 +1162,15 @@ const useCanvasStore = create<RFState>()(
         typeof target.data?.['label'] === 'string'
           ? (target.data['label'] as string)
           : '';
+      // Snapshot the existing labelSource so the rollback path can
+      // restore the original provenance ('user' / 'agent' / 'auto' /
+      // undefined) verbatim instead of hard-coding 'auto'. Downstream
+      // consumers (paste resolver, content PUT, preprocess dispatcher)
+      // all gate on this field, so clobbering it would silently change
+      // behaviour.
+      const currentLabelSource = (
+        target.data as Record<string, unknown> | undefined
+      )?.['labelSource'];
       if (normalize(currentLabel) === normalize(trimmed)) {
         // No-op: avoid a needless dispatch.
         if (currentLabel !== trimmed) {
@@ -1200,21 +1209,28 @@ const useCanvasStore = create<RFState>()(
           // skips both autosave scheduling and the content-diff hook
           // so reverting doesn't schedule another doomed PUT.
           get()._setStateNoAutosave({
-            nodes: get().nodes.map((n) =>
-              n.id === id
-                ? {
-                    ...n,
-                    data: {
-                      ...(n.data ?? {}),
-                      label: currentLabel,
-                      // Restore original label source so we don't keep
-                      // strict-validating a reverted label on future
-                      // saves.
-                      labelSource: 'auto',
-                    },
-                  }
-                : n,
-            ),
+            nodes: get().nodes.map((n) => {
+              if (n.id !== id) return n;
+              // Strip the optimistic `labelSource: 'user'` first so we
+              // can restore the original provenance exactly — including
+              // the "was previously absent" case (omit the key entirely
+              // rather than leaving a literal `undefined` value behind).
+              const { labelSource: _omitted, ...rest } = (n.data ??
+                {}) as Record<string, unknown>;
+              return {
+                ...n,
+                data: {
+                  ...rest,
+                  label: currentLabel,
+                  // Restore the original label source captured before
+                  // the optimistic patch so we don't silently rewrite
+                  // provenance ('user' / 'agent') to 'auto' on revert.
+                  ...(currentLabelSource !== undefined
+                    ? { labelSource: currentLabelSource }
+                    : {}),
+                },
+              };
+            }),
           });
           const taken = err.conflictWith ?? trimmed;
           window.alert(

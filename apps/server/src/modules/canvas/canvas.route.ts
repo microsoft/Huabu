@@ -206,16 +206,13 @@ function hydrateOneNode(store: CanvasStore, node: NodeLike): NodeLike {
   const nodeType = typeof node.type === 'string' ? node.type : '';
   const data: Record<string, unknown> = { ...(node.data ?? {}) };
 
-  // ----- Artifact-backed nodes: flag missing src file -----
-  if (ARTIFACT_BACKED_NODE_TYPES.has(nodeType)) {
-    if (isArtifactMissing(store, data)) {
-      data['artifactMissing'] = true;
-    } else if ('artifactMissing' in data) {
-      delete data['artifactMissing'];
-    }
-  }
-
-  // ----- Content-backed nodes: read markdown side-file -----
+  // ----- Read markdown side-file first -----
+  // The structure PUT strips every per-node content key (src,
+  // provenance, label, summary, keywords, …) before persisting
+  // `canvas.json` via {@link stripNodesForCanvas}. The markdown sidecar
+  // is the only source of truth for those fields, so we read it before
+  // any check that depends on them (notably the artifact-missing probe,
+  // which needs the hydrated `src`).
   let nodeContent: NodeContent | null = null;
   try {
     nodeContent = store.readNode(nodeId);
@@ -227,6 +224,8 @@ function hydrateOneNode(store: CanvasStore, node: NodeLike): NodeLike {
     if (CONTENT_BACKED_NODE_TYPES.has(nodeType)) {
       data['contentMissing'] = true;
     }
+    // Without a sidecar we can't recover `src`, so the
+    // artifact-missing probe below would be meaningless — skip it.
     // Return early only when we actually mutated something; otherwise
     // preserve the original node reference to keep diffs minimal.
     return data === node.data ? node : { ...node, data };
@@ -240,6 +239,22 @@ function hydrateOneNode(store: CanvasStore, node: NodeLike): NodeLike {
   // a content field for them.
   if (TEXT_BEARING_NODE_TYPES.has(nodeType)) {
     data['content'] = nodeContent.content;
+  }
+
+  // Rehydrate the source URL for artifact-backed (image/pdf/video) and
+  // remote (web) nodes. Without this step the structure PUT permanently
+  // wipes `data.src` from the canvas state on the next reload because
+  // `stripNodesForCanvas` removed it before writing `canvas.json`.
+  if (typeof nodeContent.src === 'string' && nodeContent.src.length > 0) {
+    data['src'] = nodeContent.src;
+  }
+
+  // Rehydrate AI-edit block provenance. Same rationale as `src`: the
+  // structure PUT strips it, so reloading any note that had AI edits
+  // would lose its provenance markers without this step.
+  const persistedProvenance = nodeContent['provenance'];
+  if (persistedProvenance !== undefined) {
+    data['provenance'] = persistedProvenance;
   }
 
   // Surface preprocessed AI summary / keywords from the per-node
@@ -268,6 +283,19 @@ function hydrateOneNode(store: CanvasStore, node: NodeLike): NodeLike {
     persistedLabelSource === 'auto'
       ? persistedLabelSource
       : 'auto';
+
+  // ----- Artifact-backed nodes: flag missing src file -----
+  // Must run AFTER `src` is rehydrated above — otherwise `data.src`
+  // would still be the post-strip empty string and `isArtifactMissing`
+  // would unconditionally return `false`, silently masking deleted
+  // artifacts.
+  if (ARTIFACT_BACKED_NODE_TYPES.has(nodeType)) {
+    if (isArtifactMissing(store, data)) {
+      data['artifactMissing'] = true;
+    } else if ('artifactMissing' in data) {
+      delete data['artifactMissing'];
+    }
+  }
 
   return { ...node, data };
 }
@@ -666,6 +694,14 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           typeof result.patch.label === 'string'
             ? result.patch.label
             : undefined,
+        // Surface the post-Persist canonical `src` only when the
+        // Project stage decided it diverged from the snapshot — see
+        // the `patch.src` branch in `stages/project.ts`. Reading from
+        // the patch (rather than `result.persistence`) means we
+        // automatically inherit the same "only when changed" gate so
+        // the client never receives a redundant src write.
+        src:
+          typeof result.patch.src === 'string' ? result.patch.src : undefined,
         summary: result.enriched?.summary,
         keywords: result.enriched?.keywords,
         error:
