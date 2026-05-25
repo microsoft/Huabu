@@ -555,7 +555,11 @@ function resolveMoveNodeIntoFrame(
     affectedFrameIds.push(node.parentId);
   }
   commands.push(
-    ...buildStructuredFrameRelayoutCommands(affectedFrameIds, ui.nodes),
+    ...buildStructuredFrameRelayoutCommands(affectedFrameIds, ui.nodes, {
+      // SET_NODE_PARENT was just emitted above — mirror it so the
+      // layout pass sees the moved child as a member of the new frame.
+      parentChanges: new Map([[intent.nodeId, intent.frameId]]),
+    }),
   );
   return {
     commands,
@@ -601,7 +605,11 @@ function resolveMoveNodeOutOfFrame(
   // it just lost a child and the remaining slots should reflow.
   if (node?.parentId) {
     commands.push(
-      ...buildStructuredFrameRelayoutCommands([node.parentId], ui.nodes),
+      ...buildStructuredFrameRelayoutCommands([node.parentId], ui.nodes, {
+        // SET_NODE_PARENT was just emitted above — mirror the detach
+        // so the layout pass no longer counts this child.
+        parentChanges: new Map([[intent.nodeId, null]]),
+      }),
     );
   }
   return {
@@ -623,32 +631,21 @@ function resolveSetFrameLayoutMode(
   intent: Extract<CanvasUiIntent, { type: 'SET_FRAME_LAYOUT_MODE' }>,
   ui: UiResolverState,
 ): UiIntentResolution {
-  // Apply the layout-mode patch first so the follow-up re-flow sees
-  // the new mode. We rebuild the nodes array locally to mirror what
-  // the executor will see after `MERGE_NODE_DATA` lands.
   const patch: Record<string, unknown> = { layoutMode: intent.mode };
   if (typeof intent.gridCount === 'number') {
     patch.gridCount = intent.gridCount;
   }
 
-  const patchedNodes = ui.nodes.map((n) =>
-    n.id === intent.frameId
-      ? {
-          ...n,
-          data: {
-            ...(n.data ?? {}),
-            ...patch,
-          },
-        }
-      : n,
-  );
-
+  // Apply the layout-mode patch via the relayout's `pending` channel so
+  // the structured pass sees the new mode/gridCount that's about to land.
   const commands: CanvasCommand[] = [
     {
       type: 'MERGE_NODE_DATA',
       patches: [{ nodeId: intent.frameId as CanvasNodeId, patch }],
     },
-    ...buildStructuredFrameRelayoutCommands([intent.frameId], patchedNodes),
+    ...buildStructuredFrameRelayoutCommands([intent.frameId], ui.nodes, {
+      frameDataPatches: [{ nodeId: intent.frameId, patch }],
+    }),
   ];
 
   return { commands, trace: [] };

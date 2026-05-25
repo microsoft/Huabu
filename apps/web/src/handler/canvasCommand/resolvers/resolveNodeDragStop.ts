@@ -107,7 +107,12 @@ export default function resolveNodeDragStop(
     }
     pushSlotCommand(commands, cellsSlotPatches);
     commands.push(
-      ...buildStructuredFrameRelayoutCommands(affectedFrameIds, ui.nodes),
+      ...buildStructuredFrameRelayoutCommands(affectedFrameIds, result, {
+        slotPatches: cellsSlotPatches.map((p) => ({
+          nodeId: p.nodeId,
+          slot: p.slot,
+        })),
+      }),
     );
     const movedNodes = intent.draggedNodeIds
       .map((id) => nodes.find((n) => n.id === id))
@@ -146,7 +151,12 @@ export default function resolveNodeDragStop(
 
   pushSlotCommand(commands, cellsSlotPatches);
   commands.push(
-    ...buildStructuredFrameRelayoutCommands(affectedFrameIds, ui.nodes),
+    ...buildStructuredFrameRelayoutCommands(affectedFrameIds, result, {
+      slotPatches: cellsSlotPatches.map((p) => ({
+        nodeId: p.nodeId,
+        slot: p.slot,
+      })),
+    }),
   );
 
   // Build trace: framed/unframed + moved.
