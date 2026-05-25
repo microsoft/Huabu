@@ -7,7 +7,7 @@ import staticPlugin from '@fastify/static';
 import { fastify } from 'fastify';
 
 import debugAcpRoutes from './modules/agent/acp/debug.route.js';
-import { mountAgentletServer } from './modules/agent/acp/index.js';
+import { acpAgentsRoutes, mountAgentletServer } from './modules/agent/acp/index.js';
 import agentRoutes from './modules/agent/agent.route.js';
 import intentRoutes from './modules/agent/intent.route.js';
 import llmRoutes from './modules/agent/llm.route.js';
@@ -118,6 +118,11 @@ app.register(workspaceRoutes, { prefix: '/api/workspace' });
 // and the Phase 1 debug endpoint (POST /api/debug/acp-prompt) behind the
 // same feature flag so the default startup path is unchanged. Set
 // SEDIMENT_ENABLE_ACP=1 to enable. See modules/agent/acp/README.md.
+//
+// The agents-list route is registered *unconditionally* so the front-end
+// has one URL to call regardless of flag state — it reports
+// `{ enabled: false, agents: [] }` when the bridge isn't mounted.
+app.register(acpAgentsRoutes, { prefix: '/api/acp' });
 if (process.env.SEDIMENT_ENABLE_ACP === '1') {
   mountAgentletServer(app);
   app.register(debugAcpRoutes, { prefix: '/api/debug' });

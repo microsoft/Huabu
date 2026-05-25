@@ -5,6 +5,8 @@ export {
 } from './server-mount.js';
 export type { MountAcpOptions } from './server-mount.js';
 
+export { default as acpAgentsRoutes, deriveAlias } from './agents.route.js';
+
 export { AcpAgentClient } from './client.js';
 export type {
   AcpAgentClientOptions,

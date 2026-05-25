@@ -14,6 +14,7 @@ import { useLLMStore } from '@/store/llmStore';
 
 import { SidebarPanel } from '../SidebarPanel';
 import { ChatInput } from './ChatInput';
+import { ConnectedAgentsBar } from './ConnectedAgentsBar';
 import { useSketchClusterMessages } from './useSketchClusterMessages';
 import { useAgentStream } from '../../../hooks/useAgentStream';
 import { useChatHistory } from '../../../hooks/useChatHistory';
@@ -196,16 +197,19 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
 
         {/* Input is hidden in sketch inspector mode — it's a read-only view. */}
         {!viewingSketchCluster && (
-          <ChatInput
-            value={input}
-            onChange={setInput}
-            onSubmit={handleSubmit}
-            onStop={stopStream}
-            isStreaming={isLoading}
-            mode={mode}
-            onModeChange={setMode}
-            disabled={isLoading || !isHistoryLoaded}
-          />
+          <>
+            <ConnectedAgentsBar />
+            <ChatInput
+              value={input}
+              onChange={setInput}
+              onSubmit={handleSubmit}
+              onStop={stopStream}
+              isStreaming={isLoading}
+              mode={mode}
+              onModeChange={setMode}
+              disabled={isLoading || !isHistoryLoaded}
+            />
+          </>
         )}
       </div>
     </SidebarPanel>
