@@ -5,10 +5,10 @@ import {
   Hand,
   UploadCloud,
   Link as LinkIcon,
-  Sprout,
-  Sparkles,
+  ChevronDown,
   Undo2,
   Redo2,
+  Sprout,
 } from 'lucide-react';
 import { useMemo, useRef, useState, type ChangeEvent } from 'react';
 
@@ -22,6 +22,7 @@ import useCanvasStore from '../../../store/canvasStore.ts';
 import { detectNodeType } from '../../../utils/io/media.ts';
 import { Button } from '../../Common/Button.tsx';
 import { Modal } from '../../Common/Modal.tsx';
+import { Popover } from '../../Common/Popover.tsx';
 import {
   SplitSelect,
   type SplitSelectOption,
@@ -40,8 +41,6 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
   const pendingNodeType = useToolStore((s) => s.pendingNodeType);
   const setPendingNodeType = useToolStore((s) => s.setPendingNodeType);
   const setSketchDraft = useToolStore((s) => s.setSketchDraft);
-  const autoLayoutEnabled = useCanvasStore((s) => s.autoLayoutEnabled);
-  const toggleAutoLayout = useCanvasStore((s) => s.toggleAutoLayout);
 
   // Non-mouse undo / redo (delete now lives on the per-context floating toolbars)
   const isNotMouse = useIsNotMouse();
@@ -61,6 +60,9 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
   const [activeModal, setActiveModal] = useState<'upload' | 'link' | null>(
     null,
   );
+  const [resourceMenuOpen, setResourceMenuOpen] = useState(false);
+  const resourceMenuRef = useRef<HTMLDivElement>(null);
+  const resourceJustDismissedRef = useRef(false);
   const [linkText, setLinkText] = useState('');
 
   // Selection / pan tool options for the merged dropdown trigger.
@@ -72,6 +74,21 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
     ],
     [],
   );
+
+  const resourceOptions: {
+    value: 'upload' | 'link';
+    label: string;
+    icon: React.ReactNode;
+  }[] = [
+    { value: 'upload', label: 'Upload Files', icon: <UploadCloud /> },
+    { value: 'link', label: 'Add Links', icon: <LinkIcon /> },
+  ];
+
+  const getResourceMenuPosition = () => {
+    if (!resourceMenuRef.current) return { x: 0, y: 0 };
+    const rect = resourceMenuRef.current.getBoundingClientRect();
+    return { x: rect.left, y: rect.top };
+  };
 
   const getImageDimensions = (
     file: File,
@@ -306,48 +323,59 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           </div>
         </div>
 
-        <div className="bg-edge-default mx-1 h-4 w-px" />
-
-        <div className="flex items-center gap-1.5">
+        <div ref={resourceMenuRef} className="flex items-center gap-1.5">
           <Button
             variant="ghost"
+            size="sm"
             iconOnly
-            title="Upload Files"
-            className={clsx(
-              activeModal === 'upload' && 'text-info bg-bg-default',
-            )}
-            onClick={() => setActiveModal('upload')}
+            title="Upload or Link"
+            className={clsx(resourceMenuOpen && 'bg-bg-default')}
+            onClick={() => {
+              if (resourceJustDismissedRef.current) return;
+              setResourceMenuOpen((prev) => !prev);
+            }}
           >
-            <UploadCloud />
+            <ChevronDown
+              className={clsx(
+                'transition-transform',
+                resourceMenuOpen && 'rotate-180',
+              )}
+            />
           </Button>
 
-          <Button
-            variant="ghost"
-            iconOnly
-            title="Add Links"
-            className={clsx(
-              activeModal === 'link' && 'text-info bg-bg-default',
-            )}
-            onClick={() => setActiveModal('link')}
-          >
-            <LinkIcon />
-          </Button>
-        </div>
-
-        <div className="bg-edge-default mx-1 h-4 w-px" />
-
-        <div className="flex items-center gap-1.5">
-          <Button
-            variant="ghost"
-            iconOnly
-            title={
-              autoLayoutEnabled ? 'Disable Auto Layout' : 'Enable Auto Layout'
-            }
-            onClick={() => toggleAutoLayout()}
-            className={clsx(autoLayoutEnabled && 'text-info bg-bg-default')}
-          >
-            <Sparkles />
-          </Button>
+          {resourceMenuOpen && (
+            <Popover
+              position={getResourceMenuPosition()}
+              onDismiss={() => {
+                resourceJustDismissedRef.current = true;
+                setResourceMenuOpen(false);
+                requestAnimationFrame(() => {
+                  resourceJustDismissedRef.current = false;
+                });
+              }}
+              anchor="bottom-left"
+              offset={{ x: 0, y: -4 }}
+              className="flex flex-col overflow-hidden py-1"
+            >
+              {resourceOptions.map((opt) => (
+                <Button
+                  key={opt.value}
+                  variant="ghost"
+                  tone="neutral"
+                  size="sm"
+                  role="menuitem"
+                  className="w-full justify-start rounded-none px-3 py-1.5 text-left"
+                  onClick={() => {
+                    setResourceMenuOpen(false);
+                    setActiveModal(opt.value);
+                  }}
+                >
+                  <span className="shrink-0">{opt.icon}</span>
+                  <span className="flex-1">{opt.label}</span>
+                </Button>
+              ))}
+            </Popover>
+          )}
         </div>
 
         <div className="bg-edge-default mx-1 h-4 w-px" />
@@ -356,7 +384,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           <Button
             variant="ghost"
             iconOnly
-            title="Question"
+            title="Question Sticker"
             className={clsx(
               pendingNodeType === 'question' && 'text-info bg-bg-default',
             )}

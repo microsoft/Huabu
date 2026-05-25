@@ -212,7 +212,18 @@ interface NodeWrapperProps {
   className?: string;
   minWidth?: number;
   minHeight?: number;
+  /**
+   * Group 3 content for the floating toolbar: controls that affect
+   * how the node is displayed on the canvas (text formatting, sketch
+   * stroke controls, frame layout, etc.).
+   */
   toolbar?: React.ReactNode;
+  /**
+   * Group 4 content for the floating toolbar: action buttons that
+   * trigger operations (open large view, apply AI sketch, download,
+   * unframe, run / cancel AI question, etc.).
+   */
+  actions?: React.ReactNode;
 
   /**
    * Content to render in the zoom-invariant overlay layer.
@@ -252,6 +263,7 @@ export const NodeWrapper = memo(
     minWidth,
     minHeight,
     toolbar,
+    actions,
     overlayContent,
     overlayOffsetY = 0,
     keepAspectRatio = false,
@@ -506,10 +518,14 @@ export const NodeWrapper = memo(
           }}
           lineClassName="!border-transparent"
         />
-        {toolbar && selected && selectedCount === 1 && (
-          <NodeFloatingToolbar id={id} type={type} data={data}>
-            {toolbar}
-          </NodeFloatingToolbar>
+        {selected && selectedCount === 1 && (
+          <NodeFloatingToolbar
+            id={id}
+            type={type}
+            data={data}
+            toolbar={toolbar}
+            actions={actions}
+          />
         )}
 
         {/* Zoom-invariant overlay portal — isolated component to avoid re-rendering the entire NodeWrapper on pan/zoom */}
@@ -531,7 +547,7 @@ export const NodeWrapper = memo(
 
         <div
           className={cn(
-            'group relative flex h-full w-full flex-col rounded transition-all duration-120',
+            'group relative flex h-full w-full flex-col rounded-lg transition-all duration-120',
             // Drop shadow whenever there is no *visible* colored accent.
             // A `white` accent is visually neutral (its 50%-mix border is
             // effectively invisible against the canvas), so it should keep
@@ -622,7 +638,16 @@ export const NodeWrapper = memo(
               // fine while filling but would collapse the auto chain to 0.
               hasFixedNodeHeight ? 'min-h-0 flex-1' : 'min-h-0',
               isMinimal && 'invisible',
-              allowOverflow ? 'overflow-visible' : 'overflow-hidden',
+              // Match the wrapper's *inner* border radius so children that
+              // paint their own background (e.g. NoteNode's `bg-surface`)
+              // get clipped along the rounded inner edge instead of
+              // poking a sharp rectangular corner into the accent border.
+              // Wrapper has `rounded-lg` (8px) + `border-3` (3px) → inner
+              // radius is ~5px; `rounded-md` (6px) overshoots by 1px which
+              // is hidden under the opaque border. We can't put
+              // `overflow-hidden` on the outer wrapper itself because it
+              // would clip the absolutely-positioned resize handles.
+              allowOverflow ? 'overflow-visible' : 'overflow-hidden rounded-md',
             )}
           >
             {children}

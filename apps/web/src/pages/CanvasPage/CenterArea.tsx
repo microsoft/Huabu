@@ -1,7 +1,11 @@
+import { Bot, HelpCircle } from 'lucide-react';
 import React, { useCallback, useRef } from 'react';
 
+import { Button } from '../../components/Common/Button';
+import { cn } from '../../components/Common/cn';
 import { Canvas } from '../../components/Panels/Canvas/Canvas';
 import { ExpandedNodePanel } from '../../components/Panels/Canvas/ExpandedNodePanel';
+import { SettingsPopover } from '../../components/Panels/Header/SettingsPopover';
 import useCanvasStore from '../../store/canvasStore';
 import { usePreviewStore } from '../../store/previewStore';
 
@@ -15,10 +19,21 @@ const SPLIT_DEFAULT_RATIO = 0.5;
  */
 type CenterAreaProps = {
   canvasShortcutsDisabled?: boolean;
+  onOpenHelp?: () => void;
+  /**
+   * Mirrors the chat (right) panel collapse state. Injected by MainLayout
+   * so the floating chat-toggle button can live on top of the canvas
+   * instead of as a vertical strip at the canvas edge.
+   */
+  isChatCollapsed?: boolean;
+  onToggleChat?: () => void;
 };
 
 export const CenterArea: React.FC<CenterAreaProps> = ({
   canvasShortcutsDisabled = false,
+  onOpenHelp,
+  isChatCollapsed,
+  onToggleChat,
 }) => {
   const expandedNodeId = useCanvasStore((s) => s.expandedNodeId);
   const canvasExpandMode = useCanvasStore((s) => s.expandMode);
@@ -99,15 +114,67 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
       : '100%';
 
   return (
-    <div ref={containerRef} className="flex h-full w-full overflow-hidden">
-      {/* Canvas – always mounted; width controlled via CSS */}
+    <div
+      ref={containerRef}
+      className="relative flex h-full w-full overflow-hidden"
+    >
+      {/* Canvas – always mounted; width controlled via CSS. Hosts the
+          floating top-right controls so they pin to the canvas's right
+          edge (not the whole CenterArea) — in split mode the buttons
+          stay over the canvas portion instead of bleeding into the
+          expanded preview panel on the right. */}
       <div
-        className="h-full shrink-0 overflow-hidden"
+        className="relative h-full shrink-0 overflow-hidden"
         data-animate-width
         data-resizing={isResizing ? 'true' : undefined}
         style={{ width: canvasWidth }}
       >
         <Canvas shortcutsDisabled={canvasShortcutsDisabled} />
+
+        {/* Floating top-right controls — settings always visible; chat
+            toggle is always visible and switches to an "active" solid
+            style while the chat panel is expanded, so it doubles as the
+            collapse control. All three buttons use the pill shape so
+            they read as a uniform floating control group on top of the
+            canvas. */}
+        <div className="pointer-events-auto absolute top-3 right-3 z-30 flex items-center gap-1">
+          {onOpenHelp && (
+            <Button
+              variant="outline"
+              shape="pill"
+              iconOnly
+              onClick={onOpenHelp}
+              title="Keyboard Shortcuts (?)"
+              aria-label="Keyboard shortcuts"
+            >
+              <HelpCircle />
+            </Button>
+          )}
+          <SettingsPopover variant="outline" shape="pill" />
+          {onToggleChat && (
+            <Button
+              variant="outline"
+              shape="pill"
+              iconOnly
+              onClick={onToggleChat}
+              title={isChatCollapsed ? 'Open Chat' : 'Close Chat'}
+              aria-label={
+                isChatCollapsed ? 'Open chat panel' : 'Close chat panel'
+              }
+              aria-pressed={!isChatCollapsed}
+              className={cn(
+                // Active state mirrors the CanvasToolbar's active button —
+                // icon switches to the theme info color over a soft
+                // info-tinted background so the toggle reads as
+                // "currently engaged" without the heavy solid look.
+                !isChatCollapsed &&
+                  'text-info bg-info-bg border-info-light enabled:hover:bg-info-bg-hover',
+              )}
+            >
+              <Bot />
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Resize handle – visible only in split mode */}
@@ -124,8 +191,15 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
 
       {/* Expanded panel – rendered only when needed */}
       {hasExpanded && (
-        <div className={isReplace ? 'h-full w-full' : 'h-full min-w-0 flex-1'}>
-          <ExpandedNodePanel />
+        <div
+          className={
+            isReplace ? 'relative z-40 h-full w-full' : 'h-full min-w-0 flex-1'
+          }
+        >
+          <ExpandedNodePanel
+            isChatCollapsed={isChatCollapsed}
+            onToggleChat={onToggleChat}
+          />
         </div>
       )}
     </div>

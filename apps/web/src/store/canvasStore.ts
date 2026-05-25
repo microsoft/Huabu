@@ -1328,9 +1328,32 @@ const useCanvasStore = create<RFState>()(
       // which detaches every window-level listener attached during
       // `beginSnapSession` in one operation.
       endSnapSession();
+
+      // Convert the cursor's screen position to flow space so the
+      // resolver can assign grid-frame columns based on where the
+      // mouse actually was (not where the dragged node settled).
+      // Guarded against unusual event shapes (touch, programmatic
+      // emits) — the resolver gracefully falls back to node X.
+      let pointerFlowPosition: { x: number; y: number } | undefined;
+      const mouseEvent = _event as
+        | { clientX?: number; clientY?: number }
+        | undefined;
+      if (
+        mouseEvent &&
+        typeof mouseEvent.clientX === 'number' &&
+        typeof mouseEvent.clientY === 'number'
+      ) {
+        const flow = get().rfInstance?.screenToFlowPosition({
+          x: mouseEvent.clientX,
+          y: mouseEvent.clientY,
+        });
+        if (flow) pointerFlowPosition = flow;
+      }
+
       get().dispatchUiIntent({
         type: 'NODE_DRAG_STOP',
         draggedNodeIds: draggedNodes.map((n) => n.id),
+        pointerFlowPosition,
       });
     },
 

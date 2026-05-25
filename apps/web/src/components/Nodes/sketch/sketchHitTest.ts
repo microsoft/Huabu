@@ -1,3 +1,9 @@
+import {
+  createAbsolutePositionGetter,
+  indexById,
+  type NestableNode,
+} from '@sediment/shared/canvas-engine';
+
 import useCanvasStore from '@/store/canvasStore';
 
 import type { CanvasSketchNodeData } from '../types';
@@ -33,10 +39,16 @@ export interface SketchStrokeHit {
  * (`scaleX`, `scaleY`) and the node origin (`x0`, `y0`) so the caller
  * can map node-local stroke points to flow coordinates without
  * recomputing them.
+ *
+ * `x0` / `y0` are **absolute** flow-space coordinates — when the sketch
+ * is parented to a frame, `node.position` is relative to that parent,
+ * so we need the resolved absolute position for the bbox to line up
+ * with the pointer's flow-space hit point.
  */
 function nodeReject(
   node: ReturnType<typeof useCanvasStore.getState>['nodes'][number],
   data: CanvasSketchNodeData,
+  absPos: { x: number; y: number },
   flowX: number,
   flowY: number,
   r: number,
@@ -45,8 +57,8 @@ function nodeReject(
   const baseH = data.initialSize?.height || 1;
   const w = node.measured?.width ?? node.width ?? baseW;
   const h = node.measured?.height ?? node.height ?? baseH;
-  const x0 = node.position.x;
-  const y0 = node.position.y;
+  const x0 = absPos.x;
+  const y0 = absPos.y;
   if (
     flowX < x0 - r ||
     flowX > x0 + w + r ||
@@ -91,6 +103,11 @@ function walkSketchHits(
   onHit: (nodeId: string, strokeId: string) => HitWalkAction,
 ): void {
   const nodes = useCanvasStore.getState().nodes;
+  // Resolve absolute positions once per walk so sketches nested inside
+  // frames (whose `node.position` is parent-relative) still hit-test
+  // against the pointer's absolute flow coordinates.
+  const byId = indexById(nodes as NestableNode[]);
+  const getAbs = createAbsolutePositionGetter(byId);
 
   for (const node of nodes) {
     if (node.type !== 'sketch') continue;
@@ -106,7 +123,8 @@ function walkSketchHits(
       0,
     );
     const r = hitRadius + maxHalfStroke;
-    const reject = nodeReject(node, data, flowX, flowY, r);
+    const absPos = getAbs(node.id) ?? node.position;
+    const reject = nodeReject(node, data, absPos, flowX, flowY, r);
     if (!reject) continue;
 
     let advanceToNextNode = false;

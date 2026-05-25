@@ -49,6 +49,11 @@ export {
 export { toScreenshotDataUrl, captureCanvasScreenshot } from './screenshot';
 
 export {
+  getFrameLayoutMode,
+  buildStructuredFrameRelayoutCommands,
+} from './frameLayout';
+
+export {
   extractNodeRef,
   extractSnippet,
   computeNodeEditDiff,

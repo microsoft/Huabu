@@ -11,6 +11,11 @@ interface HeaderProps {
   onOpenHelp?: () => void;
 }
 
+/**
+ * Standalone-page header used on the canvas list and component showcase.
+ * The in-canvas header lives in `CanvasHeader.tsx` and has its own
+ * collapsed / floating logic.
+ */
 export const Header: React.FC<HeaderProps> = ({ children, onOpenHelp }) => {
   return (
     <header className="border-edge-default bg-surface flex h-12 items-center gap-3 border-b px-3">

@@ -96,7 +96,8 @@ export const CanvasLayerPanel = ({
       onToggle={onToggle}
       iconCollapsed={<PanelLeftOpen size={16} />}
       iconExpanded={<PanelLeftClose size={16} />}
-      className="border-edge-default border-r"
+      className="border-r border-[#eeece7]"
+      hideHeader
     >
       <CanvasLayerTree
         items={layerItems}

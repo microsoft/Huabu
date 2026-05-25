@@ -123,8 +123,8 @@ export const PDFNode = memo(
       setThumbnail(dataUrl);
     }, []);
 
-    const PDFToolbar = (
-      <FloatingToolbar.Group>
+    const PDFActions = (
+      <>
         <FloatingToolbar.ActionButton
           title="Open Large View"
           onClick={(e) => {
@@ -145,7 +145,7 @@ export const PDFNode = memo(
             <ImageOff />
           </FloatingToolbar.ActionButton>
         )}
-      </FloatingToolbar.Group>
+      </>
     );
 
     return (
@@ -154,12 +154,12 @@ export const PDFNode = memo(
         data={data}
         type={'pdf'}
         selected={selected}
-        toolbar={PDFToolbar}
+        actions={PDFActions}
         resizable
         keepAspectRatio={false}
         className={clsx('bg-surface transition-all duration-300 ease-in-out')}
       >
-        <div className="relative flex h-full w-full flex-col overflow-hidden rounded">
+        <div className="relative flex h-full w-full flex-col overflow-hidden rounded-lg">
           {/* Render the first page off-screen to capture a thumbnail when no manual cover exists */}
           {!hasCover && src && !thumbnail && !data.artifactMissing && (
             <FirstPageThumbnail src={src} onCapture={handleThumbnailCapture} />

@@ -74,18 +74,16 @@ export const NoteNode = memo(
       [hasFixedHeight, id, setNoteHeightMode],
     );
 
-    const NoteToolbar = (
-      <FloatingToolbar.Group>
-        <FloatingToolbar.ActionButton
-          title="Expand"
-          onClick={(e) => {
-            e.stopPropagation();
-            openExpanded(id);
-          }}
-        >
-          <Fullscreen />
-        </FloatingToolbar.ActionButton>
-      </FloatingToolbar.Group>
+    const NoteActions = (
+      <FloatingToolbar.ActionButton
+        title="Expand"
+        onClick={(e) => {
+          e.stopPropagation();
+          openExpanded(id);
+        }}
+      >
+        <Fullscreen />
+      </FloatingToolbar.ActionButton>
     );
 
     const markdown = typeof data.content === 'string' ? data.content : '';
@@ -189,7 +187,7 @@ export const NoteNode = memo(
         data={data}
         type={'note'}
         selected={selected}
-        toolbar={isContentMissing ? undefined : NoteToolbar}
+        actions={isContentMissing ? undefined : NoteActions}
         keepAspectRatio={false}
         borderColor={borderColorOverride}
       >

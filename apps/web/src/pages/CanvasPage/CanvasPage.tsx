@@ -8,7 +8,7 @@ import { MainLayout } from '@/pages/CanvasPage/MainLayout.tsx';
 import { LoadingState } from '../../components/Common/LoadingState.tsx';
 import { CanvasLayerPanel } from '../../components/Panels/CanvasLayerPanel';
 import { ChatPanel } from '../../components/Panels/ChatPanel';
-import { Header } from '../../components/Panels/Header/Header.tsx';
+import { CanvasHeader } from '../../components/Panels/Header/CanvasHeader.tsx';
 import { KeyboardShortcutsModal } from '../../components/Panels/Header/KeyboardShortcutsModal.tsx';
 import useStore from '../../store/canvasStore.ts';
 
@@ -109,11 +109,14 @@ export default function CanvasPage() {
   return (
     <>
       <MainLayout
-        header={<Header onOpenHelp={() => setIsShortcutsOpen(true)} />}
+        header={<CanvasHeader />}
         leftPanel={<CanvasLayerPanel />}
         rightPanel={<ChatPanel />}
       >
-        <CenterArea canvasShortcutsDisabled={isShortcutsOpen} />
+        <CenterArea
+          canvasShortcutsDisabled={isShortcutsOpen}
+          onOpenHelp={() => setIsShortcutsOpen(true)}
+        />
       </MainLayout>
 
       <KeyboardShortcutsModal

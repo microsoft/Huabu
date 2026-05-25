@@ -229,6 +229,16 @@ export interface BaseNodeData {
    * video) whose `src` points to a canvas-scoped artifact URL.
    */
   artifactMissing?: boolean;
+  /**
+   * Track index inside the parent frame when that frame is in a grid
+   * layout mode. Means the **column index** when the parent is in
+   * `column` mode, the **row index** when the parent is in `row`
+   * mode, and is ignored for `free` mode and root-level nodes.
+   *
+   * Persisted so a child stays in its user-chosen lane across re-runs
+   * of the layout pass (especially the "no empty track" rebalance).
+   */
+  frameSlot?: number;
 }
 
 /** Note node: rich Markdown content authored on the canvas */
@@ -319,9 +329,40 @@ export interface ImageNodeData extends BaseNodeData {
   src: string;
 }
 
+/**
+ * Layout mode applied to a frame's direct children.
+ *
+ * - `free`   — no layout enforcement; children keep their current
+ *              positions (default).
+ * - `column` — N columns × ∞ rows. Children stack top-to-bottom inside
+ *              each column, left-aligned; column width adapts to the
+ *              widest child. Drop column = position under the cursor;
+ *              the "no empty column" invariant rebalances when there
+ *              are at least as many children as columns.
+ * - `row`    — N rows × ∞ columns. Mirror of `column` on the other axis
+ *              (children top-aligned within their row).
+ */
+export const FRAME_LAYOUT_MODES = ['free', 'column', 'row'] as const;
+export type FrameLayoutMode = (typeof FRAME_LAYOUT_MODES)[number];
+
+/** Min / max bounds for the track count picker. */
+export const FRAME_GRID_MIN_COUNT = 1;
+export const FRAME_GRID_MAX_COUNT = 12;
+/** Default track count (columns or rows) when switching into a grid mode. */
+export const FRAME_GRID_DEFAULT_COUNT = 1;
+
 /** Frame node: container for grouping other nodes */
 export interface FrameNodeData extends BaseNodeData {
   type: 'frame';
+  /** Layout mode applied to direct children. Defaults to `'free'`. */
+  layoutMode?: FrameLayoutMode;
+  /**
+   * Number of tracks for the active grid mode — interpreted as columns
+   * when `layoutMode === 'column'`, as rows when `layoutMode === 'row'`,
+   * ignored otherwise. Clamped to [`FRAME_GRID_MIN_COUNT`,
+   * `FRAME_GRID_MAX_COUNT`]; defaults to `FRAME_GRID_DEFAULT_COUNT`.
+   */
+  gridCount?: number;
 }
 
 /**

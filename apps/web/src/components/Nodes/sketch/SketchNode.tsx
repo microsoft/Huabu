@@ -71,35 +71,32 @@ export const SketchNode = memo(
     const toolbarSize = lastStroke?.size ?? DEFAULT_STROKE_SIZE;
 
     const sketchToolbar = (
-      <>
-        <SketchControls
-          color={toolbarColor}
-          size={toolbarSize}
-          onColorChange={(color) =>
-            // Broadcast to every stroke \u2014 multi-stroke per-stroke
-            // editing is intentionally out of scope until sub-stroke
-            // selection lands.
-            updateNodeData(id, {
-              strokes: strokes.map((s) => ({ ...s, color })),
-            })
-          }
-          onSizeChange={(size) =>
-            updateNodeData(id, {
-              strokes: strokes.map((s) => ({ ...s, size })),
-            })
-          }
-        />
-        <FloatingToolbar.Divider />
-        <FloatingToolbar.ActionButton
-          title="Apply Sketch (interpret stroke with AI)"
-          onClick={(e) => {
-            e.stopPropagation();
-            requestSketchRecognition([id]);
-          }}
-        >
-          <Sparkles />
-        </FloatingToolbar.ActionButton>
-      </>
+      <SketchControls
+        color={toolbarColor}
+        size={toolbarSize}
+        onColorChange={(color) =>
+          updateNodeData(id, {
+            strokes: strokes.map((s) => ({ ...s, color })),
+          })
+        }
+        onSizeChange={(size) =>
+          updateNodeData(id, {
+            strokes: strokes.map((s) => ({ ...s, size })),
+          })
+        }
+      />
+    );
+
+    const sketchActions = (
+      <FloatingToolbar.ActionButton
+        title="Apply Sketch (interpret stroke with AI)"
+        onClick={(e) => {
+          e.stopPropagation();
+          requestSketchRecognition([id]);
+        }}
+      >
+        <Sparkles />
+      </FloatingToolbar.ActionButton>
     );
 
     return (
@@ -110,6 +107,7 @@ export const SketchNode = memo(
         selected={selected}
         resizable={true}
         toolbar={sketchToolbar}
+        actions={sketchActions}
         allowOverflow
       >
         <svg

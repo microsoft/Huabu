@@ -100,7 +100,7 @@ export const WebNode = memo(
       };
     }, [src, hasIngestedContent, canvasId, refreshKey, ingestion?.status, id]);
 
-    const WebToolbar = (
+    const WebActions = (
       <>
         <a
           href={data?.src}
@@ -112,9 +112,6 @@ export const WebNode = memo(
           <span className="max-w-24 truncate">{data?.src || 'Website'}</span>
           <ArrowUpRight size={14} strokeWidth={2} />
         </a>
-
-        <FloatingToolbar.Divider />
-
         <FloatingToolbar.ActionButton
           title="Open Large View"
           onClick={(e) => {
@@ -133,7 +130,7 @@ export const WebNode = memo(
         data={data}
         type={'web'}
         selected={selected}
-        toolbar={WebToolbar}
+        actions={WebActions}
         keepAspectRatio={false}
       >
         <div className="h-full w-full overflow-hidden">
@@ -146,7 +143,7 @@ export const WebNode = memo(
             }}
           >
             <div className="flex h-full flex-col">
-              <div className="bg-surface relative h-full w-full overflow-hidden rounded">
+              <div className="bg-surface relative h-full w-full overflow-hidden rounded-lg">
                 {src ? (
                   <div className="flex h-full w-full flex-col gap-2">
                     {previewLoading ? (

@@ -259,14 +259,14 @@ export const QuestionNode = memo(
         data={{ ...data, style: { ...data.style, backgroundColor: STICKY_BG } }}
         type={'question'}
         selected={selected}
-        toolbar={questionToolbar}
+        actions={questionToolbar}
         keepAspectRatio={false}
         allowOverflow
         onResizeStart={handleResizeStart}
         onResize={handleResize}
         onResizeEnd={handleResizeEnd}
         className={clsx(
-          'question-sticky rounded transition-all duration-200',
+          'question-sticky rounded-lg transition-all duration-200',
           isDoneUnviewed && 'question-node-done-unviewed',
         )}
       >
@@ -293,6 +293,7 @@ export const QuestionNode = memo(
                   : undefined
               }
               shake={status === 'error'}
+              className={isDoneUnviewed ? 'question-done-pill' : undefined}
               tooltip={
                 status === 'error' && data.errorMessage
                   ? data.errorMessage
