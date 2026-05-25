@@ -7,7 +7,6 @@ const setNodeSelection: CommandDefinition<Cmd> = {
   meta: {
     snapshot: 'no',
     requiresEdgeReroute: false,
-    needsTransitionCleanup: false,
   },
 
   handler(cmd, state) {

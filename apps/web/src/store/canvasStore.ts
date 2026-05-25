@@ -32,10 +32,6 @@ import { create, type StateCreator } from 'zustand';
 
 import { runWebPostEffects } from '@/handler/canvasCommand/postEffects.web';
 import {
-  preprocessNodeIfNeeded,
-  type NodeIngestionInfo,
-} from '@/handler/canvasCommand/preprocess';
-import {
   resolveUiIntent,
   type AddNodeInput,
   type CanvasUiIntent,
@@ -54,9 +50,16 @@ import {
 } from '@/handler/snap/snapSession';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
+import { createCanvasEventBuffer } from './canvasStore/save/eventBuffer';
+import { NODE_CONTENT_KEYS } from './canvasStore/save/nodeContentFields';
+import { createNodeContentQueue } from './canvasStore/save/nodeContentQueue';
+import { createPreprocessQueue } from './canvasStore/save/preprocessQueue';
+import { shouldScheduleStructureSave } from './canvasStore/save/structureDirtyDetector';
+import { createStructureScheduler } from './canvasStore/save/structureScheduler';
+import { createUnloadFlush } from './canvasStore/save/unloadFlush';
 import { useGesturePreviewStore } from './gesturePreviewStore';
 import { useToolStore } from './toolStore';
-import { getCanvas, postCanvasEvents, preprocessNode, putCanvas } from '../api';
+import { getCanvas, putCanvas } from '../api';
 import { cloneArtifactToCanvas } from '../api/artifact';
 import { CanvasConflictError } from '../api/canvas';
 import { toast } from '../components/Common/Toast';
@@ -64,6 +67,7 @@ import { seedNoteFixedHeight } from '../components/Nodes/note/autoHeight';
 import { getNoteFixedHeight } from '../components/Nodes/note/heightMemory';
 import { copyToClipboard } from '../utils/io/clipboard';
 
+import type { NodeIngestionInfo } from '@/handler/canvasCommand/preprocess';
 import type {
   AgentChatContext,
   CanvasCommand,
@@ -76,59 +80,97 @@ import type {
   RecentAction,
   WireCanvasNode,
   WireSelectionNode,
-  CanvasEventInput,
 } from '@sediment/shared';
 
 const AUTOSAVE_DEBOUNCE_MS = 1000;
 const PREPROCESS_DEBOUNCE_MS = 1000;
+const NODE_CONTENT_DEBOUNCE_MS = 500;
+
+// ─── Viewport sessionStorage ──────────────────────────────────────────────
+//
+// Pan + zoom is a per-tab view preference, not canvas data: persisting it
+// server-side forced every tab/device on the same canvas to share one
+// view and turned each `onMoveEnd` into a structure PUT that bumped
+// `version` (and could collide with the agent). We store it in
+// `sessionStorage` keyed by canvasId so each tab keeps its own scroll
+// position across refreshes without touching the server.
+
+const viewportStorageKey = (canvasId: string) =>
+  `sediment.viewport.${canvasId}`;
+
+function readViewportFromSession(canvasId: string): CanvasViewport | null {
+  if (!canvasId) return null;
+  try {
+    const raw = sessionStorage.getItem(viewportStorageKey(canvasId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<CanvasViewport> | null;
+    if (
+      parsed &&
+      Number.isFinite(parsed.x) &&
+      Number.isFinite(parsed.y) &&
+      Number.isFinite(parsed.zoom) &&
+      (parsed.zoom as number) > 0
+    ) {
+      return {
+        x: parsed.x as number,
+        y: parsed.y as number,
+        zoom: parsed.zoom as number,
+      };
+    }
+  } catch {
+    // Private mode / quota / corrupt entry — fall back to fitView.
+  }
+  return null;
+}
+
+function writeViewportToSession(
+  canvasId: string,
+  viewport: CanvasViewport,
+): void {
+  if (!canvasId) return;
+  try {
+    sessionStorage.setItem(
+      viewportStorageKey(canvasId),
+      JSON.stringify(viewport),
+    );
+  } catch {
+    // Ignore: viewport is a UX nicety, never block the user on it.
+  }
+}
+
+// ─── Per-node content flush ────────────────────────────────────────────────
+//
+// Markdown sidecar persistence (debounced per-node PUT + serialized
+// in-flight chain) lives in `./canvasStore/save/nodeContentQueue.ts`.
+// The factory call is in the module-scope singletons section below;
+// `stripNodeContentForStructurePut` is the only piece that stays here
+// because it's only used inside the `saveCanvas` action body.
 
 /**
- * Flush pending autosave immediately (synchronous cancel + fire).
- * Used before switching canvases to avoid losing edits.
+ * Remove every {@link NODE_CONTENT_KEYS} member from each node's
+ * `data` before sending a structure PUT — those fields live in the
+ * `.md` sidecar now and are persisted exclusively via the per-node
+ * content endpoint. Structure-only fields (`id`, `type`, geometry,
+ * `parentId`, custom data) are preserved verbatim. Returns the
+ * original `node` reference when nothing was stripped so the array
+ * stays identity-stable for downstream diffing.
  */
-const flushAutoSave = async (saveCanvas: () => Promise<void>) => {
-  if (saveTimeout) {
-    clearTimeout(saveTimeout);
-    saveTimeout = null;
-    // Swallow conflicts here — `tryRename` is the path that surfaces
-    // them to the user. Autosave should never break canvas switching.
-    try {
-      await saveCanvas();
-    } catch (err) {
-      if (!(err instanceof CanvasConflictError)) {
-        console.error('Failed to flush autosave:', err);
+function stripNodeContentForStructurePut(nodes: readonly Node[]): Node[] {
+  return nodes.map((node) => {
+    const data = node.data;
+    if (!data) return node;
+    let mutated = false;
+    const slim: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(data)) {
+      if (NODE_CONTENT_KEYS.has(k)) {
+        mutated = true;
+        continue;
       }
+      slim[k] = v;
     }
-  }
-};
-
-// Per-node debounce timers so rapid edits only fire one preprocessing request
-// after the user stops typing, rather than on every keystroke.
-const preprocessTimers = new Map<string, ReturnType<typeof setTimeout>>();
-
-const triggerPreprocessing = (node: Node) => {
-  const nodeId = node.id;
-  const existing = preprocessTimers.get(nodeId);
-  if (existing) clearTimeout(existing);
-
-  const timer = setTimeout(() => {
-    preprocessTimers.delete(nodeId);
-    const state = useCanvasStore.getState();
-    // Re-fetch the latest node so we send the most up-to-date content.
-    const latestNode = state.nodes.find((n) => n.id === nodeId) ?? node;
-    void preprocessNodeIfNeeded({
-      canvasId: state.canvasId,
-      node: latestNode,
-      setNodeIngestion: state.setNodeIngestion,
-      clearNodeIngestion: state.clearNodeIngestion,
-      getChildNodes: (frameId) =>
-        state.nodes.filter((n) => n.parentId === frameId),
-      patchNodeSilent: state.patchNodeSilent,
-    });
-  }, PREPROCESS_DEBOUNCE_MS);
-
-  preprocessTimers.set(nodeId, timer);
-};
+    return mutated ? { ...node, data: slim } : node;
+  });
+}
 
 // ── Spatial data ──────────────────────────────────────────────
 //
@@ -163,10 +205,15 @@ type RFState = {
   /**
    * Apply a partial state update without triggering autosave or the
    * canUndo/canRedo sync. Reserved for acknowledging server-driven
-   * updates (e.g. labels the server auto-deduped on save) so the patch
-   * doesn't ping-pong back into another autosave.
+   * updates (e.g. labels the server auto-deduped on save) and for
+   * purely transient visual writes (ReactFlow internal change ticks,
+   * agent entrance animations) that must not feed back into another
+   * save. Accepts both an object partial and Zustand's functional
+   * updater form, mirroring the wrapped `set`.
    */
-  _setStateNoAutosave: (partial: Partial<RFState>) => void;
+  _setStateNoAutosave: (
+    partial: Partial<RFState> | ((state: RFState) => Partial<RFState>),
+  ) => void;
 
   canvasTitle: string;
 
@@ -267,21 +314,21 @@ type RFState = {
   setRfInstance: (instance: ReactFlowInstance | null) => void;
 
   /**
-   * Last persisted pan + zoom of the React Flow viewport.
+   * Current pan + zoom of the React Flow viewport.
    *
    * `null` means "no saved viewport yet" — on initial load that triggers a
-   * one-shot `fitView` for backward-compat with old canvases. After the
-   * user pans or zooms, `onMoveEnd` writes the new viewport here through
-   * {@link setViewport}, which rides the standard autosave debounce so it
-   * lands in `canvas.json` as `state.viewport`. Restoring it on reopen
-   * means typical edits (drawing a sketch stroke, dropping a note) no
-   * longer trigger an auto-fit that yanks the canvas around.
+   * one-shot `fitView`. After the user pans or zooms, `onMoveEnd` writes
+   * the new viewport here through {@link setViewport}, which also
+   * mirrors it into `sessionStorage` (per-tab, per-canvas) so a refresh
+   * lands back at the same view without going through the server.
    */
   viewport: CanvasViewport | null;
   /**
    * Record a new viewport. Called from `<ReactFlow onMoveEnd>` after the
-   * user finishes panning/zooming. Triggers autosave via the standard
-   * PERSISTED_KEYS diff.
+   * user finishes panning/zooming. Writes to `sessionStorage` directly;
+   * does NOT participate in the structure autosave (`viewport` is not
+   * one of the persisted fields tracked by
+   * `./canvasStore/save/structureDirtyDetector.ts`).
    */
   setViewport: (viewport: CanvasViewport) => void;
 
@@ -362,7 +409,15 @@ type RFState = {
 
   loadCanvas: (canvasId?: string) => Promise<void>;
   switchCanvas: (canvasId: string) => Promise<void>;
-  saveCanvas: () => Promise<void>;
+  /**
+   * Persist the canvas structure (geometry, parenthood, edges).
+   * Pass `{ keepalive: true }` from the `beforeunload` flush so the
+   * request survives the page close. Per-node content (markdown,
+   * label, src, summary, …) is stripped before sending — it rides
+   * the per-node content PUT, not this one. Viewport is intentionally
+   * excluded: it lives in `sessionStorage` per tab.
+   */
+  saveCanvas: (options?: { keepalive?: boolean }) => Promise<void>;
 
   /**
    * Attempt to rename a canvas or node, with collision detection.
@@ -420,18 +475,19 @@ type RFState = {
   flushCanvasEvents: () => Promise<void>;
 };
 
-let saveTimeout: ReturnType<typeof setTimeout> | null = null;
-
-const scheduleAutoSave = (saveCanvas: () => Promise<void>) => {
-  if (saveTimeout) clearTimeout(saveTimeout);
-  saveTimeout = setTimeout(() => {
-    saveCanvas().catch((err) => {
-      if (!(err instanceof CanvasConflictError)) {
-        console.error('Autosave failed:', err);
-      }
-    });
-  }, AUTOSAVE_DEBOUNCE_MS);
-};
+/**
+ * Module-scoped structure-save scheduler. Owns the debounce timer
+ * for `PUT /api/canvas/:id`; the actual save action lives on the
+ * store slice (`saveCanvas`) because it touches OCC state.
+ *
+ * `getSaveCanvas` is a lazy getter so the scheduler always picks up
+ * the freshest closure (matters for HMR and for tests that swap the
+ * store).
+ */
+const structureScheduler = createStructureScheduler({
+  getSaveCanvas: () => useCanvasStore.getState().saveCanvas,
+  delayMs: AUTOSAVE_DEBOUNCE_MS,
+});
 
 // ─── Outgoing event buffer ────────────────────────────────────────────────
 //
@@ -453,78 +509,49 @@ const scheduleAutoSave = (saveCanvas: () => Promise<void>) => {
 // Per-batch caps mirror the server (200 events; the 64 KB body cap is
 // enforced server-side via Fastify's `bodyLimit`).
 
-const EVENT_BATCH_MAX = 200;
-const eventBuffer = new Map<string, CanvasEventInput[]>();
-
-function bufferEvent(canvasId: string, action: RecentAction): void {
-  if (!canvasId) return;
-  const list = eventBuffer.get(canvasId) ?? [];
-  list.push({ ts: Date.now(), payload: action });
-  eventBuffer.set(canvasId, list);
-}
-
-function bufferEvents(canvasId: string, actions: RecentAction[]): void {
-  if (!canvasId || actions.length === 0) return;
-  const list = eventBuffer.get(canvasId) ?? [];
-  const now = Date.now();
-  for (const action of actions) list.push({ ts: now, payload: action });
-  eventBuffer.set(canvasId, list);
-}
+/**
+ * Module-scoped action-log event buffer. Accumulates `RecentAction`
+ * events produced by UI intents / undo / redo and is drained by
+ * external triggers (structure-save piggy-back, pre-agent flush,
+ * `beforeunload` keepalive POST).
+ */
+const canvasEvents = createCanvasEventBuffer();
 
 /**
- * Drain the buffer for `canvasId` and POST it to the server.
- *
- * On success, the drained events are removed. On failure, they are
- * re-prepended so the next flush trigger retries them; this trades a
- * small risk of duplicate-on-double-write for never silently losing a
- * user action. `keepalive` should only be set for the unload path —
- * the browser caps keepalive bodies at ~64 KB.
+ * Module-scoped per-node preprocessing queue. Each store mutation
+ * that affects a markdown-backed node schedules a debounced
+ * `preprocessNode` POST through this queue.
  */
-async function flushCanvasEventsFor(
-  canvasId: string,
-  opts?: { keepalive?: boolean },
-): Promise<void> {
-  if (!canvasId) return;
-  const queued = eventBuffer.get(canvasId);
-  if (!queued || queued.length === 0) return;
+const preprocessQueue = createPreprocessQueue({
+  delayMs: PREPROCESS_DEBOUNCE_MS,
+  getState: () => useCanvasStore.getState(),
+});
 
-  // Take at most EVENT_BATCH_MAX off the front; leave the rest for the
-  // next flush. Keeps each request under both server-side caps.
-  const batch = queued.slice(0, EVENT_BATCH_MAX);
-  const remainder = queued.slice(batch.length);
-  if (remainder.length > 0) {
-    eventBuffer.set(canvasId, remainder);
-  } else {
-    eventBuffer.delete(canvasId);
-  }
-
-  try {
-    await postCanvasEvents(canvasId, batch, { keepalive: opts?.keepalive });
-  } catch (error) {
-    // Restore the failed batch so the next flush retries it. We push
-    // it back to the *front* to preserve the original ordering.
-    const current = eventBuffer.get(canvasId) ?? [];
-    eventBuffer.set(canvasId, [...batch, ...current]);
-    console.warn('[canvas-events] flush failed, will retry:', error);
-  }
-}
-
-// Best-effort flush for *all* canvases — used by the `beforeunload`
-// listener so we don't lose the tail of any open canvas.
-function flushAllCanvasEventsKeepalive(): void {
-  for (const canvasId of Array.from(eventBuffer.keys())) {
-    void flushCanvasEventsFor(canvasId, { keepalive: true });
-  }
-}
+/**
+ * Module-scoped per-node markdown sidecar save queue. Coalesces rapid
+ * editor edits into one PUT per node and serializes in-flight writes
+ * so the server never sees two PUTs for the same node concurrently.
+ */
+const nodeContentQueue = createNodeContentQueue({
+  delayMs: NODE_CONTENT_DEBOUNCE_MS,
+  getState: () => useCanvasStore.getState(),
+});
 
 // Module-scoped singleton listener: intentionally registered once at module
 // load time and never removed. Safe for this app's single-page lifecycle.
+// All keepalive drains live in `./canvasStore/save/unloadFlush.ts`.
 if (typeof window !== 'undefined') {
-  window.addEventListener('beforeunload', flushAllCanvasEventsKeepalive);
+  window.addEventListener(
+    'beforeunload',
+    createUnloadFlush({
+      events: canvasEvents,
+      nodeContent: nodeContentQueue,
+      preprocess: preprocessQueue,
+      structure: structureScheduler,
+      getSaveCanvas: () => useCanvasStore.getState().saveCanvas,
+    }),
+  );
 }
-
-const PERSISTED_KEYS = ['nodes', 'edges', 'canvasTitle', 'viewport'] as const;
-type PersistedKey = (typeof PERSISTED_KEYS)[number];
 
 /**
  * Middleware that:
@@ -554,11 +581,23 @@ const autoSaveMiddleware =
       // --- Autosave diff ---
       if (!prev.isLoading) {
         const next = get();
-        const changed = (PERSISTED_KEYS as readonly PersistedKey[]).some(
-          (k) => prev[k] !== next[k],
-        );
-        if (changed) {
-          scheduleAutoSave(next.saveCanvas);
+        // Gate the structure autosave on a real structural diff so pure
+        // content edits do NOT bump the canvas `version` — they ride
+        // the per-node content PUT instead. See
+        // `./canvasStore/save/structureDirtyDetector.ts`.
+        if (shouldScheduleStructureSave(prev, next)) {
+          structureScheduler.schedule();
+        }
+        // --- Per-node content diff ---
+        // Independent of the structure autosave so editor edits flush
+        // on their own (faster) debounce and never participate in the
+        // canvas-level `version` counter.
+        if (prev.nodes !== next.nodes) {
+          nodeContentQueue.scheduleChanges(
+            next.canvasId,
+            prev.nodes,
+            next.nodes,
+          );
         }
       }
     };
@@ -586,7 +625,7 @@ const autoSaveMiddleware =
     return {
       ...baseState,
       _setStateNoAutosave: (partial) => {
-        (set as (p: Partial<RFState>) => void)(partial);
+        (set as (p: typeof partial) => void)(partial);
       },
     };
   };
@@ -682,7 +721,8 @@ const useCanvasStore = create<RFState>()(
     // that bypasses autosave scheduling. Calling it before middleware has
     // wrapped the store would be a programmer error, so fall back to the
     // wrapped `set` (which still works, just without the suppression).
-    _setStateNoAutosave: (partial) => set(partial),
+    _setStateNoAutosave: (partial) =>
+      (set as (p: typeof partial) => void)(partial),
 
     canvasTitle: '',
 
@@ -796,7 +836,7 @@ const useCanvasStore = create<RFState>()(
         canvasId: state.canvasId,
         getNodes: () => get().nodes,
         setNodes: (nodes) => set({ nodes }),
-        triggerPreprocessing,
+        triggerPreprocessing: preprocessQueue.schedule,
       });
     },
 
@@ -826,7 +866,7 @@ const useCanvasStore = create<RFState>()(
         // Mirror the trace into the outgoing event buffer so the server
         // builds up a long-window action log alongside the short
         // in-memory ring buffer.
-        bufferEvents(get().canvasId, execution.trace);
+        canvasEvents.bufferMany(get().canvasId, execution.trace);
       }
     },
 
@@ -892,15 +932,21 @@ const useCanvasStore = create<RFState>()(
         const state = response.state as {
           nodes?: Node[];
           edges?: Edge[];
+          // Legacy field: older canvases still carry a server-side
+          // viewport. Used only as a one-shot fallback when this tab
+          // has no sessionStorage entry yet; the next structure PUT
+          // strips it from `canvas.json` for good.
           viewport?: CanvasViewport;
         };
         canvasHistoryManager.clear();
 
         const loadedNodes = state.nodes ?? [];
-        // Sanity-check the persisted viewport so a corrupt entry can't
-        // strand the canvas at NaN/Infinity. Fall back to a one-shot
-        // fitView in that case (handled in Canvas.tsx).
-        const loadedViewport =
+        // Prefer this tab's sessionStorage; fall back to whatever the
+        // server still has from before viewport was moved client-side.
+        // A corrupt entry on either side falls through to `null`, which
+        // Canvas.tsx interprets as "do a one-shot fitView".
+        const sessionViewport = readViewportFromSession(targetId);
+        const legacyServerViewport =
           state.viewport &&
           Number.isFinite(state.viewport.x) &&
           Number.isFinite(state.viewport.y) &&
@@ -908,6 +954,7 @@ const useCanvasStore = create<RFState>()(
           state.viewport.zoom > 0
             ? state.viewport
             : null;
+        const loadedViewport = sessionViewport ?? legacyServerViewport;
         set({
           nodes: loadedNodes,
           edges: state.edges ?? [],
@@ -926,7 +973,7 @@ const useCanvasStore = create<RFState>()(
           const data = node.data as Record<string, unknown> | undefined;
           const label = typeof data?.label === 'string' ? data.label : '';
           if (label.trim().length > 0) continue;
-          triggerPreprocessing(node);
+          preprocessQueue.schedule(node);
         }
       } catch (error) {
         console.error('Failed to load canvas:', error);
@@ -940,9 +987,9 @@ const useCanvasStore = create<RFState>()(
 
       // Flip into the loading state *before* awaiting anything so the
       // shell shows `LoadingState` on the very next render instead of
-      // briefly painting the previous canvas while `flushAutoSave`
-      // resolves. `loadCanvas` below will set `isLoading: true` again
-      // (idempotent) once it starts the actual fetch.
+      // briefly painting the previous canvas while the structure save
+      // flush resolves. `loadCanvas` below will set `isLoading: true`
+      // again (idempotent) once it starts the actual fetch.
       set({
         isLoading: true,
         canvasNotFound: false,
@@ -950,13 +997,13 @@ const useCanvasStore = create<RFState>()(
       });
 
       // Flush any pending save for the current canvas before switching
-      await flushAutoSave(get().saveCanvas);
+      await structureScheduler.flushAsync();
+      // Also drain any pending per-node content PUTs so editor edits
+      // made on the outgoing canvas land before we tear its state down.
+      await nodeContentQueue.flushAll();
 
       // Cancel all pending preprocessing timers
-      for (const timer of preprocessTimers.values()) {
-        clearTimeout(timer);
-      }
-      preprocessTimers.clear();
+      preprocessQueue.cancelAll();
 
       // Reset state for clean slate. `viewport` is cleared so the new
       // canvas's restore effect either applies its own saved viewport
@@ -976,7 +1023,7 @@ const useCanvasStore = create<RFState>()(
       await get().loadCanvas(canvasId);
     },
 
-    saveCanvas: async () => {
+    saveCanvas: async (options) => {
       // Once the server has rejected a save with a version mismatch, our
       // local `version` is permanently stale until the user reloads. Skip
       // further attempts so we don't generate a 409 on every autosave tick
@@ -992,39 +1039,24 @@ const useCanvasStore = create<RFState>()(
       set({ isSaving: true });
       let saveSucceeded = false;
       try {
-        const { nodes, edges, version, canvasId, canvasTitle, viewport } =
-          get();
-        const response = await putCanvas(canvasId, {
-          version,
-          title: canvasTitle || 'Untitled',
-          // `viewport` is persisted under `state.viewport` so reopening
-          // the canvas restores pan+zoom verbatim instead of falling
-          // back to a fitView that fights the user's edits.
-          state: viewport ? { nodes, edges, viewport } : { nodes, edges },
-        });
+        const { nodes, edges, version, canvasId, canvasTitle } = get();
+        // Strip every per-node content / label / src / summary / etc.
+        // field from the body. Those live in `nodes/<safe(label)>.md`
+        // now and ride the per-node content PUT, so the structure PUT
+        // body shrinks to pure geometry + parenthood.
+        // Viewport is intentionally omitted: it's a per-tab UX state
+        // mirrored into `sessionStorage`, not canvas data.
+        const slimNodes = stripNodeContentForStructurePut(nodes);
+        const response = await putCanvas(
+          canvasId,
+          {
+            version,
+            title: canvasTitle || 'Untitled',
+            state: { nodes: slimNodes, edges },
+          },
+          { keepalive: options?.keepalive },
+        );
         set({ version: response.version });
-
-        // The server may have auto-deduped one or more node labels (typically
-        // when an agent-sourced label collided with a sibling and was bumped
-        // to `Foo (2)`). Patch those into our in-memory state so the canvas
-        // display matches what was persisted, without waiting for a reload.
-        // Use `_setStateNoAutosave` so applying these server-told labels
-        // doesn't trigger another autosave round-trip.
-        if (response.renamedNodes && response.renamedNodes.length > 0) {
-          const renames = new Map(
-            response.renamedNodes.map((r) => [r.nodeId, r.label]),
-          );
-          get()._setStateNoAutosave({
-            nodes: get().nodes.map((n) => {
-              const next = renames.get(n.id);
-              if (next === undefined) return n;
-              return {
-                ...n,
-                data: { ...(n.data ?? {}), label: next },
-              };
-            }),
-          });
-        }
         saveSucceeded = true;
       } catch (error) {
         if (error instanceof CanvasConflictError) {
@@ -1070,7 +1102,7 @@ const useCanvasStore = create<RFState>()(
       // don't open a separate timer just for events. Fire-and-forget —
       // failures are retried on the next flush trigger.
       if (saveSucceeded) {
-        void flushCanvasEventsFor(get().canvasId);
+        void canvasEvents.flush(get().canvasId);
       }
     },
 
@@ -1123,13 +1155,22 @@ const useCanvasStore = create<RFState>()(
       }
 
       // kind === 'node'
-      const { nodes } = get();
+      const { nodes, canvasId } = get();
       const target = nodes.find((n) => n.id === id);
       if (!target) return false;
       const currentLabel =
         typeof target.data?.['label'] === 'string'
           ? (target.data['label'] as string)
           : '';
+      // Snapshot the existing labelSource so the rollback path can
+      // restore the original provenance ('user' / 'agent' / 'auto' /
+      // undefined) verbatim instead of hard-coding 'auto'. Downstream
+      // consumers (paste resolver, content PUT, preprocess dispatcher)
+      // all gate on this field, so clobbering it would silently change
+      // behaviour.
+      const currentLabelSource = (
+        target.data as Record<string, unknown> | undefined
+      )?.['labelSource'];
       if (normalize(currentLabel) === normalize(trimmed)) {
         // No-op: avoid a needless dispatch.
         if (currentLabel !== trimmed) {
@@ -1151,12 +1192,59 @@ const useCanvasStore = create<RFState>()(
         );
         return false;
       }
+      // Optimistic patch — the per-node content middleware schedules a
+      // debounced PUT. We force-flush immediately so the user sees the
+      // 409 alert at rename time rather than ~500 ms later.
       get().updateNodeData(id, { label: trimmed, labelSource: 'user' });
-      return true;
+      try {
+        await nodeContentQueue.flushNow(canvasId, id);
+        return true;
+      } catch (err) {
+        if (
+          err instanceof CanvasConflictError &&
+          err.code === 'NODE_LABEL_CONFLICT'
+        ) {
+          // Revert the optimistic label and surface the same alert UX
+          // the legacy structure-PUT path used. `_setStateNoAutosave`
+          // skips both autosave scheduling and the content-diff hook
+          // so reverting doesn't schedule another doomed PUT.
+          get()._setStateNoAutosave({
+            nodes: get().nodes.map((n) => {
+              if (n.id !== id) return n;
+              // Strip the optimistic `labelSource: 'user'` first so we
+              // can restore the original provenance exactly — including
+              // the "was previously absent" case (omit the key entirely
+              // rather than leaving a literal `undefined` value behind).
+              const { labelSource: _omitted, ...rest } = (n.data ??
+                {}) as Record<string, unknown>;
+              return {
+                ...n,
+                data: {
+                  ...rest,
+                  label: currentLabel,
+                  // Restore the original label source captured before
+                  // the optimistic patch so we don't silently rewrite
+                  // provenance ('user' / 'agent') to 'auto' on revert.
+                  ...(currentLabelSource !== undefined
+                    ? { labelSource: currentLabelSource }
+                    : {}),
+                },
+              };
+            }),
+          });
+          const taken = err.conflictWith ?? trimmed;
+          window.alert(
+            `Name "${taken}" is already used by another node on this canvas. Please choose a different name.`,
+          );
+          return false;
+        }
+        console.error('Failed to rename node:', err);
+        return false;
+      }
     },
 
     flushCanvasEvents: async () => {
-      await flushCanvasEventsFor(get().canvasId);
+      await canvasEvents.flush(get().canvasId);
     },
 
     onNodeDragStart: (event, _draggedNode, draggedNodes) => {
@@ -1508,7 +1596,14 @@ const useCanvasStore = create<RFState>()(
         );
       }
 
-      set({ nodes: nextNodes });
+      // Internal RF changes (position mid-drag, select, dimensions /
+      // measured) are purely transient UI state. The authoritative
+      // geometry commit happens in `onNodeDragStop` via the
+      // `SET_NODE_GEOMETRY` engine command, which DOES schedule
+      // autosave. Routing this hot 60 fps drag-tick path through the
+      // no-autosave setter avoids running the structure dirty
+      // detector (and resetting the autosave debounce) on every frame.
+      get()._setStateNoAutosave({ nodes: nextNodes });
 
       // Drag-end detection: if this batch contained the final
       // `dragging:false` commit for any node the snap session is
@@ -1539,7 +1634,14 @@ const useCanvasStore = create<RFState>()(
       }
       const internalChanges = changes.filter((c) => c.type !== 'remove');
       if (internalChanges.length > 0) {
-        set({ edges: applyEdgeChanges(internalChanges, get().edges) });
+        // Only edge `select` reaches this path (other persisted edge
+        // mutations go through `CONNECT_NODES` / `DISCONNECT_EDGE`
+        // commands above). Selection is transient UI state — bypass
+        // autosave so toggling edge selection never schedules an empty
+        // structure PUT.
+        get()._setStateNoAutosave({
+          edges: applyEdgeChanges(internalChanges, get().edges),
+        });
       }
     },
 
@@ -1569,6 +1671,9 @@ const useCanvasStore = create<RFState>()(
         return;
       }
       set({ viewport });
+      // Mirror into sessionStorage so a refresh restores this tab's
+      // pan + zoom without a server round-trip.
+      writeViewportToSession(get().canvasId, viewport);
     },
 
     addNodes: (inputs) => {
@@ -1920,13 +2025,13 @@ const useCanvasStore = create<RFState>()(
         edges: snapshot.edges,
         actionHistory: pushAction(actionHistory, action),
       });
-      bufferEvent(canvasId, action);
+      canvasEvents.buffer(canvasId, action);
 
       canvasHistoryManager.syncServerAfterRestore(
         canvasId,
         nodes,
         snapshot.nodes,
-        triggerPreprocessing,
+        preprocessQueue.schedule,
       );
     },
 
@@ -1941,96 +2046,16 @@ const useCanvasStore = create<RFState>()(
         edges: snapshot.edges,
         actionHistory: pushAction(actionHistory, action),
       });
-      bufferEvent(canvasId, action);
+      canvasEvents.buffer(canvasId, action);
 
       canvasHistoryManager.syncServerAfterRestore(
         canvasId,
         nodes,
         snapshot.nodes,
-        triggerPreprocessing,
+        preprocessQueue.schedule,
       );
     },
   })),
 );
-
-/**
- * Flush all pending changes when the page is about to be unloaded.
- * Uses keepalive:true so requests survive page close/refresh.
- *
- * 1. Cancel all pending preprocessing debounce timers.
- * 2. Fire preprocessNode (keepalive) for every node that was still queued.
- * 3. Fire putCanvas (keepalive) with the latest canvas state.
- */
-function flushOnUnload(): void {
-  const state = useCanvasStore.getState();
-
-  const { canvasId, nodes, edges, version, canvasTitle } = state;
-
-  // Collect node IDs that had a pending debounce timer before clearing them.
-  const pendingNodeIds = Array.from(preprocessTimers.keys());
-  for (const timer of preprocessTimers.values()) {
-    clearTimeout(timer);
-  }
-  preprocessTimers.clear();
-
-  // Nothing else to flush if no canvas is loaded.
-  if (!canvasId) return;
-
-  // Fire preprocessNode with keepalive for every queued node.
-  for (const nodeId of pendingNodeIds) {
-    const node = nodes.find((n) => n.id === nodeId);
-    if (!node) continue;
-
-    const nodeData = node.data as Record<string, unknown> | undefined;
-    const nodeType = node.type ?? '';
-
-    // Build a minimal snapshot matching what preprocessNodeIfNeeded would send.
-    const snapshot: Record<string, unknown> =
-      nodeType === 'frame'
-        ? {
-            childLabels: nodes
-              .filter((n) => n.parentId === nodeId)
-              .map((c) => {
-                const cData = c.data as Record<string, unknown> | undefined;
-                const label =
-                  typeof cData?.label === 'string' ? cData.label : '';
-                return label.trim();
-              })
-              .filter((l) => l.length > 0),
-            labelSource: (nodeData?.labelSource as string) || undefined,
-          }
-        : {
-            title:
-              (nodeData?.label as string) ||
-              (nodeData?.title as string) ||
-              undefined,
-            labelSource: (nodeData?.labelSource as string) || undefined,
-            content: (nodeData?.content as string) || undefined,
-            src: (nodeData?.src as string) || undefined,
-          };
-
-    void preprocessNode(
-      canvasId,
-      nodeId,
-      { nodeType, trigger: 'flush', snapshot },
-      { keepalive: true },
-    ).catch(() => {
-      // Best-effort on unload – ignore errors.
-    });
-  }
-
-  // Flush canvas save.
-  void putCanvas(
-    canvasId,
-    { version, title: canvasTitle || 'Untitled', state: { nodes, edges } },
-    { keepalive: true },
-  ).catch(() => {
-    // Best-effort on unload – ignore errors.
-  });
-}
-
-if (typeof window !== 'undefined') {
-  window.addEventListener('beforeunload', flushOnUnload);
-}
 
 export default useCanvasStore;

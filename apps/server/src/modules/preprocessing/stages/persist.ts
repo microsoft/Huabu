@@ -32,20 +32,33 @@ export function persist(
   // Content-based dedup inside this canvas: skip rewrite when canonical
   // content has not changed. Label may still drift, so refresh it.
   if (existing && existing.content === normalized.canonicalContent) {
+    let persistedLabel: string | undefined;
     if (normalized.label && existing.label !== normalized.label) {
-      store.writeNode(nodeId, {
+      const result = store.writeNode(nodeId, {
         ...existing,
         label: normalized.label,
       });
+      if (result.ok) {
+        persistedLabel = result.label ?? undefined;
+      }
     }
+    // Surface the on-disk `src` even when content was unchanged so the
+    // Project stage can patch the client when it still holds an
+    // un-normalized version (e.g. user pasted a URL with utm params and
+    // the previous preprocess already normalized + cached it; the client
+    // tab reloaded the canvas but a fresh re-trigger now races against
+    // the cache short-circuit and would never receive the canonical src
+    // otherwise).
     return {
       nodeId,
       isNew: false,
       contentChanged: false,
+      persistedLabel,
+      persistedSrc: typeof existing.src === 'string' ? existing.src : undefined,
     };
   }
 
-  store.writeNode(nodeId, {
+  const result = store.writeNode(nodeId, {
     ...(normalized.metadata ?? {}),
     nodeId,
     type: contentKind,
@@ -58,5 +71,7 @@ export function persist(
     nodeId,
     isNew: !existing,
     contentChanged: true,
+    persistedLabel: result.ok ? (result.label ?? undefined) : undefined,
+    persistedSrc: src,
   };
 }

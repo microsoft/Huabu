@@ -17,7 +17,6 @@ import type { Node, Edge } from '@xyflow/react';
 export interface CommandMeta {
   snapshot: 'yes' | 'caller' | 'no';
   requiresEdgeReroute: boolean;
-  needsTransitionCleanup: boolean;
 }
 
 // ---------------------------------------------------------------------------

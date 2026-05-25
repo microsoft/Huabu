@@ -8,7 +8,6 @@ const deleteNodes: CommandDefinition<Cmd> = {
   meta: {
     snapshot: 'yes',
     requiresEdgeReroute: true,
-    needsTransitionCleanup: false,
   },
 
   handler(cmd, state) {
