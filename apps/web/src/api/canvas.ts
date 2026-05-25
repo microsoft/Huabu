@@ -7,8 +7,11 @@ import type {
   CanvasErrorCode,
   DeleteCanvasResponse,
   GetCanvasResponse,
+  GetNodeContentResponse,
   PutCanvasRequest,
   PutCanvasResponse,
+  PutNodeContentRequest,
+  PutNodeContentResponse,
   DeleteNodeResponse,
   ImportCanvasResponse,
   ListCanvasesResponse,
@@ -124,6 +127,68 @@ export async function deleteNode(
     signal: options?.signal,
     fallbackMessage: 'Failed to delete node',
   });
+}
+
+/**
+ * Persist a single node's markdown sidecar
+ * (`nodes/<safe(label)>.md`). Unlike `putCanvas`, this endpoint never
+ * touches `canvas.json` and therefore does not participate in the
+ * canvas-level optimistic-concurrency `version` counter — concurrent
+ * editor edits and viewport drags never collide on it.
+ *
+ * Mirrors `putCanvas`'s raw-fetch pattern so a 409 `NODE_LABEL_CONFLICT`
+ * body deserialises into `CanvasConflictError` with `nodeId` +
+ * `conflictWith` intact, which `tryRename` reads to revert + alert.
+ */
+export async function putNodeContent(
+  canvasId: string,
+  nodeId: string,
+  request: PutNodeContentRequest,
+  options?: { keepalive?: boolean },
+): Promise<PutNodeContentResponse> {
+  const response = await fetch(
+    apiUrl(routes.canvasNodeContent(canvasId, nodeId)),
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+      keepalive: options?.keepalive ?? false,
+    },
+  );
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as unknown;
+    if (response.status === 409 && isCanvasConflictResponse(body)) {
+      throw new CanvasConflictError(body);
+    }
+    const errBody =
+      body && typeof body === 'object' ? (body as Partial<ApiErrorBody>) : {};
+    throw new ApiError(response.status, errBody, 'Failed to save node content');
+  }
+
+  return (await response.json()) as PutNodeContentResponse;
+}
+
+/**
+ * Fetch a single node's persisted markdown sidecar. Returns `null` when
+ * the canvas itself is missing (404); for an existing canvas with a
+ * deleted / never-written sidecar the server responds 200 with
+ * `contentMissing: true` so callers can render the placeholder UI.
+ */
+export async function getNodeContent(
+  canvasId: string,
+  nodeId: string,
+): Promise<GetNodeContentResponse | null> {
+  try {
+    return await apiFetch<GetNodeContentResponse>(
+      routes.canvasNodeContent(canvasId, nodeId),
+      { fallbackMessage: 'Failed to get node content' },
+    );
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return null;
+    console.error('Failed to get node content:', error);
+    return null;
+  }
 }
 
 /**

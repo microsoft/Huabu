@@ -84,7 +84,6 @@ const setNodeLocked: CommandDefinition<Cmd> = {
   meta: {
     snapshot: 'yes',
     requiresEdgeReroute: false,
-    needsTransitionCleanup: false,
   },
 
   handler(cmd, state) {

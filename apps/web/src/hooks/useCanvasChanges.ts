@@ -676,7 +676,12 @@ export function useCanvasChangePreview(changes: CanvasChange[]) {
     if (cmds.length === 0) return;
 
     const preview = applyCommandsToState(cmds, nodes, edges);
-    useCanvasStore.setState({ nodes: preview.nodes, edges: preview.edges });
+    // Use the no-autosave setter: a preview is a transient visual hover
+    // state; if the user holds it longer than the 1 s autosave debounce
+    // we must NOT persist the reverted snapshot to the server.
+    useCanvasStore
+      .getState()
+      ._setStateNoAutosave({ nodes: preview.nodes, edges: preview.edges });
     setPreviewActive(true);
   }, []);
 
@@ -700,13 +705,19 @@ export function useCanvasChangePreview(changes: CanvasChange[]) {
     if (cmds.length === 0) return;
 
     const preview = applyCommandsToState(cmds, nodes, edges);
-    useCanvasStore.setState({ nodes: preview.nodes, edges: preview.edges });
+    // See startPreview for why this bypasses autosave.
+    useCanvasStore
+      .getState()
+      ._setStateNoAutosave({ nodes: preview.nodes, edges: preview.edges });
     setPreviewActive(true);
   }, [changes]);
 
   const endPreview = useCallback(() => {
     if (!snapshotRef.current) return;
-    useCanvasStore.setState({
+    // Restoring the snapshot is the symmetric counterpart of startPreview
+    // and must also bypass autosave — otherwise tearing down a preview
+    // would schedule an empty-diff structure PUT.
+    useCanvasStore.getState()._setStateNoAutosave({
       nodes: snapshotRef.current.nodes,
       edges: snapshotRef.current.edges,
     });

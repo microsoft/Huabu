@@ -72,10 +72,10 @@ export interface CanvasWriteResult {
  * headless / server context (M2).
  *
  * Hosts are free to ignore fields that don't apply to them — e.g. a
- * server has no DOM, so `needsTransitionCleanup` and `deferredFitFrameIds`
- * are no-ops there. See `applySharedPostEffects` for the pure subset
- * that BOTH hosts must run, and `runWebPostEffects` /
- * (forthcoming) `runServerPostEffects` for host-specific drains.
+ * server has no DOM, so `deferredFitFrameIds` is a no-op there. See
+ * `applySharedPostEffects` for the pure subset that BOTH hosts must
+ * run, and `runWebPostEffects` / (forthcoming) `runServerPostEffects`
+ * for host-specific drains.
  */
 export interface PendingEffects {
   /**
@@ -106,13 +106,6 @@ export interface PendingEffects {
    * non-agent web batches) ignore the field.
    */
   contentEditedNodeIds: string[];
-
-  /**
-   * Whether layout animation CSS transitions need cleanup after the
-   * animation completes. Set when any applied command was tagged
-   * `needsTransitionCleanup` in `COMMAND_META`. Web-only consumer.
-   */
-  needsTransitionCleanup: boolean;
 
   /**
    * Frame IDs to re-fit after the next render cycle. Used when a

@@ -17,8 +17,6 @@
  * pulled in. The new slot assignment is written back to
  * `data.frameSlot` so subsequent passes stay stable.
  */
-
-import { LAYOUT_ANIMATION_TRANSITION } from './applier.js';
 import {
   FRAME_GRID_DEFAULT_COUNT,
   FRAME_GRID_MAX_COUNT,
@@ -431,7 +429,3 @@ export function pickRowSlotFromFramePoint(
   }
   return best;
 }
-
-// Marker so `LAYOUT_ANIMATION_TRANSITION` import stays needed even if
-// callers stop using it via this module (re-exported for convenience).
-export { LAYOUT_ANIMATION_TRANSITION };

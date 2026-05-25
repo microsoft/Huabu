@@ -42,8 +42,13 @@ export type PreprocessHelperDeps = {
  * Build the snapshot object sent to the server for a given node.
  * For frame nodes we include child labels so the Enrich stage can
  * generate a group-level label.
+ *
+ * Exported so the unload-time keepalive path (in `preprocessQueue`)
+ * can produce the same snapshot shape without going through the full
+ * `preprocessNodeIfNeeded` flow (which mutates ingestion state — a
+ * no-op during page unload).
  */
-function buildSnapshot(
+export function buildPreprocessSnapshot(
   node: Node,
   getChildNodes: (frameId: string) => Node[],
 ): Record<string, unknown> {
@@ -94,7 +99,7 @@ export async function preprocessNodeIfNeeded({
   setNodeIngestion(node.id, { status: 'pending', updatedAt: Date.now() });
 
   try {
-    const snapshot = buildSnapshot(node, getChildNodes);
+    const snapshot = buildPreprocessSnapshot(node, getChildNodes);
 
     const response = await preprocessNode(canvasId, node.id, {
       nodeType,
@@ -102,11 +107,22 @@ export async function preprocessNodeIfNeeded({
       snapshot,
     });
 
-    // Apply results from the backend.
+    // Apply results from the backend. The server is responsible for
+    // suppressing label suggestions that would just re-trigger its own
+    // ` (N)` dedup (see `apps/server/src/modules/preprocessing/stages/project.ts`),
+    // so the client can apply whatever it receives verbatim.
     const patch: Record<string, unknown> = {};
     if (response.suggestedLabel) {
       patch.label = response.suggestedLabel;
       patch.labelSource = 'auto';
+    }
+    // Adopt the server-canonical `src` whenever the pipeline normalized
+    // it (e.g. URL canonicalization for web, artifact URL rewrite for
+    // pdf). The server only emits this field when it actually diverged
+    // from the snapshot we sent, so any value here is meaningful — no
+    // need to re-compare on the client.
+    if (typeof response.src === 'string' && response.src.length > 0) {
+      patch.src = response.src;
     }
     if (typeof response.summary === 'string' && response.summary.length > 0) {
       patch.summary = response.summary;

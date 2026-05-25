@@ -32,6 +32,8 @@ export const routes = {
   canvasExport: (canvasId: string) => `/canvas/${enc(canvasId)}/export`,
   canvasNode: (canvasId: string, nodeId: string) =>
     `/canvas/${enc(canvasId)}/nodes/${enc(nodeId)}`,
+  canvasNodeContent: (canvasId: string, nodeId: string) =>
+    `/canvas/${enc(canvasId)}/nodes/${enc(nodeId)}/content`,
   canvasNodePreprocess: (canvasId: string, nodeId: string) =>
     `/canvas/${enc(canvasId)}/nodes/${enc(nodeId)}/preprocess`,
   canvasArtifact: (canvasId: string, kind: 'image' | 'pdf' | 'video') =>

@@ -101,15 +101,16 @@ export async function startDeviceCodeFlow(): Promise<{
     promise: null!,
   };
 
-  // Promise that resolves once onAuth fires with the device code
+  // Promise that resolves once onDeviceCode fires with the device code
   const userCodeReady = new Promise<void>((resolveCode) => {
-    // loginGitHubCopilot is async and will call onAuth when the device code is ready
+    // loginGitHubCopilot is async and will call onDeviceCode when the device code is ready
     const loginPromise = loginGitHubCopilot({
-      onAuth: (url, instructions) => {
-        // instructions contains "Enter code: XXXX-XXXX"
-        const codeMatch = instructions?.match(/:\s*([A-Z0-9]{4}-[A-Z0-9]{4})/);
-        session.userCode = codeMatch?.[1] ?? null;
-        session.verificationUri = url;
+      onDeviceCode: (info) => {
+        session.userCode = info.userCode;
+        session.verificationUri = info.verificationUri;
+        if (typeof info.intervalSeconds === 'number') {
+          session.interval = info.intervalSeconds;
+        }
         resolveCode();
       },
       onPrompt: async () => {

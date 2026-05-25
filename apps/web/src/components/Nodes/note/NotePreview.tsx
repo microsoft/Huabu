@@ -19,6 +19,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { Button } from '@/components/Common/Button';
 import { MilkdownEditor } from '@/components/Milkdown';
 import { consumeAiContentEdit } from '@/utils/aiEditFlags';
 import {
@@ -362,6 +363,9 @@ export const NotePreview = ({
     [id],
   );
 
+  const totalPending =
+    provenance.blocks.length + provenance.deletedBlocks.length;
+
   return (
     <div className="bg-surface relative h-full w-full">
       <div
@@ -389,11 +393,41 @@ export const NotePreview = ({
             onInsertBelow={handleInsertBelow}
             onRestoreTombstone={handleRestoreTombstone}
             onDismissTombstone={handleDismissTombstone}
-            onAcceptAll={handleAcceptAll}
-            onRejectAll={handleRejectAll}
           />
         ) : null}
       </div>
+      {PROVENANCE_ENABLED && !readOnly && totalPending > 0 ? (
+        <div
+          className="border-edge-default bg-surface absolute bottom-3 left-1/2 z-20 flex w-fit -translate-x-1/2 items-center gap-2 rounded-full border px-3 py-1 shadow-lg"
+          role="status"
+          aria-label={`AI made ${totalPending} pending edit${totalPending === 1 ? '' : 's'} on this note`}
+        >
+          <span className="text-fg-muted text-xs">
+            {`AI edited ${provenance.blocks.length} block${provenance.blocks.length === 1 ? '' : 's'}`}
+            {provenance.deletedBlocks.length > 0
+              ? ` · deleted ${provenance.deletedBlocks.length}`
+              : ''}
+          </span>
+          <Button
+            variant="outline"
+            tone="neutral"
+            size="sm"
+            onClick={handleRejectAll}
+            title="Restore all blocks to their pre-AI baseline"
+          >
+            Reject
+          </Button>
+          <Button
+            variant="solid"
+            tone="info"
+            size="sm"
+            onClick={handleAcceptAll}
+            title="Keep all AI changes and clear the markers"
+          >
+            Accept
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 };

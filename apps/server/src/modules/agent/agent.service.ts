@@ -13,7 +13,7 @@
  *    themselves and pull the relevant `tool_result` payload.
  */
 
-import { Agent } from '@earendil-works/pi-agent-core';
+import { Agent, convertToLlm } from '@earendil-works/pi-agent-core';
 
 import { ensureApiKey, getLLMModel } from './llm.js';
 import { buildToolsForScope, type ToolScope } from './tools/index.js';
@@ -393,7 +393,15 @@ export async function* runAgent(
     // Sync the agent's final transcript back into `context.messages`. The
     // route layer (saveContext / cleanUpAbortedContext) reads `context`
     // directly, so we mutate the array in place to preserve identity.
+    //
+    // `agent.state.messages` is `AgentMessage[]`, a superset of
+    // `Message[]` that includes the harness-only roles (`custom`,
+    // `bashExecution`, `branchSummary`, `compactionSummary`). Those
+    // roles are not part of the LLM wire protocol and must not appear
+    // in `context.messages`. `convertToLlm` is the official downcast
+    // from pi-agent-core: it drops / flattens harness roles into the
+    // user / assistant / toolResult triple `Message` expects.
     context.messages.length = 0;
-    context.messages.push(...agent.state.messages);
+    context.messages.push(...convertToLlm(agent.state.messages));
   }
 }

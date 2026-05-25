@@ -8,8 +8,7 @@
  *  1. Debounced HTTP preprocessing fetch.
  *  2. Delete tracking for the local history manager.
  *  3. AI-content-edit flag for the editor (gated by `source === 'agent'`).
- *  4. CSS transition style cleanup after the layout animation.
- *  5. Deferred `fitFrames` after the DOM has reflowed.
+ *  4. Deferred `fitFrames` after the DOM has reflowed.
  *
  * Pure host-agnostic cleanups (edge reroute) live in the shared
  * `applySharedPostEffects` and run BEFORE the state commit so they
@@ -23,7 +22,6 @@
  */
 
 import {
-  LAYOUT_ANIMATION_DURATION_MS,
   fitFrames,
   type NestableNode,
   type PendingEffects,
@@ -65,8 +63,7 @@ export interface RunWebPostEffectsInput {
  *  1. preprocessing trigger (synchronous fan-out into debounced fetch)
  *  2. delete tracking
  *  3. AI flag marking (agent batches only)
- *  4. transition cleanup (setTimeout)
- *  5. deferred frame fit (double-rAF)
+ *  4. deferred frame fit (double-rAF)
  */
 export function runWebPostEffects(input: RunWebPostEffectsInput): void {
   const {
@@ -98,13 +95,7 @@ export function runWebPostEffects(input: RunWebPostEffectsInput): void {
     }
   }
 
-  // 4. Clean up layout-animation CSS transition styles after the
-  // animation completes.
-  if (effects.needsTransitionCleanup) {
-    scheduleTransitionCleanup(getNodes, setNodes);
-  }
-
-  // 5. Refit frames whose children need a render cycle to settle their
+  // 4. Refit frames whose children need a render cycle to settle their
   // size (e.g. notes whose pinned height was just cleared). Deferred
   // via double-rAF so the inline editor can reflow and ReactFlow's
   // ResizeObserver can update `measured.height` first.
@@ -118,27 +109,6 @@ export function runWebPostEffects(input: RunWebPostEffectsInput): void {
 // These are implementation details of the web post-effect drain and
 // are intentionally not exported. If a future consumer needs them
 // elsewhere, lift them to a separate module and add direct tests.
-
-/**
- * Schedule cleanup of CSS transition styles after a layout animation
- * completes. Uses `setTimeout` (not rAF) because the duration must
- * match the animation length precisely.
- */
-function scheduleTransitionCleanup(
-  getNodes: () => Node[],
-  setNodes: (nodes: Node[]) => void,
-): void {
-  setTimeout(() => {
-    const currentNodes = getNodes();
-    const cleaned = currentNodes.map((n) => {
-      const s = n.style as Record<string, unknown> | undefined;
-      if (!s?.transition) return n;
-      const { transition: _t, ...rest } = s;
-      return { ...n, style: rest as Node['style'] };
-    });
-    setNodes(cleaned);
-  }, LAYOUT_ANIMATION_DURATION_MS);
-}
 
 /**
  * Refit one or more frames to their current children after the next

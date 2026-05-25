@@ -138,7 +138,10 @@ export function cancelAgentAnimation(): void {
   animNodeIds = new Set();
   animEdgeIds = new Set();
 
-  useCanvasStore.setState((state) => ({
+  // Animation cleanup is a transient visual write — use the no-autosave
+  // setter so resetting opacity/transition does not schedule an empty
+  // structure PUT or reset the autosave debounce.
+  useCanvasStore.getState()._setStateNoAutosave((state) => ({
     nodes: state.nodes.map((n) => {
       if (!nIds.has(n.id)) return n;
       const {
@@ -202,8 +205,11 @@ function animateAgentBatch(commands: CanvasCommand[]): void {
 
   const transition = `opacity ${ENTER_ANIM_DURATION}ms ease-out`;
 
-  // Step 1: Hide everything that's in the queue.
-  useCanvasStore.setState((state) => ({
+  // Step 1: Hide everything that's in the queue. Transient visual
+  // write — bypass autosave (the engine commands that CREATED these
+  // nodes already scheduled a structure PUT; the opacity ramp must not
+  // pile on additional ones nor reset that debounce).
+  useCanvasStore.getState()._setStateNoAutosave((state) => ({
     nodes: state.nodes.map((n) => {
       if (!newNodeIds.has(n.id)) return n;
       return { ...n, style: { ...n.style, opacity: 0, transition } };
@@ -219,14 +225,14 @@ function animateAgentBatch(commands: CanvasCommand[]): void {
     const timer = setTimeout(() => {
       if (item.kind === 'node') {
         animNodeIds.delete(item.id);
-        useCanvasStore.setState((state) => ({
+        useCanvasStore.getState()._setStateNoAutosave((state) => ({
           nodes: state.nodes.map((n) =>
             n.id === item.id ? { ...n, style: { ...n.style, opacity: 1 } } : n,
           ),
         }));
       } else {
         animEdgeIds.delete(item.id);
-        useCanvasStore.setState((state) => ({
+        useCanvasStore.getState()._setStateNoAutosave((state) => ({
           edges: state.edges.map((e) =>
             e.id === item.id ? { ...e, style: { ...e.style, opacity: 1 } } : e,
           ),
@@ -242,7 +248,7 @@ function animateAgentBatch(commands: CanvasCommand[]): void {
     animTimers = [];
     animNodeIds = new Set();
     animEdgeIds = new Set();
-    useCanvasStore.setState((state) => ({
+    useCanvasStore.getState()._setStateNoAutosave((state) => ({
       nodes: state.nodes.map((n) => {
         if (!newNodeIds.has(n.id)) return n;
         const { transition: _, ...rest } = (n.style ?? {}) as Record<
