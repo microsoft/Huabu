@@ -55,6 +55,7 @@ const smallerButtonSize: Record<
 > = {
   sm: 'sm',
   md: 'sm',
+  lg: 'md',
 };
 
 export function SplitSelect<T extends string = string>({
