@@ -1,5 +1,5 @@
 /**
- * ACP Preprocessor — Phase 2 PR D.
+ * ACP Preprocessor.
  *
  * Rewrites the user's raw message into a structured
  * {@link ExternalAgentPrompt} (a focused `task` + a `fileRefs` list of
@@ -13,7 +13,7 @@
  *   - Large canvases would blow past the external agent's context.
  *   - The agent doesn't need every node — only the ones relevant to
  *     this turn. We let the preprocessor LLM cull.
- *   - Path-based output lines up with Phase 3's `fs/read_text_file`
+ *   - Path-based output lines up with the upcoming `fs/read_text_file`
  *     capability so the external agent reads on demand.
  *
  * Failure model: callers `try`/`catch` and fall back to the raw user

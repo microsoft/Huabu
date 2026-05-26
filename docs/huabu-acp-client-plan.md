@@ -88,7 +88,7 @@ apps/server/src/modules/agent/acp/
 ├── preprocessor.ts       rawMsg + canvas → ExternalAgentPrompt                ✅
 ├── capabilities/
 │   ├── fs.ts             fs/read_text_file 沙箱                               ⏳ Phase 3
-│   └── permission.ts     permission/request → UI 弹窗                         ⏳ Phase 3
+│   └── permission.ts     session/request_permission → UI 弹窗              ⏳ Phase 3
 └── repo-binding.ts       canvas ↔ code repo cwd resolver                     ⏳ Phase 4
 
 # Layer 3（Phase 5，可选）：
@@ -134,16 +134,39 @@ apps/web/src/
 
 ### 2.4 Client-side capabilities (沙箱)
 
-ACP 的双向性意味着 agent 会主动**调** client 暴露的方法。Sediment 必须实现并鉴权。
+ACP 是双向 JSON-RPC：除了 client 主动调 agent (`session/new` / `session/prompt`)，agent 也会反过来调 client 提供的方法 —— 本节定义 Sediment v1 实现哪些、不实现哪些。
 
-| ACP 方法             | Sediment v1 实现                            | 沙箱                                                |
-| -------------------- | ------------------------------------------- | --------------------------------------------------- |
-| `fs/read_text_file`  | 走 `fs-sandbox.ts:safeResolve(canvasId, …)` | 只允许 `canvas.json` + `nodes/**` + `.artifacts/**` |
-| `fs/write_text_file` | **v1 直接返 ACP error**                     | 返错                                                |
-| `terminal/*`         | **不实现** — LLM 在 server 上跑 bash 太危险 | 不开                                                |
-| `permission/request` | 推送到 Sediment UI（reuse 现有 confirm 流） | 用户点确认                                          |
+**Trust boundary 必须先说清楚**：
 
-当前 (PR C) `AcpAgentClient` 把 agent 的所有 incoming JSON-RPC requests 一律 `-32601 method not found` 拒绝。Phase 3 才接入真实 capability handler。
+| 谁的工具                                                                       | 跑在哪                     | Huabu 是否可见 / 可控                                       |
+| ------------------------------------------------------------------------------ | -------------------------- | ----------------------------------------------------------- |
+| 外部 agent 自带工具（claude 的 `Read` / `Write` / `Edit` / `Bash` / MCP tool） | 用户机器，agent 自己的进程 | **完全不可见、不可控** — LLM ↔ agent runtime 闭环，不经 ACP |
+| ACP **client-side capabilities**（`fs/read_text_file` 等）                     | Huabu server               | 必走下面表格里的 sandbox                                    |
+
+也就是说我们的 sandbox **只管 agent 想读 Huabu canvas 内容那一部分**；agent 在用户本地 repo 里改什么文件是它本来就能做的事，跟 Huabu 无关。这条边界 Phase 4 会主动模糊 —— canvas↔repo binding 之后 agent 改的 repo 就是 canvas 关联的 repo，但本质上依然走 agent 自己的本地工具，不经 ACP capability。
+
+**ACP wire method 名锁定**（与 spec 一致，避免 plan doc / 代码再分裂）：
+
+| ACP 方法                     | Sediment v1 实现                                                  | 范围 / Phase                                                                        |
+| ---------------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `fs/read_text_file`          | 走 `fs-sandbox.ts:safeResolve(canvasId, …)`                       | 只允许 `canvas.json` + `nodes/**` + `.artifacts/**`，Phase 3 PR G 开                |
+| `fs/write_text_file`         | **v1 reject 以 ACP error**                                        | 推到 Phase 4 (canvas↔repo binding) 后再考虑；之前写 canvas 节点有跟前端状态冲突风险 |
+| `terminal/*`                 | **永不实现 server-side** — LLM 在 server 上跑 bash 风险远大于收益 | 不开；agent 要跑 shell 用它本地 `Bash` 工具即可                                     |
+| `session/request_permission` | Phase 3 PR H 后端 auto-allow + SSE；Phase 3 PR I 真 UI            | 4 outcomes：`allowed_once` / `allowed_always` / `rejected_once` / `rejected_always` |
+
+> **关于 `session/request_permission` 的角色**：这条 wire 是 **agent → client** 方向，由 agent 自己的策略决定要不要 ask（典型场景：claude 要 `Edit` / `Bash` 前），Huabu 只负责弹 UI + 把用户答复转回去。**它不用来 gate Huabu 的 `fs/*` capability** —— 那些走 sandbox allowlist 静默判，不弹用户。Phase 4 的 `fs/write_text_file` 也是 Huabu **自己内部**弹 confirm（client 端直接做），不走这条 wire。
+
+**对应的 `initialize.clientCapabilities` advertise 也要同步翻**（命名约定不一样：方法名 snake_case，capability 字段 camelCase）：
+
+```ts
+clientCapabilities: {
+  fs: { readTextFile: true,  writeTextFile: false },  // PR G 后
+  terminal: false,                                     // 永远
+  // session/request_permission 是隐式 capability，不需要在这里声明
+}
+```
+
+当前 (PR C–E) `AcpAgentClient` 还在 advertise 全 `false`，所有 incoming requests 一律 `-32601`。Phase 3 PR F–I 逐步打开。
 
 ### 2.5 External agent 怎么看到 canvas
 
@@ -203,24 +226,28 @@ v1 用 Layer 2 (preprocessor) + Layer 1 (fs/read) 组合；Layer 3 (MCP) 是 Pha
 
 ### Phase 3 — Client capabilities & 沙箱
 
-**目标**：实现 `fs/read_text_file` + `permission/request`，让 agent 能调但被 Huabu 沙箱住；agent 越权访问被拒。
+**目标**：让 agent 通过 ACP 标准方法读到 Huabu canvas 内容（read-only），并打通 `session/request_permission` 骨架为 Phase 4 写能力做准备。Trust boundary 与方法名见 §2.4。
 
-**任务**：
+**已定的设计决策**：
 
-- [ ] `acp/capabilities/fs.ts`：基于 `fs-sandbox.ts:safeResolve` 实现 `fs/read_text_file`，只允许 `<canvasDir>/canvas.json` + `nodes/**` + `.artifacts/**`
-- [ ] `acp/capabilities/permission.ts`：通过新 SSE 事件 `permission_request` 推前端，UI 弹窗等用户点击，回信给 agent
-- [ ] `AcpAgentClient` 把 incoming JSON-RPC requests 路由到 capability handler（替换当前的 `-32601` reject）
-- [ ] 跨 agent compatibility note：实测 Claude Code、Copilot CLI、Gemini CLI 实际发什么请求
-- [ ] e2e 测试：模拟 agent 读 canvas 外文件 → 拒；读 canvas 内 → 通；写 → 拒
+- **canvasId plumb 方式：构造注入 `AcpAgentClient`**。链路：`agent.route.ts`（已有 canvasId）→ `runAcpAgent({..., canvasId})` → `new AcpAgentClient(conn, { canvasId, logger })`。一个 thread 终身绑一个 canvas（§1 心智模型），canvasId 在 client 生命周期里不变，所以构造参数是最贴合数据模型的形式，零运行时 indirection。`session-registry` entry 顺手加 `canvasId` 字段做断言：thread 若重绑到别的 canvas，连同 session 一起 reset（与现有「rebind = implicit New conversation」政策对齐）。
+- **`fs/write_text_file`：v1 不开**。advertise `writeTextFile: false` + 收到也 reject。推迟到 Phase 4：之前写 canvas 节点文件会跟前端状态冲突，且意义不大——agent 真要改的是它自己 cwd 里的 repo 代码，那走它本地 `Write` 工具不经 ACP。
+- **`terminal/*`：永不实现 server-side**。LLM 在 server 进程上跑任意 bash 风险远大于收益；agent 本地 `Bash` 工具能覆盖该场景。
+- **permission handler 拆 H + I**：先后端骨架（PR H），后真 UI（PR I）。Phase 3 不强求 UI 是因为：(a) v1 只开 read，read 默认不上 permission gate（绑定 agent 时已间接授权读 canvas），骨架是为 Phase 4 写能力准备；(b) 真 UI 涉及给现有 confirm dialog 加 4-outcome + 「always」持久化，是独立的交互 + 数据设计工作。
 
-**Exit criteria**：测试覆盖越权场景；至少两款 agent（claude / copilot）能跑通 `fs/read_text_file`。
+**PR 拆分**（沿用 A–E 风格）：
 
-**Open design decisions**：
+| PR    | 内容                                                                                                                                                                                                                                                                                                                                      | Exit criteria                                                                                              |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| **F** | (a) plumb `canvasId` 进 `RunAcpAgentOptions` + `AcpAgentClient` 构造 + `session-registry` entry；(b) `handleIncoming` 抽出 capability router 结构（所有方法仍 `-32601`，结构就位）；(c) plan doc + 代码注释里所有 `permission/request` → `session/request_permission`                                                                     | typecheck 绿；运行时行为零变化；agent 越权访问 log 里 method 名拼写正确                                    |
+| **G** | (a) `acp/capabilities/fs.ts` 实现 `fs/read_text_file`，allowlist `canvas.json` + `nodes/**` + `.artifacts/**`；(b) `initialize.clientCapabilities.fs.readTextFile` 翻 `true`；(c) unit test 覆盖：相对 escape (`../`)、绝对路径、symlink、跨 canvasId、allowlist 外 (`.history/...`)；(d) `fs/write_text_file` 显式 reject `-32601` + log | 单元测试覆盖 ≥ 4 类越权；至少一款 agent 实测能 Read canvas 节点                                            |
+| **H** | (a) `acp/capabilities/permission.ts` 实现 `session/request_permission` 后端：auto-allow first option + log，同时通过新 SSE event `permission_request` 推前端；(b) `packages/shared` 加 `permission_request` event schema                                                                                                                  | 至少一款 agent 真发了 permission 请求时 server 不再 -32601；前端能看到 SSE event（即便 UI 只是只读 toast） |
+| **I** | (a) ChatPanel 真 permission UI：confirm dialog 扩展 4-outcome + remember decision 持久化；(b) 跨 agent compatibility note：claude / copilot / gemini 三家实测各发什么 method + permission 触发条件，写进 §2.4 子节                                                                                                                        | 用户能在 UI 里点 allow/reject；plan doc 多了一张 compat 矩阵                                               |
 
-- **`fs/read_text_file` / `permission/request` 是 ACP 标准还是 Zed 扩展**？实施前必须读最新 spec + 抓 Claude/Copilot 实际包。
-- **permission UI 复用还是新建**？现有 confirm 弹窗能否承载 ACP 的 `kind: 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always'` 四态？
-- **`fs/write_text_file` 上线时机**：Phase 3 只开 read（v1 read-only 原则），还是顺手把 write 也接上（带 permission gate）？write 在没有 code repo 绑定（Phase 4）之前对外部 agent 意义不大。
-- **`terminal/*` 永远不开还是 Phase 4+ 可选**？
+**待定（Phase 3+ 不阻塞）**：
+
+- `agent_thought_chunk` / `tool_call` / `plan` 这些 `session/update` 翻译 —— 与 capability 工作正交，按需补
+- permission 「always」的存储位置（per-thread / per-canvas / global）—— 留到 PR I 设计 UI 时决定
 
 ### Phase 4 — Code-repo binding & 多 agent 选择
 
@@ -262,7 +289,7 @@ v1 用 Layer 2 (preprocessor) + Layer 1 (fs/read) 组合；Layer 3 (MCP) 是 Pha
 **Open design decisions**：
 
 - **transport**：HTTP+SSE（不用让用户跑额外进程）还是 stdio（MCP 默认）？
-- **`canvas_commands` 写能力是否走 permission gate**？跟 ACP `permission/request` 流复用还是独立？
+- **`canvas_commands` 写能力是否走 permission gate**？跟 ACP `session/request_permission` 流复用还是独立？
 - **Phase 5 真的需要做吗**？如果 Phase 2 + 3 上线后 user feedback 表明 Layer 1+2 够用就跳过。
 
 ---

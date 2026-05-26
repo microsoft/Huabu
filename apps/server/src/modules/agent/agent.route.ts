@@ -565,10 +565,10 @@ function buildHistoryItems(
         continue;
       }
 
-      // ACP preprocessor sidecar (PR D). The marker is appended right
-      // before the external agent's assistant turn, so flushing it
-      // immediately keeps the visible order: user → prepared-prompt
-      // card → assistant. Mirrors how the UI inserts the card live.
+      // ACP preprocessor sidecar marker. Appended right before the
+      // external agent's assistant turn, so flushing it immediately
+      // keeps the visible order: user → prepared-prompt card →
+      // assistant. Mirrors how the UI inserts the card live.
       if (content.startsWith('[SYSTEM PreparedPrompt]')) {
         flushStatus();
         const payload = content.slice('[SYSTEM PreparedPrompt] '.length);
@@ -1134,6 +1134,7 @@ const agentRoutes: FastifyPluginAsync = async (
               },
               message: userContent,
               threadId: resolvedThreadId,
+              canvasId,
               context,
               canvasContext,
               signal: abortController.signal,

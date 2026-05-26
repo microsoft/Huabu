@@ -22,17 +22,22 @@
  *
  * Design notes:
  *
- *   - One AcpAgentClient instance can own multiple ACP sessions on a
- *     single agentlet `AgentConnection`. Each session is keyed by the
- *     sessionId returned by `newSession()`. Use this when multiple chat
- *     threads share one external agent.
+ *   - One AcpAgentClient instance is bound to exactly **one Sediment
+ *     canvas** (via `opts.canvasId` in the constructor). All sessions
+ *     opened on this client inherit that canvas as their sandbox scope.
+ *     A thread that rebinds to a different canvas must rebuild the
+ *     client (enforced by `session-registry`).
+ *   - One AcpAgentClient instance can still own multiple ACP sessions
+ *     on a single agentlet `AgentConnection`, keyed by sessionId.
  *   - Registers a single `onMessage` handler on the connection that routes
  *     responses to pending request promises and `session/update`
  *     notifications to the per-session update handler installed by the
  *     in-flight `prompt(sessionId, ...)` call.
- *   - Any incoming JSON-RPC request from the agent is replied to with
- *     -32601 Method not implemented (until the capability router is
- *     wired up).
+ *   - Incoming JSON-RPC requests from the agent go through
+ *     `routeAgentRequest`; every branch currently returns -32601 with
+ *     the agreed wire method name in the log. Capability handlers
+ *     (fs sandbox, permission gate) will be plugged into the router
+ *     as they land.
  */
 
 import type { AcpSessionUpdate } from './translator.js';
@@ -47,7 +52,7 @@ interface PendingRequest {
   reject: (err: Error) => void;
 }
 
-/** Subset of the ACP initialize response we care about in Phase 1. */
+/** Subset of the ACP initialize response we care about. */
 export interface AcpInitializeResult {
   protocolVersion: number;
   agentCapabilities?: Record<string, unknown>;
@@ -74,6 +79,19 @@ export interface AcpPromptResult {
 }
 
 export interface AcpAgentClientOptions {
+  /**
+   * Sediment canvasId this client is bound to. Plumbed all the way from
+   * `agent.route.ts` so capability handlers (fs sandbox, permission gate)
+   * can scope their checks to the correct canvas directory. Constant for
+   * the lifetime of the client — rebinding a thread to a different
+   * canvas requires rebuilding the client (enforced in service.ts).
+   *
+   * Typed as optional because `agentRequestSchema.canvasId` is optional;
+   * the fs sandbox (once implemented) will reject any fs/* call when
+   * this is empty, so an external dispatch without a canvas cannot
+   * access any Huabu file.
+   */
+  canvasId?: string;
   /** Optional logger; defaults to console. */
   logger?: {
     debug: (obj: unknown, msg?: string) => void;
@@ -96,11 +114,14 @@ export class AcpAgentClient {
   private readonly updateHandlers = new Map<string, SessionUpdateHandler>();
   private closed = false;
   private readonly logger: NonNullable<AcpAgentClientOptions['logger']>;
+  /** Canvas scope for sandbox + permission checks. See AcpAgentClientOptions.canvasId. Empty string = “no canvas” (fs/* will be rejected). */
+  readonly canvasId: string;
 
   constructor(
     private readonly connection: AgentConnection,
-    opts: AcpAgentClientOptions = {},
+    opts: AcpAgentClientOptions,
   ) {
+    this.canvasId = opts.canvasId ?? '';
     this.logger = opts.logger ?? {
       debug: (o, m) => console.debug('[acp-client]', m ?? '', o),
       warn: (o, m) => console.warn('[acp-client]', m ?? '', o),
@@ -115,8 +136,12 @@ export class AcpAgentClient {
     const result = (await this.sendRequest('initialize', {
       protocolVersion: ACP_PROTOCOL_VERSION,
       clientCapabilities: {
-        // Phase 1 advertises ZERO capabilities so the agent shouldn't try
-        // to call fs/* or terminal/*. If it does anyway we reply -32601.
+        // Currently advertises ZERO fs/terminal capabilities — the
+        // capability router skeleton is in place but every method
+        // returns -32601. `fs.readTextFile` will flip to true when the
+        // sandbox handler lands; `terminal` stays false forever.
+        // `session/request_permission` is an implicit capability and
+        // is not declared here.
         fs: { readTextFile: false, writeTextFile: false },
         terminal: false,
       },
@@ -283,17 +308,58 @@ export class AcpAgentClient {
       return;
     }
 
-    // 2b) Request from agent — Phase 1 has no client capabilities advertised,
-    //     so reject everything with -32601. Phase 3 will wire the real router
-    //     for fs/* + session/request_permission.
-    this.logger.warn(
-      { method: msg.method, id: msg.id },
-      'agent called unimplemented client method',
-    );
-    this.sendErrorReply(
-      msg.id,
-      JSON_RPC_METHOD_NOT_FOUND,
-      `Method not implemented in Phase 1: ${msg.method}`,
-    );
+    // 2b) Request from agent — route through the capability dispatcher.
+    //     Every branch currently returns -32601 with the agreed wire
+    //     method name; capability handlers will be filled in as they
+    //     land (fs/read_text_file, session/request_permission, …).
+    this.routeAgentRequest(msg.method, msg.id, msg.params);
+  }
+
+  /**
+   * Capability router for incoming agent→client requests.
+   *
+   * Every branch currently returns -32601; this is the dispatch shape
+   * future handlers will plug into:
+   *
+   *   - `fs/read_text_file`          → fs-sandbox.safeResolve(this.canvasId, …)
+   *   - `fs/write_text_file`         → explicit reject (v1 read-only)
+   *   - `session/request_permission` → forwarded to the UI for user confirm
+   *   - `terminal/*`                 → never implemented server-side
+   *
+   * `params` is forwarded untouched; capability handlers are responsible
+   * for their own validation.
+   */
+  private routeAgentRequest(
+    method: string,
+    id: string | number,
+    _params: unknown,
+  ): void {
+    switch (method) {
+      case 'fs/read_text_file':
+      case 'fs/write_text_file':
+      case 'session/request_permission':
+        this.logger.warn(
+          { method, id, canvasId: this.canvasId },
+          'agent called client capability — not yet implemented',
+        );
+        this.sendErrorReply(
+          id,
+          JSON_RPC_METHOD_NOT_FOUND,
+          `Capability not yet implemented: ${method}`,
+        );
+        return;
+      default:
+        // Includes terminal/* (never implemented) and any unknown method.
+        this.logger.warn(
+          { method, id, canvasId: this.canvasId },
+          'agent called unknown / unsupported client method',
+        );
+        this.sendErrorReply(
+          id,
+          JSON_RPC_METHOD_NOT_FOUND,
+          `Method not implemented: ${method}`,
+        );
+        return;
+    }
   }
 }

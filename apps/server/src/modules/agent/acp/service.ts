@@ -6,15 +6,15 @@
  * as Sediment\u2019s standard `AgentStreamEvent`s, so the route handler can
  * treat external and internal dispatches uniformly.
  *
- * Persistence model (PR C, "Plan B"): one ACP session per Sediment
- * thread, kept alive for the thread\u2019s lifetime via {@link
- * acpSessionRegistry}. Successive prompts on the same thread reuse the
- * sessionId so the external agent retains conversation memory.
+ * Persistence model: one ACP session per Sediment thread, kept alive for
+ * the thread’s lifetime via {@link acpSessionRegistry}. Successive
+ * prompts on the same thread reuse the sessionId so the external agent
+ * retains conversation memory.
  *
- * Scope of translation in PR C: text deltas only \u2014
- * `session/update.agent_message_chunk` \u2192 `text_delta`. Tool calls,
- * plans, thinking, and mode updates are silently dropped by the translator
- * and will be added incrementally in later phases.
+ * Translation scope today: text deltas only —
+ * `session/update.agent_message_chunk` → `text_delta`. Tool calls,
+ * plans, thinking, and mode updates are silently dropped by the
+ * translator and will be added incrementally.
  */
 
 import { fauxAssistantMessage } from '@earendil-works/pi-ai';
@@ -74,6 +74,19 @@ export interface RunAcpAgentOptions {
   message: string | ReadonlyArray<{ type: string; text?: string }>;
   /** Sediment thread id \u2014 used as the registry key. */
   threadId: string;
+  /**
+   * Sediment canvasId for the active thread — plumbed into the
+   * AcpAgentClient so capability handlers (fs sandbox, permission gate)
+   * can scope checks to the correct canvas. Stored on the session entry
+   * too: if a thread’s canvas changes (rebind), the stale session is
+   * discarded just like an agent rebind.
+   *
+   * Optional only because the upstream schema (`agentRequestSchema`)
+   * marks `canvasId` optional; in practice an external binding always
+   * implies a canvas. The fs sandbox (once implemented) will reject
+   * any fs/* request from a session opened without a canvasId.
+   */
+  canvasId?: string;
   /** pi-ai context; we mutate `context.messages` to append the assistant reply. */
   context: Context;
   /**
@@ -85,11 +98,11 @@ export interface RunAcpAgentOptions {
    * substitutes its own `process.cwd()` (see
    * `agentlet/packages/local/src/relay.ts#enrichMessage`). This keeps
    * the local working directory authoritative on the user's machine
-   * and frees Sediment from guessing repo paths until Phase 4 wires
-   * canvas ↔ repo binding here.
+   * and frees Sediment from guessing repo paths until canvas ↔ repo
+   * binding is wired here.
    *
-   * **User contract until Phase 4**: launch agentlet from the project
-   * root (`cd <repo> && agentlet --agent "claude --acp" --server …`).
+   * **Current user contract**: launch agentlet from the project root
+   * (`cd <repo> && agentlet --agent "claude --acp" --server …`).
    */
   cwd?: string;
   /**
@@ -113,11 +126,12 @@ export async function* runAcpAgent(
   opts: RunAcpAgentOptions,
 ): AsyncGenerator<AgentStreamEvent> {
   const { binding, threadId, context, canvasContext, signal, logger } = opts;
+  const canvasId = opts.canvasId ?? '';
   const rawText = extractText(opts.message);
   // Default to '/' — the agreed sentinel with the agentlet relay, which
   // substitutes its own process.cwd() when params.cwd is empty or '/'
-  // (see agentlet/packages/local/src/relay.ts#enrichMessage). Phase 4
-  // canvas↔repo binding will pass an explicit opts.cwd here.
+  // (see agentlet/packages/local/src/relay.ts#enrichMessage). Once
+  // canvas ↔ repo binding lands, an explicit opts.cwd will be passed.
   const cwd = opts.cwd ?? '/';
 
   // 1. Resolve the live agentlet connection.
@@ -148,6 +162,18 @@ export async function* runAcpAgent(
     acpSessionRegistry.remove(threadId);
     entry = undefined;
   }
+  if (entry && entry.canvasId !== canvasId) {
+    logger.info(
+      {
+        threadId,
+        oldCanvasId: entry.canvasId,
+        newCanvasId: canvasId,
+      },
+      '[acp] thread canvas changed \u2014 discarding stale session (sandbox scope mismatch)',
+    );
+    acpSessionRegistry.remove(threadId);
+    entry = undefined;
+  }
   if (entry && entry.client.isClosed) {
     logger.info(
       { threadId },
@@ -158,16 +184,17 @@ export async function* runAcpAgent(
   }
   if (!entry) {
     logger.info(
-      { threadId, agentId: binding.agentletAgentId, cwd },
+      { threadId, canvasId, agentId: binding.agentletAgentId, cwd },
       '[acp] opening new session for thread',
     );
-    const client = new AcpAgentClient(conn, { logger });
+    const client = new AcpAgentClient(conn, { canvasId, logger });
     await client.initialize();
     const sessionId = await client.newSession({ cwd });
     entry = {
       client,
       sessionId,
       agentletAgentId: binding.agentletAgentId,
+      canvasId,
       cwd,
       createdAt: Date.now(),
     };

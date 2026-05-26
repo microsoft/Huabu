@@ -31,7 +31,8 @@ import type { FastifyPluginAsync } from 'fastify';
  *   `''` / whitespace                   → `'agent'` (defensive fallback)
  *
  * Limitation: two `claude --acp` instances collide on `'claude'`. Accepted
- * for Phase 2; Phase 4 introduces `external-agents.json` for stable aliases.
+ * for now; a stable-alias `external-agents.json` registry will fix this
+ * when canvas ↔ repo binding lands.
  */
 export function deriveAlias(command: string): string {
   const first = command.trim().split(/\s+/)[0] ?? '';

@@ -1,12 +1,12 @@
 /**
  * Per-process registry of live ACP sessions, keyed by Sediment threadId.
  *
- * Implements PR C's "Plan B" persistence model: every Sediment chat thread
- * that is bound to an external agent (`AgentBindingExternal`) owns one
- * long-lived ACP session on that agent. Successive prompts reuse the same
- * sessionId so the agent retains conversation memory.
+ * Persistence model: every Sediment chat thread bound to an external
+ * agent (`AgentBindingExternal`) owns one long-lived ACP session on
+ * that agent. Successive prompts reuse the same sessionId so the agent
+ * retains conversation memory.
  *
- * Lifecycle ownership is intentionally minimal in PR C:
+ * Lifecycle ownership is intentionally minimal:
  *
  *   - Entries are created lazily by `runAcpAgent` (in service.ts) on the
  *     first prompt for a thread.
@@ -38,6 +38,16 @@ export interface AcpSessionEntry {
    * detect stale entries when a thread\u2019s binding is reassigned.
    */
   agentletAgentId: string;
+  /**
+   * Sediment canvasId this session is bound to. A thread is normally
+   * pinned to one canvas for its lifetime, but if it ever rebinds to a
+   * different canvas we treat it like a binding change and reset the
+   * session \u2014 otherwise fs sandbox / permission scope would leak
+   * across canvases. Optional because `agentRequestSchema.canvasId`
+   * is optional; an empty string means “no canvas” and the fs sandbox
+   * (once implemented) will reject any fs/* call in that state.
+   */
+  canvasId: string;
   /** `cwd` passed to `session/new`. Mostly for diagnostics. */
   cwd: string;
   /** Epoch ms at which this session was first created. */
