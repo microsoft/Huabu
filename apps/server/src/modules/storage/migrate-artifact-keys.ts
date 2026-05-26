@@ -1,6 +1,6 @@
 /**
  * One-shot rewrite of artifact references in node markdown sidecars.
- *
+ * @deprecated Launch-only legacy migration.
  * Before this migration, the front-end persisted artifact references as
  * full canvas-scoped URLs:
  *
