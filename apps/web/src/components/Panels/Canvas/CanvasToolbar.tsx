@@ -354,7 +354,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
                 });
               }}
               anchor="bottom-left"
-              offset={{ x: 0, y: -4 }}
+              offset={{ x: 0, y: -8 }}
               className="flex flex-col overflow-hidden py-1"
             >
               {resourceOptions.map((opt) => (
@@ -362,7 +362,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
                   key={opt.value}
                   variant="ghost"
                   tone="neutral"
-                  size="sm"
+                  size="md"
                   role="menuitem"
                   className="w-full justify-start rounded-none px-3 py-1.5 text-left"
                   onClick={() => {

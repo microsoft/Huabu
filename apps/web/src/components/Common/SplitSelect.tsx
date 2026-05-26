@@ -200,7 +200,7 @@ export function SplitSelect<T extends string = string>({
               onClick={() => handleSelect(option.value)}
               className={cn(
                 'w-full justify-start rounded-none px-3 py-1.5 text-left',
-                option.value === value ? 'text-info' : 'text-fg-default',
+                option.value === value ? 'text-info' : 'text-fg-muted',
               )}
             >
               {option.icon && <span className="shrink-0">{option.icon}</span>}
