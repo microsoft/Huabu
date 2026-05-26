@@ -1,9 +1,10 @@
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 
 import { CanvasLayerTree } from './CanvasLayerTree';
 import { getNodeIcon } from '../../../config/nodeIcons';
 import useCanvasStore from '../../../store/canvasStore';
+import { usePanelStore } from '../../../store/panelStore';
 import { SketchIcon } from '../../Nodes/sketch/SketchIcon';
 import { SidebarPanel } from '../SidebarPanel';
 
@@ -78,16 +79,75 @@ const buildTreeItems = (nodes: DataSourceNodeLike[]): DataSourceTreeItem[] => {
   return out;
 };
 
+/**
+ * Compare two tree items by the fields actually consumed by the layer
+ * tree's rows. Crucially this ignores `selected` and other non-visible
+ * node fields so we can reuse the cached item ref whenever the only
+ * change was a selection toggle.
+ */
+const isSameTreeItem = (
+  a: DataSourceTreeItem,
+  b: DataSourceTreeItem,
+): boolean => {
+  if (a.depth !== b.depth) return false;
+  const an = a.node;
+  const bn = b.node;
+  if (an.type !== bn.type) return false;
+  if (an.parentId !== bn.parentId) return false;
+  if (an.data.label !== bn.data.label) return false;
+  if (an.data.locked !== bn.data.locked) return false;
+  // SketchIcon depends on these references; reuse cached item when they
+  // are reference-equal (the sketch store updates immutably).
+  if (an.data.strokes !== bn.data.strokes) return false;
+  if (an.data.initialSize !== bn.data.initialSize) return false;
+  return true;
+};
+
 export const CanvasLayerPanel = ({
   isCollapsed,
   onToggle,
 }: CanvasLayerPanelProps) => {
-  const nodes = useCanvasStore(
+  // `MainLayout` keeps this subtree mounted while the column animates to
+  // width 0 (to avoid a content-swap flash mid-animation), so the local
+  // `isCollapsed` prop is always `false`. We read the real collapse state
+  // from `panelStore` and use it to freeze the `nodes` reference fed to
+  // `buildTreeItems`. While collapsed, selection bumps on the canvas
+  // (which rebuild `state.nodes` on every toggle) skip the O(N) tree
+  // walk — but no DOM is unmounted, so the 220ms width animation stays
+  // smooth.
+  const isLeftCollapsed = usePanelStore((s) => s.isLeftCollapsed);
+  const rawNodes = useCanvasStore(
     (s) => s.nodes,
   ) as unknown as DataSourceNodeLike[];
+  const frozenNodesRef = useRef(rawNodes);
+  if (!isLeftCollapsed) {
+    // Keep the cached reference in step with the live store whenever the
+    // panel is visible. Writing the same ref value during render is safe
+    // (no extra render scheduled).
+    frozenNodesRef.current = rawNodes;
+  }
+  const nodes = isLeftCollapsed ? frozenNodesRef.current : rawNodes;
 
-  // Canvas layer tree: use original node order (hierarchy-based)
-  const layerItems = useMemo(() => buildTreeItems(nodes), [nodes]);
+  // Canvas layer tree: use original node order (hierarchy-based).
+  // We cache per-id item refs by content so that selection-only changes
+  // (which rebuild every node object in the store via `{...n, selected}`)
+  // do NOT invalidate the row props of unchanged items — this preserves
+  // `SortableRow`'s `React.memo` and prevents O(N) row re-renders on
+  // every click in the layer panel.
+  const itemCacheRef = useRef<Map<string, DataSourceTreeItem>>(new Map());
+  const layerItems = useMemo(() => {
+    const fresh = buildTreeItems(nodes);
+    const previous = itemCacheRef.current;
+    const next = new Map<string, DataSourceTreeItem>();
+    const stabilized = fresh.map((item) => {
+      const cached = previous.get(item.id);
+      const reused = cached && isSameTreeItem(cached, item) ? cached : item;
+      next.set(item.id, reused);
+      return reused;
+    });
+    itemCacheRef.current = next;
+    return stabilized;
+  }, [nodes]);
 
   return (
     <SidebarPanel

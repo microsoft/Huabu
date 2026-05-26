@@ -125,6 +125,23 @@ const FrameFitPreviewOverlay: React.FC<{
 const EXPANDABLE_TYPES = new Set(['image', 'video', 'web', 'pdf', 'note']);
 
 /**
+ * `--color-info` is a design-system token that does not change at runtime,
+ * but `getComputedStyle(document.documentElement).getPropertyValue(...)`
+ * is a synchronous style read that can flush pending style work — and the
+ * old `displayEdges` memo invoked it on every selection change. Cache the
+ * resolved value lazily so subsequent renders pay nothing.
+ */
+let cachedInfoColor: string | null = null;
+function getInfoColor(): string {
+  if (cachedInfoColor !== null) return cachedInfoColor;
+  if (typeof document === 'undefined') return '';
+  cachedInfoColor = getComputedStyle(document.documentElement)
+    .getPropertyValue('--color-info')
+    .trim();
+  return cachedInfoColor;
+}
+
+/**
  * Inner component that owns canvas-wide touch / trackpad gesture wiring.
  * Lives inside `<ReactFlow>` so the gesture hook (which calls
  * `useStoreApi`) can reach React Flow's store context.
@@ -324,12 +341,19 @@ export const Canvas: React.FC<CanvasProps> = ({
   const displayNodes = useMemo<typeof nodes>(
     () =>
       nodes.map((node) => {
-        const className = clsx(
-          node.className,
-          lassoPreviewNodeIdSet.has(node.id) && 'canvas-lasso-preview',
-        );
-
-        return className ? { ...node, className } : node;
+        // Reuse the original node reference whenever the computed
+        // `className` matches what's already on the node. Without this
+        // check, `clsx('foo', false)` returns `'foo'` (truthy), so the
+        // ternary in the previous implementation re-spread every node
+        // that had any pre-existing className — defeating xyflow's
+        // per-node `React.memo` on every selection click.
+        const wantsLassoClass = lassoPreviewNodeIdSet.has(node.id);
+        const baseClassName = node.className;
+        const nextClassName = wantsLassoClass
+          ? clsx(baseClassName, 'canvas-lasso-preview')
+          : baseClassName;
+        if (nextClassName === baseClassName) return node;
+        return { ...node, className: nextClassName };
       }),
     [lassoPreviewNodeIdSet, nodes],
   );
@@ -338,9 +362,8 @@ export const Canvas: React.FC<CanvasProps> = ({
   // highlight color (--color-info). CSS cannot style SVG <marker> referenced
   // via url() from <defs>, so we swap the marker config in JS.
   const displayEdges = useMemo(() => {
-    const infoColor = getComputedStyle(document.documentElement)
-      .getPropertyValue('--color-info')
-      .trim();
+    // Cached module-level read — see `getInfoColor` above.
+    const infoColor = getInfoColor();
     if (!infoColor) return edges;
     return edges.map((e) => {
       const isLassoPreviewSelected = lassoPreviewEdgeIdSet.has(e.id);
@@ -362,16 +385,33 @@ export const Canvas: React.FC<CanvasProps> = ({
         };
       }
 
+      // Only allocate a new marker object when its color actually needs
+      // to change; otherwise reuse the existing reference so the parent
+      // edge can also be reused below.
       const recolor = (m: typeof e.markerEnd) => {
         if (!m || typeof m === 'string') return m;
+        if (m.color === infoColor) return m;
         return { ...m, color: infoColor };
       };
+
+      const nextMarkerEnd = recolor(e.markerEnd);
+      const nextMarkerStart = recolor(e.markerStart);
+      // Edge is already in the desired visual state — reuse its ref so
+      // downstream consumers (xyflow's edge memo, selection toolbars)
+      // skip rework.
+      if (
+        e.selected &&
+        nextMarkerEnd === e.markerEnd &&
+        nextMarkerStart === e.markerStart
+      ) {
+        return e;
+      }
 
       return {
         ...e,
         selected: true,
-        markerEnd: recolor(e.markerEnd),
-        markerStart: recolor(e.markerStart),
+        markerEnd: nextMarkerEnd,
+        markerStart: nextMarkerStart,
       };
     });
   }, [
