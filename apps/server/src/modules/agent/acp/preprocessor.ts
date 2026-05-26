@@ -24,6 +24,7 @@
 
 import { llmComplete } from '../llm.js';
 import { buildAgentNodeRef } from '../node-ref.js';
+import { ACP_CANVAS_VFS_PREFIX } from './capabilities/fs.js';
 
 import type { AgentNodeRef } from '../node-ref.js';
 import type { Context } from '@earendil-works/pi-ai';
@@ -74,7 +75,7 @@ Return **only** a JSON object (no markdown fences, no commentary) with this exac
 1. \`task\` must stand alone: an agent reading **only** \`task\` and \`fileRefs\` (with no other context) should know what to do. Quote the user's intent faithfully — do not invent requirements.
 2. Use second person ("you") to address the external agent.
 3. Mention the canvas only when it matters for this turn. If the user asks something fully general, \`fileRefs\` may be \`[]\`.
-4. \`fileRefs\` paths must come from \`selectedNodes[].filename\` or be one of these known canvas paths: \`canvas.json\`, \`.artifacts/...\`. Never invent paths.
+4. \`fileRefs\` paths must come from \`selectedNodes[].filename\` (i.e. \`nodes/<file>.md\`) or be under \`.artifacts/\`. Never invent paths and never reference \`canvas.json\` — the canvas structure was summarised for you above.
 5. Keep \`reason\` short and concrete (≤80 chars). Skip \`reason\` if obvious from the filename.
 6. Order \`fileRefs\` by relevance, most relevant first. Cap at 8 entries — leave the rest for the agent to discover via tools.
 7. If the user's message is itself code/config/markdown they want analysed, paraphrase the request in \`task\` and quote the snippet inside \`task\` (don't try to externalise it as a file).
@@ -179,14 +180,24 @@ export async function prepareExternalAgentPrompt(
  * Convert an {@link ExternalAgentPrompt} into the plain-text payload
  * sent over ACP `session/prompt`. Format is deliberately simple
  * markdown so any agent's text rendering picks it up cleanly.
+ *
+ * Every `fileRefs[].path` is rendered as `<ACP_CANVAS_VFS_PREFIX><rel>`
+ * (i.e. `/canvas/nodes/foo.md`) — absolute paths in the virtual
+ * namespace owned by `acp/capabilities/fs.ts`. The agent's `Read`
+ * tool emits the same absolute path back over `fs/read_text_file`,
+ * which is what the sandbox handler expects. Keep `fileRefs[].path`
+ * itself canvas-relative; serialization is the only layer that adds
+ * the prefix so storage / UI / future internal consumers stay free
+ * of wire concerns.
  */
 export function serializePrompt(prompt: ExternalAgentPrompt): string {
   const lines: string[] = [prompt.task.trim()];
   if (prompt.fileRefs.length > 0) {
     lines.push('', '## Files to consider', '');
     for (const ref of prompt.fileRefs) {
+      const wirePath = `${ACP_CANVAS_VFS_PREFIX}${ref.path}`;
       lines.push(
-        ref.reason ? `- \`${ref.path}\` — ${ref.reason}` : `- \`${ref.path}\``,
+        ref.reason ? `- \`${wirePath}\` — ${ref.reason}` : `- \`${wirePath}\``,
       );
     }
   }
@@ -310,10 +321,7 @@ function parsePromptJson(
   const task = typeof obj.task === 'string' ? obj.task.trim() : '';
   if (!task) return null;
 
-  const knownPaths = new Set<string>([
-    'canvas.json',
-    ...selectedRefs.map((r) => r.filename),
-  ]);
+  const knownPaths = new Set<string>(selectedRefs.map((r) => r.filename));
 
   const rawRefs = Array.isArray(obj.fileRefs) ? obj.fileRefs : [];
   const fileRefs: ExternalAgentPrompt['fileRefs'] = [];
@@ -322,10 +330,11 @@ function parsePromptJson(
     const ref = r as Record<string, unknown>;
     const path = typeof ref.path === 'string' ? ref.path.trim() : '';
     if (!path) continue;
-    // Allowlist: known node filenames, canvas.json, or any path under
-    // nodes/ or .artifacts/ (so the LLM can guess sibling files of a
-    // selected node). Reject everything else to keep the preprocessor
-    // from inventing paths that map nowhere.
+    // Allowlist mirrors the runtime fs/read_text_file handler
+    // (`capabilities/fs.ts:isAllowedRead`): only canvas nodes and
+    // artifact files. canvas.json is intentionally excluded — the
+    // canvas structure is summarised in `task`, not re-read by the
+    // agent.
     const allowed =
       knownPaths.has(path) ||
       path.startsWith('nodes/') ||

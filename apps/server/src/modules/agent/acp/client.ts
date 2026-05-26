@@ -11,10 +11,13 @@
  *     the final `{ stopReason }`
  *   - `cancel(sessionId)` — notify the agent to abort the current turn
  *
- * Capability stubs that currently reject:
- *   - `fs/read_text_file`, `fs/write_text_file`
- *   - `terminal/*`
- *   - `session/request_permission`
+ * Capability handlers:
+ *   - `fs/read_text_file`          — wired to capabilities/fs.ts (sandbox
+ *                                    + `/canvas/` vfs prefix + allowlist)
+ *   - `fs/write_text_file`         — explicit reject (-32601); read-only
+ *   - `terminal/*`                 — never implemented; reject (-32601)
+ *   - `session/request_permission` — stub (-32601) until the backend
+ *                                    gate + UI land
  *
  * Not yet supported at all:
  *   - reconnect / session/load
@@ -34,11 +37,14 @@
  *     notifications to the per-session update handler installed by the
  *     in-flight `prompt(sessionId, ...)` call.
  *   - Incoming JSON-RPC requests from the agent go through
- *     `routeAgentRequest`; every branch currently returns -32601 with
- *     the agreed wire method name in the log. Capability handlers
- *     (fs sandbox, permission gate) will be plugged into the router
- *     as they land.
+ *     `routeAgentRequest`. `fs/read_text_file` is live (sandbox +
+ *     allowlist); the remaining capabilities are still stubs that
+ *     return -32601 with the agreed wire method name. New capability
+ *     handlers (permission gate, etc.) plug into the router as they
+ *     land.
  */
+
+import { FsCapabilityError, handleFsReadTextFile } from './capabilities/fs.js';
 
 import type { AcpSessionUpdate } from './translator.js';
 import type { AgentConnection, AcpMessage } from '@agentlet/protocol';
@@ -46,6 +52,7 @@ import type { AgentConnection, AcpMessage } from '@agentlet/protocol';
 const ACP_PROTOCOL_VERSION = 1;
 
 const JSON_RPC_METHOD_NOT_FOUND = -32601;
+const JSON_RPC_INTERNAL_ERROR = -32603;
 
 interface PendingRequest {
   resolve: (result: unknown) => void;
@@ -136,13 +143,14 @@ export class AcpAgentClient {
     const result = (await this.sendRequest('initialize', {
       protocolVersion: ACP_PROTOCOL_VERSION,
       clientCapabilities: {
-        // Currently advertises ZERO fs/terminal capabilities — the
-        // capability router skeleton is in place but every method
-        // returns -32601. `fs.readTextFile` will flip to true when the
-        // sandbox handler lands; `terminal` stays false forever.
-        // `session/request_permission` is an implicit capability and
-        // is not declared here.
-        fs: { readTextFile: false, writeTextFile: false },
+        // Read is handled by acp/capabilities/fs.ts (sandbox +
+        // /canvas/ vfs prefix + allowlist). Write stays closed —
+        // there is no compelling v1 use case and writing canvas node
+        // files would race with the live UI. `terminal` stays false
+        // forever; agents that need a shell use their own local Bash
+        // tool. `session/request_permission` is an implicit
+        // capability and is not declared here.
+        fs: { readTextFile: true, writeTextFile: false },
         terminal: false,
       },
       clientInfo: {
@@ -318,12 +326,10 @@ export class AcpAgentClient {
   /**
    * Capability router for incoming agent→client requests.
    *
-   * Every branch currently returns -32601; this is the dispatch shape
-   * future handlers will plug into:
-   *
-   *   - `fs/read_text_file`          → fs-sandbox.safeResolve(this.canvasId, …)
-   *   - `fs/write_text_file`         → explicit reject (v1 read-only)
-   *   - `session/request_permission` → forwarded to the UI for user confirm
+   *   - `fs/read_text_file`          → handleFsReadTextFile (sandbox + allowlist)
+   *   - `fs/write_text_file`         → explicit reject (v1 is read-only)
+   *   - `session/request_permission` → stub: rejected with -32601 until the
+   *                                    backend gate + UI land
    *   - `terminal/*`                 → never implemented server-side
    *
    * `params` is forwarded untouched; capability handlers are responsible
@@ -332,20 +338,37 @@ export class AcpAgentClient {
   private routeAgentRequest(
     method: string,
     id: string | number,
-    _params: unknown,
+    params: unknown,
   ): void {
     switch (method) {
       case 'fs/read_text_file':
+        this.handleFsRead(id, params);
+        return;
       case 'fs/write_text_file':
-      case 'session/request_permission':
+        // Advertised as unsupported via clientCapabilities; an agent
+        // calling it anyway gets a precise reject so the operator can
+        // see what was attempted.
         this.logger.warn(
           { method, id, canvasId: this.canvasId },
-          'agent called client capability — not yet implemented',
+          'agent attempted fs/write_text_file — read-only in this Sediment version',
         );
         this.sendErrorReply(
           id,
           JSON_RPC_METHOD_NOT_FOUND,
-          `Capability not yet implemented: ${method}`,
+          'fs/write_text_file is not implemented (Sediment is read-only over ACP in this version)',
+        );
+        return;
+      case 'session/request_permission':
+        // Permission gate will land alongside the UI; until then we
+        // -32601 so the agent does not assume an implicit allow.
+        this.logger.warn(
+          { method, id, canvasId: this.canvasId },
+          'agent called session/request_permission — handler not yet implemented',
+        );
+        this.sendErrorReply(
+          id,
+          JSON_RPC_METHOD_NOT_FOUND,
+          'session/request_permission is not yet implemented',
         );
         return;
       default:
@@ -360,6 +383,42 @@ export class AcpAgentClient {
           `Method not implemented: ${method}`,
         );
         return;
+    }
+  }
+
+  /**
+   * Dispatch one `fs/read_text_file` call to the capability handler
+   * and translate the (sync, may-throw) result into a JSON-RPC reply.
+   * Failure mapping:
+   *   - `FsCapabilityError`  → reply with its own code + message
+   *   - anything else        → -32603 internal_error with sanitised text
+   */
+  private handleFsRead(id: string | number, params: unknown): void {
+    try {
+      const result = handleFsReadTextFile(this.canvasId, params);
+      this.connection.send({ jsonrpc: '2.0', id, result });
+    } catch (e) {
+      if (e instanceof FsCapabilityError) {
+        this.logger.warn(
+          { id, canvasId: this.canvasId, code: e.code, message: e.message },
+          'fs/read_text_file refused',
+        );
+        this.sendErrorReply(id, e.code, e.message);
+        return;
+      }
+      this.logger.error(
+        {
+          id,
+          canvasId: this.canvasId,
+          err: e instanceof Error ? e.message : String(e),
+        },
+        'fs/read_text_file failed with unexpected error',
+      );
+      this.sendErrorReply(
+        id,
+        JSON_RPC_INTERNAL_ERROR,
+        'fs/read_text_file: internal error',
+      );
     }
   }
 }

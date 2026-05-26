@@ -9,6 +9,8 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "tsx src/server.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "eval": "tsx evals/cli.ts run",
     "eval:list": "tsx evals/cli.ts list",
     "eval:baseline": "tsx evals/cli.ts baseline",
@@ -42,6 +44,8 @@
     "@types/sanitize-html": "^2.16.0",
     "@types/yauzl": "^2.10.3",
     "tsx": "^4.0.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vite": "^7.0.0",
+    "vitest": "^4.0.18"
   }
 }
