@@ -43,6 +43,7 @@ import type {
   ChatHistoryItem,
   ChatHistoryResponse,
   ContextTokensResponse,
+  ExternalAgentPrompt,
   StopThreadResponse,
   ToolResponse,
   WireSelectionNode,
@@ -561,6 +562,31 @@ function buildHistoryItems(
       if (content.startsWith('[SYSTEM Error]')) {
         const detail = content.slice('[SYSTEM Error] '.length);
         pendingStatus = { role: 'status', status: 'error', detail };
+        continue;
+      }
+
+      // ACP preprocessor sidecar (PR D). The marker is appended right
+      // before the external agent's assistant turn, so flushing it
+      // immediately keeps the visible order: user → prepared-prompt
+      // card → assistant. Mirrors how the UI inserts the card live.
+      if (content.startsWith('[SYSTEM PreparedPrompt]')) {
+        flushStatus();
+        const payload = content.slice('[SYSTEM PreparedPrompt] '.length);
+        try {
+          const parsed = JSON.parse(payload) as {
+            agentAlias: string;
+            prompt: ExternalAgentPrompt | null;
+            error?: string;
+          };
+          messages.push({
+            role: 'prepared-prompt',
+            agentAlias: parsed.agentAlias,
+            prompt: parsed.prompt,
+            ...(parsed.error ? { error: parsed.error } : {}),
+          });
+        } catch {
+          // Malformed sidecar — drop silently rather than break history.
+        }
         continue;
       }
 
@@ -1109,6 +1135,7 @@ const agentRoutes: FastifyPluginAsync = async (
               message: userContent,
               threadId: resolvedThreadId,
               context,
+              canvasContext,
               signal: abortController.signal,
               logger: request.log,
             })

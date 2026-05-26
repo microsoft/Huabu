@@ -1,5 +1,6 @@
 import type {
   ChatAttachment,
+  ExternalAgentPrompt,
   IntentCandidate,
   ToolResponse,
 } from '@sediment/shared';
@@ -46,4 +47,19 @@ export type ChatMessage =
       selectedIntent: string;
       /** Custom intent text typed by user. */
       customIntent?: string;
+    }
+  | {
+      id: string;
+      role: 'prepared-prompt';
+      /**
+       * Structured prompt the ACP preprocessor produced for the
+       * external agent. `null` while we're still waiting on the
+       * preprocessor's LLM call (pending state) or when the call
+       * failed outright (in which case `error` is set).
+       */
+      prompt: ExternalAgentPrompt | null;
+      /** Short alias of the bound external agent (`'claude'`, etc.). */
+      agentAlias: string;
+      /** Preprocessor failure detail; presence indicates the fallback path ran. */
+      error?: string;
     };

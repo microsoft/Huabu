@@ -20,12 +20,20 @@
 import { fauxAssistantMessage } from '@earendil-works/pi-ai';
 
 import { AcpAgentClient } from './client.js';
+import {
+  prepareExternalAgentPrompt,
+  serializeRawPrompt,
+} from './preprocessor.js';
 import { getAgentletServer } from './server-mount.js';
 import { acpSessionRegistry } from './session-registry.js';
 import { acpUpdateToStreamEvent } from './translator.js';
 
 import type { AssistantMessage, Context } from '@earendil-works/pi-ai';
-import type { AgentStreamEvent } from '@sediment/shared';
+import type {
+  AgentChatContext,
+  AgentStreamEvent,
+  ExternalAgentPrompt,
+} from '@sediment/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
 /** ACP stop reasons we know about; mapped onto pi-ai `stopReason`. */
@@ -75,6 +83,13 @@ export interface RunAcpAgentOptions {
    * Phase 4 will pass an explicit canvas-bound repo path here.
    */
   cwd?: string;
+  /**
+   * Optional canvas context (selected nodes, etc.) used by the
+   * preprocessor to build a focused prompt for the external agent.
+   * When omitted, the preprocessor still runs but with no
+   * canvas-aware fileRefs hints.
+   */
+  canvasContext?: AgentChatContext;
   /** Cancellation signal \u2014 wired through to `session/cancel`. */
   signal?: AbortSignal;
   logger: FastifyBaseLogger;
@@ -88,8 +103,8 @@ export interface RunAcpAgentOptions {
 export async function* runAcpAgent(
   opts: RunAcpAgentOptions,
 ): AsyncGenerator<AgentStreamEvent> {
-  const { binding, threadId, context, signal, logger } = opts;
-  const text = extractText(opts.message);
+  const { binding, threadId, context, canvasContext, signal, logger } = opts;
+  const rawText = extractText(opts.message);
   // Default to '/' so the agentlet relay overrides with its own --cwd
   // (relay.ts only substitutes when params.cwd is empty or '/'). Phase 4
   // canvas↔repo binding will pass an explicit opts.cwd here.
@@ -154,7 +169,56 @@ export async function* runAcpAgent(
     );
   }
 
-  // 3. Bridge the per-update callback into an async iterable via a queue.
+  // 3. Preprocess the user message into a structured ExternalAgentPrompt
+  //    BEFORE opening the queue, so the UI sees `prepared_prompt` strictly
+  //    before any `text_delta`. On failure we fall back to the raw text
+  //    and emit a `prepared_prompt` event with `prompt: null + error` so
+  //    the UI can surface the failure (and we still serve the user).
+  let preparedPrompt: ExternalAgentPrompt | null = null;
+  let preparedError: string | undefined;
+  let promptPayload = rawText;
+  try {
+    const result = await prepareExternalAgentPrompt({
+      rawText,
+      agentAlias: binding.alias,
+      canvasContext,
+      history: context.messages,
+      logger,
+    });
+    preparedPrompt = result.prompt;
+    promptPayload = result.serialized;
+  } catch (err) {
+    preparedError = err instanceof Error ? err.message : String(err);
+    logger.warn(
+      { threadId, agentAlias: binding.alias, err: preparedError },
+      '[acp] preprocessor failed — falling back to raw user text',
+    );
+    promptPayload = serializeRawPrompt(rawText);
+  }
+
+  // Persist a sidecar marker on the user's history slot so chat
+  // history can rehydrate the PreparedPromptCard. Mirrors the
+  // `[SYSTEM Error]` / `[SYSTEM Interrupted]` pattern used elsewhere.
+  context.messages.push({
+    role: 'user',
+    content: `[SYSTEM PreparedPrompt] ${JSON.stringify({
+      agentAlias: binding.alias,
+      prompt: preparedPrompt,
+      error: preparedError,
+    })}`,
+    timestamp: Date.now(),
+  });
+
+  yield {
+    type: 'prepared_prompt',
+    data: {
+      agentAlias: binding.alias,
+      prompt: preparedPrompt,
+      error: preparedError,
+    },
+  };
+
+  // 4. Bridge the per-update callback into an async iterable via a queue.
   const queue: AgentStreamEvent[] = [];
   let resolveWaiter: (() => void) | null = null;
   let assembledText = '';
@@ -175,7 +239,8 @@ export async function* runAcpAgent(
       threadId,
       sessionId: entry.sessionId,
       agentId: binding.agentletAgentId,
-      promptLength: text.length,
+      promptLength: promptPayload.length,
+      preprocessed: preparedPrompt !== null,
     },
     '[acp] session/prompt dispatch',
   );
@@ -183,7 +248,7 @@ export async function* runAcpAgent(
   void entry.client
     .prompt(
       entry.sessionId,
-      text,
+      promptPayload,
       (update) => {
         const evt = acpUpdateToStreamEvent(update);
         if (!evt) {
@@ -211,7 +276,7 @@ export async function* runAcpAgent(
     });
 
   try {
-    // 4. Drain the queue as updates arrive.
+    // 5. Drain the queue as updates arrive.
     while (true) {
       while (queue.length > 0) {
         yield queue.shift()!;
@@ -222,7 +287,7 @@ export async function* runAcpAgent(
       });
     }
   } finally {
-    // 5. Always sync the assistant\u2019s text back into context.messages,
+    // 6. Always sync the assistant’s text back into context.messages,
     //    even on abort/error \u2014 mirrors `runAgent`\u2019s `finally` sync
     //    so partial replies survive page reloads.
     if (assembledText.length > 0) {
@@ -236,7 +301,7 @@ export async function* runAcpAgent(
     }
   }
 
-  // 6. Yield terminal event \u2014 error wins over done.
+  // 7. Yield terminal event \u2014 error wins over done.
   if (promptError) {
     const msg =
       promptError instanceof Error ? promptError.message : String(promptError);

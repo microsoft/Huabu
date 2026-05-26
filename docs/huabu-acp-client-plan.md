@@ -203,13 +203,19 @@ v1 用 Layer 2 (preprocessor) + Layer 1 (fs/read) 组合；Layer 3 (MCP) 是 Pha
 
 **Exit criteria**：所有外部 agent 消息上方出现「Prepared prompt」折叠卡片（task + fileRefs）；preprocessor 抛错时降级到 raw message 且 log 告警。
 
-**Open design decisions**（开工前要拍板）：
+**Design decisions**（已定）：
 
-- **preprocessor 用哪个 LLM**？复用 Sediment settings 里的 default model（用户配啥用啥）？还是 hardcode 一个便宜模型（claude haiku / gpt-4o-mini）避免影响主任务 token 配额？
-- **`ExternalAgentPrompt` wire schema**：`{ task: string, fileRefs: [{path: string, reason?: string}] }` 是否足够？是否需要按 node id（而不是 path）传 fileRefs，让外部 agent 不依赖磁盘结构？
-- **`selectedNodeIds` 怎么流到 preprocessor**？前端 chatStore 当前是否已经持有？需要在 `agentRequestSchema` 加字段一路传到 service。
-- **fallback UX**：preprocessor 抛错时，除 log 外，前端要不要展示 warning toast？折叠卡片显示「Fallback to raw message because ...」？
-- **dirty canvas 处理**：用户有未保存改动时，preprocessor 是 (a) 强制 auto-save 再读盘，还是 (b) 从 in-memory canvas state 读 + 显式标注「脏状态」给 agent？
+- **preprocessor LLM**：复用 Sediment settings 里的 **default model**。用户可控；不引入新 hardcode；不需要单独 token 预算管理。
+- **`ExternalAgentPrompt` wire schema**：按 **path** 而非 node id，与 Phase 3 `fs/read_text_file` 语义一致；外部 agent 不需要懂 Huabu 内部模型，直接 `Read <path>`。
+  ```ts
+  type ExternalAgentPrompt = {
+    task: string; // 重写后的任务描述
+    fileRefs: Array<{ path: string; reason?: string }>; // 相对 canvasDir
+  };
+  ```
+- **`selectedNodeIds` 传递**：**不需要新加字段**。`agentRequestSchema` 已包含 `canvasContext.selectedNodes`（由 `apps/web/src/store/canvasStore.ts:getAgentChatContext` 产出），ask / internal agent / external 三边共用同一个 request schema 和 `Context` 对象。preprocessor 直接从已有 context 读 selected nodes 即可。
+- **fallback UX**：**复用 `apps/web/src/components/Messages/StatusMessage.tsx`**（已支持 `status: 'error'` + `detail` + retry）。preprocessor 失败时 push 一条 `role: 'status', status: 'error', detail: 'Preprocessor failed; using raw input: <reason>'`，不引入新组件、不加 toast。
+- **dirty canvas 处理**：**(a) auto-save 路径，但不是 PR D 范围**。ask agent 也是从磁盘读 canvas，依赖 `useAgentStream.ts` 的 `flushCanvasEvents()` 在 startStream 前 flush 待持久化的 mutation；该 flush 错误被静默吞掉是 **ask + internal + external 三边共通**的潜在 staleness 问题。PR D **复用现有 flush 路径**即可；真要修需单独开 issue 加固 flush 链路（影响范围更广）。
 
 ### Phase 2 PR E — 清理
 

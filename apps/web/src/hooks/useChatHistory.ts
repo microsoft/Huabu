@@ -89,6 +89,16 @@ export function useChatHistory(setIsLoading: (loading: boolean) => void): void {
               };
             }
 
+            if (m.role === 'prepared-prompt') {
+              return {
+                id,
+                role: 'prepared-prompt' as const,
+                prompt: m.prompt,
+                agentAlias: m.agentAlias,
+                ...(m.error ? { error: m.error } : {}),
+              };
+            }
+
             const msg = m as {
               role: 'user' | 'assistant';
               content: string;

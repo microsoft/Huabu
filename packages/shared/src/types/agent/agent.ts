@@ -76,6 +76,51 @@ export interface AgentErrorEventData {
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface AgentEndEventData {}
 
+/**
+ * Structured rewrite of a raw user message for an external (ACP) agent.
+ *
+ * The preprocessor reads the user's raw input plus the canvas state and
+ * produces a "project-manager" briefing: a focused `task` description and
+ * a curated `fileRefs` list of paths the external agent should consider
+ * `Read`ing. Path-based (rather than node-id-based) so it lines up
+ * directly with the Phase 3 `fs/read_text_file` capability and is
+ * agent-agnostic.
+ *
+ * Paths are relative to the canvas directory on disk
+ * (`<canvasDir>/canvas.json`, `<canvasDir>/nodes/<safeLabel>.md`, …).
+ */
+export interface ExternalAgentPrompt {
+  /** Rewritten task description handed to the external agent. */
+  task: string;
+  /** Files the external agent is suggested to read on demand. */
+  fileRefs: Array<{
+    /** Path relative to the canvas directory. */
+    path: string;
+    /** Why the agent should look at this file (optional, ≤ ~80 chars). */
+    reason?: string;
+  }>;
+}
+
+/**
+ * `event: prepared_prompt` — emitted once per external-agent turn,
+ * before the first `text_delta`, when Huabu's preprocessor has
+ * rewritten the user's raw message into a structured
+ * {@link ExternalAgentPrompt}. Internal-agent turns never emit this.
+ *
+ * When the preprocessor fails the server still emits this event with
+ * `prompt: null` + an `error` description so the UI can replace its
+ * pending "Preparing…" placeholder with a concrete failure note
+ * (and Huabu falls back to forwarding the raw user message).
+ */
+export interface AgentPreparedPromptEventData {
+  /** Structured prompt produced by the preprocessor, or `null` on failure. */
+  prompt: ExternalAgentPrompt | null;
+  /** Short alias of the bound external agent (e.g. `'claude'`). */
+  agentAlias: string;
+  /** Reason the preprocessor failed; only set when `prompt === null`. */
+  error?: string;
+}
+
 /** Discriminated union of every SSE frame emitted by `/api/agent`. */
 export type AgentStreamEvent =
   | { type: 'meta'; data: AgentMetaEventData }
@@ -83,6 +128,7 @@ export type AgentStreamEvent =
   | { type: 'thinking_delta'; data: AgentThinkingDeltaEventData }
   | { type: 'tool_start'; data: AgentToolStartEventData }
   | { type: 'tool_result'; data: AgentToolResultEventData }
+  | { type: 'prepared_prompt'; data: AgentPreparedPromptEventData }
   | { type: 'done'; data: AgentDoneEventData }
   | { type: 'error'; data: AgentErrorEventData }
   | { type: 'end'; data: AgentEndEventData };
@@ -99,6 +145,7 @@ export const AGENT_SSE_EVENTS = {
   ThinkingDelta: 'thinking_delta',
   ToolStart: 'tool_start',
   ToolResult: 'tool_result',
+  PreparedPrompt: 'prepared_prompt',
   Done: 'done',
   Error: 'error',
   End: 'end',

@@ -361,6 +361,13 @@ interface StreamEventContext {
     commands: CanvasCommand[],
     toolMsgId: string | undefined,
   ) => void;
+  /**
+   * ID of the pending PreparedPromptCard message inserted by
+   * `startStream` for external-agent turns. When the server emits its
+   * `prepared_prompt` event we update this message in place; when
+   * absent (reconnect path) we append a fresh one.
+   */
+  preparedPromptId?: string;
 }
 
 /**
@@ -489,6 +496,36 @@ export function handleStreamEvent(
         }
         ctx.onCanvasCommands?.(result.commands, toolMsgId);
       }
+    }
+  } else if (event.type === 'prepared_prompt') {
+    // External-agent only: the server's preprocessor finished. If
+    // startStream already inserted a pending placeholder we update it
+    // in place; otherwise (reconnect path) we append a fresh one.
+    const pendingId = ctx.preparedPromptId;
+    const existing = pendingId
+      ? useChatStore.getState().messages.find((m) => m.id === pendingId)
+      : undefined;
+    if (existing) {
+      updateMessage(pendingId!, (m) =>
+        m.role === 'prepared-prompt'
+          ? {
+              ...m,
+              prompt: event.data.prompt,
+              agentAlias: event.data.agentAlias,
+              ...(event.data.error
+                ? { error: event.data.error }
+                : { error: undefined }),
+            }
+          : m,
+      );
+    } else {
+      addMessage({
+        id: createId('preparedPrompt'),
+        role: 'prepared-prompt',
+        prompt: event.data.prompt,
+        agentAlias: event.data.agentAlias,
+        ...(event.data.error ? { error: event.data.error } : {}),
+      });
     }
   }
 }
@@ -657,6 +694,24 @@ export function useAgentStream(): UseAgentStreamReturn {
       // picked for this thread.
       const agentBinding = useChatStore.getState().agentBinding;
 
+      // External-binding only: insert a pending "Preparing prompt …"
+      // card immediately so the user sees something the moment they
+      // hit send. The server's `prepared_prompt` event will populate
+      // this same message in place. If preprocessing fails server-side
+      // we get a `prepared_prompt` with `error` set — still the same
+      // slot, no flash. We capture its ID into the StreamEventContext
+      // so `handleStreamEvent` knows which message to update.
+      let preparedPromptId: string | undefined;
+      if (agentBinding?.kind === 'external') {
+        preparedPromptId = createId('preparedPrompt');
+        addMessage({
+          id: preparedPromptId,
+          role: 'prepared-prompt',
+          prompt: null,
+          agentAlias: agentBinding.alias,
+        });
+      }
+
       try {
         await agentApi.streamMessage(
           prompt,
@@ -667,6 +722,7 @@ export function useAgentStream(): UseAgentStreamReturn {
               handleStreamEvent(event, {
                 assistantId,
                 toolQueue: toolMsgQueue,
+                preparedPromptId,
                 onCanvasCommands: (commands) => {
                   if (agentMode === 'operate') {
                     const newResources = extractResourcesFromCommands(commands);
