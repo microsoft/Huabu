@@ -26,19 +26,25 @@ export class ProviderManager {
    * Generate a short semantic label for an image using LLM vision.
    * Returns undefined if generation fails or produces an invalid result.
    *
-   * `resolveArtifact` maps a canvas-scoped URL filename (the URL key) to an
-   * absolute on-disk path, or `null` if the artifact is unknown. This keeps
-   * the provider decoupled from storage internals while still honouring the
-   * id→displayName indirection used by the artifact manifest.
+   * `resolveArtifact` maps `(canvasId, filename)` to an absolute on-disk
+   * path, or `null` if the artifact is unknown. `defaultCanvasId` is
+   * used when `src` is a bare artifact key (the canonical form persisted
+   * by the front-end after the bare-key migration) instead of a full
+   * canvas-scoped URL.
    */
   async generateImageLabel(
     src: string,
     resolveArtifact: (canvasId: string, filename: string) => string | null,
+    defaultCanvasId: string | null = null,
   ): Promise<string | undefined> {
     try {
       // Resolve URL → data URL. The local artifact branch reads the file
       // via the resolver; remote / data URLs are returned as-is.
-      const dataUrl = await resolveArtifactImageUrl(src, resolveArtifact);
+      const dataUrl = await resolveArtifactImageUrl(
+        src,
+        resolveArtifact,
+        defaultCanvasId,
+      );
       const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
       if (!match) return undefined;
 

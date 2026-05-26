@@ -14,6 +14,9 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 
+import useCanvasStore from '@/store/canvasStore';
+import { usePreviewStore } from '@/store/previewStore';
+
 /**
  * A rectangle in flow (canvas) coordinates. For point-based anchors
  * (e.g. an edge midpoint) pass `width: 0` and `height: 0`.
@@ -81,6 +84,22 @@ export function CanvasFloatingPopover({
   const { zoom, x: vpX, y: vpY } = useViewport();
   const domNode = useStore((s) => s.domNode);
 
+  // Hide whenever the canvas is fully replaced by the ExpandedNodePanel
+  // (node edit or preview in 'replace' mode). The canvas itself is kept
+  // mounted at 0% width in that state, so anchor rectangles still resolve
+  // to on-screen coordinates and the portal'd toolbar would otherwise
+  // leak through on top of the expanded panel.
+  const canvasReplaced = useCanvasStore(
+    (s) => s.expandedNodeId !== null && s.expandMode === 'replace',
+  );
+  const previewReplaced = usePreviewStore(
+    (s) =>
+      s.previewType !== null &&
+      s.previewData !== null &&
+      s.expandMode === 'replace',
+  );
+  const hiddenByExpandedPanel = canvasReplaced || previewReplaced;
+
   // Virtual reference element: Floating UI calls `getBoundingClientRect`
   // on every position recalculation, so we always read fresh values
   // from the live React Flow container. The identity changes whenever
@@ -129,7 +148,7 @@ export function CanvasFloatingPopover({
     refs.setPositionReference(virtualReference);
   }, [refs, virtualReference]);
 
-  if (!open || !virtualReference) return null;
+  if (!open || !virtualReference || hiddenByExpandedPanel) return null;
 
   return createPortal(
     <div

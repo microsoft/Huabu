@@ -26,6 +26,7 @@
  *   host-specific drain — see `runWebPostEffects`).
  */
 
+import { applyStructuredFrameRelayout } from './autoLayout/gridLayout.js';
 import { HANDLERS, COMMAND_META } from './commands/index.js';
 import { fitFrames, type NestableNode } from './frame/index.js';
 
@@ -168,14 +169,25 @@ export function executeCanvasCommands(
   // Runs when either the user has auto-layout enabled OR the caller
   // explicitly opted in (e.g. agent batches must always refit frames
   // because the LLM cannot predict rendered dimensions accurately).
+  //
+  // Order: structured (`column` / `row`) frames first — they reposition
+  // children into tracks and set their own content-driven size — then
+  // the generic bounding-box `fitFrames` pass, which is a no-op for
+  // frames the structured pass already handled (children are placed
+  // exactly at `FRAME_PADDING` so the box matches) but still cascades
+  // to ancestor frames so outer wrappers stay correctly sized.
   // ------------------------------------------------------------------
   if (
     anyApplied &&
     allAffectedFrameIds.size > 0 &&
     (state.autoLayoutEnabled || options.forceFitFrames)
   ) {
+    const structured = applyStructuredFrameRelayout(
+      currentNodes,
+      allAffectedFrameIds,
+    );
     currentNodes = fitFrames(
-      currentNodes as NestableNode[],
+      structured.nodes as NestableNode[],
       allAffectedFrameIds,
     );
   }

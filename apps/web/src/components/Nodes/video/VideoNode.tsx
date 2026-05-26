@@ -16,6 +16,7 @@ export type VideoNodeType = Node<CanvasVideoNodeData, 'video'>;
 export const VideoNode = memo(
   ({ id, data, selected }: NodeProps<VideoNodeType>) => {
     const openExpanded = useCanvasStore((s) => s.openExpanded);
+    const canvasId = useCanvasStore((s) => s.canvasId);
 
     const VideoActions = (
       <FloatingToolbar.ActionButton
@@ -49,7 +50,7 @@ export const VideoNode = memo(
             ) : data?.src ? (
               <>
                 <video
-                  src={resolveArtifactUrl(data.src)}
+                  src={resolveArtifactUrl(data.src, canvasId)}
                   className="pointer-events-none h-full w-full object-contain select-none"
                   preload="metadata"
                   muted

@@ -137,11 +137,12 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
             collapse control. All three buttons use the pill shape so
             they read as a uniform floating control group on top of the
             canvas. */}
-        <div className="pointer-events-auto absolute top-3 right-3 z-30 flex items-center gap-1">
+        <div className="pointer-events-auto absolute top-3 right-2 z-30 flex items-center gap-1">
           {onOpenHelp && (
             <Button
               variant="outline"
               shape="pill"
+              size="lg"
               iconOnly
               onClick={onOpenHelp}
               title="Keyboard Shortcuts (?)"
@@ -150,12 +151,13 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
               <HelpCircle />
             </Button>
           )}
-          <SettingsPopover variant="outline" shape="pill" />
+          <SettingsPopover variant="outline" shape="pill" size="lg" />
           {onToggleChat && (
             <Button
               variant="outline"
               shape="pill"
               iconOnly
+              size="lg"
               onClick={onToggleChat}
               title={isChatCollapsed ? 'Open Chat' : 'Close Chat'}
               aria-label={
@@ -189,11 +191,16 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
         </div>
       )}
 
-      {/* Expanded panel – rendered only when needed */}
+      {/* Expanded panel – rendered only when needed. In replace mode we
+          pin it above the canvas's floating popovers (which portal to
+          body at z-index 1000) so canvas toolbars from the still-mounted
+          underlying canvas can never leak through on top of the panel. */}
       {hasExpanded && (
         <div
           className={
-            isReplace ? 'relative z-40 h-full w-full' : 'h-full min-w-0 flex-1'
+            isReplace
+              ? 'relative z-[1100] h-full w-full'
+              : 'h-full min-w-0 flex-1'
           }
         >
           <ExpandedNodePanel

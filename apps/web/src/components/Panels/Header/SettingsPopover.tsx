@@ -15,6 +15,7 @@ interface SettingsPopoverProps {
    */
   variant?: 'ghost' | 'outline';
   shape?: 'default' | 'pill';
+  size?: 'sm' | 'md' | 'lg';
 }
 
 /**
@@ -24,6 +25,7 @@ interface SettingsPopoverProps {
 export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
   variant = 'ghost',
   shape = 'default',
+  size = 'md',
 }) => {
   const llmInit = useLLMStore((s) => s.init);
   const autoLayoutEnabled = useCanvasStore((s) => s.autoLayoutEnabled);
@@ -67,6 +69,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
         <Button
           variant={variant}
           shape={shape}
+          size={size}
           iconOnly
           title="Settings"
           onClick={handleToggle}

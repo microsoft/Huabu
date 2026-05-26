@@ -14,7 +14,7 @@ export type ButtonProps = {
   variant?: ButtonVariant;
   shape?: ButtonShape;
   tone?: ButtonTone;
-  size?: 'sm' | 'md';
+  size?: 'sm' | 'md' | 'lg';
   iconOnly?: boolean;
   className?: string;
   tooltipWrapperClassName?: string;
@@ -52,16 +52,19 @@ const shapeClasses: Record<ButtonShape, string> = {
 const sizeClasses: Record<NonNullable<ButtonProps['size']>, string> = {
   sm: 'px-2.5 py-1 text-xs gap-1.5',
   md: 'px-3 py-2 text-sm gap-2 font-medium',
+  lg: 'px-4 py-2.5 text-base gap-2 font-medium',
 };
 
 const iconSizeClasses: Record<NonNullable<ButtonProps['size']>, string> = {
   sm: '[&_svg]:h-3.25 [&_svg]:w-3.25',
   md: '[&_svg]:h-4 [&_svg]:w-4',
+  lg: '[&_svg]:h-5 [&_svg]:w-5',
 };
 
 const iconOnlySizeClasses: Record<NonNullable<ButtonProps['size']>, string> = {
   sm: 'p-1',
   md: 'p-1.5',
+  lg: 'p-2',
 };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(

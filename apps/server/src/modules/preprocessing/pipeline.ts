@@ -227,6 +227,7 @@ export async function runPipeline(
           plan,
           deps.provider,
           resolveArtifactForCanvas,
+          deps.store.canvasId,
         );
         if (has('generate_label')) usedCapabilities.push('generate_label');
         if (has('generate_summary')) usedCapabilities.push('generate_summary');

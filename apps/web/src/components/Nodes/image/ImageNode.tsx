@@ -16,6 +16,7 @@ export type ImageNodeType = Node<CanvasImageNodeData, 'image'>;
 export const ImageNode = memo(
   ({ id, data, selected }: NodeProps<ImageNodeType>) => {
     const openExpanded = useCanvasStore((s) => s.openExpanded);
+    const canvasId = useCanvasStore((s) => s.canvasId);
 
     const ImageActions = (
       <FloatingToolbar.ActionButton
@@ -48,7 +49,7 @@ export const ImageNode = memo(
               />
             ) : data?.src ? (
               <img
-                src={resolveArtifactUrl(data.src)}
+                src={resolveArtifactUrl(data.src, canvasId)}
                 alt={data.label || 'Node image'}
                 className="pointer-events-none h-full w-full rounded-lg border-0 object-contain"
               />

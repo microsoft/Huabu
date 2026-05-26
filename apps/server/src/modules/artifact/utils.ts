@@ -13,24 +13,44 @@ export { ARTIFACT_URL_REGEX, artifactApiPath } from '@sediment/shared';
 /**
  * Resolve an artifact image URL to a base64 data URL.
  *
- * Local canvas-scoped artifact URLs are read from disk and converted to
- * inline data URLs so the LLM API can see them. Already-valid data URLs or
- * remote URLs are returned as-is. The `resolvePath` callback may return
- * `null` to signal that the URL key has no matching stored artifact (e.g.
- * a stale URL after the file was deleted), in which case the original URL
- * is returned unchanged.
+ * Three input shapes are recognised:
+ *
+ *   1. Bare artifact key (`<artifactId><ext>`) — combined with
+ *      `defaultCanvasId` to locate the file. This is the canonical form
+ *      that the front-end persists in `data.src` after the bare-key
+ *      migration.
+ *   2. Full canvas-scoped URL (`/api/canvas/<id>/artifact/<key>`) —
+ *      `canvasId` is read directly from the URL. Legacy data, but still
+ *      flowing in from external sources / older clients.
+ *   3. Anything else (data: URLs, absolute http(s) URLs, unrelated
+ *      paths) — returned verbatim.
+ *
+ * The `resolvePath` callback may return `null` to signal that the URL
+ * key has no matching stored artifact (e.g. a stale URL after the file
+ * was deleted), in which case the original URL is returned unchanged.
  */
 export async function resolveArtifactImageUrl(
   url: string,
   resolvePath: (canvasId: string, filename: string) => string | null,
+  defaultCanvasId: string | null = null,
 ): Promise<string> {
-  if (url.startsWith('data:')) return url;
+  if (!url || url.startsWith('data:')) return url;
+
+  let canvasId: string | null = null;
+  let filename: string | null = null;
 
   const match = ARTIFACT_URL_REGEX.exec(url);
-  if (!match) return url;
+  if (match) {
+    canvasId = match[1] ?? null;
+    filename = path.basename(match[2] ?? '');
+  } else if (defaultCanvasId && !/^https?:/i.test(url) && !url.includes('/')) {
+    // Bare artifact key — pair it with the caller-supplied canvas id.
+    canvasId = defaultCanvasId;
+    filename = url;
+  }
 
-  const canvasId = match[1];
-  const filename = path.basename(match[2]);
+  if (!canvasId || !filename) return url;
+
   const filePath = resolvePath(canvasId, filename);
   if (!filePath) return url;
 

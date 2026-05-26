@@ -16,15 +16,31 @@ export { parseArtifactUrl };
 type ArtifactType = 'image' | 'pdf' | 'video';
 
 /**
- * Resolve an artifact path to a full URL.
+ * Resolve a stored artifact reference into a fully-qualified URL that
+ * the browser can fetch.
  *
- * Handles both legacy absolute URLs and relative API paths.
- * Legacy fix: earlier versions stored absolute URLs with a hardcoded port
- * (e.g. `http://localhost:3000/api/...`). When the server port changed
- * those URLs broke. Re-base any absolute artifact URL onto the current
- * BASE_URL so existing data keeps working.
+ * Three input shapes are accepted, in priority order:
+ *
+ *  1. **Bare artifact key** (`<artifactId><ext>`, e.g. `art_abc.pdf`) —
+ *     the canonical form that the front-end now persists in
+ *     `data.src` / `data.coverUrl`. Combined with `canvasId` to build
+ *     `/api/canvas/<canvasId>/artifact/<key>`.
+ *  2. **Canvas-scoped API path** (`/api/canvas/<id>/artifact/<key>`) —
+ *     legacy data persisted before the bare-key migration. Re-based
+ *     onto the current API origin.
+ *  3. **Absolute URL** (`http(s)://…`) — either an external resource or
+ *     a legacy absolute artifact URL whose hardcoded port has drifted.
+ *     For the artifact case we strip the origin and re-base; everything
+ *     else is returned untouched.
+ *
+ * `data:` URLs are passed through unchanged.
+ *
+ * `canvasId` is optional only to keep older call sites compiling — when
+ * a bare key is passed without a canvas id we fall back to the input
+ * verbatim so the caller can see the misconfiguration in the network
+ * panel rather than silently rendering nothing.
  */
-export function resolveArtifactUrl(src: string): string {
+export function resolveArtifactUrl(src: string, canvasId?: string): string {
   if (!src) return src;
   if (src.startsWith('data:')) return src;
 
@@ -43,7 +59,13 @@ export function resolveArtifactUrl(src: string): string {
     return src;
   }
 
-  return `${API_CONFIG.BASE_URL}${src}`;
+  if (src.startsWith('/api/')) {
+    return `${API_CONFIG.BASE_URL}${src}`;
+  }
+
+  // Bare artifact key path: needs a canvas id to construct the URL.
+  if (!canvasId) return src;
+  return `${API_CONFIG.BASE_URL}/api/canvas/${canvasId}/artifact/${src}`;
 }
 
 async function uploadArtifact(
@@ -89,26 +111,25 @@ export { apiUrl };
 
 /**
  * Copy an artifact from one canvas into another. Returns the new
- * artifact URL (relative `/api/canvas/<dstCanvasId>/artifact/<id><ext>`)
- * which the caller can drop into the pasted node's `data.src` /
- * `data.coverUrl`.
+ * artifact storage key (the bare `<id><ext>` filename) which the caller
+ * can drop into the pasted node's `data.src` / `data.coverUrl`.
  *
- * Returns `null` for non-artifact URLs (caller should leave them
- * untouched). Returns the input unchanged when the source canvas equals
- * the destination canvas, since a same-canvas paste keeps sharing the
+ * Returns `null` when `srcKey` is empty (caller should leave the field
+ * untouched). Returns the original key unchanged when `srcCanvasId`
+ * equals `dstCanvasId`, since a same-canvas paste keeps sharing the
  * original artifact (no need to duplicate the file on disk).
  */
 export async function cloneArtifactToCanvas(
-  srcUrl: string,
+  srcCanvasId: string,
+  srcKey: string,
   dstCanvasId: string,
 ): Promise<string | null> {
-  const parsed = parseArtifactUrl(srcUrl);
-  if (!parsed) return null;
-  if (parsed.canvasId === dstCanvasId) return srcUrl;
+  if (!srcKey) return null;
+  if (srcCanvasId === dstCanvasId) return srcKey;
 
   const body: CloneArtifactRequest = {
-    srcCanvasId: parsed.canvasId,
-    srcKey: parsed.key,
+    srcCanvasId,
+    srcKey,
   };
   const data = await apiFetch<ArtifactUploadResponse>(
     routes.canvasArtifactCloneFrom(dstCanvasId),

@@ -1,5 +1,6 @@
 /**
  * One-shot rename migration.
+ * @deprecated Launch-only legacy migration.
  *
  *   V2 → V3: stable-id directories / files renamed to label-derived names,
  *            node frontmatter gains `id:`.

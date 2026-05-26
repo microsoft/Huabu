@@ -474,7 +474,10 @@ export const Canvas: React.FC<CanvasProps> = ({
   // When a node is expanded in split mode, pan the canvas so the node stays visible.
   useEffect(() => {
     if (!expandedNodeId || expandMode !== 'split') return;
-    // Wait for the canvas container to finish resizing before fitting.
+    // Wait for the canvas container's `data-animate-width` CSS transition
+    // (220ms, see index.css) to fully settle before fitting — otherwise
+    // React Flow still has the pre-transition (larger) container size and
+    // the node ends up centered in the old viewport instead of the new one.
     const timer = setTimeout(() => {
       rfInstanceRef.current?.fitView({
         nodes: [{ id: expandedNodeId }],
@@ -482,7 +485,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         maxZoom: rfInstanceRef.current.getZoom(),
         padding: 0.15,
       });
-    }, 100);
+    }, 260);
     return () => clearTimeout(timer);
   }, [expandedNodeId, expandMode]);
 

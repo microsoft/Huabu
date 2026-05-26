@@ -4,9 +4,8 @@
 
 import type { EdgeStyle } from './edge.js';
 import type { Point } from './layout.js';
-import type { CanvasNodeType, NodeData } from './node.js';
+import type { CanvasNodeType, FrameLayoutMode, NodeData } from './node.js';
 import type { PrefixedId } from '../../utils/id.js';
-
 /**
  * Canvas node ids follow the standard `node-<uuid>` convention.
  */
@@ -153,6 +152,24 @@ export type CanvasCommand =
   | { type: 'SET_NODE_LOCKED'; items: CanvasNodeLockUpdate[] }
   | {
       /**
+       * Set a frame's child-layout mode. When switching into `column`
+       * or `row`, the engine auto-assigns each child to a track and
+       * resizes the frame to fit its content; when switching to `free`
+       * children keep their current positions but the engine still
+       * runs a final fit-to-content pass.
+       *
+       * `gridCount` is honoured only for `column` / `row` modes; it is
+       * clamped to `[FRAME_GRID_MIN_COUNT, FRAME_GRID_MAX_COUNT]`. When
+       * omitted while staying in a grid mode, the frame keeps its
+       * previously-stored `gridCount` (or `FRAME_GRID_DEFAULT_COUNT`).
+       */
+      type: 'SET_FRAME_LAYOUT';
+      frameId: CanvasNodeId;
+      mode: FrameLayoutMode;
+      gridCount?: number;
+    }
+  | {
+      /**
        * Convert a node between `text` and `note` types. UI-only — used by the
        * one-click toggle in the node toolbar after a paste lands in the
        * "wrong" container. Both types share a `content` string field, so the
@@ -213,6 +230,7 @@ export const AGENT_CANVAS_COMMAND_TYPES = [
   'ALIGN_NODES',
   'DISTRIBUTE_NODES',
   'CREATE_QUESTION',
+  'SET_FRAME_LAYOUT',
 ] as const satisfies readonly AgentCanvasCommandType[];
 
 // Compile-time guard: `AGENT_CANVAS_COMMAND_TYPES` must list every
