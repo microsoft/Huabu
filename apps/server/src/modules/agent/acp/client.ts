@@ -22,11 +22,14 @@
  *
  * Design notes:
  *
- *   - One AcpAgentClient instance owns one ACP session. Don't reuse across
- *     sessions; construct a new one per debug invocation.
+ *   - One AcpAgentClient instance can own multiple ACP sessions on a
+ *     single agentlet `AgentConnection`. Each session is keyed by the
+ *     sessionId returned by `newSession()`. Use this when multiple chat
+ *     threads share one external agent.
  *   - Registers a single `onMessage` handler on the connection that routes
- *     responses to pending request promises and notifications to the
- *     in-flight `prompt()` callback.
+ *     responses to pending request promises and `session/update`
+ *     notifications to the per-session update handler installed by the
+ *     in-flight `prompt(sessionId, ...)` call.
  *   - Any incoming JSON-RPC request from the agent is replied to with
  *     -32601 Method not implemented (until the capability router is
  *     wired up).
@@ -84,7 +87,13 @@ type SessionUpdateHandler = (update: AcpSessionUpdate) => void;
 export class AcpAgentClient {
   private nextId = 1;
   private readonly pending = new Map<number, PendingRequest>();
-  private currentUpdateHandler: SessionUpdateHandler | null = null;
+  /**
+   * Per-session update handlers keyed by sessionId. A handler is installed
+   * for the duration of a `prompt()` call and removed in `finally`. Multiple
+   * sessions on the same client can be in flight concurrently as long as
+   * they have distinct sessionIds.
+   */
+  private readonly updateHandlers = new Map<string, SessionUpdateHandler>();
   private closed = false;
   private readonly logger: NonNullable<AcpAgentClientOptions['logger']>;
 
@@ -139,10 +148,12 @@ export class AcpAgentClient {
     onUpdate: SessionUpdateHandler,
     signal?: AbortSignal,
   ): Promise<AcpPromptResult> {
-    if (this.currentUpdateHandler) {
-      throw new Error('AcpAgentClient: another prompt is already in flight');
+    if (this.updateHandlers.has(sessionId)) {
+      throw new Error(
+        `AcpAgentClient: another prompt is already in flight for session ${sessionId}`,
+      );
     }
-    this.currentUpdateHandler = onUpdate;
+    this.updateHandlers.set(sessionId, onUpdate);
 
     const abortListener = () => {
       void this.cancel(sessionId).catch((e) => {
@@ -161,7 +172,7 @@ export class AcpAgentClient {
       })) as AcpPromptResult;
       return result;
     } finally {
-      this.currentUpdateHandler = null;
+      this.updateHandlers.delete(sessionId);
       signal?.removeEventListener('abort', abortListener);
     }
   }
@@ -178,7 +189,12 @@ export class AcpAgentClient {
     const err = new Error(`AcpAgentClient closed: ${reason}`);
     for (const p of this.pending.values()) p.reject(err);
     this.pending.clear();
-    this.currentUpdateHandler = null;
+    this.updateHandlers.clear();
+  }
+
+  /** True if this client has been closed via `shutdown()`. */
+  get isClosed(): boolean {
+    return this.closed;
   }
 
   // ── Internal: JSON-RPC plumbing ─────────────────────────────────────────
@@ -245,9 +261,21 @@ export class AcpAgentClient {
     // 2a) Notification (no id) — currently only session/update is interesting.
     if (!('id' in msg)) {
       if (msg.method === 'session/update') {
-        const params = (msg.params ?? {}) as { update?: AcpSessionUpdate };
-        if (params.update && this.currentUpdateHandler) {
-          this.currentUpdateHandler(params.update);
+        const params = (msg.params ?? {}) as {
+          sessionId?: string;
+          update?: AcpSessionUpdate;
+        };
+        const sessionId = params.sessionId;
+        if (params.update && typeof sessionId === 'string') {
+          const handler = this.updateHandlers.get(sessionId);
+          if (handler) {
+            handler(params.update);
+          } else {
+            this.logger.debug(
+              { sessionId, sessionUpdate: params.update.sessionUpdate },
+              'session/update for unknown session — no handler registered',
+            );
+          }
         }
         return;
       }

@@ -21,6 +21,7 @@ import {
 import { encode } from 'gpt-tokenizer';
 
 import { loadAgent, renderAgentTemplate } from '../../prompt/agent-loader.js';
+import { runAcpAgent } from '../agent/acp/service.js';
 import { runAgent } from '../agent/agent.service.js';
 import { buildAgentNodeRef } from '../agent/node-ref.js';
 import { loadContext, saveContext } from '../agent/store/chat-store.js';
@@ -877,9 +878,8 @@ const agentRoutes: FastifyPluginAsync = async (
     } = parsed.data;
 
     // Log the thread→agent binding so external dispatches are visible
-    // in the server log. External-bound requests still fall through to
-    // the built-in agent loop here — actual ACP dispatch is not wired
-    // up at this layer yet.
+    // in the server log. When `kind === 'external'`, the dispatch below
+    // routes to `runAcpAgent` instead of the built-in pi-agent-core loop.
     if (agentBinding && agentBinding.kind === 'external') {
       request.log.info(
         {
@@ -888,7 +888,7 @@ const agentRoutes: FastifyPluginAsync = async (
           alias: agentBinding.alias,
           agentletAgentId: agentBinding.agentletAgentId,
         },
-        'agent.route: external agentBinding received (passthrough — not yet dispatched to ACP)',
+        'agent.route: external agentBinding → ACP dispatch',
       );
     }
 
@@ -1095,14 +1095,31 @@ const agentRoutes: FastifyPluginAsync = async (
     socket?.once('close', onDisconnect);
 
     try {
-      const stream = runAgent({
-        scope: mode,
-        canvasId,
-        context,
-        logger: request.log,
-        maxIterations: 20,
-        signal: abortController.signal,
-      });
+      // Route dispatch: external bindings go to `runAcpAgent`, everything
+      // else (including missing/`internal` bindings) goes to the built-in
+      // pi-agent-core loop. Both paths yield the same `AgentStreamEvent`
+      // shape so the for-await loop below is binding-agnostic.
+      const stream: AsyncIterable<AgentStreamEvent> =
+        agentBinding?.kind === 'external'
+          ? runAcpAgent({
+              binding: {
+                alias: agentBinding.alias,
+                agentletAgentId: agentBinding.agentletAgentId,
+              },
+              message: userContent,
+              threadId: resolvedThreadId,
+              context,
+              signal: abortController.signal,
+              logger: request.log,
+            })
+          : runAgent({
+              scope: mode,
+              canvasId,
+              context,
+              logger: request.log,
+              maxIterations: 20,
+              signal: abortController.signal,
+            });
 
       // Track the latest agent error so we can persist it AFTER the stream
       // exits. We can't push into `context.messages` mid-loop because the
