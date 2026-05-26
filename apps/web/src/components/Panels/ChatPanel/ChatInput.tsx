@@ -12,7 +12,11 @@ import { Button } from '../../Common/Button';
 import { NodeRef } from '../../Common/NodeRef';
 import { Tooltip } from '../../Common/Tooltip';
 
-import type { AgentMode } from '@sediment/shared';
+import type {
+  AcpAgentSummary,
+  AgentBinding,
+  AgentMode,
+} from '@sediment/shared';
 
 interface ChatInputProps {
   value: string;
@@ -22,6 +26,20 @@ interface ChatInputProps {
   isStreaming?: boolean;
   mode: AgentMode;
   onModeChange: (mode: AgentMode) => void;
+  /** Thread → agent binding. See ChatPanel for sourcing rules. */
+  binding: AgentBinding;
+  onBindingChange: (binding: AgentBinding) => void;
+  /** Currently-connected ACP agents (from `useAcpAgents`). */
+  connectedAgents: AcpAgentSummary[];
+  /** Re-fetch the connected-agents list (called on selector open + Refresh button). */
+  onRefreshAgents?: () => void | Promise<void>;
+  /** True while a refresh is in flight. */
+  refreshingAgents?: boolean;
+  /**
+   * When true, the mode/binding picker is locked. Independent of
+   * `disabled`, which only suppresses input submission.
+   */
+  bindingLocked?: boolean;
   disabled?: boolean;
   placeholder?: string;
 }
@@ -34,6 +52,12 @@ export const ChatInput = ({
   isStreaming = false,
   mode,
   onModeChange,
+  binding,
+  onBindingChange,
+  connectedAgents,
+  onRefreshAgents,
+  refreshingAgents = false,
+  bindingLocked = false,
   disabled = false,
   placeholder = 'Asking anything here...',
 }: ChatInputProps) => {
@@ -462,8 +486,14 @@ export const ChatInput = ({
           <div className="mt-2 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <ModeSelector
-                value={mode}
-                onChange={onModeChange}
+                mode={mode}
+                onModeChange={onModeChange}
+                binding={binding}
+                onBindingChange={onBindingChange}
+                connectedAgents={connectedAgents}
+                onRefreshAgents={onRefreshAgents}
+                refreshing={refreshingAgents}
+                locked={bindingLocked}
                 disabled={disabled}
               />
               <ContextUsageRing draftText={value} isStreaming={isStreaming} />

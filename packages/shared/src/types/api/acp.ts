@@ -1,17 +1,14 @@
 /**
  * ACP (External-agent bridge) API wire types.
  *
- * Phase 2 / PR A — read-only visibility surface for the agentlet bridge.
- * Server enumerates currently-connected external agents; the chat UI shows
- * a status indicator and (later, PR B) feeds the `@`-autocomplete list.
+ * Read-only visibility surface for the agentlet bridge. Server
+ * enumerates currently-connected external agents; the chat UI shows a
+ * status indicator and feeds the agent picker in the ChatPanel.
  *
  * Schemas live here (and not in `agent.ts`) because ACP is a separate
  * subsystem that may grow its own endpoints (`/api/acp/agents`,
  * eventually `/api/acp/events` SSE). Keeping them isolated lets us
  * delete the file cleanly if ACP is ever removed.
- *
- * See docs/huabu-acp-client-plan.md §Phase 2 D1 for the alias
- * derivation rule and §Phase 2 PR breakdown.
  */
 
 /**
@@ -49,3 +46,34 @@ export interface AcpAgentsResponse {
    */
   enabled: boolean;
 }
+
+// ─── Thread → agent binding ────────────────────────────────────────────
+//
+// 1 chat thread is permanently bound to a single agent for its entire
+// lifetime. The binding is set via the ChatPanel's ModeSelector dropdown
+// and travels with every agent request.
+
+/**
+ * Internal binding — chat thread talks to Huabu's built-in agent.
+ * Default for every newly-created thread.
+ */
+export interface AgentBindingInternal {
+  kind: 'internal';
+}
+
+/**
+ * External binding — chat thread is bound to a specific ACP-connected agent.
+ * `alias` is the short name shown in the UI. `agentletAgentId` is the
+ * opaque agentlet connection key that the server uses to dispatch
+ * `session/prompt` (matches `AcpAgentSummary.agentId`).
+ *
+ * Persisted across page reloads via the chat store; cleared when the
+ * thread is reset (`clearMessages`).
+ */
+export interface AgentBindingExternal {
+  kind: 'external';
+  alias: string;
+  agentletAgentId: string;
+}
+
+export type AgentBinding = AgentBindingInternal | AgentBindingExternal;

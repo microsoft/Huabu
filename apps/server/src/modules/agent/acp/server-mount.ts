@@ -15,8 +15,7 @@ import type { FastifyInstance } from 'fastify';
  * Note: this path uses Sediment's standard `/api` prefix but bypasses Fastify's
  * route/hook chain because it's attached to the raw HTTP server's `upgrade`
  * event. Basic Auth (if enabled) does NOT protect this endpoint — agentlet's
- * own token check inside bridge/hello is the auth boundary. See
- * docs/huabu-acp-client-plan.md §3.4 for the security model.
+ * own token check inside bridge/hello is the auth boundary.
  */
 export const ACP_UPGRADE_PATH = '/api/acp/agent';
 
@@ -25,9 +24,8 @@ let instance: AgentletServer | null = null;
 export interface MountAcpOptions {
   /**
    * Override the default authenticator. By default we delegate to the
-   * process-wide `TokenStore` (see `./token-store.ts`), which Phase 1 seeds
-   * from `SEDIMENT_ACP_DEV_TOKEN`. Phase 3 will replace the store with a
-   * canvas-scoped backing.
+   * process-wide `TokenStore` (see `./token-store.ts`), which seeds
+   * from `SEDIMENT_ACP_DEV_TOKEN`.
    */
   authenticate?: AgentletServerOptions['authenticate'];
 }
@@ -36,8 +34,6 @@ export interface MountAcpOptions {
  * Embed `@agentlet/server` into the running Fastify HTTP server so external
  * ACP agents (launched via the user's local `agentlet` CLI) can connect over
  * WebSocket. Idempotent — calling twice returns the same instance.
- *
- * Design details: see docs/huabu-acp-client-plan.md §3.1 (server-mount.ts).
  */
 export function mountAgentletServer(
   app: FastifyInstance,

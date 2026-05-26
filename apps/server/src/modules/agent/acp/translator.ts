@@ -3,16 +3,14 @@
  * `AgentStreamEvent` shape so existing SSE consumers don't need to know about
  * the ACP wire format.
  *
- * Phase 1 scope: only text content. Tool calls, plans, mode updates, and
+ * Current scope: only text content. Tool calls, plans, mode updates, and
  * non-text content blocks are ignored (returns null) and logged upstream.
- * Phase 2+ will extend this to tool_start / tool_result / thinking_delta.
- *
- * See docs/huabu-acp-client-plan.md §3.5 for the full mapping table.
+ * Extend this to tool_start / tool_result / thinking_delta as needed.
  */
 
 import type { AgentStreamEvent } from '@sediment/shared';
 
-/** Subset of ACP ContentBlock that we recognise in Phase 1. */
+/** Subset of ACP ContentBlock that we currently recognise. */
 interface AcpTextContentBlock {
   type: 'text';
   text: string;
@@ -25,15 +23,15 @@ interface AcpContentBlockBase {
 type AcpContentBlock = AcpTextContentBlock | AcpContentBlockBase;
 
 /**
- * Subset of ACP `SessionUpdate` shape used by Phase 1. ACP uses the
+ * Subset of ACP `SessionUpdate` shape used by the translator. ACP uses the
  * `sessionUpdate` discriminator field (camelCase, snake_case values). Full
  * variant list is in the spec at agentclientprotocol.com/protocol/schema.
  */
 export interface AcpSessionUpdate {
   sessionUpdate: string;
   content?: AcpContentBlock;
-  // Other variant-specific fields exist (toolCallId, plan, ...) but Phase 1
-  // doesn't care about them.
+  // Other variant-specific fields exist (toolCallId, plan, ...) but we
+  // don't currently care about them.
   [key: string]: unknown;
 }
 
@@ -62,7 +60,7 @@ export function acpUpdateToStreamEvent(
         data: { content: update.content.text },
       };
     }
-    // Phase 2 will add: agent_thought_chunk → thinking_delta,
+    // Future updates to map: agent_thought_chunk → thinking_delta,
     // tool_call → tool_start, tool_call_update → tool_result, etc.
     default:
       return null;

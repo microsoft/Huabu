@@ -1,18 +1,16 @@
 /**
  * Token store for the ACP bridge.
  *
- * Phase 1: in-memory, single shared token sourced from `SEDIMENT_ACP_DEV_TOKEN`
- * env var. Sufficient for dev/local where one user runs one Sediment server.
- *
- * Phase 3 will replace this with a canvas-scoped store backed by disk + a
- * proper token lifecycle (issue / revoke / expire). See
- * docs/huabu-acp-client-plan.md §3.1 (token-store.ts) and §3.4.
+ * Currently in-memory with a single shared token sourced from
+ * `SEDIMENT_ACP_DEV_TOKEN`. Sufficient for dev/local where one user
+ * runs one Sediment server. A canvas-scoped store with a proper token
+ * lifecycle (issue / revoke / expire) can replace this when needed.
  */
 
 import type { AuthResult, BridgeHelloParams } from '@agentlet/protocol';
 
 export interface TokenEntry {
-  /** Free-form metadata returned from `authenticate`. Phase 1 stores nothing useful. */
+  /** Free-form metadata returned from `authenticate`. Currently unused. */
   metadata: Record<string, unknown>;
 }
 

@@ -7,6 +7,7 @@ import {
 import { useState, useEffect, useCallback, useMemo } from 'react';
 
 import { Button } from '@/components/Common/Button';
+import { useAcpAgents } from '@/hooks/useAcpAgents';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import { useIntentStore } from '@/store/intentStore';
@@ -14,7 +15,6 @@ import { useLLMStore } from '@/store/llmStore';
 
 import { SidebarPanel } from '../SidebarPanel';
 import { ChatInput } from './ChatInput';
-import { ConnectedAgentsBar } from './ConnectedAgentsBar';
 import { useSketchClusterMessages } from './useSketchClusterMessages';
 import { useAgentStream } from '../../../hooks/useAgentStream';
 import { useChatHistory } from '../../../hooks/useChatHistory';
@@ -47,6 +47,17 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const llmModels = useLLMStore((state) => state.models);
   const llmLoading = useLLMStore((state) => state.loading);
   const llmInit = useLLMStore((state) => state.init);
+
+  // Thread → agent binding. The binding is locked for the lifetime of
+  // a thread; the picker is only writable on an empty, not-streaming
+  // thread. New threads start in `{kind:'internal'}`.
+  const agentBinding = useChatStore((state) => state.agentBinding);
+  const setAgentBinding = useChatStore((state) => state.setAgentBinding);
+  const {
+    agents: connectedAgents,
+    refresh: refreshAcpAgents,
+    loading: acpAgentsLoading,
+  } = useAcpAgents();
 
   // Question thread replay mode
   const viewingQuestionThread = useChatStore((s) => s.viewingQuestionThread);
@@ -197,19 +208,25 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
 
         {/* Input is hidden in sketch inspector mode — it's a read-only view. */}
         {!viewingSketchCluster && (
-          <>
-            <ConnectedAgentsBar />
-            <ChatInput
-              value={input}
-              onChange={setInput}
-              onSubmit={handleSubmit}
-              onStop={stopStream}
-              isStreaming={isLoading}
-              mode={mode}
-              onModeChange={setMode}
-              disabled={isLoading || !isHistoryLoaded}
-            />
-          </>
+          <ChatInput
+            value={input}
+            onChange={setInput}
+            onSubmit={handleSubmit}
+            onStop={stopStream}
+            isStreaming={isLoading}
+            mode={mode}
+            onModeChange={setMode}
+            binding={agentBinding}
+            onBindingChange={(b) => setAgentBinding(b, canvasId || undefined)}
+            connectedAgents={connectedAgents}
+            onRefreshAgents={refreshAcpAgents}
+            refreshingAgents={acpAgentsLoading}
+            // 1 thread = 1 binding. Lock the picker the moment a thread
+            // has any message OR a stream is in flight — the user must
+            // start a new chat to pick a different agent.
+            bindingLocked={messages.length > 0 || isLoading}
+            disabled={isLoading || !isHistoryLoaded}
+          />
         )}
       </div>
     </SidebarPanel>

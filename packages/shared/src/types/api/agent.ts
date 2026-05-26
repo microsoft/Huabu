@@ -21,6 +21,7 @@ import { z } from 'zod';
 import { recentActionSchema } from './canvas-events.js';
 import { CANVAS_NODE_TYPES } from '../canvas/node.js';
 
+import type { AgentBinding } from './acp.js';
 import type {
   AgentChatContext,
   SketchClusterContext,
@@ -193,6 +194,20 @@ export const sketchClusterContextSchema = z.object({
   nearbyEdgeIds: z.array(z.string().min(1)),
 }) satisfies z.ZodType<SketchClusterContext>;
 
+/**
+ * Wire shape of {@link AgentBinding}.
+ * Discriminated union: `kind: 'internal'` (default) routes to the built-in
+ * agent; `kind: 'external'` routes to the ACP service. See acp.ts.
+ */
+export const agentBindingSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('internal') }),
+  z.object({
+    kind: z.literal('external'),
+    alias: z.string().min(1),
+    agentletAgentId: z.string().min(1),
+  }),
+]) satisfies z.ZodType<AgentBinding>;
+
 /** Body for `POST /api/agent`. */
 export const agentRequestSchema = z.object({
   content: z.string().min(1, 'Message content is required'),
@@ -219,6 +234,15 @@ export const agentRequestSchema = z.object({
    * back any future "describe what's around X" flow.
    */
   anchorNodeId: z.string().min(1).optional(),
+  /**
+   * Thread-level agent binding. When omitted or `{ kind: 'internal' }`
+   * the request is dispatched to Huabu's built-in agent loop
+   * (`runAgent`). When `{ kind: 'external', alias, agentletAgentId }`
+   * the request is dispatched to the ACP service.
+   * Carried per-request so the server is stateless about thread bindings;
+   * the persistent ChatStore on the client is the source of truth.
+   */
+  agentBinding: agentBindingSchema.optional(),
 });
 export type AgentRequest = z.infer<typeof agentRequestSchema>;
 

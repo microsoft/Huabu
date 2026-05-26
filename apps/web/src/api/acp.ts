@@ -1,7 +1,7 @@
 /**
  * ACP (external agent bridge) API client.
  *
- * Phase 2 PR A — exposes the read-only `GET /api/acp/agents` endpoint.
+ * Wraps the read-only `GET /api/acp/agents` endpoint.
  * The endpoint is always registered server-side: when the bridge is
  * disabled it returns `{ enabled: false, agents: [] }`, so callers don't
  * need to know about `SEDIMENT_ENABLE_ACP` themselves.

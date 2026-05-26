@@ -1,5 +1,5 @@
 /**
- * `POST /api/debug/acp-prompt` — Phase 1 debug endpoint that bypasses the
+ * `POST /api/debug/acp-prompt` — debug endpoint that bypasses the
  * regular `/api/agent` route to exercise the ACP client end-to-end.
  *
  * Body:
@@ -13,11 +13,10 @@
  *
  * Streams Server-Sent Events using the same `event:`/`data:` framing as
  * `/api/agent`, but yields only `text_delta`, `done`, and `error` events
- * (translator scope for Phase 1).
+ * (the translator's current scope).
  *
  * NOT to be merged into production routes — this endpoint will be deleted
- * once Phase 2's `@mention` routing in `agent.route.ts` is wired up. See
- * docs/huabu-acp-client-plan.md §Phase 1 / §Phase 2.
+ * once the production agent route dispatches to ACP agents directly.
  */
 
 import { AcpAgentClient } from './client.js';

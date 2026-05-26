@@ -3,7 +3,14 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
 import type { ChatMessage } from '../components/Messages/types';
-import type { AgentMode, ChatAttachment } from '@sediment/shared';
+import type { AgentBinding, AgentMode, ChatAttachment } from '@sediment/shared';
+
+/**
+ * Default binding for any newly opened canvas / cleared thread.
+ * v1: built-in Huabu agent. External bindings only appear when the
+ * user explicitly picks an agent in the ModeSelector.
+ */
+const DEFAULT_BINDING: AgentBinding = { kind: 'internal' };
 
 interface ChatState {
   /** In-memory message list — not persisted to localStorage. */
@@ -16,6 +23,20 @@ interface ChatState {
   lastAction: AgentMode;
   /** Map of canvasId → threadId, persisted so each canvas keeps its own thread. */
   threadMap: Record<string, string>;
+
+  /**
+   * Active thread → agent binding. 1 thread = 1 binding for its entire
+   * lifetime; the only way to change it is to start a new thread
+   * (`clearMessages`).
+   */
+  agentBinding: AgentBinding;
+  /**
+   * Map of canvasId → AgentBinding, persisted so each canvas keeps its
+   * own binding across reloads. Source of truth on the client; the
+   * server is stateless about thread bindings and reads the binding
+   * from each request body.
+   */
+  bindingMap: Record<string, AgentBinding>;
 
   /**
    * When set, the chat panel is viewing a question node's conversation thread
@@ -60,6 +81,14 @@ interface ChatState {
   setLastAction: (action: AgentMode) => void;
   clearMessages: (canvasId?: string) => void;
 
+  /**
+   * Change the agent binding for the current thread. Pass `canvasId` to
+   * also persist the choice to `bindingMap` so it is remembered the
+   * next time the user opens this canvas. UI guards against calling
+   * this while a thread has any messages (1 thread = 1 binding).
+   */
+  setAgentBinding: (binding: AgentBinding, canvasId?: string) => void;
+
   /** Switch to a canvas — loads or creates its threadId, resets in-memory messages. */
   switchToCanvas: (canvasId: string) => void;
 
@@ -92,6 +121,8 @@ export const useChatStore = create<ChatState>()(
       isHistoryLoaded: false,
       lastAction: 'ask',
       threadMap: {},
+      agentBinding: DEFAULT_BINDING,
+      bindingMap: {},
       pendingAttachments: [],
       selectionAttachment: null,
       viewingQuestionThread: null,
@@ -112,11 +143,16 @@ export const useChatStore = create<ChatState>()(
       setLastAction: (action) => set({ lastAction: action }),
 
       clearMessages: (canvasId?: string) => {
-        const { threadMap } = get();
+        const { threadMap, bindingMap } = get();
         const newThreadId = createId('thread');
-        const updatedMap = canvasId
+        const updatedThreads = canvasId
           ? { ...threadMap, [canvasId]: newThreadId }
           : { ...threadMap };
+        // New thread → default binding. Persist the reset for this canvas
+        // so reloads agree with the in-memory state.
+        const updatedBindings = canvasId
+          ? { ...bindingMap, [canvasId]: DEFAULT_BINDING }
+          : { ...bindingMap };
         set({
           messages: [],
           threadId: newThreadId,
@@ -124,16 +160,29 @@ export const useChatStore = create<ChatState>()(
           lastAction: 'ask',
           pendingAttachments: [],
           selectionAttachment: null,
-          threadMap: updatedMap,
+          threadMap: updatedThreads,
+          agentBinding: DEFAULT_BINDING,
+          bindingMap: updatedBindings,
+        });
+      },
+
+      setAgentBinding: (binding, canvasId) => {
+        const { bindingMap } = get();
+        set({
+          agentBinding: binding,
+          bindingMap: canvasId
+            ? { ...bindingMap, [canvasId]: binding }
+            : bindingMap,
         });
       },
 
       switchToCanvas: (canvasId: string) => {
-        const { threadMap } = get();
+        const { threadMap, bindingMap } = get();
         let tid = threadMap[canvasId];
         if (!tid) {
           tid = createId('thread');
         }
+        const binding = bindingMap[canvasId] ?? DEFAULT_BINDING;
         set({
           threadId: tid,
           messages: [],
@@ -141,6 +190,10 @@ export const useChatStore = create<ChatState>()(
           pendingAttachments: [],
           selectionAttachment: null,
           threadMap: { ...threadMap, [canvasId]: tid },
+          agentBinding: binding,
+          bindingMap: bindingMap[canvasId]
+            ? bindingMap
+            : { ...bindingMap, [canvasId]: binding },
         });
       },
 
@@ -231,6 +284,7 @@ export const useChatStore = create<ChatState>()(
         threadMap: state.threadMap,
         threadId: state.threadId,
         lastAction: state.lastAction,
+        bindingMap: state.bindingMap,
       }),
     },
   ),

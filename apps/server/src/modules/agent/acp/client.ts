@@ -2,7 +2,7 @@
  * AcpAgentClient — drives one ACP session over a single agentlet
  * `AgentConnection`.
  *
- * Phase 1 scope (per docs/huabu-acp-client-plan.md §3.2 + Phase 1):
+ * Currently supported:
  *
  *   - `initialize()` — negotiate protocol version + capabilities
  *   - `newSession({ cwd })` — create a session, return sessionId
@@ -11,14 +11,14 @@
  *     the final `{ stopReason }`
  *   - `cancel(sessionId)` — notify the agent to abort the current turn
  *
- * Out of scope for Phase 1 (handled by capability stubs that reject):
- *   - `fs/read_text_file`, `fs/write_text_file`            → Phase 3
- *   - `terminal/*`                                          → never
- *   - `session/request_permission`                          → Phase 3
+ * Capability stubs that currently reject:
+ *   - `fs/read_text_file`, `fs/write_text_file`
+ *   - `terminal/*`
+ *   - `session/request_permission`
  *
- * Out of scope for Phase 1 entirely:
- *   - reconnect / session/load                              → Phase 3+
- *   - tool_call / plan translation                          → Phase 2
+ * Not yet supported at all:
+ *   - reconnect / session/load
+ *   - tool_call / plan translation
  *
  * Design notes:
  *
@@ -28,8 +28,8 @@
  *     responses to pending request promises and notifications to the
  *     in-flight `prompt()` callback.
  *   - Any incoming JSON-RPC request from the agent is replied to with
- *     -32601 Method not implemented (until Phase 3 wires the capability
- *     router).
+ *     -32601 Method not implemented (until the capability router is
+ *     wired up).
  */
 
 import type { AcpSessionUpdate } from './translator.js';

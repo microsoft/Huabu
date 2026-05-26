@@ -873,7 +873,24 @@ const agentRoutes: FastifyPluginAsync = async (
       canvasId,
       attachments,
       anchorNodeId,
+      agentBinding,
     } = parsed.data;
+
+    // Log the thread→agent binding so external dispatches are visible
+    // in the server log. External-bound requests still fall through to
+    // the built-in agent loop here — actual ACP dispatch is not wired
+    // up at this layer yet.
+    if (agentBinding && agentBinding.kind === 'external') {
+      request.log.info(
+        {
+          threadId: threadId ?? null,
+          canvasId: canvasId ?? null,
+          alias: agentBinding.alias,
+          agentletAgentId: agentBinding.agentletAgentId,
+        },
+        'agent.route: external agentBinding received (passthrough — not yet dispatched to ACP)',
+      );
+    }
 
     const resolvedThreadId = getOrCreateThreadId(threadId);
 

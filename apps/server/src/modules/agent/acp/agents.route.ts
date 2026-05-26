@@ -1,9 +1,8 @@
 /**
  * `GET /api/acp/agents` — list currently-connected external ACP agents.
  *
- * Read-only visibility surface for Phase 2 PR A. The chat panel polls this
- * endpoint every few seconds to render a "Connected: claude" indicator and
- * (in PR B) feed the `@`-autocomplete list for `@mention` routing.
+ * Read-only visibility surface for the agentlet bridge. The chat panel
+ * uses this endpoint to render the agent picker in the ChatPanel.
  *
  * Behaviour summary:
  *  - Always registered (so the front-end has one URL to call regardless of
@@ -11,13 +10,10 @@
  *    agentlet server was never mounted, so `getAgentletServer()` returns
  *    `null` and we reply `{ enabled: false, agents: [] }`.
  *  - When enabled, we filter `getConnections({ status: 'connected' })` and
- *    derive a short alias from `agentInfo.command` per D1.
+ *    derive a short alias from `agentInfo.command` (see `deriveAlias`).
  *  - No authentication beyond the global Basic-Auth gate — the bridge
  *    itself is gated by `token-store.ts`; this route only enumerates what
  *    the in-process registry already knows about.
- *
- * See docs/huabu-acp-client-plan.md §Phase 2 D1 (alias derivation) and the
- * PR-A row of the breakdown table.
  */
 
 import { getAgentletServer } from './server-mount.js';
@@ -26,8 +22,8 @@ import type { AcpAgentSummary, AcpAgentsResponse } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
 /**
- * Derive the short alias used as the user-facing display name and (in
- * PR B) as the `@mention` key.
+ * Derive the short alias used as the user-facing display name and as
+ * the `@mention` key.
  *
  *   `'claude --acp'`                    → `'claude'`
  *   `'/usr/local/bin/claude --acp'`     → `'claude'`

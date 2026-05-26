@@ -651,6 +651,12 @@ export function useAgentStream(): UseAgentStreamReturn {
       // network blip to block the agent call.
       await useCanvasStore.getState().flushCanvasEvents();
 
+      // Snapshot the current thread → agent binding at send time. The
+      // server is stateless about bindings; we pass it per-request so
+      // the server-side dispatch sees exactly which agent the user
+      // picked for this thread.
+      const agentBinding = useChatStore.getState().agentBinding;
+
       try {
         await agentApi.streamMessage(
           prompt,
@@ -705,6 +711,7 @@ export function useAgentStream(): UseAgentStreamReturn {
             canvasId: canvasId || undefined,
             attachments,
             intentData,
+            agentBinding,
             signal: abortController.signal,
           },
         );
