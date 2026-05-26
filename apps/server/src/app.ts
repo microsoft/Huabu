@@ -6,7 +6,6 @@ import multipart from '@fastify/multipart';
 import staticPlugin from '@fastify/static';
 import { fastify } from 'fastify';
 
-import debugAcpRoutes from './modules/agent/acp/debug.route.js';
 import {
   acpAgentsRoutes,
   mountAgentletServer,
@@ -117,10 +116,9 @@ app.register(llmRoutes, { prefix: '/api/llm' });
 app.register(workspaceRoutes, { prefix: '/api/workspace' });
 
 // ── External agent (ACP) bridge ───────────────────────────────────────
-// Mount @agentlet/server (WS upgrade at /api/acp/agent) and the debug
-// endpoint (POST /api/debug/acp-prompt) behind the same feature flag so
-// the default startup path is unchanged. Set SEDIMENT_ENABLE_ACP=1 to
-// enable. See modules/agent/acp/README.md.
+// Mount @agentlet/server (WS upgrade at /api/acp/agent) behind the
+// SEDIMENT_ENABLE_ACP=1 feature flag so the default startup path is
+// unchanged. See docs/huabu-acp-client-plan.md for the full design.
 //
 // The agents-list route is registered *unconditionally* so the front-end
 // has one URL to call regardless of flag state — it reports
@@ -128,6 +126,5 @@ app.register(workspaceRoutes, { prefix: '/api/workspace' });
 app.register(acpAgentsRoutes, { prefix: '/api/acp' });
 if (process.env.SEDIMENT_ENABLE_ACP === '1') {
   mountAgentletServer(app);
-  app.register(debugAcpRoutes, { prefix: '/api/debug' });
-  app.log.info('ACP (external agent) bridge + debug route enabled');
+  app.log.info('ACP (external agent) bridge enabled');
 }

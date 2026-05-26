@@ -77,10 +77,19 @@ export interface RunAcpAgentOptions {
   /** pi-ai context; we mutate `context.messages` to append the assistant reply. */
   context: Context;
   /**
-   * `cwd` passed to `session/new` on first prompt for this thread. Ignored
-   * for subsequent prompts (the session is already open). Defaults to
-   * `'/'`, which signals the agentlet relay to substitute its own `--cwd`.
-   * Phase 4 will pass an explicit canvas-bound repo path here.
+   * `cwd` passed to `session/new` on first prompt for this thread.
+   * Ignored for subsequent prompts (the session is already open).
+   *
+   * Defaults to `'/'`, which is the **agreed sentinel** with the
+   * agentlet relay: when `params.cwd` is missing or `'/'`, the relay
+   * substitutes its own `process.cwd()` (see
+   * `agentlet/packages/local/src/relay.ts#enrichMessage`). This keeps
+   * the local working directory authoritative on the user's machine
+   * and frees Sediment from guessing repo paths until Phase 4 wires
+   * canvas ↔ repo binding here.
+   *
+   * **User contract until Phase 4**: launch agentlet from the project
+   * root (`cd <repo> && agentlet --agent "claude --acp" --server …`).
    */
   cwd?: string;
   /**
@@ -105,8 +114,9 @@ export async function* runAcpAgent(
 ): AsyncGenerator<AgentStreamEvent> {
   const { binding, threadId, context, canvasContext, signal, logger } = opts;
   const rawText = extractText(opts.message);
-  // Default to '/' so the agentlet relay overrides with its own --cwd
-  // (relay.ts only substitutes when params.cwd is empty or '/'). Phase 4
+  // Default to '/' — the agreed sentinel with the agentlet relay, which
+  // substitutes its own process.cwd() when params.cwd is empty or '/'
+  // (see agentlet/packages/local/src/relay.ts#enrichMessage). Phase 4
   // canvas↔repo binding will pass an explicit opts.cwd here.
   const cwd = opts.cwd ?? '/';
 

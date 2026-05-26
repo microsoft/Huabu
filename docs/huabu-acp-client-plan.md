@@ -3,7 +3,7 @@
 > Huabu 作为 ACP **client**，通过 [agentlet](https://github.com/hai-team/agentlet)
 > 连接到外部 ACP 兼容 agent（Claude Code / Copilot CLI / Gemini CLI ...）。
 >
-> Status: **In progress · Phase 2 PR C 已 merge** · Last updated 2026-05-26
+> Status: **Phase 2 完成 (PR A–E 已 merge)** · Next: Phase 3 capabilities · Last updated 2026-05-26
 
 ---
 
@@ -83,10 +83,9 @@ apps/server/src/modules/agent/acp/
 ├── agents.route.ts       GET /api/acp/agents 暴露连接列表                     ✅
 ├── client.ts             AcpAgentClient — 1 session lifecycle                ✅
 ├── session-registry.ts   threadId → AcpSessionEntry，replace 时 shutdown 旧  ✅
-├── service.ts            runAcpAgent() async generator                       ✅
+├── service.ts            runAcpAgent() async generator + preprocessor wire    ✅
 ├── translator.ts         session/update → AgentStreamEvent                   🟡 仅 text_delta
-├── debug.route.ts        POST /api/debug/acp-prompt 调试端点（PR E 删）       ✅
-├── preprocessor.ts       rawMsg + canvas → ExternalAgentPrompt                ⏳ PR D
+├── preprocessor.ts       rawMsg + canvas → ExternalAgentPrompt                ✅
 ├── capabilities/
 │   ├── fs.ts             fs/read_text_file 沙箱                               ⏳ Phase 3
 │   └── permission.ts     permission/request → UI 弹窗                         ⏳ Phase 3
@@ -109,7 +108,7 @@ apps/web/src/
 └── components/Panels/ChatPanel/
     ├── index.tsx                             ChatPanel 入口                 ✅
     ├── ModeSelector.tsx                      下拉含 ─── External ─── 子列表 ✅
-    └── PreparedPromptCard.tsx                折叠卡片                       ⏳ PR D
+    └── PreparedPromptCard.tsx                折叠卡片                       ✅
 ```
 
 ### 2.3 协议翻译表
@@ -117,13 +116,13 @@ apps/web/src/
 | ACP `session/update.sessionUpdate`  | Sediment `AgentStreamEvent`       | 状态        |
 | ----------------------------------- | --------------------------------- | ----------- |
 | `agent_message_chunk` (type=text)   | `text_delta`                      | ✅          |
-| `agent_thought_chunk`               | `thinking_delta`                  | ⏳ PR D/E   |
+| `agent_thought_chunk`               | `thinking_delta`                  | ⏳ Phase 3  |
 | `tool_call` (status=in_progress)    | `tool_start`                      | ⏳ Phase 3+ |
 | `tool_call` (status=completed)      | `tool_result`                     | ⏳ Phase 3+ |
 | `plan`                              | `thinking_delta` 或 `plan_update` | ⏳          |
 | ACP error response                  | `error`                           | ✅          |
 | stopReason (end_turn/cancelled/...) | `done` (with stopReason)          | ✅          |
-| **（本地发送，不来自 ACP）**        | **`prepared_prompt`**             | ⏳ PR D     |
+| **（本地发送，不来自 ACP）**        | **`prepared_prompt`**             | ✅          |
 
 逆向（Sediment → ACP）：
 
@@ -150,17 +149,17 @@ ACP 的双向性意味着 agent 会主动**调** client 暴露的方法。Sedime
 
 v1 用 Layer 2 (preprocessor) + Layer 1 (fs/read) 组合；Layer 3 (MCP) 是 Phase 5 可选项。
 
-| Layer       | 机制                                                                         | 落地 phase     |
-| ----------- | ---------------------------------------------------------------------------- | -------------- |
-| **Layer 1** | ACP 标准 `fs/read_text_file`，agent 用自己的 `Read` tool 拉指定路径          | Phase 3        |
-| **Layer 2** | Preprocessor 用内部 LLM 重写 (rawMsg + canvas state) → `ExternalAgentPrompt` | Phase 2 PR D   |
-| **Layer 3** | Huabu 暴露为 MCP server，agent 看到 typed tool                               | Phase 5 (可选) |
+| Layer       | 机制                                                                         | 落地 phase             |
+| ----------- | ---------------------------------------------------------------------------- | ---------------------- |
+| **Layer 1** | ACP 标准 `fs/read_text_file`，agent 用自己的 `Read` tool 拉指定路径          | Phase 3                |
+| **Layer 2** | Preprocessor 用内部 LLM 重写 (rawMsg + canvas state) → `ExternalAgentPrompt` | Phase 2 PR D — ✅ done |
+| **Layer 3** | Huabu 暴露为 MCP server，agent 看到 typed tool                               | Phase 5 (可选)         |
 
 **为什么 Layer 2 用 preprocessor 而不是直接拼 canvas 概览**：大 canvas 会压垮 token 预算且不相关信息干扰 agent；preprocessor 让 Huabu 当"项目经理"，出一份「任务 + 需要看哪些文件」的清单，agent 按需 Read 即可。
 
 **为什么 Layer 3 走 MCP 而不是 ACP 自定义方法**：ACP spec 没规范化「client → agent 注册自定义 tool」机制；MCP 是事实标准，主流 ACP agent 自带 MCP client。
 
-**注意**：以上所有 layer 都看到的是 **canvas 在磁盘上的状态**——未保存改动 agent 看不到。Phase 2 PR D 会在 preprocessor 注入时显式标注「脏状态」或强制 auto-save。
+**注意**：以上所有 layer 都看到的是 **canvas 在磁盘上的状态**——未保存改动 agent 看不到。PR D 推到了外部 agent 之前复用了 `useAgentStream.ts:flushCanvasEvents()`（与 ask / internal agent 同一条路径）；flush 错误被静默吞掉是三边共通的遗留 staleness 问题，需要加固请单开 issue。
 
 ---
 
@@ -174,65 +173,33 @@ v1 用 Layer 2 (preprocessor) + Layer 1 (fs/read) 组合；Layer 3 (MCP) 是 Pha
 | 2     | A   | GET /api/acp/agents + 临时 ConnectedAgentsBar            | ✅ `43ecdfa` |
 | 2     | B   | AgentBinding 类型 + ChatState + ModeSelector 下拉        | ✅ `1ee3834` |
 | 2     | C   | AcpAgentClient + session-registry + service + route 分流 | ✅ `6fca129` |
-| 2     | D   | preprocessor + `prepared_prompt` SSE + 折叠卡片          | ⏳           |
-| 2     | E   | 删 debug.route + 清理                                    | ⏳           |
+| 2     | D   | preprocessor + `prepared_prompt` SSE + 折叠卡片          | ✅ `ba9e5c8` |
+| 2     | E   | 删 debug.route + 清理                                    | ✅           |
 | 3     | —   | fs/permission capabilities + 沙箱                        | ⏳           |
 | 4     | —   | canvas ↔ repo binding + 多 agent 选择 + token 管理       | ⏳           |
 | 5     | —   | Huabu as MCP server (可选)                               | ⏳           |
 
 ## 4. 已完成
 
-- **Phase 0/1 (`f4f4950`)**：embed `@agentlet/server` 到 Fastify upgrade，`SEDIMENT_ENABLE_ACP=1` flag 控制开关，最小 `client.ts` + `translator.ts` 跑通 initialize/session/prompt/text_delta，`POST /api/debug/acp-prompt` 调试端点（PR E 会删）。
+- **Phase 0/1 (`f4f4950`)**：embed `@agentlet/server` 到 Fastify upgrade，`SEDIMENT_ENABLE_ACP=1` flag 控制开关，最小 `client.ts` + `translator.ts` 跑通 initialize/session/prompt/text_delta，`POST /api/debug/acp-prompt` 调试端点（已在 PR E 删除）。
 - **Phase 2 PR A (`43ecdfa`)**：`GET /api/acp/agents` 暴露 alias + command + host + cwd；前端 `useAcpAgents()` 3s 轮询 + 临时 `ConnectedAgentsBar` 指示器（PR B 已删）。
 - **Phase 2 PR B (`1ee3834`)**：`AgentBinding` discriminated union（internal/external）+ ChatStore `bindingMap` per-canvas localStorage 持久化；ModeSelector 下拉新增 `─── External ───` 子列表；`agentRequestSchema` 携带 `agentBinding`；删除 ConnectedAgentsBar。
 - **Phase 2 PR C (`6fca129`)**：`AcpAgentClient` 完整 lifecycle（per-session updateHandlers Map、abort listener、`isClosed` flag、agent incoming requests 一律 `-32601` reject）+ `session-registry`（threadId → AcpSessionEntry，replace 时 shutdown 旧 client）+ `runAcpAgent()` async generator（preprocessor 暂走 passthrough，`cwd` 默认 `/` 让 agentlet 端覆盖）+ `agent.route.ts` 按 `agentBinding.kind` 分流。
+- **Phase 2 PR D (`ba9e5c8`)**：`acp/preprocessor.ts` 调内部 LLM 重写 raw text → `ExternalAgentPrompt`（`task` + `fileRefs`）；`runAcpAgent` 在 session 打开后、queue 开启前调 preprocessor 并 yield `prepared_prompt` SSE（包含可选 `error`，失败时降级到 raw text）；`packages/shared/src/types/agent/agent.ts` 加 `prepared_prompt` event schema；`PreparedPromptCard.tsx` 渲染折叠卡片；history 里写 `[SYSTEM PreparedPrompt]` sidecar 让重连后 UI 能回填。**已定的设计决策**：
+  - **preprocessor LLM**：复用 Sediment settings 的 **default model**，用户可控、无新 hardcode、无独立 token 预算。
+  - **wire schema**：按 **path** 而非 node id，与 Phase 3 `fs/read_text_file` 语义一致；外部 agent 直接 `Read <path>` 即可。
+    ```ts
+    type ExternalAgentPrompt = {
+      task: string; // 重写后的任务描述
+      fileRefs: Array<{ path: string; reason?: string }>; // 相对 canvasDir
+    };
+    ```
+  - **`selectedNodeIds`**：不加新字段，直接从 `agentRequestSchema.canvasContext.selectedNodes`（`apps/web/src/store/canvasStore.ts:getAgentChatContext` 产出）读，与 ask / internal agent 共用同一份 context。
+  - **fallback UX**：preprocessor 失败时 `prepared_prompt` 带 `error` 字段，UI 在卡片里直接显示失败原因；不引入新组件、不加 toast。
+  - **dirty canvas**：复用 `useAgentStream.ts:flushCanvasEvents()` 路径（与 ask / internal agent 同一条），加固需单独开 issue（影响范围更广）。
+- **Phase 2 PR E**：删 `acp/debug.route.ts` + `app.ts` 的 import/register/log；`ConnectedAgentsBar` 已无残留（PR B 已删）；`service.ts` 的 `cwd ?? '/'` 默认值保持不变 —— `'/'` 是与 agentlet relay 约定的 sentinel：`relay.ts#enrichMessage` 在 `params.cwd` 为空或 `'/'` 时会用自己的 `process.cwd()` 替换（**不是 bug**，是显式契约），所以 Phase 4 之前用户的契约是 `cd <repo> && agentlet --agent "..." --server ...`。文档同步：README + plan doc 文件表 / 进度速览 / 协议翻译表 / Layer 表全部对齐到当前实现。
 
 ## 5. 待办
-
-### Phase 2 PR D — preprocessor + prepared_prompt
-
-**目标**：把 raw user message + canvas state 重写成结构化 `ExternalAgentPrompt`（`task` + `fileRefs`），前端展示折叠卡片，外部 agent 收到清晰任务 + 推荐读哪些文件。
-
-**任务**：
-
-- [ ] `acp/preprocessor.ts`：调内部 LLM，输出 `ExternalAgentPrompt`
-- [ ] `service.ts`：把 preprocessor 调用接入 `runAcpAgent` 前置步骤
-- [ ] `packages/shared/src/types/agent.ts` 加 `prepared_prompt` SSE event schema
-- [ ] ChatPanel `PreparedPromptCard.tsx` 渲染折叠卡片
-- [ ] preprocessor 抛错时降级到 raw message + log 告警 + 前端 indicator
-
-**Exit criteria**：所有外部 agent 消息上方出现「Prepared prompt」折叠卡片（task + fileRefs）；preprocessor 抛错时降级到 raw message 且 log 告警。
-
-**Design decisions**（已定）：
-
-- **preprocessor LLM**：复用 Sediment settings 里的 **default model**。用户可控；不引入新 hardcode；不需要单独 token 预算管理。
-- **`ExternalAgentPrompt` wire schema**：按 **path** 而非 node id，与 Phase 3 `fs/read_text_file` 语义一致；外部 agent 不需要懂 Huabu 内部模型，直接 `Read <path>`。
-  ```ts
-  type ExternalAgentPrompt = {
-    task: string; // 重写后的任务描述
-    fileRefs: Array<{ path: string; reason?: string }>; // 相对 canvasDir
-  };
-  ```
-- **`selectedNodeIds` 传递**：**不需要新加字段**。`agentRequestSchema` 已包含 `canvasContext.selectedNodes`（由 `apps/web/src/store/canvasStore.ts:getAgentChatContext` 产出），ask / internal agent / external 三边共用同一个 request schema 和 `Context` 对象。preprocessor 直接从已有 context 读 selected nodes 即可。
-- **fallback UX**：**复用 `apps/web/src/components/Messages/StatusMessage.tsx`**（已支持 `status: 'error'` + `detail` + retry）。preprocessor 失败时 push 一条 `role: 'status', status: 'error', detail: 'Preprocessor failed; using raw input: <reason>'`，不引入新组件、不加 toast。
-- **dirty canvas 处理**：**(a) auto-save 路径，但不是 PR D 范围**。ask agent 也是从磁盘读 canvas，依赖 `useAgentStream.ts` 的 `flushCanvasEvents()` 在 startStream 前 flush 待持久化的 mutation；该 flush 错误被静默吞掉是 **ask + internal + external 三边共通**的潜在 staleness 问题。PR D **复用现有 flush 路径**即可；真要修需单独开 issue 加固 flush 链路（影响范围更广）。
-
-### Phase 2 PR E — 清理
-
-**任务**：
-
-- [ ] 删 `apps/server/src/modules/agent/acp/debug.route.ts` 和 `app.ts` 的 registration
-- [ ] 清理 PR A 留下的 `ConnectedAgentsBar` 残留 export（如还有）
-- [ ] 重新审视 `service.ts` 里 `cwd = opts.cwd ?? '/'` 的默认值（见下方设计决策）
-
-**Exit criteria**：`curl POST /api/debug/acp-prompt` 返 404；ConnectedAgentsBar 相关文件全删；typecheck 全绿。
-
-**Open design decisions**：
-
-- **cwd 默认值**：PR C 调试时改成 `/`（让 agentlet 端的 `--cwd` 覆盖），但 [agentlet relay 当前有 bug 不读 `--cwd` flag](https://github.com/hai-team/agentlet/blob/main/packages/local/src/relay.ts#L25)（用的是 agentlet 进程本身的 process.cwd）。三个选项：
-  - (a) 修 agentlet relay，让 `--cwd` 真的生效；Sediment 端继续传 `/`
-  - (b) Sediment 端从 binding/canvas 派生合理默认（如 canvas 绑定的 repo cwd——但这是 Phase 4 才有的概念）
-  - (c) 维持现状不修，文档说明用户必须 `cd <project>` 再起 agentlet
 
 ### Phase 3 — Client capabilities & 沙箱
 
