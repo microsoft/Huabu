@@ -39,6 +39,7 @@ import path from 'node:path';
 // @deprecated Launch-only legacy migration. Remove once all workspaces have
 // been migrated to the canvas-centric layout.
 import { refreshCanvasDirIndex } from './storage/canvas-dirs.js';
+import { migrateBareArtifactKeys } from './storage/migrate-artifact-keys.js';
 import { migrateLabeledNames } from './storage/migrate-labels.js';
 import {
   flattenLegacyMetaJson,
@@ -96,6 +97,8 @@ export function initWorkspaceFromEnv(): void {
   flattenLegacyMetaJson(_workspacePath);
   // V2 -> V3 label-based rename pass (idempotent; stays long-term).
   migrateLabeledNames(_workspacePath);
+  // One-shot rewrite of legacy full artifact URLs to bare keys (sentinel-gated).
+  migrateBareArtifactKeys(_workspacePath);
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -164,6 +167,8 @@ export function setWorkspacePath(newPath: string): void {
   flattenLegacyMetaJson(_workspacePath);
   // V2 -> V3 label-based rename pass (idempotent; stays long-term).
   migrateLabeledNames(_workspacePath);
+  // One-shot rewrite of legacy full artifact URLs to bare keys (sentinel-gated).
+  migrateBareArtifactKeys(_workspacePath);
 }
 
 // ──────────────────────────────────────────────────────────────────────

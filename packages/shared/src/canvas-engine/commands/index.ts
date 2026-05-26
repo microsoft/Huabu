@@ -18,6 +18,7 @@ import distributeNodes from './distributeNodes.js';
 import mergeNodeData from './mergeNodeData.js';
 import reorderNodes from './reorderNodes.js';
 import setEdgeStyle from './setEdgeStyle.js';
+import setFrameLayout from './setFrameLayout.js';
 import setNodeGeometry from './setNodeGeometry.js';
 import setNodeLocked from './setNodeLocked.js';
 import setNodeParent from './setNodeParent.js';
@@ -56,6 +57,7 @@ export const HANDLERS: HandlerMap = {
   ALIGN_NODES: alignNodes.handler,
   DISTRIBUTE_NODES: distributeNodes.handler,
   CHANGE_NODE_TYPE: changeNodeType.handler,
+  SET_FRAME_LAYOUT: setFrameLayout.handler,
 };
 
 // ---------------------------------------------------------------------------
@@ -79,6 +81,7 @@ export const COMMAND_META: Record<CanvasCommandType, CommandMeta> = {
   ALIGN_NODES: alignNodes.meta,
   DISTRIBUTE_NODES: distributeNodes.meta,
   CHANGE_NODE_TYPE: changeNodeType.meta,
+  SET_FRAME_LAYOUT: setFrameLayout.meta,
 };
 
 // Re-export types for consumers.

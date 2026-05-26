@@ -35,7 +35,13 @@ export type ApiResult<T> = T | ApiErrorBody;
 export interface ArtifactUploadResponse {
   /** Stable artifact id. */
   id: string;
-  /** Relative API path the front-end should store as the artifact URL. */
+  /**
+   * The artifact storage key — equal to the on-disk filename
+   * (`<artifactId><ext>`). The front-end should store **only this key**
+   * in `data.src` / `data.coverUrl`. The full URL is reconstructed at
+   * render time via `resolveArtifactUrl(key, canvasId)` so the persisted
+   * canvas state stays portable across canvas renames and host moves.
+   */
   uri: string;
   /** Original upload filename, when known. */
   filename?: string;

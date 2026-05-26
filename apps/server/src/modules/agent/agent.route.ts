@@ -65,17 +65,29 @@ function getOrCreateThreadId(value: unknown): string {
   return createId('thread');
 }
 
-async function resolveImageUrl(url: string): Promise<string> {
+async function resolveImageUrl(
+  url: string,
+  defaultCanvasId: string | null,
+): Promise<string> {
   // Canvas-scoped artifacts + already-baked data: URLs go through the
   // shared helper. It returns the input unchanged for unrelated URLs
   // (external http(s), bare paths, etc.).
-  const resolved = await resolveArtifactImageUrl(url, (canvasId, filename) => {
-    try {
-      return getCanvasStore(canvasId).resolveArtifactFilePath(filename);
-    } catch {
-      return null;
-    }
-  });
+  //
+  // `defaultCanvasId` is used when `url` is a bare artifact key
+  // (`<id><ext>`) rather than a full URL. Bare keys are the canonical
+  // form that the front-end now sends; full URLs are kept for legacy
+  // / external references.
+  const resolved = await resolveArtifactImageUrl(
+    url,
+    (canvasId, filename) => {
+      try {
+        return getCanvasStore(canvasId).resolveArtifactFilePath(filename);
+      } catch {
+        return null;
+      }
+    },
+    defaultCanvasId,
+  );
   if (resolved.startsWith('data:')) return resolved;
 
   // External image URLs: fetch and inline as base64 so the LLM can see them.
@@ -148,7 +160,8 @@ async function resolveImageUrl(url: string): Promise<string> {
  */
 async function buildUserContent(
   text: string,
-  attachments?: ChatAttachment[],
+  attachments: ChatAttachment[] | undefined,
+  canvasId: string | null,
 ): Promise<
   | string
   | Array<
@@ -197,7 +210,7 @@ async function buildUserContent(
         }
         // Resolve image URL to base64 for vision
         if (att.url) {
-          const resolved = await resolveImageUrl(att.url);
+          const resolved = await resolveImageUrl(att.url, canvasId);
           if (resolved.startsWith('data:')) {
             const match = /^data:([^;]+);base64,(.+)$/.exec(resolved);
             if (match) {
@@ -272,12 +285,32 @@ async function buildUserContent(
         } else if (att.url) {
           let fileContent: string | null = null;
           const artifactMatch = ARTIFACT_URL_REGEX.exec(att.url);
+          // Three cases for `att.url`:
+          //   1. Full canvas-scoped URL → pull canvasId + filename from regex.
+          //   2. Bare artifact key (no slashes, not http(s)) → pair with
+          //      the current canvas id (the chat thread's canvas).
+          //   3. Anything else (external URL, data URL, etc.) → skip the
+          //      filesystem lookup and fall through to the URL-only branch.
+          let resolvedCanvasId: string | null = null;
+          let resolvedFilename: string | null = null;
           if (artifactMatch) {
-            const canvasId = artifactMatch[1];
-            const filename = path.basename(artifactMatch[2]);
+            resolvedCanvasId = artifactMatch[1] ?? null;
+            resolvedFilename = path.basename(artifactMatch[2] ?? '');
+          } else if (
+            canvasId &&
+            !att.url.startsWith('data:') &&
+            !/^https?:/i.test(att.url) &&
+            !att.url.includes('/')
+          ) {
+            resolvedCanvasId = canvasId;
+            resolvedFilename = att.url;
+          }
+          if (resolvedCanvasId && resolvedFilename) {
             try {
               const filePath =
-                getCanvasStore(canvasId).resolveArtifactFilePath(filename);
+                getCanvasStore(resolvedCanvasId).resolveArtifactFilePath(
+                  resolvedFilename,
+                );
               if (filePath) {
                 try {
                   fileContent = await readFile(filePath, 'utf-8');
@@ -286,7 +319,7 @@ async function buildUserContent(
                 }
               }
             } catch {
-              /* invalid artifact URL; fall back to including the URL */
+              /* invalid artifact reference; fall back to including the URL */
             }
           }
           if (fileContent) {
@@ -873,7 +906,11 @@ const agentRoutes: FastifyPluginAsync = async (
         : undefined;
 
     // Build user message
-    let userContent = await buildUserContent(content, allAttachments);
+    let userContent = await buildUserContent(
+      content,
+      allAttachments,
+      canvasId ?? null,
+    );
 
     // Inject a minimal selected-node reference list as a system message.
     // Each entry carries { id, type, label?, filename } — the `filename`

@@ -34,6 +34,22 @@ Place the centre at `(cx, cy)`; place N children on a ring of radius `r`. For ev
 - **Position the frame first**, then position children. Child positions are absolute (canvas-relative), not frame-relative — but it is easier to think of children as offsets from the frame's top-left.
 - Give the frame a clear `data.label` so the group is identifiable when zoomed out.
 
+### Structured frame layout (`column` / `row`)
+
+A frame can opt into a deterministic masonry layout that re-flows its children automatically whenever they change (added, removed, resized). Use `SET_FRAME_LAYOUT` to switch a frame between `free` (default), `column`, or `row`, optionally with `gridCount` (number of tracks, 1–12, default 1):
+
+```
+SET_FRAME_LAYOUT { frameId: "<frame-id>", mode: "column", gridCount: 3 }
+```
+
+- `column` — N columns, children stack top-to-bottom inside each column, left-aligned. Column width adapts to the widest child.
+- `row` — mirror on the other axis: N rows, children stack left-to-right inside each row, top-aligned. Row height adapts to the tallest child.
+- The engine assigns each child to a track automatically (least-full track wins) and writes the slot back to `data.frameSlot`. To pin a child to a specific track, pass `MERGE_NODE_DATA` with `patch: { frameSlot: <0..N-1> }` after the layout switch. To control vertical (column mode) or horizontal (row mode) order within a track, set initial child positions; the engine sorts by that axis.
+- The frame size is content-driven and the engine re-sizes the frame after every child change — do **not** pass `size` for structured frames; it will be overwritten on the next batch.
+- Switch back to free positioning with `SET_FRAME_LAYOUT { frameId, mode: "free" }`.
+
+Use structured frames for: stacked column lists, kanban-style boards, row tracks where each lane represents a theme, deterministic comparison tables.
+
 ## Connecting layers
 
 - Use `CONNECT_NODES` with `direction: "forward"` for primary data flow.

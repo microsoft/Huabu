@@ -317,7 +317,7 @@ export const canvasCommandsTool: ToolDefinition = {
   label: 'Canvas Commands',
   description: `Execute a batch of canvas commands atomically. All commands in a single call are applied as one undo step.
 
-Supported command types: CREATE_NODES, CREATE_QUESTION, DELETE_NODES, MERGE_NODE_DATA, SET_NODE_PARENT, DISSOLVE_FRAME, SET_NODE_GEOMETRY, REORDER_NODES, CONNECT_NODES, DISCONNECT_EDGES, SET_EDGE_STYLE, ALIGN_NODES, DISTRIBUTE_NODES. Field-level requirements (which fields each command takes) are described by this tool's parameter schema.
+Supported command types: CREATE_NODES, CREATE_QUESTION, DELETE_NODES, MERGE_NODE_DATA, SET_NODE_PARENT, DISSOLVE_FRAME, SET_NODE_GEOMETRY, REORDER_NODES, CONNECT_NODES, DISCONNECT_EDGES, SET_EDGE_STYLE, ALIGN_NODES, DISTRIBUTE_NODES, SET_FRAME_LAYOUT. Field-level requirements (which fields each command takes) are described by this tool's parameter schema.
 
 ID conventions:
 - Node IDs: \`node-<uuid>\` (use crypto.randomUUID()).

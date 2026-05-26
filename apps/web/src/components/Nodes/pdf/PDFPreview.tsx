@@ -47,7 +47,8 @@ export const PDFPreview = ({
   onDataChange,
 }: PreviewComponentProps) => {
   const src = typeof data.src === 'string' ? data.src : '';
-  const resolvedSrc = resolveArtifactUrl(src);
+  const canvasId = useCanvasStore((s) => s.canvasId);
+  const resolvedSrc = resolveArtifactUrl(src, canvasId);
   const addPendingAttachment = useChatStore((s) => s.addPendingAttachment);
   const [numPages, setNumPages] = useState<number | null>(null);
   const [docLoaded, setDocLoaded] = useState(false);

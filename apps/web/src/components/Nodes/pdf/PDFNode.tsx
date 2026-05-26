@@ -32,9 +32,11 @@ const THUMBNAIL_WIDTH = 400;
 const FirstPageThumbnail = memo(
   ({
     src,
+    canvasId,
     onCapture,
   }: {
     src: string;
+    canvasId: string;
     onCapture: (dataUrl: string) => void;
   }) => {
     const captured = useRef(false);
@@ -58,7 +60,11 @@ const FirstPageThumbnail = memo(
         style={{ position: 'absolute', left: -9999, top: -9999 }}
         aria-hidden
       >
-        <Document file={resolveArtifactUrl(src)} loading={null} error={null}>
+        <Document
+          file={resolveArtifactUrl(src, canvasId)}
+          loading={null}
+          error={null}
+        >
           <Page
             pageNumber={1}
             width={THUMBNAIL_WIDTH}
@@ -77,6 +83,7 @@ export const PDFNode = memo(
     const scale = useNodeScale(id, 'pdf');
     const openExpanded = useCanvasStore((s) => s.openExpanded);
     const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+    const canvasId = useCanvasStore((s) => s.canvasId);
 
     const hasCover = !!data.coverUrl;
     const src = typeof data.src === 'string' ? data.src : '';
@@ -94,7 +101,7 @@ export const PDFNode = memo(
     }, [src]);
 
     const coverImage = hasCover
-      ? resolveArtifactUrl(data.coverUrl as string)
+      ? resolveArtifactUrl(data.coverUrl as string, canvasId)
       : (thumbnail ?? undefined);
 
     const handleDownload = useCallback(
@@ -102,13 +109,13 @@ export const PDFNode = memo(
         e.stopPropagation();
         if (!src) return;
         const link = document.createElement('a');
-        link.href = resolveArtifactUrl(src);
+        link.href = resolveArtifactUrl(src, canvasId);
         link.download = data.label || src.split('/').pop() || 'document.pdf';
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
       },
-      [src, data.label],
+      [src, data.label, canvasId],
     );
 
     const handleDeleteCover = useCallback(
@@ -162,7 +169,11 @@ export const PDFNode = memo(
         <div className="relative flex h-full w-full flex-col overflow-hidden rounded-lg">
           {/* Render the first page off-screen to capture a thumbnail when no manual cover exists */}
           {!hasCover && src && !thumbnail && !data.artifactMissing && (
-            <FirstPageThumbnail src={src} onCapture={handleThumbnailCapture} />
+            <FirstPageThumbnail
+              src={src}
+              canvasId={canvasId}
+              onCapture={handleThumbnailCapture}
+            />
           )}
 
           <div

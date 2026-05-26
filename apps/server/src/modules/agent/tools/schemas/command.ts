@@ -9,7 +9,7 @@
  */
 
 import { Type } from '@earendil-works/pi-ai';
-import { CANVAS_ALIGN_DIRECTIONS } from '@sediment/shared';
+import { CANVAS_ALIGN_DIRECTIONS, FRAME_LAYOUT_MODES } from '@sediment/shared';
 
 import { literalUnion, NodeSizeSchema, PointSchema } from './common.js';
 import {
@@ -105,6 +105,22 @@ export const AgentCanvasCommandSchema = Type.Union([
     parentId: Type.Optional(
       Type.Union([Type.String(), Type.Null()], {
         description: 'Parent frame id, or null for root',
+      }),
+    ),
+  }),
+  Type.Object({
+    type: Type.Literal('SET_FRAME_LAYOUT'),
+    frameId: Type.String({ description: 'Target frame node id' }),
+    mode: literalUnion(FRAME_LAYOUT_MODES, {
+      description:
+        '`free` keeps children where they are; `column` / `row` enable structured masonry layout (engine reflows children + resizes the frame to fit on every child change).',
+    }),
+    gridCount: Type.Optional(
+      Type.Integer({
+        description:
+          "Number of tracks (columns or rows) when mode is `column`/`row`. Clamped to [1, 12]. Ignored for `free`. Omit to keep the frame's previous value (or the default of 1).",
+        minimum: 1,
+        maximum: 12,
       }),
     ),
   }),

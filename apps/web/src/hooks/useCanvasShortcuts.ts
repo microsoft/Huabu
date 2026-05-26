@@ -32,12 +32,19 @@ function isEditableTarget(target: EventTarget | null): boolean {
 // Marker keys used to identify serialized canvas nodes / edges in the
 // system clipboard. Older payloads only have `__sediment_nodes__`; the
 // edges key is optional and absent for paste-from-other-app cases.
+// `__sediment_canvas_id__` was added when artifact references moved
+// from full URLs to bare keys: the source canvas id is needed by the
+// cross-canvas clone path because the bare key alone no longer
+// identifies which canvas the underlying file lives in.
 const SEDIMENT_NODES_KEY = '__sediment_nodes__';
 const SEDIMENT_EDGES_KEY = '__sediment_edges__';
+const SEDIMENT_CANVAS_ID_KEY = '__sediment_canvas_id__';
 
 interface SedimentClipboard {
   nodes: unknown[];
   edges: unknown[];
+  /** The canvas the nodes were copied from. May be undefined for legacy payloads. */
+  srcCanvasId?: string;
 }
 
 /**
@@ -60,7 +67,15 @@ function parseSedimentClipboard(
       const edges = Array.isArray(parsed[SEDIMENT_EDGES_KEY])
         ? parsed[SEDIMENT_EDGES_KEY]
         : [];
-      return { nodes: parsed[SEDIMENT_NODES_KEY], edges };
+      const srcCanvasId =
+        typeof parsed[SEDIMENT_CANVAS_ID_KEY] === 'string'
+          ? (parsed[SEDIMENT_CANVAS_ID_KEY] as string)
+          : undefined;
+      return {
+        nodes: parsed[SEDIMENT_NODES_KEY],
+        edges,
+        ...(srcCanvasId ? { srcCanvasId } : {}),
+      };
     }
   } catch {
     // Not JSON — not sediment data
@@ -345,6 +360,7 @@ export function useCanvasShortcuts(
                 getFlowPos(),
                 parsed.nodes as Node[],
                 parsed.edges as Edge[],
+                parsed.srcCanvasId,
               );
               return;
             }
@@ -432,6 +448,7 @@ export function useCanvasShortcuts(
           getFlowPos(),
           parsed.nodes as Node[],
           parsed.edges as Edge[],
+          parsed.srcCanvasId,
         );
         return;
       }

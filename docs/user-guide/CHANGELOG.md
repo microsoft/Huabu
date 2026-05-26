@@ -2,268 +2,35 @@
 
 每次重要功能变更都会记录在此文件中，按时间倒序排列。
 
-## 2026-05-24 · 下线 AUTO_LAYOUT 命令（按钮 / 快捷键 / Agent 工具）
+---
+
+## 2026-05-25 · Artifact 引用瘦身：只存裸文件名
 
 **What Changed**
 
-- 移除画布工具栏的 **⊞ 布局全部** 按钮以及 Frame 工具栏的 **Layout Children** 按钮；对应的 `Ctrl/Cmd+Shift+L` 全局快捷键一并下线。
-- `canvas_commands` 工具的允许集从 14 个命令收窄到 13 个，AI 不再能直接发出 `AUTO_LAYOUT`；用户引导文档（03 / 07 / 08）也同步删除相关行。
-- `AUTO_LAYOUT` 命令本身在 `CanvasCommand` 联合类型中保留，但已标注 `@deprecated`，并加入新增的 `DEPRECATED_CANVAS_COMMAND_TYPES` 桶，从 `AgentCanvasCommand` 中排除；执行器、change extractor、历史 `ToolMessage` 渲染分支也都保留并打上 `@deprecated`，以便历史会话和已持久化的命令仍能正常回放。
+- Node 的 `data.src` / `data.coverUrl` 现在只存裸 artifact key（如 `art_abc.pdf`），不再存完整的 `/api/canvas/<canvasId>/artifact/<file>` 路径。完整 URL 只在渲染时由 `resolveArtifactUrl(key, canvasId)` 临时拼接。
+- 新增一次性迁移 `migrateBareArtifactKeys`（sentinel：`.bare-artifact-keys-v1`），在工作区首次启动时把所有 `nodes/*.md` 里的旧 URL 形态 `src:` / `coverUrl:` 改写为裸 key，data: URL / 外部 URL / 已是裸 key 的值原样保留。
 
 **Notes**
 
-- ✨ **自动布局开关**（`Ctrl/Cmd+Shift+A` / 工具栏开关）的行为完全保留 —— 它控制的是新节点创建时的"自动放置"（fCoSE 增量布局），与已下线的"一键全图重排"是两套机制。
-- 撤销/重做不受影响；历史会话中 AI 曾经发出过 `AUTO_LAYOUT` 的工具卡片仍然显示为不可回滚的"Auto layout"条目。
-- 如果将来要把"一键重排"再上线，需要先解决 `docs/headless-executor-plan.md` 里提到的 fCoSE 服务端确定性问题（位置必须由服务端权威决定，不能依赖浏览器内非确定性算法）。
+- 跨 canvas 复制粘贴的剪贴板载荷新增 `__sediment_canvas_id__` 字段，paste 端用它来判断是否需要克隆 artifact 到目标 canvas。从旧版本剪贴板（无该字段）粘贴时，按同 canvas 处理（不克隆）。
+- 渲染节点的所有位置（PDFNode/PDFPreview、ImageNode/ImagePreview、VideoNode/VideoPreview）必须从 `useCanvasStore` 读取 `canvasId` 并传给 `resolveArtifactUrl(value, canvasId)`，否则裸 key 无法拼出正确 URL。
+- Agent 路由处理 chat 附件时也支持裸 key：附件 `url` 若不是完整路径而是裸文件名，会与当前 thread 的 canvasId 配对解析。
+- 删除节点不会清理 `.artifacts/` 中的对应文件 —— 上传文件被视为可独立保留的资源，避免因撤销 / 重做 / 误删而丢失原始数据。
 
 ---
 
-## 2026-05-22 · Canvas 工具栏与设置入口调整
+## 2026-05-25 · Frame 结构化布局：自动重排 + Agent 可控
 
 **What Changed**
 
-- Canvas 底部工具栏移除了 `Auto Layout All` 按钮。
-- `Enable/Disable Auto Layout` 开关从底部工具栏迁移到画布右上角 `Settings` 弹层中的 `Canvas` 分组。
-- 底部工具栏中的 `Upload Files` 与 `Add Links` 合并为一个 split 下拉入口（主按钮 + 下拉箭头），交互方式与现有工具切换一致。
+- Frame 的 `column` / `row` 结构化布局现在由 canvas-engine executor 统一处理：只要 frame 的任何子节点发生**增删改大小**（包括 resize / 拖入 / 拖出 / 删除），executor 在 batch 末尾会自动重新排布子节点位置并把 frame 调整为内容贴合大小。无需 UI 层显式调用 relayout。
+- 新增 `SET_FRAME_LAYOUT { frameId, mode, gridCount? }` canvas command — agent 可以直接用它把 frame 切到 `column` / `row` 模式并指定轨道数（1–12）。之前依赖 `MERGE_NODE_DATA` 写 `layoutMode` / `gridCount` 的路径已被新 command 取代（agent schema 里 `MERGE_NODE_DATA` 的 patch 字段是封闭白名单，写 `layoutMode` 会被 schema 校验拒掉，所以必须有专用 command）。
 
 **Notes**
 
-- 仅调整入口位置与交互分组，不影响自动布局逻辑本身。
-- `Upload Files` 与 `Add Links` 的实际能力保持不变，仍分别通过原有上传与链接弹窗执行。
-
----
-
-## 2026-05-22 · 全屏 Preview 顶部控制与遮挡修复
-
-**What Changed**
-
-- 全屏 Preview（replace 模式）现在提升了面板层级，优先级高于画布浮动 Header，避免左上 Header 遮挡 Preview 内容与标题栏。
-- 在全屏 Preview 的右上角新增了一个 Chat 面板开关 icon button（样式与现有展开/收缩按钮一致）：
-  - Chat 折叠时显示“打开 Chat”图标。
-  - Chat 展开时显示“收起 Chat”图标。
-
-**Notes**
-
-- 该按钮仅在 Preview 全屏模式下显示；分栏（split）模式仍沿用画布右上角的 Chat 按钮。
-- 仅涉及交互与显示层级调整，不影响节点数据、预览内容或存储格式。
-
----
-
-## 2026-05-23 · 节点视觉：圆角加大
-
-**What Changed**
-
-- 所有画布节点的外圆角统一从 `rounded` (4px) 提升到 `rounded-lg` (8px)，整体观感更柔和。
-- 同步更新的元素包括：`NodeWrapper` 外框、`SemanticPlaceholder`（缩略 LOD 占位层），以及 Web / Video / PDF / Image / Question 节点中自带背景的"面板"内层容器，避免内层方角与外层圆角错位。
-
-**Notes**
-
-- 纯视觉调整，不影响节点尺寸、对齐、连线 handle 位置或选中态 ring 行为。
-- 节点 hover/selected 时的 ring 由 Tailwind 自动跟随 `border-radius`，无需额外改动。
-
----
-
-## 2026-05-23 · 笔记 AI 修改：批量 Accept / Reject + 来源区分
-
-**What Changed**
-
-- 笔记节点上当 AI 改动多个块时，悬浮区域顶部会显示一条可粘性吸顶的汇总条，包含 `Accept all` 与 `Reject all` 两个按钮：
-  - `Accept all`：保留当前所有 AI 改动，清除全部 provenance 标记和墓碑。
-  - `Reject all`：将每个被改动的块按倒序回滚到 baseline（插入的块删除、修改的块还原），并按原顺序重新插入被 AI 删除的块。
-- 区分"AI 编辑"与"其他面板回写"作为外部内容更新的两种来源：只有真正由 AI 触发的内容变更才会盖上 provenance 标记；同一节点上的其他来源（例如展开面板回写）只会平滑迁移现有标记，不再被误判为新一次 AI 改写。
-- `MilkdownPreview` 在启用块拖拽（只读模式）时增加 `aria-readonly`，向辅助技术宣告只读语义。
-
-**Notes**
-
-- 单块 Accept/Reject 行为保持不变；批量按钮只有在至少存在一条 provenance 条目（块标记或墓碑）时才会出现。
-- 批量 Reject 与单块 Reject 一样会写回 markdown — 期间不会触发"用户编辑"的标记清理逻辑，因为我们随后立刻清空 provenance。
-
----
-
-## 2026-05-21 · BlockNote 彻底下线（Phase 6）
-
-**What Changed**
-
-- 移除所有 BlockNote 相关代码与依赖：删除 `@blocknote/core`、`@blocknote/react`、`@blocknote/shadcn` 三个 npm 包，删除 `apps/web/src/components/BlockNote/` 目录与 `BlockNoteCard.tsx`，清掉 `index.css` 中只服务于 BlockNote 的 ShadCN 桥接 token。
-- 删除 `VITE_MESSAGE_RENDERER` 灰度开关，AI 消息卡片固定使用 Milkdown。
-- 拖拽到画布的笔记 payload 不再携带 `contentJson` 辅助字段，markdown 是唯一真值。
-
-**Notes**
-
-- bundle 体积显著减小（移除 ~400KB+ gzip 的 BlockNote 运行时与依赖）。
-- 历史持久化数据中遗留的 `contentJson` / `contentJsonSource` 等字段会被运行时静默忽略，不影响渲染。
-
----
-
-## 2026-05-22 · Chat 面板标题显示当前模型
-
-**What Changed**
-
-- Chat 面板在普通聊天模式下，标题由固定 `Chat` 调整为 `Chat with {当前模型名}`。
-- 当模型名过长时，标题会在不遮挡右侧 icon 按钮（新建会话、折叠）前自动省略显示为 `...`。
-
-**Notes**
-
-- 若当前模型配置尚未加载，标题会暂时回退为 `Chat`，配置返回后自动更新。
-
----
-
-## 2026-05-22 · 笔记编辑器迁移到 Milkdown（Phase 3）
-
-**What Changed**
-
-- 画布上笔记节点（折叠/展开态）的编辑器底层由 BlockNote 迁移到 Milkdown，与聊天消息卡片保持一致的渲染栈：
-  - 折叠态（只读预览）和展开态（可编辑编辑器）都采用 Milkdown。
-  - Markdown 现在是唯一真值，不再维护 BlockNote 的辅助 JSON 格式。
-  - 数学公式、表格、代码块等元素无缝渲染，外观与聊天消息卡片一致。
-- 拖拽块到画布的能力保持可用，拖拽预览同样通过 Milkdown 的原生样式生成。
-- Shadow DOM 隔离保留，笔记样式不会污染全局页面。
-
-**Notes**
-
-- **Provenance（AI 修改标记）暂时缩小**：当前阶段不显示 AI 修改的颜色条和 Accept/Reject 按钮，这些能力将在下一阶段（Phase 4）恢复。打开历史笔记时不会看到旧的 AI 标记。
-- **自动标题提取规则变化**：笔记标题仍然由服务端 preprocessing 自动更新（基于内容分析），前端只负责展示。标题的自动识别逻辑与 BlockNote 时期保持一致。
-- 笔记内容存储从双轨（`content` + `contentJson`）简化为单轨（仅 `content`），减少维护负担。历史笔记的 `contentJson` 字段暂予保留，将在 Phase 6 统一清理。
-
----
-
-## 2026-05-22 · AI 聊天消息改用 Milkdown 渲染
-
-**What Changed**
-
-- AI 聊天回复消息卡片底层渲染器由 BlockNote 迁移到 Milkdown：
-  - 数学公式（KaTeX）、表格、代码块、列表等结构现在直接由 Milkdown 原生渲染，无需经过 BlockNote 的中间块模型。
-  - Shadow DOM 隔离继续保留，消息卡片不会被全局样式污染。
-  - 从消息卡片拖拽单个块到画布生成笔记节点的能力保持可用。
-
-**Notes**
-
-- **多块拖拽暂降级为单块拖拽**：当前阶段一次只能拖拽一个块到画布。在大多数日常使用场景中（拖一个段落、一个代码块、一张表格）行为完全一致；如需把整段回复批量落到画布，请先选中文字使用「复制」或在后续版本中等待恢复多选拖拽。
-- **回退开关**：若新渲染出现问题，可在前端构建时设置环境变量 `VITE_MESSAGE_RENDERER=blocknote` 临时切回原 BlockNote 渲染器（默认值为 `milkdown`）。该回退开关将在迁移收尾阶段（计划中的 Phase 6）随旧依赖一同移除。
-- 历史消息无需迁移：消息内容本来就是 Markdown，直接由新渲染器解析显示。
-
----
-
-## 2026-05-21 · 节点缩放也支持智能对齐与吸附
-
-**What Changed**
-
-- 拖动节点缩放手柄时，画布会复用拖拽时的同一套蓝色辅助线，对正在移动的那一条边做实时对齐与吸附：
-  - **边手柄（N / E / S / W）**：仅在被拖动的那一侧检测吸附，另一侧保持固定，不会出现「拉一条边，另一边也跟着跳」的情况。
-  - **角手柄（NE / NW / SE / SW）**：两条相邻的边各自独立判定吸附目标。
-- 吸附时位置与尺寸会同步调整：例如向左拖动 W 手柄并吸附到旁边节点的右沿时，节点会同时左移并加宽。
-- `Alt` 也对缩放生效——按住即可临时关闭缩放过程中的吸附（已记录至 [快捷键文档](./08-shortcuts.md)）。
-
-**Notes**
-
-- 缩放期间会自动关闭等距对齐识别，避免误触发「‖」等距辅助线（缩放时整块矩形不再整体平移，等距语义不适用）。
-- 与拖拽一致，跨 frame 或处于不同父节点时不会触发吸附；候选节点限定为同一父节点的兄弟，并排除自身以及（若被缩放的是 frame）其后代。
-- 缩放的最终提交仍然走 `setNodeGeometry` 撤销/重做事务，吸附后的位置和尺寸都会被纳入一次撤销。
-
----
-
-## 2026-05-19 · 节点拖拽智能对齐与吸附 + Sketch 工具面板升级
-
-**What Changed**
-
-- 拖动一个或多个节点时，画布会实时计算并显示蓝色对齐辅助线，并在阈值内自动吸附：
-  - **边对齐**：左/中/右、上/中/下共九种边缘组合都会触发。
-  - **等距吸附（中间）**：当被拖节点位于两个同行/同列兄弟之间，且两侧间距相等时吸附，并显示带「‖」标记的等距辅助线。
-  - **等距吸附（延续）**：当同侧已有两个等距排列的兄弟时，吸附到能延续该节奏的位置。
-- 拖拽时按住 `Alt` 可临时关闭智能对齐与吸附（已记录至 [快捷键文档](./08-shortcuts.md)）。
-- Sketch 工具浮动面板重排：左侧 Pen/Eraser 图标按钮负责模式切换，右侧根据当前模式展示对应的设置项，宽度稳定不抖动。Eraser 模式新增可调节的橡皮笔刷半径滑块（4–64 px）。
-- 引入通用 `RangeSlider` 组件，统一节点浮动工具栏与设置面板中的滑块外观与交互。
-
-**Notes**
-
-- 智能对齐仅在被拖节点共享同一父节点（或都为顶层节点）时生效；跨 frame 的混合拖拽会自动停用对齐以避免视觉噪声。
-- 吸附阈值为屏幕空间 6px，与缩放级别无关；同一帧内最多显示 8 条辅助线。
-- 边对齐优先级高于等距吸附；中间等距优先于延续等距。每个轴独立判定，可以一个轴对齐边、另一个轴吸附等距。
-- 当被拖节点尚未测量出尺寸（极少出现）时会自动降级为不吸附，无报错。
-
----
-
-## 2026-05-14 · Annotation 节点全量重命名为 Sketch
-
-**What Changed**
-
-- 节点类型 `'annotation'` 重命名为 `'sketch'`：包含 `CanvasNodeType`、`AnnotationNodeData → SketchNodeData`、`isAnnotationNode → isSketchNode` 等共享类型；以及 `AnnotationStroke / AnnotationCluster / AnnotationClusterContext / AnnotationContext / AnnotationCommandResponse / ResolvedAnnotationIntent / AnnotationIntentRequest` 全部去掉 `Annotation` 前缀改为 `Sketch`。
-- `NodeOrigin` 中的 `'annotation-recognized'` 改为 `'sketch-recognized'`；canvas-event `'annotation-recognized'` 同步更新；`ToolScope` / `SkillScope` / `AgentId` 中的 `'annotation'` 改为 `'sketch'`。
-- 服务端：`apps/server/src/modules/agent/annotation.service.ts → sketch.service.ts`，`recognizeAnnotationCommands → recognizeSketchCommands`；`prompt/agents/annotation/ → prompt/agents/sketch/`（AGENT.md 中 `id / name / description` 同步）；skill `prompt/skills/annotation-gestures/ → sketch-gestures/`；`recognizeAnnotationCommands` 的日志前缀 `[annotation]` 改为 `[sketch]`；preprocessing profile key `annotation → sketch`。
-- API：`POST /api/intent/recognize-annotation → /api/intent/recognize-sketch`；`annotationIntentRequestSchema → sketchIntentRequestSchema`；`annotationClusterContextSchema → sketchClusterContextSchema`。
-- Web：`apps/web/src/components/Nodes/annotation/ → sketch/`（含 `AnnotationNode → SketchNode`、`AnnotationOverlay → SketchOverlay`、`AnnotationProcessingOverlay → SketchProcessingOverlay`、`AnnotationPreview → SketchPreview`、`annotationPath → sketchPath`、`ANNOTATION_OPTIONS → SKETCH_OPTIONS`）；`apps/web/src/handler/annotation/ → sketch/`（含 `clusterAnnotations → clusterSketches`、`extractAnnotationContext → extractSketchContext`）；`apps/web/src/components/Panels/ChatPanel/useAnnotationClusterMessages → useSketchClusterMessages`；`intentStore` 中的 `triggerAnnotationRecognition / cancelAnnotationRecognition / pendingAnnotationIds / onAnnotationCreated / AnnotationProcessingCluster / AnnotationProcessingStatus` 全部去掉 `Annotation` 改为 `Sketch`；`chatStore` 的 `viewingAnnotationCluster / openAnnotationCluster / closeAnnotationCluster` 同步重命名；`NODE_ICON.annotation → NODE_ICON.sketch`，工具栏按钮标题 `"Annotation" → "Sketch"`、面板标题 `"Annotation Recognition" → "Sketch Recognition"`。
-- 文档：`docs/annotation-intent-pipeline.md → sketch-intent-pipeline.md`，`docs/annotation-intent-performance.md → sketch-intent-performance.md`；其余设计 / 用户文档中所有 sketch-相关的「annotation」表述都改为 sketch。
-
-**Notes**
-
-- 这是破坏性变更：旧 `canvas.json` 中 `type: 'annotation'` 的节点不会自动迁移；`{ origin: { type: 'annotation-recognized' } }` 同样不再被识别。开发期内可接受。
-- PDF 节点的 `react-pdf` 第三方 API（`renderAnnotationLayer` / `AnnotationLayer.css`）以及截图工具中绘制 highlight 用的 `getActionAnnotation` / `ANNOTATION_COLOR` 都属于「在图像上画 annotation 标注」语义，与 sketch 节点无关，**保留未改**。
-- 历史 CHANGELOG 条目保留旧名称，反映各时间点的真实状态。
-
-## 2026-05-13 · Canvas 工具集新增 Lasso 工具
-
-**What Changed**
-
-- Canvas 底部工具栏的 Select/Pan 工具集现在新增了 Lasso 工具，并继续放在同一个 split dropdown 里。
-- Lasso 模式下，拖拽画布会绘制自由路径套索，并按闭合轮廓批量选中节点，同时联动选中这些节点之间的连接边，而不是使用矩形框选或直接拖动节点。
-- 矩形框选在结束时也会按同一套规则归一化边的选中结果，避免把只连接到局部命中节点的边一并高亮。
-- 按住空格临时切到 Pan 后，松开会回到你之前使用的选择工具，不会强制跳回 Select。
-
-**Notes**
-
-- Lasso 命中采用多边形与节点矩形的相交判断，不要求节点被完整包住。
-- Click 选中、Pan 模式、中键拖动画布这些已有交互保持不变。
-
-## 2026-05-13 · Wire/Server 边界拆分：prompt-shape 类型从 shared 退到 server
-
-**What Changed**
-
-- 把「LLM 看到的节点形态」（`AgentNodeRef` / `AgentNodePreview` / `AgentNodeOutline` 三段阶梯 + `buildAgentNode*` 构造器 + `extractAgentNodePreview` ladder + `toSafeFilename` 文件名规则）整体下沉到 `apps/server/src/modules/agent/node-ref.ts`，从 `@sediment/shared` 移除。前端打包不再带任何 prompt 形态相关代码。
-- `@sediment/shared/types/api/agent.ts` 新增三种「线上」类型：`WireNodeRef`（id+type+label?）、`WireSelectionNode`（+ src + recursive children）、`WireCanvasNode`（+ content + src + position + size + parentId）。这些是 web 实际 POST 给服务端的形状——只搬「画布原始数据」，不计算 `filename`、不抽 `preview`、不做 `parentFrame.label` 父帧反查。
-- `IntentContext.nodes` 由 `AgentNodeOutline[]` 改为 `WireCanvasNode[]`；`IntentContext.edges` 由 `Array<{source: NodeRef, target: NodeRef}>` 改为 `Array<{source: string, target: string}>`（端点只送节点 id，服务端按需查类型/标签）。
-- `AnnotationClusterContext` 与 `AnnotationContext` 的 `nearbyNodes` / `enclosedNodes` 由 `AgentNodeRef[]` 改为 `WireNodeRef[]`，服务端在拼 prompt 之前再调 `buildAgentNodeRef` 加上 `nodes/<safeLabel>.md` 路径。
-- 顺手修了一个老 bug：`resolveAddNodes` / `resolvePasteClipboard` 写入 `RecentAction.node_created.nodes` 时字段名一直是 `nodeType`（应为 `type`），所以服务端 intent 上下文渲染时读到的一直是 `undefined`。
-
-**Notes**
-
-- 没有持久化数据迁移：所有变化都在「画布到服务端的 JSON 报文形状」与「服务端到 LLM 的 prompt 形状」两层之间发生，磁盘上的 `canvas.json` / `nodes/*.md` / `events.jsonl` 无任何字段调整。
-- 行为收益：之后想改 prompt 形状（preview 长度、`filename` 命名规则、是否带 `parentFrame.label`），只改 server 不需要 web 重新发布。
-- 对外部脚本/工具的影响：直接 POST `/api/intent/recognize*` 的脚本，`nodes[i]` 字段名从 `parentFrame: {id, label?}` 退到 `parentId: string`，且不再带 `filename` / `preview`。`edges[i].source` / `edges[i].target` 从对象退化为字符串 nodeId。
-
----
-
-## 2026-05-13 · Agent 节点引用统一为 AgentNodeRef 阶梯（外部协议变更）
-
-**What Changed**
-
-- 所有传给 LLM 的「这是一个节点」载荷现在共用一条阶梯：`AgentNodeRef`（id+type+label?+filename，最小集合）→ `AgentNodePreview`（+ preview 文本）→ `AgentNodeOutline`（+ position+size+parentFrame?）。`get_canvas_outline` / `inspect_nodes` 返回的节点字段名从 `parentId` / `width` / `height` 改为 `parentFrame: { id, label? }` / `size: { width, height }`，并新增 `filename` 字段（pre-computed `nodes/<safeLabel>.md`，可直接喂给 `read`）。
-- 选中节点（`AgentChatContext.selectedNodes` / `IntentContext.selectedNodes`）的线上类型从 `SelectionPayload` 改名为 `WireSelectionNode`，shape 不变。Annotation cluster context 的 `nearbyNodes` / `enclosedNodes` 改用 `AgentNodeRef`。
-- 节点 preview 抽取规则简化为 `summary > content[:120] > src`——**舍弃了 `keywords` 拼接回退**：之前没有 summary 但有 keywords 的节点会回退成 `kw1, kw2, kw3` 字符串，现在直接落到 `content[:120]` 或 `src`。
-- 共享构造器 `buildAgentNodeRef` / `buildAgentNodePreview` / `buildAgentNodeOutline` 从 `@sediment/shared` 导出，server 与 web 各自的临时拼装代码（agent.route.ts / annotation.service.ts / canvas-spatial.ts / node-neighbourhood.ts / canvasStore.ts / annotation/context.ts）全部改用统一构造器。
-- `IntentContext.edges` 的 `NodeRef` 字段从 `nodeType` 改名为 `type`。
-
-**Notes**
-
-- 这是一次纯类型/字段重构 + 一次 Agent 工具响应 schema 变更：调用 `get_canvas_outline` 或 `inspect_nodes` 的本地脚本/外部工具如果硬编码读 `nodes[i].parentId` / `nodes[i].width` / `nodes[i].height`，必须改为 `nodes[i].parentFrame?.id` / `nodes[i].size.width` / `nodes[i].size.height`。
-- 关键收益：先前**不带 keywords 兜底**的 outline preview 与节点邻域 preview 现在保持一致，且 LLM 拿到节点 ref 时会同时拿到 `filename` 字段——再也不用根据 label 推 safeFilename，避免之前因空格/标点拼错 path 而 404 的 `read`。
-- 数据盘上不存在迁移：所有变化都是「在内存中拼装给 LLM 的 JSON 形态」。无需重启或重建索引。
-
----
-
-## 2026-05-12 · Agent 配置统一为 AGENT.md 单文件
-
-**What Changed**
-
-- 每个 agent（`ask` / `operate` / `intent` / `annotation`）的系统提示词、可用工具列表、运行时参数（`maxIterations` / `toolExecution` / `defaultOrigin`）现在统一写在一份 `apps/server/src/prompt/agents/<id>/AGENT.md` 配置文件里——YAML frontmatter 声明元信息与工具，Markdown body 即系统提示词。
-- 调用端通过新的 `loadAgent(id)` API 读取配置，原本散落在 `prompt/agent.ts`、`prompt/intent.ts` 中的硬编码字符串、以及 `tools/index.ts` 里硬编码的 `askTools / operateTools / annotationTools` 工具数组都已删除。
-- 模板支持 `{{skillCatalogue}}` 变量（自动按 `skillScope` 注入 SKILL.md 目录摘要），以及 `{{#skillCatalogue}}…{{/skillCatalogue}}` 条件块（无技能时整段省略）。
-
-**Notes**
-
-- 修改 prompt 或工具组合现在只需编辑对应的 `AGENT.md`，不再需要改 TS 代码——加载器在启动时严格校验 frontmatter，错误会立即抛出。
-- 工具的 TypeBox schema 与 handler 仍然在 `modules/agent/tools/definitions.ts` 用 TypeScript 编写并注册到 `TOOL_REGISTRY`，AGENT.md 只通过 `name` 引用——schema 形态不适合塞进 YAML。
-- 此前硬编码在 `annotation.service.ts` 中的 `ANNOTATION_MAX_ITERATIONS = 6` 与 `origin: { type: 'annotation-recognized' }` 现在分别由 `annotation/AGENT.md` 的 `runtime.maxIterations` 和 `runtime.defaultOrigin` 提供。
-- 没有用户可见的运行时行为变化——是纯重构。
+- 对终端用户：行为与之前一致，但更可靠 — 之前 child resize 不会触发 frame 自动适配，现在会。
+- 对 agent：新的能力记录在 `skills/canvas/references/layout-recipes.md` 的 "Structured frame layout" 章节。可用于 kanban、列对比表、行 track 流程图等确定性布局。结构化 frame 的大小由内容驱动，agent 不应在同 batch 里给 frame 传 `size`。
 
 ---
 
@@ -285,124 +52,10 @@
 
 ---
 
-## 2026-05-09 · Frame 节点也生成 `.md` 文件
-
-**What Changed**
-
-- frame 节点不再是“完全只存在 `canvas.json` 里”了，会在 `nodes/` 目录下生成一个对应的 `.md`，格式与 image / video 一致——只有 frontmatter（`id`、`type: frame`、`title`），没有正文。
-- 现在会生成 `.md` 的节点类型全集：note / text / web / pdf / image / video / **frame**。
-- 打开旧工作区时会自动补齐：scan `canvas.json` 里现有的 frame 节点，谁没有对应 `.md` 就为谁生成一份。
-
-**Notes**
-
-- frame 重命名会跟着改它的 `.md` 文件名，同样会被 `tryRename` 检查同画布内重名冲突。
-- frame 在 `canvas.json` 里仍然保留子节点层级等拓扑信息，`.md` 只是多一份可读的元数据限定。
-- 仍然不生成 `.md` 的节点类型：annotation、question、intent。
-
----
-
-## 2026-05-09 · Note 文件缺失占位 UI 与媒体节点对齐
-
-**What Changed**
-
-- Note 节点的 `.md` 文件在 Finder 里被删掉 / 改名后，原本顶部那条小灰带「Note file missing — type to recreate it」改成跟 PDF / 图片 / 视频节点一致的居中占位卡片：图标 + 「Note file missing」标题 + 一句说明 + 醒目的「Remove from canvas」按钮。
-- 占位状态下编辑器不再显示，节点工具栏也会临时隐藏，避免在「文件已经没了」的节点上做编辑操作。
-
-**Notes**
-
-- 触发条件不变：只有当后端给的 `data.contentMissing` 为 true **且** 节点目前没有可回退的内存内容时才会显示这张卡片。
-- 「敲字直接重建 .md」的旧行为下线了：现在只能选择「Remove from canvas」清掉孤儿节点，或者直接在 Finder 里把 .md 放回来。
-
----
-
-## 2026-05-09 · Artifact 存储改造：隐藏目录 + 节点级 .md
-
-**What Changed**
-
-- 工作区里 `artifacts/` 目录现在改名为 `.artifacts/`（隐藏），并且 `artifacts.json` 清单文件被彻底删除。文件名不再依赖 displayName，统一就是 `<artifactId><ext>`，URL 与磁盘路径一一对应。
-- 每一个有原始文件的节点（pdf / image / video / web / note / text）现在都会在 `nodes/` 下生成一个对应的 `.md`：text / web / pdf / note 的 `.md` 里有正文 + frontmatter；image / video 的 `.md` 只有 frontmatter（指向 `.artifacts/` 里的文件）。
-- 不会生成 `.md` 的节点类型：**annotation、question、intent**。它们的全部信息只存在 `canvas.json` 里。（frame 节点随后也加入了 `.md` 体系，详见上面的条目。）
-- 打开旧工作区时会自动迁移：`artifacts/` 重命名为 `.artifacts/`、按清单把文件名改为 `<artifactId><ext>`、清单文件删除、所有 image / video 节点补齐对应的 `.md`。整个过程是幂等的，重复打开不会出问题。
-
-**Notes**
-
-- 上传 / 克隆 artifact 的接口签名简化：不再接受 `displayName` / `source` 字段；服务端只关心 id 和扩展名。前端没有用到这些字段，行为没有可见变化。
-- 节点 `.md` 的文件名仍然按节点标题生成（清理过非法字符），改名节点会改 `.md` 文件名；artifact 的文件名固定为 id，不会跟着节点标题走。
-- 导出 `.sediment.zip` 时会一并打包 `.artifacts/`，对方导入后所有附件都能直接用。
-- 如果你以前手动改过 artifact 文件名，迁移会保留你的改动（因为 URL 键 = 文件名）。
-
----
-
-## 2026-05-10 · 修复：Annotation Agent 偶尔触发 `handler is not a function` 崩溃
-
-**What Changed**
-
-- **修复 annotation agent 返回未知命令类型时画布执行器崩溃的问题**。当 LLM 在批注识别（红色手绘 → canvas 命令）阶段产出一个超出 schema 的 `type`（拼写错误、小写、或臆造的命令名）时，前端 `executor.ts` 直接拿 `HANDLERS[cmd.type]` 当函数调用，触发 `Uncaught TypeError: handler is not a function`，整批命令全部丢失且后续 annotation 流水线状态卡死。
-- 修复方式：
-  - **服务端 `apps/server/src/modules/agent/intent.service.ts`**：在 `recognizeAnnotationCommands` 解析 LLM JSON 后，按共享常量 `AGENT_CANVAS_COMMAND_TYPES` 过滤命令，对未知 `type` 记 `console.warn` 并丢弃，再返回给前端。
-  - **前端 `apps/web/src/handler/canvasCommand/executor.ts`**：作为兜底，若 `HANDLERS[cmd.type]` 不存在则 `console.warn` 并把该命令记为 `applied: false, reason: 'no-op'` 后跳过；同步给 `COMMAND_META` 的下游读取加上可选链。
-
-**Notes**
-
-- 影响范围：annotation agent（手绘红色批注 → 自动转成画布命令）。Operate agent 走 `canvas_commands` 工具时本来就经过 TypeBox `validateToolCall`，不会遇到这个问题。
-- 当 LLM 偶尔产出错命令时，现在会跳过该条但其余正确命令仍会执行；overlay 状态会进入 `done`，方便用户接受/撤销其余有效部分。
-- 控制台会打印 `[annotation-intent] dropping unknown command type from LLM output: …` 和 `[canvas-executor] Unknown command type — skipping: …` 帮助定位 prompt / skill 中导致 LLM 走偏的指令。
-
----
-
-## 2026-05-10 · 修复：Agent 在 operate 模式下声称已修改画布但实际未生效
-
-**What Changed**
-
-- **修复 `canvas_commands` 工具结果被前端静默丢弃的问题**。Agent 调用 `canvas_commands`（连接节点、修改节点内容、创建节点等）后，消息列表会显示"已执行"，但画布上没有任何变化。
-- 根因：服务端 `handleCanvasCommands` 在错误处理重构（提交 `056f4f3`）时去掉了 `{ tool, status: 'success', data: { … } }` 外层包装，直接返回 `{ source, canvasId, commands }`；但前端 `useAgentStream` 的 `applyCanvasCommandsFromToolResult` 仍然按旧 schema 检查 `parsed.status === 'success' && parsed.data.commands`，匹配失败 → 静默返回 `null` → `executeCommands` 从未被调用。
-- 修复方式：在 `apps/web/src/hooks/useAgentStream.ts` 中调整解析器，按服务端当前真实输出形状读取顶层 `commands` 字段，并通过 `status === 'error'` 显式跳过错误信封。
-
-**Notes**
-
-- 影响范围：所有 operate 模式下经 `canvas_commands` 工具产生的画布变更（CREATE_NODES / CONNECT_NODES / MERGE_NODE_DATA / DELETE_NODES / SET_NODE_PARENT / DISSOLVE_FRAME / SET_NODE_GEOMETRY / REORDER_NODES / DISCONNECT_EDGES / SET_EDGE_STYLE / ALIGN_NODES / DISTRIBUTE_NODES / AUTO_LAYOUT）。
-- Annotation / sketch intent 流不受影响 — 这些路径不经 `canvas_commands` 工具，命令以 JSON 形式从 LLM 直接返回。
-- 历史会话回放：之前 Agent "假装"执行过的命令已经在服务端记录中标记为成功，但磁盘上没落盘。重新触发同一指令即可让 Agent 重新生成命令并真正执行。
-
----
-
-## 2026-05-10 · Skill 体系收敛为 `canvas` + `annotation` 两层结构
-
-**What Changed**
-
-- **从三个 flat skill 收敛为一个核心 skill + references 的层级结构**。原来的 `canvas-commands` / `canvas-tools` / `build-flowchart` 三个 SKILL 合并为单一 `skills/canvas/SKILL.md`：心智模型 + 工具决策矩阵 + 命令目录都在入口文件里，深度内容下沉到 `references/`：
-  - `skills/canvas/references/command-cookbook.md` — 组合 batch 套路（brainstorm / merge / 入框 / restyle / tidy …）。
-  - `skills/canvas/references/layout-recipes.md` — 坐标系 + 层级 / 流向 / 网格布局 + 行轨道 flowchart 配方。
-- **annotation 流水线独立成 `skills/annotation/SKILL.md`**，frontmatter `appliesTo: [annotation]`，只在 annotation prompt 的 catalogue 里出现，不污染 operate / chat / external 上下文。
-- **`resolveSkillPath` 支持 references 子路径**：`read("skills/<id>/references/<file>.md")` 走和 `read("skills/<id>/SKILL.md")` 完全相同的解析路径（per-canvas override → global），并加了路径转义防御（`..` 越界返回 null）。
-- **`agent.ts` 删除 inline 的 Layout strategies 段**（≈30 行），改为指向 `skills/canvas/SKILL.md`；catalogue 现在自动渲染为单行 `- canvas — …`。
-- **`intent.ts` 的 ANNOTATION prompt 删除 inline 的 Gesture interpretation / Rules / CanvasCommand reference 段**（≈40 行），改为同一个指向 skill 的提示。
-- **`canvas_commands` 工具描述里的 skill 链接** 同步从 `skills/canvas-commands.md` 改为 `skills/canvas/SKILL.md`。
-
-**Notes**
-
-- 兼容性：旧路径 `read("skills/canvas-commands.md")` / `read("skills/canvas-tools.md")` / `read("skills/build-flowchart.md")` 不再可用。仓库内已无残留引用，per-canvas override 若曾使用同名文件需要随之改名（一般情况下用户层不会有）。
-- Catalogue 内容：`operate` / `ask` / `external` 各看到 1 个 skill（`canvas`）；`annotation` 看到 2 个（`annotation` + `canvas`）。
-- 详见 [docs/agent-architecture.md](../agent-architecture.md) §3 Skill 设计。
-
----
-
-## 2026-05-10 · Agent skill 系统数据化：`use_skill` 工具下线，改用 `read("skills/<id>/SKILL.md")`
-
-**What Changed**
-
-- **Skill 内容从 TS 字符串迁到磁盘 markdown**。每个 skill 现在是一个 `apps/server/src/prompt/skills/<id>/SKILL.md` 文件，带 YAML frontmatter（`id / name / description / appliesTo / triggers? / version?`）。新增加载器 `skill-loader.ts` 在启动期扫盘 + 校验，frontmatter 不合法直接抛错。
-- **`use_skill` 工具被删除**。Agent 不再通过专门的工具调用拿 skill，而是用现有的 `read` 工具读 `skills/<id>/SKILL.md`。所有 agent（内置 / Copilot / Codex / Claude Code）只要有文件读权限就能用，不再需要专门集成。
-- **支持 per-canvas skill 覆盖**：`<canvas>/skills/<id>/SKILL.md` 优先于全局 skill；skill 的补充材料可放在同目录下的 `skills/<id>/references/...`。
-- **抽出两个 skill**：`canvas-commands`（命令语义 + 组合套路）和 `canvas-tools`（read / inspect_nodes / inspect_edges / grep 边界与决策矩阵）。`agent.ts` 与 `intent.ts` 中对应的长段已替换为指向 skill 的一句话；`canvas_commands` 工具描述也大幅瘦身，schema 仍由 TypeBox 单一来源决定。
-
-**Notes**
-
-- 兼容性：`use_skill` 是 LLM 可见的工具名，移除属于 agent 接口变更。已检查全 repo 无前端 / shared 调用。任何残留的旧 prompt 提到 `use_skill` 都已替换。
-- 提示词体积：operate prompt 5106 字符（含动态 catalogue），annotation prompt 3650 字符，`canvas_commands` 工具描述从 ~1.7K 降到 912 字符。
-- 详见 [docs/agent-architecture.md](../agent-architecture.md) §3 Skill 设计。
-
----
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
 
 ## 2026-05-08 · Agent 循环升级到 pi-agent-core
 
@@ -417,9 +70,7 @@
 
 - SSE 协议、UI 组件、历史会话格式全部保持兼容；老的 `.history/<canvasId>/<threadId>.json` 直接可用，无需迁移。
 - 工具卡片出现时间会**略微滞后几十毫秒**。
-- 新依赖：`@earendil-works/pi-agent-core@^0.74.0`，与已有 `pi-ai` 同版本。
-
----
+- # 新依赖：`@earendil-works/pi-agent-core@^0.74.0`，与已有 `pi-ai` 同版本。
 
 ## 2026-05-08 · 复制粘贴节点时连同边一起带走
 
@@ -434,8 +85,7 @@
 - 剪贴板 payload 新增 `__sediment_edges__` 字段（旧字段 `__sediment_nodes__` 不变），向后兼容：旧版客户端读不到 edges 字段也只会少连线、不会出错。
 - Frame 节点连带子节点一起复制时，子节点之间的连线同样会跟着复制。
 - 边的 ID 会重新生成（`edge-…`），不会撞到目标画布已有的边。
-
----
+  > > > > > > > # 114687c (feat(canvas): preserve edges when copy/pasting nodes (cross-canvas too))
 
 ## 2026-05-08 · 跨画布复制粘贴含 artifact 节点
 
@@ -451,8 +101,7 @@
 - 克隆走的是字节复制，所以源文件如果之后被删，目标画布不受影响。
 - 如果源 artifact 已经不存在（比如源画布被删了），克隆请求会 404；前端会保留原 URL 并 console.warn，节点会显示 "File missing" 占位。
 - 同名 artifact 在目标画布中通过 `<新 displayName> (2).ext` 自动去重。
-
----
+  > > > > > > > # 4f05d4d (feat(canvas): clone artifact files when pasting nodes across canvases)
 
 ## 2026-05-08 · 文件系统外部改动的兜底机制
 
@@ -469,8 +118,7 @@
 - `data.contentMissing` / `data.artifactMissing` 是后端 GET 时贴在 node data 上的 hint，前端读到就显示占位 UI；下次成功读到文件就会自动清掉，不会持久化。
 - Note / Text 节点的 banner 只在内容为空时显示。一旦用户敲了字，banner 自动消失，重新写入 .md 文件。
 - 这套兜底**不会**做模糊匹配 / 重链接，避免把不相关的文件错配到节点上。
-
----
+  > > > > > > > # f4891b4 (feat(storage): self-heal canvas/node/artifact when files are touched outside the app)
 
 ## 2026-05-08 · 文件名改用语义化命名 + 重命名重名校验
 
@@ -489,6 +137,7 @@
 - 节点 markdown 文件遇到重名时（在前端通过 alert 拦截之外的边界情况），后端会自动追加 `(2)`、`(3)` 之类的后缀。Frame 类型节点没有 label 时，文件名仍然回退到 ID。
 - 取消编辑可以按 ESC 或者点开输入框外面：canvas 标题输入按 Enter 提交，按 ESC 还原；节点 label 双击进入编辑，按 Enter 提交，按 ESC 还原。
 - 已发布给 LLM 或聊天附件的 artifact URL 不会因为后续改名而失效，因为后端通过 manifest 把 URL 里的 `<id>.ext` 反查回当前真实文件路径。
+  > > > > > > > 590f53a (docs(changelog): label-based naming + rename validation)
 
 ---
 

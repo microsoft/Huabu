@@ -1,7 +1,4 @@
-import {
-  ARTIFACT_DATA_FIELDS,
-  isCrossCanvasArtifactUrl,
-} from '@sediment/shared';
+import { ARTIFACT_DATA_FIELDS } from '@sediment/shared';
 import {
   COMMAND_META,
   applySharedPostEffectsFromWriteResult,
@@ -399,6 +396,7 @@ type RFState = {
     flowPosition: { x: number; y: number },
     clipboardNodes: Node[],
     clipboardEdges?: Edge[],
+    srcCanvasId?: string,
   ) => void;
 
   /** Undo / Redo */
@@ -1931,9 +1929,13 @@ const useCanvasStore = create<RFState>()(
       // Write serialized node + edge data to system clipboard. Edges are
       // optional; older paste handlers that only know `__sediment_nodes__`
       // will still produce valid results (just without the connections).
+      // `__sediment_canvas_id__` lets cross-canvas paste recover the
+      // source canvas — required since `data.src` now stores only the
+      // bare artifact key, not a full canvas-scoped URL.
       const payload = JSON.stringify({
         __sediment_nodes__: cloned,
         __sediment_edges__: clonedEdges,
+        __sediment_canvas_id__: get().canvasId,
       });
       // `copyToClipboard` guards against `navigator.clipboard` being
       // undefined (insecure contexts, older browsers) and falls back to
@@ -1941,22 +1943,32 @@ const useCanvasStore = create<RFState>()(
       void copyToClipboard(payload);
     },
 
-    pasteNodes: (flowPosition, clipboardNodes, clipboardEdges) => {
+    pasteNodes: (flowPosition, clipboardNodes, clipboardEdges, srcCanvasId) => {
       const dstCanvasId = get().canvasId;
       if (!dstCanvasId || clipboardNodes.length === 0) return;
 
-      // Same-canvas pastes leave artifact URLs as-is (the artifact is
+      // Same-canvas pastes leave artifact keys as-is (the artifact is
       // already owned by this canvas). Cross-canvas pastes clone the
       // underlying file so the destination canvas owns its own copy —
       // otherwise deleting the source canvas would orphan the pasted
-      // node. The set of fields that may carry a canvas-scoped artifact
-      // URL is the shared `ARTIFACT_DATA_FIELDS` constant.
-      const needsClone = clipboardNodes.some((node) => {
-        const data = (node.data ?? {}) as Record<string, unknown>;
-        return ARTIFACT_DATA_FIELDS.some((field) =>
-          isCrossCanvasArtifactUrl(data[field], dstCanvasId),
-        );
-      });
+      // node. The set of fields that may carry an artifact key is the
+      // shared `ARTIFACT_DATA_FIELDS` constant.
+      //
+      // We only know it's a cross-canvas paste when the clipboard
+      // payload carries `srcCanvasId` AND it differs from the current
+      // canvas. Legacy clipboard payloads (no srcCanvasId) — or payloads
+      // copied from this same canvas — fall through to the synchronous
+      // fast path.
+      const needsClone =
+        !!srcCanvasId &&
+        srcCanvasId !== dstCanvasId &&
+        clipboardNodes.some((node) => {
+          const data = (node.data ?? {}) as Record<string, unknown>;
+          return ARTIFACT_DATA_FIELDS.some((field) => {
+            const v = data[field];
+            return typeof v === 'string' && v.length > 0;
+          });
+        });
 
       const dispatch = (nodes: Node[]) => {
         get().dispatchUiIntent({
@@ -1971,7 +1983,7 @@ const useCanvasStore = create<RFState>()(
 
       // Fast path: nothing to clone — preserve the prior synchronous
       // behaviour so simple intra-canvas pastes feel instant.
-      if (!needsClone) {
+      if (!needsClone || !srcCanvasId) {
         dispatch(clipboardNodes);
         return;
       }
@@ -1983,18 +1995,24 @@ const useCanvasStore = create<RFState>()(
             let mutated = false;
             for (const field of ARTIFACT_DATA_FIELDS) {
               const value = data[field];
-              if (!isCrossCanvasArtifactUrl(value, dstCanvasId)) continue;
+              if (typeof value !== 'string' || value.length === 0) continue;
+              // Skip non-key strings (e.g. data URLs, http(s) URLs). The
+              // server-side clone only handles canvas-owned files.
+              if (value.startsWith('data:') || /^https?:/i.test(value))
+                continue;
+              if (value.includes('/')) continue;
               try {
-                const newUrl = await cloneArtifactToCanvas(
-                  value as string,
+                const newKey = await cloneArtifactToCanvas(
+                  srcCanvasId,
+                  value,
                   dstCanvasId,
                 );
-                if (newUrl && newUrl !== value) {
-                  data[field] = newUrl;
+                if (newKey && newKey !== value) {
+                  data[field] = newKey;
                   mutated = true;
                 }
               } catch (err) {
-                // Best effort — fall back to the original URL. The new
+                // Best effort — fall back to the original key. The new
                 // node will render with the missing-file placeholder
                 // (artifactMissing flag from the server) so the user can
                 // still remove it.

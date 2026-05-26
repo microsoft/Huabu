@@ -4,7 +4,6 @@ import path from 'node:path';
 import { cloneArtifactBodySchema, createId } from '@sediment/shared';
 import { type FastifyPluginAsync } from 'fastify';
 
-import { artifactApiPath } from './utils.js';
 import { getCanvasStore } from '../storage/index.js';
 
 import type {
@@ -63,9 +62,11 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
       return reply.code(500).send({ message: 'Failed to save file' });
     }
 
+    // `uri` carries only the artifact key (`<id><ext>`); callers build
+    // the canvas-scoped URL at render time.
     const response: ArtifactUploadResponse = {
       id,
-      uri: artifactApiPath(canvasId, record.filename),
+      uri: record.filename,
       filename: data.filename ?? record.filename,
       mimetype: data.mimetype,
     };
@@ -144,9 +145,10 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
         .send({ message: 'Failed to save cloned artifact' });
     }
 
+    // Mirror the upload route: return only the bare key.
     const response: ArtifactUploadResponse = {
       id,
-      uri: artifactApiPath(dstCanvasId, record.filename),
+      uri: record.filename,
       filename: record.filename,
       mimetype: record.mimeType ?? undefined,
     };

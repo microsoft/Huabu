@@ -59,6 +59,7 @@ export type {
 export {
   applyColumnLayout,
   applyRowLayout,
+  applyStructuredFrameRelayout,
   clampGridCount,
   readFrameGridConfig,
   pickColumnSlotFromFramePoint,

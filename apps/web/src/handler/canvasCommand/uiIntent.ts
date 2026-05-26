@@ -629,24 +629,22 @@ function resolveMoveNodeOutOfFrame(
 
 function resolveSetFrameLayoutMode(
   intent: Extract<CanvasUiIntent, { type: 'SET_FRAME_LAYOUT_MODE' }>,
-  ui: UiResolverState,
+  _ui: UiResolverState,
 ): UiIntentResolution {
-  const patch: Record<string, unknown> = { layoutMode: intent.mode };
-  if (typeof intent.gridCount === 'number') {
-    patch.gridCount = intent.gridCount;
-  }
-
-  // Apply the layout-mode patch via the relayout's `pending` channel so
-  // the structured pass sees the new mode/gridCount that's about to land.
-  const commands: CanvasCommand[] = [
-    {
-      type: 'MERGE_NODE_DATA',
-      patches: [{ nodeId: intent.frameId as CanvasNodeId, patch }],
-    },
-    ...buildStructuredFrameRelayoutCommands([intent.frameId], ui.nodes, {
-      frameDataPatches: [{ nodeId: intent.frameId, patch }],
-    }),
-  ];
-
-  return { commands, trace: [] };
+  // The executor's end-of-batch structured-relayout pass picks the
+  // frame up via `affectedFrameIds` and does the reflow + fit in one
+  // pass — no follow-up commands needed.
+  return {
+    commands: [
+      {
+        type: 'SET_FRAME_LAYOUT',
+        frameId: intent.frameId as CanvasNodeId,
+        mode: intent.mode,
+        ...(typeof intent.gridCount === 'number' && {
+          gridCount: intent.gridCount,
+        }),
+      },
+    ],
+    trace: [],
+  };
 }

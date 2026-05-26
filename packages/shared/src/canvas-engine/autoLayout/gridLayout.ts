@@ -32,8 +32,14 @@ import type { Node, XYPosition } from '@xyflow/react';
 
 /** Gap between consecutive items stacked along the "infinite" axis. */
 export const GRID_INTRA_TRACK_GAP = 24;
-/** Gap between two adjacent tracks (columns or rows). */
-export const GRID_INTER_TRACK_GAP = 12;
+/**
+ * Gap between two adjacent tracks (columns or rows). Kept in sync with
+ * `GRID_INTRA_TRACK_GAP` so the layout reads as a uniform grid — using
+ * a smaller inter-track gap (the previous 12) made columns feel
+ * squeezed horizontally compared to the vertical breathing room
+ * between stacked cards.
+ */
+export const GRID_INTER_TRACK_GAP = GRID_INTRA_TRACK_GAP;
 /** Fallback minimum track size when the children are still un-measured. */
 const MIN_TRACK_SIZE = GRID_SIZE * 4;
 
@@ -428,4 +434,93 @@ export function pickRowSlotFromFramePoint(
     }
   }
   return best;
+}
+
+// ── Executor integration: apply layout to nodes in-place ──────────────
+
+/**
+ * Apply structured (`column` / `row`) layout to every frame in
+ * `frameIds` that opted into it via `data.layoutMode`. Free-mode frames
+ * are skipped (caller's `fitFrames` handles them).
+ *
+ * Returns the new nodes array and the set of frame IDs that were
+ * actually relaid out — the executor uses this set to subtract from
+ * its bounding-box `fitFrames` pass, since structured frames already
+ * carry their own content-driven size from this pass.
+ *
+ * Mutations applied per handled frame:
+ * - Children's `position` → `result.childPositions`
+ * - Children's `data.frameSlot` → `result.slotAssignments`
+ * - Frame's `style.width` / `style.height` / `measured` → `result.frameSize`
+ *
+ * Pure (returns new arrays); the input is left untouched.
+ */
+export function applyStructuredFrameRelayout(
+  nodes: Node[],
+  frameIds: Iterable<string>,
+): { nodes: Node[]; handledFrameIds: Set<string> } {
+  const handled = new Set<string>();
+  const seen = new Set<string>();
+
+  // Compute layout for each opted-in frame against the evolving array.
+  let working = nodes;
+
+  for (const frameId of frameIds) {
+    if (seen.has(frameId)) continue;
+    seen.add(frameId);
+
+    const frame = working.find((n) => n.id === frameId);
+    const cfg = readFrameGridConfig(frame);
+    if (!cfg) continue;
+
+    const result =
+      cfg.axis === 'column'
+        ? applyColumnLayout(working, frameId, cfg.count)
+        : applyRowLayout(working, frameId, cfg.count);
+    if (!result) continue;
+
+    handled.add(frameId);
+
+    working = working.map((n) => {
+      // Frame itself — write content-driven size into both style + measured
+      // so any ancestor frame's fit pass (cascade) sees the post-layout size.
+      if (n.id === frameId) {
+        const prevMeasured = (n.measured ?? {}) as {
+          width?: number;
+          height?: number;
+        };
+        return {
+          ...n,
+          style: {
+            ...(n.style ?? {}),
+            width: result.frameSize.width,
+            height: result.frameSize.height,
+          },
+          measured: {
+            ...prevMeasured,
+            width: result.frameSize.width,
+            height: result.frameSize.height,
+          },
+        };
+      }
+      // Direct children — position + slot.
+      if (n.parentId !== frameId) return n;
+      const nextPos = result.childPositions.get(n.id);
+      const nextSlot = result.slotAssignments.get(n.id);
+      const dataRec = (n.data ?? {}) as Record<string, unknown>;
+      const priorSlot = (dataRec as { frameSlot?: number }).frameSlot;
+      const posChanged =
+        !!nextPos && (n.position.x !== nextPos.x || n.position.y !== nextPos.y);
+      const slotChanged =
+        typeof nextSlot === 'number' && priorSlot !== nextSlot;
+      if (!posChanged && !slotChanged) return n;
+      return {
+        ...n,
+        ...(posChanged && nextPos ? { position: nextPos } : {}),
+        ...(slotChanged ? { data: { ...dataRec, frameSlot: nextSlot } } : {}),
+      };
+    });
+  }
+
+  return { nodes: working, handledFrameIds: handled };
 }

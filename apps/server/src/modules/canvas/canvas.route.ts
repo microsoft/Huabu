@@ -172,22 +172,38 @@ const CONTENT_BACKED_NODE_TYPES = new Set(['note', 'text']);
 const ARTIFACT_BACKED_NODE_TYPES = new Set(['pdf', 'image', 'video']);
 
 /**
+ * Extract an artifact storage key from a `data.src` / `data.coverUrl`
+ * value. Accepts both the canonical bare key (`<id><ext>`, the form the
+ * frontend now persists) and a legacy full URL of shape
+ * `/api/canvas/<canvasId>/artifact/<key>`. Returns `null` for empty
+ * strings, data URLs, or remote URLs (which point at external hosts).
+ */
+function extractArtifactKey(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length === 0) return null;
+  if (value.startsWith('data:')) return null;
+  const match = value.match(ARTIFACT_URL_REGEX);
+  if (match && match[2]) return path.basename(match[2]);
+  // Anything containing a slash beyond what `path.basename` strips is a
+  // remote URL or a directory path — reject it so we don't try to
+  // resolve `https://example.com/file.png` as a local artifact key.
+  if (/^https?:/i.test(value)) return null;
+  if (value.includes('/')) return null;
+  return value;
+}
+
+/**
  * Inspect a node's `data.src` and report whether the underlying artifact
  * file still exists on disk. Returns `false` (not missing) for nodes
- * without a canvas-scoped artifact URL — remote URLs and data URLs are
+ * without a canvas-scoped artifact key — remote URLs and data URLs are
  * out of scope for this check.
  */
 function isArtifactMissing(
   store: CanvasStore,
   data: Record<string, unknown>,
 ): boolean {
-  const src = typeof data['src'] === 'string' ? (data['src'] as string) : '';
-  if (!src) return false;
-  const match = src.match(ARTIFACT_URL_REGEX);
-  if (!match) return false;
-  const filename = match[2];
-  if (!filename) return false;
-  return store.resolveArtifactFilePath(filename) === null;
+  const key = extractArtifactKey(data['src']);
+  if (!key) return false;
+  return store.resolveArtifactFilePath(key) === null;
 }
 
 /**
