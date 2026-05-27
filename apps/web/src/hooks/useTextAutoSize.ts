@@ -90,9 +90,24 @@ export function useTextAutoSize({
   const persistedHeight = useStore(
     (s) => s.nodeLookup.get(nodeId)?.style?.height as number | undefined,
   );
-  const patchNodeSilent = useCanvasStore((s) => s.patchNodeSilent);
 
   const lockedFontSize = style?.fontSize;
+
+  const writeLockedFontSize = useCallback(
+    (nextFontSize: number) => {
+      const state = useCanvasStore.getState();
+      const currentStyle = state.nodes.find(
+        (node) => node.id === nodeId,
+      )?.style;
+      state.patchNodeSilent(nodeId, {
+        style: {
+          ...(currentStyle ?? {}),
+          fontSize: nextFontSize,
+        },
+      });
+    },
+    [nodeId],
+  );
 
   const inset = padding + borderInset;
 
@@ -127,13 +142,11 @@ export function useTextAutoSize({
           fontOpts,
         )
       : baseFontSize;
-    patchNodeSilent(nodeId, {
-      style: { ...(style ?? {}), fontSize: derived },
-    });
+    writeLockedFontSize(derived);
     // Intentionally minimal deps — we want a one-shot migration using the
     // text/dims at mount time, not a reactive recomputation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lockedFontSize, persistedHeight, width]);
+  }, [lockedFontSize, persistedHeight, width, writeLockedFontSize]);
 
   // --------------------------------------------------------------------
   // Live drag state — overrides locked size while user is dragging the
@@ -237,9 +250,7 @@ export function useTextAutoSize({
         h - inset * 2,
         fontOpts,
       );
-      patchNodeSilent(nodeId, {
-        style: { ...(style ?? {}), fontSize: finalFontSize },
-      });
+      writeLockedFontSize(finalFontSize);
       // Release live state. The next render uses the persisted fontSize
       // and recomputes height to wrap text exactly — visually this snaps
       // the bottom edge to content height, which is the intended UX:
@@ -247,7 +258,7 @@ export function useTextAutoSize({
       setLiveFontSize(null);
       setLiveSize(null);
     },
-    [text, placeholder, fontOpts, inset, patchNodeSilent, nodeId, style],
+    [text, placeholder, fontOpts, inset, writeLockedFontSize],
   );
 
   return {
