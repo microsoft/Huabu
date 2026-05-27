@@ -60,8 +60,19 @@ export function acpUpdateToStreamEvent(
         data: { content: update.content.text },
       };
     }
-    // Future updates to map: agent_thought_chunk → thinking_delta,
-    // tool_call → tool_start, tool_call_update → tool_result, etc.
+    case 'agent_thought_chunk': {
+      // Reasoning / scratchpad content. Some agents (Copilot, Claude
+      // Code) stream thinking even when they don't emit final prose,
+      // so without this case we silently drop everything and the UI
+      // shows nothing for tool-only turns.
+      if (!isTextBlock(update.content)) return null;
+      return {
+        type: 'thinking_delta',
+        data: { content: update.content.text },
+      };
+    }
+    // Future updates to map: tool_call → tool_start,
+    // tool_call_update → tool_result, plan → (TBD), etc.
     default:
       return null;
   }

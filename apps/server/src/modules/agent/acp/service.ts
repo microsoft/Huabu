@@ -27,6 +27,7 @@ import {
 import { getAgentletServer } from './server-mount.js';
 import { acpSessionRegistry } from './session-registry.js';
 import { acpUpdateToStreamEvent } from './translator.js';
+import { canvasRoot as resolveCanvasRoot } from '../../storage/paths.js';
 
 import type { AssistantMessage, Context } from '@earendil-works/pi-ai';
 import type {
@@ -128,10 +129,45 @@ export async function* runAcpAgent(
   const { binding, threadId, context, canvasContext, signal, logger } = opts;
   const canvasId = opts.canvasId ?? '';
   const rawText = extractText(opts.message);
-  // Default to '/' — the agreed sentinel with the agentlet relay, which
-  // substitutes its own process.cwd() when params.cwd is empty or '/'
-  // (see agentlet/packages/local/src/relay.ts#enrichMessage). Once
-  // canvas ↔ repo binding lands, an explicit opts.cwd will be passed.
+  // ── Workspace model for the bound external agent ───────────────────
+  //
+  // ACP separates two notions that we deliberately keep distinct here:
+  //
+  //   1. Protocol workspace (what `acp/capabilities/fs.ts` exposes)
+  //        = the virtual `/canvas/` namespace, read-only, allowlisted
+  //          to `nodes/**` + `.artifacts/**`, scoped to this canvasId.
+  //        Reachable only via ACP `fs/read_text_file`.
+  //
+  //   2. Agent execution workspace (the agent process' own `cwd`)
+  //        = whatever the agentlet relay substitutes for the `'/'`
+  //          sentinel below, i.e. the relay's `process.cwd()`. By
+  //          contract the user launches agentlet from their project
+  //          root, so the agent's native shell/fs sees the repo,
+  //          not the canvas dir.
+  //
+  // Empirically (see /tmp/copilot-acp-probe.mjs) not every agent
+  // honours (1): Copilot CLI's `Read` tool **never** calls
+  // `fs/read_text_file` — it always issues an OS syscall, asking
+  // `session/request_permission` only when the path falls outside
+  // its own trusted-dirs list. To keep Copilot useful for canvas
+  // work, the preprocessor renders `fileRefs` as **real absolute
+  // paths** under `canvasCwd` so Copilot's OS-level Read can open
+  // them (after a one-shot permission prompt). Claude Code and other
+  // ACP-fs-bridging agents get the same absolute paths and can read
+  // them either way.
+  //
+  // Trade-off: the absolute-path projection effectively re-extends
+  // the agent's OS reach into the canvas dir, so the `/canvas/` VFS
+  // sandbox in `acp/capabilities/fs.ts` is bypassed for native-fs
+  // agents. Real isolation against a hostile agent would require an
+  // OS-level boundary (container / FUSE); ACP fs capabilities alone
+  // are cooperative.
+  //
+  // For the (currently unused) edge case of a thread with no canvasId
+  // we omit `canvasCwd`; the preprocessor then falls back to
+  // `/canvas/<rel>` virtual paths so any spec-compliant agent can
+  // still reach files via the ACP fs handler.
+  const canvasCwd = canvasId ? resolveCanvasRoot(canvasId) : undefined;
   const cwd = opts.cwd ?? '/';
 
   // 1. Resolve the live agentlet connection.
@@ -219,6 +255,7 @@ export async function* runAcpAgent(
       rawText,
       agentAlias: binding.alias,
       canvasContext,
+      canvasRoot: canvasCwd,
       history: context.messages,
       logger,
     });
@@ -289,8 +326,13 @@ export async function* runAcpAgent(
       (update) => {
         const evt = acpUpdateToStreamEvent(update);
         if (!evt) {
-          logger.debug(
-            { sessionUpdate: update.sessionUpdate },
+          // TEMP (PR-G debug): info-level so untranslated tool_call /
+          // tool_call_update / plan / etc. show up in dev logs and we
+          // can see what an external agent is actually doing during a
+          // tool-only turn. Lower to `debug` once the translator + UI
+          // surface those events as first-class.
+          logger.info(
+            { sessionUpdate: update.sessionUpdate, raw: update },
             '[acp] untranslated session/update \u2014 dropped',
           );
           return;
@@ -323,10 +365,34 @@ export async function* runAcpAgent(
         resolveWaiter = resolve;
       });
     }
+
+    // 5b. Visibility fallback for "empty" turns.
+    //
+    // External agents can legitimately finish a turn with zero
+    // `agent_message_chunk` text — e.g. Copilot CLI runs a chain of
+    // Read/Glob/Bash tool calls and then stops with `end_turn`
+    // without emitting prose. The translator only forwards text and
+    // thought chunks today, so such turns yield ZERO `text_delta`s
+    // and the UI shows nothing for the assistant slot — looks like
+    // the server hung.
+    //
+    // Synthesize a single explanatory `text_delta` whenever the
+    // agent produced no text AND we're not about to surface an error
+    // or an abort. The synthetic body names the `stopReason` so the
+    // user can tell what actually happened, and we treat it as real
+    // `assembledText` so it persists in chat history.
+    const aborted = signal?.aborted ?? false;
+    if (assembledText.length === 0 && !promptError && !aborted) {
+      const reason = stopReason ?? 'unknown';
+      const synthetic = `_(agent returned no text — stopReason: ${reason}. Usually a tool-only turn or a refusal without prose. Extend the ACP translator if you need tool-call rendering.)_`;
+      assembledText = synthetic;
+      yield { type: 'text_delta', data: { content: synthetic } };
+    }
   } finally {
     // 6. Always sync the assistant’s text back into context.messages,
     //    even on abort/error \u2014 mirrors `runAgent`\u2019s `finally` sync
-    //    so partial replies survive page reloads.
+    //    so partial replies survive page reloads. Captures any
+    //    synthetic fallback emitted above too.
     if (assembledText.length > 0) {
       const aborted = signal?.aborted ?? false;
       context.messages.push(

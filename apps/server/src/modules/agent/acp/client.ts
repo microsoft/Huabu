@@ -16,8 +16,11 @@
  *                                    + `/canvas/` vfs prefix + allowlist)
  *   - `fs/write_text_file`         — explicit reject (-32601); read-only
  *   - `terminal/*`                 — never implemented; reject (-32601)
- *   - `session/request_permission` — stub (-32601) until the backend
- *                                    gate + UI land
+ *   - `session/request_permission` — auto-allow (local-agent threat
+ *                                    model). The agent’s OS permissions
+ *                                    are the real boundary; a UI gate
+ *                                    can layer on later without breaking
+ *                                    wire compat.
  *
  * Not yet supported at all:
  *   - reconnect / session/load
@@ -52,7 +55,44 @@ import type { AgentConnection, AcpMessage } from '@agentlet/protocol';
 const ACP_PROTOCOL_VERSION = 1;
 
 const JSON_RPC_METHOD_NOT_FOUND = -32601;
+const JSON_RPC_INVALID_PARAMS = -32602;
 const JSON_RPC_INTERNAL_ERROR = -32603;
+
+/**
+ * ACP `PermissionOption` (subset). Each option offered by the agent
+ * carries a stable `optionId` (echoed back in the response) and an
+ * orientation `kind` that the client uses to pick a default.
+ */
+interface PermissionOption {
+  optionId: string;
+  name?: string;
+  kind?: 'allow_always' | 'allow_once' | 'reject_once' | 'reject_always';
+}
+
+/**
+ * Pick the most-permissive option from a permission request.
+ *
+ *   1. `allow_always` (best — sticks for the session, fewer round-trips)
+ *   2. `allow_once`
+ *   3. First option whose `kind` is not in the `reject_*` family
+ *   4. First option (last-resort — caller has already decided)
+ *
+ * Exported for testing.
+ */
+export function pickPermissionOption(
+  options: ReadonlyArray<PermissionOption>,
+): PermissionOption {
+  const byKind = (k: PermissionOption['kind']) =>
+    options.find((o) => o.kind === k);
+  return (
+    byKind('allow_always') ??
+    byKind('allow_once') ??
+    options.find(
+      (o) => o.kind !== 'reject_once' && o.kind !== 'reject_always',
+    ) ??
+    options[0]
+  );
+}
 
 interface PendingRequest {
   resolve: (result: unknown) => void;
@@ -102,6 +142,7 @@ export interface AcpAgentClientOptions {
   /** Optional logger; defaults to console. */
   logger?: {
     debug: (obj: unknown, msg?: string) => void;
+    info: (obj: unknown, msg?: string) => void;
     warn: (obj: unknown, msg?: string) => void;
     error: (obj: unknown, msg?: string) => void;
   };
@@ -131,6 +172,7 @@ export class AcpAgentClient {
     this.canvasId = opts.canvasId ?? '';
     this.logger = opts.logger ?? {
       debug: (o, m) => console.debug('[acp-client]', m ?? '', o),
+      info: (o, m) => console.info('[acp-client]', m ?? '', o),
       warn: (o, m) => console.warn('[acp-client]', m ?? '', o),
       error: (o, m) => console.error('[acp-client]', m ?? '', o),
     };
@@ -328,8 +370,8 @@ export class AcpAgentClient {
    *
    *   - `fs/read_text_file`          → handleFsReadTextFile (sandbox + allowlist)
    *   - `fs/write_text_file`         → explicit reject (v1 is read-only)
-   *   - `session/request_permission` → stub: rejected with -32601 until the
-   *                                    backend gate + UI land
+   *   - `session/request_permission` → handleSessionRequestPermission
+   *                                    (auto-allow; see method JSDoc)
    *   - `terminal/*`                 → never implemented server-side
    *
    * `params` is forwarded untouched; capability handlers are responsible
@@ -340,6 +382,16 @@ export class AcpAgentClient {
     id: string | number,
     params: unknown,
   ): void {
+    // Observability probe: every agent→client request goes through
+    // here. At info-level so it shows up in the default log stream —
+    // this is how we tell whether an external agent (Copilot, Claude,
+    // …) actually exercises ACP fs/permission capabilities or just
+    // uses its own native tools. Cheap; one line per agent→client RPC.
+    // Demote to debug once the integration is no longer being validated.
+    this.logger.info(
+      { method, id, canvasId: this.canvasId },
+      '[acp] incoming agent request',
+    );
     switch (method) {
       case 'fs/read_text_file':
         this.handleFsRead(id, params);
@@ -359,17 +411,7 @@ export class AcpAgentClient {
         );
         return;
       case 'session/request_permission':
-        // Permission gate will land alongside the UI; until then we
-        // -32601 so the agent does not assume an implicit allow.
-        this.logger.warn(
-          { method, id, canvasId: this.canvasId },
-          'agent called session/request_permission — handler not yet implemented',
-        );
-        this.sendErrorReply(
-          id,
-          JSON_RPC_METHOD_NOT_FOUND,
-          'session/request_permission is not yet implemented',
-        );
+        this.handleSessionRequestPermission(id, params);
         return;
       default:
         // Includes terminal/* (never implemented) and any unknown method.
@@ -420,5 +462,92 @@ export class AcpAgentClient {
         'fs/read_text_file: internal error',
       );
     }
+  }
+
+  /**
+   * Auto-allow handler for `session/request_permission`.
+   *
+   * Why auto-allow (not a UI prompt)?
+   *   - Sediment’s ACP runtime is **local-agent only**: the agent runs
+   *     on the same machine as the server, launched by the user via
+   *     `agentlet`. The OS file-permission boundary is the real gate;
+   *     the wire-level permission gate is a soft contract.
+   *   - Per-tool-call UI confirmations would be unusable in practice
+   *     (Copilot can invoke Read 10+ times per turn).
+   *   - When we add remote / sandboxed deployments, this method is the
+   *     single insertion point for a stricter policy (kind-based
+   *     prompt-on-write/execute, allow-list per session, etc.).
+   *
+   * Option-selection rule (see {@link pickPermissionOption}):
+   *   1. Prefer `allow_always` (sticks across the session).
+   *   2. Else `allow_once`.
+   *   3. Else first option that is not `reject_*`.
+   *   4. Else fall back to whatever is offered (caller likely already
+   *      decided this is rejected).
+   *
+   * Each decision is logged at info-level with `{ canvasId, toolCall,
+   * optionId, kind }` so dev operators can see what the agent has been
+   * doing under the implicit allow.
+   *
+   * TODO(B): when we add UI gating, branch here on `toolCall.kind`:
+   * keep auto-allow for `'read'` / `'search'` / `'fetch'`; surface
+   * `'edit'` / `'execute'` to the UI via SSE and await user choice.
+   */
+  private handleSessionRequestPermission(
+    id: string | number,
+    params: unknown,
+  ): void {
+    if (!params || typeof params !== 'object') {
+      this.logger.warn(
+        { id, canvasId: this.canvasId },
+        'session/request_permission: missing params',
+      );
+      this.sendErrorReply(
+        id,
+        JSON_RPC_INVALID_PARAMS,
+        'session/request_permission requires an object with `options[]`',
+      );
+      return;
+    }
+    const p = params as {
+      toolCall?: { toolCallId?: unknown; title?: unknown; kind?: unknown };
+      options?: unknown;
+    };
+    const options = Array.isArray(p.options)
+      ? (p.options as PermissionOption[])
+      : [];
+    if (options.length === 0) {
+      this.logger.warn(
+        { id, canvasId: this.canvasId },
+        'session/request_permission: empty options[]',
+      );
+      this.sendErrorReply(
+        id,
+        JSON_RPC_INVALID_PARAMS,
+        'session/request_permission: `options[]` must be non-empty',
+      );
+      return;
+    }
+
+    const choice = pickPermissionOption(options);
+    const toolCall = p.toolCall ?? {};
+    this.logger.info(
+      {
+        id,
+        canvasId: this.canvasId,
+        toolCallId: (toolCall as { toolCallId?: unknown }).toolCallId,
+        toolTitle: (toolCall as { title?: unknown }).title,
+        toolKind: (toolCall as { kind?: unknown }).kind,
+        choice: { optionId: choice.optionId, kind: choice.kind },
+      },
+      '[acp] session/request_permission auto-decided',
+    );
+    this.connection.send({
+      jsonrpc: '2.0',
+      id,
+      result: {
+        outcome: { outcome: 'selected', optionId: choice.optionId },
+      },
+    });
   }
 }

@@ -1,26 +1,34 @@
 /**
- * ACP Preprocessor.
+ * ACP Preprocessor — intent translator.
  *
- * Rewrites the user's raw message into a structured
- * {@link ExternalAgentPrompt} (a focused `task` + a `fileRefs` list of
- * paths the external agent should consider reading) before Sediment
- * hands it to `session/prompt`. Acts as Huabu's "project manager" so
- * the external agent receives a clean briefing instead of a token
- * dump of canvas state.
+ * The external agent (Claude Code, Copilot CLI, …) **never sees the
+ * canvas**. This module reads the user's raw message plus the bodies
+ * of any selected canvas nodes (≤ {@link INLINE_BODY_THRESHOLD_BYTES})
+ * and emits an {@link ExternalAgentPrompt}: a self-contained `task`
+ * briefing the agent can act on with no other context, plus a small
+ * `attachments` list reserved for cases where verbatim file access
+ * is essential.
  *
- * Why a separate one-shot LLM call rather than stuffing canvas state
- * inline:
- *   - Large canvases would blow past the external agent's context.
- *   - The agent doesn't need every node — only the ones relevant to
- *     this turn. We let the preprocessor LLM cull.
- *   - Path-based output lines up with the upcoming `fs/read_text_file`
- *     capability so the external agent reads on demand.
+ * Why translate intent instead of routing files:
+ *   - Most turns don't need raw canvas data — the user's *intent*
+ *     does. Synthesising into `task` keeps the agent's context tiny
+ *     and avoids leaking canvas metadata it can't act on.
+ *   - Verbatim reading is a fallback (e.g. "review this code",
+ *     binary artifacts, oversize nodes). The preprocessor decides
+ *     when to attach.
+ *   - Attachments render as absolute disk paths so OS-native `Read`
+ *     tools (Copilot CLI) and ACP-fs-bridging agents (Claude Code)
+ *     both reach the file. See {@link serializePrompt} for the
+ *     wire-format trade-off.
  *
  * Failure model: callers `try`/`catch` and fall back to the raw user
  * text. The route-level service emits a `prepared_prompt` SSE event
  * with `prompt: null` + an `error` description so the UI can replace
  * its "Preparing…" placeholder with a visible failure note.
  */
+
+import { readFileSync, statSync } from 'node:fs';
+import path from 'node:path';
 
 import { llmComplete } from '../llm.js';
 import { buildAgentNodeRef } from '../node-ref.js';
@@ -35,6 +43,21 @@ import type {
 } from '@sediment/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
+// ─── Constants ────────────────────────────────────────────────────────────
+
+/**
+ * Maximum on-disk size of a selected node whose body we inline into
+ * the preprocessor LLM payload. Larger nodes are surfaced as
+ * metadata + size only — the preprocessor will then almost certainly
+ * route them through `attachments` since it has no body to synthesise
+ * from.
+ *
+ * 16 KB is a deliberate compromise: comfortably fits typical research
+ * notes (a few pages of markdown) while keeping the preprocessor's
+ * input bounded even if the user selects many nodes at once.
+ */
+export const INLINE_BODY_THRESHOLD_BYTES = 16 * 1024;
+
 // ─── System prompt ────────────────────────────────────────────────────────
 
 /**
@@ -46,16 +69,16 @@ import type { FastifyBaseLogger } from 'fastify';
  * loader's `VALID_AGENT_IDS` set for marginal benefit. Extract later
  * if we add a second pure one-shot LLM helper.
  */
-const PREPROCESSOR_SYSTEM_PROMPT = `You are the prompt preprocessor inside Sediment, a visual research canvas.
+const PREPROCESSOR_SYSTEM_PROMPT = `You are the **intent translator** inside Sediment, a visual research canvas.
 
-The user is chatting with an **external** coding/research agent (Claude Code, Copilot CLI, Gemini CLI, …) that runs on the user's machine and can read files via its own \`Read\` tool. Sediment is acting as that agent's project manager: your job is to take the user's raw message plus what we know about their canvas and produce a clean briefing.
+The user is chatting with an **external** coding/research agent (Claude Code, Copilot CLI, Gemini CLI, …). That agent runs on the user's own machine and **never sees the canvas directly**. Your job is to translate the user's intent — together with whatever canvas nodes they attached — into a self-contained briefing the agent can act on with no other context.
 
 ## Inputs you receive
 
 - **rawMessage**: the user's literal chat input.
-- **agentAlias**: the short name of the bound external agent.
-- **selectedNodes**: zero or more canvas nodes the user has explicitly selected, each given as \`{ id, type, label?, filename }\`. The \`filename\` is a path relative to the canvas directory (\`nodes/<safeLabel>.md\` or \`nodes/<id>.md\`); the external agent can pass it straight to its \`Read\` tool.
-- **recentTurns**: brief excerpt of the recent conversation between user and external agent. Use only for context — do **not** re-issue earlier asks.
+- **agentAlias**: short name of the bound external agent.
+- **selectedNodes**: zero or more canvas nodes the user explicitly attached to this turn. Each node has \`{ id, type, label?, filename }\`. Nodes ≤ 16 KB also include a \`body\` field (full markdown content) — use it to synthesise inline. Larger nodes include \`sizeBytes\` instead, signalling they exist but cannot fit inline.
+- **recentTurns**: brief excerpt of the recent dialog between user and external agent. Use only for context — do **not** re-issue earlier asks.
 
 ## Your output
 
@@ -63,22 +86,35 @@ Return **only** a JSON object (no markdown fences, no commentary) with this exac
 
 \`\`\`
 {
-  "task": "<clear, self-contained task description for the external agent>",
-  "fileRefs": [
-    { "path": "nodes/<file>.md", "reason": "<≤80 chars why>" }
+  "task": "<self-contained briefing the external agent can act on>",
+  "attachments": [
+    { "path": "nodes/<file>.md", "reason": "<≤80 chars why verbatim>" }
   ]
 }
 \`\`\`
 
-### Rules
+## Translation rules
 
-1. \`task\` must stand alone: an agent reading **only** \`task\` and \`fileRefs\` (with no other context) should know what to do. Quote the user's intent faithfully — do not invent requirements.
-2. Use second person ("you") to address the external agent.
-3. Mention the canvas only when it matters for this turn. If the user asks something fully general, \`fileRefs\` may be \`[]\`.
-4. \`fileRefs\` paths must come from \`selectedNodes[].filename\` (i.e. \`nodes/<file>.md\`) or be under \`.artifacts/\`. Never invent paths and never reference \`canvas.json\` — the canvas structure was summarised for you above.
-5. Keep \`reason\` short and concrete (≤80 chars). Skip \`reason\` if obvious from the filename.
-6. Order \`fileRefs\` by relevance, most relevant first. Cap at 8 entries — leave the rest for the agent to discover via tools.
-7. If the user's message is itself code/config/markdown they want analysed, paraphrase the request in \`task\` and quote the snippet inside \`task\` (don't try to externalise it as a file).
+**Default to SYNTHESIS.** The external agent should not need to read any files. Quote, paraphrase, and embed selected-node \`body\` content directly inside \`task\` whenever feasible. Speak in the user's voice; do not invent requirements they did not state.
+
+**Use \`attachments\` only as a fallback** when verbatim file access is essential:
+
+  1. **Verbatim required** — the user asks for byte-exact analysis (e.g. "review this code", "find the bug in this YAML", "reformat this snippet"). Inlining would risk paraphrase drift.
+  2. **Node too large** — \`selectedNodes[i].body\` is absent because the file exceeds the inline threshold; surface it as an attachment.
+  3. **Artifact files** — paths under \`.artifacts/\` (generated or binary content) are always attachments.
+
+**Attachment rules**
+
+  - \`path\` must come from \`selectedNodes[].filename\` or start with \`.artifacts/\`. Never invent paths. Never list \`canvas.json\`.
+  - \`reason\` is **required**: short, concrete, explains why verbatim is needed (e.g. "user asks to refactor this code", "100 KB file, too large to inline", "binary artifact").
+  - Cap at 8 entries — most turns should have **zero**.
+
+**Task rules**
+
+  - Use second person ("you") to address the external agent.
+  - Stand-alone: an agent reading only \`task\` (plus any attachments) must know what to do — no canvas metadata, no node ids, no app jargon.
+  - If the user pasted code/config/markdown directly in \`rawMessage\`, paraphrase the intent and quote the snippet inline (don't try to externalise it).
+  - For general questions unrelated to selected nodes, just answer the literal request and leave \`attachments: []\`.
 `;
 
 // ─── Public API ───────────────────────────────────────────────────────────
@@ -90,6 +126,22 @@ export interface PreparePromptInput {
   agentAlias: string;
   /** Canvas chat context for this turn (may be omitted when client didn't send one). */
   canvasContext?: AgentChatContext;
+  /**
+   * Absolute on-disk path of the canvas directory. When supplied,
+   * the preprocessor:
+   *   - reads selected-node bodies (≤ {@link INLINE_BODY_THRESHOLD_BYTES})
+   *     from `<canvasRoot>/<filename>` so the LLM can synthesise them
+   *     inline into `task`;
+   *   - {@link serializePrompt} renders `attachments[].path` as **real
+   *     absolute on-disk paths** under this root so OS-native `Read`
+   *     tools (Copilot CLI) and ACP-fs-bridging agents (Claude Code)
+   *     both reach the file.
+   *
+   * When omitted (no-canvas edge case): bodies are never loaded and
+   * `serializePrompt` falls back to the `/canvas/<rel>` virtual
+   * prefix. In practice service.ts always supplies `canvasRoot`.
+   */
+  canvasRoot?: string;
   /**
    * Conversational history for THIS thread (user/assistant turns so
    * far). We only forward a short tail to keep the preprocessor LLM
@@ -118,20 +170,32 @@ export interface PreparePromptResult {
 export async function prepareExternalAgentPrompt(
   input: PreparePromptInput,
 ): Promise<PreparePromptResult> {
-  const { rawText, agentAlias, canvasContext, history, logger } = input;
+  const { rawText, agentAlias, canvasContext, canvasRoot, history, logger } =
+    input;
 
   const selectedRefs = canvasContext?.selectedNodes
     ? flattenSelection(canvasContext.selectedNodes)
     : [];
 
+  // Load each selected node's body up to the inline threshold so the
+  // LLM can synthesise it directly into `task`. Larger nodes surface
+  // as metadata-only entries; the LLM is instructed to attach those.
+  const selectedWithBody = selectedRefs.map((ref) =>
+    loadNodeBody(ref, canvasRoot),
+  );
+
   const userPayload = {
     rawMessage: rawText,
     agentAlias,
-    selectedNodes: selectedRefs.map((ref) => ({
+    selectedNodes: selectedWithBody.map((ref) => ({
       id: ref.id,
       type: ref.type,
       ...(ref.label ? { label: ref.label } : {}),
       filename: ref.filename,
+      ...(ref.body !== null ? { body: ref.body } : {}),
+      ...(ref.body === null && ref.sizeBytes !== null
+        ? { sizeBytes: ref.sizeBytes }
+        : {}),
     })),
     recentTurns: extractRecentTurns(history, 4),
   };
@@ -165,14 +229,14 @@ export async function prepareExternalAgentPrompt(
     {
       agentAlias,
       taskLength: prompt.task.length,
-      fileRefsCount: prompt.fileRefs.length,
+      attachmentsCount: prompt.attachments.length,
     },
     '[acp/preprocessor] prepared prompt',
   );
 
   return {
     prompt,
-    serialized: serializePrompt(prompt),
+    serialized: serializePrompt(prompt, { canvasRoot }),
   };
 }
 
@@ -181,24 +245,60 @@ export async function prepareExternalAgentPrompt(
  * sent over ACP `session/prompt`. Format is deliberately simple
  * markdown so any agent's text rendering picks it up cleanly.
  *
- * Every `fileRefs[].path` is rendered as `<ACP_CANVAS_VFS_PREFIX><rel>`
- * (i.e. `/canvas/nodes/foo.md`) — absolute paths in the virtual
- * namespace owned by `acp/capabilities/fs.ts`. The agent's `Read`
- * tool emits the same absolute path back over `fs/read_text_file`,
- * which is what the sandbox handler expects. Keep `fileRefs[].path`
- * itself canvas-relative; serialization is the only layer that adds
- * the prefix so storage / UI / future internal consumers stay free
- * of wire concerns.
+ * Most turns should produce **just `task`** — the intent-translator
+ * design synthesises selected-node content inline. The optional
+ * `## Attachments` section is rendered only when the preprocessor
+ * decided verbatim access is essential (large nodes, code-review
+ * asks, `.artifacts/` files).
+ *
+ * Path rendering is **gated by `canvasRoot`** because not every agent
+ * honours ACP's `fs/read_text_file` capability:
+ *
+ *   - **With `canvasRoot`** (normal case): each `attachments[].path`
+ *     is joined onto `canvasRoot` to produce a real absolute on-disk
+ *     path (e.g. `/home/me/sediment-data/huabu/<dir>/nodes/foo.md`).
+ *     Empirically Copilot CLI's `Read` tool **never** calls
+ *     `fs/read_text_file` — it always uses the OS directly (and asks
+ *     `session/request_permission` for paths outside its trusted
+ *     dirs). Feeding it absolute paths is the only way it can reach
+ *     canvas content. Spec-compliant agents (Claude Code) read those
+ *     same absolute paths fine via either channel.
+ *
+ *   - **Without `canvasRoot`** (no-canvas edge case): paths are
+ *     rendered under the virtual prefix `/canvas/<rel>` so agents
+ *     that DO route Read through ACP fs hit the `fs/read_text_file`
+ *     handler in `acp/capabilities/fs.ts`. Reserved for threads
+ *     without a bound canvas; in practice service.ts always supplies
+ *     `canvasRoot`.
+ *
+ * Trade-off: the absolute-path mode effectively re-extends the
+ * agent's OS reach into the canvas dir, so the `/canvas/` VFS
+ * sandbox is **bypassed** by native-fs agents — they read canvas
+ * files directly via syscall and the allowlist in
+ * `acp/capabilities/fs.ts` never gets a chance to refuse. Real
+ * isolation against an adversarial agent would require OS-level
+ * sandboxing (FUSE / containers); ACP fs capabilities alone are a
+ * cooperative protocol.
+ *
+ * Either way `attachments[].path` itself stays canvas-relative so
+ * storage / UI / future internal consumers stay free of wire concerns.
  */
-export function serializePrompt(prompt: ExternalAgentPrompt): string {
+export function serializePrompt(
+  prompt: ExternalAgentPrompt,
+  opts: { canvasRoot?: string } = {},
+): string {
   const lines: string[] = [prompt.task.trim()];
-  if (prompt.fileRefs.length > 0) {
-    lines.push('', '## Files to consider', '');
-    for (const ref of prompt.fileRefs) {
-      const wirePath = `${ACP_CANVAS_VFS_PREFIX}${ref.path}`;
-      lines.push(
-        ref.reason ? `- \`${wirePath}\` — ${ref.reason}` : `- \`${wirePath}\``,
-      );
+  if (prompt.attachments.length > 0) {
+    lines.push('', '## Attachments', '');
+    lines.push(
+      'Read each file below before answering — they were attached because verbatim content is required:',
+      '',
+    );
+    for (const ref of prompt.attachments) {
+      const wirePath = opts.canvasRoot
+        ? path.join(opts.canvasRoot, ref.path)
+        : `${ACP_CANVAS_VFS_PREFIX}${ref.path}`;
+      lines.push(`- \`${wirePath}\` — ${ref.reason}`);
     }
   }
   return lines.join('\n');
@@ -297,7 +397,7 @@ function truncate(s: string, max: number): string {
 /**
  * Parse the LLM's JSON output into an ExternalAgentPrompt, clipping
  * malformed entries. Returns `null` if the JSON itself is unusable.
- * `selectedRefs` is used to validate `fileRefs[].path` against the
+ * `selectedRefs` is used to validate `attachments[].path` against the
  * known canvas surface (selected node filenames + a small allowlist).
  */
 function parsePromptJson(
@@ -323,30 +423,74 @@ function parsePromptJson(
 
   const knownPaths = new Set<string>(selectedRefs.map((r) => r.filename));
 
-  const rawRefs = Array.isArray(obj.fileRefs) ? obj.fileRefs : [];
-  const fileRefs: ExternalAgentPrompt['fileRefs'] = [];
+  const rawRefs = Array.isArray(obj.attachments) ? obj.attachments : [];
+  const attachments: ExternalAgentPrompt['attachments'] = [];
   for (const r of rawRefs) {
     if (!r || typeof r !== 'object') continue;
     const ref = r as Record<string, unknown>;
-    const path = typeof ref.path === 'string' ? ref.path.trim() : '';
-    if (!path) continue;
+    const refPath = typeof ref.path === 'string' ? ref.path.trim() : '';
+    if (!refPath) continue;
     // Allowlist mirrors the runtime fs/read_text_file handler
     // (`capabilities/fs.ts:isAllowedRead`): only canvas nodes and
     // artifact files. canvas.json is intentionally excluded — the
-    // canvas structure is summarised in `task`, not re-read by the
-    // agent.
+    // canvas structure was already synthesised into `task`.
     const allowed =
-      knownPaths.has(path) ||
-      path.startsWith('nodes/') ||
-      path.startsWith('.artifacts/');
+      knownPaths.has(refPath) ||
+      refPath.startsWith('nodes/') ||
+      refPath.startsWith('.artifacts/');
     if (!allowed) continue;
-    const entry: ExternalAgentPrompt['fileRefs'][number] = { path };
-    if (typeof ref.reason === 'string' && ref.reason.trim()) {
-      entry.reason = truncate(ref.reason.trim(), 80);
-    }
-    fileRefs.push(entry);
-    if (fileRefs.length >= 8) break;
+    const rawReason = typeof ref.reason === 'string' ? ref.reason.trim() : '';
+    attachments.push({
+      path: refPath,
+      reason: rawReason ? truncate(rawReason, 80) : 'verbatim content required',
+    });
+    if (attachments.length >= 8) break;
   }
 
-  return { task, fileRefs };
+  return { task, attachments };
+}
+
+// ─── Node-body loader ─────────────────────────────────────────────────────
+
+/**
+ * Result of trying to load a selected node's body for the
+ * preprocessor LLM. Exactly one of `body` / `sizeBytes` is set:
+ *   - `body` non-null → file was small enough to inline.
+ *   - `sizeBytes` non-null → file exists but exceeds the threshold;
+ *     the LLM is expected to surface it as an attachment.
+ *   - both null → file missing / unreadable / canvasRoot absent;
+ *     the LLM only sees metadata and will likely skip it.
+ */
+interface SelectedNodeWithBody extends AgentNodeRef {
+  body: string | null;
+  sizeBytes: number | null;
+}
+
+function loadNodeBody(
+  ref: AgentNodeRef,
+  canvasRoot: string | undefined,
+): SelectedNodeWithBody {
+  if (!canvasRoot) {
+    return { ...ref, body: null, sizeBytes: null };
+  }
+  const abs = path.join(canvasRoot, ref.filename);
+  try {
+    const stat = statSync(abs);
+    if (!stat.isFile()) {
+      return { ...ref, body: null, sizeBytes: null };
+    }
+    if (stat.size <= INLINE_BODY_THRESHOLD_BYTES) {
+      return {
+        ...ref,
+        body: readFileSync(abs, 'utf8'),
+        sizeBytes: stat.size,
+      };
+    }
+    // Oversize: surface size only; the LLM will attach it verbatim.
+    return { ...ref, body: null, sizeBytes: stat.size };
+  } catch {
+    // Missing / unreadable: leave body null — the LLM only sees
+    // metadata and will likely skip the node.
+    return { ...ref, body: null, sizeBytes: null };
+  }
 }

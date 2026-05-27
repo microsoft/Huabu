@@ -6,9 +6,14 @@
  *   - **pending**: `prompt === null && !error` — preprocessor is still
  *     running. Shows a small spinner + "Preparing prompt for <alias>…"
  *   - **ready**: `prompt !== null` — collapsed by default, click to
- *     expand and see the `task` body + `fileRefs` list.
+ *     expand and see the `task` body + (optional) `attachments` list.
  *   - **failed**: `prompt === null && error` — small error chip; the
  *     external agent received the raw user text as fallback.
+ *
+ * Most turns produce a task-only prompt — selected-node content is
+ * synthesised inline by the preprocessor. `attachments` only appears
+ * when the preprocessor decided verbatim file access was essential
+ * (oversize node, `.artifacts/` file, code-review-style ask).
  *
  * Visual scaffold mirrors `CanvasCommandCard` in `ToolMessage.tsx`
  * (chevron + collapsible body, muted typography) so PR D feels native
@@ -66,10 +71,10 @@ export function PreparedPromptCard({
   // (Non-null prompt is guaranteed by the two guards above.)
   if (!prompt) return null;
 
-  const refCount = prompt.fileRefs.length;
+  const attachmentCount = prompt.attachments.length;
   const summary =
-    refCount > 0
-      ? `Prepared prompt · ${refCount} file${refCount === 1 ? '' : 's'}`
+    attachmentCount > 0
+      ? `Prepared prompt · ${attachmentCount} attachment${attachmentCount === 1 ? '' : 's'}`
       : 'Prepared prompt';
 
   return (
@@ -107,13 +112,13 @@ export function PreparedPromptCard({
               </div>
             </div>
 
-            {refCount > 0 && (
+            {attachmentCount > 0 && (
               <div>
                 <div className="text-fg-muted/70 mb-0.5 text-[10px] font-medium tracking-wide uppercase">
-                  Files to consider
+                  Attachments
                 </div>
                 <ul className="space-y-0.5">
-                  {prompt.fileRefs.map((ref) => (
+                  {prompt.attachments.map((ref) => (
                     <li
                       key={ref.path}
                       className="flex items-baseline gap-1.5 leading-snug"
@@ -121,9 +126,7 @@ export function PreparedPromptCard({
                       <code className="bg-surface-1/50 rounded px-1 text-[11px]">
                         {ref.path}
                       </code>
-                      {ref.reason && (
-                        <span className="text-fg-muted/80">— {ref.reason}</span>
-                      )}
+                      <span className="text-fg-muted/80">— {ref.reason}</span>
                     </li>
                   ))}
                 </ul>

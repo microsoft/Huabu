@@ -79,25 +79,30 @@ export interface AgentEndEventData {}
 /**
  * Structured rewrite of a raw user message for an external (ACP) agent.
  *
- * The preprocessor reads the user's raw input plus the canvas state and
- * produces a "project-manager" briefing: a focused `task` description and
- * a curated `fileRefs` list of paths the external agent should consider
- * `Read`ing. Path-based (rather than node-id-based) so it lines up
- * directly with the Phase 3 `fs/read_text_file` capability and is
- * agent-agnostic.
+ * The preprocessor is an **intent translator**, not a file router. It
+ * reads the user's raw input plus the canvas state and produces a
+ * **self-contained briefing**: the external agent should be able to
+ * act on `task` alone, with no visibility into the canvas. Selected
+ * node content is synthesised inline whenever it fits.
+ *
+ * `attachments` is a **fallback channel** for verbatim payloads — used
+ * only when (a) the task requires byte-exact reading (e.g. "review
+ * this code"), (b) a node exceeds the inline-body threshold, or
+ * (c) the user explicitly attached a `.artifacts/` file. The external
+ * agent is expected to `Read` each attachment before answering.
  *
  * Paths are relative to the canvas directory on disk
- * (`<canvasDir>/canvas.json`, `<canvasDir>/nodes/<safeLabel>.md`, …).
+ * (`<canvasDir>/nodes/<safeLabel>.md`, `<canvasDir>/.artifacts/…`).
  */
 export interface ExternalAgentPrompt {
-  /** Rewritten task description handed to the external agent. */
+  /** Self-contained task description handed to the external agent. */
   task: string;
-  /** Files the external agent is suggested to read on demand. */
-  fileRefs: Array<{
+  /** Files the external agent MUST read verbatim before acting. */
+  attachments: Array<{
     /** Path relative to the canvas directory. */
     path: string;
-    /** Why the agent should look at this file (optional, ≤ ~80 chars). */
-    reason?: string;
+    /** Why verbatim reading is required (≤ ~80 chars). */
+    reason: string;
   }>;
 }
 
