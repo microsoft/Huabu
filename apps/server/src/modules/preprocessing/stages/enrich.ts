@@ -21,6 +21,7 @@ const TEXT_NODE_TYPES: ReadonlySet<string> = new Set([
   'pdf',
   'note',
   'text',
+  'question',
 ]);
 
 export async function enrich(

@@ -35,6 +35,11 @@ export const NODE_CONTENT_KEYS: ReadonlySet<string> = new Set([
  * `MD_BACKED_NODE_TYPES`. Patches to nodes whose type is not in this
  * set still update the in-memory store but do not schedule a content
  * save (there is no `.md` to write).
+ *
+ * `question` is included as a frontmatter-only sidecar (no body) so
+ * its auto-generated label / labelSource survive canvas reloads —
+ * without this, `patchNodeSilent({label, labelSource})` would only
+ * live in memory because the structure PUT strips both fields.
  */
 export const MD_BACKED_NODE_TYPES: ReadonlySet<string> = new Set([
   'note',
@@ -44,6 +49,7 @@ export const MD_BACKED_NODE_TYPES: ReadonlySet<string> = new Set([
   'image',
   'video',
   'frame',
+  'question',
 ]);
 
 /**

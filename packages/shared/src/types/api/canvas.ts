@@ -45,7 +45,7 @@ export interface DeleteNodeResponse {
  * See `docs/node-content-api-split.md`.
  */
 export const putNodeContentBodySchema = z.object({
-  /** Node type (`note` / `text` / `web` / `pdf` / `image` / `video` / `frame`). */
+  /** Node type (`note` / `text` / `web` / `pdf` / `image` / `video` / `frame` / `question`). */
   nodeType: z.string().min(1),
   /** Markdown body. Only meaningful for text-bearing types (note/text/web/pdf). */
   content: z.string().optional(),

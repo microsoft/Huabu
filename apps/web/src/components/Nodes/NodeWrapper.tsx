@@ -250,6 +250,13 @@ interface NodeWrapperProps {
   onResize?: (width: number, height: number) => void;
   onResizeEnd?: (width: number, height: number) => void;
   onDoubleClick?: React.MouseEventHandler<HTMLDivElement>;
+  /**
+   * When true, the resize-end commit persists only the width — the height
+   * is cleared so the node auto-sizes to its content. Used by text-flow
+   * nodes (TextNode / QuestionNode) where the resize gesture conceptually
+   * sets `style.fontSize` rather than a fixed container height.
+   */
+  resizeEndClearHeight?: boolean;
 }
 
 export const NodeWrapper = memo(
@@ -277,6 +284,7 @@ export const NodeWrapper = memo(
     onResize: onResizeProp,
     onResizeEnd,
     onDoubleClick,
+    resizeEndClearHeight = false,
   }: NodeWrapperProps) => {
     const selectedCount = useCanvasStore(
       (state) => state.nodes.filter((node) => node.selected).length,
@@ -477,14 +485,22 @@ export const NodeWrapper = memo(
         setNodeGeometry([
           {
             nodeId: id,
-            size: finalSize,
+            size: resizeEndClearHeight
+              ? { width: finalSize.width, height: undefined }
+              : finalSize,
             position: positionChanged ? finalLocalPos : undefined,
           },
         ]);
         endSnapSession();
         onResizeEnd?.(finalSize.width, finalSize.height);
       },
-      [endResizePreview, setNodeGeometry, id, onResizeEnd],
+      [
+        endResizePreview,
+        setNodeGeometry,
+        id,
+        onResizeEnd,
+        resizeEndClearHeight,
+      ],
     );
 
     const isMinimal = renderMode === 'minimal';

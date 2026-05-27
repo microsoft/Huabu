@@ -71,6 +71,22 @@ export function buildPreprocessSnapshot(
     };
   }
 
+  if (nodeType === 'question') {
+    // Question nodes carry their text in `data.input.content` (the
+    // `TextInput` discriminated-union shape). Project it onto the
+    // canonical `content` field so the server pipeline can treat it
+    // like any other text-bearing node when generating a label.
+    const input = data?.input as
+      | { kind?: string; content?: string }
+      | undefined;
+    const content = input?.kind === 'text' ? (input.content ?? '').trim() : '';
+    return {
+      title: (data?.label as string) || (data?.title as string) || undefined,
+      labelSource: (data?.labelSource as string) || undefined,
+      content: content || undefined,
+    };
+  }
+
   return {
     title: (data?.label as string) || (data?.title as string) || undefined,
     labelSource: (data?.labelSource as string) || undefined,

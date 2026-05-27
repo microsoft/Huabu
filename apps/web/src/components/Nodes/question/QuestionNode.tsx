@@ -4,12 +4,13 @@ import { memo, useCallback, useState, useRef, useEffect, useMemo } from 'react';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
 import { StatusBadge } from '@/components/Common/StatusBadge.tsx';
-import { useTextAutoSize } from '@/hooks/useTextAutoSize';
+import { useTextNodeSurface } from '@/hooks/useTextNodeSurface';
 import useCanvasStore from '@/store/canvasStore.ts';
 import { useChatStore } from '@/store/chatStore.ts';
 import { usePanelStore } from '@/store/panelStore.ts';
 
 import { NodeWrapper } from '../NodeWrapper';
+import { TextNodeBody } from '../shared/TextNodeBody';
 
 import type { CanvasQuestionNodeData } from '../types';
 import type { Node, NodeProps } from '@xyflow/react';
@@ -23,8 +24,11 @@ const NODE_PADDING = 12;
 const QUESTION_FONT_FAMILY =
   '"Comic Sans MS", STXingkai, KaiTi, "Kaiti SC", cursive';
 
+/** Sticky-note warm background colour (design token). */
+const STICKY_BG = 'var(--question-bg)';
+
 export const QuestionNode = memo(
-  ({ id, data, selected, width, height }: NodeProps<QuestionNodeType>) => {
+  ({ id, data, selected, width }: NodeProps<QuestionNodeType>) => {
     const updateNodeData = useCanvasStore((state) => state.updateNodeData);
     const patchNodeSilent = useCanvasStore((state) => state.patchNodeSilent);
     const [isEditing, setIsEditing] = useState(false);
@@ -33,7 +37,6 @@ export const QuestionNode = memo(
 
     const inputContent =
       data.input?.kind === 'text' ? (data.input.content ?? '') : '';
-    const [draft, setDraft] = useState(inputContent);
 
     // Focus textarea when entering edit mode, cursor at end.
     useEffect(() => {
@@ -50,18 +53,11 @@ export const QuestionNode = memo(
       }
     }, [isEditing]);
 
-    // Sync draft from external store changes (undo/redo).
-    useEffect(() => {
-      if (!isEditing) {
-        setDraft(data.input?.kind === 'text' ? (data.input.content ?? '') : '');
-      }
-    }, [data.input, isEditing]);
-
     // Abort any in-flight blur processing on unmount.
     useEffect(() => () => processingRef.current?.abort(), []);
 
     // ------------------------------------------------------------------
-    // Text auto-sizing (shared with TextNode)
+    // Shared surface (auto-size + draft state + wrapper/body prop bundles)
     // ------------------------------------------------------------------
     const fontOpts = useMemo(
       () => ({
@@ -73,30 +69,19 @@ export const QuestionNode = memo(
       [],
     );
 
-    const {
-      hasFixedSize,
-      effectiveFontSize,
-      autoWidth,
-      autoHeight,
-      handleResizeStart,
-      handleResize,
-      handleResizeEnd,
-    } = useTextAutoSize({
+    const surface = useTextNodeSurface({
       nodeId: id,
-      text: draft,
+      width,
+      isEditing,
+      content: inputContent,
       baseFontSize: 16,
       padding: NODE_PADDING,
       fontOpts,
       placeholder: 'Ask a question...',
-      width,
-      height,
     });
 
     const status = data.status ?? 'idle';
     const viewed = data.viewed ?? false;
-
-    /** Sticky-note warm background colour (design token). */
-    const STICKY_BG = 'var(--question-bg)';
 
     // ------------------------------------------------------------------
     // Countdown seconds for pending label
@@ -224,7 +209,7 @@ export const QuestionNode = memo(
     const handleBlur = useCallback(() => {
       setIsEditing(false);
 
-      const trimmed = draft.trim();
+      const trimmed = surface.draft.trim();
       const contentChanged = trimmed !== inputContent;
 
       // Commit input to store if changed.
@@ -243,7 +228,7 @@ export const QuestionNode = memo(
         runAt: Date.now() + delay * 1000,
       });
     }, [
-      draft,
+      surface.draft,
       inputContent,
       id,
       data.autoRunDelay,
@@ -262,26 +247,24 @@ export const QuestionNode = memo(
         actions={questionToolbar}
         keepAspectRatio={false}
         allowOverflow
-        onResizeStart={handleResizeStart}
-        onResize={handleResize}
-        onResizeEnd={handleResizeEnd}
         className={clsx(
           'question-sticky rounded-lg transition-all duration-200',
           isDoneUnviewed && 'question-node-done-unviewed',
         )}
+        {...surface.nodeWrapperProps}
       >
-        {/* Sticky-note content */}
-        <div
-          className={clsx(
-            'relative',
-            hasFixedSize ? 'h-full w-full' : undefined,
-          )}
-          style={{
-            padding: `${NODE_PADDING}px`,
-            ...(autoWidth !== undefined
-              ? { width: autoWidth, height: autoHeight }
-              : undefined),
-          }}
+        <TextNodeBody
+          ref={textareaRef}
+          {...surface.bodyProps}
+          draft={surface.draft}
+          onChange={surface.setDraft}
+          onBlur={handleBlur}
+          isEditing={isEditing}
+          onRequestEdit={handleDoubleClick}
+          placeholder="Ask a question..."
+          fontFamily={QUESTION_FONT_FAMILY}
+          color="var(--question-fg)"
+          textareaClassName="placeholder:text-fg-default/40"
         >
           {status !== 'idle' && (
             <StatusBadge
@@ -303,38 +286,7 @@ export const QuestionNode = memo(
               title={hasRun && data.threadId ? 'Open conversation' : undefined}
             />
           )}
-
-          {/* Input area */}
-          {!isEditing && (
-            <div
-              className="absolute inset-0 z-2 cursor-grab"
-              onDoubleClick={handleDoubleClick}
-            />
-          )}
-          <textarea
-            ref={textareaRef}
-            className={clsx(
-              'placeholder:text-fg-default/40 relative z-1 h-full w-full resize-none overflow-hidden bg-transparent outline-none',
-              isEditing ? 'nodrag nowheel cursor-text' : 'pointer-events-none',
-            )}
-            placeholder="Ask a question..."
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={handleBlur}
-            readOnly={!isEditing}
-            style={{
-              padding: 0,
-              border: 'none',
-              color: 'var(--question-fg)',
-              fontFamily: QUESTION_FONT_FAMILY,
-              fontWeight: 'normal',
-              fontSize: `${effectiveFontSize}px`,
-              lineHeight: 1.5,
-              wordBreak: 'break-word',
-              whiteSpace: 'pre-wrap',
-            }}
-          />
-        </div>
+        </TextNodeBody>
       </NodeWrapper>
     );
   },
