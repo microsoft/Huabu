@@ -20,6 +20,8 @@ export default typescriptEslint.config(
       '**/out/**',
       '**/.vite/**',
       '**/*.min.*',
+      // Vendored upstream code — lint with its own rules in the agentlet repo.
+      'external/**',
     ],
   },
   js.configs.recommended,
