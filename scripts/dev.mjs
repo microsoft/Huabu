@@ -156,7 +156,47 @@ function spawnPnpmDev(filter, label) {
   return child;
 }
 
-console.log('[dev] starting shared + server …');
+/**
+ * Spawn `tsc -w` inside a vendored agentlet package (`external/agentlet/...`).
+ *
+ * Those packages have no `dev` script of their own — we don't want to patch
+ * vendored code — so we invoke their local `tsc` via `pnpm exec`. The
+ * resulting `dist/` is what `apps/server`'s `tsx watch` actually imports
+ * through `node_modules/@agentlet/*` symlinks, so any source change here
+ * propagates to a server restart automatically.
+ *
+ * `predev` (`build:agentlet`) primes `dist/` before this runs, so the server
+ * never races a still-empty `dist/` on cold start.
+ */
+function spawnAgentletWatch(filter, label) {
+  const child = spawn(
+    'pnpm',
+    ['--filter', filter, 'exec', 'tsc', '-w', '--preserveWatchOutput'],
+    {
+      cwd: repoRoot,
+      stdio: 'inherit',
+      shell: process.platform === 'win32',
+      detached: process.platform !== 'win32',
+    },
+  );
+  children.push(child);
+  child.on('exit', (code, signal) => {
+    if (shuttingDown) return;
+    console.error(
+      `[dev] ${label} exited (code=${code} signal=${signal}); shutting down.`,
+    );
+    shutdown(code ?? 1);
+  });
+  return child;
+}
+
+console.log('[dev] starting agentlet watchers + shared + server …');
+// Order within the parallel group doesn't matter — agentlet/protocol is a
+// build-time dep of agentlet/server, but `predev` already ran a full build
+// so both watchers start from a populated `dist/` and only do incremental
+// recompiles from here on.
+spawnAgentletWatch('@agentlet/protocol', 'agentlet/protocol');
+spawnAgentletWatch('@agentlet/server', 'agentlet/server');
 spawnPnpmDev('@sediment/shared', 'shared');
 spawnPnpmDev('@sediment/server', 'server');
 

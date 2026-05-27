@@ -133,6 +133,67 @@ For environment setup details, see [docs/setup.md](./docs/setup.md).
 
 ---
 
+## Connecting external coding agents
+
+Sediment can talk to AI coding agents that already run on your machine —
+**GitHub Copilot CLI**, **Claude Code**, **Gemini CLI**, and others that
+speak the [Agent Client Protocol](https://agentclientprotocol.com). Once
+connected, the agent shows up inside Sediment and can read and modify
+files in whatever project folder you pointed it at.
+
+### One-time setup
+
+1. Copy the env template:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+   Open the new `.env` and set these two lines (the token is just a
+   password you make up — anything long and random is fine):
+
+   ```dotenv
+   SEDIMENT_ENABLE_ACP=1
+   SEDIMENT_ACP_DEV_TOKEN=pick-any-long-random-string
+   ```
+
+2. _Optional._ Make the `agentlet` command available from any folder:
+
+   ```bash
+   echo 'export PATH="'"$PWD"'/bin:$PATH"' >> ~/.bashrc && exec bash
+   ```
+
+   If you skip this, just use the full path everywhere
+   (e.g. `~/Sediment/bin/agentlet …`).
+
+### Connecting an agent
+
+With `pnpm dev` running, open another terminal, `cd` into the project
+folder you want the agent to work on, and start the agent of your choice:
+
+```bash
+# GitHub Copilot CLI
+agentlet --agent "copilot --acp --allow-all"
+
+# Claude Code
+agentlet --agent "claude --acp"
+
+# Gemini CLI
+agentlet --agent "gemini --acp"
+```
+
+That's it — the agent will show up in Sediment's external-agent panel and
+you can hand it tasks from any canvas.
+
+### Updating the bundled `agentlet`
+
+`external/agentlet/` is a snapshot of
+[`hai-team/agentlet`](https://github.com/hai-team/agentlet). Maintainers
+sync it with `pnpm run subtree:pull:agentlet` (pull upstream changes) or
+`pnpm run subtree:push:agentlet` (publish local changes back).
+
+---
+
 ## Documentation
 
 - [User Guide](./docs/user-guide/README.md) — how to use the product

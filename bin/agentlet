@@ -1,0 +1,67 @@
+#!/usr/bin/env sh
+# Stable short entry point for the vendored agentlet CLI.
+#
+# Goal: zero shell-config burden on users. They should only need to:
+#   1. Put `SEDIMENT_ACP_DEV_TOKEN=...` in <repo>/.env  (once)
+#   2. Run `<repo>/bin/agentlet --agent "<cmd>"`        (every time)
+#
+# This wrapper takes care of everything else by reading <repo>/.env itself,
+# deriving the right defaults, and forwarding any extra flags to the
+# underlying agentlet CLI verbatim. Nothing needs to live in ~/.bashrc.
+
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo=$(CDPATH= cd -- "$here/.." && pwd)
+cli="$repo/external/agentlet/packages/local/dist/index.js"
+
+if [ ! -f "$cli" ]; then
+  echo "agentlet wrapper: $cli not found." >&2
+  echo "Run \`pnpm run build:agentlet\` in $repo first." >&2
+  exit 1
+fi
+
+# Auto-load <repo>/.env so the same token the server already reads via
+# dotenv (SEDIMENT_ACP_DEV_TOKEN) becomes available here too. We strip
+# CR before sourcing because the file may have CRLF line endings (some
+# editors do that), which POSIX `.` interprets as part of the value and
+# trips with `: not found` errors. `set -a` makes every assignment in
+# .env exported, not just shell-local.
+if [ -f "$repo/.env" ]; then
+  envtmp=$(mktemp 2>/dev/null || echo "/tmp/agentlet-env.$$")
+  trap 'rm -f "$envtmp"' EXIT INT TERM
+  tr -d '\r' < "$repo/.env" > "$envtmp"
+  set -a
+  # shellcheck disable=SC1090
+  . "$envtmp"
+  set +a
+  rm -f "$envtmp"
+  trap - EXIT INT TERM
+fi
+
+# agentlet CLI expects AGENTLET_TOKEN — derive it from the canonical
+# server-side name if the user didn't set it explicitly. Single source
+# of truth: SEDIMENT_ACP_DEV_TOKEN in <repo>/.env.
+: "${AGENTLET_TOKEN:=$SEDIMENT_ACP_DEV_TOKEN}"
+export AGENTLET_TOKEN
+
+# Server URL.
+#   - Default = ws://localhost:${SERVER_PORT:-3001}/api/acp/agent, i.e. the
+#     embedded mount that `pnpm dev` exposes on the same port as the rest of
+#     Sediment's API. SERVER_PORT already lives in .env (see .env.example)
+#     and the server reads it from there too — single source of truth.
+#   - For non-local setups (different host, wss://, custom path) set
+#     SEDIMENT_ACP_URL to the full URL — it wins outright.
+if [ -n "$SEDIMENT_ACP_URL" ]; then
+  url="$SEDIMENT_ACP_URL"
+else
+  url="ws://localhost:${SERVER_PORT:-3001}/api/acp/agent"
+fi
+
+# `--allow-insecure` is required by agentlet for ws:// (non-TLS) URLs but
+# disallowed for wss://. Auto-pick based on the URL scheme so users never
+# have to think about it.
+insecure_flag=
+case "$url" in
+  ws://*) insecure_flag=--allow-insecure ;;
+esac
+
+exec node "$cli" --server "$url" $insecure_flag "$@"
