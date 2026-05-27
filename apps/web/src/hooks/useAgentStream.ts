@@ -645,6 +645,33 @@ export function useAgentStream(): UseAgentStreamReturn {
       const abortController = new AbortController();
       abortControllerRef.current = abortController;
 
+      // ── Question-node follow-up bookkeeping ─────────────────────────
+      //
+      // When the chat panel is currently rendering a question node's
+      // thread (`viewingQuestionThread` is set), every message the user
+      // sends is a follow-up turn against that node. The question node
+      // owns a `status` field (`idle | pending | running | done | error`)
+      // that the canvas badge reads. The dedicated `useQuestionRunner`
+      // hook only manages the *initial* auto-run; follow-ups travel
+      // through this hook, so we are the only place that can keep that
+      // badge honest across multi-turn conversations.
+      //
+      // We also track whether a successful `done` event was observed so
+      // a late cap-out `error` event (`Agent loop exceeded maximum
+      // iterations`) emitted *after* a complete answer doesn't flip the
+      // node to `error` (issue 3 — tool failures during a successful
+      // agent run should not poison the final status).
+      const viewingQuestion = useChatStore.getState().viewingQuestionThread;
+      const questionNodeId = viewingQuestion?.nodeId ?? null;
+      let sawDone = false;
+
+      if (questionNodeId) {
+        useCanvasStore.getState().patchNodeSilent(questionNodeId, {
+          status: 'running',
+          errorMessage: undefined,
+        });
+      }
+
       // Make sure any buffered behavioural events have hit the server
       // before the agent builds its request context. Failures are
       // swallowed inside the flush helper — we never want a transient
@@ -658,6 +685,7 @@ export function useAgentStream(): UseAgentStreamReturn {
           agentMode,
           {
             onEvent: (event: AgentStreamEvent) => {
+              if (event.type === 'done') sawDone = true;
               handleStreamEvent(event, {
                 assistantId,
                 toolQueue: toolMsgQueue,
@@ -678,6 +706,15 @@ export function useAgentStream(): UseAgentStreamReturn {
               if (!activeRef.current || errorHandled) return;
               errorHandled = true;
               console.error(`${agentMode} error:`, err);
+              // Question-node follow-up: only flip to `error` if no
+              // useful final `done` event ever arrived. A cap-out error
+              // emitted after a successful answer is treated as success.
+              if (questionNodeId) {
+                useCanvasStore.getState().patchNodeSilent(questionNodeId, {
+                  status: sawDone ? 'done' : 'error',
+                  errorMessage: sawDone ? undefined : err.message,
+                });
+              }
               addMessage({
                 id: createId('status'),
                 role: 'status',
@@ -690,6 +727,13 @@ export function useAgentStream(): UseAgentStreamReturn {
             onComplete: () => {
               setIsLoading(false);
               abortControllerRef.current = null;
+
+              if (questionNodeId) {
+                useCanvasStore.getState().patchNodeSilent(questionNodeId, {
+                  status: 'done',
+                  errorMessage: undefined,
+                });
+              }
 
               if (agentMode === 'operate' && resourcesRef.current.length > 0) {
                 updateMessage(assistantIdRef.current, (m) =>
@@ -705,6 +749,7 @@ export function useAgentStream(): UseAgentStreamReturn {
             canvasId: canvasId || undefined,
             attachments,
             intentData,
+            anchorNodeId: questionNodeId ?? undefined,
             signal: abortController.signal,
           },
         );
@@ -713,6 +758,15 @@ export function useAgentStream(): UseAgentStreamReturn {
         if (abortController.signal.aborted) {
           setIsLoading(false);
           abortControllerRef.current = null;
+          // User explicitly stopped: roll the question node back to
+          // `done` (preserve any partial reply the server kept) rather
+          // than leaving it stuck on `running`.
+          if (questionNodeId) {
+            useCanvasStore.getState().patchNodeSilent(questionNodeId, {
+              status: 'done',
+              errorMessage: undefined,
+            });
+          }
           return;
         }
         // Page unloading — don't persist error
@@ -721,6 +775,13 @@ export function useAgentStream(): UseAgentStreamReturn {
         if (errorHandled) return;
         errorHandled = true;
         console.error(`${agentMode} failed:`, err);
+        if (questionNodeId) {
+          const message = err instanceof Error ? err.message : 'Unknown error';
+          useCanvasStore.getState().patchNodeSilent(questionNodeId, {
+            status: sawDone ? 'done' : 'error',
+            errorMessage: sawDone ? undefined : message,
+          });
+        }
         addMessage({
           id: createId('status'),
           role: 'status',

@@ -14,6 +14,8 @@ export const NODE_TYPE_TO_PREFIX: Record<string, string> = {
   pdf: 'PDF',
   note: 'Note',
   text: 'Text',
+  question: 'Question',
+  sketch: 'Sketch',
 };
 
 /**

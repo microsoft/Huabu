@@ -58,6 +58,14 @@ async function executeQuestionNode(nodeId: string): Promise<void> {
   const abortController = new AbortController();
   activeRuns.set(nodeId, abortController);
 
+  // Track whether the stream delivered a usable final `done` event.
+  // The agent server can emit an `error` event *after* a successful
+  // `done` (e.g. on cap-out: `Agent loop exceeded maximum iterations`),
+  // and the user reasonably expects "received a final answer" to mean
+  // the node displays success — not error — regardless of mid-run tool
+  // failures or the soft turn cap.
+  let sawDone = false;
+
   try {
     // Stream to existing /api/agent endpoint.
     //
@@ -73,16 +81,24 @@ async function executeQuestionNode(nodeId: string): Promise<void> {
       threadId,
       'ask',
       {
-        onEvent: () => {
+        onEvent: (event) => {
+          if (event.type === 'done') sawDone = true;
           // Events stream in background — we don't render them live.
           // The conversation is viewed later via openQuestionThread.
         },
         onError: (err) => {
           if (!abortController.signal.aborted) {
-            patch(nodeId, {
-              status: 'error',
-              errorMessage: err.message,
-            });
+            if (sawDone) {
+              // A final answer was delivered before this error — treat
+              // the run as successful so the node shows the unviewed
+              // glow instead of a red error badge.
+              patch(nodeId, { status: 'done', errorMessage: undefined });
+            } else {
+              patch(nodeId, {
+                status: 'error',
+                errorMessage: err.message,
+              });
+            }
           }
           activeRuns.delete(nodeId);
         },
@@ -101,10 +117,14 @@ async function executeQuestionNode(nodeId: string): Promise<void> {
     );
   } catch (err) {
     if (!abortController.signal.aborted) {
-      patch(nodeId, {
-        status: 'error',
-        errorMessage: err instanceof Error ? err.message : 'Unknown error',
-      });
+      if (sawDone) {
+        patch(nodeId, { status: 'done', errorMessage: undefined });
+      } else {
+        patch(nodeId, {
+          status: 'error',
+          errorMessage: err instanceof Error ? err.message : 'Unknown error',
+        });
+      }
     }
     activeRuns.delete(nodeId);
   }

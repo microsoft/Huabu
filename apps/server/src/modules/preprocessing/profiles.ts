@@ -111,8 +111,13 @@ export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
   },
   question: {
     nodeType: 'question',
-    capabilities: [],
-    watchFields: [],
+    capabilities: [
+      'resolve_input',
+      'compute_fingerprint',
+      'generate_label',
+      'build_patch',
+    ],
+    watchFields: ['content'],
   },
 };
 

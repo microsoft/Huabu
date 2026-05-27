@@ -43,7 +43,8 @@ export function inputResolve(
 
   switch (nodeType) {
     case 'note':
-    case 'text': {
+    case 'text':
+    case 'question': {
       return {
         ...base,
         content: (snapshot.content as string) ?? '',
