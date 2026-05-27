@@ -88,27 +88,32 @@ export const NoteNode = memo(
 
     const markdown = typeof data.content === 'string' ? data.content : '';
 
-    // Track the rendered content height. Used only to decide whether to
-    // surface the truncation indicator in fixed-height mode.
-    //
-    // Subtlety: in fixed-height mode the host carries `h-full`, so its
-    // own layout box never grows when content overflows — a
-    // ResizeObserver on the host alone would never fire on content
-    // changes. We additionally observe the host's first child (the
-    // div that `MilkdownPreview` mounts into) and use a
-    // MutationObserver to (re)attach the observer when that child
-    // appears or is replaced. `scrollHeight` on the host always reports
-    // the intrinsic content height, so the truncation check stays
-    // accurate even when the editor reflows internally.
+    // Measure `.ProseMirror` (not host.scrollHeight): Crepe's block-edit
+    // plugin keeps an absolute-positioned `.milkdown-block-handle` at
+    // the bottom of `.milkdown`, which inflates host.scrollHeight by
+    // ~34px and leaves dead bg-surface below the text in auto mode.
+    // Add host's vertical padding back since `.ProseMirror` doesn't
+    // include it. Observation chain covers fixed-mode (host has
+    // h-full so its own size never changes) by also watching the
+    // first child + MutationObserver for editor (re)mounts.
     useEffect(() => {
       const host = previewHostRef.current;
       if (!host) return;
 
       const measure = () => {
-        const contentH = host.scrollHeight;
-        const hostH = host.clientHeight;
+        const prose = host.querySelector('.ProseMirror') as HTMLElement | null;
+        let contentH: number;
+        if (prose) {
+          const cs = getComputedStyle(host);
+          const padY =
+            (parseFloat(cs.paddingTop) || 0) +
+            (parseFloat(cs.paddingBottom) || 0);
+          contentH = prose.scrollHeight + padY;
+        } else {
+          contentH = host.scrollHeight;
+        }
         if (contentH > 0) setContentHeight(contentH);
-        setHostHeight(hostH);
+        setHostHeight(host.clientHeight);
       };
 
       const ro = new ResizeObserver(measure);
