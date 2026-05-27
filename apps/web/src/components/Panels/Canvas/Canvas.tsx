@@ -45,6 +45,7 @@ import { SnapGuidesOverlay } from './SnapGuidesOverlay.tsx';
 import { GRID_SIZE, MAX_ZOOM, MIN_ZOOM } from '../../../config/canvas.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import { useGesturePreviewStore } from '../../../store/gesturePreviewStore.ts';
+import { usePreviewStore } from '../../../store/previewStore.ts';
 import { useToolStore } from '../../../store/toolStore.ts';
 import {
   canReadSedimentPayload,
@@ -207,6 +208,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   const setRfInstance = useCanvasStore((state) => state.setRfInstance);
   const setViewport = useCanvasStore((state) => state.setViewport);
   const openExpanded = useCanvasStore((state) => state.openExpanded);
+  const closeExpanded = useCanvasStore((state) => state.closeExpanded);
   const expandedNodeId = useCanvasStore((state) => state.expandedNodeId);
   const expandMode = useCanvasStore((state) => state.expandMode);
   const frameNodesInRect = useCanvasStore((state) => state.frameNodesInRect);
@@ -432,43 +434,70 @@ export const Canvas: React.FC<CanvasProps> = ({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [pendingNodeType, exitPendingNodeType]);
 
-  // Handle click-to-place for note, text, and question
+  // Handle click-to-place for note, text, and question; otherwise dismiss
+  // any currently expanded view (preview or node) so clicking the canvas
+  // background acts as a quick close gesture in split mode.
   const handlePaneClick = useCallback(
     (event: React.MouseEvent) => {
+      // 1. Click-to-place for pending node creation tools.
       if (
-        !pendingNodeType ||
-        pendingNodeType === 'frame' ||
-        pendingNodeType === 'sketch'
-      )
+        pendingNodeType &&
+        pendingNodeType !== 'frame' &&
+        pendingNodeType !== 'sketch'
+      ) {
+        const instance = rfInstanceRef.current;
+        if (!instance) return;
+
+        const position = instance.screenToFlowPosition({
+          x: event.clientX,
+          y: event.clientY,
+        });
+
+        const data: Record<string, unknown> =
+          pendingNodeType === 'question'
+            ? {
+                input: { kind: 'text', content: '' },
+                status: 'idle',
+                origin: { type: 'user-created' },
+              }
+            : {
+                content: '',
+                origin: { type: 'user-created' },
+              };
+
+        addNode({
+          nodeType: pendingNodeType,
+          placementPoint: position,
+          data,
+        });
+        setPendingNodeType(null);
         return;
-      const instance = rfInstanceRef.current;
-      if (!instance) return;
+      }
 
-      const position = instance.screenToFlowPosition({
-        x: event.clientX,
-        y: event.clientY,
-      });
+      // 2. With a different creation tool still active (frame / sketch), the
+      //    background click belongs to that tool — leave the expanded view
+      //    alone so the user doesn't lose their context mid-gesture.
+      if (pendingNodeType) return;
 
-      const data: Record<string, unknown> =
-        pendingNodeType === 'question'
-          ? {
-              input: { kind: 'text', content: '' },
-              status: 'idle',
-              origin: { type: 'user-created' },
-            }
-          : {
-              content: '',
-              origin: { type: 'user-created' },
-            };
-
-      addNode({
-        nodeType: pendingNodeType,
-        placementPoint: position,
-        data,
-      });
-      setPendingNodeType(null);
+      // 3. No tool active → background click closes the expanded view.
+      //    Priority preview > node mirrors ExpandedNodePanel's Escape handler.
+      const { previewType, previewData, closePreview } =
+        usePreviewStore.getState();
+      if (previewType && previewData) {
+        closePreview();
+        return;
+      }
+      if (expandedNodeId) {
+        closeExpanded();
+      }
     },
-    [pendingNodeType, addNode, setPendingNodeType],
+    [
+      pendingNodeType,
+      addNode,
+      setPendingNodeType,
+      expandedNodeId,
+      closeExpanded,
+    ],
   );
 
   // When a node is expanded in split mode, pan the canvas so the node stays visible.
