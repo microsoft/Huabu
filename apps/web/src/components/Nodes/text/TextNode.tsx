@@ -1,15 +1,15 @@
 import { resolveAccent } from '@sediment/shared';
-import { clsx } from 'clsx';
 import { Bold, Italic, Underline, Strikethrough } from 'lucide-react';
-import { memo, useCallback, useState, useRef, useMemo, useEffect } from 'react';
+import { memo, useCallback, useState, useRef, useMemo } from 'react';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
-import { useTextAutoSize } from '@/hooks/useTextAutoSize';
+import { useTextNodeSurface } from '@/hooks/useTextNodeSurface';
 import useCanvasStore from '@/store/canvasStore.ts';
 
 import { getAccentTokens } from '../accentTokens';
 import { MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
+import { TextNodeBody } from '../shared/TextNodeBody';
 
 import type { CanvasTextNodeData, NodeStyle } from '../types';
 import type { NodeFontFamily } from '@sediment/shared';
@@ -38,24 +38,15 @@ const ACCENT_BORDER = 3;
 export type TextNodeType = Node<CanvasTextNodeData, 'text'>;
 
 export const TextNode = memo(
-  ({ id, data, selected, width, height }: NodeProps<TextNodeType>) => {
+  ({ id, data, selected, width }: NodeProps<TextNodeType>) => {
     const updateNodeData = useCanvasStore((state) => state.updateNodeData);
     const [isEditing, setIsEditing] = useState(false);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-    // Controlled draft state — local during editing, synced from store on undo/external update.
     const content = data.content ?? '';
-    const [draftContent, setDraftContent] = useState(content);
-
-    // Sync draft from external store changes (undo/redo, server updates).
-    useEffect(() => {
-      if (!isEditing) {
-        setDraftContent(data.content ?? '');
-      }
-    }, [data.content, isEditing]);
 
     // ------------------------------------------------------------------
-    // Text auto-sizing (shared with QuestionNode)
+    // Style derivation
     // ------------------------------------------------------------------
     const updateStyle = useCallback(
       (newStyle: Partial<NodeStyle>) => {
@@ -70,7 +61,6 @@ export const TextNode = memo(
     );
 
     const style = data.style || {};
-    const baseFontSize = 16;
     const fontFamily = FONT_FAMILY_CSS[style.fontFamily ?? 'default'];
     const isBold = style.fontWeight === 'bold';
     const isItalic = style.fontStyle === 'italic';
@@ -113,28 +103,23 @@ export const TextNode = memo(
 
     const borderInset = style.accent ? ACCENT_BORDER : 0;
 
-    const {
-      hasFixedSize,
-      effectiveFontSize,
-      autoWidth,
-      autoHeight,
-      handleResizeStart,
-      handleResize,
-      handleResizeEnd,
-    } = useTextAutoSize({
+    // ------------------------------------------------------------------
+    // Shared surface (auto-size + draft state + wrapper/body prop bundles)
+    // ------------------------------------------------------------------
+    const surface = useTextNodeSurface({
       nodeId: id,
-      text: draftContent,
-      baseFontSize,
+      width,
+      isEditing,
+      content,
+      baseFontSize: 16,
       padding: NODE_PADDING,
       borderInset,
       fontOpts,
       placeholder: 'Type...',
-      width,
-      height,
     });
 
     // ------------------------------------------------------------------
-    // Toolbar state
+    // Editing handlers
     // ------------------------------------------------------------------
     const toggleDecoration = (value: string) => {
       let current = textDecoration.split(' ').filter(Boolean);
@@ -146,17 +131,17 @@ export const TextNode = memo(
       updateStyle({ textDecoration: current.join(' ') });
     };
 
-    const handleDoubleClick = (e: React.MouseEvent) => {
+    const handleDoubleClick = useCallback((e: React.MouseEvent) => {
       e.stopPropagation();
       setIsEditing(true);
       setTimeout(() => textareaRef.current?.focus(), 50);
-    };
+    }, []);
 
-    const handleBlur = () => {
+    const handleBlur = useCallback(() => {
       setIsEditing(false);
-      if (draftContent === (data.content ?? '')) return;
-      updateNodeData(id, { content: draftContent });
-    };
+      if (surface.draft === content) return;
+      updateNodeData(id, { content: surface.draft });
+    }, [surface.draft, content, id, updateNodeData]);
 
     const TextToolbar = (
       <>
@@ -221,69 +206,41 @@ export const TextNode = memo(
         selected={selected}
         toolbar={TextToolbar}
         keepAspectRatio={false}
-        onResizeStart={handleResizeStart}
-        onResize={handleResize}
-        onResizeEnd={handleResizeEnd}
         className="transition-all duration-200"
+        {...surface.nodeWrapperProps}
       >
-        {/*
-          Server flagged the per-node markdown file as missing on disk.
-          Surface a small inline banner while the editor is empty so the
-          user can recreate the file by typing or remove the node.
-        */}
-        {data.contentMissing && !draftContent.trim() && (
-          <div className="absolute top-1 right-1 left-1 z-10">
-            <MissingFileBanner
-              nodeId={id}
-              title="Text file missing — type to recreate it"
-              variant="inline"
-            />
-          </div>
-        )}
-        <div
-          className={clsx(
-            'relative overflow-hidden',
-            hasFixedSize ? 'h-full w-full' : undefined,
-          )}
-          style={{
-            padding: `${NODE_PADDING}px`,
-            ...(autoWidth != null
-              ? { width: autoWidth, height: autoHeight }
-              : undefined),
-          }}
-          onDoubleClick={handleDoubleClick}
+        <TextNodeBody
+          ref={textareaRef}
+          {...surface.bodyProps}
+          draft={surface.draft}
+          onChange={surface.setDraft}
+          onBlur={handleBlur}
+          isEditing={isEditing}
+          onRequestEdit={handleDoubleClick}
+          placeholder="Type..."
+          fontFamily={fontFamily}
+          fontWeight={isBold ? 'bold' : 'normal'}
+          fontStyle={isItalic ? 'italic' : 'normal'}
+          textDecoration={textDecoration}
+          color={textColor}
+          textareaClassName="placeholder:text-fg-subtle/30"
+          containerClassName="overflow-hidden"
         >
-          <textarea
-            ref={textareaRef}
-            className={clsx(
-              'placeholder:text-fg-subtle/30 h-full w-full resize-none overflow-hidden bg-transparent outline-none',
-              isEditing
-                ? 'nodrag cursor-text'
-                : 'pointer-events-none cursor-grab select-none',
-            )}
-            placeholder="Type..."
-            value={draftContent}
-            onChange={(e) => {
-              // Update local draft state — no store write on every keystroke.
-              setDraftContent(e.target.value);
-            }}
-            onBlur={handleBlur}
-            readOnly={!isEditing}
-            style={{
-              color: textColor,
-              fontWeight: isBold ? 'bold' : 'normal',
-              fontStyle: isItalic ? 'italic' : 'normal',
-              fontFamily,
-              fontSize: `${effectiveFontSize}px`,
-              lineHeight: 1.5,
-              textDecoration,
-              wordBreak: 'break-word',
-              whiteSpace: 'pre-wrap',
-              padding: 0,
-              border: 'none',
-            }}
-          />
-        </div>
+          {/*
+            Server flagged the per-node markdown file as missing on disk.
+            Surface a small inline banner while the editor is empty so the
+            user can recreate the file by typing or remove the node.
+          */}
+          {data.contentMissing && !surface.draft.trim() && (
+            <div className="absolute top-1 right-1 left-1 z-10">
+              <MissingFileBanner
+                nodeId={id}
+                title="Text file missing — type to recreate it"
+                variant="inline"
+              />
+            </div>
+          )}
+        </TextNodeBody>
       </NodeWrapper>
     );
   },

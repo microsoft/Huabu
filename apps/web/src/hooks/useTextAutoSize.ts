@@ -1,23 +1,35 @@
 /**
  * Hook that encapsulates text auto-sizing logic shared by TextNode and QuestionNode.
  *
- * Two modes:
- *   - Auto mode (no fixed size): node shrink-wraps to content at baseFontSize
- *   - Fixed mode (user resized): font size is computed to fill the node
+ * Model:
+ *   - Width: Fixed if the node has `style.width` (set by a resize gesture),
+ *     else auto-fits the content at `baseFontSize`.
+ *   - Font size: locked via `style.fontSize`. Captured at resize-end by
+ *     binary-searching the box dimensions; absent value defaults to
+ *     `baseFontSize`. Typing / deleting / undo / external sync never
+ *     change it — they only adjust the height.
+ *   - Height: ALWAYS content-driven. Measured from the locked font size
+ *     and width. The node's `style.height` is intentionally never persisted
+ *     by these node types (NodeWrapper's `resizeEndClearHeight` prop
+ *     ensures the resize commit drops it).
  *
  * Returns dimensions, effective font size, and resize callbacks.
  */
 
 import { useStore } from '@xyflow/react';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import useCanvasStore from '@/store/canvasStore';
 import {
   computeFontSizeForHeight,
   measureTextContent,
+  measureTextHeight,
   type FontOpts,
 } from '@/utils/node/textMeasure';
 
-/** Maximum characters per line before wrapping (auto mode). */
+import type { NodeStyle } from '@sediment/shared';
+
+/** Maximum characters per line before wrapping in auto-width mode. */
 const MAX_CHARS_PER_LINE = 18;
 
 /**
@@ -35,27 +47,25 @@ export interface UseTextAutoSizeOpts {
   fontOpts: FontOpts;
   /** Placeholder text used to measure minimum width when content is empty. */
   placeholder?: string;
-  /** Node width from NodeProps (only available in fixed mode). */
+  /** Node width from NodeProps (only available once measured). */
   width?: number;
-  /** Node height from NodeProps (only available in fixed mode). */
-  height?: number;
 }
 
 export interface UseTextAutoSizeResult {
-  /** Whether the node has been manually resized to a fixed size. */
-  hasFixedSize: boolean;
+  /** Whether the node has a user-set width (from a resize gesture). */
+  hasFixedWidth: boolean;
   /** The font size to apply to the textarea. */
   effectiveFontSize: number;
-  /** Auto-computed width (undefined in fixed mode). */
-  autoWidth: number | undefined;
-  /** Auto-computed height (undefined in fixed mode). */
-  autoHeight: number | undefined;
+  /** Width to apply to the inner content container. */
+  effectiveWidth: number;
+  /** Height to apply to the inner content container. */
+  effectiveHeight: number;
   /** Callback for NodeWrapper onResizeStart. */
   handleResizeStart: () => void;
   /** Callback for NodeWrapper onResize. */
   handleResize: (width: number, height: number) => void;
   /** Callback for NodeWrapper onResizeEnd. */
-  handleResizeEnd: () => void;
+  handleResizeEnd: (width: number, height: number) => void;
 }
 
 export function useTextAutoSize({
@@ -67,96 +77,184 @@ export function useTextAutoSize({
   fontOpts,
   placeholder = 'Type...',
   width,
-  height,
 }: UseTextAutoSizeOpts): UseTextAutoSizeResult {
-  const hasFixedSize = useStore(
-    (s) => typeof s.nodeLookup.get(nodeId)?.style?.height === 'number',
+  // Subscribe to the persisted style so we react to undo/redo and external
+  // edits. Selecting the whole style object is fine — React Flow's store
+  // dedupes by reference equality and `style` is treated as immutable.
+  const style = useStore(
+    (s) => s.nodeLookup.get(nodeId)?.data?.style as NodeStyle | undefined,
   );
+  const hasFixedWidth = useStore(
+    (s) => typeof s.nodeLookup.get(nodeId)?.style?.width === 'number',
+  );
+  const persistedHeight = useStore(
+    (s) => s.nodeLookup.get(nodeId)?.style?.height as number | undefined,
+  );
+  const patchNodeSilent = useCanvasStore((s) => s.patchNodeSilent);
 
-  const [liveFontSize, setLiveFontSize] = useState<number | null>(null);
-  const isResizingRef = useRef(false);
+  const lockedFontSize = style?.fontSize;
 
   const inset = padding + borderInset;
 
-  const computedFontSize = useMemo(() => {
-    if (hasFixedSize && width != null && height != null) {
-      // Empty content -> render the placeholder at the base size (a small
-      // hint, not a fill-the-box title). Scaling the placeholder up would
-      // either wrap it onto multiple lines or clip it.
-      if (!text.trim()) return baseFontSize;
-      const cw = width - inset * 2;
-      const ch = height - inset * 2;
-      return computeFontSizeForHeight(text, cw, ch, fontOpts);
+  // --------------------------------------------------------------------
+  // @deprecated MIGRATION_FONTSIZE_FROM_HEIGHT
+  //
+  // Nodes created before `style.fontSize` existed persist `style.height`
+  // as the implicit carrier of "the size the user resized to". Back-derive
+  // a fontSize once, write it via `patchNodeSilent` (no undo entry), and
+  // let `NodeWrapper.resizeEndClearHeight` drop `style.height` on the next
+  // resize. The block reads `text` only at mount-time so a long edit
+  // session after migration doesn't keep recomputing.
+  //
+  // Safe to remove after live data has migrated (next major schema bump).
+  // Grep for `MIGRATION_FONTSIZE_FROM_HEIGHT` to locate this block.
+  // --------------------------------------------------------------------
+  const migrationDoneRef = useRef(false);
+  useEffect(() => {
+    if (migrationDoneRef.current) return;
+    if (lockedFontSize !== undefined) {
+      migrationDoneRef.current = true;
+      return;
     }
-    return baseFontSize;
-  }, [hasFixedSize, width, height, text, baseFontSize, fontOpts, inset]);
+    if (persistedHeight === undefined || width === undefined) return;
+    if (width - inset * 2 <= 0 || persistedHeight - inset * 2 <= 0) return;
+    migrationDoneRef.current = true;
+    const derived = text.trim()
+      ? computeFontSizeForHeight(
+          text,
+          width - inset * 2,
+          persistedHeight - inset * 2,
+          fontOpts,
+        )
+      : baseFontSize;
+    patchNodeSilent(nodeId, {
+      style: { ...(style ?? {}), fontSize: derived },
+    });
+    // Intentionally minimal deps — we want a one-shot migration using the
+    // text/dims at mount time, not a reactive recomputation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lockedFontSize, persistedHeight, width]);
 
-  // Clear liveFontSize once computedFontSize updates after resize ends,
-  // so the stable memo-driven value takes over.
-  const prevComputedRef = useRef(computedFontSize);
-  if (prevComputedRef.current !== computedFontSize) {
-    prevComputedRef.current = computedFontSize;
-    if (!isResizingRef.current && liveFontSize !== null) {
-      setLiveFontSize(null);
-    }
-  }
+  // --------------------------------------------------------------------
+  // Live drag state — overrides locked size while user is dragging the
+  // resize handle so feedback is instantaneous.
+  // --------------------------------------------------------------------
+  const [liveFontSize, setLiveFontSize] = useState<number | null>(null);
+  const [liveSize, setLiveSize] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
+  const isResizingRef = useRef(false);
 
+  // --------------------------------------------------------------------
+  // Auto-width fallback (used when no fixed width is set).
+  // --------------------------------------------------------------------
+  const fontSize = liveFontSize ?? lockedFontSize ?? baseFontSize;
   const maxAutoWidth = baseFontSize * MAX_CHARS_PER_LINE * 0.62;
 
-  const autoSize = useMemo(() => {
-    if (hasFixedSize) return null;
+  const autoContent = useMemo(() => {
     const measuredText = text || placeholder;
     return measureTextContent(measuredText, {
       ...fontOpts,
       fontSize: baseFontSize,
       maxWidth: maxAutoWidth,
     });
-  }, [hasFixedSize, text, baseFontSize, fontOpts, maxAutoWidth, placeholder]);
+  }, [text, baseFontSize, fontOpts, maxAutoWidth, placeholder]);
 
-  // After resize ends, prefer computedFontSize (driven by NodeProps width/height)
-  // over liveFontSize. During active drag, use liveFontSize for instant feedback.
-  const effectiveFontSize = liveFontSize ?? computedFontSize;
+  const autoWidth = Math.max(
+    autoContent.width + WRAP_TOLERANCE + inset * 2,
+    30,
+  );
 
-  const autoWidth = hasFixedSize
-    ? undefined
-    : Math.max((autoSize?.width ?? 0) + WRAP_TOLERANCE + inset * 2, 30);
-  const autoHeight = hasFixedSize
-    ? undefined
-    : Math.max(
-        (autoSize?.height ?? 0) + inset * 2,
-        baseFontSize * 1.5 + inset * 2,
-      );
+  // --------------------------------------------------------------------
+  // Effective dimensions.
+  //
+  // - Width:  live drag value > fixed `style.width` > auto-measured
+  // - Height: live drag value > content-driven height at the current font
+  // - Font:   live drag value > locked `style.fontSize` > placeholder cap
+  // --------------------------------------------------------------------
+  const effectiveWidth =
+    liveSize?.width ?? (hasFixedWidth ? (width ?? autoWidth) : autoWidth);
+  const contentWidth = Math.max(effectiveWidth - inset * 2, 1);
 
+  // Placeholder renders at the same font size as user-typed text so there
+  // is no visual jump between empty and filled states. The placeholder
+  // hint reflects exactly what typed text will look like.
+  const renderFontSize = fontSize;
+  const measureText = text || placeholder;
+
+  const measuredHeight = useMemo(
+    () =>
+      measureTextHeight(measureText, contentWidth, renderFontSize, fontOpts),
+    [measureText, contentWidth, renderFontSize, fontOpts],
+  );
+
+  const effectiveHeight =
+    liveSize?.height ??
+    Math.max(
+      measuredHeight + inset * 2,
+      renderFontSize * fontOpts.lineHeight + inset * 2,
+    );
+
+  // --------------------------------------------------------------------
+  // Resize callbacks.
+  //
+  // During drag: compute a live fontSize from (w, h, text) and a live
+  // size so the container visually follows the handle exactly.
+  // On end:     write the final fontSize to `style.fontSize` (silent —
+  // no undo entry) and release the live state. NodeWrapper, configured
+  // with `resizeEndClearHeight`, has already persisted the width-only
+  // geometry change in its own undo entry.
+  // --------------------------------------------------------------------
   const handleResizeStart = useCallback(() => {
     isResizingRef.current = true;
   }, []);
 
   const handleResize = useCallback(
     (w: number, h: number) => {
-      if (!text.trim()) {
-        setLiveFontSize(baseFontSize);
-        return;
-      }
+      setLiveSize({ width: w, height: h });
+      // Use placeholder as the measurement target when empty, so dragging
+      // on an empty node still scales the font naturally (same behaviour
+      // and same final size as if the user had typed something).
+      const target = text.trim() ? text : placeholder;
       const cw = w - inset * 2;
       const ch = h - inset * 2;
-      const fs = computeFontSizeForHeight(text, cw, ch, fontOpts);
+      const fs = computeFontSizeForHeight(target, cw, ch, fontOpts);
       setLiveFontSize(fs);
     },
-    [text, baseFontSize, fontOpts, inset],
+    [text, placeholder, fontOpts, inset],
   );
 
-  const handleResizeEnd = useCallback(() => {
-    isResizingRef.current = false;
-    // Keep liveFontSize until the next render with updated NodeProps dimensions,
-    // which will recompute computedFontSize. Clearing it immediately would cause
-    // a flash to baseFontSize before React Flow propagates measured dimensions.
-  }, []);
+  const handleResizeEnd = useCallback(
+    (w: number, h: number) => {
+      isResizingRef.current = false;
+      // Mirror handleResize: placeholder drives sizing when empty so the
+      // committed fontSize matches what the user saw during the drag.
+      const target = text.trim() ? text : placeholder;
+      const finalFontSize = computeFontSizeForHeight(
+        target,
+        w - inset * 2,
+        h - inset * 2,
+        fontOpts,
+      );
+      patchNodeSilent(nodeId, {
+        style: { ...(style ?? {}), fontSize: finalFontSize },
+      });
+      // Release live state. The next render uses the persisted fontSize
+      // and recomputes height to wrap text exactly — visually this snaps
+      // the bottom edge to content height, which is the intended UX:
+      // resize sets fontSize, height returns to being content-driven.
+      setLiveFontSize(null);
+      setLiveSize(null);
+    },
+    [text, placeholder, fontOpts, inset, patchNodeSilent, nodeId, style],
+  );
 
   return {
-    hasFixedSize,
-    effectiveFontSize,
-    autoWidth,
-    autoHeight,
+    hasFixedWidth,
+    effectiveFontSize: renderFontSize,
+    effectiveWidth,
+    effectiveHeight,
     handleResizeStart,
     handleResize,
     handleResizeEnd,
