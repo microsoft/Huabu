@@ -1,7 +1,7 @@
 import { clsx } from 'clsx';
 import { Download, Fullscreen, ImageOff } from 'lucide-react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { Document, Page, pdfjs } from 'react-pdf';
+import { Document, Page } from 'react-pdf';
 
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
@@ -14,11 +14,10 @@ import useCanvasStore from '@/store/canvasStore';
 import { MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
 import { PreviewCard } from '../PreviewCard';
+import { PDF_DOCUMENT_OPTIONS } from './pdfWorker';
 
 import type { CanvasPdfNodeData } from '../types';
 import type { Node, NodeProps } from '@xyflow/react';
-
-pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 export type PDFNodeType = Node<CanvasPdfNodeData, 'pdf'>;
 
@@ -62,6 +61,7 @@ const FirstPageThumbnail = memo(
       >
         <Document
           file={resolveArtifactUrl(src, canvasId)}
+          options={PDF_DOCUMENT_OPTIONS}
           loading={null}
           error={null}
         >

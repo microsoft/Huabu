@@ -1,12 +1,12 @@
 import clsx from 'clsx';
 import { useCallback, useRef, useState } from 'react';
-import { Page, pdfjs } from 'react-pdf';
+import { Page } from 'react-pdf';
 
 import 'react-pdf/dist/Page/TextLayer.css';
 
 import { LoadingState } from '@/components/Common/LoadingState';
 
-pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+import './pdfWorker';
 
 /** Minimal pdfjs page proxy shape we rely on. */
 type PdfPageProxy = {

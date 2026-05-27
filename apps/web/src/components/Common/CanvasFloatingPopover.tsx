@@ -128,13 +128,23 @@ export function CanvasFloatingPopover({
     };
   }, [domNode, anchor, zoom, vpX, vpY]);
 
-  const { refs, floatingStyles, isPositioned } = useFloating({
+  // Constrain `flip` / `shift` to the canvas container's rect instead of
+  // the browser viewport. Without this, a toolbar anchored to a node near
+  // the canvas's right edge would freely overflow into the adjacent
+  // ChatPanel / Split-mode ExpandedNodePanel (the portal renders at
+  // z-index 1000, so it paints *on top of* those panels and visually
+  // covers them). Using the React Flow container as the boundary makes
+  // `shift` push the toolbar back inside the canvas and `flip` choose the
+  // opposite side when there isn't room — so the popover never crosses
+  // into neighbouring panels. Falls back to the viewport when `domNode`
+  // isn't ready yet (first frame after mount).
+  const { refs, floatingStyles, isPositioned, update } = useFloating({
     open: open && !!virtualReference,
     placement: side,
     middleware: [
       offsetMiddleware(offset),
-      flip({ padding: viewportPadding }),
-      shift({ padding: viewportPadding }),
+      flip({ boundary: domNode ?? undefined, padding: viewportPadding }),
+      shift({ boundary: domNode ?? undefined, padding: viewportPadding }),
     ],
     whileElementsMounted: autoUpdate,
   });
@@ -147,6 +157,23 @@ export function CanvasFloatingPopover({
   useLayoutEffect(() => {
     refs.setPositionReference(virtualReference);
   }, [refs, virtualReference]);
+
+  // `autoUpdate` only watches the reference (virtual — no real DOM
+  // ancestors) and the floating element (portal'd to `document.body`,
+  // also outside the canvas tree), so it never sees the canvas
+  // container resize when the user toggles / drags the ChatPanel or
+  // opens a Split-mode preview. Without an explicit observer, a toolbar
+  // that was placed *before* the panel expanded would keep its old
+  // screen position and bleed onto the freshly-revealed panel.
+  // ResizeObserver on `domNode` triggers `update()` on every layout
+  // frame the canvas resizes (including during the width transition),
+  // re-running `shift` / `flip` against the new boundary rect.
+  useLayoutEffect(() => {
+    if (!domNode) return;
+    const observer = new ResizeObserver(() => update());
+    observer.observe(domNode);
+    return () => observer.disconnect();
+  }, [domNode, update]);
 
   if (!open || !virtualReference || hiddenByExpandedPanel) return null;
 

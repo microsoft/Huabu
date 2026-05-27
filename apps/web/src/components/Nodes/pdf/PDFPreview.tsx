@@ -13,6 +13,7 @@ import { useChatStore } from '@/store/chatStore';
 
 import { FloatingDragHandle } from '../FloatingDragHandle';
 import { PDFPageWithOverlay } from './PDFPageWithOverlay';
+import { PDF_DOCUMENT_OPTIONS } from './pdfWorker';
 import { Button } from '../../Common/Button';
 import { LoadingState } from '../../Common/LoadingState';
 
@@ -379,6 +380,7 @@ export const PDFPreview = ({
           >
             <Document
               file={resolvedSrc}
+              options={PDF_DOCUMENT_OPTIONS}
               onLoadSuccess={onDocumentLoadSuccess}
               loading=""
               error={
