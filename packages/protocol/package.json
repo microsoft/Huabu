@@ -1,0 +1,25 @@
+{
+  "name": "@agentlet/protocol",
+  "version": "0.1.0",
+  "description": "Shared protocol types for the Agentlet bridge (bridge/* messages, JSON-RPC envelope)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "lint": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}
