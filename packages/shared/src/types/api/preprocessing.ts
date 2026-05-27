@@ -52,27 +52,6 @@ export type PreprocessableNodeType = z.infer<
   typeof preprocessableNodeTypeSchema
 >;
 
-/**
- * Plain JS mirror of {@link preprocessableNodeTypeSchema}'s enum.
- *
- * Web bundle gate — lets the client skip the preprocess POST entirely
- * for node types the server would reject at zod validation (notably
- * `sketch`). Imported via `import type` keeps web zod-free; this Set
- * provides the runtime check without dragging zod in.
- *
- * Keep in lock-step with the enum above.
- */
-export const PREPROCESSABLE_NODE_TYPES: ReadonlySet<string> = new Set([
-  'note',
-  'text',
-  'web',
-  'pdf',
-  'image',
-  'video',
-  'frame',
-  'question',
-]);
-
 // ---------------------------------------------------------------------------
 // Options
 // ---------------------------------------------------------------------------

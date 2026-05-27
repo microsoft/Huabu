@@ -96,9 +96,12 @@ export function useTextAutoSize({
   const writeLockedFontSize = useCallback(
     (nextFontSize: number) => {
       const state = useCanvasStore.getState();
-      const currentStyle = state.nodes.find(
-        (node) => node.id === nodeId,
-      )?.style;
+      // Read from `data.style` (NodeStyle: fontFamily, fontWeight,
+      // textDecoration, accent, colors, …) — NOT from the React Flow
+      // node's top-level `style` (geometry width/height). `patchNodeSilent`
+      // replaces `data.style` wholesale, so any field omitted here is lost.
+      const currentStyle = state.nodes.find((node) => node.id === nodeId)?.data
+        ?.style as NodeStyle | undefined;
       state.patchNodeSilent(nodeId, {
         style: {
           ...(currentStyle ?? {}),
