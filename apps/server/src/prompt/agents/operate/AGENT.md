@@ -27,6 +27,21 @@ runtime:
 # vs. answering) but the variables and substitution semantics are
 # identical.
 messageTemplates:
+  # Pushed as the very first user-role message of every turn whenever
+  # the memory module has anything to surface. Two independent blocks
+  # (long-term cross-canvas memory, short-term per-canvas working
+  # memory) — each kept only when its source had non-empty content.
+  # Route skips the push entirely when both are missing, so we don't
+  # waste tokens on a stub `(empty)` block. Stripped from chat history
+  # by `buildHistoryItems` because it begins with `[SYSTEM`.
+  memoryPreamble: |
+    [SYSTEM Memory]{{#longterm}}
+    [Long-term preferences — the user, across canvases]
+    {{longterm}}{{/longterm}}{{#shortterm}}
+
+    [Working memory — this canvas]
+    {{shortterm}}{{/shortterm}}
+
   # Pushed as a separate user-role message before the actual user prompt
   # whenever the request carries `canvasContext.selectedNodes`. Stripped
   # from chat history later because it begins with `[SYSTEM`.

@@ -24,6 +24,10 @@ import { encode } from 'gpt-tokenizer';
 import { loadAgent, renderAgentTemplate } from '../../prompt/index.js';
 import { runAcpAgent } from '../agent/acp/service.js';
 import { runAgent } from '../agent/agent.service.js';
+import {
+  readLongTermMemory,
+  readWorkingMemory,
+} from '../agent/memory/index.js';
 import { buildAgentNodeRef } from '../agent/node-ref.js';
 import { readChatParts } from '../agent/store/chat-parts-store.js';
 import { loadContext, saveContext } from '../agent/store/chat-store.js';
@@ -1107,6 +1111,28 @@ const agentRoutes: FastifyPluginAsync = async (
       allAttachments,
       canvasId ?? null,
     );
+
+    // Memory preamble: long-term cross-canvas preferences + per-canvas
+    // working memory. Pushed before everything else so the model has
+    // the user / canvas profile baked in by the time it sees the
+    // selected-node list or the user prompt. Each block survives the
+    // mustache conditional only when its source had non-empty content,
+    // and the whole push is skipped when both are empty — see
+    // `apps/server/src/modules/agent/memory/read.ts`.
+    {
+      const longterm = readLongTermMemory();
+      const shortterm = canvasId ? readWorkingMemory(canvasId) : null;
+      if (longterm || shortterm) {
+        context.messages.push({
+          role: 'user',
+          content: renderAgentTemplate(agentCfg, 'memoryPreamble', {
+            longterm: longterm ?? '',
+            shortterm: shortterm ?? '',
+          }),
+          timestamp: Date.now(),
+        });
+      }
+    }
 
     // Inject a minimal selected-node reference list as a system message.
     // Each entry carries { id, type, label?, filename } — the `filename`
