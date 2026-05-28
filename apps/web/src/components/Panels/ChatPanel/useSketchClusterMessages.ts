@@ -20,7 +20,7 @@ import { useMemo } from 'react';
 
 import { useIntentStore } from '@/store/intentStore';
 
-import type { ChatMessage } from '../../Messages/types';
+import type { ChatMessage } from '@/store/chatTypes';
 import type { SketchProcessingCluster } from '@/store/intentStore';
 
 /**
