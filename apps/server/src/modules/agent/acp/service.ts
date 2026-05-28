@@ -222,7 +222,7 @@ async function ensureAcpSessionInner(
   const server = getAgentletServer();
   if (!server) {
     throw new Error(
-      'ACP server not mounted \u2014 set SEDIMENT_ENABLE_ACP=1 and restart',
+      'ACP server not mounted \u2014 set ENABLE_ACP=1 and restart',
     );
   }
   const conn = server.getConnection(binding.agentletAgentId);

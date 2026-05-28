@@ -7,7 +7,7 @@
  *
  * The agents-list endpoint is always registered server-side: when the
  * bridge is disabled it returns `{ enabled: false, agents: [] }`, so
- * callers don't need to know about `SEDIMENT_ENABLE_ACP` themselves.
+ * callers don't need to know about `ENABLE_ACP` themselves.
  * The thread-scoped endpoints, by contrast, are only mounted when the
  * bridge is enabled — calls to them on a disabled server respond 404.
  */

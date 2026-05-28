@@ -55,8 +55,8 @@ export default defineConfig(({ mode }) => {
   const devPort =
     Number.isFinite(parsedDevPort) && parsedDevPort > 0 ? parsedDevPort : 5173;
 
-  const authUser = env.SEDIMENT_BASIC_AUTH_USER;
-  const authPass = env.SEDIMENT_BASIC_AUTH_PASS;
+  const authUser = env.HUABU_BASIC_AUTH_USER;
+  const authPass = env.HUABU_BASIC_AUTH_PASS;
   const authEnabled = Boolean(authUser && authPass);
   if (authEnabled) {
     console.log('[sediment] Vite dev server: Basic Auth enabled');

@@ -47,7 +47,7 @@ export interface AcpAgentsResponse {
   /** May be empty — either no agents connected, or ACP bridge disabled. */
   agents: AcpAgentSummary[];
   /**
-   * `false` when the server was started without `SEDIMENT_ENABLE_ACP=1`.
+   * `false` when the server was started without `ENABLE_ACP=1`.
    * The client uses this to suppress the indicator entirely vs. showing
    * "no agents connected yet" guidance.
    */

@@ -253,15 +253,11 @@ async function fetchWebContentViaTavilyExtract(
   }
 
   const extractDepth: 'basic' | 'advanced' =
-    process.env.SEDIMENT_TAVILY_EXTRACT_DEPTH === 'advanced'
-      ? 'advanced'
-      : 'basic';
+    process.env.TAVILY_EXTRACT_DEPTH === 'advanced' ? 'advanced' : 'basic';
 
   const format: 'text' | 'markdown' =
     params.format ??
-    (process.env.SEDIMENT_TAVILY_EXTRACT_FORMAT === 'markdown'
-      ? 'markdown'
-      : 'text');
+    (process.env.TAVILY_EXTRACT_FORMAT === 'markdown' ? 'markdown' : 'text');
 
   const timeoutSeconds = clampNumber(
     Math.round(params.timeoutMs / 1000),

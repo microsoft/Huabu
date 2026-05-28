@@ -165,7 +165,7 @@ cat node-ids.txt | xargs -I{} huabu node update {} --add-tag important
 │  │ agent    │  │ canvas   │  │ storage  │  │ artifact │    │
 │  └──────────┘  └──────────┘  └──────────┘  └──────────┘    │
 │                                                              │
-│  workspace = <SEDIMENT_WORKSPACE> 或 UI 选择的路径           │
+│  workspace = <HUABU_WORKSPACE> 或 UI 选择的路径           │
 └──────────────────────────────────────────────────────────────┘
                            │
                   ┌────────▼────────┐
@@ -200,7 +200,7 @@ CLI 启动时检测：
 
 Server 已有的两种模式：
 
-- **Managed mode**：`SEDIMENT_WORKSPACE=/path` 启动，锁死；
+- **Managed mode**：`HUABU_WORKSPACE=/path` 启动，锁死；
 - **Unmanaged mode**：UI 让用户挑文件夹。
 
 CLI 加第三种：
@@ -211,7 +211,7 @@ CLI 加第三种：
   3. `$HOME/sediment-data/` 这种约定路径；
   4. 报错，让用户 `huabu workspace set <path>`。
 
-`huabu serve` 启动 server 时把 workspace 透传给 server（`SEDIMENT_WORKSPACE` env），不污染 web app 的"用户在 UI 里选"流程。
+`huabu serve` 启动 server 时把 workspace 透传给 server（`HUABU_WORKSPACE` env），不污染 web app 的"用户在 UI 里选"流程。
 
 ---
 

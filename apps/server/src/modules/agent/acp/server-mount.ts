@@ -25,7 +25,7 @@ export interface MountAcpOptions {
   /**
    * Override the default authenticator. By default we delegate to the
    * process-wide `TokenStore` (see `./token-store.ts`), which seeds
-   * from `SEDIMENT_ACP_DEV_TOKEN`.
+   * from `ACP_DEV_TOKEN`.
    */
   authenticate?: AgentletServerOptions['authenticate'];
 }

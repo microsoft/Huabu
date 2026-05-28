@@ -6,7 +6,7 @@
  *
  * Behaviour summary:
  *  - Always registered (so the front-end has one URL to call regardless of
- *    feature-flag state). When `SEDIMENT_ENABLE_ACP` is not set, the
+ *    feature-flag state). When `ENABLE_ACP` is not set, the
  *    agentlet server was never mounted, so `getAgentletServer()` returns
  *    `null` and we reply `{ enabled: false, agents: [] }`.
  *  - When enabled, we filter `getConnections({ status: 'connected' })` and

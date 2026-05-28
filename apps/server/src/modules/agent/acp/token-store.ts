@@ -2,7 +2,7 @@
  * Token store for the ACP bridge.
  *
  * Currently in-memory with a single shared token sourced from
- * `SEDIMENT_ACP_DEV_TOKEN`. Sufficient for dev/local where one user
+ * `ACP_DEV_TOKEN`. Sufficient for dev/local where one user
  * runs one Sediment server. A canvas-scoped store with a proper token
  * lifecycle (issue / revoke / expire) can replace this when needed.
  */
@@ -49,15 +49,15 @@ let _store: AcpTokenStore | null = null;
 
 /**
  * Get the process-wide token store. Lazily seeds a single dev token from
- * `SEDIMENT_ACP_DEV_TOKEN` if set; otherwise the store starts empty and
+ * `ACP_DEV_TOKEN` if set; otherwise the store starts empty and
  * `bridge/hello` will reject every connection until a token is `put()`.
  */
 export function getTokenStore(): AcpTokenStore {
   if (_store) return _store;
   const store = new AcpTokenStore();
-  const devToken = process.env.SEDIMENT_ACP_DEV_TOKEN;
+  const devToken = process.env.ACP_DEV_TOKEN;
   if (devToken) {
-    store.put(devToken, { source: 'env:SEDIMENT_ACP_DEV_TOKEN' });
+    store.put(devToken, { source: 'env:ACP_DEV_TOKEN' });
   }
   _store = store;
   return store;

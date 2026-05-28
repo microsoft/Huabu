@@ -79,7 +79,7 @@ agent 进程通过 agentlet 注册到 bridge。Sediment 的 chat thread 可以�
 ```
 apps/server/src/modules/agent/acp/
 ├── server-mount.ts       embed @agentlet/server 到 Fastify upgrade           ✅
-├── token-store.ts        token 颁发/验证（v1 单 dev token: SEDIMENT_ACP_DEV_TOKEN）✅
+├── token-store.ts        token 颁发/验证（v1 单 dev token: ACP_DEV_TOKEN）✅
 ├── agents.route.ts       GET /api/acp/agents 暴露连接列表                     ✅
 ├── client.ts             AcpAgentClient — 1 session lifecycle                ✅
 ├── session-registry.ts   threadId → AcpSessionEntry，replace 时 shutdown 旧  ✅
@@ -204,7 +204,7 @@ v1 用 Layer 2 (preprocessor) + Layer 1 (fs/read) 组合；Layer 3 (MCP) 是 Pha
 
 ## 4. 已完成
 
-- **Phase 0/1 (`f4f4950`)**：embed `@agentlet/server` 到 Fastify upgrade，`SEDIMENT_ENABLE_ACP=1` flag 控制开关，最小 `client.ts` + `translator.ts` 跑通 initialize/session/prompt/text_delta，`POST /api/debug/acp-prompt` 调试端点（已在 PR E 删除）。
+- **Phase 0/1 (`f4f4950`)**：embed `@agentlet/server` 到 Fastify upgrade，`ENABLE_ACP=1` flag 控制开关，最小 `client.ts` + `translator.ts` 跑通 initialize/session/prompt/text_delta，`POST /api/debug/acp-prompt` 调试端点（已在 PR E 删除）。
 - **Phase 2 PR A (`43ecdfa`)**：`GET /api/acp/agents` 暴露 alias + command + host + cwd；前端 `useAcpAgents()` 3s 轮询 + 临时 `ConnectedAgentsBar` 指示器（PR B 已删）。
 - **Phase 2 PR B (`1ee3834`)**：`AgentBinding` discriminated union（internal/external）+ ChatStore `bindingMap` per-canvas localStorage 持久化；ModeSelector 下拉新增 `─── External ───` 子列表；`agentRequestSchema` 携带 `agentBinding`；删除 ConnectedAgentsBar。
 - **Phase 2 PR C (`6fca129`)**：`AcpAgentClient` 完整 lifecycle（per-session updateHandlers Map、abort listener、`isClosed` flag、agent incoming requests 一律 `-32601` reject）+ `session-registry`（threadId → AcpSessionEntry，replace 时 shutdown 旧 client）+ `runAcpAgent()` async generator（preprocessor 暂走 passthrough，`cwd` 默认 `/` 让 agentlet 端覆盖）+ `agent.route.ts` 按 `agentBinding.kind` 分流。

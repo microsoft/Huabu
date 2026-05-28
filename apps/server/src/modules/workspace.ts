@@ -2,16 +2,16 @@
  * Centralised workspace path management.
  *
  * Two operating modes, decided at process startup by the presence of the
- * `SEDIMENT_WORKSPACE` environment variable:
+ * `HUABU_WORKSPACE` environment variable:
  *
  *   ── Free mode (default for local dev) ──
- *     `SEDIMENT_WORKSPACE` is *unset*.
+ *     `HUABU_WORKSPACE` is *unset*.
  *     The user picks any absolute directory at runtime via the client
  *     (folder picker / path input). `setWorkspacePath(absPath)` is the
  *     entry point. The active path can change during the process lifetime.
  *
  *   ── Managed mode (recommended for remote / single-tenant deployments) ──
- *     `SEDIMENT_WORKSPACE=/abs/path` is set at process start.
+ *     `HUABU_WORKSPACE=/abs/path` is set at process start.
  *     The path is locked at boot via {@link initWorkspaceFromEnv} and
  *     CANNOT be changed at runtime. The client gets a read-only label
  *     (the basename of the path) and no folder-picker UI. To run a
@@ -46,7 +46,7 @@ import {
   runMigrationIfNeeded,
 } from './storage/migrate.js';
 
-const ENV_KEY = 'SEDIMENT_WORKSPACE';
+const ENV_KEY = 'HUABU_WORKSPACE';
 
 let _workspacePath: string | null = null;
 let _managed = false;
@@ -68,7 +68,7 @@ export function isWorkspaceConfigured(): boolean {
 }
 
 /**
- * If `SEDIMENT_WORKSPACE` is set, lock the server to that path.
+ * If `HUABU_WORKSPACE` is set, lock the server to that path.
  * Must be called once at startup, before any request handlers run.
  * Throws if the env value is invalid (non-absolute) so misconfiguration
  * is surfaced loudly.

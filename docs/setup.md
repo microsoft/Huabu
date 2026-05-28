@@ -345,7 +345,7 @@ cd ~/agentlet && pnpm build    # 只需 rebuild dist/，Sediment 不用重装
 默认 **关闭**，避免影响普通开发。设置环境变量打开：
 
 ```bash
-SEDIMENT_ENABLE_ACP=1 pnpm -F @sediment/server dev
+ENABLE_ACP=1 pnpm -F @sediment/server dev
 ```
 
 启用后 Sediment server 会在 `ws://<host>:<port>/api/acp/agent` 监听 agentlet 连接。

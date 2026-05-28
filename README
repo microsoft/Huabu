@@ -153,8 +153,8 @@ files in whatever project folder you pointed it at.
    password you make up — anything long and random is fine):
 
    ```dotenv
-   SEDIMENT_ENABLE_ACP=1
-   SEDIMENT_ACP_DEV_TOKEN=pick-any-long-random-string
+   ENABLE_ACP=1
+   ACP_DEV_TOKEN=pick-any-long-random-string
    ```
 
 2. _Optional._ Make the `agentlet` command available from any folder:

@@ -17,7 +17,7 @@
 - 该功能要求线程绑定到 **external** binding（ModeSelector 中选了一个连接上的 ACP agent）。Internal（Sediment 内置 agent）线程没有 slash 命令，菜单不会出现。
 - 命令列表是 agent 推送的 —— 由 ACP `session/update.available_commands_update` 通知决定。某些 agent 在 `session/new` 后才推送，前端会立即拉一次 + 200ms 后再拉一次，以兜底"晚到"的推送。如果 agent 完全不推送任何命令，菜单保持隐藏。
 - ACP 协议本身没有"执行斜杠命令"的 RPC —— 斜杠命令是嵌在普通 `session/prompt` 文本里的，agent 自己解析。Sediment 只是帮你把命令名输入对，不会拦截执行。
-- 仅在服务器启动时设置 `SEDIMENT_ENABLE_ACP=1` 才会注册线程端点；否则按 404 行为降级，菜单不展示。
+- 仅在服务器启动时设置 `ENABLE_ACP=1` 才会注册线程端点；否则按 404 行为降级，菜单不展示。
 
 ---
 
