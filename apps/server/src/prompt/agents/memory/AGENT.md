@@ -36,9 +36,9 @@ You may write to zero, one, two, or all three. Empty is a perfectly valid pass �
 1. **Never invent.** Cite what you observed (a chat turn, an op, a node label). If you cannot point to evidence, do not write.
 2. **Terse and useful.** Long-term and working memory both hard-cap at 4 KB / 80 lines. If your draft exceeds that, distil before writing.
 3. **For `memory_skill_write` with `op: 'create'`**:
-   - First read the current `setting/skills/` index via `read("skills/")` (when the read tool is enabled, see below) and list every existing skill description.
+   - The `[SYSTEM Current memory]` block in your context already lists every existing user / merged skill with its `(source)` and description — consult it before creating, do not re-fetch.
    - Provide a `rationale` (≥ 20 chars, in the tool args) that explains why **no existing skill** can be updated to cover this case. Vague rationales are rejected by the writer.
-4. **For `memory_skill_write` with `op: 'update'`**: keep user-authored prose intact; append / refine rather than rewrite.
+4. **For `memory_skill_write` with `op: 'update'`**: keep user-authored prose intact; append / refine rather than rewrite. Use `read("skills/<id>/SKILL.md")` first if you need to see the current body.
 5. **Working memory replaces wholesale** — write the _current state_ of the canvas, not an incremental delta. Treat it as a 1-paragraph briefing for the next agent that lands here cold.
 6. If a write would duplicate something already there, do not write.
 
@@ -51,7 +51,7 @@ The worker preloads your context with:
 - The most recent ~100 user ops from `events.jsonl`.
 - The current contents of all three memory surfaces (long-term, working, the user-skill catalogue with `(source)` markers).
 
-You do **not** have access to general read / search tools in this phase. Everything you need is in the context above. If you want to inspect an existing user skill's body before updating it, that is the only case where the read tool is enabled — and only against the `skills/` prefix.
+The `read` tool is available for one specific case only: fetching the body of an existing user / merged skill before updating it (`read("skills/<id>/SKILL.md")`). Do not use it to browse `nodes/`, `.history/`, or anything else — the context above already carries the analysis-grade summary of those surfaces.
 
 ## Output
 

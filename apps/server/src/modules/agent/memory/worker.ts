@@ -79,13 +79,22 @@ export function _waitForIdle(): Promise<void> {
 
 async function runOnce(canvasId: string, logger?: MemoryLogger): Promise<void> {
   try {
-    const results = await runAnalysisPass(canvasId, logger);
+    const { results, latestChatTs } = await runAnalysisPass(canvasId, logger);
     // markAnalyzed is intentionally always called when the pass finished
     // without throwing — even if individual writers rejected (e.g. a
     // create-rationale violation). The bookkeeping records "we tried",
     // not "we wrote". This avoids hammering the threshold with retries
     // when the LLM keeps producing rejected outputs.
-    markAnalyzed(canvasId);
+    //
+    // `latestChatTs` advances `lastSeenThreadCursor` so the next pass's
+    // chat digest only includes strictly newer turns. `null` means the
+    // digest saw nothing new past the existing cursor — in which case
+    // we leave the cursor untouched (handled by markAnalyzed when
+    // `lastSeenThreadCursor` is omitted).
+    markAnalyzed(
+      canvasId,
+      latestChatTs !== null ? { lastSeenThreadCursor: latestChatTs } : {},
+    );
     summariseResults(canvasId, results, logger);
   } catch (err) {
     logger?.warn(

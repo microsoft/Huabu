@@ -59,11 +59,18 @@ const MAX_THREAD_SCAN = 6;
  * does NOT call `markAnalyzed` (so the next trigger retries). Writer
  * rejections are *not* errors — they come back as `ok:false` tool
  * results which we surface in the returned summary.
+ *
+ * The returned `latestChatTs` is the maximum message timestamp the
+ * pass scanned (independent of which were summarised into the
+ * prompt). The worker persists it as `lastSeenThreadCursor` via
+ * {@link markAnalyzed} so subsequent passes only look at strictly
+ * newer turns — without it the chat digest would re-include the
+ * same messages every threshold crossing.
  */
 export async function runAnalysisPass(
   canvasId: string,
   logger?: MemoryLogger,
-): Promise<WriteResult[]> {
+): Promise<{ results: WriteResult[]; latestChatTs: number | null }> {
   const agent = loadAgent('memory');
   const bundle = assembleContext(canvasId);
   const context: Context = {
@@ -98,7 +105,7 @@ export async function runAnalysisPass(
     if (parsed) writeResults.push(parsed);
   }
 
-  return writeResults;
+  return { results: writeResults, latestChatTs: bundle.latestChatTs };
 }
 
 function parseWriteResult(raw: string): WriteResult | null {
@@ -134,6 +141,13 @@ function parseWriteResult(raw: string): WriteResult | null {
 interface ContextBundle {
   messages: Message[];
   summary: string;
+  /**
+   * Max message timestamp scanned by the chat digest, or `null` when
+   * no new turns were seen. Carries to the worker so it can persist
+   * `lastSeenThreadCursor` and the next pass only looks at strictly
+   * newer turns.
+   */
+  latestChatTs: number | null;
 }
 
 /**
@@ -171,7 +185,6 @@ function assembleContext(canvasId: string): ContextBundle {
     });
     parts.push(`${chat.turns} chat turns`);
   }
-
   const events = readEventsDigest(canvasId);
   if (events) {
     messages.push({
@@ -199,6 +212,7 @@ function assembleContext(canvasId: string): ContextBundle {
   return {
     messages,
     summary: parts.join(', ') || '(empty)',
+    latestChatTs: chat?.latestTs ?? null,
   };
 }
 
@@ -256,6 +270,13 @@ function summariseNode(node: unknown): string {
 interface ChatDigest {
   text: string;
   turns: number;
+  /**
+   * Max `timestamp` seen across every message that passed the `since`
+   * filter, regardless of whether it landed in the digest body. The
+   * worker persists this as the next pass's `lastSeenThreadCursor`
+   * so the chat digest monotonically advances.
+   */
+  latestTs: number | null;
 }
 
 /**
@@ -263,14 +284,18 @@ interface ChatDigest {
  *
  * Strategy:
  *   - List every thread file, sorted by `mtime` descending.
- *   - Walk up to {@link MAX_THREAD_SCAN} threads, gathering messages
- *     until we have {@link MAX_CHAT_TURNS_IN_DIGEST} non-system
- *     turns.
- *   - For each turn, emit the role + the first ~200 chars of the
- *     content (or a `[tool: name]` marker for assistant turns that
- *     only carry tool calls).
- *   - Drop turns older than `since` (the bookkeeping's
- *     `lastSeenThreadCursor`).
+ *   - Walk up to {@link MAX_THREAD_SCAN} threads, scanning each
+ *     message in turn. For each message:
+ *       - drop turns older than `since` (the bookkeeping's
+ *         `lastSeenThreadCursor`);
+ *       - track `latestTs` = max(`timestamp`) of every survivor,
+ *         so the caller can advance the cursor even when the
+ *         digest body itself was capped;
+ *       - skip system / non-user / non-assistant rows;
+ *       - emit up to {@link MAX_CHAT_TURNS_IN_DIGEST} into the body.
+ *   - For each emitted turn, render the role + the first ~200 chars
+ *     of the content (or `[tool: name]` for assistant turns that
+ *     only carried tool calls).
  */
 function readChatDigest(
   canvasId: string,
@@ -294,7 +319,8 @@ function readChatDigest(
 
   const lines: string[] = [];
   let turns = 0;
-  outer: for (const thread of threads) {
+  let latestTs: number | null = null;
+  for (const thread of threads) {
     let ctx: { messages?: unknown[] } | null;
     try {
       ctx = JSON.parse(readFileSync(thread.path, 'utf8')) as {
@@ -311,20 +337,28 @@ function readChatDigest(
         content?: unknown;
         timestamp?: number;
       };
-      if (since !== null && typeof msg.timestamp === 'number') {
-        if (msg.timestamp <= since) continue;
+      const ts = typeof msg.timestamp === 'number' ? msg.timestamp : null;
+      if (since !== null && ts !== null && ts <= since) continue;
+
+      // Advance latestTs for every message that survived the `since`
+      // filter — not just the ones we end up emitting. That way the
+      // cursor still advances when MAX_CHAT_TURNS_IN_DIGEST has been
+      // reached, and we don't re-scan the same prefix next pass.
+      if (ts !== null && (latestTs === null || ts > latestTs)) {
+        latestTs = ts;
       }
+
       const role = msg.role;
       if (role !== 'user' && role !== 'assistant') continue;
+      if (turns >= MAX_CHAT_TURNS_IN_DIGEST) continue;
       const text = digestMessageContent(msg.content);
       if (text.startsWith('[SYSTEM')) continue;
       lines.push(`${role}: ${text}`);
       turns++;
-      if (turns >= MAX_CHAT_TURNS_IN_DIGEST) break outer;
     }
   }
-  if (turns === 0) return null;
-  return { text: lines.join('\n'), turns };
+  if (turns === 0 && latestTs === null) return null;
+  return { text: lines.join('\n'), turns, latestTs };
 }
 
 function digestMessageContent(content: unknown): string {
