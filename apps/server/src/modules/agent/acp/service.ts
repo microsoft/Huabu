@@ -29,10 +29,10 @@ import { acpSessionRegistry } from './session-registry.js';
 import { acpUpdateToStreamEvent } from './translator.js';
 import { canvasRoot as resolveCanvasRoot } from '../../storage/paths.js';
 import {
-  appendPlanPart,
   emptySidecar,
   readChatParts,
   recordMessageTimestamp,
+  setPlanForMessage,
   upsertToolExt,
   writeChatParts,
 } from '../store/chat-parts-store.js';
@@ -40,7 +40,7 @@ import {
 import type { AcpSessionEntry } from './session-registry.js';
 import type { ChatPartsSidecar } from '../store/chat-parts-store.js';
 import type { AssistantMessage, Context } from '@earendil-works/pi-ai';
-import type { AcpSessionUpdate } from '@sediment/shared';
+import type { AcpPlanEntry, AcpSessionUpdate } from '@sediment/shared';
 import type {
   AgentChatContext,
   AgentStreamEvent,
@@ -504,15 +504,28 @@ export async function* runAcpAgent(
   //     the turn carry ACP-specific enrichment that doesn't fit in
   //     pi-ai's `AssistantMessage.content` shape, so we mirror them
   //     into `<threadId>.parts.json` for later history reconstruction.
-  //     `assistantIndex` is the position the future assistant message
-  //     will occupy (`context.messages.length` at this point already
-  //     includes the user push above). Computed once and reused for
-  //     every event in the turn so all sidecar parts share the same
-  //     message anchor.
+  //
+  //     v2 sidecar keys overlays by STABLE IDS, not array positions:
+  //       - `toolExtras` is keyed by `toolCallId` (per-call uuid).
+  //       - `planByMessageTimestamp` is keyed by the assistant
+  //         message's arrival timestamp.
+  //
+  //     The timestamp isn't known until `fauxAssistantMessage` runs in
+  //     the `finally` block below, so plan entries are STAGED in
+  //     `pendingPlan` during the turn and committed to the sidecar
+  //     once the timestamp exists. A turn that aborts before any
+  //     assistant text simply drops the staged plan — it has no
+  //     stable anchor to attach to.
+  //
+  //     `assistantIndex` is still recorded so the v1-style timestamps
+  //     array stays in lock-step with pi-ai's `Context.messages` and
+  //     so the history builder can resolve `messageIndex → timestamp`
+  //     during read.
   let sidecar: ChatPartsSidecar =
     readChatParts(threadId, canvasId) ?? emptySidecar();
   const assistantIndex = context.messages.length;
   let sidecarDirty = false;
+  let pendingPlan: AcpPlanEntry[] | null = null;
   const persistSidecar = () => {
     if (!sidecarDirty || !canvasId) return;
     try {
@@ -575,38 +588,31 @@ export async function* runAcpAgent(
         // the writer's try/catch in `persistSidecar` later; here we
         // only stage the in-memory mutation.
         if (evt.type === 'tool_call') {
-          sidecar = upsertToolExt(
-            sidecar,
-            evt.data.toolCallId,
-            {
-              toolKind: evt.data.toolKind,
-              status: evt.data.status,
-              locations: evt.data.locations,
-              content: evt.data.content,
-              rawOutput: undefined,
-            },
-            { messageIndex: assistantIndex },
-          );
+          sidecar = upsertToolExt(sidecar, evt.data.toolCallId, {
+            toolKind: evt.data.toolKind,
+            status: evt.data.status,
+            locations: evt.data.locations,
+            content: evt.data.content,
+            rawOutput: undefined,
+          });
           sidecarDirty = true;
         } else if (evt.type === 'tool_call_update') {
-          sidecar = upsertToolExt(
-            sidecar,
-            evt.data.toolCallId,
-            {
-              status: evt.data.status,
-              // `title` is on the wire but lives on the ACP envelope,
-              // not the persistence extension — skip it here, the
-              // value is already in the SSE event for live UI.
-              locations: evt.data.locations,
-              content: evt.data.content,
-              rawOutput: evt.data.rawOutput,
-            },
-            { messageIndex: assistantIndex },
-          );
+          sidecar = upsertToolExt(sidecar, evt.data.toolCallId, {
+            status: evt.data.status,
+            // `title` is on the wire but lives on the ACP envelope,
+            // not the persistence extension — skip it here, the
+            // value is already in the SSE event for live UI.
+            locations: evt.data.locations,
+            content: evt.data.content,
+            rawOutput: evt.data.rawOutput,
+          });
           sidecarDirty = true;
         } else if (evt.type === 'plan') {
-          sidecar = appendPlanPart(sidecar, assistantIndex, evt.data.entries);
-          sidecarDirty = true;
+          // Plan entries are STAGED here; they only enter the sidecar
+          // once the assistant message's timestamp is known (in the
+          // `finally` block below). Wire semantics are full-replacement,
+          // so the latest plan always wins for this turn.
+          pendingPlan = evt.data.entries;
         }
         queue.push(evt);
         wake();
@@ -678,6 +684,12 @@ export async function* runAcpAgent(
       // the same turn never overwrites the original arrival time.
       sidecar = recordMessageTimestamp(sidecar, assistantIndex, timestamp);
       sidecarDirty = true;
+      // Commit any plan entries that were staged during the turn now
+      // that we have a stable timestamp to key them by.
+      if (pendingPlan) {
+        sidecar = setPlanForMessage(sidecar, timestamp, pendingPlan);
+        pendingPlan = null;
+      }
     }
     // 6b. Persist the rich-ACP sidecar regardless of error/abort —
     //     partial tool calls captured before the failure still

@@ -1,12 +1,13 @@
 /**
- * Tests for the chat-parts sidecar store.
+ * Tests for the chat-parts sidecar store (v2 schema).
  *
  * Coverage:
  *
  *   ✓ emptySidecar shape
  *   ✓ read/write round-trip
  *   ✓ readChatParts → null when canvasId missing / file missing / corrupt
- *   ✓ appendPlanPart: append + replace at same (messageIndex, partIndex)
+ *   ✓ readChatParts → migrates v1 files to v2 in-memory
+ *   ✓ setPlanForMessage: keyed by messageTimestamp, replace semantics
  *   ✓ upsertToolExt: append on new toolCallId, merge on repeat
  *   ✓ mergeToolExtension: append-only for content/locations,
  *     replace-semantics for status/toolKind/rawOutput/permission
@@ -22,11 +23,11 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
-  appendPlanPart,
   emptySidecar,
   hasChatParts,
   readChatParts,
   recordMessageTimestamp,
+  setPlanForMessage,
   setToolPermission,
   upsertToolExt,
   writeChatParts,
@@ -53,10 +54,11 @@ afterEach(() => {
 });
 
 describe('emptySidecar', () => {
-  it('returns the canonical empty shape', () => {
+  it('returns the canonical empty v2 shape', () => {
     expect(emptySidecar()).toEqual({
-      schemaVersion: 1,
-      parts: [],
+      schemaVersion: 2,
+      toolExtras: {},
+      planByMessageTimestamp: {},
       messageTimestamps: [],
     });
   });
@@ -64,7 +66,7 @@ describe('emptySidecar', () => {
 
 describe('readChatParts / writeChatParts', () => {
   it('round-trips a sidecar through disk', () => {
-    const sidecar = appendPlanPart(emptySidecar(), 1, [
+    const sidecar = setPlanForMessage(emptySidecar(), 1000, [
       { content: 'step', status: 'pending', priority: 'high' },
     ]);
     writeChatParts(threadId, sidecar, canvasId);
@@ -101,113 +103,117 @@ describe('readChatParts / writeChatParts', () => {
     writeChatParts(threadId, emptySidecar(), undefined);
     expect(hasChatParts(threadId, canvasId)).toBe(false);
   });
+
+  it('migrates a v1 sidecar to v2 on read', () => {
+    // Write a v1 payload directly to disk (we never produce v1 again
+    // through the public API, so this hand-builds the legacy shape).
+    writeChatParts(threadId, emptySidecar(), canvasId);
+    const v1 = {
+      schemaVersion: 1,
+      messageTimestamps: [0, 2000],
+      parts: [
+        {
+          kind: 'plan',
+          messageIndex: 1,
+          partIndex: 0,
+          entries: [{ content: 'p', status: 'pending', priority: 'high' }],
+        },
+        {
+          kind: 'tool_acp_ext',
+          messageIndex: 0,
+          partIndex: 0,
+          toolCallId: 'tc-legacy',
+          extension: { status: 'completed', toolKind: 'read' },
+        },
+      ],
+    };
+    writeFileSync(chatPartsPath(canvasId, threadId), JSON.stringify(v1));
+    const loaded = readChatParts(threadId, canvasId);
+    expect(loaded).toEqual({
+      schemaVersion: 2,
+      toolExtras: {
+        'tc-legacy': { status: 'completed', toolKind: 'read' },
+      },
+      planByMessageTimestamp: {
+        '2000': [{ content: 'p', status: 'pending', priority: 'high' }],
+      },
+      messageTimestamps: [0, 2000],
+    });
+  });
 });
 
-describe('appendPlanPart', () => {
-  it('appends a new plan part on first call', () => {
+describe('setPlanForMessage', () => {
+  it('records a plan keyed by messageTimestamp', () => {
     const entries = [
       { content: 'a', status: 'pending' as const, priority: 'high' as const },
     ];
-    const next = appendPlanPart(emptySidecar(), 0, entries);
-    expect(next.parts).toHaveLength(1);
-    expect(next.parts[0]).toMatchObject({ kind: 'plan', messageIndex: 0 });
+    const next = setPlanForMessage(emptySidecar(), 1234, entries);
+    expect(next.planByMessageTimestamp['1234']).toEqual(entries);
   });
 
-  it('replaces an existing plan at the same (messageIndex, partIndex)', () => {
+  it('replaces (full-replacement semantics) on second call at same timestamp', () => {
     let s: ChatPartsSidecar = emptySidecar();
-    s = appendPlanPart(s, 0, [
+    s = setPlanForMessage(s, 1, [
       { content: 'old', status: 'pending', priority: 'high' },
     ]);
-    s = appendPlanPart(s, 0, [
+    s = setPlanForMessage(s, 1, [
       { content: 'new', status: 'in_progress', priority: 'high' },
     ]);
-    expect(s.parts).toHaveLength(1);
-    expect(s.parts[0]).toMatchObject({
-      kind: 'plan',
-      entries: [{ content: 'new', status: 'in_progress', priority: 'high' }],
-    });
+    expect(s.planByMessageTimestamp['1']).toEqual([
+      { content: 'new', status: 'in_progress', priority: 'high' },
+    ]);
   });
 
-  it('keeps separate plans across distinct messageIndexes', () => {
+  it('keeps separate plans across distinct timestamps', () => {
     let s: ChatPartsSidecar = emptySidecar();
-    s = appendPlanPart(s, 0, [
+    s = setPlanForMessage(s, 1, [
       { content: 'a', status: 'pending', priority: 'high' },
     ]);
-    s = appendPlanPart(s, 1, [
+    s = setPlanForMessage(s, 2, [
       { content: 'b', status: 'pending', priority: 'high' },
     ]);
-    expect(s.parts).toHaveLength(2);
+    expect(Object.keys(s.planByMessageTimestamp)).toHaveLength(2);
   });
 });
 
 describe('upsertToolExt', () => {
   it('appends a fresh entry for a new toolCallId', () => {
-    const s = upsertToolExt(
-      emptySidecar(),
-      'tc-1',
-      { toolKind: 'read', status: 'pending' },
-      { messageIndex: 2 },
-    );
-    expect(s.parts).toHaveLength(1);
-    expect(s.parts[0]).toMatchObject({
-      kind: 'tool_acp_ext',
-      messageIndex: 2,
-      toolCallId: 'tc-1',
-      extension: { toolKind: 'read', status: 'pending' },
+    const s = upsertToolExt(emptySidecar(), 'tc-1', {
+      toolKind: 'read',
+      status: 'pending',
+    });
+    expect(s.toolExtras['tc-1']).toEqual({
+      toolKind: 'read',
+      status: 'pending',
     });
   });
 
   it('merges append-only fields (content/locations) on second call', () => {
     let s: ChatPartsSidecar = emptySidecar();
-    s = upsertToolExt(
-      s,
-      'tc-1',
-      {
-        content: [{ type: 'content', content: { type: 'text', text: 'a' } }],
-        locations: [{ path: '/x' }],
-      } as ToolAcpExtension,
-      { messageIndex: 0 },
-    );
-    s = upsertToolExt(
-      s,
-      'tc-1',
-      {
-        content: [{ type: 'content', content: { type: 'text', text: 'b' } }],
-        locations: [{ path: '/y' }],
-      } as ToolAcpExtension,
-      { messageIndex: 0 },
-    );
-    expect(s.parts).toHaveLength(1);
-    const ext = (s.parts[0] as { extension: ToolAcpExtension }).extension;
+    s = upsertToolExt(s, 'tc-1', {
+      content: [{ type: 'content', content: { type: 'text', text: 'a' } }],
+      locations: [{ path: '/x' }],
+    } as ToolAcpExtension);
+    s = upsertToolExt(s, 'tc-1', {
+      content: [{ type: 'content', content: { type: 'text', text: 'b' } }],
+      locations: [{ path: '/y' }],
+    } as ToolAcpExtension);
+    const ext = s.toolExtras['tc-1']!;
     expect(ext.content).toHaveLength(2);
     expect(ext.locations).toEqual([{ path: '/x' }, { path: '/y' }]);
   });
 
   it('replaces status/toolKind/rawOutput on update', () => {
     let s: ChatPartsSidecar = emptySidecar();
-    s = upsertToolExt(
-      s,
-      'tc-1',
-      { status: 'pending', toolKind: 'read' },
-      { messageIndex: 0 },
-    );
-    s = upsertToolExt(
-      s,
-      'tc-1',
-      { status: 'completed', rawOutput: { ok: true } },
-      { messageIndex: 0 },
-    );
-    const ext = (s.parts[0] as { extension: ToolAcpExtension }).extension;
+    s = upsertToolExt(s, 'tc-1', { status: 'pending', toolKind: 'read' });
+    s = upsertToolExt(s, 'tc-1', {
+      status: 'completed',
+      rawOutput: { ok: true },
+    });
+    const ext = s.toolExtras['tc-1']!;
     expect(ext.status).toBe('completed');
     expect(ext.toolKind).toBe('read'); // preserved across update
     expect(ext.rawOutput).toEqual({ ok: true });
-  });
-
-  it('never changes messageIndex on subsequent updates', () => {
-    let s: ChatPartsSidecar = emptySidecar();
-    s = upsertToolExt(s, 'tc-1', { status: 'pending' }, { messageIndex: 5 });
-    s = upsertToolExt(s, 'tc-1', { status: 'completed' }, { messageIndex: 99 });
-    expect((s.parts[0] as { messageIndex: number }).messageIndex).toBe(5);
   });
 });
 
@@ -226,7 +232,7 @@ describe('setToolPermission', () => {
 
   it('replaces the permission on the matching entry', () => {
     let s: ChatPartsSidecar = emptySidecar();
-    s = upsertToolExt(s, 'tc-1', { status: 'pending' }, { messageIndex: 0 });
+    s = upsertToolExt(s, 'tc-1', { status: 'pending' });
     s = setToolPermission(s, 'tc-1', {
       optionId: 'opt-1',
       optionKind: 'allow_once',
@@ -234,7 +240,7 @@ describe('setToolPermission', () => {
       source: 'auto-allow',
       decidedAt: 999,
     });
-    const ext = (s.parts[0] as { extension: ToolAcpExtension }).extension;
+    const ext = s.toolExtras['tc-1']!;
     expect(ext.permission?.outcome).toBe('selected');
     expect(ext.permission?.decidedAt).toBe(999);
   });

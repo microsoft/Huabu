@@ -14,10 +14,10 @@
  *
  * The sidecar keeps the pi-ai file 100 % pi-ai-compliant (so existing
  * `loadContext`/`saveContext` and pi-ai's own re-runners keep
- * working) and records every rich-ACP extension separately, indexed
- * by `messageIndex` so the future history reconstruction layer can
- * merge by position. A thread that never used ACP simply has no
- * `.parts.json` file — zero overhead.
+ * working) and records every rich-ACP extension separately, keyed by
+ * STABLE IDS (`toolCallId` for tool extras, wall-clock millis of the
+ * owning assistant message for plans). A thread that never used ACP
+ * simply has no `.parts.json` file — zero overhead.
  *
  * ### File layout
  *
@@ -26,25 +26,29 @@
  *
  * ### Schema versioning
  *
- * `schemaVersion: 1` is recorded on every file so future migrations
- * (e.g. compaction, field renames) can detect old files. Bump only
- * on a breaking shape change.
+ * `schemaVersion: 2` is recorded on every file. The v1 → v2 upgrade
+ * dropped positional `messageIndex`/`partIndex` keys in favour of
+ * stable ids; legacy v1 files are read transparently via
+ * {@link migrateV1ToV2} and rewritten as v2 on the next save.
+ *
+ * Bump only on a breaking shape change.
  *
  * ### Mutator semantics
  *
- * All mutator helpers (`appendPlanPart`, `upsertToolExt`,
- * `setToolPermission`) return a NEW sidecar object — never mutate
- * the input. Callers compose mutators in their own update cycle
- * (typically `read → mutate → write`). Atomicity is the caller's
- * responsibility; in practice the SSE handler in `acp/service.ts`
- * runs single-threaded per turn, so no locking is needed.
+ * All mutator helpers (`setPlanForMessage`, `upsertToolExt`,
+ * `setToolPermission`, `recordMessageTimestamp`) return a NEW sidecar
+ * object — never mutate the input. Callers compose mutators in their
+ * own update cycle (typically `read → mutate → write`). Atomicity is
+ * the caller's responsibility; in practice the SSE handler in
+ * `acp/service.ts` runs single-threaded per turn, so no locking is
+ * needed.
  *
  * ### Trust boundary
  *
  * Sidecar files live on the local filesystem and are user-editable.
- * `readChatParts` validates with `safeParseSidecar` and returns
- * `null` (treated as "no sidecar yet") rather than throwing — a
- * corrupt sidecar should not brick chat history.
+ * `readChatParts` validates via {@link isSidecarV1} / {@link isSidecarV2}
+ * and returns `null` (treated as "no sidecar yet") rather than
+ * throwing — a corrupt sidecar should not brick chat history.
  */
 
 import { existsSync } from 'node:fs';
@@ -61,24 +65,83 @@ import type {
   ToolPermissionState,
 } from '@sediment/shared';
 
-// ─── Schema ───────────────────────────────────────────────────────────
+// ─── ToolAcpExtension (shared by v1/v2) ───────────────────────────────
 
 /**
- * One entry in `ChatPartsSidecar.parts`. Two kinds today:
+ * The ACP-specific subset of a `tool_call` / `tool_call_update`
+ * payload that does NOT round-trip through pi-ai's `ToolResultMessage`.
  *
- *   - `plan` — full plan replacement at a given assistant turn.
- *   - `tool_acp_ext` — ACP enrichment fields for a single tool call
- *     within an assistant turn. Indexed by `toolCallId` so subsequent
- *     `tool_call_update` notifications can find and merge into the
- *     same entry.
+ * The pi-ai message keeps the raw JSON output (so reruns work);
+ * this struct preserves the semantic envelope (`toolKind`, lifecycle
+ * `status`, source `locations`, structured `content` blocks) plus
+ * any permission decision recorded by the auto-allow handler.
  *
- * `messageIndex` is the position in the pi-ai `Context.messages`
- * array (0-based). `partIndex` is the position within that
- * assistant message's parts (0-based) — pre-reserved for the future
- * multi-segment reconstruction layer. Today every writer uses
- * `partIndex: 0`; treat it as a stable intra-message ordering key.
+ * Append-only fields (`locations`, `content`) merge with prior values
+ * via {@link mergeToolExtension}. Replace-semantics fields (`status`,
+ * `toolKind`, `permission`, `rawOutput`) overwrite.
  */
-export type SidecarPart =
+export interface ToolAcpExtension {
+  toolKind?: AcpToolKind;
+  status?: AcpToolCallStatus;
+  locations?: AcpToolCallLocation[];
+  content?: AcpToolCallContent[];
+  rawOutput?: unknown;
+  permission?: ToolPermissionState;
+}
+
+// ─── v2 schema (current) ──────────────────────────────────────────────
+
+/**
+ * Full on-disk shape of a chat-parts sidecar.
+ *
+ * v2 keys every overlay by a stable id:
+ *  - `toolExtras` — keyed by `toolCallId` (per-call uuid from the
+ *    agent, survives re-orderings and replays).
+ *  - `planByMessageTimestamp` — keyed by `String(messageTimestamp)`
+ *    of the assistant message that emitted the plan. Plans are
+ *    full-replacement on the wire, so a single entry per message
+ *    is correct.
+ *
+ * `messageTimestamps` remains a sparse array indexed by pi-ai
+ * `Context.messages` position. It is an auxiliary lookup used by the
+ * history builder to find each assistant message's timestamp; v1
+ * migration also relies on it (see {@link migrateV1ToV2}).
+ */
+export interface ChatPartsSidecar {
+  /** Bump on a breaking shape change. */
+  schemaVersion: 2;
+  /** ACP tool extensions, keyed by `toolCallId`. */
+  toolExtras: Record<string, ToolAcpExtension>;
+  /** Plan entries, keyed by `String(messageTimestamp)` of the owning assistant message. */
+  planByMessageTimestamp: Record<string, AcpPlanEntry[]>;
+  /**
+   * Wall-clock millis of each `Context.messages[i]`'s arrival, in
+   * parallel index with the pi-ai file. Sparse — gaps are `0`.
+   * Used both for UI timestamps and as the lookup table that
+   * resolves a `messageIndex` to a `messageTimestamp` (e.g. when
+   * the history builder wants the plan associated with the
+   * current assistant turn). Empty for back-compat (older sidecars
+   * without it).
+   */
+  messageTimestamps: number[];
+}
+
+/** Construct an empty sidecar. */
+export function emptySidecar(): ChatPartsSidecar {
+  return {
+    schemaVersion: 2,
+    toolExtras: {},
+    planByMessageTimestamp: {},
+    messageTimestamps: [],
+  };
+}
+
+// ─── v1 schema (read-only, for migration) ─────────────────────────────
+//
+// Kept inline (not exported) so old files on disk still parse. We
+// do not write v1 again — `writeChatParts` always produces v2.
+
+type SidecarPartV1 =
   | {
       kind: 'plan';
       messageIndex: number;
@@ -93,63 +156,72 @@ export type SidecarPart =
       extension: ToolAcpExtension;
     };
 
-/**
- * The ACP-specific subset of a `tool_call` / `tool_call_update`
- * payload that does NOT round-trip through pi-ai's `ToolResultMessage`.
- *
- * The pi-ai message keeps the raw JSON output (so reruns work);
- * this struct preserves the semantic envelope (`toolKind`, lifecycle
- * `status`, source `locations`, structured `content` blocks) plus
- * any permission decision recorded by the auto-allow handler.
- *
- * Append-only fields (`locations`, `content`) merge with prior values
- * via `mergeToolExtension`. Replace-semantics fields (`status`,
- * `toolKind`, `permission`, `rawOutput`) overwrite.
- */
-export interface ToolAcpExtension {
-  toolKind?: AcpToolKind;
-  status?: AcpToolCallStatus;
-  locations?: AcpToolCallLocation[];
-  content?: AcpToolCallContent[];
-  rawOutput?: unknown;
-  permission?: ToolPermissionState;
-}
-
-/** Full on-disk shape of a chat-parts sidecar. */
-export interface ChatPartsSidecar {
-  /** Bump on a breaking shape change. */
+interface ChatPartsSidecarV1 {
   schemaVersion: 1;
-  /** Rich-ACP overlay entries, in insertion order. */
-  parts: SidecarPart[];
-  /**
-   * Wall-clock millis of each `Context.messages[i]`'s arrival, in
-   * parallel index with the pi-ai file. Optional helper that lets
-   * the UI render timestamps without re-deriving them from message
-   * content. Empty for back-compat (older sidecars without it).
-   */
+  parts: SidecarPartV1[];
   messageTimestamps: number[];
-}
-
-/** Construct an empty sidecar. */
-export function emptySidecar(): ChatPartsSidecar {
-  return { schemaVersion: 1, parts: [], messageTimestamps: [] };
 }
 
 // ─── Validation ───────────────────────────────────────────────────────
 //
-// Lightweight structural check — full zod validation would force a
+// Lightweight structural checks — full zod validation would force a
 // dependency from server storage onto SDK zod schemas, and the
 // sidecar is internal-only (we control all writers). A best-effort
 // shape check is enough to guard against truncated / hand-edited
-// files. Returns the typed value or null.
+// files.
 
-function isSidecar(value: unknown): value is ChatPartsSidecar {
-  if (!value || typeof value !== 'object') return false;
-  const v = value as Partial<ChatPartsSidecar>;
-  if (v.schemaVersion !== 1) return false;
-  if (!Array.isArray(v.parts)) return false;
-  if (!Array.isArray(v.messageTimestamps)) return false;
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
+}
+
+function isSidecarV2(value: unknown): value is ChatPartsSidecar {
+  if (!isPlainObject(value)) return false;
+  if (value.schemaVersion !== 2) return false;
+  if (!isPlainObject(value.toolExtras)) return false;
+  if (!isPlainObject(value.planByMessageTimestamp)) return false;
+  if (!Array.isArray(value.messageTimestamps)) return false;
   return true;
+}
+
+function isSidecarV1(value: unknown): value is ChatPartsSidecarV1 {
+  if (!isPlainObject(value)) return false;
+  if (value.schemaVersion !== 1) return false;
+  if (!Array.isArray(value.parts)) return false;
+  if (!Array.isArray(value.messageTimestamps)) return false;
+  return true;
+}
+
+/**
+ * Translate a v1 sidecar to v2 in-memory. Tool extensions port 1:1
+ * via `toolCallId`. Plans require a `messageIndex → timestamp`
+ * lookup through `messageTimestamps`; entries whose owning message
+ * has no recorded timestamp (`0` / out-of-range) are dropped — they
+ * would have no stable key in v2 and re-acquiring them isn't worth
+ * a fragile fallback.
+ */
+function migrateV1ToV2(v1: ChatPartsSidecarV1): ChatPartsSidecar {
+  const toolExtras: Record<string, ToolAcpExtension> = {};
+  const planByMessageTimestamp: Record<string, AcpPlanEntry[]> = {};
+  for (const part of v1.parts) {
+    if (part.kind === 'tool_acp_ext') {
+      // Last-write-wins on toolCallId collision — v1 used append
+      // semantics with merge, but the final state on disk should
+      // already reflect that merge, so a duplicate id signals a
+      // corrupt file. Take the latest entry.
+      toolExtras[part.toolCallId] = part.extension;
+    } else if (part.kind === 'plan') {
+      const ts = v1.messageTimestamps[part.messageIndex];
+      if (typeof ts === 'number' && ts > 0) {
+        planByMessageTimestamp[String(ts)] = part.entries;
+      }
+    }
+  }
+  return {
+    schemaVersion: 2,
+    toolExtras,
+    planByMessageTimestamp,
+    messageTimestamps: v1.messageTimestamps,
+  };
 }
 
 // ─── I/O ──────────────────────────────────────────────────────────────
@@ -160,6 +232,9 @@ function isSidecar(value: unknown): value is ChatPartsSidecar {
  *   - the file does not exist (first ACP turn on a fresh thread)
  *   - the file is corrupt / wrong shape (do NOT throw — let the
  *     caller treat it as "empty sidecar")
+ *
+ * v1 files are migrated to v2 in-memory; the upgrade is persisted
+ * on the next `writeChatParts` call.
  */
 export function readChatParts(
   threadId: string,
@@ -168,7 +243,9 @@ export function readChatParts(
   if (!canvasId) return null;
   const raw = readJson<unknown>(chatPartsPath(canvasId, threadId));
   if (raw === null) return null;
-  return isSidecar(raw) ? raw : null;
+  if (isSidecarV2(raw)) return raw;
+  if (isSidecarV1(raw)) return migrateV1ToV2(raw);
+  return null;
 }
 
 /**
@@ -199,37 +276,6 @@ export function hasChatParts(threadId: string, canvasId?: string): boolean {
 // on write conflicts.
 
 /**
- * Append a `plan` part at `messageIndex`. Plans use full-replacement
- * semantics on the wire, so if a plan already exists at the same
- * (messageIndex, partIndex) we REPLACE its entries.
- */
-export function appendPlanPart(
-  sidecar: ChatPartsSidecar,
-  messageIndex: number,
-  entries: AcpPlanEntry[],
-  partIndex = 0,
-): ChatPartsSidecar {
-  const idx = sidecar.parts.findIndex(
-    (p) =>
-      p.kind === 'plan' &&
-      p.messageIndex === messageIndex &&
-      p.partIndex === partIndex,
-  );
-  const next: SidecarPart = {
-    kind: 'plan',
-    messageIndex,
-    partIndex,
-    entries,
-  };
-  if (idx === -1) {
-    return { ...sidecar, parts: [...sidecar.parts, next] };
-  }
-  const parts = [...sidecar.parts];
-  parts[idx] = next;
-  return { ...sidecar, parts };
-}
-
-/**
  * Merge two `ToolAcpExtension` values. Append-only fields
  * (`locations`, `content`) concatenate; replace-semantics fields
  * (`status`, `toolKind`, `rawOutput`, `permission`) overwrite when
@@ -256,77 +302,74 @@ function mergeToolExtension(
 }
 
 /**
- * Upsert a `tool_acp_ext` part for the given `toolCallId`. If an
- * entry already exists, the new `extension` is merged in
- * (see {@link mergeToolExtension}); otherwise a new part is appended
- * at the supplied `messageIndex` / `partIndex`.
- *
- * `messageIndex` is only used when creating a new entry; updates
- * never change the index of an existing one.
+ * Upsert a `ToolAcpExtension` for the given `toolCallId`. If an
+ * entry already exists, the new extension is merged in
+ * (see {@link mergeToolExtension}); otherwise a new entry is added.
  */
 export function upsertToolExt(
   sidecar: ChatPartsSidecar,
   toolCallId: string,
   extension: ToolAcpExtension,
-  options: { messageIndex: number; partIndex?: number },
 ): ChatPartsSidecar {
-  const idx = sidecar.parts.findIndex(
-    (p) => p.kind === 'tool_acp_ext' && p.toolCallId === toolCallId,
-  );
-  if (idx === -1) {
-    const part: SidecarPart = {
-      kind: 'tool_acp_ext',
-      messageIndex: options.messageIndex,
-      partIndex: options.partIndex ?? 0,
-      toolCallId,
-      extension,
-    };
-    return { ...sidecar, parts: [...sidecar.parts, part] };
-  }
-  const existing = sidecar.parts[idx];
-  if (existing.kind !== 'tool_acp_ext') return sidecar; // narrow for TS
-  const parts = [...sidecar.parts];
-  parts[idx] = {
-    ...existing,
-    extension: mergeToolExtension(existing.extension, extension),
+  const prev = sidecar.toolExtras[toolCallId];
+  const merged = prev ? mergeToolExtension(prev, extension) : extension;
+  return {
+    ...sidecar,
+    toolExtras: { ...sidecar.toolExtras, [toolCallId]: merged },
   };
-  return { ...sidecar, parts };
 }
 
 /**
  * Record the final permission decision for the given tool call.
- * Equivalent to `upsertToolExt(sidecar, toolCallId, { permission },
- * { messageIndex })` but stays a separate helper so the auto-allow /
- * UI-gate handler can call it without knowing the position of the
- * tool call within the message.
- *
- * Returns the sidecar unchanged when no matching `tool_acp_ext`
- * entry exists (the agent emitted a permission decision before the
- * `tool_call` event — should not happen per ACP spec, but defensive).
+ * Returns the sidecar unchanged when no matching extension exists
+ * (the agent emitted a permission decision before the `tool_call`
+ * event — should not happen per ACP spec, but defensive).
  */
 export function setToolPermission(
   sidecar: ChatPartsSidecar,
   toolCallId: string,
   permission: ToolPermissionState,
 ): ChatPartsSidecar {
-  const idx = sidecar.parts.findIndex(
-    (p) => p.kind === 'tool_acp_ext' && p.toolCallId === toolCallId,
-  );
-  if (idx === -1) return sidecar;
-  const existing = sidecar.parts[idx];
-  if (existing.kind !== 'tool_acp_ext') return sidecar;
-  const parts = [...sidecar.parts];
-  parts[idx] = {
-    ...existing,
-    extension: { ...existing.extension, permission },
+  const prev = sidecar.toolExtras[toolCallId];
+  if (!prev) return sidecar;
+  return {
+    ...sidecar,
+    toolExtras: {
+      ...sidecar.toolExtras,
+      [toolCallId]: { ...prev, permission },
+    },
   };
-  return { ...sidecar, parts };
 }
 
 /**
- * Append a wall-clock timestamp at `messageIndex`. Skip the write if
- * an entry already exists at that index (first-write-wins — message
- * arrival time, not last-edit time).
+ * Set the plan entries for the assistant message whose arrival
+ * timestamp is `messageTimestamp`. Plans use full-replacement
+ * semantics on the wire, so the new entries always overwrite.
+ *
+ * The caller (acp/service.ts) is expected to call this only AFTER
+ * the assistant push completes and `recordMessageTimestamp` has
+ * stamped the sidecar, so `messageTimestamp` is the same value the
+ * UI will see.
+ */
+export function setPlanForMessage(
+  sidecar: ChatPartsSidecar,
+  messageTimestamp: number,
+  entries: AcpPlanEntry[],
+): ChatPartsSidecar {
+  const key = String(messageTimestamp);
+  return {
+    ...sidecar,
+    planByMessageTimestamp: {
+      ...sidecar.planByMessageTimestamp,
+      [key]: entries,
+    },
+  };
+}
+
+/**
+ * Record a wall-clock arrival timestamp at `messageIndex`. Skip the
+ * write if an entry already exists at that index (first-write-wins —
+ * message arrival time, not last-edit time).
  */
 export function recordMessageTimestamp(
   sidecar: ChatPartsSidecar,

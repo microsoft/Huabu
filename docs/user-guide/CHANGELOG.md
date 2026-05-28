@@ -4,6 +4,25 @@
 
 ---
 
+## 2026-05-30 · ACP rich-update 在聊天面板可见（PR-2）
+
+**What Changed**
+
+- PR-1 铺设的 `tool_call` / `tool_call_update` / `plan` 现在在聊天面板里渲染为一等公民的"段（part）"：
+  - **工具调用卡片**：外部 ACP agent（Claude Code / Copilot CLI / 自研 agent）发出的 tool call 显示为一行可展开的卡片，带状态图标（pending → in_progress → completed/failed）、`toolKind` 图标（read / edit / search / execute …）、source locations 和富 content 块（文本 / 图片 / 资源链接）。同名连续的内置 agent 工具调用（如 3 条 `inspect_nodes`）合并为一行计数。
+  - **Plan 卡片**：agent 发出的 `plan` 通知现在显示为可折叠的待办清单，支持 `pending` / `in_progress` / `completed` 三种状态、`high` 优先级徽章和"复制 plan（Markdown 格式）"按钮。
+- 助手消息内部模型从"一条 text + 旁边一条独立 `tool` 角色消息"重构为"一条 assistant 消息持有 `parts: AssistantHistoryPart[]`"。`parts` 是 `text / thinking / tool / plan / status` 五种段的有序数组——同一段渲染分发既走实时流也走刷新回放，不再有双码路。
+- 历史 sidecar 从 v1（positional `messageIndex / partIndex`）升级到 v2（stable id：`toolCallId` 作为 tool extras 的 key，`messageTimestamp` 作为 plan 的 key）。读取时旧文件自动 in-memory migrate 到 v2，下次写入即落地为 v2。
+
+**Notes**
+
+- **数据兼容**：旧的 chat-store 数据（messages 没持久化、只持久化 thread/binding 映射）不需要迁移。旧的 sidecar v1 文件透明升级，无人工动作。
+- **内置 pi-ai agent**：内部 tools（`read` / `grep` / `inspect_nodes` / `canvas_commands` / `web_search` …）的现有富渲染（CanvasCommandCard / WebSearchToolDisplay / MergedAgentToolRow）保持不变；它们通过新的 `internalToolName` 字段从 part 上解析，原有交互（撤回单次变更、批量撤回、preview）行为一致。
+- **遗留事件**：`tool_start` / `tool_result` 这两个 SSE 事件仍兼容并标记 `@deprecated`，内部 pi-ai 桥仍在用；下一个 PR-2.5 会把 pi-ai 也切到 `tool_call` / `tool_call_update`，届时会一并清理。
+- 一个线程如果从未触发过 ACP 富更新，仍然不会生成 `.parts.json`——零额外存储成本不变。
+
+---
+
 ## 2026-05-29 · 幕后：ACP rich-update 基础设施（PR-1）
 
 **What Changed**

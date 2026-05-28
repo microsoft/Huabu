@@ -4,13 +4,8 @@ import {
   ChevronDown,
   ChevronRight,
   Command,
-  FolderOpen,
-  LayoutList,
-  ScanText,
-  Search,
-  SearchCode,
-  Undo2,
   X as XIcon,
+  Undo2,
 } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
 
@@ -19,120 +14,47 @@ import { useChatStore } from '@/store/chatStore';
 
 import { NodeRef } from '../Common/NodeRef';
 import { SourceCard, type Source } from './Card/SourceCard';
+import { ToolKindIcon } from './ToolKindIcon';
 import { useCanvasChangePreview } from '../../hooks/useCanvasChanges';
 import { Button } from '../Common/Button';
 import { Spinner } from '../Common/Spinner';
 
 import type { CanvasChange } from '../../hooks/useCanvasChanges';
-import type { CanvasCommand } from '@sediment/shared';
-import type { ToolResponse, WebSearchToolResponse } from '@sediment/shared';
+import type {
+  AssistantToolPart,
+  CanvasCommand,
+  ToolResponse,
+  WebSearchToolResponse,
+} from '@sediment/shared';
 
-// TODO: many status icons
 // ==================== Helpers ====================
 
 const truncate = (s: string, n: number) =>
   s.length > n ? s.slice(0, n) + '…' : s;
 
-// ==================== Tool Icon Mapping ====================
-
-const TOOL_ICON: Record<string, typeof ScanText> = {
-  read: ScanText,
-  grep: SearchCode,
-  find: Search,
-  ls: FolderOpen,
-  inspect_nodes: LayoutList,
-  get_canvas_outline: LayoutList,
-  canvas_commands: Command,
-};
-
-// ==================== Merged Tool Row ====================
-
-/** A single tool entry within a ToolMessageGroup, used for merging logic. */
-export interface ToolEntry {
-  messageId: string;
-  toolResponse: ToolResponse<string, unknown>;
-  isExecuting?: boolean;
-}
-
-/** Props for the unified tool message group component. */
-interface ToolMessageGroupProps {
-  entries: ToolEntry[];
-}
-
 /**
- * ToolMessageGroup — renders a group of consecutive same-tool messages
- * as a single merged row. For canvas_commands, shows inline change list.
+ * Bridge to the legacy {@link ToolResponse} envelope: the renderers
+ * below were written when each tool call was its own `role:'tool'`
+ * message keyed by `toolResponse`. After PR-2 the same payload lives
+ * on `part.internalToolData` — this helper narrows it back into the
+ * old shape so the rendering bodies could stay unchanged.
  */
-export function ToolMessageGroup({ entries }: ToolMessageGroupProps) {
-  if (entries.length === 0) return null;
+function partToToolResponse(
+  part: AssistantToolPart,
+): ToolResponse<string, unknown> | null {
+  return (part.internalToolData as ToolResponse<string, unknown>) ?? null;
+}
 
-  const first = entries[0];
-  const tool = first.toolResponse.tool;
+function partIsExecuting(part: AssistantToolPart): boolean {
+  return part.status === 'pending' || part.status === 'in_progress';
+}
 
-  // Non-agent tools: render individually
-  if (!isAgentTool(tool)) {
-    if (tool === 'web_search') {
-      return (
-        <>
-          {entries.map((e) => (
-            <WebSearchToolDisplay
-              key={e.messageId}
-              toolResponse={e.toolResponse as WebSearchToolResponse}
-            />
-          ))}
-        </>
-      );
-    }
-    // Error display
-    return (
-      <>
-        {entries.map((e) => {
-          if (e.toolResponse.status === 'error') {
-            const text = e.toolResponse.hint
-              ? `Tool error (${e.toolResponse.tool}): ${e.toolResponse.error}\nHint: ${e.toolResponse.hint}`
-              : `Tool error (${e.toolResponse.tool}): ${e.toolResponse.error}`;
-            return (
-              <div key={e.messageId} className="flex justify-start">
-                <div className="bg-danger-bg text-danger border-edge-default rounded-md border px-4 py-3 text-sm whitespace-pre-wrap">
-                  {text}
-                </div>
-              </div>
-            );
-          }
-          return null;
-        })}
-      </>
-    );
-  }
-
-  // canvas_commands: render each individually (each has its own change list)
-  if (tool === 'canvas_commands') {
-    return (
-      <>
-        {entries.map((e) => (
-          <CanvasCommandCard
-            key={e.messageId}
-            messageId={e.messageId}
-            toolResponse={e.toolResponse}
-            isExecuting={e.isExecuting}
-          />
-        ))}
-      </>
-    );
-  }
-
-  // All other agent tools: merge into a single row
-  const anyExecuting = entries.some((e) => e.isExecuting);
-  const anyError = entries.some((e) => e.toolResponse.status === 'error');
-
-  return (
-    <MergedAgentToolRow
-      tool={tool}
-      entries={entries}
-      isExecuting={anyExecuting}
-      isError={anyError}
-    />
-  );
+/** A single tool part plus the owning assistant message id (used for updates). */
+export interface ToolPart {
+  /** The owning assistant message id. */
+  messageId: string;
+  /** The actual ACP tool part data. */
+  part: AssistantToolPart;
 }
 
 // ==================== Canvas Change Reconstruction ====================
@@ -303,19 +225,14 @@ function reconstructChangesFromCommands(
 
 // ==================== Canvas Command Card ====================
 
-function CanvasCommandCard({
-  messageId,
-  toolResponse,
-  isExecuting,
-}: {
-  messageId: string;
-  toolResponse: ToolResponse<string, unknown>;
-  isExecuting?: boolean;
-}) {
+export function CanvasCommandCard({ messageId, part }: ToolPart) {
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const toolResponse = partToToolResponse(part);
+  const isExecuting = partIsExecuting(part);
+  const toolCallId = part.toolCallId;
 
   const data =
-    toolResponse.status === 'success'
+    toolResponse?.status === 'success'
       ? ((toolResponse.data ?? {}) as Record<string, unknown>)
       : ({} as Record<string, unknown>);
 
@@ -332,7 +249,9 @@ function CanvasCommandCard({
   const hasChanges = displayChanges.length > 0;
   const anyRevertible = displayChanges.some((c) => c.revertible);
 
-  const updateMessage = useChatStore((s) => s.updateMessage);
+  const upsertAssistantToolPart = useChatStore(
+    (s) => s.upsertAssistantToolPart,
+  );
 
   const {
     isNodeMissing,
@@ -342,40 +261,46 @@ function CanvasCommandCard({
     handlePreviewUp,
   } = useCanvasChangePreview(canvasChanges);
 
-  const removeChange = useCallback(
-    (changeId: string) => {
-      updateMessage(messageId, (m) => {
-        if (m.role !== 'tool' || m.toolResponse.status !== 'success') return m;
-        const d = m.toolResponse.data as Record<string, unknown>;
+  /**
+   * Update the `canvasChanges` array nested inside this part's
+   * `internalToolData`. The renderers all read off `canvasChanges`,
+   * so removing / clearing is just a filtered rewrite of that array.
+   */
+  const writeChanges = useCallback(
+    (mapper: (changes: CanvasChange[]) => CanvasChange[]) => {
+      upsertAssistantToolPart(messageId, toolCallId, (existing) => {
+        if (!existing) return part;
+        const td = existing.internalToolData as
+          | ToolResponse<string, unknown>
+          | undefined;
+        if (!td || td.status !== 'success') return existing;
+        const d = (td.data ?? {}) as Record<string, unknown>;
         const changes = (d.canvasChanges ?? []) as CanvasChange[];
         return {
-          ...m,
-          toolResponse: {
-            ...m.toolResponse,
+          ...existing,
+          internalToolData: {
+            ...td,
             data: {
               ...d,
-              canvasChanges: changes.filter((c) => c.id !== changeId),
+              canvasChanges: mapper(changes),
             },
           },
         };
       });
     },
-    [messageId, updateMessage],
+    [messageId, toolCallId, upsertAssistantToolPart, part],
+  );
+
+  const removeChange = useCallback(
+    (changeId: string) => {
+      writeChanges((changes) => changes.filter((c) => c.id !== changeId));
+    },
+    [writeChanges],
   );
 
   const clearAllChanges = useCallback(() => {
-    updateMessage(messageId, (m) => {
-      if (m.role !== 'tool' || m.toolResponse.status !== 'success') return m;
-      const d = m.toolResponse.data as Record<string, unknown>;
-      return {
-        ...m,
-        toolResponse: {
-          ...m.toolResponse,
-          data: { ...d, canvasChanges: [] },
-        },
-      };
-    });
-  }, [messageId, updateMessage]);
+    writeChanges(() => []);
+  }, [writeChanges]);
 
   const revertChange = useCallback(
     (changeId: string) => {
@@ -601,19 +526,18 @@ function CanvasCommandCard({
 
 // ==================== Merged Agent Tool Row ====================
 
-function MergedAgentToolRow({
+export function MergedAgentToolRow({
   tool,
   entries,
-  isExecuting,
-  isError,
 }: {
   tool: string;
-  entries: ToolEntry[];
-  isExecuting?: boolean;
-  isError?: boolean;
+  entries: ToolPart[];
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const count = entries.length;
+
+  const isExecuting = entries.some((e) => partIsExecuting(e.part));
+  const isError = entries.some((e) => e.part.status === 'failed');
 
   // Build merged title and content
   const { title, nodeRefs } = useMemo(() => {
@@ -626,9 +550,10 @@ function MergedAgentToolRow({
       const refs: { nodeId?: string; label?: string }[] = [];
       let totalMatched = 0;
       for (const e of entries) {
+        const tr = partToToolResponse(e.part);
         const d =
-          e.toolResponse.status === 'success'
-            ? ((e.toolResponse.data ?? {}) as Record<string, unknown>)
+          tr?.status === 'success'
+            ? ((tr.data ?? {}) as Record<string, unknown>)
             : {};
         const nodes = Array.isArray(d.nodes)
           ? (d.nodes as Array<Record<string, unknown>>)
@@ -653,9 +578,10 @@ function MergedAgentToolRow({
     }
 
     if (tool === 'read') {
+      const tr = partToToolResponse(entries[0]?.part);
       const first =
-        entries[0]?.toolResponse.status === 'success'
-          ? ((entries[0].toolResponse.data ?? {}) as Record<string, unknown>)
+        tr?.status === 'success'
+          ? ((tr.data ?? {}) as Record<string, unknown>)
           : {};
       const firstPath = (first.path as string) || '';
       return {
@@ -673,9 +599,10 @@ function MergedAgentToolRow({
       // grep returns `{ matches, count, limitReached }`. Sum match counts
       // across calls for a self-describing title.
       const totalMatches = entries.reduce((sum, e) => {
+        const tr = partToToolResponse(e.part);
         const d =
-          e.toolResponse.status === 'success'
-            ? ((e.toolResponse.data ?? {}) as Record<string, unknown>)
+          tr?.status === 'success'
+            ? ((tr.data ?? {}) as Record<string, unknown>)
             : {};
         return sum + (typeof d.count === 'number' ? d.count : 0);
       }, 0);
@@ -692,9 +619,10 @@ function MergedAgentToolRow({
     if (tool === 'find') {
       // find returns `{ paths, count, limitReached }`.
       const totalPaths = entries.reduce((sum, e) => {
+        const tr = partToToolResponse(e.part);
         const d =
-          e.toolResponse.status === 'success'
-            ? ((e.toolResponse.data ?? {}) as Record<string, unknown>)
+          tr?.status === 'success'
+            ? ((tr.data ?? {}) as Record<string, unknown>)
             : {};
         return sum + (typeof d.count === 'number' ? d.count : 0);
       }, 0);
@@ -710,9 +638,10 @@ function MergedAgentToolRow({
 
     if (tool === 'ls') {
       // ls returns `{ path, entries, count, limitReached }`.
+      const tr = partToToolResponse(entries[0]?.part);
       const first =
-        entries[0]?.toolResponse.status === 'success'
-          ? ((entries[0].toolResponse.data ?? {}) as Record<string, unknown>)
+        tr?.status === 'success'
+          ? ((tr.data ?? {}) as Record<string, unknown>)
           : {};
       const firstPath = (first.path as string) || '';
       const firstCount = typeof first.count === 'number' ? first.count : 0;
@@ -749,11 +678,9 @@ function MergedAgentToolRow({
     <Check size={12} className="text-fg-muted" />
   );
 
-  const icon = useMemo(() => {
-    const Icon = TOOL_ICON[tool];
-    if (Icon) return <Icon size={12} />;
-    return null;
-  }, [tool]);
+  // Derive the icon from the first part — all parts in a merged row
+  // share the same internalToolName by construction.
+  const iconPart = entries[0]?.part;
 
   // Single inspect_nodes call that matched a single node → inline badge
   if (
@@ -767,7 +694,9 @@ function MergedAgentToolRow({
         <div className="w-full">
           <div className="text-fg-muted hover:bg-hover flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors">
             {statusIcon}
-            {icon && <span className="text-fg-muted/60">{icon}</span>}
+            {iconPart && (
+              <ToolKindIcon part={iconPart} className="text-fg-muted/60" />
+            )}
             <span className="flex-1 truncate">
               Inspected{' '}
               <NodeRef
@@ -788,7 +717,9 @@ function MergedAgentToolRow({
         <div className="w-full">
           <div className="text-fg-muted hover:bg-hover flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors">
             {statusIcon}
-            {icon && <span className="text-fg-muted/60">{icon}</span>}
+            {iconPart && (
+              <ToolKindIcon part={iconPart} className="text-fg-muted/60" />
+            )}
             <span className="flex-1 truncate">{title}</span>
           </div>
         </div>
@@ -802,7 +733,9 @@ function MergedAgentToolRow({
       <div className="w-full">
         <div className="text-fg-muted hover:bg-hover flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors">
           {statusIcon}
-          {icon && <span className="text-fg-muted/60">{icon}</span>}
+          {iconPart && (
+            <ToolKindIcon part={iconPart} className="text-fg-muted/60" />
+          )}
           <button
             type="button"
             onClick={() => setIsExpanded(!isExpanded)}
@@ -811,7 +744,7 @@ function MergedAgentToolRow({
             <span>{title}</span>
             <ChevronRight
               size={10}
-              className={`text-fg-muted/50 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+              className={`text-fg-muted/50 shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
             />
           </button>
         </div>
@@ -850,30 +783,8 @@ function MergedAgentToolRow({
   );
 }
 
-// ==================== Legacy Single ToolMessage (for non-grouped rendering) ====================
-
-interface ToolMessageProps {
-  messageId: string;
-  toolResponse: ToolResponse<string, unknown>;
-  isExecuting?: boolean;
-}
-
-/**
- * ToolMessage — single tool message renderer.
- * Delegates to ToolMessageGroup with a single entry.
- */
-export const ToolMessage = ({
-  messageId,
-  toolResponse,
-  isExecuting,
-}: ToolMessageProps) => {
-  return (
-    <ToolMessageGroup entries={[{ messageId, toolResponse, isExecuting }]} />
-  );
-};
-
 /** Tools used by the operate mode that should show as collapsible cards. */
-function isAgentTool(tool: string): boolean {
+export function isAgentTool(tool: string): boolean {
   return [
     'read',
     'grep',
@@ -886,24 +797,21 @@ function isAgentTool(tool: string): boolean {
 }
 
 /**
- * Display for web search tool responses
+ * Display for web search tool responses.
  */
-function WebSearchToolDisplay({
-  toolResponse,
-}: {
-  toolResponse: WebSearchToolResponse;
-}) {
+export function WebSearchToolDisplay({ part }: { part: AssistantToolPart }) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const toolResponse = partToToolResponse(part) as WebSearchToolResponse | null;
 
   const sources = useMemo<Source[]>(() => {
-    if (toolResponse.status !== 'success') return [];
+    if (!toolResponse || toolResponse.status !== 'success') return [];
     const results = toolResponse.data.results ?? [];
     return results
       .map((r) => ({ title: r.title, url: r.url, favicon: r.favicon }))
       .filter((s) => typeof s.url === 'string' && s.url.trim().length > 0);
   }, [toolResponse]);
 
-  if (toolResponse.status !== 'success') return null;
+  if (!toolResponse || toolResponse.status !== 'success') return null;
 
   if (sources.length === 0) {
     return (

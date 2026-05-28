@@ -1,5 +1,7 @@
 import {
   createId,
+  isInternalAgentToolName,
+  type AssistantToolPart,
   type CanvasCommand,
   type CanvasEdgeId,
   type CanvasNodeId,
@@ -343,24 +345,20 @@ function applyCanvasCommandsFromToolResult(toolResult: string | undefined): {
 interface StreamEventContext {
   assistantId: string;
   /**
-   * Pending tool-start message IDs awaiting their `tool_result`.
+   * Fallback FIFO of `toolCallId`s emitted by the *legacy*
+   * `tool_start` events. Used only when the matching `tool_result`
+   * arrives without its own `toolCallId` (older servers / synthetic
+   * events in tests). With `toolCallId` present we look up the tool
+   * part directly on the assistant message; parallel completion
+   * order ≠ start order stays correct.
    *
-   * Primary lookup is by `toolCallId` (a stable per-call identifier
-   * the server forwards from the LLM tool-call protocol). The
-   * `fifo` array preserves emission order as a fallback for older
-   * servers that don't yet send `toolCallId` — without it, parallel
-   * tool execution could swap results onto the wrong message bubble
-   * because completion order ≠ start order.
+   * `tool_call` / `tool_call_update` events never touch this queue:
+   * they carry a mandatory `toolCallId` and address the tool part on
+   * the owning assistant message directly.
    */
-  toolQueue: {
-    byCallId: Map<string, string>;
-    fifo: string[];
-  };
+  toolQueue: { fifo: string[] };
   /** Called after canvas_commands are applied. */
-  onCanvasCommands?: (
-    commands: CanvasCommand[],
-    toolMsgId: string | undefined,
-  ) => void;
+  onCanvasCommands?: (commands: CanvasCommand[]) => void;
   /**
    * ID of the pending PreparedPromptCard message inserted by
    * `startStream` for external-agent turns. When the server emits its
@@ -371,15 +369,87 @@ interface StreamEventContext {
 }
 
 /**
+ * Ensure an assistant message exists for `ctx.assistantId`. Used by
+ * the tool-call / plan handlers which may fire before any text_delta.
+ */
+function ensureAssistantMessage(ctx: StreamEventContext): void {
+  const { addMessage } = useChatStore.getState();
+  const existing = useChatStore
+    .getState()
+    .messages.find((m) => m.id === ctx.assistantId);
+  if (!existing) {
+    addMessage({
+      id: ctx.assistantId,
+      role: 'assistant',
+      segments: [],
+    });
+  }
+}
+
+/** Merge a tool_call / tool_call_update payload onto an existing tool part. */
+function mergeToolPart(
+  existing: AssistantToolPart | undefined,
+  toolCallId: string,
+  patch: {
+    title?: string;
+    toolKind?: AssistantToolPart['toolKind'];
+    status?: AssistantToolPart['status'];
+    locations?: AssistantToolPart['locations'];
+    content?: AssistantToolPart['content'];
+    rawOutput?: unknown;
+    internalToolName?: string;
+    internalToolData?: AssistantToolPart['internalToolData'];
+  },
+): AssistantToolPart {
+  const next: AssistantToolPart = {
+    kind: 'tool',
+    toolCallId,
+    title: patch.title ?? existing?.title ?? toolCallId,
+  };
+  const toolKind = patch.toolKind ?? existing?.toolKind;
+  if (toolKind !== undefined) next.toolKind = toolKind;
+  const status = patch.status ?? existing?.status;
+  if (status !== undefined) next.status = status;
+  // Locations/content are append-only per ACP §session/update spec.
+  const mergedLocations = [
+    ...(existing?.locations ?? []),
+    ...(patch.locations ?? []),
+  ];
+  if (mergedLocations.length > 0) next.locations = mergedLocations;
+  const mergedContent = [
+    ...(existing?.content ?? []),
+    ...(patch.content ?? []),
+  ];
+  if (mergedContent.length > 0) next.content = mergedContent;
+  const rawOutput = patch.rawOutput ?? existing?.rawOutput;
+  if (rawOutput !== undefined) next.rawOutput = rawOutput;
+  // internalToolName is narrowed to known built-in names — silently
+  // drop any out-of-allowlist value so external-agent tools never end
+  // up routed through the legacy renderers.
+  const candidateInternal =
+    patch.internalToolName ?? existing?.internalToolName;
+  if (candidateInternal && isInternalAgentToolName(candidateInternal)) {
+    next.internalToolName = candidateInternal;
+  }
+  const internalToolData = patch.internalToolData ?? existing?.internalToolData;
+  if (internalToolData !== undefined) next.internalToolData = internalToolData;
+  if (existing?.permission !== undefined) next.permission = existing.permission;
+  return next;
+}
+
+/**
  * Shared SSE event handler used by both reconnect and normal streaming.
- * Processes text_delta, tool_start, tool_result events by updating chat
- * messages and executing canvas commands.
+ * Processes text_delta / thinking_delta / tool_call / tool_call_update /
+ * plan, plus the legacy tool_start / tool_result pair (folded into the
+ * owning assistant message), by updating chat messages and executing
+ * canvas commands.
  */
 export function handleStreamEvent(
   event: AgentStreamEvent,
   ctx: StreamEventContext,
 ): void {
-  const { addMessage, updateMessage } = useChatStore.getState();
+  const { addMessage, updateMessage, upsertAssistantToolPart } =
+    useChatStore.getState();
 
   if (event.type === 'text_delta' || event.type === 'thinking_delta') {
     const delta = event.data.content;
@@ -415,22 +485,66 @@ export function handleStreamEvent(
         segments: [{ kind, text: delta }],
       });
     }
-  } else if (event.type === 'tool_start') {
-    const msgId = createId('tool');
-    if (event.data.toolCallId) {
-      ctx.toolQueue.byCallId.set(event.data.toolCallId, msgId);
-    }
-    ctx.toolQueue.fifo.push(msgId);
-    addMessage({
-      id: msgId,
-      role: 'tool',
-      toolResponse: {
-        tool: event.data.toolName,
-        status: 'success',
-        data: event.data.toolArgs,
-      },
-      isExecuting: true,
+  } else if (event.type === 'tool_call') {
+    const data = event.data;
+    ensureAssistantMessage(ctx);
+    upsertAssistantToolPart(ctx.assistantId, data.toolCallId, (existing) =>
+      mergeToolPart(existing, data.toolCallId, {
+        title: data.title,
+        toolKind: data.toolKind,
+        status: data.status,
+        locations: data.locations,
+        content: data.content,
+        internalToolName: data.internalToolName,
+      }),
+    );
+  } else if (event.type === 'tool_call_update') {
+    const data = event.data;
+    ensureAssistantMessage(ctx);
+    upsertAssistantToolPart(ctx.assistantId, data.toolCallId, (existing) =>
+      mergeToolPart(existing, data.toolCallId, {
+        title: data.title,
+        status: data.status,
+        locations: data.locations,
+        content: data.content,
+        rawOutput: data.rawOutput,
+      }),
+    );
+  } else if (event.type === 'plan') {
+    const entries = event.data.entries;
+    ensureAssistantMessage(ctx);
+    updateMessage(ctx.assistantId, (m) => {
+      if (m.role !== 'assistant') return m;
+      // Plan uses REPLACE-semantics per ACP §session/update.
+      const planIdx = m.segments.findIndex((s) => s.kind === 'plan');
+      if (planIdx === -1) {
+        return { ...m, segments: [...m.segments, { kind: 'plan', entries }] };
+      }
+      const next = [...m.segments];
+      next[planIdx] = { kind: 'plan', entries };
+      return { ...m, segments: next };
     });
+  } else if (event.type === 'tool_start') {
+    // Legacy event — fold into the assistant message as a tool part.
+    const toolCallId = event.data.toolCallId ?? createId('toolcall');
+    ctx.toolQueue.fifo.push(toolCallId);
+    ensureAssistantMessage(ctx);
+    // Stash the args as a provisional ToolResponse on `internalToolData`
+    // so the existing legacy renderers see something while the call is
+    // in flight. tool_result will replace this with the real response.
+    const provisional: ToolResponse<string, unknown> = {
+      tool: event.data.toolName,
+      status: 'success',
+      data: event.data.toolArgs,
+    };
+    upsertAssistantToolPart(ctx.assistantId, toolCallId, (existing) =>
+      mergeToolPart(existing, toolCallId, {
+        title: event.data.toolName,
+        status: 'pending',
+        internalToolName: event.data.toolName,
+        internalToolData: provisional,
+      }),
+    );
   } else if (event.type === 'tool_result') {
     const toolResponse = parseToolResponse(
       event.data.toolName,
@@ -438,79 +552,95 @@ export function handleStreamEvent(
     );
     if (!toolResponse) return;
 
-    // Resolve the pending tool message. Prefer toolCallId so parallel
-    // tool execution stays correct (completion order ≠ start order).
-    // Fall back to FIFO only when toolCallId is absent (older servers
-    // / synthetic events in tests).
-    let pendingMsgId: string | undefined;
-    const callId = event.data.toolCallId;
-    if (callId && ctx.toolQueue.byCallId.has(callId)) {
-      pendingMsgId = ctx.toolQueue.byCallId.get(callId);
-      ctx.toolQueue.byCallId.delete(callId);
-      if (pendingMsgId) {
-        const idx = ctx.toolQueue.fifo.indexOf(pendingMsgId);
-        if (idx !== -1) ctx.toolQueue.fifo.splice(idx, 1);
-      }
+    // Resolve toolCallId. Prefer the explicit ID so parallel tool
+    // execution stays correct; fall back to FIFO when absent.
+    let toolCallId = event.data.toolCallId;
+    if (toolCallId) {
+      const idx = ctx.toolQueue.fifo.indexOf(toolCallId);
+      if (idx !== -1) ctx.toolQueue.fifo.splice(idx, 1);
     } else {
-      pendingMsgId = ctx.toolQueue.fifo.shift();
+      toolCallId = ctx.toolQueue.fifo.shift();
+    }
+    if (!toolCallId) {
+      // No matching tool_start — synthesize a standalone tool part so
+      // the result is not silently dropped.
+      toolCallId = createId('toolcall');
     }
 
-    let finalResponse = toolResponse;
-    if (pendingMsgId) {
-      const existingMsg = useChatStore
-        .getState()
-        .messages.find((m) => m.id === pendingMsgId);
-      const existingArgs =
-        existingMsg?.role === 'tool' &&
-        existingMsg.toolResponse.status === 'success'
-          ? (existingMsg.toolResponse.data as Record<string, unknown>)
-          : {};
-      finalResponse = {
-        ...toolResponse,
-        data: {
-          ...existingArgs,
-          ...((toolResponse.status === 'success'
-            ? toolResponse.data
-            : {}) as Record<string, unknown>),
-        },
-      } as typeof toolResponse;
-      updateMessage(pendingMsgId, () => ({
-        id: pendingMsgId,
-        role: 'tool' as const,
-        toolResponse: finalResponse,
-        isExecuting: false,
-      }));
-    } else {
-      addMessage({
-        id: createId('tool'),
-        role: 'tool',
-        toolResponse: finalResponse,
-      });
+    // Merge provisional args (from tool_start) with the real response.
+    const assistantMsg = useChatStore
+      .getState()
+      .messages.find((m) => m.id === ctx.assistantId);
+    let existingArgs: Record<string, unknown> = {};
+    if (assistantMsg?.role === 'assistant') {
+      const priorPart = assistantMsg.segments.find(
+        (s): s is AssistantToolPart =>
+          s.kind === 'tool' && s.toolCallId === toolCallId,
+      );
+      const priorData = priorPart?.internalToolData as
+        | ToolResponse<string, unknown>
+        | undefined;
+      if (priorData && priorData.status === 'success') {
+        existingArgs =
+          (priorData.data as Record<string, unknown> | undefined) ?? {};
+      }
     }
+    const mergedResponse: ToolResponse<string, unknown> = {
+      ...toolResponse,
+      data: {
+        ...existingArgs,
+        ...((toolResponse.status === 'success'
+          ? toolResponse.data
+          : {}) as Record<string, unknown>),
+      },
+    } as ToolResponse<string, unknown>;
+
+    ensureAssistantMessage(ctx);
+    upsertAssistantToolPart(ctx.assistantId, toolCallId, (existing) =>
+      mergeToolPart(existing, toolCallId!, {
+        title: existing?.title ?? event.data.toolName,
+        status: 'completed',
+        internalToolName: existing?.internalToolName ?? event.data.toolName,
+        internalToolData: mergedResponse,
+      }),
+    );
 
     // Execute canvas_commands locally
     if (event.data.toolName === 'canvas_commands') {
       const result = applyCanvasCommandsFromToolResult(event.data.toolResult);
       if (result) {
-        // Attach changes to the tool message
-        const toolMsgId = pendingMsgId ?? undefined;
-        if (toolMsgId && result.changes.length > 0) {
-          updateMessage(toolMsgId, (m) => {
-            if (m.role !== 'tool' || m.toolResponse.status !== 'success')
-              return m;
+        // Attach changes to the tool part's internalToolData
+        if (result.changes.length > 0) {
+          upsertAssistantToolPart(ctx.assistantId, toolCallId, (existing) => {
+            if (!existing) {
+              // Should never happen — we just inserted above. Bail
+              // safely by returning a minimal part.
+              return mergeToolPart(existing, toolCallId!, {
+                internalToolData: mergedResponse,
+              });
+            }
+            const existingData = existing.internalToolData as
+              | ToolResponse<string, unknown>
+              | undefined;
+            const priorData =
+              existingData?.status === 'success'
+                ? ((existingData.data as Record<string, unknown> | undefined) ??
+                  {})
+                : {};
             return {
-              ...m,
-              toolResponse: {
-                ...m.toolResponse,
+              ...existing,
+              internalToolData: {
+                tool: event.data.toolName,
+                status: 'success',
                 data: {
-                  ...(m.toolResponse.data as Record<string, unknown>),
+                  ...priorData,
                   canvasChanges: result.changes,
                 },
               },
             };
           });
         }
-        ctx.onCanvasCommands?.(result.commands, toolMsgId);
+        ctx.onCanvasCommands?.(result.commands);
       }
     }
   } else if (event.type === 'prepared_prompt') {
@@ -687,7 +817,6 @@ export function useAgentStream(): UseAgentStreamReturn {
       assistantIdRef.current = assistantId;
 
       const toolMsgQueue: StreamEventContext['toolQueue'] = {
-        byCallId: new Map<string, string>(),
         fifo: [],
       };
 
@@ -900,14 +1029,28 @@ export function useAgentStream(): UseAgentStreamReturn {
       status: 'interrupted',
     });
 
-    // Mark any still-executing tool messages as done
+    // Mark any still-pending tool parts as cancelled so the renderer
+    // can drop spinners / show a definitive end state.
     const msgs = useChatStore.getState().messages;
     for (const msg of msgs) {
-      if (msg.role === 'tool' && msg.isExecuting) {
-        updateMessage(msg.id, (m) =>
-          m.role === 'tool' ? { ...m, isExecuting: false } : m,
-        );
-      }
+      if (msg.role !== 'assistant') continue;
+      const hasInflight = msg.segments.some(
+        (s) =>
+          s.kind === 'tool' &&
+          (s.status === 'pending' || s.status === 'in_progress'),
+      );
+      if (!hasInflight) continue;
+      updateMessage(msg.id, (m) => {
+        if (m.role !== 'assistant') return m;
+        return {
+          ...m,
+          segments: m.segments.map((s) => {
+            if (s.kind !== 'tool') return s;
+            if (s.status !== 'pending' && s.status !== 'in_progress') return s;
+            return { ...s, status: 'failed' };
+          }),
+        };
+      });
     }
   }, [addMessage, updateMessage]);
 

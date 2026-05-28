@@ -3,7 +3,12 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
 import type { ChatMessage } from './chatTypes';
-import type { AgentBinding, AgentMode, ChatAttachment } from '@sediment/shared';
+import type {
+  AgentBinding,
+  AgentMode,
+  AssistantToolPart,
+  ChatAttachment,
+} from '@sediment/shared';
 
 /**
  * Default binding for any newly opened canvas / cleared thread.
@@ -76,6 +81,22 @@ interface ChatState {
     id: string,
     updater: (msg: ChatMessage) => ChatMessage,
   ) => void;
+  /**
+   * Upsert a `kind:'tool'` segment on an assistant message identified
+   * by `messageId`, matched by `toolCallId`. The `factory` receives
+   * the prior part (or `undefined` for a fresh insertion) and must
+   * return the full part with the same `toolCallId`. Used by the SSE
+   * handler to merge `tool_call_update` into a previously appended
+   * `tool_call`, and by the legacy `tool_start` → `tool_result` adapter
+   * to fold those events into the same assistant turn.
+   *
+   * No-op if `messageId` does not resolve to an assistant message.
+   */
+  upsertAssistantToolPart: (
+    messageId: string,
+    toolCallId: string,
+    factory: (existing: AssistantToolPart | undefined) => AssistantToolPart,
+  ) => void;
   setMessages: (messages: ChatMessage[]) => void;
   setHistoryLoaded: (loaded: boolean) => void;
   setLastAction: (action: AgentMode) => void;
@@ -134,6 +155,26 @@ export const useChatStore = create<ChatState>()(
       updateMessage: (id, updater) =>
         set((state) => ({
           messages: state.messages.map((m) => (m.id === id ? updater(m) : m)),
+        })),
+
+      upsertAssistantToolPart: (messageId, toolCallId, factory) =>
+        set((state) => ({
+          messages: state.messages.map((m) => {
+            if (m.id !== messageId || m.role !== 'assistant') return m;
+            let found = false;
+            const segments = m.segments.map((seg) => {
+              if (seg.kind === 'tool' && seg.toolCallId === toolCallId) {
+                found = true;
+                return factory(seg);
+              }
+              return seg;
+            });
+            // If no existing tool part, append a new one. Callers can
+            // rely on the inserted part's `kind`/`toolCallId` being
+            // exactly what `factory(undefined)` produced.
+            if (!found) segments.push(factory(undefined));
+            return { ...m, segments };
+          }),
         })),
 
       setMessages: (messages) => set({ messages }),

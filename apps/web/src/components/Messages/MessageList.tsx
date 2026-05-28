@@ -5,12 +5,10 @@ import { AIMessage } from './AIMessage';
 import { IntentSelectMessage } from './IntentSelectMessage';
 import { PreparedPromptCard } from './PreparedPromptCard';
 import { StatusMessage } from './StatusMessage';
-import { ToolMessageGroup } from './ToolMessage';
 import { UserMessage } from './UserMessage';
 import { Button } from '../Common/Button';
 import { ThinkingIndicator } from '../Common/ThinkingIndicator';
 
-import type { ToolEntry } from './ToolMessage';
 import type { ChatMessage } from '../../store/chatTypes';
 
 interface MessageListProps {
@@ -105,6 +103,7 @@ export const MessageList = ({
               elements.push(
                 <AIMessage
                   key={msg.id}
+                  messageId={msg.id}
                   segments={msg.segments}
                   isStreaming={msg.id === streamingAssistantId}
                   resources={msg.resources}
@@ -112,30 +111,6 @@ export const MessageList = ({
                 />,
               );
               i++;
-              continue;
-            }
-
-            if (msg.role === 'tool') {
-              // Group consecutive tool messages of the same tool type
-              const toolName = msg.toolResponse.tool;
-              const group: ToolEntry[] = [];
-              while (i < messages.length) {
-                const cur = messages[i];
-                if (cur?.role !== 'tool' || cur.toolResponse.tool !== toolName)
-                  break;
-                group.push({
-                  messageId: cur.id,
-                  toolResponse: cur.toolResponse,
-                  isExecuting: cur.isExecuting,
-                });
-                i++;
-              }
-              elements.push(
-                <ToolMessageGroup
-                  key={group.map((e) => e.messageId).join(',')}
-                  entries={group}
-                />,
-              );
               continue;
             }
 

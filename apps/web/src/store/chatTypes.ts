@@ -9,10 +9,10 @@
  */
 
 import type {
+  AssistantPart,
   ChatAttachment,
   ExternalAgentPrompt,
   IntentCandidate,
-  ToolResponse,
 } from '@sediment/shared';
 
 /** A resource label created by an agent tool call (e.g. node, edge, frame). */
@@ -24,30 +24,32 @@ export interface ResourceLabel {
 }
 
 /**
- * Ordered piece of an assistant turn. The agent stream can interleave
- * reasoning ("thinking") with visible text — and, later, tool calls —
- * so the assistant message stores them as a time-ordered sequence
- * instead of a flat string. Each delta event either extends the
- * trailing segment (same kind) or pushes a new one.
+ * Ordered piece of an assistant turn. Aliased to {@link AssistantPart}
+ * from the shared types package — the same union the SSE pipeline,
+ * sidecar persistence, and history endpoint all speak — so live
+ * streaming and rehydration share one renderer dispatch.
  *
- * Future: tool calls may also fold into this union (as
- * `{ kind: 'tool'; ... }`) once we collapse per-turn tool messages
- * into the owning assistant message. Until then, tool execution is
- * still represented by separate top-level `role: 'tool'` messages
- * in {@link ChatMessage}.
+ * Variants today: `text` / `thinking` / `tool` / `plan` / `status`.
  */
-export type AssistantSegment =
-  | { kind: 'text'; text: string }
-  | { kind: 'thinking'; text: string };
+export type AssistantSegment = AssistantPart;
 
 /** Concatenate only the visible text segments — used for copy / "add as note" / history serialization. */
 export function assistantMessageText(segments: AssistantSegment[]): string {
   return segments
-    .filter((s) => s.kind === 'text')
+    .filter(
+      (s): s is Extract<AssistantSegment, { kind: 'text' }> =>
+        s.kind === 'text',
+    )
     .map((s) => s.text)
     .join('');
 }
 
+/**
+ * Top-level chat message. Tool calls are folded INTO the owning
+ * assistant turn as `kind:'tool'` segments — there is no longer a
+ * dedicated `role:'tool'` variant (dropped in PR-2; see
+ * docs/assistant-segments-plan.md §3).
+ */
 export type ChatMessage =
   | {
       id: string;
@@ -68,13 +70,6 @@ export type ChatMessage =
       resources?: ResourceLabel[];
       /** IDs of canvas nodes selected when this message was sent. */
       selectedNodeIds?: string[];
-    }
-  | {
-      id: string;
-      role: 'tool';
-      toolResponse: ToolResponse<string, unknown>;
-      /** Whether this tool is currently executing (streaming). */
-      isExecuting?: boolean;
     }
   | {
       id: string;

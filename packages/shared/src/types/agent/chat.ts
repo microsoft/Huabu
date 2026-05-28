@@ -1,6 +1,6 @@
 import type { ExternalAgentPrompt } from './agent.js';
+import type { AssistantHistoryPart } from './assistant-parts.js';
 import type { IntentCandidate } from './intent.js';
-import type { ToolResponse } from './tools.js';
 
 /**
  * An attachment sent alongside a chat message — e.g. a captured PDF region or pasted file.
@@ -24,10 +24,22 @@ export interface ChatAttachment {
 
 // --- Chat History ---
 
-/** A single message item returned by the history endpoint. */
+/**
+ * A single message item returned by the history endpoint.
+ *
+ * Assistant turns are an ordered `parts` array (`text` / `thinking` /
+ * `tool` / `plan` / `status`) rather than a flat string — the wire
+ * shape mirrors the live SSE aggregation so refresh and live rendering
+ * share a single renderer dispatch.
+ *
+ * Tool calls are NOT a top-level role: they are folded into the
+ * owning assistant turn as `kind:'tool'` parts. The legacy
+ * `role:'tool'` variant was removed when the parts model landed (see
+ * docs/assistant-segments-plan.md §3).
+ */
 export type ChatHistoryItem =
   | {
-      role: 'user' | 'assistant';
+      role: 'user';
       content: string;
       /** Image attachments recovered from multimodal messages. */
       attachments?: ChatAttachment[];
@@ -35,8 +47,13 @@ export type ChatHistoryItem =
       selectedNodeIds?: string[];
     }
   | {
-      role: 'tool';
-      toolResponse: ToolResponse<string, unknown>;
+      role: 'assistant';
+      /** Ordered parts that make up the assistant turn. */
+      parts: AssistantHistoryPart[];
+      /** Image attachments recovered from multimodal messages. */
+      attachments?: ChatAttachment[];
+      /** IDs of canvas nodes that were selected when this message was sent. */
+      selectedNodeIds?: string[];
     }
   | {
       role: 'status';

@@ -1,4 +1,4 @@
-import { createId, type ToolResponse } from '@sediment/shared';
+import { createId } from '@sediment/shared';
 import { useEffect } from 'react';
 
 import { agentApi } from '@/api/agent';
@@ -8,7 +8,7 @@ import { useChatStore } from '@/store/chatStore';
 import { handleStreamEvent } from './useAgentStream';
 
 import type { ChatMessage } from '../store/chatTypes';
-import type { AgentStreamEvent, ChatAttachment } from '@sediment/shared';
+import type { AgentStreamEvent } from '@sediment/shared';
 
 /**
  * Hook that loads chat history from the server and handles reconnection
@@ -63,14 +63,6 @@ export function useChatHistory(setIsLoading: (loading: boolean) => void): void {
           (m, i): ChatMessage => {
             const id = `history-${i}`;
 
-            if (m.role === 'tool') {
-              return {
-                id,
-                role: 'tool' as const,
-                toolResponse: m.toolResponse as ToolResponse<string, unknown>,
-              };
-            }
-
             if (m.role === 'status') {
               return {
                 id,
@@ -99,37 +91,42 @@ export function useChatHistory(setIsLoading: (loading: boolean) => void): void {
               };
             }
 
-            const msg = m as {
-              role: 'user' | 'assistant';
-              content: string;
-              attachments?: ChatAttachment[];
-              selectedNodeIds?: string[];
-            };
-            const attachmentsField =
-              msg.attachments && msg.attachments.length > 0
-                ? { attachments: msg.attachments }
-                : {};
-            const selectedNodesField =
-              msg.selectedNodeIds && msg.selectedNodeIds.length > 0
-                ? { selectedNodeIds: msg.selectedNodeIds }
-                : {};
-            if (msg.role === 'assistant') {
-              // Server history doesn't persist segment boundaries (it
-              // never saw the thinking chunks separately), so reconstruct
-              // a single text segment from the flat content. New turns
-              // streamed after reload will produce real segments.
+            if (m.role === 'assistant') {
+              // Wire shape mirrors the runtime AssistantSegment union
+              // (see chatTypes.ts) — the server already produces the
+              // correct text/thinking/tool/plan/status part order; we
+              // pass it through unchanged so live streaming and
+              // rehydration share one renderer dispatch.
+              const attachmentsField =
+                m.attachments && m.attachments.length > 0
+                  ? { attachments: m.attachments }
+                  : {};
+              const selectedNodesField =
+                m.selectedNodeIds && m.selectedNodeIds.length > 0
+                  ? { selectedNodeIds: m.selectedNodeIds }
+                  : {};
               return {
                 id,
                 role: 'assistant' as const,
-                segments: [{ kind: 'text' as const, text: msg.content || '' }],
+                segments: m.parts,
                 ...attachmentsField,
                 ...selectedNodesField,
               };
             }
+
+            // role === 'user'
+            const attachmentsField =
+              m.attachments && m.attachments.length > 0
+                ? { attachments: m.attachments }
+                : {};
+            const selectedNodesField =
+              m.selectedNodeIds && m.selectedNodeIds.length > 0
+                ? { selectedNodeIds: m.selectedNodeIds }
+                : {};
             return {
               id,
               role: 'user' as const,
-              content: msg.content || '',
+              content: m.content || '',
               ...attachmentsField,
               ...selectedNodesField,
             };
@@ -157,10 +154,10 @@ export function useChatHistory(setIsLoading: (loading: boolean) => void): void {
 
     // Only attempt reconnect if history suggests an incomplete run:
     // the last message is from the user (or intent-select) without a
-    // following assistant/tool response, meaning the server may still
-    // be streaming. If history is empty or ends with an assistant/tool
-    // message, there's nothing to reconnect to — skip the request
-    // entirely to avoid a 404 in the browser console.
+    // following assistant response, meaning the server may still be
+    // streaming. If history is empty or ends with an assistant message,
+    // there's nothing to reconnect to — skip the request entirely to
+    // avoid a 404 in the browser console.
     const msgs = useChatStore.getState().messages;
     if (msgs.length === 0) return;
     const lastMsg = msgs[msgs.length - 1];
@@ -171,13 +168,12 @@ export function useChatHistory(setIsLoading: (loading: boolean) => void): void {
     const tryReconnect = async () => {
       const assistantId = createId('message');
       const toolQueue = {
-        byCallId: new Map<string, string>(),
         fifo: [] as string[],
       };
       // Flag set to true once we know the server has an active run
       let streaming = false;
 
-      // Clear assistant/tool/status messages loaded from history for the
+      // Clear assistant / status messages loaded from history for the
       // current run — the reconnect event buffer replays them fully.
       // Keep only messages up to and including the last user message.
       const clearStaleMessages = () => {
