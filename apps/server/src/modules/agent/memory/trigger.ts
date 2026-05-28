@@ -25,7 +25,7 @@ import { atomicWriteJson, mkdirp, readJson } from '../../storage/io.js';
 import { memoryStatePath, workingMemoryDir } from '../../storage/paths.js';
 
 /** Op-count threshold that triggers a memory analysis pass. */
-export const OP_THRESHOLD = 100;
+export const OP_THRESHOLD = 50;
 
 export interface MemoryState {
   counter: number;

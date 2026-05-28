@@ -42,7 +42,7 @@ import {
 } from '../../storage/paths.js';
 import { getWorkspacePath } from '../../workspace.js';
 
-import { readMemoryState } from './index.js';
+import { OP_THRESHOLD, readMemoryState } from './index.js';
 
 import type { WriteResult } from './writers.js';
 import type { FastifyPluginAsync } from 'fastify';
@@ -122,6 +122,8 @@ export const memoryDebug = {
 // ─── Snapshot builder ──────────────────────────────────────────────────────
 
 interface MemorySnapshot {
+  /** Op-count threshold the worker is currently configured for. */
+  threshold: number;
   canvases: Array<{ id: string; title: string | null }>;
   workspace: {
     longterm: FilePeek;
@@ -256,6 +258,7 @@ function buildSnapshot(canvasId: string | null): MemorySnapshot {
     };
   }
   const snapshot: MemorySnapshot = {
+    threshold: OP_THRESHOLD,
     canvases,
     workspace: {
       longterm: longTermPeek,
@@ -437,14 +440,16 @@ function renderDebugHtml(): string {
         canvases.map((c) => '<option value="' + esc(c.id) + '"' + (c.id === current ? ' selected' : '') + '>' + esc(c.title || c.id) + '</option>').join('');
     }
 
-    function renderCounters(selected) {
+    function renderCounters(snap) {
+      const selected = snap.selected;
+      const threshold = snap.threshold ?? 50;
       if (!selected) {
         $('counter-cards').innerHTML = '<div class="card"><div class="label">canvas</div><div class="value">—</div><div class="sub">pick a canvas above</div></div>';
         return;
       }
       const s = selected.state || { counter: 0, lastAnalyzedAt: null, lastSeenThreadCursor: null };
       const cards = [
-        { label: 'op counter', value: s.counter, sub: 'threshold 100' },
+        { label: 'op counter', value: s.counter, sub: 'threshold ' + threshold },
         { label: 'last analysis', value: fmtTs(s.lastAnalyzedAt), sub: s.lastAnalyzedAt ? new Date(s.lastAnalyzedAt).toLocaleString() : 'never' },
         { label: 'cursor (lastSeenThreadCursor)', value: fmtTs(s.lastSeenThreadCursor), sub: 'newer chat turns analyse next' },
         { label: 'recent events', value: selected.events.length, sub: 'rolling buffer' },
@@ -525,7 +530,7 @@ function renderDebugHtml(): string {
       try {
         const snap = await fetchSnapshot();
         renderCanvasOptions(snap.canvases);
-        renderCounters(snap.selected);
+        renderCounters(snap);
         renderEvents(snap.selected);
         renderFiles(snap);
         renderSkills(snap);
