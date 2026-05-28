@@ -41,6 +41,7 @@ import path from 'node:path';
 import { refreshCanvasDirIndex } from './storage/canvas-dirs.js';
 import { migrateBareArtifactKeys } from './storage/migrate-artifact-keys.js';
 import { migrateLabeledNames } from './storage/migrate-labels.js';
+import { migrateLegacyMemory } from './storage/migrate-memory.js';
 import {
   flattenLegacyMetaJson,
   runMigrationIfNeeded,
@@ -100,6 +101,9 @@ export function initWorkspaceFromEnv(): void {
   migrateLabeledNames(_workspacePath);
   // One-shot rewrite of legacy full artifact URLs to bare keys (sentinel-gated).
   migrateBareArtifactKeys(_workspacePath);
+  // One-shot move of legacy `<canvas>/memory/preferences.md` into the
+  // new `<canvas>/.memory/canvas.md` working-memory file (sentinel-gated).
+  migrateLegacyMemory(_workspacePath);
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -179,6 +183,9 @@ export function setWorkspacePath(newPath: string): void {
   migrateLabeledNames(_workspacePath);
   // One-shot rewrite of legacy full artifact URLs to bare keys (sentinel-gated).
   migrateBareArtifactKeys(_workspacePath);
+  // One-shot move of legacy `<canvas>/memory/preferences.md` into the
+  // new `<canvas>/.memory/canvas.md` working-memory file (sentinel-gated).
+  migrateLegacyMemory(_workspacePath);
 }
 
 // ──────────────────────────────────────────────────────────────────────

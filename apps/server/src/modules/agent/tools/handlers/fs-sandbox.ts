@@ -32,10 +32,23 @@ import { canvasRoot } from '../../../storage/paths.js';
 
 // ─── Always-skipped directory names ─────────────────────────────────────────
 
-/** Directories never traversed. Holds chat history, vcs, build outputs. */
+/**
+ * Directories never traversed by `grep` / `find` / `ls` / `read`.
+ *
+ * - `.history` — chat / intent transcripts, append-only event log.
+ * - `.git`, `node_modules` — defensive: should never appear under a
+ *   canvas root, but cheap to skip in case a workspace happens to live
+ *   inside a repo.
+ * - `.memory` — canvas-scoped working memory + worker state; written
+ *   exclusively by the memory sub-agent. Keeping it out of the chat
+ *   agent's read surface avoids it leaking back into prompts via
+ *   tool calls (the preamble injection in PR-E is the only intended
+ *   read path).
+ */
 export const ALWAYS_SKIP: ReadonlySet<string> = new Set([
   '.history',
   '.git',
+  '.memory',
   'node_modules',
 ]);
 

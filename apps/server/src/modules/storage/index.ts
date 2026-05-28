@@ -29,7 +29,6 @@ export type {
   CanvasEvent,
   NodeContent,
   NodeContentSummary,
-  UserPreferences,
 } from './canvas-store.js';
 
 // ─── Instance cache (LRU-ish, max 16) ───────────────────────────────────────
