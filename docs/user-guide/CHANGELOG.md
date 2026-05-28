@@ -4,6 +4,23 @@
 
 ---
 
+## 2026-05-26 · ACP 外部 Agent 斜杠命令：聊天输入框 typeahead
+
+**What Changed**
+
+- 当聊天线程绑定到外部 ACP agent（如 Claude Code / Copilot CLI）时，在输入框中输入 `/` 会弹出该 agent 提供的 **slash command 候选菜单**。键盘交互：`↑/↓` 移动高亮、`Tab` / `Enter` 选中、`Esc` 关闭。点击候选项也可选中，选中后会把 `/<name>` 写入输入框并把光标放在参数位置。
+- 服务端新增两个端点：`POST /api/acp/threads/:threadId/session`（幂等地打开/复用 per-thread ACP session 并返回当前缓存的 slash 命令）和 `GET /api/acp/threads/:threadId/commands`（读取最新缓存）。绑定到外部 agent 后，前端会自动调用前者预热 session 并拉取命令，无需用户先发送一条消息。
+- 预处理器（intent translator LLM）对斜杠命令做 **short-circuit**：当 raw 输入以 `/<name>` 开头时跳过 LLM 重写，原样转发给外部 agent —— 否则 LLM 可能把命令拆成自然语言、丢失前导 `/`、或额外加噪声。
+
+**Notes**
+
+- 该功能要求线程绑定到 **external** binding（ModeSelector 中选了一个连接上的 ACP agent）。Internal（Sediment 内置 agent）线程没有 slash 命令，菜单不会出现。
+- 命令列表是 agent 推送的 —— 由 ACP `session/update.available_commands_update` 通知决定。某些 agent 在 `session/new` 后才推送，前端会立即拉一次 + 200ms 后再拉一次，以兜底"晚到"的推送。如果 agent 完全不推送任何命令，菜单保持隐藏。
+- ACP 协议本身没有"执行斜杠命令"的 RPC —— 斜杠命令是嵌在普通 `session/prompt` 文本里的，agent 自己解析。Sediment 只是帮你把命令名输入对，不会拦截执行。
+- 仅在服务器启动时设置 `SEDIMENT_ENABLE_ACP=1` 才会注册线程端点；否则按 404 行为降级，菜单不展示。
+
+---
+
 ## 2026-05-25 · Artifact 引用瘦身：只存裸文件名
 
 **What Changed**

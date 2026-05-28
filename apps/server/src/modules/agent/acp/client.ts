@@ -160,6 +160,19 @@ export class AcpAgentClient {
    * they have distinct sessionIds.
    */
   private readonly updateHandlers = new Map<string, SessionUpdateHandler>();
+  /**
+   * Long-lived per-session listeners installed via
+   * {@link registerSessionListener}. Coexist with the turn-scoped
+   * `updateHandlers`: both fire for every `session/update` on the
+   * session id. Used to capture out-of-turn notifications (e.g.
+   * `available_commands_update`, which the spec allows the agent to
+   * push at any time and which typically arrives shortly after
+   * `session/new` resolves — before any prompt is in flight).
+   */
+  private readonly sessionListeners = new Map<
+    string,
+    Set<SessionUpdateHandler>
+  >();
   private closed = false;
   private readonly logger: NonNullable<AcpAgentClientOptions['logger']>;
   /** Canvas scope for sandbox + permission checks. See AcpAgentClientOptions.canvasId. Empty string = “no canvas” (fs/* will be rejected). */
@@ -257,6 +270,40 @@ export class AcpAgentClient {
     this.sendNotification('session/cancel', { sessionId });
   }
 
+  /**
+   * Install a long-lived listener for every `session/update` arriving on
+   * `sessionId`, regardless of whether a `prompt()` turn is in flight.
+   * Use for out-of-turn metadata pushes — the canonical example is
+   * `available_commands_update`, which the spec allows the agent to push
+   * at any time (typically right after `session/new`).
+   *
+   * Multiple listeners are supported; each is invoked in registration order.
+   * Returns a disposer; call it during cleanup to avoid leaks.
+   *
+   * Listeners run in addition to (not instead of) the turn-scoped handler
+   * installed by `prompt()`. So a `session/update` arriving during a turn
+   * fires BOTH the turn handler and any registered session listeners.
+   */
+  registerSessionListener(
+    sessionId: string,
+    handler: SessionUpdateHandler,
+  ): () => void {
+    let set = this.sessionListeners.get(sessionId);
+    if (!set) {
+      set = new Set();
+      this.sessionListeners.set(sessionId, set);
+    }
+    set.add(handler);
+    return () => {
+      const current = this.sessionListeners.get(sessionId);
+      if (!current) return;
+      current.delete(handler);
+      if (current.size === 0) {
+        this.sessionListeners.delete(sessionId);
+      }
+    };
+  }
+
   /** Mark this client as closed and reject all pending promises. */
   shutdown(reason = 'client_shutdown'): void {
     if (this.closed) return;
@@ -265,6 +312,7 @@ export class AcpAgentClient {
     for (const p of this.pending.values()) p.reject(err);
     this.pending.clear();
     this.updateHandlers.clear();
+    this.sessionListeners.clear();
   }
 
   /** True if this client has been closed via `shutdown()`. */
@@ -342,10 +390,36 @@ export class AcpAgentClient {
         };
         const sessionId = params.sessionId;
         if (params.update && typeof sessionId === 'string') {
-          const handler = this.updateHandlers.get(sessionId);
-          if (handler) {
-            handler(params.update);
-          } else {
+          // Fan-out: BOTH the turn-scoped handler (if a prompt is in
+          // flight) and every long-lived session listener fire. Out-of-turn
+          // updates (e.g. `available_commands_update` arriving right
+          // after `session/new`) only have listeners — they would be
+          // silently dropped without this branch.
+          const turnHandler = this.updateHandlers.get(sessionId);
+          const listeners = this.sessionListeners.get(sessionId);
+          if (turnHandler) {
+            try {
+              turnHandler(params.update);
+            } catch (e) {
+              this.logger.warn(
+                { sessionId, err: String(e) },
+                'session/update turn handler threw',
+              );
+            }
+          }
+          if (listeners && listeners.size > 0) {
+            for (const listener of listeners) {
+              try {
+                listener(params.update);
+              } catch (e) {
+                this.logger.warn(
+                  { sessionId, err: String(e) },
+                  'session/update listener threw',
+                );
+              }
+            }
+          }
+          if (!turnHandler && (!listeners || listeners.size === 0)) {
             this.logger.debug(
               { sessionId, sessionUpdate: params.update.sessionUpdate },
               'session/update for unknown session — no handler registered',

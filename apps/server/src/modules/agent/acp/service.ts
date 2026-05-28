@@ -29,10 +29,13 @@ import { acpSessionRegistry } from './session-registry.js';
 import { acpUpdateToStreamEvent } from './translator.js';
 import { canvasRoot as resolveCanvasRoot } from '../../storage/paths.js';
 
+import type { AcpSessionEntry } from './session-registry.js';
+import type { AcpSessionUpdate } from './translator.js';
 import type { AssistantMessage, Context } from '@earendil-works/pi-ai';
 import type {
   AgentChatContext,
   AgentStreamEvent,
+  AvailableCommand,
   ExternalAgentPrompt,
 } from '@sediment/shared';
 import type { FastifyBaseLogger } from 'fastify';
@@ -118,6 +121,248 @@ export interface RunAcpAgentOptions {
   logger: FastifyBaseLogger;
 }
 
+// ─── Session lifecycle helper ─────────────────────────────────────────────
+
+export interface EnsureAcpSessionOptions {
+  threadId: string;
+  /** External binding for the thread. */
+  binding: { alias: string; agentletAgentId: string };
+  /**
+   * Sediment canvasId scoping the sandbox. Empty string = no canvas
+   * (fs/* will be rejected). Mirrors {@link RunAcpAgentOptions.canvasId}.
+   */
+  canvasId?: string;
+  /** `cwd` for `session/new`. Defaults to `'/'` (relay substitutes its cwd). */
+  cwd?: string;
+  logger: FastifyBaseLogger;
+}
+
+/**
+ * Per-key map of in-flight `ensureAcpSession` work, used to coalesce
+ * concurrent callers so we never run `initialize() + session/new`
+ * twice for the same `{threadId, agentletAgentId, canvasId}` triple.
+ *
+ * Why this matters: the ChatPanel mount fires
+ * `POST /api/acp/threads/:id/session` to warm the slash-command cache,
+ * and the same thread's first user prompt also goes through
+ * `ensureAcpSession` via `runAcpAgent`. If they arrive in the same
+ * event-loop tick BOTH callers see `acpSessionRegistry.get()` as
+ * undefined, both open a session, and the second `registry.set()`
+ * `shutdown()`s the first client — which silently invalidates the
+ * first request's listener registration and wastes one round-trip.
+ *
+ * Keying by all three staleness inputs means: different agent / canvas
+ * / thread → independent slots, so a binding switch is never blocked
+ * waiting on a stale promise.
+ */
+const inflightEnsureSessions = new Map<string, Promise<AcpSessionEntry>>();
+
+function ensureSessionKey(
+  threadId: string,
+  agentletAgentId: string,
+  canvasId: string,
+): string {
+  return `${threadId}|${agentletAgentId}|${canvasId}`;
+}
+
+/**
+ * Get-or-create the per-thread ACP session, installing the long-lived
+ * `available_commands_update` listener on first creation. Idempotent for
+ * a given `{threadId, agentletAgentId, canvasId}` triple — repeated calls
+ * return the same {@link AcpSessionEntry} without re-issuing `session/new`.
+ *
+ * Concurrency: thread-safe across overlapping awaits. Multiple calls
+ * for the same `{threadId, agentletAgentId, canvasId}` key share the
+ * same in-flight promise so only one `initialize() + session/new`
+ * pair is ever issued for a given coalescing window.
+ *
+ * Stale-entry rules (mirror the logic previously inlined in
+ * `runAcpAgent`):
+ *  - Binding switched to a different agent → drop and rebuild.
+ *  - Canvas changed → drop (sandbox scope mismatch).
+ *  - Stored client was shut down → drop and reopen.
+ *
+ * Throws synchronously when the agentlet bridge is not mounted or the
+ * agent is not connected — same surface as the inline path so callers
+ * can `try`/`catch` uniformly.
+ */
+export async function ensureAcpSession(
+  opts: EnsureAcpSessionOptions,
+): Promise<AcpSessionEntry> {
+  const key = ensureSessionKey(
+    opts.threadId,
+    opts.binding.agentletAgentId,
+    opts.canvasId ?? '',
+  );
+  const existing = inflightEnsureSessions.get(key);
+  if (existing) return existing;
+  // The IIFE's `finally` runs only AFTER the inner `await` suspends,
+  // by which time `p` is fully assigned. Plain `delete(key)` is safe
+  // because no other caller can replace this slot while we own it:
+  // they would short-circuit on `existing` above and never reach
+  // `set(key, …)`.
+  const p: Promise<AcpSessionEntry> = (async () => {
+    try {
+      return await ensureAcpSessionInner(opts);
+    } finally {
+      inflightEnsureSessions.delete(key);
+    }
+  })();
+  inflightEnsureSessions.set(key, p);
+  return p;
+}
+
+async function ensureAcpSessionInner(
+  opts: EnsureAcpSessionOptions,
+): Promise<AcpSessionEntry> {
+  const { threadId, binding, logger } = opts;
+  const canvasId = opts.canvasId ?? '';
+  const cwd = opts.cwd ?? '/';
+
+  const server = getAgentletServer();
+  if (!server) {
+    throw new Error(
+      'ACP server not mounted \u2014 set SEDIMENT_ENABLE_ACP=1 and restart',
+    );
+  }
+  const conn = server.getConnection(binding.agentletAgentId);
+  if (!conn || conn.status !== 'connected') {
+    throw new Error(
+      `External agent '${binding.alias}' (id=${binding.agentletAgentId}) is not connected`,
+    );
+  }
+
+  let entry = acpSessionRegistry.get(threadId);
+  if (entry && entry.agentletAgentId !== binding.agentletAgentId) {
+    logger.info(
+      {
+        threadId,
+        oldAgentId: entry.agentletAgentId,
+        newAgentId: binding.agentletAgentId,
+      },
+      '[acp] thread binding changed \u2014 discarding stale session',
+    );
+    acpSessionRegistry.remove(threadId);
+    entry = undefined;
+  }
+  if (entry && entry.canvasId !== canvasId) {
+    logger.info(
+      {
+        threadId,
+        oldCanvasId: entry.canvasId,
+        newCanvasId: canvasId,
+      },
+      '[acp] thread canvas changed \u2014 discarding stale session (sandbox scope mismatch)',
+    );
+    acpSessionRegistry.remove(threadId);
+    entry = undefined;
+  }
+  if (entry && entry.client.isClosed) {
+    logger.info(
+      { threadId },
+      '[acp] stored session client was closed \u2014 reopening',
+    );
+    acpSessionRegistry.remove(threadId);
+    entry = undefined;
+  }
+  if (entry) {
+    logger.debug(
+      { threadId, sessionId: entry.sessionId },
+      '[acp] reusing existing session for thread',
+    );
+    return entry;
+  }
+
+  logger.info(
+    { threadId, canvasId, agentId: binding.agentletAgentId, cwd },
+    '[acp] opening new session for thread',
+  );
+  const client = new AcpAgentClient(conn, { canvasId, logger });
+  await client.initialize();
+  const sessionId = await client.newSession({ cwd });
+  const created: AcpSessionEntry = {
+    client,
+    sessionId,
+    agentletAgentId: binding.agentletAgentId,
+    canvasId,
+    cwd,
+    createdAt: Date.now(),
+    availableCommands: [],
+    commandsUpdatedAt: 0,
+  };
+  // Install the long-lived listener BEFORE registering so we never
+  // miss an `available_commands_update` that the agent pushes during
+  // the very first event-loop tick after `session/new` resolves.
+  client.registerSessionListener(sessionId, (update) => {
+    handleSessionMetaUpdate(created, update, logger);
+  });
+  acpSessionRegistry.set(threadId, created);
+  return created;
+}
+
+/**
+ * Long-lived session listener — handles out-of-turn `session/update`
+ * notifications carrying session-scoped metadata. Currently only
+ * `available_commands_update`; new metadata variants plug in here.
+ */
+function handleSessionMetaUpdate(
+  entry: AcpSessionEntry,
+  update: AcpSessionUpdate,
+  logger: FastifyBaseLogger,
+): void {
+  if (update.sessionUpdate !== 'available_commands_update') return;
+  const raw = (update as { availableCommands?: unknown }).availableCommands;
+  if (!Array.isArray(raw)) {
+    logger.warn(
+      { sessionId: entry.sessionId },
+      '[acp] available_commands_update without availableCommands array',
+    );
+    return;
+  }
+  // Per spec the list REPLACES (not merges with) any prior state.
+  // We do a permissive shape check here so a misbehaving agent can't
+  // poison the cache.
+  const next: AvailableCommand[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const obj = item as Record<string, unknown>;
+    const name = typeof obj.name === 'string' ? obj.name.trim() : '';
+    if (!name) continue;
+    const description =
+      typeof obj.description === 'string' ? obj.description : '';
+    const input = obj.input;
+    if (
+      input !== undefined &&
+      input !== null &&
+      !(
+        typeof input === 'object' &&
+        typeof (input as { hint?: unknown }).hint === 'string'
+      )
+    ) {
+      // Reject malformed input metadata but keep the command name.
+      next.push({ name, description, input: null });
+      continue;
+    }
+    next.push({
+      name,
+      description,
+      input:
+        input && typeof (input as { hint?: unknown }).hint === 'string'
+          ? { hint: (input as { hint: string }).hint }
+          : null,
+    });
+  }
+  entry.availableCommands = next;
+  entry.commandsUpdatedAt = Date.now();
+  logger.info(
+    {
+      sessionId: entry.sessionId,
+      count: next.length,
+    },
+    '[acp] available_commands_update applied',
+  );
+}
+
 /**
  * Drive a prompt against the bound external agent and yield SSE-shaped
  * events. The route handler is responsible for the surrounding `meta` /
@@ -170,77 +415,18 @@ export async function* runAcpAgent(
   const canvasCwd = canvasId ? resolveCanvasRoot(canvasId) : undefined;
   const cwd = opts.cwd ?? '/';
 
-  // 1. Resolve the live agentlet connection.
-  const server = getAgentletServer();
-  if (!server) {
-    throw new Error(
-      'ACP server not mounted \u2014 set SEDIMENT_ENABLE_ACP=1 and restart',
-    );
-  }
-  const conn = server.getConnection(binding.agentletAgentId);
-  if (!conn || conn.status !== 'connected') {
-    throw new Error(
-      `External agent '${binding.alias}' (id=${binding.agentletAgentId}) is not connected`,
-    );
-  }
-
-  // 2. Get or create the per-thread ACP session.
-  let entry = acpSessionRegistry.get(threadId);
-  if (entry && entry.agentletAgentId !== binding.agentletAgentId) {
-    logger.info(
-      {
-        threadId,
-        oldAgentId: entry.agentletAgentId,
-        newAgentId: binding.agentletAgentId,
-      },
-      '[acp] thread binding changed \u2014 discarding stale session',
-    );
-    acpSessionRegistry.remove(threadId);
-    entry = undefined;
-  }
-  if (entry && entry.canvasId !== canvasId) {
-    logger.info(
-      {
-        threadId,
-        oldCanvasId: entry.canvasId,
-        newCanvasId: canvasId,
-      },
-      '[acp] thread canvas changed \u2014 discarding stale session (sandbox scope mismatch)',
-    );
-    acpSessionRegistry.remove(threadId);
-    entry = undefined;
-  }
-  if (entry && entry.client.isClosed) {
-    logger.info(
-      { threadId },
-      '[acp] stored session client was closed \u2014 reopening',
-    );
-    acpSessionRegistry.remove(threadId);
-    entry = undefined;
-  }
-  if (!entry) {
-    logger.info(
-      { threadId, canvasId, agentId: binding.agentletAgentId, cwd },
-      '[acp] opening new session for thread',
-    );
-    const client = new AcpAgentClient(conn, { canvasId, logger });
-    await client.initialize();
-    const sessionId = await client.newSession({ cwd });
-    entry = {
-      client,
-      sessionId,
-      agentletAgentId: binding.agentletAgentId,
-      canvasId,
-      cwd,
-      createdAt: Date.now(),
-    };
-    acpSessionRegistry.set(threadId, entry);
-  } else {
-    logger.debug(
-      { threadId, sessionId: entry.sessionId },
-      '[acp] reusing existing session for thread',
-    );
-  }
+  // 1-2. Ensure (open or reuse) the per-thread ACP session. The helper
+  //      handles connection lookup, stale-entry eviction, initialize +
+  //      session/new, and registers the `available_commands_update`
+  //      listener so slash-command pushes outside a turn don't get
+  //      silently dropped.
+  const entry = await ensureAcpSession({
+    threadId,
+    binding,
+    canvasId,
+    cwd,
+    logger,
+  });
 
   // 3. Preprocess the user message into a structured ExternalAgentPrompt
   //    BEFORE opening the queue, so the UI sees `prepared_prompt` strictly

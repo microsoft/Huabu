@@ -8,6 +8,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 
 import { Button } from '@/components/Common/Button';
 import { useAcpAgents } from '@/hooks/useAcpAgents';
+import { useAcpSlashCommands } from '@/hooks/useAcpSlashCommands';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import { useIntentStore } from '@/store/intentStore';
@@ -53,11 +54,25 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   // thread. New threads start in `{kind:'internal'}`.
   const agentBinding = useChatStore((state) => state.agentBinding);
   const setAgentBinding = useChatStore((state) => state.setAgentBinding);
+  const threadId = useChatStore((state) => state.threadId);
   const {
     agents: connectedAgents,
     refresh: refreshAcpAgents,
     loading: acpAgentsLoading,
   } = useAcpAgents();
+
+  // Slash commands for the currently-bound external agent. Empty array
+  // when the thread is internal or the agent has nothing to offer.
+  // `refreshIfStale` is plumbed into ChatInput so the typeahead can
+  // lazily resync the list on the rising edge of "user wants the
+  // slash menu" — covers the case where the agent pushes new
+  // commands mid-session (e.g. after auth completes).
+  const { commands: slashCommands, refreshIfStale: refreshSlashCommands } =
+    useAcpSlashCommands({
+      threadId,
+      binding: agentBinding,
+      canvasId,
+    });
 
   // Question thread replay mode
   const viewingQuestionThread = useChatStore((s) => s.viewingQuestionThread);
@@ -221,6 +236,8 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
             connectedAgents={connectedAgents}
             onRefreshAgents={refreshAcpAgents}
             refreshingAgents={acpAgentsLoading}
+            slashCommands={slashCommands}
+            onSlashMenuIntent={refreshSlashCommands}
             // 1 thread = 1 binding. Lock the picker the moment a thread
             // has any message OR a stream is in flight — the user must
             // start a new chat to pick a different agent.

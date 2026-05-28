@@ -58,6 +58,15 @@ import type { FastifyBaseLogger } from 'fastify';
  */
 export const INLINE_BODY_THRESHOLD_BYTES = 16 * 1024;
 
+/**
+ * Pattern for the slash-command short-circuit (see
+ * {@link prepareExternalAgentPrompt}). Matches `/<name>` followed by
+ * whitespace OR end of string. The leading character class is ASCII
+ * letters only so URLs / Windows paths pasted mid-thought don't trip
+ * it. Exported for tests.
+ */
+export const SLASH_COMMAND_RE = /^\/[a-zA-Z][\w-]*(?:\s|$)/;
+
 // ─── System prompt ────────────────────────────────────────────────────────
 
 /**
@@ -172,6 +181,34 @@ export async function prepareExternalAgentPrompt(
 ): Promise<PreparePromptResult> {
   const { rawText, agentAlias, canvasContext, canvasRoot, history, logger } =
     input;
+
+  // ── Slash-command short-circuit ────────────────────────────────────
+  //
+  // ACP agents recognise slash commands (`/<name> <args>`) natively
+  // inside `session/prompt` text. The intent-translator LLM rewrites
+  // would corrupt that wire format — e.g. wrap `/compact` in prose,
+  // strip the leading `/`, or attach noise. When the raw user input
+  // starts with a slash command we forward it verbatim and skip the
+  // LLM round-trip entirely. Cheaper AND correct.
+  //
+  // Match rule: starts with `/`, followed by an ASCII letter and zero
+  // or more word/dash chars, then whitespace OR end of input. Avoids
+  // false positives for forward-slashes inside URLs / paths the user
+  // might paste mid-sentence.
+  if (SLASH_COMMAND_RE.test(rawText.trim())) {
+    const trimmed = rawText.trim();
+    logger.debug(
+      { agentAlias, command: trimmed.split(/\s+/)[0] },
+      '[acp/preprocessor] slash command detected — forwarding verbatim',
+    );
+    return {
+      // Surface as a minimal ExternalAgentPrompt so the UI's
+      // PreparedPromptCard still has something to render. No
+      // attachments by design — slash commands speak for themselves.
+      prompt: { task: trimmed, attachments: [] },
+      serialized: trimmed,
+    };
+  }
 
   const selectedRefs = canvasContext?.selectedNodes
     ? flattenSelection(canvasContext.selectedNodes)

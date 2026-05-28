@@ -26,6 +26,7 @@
  */
 
 import type { AcpAgentClient } from './client.js';
+import type { AvailableCommand } from '@sediment/shared';
 
 /** A single live ACP session owned by one Sediment thread. */
 export interface AcpSessionEntry {
@@ -52,6 +53,22 @@ export interface AcpSessionEntry {
   cwd: string;
   /** Epoch ms at which this session was first created. */
   createdAt: number;
+  /**
+   * Latest snapshot of slash commands the agent advertised via
+   * `session/update.available_commands_update`. Initialised to `[]`
+   * because the push is best-effort: agents that never send the
+   * notification simply expose no slash commands to the UI.
+   *
+   * Per ACP v1 the notification carries the COMPLETE list (not a
+   * diff), so each arrival fully replaces this array.
+   */
+  availableCommands: AvailableCommand[];
+  /**
+   * Epoch ms of the most recent `available_commands_update` push.
+   * `0` means the agent has not yet pushed; the UI uses this to
+   * decide whether to do a delayed re-pull (catch late arrivals).
+   */
+  commandsUpdatedAt: number;
 }
 
 class AcpSessionRegistry {

@@ -8,6 +8,7 @@ import { fastify } from 'fastify';
 
 import {
   acpAgentsRoutes,
+  acpThreadsRoutes,
   mountAgentletServer,
 } from './modules/agent/acp/index.js';
 import agentRoutes from './modules/agent/agent.route.js';
@@ -126,5 +127,10 @@ app.register(workspaceRoutes, { prefix: '/api/workspace' });
 app.register(acpAgentsRoutes, { prefix: '/api/acp' });
 if (process.env.SEDIMENT_ENABLE_ACP === '1') {
   mountAgentletServer(app);
+  // Thread-scoped routes (session/commands) only make sense when the
+  // bridge is actually mounted — register them under the same flag so
+  // disabled deployments don't expose endpoints that would always
+  // 503.
+  app.register(acpThreadsRoutes, { prefix: '/api/acp' });
   app.log.info('ACP (external agent) bridge enabled');
 }

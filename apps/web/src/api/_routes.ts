@@ -68,4 +68,8 @@ export const routes = {
 
   // ── ACP (external agent bridge) ───────────────────────────────────
   acpAgents: '/acp/agents',
+  acpThreadSession: (threadId: string) =>
+    `/acp/threads/${enc(threadId)}/session`,
+  acpThreadCommands: (threadId: string) =>
+    `/acp/threads/${enc(threadId)}/commands`,
 } as const;
