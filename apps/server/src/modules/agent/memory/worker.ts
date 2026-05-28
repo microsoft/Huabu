@@ -21,21 +21,15 @@
  *     surfaced to the route. A failed pass leaves `lastAnalyzedAt`
  *     untouched — the next trigger will retry naturally.
  *
- * PR-C delegates the actual analysis to {@link runAnalysisPass},
- * which currently only logs ("dry-run"). PR-D wires it up to a
- * real LLM call via `runAgent({ scope: 'memory' })` and lets the
- * sub-agent invoke the writers from `./writers.ts`.
+ * The actual analysis lives in `./analyzer.ts` — that module owns
+ * context assembly + the `runAgent` call + tool-result aggregation.
  */
 
+import { runAnalysisPass } from './analyzer.js';
 import { markAnalyzed } from './trigger.js';
-import {
-  writeLongTerm,
-  writeSkill,
-  writeWorkingMemory,
-  type WriteResult,
-} from './writers.js';
 
 import type { MemoryLogger } from './index.js';
+import type { WriteResult } from './writers.js';
 
 /**
  * One promise per actively-running canvas analysis. Cleared from the
@@ -100,54 +94,6 @@ async function runOnce(canvasId: string, logger?: MemoryLogger): Promise<void> {
       }`,
     );
   }
-}
-
-/**
- * Memory analysis pass.
- *
- * **PR-C stub**: synthesises a small set of writer calls in dry-run
- * mode so the worker / writers / sandbox plumbing is exercised
- * end-to-end. Returns the writer results so {@link runOnce} can log
- * a summary.
- *
- * **PR-D** replaces this body with:
- *   1. Build the analyzer prompt (canvas snapshot + chat digest +
- *      recent events + current memory).
- *   2. Call `runAgent({ scope: 'memory', ... })` against a cheap
- *      model (`getMemoryModel`).
- *   3. Parse the JSON the sub-agent emits, dispatch to writers,
- *      collect results.
- */
-async function runAnalysisPass(
-  canvasId: string,
-  logger?: MemoryLogger,
-): Promise<WriteResult[]> {
-  logger?.info(
-    `[memory] (dry-run) analysing canvas ${canvasId}; PR-D will plug a real LLM here`,
-  );
-  // Exercise each writer so the sandbox + dry-run guards are covered
-  // by every run that reaches this branch. None of these touch disk
-  // (see writers.ts for the dry-run contract).
-  const results: WriteResult[] = [
-    writeLongTerm({
-      mode: 'patch',
-      diff: '+ prefers concise responses\n',
-      logger,
-    }),
-    writeWorkingMemory({
-      canvasId,
-      body: '(dry-run: synthesised working memory body)\n',
-      logger,
-    }),
-    // Intentional reject case so we can see the rejection path in logs.
-    writeSkill({
-      op: 'create',
-      id: 'dry-run-no-rationale',
-      body: '# should be rejected\n',
-      logger,
-    }),
-  ];
-  return results;
 }
 
 function summariseResults(

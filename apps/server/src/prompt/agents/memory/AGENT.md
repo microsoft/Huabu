@@ -2,7 +2,11 @@
 id: memory
 name: Memory Curator
 description: Background curator that distils the canvas + chat history into long-term, working, and skill memory. Never user-facing.
-tools: []
+tools:
+  - memory_longterm_write
+  - memory_shortterm_write
+  - memory_skill_write
+  - read
 skillScope: null
 runtime:
   maxIterations: 5

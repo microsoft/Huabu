@@ -474,6 +474,113 @@ export const lsTool: ToolDefinition = {
   parameters: lsParamsSchema,
 };
 
+// ==================== Memory Write Tools ====================
+//
+// Three write tools exposed exclusively to the `memory` sub-agent
+// (see `prompt/agents/memory/AGENT.md`). They never appear in the
+// chat / operate / sketch toolsets — long-term memory and skills are
+// workspace-scoped, not canvas-scoped, and accidentally exposing them
+// to a per-canvas agent would punch a sandbox hole.
+//
+// Every write goes through the per-tool sandbox in
+// `modules/agent/memory/sandbox.ts`; the handlers are pure dispatch.
+//
+// All three are marked `executionMode: 'sequential'`: the memory
+// sub-agent only ever issues a handful of write calls per pass, and
+// running them in declared order makes the worker's summary log
+// readable.
+
+export const memoryLongtermWriteParamsSchema = Type.Object({
+  mode: Type.Union([Type.Literal('patch'), Type.Literal('replace')], {
+    description:
+      'Use "patch" to merge new bullet-style lines into the existing body (dedup applies). "replace" is reserved and currently rejected — do not use.',
+  }),
+  diff: Type.String({
+    description:
+      'Bullet-style content to integrate. One observation per line; the writer auto-prefixes each with "- " and skips duplicates.',
+  }),
+});
+
+export const memoryLongtermWriteTool: ToolDefinition = {
+  name: 'memory_longterm_write',
+  label: 'Write long-term memory',
+  description:
+    'Patch the user-level long-term memory (`<workspace>/setting/.huabu.md`). Use only for durable, cross-canvas preferences / style / facts about the user. Keep each bullet ≤ 80 chars. The writer enforces a 4 KB / 80-line cap on the merged body and rejects oversized writes.',
+  parameters: memoryLongtermWriteParamsSchema,
+  executionMode: 'sequential',
+};
+
+export const memoryShorttermWriteParamsSchema = Type.Object({
+  body: Type.String({
+    description:
+      'Markdown body that replaces the current working memory wholesale. Treat as a one-paragraph briefing for the next agent landing on this canvas cold.',
+  }),
+});
+
+export const memoryShorttermWriteTool: ToolDefinition = {
+  name: 'memory_shortterm_write',
+  label: 'Write working memory',
+  description:
+    "Replace this canvas's working memory (`<canvasDir>/.memory/canvas.md`). Wholesale replacement, not a delta — write the *current state* of the canvas in ≤ 4 KB / 80 lines. The writer rejects oversized bodies.",
+  parameters: memoryShorttermWriteParamsSchema,
+  executionMode: 'sequential',
+};
+
+export const memorySkillWriteParamsSchema = Type.Object({
+  op: Type.Union([Type.Literal('create'), Type.Literal('update')], {
+    description:
+      'Use "update" whenever possible — reserve "create" for genuinely new reusable how-tos that no existing skill covers.',
+  }),
+  id: Type.String({
+    description:
+      'Stable skill id (becomes the directory name). Must match `[a-z0-9-]+` for sanity; the writer enforces FS safety.',
+  }),
+  title: Type.Optional(
+    Type.String({
+      description: 'Human-readable label. Defaults to `id` on create.',
+    }),
+  ),
+  description: Type.Optional(
+    Type.String({
+      description:
+        'Short catalogue blurb (one sentence). Required on create. On update, optional — when provided, overrides the existing description.',
+    }),
+  ),
+  appliesTo: Type.Optional(
+    Type.Array(
+      Type.Union([
+        Type.Literal('ask'),
+        Type.Literal('operate'),
+        Type.Literal('sketch'),
+        Type.Literal('external'),
+      ]),
+      {
+        description:
+          'Agent surfaces this skill should be advertised to. Required (non-empty) on create.',
+      },
+    ),
+  ),
+  body: Type.String({
+    description:
+      'Markdown body. On create: full body. On update: appended to the existing body as a dated `## Update — YYYY-MM-DD` section so prior prose is preserved.',
+  }),
+  rationale: Type.Optional(
+    Type.String({
+      description:
+        'Required on create (≥ 20 chars): why no existing skill can be updated to cover this case. Ignored on update.',
+    }),
+  ),
+});
+
+export const memorySkillWriteTool: ToolDefinition = {
+  name: 'memory_skill_write',
+  label: 'Write user skill',
+  description:
+    'Write a user-owned skill at `<workspace>/setting/skills/<id>/SKILL.md`. Strongly prefer `op: "update"` over `op: "create"` — new skills must be precious and reusable. The writer invalidates the skill cache on success so the next `read("skills/<id>/SKILL.md")` returns the new content immediately.',
+  parameters: memorySkillWriteParamsSchema,
+  executionMode: 'sequential',
+};
+
 // ==================== Tool Registry ====================
 
 /**
@@ -498,6 +605,9 @@ export const TOOL_REGISTRY: Readonly<Record<string, ToolDefinition>> =
         grepTool,
         findTool,
         lsTool,
+        memoryLongtermWriteTool,
+        memoryShorttermWriteTool,
+        memorySkillWriteTool,
       ].map((t) => [t.name, t] as const),
     ),
   );
