@@ -16,10 +16,6 @@ import {
 import archiver from 'archiver';
 import yauzl from 'yauzl';
 
-import {
-  bumpOpCounter,
-  enqueue as enqueueMemory,
-} from '../agent/memory/index.js';
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getPreprocessDispatcher } from '../preprocessing/index.js';
 import {
@@ -906,24 +902,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         });
       }
 
-      // Drive the memory worker's op counter. `bumpOpCounter` is a tiny
-      // read-modify-write of `<canvas>/.memory/state.json` and we want
-      // it on the request hot path so the trigger fires deterministically
-      // — but the worker itself (`enqueueMemory`) is fire-and-forget:
-      // it dispatches via `setImmediate` and never affects the response
-      // we send to the client. Errors are caught + logged so a corrupted
-      // state file cannot break event ingestion.
-      try {
-        const shouldRun = bumpOpCounter(canvasId, parsed.data.events.length);
-        if (shouldRun) {
-          enqueueMemory(canvasId, request.log);
-        }
-      } catch (error) {
-        request.log.warn(
-          { canvasId, error: toMessage(error) },
-          '[memory] bumpOpCounter failed (non-fatal)',
-        );
-      }
+      // Op-counter bookkeeping is centralised in the global Fastify
+      // hook — see `modules/agent/memory/op-counter-hook.ts`. It picks
+      // this endpoint up automatically and weights the bump by
+      // `parsed.data.events.length` so node-level granularity is
+      // preserved.
 
       return reply.send({ appended: parsed.data.events.length });
     },

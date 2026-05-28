@@ -449,7 +449,7 @@ function renderDebugHtml(): string {
       }
       const s = selected.state || { counter: 0, lastAnalyzedAt: null, lastSeenThreadCursor: null };
       const cards = [
-        { label: 'op counter', value: s.counter, sub: 'threshold ' + threshold },
+        { label: 'op counter', value: s.counter + ' / ' + threshold, sub: '1 op = 1 mutating request (events POST counts per action)' },
         { label: 'last analysis', value: fmtTs(s.lastAnalyzedAt), sub: s.lastAnalyzedAt ? new Date(s.lastAnalyzedAt).toLocaleString() : 'never' },
         { label: 'cursor (lastSeenThreadCursor)', value: fmtTs(s.lastSeenThreadCursor), sub: 'newer chat turns analyse next' },
         { label: 'recent events', value: selected.events.length, sub: 'rolling buffer' },
