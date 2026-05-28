@@ -1,10 +1,11 @@
 # Assistant Segments & ACP Rich Updates — Implementation Plan
 
-> Status: **PR-1 已交付**（infra-only：SDK 接入、`AssistantPart` 类型、3 个新 SSE event、translator 重写、sidecar 持久化与 wire 进 `runAcpAgent`。`ChatHistoryItem.assistant.content` 仍为 string 形态，PR-2 才切换 wire；UI 也未变更，所以现有 `CanvasCommandCard` / `WebSearchToolDisplay` / `MergedAgentToolRow` 渲染路径保持原状。下一步是 PR-2 切 wire + PR-3 UI。）
+> Status: **PR-1 已交付**（infra-only：SDK 接入、`AssistantPart` 类型、3 个新 SSE event、translator 重写、sidecar 持久化骨架与 wire 进 `runAcpAgent`）。`ChatHistoryItem.assistant.content` 仍为 string 形态；UI 也未变，现有 `CanvasCommandCard` / `WebSearchToolDisplay` / `MergedAgentToolRow` 渲染路径保持原状。
+>
+> **下一步 PR-2**（合并原 PR-2 + PR-3）：sidecar 关联键从 `messageIndex` 迁到 `(toolCallId | messageTimestamp)`、`ChatHistoryItem` parts 化、`buildHistoryItems` 翻译器、`useAgentStream` 聚合 + ACP 三事件 + internal adapter、新增 `ToolCallCard` / `PlanCard`、删 `role:'tool'` 顶层 message、用 SDK `ClientSideConnection` 替换手写 [`client.ts`](../apps/server/src/modules/agent/acp/client.ts)。一刀切到位，不留 wire 双发或 reverse-adapter 过渡态。
+>
 > Scope: 把 assistant 一次 turn 重构成「时序 parts 数组」，并把 ACP 的 `tool_call` / `tool_call_update` / `plan` 三类 update 接进 Sediment 的 wire 与 UI。
 > 关联：[`huabu-acp-client-plan.md`](./huabu-acp-client-plan.md) §2.3、[`agent-architecture.md`](./agent-architecture.md)
-
-> **PR-1 errata**：plan 各处提及"8 个内置工具"应为 **9 个**（漏写了 `inspect_edges`），代码侧 `INTERNAL_AGENT_TOOL_NAMES` 已按真实 registry 同步为 9-tuple，后续 PR 复制宿主表请认准代码。
 
 ---
 
@@ -70,7 +71,7 @@
 - 但 [client.ts L662](../apps/server/src/modules/agent/acp/client.ts#L662) 里处理 `session/request_permission` 时，`toolCall` 被声明为 `{ toolCallId?: unknown; title?: unknown; kind?: unknown }`——三个都 optional。这与 ACP spec（agentclientprotocol.com/protocol/schema）中 `ToolCall.kind` 为 optional 一致。
 - 代码中现有 TODO 注释：「_when we add UI gating, branch here on `toolCall.kind`_」也隐含 kind 下发不稳定。
 
-结论：PR-3 的 `ToolKindIcon` **必须实现 fallback 启发式**（按 `title` 前缀 / 关键字推断 kind），不能依赖 ACP server 传 `kind`。真实下发率较高到 metric 阶段再决定是否可以拍掉实现：PR-1 同步在 [translator.ts](../apps/server/src/modules/agent/acp/translator.ts) 加一行「`update.kind == null` 统计计数器 + info-level 日志」，PR-1 合入后收集 1–2 周生产数据再评估。
+结论：PR-2 的 `ToolKindIcon` **必须实现 fallback 启发式**（按 `title` 前缀 / 关键字推断 kind），不能依赖 ACP server 传 `kind`。fallback 当作永久兜底（Sediment 无生产 metric pipeline，无法回收下发率统计；与其留无人读的计数器，不如把启发式当成规范实现）。
 
 **Spike 后补充**：调研发现 ACP 官方 TS SDK 已发布在 `@agentclientprotocol/sdk@^0.22.1`（schema v0.13.2，peer-dep zod ^3 || ^4），同时提供 `types.gen.ts` 与 `zod.gen.ts`。决定 §2.2 直接 re-export SDK 类型而非手写 mirror，§2.3 的 zod 也大幅退化为「只写三个 wire 包装」。完整理由见新 §2.2 / §2.3。
 
@@ -83,10 +84,10 @@
 - [`agent-architecture.md`](./agent-architecture.md) 的 SSE 事件清单从 9 个扩到 12 个。
 - 这两份同步动作放进 PR-1 一起提交，避免其他 ACP PR 按旧映射接续出错。
 
-### Spike 后留下的 Open Questions（随 PR-1 解决）
+### Spike 后留下的设计结论
 
-1. **sidecar 与 Context 的 messageId 关联键**：pi-ai `Message` 没有 `id` 字段，只有 `timestamp: number`。Sidecar 应该用「`messages` 数组下标」还是「`timestamp + partIndex` 复合键」关联？下标依赖 pi-ai append-only——需要 PR-1 加 vitest 验证 pi-ai resume / streaming 不重排 `messages`。**推荐**：PR-1 默认用下标，同时在 sidecar 里冗余写 timestamp 作 sanity check，读时不匹配则 warn 并以下标为准。
-2. **两份文件的事务性**：`writeChat()` 与未来的 `writeChatParts()` 是两次独立 atomic write，中间崩溃会造成片面一致。**推荐**：不引入跨文件事务。Sidecar 丢失退化为「只剩 pi-ai 原生 ToolCall 信息」（UI 展示 kind=other / 无 plan），数据不会坏。但要在 buildHistoryItems 里容忘 sidecar 缺失。
+1. **sidecar 关联键 = `toolCallId`（tool extras）+ `messageTimestamp`（plan）**：放弃数组下标 `messageIndex`，因为它依赖 pi-ai append-only 这种隐式契约。`toolCallId` 在 ACP 协议层全局唯一；plan 在 turn 内最多 1 条（§7 #5），用 pi-ai message 自带的 `timestamp: number` 关联到所属 assistant message 即可。PR-1 已交付代码用的是 `messageIndex + partIndex:0` 形态，**PR-2 同步迁移到新键**（schemaVersion 升 2，读时兼容 v1）。
+2. **两份文件的事务性**：`writeChat()` 与 `writeChatParts()` 是两次独立 atomic write，中间崩溃会造成片面一致。**不引入跨文件事务**。Sidecar 丢失退化为「只剩 pi-ai 原生 ToolCall 信息」（UI 展示 kind=other / 无 plan），数据不会坏。`buildHistoryItems` 必须容忍 sidecar 缺失。
 3. **ACP 模式下 pi-ai Context 的角色变了**：ACP 外部 agent 不依赖 Sediment 调 pi-ai LLM，所以 ACP 模式下 `Context.messages` 实际上退化为「UI 历史快照」，不再是 LLM 上下文。这让 sidecar 方案在 ACP 模式下零风险（不需担心污染 LLM）。Internal agent 模式下 sidecar 大概率是空的（internal tool 不走 ACP 扩展字段，也没 plan）。两种模式都安全。
 
 ---
@@ -114,10 +115,10 @@ type AssistantPart =
       permission?: ToolPermissionState }
   | { kind: 'plan'; entries: AcpPlanEntry[] };
 
-/** Nominal union of Sediment 自家 internal agent 工具名（与 apps/server/.../tools/definitions.ts 对齐）。 */
+/** Nominal union of Sediment 自家 internal agent 工具名（与 apps/server/.../tools/definitions.ts 对齐；9-tuple）。 */
 type InternalAgentToolName =
   | 'read' | 'grep' | 'find' | 'ls'
-  | 'inspect_nodes' | 'get_canvas_outline'
+  | 'inspect_nodes' | 'inspect_edges' | 'get_canvas_outline'
   | 'canvas_commands' | 'web_search';
 
 type ToolPermissionState = {
@@ -201,7 +202,7 @@ export type {
 
 **SDK ≠ wire 协议版本**：SDK 自身版本会随 schema 演进 bump，但 wire `protocolVersion` 仍是 1。升 SDK 时读 CHANGELOG 即可，不会破 wire 兼容。
 
-**明确 out of scope**：SDK 提供 `ClientSideConnection` 完整 JSON-RPC 实现，可替换 Sediment 手写的 [client.ts](../apps/server/src/modules/agent/acp/client.ts)。但涉及 `fs/read_text_file` capability hook、permission auto-allow 等多处自定义路由，**非平凡改造**，留作独立 follow-up PR，不进本计划。
+**client.ts SDK 替换 = PR-2 必做项**：SDK 自带 `ClientSideConnection` 完整 JSON-RPC 实现。继续保留手写 `client.ts` ~600 行就意味着 SDK 一升级、schema 与手写 RPC 立刻 drift。`fs/read_text_file` capability hook 与 `session/request_permission` 自定义路由都是 `ClientSideConnection` 构造时的回调注入，**不是非平凡改造**。详见 §3.4。
 
 ### 2.3 Zod schema（PR-1 必交付）—— 大头复用 SDK
 
@@ -237,26 +238,19 @@ translator.ts 出口加一行 `ZAcpSessionUpdate.safeParse(update)`，同时覆�
 
 ### 2.4 `ChatHistoryItem` parts 化
 
+Wire 层 `AssistantHistoryPart` **与 §1 `AssistantPart` 结构完全一致**——直接复用同一个 type alias，避免双份定义漂移：
+
 ```ts
-export type AssistantHistoryPart =
-  | { kind: 'text'; text: string }
-  | { kind: 'thinking'; text: string }
-  | { kind: 'tool'; toolCallId: string; title: string;
-      toolKind: AcpToolKind; status: AcpToolCallStatus;
-      locations?: AcpToolCallLocation[]; content?: AcpToolCallContent[];
-      rawInput?: unknown; rawOutput?: unknown;
-      // 与 §1 AssistantPart 同步：internal agent 逃生门 + permission state
-      internalToolName?: InternalAgentToolName;
-      internalToolData?: unknown;
-      permission?: ToolPermissionState }
-  | { kind: 'plan'; entries: AcpPlanEntry[] };
+export type AssistantHistoryPart = AssistantPart; // 见 §1
 
 export type ChatHistoryItem =
   | { role: 'user'; content: string; attachments?; selectedNodeIds? }
   | { role: 'assistant'; parts: AssistantHistoryPart[] }   // 新
   | { role: 'status' | 'intent-select' | 'prepared-prompt'; ... };
-// 删掉 role: 'tool' 顶层项
+// 删掉 role: 'tool' 顶层项；删掉 assistant.content: string
 ```
+
+> PR-2 直接切，不做 `content: string` 与 `parts` 双发过渡：acp 分支尚未合 main，对外发布前没有「旧 web tab 连新 server」的用户。
 
 ---
 
@@ -279,7 +273,7 @@ case 'tool_call': {
   if (!parsed.success) { log.warn(...); return null; }
   return { type: 'tool_call', data: {
     toolCallId: parsed.data.toolCallId, title: parsed.data.title,
-    kind: parsed.data.kind ?? 'other',         // metric 计数器在这里 +1
+    kind: parsed.data.kind ?? 'other',         // ToolKindIcon 启发式兜底
     status: parsed.data.status ?? 'pending',
     rawInput: parsed.data.rawInput,
     locations: parsed.data.locations,
@@ -363,9 +357,18 @@ type ChatPartsSidecar = {
 
 - `internalToolName`：从同 turn pi-ai `ToolCall.name` 推回，对 nominal union（§7 #7）做白名单校验，不在表内则丢弃（避免外部 ACP tool 名字 leak 进 nominal union 触发 UI 误分派）；
 - `internalToolData`：`JSON.parse(toolResultMessage.content[0].text)`，parse 失败则原字符串落到 `rawOutput`；
-- `permission`：从 sidecar `tool_acp_ext.extension.permission` 覆盖，不存在则不写。
+- `permission`：从 sidecar `toolExtras[id].permission` 覆盖，不存在则不写。
 
 不再产出顶层 `role: 'tool'` ChatHistoryItem。
+
+### 3.4 client.ts SDK 化（PR-2 一并完成）
+
+PR-1 已引入 `@agentclientprotocol/sdk@^0.22.1`。继续保留 ~600 行手写 JSON-RPC 在 [client.ts](../apps/server/src/modules/agent/acp/client.ts) 是技术债——SDK 一升级，wire 方法名 / payload shape 立刻与手写 RPC drift。**PR-2 用 SDK `ClientSideConnection` 完整替换**，保留两个自定义点：
+
+- `fs/read_text_file` capability hook：SDK 构造时传入 client capabilities + per-method handler（现有 [client.ts](../apps/server/src/modules/agent/acp/client.ts) 里那些 switch-case 直接迁进 handler map）。
+- `session/request_permission` auto-allow：同上，handler 内调现有 `pickPermissionOption(...)`；PR-3 加 SSE/HTTP 回路时换接口。
+
+收益：~600 行 → ~150 行；方法名、payload zod 校验、错误类型、`AGENT_METHODS / CLIENT_METHODS` 常量全点 SDK。只要 SDK peer-dep 不变 (zod ^3||^4)，升级就是改 caret。
 
 ---
 
@@ -418,7 +421,7 @@ ctx.planSegmentIdx?: number
   - **store 操作**：`CanvasCommandCard` 现在通过 `useChatStore.updateMessage` 改 `m.toolResponse.data.canvasChanges` 的路径，改为定位到 `m.parts[i].internalToolData.canvasChanges` —— chatStore 加新 action `updateAssistantToolPart(messageId, toolCallId, updater)`，PR-3 内同步完成。
 
 - **`ToolCallCard`**（`apps/web/src/components/Messages/ToolCallCard.tsx`，新增，**仅服务无 `internalToolName` 的纯 ACP tool**）
-  - 头部：`ToolKindIcon` 按 `toolKind` 取图标 + `title` + 状态指示（pending/灰、in_progress/spinner + `text-info`、completed/`text-success`、failed/`text-danger`）+ 右侧 `locations[0].path:line`（多个显示 `+N`）+ `permission.outcome?.type === 'allowed' && optionId === 'auto'` 时 `text-fg-subtle` 的 "auto-allowed" 文本徽章（供 metric 评估，PR-4 真 UI 之前临时显示）。
+  - 头部：`ToolKindIcon` 按 `toolKind` 取图标 + `title` + 状态指示（pending/灰、in_progress/spinner + `text-info`、completed/`text-success`、failed/`text-danger`）+ 右侧 `locations[0].path:line`（多个显示 `+N`）。PR-1/2 期间 server auto-allow，不显示额外徽章；PR-3 上线后锁图标位置展开 allow/deny 控件。
   - 默认 in_progress 展开、completed 折叠、failed 展开。
   - body 按 `ToolCallContent.type` 分派：
     - `content + text` → 轻量 markdown（不走 Milkdown）；
@@ -464,7 +467,7 @@ groups.map((g, i) => {
     case 'web_search':
       return g.parts.map((p) => <WebSearchToolDisplay key={p.toolCallId} part={p} />);
     case 'read': case 'grep': case 'find': case 'ls':
-    case 'inspect_nodes': case 'get_canvas_outline':
+    case 'inspect_nodes': case 'inspect_edges': case 'get_canvas_outline':
       return <MergedAgentToolRow key={i} tool={g.internalToolName} parts={g.parts} />;
     case undefined:
       // 纯 ACP tool（外部 agent）→ 通用 ToolCallCard
@@ -480,6 +483,7 @@ groups.map((g, i) => {
 - `MessageList` 的 `role: 'tool'` 分支删除；分组改由 `AIMessage` 内 `groupAdjacentToolParts` 完成（§4.4）。
 - `useSketchClusterMessages`、`useChatHistory` 改为产出 parts。
 - `assistantMessageText` 继续只取 `kind:'text'` 段，**仅**用于 copy / "add as note"——历史序列化走 `parts` 本身，不再借这个函数。两个使用场景都明确只要纯文本：copy 不应含 thinking / tool output / plan；note 是把 AI 的最终回答作为知识沉淀，过程产物不该进 note。
+  - **plan 另走独立按钮**：`PlanCard` 头部加 "Copy plan" 按钮（复制为 markdown checklist）。这样 plan 不会被 `assistantMessageText` 沉默丢弃又不污染整条消息 copy 路径。
 
 **不删的（容易误删，明列）**：
 
@@ -491,23 +495,30 @@ groups.map((g, i) => {
 
 ## 5. PR 拆分与落地顺序
 
-| PR       | 内容                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | 可独立合入             |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
-| **PR-1** | **引入 `@agentclientprotocol/sdk@^0.22.1`** 到 `packages/shared`，§2.2 改为 SDK re-export（type 与 zod 分文件，permission 类型一并 re-export 备 PR-4 用）+ web bundle 卫生 vitest；shared `AssistantPart` / `AssistantHistoryPart` 的 `kind:'tool'` variant 加 `internalToolName?: InternalAgentToolName` + `internalToolData?: unknown` + `permission?: ToolPermissionState` 三字段（§1/§2.4）；shared 新增三个 `AgentStreamEvent` variant 的 wire 包装 schema（~30 行，§2.3）；translator 三个 case 在出口 `ZAcpSessionUpdate.safeParse`，同时加 `kind == null` 计数器 + info 日志供后续 metric 评估；translator 写 `tool` part 时把 ACP auto-allow 的 permission outcome 预填进 part（§7 #6）。**Sidecar 持久化（新 §3.2）**：`apps/server/src/modules/agent/store/` 下新增 `chat-parts-store.ts`，ACP `tool_call_update` 的扩展字段 + `plan` + `permission` 写入 `<canvasId>/.history/chat/<threadId>.parts.json`；pi-ai Context 只写 pi-ai 原生 union 允许的 `ToolCall` 三字段；`internalToolData` **不入 sidecar**（从 pi-ai `ToolResultMessage` 重建，§3.2/§3.3）。**vitest 必覆盖**：（1）pi-ai resume / streaming 不重排 `messages` 数组，`messageIndex` 稳定；（2）sidecar / Context 二者崩溃后退化路径（3 种场景：sidecar 缺失、Context 缺失、messageIndex 不匹配）；（3）translator + schema 单测；（4）web bundle 不含 SDK runtime；（5）translator 对 auto-allow permission 的预填正确写入 sidecar、buildHistoryItems 重建后 `permission.outcome` 完整；（6）`internalToolName` / `internalToolData` 经 buildHistoryItems 重建后等于原 `ToolResponse.data`（含 `canvas_commands` 大 payload 用例）。**同时提交 S3 文档同步**：huabu-acp-client-plan §2.3 表格 + agent-architecture 事件清单。 | ✅                     |
-| **PR-2** | `ChatHistoryItem` parts 化（§2.4）+ `buildHistoryItems` 翻译器 + pi-ai plan block 持久化补齐。**`useChatHistory` 走 reverse-adapter**：wire 已是 parts，但 hook 内部把 parts 拆回 `role:'tool'` 顶层消息塞进 store，保持 client store schema 与 PR-3 之前完全一致；PR-3 时连同 adapter 一起撤掉，避免 PR-2 阶段「live = 顶层 tool / 历史 = parts」的形状漂移。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | ✅                     |
-| **PR-3** | `useAgentStream` 把 ACP 三类事件 + internal `tool_start/tool_result` 统一聚合进 `assistant.parts`；删 `role:'tool'` 顶层 message；新增 `ToolCallCard` + `PlanCard`；`MessageList` 简化。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | ✅（合并后改动面最大） |
-| **PR-4** | `locations` 点击 follow-along；**`session/request_permission` 全套**：新增 SSE event `permission_request`（server→web）+ HTTP endpoint `POST /agent/permission/:requestId/respond`（web→server）；[client.ts](../apps/server/src/modules/agent/acp/client.ts) 的 auto-allow 改为「先 SSE 请 web 决定 → 超时回退 auto-allow」；UI 在 `ToolCallCard` / `CanvasCommandCard` 头部 pending 锁图标处展开 allow/deny 控件；persist outcome 进 PR-1 已开槽的 `permission.outcome` 字段（**无 wire/sidecar schema 变更**）。与 ACP Phase 3 PR I 合并。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | ✅                     |
-| **PR-5** | rich content：Monaco DiffEditor 接入；`resource_link` 与 canvas 节点 binding；terminal embed（若开启 capability）。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | ✅                     |
+| PR       | 内容                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | 状态      |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------- |
+| **PR-1** | **Infra-only（已合 `acp`，commit `bf5adcbc`）**：引入 `@agentclientprotocol/sdk@^0.22.1` 到 `packages/shared`（type/zod 分文件，permission 类型一并 re-export 备 PR-3 用）；shared 新增 `AssistantPart` / `AssistantHistoryPart` 含 `internalToolName?` / `internalToolData?` / `permission?` 三字段（§1/§2.4）；shared 加 3 个 `AgentStreamEvent` wire 包装 schema（~30 行，§2.3）；translator 三个 case 在出口 `ZAcpSessionUpdate.safeParse`；translator 写 `tool` part 时把 ACP auto-allow 的 permission outcome 预填进 part（§7 #6）。Sidecar 持久化（v1 schema，PR-2 升 v2）：`apps/server/src/modules/agent/store/chat-parts-store.ts`，写 `<canvasId>/.history/chat/<threadId>.parts.json`。**vitest**：translator + schema 单测；chat-parts-store 读写 + 退化路径；web bundle 不含 SDK runtime。同步 docs：huabu-acp-client-plan §2.3 表格 + agent-architecture 事件清单 + CHANGELOG。                                                                                                                                                                                                                                 | ✅ 已交付 |
+| **PR-2** | **合并原 PR-2 + PR-3 + client.ts SDK 化**。一刀切到位，不留 wire 双发 / reverse-adapter 过渡态。范围：(a) `ChatHistoryItem.assistant` 切 parts（删 `content: string`，删 `role:'tool'` 顶层项，§2.4）；(b) `buildHistoryItems` 重写为 parts 翻译器（§3.3），按 `toolCallId` 回填 `internalToolData` / `internalToolName`；(c) sidecar 升 v2（`toolExtras` + `planByMessageTimestamp`，§3.2），读时兼容 v1，写时只输出 v2；(d) `useAgentStream` 聚合 ACP 三事件 + internal `tool_start/tool_result` adapter（§4.2）；(e) `useSketchClusterMessages` / `useChatHistory` 产出 parts，store 加 `updateAssistantToolPart(messageId, toolCallId, updater)` action；(f) 新增 `ToolCallCard` + `PlanCard` + `ToolKindIcon`（§4.3，含 fallback 启发式）；(g) `AIMessage` 按 `groupAdjacentToolParts` 分派；旧 `CanvasCommandCard` / `WebSearchToolDisplay` / `MergedAgentToolRow` 改 props 签名但保留 body；(h) 删 `MessageList` 的 `role:'tool'` 分支 + `ToolMessageGroup` wrapper；(i) **client.ts 用 SDK `ClientSideConnection` 替换**（§3.4），保留 `fs/read_text_file` capability hook 与 `pickPermissionOption` auto-allow 注入。 | 🔧 待做   |
+| **PR-3** | **`session/request_permission` 全套** + `locations` 点击 follow-along。新增 SSE event `permission_request`（server→web，schema 在 `packages/shared/src/types/api/permission.ts` 用 zod 定义，含 `{ requestId, sessionId, toolCallId, options, toolCall }`）+ HTTP endpoint `POST /agent/permission/:requestId/respond`（req `{ optionId: string \| null, outcome: 'allowed' \| 'denied' \| 'cancelled' }`）；client.ts 的 auto-allow handler 改为「SSE 请 web → N 秒（默认 30s，env `ACP_PERMISSION_TIMEOUT_MS` 覆盖）超时回退 `pickPermissionOption`」；UI 在 `ToolCallCard` / `CanvasCommandCard` 头部 pending 锁图标处展开 allow/deny 控件；outcome 写回 PR-1 已开槽的 `permission.outcome` 字段（无 wire / sidecar schema 变更）。`locations` 点击与 [agentlet](../external/agentlet/) follow-along 联动（独立子任务，最后单独 commit 便于回退）。与 ACP Phase 3 PR I 合并。                                                                                                                                                                                                                                               | 🔧 待做   |
+| **PR-4** | Rich content：Monaco DiffEditor 接入；`resource_link` 与 canvas 节点 binding；terminal embed（若开启 capability）；artifact ref 化（参 §8 风险段「Context.messages 体积」后续方案）。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | 🔧 待做   |
 
 > PR-1 / PR-2 合入后，**当前 thinking PR 的 #3「持久化 thinking」自然解决**——server 端本来就存了，只是 wire 不再拍平。
+>
+> **PR-2 合并原 PR-2 + PR-3 的理由**：分两个 PR 会强迫 server 做 `content: string` + `parts` 双发，client 端在 `useChatHistory` 做 reverse-adapter 把 parts 拆回 `role:'tool'` 顶层 message —— 这些都是纯过渡代码，下个 PR 一上线就删。一次切完反而减小总改动面。
 
 ---
 
 ## 6. 测试策略
 
-- **PR-1**：translator 单测 — mock 各种 `SessionUpdate` payload → 期望 `AgentStreamEvent`；覆盖 `tool_call_update` 的"缺省字段不变 / `content` 整体替换"两条规则。
-- **PR-2**：`buildHistoryItems` 单测 — 构造含 thinking / toolCall / plan blocks 的 pi-ai Context → 期望 parts 顺序无损。
-- **PR-3**：`useAgentStream` 聚合测试 — 顺序灌入事件序列（含乱序 `tool_call_update`、同 turn 多个 `plan`、internal `tool_start/tool_result`、adapter 写入 `internalToolName` / `internalToolData`）→ 检查最终 `assistant.parts` 形状；`groupAdjacentToolParts` 4 个典型序列单测（§4.4）；snapshot 覆盖 `AIMessage` 内 ACP-only `ToolCallCard` / internal `CanvasCommandCard` / `MergedAgentToolRow` / mixed sequence 四条分派路径。
+- **PR-1（已交付，供参考）**：translator 单测（各种 `SessionUpdate` payload → `AgentStreamEvent`，覆盖 `tool_call_update` 的「缺省字段不变 / `content` 整体替换」两条规则 + safeParse 成功/失败路径 + auto-allow permission 预填）；chat-parts-store 读写 + 退化（sidecar 缺失 / JSON 损坏 / 旧线程无 sidecar）；web bundle 不含 SDK runtime。
+- **PR-2**：
+  - `buildHistoryItems` 单测：构造含 thinking / toolCall / plan blocks 的 pi-ai Context + sidecar v2 → 期望 parts 顺序无损 + `toolCallId` 回填 `internalToolData` / `internalToolName`（含 `canvas_commands` 大 payload）。
+  - **sidecar v1→v2 迁移**：预写一份 v1 schema 文件 → 读取后重写为 v2，期望 `messageIndex+partIndex` 映射到 `toolCallId`（依 toolCallId 是否能从 pi-ai Context 恢复，不能恢复的 entry 静默丢弃）。
+  - `useAgentStream` 聚合测试：顺序灌入事件序列（含乱序 `tool_call_update`、同 turn 多条 `plan`、internal `tool_start/tool_result` 经 adapter 写入 `internalToolName` / `internalToolData`）→ 检查最终 `assistant.parts` 形状。
+  - `groupAdjacentToolParts` 4 个典型序列单测（§4.4）；snapshot 覆盖 `AIMessage` 内 ACP-only `ToolCallCard` / internal `CanvasCommandCard` / `MergedAgentToolRow` / mixed sequence 四条分派路径。
+  - **client.ts SDK swap 回归**：fixture 脱机跑一个 `read` + `edit` + `plan` turn，期望 SSE 事件序列与 SDK 化前逐条 byte-equal（除了 messageId / timestamp）。
+- **PR-3**：SSE `permission_request` 事件 ordering + HTTP endpoint 合法/非法 request 处理；client.ts handler 超时回退 `pickPermissionOption` 路径；deny outcome 写回 sidecar `permission.outcome.type === 'denied'`；UI snapshot（pending / allowed / denied / cancelled 四态）。
+- **PR-4**：Monaco DiffEditor 渲染不犯 React 重复创建；`resource_link` 点击定位到 canvas 节点；artifact `bodyRef` lazy fetch 状态机。
 - 浏览器手测：claude-code agent 真实跑一次 read+edit+plan turn，确认 follow-along / 折叠 / 进度条无回退。
 
 ---
@@ -518,7 +529,7 @@ groups.map((g, i) => {
    - 归属清晰、与 ACP 时序一致；不作顶层悬浮。
 2. ~~**是否把 internal `tool_start/tool_result` 一并迁到 `kind:'tool'` segment？**~~ **wire 双轨 / client 单轨 via adapter。**
    - 结论：wire 上保留旧 `tool_start` / `tool_result` 事件不动，server 侧 internal agent 不改；client 在 `useAgentStream` 加 ~30 行 adapter 把旧事件折叠进同一套 `toolSegmentIndex` 聚合管线（详见 §4.2 表格下方说明）。
-   - 好处：PR-3 不触碰 internal agent 的 server 实现，回退面小；store 仍然单一真相。
+   - 好处：PR-2 不触碰 internal agent 的 server 实现，回退面小；store 仍然单一真相。
    - 后续：等 internal agent 也迁到 `tool_call` / `tool_call_update` 后，统一删 adapter + 旧事件常量。
 3. **`terminal` content 走占位渲染。**
    - v1 不开 terminal capability，但 `AcpToolCallContent` 保留 `terminal` type；渲染占位文案建议「_Terminal embedding disabled in v1_」以阐明是产品限制、不是 bug。
@@ -526,13 +537,13 @@ groups.map((g, i) => {
    - 该事件使命是推送 slash command 元数据，与 assistant.parts 模型无关；server 侧已在 [`apps/server/src/modules/agent/acp/service.ts`](../apps/server/src/modules/agent/acp/service.ts) 落到 session-registry 的 `availableCommands`，有完整单测 + CHANGELOG 记录。
 5. **`plan` 多次快照不保留历史，就地替换。**
    - turn 内永远只有 0 或 1 条 plan segment（**scope = turn-scoped**；ACP spec 不强制 scope，session-scoped 是已知备选，若未来产品定位偏长任务可改为 thread-scoped `Map<threadId, planEntries>`）。未来若有「plan 演化动画」需求，另开新的 `kind:'plan_snapshot'` part，**不仅仅是「允许多条 plan 共存」**这种模糊语义——避免后续语义滑坡。
-6. **`session/request_permission`：本计划只做数据模型预留，不做 UI。**
-   - PR-1 在 `AssistantPart.kind:'tool'` 与 sidecar `tool_acp_ext.extension` 加 `permission?: ToolPermissionState` 字段，SDK 的 `PermissionOption` / `PermissionOptionKind` / `RequestPermissionRequest` / `RequestPermissionResponse` 一并 re-export 备用（§2.2）。
-   - PR-1/2/3 期间 server 端 [client.ts](../apps/server/src/modules/agent/acp/client.ts) 维持 **auto-allow**（现状由 `pickPermissionOption` 决定 optionId），translator 写 `tool` part 时把 `permission.outcome` 预填为 `{ type: 'allowed', optionId: <pickPermissionOption 结果>, resolvedAt = requestedAt }`，UI 显示 "auto-allowed" 徽章供 metric 评估。
-   - PR-4 才加 **wire event `permission_request`**（server→web）+ **HTTP endpoint `POST /agent/permission/:requestId/respond`**（web→server），把 client.ts 的 auto-allow 改为「先 SSE 请 web 决定 → 超时回退 auto-allow」。届时 part 字段 / sidecar schema 不动，`outcome` 从「PR-1 默认填 allowed」变成「PR-4 真实 user choice」。
-   - 这样**接口一次到位**，PR-4 仅加事件回路与 UI 控件，零 schema 漂移。
+6. **`session/request_permission`：本计划分 PR-1 预留、PR-3 接入 UI 回路。**
+   - PR-1 在 `AssistantPart.kind:'tool'` 与 sidecar `toolExtras[id]` 加 `permission?: ToolPermissionState` 字段，SDK 的 `PermissionOption` / `PermissionOptionKind` / `RequestPermissionRequest` / `RequestPermissionResponse` 一并 re-export 备用（§2.2）。
+   - PR-1/2 期间 server 端 [client.ts](../apps/server/src/modules/agent/acp/client.ts) 维持 **auto-allow**（现状由 `pickPermissionOption` 决定 optionId），translator 写 `tool` part 时把 `permission.outcome` 预填为 `{ type: 'allowed', optionId: <pickPermissionOption 结果>, resolvedAt = requestedAt }`。UI 不额外标记（看不出与手动批准区别，避免临时 UI 以后要拆）。
+   - PR-3 才加 **wire event `permission_request`**（server→web）+ **HTTP endpoint `POST /agent/permission/:requestId/respond`**（web→server），把 client.ts 的 auto-allow 改为「先 SSE 请 web 决定 → 超时回退 auto-allow」。届时 part 字段 / sidecar schema 不动，`outcome` 从「PR-1 默认填 allowed」变成「PR-3 真实 user choice」。
+   - 这样**接口一次到位**，PR-3 仅加事件回路与 UI 控件，零 schema 漂移。
 7. **`internalToolName` 是 Sediment 自家 nominal union（不暴露给 ACP 协议层）。**
-   - union 显式列出当前 8 个工具（与 [tools/definitions.ts](../apps/server/src/modules/agent/tools/definitions.ts) 对齐：`read` / `grep` / `find` / `ls` / `inspect_nodes` / `get_canvas_outline` / `canvas_commands` / `web_search`）；扩工具时同步加 union 成员 + §4.4 UI 分派 case。
+   - union 显式列出当前 9 个工具（与 [tools/definitions.ts](../apps/server/src/modules/agent/tools/definitions.ts) 对齐：`read` / `grep` / `find` / `ls` / `inspect_nodes` / `inspect_edges` / `get_canvas_outline` / `canvas_commands` / `web_search`）；扩工具时同步加 union 成员 + §4.4 UI 分派 case。
    - ACP 模式下 `internalToolName` 恒为 undefined，wire 上 ACP server 不会看到这些字段。
    - 不用 `string` 是为了让 §4.4 的 `switch (name)` 是穷举式 narrow，新工具上线 TS 编译器会主动报漏分派——避免 UI 静默回退到 fallback `ToolCallCard` 且无人发现。
 
@@ -541,13 +552,11 @@ groups.map((g, i) => {
 ## 8. 已知风险
 
 - **Sidecar 与 pi-ai Context 的事务一致性**：两个 JSON 文件是两次独立 atomic write，中间崩溃会造成片面一致（sidecar 有但 Context 旧、或反之）。**不引入跨文件事务**；sidecar 丢失退化为「只剩基础 ToolCall / 无 plan」，UI 能展示不报错。`buildHistoryItems` 必须容忘 sidecar 缺失且加单测。
-- **`messageIndex` 依赖 pi-ai append-only**：若 pi-ai 未来某个版本在中间重排 / 去重 / splice `Context.messages`，sidecar 关联全部错位。PR-1 必加 vitest 实际跳动 pi-ai 现有版本验证；pi-ai bump 时需重跑该测试。Sidecar 里冗余写 `messageTimestamps` 作 sanity check，读时不一致则 warn。
-- **`role:'tool'` 顶层消息删除**：需要扫一遍所有引用（`useSketchClusterMessages` / 任何 store selectors），避免漏改。PR-3 前可先以 grep `role.*'tool'` 起一份变更清单。
-- **wire 不向后兼容**：PR-2 一旦合入，旧版客户端连新服务端会拿不到 assistant.content 字符串。**推荐双发过渡**：PR-2 server 同时返回 `content: string`（legacy）和 `parts`（new），client 优先 parts；下个 minor 刪 content。避免「用户旧 web tab 连新 server 立刻白屏」。
+- **`role:'tool'` 顶层消息删除**：需要扫一遍所有引用（`useSketchClusterMessages` / 任何 store selectors），避免漏改。PR-2 前先以 grep `role.*'tool'` 起一份变更清单。
 - **旧 `chat/<threadId>.json` 反序列化容忘**：老 thread 没有 sidecar，读时需按「缺失 = 空」处理，不要报错。老 thread 也不会有 plan 或 ACP 扩展字段重现——不提供迷踪脚本，避免用户误期待。
 - **evals / agentlet 影响面**：[evals/trace.ts](../apps/server/evals/trace.ts) import pi-ai `Context`——`Context` 形状本轮不变，但 `buildHistoryItems` 输出形状变了，需检查 evals fixture。[external/agentlet/](../external/agentlet/) 若消费 `@sediment/shared` 的 wire 类型需同步发版。
 - **`@agentclientprotocol/sdk` 升级管理**：SDK 版本与 ACP wire 协议版本是两套独立 SemVer（详见 [SDK README](https://github.com/agentclientprotocol/typescript-sdk#versioning)）。bump SDK 时必读 CHANGELOG —— 重点看 `types.gen.ts` 的 ContentBlock / ToolCallContent variants 增减、`SessionUpdate` 新成员。建议固定到 caret `^0.22.x`、在 renovate 配置里把该包标记为 minor-only 自动合并、major 手动审。配套加一条 vitest 守门：`expect(Object.keys(zSessionUpdate.options).length).toBe(N)` —— bump 后若多出 update 类型，强制评估是否要在 translator 加 case。
 - **Context.messages 体积**：tool content 含 image base64 / diff 大文件时，单条 turn 存档会膨胀（这里指 sidecar，不是 pi-ai Context——后者原样干净）。
-  - **v1（PR-2/PR-3）**：仅在 translator 入口加一条 per-event 硬上限（建议 1MB），超限就把 `content` 字段换成 `[{type:'content', content:{type:'text', text:'[content too large, omitted]'}}]` 占位，`status` / `locations` / `title` 照常推。零类型改动、零迁移成本。
-  - **后续（PR-5）**：真正的 artifact ref 化与 Monaco DiffEditor / `resource_link` ↔ canvas binding 一并做，复用 `apps/server/src/modules/storage/` 既有机制——`ToolCallContent` 增加可选 `bodyRef?: string`，UI 按需 lazy fetch。届时只需把 v1 的"丢弃"分支换成"转存"，类型 / UI / 聚合逻辑都不动。
+  - **v1（PR-2）**：仅在 translator 入口加一条 per-event 硬上限（建议 1MB），超限就把 `content` 字段换成 `[{type:'content', content:{type:'text', text:'[content too large, omitted]'}}]` 占位，`status` / `locations` / `title` 照常推。零类型改动、零迁移成本。
+  - **后续（PR-4）**：真正的 artifact ref 化与 Monaco DiffEditor / `resource_link` ↔ canvas binding 一并做，复用 `apps/server/src/modules/storage/` 既有机制——`ToolCallContent` 增加可选 `bodyRef?: string`，UI 按需 lazy fetch。届时只需把 v1 的"丢弃"分支换成"转存"，类型 / UI / 聚合逻辑都不动。
   - **LLM 上下文层独立处理**：`buildHistoryItems` → provider 之间的窗口策略（近 K 轮全文 / 更早只留摘要 / image strip 成占位）不依赖 artifact ref，可独立演进。
