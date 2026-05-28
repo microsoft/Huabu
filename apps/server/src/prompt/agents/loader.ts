@@ -99,7 +99,15 @@ export interface LoadedAgent {
   id: AgentId;
   name: string;
   description: string;
-  /** System prompt with template variables expanded. */
+  /**
+   * System prompt with template variables expanded.
+   *
+   * Re-rendered on every {@link loadAgent} call so the
+   * `{{skillCatalogue}}` block reflects current user-side skills.
+   * The expensive bit (parsing AGENT.md + validating frontmatter) is
+   * still cached — only the cheap mustache pass against the live
+   * catalogue runs each call.
+   */
   systemPrompt: string;
   /** Tool names declared in frontmatter, in declaration order. */
   toolNames: string[];
@@ -323,8 +331,28 @@ export function renderAgentTemplate(
 }
 
 // ─── Loader ─────────────────────────────────────────────────────────────────
+//
+// Parsing is done once per process (AGENT.md does not change at
+// runtime); rendering happens on every `loadAgent()` call so the
+// `{{skillCatalogue}}` substitution picks up freshly written user
+// skills. The skill loader already implements a per-workspace,
+// mtime-aware cache with a 2 s TTL and an `invalidateUserSkill(id)`
+// hook — see `prompt/skills/loader.ts` — so re-rendering here
+// transparently inherits that freshness contract.
 
-function loadAgentFile(id: AgentId): LoadedAgent {
+/**
+ * Cheap, parsed shell of an AGENT.md. Held in `_cache` and consulted
+ * on every `loadAgent()`; the system prompt body is re-rendered
+ * against the live skill catalogue on each access.
+ */
+interface ParsedAgent {
+  fm: AgentFrontmatter;
+  /** Markdown body with leading whitespace stripped, un-rendered. */
+  body: string;
+  sourcePath: string;
+}
+
+function parseAgentFile(id: AgentId): ParsedAgent {
   const sourcePath = path.join(AGENTS_DIR, id, 'AGENT.md');
   if (!existsSync(sourcePath)) {
     throw new Error(`[agent-loader] AGENT.md not found at ${sourcePath}`);
@@ -337,50 +365,68 @@ function loadAgentFile(id: AgentId): LoadedAgent {
     );
   }
   const fm = validateFrontmatter(meta, sourcePath, id);
+  return { fm, body: content.trimStart(), sourcePath };
+}
 
-  const skillCatalogue = fm.skillScope ? getSkillCatalogue(fm.skillScope) : '';
-  const systemPrompt = renderTemplate(content.trimStart(), {
+/** Render a parsed agent into a `LoadedAgent` with a fresh catalogue. */
+function renderLoadedAgent(parsed: ParsedAgent): LoadedAgent {
+  const skillCatalogue = parsed.fm.skillScope
+    ? getSkillCatalogue(parsed.fm.skillScope)
+    : '';
+  const systemPrompt = renderTemplate(parsed.body, {
     skillCatalogue,
   }).trimEnd();
-
   return {
-    id: fm.id,
-    name: fm.name,
-    description: fm.description,
+    id: parsed.fm.id,
+    name: parsed.fm.name,
+    description: parsed.fm.description,
     systemPrompt,
-    toolNames: fm.tools,
-    runtime: fm.runtime ?? {},
-    messageTemplates: fm.messageTemplates ?? {},
-    sourcePath,
+    toolNames: parsed.fm.tools,
+    runtime: parsed.fm.runtime ?? {},
+    messageTemplates: parsed.fm.messageTemplates ?? {},
+    sourcePath: parsed.sourcePath,
   };
 }
 
 // ─── Cache ──────────────────────────────────────────────────────────────────
+//
+// Holds the *parsed* AGENT.md shell (frontmatter + raw body). The
+// system prompt is rendered on top of this shell on every
+// `loadAgent()` call so the catalogue stays in sync with the live
+// user-skill set.
 
-let _cache: Map<AgentId, LoadedAgent> | null = null;
+let _cache: Map<AgentId, ParsedAgent> | null = null;
 
-function ensureCache(): Map<AgentId, LoadedAgent> {
+function ensureCache(): Map<AgentId, ParsedAgent> {
   if (_cache) return _cache;
   _cache = new Map();
   return _cache;
 }
 
-/** Force a re-load on next access. Intended for tests / future hot-reload. */
+/** Force a re-parse on next access. Intended for tests / future hot-reload. */
 export function invalidateAgentCache(): void {
   _cache = null;
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────
 
-/** Load (and cache) the configuration for an agent. */
+/**
+ * Load the configuration for an agent.
+ *
+ * AGENT.md is parsed once per process; the system prompt is rendered
+ * against the *current* skill catalogue on every call so newly
+ * written user skills appear without a restart. The skill loader
+ * already de-dupes filesystem work via mtime + a 2 s TTL.
+ */
 export function loadAgent(id: AgentId): LoadedAgent {
   if (!VALID_AGENT_IDS.has(id)) {
     throw new Error(`[agent-loader] unknown agent id: ${id}`);
   }
   const cache = ensureCache();
-  const cached = cache.get(id);
-  if (cached) return cached;
-  const loaded = loadAgentFile(id);
-  cache.set(id, loaded);
-  return loaded;
+  let parsed = cache.get(id);
+  if (!parsed) {
+    parsed = parseAgentFile(id);
+    cache.set(id, parsed);
+  }
+  return renderLoadedAgent(parsed);
 }
