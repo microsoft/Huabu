@@ -2,7 +2,7 @@ import { createId } from '@sediment/shared';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-import type { ChatMessage } from '../components/Messages/types';
+import type { ChatMessage } from './chatTypes';
 import type { AgentBinding, AgentMode, ChatAttachment } from '@sediment/shared';
 
 /**

@@ -61,7 +61,7 @@ function buildMessages(cluster: SketchProcessingCluster): ChatMessage[] {
     messages.push({
       id: `${cluster.id}-assistant`,
       role: 'assistant',
-      content: cluster.reasoning,
+      segments: [{ kind: 'text', text: cluster.reasoning }],
     });
   }
 

@@ -7,7 +7,7 @@ import { useChatStore } from '@/store/chatStore';
 
 import { handleStreamEvent } from './useAgentStream';
 
-import type { ChatMessage } from '../components/Messages/types';
+import type { ChatMessage } from '../store/chatTypes';
 import type { AgentStreamEvent, ChatAttachment } from '@sediment/shared';
 
 /**
@@ -105,18 +105,33 @@ export function useChatHistory(setIsLoading: (loading: boolean) => void): void {
               attachments?: ChatAttachment[];
               selectedNodeIds?: string[];
             };
+            const attachmentsField =
+              msg.attachments && msg.attachments.length > 0
+                ? { attachments: msg.attachments }
+                : {};
+            const selectedNodesField =
+              msg.selectedNodeIds && msg.selectedNodeIds.length > 0
+                ? { selectedNodeIds: msg.selectedNodeIds }
+                : {};
+            if (msg.role === 'assistant') {
+              // Server history doesn't persist segment boundaries (it
+              // never saw the thinking chunks separately), so reconstruct
+              // a single text segment from the flat content. New turns
+              // streamed after reload will produce real segments.
+              return {
+                id,
+                role: 'assistant' as const,
+                segments: [{ kind: 'text' as const, text: msg.content || '' }],
+                ...attachmentsField,
+                ...selectedNodesField,
+              };
+            }
             return {
               id,
-              role: msg.role,
+              role: 'user' as const,
               content: msg.content || '',
-              ...(msg.attachments &&
-                msg.attachments.length > 0 && {
-                  attachments: msg.attachments,
-                }),
-              ...(msg.selectedNodeIds &&
-                msg.selectedNodeIds.length > 0 && {
-                  selectedNodeIds: msg.selectedNodeIds,
-                }),
+              ...attachmentsField,
+              ...selectedNodesField,
             };
           },
         );

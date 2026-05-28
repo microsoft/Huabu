@@ -14,7 +14,7 @@ import { useChatStore } from '@/store/chatStore';
 
 import { snapshotAndExtractChanges } from './useCanvasChanges';
 
-import type { ResourceLabel } from '../components/Messages/types';
+import type { AssistantSegment, ResourceLabel } from '../store/chatTypes';
 import type {
   AgentMode,
   AgentStreamEvent,
@@ -381,22 +381,38 @@ export function handleStreamEvent(
 ): void {
   const { addMessage, updateMessage } = useChatStore.getState();
 
-  if (event.type === 'text_delta') {
+  if (event.type === 'text_delta' || event.type === 'thinking_delta') {
     const delta = event.data.content;
+    if (!delta) return;
+    const kind: AssistantSegment['kind'] =
+      event.type === 'text_delta' ? 'text' : 'thinking';
     const existing = useChatStore
       .getState()
       .messages.find((m) => m.id === ctx.assistantId);
     if (existing) {
-      updateMessage(ctx.assistantId, (m) =>
-        m.role === 'user' || m.role === 'assistant'
-          ? { ...m, content: m.content + delta }
-          : m,
-      );
+      updateMessage(ctx.assistantId, (m) => {
+        if (m.role !== 'assistant') return m;
+        const segs = m.segments;
+        const last = segs[segs.length - 1];
+        // Same kind as trailing segment → extend in place. Different
+        // kind (or empty) → push a new segment so time order survives
+        // think/text/think interleaving from extended-thinking models.
+        if (last && last.kind === kind) {
+          return {
+            ...m,
+            segments: [
+              ...segs.slice(0, -1),
+              { ...last, text: last.text + delta },
+            ],
+          };
+        }
+        return { ...m, segments: [...segs, { kind, text: delta }] };
+      });
     } else {
       addMessage({
         id: ctx.assistantId,
         role: 'assistant',
-        content: delta,
+        segments: [{ kind, text: delta }],
       });
     }
   } else if (event.type === 'tool_start') {

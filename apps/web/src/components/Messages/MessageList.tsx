@@ -11,7 +11,7 @@ import { Button } from '../Common/Button';
 import { ThinkingIndicator } from '../Common/ThinkingIndicator';
 
 import type { ToolEntry } from './ToolMessage';
-import type { ChatMessage } from './types';
+import type { ChatMessage } from '../../store/chatTypes';
 
 interface MessageListProps {
   messages: ChatMessage[];
@@ -105,7 +105,7 @@ export const MessageList = ({
               elements.push(
                 <AIMessage
                   key={msg.id}
-                  content={msg.content}
+                  segments={msg.segments}
                   isStreaming={msg.id === streamingAssistantId}
                   resources={msg.resources}
                   hideActions={hideAIActions}

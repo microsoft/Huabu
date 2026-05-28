@@ -196,7 +196,7 @@ describe('AcpAgentClient — orphan session/update replay', () => {
 
     expect(received).toHaveLength(CAP);
     // The first push (i=0) was dropped; the replayed window starts at i=1.
-    const firstReplayed = received[0] as {
+    const firstReplayed = received[0] as unknown as {
       availableCommands: Array<{ name: string }>;
     };
     expect(firstReplayed.availableCommands[0]?.name).toBe('cmd-1');
