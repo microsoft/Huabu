@@ -12,7 +12,7 @@
  */
 
 import { runAgent } from '../src/modules/agent/agent.service.js';
-import { loadAgent } from '../src/prompt/agent-loader.js';
+import { loadAgent } from '../src/prompt/index.js';
 
 import type { Context } from '@earendil-works/pi-ai';
 import type { AgentMode } from '@sediment/shared';

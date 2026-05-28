@@ -7,7 +7,7 @@
 
 import { llmComplete, llmStream } from './llm.js';
 import { logIntentEpisode as storeEpisode } from './store/intent-store.js';
-import { loadAgent } from '../../prompt/agent-loader.js';
+import { loadAgent } from '../../prompt/index.js';
 
 import type { Context } from '@earendil-works/pi-ai';
 import type {

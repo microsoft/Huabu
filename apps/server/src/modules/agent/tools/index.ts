@@ -13,7 +13,7 @@
 
 import { TOOL_REGISTRY, type ToolDefinition } from './definitions.js';
 import { executeTool } from './executor.js';
-import { loadAgent, type AgentId } from '../../../prompt/agent-loader.js';
+import { loadAgent, type AgentId } from '../../../prompt/index.js';
 
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import type { AgentMode, NodeOrigin } from '@sediment/shared';

@@ -3,6 +3,9 @@
  *
  * Layout under `<workspace>/`:
  *
+ *   setting/                        user-owned, cross-canvas
+ *     .huabu.md                     long-term memory (PR-B)
+ *     skills/<id>/SKILL.md          user / memory-agent authored skills
  *   <canvasDir>/                    name = sanitised canvas title
  *     canvas.json                   carries the stable canvasId
  *     nodes/<safe(label)>.md        per-node markdown (id in frontmatter)
@@ -64,6 +67,27 @@ export function memoryDir(canvasId: string): string {
 
 export function prefsPath(canvasId: string): string {
   return path.join(memoryDir(canvasId), 'preferences.md');
+}
+
+// ─── Workspace-level setting / user skills ─────────────────────────────────
+
+/**
+ * Workspace-level user setting directory: `<workspace>/setting/`.
+ * Holds cross-canvas, user-visible artifacts:
+ *   - `.huabu.md`            long-term user memory (PR-B)
+ *   - `skills/<id>/SKILL.md` user-authored / memory-agent-authored skills
+ *
+ * Distinct from the per-canvas `memory/` directory (which is
+ * canvas-scoped working memory, AI-private). This one is the
+ * cross-canvas, user-editable surface.
+ */
+export function settingDir(): string {
+  return path.join(getWorkspacePath(), 'setting');
+}
+
+/** User skill root: `<workspace>/setting/skills/`. */
+export function userSkillsDir(): string {
+  return path.join(settingDir(), 'skills');
 }
 
 export function historyDir(canvasId: string): string {

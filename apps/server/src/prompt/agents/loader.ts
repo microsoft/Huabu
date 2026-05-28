@@ -1,12 +1,12 @@
 /**
  * Agent loader — markdown AGENT.md files as the single source of truth.
  *
- * Each agent lives at `<thisDir>/agents/<id>/AGENT.md`. The YAML
- * frontmatter declares the agent's identity, tool list (by name —
- * resolved by {@link buildAgentToolsByNames} against the registry in
- * `modules/agent/tools/index.ts`), optional skill scope, and runtime
- * knobs. The Markdown body is the system prompt, with two template
- * facilities:
+ * Each agent lives at `<thisDir>/<id>/AGENT.md` (where `<thisDir>` is
+ * `src/prompt/agents/`). The YAML frontmatter declares the agent's
+ * identity, tool list (by name — resolved by {@link buildAgentToolsByNames}
+ * against the registry in `modules/agent/tools/index.ts`), optional skill
+ * scope, and runtime knobs. The Markdown body is the system prompt, with
+ * two template facilities:
  *
  *   `{{skillCatalogue}}`             → expanded to the catalogue lines
  *                                      for the agent's `skillScope`
@@ -20,7 +20,7 @@
  * (intended for tests / future hot-reload).
  *
  * Runtime layout mirrors the skill loader: dev (tsx) and start (tsx)
- * both run from `src/`, so the relative `<thisDir>/agents/<id>/AGENT.md`
+ * both run from `src/`, so the relative `<thisDir>/<id>/AGENT.md`
  * layout works. Any future `dist/` build must copy
  * `src/prompt/agents/**\/AGENT.md` into `dist/prompt/agents/`.
  */
@@ -29,10 +29,10 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { getSkillCatalogue } from './skills/index.js';
-import { parseFrontmatter } from '../modules/storage/frontmatter.js';
+import { parseFrontmatter } from '../../modules/storage/frontmatter.js';
+import { getSkillCatalogue } from '../skills/catalogue.js';
 
-import type { SkillScope } from './skill-loader.js';
+import type { SkillScope } from '../skills/loader.js';
 import type { ToolExecutionMode } from '@earendil-works/pi-agent-core';
 import type { NodeOrigin } from '@sediment/shared';
 
@@ -114,7 +114,7 @@ export interface LoadedAgent {
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 /** Absolute path of the agents directory (`src/prompt/agents`). */
-export const AGENTS_DIR = path.join(HERE, 'agents');
+export const AGENTS_DIR = HERE;
 
 // ─── Validation ─────────────────────────────────────────────────────────────
 

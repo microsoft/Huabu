@@ -45,6 +45,7 @@ import {
   flattenLegacyMetaJson,
   runMigrationIfNeeded,
 } from './storage/migrate.js';
+import { invalidateUserSkill } from '../prompt/index.js';
 
 const ENV_KEY = 'HUABU_WORKSPACE';
 
@@ -160,6 +161,15 @@ export function setWorkspacePath(newPath: string): void {
   // Drop the cached canvas-dir index so subsequent lookups (used by
   // migrations and route handlers) reflect the new workspace.
   refreshCanvasDirIndex();
+  // Drop any user-skill cache built against the previous workspace so
+  // the next `listSkills` / `read("skills/...")` call rescans the new
+  // `<workspace>/setting/skills/` from scratch. The import-cycle with
+  // the prompt loader (which depends on `getWorkspacePath` from this
+  // module) is safe because Node ESM allows cycles as long as no
+  // top-level code on either side dereferences the late-bound import
+  // — here `invalidateUserSkill` is only ever called from within
+  // function bodies, after both modules have finished evaluating.
+  invalidateUserSkill();
   // @deprecated Launch-only legacy migration. Remove once all workspaces have
   // been migrated to the canvas-centric layout.
   runMigrationIfNeeded(_workspacePath);

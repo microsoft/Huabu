@@ -31,7 +31,7 @@
 import { readFileSync, statSync } from 'node:fs';
 
 import { normalizeRel, safeResolve } from './fs-sandbox.js';
-import { resolveSkillPath } from '../../../../prompt/skill-loader.js';
+import { readSkillFile, resolveSkillPath } from '../../../../prompt/index.js';
 import { parseFrontmatter } from '../../../storage/frontmatter.js';
 
 import type { readParamsSchema } from '../definitions.js';
@@ -69,32 +69,34 @@ export async function handleRead(args: ReadArgs): Promise<string> {
   }
   const rel = normalizeRel(requested);
 
-  // Skill file paths get a two-tier resolver: per-canvas override under
-  // <workspace>/<canvasDir>/skills/... wins; otherwise we fall back to
-  // the global skill set shipped with the server. This lets every agent
-  // — including external ones that mount the canvas folder via raw FS
-  // — discover skills with the same `read("skills/<id>/SKILL.md")` call.
+  // Skill file paths resolve through the merged system+user view (see
+  // `src/prompt/skills/loader.ts`). `readSkillFile` returns content
+  // directly so the agent sees the merged SKILL.md when both layers
+  // carry the id; reference files (`skills/<id>/references/*.md`)
+  // fall through to `resolveSkillPath`, which returns the on-disk
+  // path under whichever source actually owns that file.
+  //
+  // `readSkillFile` / `resolveSkillPath` throw `SkillPathEscapeError`
+  // on `..` traversal — we let it propagate so pi-agent-core surfaces
+  // it as a security-relevant tool error distinct from "Path not found".
   //
   // Intentionally do not special-case the bare `skills` path here:
-  // `read` is file-only, so a directory read should fall through to the
-  // normal sandbox path and surface the later directory-specific error.
+  // `read` is file-only, so a directory read should fall through to
+  // the normal sandbox path and surface the later directory-specific
+  // error.
   let abs: string;
   if (rel.startsWith('skills/')) {
-    const probeLocal = (probeRel: string): string | null => {
-      try {
-        const candidate = safeResolve(args.canvasId, probeRel);
-        const stat = statSync(candidate);
-        return stat.isFile() ? candidate : null;
-      } catch {
-        return null;
-      }
-    };
-    // `resolveSkillPath` returns `null` for "not found" and throws
-    // `SkillPathEscapeError` when the requested path tries to break out
-    // of the global skill directory via `..`. Let the escape error
-    // propagate so pi-agent-core can surface it as a security-relevant
-    // tool error distinct from the generic "Path not found" miss.
-    const resolved = resolveSkillPath(rel, probeLocal);
+    const content = readSkillFile(rel);
+    if (content !== null) {
+      // Merged / system-only / user-only SKILL.md content is materialised
+      // in memory. Render the same JSON envelope as a normal file read
+      // (frontmatter convenience parse + line/byte windowing) without
+      // ever touching disk again.
+      return renderTextResponse(rel, content, offset, limit);
+    }
+    // Not a SKILL.md (or unknown id): fall back to the path resolver
+    // for references / sub-files. Returns null on miss.
+    const resolved = resolveSkillPath(rel);
     if (!resolved) {
       throw new Error(`Path not found: ${rel}`);
     }
@@ -145,12 +147,29 @@ export async function handleRead(args: ReadArgs): Promise<string> {
     );
   }
 
-  const text = buf.toString('utf8');
+  return renderTextResponse(rel, buf.toString('utf8'), offset, limit);
+}
 
+/**
+ * Format the pi `read` JSON envelope around an already-loaded text body.
+ *
+ * Shared between the on-disk path (after binary detection) and the
+ * skill merged-view path (where the body is materialised in memory by
+ * the loader, so there's no file to stat or sniff for binary content).
+ *
+ * Encapsulates the line / byte windowing and frontmatter convenience
+ * parse so the two callers cannot drift apart.
+ */
+function renderTextResponse(
+  rel: string,
+  text: string,
+  offset: number | undefined,
+  limit: number | undefined,
+): string {
   // Parse frontmatter from the whole file (not the slice) so the structured
   // metadata is surfaced even when the agent pages through the body. The
   // raw fence block is still present in `content` when the slice covers
-  // the file head \u2014 we don't strip it, so the file remains reproduced
+  // the file head — we don't strip it, so the file remains reproduced
   // verbatim. Empty `meta` (no fences, or unparseable YAML) means "not a
   // frontmatter file" and we omit the field entirely.
   let frontmatter: Record<string, unknown> | undefined;

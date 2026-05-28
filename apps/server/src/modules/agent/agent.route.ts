@@ -21,7 +21,7 @@ import {
 } from '@sediment/shared';
 import { encode } from 'gpt-tokenizer';
 
-import { loadAgent, renderAgentTemplate } from '../../prompt/agent-loader.js';
+import { loadAgent, renderAgentTemplate } from '../../prompt/index.js';
 import { runAcpAgent } from '../agent/acp/service.js';
 import { runAgent } from '../agent/agent.service.js';
 import { buildAgentNodeRef } from '../agent/node-ref.js';
