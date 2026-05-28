@@ -106,3 +106,30 @@ export function computeFontSizeForHeight(
   }
   return Math.max(1, Math.floor(lo * 2) / 2);
 }
+
+/**
+ * Measure the rendered height of `text` laid out at a fixed `fontSize`
+ * inside a fixed `contentWidth`. Used by text-flow nodes to derive the
+ * container height after the font size has been locked by a resize gesture.
+ * Pure arithmetic via pretext — no DOM reflow.
+ */
+export function measureTextHeight(
+  text: string,
+  contentWidth: number,
+  fontSize: number,
+  opts: FontOpts,
+): number {
+  if (contentWidth <= 0 || fontSize <= 0) return 0;
+  const fontStr = buildFontStr(
+    fontSize,
+    opts.fontFamily,
+    opts.fontWeight,
+    opts.fontStyle,
+  );
+  const prepared = prepareWithSegments(text || ' ', fontStr, {
+    whiteSpace: 'pre-wrap',
+  });
+  const lineH = fontSize * opts.lineHeight;
+  const { height } = layoutWithLines(prepared, contentWidth, lineH);
+  return Math.ceil(height);
+}

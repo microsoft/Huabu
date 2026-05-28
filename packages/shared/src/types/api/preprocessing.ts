@@ -31,10 +31,12 @@ export type TriggerReason = z.infer<typeof triggerReasonSchema>;
 // ---------------------------------------------------------------------------
 
 /**
- * Subset of `CanvasNodeType` that the preprocess endpoint actually handles.
- * Excludes 'sketch' and 'question' which never carry preprocessable
- * payloads. Kept as its own enum so wire validation is tight and the
- * server doesn't have to defensively reject those types at runtime.
+ * Node types that participate in the preprocessing pipeline.
+ *
+ * `sketch` is excluded — it never carries a preprocessable payload.
+ * `question` IS included: although it never persists ingest text,
+ * its `data.input.content` flows through the same Enrich path used
+ * by `note` / `text` to derive an auto-label from the user's prompt.
  */
 export const preprocessableNodeTypeSchema = z.enum([
   'note',
@@ -44,6 +46,7 @@ export const preprocessableNodeTypeSchema = z.enum([
   'image',
   'video',
   'frame',
+  'question',
 ]);
 export type PreprocessableNodeType = z.infer<
   typeof preprocessableNodeTypeSchema

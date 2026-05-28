@@ -61,6 +61,7 @@ export const NodeStyleSchema = Type.Object(
     fontFamily: Type.Optional(NodeFontFamilySchema),
     fontWeight: Type.Optional(NodeFontWeightSchema),
     fontStyle: Type.Optional(NodeFontStyleSchema),
+    fontSize: Type.Optional(Type.Number({ minimum: 1 })),
     textDecoration: Type.Optional(
       Type.String({
         description: 'Space-separated: "underline", "line-through", or both',

@@ -29,6 +29,7 @@ import {
 
 import { createPerKeyDebouncer } from './perKeyDebouncer';
 
+import type { CanvasNodeType } from '@sediment/shared';
 import type { Node } from '@xyflow/react';
 
 /**
@@ -88,6 +89,14 @@ export function createPreprocessQueue(opts: {
 
   return {
     schedule(node) {
+      // `sketch` is the only canvas node type excluded from the
+      // server's preprocess pipeline (no preprocessable payload —
+      // mirrors `preprocessableNodeTypeSchema` in packages/shared).
+      // Gating it here avoids 400s from zod validation polluting
+      // the network log. `satisfies` gives us a compile-time guard
+      // against typos without dragging a runtime list into the
+      // web bundle.
+      if (node.type === ('sketch' satisfies CanvasNodeType)) return;
       const nodeId = node.id;
       debouncer.schedule(nodeId, () => {
         const state = opts.getState();

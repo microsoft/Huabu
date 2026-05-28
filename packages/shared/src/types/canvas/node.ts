@@ -119,6 +119,16 @@ export interface NodeStyle {
   fontWeight?: NodeFontWeight;
   fontStyle?: NodeFontStyle;
   textDecoration?: string; // space-separated NodeTextDecoration values
+  /**
+   * Locked font size (px) for text-flow nodes (TextNode, QuestionNode).
+   *
+   * Captured when the user finishes a resize gesture: the binary-searched
+   * "fits-the-box" font size is stored here and reused on subsequent
+   * renders, so typing/deleting only grows/shrinks the node height, not
+   * the font size. Absent value means "use the node type's default font
+   * size" (typically 16px).
+   */
+  fontSize?: number;
 }
 
 // ==================== Block-Level Provenance (Phase 4) ====================
