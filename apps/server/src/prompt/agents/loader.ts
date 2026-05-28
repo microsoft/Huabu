@@ -39,13 +39,14 @@ import type { NodeOrigin } from '@sediment/shared';
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 /** Agent identifiers backed by an `AGENT.md` config file. */
-export type AgentId = 'ask' | 'operate' | 'intent' | 'sketch';
+export type AgentId = 'ask' | 'operate' | 'intent' | 'sketch' | 'memory';
 
 const VALID_AGENT_IDS: ReadonlySet<AgentId> = new Set<AgentId>([
   'ask',
   'operate',
   'intent',
   'sketch',
+  'memory',
 ]);
 
 /** Runtime knobs forwarded to `runAgent` / direct LLM callers. */
