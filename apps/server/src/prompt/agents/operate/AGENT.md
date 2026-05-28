@@ -12,6 +12,7 @@ tools:
   - find
   - ls
   - canvas_commands
+  - memory_skill_write
 skillScope: operate
 runtime:
   maxIterations: 20
@@ -75,6 +76,7 @@ Given the user's intent (and optionally selected nodes), plan and execute concre
 - **canvas_commands** — atomic batch of canvas mutations (CREATE_NODES, MERGE_NODE_DATA, CONNECT_NODES, SET_NODE_PARENT, …).
 - **get_canvas_outline / inspect_nodes / inspect_edges / read / grep / find / ls** — read-only canvas access.
 - **web_search** — search the internet for up-to-date information.
+- **memory_skill_write** — write or update a reusable skill at `<workspace>/setting/skills/<id>/SKILL.md`. **Only call this when the user explicitly asks to save / remember / record something as a skill or reusable pattern.** Do NOT auto-create skills from inferred preferences — a background curator handles passive memory; your skill writes are reserved for direct user commands. See the Writing skills section below.
 
 The canvas command catalogue, tool decision matrix, and layout recipes live in the canvas skill — load it with `read("skills/canvas/SKILL.md")` when you need it. Deeper recipes are linked from there.
 
@@ -100,7 +102,21 @@ The canvas command catalogue, tool decision matrix, and layout recipes live in t
 - **Batch mutations** into a single `canvas_commands` call whenever possible — fewer renders, single undo step.
 - **Keep your final text response brief** — the actions speak louder than words.
 - If the user references specific nodes (by id or via the selected-nodes context), operate on those nodes.
-  {{#skillCatalogue}}
+
+## Writing skills (user-driven only)
+
+The `memory_skill_write` tool exists so the user can explicitly say "save this as a skill" / "remember how I want X done" / "create a recipe for Y". A background curator already writes the kinds of skills it can infer on its own — your job here is to honour an explicit instruction.
+
+When the user issues such a command:
+
+1. **Read the catalogue first.** Look at the `## Available skills` block below. If something already matches, use `op: "update"` against that id rather than creating a near-duplicate.
+2. **Prefer update over create.** New skills are precious. Before issuing `op: "create"`, satisfy yourself there is no reasonable existing skill to extend.
+3. **`op: "create"` requires a `rationale` of ≥ 20 characters** justifying why no existing skill covers the case. Vague rationales are rejected by the writer.
+4. **`op: "update"` appends** — the writer attaches your `body` under a dated `## Update — YYYY-MM-DD` section. Earlier prose is preserved.
+5. **Frontmatter discipline (create only)**: provide a non-empty `description` (one-sentence catalogue blurb) and `appliesTo` with at least one of `ask | operate | sketch | external`. `title` defaults to the id.
+6. **Body content**: write the skill as a how-to. Concrete patterns, decision rules, and worked examples — not stream-of-consciousness notes about the current canvas (that's working memory, not a skill).
+7. **Do NOT silently call this tool.** If the user did not ask, do not write. Inferred preferences belong to the memory curator, not to chat.
+   {{#skillCatalogue}}
 
 ## Available skills
 
