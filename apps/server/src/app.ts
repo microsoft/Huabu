@@ -14,6 +14,7 @@ import {
 import agentRoutes from './modules/agent/agent.route.js';
 import intentRoutes from './modules/agent/intent.route.js';
 import llmRoutes from './modules/agent/llm.route.js';
+import { memoryDebugRoutes } from './modules/agent/memory/debug.js'; // [debug-tap] remove with debug.ts
 import artifactRoute from './modules/artifact/artifact.route.js';
 import canvasRoutes from './modules/canvas/canvas.route.js';
 import webRoutes from './modules/web/web.route.js';
@@ -98,7 +99,8 @@ app.addHook('preHandler', async (request, reply) => {
     !isWorkspaceConfigured() &&
     url.startsWith('/api') &&
     !url.startsWith('/api/workspace') &&
-    !url.startsWith('/api/llm')
+    !url.startsWith('/api/llm') &&
+    !url.startsWith('/api/memory-debug') // [debug-tap] remove with debug.ts
   ) {
     return reply.status(503).send({
       message:
@@ -134,3 +136,4 @@ if (process.env.ENABLE_ACP === '1') {
   app.register(acpThreadsRoutes, { prefix: '/api/acp' });
   app.log.info('ACP (external agent) bridge enabled');
 }
+app.register(memoryDebugRoutes, { prefix: '/api/memory-debug' }); // [debug-tap] remove with debug.ts

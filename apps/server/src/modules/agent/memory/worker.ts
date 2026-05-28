@@ -26,6 +26,7 @@
  */
 
 import { runAnalysisPass } from './analyzer.js';
+import { memoryDebug } from './debug.js'; // [debug-tap] remove with debug.ts
 import { markAnalyzed } from './trigger.js';
 
 import type { MemoryLogger } from './index.js';
@@ -52,8 +53,10 @@ const pending = new Set<string>();
 export function schedule(canvasId: string, logger?: MemoryLogger): void {
   if (running.has(canvasId)) {
     pending.add(canvasId);
+    memoryDebug.recordEnqueue(canvasId); // [debug-tap] remove with debug.ts
     return;
   }
+  memoryDebug.recordEnqueue(canvasId); // [debug-tap] remove with debug.ts
   // Wrap the worker in a Promise we can dedupe against. `setImmediate`
   // hands control back to libuv so the route handler completes its
   // response cycle before we start touching disk / LLMs.
@@ -78,6 +81,7 @@ export function _waitForIdle(): Promise<void> {
 }
 
 async function runOnce(canvasId: string, logger?: MemoryLogger): Promise<void> {
+  memoryDebug.recordPassStart(canvasId, '(analysis in progress)'); // [debug-tap] remove with debug.ts
   try {
     const { results, latestChatTs } = await runAnalysisPass(canvasId, logger);
     // markAnalyzed is intentionally always called when the pass finished
@@ -95,8 +99,13 @@ async function runOnce(canvasId: string, logger?: MemoryLogger): Promise<void> {
       canvasId,
       latestChatTs !== null ? { lastSeenThreadCursor: latestChatTs } : {},
     );
-    summariseResults(canvasId, results, logger);
+    // [debug-tap] remove the next loop with debug.ts
+    for (const result of results) {
+      memoryDebug.recordWriteResult(canvasId, result);
+    }
+    summariseResults(canvasId, results, latestChatTs, logger);
   } catch (err) {
+    memoryDebug.recordError(canvasId, err); // [debug-tap] remove with debug.ts
     logger?.warn(
       `[memory] analysis pass failed for canvas ${canvasId}: ${
         (err as Error).message
@@ -108,10 +117,12 @@ async function runOnce(canvasId: string, logger?: MemoryLogger): Promise<void> {
 function summariseResults(
   canvasId: string,
   results: WriteResult[],
+  latestChatTs: number | null,
   logger?: MemoryLogger,
 ): void {
   const ok = results.filter((r) => r.ok).length;
   const rejected = results.length - ok;
+  memoryDebug.recordPassEnd(canvasId, { ok, rejected, latestChatTs }); // [debug-tap] remove with debug.ts
   logger?.info(
     `[memory] pass for canvas ${canvasId} done — ${ok} ok, ${rejected} rejected`,
   );
