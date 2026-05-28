@@ -290,9 +290,14 @@ async function ensureAcpSessionInner(
     availableCommands: [],
     commandsUpdatedAt: 0,
   };
-  // Install the long-lived listener BEFORE registering so we never
-  // miss an `available_commands_update` that the agent pushes during
-  // the very first event-loop tick after `session/new` resolves.
+  // Install the long-lived listener BEFORE adding the entry to the
+  // registry so subsequent registry lookups always see an entry with
+  // a wired-up listener. The listener registration itself replays
+  // any orphan `available_commands_update` notifications that
+  // arrived BEFORE `session/new` resolved (a common ACP wire
+  // ordering — see `AcpAgentClient.orphanUpdates`), so we never
+  // miss the agent's initial command-list push regardless of who
+  // wins the response-vs-notification race.
   client.registerSessionListener(sessionId, (update) => {
     handleSessionMetaUpdate(created, update, logger);
   });

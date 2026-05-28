@@ -4,6 +4,21 @@
 
 ---
 
+## 2026-05-28 · 修复：外部 Agent slash 命令偶尔为空
+
+**What Changed**
+
+- 修复了绑定到外部 ACP agent（如 Claude Code / Copilot CLI）的线程在打开聊天面板后，`/` typeahead 偶尔一直空白、且 Network 里 `commands` 始终是空数组的问题。根因是 agent 经常在 `session/new` 响应**之前**就把 `available_commands_update` 通知推过来，而服务端那时还没装上 listener，通知被静默丢弃。
+- 服务端 `AcpAgentClient` 现在会把"还没有 listener 就到达"的 `session/update` 按 sessionId 缓存到一个有界 ring buffer 里；调用 `registerSessionListener` 时同步回放，确保不会再漏掉首次推送。
+
+**Notes**
+
+- 不需要前端配合，刷新页面即可生效。原有的"立即拉 + 200ms 后再拉一次"兜底逻辑保留不变，但绝大多数情况下首次 POST 就能返回完整命令列表了。
+- 仅当 `ENABLE_ACP=1` 启用时该路径才会生效；内置 agent 线程不受影响。
+- 如果 agent 本身从来不推 `available_commands_update`，菜单仍然保持隐藏 —— 这是 agent 的行为，不是 Sediment 的 bug。
+
+---
+
 ## 2026-05-26 · ACP 外部 Agent 斜杠命令：聊天输入框 typeahead
 
 **What Changed**

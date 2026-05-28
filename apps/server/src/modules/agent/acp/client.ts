@@ -173,6 +173,32 @@ export class AcpAgentClient {
     string,
     Set<SessionUpdateHandler>
   >();
+  /**
+   * Bounded ring buffer of `session/update` notifications that arrived
+   * BEFORE any turn handler or session listener was registered for
+   * their sessionId. Replayed when {@link registerSessionListener} is
+   * called for that sessionId, then dropped.
+   *
+   * Motivating race: many ACP agents push
+   * `available_commands_update` **before** their `session/new`
+   * response on the wire (agentlet's own UI compensates for the same
+   * ordering in `stores/session.ts`). Without buffering, the caller
+   * has no chance to install a listener in time: the
+   * `await sendRequest('session/new', …)` promise only resolves
+   * after the response arrives, so any listener registration must
+   * follow — by which point the earlier notification has already
+   * been seen by `handleIncoming` with no handlers and silently
+   * dropped. The bug surfaces as a permanently-empty slash-command
+   * list for the thread.
+   *
+   * Size cap per sessionId is a defensive memory bound — in practice
+   * the orphan window is one or two updates wide. Once a listener
+   * registers we drain and forget; sessions that never get a listener
+   * keep at most {@link MAX_ORPHAN_UPDATES_PER_SESSION} updates and
+   * are cleared on {@link shutdown}.
+   */
+  private readonly orphanUpdates = new Map<string, AcpSessionUpdate[]>();
+  private static readonly MAX_ORPHAN_UPDATES_PER_SESSION = 32;
   private closed = false;
   private readonly logger: NonNullable<AcpAgentClientOptions['logger']>;
   /** Canvas scope for sandbox + permission checks. See AcpAgentClientOptions.canvasId. Empty string = “no canvas” (fs/* will be rejected). */
@@ -283,6 +309,13 @@ export class AcpAgentClient {
    * Listeners run in addition to (not instead of) the turn-scoped handler
    * installed by `prompt()`. So a `session/update` arriving during a turn
    * fires BOTH the turn handler and any registered session listeners.
+   *
+   * Replays {@link orphanUpdates} for `sessionId` synchronously to the
+   * newly-registered handler before returning, so notifications that
+   * arrived before any listener existed (the canonical race: agent
+   * pushes `available_commands_update` BEFORE the `session/new`
+   * response) are delivered exactly once. The orphan buffer for
+   * `sessionId` is then cleared.
    */
   registerSessionListener(
     sessionId: string,
@@ -294,6 +327,28 @@ export class AcpAgentClient {
       this.sessionListeners.set(sessionId, set);
     }
     set.add(handler);
+    // Drain orphan buffer for this sessionId. Done AFTER adding the
+    // handler to the set so a (hypothetical) re-entrant
+    // registerSessionListener from inside the replayed handler sees a
+    // stable state. We fire the just-registered handler with each
+    // buffered update; any OTHER listeners that race-registered in
+    // the same tick already had their chance via the live path and
+    // won't see replays — which is correct, they were attached AFTER
+    // the orphan arrived.
+    const orphans = this.orphanUpdates.get(sessionId);
+    if (orphans && orphans.length > 0) {
+      this.orphanUpdates.delete(sessionId);
+      for (const update of orphans) {
+        try {
+          handler(update);
+        } catch (e) {
+          this.logger.warn(
+            { sessionId, err: String(e) },
+            'session/update orphan replay handler threw',
+          );
+        }
+      }
+    }
     return () => {
       const current = this.sessionListeners.get(sessionId);
       if (!current) return;
@@ -313,6 +368,7 @@ export class AcpAgentClient {
     this.pending.clear();
     this.updateHandlers.clear();
     this.sessionListeners.clear();
+    this.orphanUpdates.clear();
   }
 
   /** True if this client has been closed via `shutdown()`. */
@@ -420,9 +476,28 @@ export class AcpAgentClient {
             }
           }
           if (!turnHandler && (!listeners || listeners.size === 0)) {
+            // No handler yet — buffer for later replay via
+            // registerSessionListener. Bounded ring: drop oldest if
+            // we exceed MAX_ORPHAN_UPDATES_PER_SESSION. See the
+            // orphanUpdates field comment for why this matters
+            // (agent pushes available_commands_update before the
+            // session/new response).
+            let buf = this.orphanUpdates.get(sessionId);
+            if (!buf) {
+              buf = [];
+              this.orphanUpdates.set(sessionId, buf);
+            }
+            buf.push(params.update);
+            if (buf.length > AcpAgentClient.MAX_ORPHAN_UPDATES_PER_SESSION) {
+              buf.shift();
+            }
             this.logger.debug(
-              { sessionId, sessionUpdate: params.update.sessionUpdate },
-              'session/update for unknown session — no handler registered',
+              {
+                sessionId,
+                sessionUpdate: params.update.sessionUpdate,
+                bufferedCount: buf.length,
+              },
+              'session/update buffered (no handler yet)',
             );
           }
         }
