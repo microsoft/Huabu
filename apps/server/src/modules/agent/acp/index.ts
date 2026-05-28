@@ -16,8 +16,12 @@ export type {
   AcpPromptResult,
 } from './client.js';
 
-export { acpUpdateToStreamEvent } from './translator.js';
-export type { AcpSessionUpdate } from './translator.js';
+export {
+  acpUpdateToStreamEvent,
+  getTranslatorCounters,
+  resetTranslatorCounters,
+} from './translator.js';
+export type { TranslatorLogger } from './translator.js';
 
 export { getTokenStore } from './token-store.js';
 export type { TokenEntry } from './token-store.js';

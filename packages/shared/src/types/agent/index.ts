@@ -5,7 +5,9 @@
  * events, chat history, intent recognition, and tool envelopes.
  */
 
+export * from './acp-tool.js';
 export * from './agent.js';
+export * from './assistant-parts.js';
 export * from './chat.js';
 export * from './context.js';
 export * from './events.js';

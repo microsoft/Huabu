@@ -601,7 +601,9 @@ export class CanvasStore {
     if (!existsSync(dir)) return null;
     let latest: { file: string; mtime: number } | null = null;
     for (const file of readdirSync(dir)) {
-      if (!file.endsWith('.json')) continue;
+      // Skip the rich-ACP sidecar (`<threadId>.parts.json`); it
+      // pairs with a real pi-ai file and isn't a thread of its own.
+      if (!file.endsWith('.json') || file.endsWith('.parts.json')) continue;
       try {
         const st = statSync(path.join(dir, file));
         if (!latest || st.mtimeMs > latest.mtime) {
@@ -622,7 +624,7 @@ export class CanvasStore {
     const dir = chatDir(this.canvasId);
     if (!existsSync(dir)) return [];
     return readdirSync(dir)
-      .filter((f) => f.endsWith('.json'))
+      .filter((f) => f.endsWith('.json') && !f.endsWith('.parts.json'))
       .map((f) => f.replace(/\.json$/, ''));
   }
 

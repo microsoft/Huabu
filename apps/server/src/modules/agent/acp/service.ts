@@ -28,10 +28,19 @@ import { getAgentletServer } from './server-mount.js';
 import { acpSessionRegistry } from './session-registry.js';
 import { acpUpdateToStreamEvent } from './translator.js';
 import { canvasRoot as resolveCanvasRoot } from '../../storage/paths.js';
+import {
+  appendPlanPart,
+  emptySidecar,
+  readChatParts,
+  recordMessageTimestamp,
+  upsertToolExt,
+  writeChatParts,
+} from '../store/chat-parts-store.js';
 
 import type { AcpSessionEntry } from './session-registry.js';
-import type { AcpSessionUpdate } from './translator.js';
+import type { ChatPartsSidecar } from '../store/chat-parts-store.js';
 import type { AssistantMessage, Context } from '@earendil-works/pi-ai';
+import type { AcpSessionUpdate } from '@sediment/shared';
 import type {
   AgentChatContext,
   AgentStreamEvent,
@@ -491,6 +500,38 @@ export async function* runAcpAgent(
   let stopReason: string | undefined;
   let done = false;
 
+  // 4a. Sidecar bookkeeping. Tool-call and plan events emitted during
+  //     the turn carry ACP-specific enrichment that doesn't fit in
+  //     pi-ai's `AssistantMessage.content` shape, so we mirror them
+  //     into `<threadId>.parts.json` for later history reconstruction.
+  //     `assistantIndex` is the position the future assistant message
+  //     will occupy (`context.messages.length` at this point already
+  //     includes the user push above). Computed once and reused for
+  //     every event in the turn so all sidecar parts share the same
+  //     message anchor.
+  let sidecar: ChatPartsSidecar =
+    readChatParts(threadId, canvasId) ?? emptySidecar();
+  const assistantIndex = context.messages.length;
+  let sidecarDirty = false;
+  const persistSidecar = () => {
+    if (!sidecarDirty || !canvasId) return;
+    try {
+      writeChatParts(threadId, sidecar, canvasId);
+      sidecarDirty = false;
+    } catch (err) {
+      // Sidecar failures must NEVER abort the turn — chat history is
+      // still functional from the pi-ai file alone. Log + continue.
+      logger.warn(
+        {
+          threadId,
+          canvasId,
+          err: err instanceof Error ? err.message : String(err),
+        },
+        '[acp] failed to write chat-parts sidecar',
+      );
+    }
+  };
+
   const wake = () => {
     if (resolveWaiter) {
       const fn = resolveWaiter;
@@ -515,7 +556,7 @@ export async function* runAcpAgent(
       entry.sessionId,
       promptPayload,
       (update) => {
-        const evt = acpUpdateToStreamEvent(update);
+        const evt = acpUpdateToStreamEvent(update, logger);
         if (!evt) {
           // TEMP (PR-G debug): info-level so untranslated tool_call /
           // tool_call_update / plan / etc. show up in dev logs and we
@@ -529,6 +570,44 @@ export async function* runAcpAgent(
           return;
         }
         if (evt.type === 'text_delta') assembledText += evt.data.content;
+        // Mirror rich-ACP events into the sidecar overlay. Failures
+        // (e.g. RangeError on malformed entries) are swallowed via
+        // the writer's try/catch in `persistSidecar` later; here we
+        // only stage the in-memory mutation.
+        if (evt.type === 'tool_call') {
+          sidecar = upsertToolExt(
+            sidecar,
+            evt.data.toolCallId,
+            {
+              toolKind: evt.data.toolKind,
+              status: evt.data.status,
+              locations: evt.data.locations,
+              content: evt.data.content,
+              rawOutput: undefined,
+            },
+            { messageIndex: assistantIndex },
+          );
+          sidecarDirty = true;
+        } else if (evt.type === 'tool_call_update') {
+          sidecar = upsertToolExt(
+            sidecar,
+            evt.data.toolCallId,
+            {
+              status: evt.data.status,
+              // `title` is on the wire but lives on the ACP envelope,
+              // not the persistence extension — skip it here, the
+              // value is already in the SSE event for live UI.
+              locations: evt.data.locations,
+              content: evt.data.content,
+              rawOutput: evt.data.rawOutput,
+            },
+            { messageIndex: assistantIndex },
+          );
+          sidecarDirty = true;
+        } else if (evt.type === 'plan') {
+          sidecar = appendPlanPart(sidecar, assistantIndex, evt.data.entries);
+          sidecarDirty = true;
+        }
         queue.push(evt);
         wake();
       },
@@ -586,13 +665,24 @@ export async function* runAcpAgent(
     //    synthetic fallback emitted above too.
     if (assembledText.length > 0) {
       const aborted = signal?.aborted ?? false;
+      const timestamp = Date.now();
       context.messages.push(
         fauxAssistantMessage(assembledText, {
           stopReason: mapStopReason(stopReason, aborted),
-          timestamp: Date.now(),
+          timestamp,
         }),
       );
+      // Stamp the sidecar with the assistant arrival time only AFTER
+      // the pi-ai push completes — keeps the two files index-aligned.
+      // `recordMessageTimestamp` is first-write-wins, so a retry of
+      // the same turn never overwrites the original arrival time.
+      sidecar = recordMessageTimestamp(sidecar, assistantIndex, timestamp);
+      sidecarDirty = true;
     }
+    // 6b. Persist the rich-ACP sidecar regardless of error/abort —
+    //     partial tool calls captured before the failure still
+    //     survive a refresh once the read path is wired.
+    persistSidecar();
   }
 
   // 7. Yield terminal event \u2014 error wins over done.

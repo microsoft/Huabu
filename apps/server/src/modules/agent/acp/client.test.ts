@@ -17,8 +17,8 @@ import { describe, expect, it } from 'vitest';
 
 import { AcpAgentClient } from './client.js';
 
-import type { AcpSessionUpdate } from './translator.js';
 import type { AgentConnection, AcpMessage } from '@agentlet/protocol';
+import type { AcpSessionUpdate } from '@sediment/shared';
 
 interface FakeConnection extends AgentConnection {
   pushMessage(msg: AcpMessage): void;

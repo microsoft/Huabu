@@ -49,8 +49,8 @@
 
 import { FsCapabilityError, handleFsReadTextFile } from './capabilities/fs.js';
 
-import type { AcpSessionUpdate } from './translator.js';
 import type { AgentConnection, AcpMessage } from '@agentlet/protocol';
+import type { AcpSessionUpdate } from '@sediment/shared';
 
 const ACP_PROTOCOL_VERSION = 1;
 

@@ -1,8 +1,10 @@
 # Assistant Segments & ACP Rich Updates — Implementation Plan
 
-> Status: **planning**（§0.5 Spike 已完成且推翻原 §3.2；§2.2 已切换到官方 `@agentclientprotocol/sdk`；§1/§2.4/§3.2/§4.3/§4.4/§4.5/§7 已加 `internalToolName` 逃生门 + `permission` 字段预留，保留现有 `CanvasCommandCard` / `WebSearchToolDisplay` / `MergedAgentToolRow` 渲染路径。等 PR-1 实施。）
+> Status: **PR-1 已交付**（infra-only：SDK 接入、`AssistantPart` 类型、3 个新 SSE event、translator 重写、sidecar 持久化与 wire 进 `runAcpAgent`。`ChatHistoryItem.assistant.content` 仍为 string 形态，PR-2 才切换 wire；UI 也未变更，所以现有 `CanvasCommandCard` / `WebSearchToolDisplay` / `MergedAgentToolRow` 渲染路径保持原状。下一步是 PR-2 切 wire + PR-3 UI。）
 > Scope: 把 assistant 一次 turn 重构成「时序 parts 数组」，并把 ACP 的 `tool_call` / `tool_call_update` / `plan` 三类 update 接进 Sediment 的 wire 与 UI。
 > 关联：[`huabu-acp-client-plan.md`](./huabu-acp-client-plan.md) §2.3、[`agent-architecture.md`](./agent-architecture.md)
+
+> **PR-1 errata**：plan 各处提及"8 个内置工具"应为 **9 个**（漏写了 `inspect_edges`），代码侧 `INTERNAL_AGENT_TOOL_NAMES` 已按真实 registry 同步为 9-tuple，后续 PR 复制宿主表请认准代码。
 
 ---
 

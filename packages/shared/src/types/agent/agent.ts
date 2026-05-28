@@ -5,6 +5,14 @@
  * ask and operate (canvas manipulation) modes.
  */
 
+import type {
+  AcpPlanEntry,
+  AcpToolCallContent,
+  AcpToolCallLocation,
+  AcpToolCallStatus,
+  AcpToolKind,
+} from './acp-tool.js';
+
 // ==================== Agent Modes ====================
 
 export type AgentMode = 'ask' | 'operate';
@@ -31,7 +39,11 @@ export interface AgentThinkingDeltaEventData {
   content: string;
 }
 
-/** `event: tool_start` — model decided to call a tool. */
+/** `event: tool_start` — model decided to call a tool.
+ *  @deprecated will be removed once the internal-agent translator
+ *  migrates to the ACP-shaped `tool_call` event. External-agent turns
+ *  already emit `tool_call` instead; do NOT consume this for new code.
+ */
 export interface AgentToolStartEventData {
   /**
    * Stable per-call identifier supplied by the LLM tool-call protocol.
@@ -44,7 +56,10 @@ export interface AgentToolStartEventData {
   toolArgs: Record<string, unknown>;
 }
 
-/** `event: tool_result` — server finished executing the tool. */
+/** `event: tool_result` — server finished executing the tool.
+ *  @deprecated paired with `tool_start` above. Replaced by
+ *  `tool_call_update` for ACP-shaped turns.
+ */
 export interface AgentToolResultEventData {
   /**
    * Stable per-call identifier matching the `toolCallId` on the
@@ -55,6 +70,78 @@ export interface AgentToolResultEventData {
   toolName: string;
   /** Raw tool result payload (usually a JSON-stringified value). */
   toolResult: string;
+}
+
+/**
+ * `event: tool_call` — agent declared a tool invocation.
+ *
+ * Replaces the legacy `tool_start`/`tool_result` pair with the shape
+ * documented in ACP §session/update: a stable `toolCallId`, semantic
+ * `kind`, lifecycle `status`, list of source `locations`, and rich
+ * `content` blocks (text/image/diff/terminal). Emitted by external
+ * (ACP) agents today; the internal pi-ai bridge will move onto it
+ * in a follow-up change.
+ *
+ * `internalToolName` is the escape hatch: when present, the payload
+ * originated from a built-in pi-ai tool whose name appears in
+ * `INTERNAL_AGENT_TOOL_NAMES`. UI renderers use this discriminator
+ * to dispatch to the pre-existing `CanvasCommandCard` /
+ * `WebSearchToolDisplay` / `MergedAgentToolRow` components without
+ * re-implementing them on top of the ACP `content[]` model.
+ */
+export interface AgentToolCallEventData {
+  toolCallId: string;
+  /** Human-readable title from the agent (e.g. `Read app.ts`). */
+  title: string;
+  /** ACP semantic kind; undefined when the agent does not classify. */
+  toolKind?: AcpToolKind;
+  /** Initial lifecycle status, usually `pending`. */
+  status?: AcpToolCallStatus;
+  /** Source-file locations the tool touched. */
+  locations?: AcpToolCallLocation[];
+  /** Content blocks (often empty at declaration time, filled by updates). */
+  content?: AcpToolCallContent[];
+  /** Raw arguments the agent attached (passed through unmodified). */
+  rawInput?: unknown;
+  /**
+   * Internal-tool nominal name when this call came from Sediment's
+   * built-in pi-ai agent. Always absent for external-agent turns.
+   * Consumers narrow on this to pick the rich legacy renderer.
+   */
+  internalToolName?: string;
+}
+
+/**
+ * `event: tool_call_update` — incremental update for an in-flight
+ * tool call. Carries any subset of fields except `toolCallId`
+ * (mandatory key). Emitted multiple times per call: status
+ * transitions, streaming content blocks, late-arriving locations.
+ */
+export interface AgentToolCallUpdateEventData {
+  toolCallId: string;
+  status?: AcpToolCallStatus;
+  /** Replace-semantics: new value, if any, supersedes prior `title`. */
+  title?: string;
+  /**
+   * Newly-known content blocks. ACP spec is append-only — UI
+   * concatenates these onto whatever `content[]` is already showing.
+   */
+  content?: AcpToolCallContent[];
+  /** Newly-known locations; append-only. */
+  locations?: AcpToolCallLocation[];
+  /** Raw tool output the agent attached (passed through). */
+  rawOutput?: unknown;
+}
+
+/**
+ * `event: plan` — full plan replacement.
+ *
+ * ACP plans use REPLACE-semantics: each `plan` event carries the
+ * complete current entry list, not a delta. UI keeps only the latest
+ * plan emitted in the turn.
+ */
+export interface AgentPlanEventData {
+  entries: AcpPlanEntry[];
 }
 
 /** `event: done` — final assistant message + run-level metadata. */
@@ -133,6 +220,9 @@ export type AgentStreamEvent =
   | { type: 'thinking_delta'; data: AgentThinkingDeltaEventData }
   | { type: 'tool_start'; data: AgentToolStartEventData }
   | { type: 'tool_result'; data: AgentToolResultEventData }
+  | { type: 'tool_call'; data: AgentToolCallEventData }
+  | { type: 'tool_call_update'; data: AgentToolCallUpdateEventData }
+  | { type: 'plan'; data: AgentPlanEventData }
   | { type: 'prepared_prompt'; data: AgentPreparedPromptEventData }
   | { type: 'done'; data: AgentDoneEventData }
   | { type: 'error'; data: AgentErrorEventData }
@@ -148,8 +238,14 @@ export const AGENT_SSE_EVENTS = {
   Meta: 'meta',
   TextDelta: 'text_delta',
   ThinkingDelta: 'thinking_delta',
+  /** @deprecated emit `ToolCall` instead. Kept for legacy
+   *  internal-agent turns until the pi-ai bridge migrates over. */
   ToolStart: 'tool_start',
+  /** @deprecated emit `ToolCallUpdate` instead. */
   ToolResult: 'tool_result',
+  ToolCall: 'tool_call',
+  ToolCallUpdate: 'tool_call_update',
+  Plan: 'plan',
   PreparedPrompt: 'prepared_prompt',
   Done: 'done',
   Error: 'error',

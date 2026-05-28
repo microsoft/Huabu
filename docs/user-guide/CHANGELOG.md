@@ -4,6 +4,22 @@
 
 ---
 
+## 2026-05-29 · 幕后：ACP rich-update 基础设施（PR-1）
+
+**What Changed**
+
+- 外部 ACP agent（Claude Code / Copilot CLI 等）的 `tool_call` / `tool_call_update` / `plan` 三类 `session/update` 通知现在会被翻译成新的 SSE 事件（`tool_call` / `tool_call_update` / `plan`），并以 sidecar 文件 `<canvasId>/.history/chat/<threadId>.parts.json` 形式持久化，刷新后不再丢失。原有的 `text_delta` / `thinking_delta` 行为不变。
+- `packages/shared` 引入官方 `@agentclientprotocol/sdk@^0.22.1`：类型与 zod schema 通过该 SDK 复用，避免在客户端 / 服务端各自手抄。translator 在出口对每条 `session/update` 用 `safeParse` 做 trust-boundary 验证，并暴露三个计数器（invalidPayloads / toolCallMissingKind / unknownSessionUpdate）供后续 metric。
+
+**Notes**
+
+- **没有用户可见的 UI 变化**：本次只铺设管线，新的事件目前还没有渲染入口；PR-2/PR-3 会把它们接到聊天面板。
+- 现有 `tool_start` / `tool_result` SSE 事件保留并标记 `@deprecated`：内部 pi-ai 桥仍然在用，PR-3 切换前别拆。
+- 一个线程如果从未触发过 ACP 的 rich update（例如只跑了一条纯文本对话），不会生成 `.parts.json` 文件——零额外存储成本。
+- Sidecar 写入失败（磁盘只读 / 权限错误等）不会中断会话，只会在服务端日志里打 warn，pi-ai 主历史文件仍然完整。
+
+---
+
 ## 2026-05-28 · 修复：外部 Agent slash 命令偶尔为空
 
 **What Changed**

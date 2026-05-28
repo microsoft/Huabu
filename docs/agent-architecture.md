@@ -15,7 +15,7 @@
 | Sketch 识别            | `sketch`                         | [intent.route.ts](../apps/server/src/modules/agent/intent.route.ts) → [sketch.service.ts](../apps/server/src/modules/agent/sketch.service.ts)（`runAgent` 多轮 tool-calling） |
 | Prompt 节点 / Question | 复用 chat                        | 走 chat 入口                                                                                                                                                                  |
 
-**SSE 协议**：服务端只发 [`AgentStreamEvent`](../packages/shared/src/types/agent/agent.ts) 自定义事件（`meta` / `text_delta` / `thinking_delta` / `tool_start` / `tool_result` / `done` / `error` / `end`）；pi-agent-core 的内部事件被 `runAgent` 映射后转出，前端 [useAgentStream.ts](../apps/web/src/hooks/useAgentStream.ts) 不感知 pi-agent-core。
+**SSE 协议**：服务端只发 [`AgentStreamEvent`](../packages/shared/src/types/agent/agent.ts) 自定义事件（`meta` / `text_delta` / `thinking_delta` / `tool_start`<sup>†</sup> / `tool_result`<sup>†</sup> / `tool_call` / `tool_call_update` / `plan` / `prepared_prompt` / `done` / `error` / `end`）；pi-agent-core 的内部事件被 `runAgent` 映射后转出，前端 [useAgentStream.ts](../apps/web/src/hooks/useAgentStream.ts) 不感知 pi-agent-core。<sup>†</sup> `tool_start` / `tool_result` 自 PR-1 起标记 `@deprecated`，外部 ACP 代理走 `tool_call` / `tool_call_update`；保留是为 PR-3 切换前的内部 pi-ai 桥路径兼容。
 
 **关键运行时特性**：
 

@@ -84,7 +84,7 @@ apps/server/src/modules/agent/acp/
 ├── client.ts             AcpAgentClient — 1 session lifecycle                ✅
 ├── session-registry.ts   threadId → AcpSessionEntry，replace 时 shutdown 旧  ✅
 ├── service.ts            runAcpAgent() async generator + preprocessor wire    ✅
-├── translator.ts         session/update → AgentStreamEvent                   🟡 仅 text_delta
+├── translator.ts         session/update → AgentStreamEvent                   ✅ 5 active variants
 ├── preprocessor.ts       rawMsg + canvas → ExternalAgentPrompt                ✅
 ├── capabilities/
 │   ├── fs.ts             fs/read_text_file 沙箱                               ⏳ Phase 3
@@ -113,16 +113,19 @@ apps/web/src/
 
 ### 2.3 协议翻译表
 
-| ACP `session/update.sessionUpdate`  | Sediment `AgentStreamEvent`       | 状态        |
-| ----------------------------------- | --------------------------------- | ----------- |
-| `agent_message_chunk` (type=text)   | `text_delta`                      | ✅          |
-| `agent_thought_chunk`               | `thinking_delta`                  | ⏳ Phase 3  |
-| `tool_call` (status=in_progress)    | `tool_start`                      | ⏳ Phase 3+ |
-| `tool_call` (status=completed)      | `tool_result`                     | ⏳ Phase 3+ |
-| `plan`                              | `thinking_delta` 或 `plan_update` | ⏳          |
-| ACP error response                  | `error`                           | ✅          |
-| stopReason (end_turn/cancelled/...) | `done` (with stopReason)          | ✅          |
-| **（本地发送，不来自 ACP）**        | **`prepared_prompt`**             | ✅          |
+| ACP `session/update.sessionUpdate`  | Sediment `AgentStreamEvent`     | 状态                                |
+| ----------------------------------- | ------------------------------- | ----------------------------------- |
+| `agent_message_chunk` (type=text)   | `text_delta`                    | ✅                                  |
+| `agent_thought_chunk` (type=text)   | `thinking_delta`                | ✅ PR-1                             |
+| `tool_call`                         | `tool_call`                     | ✅ PR-1（新 SSE 事件，含 toolKind） |
+| `tool_call_update`                  | `tool_call_update`              | ✅ PR-1（null→undefined 语义统一）  |
+| `plan`                              | `plan`                          | ✅ PR-1（独立事件，sidecar 持久化） |
+| `user_message_chunk`                | _ignored_                       | ✅ PR-1（不回放自家消息）           |
+| `available_commands_update`         | _out-of-turn handled elsewhere_ | ✅                                  |
+| `current_mode_update` / 其他 4 种   | _dropped_                       | ⏳ 暂无 UI surface                  |
+| ACP error response                  | `error`                         | ✅                                  |
+| stopReason (end_turn/cancelled/...) | `done` (with stopReason)        | ✅                                  |
+| **（本地发送，不来自 ACP）**        | **`prepared_prompt`**           | ✅                                  |
 
 逆向（Sediment → ACP）：
 

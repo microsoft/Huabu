@@ -15,3 +15,4 @@ export * from './preprocessing.js';
 export * from './agent.js';
 export * from './artifact.js';
 export * from './acp.js';
+export * from './acp-tool.js';
