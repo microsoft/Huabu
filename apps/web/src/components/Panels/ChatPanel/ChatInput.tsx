@@ -1,12 +1,5 @@
 import { ArrowUp, Square, X } from 'lucide-react';
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 
 import { uploadImage, uploadPdf } from '@/api/artifact';
 import useCanvasStore from '@/store/canvasStore';
@@ -16,11 +9,11 @@ import { ContextUsageRing } from './ContextUsageRing';
 import { ModeSelector } from './ModeSelector';
 import { SourceCount } from './SelectedNodeRefs';
 import { SlashCommandMenu } from './SlashCommandMenu';
+import { useSlashCommandTypeahead } from './useSlashCommandTypeahead';
 import { Button } from '../../Common/Button';
 import { NodeRef } from '../../Common/NodeRef';
 import { Tooltip } from '../../Common/Tooltip';
 
-import type { SlashCommandMenuRef } from './SlashCommandMenu';
 import type {
   AcpAgentSummary,
   AgentBinding,
@@ -98,7 +91,6 @@ export const ChatInput = ({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const historyIndexRef = useRef(-1);
   const draftRef = useRef('');
-  const slashMenuRef = useRef<SlashCommandMenuRef | null>(null);
 
   // Pending attachments from the store
   const pendingAttachments = useChatStore((s) => s.pendingAttachments);
@@ -110,132 +102,19 @@ export const ChatInput = ({
   const [isDragOver, setIsDragOver] = useState(false);
   const canvasId = useCanvasStore((s) => s.canvasId);
 
-  // ── Slash-command typeahead state ────────────────────────────────
+  // ── Slash-command typeahead ──────────────────────────────────────
   //
-  // The menu activates when the textarea starts with `/<token>` AND
-  // the caret sits inside that token (so editing further into a
-  // sentence doesn't pop the menu back up). We keep the dismiss flag
-  // separate so an Esc-dismissal sticks until the user clears the
-  // slash or types a different one.
-  const [slashDismissedFor, setSlashDismissedFor] = useState<string | null>(
-    null,
-  );
-  const [caretPos, setCaretPos] = useState(0);
-
-  /**
-   * "User wants the slash menu" signal, computed independently of
-   * whether `slashCommands` is currently populated. We need this
-   * split because the lazy-refresh on-rising-edge effect must still
-   * fire when the cached list is empty (otherwise a missed push can
-   * never recover via user interaction). True iff:
-   *  - Value starts with `/` followed by an ASCII letter, AND
-   *  - Caret sits at or before the first whitespace, AND
-   *  - Esc-dismissal hasn't been applied for the same literal token.
-   * (Leading `/` followed by non-letter, e.g. `/path/to/x`, is
-   * treated as plain text.)
-   */
-  const wantsSlashMenu = useMemo(() => {
-    if (!value.startsWith('/')) return false;
-    const firstSpace = value.search(/\s/);
-    const tokenEnd = firstSpace === -1 ? value.length : firstSpace;
-    if (caretPos > tokenEnd) return false;
-    const filter = value.slice(1, tokenEnd);
-    if (filter.length > 0 && !/^[a-zA-Z]/.test(filter)) return false;
-    if (slashDismissedFor === filter) return false;
-    return true;
-  }, [value, caretPos, slashDismissedFor]);
-
-  /**
-   * If the current value + caret position is positioned in the leading
-   * `/<token>` segment AND we have at least one cached command,
-   * return the typed token (without the leading `/`). Otherwise
-   * return `null`.
-   *
-   * `wantsSlashMenu` covers the activation rules; this memo just
-   * layers the "non-empty command cache" gate on top so the popover
-   * itself is suppressed when there's nothing to show.
-   */
-  const slashState = useMemo<{ filter: string } | null>(() => {
-    if (!wantsSlashMenu) return null;
-    if (slashCommands.length === 0) return null;
-    const firstSpace = value.search(/\s/);
-    const tokenEnd = firstSpace === -1 ? value.length : firstSpace;
-    const filter = value.slice(1, tokenEnd);
-    return { filter };
-  }, [wantsSlashMenu, value, slashCommands.length]);
-
-  // ── Lazy-refresh trigger ────────────────────────────────────────
-  //
-  // Notify the hook on the rising edge of "user wants slash menu" so
-  // its TTL gate can decide whether to re-pull the command list. We
-  // fire on the rising edge (not on every render with
-  // wantsSlashMenu===true) so dragging the caret around inside the
-  // token doesn't spam the gate; the hook's own TTL gate is the
-  // throttle for true repeats.
-  useEffect(() => {
-    if (wantsSlashMenu) onSlashMenuIntent?.();
-  }, [wantsSlashMenu, onSlashMenuIntent]);
-
-  // Reset the dismiss flag when the user starts a new slash token.
-  // This way Esc dismisses the current `/comp` but typing `/help`
-  // afterwards re-opens the menu.
-  useEffect(() => {
-    if (slashDismissedFor === null) return;
-    if (!value.startsWith(`/${slashDismissedFor}`)) {
-      setSlashDismissedFor(null);
-    }
-  }, [value, slashDismissedFor]);
-
-  const setSlashMenuDismissed = useCallback(
-    (dismissed: boolean) => {
-      if (!dismissed) {
-        setSlashDismissedFor(null);
-        return;
-      }
-      const firstSpace = value.search(/\s/);
-      const tokenEnd = firstSpace === -1 ? value.length : firstSpace;
-      const token = value.startsWith('/') ? value.slice(1, tokenEnd) : '';
-      setSlashDismissedFor(token);
-    },
-    [value],
-  );
-
-  /**
-   * Insert the chosen command into the textarea, replacing the
-   * leading `/<token>` segment with `/<name> `. Caret lands right
-   * after the trailing space so the user can start typing arguments.
-   * Single attempt; we never mutate non-slash content.
-   */
-  const acceptSlashCommand = useCallback(
-    (command: AvailableCommand) => {
-      const firstSpace = value.search(/\s/);
-      const tokenEnd = firstSpace === -1 ? value.length : firstSpace;
-      const rest = value.slice(tokenEnd);
-      const replacement = `/${command.name} `;
-      const next = replacement + rest.replace(/^\s+/, '');
-      onChange(next);
-      // Restore focus + place caret right after the inserted `/name `.
-      requestAnimationFrame(() => {
-        const ta = textareaRef.current;
-        if (!ta) return;
-        ta.focus();
-        const pos = replacement.length;
-        ta.selectionStart = pos;
-        ta.selectionEnd = pos;
-        setCaretPos(pos);
-      });
-      setSlashDismissedFor(null);
-    },
-    [value, onChange],
-  );
-
-  // Keep `caretPos` in sync without forcing an extra render per
-  // keystroke for callers that don't care about it.
-  const syncCaret = useCallback(() => {
-    const ta = textareaRef.current;
-    if (!ta) return;
-    setCaretPos(ta.selectionStart ?? 0);
-  }, []);
+  // All slash-related state (caret tracking, Esc-dismiss, activation
+  // parsing, keyboard handling, command insertion) lives in the
+  // hook. ChatInput only forwards events to it and renders the menu
+  // when `slash.slashState` is non-null.
+  const slash = useSlashCommandTypeahead({
+    value,
+    onChange,
+    textareaRef,
+    slashCommands,
+    onSlashMenuIntent,
+  });
 
   // Upload a file and add it as a pending attachment
   const attachFile = useCallback(
@@ -383,39 +262,10 @@ export const ChatInput = ({
     if (disabled) return;
     if (e.nativeEvent.isComposing) return;
 
-    // ── Slash-command typeahead takes precedence over history nav ────
-    //
-    // When the menu is open we steal ArrowUp/Down (highlight move),
-    // Tab/Enter (accept), and Esc (close). Submission via Enter is
-    // disabled while the menu is open so the user doesn't accidentally
-    // send a partial command. The menu only counts as "open" when the
-    // textarea actually has a parseable `/<token>` at the caret AND
-    // some commands match the typed prefix.
-    if (slashState && slashMenuRef.current) {
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        slashMenuRef.current.moveHighlight(1);
-        return;
-      }
-      if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        slashMenuRef.current.moveHighlight(-1);
-        return;
-      }
-      if (e.key === 'Tab' || e.key === 'Enter') {
-        const active = slashMenuRef.current.getActive();
-        if (active) {
-          e.preventDefault();
-          acceptSlashCommand(active);
-          return;
-        }
-      }
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        setSlashMenuDismissed(true);
-        return;
-      }
-    }
+    // Slash menu owns ArrowUp/Down/Tab/Enter/Esc while open; bail
+    // out the moment it consumes the event so submission and history
+    // nav below don't also fire.
+    if (slash.handleKeyDown(e)) return;
 
     if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
       const ta = textareaRef.current;
@@ -672,26 +522,26 @@ export const ChatInput = ({
               value={value}
               onChange={(e) => {
                 onChange(e.target.value);
-                // Caret reads from the same event target — call AFTER
-                // onChange so the value is committed.
-                setCaretPos(e.target.selectionStart ?? 0);
+                // Caret reads must run AFTER onChange so the slash
+                // activation parser sees the committed value.
+                slash.syncCaret();
               }}
               onKeyDown={handleKeyDown}
-              onKeyUp={syncCaret}
-              onClick={syncCaret}
-              onSelect={syncCaret}
+              onKeyUp={slash.syncCaret}
+              onClick={slash.syncCaret}
+              onSelect={slash.syncCaret}
               onPaste={handlePaste}
               placeholder={currentPlaceholder}
               disabled={disabled}
               rows={2}
               className="text-fg-default placeholder:text-fg-subtle w-full resize-none bg-transparent text-sm focus:outline-none disabled:cursor-not-allowed"
             />
-            {slashState && (
+            {slash.slashState && (
               <SlashCommandMenu
-                ref={slashMenuRef}
+                ref={slash.slashMenuRef}
                 commands={slashCommands}
-                filter={slashState.filter}
-                onSelect={acceptSlashCommand}
+                filter={slash.slashState.filter}
+                onSelect={slash.acceptSlashCommand}
               />
             )}
           </div>
