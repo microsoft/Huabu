@@ -364,7 +364,7 @@ async function ensureAcpSessionInner(
       try {
         const loadResult = await client.loadSession({
           sessionId: persisted.sessionId,
-          cwd: persisted.cwd,
+          cwd,
         });
         sessionId = persisted.sessionId;
         created.sessionId = sessionId;
