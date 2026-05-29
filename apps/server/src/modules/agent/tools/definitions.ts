@@ -503,7 +503,7 @@ export const memoryWorkspaceWriteTool: ToolDefinition = {
   name: 'memory_workspace_write',
   label: 'Write workspace memory',
   description:
-    'Patch `<workspace>/setting/.huabu.md` — cross-canvas user profile. Each line in `diff` becomes a bullet, deduped against existing entries. Caller-supplied bullets should be ≤ 80 chars. Writer enforces a 4 KB / 80-line cap on the merged body and rejects oversized writes. See AGENT.md for when to use this.',
+    'Patch `<workspace>/setting/.huabu.md` — cross-canvas user profile. Each line in `diff` becomes a bullet, deduped against existing entries. Caller-supplied bullets should be ≤ 80 chars. Writer enforces a 4 KB / 80-line cap on the merged body and rejects oversized writes. Required args + discipline: `read("skills/memory/write/workspace-memory-writing.md")`.',
   parameters: memoryWorkspaceWriteParamsSchema,
   executionMode: 'sequential',
 };
@@ -519,7 +519,7 @@ export const memoryCanvasWriteTool: ToolDefinition = {
   name: 'memory_canvas_write',
   label: 'Write working memory',
   description:
-    'Replace `<canvasDir>/.memory/canvas.md` — per-canvas working memory. Wholesale replacement, not a delta: write the *current state* of the canvas in ≤ 4 KB / 80 lines. Writer rejects oversized bodies. See AGENT.md for when to use this.',
+    'Replace `<canvasDir>/.memory/canvas.md` — per-canvas working memory. Wholesale replacement, not a delta: write the *current state* of the canvas in ≤ 4 KB / 80 lines. Writer rejects oversized bodies. Required args + discipline: `read("skills/memory/write/canvas-memory-writing.md")`.',
   parameters: memoryCanvasWriteParamsSchema,
   executionMode: 'sequential',
 };
@@ -574,7 +574,7 @@ export const memorySkillWriteTool: ToolDefinition = {
   name: 'memory_skill_write',
   label: 'Write user skill',
   description:
-    'Write a user-owned skill at `<workspace>/setting/skills/<id>/SKILL.md`. Writer invalidates the skill cache on success so the next `read("skills/<id>/SKILL.md")` returns the new content immediately. See AGENT.md for when to use this and the rationale rules for `op: "create"`.',
+    'Write a user-owned skill at `<workspace>/setting/skills/<id>/SKILL.md`. Writer invalidates the skill cache on success so the next `read("skills/<id>/SKILL.md")` returns the new content immediately. Required args + discipline (incl. `op:"create"` rationale rule): `read("skills/memory/write/skills-writing.md")`.',
   parameters: memorySkillWriteParamsSchema,
   executionMode: 'sequential',
 };
