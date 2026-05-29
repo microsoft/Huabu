@@ -31,7 +31,7 @@ import {
   readAcpSessionRecord,
   writeAcpSessionRecord,
 } from './session-store.js';
-import { acpUpdateToStreamEvent } from './translator.js';
+import { acpUpdateToStreamEvent, mergeThinkingChunk } from './translator.js';
 import { canvasRoot as resolveCanvasRoot } from '../../storage/paths.js';
 import {
   emptySidecar,
@@ -991,7 +991,7 @@ export async function* runAcpAgent(
         } else if (evt.type === 'thinking_delta') {
           const last = contentBlocks[contentBlocks.length - 1];
           if (last?.type === 'thinking') {
-            last.thinking += evt.data.content;
+            last.thinking = mergeThinkingChunk(last.thinking, evt.data.content);
           } else {
             contentBlocks.push({
               type: 'thinking',

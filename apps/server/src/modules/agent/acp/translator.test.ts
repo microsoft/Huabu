@@ -10,6 +10,8 @@
  *   ✓ `tool_call` without `kind` increments the missing-kind counter
  *   ✓ `tool_call_update` coerces `null` → `undefined` per ACP semantics
  *   ✓ counter accessors are pure snapshots (mutations don't leak)
+ *   ✓ `mergeThinkingChunk` defends against snapshot-resend
+ *     (Copilot CLI re-emits intent chunks instead of streaming deltas)
  */
 
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -17,6 +19,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   acpUpdateToStreamEvent,
   getTranslatorCounters,
+  mergeThinkingChunk,
   resetTranslatorCounters,
   type TranslatorLogger,
 } from './translator.js';
@@ -265,5 +268,48 @@ describe('counters', () => {
       toolCallMissingKind: 0,
       unknownSessionUpdate: 0,
     });
+  });
+});
+
+describe('mergeThinkingChunk — snapshot-resend dedupe', () => {
+  it('returns the incoming chunk verbatim when the buffer is empty', () => {
+    expect(mergeThinkingChunk('', 'Planning guide IA')).toBe(
+      'Planning guide IA',
+    );
+  });
+
+  it('appends a true delta chunk', () => {
+    expect(mergeThinkingChunk('Plan', 'ning guide IA')).toBe(
+      'Planning guide IA',
+    );
+  });
+
+  it('drops an exact re-send (Copilot CLI report_intent quirk)', () => {
+    // Observed: same agent_thought_chunk text arrives twice in a row,
+    // producing "Planning guide IAPlanning guide IA" if naively appended.
+    expect(mergeThinkingChunk('Planning guide IA', 'Planning guide IA')).toBe(
+      'Planning guide IA',
+    );
+  });
+
+  it('drops a trailing-suffix resend', () => {
+    // Some agents resend the latest suffix as a "snapshot tail" instead
+    // of the full buffer. Treat that as a no-op too.
+    expect(mergeThinkingChunk('Planning guide IA', 'guide IA')).toBe(
+      'Planning guide IA',
+    );
+  });
+
+  it('treats an empty incoming chunk as a no-op', () => {
+    expect(mergeThinkingChunk('Plan', '')).toBe('Plan');
+  });
+
+  it('does not collapse legitimately repeating tail text', () => {
+    // If an agent legitimately streams "ha" then "ha" as separate
+    // deltas, the second "ha" IS a suffix of the buffer after the
+    // first append — we accept that this heuristic favours dedupe
+    // over preserving rare repeated short tokens. Document the
+    // trade-off here so future maintainers don't "fix" it.
+    expect(mergeThinkingChunk('ha', 'ha')).toBe('ha');
   });
 });

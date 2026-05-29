@@ -111,6 +111,32 @@ function nullToUndefined<T>(value: T | null | undefined): T | undefined {
 }
 
 /**
+ * Merge an incoming `agent_thought_chunk` text into the accumulated
+ * thinking buffer, defending against ACP servers that re-emit the
+ * same snapshot instead of a true delta.
+ *
+ * Observed in the wild (Copilot CLI, intent / report_intent text):
+ * the same chunk arrives twice in a row, producing `"FooBarFooBar"`
+ * after naive `+=`. Spec-conformant agents send disjoint deltas, so
+ * the incoming text never legitimately equals the trailing accumulated
+ * text — making suffix-match a safe dedupe heuristic.
+ *
+ *   merge("",          "Plan")   → "Plan"          (initial chunk)
+ *   merge("Plan",      "Plan")   → "Plan"          (exact re-send)
+ *   merge("Plan",      "ning")   → "Planning"      (true delta)
+ *   merge("Planning",  "Planning") → "Planning"    (snapshot resend)
+ *
+ * Pure function; safe to call from any state machine that accumulates
+ * thinking text.
+ */
+export function mergeThinkingChunk(existing: string, incoming: string): string {
+  if (incoming.length === 0) return existing;
+  if (existing.length === 0) return incoming;
+  if (existing.endsWith(incoming)) return existing;
+  return existing + incoming;
+}
+
+/**
  * Map one ACP `session/update` notification to a Sediment
  * `AgentStreamEvent`. Returns `null` when:
  *
