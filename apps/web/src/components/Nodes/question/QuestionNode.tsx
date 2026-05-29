@@ -4,15 +4,22 @@ import { memo, useCallback, useState, useRef, useEffect, useMemo } from 'react';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
 import { StatusBadge } from '@/components/Common/StatusBadge.tsx';
+import { useAcpAgents } from '@/hooks/useAcpAgents';
 import { useTextNodeSurface } from '@/hooks/useTextNodeSurface';
 import useCanvasStore from '@/store/canvasStore.ts';
 import { useChatStore } from '@/store/chatStore.ts';
 import { usePanelStore } from '@/store/panelStore.ts';
 
+import { AgentMentionMenu } from './AgentMentionMenu';
 import { NodeWrapper } from '../NodeWrapper';
 import { TextNodeBody } from '../shared/TextNodeBody';
 
+import type {
+  AgentMentionMenuRef,
+  AgentMentionOption,
+} from './AgentMentionMenu';
 import type { CanvasQuestionNodeData } from '../types';
+import type { AgentBinding } from '@sediment/shared';
 import type { Node, NodeProps } from '@xyflow/react';
 
 export type QuestionNodeType = Node<CanvasQuestionNodeData, 'question'>;
@@ -37,6 +44,16 @@ export const QuestionNode = memo(
 
     const inputContent =
       data.input?.kind === 'text' ? (data.input.content ?? '') : '';
+
+    // ------------------------------------------------------------------
+    // Connected ACP agents — feeds the `@` mention picker.
+    //
+    // We deliberately do NOT mount-fetch on every QuestionNode render
+    // because there may be many nodes per canvas; the hook already
+    // does a one-shot fetch at mount and we expose `refreshAgents` on
+    // explicit user intent (first `@` keystroke per session).
+    // ------------------------------------------------------------------
+    const { agents: connectedAgents, refresh: refreshAgents } = useAcpAgents();
 
     // Focus textarea when entering edit mode, cursor at end.
     useEffect(() => {
@@ -77,7 +94,7 @@ export const QuestionNode = memo(
       baseFontSize: 16,
       padding: NODE_PADDING,
       fontOpts,
-      placeholder: 'Ask a question...',
+      placeholder: 'Ask a question… type @ to pick an agent',
     });
 
     const status = data.status ?? 'idle';
@@ -113,7 +130,10 @@ export const QuestionNode = memo(
 
     const openInChat = useCallback(() => {
       if (!data.threadId) return;
-      openQuestionThread(id, data.threadId);
+      // Forward the node's binding so the ChatInput mode selector
+      // reflects the agent that actually answered this question
+      // (defaults to internal when the node pre-dates `agentBinding`).
+      openQuestionThread(id, data.threadId, data.agentBinding);
       requestOpenRightPanel();
       // Mark as viewed (persisted via autosave, no undo entry).
       if (!data.viewed) {
@@ -122,6 +142,7 @@ export const QuestionNode = memo(
     }, [
       id,
       data.threadId,
+      data.agentBinding,
       data.viewed,
       openQuestionThread,
       requestOpenRightPanel,
@@ -236,6 +257,163 @@ export const QuestionNode = memo(
       patchNodeSilent,
     ]);
 
+    // ------------------------------------------------------------------
+    // `@` mention typeahead — pick the agent that will handle this
+    // question. The picker activates when the draft starts with `@`
+    // and the caret sits within that token. Selecting an option
+    // rewrites the leading `@<filter>` to `@<alias> ` and persists
+    // the binding choice on the node so `useQuestionRunner` can
+    // dispatch to the right agent.
+    // ------------------------------------------------------------------
+    const mentionMenuRef = useRef<AgentMentionMenuRef | null>(null);
+    const [caretPos, setCaretPos] = useState(0);
+    // Esc-dismiss is keyed by the literal `@<token>` the user dismissed
+    // for, so typing a different alias after Esc re-opens the menu
+    // (vs. requiring an explicit interaction).
+    const [mentionDismissedFor, setMentionDismissedFor] = useState<
+      string | null
+    >(null);
+
+    /**
+     * Activation rule for the mention menu. True when:
+     *   - editing is active,
+     *   - draft starts with `@`,
+     *   - caret sits at or before the end of the first token,
+     *   - the token isn't currently dismissed.
+     */
+    const mentionState = useMemo<{ filter: string } | null>(() => {
+      if (!isEditing) return null;
+      const draft = surface.draft;
+      if (!draft.startsWith('@')) return null;
+      const firstSpace = draft.search(/\s/);
+      const tokenEnd = firstSpace === -1 ? draft.length : firstSpace;
+      if (caretPos > tokenEnd) return null;
+      const filter = draft.slice(1, tokenEnd);
+      if (mentionDismissedFor === filter) return null;
+      return { filter };
+    }, [isEditing, surface.draft, caretPos, mentionDismissedFor]);
+
+    // Clear the dismiss flag once the user starts a different `@token`
+    // (typed `@cu` after dismissing `@cl`).
+    useEffect(() => {
+      if (mentionDismissedFor === null) return;
+      if (!surface.draft.startsWith(`@${mentionDismissedFor}`)) {
+        setMentionDismissedFor(null);
+      }
+    }, [surface.draft, mentionDismissedFor]);
+
+    // Refresh the ACP agent list on the rising edge of "user wants the
+    // mention menu" so a newly-connected agent shows up without
+    // requiring the user to first open the ChatPanel's ModeSelector.
+    const lastMentionWantedRef = useRef(false);
+    useEffect(() => {
+      const wants = mentionState !== null;
+      if (wants && !lastMentionWantedRef.current) {
+        void refreshAgents();
+      }
+      lastMentionWantedRef.current = wants;
+    }, [mentionState, refreshAgents]);
+
+    const syncCaret = useCallback(() => {
+      const ta = textareaRef.current;
+      if (!ta) return;
+      setCaretPos(ta.selectionStart ?? 0);
+    }, []);
+
+    const handleDraftChange = useCallback(
+      (next: string) => {
+        surface.setDraft(next);
+        // Re-read the caret AFTER React commits the new value so the
+        // activation parser sees the just-typed character.
+        requestAnimationFrame(syncCaret);
+      },
+      [surface, syncCaret],
+    );
+
+    const acceptMention = useCallback(
+      (option: AgentMentionOption) => {
+        const draft = surface.draft;
+        const firstSpace = draft.search(/\s/);
+        const tokenEnd = firstSpace === -1 ? draft.length : firstSpace;
+        const rest = draft.slice(tokenEnd);
+        const replacement = `@${option.alias} `;
+        const next = replacement + rest.replace(/^\s+/, '');
+        surface.setDraft(next);
+
+        // Persist the binding via patchNodeSilent — picking an agent
+        // is a metadata tweak, not a content edit, so it shouldn't
+        // create a separate undo step or trigger ingestion.
+        const binding: AgentBinding =
+          option.kind === 'external'
+            ? {
+                kind: 'external',
+                alias: option.alias,
+                agentletAgentId: option.agentletAgentId,
+              }
+            : { kind: 'internal' };
+        patchNodeSilent(id, {
+          agentBinding: binding,
+          agentMode: option.kind === 'internal' ? option.mode : undefined,
+        });
+
+        setMentionDismissedFor(null);
+        // Restore focus + place caret right after the inserted `@alias `.
+        requestAnimationFrame(() => {
+          const ta = textareaRef.current;
+          if (!ta) return;
+          ta.focus();
+          const pos = replacement.length;
+          ta.selectionStart = pos;
+          ta.selectionEnd = pos;
+          setCaretPos(pos);
+        });
+      },
+      [id, surface, patchNodeSilent],
+    );
+
+    const dismissMention = useCallback(() => {
+      const draft = surface.draft;
+      const firstSpace = draft.search(/\s/);
+      const tokenEnd = firstSpace === -1 ? draft.length : firstSpace;
+      const token = draft.startsWith('@') ? draft.slice(1, tokenEnd) : '';
+      setMentionDismissedFor(token);
+    }, [surface.draft]);
+
+    /**
+     * Intercept keys only while the mention menu is visible — the
+     * textarea otherwise behaves identically to plain text input
+     * (Enter inserts a newline; we never submit on Enter).
+     */
+    const handleTextareaKeyDown = useCallback(
+      (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (!mentionState || !mentionMenuRef.current) return;
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          mentionMenuRef.current.moveHighlight(1);
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          mentionMenuRef.current.moveHighlight(-1);
+          return;
+        }
+        if (e.key === 'Tab' || e.key === 'Enter') {
+          const active = mentionMenuRef.current.getActive();
+          if (active) {
+            e.preventDefault();
+            acceptMention(active);
+          }
+          return;
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          dismissMention();
+          return;
+        }
+      },
+      [mentionState, acceptMention, dismissMention],
+    );
+
     const isDoneUnviewed = status === 'done' && !viewed;
 
     return (
@@ -257,15 +435,27 @@ export const QuestionNode = memo(
           ref={textareaRef}
           {...surface.bodyProps}
           draft={surface.draft}
-          onChange={surface.setDraft}
+          onChange={handleDraftChange}
           onBlur={handleBlur}
+          onKeyDown={handleTextareaKeyDown}
+          onKeyUp={syncCaret}
+          onClick={syncCaret}
+          onSelect={syncCaret}
           isEditing={isEditing}
           onRequestEdit={handleDoubleClick}
-          placeholder="Ask a question..."
+          placeholder="Ask a question… type @ to pick an agent"
           fontFamily={QUESTION_FONT_FAMILY}
           color="var(--question-fg)"
           textareaClassName="placeholder:text-fg-default/40"
         >
+          {mentionState && (
+            <AgentMentionMenu
+              ref={mentionMenuRef}
+              agents={connectedAgents}
+              filter={mentionState.filter}
+              onSelect={acceptMention}
+            />
+          )}
           {status !== 'idle' && (
             <StatusBadge
               status={status}

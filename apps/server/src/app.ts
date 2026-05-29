@@ -6,6 +6,11 @@ import multipart from '@fastify/multipart';
 import staticPlugin from '@fastify/static';
 import { fastify } from 'fastify';
 
+import {
+  acpAgentsRoutes,
+  acpThreadsRoutes,
+  mountAgentletServer,
+} from './modules/agent/acp/index.js';
 import agentRoutes from './modules/agent/agent.route.js';
 import intentRoutes from './modules/agent/intent.route.js';
 import llmRoutes from './modules/agent/llm.route.js';
@@ -19,7 +24,7 @@ import {
 import workspaceRoutes from './modules/workspace.route.js';
 import { preloadSkills } from './prompt/skill-loader.js';
 
-// Lock the workspace at startup if SEDIMENT_WORKSPACE is set (managed mode).
+// Lock the workspace at startup if HUABU_WORKSPACE is set (managed mode).
 // In free mode this is a no-op and the client will activate at runtime.
 initWorkspaceFromEnv();
 
@@ -54,13 +59,13 @@ app.register(multipart, {
 });
 
 // ── HTTP Basic Auth gate ─────────────────────────────────────────────
-// When SEDIMENT_BASIC_AUTH_USER and SEDIMENT_BASIC_AUTH_PASS are both set,
+// When HUABU_BASIC_AUTH_USER and HUABU_BASIC_AUTH_PASS are both set,
 // every request (except CORS preflight) must include matching Basic Auth
 // credentials. The Vite dev server applies the same check at the edge,
 // but the backend must enforce it independently because port 3001 may be
 // reachable directly (e.g. when bound to 0.0.0.0 on a public IP).
-const basicAuthUser = process.env.SEDIMENT_BASIC_AUTH_USER;
-const basicAuthPass = process.env.SEDIMENT_BASIC_AUTH_PASS;
+const basicAuthUser = process.env.HUABU_BASIC_AUTH_USER;
+const basicAuthPass = process.env.HUABU_BASIC_AUTH_PASS;
 if (basicAuthUser && basicAuthPass) {
   const expected =
     'Basic ' +
@@ -110,3 +115,22 @@ app.register(artifactRoute, { prefix: '/api/canvas' });
 app.register(intentRoutes, { prefix: '/api/intent' });
 app.register(llmRoutes, { prefix: '/api/llm' });
 app.register(workspaceRoutes, { prefix: '/api/workspace' });
+
+// ── External agent (ACP) bridge ───────────────────────────────────────
+// Mount @agentlet/server (WS upgrade at /api/acp/agent) behind the
+// ENABLE_ACP=1 feature flag so the default startup path is
+// unchanged. See docs/huabu-acp-client-plan.md for the full design.
+//
+// The agents-list route is registered *unconditionally* so the front-end
+// has one URL to call regardless of flag state — it reports
+// `{ enabled: false, agents: [] }` when the bridge isn't mounted.
+app.register(acpAgentsRoutes, { prefix: '/api/acp' });
+if (process.env.ENABLE_ACP === '1') {
+  mountAgentletServer(app);
+  // Thread-scoped routes (session/commands) only make sense when the
+  // bridge is actually mounted — register them under the same flag so
+  // disabled deployments don't expose endpoints that would always
+  // 503.
+  app.register(acpThreadsRoutes, { prefix: '/api/acp' });
+  app.log.info('ACP (external agent) bridge enabled');
+}

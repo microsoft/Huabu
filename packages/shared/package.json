@@ -26,6 +26,7 @@
     "dev": "tsc -w -p tsconfig.json"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "^0.22.1",
     "@xyflow/react": "^12.10.0",
     "cytoscape": "^3.33.1",
     "cytoscape-fcose": "^2.2.0",

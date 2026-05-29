@@ -17,12 +17,15 @@ import {
   agentCanvasIdQuerySchema,
   agentRequestSchema,
   createId,
+  variantForInternalTool,
 } from '@sediment/shared';
 import { encode } from 'gpt-tokenizer';
 
 import { loadAgent, renderAgentTemplate } from '../../prompt/agent-loader.js';
+import { runAcpAgent } from '../agent/acp/service.js';
 import { runAgent } from '../agent/agent.service.js';
 import { buildAgentNodeRef } from '../agent/node-ref.js';
+import { readChatParts } from '../agent/store/chat-parts-store.js';
 import { loadContext, saveContext } from '../agent/store/chat-store.js';
 import {
   ARTIFACT_URL_REGEX,
@@ -32,18 +35,22 @@ import { renderNodeNeighbourhoodMarkdown } from '../canvas/node-neighbourhood.js
 import { getCanvasStore } from '../storage/index.js';
 
 import type { AgentNodeRef } from '../agent/node-ref.js';
+import type { ChatPartsSidecar } from '../agent/store/chat-parts-store.js';
 import type { AssistantMessage, Context } from '@earendil-works/pi-ai';
 import type {
   AgentCanvasIdQuery,
   AgentRequest,
   AgentStreamEvent,
   ApiResult,
+  AssistantHistoryPart,
   ChatAttachment,
   ChatHistoryItem,
   ChatHistoryResponse,
   ContextTokensResponse,
+  ExternalAgentPrompt,
   StopThreadResponse,
   ToolResponse,
+  WebSearchToolResponse,
   WireSelectionNode,
 } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
@@ -500,13 +507,61 @@ function scheduleRunCleanup(threadId: string, delayMs = 60_000): void {
 }
 
 /**
+ * Parse a pi-ai tool-result text payload into the canonical
+ * `ToolResponse<…>` envelope. Mirrors the legacy `role:'tool'`
+ * reconstruction logic — preserved here because every rich-variant
+ * tool part carries this envelope as its `data` field.
+ */
+function parseToolResultText(
+  toolName: string,
+  resultText: string,
+): ToolResponse<string, unknown> {
+  try {
+    const parsed = JSON.parse(resultText);
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      'tool' in parsed &&
+      'status' in parsed
+    ) {
+      return parsed as ToolResponse<string, unknown>;
+    }
+    return {
+      tool: toolName,
+      status: 'success',
+      data: parsed,
+    };
+  } catch {
+    return {
+      tool: toolName,
+      status: 'success',
+      data: { content: resultText },
+    };
+  }
+}
+
+/**
  * Convert a pi-ai Context into ChatHistoryItem entries for the client.
- * Status messages (interrupted / error) are deferred so they appear
- * after any adjacent assistant or tool content, matching the visual
+ *
+ * Assistant turns are emitted as a single `role:'assistant'` item
+ * whose `parts` array preserves the in-stream order of text /
+ * thinking / tool blocks — there is no longer a standalone
+ * `role:'tool'` item (the legacy variant was dropped in PR-2).
+ *
+ * Tool segments are reconstructed by looking ahead at the pi-ai
+ * `toolResult` messages (matched by `toolCallId`) and, when present,
+ * by the ACP sidecar's per-call extras (`toolKind`, `status`,
+ * `locations`, structured `content`, `permission`). Plans persisted
+ * in the sidecar by message timestamp are appended at the end of
+ * the assistant turn's parts.
+ *
+ * Status messages (interrupted / error) are still deferred so they
+ * appear after any adjacent assistant content, matching the visual
  * order the user saw during the live session.
  */
 function buildHistoryItems(
   context: Context,
+  sidecar: ChatPartsSidecar | null,
   messages: ChatHistoryItem[],
 ): void {
   let pendingStatus: ChatHistoryItem | null = null;
@@ -518,7 +573,31 @@ function buildHistoryItems(
     }
   };
 
-  for (const msg of context.messages) {
+  // Pre-index pi-ai toolResult messages by toolCallId so an assistant
+  // message's `toolCall` block can find its result in O(1) without
+  // forcing a quadratic scan over the message list. Each result is
+  // referenced exactly once during the walk below; collisions cannot
+  // happen because pi-ai guarantees toolCallIds are unique within a
+  // Context.
+  const toolResultByCallId = new Map<
+    string,
+    { toolName: string; resultText: string }
+  >();
+  for (const m of context.messages) {
+    if (m.role === 'toolResult') {
+      const resultText = m.content
+        .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+        .map((b) => b.text)
+        .join('');
+      toolResultByCallId.set(m.toolCallId, {
+        toolName: m.toolName ?? 'unknown',
+        resultText,
+      });
+    }
+  }
+
+  for (let i = 0; i < context.messages.length; i++) {
+    const msg = context.messages[i];
     if (msg.role === 'user') {
       let content =
         typeof msg.content === 'string'
@@ -560,6 +639,31 @@ function buildHistoryItems(
       if (content.startsWith('[SYSTEM Error]')) {
         const detail = content.slice('[SYSTEM Error] '.length);
         pendingStatus = { role: 'status', status: 'error', detail };
+        continue;
+      }
+
+      // ACP preprocessor sidecar marker. Appended right before the
+      // external agent's assistant turn, so flushing it immediately
+      // keeps the visible order: user → prepared-prompt card →
+      // assistant. Mirrors how the UI inserts the card live.
+      if (content.startsWith('[SYSTEM PreparedPrompt]')) {
+        flushStatus();
+        const payload = content.slice('[SYSTEM PreparedPrompt] '.length);
+        try {
+          const parsed = JSON.parse(payload) as {
+            agentAlias: string;
+            prompt: ExternalAgentPrompt | null;
+            error?: string;
+          };
+          messages.push({
+            role: 'prepared-prompt',
+            agentAlias: parsed.agentAlias,
+            prompt: parsed.prompt,
+            ...(parsed.error ? { error: parsed.error } : {}),
+          });
+        } catch {
+          // Malformed sidecar — drop silently rather than break history.
+        }
         continue;
       }
 
@@ -623,51 +727,126 @@ function buildHistoryItems(
         });
       }
     } else if (msg.role === 'assistant') {
-      const textParts = msg.content
-        .filter((b) => b.type === 'text')
-        .map((b) => (b as { type: 'text'; text: string }).text);
-
-      if (textParts.length > 0) {
-        messages.push({
-          role: 'assistant',
-          content: textParts.join(''),
-        });
+      // Walk the assistant content blocks IN ORDER, building a parts
+      // array that mirrors the live SSE aggregation. Tool calls fold
+      // INTO this assistant turn (not a separate role:'tool' message)
+      // — the ACP sidecar's `toolExtras` overlay supplies the
+      // semantic fields (`toolKind`, `status`, `locations`, …) and the
+      // matching pi-ai `toolResult` supplies the typed `data` envelope
+      // for built-in tools.
+      const parts: AssistantHistoryPart[] = [];
+      for (const block of msg.content) {
+        if (block.type === 'text') {
+          if (block.text.length > 0) {
+            parts.push({ kind: 'text', text: block.text });
+          }
+        } else if (block.type === 'thinking') {
+          if (block.thinking.length > 0) {
+            parts.push({ kind: 'thinking', text: block.thinking });
+          }
+        } else if (block.type === 'toolCall') {
+          const toolCallId = block.id;
+          const toolName = block.name;
+          const result = toolResultByCallId.get(toolCallId);
+          const extras = sidecar?.toolExtras[toolCallId];
+          // Structural internal-vs-external discriminator: the
+          // internal pi-ai bridge pushes a matching `toolResult`
+          // into `Context.messages`; the ACP path does NOT (it only
+          // appends faux `ToolCall` blocks — see
+          // `acp/service.ts` step 6). So the presence of `result`
+          // is itself the signal — no name-allowlist needed, and an
+          // external agent that happens to expose a tool named
+          // `read` / `grep` / … cannot collide.
+          //
+          // `JSON.parse(result.resultText)` is only safe under this
+          // structural guarantee because the pi-ai bridge always
+          // emits the `ToolResponse<…>` envelope for built-in tools.
+          const toolData = result
+            ? parseToolResultText(toolName, result.resultText)
+            : undefined;
+          // External agents (no pi-ai toolResult) always render as
+          // `generic`; internal calls dispatch through the shared
+          // variant table so server + client + sketch synthesizer all
+          // agree on which renderer owns each tool name.
+          const variant = toolData
+            ? variantForInternalTool(toolName)
+            : 'generic';
+          const base = {
+            kind: 'tool' as const,
+            toolCallId,
+            // ACP envelopes carry a `title` field on tool_call /
+            // tool_call_update events; we did not persist it in the
+            // sidecar (only the SSE event carried it for live UI), so
+            // fall back to the tool's own name as the human label.
+            title: toolName,
+            ...(extras?.toolKind ? { toolKind: extras.toolKind } : {}),
+            ...(extras?.status ? { status: extras.status } : {}),
+            ...(extras?.locations ? { locations: extras.locations } : {}),
+            ...(extras?.content ? { content: extras.content } : {}),
+            ...(extras?.rawOutput !== undefined
+              ? { rawOutput: extras.rawOutput }
+              : {}),
+            ...(extras?.permission ? { permission: extras.permission } : {}),
+          };
+          switch (variant) {
+            case 'agent_tool':
+              parts.push({
+                ...base,
+                variant: 'agent_tool',
+                toolName,
+                ...(toolData ? { data: toolData } : {}),
+              });
+              break;
+            case 'canvas_commands':
+              parts.push({
+                ...base,
+                variant: 'canvas_commands',
+                ...(toolData
+                  ? {
+                      data: toolData as ToolResponse<
+                        'canvas_commands',
+                        Record<string, unknown>
+                      >,
+                    }
+                  : {}),
+              });
+              break;
+            case 'web_search':
+              parts.push({
+                ...base,
+                variant: 'web_search',
+                ...(toolData
+                  ? {
+                      data: toolData as WebSearchToolResponse,
+                    }
+                  : {}),
+              });
+              break;
+            case 'generic':
+              parts.push({ ...base, variant: 'generic' });
+              break;
+          }
+        }
+      }
+      // Append the persisted plan (if any) at the END of the parts
+      // array — the renderer decides visual placement; persisting at
+      // the end keeps insertion deterministic (no ambiguity about
+      // pre/post-text ordering).
+      const ts = sidecar?.messageTimestamps[i];
+      if (typeof ts === 'number' && ts > 0) {
+        const planEntries = sidecar?.planByMessageTimestamp[String(ts)];
+        if (planEntries && planEntries.length > 0) {
+          parts.push({ kind: 'plan', entries: planEntries });
+        }
+      }
+      if (parts.length > 0) {
+        messages.push({ role: 'assistant', parts });
       }
       // Flush status after assistant content so it appears below
       flushStatus();
     } else if (msg.role === 'toolResult') {
-      const resultText = msg.content
-        .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
-        .map((b) => b.text)
-        .join('');
-
-      let toolResponse: ToolResponse<string, unknown>;
-      try {
-        const parsed = JSON.parse(resultText);
-        if (
-          parsed &&
-          typeof parsed === 'object' &&
-          'tool' in parsed &&
-          'status' in parsed
-        ) {
-          toolResponse = parsed as ToolResponse<string, unknown>;
-        } else {
-          toolResponse = {
-            tool: msg.toolName ?? 'unknown',
-            status: 'success',
-            data: parsed,
-          };
-        }
-      } catch {
-        toolResponse = {
-          tool: msg.toolName ?? 'unknown',
-          status: 'success',
-          data: { content: resultText },
-        };
-      }
-
-      messages.push({ role: 'tool', toolResponse });
-      flushStatus();
+      // Folded into the preceding assistant turn via toolCallId — no
+      // standalone history item.
     }
   }
 
@@ -711,7 +890,8 @@ const agentRoutes: FastifyPluginAsync = async (
     }
 
     const messages: ChatHistoryItem[] = [];
-    buildHistoryItems(context, messages);
+    const sidecar = readChatParts(threadId, canvasId);
+    buildHistoryItems(context, sidecar, messages);
 
     return reply.send({ threadId, messages });
   });
@@ -873,7 +1053,23 @@ const agentRoutes: FastifyPluginAsync = async (
       canvasId,
       attachments,
       anchorNodeId,
+      agentBinding,
     } = parsed.data;
+
+    // Log the thread→agent binding so external dispatches are visible
+    // in the server log. When `kind === 'external'`, the dispatch below
+    // routes to `runAcpAgent` instead of the built-in pi-agent-core loop.
+    if (agentBinding && agentBinding.kind === 'external') {
+      request.log.info(
+        {
+          threadId: threadId ?? null,
+          canvasId: canvasId ?? null,
+          alias: agentBinding.alias,
+          agentletAgentId: agentBinding.agentletAgentId,
+        },
+        'agent.route: external agentBinding → ACP dispatch',
+      );
+    }
 
     const resolvedThreadId = getOrCreateThreadId(threadId);
 
@@ -1078,14 +1274,33 @@ const agentRoutes: FastifyPluginAsync = async (
     socket?.once('close', onDisconnect);
 
     try {
-      const stream = runAgent({
-        scope: mode,
-        canvasId,
-        context,
-        logger: request.log,
-        maxIterations: 20,
-        signal: abortController.signal,
-      });
+      // Route dispatch: external bindings go to `runAcpAgent`, everything
+      // else (including missing/`internal` bindings) goes to the built-in
+      // pi-agent-core loop. Both paths yield the same `AgentStreamEvent`
+      // shape so the for-await loop below is binding-agnostic.
+      const stream: AsyncIterable<AgentStreamEvent> =
+        agentBinding?.kind === 'external'
+          ? runAcpAgent({
+              binding: {
+                alias: agentBinding.alias,
+                agentletAgentId: agentBinding.agentletAgentId,
+              },
+              message: userContent,
+              threadId: resolvedThreadId,
+              canvasId,
+              context,
+              canvasContext,
+              signal: abortController.signal,
+              logger: request.log,
+            })
+          : runAgent({
+              scope: mode,
+              canvasId,
+              context,
+              logger: request.log,
+              maxIterations: 20,
+              signal: abortController.signal,
+            });
 
       // Track the latest agent error so we can persist it AFTER the stream
       // exits. We can't push into `context.messages` mid-loop because the

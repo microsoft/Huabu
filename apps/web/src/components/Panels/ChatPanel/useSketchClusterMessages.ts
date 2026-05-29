@@ -6,21 +6,21 @@
  * there is no real chat thread to replay. Instead we fake one by emitting:
  *
  *  1. A user message describing the gesture (stroke count + ID context).
- *  2. An assistant message with the LLM's reasoning.
- *  3. A `canvas_commands` tool message carrying the produced commands +
- *     captured CanvasChange entries — rendered by the existing
- *     `CanvasCommandCard` so Accept / Revert / Blend "just work".
- *  4. A status message if the LLM call failed.
+ *  2. An assistant message carrying the LLM's reasoning + a synthetic
+ *     `canvas_commands` tool part (rendered by the existing
+ *     `CanvasCommandCard` so Accept / Revert / Blend "just work").
+ *  3. A status message if the LLM call failed.
  *
  * The chat panel reads these synthesized messages directly from the
  * intent store; nothing is persisted to the chat thread.
  */
 
+import { createId } from '@sediment/shared';
 import { useMemo } from 'react';
 
 import { useIntentStore } from '@/store/intentStore';
 
-import type { ChatMessage } from '../../Messages/types';
+import type { AssistantSegment, ChatMessage } from '@/store/chatTypes';
 import type { SketchProcessingCluster } from '@/store/intentStore';
 
 /**
@@ -56,25 +56,23 @@ function buildMessages(cluster: SketchProcessingCluster): ChatMessage[] {
     content: userParts.join('\n'),
   });
 
-  // 2. Assistant reasoning (only if we have one)
+  // 2. Assistant message — reasoning text + synthetic canvas_commands
+  //    tool part that mimics the shape `CanvasCommandCard` consumes
+  //    from a real agent turn.
+  const segments: AssistantSegment[] = [];
   if (cluster.reasoning) {
-    messages.push({
-      id: `${cluster.id}-assistant`,
-      role: 'assistant',
-      content: cluster.reasoning,
-    });
+    segments.push({ kind: 'text', text: cluster.reasoning });
   }
-
-  // 3. canvas_commands tool message — fakes the same shape that
-  //    `CanvasCommandCard` consumes from real agent tool output.
-  if (
-    (cluster.commands?.length ?? 0) > 0 ||
-    (cluster.changes?.length ?? 0) > 0
-  ) {
-    messages.push({
-      id: `${cluster.id}-tool`,
-      role: 'tool',
-      toolResponse: {
+  const hasCanvas =
+    (cluster.commands?.length ?? 0) > 0 || (cluster.changes?.length ?? 0) > 0;
+  if (hasCanvas) {
+    segments.push({
+      kind: 'tool',
+      toolCallId: createId('toolcall'),
+      title: 'canvas_commands',
+      status: 'completed',
+      variant: 'canvas_commands',
+      data: {
         tool: 'canvas_commands',
         status: 'success',
         data: {
@@ -86,8 +84,15 @@ function buildMessages(cluster: SketchProcessingCluster): ChatMessage[] {
       },
     });
   }
+  if (segments.length > 0) {
+    messages.push({
+      id: `${cluster.id}-assistant`,
+      role: 'assistant',
+      segments,
+    });
+  }
 
-  // 4. Error
+  // 3. Error
   if (cluster.error) {
     messages.push({
       id: `${cluster.id}-error`,

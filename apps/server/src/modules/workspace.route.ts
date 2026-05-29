@@ -214,7 +214,7 @@ const workspaceRoutes: FastifyPluginAsync = async (app) => {
       return sendError(
         reply,
         403,
-        'Workspace is locked by the server (managed mode). Restart with a different SEDIMENT_WORKSPACE to switch.',
+        'Workspace is locked by the server (managed mode). Restart with a different HUABU_WORKSPACE to switch.',
       );
     }
     if (!isLocalhost(request.ip)) {

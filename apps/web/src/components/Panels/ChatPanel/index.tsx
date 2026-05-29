@@ -7,6 +7,8 @@ import {
 import { useState, useEffect, useCallback, useMemo } from 'react';
 
 import { Button } from '@/components/Common/Button';
+import { useAcpAgents } from '@/hooks/useAcpAgents';
+import { useAcpSlashCommands } from '@/hooks/useAcpSlashCommands';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import { useIntentStore } from '@/store/intentStore';
@@ -47,6 +49,31 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const llmLoading = useLLMStore((state) => state.loading);
   const llmInit = useLLMStore((state) => state.init);
 
+  // Thread → agent binding. The binding is locked for the lifetime of
+  // a thread; the picker is only writable on an empty, not-streaming
+  // thread. New threads start in `{kind:'internal'}`.
+  const agentBinding = useChatStore((state) => state.agentBinding);
+  const setAgentBinding = useChatStore((state) => state.setAgentBinding);
+  const threadId = useChatStore((state) => state.threadId);
+  const {
+    agents: connectedAgents,
+    refresh: refreshAcpAgents,
+    loading: acpAgentsLoading,
+  } = useAcpAgents();
+
+  // Slash commands for the currently-bound external agent. Empty array
+  // when the thread is internal or the agent has nothing to offer.
+  // `refreshIfStale` is plumbed into ChatInput so the typeahead can
+  // lazily resync the list on the rising edge of "user wants the
+  // slash menu" — covers the case where the agent pushes new
+  // commands mid-session (e.g. after auth completes).
+  const { commands: slashCommands, refreshIfStale: refreshSlashCommands } =
+    useAcpSlashCommands({
+      threadId,
+      binding: agentBinding,
+      canvasId,
+    });
+
   // Question thread replay mode
   const viewingQuestionThread = useChatStore((s) => s.viewingQuestionThread);
   const closeQuestionThread = useChatStore((s) => s.closeQuestionThread);
@@ -76,8 +103,19 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const panelTitle = useMemo(() => {
     if (viewingSketchCluster) return 'Sketch Recognition';
     if (viewingQuestionThread) return 'Question Replay';
+    // When the thread is delegated to an external ACP agent, the
+    // built-in model name is irrelevant — surface the agent alias
+    // instead so the header reflects who's actually answering.
+    if (agentBinding.kind === 'external') {
+      return `Chat with ${agentBinding.alias}`;
+    }
     return activeModelName ? `Chat with ${activeModelName}` : 'Chat';
-  }, [activeModelName, viewingQuestionThread, viewingSketchCluster]);
+  }, [
+    activeModelName,
+    agentBinding,
+    viewingQuestionThread,
+    viewingSketchCluster,
+  ]);
 
   // Register intent callback — when user selects an intent in the popover,
   // it's sent here and executed as an agent chat message.
@@ -204,6 +242,18 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
             isStreaming={isLoading}
             mode={mode}
             onModeChange={setMode}
+            binding={agentBinding}
+            onBindingChange={(b) => setAgentBinding(b, canvasId || undefined)}
+            connectedAgents={connectedAgents}
+            onRefreshAgents={refreshAcpAgents}
+            refreshingAgents={acpAgentsLoading}
+            onNewThread={handleNewChat}
+            slashCommands={slashCommands}
+            onSlashMenuIntent={refreshSlashCommands}
+            // 1 thread = 1 binding. Lock the picker the moment a thread
+            // has any message OR a stream is in flight — the user must
+            // start a new chat to pick a different agent.
+            bindingLocked={messages.length > 0 || isLoading}
             disabled={isLoading || !isHistoryLoaded}
           />
         )}

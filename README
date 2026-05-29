@@ -133,6 +133,107 @@ For environment setup details, see [docs/setup.md](./docs/setup.md).
 
 ---
 
+## Connecting external coding agents
+
+Sediment can talk to AI coding agents that already run on your machine —
+**GitHub Copilot CLI**, **Claude Code**, **Gemini CLI**, and others that
+speak the [Agent Client Protocol](https://agentclientprotocol.com). Once
+connected, the agent shows up inside Sediment and can read and modify
+files in whatever project folder you pointed it at.
+
+### One-time setup
+
+1. Copy the env template:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+   Open the new `.env` and set these two lines (the token is just a
+   password you make up — anything long and random is fine):
+
+   ```dotenv
+   ENABLE_ACP=1
+   ACP_DEV_TOKEN=pick-any-long-random-string
+   ```
+
+2. _Optional._ Make the `agentlet` command available from any folder.
+   Run the snippet that matches your shell from the project root:
+
+   ```bash
+   # bash
+   echo 'export PATH="'"$PWD"'/bin:$PATH"' >> ~/.bashrc && exec bash
+   ```
+
+   ```bash
+   # zsh (macOS default)
+   echo 'export PATH="'"$PWD"'/bin:$PATH"' >> ~/.zshrc && exec zsh
+   ```
+
+   ```fish
+   # fish
+   fish_add_path "$PWD/bin"
+   ```
+
+   ```powershell
+   # PowerShell (Windows) — persists for the current user
+   [Environment]::SetEnvironmentVariable(
+     'Path',
+     "$((Get-Location).Path)\bin;$([Environment]::GetEnvironmentVariable('Path','User'))",
+     'User')
+   ```
+
+   If you skip this, just use the full path everywhere
+   (e.g. `~/Sediment/bin/agentlet …` or `.\bin\agentlet …` on Windows).
+
+### Connecting an agent
+
+With `pnpm dev` running, open another terminal, `cd` into the project
+folder you want the agent to work on, and start the agent of your choice:
+
+```bash
+# GitHub Copilot CLI
+agentlet --agent "copilot --acp"
+
+# Claude Code
+agentlet --agent "claude --acp"
+
+# Gemini CLI
+agentlet --agent "gemini --acp"
+```
+
+That's it — the agent will show up in Sediment's external-agent panel and
+you can hand it tasks from any canvas.
+
+### Tool-permission prompts
+
+Some agents pause to ask for permission before running a tool that edits
+files, executes commands, etc. When they do, the request surfaces **inline
+in the chat** as a permission card, and the agent waits until you click
+**Allow** or **Reject** (a request times out and is treated as cancelled
+after 5 minutes).
+
+Whether you ever see these prompts is up to the agent, not Sediment:
+
+- `copilot --acp --allow-all` — the `--allow-all` flag tells Copilot to
+  **auto-approve everything on its side**, so it never sends a permission
+  request and no card appears. Drop `--allow-all` if you want to approve
+  each sensitive action yourself.
+- `claude --acp` / `gemini --acp` — these keep their own default policy and
+  will ask before risky operations (typically `edit` / `execute`).
+
+> Permission decisions are transient — they are not persisted and do not
+> appear in canvas history after a refresh.
+
+### Updating the bundled `agentlet`
+
+`external/agentlet/` is a snapshot of
+[`hai-team/agentlet`](https://github.com/hai-team/agentlet). Maintainers
+sync it with `pnpm run subtree:pull:agentlet` (pull upstream changes) or
+`pnpm run subtree:push:agentlet` (publish local changes back).
+
+---
+
 ## Documentation
 
 - [User Guide](./docs/user-guide/README.md) — how to use the product

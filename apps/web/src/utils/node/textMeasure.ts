@@ -31,6 +31,20 @@ export function buildFontStr(
 }
 
 /**
+ * Pretext treats `\n` as a line terminator (matching CSS layout): a
+ * string that ends with `\n` produces the same number of laid-out lines
+ * as the same string without the trailing newline. Inside an editable
+ * textarea, however, the caret sits on a visually empty line right after
+ * the trailing `\n`, so the container must reserve a line of height for
+ * it — otherwise pressing Enter at the end of the text does not grow
+ * the node until the user types the next character. Returns 1 when the
+ * text ends with `\n`, else 0.
+ */
+function trailingEditableLines(text: string): number {
+  return text.endsWith('\n') ? 1 : 0;
+}
+
+/**
  * Measure the natural content dimensions using pretext (no DOM reflow).
  * maxWidth controls the wrap boundary.
  */
@@ -54,7 +68,8 @@ export function measureTextContent(
   for (const line of lines) {
     if (line.width > maxW) maxW = line.width;
   }
-  return { width: Math.ceil(maxW), height: Math.ceil(height) };
+  const extra = trailingEditableLines(text) * lineH;
+  return { width: Math.ceil(maxW), height: Math.ceil(height + extra) };
 }
 
 /**
@@ -85,6 +100,7 @@ export function computeFontSizeForHeight(
 
   let lo = 1;
   let hi = 200;
+  const trailingLines = trailingEditableLines(text);
   for (let i = 0; i < 15; i++) {
     const mid = (lo + hi) / 2;
     const fontStr = buildFontStr(
@@ -98,7 +114,8 @@ export function computeFontSizeForHeight(
     });
     const lineH = mid * opts.lineHeight;
     const { height } = layoutWithLines(prepared, safeWidth, lineH);
-    if (height <= safeHeight) {
+    const totalHeight = height + trailingLines * lineH;
+    if (totalHeight <= safeHeight) {
       lo = mid;
     } else {
       hi = mid;
@@ -131,5 +148,6 @@ export function measureTextHeight(
   });
   const lineH = fontSize * opts.lineHeight;
   const { height } = layoutWithLines(prepared, contentWidth, lineH);
-  return Math.ceil(height);
+  const extra = trailingEditableLines(text) * lineH;
+  return Math.ceil(height + extra);
 }

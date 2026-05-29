@@ -4,6 +4,8 @@
  */
 
 import type { AccentToken, SurfaceToken } from './color.js';
+import type { AgentMode } from '../agent/agent.js';
+import type { AgentBinding } from '../api/acp.js';
 
 // ==================== Basic Node Types ====================
 
@@ -455,6 +457,19 @@ export interface QuestionNodeData extends BaseNodeData {
   responseSummary?: string;
   /** Whether the user has viewed the completed response in the chat panel. */
   viewed?: boolean;
+  /**
+   * Agent dispatch binding chosen via the in-node `@` mention. When
+   * omitted (default), the question runs against the built-in agent
+   * with `agentMode='ask'`. The mention text (e.g. `@claude`) is also
+   * kept in `input.content` so the user can see/edit which agent was
+   * picked.
+   */
+  agentBinding?: AgentBinding;
+  /**
+   * Built-in agent mode when `agentBinding` is internal or omitted.
+   * Defaults to `'ask'`. Ignored for external bindings.
+   */
+  agentMode?: AgentMode;
 }
 
 /**

@@ -8,11 +8,18 @@ import { useChatStore } from '@/store/chatStore';
 import { ContextUsageRing } from './ContextUsageRing';
 import { ModeSelector } from './ModeSelector';
 import { SourceCount } from './SelectedNodeRefs';
+import { SlashCommandMenu } from './SlashCommandMenu';
+import { useSlashCommandTypeahead } from './useSlashCommandTypeahead';
 import { Button } from '../../Common/Button';
 import { NodeRef } from '../../Common/NodeRef';
 import { Tooltip } from '../../Common/Tooltip';
 
-import type { AgentMode } from '@sediment/shared';
+import type {
+  AcpAgentSummary,
+  AgentBinding,
+  AgentMode,
+  AvailableCommand,
+} from '@sediment/shared';
 
 interface ChatInputProps {
   value: string;
@@ -22,6 +29,43 @@ interface ChatInputProps {
   isStreaming?: boolean;
   mode: AgentMode;
   onModeChange: (mode: AgentMode) => void;
+  /** Thread → agent binding. See ChatPanel for sourcing rules. */
+  binding: AgentBinding;
+  onBindingChange: (binding: AgentBinding) => void;
+  /** Currently-connected ACP agents (from `useAcpAgents`). */
+  connectedAgents: AcpAgentSummary[];
+  /** Re-fetch the connected-agents list (called on selector open + Refresh button). */
+  onRefreshAgents?: () => void | Promise<void>;
+  /** True while a refresh is in flight. */
+  refreshingAgents?: boolean;
+  /** Start a fresh chat thread ("New chat session" action in the mode picker). */
+  onNewThread?: () => void;
+  /**
+   * Slash commands the bound external agent advertised via
+   * `available_commands_update`. Empty when the binding is internal,
+   * the agent has not pushed yet, or the agent simply exposes no
+   * slash commands. The typeahead popover is suppressed in those
+   * cases so the user doesn't see an empty menu.
+   */
+  slashCommands?: AvailableCommand[];
+  /**
+   * Called on the rising edge of "user wants the slash menu" — i.e.
+   * the textarea transitions from "doesn't look like a slash" to
+   * "starts with `/<letter>` and caret sits in that token". The
+   * receiver (`useAcpSlashCommands.refreshIfStale`) decides whether
+   * a fetch is actually due via its own TTL gate, so this can be
+   * fired liberally.
+   *
+   * Fires regardless of whether `slashCommands` is currently empty
+   * so an empty list caused by a missed push can recover the moment
+   * the user signals intent.
+   */
+  onSlashMenuIntent?: () => void;
+  /**
+   * When true, the mode/binding picker is locked. Independent of
+   * `disabled`, which only suppresses input submission.
+   */
+  bindingLocked?: boolean;
   disabled?: boolean;
   placeholder?: string;
 }
@@ -34,6 +78,15 @@ export const ChatInput = ({
   isStreaming = false,
   mode,
   onModeChange,
+  binding,
+  onBindingChange,
+  connectedAgents,
+  onRefreshAgents,
+  refreshingAgents = false,
+  onNewThread,
+  slashCommands = [],
+  onSlashMenuIntent,
+  bindingLocked = false,
   disabled = false,
   placeholder = 'Asking anything here...',
 }: ChatInputProps) => {
@@ -51,6 +104,20 @@ export const ChatInput = ({
   );
   const [isDragOver, setIsDragOver] = useState(false);
   const canvasId = useCanvasStore((s) => s.canvasId);
+
+  // ── Slash-command typeahead ──────────────────────────────────────
+  //
+  // All slash-related state (caret tracking, Esc-dismiss, activation
+  // parsing, keyboard handling, command insertion) lives in the
+  // hook. ChatInput only forwards events to it and renders the menu
+  // when `slash.slashState` is non-null.
+  const slash = useSlashCommandTypeahead({
+    value,
+    onChange,
+    textareaRef,
+    slashCommands,
+    onSlashMenuIntent,
+  });
 
   // Upload a file and add it as a pending attachment
   const attachFile = useCallback(
@@ -197,6 +264,11 @@ export const ChatInput = ({
   ) => {
     if (disabled) return;
     if (e.nativeEvent.isComposing) return;
+
+    // Slash menu owns ArrowUp/Down/Tab/Enter/Esc while open; bail
+    // out the moment it consumes the event so submission and history
+    // nav below don't also fire.
+    if (slash.handleKeyDown(e)) return;
 
     if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
       const ta = textareaRef.current;
@@ -447,23 +519,48 @@ export const ChatInput = ({
             </div>
           )}
 
-          <textarea
-            ref={textareaRef}
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            onKeyDown={handleKeyDown}
-            onPaste={handlePaste}
-            placeholder={currentPlaceholder}
-            disabled={disabled}
-            rows={2}
-            className="text-fg-default placeholder:text-fg-subtle w-full resize-none bg-transparent text-sm focus:outline-none disabled:cursor-not-allowed"
-          />
+          <div className="relative">
+            <textarea
+              ref={textareaRef}
+              value={value}
+              onChange={(e) => {
+                onChange(e.target.value);
+                // Caret reads must run AFTER onChange so the slash
+                // activation parser sees the committed value.
+                slash.syncCaret();
+              }}
+              onKeyDown={handleKeyDown}
+              onKeyUp={slash.syncCaret}
+              onClick={slash.syncCaret}
+              onSelect={slash.syncCaret}
+              onPaste={handlePaste}
+              placeholder={currentPlaceholder}
+              disabled={disabled}
+              rows={2}
+              className="text-fg-default placeholder:text-fg-subtle w-full resize-none bg-transparent text-sm focus:outline-none disabled:cursor-not-allowed"
+            />
+            {slash.slashState && (
+              <SlashCommandMenu
+                ref={slash.slashMenuRef}
+                commands={slashCommands}
+                filter={slash.slashState.filter}
+                onSelect={slash.acceptSlashCommand}
+              />
+            )}
+          </div>
 
           <div className="mt-2 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <ModeSelector
-                value={mode}
-                onChange={onModeChange}
+                mode={mode}
+                onModeChange={onModeChange}
+                binding={binding}
+                onBindingChange={onBindingChange}
+                connectedAgents={connectedAgents}
+                onRefreshAgents={onRefreshAgents}
+                refreshing={refreshingAgents}
+                onNewThread={onNewThread}
+                locked={bindingLocked}
                 disabled={disabled}
               />
               <ContextUsageRing draftText={value} isStreaming={isStreaming} />

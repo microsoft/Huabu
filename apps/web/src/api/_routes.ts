@@ -65,4 +65,13 @@ export const routes = {
     const params = canvasId ? `?canvasId=${enc(canvasId)}` : '';
     return `/agent/context-tokens/${enc(threadId)}${params}`;
   },
+
+  // ── ACP (external agent bridge) ───────────────────────────────────
+  acpAgents: '/acp/agents',
+  acpThreadSession: (threadId: string) =>
+    `/acp/threads/${enc(threadId)}/session`,
+  acpThreadCommands: (threadId: string) =>
+    `/acp/threads/${enc(threadId)}/commands`,
+  acpThreadPermission: (threadId: string) =>
+    `/acp/threads/${enc(threadId)}/permission`,
 } as const;

@@ -12,6 +12,7 @@ import { routes } from './_routes';
 import { readTypedSSEStream } from './_sse';
 
 import type {
+  AgentBinding,
   AgentMode,
   AgentRequest,
   AgentStreamEvent,
@@ -169,6 +170,13 @@ export const agentApi = {
        * `useQuestionRunner`; anchor-type agnostic.
        */
       anchorNodeId?: string;
+      /**
+       * Thread → agent binding. The client is the source of truth for
+       * this mapping; the server reads it per-request to decide whether
+       * to run the built-in agent or dispatch to an ACP agent.
+       * Defaults to internal when omitted.
+       */
+      agentBinding?: AgentBinding;
       signal?: AbortSignal;
     },
   ): Promise<void> => {
@@ -183,6 +191,7 @@ export const agentApi = {
         : undefined,
       intentData: options?.intentData,
       anchorNodeId: options?.anchorNodeId,
+      agentBinding: options?.agentBinding,
     };
 
     try {

@@ -15,7 +15,7 @@
 | Sketch 识别            | `sketch`                         | [intent.route.ts](../apps/server/src/modules/agent/intent.route.ts) → [sketch.service.ts](../apps/server/src/modules/agent/sketch.service.ts)（`runAgent` 多轮 tool-calling） |
 | Prompt 节点 / Question | 复用 chat                        | 走 chat 入口                                                                                                                                                                  |
 
-**SSE 协议**：服务端只发 [`AgentStreamEvent`](../packages/shared/src/types/agent/agent.ts) 自定义事件（`meta` / `text_delta` / `thinking_delta` / `tool_start` / `tool_result` / `done` / `error` / `end`）；pi-agent-core 的内部事件被 `runAgent` 映射后转出，前端 [useAgentStream.ts](../apps/web/src/hooks/useAgentStream.ts) 不感知 pi-agent-core。
+**SSE 协议**：服务端只发 [`AgentStreamEvent`](../packages/shared/src/types/agent/agent.ts) 自定义事件（`meta` / `text_delta` / `thinking_delta` / `tool_call` / `tool_call_update` / `plan` / `prepared_prompt` / `done` / `error` / `end`）；pi-agent-core 的内部事件被 `runAgent` 映射后转出，前端 [useAgentStream.ts](../apps/web/src/hooks/useAgentStream.ts) 不感知 pi-agent-core。内部 pi-ai 工具调用与外部 ACP 代理共用同一套 `tool_call` / `tool_call_update` 信封：内部回合在 `tool_call` 上携带 `internalToolName` 以驱动前端 render variant 派发并触发本地副作用（如 `canvas_commands` 执行），外部 ACP 回合不带该字段、统一渲染为 `generic` variant。
 
 **关键运行时特性**：
 

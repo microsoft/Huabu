@@ -9,7 +9,8 @@
  *     .artifacts/<artifactId><ext>  raw uploads (hidden dir)
  *     memory/preferences.md
  *     .history/
- *       chat/<threadId>.json
+ *       chat/<threadId>.json        pi-ai Context (messages, append-only)
+ *       chat/<threadId>.parts.json  rich-ACP sidecar overlay (optional)
  *       intent.json
  *       events.jsonl
  */
@@ -76,6 +77,20 @@ export function chatPath(canvasId: string, threadId: string): string {
   return path.join(
     chatDir(canvasId),
     `${sanitizeId(threadId, 'threadId')}.json`,
+  );
+}
+
+/**
+ * Sidecar JSON paired with `chatPath` — holds rich-ACP overlay parts
+ * (plan entries, tool-call extension fields, permission outcomes)
+ * that don't fit inside the pi-ai `Context` shape. See
+ * `chat-parts-store.ts` for the schema. Optional: a thread without
+ * ACP enrichment simply has no `.parts.json` file.
+ */
+export function chatPartsPath(canvasId: string, threadId: string): string {
+  return path.join(
+    chatDir(canvasId),
+    `${sanitizeId(threadId, 'threadId')}.parts.json`,
   );
 }
 

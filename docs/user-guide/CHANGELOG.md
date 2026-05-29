@@ -4,6 +4,102 @@
 
 ---
 
+## 2026-05-31 · 文本节点编辑：按回车现在会立即增高
+
+**What Changed**
+
+- 在 `TextNode` / `QuestionNode` 中编辑文字时，按下回车键节点会立即增加一行高度，不再需要在新行上多输入一个字符才看到容器变大。
+- 节点尺寸自适应使用的 `measureTextContent` / `measureTextHeight` / `computeFontSizeForHeight` 现在会把"以 `\n` 结尾"的文本视为多一个可见空行。
+
+**Notes**
+
+- 行为差异来自 pretext 把 `\n` 视为 CSS 风格的行终止符——纯排版场景这没问题，但在可编辑的 textarea 里光标会停留在那个"看似空白"的下一行，所以节点必须为它预留一行高度。
+- 仅影响输入时的高度反馈；已落盘的节点尺寸（`style.width` / `style.fontSize`）不变，无需迁移。
+
+---
+
+## 2026-05-31 · ToolPart 结构重构：富渲染工具升级为一等变体
+
+**What Changed**
+
+- 助手消息里的 `AssistantToolPart` 从"扁平形状 + 名字判断分发"重构为四个一等结构变体的 discriminated union：`generic` / `agent_tool` / `canvas_commands` / `web_search`。`variant` 标签在数据源头（服务端 history 重建、SSE 合并、sketch cluster 合成器）写定一次，所有渲染器按 `variant` 精确收窄分发，前端不再做名字字符串翻译，也不再有 `as ToolResponse<…>` 强转。
+- `canvas_commands` / `web_search` 因为有独家形状（canvas commands、`WebSearchToolResponse`）而独立成型；`agent_tool` 收纳所有同名连续合并的内置 pi-ai 工具（如 `read` / `grep` / `inspect_nodes`），合并键现在是结构化的 `agent_tool:<toolName>`；其余外部 ACP `tool_call` 走 `generic` 通用渲染器。
+
+**Notes**
+
+- **没有用户可见的 UI 变化**：所有四类工具卡片的视觉、行为（撤回 / 预览 / 批量撤回 / 复制等）保持不变；重构只调整内部数据契约，让类型系统替代名字约定承担正确性。
+- 历史 sidecar 与 SSE 线协议未变。`AgentToolCallEventData` 移除了 `internalToolName`（ACP `tool_call` 永远走 `generic`），不影响任何已落盘的旧消息——回放时由服务端按结构化数据决定 variant。
+- 内部约定：新增需要"独家形状"的内置工具时（例如未来引入新的可视化卡片），优先升级为新 variant 而不是塞到 `agent_tool.data` 里。共享辅助 `variantForInternalTool(toolName)` 是 variant 解析的单一源点。
+
+---
+
+## 2026-05-30 · ACP rich-update 在聊天面板可见（PR-2）
+
+**What Changed**
+
+- PR-1 铺设的 `tool_call` / `tool_call_update` / `plan` 现在在聊天面板里渲染为一等公民的"段（part）"：
+  - **工具调用卡片**：外部 ACP agent（Claude Code / Copilot CLI / 自研 agent）发出的 tool call 显示为一行可展开的卡片，带状态图标（pending → in_progress → completed/failed）、`toolKind` 图标（read / edit / search / execute …）、source locations 和富 content 块（文本 / 图片 / 资源链接）。同名连续的内置 agent 工具调用（如 3 条 `inspect_nodes`）合并为一行计数。
+  - **Plan 卡片**：agent 发出的 `plan` 通知现在显示为可折叠的待办清单，支持 `pending` / `in_progress` / `completed` 三种状态、`high` 优先级徽章和"复制 plan（Markdown 格式）"按钮。
+- 助手消息内部模型从"一条 text + 旁边一条独立 `tool` 角色消息"重构为"一条 assistant 消息持有 `parts: AssistantHistoryPart[]`"。`parts` 是 `text / thinking / tool / plan / status` 五种段的有序数组——同一段渲染分发既走实时流也走刷新回放，不再有双码路。
+- 历史 sidecar 从 v1（positional `messageIndex / partIndex`）升级到 v2（stable id：`toolCallId` 作为 tool extras 的 key，`messageTimestamp` 作为 plan 的 key）。读取时旧文件自动 in-memory migrate 到 v2，下次写入即落地为 v2。
+
+**Notes**
+
+- **数据兼容**：旧的 chat-store 数据（messages 没持久化、只持久化 thread/binding 映射）不需要迁移。旧的 sidecar v1 文件透明升级，无人工动作。
+- **内置 pi-ai agent**：内部 tools（`read` / `grep` / `inspect_nodes` / `canvas_commands` / `web_search` …）的现有富渲染（CanvasCommandCard / WebSearchToolDisplay / MergedAgentToolRow）保持不变；它们通过新的 `internalToolName` 字段从 part 上解析，原有交互（撤回单次变更、批量撤回、preview）行为一致。
+- **遗留事件**：`tool_start` / `tool_result` 这两个 SSE 事件仍兼容并标记 `@deprecated`，内部 pi-ai 桥仍在用；下一个 PR-2.5 会把 pi-ai 也切到 `tool_call` / `tool_call_update`，届时会一并清理。
+- 一个线程如果从未触发过 ACP 富更新，仍然不会生成 `.parts.json`——零额外存储成本不变。
+
+---
+
+## 2026-05-29 · 幕后：ACP rich-update 基础设施（PR-1）
+
+**What Changed**
+
+- 外部 ACP agent（Claude Code / Copilot CLI 等）的 `tool_call` / `tool_call_update` / `plan` 三类 `session/update` 通知现在会被翻译成新的 SSE 事件（`tool_call` / `tool_call_update` / `plan`），并以 sidecar 文件 `<canvasId>/.history/chat/<threadId>.parts.json` 形式持久化，刷新后不再丢失。原有的 `text_delta` / `thinking_delta` 行为不变。
+- `packages/shared` 引入官方 `@agentclientprotocol/sdk@^0.22.1`：类型与 zod schema 通过该 SDK 复用，避免在客户端 / 服务端各自手抄。translator 在出口对每条 `session/update` 用 `safeParse` 做 trust-boundary 验证，并暴露三个计数器（invalidPayloads / toolCallMissingKind / unknownSessionUpdate）供后续 metric。
+
+**Notes**
+
+- **没有用户可见的 UI 变化**：本次只铺设管线，新的事件目前还没有渲染入口；PR-2/PR-3 会把它们接到聊天面板。
+- 现有 `tool_start` / `tool_result` SSE 事件保留并标记 `@deprecated`：内部 pi-ai 桥仍然在用，PR-3 切换前别拆。
+- 一个线程如果从未触发过 ACP 的 rich update（例如只跑了一条纯文本对话），不会生成 `.parts.json` 文件——零额外存储成本。
+- Sidecar 写入失败（磁盘只读 / 权限错误等）不会中断会话，只会在服务端日志里打 warn，pi-ai 主历史文件仍然完整。
+
+---
+
+## 2026-05-28 · 修复：外部 Agent slash 命令偶尔为空
+
+**What Changed**
+
+- 修复了绑定到外部 ACP agent（如 Claude Code / Copilot CLI）的线程在打开聊天面板后，`/` typeahead 偶尔一直空白、且 Network 里 `commands` 始终是空数组的问题。根因是 agent 经常在 `session/new` 响应**之前**就把 `available_commands_update` 通知推过来，而服务端那时还没装上 listener，通知被静默丢弃。
+- 服务端 `AcpAgentClient` 现在会把"还没有 listener 就到达"的 `session/update` 按 sessionId 缓存到一个有界 ring buffer 里；调用 `registerSessionListener` 时同步回放，确保不会再漏掉首次推送。
+
+**Notes**
+
+- 不需要前端配合，刷新页面即可生效。原有的"立即拉 + 200ms 后再拉一次"兜底逻辑保留不变，但绝大多数情况下首次 POST 就能返回完整命令列表了。
+- 仅当 `ENABLE_ACP=1` 启用时该路径才会生效；内置 agent 线程不受影响。
+- 如果 agent 本身从来不推 `available_commands_update`，菜单仍然保持隐藏 —— 这是 agent 的行为，不是 Sediment 的 bug。
+
+---
+
+## 2026-05-26 · ACP 外部 Agent 斜杠命令：聊天输入框 typeahead
+
+**What Changed**
+
+- 当聊天线程绑定到外部 ACP agent（如 Claude Code / Copilot CLI）时，在输入框中输入 `/` 会弹出该 agent 提供的 **slash command 候选菜单**。键盘交互：`↑/↓` 移动高亮、`Tab` / `Enter` 选中、`Esc` 关闭。点击候选项也可选中，选中后会把 `/<name>` 写入输入框并把光标放在参数位置。
+- 服务端新增两个端点：`POST /api/acp/threads/:threadId/session`（幂等地打开/复用 per-thread ACP session 并返回当前缓存的 slash 命令）和 `GET /api/acp/threads/:threadId/commands`（读取最新缓存）。绑定到外部 agent 后，前端会自动调用前者预热 session 并拉取命令，无需用户先发送一条消息。
+- 预处理器（intent translator LLM）对斜杠命令做 **short-circuit**：当 raw 输入以 `/<name>` 开头时跳过 LLM 重写，原样转发给外部 agent —— 否则 LLM 可能把命令拆成自然语言、丢失前导 `/`、或额外加噪声。
+
+**Notes**
+
+- 该功能要求线程绑定到 **external** binding（ModeSelector 中选了一个连接上的 ACP agent）。Internal（Sediment 内置 agent）线程没有 slash 命令，菜单不会出现。
+- 命令列表是 agent 推送的 —— 由 ACP `session/update.available_commands_update` 通知决定。某些 agent 在 `session/new` 后才推送，前端会立即拉一次 + 200ms 后再拉一次，以兜底"晚到"的推送。如果 agent 完全不推送任何命令，菜单保持隐藏。
+- ACP 协议本身没有"执行斜杠命令"的 RPC —— 斜杠命令是嵌在普通 `session/prompt` 文本里的，agent 自己解析。Sediment 只是帮你把命令名输入对，不会拦截执行。
+- 仅在服务器启动时设置 `ENABLE_ACP=1` 才会注册线程端点；否则按 404 行为降级，菜单不展示。
+
+---
+
 ## 2026-05-25 · Artifact 引用瘦身：只存裸文件名
 
 **What Changed**

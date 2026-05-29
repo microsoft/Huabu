@@ -1,9 +1,13 @@
 import {
   createId,
+  variantForInternalTool,
+  type AssistantToolPart,
+  type AssistantToolVariant,
   type CanvasCommand,
   type CanvasEdgeId,
   type CanvasNodeId,
   type ToolResponse,
+  type WebSearchToolResponse,
 } from '@sediment/shared';
 import { useState, useCallback, useRef, useEffect } from 'react';
 
@@ -14,7 +18,7 @@ import { useChatStore } from '@/store/chatStore';
 
 import { snapshotAndExtractChanges } from './useCanvasChanges';
 
-import type { ResourceLabel } from '../components/Messages/types';
+import type { AssistantSegment, ResourceLabel } from '../store/chatTypes';
 import type {
   AgentMode,
   AgentStreamEvent,
@@ -342,153 +346,452 @@ function applyCanvasCommandsFromToolResult(toolResult: string | undefined): {
 
 interface StreamEventContext {
   assistantId: string;
-  /**
-   * Pending tool-start message IDs awaiting their `tool_result`.
-   *
-   * Primary lookup is by `toolCallId` (a stable per-call identifier
-   * the server forwards from the LLM tool-call protocol). The
-   * `fifo` array preserves emission order as a fallback for older
-   * servers that don't yet send `toolCallId` — without it, parallel
-   * tool execution could swap results onto the wrong message bubble
-   * because completion order ≠ start order.
-   */
-  toolQueue: {
-    byCallId: Map<string, string>;
-    fifo: string[];
-  };
   /** Called after canvas_commands are applied. */
-  onCanvasCommands?: (
-    commands: CanvasCommand[],
-    toolMsgId: string | undefined,
-  ) => void;
+  onCanvasCommands?: (commands: CanvasCommand[]) => void;
+  /**
+   * ID of the pending PreparedPromptCard message inserted by
+   * `startStream` for external-agent turns. When the server emits its
+   * `prepared_prompt` event we update this message in place; when
+   * absent (reconnect path) we append a fresh one.
+   */
+  preparedPromptId?: string;
+}
+
+/**
+ * Ensure an assistant message exists for `ctx.assistantId`. Used by
+ * the tool-call / plan handlers which may fire before any text_delta.
+ */
+function ensureAssistantMessage(ctx: StreamEventContext): void {
+  const { addMessage } = useChatStore.getState();
+  const existing = useChatStore
+    .getState()
+    .messages.find((m) => m.id === ctx.assistantId);
+  if (!existing) {
+    addMessage({
+      id: ctx.assistantId,
+      role: 'assistant',
+      segments: [],
+    });
+  }
+}
+
+/**
+ * Merge a tool_call / tool_call_update payload onto an existing tool
+ * part, preserving the variant tag.
+ *
+ * The `variant` is fixed by the FIRST observation (the producer
+ * always knows it): external ACP `tool_call` events arrive as
+ * `generic`; internal-agent turns set `internalToolName` and the
+ * variant is computed from it via {@link variantForInternalTool}.
+ * Subsequent updates never change the variant — only enrich its
+ * fields.
+ */
+function mergeToolPart(
+  existing: AssistantToolPart | undefined,
+  toolCallId: string,
+  patch: {
+    variant?: AssistantToolVariant;
+    toolName?: string;
+    title?: string;
+    toolKind?: AssistantToolPart['toolKind'];
+    status?: AssistantToolPart['status'];
+    locations?: AssistantToolPart['locations'];
+    content?: AssistantToolPart['content'];
+    rawOutput?: unknown;
+    /** Variant-specific `data` envelope; caller is responsible for shape. */
+    data?: ToolResponse<string, unknown>;
+  },
+): AssistantToolPart {
+  const variant: AssistantToolVariant =
+    patch.variant ?? existing?.variant ?? 'generic';
+
+  // Shared ToolPartBase fields — identical assembly for every variant.
+  const title = patch.title ?? existing?.title ?? toolCallId;
+  const toolKind = patch.toolKind ?? existing?.toolKind;
+  const status = patch.status ?? existing?.status;
+  // Locations/content are append-only per ACP §session/update spec.
+  const mergedLocations = [
+    ...(existing?.locations ?? []),
+    ...(patch.locations ?? []),
+  ];
+  const mergedContent = [
+    ...(existing?.content ?? []),
+    ...(patch.content ?? []),
+  ];
+  const rawOutput = patch.rawOutput ?? existing?.rawOutput;
+  const permission = existing?.permission;
+
+  const base = {
+    kind: 'tool' as const,
+    toolCallId,
+    title,
+    ...(toolKind !== undefined ? { toolKind } : {}),
+    ...(status !== undefined ? { status } : {}),
+    ...(mergedLocations.length > 0 ? { locations: mergedLocations } : {}),
+    ...(mergedContent.length > 0 ? { content: mergedContent } : {}),
+    ...(rawOutput !== undefined ? { rawOutput } : {}),
+    ...(permission !== undefined ? { permission } : {}),
+  };
+
+  switch (variant) {
+    case 'agent_tool': {
+      const toolName =
+        patch.toolName ??
+        (existing?.variant === 'agent_tool' ? existing.toolName : title);
+      const data =
+        patch.data ??
+        (existing?.variant === 'agent_tool' ? existing.data : undefined);
+      return {
+        ...base,
+        variant: 'agent_tool',
+        toolName,
+        ...(data ? { data } : {}),
+      };
+    }
+    case 'canvas_commands': {
+      const data = (patch.data ??
+        (existing?.variant === 'canvas_commands'
+          ? existing.data
+          : undefined)) as
+        | ToolResponse<'canvas_commands', Record<string, unknown>>
+        | undefined;
+      return {
+        ...base,
+        variant: 'canvas_commands',
+        ...(data ? { data } : {}),
+      };
+    }
+    case 'web_search': {
+      const data = (patch.data ??
+        (existing?.variant === 'web_search' ? existing.data : undefined)) as
+        | WebSearchToolResponse
+        | undefined;
+      return {
+        ...base,
+        variant: 'web_search',
+        ...(data ? { data } : {}),
+      };
+    }
+    case 'generic':
+      return { ...base, variant: 'generic' };
+  }
+}
+
+/**
+ * Fold an internal pi-ai tool *invocation* into the owning assistant
+ * message: resolve its render variant from the tool name and stash a
+ * provisional `ToolResponse` (the call args) so rich renderers have
+ * something to show while the call is in flight. The eventual result
+ * (via {@link applyInternalToolResult}) replaces the provisional data.
+ *
+ * Driven by the ACP-shaped `tool_call` event carrying an
+ * `internalToolName`.
+ */
+function applyInternalToolStart(
+  ctx: StreamEventContext,
+  toolCallId: string,
+  toolName: string,
+  args: unknown,
+): void {
+  const { upsertAssistantToolPart } = useChatStore.getState();
+  const variant = variantForInternalTool(toolName);
+  const provisional: ToolResponse<string, unknown> = {
+    tool: toolName,
+    status: 'success',
+    data: args,
+  };
+  ensureAssistantMessage(ctx);
+  upsertAssistantToolPart(ctx.assistantId, toolCallId, (existing) =>
+    mergeToolPart(existing, toolCallId, {
+      variant,
+      toolName,
+      title: toolName,
+      status: 'pending',
+      data: provisional,
+    }),
+  );
+}
+
+/**
+ * Fold an internal pi-ai tool *result* into the owning assistant
+ * message: parse the `ToolResponse` envelope, merge it over the
+ * provisional args recorded by {@link applyInternalToolStart}, mark
+ * the part completed, and — for `canvas_commands` — execute the
+ * commands locally and attach the live `canvasChanges`.
+ *
+ * Driven by the ACP-shaped `tool_call_update` event for an internal
+ * tool. `rawText` is the JSON-stringified tool result payload.
+ */
+function applyInternalToolResult(
+  ctx: StreamEventContext,
+  toolCallId: string,
+  toolName: string,
+  rawText: string,
+): void {
+  const { upsertAssistantToolPart } = useChatStore.getState();
+  const toolResponse = parseToolResponse(toolName, rawText);
+  if (!toolResponse) return;
+
+  const variant = variantForInternalTool(toolName);
+  const assistantMsg = useChatStore
+    .getState()
+    .messages.find((m) => m.id === ctx.assistantId);
+  let existingArgs: Record<string, unknown> = {};
+  if (assistantMsg?.role === 'assistant') {
+    const priorPart = assistantMsg.segments.find(
+      (s): s is AssistantToolPart =>
+        s.kind === 'tool' && s.toolCallId === toolCallId,
+    );
+    // Every rich variant carries the same `ToolResponse<…>`
+    // envelope on `data`; only `generic` skips it. Reading via
+    // the variant narrowing keeps the code honest — no cast.
+    const priorData =
+      priorPart && priorPart.variant !== 'generic' ? priorPart.data : undefined;
+    if (priorData && priorData.status === 'success') {
+      existingArgs =
+        (priorData.data as Record<string, unknown> | undefined) ?? {};
+    }
+  }
+  const mergedResponse: ToolResponse<string, unknown> = {
+    ...toolResponse,
+    data: {
+      ...existingArgs,
+      ...((toolResponse.status === 'success'
+        ? toolResponse.data
+        : {}) as Record<string, unknown>),
+    },
+  } as ToolResponse<string, unknown>;
+
+  ensureAssistantMessage(ctx);
+  upsertAssistantToolPart(ctx.assistantId, toolCallId, (existing) =>
+    mergeToolPart(existing, toolCallId, {
+      variant,
+      toolName,
+      title: existing?.title ?? toolName,
+      status: 'completed',
+      data: mergedResponse,
+    }),
+  );
+
+  // Execute canvas_commands locally.
+  if (toolName === 'canvas_commands') {
+    const result = applyCanvasCommandsFromToolResult(rawText);
+    if (result) {
+      // Attach the live canvasChanges array to the canvas_commands
+      // tool part's typed `data` envelope (this is the canonical
+      // home that `CanvasCommandCard` reads from).
+      if (result.changes.length > 0) {
+        upsertAssistantToolPart(ctx.assistantId, toolCallId, (existing) => {
+          if (!existing) {
+            // Should never happen — we just inserted above. Bail
+            // safely by returning a minimal part.
+            return mergeToolPart(existing, toolCallId, {
+              variant: 'canvas_commands',
+              data: mergedResponse,
+            });
+          }
+          if (existing.variant !== 'canvas_commands') return existing;
+          const existingData = existing.data;
+          const priorData =
+            existingData?.status === 'success'
+              ? ((existingData.data as Record<string, unknown> | undefined) ??
+                {})
+              : {};
+          return {
+            ...existing,
+            data: {
+              tool: 'canvas_commands',
+              status: 'success',
+              data: {
+                ...priorData,
+                canvasChanges: result.changes,
+              },
+            },
+          };
+        });
+      }
+      ctx.onCanvasCommands?.(result.commands);
+    }
+  }
 }
 
 /**
  * Shared SSE event handler used by both reconnect and normal streaming.
- * Processes text_delta, tool_start, tool_result events by updating chat
- * messages and executing canvas commands.
+ * Processes text_delta / thinking_delta / tool_call / tool_call_update /
+ * plan, by updating chat messages and executing canvas commands.
  */
 export function handleStreamEvent(
   event: AgentStreamEvent,
   ctx: StreamEventContext,
 ): void {
-  const { addMessage, updateMessage } = useChatStore.getState();
+  const { addMessage, updateMessage, upsertAssistantToolPart } =
+    useChatStore.getState();
 
-  if (event.type === 'text_delta') {
+  if (event.type === 'text_delta' || event.type === 'thinking_delta') {
     const delta = event.data.content;
+    if (!delta) return;
+    const kind: AssistantSegment['kind'] =
+      event.type === 'text_delta' ? 'text' : 'thinking';
     const existing = useChatStore
       .getState()
       .messages.find((m) => m.id === ctx.assistantId);
     if (existing) {
-      updateMessage(ctx.assistantId, (m) =>
-        m.role === 'user' || m.role === 'assistant'
-          ? { ...m, content: m.content + delta }
-          : m,
-      );
+      updateMessage(ctx.assistantId, (m) => {
+        if (m.role !== 'assistant') return m;
+        const segs = m.segments;
+        const last = segs[segs.length - 1];
+        // Same kind as trailing segment → extend in place. Different
+        // kind (or empty) → push a new segment so time order survives
+        // think/text/think interleaving from extended-thinking models.
+        if (last && last.kind === kind) {
+          return {
+            ...m,
+            segments: [
+              ...segs.slice(0, -1),
+              { ...last, text: last.text + delta },
+            ],
+          };
+        }
+        return { ...m, segments: [...segs, { kind, text: delta }] };
+      });
     } else {
       addMessage({
         id: ctx.assistantId,
         role: 'assistant',
-        content: delta,
+        segments: [{ kind, text: delta }],
       });
     }
-  } else if (event.type === 'tool_start') {
-    const msgId = createId('tool');
-    if (event.data.toolCallId) {
-      ctx.toolQueue.byCallId.set(event.data.toolCallId, msgId);
-    }
-    ctx.toolQueue.fifo.push(msgId);
-    addMessage({
-      id: msgId,
-      role: 'tool',
-      toolResponse: {
-        tool: event.data.toolName,
-        status: 'success',
-        data: event.data.toolArgs,
-      },
-      isExecuting: true,
-    });
-  } else if (event.type === 'tool_result') {
-    const toolResponse = parseToolResponse(
-      event.data.toolName,
-      event.data.toolResult,
-    );
-    if (!toolResponse) return;
-
-    // Resolve the pending tool message. Prefer toolCallId so parallel
-    // tool execution stays correct (completion order ≠ start order).
-    // Fall back to FIFO only when toolCallId is absent (older servers
-    // / synthetic events in tests).
-    let pendingMsgId: string | undefined;
-    const callId = event.data.toolCallId;
-    if (callId && ctx.toolQueue.byCallId.has(callId)) {
-      pendingMsgId = ctx.toolQueue.byCallId.get(callId);
-      ctx.toolQueue.byCallId.delete(callId);
-      if (pendingMsgId) {
-        const idx = ctx.toolQueue.fifo.indexOf(pendingMsgId);
-        if (idx !== -1) ctx.toolQueue.fifo.splice(idx, 1);
-      }
+  } else if (event.type === 'tool_call') {
+    const data = event.data;
+    // Internal pi-ai tools carry `internalToolName` → resolve the rich
+    // variant + stash provisional args. External ACP tools leave it
+    // undefined → render as `generic` from ACP-spec fields only.
+    if (data.internalToolName) {
+      applyInternalToolStart(
+        ctx,
+        data.toolCallId,
+        data.internalToolName,
+        data.rawInput,
+      );
     } else {
-      pendingMsgId = ctx.toolQueue.fifo.shift();
+      ensureAssistantMessage(ctx);
+      upsertAssistantToolPart(ctx.assistantId, data.toolCallId, (existing) =>
+        mergeToolPart(existing, data.toolCallId, {
+          // ACP `tool_call` events always materialise as `generic`;
+          // the wire shape carries only ACP-spec fields.
+          variant: 'generic',
+          title: data.title,
+          toolKind: data.toolKind,
+          status: data.status,
+          locations: data.locations,
+          content: data.content,
+        }),
+      );
     }
+  } else if (event.type === 'tool_call_update') {
+    const data = event.data;
+    ensureAssistantMessage(ctx);
+    // An internal tool's completion arrives as a `tool_call_update`
+    // carrying `rawOutput` (the JSON-stringified `ToolResponse`). The
+    // update event itself has no tool name — recover it from the part
+    // the originating `tool_call` already created (variant fixes it).
+    const assistantMsg = useChatStore
+      .getState()
+      .messages.find((m) => m.id === ctx.assistantId);
+    const priorPart =
+      assistantMsg?.role === 'assistant'
+        ? assistantMsg.segments.find(
+            (s): s is AssistantToolPart =>
+              s.kind === 'tool' && s.toolCallId === data.toolCallId,
+          )
+        : undefined;
+    const internalToolName =
+      priorPart?.variant === 'agent_tool'
+        ? priorPart.toolName
+        : priorPart?.variant === 'canvas_commands' ||
+            priorPart?.variant === 'web_search'
+          ? priorPart.variant
+          : undefined;
 
-    let finalResponse = toolResponse;
-    if (pendingMsgId) {
-      const existingMsg = useChatStore
-        .getState()
-        .messages.find((m) => m.id === pendingMsgId);
-      const existingArgs =
-        existingMsg?.role === 'tool' &&
-        existingMsg.toolResponse.status === 'success'
-          ? (existingMsg.toolResponse.data as Record<string, unknown>)
-          : {};
-      finalResponse = {
-        ...toolResponse,
-        data: {
-          ...existingArgs,
-          ...((toolResponse.status === 'success'
-            ? toolResponse.data
-            : {}) as Record<string, unknown>),
-        },
-      } as typeof toolResponse;
-      updateMessage(pendingMsgId, () => ({
-        id: pendingMsgId,
-        role: 'tool' as const,
-        toolResponse: finalResponse,
-        isExecuting: false,
-      }));
+    if (internalToolName && data.rawOutput !== undefined) {
+      const rawText =
+        typeof data.rawOutput === 'string'
+          ? data.rawOutput
+          : JSON.stringify(data.rawOutput);
+      applyInternalToolResult(ctx, data.toolCallId, internalToolName, rawText);
+    } else {
+      upsertAssistantToolPart(ctx.assistantId, data.toolCallId, (existing) =>
+        mergeToolPart(existing, data.toolCallId, {
+          title: data.title,
+          status: data.status,
+          locations: data.locations,
+          content: data.content,
+          rawOutput: data.rawOutput,
+        }),
+      );
+    }
+  } else if (event.type === 'plan') {
+    const entries = event.data.entries;
+    ensureAssistantMessage(ctx);
+    updateMessage(ctx.assistantId, (m) => {
+      if (m.role !== 'assistant') return m;
+      // Plan uses REPLACE-semantics per ACP §session/update.
+      const planIdx = m.segments.findIndex((s) => s.kind === 'plan');
+      if (planIdx === -1) {
+        return { ...m, segments: [...m.segments, { kind: 'plan', entries }] };
+      }
+      const next = [...m.segments];
+      next[planIdx] = { kind: 'plan', entries };
+      return { ...m, segments: next };
+    });
+  } else if (event.type === 'permission_request') {
+    const { requestId, toolCall, options } = event.data;
+    ensureAssistantMessage(ctx);
+    updateMessage(ctx.assistantId, (m) => {
+      if (m.role !== 'assistant') return m;
+      // Idempotent on reconnect: the SSE event buffer replays the
+      // request, so de-dupe by requestId rather than appending twice.
+      const existingIdx = m.segments.findIndex(
+        (s) => s.kind === 'permission' && s.requestId === requestId,
+      );
+      if (existingIdx !== -1) return m;
+      return {
+        ...m,
+        segments: [
+          ...m.segments,
+          { kind: 'permission', requestId, toolCall, options },
+        ],
+      };
+    });
+  } else if (event.type === 'prepared_prompt') {
+    // External-agent only: the server's preprocessor finished. If
+    // startStream already inserted a pending placeholder we update it
+    // in place; otherwise (reconnect path) we append a fresh one.
+    const pendingId = ctx.preparedPromptId;
+    const existing = pendingId
+      ? useChatStore.getState().messages.find((m) => m.id === pendingId)
+      : undefined;
+    if (existing) {
+      updateMessage(pendingId!, (m) =>
+        m.role === 'prepared-prompt'
+          ? {
+              ...m,
+              prompt: event.data.prompt,
+              agentAlias: event.data.agentAlias,
+              ...(event.data.error
+                ? { error: event.data.error }
+                : { error: undefined }),
+            }
+          : m,
+      );
     } else {
       addMessage({
-        id: createId('tool'),
-        role: 'tool',
-        toolResponse: finalResponse,
+        id: createId('preparedPrompt'),
+        role: 'prepared-prompt',
+        prompt: event.data.prompt,
+        agentAlias: event.data.agentAlias,
+        ...(event.data.error ? { error: event.data.error } : {}),
       });
-    }
-
-    // Execute canvas_commands locally
-    if (event.data.toolName === 'canvas_commands') {
-      const result = applyCanvasCommandsFromToolResult(event.data.toolResult);
-      if (result) {
-        // Attach changes to the tool message
-        const toolMsgId = pendingMsgId ?? undefined;
-        if (toolMsgId && result.changes.length > 0) {
-          updateMessage(toolMsgId, (m) => {
-            if (m.role !== 'tool' || m.toolResponse.status !== 'success')
-              return m;
-            return {
-              ...m,
-              toolResponse: {
-                ...m.toolResponse,
-                data: {
-                  ...(m.toolResponse.data as Record<string, unknown>),
-                  canvasChanges: result.changes,
-                },
-              },
-            };
-          });
-        }
-        ctx.onCanvasCommands?.(result.commands, toolMsgId);
-      }
     }
   }
 }
@@ -633,11 +936,6 @@ export function useAgentStream(): UseAgentStreamReturn {
       const assistantId = createId('message');
       assistantIdRef.current = assistantId;
 
-      const toolMsgQueue: StreamEventContext['toolQueue'] = {
-        byCallId: new Map<string, string>(),
-        fifo: [],
-      };
-
       // Guard: ensure only one of onError / catch adds an error status
       let errorHandled = false;
 
@@ -678,6 +976,30 @@ export function useAgentStream(): UseAgentStreamReturn {
       // network blip to block the agent call.
       await useCanvasStore.getState().flushCanvasEvents();
 
+      // Snapshot the current thread → agent binding at send time. The
+      // server is stateless about bindings; we pass it per-request so
+      // the server-side dispatch sees exactly which agent the user
+      // picked for this thread.
+      const agentBinding = useChatStore.getState().agentBinding;
+
+      // External-binding only: insert a pending "Preparing prompt …"
+      // card immediately so the user sees something the moment they
+      // hit send. The server's `prepared_prompt` event will populate
+      // this same message in place. If preprocessing fails server-side
+      // we get a `prepared_prompt` with `error` set — still the same
+      // slot, no flash. We capture its ID into the StreamEventContext
+      // so `handleStreamEvent` knows which message to update.
+      let preparedPromptId: string | undefined;
+      if (agentBinding?.kind === 'external') {
+        preparedPromptId = createId('preparedPrompt');
+        addMessage({
+          id: preparedPromptId,
+          role: 'prepared-prompt',
+          prompt: null,
+          agentAlias: agentBinding.alias,
+        });
+      }
+
       try {
         await agentApi.streamMessage(
           prompt,
@@ -688,7 +1010,7 @@ export function useAgentStream(): UseAgentStreamReturn {
               if (event.type === 'done') sawDone = true;
               handleStreamEvent(event, {
                 assistantId,
-                toolQueue: toolMsgQueue,
+                preparedPromptId,
                 onCanvasCommands: (commands) => {
                   if (agentMode === 'operate') {
                     const newResources = extractResourcesFromCommands(commands);
@@ -749,6 +1071,7 @@ export function useAgentStream(): UseAgentStreamReturn {
             canvasId: canvasId || undefined,
             attachments,
             intentData,
+            agentBinding,
             anchorNodeId: questionNodeId ?? undefined,
             signal: abortController.signal,
           },
@@ -821,14 +1144,28 @@ export function useAgentStream(): UseAgentStreamReturn {
       status: 'interrupted',
     });
 
-    // Mark any still-executing tool messages as done
+    // Mark any still-pending tool parts as cancelled so the renderer
+    // can drop spinners / show a definitive end state.
     const msgs = useChatStore.getState().messages;
     for (const msg of msgs) {
-      if (msg.role === 'tool' && msg.isExecuting) {
-        updateMessage(msg.id, (m) =>
-          m.role === 'tool' ? { ...m, isExecuting: false } : m,
-        );
-      }
+      if (msg.role !== 'assistant') continue;
+      const hasInflight = msg.segments.some(
+        (s) =>
+          s.kind === 'tool' &&
+          (s.status === 'pending' || s.status === 'in_progress'),
+      );
+      if (!hasInflight) continue;
+      updateMessage(msg.id, (m) => {
+        if (m.role !== 'assistant') return m;
+        return {
+          ...m,
+          segments: m.segments.map((s) => {
+            if (s.kind !== 'tool') return s;
+            if (s.status !== 'pending' && s.status !== 'in_progress') return s;
+            return { ...s, status: 'failed' };
+          }),
+        };
+      });
     }
   }, [addMessage, updateMessage]);
 

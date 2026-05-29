@@ -9,12 +9,17 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "tsx src/server.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "eval": "tsx evals/cli.ts run",
     "eval:list": "tsx evals/cli.ts list",
     "eval:baseline": "tsx evals/cli.ts baseline",
     "eval:diff": "tsx evals/cli.ts diff"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "^0.22.1",
+    "@agentlet/protocol": "workspace:*",
+    "@agentlet/server": "workspace:*",
     "@earendil-works/pi-agent-core": "^0.75.5",
     "@earendil-works/pi-ai": "^0.75.5",
     "@fastify/compress": "^8.3.1",
@@ -40,6 +45,8 @@
     "@types/sanitize-html": "^2.16.0",
     "@types/yauzl": "^2.10.3",
     "tsx": "^4.0.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vite": "^7.0.0",
+    "vitest": "^4.0.18"
   }
 }
