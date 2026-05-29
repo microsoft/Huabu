@@ -15,7 +15,10 @@
  *           "sessionId":       "...",        // returned by session/new
  *           "agentletAgentId": "...",        // binding identifier
  *           "cwd":             "/repo",       // cwd passed to session/new
- *           "updatedAt":       1700000000000  // epoch ms
+ *           "updatedAt":       1700000000000, // epoch ms
+ *           "meta":            { ... }        // OPTIONAL last-known
+ *                                             // selector/usage snapshot;
+ *                                             // see AcpSessionPersistedMeta
  *         }
  *       }
  *     }
@@ -52,8 +55,43 @@
 import { atomicWriteJson, readJson, sanitizeId } from '../../storage/io.js';
 import { acpSessionsPath } from '../../storage/paths.js';
 
+import type {
+  AcpCost,
+  AcpModelInfo,
+  AcpSessionConfigOption,
+  AcpSessionMode,
+  AvailableCommand,
+} from '@sediment/shared';
+
 /** Bumped only on a breaking layout change. */
 const ACP_SESSION_STORE_SCHEMA_VERSION = 1;
+
+/**
+ * Snapshot of selector/usage state that the agent pushed via
+ * `session/new`, `session/load`, or `session/update` notifications.
+ *
+ * Persisted alongside the sessionId so that the "already loaded"
+ * recovery branch in `service.ensureAcpSessionInner` can rehydrate
+ * the registry entry without waiting for the agent to re-emit
+ * notifications (which it generally will NOT do for a session that
+ * is already loaded in its memory).
+ *
+ * All fields are optional: older records (and records for sessions
+ * that never received the corresponding update) parse cleanly and
+ * simply restore nothing.
+ */
+export interface AcpSessionPersistedMeta {
+  availableCommands?: AvailableCommand[];
+  commandsUpdatedAt?: number;
+  availableModes?: AcpSessionMode[];
+  currentModeId?: string | null;
+  availableModels?: AcpModelInfo[];
+  currentModelId?: string | null;
+  configOptions?: AcpSessionConfigOption[];
+  sessionInfo?: { title: string | null; updatedAt: string | null } | null;
+  usage?: { used: number; size: number; cost: AcpCost | null } | null;
+  metaUpdatedAt?: number;
+}
 
 /** One persisted session entry per Sediment thread on a canvas. */
 export interface AcpSessionRecord {
@@ -69,6 +107,12 @@ export interface AcpSessionRecord {
   cwd: string;
   /** Epoch ms of the last write. Diagnostic only. */
   updatedAt: number;
+  /**
+   * Last-known snapshot of selector/usage state. Optional — absent for
+   * legacy records written before this field existed, and for records
+   * that never received any meta updates. See {@link AcpSessionPersistedMeta}.
+   */
+  meta?: AcpSessionPersistedMeta;
 }
 
 interface SessionStoreFile {
@@ -83,14 +127,101 @@ function emptyFile(): SessionStoreFile {
 function isRecord(value: unknown): value is AcpSessionRecord {
   if (!value || typeof value !== 'object') return false;
   const r = value as Record<string, unknown>;
-  return (
-    typeof r.sessionId === 'string' &&
-    r.sessionId.length > 0 &&
-    typeof r.agentletAgentId === 'string' &&
-    r.agentletAgentId.length > 0 &&
-    typeof r.cwd === 'string' &&
-    typeof r.updatedAt === 'number'
-  );
+  if (
+    !(
+      typeof r.sessionId === 'string' &&
+      r.sessionId.length > 0 &&
+      typeof r.agentletAgentId === 'string' &&
+      r.agentletAgentId.length > 0 &&
+      typeof r.cwd === 'string' &&
+      typeof r.updatedAt === 'number'
+    )
+  ) {
+    return false;
+  }
+  // `meta` is optional. When present it MUST be an object; otherwise the
+  // whole record is rejected. Individual meta fields are validated
+  // permissively in `sanitizeMeta` below so a single malformed field
+  // never invalidates an otherwise-valid record.
+  if (r.meta !== undefined && (r.meta === null || typeof r.meta !== 'object')) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Defensively shape-check a {@link AcpSessionPersistedMeta} payload
+ * loaded from disk. Returns a cleaned copy containing only fields that
+ * pass minimal type validation. Returns `undefined` when the input is
+ * not a plain object or yields zero valid fields (so callers can keep
+ * the property absent rather than store an empty `{}`).
+ */
+function sanitizeMeta(raw: unknown): AcpSessionPersistedMeta | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  const out: AcpSessionPersistedMeta = {};
+  let touched = false;
+  if (Array.isArray(r.availableCommands)) {
+    out.availableCommands = r.availableCommands as AvailableCommand[];
+    touched = true;
+  }
+  if (typeof r.commandsUpdatedAt === 'number') {
+    out.commandsUpdatedAt = r.commandsUpdatedAt;
+    touched = true;
+  }
+  if (Array.isArray(r.availableModes)) {
+    out.availableModes = r.availableModes as AcpSessionMode[];
+    touched = true;
+  }
+  if (r.currentModeId === null || typeof r.currentModeId === 'string') {
+    out.currentModeId = r.currentModeId as string | null;
+    touched = true;
+  }
+  if (Array.isArray(r.availableModels)) {
+    out.availableModels = r.availableModels as AcpModelInfo[];
+    touched = true;
+  }
+  if (r.currentModelId === null || typeof r.currentModelId === 'string') {
+    out.currentModelId = r.currentModelId as string | null;
+    touched = true;
+  }
+  if (Array.isArray(r.configOptions)) {
+    out.configOptions = r.configOptions as AcpSessionConfigOption[];
+    touched = true;
+  }
+  if (r.sessionInfo === null) {
+    out.sessionInfo = null;
+    touched = true;
+  } else if (r.sessionInfo && typeof r.sessionInfo === 'object') {
+    const si = r.sessionInfo as { title?: unknown; updatedAt?: unknown };
+    out.sessionInfo = {
+      title: typeof si.title === 'string' ? si.title : null,
+      updatedAt: typeof si.updatedAt === 'string' ? si.updatedAt : null,
+    };
+    touched = true;
+  }
+  if (r.usage === null) {
+    out.usage = null;
+    touched = true;
+  } else if (r.usage && typeof r.usage === 'object') {
+    const u = r.usage as { used?: unknown; size?: unknown; cost?: unknown };
+    if (typeof u.used === 'number' && typeof u.size === 'number') {
+      let cost: AcpCost | null = null;
+      if (u.cost && typeof u.cost === 'object') {
+        const c = u.cost as { amount?: unknown; currency?: unknown };
+        if (typeof c.amount === 'number' && typeof c.currency === 'string') {
+          cost = { amount: c.amount, currency: c.currency };
+        }
+      }
+      out.usage = { used: u.used, size: u.size, cost };
+      touched = true;
+    }
+  }
+  if (typeof r.metaUpdatedAt === 'number') {
+    out.metaUpdatedAt = r.metaUpdatedAt;
+    touched = true;
+  }
+  return touched ? out : undefined;
 }
 
 /**
@@ -110,7 +241,13 @@ function readFile(canvasId: string): SessionStoreFile {
     for (const [key, value] of Object.entries(
       maybeRecords as Record<string, unknown>,
     )) {
-      if (isRecord(value)) records[key] = value;
+      if (!isRecord(value)) continue;
+      // Replace any malformed meta with a sanitised copy (or drop the
+      // field entirely) so callers can trust whatever they receive
+      // without re-validating.
+      const meta = sanitizeMeta((value as { meta?: unknown }).meta);
+      records[key] = meta ? { ...value, meta } : { ...value, meta: undefined };
+      if (!meta) delete records[key].meta;
     }
   }
   return { schemaVersion: ACP_SESSION_STORE_SCHEMA_VERSION, records };
@@ -138,7 +275,8 @@ export function readAcpSessionRecord(
 /**
  * Insert or replace the record for `(canvasId, threadId)`. No-op
  * when `canvasId` is empty (mirrors {@link readAcpSessionRecord}).
- * Stamps `updatedAt` automatically.
+ * Stamps `updatedAt` automatically. Pass `meta` to capture the
+ * latest selector/usage snapshot alongside the sessionId.
  */
 export function writeAcpSessionRecord(
   canvasId: string,
@@ -148,8 +286,50 @@ export function writeAcpSessionRecord(
   if (!canvasId) return;
   sanitizeId(threadId, 'threadId');
   const file = readFile(canvasId);
-  file.records[threadId] = { ...record, updatedAt: Date.now() };
+  const next: AcpSessionRecord = {
+    sessionId: record.sessionId,
+    agentletAgentId: record.agentletAgentId,
+    cwd: record.cwd,
+    updatedAt: Date.now(),
+  };
+  if (record.meta) next.meta = record.meta;
+  file.records[threadId] = next;
   atomicWriteJson(acpSessionsPath(canvasId), file);
+}
+
+/**
+ * Update only the `meta` field for an existing record, leaving the
+ * sessionId / agentletAgentId / cwd untouched. No-op when `canvasId`
+ * is empty OR no record exists for `(canvasId, threadId)` — the meta
+ * is per-session state, so persisting it without the parent record
+ * would leak across recreations.
+ *
+ * Passing `meta = null` clears the field. Stamps `updatedAt`.
+ */
+export function writeAcpSessionMeta(
+  canvasId: string,
+  threadId: string,
+  meta: AcpSessionPersistedMeta | null,
+): boolean {
+  if (!canvasId) return false;
+  try {
+    sanitizeId(threadId, 'threadId');
+  } catch {
+    return false;
+  }
+  const file = readFile(canvasId);
+  const existing = file.records[threadId];
+  if (!existing) return false;
+  const next: AcpSessionRecord = {
+    sessionId: existing.sessionId,
+    agentletAgentId: existing.agentletAgentId,
+    cwd: existing.cwd,
+    updatedAt: Date.now(),
+  };
+  if (meta) next.meta = meta;
+  file.records[threadId] = next;
+  atomicWriteJson(acpSessionsPath(canvasId), file);
+  return true;
 }
 
 /**

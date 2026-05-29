@@ -162,6 +162,17 @@ class AcpSessionRegistry {
   get size(): number {
     return this.byThread.size;
   }
+
+  /**
+   * Iterate over all live `(threadId, entry)` pairs. Used by
+   * persistence helpers in service.ts that need to reverse-look-up the
+   * threadId for an entry. The returned iterator is a thin pass-through
+   * to the underlying Map iterator and is invalidated by concurrent
+   * mutation — callers MUST NOT call `set`/`remove` mid-iteration.
+   */
+  entries(): IterableIterator<[string, AcpSessionEntry]> {
+    return this.byThread.entries();
+  }
 }
 
 /** Process-wide singleton. */

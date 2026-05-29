@@ -221,7 +221,6 @@ export function acpUpdateToStreamEvent(
       const data: AgentConfigOptionsUpdateEventData = { options };
       return { type: 'config_options_update', data };
     }
-    }
     case 'current_mode_update': {
       const data: AgentSessionModeUpdateEventData = {
         currentModeId: u.currentModeId,
@@ -241,7 +240,6 @@ export function acpUpdateToStreamEvent(
             : undefined,
       };
       return { type: 'session_info_update', data };
-    }
     }
     case 'usage_update': {
       const data: AgentSessionUsageUpdateEventData = {

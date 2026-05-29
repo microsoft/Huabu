@@ -29,6 +29,7 @@ import { acpSessionRegistry } from './session-registry.js';
 import {
   deleteAcpSessionRecord,
   readAcpSessionRecord,
+  writeAcpSessionMeta,
   writeAcpSessionRecord,
 } from './session-store.js';
 import { acpUpdateToStreamEvent, mergeThinkingChunk } from './translator.js';
@@ -43,6 +44,7 @@ import {
 } from '../store/chat-parts-store.js';
 
 import type { AcpSessionEntry } from './session-registry.js';
+import type { AcpSessionPersistedMeta } from './session-store.js';
 import type { ChatPartsSidecar } from '../store/chat-parts-store.js';
 import type { AssistantMessage, Context } from '@earendil-works/pi-ai';
 import type {
@@ -186,6 +188,143 @@ function ensureSessionKey(
 }
 
 /**
+ * Per-`(canvasId, threadId)` debounce slots for meta persistence. Meta
+ * updates can arrive in bursts (e.g. an `available_commands_update`
+ * immediately followed by a `config_option_update` on session warm-up,
+ * or a flurry of `usage_update`s during a long turn), and persisting
+ * each one independently would hit the JSON store dozens of times per
+ * second on a busy thread. We collapse them into a single tail-write
+ * by deferring the flush by {@link META_PERSIST_DEBOUNCE_MS}.
+ *
+ * Cancellation: callers MUST invoke `cancelPersistEntryMeta` whenever
+ * the record is being deleted (binding switch, canvas switch, load
+ * failure) — otherwise a queued timer could re-create the file
+ * milliseconds after a deliberate `deleteAcpSessionRecord` call.
+ */
+const META_PERSIST_DEBOUNCE_MS = 250;
+const pendingMetaPersists = new Map<string, NodeJS.Timeout>();
+
+function metaPersistKey(canvasId: string, threadId: string): string {
+  return `${canvasId}|${threadId}`;
+}
+
+function snapshotEntryMeta(entry: AcpSessionEntry): AcpSessionPersistedMeta {
+  return {
+    availableCommands: entry.availableCommands,
+    commandsUpdatedAt: entry.commandsUpdatedAt,
+    availableModes: entry.availableModes,
+    currentModeId: entry.currentModeId,
+    availableModels: entry.availableModels,
+    currentModelId: entry.currentModelId,
+    configOptions: entry.configOptions,
+    sessionInfo: entry.sessionInfo,
+    usage: entry.usage,
+    metaUpdatedAt: entry.metaUpdatedAt,
+  };
+}
+
+/**
+ * Hydrate a fresh registry entry from a previously-persisted meta
+ * snapshot. Used by the "already loaded" recovery path where neither
+ * `session/new` nor `session/load` provides a meta seed and the agent
+ * will not re-emit notifications because it never dropped the session
+ * from its own memory.
+ *
+ * Each field is only restored when the snapshot actually contains it
+ * (i.e. the agent had pushed that variant before the server restart),
+ * so we never overwrite an explicit empty default with `undefined`.
+ */
+function hydrateEntryFromPersistedMeta(
+  entry: AcpSessionEntry,
+  meta: AcpSessionPersistedMeta,
+): void {
+  if (meta.availableCommands) entry.availableCommands = meta.availableCommands;
+  if (typeof meta.commandsUpdatedAt === 'number') {
+    entry.commandsUpdatedAt = meta.commandsUpdatedAt;
+  }
+  if (meta.availableModes) entry.availableModes = meta.availableModes;
+  if (meta.currentModeId !== undefined)
+    entry.currentModeId = meta.currentModeId;
+  if (meta.availableModels) entry.availableModels = meta.availableModels;
+  if (meta.currentModelId !== undefined) {
+    entry.currentModelId = meta.currentModelId;
+  }
+  if (meta.configOptions) entry.configOptions = meta.configOptions;
+  if (meta.sessionInfo !== undefined) entry.sessionInfo = meta.sessionInfo;
+  if (meta.usage !== undefined) entry.usage = meta.usage;
+  if (typeof meta.metaUpdatedAt === 'number') {
+    entry.metaUpdatedAt = meta.metaUpdatedAt;
+  }
+}
+
+/**
+ * Schedule (or reschedule) a debounced write of the entry's current
+ * meta snapshot to disk. Safe to call from notification handlers on
+ * the hot path — the actual write happens asynchronously and never
+ * throws (failures are logged and swallowed; we never want a
+ * persistence hiccup to kill an SSE stream).
+ *
+ * No-op when the entry has no `canvasId` (anonymous-canvas threads
+ * are not persisted at all — see `writeAcpSessionRecord`).
+ */
+function schedulePersistEntryMeta(
+  entry: AcpSessionEntry,
+  logger: FastifyBaseLogger,
+): void {
+  if (!entry.canvasId) return;
+  const threadId = findThreadIdForEntry(entry);
+  if (!threadId) return;
+  const key = metaPersistKey(entry.canvasId, threadId);
+  const prior = pendingMetaPersists.get(key);
+  if (prior) clearTimeout(prior);
+  const timer = setTimeout(() => {
+    pendingMetaPersists.delete(key);
+    try {
+      writeAcpSessionMeta(entry.canvasId, threadId, snapshotEntryMeta(entry));
+    } catch (err) {
+      logger.warn(
+        {
+          threadId,
+          canvasId: entry.canvasId,
+          err: err instanceof Error ? err.message : String(err),
+        },
+        '[acp] failed to persist session meta snapshot (will retry on next update)',
+      );
+    }
+  }, META_PERSIST_DEBOUNCE_MS);
+  // `unref` so a stale pending timer never blocks process shutdown.
+  if (typeof timer.unref === 'function') timer.unref();
+  pendingMetaPersists.set(key, timer);
+}
+
+function cancelPersistEntryMeta(canvasId: string, threadId: string): void {
+  if (!canvasId) return;
+  const key = metaPersistKey(canvasId, threadId);
+  const prior = pendingMetaPersists.get(key);
+  if (prior) {
+    clearTimeout(prior);
+    pendingMetaPersists.delete(key);
+  }
+}
+
+/**
+ * Reverse-lookup the threadId for a registry entry. The registry maps
+ * threadId → entry but the entry itself doesn't carry the threadId
+ * (it would be redundant in normal flow). We need it here because the
+ * persistence layer is keyed by `(canvasId, threadId)`.
+ *
+ * Linear scan over O(threads-on-this-server) — acceptable: a single
+ * Sediment server typically holds a handful of live ACP sessions, and
+ * this only runs on the (debounced) meta-persist path.
+ */
+function findThreadIdForEntry(entry: AcpSessionEntry): string | null {
+  for (const [threadId, candidate] of acpSessionRegistry.entries()) {
+    if (candidate === entry) return threadId;
+  }
+  return null;
+}
+
+/**
  * Get-or-create the per-thread ACP session, installing the long-lived
  * `available_commands_update` listener on first creation. Idempotent for
  * a given `{threadId, agentletAgentId, canvasId}` triple — repeated calls
@@ -262,6 +401,7 @@ async function ensureAcpSessionInner(
       },
       '[acp] thread binding changed \u2014 discarding stale session',
     );
+    cancelPersistEntryMeta(entry.canvasId, threadId);
     acpSessionRegistry.remove(threadId);
     // Stale binding → persisted sessionId is also stale (it belongs to
     // the OLD agent). Drop it so we don't try to load it against the
@@ -278,6 +418,7 @@ async function ensureAcpSessionInner(
       },
       '[acp] thread canvas changed \u2014 discarding stale session (sandbox scope mismatch)',
     );
+    cancelPersistEntryMeta(entry.canvasId, threadId);
     acpSessionRegistry.remove(threadId);
     // Persisted record is canvas-scoped (see session-store path layout),
     // so the wrong-canvas case is already handled implicitly. We still
@@ -290,6 +431,7 @@ async function ensureAcpSessionInner(
       { threadId },
       '[acp] stored session client was closed \u2014 reopening',
     );
+    cancelPersistEntryMeta(entry.canvasId, threadId);
     acpSessionRegistry.remove(threadId);
     entry = undefined;
   }
@@ -385,6 +527,44 @@ async function ensureAcpSessionInner(
         if (/already\s*loaded/i.test(errMsg)) {
           sessionId = persisted.sessionId;
           created.sessionId = sessionId;
+          // The agent already holds this session in memory and will
+          // NOT replay `available_commands_update` / `current_mode_update`
+          // / `usage_update` / etc. on its own — those notifications
+          // only fire on the original `session/new` or `session/load`.
+          // Without a fallback the registry entry would surface empty
+          // selectors and an empty slash-command list to the UI for the
+          // entire lifetime of this re-attached session (until the
+          // agent happens to push a fresh meta update of its own).
+          //
+          // Rehydrate from the last meta snapshot we persisted before
+          // the server restart. By definition that snapshot reflects
+          // what THIS agent process most recently advertised, so it is
+          // exactly what a fresh `session/new` against the same agent
+          // would return today — modulo any state the user changed
+          // out-of-band while the Sediment server was down (a vanishingly
+          // narrow race for typical use). Subsequent `session/update`
+          // notifications still take precedence; this is purely a seed.
+          if (persisted.meta) {
+            hydrateEntryFromPersistedMeta(created, persisted.meta);
+            logger.info(
+              {
+                threadId,
+                sessionId,
+                commandCount: created.availableCommands.length,
+                modeCount: created.availableModes.length,
+                modelCount: created.availableModels.length,
+                configCount: created.configOptions.length,
+                hasUsage: created.usage !== null,
+                hasSessionInfo: created.sessionInfo !== null,
+              },
+              '[acp] hydrated session meta from persisted snapshot (already-loaded path)',
+            );
+          } else {
+            logger.warn(
+              { threadId, sessionId },
+              '[acp] session already loaded but no persisted meta snapshot \u2014 UI selectors will start empty until the agent pushes a meta update',
+            );
+          }
           logger.info(
             { threadId, sessionId },
             '[acp] session already loaded in live agent \u2014 reusing without replay',
@@ -404,6 +584,7 @@ async function ensureAcpSessionInner(
             },
             '[acp] session/load failed \u2014 dropping persisted record and falling back to session/new',
           );
+          cancelPersistEntryMeta(canvasId, threadId);
           deleteAcpSessionRecord(canvasId, threadId);
         }
       }
@@ -448,11 +629,18 @@ async function ensureAcpSessionInner(
   // recover this session. Done AFTER the registry insert so the
   // happy-path memory state is authoritative; persistence failures
   // (logged below) only forfeit recovery, not the current session.
+  //
+  // We include the current meta snapshot up front so the "already
+  // loaded" branch on a subsequent restart has something to hydrate
+  // from even if the agent never pushes a meta-update notification
+  // for this session (e.g. an idle session that was created, loaded
+  // its mode/model from the response, then sat quiet).
   try {
     writeAcpSessionRecord(canvasId, threadId, {
       sessionId,
       agentletAgentId: binding.agentletAgentId,
       cwd,
+      meta: snapshotEntryMeta(created),
     });
   } catch (err) {
     logger.warn(
@@ -561,6 +749,7 @@ function applyAvailableCommandsUpdate(
   }
   entry.availableCommands = next;
   entry.commandsUpdatedAt = Date.now();
+  schedulePersistEntryMeta(entry, logger);
   logger.info(
     {
       sessionId: entry.sessionId,
@@ -610,6 +799,7 @@ function applyConfigOptionUpdate(
     entry.configOptions = Array.from(byId.values());
   }
   entry.metaUpdatedAt = Date.now();
+  schedulePersistEntryMeta(entry, logger);
   logger.info(
     { sessionId: entry.sessionId, count: entry.configOptions.length },
     '[acp] config_option_update applied',
@@ -631,6 +821,7 @@ function applyCurrentModeUpdate(
   }
   entry.currentModeId = id;
   entry.metaUpdatedAt = Date.now();
+  schedulePersistEntryMeta(entry, logger);
   logger.info(
     { sessionId: entry.sessionId, currentModeId: id },
     '[acp] current_mode_update applied',
@@ -658,6 +849,7 @@ function applySessionInfoUpdate(
     updatedAt: updatedAt === undefined ? prior.updatedAt : updatedAt,
   };
   entry.metaUpdatedAt = Date.now();
+  schedulePersistEntryMeta(entry, logger);
   logger.info(
     { sessionId: entry.sessionId, info: entry.sessionInfo },
     '[acp] session_info_update applied',
@@ -688,6 +880,7 @@ function applyUsageUpdate(
   }
   entry.usage = { used, size, cost };
   entry.metaUpdatedAt = Date.now();
+  schedulePersistEntryMeta(entry, logger);
   logger.info(
     { sessionId: entry.sessionId, used, size },
     '[acp] usage_update applied',

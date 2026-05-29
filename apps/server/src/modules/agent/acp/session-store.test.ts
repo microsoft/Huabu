@@ -21,6 +21,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   deleteAcpSessionRecord,
   readAcpSessionRecord,
+  writeAcpSessionMeta,
   writeAcpSessionRecord,
 } from './session-store.js';
 import { acpSessionsPath } from '../../storage/paths.js';
@@ -191,5 +192,133 @@ describe('deleteAcpSessionRecord', () => {
     expect(readAcpSessionRecord(canvasId, 'thread-b')?.sessionId).toBe(
       'sess-b',
     );
+  });
+});
+
+describe('session meta persistence', () => {
+  it('round-trips meta when included in writeAcpSessionRecord', () => {
+    writeAcpSessionRecord(canvasId, threadId, {
+      sessionId: 'sess-1',
+      agentletAgentId: 'agent-1',
+      cwd: '/repo',
+      meta: {
+        availableCommands: [
+          { name: '/help', description: 'show help', input: null },
+        ],
+        commandsUpdatedAt: 1700000000000,
+        currentModeId: 'agent',
+        usage: { used: 100, size: 8000, cost: null },
+      },
+    });
+    const got = readAcpSessionRecord(canvasId, threadId);
+    expect(got?.meta).toEqual({
+      availableCommands: [
+        { name: '/help', description: 'show help', input: null },
+      ],
+      commandsUpdatedAt: 1700000000000,
+      currentModeId: 'agent',
+      usage: { used: 100, size: 8000, cost: null },
+    });
+  });
+
+  it('omits meta when not provided', () => {
+    writeAcpSessionRecord(canvasId, threadId, {
+      sessionId: 'sess-1',
+      agentletAgentId: 'agent-1',
+      cwd: '/repo',
+    });
+    const got = readAcpSessionRecord(canvasId, threadId);
+    expect(got).not.toBeNull();
+    expect(got!.meta).toBeUndefined();
+  });
+
+  it('writeAcpSessionMeta updates only the meta field on an existing record', () => {
+    writeAcpSessionRecord(canvasId, threadId, {
+      sessionId: 'sess-1',
+      agentletAgentId: 'agent-1',
+      cwd: '/repo',
+    });
+    const ok = writeAcpSessionMeta(canvasId, threadId, {
+      currentModeId: 'plan',
+      usage: { used: 42, size: 1000, cost: { amount: 0.1, currency: 'USD' } },
+    });
+    expect(ok).toBe(true);
+    const got = readAcpSessionRecord(canvasId, threadId);
+    expect(got?.sessionId).toBe('sess-1');
+    expect(got?.agentletAgentId).toBe('agent-1');
+    expect(got?.cwd).toBe('/repo');
+    expect(got?.meta).toEqual({
+      currentModeId: 'plan',
+      usage: { used: 42, size: 1000, cost: { amount: 0.1, currency: 'USD' } },
+    });
+  });
+
+  it('writeAcpSessionMeta returns false when no record exists', () => {
+    expect(
+      writeAcpSessionMeta(canvasId, threadId, { currentModeId: 'x' }),
+    ).toBe(false);
+    expect(readAcpSessionRecord(canvasId, threadId)).toBeNull();
+  });
+
+  it('writeAcpSessionMeta is a no-op when canvasId is empty', () => {
+    expect(writeAcpSessionMeta('', threadId, { currentModeId: 'x' })).toBe(
+      false,
+    );
+  });
+
+  it('writeAcpSessionMeta(null) clears the field', () => {
+    writeAcpSessionRecord(canvasId, threadId, {
+      sessionId: 'sess-1',
+      agentletAgentId: 'agent-1',
+      cwd: '/repo',
+      meta: { currentModeId: 'plan' },
+    });
+    expect(writeAcpSessionMeta(canvasId, threadId, null)).toBe(true);
+    const got = readAcpSessionRecord(canvasId, threadId);
+    expect(got).not.toBeNull();
+    expect(got!.meta).toBeUndefined();
+  });
+
+  it('drops malformed meta on read while keeping the parent record', () => {
+    writeFileSync(
+      acpSessionsPath(canvasId),
+      JSON.stringify({
+        schemaVersion: 1,
+        records: {
+          [threadId]: {
+            sessionId: 'sess-1',
+            agentletAgentId: 'agent-1',
+            cwd: '/repo',
+            updatedAt: Date.now(),
+            // `meta` field present but with no recognisable fields →
+            // sanitizeMeta should return undefined and the parent
+            // record should still be readable.
+            meta: { nonsense: 'value' },
+          },
+        },
+      }),
+    );
+    const got = readAcpSessionRecord(canvasId, threadId);
+    expect(got?.sessionId).toBe('sess-1');
+    expect(got?.meta).toBeUndefined();
+  });
+
+  it('rejects record entirely when meta is a non-object', () => {
+    writeFileSync(
+      acpSessionsPath(canvasId),
+      JSON.stringify({
+        schemaVersion: 1,
+        records: {
+          [threadId]: {
+            sessionId: 'sess-1',
+            agentletAgentId: 'agent-1',
+            cwd: '/repo',
+            updatedAt: Date.now(),
+            meta: 'not-an-object',
+          },
+        },
+      }),
+    );
+    expect(readAcpSessionRecord(canvasId, threadId)).toBeNull();
   });
 });
