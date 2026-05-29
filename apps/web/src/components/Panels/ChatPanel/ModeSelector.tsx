@@ -156,11 +156,11 @@ export const ModeSelector = ({
       onChange={handleChange}
       disabled={disabled}
       title="Delegate Session"
-      variant="outline"
-      shape="pill"
+      variant="ghost"
+      shape="default"
       tone="neutral"
       size="sm"
-      align="top-left"
+      align="bottom-left"
       footerSlot={({ dismiss }) => (
         <div className="flex flex-col">
           {onNewThread && (

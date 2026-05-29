@@ -18,6 +18,19 @@
 
 import { z } from 'zod';
 
+import {
+  ZAcpModelInfo,
+  ZAcpSessionConfigOption,
+  ZAcpSessionMode,
+} from './acp-tool.js';
+
+import type {
+  AcpCost,
+  AcpModelInfo,
+  AcpSessionConfigOption,
+  AcpSessionMode,
+} from '../agent/acp-tool.js';
+
 /**
  * One connected ACP agent as exposed to the web client.
  *
@@ -151,6 +164,13 @@ export interface EnsureAcpSessionResponse {
   availableCommands: AvailableCommand[];
   /** Epoch ms when `availableCommands` was last refreshed. 0 if never. */
   updatedAt: number;
+  /**
+   * Snapshot of session-meta (modes / models / config options / info /
+   * usage) the server has cached. Always present (defaults to empty
+   * fields when the agent has not pushed anything). Web UI uses this
+   * to seed selector dropdowns before any SSE frame arrives.
+   */
+  sessionMeta: AcpSessionMetaSnapshot;
 }
 
 /** Response body for `GET /api/acp/threads/:threadId/commands`. */
@@ -159,6 +179,106 @@ export interface AcpThreadCommandsResponse {
   availableCommands: AvailableCommand[];
   /** Epoch ms when `availableCommands` was last refreshed. 0 if never. */
   updatedAt: number;
+  /**
+   * Snapshot of session-meta (modes / models / config options / info /
+   * usage). Same shape as on {@link EnsureAcpSessionResponse}.
+   */
+  sessionMeta: AcpSessionMetaSnapshot;
+}
+
+// ─── Session-meta snapshot & set-RPCs ──────────────────────────────────
+//
+// ACP exposes four kinds of mutable session metadata, surfaced to the
+// UI as dropdown selectors:
+//
+//   • Available modes (`current_mode_update`) — Copilot uses this for
+//     its "interactive / yolo / plan" mode picker.
+//   • Available models (no dedicated update notification; only seeded
+//     from the `session/new` / `session/load` response).
+//   • Config options (`config_option_update`) — free-form key/value
+//     knobs grouped by `category` (`mode` / `model` / `thought_level`
+//     / `string`).
+//   • Session info (`session_info_update`) and usage (`usage_update`)
+//     — read-only display values.
+//
+// The set-RPCs (`session/setSessionMode`, `session/setSessionModel`,
+// `session/setSessionConfigOption`) round-trip through the bridge to
+// the agent. We surface them as small POST endpoints so the web bundle
+// can stay schema-free.
+
+/**
+ * Server-cached snapshot of every session-meta field the agent has
+ * pushed. Empty arrays / nulls when the agent has not provided a
+ * value yet.
+ */
+export interface AcpSessionMetaSnapshot {
+  /** Current `availableModes` list (cleared & replaced per update). */
+  availableModes: AcpSessionMode[];
+  /** Currently-active mode id, or `null` if the agent has not set one. */
+  currentModeId: string | null;
+  /** Catalogue of selectable models. */
+  availableModels: AcpModelInfo[];
+  /** Currently-active model id. */
+  currentModelId: string | null;
+  /** Free-form config knobs (most recent snapshot, replace-semantics). */
+  configOptions: AcpSessionConfigOption[];
+  /** Human-readable title + activity timestamp pushed by the agent. */
+  sessionInfo: { title: string | null; updatedAt: string | null } | null;
+  /** Token / cost budget snapshot. */
+  usage: { used: number; size: number; cost: AcpCost | null } | null;
+  /**
+   * Epoch ms when ANY field of `sessionMeta` was last touched.
+   * UI can use this to detect stale snapshots after reconnect.
+   */
+  updatedAt: number;
+}
+
+/**
+ * Request body for `POST /api/acp/threads/:threadId/mode`.
+ * Switches the session's currently-active mode.
+ */
+export interface SetAcpSessionModeRequest {
+  modeId: string;
+}
+
+/** Response body for `POST /api/acp/threads/:threadId/mode`. */
+export interface SetAcpSessionModeResponse {
+  ok: true;
+  /** Echo back the freshly-set mode id; agent confirms via SSE separately. */
+  modeId: string;
+}
+
+/**
+ * Request body for `POST /api/acp/threads/:threadId/model`.
+ * Switches the session's currently-active model.
+ */
+export interface SetAcpSessionModelRequest {
+  modelId: string;
+}
+
+/** Response body for `POST /api/acp/threads/:threadId/model`. */
+export interface SetAcpSessionModelResponse {
+  ok: true;
+  modelId: string;
+}
+
+/**
+ * Request body for `POST /api/acp/threads/:threadId/config-option`.
+ *
+ * `value` follows the ACP `SessionConfigValueId` shape:
+ *   • `string`  for `select` options (the chosen `id`)
+ *   • `boolean` for `boolean` options
+ */
+export interface SetAcpSessionConfigOptionRequest {
+  configOptionId: string;
+  value: string | boolean;
+}
+
+/** Response body for `POST /api/acp/threads/:threadId/config-option`. */
+export interface SetAcpSessionConfigOptionResponse {
+  ok: true;
+  configOptionId: string;
+  value: string | boolean;
 }
 
 // ─── Permission decisions ──────────────────────────────────────────────
@@ -209,6 +329,44 @@ export const availableCommandSchema = z.object({
   input: z.object({ hint: z.string() }).nullable().optional(),
 }) satisfies z.ZodType<AvailableCommand>;
 
+/**
+ * Schema mirror of `AcpCost` — kept inline here (rather than re-exported
+ * from `acp-tool.ts`) because the SDK names the cost-block schema
+ * differently from the type and we want the api file to own the wire
+ * shape for the snapshot.
+ */
+const acpCostSchema = z.object({
+  amount: z.number(),
+  currency: z.string(),
+}) satisfies z.ZodType<AcpCost>;
+
+/** Schema mirror of {@link AcpSessionMetaSnapshot}. */
+export const acpSessionMetaSnapshotSchema = z.object({
+  availableModes: z.array(
+    ZAcpSessionMode as unknown as z.ZodType<AcpSessionMode>,
+  ),
+  currentModeId: z.string().min(1).nullable(),
+  availableModels: z.array(ZAcpModelInfo as unknown as z.ZodType<AcpModelInfo>),
+  currentModelId: z.string().min(1).nullable(),
+  configOptions: z.array(
+    ZAcpSessionConfigOption as unknown as z.ZodType<AcpSessionConfigOption>,
+  ),
+  sessionInfo: z
+    .object({
+      title: z.string().nullable(),
+      updatedAt: z.string().nullable(),
+    })
+    .nullable(),
+  usage: z
+    .object({
+      used: z.number(),
+      size: z.number(),
+      cost: acpCostSchema.nullable(),
+    })
+    .nullable(),
+  updatedAt: z.number().int().nonnegative(),
+}) satisfies z.ZodType<AcpSessionMetaSnapshot>;
+
 /** Schema mirror of {@link EnsureAcpSessionRequest}. */
 export const ensureAcpSessionRequestSchema = z.object({
   canvasId: z.string().min(1).optional(),
@@ -222,6 +380,7 @@ export const ensureAcpSessionResponseSchema = z.object({
   sessionId: z.string().min(1),
   availableCommands: z.array(availableCommandSchema),
   updatedAt: z.number().int().nonnegative(),
+  sessionMeta: acpSessionMetaSnapshotSchema,
 }) satisfies z.ZodType<EnsureAcpSessionResponse>;
 
 /** Schema mirror of {@link AcpThreadCommandsResponse}. */
@@ -229,6 +388,7 @@ export const acpThreadCommandsResponseSchema = z.object({
   sessionId: z.string().min(1),
   availableCommands: z.array(availableCommandSchema),
   updatedAt: z.number().int().nonnegative(),
+  sessionMeta: acpSessionMetaSnapshotSchema,
 }) satisfies z.ZodType<AcpThreadCommandsResponse>;
 
 /** Schema mirror of {@link AcpPermissionDecisionRequest}. */
@@ -242,3 +402,40 @@ export const acpPermissionDecisionSchema = z.object({
 export const acpPermissionDecisionResponseSchema = z.object({
   resolved: z.boolean(),
 }) satisfies z.ZodType<AcpPermissionDecisionResponse>;
+
+// ─── Session-meta set-RPCs (zod) ───────────────────────────────────────
+
+/** Schema mirror of {@link SetAcpSessionModeRequest}. */
+export const setAcpSessionModeRequestSchema = z.object({
+  modeId: z.string().min(1),
+}) satisfies z.ZodType<SetAcpSessionModeRequest>;
+
+/** Schema mirror of {@link SetAcpSessionModeResponse}. */
+export const setAcpSessionModeResponseSchema = z.object({
+  ok: z.literal(true),
+  modeId: z.string().min(1),
+}) satisfies z.ZodType<SetAcpSessionModeResponse>;
+
+/** Schema mirror of {@link SetAcpSessionModelRequest}. */
+export const setAcpSessionModelRequestSchema = z.object({
+  modelId: z.string().min(1),
+}) satisfies z.ZodType<SetAcpSessionModelRequest>;
+
+/** Schema mirror of {@link SetAcpSessionModelResponse}. */
+export const setAcpSessionModelResponseSchema = z.object({
+  ok: z.literal(true),
+  modelId: z.string().min(1),
+}) satisfies z.ZodType<SetAcpSessionModelResponse>;
+
+/** Schema mirror of {@link SetAcpSessionConfigOptionRequest}. */
+export const setAcpSessionConfigOptionRequestSchema = z.object({
+  configOptionId: z.string().min(1),
+  value: z.union([z.string(), z.boolean()]),
+}) satisfies z.ZodType<SetAcpSessionConfigOptionRequest>;
+
+/** Schema mirror of {@link SetAcpSessionConfigOptionResponse}. */
+export const setAcpSessionConfigOptionResponseSchema = z.object({
+  ok: z.literal(true),
+  configOptionId: z.string().min(1),
+  value: z.union([z.string(), z.boolean()]),
+}) satisfies z.ZodType<SetAcpSessionConfigOptionResponse>;

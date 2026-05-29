@@ -5,17 +5,21 @@
  *
  * ### Supported variants
  *
- *   - `agent_message_chunk`  → `text_delta`
- *   - `agent_thought_chunk`  → `thinking_delta`
- *   - `tool_call`            → `tool_call`
- *   - `tool_call_update`     → `tool_call_update`
- *   - `plan`                 → `plan`
+ *   - `agent_message_chunk`     → `text_delta`
+ *   - `agent_thought_chunk`     → `thinking_delta`
+ *   - `tool_call`               → `tool_call`
+ *   - `tool_call_update`        → `tool_call_update`
+ *   - `plan`                    → `plan`
+ *   - `config_option_update`    → `config_options_update`
+ *   - `current_mode_update`     → `session_mode_update`
+ *   - `session_info_update`     → `session_info_update`
+ *   - `usage_update`            → `session_usage_update`
  *
  * Out of scope (returns null, caller logs + drops):
  *   - `user_message_chunk` (we don't echo our own messages back)
- *   - `available_commands_update` (handled out-of-turn in `service.ts`)
- *   - `current_mode_update`, `config_option_update`, `session_info_update`,
- *     `usage_update` (no UI surface yet)
+ *   - `available_commands_update` (handled out-of-turn in `service.ts`
+ *     via `handleSessionMetaUpdate` — refresh comes from the REST
+ *     endpoint, not SSE)
  *
  * ### Trust boundary
  *
@@ -45,8 +49,13 @@
 import { ZAcpSessionUpdate } from '@sediment/shared';
 
 import type {
+  AcpSessionConfigOption,
   AcpSessionUpdate,
+  AgentConfigOptionsUpdateEventData,
   AgentPlanEventData,
+  AgentSessionInfoUpdateEventData,
+  AgentSessionModeUpdateEventData,
+  AgentSessionUsageUpdateEventData,
   AgentStreamEvent,
   AgentToolCallEventData,
   AgentToolCallUpdateEventData,
@@ -175,13 +184,41 @@ export function acpUpdateToStreamEvent(
       const data: AgentPlanEventData = { entries: u.entries };
       return { type: 'plan', data };
     }
+    case 'config_option_update': {
+      // ACP spec: `ConfigOptionUpdate` carries a full snapshot in
+      // `configOptions`. Forward verbatim so the consumer can
+      // overwrite its cached list.
+      const data: AgentConfigOptionsUpdateEventData = {
+        options: u.configOptions as AcpSessionConfigOption[],
+      };
+      return { type: 'config_options_update', data };
+    }
+    case 'current_mode_update': {
+      const data: AgentSessionModeUpdateEventData = {
+        currentModeId: u.currentModeId,
+      };
+      return { type: 'session_mode_update', data };
+    }
+    case 'session_info_update': {
+      const data: AgentSessionInfoUpdateEventData = {
+        title: nullToUndefined((u as { title?: string | null }).title),
+        updatedAt: nullToUndefined(
+          (u as { updatedAt?: string | null }).updatedAt,
+        ),
+      };
+      return { type: 'session_info_update', data };
+    }
+    case 'usage_update': {
+      const data: AgentSessionUsageUpdateEventData = {
+        used: u.used,
+        size: u.size,
+        cost: u.cost ?? null,
+      };
+      return { type: 'session_usage_update', data };
+    }
     // Out-of-turn variants we route elsewhere or simply ignore.
     case 'user_message_chunk':
     case 'available_commands_update':
-    case 'current_mode_update':
-    case 'config_option_update':
-    case 'session_info_update':
-    case 'usage_update':
       return null;
     default: {
       counters.unknownSessionUpdate += 1;

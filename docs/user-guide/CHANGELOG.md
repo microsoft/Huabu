@@ -4,6 +4,29 @@
 
 ---
 
+## 2026-05-31 · ACP 外部 agent 现在能在聊天面板里切模式 / 模型 / 配置项
+
+**What Changed**
+
+- **聊天面板顶部新增 agent 选择器**：原来挂在输入框工具栏左侧的 `[copilot ▼]` 绑定下拉，被提升到 ChatPanel 头部（标题位置）。视觉上类似 ChatGPT 顶部那种 `ChatGPT ▼`：无边框、点开下拉选 built-in mode（Chat / Agent）或某个外部 ACP agent。`+` 新会话按钮仍在右上角。Sketch / Question replay 这类只读视图保留原来的纯文本标题。
+- 当 thread 绑定到外部 ACP agent（Copilot CLI、Claude Code、Gemini CLI 等）后，聊天**输入栏**里会出现一组无边框的 ghost 下拉，**专门用于 session 进行中可调的设置**：
+  - **Agent Mode**：agent 通过 `session/new` / `session/load` 响应的 `modes.availableModes` 公布的可选模式（例如 Copilot CLI 的 `agent` / `chat`）。
+  - **Model**：agent 通过 `models.availableModels` 公布的可选模型；切换时调用 SDK 的 `unstable_setSessionModel`。
+  - **Config Options**：agent 通过 `configOptions` 公布的每一项配置（Copilot 通常推 4 项：model / mode / thought level / auto-approve toggle），按 `type` 分别渲染为下拉或 On/Off 开关。
+- 切换任意一项会立即调对应的 ACP 方法（`session/set_mode` / `session/set_model` / `session/set_config_option`），同时本地 UI 乐观更新，不等服务器回包就改高亮。
+- agent 在 turn 进行中推送的 `current_mode_update` / `config_option_update` / `session_info_update` / `usage_update` 现在也会实时反映到这些下拉里——之前 translator 直接丢弃这些 SSE 帧，"已加载 session 复用" 的场景下 UI 只能看到一个空的 ModeSelector。
+
+**Notes**
+
+- **分层语义**：顶部的 agent 选择器是"这个 thread 委派给谁"——thread 一旦开始对话就锁死；底部输入栏里的下拉是"已委派的这个 agent 在 session 进行中可调的旋钮"——随时可改、agent 也可以推送更新。
+- **仅对外部 agent 生效**：内部 Huabu agent 没有这些概念，输入栏里的下拉不会出现。
+- **agent 不公布就不显示**：如果某个 agent 没在 `session/new` 响应里返回 `modes` / `models` / `configOptions`，对应下拉默认隐藏；不会出现"空列表"占位。
+- **避免双胞胎下拉**：Copilot CLI 会把 `mode` / `model` 同时塞进 `modes`/`models` _和_ `configOptions`。当顶层 mode/model 下拉已经存在时，`configOptions` 里 `id` 为 `mode` / `model` 的项会被静默隐藏，避免两个完全一样的下拉并排出现；只通过 `configOptions` 公布 mode/model 的 agent 不受影响。
+- **turn 进行中可切换**：mode / model / config 切换不被"streaming"状态禁用，因为 ACP 协议本身允许 mid-turn 切换；如果某些 agent 拒绝（返回错误），UI 会在 agent 下一次 push 时被覆盖回正确状态。
+- 没有迁移成本：所有持久化结构未变；只是 SSE 事件流多了 4 个 `type`，外加聊天面板布局调整。
+
+---
+
 ## 2026-05-29 · 重启 Sediment server 后 ACP 对话不再重置
 
 **What Changed**

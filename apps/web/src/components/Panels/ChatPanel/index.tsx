@@ -6,8 +6,14 @@ import {
 } from 'lucide-react';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 
+import {
+  setAcpSessionConfigOption,
+  setAcpSessionMode,
+  setAcpSessionModel,
+} from '@/api/acp';
 import { Button } from '@/components/Common/Button';
 import { useAcpAgents } from '@/hooks/useAcpAgents';
+import { useAcpSessionMeta } from '@/hooks/useAcpSessionMeta';
 import { useAcpSlashCommands } from '@/hooks/useAcpSlashCommands';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
@@ -15,7 +21,9 @@ import { useIntentStore } from '@/store/intentStore';
 import { useLLMStore } from '@/store/llmStore';
 
 import { SidebarPanel } from '../SidebarPanel';
+import { AcpSessionSelectors } from './AcpSessionSelectors';
 import { ChatInput } from './ChatInput';
+import { ModeSelector } from './ModeSelector';
 import { useSketchClusterMessages } from './useSketchClusterMessages';
 import { useAgentStream } from '../../../hooks/useAgentStream';
 import { useChatHistory } from '../../../hooks/useChatHistory';
@@ -73,6 +81,72 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       binding: agentBinding,
       canvasId,
     });
+
+  // ACP session-meta (mode / model / config options / info / usage).
+  // Drives the dropdown trio in ChatInput's toolbar. Empty when the
+  // binding is internal — selectors then render nothing.
+  const { meta: acpSessionMeta, applyEvent: applyAcpSessionMetaEvent } =
+    useAcpSessionMeta({
+      threadId,
+      binding: agentBinding,
+      canvasId,
+    });
+
+  // Optimistic onChange handlers for the ACP selectors: merge the
+  // chosen value into the local snapshot immediately, then fire the
+  // REST set-RPC. If the agent rejects (502 from the server route),
+  // the next session-meta push will overwrite our optimistic state.
+  const handleAcpSelectMode = useCallback(
+    async (modeId: string) => {
+      if (!threadId) return;
+      applyAcpSessionMetaEvent({
+        type: 'session_mode_update',
+        data: { currentModeId: modeId },
+      });
+      try {
+        await setAcpSessionMode(threadId, { modeId });
+      } catch {
+        // Server will re-sync on the agent's next push.
+      }
+    },
+    [threadId, applyAcpSessionMetaEvent],
+  );
+
+  const handleAcpSelectModel = useCallback(
+    async (modelId: string) => {
+      if (!threadId) return;
+      // No dedicated SSE event for "model changed"; mirror the mode
+      // pattern by directly mutating the local snapshot through a
+      // synthetic config event before the round-trip.
+      applyAcpSessionMetaEvent({
+        type: 'config_options_update',
+        data: { options: acpSessionMeta.configOptions },
+      });
+      try {
+        await setAcpSessionModel(threadId, { modelId });
+      } catch {
+        // Server will re-sync on the agent's next push.
+      }
+    },
+    [threadId, acpSessionMeta.configOptions, applyAcpSessionMetaEvent],
+  );
+
+  const handleAcpSelectConfigOption = useCallback(
+    async (optionId: string, value: string | boolean) => {
+      if (!threadId) return;
+      try {
+        await setAcpSessionConfigOption(threadId, {
+          configOptionId: optionId,
+          value,
+        });
+      } catch {
+        // Optimistic mutation skipped — the option shape is opaque,
+        // so we wait for the agent's confirmation push instead of
+        // forging a synthetic update that might diverge.
+      }
+    },
+    [threadId],
+  );
 
   // Question thread replay mode
   const viewingQuestionThread = useChatStore((s) => s.viewingQuestionThread);
@@ -172,9 +246,29 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     <SidebarPanel
       title={panelTitle}
       tabs={
-        <span className="block min-w-0 flex-1 truncate" title={panelTitle}>
-          {panelTitle}
-        </span>
+        // Sketch / question replay are read-only views — keep the
+        // descriptive title there. The normal chat view promotes the
+        // binding picker into the header (ChatGPT-style) so it reads
+        // as "which agent owns this thread", separating it visually
+        // from the per-turn ACP session selectors in ChatInput.
+        viewingSketchCluster || viewingQuestionThread ? (
+          <span className="block min-w-0 flex-1 truncate" title={panelTitle}>
+            {panelTitle}
+          </span>
+        ) : (
+          <ModeSelector
+            mode={mode}
+            onModeChange={setMode}
+            binding={agentBinding}
+            onBindingChange={(b) => setAgentBinding(b, canvasId || undefined)}
+            connectedAgents={connectedAgents}
+            onRefreshAgents={refreshAcpAgents}
+            refreshing={acpAgentsLoading}
+            onNewThread={handleNewChat}
+            locked={messages.length > 0 || isLoading}
+            disabled={!isHistoryLoaded}
+          />
+        )
       }
       isCollapsed={isCollapsed}
       onToggle={onToggle}
@@ -241,19 +335,18 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
             onStop={stopStream}
             isStreaming={isLoading}
             mode={mode}
-            onModeChange={setMode}
-            binding={agentBinding}
-            onBindingChange={(b) => setAgentBinding(b, canvasId || undefined)}
-            connectedAgents={connectedAgents}
-            onRefreshAgents={refreshAcpAgents}
-            refreshingAgents={acpAgentsLoading}
-            onNewThread={handleNewChat}
             slashCommands={slashCommands}
             onSlashMenuIntent={refreshSlashCommands}
-            // 1 thread = 1 binding. Lock the picker the moment a thread
-            // has any message OR a stream is in flight — the user must
-            // start a new chat to pick a different agent.
-            bindingLocked={messages.length > 0 || isLoading}
+            acpSelectorsSlot={
+              agentBinding.kind === 'external' ? (
+                <AcpSessionSelectors
+                  meta={acpSessionMeta}
+                  onSelectMode={handleAcpSelectMode}
+                  onSelectModel={handleAcpSelectModel}
+                  onSelectConfigOption={handleAcpSelectConfigOption}
+                />
+              ) : null
+            }
             disabled={isLoading || !isHistoryLoaded}
           />
         )}

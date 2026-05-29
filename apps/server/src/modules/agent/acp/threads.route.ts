@@ -25,20 +25,45 @@
 import {
   acpPermissionDecisionSchema,
   ensureAcpSessionRequestSchema,
+  setAcpSessionConfigOptionRequestSchema,
+  setAcpSessionModeRequestSchema,
+  setAcpSessionModelRequestSchema,
 } from '@sediment/shared';
 
 import { ensureAcpSession } from './service.js';
 import { acpSessionRegistry } from './session-registry.js';
 
+import type { AcpSessionEntry } from './session-registry.js';
 import type {
   AcpPermissionDecisionResponse,
+  AcpSessionMetaSnapshot,
   AcpThreadCommandsResponse,
   EnsureAcpSessionResponse,
+  SetAcpSessionConfigOptionResponse,
+  SetAcpSessionModelResponse,
+  SetAcpSessionModeResponse,
 } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
 interface ThreadParams {
   threadId: string;
+}
+
+/**
+ * Project the mutable session-meta fields cached on the entry into the
+ * wire-shape clients consume. Pure; safe to call on every response.
+ */
+function snapshotSessionMeta(entry: AcpSessionEntry): AcpSessionMetaSnapshot {
+  return {
+    availableModes: entry.availableModes,
+    currentModeId: entry.currentModeId,
+    availableModels: entry.availableModels,
+    currentModelId: entry.currentModelId,
+    configOptions: entry.configOptions,
+    sessionInfo: entry.sessionInfo,
+    usage: entry.usage,
+    updatedAt: entry.metaUpdatedAt,
+  };
 }
 
 const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
@@ -88,6 +113,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
         sessionId: entry.sessionId,
         availableCommands: entry.availableCommands,
         updatedAt: entry.commandsUpdatedAt,
+        sessionMeta: snapshotSessionMeta(entry),
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -124,6 +150,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
       sessionId: entry.sessionId,
       availableCommands: entry.availableCommands,
       updatedAt: entry.commandsUpdatedAt,
+      sessionMeta: snapshotSessionMeta(entry),
     };
   });
 
@@ -168,6 +195,156 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
       cancelled || !optionId ? { cancelled: true } : { optionId },
     );
     return { resolved };
+  });
+
+  // ── Session-meta set-RPCs ─────────────────────────────────────────
+  //
+  // Three POSTs surface the corresponding ACP `session/set_*` calls.
+  // They mutate session-meta state on the agent; the agent confirms
+  // by pushing a `session/update` notification that flows back into
+  // the session entry through `handleSessionMetaUpdate`. The HTTP
+  // response is therefore best treated as "request accepted" — the
+  // authoritative state is the one carried by the next SSE event.
+  //
+  // Failure modes:
+  //   • 404 — no session for this thread (caller must POST `/session`
+  //     first).
+  //   • 400 — body failed `safeParse`.
+  //   • 502 — agent rejected the RPC (unknown id, capability missing,
+  //     transport error). The user-visible message comes from the
+  //     agent's rejection.
+
+  app.post<{
+    Params: ThreadParams;
+    Reply: SetAcpSessionModeResponse | { message: string; code?: string };
+  }>('/threads/:threadId/mode', async (request, reply) => {
+    const { threadId } = request.params;
+    const entry = acpSessionRegistry.get(threadId);
+    if (!entry) {
+      return reply.status(404).send({
+        message: 'No ACP session for this thread',
+        code: 'session_not_found',
+      });
+    }
+    const parsed = setAcpSessionModeRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      request.log.warn(
+        { threadId, issues: parsed.error.issues },
+        '[acp/threads] invalid set-mode body',
+      );
+      return reply.status(400).send({
+        message: 'Invalid request body',
+        code: 'validation_failed',
+      });
+    }
+    try {
+      await entry.client.setSessionMode(entry.sessionId, parsed.data.modeId);
+      // Optimistic local update so the next GET returns the new id
+      // even before the agent's confirmation notification lands.
+      entry.currentModeId = parsed.data.modeId;
+      entry.metaUpdatedAt = Date.now();
+      return { ok: true as const, modeId: parsed.data.modeId };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      request.log.warn(
+        { threadId, modeId: parsed.data.modeId, err: message },
+        '[acp/threads] setSessionMode failed',
+      );
+      return reply.status(502).send({ message, code: 'acp_set_mode_failed' });
+    }
+  });
+
+  app.post<{
+    Params: ThreadParams;
+    Reply: SetAcpSessionModelResponse | { message: string; code?: string };
+  }>('/threads/:threadId/model', async (request, reply) => {
+    const { threadId } = request.params;
+    const entry = acpSessionRegistry.get(threadId);
+    if (!entry) {
+      return reply.status(404).send({
+        message: 'No ACP session for this thread',
+        code: 'session_not_found',
+      });
+    }
+    const parsed = setAcpSessionModelRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      request.log.warn(
+        { threadId, issues: parsed.error.issues },
+        '[acp/threads] invalid set-model body',
+      );
+      return reply.status(400).send({
+        message: 'Invalid request body',
+        code: 'validation_failed',
+      });
+    }
+    try {
+      await entry.client.setSessionModel(entry.sessionId, parsed.data.modelId);
+      entry.currentModelId = parsed.data.modelId;
+      entry.metaUpdatedAt = Date.now();
+      return { ok: true as const, modelId: parsed.data.modelId };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      request.log.warn(
+        { threadId, modelId: parsed.data.modelId, err: message },
+        '[acp/threads] setSessionModel failed',
+      );
+      return reply.status(502).send({ message, code: 'acp_set_model_failed' });
+    }
+  });
+
+  app.post<{
+    Params: ThreadParams;
+    Reply:
+      | SetAcpSessionConfigOptionResponse
+      | { message: string; code?: string };
+  }>('/threads/:threadId/config-option', async (request, reply) => {
+    const { threadId } = request.params;
+    const entry = acpSessionRegistry.get(threadId);
+    if (!entry) {
+      return reply.status(404).send({
+        message: 'No ACP session for this thread',
+        code: 'session_not_found',
+      });
+    }
+    const parsed = setAcpSessionConfigOptionRequestSchema.safeParse(
+      request.body,
+    );
+    if (!parsed.success) {
+      request.log.warn(
+        { threadId, issues: parsed.error.issues },
+        '[acp/threads] invalid set-config-option body',
+      );
+      return reply.status(400).send({
+        message: 'Invalid request body',
+        code: 'validation_failed',
+      });
+    }
+    try {
+      await entry.client.setSessionConfigOption(
+        entry.sessionId,
+        parsed.data.configOptionId,
+        parsed.data.value,
+      );
+      entry.metaUpdatedAt = Date.now();
+      return {
+        ok: true as const,
+        configOptionId: parsed.data.configOptionId,
+        value: parsed.data.value,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      request.log.warn(
+        {
+          threadId,
+          configOptionId: parsed.data.configOptionId,
+          err: message,
+        },
+        '[acp/threads] setSessionConfigOption failed',
+      );
+      return reply
+        .status(502)
+        .send({ message, code: 'acp_set_config_option_failed' });
+    }
   });
 };
 

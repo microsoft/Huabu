@@ -31,7 +31,13 @@
  */
 
 import type { AcpAgentClient } from './client.js';
-import type { AvailableCommand } from '@sediment/shared';
+import type {
+  AcpCost,
+  AcpModelInfo,
+  AcpSessionConfigOption,
+  AcpSessionMode,
+  AvailableCommand,
+} from '@sediment/shared';
 
 /** A single live ACP session owned by one Sediment thread. */
 export interface AcpSessionEntry {
@@ -74,6 +80,54 @@ export interface AcpSessionEntry {
    * decide whether to do a delayed re-pull (catch late arrivals).
    */
   commandsUpdatedAt: number;
+  /**
+   * Catalogue of selectable modes published by the agent via the
+   * `session/new` (or `session/load`) response's `modes` field.
+   * `current_mode_update` notifications only carry `currentModeId`,
+   * so the list itself is seeded once at session creation time and
+   * left untouched until the session is rebuilt.
+   */
+  availableModes: AcpSessionMode[];
+  /**
+   * Currently-active mode id. Seeded from `modes.currentModeId` on
+   * session creation; subsequently updated by `current_mode_update`
+   * notifications and by successful `setSessionMode` calls.
+   */
+  currentModeId: string | null;
+  /**
+   * Catalogue of selectable models (experimental ACP capability).
+   * Same seeding rules as `availableModes` — there is no
+   * dedicated update notification, so the list is fixed at
+   * session creation time.
+   */
+  availableModels: AcpModelInfo[];
+  /**
+   * Currently-active model id. Seeded from `models.currentModelId`
+   * and refreshed by successful `setSessionModel` calls.
+   */
+  currentModelId: string | null;
+  /**
+   * Free-form configuration knobs surfaced as UI selectors (Copilot
+   * publishes four: model / mode / thought-level / auto-approve).
+   * Updated wholesale by `config_option_update` notifications and
+   * also returned by `setSessionConfigOption`.
+   */
+  configOptions: AcpSessionConfigOption[];
+  /**
+   * Last `session_info_update` payload — title + activity stamp.
+   * `null` until the agent pushes one.
+   */
+  sessionInfo: { title: string | null; updatedAt: string | null } | null;
+  /**
+   * Last `usage_update` payload — context-window / cost gauge.
+   * `null` until the agent pushes one.
+   */
+  usage: { used: number; size: number; cost: AcpCost | null } | null;
+  /**
+   * Epoch ms of the most recent meta touch (any of the five fields
+   * above). UI uses this to detect stale snapshots after reconnect.
+   */
+  metaUpdatedAt: number;
 }
 
 class AcpSessionRegistry {

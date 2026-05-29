@@ -6,8 +6,11 @@
  */
 
 import type {
+  AcpCost,
   AcpPermissionOption,
   AcpPlanEntry,
+  AcpSessionConfigOption,
+  AcpSessionMode,
   AcpToolCallContent,
   AcpToolCallLocation,
   AcpToolCallStatus,
@@ -214,6 +217,78 @@ export interface AgentPermissionRequestEventData {
   options: AcpPermissionOption[];
 }
 
+// ── External-agent session-meta events ─────────────────────────────────
+//
+// External (ACP) agents push four kinds of session metadata via
+// `session/update` notifications:
+//
+//   1. `config_option_update`    → 1..n selectable / boolean knobs
+//                                  (e.g. Copilot's "model", "mode",
+//                                   "thought level", "auto-approve").
+//   2. `current_mode_update`     → currently-active mode id (the
+//                                  mode list itself lives in
+//                                  `availableModes` returned by
+//                                  `session/new`).
+//   3. `session_info_update`     → human-readable title +
+//                                  last-activity timestamp.
+//   4. `usage_update`            → token / cost budget for the session.
+//
+// All four arrive both DURING a turn (translator path) and OUT OF TURN
+// (session-listener path). The wire shapes mirror the SDK 1:1; the
+// `availableModes` field on `AgentSessionModeUpdateEventData` is
+// optional because `current_mode_update` only carries an id — the full
+// list comes from the `session/new` / `session/load` response and is
+// reconstituted by the server before forwarding.
+
+/**
+ * `event: config_options_update` — agent published a fresh snapshot of
+ * its selectable configuration options. REPLACE-semantics: the full
+ * list supersedes any prior state.
+ *
+ * Copilot CLI typically pushes four options (model / mode / thought
+ * level / auto-approve toggle) shortly after `session/new`; other
+ * agents may push fewer or none.
+ */
+export interface AgentConfigOptionsUpdateEventData {
+  options: AcpSessionConfigOption[];
+}
+
+/**
+ * `event: session_mode_update` — currently-active session mode changed.
+ *
+ * `availableModes` carries the full mode catalogue when the server has
+ * one cached (always true after `session/new` resolves). UI clients
+ * key the selector dropdown off `availableModes` and highlight
+ * `currentModeId`.
+ */
+export interface AgentSessionModeUpdateEventData {
+  currentModeId: string;
+  availableModes?: AcpSessionMode[];
+}
+
+/**
+ * `event: session_info_update` — title / activity timestamp changed.
+ * Both fields are optional per ACP spec (partial updates allowed);
+ * `null` explicitly clears the field, `undefined` leaves it unchanged.
+ */
+export interface AgentSessionInfoUpdateEventData {
+  title?: string | null;
+  updatedAt?: string | null;
+}
+
+/**
+ * `event: session_usage_update` — running token / cost budget for the
+ * session. UI surfaces these as a context-window gauge.
+ */
+export interface AgentSessionUsageUpdateEventData {
+  /** Tokens used so far. */
+  used: number;
+  /** Total tokens budgeted for the session. */
+  size: number;
+  /** Optional cost breakdown (currency + amount). */
+  cost?: AcpCost | null;
+}
+
 /** Discriminated union of every SSE frame emitted by `/api/agent`. */
 export type AgentStreamEvent =
   | { type: 'meta'; data: AgentMetaEventData }
@@ -224,6 +299,10 @@ export type AgentStreamEvent =
   | { type: 'plan'; data: AgentPlanEventData }
   | { type: 'prepared_prompt'; data: AgentPreparedPromptEventData }
   | { type: 'permission_request'; data: AgentPermissionRequestEventData }
+  | { type: 'config_options_update'; data: AgentConfigOptionsUpdateEventData }
+  | { type: 'session_mode_update'; data: AgentSessionModeUpdateEventData }
+  | { type: 'session_info_update'; data: AgentSessionInfoUpdateEventData }
+  | { type: 'session_usage_update'; data: AgentSessionUsageUpdateEventData }
   | { type: 'done'; data: AgentDoneEventData }
   | { type: 'error'; data: AgentErrorEventData }
   | { type: 'end'; data: AgentEndEventData };
@@ -243,6 +322,10 @@ export const AGENT_SSE_EVENTS = {
   Plan: 'plan',
   PreparedPrompt: 'prepared_prompt',
   PermissionRequest: 'permission_request',
+  ConfigOptionsUpdate: 'config_options_update',
+  SessionModeUpdate: 'session_mode_update',
+  SessionInfoUpdate: 'session_info_update',
+  SessionUsageUpdate: 'session_usage_update',
   Done: 'done',
   Error: 'error',
   End: 'end',

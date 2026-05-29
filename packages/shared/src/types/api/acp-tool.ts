@@ -23,4 +23,16 @@ export {
   zPlan as ZAcpPlan,
   zPlanEntry as ZAcpPlanEntry,
   zSessionUpdate as ZAcpSessionUpdate,
+  // Session-meta variants — surfaced for explicit shape narrowing in
+  // `handleSessionMetaUpdate` and for validating the
+  // `config_options_update` / `current_mode_update` / `session_info_update`
+  // / `usage_update` SSE payloads that travel through
+  // `EnsureAcpSessionResponse` and `AcpThreadCommandsResponse`.
+  zSessionConfigOption as ZAcpSessionConfigOption,
+  zSessionMode as ZAcpSessionMode,
+  zSessionModeState as ZAcpSessionModeState,
+  zSessionModelState as ZAcpSessionModelState,
+  zModelInfo as ZAcpModelInfo,
+  zSessionInfoUpdate as ZAcpSessionInfoUpdate,
+  zUsageUpdate as ZAcpUsageUpdate,
 } from '@agentclientprotocol/sdk/dist/schema/zod.gen.js';

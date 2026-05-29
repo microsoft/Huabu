@@ -45,7 +45,13 @@ import {
 import type { AcpSessionEntry } from './session-registry.js';
 import type { ChatPartsSidecar } from '../store/chat-parts-store.js';
 import type { AssistantMessage, Context } from '@earendil-works/pi-ai';
-import type { AcpPlanEntry, AcpSessionUpdate } from '@sediment/shared';
+import type {
+  AcpModelInfo,
+  AcpPlanEntry,
+  AcpSessionConfigOption,
+  AcpSessionMode,
+  AcpSessionUpdate,
+} from '@sediment/shared';
 import type {
   AgentChatContext,
   AgentStreamEvent,
@@ -323,6 +329,14 @@ async function ensureAcpSessionInner(
     createdAt: Date.now(),
     availableCommands: [],
     commandsUpdatedAt: 0,
+    availableModes: [],
+    currentModeId: null,
+    availableModels: [],
+    currentModelId: null,
+    configOptions: [],
+    sessionInfo: null,
+    usage: null,
+    metaUpdatedAt: 0,
   };
 
   let sessionId: string | null = null;
@@ -348,12 +362,13 @@ async function ensureAcpSessionInner(
         (update) => handleSessionMetaUpdate(created, update, logger),
       );
       try {
-        await client.loadSession({
+        const loadResult = await client.loadSession({
           sessionId: persisted.sessionId,
           cwd: persisted.cwd,
         });
         sessionId = persisted.sessionId;
         created.sessionId = sessionId;
+        seedSessionMetaFromResponse(created, loadResult, logger);
         logger.info(
           { threadId, sessionId },
           '[acp] session/load succeeded \u2014 resumed external agent memory',
@@ -408,8 +423,10 @@ async function ensureAcpSessionInner(
       { threadId, canvasId, agentId: binding.agentletAgentId, cwd },
       '[acp] opening new session for thread',
     );
-    sessionId = await client.newSession({ cwd });
+    const newResult = await client.newSession({ cwd });
+    sessionId = newResult.sessionId;
     created.sessionId = sessionId;
+    seedSessionMetaFromResponse(created, newResult, logger);
   }
 
   if (!removeListener) {
@@ -453,15 +470,54 @@ async function ensureAcpSessionInner(
 
 /**
  * Long-lived session listener — handles out-of-turn `session/update`
- * notifications carrying session-scoped metadata. Currently only
- * `available_commands_update`; new metadata variants plug in here.
+ * notifications carrying session-scoped metadata.
+ *
+ * Five variants are recognised, all using REPLACE-semantics:
+ *
+ *   1. `available_commands_update`  → slash command catalogue.
+ *   2. `config_option_update`       → free-form config knobs (model /
+ *                                     mode / thought-level / etc).
+ *   3. `current_mode_update`        → currently-active mode id; the
+ *                                     mode catalogue itself was seeded
+ *                                     from `session/new` and is left
+ *                                     untouched here.
+ *   4. `session_info_update`        → title + activity timestamp.
+ *   5. `usage_update`               → context-window + cost gauge.
+ *
+ * All other variants are forwarded by the translator into the SSE
+ * stream and ignored here.
  */
 function handleSessionMetaUpdate(
   entry: AcpSessionEntry,
   update: AcpSessionUpdate,
   logger: FastifyBaseLogger,
 ): void {
-  if (update.sessionUpdate !== 'available_commands_update') return;
+  switch (update.sessionUpdate) {
+    case 'available_commands_update':
+      applyAvailableCommandsUpdate(entry, update, logger);
+      return;
+    case 'config_option_update':
+      applyConfigOptionUpdate(entry, update, logger);
+      return;
+    case 'current_mode_update':
+      applyCurrentModeUpdate(entry, update, logger);
+      return;
+    case 'session_info_update':
+      applySessionInfoUpdate(entry, update, logger);
+      return;
+    case 'usage_update':
+      applyUsageUpdate(entry, update, logger);
+      return;
+    default:
+      return;
+  }
+}
+
+function applyAvailableCommandsUpdate(
+  entry: AcpSessionEntry,
+  update: AcpSessionUpdate,
+  logger: FastifyBaseLogger,
+): void {
   const raw = (update as { availableCommands?: unknown }).availableCommands;
   if (!Array.isArray(raw)) {
     logger.warn(
@@ -512,6 +568,194 @@ function handleSessionMetaUpdate(
     },
     '[acp] available_commands_update applied',
   );
+}
+
+function applyConfigOptionUpdate(
+  entry: AcpSessionEntry,
+  update: AcpSessionUpdate,
+  logger: FastifyBaseLogger,
+): void {
+  // Two wire shapes observed across agents:
+  //   • `{ configOptions: SessionConfigOption[] }`  (Copilot CLI)
+  //   • A single `SessionConfigOption` flattened on the update itself
+  //     (per the SDK's `ConfigOptionUpdate` zod schema).
+  // Accept both: the first wins; otherwise reconstruct from the
+  // discriminator + payload keys present.
+  const raw = update as Record<string, unknown>;
+  const list = Array.isArray(raw.configOptions)
+    ? (raw.configOptions as AcpSessionConfigOption[])
+    : raw.id || raw.label
+      ? [raw as unknown as AcpSessionConfigOption]
+      : [];
+  if (list.length === 0) {
+    logger.warn(
+      { sessionId: entry.sessionId },
+      '[acp] config_option_update without recognisable payload',
+    );
+    return;
+  }
+  // The spec is replace-only for the full snapshot; but the
+  // single-item flavour is genuinely a per-option upsert. Merge by id.
+  if (Array.isArray(raw.configOptions)) {
+    entry.configOptions = list;
+  } else {
+    const byId = new Map<string, AcpSessionConfigOption>(
+      entry.configOptions.map((o) => [String((o as { id: string }).id), o]),
+    );
+    for (const opt of list) {
+      const id = String((opt as { id?: unknown }).id ?? '');
+      if (!id) continue;
+      byId.set(id, opt);
+    }
+    entry.configOptions = Array.from(byId.values());
+  }
+  entry.metaUpdatedAt = Date.now();
+  logger.info(
+    { sessionId: entry.sessionId, count: entry.configOptions.length },
+    '[acp] config_option_update applied',
+  );
+}
+
+function applyCurrentModeUpdate(
+  entry: AcpSessionEntry,
+  update: AcpSessionUpdate,
+  logger: FastifyBaseLogger,
+): void {
+  const id = (update as { currentModeId?: unknown }).currentModeId;
+  if (typeof id !== 'string' || !id) {
+    logger.warn(
+      { sessionId: entry.sessionId },
+      '[acp] current_mode_update without currentModeId',
+    );
+    return;
+  }
+  entry.currentModeId = id;
+  entry.metaUpdatedAt = Date.now();
+  logger.info(
+    { sessionId: entry.sessionId, currentModeId: id },
+    '[acp] current_mode_update applied',
+  );
+}
+
+function applySessionInfoUpdate(
+  entry: AcpSessionEntry,
+  update: AcpSessionUpdate,
+  logger: FastifyBaseLogger,
+): void {
+  const raw = update as { title?: unknown; updatedAt?: unknown };
+  const title = readNullableString(raw.title);
+  const updatedAt = readNullableString(raw.updatedAt);
+  if (title === undefined && updatedAt === undefined) {
+    logger.warn(
+      { sessionId: entry.sessionId },
+      '[acp] session_info_update without title or updatedAt',
+    );
+    return;
+  }
+  const prior = entry.sessionInfo ?? { title: null, updatedAt: null };
+  entry.sessionInfo = {
+    title: title === undefined ? prior.title : title,
+    updatedAt: updatedAt === undefined ? prior.updatedAt : updatedAt,
+  };
+  entry.metaUpdatedAt = Date.now();
+  logger.info(
+    { sessionId: entry.sessionId, info: entry.sessionInfo },
+    '[acp] session_info_update applied',
+  );
+}
+
+function applyUsageUpdate(
+  entry: AcpSessionEntry,
+  update: AcpSessionUpdate,
+  logger: FastifyBaseLogger,
+): void {
+  const raw = update as { used?: unknown; size?: unknown; cost?: unknown };
+  const used = typeof raw.used === 'number' ? raw.used : null;
+  const size = typeof raw.size === 'number' ? raw.size : null;
+  if (used === null || size === null) {
+    logger.warn(
+      { sessionId: entry.sessionId },
+      '[acp] usage_update missing used/size',
+    );
+    return;
+  }
+  let cost: { amount: number; currency: string } | null = null;
+  if (raw.cost && typeof raw.cost === 'object') {
+    const c = raw.cost as { amount?: unknown; currency?: unknown };
+    if (typeof c.amount === 'number' && typeof c.currency === 'string') {
+      cost = { amount: c.amount, currency: c.currency };
+    }
+  }
+  entry.usage = { used, size, cost };
+  entry.metaUpdatedAt = Date.now();
+  logger.info(
+    { sessionId: entry.sessionId, used, size },
+    '[acp] usage_update applied',
+  );
+}
+
+/**
+ * Seed the session entry from the `modes` / `models` / `configOptions`
+ * fields of a `session/new` or `session/load` response, when present.
+ * Permissive — silently skips fields the agent didn't include.
+ */
+function seedSessionMetaFromResponse(
+  entry: AcpSessionEntry,
+  response: { modes?: unknown; models?: unknown; configOptions?: unknown },
+  logger: FastifyBaseLogger,
+): void {
+  let touched = false;
+  if (response.modes && typeof response.modes === 'object') {
+    const m = response.modes as {
+      availableModes?: unknown;
+      currentModeId?: unknown;
+    };
+    if (Array.isArray(m.availableModes)) {
+      entry.availableModes = m.availableModes as AcpSessionMode[];
+      touched = true;
+    }
+    if (typeof m.currentModeId === 'string' && m.currentModeId) {
+      entry.currentModeId = m.currentModeId;
+      touched = true;
+    }
+  }
+  if (response.models && typeof response.models === 'object') {
+    const m = response.models as {
+      availableModels?: unknown;
+      currentModelId?: unknown;
+    };
+    if (Array.isArray(m.availableModels)) {
+      entry.availableModels = m.availableModels as AcpModelInfo[];
+      touched = true;
+    }
+    if (typeof m.currentModelId === 'string' && m.currentModelId) {
+      entry.currentModelId = m.currentModelId;
+      touched = true;
+    }
+  }
+  if (Array.isArray(response.configOptions)) {
+    entry.configOptions = response.configOptions as AcpSessionConfigOption[];
+    touched = true;
+  }
+  if (touched) {
+    entry.metaUpdatedAt = Date.now();
+    logger.info(
+      {
+        sessionId: entry.sessionId,
+        modeCount: entry.availableModes.length,
+        modelCount: entry.availableModels.length,
+        configCount: entry.configOptions.length,
+      },
+      '[acp] seeded session-meta from session/new|load response',
+    );
+  }
+}
+
+function readNullableString(v: unknown): string | null | undefined {
+  if (v === undefined) return undefined;
+  if (v === null) return null;
+  if (typeof v === 'string') return v;
+  return undefined;
 }
 
 /**

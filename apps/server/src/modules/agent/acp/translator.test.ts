@@ -144,26 +144,106 @@ describe('acpUpdateToStreamEvent — active discriminators', () => {
     });
     expect(evt).toEqual({ type: 'plan', data: { entries } });
   });
+
+  it('maps current_mode_update → session_mode_update', () => {
+    const evt = acpUpdateToStreamEvent({
+      sessionUpdate: 'current_mode_update',
+      currentModeId: 'agent',
+    });
+    expect(evt).toEqual({
+      type: 'session_mode_update',
+      data: { currentModeId: 'agent' },
+    });
+  });
+
+  it('maps config_option_update (select option) → config_options_update', () => {
+    const options = [
+      {
+        id: 'model',
+        name: 'Model',
+        type: 'select',
+        currentValue: 'gpt-5',
+        options: [
+          { name: 'GPT-5', value: 'gpt-5' },
+          { name: 'Claude 4', value: 'claude-4' },
+        ],
+      },
+    ];
+    const evt = acpUpdateToStreamEvent({
+      sessionUpdate: 'config_option_update',
+      configOptions: options,
+    });
+    expect(evt).toMatchObject({
+      type: 'config_options_update',
+      data: { options },
+    });
+  });
+
+  it('maps config_option_update (boolean option) → config_options_update', () => {
+    const options = [
+      {
+        id: 'auto_approve',
+        name: 'Auto-approve',
+        type: 'boolean',
+        currentValue: true,
+      },
+    ];
+    const evt = acpUpdateToStreamEvent({
+      sessionUpdate: 'config_option_update',
+      configOptions: options,
+    });
+    expect(evt).toEqual({
+      type: 'config_options_update',
+      data: { options },
+    });
+  });
+
+  it('maps session_info_update → session_info_update', () => {
+    const evt = acpUpdateToStreamEvent({
+      sessionUpdate: 'session_info_update',
+      title: 'My session',
+      updatedAt: '2025-01-01T00:00:00Z',
+    });
+    expect(evt).toEqual({
+      type: 'session_info_update',
+      data: {
+        title: 'My session',
+        updatedAt: '2025-01-01T00:00:00Z',
+      },
+    });
+  });
+
+  it('maps usage_update → session_usage_update', () => {
+    const evt = acpUpdateToStreamEvent({
+      sessionUpdate: 'usage_update',
+      used: 1024,
+      size: 200_000,
+    });
+    expect(evt).toEqual({
+      type: 'session_usage_update',
+      data: { used: 1024, size: 200_000, cost: null },
+    });
+  });
 });
 
 describe('acpUpdateToStreamEvent — ignored discriminators', () => {
-  it.each([
-    'user_message_chunk',
-    'available_commands_update',
-    'current_mode_update',
-  ])('returns null for %s (no counter bump)', (kind) => {
-    let payload: unknown;
-    if (kind === 'user_message_chunk') {
-      payload = { sessionUpdate: kind, content: { type: 'text', text: 'hi' } };
-    } else if (kind === 'available_commands_update') {
-      payload = { sessionUpdate: kind, availableCommands: [] };
-    } else {
-      payload = { sessionUpdate: kind, currentModeId: 'default' };
-    }
-    expect(acpUpdateToStreamEvent(payload)).toBeNull();
-    expect(getTranslatorCounters().unknownSessionUpdate).toBe(0);
-    expect(getTranslatorCounters().invalidPayloads).toBe(0);
-  });
+  it.each(['user_message_chunk', 'available_commands_update'])(
+    'returns null for %s (no counter bump)',
+    (kind) => {
+      let payload: unknown;
+      if (kind === 'user_message_chunk') {
+        payload = {
+          sessionUpdate: kind,
+          content: { type: 'text', text: 'hi' },
+        };
+      } else {
+        payload = { sessionUpdate: kind, availableCommands: [] };
+      }
+      expect(acpUpdateToStreamEvent(payload)).toBeNull();
+      expect(getTranslatorCounters().unknownSessionUpdate).toBe(0);
+      expect(getTranslatorCounters().invalidPayloads).toBe(0);
+    },
+  );
 });
 
 describe('counters', () => {

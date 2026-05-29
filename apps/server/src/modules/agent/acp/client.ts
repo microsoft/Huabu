@@ -103,7 +103,31 @@ export function agentSupportsLoadSession(
 /** Subset of the ACP session/new response we care about. */
 export interface AcpNewSessionResult {
   sessionId: string;
+  /**
+   * Mode catalogue + current mode id, as published by the agent.
+   * Shape: `{ availableModes: SessionMode[]; currentModeId: SessionModeId }`.
+   * Optional because not every agent emits a mode list.
+   */
   modes?: unknown;
+  /**
+   * Model catalogue + current model id (experimental ACP capability).
+   * Shape: `{ availableModels: ModelInfo[]; currentModelId: ModelId }`.
+   * Optional because the capability is unstable and many agents omit it.
+   */
+  models?: unknown;
+  /** Free-form config knobs (Copilot publishes 4: model/mode/thought/auto). */
+  configOptions?: unknown;
+}
+
+/**
+ * Subset of the ACP `session/load` response. Shape mirrors
+ * {@link AcpNewSessionResult} sans `sessionId` (the load caller already
+ * knows it). All fields optional because some agents return an empty
+ * object on successful resume.
+ */
+export interface AcpLoadSessionResult {
+  modes?: unknown;
+  models?: unknown;
   configOptions?: unknown;
 }
 
@@ -362,13 +386,13 @@ export class AcpAgentClient {
     return this._initializeResult;
   }
 
-  async newSession(opts: { cwd: string }): Promise<string> {
+  async newSession(opts: { cwd: string }): Promise<AcpNewSessionResult> {
     if (this._closed) throw new Error('AcpAgentClient is closed');
     const result = await this.sdk.newSession({
       cwd: opts.cwd,
       mcpServers: [],
     });
-    return (result as AcpNewSessionResult).sessionId;
+    return result as AcpNewSessionResult;
   }
 
   /**
@@ -388,14 +412,22 @@ export class AcpAgentClient {
    * Rejects when the agent does not recognise `sessionId` (e.g. agent
    * was itself restarted and lost session state). Callers should treat
    * rejection as "session is gone" and fall back to {@link newSession}.
+   *
+   * Returns the SDK's load response so callers can seed mode/model/
+   * config catalogues — the spec mirrors `session/new` (modes / models /
+   * configOptions all optional).
    */
-  async loadSession(opts: { sessionId: string; cwd: string }): Promise<void> {
+  async loadSession(opts: {
+    sessionId: string;
+    cwd: string;
+  }): Promise<AcpLoadSessionResult> {
     if (this._closed) throw new Error('AcpAgentClient is closed');
-    await this.sdk.loadSession({
+    const result = await this.sdk.loadSession({
       sessionId: opts.sessionId,
       cwd: opts.cwd,
       mcpServers: [],
     });
+    return (result ?? {}) as AcpLoadSessionResult;
   }
 
   /**
@@ -461,6 +493,68 @@ export class AcpAgentClient {
       // SDK rejects if the underlying stream is closed mid-flight;
       // a cancel notification is best-effort anyway.
       this.logger.debug({ err: String(e) }, 'session/cancel send failed');
+    }
+  }
+
+  // ── Session-meta setters ──────────────────────────────────────────
+  //
+  // Thin wrappers around the SDK's `setSessionMode` / `setSessionModel`
+  // / `setSessionConfigOption` JSON-RPC methods. The SDK validates the
+  // request/response shapes against the generated zod schemas; we just
+  // surface the calls so service.ts can wire them into REST endpoints.
+  //
+  // None of these methods mutate local `AcpSessionEntry` state — that's
+  // the caller's job. A successful response from the agent should be
+  // followed by a corresponding `session/update` notification (which
+  // updates the entry through the normal dispatch path); the response
+  // itself is only the agent's "I accepted the request" ack.
+
+  /**
+   * Send `session/set_mode` to switch the currently-active mode.
+   * Resolves on the agent's ack; rejects if the agent rejects the
+   * `modeId` (unknown id) or doesn't support modes at all.
+   */
+  async setSessionMode(sessionId: string, modeId: string): Promise<void> {
+    if (this._closed) throw new Error('AcpAgentClient is closed');
+    await this.sdk.setSessionMode({ sessionId, modeId });
+  }
+
+  /**
+   * Send `session/set_model` to switch the currently-active model
+   * (experimental ACP capability — SDK exposes it as
+   * `unstable_setSessionModel`). Rejects with method-not-found when
+   * the agent does not support model switching.
+   */
+  async setSessionModel(sessionId: string, modelId: string): Promise<void> {
+    if (this._closed) throw new Error('AcpAgentClient is closed');
+    await this.sdk.unstable_setSessionModel({ sessionId, modelId });
+  }
+
+  /**
+   * Send `session/set_config_option` to change a single config knob.
+   * `value` is `boolean` for boolean options and `string` (the value
+   * id) for select options — the SDK enforces the shape based on the
+   * option's type at parse time.
+   */
+  async setSessionConfigOption(
+    sessionId: string,
+    configId: string,
+    value: string | boolean,
+  ): Promise<void> {
+    if (this._closed) throw new Error('AcpAgentClient is closed');
+    if (typeof value === 'boolean') {
+      await this.sdk.setSessionConfigOption({
+        sessionId,
+        configId,
+        type: 'boolean',
+        value,
+      });
+    } else {
+      await this.sdk.setSessionConfigOption({
+        sessionId,
+        configId,
+        value,
+      });
     }
   }
 

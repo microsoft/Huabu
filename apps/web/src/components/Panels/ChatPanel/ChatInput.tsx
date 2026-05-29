@@ -6,7 +6,6 @@ import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 
 import { ContextUsageRing } from './ContextUsageRing';
-import { ModeSelector } from './ModeSelector';
 import { SourceCount } from './SelectedNodeRefs';
 import { SlashCommandMenu } from './SlashCommandMenu';
 import { useSlashCommandTypeahead } from './useSlashCommandTypeahead';
@@ -14,12 +13,7 @@ import { Button } from '../../Common/Button';
 import { NodeRef } from '../../Common/NodeRef';
 import { Tooltip } from '../../Common/Tooltip';
 
-import type {
-  AcpAgentSummary,
-  AgentBinding,
-  AgentMode,
-  AvailableCommand,
-} from '@sediment/shared';
+import type { AgentMode, AvailableCommand } from '@sediment/shared';
 
 interface ChatInputProps {
   value: string;
@@ -27,19 +21,8 @@ interface ChatInputProps {
   onSubmit: (e: React.FormEvent, mode: AgentMode) => void;
   onStop: () => void;
   isStreaming?: boolean;
+  /** Current built-in mode. Affects placeholder + the value submitted to `onSubmit`. */
   mode: AgentMode;
-  onModeChange: (mode: AgentMode) => void;
-  /** Thread → agent binding. See ChatPanel for sourcing rules. */
-  binding: AgentBinding;
-  onBindingChange: (binding: AgentBinding) => void;
-  /** Currently-connected ACP agents (from `useAcpAgents`). */
-  connectedAgents: AcpAgentSummary[];
-  /** Re-fetch the connected-agents list (called on selector open + Refresh button). */
-  onRefreshAgents?: () => void | Promise<void>;
-  /** True while a refresh is in flight. */
-  refreshingAgents?: boolean;
-  /** Start a fresh chat thread ("New chat session" action in the mode picker). */
-  onNewThread?: () => void;
   /**
    * Slash commands the bound external agent advertised via
    * `available_commands_update`. Empty when the binding is internal,
@@ -62,10 +45,12 @@ interface ChatInputProps {
    */
   onSlashMenuIntent?: () => void;
   /**
-   * When true, the mode/binding picker is locked. Independent of
-   * `disabled`, which only suppresses input submission.
+   * Optional slot rendered at the left of the toolbar (before the
+   * `ContextUsageRing`). Used by ChatPanel to mount the ACP session
+   * selectors (mode / model / config options) when the bound agent
+   * advertises any. Hidden by simply passing nothing.
    */
-  bindingLocked?: boolean;
+  acpSelectorsSlot?: React.ReactNode;
   disabled?: boolean;
   placeholder?: string;
 }
@@ -77,16 +62,9 @@ export const ChatInput = ({
   onStop,
   isStreaming = false,
   mode,
-  onModeChange,
-  binding,
-  onBindingChange,
-  connectedAgents,
-  onRefreshAgents,
-  refreshingAgents = false,
-  onNewThread,
   slashCommands = [],
   onSlashMenuIntent,
-  bindingLocked = false,
+  acpSelectorsSlot,
   disabled = false,
   placeholder = 'Asking anything here...',
 }: ChatInputProps) => {
@@ -550,19 +528,8 @@ export const ChatInput = ({
           </div>
 
           <div className="mt-2 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <ModeSelector
-                mode={mode}
-                onModeChange={onModeChange}
-                binding={binding}
-                onBindingChange={onBindingChange}
-                connectedAgents={connectedAgents}
-                onRefreshAgents={onRefreshAgents}
-                refreshing={refreshingAgents}
-                onNewThread={onNewThread}
-                locked={bindingLocked}
-                disabled={disabled}
-              />
+            <div className="flex flex-wrap items-center gap-2">
+              {acpSelectorsSlot}
               <ContextUsageRing draftText={value} isStreaming={isStreaming} />
             </div>
 

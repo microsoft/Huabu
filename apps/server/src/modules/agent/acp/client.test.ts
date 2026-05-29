@@ -537,7 +537,12 @@ describe('AcpAgentClient — loadSession', () => {
       id: sentLoad!.id as number,
       result: {},
     });
-    await expect(loadPromise).resolves.toBeUndefined();
+    // `loadSession` now returns the full agent response so the caller
+    // can seed session-meta (modes / models / configOptions) from it.
+    // The fake agent responds with `{}` here — that's a valid empty
+    // payload, so we just assert the resolution succeeds.
+    const result = await loadPromise;
+    expect(result).toEqual({});
   });
 
   it('rejects when the agent returns an error (caller falls back to newSession)', async () => {
