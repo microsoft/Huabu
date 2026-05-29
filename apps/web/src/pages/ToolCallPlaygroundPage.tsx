@@ -3,16 +3,22 @@
  * scrollable page. Lets us eyeball icon/status/content combinations
  * without running a real agent turn.
  *
+ * Scope: `ToolCallCard` renders only the `generic` variant of
+ * `AssistantToolPart`. The other variants (`agent_tool`,
+ * `canvas_commands`, `web_search`) have their own dedicated
+ * renderers (`MergedAgentToolRow`, `CanvasCommandCard`,
+ * `WebSearchToolDisplay`) and are not exercised here.
+ *
  * Route: `/playground/tool-calls`
  */
 
 import { ToolCallCard } from '../components/Messages/AIMessage/Tool/ToolCallCard';
 
-import type { AssistantToolPart } from '@sediment/shared';
+import type { GenericToolPart } from '@sediment/shared';
 
 interface Fixture {
   label: string;
-  part: AssistantToolPart;
+  part: GenericToolPart;
 }
 
 let idSeq = 0;
@@ -20,7 +26,7 @@ const nextId = () => `fake-${++idSeq}`;
 
 // ─── Status × ToolKind matrix ─────────────────────────────────────────
 
-const STATUSES: AssistantToolPart['status'][] = [
+const STATUSES: GenericToolPart['status'][] = [
   'pending',
   'in_progress',
   'completed',
@@ -28,7 +34,7 @@ const STATUSES: AssistantToolPart['status'][] = [
 ];
 
 const KIND_FIXTURES: Array<{
-  toolKind: NonNullable<AssistantToolPart['toolKind']>;
+  toolKind: NonNullable<GenericToolPart['toolKind']>;
   title: string;
 }> = [
   { toolKind: 'read', title: 'Read app.ts' },
@@ -41,21 +47,6 @@ const KIND_FIXTURES: Array<{
   { toolKind: 'fetch', title: 'Fetch https://example.com/data.json' },
   { toolKind: 'switch_mode', title: 'Switch mode → review' },
   { toolKind: 'other', title: 'Unknown tool' },
-];
-
-const INTERNAL_FIXTURES: Array<{
-  internalToolName: NonNullable<AssistantToolPart['internalToolName']>;
-  title: string;
-}> = [
-  { internalToolName: 'read', title: 'read(app.ts)' },
-  { internalToolName: 'grep', title: 'grep("AssistantToolPart")' },
-  { internalToolName: 'find', title: 'find(**/*.tsx)' },
-  { internalToolName: 'ls', title: 'ls(apps/web/src)' },
-  { internalToolName: 'inspect_nodes', title: 'inspect_nodes(["n1","n2"])' },
-  { internalToolName: 'inspect_edges', title: 'inspect_edges(["e1"])' },
-  { internalToolName: 'get_canvas_outline', title: 'get_canvas_outline()' },
-  { internalToolName: 'canvas_commands', title: 'canvas_commands(3 ops)' },
-  { internalToolName: 'web_search', title: 'web_search("react 19")' },
 ];
 
 const TITLE_HEURISTIC_FIXTURES: Array<{ title: string }> = [
@@ -82,6 +73,7 @@ for (const { toolKind, title } of KIND_FIXTURES) {
         kind: 'tool',
         toolCallId: nextId(),
         title,
+        variant: 'generic',
         toolKind,
         status,
       },
@@ -89,21 +81,7 @@ for (const { toolKind, title } of KIND_FIXTURES) {
   }
 }
 
-// 2. Internal tools at completed status.
-for (const { internalToolName, title } of INTERNAL_FIXTURES) {
-  fixtures.push({
-    label: `internalToolName=${internalToolName}`,
-    part: {
-      kind: 'tool',
-      toolCallId: nextId(),
-      title,
-      status: 'completed',
-      internalToolName,
-    },
-  });
-}
-
-// 3. Title-heuristic fallback (no toolKind, no internalToolName).
+// 2. Title-heuristic fallback (no toolKind).
 for (const { title } of TITLE_HEURISTIC_FIXTURES) {
   fixtures.push({
     label: `title-heuristic · "${title}"`,
@@ -111,18 +89,20 @@ for (const { title } of TITLE_HEURISTIC_FIXTURES) {
       kind: 'tool',
       toolCallId: nextId(),
       title,
+      variant: 'generic',
       status: 'completed',
     },
   });
 }
 
-// 4. Rich content variants — exercise expand/collapse and content blocks.
+// 3. Rich content variants — exercise expand/collapse and content blocks.
 fixtures.push({
   label: 'completed + text content + locations',
   part: {
     kind: 'tool',
     toolCallId: nextId(),
     title: 'Read app.ts',
+    variant: 'generic',
     toolKind: 'read',
     status: 'completed',
     locations: [
@@ -147,6 +127,7 @@ fixtures.push({
     kind: 'tool',
     toolCallId: nextId(),
     title: 'Edit ToolCallCard.tsx',
+    variant: 'generic',
     toolKind: 'edit',
     status: 'completed',
     content: [
@@ -170,6 +151,7 @@ fixtures.push({
     kind: 'tool',
     toolCallId: nextId(),
     title: 'Fetch docs',
+    variant: 'generic',
     toolKind: 'fetch',
     status: 'completed',
     content: [
@@ -191,6 +173,7 @@ fixtures.push({
     kind: 'tool',
     toolCallId: nextId(),
     title: 'Run pnpm build',
+    variant: 'generic',
     toolKind: 'execute',
     status: 'failed',
     content: [
@@ -211,6 +194,7 @@ fixtures.push({
     kind: 'tool',
     toolCallId: nextId(),
     title: 'Search workspace',
+    variant: 'generic',
     toolKind: 'search',
     status: 'in_progress',
     content: [
@@ -232,6 +216,7 @@ fixtures.push({
     toolCallId: nextId(),
     title:
       'Read a really really really really really really really really really really long file path that should truncate gracefully in the UI',
+    variant: 'generic',
     toolKind: 'read',
     status: 'completed',
   },
@@ -248,8 +233,9 @@ export default function ToolCallPlaygroundPage() {
             ToolCallCard playground
           </h1>
           <p className="text-fg-muted mt-2 text-sm">
-            Fake fixtures covering every status × icon-mapping permutation.
-            Click an expandable card to verify content blocks &amp; locations.
+            Fake fixtures covering every status × icon-mapping permutation for
+            the `generic` tool-part variant. Click an expandable card to verify
+            content blocks &amp; locations.
           </p>
         </header>
 

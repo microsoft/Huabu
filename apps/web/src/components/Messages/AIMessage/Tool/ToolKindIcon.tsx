@@ -3,8 +3,10 @@
  *
  * Order of resolution:
  *   1. Explicit `toolKind` from the agent (ACP §session/update enum).
- *   2. Built-in internal-tool name (`read`, `grep`, `canvas_commands`,
- *      …) — keeps the same icon the legacy `TOOL_ICON` map showed.
+ *   2. Variant-driven icon for the rich-rendered internal tools
+ *      (`canvas_commands`, `web_search`) and for `agent_tool` parts
+ *      keyed by `toolName` — keeps the same icon the legacy
+ *      `TOOL_ICON` map showed.
  *   3. Fallback heuristic on the title: classify the leading verb
  *      (`read`, `edit`, `delete`, `move`, `search`, `run` …) so an
  *      external agent that omits `toolKind` still gets a reasonable
@@ -86,13 +88,21 @@ export function ToolKindIcon({
   let Icon: IconComponent;
   if (part.toolKind) {
     Icon = KIND_ICON[part.toolKind];
-  } else if (
-    part.internalToolName &&
-    INTERNAL_TOOL_ICON[part.internalToolName]
-  ) {
-    Icon = INTERNAL_TOOL_ICON[part.internalToolName];
   } else {
-    Icon = classifyTitle(part.title);
+    switch (part.variant) {
+      case 'canvas_commands':
+        Icon = Command;
+        break;
+      case 'web_search':
+        Icon = Search;
+        break;
+      case 'agent_tool':
+        Icon = INTERNAL_TOOL_ICON[part.toolName] ?? classifyTitle(part.title);
+        break;
+      case 'generic':
+        Icon = classifyTitle(part.title);
+        break;
+    }
   }
   return <Icon size={size} className={className} />;
 }

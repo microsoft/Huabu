@@ -1,11 +1,13 @@
 import {
   createId,
-  isInternalAgentToolName,
+  variantForInternalTool,
   type AssistantToolPart,
+  type AssistantToolVariant,
   type CanvasCommand,
   type CanvasEdgeId,
   type CanvasNodeId,
   type ToolResponse,
+  type WebSearchToolResponse,
 } from '@sediment/shared';
 import { useState, useCallback, useRef, useEffect } from 'react';
 
@@ -386,55 +388,105 @@ function ensureAssistantMessage(ctx: StreamEventContext): void {
   }
 }
 
-/** Merge a tool_call / tool_call_update payload onto an existing tool part. */
+/**
+ * Merge a tool_call / tool_call_update / tool_start / tool_result
+ * payload onto an existing tool part, preserving the variant tag.
+ *
+ * The `variant` is fixed by the FIRST observation (the producer
+ * always knows it): ACP `tool_call` events arrive as `generic`; the
+ * legacy `tool_start` handler computes the variant from the tool
+ * name via {@link variantForInternalTool}. Subsequent updates never
+ * change the variant — only enrich its fields.
+ */
 function mergeToolPart(
   existing: AssistantToolPart | undefined,
   toolCallId: string,
   patch: {
+    variant?: AssistantToolVariant;
+    toolName?: string;
     title?: string;
     toolKind?: AssistantToolPart['toolKind'];
     status?: AssistantToolPart['status'];
     locations?: AssistantToolPart['locations'];
     content?: AssistantToolPart['content'];
     rawOutput?: unknown;
-    internalToolName?: string;
-    internalToolData?: AssistantToolPart['internalToolData'];
+    /** Variant-specific `data` envelope; caller is responsible for shape. */
+    data?: ToolResponse<string, unknown>;
   },
 ): AssistantToolPart {
-  const next: AssistantToolPart = {
-    kind: 'tool',
-    toolCallId,
-    title: patch.title ?? existing?.title ?? toolCallId,
-  };
+  const variant: AssistantToolVariant =
+    patch.variant ?? existing?.variant ?? 'generic';
+
+  // Shared ToolPartBase fields — identical assembly for every variant.
+  const title = patch.title ?? existing?.title ?? toolCallId;
   const toolKind = patch.toolKind ?? existing?.toolKind;
-  if (toolKind !== undefined) next.toolKind = toolKind;
   const status = patch.status ?? existing?.status;
-  if (status !== undefined) next.status = status;
   // Locations/content are append-only per ACP §session/update spec.
   const mergedLocations = [
     ...(existing?.locations ?? []),
     ...(patch.locations ?? []),
   ];
-  if (mergedLocations.length > 0) next.locations = mergedLocations;
   const mergedContent = [
     ...(existing?.content ?? []),
     ...(patch.content ?? []),
   ];
-  if (mergedContent.length > 0) next.content = mergedContent;
   const rawOutput = patch.rawOutput ?? existing?.rawOutput;
-  if (rawOutput !== undefined) next.rawOutput = rawOutput;
-  // internalToolName is narrowed to known built-in names — silently
-  // drop any out-of-allowlist value so external-agent tools never end
-  // up routed through the legacy renderers.
-  const candidateInternal =
-    patch.internalToolName ?? existing?.internalToolName;
-  if (candidateInternal && isInternalAgentToolName(candidateInternal)) {
-    next.internalToolName = candidateInternal;
+  const permission = existing?.permission;
+
+  const base = {
+    kind: 'tool' as const,
+    toolCallId,
+    title,
+    ...(toolKind !== undefined ? { toolKind } : {}),
+    ...(status !== undefined ? { status } : {}),
+    ...(mergedLocations.length > 0 ? { locations: mergedLocations } : {}),
+    ...(mergedContent.length > 0 ? { content: mergedContent } : {}),
+    ...(rawOutput !== undefined ? { rawOutput } : {}),
+    ...(permission !== undefined ? { permission } : {}),
+  };
+
+  switch (variant) {
+    case 'agent_tool': {
+      const toolName =
+        patch.toolName ??
+        (existing?.variant === 'agent_tool' ? existing.toolName : title);
+      const data =
+        patch.data ??
+        (existing?.variant === 'agent_tool' ? existing.data : undefined);
+      return {
+        ...base,
+        variant: 'agent_tool',
+        toolName,
+        ...(data ? { data } : {}),
+      };
+    }
+    case 'canvas_commands': {
+      const data = (patch.data ??
+        (existing?.variant === 'canvas_commands'
+          ? existing.data
+          : undefined)) as
+        | ToolResponse<'canvas_commands', Record<string, unknown>>
+        | undefined;
+      return {
+        ...base,
+        variant: 'canvas_commands',
+        ...(data ? { data } : {}),
+      };
+    }
+    case 'web_search': {
+      const data = (patch.data ??
+        (existing?.variant === 'web_search' ? existing.data : undefined)) as
+        | WebSearchToolResponse
+        | undefined;
+      return {
+        ...base,
+        variant: 'web_search',
+        ...(data ? { data } : {}),
+      };
+    }
+    case 'generic':
+      return { ...base, variant: 'generic' };
   }
-  const internalToolData = patch.internalToolData ?? existing?.internalToolData;
-  if (internalToolData !== undefined) next.internalToolData = internalToolData;
-  if (existing?.permission !== undefined) next.permission = existing.permission;
-  return next;
 }
 
 /**
@@ -490,12 +542,14 @@ export function handleStreamEvent(
     ensureAssistantMessage(ctx);
     upsertAssistantToolPart(ctx.assistantId, data.toolCallId, (existing) =>
       mergeToolPart(existing, data.toolCallId, {
+        // ACP `tool_call` events always materialise as `generic`;
+        // the wire shape carries only ACP-spec fields.
+        variant: 'generic',
         title: data.title,
         toolKind: data.toolKind,
         status: data.status,
         locations: data.locations,
         content: data.content,
-        internalToolName: data.internalToolName,
       }),
     );
   } else if (event.type === 'tool_call_update') {
@@ -529,20 +583,25 @@ export function handleStreamEvent(
     const toolCallId = event.data.toolCallId ?? createId('toolcall');
     ctx.toolQueue.fifo.push(toolCallId);
     ensureAssistantMessage(ctx);
-    // Stash the args as a provisional ToolResponse on `internalToolData`
-    // so the existing legacy renderers see something while the call is
-    // in flight. tool_result will replace this with the real response.
+    // Stash the args as a provisional `ToolResponse` on the variant's
+    // typed `data` so the rich renderers see something while the call
+    // is in flight. tool_result will replace this with the real
+    // response. The variant is fixed here from the tool name — every
+    // subsequent update keeps it.
+    const toolName = event.data.toolName;
+    const variant = variantForInternalTool(toolName);
     const provisional: ToolResponse<string, unknown> = {
-      tool: event.data.toolName,
+      tool: toolName,
       status: 'success',
       data: event.data.toolArgs,
     };
     upsertAssistantToolPart(ctx.assistantId, toolCallId, (existing) =>
       mergeToolPart(existing, toolCallId, {
-        title: event.data.toolName,
+        variant,
+        toolName,
+        title: toolName,
         status: 'pending',
-        internalToolName: event.data.toolName,
-        internalToolData: provisional,
+        data: provisional,
       }),
     );
   } else if (event.type === 'tool_result') {
@@ -568,6 +627,8 @@ export function handleStreamEvent(
     }
 
     // Merge provisional args (from tool_start) with the real response.
+    const toolName = event.data.toolName;
+    const variant = variantForInternalTool(toolName);
     const assistantMsg = useChatStore
       .getState()
       .messages.find((m) => m.id === ctx.assistantId);
@@ -577,9 +638,13 @@ export function handleStreamEvent(
         (s): s is AssistantToolPart =>
           s.kind === 'tool' && s.toolCallId === toolCallId,
       );
-      const priorData = priorPart?.internalToolData as
-        | ToolResponse<string, unknown>
-        | undefined;
+      // Every rich variant carries the same `ToolResponse<…>`
+      // envelope on `data`; only `generic` skips it. Reading via
+      // the variant narrowing keeps the code honest — no cast.
+      const priorData =
+        priorPart && priorPart.variant !== 'generic'
+          ? priorPart.data
+          : undefined;
       if (priorData && priorData.status === 'success') {
         existingArgs =
           (priorData.data as Record<string, unknown> | undefined) ?? {};
@@ -598,10 +663,11 @@ export function handleStreamEvent(
     ensureAssistantMessage(ctx);
     upsertAssistantToolPart(ctx.assistantId, toolCallId, (existing) =>
       mergeToolPart(existing, toolCallId!, {
-        title: existing?.title ?? event.data.toolName,
+        variant,
+        toolName,
+        title: existing?.title ?? toolName,
         status: 'completed',
-        internalToolName: existing?.internalToolName ?? event.data.toolName,
-        internalToolData: mergedResponse,
+        data: mergedResponse,
       }),
     );
 
@@ -609,19 +675,21 @@ export function handleStreamEvent(
     if (event.data.toolName === 'canvas_commands') {
       const result = applyCanvasCommandsFromToolResult(event.data.toolResult);
       if (result) {
-        // Attach changes to the tool part's internalToolData
+        // Attach the live canvasChanges array to the canvas_commands
+        // tool part's typed `data` envelope (this is the canonical
+        // home that `CanvasCommandCard` reads from).
         if (result.changes.length > 0) {
           upsertAssistantToolPart(ctx.assistantId, toolCallId, (existing) => {
             if (!existing) {
               // Should never happen — we just inserted above. Bail
               // safely by returning a minimal part.
               return mergeToolPart(existing, toolCallId!, {
-                internalToolData: mergedResponse,
+                variant: 'canvas_commands',
+                data: mergedResponse,
               });
             }
-            const existingData = existing.internalToolData as
-              | ToolResponse<string, unknown>
-              | undefined;
+            if (existing.variant !== 'canvas_commands') return existing;
+            const existingData = existing.data;
             const priorData =
               existingData?.status === 'success'
                 ? ((existingData.data as Record<string, unknown> | undefined) ??
@@ -629,8 +697,8 @@ export function handleStreamEvent(
                 : {};
             return {
               ...existing,
-              internalToolData: {
-                tool: event.data.toolName,
+              data: {
+                tool: 'canvas_commands',
                 status: 'success',
                 data: {
                   ...priorData,

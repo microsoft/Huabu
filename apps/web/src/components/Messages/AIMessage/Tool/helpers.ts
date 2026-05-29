@@ -7,35 +7,22 @@
  */
 
 import type { CanvasChange } from '../../../../hooks/useCanvasChanges';
-import type { AssistantToolPart, ToolResponse } from '@sediment/shared';
+import type { AssistantToolPart } from '@sediment/shared';
 
 /** Truncate a string to a max length with ellipsis. */
 export const truncate = (s: string, n: number) =>
   s.length > n ? s.slice(0, n) + '…' : s;
-
-/**
- * Bridge to the legacy {@link ToolResponse} envelope: the renderers
- * below were written when each tool call was its own `role:'tool'`
- * message keyed by `toolResponse`. After PR-2 the same payload lives
- * on `part.internalToolData` — this helper narrows it back into the
- * old shape so the rendering bodies could stay unchanged.
- */
-export function partToToolResponse(
-  part: AssistantToolPart,
-): ToolResponse<string, unknown> | null {
-  return (part.internalToolData as ToolResponse<string, unknown>) ?? null;
-}
 
 export function partIsExecuting(part: AssistantToolPart): boolean {
   return part.status === 'pending' || part.status === 'in_progress';
 }
 
 /** A single tool part plus the owning assistant message id (used for updates). */
-export interface ToolPart {
+export interface ToolPart<P extends AssistantToolPart = AssistantToolPart> {
   /** The owning assistant message id. */
   messageId: string;
   /** The actual ACP tool part data. */
-  part: AssistantToolPart;
+  part: P;
 }
 
 /**
@@ -200,17 +187,4 @@ export function reconstructChangesFromCommands(
   }
 
   return changes;
-}
-
-/** Tools used by the operate mode that should show as collapsible cards. */
-export function isAgentTool(tool: string): boolean {
-  return [
-    'read',
-    'grep',
-    'find',
-    'ls',
-    'inspect_nodes',
-    'get_canvas_outline',
-    'canvas_commands',
-  ].includes(tool);
 }

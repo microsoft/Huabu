@@ -12,7 +12,6 @@ import { useChatStore } from '@/store/chatStore';
 
 import {
   partIsExecuting,
-  partToToolResponse,
   reconstructChangesFromCommands,
   type ToolPart,
 } from './helpers';
@@ -22,11 +21,14 @@ import { NodeRef } from '../../../Common/NodeRef';
 import { Spinner } from '../../../Common/Spinner';
 
 import type { CanvasChange } from '../../../../hooks/useCanvasChanges';
-import type { CanvasCommand, ToolResponse } from '@sediment/shared';
+import type { CanvasCommand, CanvasCommandsToolPart } from '@sediment/shared';
 
-export function CanvasCommandCard({ messageId, part }: ToolPart) {
+export function CanvasCommandCard({
+  messageId,
+  part,
+}: ToolPart<CanvasCommandsToolPart>) {
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const toolResponse = partToToolResponse(part);
+  const toolResponse = part.data ?? null;
   const isExecuting = partIsExecuting(part);
   const toolCallId = part.toolCallId;
 
@@ -62,22 +64,22 @@ export function CanvasCommandCard({ messageId, part }: ToolPart) {
 
   /**
    * Update the `canvasChanges` array nested inside this part's
-   * `internalToolData`. The renderers all read off `canvasChanges`,
-   * so removing / clearing is just a filtered rewrite of that array.
+   * typed `data` envelope. The renderers all read off
+   * `canvasChanges`, so removing / clearing is just a filtered
+   * rewrite of that array.
    */
   const writeChanges = useCallback(
     (mapper: (changes: CanvasChange[]) => CanvasChange[]) => {
       upsertAssistantToolPart(messageId, toolCallId, (existing) => {
         if (!existing) return part;
-        const td = existing.internalToolData as
-          | ToolResponse<string, unknown>
-          | undefined;
+        if (existing.variant !== 'canvas_commands') return existing;
+        const td = existing.data;
         if (!td || td.status !== 'success') return existing;
         const d = (td.data ?? {}) as Record<string, unknown>;
         const changes = (d.canvasChanges ?? []) as CanvasChange[];
         return {
           ...existing,
-          internalToolData: {
+          data: {
             ...td,
             data: {
               ...d,

@@ -154,11 +154,9 @@ export function acpUpdateToStreamEvent(
         locations: u.locations,
         content: u.content,
         rawInput: u.rawInput,
-        // External-agent turns never set internalToolName — that field
-        // is reserved for the internal pi-ai bridge. Leaving it
-        // undefined makes the renderer's escape-hatch check
-        // (`if (internalToolName) …`) miss, falling through to the
-        // generic ACP renderer.
+        // External-agent turns are always emitted as the `generic`
+        // tool-part variant downstream \u2014 there is no internal-tool
+        // metadata to attach here.
       };
       return { type: 'tool_call', data };
     }

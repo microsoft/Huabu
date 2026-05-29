@@ -8,22 +8,19 @@
 import { Check, ChevronRight, X as XIcon } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
-import {
-  partIsExecuting,
-  partToToolResponse,
-  truncate,
-  type ToolPart,
-} from './helpers';
+import { partIsExecuting, truncate, type ToolPart } from './helpers';
 import { ToolKindIcon } from './ToolKindIcon';
 import { NodeRef } from '../../../Common/NodeRef';
 import { Spinner } from '../../../Common/Spinner';
+
+import type { AgentToolPart } from '@sediment/shared';
 
 export function MergedAgentToolRow({
   tool,
   entries,
 }: {
   tool: string;
-  entries: ToolPart[];
+  entries: ToolPart<AgentToolPart>[];
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const count = entries.length;
@@ -42,7 +39,7 @@ export function MergedAgentToolRow({
       const refs: { nodeId?: string; label?: string }[] = [];
       let totalMatched = 0;
       for (const e of entries) {
-        const tr = partToToolResponse(e.part);
+        const tr = e.part.data;
         const d =
           tr?.status === 'success'
             ? ((tr.data ?? {}) as Record<string, unknown>)
@@ -70,7 +67,7 @@ export function MergedAgentToolRow({
     }
 
     if (tool === 'read') {
-      const tr = partToToolResponse(entries[0]?.part);
+      const tr = entries[0]?.part.data;
       const first =
         tr?.status === 'success'
           ? ((tr.data ?? {}) as Record<string, unknown>)
@@ -91,7 +88,7 @@ export function MergedAgentToolRow({
       // grep returns `{ matches, count, limitReached }`. Sum match counts
       // across calls for a self-describing title.
       const totalMatches = entries.reduce((sum, e) => {
-        const tr = partToToolResponse(e.part);
+        const tr = e.part.data;
         const d =
           tr?.status === 'success'
             ? ((tr.data ?? {}) as Record<string, unknown>)
@@ -111,7 +108,7 @@ export function MergedAgentToolRow({
     if (tool === 'find') {
       // find returns `{ paths, count, limitReached }`.
       const totalPaths = entries.reduce((sum, e) => {
-        const tr = partToToolResponse(e.part);
+        const tr = e.part.data;
         const d =
           tr?.status === 'success'
             ? ((tr.data ?? {}) as Record<string, unknown>)
@@ -130,7 +127,7 @@ export function MergedAgentToolRow({
 
     if (tool === 'ls') {
       // ls returns `{ path, entries, count, limitReached }`.
-      const tr = partToToolResponse(entries[0]?.part);
+      const tr = entries[0]?.part.data;
       const first =
         tr?.status === 'success'
           ? ((tr.data ?? {}) as Record<string, unknown>)
@@ -171,7 +168,7 @@ export function MergedAgentToolRow({
   );
 
   // Derive the icon from the first part — all parts in a merged row
-  // share the same internalToolName by construction.
+  // share the same toolName by construction.
   const iconPart = entries[0]?.part;
 
   // Single inspect_nodes call that matched a single node → inline badge

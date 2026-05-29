@@ -17,8 +17,8 @@ import {
   agentCanvasIdQuerySchema,
   agentRequestSchema,
   createId,
+  variantForInternalTool,
 } from '@sediment/shared';
-import { isInternalAgentToolName } from '@sediment/shared';
 import { encode } from 'gpt-tokenizer';
 
 import { loadAgent, renderAgentTemplate } from '../../prompt/agent-loader.js';
@@ -50,6 +50,7 @@ import type {
   ExternalAgentPrompt,
   StopThreadResponse,
   ToolResponse,
+  WebSearchToolResponse,
   WireSelectionNode,
 } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
@@ -508,8 +509,8 @@ function scheduleRunCleanup(threadId: string, delayMs = 60_000): void {
 /**
  * Parse a pi-ai tool-result text payload into the canonical
  * `ToolResponse<…>` envelope. Mirrors the legacy `role:'tool'`
- * reconstruction logic — preserved here because the parts-based
- * history relies on the same payload shape for `internalToolData`.
+ * reconstruction logic — preserved here because every rich-variant
+ * tool part carries this envelope as its `data` field.
  */
 function parseToolResultText(
   toolName: string,
@@ -731,8 +732,8 @@ function buildHistoryItems(
       // INTO this assistant turn (not a separate role:'tool' message)
       // — the ACP sidecar's `toolExtras` overlay supplies the
       // semantic fields (`toolKind`, `status`, `locations`, …) and the
-      // matching pi-ai `toolResult` supplies `internalToolData` for
-      // built-in tools.
+      // matching pi-ai `toolResult` supplies the typed `data` envelope
+      // for built-in tools.
       const parts: AssistantHistoryPart[] = [];
       for (const block of msg.content) {
         if (block.type === 'text') {
@@ -748,26 +749,35 @@ function buildHistoryItems(
           const toolName = block.name;
           const result = toolResultByCallId.get(toolCallId);
           const extras = sidecar?.toolExtras[toolCallId];
-          const isInternal = isInternalAgentToolName(toolName);
-          // Reconstruct `internalToolData` only for known internal
-          // tools — `JSON.parse(result.resultText)` is unsafe for
-          // arbitrary external payloads (the format is agent-specific),
-          // and the renderer dispatch keys off the same
-          // `internalToolName` guard.
-          const internalToolData =
-            isInternal && result
-              ? parseToolResultText(toolName, result.resultText)
-              : undefined;
-          parts.push({
-            kind: 'tool',
+          // Structural internal-vs-external discriminator: the
+          // internal pi-ai bridge pushes a matching `toolResult`
+          // into `Context.messages`; the ACP path does NOT (it only
+          // appends faux `ToolCall` blocks — see
+          // `acp/service.ts` step 6). So the presence of `result`
+          // is itself the signal — no name-allowlist needed, and an
+          // external agent that happens to expose a tool named
+          // `read` / `grep` / … cannot collide.
+          //
+          // `JSON.parse(result.resultText)` is only safe under this
+          // structural guarantee because the pi-ai bridge always
+          // emits the `ToolResponse<…>` envelope for built-in tools.
+          const toolData = result
+            ? parseToolResultText(toolName, result.resultText)
+            : undefined;
+          // External agents (no pi-ai toolResult) always render as
+          // `generic`; internal calls dispatch through the shared
+          // variant table so server + client + sketch synthesizer all
+          // agree on which renderer owns each tool name.
+          const variant = toolData
+            ? variantForInternalTool(toolName)
+            : 'generic';
+          const base = {
+            kind: 'tool' as const,
             toolCallId,
             // ACP envelopes carry a `title` field on tool_call /
             // tool_call_update events; we did not persist it in the
             // sidecar (only the SSE event carried it for live UI), so
             // fall back to the tool's own name as the human label.
-            // External agents that resurface a refined title via
-            // tool_call_update would need a sidecar field for that —
-            // out of scope for PR-2.
             title: toolName,
             ...(extras?.toolKind ? { toolKind: extras.toolKind } : {}),
             ...(extras?.status ? { status: extras.status } : {}),
@@ -776,11 +786,46 @@ function buildHistoryItems(
             ...(extras?.rawOutput !== undefined
               ? { rawOutput: extras.rawOutput }
               : {}),
-            ...(isInternal
-              ? { internalToolName: toolName, internalToolData }
-              : {}),
             ...(extras?.permission ? { permission: extras.permission } : {}),
-          });
+          };
+          switch (variant) {
+            case 'agent_tool':
+              parts.push({
+                ...base,
+                variant: 'agent_tool',
+                toolName,
+                ...(toolData ? { data: toolData } : {}),
+              });
+              break;
+            case 'canvas_commands':
+              parts.push({
+                ...base,
+                variant: 'canvas_commands',
+                ...(toolData
+                  ? {
+                      data: toolData as ToolResponse<
+                        'canvas_commands',
+                        Record<string, unknown>
+                      >,
+                    }
+                  : {}),
+              });
+              break;
+            case 'web_search':
+              parts.push({
+                ...base,
+                variant: 'web_search',
+                ...(toolData
+                  ? {
+                      data: toolData as WebSearchToolResponse,
+                    }
+                  : {}),
+              });
+              break;
+            case 'generic':
+              parts.push({ ...base, variant: 'generic' });
+              break;
+          }
         }
       }
       // Append the persisted plan (if any) at the END of the parts

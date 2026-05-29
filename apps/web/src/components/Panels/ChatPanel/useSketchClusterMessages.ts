@@ -71,8 +71,8 @@ function buildMessages(cluster: SketchProcessingCluster): ChatMessage[] {
       toolCallId: createId('toolcall'),
       title: 'canvas_commands',
       status: 'completed',
-      internalToolName: 'canvas_commands',
-      internalToolData: {
+      variant: 'canvas_commands',
+      data: {
         tool: 'canvas_commands',
         status: 'success',
         data: {

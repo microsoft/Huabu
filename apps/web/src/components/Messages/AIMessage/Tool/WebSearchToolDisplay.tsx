@@ -7,18 +7,14 @@
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
-import { partToToolResponse } from './helpers';
 import { SourceCard, type Source } from './SourceCard';
 import { Button } from '../../../Common/Button';
 
-import type {
-  AssistantToolPart,
-  WebSearchToolResponse,
-} from '@sediment/shared';
+import type { WebSearchToolPart } from '@sediment/shared';
 
-export function WebSearchToolDisplay({ part }: { part: AssistantToolPart }) {
+export function WebSearchToolDisplay({ part }: { part: WebSearchToolPart }) {
   const [isExpanded, setIsExpanded] = useState(false);
-  const toolResponse = partToToolResponse(part) as WebSearchToolResponse | null;
+  const toolResponse = part.data ?? null;
 
   const sources = useMemo<Source[]>(() => {
     if (!toolResponse || toolResponse.status !== 'success') return [];

@@ -23,10 +23,10 @@ import { X as XIcon } from 'lucide-react';
 import { ToolKindIcon } from './ToolKindIcon';
 import { AssistantDisclosure } from '../../AssistantDisclosure';
 
-import type { AcpContentBlock, AssistantToolPart } from '@sediment/shared';
+import type { AcpContentBlock, GenericToolPart } from '@sediment/shared';
 
 interface ToolCallCardProps {
-  part: AssistantToolPart;
+  part: GenericToolPart;
 }
 
 function renderContentBlock(

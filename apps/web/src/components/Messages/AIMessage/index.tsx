@@ -5,7 +5,6 @@ import { MilkdownMessageCard } from './MilkdownMessageCard';
 import { PlanCard } from './PlanCard';
 import { ThinkingCard } from './ThinkingCard';
 import { CanvasCommandCard } from './Tool/CanvasCommandCard';
-import { isAgentTool } from './Tool/helpers';
 import { MergedAgentToolRow } from './Tool/MergedAgentToolRow';
 import { ToolCallCard } from './Tool/ToolCallCard';
 import { WebSearchToolDisplay } from './Tool/WebSearchToolDisplay';
@@ -47,7 +46,7 @@ export const AIMessage = ({
   const plainText = assistantMessageText(segments);
   const lastIdx = segments.length - 1;
 
-  // Group adjacent same-internal-tool parts so e.g. a run of three
+  // Group adjacent same-variant tool parts so e.g. a run of three
   // `inspect_nodes` calls collapses into a single merged row.
   const groups = groupAdjacentToolParts(segments);
 
@@ -56,57 +55,50 @@ export const AIMessage = ({
       <div className="flex w-full flex-col gap-1">
         {groups.map((group, gIdx) => {
           if (group.kind === 'tool-group') {
-            const internalName = group.internalToolName;
-            const parts = group.parts;
-
-            // canvas_commands keeps its rich change-list UI per call,
-            // so render each part separately.
-            if (internalName === 'canvas_commands') {
-              return (
-                <div key={`g${gIdx}`} className="flex flex-col gap-1">
-                  {parts.map((p) => (
-                    <CanvasCommandCard
-                      key={p.toolCallId}
-                      messageId={messageId}
-                      part={p}
-                    />
-                  ))}
-                </div>
-              );
+            // Exhaustive variant dispatch — `SegmentGroup` is typed
+            // per-variant so each branch has fully narrowed parts.
+            switch (group.variant) {
+              case 'canvas_commands':
+                // canvas_commands keeps its rich change-list UI per
+                // call (grouping intentionally never merges these).
+                return (
+                  <div key={`g${gIdx}`} className="flex flex-col gap-1">
+                    {group.parts.map((p) => (
+                      <CanvasCommandCard
+                        key={p.toolCallId}
+                        messageId={messageId}
+                        part={p}
+                      />
+                    ))}
+                  </div>
+                );
+              case 'web_search':
+                return (
+                  <div key={`g${gIdx}`} className="flex flex-col gap-1">
+                    {group.parts.map((p) => (
+                      <WebSearchToolDisplay key={p.toolCallId} part={p} />
+                    ))}
+                  </div>
+                );
+              case 'agent_tool':
+                // Built-in agent tools (read / grep / find / ls / …)
+                // merge into one collapsible row keyed by toolName.
+                return (
+                  <MergedAgentToolRow
+                    key={`g${gIdx}`}
+                    tool={group.toolName}
+                    entries={group.parts.map((p) => ({ messageId, part: p }))}
+                  />
+                );
+              case 'generic':
+                return (
+                  <div key={`g${gIdx}`} className="flex flex-col gap-1">
+                    {group.parts.map((p) => (
+                      <ToolCallCard key={p.toolCallId} part={p} />
+                    ))}
+                  </div>
+                );
             }
-
-            // web_search has its own dedicated source-list card per call.
-            if (internalName === 'web_search') {
-              return (
-                <div key={`g${gIdx}`} className="flex flex-col gap-1">
-                  {parts.map((p) => (
-                    <WebSearchToolDisplay key={p.toolCallId} part={p} />
-                  ))}
-                </div>
-              );
-            }
-
-            // Built-in agent tools (read / grep / find / ls / …) merge
-            // into one collapsible row.
-            if (internalName && isAgentTool(internalName)) {
-              return (
-                <MergedAgentToolRow
-                  key={`g${gIdx}`}
-                  tool={internalName}
-                  entries={parts.map((p) => ({ messageId, part: p }))}
-                />
-              );
-            }
-
-            // ACP-native parts (no internalToolName) and any unknown
-            // internal tool fall back to the generic per-call renderer.
-            return (
-              <div key={`g${gIdx}`} className="flex flex-col gap-1">
-                {parts.map((p) => (
-                  <ToolCallCard key={p.toolCallId} part={p} />
-                ))}
-              </div>
-            );
           }
 
           const seg = group.segment;

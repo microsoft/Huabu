@@ -82,12 +82,10 @@ export interface AgentToolResultEventData {
  * (ACP) agents today; the internal pi-ai bridge will move onto it
  * in a follow-up change.
  *
- * `internalToolName` is the escape hatch: when present, the payload
- * originated from a built-in pi-ai tool whose name appears in
- * `INTERNAL_AGENT_TOOL_NAMES`. UI renderers use this discriminator
- * to dispatch to the pre-existing `CanvasCommandCard` /
- * `WebSearchToolDisplay` / `MergedAgentToolRow` components without
- * re-implementing them on top of the ACP `content[]` model.
+ * The wire shape carries only ACP-spec fields. Render-variant
+ * dispatch happens client-side via {@link variantForInternalTool}
+ * keyed on the legacy `tool_start`/`tool_result` `toolName` — ACP
+ * `tool_call` events always materialise as the `generic` variant.
  */
 export interface AgentToolCallEventData {
   toolCallId: string;
@@ -103,12 +101,6 @@ export interface AgentToolCallEventData {
   content?: AcpToolCallContent[];
   /** Raw arguments the agent attached (passed through unmodified). */
   rawInput?: unknown;
-  /**
-   * Internal-tool nominal name when this call came from Sediment's
-   * built-in pi-ai agent. Always absent for external-agent turns.
-   * Consumers narrow on this to pick the rich legacy renderer.
-   */
-  internalToolName?: string;
 }
 
 /**

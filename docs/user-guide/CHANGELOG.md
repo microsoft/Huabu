@@ -4,6 +4,21 @@
 
 ---
 
+## 2026-05-31 · ToolPart 结构重构：富渲染工具升级为一等变体
+
+**What Changed**
+
+- 助手消息里的 `AssistantToolPart` 从"扁平形状 + 名字判断分发"重构为四个一等结构变体的 discriminated union：`generic` / `agent_tool` / `canvas_commands` / `web_search`。`variant` 标签在数据源头（服务端 history 重建、SSE 合并、sketch cluster 合成器）写定一次，所有渲染器按 `variant` 精确收窄分发，前端不再做名字字符串翻译，也不再有 `as ToolResponse<…>` 强转。
+- `canvas_commands` / `web_search` 因为有独家形状（canvas commands、`WebSearchToolResponse`）而独立成型；`agent_tool` 收纳所有同名连续合并的内置 pi-ai 工具（如 `read` / `grep` / `inspect_nodes`），合并键现在是结构化的 `agent_tool:<toolName>`；其余外部 ACP `tool_call` 走 `generic` 通用渲染器。
+
+**Notes**
+
+- **没有用户可见的 UI 变化**：所有四类工具卡片的视觉、行为（撤回 / 预览 / 批量撤回 / 复制等）保持不变；重构只调整内部数据契约，让类型系统替代名字约定承担正确性。
+- 历史 sidecar 与 SSE 线协议未变。`AgentToolCallEventData` 移除了 `internalToolName`（ACP `tool_call` 永远走 `generic`），不影响任何已落盘的旧消息——回放时由服务端按结构化数据决定 variant。
+- 内部约定：新增需要"独家形状"的内置工具时（例如未来引入新的可视化卡片），优先升级为新 variant 而不是塞到 `agent_tool.data` 里。共享辅助 `variantForInternalTool(toolName)` 是 variant 解析的单一源点。
+
+---
+
 ## 2026-05-30 · ACP rich-update 在聊天面板可见（PR-2）
 
 **What Changed**
