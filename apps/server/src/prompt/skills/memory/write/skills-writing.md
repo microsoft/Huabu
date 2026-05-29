@@ -17,7 +17,7 @@ A **reusable pattern** emerged that another agent could apply on a future, unrel
 | ------------- | ----------------------- | ------------------------ | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `op`          | `"create"` / `"update"` | always                   | always               | Prefer `update`.                                                                                                                                                                                               |
 | `id`          | `string`                | always                   | always               | Lowercase + hyphens (e.g. `narrative-outline-five-acts`). Writer enforces FS safety.                                                                                                                           |
-| `body`        | `string`                | always                   | always               | Markdown. On `update` this is appended under a dated `## Update — YYYY-MM-DD` section; prior body preserved.                                                                                                   |
+| `body`        | `string`                | always                   | always               | Markdown. On `update`, **wholesale replacement** of the existing body. Read the existing SKILL.md first if prior prose should be preserved and merge it into your submitted body.                              |
 | `title`       | `string`                | optional                 | optional             | Display label. Defaults to `id`.                                                                                                                                                                               |
 | `description` | `string`                | **required**             | optional             | One-sentence catalogue blurb. On update, overrides the existing description when provided.                                                                                                                     |
 | `appliesTo`   | `string[]`              | **required, non-empty**  | optional             | Agent surfaces: `ask` / `operate` / `sketch` / `external`. **MUST include your own surface** or you won't see it next turn. On `update`, passing this REPLACES the existing array — omit to keep what's there. |
@@ -28,7 +28,7 @@ A **reusable pattern** emerged that another agent could apply on a future, unrel
 - **Strongly prefer `op: "update"`.** Read the user-skill catalogue in your system prompt (`{{skillCatalogue}}`) before creating; if anything is close, update it.
 - **Body = reusable how-to.** Concrete decision rules, layout patterns, worked examples. Not canvas-specific narrative.
 - **Body is markdown**; structure with `##` sections (when to use, core mechanism, examples, anti-patterns).
-- **Read `skills/<id>/SKILL.md` first when updating** so you know what's already in there and don't repeat yourself.
+- **On `update`, `body` wholesale-replaces the existing body.** Read `skills/<id>/SKILL.md` first; copy forward any prior prose that should survive, then merge in your additions before submitting.
 
 ## Example (update)
 
@@ -36,7 +36,7 @@ A **reusable pattern** emerged that another agent could apply on a future, unrel
 {
   "op": "update",
   "id": "narrative-outline-five-acts",
-  "body": "## Refinement: edge styling\n\nFor foreshadowing arcs, use line-style `dashed`. For causal links, use solid."
+  "body": "# Narrative outline — five acts\n\n...full body including any prior content you want to keep, plus your additions..."
 }
 ```
 

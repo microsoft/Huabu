@@ -527,7 +527,7 @@ export const memoryCanvasWriteTool: ToolDefinition = {
 export const memorySkillWriteParamsSchema = Type.Object({
   op: Type.Union([Type.Literal('create'), Type.Literal('update')], {
     description:
-      '"create" writes a new skill file; "update" appends a dated `## Update — YYYY-MM-DD` section to an existing one (prior body preserved).',
+      '"create" writes a new skill file; "update" wholesale-replaces the body of an existing one (frontmatter preserved with caller overrides). To preserve prior body content on update, read the existing SKILL.md first and merge it into your submitted body.',
   }),
   id: Type.String({
     description:
@@ -560,7 +560,7 @@ export const memorySkillWriteParamsSchema = Type.Object({
   ),
   body: Type.String({
     description:
-      'Markdown body. On create: full body. On update: appended to the existing body as a dated `## Update — YYYY-MM-DD` section so prior prose is preserved.',
+      'Markdown body. On create: full body of the new skill. On update: wholesale replacement of the existing body — caller is responsible for preserving any prior content they want to keep.',
   }),
   rationale: Type.Optional(
     Type.String({

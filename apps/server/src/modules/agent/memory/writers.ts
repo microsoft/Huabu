@@ -190,7 +190,7 @@ export interface SkillWriteArgs {
   title?: string;
   description?: string;
   appliesTo?: string[];
-  /** Markdown body. For `update` the new body is appended as a new section. */
+  /** Markdown body. On create: full body. On update: wholesale replacement of the existing body. */
   body: string;
   /** Required when `op === 'create'`; ignored on update. */
   rationale?: string;
@@ -211,9 +211,11 @@ export interface SkillWriteArgs {
  *
  * `op === 'update'`:
  *   - Requires the skill to already exist.
- *   - Reads the existing SKILL.md, preserves its frontmatter, appends
- *     the new body as a dated `## Update — YYYY-MM-DD` section so
- *     prior content (including any user-authored prose) stays visible.
+ *   - Preserves the existing frontmatter (with user-supplied
+ *     overrides) and **wholesale-replaces the body** with `args.body`.
+ *     If prior content should be preserved or refined, the caller is
+ *     expected to read the existing SKILL.md first and merge in the
+ *     submitted body — the writer does not auto-append.
  *
  * On success, calls {@link invalidateUserSkill} so the next
  * `read("skills/<id>/SKILL.md")` returns the new content without
@@ -274,14 +276,18 @@ export function writeSkill(args: SkillWriteArgs): WriteResult {
       );
     }
     const raw = readFileSync(target, 'utf8');
-    const { meta, content } = parseFrontmatter(raw);
+    const { meta } = parseFrontmatter(raw);
     if (!meta || Object.keys(meta).length === 0) {
       return reject(
         target,
         `existing user skill "${args.id}" is missing frontmatter; refusing to update`,
       );
     }
-    const updatedBody = appendUpdateSection(content, args.body);
+    // Body is wholesale-replaced — the caller is expected to read the
+    // existing SKILL.md first if they need to preserve / refine prior
+    // content. This matches the canvas-memory contract and gives the
+    // agent freedom to restructure / shrink / rewrite the body.
+    const updatedBody = ensureTrailingNewline(args.body);
     const scopesArg = sanitiseAppliesTo(args.appliesTo);
     const scopesExisting = sanitiseAppliesTo(
       Array.isArray(meta.appliesTo) ? (meta.appliesTo as string[]) : undefined,
@@ -305,21 +311,6 @@ export function writeSkill(args: SkillWriteArgs): WriteResult {
   } catch (err) {
     return rejectFromError(err, target);
   }
-}
-
-/**
- * Append a new "## Update — YYYY-MM-DD" section to an existing skill
- * body. Preserves every byte of existing prose.
- */
-function appendUpdateSection(existingBody: string, addition: string): string {
-  const trimmed = existingBody.replace(/\n+$/, '');
-  const stamp = new Date().toISOString().slice(0, 10);
-  const header = `## Update — ${stamp}`;
-  const block = addition.trim();
-  if (trimmed.length === 0) {
-    return `${header}\n\n${block}\n`;
-  }
-  return `${trimmed}\n\n${header}\n\n${block}\n`;
 }
 
 /** Minimal YAML rendering for skill frontmatter. */
