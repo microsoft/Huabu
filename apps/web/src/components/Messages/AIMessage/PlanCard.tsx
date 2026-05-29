@@ -17,9 +17,9 @@
 import { Check, ChevronRight, Circle, Copy } from 'lucide-react';
 import { useState } from 'react';
 
-import { copyToClipboard } from '../../utils/io/clipboard';
-import { Button } from '../Common/Button';
-import { Spinner } from '../Common/Spinner';
+import { copyToClipboard } from '../../../utils/io/clipboard';
+import { Button } from '../../Common/Button';
+import { Spinner } from '../../Common/Spinner';
 
 import type { AcpPlanEntry } from '@sediment/shared';
 

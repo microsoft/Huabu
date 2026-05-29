@@ -15,7 +15,7 @@
  * groups so the dispatch in `AIMessage` only iterates once.
  */
 
-import type { AssistantSegment } from '../../store/chatTypes';
+import type { AssistantSegment } from '../../../store/chatTypes';
 import type { AssistantToolPart } from '@sediment/shared';
 
 export type SegmentGroup =

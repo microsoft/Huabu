@@ -1,5 +1,5 @@
 /**
- * PreparedPromptCard — renders the structured prompt that the ACP
+ * PreparedPromptMessage — renders the structured prompt that the ACP
  * preprocessor produced for an external agent turn.
  *
  * Three states drive the visual:
@@ -15,9 +15,9 @@
  * when the preprocessor decided verbatim file access was essential
  * (oversize node, `.artifacts/` file, code-review-style ask).
  *
- * Visual scaffold mirrors `CanvasCommandCard` in `ToolMessage.tsx`
- * (chevron + collapsible body, muted typography) so PR D feels native
- * inside the existing tool-style message list.
+ * Visual scaffold mirrors `CanvasCommandCard` in `AIMessage/Tool/`
+ * (chevron + collapsible body, muted typography) so this card feels
+ * native inside the existing tool-style message list.
  */
 
 import { ChevronRight, FileText, Loader2 } from 'lucide-react';
@@ -25,17 +25,17 @@ import { useState } from 'react';
 
 import type { ExternalAgentPrompt } from '@sediment/shared';
 
-interface PreparedPromptCardProps {
+interface PreparedPromptMessageProps {
   prompt: ExternalAgentPrompt | null;
   agentAlias: string;
   error?: string;
 }
 
-export function PreparedPromptCard({
+export function PreparedPromptMessage({
   prompt,
   agentAlias,
   error,
-}: PreparedPromptCardProps) {
+}: PreparedPromptMessageProps) {
   // Default to collapsed on ready state to match the "fold by default"
   // rule from the design discussion — the prompt body can be long and
   // most of the time the user just wants to confirm preprocessing ran.

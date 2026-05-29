@@ -14,15 +14,14 @@
 
 import {
   ArrowRightLeft,
-  Brain,
+  Sparkle,
   Command,
   Download,
   FolderOpen,
-  LayoutList,
+  Workflow,
   Pencil,
-  ScanText,
+  BookOpen,
   Search,
-  SearchCode,
   Settings,
   Terminal,
   Trash2,
@@ -34,26 +33,26 @@ import type { AcpToolKind, AssistantToolPart } from '@sediment/shared';
 type IconComponent = typeof Wrench;
 
 const KIND_ICON: Record<AcpToolKind, IconComponent> = {
-  read: ScanText,
+  read: BookOpen,
   edit: Pencil,
   delete: Trash2,
   move: ArrowRightLeft,
   search: Search,
   execute: Terminal,
-  think: Brain,
+  think: Sparkle,
   fetch: Download,
   switch_mode: Settings,
   other: Wrench,
 };
 
 const INTERNAL_TOOL_ICON: Record<string, IconComponent> = {
-  read: ScanText,
-  grep: SearchCode,
+  read: BookOpen,
+  grep: Search,
   find: Search,
   ls: FolderOpen,
-  inspect_nodes: LayoutList,
-  inspect_edges: LayoutList,
-  get_canvas_outline: LayoutList,
+  inspect_nodes: Workflow,
+  inspect_edges: Workflow,
+  get_canvas_outline: Workflow,
   canvas_commands: Command,
   web_search: Search,
 };
@@ -61,13 +60,13 @@ const INTERNAL_TOOL_ICON: Record<string, IconComponent> = {
 /** Heuristic: classify the leading verb of a tool title. */
 function classifyTitle(title: string): IconComponent {
   const head = title.trim().split(/\s+/)[0]?.toLowerCase() ?? '';
-  if (/^(read|cat|view|open|inspect)$/.test(head)) return ScanText;
+  if (/^(read|cat|view|open|inspect)$/.test(head)) return BookOpen;
   if (/^(edit|patch|write|update|modify)$/.test(head)) return Pencil;
   if (/^(delete|remove|rm)$/.test(head)) return Trash2;
   if (/^(move|rename|mv)$/.test(head)) return ArrowRightLeft;
-  if (/^(search|grep|find|lookup)$/.test(head)) return SearchCode;
+  if (/^(search|grep|find|lookup)$/.test(head)) return Search;
   if (/^(run|execute|exec|bash|shell)$/.test(head)) return Terminal;
-  if (/^(think|reason|plan)$/.test(head)) return Brain;
+  if (/^(think|reason|plan)$/.test(head)) return Sparkle;
   if (/^(fetch|download|get)$/.test(head)) return Download;
   if (/^(ls|list)$/.test(head)) return FolderOpen;
   return Wrench;

@@ -14,27 +14,15 @@
  * populated by the auto-allow handler today).
  */
 
-import { Check, ChevronRight, X as XIcon } from 'lucide-react';
+import { ChevronRight, X as XIcon } from 'lucide-react';
 import { useState } from 'react';
 
 import { ToolKindIcon } from './ToolKindIcon';
-import { Spinner } from '../Common/Spinner';
 
 import type { AcpContentBlock, AssistantToolPart } from '@sediment/shared';
 
 interface ToolCallCardProps {
   part: AssistantToolPart;
-}
-
-function StatusIcon({ status }: { status: AssistantToolPart['status'] }) {
-  if (status === 'pending' || status === 'in_progress') {
-    return <Spinner size="xs" className="text-info" />;
-  }
-  if (status === 'failed') {
-    return <XIcon size={12} className="text-danger" />;
-  }
-  // completed / undefined → neutral check
-  return <Check size={12} className="text-fg-muted" />;
 }
 
 function renderContentBlock(
@@ -133,8 +121,11 @@ export function ToolCallCard({ part }: ToolCallCardProps) {
     <div className="flex justify-start">
       <div className="w-full">
         <div className="text-fg-muted hover:bg-hover flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors">
-          <StatusIcon status={part.status} />
-          <ToolKindIcon part={part} className="text-fg-muted/60" />
+          {part.status === 'failed' ? (
+            <XIcon size={12} className="text-danger" />
+          ) : (
+            <ToolKindIcon part={part} className="text-fg-muted/60" />
+          )}
           {isExpandable ? (
             <button
               type="button"

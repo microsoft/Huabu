@@ -13,6 +13,7 @@ import { useInputModeListener } from './hooks/useInputMode';
 import CanvasListPage from './pages/CanvasListPage';
 import CanvasPage from './pages/CanvasPage/CanvasPage.tsx';
 import ComponentShowcasePage from './pages/ComponentShowcasePage';
+import ToolCallPlaygroundPage from './pages/ToolCallPlaygroundPage';
 import WorkspaceSetupPage from './pages/WorkspaceSetupPage';
 import { useWorkspaceStore } from './store/workspaceStore';
 
@@ -77,6 +78,10 @@ export default function App() {
             <Route
               path="/playground/components"
               element={<ComponentShowcasePage />}
+            />
+            <Route
+              path="/playground/tool-calls"
+              element={<ToolCallPlaygroundPage />}
             />
             <Route path="/canvas/:canvasId" element={<CanvasPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />

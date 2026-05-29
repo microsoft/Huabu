@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest';
 
 import { groupAdjacentToolParts } from './groupParts';
 
-import type { AssistantSegment } from '../../store/chatTypes';
+import type { AssistantSegment } from '../../../store/chatTypes';
 
 function text(t: string): AssistantSegment {
   return { kind: 'text', text: t };

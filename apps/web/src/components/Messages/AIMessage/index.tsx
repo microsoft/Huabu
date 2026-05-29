@@ -1,26 +1,24 @@
 import { Copy } from 'lucide-react';
 
-import { MilkdownMessageCard } from './Card/MilkdownMessageCard';
 import { groupAdjacentToolParts } from './groupParts';
+import { MilkdownMessageCard } from './MilkdownMessageCard';
 import { PlanCard } from './PlanCard';
 import { ThinkingCard } from './ThinkingCard';
-import { ToolCallCard } from './ToolCallCard';
-import {
-  CanvasCommandCard,
-  isAgentTool,
-  MergedAgentToolRow,
-  WebSearchToolDisplay,
-} from './ToolMessage';
-import { NODE_ICON } from '../../config/nodeIcons';
-import useCanvasStore from '../../store/canvasStore';
-import { useChatStore } from '../../store/chatStore';
+import { CanvasCommandCard } from './Tool/CanvasCommandCard';
+import { isAgentTool } from './Tool/helpers';
+import { MergedAgentToolRow } from './Tool/MergedAgentToolRow';
+import { ToolCallCard } from './Tool/ToolCallCard';
+import { WebSearchToolDisplay } from './Tool/WebSearchToolDisplay';
+import { NODE_ICON } from '../../../config/nodeIcons';
+import useCanvasStore from '../../../store/canvasStore';
+import { useChatStore } from '../../../store/chatStore';
 import {
   assistantMessageText,
   type AssistantSegment,
   type ResourceLabel,
-} from '../../store/chatTypes';
-import { copyToClipboard } from '../../utils/io/clipboard';
-import { Button } from '../Common/Button';
+} from '../../../store/chatTypes';
+import { copyToClipboard } from '../../../utils/io/clipboard';
+import { Button } from '../../Common/Button';
 
 import type { CanvasNodeType } from '@sediment/shared';
 

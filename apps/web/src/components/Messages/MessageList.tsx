@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { AIMessage } from './AIMessage';
 import { IntentSelectMessage } from './IntentSelectMessage';
-import { PreparedPromptCard } from './PreparedPromptCard';
+import { PreparedPromptMessage } from './PreparedPromptMessage';
 import { StatusMessage } from './StatusMessage';
 import { UserMessage } from './UserMessage';
 import { Button } from '../Common/Button';
@@ -142,7 +142,7 @@ export const MessageList = ({
 
             if (msg.role === 'prepared-prompt') {
               elements.push(
-                <PreparedPromptCard
+                <PreparedPromptMessage
                   key={msg.id}
                   prompt={msg.prompt}
                   agentAlias={msg.agentAlias}
@@ -158,7 +158,7 @@ export const MessageList = ({
           return elements;
         })()}
 
-        {isLoading && (
+        {isLoading && !streamingAssistantId && (
           <div className="flex justify-start">
             <div className="px-3 py-2">
               <ThinkingIndicator />

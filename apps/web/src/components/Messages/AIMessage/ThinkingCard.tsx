@@ -11,7 +11,7 @@
  */
 
 import { Loader2 } from 'lucide-react';
-import { useId, useState } from 'react';
+import { useState } from 'react';
 
 interface ThinkingCardProps {
   text: string;
@@ -29,7 +29,6 @@ function firstLine(text: string): string {
 
 export function ThinkingCard({ text, isStreaming }: ThinkingCardProps) {
   const [isCollapsed, setIsCollapsed] = useState(true);
-  const bodyId = useId();
 
   if (!text) return null;
 
@@ -38,34 +37,32 @@ export function ThinkingCard({ text, isStreaming }: ThinkingCardProps) {
   return (
     <div className="flex justify-start">
       <div className="w-full min-w-0">
-        <button
-          type="button"
-          onClick={() => setIsCollapsed((prev) => !prev)}
-          aria-expanded={!isCollapsed}
-          aria-controls={bodyId}
-          className="text-fg-muted hover:bg-hover flex w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-md px-2 py-0.5 text-left text-xs transition-colors"
-        >
-          {isStreaming ? (
-            <Loader2
-              size={10}
-              className="text-fg-subtle shrink-0 animate-spin"
-            />
-          ) : (
-            <span
-              aria-hidden
-              className="bg-fg-subtle inline-block h-1 w-1 shrink-0 rounded-full"
-            />
-          )}
-          <span className="min-w-0 flex-1 truncate">
-            {isStreaming && !preview ? 'Thinking…' : preview}
-          </span>
-        </button>
+        <div className="text-fg-muted hover:bg-hover flex w-full items-center gap-1.5 rounded-md px-2 py-0.5 text-xs transition-colors">
+          <button
+            type="button"
+            onClick={() => setIsCollapsed((prev) => !prev)}
+            className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+          >
+            {isStreaming ? (
+              <Loader2
+                size={10}
+                className="text-fg-muted/50 flex-shrink-0 animate-spin"
+              />
+            ) : (
+              <span
+                aria-hidden
+                className="bg-fg-muted/50 inline-block h-1 w-1 flex-shrink-0 rounded-full"
+              />
+            )}
+            <span className="min-w-0 flex-1 truncate">
+              {isStreaming && !preview ? 'Thinking…' : preview}
+            </span>
+          </button>
+        </div>
 
         {!isCollapsed && (
-          <div id={bodyId} className="text-fg-muted mt-1 ml-2 text-xs">
-            <div className="wrap-break-word whitespace-pre-wrap italic">
-              {text}
-            </div>
+          <div className="text-fg-muted mt-1 ml-2 text-xs">
+            <div className="break-words whitespace-pre-wrap italic">{text}</div>
           </div>
         )}
       </div>
