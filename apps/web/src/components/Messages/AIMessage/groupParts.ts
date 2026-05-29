@@ -14,6 +14,10 @@
  *
  * Non-tool segments (text/thinking/plan/status) become singleton
  * groups so the dispatch in `AIMessage` only iterates once.
+ *
+ * Higher-level phase grouping (a `thinking` followed by its tool
+ * runs) lives in {@link groupByThinkingPhase} so this primitive
+ * stays focused on tool-call coalescing.
  */
 
 import type { AssistantSegment } from '../../../store/chatTypes';
@@ -127,4 +131,87 @@ export function groupAdjacentToolParts(
     }
   }
   return groups;
+}
+
+/**
+ * A "thinking phase" — a thinking segment together with all the
+ * tool runs that immediately follow it. Models the typical agent
+ * loop "say what I'm about to do → do it (tool calls) → ...".
+ *
+ * Phase boundary rules:
+ *  - A `thinking` segment OPENS a phase.
+ *  - A phase swallows trailing `tool-group` entries until either:
+ *      • another `thinking` arrives → that thinking opens a new
+ *        phase, the previous phase is "closed" (auto-collapses);
+ *      • any non-tool, non-thinking segment arrives (text, plan,
+ *        permission, status) → the phase closes BEFORE that
+ *        segment, which then renders as its own loose group.
+ *  - Tool groups / loose segments that appear BEFORE any thinking
+ *    in the message render as their own loose entries with no
+ *    surrounding phase — preserves backward-compat for agents that
+ *    never emit thinking chunks.
+ *
+ * A phase is "closed" iff another phase or any loose segment exists
+ * after it in the same message. Callers use `closed` to drive the
+ * auto-collapse signal: while the latest phase is still the tail of
+ * the message, its body stays visible.
+ */
+export type ThinkingPhase = {
+  kind: 'phase';
+  thinking: Extract<AssistantSegment, { kind: 'thinking' }>;
+  toolGroups: Extract<SegmentGroup, { kind: 'tool-group' }>[];
+  /** True once another phase or loose segment follows it. */
+  closed: boolean;
+};
+
+export type PhaseOrLoose =
+  | ThinkingPhase
+  | { kind: 'loose'; group: SegmentGroup };
+
+/**
+ * Pure helper. Wraps {@link groupAdjacentToolParts}'s output into a
+ * phase list. See {@link ThinkingPhase} for the boundary rules.
+ */
+export function groupByThinkingPhase(
+  segments: AssistantSegment[],
+): PhaseOrLoose[] {
+  const groups = groupAdjacentToolParts(segments);
+  const out: PhaseOrLoose[] = [];
+  let current: ThinkingPhase | null = null;
+
+  for (const g of groups) {
+    if (g.kind === 'segment' && g.segment.kind === 'thinking') {
+      if (current) out.push(current);
+      current = {
+        kind: 'phase',
+        thinking: g.segment,
+        toolGroups: [],
+        closed: false,
+      };
+      continue;
+    }
+    if (g.kind === 'tool-group' && current) {
+      current.toolGroups.push(g);
+      continue;
+    }
+    // Non-tool, non-thinking segment (text, plan, permission,
+    // status) closes the open phase before rendering as a loose entry.
+    if (current) {
+      current.closed = true;
+      out.push(current);
+      current = null;
+    }
+    out.push({ kind: 'loose', group: g });
+  }
+  if (current) out.push(current);
+
+  // A trailing phase is "closed" only if anything followed it; the
+  // construction above already enforces that (a closed phase was
+  // flushed before the following entry). Mark every non-tail phase
+  // closed as a final sweep so callers can rely on the flag alone.
+  for (let i = 0; i < out.length - 1; i++) {
+    const entry = out[i]!;
+    if (entry.kind === 'phase') entry.closed = true;
+  }
+  return out;
 }

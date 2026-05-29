@@ -22,7 +22,7 @@
  */
 
 import { ChevronRight } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 interface AssistantDisclosureProps {
   /**
@@ -46,6 +46,13 @@ interface AssistantDisclosureProps {
   children?: ReactNode;
   /** Initial collapsed state. Defaults to `true`. */
   defaultCollapsed?: boolean;
+  /**
+   * When this prop transitions from `false` → `true`, the disclosure
+   * auto-collapses. The user can still re-expand manually afterwards.
+   * Intended for tool cards that start expanded while executing and
+   * should fold once the tool completes.
+   */
+  collapseSignal?: boolean;
   /** Extra classes for the body wrapper (e.g. left rule, indent). */
   bodyClassName?: string;
 }
@@ -56,9 +63,22 @@ export function AssistantDisclosure({
   trailing,
   children,
   defaultCollapsed = true,
+  collapseSignal,
   bodyClassName = '',
 }: AssistantDisclosureProps) {
   const [isCollapsed, setIsCollapsed] = useState(defaultCollapsed);
+
+  // Auto-collapse once when collapseSignal transitions false → true (e.g. a
+  // tool card that was open while executing and should fold on completion).
+  // Initialise the ref to the *current* signal so already-done tools on
+  // initial render don't fire the effect spuriously.
+  const prevCollapseRef = useRef(collapseSignal);
+  useEffect(() => {
+    if (collapseSignal && !prevCollapseRef.current) {
+      setIsCollapsed(true);
+    }
+    prevCollapseRef.current = collapseSignal;
+  }, [collapseSignal]);
   const expandable = children !== undefined && children !== null;
 
   const iconSlot = (

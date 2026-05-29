@@ -10,16 +10,22 @@
  *  - `generic` / `canvas_commands` / `web_search` parts never merge
  *    with each other or with `agent_tool` parts.
  *  - A different `agent_tool.toolName` starts a fresh group.
+ *
+ * Plus `groupByThinkingPhase` boundary rules — see that suite below.
  */
 
 import { describe, expect, it } from 'vitest';
 
-import { groupAdjacentToolParts } from './groupParts';
+import { groupAdjacentToolParts, groupByThinkingPhase } from './groupParts';
 
 import type { AssistantSegment } from '../../../store/chatTypes';
 
 function text(t: string): AssistantSegment {
   return { kind: 'text', text: t };
+}
+
+function thinking(t: string): AssistantSegment {
+  return { kind: 'thinking', text: t };
 }
 
 function agentTool(
@@ -149,5 +155,93 @@ describe('groupAdjacentToolParts', () => {
     expect(groups[0]?.kind).toBe('tool-group');
     expect(groups[1]?.kind).toBe('segment');
     expect(groups[2]?.kind).toBe('tool-group');
+  });
+});
+
+describe('groupByThinkingPhase', () => {
+  it('absorbs tool runs that follow a thinking into one phase', () => {
+    const phases = groupByThinkingPhase([
+      thinking('Planning guide IA'),
+      agentTool('tc-1', 'read'),
+      agentTool('tc-2', 'read'),
+      genericTool('tc-3'),
+    ]);
+    expect(phases).toHaveLength(1);
+    const p = phases[0]!;
+    expect(p.kind).toBe('phase');
+    if (p.kind === 'phase') {
+      expect(p.thinking.text).toBe('Planning guide IA');
+      // adjacent agent_tool merged + the generic tool stays its own
+      // group → 2 tool groups under the phase.
+      expect(p.toolGroups).toHaveLength(2);
+      // Trailing phase with nothing after it is NOT closed yet.
+      expect(p.closed).toBe(false);
+    }
+  });
+
+  it('closes a phase when the next thinking arrives and opens a new one', () => {
+    const phases = groupByThinkingPhase([
+      thinking('Planning guide IA'),
+      agentTool('tc-1', 'read'),
+      thinking('Shaping guide plan'),
+      agentTool('tc-2', 'grep'),
+    ]);
+    expect(phases).toHaveLength(2);
+    const [first, second] = phases as [
+      Extract<(typeof phases)[number], { kind: 'phase' }>,
+      Extract<(typeof phases)[number], { kind: 'phase' }>,
+    ];
+    expect(first.kind).toBe('phase');
+    expect(second.kind).toBe('phase');
+    expect(first.closed).toBe(true);
+    expect(second.closed).toBe(false);
+    expect(first.thinking.text).toBe('Planning guide IA');
+    expect(second.thinking.text).toBe('Shaping guide plan');
+  });
+
+  it('closes the phase before a text segment (loose) and reopens on next thinking', () => {
+    const phases = groupByThinkingPhase([
+      thinking('Investigating'),
+      agentTool('tc-1', 'read'),
+      text('Final answer.'),
+      thinking('Refining'),
+      agentTool('tc-2', 'grep'),
+    ]);
+    expect(phases).toHaveLength(3);
+    expect(phases[0]?.kind).toBe('phase');
+    if (phases[0]?.kind === 'phase') expect(phases[0].closed).toBe(true);
+    expect(phases[1]?.kind).toBe('loose');
+    if (phases[1]?.kind === 'loose')
+      expect(phases[1].group.kind).toBe('segment');
+    expect(phases[2]?.kind).toBe('phase');
+    if (phases[2]?.kind === 'phase') expect(phases[2].closed).toBe(false);
+  });
+
+  it('emits tool runs that appear before any thinking as loose groups', () => {
+    const phases = groupByThinkingPhase([
+      agentTool('tc-1', 'read'),
+      canvasCommandsTool('tc-2'),
+      thinking('Now planning'),
+      agentTool('tc-3', 'grep'),
+    ]);
+    // 1 loose agent_tool group + 1 loose canvas_commands + 1 phase
+    expect(phases).toHaveLength(3);
+    expect(phases[0]?.kind).toBe('loose');
+    expect(phases[1]?.kind).toBe('loose');
+    expect(phases[2]?.kind).toBe('phase');
+    if (phases[2]?.kind === 'phase') {
+      expect(phases[2].toolGroups).toHaveLength(1);
+      expect(phases[2].closed).toBe(false);
+    }
+  });
+
+  it('represents a bare thinking with no tools as an empty phase', () => {
+    const phases = groupByThinkingPhase([thinking('Just thinking')]);
+    expect(phases).toHaveLength(1);
+    const p = phases[0]!;
+    if (p.kind === 'phase') {
+      expect(p.toolGroups).toHaveLength(0);
+      expect(p.closed).toBe(false);
+    }
   });
 });
