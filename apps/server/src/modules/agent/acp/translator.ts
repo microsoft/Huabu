@@ -229,13 +229,19 @@ export function acpUpdateToStreamEvent(
       return { type: 'session_mode_update', data };
     }
     case 'session_info_update': {
+      const raw = u as { title?: unknown; updatedAt?: unknown };
       const data: AgentSessionInfoUpdateEventData = {
-        title: nullToUndefined((u as { title?: string | null }).title),
-        updatedAt: nullToUndefined(
-          (u as { updatedAt?: string | null }).updatedAt,
-        ),
+        title:
+          raw.title === null || typeof raw.title === 'string'
+            ? raw.title
+            : undefined,
+        updatedAt:
+          raw.updatedAt === null || typeof raw.updatedAt === 'string'
+            ? raw.updatedAt
+            : undefined,
       };
       return { type: 'session_info_update', data };
+    }
     }
     case 'usage_update': {
       const data: AgentSessionUsageUpdateEventData = {
