@@ -103,8 +103,19 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const panelTitle = useMemo(() => {
     if (viewingSketchCluster) return 'Sketch Recognition';
     if (viewingQuestionThread) return 'Question Replay';
+    // When the thread is delegated to an external ACP agent, the
+    // built-in model name is irrelevant — surface the agent alias
+    // instead so the header reflects who's actually answering.
+    if (agentBinding.kind === 'external') {
+      return `Chat with ${agentBinding.alias}`;
+    }
     return activeModelName ? `Chat with ${activeModelName}` : 'Chat';
-  }, [activeModelName, viewingQuestionThread, viewingSketchCluster]);
+  }, [
+    activeModelName,
+    agentBinding,
+    viewingQuestionThread,
+    viewingSketchCluster,
+  ]);
 
   // Register intent callback — when user selects an intent in the popover,
   // it's sent here and executed as an agent chat message.
@@ -236,6 +247,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
             connectedAgents={connectedAgents}
             onRefreshAgents={refreshAcpAgents}
             refreshingAgents={acpAgentsLoading}
+            onNewThread={handleNewChat}
             slashCommands={slashCommands}
             onSlashMenuIntent={refreshSlashCommands}
             // 1 thread = 1 binding. Lock the picker the moment a thread

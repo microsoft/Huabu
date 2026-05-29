@@ -37,6 +37,8 @@ type SelectProps<T extends string = string> = {
   placeholder?: string;
   /** Extra className on the trigger button. */
   className?: string;
+  /** Tooltip text wrapped around the trigger button via `Button`'s `title`. */
+  title?: string;
   /** Trigger button props forwarded to `<Button>`. Defaults to outline/neutral/sm. */
   variant?: ButtonProps['variant'];
   tone?: ButtonProps['tone'];
@@ -102,6 +104,7 @@ export function Select<T extends string = string>({
   disabled = false,
   placeholder = 'Select…',
   className,
+  title,
   variant = 'outline',
   tone = 'neutral',
   size = 'sm',
@@ -173,6 +176,7 @@ export function Select<T extends string = string>({
           disabled={disabled}
           onClick={handleToggle}
           aria-expanded={isOpen}
+          title={title}
           className={cn(
             selectShapeClasses[shape],
             isOpen && 'bg-bg-default',
@@ -231,7 +235,12 @@ export function Select<T extends string = string>({
                     {option.description}
                   </span>
                 )}
-                {option.value === value && <Check size={14} />}
+                {/* Reserve a fixed-width slot for the check so the
+                    description column stays aligned across rows whether
+                    or not the row is selected. */}
+                <span className="flex w-3.5 shrink-0 justify-center">
+                  {option.value === value && <Check size={14} />}
+                </span>
               </Button>
             </Fragment>
           ))}

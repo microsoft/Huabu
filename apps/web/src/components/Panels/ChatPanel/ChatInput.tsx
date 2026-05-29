@@ -38,6 +38,8 @@ interface ChatInputProps {
   onRefreshAgents?: () => void | Promise<void>;
   /** True while a refresh is in flight. */
   refreshingAgents?: boolean;
+  /** Start a fresh chat thread ("New chat session" action in the mode picker). */
+  onNewThread?: () => void;
   /**
    * Slash commands the bound external agent advertised via
    * `available_commands_update`. Empty when the binding is internal,
@@ -81,6 +83,7 @@ export const ChatInput = ({
   connectedAgents,
   onRefreshAgents,
   refreshingAgents = false,
+  onNewThread,
   slashCommands = [],
   onSlashMenuIntent,
   bindingLocked = false,
@@ -556,6 +559,7 @@ export const ChatInput = ({
                 connectedAgents={connectedAgents}
                 onRefreshAgents={onRefreshAgents}
                 refreshing={refreshingAgents}
+                onNewThread={onNewThread}
                 locked={bindingLocked}
                 disabled={disabled}
               />
