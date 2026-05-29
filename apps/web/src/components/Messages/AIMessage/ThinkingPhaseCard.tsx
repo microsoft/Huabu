@@ -73,17 +73,27 @@ export function ThinkingPhaseCard({
     />
   );
 
+  // When the thinking text is just the preview line, skip the
+  // duplicated text block in the body — the title already shows it
+  // and the native tooltip exposes the full line on hover when
+  // truncated. The disclosure stays expandable because the tool
+  // groups still live in the body.
+  const isMultiLine = text.trim() !== preview;
+
   return (
     <AssistantDisclosure
       icon={icon}
       title={showSpinner && !preview ? 'Thinking…' : preview}
+      titleTooltip={isMultiLine ? undefined : preview}
       defaultCollapsed={closed}
       collapseSignal={closed}
       bodyClassName="border-edge-default/40 ml-2 flex flex-col gap-1 border-l pl-3"
     >
-      <div className="text-fg-muted/70 mb-1 px-1 text-xs wrap-break-word whitespace-pre-wrap italic">
-        {text}
-      </div>
+      {isMultiLine && (
+        <div className="text-fg-muted/70 mb-1 px-1 text-xs wrap-break-word whitespace-pre-wrap italic">
+          {text}
+        </div>
+      )}
       {children}
     </AssistantDisclosure>
   );

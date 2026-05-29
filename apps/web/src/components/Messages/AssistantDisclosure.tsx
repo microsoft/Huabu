@@ -34,6 +34,13 @@ interface AssistantDisclosureProps {
   /** Single-line title; truncates with ellipsis when overflowing. */
   title: ReactNode;
   /**
+   * Optional plain-text tooltip for the title. Useful when the title
+   * may be truncated and the consumer wants the full text accessible
+   * via a native hover tooltip — particularly when the disclosure has
+   * no body to fall back on.
+   */
+  titleTooltip?: string;
+  /**
    * Optional trailing slot, rendered after the chevron inside the
    * header row. Use for action buttons that must stay visible while
    * collapsed.
@@ -60,6 +67,7 @@ interface AssistantDisclosureProps {
 export function AssistantDisclosure({
   icon,
   title,
+  titleTooltip,
   trailing,
   children,
   defaultCollapsed = true,
@@ -86,7 +94,11 @@ export function AssistantDisclosure({
       {icon}
     </span>
   );
-  const titleText = <span className="min-w-0 flex-1 truncate">{title}</span>;
+  const titleText = (
+    <span className="min-w-0 flex-1 truncate" title={titleTooltip}>
+      {title}
+    </span>
+  );
   const chevron = expandable ? (
     <ChevronRight
       size={10}
