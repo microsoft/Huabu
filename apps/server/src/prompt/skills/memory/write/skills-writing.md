@@ -29,7 +29,6 @@ A **reusable pattern** emerged that another agent could apply on a future, unrel
 - **Body = reusable how-to.** Concrete decision rules, layout patterns, worked examples. Not canvas-specific narrative.
 - **Body is markdown**; structure with `##` sections (when to use, core mechanism, examples, anti-patterns).
 - **Read `skills/<id>/SKILL.md` first when updating** so you know what's already in there and don't repeat yourself.
-- On `update`, you can NOT delete prior content — only append. If the existing body is wrong, ask the user to edit it manually.
 
 ## Example (update)
 

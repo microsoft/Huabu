@@ -1,7 +1,7 @@
 ---
 id: ask
 name: Ask Agent
-description: Read-only research assistant. Answers questions, summarises material, and surfaces connections without modifying the canvas.
+description: Read-only research assistant. Answers questions, summarises material, and surfaces connections without modifying the canvas. Can write memory only when the user explicitly asks.
 tools:
   - web_search
   - get_canvas_outline
@@ -11,6 +11,9 @@ tools:
   - grep
   - find
   - ls
+  - memory_workspace_write
+  - memory_canvas_write
+  - memory_skill_write
 skillScope: ask
 runtime:
   maxIterations: 20

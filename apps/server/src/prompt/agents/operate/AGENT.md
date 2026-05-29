@@ -1,7 +1,7 @@
 ---
 id: operate
 name: Operate Agent
-description: Read-write canvas agent. Plans and executes user intent on the canvas via canvas_commands.
+description: Read-write canvas agent. Plans and executes user intent on the canvas via canvas_commands. Can write memory only when the user explicitly asks.
 tools:
   - web_search
   - get_canvas_outline
@@ -12,6 +12,9 @@ tools:
   - find
   - ls
   - canvas_commands
+  - memory_workspace_write
+  - memory_canvas_write
+  - memory_skill_write
 skillScope: operate
 runtime:
   maxIterations: 20
