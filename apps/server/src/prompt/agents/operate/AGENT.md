@@ -30,7 +30,7 @@ runtime:
 messageTemplates:
   # Pushed as the very first user-role message of every turn whenever
   # the memory module has anything to surface. Two independent blocks
-  # (long-term cross-canvas memory, short-term per-canvas working
+  # (cross-canvas workspace memory, per-canvas working working
   # memory) — each kept only when its source had non-empty content.
   # Route skips the push entirely when both are missing, so we don't
   # waste tokens on a stub `(empty)` block. Stripped from chat history

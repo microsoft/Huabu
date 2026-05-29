@@ -49,7 +49,7 @@ export interface WriteResult {
   reason: string;
 }
 
-/** Body cap shared by long-term + working memory. */
+/** Body cap shared by workspace + working memory. */
 export const MEMORY_BYTE_CAP = 4 * 1024;
 export const MEMORY_LINE_CAP = 80;
 
@@ -76,7 +76,7 @@ export const SKILL_CREATE_RATIONALE_MIN = 20;
  * (the leading `+`/`-`/`*` is stripped if present, then re-prefixed
  * with `- `). Cap check runs against the merged body.
  */
-export function writeLongTerm(args: {
+export function writeWorkspaceMemory(args: {
   mode: 'patch' | 'replace';
   diff: string;
   logger?: MemoryLogger;
@@ -87,7 +87,7 @@ export function writeLongTerm(args: {
     if (args.mode !== 'patch') {
       return reject(
         target,
-        `long-term writer only accepts mode="patch" in this phase`,
+        `workspace-memory writer only accepts mode="patch" in this phase`,
       );
     }
 
@@ -99,7 +99,7 @@ export function writeLongTerm(args: {
     mkdirp(settingDir());
     atomicWriteText(target, merged);
     args.logger?.info(
-      `[memory] long-term updated (${merged.length} bytes, ${merged.split('\n').length} lines)`,
+      `[memory] workspace memory updated (${merged.length} bytes, ${merged.split('\n').length} lines)`,
     );
     return { ok: true, target, reason: 'patched' };
   } catch (err) {
@@ -108,7 +108,7 @@ export function writeLongTerm(args: {
 }
 
 /**
- * Merge a patch into an existing long-term body.
+ * Merge a patch into an existing workspace memory body.
  *
  * Each non-empty line in `patch` becomes a bullet appended to the
  * existing body — unless an identical-trimmed-content bullet is
@@ -158,7 +158,7 @@ function stripBulletPrefix(line: string): string {
  * agent's "current state" briefing for the canvas, not a journal.
  * Cap check applies to the body.
  */
-export function writeWorkingMemory(args: {
+export function writeCanvasMemory(args: {
   canvasId: string;
   body: string;
   logger?: MemoryLogger;

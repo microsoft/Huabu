@@ -35,7 +35,7 @@ import path from 'node:path';
 
 import {
   canvasJsonPath,
-  longTermMemoryPath,
+  workspaceMemoryPath,
   memoryStatePath,
   userSkillsDir,
   workingMemoryPath,
@@ -126,7 +126,7 @@ interface MemorySnapshot {
   threshold: number;
   canvases: Array<{ id: string; title: string | null }>;
   workspace: {
-    longterm: FilePeek;
+    memory: FilePeek;
     userSkills: Array<{ id: string; file: FilePeek }>;
   };
   selected?: {
@@ -245,11 +245,11 @@ function listUserSkills(): Array<{ id: string; file: FilePeek }> {
 
 function buildSnapshot(canvasId: string | null): MemorySnapshot {
   const canvases = listCanvasesFromDisk();
-  let longTermPeek: FilePeek;
+  let workspaceMemoryPeek: FilePeek;
   try {
-    longTermPeek = peek(longTermMemoryPath());
+    workspaceMemoryPeek = peek(workspaceMemoryPath());
   } catch {
-    longTermPeek = {
+    workspaceMemoryPeek = {
       path: '(workspace not configured)',
       exists: false,
       content: null,
@@ -261,7 +261,7 @@ function buildSnapshot(canvasId: string | null): MemorySnapshot {
     threshold: OP_THRESHOLD,
     canvases,
     workspace: {
-      longterm: longTermPeek,
+      memory: workspaceMemoryPeek,
       userSkills: listUserSkills(),
     },
   };
@@ -507,7 +507,7 @@ function renderDebugHtml(): string {
 
     function renderFiles(snap) {
       const parts = [];
-      parts.push(renderFile('long-term memory (cross-canvas)', snap.workspace.longterm));
+      parts.push(renderFile('workspace memory (cross-canvas)', snap.workspace.memory));
       if (snap.selected) {
         parts.push(renderFile('working memory (this canvas)', snap.selected.working));
       } else {

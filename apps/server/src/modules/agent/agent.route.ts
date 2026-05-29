@@ -25,8 +25,8 @@ import { loadAgent, renderAgentTemplate } from '../../prompt/index.js';
 import { runAcpAgent } from '../agent/acp/service.js';
 import { runAgent } from '../agent/agent.service.js';
 import {
-  readLongTermMemory,
-  readWorkingMemory,
+  readWorkspaceMemory,
+  readCanvasMemory,
 } from '../agent/memory/index.js';
 import { buildAgentNodeRef } from '../agent/node-ref.js';
 import { readChatParts } from '../agent/store/chat-parts-store.js';
@@ -1112,7 +1112,7 @@ const agentRoutes: FastifyPluginAsync = async (
       canvasId ?? null,
     );
 
-    // Memory preamble: long-term cross-canvas preferences + per-canvas
+    // Memory preamble: cross-canvas workspace preferences + per-canvas
     // working memory. Pushed before everything else so the model has
     // the user / canvas profile baked in by the time it sees the
     // selected-node list or the user prompt. Each block survives the
@@ -1120,8 +1120,8 @@ const agentRoutes: FastifyPluginAsync = async (
     // and the whole push is skipped when both are empty — see
     // `apps/server/src/modules/agent/memory/read.ts`.
     {
-      const longterm = readLongTermMemory();
-      const shortterm = canvasId ? readWorkingMemory(canvasId) : null;
+      const longterm = readWorkspaceMemory();
+      const shortterm = canvasId ? readCanvasMemory(canvasId) : null;
       if (longterm || shortterm) {
         context.messages.push({
           role: 'user',

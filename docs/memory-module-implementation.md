@@ -205,7 +205,7 @@ apps/server/src/prompt/
 
 ```ts
 export function settingDir(): string;
-export function longTermMemoryPath(): string; // setting/.huabu.md
+export function workspaceMemoryPath(): string; // setting/.huabu.md
 export function userSkillsDir(): string; // setting/skills/
 export function workingMemoryDir(canvasId): string; // <canvas>/.memory/
 export function workingMemoryPath(canvasId): string; // <canvas>/.memory/canvas.md
@@ -251,7 +251,7 @@ apps/server/src/modules/agent/memory/
     shortterm.ts
     skill.ts
   sandbox.ts      ← workspace + canvas 双根 safeResolve
-  tools.ts        ← memory_longterm_write / memory_shortterm_write / memory_skill_write 定义
+  tools.ts        ← memory_workspace_write / memory_canvas_write / memory_skill_write 定义
 ```
 
 **worker 行为**：
@@ -271,7 +271,7 @@ enqueue(canvasId) {
 **analyzer 接 `runAgent`**：
 
 - 加 `'memory'` 到 `ToolScope`。
-- 新建 `prompt/agents/memory/AGENT.md`，tools: `[memory_longterm_write, memory_shortterm_write, memory_skill_write, read]`。
+- 新建 `prompt/agents/memory/AGENT.md`，tools: `[memory_workspace_write, memory_canvas_write, memory_skill_write, read]`。
 - 用便宜模型：在 [llm.ts](../apps/server/src/modules/agent/llm.ts) 加 `getMemoryModel()`（默认走配置 `memoryModel` 或 fallback 主模型）。
 - Context messages：一次性塞 `[SYSTEM Snapshot]` + `[SYSTEM Chat digest]` + `[SYSTEM Recent ops]` + 三层当前 memory 内容，然后给 user-role 一句 "Analyse and write what's worth remembering"。
 - `maxIterations: 5`（足够调几次 read + 三个 write）。
@@ -307,8 +307,8 @@ enqueue(canvasId) {
 - [agent.route.ts](../apps/server/src/modules/agent/agent.route.ts) 在 `selectedNodesPreamble` push 之前：
 
   ```ts
-  const longterm = readLongTermMemory(); // workspace 单例
-  const shortterm = canvasId ? readWorkingMemory(canvasId) : null;
+  const longterm = readWorkspaceMemory(); // workspace 单例
+  const shortterm = canvasId ? readCanvasMemory(canvasId) : null;
   if (longterm || shortterm) {
     context.messages.push({
       role: 'user',
@@ -346,5 +346,5 @@ enqueue(canvasId) {
 ## 5. 后续（不在本计划内）
 
 - 跨 workspace 全局 memory（`~/.config/sediment/global.md`）。
-- 用户在 UI 里 inline 编辑 long-term memory。
+- 用户在 UI 里 inline 编辑 workspace memory。
 - Memory 显示哪些条目最近被 agent 引用（命中率统计）。

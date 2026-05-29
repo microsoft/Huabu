@@ -12,27 +12,27 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 
-import { longTermMemoryPath, workingMemoryPath } from '../../storage/paths.js';
+import { workspaceMemoryPath, workingMemoryPath } from '../../storage/paths.js';
 
 /**
- * Read the long-term memory body (`<workspace>/setting/.huabu.md`).
+ * Read the workspace memory body (`<workspace>/setting/.huabu.md`).
  *
  * Returns the raw markdown content (frontmatter is not used here —
- * long-term memory is bullet-list prose, no frontmatter). Returns
+ * workspace memory is bullet-list prose, no frontmatter). Returns
  * `null` when the file is missing, empty, or unreadable so the
  * caller can omit the preamble entirely instead of injecting a
  * zero-information `(empty)` line.
  */
-export function readLongTermMemory(): string | null {
-  return readNonEmpty(longTermMemoryPath());
+export function readWorkspaceMemory(): string | null {
+  return readNonEmpty(workspaceMemoryPath());
 }
 
 /**
  * Read the per-canvas working memory body.
  *
- * Same null-on-empty contract as {@link readLongTermMemory}.
+ * Same null-on-empty contract as {@link readWorkspaceMemory}.
  */
-export function readWorkingMemory(canvasId: string): string | null {
+export function readCanvasMemory(canvasId: string): string | null {
   return readNonEmpty(workingMemoryPath(canvasId));
 }
 

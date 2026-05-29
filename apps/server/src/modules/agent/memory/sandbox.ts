@@ -3,7 +3,7 @@
  *
  * Two roots, both legitimate targets for the three memory writers:
  *
- *   - **Workspace root** (`<workspace>/setting/`) — long-term memory
+ *   - **Workspace root** (`<workspace>/setting/`) — workspace memory
  *     (`.huabu.md`) and user-skill SKILL.md files.
  *   - **Canvas root** (`<canvasDir>/.memory/`) — working memory body
  *     (`canvas.md`) and the worker's `state.json`.
@@ -23,7 +23,7 @@
 import path from 'node:path';
 
 import {
-  longTermMemoryPath,
+  workspaceMemoryPath,
   settingDir,
   userSkillsDir,
   workingMemoryDir,
@@ -67,16 +67,16 @@ function ensureUnderRoot(root: string, candidate: string, label: string): void {
 }
 
 /**
- * Resolve the canonical absolute path of the long-term memory file.
+ * Resolve the canonical absolute path of the workspace memory file.
  *
- * No segments parameter: there is exactly one long-term memory file
+ * No segments parameter: there is exactly one workspace memory file
  * per workspace. The function exists purely so callers go through the
  * same sandbox-enforcing surface as the other writers, and so the
  * setting/ root is materialised consistently.
  */
 export function resolveLongTermPath(): string {
   const root = settingDir();
-  const target = longTermMemoryPath();
+  const target = workspaceMemoryPath();
   ensureUnderRoot(root, target, 'workspace setting');
   return target;
 }

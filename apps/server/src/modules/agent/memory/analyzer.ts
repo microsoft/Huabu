@@ -7,7 +7,7 @@
  *   1. Build the system prompt from `prompt/agents/memory/AGENT.md`.
  *   2. Assemble a compact context bundle from disk: canvas snapshot,
  *      chat-thread digest, recent ops, current contents of every
- *      memory surface (long-term, working, user-skill catalogue).
+ *      memory surface (workspace, working, user-skill catalogue).
  *   3. Run the sub-agent against that context. The agent's only way
  *      to affect the world is via the three `memory_*_write` tools,
  *      whose handlers wrap the writers in `./writers.ts`.
@@ -33,7 +33,7 @@ import {
   canvasJsonPath,
   chatDir,
   eventsPath,
-  longTermMemoryPath,
+  workspaceMemoryPath,
   workingMemoryPath,
 } from '../../storage/paths.js';
 
@@ -205,7 +205,7 @@ function assembleContext(canvasId: string): ContextBundle {
   messages.push({
     role: 'user',
     content:
-      'Analyse the observations above. Update long-term, working, or skill memory only if there is high-confidence value in doing so. Output nothing in free-form text — use tool calls.',
+      'Analyse the observations above. Update workspace, working, or skill memory only if there is high-confidence value in doing so. Output nothing in free-form text — use tool calls.',
     timestamp: Date.now(),
   });
 
@@ -414,7 +414,7 @@ function readEventsDigest(canvasId: string): EventsDigest | null {
 function readMemorySnapshot(canvasId: string): string {
   const parts: string[] = [];
 
-  const longTerm = readFileSafe(longTermMemoryPath());
+  const longTerm = readFileSafe(workspaceMemoryPath());
   parts.push('## Long-term memory');
   parts.push(longTerm.trim().length > 0 ? longTerm.trim() : '(empty)');
 

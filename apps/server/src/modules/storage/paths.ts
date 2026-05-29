@@ -4,14 +4,14 @@
  * Layout under `<workspace>/`:
  *
  *   setting/                        user-owned, cross-canvas
- *     .huabu.md                     long-term memory (user preferences)
+ *     .huabu.md                     workspace memory (user preferences)
  *     skills/<id>/SKILL.md          user / memory-agent authored skills
  *   <canvasDir>/                    name = sanitised canvas title
  *     canvas.json                   carries the stable canvasId
  *     nodes/<safe(label)>.md        per-node markdown (id in frontmatter)
  *     .artifacts/<artifactId><ext>  raw uploads (hidden dir)
  *     .memory/                      canvas-scoped working memory (AI-private)
- *       canvas.md                   short-term working memory body
+ *       canvas.md                   working memory body
  *       state.json                  memory worker bookkeeping
  *     .history/
  *       chat/<threadId>.json        pi-ai Context (messages, append-only)
@@ -78,7 +78,7 @@ export function memoryDir(canvasId: string): string {
 }
 
 /**
- * @deprecated See {@link memoryDir}. The current short-term memory path
+ * @deprecated See {@link memoryDir}. The current working memory path
  * is {@link workingMemoryPath}.
  */
 export function prefsPath(canvasId: string): string {
@@ -88,14 +88,14 @@ export function prefsPath(canvasId: string): string {
 // ─── Memory module paths ───────────────────────────────────────────────────
 //
 // Two scopes:
-//   - Workspace-level long-term memory (`<workspace>/setting/.huabu.md`):
+//   - Workspace memory (`<workspace>/setting/.huabu.md`):
 //     cross-canvas user preferences / profile. User-editable.
 //   - Canvas-level working memory (`<canvasDir>/.memory/`): hidden,
 //     AI-private working notes for *this* canvas. The leading `.` puts
 //     it in the same hidden tier as `.history/` and `.artifacts/`.
 
-/** Long-term, cross-canvas user preferences: `<workspace>/setting/.huabu.md`. */
-export function longTermMemoryPath(): string {
+/** Workspace memory — cross-canvas user preferences: `<workspace>/setting/.huabu.md`. */
+export function workspaceMemoryPath(): string {
   return path.join(settingDir(), '.huabu.md');
 }
 
@@ -106,7 +106,7 @@ export function workingMemoryDir(canvasId: string): string {
   return path.join(canvasRoot(canvasId), WORKING_MEMORY_DIR_NAME);
 }
 
-/** Short-term working memory body for a canvas. */
+/** Working memory body for a canvas. */
 export function workingMemoryPath(canvasId: string): string {
   return path.join(workingMemoryDir(canvasId), 'canvas.md');
 }
@@ -126,7 +126,7 @@ export function memoryStatePath(canvasId: string): string {
 /**
  * Workspace-level user setting directory: `<workspace>/setting/`.
  * Holds cross-canvas, user-visible artifacts:
- *   - `.huabu.md`            long-term user memory (PR-B)
+ *   - `.huabu.md`            workspace user memory (PR-B)
  *   - `skills/<id>/SKILL.md` user-authored / memory-agent-authored skills
  *
  * Distinct from the per-canvas `memory/` directory (which is

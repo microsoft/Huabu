@@ -478,7 +478,7 @@ export const lsTool: ToolDefinition = {
 //
 // Three write tools exposed exclusively to the `memory` sub-agent
 // (see `prompt/agents/memory/AGENT.md`). They never appear in the
-// chat / operate / sketch toolsets — long-term memory and skills are
+// chat / operate / sketch toolsets — workspace memory and skills are
 // workspace-scoped, not canvas-scoped, and accidentally exposing them
 // to a per-canvas agent would punch a sandbox hole.
 //
@@ -490,7 +490,7 @@ export const lsTool: ToolDefinition = {
 // running them in declared order makes the worker's summary log
 // readable.
 
-export const memoryLongtermWriteParamsSchema = Type.Object({
+export const memoryWorkspaceWriteParamsSchema = Type.Object({
   mode: Type.Union([Type.Literal('patch'), Type.Literal('replace')], {
     description:
       'Use "patch" to merge new bullet-style lines into the existing body (dedup applies). "replace" is reserved and currently rejected — do not use.',
@@ -501,28 +501,28 @@ export const memoryLongtermWriteParamsSchema = Type.Object({
   }),
 });
 
-export const memoryLongtermWriteTool: ToolDefinition = {
-  name: 'memory_longterm_write',
-  label: 'Write long-term memory',
+export const memoryWorkspaceWriteTool: ToolDefinition = {
+  name: 'memory_workspace_write',
+  label: 'Write workspace memory',
   description:
-    'Patch the user-level long-term memory (`<workspace>/setting/.huabu.md`). Use only for durable, cross-canvas preferences / style / facts about the user. Keep each bullet ≤ 80 chars. The writer enforces a 4 KB / 80-line cap on the merged body and rejects oversized writes.',
-  parameters: memoryLongtermWriteParamsSchema,
+    'Patch the user-level workspace memory (`<workspace>/setting/.huabu.md`). Use only for durable, cross-canvas preferences / style / facts about the user. Keep each bullet ≤ 80 chars. The writer enforces a 4 KB / 80-line cap on the merged body and rejects oversized writes.',
+  parameters: memoryWorkspaceWriteParamsSchema,
   executionMode: 'sequential',
 };
 
-export const memoryShorttermWriteParamsSchema = Type.Object({
+export const memoryCanvasWriteParamsSchema = Type.Object({
   body: Type.String({
     description:
       'Markdown body that replaces the current working memory wholesale. Treat as a one-paragraph briefing for the next agent landing on this canvas cold.',
   }),
 });
 
-export const memoryShorttermWriteTool: ToolDefinition = {
-  name: 'memory_shortterm_write',
+export const memoryCanvasWriteTool: ToolDefinition = {
+  name: 'memory_canvas_write',
   label: 'Write working memory',
   description:
     "Replace this canvas's working memory (`<canvasDir>/.memory/canvas.md`). Wholesale replacement, not a delta — write the *current state* of the canvas in ≤ 4 KB / 80 lines. The writer rejects oversized bodies.",
-  parameters: memoryShorttermWriteParamsSchema,
+  parameters: memoryCanvasWriteParamsSchema,
   executionMode: 'sequential',
 };
 
@@ -605,8 +605,8 @@ export const TOOL_REGISTRY: Readonly<Record<string, ToolDefinition>> =
         grepTool,
         findTool,
         lsTool,
-        memoryLongtermWriteTool,
-        memoryShorttermWriteTool,
+        memoryWorkspaceWriteTool,
+        memoryCanvasWriteTool,
         memorySkillWriteTool,
       ].map((t) => [t.name, t] as const),
     ),

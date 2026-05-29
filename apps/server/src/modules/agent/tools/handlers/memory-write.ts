@@ -17,26 +17,26 @@
  */
 
 import {
-  writeLongTerm,
+  writeWorkspaceMemory,
   writeSkill,
-  writeWorkingMemory,
+  writeCanvasMemory,
 } from '../../memory/writers.js';
 
 import type {
-  memoryLongtermWriteParamsSchema,
-  memoryShorttermWriteParamsSchema,
+  memoryWorkspaceWriteParamsSchema,
+  memoryCanvasWriteParamsSchema,
   memorySkillWriteParamsSchema,
 } from '../definitions.js';
 import type { Static } from '@earendil-works/pi-ai';
 
 // ─── Argument types ─────────────────────────────────────────────────────────
 
-export type MemoryLongtermWriteArgs = Static<
-  typeof memoryLongtermWriteParamsSchema
+export type MemoryWorkspaceWriteArgs = Static<
+  typeof memoryWorkspaceWriteParamsSchema
 >;
 
-export type MemoryShorttermWriteArgs = Static<
-  typeof memoryShorttermWriteParamsSchema
+export type MemoryCanvasWriteArgs = Static<
+  typeof memoryCanvasWriteParamsSchema
 > & {
   /**
    * Injected by the executor from the request-scoped canvas id —
@@ -50,20 +50,20 @@ export type MemorySkillWriteArgs = Static<typeof memorySkillWriteParamsSchema>;
 
 // ─── Handlers ──────────────────────────────────────────────────────────────
 
-export async function handleMemoryLongtermWrite(
-  args: MemoryLongtermWriteArgs,
+export async function handleMemoryWorkspaceWrite(
+  args: MemoryWorkspaceWriteArgs,
 ): Promise<string> {
-  const result = writeLongTerm({
+  const result = writeWorkspaceMemory({
     mode: args.mode,
     diff: args.diff,
   });
   return JSON.stringify(result);
 }
 
-export async function handleMemoryShorttermWrite(
-  args: MemoryShorttermWriteArgs,
+export async function handleMemoryCanvasWrite(
+  args: MemoryCanvasWriteArgs,
 ): Promise<string> {
-  const result = writeWorkingMemory({
+  const result = writeCanvasMemory({
     canvasId: args.canvasId,
     body: args.body,
   });

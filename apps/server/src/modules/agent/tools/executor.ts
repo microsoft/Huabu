@@ -44,11 +44,11 @@ import {
   type LsArgs,
 } from './handlers/fs-search.js';
 import {
-  handleMemoryLongtermWrite,
-  handleMemoryShorttermWrite,
+  handleMemoryWorkspaceWrite,
+  handleMemoryCanvasWrite,
   handleMemorySkillWrite,
-  type MemoryLongtermWriteArgs,
-  type MemoryShorttermWriteArgs,
+  type MemoryWorkspaceWriteArgs,
+  type MemoryCanvasWriteArgs,
   type MemorySkillWriteArgs,
 } from './handlers/memory-write.js';
 import { handleWebSearch, type WebSearchArgs } from './handlers/web-search.js';
@@ -136,12 +136,12 @@ export async function executeTool(
         context?.origin,
       );
 
-    case 'memory_longterm_write':
-      return handleMemoryLongtermWrite(args as MemoryLongtermWriteArgs);
+    case 'memory_workspace_write':
+      return handleMemoryWorkspaceWrite(args as MemoryWorkspaceWriteArgs);
 
-    case 'memory_shortterm_write':
-      return handleMemoryShorttermWrite(
-        withCanvasId<MemoryShorttermWriteArgs>(args, 'memory_shortterm_write'),
+    case 'memory_canvas_write':
+      return handleMemoryCanvasWrite(
+        withCanvasId<MemoryCanvasWriteArgs>(args, 'memory_canvas_write'),
       );
 
     case 'memory_skill_write':
