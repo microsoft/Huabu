@@ -26,12 +26,8 @@
  *
  * ### Schema versioning
  *
- * `schemaVersion: 2` is recorded on every file. The v1 → v2 upgrade
- * dropped positional `messageIndex`/`partIndex` keys in favour of
- * stable ids; legacy v1 files are read transparently via
- * {@link migrateV1ToV2} and rewritten as v2 on the next save.
- *
- * Bump only on a breaking shape change.
+ * `schemaVersion: 1` is recorded on every file. Bump only on a
+ * breaking shape change.
  *
  * ### Mutator semantics
  *
@@ -46,9 +42,9 @@
  * ### Trust boundary
  *
  * Sidecar files live on the local filesystem and are user-editable.
- * `readChatParts` validates via {@link isSidecarV1} / {@link isSidecarV2}
- * and returns `null` (treated as "no sidecar yet") rather than
- * throwing — a corrupt sidecar should not brick chat history.
+ * `readChatParts` validates via {@link isSidecar} and returns `null`
+ * (treated as "no sidecar yet") rather than throwing — a corrupt
+ * sidecar should not brick chat history.
  */
 
 import { existsSync } from 'node:fs';
@@ -65,7 +61,7 @@ import type {
   ToolPermissionState,
 } from '@sediment/shared';
 
-// ─── ToolAcpExtension (shared by v1/v2) ───────────────────────────────
+// ─── ToolAcpExtension ─────────────────────────────────────────────────
 
 /**
  * The ACP-specific subset of a `tool_call` / `tool_call_update`
@@ -89,12 +85,12 @@ export interface ToolAcpExtension {
   permission?: ToolPermissionState;
 }
 
-// ─── v2 schema (current) ──────────────────────────────────────────────
+// ─── Sidecar schema ───────────────────────────────────────────────────
 
 /**
  * Full on-disk shape of a chat-parts sidecar.
  *
- * v2 keys every overlay by a stable id:
+ * Every overlay is keyed by a stable id:
  *  - `toolExtras` — keyed by `toolCallId` (per-call uuid from the
  *    agent, survives re-orderings and replays).
  *  - `planByMessageTimestamp` — keyed by `String(messageTimestamp)`
@@ -102,14 +98,13 @@ export interface ToolAcpExtension {
  *    full-replacement on the wire, so a single entry per message
  *    is correct.
  *
- * `messageTimestamps` remains a sparse array indexed by pi-ai
+ * `messageTimestamps` is a sparse array indexed by pi-ai
  * `Context.messages` position. It is an auxiliary lookup used by the
- * history builder to find each assistant message's timestamp; v1
- * migration also relies on it (see {@link migrateV1ToV2}).
+ * history builder to find each assistant message's timestamp.
  */
 export interface ChatPartsSidecar {
   /** Bump on a breaking shape change. */
-  schemaVersion: 2;
+  schemaVersion: 1;
   /** ACP tool extensions, keyed by `toolCallId`. */
   toolExtras: Record<string, ToolAcpExtension>;
   /** Plan entries, keyed by `String(messageTimestamp)` of the owning assistant message. */
@@ -129,37 +124,11 @@ export interface ChatPartsSidecar {
 /** Construct an empty sidecar. */
 export function emptySidecar(): ChatPartsSidecar {
   return {
-    schemaVersion: 2,
+    schemaVersion: 1,
     toolExtras: {},
     planByMessageTimestamp: {},
     messageTimestamps: [],
   };
-}
-
-// ─── v1 schema (read-only, for migration) ─────────────────────────────
-//
-// Kept inline (not exported) so old files on disk still parse. We
-// do not write v1 again — `writeChatParts` always produces v2.
-
-type SidecarPartV1 =
-  | {
-      kind: 'plan';
-      messageIndex: number;
-      partIndex: number;
-      entries: AcpPlanEntry[];
-    }
-  | {
-      kind: 'tool_acp_ext';
-      messageIndex: number;
-      partIndex: number;
-      toolCallId: string;
-      extension: ToolAcpExtension;
-    };
-
-interface ChatPartsSidecarV1 {
-  schemaVersion: 1;
-  parts: SidecarPartV1[];
-  messageTimestamps: number[];
 }
 
 // ─── Validation ───────────────────────────────────────────────────────
@@ -174,54 +143,13 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 
-function isSidecarV2(value: unknown): value is ChatPartsSidecar {
+function isSidecar(value: unknown): value is ChatPartsSidecar {
   if (!isPlainObject(value)) return false;
-  if (value.schemaVersion !== 2) return false;
+  if (value.schemaVersion !== 1) return false;
   if (!isPlainObject(value.toolExtras)) return false;
   if (!isPlainObject(value.planByMessageTimestamp)) return false;
   if (!Array.isArray(value.messageTimestamps)) return false;
   return true;
-}
-
-function isSidecarV1(value: unknown): value is ChatPartsSidecarV1 {
-  if (!isPlainObject(value)) return false;
-  if (value.schemaVersion !== 1) return false;
-  if (!Array.isArray(value.parts)) return false;
-  if (!Array.isArray(value.messageTimestamps)) return false;
-  return true;
-}
-
-/**
- * Translate a v1 sidecar to v2 in-memory. Tool extensions port 1:1
- * via `toolCallId`. Plans require a `messageIndex → timestamp`
- * lookup through `messageTimestamps`; entries whose owning message
- * has no recorded timestamp (`0` / out-of-range) are dropped — they
- * would have no stable key in v2 and re-acquiring them isn't worth
- * a fragile fallback.
- */
-function migrateV1ToV2(v1: ChatPartsSidecarV1): ChatPartsSidecar {
-  const toolExtras: Record<string, ToolAcpExtension> = {};
-  const planByMessageTimestamp: Record<string, AcpPlanEntry[]> = {};
-  for (const part of v1.parts) {
-    if (part.kind === 'tool_acp_ext') {
-      // Last-write-wins on toolCallId collision — v1 used append
-      // semantics with merge, but the final state on disk should
-      // already reflect that merge, so a duplicate id signals a
-      // corrupt file. Take the latest entry.
-      toolExtras[part.toolCallId] = part.extension;
-    } else if (part.kind === 'plan') {
-      const ts = v1.messageTimestamps[part.messageIndex];
-      if (typeof ts === 'number' && ts > 0) {
-        planByMessageTimestamp[String(ts)] = part.entries;
-      }
-    }
-  }
-  return {
-    schemaVersion: 2,
-    toolExtras,
-    planByMessageTimestamp,
-    messageTimestamps: v1.messageTimestamps,
-  };
 }
 
 // ─── I/O ──────────────────────────────────────────────────────────────
@@ -232,9 +160,6 @@ function migrateV1ToV2(v1: ChatPartsSidecarV1): ChatPartsSidecar {
  *   - the file does not exist (first ACP turn on a fresh thread)
  *   - the file is corrupt / wrong shape (do NOT throw — let the
  *     caller treat it as "empty sidecar")
- *
- * v1 files are migrated to v2 in-memory; the upgrade is persisted
- * on the next `writeChatParts` call.
  */
 export function readChatParts(
   threadId: string,
@@ -243,8 +168,7 @@ export function readChatParts(
   if (!canvasId) return null;
   const raw = readJson<unknown>(chatPartsPath(canvasId, threadId));
   if (raw === null) return null;
-  if (isSidecarV2(raw)) return raw;
-  if (isSidecarV1(raw)) return migrateV1ToV2(raw);
+  if (isSidecar(raw)) return raw;
   return null;
 }
 

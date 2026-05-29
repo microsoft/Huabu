@@ -1,12 +1,11 @@
 /**
- * Tests for the chat-parts sidecar store (v2 schema).
+ * Tests for the chat-parts sidecar store.
  *
  * Coverage:
  *
  *   ✓ emptySidecar shape
  *   ✓ read/write round-trip
  *   ✓ readChatParts → null when canvasId missing / file missing / corrupt
- *   ✓ readChatParts → migrates v1 files to v2 in-memory
  *   ✓ setPlanForMessage: keyed by messageTimestamp, replace semantics
  *   ✓ upsertToolExt: append on new toolCallId, merge on repeat
  *   ✓ mergeToolExtension: append-only for content/locations,
@@ -54,9 +53,9 @@ afterEach(() => {
 });
 
 describe('emptySidecar', () => {
-  it('returns the canonical empty v2 shape', () => {
+  it('returns the canonical empty shape', () => {
     expect(emptySidecar()).toEqual({
-      schemaVersion: 2,
+      schemaVersion: 1,
       toolExtras: {},
       planByMessageTimestamp: {},
       messageTimestamps: [],
@@ -102,43 +101,6 @@ describe('readChatParts / writeChatParts', () => {
   it('writeChatParts is a no-op when canvasId is missing', () => {
     writeChatParts(threadId, emptySidecar(), undefined);
     expect(hasChatParts(threadId, canvasId)).toBe(false);
-  });
-
-  it('migrates a v1 sidecar to v2 on read', () => {
-    // Write a v1 payload directly to disk (we never produce v1 again
-    // through the public API, so this hand-builds the legacy shape).
-    writeChatParts(threadId, emptySidecar(), canvasId);
-    const v1 = {
-      schemaVersion: 1,
-      messageTimestamps: [0, 2000],
-      parts: [
-        {
-          kind: 'plan',
-          messageIndex: 1,
-          partIndex: 0,
-          entries: [{ content: 'p', status: 'pending', priority: 'high' }],
-        },
-        {
-          kind: 'tool_acp_ext',
-          messageIndex: 0,
-          partIndex: 0,
-          toolCallId: 'tc-legacy',
-          extension: { status: 'completed', toolKind: 'read' },
-        },
-      ],
-    };
-    writeFileSync(chatPartsPath(canvasId, threadId), JSON.stringify(v1));
-    const loaded = readChatParts(threadId, canvasId);
-    expect(loaded).toEqual({
-      schemaVersion: 2,
-      toolExtras: {
-        'tc-legacy': { status: 'completed', toolKind: 'read' },
-      },
-      planByMessageTimestamp: {
-        '2000': [{ content: 'p', status: 'pending', priority: 'high' }],
-      },
-      messageTimestamps: [0, 2000],
-    });
   });
 });
 
