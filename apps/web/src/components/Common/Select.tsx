@@ -5,6 +5,7 @@ import { Fragment, useCallback, useRef, useState, type ReactNode } from 'react';
 import { Button, type ButtonProps } from './Button';
 import { cn } from './cn';
 import { Popover } from './Popover';
+import { Tooltip } from './Tooltip';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -185,7 +186,11 @@ export function Select<T extends string = string>({
           )}
         >
           {current?.icon}
-          {!iconOnly && <span>{current?.label ?? placeholder}</span>}
+          {!iconOnly && (
+            <span className="whitespace-nowrap">
+              {current?.label ?? placeholder}
+            </span>
+          )}
           <ChevronDown
             className={clsx('transition-transform', isOpen && 'rotate-180')}
           />
@@ -197,7 +202,13 @@ export function Select<T extends string = string>({
           onDismiss={handleDismiss}
           anchor={anchor}
           offset={{ x: 0, y: isTop ? -4 : 4 }}
-          className="flex flex-col overflow-hidden py-1"
+          // Cap panel width so long descriptions truncate instead of
+          // pushing the dropdown wider than the parent column (e.g.
+          // ChatPanel). 24rem leaves room for a useful description
+          // prefix while still fitting inside the default chat panel;
+          // the `min(…, 100vw-1rem)` guard keeps it on-screen at narrow
+          // widths.
+          className="flex max-w-[min(24rem,calc(100vw-1rem))] flex-col overflow-hidden py-1"
         >
           {options.map((option) => (
             <Fragment key={option.value}>
@@ -220,7 +231,7 @@ export function Select<T extends string = string>({
                 disabled={option.disabled}
                 onClick={() => handleSelect(option.value)}
                 className={cn(
-                  'w-full justify-start rounded-none px-3 py-1.5 text-left',
+                  'w-full justify-start gap-2 rounded-none px-3 py-1.5 text-left',
                   option.disabled
                     ? 'text-fg-muted cursor-not-allowed'
                     : option.value === value
@@ -229,16 +240,21 @@ export function Select<T extends string = string>({
                 )}
               >
                 {option.icon && <span className="shrink-0">{option.icon}</span>}
-                <span className="flex-1">{option.label}</span>
+                <span className="shrink-0">{option.label}</span>
                 {option.description && (
-                  <span className="text-fg-muted text-xs">
-                    {option.description}
-                  </span>
+                  <Tooltip
+                    content={option.description}
+                    wrapperClassName="block min-w-0 flex-1"
+                  >
+                    <span className="text-fg-muted block truncate text-left text-xs">
+                      {option.description}
+                    </span>
+                  </Tooltip>
                 )}
                 {/* Reserve a fixed-width slot for the check so the
                     description column stays aligned across rows whether
                     or not the row is selected. */}
-                <span className="flex w-3.5 shrink-0 justify-center">
+                <span className="ml-auto flex w-3.5 shrink-0 justify-center">
                   {option.value === value && <Check size={14} />}
                 </span>
               </Button>

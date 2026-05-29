@@ -276,6 +276,20 @@
   transition: fill 0.15s ease;
 }
 
+/* Crepe ships the handle SVGs with hard-coded clip-path IDs
+   (`clip0_971_7676` plus, `clip0_971_7680` drag dots) — every editor
+   instance reuses the SAME ids, so the browser's `url(#id)` lookup
+   resolves to the first matching `<clipPath>` in document order, which
+   sits inside a different SVG context. The resulting cross-document
+   clip leaves the path drawn entirely outside the clipping region, so
+   the glyph renders invisibly. The clipPath itself is a 24×24 rect on
+   a `0 0 24 24` viewBox — a no-op — so neutralising it via CSS is safe
+   and avoids the cross-instance collision. */
+.milkdown-preview-host .milkdown-block-handle .operation-item svg g,
+.milkdown-note-preview .milkdown-block-handle .operation-item svg g {
+  clip-path: none;
+}
+
 .milkdown-preview-host .milkdown-block-handle .operation-item:hover svg,
 .milkdown-note-preview .milkdown-block-handle .operation-item:hover svg {
   fill: var(--fg-default);
