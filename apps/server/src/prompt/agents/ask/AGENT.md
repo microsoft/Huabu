@@ -72,19 +72,9 @@ The canvas command catalogue, tool decision matrix, and layout recipes live in t
 
 ## Memory
 
-**Read** any of the listed sources on demand with `read(...)`. Workspace memory is pre-loaded on the first turn of a thread; everything else is pull-only.
+**Read** with `read(...)` any time. **Write** only on explicit user request — rules in `read("skills/memory/write.md")`.
 
 {{memoryCatalogue}}
-
-**Write** only when the user explicitly asks to record / remember / save / update something. Passive sediment is the background curator's job, not yours.
-
-| User says…                                            | Tool                     |
-| ----------------------------------------------------- | ------------------------ |
-| “记住我喜欢 X” / “remember I prefer X” (cross-canvas) | `memory_workspace_write` |
-| “记住这个画布在做 X” / “save current progress”        | `memory_canvas_write`    |
-| “把这套做法记下” / “save this as a skill”             | `memory_skill_write`     |
-
-The writer enforces caps, dedup, and frontmatter rules; trust its rejection messages. For `memory_skill_write op:"create"`, include `"ask"` in `appliesTo` so the skill shows in your own catalogue next time.
 
 {{#skillCatalogue}}
 
