@@ -12,12 +12,16 @@
  *
  * Permission-gate UI lives elsewhere (the `permission` field is
  * populated by the auto-allow handler today).
+ *
+ * Visual shell (icon slot, title, chevron, expand/collapse) comes
+ * from `AssistantDisclosure` so this card stays aligned with the
+ * other assistant sub-cards (`ThinkingCard`, `PreparedPromptMessage`).
  */
 
-import { ChevronRight, X as XIcon } from 'lucide-react';
-import { useState } from 'react';
+import { X as XIcon } from 'lucide-react';
 
 import { ToolKindIcon } from './ToolKindIcon';
+import { AssistantDisclosure } from '../../AssistantDisclosure';
 
 import type { AcpContentBlock, AssistantToolPart } from '@sediment/shared';
 
@@ -81,8 +85,6 @@ function renderContentBlock(
 }
 
 export function ToolCallCard({ part }: ToolCallCardProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
-
   const hasContent = (part.content?.length ?? 0) > 0;
   const hasLocations = (part.locations?.length ?? 0) > 0;
   const isExpandable = hasContent || hasLocations;
@@ -117,49 +119,36 @@ export function ToolCallCard({ part }: ToolCallCardProps) {
     });
   }
 
+  const icon =
+    part.status === 'failed' ? (
+      <XIcon size={12} className="text-danger" />
+    ) : (
+      <ToolKindIcon part={part} className="text-fg-muted/60" />
+    );
+
+  const body = isExpandable ? (
+    <>
+      {hasLocations && (
+        <ul className="text-fg-subtle text-xs">
+          {part.locations!.map((loc, i) => (
+            <li key={`loc-${i}`} className="truncate">
+              {loc.path}
+              {loc.line ? `:${loc.line}` : ''}
+            </li>
+          ))}
+        </ul>
+      )}
+      {renderedContent}
+    </>
+  ) : undefined;
+
   return (
-    <div className="flex justify-start">
-      <div className="w-full">
-        <div className="text-fg-muted hover:bg-hover flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors">
-          {part.status === 'failed' ? (
-            <XIcon size={12} className="text-danger" />
-          ) : (
-            <ToolKindIcon part={part} className="text-fg-muted/60" />
-          )}
-          {isExpandable ? (
-            <button
-              type="button"
-              onClick={() => setIsExpanded((v) => !v)}
-              className="flex flex-1 items-center gap-1 truncate text-left"
-            >
-              <span className="truncate">{part.title}</span>
-              <ChevronRight
-                size={10}
-                className={`text-fg-muted/50 shrink-0 transition-transform ${
-                  isExpanded ? 'rotate-90' : ''
-                }`}
-              />
-            </button>
-          ) : (
-            <span className="flex-1 truncate">{part.title}</span>
-          )}
-        </div>
-        {isExpanded && (
-          <div className="border-edge-default/40 ml-4 flex flex-col gap-1 border-l py-1 pl-3">
-            {hasLocations && (
-              <ul className="text-fg-subtle text-xs">
-                {part.locations!.map((loc, i) => (
-                  <li key={`loc-${i}`} className="truncate">
-                    {loc.path}
-                    {loc.line ? `:${loc.line}` : ''}
-                  </li>
-                ))}
-              </ul>
-            )}
-            {renderedContent}
-          </div>
-        )}
-      </div>
-    </div>
+    <AssistantDisclosure
+      icon={icon}
+      title={part.title}
+      bodyClassName="border-edge-default/40 ml-4 flex flex-col gap-1 border-l py-1 pl-3"
+    >
+      {body}
+    </AssistantDisclosure>
   );
 }

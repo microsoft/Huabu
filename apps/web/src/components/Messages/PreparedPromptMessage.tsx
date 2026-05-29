@@ -15,13 +15,14 @@
  * when the preprocessor decided verbatim file access was essential
  * (oversize node, `.artifacts/` file, code-review-style ask).
  *
- * Visual scaffold mirrors `CanvasCommandCard` in `AIMessage/Tool/`
- * (chevron + collapsible body, muted typography) so this card feels
- * native inside the existing tool-style message list.
+ * Visual shell (icon slot, title row, chevron, expand/collapse) is
+ * provided by `AssistantDisclosure` so this card stays visually
+ * aligned with its siblings (`ThinkingCard`, `ToolCallCard`).
  */
 
-import { ChevronRight, FileText, Loader2 } from 'lucide-react';
-import { useState } from 'react';
+import { FileText, Loader2 } from 'lucide-react';
+
+import { AssistantDisclosure } from './AssistantDisclosure';
 
 import type { ExternalAgentPrompt } from '@sediment/shared';
 
@@ -36,34 +37,23 @@ export function PreparedPromptMessage({
   agentAlias,
   error,
 }: PreparedPromptMessageProps) {
-  // Default to collapsed on ready state to match the "fold by default"
-  // rule from the design discussion — the prompt body can be long and
-  // most of the time the user just wants to confirm preprocessing ran.
-  const [isCollapsed, setIsCollapsed] = useState(true);
-
   // ── pending ──────────────────────────────────────────────────────
   if (prompt === null && !error) {
     return (
-      <div className="flex justify-start">
-        <div className="text-fg-muted flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs">
-          <Loader2 size={12} className="animate-spin" />
-          <span>Preparing prompt for {agentAlias}…</span>
-        </div>
-      </div>
+      <AssistantDisclosure
+        icon={<Loader2 size={12} className="animate-spin" />}
+        title={`Preparing prompt for ${agentAlias}…`}
+      />
     );
   }
 
   // ── failed ───────────────────────────────────────────────────────
   if (prompt === null && error) {
     return (
-      <div className="flex justify-start">
-        <div className="text-fg-muted/80 flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs">
-          <FileText size={12} className="flex-shrink-0" />
-          <span>
-            Prompt preprocessing failed for {agentAlias} — sent raw message.
-          </span>
-        </div>
-      </div>
+      <AssistantDisclosure
+        icon={<FileText size={12} className="text-fg-muted/60" />}
+        title={`Prompt preprocessing failed for ${agentAlias} — sent raw message.`}
+      />
     );
   }
 
@@ -78,63 +68,38 @@ export function PreparedPromptMessage({
       : 'Prepared prompt';
 
   return (
-    <div className="flex justify-start">
-      <div className="w-full">
-        {/* Header */}
-        <div className="text-fg-muted hover:bg-hover flex w-full items-center gap-1.5 rounded-md px-2 py-0.5 text-xs transition-colors">
-          <FileText size={12} className="text-fg-muted/60 flex-shrink-0" />
-          <button
-            type="button"
-            onClick={() => setIsCollapsed((prev) => !prev)}
-            className="flex flex-1 items-center gap-1 truncate text-left"
-          >
-            <span>
-              {summary} → {agentAlias}
-            </span>
-            <ChevronRight
-              size={10}
-              className={`text-fg-muted/50 flex-shrink-0 transition-transform ${
-                !isCollapsed ? 'rotate-90' : ''
-              }`}
-            />
-          </button>
+    <AssistantDisclosure
+      icon={<FileText size={12} className="text-fg-muted/60" />}
+      title={`${summary} → ${agentAlias}`}
+      bodyClassName="ml-5 space-y-2"
+    >
+      <div>
+        <div className="text-fg-muted/70 mb-0.5 text-[10px] font-medium tracking-wide uppercase">
+          Task
         </div>
-
-        {/* Body */}
-        {!isCollapsed && (
-          <div className="text-fg-muted mt-1 ml-5 space-y-2 text-xs">
-            <div>
-              <div className="text-fg-muted/70 mb-0.5 text-[10px] font-medium tracking-wide uppercase">
-                Task
-              </div>
-              <div className="break-words whitespace-pre-wrap">
-                {prompt.task}
-              </div>
-            </div>
-
-            {attachmentCount > 0 && (
-              <div>
-                <div className="text-fg-muted/70 mb-0.5 text-[10px] font-medium tracking-wide uppercase">
-                  Attachments
-                </div>
-                <ul className="space-y-0.5">
-                  {prompt.attachments.map((ref) => (
-                    <li
-                      key={ref.path}
-                      className="flex items-baseline gap-1.5 leading-snug"
-                    >
-                      <code className="bg-surface-1/50 rounded px-1 text-[11px]">
-                        {ref.path}
-                      </code>
-                      <span className="text-fg-muted/80">— {ref.reason}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        )}
+        <div className="wrap-break-word whitespace-pre-wrap">{prompt.task}</div>
       </div>
-    </div>
+
+      {attachmentCount > 0 && (
+        <div>
+          <div className="text-fg-muted/70 mb-0.5 text-[10px] font-medium tracking-wide uppercase">
+            Attachments
+          </div>
+          <ul className="space-y-0.5">
+            {prompt.attachments.map((ref) => (
+              <li
+                key={ref.path}
+                className="flex items-baseline gap-1.5 leading-snug"
+              >
+                <code className="bg-surface-1/50 rounded px-1 text-[11px]">
+                  {ref.path}
+                </code>
+                <span className="text-fg-muted/80">— {ref.reason}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </AssistantDisclosure>
   );
 }
