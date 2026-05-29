@@ -4,6 +4,20 @@
 
 ---
 
+## 2026-05-31 · 文本节点编辑：按回车现在会立即增高
+
+**What Changed**
+
+- 在 `TextNode` / `QuestionNode` 中编辑文字时，按下回车键节点会立即增加一行高度，不再需要在新行上多输入一个字符才看到容器变大。
+- 节点尺寸自适应使用的 `measureTextContent` / `measureTextHeight` / `computeFontSizeForHeight` 现在会把"以 `\n` 结尾"的文本视为多一个可见空行。
+
+**Notes**
+
+- 行为差异来自 pretext 把 `\n` 视为 CSS 风格的行终止符——纯排版场景这没问题，但在可编辑的 textarea 里光标会停留在那个"看似空白"的下一行，所以节点必须为它预留一行高度。
+- 仅影响输入时的高度反馈；已落盘的节点尺寸（`style.width` / `style.fontSize`）不变，无需迁移。
+
+---
+
 ## 2026-05-31 · ToolPart 结构重构：富渲染工具升级为一等变体
 
 **What Changed**
