@@ -33,6 +33,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { normalizeRel, safeResolve } from './fs-sandbox.js';
 import { readSkillFile, resolveSkillPath } from '../../../../prompt/index.js';
 import { parseFrontmatter } from '../../../storage/frontmatter.js';
+import { readCanvasMemory, readWorkspaceMemory } from '../../memory/index.js';
 
 import type { readParamsSchema } from '../definitions.js';
 import type { Static } from '@earendil-works/pi-ai';
@@ -101,6 +102,40 @@ export async function handleRead(args: ReadArgs): Promise<string> {
       throw new Error(`Path not found: ${rel}`);
     }
     abs = resolved;
+  } else if (rel.startsWith('memory/')) {
+    // Memory virtual paths.
+    //
+    // Exactly two are accepted and routed to the corresponding
+    // memory module readers (which resolve to setting/.huabu.md and
+    // the canvas's .memory/canvas.md respectively). The bodies live
+    // outside the canvas sandbox — the canvas one is hidden behind
+    // ALWAYS_SKIP for grep/find/ls, and the workspace one isn't under
+    // the canvas root at all — so reading them via the normal
+    // safeResolve path is impossible. This branch is the only way
+    // for an agent to read them.
+    //
+    // Anything else under memory/ is rejected up-front so a typo
+    // doesn't accidentally fall through to a 'path not found' that
+    // looks like a missing memory file.
+    let content: string | null = null;
+    if (rel === 'memory/workspace.md') {
+      content = readWorkspaceMemory();
+    } else if (rel === 'memory/canvas.md') {
+      if (!args.canvasId) {
+        throw new Error(
+          'memory/canvas.md is canvas-scoped but no canvasId is bound to this request',
+        );
+      }
+      content = readCanvasMemory(args.canvasId);
+    } else {
+      throw new Error(
+        `Unknown memory path "${rel}". Valid: memory/workspace.md, memory/canvas.md`,
+      );
+    }
+    if (content === null) {
+      throw new Error(`Path not found: ${rel}`);
+    }
+    return renderTextResponse(rel, content, offset, limit);
   } else {
     // safeResolve throws when the path escapes the canvas sandbox; let
     // pi-agent-core wrap that as an isError tool result.
