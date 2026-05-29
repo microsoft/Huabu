@@ -19,10 +19,15 @@
  *     agentlet `onDisconnection` callback in `server-mount.ts` to evict
  *     all sessions for that agentId proactively.
  *
- * In-memory only; no persistence across server restarts. After a restart,
- * the first prompt on each thread reopens a fresh ACP session \u2014 the
- * external agent loses its session memory but Sediment's own chat history
- * (loaded via `loadContext`) is unaffected.
+ * In-memory only; no persistence across server restarts. A companion
+ * disk store (`session-store.ts`) persists `(canvasId, threadId) →
+ * sessionId` so `ensureAcpSession` can recover the ACP session via
+ * `session/load` after a restart, preserving the external agent's
+ * memory. The first prompt on each thread after a restart triggers
+ * that recovery; if `session/load` fails (e.g. agent itself was
+ * restarted) we fall back to `session/new` and Sediment's own chat
+ * history (loaded via `loadContext`) remains the source of truth for
+ * what the user sees.
  */
 
 import type { AcpAgentClient } from './client.js';

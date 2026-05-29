@@ -13,6 +13,7 @@
  *       chat/<threadId>.parts.json  rich-ACP sidecar overlay (optional)
  *       intent.json
  *       events.jsonl
+ *       acp-sessions.json           per-thread ACP sessionId map (optional)
  */
 
 import path from 'node:path';
@@ -100,4 +101,19 @@ export function intentPath(canvasId: string): string {
 
 export function eventsPath(canvasId: string): string {
   return path.join(historyDir(canvasId), 'events.jsonl');
+}
+
+/**
+ * ACP session persistence — maps each Sediment thread on this canvas
+ * to the live ACP `sessionId` returned by `session/new`, so we can
+ * call `session/load` after a server restart instead of opening a
+ * fresh session (which would lose the external agent's memory).
+ *
+ * One JSON file per canvas; see `agent/acp/session-store.ts` for the
+ * record shape. Absence of the file = no persisted sessions for this
+ * canvas, which is the default for any canvas that has never bound
+ * an external agent.
+ */
+export function acpSessionsPath(canvasId: string): string {
+  return path.join(historyDir(canvasId), 'acp-sessions.json');
 }

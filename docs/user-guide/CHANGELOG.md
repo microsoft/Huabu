@@ -4,6 +4,22 @@
 
 ---
 
+## 2026-05-29 · 重启 Sediment server 后 ACP 对话不再重置
+
+**What Changed**
+
+- 每个绑定外部 ACP agent（Copilot CLI / Claude Code / Gemini CLI 等）的 thread 会把 `sessionId` 持久化到 `<canvasId>/.history/acp-sessions.json`。**只重启 Sediment server、agentlet CLI 与 agent 子进程仍在跑** 的场景下，下一次发 prompt 会自动调 `session/load`：
+  - agent 进程还认识这个 session（通常返回 `Session ... is already loaded`）→ 我们直接复用，外部 agent 的对话上下文、slash 命令缓存等完整保留。
+  - agent 不认识 / 拒绝 → fallback 到 `session/new` 重开会话，行为与改造前一致，UI 不会卡死。
+
+**Notes**
+
+- **覆盖范围有限**：当前仅恢复"server 重启、agent 仍存活"的场景。如果 agentlet CLI 也重启了，它会重新生成 agent id（末尾随机 UUID 变化），我们会判定为不同 agent → 直接走 `session/new`。Copilot CLI 本身只在内存里保存 session，agent 进程一死状态就没了；Claude Code / Gemini CLI / Codex 这类把 session 落盘的 agent，未来通过放宽 agent id 匹配规则可以进一步覆盖（目前不做）。
+- **不恢复断联期间的对话**：刷新前已完成的 turn 仍在 chat history（一直在）；断联期间 agent 在 CLI 继续输出但前端没收到的那部分内容，刷新后不会回灌到聊天面板。需要的话用户手动重新 prompt 继续。
+- 持久化文件按 canvas 分文件，删 canvas 自然清理，无需手工迁移；从未用过外部 agent 的 thread 不会生成文件，零额外存储成本。原子写入，崩溃中段最多损失最后一条记录，整个文件不会损坏；读取容错任何形状错误。
+
+---
+
 ## 2026-05-31 · 文本节点编辑：按回车现在会立即增高
 
 **What Changed**

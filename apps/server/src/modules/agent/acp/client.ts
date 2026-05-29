@@ -85,6 +85,21 @@ export interface AcpInitializeResult {
   authMethods?: Array<{ id: string; name: string }>;
 }
 
+/**
+ * True when the agent's initialize response advertises support for
+ * `session/load`. Permissive: any truthy value at `agentCapabilities.loadSession`
+ * counts (spec defines it as a plain boolean, but some agents echo it
+ * back inside a nested capability object).
+ */
+export function agentSupportsLoadSession(
+  init: AcpInitializeResult | null | undefined,
+): boolean {
+  if (!init) return false;
+  const caps = init.agentCapabilities;
+  if (!caps || typeof caps !== 'object') return false;
+  return Boolean((caps as Record<string, unknown>).loadSession);
+}
+
 /** Subset of the ACP session/new response we care about. */
 export interface AcpNewSessionResult {
   sessionId: string;
@@ -289,6 +304,14 @@ export class AcpAgentClient {
   private readonly logger: NonNullable<AcpAgentClientOptions['logger']>;
   /** Canvas scope for sandbox + permission checks. See AcpAgentClientOptions.canvasId. Empty string = “no canvas” (fs/* will be rejected). */
   readonly canvasId: string;
+  /**
+   * Cached `initialize()` response. Populated by the first successful
+   * {@link AcpAgentClient.initialize} call. Exposed via
+   * {@link AcpAgentClient.initializeResult} so callers (notably
+   * `service.ensureAcpSession`) can inspect `agentCapabilities` —
+   * specifically `loadSession` — without re-issuing `initialize`.
+   */
+  private _initializeResult: AcpInitializeResult | null = null;
 
   constructor(connection: AgentConnection, opts: AcpAgentClientOptions) {
     this.canvasId = opts.canvasId ?? '';
@@ -326,7 +349,17 @@ export class AcpAgentClient {
         version: '0.1.0',
       },
     });
-    return result as AcpInitializeResult;
+    this._initializeResult = result as AcpInitializeResult;
+    return this._initializeResult;
+  }
+
+  /**
+   * Cached initialize result. Available after `initialize()` resolves;
+   * `null` before. Returned object is the same instance each call —
+   * do not mutate.
+   */
+  get initializeResult(): AcpInitializeResult | null {
+    return this._initializeResult;
   }
 
   async newSession(opts: { cwd: string }): Promise<string> {
@@ -336,6 +369,33 @@ export class AcpAgentClient {
       mcpServers: [],
     });
     return (result as AcpNewSessionResult).sessionId;
+  }
+
+  /**
+   * Resume a previously-opened ACP session via `session/load`. Requires
+   * the agent to advertise `agentCapabilities.loadSession: true` — call
+   * {@link agentSupportsLoadSession} on {@link initializeResult} before
+   * dispatching, since SDK rejects unsupported calls with a
+   * method-not-found error.
+   *
+   * The agent typically REPLAYS the session's history as a stream of
+   * `session/update` notifications before this promise resolves. The
+   * stream-adapter routes those through {@link dispatchSessionUpdate}
+   * exactly like real-time updates; with no listener yet installed they
+   * land in {@link orphanUpdates} and a subsequent
+   * {@link registerSessionListener} call drains them.
+   *
+   * Rejects when the agent does not recognise `sessionId` (e.g. agent
+   * was itself restarted and lost session state). Callers should treat
+   * rejection as "session is gone" and fall back to {@link newSession}.
+   */
+  async loadSession(opts: { sessionId: string; cwd: string }): Promise<void> {
+    if (this._closed) throw new Error('AcpAgentClient is closed');
+    await this.sdk.loadSession({
+      sessionId: opts.sessionId,
+      cwd: opts.cwd,
+      mcpServers: [],
+    });
   }
 
   /**

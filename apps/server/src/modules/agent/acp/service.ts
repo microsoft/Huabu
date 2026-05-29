@@ -19,13 +19,18 @@
 
 import { fauxAssistantMessage } from '@earendil-works/pi-ai';
 
-import { AcpAgentClient } from './client.js';
+import { AcpAgentClient, agentSupportsLoadSession } from './client.js';
 import {
   prepareExternalAgentPrompt,
   serializeRawPrompt,
 } from './preprocessor.js';
 import { getAgentletServer } from './server-mount.js';
 import { acpSessionRegistry } from './session-registry.js';
+import {
+  deleteAcpSessionRecord,
+  readAcpSessionRecord,
+  writeAcpSessionRecord,
+} from './session-store.js';
 import { acpUpdateToStreamEvent } from './translator.js';
 import { canvasRoot as resolveCanvasRoot } from '../../storage/paths.js';
 import {
@@ -252,6 +257,10 @@ async function ensureAcpSessionInner(
       '[acp] thread binding changed \u2014 discarding stale session',
     );
     acpSessionRegistry.remove(threadId);
+    // Stale binding → persisted sessionId is also stale (it belongs to
+    // the OLD agent). Drop it so we don't try to load it against the
+    // new agent on the next miss.
+    deleteAcpSessionRecord(canvasId, threadId);
     entry = undefined;
   }
   if (entry && entry.canvasId !== canvasId) {
@@ -264,6 +273,10 @@ async function ensureAcpSessionInner(
       '[acp] thread canvas changed \u2014 discarding stale session (sandbox scope mismatch)',
     );
     acpSessionRegistry.remove(threadId);
+    // Persisted record is canvas-scoped (see session-store path layout),
+    // so the wrong-canvas case is already handled implicitly. We still
+    // proactively drop the OLD canvas's record to keep the store tidy.
+    deleteAcpSessionRecord(entry.canvasId, threadId);
     entry = undefined;
   }
   if (entry && entry.client.isClosed) {
@@ -282,16 +295,28 @@ async function ensureAcpSessionInner(
     return entry;
   }
 
-  logger.info(
-    { threadId, canvasId, agentId: binding.agentletAgentId, cwd },
-    '[acp] opening new session for thread',
-  );
+  // No live session for this thread in the registry. Open the SDK
+  // client + run `initialize` first, then try to recover a persisted
+  // sessionId via `session/load`; fall back to `session/new` when
+  // there is no record, the agent does not support load, or the load
+  // call rejects (e.g. agent restarted and forgot the session).
+  const persisted = readAcpSessionRecord(canvasId, threadId);
   const client = new AcpAgentClient(conn, { canvasId, logger });
   await client.initialize();
-  const sessionId = await client.newSession({ cwd });
+
+  // Build the entry skeleton up front so the long-lived
+  // `available_commands_update` listener can be installed BEFORE
+  // `session/load`. The listener mutates `created.availableCommands`
+  // in place (see {@link handleSessionMetaUpdate}); the sessionId
+  // field is filled in below once known. This matters because
+  // `session/load` typically replays the full session history as a
+  // stream of `session/update` notifications — far more than the
+  // orphan-buffer cap of `MAX_ORPHAN_UPDATES_PER_SESSION = 32` would
+  // tolerate. With a listener attached, dispatched updates skip the
+  // orphan buffer entirely.
   const created: AcpSessionEntry = {
     client,
-    sessionId,
+    sessionId: '',
     agentletAgentId: binding.agentletAgentId,
     canvasId,
     cwd,
@@ -299,18 +324,130 @@ async function ensureAcpSessionInner(
     availableCommands: [],
     commandsUpdatedAt: 0,
   };
-  // Install the long-lived listener BEFORE adding the entry to the
-  // registry so subsequent registry lookups always see an entry with
-  // a wired-up listener. The listener registration itself replays
-  // any orphan `available_commands_update` notifications that
-  // arrived BEFORE `session/new` resolved (a common ACP wire
-  // ordering — see `AcpAgentClient.orphanUpdates`), so we never
-  // miss the agent's initial command-list push regardless of who
-  // wins the response-vs-notification race.
-  client.registerSessionListener(sessionId, (update) => {
-    handleSessionMetaUpdate(created, update, logger);
-  });
+
+  let sessionId: string | null = null;
+  let removeListener: (() => void) | null = null;
+
+  if (persisted && persisted.agentletAgentId === binding.agentletAgentId) {
+    if (agentSupportsLoadSession(client.initializeResult)) {
+      logger.info(
+        {
+          threadId,
+          canvasId,
+          agentId: binding.agentletAgentId,
+          sessionId: persisted.sessionId,
+          cwd: persisted.cwd,
+        },
+        '[acp] attempting session/load for persisted session',
+      );
+      // Listener installed BEFORE the load so replay notifications go
+      // straight to handleSessionMetaUpdate (and through it to no-op
+      // for non-meta updates) instead of overflowing the orphan buffer.
+      removeListener = client.registerSessionListener(
+        persisted.sessionId,
+        (update) => handleSessionMetaUpdate(created, update, logger),
+      );
+      try {
+        await client.loadSession({
+          sessionId: persisted.sessionId,
+          cwd: persisted.cwd,
+        });
+        sessionId = persisted.sessionId;
+        created.sessionId = sessionId;
+        logger.info(
+          { threadId, sessionId },
+          '[acp] session/load succeeded \u2014 resumed external agent memory',
+        );
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        // "Already loaded" is the BEST possible outcome: the agent
+        // process is still alive (typical scenario: only the Sediment
+        // server restarted, the user's agentlet CLI kept running) and
+        // already holds the session in memory. Adopt it as-is — no
+        // replay needed, no fallback. Copilot CLI surfaces this as
+        // `Session <id> is already loaded`; other agents may use
+        // different wording, hence the permissive substring check.
+        if (/already\s*loaded/i.test(errMsg)) {
+          sessionId = persisted.sessionId;
+          created.sessionId = sessionId;
+          logger.info(
+            { threadId, sessionId },
+            '[acp] session already loaded in live agent \u2014 reusing without replay',
+          );
+        } else {
+          // Real failure (agent forgot the session, wrong sessionId,
+          // capability lied, transport error, ...). Drop the listener
+          // + stale record and fall through to newSession; the user
+          // pays one extra round-trip but the thread keeps working.
+          removeListener();
+          removeListener = null;
+          logger.warn(
+            {
+              threadId,
+              sessionId: persisted.sessionId,
+              err: errMsg,
+            },
+            '[acp] session/load failed \u2014 dropping persisted record and falling back to session/new',
+          );
+          deleteAcpSessionRecord(canvasId, threadId);
+        }
+      }
+    } else {
+      logger.info(
+        { threadId, agentId: binding.agentletAgentId },
+        '[acp] agent does not advertise loadSession capability \u2014 cannot resume; using session/new',
+      );
+      // Don't delete the record here: a future agent upgrade may add
+      // loadSession support, and the existing sessionId might still be
+      // valid in the agent. Keeping it costs nothing.
+    }
+  }
+
+  if (!sessionId) {
+    logger.info(
+      { threadId, canvasId, agentId: binding.agentletAgentId, cwd },
+      '[acp] opening new session for thread',
+    );
+    sessionId = await client.newSession({ cwd });
+    created.sessionId = sessionId;
+  }
+
+  if (!removeListener) {
+    // Install the long-lived listener BEFORE adding the entry to the
+    // registry so subsequent registry lookups always see an entry with
+    // a wired-up listener. The listener registration itself replays
+    // any orphan `available_commands_update` notifications that
+    // arrived BEFORE `session/new` resolved (a common ACP wire
+    // ordering — see `AcpAgentClient.orphanUpdates`), so we never
+    // miss the agent's initial command-list push regardless of who
+    // wins the response-vs-notification race.
+    client.registerSessionListener(sessionId, (update) => {
+      handleSessionMetaUpdate(created, update, logger);
+    });
+  }
   acpSessionRegistry.set(threadId, created);
+
+  // Persist (or refresh) the record so a future server restart can
+  // recover this session. Done AFTER the registry insert so the
+  // happy-path memory state is authoritative; persistence failures
+  // (logged below) only forfeit recovery, not the current session.
+  try {
+    writeAcpSessionRecord(canvasId, threadId, {
+      sessionId,
+      agentletAgentId: binding.agentletAgentId,
+      cwd,
+    });
+  } catch (err) {
+    logger.warn(
+      {
+        threadId,
+        canvasId,
+        err: err instanceof Error ? err.message : String(err),
+      },
+      '[acp] failed to persist session record (recovery after restart will fall back to session/new)',
+    );
+  }
+
   return created;
 }
 
