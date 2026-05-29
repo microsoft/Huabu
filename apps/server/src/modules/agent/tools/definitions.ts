@@ -476,24 +476,22 @@ export const lsTool: ToolDefinition = {
 
 // ==================== Memory Write Tools ====================
 //
-// Three write tools exposed exclusively to the `memory` sub-agent
-// (see `prompt/agents/memory/AGENT.md`). They never appear in the
-// chat / operate / sketch toolsets — workspace memory and skills are
-// workspace-scoped, not canvas-scoped, and accidentally exposing them
-// to a per-canvas agent would punch a sandbox hole.
+// Three write tools, one per memory tier. Available to every chat
+// agent (ask / operate) plus the background memory curator. The
+// trigger policy — *when* each agent may call each tool — lives in
+// the respective AGENT.md, not here. These descriptions cover only
+// the mechanics: target file, merge strategy, caps, validation.
 //
 // Every write goes through the per-tool sandbox in
 // `modules/agent/memory/sandbox.ts`; the handlers are pure dispatch.
 //
-// All three are marked `executionMode: 'sequential'`: the memory
-// sub-agent only ever issues a handful of write calls per pass, and
-// running them in declared order makes the worker's summary log
-// readable.
+// All three are marked `executionMode: 'sequential'` so a pass that
+// touches more than one tier logs in declared order.
 
 export const memoryWorkspaceWriteParamsSchema = Type.Object({
   mode: Type.Union([Type.Literal('patch'), Type.Literal('replace')], {
     description:
-      'Use "patch" to merge new bullet-style lines into the existing body (dedup applies). "replace" is reserved and currently rejected — do not use.',
+      'Use "patch" to merge new bullet-style lines into the existing body (dedup applies). "replace" is reserved and currently rejected.',
   }),
   diff: Type.String({
     description:
@@ -505,7 +503,7 @@ export const memoryWorkspaceWriteTool: ToolDefinition = {
   name: 'memory_workspace_write',
   label: 'Write workspace memory',
   description:
-    'Patch the user-level workspace memory (`<workspace>/setting/.huabu.md`). Use only for durable, cross-canvas preferences / style / facts about the user. Keep each bullet ≤ 80 chars. The writer enforces a 4 KB / 80-line cap on the merged body and rejects oversized writes.',
+    'Patch `<workspace>/setting/.huabu.md` — cross-canvas user profile. Each line in `diff` becomes a bullet, deduped against existing entries. Caller-supplied bullets should be ≤ 80 chars. Writer enforces a 4 KB / 80-line cap on the merged body and rejects oversized writes. See AGENT.md for when to use this.',
   parameters: memoryWorkspaceWriteParamsSchema,
   executionMode: 'sequential',
 };
@@ -513,7 +511,7 @@ export const memoryWorkspaceWriteTool: ToolDefinition = {
 export const memoryCanvasWriteParamsSchema = Type.Object({
   body: Type.String({
     description:
-      'Markdown body that replaces the current working memory wholesale. Treat as a one-paragraph briefing for the next agent landing on this canvas cold.',
+      'Markdown body that wholesale replaces the current working memory. Treat as a one-paragraph briefing for the next agent landing on this canvas cold.',
   }),
 });
 
@@ -521,7 +519,7 @@ export const memoryCanvasWriteTool: ToolDefinition = {
   name: 'memory_canvas_write',
   label: 'Write working memory',
   description:
-    "Replace this canvas's working memory (`<canvasDir>/.memory/canvas.md`). Wholesale replacement, not a delta — write the *current state* of the canvas in ≤ 4 KB / 80 lines. The writer rejects oversized bodies.",
+    'Replace `<canvasDir>/.memory/canvas.md` — per-canvas working memory. Wholesale replacement, not a delta: write the *current state* of the canvas in ≤ 4 KB / 80 lines. Writer rejects oversized bodies. See AGENT.md for when to use this.',
   parameters: memoryCanvasWriteParamsSchema,
   executionMode: 'sequential',
 };
@@ -529,11 +527,11 @@ export const memoryCanvasWriteTool: ToolDefinition = {
 export const memorySkillWriteParamsSchema = Type.Object({
   op: Type.Union([Type.Literal('create'), Type.Literal('update')], {
     description:
-      'Use "update" whenever possible — reserve "create" for genuinely new reusable how-tos that no existing skill covers.',
+      '"create" writes a new skill file; "update" appends a dated `## Update — YYYY-MM-DD` section to an existing one (prior body preserved).',
   }),
   id: Type.String({
     description:
-      'Stable skill id (becomes the directory name). Must match `[a-z0-9-]+` for sanity; the writer enforces FS safety.',
+      'Stable skill id (becomes the directory name). Lowercase letters / digits / hyphens recommended; writer enforces FS safety.',
   }),
   title: Type.Optional(
     Type.String({
@@ -556,7 +554,7 @@ export const memorySkillWriteParamsSchema = Type.Object({
       ]),
       {
         description:
-          'Agent surfaces this skill should be advertised to. Required (non-empty) on create.',
+          'Agent surfaces this skill should be advertised to. Required (non-empty) on create. On update, passing this REPLACES the existing array — omit to keep the current value.',
       },
     ),
   ),
@@ -576,7 +574,7 @@ export const memorySkillWriteTool: ToolDefinition = {
   name: 'memory_skill_write',
   label: 'Write user skill',
   description:
-    'Write a user-owned skill at `<workspace>/setting/skills/<id>/SKILL.md`. Strongly prefer `op: "update"` over `op: "create"` — new skills must be precious and reusable. The writer invalidates the skill cache on success so the next `read("skills/<id>/SKILL.md")` returns the new content immediately.',
+    'Write a user-owned skill at `<workspace>/setting/skills/<id>/SKILL.md`. Writer invalidates the skill cache on success so the next `read("skills/<id>/SKILL.md")` returns the new content immediately. See AGENT.md for when to use this and the rationale rules for `op: "create"`.',
   parameters: memorySkillWriteParamsSchema,
   executionMode: 'sequential',
 };
