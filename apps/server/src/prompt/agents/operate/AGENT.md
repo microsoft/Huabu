@@ -23,26 +23,11 @@ runtime:
 # substitutes, `{{#var}}…{{/var}}` keeps the block only when `var` is
 # a non-empty string. Anything more conditional belongs in TS, not here.
 #
-# Operate shares `agent.route.ts` with the Ask agent, so it consumes
-# the same two preamble keys. The wording is operate-flavoured (acting
-# vs. answering) but the variables and substitution semantics are
-# identical.
+# Operate shares `agent.route.ts` with the Ask agent and consumes the
+# same selectedNodesPreamble / nodeNeighbourhoodPreamble keys. The
+# wording is operate-flavoured (acting vs. answering) but the
+# variables and substitution semantics are identical.
 messageTemplates:
-  # Pushed as the very first user-role message of every turn whenever
-  # the memory module has anything to surface. Two independent blocks
-  # (cross-canvas workspace memory, per-canvas working working
-  # memory) — each kept only when its source had non-empty content.
-  # Route skips the push entirely when both are missing, so we don't
-  # waste tokens on a stub `(empty)` block. Stripped from chat history
-  # by `buildHistoryItems` because it begins with `[SYSTEM`.
-  memoryPreamble: |
-    [SYSTEM Memory]{{#longterm}}
-    [Long-term preferences — the user, across canvases]
-    {{longterm}}{{/longterm}}{{#shortterm}}
-
-    [Working memory — this canvas]
-    {{shortterm}}{{/shortterm}}
-
   # Pushed as a separate user-role message before the actual user prompt
   # whenever the request carries `canvasContext.selectedNodes`. Stripped
   # from chat history later because it begins with `[SYSTEM`.
@@ -117,7 +102,14 @@ When the user issues such a command:
 6. **Same rule applies on `op: "update"` when you pass `appliesTo`**: passing a new array replaces the old one entirely, so always include `"operate"` plus whichever other scopes were already there. When in doubt, omit `appliesTo` from the update args and the writer will keep the existing value.
 7. **Body content**: write the skill as a how-to. Concrete patterns, decision rules, and worked examples — not stream-of-consciousness notes about the current canvas (that's working memory, not a skill).
 8. **Do NOT silently call this tool.** If the user did not ask, do not write. Inferred preferences belong to the memory curator, not to chat.
-   {{#skillCatalogue}}
+
+## Available memory
+
+Two memory resources you can open on demand. The catalogue below lists them with their current sizes; `empty` means the file is missing or zero bytes. Workspace memory has _already been loaded into your context as a `[SYSTEM Workspace memory]` block_ on the very first turn of this thread — don't re-read it then; use `read("memory/workspace.md")` on later turns only if you want to confirm it's still relevant. Working memory is never pre-loaded — **read `memory/canvas.md` before any non-trivial mutation** so your `canvas_commands` batch fits the current state of this canvas (what the user is working on, what was just done, what to avoid disturbing).
+
+{{memoryCatalogue}}
+
+{{#skillCatalogue}}
 
 ## Available skills
 

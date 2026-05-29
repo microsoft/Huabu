@@ -29,6 +29,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { getMemoryCatalogue } from '../../modules/agent/memory/index.js';
 import { parseFrontmatter } from '../../modules/storage/frontmatter.js';
 import { getSkillCatalogue } from '../skills/catalogue.js';
 
@@ -368,13 +369,24 @@ function parseAgentFile(id: AgentId): ParsedAgent {
   return { fm, body: content.trimStart(), sourcePath };
 }
 
-/** Render a parsed agent into a `LoadedAgent` with a fresh catalogue. */
-function renderLoadedAgent(parsed: ParsedAgent): LoadedAgent {
+/** Render a parsed agent into a `LoadedAgent` with fresh catalogues. */
+function renderLoadedAgent(
+  parsed: ParsedAgent,
+  opts: { canvasId?: string | null } = {},
+): LoadedAgent {
   const skillCatalogue = parsed.fm.skillScope
     ? getSkillCatalogue(parsed.fm.skillScope)
     : '';
+  // The memory catalogue is per-request: the workspace line is
+  // workspace-scoped (cross-canvas) but the working-memory line is
+  // canvas-scoped, so we need the request's canvasId. When the caller
+  // doesn't supply one (the catalogue is rendered for an agent that
+  // isn't bound to a canvas — e.g. intent / sketch / memory), the
+  // canvas line is omitted automatically.
+  const memoryCatalogue = getMemoryCatalogue(opts.canvasId ?? null);
   const systemPrompt = renderTemplate(parsed.body, {
     skillCatalogue,
+    memoryCatalogue,
   }).trimEnd();
   return {
     id: parsed.fm.id,
@@ -414,11 +426,20 @@ export function invalidateAgentCache(): void {
  * Load the configuration for an agent.
  *
  * AGENT.md is parsed once per process; the system prompt is rendered
- * against the *current* skill catalogue on every call so newly
- * written user skills appear without a restart. The skill loader
- * already de-dupes filesystem work via mtime + a 2 s TTL.
+ * against the *current* skill + memory catalogues on every call so
+ * newly written user skills and memory size changes appear without
+ * a restart. The skill loader already de-dupes filesystem work via
+ * mtime + a 2 s TTL.
+ *
+ * Pass `opts.canvasId` (the request's active canvas) so the memory
+ * catalogue can include the per-canvas working-memory line; omit it
+ * for agents that aren't bound to a canvas (intent / sketch /
+ * memory curator) and only the workspace-memory line will render.
  */
-export function loadAgent(id: AgentId): LoadedAgent {
+export function loadAgent(
+  id: AgentId,
+  opts: { canvasId?: string | null } = {},
+): LoadedAgent {
   if (!VALID_AGENT_IDS.has(id)) {
     throw new Error(`[agent-loader] unknown agent id: ${id}`);
   }
@@ -428,5 +449,5 @@ export function loadAgent(id: AgentId): LoadedAgent {
     parsed = parseAgentFile(id);
     cache.set(id, parsed);
   }
-  return renderLoadedAgent(parsed);
+  return renderLoadedAgent(parsed, opts);
 }

@@ -27,6 +27,7 @@ export {
 } from './trigger.js';
 export { _waitForIdle } from './worker.js';
 export { readWorkspaceMemory, readCanvasMemory } from './read.js';
+export { getMemoryCatalogue } from './catalogue.js';
 
 import { schedule } from './worker.js';
 

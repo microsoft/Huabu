@@ -21,21 +21,6 @@ runtime:
 # substitutes, `{{#var}}…{{/var}}` keeps the block only when `var` is
 # a non-empty string. Anything more conditional belongs in TS, not here.
 messageTemplates:
-  # Pushed as the very first user-role message of every turn whenever
-  # the memory module has anything to surface. Two independent blocks
-  # (cross-canvas workspace memory, per-canvas working working
-  # memory) — each kept only when its source had non-empty content.
-  # Route skips the push entirely when both are missing, so we don't
-  # waste tokens on a stub `(empty)` block. Stripped from chat history
-  # by `buildHistoryItems` because it begins with `[SYSTEM`.
-  memoryPreamble: |
-    [SYSTEM Memory]{{#longterm}}
-    [Long-term preferences — the user, across canvases]
-    {{longterm}}{{/longterm}}{{#shortterm}}
-
-    [Working memory — this canvas]
-    {{shortterm}}{{/shortterm}}
-
   # Pushed as a separate user-role message before the actual user prompt
   # whenever the request carries `canvasContext.selectedNodes`. Stripped
   # from chat history later because it begins with `[SYSTEM`.
@@ -81,7 +66,13 @@ The canvas command catalogue, tool decision matrix, and layout recipes live in t
 
 - When the user asks for up-to-date information, current events, or anything that may have changed recently, you MUST call `web_search` and cite the URLs you relied on.
 - **Selected-node context is sparse**: each entry carries `{ id, type, label?, filename }` only — no content, no summary, no geometry. To read a selected node's body **pass its `filename` field straight to `read`** (e.g. `read({ path: ref.filename })`); do not re-derive the path from the label. For layout / style / spatial relations call `inspect_nodes({ ids: ["<id>"] })`. If you ever need to build a node path from a bare label (a node mentioned in canvas snapshot, not in the selection), the rule is: `nodes/<safeLabel>.md` where `safeLabel` replaces only `\ / : * ? " < > |` (and ASCII control chars) with `_` — **spaces, hyphens, parentheses, dots, and any other character are kept verbatim**; only leading/trailing dots and spaces are stripped. Example: `"Dolphin Migration"` → `nodes/Dolphin Migration.md` (space kept). Only fall back to `find("nodes/*.md")` / `grep` if the direct read returns ENOENT.
-  {{#skillCatalogue}}
+
+## Available memory
+
+Two memory resources you can open on demand. The catalogue below lists them with their current sizes; `empty` means the file is missing or zero bytes. Workspace memory has _already been loaded into your context as a `[SYSTEM Workspace memory]` block_ on the very first turn of this thread — don't re-read it then; use `read("memory/workspace.md")` on later turns only if you want to confirm it's still relevant. Working memory is never pre-loaded — if the user's question seems anchored to the current canvas's ongoing work ("what was I doing here", "continue from where I left off", or any reference that needs canvas-scoped context to answer well), read `memory/canvas.md` early in the turn.
+
+{{memoryCatalogue}}
+{{#skillCatalogue}}
 
 ## Available skills
 
