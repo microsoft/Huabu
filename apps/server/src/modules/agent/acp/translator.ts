@@ -211,13 +211,16 @@ export function acpUpdateToStreamEvent(
       return { type: 'plan', data };
     }
     case 'config_option_update': {
-      // ACP spec: `ConfigOptionUpdate` carries a full snapshot in
-      // `configOptions`. Forward verbatim so the consumer can
-      // overwrite its cached list.
-      const data: AgentConfigOptionsUpdateEventData = {
-        options: u.configOptions as AcpSessionConfigOption[],
-      };
+      const raw = u as Record<string, unknown>;
+      const options = Array.isArray(raw.configOptions)
+        ? (raw.configOptions as AcpSessionConfigOption[])
+        : raw.id || raw.name || raw.label
+          ? [raw as unknown as AcpSessionConfigOption]
+          : [];
+      if (options.length === 0) return null;
+      const data: AgentConfigOptionsUpdateEventData = { options };
       return { type: 'config_options_update', data };
+    }
     }
     case 'current_mode_update': {
       const data: AgentSessionModeUpdateEventData = {
