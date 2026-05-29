@@ -75,4 +75,48 @@ case "$url" in
   ws://*) insecure_flag=--allow-insecure ;;
 esac
 
+# Pre-flight: if the user told us which agent CLI to launch (e.g.
+# `--agent "copilot --acp --allow-all"`), make sure that CLI is actually
+# on PATH. Otherwise the failure mode is a confusing ACP handshake error
+# rather than "the binary doesn't exist", which sends people down the
+# wrong debugging path. We only check, never auto-install.
+agent_cmd=
+prev=
+for arg in "$@"; do
+  case "$prev" in
+    --agent) agent_cmd="$arg"; break ;;
+  esac
+  case "$arg" in
+    --agent=*) agent_cmd="${arg#--agent=}"; break ;;
+  esac
+  prev="$arg"
+done
+
+if [ -n "$agent_cmd" ]; then
+  # First whitespace-separated token of the --agent value is the
+  # executable; everything after it is forwarded as flags to that CLI.
+  # POSIX word-splitting via positional params, in a subshell so we
+  # don't clobber the outer "$@".
+  agent_bin=$(set -f; set -- $agent_cmd; printf '%s\n' "$1")
+  # Skip the check if the user supplied an explicit path — `command -v`
+  # would still work, but a path-based agent is an unusual case and we'd
+  # rather not second-guess it.
+  case "$agent_bin" in
+    */*|'') ;;
+    *)
+      if ! command -v "$agent_bin" >/dev/null 2>&1; then
+        echo "agentlet wrapper: \"$agent_bin\" was not found on PATH." >&2
+        echo "  Install the CLI first, e.g.:" >&2
+        case "$agent_bin" in
+          copilot) echo "    npm install -g @github/copilot" >&2 ;;
+          claude)  echo "    npm install -g @anthropic-ai/claude-code" >&2 ;;
+          gemini)  echo "    npm install -g @google/gemini-cli" >&2 ;;
+          *)       echo "    (see the agent's own install instructions)" >&2 ;;
+        esac
+        exit 127
+      fi
+      ;;
+  esac
+fi
+
 exec node "$cli" --server "$url" $insecure_flag "$@"

@@ -68,16 +68,14 @@ export interface AgentToolCallEventData {
   /** Raw arguments the agent attached (passed through unmodified). */
   rawInput?: unknown;
   /**
-   * pi-ai built-in tool name, set ONLY by internal-agent turns
-   * (`canvas_commands`, `web_search`, `read`, `grep`, …). Drives
-   * client-side render-variant dispatch via `variantForInternalTool()`
-   * and gates local side-effects (e.g. `canvas_commands` execution).
+   * Stable tool name from the internal agent (`canvas_commands`,
+   * `web_search`, `read`, `grep`, …). Drives client-side render-variant
+   * dispatch via `variantForInternalTool()` and gates local side-effects
+   * (e.g. `canvas_commands` execution).
    *
-   * External ACP turns leave this undefined — they carry no stable
-   * machine tool name (only a display `title` + semantic `toolKind`)
-   * and always render as the `generic` variant. Presence of this
-   * field is therefore the single wire-level discriminator between an
-   * internal and an external tool call.
+   * Undefined for external ACP turns, which carry only a display
+   * `title` + semantic `toolKind`; its presence is the wire-level
+   * discriminator between internal and external tool calls.
    */
   internalToolName?: string;
 }
@@ -137,20 +135,10 @@ export interface AgentEndEventData {}
 /**
  * Structured rewrite of a raw user message for an external (ACP) agent.
  *
- * The preprocessor is an **intent translator**, not a file router. It
- * reads the user's raw input plus the canvas state and produces a
- * **self-contained briefing**: the external agent should be able to
- * act on `task` alone, with no visibility into the canvas. Selected
- * node content is synthesised inline whenever it fits.
- *
- * `attachments` is a **fallback channel** for verbatim payloads — used
- * only when (a) the task requires byte-exact reading (e.g. "review
- * this code"), (b) a node exceeds the inline-body threshold, or
- * (c) the user explicitly attached a `.artifacts/` file. The external
- * agent is expected to `Read` each attachment before answering.
- *
- * Paths are relative to the canvas directory on disk
- * (`<canvasDir>/nodes/<safeLabel>.md`, `<canvasDir>/.artifacts/…`).
+ * `task` is a self-contained briefing — the external agent should be
+ * able to act on it alone, with no visibility into the canvas.
+ * `attachments` is a fallback channel for payloads that must be read
+ * verbatim (paths relative to the canvas directory).
  */
 export interface ExternalAgentPrompt {
   /** Self-contained task description handed to the external agent. */

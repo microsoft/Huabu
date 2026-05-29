@@ -157,14 +157,34 @@ files in whatever project folder you pointed it at.
    ACP_DEV_TOKEN=pick-any-long-random-string
    ```
 
-2. _Optional._ Make the `agentlet` command available from any folder:
+2. _Optional._ Make the `agentlet` command available from any folder.
+   Run the snippet that matches your shell from the project root:
 
    ```bash
+   # bash
    echo 'export PATH="'"$PWD"'/bin:$PATH"' >> ~/.bashrc && exec bash
    ```
 
+   ```bash
+   # zsh (macOS default)
+   echo 'export PATH="'"$PWD"'/bin:$PATH"' >> ~/.zshrc && exec zsh
+   ```
+
+   ```fish
+   # fish
+   fish_add_path "$PWD/bin"
+   ```
+
+   ```powershell
+   # PowerShell (Windows) — persists for the current user
+   [Environment]::SetEnvironmentVariable(
+     'Path',
+     "$((Get-Location).Path)\bin;$([Environment]::GetEnvironmentVariable('Path','User'))",
+     'User')
+   ```
+
    If you skip this, just use the full path everywhere
-   (e.g. `~/Sediment/bin/agentlet …`).
+   (e.g. `~/Sediment/bin/agentlet …` or `.\bin\agentlet …` on Windows).
 
 ### Connecting an agent
 
