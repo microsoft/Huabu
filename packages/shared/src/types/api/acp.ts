@@ -161,6 +161,41 @@ export interface AcpThreadCommandsResponse {
   updatedAt: number;
 }
 
+// ─── Permission decisions ──────────────────────────────────────────────
+//
+// Reply channel for a `permission_request` SSE event (see
+// `AgentPermissionRequestEventData`). SSE is one-way server→client, so
+// the user's approve/deny choice comes back over this POST. The server
+// matches it to the suspended `session/request_permission` promise by
+// `requestId` and resolves it (or treats a missing/duplicate id as a
+// no-op when the request already timed out / was answered).
+
+/**
+ * Request body for `POST /api/acp/threads/:threadId/permission`.
+ *
+ * Exactly one of `optionId` (user picked an option) or `cancelled`
+ * (user dismissed) is meaningful; if neither is set the server treats
+ * it as a cancel.
+ */
+export interface AcpPermissionDecisionRequest {
+  /** The `requestId` from the originating `permission_request` event. */
+  requestId: string;
+  /** ACP `optionId` the user selected. Omit to cancel. */
+  optionId?: string;
+  /** Explicit cancel (user dismissed the prompt). */
+  cancelled?: boolean;
+}
+
+/** Response body for `POST /api/acp/threads/:threadId/permission`. */
+export interface AcpPermissionDecisionResponse {
+  /**
+   * `true` when a suspended request matched `requestId` and was
+   * resolved by this call; `false` when none matched (already answered,
+   * timed out, or the session ended) — the client can safely ignore.
+   */
+  resolved: boolean;
+}
+
 // ─── Zod schemas (server-side only) ────────────────────────────────────
 //
 // Defined here per docs/api-design.md so every public HTTP boundary
@@ -195,3 +230,15 @@ export const acpThreadCommandsResponseSchema = z.object({
   availableCommands: z.array(availableCommandSchema),
   updatedAt: z.number().int().nonnegative(),
 }) satisfies z.ZodType<AcpThreadCommandsResponse>;
+
+/** Schema mirror of {@link AcpPermissionDecisionRequest}. */
+export const acpPermissionDecisionSchema = z.object({
+  requestId: z.string().min(1),
+  optionId: z.string().min(1).optional(),
+  cancelled: z.literal(true).optional(),
+}) satisfies z.ZodType<AcpPermissionDecisionRequest>;
+
+/** Schema mirror of {@link AcpPermissionDecisionResponse}. */
+export const acpPermissionDecisionResponseSchema = z.object({
+  resolved: z.boolean(),
+}) satisfies z.ZodType<AcpPermissionDecisionResponse>;

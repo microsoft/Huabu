@@ -744,6 +744,25 @@ export function handleStreamEvent(
       next[planIdx] = { kind: 'plan', entries };
       return { ...m, segments: next };
     });
+  } else if (event.type === 'permission_request') {
+    const { requestId, toolCall, options } = event.data;
+    ensureAssistantMessage(ctx);
+    updateMessage(ctx.assistantId, (m) => {
+      if (m.role !== 'assistant') return m;
+      // Idempotent on reconnect: the SSE event buffer replays the
+      // request, so de-dupe by requestId rather than appending twice.
+      const existingIdx = m.segments.findIndex(
+        (s) => s.kind === 'permission' && s.requestId === requestId,
+      );
+      if (existingIdx !== -1) return m;
+      return {
+        ...m,
+        segments: [
+          ...m.segments,
+          { kind: 'permission', requestId, toolCall, options },
+        ],
+      };
+    });
   } else if (event.type === 'prepared_prompt') {
     // External-agent only: the server's preprocessor finished. If
     // startStream already inserted a pending placeholder we update it

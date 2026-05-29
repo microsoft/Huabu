@@ -60,6 +60,12 @@ interface ChatState {
   _stashedThreadId?: string;
   /** @internal Stashed canvas messages while viewing a question thread. */
   _stashedMessages?: ChatMessage[];
+  /**
+   * @internal Stashed canvas agent binding while viewing a question
+   * thread. Restored on `closeQuestionThread` so the canvas chat
+   * goes back to its own bound agent.
+   */
+  _stashedBinding?: AgentBinding;
 
   /**
    * Staged attachments waiting to be sent with the next message.
@@ -123,8 +129,17 @@ interface ChatState {
   /** Set/replace the text-selection-based attachment (auto-managed by ExpandedNodePanel). */
   setSelectionAttachment: (attachment: ChatAttachment | null) => void;
 
-  /** Open a question node's thread in the chat panel (replay mode). */
-  openQuestionThread: (nodeId: string, threadId: string) => void;
+  /**
+   * Open a question node's thread in the chat panel (replay mode).
+   * Pass the question's `binding` so the ChatInput's mode selector
+   * surfaces the agent that actually answered this question — the
+   * canvas-level binding is stashed and restored on close.
+   */
+  openQuestionThread: (
+    nodeId: string,
+    threadId: string,
+    binding?: AgentBinding,
+  ) => void;
   /** Close question thread replay and return to normal canvas chat. */
   closeQuestionThread: () => void;
 
@@ -255,10 +270,11 @@ export const useChatStore = create<ChatState>()(
       setSelectionAttachment: (attachment) =>
         set({ selectionAttachment: attachment }),
 
-      openQuestionThread: (nodeId, threadId) => {
+      openQuestionThread: (nodeId, threadId, binding) => {
         const {
           threadId: currentThreadId,
           messages: currentMessages,
+          agentBinding: currentBinding,
           viewingQuestionThread: currentViewing,
         } = get();
 
@@ -269,16 +285,25 @@ export const useChatStore = create<ChatState>()(
         // overwrite the stash — keep the original canvas thread.
         const isAlreadyViewing = currentViewing !== null;
 
+        // Question-thread binding: prefer the binding the question was
+        // actually run with; fall back to the default internal agent
+        // for legacy nodes that pre-date `data.agentBinding`.
+        const nextBinding: AgentBinding = binding ?? DEFAULT_BINDING;
+
         set({
           viewingQuestionThread: { nodeId, threadId },
           // Swap to the question thread — history hook will refetch
           threadId: threadId,
           messages: [],
           isHistoryLoaded: false,
-          // Stash the previous thread ID so we can restore on close
+          // Swap binding so ChatInput's ModeSelector shows the agent
+          // that actually answered this question, not the canvas's.
+          agentBinding: nextBinding,
+          // Stash the previous thread ID + binding so we can restore on close
           ...(!isAlreadyViewing && {
             _stashedThreadId: currentThreadId,
             _stashedMessages: currentMessages,
+            _stashedBinding: currentBinding,
           }),
         });
       },
@@ -290,8 +315,10 @@ export const useChatStore = create<ChatState>()(
           threadId: state._stashedThreadId ?? state.threadId,
           messages: state._stashedMessages ?? [],
           isHistoryLoaded: (state._stashedMessages ?? []).length > 0,
+          agentBinding: state._stashedBinding ?? state.agentBinding,
           _stashedThreadId: undefined,
           _stashedMessages: undefined,
+          _stashedBinding: undefined,
         });
       },
 

@@ -72,4 +72,6 @@ export const routes = {
     `/acp/threads/${enc(threadId)}/session`,
   acpThreadCommands: (threadId: string) =>
     `/acp/threads/${enc(threadId)}/commands`,
+  acpThreadPermission: (threadId: string) =>
+    `/acp/threads/${enc(threadId)}/permission`,
 } as const;

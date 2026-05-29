@@ -41,6 +41,20 @@ export interface TextNodeBodyProps {
   onChange: (next: string) => void;
   /** Called when the textarea loses focus. */
   onBlur: () => void;
+  /**
+   * Optional textarea keydown handler. Lets the parent intercept keys
+   * before the browser's default (used by the QuestionNode `@`
+   * mention typeahead).
+   */
+  onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+  /**
+   * Optional handlers fired AFTER browser updates the textarea state.
+   * Used by typeahead pickers to keep an internal caret tracker in
+   * sync without owning the textarea element directly.
+   */
+  onKeyUp?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+  onClick?: (e: React.MouseEvent<HTMLTextAreaElement>) => void;
+  onSelect?: (e: React.SyntheticEvent<HTMLTextAreaElement>) => void;
   /** When true the textarea accepts input; when false the dblclick overlay is shown. */
   isEditing: boolean;
   /** Invoked when the user double-clicks the body while not editing. */
@@ -90,6 +104,10 @@ export const TextNodeBody = forwardRef<HTMLTextAreaElement, TextNodeBodyProps>(
       draft,
       onChange,
       onBlur,
+      onKeyDown,
+      onKeyUp,
+      onClick,
+      onSelect,
       isEditing,
       onRequestEdit,
       placeholder,
@@ -138,6 +156,10 @@ export const TextNodeBody = forwardRef<HTMLTextAreaElement, TextNodeBodyProps>(
           value={draft}
           onChange={(e) => onChange(e.target.value)}
           onBlur={onBlur}
+          onKeyDown={onKeyDown}
+          onKeyUp={onKeyUp}
+          onClick={onClick}
+          onSelect={onSelect}
           readOnly={!isEditing}
           style={{
             padding: 0,

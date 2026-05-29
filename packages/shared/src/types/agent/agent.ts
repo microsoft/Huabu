@@ -6,6 +6,7 @@
  */
 
 import type {
+  AcpPermissionOption,
   AcpPlanEntry,
   AcpToolCallContent,
   AcpToolCallLocation,
@@ -172,6 +173,47 @@ export interface AgentPreparedPromptEventData {
   error?: string;
 }
 
+/**
+ * `event: permission_request` — an external (ACP) agent asked the
+ * client to approve a tool invocation via `session/request_permission`.
+ *
+ * The turn pauses on the server while this is outstanding: the agent's
+ * `requestPermission` promise is suspended until the user answers (or a
+ * server-side timeout cancels it). The web client surfaces an inline
+ * approve/deny card and replies out-of-band via
+ * `POST /api/acp/threads/:threadId/permission` carrying the same
+ * `requestId`.
+ *
+ * Transient by design — NOT persisted to chat history or the sidecar.
+ * A resolved/expired request leaves no trace beyond whatever the agent
+ * itself records. Only emitted for external bindings.
+ */
+export interface AgentPermissionRequestEventData {
+  /** Server-generated id, unique within the turn; echoed back on reply. */
+  requestId: string;
+  /**
+   * The tool the agent wants to run (subset of ACP `toolCall`; all optional).
+   *
+   * `rawInput` is the structured arg payload the agent intends to pass to
+   * the tool — typically the most useful field for the user to see (e.g.
+   * `{ command: "git status" }` for a shell tool, `{ path, content }` for
+   * a write tool). `content` carries optional rich blocks (text / diff /
+   * terminal) the agent prepared as a preview, and `locations` lists the
+   * files being touched. All three are passed through verbatim; the UI
+   * picks a sensible projection.
+   */
+  toolCall: {
+    toolCallId?: string;
+    title?: string;
+    kind?: AcpToolKind;
+    rawInput?: unknown;
+    content?: AcpToolCallContent[];
+    locations?: AcpToolCallLocation[];
+  };
+  /** Options offered by the agent; the UI renders one control per option. */
+  options: AcpPermissionOption[];
+}
+
 /** Discriminated union of every SSE frame emitted by `/api/agent`. */
 export type AgentStreamEvent =
   | { type: 'meta'; data: AgentMetaEventData }
@@ -181,6 +223,7 @@ export type AgentStreamEvent =
   | { type: 'tool_call_update'; data: AgentToolCallUpdateEventData }
   | { type: 'plan'; data: AgentPlanEventData }
   | { type: 'prepared_prompt'; data: AgentPreparedPromptEventData }
+  | { type: 'permission_request'; data: AgentPermissionRequestEventData }
   | { type: 'done'; data: AgentDoneEventData }
   | { type: 'error'; data: AgentErrorEventData }
   | { type: 'end'; data: AgentEndEventData };
@@ -199,6 +242,7 @@ export const AGENT_SSE_EVENTS = {
   ToolCallUpdate: 'tool_call_update',
   Plan: 'plan',
   PreparedPrompt: 'prepared_prompt',
+  PermissionRequest: 'permission_request',
   Done: 'done',
   Error: 'error',
   End: 'end',

@@ -22,12 +22,16 @@
  * `token-store.ts`.
  */
 
-import { ensureAcpSessionRequestSchema } from '@sediment/shared';
+import {
+  acpPermissionDecisionSchema,
+  ensureAcpSessionRequestSchema,
+} from '@sediment/shared';
 
 import { ensureAcpSession } from './service.js';
 import { acpSessionRegistry } from './session-registry.js';
 
 import type {
+  AcpPermissionDecisionResponse,
   AcpThreadCommandsResponse,
   EnsureAcpSessionResponse,
 } from '@sediment/shared';
@@ -121,6 +125,49 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
       availableCommands: entry.availableCommands,
       updatedAt: entry.commandsUpdatedAt,
     };
+  });
+
+  /**
+   * Answer an outstanding `session/request_permission` for this thread.
+   *
+   * SSE is one-way, so the user's approve/deny choice (surfaced via a
+   * `permission_request` event) comes back over this POST. The body
+   * carries the originating `requestId` plus either an `optionId`
+   * (selected) or `cancelled: true`. `resolved: false` means no
+   * suspended request matched — already answered, timed out, or the
+   * session ended; the client can safely ignore it.
+   */
+  app.post<{
+    Params: ThreadParams;
+    Reply: AcpPermissionDecisionResponse | { message: string; code?: string };
+  }>('/threads/:threadId/permission', async (request, reply) => {
+    const { threadId } = request.params;
+    const entry = acpSessionRegistry.get(threadId);
+    if (!entry) {
+      return reply.status(404).send({
+        message: 'No ACP session for this thread',
+        code: 'session_not_found',
+      });
+    }
+
+    const parsed = acpPermissionDecisionSchema.safeParse(request.body);
+    if (!parsed.success) {
+      request.log.warn(
+        { threadId, issues: parsed.error.issues },
+        '[acp/threads] invalid permission decision body',
+      );
+      return reply.status(400).send({
+        message: 'Invalid request body',
+        code: 'validation_failed',
+      });
+    }
+
+    const { requestId, optionId, cancelled } = parsed.data;
+    const resolved = entry.client.resolvePermission(
+      requestId,
+      cancelled || !optionId ? { cancelled: true } : { optionId },
+    );
+    return { resolved };
   });
 };
 

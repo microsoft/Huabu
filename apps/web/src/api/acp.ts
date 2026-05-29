@@ -17,6 +17,8 @@ import { routes } from './_routes';
 
 import type {
   AcpAgentsResponse,
+  AcpPermissionDecisionRequest,
+  AcpPermissionDecisionResponse,
   AcpThreadCommandsResponse,
   EnsureAcpSessionRequest,
   EnsureAcpSessionResponse,
@@ -77,4 +79,25 @@ export async function getAcpThreadCommands(
     if (err instanceof ApiError && err.status === 404) return null;
     throw err;
   }
+}
+
+/**
+ * Answer an outstanding `session/request_permission` surfaced via a
+ * `permission_request` SSE event. Pass either `optionId` (user picked
+ * an option) or `cancelled: true` (dismissed). `resolved: false` means
+ * no suspended request matched — already answered, timed out, or the
+ * session ended; the caller can safely ignore it.
+ */
+export async function respondAcpPermission(
+  threadId: string,
+  decision: AcpPermissionDecisionRequest,
+): Promise<AcpPermissionDecisionResponse> {
+  return apiFetch<AcpPermissionDecisionResponse>(
+    routes.acpThreadPermission(threadId),
+    {
+      method: 'POST',
+      json: decision,
+      fallbackMessage: 'Failed to submit permission decision',
+    },
+  );
 }

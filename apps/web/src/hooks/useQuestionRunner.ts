@@ -15,6 +15,8 @@ import { useEffect, useRef } from 'react';
 import { agentApi } from '@/api/agent';
 import useCanvasStore from '@/store/canvasStore';
 
+import type { AgentBinding, AgentMode } from '@sediment/shared';
+
 // ── Active run tracking (abort on cancel / node delete) ────────
 
 const activeRuns = new Map<string, AbortController>();
@@ -40,6 +42,14 @@ async function executeQuestionNode(nodeId: string): Promise<void> {
   const question =
     input?.kind === 'text' ? ((input.content as string) ?? '') : '';
   if (!question.trim()) return;
+
+  // Resolve the binding chosen via the in-node `@` mention. Defaults
+  // (internal binding + `ask` mode) preserve the legacy behaviour for
+  // question nodes created before the picker existed.
+  const agentBinding = data.agentBinding as AgentBinding | undefined;
+  const explicitMode = data.agentMode as AgentMode | undefined;
+  const mode: AgentMode =
+    agentBinding?.kind === 'external' ? 'ask' : (explicitMode ?? 'ask');
 
   const canvasId = state.canvasId;
   const patch = state.patchNodeSilent;
@@ -79,7 +89,7 @@ async function executeQuestionNode(nodeId: string): Promise<void> {
     await agentApi.streamMessage(
       question,
       threadId,
-      'ask',
+      mode,
       {
         onEvent: (event) => {
           if (event.type === 'done') sawDone = true;
@@ -112,6 +122,7 @@ async function executeQuestionNode(nodeId: string): Promise<void> {
       {
         canvasId,
         anchorNodeId: nodeId,
+        agentBinding,
         signal: abortController.signal,
       },
     );

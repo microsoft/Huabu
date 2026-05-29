@@ -666,6 +666,14 @@ export async function* runAcpAgent(
         wake();
       },
       signal,
+      // Surface agent permission requests as a transient SSE event.
+      // The client owns the suspended promise + resolution; we only
+      // push the request onto the drain queue. Not persisted to the
+      // sidecar — permission prompts are live-only interactions.
+      (req) => {
+        queue.push({ type: 'permission_request', data: req });
+        wake();
+      },
     )
     .then((result) => {
       stopReason = result.stopReason;

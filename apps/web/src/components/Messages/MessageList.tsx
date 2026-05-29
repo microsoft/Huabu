@@ -35,9 +35,27 @@ export const MessageList = ({
   const isAtBottomRef = useRef(true);
   const prevMessageCountRef = useRef(messages.length);
 
-  const streamingAssistantId = isLoading
-    ? [...messages].reverse().find((m) => m.role === 'assistant')?.id
-    : undefined;
+  // Find the in-flight assistant message for the *current* turn.
+  //
+  // We walk backwards from the tail and stop at the most recent `user`
+  // message — any assistant message that appears before that user turn
+  // belongs to a *previous* exchange and must not be tagged as
+  // streaming. This matters during the "preparing prompt" phase
+  // (external ACP agents): a fresh `user` + `prepared-prompt` pair is
+  // already in the list, but the new assistant message isn't inserted
+  // until the first content event arrives. Without this guard, naive
+  // `findLast(role === 'assistant')` returns the *previous* turn's
+  // assistant message and the `ThinkingIndicator` ends up attached to
+  // the wrong bubble.
+  const streamingAssistantId = (() => {
+    if (!isLoading) return undefined;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i]!;
+      if (m.role === 'user') return undefined;
+      if (m.role === 'assistant') return m.id;
+    }
+    return undefined;
+  })();
 
   // Track whether the user is scrolled near the bottom
   const handleScroll = useCallback(() => {

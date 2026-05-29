@@ -16,6 +16,8 @@
  * and orphan-update replay (see {@link AcpAgentClient.orphanUpdates}).
  */
 
+import { randomUUID } from 'node:crypto';
+
 import {
   ClientSideConnection,
   RequestError,
@@ -35,7 +37,13 @@ import {
 import { FsCapabilityError, handleFsReadTextFile } from './capabilities/fs.js';
 
 import type { AgentConnection, AcpMessage } from '@agentlet/protocol';
-import type { AcpSessionUpdate } from '@sediment/shared';
+import type {
+  AcpSessionUpdate,
+  AcpPermissionOption,
+  AcpToolCallContent,
+  AcpToolCallLocation,
+  AcpToolKind,
+} from '@sediment/shared';
 
 const ACP_PROTOCOL_VERSION = 1;
 
@@ -114,13 +122,78 @@ export interface AcpAgentClientOptions {
 type SessionUpdateHandler = (update: AcpSessionUpdate) => void;
 
 /**
+ * Per-turn callback the caller installs (via {@link AcpAgentClient.prompt})
+ * to surface an agent `session/request_permission` to the user. The
+ * client suspends the agent's request until {@link AcpAgentClient.resolvePermission}
+ * is called with the matching `requestId`. When NO notifier is installed
+ * (e.g. session warm-up, or an out-of-turn request) the client falls
+ * back to the auto-allow strategy ({@link pickPermissionOption}).
+ */
+export type PermissionNotifier = (req: {
+  requestId: string;
+  toolCall: {
+    toolCallId?: string;
+    title?: string;
+    kind?: AcpToolKind;
+    rawInput?: unknown;
+    content?: AcpToolCallContent[];
+    locations?: AcpToolCallLocation[];
+  };
+  options: AcpPermissionOption[];
+}) => void;
+
+/** User/timeout decision passed back to {@link AcpAgentClient.resolvePermission}. */
+export type PermissionDecision =
+  | { optionId: string; cancelled?: false }
+  | { cancelled: true };
+
+/** How long a suspended permission request waits before auto-cancelling. */
+const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000;
+
+/**
+ * Optional interceptor for raw `session/update` notifications. When
+ * supplied to {@link streamFromAgentConnection} the adapter calls this
+ * *instead of* forwarding the notification to the SDK's read pump,
+ * effectively bypassing the SDK's strict `zSessionNotification` zod
+ * parse for these messages.
+ *
+ * Why this exists:
+ *   The SDK validates every `session/update` against the full union of
+ *   spec'd variants and per-item shapes (e.g. `AvailableCommand` requires
+ *   a non-null `description: string`). Real-world agents occasionally
+ *   emit fields that fail strict validation — Claude Code / Gemini CLI
+ *   may push slash commands with a missing or `null` description, or
+ *   `sessionUpdate` discriminators that haven't been published in the
+ *   spec yet. When the SDK's `parse()` throws, the WHOLE notification
+ *   is silently dropped (only a `console.error` in the SDK), which
+ *   manifested as a regression where the slash-command typeahead
+ *   listed far fewer commands than before the SDK integration.
+ *
+ *   Intercepting here lets us route the raw update straight to our own
+ *   permissive dispatcher (which already tolerates missing/empty
+ *   description fields and unknown variants) while still letting the
+ *   SDK own request/response correlation for everything else.
+ *
+ * Returns `true` when the interceptor consumed the message and the
+ * adapter should NOT forward it to the SDK; `false` to fall through.
+ */
+type SessionUpdateInterceptor = (msg: AcpMessage) => boolean;
+
+/**
  * Adapt an agentlet `AgentConnection` (`send` + `onMessage`) to the SDK
  * `Stream` shape. `close()` closes the readable, which makes the SDK
  * abort its connection and reject pending outgoing requests. Does NOT
  * call `conn.disconnect()` — connection lifecycle is owned by
  * `server-mount.ts`.
+ *
+ * `interceptSessionUpdate` is invoked on every inbound message *before*
+ * it reaches the SDK; returning `true` swallows the message (see
+ * {@link SessionUpdateInterceptor}).
  */
-function streamFromAgentConnection(conn: AgentConnection): {
+function streamFromAgentConnection(
+  conn: AgentConnection,
+  interceptSessionUpdate?: SessionUpdateInterceptor,
+): {
   stream: Stream;
   close: () => void;
 } {
@@ -133,6 +206,10 @@ function streamFromAgentConnection(conn: AgentConnection): {
       readableController = controller;
       conn.onMessage((msg) => {
         if (closed) return;
+        if (interceptSessionUpdate && interceptSessionUpdate(msg)) {
+          // Interceptor consumed the message — do not forward to SDK.
+          return;
+        }
         try {
           controller.enqueue(msg as unknown as AnyMessage);
         } catch {
@@ -179,6 +256,25 @@ export class AcpAgentClient {
     Set<SessionUpdateHandler>
   >();
   /**
+   * Per-turn permission notifiers, keyed by sessionId. Installed by
+   * {@link prompt} when the caller wants to gate permission via UI;
+   * removed in the `prompt` `finally`. Absence ⇒ auto-allow.
+   */
+  private readonly permissionNotifiers = new Map<string, PermissionNotifier>();
+  /**
+   * Suspended `session/request_permission` calls awaiting a user (or
+   * timeout) decision, keyed by the server-generated `requestId`.
+   * Resolved via {@link resolvePermission}; cleared on shutdown / abort.
+   */
+  private readonly pendingPermissions = new Map<
+    string,
+    {
+      sessionId: string;
+      resolve: (decision: PermissionDecision) => void;
+      timer: ReturnType<typeof setTimeout>;
+    }
+  >();
+  /**
    * Bounded ring buffer of `session/update`s that arrived before any
    * handler/listener existed for their sessionId. Drained by the next
    * {@link registerSessionListener} call.
@@ -203,7 +299,9 @@ export class AcpAgentClient {
       error: (o, m) => console.error('[acp-client]', m ?? '', o),
     };
 
-    const { stream, close } = streamFromAgentConnection(connection);
+    const { stream, close } = streamFromAgentConnection(connection, (msg) =>
+      this.tryInterceptSessionUpdate(msg),
+    );
     this.closeStream = close;
     this.sdk = new ClientSideConnection(
       (_agent: SdkAgent) => this.createClientHandler(),
@@ -424,7 +522,18 @@ export class AcpAgentClient {
    */
   private createClientHandler(): SdkClient {
     return {
+      // `session/update` is intercepted in the stream adapter BEFORE
+      // it reaches the SDK (see {@link tryInterceptSessionUpdate}), so
+      // this handler is a defensive fallback that should never fire in
+      // practice. We still route through `dispatchSessionUpdate` so
+      // that if anyone ever wires the SDK to call us directly (e.g.
+      // during tests, or if the interceptor is disabled), the message
+      // still lands in the same dispatch path.
       sessionUpdate: async (params: SessionNotification): Promise<void> => {
+        this.logger.debug(
+          { sessionId: params.sessionId },
+          'sessionUpdate handler hit via SDK path (interceptor missed?)',
+        );
         this.dispatchSessionUpdate(
           params.sessionId,
           params.update as unknown as AcpSessionUpdate,
@@ -471,6 +580,62 @@ export class AcpAgentClient {
         this.rejectTerminal('terminal/kill');
       },
     };
+  }
+
+  /**
+   * Stream-adapter hook (see {@link streamFromAgentConnection}).
+   *
+   * Detects raw `session/update` notifications coming from the agent
+   * and routes them directly to {@link dispatchSessionUpdate}, bypassing
+   * the SDK's strict `zSessionNotification.parse` (which would silently
+   * drop the entire notification on any per-item shape mismatch, e.g.
+   * an `AvailableCommand` with a missing/`null` `description`).
+   *
+   * Permissive checks here are intentionally minimal: the only things
+   * we need from the wire shape are `sessionId: string` and an `update`
+   * object carrying a `sessionUpdate` discriminator. Per-variant shape
+   * validation is the downstream consumer's job — `service.ts`
+   * (`handleSessionMetaUpdate`) and `translator.ts`
+   * (`acpUpdateToStreamEvent`) both already `safeParse` and tolerate
+   * missing optional fields.
+   *
+   * Returns `true` when the message is a `session/update` (and was
+   * therefore consumed), `false` for every other message kind so the
+   * SDK keeps owning request/response correlation.
+   */
+  private tryInterceptSessionUpdate(msg: AcpMessage): boolean {
+    if (!msg || typeof msg !== 'object') return false;
+    const m = msg as unknown as Record<string, unknown>;
+    // Must be a notification (has `method`, no `id`).
+    if (m.method !== 'session/update') return false;
+    if ('id' in m) return false;
+    const params = m.params;
+    if (!params || typeof params !== 'object') {
+      this.logger.warn(
+        { params },
+        'session/update notification has no params — dropping',
+      );
+      return true;
+    }
+    const p = params as Record<string, unknown>;
+    const sessionId = typeof p.sessionId === 'string' ? p.sessionId : '';
+    const update = p.update;
+    if (!sessionId) {
+      this.logger.warn(
+        { params: p },
+        'session/update notification missing sessionId — dropping',
+      );
+      return true;
+    }
+    if (!update || typeof update !== 'object') {
+      this.logger.warn(
+        { sessionId, update },
+        'session/update notification missing `update` body — dropping',
+      );
+      return true;
+    }
+    this.dispatchSessionUpdate(sessionId, update as AcpSessionUpdate);
+    return true;
   }
 
   /** Fan out one validated `session/update` to turn handler + listeners + orphan buffer. */
@@ -563,16 +728,21 @@ export class AcpAgentClient {
   }
 
   /**
-   * Auto-allow handler. Sediment's ACP runtime is local-agent only; OS
-   * file permissions are the real boundary, and per-call UI prompts are
-   * unusable (Copilot can call Read 10+ times per turn). Single insertion
-   * point when stricter policy is needed for remote/sandboxed deploys.
+   * Permission handler.
    *
-   * TODO(B): branch on `toolCall.kind` to gate `'edit'`/`'execute'` via UI.
+   * Two paths:
+   *  1. A per-turn notifier is installed for this session ⇒ surface the
+   *     request to the user (via the notifier), suspend until
+   *     {@link resolvePermission} answers, a {@link PERMISSION_TIMEOUT_MS}
+   *     timeout fires, or the turn aborts. The user's choice (or a
+   *     cancel) is returned to the agent.
+   *  2. No notifier (session warm-up, out-of-turn request) ⇒ fall back to
+   *     auto-allow via {@link pickPermissionOption}. Sediment's ACP runtime
+   *     is local-agent only; OS file permissions are the real boundary.
    */
-  private handleRequestPermission(
+  private async handleRequestPermission(
     params: RequestPermissionRequest,
-  ): RequestPermissionResponse {
+  ): Promise<RequestPermissionResponse> {
     this.logger.info(
       { method: 'session/request_permission', canvasId: this.canvasId },
       '[acp] incoming agent request',
@@ -588,20 +758,95 @@ export class AcpAgentClient {
         'session/request_permission: `options[]` must be non-empty',
       );
     }
-    const choice = pickPermissionOption(options);
     const toolCall = params.toolCall ?? {};
+    const notifier = this.permissionNotifiers.get(params.sessionId);
+
+    // No UI gate for this turn — preserve auto-allow behaviour.
+    if (!notifier) {
+      const choice = pickPermissionOption(options);
+      this.logger.info(
+        {
+          canvasId: this.canvasId,
+          toolCallId: (toolCall as { toolCallId?: unknown }).toolCallId,
+          toolTitle: (toolCall as { title?: unknown }).title,
+          toolKind: (toolCall as { kind?: unknown }).kind,
+          choice: { optionId: choice.optionId, kind: choice.kind },
+        },
+        '[acp] session/request_permission auto-decided',
+      );
+      return {
+        outcome: { outcome: 'selected', optionId: choice.optionId },
+      };
+    }
+
+    // UI gate: suspend until the user (or a timeout/abort) decides.
+    const requestId = randomUUID();
+    const decision = await new Promise<PermissionDecision>((resolve) => {
+      const timer = setTimeout(() => {
+        if (this.pendingPermissions.delete(requestId)) {
+          this.logger.warn(
+            { requestId, canvasId: this.canvasId },
+            'session/request_permission timed out — cancelling',
+          );
+          resolve({ cancelled: true });
+        }
+      }, PERMISSION_TIMEOUT_MS);
+      this.pendingPermissions.set(requestId, {
+        sessionId: params.sessionId,
+        resolve,
+        timer,
+      });
+      try {
+        const tc = toolCall as {
+          toolCallId?: string;
+          title?: string;
+          kind?: AcpToolKind;
+          rawInput?: unknown;
+          content?: AcpToolCallContent[] | null;
+          locations?: AcpToolCallLocation[] | null;
+        };
+        notifier({
+          requestId,
+          toolCall: {
+            toolCallId: tc.toolCallId,
+            title: tc.title,
+            kind: tc.kind,
+            rawInput: tc.rawInput,
+            content: tc.content ?? undefined,
+            locations: tc.locations ?? undefined,
+          },
+          options: options as unknown as AcpPermissionOption[],
+        });
+      } catch (e) {
+        // Notifier throwing must not leak a dangling pending entry.
+        if (this.pendingPermissions.delete(requestId)) {
+          clearTimeout(timer);
+        }
+        this.logger.warn(
+          { requestId, err: String(e) },
+          'permission notifier threw — cancelling',
+        );
+        resolve({ cancelled: true });
+      }
+    });
+
+    if (decision.cancelled) {
+      this.logger.info(
+        { requestId, canvasId: this.canvasId },
+        '[acp] session/request_permission cancelled',
+      );
+      return { outcome: { outcome: 'cancelled' } };
+    }
     this.logger.info(
       {
+        requestId,
         canvasId: this.canvasId,
-        toolCallId: (toolCall as { toolCallId?: unknown }).toolCallId,
-        toolTitle: (toolCall as { title?: unknown }).title,
-        toolKind: (toolCall as { kind?: unknown }).kind,
-        choice: { optionId: choice.optionId, kind: choice.kind },
+        optionId: decision.optionId,
       },
-      '[acp] session/request_permission auto-decided',
+      '[acp] session/request_permission resolved by user',
     );
     return {
-      outcome: { outcome: 'selected', optionId: choice.optionId },
+      outcome: { outcome: 'selected', optionId: decision.optionId },
     };
   }
 

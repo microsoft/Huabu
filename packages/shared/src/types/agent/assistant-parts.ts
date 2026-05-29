@@ -13,6 +13,7 @@
 
 import type {
   AcpContentBlock,
+  AcpPermissionOption,
   AcpPlanEntry,
   AcpToolCallContent,
   AcpToolCallLocation,
@@ -65,6 +66,7 @@ export type AssistantPart =
   | AssistantThinkingPart
   | AssistantToolPart
   | AssistantPlanPart
+  | AssistantPermissionPart
   | AssistantStatusPart;
 
 /** Markdown body chunk emitted by `text_delta`. */
@@ -92,6 +94,49 @@ export interface AssistantStatusPart {
   kind: 'status';
   status: 'interrupted' | 'error';
   detail?: string;
+}
+
+/**
+ * A live permission prompt surfaced by an external (ACP) agent.
+ *
+ * Transient: produced from a `permission_request` SSE event, rendered
+ * inline as an approve/deny card, and NEVER persisted to chat history
+ * or the sidecar. It survives a mid-turn reconnect only because the SSE
+ * event buffer replays it; once the turn ends it is gone.
+ *
+ * `resolution` is set optimistically by the client the moment the user
+ * (or a timeout) answers, so the card can collapse without waiting for
+ * the next stream event.
+ */
+export interface AssistantPermissionPart {
+  kind: 'permission';
+  /** Matches the originating event's `requestId`; reply key. */
+  requestId: string;
+  /**
+   * The tool the agent wants to run (all fields optional per ACP).
+   *
+   * `rawInput` carries the structured tool args (e.g. `{ command }` for
+   * shell tools, `{ path, content }` for file writes). `content` and
+   * `locations` are forwarded as-is so the card can preview rich blocks
+   * / list affected files. See {@link AgentPermissionRequestEventData}.
+   */
+  toolCall: {
+    toolCallId?: string;
+    title?: string;
+    kind?: AcpToolKind;
+    rawInput?: unknown;
+    content?: AcpToolCallContent[];
+    locations?: AcpToolCallLocation[];
+  };
+  /** Options offered by the agent; one control rendered per option. */
+  options: AcpPermissionOption[];
+  /** Client-side outcome once answered; absent while still pending. */
+  resolution?: {
+    /** Option the user picked, if any. */
+    optionId?: string;
+    /** `true` when cancelled/dismissed instead of an option pick. */
+    cancelled?: boolean;
+  };
 }
 
 /**

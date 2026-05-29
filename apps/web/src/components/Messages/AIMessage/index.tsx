@@ -2,6 +2,7 @@ import { Copy } from 'lucide-react';
 
 import { groupAdjacentToolParts } from './groupParts';
 import { MilkdownMessageCard } from './MilkdownMessageCard';
+import { PermissionCard } from './PermissionCard';
 import { PlanCard } from './PlanCard';
 import { ThinkingCard } from './ThinkingCard';
 import { CanvasCommandCard } from './Tool/CanvasCommandCard';
@@ -18,6 +19,7 @@ import {
 } from '../../../store/chatTypes';
 import { copyToClipboard } from '../../../utils/io/clipboard';
 import { Button } from '../../Common/Button';
+import { ThinkingIndicator } from '../../Common/ThinkingIndicator';
 
 import type { CanvasNodeType } from '@sediment/shared';
 
@@ -49,6 +51,16 @@ export const AIMessage = ({
   // Group adjacent same-variant tool parts so e.g. a run of three
   // `inspect_nodes` calls collapses into a single merged row.
   const groups = groupAdjacentToolParts(segments);
+
+  // Show the "still generating" shimmer at the tail of a streaming
+  // turn. This is distinct from `ThinkingCard` (which renders the
+  // reasoning content): the indicator signals that more output is on
+  // the way. Suppressed when the trailing segment is a streaming
+  // thinking card, since that card already shows its own "Thinking…"
+  // label + spinner and a second one would be redundant.
+  const lastSeg = segments[lastIdx];
+  const showStreamingIndicator =
+    isStreaming && !(lastSeg && lastSeg.kind === 'thinking');
 
   return (
     <div className="flex justify-start">
@@ -124,6 +136,17 @@ export const AIMessage = ({
             return <PlanCard key={`g${gIdx}`} entries={seg.entries} />;
           }
 
+          if (seg.kind === 'permission') {
+            return (
+              <PermissionCard
+                key={`g${gIdx}`}
+                threadId={threadId}
+                messageId={messageId}
+                part={seg}
+              />
+            );
+          }
+
           if (seg.kind === 'status') {
             return (
               <div
@@ -147,6 +170,12 @@ export const AIMessage = ({
             </div>
           );
         })}
+
+        {showStreamingIndicator && (
+          <div className="ml-1 px-4 py-1">
+            <ThinkingIndicator />
+          </div>
+        )}
 
         {!isStreaming && !hideActions && (
           <div className="ml-1 flex items-center gap-1 px-3">

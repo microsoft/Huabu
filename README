@@ -193,7 +193,7 @@ folder you want the agent to work on, and start the agent of your choice:
 
 ```bash
 # GitHub Copilot CLI
-agentlet --agent "copilot --acp --allow-all"
+agentlet --agent "copilot --acp"
 
 # Claude Code
 agentlet --agent "claude --acp"
@@ -204,6 +204,26 @@ agentlet --agent "gemini --acp"
 
 That's it — the agent will show up in Sediment's external-agent panel and
 you can hand it tasks from any canvas.
+
+### Tool-permission prompts
+
+Some agents pause to ask for permission before running a tool that edits
+files, executes commands, etc. When they do, the request surfaces **inline
+in the chat** as a permission card, and the agent waits until you click
+**Allow** or **Reject** (a request times out and is treated as cancelled
+after 5 minutes).
+
+Whether you ever see these prompts is up to the agent, not Sediment:
+
+- `copilot --acp --allow-all` — the `--allow-all` flag tells Copilot to
+  **auto-approve everything on its side**, so it never sends a permission
+  request and no card appears. Drop `--allow-all` if you want to approve
+  each sensitive action yourself.
+- `claude --acp` / `gemini --acp` — these keep their own default policy and
+  will ask before risky operations (typically `edit` / `execute`).
+
+> Permission decisions are transient — they are not persisted and do not
+> appear in canvas history after a refresh.
 
 ### Updating the bundled `agentlet`
 

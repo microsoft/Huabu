@@ -247,4 +247,226 @@ describe('AcpAgentClient — orphan session/update replay', () => {
     };
     expect(firstReplayed.availableCommands[0]?.name).toBe('cmd-1');
   });
+
+  // Regression cover for the "fewer slash commands than before" bug
+  // introduced by the @agentclientprotocol/sdk integration: real agents
+  // (Claude Code, Gemini CLI) sometimes emit `AvailableCommand` items
+  // with a missing or `null` description, which the SDK's strict
+  // `zSessionNotification.parse` rejects — silently dropping the WHOLE
+  // notification along with every other command in the array.
+  //
+  // We now intercept `session/update` in the stream adapter and route
+  // raw payloads straight to dispatch, so per-item shape issues no
+  // longer wipe the entire update.
+  it('forwards available_commands_update even when a command lacks description', async () => {
+    const conn = createFakeConnection();
+    const client = new AcpAgentClient(conn, { logger: silentLogger });
+
+    const sessionId = 'sess-loose';
+    // Three commands: one well-formed, one with `description: null`,
+    // one with description omitted entirely. The SDK schema would
+    // reject the whole array; our interceptor must let it through.
+    const looseUpdate = {
+      sessionUpdate: 'available_commands_update',
+      availableCommands: [
+        { name: 'help', description: 'show help' },
+        { name: 'compact', description: null },
+        { name: 'init' },
+      ],
+    } as unknown as AcpSessionUpdate;
+
+    conn.pushMessage({
+      jsonrpc: '2.0',
+      method: 'session/update',
+      params: { sessionId, update: looseUpdate },
+    });
+    // No await needed — the interceptor dispatches synchronously,
+    // bypassing the SDK's microtask-boundary read pump.
+
+    const received: AcpSessionUpdate[] = [];
+    client.registerSessionListener(sessionId, (u) => received.push(u));
+
+    expect(received).toHaveLength(1);
+    const cmds = (received[0] as unknown as { availableCommands: unknown[] })
+      .availableCommands;
+    expect(cmds).toHaveLength(3);
+    expect((cmds[0] as { name: string }).name).toBe('help');
+    expect((cmds[1] as { name: string }).name).toBe('compact');
+    expect((cmds[2] as { name: string }).name).toBe('init');
+  });
+
+  // Belt-and-braces: even unknown `sessionUpdate` discriminators (e.g.
+  // an experimental variant the SDK schema hasn't shipped yet) must
+  // reach downstream consumers so they can decide how to handle them.
+  it('forwards unknown sessionUpdate discriminators verbatim', async () => {
+    const conn = createFakeConnection();
+    const client = new AcpAgentClient(conn, { logger: silentLogger });
+
+    const sessionId = 'sess-unknown';
+    const exotic = {
+      sessionUpdate: 'experimental_future_variant',
+      payload: { foo: 'bar' },
+    } as unknown as AcpSessionUpdate;
+
+    conn.pushMessage({
+      jsonrpc: '2.0',
+      method: 'session/update',
+      params: { sessionId, update: exotic },
+    });
+
+    const received: AcpSessionUpdate[] = [];
+    client.registerSessionListener(sessionId, (u) => received.push(u));
+
+    expect(received).toHaveLength(1);
+    expect(received[0]).toEqual(exotic);
+  });
+});
+
+describe('AcpAgentClient — permission handshake', () => {
+  it('auto-allows when NO per-turn notifier is installed', async () => {
+    const conn = createFakeConnection();
+    // Construct for its handler side-effects; no method is called directly.
+    void new AcpAgentClient(conn, { logger: silentLogger });
+
+    conn.pushMessage({
+      jsonrpc: '2.0',
+      id: 42,
+      method: 'session/request_permission',
+      params: {
+        sessionId: 'sess-perm-1',
+        toolCall: { toolCallId: 't1', title: 'Read x', kind: 'read' },
+        options: [
+          { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
+          { optionId: 'deny', name: 'Deny', kind: 'reject_once' },
+        ],
+      },
+    });
+    await flush();
+
+    const resp = conn.sent.find((m) => (m as { id?: unknown }).id === 42) as
+      | { result?: { outcome?: unknown } }
+      | undefined;
+    expect(resp?.result?.outcome).toEqual({
+      outcome: 'selected',
+      optionId: 'allow',
+    });
+  });
+
+  it('suspends until resolvePermission selects an option', async () => {
+    const conn = createFakeConnection();
+    const client = new AcpAgentClient(conn, { logger: silentLogger });
+    const sessionId = 'sess-perm-2';
+
+    let captured:
+      | { requestId: string; options: Array<{ optionId: string }> }
+      | undefined;
+    const promptPromise = client.prompt(
+      sessionId,
+      'hi',
+      () => {},
+      undefined,
+      (req) => {
+        captured = req;
+      },
+    );
+    await flush();
+    const sentPrompt = conn.sent.find(
+      (m) => (m as { method?: string }).method === 'session/prompt',
+    ) as { id?: number };
+    const promptRequestId = sentPrompt.id as number;
+
+    conn.pushMessage({
+      jsonrpc: '2.0',
+      id: 99,
+      method: 'session/request_permission',
+      params: {
+        sessionId,
+        toolCall: { toolCallId: 't-edit', title: 'Edit f', kind: 'edit' },
+        options: [{ optionId: 'ok', name: 'OK', kind: 'allow_once' }],
+      },
+    });
+    await flush();
+
+    // Notifier fired; the agent's request is still suspended.
+    expect(captured).toBeDefined();
+    expect(captured?.options).toHaveLength(1);
+    expect(
+      conn.sent.find((m) => (m as { id?: unknown }).id === 99),
+    ).toBeUndefined();
+
+    const ok = client.resolvePermission(captured!.requestId, {
+      optionId: 'ok',
+    });
+    expect(ok).toBe(true);
+    await flush();
+
+    const resp = conn.sent.find((m) => (m as { id?: unknown }).id === 99) as {
+      result?: { outcome?: unknown };
+    };
+    expect(resp.result?.outcome).toEqual({
+      outcome: 'selected',
+      optionId: 'ok',
+    });
+
+    conn.pushMessage({
+      jsonrpc: '2.0',
+      id: promptRequestId,
+      result: { stopReason: 'end_turn' },
+    });
+    await promptPromise;
+  });
+
+  it('returns a cancelled outcome when the request is cancelled', async () => {
+    const conn = createFakeConnection();
+    const client = new AcpAgentClient(conn, { logger: silentLogger });
+    const sessionId = 'sess-perm-3';
+
+    let requestId = '';
+    const promptPromise = client.prompt(
+      sessionId,
+      'hi',
+      () => {},
+      undefined,
+      (req) => {
+        requestId = req.requestId;
+      },
+    );
+    await flush();
+    const sentPrompt = conn.sent.find(
+      (m) => (m as { method?: string }).method === 'session/prompt',
+    ) as { id?: number };
+    const promptRequestId = sentPrompt.id as number;
+
+    conn.pushMessage({
+      jsonrpc: '2.0',
+      id: 7,
+      method: 'session/request_permission',
+      params: {
+        sessionId,
+        toolCall: { toolCallId: 't-run', title: 'Run', kind: 'execute' },
+        options: [{ optionId: 'go', name: 'Go', kind: 'allow_once' }],
+      },
+    });
+    await flush();
+
+    expect(client.resolvePermission(requestId, { cancelled: true })).toBe(true);
+    await flush();
+
+    const resp = conn.sent.find((m) => (m as { id?: unknown }).id === 7) as {
+      result?: { outcome?: unknown };
+    };
+    expect(resp.result?.outcome).toEqual({ outcome: 'cancelled' });
+
+    // Second resolve for the same id is a no-op false.
+    expect(client.resolvePermission(requestId, { cancelled: true })).toBe(
+      false,
+    );
+
+    conn.pushMessage({
+      jsonrpc: '2.0',
+      id: promptRequestId,
+      result: { stopReason: 'end_turn' },
+    });
+    await promptPromise;
+  });
 });
