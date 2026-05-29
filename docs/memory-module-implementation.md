@@ -207,8 +207,8 @@ apps/server/src/prompt/
 export function settingDir(): string;
 export function workspaceMemoryPath(): string; // setting/.huabu.md
 export function userSkillsDir(): string; // setting/skills/
-export function workingMemoryDir(canvasId): string; // <canvas>/.memory/
-export function workingMemoryPath(canvasId): string; // <canvas>/.memory/canvas.md
+export function canvasMemoryDir(canvasId): string; // <canvas>/.memory/
+export function canvasMemoryPath(canvasId): string; // <canvas>/.memory/canvas.md
 export function memoryStatePath(canvasId): string; // <canvas>/.memory/state.json
 ```
 

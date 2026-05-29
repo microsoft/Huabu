@@ -40,7 +40,7 @@ export type MemoryCanvasWriteArgs = Static<
 > & {
   /**
    * Injected by the executor from the request-scoped canvas id —
-   * working memory is per-canvas, so a tool call that arrives
+   * canvas memory is per-canvas, so a tool call that arrives
    * without a canvas in scope is rejected upstream.
    */
   canvasId: string;

@@ -10,8 +10,8 @@
  *     canvas.json                   carries the stable canvasId
  *     nodes/<safe(label)>.md        per-node markdown (id in frontmatter)
  *     .artifacts/<artifactId><ext>  raw uploads (hidden dir)
- *     .memory/                      canvas-scoped working memory (AI-private)
- *       canvas.md                   working memory body
+ *     .memory/                      canvas-scoped canvas memory (AI-private)
+ *       canvas.md                   canvas memory body
  *       state.json                  memory worker bookkeeping
  *     .history/
  *       chat/<threadId>.json        pi-ai Context (messages, append-only)
@@ -71,15 +71,15 @@ export function artifactPath(canvasId: string, filename: string): string {
  * @deprecated Legacy V0 memory directory (`<canvasDir>/memory/`).
  * Retained only so the one-shot {@link import('./migrate-memory.js').migrateLegacyMemory}
  * pass can find old `preferences.md` files and mv them into `.memory/canvas.md`.
- * Do not use in new code — the active path is {@link workingMemoryDir}.
+ * Do not use in new code — the active path is {@link canvasMemoryDir}.
  */
 export function memoryDir(canvasId: string): string {
   return path.join(canvasRoot(canvasId), 'memory');
 }
 
 /**
- * @deprecated See {@link memoryDir}. The current working memory path
- * is {@link workingMemoryPath}.
+ * @deprecated See {@link memoryDir}. The current canvas memory path
+ * is {@link canvasMemoryPath}.
  */
 export function prefsPath(canvasId: string): string {
   return path.join(memoryDir(canvasId), 'preferences.md');
@@ -90,7 +90,7 @@ export function prefsPath(canvasId: string): string {
 // Two scopes:
 //   - Workspace memory (`<workspace>/setting/.huabu.md`):
 //     cross-canvas user preferences / profile. User-editable.
-//   - Canvas-level working memory (`<canvasDir>/.memory/`): hidden,
+//   - Canvas-level canvas memory (`<canvasDir>/.memory/`): hidden,
 //     AI-private working notes for *this* canvas. The leading `.` puts
 //     it in the same hidden tier as `.history/` and `.artifacts/`.
 
@@ -99,16 +99,16 @@ export function workspaceMemoryPath(): string {
   return path.join(settingDir(), '.huabu.md');
 }
 
-/** Hidden directory holding canvas-scoped working memory + bookkeeping. */
+/** Hidden directory holding canvas-scoped canvas memory + bookkeeping. */
 export const WORKING_MEMORY_DIR_NAME = '.memory';
 
-export function workingMemoryDir(canvasId: string): string {
+export function canvasMemoryDir(canvasId: string): string {
   return path.join(canvasRoot(canvasId), WORKING_MEMORY_DIR_NAME);
 }
 
 /** Working memory body for a canvas. */
-export function workingMemoryPath(canvasId: string): string {
-  return path.join(workingMemoryDir(canvasId), 'canvas.md');
+export function canvasMemoryPath(canvasId: string): string {
+  return path.join(canvasMemoryDir(canvasId), 'canvas.md');
 }
 
 /**
@@ -118,7 +118,7 @@ export function workingMemoryPath(canvasId: string): string {
  * Read/written by `modules/agent/memory/trigger.ts` (PR-B/C).
  */
 export function memoryStatePath(canvasId: string): string {
-  return path.join(workingMemoryDir(canvasId), 'state.json');
+  return path.join(canvasMemoryDir(canvasId), 'state.json');
 }
 
 // ─── Workspace-level setting / user skills ─────────────────────────────────
@@ -130,7 +130,7 @@ export function memoryStatePath(canvasId: string): string {
  *   - `skills/<id>/SKILL.md` user-authored / memory-agent-authored skills
  *
  * Distinct from the per-canvas `memory/` directory (which is
- * canvas-scoped working memory, AI-private). This one is the
+ * canvas-scoped canvas memory, AI-private). This one is the
  * cross-canvas, user-editable surface.
  */
 export function settingDir(): string {

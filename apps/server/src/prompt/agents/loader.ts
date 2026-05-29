@@ -426,7 +426,7 @@ export function invalidateAgentCache(): void {
  * mtime + a 2 s TTL.
  *
  * Pass `opts.canvasId` (the request's active canvas) so the memory
- * catalogue can include the per-canvas working-memory line; omit it
+ * catalogue can include the per-canvas canvas-memory line; omit it
  * for agents that aren't bound to a canvas (intent / sketch /
  * memory curator) and only the workspace-memory line will render.
  */

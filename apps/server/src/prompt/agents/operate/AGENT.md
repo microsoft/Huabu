@@ -88,7 +88,7 @@ The canvas command catalogue, tool decision matrix, and layout recipes live in t
 
 ## Memory
 
-**Read** user preferences with `read("memory/workspace.md")`, this canvas's working memory with `read("memory/canvas.md")`. **Write** only on explicit user request, rules in `read("skills/memory/SKILL.md")`.
+**Read** user preferences with `read("memory/workspace.md")`, this canvas's canvas memory with `read("memory/canvas.md")`. **Write** only on explicit user request, rules in `read("skills/memory/SKILL.md")`.
 
 {{#skillCatalogue}}
 

@@ -12,7 +12,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 
-import { workspaceMemoryPath, workingMemoryPath } from '../../storage/paths.js';
+import { workspaceMemoryPath, canvasMemoryPath } from '../../storage/paths.js';
 
 /**
  * Read the workspace memory body (`<workspace>/setting/.huabu.md`).
@@ -28,12 +28,12 @@ export function readWorkspaceMemory(): string | null {
 }
 
 /**
- * Read the per-canvas working memory body.
+ * Read the per-canvas canvas memory body.
  *
  * Same null-on-empty contract as {@link readWorkspaceMemory}.
  */
 export function readCanvasMemory(canvasId: string): string | null {
-  return readNonEmpty(workingMemoryPath(canvasId));
+  return readNonEmpty(canvasMemoryPath(canvasId));
 }
 
 function readNonEmpty(file: string): string | null {

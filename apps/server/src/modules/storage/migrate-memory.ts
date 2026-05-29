@@ -5,7 +5,7 @@
  * The memory module redesign collapses two artifacts:
  *   - the old legacy `memory/preferences.md` (per-canvas user-visible
  *     preferences, never wired into a prompt) and
- *   - the new `.memory/canvas.md` (per-canvas working memory, hidden,
+ *   - the new `.memory/canvas.md` (per-canvas canvas memory, hidden,
  *     written by the memory sub-agent and read back as a preamble).
  *
  * They serve different roles, but the existing files are typically
@@ -109,7 +109,7 @@ export function migrateLegacyMemory(
           mkdirSync(newDir, { recursive: true });
           writeFileSync(newFile, `${body}\n`, 'utf8');
           migrated++;
-          logger.info('migrated working memory', { canvas: name });
+          logger.info('migrated canvas memory', { canvas: name });
         }
       } catch (err) {
         logger.warn('failed reading legacy preferences.md, leaving in place', {
@@ -154,9 +154,9 @@ export function migrateLegacyMemory(
  *
  * The legacy `preferences.md` writer (`writePreferences` in
  * `canvas-store.ts`) emitted a frontmatter block with arbitrary
- * key-value pairs in front of the body. For the new working memory
+ * key-value pairs in front of the body. For the new canvas memory
  * file we only want the prose body — frontmatter metadata is not part
- * of the working-memory contract. A real YAML parser is overkill here;
+ * of the canvas-memory contract. A real YAML parser is overkill here;
  * a simple `---` / `---` envelope strip is all that is needed.
  */
 function stripFrontmatter(raw: string): string {

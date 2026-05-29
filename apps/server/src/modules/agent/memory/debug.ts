@@ -38,7 +38,7 @@ import {
   workspaceMemoryPath,
   memoryStatePath,
   userSkillsDir,
-  workingMemoryPath,
+  canvasMemoryPath,
 } from '../../storage/paths.js';
 import { getWorkspacePath } from '../../workspace.js';
 
@@ -133,7 +133,7 @@ interface MemorySnapshot {
     canvasId: string;
     title: string | null;
     state: ReturnType<typeof readMemoryState> | null;
-    working: FilePeek;
+    canvas: FilePeek;
     events: MemoryDebugEvent[];
   };
 }
@@ -283,7 +283,7 @@ function buildSnapshot(canvasId: string | null): MemorySnapshot {
         canvasId,
         title: known.title,
         state,
-        working: peek(workingMemoryPath(canvasId)),
+        canvas: peek(canvasMemoryPath(canvasId)),
         events: [...(buffers.get(canvasId) ?? [])].reverse(),
       };
     }
@@ -509,9 +509,9 @@ function renderDebugHtml(): string {
       const parts = [];
       parts.push(renderFile('workspace memory (cross-canvas)', snap.workspace.memory));
       if (snap.selected) {
-        parts.push(renderFile('working memory (this canvas)', snap.selected.working));
+        parts.push(renderFile('canvas memory (this canvas)', snap.selected.canvas));
       } else {
-        parts.push('<div class="empty" style="margin-top:8px">working memory only shown when a canvas is picked</div>');
+        parts.push('<div class="empty" style="margin-top:8px">canvas memory only shown when a canvas is picked</div>');
       }
       $('files-panel').innerHTML = parts.join('');
     }

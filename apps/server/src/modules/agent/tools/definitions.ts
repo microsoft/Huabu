@@ -511,15 +511,15 @@ export const memoryWorkspaceWriteTool: ToolDefinition = {
 export const memoryCanvasWriteParamsSchema = Type.Object({
   body: Type.String({
     description:
-      'Markdown body that wholesale replaces the current working memory. Treat as a one-paragraph briefing for the next agent landing on this canvas cold.',
+      'Markdown body that wholesale replaces the current canvas memory. Treat as a one-paragraph briefing for the next agent landing on this canvas cold.',
   }),
 });
 
 export const memoryCanvasWriteTool: ToolDefinition = {
   name: 'memory_canvas_write',
-  label: 'Write working memory',
+  label: 'Write canvas memory',
   description:
-    'Replace `<canvasDir>/.memory/canvas.md` — per-canvas working memory. Wholesale replacement, not a delta: write the *current state* of the canvas in ≤ 4 KB / 80 lines. Writer rejects oversized bodies. Required args + discipline: `read("skills/memory/write/canvas-memory-writing.md")`.',
+    'Replace `<canvasDir>/.memory/canvas.md` — per-canvas canvas memory. Wholesale replacement, not a delta: write the *current state* of the canvas in ≤ 4 KB / 80 lines. Writer rejects oversized bodies. Required args + discipline: `read("skills/memory/write/canvas-memory-writing.md")`.',
   parameters: memoryCanvasWriteParamsSchema,
   executionMode: 'sequential',
 };

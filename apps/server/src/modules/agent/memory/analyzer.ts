@@ -7,7 +7,7 @@
  *   1. Build the system prompt from `prompt/agents/memory/AGENT.md`.
  *   2. Assemble a compact context bundle from disk: canvas snapshot,
  *      chat-thread digest, recent ops, current contents of every
- *      memory surface (workspace, working, user-skill catalogue).
+ *      memory surface (workspace, canvas, user-skill catalogue).
  *   3. Run the sub-agent against that context. The agent's only way
  *      to affect the world is via the three `memory_*_write` tools,
  *      whose handlers wrap the writers in `./writers.ts`.
@@ -34,7 +34,7 @@ import {
   chatDir,
   eventsPath,
   workspaceMemoryPath,
-  workingMemoryPath,
+  canvasMemoryPath,
 } from '../../storage/paths.js';
 
 import type { MemoryLogger } from './index.js';
@@ -205,7 +205,7 @@ function assembleContext(canvasId: string): ContextBundle {
   messages.push({
     role: 'user',
     content:
-      'Analyse the observations above. Update workspace, working, or skill memory only if there is high-confidence value in doing so. Output nothing in free-form text — use tool calls.',
+      'Analyse the observations above. Update workspace, canvas, or skill memory only if there is high-confidence value in doing so. Output nothing in free-form text — use tool calls.',
     timestamp: Date.now(),
   });
 
@@ -418,10 +418,10 @@ function readMemorySnapshot(canvasId: string): string {
   parts.push('## Long-term memory');
   parts.push(longTerm.trim().length > 0 ? longTerm.trim() : '(empty)');
 
-  const working = readFileSafe(workingMemoryPath(canvasId));
+  const canvas = readFileSafe(canvasMemoryPath(canvasId));
   parts.push('');
-  parts.push('## Working memory');
-  parts.push(working.trim().length > 0 ? working.trim() : '(empty)');
+  parts.push('## Canvas memory');
+  parts.push(canvas.trim().length > 0 ? canvas.trim() : '(empty)');
 
   parts.push('');
   parts.push('## User-skill catalogue');

@@ -21,10 +21,10 @@
 | 层                          | 范围   | 路径                                       | 用户可见                 | 用途                                          |
 | --------------------------- | ------ | ------------------------------------------ | ------------------------ | --------------------------------------------- |
 | Long-term (user preference) | 跨画布 | `<workspace>/setting/.huabu.md`            | ✅ 可读可改              | 用户画像、风格偏好、回答长短、配色 / 布局倾向 |
-| Short-term (working memory) | 单画布 | `<workspace>/<canvas>/.memory/canvas.md`   | ❌ 隐藏（同 `.history`） | 这张画布当前在做什么、目的、已确认的小决定    |
+| Short-term (canvas memory) | 单画布 | `<workspace>/<canvas>/.memory/canvas.md`   | ❌ 隐藏（同 `.history`） | 这张画布当前在做什么、目的、已确认的小决定    |
 | Skill memory                | 跨画布 | `<workspace>/setting/skills/<id>/SKILL.md` | ✅ 可读可改              | 可复用的做法 / recipe                         |
 
-**单文件约束**：workspace memory 和 working memory 都是单 markdown 文件，硬上限 4 KB body / 80 行。超限触发自压缩。Skill 没有体积上限，但新增门槛极高（见 §3.3）。
+**单文件约束**：workspace memory 和 canvas memory 都是单 markdown 文件，硬上限 4 KB body / 80 行。超限触发自压缩。Skill 没有体积上限，但新增门槛极高（见 §3.3）。
 
 **与 system skills 的关系**：系统自带的 `skills/canvas/`、`skills/sketch-gestures/` 仍在 server 仓库里随程序发布，**用户不可改**。用户记忆产出的 skill 落在 workspace 的 `setting/skills/`。同名时主动拼接，详见 [memory-module-implementation.md §1](./memory-module-implementation.md#1-skills-双源)。
 
@@ -128,7 +128,7 @@ LLM 想造新 skill 必须满足：
 
 ### 3.4 安全
 
-- 三个 memory write tool 都用现有 `safeResolve` 同款 sandbox 思路，但根目录换成 workspace（workspace memory / skills）或 `<canvas>/.memory/`（working memory）。新建 `memorySandbox` 模块，禁止 `..` 逃逸。
+- 三个 memory write tool 都用现有 `safeResolve` 同款 sandbox 思路，但根目录换成 workspace（workspace memory / skills）或 `<canvas>/.memory/`（canvas memory）。新建 `memorySandbox` 模块，禁止 `..` 逃逸。
 - Memory sub-agent **不持有** read / grep / find / ls / canvas_commands / web_search，工具白名单只有三个 memory write + `read`（且 `read` 只放行 `skills/` 和 `memory/` 前缀，便于自查）。
 
 ---
@@ -158,8 +158,8 @@ apps/server/src/prompt/agents/memory/
 export function settingDir(): string; // <workspace>/setting/
 export function workspaceMemoryPath(): string; // <workspace>/setting/.huabu.md
 export function userSkillsDir(): string; // <workspace>/setting/skills/
-export function workingMemoryDir(canvasId): string; // <canvas>/.memory/
-export function workingMemoryPath(canvasId): string; // <canvas>/.memory/canvas.md
+export function canvasMemoryDir(canvasId): string; // <canvas>/.memory/
+export function canvasMemoryPath(canvasId): string; // <canvas>/.memory/canvas.md
 export function memoryStatePath(canvasId): string; // <canvas>/.memory/state.json
 ```
 
@@ -171,7 +171,7 @@ export function memoryStatePath(canvasId): string; // <canvas>/.memory/state.jso
 
 | 现有                                                                                                 | 变更                                                                 |
 | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| [`CanvasStore.readPreferences/writePreferences`](../apps/server/src/modules/storage/canvas-store.ts) | 删除（被 working-memory writer 取代）                                    |
+| [`CanvasStore.readPreferences/writePreferences`](../apps/server/src/modules/storage/canvas-store.ts) | 删除（被 canvas-memory writer 取代）                                    |
 | `<canvas>/memory/` 目录                                                                              | 启动迁移到 `<canvas>/.memory/`，前缀加 `.` 让它进 `ALWAYS_SKIP` 一类 |
 | `events.jsonl`                                                                                       | 不变，memory trigger 复用同一份数据                                  |
 | `skills/canvas/`、`skills/sketch-gestures/`                                                          | 不变，归类为 **system**（见实现文档 §1）                             |

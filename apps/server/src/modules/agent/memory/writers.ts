@@ -36,7 +36,7 @@ import { atomicWriteText, mkdirp } from '../../storage/io.js';
 import {
   settingDir,
   userSkillsDir,
-  workingMemoryDir,
+  canvasMemoryDir,
 } from '../../storage/paths.js';
 
 import type { MemoryLogger } from './index.js';
@@ -49,7 +49,7 @@ export interface WriteResult {
   reason: string;
 }
 
-/** Body cap shared by workspace + working memory. */
+/** Body cap shared by workspace + canvas memory. */
 export const MEMORY_BYTE_CAP = 4 * 1024;
 export const MEMORY_LINE_CAP = 80;
 
@@ -154,7 +154,7 @@ function stripBulletPrefix(line: string): string {
 /**
  * Replace `<canvasDir>/.memory/canvas.md` with the supplied body.
  *
- * Wholesale replacement is intentional: working memory is the
+ * Wholesale replacement is intentional: canvas memory is the
  * agent's "current state" briefing for the canvas, not a journal.
  * Cap check applies to the body.
  */
@@ -170,10 +170,10 @@ export function writeCanvasMemory(args: {
     const capCheck = checkCap(body);
     if (!capCheck.ok) return reject(target, capCheck.reason);
 
-    mkdirp(workingMemoryDir(args.canvasId));
+    mkdirp(canvasMemoryDir(args.canvasId));
     atomicWriteText(target, body);
     args.logger?.info(
-      `[memory] working memory replaced for canvas ${args.canvasId} (${body.length} bytes)`,
+      `[memory] canvas memory replaced for canvas ${args.canvasId} (${body.length} bytes)`,
     );
     return { ok: true, target, reason: 'replaced' };
   } catch (err) {

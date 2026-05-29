@@ -9,6 +9,10 @@ appliesTo: [ask, operate, sketch, external]
 
 You may issue **0 to 3** memory-write tool calls per turn — at most one per tier. Zero is a valid answer; do not write speculatively.
 
+- **workspace** — durable cross-canvas user traits (style, preferences) that should bias every future canvas.
+- **canvas** — this canvas's current purpose / user intent / open decisions; a 1-paragraph briefing for the next agent that lands here cold.
+- **skill** — reusable how-to (decision rules, recipes, patterns) any future agent on an unrelated canvas could apply.
+
 | Tier      | Tool                     | Sub-skill (read before writing)                           |
 | --------- | ------------------------ | --------------------------------------------------------- |
 | workspace | `memory_workspace_write` | `read("skills/memory/write/workspace-memory-writing.md")` |

@@ -5,7 +5,7 @@
  *
  *   - **Workspace root** (`<workspace>/setting/`) — workspace memory
  *     (`.huabu.md`) and user-skill SKILL.md files.
- *   - **Canvas root** (`<canvasDir>/.memory/`) — working memory body
+ *   - **Canvas root** (`<canvasDir>/.memory/`) — canvas memory body
  *     (`canvas.md`) and the worker's `state.json`.
  *
  * Everything else is rejected. Each writer goes through
@@ -26,8 +26,8 @@ import {
   workspaceMemoryPath,
   settingDir,
   userSkillsDir,
-  workingMemoryDir,
-  workingMemoryPath,
+  canvasMemoryDir,
+  canvasMemoryPath,
 } from '../../storage/paths.js';
 
 /** Thrown by every resolver below on out-of-sandbox attempts. */
@@ -96,7 +96,7 @@ export function resolveUserSkillPath(id: string): string {
 }
 
 /**
- * Resolve the absolute working-memory file path for a canvas.
+ * Resolve the absolute canvas-memory file path for a canvas.
  *
  * `<canvasDir>/.memory/canvas.md`. Throws if the resolved path
  * escapes the canvas's `.memory/` root (a defensive check — the path
@@ -104,8 +104,8 @@ export function resolveUserSkillPath(id: string): string {
  * but going through `ensureUnderRoot` keeps the invariant explicit).
  */
 export function resolveWorkingMemoryPath(canvasId: string): string {
-  const root = workingMemoryDir(canvasId);
-  const target = workingMemoryPath(canvasId);
-  ensureUnderRoot(root, target, 'working memory');
+  const root = canvasMemoryDir(canvasId);
+  const target = canvasMemoryPath(canvasId);
+  ensureUnderRoot(root, target, 'canvas memory');
   return target;
 }

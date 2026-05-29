@@ -102,7 +102,7 @@ export function initWorkspaceFromEnv(): void {
   // One-shot rewrite of legacy full artifact URLs to bare keys (sentinel-gated).
   migrateBareArtifactKeys(_workspacePath);
   // One-shot move of legacy `<canvas>/memory/preferences.md` into the
-  // new `<canvas>/.memory/canvas.md` working-memory file (sentinel-gated).
+  // new `<canvas>/.memory/canvas.md` canvas-memory file (sentinel-gated).
   migrateLegacyMemory(_workspacePath);
 }
 
@@ -184,7 +184,7 @@ export function setWorkspacePath(newPath: string): void {
   // One-shot rewrite of legacy full artifact URLs to bare keys (sentinel-gated).
   migrateBareArtifactKeys(_workspacePath);
   // One-shot move of legacy `<canvas>/memory/preferences.md` into the
-  // new `<canvas>/.memory/canvas.md` working-memory file (sentinel-gated).
+  // new `<canvas>/.memory/canvas.md` canvas-memory file (sentinel-gated).
   migrateLegacyMemory(_workspacePath);
 }
 

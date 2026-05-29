@@ -1,4 +1,4 @@
-# Canvas working memory — `memory_canvas_write`
+# Canvas canvas memory — `memory_canvas_write`
 
 **Target file:** `<canvas>/.memory/canvas.md` — per-canvas situational notes ("what's this canvas about right now"). Hidden from the user; consumed by future agents that land on this canvas cold.
 
