@@ -1077,12 +1077,9 @@ const agentRoutes: FastifyPluginAsync = async (
     // Build or resume context.
     //
     // We re-render the agent's system prompt on every turn so the
-    // `{{skillCatalogue}}` and `{{memoryCatalogue}}` placeholders
-    // reflect freshly written user skills and current memory file
-    // sizes. `canvasId` flows into `loadAgent({ canvasId })` so the
-    // working-memory line in the memory catalogue points at the
-    // right per-canvas file (or is omitted when the request has no
-    // canvas bound).
+    // `{{skillCatalogue}}` placeholder reflects freshly written user
+    // skills. `canvasId` flows into `loadAgent({ canvasId })` for
+    // forward compatibility with future per-canvas template vars.
     let context = loadContext(resolvedThreadId, canvasId);
     const agentCfg = loadAgent(mode, { canvasId });
 

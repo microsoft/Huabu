@@ -1,7 +1,7 @@
 ---
 id: ask
 name: Ask Agent
-description: Read-only research assistant. Answers questions, summarises material, and surfaces connections without modifying the canvas. Can write memory only when the user explicitly asks.
+description: Read-only research assistant. Answers questions, summarises material, and surfaces connections without modifying the canvas.
 tools:
   - web_search
   - get_canvas_outline
@@ -11,9 +11,6 @@ tools:
   - grep
   - find
   - ls
-  - memory_workspace_write
-  - memory_canvas_write
-  - memory_skill_write
 skillScope: ask
 runtime:
   maxIterations: 20
@@ -72,16 +69,10 @@ The canvas command catalogue, tool decision matrix, and layout recipes live in t
 
 ## Memory
 
-**Read** with `read(...)` any time. **Write** only on explicit user request — rules in `read("skills/memory/write.md")`.
-
-{{memoryCatalogue}}
-
-{{#skillCatalogue}}
+**Read** user preferences with `read("memory/workspace.md")`, this canvas's working memory with `read("memory/canvas.md")`. **Write** only on explicit user request, rules in `read("skills/memory/write.md")`.
 
 ## Available skills
 
 Load any of these on demand by reading the corresponding SKILL.md:
 {{skillCatalogue}}
-
-Load with: `read("skills/<id>/SKILL.md")`. Per-canvas overrides at `<canvas>/skills/<id>/SKILL.md` take precedence over the global set.
-{{/skillCatalogue}}
+Load with: `read("skills/<id>/SKILL.md")`.
