@@ -358,6 +358,38 @@ interface StreamEventContext {
 }
 
 /**
+ * Subset of `AgentStreamEvent` the ACP session-meta sink consumes.
+ * Kept structural (not imported from the hook file) so the sink stays
+ * decoupled from this module's other concerns.
+ */
+export type AcpSessionMetaStreamEvent = Extract<
+  AgentStreamEvent,
+  {
+    type:
+      | 'session_mode_update'
+      | 'config_options_update'
+      | 'session_info_update'
+      | 'session_usage_update';
+  }
+>;
+
+/**
+ * Module-level sink for session-meta events. A single subscriber (the
+ * ChatPanel's `useAcpSessionMeta` hook) registers itself on mount via
+ * {@link setAcpSessionMetaSink} so `handleStreamEvent` can dispatch
+ * meta updates without re-plumbing every event through props.
+ *
+ * Last-writer-wins by design — there is only ever one ChatPanel
+ * mounted at a time (the canvas chat OR a question-thread view, never
+ * both), so concurrent subscribers would be a bug.
+ */
+type AcpSessionMetaSink = (event: AcpSessionMetaStreamEvent) => void;
+let acpSessionMetaSink: AcpSessionMetaSink | null = null;
+export function setAcpSessionMetaSink(sink: AcpSessionMetaSink | null): void {
+  acpSessionMetaSink = sink;
+}
+
+/**
  * Ensure an assistant message exists for `ctx.assistantId`. Used by
  * the tool-call / plan handlers which may fire before any text_delta.
  */
@@ -793,6 +825,17 @@ export function handleStreamEvent(
         ...(event.data.error ? { error: event.data.error } : {}),
       });
     }
+  } else if (
+    event.type === 'session_mode_update' ||
+    event.type === 'config_options_update' ||
+    event.type === 'session_info_update' ||
+    event.type === 'session_usage_update'
+  ) {
+    // Session-meta updates have no message-list impact — they drive
+    // the ChatPanel's mode/model/config selector dropdowns. Hand off
+    // to the registered sink (see {@link setAcpSessionMetaSink}); if
+    // no panel is mounted (e.g. tests, headless reconnect), drop.
+    acpSessionMetaSink?.(event);
   }
 }
 

@@ -19,14 +19,25 @@
  *     agentlet `onDisconnection` callback in `server-mount.ts` to evict
  *     all sessions for that agentId proactively.
  *
- * In-memory only; no persistence across server restarts. After a restart,
- * the first prompt on each thread reopens a fresh ACP session \u2014 the
- * external agent loses its session memory but Sediment's own chat history
- * (loaded via `loadContext`) is unaffected.
+ * In-memory only; no persistence across server restarts. A companion
+ * disk store (`session-store.ts`) persists `(canvasId, threadId) →
+ * sessionId` so `ensureAcpSession` can recover the ACP session via
+ * `session/load` after a restart, preserving the external agent's
+ * memory. The first prompt on each thread after a restart triggers
+ * that recovery; if `session/load` fails (e.g. agent itself was
+ * restarted) we fall back to `session/new` and Sediment's own chat
+ * history (loaded via `loadContext`) remains the source of truth for
+ * what the user sees.
  */
 
 import type { AcpAgentClient } from './client.js';
-import type { AvailableCommand } from '@sediment/shared';
+import type {
+  AcpCost,
+  AcpModelInfo,
+  AcpSessionConfigOption,
+  AcpSessionMode,
+  AvailableCommand,
+} from '@sediment/shared';
 
 /** A single live ACP session owned by one Sediment thread. */
 export interface AcpSessionEntry {
@@ -69,6 +80,54 @@ export interface AcpSessionEntry {
    * decide whether to do a delayed re-pull (catch late arrivals).
    */
   commandsUpdatedAt: number;
+  /**
+   * Catalogue of selectable modes published by the agent via the
+   * `session/new` (or `session/load`) response's `modes` field.
+   * `current_mode_update` notifications only carry `currentModeId`,
+   * so the list itself is seeded once at session creation time and
+   * left untouched until the session is rebuilt.
+   */
+  availableModes: AcpSessionMode[];
+  /**
+   * Currently-active mode id. Seeded from `modes.currentModeId` on
+   * session creation; subsequently updated by `current_mode_update`
+   * notifications and by successful `setSessionMode` calls.
+   */
+  currentModeId: string | null;
+  /**
+   * Catalogue of selectable models (experimental ACP capability).
+   * Same seeding rules as `availableModes` — there is no
+   * dedicated update notification, so the list is fixed at
+   * session creation time.
+   */
+  availableModels: AcpModelInfo[];
+  /**
+   * Currently-active model id. Seeded from `models.currentModelId`
+   * and refreshed by successful `setSessionModel` calls.
+   */
+  currentModelId: string | null;
+  /**
+   * Free-form configuration knobs surfaced as UI selectors (Copilot
+   * publishes four: model / mode / thought-level / auto-approve).
+   * Updated wholesale by `config_option_update` notifications and
+   * also returned by `setSessionConfigOption`.
+   */
+  configOptions: AcpSessionConfigOption[];
+  /**
+   * Last `session_info_update` payload — title + activity stamp.
+   * `null` until the agent pushes one.
+   */
+  sessionInfo: { title: string | null; updatedAt: string | null } | null;
+  /**
+   * Last `usage_update` payload — context-window / cost gauge.
+   * `null` until the agent pushes one.
+   */
+  usage: { used: number; size: number; cost: AcpCost | null } | null;
+  /**
+   * Epoch ms of the most recent meta touch (any of the five fields
+   * above). UI uses this to detect stale snapshots after reconnect.
+   */
+  metaUpdatedAt: number;
 }
 
 class AcpSessionRegistry {
@@ -102,6 +161,17 @@ class AcpSessionRegistry {
   /** Number of live sessions \u2014 used by tests / diagnostics. */
   get size(): number {
     return this.byThread.size;
+  }
+
+  /**
+   * Iterate over all live `(threadId, entry)` pairs. Used by
+   * persistence helpers in service.ts that need to reverse-look-up the
+   * threadId for an entry. The returned iterator is a thin pass-through
+   * to the underlying Map iterator and is invalidated by concurrent
+   * mutation — callers MUST NOT call `set`/`remove` mid-iteration.
+   */
+  entries(): IterableIterator<[string, AcpSessionEntry]> {
+    return this.byThread.entries();
   }
 }
 

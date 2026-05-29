@@ -19,14 +19,20 @@
 
 import { fauxAssistantMessage } from '@earendil-works/pi-ai';
 
-import { AcpAgentClient } from './client.js';
+import { AcpAgentClient, agentSupportsLoadSession } from './client.js';
 import {
   prepareExternalAgentPrompt,
   serializeRawPrompt,
 } from './preprocessor.js';
 import { getAgentletServer } from './server-mount.js';
 import { acpSessionRegistry } from './session-registry.js';
-import { acpUpdateToStreamEvent } from './translator.js';
+import {
+  deleteAcpSessionRecord,
+  readAcpSessionRecord,
+  writeAcpSessionMeta,
+  writeAcpSessionRecord,
+} from './session-store.js';
+import { acpUpdateToStreamEvent, mergeThinkingChunk } from './translator.js';
 import { canvasRoot as resolveCanvasRoot } from '../../storage/paths.js';
 import {
   emptySidecar,
@@ -38,9 +44,16 @@ import {
 } from '../store/chat-parts-store.js';
 
 import type { AcpSessionEntry } from './session-registry.js';
+import type { AcpSessionPersistedMeta } from './session-store.js';
 import type { ChatPartsSidecar } from '../store/chat-parts-store.js';
 import type { AssistantMessage, Context } from '@earendil-works/pi-ai';
-import type { AcpPlanEntry, AcpSessionUpdate } from '@sediment/shared';
+import type {
+  AcpModelInfo,
+  AcpPlanEntry,
+  AcpSessionConfigOption,
+  AcpSessionMode,
+  AcpSessionUpdate,
+} from '@sediment/shared';
 import type {
   AgentChatContext,
   AgentStreamEvent,
@@ -175,6 +188,143 @@ function ensureSessionKey(
 }
 
 /**
+ * Per-`(canvasId, threadId)` debounce slots for meta persistence. Meta
+ * updates can arrive in bursts (e.g. an `available_commands_update`
+ * immediately followed by a `config_option_update` on session warm-up,
+ * or a flurry of `usage_update`s during a long turn), and persisting
+ * each one independently would hit the JSON store dozens of times per
+ * second on a busy thread. We collapse them into a single tail-write
+ * by deferring the flush by {@link META_PERSIST_DEBOUNCE_MS}.
+ *
+ * Cancellation: callers MUST invoke `cancelPersistEntryMeta` whenever
+ * the record is being deleted (binding switch, canvas switch, load
+ * failure) — otherwise a queued timer could re-create the file
+ * milliseconds after a deliberate `deleteAcpSessionRecord` call.
+ */
+const META_PERSIST_DEBOUNCE_MS = 250;
+const pendingMetaPersists = new Map<string, NodeJS.Timeout>();
+
+function metaPersistKey(canvasId: string, threadId: string): string {
+  return `${canvasId}|${threadId}`;
+}
+
+function snapshotEntryMeta(entry: AcpSessionEntry): AcpSessionPersistedMeta {
+  return {
+    availableCommands: entry.availableCommands,
+    commandsUpdatedAt: entry.commandsUpdatedAt,
+    availableModes: entry.availableModes,
+    currentModeId: entry.currentModeId,
+    availableModels: entry.availableModels,
+    currentModelId: entry.currentModelId,
+    configOptions: entry.configOptions,
+    sessionInfo: entry.sessionInfo,
+    usage: entry.usage,
+    metaUpdatedAt: entry.metaUpdatedAt,
+  };
+}
+
+/**
+ * Hydrate a fresh registry entry from a previously-persisted meta
+ * snapshot. Used by the "already loaded" recovery path where neither
+ * `session/new` nor `session/load` provides a meta seed and the agent
+ * will not re-emit notifications because it never dropped the session
+ * from its own memory.
+ *
+ * Each field is only restored when the snapshot actually contains it
+ * (i.e. the agent had pushed that variant before the server restart),
+ * so we never overwrite an explicit empty default with `undefined`.
+ */
+function hydrateEntryFromPersistedMeta(
+  entry: AcpSessionEntry,
+  meta: AcpSessionPersistedMeta,
+): void {
+  if (meta.availableCommands) entry.availableCommands = meta.availableCommands;
+  if (typeof meta.commandsUpdatedAt === 'number') {
+    entry.commandsUpdatedAt = meta.commandsUpdatedAt;
+  }
+  if (meta.availableModes) entry.availableModes = meta.availableModes;
+  if (meta.currentModeId !== undefined)
+    entry.currentModeId = meta.currentModeId;
+  if (meta.availableModels) entry.availableModels = meta.availableModels;
+  if (meta.currentModelId !== undefined) {
+    entry.currentModelId = meta.currentModelId;
+  }
+  if (meta.configOptions) entry.configOptions = meta.configOptions;
+  if (meta.sessionInfo !== undefined) entry.sessionInfo = meta.sessionInfo;
+  if (meta.usage !== undefined) entry.usage = meta.usage;
+  if (typeof meta.metaUpdatedAt === 'number') {
+    entry.metaUpdatedAt = meta.metaUpdatedAt;
+  }
+}
+
+/**
+ * Schedule (or reschedule) a debounced write of the entry's current
+ * meta snapshot to disk. Safe to call from notification handlers on
+ * the hot path — the actual write happens asynchronously and never
+ * throws (failures are logged and swallowed; we never want a
+ * persistence hiccup to kill an SSE stream).
+ *
+ * No-op when the entry has no `canvasId` (anonymous-canvas threads
+ * are not persisted at all — see `writeAcpSessionRecord`).
+ */
+function schedulePersistEntryMeta(
+  entry: AcpSessionEntry,
+  logger: FastifyBaseLogger,
+): void {
+  if (!entry.canvasId) return;
+  const threadId = findThreadIdForEntry(entry);
+  if (!threadId) return;
+  const key = metaPersistKey(entry.canvasId, threadId);
+  const prior = pendingMetaPersists.get(key);
+  if (prior) clearTimeout(prior);
+  const timer = setTimeout(() => {
+    pendingMetaPersists.delete(key);
+    try {
+      writeAcpSessionMeta(entry.canvasId, threadId, snapshotEntryMeta(entry));
+    } catch (err) {
+      logger.warn(
+        {
+          threadId,
+          canvasId: entry.canvasId,
+          err: err instanceof Error ? err.message : String(err),
+        },
+        '[acp] failed to persist session meta snapshot (will retry on next update)',
+      );
+    }
+  }, META_PERSIST_DEBOUNCE_MS);
+  // `unref` so a stale pending timer never blocks process shutdown.
+  if (typeof timer.unref === 'function') timer.unref();
+  pendingMetaPersists.set(key, timer);
+}
+
+function cancelPersistEntryMeta(canvasId: string, threadId: string): void {
+  if (!canvasId) return;
+  const key = metaPersistKey(canvasId, threadId);
+  const prior = pendingMetaPersists.get(key);
+  if (prior) {
+    clearTimeout(prior);
+    pendingMetaPersists.delete(key);
+  }
+}
+
+/**
+ * Reverse-lookup the threadId for a registry entry. The registry maps
+ * threadId → entry but the entry itself doesn't carry the threadId
+ * (it would be redundant in normal flow). We need it here because the
+ * persistence layer is keyed by `(canvasId, threadId)`.
+ *
+ * Linear scan over O(threads-on-this-server) — acceptable: a single
+ * Sediment server typically holds a handful of live ACP sessions, and
+ * this only runs on the (debounced) meta-persist path.
+ */
+function findThreadIdForEntry(entry: AcpSessionEntry): string | null {
+  for (const [threadId, candidate] of acpSessionRegistry.entries()) {
+    if (candidate === entry) return threadId;
+  }
+  return null;
+}
+
+/**
  * Get-or-create the per-thread ACP session, installing the long-lived
  * `available_commands_update` listener on first creation. Idempotent for
  * a given `{threadId, agentletAgentId, canvasId}` triple — repeated calls
@@ -251,7 +401,12 @@ async function ensureAcpSessionInner(
       },
       '[acp] thread binding changed \u2014 discarding stale session',
     );
+    cancelPersistEntryMeta(entry.canvasId, threadId);
     acpSessionRegistry.remove(threadId);
+    // Stale binding → persisted sessionId is also stale (it belongs to
+    // the OLD agent). Drop it so we don't try to load it against the
+    // new agent on the next miss.
+    deleteAcpSessionRecord(canvasId, threadId);
     entry = undefined;
   }
   if (entry && entry.canvasId !== canvasId) {
@@ -263,7 +418,12 @@ async function ensureAcpSessionInner(
       },
       '[acp] thread canvas changed \u2014 discarding stale session (sandbox scope mismatch)',
     );
+    cancelPersistEntryMeta(entry.canvasId, threadId);
     acpSessionRegistry.remove(threadId);
+    // Persisted record is canvas-scoped (see session-store path layout),
+    // so the wrong-canvas case is already handled implicitly. We still
+    // proactively drop the OLD canvas's record to keep the store tidy.
+    deleteAcpSessionRecord(entry.canvasId, threadId);
     entry = undefined;
   }
   if (entry && entry.client.isClosed) {
@@ -271,6 +431,7 @@ async function ensureAcpSessionInner(
       { threadId },
       '[acp] stored session client was closed \u2014 reopening',
     );
+    cancelPersistEntryMeta(entry.canvasId, threadId);
     acpSessionRegistry.remove(threadId);
     entry = undefined;
   }
@@ -282,49 +443,269 @@ async function ensureAcpSessionInner(
     return entry;
   }
 
-  logger.info(
-    { threadId, canvasId, agentId: binding.agentletAgentId, cwd },
-    '[acp] opening new session for thread',
-  );
+  // No live session for this thread in the registry. Open the SDK
+  // client + run `initialize` first, then try to recover a persisted
+  // sessionId via `session/load`; fall back to `session/new` when
+  // there is no record, the agent does not support load, or the load
+  // call rejects (e.g. agent restarted and forgot the session).
+  const persisted = readAcpSessionRecord(canvasId, threadId);
   const client = new AcpAgentClient(conn, { canvasId, logger });
   await client.initialize();
-  const sessionId = await client.newSession({ cwd });
+
+  // Build the entry skeleton up front so the long-lived
+  // `available_commands_update` listener can be installed BEFORE
+  // `session/load`. The listener mutates `created.availableCommands`
+  // in place (see {@link handleSessionMetaUpdate}); the sessionId
+  // field is filled in below once known. This matters because
+  // `session/load` typically replays the full session history as a
+  // stream of `session/update` notifications — far more than the
+  // orphan-buffer cap of `MAX_ORPHAN_UPDATES_PER_SESSION = 32` would
+  // tolerate. With a listener attached, dispatched updates skip the
+  // orphan buffer entirely.
   const created: AcpSessionEntry = {
     client,
-    sessionId,
+    sessionId: '',
     agentletAgentId: binding.agentletAgentId,
     canvasId,
     cwd,
     createdAt: Date.now(),
     availableCommands: [],
     commandsUpdatedAt: 0,
+    availableModes: [],
+    currentModeId: null,
+    availableModels: [],
+    currentModelId: null,
+    configOptions: [],
+    sessionInfo: null,
+    usage: null,
+    metaUpdatedAt: 0,
   };
-  // Install the long-lived listener BEFORE adding the entry to the
-  // registry so subsequent registry lookups always see an entry with
-  // a wired-up listener. The listener registration itself replays
-  // any orphan `available_commands_update` notifications that
-  // arrived BEFORE `session/new` resolved (a common ACP wire
-  // ordering — see `AcpAgentClient.orphanUpdates`), so we never
-  // miss the agent's initial command-list push regardless of who
-  // wins the response-vs-notification race.
-  client.registerSessionListener(sessionId, (update) => {
-    handleSessionMetaUpdate(created, update, logger);
-  });
+
+  let sessionId: string | null = null;
+  let removeListener: (() => void) | null = null;
+
+  if (persisted && persisted.agentletAgentId === binding.agentletAgentId) {
+    if (agentSupportsLoadSession(client.initializeResult)) {
+      logger.info(
+        {
+          threadId,
+          canvasId,
+          agentId: binding.agentletAgentId,
+          sessionId: persisted.sessionId,
+          cwd: persisted.cwd,
+        },
+        '[acp] attempting session/load for persisted session',
+      );
+      // Listener installed BEFORE the load so replay notifications go
+      // straight to handleSessionMetaUpdate (and through it to no-op
+      // for non-meta updates) instead of overflowing the orphan buffer.
+      removeListener = client.registerSessionListener(
+        persisted.sessionId,
+        (update) => handleSessionMetaUpdate(created, update, logger),
+      );
+      try {
+        const loadResult = await client.loadSession({
+          sessionId: persisted.sessionId,
+          cwd,
+        });
+        sessionId = persisted.sessionId;
+        created.sessionId = sessionId;
+        seedSessionMetaFromResponse(created, loadResult, logger);
+        logger.info(
+          { threadId, sessionId },
+          '[acp] session/load succeeded \u2014 resumed external agent memory',
+        );
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        // "Already loaded" is the BEST possible outcome: the agent
+        // process is still alive (typical scenario: only the Sediment
+        // server restarted, the user's agentlet CLI kept running) and
+        // already holds the session in memory. Adopt it as-is — no
+        // replay needed, no fallback. Copilot CLI surfaces this as
+        // `Session <id> is already loaded`; other agents may use
+        // different wording, hence the permissive substring check.
+        if (/already\s*loaded/i.test(errMsg)) {
+          sessionId = persisted.sessionId;
+          created.sessionId = sessionId;
+          // The agent already holds this session in memory and will
+          // NOT replay `available_commands_update` / `current_mode_update`
+          // / `usage_update` / etc. on its own — those notifications
+          // only fire on the original `session/new` or `session/load`.
+          // Without a fallback the registry entry would surface empty
+          // selectors and an empty slash-command list to the UI for the
+          // entire lifetime of this re-attached session (until the
+          // agent happens to push a fresh meta update of its own).
+          //
+          // Rehydrate from the last meta snapshot we persisted before
+          // the server restart. By definition that snapshot reflects
+          // what THIS agent process most recently advertised, so it is
+          // exactly what a fresh `session/new` against the same agent
+          // would return today — modulo any state the user changed
+          // out-of-band while the Sediment server was down (a vanishingly
+          // narrow race for typical use). Subsequent `session/update`
+          // notifications still take precedence; this is purely a seed.
+          if (persisted.meta) {
+            hydrateEntryFromPersistedMeta(created, persisted.meta);
+            logger.info(
+              {
+                threadId,
+                sessionId,
+                commandCount: created.availableCommands.length,
+                modeCount: created.availableModes.length,
+                modelCount: created.availableModels.length,
+                configCount: created.configOptions.length,
+                hasUsage: created.usage !== null,
+                hasSessionInfo: created.sessionInfo !== null,
+              },
+              '[acp] hydrated session meta from persisted snapshot (already-loaded path)',
+            );
+          } else {
+            logger.warn(
+              { threadId, sessionId },
+              '[acp] session already loaded but no persisted meta snapshot \u2014 UI selectors will start empty until the agent pushes a meta update',
+            );
+          }
+          logger.info(
+            { threadId, sessionId },
+            '[acp] session already loaded in live agent \u2014 reusing without replay',
+          );
+        } else {
+          // Real failure (agent forgot the session, wrong sessionId,
+          // capability lied, transport error, ...). Drop the listener
+          // + stale record and fall through to newSession; the user
+          // pays one extra round-trip but the thread keeps working.
+          removeListener();
+          removeListener = null;
+          logger.warn(
+            {
+              threadId,
+              sessionId: persisted.sessionId,
+              err: errMsg,
+            },
+            '[acp] session/load failed \u2014 dropping persisted record and falling back to session/new',
+          );
+          cancelPersistEntryMeta(canvasId, threadId);
+          deleteAcpSessionRecord(canvasId, threadId);
+        }
+      }
+    } else {
+      logger.info(
+        { threadId, agentId: binding.agentletAgentId },
+        '[acp] agent does not advertise loadSession capability \u2014 cannot resume; using session/new',
+      );
+      // Don't delete the record here: a future agent upgrade may add
+      // loadSession support, and the existing sessionId might still be
+      // valid in the agent. Keeping it costs nothing.
+    }
+  }
+
+  if (!sessionId) {
+    logger.info(
+      { threadId, canvasId, agentId: binding.agentletAgentId, cwd },
+      '[acp] opening new session for thread',
+    );
+    const newResult = await client.newSession({ cwd });
+    sessionId = newResult.sessionId;
+    created.sessionId = sessionId;
+    seedSessionMetaFromResponse(created, newResult, logger);
+  }
+
+  if (!removeListener) {
+    // Install the long-lived listener BEFORE adding the entry to the
+    // registry so subsequent registry lookups always see an entry with
+    // a wired-up listener. The listener registration itself replays
+    // any orphan `available_commands_update` notifications that
+    // arrived BEFORE `session/new` resolved (a common ACP wire
+    // ordering — see `AcpAgentClient.orphanUpdates`), so we never
+    // miss the agent's initial command-list push regardless of who
+    // wins the response-vs-notification race.
+    client.registerSessionListener(sessionId, (update) => {
+      handleSessionMetaUpdate(created, update, logger);
+    });
+  }
   acpSessionRegistry.set(threadId, created);
+
+  // Persist (or refresh) the record so a future server restart can
+  // recover this session. Done AFTER the registry insert so the
+  // happy-path memory state is authoritative; persistence failures
+  // (logged below) only forfeit recovery, not the current session.
+  //
+  // We include the current meta snapshot up front so the "already
+  // loaded" branch on a subsequent restart has something to hydrate
+  // from even if the agent never pushes a meta-update notification
+  // for this session (e.g. an idle session that was created, loaded
+  // its mode/model from the response, then sat quiet).
+  try {
+    writeAcpSessionRecord(canvasId, threadId, {
+      sessionId,
+      agentletAgentId: binding.agentletAgentId,
+      cwd,
+      meta: snapshotEntryMeta(created),
+    });
+  } catch (err) {
+    logger.warn(
+      {
+        threadId,
+        canvasId,
+        err: err instanceof Error ? err.message : String(err),
+      },
+      '[acp] failed to persist session record (recovery after restart will fall back to session/new)',
+    );
+  }
+
   return created;
 }
 
 /**
  * Long-lived session listener — handles out-of-turn `session/update`
- * notifications carrying session-scoped metadata. Currently only
- * `available_commands_update`; new metadata variants plug in here.
+ * notifications carrying session-scoped metadata.
+ *
+ * Five variants are recognised, all using REPLACE-semantics:
+ *
+ *   1. `available_commands_update`  → slash command catalogue.
+ *   2. `config_option_update`       → free-form config knobs (model /
+ *                                     mode / thought-level / etc).
+ *   3. `current_mode_update`        → currently-active mode id; the
+ *                                     mode catalogue itself was seeded
+ *                                     from `session/new` and is left
+ *                                     untouched here.
+ *   4. `session_info_update`        → title + activity timestamp.
+ *   5. `usage_update`               → context-window + cost gauge.
+ *
+ * All other variants are forwarded by the translator into the SSE
+ * stream and ignored here.
  */
 function handleSessionMetaUpdate(
   entry: AcpSessionEntry,
   update: AcpSessionUpdate,
   logger: FastifyBaseLogger,
 ): void {
-  if (update.sessionUpdate !== 'available_commands_update') return;
+  switch (update.sessionUpdate) {
+    case 'available_commands_update':
+      applyAvailableCommandsUpdate(entry, update, logger);
+      return;
+    case 'config_option_update':
+      applyConfigOptionUpdate(entry, update, logger);
+      return;
+    case 'current_mode_update':
+      applyCurrentModeUpdate(entry, update, logger);
+      return;
+    case 'session_info_update':
+      applySessionInfoUpdate(entry, update, logger);
+      return;
+    case 'usage_update':
+      applyUsageUpdate(entry, update, logger);
+      return;
+    default:
+      return;
+  }
+}
+
+function applyAvailableCommandsUpdate(
+  entry: AcpSessionEntry,
+  update: AcpSessionUpdate,
+  logger: FastifyBaseLogger,
+): void {
   const raw = (update as { availableCommands?: unknown }).availableCommands;
   if (!Array.isArray(raw)) {
     logger.warn(
@@ -368,6 +749,7 @@ function handleSessionMetaUpdate(
   }
   entry.availableCommands = next;
   entry.commandsUpdatedAt = Date.now();
+  schedulePersistEntryMeta(entry, logger);
   logger.info(
     {
       sessionId: entry.sessionId,
@@ -375,6 +757,198 @@ function handleSessionMetaUpdate(
     },
     '[acp] available_commands_update applied',
   );
+}
+
+function applyConfigOptionUpdate(
+  entry: AcpSessionEntry,
+  update: AcpSessionUpdate,
+  logger: FastifyBaseLogger,
+): void {
+  // Two wire shapes observed across agents:
+  //   • `{ configOptions: SessionConfigOption[] }`  (Copilot CLI)
+  //   • A single `SessionConfigOption` flattened on the update itself
+  //     (per the SDK's `ConfigOptionUpdate` zod schema).
+  // Accept both: the first wins; otherwise reconstruct from the
+  // discriminator + payload keys present.
+  const raw = update as Record<string, unknown>;
+  const list = Array.isArray(raw.configOptions)
+    ? (raw.configOptions as AcpSessionConfigOption[])
+    : raw.id || raw.label
+      ? [raw as unknown as AcpSessionConfigOption]
+      : [];
+  if (list.length === 0) {
+    logger.warn(
+      { sessionId: entry.sessionId },
+      '[acp] config_option_update without recognisable payload',
+    );
+    return;
+  }
+  // The spec is replace-only for the full snapshot; but the
+  // single-item flavour is genuinely a per-option upsert. Merge by id.
+  if (Array.isArray(raw.configOptions)) {
+    entry.configOptions = list;
+  } else {
+    const byId = new Map<string, AcpSessionConfigOption>(
+      entry.configOptions.map((o) => [String((o as { id: string }).id), o]),
+    );
+    for (const opt of list) {
+      const id = String((opt as { id?: unknown }).id ?? '');
+      if (!id) continue;
+      byId.set(id, opt);
+    }
+    entry.configOptions = Array.from(byId.values());
+  }
+  entry.metaUpdatedAt = Date.now();
+  schedulePersistEntryMeta(entry, logger);
+  logger.info(
+    { sessionId: entry.sessionId, count: entry.configOptions.length },
+    '[acp] config_option_update applied',
+  );
+}
+
+function applyCurrentModeUpdate(
+  entry: AcpSessionEntry,
+  update: AcpSessionUpdate,
+  logger: FastifyBaseLogger,
+): void {
+  const id = (update as { currentModeId?: unknown }).currentModeId;
+  if (typeof id !== 'string' || !id) {
+    logger.warn(
+      { sessionId: entry.sessionId },
+      '[acp] current_mode_update without currentModeId',
+    );
+    return;
+  }
+  entry.currentModeId = id;
+  entry.metaUpdatedAt = Date.now();
+  schedulePersistEntryMeta(entry, logger);
+  logger.info(
+    { sessionId: entry.sessionId, currentModeId: id },
+    '[acp] current_mode_update applied',
+  );
+}
+
+function applySessionInfoUpdate(
+  entry: AcpSessionEntry,
+  update: AcpSessionUpdate,
+  logger: FastifyBaseLogger,
+): void {
+  const raw = update as { title?: unknown; updatedAt?: unknown };
+  const title = readNullableString(raw.title);
+  const updatedAt = readNullableString(raw.updatedAt);
+  if (title === undefined && updatedAt === undefined) {
+    logger.warn(
+      { sessionId: entry.sessionId },
+      '[acp] session_info_update without title or updatedAt',
+    );
+    return;
+  }
+  const prior = entry.sessionInfo ?? { title: null, updatedAt: null };
+  entry.sessionInfo = {
+    title: title === undefined ? prior.title : title,
+    updatedAt: updatedAt === undefined ? prior.updatedAt : updatedAt,
+  };
+  entry.metaUpdatedAt = Date.now();
+  schedulePersistEntryMeta(entry, logger);
+  logger.info(
+    { sessionId: entry.sessionId, info: entry.sessionInfo },
+    '[acp] session_info_update applied',
+  );
+}
+
+function applyUsageUpdate(
+  entry: AcpSessionEntry,
+  update: AcpSessionUpdate,
+  logger: FastifyBaseLogger,
+): void {
+  const raw = update as { used?: unknown; size?: unknown; cost?: unknown };
+  const used = typeof raw.used === 'number' ? raw.used : null;
+  const size = typeof raw.size === 'number' ? raw.size : null;
+  if (used === null || size === null) {
+    logger.warn(
+      { sessionId: entry.sessionId },
+      '[acp] usage_update missing used/size',
+    );
+    return;
+  }
+  let cost: { amount: number; currency: string } | null = null;
+  if (raw.cost && typeof raw.cost === 'object') {
+    const c = raw.cost as { amount?: unknown; currency?: unknown };
+    if (typeof c.amount === 'number' && typeof c.currency === 'string') {
+      cost = { amount: c.amount, currency: c.currency };
+    }
+  }
+  entry.usage = { used, size, cost };
+  entry.metaUpdatedAt = Date.now();
+  schedulePersistEntryMeta(entry, logger);
+  logger.info(
+    { sessionId: entry.sessionId, used, size },
+    '[acp] usage_update applied',
+  );
+}
+
+/**
+ * Seed the session entry from the `modes` / `models` / `configOptions`
+ * fields of a `session/new` or `session/load` response, when present.
+ * Permissive — silently skips fields the agent didn't include.
+ */
+function seedSessionMetaFromResponse(
+  entry: AcpSessionEntry,
+  response: { modes?: unknown; models?: unknown; configOptions?: unknown },
+  logger: FastifyBaseLogger,
+): void {
+  let touched = false;
+  if (response.modes && typeof response.modes === 'object') {
+    const m = response.modes as {
+      availableModes?: unknown;
+      currentModeId?: unknown;
+    };
+    if (Array.isArray(m.availableModes)) {
+      entry.availableModes = m.availableModes as AcpSessionMode[];
+      touched = true;
+    }
+    if (typeof m.currentModeId === 'string' && m.currentModeId) {
+      entry.currentModeId = m.currentModeId;
+      touched = true;
+    }
+  }
+  if (response.models && typeof response.models === 'object') {
+    const m = response.models as {
+      availableModels?: unknown;
+      currentModelId?: unknown;
+    };
+    if (Array.isArray(m.availableModels)) {
+      entry.availableModels = m.availableModels as AcpModelInfo[];
+      touched = true;
+    }
+    if (typeof m.currentModelId === 'string' && m.currentModelId) {
+      entry.currentModelId = m.currentModelId;
+      touched = true;
+    }
+  }
+  if (Array.isArray(response.configOptions)) {
+    entry.configOptions = response.configOptions as AcpSessionConfigOption[];
+    touched = true;
+  }
+  if (touched) {
+    entry.metaUpdatedAt = Date.now();
+    logger.info(
+      {
+        sessionId: entry.sessionId,
+        modeCount: entry.availableModes.length,
+        modelCount: entry.availableModels.length,
+        configCount: entry.configOptions.length,
+      },
+      '[acp] seeded session-meta from session/new|load response',
+    );
+  }
+}
+
+function readNullableString(v: unknown): string | null | undefined {
+  if (v === undefined) return undefined;
+  if (v === null) return null;
+  if (typeof v === 'string') return v;
+  return undefined;
 }
 
 /**
@@ -610,7 +1184,7 @@ export async function* runAcpAgent(
         } else if (evt.type === 'thinking_delta') {
           const last = contentBlocks[contentBlocks.length - 1];
           if (last?.type === 'thinking') {
-            last.thinking += evt.data.content;
+            last.thinking = mergeThinkingChunk(last.thinking, evt.data.content);
           } else {
             contentBlocks.push({
               type: 'thinking',

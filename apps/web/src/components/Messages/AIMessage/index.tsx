@@ -1,10 +1,11 @@
 import { Copy } from 'lucide-react';
 
-import { groupAdjacentToolParts } from './groupParts';
+import { groupByThinkingPhase, type SegmentGroup } from './groupParts';
 import { MilkdownMessageCard } from './MilkdownMessageCard';
 import { PermissionCard } from './PermissionCard';
 import { PlanCard } from './PlanCard';
 import { ThinkingCard } from './ThinkingCard';
+import { ThinkingPhaseCard } from './ThinkingPhaseCard';
 import { CanvasCommandCard } from './Tool/CanvasCommandCard';
 import { MergedAgentToolRow } from './Tool/MergedAgentToolRow';
 import { ToolCallCard } from './Tool/ToolCallCard';
@@ -33,6 +34,61 @@ interface AIMessageProps {
 
 const NoteIcon = NODE_ICON.note;
 
+/**
+ * Render one `tool-group` from `groupAdjacentToolParts`. Extracted
+ * so both the phase body (tool calls under a thinking) and the
+ * loose-group path (legacy: no thinking opened a phase) share the
+ * exact same dispatch.
+ */
+function renderToolGroup(
+  group: Extract<SegmentGroup, { kind: 'tool-group' }>,
+  messageId: string,
+  key: string,
+): React.ReactNode {
+  switch (group.variant) {
+    case 'canvas_commands':
+      // canvas_commands keeps its rich change-list UI per call
+      // (grouping intentionally never merges these).
+      return (
+        <div key={key} className="flex flex-col gap-1">
+          {group.parts.map((p) => (
+            <CanvasCommandCard
+              key={p.toolCallId}
+              messageId={messageId}
+              part={p}
+            />
+          ))}
+        </div>
+      );
+    case 'web_search':
+      return (
+        <div key={key} className="flex flex-col gap-1">
+          {group.parts.map((p) => (
+            <WebSearchToolDisplay key={p.toolCallId} part={p} />
+          ))}
+        </div>
+      );
+    case 'agent_tool':
+      // Built-in agent tools (read / grep / find / ls / …) merge
+      // into one collapsible row keyed by toolName.
+      return (
+        <MergedAgentToolRow
+          key={key}
+          tool={group.toolName}
+          entries={group.parts.map((p) => ({ messageId, part: p }))}
+        />
+      );
+    case 'generic':
+      return (
+        <div key={key} className="flex flex-col gap-1">
+          {group.parts.map((p) => (
+            <ToolCallCard key={p.toolCallId} part={p} />
+          ))}
+        </div>
+      );
+  }
+}
+
 export const AIMessage = ({
   messageId,
   segments,
@@ -48,9 +104,11 @@ export const AIMessage = ({
   const plainText = assistantMessageText(segments);
   const lastIdx = segments.length - 1;
 
-  // Group adjacent same-variant tool parts so e.g. a run of three
-  // `inspect_nodes` calls collapses into a single merged row.
-  const groups = groupAdjacentToolParts(segments);
+  // Phase-group adjacent thinking + tool runs so each "agent intent"
+  // becomes one collapsible card. Falls back to loose entries for
+  // segments that don't belong to any phase (e.g. text segments or
+  // tool calls that arrived before the first thinking).
+  const phases = groupByThinkingPhase(segments);
 
   // Show the "still generating" shimmer at the tail of a streaming
   // turn. This is distinct from `ThinkingCard` (which renders the
@@ -65,81 +123,52 @@ export const AIMessage = ({
   return (
     <div className="flex justify-start">
       <div className="flex w-full flex-col gap-1">
-        {groups.map((group, gIdx) => {
-          if (group.kind === 'tool-group') {
-            // Exhaustive variant dispatch — `SegmentGroup` is typed
-            // per-variant so each branch has fully narrowed parts.
-            switch (group.variant) {
-              case 'canvas_commands':
-                // canvas_commands keeps its rich change-list UI per
-                // call (grouping intentionally never merges these).
-                return (
-                  <div key={`g${gIdx}`} className="flex flex-col gap-1">
-                    {group.parts.map((p) => (
-                      <CanvasCommandCard
-                        key={p.toolCallId}
-                        messageId={messageId}
-                        part={p}
-                      />
-                    ))}
-                  </div>
-                );
-              case 'web_search':
-                return (
-                  <div key={`g${gIdx}`} className="flex flex-col gap-1">
-                    {group.parts.map((p) => (
-                      <WebSearchToolDisplay key={p.toolCallId} part={p} />
-                    ))}
-                  </div>
-                );
-              case 'agent_tool':
-                // Built-in agent tools (read / grep / find / ls / …)
-                // merge into one collapsible row keyed by toolName.
-                return (
-                  <MergedAgentToolRow
-                    key={`g${gIdx}`}
-                    tool={group.toolName}
-                    entries={group.parts.map((p) => ({ messageId, part: p }))}
-                  />
-                );
-              case 'generic':
-                return (
-                  <div key={`g${gIdx}`} className="flex flex-col gap-1">
-                    {group.parts.map((p) => (
-                      <ToolCallCard key={p.toolCallId} part={p} />
-                    ))}
-                  </div>
-                );
+        {phases.map((entry, eIdx) => {
+          if (entry.kind === 'phase') {
+            // A phase with zero tool groups is just a bare thinking
+            // segment — render via the legacy ThinkingCard so we
+            // don't show an empty "expand to see tools" affordance.
+            if (entry.toolGroups.length === 0) {
+              const segStreaming =
+                isStreaming && segments.indexOf(entry.thinking) === lastIdx;
+              return (
+                <ThinkingCard
+                  key={`p${eIdx}`}
+                  text={entry.thinking.text}
+                  isStreaming={segStreaming}
+                />
+              );
             }
-          }
-
-          const seg = group.segment;
-          // The segment's index in the original list — used for "is this
-          // the trailing thinking block?" check below.
-          const idx = segments.indexOf(seg);
-
-          if (seg.kind === 'thinking') {
-            // A thinking segment is "still streaming" only when it's the
-            // trailing segment of an in-flight turn — once text starts
-            // flowing after it, the thinking phase is done.
-            const segStreaming = isStreaming && idx === lastIdx;
             return (
-              <ThinkingCard
-                key={`g${gIdx}`}
-                text={seg.text}
-                isStreaming={segStreaming}
-              />
+              <ThinkingPhaseCard
+                key={`p${eIdx}`}
+                text={entry.thinking.text}
+                closed={entry.closed}
+                isStreaming={isStreaming}
+              >
+                {entry.toolGroups.map((g, gIdx) =>
+                  renderToolGroup(g, messageId, `p${eIdx}-g${gIdx}`),
+                )}
+              </ThinkingPhaseCard>
             );
           }
 
+          const group = entry.group;
+          if (group.kind === 'tool-group') {
+            return renderToolGroup(group, messageId, `l${eIdx}`);
+          }
+
+          const seg = group.segment;
+          const idx = segments.indexOf(seg);
+
           if (seg.kind === 'plan') {
-            return <PlanCard key={`g${gIdx}`} entries={seg.entries} />;
+            return <PlanCard key={`l${eIdx}`} entries={seg.entries} />;
           }
 
           if (seg.kind === 'permission') {
             return (
               <PermissionCard
-                key={`g${gIdx}`}
+                key={`l${eIdx}`}
                 threadId={threadId}
                 messageId={messageId}
                 part={seg}
@@ -150,7 +179,7 @@ export const AIMessage = ({
           if (seg.kind === 'status') {
             return (
               <div
-                key={`g${gIdx}`}
+                key={`l${eIdx}`}
                 className="text-fg-subtle ml-1 px-4 text-xs italic"
               >
                 {seg.detail ?? seg.status}
@@ -158,10 +187,27 @@ export const AIMessage = ({
             );
           }
 
+          // Loose thinking segments (no following tool runs in their
+          // own phase) take the simple `ThinkingCard` path. This
+          // branch only fires for thinking segments that weren't
+          // absorbed by `groupByThinkingPhase` — currently
+          // unreachable (every thinking opens a phase), but kept for
+          // type-exhaustiveness.
+          if (seg.kind === 'thinking') {
+            const segStreaming = isStreaming && idx === lastIdx;
+            return (
+              <ThinkingCard
+                key={`l${eIdx}`}
+                text={seg.text}
+                isStreaming={segStreaming}
+              />
+            );
+          }
+
           // text segment
           return (
             <div
-              key={`g${gIdx}`}
+              key={`l${eIdx}`}
               className="text-fg-default bg-surface ml-1 rounded-2xl border border-none px-4 text-sm"
             >
               <div className="leading-relaxed">

@@ -146,7 +146,7 @@ export function ToolCallCard({ part }: ToolCallCardProps) {
     <AssistantDisclosure
       icon={icon}
       title={part.title}
-      bodyClassName="border-edge-default/40 ml-4 flex flex-col gap-1 border-l py-1 pl-3"
+      bodyClassName="border-edge-default/40 ml-4 flex max-h-80 flex-col gap-1 overflow-y-auto border-l py-1 pl-3"
     >
       {body}
     </AssistantDisclosure>

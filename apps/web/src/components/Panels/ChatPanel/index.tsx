@@ -4,10 +4,17 @@ import {
   PanelRightOpen,
   Plus,
 } from 'lucide-react';
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 
+import {
+  setAcpSessionConfigOption,
+  setAcpSessionMode,
+  setAcpSessionModel,
+} from '@/api/acp';
 import { Button } from '@/components/Common/Button';
+import { toast } from '@/components/Common/Toast';
 import { useAcpAgents } from '@/hooks/useAcpAgents';
+import { useAcpSessionMeta } from '@/hooks/useAcpSessionMeta';
 import { useAcpSlashCommands } from '@/hooks/useAcpSlashCommands';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
@@ -15,7 +22,9 @@ import { useIntentStore } from '@/store/intentStore';
 import { useLLMStore } from '@/store/llmStore';
 
 import { SidebarPanel } from '../SidebarPanel';
+import { AcpSessionSelectors } from './AcpSessionSelectors';
 import { ChatInput } from './ChatInput';
+import { ModeSelector } from './ModeSelector';
 import { useSketchClusterMessages } from './useSketchClusterMessages';
 import { useAgentStream } from '../../../hooks/useAgentStream';
 import { useChatHistory } from '../../../hooks/useChatHistory';
@@ -59,7 +68,22 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     agents: connectedAgents,
     refresh: refreshAcpAgents,
     loading: acpAgentsLoading,
+    enabled: acpBridgeEnabled,
   } = useAcpAgents();
+
+  // Gate the ACP per-thread hooks on the bound agent actually being
+  // present in the connected-agents list. Without this gate a thread
+  // whose persisted binding refers to a now-disconnected agent (bridge
+  // restart, agent process exited, etc.) would still POST
+  // /api/acp/threads/<id>/session at mount and reliably get a 503,
+  // which clutters the console and confuses debugging. The
+  // ModeSelector resets the binding to internal on unlocked threads
+  // (see ModeSelector.tsx), but the meta/slash-commands hooks still
+  // fire one render earlier than the reset — `acpExternalReachable`
+  // is what keeps that initial fetch from happening.
+  const acpExternalReachable =
+    agentBinding.kind === 'external' &&
+    connectedAgents.some((a) => a.agentId === agentBinding.agentletAgentId);
 
   // Slash commands for the currently-bound external agent. Empty array
   // when the thread is internal or the agent has nothing to offer.
@@ -72,7 +96,116 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       threadId,
       binding: agentBinding,
       canvasId,
+      enabled: acpExternalReachable,
     });
+
+  // ACP session-meta (mode / model / config options / info / usage).
+  // Drives the dropdown trio in ChatInput's toolbar. Empty when the
+  // binding is internal — selectors then render nothing.
+  const {
+    meta: acpSessionMeta,
+    applyEvent: applyAcpSessionMetaEvent,
+    applyOptimistic: applyAcpSessionMetaOptimistic,
+  } = useAcpSessionMeta({
+    threadId,
+    binding: agentBinding,
+    canvasId,
+    enabled: acpExternalReachable,
+  });
+
+  // Keep a ref to the latest snapshot so the optimistic handlers can
+  // read prior values for revert without re-creating themselves (and
+  // their downstream consumers) on every meta tick.
+  const acpSessionMetaRef = useRef(acpSessionMeta);
+  useEffect(() => {
+    acpSessionMetaRef.current = acpSessionMeta;
+  }, [acpSessionMeta]);
+
+  // Optimistic onChange handlers for the ACP selectors: merge the
+  // chosen value into the local snapshot immediately, then fire the
+  // REST set-RPC. On failure, revert the snapshot and surface a toast
+  // so the user knows the agent rejected the change.
+  const handleAcpSelectMode = useCallback(
+    async (modeId: string) => {
+      if (!threadId) return;
+      const previousModeId = acpSessionMetaRef.current.currentModeId;
+      if (previousModeId === modeId) return;
+      applyAcpSessionMetaEvent({
+        type: 'session_mode_update',
+        data: { currentModeId: modeId },
+      });
+      try {
+        await setAcpSessionMode(threadId, { modeId });
+      } catch (err) {
+        applyAcpSessionMetaOptimistic({ currentModeId: previousModeId });
+        toast(
+          err instanceof Error
+            ? `Failed to switch mode: ${err.message}`
+            : 'Failed to switch mode',
+          { variant: 'error' },
+        );
+      }
+    },
+    [threadId, applyAcpSessionMetaEvent, applyAcpSessionMetaOptimistic],
+  );
+
+  const handleAcpSelectModel = useCallback(
+    async (modelId: string) => {
+      if (!threadId) return;
+      const previousModelId = acpSessionMetaRef.current.currentModelId;
+      if (previousModelId === modelId) return;
+      applyAcpSessionMetaOptimistic({ currentModelId: modelId });
+      try {
+        await setAcpSessionModel(threadId, { modelId });
+      } catch (err) {
+        applyAcpSessionMetaOptimistic({ currentModelId: previousModelId });
+        toast(
+          err instanceof Error
+            ? `Failed to switch model: ${err.message}`
+            : 'Failed to switch model',
+          { variant: 'error' },
+        );
+      }
+    },
+    [threadId, applyAcpSessionMetaOptimistic],
+  );
+
+  const handleAcpSelectConfigOption = useCallback(
+    async (optionId: string, value: string | boolean) => {
+      if (!threadId) return;
+      const priorOption = acpSessionMetaRef.current.configOptions.find(
+        (o) => String((o as { id?: unknown }).id ?? '') === optionId,
+      );
+      const previousValue = (
+        priorOption as { currentValue?: unknown } | undefined
+      )?.currentValue;
+      const previousValueTyped =
+        typeof previousValue === 'string' || typeof previousValue === 'boolean'
+          ? previousValue
+          : undefined;
+      if (previousValueTyped === value) return;
+      applyAcpSessionMetaOptimistic({ configOption: { id: optionId, value } });
+      try {
+        await setAcpSessionConfigOption(threadId, {
+          configOptionId: optionId,
+          value,
+        });
+      } catch (err) {
+        if (previousValueTyped !== undefined) {
+          applyAcpSessionMetaOptimistic({
+            configOption: { id: optionId, value: previousValueTyped },
+          });
+        }
+        toast(
+          err instanceof Error
+            ? `Failed to update option: ${err.message}`
+            : 'Failed to update option',
+          { variant: 'error' },
+        );
+      }
+    },
+    [threadId, applyAcpSessionMetaOptimistic],
+  );
 
   // Question thread replay mode
   const viewingQuestionThread = useChatStore((s) => s.viewingQuestionThread);
@@ -172,9 +305,30 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     <SidebarPanel
       title={panelTitle}
       tabs={
-        <span className="block min-w-0 flex-1 truncate" title={panelTitle}>
-          {panelTitle}
-        </span>
+        // Sketch / question replay are read-only views — keep the
+        // descriptive title there. The normal chat view promotes the
+        // binding picker into the header (ChatGPT-style) so it reads
+        // as "which agent owns this thread", separating it visually
+        // from the per-turn ACP session selectors in ChatInput.
+        viewingSketchCluster || viewingQuestionThread ? (
+          <span className="block min-w-0 flex-1 truncate" title={panelTitle}>
+            {panelTitle}
+          </span>
+        ) : (
+          <ModeSelector
+            mode={mode}
+            onModeChange={setMode}
+            binding={agentBinding}
+            onBindingChange={(b) => setAgentBinding(b, canvasId || undefined)}
+            connectedAgents={connectedAgents}
+            onRefreshAgents={refreshAcpAgents}
+            refreshing={acpAgentsLoading}
+            agentsListReady={acpBridgeEnabled !== null}
+            onNewThread={handleNewChat}
+            locked={messages.length > 0 || isLoading}
+            disabled={!isHistoryLoaded}
+          />
+        )
       }
       isCollapsed={isCollapsed}
       onToggle={onToggle}
@@ -241,19 +395,29 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
             onStop={stopStream}
             isStreaming={isLoading}
             mode={mode}
-            onModeChange={setMode}
-            binding={agentBinding}
-            onBindingChange={(b) => setAgentBinding(b, canvasId || undefined)}
-            connectedAgents={connectedAgents}
-            onRefreshAgents={refreshAcpAgents}
-            refreshingAgents={acpAgentsLoading}
-            onNewThread={handleNewChat}
             slashCommands={slashCommands}
             onSlashMenuIntent={refreshSlashCommands}
-            // 1 thread = 1 binding. Lock the picker the moment a thread
-            // has any message OR a stream is in flight — the user must
-            // start a new chat to pick a different agent.
-            bindingLocked={messages.length > 0 || isLoading}
+            acpSelectorsSlot={
+              agentBinding.kind === 'external' ? (
+                <AcpSessionSelectors
+                  meta={acpSessionMeta}
+                  onSelectMode={handleAcpSelectMode}
+                  onSelectModel={handleAcpSelectModel}
+                  onSelectConfigOption={handleAcpSelectConfigOption}
+                />
+              ) : null
+            }
+            // For external (ACP) bindings, defer to the agent's own
+            // `session_usage_update`; the internal context-token fetch
+            // would return 0 and the hardcoded 128k window is wrong
+            // for non-GPT-4o models. `undefined` keeps the legacy
+            // built-in path; `null` hides the ring until the agent
+            // pushes its first usage snapshot.
+            contextUsageOverride={
+              agentBinding.kind === 'external'
+                ? acpSessionMeta.usage
+                : undefined
+            }
             disabled={isLoading || !isHistoryLoaded}
           />
         )}

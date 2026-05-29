@@ -6,7 +6,6 @@ import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 
 import { ContextUsageRing } from './ContextUsageRing';
-import { ModeSelector } from './ModeSelector';
 import { SourceCount } from './SelectedNodeRefs';
 import { SlashCommandMenu } from './SlashCommandMenu';
 import { useSlashCommandTypeahead } from './useSlashCommandTypeahead';
@@ -14,12 +13,8 @@ import { Button } from '../../Common/Button';
 import { NodeRef } from '../../Common/NodeRef';
 import { Tooltip } from '../../Common/Tooltip';
 
-import type {
-  AcpAgentSummary,
-  AgentBinding,
-  AgentMode,
-  AvailableCommand,
-} from '@sediment/shared';
+import type { ContextUsageOverride } from './ContextUsageRing';
+import type { AgentMode, AvailableCommand } from '@sediment/shared';
 
 interface ChatInputProps {
   value: string;
@@ -27,19 +22,8 @@ interface ChatInputProps {
   onSubmit: (e: React.FormEvent, mode: AgentMode) => void;
   onStop: () => void;
   isStreaming?: boolean;
+  /** Current built-in mode. Affects placeholder + the value submitted to `onSubmit`. */
   mode: AgentMode;
-  onModeChange: (mode: AgentMode) => void;
-  /** Thread → agent binding. See ChatPanel for sourcing rules. */
-  binding: AgentBinding;
-  onBindingChange: (binding: AgentBinding) => void;
-  /** Currently-connected ACP agents (from `useAcpAgents`). */
-  connectedAgents: AcpAgentSummary[];
-  /** Re-fetch the connected-agents list (called on selector open + Refresh button). */
-  onRefreshAgents?: () => void | Promise<void>;
-  /** True while a refresh is in flight. */
-  refreshingAgents?: boolean;
-  /** Start a fresh chat thread ("New chat session" action in the mode picker). */
-  onNewThread?: () => void;
   /**
    * Slash commands the bound external agent advertised via
    * `available_commands_update`. Empty when the binding is internal,
@@ -62,10 +46,20 @@ interface ChatInputProps {
    */
   onSlashMenuIntent?: () => void;
   /**
-   * When true, the mode/binding picker is locked. Independent of
-   * `disabled`, which only suppresses input submission.
+   * Optional slot rendered at the left of the toolbar (before the
+   * `ContextUsageRing`). Used by ChatPanel to mount the ACP session
+   * selectors (mode / model / config options) when the bound agent
+   * advertises any. Hidden by simply passing nothing.
    */
-  bindingLocked?: boolean;
+  acpSelectorsSlot?: React.ReactNode;
+  /**
+   * Authoritative context usage forwarded straight to
+   * `ContextUsageRing`. Set by ChatPanel for ACP-bound threads so the
+   * ring reflects the agent's own token budget instead of the
+   * built-in pi-agent's. See `ContextUsageRing` for the three-state
+   * semantics of this prop.
+   */
+  contextUsageOverride?: ContextUsageOverride | undefined;
   disabled?: boolean;
   placeholder?: string;
 }
@@ -77,16 +71,10 @@ export const ChatInput = ({
   onStop,
   isStreaming = false,
   mode,
-  onModeChange,
-  binding,
-  onBindingChange,
-  connectedAgents,
-  onRefreshAgents,
-  refreshingAgents = false,
-  onNewThread,
   slashCommands = [],
   onSlashMenuIntent,
-  bindingLocked = false,
+  acpSelectorsSlot,
+  contextUsageOverride,
   disabled = false,
   placeholder = 'Asking anything here...',
 }: ChatInputProps) => {
@@ -550,23 +538,18 @@ export const ChatInput = ({
           </div>
 
           <div className="mt-2 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <ModeSelector
-                mode={mode}
-                onModeChange={onModeChange}
-                binding={binding}
-                onBindingChange={onBindingChange}
-                connectedAgents={connectedAgents}
-                onRefreshAgents={onRefreshAgents}
-                refreshing={refreshingAgents}
-                onNewThread={onNewThread}
-                locked={bindingLocked}
-                disabled={disabled}
-              />
-              <ContextUsageRing draftText={value} isStreaming={isStreaming} />
+            <div className="flex min-w-0 flex-1 items-center overflow-hidden">
+              {acpSelectorsSlot}
+              <span className="ml-2 inline-flex shrink-0 items-center">
+                <ContextUsageRing
+                  draftText={value}
+                  isStreaming={isStreaming}
+                  usageOverride={contextUsageOverride}
+                />
+              </span>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex shrink-0 items-center gap-2">
               <SourceCount />
 
               {isStreaming ? (

@@ -4,6 +4,45 @@
 
 ---
 
+## 2026-05-31 · ACP 外部 agent 现在能在聊天面板里切模式 / 模型 / 配置项
+
+**What Changed**
+
+- **聊天面板顶部新增 agent 选择器**：原来挂在输入框工具栏左侧的 `[copilot ▼]` 绑定下拉，被提升到 ChatPanel 头部（标题位置）。视觉上类似 ChatGPT 顶部那种 `ChatGPT ▼`：无边框、点开下拉选 built-in mode（Chat / Agent）或某个外部 ACP agent。`+` 新会话按钮仍在右上角。Sketch / Question replay 这类只读视图保留原来的纯文本标题。
+- 当 thread 绑定到外部 ACP agent（Copilot CLI、Claude Code、Gemini CLI 等）后，聊天**输入栏**里会出现一组无边框的 ghost 下拉，**专门用于 session 进行中可调的设置**：
+  - **Agent Mode**：agent 通过 `session/new` / `session/load` 响应的 `modes.availableModes` 公布的可选模式（例如 Copilot CLI 的 `agent` / `chat`）。
+  - **Model**：agent 通过 `models.availableModels` 公布的可选模型；切换时调用 SDK 的 `unstable_setSessionModel`。
+  - **Config Options**：agent 通过 `configOptions` 公布的每一项配置（Copilot 通常推 4 项：model / mode / thought level / auto-approve toggle），按 `type` 分别渲染为下拉或 On/Off 开关。
+- 切换任意一项会立即调对应的 ACP 方法（`session/set_mode` / `session/set_model` / `session/set_config_option`），同时本地 UI 乐观更新，不等服务器回包就改高亮。
+- agent 在 turn 进行中推送的 `current_mode_update` / `config_option_update` / `session_info_update` / `usage_update` 现在也会实时反映到这些下拉里——之前 translator 直接丢弃这些 SSE 帧，"已加载 session 复用" 的场景下 UI 只能看到一个空的 ModeSelector。
+
+**Notes**
+
+- **分层语义**：顶部的 agent 选择器是"这个 thread 委派给谁"——thread 一旦开始对话就锁死；底部输入栏里的下拉是"已委派的这个 agent 在 session 进行中可调的旋钮"——随时可改、agent 也可以推送更新。
+- **仅对外部 agent 生效**：内部 Huabu agent 没有这些概念，输入栏里的下拉不会出现。
+- **agent 不公布就不显示**：如果某个 agent 没在 `session/new` 响应里返回 `modes` / `models` / `configOptions`，对应下拉默认隐藏；不会出现"空列表"占位。
+- **避免双胞胎下拉**：Copilot CLI 会把 `mode` / `model` 同时塞进 `modes`/`models` _和_ `configOptions`。当顶层 mode/model 下拉已经存在时，`configOptions` 里 `id` 为 `mode` / `model` 的项会被静默隐藏，避免两个完全一样的下拉并排出现；只通过 `configOptions` 公布 mode/model 的 agent 不受影响。
+- **turn 进行中可切换**：mode / model / config 切换不被"streaming"状态禁用，因为 ACP 协议本身允许 mid-turn 切换；如果某些 agent 拒绝（返回错误），UI 会在 agent 下一次 push 时被覆盖回正确状态。
+- 没有迁移成本：所有持久化结构未变；只是 SSE 事件流多了 4 个 `type`，外加聊天面板布局调整。
+
+---
+
+## 2026-05-29 · 重启 Sediment server 后 ACP 对话不再重置
+
+**What Changed**
+
+- 每个绑定外部 ACP agent（Copilot CLI / Claude Code / Gemini CLI 等）的 thread 会把 `sessionId` 持久化到 `<canvasId>/.history/acp-sessions.json`。**只重启 Sediment server、agentlet CLI 与 agent 子进程仍在跑** 的场景下，下一次发 prompt 会自动调 `session/load`：
+  - agent 进程还认识这个 session（通常返回 `Session ... is already loaded`）→ 我们直接复用，外部 agent 的对话上下文、slash 命令缓存等完整保留。
+  - agent 不认识 / 拒绝 → fallback 到 `session/new` 重开会话，行为与改造前一致，UI 不会卡死。
+
+**Notes**
+
+- **覆盖范围有限**：当前仅恢复"server 重启、agent 仍存活"的场景。如果 agentlet CLI 也重启了，它会重新生成 agent id（末尾随机 UUID 变化），我们会判定为不同 agent → 直接走 `session/new`。Copilot CLI 本身只在内存里保存 session，agent 进程一死状态就没了；Claude Code / Gemini CLI / Codex 这类把 session 落盘的 agent，未来通过放宽 agent id 匹配规则可以进一步覆盖（目前不做）。
+- **不恢复断联期间的对话**：刷新前已完成的 turn 仍在 chat history（一直在）；断联期间 agent 在 CLI 继续输出但前端没收到的那部分内容，刷新后不会回灌到聊天面板。需要的话用户手动重新 prompt 继续。
+- 持久化文件按 canvas 分文件，删 canvas 自然清理，无需手工迁移；从未用过外部 agent 的 thread 不会生成文件，零额外存储成本。原子写入，崩溃中段最多损失最后一条记录，整个文件不会损坏；读取容错任何形状错误。
+
+---
+
 ## 2026-05-31 · 文本节点编辑：按回车现在会立即增高
 
 **What Changed**

@@ -22,7 +22,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { AcpAgentClient } from './client.js';
+import { AcpAgentClient, agentSupportsLoadSession } from './client.js';
 
 import type { AgentConnection, AcpMessage } from '@agentlet/protocol';
 import type { AcpSessionUpdate } from '@sediment/shared';
@@ -468,5 +468,101 @@ describe('AcpAgentClient — permission handshake', () => {
       result: { stopReason: 'end_turn' },
     });
     await promptPromise;
+  });
+});
+
+describe('agentSupportsLoadSession', () => {
+  it('returns false for null / undefined / no capabilities', () => {
+    expect(agentSupportsLoadSession(null)).toBe(false);
+    expect(agentSupportsLoadSession(undefined)).toBe(false);
+    expect(agentSupportsLoadSession({ protocolVersion: 1 })).toBe(false);
+    expect(
+      agentSupportsLoadSession({ protocolVersion: 1, agentCapabilities: {} }),
+    ).toBe(false);
+  });
+
+  it('returns true when agentCapabilities.loadSession is truthy', () => {
+    expect(
+      agentSupportsLoadSession({
+        protocolVersion: 1,
+        agentCapabilities: { loadSession: true },
+      }),
+    ).toBe(true);
+    // Permissive: nested objects also count.
+    expect(
+      agentSupportsLoadSession({
+        protocolVersion: 1,
+        agentCapabilities: { loadSession: { something: 'else' } },
+      }),
+    ).toBe(true);
+  });
+
+  it('returns false when loadSession is explicitly false', () => {
+    expect(
+      agentSupportsLoadSession({
+        protocolVersion: 1,
+        agentCapabilities: { loadSession: false },
+      }),
+    ).toBe(false);
+  });
+});
+
+describe('AcpAgentClient — loadSession', () => {
+  it('sends a session/load JSON-RPC request with the persisted sessionId + cwd', async () => {
+    const conn = createFakeConnection();
+    const client = new AcpAgentClient(conn, { logger: silentLogger });
+
+    const loadPromise = client.loadSession({
+      sessionId: 'sess-persisted',
+      cwd: '/repo',
+    });
+    await flush();
+
+    const sentLoad = conn.sent.find(
+      (m) => (m as { method?: string }).method === 'session/load',
+    ) as
+      | {
+          id?: unknown;
+          params?: { sessionId?: string; cwd?: string; mcpServers?: unknown };
+        }
+      | undefined;
+    expect(sentLoad).toBeDefined();
+    expect(sentLoad?.params?.sessionId).toBe('sess-persisted');
+    expect(sentLoad?.params?.cwd).toBe('/repo');
+    expect(Array.isArray(sentLoad?.params?.mcpServers)).toBe(true);
+
+    // Resolve so the test doesn't hang.
+    conn.pushMessage({
+      jsonrpc: '2.0',
+      id: sentLoad!.id as number,
+      result: {},
+    });
+    // `loadSession` now returns the full agent response so the caller
+    // can seed session-meta (modes / models / configOptions) from it.
+    // The fake agent responds with `{}` here — that's a valid empty
+    // payload, so we just assert the resolution succeeds.
+    const result = await loadPromise;
+    expect(result).toEqual({});
+  });
+
+  it('rejects when the agent returns an error (caller falls back to newSession)', async () => {
+    const conn = createFakeConnection();
+    const client = new AcpAgentClient(conn, { logger: silentLogger });
+
+    const loadPromise = client.loadSession({
+      sessionId: 'sess-gone',
+      cwd: '/repo',
+    });
+    await flush();
+
+    const sentLoad = conn.sent.find(
+      (m) => (m as { method?: string }).method === 'session/load',
+    ) as { id?: number };
+    conn.pushMessage({
+      jsonrpc: '2.0',
+      id: sentLoad.id as number,
+      error: { code: -32602, message: 'unknown sessionId' },
+    });
+    await expect(loadPromise).rejects.toBeDefined();
   });
 });

@@ -10,6 +10,8 @@
  *   ✓ `tool_call` without `kind` increments the missing-kind counter
  *   ✓ `tool_call_update` coerces `null` → `undefined` per ACP semantics
  *   ✓ counter accessors are pure snapshots (mutations don't leak)
+ *   ✓ `mergeThinkingChunk` defends against snapshot-resend
+ *     (Copilot CLI re-emits intent chunks instead of streaming deltas)
  */
 
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -17,6 +19,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   acpUpdateToStreamEvent,
   getTranslatorCounters,
+  mergeThinkingChunk,
   resetTranslatorCounters,
   type TranslatorLogger,
 } from './translator.js';
@@ -144,26 +147,106 @@ describe('acpUpdateToStreamEvent — active discriminators', () => {
     });
     expect(evt).toEqual({ type: 'plan', data: { entries } });
   });
+
+  it('maps current_mode_update → session_mode_update', () => {
+    const evt = acpUpdateToStreamEvent({
+      sessionUpdate: 'current_mode_update',
+      currentModeId: 'agent',
+    });
+    expect(evt).toEqual({
+      type: 'session_mode_update',
+      data: { currentModeId: 'agent' },
+    });
+  });
+
+  it('maps config_option_update (select option) → config_options_update', () => {
+    const options = [
+      {
+        id: 'model',
+        name: 'Model',
+        type: 'select',
+        currentValue: 'gpt-5',
+        options: [
+          { name: 'GPT-5', value: 'gpt-5' },
+          { name: 'Claude 4', value: 'claude-4' },
+        ],
+      },
+    ];
+    const evt = acpUpdateToStreamEvent({
+      sessionUpdate: 'config_option_update',
+      configOptions: options,
+    });
+    expect(evt).toMatchObject({
+      type: 'config_options_update',
+      data: { options },
+    });
+  });
+
+  it('maps config_option_update (boolean option) → config_options_update', () => {
+    const options = [
+      {
+        id: 'auto_approve',
+        name: 'Auto-approve',
+        type: 'boolean',
+        currentValue: true,
+      },
+    ];
+    const evt = acpUpdateToStreamEvent({
+      sessionUpdate: 'config_option_update',
+      configOptions: options,
+    });
+    expect(evt).toEqual({
+      type: 'config_options_update',
+      data: { options },
+    });
+  });
+
+  it('maps session_info_update → session_info_update', () => {
+    const evt = acpUpdateToStreamEvent({
+      sessionUpdate: 'session_info_update',
+      title: 'My session',
+      updatedAt: '2025-01-01T00:00:00Z',
+    });
+    expect(evt).toEqual({
+      type: 'session_info_update',
+      data: {
+        title: 'My session',
+        updatedAt: '2025-01-01T00:00:00Z',
+      },
+    });
+  });
+
+  it('maps usage_update → session_usage_update', () => {
+    const evt = acpUpdateToStreamEvent({
+      sessionUpdate: 'usage_update',
+      used: 1024,
+      size: 200_000,
+    });
+    expect(evt).toEqual({
+      type: 'session_usage_update',
+      data: { used: 1024, size: 200_000, cost: null },
+    });
+  });
 });
 
 describe('acpUpdateToStreamEvent — ignored discriminators', () => {
-  it.each([
-    'user_message_chunk',
-    'available_commands_update',
-    'current_mode_update',
-  ])('returns null for %s (no counter bump)', (kind) => {
-    let payload: unknown;
-    if (kind === 'user_message_chunk') {
-      payload = { sessionUpdate: kind, content: { type: 'text', text: 'hi' } };
-    } else if (kind === 'available_commands_update') {
-      payload = { sessionUpdate: kind, availableCommands: [] };
-    } else {
-      payload = { sessionUpdate: kind, currentModeId: 'default' };
-    }
-    expect(acpUpdateToStreamEvent(payload)).toBeNull();
-    expect(getTranslatorCounters().unknownSessionUpdate).toBe(0);
-    expect(getTranslatorCounters().invalidPayloads).toBe(0);
-  });
+  it.each(['user_message_chunk', 'available_commands_update'])(
+    'returns null for %s (no counter bump)',
+    (kind) => {
+      let payload: unknown;
+      if (kind === 'user_message_chunk') {
+        payload = {
+          sessionUpdate: kind,
+          content: { type: 'text', text: 'hi' },
+        };
+      } else {
+        payload = { sessionUpdate: kind, availableCommands: [] };
+      }
+      expect(acpUpdateToStreamEvent(payload)).toBeNull();
+      expect(getTranslatorCounters().unknownSessionUpdate).toBe(0);
+      expect(getTranslatorCounters().invalidPayloads).toBe(0);
+    },
+  );
 });
 
 describe('counters', () => {
@@ -185,5 +268,48 @@ describe('counters', () => {
       toolCallMissingKind: 0,
       unknownSessionUpdate: 0,
     });
+  });
+});
+
+describe('mergeThinkingChunk — snapshot-resend dedupe', () => {
+  it('returns the incoming chunk verbatim when the buffer is empty', () => {
+    expect(mergeThinkingChunk('', 'Planning guide IA')).toBe(
+      'Planning guide IA',
+    );
+  });
+
+  it('appends a true delta chunk', () => {
+    expect(mergeThinkingChunk('Plan', 'ning guide IA')).toBe(
+      'Planning guide IA',
+    );
+  });
+
+  it('drops an exact re-send (Copilot CLI report_intent quirk)', () => {
+    // Observed: same agent_thought_chunk text arrives twice in a row,
+    // producing "Planning guide IAPlanning guide IA" if naively appended.
+    expect(mergeThinkingChunk('Planning guide IA', 'Planning guide IA')).toBe(
+      'Planning guide IA',
+    );
+  });
+
+  it('drops a trailing-suffix resend', () => {
+    // Some agents resend the latest suffix as a "snapshot tail" instead
+    // of the full buffer. Treat that as a no-op too.
+    expect(mergeThinkingChunk('Planning guide IA', 'guide IA')).toBe(
+      'Planning guide IA',
+    );
+  });
+
+  it('treats an empty incoming chunk as a no-op', () => {
+    expect(mergeThinkingChunk('Plan', '')).toBe('Plan');
+  });
+
+  it('does not collapse legitimately repeating tail text', () => {
+    // If an agent legitimately streams "ha" then "ha" as separate
+    // deltas, the second "ha" IS a suffix of the buffer after the
+    // first append — we accept that this heuristic favours dedupe
+    // over preserving rare repeated short tokens. Document the
+    // trade-off here so future maintainers don't "fix" it.
+    expect(mergeThinkingChunk('ha', 'ha')).toBe('ha');
   });
 });

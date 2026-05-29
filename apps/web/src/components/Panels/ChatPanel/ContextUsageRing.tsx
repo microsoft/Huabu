@@ -6,8 +6,20 @@ import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import { countTokens } from '@/utils/tokenCount';
 
-/** Maximum context window size in tokens (GPT-4o / Azure OpenAI). */
-const CONTEXT_WINDOW = 128_000;
+/** Fallback context window in tokens — used only for the built-in pi-agent path. */
+const DEFAULT_CONTEXT_WINDOW = 128_000;
+
+/**
+ * Authoritative usage reported by an external (ACP) agent itself.
+ * `null` means the binding is external but the agent has not pushed a
+ * `session_usage_update` yet — the ring should render nothing in that
+ * case because any number from the internal fetch would be misleading.
+ */
+export type ContextUsageOverride = {
+  used: number;
+  size: number;
+  cost?: { amount: number; currency: string } | null;
+} | null;
 
 // ==================== SVG arc helpers ====================
 
@@ -43,16 +55,29 @@ interface ContextUsageRingProps {
   draftText?: string;
   /** Whether the agent is currently streaming */
   isStreaming?: boolean;
+  /**
+   * Authoritative usage supplied by the bound agent.
+   *
+   * - `undefined` (default): internal pi-agent binding — fetch token
+   *   count from `/agent/context-tokens` and use the GPT-4o window.
+   * - `null`: external (ACP) binding but no usage reported yet — the
+   *   internal fetch returns 0 and the GPT-4o window is wrong, so the
+   *   ring renders nothing rather than show a misleading value.
+   * - `{used, size}`: external binding with agent-reported usage; these
+   *   numbers drive the history arc and total budget.
+   */
+  usageOverride?: ContextUsageOverride | undefined;
 }
 
 /**
  * Circular progress ring showing context window usage.
- * - Red arc: tokens already consumed by the conversation history (from backend)
+ * - Red arc: tokens already consumed by the conversation history
  * - Orange arc: estimated tokens for the current input (draft + selected nodes)
  */
 export const ContextUsageRing = ({
   draftText = '',
   isStreaming,
+  usageOverride,
 }: ContextUsageRingProps) => {
   const messages = useChatStore((s) => s.messages);
   const threadId = useChatStore((s) => s.threadId);
@@ -60,8 +85,10 @@ export const ContextUsageRing = ({
   const canvasId = useCanvasStore((s) => s.canvasId);
   const nodes = useCanvasStore((s) => s.nodes);
 
-  // ---- Backend context token count ----
-  const [actualTokens, setActualTokens] = useState(0);
+  const useInternalFetch = usageOverride === undefined;
+
+  // ---- Backend context token count (internal binding only) ----
+  const [internalTokens, setInternalTokens] = useState(0);
   const fetchIdRef = useRef(0);
 
   const fetchContextTokens = useCallback(() => {
@@ -71,7 +98,7 @@ export const ContextUsageRing = ({
       .fetchContextTokens(threadId, canvasId ?? undefined)
       .then((res) => {
         if (id === fetchIdRef.current) {
-          setActualTokens(res.contextTokens);
+          setInternalTokens(res.contextTokens);
         }
       })
       .catch(() => {
@@ -79,10 +106,12 @@ export const ContextUsageRing = ({
       });
   }, [threadId, canvasId]);
 
-  // Fetch on mount / thread change / after streaming finishes
+  // Fetch on mount / thread change / after streaming finishes — skip
+  // entirely when an authoritative override is supplied by the agent.
   useEffect(() => {
+    if (!useInternalFetch) return;
     fetchContextTokens();
-  }, [fetchContextTokens, messages.length, isStreaming]);
+  }, [useInternalFetch, fetchContextTokens, messages.length, isStreaming]);
 
   // ---- Frontend estimated input tokens ----
   const estimatedInputTokens = useMemo(() => {
@@ -134,10 +163,22 @@ export const ContextUsageRing = ({
     return total;
   }, [draftText, pendingAttachments, nodes]);
 
+  // External binding hasn't reported usage yet — any number we could
+  // show would be a guess, so render nothing until the agent pushes.
+  if (usageOverride === null) {
+    return null;
+  }
+
   // ---- Rendering ----
+  const actualTokens = usageOverride ? usageOverride.used : internalTokens;
+  const contextWindow = usageOverride
+    ? usageOverride.size
+    : DEFAULT_CONTEXT_WINDOW;
+  const cost = usageOverride?.cost ?? null;
   const projectedTotal = actualTokens + estimatedInputTokens;
-  const actualRatio = Math.min(actualTokens / CONTEXT_WINDOW, 1);
-  const projectedRatio = Math.min(projectedTotal / CONTEXT_WINDOW, 1);
+  const safeWindow = contextWindow > 0 ? contextWindow : DEFAULT_CONTEXT_WINDOW;
+  const actualRatio = Math.min(actualTokens / safeWindow, 1);
+  const projectedRatio = Math.min(projectedTotal / safeWindow, 1);
   const percentage = Math.round(projectedRatio * 100);
 
   // SVG parameters
@@ -167,9 +208,17 @@ export const ContextUsageRing = ({
         </div>
       )}
       <div>
-        Total: {formatTokens(projectedTotal)} / {formatTokens(CONTEXT_WINDOW)} (
+        Total: {formatTokens(projectedTotal)} / {formatTokens(safeWindow)} (
         {percentage}%)
       </div>
+      {cost && (
+        <div>
+          Cost:{' '}
+          <strong>
+            {cost.amount.toFixed(4)} {cost.currency}
+          </strong>
+        </div>
+      )}
     </div>
   );
 
@@ -177,7 +226,7 @@ export const ContextUsageRing = ({
     <Tooltip content={tooltipContent}>
       <span
         tabIndex={0}
-        aria-label={`Context usage ${formatTokens(projectedTotal)} of ${formatTokens(CONTEXT_WINDOW)} tokens, ${percentage} percent`}
+        aria-label={`Context usage ${formatTokens(projectedTotal)} of ${formatTokens(safeWindow)} tokens, ${percentage} percent`}
         className="inline-flex cursor-default items-center justify-center focus:outline-none"
       >
         <svg

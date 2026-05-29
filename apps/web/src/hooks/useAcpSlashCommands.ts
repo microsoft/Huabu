@@ -79,6 +79,15 @@ export interface UseAcpSlashCommandsOptions {
   binding: AgentBinding;
   /** Sediment canvasId; threaded into the ensure-session call. */
   canvasId?: string | null;
+  /**
+   * Master enable switch. When `false`, the hook behaves as if the
+   * binding were internal: no fetch, empty `commands`, no error. Use
+   * this to gate the request on a precondition the hook can't see
+   * itself — e.g. "the bound external agent is currently connected
+   * to the bridge" — so we don't fire a guaranteed-to-fail request.
+   * Defaults to `true` for backwards-compat with the original API.
+   */
+  enabled?: boolean;
 }
 
 /**
@@ -91,6 +100,7 @@ export function useAcpSlashCommands({
   threadId,
   binding,
   canvasId,
+  enabled = true,
 }: UseAcpSlashCommandsOptions): UseAcpSlashCommandsResult {
   const [commands, setCommands] = useState<AvailableCommand[]>([]);
   const [loading, setLoading] = useState(false);
@@ -122,14 +132,17 @@ export function useAcpSlashCommands({
     binding.kind === 'external' ? binding.agentletAgentId : '';
   const alias = binding.kind === 'external' ? binding.alias : '';
 
-  // ── Refresh: ensure session → optional delayed re-pull ─────────────
+  // ── Refresh: ensure session → optional delayed re-pull ───────────
   const refresh = useCallback(async () => {
     const myEpoch = ++epochRef.current;
     const isCurrent = () => epochRef.current === myEpoch;
 
-    if (!threadId || bindingKind !== 'external') {
+    if (!threadId || bindingKind !== 'external' || !enabled) {
       // Reset to empty so a freshly-switched internal binding doesn't
-      // keep showing the previous agent's commands.
+      // keep showing the previous agent's commands. The `!enabled`
+      // branch lands here too — caller has told us the precondition
+      // for a successful fetch isn't met (e.g. bound agent is
+      // disconnected), so behave exactly like an internal binding.
       setCommands([]);
       setError(null);
       setLoading(false);
@@ -184,7 +197,7 @@ export function useAcpSlashCommands({
       // the winner of the epoch race is the one that matters.)
       loadingRef.current = false;
     }
-  }, [threadId, canvasId, bindingKind, agentletAgentId, alias]);
+  }, [threadId, canvasId, bindingKind, agentletAgentId, alias, enabled]);
 
   /**
    * Rising-edge / TTL-gated refresh — see {@link UseAcpSlashCommandsResult.refreshIfStale}.

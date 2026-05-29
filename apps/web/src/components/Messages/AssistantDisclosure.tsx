@@ -22,7 +22,7 @@
  */
 
 import { ChevronRight } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 interface AssistantDisclosureProps {
   /**
@@ -33,6 +33,13 @@ interface AssistantDisclosureProps {
   icon: ReactNode;
   /** Single-line title; truncates with ellipsis when overflowing. */
   title: ReactNode;
+  /**
+   * Optional plain-text tooltip for the title. Useful when the title
+   * may be truncated and the consumer wants the full text accessible
+   * via a native hover tooltip — particularly when the disclosure has
+   * no body to fall back on.
+   */
+  titleTooltip?: string;
   /**
    * Optional trailing slot, rendered after the chevron inside the
    * header row. Use for action buttons that must stay visible while
@@ -46,6 +53,13 @@ interface AssistantDisclosureProps {
   children?: ReactNode;
   /** Initial collapsed state. Defaults to `true`. */
   defaultCollapsed?: boolean;
+  /**
+   * When this prop transitions from `false` → `true`, the disclosure
+   * auto-collapses. The user can still re-expand manually afterwards.
+   * Intended for tool cards that start expanded while executing and
+   * should fold once the tool completes.
+   */
+  collapseSignal?: boolean;
   /** Extra classes for the body wrapper (e.g. left rule, indent). */
   bodyClassName?: string;
 }
@@ -53,12 +67,26 @@ interface AssistantDisclosureProps {
 export function AssistantDisclosure({
   icon,
   title,
+  titleTooltip,
   trailing,
   children,
   defaultCollapsed = true,
+  collapseSignal,
   bodyClassName = '',
 }: AssistantDisclosureProps) {
   const [isCollapsed, setIsCollapsed] = useState(defaultCollapsed);
+
+  // Auto-collapse once when collapseSignal transitions false → true (e.g. a
+  // tool card that was open while executing and should fold on completion).
+  // Initialise the ref to the *current* signal so already-done tools on
+  // initial render don't fire the effect spuriously.
+  const prevCollapseRef = useRef(collapseSignal);
+  useEffect(() => {
+    if (collapseSignal && !prevCollapseRef.current) {
+      setIsCollapsed(true);
+    }
+    prevCollapseRef.current = collapseSignal;
+  }, [collapseSignal]);
   const expandable = children !== undefined && children !== null;
 
   const iconSlot = (
@@ -66,7 +94,11 @@ export function AssistantDisclosure({
       {icon}
     </span>
   );
-  const titleText = <span className="min-w-0 flex-1 truncate">{title}</span>;
+  const titleText = (
+    <span className="min-w-0 flex-1 truncate" title={titleTooltip}>
+      {title}
+    </span>
+  );
   const chevron = expandable ? (
     <ChevronRight
       size={10}

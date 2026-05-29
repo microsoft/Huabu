@@ -19,6 +19,7 @@
  * `mode:operate`, `agent:<agentletAgentId>`) and decode in `onChange`.
  */
 import { MessageSquare, Plus, RefreshCw, Route, Sprout } from 'lucide-react';
+import { useEffect } from 'react';
 
 import { Button } from '../../Common/Button';
 import { Select, type SelectOption } from '../../Common/Select';
@@ -61,6 +62,13 @@ interface ModeSelectorProps {
    * messages or a stream is in flight (1 thread = 1 binding).
    */
   locked?: boolean;
+  /**
+   * True once the bridge has responded with a definitive agent list
+   * (success or empty). Gates the auto-reset that drops a stale
+   * external binding on a fresh thread — we wait for a real answer so a
+   * still-loading list doesn't trigger a premature reset.
+   */
+  agentsListReady?: boolean;
   /** Backward-compat: forwarded to the underlying Select. */
   disabled?: boolean;
 }
@@ -85,9 +93,29 @@ export const ModeSelector = ({
   onNewThread,
   refreshing = false,
   locked = false,
+  agentsListReady = false,
   disabled = false,
 }: ModeSelectorProps) => {
   const value = encodeValue(mode, binding);
+
+  // Detect a stale external binding: the thread was last bound to an
+  // ACP agent that is no longer connected (bridge restart, agent
+  // exited, etc.). Drives both the disabled placeholder option below
+  // and the auto-reset effect for unlocked threads.
+  const boundExternalMissing =
+    binding.kind === 'external' &&
+    !connectedAgents.some((a) => a.agentId === binding.agentletAgentId);
+
+  // Fresh thread + stale binding → silently fall back to the built-in
+  // internal agent so the trigger doesn't read "Select…". For locked
+  // threads we keep the binding so the synthesized placeholder option
+  // (see below) can still surface the disconnected agent name.
+  useEffect(() => {
+    if (locked) return;
+    if (!agentsListReady) return;
+    if (!boundExternalMissing) return;
+    onBindingChange({ kind: 'internal' });
+  }, [locked, agentsListReady, boundExternalMissing, onBindingChange]);
 
   // Built-in modes always lead the list.
   const modeOptions: SelectOption<SelectorValue>[] = [
@@ -120,7 +148,24 @@ export const ModeSelector = ({
     }),
   );
 
-  const options = [...modeOptions, ...agentOptions];
+  // Locked thread bound to a now-disconnected agent: synthesize a
+  // disabled option so the trigger still reads the alias (instead of
+  // the bare "Select…" placeholder) and the user has a visible cue to
+  // hit Refresh. The unlocked case is handled by the effect above.
+  const disconnectedOption: SelectOption<SelectorValue>[] =
+    locked && boundExternalMissing && binding.kind === 'external'
+      ? [
+          {
+            value: `agent:${binding.agentletAgentId}` as SelectorValue,
+            label: binding.alias,
+            icon: <Route size={14} />,
+            description: 'Disconnected',
+            disabled: true,
+          },
+        ]
+      : [];
+
+  const options = [...modeOptions, ...disconnectedOption, ...agentOptions];
 
   const handleChange = (next: SelectorValue) => {
     if (next.startsWith('mode:')) {
@@ -156,11 +201,11 @@ export const ModeSelector = ({
       onChange={handleChange}
       disabled={disabled}
       title="Delegate Session"
-      variant="outline"
-      shape="pill"
+      variant="ghost"
+      shape="default"
       tone="neutral"
       size="sm"
-      align="top-left"
+      align="bottom-left"
       footerSlot={({ dismiss }) => (
         <div className="flex flex-col">
           {onNewThread && (

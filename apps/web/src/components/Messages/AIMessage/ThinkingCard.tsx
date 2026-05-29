@@ -39,13 +39,24 @@ export function ThinkingCard({ text, isStreaming }: ThinkingCardProps) {
     />
   );
 
+  // Skip the body when it would only repeat the preview line — the
+  // disclosure then renders as a non-expandable row. While streaming
+  // we keep it expandable since more lines may still arrive. When the
+  // preview line is too long to fit, the native `title` tooltip
+  // surfaces the full text on hover so nothing is lost.
+  const isMultiLine = text.trim() !== preview;
+  const showBody = Boolean(isStreaming) || isMultiLine;
+
   return (
     <AssistantDisclosure
       icon={icon}
       title={isStreaming && !preview ? 'Thinking…' : preview}
+      titleTooltip={showBody ? undefined : preview}
       bodyClassName="ml-2"
     >
-      <div className="wrap-break-word whitespace-pre-wrap italic">{text}</div>
+      {showBody ? (
+        <div className="wrap-break-word whitespace-pre-wrap italic">{text}</div>
+      ) : undefined}
     </AssistantDisclosure>
   );
 }

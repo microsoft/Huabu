@@ -22,15 +22,31 @@ import type {
   AcpThreadCommandsResponse,
   EnsureAcpSessionRequest,
   EnsureAcpSessionResponse,
+  SetAcpSessionConfigOptionRequest,
+  SetAcpSessionConfigOptionResponse,
+  SetAcpSessionModelRequest,
+  SetAcpSessionModelResponse,
+  SetAcpSessionModeRequest,
+  SetAcpSessionModeResponse,
 } from '@sediment/shared';
 
 export type {
   AcpAgentSummary,
   AcpAgentsResponse,
+  AcpModelInfo,
+  AcpSessionConfigOption,
+  AcpSessionMetaSnapshot,
+  AcpSessionMode,
   AcpThreadCommandsResponse,
   AvailableCommand,
   EnsureAcpSessionRequest,
   EnsureAcpSessionResponse,
+  SetAcpSessionConfigOptionRequest,
+  SetAcpSessionConfigOptionResponse,
+  SetAcpSessionModelRequest,
+  SetAcpSessionModelResponse,
+  SetAcpSessionModeRequest,
+  SetAcpSessionModeResponse,
 } from '@sediment/shared';
 
 /** List currently-connected external ACP agents. */
@@ -98,6 +114,53 @@ export async function respondAcpPermission(
       method: 'POST',
       json: decision,
       fallbackMessage: 'Failed to submit permission decision',
+    },
+  );
+}
+
+// ── Session-meta set-RPCs ──────────────────────────────────────────
+//
+// Thin wrappers around POST `/threads/:threadId/{mode,model,config-option}`.
+// The agent confirms successful switches via SSE (`session_mode_update`
+// / `config_options_update`) — UI updates its dropdowns from THAT, not
+// the optimistic ack returned by these calls. We keep the ack typed so
+// callers can show a loading spinner that clears on resolve / reject.
+
+/** Switch the session's currently-active mode (e.g. Copilot "plan"). */
+export async function setAcpSessionMode(
+  threadId: string,
+  payload: SetAcpSessionModeRequest,
+): Promise<SetAcpSessionModeResponse> {
+  return apiFetch<SetAcpSessionModeResponse>(routes.acpThreadMode(threadId), {
+    method: 'POST',
+    json: payload,
+    fallbackMessage: 'Failed to switch session mode',
+  });
+}
+
+/** Switch the session's currently-active model. */
+export async function setAcpSessionModel(
+  threadId: string,
+  payload: SetAcpSessionModelRequest,
+): Promise<SetAcpSessionModelResponse> {
+  return apiFetch<SetAcpSessionModelResponse>(routes.acpThreadModel(threadId), {
+    method: 'POST',
+    json: payload,
+    fallbackMessage: 'Failed to switch session model',
+  });
+}
+
+/** Change a single session config knob (e.g. thought-level, auto-approve). */
+export async function setAcpSessionConfigOption(
+  threadId: string,
+  payload: SetAcpSessionConfigOptionRequest,
+): Promise<SetAcpSessionConfigOptionResponse> {
+  return apiFetch<SetAcpSessionConfigOptionResponse>(
+    routes.acpThreadConfigOption(threadId),
+    {
+      method: 'POST',
+      json: payload,
+      fallbackMessage: 'Failed to update session config option',
     },
   );
 }

@@ -74,4 +74,8 @@ export const routes = {
     `/acp/threads/${enc(threadId)}/commands`,
   acpThreadPermission: (threadId: string) =>
     `/acp/threads/${enc(threadId)}/permission`,
+  acpThreadMode: (threadId: string) => `/acp/threads/${enc(threadId)}/mode`,
+  acpThreadModel: (threadId: string) => `/acp/threads/${enc(threadId)}/model`,
+  acpThreadConfigOption: (threadId: string) =>
+    `/acp/threads/${enc(threadId)}/config-option`,
 } as const;
