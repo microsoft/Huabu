@@ -248,11 +248,16 @@ export async function* runAgent(
 
         case 'tool_execution_start': {
           yield {
-            type: 'tool_start',
+            type: 'tool_call',
             data: {
               toolCallId: event.toolCallId,
-              toolName: event.toolName,
-              toolArgs: (event.args ?? {}) as Record<string, unknown>,
+              // `title` is display-only; the machine tool name travels
+              // on `internalToolName` so the web can resolve the render
+              // variant + gate local side-effects (canvas_commands).
+              title: event.toolName,
+              internalToolName: event.toolName,
+              status: 'pending',
+              rawInput: (event.args ?? {}) as Record<string, unknown>,
             },
           };
           break;
@@ -281,11 +286,14 @@ export async function* runAgent(
             });
           }
           yield {
-            type: 'tool_result',
+            type: 'tool_call_update',
             data: {
               toolCallId: event.toolCallId,
-              toolName: event.toolName,
-              toolResult: payload,
+              status: event.isError ? 'failed' : 'completed',
+              // The web recovers the tool name from the part the
+              // originating `tool_call` created; the result payload
+              // (JSON-stringified `ToolResponse`) rides on `rawOutput`.
+              rawOutput: payload,
             },
           };
           break;

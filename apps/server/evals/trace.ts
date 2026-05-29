@@ -87,12 +87,10 @@ export async function recordTrace(opts: RecordOptions): Promise<Trace> {
   };
 
   const toolCalls: ToolCallRecord[] = [];
-  // Tool start times keyed by tool name. pi-agent-core does not expose
-  // a tool-call id in our SSE bridge, so we pair the most recent
-  // `tool_start` for a given name with the next `tool_result` of the
-  // same name. Within a single batch, calls of the same name are
-  // executed in order, so this matches pi-agent-core's emission order.
-  const pending = new Map<string, number[]>();
+  // Tool start metadata keyed by the stable per-call id, so a
+  // `tool_call` pairs exactly with its `tool_call_update` even when
+  // tools execute in parallel and complete out of declaration order.
+  const pending = new Map<string, { index: number; startedMs: number }>();
 
   let finalText = '';
   let error: string | null = null;
@@ -110,33 +108,47 @@ export async function recordTrace(opts: RecordOptions): Promise<Trace> {
   try {
     for await (const event of stream) {
       switch (event.type) {
-        case 'tool_start': {
-          const list = pending.get(event.data.toolName) ?? [];
-          list.push(Date.now());
-          pending.set(event.data.toolName, list);
-          // Push a placeholder so the order in `toolCalls` matches
-          // `tool_start` order. We patch `ms` / `ok` / preview when
-          // the matching `tool_result` arrives.
-          toolCalls.push({
-            name: event.data.toolName,
-            args: event.data.toolArgs ?? {},
-            ms: 0,
-            ok: true,
-            resultPreview: '',
+        case 'tool_call': {
+          // Internal-agent turns carry the machine tool name on
+          // `internalToolName`; fall back to the display title.
+          const name = event.data.internalToolName ?? event.data.title;
+          const index =
+            toolCalls.push({
+              name,
+              args: (event.data.rawInput as Record<string, unknown>) ?? {},
+              ms: 0,
+              ok: true,
+              resultPreview: '',
+            }) - 1;
+          pending.set(event.data.toolCallId, {
+            index,
+            startedMs: Date.now(),
           });
           break;
         }
-        case 'tool_result': {
-          const list = pending.get(event.data.toolName);
-          const startedMs = list?.shift() ?? Date.now();
-          const elapsedMs = Math.max(0, Date.now() - startedMs);
+        case 'tool_call_update': {
+          const entry = pending.get(event.data.toolCallId);
+          if (!entry) break;
+          // Only finalize on a terminal status or once a result
+          // payload arrives — external agents may stream interim
+          // `in_progress` updates we should not treat as completion.
+          const status = event.data.status;
+          const isTerminal = status === 'completed' || status === 'failed';
+          if (!isTerminal && event.data.rawOutput === undefined) break;
+          pending.delete(event.data.toolCallId);
+          const elapsedMs = Math.max(0, Date.now() - entry.startedMs);
 
-          // pi-agent-core wraps thrown handler errors as
-          // `{ status: 'error', ... }` JSON envelopes (see
-          // agent.service.ts). Anything else is treated as success.
-          let ok = true;
-          const text = event.data.toolResult ?? '';
-          if (text.startsWith('{')) {
+          // The internal bridge wraps thrown handler errors as
+          // `{ status: 'error', ... }` JSON envelopes on `rawOutput`
+          // (see agent.service.ts) and sets ACP status `failed`.
+          const text =
+            typeof event.data.rawOutput === 'string'
+              ? event.data.rawOutput
+              : event.data.rawOutput !== undefined
+                ? JSON.stringify(event.data.rawOutput)
+                : '';
+          let ok = status !== 'failed';
+          if (ok && text.startsWith('{')) {
             try {
               const parsed = JSON.parse(text) as { status?: string };
               if (parsed.status === 'error') ok = false;
@@ -145,18 +157,10 @@ export async function recordTrace(opts: RecordOptions): Promise<Trace> {
             }
           }
 
-          // Patch the most recent placeholder for this tool name in
-          // reverse order — guarantees FIFO pairing without an
-          // O(n) scan from the front for typical (small) traces.
-          for (let i = toolCalls.length - 1; i >= 0; i--) {
-            const entry = toolCalls[i];
-            if (entry.name === event.data.toolName && entry.ms === 0) {
-              entry.ms = elapsedMs;
-              entry.ok = ok;
-              entry.resultPreview = text.slice(0, 500);
-              break;
-            }
-          }
+          const record = toolCalls[entry.index];
+          record.ms = elapsedMs;
+          record.ok = ok;
+          record.resultPreview = text.slice(0, 500);
           break;
         }
         case 'done': {

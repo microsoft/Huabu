@@ -6,17 +6,28 @@
 #   2. Run `<repo>/bin/agentlet --agent "<cmd>"`        (every time)
 #
 # This wrapper takes care of everything else by reading <repo>/.env itself,
-# deriving the right defaults, and forwarding any extra flags to the
-# underlying agentlet CLI verbatim. Nothing needs to live in ~/.bashrc.
+# auto-building the CLI on first run, deriving the right defaults, and
+# forwarding any extra flags to the underlying agentlet CLI verbatim.
+# Nothing needs to live in ~/.bashrc.
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo=$(CDPATH= cd -- "$here/.." && pwd)
 cli="$repo/external/agentlet/packages/local/dist/index.js"
 
+# Auto-build on first run (or after a clean) so users never have to
+# remember `pnpm run build:agentlet` separately. We only build if the
+# compiled entry is missing — if it exists but is stale, the user is
+# expected to rebuild (or `pnpm dev` will, via its `predev` hook).
 if [ ! -f "$cli" ]; then
-  echo "agentlet wrapper: $cli not found." >&2
-  echo "Run \`pnpm run build:agentlet\` in $repo first." >&2
-  exit 1
+  echo "agentlet wrapper: $cli not found — building..." >&2
+  if ! (cd "$repo" && pnpm run build:agentlet >&2); then
+    echo "agentlet wrapper: build failed. Run \`pnpm run build:agentlet\` in $repo manually." >&2
+    exit 1
+  fi
+  if [ ! -f "$cli" ]; then
+    echo "agentlet wrapper: build completed but $cli still missing." >&2
+    exit 1
+  fi
 fi
 
 # Auto-load <repo>/.env so the same token the server already reads via

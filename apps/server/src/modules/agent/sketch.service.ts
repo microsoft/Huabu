@@ -137,6 +137,10 @@ export async function recognizeSketchCommands(
   // came back empty" (handler issue) from "handler errored".
   const toolStartCounts = new Map<string, number>();
   const toolResultCounts = new Map<string, number>();
+  // Recover the machine tool name on `tool_call_update` (which carries
+  // only `toolCallId`) by indexing the name from the originating
+  // `tool_call` event.
+  const toolNameById = new Map<string, string>();
   let canvasCommandsErrorPayload: string | null = null;
 
   const stream = runAgent({
@@ -148,21 +152,28 @@ export async function recognizeSketchCommands(
   });
 
   for await (const event of stream) {
-    if (event.type === 'tool_start') {
-      const n = (toolStartCounts.get(event.data.toolName) ?? 0) + 1;
-      toolStartCounts.set(event.data.toolName, n);
-      const argsStr = JSON.stringify(event.data.toolArgs ?? {});
+    if (event.type === 'tool_call') {
+      const toolName = event.data.internalToolName ?? event.data.title;
+      toolNameById.set(event.data.toolCallId, toolName);
+      const n = (toolStartCounts.get(toolName) ?? 0) + 1;
+      toolStartCounts.set(toolName, n);
+      const argsStr = JSON.stringify(event.data.rawInput ?? {});
       console.log(
-        `[sketch] → tool_start #${n} ${event.data.toolName} args=${argsStr.length > 800 ? argsStr.slice(0, 800) + `…(${argsStr.length} chars total)` : argsStr}`,
+        `[sketch] → tool_call #${n} ${toolName} args=${argsStr.length > 800 ? argsStr.slice(0, 800) + `…(${argsStr.length} chars total)` : argsStr}`,
       );
-    } else if (event.type === 'tool_result') {
-      const n = (toolResultCounts.get(event.data.toolName) ?? 0) + 1;
-      toolResultCounts.set(event.data.toolName, n);
-      const result = event.data.toolResult ?? '';
+    } else if (
+      event.type === 'tool_call_update' &&
+      (event.data.status === 'completed' || event.data.status === 'failed')
+    ) {
+      const toolName = toolNameById.get(event.data.toolCallId) ?? 'unknown';
+      const n = (toolResultCounts.get(toolName) ?? 0) + 1;
+      toolResultCounts.set(toolName, n);
+      const result =
+        typeof event.data.rawOutput === 'string' ? event.data.rawOutput : '';
       console.log(
-        `[sketch] ← tool_result #${n} ${event.data.toolName} (${result.length} chars): ${result.length > 800 ? result.slice(0, 800) + '…' : result}`,
+        `[sketch] ← tool_call_update #${n} ${toolName} (${result.length} chars): ${result.length > 800 ? result.slice(0, 800) + '…' : result}`,
       );
-      if (event.data.toolName === 'canvas_commands') {
+      if (toolName === 'canvas_commands') {
         const extracted = extractCommandsFromToolResult(result);
         console.log(
           `[sketch]   ↳ canvas_commands extracted ${extracted.length} command(s): [${extracted.map((c) => c.type).join(', ')}]`,

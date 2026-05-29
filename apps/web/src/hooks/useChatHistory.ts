@@ -167,9 +167,6 @@ export function useChatHistory(setIsLoading: (loading: boolean) => void): void {
 
     const tryReconnect = async () => {
       const assistantId = createId('message');
-      const toolQueue = {
-        fifo: [] as string[],
-      };
       // Flag set to true once we know the server has an active run
       let streaming = false;
 
@@ -203,7 +200,7 @@ export function useChatHistory(setIsLoading: (loading: boolean) => void): void {
             setIsLoading(true);
             clearStaleMessages();
           }
-          handleStreamEvent(event, { assistantId, toolQueue });
+          handleStreamEvent(event, { assistantId });
         },
         onError: (err) => {
           if (cancelled) return;

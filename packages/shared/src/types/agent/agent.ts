@@ -39,53 +39,19 @@ export interface AgentThinkingDeltaEventData {
   content: string;
 }
 
-/** `event: tool_start` — model decided to call a tool.
- *  @deprecated will be removed once the internal-agent translator
- *  migrates to the ACP-shaped `tool_call` event. External-agent turns
- *  already emit `tool_call` instead; do NOT consume this for new code.
- */
-export interface AgentToolStartEventData {
-  /**
-   * Stable per-call identifier supplied by the LLM tool-call protocol.
-   * Pairs a `tool_start` with its eventual `tool_result` even when
-   * tools execute in parallel and complete out of declaration order.
-   * Optional for backward compatibility with older server builds.
-   */
-  toolCallId?: string;
-  toolName: string;
-  toolArgs: Record<string, unknown>;
-}
-
-/** `event: tool_result` — server finished executing the tool.
- *  @deprecated paired with `tool_start` above. Replaced by
- *  `tool_call_update` for ACP-shaped turns.
- */
-export interface AgentToolResultEventData {
-  /**
-   * Stable per-call identifier matching the `toolCallId` on the
-   * corresponding `tool_start` event. Optional for backward
-   * compatibility with older server builds.
-   */
-  toolCallId?: string;
-  toolName: string;
-  /** Raw tool result payload (usually a JSON-stringified value). */
-  toolResult: string;
-}
-
 /**
  * `event: tool_call` — agent declared a tool invocation.
  *
- * Replaces the legacy `tool_start`/`tool_result` pair with the shape
- * documented in ACP §session/update: a stable `toolCallId`, semantic
- * `kind`, lifecycle `status`, list of source `locations`, and rich
- * `content` blocks (text/image/diff/terminal). Emitted by external
- * (ACP) agents today; the internal pi-ai bridge will move onto it
- * in a follow-up change.
+ * The unified wire shape for both internal (pi-ai) and external (ACP)
+ * tool calls, following ACP §session/update: a stable `toolCallId`,
+ * semantic `kind`, lifecycle `status`, list of source `locations`, and
+ * rich `content` blocks (text/image/diff/terminal).
  *
- * The wire shape carries only ACP-spec fields. Render-variant
- * dispatch happens client-side via {@link variantForInternalTool}
- * keyed on the legacy `tool_start`/`tool_result` `toolName` — ACP
- * `tool_call` events always materialise as the `generic` variant.
+ * Render-variant dispatch happens client-side via
+ * {@link variantForInternalTool} keyed on `internalToolName`:
+ * internal-agent turns set that field and materialise as their
+ * dedicated variant (`canvas_commands`, `agent_tool`, …); external
+ * ACP turns leave it undefined and always render as `generic`.
  */
 export interface AgentToolCallEventData {
   toolCallId: string;
@@ -101,6 +67,19 @@ export interface AgentToolCallEventData {
   content?: AcpToolCallContent[];
   /** Raw arguments the agent attached (passed through unmodified). */
   rawInput?: unknown;
+  /**
+   * pi-ai built-in tool name, set ONLY by internal-agent turns
+   * (`canvas_commands`, `web_search`, `read`, `grep`, …). Drives
+   * client-side render-variant dispatch via `variantForInternalTool()`
+   * and gates local side-effects (e.g. `canvas_commands` execution).
+   *
+   * External ACP turns leave this undefined — they carry no stable
+   * machine tool name (only a display `title` + semantic `toolKind`)
+   * and always render as the `generic` variant. Presence of this
+   * field is therefore the single wire-level discriminator between an
+   * internal and an external tool call.
+   */
+  internalToolName?: string;
 }
 
 /**
@@ -210,8 +189,6 @@ export type AgentStreamEvent =
   | { type: 'meta'; data: AgentMetaEventData }
   | { type: 'text_delta'; data: AgentTextDeltaEventData }
   | { type: 'thinking_delta'; data: AgentThinkingDeltaEventData }
-  | { type: 'tool_start'; data: AgentToolStartEventData }
-  | { type: 'tool_result'; data: AgentToolResultEventData }
   | { type: 'tool_call'; data: AgentToolCallEventData }
   | { type: 'tool_call_update'; data: AgentToolCallUpdateEventData }
   | { type: 'plan'; data: AgentPlanEventData }
@@ -230,11 +207,6 @@ export const AGENT_SSE_EVENTS = {
   Meta: 'meta',
   TextDelta: 'text_delta',
   ThinkingDelta: 'thinking_delta',
-  /** @deprecated emit `ToolCall` instead. Kept for legacy
-   *  internal-agent turns until the pi-ai bridge migrates over. */
-  ToolStart: 'tool_start',
-  /** @deprecated emit `ToolCallUpdate` instead. */
-  ToolResult: 'tool_result',
   ToolCall: 'tool_call',
   ToolCallUpdate: 'tool_call_update',
   Plan: 'plan',
