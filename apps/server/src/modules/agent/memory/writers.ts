@@ -257,7 +257,7 @@ export function writeSkill(args: SkillWriteArgs): WriteResult {
         title: (args.title ?? args.id).trim(),
         description: args.description.trim(),
         appliesTo: scopes,
-        body: ensureTrailingNewline(args.body),
+        body: ensureTrailingNewline(stripLeadingFrontmatter(args.body)),
       });
       mkdirp(userSkillsDir());
       atomicWriteText(target, md);
@@ -287,7 +287,18 @@ export function writeSkill(args: SkillWriteArgs): WriteResult {
     // existing SKILL.md first if they need to preserve / refine prior
     // content. This matches the canvas-memory contract and gives the
     // agent freedom to restructure / shrink / rewrite the body.
-    const updatedBody = ensureTrailingNewline(args.body);
+    //
+    // The agent typically copies the existing SKILL.md verbatim then
+    // edits it, which means `args.body` often starts with a `---`
+    // frontmatter fence. Strip it: we render frontmatter from `meta`
+    // (with caller overrides) ourselves, so a duplicate fence in the
+    // body would produce a file with TWO frontmatter blocks. The
+    // values the caller embedded in their leading fence are silently
+    // dropped because the canonical args-level fields (`description`,
+    // `appliesTo`, `title`) are the only supported override channel.
+    const updatedBody = ensureTrailingNewline(
+      stripLeadingFrontmatter(args.body),
+    );
     const scopesArg = sanitiseAppliesTo(args.appliesTo);
     const scopesExisting = sanitiseAppliesTo(
       Array.isArray(meta.appliesTo) ? (meta.appliesTo as string[]) : undefined,
@@ -386,6 +397,28 @@ function readOrEmpty(file: string): string {
 
 function ensureTrailingNewline(s: string): string {
   return s.endsWith('\n') ? s : `${s}\n`;
+}
+
+/**
+ * Strip a leading `---\n...\n---\n` YAML frontmatter fence if present.
+ *
+ * Defensive: agents that read an existing SKILL.md and re-submit it as
+ * `args.body` (the workflow encouraged by `update`'s wholesale-replace
+ * contract) tend to include the original frontmatter. Without this
+ * strip, the writer's own `renderFrontmatter` output would stack on
+ * top of the caller's fence and produce a file with two frontmatter
+ * blocks — which the loader then refuses to parse correctly.
+ *
+ * The values the caller embedded in their leading fence are silently
+ * dropped; the canonical args-level fields (`description`,
+ * `appliesTo`, `title`) are the only supported override channel.
+ */
+function stripLeadingFrontmatter(body: string): string {
+  if (!body.startsWith('---\n') && !body.startsWith('---\r\n')) return body;
+  const closeRe = /\n---[ \t]*(\r?\n|$)/;
+  const m = closeRe.exec(body);
+  if (!m) return body;
+  return body.slice(m.index + m[0].length);
 }
 
 function checkCap(s: string): { ok: true } | { ok: false; reason: string } {
