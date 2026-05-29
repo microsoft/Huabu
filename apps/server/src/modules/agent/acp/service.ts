@@ -500,27 +500,44 @@ export async function* runAcpAgent(
   let stopReason: string | undefined;
   let done = false;
 
-  // 4a. Sidecar bookkeeping. Tool-call and plan events emitted during
-  //     the turn carry ACP-specific enrichment that doesn't fit in
-  //     pi-ai's `AssistantMessage.content` shape, so we mirror them
-  //     into `<threadId>.parts.json` for later history reconstruction.
+  // 4a. Turn bookkeeping.
   //
-  //     v2 sidecar keys overlays by STABLE IDS, not array positions:
-  //       - `toolExtras` is keyed by `toolCallId` (per-call uuid).
-  //       - `planByMessageTimestamp` is keyed by the assistant
-  //         message's arrival timestamp.
+  //   `contentBlocks` accumulates text / thinking / tool-call blocks
+  //   in WIRE ORDER. Text and thinking deltas coalesce into the
+  //   trailing same-kind block; tool calls push a fresh block. This
+  //   list is what we hand to `fauxAssistantMessage` in the `finally`
+  //   below, so the persisted message mirrors what the user saw live
+  //   (refresh preserves interleaving + thinking blocks + tool-call
+  //   order, and gives the sidecar's `toolExtras` content-block ids
+  //   to join against).
   //
-  //     The timestamp isn't known until `fauxAssistantMessage` runs in
-  //     the `finally` block below, so plan entries are STAGED in
-  //     `pendingPlan` during the turn and committed to the sidecar
-  //     once the timestamp exists. A turn that aborts before any
-  //     assistant text simply drops the staged plan — it has no
-  //     stable anchor to attach to.
+  //   `sidecar` holds ACP-specific enrichment (toolKind / status /
+  //   plan entries / …) that doesn't fit pi-ai's content shape;
+  //   keyed by stable ids — `toolExtras[toolCallId]` and
+  //   `planByMessageTimestamp[String(timestamp)]`. The assistant
+  //   timestamp is only known after the `finally` push, so plan
+  //   entries are staged in `pendingPlan` and committed there; a
+  //   turn aborted before any output drops the staged plan.
   //
-  //     `assistantIndex` is still recorded so the v1-style timestamps
-  //     array stays in lock-step with pi-ai's `Context.messages` and
-  //     so the history builder can resolve `messageIndex → timestamp`
-  //     during read.
+  //   `assistantIndex` lets `recordMessageTimestamp` keep the
+  //   sidecar's `messageTimestamps` array index-aligned with
+  //   `Context.messages`.
+  type AssistantContentBlock =
+    | { type: 'text'; text: string }
+    | { type: 'thinking'; thinking: string }
+    | {
+        type: 'toolCall';
+        id: string;
+        name: string;
+        arguments: Record<string, unknown>;
+      };
+  const contentBlocks: AssistantContentBlock[] = [];
+  // Per-toolCallId reference into `contentBlocks` so a later
+  // `tool_call_update` can refine the title in place.
+  const toolCallByCallId = new Map<
+    string,
+    Extract<AssistantContentBlock, { type: 'toolCall' }>
+  >();
   let sidecar: ChatPartsSidecar =
     readChatParts(threadId, canvasId) ?? emptySidecar();
   const assistantIndex = context.messages.length;
@@ -582,12 +599,25 @@ export async function* runAcpAgent(
           );
           return;
         }
-        if (evt.type === 'text_delta') assembledText += evt.data.content;
-        // Mirror rich-ACP events into the sidecar overlay. Failures
-        // (e.g. RangeError on malformed entries) are swallowed via
-        // the writer's try/catch in `persistSidecar` later; here we
-        // only stage the in-memory mutation.
-        if (evt.type === 'tool_call') {
+        if (evt.type === 'text_delta') {
+          assembledText += evt.data.content;
+          const last = contentBlocks[contentBlocks.length - 1];
+          if (last?.type === 'text') {
+            last.text += evt.data.content;
+          } else {
+            contentBlocks.push({ type: 'text', text: evt.data.content });
+          }
+        } else if (evt.type === 'thinking_delta') {
+          const last = contentBlocks[contentBlocks.length - 1];
+          if (last?.type === 'thinking') {
+            last.thinking += evt.data.content;
+          } else {
+            contentBlocks.push({
+              type: 'thinking',
+              thinking: evt.data.content,
+            });
+          }
+        } else if (evt.type === 'tool_call') {
           sidecar = upsertToolExt(sidecar, evt.data.toolCallId, {
             toolKind: evt.data.toolKind,
             status: evt.data.status,
@@ -596,22 +626,40 @@ export async function* runAcpAgent(
             rawOutput: undefined,
           });
           sidecarDirty = true;
+          // `rawInput` may be any JSON shape; pi-ai's `ToolCall.arguments`
+          // requires a plain object, so narrow defensively.
+          const rawInput = evt.data.rawInput;
+          const args: Record<string, unknown> =
+            rawInput !== null &&
+            typeof rawInput === 'object' &&
+            !Array.isArray(rawInput)
+              ? (rawInput as Record<string, unknown>)
+              : {};
+          const block: Extract<AssistantContentBlock, { type: 'toolCall' }> = {
+            type: 'toolCall',
+            id: evt.data.toolCallId,
+            name: evt.data.title || evt.data.toolKind || 'tool',
+            arguments: args,
+          };
+          contentBlocks.push(block);
+          toolCallByCallId.set(evt.data.toolCallId, block);
         } else if (evt.type === 'tool_call_update') {
           sidecar = upsertToolExt(sidecar, evt.data.toolCallId, {
             status: evt.data.status,
-            // `title` is on the wire but lives on the ACP envelope,
-            // not the persistence extension — skip it here, the
-            // value is already in the SSE event for live UI.
             locations: evt.data.locations,
             content: evt.data.content,
             rawOutput: evt.data.rawOutput,
           });
           sidecarDirty = true;
+          // ACP allows refining the title mid-flight (e.g. "Reading"
+          // → "Reading app.ts"); mirror onto the persisted block.
+          if (evt.data.title) {
+            const tc = toolCallByCallId.get(evt.data.toolCallId);
+            if (tc) tc.name = evt.data.title;
+          }
         } else if (evt.type === 'plan') {
-          // Plan entries are STAGED here; they only enter the sidecar
-          // once the assistant message's timestamp is known (in the
-          // `finally` block below). Wire semantics are full-replacement,
-          // so the latest plan always wins for this turn.
+          // Full-replacement wire semantics: latest plan wins.
+          // Staged until the assistant timestamp is known (finally).
           pendingPlan = evt.data.entries;
         }
         queue.push(evt);
@@ -662,30 +710,29 @@ export async function* runAcpAgent(
       const reason = stopReason ?? 'unknown';
       const synthetic = `_(agent returned no text — stopReason: ${reason}. Usually a tool-only turn or a refusal without prose. Extend the ACP translator if you need tool-call rendering.)_`;
       assembledText = synthetic;
+      // Push as a trailing text block so the synthetic also survives
+      // refresh alongside any tool calls emitted earlier in the turn.
+      contentBlocks.push({ type: 'text', text: synthetic });
       yield { type: 'text_delta', data: { content: synthetic } };
     }
   } finally {
-    // 6. Always sync the assistant’s text back into context.messages,
-    //    even on abort/error \u2014 mirrors `runAgent`\u2019s `finally` sync
-    //    so partial replies survive page reloads. Captures any
-    //    synthetic fallback emitted above too.
-    if (assembledText.length > 0) {
+    // 6. Persist assistant output. Mirrors `runAgent`'s `finally` so
+    //    partial replies survive abort/error. `contentBlocks` is
+    //    already in wire order, so we hand it straight to pi-ai.
+    if (contentBlocks.length > 0) {
       const aborted = signal?.aborted ?? false;
       const timestamp = Date.now();
       context.messages.push(
-        fauxAssistantMessage(assembledText, {
+        fauxAssistantMessage(contentBlocks, {
           stopReason: mapStopReason(stopReason, aborted),
           timestamp,
         }),
       );
-      // Stamp the sidecar with the assistant arrival time only AFTER
-      // the pi-ai push completes — keeps the two files index-aligned.
-      // `recordMessageTimestamp` is first-write-wins, so a retry of
-      // the same turn never overwrites the original arrival time.
+      // Stamp arrival time AFTER the push so the sidecar's
+      // `messageTimestamps` stays index-aligned with `Context.messages`.
+      // First-write-wins guards against retry overwrites.
       sidecar = recordMessageTimestamp(sidecar, assistantIndex, timestamp);
       sidecarDirty = true;
-      // Commit any plan entries that were staged during the turn now
-      // that we have a stable timestamp to key them by.
       if (pendingPlan) {
         sidecar = setPlanForMessage(sidecar, timestamp, pendingPlan);
         pendingPlan = null;
@@ -693,7 +740,7 @@ export async function* runAcpAgent(
     }
     // 6b. Persist the rich-ACP sidecar regardless of error/abort —
     //     partial tool calls captured before the failure still
-    //     survive a refresh once the read path is wired.
+    //     survive a refresh.
     persistSidecar();
   }
 
