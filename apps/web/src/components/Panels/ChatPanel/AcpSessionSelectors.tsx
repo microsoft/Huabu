@@ -24,6 +24,11 @@ import type {
   AcpSessionMetaSnapshot,
 } from '@sediment/shared';
 
+// Tighter trigger than the default `size="sm"` Button to keep the
+// toolbar row from wrapping when the agent publishes 3+ pills. Wins
+// over the size class via `tailwind-merge` in `Select`'s `cn()`.
+const COMPACT_TRIGGER_CLASS = 'px-1.5 py-0.5 gap-1';
+
 interface AcpSessionSelectorsProps {
   meta: AcpSessionMetaSnapshot;
   /**
@@ -91,6 +96,7 @@ function ConfigOptionSelect({
         tone="neutral"
         size="sm"
         align="top-left"
+        className={COMPACT_TRIGGER_CLASS}
       />
     );
   }
@@ -167,6 +173,7 @@ function ConfigOptionSelect({
       tone="neutral"
       size="sm"
       align="top-left"
+      className={COMPACT_TRIGGER_CLASS}
     />
   );
 }
@@ -248,6 +255,7 @@ export const AcpSessionSelectors = ({
           tone="neutral"
           size="sm"
           align="top-left"
+          className={COMPACT_TRIGGER_CLASS}
         />
       )}
       {hasModel && (
@@ -262,6 +270,7 @@ export const AcpSessionSelectors = ({
           tone="neutral"
           size="sm"
           align="top-left"
+          className={COMPACT_TRIGGER_CLASS}
         />
       )}
       {meta.configOptions.length > 0 &&

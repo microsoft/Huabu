@@ -13,6 +13,7 @@ import { Button } from '../../Common/Button';
 import { NodeRef } from '../../Common/NodeRef';
 import { Tooltip } from '../../Common/Tooltip';
 
+import type { ContextUsageOverride } from './ContextUsageRing';
 import type { AgentMode, AvailableCommand } from '@sediment/shared';
 
 interface ChatInputProps {
@@ -51,6 +52,14 @@ interface ChatInputProps {
    * advertises any. Hidden by simply passing nothing.
    */
   acpSelectorsSlot?: React.ReactNode;
+  /**
+   * Authoritative context usage forwarded straight to
+   * `ContextUsageRing`. Set by ChatPanel for ACP-bound threads so the
+   * ring reflects the agent's own token budget instead of the
+   * built-in pi-agent's. See `ContextUsageRing` for the three-state
+   * semantics of this prop.
+   */
+  contextUsageOverride?: ContextUsageOverride | undefined;
   disabled?: boolean;
   placeholder?: string;
 }
@@ -65,6 +74,7 @@ export const ChatInput = ({
   slashCommands = [],
   onSlashMenuIntent,
   acpSelectorsSlot,
+  contextUsageOverride,
   disabled = false,
   placeholder = 'Asking anything here...',
 }: ChatInputProps) => {
@@ -528,12 +538,18 @@ export const ChatInput = ({
           </div>
 
           <div className="mt-2 flex items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex min-w-0 flex-1 items-center overflow-hidden">
               {acpSelectorsSlot}
-              <ContextUsageRing draftText={value} isStreaming={isStreaming} />
+              <span className="ml-2 inline-flex shrink-0 items-center">
+                <ContextUsageRing
+                  draftText={value}
+                  isStreaming={isStreaming}
+                  usageOverride={contextUsageOverride}
+                />
+              </span>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex shrink-0 items-center gap-2">
               <SourceCount />
 
               {isStreaming ? (

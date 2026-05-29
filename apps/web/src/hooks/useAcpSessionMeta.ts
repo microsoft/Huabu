@@ -48,6 +48,26 @@ const EMPTY_META: AcpSessionMetaSnapshot = {
 /** Subset of `AgentStreamEvent` types this hook merges into the snapshot. */
 export type AcpSessionMetaEvent = AcpSessionMetaStreamEvent;
 
+/**
+ * Patch shape accepted by {@link UseAcpSessionMetaResult.applyOptimistic}.
+ * Every field is optional; only the provided fields are mutated.
+ *
+ * - `currentModeId`: replaces the active mode id (mirrors the
+ *   `session_mode_update` SSE event but lets callers also pass
+ *   `null` for revert).
+ * - `currentModelId`: replaces the active model id. There is no SSE
+ *   event for this, so optimistic updates are the only way to get the
+ *   selector to reflect a model switch before the agent re-pushes the
+ *   full `configOptions` snapshot.
+ * - `configOption`: replaces a single option's `currentValue` (matched
+ *   by `id`). No-op when no option with that id exists in the cache.
+ */
+export interface AcpSessionMetaOptimisticPatch {
+  currentModeId?: string | null;
+  currentModelId?: string | null;
+  configOption?: { id: string; value: string | boolean };
+}
+
 export interface UseAcpSessionMetaResult {
   /** Snapshot the server most recently confirmed. Never null. */
   meta: AcpSessionMetaSnapshot;
@@ -66,12 +86,29 @@ export interface UseAcpSessionMetaResult {
    * no-op (e.g. duplicate id).
    */
   applyEvent: (event: AcpSessionMetaEvent) => void;
+  /**
+   * Apply a client-side optimistic patch (no SSE equivalent required).
+   * Use for set-RPC handlers that want the selector to update
+   * immediately, and to revert on RPC failure by re-applying the
+   * prior value.
+   */
+  applyOptimistic: (patch: AcpSessionMetaOptimisticPatch) => void;
 }
 
 export interface UseAcpSessionMetaOptions {
   threadId: string | null | undefined;
   binding: AgentBinding;
   canvasId?: string | null;
+  /**
+   * Master enable switch. When `false`, the hook behaves as if the
+   * binding were internal: no fetch, empty {@link EMPTY_META}, no
+   * error. Use this to gate the request on a precondition the hook
+   * can't see itself — e.g. "the bound external agent is currently
+   * connected to the bridge" — so we don't fire a guaranteed-to-fail
+   * request that pollutes the console with 503s. Defaults to `true`
+   * for backwards-compat with the original API.
+   */
+  enabled?: boolean;
 }
 
 /**
@@ -82,6 +119,7 @@ export function useAcpSessionMeta({
   threadId,
   binding,
   canvasId,
+  enabled = true,
 }: UseAcpSessionMetaOptions): UseAcpSessionMetaResult {
   const [meta, setMeta] = useState<AcpSessionMetaSnapshot>(EMPTY_META);
   const [loading, setLoading] = useState(false);
@@ -102,7 +140,11 @@ export function useAcpSessionMeta({
     const myEpoch = ++epochRef.current;
     const isCurrent = () => epochRef.current === myEpoch;
 
-    if (!threadId || bindingKind !== 'external') {
+    if (!threadId || bindingKind !== 'external' || !enabled) {
+      // Internal binding (or external binding whose precondition has
+      // been gated off by the caller) — nothing to fetch. Reset to
+      // empty so a freshly-switched internal binding doesn't keep
+      // showing the previous agent's snapshot.
       setMeta(EMPTY_META);
       setError(null);
       setLoading(false);
@@ -144,7 +186,7 @@ export function useAcpSessionMeta({
       if (isCurrent()) setLoading(false);
       loadingRef.current = false;
     }
-  }, [threadId, canvasId, bindingKind, agentletAgentId, alias]);
+  }, [threadId, canvasId, bindingKind, agentletAgentId, alias, enabled]);
 
   const refreshIfStale = useCallback(
     (ttlMs: number = STALE_TTL_MS) => {
@@ -227,6 +269,57 @@ export function useAcpSessionMeta({
     });
   }, []);
 
+  const applyOptimistic = useCallback(
+    (patch: AcpSessionMetaOptimisticPatch) => {
+      setMeta((prev) => {
+        let changed = false;
+        let next: AcpSessionMetaSnapshot = prev;
+
+        if (
+          'currentModeId' in patch &&
+          patch.currentModeId !== prev.currentModeId
+        ) {
+          next = { ...next, currentModeId: patch.currentModeId ?? null };
+          changed = true;
+        }
+
+        if (
+          'currentModelId' in patch &&
+          patch.currentModelId !== prev.currentModelId
+        ) {
+          next = { ...next, currentModelId: patch.currentModelId ?? null };
+          changed = true;
+        }
+
+        if (patch.configOption) {
+          const { id, value } = patch.configOption;
+          const idx = prev.configOptions.findIndex(
+            (o) => String((o as { id?: unknown }).id ?? '') === id,
+          );
+          if (idx !== -1) {
+            const target = prev.configOptions[idx] as {
+              currentValue?: unknown;
+            };
+            if (target.currentValue !== value) {
+              const updated = {
+                ...prev.configOptions[idx],
+                currentValue: value,
+              };
+              const list = prev.configOptions.slice();
+              list[idx] = updated as (typeof list)[number];
+              next = { ...next, configOptions: list };
+              changed = true;
+            }
+          }
+        }
+
+        if (!changed) return prev;
+        return { ...next, updatedAt: Date.now() };
+      });
+    },
+    [],
+  );
+
   useEffect(() => {
     setMeta(EMPTY_META);
     setError(null);
@@ -249,5 +342,13 @@ export function useAcpSessionMeta({
     return () => setAcpSessionMetaSink(null);
   }, [bindingKind, applyEvent]);
 
-  return { meta, loading, error, refresh, refreshIfStale, applyEvent };
+  return {
+    meta,
+    loading,
+    error,
+    refresh,
+    refreshIfStale,
+    applyEvent,
+    applyOptimistic,
+  };
 }

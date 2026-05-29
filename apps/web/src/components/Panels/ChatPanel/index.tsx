@@ -4,7 +4,7 @@ import {
   PanelRightOpen,
   Plus,
 } from 'lucide-react';
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 
 import {
   setAcpSessionConfigOption,
@@ -12,6 +12,7 @@ import {
   setAcpSessionModel,
 } from '@/api/acp';
 import { Button } from '@/components/Common/Button';
+import { toast } from '@/components/Common/Toast';
 import { useAcpAgents } from '@/hooks/useAcpAgents';
 import { useAcpSessionMeta } from '@/hooks/useAcpSessionMeta';
 import { useAcpSlashCommands } from '@/hooks/useAcpSlashCommands';
@@ -67,7 +68,22 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     agents: connectedAgents,
     refresh: refreshAcpAgents,
     loading: acpAgentsLoading,
+    enabled: acpBridgeEnabled,
   } = useAcpAgents();
+
+  // Gate the ACP per-thread hooks on the bound agent actually being
+  // present in the connected-agents list. Without this gate a thread
+  // whose persisted binding refers to a now-disconnected agent (bridge
+  // restart, agent process exited, etc.) would still POST
+  // /api/acp/threads/<id>/session at mount and reliably get a 503,
+  // which clutters the console and confuses debugging. The
+  // ModeSelector resets the binding to internal on unlocked threads
+  // (see ModeSelector.tsx), but the meta/slash-commands hooks still
+  // fire one render earlier than the reset — `acpExternalReachable`
+  // is what keeps that initial fetch from happening.
+  const acpExternalReachable =
+    agentBinding.kind === 'external' &&
+    connectedAgents.some((a) => a.agentId === agentBinding.agentletAgentId);
 
   // Slash commands for the currently-bound external agent. Empty array
   // when the thread is internal or the agent has nothing to offer.
@@ -80,72 +96,115 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       threadId,
       binding: agentBinding,
       canvasId,
+      enabled: acpExternalReachable,
     });
 
   // ACP session-meta (mode / model / config options / info / usage).
   // Drives the dropdown trio in ChatInput's toolbar. Empty when the
   // binding is internal — selectors then render nothing.
-  const { meta: acpSessionMeta, applyEvent: applyAcpSessionMetaEvent } =
-    useAcpSessionMeta({
-      threadId,
-      binding: agentBinding,
-      canvasId,
-    });
+  const {
+    meta: acpSessionMeta,
+    applyEvent: applyAcpSessionMetaEvent,
+    applyOptimistic: applyAcpSessionMetaOptimistic,
+  } = useAcpSessionMeta({
+    threadId,
+    binding: agentBinding,
+    canvasId,
+    enabled: acpExternalReachable,
+  });
+
+  // Keep a ref to the latest snapshot so the optimistic handlers can
+  // read prior values for revert without re-creating themselves (and
+  // their downstream consumers) on every meta tick.
+  const acpSessionMetaRef = useRef(acpSessionMeta);
+  useEffect(() => {
+    acpSessionMetaRef.current = acpSessionMeta;
+  }, [acpSessionMeta]);
 
   // Optimistic onChange handlers for the ACP selectors: merge the
   // chosen value into the local snapshot immediately, then fire the
-  // REST set-RPC. If the agent rejects (502 from the server route),
-  // the next session-meta push will overwrite our optimistic state.
+  // REST set-RPC. On failure, revert the snapshot and surface a toast
+  // so the user knows the agent rejected the change.
   const handleAcpSelectMode = useCallback(
     async (modeId: string) => {
       if (!threadId) return;
+      const previousModeId = acpSessionMetaRef.current.currentModeId;
+      if (previousModeId === modeId) return;
       applyAcpSessionMetaEvent({
         type: 'session_mode_update',
         data: { currentModeId: modeId },
       });
       try {
         await setAcpSessionMode(threadId, { modeId });
-      } catch {
-        // Server will re-sync on the agent's next push.
+      } catch (err) {
+        applyAcpSessionMetaOptimistic({ currentModeId: previousModeId });
+        toast(
+          err instanceof Error
+            ? `Failed to switch mode: ${err.message}`
+            : 'Failed to switch mode',
+          { variant: 'error' },
+        );
       }
     },
-    [threadId, applyAcpSessionMetaEvent],
+    [threadId, applyAcpSessionMetaEvent, applyAcpSessionMetaOptimistic],
   );
 
   const handleAcpSelectModel = useCallback(
     async (modelId: string) => {
       if (!threadId) return;
-      // No dedicated SSE event for "model changed"; mirror the mode
-      // pattern by directly mutating the local snapshot through a
-      // synthetic config event before the round-trip.
-      applyAcpSessionMetaEvent({
-        type: 'config_options_update',
-        data: { options: acpSessionMeta.configOptions },
-      });
+      const previousModelId = acpSessionMetaRef.current.currentModelId;
+      if (previousModelId === modelId) return;
+      applyAcpSessionMetaOptimistic({ currentModelId: modelId });
       try {
         await setAcpSessionModel(threadId, { modelId });
-      } catch {
-        // Server will re-sync on the agent's next push.
+      } catch (err) {
+        applyAcpSessionMetaOptimistic({ currentModelId: previousModelId });
+        toast(
+          err instanceof Error
+            ? `Failed to switch model: ${err.message}`
+            : 'Failed to switch model',
+          { variant: 'error' },
+        );
       }
     },
-    [threadId, acpSessionMeta.configOptions, applyAcpSessionMetaEvent],
+    [threadId, applyAcpSessionMetaOptimistic],
   );
 
   const handleAcpSelectConfigOption = useCallback(
     async (optionId: string, value: string | boolean) => {
       if (!threadId) return;
+      const priorOption = acpSessionMetaRef.current.configOptions.find(
+        (o) => String((o as { id?: unknown }).id ?? '') === optionId,
+      );
+      const previousValue = (
+        priorOption as { currentValue?: unknown } | undefined
+      )?.currentValue;
+      const previousValueTyped =
+        typeof previousValue === 'string' || typeof previousValue === 'boolean'
+          ? previousValue
+          : undefined;
+      if (previousValueTyped === value) return;
+      applyAcpSessionMetaOptimistic({ configOption: { id: optionId, value } });
       try {
         await setAcpSessionConfigOption(threadId, {
           configOptionId: optionId,
           value,
         });
-      } catch {
-        // Optimistic mutation skipped — the option shape is opaque,
-        // so we wait for the agent's confirmation push instead of
-        // forging a synthetic update that might diverge.
+      } catch (err) {
+        if (previousValueTyped !== undefined) {
+          applyAcpSessionMetaOptimistic({
+            configOption: { id: optionId, value: previousValueTyped },
+          });
+        }
+        toast(
+          err instanceof Error
+            ? `Failed to update option: ${err.message}`
+            : 'Failed to update option',
+          { variant: 'error' },
+        );
       }
     },
-    [threadId],
+    [threadId, applyAcpSessionMetaOptimistic],
   );
 
   // Question thread replay mode
@@ -264,6 +323,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
             connectedAgents={connectedAgents}
             onRefreshAgents={refreshAcpAgents}
             refreshing={acpAgentsLoading}
+            agentsListReady={acpBridgeEnabled !== null}
             onNewThread={handleNewChat}
             locked={messages.length > 0 || isLoading}
             disabled={!isHistoryLoaded}
@@ -346,6 +406,17 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
                   onSelectConfigOption={handleAcpSelectConfigOption}
                 />
               ) : null
+            }
+            // For external (ACP) bindings, defer to the agent's own
+            // `session_usage_update`; the internal context-token fetch
+            // would return 0 and the hardcoded 128k window is wrong
+            // for non-GPT-4o models. `undefined` keeps the legacy
+            // built-in path; `null` hides the ring until the agent
+            // pushes its first usage snapshot.
+            contextUsageOverride={
+              agentBinding.kind === 'external'
+                ? acpSessionMeta.usage
+                : undefined
             }
             disabled={isLoading || !isHistoryLoaded}
           />
