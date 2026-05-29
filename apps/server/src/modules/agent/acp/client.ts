@@ -1,51 +1,36 @@
 /**
  * AcpAgentClient — drives one ACP session over a single agentlet
- * `AgentConnection`.
+ * `AgentConnection`, layered on top of `@agentclientprotocol/sdk`'s
+ * `ClientSideConnection`.
  *
- * Currently supported:
+ * Capability handlers wired into the SDK `Client`:
+ *   - `fs/read_text_file`          → capabilities/fs.ts (sandboxed)
+ *   - `fs/write_text_file`         → reject -32601 (read-only)
+ *   - `terminal/*`                 → reject -32601 (never implemented)
+ *   - `session/request_permission` → auto-allow (local-agent threat model)
  *
- *   - `initialize()` — negotiate protocol version + capabilities
- *   - `newSession({ cwd })` — create a session, return sessionId
- *   - `prompt(sessionId, text, onUpdate, signal?)` — send user message,
- *     stream `session/update` notifications via callback, resolve with
- *     the final `{ stopReason }`
- *   - `cancel(sessionId)` — notify the agent to abort the current turn
- *
- * Capability handlers:
- *   - `fs/read_text_file`          — wired to capabilities/fs.ts (sandbox
- *                                    + `/canvas/` vfs prefix + allowlist)
- *   - `fs/write_text_file`         — explicit reject (-32601); read-only
- *   - `terminal/*`                 — never implemented; reject (-32601)
- *   - `session/request_permission` — auto-allow (local-agent threat
- *                                    model). The agent’s OS permissions
- *                                    are the real boundary; a UI gate
- *                                    can layer on later without breaking
- *                                    wire compat.
- *
- * Not yet supported at all:
- *   - reconnect / session/load
- *   - tool_call / plan translation
- *
- * Design notes:
- *
- *   - One AcpAgentClient instance is bound to exactly **one Sediment
- *     canvas** (via `opts.canvasId` in the constructor). All sessions
- *     opened on this client inherit that canvas as their sandbox scope.
- *     A thread that rebinds to a different canvas must rebuild the
- *     client (enforced by `session-registry`).
- *   - One AcpAgentClient instance can still own multiple ACP sessions
- *     on a single agentlet `AgentConnection`, keyed by sessionId.
- *   - Registers a single `onMessage` handler on the connection that routes
- *     responses to pending request promises and `session/update`
- *     notifications to the per-session update handler installed by the
- *     in-flight `prompt(sessionId, ...)` call.
- *   - Incoming JSON-RPC requests from the agent go through
- *     `routeAgentRequest`. `fs/read_text_file` is live (sandbox +
- *     allowlist); the remaining capabilities are still stubs that
- *     return -32601 with the agreed wire method name. New capability
- *     handlers (permission gate, etc.) plug into the router as they
- *     land.
+ * Bound to one Sediment canvas (`opts.canvasId`); rebinding to another
+ * canvas requires rebuilding the client (enforced by session-registry).
+ * The SDK owns request id correlation, schema validation, and handler
+ * dispatch; we add a thin layer for long-lived per-session listeners
+ * and orphan-update replay (see {@link AcpAgentClient.orphanUpdates}).
  */
+
+import {
+  ClientSideConnection,
+  RequestError,
+  type Agent as SdkAgent,
+  type Client as SdkClient,
+  type AnyMessage,
+  type Stream,
+  type SessionNotification,
+  type RequestPermissionRequest,
+  type RequestPermissionResponse,
+  type ReadTextFileRequest,
+  type ReadTextFileResponse,
+  type WriteTextFileRequest,
+  type WriteTextFileResponse,
+} from '@agentclientprotocol/sdk';
 
 import { FsCapabilityError, handleFsReadTextFile } from './capabilities/fs.js';
 
@@ -58,11 +43,7 @@ const JSON_RPC_METHOD_NOT_FOUND = -32601;
 const JSON_RPC_INVALID_PARAMS = -32602;
 const JSON_RPC_INTERNAL_ERROR = -32603;
 
-/**
- * ACP `PermissionOption` (subset). Each option offered by the agent
- * carries a stable `optionId` (echoed back in the response) and an
- * orientation `kind` that the client uses to pick a default.
- */
+/** ACP `PermissionOption` (subset) — `optionId` is echoed back in the response. */
 interface PermissionOption {
   optionId: string;
   name?: string;
@@ -70,14 +51,8 @@ interface PermissionOption {
 }
 
 /**
- * Pick the most-permissive option from a permission request.
- *
- *   1. `allow_always` (best — sticks for the session, fewer round-trips)
- *   2. `allow_once`
- *   3. First option whose `kind` is not in the `reject_*` family
- *   4. First option (last-resort — caller has already decided)
- *
- * Exported for testing.
+ * Pick the most-permissive option: `allow_always` > `allow_once` > first
+ * non-`reject_*` > first. Exported for testing.
  */
 export function pickPermissionOption(
   options: ReadonlyArray<PermissionOption>,
@@ -92,11 +67,6 @@ export function pickPermissionOption(
     ) ??
     options[0]
   );
-}
-
-interface PendingRequest {
-  resolve: (result: unknown) => void;
-  reject: (err: Error) => void;
 }
 
 /** Subset of the ACP initialize response we care about. */
@@ -127,16 +97,9 @@ export interface AcpPromptResult {
 
 export interface AcpAgentClientOptions {
   /**
-   * Sediment canvasId this client is bound to. Plumbed all the way from
-   * `agent.route.ts` so capability handlers (fs sandbox, permission gate)
-   * can scope their checks to the correct canvas directory. Constant for
-   * the lifetime of the client — rebinding a thread to a different
-   * canvas requires rebuilding the client (enforced in service.ts).
-   *
-   * Typed as optional because `agentRequestSchema.canvasId` is optional;
-   * the fs sandbox (once implemented) will reject any fs/* call when
-   * this is empty, so an external dispatch without a canvas cannot
-   * access any Huabu file.
+   * Canvas this client is bound to; scopes fs sandbox + permission checks.
+   * Optional because `agentRequestSchema.canvasId` is optional — the fs
+   * sandbox rejects all fs/* calls when this is empty.
    */
   canvasId?: string;
   /** Optional logger; defaults to console. */
@@ -150,64 +113,88 @@ export interface AcpAgentClientOptions {
 
 type SessionUpdateHandler = (update: AcpSessionUpdate) => void;
 
+/**
+ * Adapt an agentlet `AgentConnection` (`send` + `onMessage`) to the SDK
+ * `Stream` shape. `close()` closes the readable, which makes the SDK
+ * abort its connection and reject pending outgoing requests. Does NOT
+ * call `conn.disconnect()` — connection lifecycle is owned by
+ * `server-mount.ts`.
+ */
+function streamFromAgentConnection(conn: AgentConnection): {
+  stream: Stream;
+  close: () => void;
+} {
+  let readableController: ReadableStreamDefaultController<AnyMessage> | null =
+    null;
+  let closed = false;
+
+  const readable = new ReadableStream<AnyMessage>({
+    start(controller) {
+      readableController = controller;
+      conn.onMessage((msg) => {
+        if (closed) return;
+        try {
+          controller.enqueue(msg as unknown as AnyMessage);
+        } catch {
+          // Controller already closed — ignore.
+        }
+      });
+    },
+  });
+
+  const writable = new WritableStream<AnyMessage>({
+    write(msg) {
+      if (closed) return;
+      // agentlet's `AcpMessage` and SDK's `AnyMessage` are both
+      // JSON-RPC 2.0 messages — structurally compatible.
+      conn.send(msg as unknown as AcpMessage);
+    },
+  });
+
+  function close() {
+    if (closed) return;
+    closed = true;
+    try {
+      readableController?.close();
+    } catch {
+      // Already closed — ignore.
+    }
+  }
+
+  return { stream: { readable, writable }, close };
+}
+
 export class AcpAgentClient {
-  private nextId = 1;
-  private readonly pending = new Map<number, PendingRequest>();
-  /**
-   * Per-session update handlers keyed by sessionId. A handler is installed
-   * for the duration of a `prompt()` call and removed in `finally`. Multiple
-   * sessions on the same client can be in flight concurrently as long as
-   * they have distinct sessionIds.
-   */
+  private readonly sdk: ClientSideConnection;
+  private readonly closeStream: () => void;
+  /** Turn-scoped handlers: installed on `prompt()`, removed in `finally`. */
   private readonly updateHandlers = new Map<string, SessionUpdateHandler>();
   /**
-   * Long-lived per-session listeners installed via
-   * {@link registerSessionListener}. Coexist with the turn-scoped
-   * `updateHandlers`: both fire for every `session/update` on the
-   * session id. Used to capture out-of-turn notifications (e.g.
-   * `available_commands_update`, which the spec allows the agent to
-   * push at any time and which typically arrives shortly after
-   * `session/new` resolves — before any prompt is in flight).
+   * Long-lived per-session listeners (via {@link registerSessionListener}).
+   * Fire in addition to the turn handler — needed for out-of-turn
+   * notifications like `available_commands_update`.
    */
   private readonly sessionListeners = new Map<
     string,
     Set<SessionUpdateHandler>
   >();
   /**
-   * Bounded ring buffer of `session/update` notifications that arrived
-   * BEFORE any turn handler or session listener was registered for
-   * their sessionId. Replayed when {@link registerSessionListener} is
-   * called for that sessionId, then dropped.
+   * Bounded ring buffer of `session/update`s that arrived before any
+   * handler/listener existed for their sessionId. Drained by the next
+   * {@link registerSessionListener} call.
    *
-   * Motivating race: many ACP agents push
-   * `available_commands_update` **before** their `session/new`
-   * response on the wire (agentlet's own UI compensates for the same
-   * ordering in `stores/session.ts`). Without buffering, the caller
-   * has no chance to install a listener in time: the
-   * `await sendRequest('session/new', …)` promise only resolves
-   * after the response arrives, so any listener registration must
-   * follow — by which point the earlier notification has already
-   * been seen by `handleIncoming` with no handlers and silently
-   * dropped. The bug surfaces as a permanently-empty slash-command
-   * list for the thread.
-   *
-   * Size cap per sessionId is a defensive memory bound — in practice
-   * the orphan window is one or two updates wide. Once a listener
-   * registers we drain and forget; sessions that never get a listener
-   * keep at most {@link MAX_ORPHAN_UPDATES_PER_SESSION} updates and
-   * are cleared on {@link shutdown}.
+   * Race: many agents push `available_commands_update` before their
+   * `session/new` response, so callers can't install a listener in time.
+   * Without buffering, the slash-command list is permanently empty.
    */
   private readonly orphanUpdates = new Map<string, AcpSessionUpdate[]>();
   private static readonly MAX_ORPHAN_UPDATES_PER_SESSION = 32;
-  private closed = false;
+  private _closed = false;
   private readonly logger: NonNullable<AcpAgentClientOptions['logger']>;
   /** Canvas scope for sandbox + permission checks. See AcpAgentClientOptions.canvasId. Empty string = “no canvas” (fs/* will be rejected). */
   readonly canvasId: string;
 
-  constructor(
-    private readonly connection: AgentConnection,
-    opts: AcpAgentClientOptions,
-  ) {
+  constructor(connection: AgentConnection, opts: AcpAgentClientOptions) {
     this.canvasId = opts.canvasId ?? '';
     this.logger = opts.logger ?? {
       debug: (o, m) => console.debug('[acp-client]', m ?? '', o),
@@ -215,22 +202,24 @@ export class AcpAgentClient {
       warn: (o, m) => console.warn('[acp-client]', m ?? '', o),
       error: (o, m) => console.error('[acp-client]', m ?? '', o),
     };
-    this.connection.onMessage((msg) => this.handleIncoming(msg));
+
+    const { stream, close } = streamFromAgentConnection(connection);
+    this.closeStream = close;
+    this.sdk = new ClientSideConnection(
+      (_agent: SdkAgent) => this.createClientHandler(),
+      stream,
+    );
   }
 
   // ── Public API ──────────────────────────────────────────────────────────
 
   async initialize(): Promise<AcpInitializeResult> {
-    const result = (await this.sendRequest('initialize', {
+    if (this._closed) throw new Error('AcpAgentClient is closed');
+    const result = await this.sdk.initialize({
       protocolVersion: ACP_PROTOCOL_VERSION,
       clientCapabilities: {
-        // Read is handled by acp/capabilities/fs.ts (sandbox +
-        // /canvas/ vfs prefix + allowlist). Write stays closed —
-        // there is no compelling v1 use case and writing canvas node
-        // files would race with the live UI. `terminal` stays false
-        // forever; agents that need a shell use their own local Bash
-        // tool. `session/request_permission` is an implicit
-        // capability and is not declared here.
+        // Write would race with live canvas UI; terminal is delegated
+        // to the agent's own local Bash tool.
         fs: { readTextFile: true, writeTextFile: false },
         terminal: false,
       },
@@ -238,16 +227,17 @@ export class AcpAgentClient {
         name: 'sediment',
         version: '0.1.0',
       },
-    })) as AcpInitializeResult;
-    return result;
+    });
+    return result as AcpInitializeResult;
   }
 
   async newSession(opts: { cwd: string }): Promise<string> {
-    const result = (await this.sendRequest('session/new', {
+    if (this._closed) throw new Error('AcpAgentClient is closed');
+    const result = await this.sdk.newSession({
       cwd: opts.cwd,
       mcpServers: [],
-    })) as AcpNewSessionResult;
-    return result.sessionId;
+    });
+    return (result as AcpNewSessionResult).sessionId;
   }
 
   /**
@@ -255,21 +245,32 @@ export class AcpAgentClient {
    * the turn is forwarded to `onUpdate`. Promise resolves when the agent
    * returns the prompt response (i.e. turn is over). If `signal` aborts,
    * a `session/cancel` notification is sent and the promise rejects.
+   *
+   * When `onPermissionRequest` is supplied, agent
+   * `session/request_permission` calls during this turn are surfaced to it
+   * and suspended until {@link resolvePermission} answers (or a timeout /
+   * abort cancels them). Without it, permission requests auto-allow.
    */
   async prompt(
     sessionId: string,
     text: string,
     onUpdate: SessionUpdateHandler,
     signal?: AbortSignal,
+    onPermissionRequest?: PermissionNotifier,
   ): Promise<AcpPromptResult> {
+    if (this._closed) throw new Error('AcpAgentClient is closed');
     if (this.updateHandlers.has(sessionId)) {
       throw new Error(
         `AcpAgentClient: another prompt is already in flight for session ${sessionId}`,
       );
     }
     this.updateHandlers.set(sessionId, onUpdate);
+    if (onPermissionRequest) {
+      this.permissionNotifiers.set(sessionId, onPermissionRequest);
+    }
 
     const abortListener = () => {
+      this.cancelPendingPermissionsForSession(sessionId, 'aborted');
       void this.cancel(sessionId).catch((e) => {
         this.logger.warn(
           { err: String(e) },
@@ -280,42 +281,36 @@ export class AcpAgentClient {
     signal?.addEventListener('abort', abortListener);
 
     try {
-      const result = (await this.sendRequest('session/prompt', {
+      const result = await this.sdk.prompt({
         sessionId,
         prompt: [{ type: 'text', text }],
-      })) as AcpPromptResult;
-      return result;
+      });
+      return result as AcpPromptResult;
     } finally {
       this.updateHandlers.delete(sessionId);
+      this.permissionNotifiers.delete(sessionId);
+      this.cancelPendingPermissionsForSession(sessionId, 'turn_ended');
       signal?.removeEventListener('abort', abortListener);
     }
   }
 
   /** Notify the agent to abort the current turn. Fire-and-forget. */
   async cancel(sessionId: string): Promise<void> {
-    this.sendNotification('session/cancel', { sessionId });
+    if (this._closed) return;
+    try {
+      await this.sdk.cancel({ sessionId });
+    } catch (e) {
+      // SDK rejects if the underlying stream is closed mid-flight;
+      // a cancel notification is best-effort anyway.
+      this.logger.debug({ err: String(e) }, 'session/cancel send failed');
+    }
   }
 
   /**
-   * Install a long-lived listener for every `session/update` arriving on
-   * `sessionId`, regardless of whether a `prompt()` turn is in flight.
-   * Use for out-of-turn metadata pushes — the canonical example is
-   * `available_commands_update`, which the spec allows the agent to push
-   * at any time (typically right after `session/new`).
-   *
-   * Multiple listeners are supported; each is invoked in registration order.
-   * Returns a disposer; call it during cleanup to avoid leaks.
-   *
-   * Listeners run in addition to (not instead of) the turn-scoped handler
-   * installed by `prompt()`. So a `session/update` arriving during a turn
-   * fires BOTH the turn handler and any registered session listeners.
-   *
-   * Replays {@link orphanUpdates} for `sessionId` synchronously to the
-   * newly-registered handler before returning, so notifications that
-   * arrived before any listener existed (the canonical race: agent
-   * pushes `available_commands_update` BEFORE the `session/new`
-   * response) are delivered exactly once. The orphan buffer for
-   * `sessionId` is then cleared.
+   * Install a long-lived listener for every `session/update` on `sessionId`,
+   * regardless of whether a turn is in flight. Multiple listeners supported;
+   * returns a disposer. Synchronously drains and replays {@link orphanUpdates}
+   * for `sessionId` to the new handler before returning.
    */
   registerSessionListener(
     sessionId: string,
@@ -327,14 +322,9 @@ export class AcpAgentClient {
       this.sessionListeners.set(sessionId, set);
     }
     set.add(handler);
-    // Drain orphan buffer for this sessionId. Done AFTER adding the
-    // handler to the set so a (hypothetical) re-entrant
-    // registerSessionListener from inside the replayed handler sees a
-    // stable state. We fire the just-registered handler with each
-    // buffered update; any OTHER listeners that race-registered in
-    // the same tick already had their chance via the live path and
-    // won't see replays — which is correct, they were attached AFTER
-    // the orphan arrived.
+    // Drain after add so a re-entrant register sees a stable state.
+    // Only the just-registered handler gets replays; listeners that
+    // race-registered later were attached AFTER the orphan arrived.
     const orphans = this.orphanUpdates.get(sessionId);
     if (orphans && orphans.length > 0) {
       this.orphanUpdates.delete(sessionId);
@@ -359,254 +349,213 @@ export class AcpAgentClient {
     };
   }
 
-  /** Mark this client as closed and reject all pending promises. */
+  /**
+   * Resolve a suspended `session/request_permission` by `requestId`.
+   * Returns `true` when a pending request matched and was settled; `false`
+   * when none matched (already answered, timed out, or session ended).
+   *
+   * Idempotent: a second call for the same `requestId` is a no-op `false`.
+   */
+  resolvePermission(requestId: string, decision: PermissionDecision): boolean {
+    const pending = this.pendingPermissions.get(requestId);
+    if (!pending) return false;
+    this.pendingPermissions.delete(requestId);
+    clearTimeout(pending.timer);
+    pending.resolve(decision);
+    return true;
+  }
+
+  /** Cancel every pending permission for one session (turn end / abort). */
+  private cancelPendingPermissionsForSession(
+    sessionId: string,
+    reason: string,
+  ): void {
+    for (const [requestId, pending] of this.pendingPermissions) {
+      if (pending.sessionId !== sessionId) continue;
+      this.pendingPermissions.delete(requestId);
+      clearTimeout(pending.timer);
+      this.logger.debug(
+        { requestId, sessionId, reason },
+        'permission request cancelled',
+      );
+      pending.resolve({ cancelled: true });
+    }
+  }
+
+  /** Cancel ALL pending permissions (used on shutdown). */
+  private cancelAllPendingPermissions(reason: string): void {
+    for (const [requestId, pending] of this.pendingPermissions) {
+      clearTimeout(pending.timer);
+      this.logger.debug(
+        { requestId, sessionId: pending.sessionId, reason },
+        'permission request cancelled',
+      );
+      pending.resolve({ cancelled: true });
+    }
+    this.pendingPermissions.clear();
+  }
+
+  /**
+   * Close the SDK connection (rejects pending requests via its abort
+   * signal) and clear dispatch state.
+   */
   shutdown(reason = 'client_shutdown'): void {
-    if (this.closed) return;
-    this.closed = true;
-    const err = new Error(`AcpAgentClient closed: ${reason}`);
-    for (const p of this.pending.values()) p.reject(err);
-    this.pending.clear();
+    if (this._closed) return;
+    this._closed = true;
+    this.logger.debug({ reason }, 'AcpAgentClient.shutdown');
+    this.cancelAllPendingPermissions(reason);
+    this.permissionNotifiers.clear();
     this.updateHandlers.clear();
     this.sessionListeners.clear();
     this.orphanUpdates.clear();
+    this.closeStream();
   }
 
   /** True if this client has been closed via `shutdown()`. */
   get isClosed(): boolean {
-    return this.closed;
+    return this._closed;
   }
 
-  // ── Internal: JSON-RPC plumbing ─────────────────────────────────────────
+  // ── SDK Client handler ──────────────────────────────────────────────────
 
-  private sendRequest(
-    method: string,
-    params: Record<string, unknown>,
-  ): Promise<unknown> {
-    if (this.closed)
-      return Promise.reject(new Error('AcpAgentClient is closed'));
-    const id = this.nextId++;
-    return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      try {
-        this.connection.send({ jsonrpc: '2.0', id, method, params });
-      } catch (e) {
-        this.pending.delete(id);
-        reject(e instanceof Error ? e : new Error(String(e)));
-      }
-    });
-  }
-
-  private sendNotification(
-    method: string,
-    params: Record<string, unknown>,
-  ): void {
-    if (this.closed) return;
-    this.connection.send({ jsonrpc: '2.0', method, params });
-  }
-
-  private sendErrorReply(
-    id: string | number,
-    code: number,
-    message: string,
-  ): void {
-    this.connection.send({ jsonrpc: '2.0', id, error: { code, message } });
-  }
-
-  private handleIncoming(msg: AcpMessage): void {
-    // 1) Response to one of our outgoing requests?
-    if ('id' in msg && !('method' in msg)) {
-      const pending = this.pending.get(msg.id as number);
-      if (!pending) {
-        this.logger.warn({ id: msg.id }, 'response for unknown request id');
-        return;
-      }
-      this.pending.delete(msg.id as number);
-      if ('error' in msg) {
-        pending.reject(
-          new Error(`ACP error ${msg.error.code}: ${msg.error.message}`),
+  /**
+   * Build the {@link SdkClient} handed to `ClientSideConnection`. Thrown
+   * {@link RequestError}s are converted to JSON-RPC error responses.
+   */
+  private createClientHandler(): SdkClient {
+    return {
+      sessionUpdate: async (params: SessionNotification): Promise<void> => {
+        this.dispatchSessionUpdate(
+          params.sessionId,
+          params.update as unknown as AcpSessionUpdate,
         );
-      } else {
-        pending.resolve(msg.result);
+      },
+      requestPermission: async (
+        params: RequestPermissionRequest,
+      ): Promise<RequestPermissionResponse> => {
+        return this.handleRequestPermission(params);
+      },
+      readTextFile: async (
+        params: ReadTextFileRequest,
+      ): Promise<ReadTextFileResponse> => {
+        return this.handleFsRead(params);
+      },
+      writeTextFile: async (
+        _params: WriteTextFileRequest,
+      ): Promise<WriteTextFileResponse> => {
+        // Advertised as unsupported, but reject loudly if called anyway
+        // so operators see what was attempted.
+        this.logger.warn(
+          { canvasId: this.canvasId },
+          'agent attempted fs/write_text_file — read-only',
+        );
+        throw new RequestError(
+          JSON_RPC_METHOD_NOT_FOUND,
+          'fs/write_text_file is not implemented (read-only)',
+        );
+      },
+      // terminal/* — advertised false; reject for diagnostic visibility.
+      createTerminal: async () => {
+        this.rejectTerminal('terminal/create');
+      },
+      terminalOutput: async () => {
+        this.rejectTerminal('terminal/output');
+      },
+      releaseTerminal: async () => {
+        this.rejectTerminal('terminal/release');
+      },
+      waitForTerminalExit: async () => {
+        this.rejectTerminal('terminal/wait_for_exit');
+      },
+      killTerminal: async () => {
+        this.rejectTerminal('terminal/kill');
+      },
+    };
+  }
+
+  /** Fan out one validated `session/update` to turn handler + listeners + orphan buffer. */
+  private dispatchSessionUpdate(
+    sessionId: string,
+    update: AcpSessionUpdate,
+  ): void {
+    const turnHandler = this.updateHandlers.get(sessionId);
+    const listeners = this.sessionListeners.get(sessionId);
+    if (turnHandler) {
+      try {
+        turnHandler(update);
+      } catch (e) {
+        this.logger.warn(
+          { sessionId, err: String(e) },
+          'session/update turn handler threw',
+        );
       }
-      return;
     }
-
-    // 2) Notification or request from the agent.
-    if (!('method' in msg)) {
-      this.logger.warn({ msg }, 'malformed ACP message (no method, no id)');
-      return;
-    }
-
-    // 2a) Notification (no id) — currently only session/update is interesting.
-    if (!('id' in msg)) {
-      if (msg.method === 'session/update') {
-        const params = (msg.params ?? {}) as {
-          sessionId?: string;
-          update?: AcpSessionUpdate;
-        };
-        const sessionId = params.sessionId;
-        if (params.update && typeof sessionId === 'string') {
-          // Fan-out: BOTH the turn-scoped handler (if a prompt is in
-          // flight) and every long-lived session listener fire. Out-of-turn
-          // updates (e.g. `available_commands_update` arriving right
-          // after `session/new`) only have listeners — they would be
-          // silently dropped without this branch.
-          const turnHandler = this.updateHandlers.get(sessionId);
-          const listeners = this.sessionListeners.get(sessionId);
-          if (turnHandler) {
-            try {
-              turnHandler(params.update);
-            } catch (e) {
-              this.logger.warn(
-                { sessionId, err: String(e) },
-                'session/update turn handler threw',
-              );
-            }
-          }
-          if (listeners && listeners.size > 0) {
-            for (const listener of listeners) {
-              try {
-                listener(params.update);
-              } catch (e) {
-                this.logger.warn(
-                  { sessionId, err: String(e) },
-                  'session/update listener threw',
-                );
-              }
-            }
-          }
-          if (!turnHandler && (!listeners || listeners.size === 0)) {
-            // No handler yet — buffer for later replay via
-            // registerSessionListener. Bounded ring: drop oldest if
-            // we exceed MAX_ORPHAN_UPDATES_PER_SESSION. See the
-            // orphanUpdates field comment for why this matters
-            // (agent pushes available_commands_update before the
-            // session/new response).
-            let buf = this.orphanUpdates.get(sessionId);
-            if (!buf) {
-              buf = [];
-              this.orphanUpdates.set(sessionId, buf);
-            }
-            buf.push(params.update);
-            if (buf.length > AcpAgentClient.MAX_ORPHAN_UPDATES_PER_SESSION) {
-              buf.shift();
-            }
-            this.logger.debug(
-              {
-                sessionId,
-                sessionUpdate: params.update.sessionUpdate,
-                bufferedCount: buf.length,
-              },
-              'session/update buffered (no handler yet)',
-            );
-          }
+    if (listeners && listeners.size > 0) {
+      for (const listener of listeners) {
+        try {
+          listener(update);
+        } catch (e) {
+          this.logger.warn(
+            { sessionId, err: String(e) },
+            'session/update listener threw',
+          );
         }
-        return;
       }
-      this.logger.debug({ method: msg.method }, 'ignored ACP notification');
-      return;
     }
-
-    // 2b) Request from agent — route through the capability dispatcher.
-    //     Every branch currently returns -32601 with the agreed wire
-    //     method name; capability handlers will be filled in as they
-    //     land (fs/read_text_file, session/request_permission, …).
-    this.routeAgentRequest(msg.method, msg.id, msg.params);
+    if (!turnHandler && (!listeners || listeners.size === 0)) {
+      // No handler — buffer for later replay. Ring drops oldest on overflow.
+      let buf = this.orphanUpdates.get(sessionId);
+      if (!buf) {
+        buf = [];
+        this.orphanUpdates.set(sessionId, buf);
+      }
+      buf.push(update);
+      if (buf.length > AcpAgentClient.MAX_ORPHAN_UPDATES_PER_SESSION) {
+        buf.shift();
+      }
+      this.logger.debug(
+        {
+          sessionId,
+          sessionUpdate: (update as { sessionUpdate?: unknown }).sessionUpdate,
+          bufferedCount: buf.length,
+        },
+        'session/update buffered (no handler yet)',
+      );
+    }
   }
 
   /**
-   * Capability router for incoming agent→client requests.
-   *
-   *   - `fs/read_text_file`          → handleFsReadTextFile (sandbox + allowlist)
-   *   - `fs/write_text_file`         → explicit reject (v1 is read-only)
-   *   - `session/request_permission` → handleSessionRequestPermission
-   *                                    (auto-allow; see method JSDoc)
-   *   - `terminal/*`                 → never implemented server-side
-   *
-   * `params` is forwarded untouched; capability handlers are responsible
-   * for their own validation.
+   * `fs/read_text_file` dispatcher. {@link FsCapabilityError} keeps its
+   * own code+message; anything else collapses to -32603.
    */
-  private routeAgentRequest(
-    method: string,
-    id: string | number,
-    params: unknown,
-  ): void {
-    // Observability probe: every agent→client request goes through
-    // here. At info-level so it shows up in the default log stream —
-    // this is how we tell whether an external agent (Copilot, Claude,
-    // …) actually exercises ACP fs/permission capabilities or just
-    // uses its own native tools. Cheap; one line per agent→client RPC.
-    // Demote to debug once the integration is no longer being validated.
+  private handleFsRead(params: ReadTextFileRequest): ReadTextFileResponse {
+    // Info-level so we can see whether external agents actually exercise
+    // ACP fs vs. their own native tools. Demote once integration is stable.
     this.logger.info(
-      { method, id, canvasId: this.canvasId },
+      { method: 'fs/read_text_file', canvasId: this.canvasId },
       '[acp] incoming agent request',
     );
-    switch (method) {
-      case 'fs/read_text_file':
-        this.handleFsRead(id, params);
-        return;
-      case 'fs/write_text_file':
-        // Advertised as unsupported via clientCapabilities; an agent
-        // calling it anyway gets a precise reject so the operator can
-        // see what was attempted.
-        this.logger.warn(
-          { method, id, canvasId: this.canvasId },
-          'agent attempted fs/write_text_file — read-only in this Sediment version',
-        );
-        this.sendErrorReply(
-          id,
-          JSON_RPC_METHOD_NOT_FOUND,
-          'fs/write_text_file is not implemented (Sediment is read-only over ACP in this version)',
-        );
-        return;
-      case 'session/request_permission':
-        this.handleSessionRequestPermission(id, params);
-        return;
-      default:
-        // Includes terminal/* (never implemented) and any unknown method.
-        this.logger.warn(
-          { method, id, canvasId: this.canvasId },
-          'agent called unknown / unsupported client method',
-        );
-        this.sendErrorReply(
-          id,
-          JSON_RPC_METHOD_NOT_FOUND,
-          `Method not implemented: ${method}`,
-        );
-        return;
-    }
-  }
-
-  /**
-   * Dispatch one `fs/read_text_file` call to the capability handler
-   * and translate the (sync, may-throw) result into a JSON-RPC reply.
-   * Failure mapping:
-   *   - `FsCapabilityError`  → reply with its own code + message
-   *   - anything else        → -32603 internal_error with sanitised text
-   */
-  private handleFsRead(id: string | number, params: unknown): void {
     try {
-      const result = handleFsReadTextFile(this.canvasId, params);
-      this.connection.send({ jsonrpc: '2.0', id, result });
+      return handleFsReadTextFile(
+        this.canvasId,
+        params,
+      ) as ReadTextFileResponse;
     } catch (e) {
       if (e instanceof FsCapabilityError) {
         this.logger.warn(
-          { id, canvasId: this.canvasId, code: e.code, message: e.message },
+          { canvasId: this.canvasId, code: e.code, message: e.message },
           'fs/read_text_file refused',
         );
-        this.sendErrorReply(id, e.code, e.message);
-        return;
+        throw new RequestError(e.code, e.message);
       }
       this.logger.error(
         {
-          id,
           canvasId: this.canvasId,
           err: e instanceof Error ? e.message : String(e),
         },
         'fs/read_text_file failed with unexpected error',
       );
-      this.sendErrorReply(
-        id,
+      throw new RequestError(
         JSON_RPC_INTERNAL_ERROR,
         'fs/read_text_file: internal error',
       );
@@ -614,75 +563,35 @@ export class AcpAgentClient {
   }
 
   /**
-   * Auto-allow handler for `session/request_permission`.
+   * Auto-allow handler. Sediment's ACP runtime is local-agent only; OS
+   * file permissions are the real boundary, and per-call UI prompts are
+   * unusable (Copilot can call Read 10+ times per turn). Single insertion
+   * point when stricter policy is needed for remote/sandboxed deploys.
    *
-   * Why auto-allow (not a UI prompt)?
-   *   - Sediment’s ACP runtime is **local-agent only**: the agent runs
-   *     on the same machine as the server, launched by the user via
-   *     `agentlet`. The OS file-permission boundary is the real gate;
-   *     the wire-level permission gate is a soft contract.
-   *   - Per-tool-call UI confirmations would be unusable in practice
-   *     (Copilot can invoke Read 10+ times per turn).
-   *   - When we add remote / sandboxed deployments, this method is the
-   *     single insertion point for a stricter policy (kind-based
-   *     prompt-on-write/execute, allow-list per session, etc.).
-   *
-   * Option-selection rule (see {@link pickPermissionOption}):
-   *   1. Prefer `allow_always` (sticks across the session).
-   *   2. Else `allow_once`.
-   *   3. Else first option that is not `reject_*`.
-   *   4. Else fall back to whatever is offered (caller likely already
-   *      decided this is rejected).
-   *
-   * Each decision is logged at info-level with `{ canvasId, toolCall,
-   * optionId, kind }` so dev operators can see what the agent has been
-   * doing under the implicit allow.
-   *
-   * TODO(B): when we add UI gating, branch here on `toolCall.kind`:
-   * keep auto-allow for `'read'` / `'search'` / `'fetch'`; surface
-   * `'edit'` / `'execute'` to the UI via SSE and await user choice.
+   * TODO(B): branch on `toolCall.kind` to gate `'edit'`/`'execute'` via UI.
    */
-  private handleSessionRequestPermission(
-    id: string | number,
-    params: unknown,
-  ): void {
-    if (!params || typeof params !== 'object') {
-      this.logger.warn(
-        { id, canvasId: this.canvasId },
-        'session/request_permission: missing params',
-      );
-      this.sendErrorReply(
-        id,
-        JSON_RPC_INVALID_PARAMS,
-        'session/request_permission requires an object with `options[]`',
-      );
-      return;
-    }
-    const p = params as {
-      toolCall?: { toolCallId?: unknown; title?: unknown; kind?: unknown };
-      options?: unknown;
-    };
-    const options = Array.isArray(p.options)
-      ? (p.options as PermissionOption[])
-      : [];
+  private handleRequestPermission(
+    params: RequestPermissionRequest,
+  ): RequestPermissionResponse {
+    this.logger.info(
+      { method: 'session/request_permission', canvasId: this.canvasId },
+      '[acp] incoming agent request',
+    );
+    const options = (params.options ?? []) as PermissionOption[];
     if (options.length === 0) {
       this.logger.warn(
-        { id, canvasId: this.canvasId },
+        { canvasId: this.canvasId },
         'session/request_permission: empty options[]',
       );
-      this.sendErrorReply(
-        id,
+      throw new RequestError(
         JSON_RPC_INVALID_PARAMS,
         'session/request_permission: `options[]` must be non-empty',
       );
-      return;
     }
-
     const choice = pickPermissionOption(options);
-    const toolCall = p.toolCall ?? {};
+    const toolCall = params.toolCall ?? {};
     this.logger.info(
       {
-        id,
         canvasId: this.canvasId,
         toolCallId: (toolCall as { toolCallId?: unknown }).toolCallId,
         toolTitle: (toolCall as { title?: unknown }).title,
@@ -691,12 +600,20 @@ export class AcpAgentClient {
       },
       '[acp] session/request_permission auto-decided',
     );
-    this.connection.send({
-      jsonrpc: '2.0',
-      id,
-      result: {
-        outcome: { outcome: 'selected', optionId: choice.optionId },
-      },
-    });
+    return {
+      outcome: { outcome: 'selected', optionId: choice.optionId },
+    };
+  }
+
+  /** Helper: log + throw method_not_found for an unsupported terminal/* call. */
+  private rejectTerminal(method: string): never {
+    this.logger.warn(
+      { method, canvasId: this.canvasId },
+      'agent called unsupported terminal/* method',
+    );
+    throw new RequestError(
+      JSON_RPC_METHOD_NOT_FOUND,
+      `Method not implemented: ${method}`,
+    );
   }
 }

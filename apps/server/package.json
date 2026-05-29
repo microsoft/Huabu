@@ -17,6 +17,7 @@
     "eval:diff": "tsx evals/cli.ts diff"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "^0.22.1",
     "@agentlet/protocol": "workspace:*",
     "@agentlet/server": "workspace:*",
     "@earendil-works/pi-agent-core": "^0.75.5",
