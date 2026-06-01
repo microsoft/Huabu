@@ -44,7 +44,7 @@
 
 import path from 'node:path';
 
-import { loadAgent } from '../../../prompt/agent-loader.js';
+import { loadAgent } from '../../../prompt/agents/loader.js';
 import { runAgent } from '../agent.service.js';
 import { buildAgentNodeRef } from '../node-ref.js';
 import { ACP_CANVAS_VFS_PREFIX } from './capabilities/fs.js';

@@ -25,7 +25,7 @@ import {
   loadAgent,
   renderAgentTemplate,
   AGENTS_DIR,
-} from './agent-loader.js';
+} from './agents/loader.js';
 
 const PROMPT_ROOT = path.dirname(AGENTS_DIR);
 
