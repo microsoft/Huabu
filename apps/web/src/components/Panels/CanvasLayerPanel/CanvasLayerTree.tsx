@@ -101,6 +101,16 @@ export interface CanvasLayerTreeProps {
   getIcon: (node: DataSourceNodeLike) => React.ReactNode;
   getDisplayName: (node: DataSourceNodeLike) => string;
   emptyText?: string;
+  /**
+   * When `true`, the tree behaves as a flat search-result list:
+   * - The collapsed-frame visibility filter is skipped (matches inside
+   *   collapsed frames still appear).
+   * - All rows are non-collapsible (chevron is hidden) since the result
+   *   set is flattened to depth 0 by the parent.
+   * - Drag-to-reorder is disabled — reordering a filtered subset would
+   *   produce surprising z-order changes that "jump over" hidden nodes.
+   */
+  isFilterActive?: boolean;
 }
 
 export const CanvasLayerTree = ({
@@ -108,6 +118,7 @@ export const CanvasLayerTree = ({
   getIcon,
   getDisplayName,
   emptyText = 'No items',
+  isFilterActive = false,
 }: CanvasLayerTreeProps) => {
   const nodes = useCanvasStore((state) => state.nodes);
   const selectNodes = useCanvasStore((state) => state.selectNodes);
@@ -133,8 +144,13 @@ export const CanvasLayerTree = ({
     }),
   );
 
-  // Filter out children of collapsed frames
+  // Filter out children of collapsed frames.
+  // In filter mode the parent already produced a flat result set; we
+  // bypass the collapsed-frame walk entirely so a match buried inside a
+  // currently-collapsed frame still surfaces in search results.
   const visibleItems = useMemo(() => {
+    if (isFilterActive) return items;
+
     const result: DataSourceTreeItem[] = [];
     const itemMap = new Map(items.map((item) => [item.id, item]));
 
@@ -157,7 +173,7 @@ export const CanvasLayerTree = ({
     }
 
     return result;
-  }, [items, collapsedFrameIds]);
+  }, [items, collapsedFrameIds, isFilterActive]);
 
   const selectedIdSet = useMemo(() => {
     const set = new Set<string>();
@@ -372,8 +388,12 @@ export const CanvasLayerTree = ({
             strategy={verticalListSortingStrategy}
           >
             {visibleItems.map((item) => {
+              // Filter mode flattens the list to depth 0 and renders a
+              // pure result set, so chevrons / drag are both meaningless
+              // and confusing — we force them off here.
               const isCollapsible =
-                item.node.type === 'frame' || item.node.type === 'group';
+                !isFilterActive &&
+                (item.node.type === 'frame' || item.node.type === 'group');
               const isCollapsed = isFrameCollapsed(item.id);
               const isSelfLocked = Boolean(item.node.data?.locked);
 
@@ -390,7 +410,7 @@ export const CanvasLayerTree = ({
               }
 
               const isLocked = isSelfLocked || isParentLocked;
-              const isDraggingDisabled = isParentLocked;
+              const isDraggingDisabled = isParentLocked || isFilterActive;
 
               return (
                 <SortableRow

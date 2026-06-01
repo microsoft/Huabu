@@ -1,16 +1,23 @@
-import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
-import { useMemo, useRef } from 'react';
+import {
+  CANVAS_NODE_TYPES,
+  type CanvasNodeType,
+  type QuestionNodeStatus,
+  type SketchStroke,
+} from '@sediment/shared';
+import { PanelLeftClose, PanelLeftOpen, Search } from 'lucide-react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 
 import { CanvasLayerTree } from './CanvasLayerTree';
+import { LayerFilterBar } from './LayerFilterBar';
 import { QuestionStatusDot } from './QuestionStatusDot';
 import { getNodeIcon } from '../../../config/nodeIcons';
 import useCanvasStore from '../../../store/canvasStore';
 import { usePanelStore } from '../../../store/panelStore';
+import { Button } from '../../Common/Button';
 import { SketchIcon } from '../../Nodes/sketch/SketchIcon';
 import { SidebarPanel } from '../SidebarPanel';
 
 import type { DataSourceNodeLike, DataSourceTreeItem } from './types';
-import type { QuestionNodeStatus, SketchStroke } from '@sediment/shared';
 
 interface CanvasLayerPanelProps {
   isCollapsed?: boolean;
@@ -159,6 +166,67 @@ export const CanvasLayerPanel = ({
   }
   const nodes = isLeftCollapsed ? frozenNodesRef.current : rawNodes;
 
+  // ============================================================
+  // Filter state — purely panel-local. Lives in `useState` because
+  // (a) the panel component stays mounted across collapse/expand,
+  // (b) no other surface needs to observe these values.
+  // ============================================================
+  const [query, setQuery] = useState('');
+  const [selectedTypes, setSelectedTypes] = useState<Set<CanvasNodeType>>(
+    () => new Set(),
+  );
+  // The regex *input* row is opt-in to keep the panel chrome quiet —
+  // typed search is far less frequent than the at-a-glance chip toggles.
+  // The type-chip row, on the other hand, is shown by default whenever
+  // the canvas has at least two node types: chips ARE the filter
+  // affordance the user sees first. Closing the search (× / Esc) only
+  // hides the input row and clears `query`; chip selections are
+  // intentionally preserved across open/close cycles.
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+
+  const handleToggleType = useCallback((type: CanvasNodeType) => {
+    setSelectedTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) next.delete(type);
+      else next.add(type);
+      return next;
+    });
+  }, []);
+
+  const handleCloseSearch = useCallback(() => {
+    setIsSearchOpen(false);
+    setQuery('');
+  }, []);
+
+  // Only show chips for types that actually exist on the canvas, in the
+  // canonical `CANVAS_NODE_TYPES` order so toggling doesn't reshuffle the
+  // row.
+  const availableTypes = useMemo<CanvasNodeType[]>(() => {
+    const present = new Set<string>();
+    for (const n of nodes) {
+      if (n.type) present.add(n.type);
+    }
+    return CANVAS_NODE_TYPES.filter((t) => present.has(t));
+  }, [nodes]);
+
+  // Compile the regex once per `query` change. Invalid syntax returns a
+  // null regex plus an `isRegexInvalid` flag; the bar shows a red border
+  // and the filtered list is forced empty (see below) so the UX is
+  // unambiguous — no silent "fallback to substring match".
+  const { regex, isRegexInvalid } = useMemo(() => {
+    if (!query) return { regex: null as RegExp | null, isRegexInvalid: false };
+    try {
+      return {
+        regex: new RegExp(query, 'i'),
+        isRegexInvalid: false,
+      };
+    } catch {
+      return { regex: null as RegExp | null, isRegexInvalid: true };
+    }
+  }, [query]);
+
+  const isFilterActive = query !== '' || selectedTypes.size > 0;
+
   // Canvas layer tree: use original node order (hierarchy-based).
   // We cache per-id item refs by content so that selection-only changes
   // (which rebuild every node object in the store via `{...n, selected}`)
@@ -180,6 +248,44 @@ export const CanvasLayerPanel = ({
     return stabilized;
   }, [nodes]);
 
+  // When filtering is active we switch to a flat "search results" view
+  // (VS Code global-search style): hierarchy and indentation are dropped,
+  // every match is rendered at depth 0. This sidesteps the messy
+  // "ancestor frame might or might not pass the type filter" semantics
+  // and keeps the drag / collapse code paths in the tree component
+  // untouched. A second cache preserves item identity across renders so
+  // `SortableRow`'s `React.memo` stays valid in flat mode too.
+  const flatItemCacheRef = useRef<Map<string, DataSourceTreeItem>>(new Map());
+  const filteredFlatItems = useMemo(() => {
+    if (!isFilterActive) return null;
+    // Invalid regex → empty list, the bar already shows the danger border.
+    if (query !== '' && isRegexInvalid) return [] as DataSourceTreeItem[];
+
+    const prev = flatItemCacheRef.current;
+    const next = new Map<string, DataSourceTreeItem>();
+    const out: DataSourceTreeItem[] = [];
+    const hasTypeFilter = selectedTypes.size > 0;
+    for (const item of layerItems) {
+      const t = item.node.type as CanvasNodeType | undefined;
+      // Empty `selectedTypes` means "no type constraint"; otherwise the
+      // chip row acts as a whitelist and the node's type must be in it.
+      if (hasTypeFilter && (!t || !selectedTypes.has(t))) continue;
+      if (regex && !regex.test(item.node.data.label)) continue;
+      const cached = prev.get(item.id);
+      const flat =
+        cached && cached.node === item.node && cached.depth === 0
+          ? cached
+          : { id: item.id, node: item.node, depth: 0 };
+      next.set(item.id, flat);
+      out.push(flat);
+    }
+    flatItemCacheRef.current = next;
+    return out;
+  }, [layerItems, isFilterActive, isRegexInvalid, query, regex, selectedTypes]);
+
+  const itemsToRender = isFilterActive ? (filteredFlatItems ?? []) : layerItems;
+  const emptyText = isFilterActive ? 'No matching layers' : undefined;
+
   return (
     <SidebarPanel
       title="Layers"
@@ -190,10 +296,44 @@ export const CanvasLayerPanel = ({
       className="border-r border-[#eeece7]"
       hideHeader
     >
+      {isSearchOpen || availableTypes.length >= 2 ? (
+        <LayerFilterBar
+          query={query}
+          onQueryChange={setQuery}
+          isRegexInvalid={isRegexInvalid}
+          availableTypes={availableTypes}
+          selectedTypes={selectedTypes}
+          onToggleType={handleToggleType}
+          isSearchOpen={isSearchOpen}
+          onOpenSearch={() => setIsSearchOpen(true)}
+          onCloseSearch={handleCloseSearch}
+        />
+      ) : (
+        nodes.length > 0 && (
+          // Fallback when the chip row would be empty (canvas has 0–1
+          // node types): float a tiny Search trigger over the top-right
+          // corner so users can still open the regex input on demand
+          // without the bar eating a row on every render.
+          <div className="pointer-events-none sticky top-0 z-10 flex h-0 justify-end pt-1.5 pr-1.5">
+            <Button
+              variant="ghost"
+              iconOnly
+              size="sm"
+              onClick={() => setIsSearchOpen(true)}
+              title="Find layers"
+              className="pointer-events-auto p-1! opacity-50 hover:opacity-100"
+            >
+              <Search size={12} />
+            </Button>
+          </div>
+        )
+      )}
       <CanvasLayerTree
-        items={layerItems}
+        items={itemsToRender}
         getIcon={renderNodeIcon}
         getDisplayName={getNodeDisplayName}
+        isFilterActive={isFilterActive}
+        emptyText={emptyText}
       />
     </SidebarPanel>
   );
