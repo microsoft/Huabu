@@ -1029,6 +1029,7 @@ export async function* runAcpAgent(
       rawText,
       agentAlias: binding.alias,
       canvasContext,
+      canvasId,
       canvasRoot: canvasCwd,
       logger,
     });

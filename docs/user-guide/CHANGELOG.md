@@ -62,6 +62,26 @@
 - **内部工具调整，普通用户无感知**：所有写入的目标文件、磁盘布局、cap（workspace + canvas 仍是 4 KB / 80 行；skill 仍无 cap）、并发锁、skill 缓存失效行为都保持不变。
 - **自定义 agent 配置需要更新**：若你在自定义 prompt / AGENT.md 里引用了旧工具名（`memory_workspace_write` 等），请替换为 `fs_write`，并按新参数形态调整 schema。所有内置 prompt 已同步。
 - **行级编辑能力顺带获得**：`mode: "replace_string"` 在三类 memory 文件上都可用，特别适合对长 skill 文件做局部修订，不再需要 LLM 整段重抄。
+## 2026-06-02 · ACP preprocessor 升级成可自主探索画布的 sub-agent
+
+**What Changed**
+
+- ACP **intent translator**（生成给外部 agent 用的 `task` 简报的那一层）从"一次性 LLM 调用 + 固定塞入选中节点正文"升级成了一个**带 read-only 画布工具**的 sub-agent，包括 `get_canvas_outline` / `inspect_nodes` / `inspect_edges` / `read` / `grep` / `find` / `ls`。
+  - 它现在能**自己决定要不要读取节点内容**——简单问题（一句寒暄、纯文字指令、用户已经在聊天框里贴了代码片段）直接合成简报，根本不去碰画布；需要画布上下文的（"看看那几个节点说什么"、"那个 frame 里哪几个最相关"）会按需 `read` / `grep` / `inspect_*`。
+  - 翻译期最多跑 6 轮（`runtime.maxIterations: 6`），多数 turn 应该 1-2 轮就结束；UI 看不到中间 tool call，只会看到最终的 `prepared_prompt` 卡片。
+- 新增模板指令 `{{include:<path>}}`：可以把另一个文件（路径相对 `apps/server/src/prompt/`）整段塞进 AGENT.md 里。preprocessor 的 AGENT.md 就是用 `{{include:skills/canvas/SKILL.md}}` 把 canvas SKILL 原样拼进来，**和其他 agent 共用同一份画布知识，不再有 copy-paste 漂移风险**。
+- 顺手修了一个潜在的 Windows 坑：`parseFrontmatter` 现在会把 CRLF 行尾正规化成 LF 再交给 YAML 解析器，避免 Windows 上写的 AGENT.md 把 `toolExecution: parallel` 解析成 `"parallel\r"` 然后被验证拒绝。
+
+**Notes**
+
+- **用户感知**：依旧是发出消息后看到 "Preparing…" 卡片，然后变成 PreparedPromptCard，外部 agent 那边收到的内容形态不变。差别在**简报质量**：preprocessor 不再被 16KB 阈值卡住——以前超过 16KB 的节点只能挂 attachments、永远不会被合成到 `task`；现在 agent 可以分块 read 出关键段落直接合成进去，attachments 只在真正需要逐字访问时才用（review 代码、二进制 artifact 等）。
+- **不需要选中节点的 turn 更便宜**：以前哪怕用户问"你叫什么名字"，只要画布里有 selected node，preprocessor 也会先把它正文 stat + read 一遍；现在 agent 会跳过整个读节点环节。
+- **失败回退保持不变**：translator 抛错（LLM 故障 / JSON 解析失败 / 用完 6 轮还没出 JSON）依旧 fallback 到原始 rawText，前端会看到 `prepared_prompt` 带 `error` 字段。
+- **没有引入新的画布写入面**：preprocessor agent 没有 `canvas_commands` 工具，只能读不能写，不会动用户画布。
+- **后续优化方向**：现在 preprocessor 已经具备探索能力，下一步可以把 frame 内兄弟节点 / 空间邻居自动注入提示，让 agent 不用每次都 `get_canvas_outline` 才知道附近还有什么。
+
+---
+
 ## 2026-06-01 · 一键开"和别的 agent 的新会话"——ModeSelector → NewChatMenu
 
 **What Changed**

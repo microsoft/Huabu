@@ -13,6 +13,24 @@
  *                                      (empty string when absent).
  *   `{{#skillCatalogue}}...{{/...}}` → block kept only when the
  *                                      catalogue is non-empty.
+ *   `{{include:<rel>}}`              → spliced in at load time with the
+ *                                      contents of `<prompt-root>/<rel>`.
+ *                                      Use this when two agents need
+ *                                      to share the same prose (e.g.
+ *                                      the canvas read-side mental
+ *                                      model lives in
+ *                                      `skills/canvas/SKILL.md` and
+ *                                      multiple agents inline it via
+ *                                      `{{include:skills/canvas/SKILL.md}}`).
+ *                                      Paths are PROMPT-ROOT relative;
+ *                                      escapes outside
+ *                                      `apps/server/src/prompt/` throw
+ *                                      at load time. Nested includes are
+ *                                      forbidden — the included file may
+ *                                      not contain its own
+ *                                      `{{include:...}}` directive (keeps
+ *                                      the loader trivial and prevents
+ *                                      cycles).
  *
  * Validation failures throw at load time so a malformed agent cannot
  * ship silently. Bodies are read on first access and cached for the
@@ -39,7 +57,13 @@ import type { NodeOrigin } from '@sediment/shared';
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 /** Agent identifiers backed by an `AGENT.md` config file. */
-export type AgentId = 'ask' | 'operate' | 'intent' | 'sketch' | 'memory';
+export type AgentId =
+  | 'ask'
+  | 'operate'
+  | 'intent'
+  | 'sketch'
+  | 'memory'
+  | 'acp-preprocessor';
 
 const VALID_AGENT_IDS: ReadonlySet<AgentId> = new Set<AgentId>([
   'ask',
@@ -47,6 +71,7 @@ const VALID_AGENT_IDS: ReadonlySet<AgentId> = new Set<AgentId>([
   'intent',
   'sketch',
   'memory',
+  'acp-preprocessor',
 ]);
 
 /** Runtime knobs forwarded to `runAgent` / direct LLM callers. */
@@ -124,6 +149,16 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 /** Absolute path of the agents directory (`src/prompt/agents`). */
 export const AGENTS_DIR = HERE;
+
+/**
+ * Root for `{{include:<rel>}}` path resolution. Includes are resolved
+ * relative to this directory, and the resolved absolute path must
+ * stay within it — a path traversal that escapes the root throws at
+ * load time. Pointing at the shared parent of `agents/` and `skills/`
+ * means an AGENT.md can pull in either a sibling agent's fragment or
+ * any global skill without `../../` confusion.
+ */
+const PROMPT_ROOT = path.resolve(HERE, '..');
 
 // ─── Validation ─────────────────────────────────────────────────────────────
 
@@ -281,9 +316,53 @@ function validateFrontmatter(
 // ─── Templating ─────────────────────────────────────────────────────────────
 
 /**
+ * Resolve a `{{include:<rel>}}` path against {@link PROMPT_ROOT} and
+ * read the file. Throws on traversal escapes (`../../../etc/passwd`)
+ * and on absolute paths so that includes can only reach files we
+ * ship inside the prompt tree.
+ */
+function resolveTemplateInclude(rel: string): string {
+  const trimmed = rel.trim();
+  if (!trimmed) {
+    throw new Error(`[agent-loader] {{include}} requires a non-empty path`);
+  }
+  if (path.isAbsolute(trimmed)) {
+    throw new Error(
+      `[agent-loader] {{include:${trimmed}}} must be PROMPT-ROOT relative, not absolute`,
+    );
+  }
+  const resolved = path.resolve(PROMPT_ROOT, trimmed);
+  const inside = path.relative(PROMPT_ROOT, resolved);
+  if (inside.startsWith('..') || path.isAbsolute(inside)) {
+    throw new Error(
+      `[agent-loader] {{include:${trimmed}}} escapes the prompt root (${PROMPT_ROOT})`,
+    );
+  }
+  if (!existsSync(resolved)) {
+    throw new Error(
+      `[agent-loader] {{include:${trimmed}}} → file not found at ${resolved}`,
+    );
+  }
+  const body = readFileSync(resolved, 'utf8');
+  // No recursion: keeps the loader trivial and rules out cycles.
+  if (/\{\{include:/.test(body)) {
+    throw new Error(
+      `[agent-loader] {{include:${trimmed}}} → included file contains its own {{include:...}}; nested includes are not supported`,
+    );
+  }
+  return body;
+}
+
+/**
  * Minimal Mustache-flavoured template renderer.
  *
- * Supports two constructs:
+ * Supports three constructs:
+ *   - `{{include:<rel>}}`    → replaced at LOAD TIME with the contents of
+ *                              the file at `<prompt-root>/<rel>`. Runs
+ *                              before substitution so the included
+ *                              body participates in subsequent `{{key}}`
+ *                              passes. See {@link resolveTemplateInclude}
+ *                              for the safety rules.
  *   - `{{key}}`              → replaced by `vars[key]` (empty string when missing).
  *   - `{{#key}}...{{/key}}`  → kept only when `vars[key]` is a non-empty string.
  *                              The block (and a single trailing newline,
@@ -294,11 +373,20 @@ function validateFrontmatter(
  * loops. Anything more complex belongs in code, not in a config file.
  */
 function renderTemplate(body: string, vars: Record<string, string>): string {
-  // 1) Conditional blocks first so the substitution pass below doesn't
+  // 0) Load-time includes first so the spliced-in content participates
+  //    in the subsequent passes (variables / conditionals defined in
+  //    the calling AGENT.md can interpolate INTO an included fragment).
+  //    The trailing-newline swallow keeps the surrounding block clean
+  //    when the include sits on its own line.
+  const includeRe = /\{\{include:([^}]+)\}\}\n?/g;
+  let out = body.replace(includeRe, (_, rel: string) =>
+    resolveTemplateInclude(rel),
+  );
+  // 1) Conditional blocks next so the substitution pass below doesn't
   //    accidentally fill the surrounding section header before we get
   //    a chance to drop it.
   const blockRe = /\{\{#(\w+)\}\}([\s\S]*?)\{\{\/\1\}\}\n?/g;
-  let out = body.replace(blockRe, (_, key: string, inner: string) => {
+  out = out.replace(blockRe, (_, key: string, inner: string) => {
     const value = vars[key];
     return value && value.length > 0 ? inner : '';
   });
