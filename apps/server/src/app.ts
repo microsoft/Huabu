@@ -15,6 +15,7 @@ import agentRoutes from './modules/agent/agent.route.js';
 import intentRoutes from './modules/agent/intent.route.js';
 import llmRoutes from './modules/agent/llm.route.js';
 import { registerOpCounterHook } from './modules/agent/memory/op-counter-hook.js';
+import skillsRoutes from './modules/agent/skills.route.js';
 import artifactRoute from './modules/artifact/artifact.route.js';
 import canvasRoutes from './modules/canvas/canvas.route.js';
 import webRoutes from './modules/web/web.route.js';
@@ -115,6 +116,7 @@ app.register(artifactRoute, { prefix: '/api/canvas' });
 
 app.register(intentRoutes, { prefix: '/api/intent' });
 app.register(llmRoutes, { prefix: '/api/llm' });
+app.register(skillsRoutes, { prefix: '/api/skills' });
 app.register(workspaceRoutes, { prefix: '/api/workspace' });
 
 // ── External agent (ACP) bridge ───────────────────────────────────────

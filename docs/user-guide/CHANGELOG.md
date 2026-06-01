@@ -4,6 +4,28 @@
 
 ---
 
+## 2026-06-01 · 聊天面板新增 `/` 手动调用 skill 能力
+
+**What Changed**
+
+- 聊天输入框现在支持用 `/<skill-id>` 显式调用 user-authored skill（位于工作区的 `setting/skills/<id>/SKILL.md`）。键入 `/` 会弹出 typeahead 菜单列出所有可用 user skill，与外部 ACP agent 的 slash 命令共用同一套 UI（按 thread binding 自动切换数据源）。
+- 选中后送出消息时，server 会自动把对应 skill 的完整 markdown body 作为 `[SYSTEM Skill]` 前置消息注入到本轮上下文，相当于强制 agent 应用该技能——和原本"agent 自行决定是否 `read()`"的按需加载模式区分开。
+- 一条消息最多可以连写多个 `/<id>` 前缀，例如 `/canvas-memory /workspace-memory 帮我整理一下`，所有 id 会按出现顺序去重后一次性注入（server 端硬上限 8 个）。
+- 新增 `GET /api/skills?scope=ask|operate|sketch|external` 路由，返回当前 workspace 下可被用户调用的 skill 元数据；菜单按当前 mode（ask / operate）过滤。
+
+**Notes**
+
+- **菜单只列 user / merged skill，不列 system-only skill**：
+  - `user` = 用户在 `setting/skills/` 下亲手或通过 memory agent 写的 skill；
+  - `merged` = system 提供了同名基线、user 在 workspace 里写了 override / 扩展；
+  - `system` = 框架自带 skill（如 `canvas` / `sketch-gestures`），仍保留在 agent 的 `{{skillCatalogue}}` 让模型自主选用，但不进 `/` 菜单（避免菜单被一堆用户不知情的 skill 灌满）。
+- **server 端再做一次白名单校验**：客户端被改 / 旧版本 / 第三方直接 POST 都没法绕过菜单硬塞 system skill id；非 user/merged id 会被静默丢弃，server 日志会有一条 warn。
+- **未知 id 处理**：消息开头 `/foo` 若不在已知 skill 列表里（typeahead 也没匹配），会被当成普通文本送出去，不会触发 skill 注入。
+- **mid-sentence `/` 不会被误识别**：解析器只看消息开头的连续 `/<id>` token，例如 `check src/main.ts and /canvas-memory` 不会被当成调用 `canvas-memory`。
+- **外部 ACP agent thread 不变**：绑定到 Copilot / Claude Code / Gemini 这类外部 agent 时，`/` 菜单仍然来自 agent 自己推送的 `available_commands_update`，server 不会做 skill 注入；同名 token 由 agent 自己解释。
+
+---
+
 ## 2026-06-01 · 三个 memory 写工具收敛为统一的 `fs_write`
 
 **What Changed**
