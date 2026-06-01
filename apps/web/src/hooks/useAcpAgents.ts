@@ -3,7 +3,7 @@
  * current connected-agents list.
  *
  * Fetched once at mount; subsequent updates are explicit. The
- * ChatPanel's `ModeSelector` exposes a "Refresh agents" button that
+ * ChatPanel's `NewChatMenu` exposes a "Refresh agents" button that
  * calls `refresh()`. On-demand semantics keep request volume to the
  * bridge minimal — most of the time the agent list doesn't change.
  *

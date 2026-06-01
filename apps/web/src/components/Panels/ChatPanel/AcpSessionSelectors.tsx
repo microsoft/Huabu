@@ -1,6 +1,6 @@
 /**
  * `AcpSessionSelectors` — the ACP-published mode / model / config-option
- * dropdowns rendered next to the ModeSelector when the active thread
+ * dropdowns rendered next to the NewChatMenu when the active thread
  * is delegated to an external agent that advertises any of those.
  *
  * Mirrors the four `session/update` variants Copilot CLI emits on
@@ -18,6 +18,7 @@
 import { useMemo } from 'react';
 
 import { Select, type SelectOption } from '../../Common/Select';
+import { Spinner } from '../../Common/Spinner';
 
 import type {
   AcpSessionConfigOption,
@@ -38,6 +39,14 @@ interface AcpSessionSelectorsProps {
    * variant by passing `true` here.
    */
   disabled?: boolean;
+  /**
+   * True while the initial session-meta fetch is in-flight (covers
+   * both the `session/new` round-trip and the late-push retry).
+   * Used to swap the empty render for a placeholder pill so the
+   * toolbar gives the user feedback that selectors are still on the
+   * way instead of looking inert.
+   */
+  loading?: boolean;
   onSelectMode: (modeId: string) => void | Promise<void>;
   onSelectModel: (modelId: string) => void | Promise<void>;
   onSelectConfigOption: (
@@ -181,6 +190,7 @@ function ConfigOptionSelect({
 export const AcpSessionSelectors = ({
   meta,
   disabled = false,
+  loading = false,
   onSelectMode,
   onSelectModel,
   onSelectConfigOption,
@@ -239,7 +249,28 @@ export const AcpSessionSelectors = ({
     [meta.configOptions, hasMode, hasModel],
   );
   const hasConfig = visibleConfigOptions.length > 0;
-  if (!hasMode && !hasModel && !hasConfig) return null;
+
+  // Initial fetch in-flight and no data merged yet — show a single
+  // unobtrusive placeholder pill so the toolbar signals that the
+  // agent's selectors are still loading instead of looking inert.
+  // Once any selector is renderable we drop the placeholder, even if
+  // a follow-up refresh is still pending, to avoid layout jitter.
+  if (!hasMode && !hasModel && !hasConfig) {
+    if (loading) {
+      return (
+        <span
+          role="status"
+          aria-live="polite"
+          aria-label="Loading agent options"
+          className="text-fg-subtle inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs whitespace-nowrap"
+        >
+          <Spinner size="xs" />
+          <span>Loading agent options…</span>
+        </span>
+      );
+    }
+    return null;
+  }
 
   return (
     <>

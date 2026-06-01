@@ -304,7 +304,7 @@ export const QuestionNode = memo(
 
     // Refresh the ACP agent list on the rising edge of "user wants the
     // mention menu" so a newly-connected agent shows up without
-    // requiring the user to first open the ChatPanel's ModeSelector.
+    // requiring the user to first open the ChatPanel's NewChatMenu.
     const lastMentionWantedRef = useRef(false);
     useEffect(() => {
       const wants = mentionState !== null;

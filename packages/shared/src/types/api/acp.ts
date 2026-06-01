@@ -70,8 +70,7 @@ export interface AcpAgentsResponse {
 // ─── Thread → agent binding ────────────────────────────────────────────
 //
 // 1 chat thread is permanently bound to a single agent for its entire
-// lifetime. The binding is set via the ChatPanel's ModeSelector dropdown
-// and travels with every agent request.
+// lifetime
 
 /**
  * Internal binding — chat thread talks to Huabu's built-in agent.

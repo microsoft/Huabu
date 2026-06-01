@@ -62,6 +62,54 @@
 - **内部工具调整，普通用户无感知**：所有写入的目标文件、磁盘布局、cap（workspace + canvas 仍是 4 KB / 80 行；skill 仍无 cap）、并发锁、skill 缓存失效行为都保持不变。
 - **自定义 agent 配置需要更新**：若你在自定义 prompt / AGENT.md 里引用了旧工具名（`memory_workspace_write` 等），请替换为 `fs_write`，并按新参数形态调整 schema。所有内置 prompt 已同步。
 - **行级编辑能力顺带获得**：`mode: "replace_string"` 在三类 memory 文件上都可用，特别适合对长 skill 文件做局部修订，不再需要 LLM 整段重抄。
+## 2026-06-01 · 一键开"和别的 agent 的新会话"——ModeSelector → NewChatMenu
+
+**What Changed**
+
+- 聊天面板顶部的 `[模式/Agent ▼]` 下拉（`ModeSelector`）被替换成一个 **`+ ▾` split button**（`NewChatMenu`），仍然在右上角原 `+` 的位置。
+  - 左半 **`+`**：保留以前的 "开新对话" 单击行为，但现在会**继承当前 thread 的 (mode, binding)**——如果你正在和 claude 聊天，点 `+` 就直接开一个新的 claude 会话；正在用内置 Ask 模式，就开一个新的内置 Ask 会话。
+  - 右半 **`▾`**：点开后是一个菜单，列出所有可选的起点（Chat / Agent / 每一个连接上的 ACP agent），**点哪一项就直接开一个新 thread 并绑定到那项**。底部仍有 "Refresh Agents" 按钮。
+  - 菜单里会用 `text-info` 高亮当前 thread 的 (mode, binding)，方便看出现在用的是哪个。
+- 当前 thread "绑定到谁" 这个信息，从下拉的 trigger 文本变成了直接显示在面板**标题**位置（例如 "Chat with claude" / "Chat with GPT-4o"），与 Sketch / Question replay 这类只读视图的标题样式统一。
+
+**Notes**
+
+- **解决了什么痛点**：以前想 "和 claude 开新会话" 要两步——先点 `+` 开新会话（会被强制重置成内置 agent），再打开下拉选 claude。现在 `▾ → claude` 一步搞定。
+- **1 thread = 1 binding 的规则不变**：thread 一旦开始对话，agent 就锁死，只能开新 thread 才能换。NewChatMenu 的语义是 "开新 thread"，所以菜单永远可点；这和以前 ModeSelector "thread 有消息后所有选项灰掉" 相比，更符合直觉（以前那个状态下下拉看起来像坏了）。
+- **持久化层小幅扩展**：`chatStore.clearMessages(canvasId, options?)` 新增可选 `options.binding` 参数，让 "重置 thread + 绑定到指定 agent" 在 zustand 内变成一次 `set`——避免菜单选项点击后 UI 闪一帧 "内置 binding"。其他调用方（不带 `options`）行为不变。
+- **失联 binding 自动 fallback**：以前 ModeSelector 内部有个 effect 会在 "空 thread + 持久化的 external binding 已经断连" 时把 binding 重置成内置；这个逻辑被搬到 ChatPanel 里继续生效，避免新的 `+` 快捷键去尝试连一个不存在的 agent。
+
+---
+
+## 2026-06-01 · ACP preprocessor 不再回传对话历史
+
+**What Changed**
+
+- 给外部 ACP agent（Copilot CLI、Claude Code、Gemini CLI 等）发送消息前，Sediment 这边的 **intent translator**（即 `acp/preprocessor.ts`）会先把用户消息 + 选中的画布节点合成成一份自包含的 `task` 简报。之前为了帮翻译 LLM 解析"用那个"、"按你刚才说的改"这类指代，preprocessor 会把当前线程最近 4 轮对话也喂给翻译 LLM——但外部 agent 那边本来就通过 ACP `session/load` 维护着完整对话记忆，这部分历史等于发了两遍，是纯粹的 token 浪费。
+- 现在 preprocessor **不再读取也不再发送对话历史**。指代词（"that" / "the previous one" / "上面那个"）会原样透传给外部 agent，由它用自己的 session 记忆去解析。
+- preprocessor system prompt 里加了一段明确说明："你不会收到任何对话历史，外部 agent 自己有完整记忆，请把指代短语原样保留、不要尝试展开。"
+
+**Notes**
+
+- **用户感知近似无变化**：因为外部 agent 那边的历史一直在，指代解析能力没下降。
+- **省 token**：每轮固定省下 truncate 后的 ~400-1500 tokens（4 轮对话 × ~800 字符上限），频繁画布编辑场景下累计可观。
+- **后续优化方向**：preprocessor 当前还只能利用用户**显式选中**的节点，下一步会注入画布的空间结构（frame 内的兄弟节点 / 邻近候选清单），让外部 agent 能感知"放在一起的节点是相关的"——这条会单独在另一篇 changelog 里跟进。
+
+---
+
+## 2026-06-01 · ACP agent 选择器加载中提示
+
+**What Changed**
+
+- 当聊天面板绑定到外部 ACP agent（Copilot CLI、Claude Code、Gemini CLI 等）后，输入栏里的 mode / model / config 下拉是异步从 agent 拉取的——`session/new` 还在路上、或者 agent 还没推第一份 `current_mode_update` / `config_option_update` 之前，工具栏左侧那块本来是空白的，用户看不出 "还在加载" 还是 "这个 agent 没有可调项"。
+- 现在在 `AcpSessionSelectors` 里加了一个轻量的占位 pill：`⟳ Loading agent options…`，**只在首次拉取还没拿到任何数据时**显示；agent 一公布出 mode / model / config 的任意一项，占位立刻消失换成真正的下拉，不会和实际下拉同时出现。
+- 后续 SSE 推送（mid-turn 推新 mode 列表等）刷新数据时不会再触发占位，避免布局抖动。
+
+**Notes**
+
+- **不影响内部 Huabu agent**：内部绑定不走这条 fetch，输入栏左侧仍然保持原样。
+- **agent 不公布就不显示**：如果初次拉取完成后 agent 没暴露任何 mode / model / config，占位会和真实下拉一起消失（行为与之前一致）；只有在 "请求还在飞" 这个窗口期内才有提示。
+- **可访问性**：占位带 `role="status"` + `aria-live="polite"`，屏幕阅读器会朗读 "Loading agent options"。
 
 ---
 
@@ -248,10 +296,6 @@
 
 ---
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
 
 ## 2026-05-08 · Agent 循环升级到 pi-agent-core
 

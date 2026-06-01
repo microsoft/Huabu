@@ -13,7 +13,7 @@ import type {
 /**
  * Default binding for any newly opened canvas / cleared thread.
  * v1: built-in Huabu agent. External bindings only appear when the
- * user explicitly picks an agent in the ModeSelector.
+ * user explicitly picks an agent in the NewChatMenu.
  */
 const DEFAULT_BINDING: AgentBinding = { kind: 'internal' };
 
@@ -106,7 +106,19 @@ interface ChatState {
   setMessages: (messages: ChatMessage[]) => void;
   setHistoryLoaded: (loaded: boolean) => void;
   setLastAction: (action: AgentMode) => void;
-  clearMessages: (canvasId?: string) => void;
+  /**
+   * Reset the current thread: clear messages, mint a fresh threadId,
+   * and reset the binding. By default the new thread starts on the
+   * built-in agent (`DEFAULT_BINDING`); pass `options.binding` to start
+   * the new thread already bound to a specific agent. The combined form
+   * lets the UI offer a single-click "new chat with <agent>" affordance
+   * without a flash of internal-binding state between two separate
+   * store updates.
+   */
+  clearMessages: (
+    canvasId?: string,
+    options?: { binding?: AgentBinding },
+  ) => void;
 
   /**
    * Change the agent binding for the current thread. Pass `canvasId` to
@@ -198,16 +210,18 @@ export const useChatStore = create<ChatState>()(
 
       setLastAction: (action) => set({ lastAction: action }),
 
-      clearMessages: (canvasId?: string) => {
+      clearMessages: (canvasId?: string, options) => {
         const { threadMap, bindingMap } = get();
         const newThreadId = createId('thread');
+        const initialBinding = options?.binding ?? DEFAULT_BINDING;
         const updatedThreads = canvasId
           ? { ...threadMap, [canvasId]: newThreadId }
           : { ...threadMap };
-        // New thread → default binding. Persist the reset for this canvas
-        // so reloads agree with the in-memory state.
+        // New thread → caller-specified binding (defaults to built-in).
+        // Persist the choice for this canvas so reloads agree with the
+        // in-memory state.
         const updatedBindings = canvasId
-          ? { ...bindingMap, [canvasId]: DEFAULT_BINDING }
+          ? { ...bindingMap, [canvasId]: initialBinding }
           : { ...bindingMap };
         set({
           messages: [],
@@ -217,7 +231,7 @@ export const useChatStore = create<ChatState>()(
           pendingAttachments: [],
           selectionAttachment: null,
           threadMap: updatedThreads,
-          agentBinding: DEFAULT_BINDING,
+          agentBinding: initialBinding,
           bindingMap: updatedBindings,
         });
       },
@@ -296,7 +310,7 @@ export const useChatStore = create<ChatState>()(
           threadId: threadId,
           messages: [],
           isHistoryLoaded: false,
-          // Swap binding so ChatInput's ModeSelector shows the agent
+          // Swap binding so ChatPanel's header title shows the agent
           // that actually answered this question, not the canvas's.
           agentBinding: nextBinding,
           // Stash the previous thread ID + binding so we can restore on close

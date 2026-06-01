@@ -1,15 +1,10 @@
-import {
-  ArrowLeft,
-  ListIndentIncrease,
-  PanelRightOpen,
-  Plus,
-} from 'lucide-react';
+import { ArrowLeft, ListIndentIncrease, PanelRightOpen } from 'lucide-react';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 
 import { SidebarPanel } from '../SidebarPanel';
 import { AcpSessionSelectors } from './AcpSessionSelectors';
 import { ChatInput } from './ChatInput';
-import { ModeSelector } from './ModeSelector';
+import { NewChatMenu, type NewChatChoice } from './NewChatMenu';
 import { parseSlashInvocations } from './parseSlashInvocations';
 import { useSketchClusterMessages } from './useSketchClusterMessages';
 import { useAgentStream } from '../../../hooks/useAgentStream';
@@ -61,8 +56,9 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const llmInit = useLLMStore((state) => state.init);
 
   // Thread → agent binding. The binding is locked for the lifetime of
-  // a thread; the picker is only writable on an empty, not-streaming
-  // thread. New threads start in `{kind:'internal'}`.
+  // a thread; the only way to change it is to start a new thread via
+  // the `NewChatMenu`. New threads default to `{kind:'internal'}`
+  // unless the user picks an external agent from the menu.
   const agentBinding = useChatStore((state) => state.agentBinding);
   const setAgentBinding = useChatStore((state) => state.setAgentBinding);
   const threadId = useChatStore((state) => state.threadId);
@@ -73,16 +69,44 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     enabled: acpBridgeEnabled,
   } = useAcpAgents();
 
+  // Auto-reset a stale external binding on an *empty* thread: the
+  // persisted binding refers to an agent that is no longer connected
+  // (bridge restart, agent exited, page reload before the agent came
+  // back). Without this, the "+" shortcut in `NewChatMenu` would try
+  // to start a new thread bound to a disconnected agent and reliably
+  // 503. Threads with messages keep the stale binding so the title
+  // still reads "Chat with <alias>" — the user can hit Refresh in the
+  // dropdown to bring the agent back.
+  useEffect(() => {
+    if (!isHistoryLoaded) return;
+    if (messages.length > 0) return;
+    if (acpBridgeEnabled === null) return;
+    if (agentBinding.kind !== 'external') return;
+    const stillConnected = connectedAgents.some(
+      (a) => a.agentId === agentBinding.agentletAgentId,
+    );
+    if (stillConnected) return;
+    setAgentBinding({ kind: 'internal' }, canvasId || undefined);
+  }, [
+    isHistoryLoaded,
+    messages.length,
+    acpBridgeEnabled,
+    agentBinding,
+    connectedAgents,
+    canvasId,
+    setAgentBinding,
+  ]);
+
   // Gate the ACP per-thread hooks on the bound agent actually being
   // present in the connected-agents list. Without this gate a thread
   // whose persisted binding refers to a now-disconnected agent (bridge
   // restart, agent process exited, etc.) would still POST
   // /api/acp/threads/<id>/session at mount and reliably get a 503,
-  // which clutters the console and confuses debugging. The
-  // ModeSelector resets the binding to internal on unlocked threads
-  // (see ModeSelector.tsx), but the meta/slash-commands hooks still
-  // fire one render earlier than the reset — `acpExternalReachable`
-  // is what keeps that initial fetch from happening.
+  // which clutters the console and confuses debugging. The auto-reset
+  // effect above clears the stale binding on empty threads, but the
+  // meta/slash-commands hooks still fire one render earlier than the
+  // reset — `acpExternalReachable` is what keeps that initial fetch
+  // from happening.
   const acpExternalReachable =
     agentBinding.kind === 'external' &&
     connectedAgents.some((a) => a.agentId === agentBinding.agentletAgentId);
@@ -141,8 +165,12 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   // ACP session-meta (mode / model / config options / info / usage).
   // Drives the dropdown trio in ChatInput's toolbar. Empty when the
   // binding is internal — selectors then render nothing.
+  // `loading` is plumbed into `AcpSessionSelectors` so the toolbar
+  // can show a placeholder pill while the initial fetch is in-flight
+  // instead of looking inert.
   const {
     meta: acpSessionMeta,
+    loading: acpSessionMetaLoading,
     applyEvent: applyAcpSessionMetaEvent,
     applyOptimistic: applyAcpSessionMetaOptimistic,
   } = useAcpSessionMeta({
@@ -370,39 +398,36 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     );
   };
 
-  const handleNewChat = () => {
-    if (isLoading) return;
-    clearMessages(canvasId || undefined);
-  };
+  // Atomic "reset thread + apply (mode, binding)". The mode is local
+  // React state so it lands in the same render as the store update
+  // (zustand commits the binding inside `clearMessages`); the user
+  // never sees an intermediate "internal-binding, old-mode" frame.
+  const handleStartNewChat = useCallback(
+    (choice: NewChatChoice) => {
+      if (isLoading) return;
+      setMode(choice.mode);
+      clearMessages(
+        canvasId || undefined,
+        choice.binding.kind === 'external'
+          ? { binding: choice.binding }
+          : undefined,
+      );
+    },
+    [isLoading, canvasId, clearMessages],
+  );
 
   return (
     <SidebarPanel
       title={panelTitle}
       tabs={
-        // Sketch / question replay are read-only views — keep the
-        // descriptive title there. The normal chat view promotes the
-        // binding picker into the header (ChatGPT-style) so it reads
-        // as "which agent owns this thread", separating it visually
-        // from the per-turn ACP session selectors in ChatInput.
-        viewingSketchCluster || viewingQuestionThread ? (
-          <span className="block min-w-0 flex-1 truncate" title={panelTitle}>
-            {panelTitle}
-          </span>
-        ) : (
-          <ModeSelector
-            mode={mode}
-            onModeChange={setMode}
-            binding={agentBinding}
-            onBindingChange={(b) => setAgentBinding(b, canvasId || undefined)}
-            connectedAgents={connectedAgents}
-            onRefreshAgents={refreshAcpAgents}
-            refreshing={acpAgentsLoading}
-            agentsListReady={acpBridgeEnabled !== null}
-            onNewThread={handleNewChat}
-            locked={messages.length > 0 || isLoading}
-            disabled={!isHistoryLoaded}
-          />
-        )
+        // The panel title doubles as the "who am I chatting with"
+        // readout (e.g. "Chat with claude"). The active binding is
+        // immutable for the life of the thread, so the title is a
+        // pure label — switching agents happens through the
+        // `NewChatMenu` in the tools slot (it forks a fresh thread).
+        <span className="block min-w-0 flex-1 truncate" title={panelTitle}>
+          {panelTitle}
+        </span>
       }
       isCollapsed={isCollapsed}
       onToggle={onToggle}
@@ -429,15 +454,16 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
             <ArrowLeft />
           </Button>
         ) : (
-          <Button
-            variant="ghost"
-            iconOnly
-            onClick={handleNewChat}
-            title="New conversation"
-            disabled={isLoading}
-          >
-            <Plus />
-          </Button>
+          <NewChatMenu
+            currentMode={mode}
+            currentBinding={agentBinding}
+            connectedAgents={connectedAgents}
+            onRefreshAgents={refreshAcpAgents}
+            refreshing={acpAgentsLoading}
+            onSelect={handleStartNewChat}
+            disabled={!isHistoryLoaded}
+            busy={isLoading}
+          />
         )
       }
     >
@@ -475,6 +501,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
               agentBinding.kind === 'external' ? (
                 <AcpSessionSelectors
                   meta={acpSessionMeta}
+                  loading={acpSessionMetaLoading}
                   onSelectMode={handleAcpSelectMode}
                   onSelectModel={handleAcpSelectModel}
                   onSelectConfigOption={handleAcpSelectConfigOption}

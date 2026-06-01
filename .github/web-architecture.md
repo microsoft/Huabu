@@ -110,7 +110,7 @@ components/
 │   ├── ChatPanel/           # AI chat sidebar
 │   │   ├── index.tsx        # Chat orchestrator
 │   │   ├── ChatInput.tsx
-│   │   ├── ModeSelector.tsx
+│   │   ├── NewChatMenu.tsx
 │   │   ├── SelectedNodeRefs.tsx
 │   │   └── ContextUsageRing.tsx
 │   ├── CanvasLayerPanel/     # Canvas layer sidebar

@@ -67,7 +67,13 @@ export const SidebarPanel = ({
           </div>
           <div className="flex shrink-0 items-center gap-1">
             {tools && (
-              <div className="text-fg-muted flex items-center">{tools}</div>
+              <>
+                <div className="text-fg-muted flex items-center">{tools}</div>
+                <span
+                  aria-hidden
+                  className="bg-edge-default mx-1 h-4 w-px shrink-0"
+                />
+              </>
             )}
             <Button
               variant="ghost"
