@@ -92,18 +92,25 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   //
   //   • external → the bound ACP agent's `available_commands_update`
   //     push (via `useAcpSlashCommands`).
-  //   • internal → the workspace's user-authored skill catalogue
-  //     (via `useInternalSlashCommands`), filtered to `user` / `merged`
-  //     skills only. System skills stay in the agent's catalogue but
-  //     are not user-invokable here — see
+  //   • internal + operate mode → the workspace's user-authored skill
+  //     catalogue (via `useInternalSlashCommands`), filtered to
+  //     `user` / `merged` skills only. System skills stay in the
+  //     agent's catalogue but are not user-invokable here — see
   //     `apps/server/src/modules/agent/skills.route.ts` for the
   //     server-side rationale.
   //
-  // Each hook is gated on its binding being active so we never fire
-  // a doomed request (ACP unreachable, internal binding switching to
-  // external mid-render, etc.). The selected `{commands,
-  // refreshSlashCommands}` pair is the one ChatInput consumes — the
-  // typeahead component itself is binding-agnostic.
+  // **Why operate-only for internal?** Ask mode is a Q&A surface
+  // where skill invocation is semantically out of place — the user
+  // is asking a question, not commissioning an action. Restricting
+  // `/` to operate mode keeps the menu out of the ask experience
+  // entirely (no popover, no parser pass on submit) so a leading
+  // `/foo` in a question prompt is never silently reinterpreted.
+  //
+  // Each hook is also gated on its binding being active so we never
+  // fire a doomed request (ACP unreachable, internal binding
+  // switching to external mid-render, etc.). The selected
+  // `{commands, refreshSlashCommands}` pair is the one ChatInput
+  // consumes — the typeahead component itself is binding-agnostic.
   const acpSlash = useAcpSlashCommands({
     threadId,
     binding: agentBinding,
@@ -113,7 +120,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const internalSlash = useInternalSlashCommands({
     binding: agentBinding,
     scope: mode,
-    enabled: agentBinding.kind === 'internal',
+    enabled: agentBinding.kind === 'internal' && mode === 'operate',
   });
   const slashCommands = acpExternalReachable
     ? acpSlash.commands
@@ -324,15 +331,26 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const handleSubmit = async (e: React.FormEvent, agentMode: AgentMode) => {
     e.preventDefault();
     // Strip leading `/<id>` tokens that match a known slash command
-    // and forward them as `invokedSkills`. Unknown `/foo` tokens pass
-    // through as literal message text (matches the typeahead UX: no
-    // menu hit → no recognition). When the binding is external we
-    // skip parsing — ACP agents handle their own slash dispatch
-    // inside the prompt body, so re-splitting here would double-
-    // strip the leading token.
+    // and forward them as `invokedSkills`. Skill invocation is gated
+    // to **internal + operate mode** only:
+    //
+    //  - External (ACP) bindings: skip parsing entirely. ACP agents
+    //    handle their own slash dispatch inside the prompt body, so
+    //    re-splitting here would double-strip the leading token.
+    //  - Internal + ask mode: skip parsing too. Ask is a Q&A surface
+    //    where a leading `/foo` is just literal text (e.g. a path or
+    //    a typo); the menu is suppressed upstream and submit must
+    //    mirror that or the two halves of the UX would disagree.
+    //  - Internal + operate mode: parse, dedup, forward.
+    //
+    // Unknown `/foo` tokens in operate mode pass through as literal
+    // message text — matches the typeahead UX (no menu hit → no
+    // recognition).
     const raw = input;
     setInput('');
-    if (agentBinding.kind === 'external') {
+    const isSkillInvocationAllowed =
+      agentBinding.kind === 'internal' && agentMode === 'operate';
+    if (!isSkillInvocationAllowed) {
       const prompt = raw.trim();
       if (!prompt) return;
       await startStream(prompt, agentMode);
