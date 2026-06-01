@@ -53,7 +53,7 @@ export type MemorySkillWriteArgs = Static<typeof memorySkillWriteParamsSchema>;
 export async function handleMemoryWorkspaceWrite(
   args: MemoryWorkspaceWriteArgs,
 ): Promise<string> {
-  const result = writeWorkspaceMemory({
+  const result = await writeWorkspaceMemory({
     mode: args.mode,
     diff: args.diff,
   });

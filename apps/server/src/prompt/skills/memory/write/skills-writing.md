@@ -28,7 +28,11 @@ A **reusable pattern** emerged that another agent could apply on a future, unrel
 - **Strongly prefer `op: "update"`.** Read the user-skill catalogue in your system prompt (`{{skillCatalogue}}`) before creating; if anything is close, update it.
 - **Body = reusable how-to.** Concrete decision rules, layout patterns, worked examples. Not canvas-specific narrative.
 - **Body is markdown**; structure with `##` sections (when to use, core mechanism, examples, anti-patterns).
-- **On `update`, `body` wholesale-replaces the existing body.** Read `skills/<id>/SKILL.md` first; copy forward any prior prose that should survive, **strip its `---` frontmatter fence**, then merge in your additions before submitting.
+- **`op: "update"` wholesale-replaces the body — silent data loss is the failure mode.**
+  Mandatory protocol:
+  1. **Call `read("skills/<id>/SKILL.md")` first, in the same turn.** If you have not just read it, do not call `memory_skill_write` with `op: "update"`.
+  2. Take the existing body, strip its leading `---\n...\n---` frontmatter fence, and treat that as your starting point.
+  3. Apply your edits _on top of_ that body. Anything you omit from the submitted `body` is permanently deleted from the file.
 
 ## Example (update)
 

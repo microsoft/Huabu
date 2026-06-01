@@ -31,6 +31,7 @@ import {
   resolveWorkingMemoryPath,
 } from './sandbox.js';
 import { invalidateUserSkill } from '../../../prompt/index.js';
+import { createKeyedMutex } from '../../../utils/keyed-mutex.js';
 import { parseFrontmatter } from '../../storage/frontmatter.js';
 import { atomicWriteText, mkdirp } from '../../storage/io.js';
 import {
@@ -40,6 +41,17 @@ import {
 } from '../../storage/paths.js';
 
 import type { MemoryLogger } from './index.js';
+
+// ─── Concurrency guards ────────────────────────────────────────────────────
+//
+// The workspace memory file is a single document shared by curators
+// from every canvas AND by the ask / operate chat agents. Without a
+// lock, two concurrent read-modify-write cycles can silently drop
+// each other's additions. We funnel every workspace-memory write
+// through this mutex.
+//
+// One slot is enough — there is exactly one workspace memory file.
+const workspaceMemoryLock = createKeyedMutex<'workspace'>();
 
 export interface WriteResult {
   ok: boolean;
@@ -75,36 +87,42 @@ export const SKILL_CREATE_RATIONALE_MIN = 20;
  * mode each non-empty trimmed line is treated as an additional bullet
  * (the leading `+`/`-`/`*` is stripped if present, then re-prefixed
  * with `- `). Cap check runs against the merged body.
+ *
+ * Serialized through {@link workspaceMemoryLock} — concurrent writers
+ * from different canvases / chat agents are queued so a
+ * read-modify-write cycle cannot lose another writer's additions.
  */
-export function writeWorkspaceMemory(args: {
+export async function writeWorkspaceMemory(args: {
   mode: 'patch' | 'replace';
   diff: string;
   logger?: MemoryLogger;
-}): WriteResult {
-  let target = '<unresolved>';
-  try {
-    target = resolveLongTermPath();
-    if (args.mode !== 'patch') {
-      return reject(
-        target,
-        `workspace-memory writer only accepts mode="patch" in this phase`,
+}): Promise<WriteResult> {
+  return workspaceMemoryLock('workspace', () => {
+    let target = '<unresolved>';
+    try {
+      target = resolveLongTermPath();
+      if (args.mode !== 'patch') {
+        return reject(
+          target,
+          `workspace-memory writer only accepts mode="patch" in this phase`,
+        );
+      }
+
+      const existing = readOrEmpty(target);
+      const merged = mergeBullets(existing, args.diff);
+      const capCheck = checkCap(merged);
+      if (!capCheck.ok) return reject(target, capCheck.reason);
+
+      mkdirp(settingDir());
+      atomicWriteText(target, merged);
+      args.logger?.info(
+        `[memory] workspace memory updated (${merged.length} bytes, ${merged.split('\n').length} lines)`,
       );
+      return { ok: true, target, reason: 'patched' };
+    } catch (err) {
+      return rejectFromError(err, target);
     }
-
-    const existing = readOrEmpty(target);
-    const merged = mergeBullets(existing, args.diff);
-    const capCheck = checkCap(merged);
-    if (!capCheck.ok) return reject(target, capCheck.reason);
-
-    mkdirp(settingDir());
-    atomicWriteText(target, merged);
-    args.logger?.info(
-      `[memory] workspace memory updated (${merged.length} bytes, ${merged.split('\n').length} lines)`,
-    );
-    return { ok: true, target, reason: 'patched' };
-  } catch (err) {
-    return rejectFromError(err, target);
-  }
+  });
 }
 
 /**

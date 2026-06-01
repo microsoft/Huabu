@@ -124,21 +124,22 @@ function safeBump(
   weight: number,
   url: string,
   logger: FastifyBaseLogger,
-): void {
-  try {
-    const shouldRun = bumpOpCounter(canvasId, weight);
-    if (shouldRun) enqueueMemory(canvasId, logger);
-  } catch (err) {
-    logger.warn(
-      {
-        canvasId,
-        weight,
-        url,
-        err: err instanceof Error ? err.message : String(err),
-      },
-      '[memory] op-counter hook failed (non-fatal)',
-    );
-  }
+): Promise<void> {
+  return bumpOpCounter(canvasId, weight)
+    .then((shouldRun) => {
+      if (shouldRun) enqueueMemory(canvasId, logger);
+    })
+    .catch((err: unknown) => {
+      logger.warn(
+        {
+          canvasId,
+          weight,
+          url,
+          err: err instanceof Error ? err.message : String(err),
+        },
+        '[memory] op-counter hook failed (non-fatal)',
+      );
+    });
 }
 
 // ─── Hook ──────────────────────────────────────────────────────────────────
@@ -166,7 +167,11 @@ export function registerOpCounterHook(app: FastifyInstance): void {
     const canvasId = extractCanvasIdFromUrl(url);
     if (!canvasId) return;
 
-    safeBump(canvasId, extractWeight(request), url, request.log);
+    // Fire-and-forget: the bump is internally serialized per canvas
+    // (see trigger.ts:stateLock), and `safeBump` swallows its own
+    // failures. Awaiting here would only delay Fastify's hook chain
+    // for a response that has already been sent.
+    void safeBump(canvasId, extractWeight(request), url, request.log);
   });
 
   // ── Stage 2: preHandler for POST /api/agent ─────────────────────────────
@@ -185,6 +190,8 @@ export function registerOpCounterHook(app: FastifyInstance): void {
     const canvasId = extractCanvasIdFromAgentBody(request);
     if (!canvasId) return;
 
-    safeBump(canvasId, 1, url, request.log);
+    // Same fire-and-forget rationale as Stage 1 — adding an `await`
+    // here would block the agent request waiting for state.json IO.
+    void safeBump(canvasId, 1, url, request.log);
   });
 }

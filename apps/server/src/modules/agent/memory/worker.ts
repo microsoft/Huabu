@@ -94,7 +94,16 @@ async function runOnce(canvasId: string, logger?: MemoryLogger): Promise<void> {
     markAnalyzed(
       canvasId,
       latestChatTs !== null ? { lastSeenThreadCursor: latestChatTs } : {},
-    );
+    ).catch((err: unknown) => {
+      // markAnalyzed is now async (it shares the per-canvas state
+      // lock with bumpOpCounter). A bookkeeping write failure does
+      // not invalidate the pass — log and continue.
+      logger?.warn(
+        `[memory] markAnalyzed failed for canvas ${canvasId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    });
     summariseResults(canvasId, results, logger);
   } catch (err) {
     logger?.warn(

@@ -21,11 +21,19 @@
 
 import { existsSync } from 'node:fs';
 
+import { createKeyedMutex } from '../../../utils/keyed-mutex.js';
 import { atomicWriteJson, mkdirp, readJson } from '../../storage/io.js';
 import { memoryStatePath, canvasMemoryDir } from '../../storage/paths.js';
 
 /** Op-count threshold that triggers a memory analysis pass. */
 export const OP_THRESHOLD = 50;
+
+// Per-canvas mutex around state.json read-modify-write. Without it,
+// concurrent mutating requests on the same canvas all read the same
+// `counter` value, increment locally, and race the writes — so the
+// counter advances by 1 instead of N. The same hazard applies to
+// `markAnalyzed`, which clobbers any in-flight bump if unguarded.
+const stateLock = createKeyedMutex<string>();
 
 export interface MemoryState {
   counter: number;
@@ -76,20 +84,29 @@ export function writeMemoryState(canvasId: string, state: MemoryState): void {
  * write — callers may immediately enqueue the worker without worrying
  * about double-firing on the very next op batch.
  *
+ * Serialized per canvas via {@link stateLock} so concurrent mutating
+ * requests on the same canvas cannot lose increments via a
+ * read-modify-write race.
+ *
  * Returns `true` exactly when the worker should be enqueued.
  */
-export function bumpOpCounter(canvasId: string, delta: number): boolean {
+export async function bumpOpCounter(
+  canvasId: string,
+  delta: number,
+): Promise<boolean> {
   if (!Number.isFinite(delta) || delta <= 0) return false;
-  const state = readMemoryState(canvasId);
-  state.counter += delta;
-  if (state.counter < OP_THRESHOLD) {
+  return stateLock(canvasId, () => {
+    const state = readMemoryState(canvasId);
+    state.counter += delta;
+    if (state.counter < OP_THRESHOLD) {
+      writeMemoryState(canvasId, state);
+      return false;
+    }
+    // Threshold crossed: reset and signal.
+    state.counter = 0;
     writeMemoryState(canvasId, state);
-    return false;
-  }
-  // Threshold crossed: reset and signal.
-  state.counter = 0;
-  writeMemoryState(canvasId, state);
-  return true;
+    return true;
+  });
 }
 
 /**
@@ -99,16 +116,21 @@ export function bumpOpCounter(canvasId: string, delta: number): boolean {
  * without touching the counter — the counter was already reset by
  * {@link bumpOpCounter} when it returned `true`.
  *
+ * Shares {@link stateLock} with `bumpOpCounter` so a concurrent bump
+ * cannot overwrite the cursor update (or vice versa).
+ *
  * Used by `worker.ts` after a successful analysis (PR-C).
  */
-export function markAnalyzed(
+export async function markAnalyzed(
   canvasId: string,
   opts: { lastSeenThreadCursor?: number } = {},
-): void {
-  const state = readMemoryState(canvasId);
-  state.lastAnalyzedAt = Date.now();
-  if (opts.lastSeenThreadCursor !== undefined) {
-    state.lastSeenThreadCursor = opts.lastSeenThreadCursor;
-  }
-  writeMemoryState(canvasId, state);
+): Promise<void> {
+  await stateLock(canvasId, () => {
+    const state = readMemoryState(canvasId);
+    state.lastAnalyzedAt = Date.now();
+    if (opts.lastSeenThreadCursor !== undefined) {
+      state.lastSeenThreadCursor = opts.lastSeenThreadCursor;
+    }
+    writeMemoryState(canvasId, state);
+  });
 }
