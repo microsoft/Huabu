@@ -8,6 +8,7 @@ import {
   Routes,
 } from 'react-router-dom';
 
+import { initCsrfToken } from './api/_client';
 import { ToastContainer } from './components/Common/Toast';
 import { useInputModeListener } from './hooks/useInputMode';
 import CanvasListPage from './pages/CanvasListPage';
@@ -54,7 +55,18 @@ export default function App() {
   const [initialising, setInitialising] = useState(true);
 
   useEffect(() => {
-    void init().finally(() => setInitialising(false));
+    // Fetch the CSRF token *before* any state-changing API call. The
+    // server replies with a fresh token on first boot and persists it
+    // so subsequent reloads are instant. We swallow errors here so a
+    // backend-down situation still renders the workspace setup page
+    // (where the user can see a clear failure on their first action).
+    void initCsrfToken()
+      .catch((err) => {
+        console.error('[security] CSRF bootstrap failed:', err);
+      })
+      .finally(() => {
+        void init().finally(() => setInitialising(false));
+      });
   }, [init]);
 
   return (

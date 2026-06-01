@@ -18,6 +18,11 @@ import { registerOpCounterHook } from './modules/agent/memory/op-counter-hook.js
 import skillsRoutes from './modules/agent/skills.route.js';
 import artifactRoute from './modules/artifact/artifact.route.js';
 import canvasRoutes from './modules/canvas/canvas.route.js';
+import {
+  csrfPlugin,
+  hostGuardPlugin,
+  resolveAllowedHostnames,
+} from './modules/security/index.js';
 import webRoutes from './modules/web/web.route.js';
 import {
   initWorkspaceFromEnv,
@@ -47,10 +52,42 @@ export const app = fastify({
 // Register response compression
 app.register(compress);
 
-// Register CORS
+// ── CORS ─────────────────────────────────────────────────────────────
+// Locked down to a static allowlist derived from `HUABU_ALLOWED_HOSTS`
+// plus the loopback defaults — see `modules/security`. Without this
+// lockdown the CSRF token can be read cross-origin and the protection
+// is bypassed. Any scheme/port is accepted on an allowed hostname so
+// `http://localhost:5173` (Vite dev) and `https://sediment.example`
+// (reverse proxy) both work without further configuration.
+const allowedHostnames = resolveAllowedHostnames();
 app.register(cors, {
-  origin: true, // Allow all origins in development, specify domains in production
+  origin: (origin, cb) => {
+    // Non-browser callers (curl, server-to-server, native apps) omit
+    // Origin entirely — allow them; the Host guard already validates
+    // their target hostname.
+    if (!origin) return cb(null, true);
+    try {
+      const parsed = new URL(origin);
+      // URL.hostname strips the port and lowercases; IPv6 literals
+      // come back without the brackets, so re-add them to match the
+      // allowlist's canonical form.
+      const hostname = parsed.hostname.includes(':')
+        ? `[${parsed.hostname}]`
+        : parsed.hostname;
+      cb(null, allowedHostnames.has(hostname));
+    } catch {
+      cb(null, false);
+    }
+  },
+  credentials: false,
 });
+
+// ── Network security guards ──────────────────────────────────────────
+// Registered before basic-auth so misaddressed requests fail fast with
+// a clear 403 instead of an auth challenge. Order matters:
+//   hostGuard → csrf → basic-auth → workspace guard → routes.
+app.register(hostGuardPlugin);
+app.register(csrfPlugin);
 
 // Register multipart for file uploads
 // Max file size: 100MB

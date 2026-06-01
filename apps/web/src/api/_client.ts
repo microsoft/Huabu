@@ -6,15 +6,19 @@
  *   - JSON encoding the request body,
  *   - checking `response.ok`,
  *   - parsing `ApiErrorBody` and throwing a real `Error` with a stable
- *     `.message`, `.status`, and (when available) `.code`.
+ *     `.message`, `.status`, and (when available) `.code`,
+ *   - echoing the per-install CSRF token on state-changing requests.
  *
  * For non-JSON bodies (FormData, file uploads) pass `body: <FormData>`
  * directly — the helper sets the `Content-Type` header only for JSON.
  */
 
+import { CSRF_HEADER, CSRF_INVALID_CODE } from '@sediment/shared';
+
+import { routes } from './_routes';
 import { API_CONFIG } from '../config/api';
 
-import type { ApiErrorBody } from '@sediment/shared';
+import type { ApiErrorBody, SecurityBootstrapResponse } from '@sediment/shared';
 
 /** Strongly-typed runtime error raised when the server returns a non-2xx. */
 export class ApiError extends Error {
@@ -29,6 +33,75 @@ export class ApiError extends Error {
     this.code = body.code;
     this.details = body.details;
   }
+}
+
+// ── CSRF token plumbing ──────────────────────────────────────────────
+// The token is fetched once at app boot (see `initCsrfToken` below) and
+// cached in module-level state. Every non-safe request automatically
+// attaches it as the `X-Sediment-CSRF` header; if the server returns a
+// 403 with code `CSRF_INVALID` (e.g. the operator wiped
+// `data/security-token`) we refresh and retry exactly once.
+
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+let cachedCsrfToken: string | null = null;
+let inflightBootstrap: Promise<string> | null = null;
+
+async function fetchCsrfToken(): Promise<string> {
+  const response = await fetch(apiUrl(routes.securityBootstrap), {
+    method: 'GET',
+    credentials: 'same-origin',
+  });
+  if (!response.ok) {
+    throw new ApiError(
+      response.status,
+      {},
+      `Security bootstrap failed: ${response.status} ${response.statusText}`,
+    );
+  }
+  const body = (await response.json()) as SecurityBootstrapResponse;
+  if (!body?.csrfToken) {
+    throw new ApiError(500, {}, 'Security bootstrap returned no token');
+  }
+  return body.csrfToken;
+}
+
+/**
+ * Fetch (or refresh) the CSRF token from the server.
+ *
+ * Concurrent callers share a single in-flight request. Idempotent —
+ * the app calls this at startup, and `apiFetch` calls it again on a
+ * stale-token 403.
+ */
+export async function initCsrfToken(): Promise<string> {
+  if (cachedCsrfToken && !inflightBootstrap) return cachedCsrfToken;
+  if (!inflightBootstrap) {
+    inflightBootstrap = fetchCsrfToken()
+      .then((token) => {
+        cachedCsrfToken = token;
+        return token;
+      })
+      .finally(() => {
+        inflightBootstrap = null;
+      });
+  }
+  return inflightBootstrap;
+}
+
+/**
+ * Read the cached token without triggering a network request. Returns
+ * `null` until `initCsrfToken` has resolved at least once.
+ *
+ * Exported so the few callers that build their own `fetch` (SSE
+ * streams, the `PUT /canvas` writer) can splice the header in by hand.
+ */
+export function getCsrfToken(): string | null {
+  return cachedCsrfToken;
+}
+
+function needsCsrf(method: string, url: string): boolean {
+  if (SAFE_METHODS.has(method.toUpperCase())) return false;
+  // Don't recurse into the bootstrap endpoint.
+  return !url.endsWith(routes.securityBootstrap);
 }
 
 export interface ApiFetchOptions extends Omit<RequestInit, 'body' | 'method'> {
@@ -65,6 +138,23 @@ async function readErrorBody(
   return {};
 }
 
+function mergeCsrfHeader(
+  headers: HeadersInit | undefined,
+  token: string | null,
+): HeadersInit | undefined {
+  if (!token) return headers;
+  if (!headers) return { [CSRF_HEADER]: token };
+  if (headers instanceof Headers) {
+    const next = new Headers(headers);
+    next.set(CSRF_HEADER, token);
+    return next;
+  }
+  if (Array.isArray(headers)) {
+    return [...headers, [CSRF_HEADER, token]];
+  }
+  return { ...headers, [CSRF_HEADER]: token };
+}
+
 /**
  * Perform a JSON request and parse the response.
  *
@@ -88,27 +178,57 @@ export async function apiFetch<T>(
     ...rest
   } = options;
 
-  const init: RequestInit = { ...rest };
+  let mergedHeaders: HeadersInit | undefined;
 
-  if (json !== undefined) {
-    init.body = JSON.stringify(json);
-    init.headers = {
-      'Content-Type': 'application/json',
-      ...(headers ?? {}),
-    };
-  } else if (formData) {
-    init.body = formData;
-    init.headers = headers; // browser sets multipart boundary
-  } else if (body !== undefined) {
-    init.body = body;
-    init.headers = headers;
-  } else {
-    init.headers = headers;
+  const buildInit = (csrfToken: string | null): RequestInit => {
+    const i: RequestInit = { ...rest };
+    if (json !== undefined) {
+      i.body = JSON.stringify(json);
+      mergedHeaders = {
+        'Content-Type': 'application/json',
+        ...(headers ?? {}),
+      };
+    } else if (formData) {
+      i.body = formData;
+      mergedHeaders = headers;
+    } else if (body !== undefined) {
+      i.body = body;
+      mergedHeaders = headers;
+    } else {
+      mergedHeaders = headers;
+    }
+    i.method = method ?? (i.body ? 'POST' : 'GET');
+    if (needsCsrf(i.method, path)) {
+      mergedHeaders = mergeCsrfHeader(mergedHeaders, csrfToken);
+    }
+    i.headers = mergedHeaders;
+    return i;
+  };
+
+  const init = buildInit(cachedCsrfToken);
+  let response = await fetch(apiUrl(path), init);
+
+  // Stale token (e.g. server restart with regenerated token, or operator
+  // wiped `data/security-token`). Refresh and retry exactly once.
+  if (
+    response.status === 403 &&
+    init.method &&
+    !SAFE_METHODS.has(init.method)
+  ) {
+    const errBody = await readErrorBody(response);
+    if (errBody.code === CSRF_INVALID_CODE) {
+      cachedCsrfToken = null;
+      const fresh = await initCsrfToken();
+      response = await fetch(apiUrl(path), buildInit(fresh));
+    } else {
+      throw new ApiError(
+        response.status,
+        errBody,
+        fallbackMessage ??
+          `Request to ${path} failed: ${response.status} ${response.statusText}`,
+      );
+    }
   }
-
-  init.method = method ?? (init.body ? 'POST' : 'GET');
-
-  const response = await fetch(apiUrl(path), init);
 
   if (!response.ok) {
     const errBody = await readErrorBody(response);

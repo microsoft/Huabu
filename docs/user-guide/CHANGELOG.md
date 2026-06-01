@@ -62,6 +62,52 @@
 - **内部工具调整，普通用户无感知**：所有写入的目标文件、磁盘布局、cap（workspace + canvas 仍是 4 KB / 80 行；skill 仍无 cap）、并发锁、skill 缓存失效行为都保持不变。
 - **自定义 agent 配置需要更新**：若你在自定义 prompt / AGENT.md 里引用了旧工具名（`memory_workspace_write` 等），请替换为 `fs_write`，并按新参数形态调整 schema。所有内置 prompt 已同步。
 - **行级编辑能力顺带获得**：`mode: "replace_string"` 在三类 memory 文件上都可用，特别适合对长 skill 文件做局部修订，不再需要 LLM 整段重抄。
+## 2026-06-02 · 默认本地绑定 + Host 白名单 + CSRF 防护（破坏性变更）
+
+**What Changed**
+
+- 服务器现在默认只绑定 `127.0.0.1`（不再是 `0.0.0.0`），新装的实例不会被同局域网的其他人意外访问到。
+- 新增 `HUABU_BIND_HOST` 环境变量，需要 LAN/远程访问时显式设置为 `0.0.0.0` 或具体网卡 IP。
+- 新增 `HUABU_ALLOWED_HOSTS` 环境变量（逗号分隔的主机名列表），所有 HTTP 请求的 `Host` 头都会校验，不在白名单里的直接 403——防御 DNS rebinding 攻击。
+- 新增 CSRF 防护：服务器在 `data/security-token` 持久化一个随机 token，Web 客户端启动时拉取并附在所有写请求的 `X-Sediment-CSRF` header 上。第三方页面（如恶意网站）即使能访问到本地端口也无法触发任何 POST/PUT/PATCH/DELETE。
+- CORS 同步收紧：只允许 `HUABU_ALLOWED_HOSTS`（含 loopback 默认项）对应的来源，挡住跨站读取 bootstrap token 的路径。
+
+**Notes**
+
+- **如果你之前从局域网 / 其他设备访问过 Sediment**：升级后需要在 `.env` 里加上：
+  ```dotenv
+  HUABU_BIND_HOST=0.0.0.0
+  HUABU_ALLOWED_HOSTS=your-lan-ip,your-hostname.local
+  ```
+  否则远程访问会出现 403 或连接被拒。强烈建议同时启用 `HUABU_BASIC_AUTH_USER`/`HUABU_BASIC_AUTH_PASS`，并在前面挂 HTTPS。
+- 纯本机使用（默认场景）无需任何配置变更，体验和之前一致。
+- 第三方 ACP agent（agentlet CLI）的 WebSocket 连接不受 CSRF 影响——它继续走自己的 `ACP_DEV_TOKEN` 鉴权。
+
+---
+
+## 2026-06-01 · 图层面板新增正则搜索 + 类型过滤
+
+**What Changed**
+
+- 左侧 **Layers 面板**顶部新增一条**默认单行**的过滤栏（画布存在 ≥2 种节点类型时显示）：
+  - **类型 chip 行（默认可见）**：左侧一排图标 chip + 右侧搜索按钮，没有额外文字标签——chip 本身（图标 + tooltip `Filter by Image` 等）就是过滤的视觉语义，避免 "Filter" 这种英文 jargon 造成的语言门槛。chip **只显示当前画布上实际存在的节点类型**（在 `CANVAS_NODE_TYPES` 的标准顺序里筛选）；**默认全部未选 = 不施加类型约束（显示全部类型）**；点击 chip 高亮选中（柔和的 `bg-info-bg` + info 色，不是刺眼的纯色 pill）→ 列表收窄到只显示该类型；多次点击不同 chip 把更多类型加入白名单；再点已选中的 chip 取消选中。chip 数量过多时优雅地 `flex-wrap` 到第二行，右侧搜索按钮始终保持在右上角。
+  - 过滤栏底部用 `border-edge-default/40` 一条极淡的发丝线（约等于 `#f5f5f5`）作为分隔，比默认 edge 色淡 60%；既能暗示"过滤栏 vs 列表"的区段感，又不会和上方 workspace header 的 border 视觉上叠成"两条平行线"。
+  - **正则搜索框（按需展开）**：点击右侧搜索图标按钮才展开输入行；自动 focus，输入即过滤，按 label 做大小写不敏感的正则匹配；非法正则会让输入框边框变红、列表清空，避免静默"降级到子串匹配"造成的误解。Esc 或栏内 × 关闭输入行并清空 query，但**保留 chip 选中状态**（chip 和 search 解耦，互不打扰）。
+  - **fallback：画布只有 0–1 种类型时**，chip 行不渲染（chip 没意义），改在右上角浮动一枚低调的搜索图标（默认 50% 透明、hover 100%），点击直接展开搜索输入；与之前版本的行为兼容。
+- 两种过滤**自动组合**为 AND：正则命中 ∧ （未选任何类型 ∨ 类型在白名单内）。
+- **过滤激活时切换成扁平 list 视图**（VS Code 全局搜索式）：层级缩进消失、所有命中节点统一 `depth=0` 渲染。撤销所有过滤后**无缝回到原 tree 视图**。
+- **过滤激活时禁用拖拽排序**（避免"跨越被隐藏节点"导致 z-order 意外变化）；折叠 chevron 也隐藏（扁平结果中折叠无意义）。
+
+**Notes**
+
+- **不破坏原有交互**：单选 / Ctrl 多选 / 双击重命名 / 锁定 / fitView 到画布节点等行为在过滤状态下全部继续工作；过滤命中节点点击后照常 fit 到画布对应位置。
+- **匹配在 collapsed frame 里的节点也会浮现**：过滤模式直接跳过"折叠 frame 隐藏子节点"的视图过滤，确保搜索结果不被画布上的折叠状态意外屏蔽。
+- **性能**：过滤是单遍 O(N)，并且复用了原有的 per-id 缓存（新增一层 flat 模式缓存），命中节点的 `SortableRow` 在 selection-only 变化时仍能命中 `React.memo`，不会触发 O(N) 重渲染。
+- **过滤状态是面板本地的 `useState`**：折叠左侧面板再展开时状态保留；不进 zustand store、不持久化到 localStorage。
+- **没有改 shared / server**：纯前端 UI 改动，节点 schema、canvas-engine、API 契约都没碰。
+
+---
+
 ## 2026-06-02 · 没有锚点的新节点改成落在当前视窗中心
 
 **What Changed**

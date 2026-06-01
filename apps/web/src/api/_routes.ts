@@ -11,6 +11,9 @@
 const enc = encodeURIComponent;
 
 export const routes = {
+  // ── Security ──────────────────────────────────────────────────────
+  securityBootstrap: '/security/bootstrap',
+
   // ── Workspace ─────────────────────────────────────────────────────
   workspace: '/workspace',
   workspacePickFolder: '/workspace/pick-folder',
