@@ -31,7 +31,7 @@ import { getTokenStore } from './token-store.js';
 
 import type { AcpConfig } from '@sediment/shared';
 
-const TOKEN_BYTES = 32;
+const TOKEN_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // unambiguous charset
 
 interface PersistedConfig {
   enabled: boolean;
@@ -47,9 +47,13 @@ function configFilePath(): string {
   return join(process.cwd(), 'data', 'acp-config.json');
 }
 
-/** Generate a 64-char hex string (32 random bytes). */
+/** Generate an 8-char token formatted as XXXX-XXXX (unambiguous uppercase). */
 function generateToken(): string {
-  return randomBytes(TOKEN_BYTES).toString('hex');
+  const bytes = randomBytes(8);
+  const raw = Array.from(bytes)
+    .map((b) => TOKEN_CHARS[b % TOKEN_CHARS.length])
+    .join('');
+  return `${raw.slice(0, 4)}-${raw.slice(4, 8)}`;
 }
 
 let cached: ResolvedConfig | null = null;

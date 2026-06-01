@@ -21,6 +21,10 @@ import { Check, ClipboardCopy, RefreshCw } from 'lucide-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 import { Button } from '@/components/Common/Button';
+import { SettingRow } from '@/components/Common/SettingRow';
+import { SettingSection } from '@/components/Common/SettingSection';
+import { toast } from '@/components/Common/Toast';
+import { Toggle } from '@/components/Common/Toggle';
 import { useAcpConfigStore } from '@/store/acpConfigStore';
 import { copyToClipboard } from '@/utils/io/clipboard';
 
@@ -38,6 +42,13 @@ export const AcpSettings: React.FC = () => {
       if (copyTimerRef.current !== null) clearTimeout(copyTimerRef.current);
     };
   }, []);
+
+  // Surface store errors as transient toasts.
+  useEffect(() => {
+    if (error) {
+      toast(error, { variant: 'error' });
+    }
+  }, [error]);
 
   const flashCopied = useCallback(() => {
     setCopied(true);
@@ -65,81 +76,55 @@ export const AcpSettings: React.FC = () => {
 
   const enabled = config?.enabled ?? false;
   const token = config?.token ?? '';
-  const maskedToken = token ? `${token.slice(0, 6)}…${token.slice(-4)}` : '—';
 
   return (
-    <div className="border-edge-default mb-3 border-b pb-3">
-      <label className="text-fg-muted mb-1.5 block text-xs font-medium">
-        External Agents (ACP)
-      </label>
-
-      {/* Enable toggle */}
-      <div className="border-edge-default bg-bg-default mb-2 flex items-center justify-between rounded-md border px-2 py-1.5">
-        <div className="min-w-0">
-          <p className="text-fg-default text-xs font-medium">Bridge</p>
-          <p className="text-fg-subtle text-[11px]">
-            {enabled
-              ? 'Accepting agentlet connections'
-              : 'Disabled — no external agents can connect'}
-          </p>
-        </div>
-        <Button
-          variant={enabled ? 'solid' : 'outline'}
-          tone={enabled ? 'info' : 'neutral'}
-          size="sm"
-          onClick={handleToggle}
+    <SettingSection title="External Agents">
+      <SettingRow
+        title="ACP Bridge"
+        description="Allow external agents to connect via the ACP bridge."
+      >
+        <Toggle
+          checked={enabled}
+          onChange={handleToggle}
           disabled={saving || !config}
-          title={enabled ? 'Disable ACP bridge' : 'Enable ACP bridge'}
-        >
-          {enabled ? 'Disable' : 'Enable'}
-        </Button>
-      </div>
+          label={enabled ? 'Disable ACP bridge' : 'Enable ACP bridge'}
+        />
+      </SettingRow>
 
-      {/* Token row — only meaningful while enabled */}
       {enabled && (
-        <div className="border-edge-default bg-bg-default mb-2 rounded-md border px-2 py-1.5">
-          <div className="mb-1 flex items-center justify-between">
-            <p className="text-fg-default text-xs font-medium">Bridge Token</p>
-            <div className="flex items-center gap-1">
-              <Button
-                variant="ghost"
-                tone="neutral"
-                size="sm"
-                iconOnly
-                title={copied ? 'Copied!' : 'Copy token'}
-                onClick={handleCopy}
-                disabled={!token}
-              >
-                {copied ? <Check /> : <ClipboardCopy />}
-              </Button>
-              <Button
-                variant="ghost"
-                tone="neutral"
-                size="sm"
-                iconOnly
-                title="Regenerate token (invalidates the current one)"
-                onClick={handleRegenerate}
-                disabled={saving}
-              >
-                <RefreshCw />
-              </Button>
-            </div>
+        <SettingRow
+          title="Bridge Token"
+          description="Paste this into your agentlet launcher's ACP_DEV_TOKEN env var."
+        >
+          <div className="flex items-center gap-1">
+            <code className="text-fg-default border-edge-default rounded border px-2 py-0.5 font-mono text-sm font-semibold tracking-widest">
+              {token || '—'}
+            </code>
+            <Button
+              variant="ghost"
+              tone="neutral"
+              size="sm"
+              iconOnly
+              title={copied ? 'Copied!' : 'Copy token'}
+              onClick={handleCopy}
+              disabled={!token}
+            >
+              {copied ? <Check /> : <ClipboardCopy />}
+            </Button>
+            <Button
+              variant="ghost"
+              tone="neutral"
+              size="sm"
+              iconOnly
+              title="Regenerate token (invalidates the current one)"
+              onClick={handleRegenerate}
+              disabled={saving}
+            >
+              <RefreshCw />
+            </Button>
           </div>
-          <code className="text-fg-muted bg-surface block truncate rounded px-1.5 py-1 font-mono text-[11px]">
-            {maskedToken}
-          </code>
-          <p className="text-fg-subtle mt-1 text-[11px] leading-snug">
-            Paste this into your <code className="font-mono">agentlet</code>{' '}
-            launcher's <code className="font-mono">ACP_DEV_TOKEN</code> env var.
-          </p>
-        </div>
+        </SettingRow>
       )}
-
-      {error && (
-        <p className="text-danger mt-1 text-[11px]" role="alert">
-          {error}
-        </p>
-      )}
-    </div>
+    </SettingSection>
   );
 };

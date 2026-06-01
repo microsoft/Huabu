@@ -25,13 +25,13 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { listSkills } from '@/api/skills';
+
 import type {
   AgentBinding,
   AvailableCommand,
   SkillScope,
 } from '@sediment/shared';
-
-import { listSkills } from '@/api/skills';
 
 /**
  * Default staleness window for {@link UseInternalSlashCommandsResult.refreshIfStale}.

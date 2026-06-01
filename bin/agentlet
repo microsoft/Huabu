@@ -60,7 +60,17 @@ fi
 # the Settings UI). Hand-rolled POSIX parser (no jq dep): the file has
 # the shape `{"enabled": true, "token": "abc…"}` written by JSON.stringify,
 # so a single greedy regex on the token field is reliable enough.
-acp_config="$repo/data/acp-config.json"
+#
+# The server writes this file via `process.cwd() + '/data/acp-config.json'`,
+# and `pnpm --filter @sediment/server dev` runs with cwd = apps/server/,
+# so the canonical location is `<repo>/apps/server/data/acp-config.json`.
+# We still check the legacy `<repo>/data/acp-config.json` as a fallback in
+# case someone launches the server from the repo root (e.g. `pnpm dev:server`
+# with a custom cwd, or an older layout).
+acp_config="$repo/apps/server/data/acp-config.json"
+if [ ! -f "$acp_config" ] && [ -f "$repo/data/acp-config.json" ]; then
+  acp_config="$repo/data/acp-config.json"
+fi
 ui_token=
 if [ -f "$acp_config" ]; then
   ui_token=$(
