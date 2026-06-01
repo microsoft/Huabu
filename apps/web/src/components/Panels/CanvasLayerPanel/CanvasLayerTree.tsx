@@ -365,7 +365,7 @@ export const CanvasLayerTree = ({
       collisionDetection={closestCenter}
       onDragEnd={handleDragEnd}
     >
-      <div className="-mx-3 -my-3 overflow-hidden">
+      <div className="overflow-hidden">
         <div className="flex flex-col py-1">
           <SortableContext
             items={itemIds}

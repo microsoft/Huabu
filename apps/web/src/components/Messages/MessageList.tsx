@@ -96,7 +96,7 @@ export const MessageList = ({
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        className="flex-1 space-y-1 overflow-x-visible overflow-y-auto"
+        className="flex-1 space-y-1 overflow-x-visible overflow-y-auto px-3"
       >
         {(() => {
           const elements: React.ReactNode[] = [];

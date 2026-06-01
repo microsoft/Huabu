@@ -467,7 +467,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         )
       }
     >
-      <div className="flex h-full flex-col gap-2 overflow-visible">
+      <div className="flex h-full flex-col gap-2 overflow-visible pt-3">
         <MessageList
           messages={viewingSketchCluster ? sketchMessages : messages}
           isLoading={
@@ -488,39 +488,41 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
 
         {/* Input is hidden in sketch inspector mode — it's a read-only view. */}
         {!viewingSketchCluster && (
-          <ChatInput
-            value={input}
-            onChange={setInput}
-            onSubmit={handleSubmit}
-            onStop={stopStream}
-            isStreaming={isLoading}
-            mode={mode}
-            slashCommands={slashCommands}
-            onSlashMenuIntent={refreshSlashCommands}
-            acpSelectorsSlot={
-              agentBinding.kind === 'external' ? (
-                <AcpSessionSelectors
-                  meta={acpSessionMeta}
-                  loading={acpSessionMetaLoading}
-                  onSelectMode={handleAcpSelectMode}
-                  onSelectModel={handleAcpSelectModel}
-                  onSelectConfigOption={handleAcpSelectConfigOption}
-                />
-              ) : null
-            }
-            // For external (ACP) bindings, defer to the agent's own
-            // `session_usage_update`; the internal context-token fetch
-            // would return 0 and the hardcoded 128k window is wrong
-            // for non-GPT-4o models. `undefined` keeps the legacy
-            // built-in path; `null` hides the ring until the agent
-            // pushes its first usage snapshot.
-            contextUsageOverride={
-              agentBinding.kind === 'external'
-                ? acpSessionMeta.usage
-                : undefined
-            }
-            disabled={isLoading || !isHistoryLoaded}
-          />
+          <div className="px-3 pb-3">
+            <ChatInput
+              value={input}
+              onChange={setInput}
+              onSubmit={handleSubmit}
+              onStop={stopStream}
+              isStreaming={isLoading}
+              mode={mode}
+              slashCommands={slashCommands}
+              onSlashMenuIntent={refreshSlashCommands}
+              acpSelectorsSlot={
+                agentBinding.kind === 'external' ? (
+                  <AcpSessionSelectors
+                    meta={acpSessionMeta}
+                    loading={acpSessionMetaLoading}
+                    onSelectMode={handleAcpSelectMode}
+                    onSelectModel={handleAcpSelectModel}
+                    onSelectConfigOption={handleAcpSelectConfigOption}
+                  />
+                ) : null
+              }
+              // For external (ACP) bindings, defer to the agent's own
+              // `session_usage_update`; the internal context-token fetch
+              // would return 0 and the hardcoded 128k window is wrong
+              // for non-GPT-4o models. `undefined` keeps the legacy
+              // built-in path; `null` hides the ring until the agent
+              // pushes its first usage snapshot.
+              contextUsageOverride={
+                agentBinding.kind === 'external'
+                  ? acpSessionMeta.usage
+                  : undefined
+              }
+              disabled={isLoading || !isHistoryLoaded}
+            />
+          </div>
         )}
       </div>
     </SidebarPanel>
