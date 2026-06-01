@@ -11,9 +11,9 @@
  *   - **user** skills (workspace-owned, user- and memory-agent-editable):
  *     live under `<workspace>/setting/skills/<id>/SKILL.md`. The user
  *     can hand-edit these; the memory sub-agent may also write to them
- *     via the `memory_skill_write` writer. Either path makes them
- *     mutable at runtime, so this layer is cached per-workspace with
- *     mtime tracking and a short TTL.
+ *     via `fs_write({ path: "skills/<id>/SKILL.md", ... })`. Either
+ *     path makes them mutable at runtime, so this layer is cached
+ *     per-workspace with mtime tracking and a short TTL.
  *
  * When the same `id` exists in both sources they are **merged** rather
  * than overridden. See {@link mergeSkill}.
@@ -74,6 +74,21 @@ export interface SkillFrontmatter {
   appliesTo: SkillScope[];
   triggers?: string[];
   version?: number;
+  /**
+   * Opt this skill into the user-invokable `/` slash menu even when
+   * `source === 'system'`. Defaults to `false` — most system skills
+   * stay catalogue-only and are loaded autonomously by the agent.
+   *
+   * Use this for system skills that are essentially user-facing
+   * commands (e.g. `create-skill`, `update-skill`): the menu becomes
+   * their canonical entry point, and explicit invocation forces the
+   * body into context regardless of whether the agent would have
+   * discovered it on its own.
+   *
+   * `user` / `merged` skills are always user-invokable — this flag
+   * has no effect on them.
+   */
+  userInvokable?: boolean;
 }
 
 export interface LoadedSkill extends SkillFrontmatter {
@@ -104,10 +119,10 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
  */
 export const SYSTEM_SKILLS_DIR = HERE;
 
-// `userSkillPath()` (the write-back target for memory_skill_write)
-// lives in the memory module — see
-// `modules/agent/memory/writers/skill.ts` (PR-D). Keeping it out of the
-// loader means the loader does not need to expose write paths; the
+// `userSkillPath()` (the write-back target for `fs_write` on a
+// `skills/<id>/SKILL.md` path) lives in the memory module — see
+// `modules/agent/memory/sandbox.ts` + `writers.ts`. Keeping it out of
+// the loader means the loader does not need to expose write paths; the
 // user-side root is owned by `userSkillsDir()` in `storage/paths.ts`.
 
 // ─── Validation ─────────────────────────────────────────────────────────────
@@ -168,6 +183,10 @@ function validateFrontmatter(
     ? raw.triggers.map((t) => String(t))
     : undefined;
   const version = typeof raw.version === 'number' ? raw.version : undefined;
+  // Optional boolean. Treat anything that isn't an explicit `true` as
+  // `false` (the menu-gating default) so a typo or stray string in
+  // user content can't accidentally surface a non-invokable skill.
+  const userInvokable = raw.userInvokable === true ? true : undefined;
 
   return {
     id,
@@ -176,6 +195,7 @@ function validateFrontmatter(
     appliesTo,
     triggers,
     version,
+    userInvokable,
   };
 }
 
@@ -396,6 +416,14 @@ function mergeSkill(system: LoadedSkill, user: LoadedSkill): LoadedSkill {
   const triggers = triggersUnion.length > 0 ? triggersUnion : undefined;
   const description = `${user.description} (extended)`;
   const version = user.version ?? system.version;
+  // Merged skills are user-authored extensions of a system skill, so
+  // they are always user-invokable in practice — but propagate an
+  // explicit `userInvokable: true` from either side too, so the flag
+  // survives a future change where merged stops implying invokable.
+  const userInvokable =
+    user.userInvokable === true || system.userInvokable === true
+      ? true
+      : undefined;
 
   return {
     id: system.id,
@@ -404,6 +432,7 @@ function mergeSkill(system: LoadedSkill, user: LoadedSkill): LoadedSkill {
     appliesTo,
     triggers,
     version,
+    userInvokable,
     body: `${system.body}${USER_EXTENSION_HEADER}${user.body}`,
     // Source path points at the system file — the merged body only
     // exists in memory. Writers needing the user-side path go through
@@ -465,9 +494,9 @@ export function invalidateSkillCache(): void {
  * skill when called without arguments) on the next access.
  *
  * Wired into:
- *   - `memory_skill_write` after a successful write: pass the id so
- *     the very next `read("skills/<id>/SKILL.md")` sees fresh content
- *     without waiting for the TTL.
+ *   - `fs_write` on a `skills/<id>/SKILL.md` path after a successful
+ *     write: pass the id so the very next `read("skills/<id>/SKILL.md")`
+ *     sees fresh content without waiting for the TTL.
  *   - `setWorkspacePath()` after activation: invalidates everything
  *     so the new workspace's user skills replace the old ones.
  */

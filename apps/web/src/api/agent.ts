@@ -177,6 +177,14 @@ export const agentApi = {
        * Defaults to internal when omitted.
        */
       agentBinding?: AgentBinding;
+      /**
+       * Skill ids the user explicitly invoked by typing `/<id>` in the
+       * chat input (parsed by `useInternalSlashCommands`). Forwarded
+       * verbatim; the server fetches each skill body and prepends a
+       * SYSTEM preamble for this turn so the agent treats the skill
+       * as authoritative. Capped server-side at 8.
+       */
+      invokedSkills?: string[];
       signal?: AbortSignal;
     },
   ): Promise<void> => {
@@ -192,6 +200,9 @@ export const agentApi = {
       intentData: options?.intentData,
       anchorNodeId: options?.anchorNodeId,
       agentBinding: options?.agentBinding,
+      invokedSkills: options?.invokedSkills?.length
+        ? options.invokedSkills
+        : undefined,
     };
 
     try {

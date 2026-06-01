@@ -78,4 +78,10 @@ export const routes = {
   acpThreadModel: (threadId: string) => `/acp/threads/${enc(threadId)}/model`,
   acpThreadConfigOption: (threadId: string) =>
     `/acp/threads/${enc(threadId)}/config-option`,
+
+  // ── Skills (user-invokable catalogue) ─────────────────────────────
+  skillsList: (scope?: string) => {
+    const params = scope ? `?scope=${enc(scope)}` : '';
+    return `/skills/${params}`;
+  },
 } as const;

@@ -21,11 +21,16 @@ import {
 } from '@sediment/shared';
 import { encode } from 'gpt-tokenizer';
 
-import { loadAgent, renderAgentTemplate } from '../../prompt/index.js';
+import {
+  getSkill,
+  loadAgent,
+  renderAgentTemplate,
+} from '../../prompt/index.js';
 import { runAcpAgent } from '../agent/acp/service.js';
 import { runAgent } from '../agent/agent.service.js';
 import { readWorkspaceMemory } from '../agent/memory/index.js';
 import { buildAgentNodeRef } from '../agent/node-ref.js';
+import { isUserInvokableSkill } from '../agent/skills.route.js';
 import { readChatParts } from '../agent/store/chat-parts-store.js';
 import { loadContext, saveContext } from '../agent/store/chat-store.js';
 import {
@@ -1055,6 +1060,7 @@ const agentRoutes: FastifyPluginAsync = async (
       attachments,
       anchorNodeId,
       agentBinding,
+      invokedSkills,
     } = parsed.data;
 
     // Log the thread→agent binding so external dispatches are visible
@@ -1176,6 +1182,73 @@ const agentRoutes: FastifyPluginAsync = async (
           content: renderAgentTemplate(agentCfg, 'nodeNeighbourhoodPreamble', {
             spatial,
           }),
+          timestamp: Date.now(),
+        });
+      }
+    }
+
+    // User-invoked skills preamble.
+    //
+    // When the user typed `/<id>` tokens in the chat input (parsed
+    // client-side, see `useInternalSlashCommands`), the skill ids are
+    // forwarded here. We fetch each skill body and prepend a single
+    // SYSTEM message so the agent treats the bodies as authoritative
+    // for this turn — distinct from the on-demand catalogue surface
+    // where the model decides whether to `read()` a skill.
+    //
+    // Security/scope rule: honoured ids must satisfy
+    // {@link isUserInvokableSkill} — i.e. `user` / `merged`, OR a
+    // `system` skill that explicitly opts in via
+    // `userInvokable: true` in its frontmatter. Unknown or
+    // non-invokable ids are dropped silently (logged for
+    // diagnostics). This matches the same cut applied by the
+    // `/api/skills` listing route and prevents a stale or hand-rolled
+    // client from forcing a non-invokable skill body into the turn.
+    if (invokedSkills && invokedSkills.length > 0) {
+      const seen = new Set<string>();
+      const injected: { id: string; name: string; body: string }[] = [];
+      const dropped: {
+        id: string;
+        reason: 'unknown' | 'not-invokable';
+      }[] = [];
+      for (const rawId of invokedSkills) {
+        const id = rawId.trim();
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        const skill = getSkill(id);
+        if (!skill) {
+          dropped.push({ id, reason: 'unknown' });
+          continue;
+        }
+        if (!isUserInvokableSkill(skill)) {
+          dropped.push({ id, reason: 'not-invokable' });
+          continue;
+        }
+        injected.push({ id: skill.id, name: skill.name, body: skill.body });
+      }
+
+      if (dropped.length > 0) {
+        request.log.warn(
+          { dropped },
+          '[agent] invokedSkills: dropped ids (unknown or not user-invokable)',
+        );
+      }
+
+      if (injected.length > 0) {
+        const sections = injected
+          .map(
+            (s) =>
+              `<skill id="${s.id}" name="${s.name}">\n${s.body.trimEnd()}\n</skill>`,
+          )
+          .join('\n\n');
+        const quotedIds = injected.map((s) => `"${s.id}"`).join(', ');
+        const header =
+          injected.length === 1
+            ? `[SYSTEM Skill — the user explicitly invoked ${quotedIds}. Apply its guidance to this turn.]`
+            : `[SYSTEM Skills — the user explicitly invoked ${quotedIds}. Apply their guidance to this turn.]`;
+        context.messages.push({
+          role: 'user',
+          content: `${header}\n\n${sections}`,
           timestamp: Date.now(),
         });
       }

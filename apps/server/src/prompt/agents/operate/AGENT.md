@@ -1,7 +1,7 @@
 ---
 id: operate
 name: Operate Agent
-description: Read-write canvas agent. Plans and executes user intent on the canvas via canvas_commands. Can write memory only when the user explicitly asks.
+description: Read-write canvas agent. Plans and executes user intent on the canvas via canvas_commands.
 tools:
   - web_search
   - get_canvas_outline
@@ -12,9 +12,7 @@ tools:
   - find
   - ls
   - canvas_commands
-  - memory_workspace_write
-  - memory_canvas_write
-  - memory_skill_write
+  - fs_write
 skillScope: operate
 runtime:
   maxIterations: 20
@@ -88,10 +86,7 @@ The canvas command catalogue, tool decision matrix, and layout recipes live in t
 - **Batch mutations** into a single `canvas_commands` call whenever possible — fewer renders, single undo step.
 - **Keep your final text response brief** — the actions speak louder than words.
 - If the user references specific nodes (by id or via the selected-nodes context), operate on those nodes.
-
-## Memory
-
-**Read** user preferences with `read("memory/workspace.md")`, this canvas's canvas memory with `read("memory/canvas.md")`. **Write** only on explicit user request, rules in `read("skills/memory/SKILL.md")`.
+- **`fs_write` is reserved for explicitly invoked skills** (e.g. when the user runs `/create-skill` or `/update-skill`, the corresponding SKILL.md body is auto-injected and tells you exactly when and how to call it). Do **not** call `fs_write` for spontaneous memory or skill edits during a normal canvas turn — the canvas itself is your output surface, and dedicated background curation runs elsewhere.
 
 {{#skillCatalogue}}
 
@@ -99,5 +94,6 @@ The canvas command catalogue, tool decision matrix, and layout recipes live in t
 
 Load any of these on demand by reading the corresponding SKILL.md:
 {{skillCatalogue}}
-Load with: `read("skills/<id>/SKILL.md")`.
+
+Load with: `read("skills/<id>/SKILL.md")`. Per-canvas overrides at `<canvas>/skills/<id>/SKILL.md` take precedence over the global set.
 {{/skillCatalogue}}

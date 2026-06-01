@@ -1,36 +1,50 @@
-# Workspace memory — `memory_workspace_write`
+# Workspace memory
 
-**Target file:** `<workspace>/setting/.huabu.md` — cross-canvas user profile. Bullet-list prose. No frontmatter.
+Tool: `fs_write({ path: "memory/workspace.md", mode, ... })`
 
-## When to write
+Cross-canvas user profile. Bullet-list markdown, no frontmatter. Shared with the user — they may hand-edit it.
 
-A durable, cross-canvas user trait the next chat (any canvas) should know about:
+## Write what
+
+Durable traits the next chat on any canvas should know:
 
 - style / voice / language preferences
 - recurring topics, expertise, interests
-- workflow habits ("I iterate in versions, never delete the previous one")
+- workflow habits ("iterates in versions, never deletes prior drafts")
 
-**Not** for this-canvas situational notes — those go to canvas memory.
+Situational notes → canvas memory. Reusable how-tos → skill.
 
-## Required args
+## Modes
 
-| Field  | Type                     | Notes                                                                                                              |
-| ------ | ------------------------ | ------------------------------------------------------------------------------------------------------------------ |
-| `mode` | `"patch"` (literal only) | `"replace"` is rejected by the writer. Patching only.                                                              |
-| `diff` | `string`                 | Bullet-style content to merge in. One observation per line. Writer auto-prefixes `- ` and dedups trim-equal lines. |
+- `replace_string` — **default.** Add / fix / replace one bullet. Local change, can't accidentally clobber user edits.
+- `overwrite` — only when restructuring the whole file, or when the file does not yet exist.
 
-## Discipline
+## Rules
 
-- **Each bullet ≤ 80 chars.** Distil before submitting.
-- **Merged body capped at 4 KB / 80 lines.** Oversized merges are rejected; if you're close, trim or skip.
-- **Read `memory/workspace.md` first.** Don't restate what's already there.
-- **One coherent thought per bullet.** "prefers concise replies; also likes tables" → two bullets, not one.
+- **`read("memory/workspace.md")` first.** Avoid dupes; pick a unique `oldString`.
+- **Never delete user-authored bullets via `overwrite`.** If unsure, use `replace_string`.
+- One thought per bullet, ≤ 80 chars.
+- Merged body capped at 4 KB / 80 lines — oversized writes are rejected.
 
-## Example
+## Examples
+
+Add a bullet:
 
 ```json
 {
-  "mode": "patch",
-  "diff": "prefers concise replies\nworks primarily in Chinese\niterates story outlines in versions, never deletes prior versions"
+  "path": "memory/workspace.md",
+  "mode": "replace_string",
+  "oldString": "- prefers concise replies\n",
+  "newString": "- prefers concise replies\n- works primarily in Chinese\n"
+}
+```
+
+First write (file missing):
+
+```json
+{
+  "path": "memory/workspace.md",
+  "mode": "overwrite",
+  "body": "- prefers concise replies\n- works primarily in Chinese\n"
 }
 ```

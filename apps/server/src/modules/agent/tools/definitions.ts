@@ -474,108 +474,66 @@ export const lsTool: ToolDefinition = {
   parameters: lsParamsSchema,
 };
 
-// ==================== Memory Write Tools ====================
+// ==================== Filesystem Write ====================
 //
-// Three write tools, one per memory tier. Available to every chat
-// agent (ask / operate) plus the background memory curator. The
-// trigger policy — *when* each agent may call each tool — lives in
-// the respective AGENT.md, not here. These descriptions cover only
-// the mechanics: target file, merge strategy, caps, validation.
+// Single write entry point, symmetrical to `read`. The agent picks a
+// virtual `path` (same set `read` accepts) and a `mode` —
+// `overwrite` for wholesale file contents, `replace_string` for a
+// Claude-Code style unique-substring edit.
 //
-// Every write goes through the per-tool sandbox in
-// `modules/agent/memory/sandbox.ts`; the handlers are pure dispatch.
+// Path → tier routing, sandboxing, cap enforcement, workspace-mutex
+// serialisation, and skill-cache invalidation all live in the
+// handler / writers; this schema deliberately stays flat so the LLM
+// only ever sees the simple shape "give me a path + a mode + the
+// fields the mode needs".
 //
-// All three are marked `executionMode: 'sequential'` so a pass that
-// touches more than one tier logs in declared order.
+// Marked `executionMode: 'sequential'` so a batch of writes (e.g.
+// edit then overwrite the same file) applies in declared order.
 
-export const memoryWorkspaceWriteParamsSchema = Type.Object({
-  mode: Type.Union([Type.Literal('patch'), Type.Literal('replace')], {
+export const fsWriteParamsSchema = Type.Object({
+  path: Type.String({
     description:
-      'Use "patch" to merge new bullet-style lines into the existing body (dedup applies). "replace" is reserved and currently rejected.',
+      'Virtual file path. Supported targets: "memory/workspace.md" (cross-canvas profile), "memory/canvas.md" (this-canvas briefing), "skills/<id>/SKILL.md" (user skill). Mirrors the paths accepted by the `read` tool.',
   }),
-  diff: Type.String({
-    description:
-      'Bullet-style content to integrate. One observation per line; the writer auto-prefixes each with "- " and skips duplicates.',
-  }),
-});
-
-export const memoryWorkspaceWriteTool: ToolDefinition = {
-  name: 'memory_workspace_write',
-  label: 'Write workspace memory',
-  description:
-    'Patch `<workspace>/setting/.huabu.md` — cross-canvas user profile. Each line in `diff` becomes a bullet, deduped against existing entries. Caller-supplied bullets should be ≤ 80 chars. Writer enforces a 4 KB / 80-line cap on the merged body and rejects oversized writes. Required args + discipline: `read("skills/memory/write/workspace-memory-writing.md")`.',
-  parameters: memoryWorkspaceWriteParamsSchema,
-  executionMode: 'sequential',
-};
-
-export const memoryCanvasWriteParamsSchema = Type.Object({
-  body: Type.String({
-    description:
-      'Markdown body that wholesale replaces the current canvas memory. Treat as a one-paragraph briefing for the next agent landing on this canvas cold.',
-  }),
-});
-
-export const memoryCanvasWriteTool: ToolDefinition = {
-  name: 'memory_canvas_write',
-  label: 'Write canvas memory',
-  description:
-    'Replace `<canvasDir>/.memory/canvas.md` — per-canvas canvas memory. Wholesale replacement, not a delta: write the *current state* of the canvas in ≤ 4 KB / 80 lines. Writer rejects oversized bodies. Required args + discipline: `read("skills/memory/write/canvas-memory-writing.md")`.',
-  parameters: memoryCanvasWriteParamsSchema,
-  executionMode: 'sequential',
-};
-
-export const memorySkillWriteParamsSchema = Type.Object({
-  op: Type.Union([Type.Literal('create'), Type.Literal('update')], {
-    description:
-      '"create" writes a new skill file; "update" wholesale-replaces the body of an existing one (frontmatter preserved with caller overrides). To preserve prior body content on update, read the existing SKILL.md first and merge it into your submitted body.',
-  }),
-  id: Type.String({
-    description:
-      'Stable skill id (becomes the directory name). Lowercase letters / digits / hyphens recommended; writer enforces FS safety.',
-  }),
-  title: Type.Optional(
-    Type.String({
-      description: 'Human-readable label. Defaults to `id` on create.',
-    }),
+  mode: Type.Union(
+    [Type.Literal('overwrite'), Type.Literal('replace_string')],
+    {
+      description:
+        '"overwrite" writes `body` as the entire file contents (creates the file if missing). "replace_string" finds `oldString` (must occur exactly once) and replaces it with `newString` — the file must already exist.',
+    },
   ),
-  description: Type.Optional(
+  body: Type.Optional(
     Type.String({
       description:
-        'Short catalogue blurb (one sentence). Required on create. On update, optional — when provided, overrides the existing description.',
+        'Required when mode="overwrite". Wholesale file contents; a trailing newline is added if absent. For "memory/workspace.md" and "memory/canvas.md" the body is capped at 4 KB / 80 lines; skills are uncapped.',
     }),
   ),
-  appliesTo: Type.Optional(
-    Type.Array(
-      Type.Union([
-        Type.Literal('ask'),
-        Type.Literal('operate'),
-        Type.Literal('sketch'),
-        Type.Literal('external'),
-      ]),
-      {
-        description:
-          'Agent surfaces this skill should be advertised to. Required (non-empty) on create. On update, passing this REPLACES the existing array — omit to keep the current value.',
-      },
-    ),
+  oldString: Type.Optional(
+    Type.String({
+      description:
+        'Required when mode="replace_string". The exact substring to find — must appear in the file exactly once. Add more surrounding context if the snippet is ambiguous.',
+    }),
   ),
-  body: Type.String({
-    description:
-      'Markdown body. On create: full body of the new skill. On update: wholesale replacement of the existing body — caller is responsible for preserving any prior content they want to keep.',
-  }),
+  newString: Type.Optional(
+    Type.String({
+      description:
+        'Required when mode="replace_string". The substring to substitute in. Use "" to delete the matched range.',
+    }),
+  ),
   rationale: Type.Optional(
     Type.String({
       description:
-        'Required on create (≥ 20 chars): why no existing skill can be updated to cover this case. Ignored on update.',
+        'Required only when creating a new skill (mode="overwrite" on a "skills/<id>/SKILL.md" path that does not yet exist), ≥ 20 chars: explain why no existing skill could be updated instead. Ignored in every other case.',
     }),
   ),
 });
 
-export const memorySkillWriteTool: ToolDefinition = {
-  name: 'memory_skill_write',
-  label: 'Write user skill',
+export const fsWriteTool: ToolDefinition = {
+  name: 'fs_write',
+  label: 'Write file',
   description:
-    'Write a user-owned skill at `<workspace>/setting/skills/<id>/SKILL.md`. Writer invalidates the skill cache on success so the next `read("skills/<id>/SKILL.md")` returns the new content immediately. Required args + discipline (incl. `op:"create"` rationale rule): `read("skills/memory/write/skills-writing.md")`.',
-  parameters: memorySkillWriteParamsSchema,
+    'Write to a memory or skill file by virtual path. Two modes: "overwrite" (wholesale contents, creates the file if missing) and "replace_string" (Claude-Code style unique-substring edit). Supported paths: "memory/workspace.md", "memory/canvas.md", "skills/<id>/SKILL.md" — same set the `read` tool accepts. Skill creates require a `rationale`. Discipline + per-target guidance: `read("skills/memory/write/workspace-memory-writing.md" | "skills/memory/write/canvas-memory-writing.md" | "skills/memory/write/skills-writing.md")`.',
+  parameters: fsWriteParamsSchema,
   executionMode: 'sequential',
 };
 
@@ -603,9 +561,7 @@ export const TOOL_REGISTRY: Readonly<Record<string, ToolDefinition>> =
         grepTool,
         findTool,
         lsTool,
-        memoryWorkspaceWriteTool,
-        memoryCanvasWriteTool,
-        memorySkillWriteTool,
+        fsWriteTool,
       ].map((t) => [t.name, t] as const),
     ),
   );

@@ -6,6 +6,18 @@ import {
 } from 'lucide-react';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 
+import { SidebarPanel } from '../SidebarPanel';
+import { AcpSessionSelectors } from './AcpSessionSelectors';
+import { ChatInput } from './ChatInput';
+import { ModeSelector } from './ModeSelector';
+import { parseSlashInvocations } from './parseSlashInvocations';
+import { useSketchClusterMessages } from './useSketchClusterMessages';
+import { useAgentStream } from '../../../hooks/useAgentStream';
+import { useChatHistory } from '../../../hooks/useChatHistory';
+import { MessageList } from '../../Messages/MessageList';
+
+import type { AgentMode, IntentCandidate } from '@sediment/shared';
+
 import {
   setAcpSessionConfigOption,
   setAcpSessionMode,
@@ -16,21 +28,11 @@ import { toast } from '@/components/Common/Toast';
 import { useAcpAgents } from '@/hooks/useAcpAgents';
 import { useAcpSessionMeta } from '@/hooks/useAcpSessionMeta';
 import { useAcpSlashCommands } from '@/hooks/useAcpSlashCommands';
+import { useInternalSlashCommands } from '@/hooks/useInternalSlashCommands';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import { useIntentStore } from '@/store/intentStore';
 import { useLLMStore } from '@/store/llmStore';
-
-import { SidebarPanel } from '../SidebarPanel';
-import { AcpSessionSelectors } from './AcpSessionSelectors';
-import { ChatInput } from './ChatInput';
-import { ModeSelector } from './ModeSelector';
-import { useSketchClusterMessages } from './useSketchClusterMessages';
-import { useAgentStream } from '../../../hooks/useAgentStream';
-import { useChatHistory } from '../../../hooks/useChatHistory';
-import { MessageList } from '../../Messages/MessageList';
-
-import type { AgentMode, IntentCandidate } from '@sediment/shared';
 
 interface ChatPanelProps {
   isCollapsed?: boolean;
@@ -85,19 +87,56 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     agentBinding.kind === 'external' &&
     connectedAgents.some((a) => a.agentId === agentBinding.agentletAgentId);
 
-  // Slash commands for the currently-bound external agent. Empty array
-  // when the thread is internal or the agent has nothing to offer.
-  // `refreshIfStale` is plumbed into ChatInput so the typeahead can
-  // lazily resync the list on the rising edge of "user wants the
-  // slash menu" — covers the case where the agent pushes new
-  // commands mid-session (e.g. after auth completes).
-  const { commands: slashCommands, refreshIfStale: refreshSlashCommands } =
-    useAcpSlashCommands({
-      threadId,
-      binding: agentBinding,
-      canvasId,
-      enabled: acpExternalReachable,
-    });
+  // Slash commands have two independent sources depending on the
+  // thread binding:
+  //
+  //   • external → the bound ACP agent's `available_commands_update`
+  //     push (via `useAcpSlashCommands`).
+  //   • internal + operate mode → the workspace's user-authored skill
+  //     catalogue (via `useInternalSlashCommands`), filtered to
+  //     `user` / `merged` skills only. System skills stay in the
+  //     agent's catalogue but are not user-invokable here — see
+  //     `apps/server/src/modules/agent/skills.route.ts` for the
+  //     server-side rationale.
+  //
+  // **Why operate-only for internal?** Ask mode is a Q&A surface
+  // where skill invocation is semantically out of place — the user
+  // is asking a question, not commissioning an action. Restricting
+  // `/` to operate mode keeps the menu out of the ask experience
+  // entirely (no popover, no parser pass on submit) so a leading
+  // `/foo` in a question prompt is never silently reinterpreted.
+  //
+  // Each hook is also gated on its binding being active so we never
+  // fire a doomed request (ACP unreachable, internal binding
+  // switching to external mid-render, etc.). The selected
+  // `{commands, refreshSlashCommands}` pair is the one ChatInput
+  // consumes — the typeahead component itself is binding-agnostic.
+  const acpSlash = useAcpSlashCommands({
+    threadId,
+    binding: agentBinding,
+    canvasId,
+    enabled: acpExternalReachable,
+  });
+  const internalSlash = useInternalSlashCommands({
+    binding: agentBinding,
+    scope: mode,
+    enabled: agentBinding.kind === 'internal' && mode === 'operate',
+  });
+  const slashCommands = acpExternalReachable
+    ? acpSlash.commands
+    : internalSlash.commands;
+  const refreshSlashCommands = acpExternalReachable
+    ? acpSlash.refreshIfStale
+    : internalSlash.refreshIfStale;
+
+  // Stable Set of currently-known slash ids — used by the submit
+  // parser to decide which leading `/<id>` tokens count as skill
+  // invocations vs. literal message text. Recomputed only when the
+  // active source's commands list changes.
+  const knownSlashIds = useMemo(
+    () => new Set(slashCommands.map((c) => c.name)),
+    [slashCommands],
+  );
 
   // ACP session-meta (mode / model / config options / info / usage).
   // Drives the dropdown trio in ChatInput's toolbar. Empty when the
@@ -291,9 +330,44 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
 
   const handleSubmit = async (e: React.FormEvent, agentMode: AgentMode) => {
     e.preventDefault();
-    const prompt = input.trim();
+    // Strip leading `/<id>` tokens that match a known slash command
+    // and forward them as `invokedSkills`. Skill invocation is gated
+    // to **internal + operate mode** only:
+    //
+    //  - External (ACP) bindings: skip parsing entirely. ACP agents
+    //    handle their own slash dispatch inside the prompt body, so
+    //    re-splitting here would double-strip the leading token.
+    //  - Internal + ask mode: skip parsing too. Ask is a Q&A surface
+    //    where a leading `/foo` is just literal text (e.g. a path or
+    //    a typo); the menu is suppressed upstream and submit must
+    //    mirror that or the two halves of the UX would disagree.
+    //  - Internal + operate mode: parse, dedup, forward.
+    //
+    // Unknown `/foo` tokens in operate mode pass through as literal
+    // message text — matches the typeahead UX (no menu hit → no
+    // recognition).
+    const raw = input;
     setInput('');
-    await startStream(prompt, agentMode);
+    const isSkillInvocationAllowed =
+      agentBinding.kind === 'internal' && agentMode === 'operate';
+    if (!isSkillInvocationAllowed) {
+      const prompt = raw.trim();
+      if (!prompt) return;
+      await startStream(prompt, agentMode);
+      return;
+    }
+    const { invokedSkills, message } = parseSlashInvocations(
+      raw,
+      knownSlashIds,
+    );
+    const prompt = message.trim();
+    if (!prompt) return;
+    await startStream(
+      prompt,
+      agentMode,
+      undefined,
+      invokedSkills.length > 0 ? invokedSkills : undefined,
+    );
   };
 
   const handleNewChat = () => {

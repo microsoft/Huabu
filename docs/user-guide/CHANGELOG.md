@@ -4,6 +4,67 @@
 
 ---
 
+## 2026-06-01 · 内置 `/create-skill` 与 `/update-skill` 两个 slash skill
+
+**What Changed**
+
+- 新增两个系统内置 slash skill，**仅 operate (Agent) 模式可用**：
+  - **`/create-skill <描述>`** — 按描述新建一个 user skill。Agent 自动取 id（kebab-case）、组合 frontmatter、写 body，最后调用 `fs_write({ path: "skills/<id>/SKILL.md", mode: "overwrite", rationale, body })`。整个过程无需用户确认细节，按描述生成即可。
+  - **`/update-skill <目标 + 改动>`** — 按目标提示从 catalogue 里定位 user/merged skill，`read()` 现有内容后用 `fs_write({ mode: "replace_string" })` 做局部编辑，或在结构性重写时用 `mode: "overwrite"`。
+- 两个 skill 都遵循前一次提交的 `/` 调用语义：选中后 server 把 SKILL.md body 强制注入到本轮 system preamble，agent 按 body 里的步骤执行。
+- 写入完全复用 `fs_write` 工具，不新增任何 handler。Operate agent 的工具列表里新增了 `fs_write` 入口，并在 AGENT.md 系统提示里明确写出"仅在被显式 `/`-invoked skill 引用时才允许调用"。
+
+**Notes**
+
+- **新增一个 frontmatter 字段 `userInvokable: true`**：用来让"看起来像系统能力但又应该出现在 `/` 菜单里"的系统 skill 通过过滤器。默认为 `false`，所以原有 `canvas` / `sketch-gestures` 等 system skill **行为不变**，仍只出现在 agent 自己的 `{{skillCatalogue}}` 里。
+- **菜单过滤规则更新**：`user` / `merged` 永远进菜单；`system` 只有在 `userInvokable: true` 时才进。server 端 `agent.route.ts` 的 invokedSkills 白名单走的是**同一条** `isUserInvokableSkill` 谓词，stale client 不能绕。
+- **不要扩散 `fs_write` 到 operate 的普通 turn**：operate 的 AGENT.md 已经写明此约束。如果未来发现 agent 在普通画布操作里乱写 skill / memory，应在 AGENT.md 里加更强的措辞，而不是把 `fs_write` 拆出来。
+- 文件位置：`apps/server/src/prompt/skills/create-skill/SKILL.md` 和 `apps/server/src/prompt/skills/update-skill/SKILL.md`（loader 只识别一层目录，所以平铺而非 `slash-skill/` 子目录；slash 性质由 `userInvokable: true` 表达，比物理目录更稳）。
+
+---
+
+## 2026-06-01 · 聊天面板新增 `/` 手动调用 skill 能力
+
+**What Changed**
+
+- 聊天输入框现在支持用 `/<skill-id>` 显式调用 user-authored skill（位于工作区的 `setting/skills/<id>/SKILL.md`）。键入 `/` 会弹出 typeahead 菜单列出所有可用 user skill，与外部 ACP agent 的 slash 命令共用同一套 UI（按 thread binding 自动切换数据源）。
+- **仅在 operate (Agent) 模式下生效**：ask (Chat) 模式属于 Q&A 语义，键入 `/` **不会**弹菜单，开头的 `/foo` 也会被原样作为消息文本发送，不触发 skill 注入。
+- 选中后送出消息时，server 会自动把对应 skill 的完整 markdown body 作为 `[SYSTEM Skill]` 前置消息注入到本轮上下文，相当于强制 agent 应用该技能——和原本"agent 自行决定是否 `read()`"的按需加载模式区分开。
+- 一条消息最多可以连写多个 `/<id>` 前缀，例如 `/canvas-memory /workspace-memory 帮我整理一下`，所有 id 会按出现顺序去重后一次性注入（server 端硬上限 8 个）。
+- 新增 `GET /api/skills?scope=ask|operate|sketch|external` 路由，返回当前 workspace 下可被用户调用的 skill 元数据；菜单按当前 mode 过滤。
+
+**Notes**
+
+- **菜单只列 user / merged skill，不列 system-only skill**：
+  - `user` = 用户在 `setting/skills/` 下亲手或通过 memory agent 写的 skill；
+  - `merged` = system 提供了同名基线、user 在 workspace 里写了 override / 扩展；
+  - `system` = 框架自带 skill（如 `canvas` / `sketch-gestures`），仍保留在 agent 的 `{{skillCatalogue}}` 让模型自主选用，但不进 `/` 菜单（避免菜单被一堆用户不知情的 skill 灌满）。
+- **server 端再做一次白名单校验**：客户端被改 / 旧版本 / 第三方直接 POST 都没法绕过菜单硬塞 system skill id；非 user/merged id 会被静默丢弃，server 日志会有一条 warn。
+- **未知 id 处理**：operate 模式下，消息开头 `/foo` 若不在已知 skill 列表里（typeahead 也没匹配），会被当成普通文本送出去，不会触发 skill 注入。
+- **mid-sentence `/` 不会被误识别**：解析器只看消息开头的连续 `/<id>` token，例如 `check src/main.ts and /canvas-memory` 不会被当成调用 `canvas-memory`。
+- **外部 ACP agent thread 不变**：绑定到 Copilot / Claude Code / Gemini 这类外部 agent 时，`/` 菜单仍然来自 agent 自己推送的 `available_commands_update`，server 不会做 skill 注入；同名 token 由 agent 自己解释；与 ask/operate 模式区分无关。
+
+---
+
+## 2026-06-01 · 三个 memory 写工具收敛为统一的 `fs_write`
+
+**What Changed**
+
+- `memory_workspace_write` / `memory_canvas_write` / `memory_skill_write` 三个工具被合并为一个 `fs_write({ path, mode, ... })`。Agent 通过虚拟 `path` 选目标（`memory/workspace.md` / `memory/canvas.md` / `skills/<id>/SKILL.md`，与 `read` 工具接受的虚拟路径对称），通过 `mode` 选写法：
+  - `mode: "overwrite"` — `body` 整体覆盖；文件不存在时即创建。
+  - `mode: "replace_string"` — 找到唯一出现的 `oldString`，替换为 `newString`；文件必须存在；匹配 0 或 ≥2 次都 reject。
+- Workspace memory 不再走 writer 层的 bullet-merge / dedup，agent 直接管理文档（先 `read` 再 `replace_string` 或 `overwrite`）。"只增不删"由 prompt 纪律保证。
+- Skill 文件的 frontmatter 不再由 writer 渲染，`body` 必须由 agent 提交完整文件内容（含 `---\n...\n---` 前导 fence）。
+- 创建新 skill（`mode: "overwrite"` 在不存在的 `skills/<id>/SKILL.md` 路径上）仍硬性要求 `rationale` ≥ 20 字符；其它情况 `rationale` 被忽略。
+
+**Notes**
+
+- **内部工具调整，普通用户无感知**：所有写入的目标文件、磁盘布局、cap（workspace + canvas 仍是 4 KB / 80 行；skill 仍无 cap）、并发锁、skill 缓存失效行为都保持不变。
+- **自定义 agent 配置需要更新**：若你在自定义 prompt / AGENT.md 里引用了旧工具名（`memory_workspace_write` 等），请替换为 `fs_write`，并按新参数形态调整 schema。所有内置 prompt 已同步。
+- **行级编辑能力顺带获得**：`mode: "replace_string"` 在三类 memory 文件上都可用，特别适合对长 skill 文件做局部修订，不再需要 LLM 整段重抄。
+
+---
+
 ## 2026-05-31 · ACP 外部 agent 现在能在聊天面板里切模式 / 模型 / 配置项
 
 **What Changed**

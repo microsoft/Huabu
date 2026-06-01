@@ -1,44 +1,38 @@
 /**
- * Memory writers — real file I/O (PR-D).
+ * Memory writers — minimal disk primitives.
  *
- * Each writer is the single point where one memory file gets mutated.
- * They all:
+ * Two operations, one shape:
  *
- *   1. Resolve the target path through the sandbox
- *      ({@link ./sandbox.ts}). Path traversal / invalid id rejection
- *      surfaces as `ok:false` with the sandbox error message.
- *   2. Enforce the size cap (4 KB / 80 lines) for the prose memories.
- *      Oversize input is rejected — the sub-agent's prompt instructs
- *      it to stay terse; an LLM-driven re-summarisation loop is a
- *      follow-up.
- *   3. Read existing content (when relevant), merge, and atomically
- *      write the result.
- *   4. For skills, call {@link invalidateUserSkill} so the next agent
- *      `read("skills/<id>/SKILL.md")` sees the new content without
- *      waiting on the 2-second TTL.
+ *   - {@link overwriteMemoryFile}        — write the supplied body verbatim,
+ *                                          creating the file if needed.
+ *   - {@link replaceStringInMemoryFile}  — substitute a single
+ *                                          unique substring (Claude
+ *                                          Code style edit).
  *
- * Failures never throw past the sandbox boundary — every writer
- * returns a structured {@link WriteResult} so the sub-agent (and the
- * worker's summary log) can reason about partial success.
+ * Both take an already-sandbox-resolved absolute path; callers
+ * (currently `tools/handlers/fs-write.ts`) own the path → tier
+ * mapping. The `tier` knob here is purely for behaviour that varies
+ * by destination:
+ *
+ *   - cap enforcement (workspace + canvas only — skill bodies are
+ *     allowed to grow larger)
+ *   - write serialisation (workspace memory is one shared file,
+ *     touched by every canvas + chat agent, so we funnel through a
+ *     keyed mutex)
+ *   - post-write cache invalidation (user skill loader caches
+ *     SKILL.md by id and needs to drop the entry after a write)
+ *
+ * Failures never throw past this boundary — each writer returns a
+ * structured {@link WriteResult} so the sub-agent (and the worker's
+ * summary log) can reason about partial success.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
 
-import {
-  MemorySandboxError,
-  resolveLongTermPath,
-  resolveUserSkillPath,
-  resolveWorkingMemoryPath,
-} from './sandbox.js';
+import { MemorySandboxError } from './sandbox.js';
 import { invalidateUserSkill } from '../../../prompt/index.js';
 import { createKeyedMutex } from '../../../utils/keyed-mutex.js';
-import { parseFrontmatter } from '../../storage/frontmatter.js';
 import { atomicWriteText, mkdirp } from '../../storage/io.js';
-import {
-  settingDir,
-  userSkillsDir,
-  canvasMemoryDir,
-} from '../../storage/paths.js';
 
 import type { MemoryLogger } from './index.js';
 
@@ -47,10 +41,8 @@ import type { MemoryLogger } from './index.js';
 // The workspace memory file is a single document shared by curators
 // from every canvas AND by the ask / operate chat agents. Without a
 // lock, two concurrent read-modify-write cycles can silently drop
-// each other's additions. We funnel every workspace-memory write
-// through this mutex.
-//
-// One slot is enough — there is exactly one workspace memory file.
+// each other's edits. We funnel every workspace-memory write through
+// this mutex. One slot is enough — there is exactly one file.
 const workspaceMemoryLock = createKeyedMutex<'workspace'>();
 
 export interface WriteResult {
@@ -61,382 +53,167 @@ export interface WriteResult {
   reason: string;
 }
 
-/** Body cap shared by workspace + canvas memory. */
+/**
+ * Memory destination. Drives cap enforcement, locking, and post-write
+ * cache invalidation — paths themselves are resolved by the caller.
+ */
+export type MemoryTier = 'workspace' | 'canvas' | 'skill';
+
+/** Body cap for `'workspace'` + `'canvas'` tiers; skills are uncapped. */
 export const MEMORY_BYTE_CAP = 4 * 1024;
 export const MEMORY_LINE_CAP = 80;
 
-/** Minimum rationale length for `writeSkill({ op: 'create' })`. */
+/** Minimum rationale length when creating a new user skill. */
 export const SKILL_CREATE_RATIONALE_MIN = 20;
 
-// ─── Long-term memory ──────────────────────────────────────────────────────
-
-/**
- * Apply a patch to `<workspace>/setting/.huabu.md`.
- *
- * Two modes:
- *   - `'patch'`   merges new bullet-style lines into the existing body
- *                 with simple dedup (`trim()` equality). Existing
- *                 user-edited prose is preserved verbatim — patches
- *                 only *add* lines.
- *   - `'replace'` overwrites the body wholesale. Reserved for an
- *                 eventual LLM-driven consolidate path; rejected in
- *                 this phase so the sub-agent cannot accidentally
- *                 nuke user-edited content.
- *
- * The `diff` parameter is the *new* content to integrate: in `patch`
- * mode each non-empty trimmed line is treated as an additional bullet
- * (the leading `+`/`-`/`*` is stripped if present, then re-prefixed
- * with `- `). Cap check runs against the merged body.
- *
- * Serialized through {@link workspaceMemoryLock} — concurrent writers
- * from different canvases / chat agents are queued so a
- * read-modify-write cycle cannot lose another writer's additions.
- */
-export async function writeWorkspaceMemory(args: {
-  mode: 'patch' | 'replace';
-  diff: string;
+interface CommonArgs {
+  tier: MemoryTier;
+  /** Absolute path, already sandbox-validated by the caller. */
+  absPath: string;
+  /** Directory to `mkdirp` before writing. */
+  parentDir: string;
+  /**
+   * Required when `tier === 'skill'` — used to invalidate the user
+   * skill loader cache after a successful write. Ignored otherwise.
+   */
+  skillId?: string;
   logger?: MemoryLogger;
-}): Promise<WriteResult> {
-  return workspaceMemoryLock('workspace', () => {
-    let target = '<unresolved>';
-    try {
-      target = resolveLongTermPath();
-      if (args.mode !== 'patch') {
-        return reject(
-          target,
-          `workspace-memory writer only accepts mode="patch" in this phase`,
-        );
-      }
-
-      const existing = readOrEmpty(target);
-      const merged = mergeBullets(existing, args.diff);
-      const capCheck = checkCap(merged);
-      if (!capCheck.ok) return reject(target, capCheck.reason);
-
-      mkdirp(settingDir());
-      atomicWriteText(target, merged);
-      args.logger?.info(
-        `[memory] workspace memory updated (${merged.length} bytes, ${merged.split('\n').length} lines)`,
-      );
-      return { ok: true, target, reason: 'patched' };
-    } catch (err) {
-      return rejectFromError(err, target);
-    }
-  });
 }
 
-/**
- * Merge a patch into an existing workspace memory body.
- *
- * Each non-empty line in `patch` becomes a bullet appended to the
- * existing body — unless an identical-trimmed-content bullet is
- * already present, in which case it is skipped. The function is
- * intentionally simple: no LLM, no fuzzy match. The agent is
- * responsible for emitting clean atomic bullets.
- */
-function mergeBullets(existing: string, patch: string): string {
-  const existingLines = existing.split('\n');
-  const seen = new Set<string>();
-  for (const line of existingLines) {
-    const trimmed = stripBulletPrefix(line.trim());
-    if (trimmed.length > 0) seen.add(trimmed);
-  }
-  const additions: string[] = [];
-  for (const raw of patch.split('\n')) {
-    const stripped = stripBulletPrefix(raw.trim());
-    if (stripped.length === 0) continue;
-    if (seen.has(stripped)) continue;
-    seen.add(stripped);
-    additions.push(`- ${stripped}`);
-  }
-  if (additions.length === 0) {
-    // Patch was fully redundant. Return the existing body verbatim,
-    // ending with one newline. Re-writing the same content is
-    // harmless (mtimeMs bumps; loader cache picks it up next scan).
-    return existing.endsWith('\n') || existing.length === 0
-      ? existing
-      : `${existing}\n`;
-  }
-  const base = existing.trimEnd();
-  if (base.length === 0) return `${additions.join('\n')}\n`;
-  return `${base}\n${additions.join('\n')}\n`;
-}
+// ─── overwrite ─────────────────────────────────────────────────────────────
 
-function stripBulletPrefix(line: string): string {
-  // Tolerate Markdown bullets (-, *, +) and unified-diff prefixes (+/-).
-  return line.replace(/^[-+*]\s*/, '');
-}
-
-// ─── Working memory ────────────────────────────────────────────────────────
-
-/**
- * Replace `<canvasDir>/.memory/canvas.md` with the supplied body.
- *
- * Wholesale replacement is intentional: canvas memory is the
- * agent's "current state" briefing for the canvas, not a journal.
- * Cap check applies to the body.
- */
-export function writeCanvasMemory(args: {
-  canvasId: string;
+export interface OverwriteArgs extends CommonArgs {
+  /** Wholesale file contents. A trailing newline is added if absent. */
   body: string;
-  logger?: MemoryLogger;
-}): WriteResult {
-  let target = '<unresolved>';
+}
+
+/**
+ * Write `body` to `absPath`, creating the file (and `parentDir`) if
+ * needed. Cap-enforced for workspace + canvas; skill writes are
+ * uncapped. Workspace writes are serialised through the shared
+ * workspace mutex.
+ */
+export async function overwriteMemoryFile(
+  args: OverwriteArgs,
+): Promise<WriteResult> {
+  return runForTier(args.tier, () => doOverwrite(args));
+}
+
+function doOverwrite(args: OverwriteArgs): WriteResult {
   try {
-    target = resolveWorkingMemoryPath(args.canvasId);
     const body = ensureTrailingNewline(args.body);
-    const capCheck = checkCap(body);
-    if (!capCheck.ok) return reject(target, capCheck.reason);
-
-    mkdirp(canvasMemoryDir(args.canvasId));
-    atomicWriteText(target, body);
+    if (args.tier !== 'skill') {
+      const capCheck = checkCap(body);
+      if (!capCheck.ok) return reject(args.absPath, capCheck.reason);
+    }
+    mkdirp(args.parentDir);
+    atomicWriteText(args.absPath, body);
+    if (args.tier === 'skill' && args.skillId) {
+      invalidateUserSkill(args.skillId);
+    }
     args.logger?.info(
-      `[memory] canvas memory replaced for canvas ${args.canvasId} (${body.length} bytes)`,
+      `[memory] ${args.tier} overwritten at ${args.absPath} (${body.length} bytes)`,
     );
-    return { ok: true, target, reason: 'replaced' };
+    return { ok: true, target: args.absPath, reason: 'overwritten' };
   } catch (err) {
-    return rejectFromError(err, target);
+    return rejectFromError(err, args.absPath);
   }
 }
 
-// ─── Skills ────────────────────────────────────────────────────────────────
+// ─── replace_string ────────────────────────────────────────────────────────
 
-export interface SkillWriteArgs {
-  op: 'create' | 'update';
-  id: string;
-  /** Display label for new skills; ignored on update (existing kept). */
-  title?: string;
-  description?: string;
-  appliesTo?: string[];
-  /** Markdown body. On create: full body. On update: wholesale replacement of the existing body. */
-  body: string;
-  /** Required when `op === 'create'`; ignored on update. */
-  rationale?: string;
-  logger?: MemoryLogger;
+export interface ReplaceStringArgs extends CommonArgs {
+  /** Substring to find; must appear in the file exactly once. */
+  oldString: string;
+  /** Replacement substring. */
+  newString: string;
 }
 
 /**
- * Write a user skill.
+ * Replace exactly one occurrence of `oldString` with `newString` in
+ * the file at `absPath`. Rejects on missing file, zero or multiple
+ * matches, or post-edit cap overflow (for workspace + canvas).
  *
- * `op === 'create'`:
- *   - Rejects when the skill id already exists user-side (the agent
- *     must use `op === 'update'` instead — this is what the
- *     "be precious with new skills" rule in the AGENT.md enforces).
- *   - Requires a `rationale` (≥ {@link SKILL_CREATE_RATIONALE_MIN} chars)
- *     so the LLM has to justify why no existing skill can be updated.
- *   - Requires `description` and `appliesTo` (at least one scope).
- *     `title` defaults to the id if omitted.
- *
- * `op === 'update'`:
- *   - Requires the skill to already exist.
- *   - Preserves the existing frontmatter (with user-supplied
- *     overrides) and **wholesale-replaces the body** with `args.body`.
- *     If prior content should be preserved or refined, the caller is
- *     expected to read the existing SKILL.md first and merge in the
- *     submitted body — the writer does not auto-append.
- *
- * On success, calls {@link invalidateUserSkill} so the next
- * `read("skills/<id>/SKILL.md")` returns the new content without
- * waiting on the cache TTL.
+ * The "exactly once" rule is the safety contract: ambiguity is the
+ * agent's problem to disambiguate by adding more context, not the
+ * writer's to guess.
  */
-export function writeSkill(args: SkillWriteArgs): WriteResult {
-  let target = '<unresolved>';
+export async function replaceStringInMemoryFile(
+  args: ReplaceStringArgs,
+): Promise<WriteResult> {
+  return runForTier(args.tier, () => doReplaceString(args));
+}
+
+function doReplaceString(args: ReplaceStringArgs): WriteResult {
   try {
-    target = resolveUserSkillPath(args.id);
-    const exists = existsSync(target);
-
-    if (args.op === 'create') {
-      if (exists) {
-        return reject(
-          target,
-          `skill "${args.id}" already exists user-side; use op="update" instead`,
-        );
-      }
-      const r = args.rationale?.trim() ?? '';
-      if (r.length < SKILL_CREATE_RATIONALE_MIN) {
-        return reject(
-          target,
-          `skill create rejected: provide a rationale (>= ${SKILL_CREATE_RATIONALE_MIN} chars) explaining why an existing skill cannot be updated`,
-        );
-      }
-      if (!args.description || args.description.trim().length === 0) {
-        return reject(target, 'skill create requires a non-empty description');
-      }
-      const scopes = sanitiseAppliesTo(args.appliesTo);
-      if (scopes.length === 0) {
-        return reject(
-          target,
-          'skill create requires appliesTo with at least one scope (ask|operate|sketch|external)',
-        );
-      }
-
-      const md = renderSkillMarkdown({
-        id: args.id,
-        title: (args.title ?? args.id).trim(),
-        description: args.description.trim(),
-        appliesTo: scopes,
-        body: ensureTrailingNewline(stripLeadingFrontmatter(args.body)),
-      });
-      mkdirp(userSkillsDir());
-      atomicWriteText(target, md);
-      invalidateUserSkill(args.id);
-      args.logger?.info(
-        `[memory] skill "${args.id}" created (${md.length} bytes)`,
-      );
-      return { ok: true, target, reason: 'created' };
+    if (typeof args.oldString !== 'string' || args.oldString.length === 0) {
+      return reject(args.absPath, 'oldString is required and non-empty');
     }
-
-    // op === 'update'
-    if (!exists) {
+    if (typeof args.newString !== 'string') {
+      return reject(args.absPath, 'newString is required (use "" to delete)');
+    }
+    if (args.oldString === args.newString) {
+      return reject(args.absPath, 'oldString and newString are identical');
+    }
+    if (!existsSync(args.absPath)) {
       return reject(
-        target,
-        `skill "${args.id}" does not exist user-side; use op="create" instead`,
+        args.absPath,
+        `file does not exist — use mode="overwrite" to create it`,
       );
     }
-    const raw = readFileSync(target, 'utf8');
-    const { meta } = parseFrontmatter(raw);
-    if (!meta || Object.keys(meta).length === 0) {
+    const before = readFileSync(args.absPath, 'utf8');
+    const idx = before.indexOf(args.oldString);
+    if (idx === -1) {
       return reject(
-        target,
-        `existing user skill "${args.id}" is missing frontmatter; refusing to update`,
+        args.absPath,
+        'oldString not found in file — no edit applied',
       );
     }
-    // Body is wholesale-replaced — the caller is expected to read the
-    // existing SKILL.md first if they need to preserve / refine prior
-    // content. This matches the canvas-memory contract and gives the
-    // agent freedom to restructure / shrink / rewrite the body.
-    //
-    // The agent typically copies the existing SKILL.md verbatim then
-    // edits it, which means `args.body` often starts with a `---`
-    // frontmatter fence. Strip it: we render frontmatter from `meta`
-    // (with caller overrides) ourselves, so a duplicate fence in the
-    // body would produce a file with TWO frontmatter blocks. The
-    // values the caller embedded in their leading fence are silently
-    // dropped because the canonical args-level fields (`description`,
-    // `appliesTo`, `title`) are the only supported override channel.
-    const updatedBody = ensureTrailingNewline(
-      stripLeadingFrontmatter(args.body),
+    if (before.indexOf(args.oldString, idx + 1) !== -1) {
+      return reject(
+        args.absPath,
+        'oldString matches multiple times — add more surrounding context to make it unique',
+      );
+    }
+    const after = ensureTrailingNewline(
+      before.slice(0, idx) +
+        args.newString +
+        before.slice(idx + args.oldString.length),
     );
-    const scopesArg = sanitiseAppliesTo(args.appliesTo);
-    const scopesExisting = sanitiseAppliesTo(
-      Array.isArray(meta.appliesTo) ? (meta.appliesTo as string[]) : undefined,
-    );
-    const fm = renderFrontmatter({
-      id: String(meta.id ?? args.id),
-      name: String(meta.name ?? args.title ?? args.id),
-      description: String(
-        args.description?.trim() || meta.description || args.id,
-      ),
-      appliesTo: scopesArg.length > 0 ? scopesArg : scopesExisting,
-      version: typeof meta.version === 'number' ? meta.version : undefined,
-    });
-    const merged = `${fm}\n\n${updatedBody}`;
-    atomicWriteText(target, merged);
-    invalidateUserSkill(args.id);
+    if (args.tier !== 'skill') {
+      const capCheck = checkCap(after);
+      if (!capCheck.ok) return reject(args.absPath, capCheck.reason);
+    }
+    mkdirp(args.parentDir);
+    atomicWriteText(args.absPath, after);
+    if (args.tier === 'skill' && args.skillId) {
+      invalidateUserSkill(args.skillId);
+    }
     args.logger?.info(
-      `[memory] skill "${args.id}" updated (${merged.length} bytes)`,
+      `[memory] ${args.tier} edited at ${args.absPath} (${after.length} bytes)`,
     );
-    return { ok: true, target, reason: 'updated' };
+    return { ok: true, target: args.absPath, reason: 'edited' };
   } catch (err) {
-    return rejectFromError(err, target);
+    return rejectFromError(err, args.absPath);
   }
-}
-
-/** Minimal YAML rendering for skill frontmatter. */
-function renderFrontmatter(meta: {
-  id: string;
-  name: string;
-  description: string;
-  appliesTo: string[];
-  version?: number;
-}): string {
-  const lines: string[] = ['---'];
-  lines.push(`id: ${meta.id}`);
-  lines.push(`name: ${yamlString(meta.name)}`);
-  lines.push(`description: ${yamlString(meta.description)}`);
-  lines.push(
-    `appliesTo: [${meta.appliesTo.map((s) => yamlString(s)).join(', ')}]`,
-  );
-  if (meta.version !== undefined) lines.push(`version: ${meta.version}`);
-  lines.push('---');
-  return lines.join('\n');
-}
-
-function renderSkillMarkdown(args: {
-  id: string;
-  title: string;
-  description: string;
-  appliesTo: string[];
-  body: string;
-}): string {
-  const fm = renderFrontmatter({
-    id: args.id,
-    name: args.title,
-    description: args.description,
-    appliesTo: args.appliesTo,
-  });
-  return `${fm}\n\n${args.body}`;
-}
-
-function yamlString(value: string): string {
-  return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
-}
-
-const VALID_SCOPE_SET: ReadonlySet<string> = new Set([
-  'ask',
-  'operate',
-  'sketch',
-  'external',
-]);
-
-function sanitiseAppliesTo(value: string[] | undefined): string[] {
-  if (!Array.isArray(value)) return [];
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const v of value) {
-    const s = String(v).trim();
-    if (!VALID_SCOPE_SET.has(s) || seen.has(s)) continue;
-    seen.add(s);
-    out.push(s);
-  }
-  return out;
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
-function readOrEmpty(file: string): string {
-  if (!existsSync(file)) return '';
-  try {
-    return readFileSync(file, 'utf8');
-  } catch {
-    return '';
+/**
+ * Serialise workspace-tier writes through the shared mutex; other
+ * tiers run inline. Returns a Promise either way so callers can
+ * `await` uniformly.
+ */
+function runForTier<T>(tier: MemoryTier, fn: () => T | Promise<T>): Promise<T> {
+  if (tier === 'workspace') {
+    return workspaceMemoryLock('workspace', fn);
   }
+  return Promise.resolve(fn());
 }
 
 function ensureTrailingNewline(s: string): string {
   return s.endsWith('\n') ? s : `${s}\n`;
-}
-
-/**
- * Strip a leading `---\n...\n---\n` YAML frontmatter fence if present.
- *
- * Defensive: agents that read an existing SKILL.md and re-submit it as
- * `args.body` (the workflow encouraged by `update`'s wholesale-replace
- * contract) tend to include the original frontmatter. Without this
- * strip, the writer's own `renderFrontmatter` output would stack on
- * top of the caller's fence and produce a file with two frontmatter
- * blocks — which the loader then refuses to parse correctly.
- *
- * The values the caller embedded in their leading fence are silently
- * dropped; the canonical args-level fields (`description`,
- * `appliesTo`, `title`) are the only supported override channel.
- */
-function stripLeadingFrontmatter(body: string): string {
-  if (!body.startsWith('---\n') && !body.startsWith('---\r\n')) return body;
-  const closeRe = /\n---[ \t]*(\r?\n|$)/;
-  const m = closeRe.exec(body);
-  if (!m) return body;
-  return body.slice(m.index + m[0].length);
 }
 
 function checkCap(s: string): { ok: true } | { ok: false; reason: string } {

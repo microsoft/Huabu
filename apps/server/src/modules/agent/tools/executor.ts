@@ -43,14 +43,7 @@ import {
   type GrepArgs,
   type LsArgs,
 } from './handlers/fs-search.js';
-import {
-  handleMemoryWorkspaceWrite,
-  handleMemoryCanvasWrite,
-  handleMemorySkillWrite,
-  type MemoryWorkspaceWriteArgs,
-  type MemoryCanvasWriteArgs,
-  type MemorySkillWriteArgs,
-} from './handlers/memory-write.js';
+import { handleFsWrite, type FsWriteArgs } from './handlers/fs-write.js';
 import { handleWebSearch, type WebSearchArgs } from './handlers/web-search.js';
 
 import type { NodeOrigin } from '@sediment/shared';
@@ -136,16 +129,15 @@ export async function executeTool(
         context?.origin,
       );
 
-    case 'memory_workspace_write':
-      return handleMemoryWorkspaceWrite(args as MemoryWorkspaceWriteArgs);
-
-    case 'memory_canvas_write':
-      return handleMemoryCanvasWrite(
-        withCanvasId<MemoryCanvasWriteArgs>(args, 'memory_canvas_write'),
-      );
-
-    case 'memory_skill_write':
-      return handleMemorySkillWrite(args as MemorySkillWriteArgs);
+    case 'fs_write':
+      // canvasId is conditionally needed (only for memory/canvas.md);
+      // the handler enforces that. Pass it through when present so the
+      // handler can resolve canvas-scoped paths, but do not require it
+      // here — workspace and skill writes have no canvas binding.
+      return handleFsWrite({
+        ...args,
+        canvasId: context?.canvasId,
+      } as FsWriteArgs);
 
     default:
       throw new Error(`Unknown tool: ${name}`);

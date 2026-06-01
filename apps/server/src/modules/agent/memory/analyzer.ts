@@ -1,6 +1,6 @@
 /**
  * Memory analyzer — assemble context, call the LLM sub-agent, dispatch
- * writes via the memory tools.
+ * writes via the memory tool.
  *
  * The worker calls {@link runAnalysisPass}. We:
  *
@@ -9,8 +9,8 @@
  *      chat-thread digest, recent ops, current contents of every
  *      memory surface (workspace, canvas, user-skill catalogue).
  *   3. Run the sub-agent against that context. The agent's only way
- *      to affect the world is via the three `memory_*_write` tools,
- *      whose handlers wrap the writers in `./writers.ts`.
+ *      to affect the world is via the `fs_write` tool, whose handler
+ *      routes by virtual path into the writers in `./writers.ts`.
  *   4. Aggregate the tool results into a single summary the worker
  *      can log.
  *
@@ -18,9 +18,8 @@
  *   - The bundle is intentionally lean: node bodies / tool result
  *     bodies are excluded.
  *   - The sub-agent is capped at `maxIterations=5` via AGENT.md.
- *   - All three writers run sequentially (`executionMode: 'sequential'`)
- *     because batched mutations on the same disk targets are easier
- *     to reason about when ordered.
+ *   - `fs_write` is marked `executionMode: 'sequential'` so batched
+ *     mutations on the same disk targets apply in declared order.
  */
 
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
@@ -89,8 +88,8 @@ export async function runAnalysisPass(
   // pi-agent-core stream emits a `tool_call` (with `internalToolName`)
   // when each tool starts and a `tool_call_update` (with `rawOutput`)
   // when it settles — there's no longer a dedicated `tool_result`
-  // frame. We keep a small map of toolCallId -> memory tool name so we
-  // only parse the updates that belong to one of our writers.
+  // frame. We keep a small map of toolCallId -> tool name so we only
+  // parse the updates that belong to our writer (`fs_write`).
   const stream = runAgent({
     scope: 'memory',
     canvasId,
@@ -98,18 +97,18 @@ export async function runAnalysisPass(
     logger: { info: (m) => logger?.info(m) },
     maxIterations: agent.runtime.maxIterations ?? 5,
   });
-  const memoryCalls = new Map<string, string>();
+  const writeCalls = new Map<string, string>();
   for await (const event of stream) {
     if (event.type === 'tool_call') {
       const { toolCallId, internalToolName } = event.data;
-      if (internalToolName && internalToolName.startsWith('memory_')) {
-        memoryCalls.set(toolCallId, internalToolName);
+      if (internalToolName === 'fs_write') {
+        writeCalls.set(toolCallId, internalToolName);
       }
       continue;
     }
     if (event.type !== 'tool_call_update') continue;
     const { toolCallId, rawOutput } = event.data;
-    if (!memoryCalls.has(toolCallId)) continue;
+    if (!writeCalls.has(toolCallId)) continue;
     if (typeof rawOutput !== 'string' || rawOutput.length === 0) continue;
     const parsed = parseWriteResult(rawOutput);
     if (parsed) writeResults.push(parsed);

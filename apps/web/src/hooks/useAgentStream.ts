@@ -11,11 +11,6 @@ import {
 } from '@sediment/shared';
 import { useState, useCallback, useRef, useEffect } from 'react';
 
-import { agentApi } from '@/api/agent';
-import { buildSketchAttachmentsFromSelection } from '@/handler/sketch/buildSketchAttachments';
-import useCanvasStore from '@/store/canvasStore';
-import { useChatStore } from '@/store/chatStore';
-
 import { snapshotAndExtractChanges } from './useCanvasChanges';
 
 import type { AssistantSegment, ResourceLabel } from '../store/chatTypes';
@@ -25,6 +20,11 @@ import type {
   ChatAttachment,
   IntentCandidate,
 } from '@sediment/shared';
+
+import { agentApi } from '@/api/agent';
+import { buildSketchAttachmentsFromSelection } from '@/handler/sketch/buildSketchAttachments';
+import useCanvasStore from '@/store/canvasStore';
+import { useChatStore } from '@/store/chatStore';
 
 // ==================== Pure Utility Functions ====================
 
@@ -853,6 +853,13 @@ export interface UseAgentStreamReturn {
       candidates: IntentCandidate[];
       selectedIntent: string;
     },
+    /**
+     * Optional skill ids the user explicitly invoked via leading
+     * `/<id>` tokens. Forwarded to the server, which prepends each
+     * skill body as a SYSTEM preamble for the turn. See
+     * `useInternalSlashCommands` / `parseSlashInvocations`.
+     */
+    invokedSkills?: string[],
   ) => Promise<void>;
   /** Stop the current stream. */
   stopStream: () => void;
@@ -910,6 +917,7 @@ export function useAgentStream(): UseAgentStreamReturn {
         candidates: IntentCandidate[];
         selectedIntent: string;
       },
+      invokedSkills?: string[],
     ) => {
       if (!prompt.trim() || isLoading) return;
 
@@ -1116,6 +1124,7 @@ export function useAgentStream(): UseAgentStreamReturn {
             intentData,
             agentBinding,
             anchorNodeId: questionNodeId ?? undefined,
+            invokedSkills,
             signal: abortController.signal,
           },
         );

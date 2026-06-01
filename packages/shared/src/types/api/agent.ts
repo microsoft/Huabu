@@ -243,6 +243,24 @@ export const agentRequestSchema = z.object({
    * the persistent ChatStore on the client is the source of truth.
    */
   agentBinding: agentBindingSchema.optional(),
+  /**
+   * User-invoked skill ids parsed from leading `/<id>` tokens in the
+   * chat input (see `useInternalSlashCommands` on the web side). The
+   * server fetches each skill's body and prepends a dedicated SYSTEM
+   * preamble for this turn, forcing the agent to apply the skill
+   * instead of relying on it to discover the skill via the catalogue.
+   *
+   * Mirrors Claude Code's "explicitly invoked skill" semantics: when
+   * the user types `/canvas-memory`, the corresponding SKILL.md body
+   * is guaranteed to be in context.
+   *
+   * Server-side rules:
+   *  - Only `user` / `merged` skills are honoured. Unknown or
+   *    system-only ids are dropped silently (with a log line) so a
+   *    stale client cannot smuggle system skills into the turn.
+   *  - Capped at 8 to keep the context budget sane.
+   */
+  invokedSkills: z.array(z.string().min(1)).max(8).optional(),
 });
 export type AgentRequest = z.infer<typeof agentRequestSchema>;
 

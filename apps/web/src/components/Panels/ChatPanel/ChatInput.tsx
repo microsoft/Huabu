@@ -1,10 +1,6 @@
 import { ArrowUp, Square, X } from 'lucide-react';
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 
-import { uploadImage, uploadPdf } from '@/api/artifact';
-import useCanvasStore from '@/store/canvasStore';
-import { useChatStore } from '@/store/chatStore';
-
 import { ContextUsageRing } from './ContextUsageRing';
 import { SourceCount } from './SelectedNodeRefs';
 import { SlashCommandMenu } from './SlashCommandMenu';
@@ -15,6 +11,10 @@ import { Tooltip } from '../../Common/Tooltip';
 
 import type { ContextUsageOverride } from './ContextUsageRing';
 import type { AgentMode, AvailableCommand } from '@sediment/shared';
+
+import { uploadImage, uploadPdf } from '@/api/artifact';
+import useCanvasStore from '@/store/canvasStore';
+import { useChatStore } from '@/store/chatStore';
 
 interface ChatInputProps {
   value: string;
@@ -201,9 +201,12 @@ export const ChatInput = ({
   // Auto-resize textarea.
   // Runs synchronously before paint to avoid the brief flash where the
   // textarea looks stretched by the parent flex container.
+  //
+  // Both `ask` and `operate` modes render the same `<textarea>` and
+  // both should grow as the user types — `mode` is still a dep so the
+  // effect re-runs on mode switch (e.g. to recompute against the
+  // mode-specific placeholder if it ever affects measured height).
   useLayoutEffect(() => {
-    if (mode === 'operate') return;
-
     const textarea = textareaRef.current;
     if (!textarea) return;
 
