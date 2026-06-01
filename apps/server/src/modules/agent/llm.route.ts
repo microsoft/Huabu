@@ -16,6 +16,7 @@ import {
   startDeviceCodeFlow,
   verifyOAuthCredentials,
 } from './oauth.js';
+import { isLoopbackRequest } from '../security/peer.js';
 
 import type {
   ApiResult,
@@ -32,13 +33,6 @@ import type {
 } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
-/**
- * Guard: only allow requests from localhost.
- */
-function isLocalhost(ip: string): boolean {
-  return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
-}
-
 const llmRoutes: FastifyPluginAsync = async (app) => {
   // GET /api/llm/config — return current provider/model config
   app.get<{ Reply: ApiResult<LLMConfig> }>('/config', async () => {
@@ -49,7 +43,7 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
   app.put<{ Body: LLMConfigUpdate; Reply: ApiResult<LLMConfig> }>(
     '/config',
     async (request, reply) => {
-      if (!isLocalhost(request.ip)) {
+      if (!isLoopbackRequest(request)) {
         return reply.status(403).send({
           message: 'Forbidden: LLM settings can only be changed from localhost',
         });
@@ -97,7 +91,7 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
   app.post<{ Reply: ApiResult<OAuthDeviceCodeResponse> }>(
     '/oauth/device-code',
     async (request, reply) => {
-      if (!isLocalhost(request.ip)) {
+      if (!isLoopbackRequest(request)) {
         return reply.status(403).send({ message: 'Forbidden' });
       }
 
@@ -116,7 +110,7 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
   app.post<{ Reply: ApiResult<OAuthPollResponse> }>(
     '/oauth/poll',
     async (request, reply) => {
-      if (!isLocalhost(request.ip)) {
+      if (!isLoopbackRequest(request)) {
         return reply.status(403).send({ message: 'Forbidden' });
       }
 
@@ -152,7 +146,7 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
   app.post<{ Reply: ApiResult<OAuthLogoutResponse> }>(
     '/oauth/logout',
     async (request, reply) => {
-      if (!isLocalhost(request.ip)) {
+      if (!isLoopbackRequest(request)) {
         return reply.status(403).send({ message: 'Forbidden' });
       }
 

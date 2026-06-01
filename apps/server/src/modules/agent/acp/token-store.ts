@@ -3,14 +3,10 @@
  *
  * In-memory map of accepted bridge tokens. Seeding is centralised in
  * `./config.ts` — at server boot (and on every Settings UI flip) the
- * config module calls {@link AcpTokenStore.put} / `.revoke` to reflect
+ * config module calls {@link AcpTokenStore.clear} / `.put` to reflect
  * the persisted `data/acp-config.json` state. The store stays empty
  * while the bridge is disabled, so every `bridge/hello` is rejected
  * without consulting any feature flag.
- *
- * Legacy `ACP_DEV_TOKEN` env support lives in `./config.ts` too — it
- * acts as a one-shot fallback the first time the server boots without
- * a JSON config file.
  *
  * A canvas-scoped store with a proper token lifecycle (issue / revoke
  * / expire) can replace this when needed.
@@ -37,6 +33,11 @@ class AcpTokenStore {
     this.tokens.delete(token);
   }
 
+  /** Remove every token. Used by config reconciliation. */
+  clear(): void {
+    this.tokens.clear();
+  }
+
   /**
    * Validate the token from a bridge/hello. Throws on rejection (rejection
    * surfaces as ACP error code -32001 INVALID_TOKEN to the agentlet client).
@@ -57,10 +58,10 @@ class AcpTokenStore {
 let _store: AcpTokenStore | null = null;
 
 /**
- * Get the process-wide token store. The store starts empty; the active
- * bridge token is installed by `./config.ts` after reading
- * `data/acp-config.json` (or the legacy `ACP_DEV_TOKEN` env fallback).
- * While no token is installed, every `bridge/hello` is rejected.
+ * Get the process-wide token store. Starts empty; the active bridge
+ * token is installed by `./config.ts` after reading
+ * `data/acp-config.json`. While no token is installed, every
+ * `bridge/hello` is rejected.
  */
 export function getTokenStore(): AcpTokenStore {
   if (!_store) _store = new AcpTokenStore();

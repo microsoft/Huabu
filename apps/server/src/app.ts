@@ -57,9 +57,10 @@ app.register(compress);
 
 // ── CORS ─────────────────────────────────────────────────────────────
 // Locked down to a static allowlist derived from `HUABU_ALLOWED_HOSTS`
-// plus the loopback defaults — see `modules/security`. The Origin guard
-// (see `origin-guard.ts`) enforces the same allowlist for non-safe
-// methods at the HTTP layer; this CORS config keeps the browser from
+// plus the loopback defaults — see `modules/security`. The cross-origin
+// write guard (see `origin-guard.ts`) enforces the same allowlist for
+// non-safe methods at the HTTP layer using `Sec-Fetch-Site` with an
+// `Origin`/loopback fallback; this CORS config keeps the browser from
 // even attempting cross-origin reads of sensitive GET endpoints. Any
 // scheme/port is accepted on an allowed hostname so
 // `http://localhost:5173` (Vite dev) and `https://sediment.example`

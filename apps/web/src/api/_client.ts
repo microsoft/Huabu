@@ -11,10 +11,12 @@
  * For non-JSON bodies (FormData, file uploads) pass `body: <FormData>`
  * directly — the helper sets the `Content-Type` header only for JSON.
  *
- * CSRF / cross-origin protection lives entirely on the server side via
- * an `Origin` header allowlist (see `modules/security/origin-guard.ts`)
- * — the browser attaches `Origin` automatically and JS cannot lie
- * about it, so the client needs zero extra plumbing here.
+ * CSRF / cross-origin protection lives entirely on the server side:
+ * it uses `Sec-Fetch-Site` (W3C Fetch Metadata) as the primary signal,
+ * with an `Origin` allowlist fallback (see
+ * `modules/security/origin-guard.ts`). Both headers are set by the
+ * browser and cannot be forged by JS, so the client needs zero extra
+ * plumbing here.
  */
 
 import { API_CONFIG } from '../config/api';

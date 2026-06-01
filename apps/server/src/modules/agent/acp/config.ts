@@ -2,17 +2,10 @@
  * ACP bridge configuration — `enabled` flag + shared bridge token.
  *
  * Persisted at `data/acp-config.json`. The Settings UI is the *sole*
- * source of truth: there is no `.env`-based override and no
- * environment-variable fallback. Fresh installs default to disabled;
- * the user flips the toggle in Settings → External Agents (ACP) once,
- * the token is auto-generated, and the bundled `bin/agentlet` wrapper
- * reads that token from the JSON file directly.
- *
- * Persistence model: read-through cache + atomic full-file write, same
- * pattern as `data/llm-config.json` (see {@link ../llm.ts}). The file is
- * `chmod 0600` on platforms that support it because it contains the
- * shared bridge secret. The cache is invalidated on every write so
- * subsequent reads in the same process always see the latest value.
+ * source of truth: no `.env` override, no env-var fallback. Fresh
+ * installs default to disabled; the user flips the toggle in
+ * Settings → External Agents (ACP) once, the token is auto-generated,
+ * and the bundled `bin/agentlet` wrapper reads it from the JSON file.
  *
  * Security: the WS endpoint `/api/acp/agent` is mounted unconditionally;
  * the security boundary is the in-memory token store, which stays empty
@@ -23,11 +16,14 @@
 
 import { randomBytes } from 'node:crypto';
 import {
-  chmodSync,
+  closeSync,
   existsSync,
   mkdirSync,
+  openSync,
   readFileSync,
-  writeFileSync,
+  renameSync,
+  unlinkSync,
+  writeSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 
@@ -64,8 +60,9 @@ let cached: ResolvedConfig | null = null;
  *      (`source: 'file'`).
  *   2. Otherwise → default disabled, empty token (`source: 'default'`).
  *
- * Subsequent calls return the cached value. Callers that need a fresh
- * read after an external write should call {@link _resetAcpConfigCache}.
+ * `enabled` is forced to `false` whenever `token` is empty so the API
+ * response cannot claim "enabled" while every `bridge/hello` would in
+ * fact be rejected.
  */
 export function loadAcpConfig(): AcpConfig {
   if (cached) return { ...cached };
@@ -75,19 +72,17 @@ export function loadAcpConfig(): AcpConfig {
     try {
       const raw = readFileSync(path, 'utf-8');
       const parsed = JSON.parse(raw) as Partial<PersistedConfig>;
-      // Defensive: coerce booleans/strings; ignore extra fields.
+      const token = typeof parsed.token === 'string' ? parsed.token : '';
       const cfg: ResolvedConfig = {
-        enabled: parsed.enabled === true,
-        token: typeof parsed.token === 'string' ? parsed.token : '',
+        enabled: parsed.enabled === true && token !== '',
+        token,
         source: 'file',
       };
       cached = cfg;
       return { ...cfg };
     } catch {
-      // Malformed JSON → fall through to default. We deliberately do
-      // not throw or log loudly: the file lives under the user's
-      // workspace and may be hand-edited; surfacing it as "disabled"
-      // matches the same failure mode as the file simply not existing.
+      // Malformed JSON → fall through to default. Same failure mode as
+      // the file simply not existing.
     }
   }
 
@@ -101,9 +96,33 @@ export function loadAcpConfig(): AcpConfig {
 }
 
 /**
- * Persist a new ACP config to disk and refresh the token store. Returns
- * the newly-effective config (with `source` always set to `'file'`,
- * since the write makes the file the authoritative source).
+ * Atomic write: create a sibling temp file with mode 0o600 from the
+ * start (no write-then-chmod window where the file is briefly 0644),
+ * then rename over the target. Failures clean up the temp file.
+ */
+function writeConfigFile(path: string, payload: PersistedConfig): void {
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
+  const fd = openSync(tmp, 'w', 0o600);
+  try {
+    writeSync(fd, JSON.stringify(payload, null, 2));
+  } finally {
+    closeSync(fd);
+  }
+  try {
+    renameSync(tmp, path);
+  } catch (err) {
+    try {
+      unlinkSync(tmp);
+    } catch {
+      /* ignore */
+    }
+    throw err;
+  }
+}
+
+/**
+ * Persist a new ACP config to disk and refresh the token store.
  *
  * Token rules:
  *   - Enabling for the first time → auto-generate a token if none
@@ -125,14 +144,7 @@ export function setAcpConfig(update: {
   }
   const next: PersistedConfig = { enabled: update.enabled, token };
 
-  const path = configFilePath();
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(next, null, 2), 'utf-8');
-  try {
-    chmodSync(path, 0o600);
-  } catch {
-    // Best-effort — Windows / network drives may not support it.
-  }
+  writeConfigFile(configFilePath(), next);
 
   cached = { ...next, source: 'file' };
   applyAcpConfig(cached);
@@ -140,35 +152,19 @@ export function setAcpConfig(update: {
 }
 
 /**
- * Reconcile the in-memory token store with the persisted config. Called
- * automatically on the first {@link loadAcpConfig} via the token store
- * and again after every {@link setAcpConfig}. Safe to call repeatedly.
+ * Reconcile the in-memory token store with the given config: clear all
+ * tokens, then install the active one if enabled. Idempotent and
+ * race-safe — concurrent callers all converge on the same final state.
  */
 export function applyAcpConfig(cfg: AcpConfig): void {
   const store = getTokenStore();
-  // Token store doesn't expose a "clear" — emulate by revoking the
-  // previous token if it differs from the new one (or if disabled).
-  // We hold the last-applied token in a module-level lastApplied to
-  // avoid scanning the store.
-  const previous = lastApplied;
-  if (previous && previous !== cfg.token) {
-    store.revoke(previous);
-  }
+  store.clear();
   if (cfg.enabled && cfg.token) {
     store.put(cfg.token, { source: `config:${cfg.source}` });
-    lastApplied = cfg.token;
-  } else {
-    // Disabled OR missing token → revoke whatever we last applied so
-    // no agent can connect with stale credentials.
-    if (previous) store.revoke(previous);
-    lastApplied = null;
   }
 }
-
-let lastApplied: string | null = null;
 
 /** Test-only: drop the in-process cache so the next read re-loads from disk. */
 export function _resetAcpConfigCache(): void {
   cached = null;
-  lastApplied = null;
 }
