@@ -902,6 +902,12 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         });
       }
 
+      // Op-counter bookkeeping is centralised in the global Fastify
+      // hook — see `modules/agent/memory/op-counter-hook.ts`. It picks
+      // this endpoint up automatically and weights the bump by
+      // `parsed.data.events.length` so node-level granularity is
+      // preserved.
+
       return reply.send({ appended: parsed.data.events.length });
     },
   );

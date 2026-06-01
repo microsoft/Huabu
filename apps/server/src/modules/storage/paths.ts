@@ -3,17 +3,26 @@
  *
  * Layout under `<workspace>/`:
  *
+ *   setting/                        user-owned, cross-canvas
+ *     .huabu.md                     workspace memory (user preferences)
+ *     skills/<id>/SKILL.md          user / memory-agent authored skills
  *   <canvasDir>/                    name = sanitised canvas title
  *     canvas.json                   carries the stable canvasId
  *     nodes/<safe(label)>.md        per-node markdown (id in frontmatter)
  *     .artifacts/<artifactId><ext>  raw uploads (hidden dir)
- *     memory/preferences.md
+ *     .memory/                      canvas-scoped canvas memory (AI-private)
+ *       canvas.md                   canvas memory body
+ *       state.json                  memory worker bookkeeping
  *     .history/
  *       chat/<threadId>.json        pi-ai Context (messages, append-only)
  *       chat/<threadId>.parts.json  rich-ACP sidecar overlay (optional)
  *       intent.json
  *       events.jsonl
  *       acp-sessions.json           per-thread ACP sessionId map (optional)
+ *
+ * Naming convention: anything prefixed with `.` is hidden / AI-private
+ * (`.artifacts`, `.history`, `.memory`); anything without the prefix is
+ * user-visible (`nodes/`, `setting/`).
  */
 
 import path from 'node:path';
@@ -58,12 +67,79 @@ export function artifactPath(canvasId: string, filename: string): string {
   return path.join(artifactsDir(canvasId), base);
 }
 
+/**
+ * @deprecated Legacy V0 memory directory (`<canvasDir>/memory/`).
+ * Retained only so the one-shot {@link import('./migrate-memory.js').migrateLegacyMemory}
+ * pass can find old `preferences.md` files and mv them into `.memory/canvas.md`.
+ * Do not use in new code — the active path is {@link canvasMemoryDir}.
+ */
 export function memoryDir(canvasId: string): string {
   return path.join(canvasRoot(canvasId), 'memory');
 }
 
+/**
+ * @deprecated See {@link memoryDir}. The current canvas memory path
+ * is {@link canvasMemoryPath}.
+ */
 export function prefsPath(canvasId: string): string {
   return path.join(memoryDir(canvasId), 'preferences.md');
+}
+
+// ─── Memory module paths ───────────────────────────────────────────────────
+//
+// Two scopes:
+//   - Workspace memory (`<workspace>/setting/.huabu.md`):
+//     cross-canvas user preferences / profile. User-editable.
+//   - Canvas-level canvas memory (`<canvasDir>/.memory/`): hidden,
+//     AI-private working notes for *this* canvas. The leading `.` puts
+//     it in the same hidden tier as `.history/` and `.artifacts/`.
+
+/** Workspace memory — cross-canvas user preferences: `<workspace>/setting/.huabu.md`. */
+export function workspaceMemoryPath(): string {
+  return path.join(settingDir(), '.huabu.md');
+}
+
+/** Hidden directory holding canvas-scoped canvas memory + bookkeeping. */
+export const WORKING_MEMORY_DIR_NAME = '.memory';
+
+export function canvasMemoryDir(canvasId: string): string {
+  return path.join(canvasRoot(canvasId), WORKING_MEMORY_DIR_NAME);
+}
+
+/** Working memory body for a canvas. */
+export function canvasMemoryPath(canvasId: string): string {
+  return path.join(canvasMemoryDir(canvasId), 'canvas.md');
+}
+
+/**
+ * Bookkeeping JSON for the memory worker, per canvas:
+ *   `{ counter, lastAnalyzedAt, lastSeenThreadCursor }`
+ *
+ * Read/written by `modules/agent/memory/trigger.ts` (PR-B/C).
+ */
+export function memoryStatePath(canvasId: string): string {
+  return path.join(canvasMemoryDir(canvasId), 'state.json');
+}
+
+// ─── Workspace-level setting / user skills ─────────────────────────────────
+
+/**
+ * Workspace-level user setting directory: `<workspace>/setting/`.
+ * Holds cross-canvas, user-visible artifacts:
+ *   - `.huabu.md`            workspace user memory (PR-B)
+ *   - `skills/<id>/SKILL.md` user-authored / memory-agent-authored skills
+ *
+ * Distinct from the per-canvas `memory/` directory (which is
+ * canvas-scoped canvas memory, AI-private). This one is the
+ * cross-canvas, user-editable surface.
+ */
+export function settingDir(): string {
+  return path.join(getWorkspacePath(), 'setting');
+}
+
+/** User skill root: `<workspace>/setting/skills/`. */
+export function userSkillsDir(): string {
+  return path.join(settingDir(), 'skills');
 }
 
 export function historyDir(canvasId: string): string {

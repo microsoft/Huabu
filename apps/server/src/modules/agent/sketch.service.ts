@@ -16,7 +16,7 @@
 
 import { runAgent } from './agent.service.js';
 import { buildAgentNodeRef } from './node-ref.js';
-import { loadAgent, renderAgentTemplate } from '../../prompt/agent-loader.js';
+import { loadAgent, renderAgentTemplate } from '../../prompt/index.js';
 
 import type { Context } from '@earendil-works/pi-ai';
 import type {

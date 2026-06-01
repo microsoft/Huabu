@@ -1,12 +1,12 @@
 /**
  * Agent loader — markdown AGENT.md files as the single source of truth.
  *
- * Each agent lives at `<thisDir>/agents/<id>/AGENT.md`. The YAML
- * frontmatter declares the agent's identity, tool list (by name —
- * resolved by {@link buildAgentToolsByNames} against the registry in
- * `modules/agent/tools/index.ts`), optional skill scope, and runtime
- * knobs. The Markdown body is the system prompt, with two template
- * facilities:
+ * Each agent lives at `<thisDir>/<id>/AGENT.md` (where `<thisDir>` is
+ * `src/prompt/agents/`). The YAML frontmatter declares the agent's
+ * identity, tool list (by name — resolved by {@link buildAgentToolsByNames}
+ * against the registry in `modules/agent/tools/index.ts`), optional skill
+ * scope, and runtime knobs. The Markdown body is the system prompt, with
+ * two template facilities:
  *
  *   `{{skillCatalogue}}`             → expanded to the catalogue lines
  *                                      for the agent's `skillScope`
@@ -20,7 +20,7 @@
  * (intended for tests / future hot-reload).
  *
  * Runtime layout mirrors the skill loader: dev (tsx) and start (tsx)
- * both run from `src/`, so the relative `<thisDir>/agents/<id>/AGENT.md`
+ * both run from `src/`, so the relative `<thisDir>/<id>/AGENT.md`
  * layout works. Any future `dist/` build must copy
  * `src/prompt/agents/**\/AGENT.md` into `dist/prompt/agents/`.
  */
@@ -29,23 +29,24 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { getSkillCatalogue } from './skills/index.js';
-import { parseFrontmatter } from '../modules/storage/frontmatter.js';
+import { parseFrontmatter } from '../../modules/storage/frontmatter.js';
+import { getSkillCatalogue } from '../skills/catalogue.js';
 
-import type { SkillScope } from './skill-loader.js';
+import type { SkillScope } from '../skills/loader.js';
 import type { ToolExecutionMode } from '@earendil-works/pi-agent-core';
 import type { NodeOrigin } from '@sediment/shared';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 /** Agent identifiers backed by an `AGENT.md` config file. */
-export type AgentId = 'ask' | 'operate' | 'intent' | 'sketch';
+export type AgentId = 'ask' | 'operate' | 'intent' | 'sketch' | 'memory';
 
 const VALID_AGENT_IDS: ReadonlySet<AgentId> = new Set<AgentId>([
   'ask',
   'operate',
   'intent',
   'sketch',
+  'memory',
 ]);
 
 /** Runtime knobs forwarded to `runAgent` / direct LLM callers. */
@@ -98,7 +99,15 @@ export interface LoadedAgent {
   id: AgentId;
   name: string;
   description: string;
-  /** System prompt with template variables expanded. */
+  /**
+   * System prompt with template variables expanded.
+   *
+   * Re-rendered on every {@link loadAgent} call so the
+   * `{{skillCatalogue}}` block reflects current user-side skills.
+   * The expensive bit (parsing AGENT.md + validating frontmatter) is
+   * still cached — only the cheap mustache pass against the live
+   * catalogue runs each call.
+   */
   systemPrompt: string;
   /** Tool names declared in frontmatter, in declaration order. */
   toolNames: string[];
@@ -114,7 +123,7 @@ export interface LoadedAgent {
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 /** Absolute path of the agents directory (`src/prompt/agents`). */
-export const AGENTS_DIR = path.join(HERE, 'agents');
+export const AGENTS_DIR = HERE;
 
 // ─── Validation ─────────────────────────────────────────────────────────────
 
@@ -322,8 +331,28 @@ export function renderAgentTemplate(
 }
 
 // ─── Loader ─────────────────────────────────────────────────────────────────
+//
+// Parsing is done once per process (AGENT.md does not change at
+// runtime); rendering happens on every `loadAgent()` call so the
+// `{{skillCatalogue}}` substitution picks up freshly written user
+// skills. The skill loader already implements a per-workspace,
+// mtime-aware cache with a 2 s TTL and an `invalidateUserSkill(id)`
+// hook — see `prompt/skills/loader.ts` — so re-rendering here
+// transparently inherits that freshness contract.
 
-function loadAgentFile(id: AgentId): LoadedAgent {
+/**
+ * Cheap, parsed shell of an AGENT.md. Held in `_cache` and consulted
+ * on every `loadAgent()`; the system prompt body is re-rendered
+ * against the live skill catalogue on each access.
+ */
+interface ParsedAgent {
+  fm: AgentFrontmatter;
+  /** Markdown body with leading whitespace stripped, un-rendered. */
+  body: string;
+  sourcePath: string;
+}
+
+function parseAgentFile(id: AgentId): ParsedAgent {
   const sourcePath = path.join(AGENTS_DIR, id, 'AGENT.md');
   if (!existsSync(sourcePath)) {
     throw new Error(`[agent-loader] AGENT.md not found at ${sourcePath}`);
@@ -336,50 +365,83 @@ function loadAgentFile(id: AgentId): LoadedAgent {
     );
   }
   const fm = validateFrontmatter(meta, sourcePath, id);
+  return { fm, body: content.trimStart(), sourcePath };
+}
 
-  const skillCatalogue = fm.skillScope ? getSkillCatalogue(fm.skillScope) : '';
-  const systemPrompt = renderTemplate(content.trimStart(), {
+/** Render a parsed agent into a `LoadedAgent` with fresh catalogues. */
+function renderLoadedAgent(
+  parsed: ParsedAgent,
+  // Reserved for future per-canvas template vars; currently unused
+  // (skill catalogue is workspace-scoped, memory rules moved to a
+  // standalone skill).
+  _opts: { canvasId?: string | null } = {},
+): LoadedAgent {
+  const skillCatalogue = parsed.fm.skillScope
+    ? getSkillCatalogue(parsed.fm.skillScope)
+    : '';
+  const systemPrompt = renderTemplate(parsed.body, {
     skillCatalogue,
   }).trimEnd();
-
   return {
-    id: fm.id,
-    name: fm.name,
-    description: fm.description,
+    id: parsed.fm.id,
+    name: parsed.fm.name,
+    description: parsed.fm.description,
     systemPrompt,
-    toolNames: fm.tools,
-    runtime: fm.runtime ?? {},
-    messageTemplates: fm.messageTemplates ?? {},
-    sourcePath,
+    toolNames: parsed.fm.tools,
+    runtime: parsed.fm.runtime ?? {},
+    messageTemplates: parsed.fm.messageTemplates ?? {},
+    sourcePath: parsed.sourcePath,
   };
 }
 
 // ─── Cache ──────────────────────────────────────────────────────────────────
+//
+// Holds the *parsed* AGENT.md shell (frontmatter + raw body). The
+// system prompt is rendered on top of this shell on every
+// `loadAgent()` call so the catalogue stays in sync with the live
+// user-skill set.
 
-let _cache: Map<AgentId, LoadedAgent> | null = null;
+let _cache: Map<AgentId, ParsedAgent> | null = null;
 
-function ensureCache(): Map<AgentId, LoadedAgent> {
+function ensureCache(): Map<AgentId, ParsedAgent> {
   if (_cache) return _cache;
   _cache = new Map();
   return _cache;
 }
 
-/** Force a re-load on next access. Intended for tests / future hot-reload. */
+/** Force a re-parse on next access. Intended for tests / future hot-reload. */
 export function invalidateAgentCache(): void {
   _cache = null;
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────
 
-/** Load (and cache) the configuration for an agent. */
-export function loadAgent(id: AgentId): LoadedAgent {
+/**
+ * Load the configuration for an agent.
+ *
+ * AGENT.md is parsed once per process; the system prompt is rendered
+ * against the *current* skill + memory catalogues on every call so
+ * newly written user skills and memory size changes appear without
+ * a restart. The skill loader already de-dupes filesystem work via
+ * mtime + a 2 s TTL.
+ *
+ * Pass `opts.canvasId` (the request's active canvas) so the memory
+ * catalogue can include the per-canvas canvas-memory line; omit it
+ * for agents that aren't bound to a canvas (intent / sketch /
+ * memory curator) and only the workspace-memory line will render.
+ */
+export function loadAgent(
+  id: AgentId,
+  opts: { canvasId?: string | null } = {},
+): LoadedAgent {
   if (!VALID_AGENT_IDS.has(id)) {
     throw new Error(`[agent-loader] unknown agent id: ${id}`);
   }
   const cache = ensureCache();
-  const cached = cache.get(id);
-  if (cached) return cached;
-  const loaded = loadAgentFile(id);
-  cache.set(id, loaded);
-  return loaded;
+  let parsed = cache.get(id);
+  if (!parsed) {
+    parsed = parseAgentFile(id);
+    cache.set(id, parsed);
+  }
+  return renderLoadedAgent(parsed, opts);
 }

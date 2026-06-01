@@ -21,9 +21,10 @@ import {
 } from '@sediment/shared';
 import { encode } from 'gpt-tokenizer';
 
-import { loadAgent, renderAgentTemplate } from '../../prompt/agent-loader.js';
+import { loadAgent, renderAgentTemplate } from '../../prompt/index.js';
 import { runAcpAgent } from '../agent/acp/service.js';
 import { runAgent } from '../agent/agent.service.js';
+import { readWorkspaceMemory } from '../agent/memory/index.js';
 import { buildAgentNodeRef } from '../agent/node-ref.js';
 import { readChatParts } from '../agent/store/chat-parts-store.js';
 import { loadContext, saveContext } from '../agent/store/chat-store.js';
@@ -1073,23 +1074,53 @@ const agentRoutes: FastifyPluginAsync = async (
 
     const resolvedThreadId = getOrCreateThreadId(threadId);
 
-    // Build or resume context
+    // Build or resume context.
+    //
+    // We re-render the agent's system prompt on every turn so the
+    // `{{skillCatalogue}}` placeholder reflects freshly written user
+    // skills. `canvasId` flows into `loadAgent({ canvasId })` for
+    // forward compatibility with future per-canvas template vars.
     let context = loadContext(resolvedThreadId, canvasId);
+    const agentCfg = loadAgent(mode, { canvasId });
 
     if (!context) {
       context = {
-        systemPrompt: loadAgent(mode).systemPrompt,
+        systemPrompt: agentCfg.systemPrompt,
         messages: [],
         tools: [],
       };
     } else {
-      // Update system prompt if mode changed
-      context.systemPrompt = loadAgent(mode).systemPrompt;
+      // Refresh on every turn (mode might change; catalogues advance).
+      context.systemPrompt = agentCfg.systemPrompt;
     }
 
-    // Cached so the SYSTEM-context preambles below can render their
-    // message templates without re-loading the agent each time.
-    const agentCfg = loadAgent(mode);
+    // Workspace-memory pre-read.
+    //
+    // For the *first turn* of a thread we eagerly inject workspace
+    // memory as a SYSTEM context block. Reason: cross-canvas user
+    // preferences (style, voice, response length) should influence
+    // the very first reply, and we can't trust the agent to remember
+    // to read memory/workspace.md before answering a trivial prompt.
+    //
+    // Subsequent turns are pull-only — the catalogue advertises both
+    // tiers and the agent decides whether to open them. Working
+    // memory is *always* pull-only because it's situational and
+    // typically larger; the agent should fetch it when the request
+    // suggests it would help.
+    //
+    // We detect "first turn" as `context.messages.length === 0`,
+    // measured *before* any of the per-turn pushes below.
+    const isFirstTurn = context.messages.length === 0;
+    if (isFirstTurn) {
+      const workspace = readWorkspaceMemory();
+      if (workspace) {
+        context.messages.push({
+          role: 'user',
+          content: `[SYSTEM Workspace memory \u2014 cross-canvas user profile, eagerly loaded for the first turn]\n${workspace}`,
+          timestamp: Date.now(),
+        });
+      }
+    }
 
     // Collect image attachments from selected canvas nodes for vision analysis
     const selectedImageAttachments = canvasContext?.selectedNodes

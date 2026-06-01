@@ -41,10 +41,12 @@ import path from 'node:path';
 import { refreshCanvasDirIndex } from './storage/canvas-dirs.js';
 import { migrateBareArtifactKeys } from './storage/migrate-artifact-keys.js';
 import { migrateLabeledNames } from './storage/migrate-labels.js';
+import { migrateLegacyMemory } from './storage/migrate-memory.js';
 import {
   flattenLegacyMetaJson,
   runMigrationIfNeeded,
 } from './storage/migrate.js';
+import { invalidateUserSkill } from '../prompt/index.js';
 
 const ENV_KEY = 'HUABU_WORKSPACE';
 
@@ -99,6 +101,9 @@ export function initWorkspaceFromEnv(): void {
   migrateLabeledNames(_workspacePath);
   // One-shot rewrite of legacy full artifact URLs to bare keys (sentinel-gated).
   migrateBareArtifactKeys(_workspacePath);
+  // One-shot move of legacy `<canvas>/memory/preferences.md` into the
+  // new `<canvas>/.memory/canvas.md` canvas-memory file (sentinel-gated).
+  migrateLegacyMemory(_workspacePath);
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -160,6 +165,15 @@ export function setWorkspacePath(newPath: string): void {
   // Drop the cached canvas-dir index so subsequent lookups (used by
   // migrations and route handlers) reflect the new workspace.
   refreshCanvasDirIndex();
+  // Drop any user-skill cache built against the previous workspace so
+  // the next `listSkills` / `read("skills/...")` call rescans the new
+  // `<workspace>/setting/skills/` from scratch. The import-cycle with
+  // the prompt loader (which depends on `getWorkspacePath` from this
+  // module) is safe because Node ESM allows cycles as long as no
+  // top-level code on either side dereferences the late-bound import
+  // — here `invalidateUserSkill` is only ever called from within
+  // function bodies, after both modules have finished evaluating.
+  invalidateUserSkill();
   // @deprecated Launch-only legacy migration. Remove once all workspaces have
   // been migrated to the canvas-centric layout.
   runMigrationIfNeeded(_workspacePath);
@@ -169,6 +183,9 @@ export function setWorkspacePath(newPath: string): void {
   migrateLabeledNames(_workspacePath);
   // One-shot rewrite of legacy full artifact URLs to bare keys (sentinel-gated).
   migrateBareArtifactKeys(_workspacePath);
+  // One-shot move of legacy `<canvas>/memory/preferences.md` into the
+  // new `<canvas>/.memory/canvas.md` canvas-memory file (sentinel-gated).
+  migrateLegacyMemory(_workspacePath);
 }
 
 // ──────────────────────────────────────────────────────────────────────

@@ -43,6 +43,14 @@ import {
   type GrepArgs,
   type LsArgs,
 } from './handlers/fs-search.js';
+import {
+  handleMemoryWorkspaceWrite,
+  handleMemoryCanvasWrite,
+  handleMemorySkillWrite,
+  type MemoryWorkspaceWriteArgs,
+  type MemoryCanvasWriteArgs,
+  type MemorySkillWriteArgs,
+} from './handlers/memory-write.js';
 import { handleWebSearch, type WebSearchArgs } from './handlers/web-search.js';
 
 import type { NodeOrigin } from '@sediment/shared';
@@ -127,6 +135,17 @@ export async function executeTool(
         withCanvasId<CanvasCommandsArgs>(args, 'canvas_commands'),
         context?.origin,
       );
+
+    case 'memory_workspace_write':
+      return handleMemoryWorkspaceWrite(args as MemoryWorkspaceWriteArgs);
+
+    case 'memory_canvas_write':
+      return handleMemoryCanvasWrite(
+        withCanvasId<MemoryCanvasWriteArgs>(args, 'memory_canvas_write'),
+      );
+
+    case 'memory_skill_write':
+      return handleMemorySkillWrite(args as MemorySkillWriteArgs);
 
     default:
       throw new Error(`Unknown tool: ${name}`);

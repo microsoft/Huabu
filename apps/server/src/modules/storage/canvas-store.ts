@@ -44,10 +44,8 @@ import {
   chatPath,
   eventsPath,
   intentPath,
-  memoryDir,
   nodeFilePath,
   nodesDir,
-  prefsPath,
 } from './paths.js';
 
 import type { Context } from '@earendil-works/pi-ai';
@@ -113,11 +111,6 @@ export interface NodeContentSummary {
 
 /** Append-only behavioural event for a canvas (re-export of shared schema). */
 export type CanvasEvent = CanvasEventRecord;
-
-export interface UserPreferences {
-  metadata: Record<string, string | null>;
-  body: string;
-}
 
 export type RenameResult =
   | {
@@ -686,24 +679,14 @@ export class CanvasStore {
     return readJsonLines<CanvasEvent>(eventsPath(this.canvasId), limit);
   }
 
-  // ── Preferences ──────────────────────────────────────────────────────────
-
-  readPreferences(): UserPreferences {
-    const raw = readText(prefsPath(this.canvasId));
-    if (raw == null) return { metadata: {}, body: '' };
-    const { meta, content } = parseFrontmatter(raw);
-    const metadata: Record<string, string | null> = {};
-    for (const [k, v] of Object.entries(meta)) {
-      metadata[k] = typeof v === 'string' ? v : null;
-    }
-    return { metadata, body: content };
-  }
-
-  writePreferences(prefs: UserPreferences): void {
-    mkdirp(memoryDir(this.canvasId));
-    const fm = toFrontmatter(prefs.metadata);
-    atomicWriteText(prefsPath(this.canvasId), `${fm}\n${prefs.body}`);
-  }
+  // ── Preferences (removed) ────────────────────────────────────────────────
+  //
+  // Long-term user memory now lives at the workspace level
+  // (`<workspace>/setting/.huabu.md`) and canvas-scoped canvas memory
+  // lives at `<canvasDir>/.memory/canvas.md`. Both are owned by the
+  // memory sub-agent, not the per-canvas store. See
+  // `modules/agent/memory/` and the migration in
+  // `modules/storage/migrate-memory.ts`.
 
   // ── Lifecycle ────────────────────────────────────────────────────────────
 

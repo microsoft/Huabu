@@ -13,7 +13,7 @@
 
 import { TOOL_REGISTRY, type ToolDefinition } from './definitions.js';
 import { executeTool } from './executor.js';
-import { loadAgent, type AgentId } from '../../../prompt/agent-loader.js';
+import { loadAgent, type AgentId } from '../../../prompt/index.js';
 
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import type { AgentMode, NodeOrigin } from '@sediment/shared';
@@ -25,11 +25,12 @@ export type { ToolDefinition } from './definitions.js';
  * Surfaces the tool builder understands.
  *
  * Mirrors `AgentMode` plus `'sketch'` for the freehand-gesture
- * pipeline. Kept local rather than reusing `SkillScope` from the
- * skill loader because `'external'` agents bring their own tooling
- * and should never go through this builder.
+ * pipeline and `'memory'` for the background memory curator. Kept
+ * local rather than reusing `SkillScope` from the skill loader
+ * because `'external'` agents bring their own tooling and should
+ * never go through this builder.
  */
-export type ToolScope = AgentMode | 'sketch';
+export type ToolScope = AgentMode | 'sketch' | 'memory';
 
 /** Per-request context closed over by every tool's `execute`. */
 export interface ToolBuildContext {
