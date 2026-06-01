@@ -273,7 +273,7 @@ export const AcpSessionSelectors = ({
   }
 
   return (
-    <>
+    <div className="flex min-w-0 shrink items-center overflow-hidden">
       {hasMode && (
         <Select<string>
           options={modeOptions}
@@ -317,6 +317,6 @@ export const AcpSessionSelectors = ({
             />
           );
         })}
-    </>
+    </div>
   );
 };

@@ -167,7 +167,7 @@ export function Select<T extends string = string>({
 
   return (
     <>
-      <div ref={triggerRef}>
+      <div ref={triggerRef} className="flex min-w-0 shrink">
         <Button
           variant={variant}
           tone={tone}
@@ -177,16 +177,17 @@ export function Select<T extends string = string>({
           onClick={handleToggle}
           aria-expanded={isOpen}
           title={title}
+          tooltipWrapperClassName="flex min-w-0 shrink"
           className={cn(
             selectShapeClasses[shape],
             isOpen && 'bg-bg-default',
-            iconOnly && 'gap-0.5 px-1',
+            iconOnly ? 'gap-0.5 px-1' : 'w-full min-w-0 overflow-hidden',
             className,
           )}
         >
           {current?.icon}
           {!iconOnly && (
-            <span className="whitespace-nowrap">
+            <span className="min-w-0 truncate">
               {current?.label ?? placeholder}
             </span>
           )}
