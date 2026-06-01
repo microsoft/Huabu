@@ -85,11 +85,12 @@ export async function runAnalysisPass(
 
   const writeResults: WriteResult[] = [];
 
-  // runAgent yields SSE-shaped events; we discard everything except
-  // tool_result, where we pluck the JSON-encoded WriteResult that
-  // each memory writer handler returns. The chat / operate routes
-  // also forward `text_delta` etc. to the client; here we don't have
-  // a client — the side effects on disk are the only output.
+  // runAgent yields SSE-shaped events. After the PR-ACP refactor the
+  // pi-agent-core stream emits a `tool_call` (with `internalToolName`)
+  // when each tool starts and a `tool_call_update` (with `rawOutput`)
+  // when it settles — there's no longer a dedicated `tool_result`
+  // frame. We keep a small map of toolCallId -> memory tool name so we
+  // only parse the updates that belong to one of our writers.
   const stream = runAgent({
     scope: 'memory',
     canvasId,
@@ -97,11 +98,20 @@ export async function runAnalysisPass(
     logger: { info: (m) => logger?.info(m) },
     maxIterations: agent.runtime.maxIterations ?? 5,
   });
+  const memoryCalls = new Map<string, string>();
   for await (const event of stream) {
-    if (event.type !== 'tool_result') continue;
-    const { toolName, toolResult } = event.data;
-    if (!toolName.startsWith('memory_')) continue;
-    const parsed = parseWriteResult(toolResult);
+    if (event.type === 'tool_call') {
+      const { toolCallId, internalToolName } = event.data;
+      if (internalToolName && internalToolName.startsWith('memory_')) {
+        memoryCalls.set(toolCallId, internalToolName);
+      }
+      continue;
+    }
+    if (event.type !== 'tool_call_update') continue;
+    const { toolCallId, rawOutput } = event.data;
+    if (!memoryCalls.has(toolCallId)) continue;
+    if (typeof rawOutput !== 'string' || rawOutput.length === 0) continue;
+    const parsed = parseWriteResult(rawOutput);
     if (parsed) writeResults.push(parsed);
   }
 
