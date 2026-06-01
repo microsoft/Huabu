@@ -210,7 +210,7 @@ export const useChatStore = create<ChatState>()(
 
       setLastAction: (action) => set({ lastAction: action }),
 
-      clearMessages: (canvasId?: string, options) => {
+      clearMessages: (canvasId, options) => {
         const { threadMap, bindingMap } = get();
         const newThreadId = createId('thread');
         const initialBinding = options?.binding ?? DEFAULT_BINDING;
