@@ -1,7 +1,7 @@
 ---
 id: create-skill
 name: Create a user skill
-description: "Slash-invoked: create a new user skill at setting/skills/<id>/SKILL.md based on the user's request."
+description: 'Create a new user skill at setting/skills/<id>/SKILL.md.'
 appliesTo:
   - operate
 userInvokable: true

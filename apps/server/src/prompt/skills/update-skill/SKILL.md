@@ -1,7 +1,7 @@
 ---
 id: update-skill
 name: Update a user skill
-description: 'Slash-invoked: find an existing user skill and apply the requested change to its SKILL.md.'
+description: 'Find an existing user skill and apply the requested change to its SKILL.md.'
 appliesTo:
   - operate
 userInvokable: true
