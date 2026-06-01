@@ -124,7 +124,7 @@
 
 - **不会主动 abort stream**：用户的预期是"我只是去别处看一眼，问题应该继续跑"，所以切 thread 时不会取消服务端的 run，只是把回复落到正确的 list 里。要主动中止仍然请用 chat 输入框右下角的 stop 按钮（只对当前 thread 生效）。
 - **顺带把 `isLoading` 也改成了 per-thread**：原来整个 chat panel 只有一个全局 `isLoading`，意味着 canvas chat 在跑的时候 question panel 的输入框也会被 disable（反之亦然）。现在每个 thread 各自有 loading 状态，**canvas chat 和任意 question node 可以并行 send**，stop 按钮也只停当前 thread 那条 run。每条 stream 在自己的 closure 里持有 `assistantId` / `resources` / abort controller，互不污染。
-- **内存占用**：缓存只活在内存（不持久化），单 thread 平均 ~200KB，数十个并存可控；后续如果出现非常多 thread 共存的场景，会按 LRU 淘汰非活跃 thread——再次切回时从服务端 `fetchHistory` 重新拉，行为对用户透明。
+- **内存占用**：缓存只活在内存（不持久化），单 thread 平均 ~200KB。每次切 thread（打开/关闭 question thread、切 canvas、新建对话）会跑一次 `evictInactiveThreads`：缓存条数超过 10 时，把所有 **非 pinned** 的 thread 一次性丢掉——pinned 集合 = 当前可见 thread ∪ 正在 stream 的 thread ∪ question 视图下被压栈的 canvas thread。被丢掉的 thread 下次再切回时，`useChatHistory` 自动 refetch（沿用既有路径），用户最多感知一次 ~200ms 的 loading。写消息路径零开销：eviction 只在切换边界跑，不在 `addMessage` 里跑。
 - **`useQuestionRunner`（首次自动 run）路径不受影响**：它只用最小化的 `onEvent` 翻一个 `sawDone` 旗子，从不写 `chatStore`，所以从一开始就没有这个泄漏。
 
 ---

@@ -14,7 +14,7 @@ import type { AgentMode, AvailableCommand } from '@sediment/shared';
 
 import { uploadImage, uploadPdf } from '@/api/artifact';
 import useCanvasStore from '@/store/canvasStore';
-import { useChatStore } from '@/store/chatStore';
+import { selectCurrentMessages, useChatStore } from '@/store/chatStore';
 
 interface ChatInputProps {
   value: string;
@@ -270,9 +270,8 @@ export const ChatInput = ({
         (e.key === 'ArrowUp' && atStart) ||
         (e.key === 'ArrowDown' && atEnd)
       ) {
-        const history = useChatStore
-          .getState()
-          .messages.filter((m) => m.role === 'user')
+        const history = selectCurrentMessages(useChatStore.getState())
+          .filter((m) => m.role === 'user')
           .map((m) => (m.role === 'user' ? m.content : ''));
         if (history.length === 0) return;
 

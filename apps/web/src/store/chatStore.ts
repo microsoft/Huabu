@@ -194,7 +194,31 @@ export interface ChatState {
 
   /** Mark / unmark a thread as having an active streaming run. */
   setThreadLoading: (threadId: string, loading: boolean) => void;
+
+  /**
+   * Drop cached message lists for threads that aren't currently pinned.
+   * A thread is "pinned" if it is:
+   *   - the currently-visible `threadId`,
+   *   - in `loadingThreadIds` (mid-stream),
+   *   - or `_savedCanvasThreadId` (about to be restored on
+   *     `closeQuestionThread`).
+   *
+   * Triggered at user-visible thread-switch boundaries (open/close
+   * question thread, switch canvas, clear). Writes stay hot — eviction
+   * never runs on the message-write path. Evicted threads will be
+   * refetched by `useChatHistory` the next time they become visible.
+   */
+  evictInactiveThreads: (maxKeep?: number) => void;
 }
+
+/**
+ * Soft upper bound on cached thread message lists. Picked to comfortably
+ * cover the realistic working set (1 canvas chat + a handful of recently
+ * opened question threads) without holding on to dead history forever.
+ * Crossing the threshold drops *all* non-pinned entries at once — simple
+ * and predictable; refetch on re-visit is cheap.
+ */
+const MAX_CACHED_THREADS = 10;
 
 export const useChatStore = create<ChatState>()(
   persist(
@@ -312,6 +336,7 @@ export const useChatStore = create<ChatState>()(
           agentBinding: initialBinding,
           bindingMap: updatedBindings,
         });
+        get().evictInactiveThreads();
       },
 
       setAgentBinding: (binding, canvasId) => {
@@ -344,6 +369,7 @@ export const useChatStore = create<ChatState>()(
             ? bindingMap
             : { ...bindingMap, [canvasId]: binding },
         });
+        get().evictInactiveThreads();
       },
 
       addPendingAttachment: (attachment) =>
@@ -395,6 +421,7 @@ export const useChatStore = create<ChatState>()(
             _savedCanvasBinding: currentBinding,
           }),
         });
+        get().evictInactiveThreads();
       },
 
       closeQuestionThread: () => {
@@ -406,6 +433,7 @@ export const useChatStore = create<ChatState>()(
           _savedCanvasThreadId: undefined,
           _savedCanvasBinding: undefined,
         });
+        get().evictInactiveThreads();
       },
 
       openSketchCluster: (clusterId) => {
@@ -439,6 +467,34 @@ export const useChatStore = create<ChatState>()(
           if (loading) next.add(threadId);
           else next.delete(threadId);
           return { loadingThreadIds: next };
+        }),
+
+      evictInactiveThreads: (maxKeep = MAX_CACHED_THREADS) =>
+        set((state) => {
+          const cached = Object.keys(state.messagesByThread);
+          if (cached.length <= maxKeep) return {};
+
+          const pinned = new Set<string>([
+            state.threadId,
+            ...state.loadingThreadIds,
+          ]);
+          if (state._savedCanvasThreadId) {
+            pinned.add(state._savedCanvasThreadId);
+          }
+
+          const evictable = cached.filter((tid) => !pinned.has(tid));
+          if (evictable.length === 0) return {};
+
+          const nextMessages = { ...state.messagesByThread };
+          const nextLoaded = new Set(state.historyLoadedThreads);
+          for (const tid of evictable) {
+            delete nextMessages[tid];
+            nextLoaded.delete(tid);
+          }
+          return {
+            messagesByThread: nextMessages,
+            historyLoadedThreads: nextLoaded,
+          };
         }),
     }),
     {
