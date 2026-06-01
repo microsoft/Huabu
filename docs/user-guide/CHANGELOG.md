@@ -99,6 +99,57 @@
 
 ---
 
+## 2026-06-02 · question node 多轮对话也会重置未读状态
+
+**What Changed**
+
+- 之前在 question node 的 chat thread 里发**追加问题**（多轮对话），新答案流回来后节点的 `viewed` 标记**保持原状**，所以 Layer Panel 上的小圆点和画布上的 "done · unread" pill 都不会重新出现——视觉上看不出"有新答案没看过"。
+- 现在每次在 question thread 里发新一轮消息时（走 `useAgentStream.startStream` 的 follow-up 路径），节点会一并被标记成 `viewed: false`，与首轮的 `useQuestionRunner` 行为对齐。
+- 答案结束时，如果**用户仍在这个 question thread 里看着**（`viewingQuestionThread.nodeId` 还指向同一个节点），则在 `onComplete` / 中止处理里把 `viewed: true` 再补回去——他们已经看了一遍，不需要再用未读提示骚扰。
+- 如果用户在 stream 期间已经切去看别的 chat 或 canvas，节点会保持 `viewed: false`，圆点和 pill 正常出现，直到下次再点开这个 question node 才会被标记成已读。
+
+**Notes**
+
+- **running 状态没变**：原来就在 follow-up 时正确把状态切到 `running`，这次只补了 `viewed` 字段，行为是叠加的，没动 status 流转。
+- **影响范围只有 question thread 的 follow-up**：canvas chat 的普通对话不会触发 `viewed` 字段修改（节点没有 `questionNodeId`）；首轮自动运行依旧由 `useQuestionRunner` 单独管理。
+
+**What Changed**
+
+- 之前在 question node 的 chat thread 里发完问题后，如果**在流式返回结束前**关掉 question thread 切回主 canvas chat（或者打开另一个 question node），LLM 的回复消息会**追加到当前正在看的那个 chat session 的 message list 上**，而不是发起这次提问的那个 thread——视觉上像是"别人的对话突然多了一段我没说过的话"。
+- 现在每个 chat session 的 message list 被**独立缓存在 `messagesByThread[threadId]` 里**：每次 send 时记录"这次 stream 属于哪个 thread"，所有 SSE 事件直接写入对应 thread 的 slice，UI 永远渲染当前 `threadId` 对应那条。
+- 切回原 thread 时，消息列表是**内存里实时的那一份**——回复继续流进来不会丢，已结束的回答也立刻能看到完整版（不再需要触发 history refetch 才知道结果）；同时切去看别的 thread 时，那边也是各自独立的状态，**所有 thread 可以并行流式接收回复**。
+- question node 自身的状态徽标（pending / running / done / error）**不受 thread 切换影响**——它是按 node id 标注的，无论用户当时在看哪个 chat，都会按时进入 `done`。
+
+**Notes**
+
+- **不会主动 abort stream**：用户的预期是"我只是去别处看一眼，问题应该继续跑"，所以切 thread 时不会取消服务端的 run，只是把回复落到正确的 list 里。要主动中止仍然请用 chat 输入框右下角的 stop 按钮（只对当前 thread 生效）。
+- **顺带把 `isLoading` 也改成了 per-thread**：原来整个 chat panel 只有一个全局 `isLoading`，意味着 canvas chat 在跑的时候 question panel 的输入框也会被 disable（反之亦然）。现在每个 thread 各自有 loading 状态，**canvas chat 和任意 question node 可以并行 send**，stop 按钮也只停当前 thread 那条 run。每条 stream 在自己的 closure 里持有 `assistantId` / `resources` / abort controller，互不污染。
+- **内存占用**：缓存只活在内存（不持久化），单 thread 平均 ~200KB，数十个并存可控；后续如果出现非常多 thread 共存的场景，会按 LRU 淘汰非活跃 thread——再次切回时从服务端 `fetchHistory` 重新拉，行为对用户透明。
+- **`useQuestionRunner`（首次自动 run）路径不受影响**：它只用最小化的 `onEvent` 翻一个 `sawDone` 旗子，从不写 `chatStore`，所以从一开始就没有这个泄漏。
+
+---
+
+## 2026-06-01 · Layer Panel 显示 question node 的执行状态
+
+**What Changed**
+
+- 左侧 **Layer Panel** 里的 question 节点行图标右下角现在会带一个 **6px 状态小圆点**，颜色含义和画布上 QuestionNode 自带的 `StatusBadge` 保持一致：
+  - 🟠 `pending` — 自动运行倒计时中
+  - 🔵 `running` — 正在执行
+  - 🟢 `done` 且**尚未阅读** — 有未读回答（带 pulse 动画提示注意）
+  - 🔴 `error` — 失败
+- 鼠标悬停小圆点会出 tooltip，文案直接复用画布 badge 的措辞（`Pending` / `Running` / `Done · unread` / `Error — {errorMessage}`，error 消息超过 200 字符自动截断）。
+- `idle` 状态和 `done` 且已读的节点**不显示**圆点——保持 panel 在"无事发生"时的视觉干净。
+
+**Notes**
+
+- **不是 chat session 列表**：这只是 ambient 状态指示，点击行为不变（依旧是选中节点）。要看完整对话仍然走"双击 question node → Chat Panel"那条路径。
+- **性能**：`isSameTreeItem` 加了 `status` / `viewed` / `errorMessage` 三个字段的浅比较；非 question 节点通过 `type` 短路退出，原有 `SortableRow` 的 `React.memo` 行为对其它节点零影响。
+- **文案单源**：`Common/StatusBadge` 新导出 `getStatusLabel(status)`，Layer Panel 和画布 badge 共用同一份 status → label 映射，未来加新 status 不会两边漂移。
+- **不和 sketch 节点抢图标位**：sketch 节点的预览缩略图渲染逻辑完全没动；只有 `type === 'question'` 的节点会触发圆点叠加。
+
+---
+
 ## 2026-06-01 · 一键开"和别的 agent 的新会话"——ModeSelector → NewChatMenu
 
 **What Changed**

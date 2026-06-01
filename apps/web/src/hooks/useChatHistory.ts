@@ -14,11 +14,17 @@ import type { AgentStreamEvent } from '@sediment/shared';
  * Hook that loads chat history from the server and handles reconnection
  * to an active agent run after page refresh.
  *
- * @param setIsLoading - Setter from useAgentStream to reflect reconnect loading state.
+ * @param setIsLoading - Setter from useAgentStream to reflect reconnect
+ *   loading state. Takes an explicit `threadId` so reconnects on a
+ *   backgrounded thread don't flip loading on the visible one.
  */
-export function useChatHistory(setIsLoading: (loading: boolean) => void): void {
+export function useChatHistory(
+  setIsLoading: (threadId: string, loading: boolean) => void,
+): void {
   const threadId = useChatStore((state) => state.threadId);
-  const isHistoryLoaded = useChatStore((state) => state.isHistoryLoaded);
+  const isHistoryLoaded = useChatStore((state) =>
+    state.historyLoadedThreads.has(state.threadId),
+  );
   const addMessage = useChatStore((state) => state.addMessage);
   const canvasId = useCanvasStore((state) => state.canvasId);
 
@@ -34,12 +40,15 @@ export function useChatHistory(setIsLoading: (loading: boolean) => void): void {
   // not have loaded yet, causing a request without canvasId that 404s.
   useEffect(() => {
     if (!canvasId) return;
-    if (useChatStore.getState().isHistoryLoaded) return;
+    // Snapshot the thread we're loading for. If the user switches threads
+    // mid-fetch, we still want to land the response on the originating
+    // thread (cache survives navigation) rather than the current one.
+    const tid = useChatStore.getState().threadId;
+    if (useChatStore.getState().historyLoadedThreads.has(tid)) return;
 
     let cancelled = false;
 
     const {
-      threadId: tid,
       lastAction: action,
       setMessages: set,
       setHistoryLoaded: setLoaded,
@@ -52,10 +61,13 @@ export function useChatHistory(setIsLoading: (loading: boolean) => void): void {
 
         // If the server returned a different threadId (fallback to latest),
         // update the client's threadMap so future requests use the correct id.
-        if (res.threadId && res.threadId !== tid) {
+        const overrideTid =
+          res.threadId && res.threadId !== tid ? res.threadId : null;
+        const finalTid = overrideTid ?? tid;
+        if (overrideTid) {
           useChatStore.setState((state) => ({
-            threadId: res.threadId,
-            threadMap: { ...state.threadMap, [canvasId]: res.threadId },
+            threadId: overrideTid,
+            threadMap: { ...state.threadMap, [canvasId]: overrideTid },
           }));
         }
 
@@ -132,13 +144,13 @@ export function useChatHistory(setIsLoading: (loading: boolean) => void): void {
             };
           },
         );
-        set(serverMessages);
-        setLoaded(true);
+        set(finalTid, serverMessages);
+        setLoaded(finalTid, true);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
         console.warn(`Could not load ${action} history:`, err);
-        setLoaded(true);
+        setLoaded(tid, true);
       });
 
     return () => {
@@ -158,12 +170,13 @@ export function useChatHistory(setIsLoading: (loading: boolean) => void): void {
     // streaming. If history is empty or ends with an assistant message,
     // there's nothing to reconnect to — skip the request entirely to
     // avoid a 404 in the browser console.
-    const msgs = useChatStore.getState().messages;
+    const msgs = useChatStore.getState().messagesByThread[threadId] ?? [];
     if (msgs.length === 0) return;
     const lastMsg = msgs[msgs.length - 1];
     if (lastMsg.role !== 'user' && lastMsg.role !== 'intent-select') return;
 
     let cancelled = false;
+    const ownerThreadId = threadId;
 
     const tryReconnect = async () => {
       const assistantId = createId('message');
@@ -174,7 +187,8 @@ export function useChatHistory(setIsLoading: (loading: boolean) => void): void {
       // current run — the reconnect event buffer replays them fully.
       // Keep only messages up to and including the last user message.
       const clearStaleMessages = () => {
-        const current = useChatStore.getState().messages;
+        const current =
+          useChatStore.getState().messagesByThread[ownerThreadId] ?? [];
         let lastUserIdx = -1;
         for (let i = current.length - 1; i >= 0; i--) {
           if (
@@ -188,34 +202,34 @@ export function useChatHistory(setIsLoading: (loading: boolean) => void): void {
         if (lastUserIdx >= 0) {
           useChatStore
             .getState()
-            .setMessages(current.slice(0, lastUserIdx + 1));
+            .setMessages(ownerThreadId, current.slice(0, lastUserIdx + 1));
         }
       };
 
-      const connected = await agentApi.reconnectStream(threadId, {
+      const connected = await agentApi.reconnectStream(ownerThreadId, {
         onEvent: (event: AgentStreamEvent) => {
           if (cancelled) return;
           if (!streaming) {
             streaming = true;
-            setIsLoading(true);
+            setIsLoading(ownerThreadId, true);
             clearStaleMessages();
           }
-          handleStreamEvent(event, { assistantId });
+          handleStreamEvent(event, { threadId: ownerThreadId, assistantId });
         },
         onError: (err) => {
           if (cancelled) return;
           clearStaleMessages();
-          addMessage({
+          addMessage(ownerThreadId, {
             id: createId('status'),
             role: 'status',
             status: 'error',
             detail: err.message,
           });
-          setIsLoading(false);
+          setIsLoading(ownerThreadId, false);
         },
         onComplete: () => {
           if (cancelled) return;
-          setIsLoading(false);
+          setIsLoading(ownerThreadId, false);
         },
       });
 

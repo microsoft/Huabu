@@ -2,6 +2,7 @@ import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { useMemo, useRef } from 'react';
 
 import { CanvasLayerTree } from './CanvasLayerTree';
+import { QuestionStatusDot } from './QuestionStatusDot';
 import { getNodeIcon } from '../../../config/nodeIcons';
 import useCanvasStore from '../../../store/canvasStore';
 import { usePanelStore } from '../../../store/panelStore';
@@ -9,7 +10,7 @@ import { SketchIcon } from '../../Nodes/sketch/SketchIcon';
 import { SidebarPanel } from '../SidebarPanel';
 
 import type { DataSourceNodeLike, DataSourceTreeItem } from './types';
-import type { SketchStroke } from '@sediment/shared';
+import type { QuestionNodeStatus, SketchStroke } from '@sediment/shared';
 
 interface CanvasLayerPanelProps {
   isCollapsed?: boolean;
@@ -40,7 +41,28 @@ const renderNodeIcon = (node: DataSourceNodeLike) => {
   }
 
   const Icon = getNodeIcon(node.type);
-  return <Icon size={ICON_SIZE} strokeWidth={ICON_STROKE_WIDTH} />;
+  const iconEl = <Icon size={ICON_SIZE} strokeWidth={ICON_STROKE_WIDTH} />;
+
+  // Question nodes carry an execution lifecycle (pending → running →
+  // done | error). We overlay a tiny status dot so the layer panel
+  // doubles as an "ambient" status board for in-flight conversations,
+  // mirroring what the on-canvas `StatusBadge` shows.
+  if (node.type === 'question') {
+    const status = node.data.status as QuestionNodeStatus | undefined;
+    if (!status) return iconEl;
+    return (
+      <span className="relative inline-flex">
+        {iconEl}
+        <QuestionStatusDot
+          status={status}
+          viewed={node.data.viewed as boolean | undefined}
+          errorMessage={node.data.errorMessage as string | undefined}
+        />
+      </span>
+    );
+  }
+
+  return iconEl;
 };
 
 const getNodeDisplayName = (node: DataSourceNodeLike): string => {
@@ -100,6 +122,15 @@ const isSameTreeItem = (
   // are reference-equal (the sketch store updates immutably).
   if (an.data.strokes !== bn.data.strokes) return false;
   if (an.data.initialSize !== bn.data.initialSize) return false;
+  // Question nodes drive a status dot — invalidate the cached item
+  // whenever any of the visible status fields change so the row
+  // re-renders. Non-question nodes hit only the cheap equality checks
+  // above thanks to the short-circuit on `type`.
+  if (an.type === 'question') {
+    if (an.data.status !== bn.data.status) return false;
+    if (an.data.viewed !== bn.data.viewed) return false;
+    if (an.data.errorMessage !== bn.data.errorMessage) return false;
+  }
   return true;
 };
 

@@ -9,7 +9,7 @@ import {
   type ToolResponse,
   type WebSearchToolResponse,
 } from '@sediment/shared';
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useCallback, useRef, useEffect } from 'react';
 
 import { snapshotAndExtractChanges } from './useCanvasChanges';
 
@@ -345,6 +345,13 @@ function applyCanvasCommandsFromToolResult(toolResult: string | undefined): {
 // ==================== SSE Event Handler ====================
 
 interface StreamEventContext {
+  /**
+   * The thread that owns this stream. Captured at send time; all
+   * message reads / writes inside the SSE handler key off this — never
+   * `state.threadId` — so events keep landing on the originating
+   * thread even after the user navigates away.
+   */
+  threadId: string;
   assistantId: string;
   /** Called after canvas_commands are applied. */
   onCanvasCommands?: (commands: CanvasCommand[]) => void;
@@ -394,12 +401,11 @@ export function setAcpSessionMetaSink(sink: AcpSessionMetaSink | null): void {
  * the tool-call / plan handlers which may fire before any text_delta.
  */
 function ensureAssistantMessage(ctx: StreamEventContext): void {
-  const { addMessage } = useChatStore.getState();
-  const existing = useChatStore
-    .getState()
-    .messages.find((m) => m.id === ctx.assistantId);
+  const { addMessage, messagesByThread } = useChatStore.getState();
+  const list = messagesByThread[ctx.threadId] ?? [];
+  const existing = list.find((m) => m.id === ctx.assistantId);
   if (!existing) {
-    addMessage({
+    addMessage(ctx.threadId, {
       id: ctx.assistantId,
       role: 'assistant',
       segments: [],
@@ -533,14 +539,18 @@ function applyInternalToolStart(
     data: args,
   };
   ensureAssistantMessage(ctx);
-  upsertAssistantToolPart(ctx.assistantId, toolCallId, (existing) =>
-    mergeToolPart(existing, toolCallId, {
-      variant,
-      toolName,
-      title: toolName,
-      status: 'pending',
-      data: provisional,
-    }),
+  upsertAssistantToolPart(
+    ctx.threadId,
+    ctx.assistantId,
+    toolCallId,
+    (existing) =>
+      mergeToolPart(existing, toolCallId, {
+        variant,
+        toolName,
+        title: toolName,
+        status: 'pending',
+        data: provisional,
+      }),
   );
 }
 
@@ -560,14 +570,14 @@ function applyInternalToolResult(
   toolName: string,
   rawText: string,
 ): void {
-  const { upsertAssistantToolPart } = useChatStore.getState();
+  const { upsertAssistantToolPart, messagesByThread } = useChatStore.getState();
   const toolResponse = parseToolResponse(toolName, rawText);
   if (!toolResponse) return;
 
   const variant = variantForInternalTool(toolName);
-  const assistantMsg = useChatStore
-    .getState()
-    .messages.find((m) => m.id === ctx.assistantId);
+  const assistantMsg = (messagesByThread[ctx.threadId] ?? []).find(
+    (m) => m.id === ctx.assistantId,
+  );
   let existingArgs: Record<string, unknown> = {};
   if (assistantMsg?.role === 'assistant') {
     const priorPart = assistantMsg.segments.find(
@@ -595,14 +605,18 @@ function applyInternalToolResult(
   } as ToolResponse<string, unknown>;
 
   ensureAssistantMessage(ctx);
-  upsertAssistantToolPart(ctx.assistantId, toolCallId, (existing) =>
-    mergeToolPart(existing, toolCallId, {
-      variant,
-      toolName,
-      title: existing?.title ?? toolName,
-      status: 'completed',
-      data: mergedResponse,
-    }),
+  upsertAssistantToolPart(
+    ctx.threadId,
+    ctx.assistantId,
+    toolCallId,
+    (existing) =>
+      mergeToolPart(existing, toolCallId, {
+        variant,
+        toolName,
+        title: existing?.title ?? toolName,
+        status: 'completed',
+        data: mergedResponse,
+      }),
   );
 
   // Execute canvas_commands locally.
@@ -613,34 +627,39 @@ function applyInternalToolResult(
       // tool part's typed `data` envelope (this is the canonical
       // home that `CanvasCommandCard` reads from).
       if (result.changes.length > 0) {
-        upsertAssistantToolPart(ctx.assistantId, toolCallId, (existing) => {
-          if (!existing) {
-            // Should never happen — we just inserted above. Bail
-            // safely by returning a minimal part.
-            return mergeToolPart(existing, toolCallId, {
-              variant: 'canvas_commands',
-              data: mergedResponse,
-            });
-          }
-          if (existing.variant !== 'canvas_commands') return existing;
-          const existingData = existing.data;
-          const priorData =
-            existingData?.status === 'success'
-              ? ((existingData.data as Record<string, unknown> | undefined) ??
-                {})
-              : {};
-          return {
-            ...existing,
-            data: {
-              tool: 'canvas_commands',
-              status: 'success',
+        upsertAssistantToolPart(
+          ctx.threadId,
+          ctx.assistantId,
+          toolCallId,
+          (existing) => {
+            if (!existing) {
+              // Should never happen — we just inserted above. Bail
+              // safely by returning a minimal part.
+              return mergeToolPart(existing, toolCallId, {
+                variant: 'canvas_commands',
+                data: mergedResponse,
+              });
+            }
+            if (existing.variant !== 'canvas_commands') return existing;
+            const existingData = existing.data;
+            const priorData =
+              existingData?.status === 'success'
+                ? ((existingData.data as Record<string, unknown> | undefined) ??
+                  {})
+                : {};
+            return {
+              ...existing,
               data: {
-                ...priorData,
-                canvasChanges: result.changes,
+                tool: 'canvas_commands',
+                status: 'success',
+                data: {
+                  ...priorData,
+                  canvasChanges: result.changes,
+                },
               },
-            },
-          };
-        });
+            };
+          },
+        );
       }
       ctx.onCanvasCommands?.(result.commands);
     }
@@ -656,19 +675,26 @@ export function handleStreamEvent(
   event: AgentStreamEvent,
   ctx: StreamEventContext,
 ): void {
-  const { addMessage, updateMessage, upsertAssistantToolPart } =
-    useChatStore.getState();
+  const {
+    addMessage,
+    updateMessage,
+    upsertAssistantToolPart,
+    messagesByThread,
+  } = useChatStore.getState();
+  // All reads / writes below key off the owner thread captured on
+  // `ctx`, never the currently-visible thread. This is what makes
+  // mid-stream thread switches safe — events keep landing on the
+  // thread that issued the request.
+  const ownerMessages = messagesByThread[ctx.threadId] ?? [];
 
   if (event.type === 'text_delta' || event.type === 'thinking_delta') {
     const delta = event.data.content;
     if (!delta) return;
     const kind: AssistantSegment['kind'] =
       event.type === 'text_delta' ? 'text' : 'thinking';
-    const existing = useChatStore
-      .getState()
-      .messages.find((m) => m.id === ctx.assistantId);
+    const existing = ownerMessages.find((m) => m.id === ctx.assistantId);
     if (existing) {
-      updateMessage(ctx.assistantId, (m) => {
+      updateMessage(ctx.threadId, ctx.assistantId, (m) => {
         if (m.role !== 'assistant') return m;
         const segs = m.segments;
         const last = segs[segs.length - 1];
@@ -687,7 +713,7 @@ export function handleStreamEvent(
         return { ...m, segments: [...segs, { kind, text: delta }] };
       });
     } else {
-      addMessage({
+      addMessage(ctx.threadId, {
         id: ctx.assistantId,
         role: 'assistant',
         segments: [{ kind, text: delta }],
@@ -707,17 +733,21 @@ export function handleStreamEvent(
       );
     } else {
       ensureAssistantMessage(ctx);
-      upsertAssistantToolPart(ctx.assistantId, data.toolCallId, (existing) =>
-        mergeToolPart(existing, data.toolCallId, {
-          // ACP `tool_call` events always materialise as `generic`;
-          // the wire shape carries only ACP-spec fields.
-          variant: 'generic',
-          title: data.title,
-          toolKind: data.toolKind,
-          status: data.status,
-          locations: data.locations,
-          content: data.content,
-        }),
+      upsertAssistantToolPart(
+        ctx.threadId,
+        ctx.assistantId,
+        data.toolCallId,
+        (existing) =>
+          mergeToolPart(existing, data.toolCallId, {
+            // ACP `tool_call` events always materialise as `generic`;
+            // the wire shape carries only ACP-spec fields.
+            variant: 'generic',
+            title: data.title,
+            toolKind: data.toolKind,
+            status: data.status,
+            locations: data.locations,
+            content: data.content,
+          }),
       );
     }
   } else if (event.type === 'tool_call_update') {
@@ -727,9 +757,7 @@ export function handleStreamEvent(
     // carrying `rawOutput` (the JSON-stringified `ToolResponse`). The
     // update event itself has no tool name — recover it from the part
     // the originating `tool_call` already created (variant fixes it).
-    const assistantMsg = useChatStore
-      .getState()
-      .messages.find((m) => m.id === ctx.assistantId);
+    const assistantMsg = ownerMessages.find((m) => m.id === ctx.assistantId);
     const priorPart =
       assistantMsg?.role === 'assistant'
         ? assistantMsg.segments.find(
@@ -752,20 +780,24 @@ export function handleStreamEvent(
           : JSON.stringify(data.rawOutput);
       applyInternalToolResult(ctx, data.toolCallId, internalToolName, rawText);
     } else {
-      upsertAssistantToolPart(ctx.assistantId, data.toolCallId, (existing) =>
-        mergeToolPart(existing, data.toolCallId, {
-          title: data.title,
-          status: data.status,
-          locations: data.locations,
-          content: data.content,
-          rawOutput: data.rawOutput,
-        }),
+      upsertAssistantToolPart(
+        ctx.threadId,
+        ctx.assistantId,
+        data.toolCallId,
+        (existing) =>
+          mergeToolPart(existing, data.toolCallId, {
+            title: data.title,
+            status: data.status,
+            locations: data.locations,
+            content: data.content,
+            rawOutput: data.rawOutput,
+          }),
       );
     }
   } else if (event.type === 'plan') {
     const entries = event.data.entries;
     ensureAssistantMessage(ctx);
-    updateMessage(ctx.assistantId, (m) => {
+    updateMessage(ctx.threadId, ctx.assistantId, (m) => {
       if (m.role !== 'assistant') return m;
       // Plan uses REPLACE-semantics per ACP §session/update.
       const planIdx = m.segments.findIndex((s) => s.kind === 'plan');
@@ -779,7 +811,7 @@ export function handleStreamEvent(
   } else if (event.type === 'permission_request') {
     const { requestId, toolCall, options } = event.data;
     ensureAssistantMessage(ctx);
-    updateMessage(ctx.assistantId, (m) => {
+    updateMessage(ctx.threadId, ctx.assistantId, (m) => {
       if (m.role !== 'assistant') return m;
       // Idempotent on reconnect: the SSE event buffer replays the
       // request, so de-dupe by requestId rather than appending twice.
@@ -801,10 +833,10 @@ export function handleStreamEvent(
     // in place; otherwise (reconnect path) we append a fresh one.
     const pendingId = ctx.preparedPromptId;
     const existing = pendingId
-      ? useChatStore.getState().messages.find((m) => m.id === pendingId)
+      ? ownerMessages.find((m) => m.id === pendingId)
       : undefined;
     if (existing) {
-      updateMessage(pendingId!, (m) =>
+      updateMessage(ctx.threadId, pendingId!, (m) =>
         m.role === 'prepared-prompt'
           ? {
               ...m,
@@ -817,7 +849,7 @@ export function handleStreamEvent(
           : m,
       );
     } else {
-      addMessage({
+      addMessage(ctx.threadId, {
         id: createId('preparedPrompt'),
         role: 'prepared-prompt',
         prompt: event.data.prompt,
@@ -842,9 +874,16 @@ export function handleStreamEvent(
 // ==================== Hook ====================
 
 export interface UseAgentStreamReturn {
+  /** True if the *currently visible* thread has an active stream. */
   isLoading: boolean;
-  /** Expose setter so useChatHistory can update loading state on reconnect. */
-  setIsLoading: (loading: boolean) => void;
+  /**
+   * Mark a specific thread as loading. Exposed so `useChatHistory` can
+   * flip the flag on/off during stream reconnection for whichever
+   * thread it is attached to — callers must pass the owner thread
+   * explicitly so reconnects on a backgrounded thread don't paint into
+   * the currently-visible one.
+   */
+  setIsLoading: (threadId: string, loading: boolean) => void;
   /** Start a streaming agent request. */
   startStream: (
     prompt: string,
@@ -870,9 +909,15 @@ export interface UseAgentStreamReturn {
  * processing SSE events, and tracking resources.
  */
 export function useAgentStream(): UseAgentStreamReturn {
-  const [isLoading, setIsLoading] = useState(false);
-
   const threadId = useChatStore((state) => state.threadId);
+  // Loading is per-thread (a question node thread can stream
+  // independently of the canvas chat), so read the flag for the
+  // currently-visible thread from the store.
+  const isLoading = useChatStore((state) =>
+    state.loadingThreadIds.has(state.threadId),
+  );
+  const setThreadLoading = useChatStore((state) => state.setThreadLoading);
+
   const addMessage = useChatStore((state) => state.addMessage);
   const updateMessage = useChatStore((state) => state.updateMessage);
   const setLastAction = useChatStore((state) => state.setLastAction);
@@ -889,10 +934,11 @@ export function useAgentStream(): UseAgentStreamReturn {
   );
   const canvasId = useCanvasStore((state) => state.canvasId);
 
-  // Track resources across the current agent run
-  const resourcesRef = useRef<ResourceLabel[]>([]);
-  const assistantIdRef = useRef<string>('');
-  const abortControllerRef = useRef<AbortController | null>(null);
+  // Per-thread abort controllers. We can have multiple streams in
+  // flight at once (canvas chat + one or more question threads), so a
+  // single ref would clobber a still-running run when the next send
+  // starts on a different thread.
+  const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
 
   // Track whether the component is still active (not unloading).
   // Prevents adding spurious "network error" status on page refresh.
@@ -919,7 +965,14 @@ export function useAgentStream(): UseAgentStreamReturn {
       },
       invokedSkills?: string[],
     ) => {
-      if (!prompt.trim() || isLoading) return;
+      // Per-thread guard: this thread's own loading flag, not any other
+      // thread's. The user may already have a stream running in a
+      // different chat (canvas chat + question node both active).
+      if (
+        !prompt.trim() ||
+        useChatStore.getState().loadingThreadIds.has(threadId)
+      )
+        return;
 
       setLastAction(agentMode);
 
@@ -961,14 +1014,14 @@ export function useAgentStream(): UseAgentStreamReturn {
 
       // For intent-driven operate calls, show an intent-select widget instead of user bubble
       if (intentData && agentMode === 'operate') {
-        addMessage({
+        addMessage(threadId, {
           id: createId('intent'),
           role: 'intent-select',
           candidates: intentData.candidates,
           selectedIntent: intentData.selectedIntent,
         });
       } else {
-        addMessage({
+        addMessage(threadId, {
           id: createId('message'),
           role: 'user',
           content: prompt,
@@ -977,22 +1030,29 @@ export function useAgentStream(): UseAgentStreamReturn {
         });
       }
 
-      setIsLoading(true);
+      setThreadLoading(threadId, true);
 
-      // Operate: reset resource tracking (canvas changes persist until explicit keep/revert)
-      if (agentMode === 'operate') {
-        resourcesRef.current = [];
-      }
+      // Operate: track resources produced by this run. Local to the
+      // closure so a concurrent run on another thread can't clobber it.
+      const resources: ResourceLabel[] = [];
 
       const assistantId = createId('message');
-      assistantIdRef.current = assistantId;
 
       // Guard: ensure only one of onError / catch adds an error status
       let errorHandled = false;
 
-      // Create abort controller for this stream
+      // Create abort controller for this stream and register it under
+      // the owning thread so `stopStream` can find it later.
       const abortController = new AbortController();
-      abortControllerRef.current = abortController;
+      abortControllersRef.current.set(threadId, abortController);
+      // Snapshot the controller binding so we only clear our own entry
+      // — a newer run on the same thread must not be cancelled by our
+      // cleanup.
+      const releaseAbort = () => {
+        if (abortControllersRef.current.get(threadId) === abortController) {
+          abortControllersRef.current.delete(threadId);
+        }
+      };
 
       // ── Question-node follow-up bookkeeping ─────────────────────────
       //
@@ -1015,9 +1075,14 @@ export function useAgentStream(): UseAgentStreamReturn {
       let sawDone = false;
 
       if (questionNodeId) {
+        // Reset `viewed` so the layer-panel dot + on-canvas "done · unread"
+        // glow re-appear when the follow-up answer lands (mirrors
+        // `useQuestionRunner`'s initial-run behaviour). `onComplete`
+        // marks it viewed again if the user is still in the thread.
         useCanvasStore.getState().patchNodeSilent(questionNodeId, {
           status: 'running',
           errorMessage: undefined,
+          viewed: false,
         });
       }
 
@@ -1043,7 +1108,7 @@ export function useAgentStream(): UseAgentStreamReturn {
       let preparedPromptId: string | undefined;
       if (agentBinding?.kind === 'external') {
         preparedPromptId = createId('preparedPrompt');
-        addMessage({
+        addMessage(threadId, {
           id: preparedPromptId,
           role: 'prepared-prompt',
           prompt: null,
@@ -1052,6 +1117,12 @@ export function useAgentStream(): UseAgentStreamReturn {
       }
 
       try {
+        // Per-thread messages live in `messagesByThread[threadId]`, so
+        // SSE writes can land on the owning thread regardless of which
+        // chat the user is currently looking at — no `isStillOwnerThread`
+        // guard needed for messages. Loading / abort cleanup is also
+        // keyed to this thread so cross-thread state stays clean.
+
         await agentApi.streamMessage(
           prompt,
           threadId,
@@ -1060,16 +1131,14 @@ export function useAgentStream(): UseAgentStreamReturn {
             onEvent: (event: AgentStreamEvent) => {
               if (event.type === 'done') sawDone = true;
               handleStreamEvent(event, {
+                threadId,
                 assistantId,
                 preparedPromptId,
                 onCanvasCommands: (commands) => {
                   if (agentMode === 'operate') {
                     const newResources = extractResourcesFromCommands(commands);
                     if (newResources.length > 0) {
-                      resourcesRef.current = [
-                        ...resourcesRef.current,
-                        ...newResources,
-                      ];
+                      resources.push(...newResources);
                     }
                   }
                 },
@@ -1088,30 +1157,36 @@ export function useAgentStream(): UseAgentStreamReturn {
                   errorMessage: sawDone ? undefined : err.message,
                 });
               }
-              addMessage({
+              setThreadLoading(threadId, false);
+              releaseAbort();
+              addMessage(threadId, {
                 id: createId('status'),
                 role: 'status',
                 status: 'error',
                 detail: err.message,
               });
-              setIsLoading(false);
-              abortControllerRef.current = null;
             },
             onComplete: () => {
-              setIsLoading(false);
-              abortControllerRef.current = null;
-
               if (questionNodeId) {
+                // If the user is still actively viewing this question
+                // thread at completion, count it as read — they watched
+                // the answer stream. Otherwise leave `viewed: false` so
+                // the layer-panel dot stays "unread" until they open it.
+                const stillViewing =
+                  useChatStore.getState().viewingQuestionThread?.nodeId ===
+                  questionNodeId;
                 useCanvasStore.getState().patchNodeSilent(questionNodeId, {
                   status: 'done',
                   errorMessage: undefined,
+                  ...(stillViewing ? { viewed: true } : {}),
                 });
               }
-
-              if (agentMode === 'operate' && resourcesRef.current.length > 0) {
-                updateMessage(assistantIdRef.current, (m) =>
+              setThreadLoading(threadId, false);
+              releaseAbort();
+              if (agentMode === 'operate' && resources.length > 0) {
+                updateMessage(threadId, assistantId, (m) =>
                   m.role === 'assistant'
-                    ? { ...m, resources: [...resourcesRef.current] }
+                    ? { ...m, resources: [...resources] }
                     : m,
                 );
               }
@@ -1129,17 +1204,20 @@ export function useAgentStream(): UseAgentStreamReturn {
           },
         );
       } catch (err) {
-        // Abort is not an error — stream was intentionally stopped
+        // Abort is not an error — stream was intentionally stopped.
         if (abortController.signal.aborted) {
-          setIsLoading(false);
-          abortControllerRef.current = null;
-          // User explicitly stopped: roll the question node back to
-          // `done` (preserve any partial reply the server kept) rather
-          // than leaving it stuck on `running`.
+          setThreadLoading(threadId, false);
+          releaseAbort();
           if (questionNodeId) {
+            // User stopped the stream while in the thread — count as
+            // viewed; otherwise leave unread so the dot reappears.
+            const stillViewing =
+              useChatStore.getState().viewingQuestionThread?.nodeId ===
+              questionNodeId;
             useCanvasStore.getState().patchNodeSilent(questionNodeId, {
               status: 'done',
               errorMessage: undefined,
+              ...(stillViewing ? { viewed: true } : {}),
             });
           }
           return;
@@ -1157,17 +1235,17 @@ export function useAgentStream(): UseAgentStreamReturn {
             errorMessage: sawDone ? undefined : message,
           });
         }
-        addMessage({
+        setThreadLoading(threadId, false);
+        releaseAbort();
+        addMessage(threadId, {
           id: createId('status'),
           role: 'status',
           status: 'error',
           detail: err instanceof Error ? err.message : 'Unknown error',
         });
-        setIsLoading(false);
       }
     },
     [
-      isLoading,
       pendingAttachments,
       selectionAttachment,
       clearPendingAttachments,
@@ -1177,20 +1255,24 @@ export function useAgentStream(): UseAgentStreamReturn {
       updateMessage,
       getAgentChatContext,
       canvasId,
+      setThreadLoading,
     ],
   );
 
   const stopStream = useCallback(() => {
-    // Tell the server to stop the active run
+    // Stop the currently-visible thread. Tell the server, then abort
+    // our local subscription so callbacks stop firing.
     const tid = useChatStore.getState().threadId;
     void agentApi.stopThread(tid);
 
-    abortControllerRef.current?.abort();
-    abortControllerRef.current = null;
-    setIsLoading(false);
+    const controller = abortControllersRef.current.get(tid);
+    if (controller) {
+      controller.abort();
+      abortControllersRef.current.delete(tid);
+    }
+    setThreadLoading(tid, false);
 
-    // Show interrupted status in chat
-    addMessage({
+    addMessage(tid, {
       id: createId('status'),
       role: 'status',
       status: 'interrupted',
@@ -1198,7 +1280,7 @@ export function useAgentStream(): UseAgentStreamReturn {
 
     // Mark any still-pending tool parts as cancelled so the renderer
     // can drop spinners / show a definitive end state.
-    const msgs = useChatStore.getState().messages;
+    const msgs = useChatStore.getState().messagesByThread[tid] ?? [];
     for (const msg of msgs) {
       if (msg.role !== 'assistant') continue;
       const hasInflight = msg.segments.some(
@@ -1207,7 +1289,7 @@ export function useAgentStream(): UseAgentStreamReturn {
           (s.status === 'pending' || s.status === 'in_progress'),
       );
       if (!hasInflight) continue;
-      updateMessage(msg.id, (m) => {
+      updateMessage(tid, msg.id, (m) => {
         if (m.role !== 'assistant') return m;
         return {
           ...m,
@@ -1219,7 +1301,13 @@ export function useAgentStream(): UseAgentStreamReturn {
         };
       });
     }
-  }, [addMessage, updateMessage]);
+  }, [addMessage, updateMessage, setThreadLoading]);
+
+  // `useChatHistory` reconnect flips loading on/off explicitly for the
+  // owner thread of the reconnect attempt. We simply re-expose
+  // `setThreadLoading` so the caller is forced to name the thread —
+  // no implicit "current thread" coupling.
+  const setIsLoading = setThreadLoading;
 
   return {
     isLoading,

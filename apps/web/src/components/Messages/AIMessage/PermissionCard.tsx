@@ -165,7 +165,7 @@ export function PermissionCard({
   };
 
   function applyResolution(next: PermissionPart['resolution']) {
-    updateMessage(messageId, (m) => {
+    updateMessage(threadId, messageId, (m) => {
       if (m.role !== 'assistant') return m;
       const idx = m.segments.findIndex(
         (s) => s.kind === 'permission' && s.requestId === requestId,

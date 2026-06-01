@@ -25,7 +25,11 @@ import { useAcpSessionMeta } from '@/hooks/useAcpSessionMeta';
 import { useAcpSlashCommands } from '@/hooks/useAcpSlashCommands';
 import { useInternalSlashCommands } from '@/hooks/useInternalSlashCommands';
 import useCanvasStore from '@/store/canvasStore';
-import { useChatStore } from '@/store/chatStore';
+import {
+  selectCurrentHistoryLoaded,
+  selectCurrentMessages,
+  useChatStore,
+} from '@/store/chatStore';
 import { useIntentStore } from '@/store/intentStore';
 import { useLLMStore } from '@/store/llmStore';
 
@@ -44,11 +48,15 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   // Chat history hook — loads history and handles reconnection
   useChatHistory(setIsLoading);
 
-  // Persistent chat state
-  const messages = useChatStore((state) => state.messages);
-  const isHistoryLoaded = useChatStore((state) => state.isHistoryLoaded);
+  // Persistent chat state. Messages are per-thread (see chatStore.ts);
+  // selectors pluck the slice that belongs to the currently-visible
+  // thread, so a stream running in another thread (e.g. a question
+  // node) does not paint into this list.
+  const messages = useChatStore(selectCurrentMessages);
+  const isHistoryLoaded = useChatStore(selectCurrentHistoryLoaded);
   const updateMessage = useChatStore((state) => state.updateMessage);
   const clearMessages = useChatStore((state) => state.clearMessages);
+  const threadId = useChatStore((state) => state.threadId);
   const canvasId = useCanvasStore((state) => state.canvasId);
   const llmConfig = useLLMStore((state) => state.config);
   const llmModels = useLLMStore((state) => state.models);
@@ -61,7 +69,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   // unless the user picks an external agent from the menu.
   const agentBinding = useChatStore((state) => state.agentBinding);
   const setAgentBinding = useChatStore((state) => state.setAgentBinding);
-  const threadId = useChatStore((state) => state.threadId);
   const {
     agents: connectedAgents,
     refresh: refreshAcpAgents,
@@ -347,13 +354,13 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const handleIntentReselect = useCallback(
     (messageId: string, intent: string) => {
       // Update the intent-select message with the new selection
-      updateMessage(messageId, (m) =>
+      updateMessage(threadId, messageId, (m) =>
         m.role === 'intent-select' ? { ...m, selectedIntent: intent } : m,
       );
       // Re-run with the new intent
       void startStream(intent, 'operate');
     },
-    [startStream, updateMessage],
+    [startStream, updateMessage, threadId],
   );
 
   const handleSubmit = async (e: React.FormEvent, agentMode: AgentMode) => {

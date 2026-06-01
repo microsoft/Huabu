@@ -17,13 +17,29 @@ import type {
  */
 const DEFAULT_BINDING: AgentBinding = { kind: 'internal' };
 
-interface ChatState {
-  /** In-memory message list — not persisted to localStorage. */
-  messages: ChatMessage[];
+export interface ChatState {
+  /**
+   * Per-thread message lists. Indexed by threadId, in-memory only.
+   * Each entry is the live message array for that thread; a missing
+   * key means "not yet hydrated from history". The user-visible chat
+   * panel is always `messagesByThread[threadId]` (see
+   * `selectCurrentMessages`).
+   *
+   * Modelled per-thread (instead of a single `messages` array + stash
+   * pattern) so concurrent agent runs across multiple threads — e.g.
+   * canvas chat plus one or more question-node threads — each write
+   * to their own list without colliding when the user navigates away
+   * mid-stream.
+   */
+  messagesByThread: Record<string, ChatMessage[]>;
   /** Current thread identifier for the active canvas. */
   threadId: string;
-  /** True once history has been fetched from the server for the current threadId. */
-  isHistoryLoaded: boolean;
+  /**
+   * Set of threadIds whose history has been fetched at least once.
+   * Drives the `useChatHistory` effect — threads not in this set get
+   * a `fetchHistory` round-trip when they become current.
+   */
+  historyLoadedThreads: Set<string>;
   /** Last agent mode — persisted to determine which checkpoint to load on refresh */
   lastAction: AgentMode;
   /** Map of canvasId → threadId, persisted so each canvas keeps its own thread. */
@@ -56,16 +72,15 @@ interface ChatState {
    */
   viewingSketchCluster: { clusterId: string } | null;
 
-  /** @internal Stashed canvas thread ID while viewing a question thread. */
-  _stashedThreadId?: string;
-  /** @internal Stashed canvas messages while viewing a question thread. */
-  _stashedMessages?: ChatMessage[];
   /**
-   * @internal Stashed canvas agent binding while viewing a question
-   * thread. Restored on `closeQuestionThread` so the canvas chat
-   * goes back to its own bound agent.
+   * @internal Saved canvas thread ID so `closeQuestionThread` knows
+   * which thread to restore. Messages are *not* stashed — they live in
+   * `messagesByThread` keyed by their own threadId and survive the
+   * round-trip naturally.
    */
-  _stashedBinding?: AgentBinding;
+  _savedCanvasThreadId?: string;
+  /** @internal Saved canvas agent binding while viewing a question thread. */
+  _savedCanvasBinding?: AgentBinding;
 
   /**
    * Staged attachments waiting to be sent with the next message.
@@ -81,9 +96,23 @@ interface ChatState {
    */
   selectionAttachment: ChatAttachment | null;
 
+  /**
+   * Set of threadIds with an in-flight agent stream. Multiple threads
+   * may stream concurrently (e.g. canvas chat + a question node's
+   * thread), so the UI must read loading state per thread rather than
+   * from a single hook-local flag. In-memory only — never persisted.
+   */
+  loadingThreadIds: Set<string>;
+
   // Actions
-  addMessage: (message: ChatMessage) => void;
+  /**
+   * Append a message to a specific thread's list. All writers take a
+   * threadId explicitly: SSE callbacks pass the owner-thread captured
+   * at send time, UI handlers pass the currently-visible thread.
+   */
+  addMessage: (threadId: string, message: ChatMessage) => void;
   updateMessage: (
+    threadId: string,
     id: string,
     updater: (msg: ChatMessage) => ChatMessage,
   ) => void;
@@ -99,12 +128,15 @@ interface ChatState {
    * No-op if `messageId` does not resolve to an assistant message.
    */
   upsertAssistantToolPart: (
+    threadId: string,
     messageId: string,
     toolCallId: string,
     factory: (existing: AssistantToolPart | undefined) => AssistantToolPart,
   ) => void;
-  setMessages: (messages: ChatMessage[]) => void;
-  setHistoryLoaded: (loaded: boolean) => void;
+  /** Replace the entire message list for a thread. */
+  setMessages: (threadId: string, messages: ChatMessage[]) => void;
+  /** Mark a thread as history-loaded so `useChatHistory` skips it. */
+  setHistoryLoaded: (threadId: string, loaded: boolean) => void;
   setLastAction: (action: AgentMode) => void;
   /**
    * Reset the current thread: clear messages, mint a fresh threadId,
@@ -159,14 +191,17 @@ interface ChatState {
   openSketchCluster: (clusterId: string) => void;
   /** Close the sketch cluster inspector view. */
   closeSketchCluster: () => void;
+
+  /** Mark / unmark a thread as having an active streaming run. */
+  setThreadLoading: (threadId: string, loading: boolean) => void;
 }
 
 export const useChatStore = create<ChatState>()(
   persist(
     (set, get) => ({
-      messages: [],
+      messagesByThread: {},
       threadId: createId('thread'),
-      isHistoryLoaded: false,
+      historyLoadedThreads: new Set<string>(),
       lastAction: 'ask',
       threadMap: {},
       agentBinding: DEFAULT_BINDING,
@@ -175,43 +210,82 @@ export const useChatStore = create<ChatState>()(
       selectionAttachment: null,
       viewingQuestionThread: null,
       viewingSketchCluster: null,
+      loadingThreadIds: new Set<string>(),
 
-      addMessage: (message) =>
-        set((state) => ({ messages: [...state.messages, message] })),
-
-      updateMessage: (id, updater) =>
+      addMessage: (threadId, message) =>
         set((state) => ({
-          messages: state.messages.map((m) => (m.id === id ? updater(m) : m)),
+          messagesByThread: {
+            ...state.messagesByThread,
+            [threadId]: [...(state.messagesByThread[threadId] ?? []), message],
+          },
         })),
 
-      upsertAssistantToolPart: (messageId, toolCallId, factory) =>
+      updateMessage: (threadId, id, updater) =>
+        set((state) => {
+          const list = state.messagesByThread[threadId];
+          if (!list) return {};
+          return {
+            messagesByThread: {
+              ...state.messagesByThread,
+              [threadId]: list.map((m) => (m.id === id ? updater(m) : m)),
+            },
+          };
+        }),
+
+      upsertAssistantToolPart: (threadId, messageId, toolCallId, factory) =>
+        set((state) => {
+          const list = state.messagesByThread[threadId];
+          if (!list) return {};
+          return {
+            messagesByThread: {
+              ...state.messagesByThread,
+              [threadId]: list.map((m) => {
+                if (m.id !== messageId || m.role !== 'assistant') return m;
+                let found = false;
+                const segments = m.segments.map((seg) => {
+                  if (seg.kind === 'tool' && seg.toolCallId === toolCallId) {
+                    found = true;
+                    return factory(seg);
+                  }
+                  return seg;
+                });
+                // If no existing tool part, append a new one. Callers
+                // can rely on the inserted part's `kind`/`toolCallId`
+                // being exactly what `factory(undefined)` produced.
+                if (!found) segments.push(factory(undefined));
+                return { ...m, segments };
+              }),
+            },
+          };
+        }),
+
+      setMessages: (threadId, messages) =>
         set((state) => ({
-          messages: state.messages.map((m) => {
-            if (m.id !== messageId || m.role !== 'assistant') return m;
-            let found = false;
-            const segments = m.segments.map((seg) => {
-              if (seg.kind === 'tool' && seg.toolCallId === toolCallId) {
-                found = true;
-                return factory(seg);
-              }
-              return seg;
-            });
-            // If no existing tool part, append a new one. Callers can
-            // rely on the inserted part's `kind`/`toolCallId` being
-            // exactly what `factory(undefined)` produced.
-            if (!found) segments.push(factory(undefined));
-            return { ...m, segments };
-          }),
+          messagesByThread: {
+            ...state.messagesByThread,
+            [threadId]: messages,
+          },
         })),
 
-      setMessages: (messages) => set({ messages }),
-
-      setHistoryLoaded: (loaded) => set({ isHistoryLoaded: loaded }),
+      setHistoryLoaded: (threadId, loaded) =>
+        set((state) => {
+          const isAlreadyLoaded = state.historyLoadedThreads.has(threadId);
+          if (isAlreadyLoaded === loaded) return {};
+          const next = new Set(state.historyLoadedThreads);
+          if (loaded) next.add(threadId);
+          else next.delete(threadId);
+          return { historyLoadedThreads: next };
+        }),
 
       setLastAction: (action) => set({ lastAction: action }),
 
       clearMessages: (canvasId, options) => {
-        const { threadMap, bindingMap } = get();
+        const {
+          threadMap,
+          bindingMap,
+          messagesByThread,
+          historyLoadedThreads,
+        } = get();
         const newThreadId = createId('thread');
         const initialBinding = options?.binding ?? DEFAULT_BINDING;
         const updatedThreads = canvasId
@@ -223,10 +297,14 @@ export const useChatStore = create<ChatState>()(
         const updatedBindings = canvasId
           ? { ...bindingMap, [canvasId]: initialBinding }
           : { ...bindingMap };
+        // Seed an empty messages list for the new thread and mark it
+        // history-loaded so the history hook doesn't try to fetch.
+        const nextLoaded = new Set(historyLoadedThreads);
+        nextLoaded.add(newThreadId);
         set({
-          messages: [],
+          messagesByThread: { ...messagesByThread, [newThreadId]: [] },
           threadId: newThreadId,
-          isHistoryLoaded: true,
+          historyLoadedThreads: nextLoaded,
           lastAction: 'ask',
           pendingAttachments: [],
           selectionAttachment: null,
@@ -255,8 +333,9 @@ export const useChatStore = create<ChatState>()(
         const binding = bindingMap[canvasId] ?? DEFAULT_BINDING;
         set({
           threadId: tid,
-          messages: [],
-          isHistoryLoaded: false,
+          // Don't touch messagesByThread — if this canvas's thread is
+          // already cached, the user sees it instantly; otherwise the
+          // history hook will populate it from the server.
           pendingAttachments: [],
           selectionAttachment: null,
           threadMap: { ...threadMap, [canvasId]: tid },
@@ -287,7 +366,6 @@ export const useChatStore = create<ChatState>()(
       openQuestionThread: (nodeId, threadId, binding) => {
         const {
           threadId: currentThreadId,
-          messages: currentMessages,
           agentBinding: currentBinding,
           viewingQuestionThread: currentViewing,
         } = get();
@@ -296,7 +374,7 @@ export const useChatStore = create<ChatState>()(
         if (currentViewing?.threadId === threadId) return;
 
         // If we're already viewing a different question thread, don't
-        // overwrite the stash — keep the original canvas thread.
+        // overwrite the saved canvas binding — keep the original.
         const isAlreadyViewing = currentViewing !== null;
 
         // Question-thread binding: prefer the binding the question was
@@ -304,20 +382,17 @@ export const useChatStore = create<ChatState>()(
         // for legacy nodes that pre-date `data.agentBinding`.
         const nextBinding: AgentBinding = binding ?? DEFAULT_BINDING;
 
+        // No need to stash messages — they live in `messagesByThread`
+        // keyed by their own threadId and survive the navigation. The
+        // history hook handles first-time hydration of the question
+        // thread; subsequent visits hit the cache.
         set({
           viewingQuestionThread: { nodeId, threadId },
-          // Swap to the question thread — history hook will refetch
           threadId: threadId,
-          messages: [],
-          isHistoryLoaded: false,
-          // Swap binding so ChatPanel's header title shows the agent
-          // that actually answered this question, not the canvas's.
           agentBinding: nextBinding,
-          // Stash the previous thread ID + binding so we can restore on close
           ...(!isAlreadyViewing && {
-            _stashedThreadId: currentThreadId,
-            _stashedMessages: currentMessages,
-            _stashedBinding: currentBinding,
+            _savedCanvasThreadId: currentThreadId,
+            _savedCanvasBinding: currentBinding,
           }),
         });
       },
@@ -326,31 +401,27 @@ export const useChatStore = create<ChatState>()(
         const state = get();
         set({
           viewingQuestionThread: null,
-          threadId: state._stashedThreadId ?? state.threadId,
-          messages: state._stashedMessages ?? [],
-          isHistoryLoaded: (state._stashedMessages ?? []).length > 0,
-          agentBinding: state._stashedBinding ?? state.agentBinding,
-          _stashedThreadId: undefined,
-          _stashedMessages: undefined,
-          _stashedBinding: undefined,
+          threadId: state._savedCanvasThreadId ?? state.threadId,
+          agentBinding: state._savedCanvasBinding ?? state.agentBinding,
+          _savedCanvasThreadId: undefined,
+          _savedCanvasBinding: undefined,
         });
       },
 
       openSketchCluster: (clusterId) => {
         // Sketch inspector is a pure overlay over the existing chat
-        // state — no thread switch, no message stash needed. We just flip a
-        // flag and the ChatPanel renders synthesized messages from the
-        // intent store instead of `state.messages`. Closing any active
-        // question thread first keeps the two modes mutually exclusive.
+        // state — no thread switch needed. We just flip a flag and the
+        // ChatPanel renders synthesized messages from the intent
+        // store. Closing any active question thread first keeps the
+        // two modes mutually exclusive.
         const state = get();
         if (state.viewingQuestionThread) {
           set({
             viewingQuestionThread: null,
-            threadId: state._stashedThreadId ?? state.threadId,
-            messages: state._stashedMessages ?? [],
-            isHistoryLoaded: (state._stashedMessages ?? []).length > 0,
-            _stashedThreadId: undefined,
-            _stashedMessages: undefined,
+            threadId: state._savedCanvasThreadId ?? state.threadId,
+            agentBinding: state._savedCanvasBinding ?? state.agentBinding,
+            _savedCanvasThreadId: undefined,
+            _savedCanvasBinding: undefined,
           });
         }
         set({ viewingSketchCluster: { clusterId } });
@@ -359,6 +430,16 @@ export const useChatStore = create<ChatState>()(
       closeSketchCluster: () => {
         set({ viewingSketchCluster: null });
       },
+
+      setThreadLoading: (threadId, loading) =>
+        set((state) => {
+          const isAlreadyLoading = state.loadingThreadIds.has(threadId);
+          if (isAlreadyLoading === loading) return {};
+          const next = new Set(state.loadingThreadIds);
+          if (loading) next.add(threadId);
+          else next.delete(threadId);
+          return { loadingThreadIds: next };
+        }),
     }),
     {
       name: 'sediment-chat',
@@ -371,3 +452,21 @@ export const useChatStore = create<ChatState>()(
     },
   ),
 );
+
+/** Stable empty array so selectors that miss the cache don't trigger renders. */
+const EMPTY_MESSAGES: ChatMessage[] = [];
+
+/**
+ * Read the currently-visible thread's message list. Returns a stable
+ * empty array reference when the thread hasn't been hydrated yet.
+ */
+export const selectCurrentMessages = (state: ChatState): ChatMessage[] =>
+  state.messagesByThread[state.threadId] ?? EMPTY_MESSAGES;
+
+/** True if the currently-visible thread has been hydrated from the server. */
+export const selectCurrentHistoryLoaded = (state: ChatState): boolean =>
+  state.historyLoadedThreads.has(state.threadId);
+
+/** True if the currently-visible thread has an active streaming run. */
+export const selectCurrentIsLoading = (state: ChatState): boolean =>
+  state.loadingThreadIds.has(state.threadId);
