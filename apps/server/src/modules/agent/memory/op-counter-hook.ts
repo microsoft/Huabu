@@ -44,13 +44,11 @@ import type {
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 /**
- * URL prefixes the hook ignores entirely. Three classes:
+ * URL prefixes the hook ignores entirely. Two classes:
  *
  *   - workspace + LLM config endpoints — not bound to a canvas; even
  *     if they were, configuring an API key is not "working on a
  *     canvas".
- *   - memory-debug — the debug panel must never trigger memory work
- *     (it would be observing its own ripples).
  *   - agent helpers (`/stop`, `/stream/...`) — chat lifecycle, not
  *     user authoring. The main `POST /api/agent` is handled by the
  *     dedicated preHandler tap below.
@@ -58,7 +56,6 @@ const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const SKIPPED_PREFIXES = [
   '/api/workspace',
   '/api/llm',
-  '/api/memory-debug', // [debug-tap] safe to leave even after debug.ts removal
   '/api/agent/stop',
   '/api/agent/stream',
 ];

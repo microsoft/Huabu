@@ -30,6 +30,6 @@ A non-trivial shift in **what this canvas is for** or **where it's at** that the
 
 ```json
 {
-  "body": "Sci-fi novel outline. Five-act structure laid out left-to-right; Act 2 in progress, focused on the protagonist's first encounter with the alien artifact. User is deciding whether to introduce the antagonist in scene 5 or postpone to Act 3. Existing antagonist sketch in `nodes/Antagonist sketch.md` is a placeholder."
+  "body": "Sci-fi novel outline, focused on the protagonist's first encounter with the alien artifact. User is deciding whether to introduce the antagonist in scene 5 or postpone to Act 3. Existing antagonist sketch in `nodes/Antagonist sketch.md` is a placeholder."
 }
 ```
