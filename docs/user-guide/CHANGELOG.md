@@ -4,6 +4,25 @@
 
 ---
 
+## 2026-06-01 · 内置 `/create-skill` 与 `/update-skill` 两个 slash skill
+
+**What Changed**
+
+- 新增两个系统内置 slash skill，**仅 operate (Agent) 模式可用**：
+  - **`/create-skill <描述>`** — 按描述新建一个 user skill。Agent 自动取 id（kebab-case）、组合 frontmatter、写 body，最后调用 `fs_write({ path: "skills/<id>/SKILL.md", mode: "overwrite", rationale, body })`。整个过程无需用户确认细节，按描述生成即可。
+  - **`/update-skill <目标 + 改动>`** — 按目标提示从 catalogue 里定位 user/merged skill，`read()` 现有内容后用 `fs_write({ mode: "replace_string" })` 做局部编辑，或在结构性重写时用 `mode: "overwrite"`。
+- 两个 skill 都遵循前一次提交的 `/` 调用语义：选中后 server 把 SKILL.md body 强制注入到本轮 system preamble，agent 按 body 里的步骤执行。
+- 写入完全复用 `fs_write` 工具，不新增任何 handler。Operate agent 的工具列表里新增了 `fs_write` 入口，并在 AGENT.md 系统提示里明确写出"仅在被显式 `/`-invoked skill 引用时才允许调用"。
+
+**Notes**
+
+- **新增一个 frontmatter 字段 `userInvokable: true`**：用来让"看起来像系统能力但又应该出现在 `/` 菜单里"的系统 skill 通过过滤器。默认为 `false`，所以原有 `canvas` / `sketch-gestures` 等 system skill **行为不变**，仍只出现在 agent 自己的 `{{skillCatalogue}}` 里。
+- **菜单过滤规则更新**：`user` / `merged` 永远进菜单；`system` 只有在 `userInvokable: true` 时才进。server 端 `agent.route.ts` 的 invokedSkills 白名单走的是**同一条** `isUserInvokableSkill` 谓词，stale client 不能绕。
+- **不要扩散 `fs_write` 到 operate 的普通 turn**：operate 的 AGENT.md 已经写明此约束。如果未来发现 agent 在普通画布操作里乱写 skill / memory，应在 AGENT.md 里加更强的措辞，而不是把 `fs_write` 拆出来。
+- 文件位置：`apps/server/src/prompt/skills/create-skill/SKILL.md` 和 `apps/server/src/prompt/skills/update-skill/SKILL.md`（loader 只识别一层目录，所以平铺而非 `slash-skill/` 子目录；slash 性质由 `userInvokable: true` 表达，比物理目录更稳）。
+
+---
+
 ## 2026-06-01 · 聊天面板新增 `/` 手动调用 skill 能力
 
 **What Changed**

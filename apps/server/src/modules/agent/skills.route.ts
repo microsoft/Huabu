@@ -4,20 +4,20 @@
  * Mounted at `/api/skills`. Backs the slash-command typeahead in the
  * web chat input for internal (built-in agent) bindings.
  *
- * Listing rule: we deliberately only surface `user` and `merged`
- * skills here. `system`-only skills are part of the agent's
- * `{{skillCatalogue}}` so the model can still pick them up on its own,
- * but they are not user-invokable via `/` because:
- *  - they would create a long, noisy menu out of skills the user did
- *    not author and may not even be aware of, and
- *  - explicit invocation has stronger force-include semantics (see the
- *    `invokedSkills` handling in agent.route.ts) that should be
- *    opt-in per user, not blanket-applied to every shipped skill.
+ * Listing rule:
+ *  - `user` / `merged` skills are always listed (anything the user
+ *    authored or extended).
+ *  - `system` skills are listed **only** when their frontmatter sets
+ *    `userInvokable: true`. Reserved for system skills that are
+ *    essentially user-facing commands (e.g. `create-skill`,
+ *    `update-skill`). The default `false` keeps the bulk of shipped
+ *    skills catalogue-only — they remain in `{{skillCatalogue}}`
+ *    for autonomous use, but stay out of the `/` menu.
  *
  * Server-side filtering is the source of truth — the client mirrors
- * the same `user | merged` cut for UX, but `invokedSkills` is
- * re-validated on the agent route so a stale or hand-crafted client
- * cannot force a `system` skill body into a turn.
+ * the same cut for UX, but `invokedSkills` is re-validated on the
+ * agent route so a stale or hand-crafted client cannot force a
+ * non-invokable system skill body into a turn.
  */
 
 import {
@@ -26,9 +26,21 @@ import {
   type SkillsListResponse,
 } from '@sediment/shared';
 
-import { listSkills } from '../../prompt/skills/loader.js';
+import { listSkills, type LoadedSkill } from '../../prompt/skills/loader.js';
 
 import type { FastifyPluginAsync } from 'fastify';
+
+/**
+ * Shared visibility predicate — the single source of truth for
+ * "should this skill be invokable via `/`". Re-exported so the
+ * agent route's `invokedSkills` whitelist applies the same rule
+ * and a stale client cannot smuggle a non-invokable skill body
+ * into a turn.
+ */
+export function isUserInvokableSkill(skill: LoadedSkill): boolean {
+  if (skill.source === 'user' || skill.source === 'merged') return true;
+  return skill.source === 'system' && skill.userInvokable === true;
+}
 
 const skillsRoutes: FastifyPluginAsync = async (app) => {
   // GET /api/skills?scope=ask|operate|sketch|external
@@ -45,10 +57,7 @@ const skillsRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const all = listSkills(parsed.data.scope);
-    // User-authored only — see file-header rationale.
-    const userVisible = all.filter(
-      (s) => s.source === 'user' || s.source === 'merged',
-    );
+    const userVisible = all.filter(isUserInvokableSkill);
 
     const skills: SkillCatalogueEntry[] = userVisible.map((s) => ({
       id: s.id,

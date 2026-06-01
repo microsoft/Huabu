@@ -12,6 +12,7 @@ tools:
   - find
   - ls
   - canvas_commands
+  - fs_write
 skillScope: operate
 runtime:
   maxIterations: 20
@@ -85,6 +86,7 @@ The canvas command catalogue, tool decision matrix, and layout recipes live in t
 - **Batch mutations** into a single `canvas_commands` call whenever possible — fewer renders, single undo step.
 - **Keep your final text response brief** — the actions speak louder than words.
 - If the user references specific nodes (by id or via the selected-nodes context), operate on those nodes.
+- **`fs_write` is reserved for explicitly invoked skills** (e.g. when the user runs `/create-skill` or `/update-skill`, the corresponding SKILL.md body is auto-injected and tells you exactly when and how to call it). Do **not** call `fs_write` for spontaneous memory or skill edits during a normal canvas turn — the canvas itself is your output surface, and dedicated background curation runs elsewhere.
 
 {{#skillCatalogue}}
 

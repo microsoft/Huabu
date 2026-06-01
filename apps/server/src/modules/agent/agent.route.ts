@@ -30,6 +30,7 @@ import { runAcpAgent } from '../agent/acp/service.js';
 import { runAgent } from '../agent/agent.service.js';
 import { readWorkspaceMemory } from '../agent/memory/index.js';
 import { buildAgentNodeRef } from '../agent/node-ref.js';
+import { isUserInvokableSkill } from '../agent/skills.route.js';
 import { readChatParts } from '../agent/store/chat-parts-store.js';
 import { loadContext, saveContext } from '../agent/store/chat-store.js';
 import {
@@ -1195,15 +1196,21 @@ const agentRoutes: FastifyPluginAsync = async (
     // for this turn — distinct from the on-demand catalogue surface
     // where the model decides whether to `read()` a skill.
     //
-    // Security/scope rule: only `user` / `merged` skills are honoured;
-    // unknown ids and system-only skills are dropped silently (logged
-    // for diagnostics). This matches the same cut applied by the
+    // Security/scope rule: honoured ids must satisfy
+    // {@link isUserInvokableSkill} — i.e. `user` / `merged`, OR a
+    // `system` skill that explicitly opts in via
+    // `userInvokable: true` in its frontmatter. Unknown or
+    // non-invokable ids are dropped silently (logged for
+    // diagnostics). This matches the same cut applied by the
     // `/api/skills` listing route and prevents a stale or hand-rolled
-    // client from forcing a system skill body into the turn.
+    // client from forcing a non-invokable skill body into the turn.
     if (invokedSkills && invokedSkills.length > 0) {
       const seen = new Set<string>();
       const injected: { id: string; name: string; body: string }[] = [];
-      const dropped: { id: string; reason: 'unknown' | 'system-only' }[] = [];
+      const dropped: {
+        id: string;
+        reason: 'unknown' | 'not-invokable';
+      }[] = [];
       for (const rawId of invokedSkills) {
         const id = rawId.trim();
         if (!id || seen.has(id)) continue;
@@ -1213,8 +1220,8 @@ const agentRoutes: FastifyPluginAsync = async (
           dropped.push({ id, reason: 'unknown' });
           continue;
         }
-        if (skill.source === 'system') {
-          dropped.push({ id, reason: 'system-only' });
+        if (!isUserInvokableSkill(skill)) {
+          dropped.push({ id, reason: 'not-invokable' });
           continue;
         }
         injected.push({ id: skill.id, name: skill.name, body: skill.body });
@@ -1223,7 +1230,7 @@ const agentRoutes: FastifyPluginAsync = async (
       if (dropped.length > 0) {
         request.log.warn(
           { dropped },
-          '[agent] invokedSkills: dropped ids (unknown or system-only)',
+          '[agent] invokedSkills: dropped ids (unknown or not user-invokable)',
         );
       }
 

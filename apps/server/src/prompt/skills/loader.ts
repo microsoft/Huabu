@@ -74,6 +74,21 @@ export interface SkillFrontmatter {
   appliesTo: SkillScope[];
   triggers?: string[];
   version?: number;
+  /**
+   * Opt this skill into the user-invokable `/` slash menu even when
+   * `source === 'system'`. Defaults to `false` — most system skills
+   * stay catalogue-only and are loaded autonomously by the agent.
+   *
+   * Use this for system skills that are essentially user-facing
+   * commands (e.g. `create-skill`, `update-skill`): the menu becomes
+   * their canonical entry point, and explicit invocation forces the
+   * body into context regardless of whether the agent would have
+   * discovered it on its own.
+   *
+   * `user` / `merged` skills are always user-invokable — this flag
+   * has no effect on them.
+   */
+  userInvokable?: boolean;
 }
 
 export interface LoadedSkill extends SkillFrontmatter {
@@ -168,6 +183,10 @@ function validateFrontmatter(
     ? raw.triggers.map((t) => String(t))
     : undefined;
   const version = typeof raw.version === 'number' ? raw.version : undefined;
+  // Optional boolean. Treat anything that isn't an explicit `true` as
+  // `false` (the menu-gating default) so a typo or stray string in
+  // user content can't accidentally surface a non-invokable skill.
+  const userInvokable = raw.userInvokable === true ? true : undefined;
 
   return {
     id,
@@ -176,6 +195,7 @@ function validateFrontmatter(
     appliesTo,
     triggers,
     version,
+    userInvokable,
   };
 }
 
@@ -396,6 +416,14 @@ function mergeSkill(system: LoadedSkill, user: LoadedSkill): LoadedSkill {
   const triggers = triggersUnion.length > 0 ? triggersUnion : undefined;
   const description = `${user.description} (extended)`;
   const version = user.version ?? system.version;
+  // Merged skills are user-authored extensions of a system skill, so
+  // they are always user-invokable in practice — but propagate an
+  // explicit `userInvokable: true` from either side too, so the flag
+  // survives a future change where merged stops implying invokable.
+  const userInvokable =
+    user.userInvokable === true || system.userInvokable === true
+      ? true
+      : undefined;
 
   return {
     id: system.id,
@@ -404,6 +432,7 @@ function mergeSkill(system: LoadedSkill, user: LoadedSkill): LoadedSkill {
     appliesTo,
     triggers,
     version,
+    userInvokable,
     body: `${system.body}${USER_EXTENSION_HEADER}${user.body}`,
     // Source path points at the system file — the merged body only
     // exists in memory. Writers needing the user-side path go through

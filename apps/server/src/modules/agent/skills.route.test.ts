@@ -81,7 +81,7 @@ afterEach(() => {
 });
 
 describe('GET /api/skills — listing', () => {
-  it('returns only user / merged skills (system-only entries are hidden)', async () => {
+  it('hides catalogue-only system skills, surfaces user / merged / userInvokable system skills', async () => {
     writeUserSkill('user-only-a', ['ask', 'operate']);
     writeUserSkill('user-only-b', ['ask']);
 
@@ -91,16 +91,25 @@ describe('GET /api/skills — listing', () => {
       expect(res.statusCode).toBe(200);
       const body = res.json<InjectListResponse>();
       const ids = body.skills.map((s) => s.id);
-      // The system catalogue ships skills like `canvas` / `sketch-gestures`
-      // — none of those should appear here because they're `source === 'system'`.
+      // Catalogue-only system skills (the default for shipped
+      // skills like `canvas` / `sketch-gestures`) must NOT appear
+      // in the user-invokable menu — they live in the agent's
+      // `{{skillCatalogue}}` only.
       expect(ids).not.toContain('canvas');
       expect(ids).not.toContain('sketch-gestures');
       // User skills must show up.
       expect(ids).toContain('user-only-a');
       expect(ids).toContain('user-only-b');
-      // Every returned entry must be from the user-owned bucket.
+      // System skills that opt in via `userInvokable: true` are
+      // expected to show up too — `create-skill` and `update-skill`
+      // ship with this flag set so the slash menu can launch them.
+      expect(ids).toContain('create-skill');
+      expect(ids).toContain('update-skill');
+      // Every returned entry must be either user/merged OR an
+      // opt-in system skill — no other source/flag combo should
+      // ever leak in.
       for (const skill of body.skills) {
-        expect(['user', 'merged']).toContain(skill.source);
+        expect(['user', 'merged', 'system']).toContain(skill.source);
       }
     } finally {
       await app.close();
@@ -169,18 +178,19 @@ describe('GET /api/skills — listing', () => {
     }
   });
 
-  it('returns an empty list when the workspace has no user skills', async () => {
+  it('returns only the opt-in system skills when the workspace has no user skills', async () => {
     const app = await buildApp();
     try {
       const res = await app.inject({ method: 'GET', url: '/skills/' });
       expect(res.statusCode).toBe(200);
       const body = res.json<InjectListResponse>();
-      // The list is non-undefined and either empty or contains only
-      // `merged` overrides (none exist in this test because no user
-      // skill matches a system id).
+      // With an empty workspace, the only entries are the shipped
+      // `userInvokable: true` system skills (`create-skill`,
+      // `update-skill`). Any other source/flag combination would be
+      // a regression in the filter.
       expect(Array.isArray(body.skills)).toBe(true);
       for (const skill of body.skills) {
-        expect(['user', 'merged']).toContain(skill.source);
+        expect(skill.source).toBe('system');
       }
     } finally {
       await app.close();
