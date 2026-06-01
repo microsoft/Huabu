@@ -1030,7 +1030,6 @@ export async function* runAcpAgent(
       agentAlias: binding.alias,
       canvasContext,
       canvasRoot: canvasCwd,
-      history: context.messages,
       logger,
     });
     preparedPrompt = result.prompt;

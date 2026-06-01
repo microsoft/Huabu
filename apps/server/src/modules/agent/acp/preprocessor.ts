@@ -87,7 +87,8 @@ The user is chatting with an **external** coding/research agent (Claude Code, Co
 - **rawMessage**: the user's literal chat input.
 - **agentAlias**: short name of the bound external agent.
 - **selectedNodes**: zero or more canvas nodes the user explicitly attached to this turn. Each node has \`{ id, type, label?, filename }\`. Nodes ≤ 16 KB also include a \`body\` field (full markdown content) — use it to synthesise inline. Larger nodes include \`sizeBytes\` instead, signalling they exist but cannot fit inline.
-- **recentTurns**: brief excerpt of the recent dialog between user and external agent. Use only for context — do **not** re-issue earlier asks.
+
+You do **not** receive prior turns. The external agent maintains its own full memory of the thread (via ACP \`session/load\`), so referential phrases like *"that"*, *"the previous one"*, *"as you said"* should be passed through verbatim — the external agent will resolve them against its own session. Do **not** paraphrase or expand them, and do **not** re-issue earlier asks.
 
 ## Your output
 
@@ -151,13 +152,6 @@ export interface PreparePromptInput {
    * prefix. In practice service.ts always supplies `canvasRoot`.
    */
   canvasRoot?: string;
-  /**
-   * Conversational history for THIS thread (user/assistant turns so
-   * far). We only forward a short tail to keep the preprocessor LLM
-   * call cheap; full long-term memory lives on the external agent's
-   * own ACP session.
-   */
-  history: Context['messages'];
   logger: FastifyBaseLogger;
 }
 
@@ -179,8 +173,7 @@ export interface PreparePromptResult {
 export async function prepareExternalAgentPrompt(
   input: PreparePromptInput,
 ): Promise<PreparePromptResult> {
-  const { rawText, agentAlias, canvasContext, canvasRoot, history, logger } =
-    input;
+  const { rawText, agentAlias, canvasContext, canvasRoot, logger } = input;
 
   // ── Slash-command short-circuit ────────────────────────────────────
   //
@@ -234,7 +227,6 @@ export async function prepareExternalAgentPrompt(
         ? { sizeBytes: ref.sizeBytes }
         : {}),
     })),
-    recentTurns: extractRecentTurns(history, 4),
   };
 
   const piContext: Context = {
@@ -363,68 +355,6 @@ function flattenSelection(nodes: WireSelectionNode[]): AgentNodeRef[] {
   };
   walk(nodes);
   return refs;
-}
-
-/**
- * Pull a short tail of user/assistant turns into a compact form for
- * the preprocessor LLM. Strips system preambles / metadata tags so
- * the payload stays small and on-topic.
- */
-function extractRecentTurns(
-  messages: Context['messages'],
-  maxTurns: number,
-): Array<{ role: 'user' | 'assistant'; text: string }> {
-  const out: Array<{ role: 'user' | 'assistant'; text: string }> = [];
-  for (let i = messages.length - 1; i >= 0 && out.length < maxTurns; i--) {
-    const msg = messages[i];
-    if (msg.role !== 'user' && msg.role !== 'assistant') continue;
-    const text = stringifyMessageContent(msg.content);
-    if (!text) continue;
-    const cleaned = stripSystemMarkers(text).trim();
-    if (!cleaned) continue;
-    out.push({ role: msg.role, text: truncate(cleaned, 800) });
-  }
-  return out.reverse();
-}
-
-function stringifyMessageContent(content: unknown): string {
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) {
-    return content
-      .filter(
-        (b): b is { type: 'text'; text: string } =>
-          !!b &&
-          typeof b === 'object' &&
-          (b as { type?: unknown }).type === 'text' &&
-          typeof (b as { text?: unknown }).text === 'string',
-      )
-      .map((b) => b.text)
-      .join('\n');
-  }
-  return '';
-}
-
-/**
- * Strip Huabu's internal `[SYSTEM ...]` metadata tags + the
- * `[SYSTEM Error]` / `[SYSTEM Interrupted]` / `[SYSTEM PreparedPrompt]`
- * markers we encode into user messages. Mirrors the cleanup in
- * `buildHistoryItems` so the preprocessor sees the same content the
- * human did.
- */
-function stripSystemMarkers(text: string): string {
-  // Drop whole-message markers — these are status / sidecar rows that
-  // were never spoken by the user.
-  if (
-    text.startsWith('[SYSTEM Error]') ||
-    text.startsWith('[SYSTEM Interrupted]') ||
-    text.startsWith('[SYSTEM PreparedPrompt]')
-  ) {
-    return '';
-  }
-  return text
-    .replace(/\n?\[SYSTEM selectedNodeIds:\[.*?\]\]/g, '')
-    .replace(/\n?\[SYSTEM attachments:\[.*\]\]/g, '')
-    .replace(/^\[Canvas ID: [^\]]+\]\n\n/, '');
 }
 
 function truncate(s: string, max: number): string {
