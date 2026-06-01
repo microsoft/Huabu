@@ -4,6 +4,25 @@
 
 ---
 
+## 2026-06-01 · 三个 memory 写工具收敛为统一的 `fs_write`
+
+**What Changed**
+
+- `memory_workspace_write` / `memory_canvas_write` / `memory_skill_write` 三个工具被合并为一个 `fs_write({ path, mode, ... })`。Agent 通过虚拟 `path` 选目标（`memory/workspace.md` / `memory/canvas.md` / `skills/<id>/SKILL.md`，与 `read` 工具接受的虚拟路径对称），通过 `mode` 选写法：
+  - `mode: "overwrite"` — `body` 整体覆盖；文件不存在时即创建。
+  - `mode: "replace_string"` — 找到唯一出现的 `oldString`，替换为 `newString`；文件必须存在；匹配 0 或 ≥2 次都 reject。
+- Workspace memory 不再走 writer 层的 bullet-merge / dedup，agent 直接管理文档（先 `read` 再 `replace_string` 或 `overwrite`）。"只增不删"由 prompt 纪律保证。
+- Skill 文件的 frontmatter 不再由 writer 渲染，`body` 必须由 agent 提交完整文件内容（含 `---\n...\n---` 前导 fence）。
+- 创建新 skill（`mode: "overwrite"` 在不存在的 `skills/<id>/SKILL.md` 路径上）仍硬性要求 `rationale` ≥ 20 字符；其它情况 `rationale` 被忽略。
+
+**Notes**
+
+- **内部工具调整，普通用户无感知**：所有写入的目标文件、磁盘布局、cap（workspace + canvas 仍是 4 KB / 80 行；skill 仍无 cap）、并发锁、skill 缓存失效行为都保持不变。
+- **自定义 agent 配置需要更新**：若你在自定义 prompt / AGENT.md 里引用了旧工具名（`memory_workspace_write` 等），请替换为 `fs_write`，并按新参数形态调整 schema。所有内置 prompt 已同步。
+- **行级编辑能力顺带获得**：`mode: "replace_string"` 在三类 memory 文件上都可用，特别适合对长 skill 文件做局部修订，不再需要 LLM 整段重抄。
+
+---
+
 ## 2026-05-31 · ACP 外部 agent 现在能在聊天面板里切模式 / 模型 / 配置项
 
 **What Changed**

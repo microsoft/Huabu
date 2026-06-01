@@ -1,35 +1,46 @@
-# Canvas canvas memory — `memory_canvas_write`
+# Canvas memory
 
-**Target file:** `<canvas>/.memory/canvas.md` — per-canvas situational notes ("what's this canvas about right now"). Hidden from the user; consumed by future agents that land on this canvas cold.
+Tool: `fs_write({ path: "memory/canvas.md", mode, ... })`
 
-## When to write
+Per-canvas situational briefing. Hidden from the user; read cold by the next agent that lands on this canvas.
 
-A non-trivial shift in **what this canvas is for** or **where it's at** that the next chat turn would benefit from knowing without having to re-derive from the node graph:
+## Write what
 
-- the canvas's current purpose (story outline, research synthesis, project plan…)
-- where the user is in their workflow (act 2 of 5, draft 3, debating between options A and B)
+Non-trivial shifts in **what this canvas is for** or **where it's at**:
+
+- current purpose (story outline, research synthesis, project plan…)
+- where the user is in the workflow (act 2 of 5, draft 3, choosing between A and B)
 - decisions already made that constrain future moves
-- things the user explicitly wants the next agent to remember
+- things the user explicitly asked the next agent to remember
 
-**Not** for cross-canvas preferences — those go to workspace memory.
-**Not** for reusable patterns — those go to skill memory.
+Cross-canvas traits → workspace. Reusable how-tos → skill.
 
-## Required args
+## Modes
 
-| Field  | Type     | Notes                                                                   |
-| ------ | -------- | ----------------------------------------------------------------------- |
-| `body` | `string` | Wholesale replacement of the canvas memory body. Markdown. NOT a delta. |
+- `overwrite` — **default.** The body is the current-state briefing; rewriting it whole is the norm.
+- `replace_string` — surgical edit of one line when you don't want to re-derive the rest.
 
-## Discipline
+## Rules
 
-- **Wholesale replacement.** Whatever you write becomes the entire new file. Read `memory/canvas.md` first so you don't drop context the user still cares about; carry forward what's relevant + integrate the new state.
-- **Body capped at 4 KB / 80 lines.** Oversized writes are rejected.
-- **Briefing, not journal.** Write the _current state_ in one short paragraph (or a tight bullet list). The next agent should be able to land cold and understand the situation in <30 seconds. No history of past changes; no chronological narrative.
+- **`read("memory/canvas.md")` first** to carry forward what the user still cares about.
+- Briefing, not journal. One short paragraph or tight bullet list; no history of past changes.
+- Body capped at 4 KB / 80 lines.
 
-## Example
+## Examples
 
 ```json
 {
-  "body": "Sci-fi novel outline, focused on the protagonist's first encounter with the alien artifact. User is deciding whether to introduce the antagonist in scene 5 or postpone to Act 3. Existing antagonist sketch in `nodes/Antagonist sketch.md` is a placeholder."
+  "path": "memory/canvas.md",
+  "mode": "overwrite",
+  "body": "Sci-fi novel outline, protagonist's first encounter with the alien artifact. User is deciding whether to introduce the antagonist in scene 5 or postpone to Act 3."
+}
+```
+
+```json
+{
+  "path": "memory/canvas.md",
+  "mode": "replace_string",
+  "oldString": "deciding whether to introduce the antagonist in scene 5 or postpone to Act 3",
+  "newString": "settled on introducing the antagonist in Act 3"
 }
 ```

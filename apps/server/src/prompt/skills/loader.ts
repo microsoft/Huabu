@@ -11,9 +11,9 @@
  *   - **user** skills (workspace-owned, user- and memory-agent-editable):
  *     live under `<workspace>/setting/skills/<id>/SKILL.md`. The user
  *     can hand-edit these; the memory sub-agent may also write to them
- *     via the `memory_skill_write` writer. Either path makes them
- *     mutable at runtime, so this layer is cached per-workspace with
- *     mtime tracking and a short TTL.
+ *     via `fs_write({ path: "skills/<id>/SKILL.md", ... })`. Either
+ *     path makes them mutable at runtime, so this layer is cached
+ *     per-workspace with mtime tracking and a short TTL.
  *
  * When the same `id` exists in both sources they are **merged** rather
  * than overridden. See {@link mergeSkill}.
@@ -104,10 +104,10 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
  */
 export const SYSTEM_SKILLS_DIR = HERE;
 
-// `userSkillPath()` (the write-back target for memory_skill_write)
-// lives in the memory module — see
-// `modules/agent/memory/writers/skill.ts` (PR-D). Keeping it out of the
-// loader means the loader does not need to expose write paths; the
+// `userSkillPath()` (the write-back target for `fs_write` on a
+// `skills/<id>/SKILL.md` path) lives in the memory module — see
+// `modules/agent/memory/sandbox.ts` + `writers.ts`. Keeping it out of
+// the loader means the loader does not need to expose write paths; the
 // user-side root is owned by `userSkillsDir()` in `storage/paths.ts`.
 
 // ─── Validation ─────────────────────────────────────────────────────────────
@@ -465,9 +465,9 @@ export function invalidateSkillCache(): void {
  * skill when called without arguments) on the next access.
  *
  * Wired into:
- *   - `memory_skill_write` after a successful write: pass the id so
- *     the very next `read("skills/<id>/SKILL.md")` sees fresh content
- *     without waiting for the TTL.
+ *   - `fs_write` on a `skills/<id>/SKILL.md` path after a successful
+ *     write: pass the id so the very next `read("skills/<id>/SKILL.md")`
+ *     sees fresh content without waiting for the TTL.
  *   - `setWorkspacePath()` after activation: invalidates everything
  *     so the new workspace's user skills replace the old ones.
  */
