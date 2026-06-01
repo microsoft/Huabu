@@ -1,17 +1,15 @@
 /**
  * ACP (external agent bridge) API client.
  *
- * Wraps the read-only `GET /api/acp/agents` endpoint, the
- * `GET/PUT /api/acp/config` enable-flag + token surface, and the
- * thread-scoped session / commands endpoints used by the slash-command
- * typeahead.
+ * Wraps the read-only `GET /api/acp/agents` endpoint, the ephemeral
+ * pairing-token surface (`POST/GET /api/acp/pair`,
+ * `DELETE /api/acp/pair/:id`), and the thread-scoped session / commands
+ * endpoints used by the slash-command typeahead.
  *
- * The agents-list endpoint is always registered server-side: when the
- * bridge is disabled it returns `{ enabled: false, agents: [] }`, so
- * callers don't need to know about the feature-flag state themselves.
- * The thread-scoped endpoints are *also* always registered now, but
- * EnsureAcpSession will throw if the bridge is disabled because there is
- * no agentlet server to attach the session to.
+ * The agents-list endpoint is always registered server-side and now
+ * always responds with `{ agents: [...] }` — the bridge is permanently
+ * mounted; whether any agent is actually reachable is a function of
+ * whether the user has paired one.
  */
 
 import { ApiError, apiFetch } from './_client';
@@ -19,8 +17,8 @@ import { routes } from './_routes';
 
 import type {
   AcpAgentsResponse,
-  AcpConfig,
-  AcpConfigUpdate,
+  AcpPairingCreatedResponse,
+  AcpPairingListResponse,
   AcpPermissionDecisionRequest,
   AcpPermissionDecisionResponse,
   AcpThreadCommandsResponse,
@@ -37,9 +35,10 @@ import type {
 export type {
   AcpAgentSummary,
   AcpAgentsResponse,
-  AcpConfig,
-  AcpConfigUpdate,
   AcpModelInfo,
+  AcpPairingCreatedResponse,
+  AcpPairingListResponse,
+  AcpPairingTicket,
   AcpSessionConfigOption,
   AcpSessionMetaSnapshot,
   AcpSessionMode,
@@ -63,29 +62,36 @@ export async function listAcpAgents(): Promise<AcpAgentsResponse> {
 }
 
 /**
- * Read the persisted ACP bridge config (`enabled` flag + shared token).
- * Localhost-only on the server side; returns `{ enabled: false, token: '',
- * source: 'default' }` on a fresh install.
+ * Mint a fresh ephemeral pairing ticket. The returned `code` is valid
+ * for 60 seconds; once an agentlet successfully runs `bridge/hello`
+ * with that code it gets locked to that agent's `agentId` indefinitely
+ * (until graceful disconnect, explicit revoke, or server restart).
  */
-export async function getAcpConfig(): Promise<AcpConfig> {
-  return apiFetch<AcpConfig>(routes.acpConfig, {
-    fallbackMessage: 'Failed to read ACP config',
+export async function createAcpPairing(): Promise<AcpPairingCreatedResponse> {
+  return apiFetch<AcpPairingCreatedResponse>(routes.acpPair, {
+    method: 'POST',
+    fallbackMessage: 'Failed to create pairing code',
+  });
+}
+
+/** Snapshot every still-active pairing ticket. */
+export async function listAcpPairings(): Promise<AcpPairingListResponse> {
+  return apiFetch<AcpPairingListResponse>(routes.acpPair, {
+    fallbackMessage: 'Failed to read pairing codes',
   });
 }
 
 /**
- * Persist the ACP bridge config. The first time `enabled` flips to
- * `true` the server auto-generates a token; pass `regenerateToken:
- * true` to rotate an existing token. Returns the newly-effective
- * config (always `source: 'file'`).
+ * Revoke a ticket by id. Returns `{ revoked: false }` when the ticket
+ * had already expired / been claimed-then-disconnected — caller can
+ * ignore.
  */
-export async function updateAcpConfig(
-  payload: AcpConfigUpdate,
-): Promise<AcpConfig> {
-  return apiFetch<AcpConfig>(routes.acpConfig, {
-    method: 'PUT',
-    json: payload,
-    fallbackMessage: 'Failed to update ACP config',
+export async function revokeAcpPairing(
+  id: string,
+): Promise<{ revoked: boolean }> {
+  return apiFetch<{ revoked: boolean }>(routes.acpPairItem(id), {
+    method: 'DELETE',
+    fallbackMessage: 'Failed to revoke pairing code',
   });
 }
 

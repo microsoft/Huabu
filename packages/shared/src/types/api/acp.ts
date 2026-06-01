@@ -57,61 +57,63 @@ export interface AcpAgentSummary {
 
 /** Response body for `GET /api/acp/agents`. */
 export interface AcpAgentsResponse {
-  /** May be empty — either no agents connected, or ACP bridge disabled. */
+  /** May be empty — bridge always mounted; empty just means nobody's connected. */
   agents: AcpAgentSummary[];
-  /**
-   * `false` when the ACP bridge is disabled in the server config
-   * (`data/acp-config.json` `enabled: false`). Used by the client to
-   * suppress agent-related UI vs. showing "no agents connected yet"
-   * guidance.
-   *
-   * NOTE: even when `false`, the WS endpoint at `/api/acp/agent` is
-   * always mounted — the security boundary is the in-memory token store,
-   * which stays empty while disabled. Toggling `enabled` is a runtime
-   * action via `PUT /api/acp/config` and does not require a server
-   * restart.
-   */
-  enabled: boolean;
 }
 
-// ─── Bridge enable / token configuration ───────────────────────────────
+// ─── Pairing tokens (ephemeral) ────────────────────────────────────────
 //
-// Persisted to `data/acp-config.json` and exposed via
-// `GET/PUT /api/acp/config`. The Settings UI is the sole authority for
-// this config — there is no `.env`-based override.
+// External agents authenticate to the bridge with a short pairing code
+// that the user generates from the Settings UI on demand. Lifecycle:
+//
+//   pending  → just minted, displayed in the UI with a 60s countdown.
+//              The first `bridge/hello` whose token matches claims it.
+//   claimed  → bound to a specific agentId. The same agentId may
+//              reconnect with this token indefinitely (so wifi blips
+//              and dev hot-reloads don't kill the session). UI hides
+//              the code immediately after the pending window closes.
+//   expired  → 60s pending window elapsed with no claim. Removed from
+//              the in-memory store.
+//   revoked  → user clicked Revoke, or the claimed agent disconnected
+//              gracefully. Removed from the in-memory store.
+//
+// Tokens are NOT persisted — a server restart invalidates every ticket.
 
-/** Currently-effective ACP bridge configuration. */
-export interface AcpConfig {
-  /** Whether external ACP agents are allowed to connect right now. */
-  enabled: boolean;
+/** State of a single pairing ticket as observed from the Settings UI. */
+export interface AcpPairingTicket {
+  /** Opaque stable id used for `DELETE /api/acp/pair/:id`. */
+  id: string;
   /**
-   * Shared secret the local `agentlet` CLI must present in `bridge/hello`.
-   * Generated automatically on first enable; rotatable via PUT. The
-   * bundled `bin/agentlet` wrapper reads this value from the JSON file
-   * directly so users don't need to copy/paste it anywhere.
+   * The pairing code the user types into `bin/agentlet --token <code>`.
+   * Format: `XXXX-XXXX` (8 chars from an unambiguous uppercase charset).
    */
-  token: string;
+  code: string;
+  /** Lifecycle state. See module-level doc for transitions. */
+  status: 'pending' | 'claimed';
   /**
-   * Where the active config came from:
-   *   - `file`    — `data/acp-config.json` was read.
-   *   - `default` — no file yet; config is the bootstrap default
-   *                 (`enabled: false`, `token: ''`).
+   * Epoch ms when the pending window closes. For `claimed` tickets the
+   * field still reflects the original expiry (UI hides the code at this
+   * point regardless of status) but the token remains valid for
+   * same-agentId reconnects.
    */
-  source: 'file' | 'default';
+  expiresAt: number;
+  /** Set once `status === 'claimed'`. */
+  claimedAgentId?: string;
+  /** Short display alias of the claimed agent (e.g. `claude`). */
+  claimedAlias?: string;
+  /** Full launcher command reported by the agent (e.g. `claude --acp`). */
+  claimedCommand?: string;
+  /** Epoch ms of the most recent successful bridge/hello against this ticket. */
+  claimedAt?: number;
 }
 
-/** Body for `PUT /api/acp/config`. */
-export const acpConfigUpdateSchema = z.object({
-  /** Flip the bridge on or off. */
-  enabled: z.boolean(),
-  /**
-   * When enabling: generate a fresh random token even if one already
-   * exists (rotation). When disabling: ignored. Defaults to `false`
-   * — first-time enable auto-generates a token only if none is set yet.
-   */
-  regenerateToken: z.boolean().optional(),
-});
-export type AcpConfigUpdate = z.infer<typeof acpConfigUpdateSchema>;
+/** Response body for `POST /api/acp/pair` — the newly-minted ticket. */
+export type AcpPairingCreatedResponse = AcpPairingTicket;
+
+/** Response body for `GET /api/acp/pair` — every still-active ticket. */
+export interface AcpPairingListResponse {
+  tickets: AcpPairingTicket[];
+}
 
 // ─── Thread → agent binding ────────────────────────────────────────────
 //

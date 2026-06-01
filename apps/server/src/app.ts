@@ -1,4 +1,6 @@
+import { unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import compress from '@fastify/compress';
 import cors from '@fastify/cors';
@@ -8,10 +10,8 @@ import { fastify } from 'fastify';
 
 import {
   acpAgentsRoutes,
-  acpConfigRoutes,
+  acpPairRoutes,
   acpThreadsRoutes,
-  applyAcpConfig,
-  loadAcpConfig,
   mountAgentletServer,
 } from './modules/agent/acp/index.js';
 import agentRoutes from './modules/agent/agent.route.js';
@@ -164,28 +164,36 @@ app.register(workspaceRoutes, { prefix: '/api/workspace' });
 
 // ── External agent (ACP) bridge ───────────────────────────────────────
 // Mount @agentlet/server (WS upgrade at /api/acp/agent) *unconditionally*.
-// The security boundary is the in-memory token store, which is seeded
-// from `data/acp-config.json` at startup. While the user has ACP
-// disabled (default for fresh installs), the store is empty and every
-// `bridge/hello` is rejected — but the endpoint stays reachable, so
-// flipping the toggle from the Settings UI takes effect immediately
-// with no server restart.
+// The security boundary is the in-memory pairing-token store
+// (`modules/agent/acp/token-store.ts`), which is empty by default and
+// populated on demand when the user clicks "Generate code" in the
+// Settings UI. While no ticket exists, every `bridge/hello` is rejected
+// — but the endpoint stays reachable so the first successful pairing
+// takes effect without a server restart.
 //
-// The Settings UI is the only way to enable the bridge — there is no
-// `.env`-based override. See `modules/agent/acp/config.ts`.
-const acpConfig = loadAcpConfig();
-applyAcpConfig(acpConfig);
+// Legacy migration: older builds persisted an `enabled` flag + shared
+// token in `data/acp-config.json`. The file is no longer read; if it
+// exists we silently delete it so a stale 0600 file does not linger.
+try {
+  const legacyAcpConfigPath = join(process.cwd(), 'data', 'acp-config.json');
+  unlinkSync(legacyAcpConfigPath);
+  app.log.info(
+    `[acp] removed legacy ${legacyAcpConfigPath} — pairing is now ephemeral`,
+  );
+} catch (err) {
+  // ENOENT is the happy path (no legacy file to remove); anything else
+  // is non-fatal — the bridge does not depend on the file.
+  if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+    app.log.warn({ err }, '[acp] could not remove legacy acp-config.json');
+  }
+}
 mountAgentletServer(app);
 app.register(acpAgentsRoutes, { prefix: '/api/acp' });
-app.register(acpConfigRoutes, { prefix: '/api/acp' });
+app.register(acpPairRoutes, { prefix: '/api/acp' });
 app.register(acpThreadsRoutes, { prefix: '/api/acp' });
-if (acpConfig.enabled) {
-  app.log.info('[acp] bridge enabled');
-} else {
-  app.log.info(
-    '[acp] bridge disabled — enable from the Settings UI to allow agentlet connections',
-  );
-}
+app.log.info(
+  '[acp] bridge mounted — generate a pairing code from the Settings UI to connect an external agent',
+);
 
 // Memory op-counter: bump the per-canvas counter on every successful
 // mutating HTTP request scoped to a canvas. Registered last so all

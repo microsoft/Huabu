@@ -4,6 +4,29 @@
 
 ---
 
+## 2026-06-02 · ACP bridge 改用阅后即焚的配对码（破坏性变更）
+
+**What Changed**
+
+- 移除 Settings → External Agents 的 enable/disable toggle。ACP bridge 现在**永远挂载**，安全边界完全交给一次性的配对码。
+- 旧的"持久化共享 token"换成了**ephemeral pairing code**：
+  - 在 Settings 里点 **Generate code** 会得到一个 8 位的码（如 `XXXX-XXXX`），UI 上明文显示并附 60 秒倒计时
+  - 60 秒内第一个用该码 `bridge/hello` 成功的 agentlet 会**锁定**这个码到自己的 `agentId`；之后同一个 agentlet 的重连（wifi 抖动、dev hot-reload、合盖醒来等）仍可继续使用
+  - 60 秒过期未被认领 → 自动失效
+  - agentlet 优雅断开 / 用户在 Settings 点 ✕ / Sediment server 重启 → 立即失效
+- 同时可以生成多个码、配对多个 agent，互不影响。
+- `bin/agentlet` wrapper 不再从 `data/acp-config.json` 读 token——这个文件不再使用，启动时会自动删除残留。
+- `bin/agentlet` 现在必须通过 `--token <CODE>` 或 `AGENTLET_TOKEN` 环境变量传入配对码，缺失时报清楚的引导信息。
+
+**Notes**
+
+- **破坏性变更（接前次 ACP 重构）**：原本走 Settings UI 启用 + 自动复用 token 的工作流被废弃。每次启动一个新的 agentlet 实例（不是重连）都需要现去 Settings 生成一个码。日常重连（同一个 agentlet 进程被 wifi/sleep 打断）不需要重新生成。
+- **安全模型**：HTTP 上的 `/api/acp/pair*` 三个端点仍然是 loopback-only；token 永远不落盘；server 重启全部失效。`/api/acp/agent` 的 WS 端点本身无条件挂载，是 token store 把守。
+- **多人/多 agent 同时使用**：完全支持。每张票据独立，互不影响。
+- **如果你之前依赖 token 长期有效**（例如脚本里硬编码了 token）：现在不行了，需要改为每次启动 agentlet 前先调 `POST /api/acp/pair` 拿一个新码。一般用户不受影响。
+
+---
+
 ## 2026-06-01 · 内置 `/create-skill` 与 `/update-skill` 两个 slash skill
 
 **What Changed**

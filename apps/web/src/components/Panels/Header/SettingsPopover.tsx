@@ -4,7 +4,7 @@ import React, { useCallback, useRef, useState } from 'react';
 import { AcpSettings } from './AcpSettings';
 import { CanvasSettings } from './CanvasSettings';
 import { LLMSettings } from './LLMSettings';
-import { useAcpConfigStore } from '../../../store/acpConfigStore';
+import { useAcpPairingStore } from '../../../store/acpPairingStore';
 import { useLLMStore } from '../../../store/llmStore';
 import { Button } from '../../Common/Button';
 import { Popover } from '../../Common/Popover';
@@ -30,7 +30,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
   size = 'md',
 }) => {
   const llmInit = useLLMStore((s) => s.init);
-  const acpInit = useAcpConfigStore((s) => s.init);
+  const acpInit = useAcpPairingStore((s) => s.init);
 
   const [isOpen, setIsOpen] = useState(false);
 

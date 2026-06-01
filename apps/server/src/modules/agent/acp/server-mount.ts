@@ -24,8 +24,9 @@ let instance: AgentletServer | null = null;
 export interface MountAcpOptions {
   /**
    * Override the default authenticator. By default we delegate to the
-   * process-wide `TokenStore` (see `./token-store.ts`), which seeds
-   * from `ACP_DEV_TOKEN`.
+   * process-wide pairing-token store (see `./token-store.ts`), which is
+   * seeded on demand by the Settings UI flow — there is no env-var
+   * fallback any more.
    */
   authenticate?: AgentletServerOptions['authenticate'];
 }
@@ -57,6 +58,11 @@ export function mountAgentletServer(
       app.log.info({ agentId: agent.agentId }, '[acp] agent reconnected');
     },
     onDisconnection: (agent, reason) => {
+      // Drop any pairing ticket bound to this agentId so a future
+      // bridge/hello for the same agentId requires a fresh pairing
+      // code. Without this, an attacker who learned the original code
+      // could re-attach indefinitely after a network blip.
+      tokenStore.markDisconnected(agent.agentId);
       app.log.info(
         { agentId: agent.agentId, reason },
         '[acp] agent disconnected',

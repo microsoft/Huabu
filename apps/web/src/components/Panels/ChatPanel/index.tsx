@@ -73,7 +73,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     agents: connectedAgents,
     refresh: refreshAcpAgents,
     loading: acpAgentsLoading,
-    enabled: acpBridgeEnabled,
+    loaded: acpAgentsLoaded,
   } = useAcpAgents();
 
   // Auto-reset a stale external binding on an *empty* thread: the
@@ -87,7 +87,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   useEffect(() => {
     if (!isHistoryLoaded) return;
     if (messages.length > 0) return;
-    if (acpBridgeEnabled === null) return;
+    if (!acpAgentsLoaded) return;
     if (agentBinding.kind !== 'external') return;
     const stillConnected = connectedAgents.some(
       (a) => a.agentId === agentBinding.agentletAgentId,
@@ -97,7 +97,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   }, [
     isHistoryLoaded,
     messages.length,
-    acpBridgeEnabled,
+    acpAgentsLoaded,
     agentBinding,
     connectedAgents,
     canvasId,

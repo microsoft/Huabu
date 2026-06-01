@@ -143,17 +143,20 @@ files in whatever project folder you pointed it at.
 
 ### One-time setup
 
-1. With `pnpm dev` running, open Sediment in your browser and click the
-   **gear icon** (top-right). In the **External Agents (ACP)** section,
-   flip **Enable** — the server auto-generates a shared bridge token and
-   persists it to `data/acp-config.json` (mode `0600`). You don't need
-   to copy the token anywhere: the `agentlet` wrapper script picks it
-   up from that file automatically.
+1. With `pnpm dev` running, open Sediment in your browser, click the
+   **gear icon** (top-right), and open the **External Agents** section.
+   Click **Generate code** — Sediment will show you a short pairing
+   code (e.g. `XXXX-XXXX`) that is valid for 60 seconds. Copy it; you
+   will paste it into the agentlet command in the next step.
 
-   > Disable the bridge or rotate the token any time from the same
-   > panel — no server restart required. The Settings UI is the only
-   > way to configure this; setting `ENABLE_ACP` / `ACP_DEV_TOKEN` in
-   > `.env` has no effect.
+   > Pairing codes are **ephemeral**. The first `bin/agentlet` that
+   > successfully hellos with the code claims it for that agent — after
+   > that the code stays valid for reconnects (wifi blips, dev hot-
+   > reloads) but cannot be used to attach a different agent. Closing
+   > agentlet gracefully or clicking the ✕ next to the code in the UI
+   > revokes it immediately; the server holds no persisted token on
+   > disk. Setting `ENABLE_ACP` / `ACP_DEV_TOKEN` in `.env` has no
+   > effect.
 
 2. _Optional._ Make the `agentlet` command available from any folder.
    Run the snippet that matches your shell from the project root:
@@ -187,21 +190,29 @@ files in whatever project folder you pointed it at.
 ### Connecting an agent
 
 With `pnpm dev` running, open another terminal, `cd` into the project
-folder you want the agent to work on, and start the agent of your choice:
+folder you want the agent to work on, generate a fresh pairing code in
+the Settings UI, and start the agent of your choice (replace
+`XXXX-XXXX` with the code Sediment just gave you):
 
 ```bash
 # GitHub Copilot CLI
-agentlet --agent "copilot --acp"
+agentlet --token XXXX-XXXX --agent "copilot --acp"
 
 # Claude Code
-agentlet --agent "claude --acp"
+agentlet --token XXXX-XXXX --agent "claude --acp"
 
 # Gemini CLI
-agentlet --agent "gemini --acp"
+agentlet --token XXXX-XXXX --agent "gemini --acp"
 ```
 
+> You can also `export AGENTLET_TOKEN=XXXX-XXXX` before launching and
+> drop the `--token` flag. The wrapper will refuse to start without
+> one or the other.
+
 That's it — the agent will show up in Sediment's external-agent panel and
-you can hand it tasks from any canvas.
+you can hand it tasks from any canvas. Reconnect / re-launch attempts
+from the **same** agentlet keep working with the same code; spinning
+up a second agent requires a fresh code.
 
 ### Tool-permission prompts
 

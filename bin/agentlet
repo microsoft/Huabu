@@ -2,18 +2,17 @@
 # Stable short entry point for the vendored agentlet CLI.
 #
 # Goal: zero shell-config burden on users. They should only need to:
-#   1. Enable the ACP bridge from Sediment's Settings panel  (once)
-#   2. Run `<repo>/bin/agentlet --agent "<cmd>"`             (every time)
+#   1. Open Sediment → Settings → External Agents → Generate code
+#   2. Run `<repo>/bin/agentlet --token CODE-1234 --agent "<cmd>"`
 #
-# This wrapper takes care of everything else by reading the token from
-# <repo>/data/acp-config.json (the file the Settings UI writes to),
-# auto-building the CLI on first run, deriving the right defaults, and
-# forwarding any extra flags to the underlying agentlet CLI verbatim.
-# Nothing needs to live in ~/.bashrc.
+# This wrapper takes care of everything else by auto-building the CLI
+# on first run, deriving the right server URL + insecure flag from the
+# repo's .env, and pre-flighting the agent binary on PATH.
 #
-# The bridge token is read *only* from data/acp-config.json. Setting
-# ACP_DEV_TOKEN in <repo>/.env has no effect — the env channel was
-# removed when the Settings UI took over as the single source of truth.
+# The bridge token is *not* read from disk any more — pairing codes are
+# ephemeral (60-second pending window, then bound to the agentlet's
+# agentId). Users must pass --token (or set AGENTLET_TOKEN) explicitly
+# with the code generated from Sediment's Settings UI.
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo=$(CDPATH= cd -- "$here/.." && pwd)
@@ -41,9 +40,6 @@ fi
 # endings (some editors do that), which POSIX `.` interprets as part
 # of the value and trips with `: not found` errors. `set -a` makes
 # every assignment in .env exported, not just shell-local.
-#
-# NB: any ACP_DEV_TOKEN in .env is intentionally ignored further down
-# — the bridge token lives only in data/acp-config.json.
 if [ -f "$repo/.env" ]; then
   envtmp=$(mktemp 2>/dev/null || echo "/tmp/agentlet-env.$$")
   trap 'rm -f "$envtmp"' EXIT INT TERM
@@ -56,35 +52,24 @@ if [ -f "$repo/.env" ]; then
   trap - EXIT INT TERM
 fi
 
-# Resolve the bridge token strictly from data/acp-config.json (written by
-# the Settings UI). Hand-rolled POSIX parser (no jq dep): the file has
-# the shape `{"enabled": true, "token": "abc…"}` written by JSON.stringify,
-# so a single greedy regex on the token field is reliable enough.
-#
-# The server writes this file via `process.cwd() + '/data/acp-config.json'`,
-# and `pnpm --filter @sediment/server dev` runs with cwd = apps/server/,
-# so the canonical location is `<repo>/apps/server/data/acp-config.json`.
-# We still check the legacy `<repo>/data/acp-config.json` as a fallback in
-# case someone launches the server from the repo root (e.g. `pnpm dev:server`
-# with a custom cwd, or an older layout).
-acp_config="$repo/apps/server/data/acp-config.json"
-if [ ! -f "$acp_config" ] && [ -f "$repo/data/acp-config.json" ]; then
-  acp_config="$repo/data/acp-config.json"
-fi
-ui_token=
-if [ -f "$acp_config" ]; then
-  ui_token=$(
-    sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
-      "$acp_config" | head -n 1
-  )
-fi
-AGENTLET_TOKEN="$ui_token"
-export AGENTLET_TOKEN
+# Pairing code must come from --token / AGENTLET_TOKEN — we no longer
+# read any disk-resident state. We only need to look at our own argv
+# to know whether the underlying CLI will fail; the CLI itself does
+# the actual --token / $AGENTLET_TOKEN resolution.
+have_token_flag=0
+for arg in "$@"; do
+  case "$arg" in
+    --token|--token=*) have_token_flag=1; break ;;
+  esac
+done
 
-if [ -z "$AGENTLET_TOKEN" ]; then
-  echo "agentlet wrapper: no ACP token found in $acp_config." >&2
-  echo "  Enable the bridge from Sediment's Settings panel (top-right gear)" >&2
-  echo "  → External Agents (ACP) → Enable. Then re-run this command." >&2
+if [ "$have_token_flag" -eq 0 ] && [ -z "$AGENTLET_TOKEN" ]; then
+  echo "agentlet wrapper: no pairing code provided." >&2
+  echo "  1. In Sediment, open Settings (top-right gear) → External Agents" >&2
+  echo "     and click \"Generate code\". The code is valid for 60 seconds." >&2
+  echo "  2. Re-run with --token <CODE>, e.g.:" >&2
+  echo "     $0 --token XXXX-XXXX --agent \"copilot --acp --allow-all\"" >&2
+  echo "     (or export AGENTLET_TOKEN=XXXX-XXXX before launching)" >&2
   exit 1
 fi
 
