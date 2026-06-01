@@ -62,6 +62,23 @@
 - **内部工具调整，普通用户无感知**：所有写入的目标文件、磁盘布局、cap（workspace + canvas 仍是 4 KB / 80 行；skill 仍无 cap）、并发锁、skill 缓存失效行为都保持不变。
 - **自定义 agent 配置需要更新**：若你在自定义 prompt / AGENT.md 里引用了旧工具名（`memory_workspace_write` 等），请替换为 `fs_write`，并按新参数形态调整 schema。所有内置 prompt 已同步。
 - **行级编辑能力顺带获得**：`mode: "replace_string"` 在三类 memory 文件上都可用，特别适合对长 skill 文件做局部修订，不再需要 LLM 整段重抄。
+## 2026-06-02 · 没有锚点的新节点改成落在当前视窗中心
+
+**What Changed**
+
+- 通过没有"锚点"的入口添加节点时（聊天消息卡片底部的 **Add as note**、Floating Drag Handle 的 **Add as note / image** 按钮等），新节点现在会**以包围盒中心对齐到当前视窗中心**出现，而不是被丢到 (0, 0) 再由 force-directed `placeNode`（fCoSE）算法挪到某处。
+- 同一批次有多个 fallback 节点时（例如一次性 paste 上传 3 张图），按 `+40, +40` 的步长依次错位，与现有 `Ctrl+V` 粘贴的视觉行为保持一致。
+- 拖拽放置、画布右键、粘贴到画布某点、Sketch overlay、frame drag-to-create 等**已经带坐标**的入口完全不受影响——它们的 `placementPoint` 仍然原样使用。
+
+**Notes**
+
+- **没有触碰 agent 路径**：agent 通过 `CREATE_NODES` 创建节点时，如果带了 `position` 就照用，没带就仍走 force-directed 兜底——agent 的位置决策权和 LLM 行为完全不变。
+- **没有触碰 shared canvas-engine**：viewport 是 web-only 概念，新逻辑只活在 web 的 `dispatchUiIntent` + `resolveAddNodes` 里；shared/server 看到的依然是带 `position` 的 `CREATE_NODES`。Headless executor 行为零变化。
+- **没有做碰撞检测**：跟现有 `Ctrl+V` 粘贴一样，如果视窗中心已经被节点占住，新节点会盖在上面；用户拖动一下即可。要做"避开已有节点"以后再补。
+- **fallback 兜底**：极端情况下（React Flow 实例还没注册 / 画布容器没挂载）`viewportCenter` 是 undefined，逻辑回退到原先的 force-directed `placeNode`，不会创建 (0, 0) 的孤儿节点。
+
+---
+
 ## 2026-06-02 · ACP preprocessor 升级成可自主探索画布的 sub-agent
 
 **What Changed**

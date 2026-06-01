@@ -74,6 +74,7 @@ import type {
   CanvasNodeType,
   CanvasViewport,
   IntentContext,
+  Point,
   RecentAction,
   WireCanvasNode,
   WireSelectionNode,
@@ -309,6 +310,20 @@ type RFState = {
   onNodeResizeStart: () => void;
   rfInstance: ReactFlowInstance | null;
   setRfInstance: (instance: ReactFlowInstance | null) => void;
+
+  /**
+   * The outer `<div>` that wraps `<ReactFlow>`. Stored so non-component
+   * code paths (UI intent resolvers, dispatcher helpers) can read the
+   * canvas pane's bounding rect — currently used by `dispatchUiIntent`
+   * to compute the flow-space viewport centre for nodes added without
+   * an explicit `placementPoint` (e.g. "Add as note" buttons in chat
+   * messages or the floating drag handle).
+   *
+   * Set by `<Canvas>` once the wrapper ref is attached; cleared on
+   * unmount. `null` while the canvas DOM is not mounted.
+   */
+  canvasWrapper: HTMLDivElement | null;
+  setCanvasWrapper: (el: HTMLDivElement | null) => void;
 
   /**
    * Current pan + zoom of the React Flow viewport.
@@ -854,10 +869,26 @@ const useCanvasStore = create<RFState>()(
 
     /** Resolve a web-only UiIntent and execute the resulting commands. */
     dispatchUiIntent: (intent) => {
+      const { rfInstance, canvasWrapper } = get();
+      // Compute the viewport centre in flow coordinates so resolvers can
+      // anchor "no placement point" additions to the visible area instead
+      // of letting the shared engine fall back to force-directed layout.
+      // Skips silently when the canvas DOM is not yet mounted.
+      let viewportCenter: Point | undefined;
+      if (rfInstance && canvasWrapper) {
+        const rect = canvasWrapper.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          viewportCenter = rfInstance.screenToFlowPosition({
+            x: rect.left + rect.width / 2,
+            y: rect.top + rect.height / 2,
+          });
+        }
+      }
       const uiState: UiResolverState = {
         nodes: get().nodes,
         edges: get().edges,
         autoLayoutEnabled: get().autoLayoutEnabled,
+        ...(viewportCenter ? { viewportCenter } : {}),
       };
       const execution = resolveUiIntent(intent, uiState);
       if (execution.commands.length > 0) {
@@ -1667,6 +1698,9 @@ const useCanvasStore = create<RFState>()(
 
     rfInstance: null,
     setRfInstance: (instance) => set({ rfInstance: instance }),
+
+    canvasWrapper: null,
+    setCanvasWrapper: (el) => set({ canvasWrapper: el }),
 
     viewport: null,
     setViewport: (viewport) => {

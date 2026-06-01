@@ -206,6 +206,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   const addNode = useCanvasStore((state) => state.addNode);
   const addNodes = useCanvasStore((state) => state.addNodes);
   const setRfInstance = useCanvasStore((state) => state.setRfInstance);
+  const setCanvasWrapper = useCanvasStore((state) => state.setCanvasWrapper);
   const setViewport = useCanvasStore((state) => state.setViewport);
   const openExpanded = useCanvasStore((state) => state.openExpanded);
   const closeExpanded = useCanvasStore((state) => state.closeExpanded);
@@ -557,6 +558,14 @@ export const Canvas: React.FC<CanvasProps> = ({
       endActiveDragSession();
     };
   }, [setRfInstance, endActiveDragSession]);
+
+  // Mirror the wrapper element into the store so non-component code
+  // paths (e.g. `dispatchUiIntent`'s viewport-centre computation) can
+  // read its bounding rect without prop-drilling the ref.
+  useEffect(() => {
+    setCanvasWrapper(wrapperRef.current);
+    return () => setCanvasWrapper(null);
+  }, [setCanvasWrapper]);
 
   return (
     <div
