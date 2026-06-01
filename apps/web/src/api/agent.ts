@@ -6,9 +6,8 @@
  */
 
 import { AGENT_SSE_EVENTS } from '@sediment/shared';
-import { CSRF_HEADER } from '@sediment/shared';
 
-import { ApiError, apiFetch, apiUrl, getCsrfToken } from './_client';
+import { ApiError, apiFetch, apiUrl } from './_client';
 import { routes } from './_routes';
 import { readTypedSSEStream } from './_sse';
 
@@ -207,12 +206,10 @@ export const agentApi = {
     };
 
     try {
-      const csrf = getCsrfToken();
       const response = await fetch(apiUrl(routes.agent), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(csrf ? { [CSRF_HEADER]: csrf } : {}),
         },
         body: JSON.stringify(body),
         signal: options?.signal,

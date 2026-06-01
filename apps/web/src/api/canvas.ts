@@ -1,6 +1,4 @@
-import { CSRF_HEADER } from '@sediment/shared';
-
-import { ApiError, apiFetch, apiUrl, getCsrfToken } from './_client';
+import { ApiError, apiFetch, apiUrl } from './_client';
 import { routes } from './_routes';
 
 import type {
@@ -99,12 +97,10 @@ export async function putCanvas(
   // `code` + `details` from the canonical `ApiErrorBody`. Fall back to
   // a raw `fetch` so we can throw a `CanvasConflictError` with the
   // full payload intact.
-  const csrf = getCsrfToken();
   const response = await fetch(apiUrl(routes.canvas(canvasId)), {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
-      ...(csrf ? { [CSRF_HEADER]: csrf } : {}),
     },
     body: JSON.stringify(request),
     keepalive: options?.keepalive ?? false,

@@ -143,19 +143,17 @@ files in whatever project folder you pointed it at.
 
 ### One-time setup
 
-1. Copy the env template:
+1. With `pnpm dev` running, open Sediment in your browser and click the
+   **gear icon** (top-right). In the **External Agents (ACP)** section,
+   flip **Enable** — the server auto-generates a shared bridge token and
+   persists it to `data/acp-config.json` (mode `0600`). You don't need
+   to copy the token anywhere: the `agentlet` wrapper script picks it
+   up from that file automatically.
 
-   ```bash
-   cp .env.example .env
-   ```
-
-   Open the new `.env` and set these two lines (the token is just a
-   password you make up — anything long and random is fine):
-
-   ```dotenv
-   ENABLE_ACP=1
-   ACP_DEV_TOKEN=pick-any-long-random-string
-   ```
+   > Disable the bridge or rotate the token any time from the same
+   > panel — no server restart required. The Settings UI is the only
+   > way to configure this; setting `ENABLE_ACP` / `ACP_DEV_TOKEN` in
+   > `.env` has no effect.
 
 2. _Optional._ Make the `agentlet` command available from any folder.
    Run the snippet that matches your shell from the project root:

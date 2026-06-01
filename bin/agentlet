@@ -2,13 +2,18 @@
 # Stable short entry point for the vendored agentlet CLI.
 #
 # Goal: zero shell-config burden on users. They should only need to:
-#   1. Put `ACP_DEV_TOKEN=...` in <repo>/.env  (once)
-#   2. Run `<repo>/bin/agentlet --agent "<cmd>"`        (every time)
+#   1. Enable the ACP bridge from Sediment's Settings panel  (once)
+#   2. Run `<repo>/bin/agentlet --agent "<cmd>"`             (every time)
 #
-# This wrapper takes care of everything else by reading <repo>/.env itself,
+# This wrapper takes care of everything else by reading the token from
+# <repo>/data/acp-config.json (the file the Settings UI writes to),
 # auto-building the CLI on first run, deriving the right defaults, and
 # forwarding any extra flags to the underlying agentlet CLI verbatim.
 # Nothing needs to live in ~/.bashrc.
+#
+# The bridge token is read *only* from data/acp-config.json. Setting
+# ACP_DEV_TOKEN in <repo>/.env has no effect — the env channel was
+# removed when the Settings UI took over as the single source of truth.
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo=$(CDPATH= cd -- "$here/.." && pwd)
@@ -30,12 +35,15 @@ if [ ! -f "$cli" ]; then
   fi
 fi
 
-# Auto-load <repo>/.env so the same token the server already reads via
-# dotenv (ACP_DEV_TOKEN) becomes available here too. We strip
-# CR before sourcing because the file may have CRLF line endings (some
-# editors do that), which POSIX `.` interprets as part of the value and
-# trips with `: not found` errors. `set -a` makes every assignment in
-# .env exported, not just shell-local.
+# Auto-load <repo>/.env so SERVER_PORT and ACP_URL (still legitimate
+# `.env` settings, read by the Fastify server too) are visible here.
+# We strip CR before sourcing because the file may have CRLF line
+# endings (some editors do that), which POSIX `.` interprets as part
+# of the value and trips with `: not found` errors. `set -a` makes
+# every assignment in .env exported, not just shell-local.
+#
+# NB: any ACP_DEV_TOKEN in .env is intentionally ignored further down
+# — the bridge token lives only in data/acp-config.json.
 if [ -f "$repo/.env" ]; then
   envtmp=$(mktemp 2>/dev/null || echo "/tmp/agentlet-env.$$")
   trap 'rm -f "$envtmp"' EXIT INT TERM
@@ -48,11 +56,27 @@ if [ -f "$repo/.env" ]; then
   trap - EXIT INT TERM
 fi
 
-# agentlet CLI expects AGENTLET_TOKEN — derive it from the canonical
-# server-side name if the user didn't set it explicitly. Single source
-# of truth: ACP_DEV_TOKEN in <repo>/.env.
-: "${AGENTLET_TOKEN:=$ACP_DEV_TOKEN}"
+# Resolve the bridge token strictly from data/acp-config.json (written by
+# the Settings UI). Hand-rolled POSIX parser (no jq dep): the file has
+# the shape `{"enabled": true, "token": "abc…"}` written by JSON.stringify,
+# so a single greedy regex on the token field is reliable enough.
+acp_config="$repo/data/acp-config.json"
+ui_token=
+if [ -f "$acp_config" ]; then
+  ui_token=$(
+    sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+      "$acp_config" | head -n 1
+  )
+fi
+AGENTLET_TOKEN="$ui_token"
 export AGENTLET_TOKEN
+
+if [ -z "$AGENTLET_TOKEN" ]; then
+  echo "agentlet wrapper: no ACP token found in $acp_config." >&2
+  echo "  Enable the bridge from Sediment's Settings panel (top-right gear)" >&2
+  echo "  → External Agents (ACP) → Enable. Then re-run this command." >&2
+  exit 1
+fi
 
 # Server URL.
 #   - Default = ws://localhost:${SERVER_PORT:-3001}/api/acp/agent, i.e. the

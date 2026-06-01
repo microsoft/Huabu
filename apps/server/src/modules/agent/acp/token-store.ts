@@ -1,10 +1,19 @@
 /**
  * Token store for the ACP bridge.
  *
- * Currently in-memory with a single shared token sourced from
- * `ACP_DEV_TOKEN`. Sufficient for dev/local where one user
- * runs one Sediment server. A canvas-scoped store with a proper token
- * lifecycle (issue / revoke / expire) can replace this when needed.
+ * In-memory map of accepted bridge tokens. Seeding is centralised in
+ * `./config.ts` — at server boot (and on every Settings UI flip) the
+ * config module calls {@link AcpTokenStore.put} / `.revoke` to reflect
+ * the persisted `data/acp-config.json` state. The store stays empty
+ * while the bridge is disabled, so every `bridge/hello` is rejected
+ * without consulting any feature flag.
+ *
+ * Legacy `ACP_DEV_TOKEN` env support lives in `./config.ts` too — it
+ * acts as a one-shot fallback the first time the server boots without
+ * a JSON config file.
+ *
+ * A canvas-scoped store with a proper token lifecycle (issue / revoke
+ * / expire) can replace this when needed.
  */
 
 import type { AuthResult, BridgeHelloParams } from '@agentlet/protocol';
@@ -48,19 +57,14 @@ class AcpTokenStore {
 let _store: AcpTokenStore | null = null;
 
 /**
- * Get the process-wide token store. Lazily seeds a single dev token from
- * `ACP_DEV_TOKEN` if set; otherwise the store starts empty and
- * `bridge/hello` will reject every connection until a token is `put()`.
+ * Get the process-wide token store. The store starts empty; the active
+ * bridge token is installed by `./config.ts` after reading
+ * `data/acp-config.json` (or the legacy `ACP_DEV_TOKEN` env fallback).
+ * While no token is installed, every `bridge/hello` is rejected.
  */
 export function getTokenStore(): AcpTokenStore {
-  if (_store) return _store;
-  const store = new AcpTokenStore();
-  const devToken = process.env.ACP_DEV_TOKEN;
-  if (devToken) {
-    store.put(devToken, { source: 'env:ACP_DEV_TOKEN' });
-  }
-  _store = store;
-  return store;
+  if (!_store) _store = new AcpTokenStore();
+  return _store;
 }
 
 /** Test-only: reset the singleton. */

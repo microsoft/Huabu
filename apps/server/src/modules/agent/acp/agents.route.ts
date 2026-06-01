@@ -5,10 +5,10 @@
  * uses this endpoint to render the agent picker in the ChatPanel.
  *
  * Behaviour summary:
- *  - Always registered (so the front-end has one URL to call regardless of
- *    feature-flag state). When `ENABLE_ACP` is not set, the
- *    agentlet server was never mounted, so `getAgentletServer()` returns
- *    `null` and we reply `{ enabled: false, agents: [] }`.
+ *  - Always registered. `enabled` mirrors `data/acp-config.json`'s
+ *    `enabled` field (see `./config.ts`). When disabled we reply
+ *    `{ enabled: false, agents: [] }`; the WS endpoint is mounted
+ *    unconditionally but stays inert because the token store is empty.
  *  - When enabled, we filter `getConnections({ status: 'connected' })` and
  *    derive a short alias from `agentInfo.command` (see `deriveAlias`).
  *  - No authentication beyond the global Basic-Auth gate — the bridge
@@ -16,6 +16,7 @@
  *    the in-process registry already knows about.
  */
 
+import { loadAcpConfig } from './config.js';
 import { getAgentletServer } from './server-mount.js';
 
 import type { AcpAgentSummary, AcpAgentsResponse } from '@sediment/shared';
@@ -44,8 +45,15 @@ export function deriveAlias(command: string): string {
 
 const acpAgentsRoutes: FastifyPluginAsync = async (app) => {
   app.get<{ Reply: AcpAgentsResponse }>('/agents', async () => {
+    const cfg = loadAcpConfig();
+    if (!cfg.enabled) {
+      return { enabled: false, agents: [] };
+    }
     const server = getAgentletServer();
     if (!server) {
+      // Bridge mount happens unconditionally at startup, so this is an
+      // exceptional state (test isolation, partial init). Treat as disabled
+      // rather than 500ing — the UI shows the same "no agents" guidance.
       return { enabled: false, agents: [] };
     }
 

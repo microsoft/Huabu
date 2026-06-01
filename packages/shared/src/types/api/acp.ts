@@ -60,12 +60,58 @@ export interface AcpAgentsResponse {
   /** May be empty — either no agents connected, or ACP bridge disabled. */
   agents: AcpAgentSummary[];
   /**
-   * `false` when the server was started without `ENABLE_ACP=1`.
-   * The client uses this to suppress the indicator entirely vs. showing
-   * "no agents connected yet" guidance.
+   * `false` when the ACP bridge is disabled in the server config
+   * (`data/acp-config.json` `enabled: false`). Used by the client to
+   * suppress agent-related UI vs. showing "no agents connected yet"
+   * guidance.
+   *
+   * NOTE: even when `false`, the WS endpoint at `/api/acp/agent` is
+   * always mounted — the security boundary is the in-memory token store,
+   * which stays empty while disabled. Toggling `enabled` is a runtime
+   * action via `PUT /api/acp/config` and does not require a server
+   * restart.
    */
   enabled: boolean;
 }
+
+// ─── Bridge enable / token configuration ───────────────────────────────
+//
+// Persisted to `data/acp-config.json` and exposed via
+// `GET/PUT /api/acp/config`. The Settings UI is the sole authority for
+// this config — there is no `.env`-based override.
+
+/** Currently-effective ACP bridge configuration. */
+export interface AcpConfig {
+  /** Whether external ACP agents are allowed to connect right now. */
+  enabled: boolean;
+  /**
+   * Shared secret the local `agentlet` CLI must present in `bridge/hello`.
+   * Generated automatically on first enable; rotatable via PUT. The
+   * bundled `bin/agentlet` wrapper reads this value from the JSON file
+   * directly so users don't need to copy/paste it anywhere.
+   */
+  token: string;
+  /**
+   * Where the active config came from:
+   *   - `file`    — `data/acp-config.json` was read.
+   *   - `default` — no file yet; config is the bootstrap default
+   *                 (`enabled: false`, `token: ''`).
+   */
+  source: 'file' | 'default';
+}
+
+/** Body for `PUT /api/acp/config`. */
+export const acpConfigUpdateSchema = z.object({
+  /** Flip the bridge on or off. */
+  enabled: z.boolean(),
+  /**
+   * When enabling: generate a fresh random token even if one already
+   * exists (rotation). When disabling: ignored. Defaults to `false`
+   * — first-time enable auto-generates a token only if none is set yet.
+   */
+  regenerateToken: z.boolean().optional(),
+});
+export type AcpConfigUpdate = z.infer<typeof acpConfigUpdateSchema>;
 
 // ─── Thread → agent binding ────────────────────────────────────────────
 //

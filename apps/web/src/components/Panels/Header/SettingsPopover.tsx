@@ -1,7 +1,9 @@
 import { Settings, Sparkles } from 'lucide-react';
 import React, { useCallback, useRef, useState } from 'react';
 
+import { AcpSettings } from './AcpSettings';
 import { LLMSettings } from './LLMSettings';
+import { useAcpConfigStore } from '../../../store/acpConfigStore';
 import useCanvasStore from '../../../store/canvasStore';
 import { useLLMStore } from '../../../store/llmStore';
 import { Button } from '../../Common/Button';
@@ -28,6 +30,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
   size = 'md',
 }) => {
   const llmInit = useLLMStore((s) => s.init);
+  const acpInit = useAcpConfigStore((s) => s.init);
   const autoLayoutEnabled = useCanvasStore((s) => s.autoLayoutEnabled);
   const toggleAutoLayout = useCanvasStore((s) => s.toggleAutoLayout);
 
@@ -52,10 +55,13 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
     if (justDismissedRef.current) return;
     setIsOpen((prev) => {
       const next = !prev;
-      if (next) void llmInit();
+      if (next) {
+        void llmInit();
+        void acpInit();
+      }
       return next;
     });
-  }, [llmInit]);
+  }, [acpInit, llmInit]);
 
   const getPopoverPosition = () => {
     if (!triggerRef.current) return { x: 0, y: 0 };
@@ -124,6 +130,8 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
           </div>
 
           <LLMSettings />
+
+          <AcpSettings />
 
           <div className="flex justify-end">
             <Button

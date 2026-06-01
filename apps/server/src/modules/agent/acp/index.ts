@@ -7,6 +7,7 @@ export type { MountAcpOptions } from './server-mount.js';
 
 export { default as acpAgentsRoutes, deriveAlias } from './agents.route.js';
 export { default as acpThreadsRoutes } from './threads.route.js';
+export { default as acpConfigRoutes } from './config.route.js';
 
 export { AcpAgentClient } from './client.js';
 export type {
@@ -25,3 +26,5 @@ export type { TranslatorLogger } from './translator.js';
 
 export { getTokenStore } from './token-store.js';
 export type { TokenEntry } from './token-store.js';
+
+export { loadAcpConfig, setAcpConfig, applyAcpConfig } from './config.js';

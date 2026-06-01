@@ -11,9 +11,6 @@
 const enc = encodeURIComponent;
 
 export const routes = {
-  // ── Security ──────────────────────────────────────────────────────
-  securityBootstrap: '/security/bootstrap',
-
   // ── Workspace ─────────────────────────────────────────────────────
   workspace: '/workspace',
   workspacePickFolder: '/workspace/pick-folder',
@@ -71,6 +68,7 @@ export const routes = {
 
   // ── ACP (external agent bridge) ───────────────────────────────────
   acpAgents: '/acp/agents',
+  acpConfig: '/acp/config',
   acpThreadSession: (threadId: string) =>
     `/acp/threads/${enc(threadId)}/session`,
   acpThreadCommands: (threadId: string) =>

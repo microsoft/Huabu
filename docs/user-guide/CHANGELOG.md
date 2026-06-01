@@ -63,14 +63,36 @@
 - **自定义 agent 配置需要更新**：若你在自定义 prompt / AGENT.md 里引用了旧工具名（`memory_workspace_write` 等），请替换为 `fs_write`，并按新参数形态调整 schema。所有内置 prompt 已同步。
 - **行级编辑能力顺带获得**：`mode: "replace_string"` 在三类 memory 文件上都可用，特别适合对长 skill 文件做局部修订，不再需要 LLM 整段重抄。
 ## 2026-06-02 · 默认本地绑定 + Host 白名单 + CSRF 防护（破坏性变更）
+## 2026-06-03 · 外部 ACP Agent 一键启用（破坏性变更：env vars 不再生效）
+
+**What Changed**
+
+- 设置面板（右上齿轮）新增 **External Agents (ACP)** 区块，可一键启用/禁用外部 agent bridge，并自动生成、复制、轮换 `agentlet` 共享 token。
+- 启用状态和 token 现在持久化到 `data/acp-config.json`（权限 `0600`），第一次启用时自动生成 64 字符 hex token；切换 enable 状态不再需要重启服务器。
+- WebSocket 端点 `/api/acp/agent` 现在**无条件挂载**——安全边界改由 in-memory token store 把守，禁用时 store 为空、`bridge/hello` 全部拒绝，启用时同步注入 token。
+- `bin/agentlet` wrapper 直接从 `data/acp-config.json` 读 token，用户不再需要复制粘贴。
+
+**Notes**
+
+- **破坏性变更**：环境变量 `ENABLE_ACP` 和 `ACP_DEV_TOKEN` 已**完全失效**，无论是服务器还是 `bin/agentlet` 都不再读取它们。原本走 `.env` 启用 ACP 的用户需要：
+  1. 在 Settings → External Agents (ACP) 里点 **Enable**（会自动生成新的 token，旧的 `ACP_DEV_TOKEN` 值不会被迁移）；
+  2. 从 `.env` 里删掉 `ENABLE_ACP` / `ACP_DEV_TOKEN` 两行（留着不会报错，但毫无作用，徒增困惑）。
+- `ACP_URL` 仍然有效——`bin/agentlet` 在连接非默认 `ws://localhost:3001/api/acp/agent` 端点时仍会读这个变量（例如 TLS-fronted 远程部署）。
+- Settings 面板的 token 读写都受 localhost-only 守卫保护，同 LAN 上的其它设备无法读取或修改 ACP 配置。
+- 旋转 token 会立即吊销旧 token，所有正在连接的 agentlet 实例需要用新 token 重连。
+- 服务器启动错误信息从 "set ENABLE_ACP=1 and restart" 改为 "enable external agents from the Settings panel"。
+
+---
+
+## 2026-06-02 · 默认本地绑定 + Host 白名单 + Origin 校验（破坏性变更）
 
 **What Changed**
 
 - 服务器现在默认只绑定 `127.0.0.1`（不再是 `0.0.0.0`），新装的实例不会被同局域网的其他人意外访问到。
 - 新增 `HUABU_BIND_HOST` 环境变量，需要 LAN/远程访问时显式设置为 `0.0.0.0` 或具体网卡 IP。
 - 新增 `HUABU_ALLOWED_HOSTS` 环境变量（逗号分隔的主机名列表），所有 HTTP 请求的 `Host` 头都会校验，不在白名单里的直接 403——防御 DNS rebinding 攻击。
-- 新增 CSRF 防护：服务器在 `data/security-token` 持久化一个随机 token，Web 客户端启动时拉取并附在所有写请求的 `X-Sediment-CSRF` header 上。第三方页面（如恶意网站）即使能访问到本地端口也无法触发任何 POST/PUT/PATCH/DELETE。
-- CORS 同步收紧：只允许 `HUABU_ALLOWED_HOSTS`（含 loopback 默认项）对应的来源，挡住跨站读取 bootstrap token 的路径。
+- 新增 **Origin header 校验**：所有写请求（POST/PUT/PATCH/DELETE）的 `Origin` 必须落在 `HUABU_ALLOWED_HOSTS` 白名单内，第三方页面无法触发任何本地写操作。无 token、无 bootstrap、无前端注入——纯浏览器层防护（`Origin` 由浏览器写入，JS 改不了）。
+- CORS 同步收紧：只允许 `HUABU_ALLOWED_HOSTS`（含 loopback 默认项）对应的来源，阻断跨站读取敏感 GET 端点的路径。
 
 **Notes**
 
@@ -81,7 +103,8 @@
   ```
   否则远程访问会出现 403 或连接被拒。强烈建议同时启用 `HUABU_BASIC_AUTH_USER`/`HUABU_BASIC_AUTH_PASS`，并在前面挂 HTTPS。
 - 纯本机使用（默认场景）无需任何配置变更，体验和之前一致。
-- 第三方 ACP agent（agentlet CLI）的 WebSocket 连接不受 CSRF 影响——它继续走自己的 `ACP_DEV_TOKEN` 鉴权。
+- 非浏览器调用方（curl、原生 app、服务端脚本）不携带 `Origin`，会被放行——它们没有"被网站偷偷调用"的攻击面，Host guard 已经替它们校验目标主机。
+- 第三方 ACP agent（agentlet CLI）的 WebSocket 连接不受影响——它继续走自己的 `ACP_DEV_TOKEN` 鉴权。
 
 ---
 

@@ -8,7 +8,10 @@ import { fastify } from 'fastify';
 
 import {
   acpAgentsRoutes,
+  acpConfigRoutes,
   acpThreadsRoutes,
+  applyAcpConfig,
+  loadAcpConfig,
   mountAgentletServer,
 } from './modules/agent/acp/index.js';
 import agentRoutes from './modules/agent/agent.route.js';
@@ -19,8 +22,8 @@ import skillsRoutes from './modules/agent/skills.route.js';
 import artifactRoute from './modules/artifact/artifact.route.js';
 import canvasRoutes from './modules/canvas/canvas.route.js';
 import {
-  csrfPlugin,
   hostGuardPlugin,
+  originGuardPlugin,
   resolveAllowedHostnames,
 } from './modules/security/index.js';
 import webRoutes from './modules/web/web.route.js';
@@ -54,9 +57,11 @@ app.register(compress);
 
 // ── CORS ─────────────────────────────────────────────────────────────
 // Locked down to a static allowlist derived from `HUABU_ALLOWED_HOSTS`
-// plus the loopback defaults — see `modules/security`. Without this
-// lockdown the CSRF token can be read cross-origin and the protection
-// is bypassed. Any scheme/port is accepted on an allowed hostname so
+// plus the loopback defaults — see `modules/security`. The Origin guard
+// (see `origin-guard.ts`) enforces the same allowlist for non-safe
+// methods at the HTTP layer; this CORS config keeps the browser from
+// even attempting cross-origin reads of sensitive GET endpoints. Any
+// scheme/port is accepted on an allowed hostname so
 // `http://localhost:5173` (Vite dev) and `https://sediment.example`
 // (reverse proxy) both work without further configuration.
 const allowedHostnames = resolveAllowedHostnames();
@@ -85,9 +90,9 @@ app.register(cors, {
 // ── Network security guards ──────────────────────────────────────────
 // Registered before basic-auth so misaddressed requests fail fast with
 // a clear 403 instead of an auth challenge. Order matters:
-//   hostGuard → csrf → basic-auth → workspace guard → routes.
+//   hostGuard → originGuard → basic-auth → workspace guard → routes.
 app.register(hostGuardPlugin);
-app.register(csrfPlugin);
+app.register(originGuardPlugin);
 
 // Register multipart for file uploads
 // Max file size: 100MB
@@ -157,22 +162,28 @@ app.register(skillsRoutes, { prefix: '/api/skills' });
 app.register(workspaceRoutes, { prefix: '/api/workspace' });
 
 // ── External agent (ACP) bridge ───────────────────────────────────────
-// Mount @agentlet/server (WS upgrade at /api/acp/agent) behind the
-// ENABLE_ACP=1 feature flag so the default startup path is
-// unchanged. See docs/huabu-acp-client-plan.md for the full design.
+// Mount @agentlet/server (WS upgrade at /api/acp/agent) *unconditionally*.
+// The security boundary is the in-memory token store, which is seeded
+// from `data/acp-config.json` at startup. While the user has ACP
+// disabled (default for fresh installs), the store is empty and every
+// `bridge/hello` is rejected — but the endpoint stays reachable, so
+// flipping the toggle from the Settings UI takes effect immediately
+// with no server restart.
 //
-// The agents-list route is registered *unconditionally* so the front-end
-// has one URL to call regardless of flag state — it reports
-// `{ enabled: false, agents: [] }` when the bridge isn't mounted.
+// The Settings UI is the only way to enable the bridge — there is no
+// `.env`-based override. See `modules/agent/acp/config.ts`.
+const acpConfig = loadAcpConfig();
+applyAcpConfig(acpConfig);
+mountAgentletServer(app);
 app.register(acpAgentsRoutes, { prefix: '/api/acp' });
-if (process.env.ENABLE_ACP === '1') {
-  mountAgentletServer(app);
-  // Thread-scoped routes (session/commands) only make sense when the
-  // bridge is actually mounted — register them under the same flag so
-  // disabled deployments don't expose endpoints that would always
-  // 503.
-  app.register(acpThreadsRoutes, { prefix: '/api/acp' });
-  app.log.info('ACP (external agent) bridge enabled');
+app.register(acpConfigRoutes, { prefix: '/api/acp' });
+app.register(acpThreadsRoutes, { prefix: '/api/acp' });
+if (acpConfig.enabled) {
+  app.log.info('[acp] bridge enabled');
+} else {
+  app.log.info(
+    '[acp] bridge disabled — enable from the Settings UI to allow agentlet connections',
+  );
 }
 
 // Memory op-counter: bump the per-canvas counter on every successful

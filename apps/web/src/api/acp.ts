@@ -1,15 +1,17 @@
 /**
  * ACP (external agent bridge) API client.
  *
- * Wraps the read-only `GET /api/acp/agents` endpoint and the
+ * Wraps the read-only `GET /api/acp/agents` endpoint, the
+ * `GET/PUT /api/acp/config` enable-flag + token surface, and the
  * thread-scoped session / commands endpoints used by the slash-command
  * typeahead.
  *
  * The agents-list endpoint is always registered server-side: when the
  * bridge is disabled it returns `{ enabled: false, agents: [] }`, so
- * callers don't need to know about `ENABLE_ACP` themselves.
- * The thread-scoped endpoints, by contrast, are only mounted when the
- * bridge is enabled — calls to them on a disabled server respond 404.
+ * callers don't need to know about the feature-flag state themselves.
+ * The thread-scoped endpoints are *also* always registered now, but
+ * EnsureAcpSession will throw if the bridge is disabled because there is
+ * no agentlet server to attach the session to.
  */
 
 import { ApiError, apiFetch } from './_client';
@@ -17,6 +19,8 @@ import { routes } from './_routes';
 
 import type {
   AcpAgentsResponse,
+  AcpConfig,
+  AcpConfigUpdate,
   AcpPermissionDecisionRequest,
   AcpPermissionDecisionResponse,
   AcpThreadCommandsResponse,
@@ -33,6 +37,8 @@ import type {
 export type {
   AcpAgentSummary,
   AcpAgentsResponse,
+  AcpConfig,
+  AcpConfigUpdate,
   AcpModelInfo,
   AcpSessionConfigOption,
   AcpSessionMetaSnapshot,
@@ -53,6 +59,33 @@ export type {
 export async function listAcpAgents(): Promise<AcpAgentsResponse> {
   return apiFetch<AcpAgentsResponse>(routes.acpAgents, {
     fallbackMessage: 'Failed to list ACP agents',
+  });
+}
+
+/**
+ * Read the persisted ACP bridge config (`enabled` flag + shared token).
+ * Localhost-only on the server side; returns `{ enabled: false, token: '',
+ * source: 'default' }` on a fresh install.
+ */
+export async function getAcpConfig(): Promise<AcpConfig> {
+  return apiFetch<AcpConfig>(routes.acpConfig, {
+    fallbackMessage: 'Failed to read ACP config',
+  });
+}
+
+/**
+ * Persist the ACP bridge config. The first time `enabled` flips to
+ * `true` the server auto-generates a token; pass `regenerateToken:
+ * true` to rotate an existing token. Returns the newly-effective
+ * config (always `source: 'file'`).
+ */
+export async function updateAcpConfig(
+  payload: AcpConfigUpdate,
+): Promise<AcpConfig> {
+  return apiFetch<AcpConfig>(routes.acpConfig, {
+    method: 'PUT',
+    json: payload,
+    fallbackMessage: 'Failed to update ACP config',
   });
 }
 

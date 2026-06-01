@@ -3,9 +3,8 @@
  */
 
 import { INTENT_SSE_EVENTS } from '@sediment/shared';
-import { CSRF_HEADER } from '@sediment/shared';
 
-import { apiFetch, apiFetchVoid, apiUrl, getCsrfToken } from './_client';
+import { apiFetch, apiFetchVoid, apiUrl } from './_client';
 import { routes } from './_routes';
 import { readTypedSSEStream } from './_sse';
 
@@ -29,12 +28,10 @@ export async function recognizeIntentStream(
 ): Promise<void> {
   // SSE endpoints can't go through `apiFetch` because we need the streaming
   // body — call `fetch` directly but reuse the URL builder + error envelope.
-  const csrf = getCsrfToken();
   const response = await fetch(apiUrl(routes.intentRecognizeStream), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...(csrf ? { [CSRF_HEADER]: csrf } : {}),
     },
     body: JSON.stringify({ canvasContext }),
     signal,
