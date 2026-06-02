@@ -58,10 +58,16 @@ export function mountAgentletServer(
       app.log.info({ agentId: agent.agentId }, '[acp] agent reconnected');
     },
     onDisconnection: (agent, reason) => {
-      // Drop any pairing ticket bound to this agentId so a future
-      // bridge/hello for the same agentId requires a fresh pairing
-      // code. Without this, an attacker who learned the original code
-      // could re-attach indefinitely after a network blip.
+      // Start the post-disconnect grace window on this agentId's
+      // ticket(s). The agentlet/server layer fires `onDisconnection`
+      // for *any* ws close (wifi blip, dev hot-reload, deliberate
+      // Ctrl-C — there is no signal that distinguishes them), so we
+      // can't drop the ticket immediately without breaking the
+      // client's built-in auto-reconnect. The token store instead
+      // arms a PAIRING_RECONNECT_GRACE_MS timer that a successful
+      // re-validate will cancel; if the agent never comes back, the
+      // ticket is eventually purged so a leaked code cannot be
+      // re-used by an attacker who later learns the agentId.
       tokenStore.markDisconnected(agent.agentId);
       app.log.info(
         { agentId: agent.agentId, reason },

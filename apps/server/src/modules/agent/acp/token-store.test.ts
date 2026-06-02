@@ -8,7 +8,9 @@
  *   ✓ validate accepts the same agentId on reconnect after claim
  *   ✓ validate rejects a different agentId trying to re-use a claimed token
  *   ✓ pending ticket auto-expires after the 60s window
- *   ✓ markDisconnected drops every ticket bound to that agentId
+ *   ✓ markDisconnected arms a grace timer (not an immediate drop)
+ *   ✓ reconnect within the grace window cancels the grace timer
+ *   ✓ grace window elapsing with no reconnect drops the ticket
  *   ✓ revoke removes the ticket by id and is a no-op for unknown ids
  *   ✓ list snapshots every active ticket
  *   ✓ multiple concurrent pending tickets are independent
@@ -18,6 +20,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   PAIRING_PENDING_TTL_MS,
+  PAIRING_RECONNECT_GRACE_MS,
   _resetTokenStoreForTests,
   getTokenStore,
 } from './token-store.js';
@@ -144,7 +147,7 @@ describe('token-store · expiry', () => {
 });
 
 describe('token-store · disconnect & revoke', () => {
-  it('markDisconnected drops every ticket bound to that agentId', () => {
+  it('markDisconnected does NOT immediately drop tickets (grace window)', () => {
     const store = getTokenStore();
     const t1 = store.createTicket();
     const t2 = store.createTicket();
@@ -154,11 +157,53 @@ describe('token-store · disconnect & revoke', () => {
     // t3 stays pending.
 
     store.markDisconnected('agent-A');
+    // Every ticket should still be present right after the disconnect —
+    // the grace timer has just been armed for t1, not fired.
     const remaining = store
       .list()
       .map((t) => t.id)
       .sort();
-    expect(remaining).toEqual([t2.id, t3.id].sort());
+    expect(remaining).toEqual([t1.id, t2.id, t3.id].sort());
+  });
+
+  it('markDisconnected drops the ticket once the grace window elapses', () => {
+    const store = getTokenStore();
+    const ticket = store.createTicket();
+    store.validate(ticket.code, hello(ticket.code, 'agent-A'));
+    store.markDisconnected('agent-A');
+    vi.advanceTimersByTime(PAIRING_RECONNECT_GRACE_MS + 1_000);
+    expect(store.list()).toHaveLength(0);
+    expect(() =>
+      store.validate(ticket.code, hello(ticket.code, 'agent-A')),
+    ).toThrowError(/invalid or expired/i);
+  });
+
+  it('reconnect within the grace window cancels the grace timer', () => {
+    const store = getTokenStore();
+    const ticket = store.createTicket();
+    store.validate(ticket.code, hello(ticket.code, 'agent-A'));
+    store.markDisconnected('agent-A');
+    // Reconnect partway through the grace window.
+    vi.advanceTimersByTime(60_000);
+    expect(() =>
+      store.validate(ticket.code, hello(ticket.code, 'agent-A')),
+    ).not.toThrow();
+    // Advancing well past the original grace window must not drop the
+    // ticket — the timer should have been cleared by the reconnect.
+    vi.advanceTimersByTime(PAIRING_RECONNECT_GRACE_MS * 2);
+    expect(store.list()).toHaveLength(1);
+  });
+
+  it('markDisconnected is idempotent (does not extend the grace window)', () => {
+    const store = getTokenStore();
+    const ticket = store.createTicket();
+    store.validate(ticket.code, hello(ticket.code, 'agent-A'));
+    store.markDisconnected('agent-A');
+    // Spurious extra close events from `ws` should not extend the window.
+    vi.advanceTimersByTime(PAIRING_RECONNECT_GRACE_MS - 100);
+    store.markDisconnected('agent-A');
+    vi.advanceTimersByTime(200);
+    expect(store.list()).toHaveLength(0);
   });
 
   it('markDisconnected is a no-op when no ticket matches', () => {
@@ -172,6 +217,17 @@ describe('token-store · disconnect & revoke', () => {
     const store = getTokenStore();
     const ticket = store.createTicket();
     expect(store.revoke(ticket.id)).toBe(true);
+    expect(store.list()).toHaveLength(0);
+  });
+
+  it('revoke during the grace window also clears the grace timer', () => {
+    const store = getTokenStore();
+    const ticket = store.createTicket();
+    store.validate(ticket.code, hello(ticket.code, 'agent-A'));
+    store.markDisconnected('agent-A');
+    expect(store.revoke(ticket.id)).toBe(true);
+    // Advancing past the grace window must not throw / re-fire.
+    vi.advanceTimersByTime(PAIRING_RECONNECT_GRACE_MS * 2);
     expect(store.list()).toHaveLength(0);
   });
 

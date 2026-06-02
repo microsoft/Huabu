@@ -19,9 +19,14 @@
  *              dev hot-reloads, laptop sleep) to keep working without
  *              re-pairing.
  *
- *   <gone>   → graceful disconnect, explicit revoke, or server restart
- *              all remove the ticket entirely. There is no "claimed
- *              but disconnected" zombie state.
+ *   <gone>   → explicit revoke or server restart remove the ticket
+ *              entirely. A WebSocket close (which the agentlet/server
+ *              layer reports as "disconnected" for *any* close — there
+ *              is no signal that distinguishes a deliberate Ctrl-C from
+ *              a transient drop) starts a {@link PAIRING_RECONNECT_GRACE_MS}
+ *              grace timer; the ticket is removed only if no `bridge/hello`
+ *              for the same agentId lands inside that window. Successful
+ *              re-validate cancels the timer.
  *
  * All state is in-memory and per-process. Pairing tokens are never
  * written to disk.
@@ -48,6 +53,20 @@ const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 export const PAIRING_PENDING_TTL_MS = 60_000;
 
 /**
+ * After {@link AcpTokenStore.markDisconnected} fires we keep the ticket
+ * around for this long so the agentlet client's auto-reconnect (wifi
+ * blips, dev hot-reloads, laptop sleep — see
+ * `external/agentlet/packages/local/src/bridge.ts`) has a chance to
+ * re-establish without forcing the user back to the Settings UI.
+ *
+ * Tuned to match agentlet's default `--reconnect-max` (300s): once the
+ * client gives up reconnecting, we expire the ticket too so a leaked
+ * code cannot be re-used by a third party that learns the agentId
+ * later.
+ */
+export const PAIRING_RECONNECT_GRACE_MS = 5 * 60 * 1000;
+
+/**
  * Internal in-memory record. Mirrors {@link AcpPairingTicket} but adds
  * the expiry timer handle so {@link close} can clear it cleanly.
  */
@@ -62,6 +81,19 @@ interface StoredTicket {
   claimedAt?: number;
   /** Active setTimeout handle; cleared on claim, expiry, or revoke. */
   pendingTimer: NodeJS.Timeout | null;
+  /**
+   * Epoch ms when {@link AcpTokenStore.markDisconnected} last fired for
+   * the bound agentId, or `null` while the agent is considered live.
+   * A successful re-validate clears this back to `null`.
+   */
+  disconnectedAt: number | null;
+  /**
+   * Active grace timer queued by {@link AcpTokenStore.markDisconnected};
+   * removes the ticket once {@link PAIRING_RECONNECT_GRACE_MS} elapses
+   * without a successful re-validate. Cleared on reconnect, revoke, or
+   * shutdown.
+   */
+  graceTimer: NodeJS.Timeout | null;
 }
 
 export type TokenEntry = AcpPairingTicket;
@@ -131,6 +163,8 @@ class AcpTokenStore {
           this.byId.delete(current.id);
         }
       }, PAIRING_PENDING_TTL_MS),
+      disconnectedAt: null,
+      graceTimer: null,
     };
     this.byCode.set(code, ticket);
     this.byId.set(id, ticket);
@@ -173,21 +207,44 @@ class AcpTokenStore {
     if (ticket.claimedAgentId !== agentId) {
       throw new Error('Pairing code already claimed by another agent');
     }
+    // Reconnect succeeded — cancel any in-flight disconnect grace timer
+    // so the ticket stays alive past PAIRING_RECONNECT_GRACE_MS.
+    if (ticket.graceTimer) {
+      clearTimeout(ticket.graceTimer);
+      ticket.graceTimer = null;
+    }
+    ticket.disconnectedAt = null;
     ticket.claimedAt = Date.now();
     return { metadata: { ticketId: ticket.id } };
   }
 
   /**
-   * Drop every ticket bound to the given `agentId`. Invoked by the
-   * agentlet server's `onDisconnection` callback so a graceful close
-   * (or any close event from `ws`) immediately invalidates the token
-   * — a fresh pairing is required to reconnect.
+   * Called by the agentlet server's `onDisconnection` callback for every
+   * WebSocket close (the underlying `ws` event surfaces no signal that
+   * distinguishes a deliberate Ctrl-C from a transient drop). We start a
+   * {@link PAIRING_RECONNECT_GRACE_MS} grace window during which the
+   * ticket stays alive; if no `bridge/hello` for the same agentId lands
+   * before the window elapses, the ticket is removed. A successful
+   * reconnect inside the window cancels the timer (see {@link validate}).
+   *
+   * Idempotent — re-firing for an already-grace-pending ticket leaves
+   * the original timer running so the grace window is not extended by
+   * spurious close events.
    */
   markDisconnected(agentId: string): void {
     for (const ticket of Array.from(this.byId.values())) {
-      if (ticket.claimedAgentId === agentId) {
-        this.removeTicket(ticket);
-      }
+      if (ticket.claimedAgentId !== agentId) continue;
+      if (ticket.graceTimer) continue;
+      ticket.disconnectedAt = Date.now();
+      ticket.graceTimer = setTimeout(() => {
+        // Only remove if still in grace (reconnect would have cleared
+        // graceTimer + disconnectedAt). Re-look up in case the ticket
+        // was already removed via revoke / shutdown.
+        const current = this.byId.get(ticket.id);
+        if (current && current.graceTimer) {
+          this.removeTicket(current);
+        }
+      }, PAIRING_RECONNECT_GRACE_MS);
     }
   }
 
@@ -208,6 +265,7 @@ class AcpTokenStore {
   close(): void {
     for (const ticket of this.byId.values()) {
       if (ticket.pendingTimer) clearTimeout(ticket.pendingTimer);
+      if (ticket.graceTimer) clearTimeout(ticket.graceTimer);
     }
     this.byCode.clear();
     this.byId.clear();
@@ -218,6 +276,10 @@ class AcpTokenStore {
     if (ticket.pendingTimer) {
       clearTimeout(ticket.pendingTimer);
       ticket.pendingTimer = null;
+    }
+    if (ticket.graceTimer) {
+      clearTimeout(ticket.graceTimer);
+      ticket.graceTimer = null;
     }
     this.byCode.delete(ticket.code);
     this.byId.delete(ticket.id);

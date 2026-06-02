@@ -93,10 +93,11 @@ export const useAcpPairingStore = create<AcpPairingState>()((set, get) => ({
   error: null,
 
   init: async () => {
-    if (get().loading || get().tickets.length > 0) {
-      // Already loaded (or loading) — but still re-arm polling in case
-      // the popover was closed and re-opened with pending tickets still
-      // visible from the previous mount.
+    // Always refetch on (re-)open so a ticket that flipped to claimed,
+    // expired, or got revoked while the popover was closed doesn't
+    // linger on screen as stale data. Only short-circuits if a fetch
+    // is already in flight.
+    if (get().loading) {
       syncPolling(get().tickets, get().refresh);
       return;
     }

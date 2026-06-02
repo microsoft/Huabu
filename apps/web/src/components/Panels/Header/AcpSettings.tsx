@@ -53,16 +53,21 @@ import type { AcpAgentCliInfo, AcpPairingTicket } from '@sediment/shared';
 
 /**
  * Custom hook: returns a millisecond-precision "now" that advances
- * roughly every 250ms while the component is mounted. We use this
- * rather than a `setInterval(force update)` directly so the countdown
- * stays smooth without re-rendering the whole tree on every tick.
+ * roughly every `intervalMs` while `active` is true. Re-uses a single
+ * `setInterval` so the countdown stays smooth without re-rendering the
+ * whole tree on every tick, and falls back to a static timestamp once
+ * `active` flips false so an idle popover doesn't keep React busy.
  */
-function useNow(intervalMs = 250): number {
+function useNow(active: boolean, intervalMs = 250): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
+    if (!active) return;
+    // Tick immediately on activation so a freshly-minted pending ticket
+    // doesn't wait up to `intervalMs` for its first refresh.
+    setNow(Date.now());
     const id = setInterval(() => setNow(Date.now()), intervalMs);
     return () => clearInterval(id);
-  }, [intervalMs]);
+  }, [active, intervalMs]);
   return now;
 }
 
@@ -401,7 +406,16 @@ export const AcpSettings: React.FC = () => {
     refresh: refreshDetection,
   } = useAgentCliDetection();
 
-  const now = useNow();
+  // Only tick the countdown clock while there's a pending ticket on
+  // screen — otherwise an open Settings popover would spin a 250ms
+  // interval forever for no UI change. `tickets` re-renders when the
+  // store polls, so the dependency captures both "new pending ticket
+  // appeared" and "last pending ticket got claimed/expired".
+  const hasPendingTicket = useMemo(
+    () => tickets.some((t) => t.status === 'pending'),
+    [tickets],
+  );
+  const now = useNow(hasPendingTicket);
 
   // Surface store errors as transient toasts.
   useEffect(() => {

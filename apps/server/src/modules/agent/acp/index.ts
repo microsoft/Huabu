@@ -25,5 +25,9 @@ export {
 } from './translator.js';
 export type { TranslatorLogger } from './translator.js';
 
-export { getTokenStore, PAIRING_PENDING_TTL_MS } from './token-store.js';
+export {
+  getTokenStore,
+  PAIRING_PENDING_TTL_MS,
+  PAIRING_RECONNECT_GRACE_MS,
+} from './token-store.js';
 export type { TokenEntry } from './token-store.js';

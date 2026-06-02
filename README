@@ -152,11 +152,13 @@ files in whatever project folder you pointed it at.
    > Pairing codes are **ephemeral**. The first `bin/agentlet` that
    > successfully hellos with the code claims it for that agent — after
    > that the code stays valid for reconnects (wifi blips, dev hot-
-   > reloads) but cannot be used to attach a different agent. Closing
-   > agentlet gracefully or clicking the ✕ next to the code in the UI
-   > revokes it immediately; the server holds no persisted token on
-   > disk. Setting `ENABLE_ACP` / `ACP_DEV_TOKEN` in `.env` has no
-   > effect.
+   > reloads) but cannot be used to attach a different agent. If the
+   > agentlet stays disconnected longer than ~5 minutes (the wrapper's
+   > default reconnect-backoff cap) the ticket is dropped too, so a
+   > leaked code can't be re-used hours later by someone who learns
+   > the agentId. Clicking the ✕ next to the code in the UI revokes it
+   > immediately; the server holds no persisted token on disk. Setting
+   > `ENABLE_ACP` / `ACP_DEV_TOKEN` in `.env` has no effect.
 
 2. _Optional._ Make the `agentlet` command available from any folder.
    Run the snippet that matches your shell from the project root:

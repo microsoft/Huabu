@@ -4,6 +4,25 @@
 
 ---
 
+## 2026-06-03 · ACP 配对码：修复"自动重连一定失败"的回归
+
+**What Changed**
+
+- 修复了 6 月 2 日重构后的回归：claimed 状态的票据在 agentlet 任意一次 WebSocket 断开（wifi 抖动、dev hot-reload、合盖醒来）后会被**立即删除**，导致客户端自带的指数退避重连永远收到 `Invalid or expired pairing code`，与 README/Settings UI 上"重连仍可继续使用"的承诺相反。
+- 现在 `onDisconnection` 改为**启动一个 5 分钟的宽限计时器**，而不是立即作废 ticket。这 5 分钟与 agentlet wrapper 的 `--reconnect-max` 默认值（300 秒）对齐，覆盖典型的网络抖动 / 笔记本休眠场景。
+- 宽限窗口内同一 `agentId` 重新发 `bridge/hello` 成功，计时器被取消，ticket 继续有效；超时还没回来才真正删除——既保留了"防止泄漏码被长期复用"的安全初衷，也不再误伤合法重连。
+- Settings popover 现在每次打开都会强制 `refresh()` 一次配对码列表，避免上一轮窗口里看到的票据已经被服务端清掉、UI 还显示"Paired · …"的陈旧态。
+- `useNow` 250ms 计时只在**有 pending 票据可见**时才转，popover 长时间开着也不会再无意义地强制 React 重渲染。
+
+**Notes**
+
+- **行为变化**：合法用户基本无感——重连恢复了；多了 5 分钟"幽灵 ticket"窗口，期间被 revoke / 服务器重启仍然立即生效。
+- **安全考量**：5 分钟选择基于 agentlet 默认 reconnect 上限。如果你把 agentlet 的 `--reconnect-max` 调高，宽限窗口期间的票据可能被你自己的 client 抢救回来；想缩短这个窗口可以改 server 端的 `PAIRING_RECONNECT_GRACE_MS` 常量。
+- **测试**：`token-store.test.ts` 新增 4 个 case（不立即 drop / 宽限内重连 / 宽限耗尽真删除 / markDisconnected 幂等不延长窗口）。
+- **未做的事**：仍然没有在 UI 上把"grace 中"状态展示出来（暂时和 Paired 一样显示），后续如果用户反馈想看 reconnect 状态再加。
+
+---
+
 ## 2026-06-03 · 外部 Agent 一键启动（检测安装 + 自动 PATH）
 
 **What Changed**
