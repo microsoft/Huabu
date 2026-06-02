@@ -87,7 +87,7 @@ browser.
 ## Configuring an LLM
 
 Sediment needs an LLM to drive chat, intent suggestions, and other
-in-canvas AI features. Open the Setting Button → **LLM Provider**.
+in-canvas AI features. Open the Settings button → **LLM Provider**.
 
 1. Pick a **Provider** (OpenAI, Anthropic, Google Gemini, OpenRouter,
    GitHub Copilot, and more).
@@ -122,17 +122,17 @@ server probes which agent CLIs are installed on your machine.
    ```bash
    # GitHub Copilot CLI
    npm install -g @github/copilot
-   # Claude Code        
+   # Claude Code
    npm install -g @anthropic-ai/claude-code
    # Gemini CLI
-   npm install -g @google/gemini-cli        
+   npm install -g @google/gemini-cli
    ```
 
    After installing, launch each CLI once in a terminal and complete
    its sign-in flow (e.g. `copilot` for GitHub Copilot, `claude` for
    Claude Code, `gemini` for Gemini CLI). Sediment reuses the credentials the CLI stores on your machine, so it can't connect until you've authenticated at least once.
 
-2. Click the Setting Button → **External Agents**. Each installed CLI appears as a card.
+2. Click the Settings button → **External Agents**. Each installed CLI appears as a card.
 
 3. Click **Connect** on the one you want. Sediment generates a 60s pairing code, builds the full `agentlet …` launch command, and copies it to your clipboard.
 
@@ -158,8 +158,11 @@ server probes which agent CLIs are installed on your machine.
   chat (5-min timeout). Copilot exposes a one-flag bypass
   (`--allow-all`, on by default in the Connect button) — uncheck it
   before clicking **Connect** to approve every tool call yourself.
-- **Pairing-code safety** — Codes are ephemeral, never persisted to
-  disk. Reconnects from the same agentlet keep working until it's
+- **Pairing-code safety** — Pending codes are ephemeral (60s TTL,
+  in-memory only). Once a code is claimed by an agentlet, the resulting
+  ticket is persisted to `data/acp-tickets.json` so server restarts
+  don't force you back to the Settings UI to re-pair every connected
+  agent. Reconnects from the _same_ agentlet keep working until it's
   been disconnected longer than ~5 minutes; spinning up a different
   agent always requires a fresh code.
 

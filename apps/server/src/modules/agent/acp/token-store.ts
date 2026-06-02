@@ -393,6 +393,16 @@ class AcpTokenStore {
         // Rehydrated tickets start with a clean "online" slate; if the
         // agent never reconnects, the next markDisconnected → grace
         // window will eventually purge them.
+        //
+        // TODO(acp-ticket-cleanup): there is currently no eviction path
+        // for rehydrated tickets whose agentlet never comes back —
+        // `markDisconnected` only fires on real WS close events, so an
+        // entry whose process died between server runs sits in
+        // `data/acp-tickets.json` forever. Cheap fix when we get to it:
+        // seed `disconnectedAt = Date.now()` and start a fresh
+        // PAIRING_RECONNECT_GRACE_MS timer here. Live agentlets
+        // auto-reconnect within seconds (the existing `validate` clears
+        // the timer); dead ones self-evict after 5 min.
         disconnectedAt: null,
         graceTimer: null,
       };
@@ -494,6 +504,6 @@ export function _resetTokenStoreForTests(): void {
  * `data/acp-tickets.json`. The override takes effect on the next
  * {@link getTokenStore} call after {@link _resetTokenStoreForTests}.
  */
-export function _setPersistPathForTests(path: string | null): void {
+export function _setPersistPathForTests(path?: string | null): void {
   _persistPathOverride = path;
 }

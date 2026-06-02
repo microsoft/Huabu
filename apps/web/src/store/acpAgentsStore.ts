@@ -30,9 +30,15 @@ import { listAcpAgents } from '@/api/acp';
 import type { AcpAgentSummary } from '@/api/acp';
 
 interface AcpAgentsState {
-  /** Currently-connected agents. Empty array until the first fetch resolves. */
+  /** Currently-connected agents. Empty array until the first successful fetch. */
   agents: AcpAgentSummary[];
-  /** `true` once the initial fetch has resolved at least once. */
+  /**
+   * `true` once a fetch has *succeeded* at least once. A failed
+   * initial fetch leaves this `false` (and {@link agents} empty), so
+   * consumers can use `loaded` to distinguish "no agents connected"
+   * from "we don't know yet / the last attempt errored" — check
+   * {@link error} alongside it for the failure case.
+   */
   loaded: boolean;
   /** Last error from a fetch, or `null`. Cleared on the next successful fetch. */
   error: Error | null;

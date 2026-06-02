@@ -9,7 +9,7 @@
  *
  *  1. **Detected agents** — the server probes the host for installed
  *     ACP-capable CLIs (Copilot / Claude / Gemini). Each is rendered
- *     as a row with name + version, an optional `--allow-all` toggle
+ *     as a row with name, an optional `--allow-all` toggle
  *     (only shown when the CLI exposes one), and a **Connect** button
  *     that mints a fresh pairing code AND builds the exact
  *     `agentlet --token … --agent "…"` command, copying it to the
