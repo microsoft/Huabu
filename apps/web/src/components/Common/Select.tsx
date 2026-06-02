@@ -17,8 +17,7 @@ export interface SelectOption<T extends string = string> {
   /**
    * When set, a section header (`─── {sectionLabel} ───`) is rendered
    * in the dropdown panel immediately ABOVE this option. Used to group
-   * related entries (e.g. the ChatPanel ModeSelector splits built-in
-   * modes from connected external agents). Has no effect on selection
+   * related entries. Has no effect on selection
    * behaviour or the trigger label.
    */
   sectionLabel?: string;
@@ -62,7 +61,7 @@ type SelectProps<T extends string = string> = {
    * Fired exactly when the dropdown transitions from closed → open
    * (clicking the trigger while open closes it and does NOT fire this).
    * Use this to lazily refresh dynamic option lists—e.g. the
-   * ChatPanel ModeSelector pulls the latest ACP agents on each open
+   * ChatPanel NewChatMenu pulls the latest ACP agents on each open
    * instead of polling on a timer.
    */
   onOpen?: () => void;
@@ -168,7 +167,7 @@ export function Select<T extends string = string>({
 
   return (
     <>
-      <div ref={triggerRef}>
+      <div ref={triggerRef} className="flex min-w-0 shrink">
         <Button
           variant={variant}
           tone={tone}
@@ -178,16 +177,17 @@ export function Select<T extends string = string>({
           onClick={handleToggle}
           aria-expanded={isOpen}
           title={title}
+          tooltipWrapperClassName="flex min-w-0 shrink"
           className={cn(
             selectShapeClasses[shape],
             isOpen && 'bg-bg-default',
-            iconOnly && 'gap-0.5 px-1',
+            iconOnly ? 'gap-0.5 px-1' : 'w-full min-w-0 overflow-hidden',
             className,
           )}
         >
           {current?.icon}
           {!iconOnly && (
-            <span className="whitespace-nowrap">
+            <span className="min-w-0 truncate">
               {current?.label ?? placeholder}
             </span>
           )}

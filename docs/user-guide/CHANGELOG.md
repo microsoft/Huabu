@@ -4,6 +4,69 @@
 
 ---
 
+## 2026-06-03 · ACP 配对码：修复"自动重连一定失败"的回归
+
+**What Changed**
+
+- 修复了 6 月 2 日重构后的回归：claimed 状态的票据在 agentlet 任意一次 WebSocket 断开（wifi 抖动、dev hot-reload、合盖醒来）后会被**立即删除**，导致客户端自带的指数退避重连永远收到 `Invalid or expired pairing code`，与 README/Settings UI 上"重连仍可继续使用"的承诺相反。
+- 现在 `onDisconnection` 改为**启动一个 5 分钟的宽限计时器**，而不是立即作废 ticket。这 5 分钟与 agentlet wrapper 的 `--reconnect-max` 默认值（300 秒）对齐，覆盖典型的网络抖动 / 笔记本休眠场景。
+- 宽限窗口内同一 `agentId` 重新发 `bridge/hello` 成功，计时器被取消，ticket 继续有效；超时还没回来才真正删除——既保留了"防止泄漏码被长期复用"的安全初衷，也不再误伤合法重连。
+- Settings popover 现在每次打开都会强制 `refresh()` 一次配对码列表，避免上一轮窗口里看到的票据已经被服务端清掉、UI 还显示"Paired · …"的陈旧态。
+- `useNow` 250ms 计时只在**有 pending 票据可见**时才转，popover 长时间开着也不会再无意义地强制 React 重渲染。
+
+**Notes**
+
+- **行为变化**：合法用户基本无感——重连恢复了；多了 5 分钟"幽灵 ticket"窗口，期间被 revoke / 服务器重启仍然立即生效。
+- **安全考量**：5 分钟选择基于 agentlet 默认 reconnect 上限。如果你把 agentlet 的 `--reconnect-max` 调高，宽限窗口期间的票据可能被你自己的 client 抢救回来；想缩短这个窗口可以改 server 端的 `PAIRING_RECONNECT_GRACE_MS` 常量。
+- **测试**：`token-store.test.ts` 新增 4 个 case（不立即 drop / 宽限内重连 / 宽限耗尽真删除 / markDisconnected 幂等不延长窗口）。
+- **未做的事**：仍然没有在 UI 上把"grace 中"状态展示出来（暂时和 Paired 一样显示），后续如果用户反馈想看 reconnect 状态再加。
+
+---
+
+## 2026-06-03 · 外部 Agent 一键启动（检测安装 + 自动 PATH）
+
+**What Changed**
+
+- Settings → External Agents 上方新增 **Detected Agents** 区块：server 在 host 上自动探测 `copilot` / `claude` / `gemini` 三种 ACP-capable CLI（用 `which` / `where` + `--version`），只显示**已安装**的；未检测到的不再占位。
+- 每张 Detected Agent 卡片暴露 **Connect** 按钮：一次点击同时完成 ① 生成新的配对码、② 拼出完整的 `agentlet --token <CODE> --agent "<binary> --acp …"` 命令、③ 复制到剪贴板，并 toast 提示用户在 60 秒内粘贴到终端。原来"先生成码，再自己拼命令"的两步流程简化为一步。
+- 卡片上的 **Auto-approve tool calls** toggle：仅在 CLI 支持显式的自动批准 flag 时显示（目前只有 Copilot 的 `--allow-all`），默认开启。Claude / Gemini 没有等价的简单 flag，因此**不**渲染该 toggle——用户如果要类似行为，仍可走下方"Pair manually (advanced)"自行拼命令。
+- 原有"Generate code"按钮保留为 **Pair manually (advanced)**，给需要自定义 binary、远程 shell、定制参数的高级用户作为兜底。
+- `pnpm install` 现在会自动把 `<repo>/bin/` 加到当前用户的 PATH（POSIX 写入对应 shell rc：zsh → `~/.zshrc`、bash → `~/.bashrc`、fish → `~/.config/fish/config.fish`；Windows 调 PowerShell 写 User-scope PATH）。安装完打开**新终端**即可直接敲 `agentlet`，不再需要手动 `export PATH=…`。
+- 后端新增 loopback-only 路由 `GET /api/acp/agent-cli`，返回探测到的 agent 列表 + `agentletOnPath` 标志 + `bin/agentlet` 的绝对路径；前端用后两者决定复制命令时用 `agentlet …`（短）还是 `<abs>/bin/agentlet …`（长）。
+
+**Notes**
+
+- **PATH 写入的安全开关**：postinstall 脚本在以下三种情况下**完全跳过**写入：① `process.env.CI === 'true'`（防止污染 CI shell rc）、② `HUABU_NO_AUTO_PATH=1`（用户显式 opt-out）、③ `bin/` 已经在 PATH 里。失败永远不会让 `pnpm install` 退出非 0——最差情况只是不复制 PATH，wrapper 仍可以走完整绝对路径调用。
+- **PATH 写入的幂等性**：通过 `# Added by Sediment — agentlet CLI` 哨兵注释 + `binDir` 字面量双重检查。多次 `pnpm install` 不会重复追加。
+- **Windows 注意**：`bin/agentlet` 本身是 POSIX sh 脚本，只能在 Git Bash / WSL 里直接运行（cmd.exe / PowerShell 不行）。把 `bin/` 加到 User PATH 仍然有意义——Git Bash 会继承 Windows PATH。如果你只用原生 PowerShell，目前需要走 WSL 或在 `bin/` 旁加 `.cmd` shim（暂未实现）。
+- **Auto-approve 的 scope**：只在 Copilot 一家上提供 toggle 是有意为之。Claude 的 `--dangerously-skip-permissions` 与 Gemini 的对应能力都属于"明确警告级"的 flag，不该作为一键勾选——如果默认勾上+复制到剪贴板，用户很可能在没读完 prompt 的情况下粘贴执行。
+- **检测时机**：Settings 面板每次挂载都会重新探测，所以你新装一个 CLI 之后只要刷新 Settings popover 就能看到，无需重启 server。
+
+---
+
+## 2026-06-02 · ACP bridge 改用阅后即焚的配对码（破坏性变更）
+
+**What Changed**
+
+- 移除 Settings → External Agents 的 enable/disable toggle。ACP bridge 现在**永远挂载**，安全边界完全交给一次性的配对码。
+- 旧的"持久化共享 token"换成了**ephemeral pairing code**：
+  - 在 Settings 里点 **Generate code** 会得到一个 8 位的码（如 `XXXX-XXXX`），UI 上明文显示并附 60 秒倒计时
+  - 60 秒内第一个用该码 `bridge/hello` 成功的 agentlet 会**锁定**这个码到自己的 `agentId`；之后同一个 agentlet 的重连（wifi 抖动、dev hot-reload、合盖醒来等）仍可继续使用
+  - 60 秒过期未被认领 → 自动失效
+  - agentlet 优雅断开 / 用户在 Settings 点 ✕ / Sediment server 重启 → 立即失效
+- 同时可以生成多个码、配对多个 agent，互不影响。
+- `bin/agentlet` wrapper 不再从 `data/acp-config.json` 读 token——这个文件不再使用，启动时会自动删除残留。
+- `bin/agentlet` 现在必须通过 `--token <CODE>` 或 `AGENTLET_TOKEN` 环境变量传入配对码，缺失时报清楚的引导信息。
+
+**Notes**
+
+- **破坏性变更（接前次 ACP 重构）**：原本走 Settings UI 启用 + 自动复用 token 的工作流被废弃。每次启动一个新的 agentlet 实例（不是重连）都需要现去 Settings 生成一个码。日常重连（同一个 agentlet 进程被 wifi/sleep 打断）不需要重新生成。
+- **安全模型**：HTTP 上的 `/api/acp/pair*` 三个端点仍然是 loopback-only；token 永远不落盘；server 重启全部失效。`/api/acp/agent` 的 WS 端点本身无条件挂载，是 token store 把守。
+- **多人/多 agent 同时使用**：完全支持。每张票据独立，互不影响。
+- **如果你之前依赖 token 长期有效**（例如脚本里硬编码了 token）：现在不行了，需要改为每次启动 agentlet 前先调 `POST /api/acp/pair` 拿一个新码。一般用户不受影响。
+
+---
+
 ## 2026-06-01 · 内置 `/create-skill` 与 `/update-skill` 两个 slash skill
 
 **What Changed**
@@ -62,6 +125,217 @@
 - **内部工具调整，普通用户无感知**：所有写入的目标文件、磁盘布局、cap（workspace + canvas 仍是 4 KB / 80 行；skill 仍无 cap）、并发锁、skill 缓存失效行为都保持不变。
 - **自定义 agent 配置需要更新**：若你在自定义 prompt / AGENT.md 里引用了旧工具名（`memory_workspace_write` 等），请替换为 `fs_write`，并按新参数形态调整 schema。所有内置 prompt 已同步。
 - **行级编辑能力顺带获得**：`mode: "replace_string"` 在三类 memory 文件上都可用，特别适合对长 skill 文件做局部修订，不再需要 LLM 整段重抄。
+
+## 2026-06-02 · 默认本地绑定 + Host 白名单 + CSRF 防护（破坏性变更）
+
+## 2026-06-03 · 外部 ACP Agent 一键启用（破坏性变更：env vars 不再生效）
+
+**What Changed**
+
+- 设置面板（右上齿轮）新增 **External Agents (ACP)** 区块，可一键启用/禁用外部 agent bridge，并自动生成、复制、轮换 `agentlet` 共享 token。
+- 启用状态和 token 现在持久化到 `data/acp-config.json`（权限 `0600`），第一次启用时自动生成 64 字符 hex token；切换 enable 状态不再需要重启服务器。
+- WebSocket 端点 `/api/acp/agent` 现在**无条件挂载**——安全边界改由 in-memory token store 把守，禁用时 store 为空、`bridge/hello` 全部拒绝，启用时同步注入 token。
+- `bin/agentlet` wrapper 直接从 `data/acp-config.json` 读 token，用户不再需要复制粘贴。
+
+**Notes**
+
+- **破坏性变更**：环境变量 `ENABLE_ACP` 和 `ACP_DEV_TOKEN` 已**完全失效**，无论是服务器还是 `bin/agentlet` 都不再读取它们。原本走 `.env` 启用 ACP 的用户需要：
+  1. 在 Settings → External Agents (ACP) 里点 **Enable**（会自动生成新的 token，旧的 `ACP_DEV_TOKEN` 值不会被迁移）；
+  2. 从 `.env` 里删掉 `ENABLE_ACP` / `ACP_DEV_TOKEN` 两行（留着不会报错，但毫无作用，徒增困惑）。
+- `ACP_URL` 仍然有效——`bin/agentlet` 在连接非默认 `ws://localhost:3001/api/acp/agent` 端点时仍会读这个变量（例如 TLS-fronted 远程部署）。
+- Settings 面板的 token 读写都受 localhost-only 守卫保护，同 LAN 上的其它设备无法读取或修改 ACP 配置。
+- 旋转 token 会立即吊销旧 token，所有正在连接的 agentlet 实例需要用新 token 重连。
+- 服务器启动错误信息从 "set ENABLE_ACP=1 and restart" 改为 "enable external agents from the Settings panel"。
+
+---
+
+## 2026-06-02 · 默认本地绑定 + Host 白名单 + 跨站写入防护（破坏性变更）
+
+**What Changed**
+
+- 服务器现在默认只绑定 `127.0.0.1`（不再是 `0.0.0.0`），新装的实例不会被同局域网的其他人意外访问到。
+- 新增 `HUABU_BIND_HOST` 环境变量，需要 LAN/远程访问时显式设置为 `0.0.0.0` 或具体网卡 IP。
+- 新增 `HUABU_ALLOWED_HOSTS` 环境变量（逗号分隔的主机名列表），所有 HTTP 请求的 `Host` 头都会校验，不在白名单里的直接 403——防御 DNS rebinding 攻击。
+- 新增 **跨站写入防护**：所有写请求（POST/PUT/PATCH/DELETE）按三层依次校验：
+  1. **`Sec-Fetch-Site` (W3C Fetch Metadata)**——现代浏览器首选信号，JS 无法伪造（forbidden header）。`cross-site` 直接 403；`same-origin` / `same-site` / `none` 放行。
+  2. **`Origin` 白名单**——老浏览器 / WebView 回退路径，主机名必须落在 `HUABU_ALLOWED_HOSTS` 里。
+  3. **Loopback 兜底**——既无 `Sec-Fetch-Site` 也无 `Origin` 的请求（curl、原生 app、CI 脚本），只在 TCP peer 为 `127.0.0.1` / `::1` 时放行。
+     无 token、无 bootstrap、无前端注入。
+- CORS 同步收紧：只允许 `HUABU_ALLOWED_HOSTS`（含 loopback 默认项）对应的来源，阻断跨站读取敏感 GET 端点的路径。
+
+**Notes**
+
+- **如果你之前从局域网 / 其他设备访问过 Sediment**：升级后需要在 `.env` 里加上：
+  ```dotenv
+  HUABU_BIND_HOST=0.0.0.0
+  HUABU_ALLOWED_HOSTS=your-lan-ip,your-hostname.local
+  ```
+  否则远程访问会出现 403 或连接被拒。强烈建议同时启用 `HUABU_BASIC_AUTH_USER`/`HUABU_BASIC_AUTH_PASS`，并在前面挂 HTTPS。
+- 纯本机使用（默认场景）无需任何配置变更,体验和之前一致。
+- **从非本机的脚本/原生 app 调用 API**：必须显式带上 `Origin: http://your-allowed-host` 头（落在白名单内），否则会被第 3 层兜底规则拒掉。这是相对旧实现的一处行为收紧——旧版本对"无 Origin"无差别放行。
+- 第三方 ACP agent（agentlet CLI）的 WebSocket 连接不受影响——它继续走自己的 token 鉴权。
+
+---
+
+## 2026-06-01 · 图层面板新增正则搜索 + 类型过滤
+
+**What Changed**
+
+- 左侧 **Layers 面板**顶部新增一条**默认单行**的过滤栏（画布存在 ≥2 种节点类型时显示）：
+  - **类型 chip 行（默认可见）**：左侧一排图标 chip + 右侧搜索按钮，没有额外文字标签——chip 本身（图标 + tooltip `Filter by Image` 等）就是过滤的视觉语义，避免 "Filter" 这种英文 jargon 造成的语言门槛。chip **只显示当前画布上实际存在的节点类型**（在 `CANVAS_NODE_TYPES` 的标准顺序里筛选）；**默认全部未选 = 不施加类型约束（显示全部类型）**；点击 chip 高亮选中（柔和的 `bg-info-bg` + info 色，不是刺眼的纯色 pill）→ 列表收窄到只显示该类型；多次点击不同 chip 把更多类型加入白名单；再点已选中的 chip 取消选中。chip 数量过多时优雅地 `flex-wrap` 到第二行，右侧搜索按钮始终保持在右上角。
+  - 过滤栏底部用 `border-edge-default/40` 一条极淡的发丝线（约等于 `#f5f5f5`）作为分隔，比默认 edge 色淡 60%；既能暗示"过滤栏 vs 列表"的区段感，又不会和上方 workspace header 的 border 视觉上叠成"两条平行线"。
+  - **正则搜索框（按需展开）**：点击右侧搜索图标按钮才展开输入行；自动 focus，输入即过滤，按 label 做大小写不敏感的正则匹配；非法正则会让输入框边框变红、列表清空，避免静默"降级到子串匹配"造成的误解。Esc 或栏内 × 关闭输入行并清空 query，但**保留 chip 选中状态**（chip 和 search 解耦，互不打扰）。
+  - **fallback：画布只有 0–1 种类型时**，chip 行不渲染（chip 没意义），改在右上角浮动一枚低调的搜索图标（默认 50% 透明、hover 100%），点击直接展开搜索输入；与之前版本的行为兼容。
+- 两种过滤**自动组合**为 AND：正则命中 ∧ （未选任何类型 ∨ 类型在白名单内）。
+- **过滤激活时切换成扁平 list 视图**（VS Code 全局搜索式）：层级缩进消失、所有命中节点统一 `depth=0` 渲染。撤销所有过滤后**无缝回到原 tree 视图**。
+- **过滤激活时禁用拖拽排序**（避免"跨越被隐藏节点"导致 z-order 意外变化）；折叠 chevron 也隐藏（扁平结果中折叠无意义）。
+
+**Notes**
+
+- **不破坏原有交互**：单选 / Ctrl 多选 / 双击重命名 / 锁定 / fitView 到画布节点等行为在过滤状态下全部继续工作；过滤命中节点点击后照常 fit 到画布对应位置。
+- **匹配在 collapsed frame 里的节点也会浮现**：过滤模式直接跳过"折叠 frame 隐藏子节点"的视图过滤，确保搜索结果不被画布上的折叠状态意外屏蔽。
+- **性能**：过滤是单遍 O(N)，并且复用了原有的 per-id 缓存（新增一层 flat 模式缓存），命中节点的 `SortableRow` 在 selection-only 变化时仍能命中 `React.memo`，不会触发 O(N) 重渲染。
+- **过滤状态是面板本地的 `useState`**：折叠左侧面板再展开时状态保留；不进 zustand store、不持久化到 localStorage。
+- **没有改 shared / server**：纯前端 UI 改动，节点 schema、canvas-engine、API 契约都没碰。
+
+---
+
+## 2026-06-02 · 没有锚点的新节点改成落在当前视窗中心
+
+**What Changed**
+
+- 通过没有"锚点"的入口添加节点时（聊天消息卡片底部的 **Add as note**、Floating Drag Handle 的 **Add as note / image** 按钮等），新节点现在会**以包围盒中心对齐到当前视窗中心**出现，而不是被丢到 (0, 0) 再由 force-directed `placeNode`（fCoSE）算法挪到某处。
+- 同一批次有多个 fallback 节点时（例如一次性 paste 上传 3 张图），按 `+40, +40` 的步长依次错位，与现有 `Ctrl+V` 粘贴的视觉行为保持一致。
+- 拖拽放置、画布右键、粘贴到画布某点、Sketch overlay、frame drag-to-create 等**已经带坐标**的入口完全不受影响——它们的 `placementPoint` 仍然原样使用。
+
+**Notes**
+
+- **没有触碰 agent 路径**：agent 通过 `CREATE_NODES` 创建节点时，如果带了 `position` 就照用，没带就仍走 force-directed 兜底——agent 的位置决策权和 LLM 行为完全不变。
+- **没有触碰 shared canvas-engine**：viewport 是 web-only 概念，新逻辑只活在 web 的 `dispatchUiIntent` + `resolveAddNodes` 里；shared/server 看到的依然是带 `position` 的 `CREATE_NODES`。Headless executor 行为零变化。
+- **没有做碰撞检测**：跟现有 `Ctrl+V` 粘贴一样，如果视窗中心已经被节点占住，新节点会盖在上面；用户拖动一下即可。要做"避开已有节点"以后再补。
+- **fallback 兜底**：极端情况下（React Flow 实例还没注册 / 画布容器没挂载）`viewportCenter` 是 undefined，逻辑回退到原先的 force-directed `placeNode`，不会创建 (0, 0) 的孤儿节点。
+
+---
+
+## 2026-06-02 · ACP preprocessor 升级成可自主探索画布的 sub-agent
+
+**What Changed**
+
+- ACP **intent translator**（生成给外部 agent 用的 `task` 简报的那一层）从"一次性 LLM 调用 + 固定塞入选中节点正文"升级成了一个**带 read-only 画布工具**的 sub-agent，包括 `get_canvas_outline` / `inspect_nodes` / `inspect_edges` / `read` / `grep` / `find` / `ls`。
+  - 它现在能**自己决定要不要读取节点内容**——简单问题（一句寒暄、纯文字指令、用户已经在聊天框里贴了代码片段）直接合成简报，根本不去碰画布；需要画布上下文的（"看看那几个节点说什么"、"那个 frame 里哪几个最相关"）会按需 `read` / `grep` / `inspect_*`。
+  - 翻译期最多跑 6 轮（`runtime.maxIterations: 6`），多数 turn 应该 1-2 轮就结束；UI 看不到中间 tool call，只会看到最终的 `prepared_prompt` 卡片。
+- 新增模板指令 `{{include:<path>}}`：可以把另一个文件（路径相对 `apps/server/src/prompt/`）整段塞进 AGENT.md 里。preprocessor 的 AGENT.md 就是用 `{{include:skills/canvas/SKILL.md}}` 把 canvas SKILL 原样拼进来，**和其他 agent 共用同一份画布知识，不再有 copy-paste 漂移风险**。
+- 顺手修了一个潜在的 Windows 坑：`parseFrontmatter` 现在会把 CRLF 行尾正规化成 LF 再交给 YAML 解析器，避免 Windows 上写的 AGENT.md 把 `toolExecution: parallel` 解析成 `"parallel\r"` 然后被验证拒绝。
+
+**Notes**
+
+- **用户感知**：依旧是发出消息后看到 "Preparing…" 卡片，然后变成 PreparedPromptCard，外部 agent 那边收到的内容形态不变。差别在**简报质量**：preprocessor 不再被 16KB 阈值卡住——以前超过 16KB 的节点只能挂 attachments、永远不会被合成到 `task`；现在 agent 可以分块 read 出关键段落直接合成进去，attachments 只在真正需要逐字访问时才用（review 代码、二进制 artifact 等）。
+- **不需要选中节点的 turn 更便宜**：以前哪怕用户问"你叫什么名字"，只要画布里有 selected node，preprocessor 也会先把它正文 stat + read 一遍；现在 agent 会跳过整个读节点环节。
+- **失败回退保持不变**：translator 抛错（LLM 故障 / JSON 解析失败 / 用完 6 轮还没出 JSON）依旧 fallback 到原始 rawText，前端会看到 `prepared_prompt` 带 `error` 字段。
+- **没有引入新的画布写入面**：preprocessor agent 没有 `canvas_commands` 工具，只能读不能写，不会动用户画布。
+- **后续优化方向**：现在 preprocessor 已经具备探索能力，下一步可以把 frame 内兄弟节点 / 空间邻居自动注入提示，让 agent 不用每次都 `get_canvas_outline` 才知道附近还有什么。
+
+---
+
+## 2026-06-02 · question node 多轮对话也会重置未读状态
+
+**What Changed**
+
+- 之前在 question node 的 chat thread 里发**追加问题**（多轮对话），新答案流回来后节点的 `viewed` 标记**保持原状**，所以 Layer Panel 上的小圆点和画布上的 "done · unread" pill 都不会重新出现——视觉上看不出"有新答案没看过"。
+- 现在每次在 question thread 里发新一轮消息时（走 `useAgentStream.startStream` 的 follow-up 路径），节点会一并被标记成 `viewed: false`，与首轮的 `useQuestionRunner` 行为对齐。
+- 答案结束时，如果**用户仍在这个 question thread 里看着**（`viewingQuestionThread.nodeId` 还指向同一个节点），则在 `onComplete` / 中止处理里把 `viewed: true` 再补回去——他们已经看了一遍，不需要再用未读提示骚扰。
+- 如果用户在 stream 期间已经切去看别的 chat 或 canvas，节点会保持 `viewed: false`，圆点和 pill 正常出现，直到下次再点开这个 question node 才会被标记成已读。
+
+**Notes**
+
+- **running 状态没变**：原来就在 follow-up 时正确把状态切到 `running`，这次只补了 `viewed` 字段，行为是叠加的，没动 status 流转。
+- **影响范围只有 question thread 的 follow-up**：canvas chat 的普通对话不会触发 `viewed` 字段修改（节点没有 `questionNodeId`）；首轮自动运行依旧由 `useQuestionRunner` 单独管理。
+
+**What Changed**
+
+- 之前在 question node 的 chat thread 里发完问题后，如果**在流式返回结束前**关掉 question thread 切回主 canvas chat（或者打开另一个 question node），LLM 的回复消息会**追加到当前正在看的那个 chat session 的 message list 上**，而不是发起这次提问的那个 thread——视觉上像是"别人的对话突然多了一段我没说过的话"。
+- 现在每个 chat session 的 message list 被**独立缓存在 `messagesByThread[threadId]` 里**：每次 send 时记录"这次 stream 属于哪个 thread"，所有 SSE 事件直接写入对应 thread 的 slice，UI 永远渲染当前 `threadId` 对应那条。
+- 切回原 thread 时，消息列表是**内存里实时的那一份**——回复继续流进来不会丢，已结束的回答也立刻能看到完整版（不再需要触发 history refetch 才知道结果）；同时切去看别的 thread 时，那边也是各自独立的状态，**所有 thread 可以并行流式接收回复**。
+- question node 自身的状态徽标（pending / running / done / error）**不受 thread 切换影响**——它是按 node id 标注的，无论用户当时在看哪个 chat，都会按时进入 `done`。
+
+**Notes**
+
+- **不会主动 abort stream**：用户的预期是"我只是去别处看一眼，问题应该继续跑"，所以切 thread 时不会取消服务端的 run，只是把回复落到正确的 list 里。要主动中止仍然请用 chat 输入框右下角的 stop 按钮（只对当前 thread 生效）。
+- **顺带把 `isLoading` 也改成了 per-thread**：原来整个 chat panel 只有一个全局 `isLoading`，意味着 canvas chat 在跑的时候 question panel 的输入框也会被 disable（反之亦然）。现在每个 thread 各自有 loading 状态，**canvas chat 和任意 question node 可以并行 send**，stop 按钮也只停当前 thread 那条 run。每条 stream 在自己的 closure 里持有 `assistantId` / `resources` / abort controller，互不污染。
+- **内存占用**：缓存只活在内存（不持久化），单 thread 平均 ~200KB。每次切 thread（打开/关闭 question thread、切 canvas、新建对话）会跑一次 `evictInactiveThreads`：缓存条数超过 10 时，把所有 **非 pinned** 的 thread 一次性丢掉——pinned 集合 = 当前可见 thread ∪ 正在 stream 的 thread ∪ question 视图下被压栈的 canvas thread。被丢掉的 thread 下次再切回时，`useChatHistory` 自动 refetch（沿用既有路径），用户最多感知一次 ~200ms 的 loading。写消息路径零开销：eviction 只在切换边界跑，不在 `addMessage` 里跑。
+- **`useQuestionRunner`（首次自动 run）路径不受影响**：它只用最小化的 `onEvent` 翻一个 `sawDone` 旗子，从不写 `chatStore`，所以从一开始就没有这个泄漏。
+
+---
+
+## 2026-06-01 · Layer Panel 显示 question node 的执行状态
+
+**What Changed**
+
+- 左侧 **Layer Panel** 里的 question 节点行图标右下角现在会带一个 **6px 状态小圆点**，颜色含义和画布上 QuestionNode 自带的 `StatusBadge` 保持一致：
+  - 🟠 `pending` — 自动运行倒计时中
+  - 🔵 `running` — 正在执行
+  - 🟢 `done` 且**尚未阅读** — 有未读回答（带 pulse 动画提示注意）
+  - 🔴 `error` — 失败
+- 鼠标悬停小圆点会出 tooltip，文案直接复用画布 badge 的措辞（`Pending` / `Running` / `Done · unread` / `Error — {errorMessage}`，error 消息超过 200 字符自动截断）。
+- `idle` 状态和 `done` 且已读的节点**不显示**圆点——保持 panel 在"无事发生"时的视觉干净。
+
+**Notes**
+
+- **不是 chat session 列表**：这只是 ambient 状态指示，点击行为不变（依旧是选中节点）。要看完整对话仍然走"双击 question node → Chat Panel"那条路径。
+- **性能**：`isSameTreeItem` 加了 `status` / `viewed` / `errorMessage` 三个字段的浅比较；非 question 节点通过 `type` 短路退出，原有 `SortableRow` 的 `React.memo` 行为对其它节点零影响。
+- **文案单源**：`Common/StatusBadge` 新导出 `getStatusLabel(status)`，Layer Panel 和画布 badge 共用同一份 status → label 映射，未来加新 status 不会两边漂移。
+- **不和 sketch 节点抢图标位**：sketch 节点的预览缩略图渲染逻辑完全没动；只有 `type === 'question'` 的节点会触发圆点叠加。
+
+---
+
+## 2026-06-01 · 一键开"和别的 agent 的新会话"——ModeSelector → NewChatMenu
+
+**What Changed**
+
+- 聊天面板顶部的 `[模式/Agent ▼]` 下拉（`ModeSelector`）被替换成一个 **`+ ▾` split button**（`NewChatMenu`），仍然在右上角原 `+` 的位置。
+  - 左半 **`+`**：保留以前的 "开新对话" 单击行为，但现在会**继承当前 thread 的 (mode, binding)**——如果你正在和 claude 聊天，点 `+` 就直接开一个新的 claude 会话；正在用内置 Ask 模式，就开一个新的内置 Ask 会话。
+  - 右半 **`▾`**：点开后是一个菜单，列出所有可选的起点（Chat / Agent / 每一个连接上的 ACP agent），**点哪一项就直接开一个新 thread 并绑定到那项**。底部仍有 "Refresh Agents" 按钮。
+  - 菜单里会用 `text-info` 高亮当前 thread 的 (mode, binding)，方便看出现在用的是哪个。
+- 当前 thread "绑定到谁" 这个信息，从下拉的 trigger 文本变成了直接显示在面板**标题**位置（例如 "Chat with claude" / "Chat with GPT-4o"），与 Sketch / Question replay 这类只读视图的标题样式统一。
+
+**Notes**
+
+- **解决了什么痛点**：以前想 "和 claude 开新会话" 要两步——先点 `+` 开新会话（会被强制重置成内置 agent），再打开下拉选 claude。现在 `▾ → claude` 一步搞定。
+- **1 thread = 1 binding 的规则不变**：thread 一旦开始对话，agent 就锁死，只能开新 thread 才能换。NewChatMenu 的语义是 "开新 thread"，所以菜单永远可点；这和以前 ModeSelector "thread 有消息后所有选项灰掉" 相比，更符合直觉（以前那个状态下下拉看起来像坏了）。
+- **持久化层小幅扩展**：`chatStore.clearMessages(canvasId, options?)` 新增可选 `options.binding` 参数，让 "重置 thread + 绑定到指定 agent" 在 zustand 内变成一次 `set`——避免菜单选项点击后 UI 闪一帧 "内置 binding"。其他调用方（不带 `options`）行为不变。
+- **失联 binding 自动 fallback**：以前 ModeSelector 内部有个 effect 会在 "空 thread + 持久化的 external binding 已经断连" 时把 binding 重置成内置；这个逻辑被搬到 ChatPanel 里继续生效，避免新的 `+` 快捷键去尝试连一个不存在的 agent。
+
+---
+
+## 2026-06-01 · ACP preprocessor 不再回传对话历史
+
+**What Changed**
+
+- 给外部 ACP agent（Copilot CLI、Claude Code、Gemini CLI 等）发送消息前，Sediment 这边的 **intent translator**（即 `acp/preprocessor.ts`）会先把用户消息 + 选中的画布节点合成成一份自包含的 `task` 简报。之前为了帮翻译 LLM 解析"用那个"、"按你刚才说的改"这类指代，preprocessor 会把当前线程最近 4 轮对话也喂给翻译 LLM——但外部 agent 那边本来就通过 ACP `session/load` 维护着完整对话记忆，这部分历史等于发了两遍，是纯粹的 token 浪费。
+- 现在 preprocessor **不再读取也不再发送对话历史**。指代词（"that" / "the previous one" / "上面那个"）会原样透传给外部 agent，由它用自己的 session 记忆去解析。
+- preprocessor system prompt 里加了一段明确说明："你不会收到任何对话历史，外部 agent 自己有完整记忆，请把指代短语原样保留、不要尝试展开。"
+
+**Notes**
+
+- **用户感知近似无变化**：因为外部 agent 那边的历史一直在，指代解析能力没下降。
+- **省 token**：每轮固定省下 truncate 后的 ~400-1500 tokens（4 轮对话 × ~800 字符上限），频繁画布编辑场景下累计可观。
+- **后续优化方向**：preprocessor 当前还只能利用用户**显式选中**的节点，下一步会注入画布的空间结构（frame 内的兄弟节点 / 邻近候选清单），让外部 agent 能感知"放在一起的节点是相关的"——这条会单独在另一篇 changelog 里跟进。
+
+---
+
+## 2026-06-01 · ACP agent 选择器加载中提示
+
+**What Changed**
+
+- 当聊天面板绑定到外部 ACP agent（Copilot CLI、Claude Code、Gemini CLI 等）后，输入栏里的 mode / model / config 下拉是异步从 agent 拉取的——`session/new` 还在路上、或者 agent 还没推第一份 `current_mode_update` / `config_option_update` 之前，工具栏左侧那块本来是空白的，用户看不出 "还在加载" 还是 "这个 agent 没有可调项"。
+- 现在在 `AcpSessionSelectors` 里加了一个轻量的占位 pill：`⟳ Loading agent options…`，**只在首次拉取还没拿到任何数据时**显示；agent 一公布出 mode / model / config 的任意一项，占位立刻消失换成真正的下拉，不会和实际下拉同时出现。
+- 后续 SSE 推送（mid-turn 推新 mode 列表等）刷新数据时不会再触发占位，避免布局抖动。
+
+**Notes**
+
+- **不影响内部 Huabu agent**：内部绑定不走这条 fetch，输入栏左侧仍然保持原样。
+- **agent 不公布就不显示**：如果初次拉取完成后 agent 没暴露任何 mode / model / config，占位会和真实下拉一起消失（行为与之前一致）；只有在 "请求还在飞" 这个窗口期内才有提示。
+- **可访问性**：占位带 `role="status"` + `aria-live="polite"`，屏幕阅读器会朗读 "Loading agent options"。
 
 ---
 
@@ -247,11 +521,6 @@
 - 这是一个保留语义的改动：现存的 `.md` 文件名不会被改动，但下一次保存这个节点时，frontmatter 里的 `label:` 会被刷新成原始（带标点）形态。
 
 ---
-
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
 
 ## 2026-05-08 · Agent 循环升级到 pi-agent-core
 

@@ -5,12 +5,11 @@
  * uses this endpoint to render the agent picker in the ChatPanel.
  *
  * Behaviour summary:
- *  - Always registered (so the front-end has one URL to call regardless of
- *    feature-flag state). When `ENABLE_ACP` is not set, the
- *    agentlet server was never mounted, so `getAgentletServer()` returns
- *    `null` and we reply `{ enabled: false, agents: [] }`.
- *  - When enabled, we filter `getConnections({ status: 'connected' })` and
- *    derive a short alias from `agentInfo.command` (see `deriveAlias`).
+ *  - Always registered. The bridge itself is always mounted; whether
+ *    anyone can actually connect is gated by the in-memory pairing
+ *    token store (see `./token-store.ts`).
+ *  - Filters `getConnections({ status: 'connected' })` and derives a
+ *    short alias from `agentInfo.command` (see `deriveAlias`).
  *  - No authentication beyond the global Basic-Auth gate — the bridge
  *    itself is gated by `token-store.ts`; this route only enumerates what
  *    the in-process registry already knows about.
@@ -46,7 +45,10 @@ const acpAgentsRoutes: FastifyPluginAsync = async (app) => {
   app.get<{ Reply: AcpAgentsResponse }>('/agents', async () => {
     const server = getAgentletServer();
     if (!server) {
-      return { enabled: false, agents: [] };
+      // Bridge mount happens unconditionally at startup, so this is an
+      // exceptional state (test isolation, partial init). Treat as empty
+      // rather than 500ing — the UI shows the same "no agents" guidance.
+      return { agents: [] };
     }
 
     const agents: AcpAgentSummary[] = server
@@ -69,7 +71,7 @@ const acpAgentsRoutes: FastifyPluginAsync = async (app) => {
         };
       });
 
-    return { enabled: true, agents };
+    return { agents };
   });
 };
 

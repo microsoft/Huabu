@@ -140,7 +140,7 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
         <div className="pointer-events-auto absolute top-3 right-2 z-30 flex items-center gap-1">
           {onOpenHelp && (
             <Button
-              variant="outline"
+              variant="ghost"
               shape="pill"
               size="lg"
               iconOnly
@@ -151,7 +151,7 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
               <HelpCircle />
             </Button>
           )}
-          <SettingsPopover variant="outline" shape="pill" size="lg" />
+          <SettingsPopover variant="ghost" shape="pill" size="lg" />
           {onToggleChat && (
             <Button
               variant="outline"

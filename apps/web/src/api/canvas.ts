@@ -99,7 +99,9 @@ export async function putCanvas(
   // full payload intact.
   const response = await fetch(apiUrl(routes.canvas(canvasId)), {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify(request),
     keepalive: options?.keepalive ?? false,
   });

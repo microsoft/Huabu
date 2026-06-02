@@ -30,7 +30,9 @@ export async function recognizeIntentStream(
   // body — call `fetch` directly but reuse the URL builder + error envelope.
   const response = await fetch(apiUrl(routes.intentRecognizeStream), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify({ canvasContext }),
     signal,
   });

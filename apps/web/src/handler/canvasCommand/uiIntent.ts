@@ -189,6 +189,17 @@ export interface UiResolverState {
   nodes: Node[];
   edges: Edge[];
   autoLayoutEnabled: boolean;
+  /**
+   * Flow-space coordinate of the current viewport centre. Filled in by
+   * `dispatchUiIntent` from the live React Flow instance + canvas wrapper
+   * rect. Resolvers use it as the anchor when a new node has no explicit
+   * `placementPoint` (e.g. "Add as note" from a chat panel), so the node
+   * lands in the visible area instead of being placed by the force-directed
+   * fallback in the shared engine. Undefined when the canvas DOM is not
+   * yet mounted (initial boot) or when the React Flow instance has not
+   * registered yet.
+   */
+  viewportCenter?: Point;
 }
 
 // ---------------------------------------------------------------------------

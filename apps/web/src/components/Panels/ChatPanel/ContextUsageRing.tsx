@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { agentApi } from '@/api/agent';
 import { Tooltip } from '@/components/Common/Tooltip';
 import useCanvasStore from '@/store/canvasStore';
-import { useChatStore } from '@/store/chatStore';
+import { selectCurrentMessages, useChatStore } from '@/store/chatStore';
 import { countTokens } from '@/utils/tokenCount';
 
 /** Fallback context window in tokens — used only for the built-in pi-agent path. */
@@ -79,7 +79,7 @@ export const ContextUsageRing = ({
   isStreaming,
   usageOverride,
 }: ContextUsageRingProps) => {
-  const messages = useChatStore((s) => s.messages);
+  const messages = useChatStore(selectCurrentMessages);
   const threadId = useChatStore((s) => s.threadId);
   const pendingAttachments = useChatStore((s) => s.pendingAttachments);
   const canvasId = useCanvasStore((s) => s.canvasId);

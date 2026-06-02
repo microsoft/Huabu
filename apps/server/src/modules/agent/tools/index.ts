@@ -24,13 +24,19 @@ export type { ToolDefinition } from './definitions.js';
 /**
  * Surfaces the tool builder understands.
  *
- * Mirrors `AgentMode` plus `'sketch'` for the freehand-gesture
- * pipeline and `'memory'` for the background memory curator. Kept
- * local rather than reusing `SkillScope` from the skill loader
+ * Mirrors `AgentMode` plus internal pipelines that also borrow the
+ * canvas tool surface:
+ *   - `'sketch'` — freehand-gesture intent recognition.
+ *   - `'memory'` — background memory curator.
+ *   - `'acp-preprocessor'` — intent translator that bundles a
+ *     self-contained briefing for an external ACP agent. Read-only
+ *     canvas access only (no `canvas_commands`).
+ *
+ * Kept local rather than reusing `SkillScope` from the skill loader
  * because `'external'` agents bring their own tooling and should
  * never go through this builder.
  */
-export type ToolScope = AgentMode | 'sketch' | 'memory';
+export type ToolScope = AgentMode | 'sketch' | 'memory' | 'acp-preprocessor';
 
 /** Per-request context closed over by every tool's `execute`. */
 export interface ToolBuildContext {

@@ -89,6 +89,16 @@ const STATUS_VISUALS: Record<StatusBadgeStatus, StatusVisual> = {
   },
 };
 
+/**
+ * Returns the human-readable label associated with a question/sketch
+ * status. Exposed so other surfaces (e.g. the LayerPanel status dot)
+ * stay in sync with the canvas badge wording without duplicating the
+ * lookup table.
+ */
+export function getStatusLabel(status: StatusBadgeStatus): string {
+  return STATUS_VISUALS[status].defaultLabel;
+}
+
 export interface StatusBadgeProps {
   /** Drives icon, default label and color tokens. */
   status: StatusBadgeStatus;

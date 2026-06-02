@@ -10,6 +10,13 @@
  *
  * For non-JSON bodies (FormData, file uploads) pass `body: <FormData>`
  * directly — the helper sets the `Content-Type` header only for JSON.
+ *
+ * CSRF / cross-origin protection lives entirely on the server side:
+ * it uses `Sec-Fetch-Site` (W3C Fetch Metadata) as the primary signal,
+ * with an `Origin` allowlist fallback (see
+ * `modules/security/origin-guard.ts`). Both headers are set by the
+ * browser and cannot be forged by JS, so the client needs zero extra
+ * plumbing here.
  */
 
 import { API_CONFIG } from '../config/api';
@@ -89,24 +96,24 @@ export async function apiFetch<T>(
   } = options;
 
   const init: RequestInit = { ...rest };
-
+  let mergedHeaders: HeadersInit | undefined;
   if (json !== undefined) {
     init.body = JSON.stringify(json);
-    init.headers = {
+    mergedHeaders = {
       'Content-Type': 'application/json',
       ...(headers ?? {}),
     };
   } else if (formData) {
     init.body = formData;
-    init.headers = headers; // browser sets multipart boundary
+    mergedHeaders = headers;
   } else if (body !== undefined) {
     init.body = body;
-    init.headers = headers;
+    mergedHeaders = headers;
   } else {
-    init.headers = headers;
+    mergedHeaders = headers;
   }
-
   init.method = method ?? (init.body ? 'POST' : 'GET');
+  init.headers = mergedHeaders;
 
   const response = await fetch(apiUrl(path), init);
 

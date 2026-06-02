@@ -10,6 +10,7 @@ import {
   type CanvasNodeId,
   type CanvasNodeType,
   type NodeSize,
+  type Point,
 } from '@sediment/shared';
 import { getNodeDefaultSize } from '@sediment/shared/canvas-engine';
 
@@ -43,11 +44,52 @@ function computeMediaSize(
 }
 
 // ---------------------------------------------------------------------------
+// Viewport-centre fallback
+// ---------------------------------------------------------------------------
+/**
+ * Per-node stagger applied when several nodes in the same batch fall
+ * back to viewport-centre placement. Matches the constant used by
+ * `resolvePasteClipboard` so the visual behaviour is consistent across
+ * "paste with no anchor" and "add with no anchor" flows.
+ */
+const VIEWPORT_FALLBACK_STAGGER = 40;
+
+/**
+ * Anchor a new node so its bounding box is centred on the given flow
+ * point, with a uniform per-index stagger so multiple nodes added in
+ * the same batch don't perfectly overlap.
+ *
+ * Height-flexible types (text, note, question) have no canonical
+ * default height — we fall back to a small visual estimate so the
+ * centring still feels balanced; the actual rendered height takes
+ * over once the node is measured.
+ */
+function viewportCenterAnchor(
+  nodeType: CanvasNodeType,
+  size: NodeSize | undefined,
+  center: Point,
+  staggerIndex: number,
+): Point {
+  const defaults = getNodeDefaultSize(nodeType);
+  const width = size?.width ?? defaults.width;
+  const height =
+    (typeof size?.height === 'number' ? size.height : undefined) ??
+    (typeof defaults.height === 'number' ? defaults.height : undefined) ??
+    80;
+  const offset = staggerIndex * VIEWPORT_FALLBACK_STAGGER;
+  return {
+    x: center.x - width / 2 + offset,
+    y: center.y - height / 2 + offset,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Node materialization
 // ---------------------------------------------------------------------------
 function materializeAddNode(
   input: AddNodeInput,
   ui: UiResolverState,
+  fallbackStaggerIndex: number,
 ): {
   node: Extract<CanvasCommand, { type: 'CREATE_NODES' }>['nodes'][number];
   traceNode: {
@@ -94,6 +136,21 @@ function materializeAddNode(
     }
   }
 
+  // Fallback: no explicit anchor was given (e.g. "Add as note" button in
+  // a chat panel). Centre the node in the current viewport so it lands
+  // in the visible area instead of being dropped at (0, 0) and then
+  // shuffled by the force-directed `placeNode` solver in the engine.
+  // Skipped when no viewport centre is available (initial boot before
+  // the React Flow instance registers); the engine fallback then runs.
+  if (!position && ui.viewportCenter) {
+    position = viewportCenterAnchor(
+      input.nodeType,
+      size,
+      ui.viewportCenter,
+      fallbackStaggerIndex,
+    );
+  }
+
   return {
     node: {
       id: nodeId,
@@ -122,7 +179,17 @@ export default function resolveAddNodes(
     return { commands: [], trace: [] };
   }
 
-  const created = intent.inputs.map((input) => materializeAddNode(input, ui));
+  // Only nodes that actually fall back to viewport-centre placement
+  // (i.e. have no `placementPoint`) consume a stagger slot, so a mixed
+  // batch — one drag-dropped input plus one button-click input — still
+  // stagger correctly without leaving a gap.
+  let staggerIndex = 0;
+  const created = intent.inputs.map((input) => {
+    const usesFallback = !input.placementPoint;
+    const item = materializeAddNode(input, ui, staggerIndex);
+    if (usesFallback) staggerIndex += 1;
+    return item;
+  });
 
   return {
     commands: [

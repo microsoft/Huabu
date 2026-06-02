@@ -1,6 +1,10 @@
 import { ArrowUp, Square, X } from 'lucide-react';
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 
+import { uploadImage, uploadPdf } from '@/api/artifact';
+import useCanvasStore from '@/store/canvasStore';
+import { selectCurrentMessages, useChatStore } from '@/store/chatStore';
+
 import { ContextUsageRing } from './ContextUsageRing';
 import { SourceCount } from './SelectedNodeRefs';
 import { SlashCommandMenu } from './SlashCommandMenu';
@@ -11,10 +15,6 @@ import { Tooltip } from '../../Common/Tooltip';
 
 import type { ContextUsageOverride } from './ContextUsageRing';
 import type { AgentMode, AvailableCommand } from '@sediment/shared';
-
-import { uploadImage, uploadPdf } from '@/api/artifact';
-import useCanvasStore from '@/store/canvasStore';
-import { useChatStore } from '@/store/chatStore';
 
 interface ChatInputProps {
   value: string;
@@ -270,9 +270,8 @@ export const ChatInput = ({
         (e.key === 'ArrowUp' && atStart) ||
         (e.key === 'ArrowDown' && atEnd)
       ) {
-        const history = useChatStore
-          .getState()
-          .messages.filter((m) => m.role === 'user')
+        const history = selectCurrentMessages(useChatStore.getState())
+          .filter((m) => m.role === 'user')
           .map((m) => (m.role === 'user' ? m.content : ''));
         if (history.length === 0) return;
 

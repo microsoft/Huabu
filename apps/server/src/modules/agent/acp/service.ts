@@ -381,7 +381,7 @@ async function ensureAcpSessionInner(
   const server = getAgentletServer();
   if (!server) {
     throw new Error(
-      'ACP server not mounted \u2014 set ENABLE_ACP=1 and restart',
+      'ACP bridge is not mounted \u2014 enable external agents from the Settings panel',
     );
   }
   const conn = server.getConnection(binding.agentletAgentId);
@@ -1029,8 +1029,8 @@ export async function* runAcpAgent(
       rawText,
       agentAlias: binding.alias,
       canvasContext,
+      canvasId,
       canvasRoot: canvasCwd,
-      history: context.messages,
       logger,
     });
     preparedPrompt = result.prompt;

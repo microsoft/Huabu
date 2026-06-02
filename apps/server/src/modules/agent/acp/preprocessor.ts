@@ -2,24 +2,39 @@
  * ACP Preprocessor — intent translator.
  *
  * The external agent (Claude Code, Copilot CLI, …) **never sees the
- * canvas**. This module reads the user's raw message plus the bodies
- * of any selected canvas nodes (≤ {@link INLINE_BODY_THRESHOLD_BYTES})
- * and emits an {@link ExternalAgentPrompt}: a self-contained `task`
- * briefing the agent can act on with no other context, plus a small
- * `attachments` list reserved for cases where verbatim file access
- * is essential.
+ * canvas**. This module runs the dedicated `acp-preprocessor` agent
+ * (see `prompt/agents/acp-preprocessor/AGENT.md`) which receives the
+ * user's raw message + the selected-node refs, decides whether to
+ * explore the canvas via its read-only tool surface
+ * (`get_canvas_outline` / `inspect_nodes` / `inspect_edges` / `read`
+ * / `grep` / `find` / `ls`), and emits an {@link ExternalAgentPrompt}:
+ * a self-contained `task` briefing the external agent can act on with
+ * no other context, plus a small `attachments` list reserved for
+ * cases where verbatim file access is essential.
  *
- * Why translate intent instead of routing files:
- *   - Most turns don't need raw canvas data — the user's *intent*
- *     does. Synthesising into `task` keeps the agent's context tiny
- *     and avoids leaking canvas metadata it can't act on.
- *   - Verbatim reading is a fallback (e.g. "review this code",
- *     binary artifacts, oversize nodes). The preprocessor decides
- *     when to attach.
- *   - Attachments render as absolute disk paths so OS-native `Read`
- *     tools (Copilot CLI) and ACP-fs-bridging agents (Claude Code)
- *     both reach the file. See {@link serializePrompt} for the
- *     wire-format trade-off.
+ * Why a sub-agent instead of a one-shot LLM call:
+ *   - The preprocessor used to inline a fixed-size slice of every
+ *     selected node's body (≤ 16 KB). That ignored the spatial /
+ *     edge context and forced the route to pay the cost of every
+ *     selected node even when the user's intent didn't actually
+ *     need it. Pushing the decision into the agent lets it skip
+ *     reads for trivial turns and dig deeper (read neighbours,
+ *     grep across nodes) when the user's request demands it.
+ *   - The system prompt now lives alongside every other agent in
+ *     `prompt/agents/<id>/AGENT.md` and reuses the canvas SKILL
+ *     verbatim via `{{include:skills/canvas/SKILL.md}}` — no more
+ *     copy-paste drift between the preprocessor's mental model and
+ *     the read-only canvas tooling.
+ *
+ * Verbatim reading is still a fallback (e.g. "review this code",
+ * binary artifacts, oversize nodes). The agent's prompt explains
+ * when to attach vs. synthesise; {@link parsePromptJson} validates
+ * the resulting paths against the known canvas surface.
+ *
+ * Attachments render as absolute disk paths so OS-native `Read`
+ * tools (Copilot CLI) and ACP-fs-bridging agents (Claude Code) both
+ * reach the file. See {@link serializePrompt} for the wire-format
+ * trade-off.
  *
  * Failure model: callers `try`/`catch` and fall back to the raw user
  * text. The route-level service emits a `prepared_prompt` SSE event
@@ -27,15 +42,19 @@
  * its "Preparing…" placeholder with a visible failure note.
  */
 
-import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 
-import { llmComplete } from '../llm.js';
+import { loadAgent } from '../../../prompt/agents/loader.js';
+import { runAgent } from '../agent.service.js';
 import { buildAgentNodeRef } from '../node-ref.js';
 import { ACP_CANVAS_VFS_PREFIX } from './capabilities/fs.js';
 
 import type { AgentNodeRef } from '../node-ref.js';
-import type { Context } from '@earendil-works/pi-ai';
+import type {
+  AssistantMessage,
+  Context,
+  TextContent,
+} from '@earendil-works/pi-ai';
 import type {
   AgentChatContext,
   ExternalAgentPrompt,
@@ -46,19 +65,6 @@ import type { FastifyBaseLogger } from 'fastify';
 // ─── Constants ────────────────────────────────────────────────────────────
 
 /**
- * Maximum on-disk size of a selected node whose body we inline into
- * the preprocessor LLM payload. Larger nodes are surfaced as
- * metadata + size only — the preprocessor will then almost certainly
- * route them through `attachments` since it has no body to synthesise
- * from.
- *
- * 16 KB is a deliberate compromise: comfortably fits typical research
- * notes (a few pages of markdown) while keeping the preprocessor's
- * input bounded even if the user selects many nodes at once.
- */
-export const INLINE_BODY_THRESHOLD_BYTES = 16 * 1024;
-
-/**
  * Pattern for the slash-command short-circuit (see
  * {@link prepareExternalAgentPrompt}). Matches `/<name>` followed by
  * whitespace OR end of string. The leading character class is ASCII
@@ -66,65 +72,6 @@ export const INLINE_BODY_THRESHOLD_BYTES = 16 * 1024;
  * it. Exported for tests.
  */
 export const SLASH_COMMAND_RE = /^\/[a-zA-Z][\w-]*(?:\s|$)/;
-
-// ─── System prompt ────────────────────────────────────────────────────────
-
-/**
- * Inlined system prompt for the preprocessor.
- *
- * Kept here (rather than in `prompt/agents/<id>/AGENT.md`) because the
- * preprocessor has no tools, no skills, and no per-canvas runtime
- * config — promoting it to a full `AgentId` would require widening the
- * loader's `VALID_AGENT_IDS` set for marginal benefit. Extract later
- * if we add a second pure one-shot LLM helper.
- */
-const PREPROCESSOR_SYSTEM_PROMPT = `You are the **intent translator** inside Sediment, a visual research canvas.
-
-The user is chatting with an **external** coding/research agent (Claude Code, Copilot CLI, Gemini CLI, …). That agent runs on the user's own machine and **never sees the canvas directly**. Your job is to translate the user's intent — together with whatever canvas nodes they attached — into a self-contained briefing the agent can act on with no other context.
-
-## Inputs you receive
-
-- **rawMessage**: the user's literal chat input.
-- **agentAlias**: short name of the bound external agent.
-- **selectedNodes**: zero or more canvas nodes the user explicitly attached to this turn. Each node has \`{ id, type, label?, filename }\`. Nodes ≤ 16 KB also include a \`body\` field (full markdown content) — use it to synthesise inline. Larger nodes include \`sizeBytes\` instead, signalling they exist but cannot fit inline.
-- **recentTurns**: brief excerpt of the recent dialog between user and external agent. Use only for context — do **not** re-issue earlier asks.
-
-## Your output
-
-Return **only** a JSON object (no markdown fences, no commentary) with this exact shape:
-
-\`\`\`
-{
-  "task": "<self-contained briefing the external agent can act on>",
-  "attachments": [
-    { "path": "nodes/<file>.md", "reason": "<≤80 chars why verbatim>" }
-  ]
-}
-\`\`\`
-
-## Translation rules
-
-**Default to SYNTHESIS.** The external agent should not need to read any files. Quote, paraphrase, and embed selected-node \`body\` content directly inside \`task\` whenever feasible. Speak in the user's voice; do not invent requirements they did not state.
-
-**Use \`attachments\` only as a fallback** when verbatim file access is essential:
-
-  1. **Verbatim required** — the user asks for byte-exact analysis (e.g. "review this code", "find the bug in this YAML", "reformat this snippet"). Inlining would risk paraphrase drift.
-  2. **Node too large** — \`selectedNodes[i].body\` is absent because the file exceeds the inline threshold; surface it as an attachment.
-  3. **Artifact files** — paths under \`.artifacts/\` (generated or binary content) are always attachments.
-
-**Attachment rules**
-
-  - \`path\` must come from \`selectedNodes[].filename\` or start with \`.artifacts/\`. Never invent paths. Never list \`canvas.json\`.
-  - \`reason\` is **required**: short, concrete, explains why verbatim is needed (e.g. "user asks to refactor this code", "100 KB file, too large to inline", "binary artifact").
-  - Cap at 8 entries — most turns should have **zero**.
-
-**Task rules**
-
-  - Use second person ("you") to address the external agent.
-  - Stand-alone: an agent reading only \`task\` (plus any attachments) must know what to do — no canvas metadata, no node ids, no app jargon.
-  - If the user pasted code/config/markdown directly in \`rawMessage\`, paraphrase the intent and quote the snippet inline (don't try to externalise it).
-  - For general questions unrelated to selected nodes, just answer the literal request and leave \`attachments: []\`.
-`;
 
 // ─── Public API ───────────────────────────────────────────────────────────
 
@@ -136,28 +83,24 @@ export interface PreparePromptInput {
   /** Canvas chat context for this turn (may be omitted when client didn't send one). */
   canvasContext?: AgentChatContext;
   /**
+   * Sediment canvasId for the current thread. Forwarded to
+   * `runAgent` so the preprocessor's read-only canvas tools
+   * (`get_canvas_outline`, `inspect_nodes`, `read`, …) resolve
+   * against the correct canvas root. Omit only for the no-canvas
+   * edge case — the agent then runs without canvas tooling and is
+   * limited to whatever it can synthesise from `rawMessage` alone.
+   */
+  canvasId?: string;
+  /**
    * Absolute on-disk path of the canvas directory. When supplied,
-   * the preprocessor:
-   *   - reads selected-node bodies (≤ {@link INLINE_BODY_THRESHOLD_BYTES})
-   *     from `<canvasRoot>/<filename>` so the LLM can synthesise them
-   *     inline into `task`;
-   *   - {@link serializePrompt} renders `attachments[].path` as **real
-   *     absolute on-disk paths** under this root so OS-native `Read`
-   *     tools (Copilot CLI) and ACP-fs-bridging agents (Claude Code)
-   *     both reach the file.
-   *
-   * When omitted (no-canvas edge case): bodies are never loaded and
+   * {@link serializePrompt} renders `attachments[].path` as **real
+   * absolute on-disk paths** under this root so OS-native `Read`
+   * tools (Copilot CLI) and ACP-fs-bridging agents (Claude Code)
+   * both reach the file. When omitted (no-canvas edge case),
    * `serializePrompt` falls back to the `/canvas/<rel>` virtual
    * prefix. In practice service.ts always supplies `canvasRoot`.
    */
   canvasRoot?: string;
-  /**
-   * Conversational history for THIS thread (user/assistant turns so
-   * far). We only forward a short tail to keep the preprocessor LLM
-   * call cheap; full long-term memory lives on the external agent's
-   * own ACP session.
-   */
-  history: Context['messages'];
   logger: FastifyBaseLogger;
 }
 
@@ -173,13 +116,14 @@ export interface PreparePromptResult {
 }
 
 /**
- * Run the preprocessor LLM. Throws on network / parse / shape errors;
- * callers should catch and fall back to {@link serializeRawPrompt}.
+ * Run the preprocessor sub-agent. Throws on network / parse / shape
+ * errors; callers should catch and fall back to
+ * {@link serializeRawPrompt}.
  */
 export async function prepareExternalAgentPrompt(
   input: PreparePromptInput,
 ): Promise<PreparePromptResult> {
-  const { rawText, agentAlias, canvasContext, canvasRoot, history, logger } =
+  const { rawText, agentAlias, canvasContext, canvasId, canvasRoot, logger } =
     input;
 
   // ── Slash-command short-circuit ────────────────────────────────────
@@ -189,7 +133,7 @@ export async function prepareExternalAgentPrompt(
   // would corrupt that wire format — e.g. wrap `/compact` in prose,
   // strip the leading `/`, or attach noise. When the raw user input
   // starts with a slash command we forward it verbatim and skip the
-  // LLM round-trip entirely. Cheaper AND correct.
+  // sub-agent run entirely. Cheaper AND correct.
   //
   // Match rule: starts with `/`, followed by an ASCII letter and zero
   // or more word/dash chars, then whitespace OR end of input. Avoids
@@ -214,31 +158,33 @@ export async function prepareExternalAgentPrompt(
     ? flattenSelection(canvasContext.selectedNodes)
     : [];
 
-  // Load each selected node's body up to the inline threshold so the
-  // LLM can synthesise it directly into `task`. Larger nodes surface
-  // as metadata-only entries; the LLM is instructed to attach those.
-  const selectedWithBody = selectedRefs.map((ref) =>
-    loadNodeBody(ref, canvasRoot),
-  );
-
+  // Build the input the agent receives. Note we deliberately pass
+  // only the *refs* (id + filename + label + type) and not the body:
+  // the agent decides per-turn whether it needs the content and uses
+  // its `read` tool to fetch it. This replaces the old "always inline
+  // every selected body up to 16 KB" heuristic and lets trivial turns
+  // (general questions, slash-style commands the LLM rewrites) skip
+  // the read cost entirely.
   const userPayload = {
     rawMessage: rawText,
     agentAlias,
-    selectedNodes: selectedWithBody.map((ref) => ({
+    selectedNodes: selectedRefs.map((ref) => ({
       id: ref.id,
       type: ref.type,
       ...(ref.label ? { label: ref.label } : {}),
       filename: ref.filename,
-      ...(ref.body !== null ? { body: ref.body } : {}),
-      ...(ref.body === null && ref.sizeBytes !== null
-        ? { sizeBytes: ref.sizeBytes }
-        : {}),
     })),
-    recentTurns: extractRecentTurns(history, 4),
   };
 
+  const cfg = loadAgent('acp-preprocessor');
+
+  // Isolated context — the preprocessor must NEVER share state with
+  // the main ACP thread's `context.messages`. `runAgent` mutates the
+  // context in place (replaces its messages with the agent's final
+  // transcript); keeping it scoped here means the only thing that
+  // escapes is the parsed JSON we return.
   const piContext: Context = {
-    systemPrompt: PREPROCESSOR_SYSTEM_PROMPT,
+    systemPrompt: cfg.systemPrompt,
     messages: [
       {
         role: 'user',
@@ -248,17 +194,40 @@ export async function prepareExternalAgentPrompt(
     ],
   };
 
-  const response = await llmComplete(piContext);
+  // Drive the sub-agent loop. We discard every stream event — the UI
+  // never sees the preprocessor's intermediate tool calls or partial
+  // text; it only sees the final `prepared_prompt` SSE that
+  // service.ts emits after we return. `FastifyBaseLogger.info`
+  // satisfies the `AgentLogger` shape (single-string form).
+  for await (const _ev of runAgent({
+    scope: 'acp-preprocessor',
+    canvasId,
+    context: piContext,
+    logger: { info: (msg) => logger.info(msg) },
+    maxIterations: cfg.runtime.maxIterations,
+  })) {
+    // Intentionally empty: drain to completion.
+  }
 
-  const raw = response.content
-    .filter((b) => b.type === 'text')
-    .map((b) => (b as { type: 'text'; text: string }).text)
-    .join('');
+  // Extract the final assistant text from the mutated context. The
+  // agent's final turn must emit the ExternalAgentPrompt JSON
+  // envelope as a plain text message (see AGENT.md for the rule);
+  // any tool-call-only or empty assistant message is a contract
+  // violation and falls through to the parse-error branch below.
+  const lastAssistant = [...piContext.messages]
+    .reverse()
+    .find((m): m is AssistantMessage => m.role === 'assistant');
+  const raw = lastAssistant
+    ? lastAssistant.content
+        .filter((b): b is TextContent => b.type === 'text')
+        .map((b) => b.text)
+        .join('')
+    : '';
 
   const prompt = parsePromptJson(raw, selectedRefs);
   if (!prompt) {
     throw new Error(
-      '[acp/preprocessor] LLM response was not valid ExternalAgentPrompt JSON',
+      '[acp/preprocessor] agent response was not valid ExternalAgentPrompt JSON',
     );
   }
 
@@ -365,68 +334,6 @@ function flattenSelection(nodes: WireSelectionNode[]): AgentNodeRef[] {
   return refs;
 }
 
-/**
- * Pull a short tail of user/assistant turns into a compact form for
- * the preprocessor LLM. Strips system preambles / metadata tags so
- * the payload stays small and on-topic.
- */
-function extractRecentTurns(
-  messages: Context['messages'],
-  maxTurns: number,
-): Array<{ role: 'user' | 'assistant'; text: string }> {
-  const out: Array<{ role: 'user' | 'assistant'; text: string }> = [];
-  for (let i = messages.length - 1; i >= 0 && out.length < maxTurns; i--) {
-    const msg = messages[i];
-    if (msg.role !== 'user' && msg.role !== 'assistant') continue;
-    const text = stringifyMessageContent(msg.content);
-    if (!text) continue;
-    const cleaned = stripSystemMarkers(text).trim();
-    if (!cleaned) continue;
-    out.push({ role: msg.role, text: truncate(cleaned, 800) });
-  }
-  return out.reverse();
-}
-
-function stringifyMessageContent(content: unknown): string {
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) {
-    return content
-      .filter(
-        (b): b is { type: 'text'; text: string } =>
-          !!b &&
-          typeof b === 'object' &&
-          (b as { type?: unknown }).type === 'text' &&
-          typeof (b as { text?: unknown }).text === 'string',
-      )
-      .map((b) => b.text)
-      .join('\n');
-  }
-  return '';
-}
-
-/**
- * Strip Huabu's internal `[SYSTEM ...]` metadata tags + the
- * `[SYSTEM Error]` / `[SYSTEM Interrupted]` / `[SYSTEM PreparedPrompt]`
- * markers we encode into user messages. Mirrors the cleanup in
- * `buildHistoryItems` so the preprocessor sees the same content the
- * human did.
- */
-function stripSystemMarkers(text: string): string {
-  // Drop whole-message markers — these are status / sidecar rows that
-  // were never spoken by the user.
-  if (
-    text.startsWith('[SYSTEM Error]') ||
-    text.startsWith('[SYSTEM Interrupted]') ||
-    text.startsWith('[SYSTEM PreparedPrompt]')
-  ) {
-    return '';
-  }
-  return text
-    .replace(/\n?\[SYSTEM selectedNodeIds:\[.*?\]\]/g, '')
-    .replace(/\n?\[SYSTEM attachments:\[.*\]\]/g, '')
-    .replace(/^\[Canvas ID: [^\]]+\]\n\n/, '');
-}
-
 function truncate(s: string, max: number): string {
   return s.length > max ? `${s.slice(0, max)}…` : s;
 }
@@ -485,49 +392,4 @@ function parsePromptJson(
   }
 
   return { task, attachments };
-}
-
-// ─── Node-body loader ─────────────────────────────────────────────────────
-
-/**
- * Result of trying to load a selected node's body for the
- * preprocessor LLM. Exactly one of `body` / `sizeBytes` is set:
- *   - `body` non-null → file was small enough to inline.
- *   - `sizeBytes` non-null → file exists but exceeds the threshold;
- *     the LLM is expected to surface it as an attachment.
- *   - both null → file missing / unreadable / canvasRoot absent;
- *     the LLM only sees metadata and will likely skip it.
- */
-interface SelectedNodeWithBody extends AgentNodeRef {
-  body: string | null;
-  sizeBytes: number | null;
-}
-
-function loadNodeBody(
-  ref: AgentNodeRef,
-  canvasRoot: string | undefined,
-): SelectedNodeWithBody {
-  if (!canvasRoot) {
-    return { ...ref, body: null, sizeBytes: null };
-  }
-  const abs = path.join(canvasRoot, ref.filename);
-  try {
-    const stat = statSync(abs);
-    if (!stat.isFile()) {
-      return { ...ref, body: null, sizeBytes: null };
-    }
-    if (stat.size <= INLINE_BODY_THRESHOLD_BYTES) {
-      return {
-        ...ref,
-        body: readFileSync(abs, 'utf8'),
-        sizeBytes: stat.size,
-      };
-    }
-    // Oversize: surface size only; the LLM will attach it verbatim.
-    return { ...ref, body: null, sizeBytes: stat.size };
-  } catch {
-    // Missing / unreadable: leave body null — the LLM only sees
-    // metadata and will likely skip the node.
-    return { ...ref, body: null, sizeBytes: null };
-  }
 }

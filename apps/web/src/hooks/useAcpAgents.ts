@@ -3,7 +3,7 @@
  * current connected-agents list.
  *
  * Fetched once at mount; subsequent updates are explicit. The
- * ChatPanel's `ModeSelector` exposes a "Refresh agents" button that
+ * ChatPanel's `NewChatMenu` exposes a "Refresh agents" button that
  * calls `refresh()`. On-demand semantics keep request volume to the
  * bridge minimal — most of the time the agent list doesn't change.
  *
@@ -13,9 +13,10 @@
  *    to re-fetch via `refresh()`.
  *  - Errors are stored on `error` but do not throw — the UI silently
  *    hides instead of disrupting the chat.
- *  - When `enabled: false` (bridge feature flag off), `agents` is `[]`
- *    and the consumer should not show empty-state copy unless it also
- *    wants to advertise the bridge.
+ *  - `loaded` is `false` until the first fetch resolves successfully;
+ *    consumers should treat the agents list as authoritative only
+ *    after `loaded === true` to avoid acting on an empty list during
+ *    the initial spinner window.
  *  - `loading` flips true while a refresh is in flight so the consumer
  *    can show a spinner on the refresh affordance.
  */
@@ -30,11 +31,11 @@ export interface UseAcpAgentsResult {
   /** Currently-connected agents. Empty array until the first fetch resolves. */
   agents: AcpAgentSummary[];
   /**
-   * Whether the bridge is enabled server-side. `null` until the first
-   * response lands. Consumers should treat `null` as "unknown — don't show
-   * UI yet" to avoid a flash of empty state.
+   * `true` once the initial fetch has resolved at least once. Consumers
+   * should treat the agents list as authoritative only after this flips
+   * — otherwise a stale binding may be cleared prematurely on mount.
    */
-  enabled: boolean | null;
+  loaded: boolean;
   /** Last error from a fetch, or `null`. Cleared on the next successful fetch. */
   error: Error | null;
   /** True while a fetch is in flight. */
@@ -56,7 +57,7 @@ export interface UseAcpAgentsResult {
  */
 export function useAcpAgents(): UseAcpAgentsResult {
   const [agents, setAgents] = useState<AcpAgentSummary[]>([]);
-  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -68,12 +69,12 @@ export function useAcpAgents(): UseAcpAgentsResult {
       const res = await listAcpAgents();
       if (cancelledRef.current) return;
       setAgents(res.agents);
-      setEnabled(res.enabled);
+      setLoaded(true);
       setError(null);
     } catch (err) {
       if (cancelledRef.current) return;
       setError(err instanceof Error ? err : new Error(String(err)));
-      // Leave `agents` and `enabled` untouched so transient errors don't
+      // Leave `agents` and `loaded` untouched so transient errors don't
       // make the indicator flicker.
     } finally {
       if (!cancelledRef.current) setLoading(false);
@@ -88,5 +89,5 @@ export function useAcpAgents(): UseAcpAgentsResult {
     };
   }, [refresh]);
 
-  return { agents, enabled, error, loading, refresh };
+  return { agents, loaded, error, loading, refresh };
 }

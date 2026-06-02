@@ -57,21 +57,125 @@ export interface AcpAgentSummary {
 
 /** Response body for `GET /api/acp/agents`. */
 export interface AcpAgentsResponse {
-  /** May be empty — either no agents connected, or ACP bridge disabled. */
+  /** May be empty — bridge always mounted; empty just means nobody's connected. */
   agents: AcpAgentSummary[];
+}
+
+// ─── Pairing tokens (ephemeral) ────────────────────────────────────────
+//
+// External agents authenticate to the bridge with a short pairing code
+// that the user generates from the Settings UI on demand. Lifecycle:
+//
+//   pending  → just minted, displayed in the UI with a 60s countdown.
+//              The first `bridge/hello` whose token matches claims it.
+//   claimed  → bound to a specific agentId. The same agentId may
+//              reconnect with this token indefinitely (so wifi blips
+//              and dev hot-reloads don't kill the session). UI hides
+//              the code immediately after the pending window closes.
+//   expired  → 60s pending window elapsed with no claim. Removed from
+//              the in-memory store.
+//   revoked  → user clicked Revoke, or the claimed agent disconnected
+//              gracefully. Removed from the in-memory store.
+//
+// Tokens are NOT persisted — a server restart invalidates every ticket.
+
+/** State of a single pairing ticket as observed from the Settings UI. */
+export interface AcpPairingTicket {
+  /** Opaque stable id used for `DELETE /api/acp/pair/:id`. */
+  id: string;
   /**
-   * `false` when the server was started without `ENABLE_ACP=1`.
-   * The client uses this to suppress the indicator entirely vs. showing
-   * "no agents connected yet" guidance.
+   * The pairing code the user types into `bin/agentlet --token <code>`.
+   * Format: `XXXX-XXXX` (8 chars from an unambiguous uppercase charset).
    */
-  enabled: boolean;
+  code: string;
+  /** Lifecycle state. See module-level doc for transitions. */
+  status: 'pending' | 'claimed';
+  /**
+   * Epoch ms when the pending window closes. For `claimed` tickets the
+   * field still reflects the original expiry (UI hides the code at this
+   * point regardless of status) but the token remains valid for
+   * same-agentId reconnects.
+   */
+  expiresAt: number;
+  /** Set once `status === 'claimed'`. */
+  claimedAgentId?: string;
+  /** Short display alias of the claimed agent (e.g. `claude`). */
+  claimedAlias?: string;
+  /** Full launcher command reported by the agent (e.g. `claude --acp`). */
+  claimedCommand?: string;
+  /** Epoch ms of the most recent successful bridge/hello against this ticket. */
+  claimedAt?: number;
+}
+
+/** Response body for `POST /api/acp/pair` — the newly-minted ticket. */
+export type AcpPairingCreatedResponse = AcpPairingTicket;
+
+/** Response body for `GET /api/acp/pair` — every still-active ticket. */
+export interface AcpPairingListResponse {
+  tickets: AcpPairingTicket[];
+}
+
+// ─── Local agent CLI detection ────────────────────────────────────────
+//
+// To make first-time onboarding one click, the server probes the host
+// for known ACP-capable CLI binaries (`copilot`, `claude`, `gemini`)
+// and reports the ones it found. The Settings UI uses this to render a
+// "Connect" button per detected agent that mints a fresh pairing code
+// AND builds the exact `bin/agentlet --token … --agent "…"` command,
+// so the user just pastes it into a terminal.
+//
+// This endpoint is loopback-only — it shells out to discover host
+// binaries and must never be reachable from a remote browser.
+
+/** Definition + detection result for one known external agent CLI. */
+export interface AcpAgentCliInfo {
+  /** Stable short id used by the UI (`copilot` / `claude` / `gemini`). */
+  id: string;
+  /** Display name shown in the Settings UI. */
+  displayName: string;
+  /** Binary name the user must install (`copilot`). */
+  binary: string;
+  /** Args after the binary to enter ACP mode (typically `['--acp']`). */
+  acpArgs: string[];
+  /**
+   * Auto-approve flag this agent supports, or `null` if none is
+   * recognized. UI shows a toggle ONLY when this is non-null;
+   * checked → flag appended to the launch command.
+   */
+  allowAllFlag: string | null;
+  /**
+   * `<binary> --version` first line (trimmed). May be an empty string
+   * when the binary is on PATH but the version probe failed (network
+   * tool, slow startup, etc.) — `installed` is still `true`.
+   */
+  version?: string;
+  /** True iff `binary` was resolved on the host's PATH. */
+  installed: boolean;
+  /** One-line `npm install -g …` hint used in error / help text. */
+  installHint: string;
+}
+
+/** Response body for `GET /api/acp/agent-cli`. */
+export interface AcpAgentCliListResponse {
+  /**
+   * Detected agent CLIs. By default the server filters out
+   * `installed === false` entries; UI shows nothing for missing agents.
+   */
+  agents: AcpAgentCliInfo[];
+  /**
+   * True iff the `agentlet` wrapper itself is on the host's PATH.
+   * When `false`, the UI prefixes generated launch commands with
+   * the absolute path to the in-repo wrapper.
+   */
+  agentletOnPath: boolean;
+  /** Absolute path to the in-repo `bin/agentlet` wrapper. */
+  agentletWrapperPath: string;
 }
 
 // ─── Thread → agent binding ────────────────────────────────────────────
 //
 // 1 chat thread is permanently bound to a single agent for its entire
-// lifetime. The binding is set via the ChatPanel's ModeSelector dropdown
-// and travels with every agent request.
+// lifetime
 
 /**
  * Internal binding — chat thread talks to Huabu's built-in agent.

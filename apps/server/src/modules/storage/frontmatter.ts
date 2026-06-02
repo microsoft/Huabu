@@ -49,9 +49,19 @@ export function parseFrontmatter(raw: string): {
   }
 
   const yamlBlock = raw.slice(4, endIdx); // skip leading "---\n"
+  // Normalise CR / CRLF → LF before handing to the YAML parser. The
+  // `yaml` package treats `\r` as part of the surrounding scalar (so
+  // a value like `toolExecution: parallel` written on Windows comes
+  // back as the literal string `"parallel\r"` and trips downstream
+  // enum-style validation). Note that `endIdx` points at the `\n` of
+  // the closing `\n---` marker, so a CRLF-authored file leaves an
+  // orphan `\r` at the tail of `yamlBlock` — match both `\r\n` and
+  // bare `\r` so the last line is normalised too. Keeps every
+  // frontmatter consumer — node files, agent / skill loaders —
+  // line-ending agnostic regardless of where the file was authored.
   let meta: Record<string, unknown> = {};
   try {
-    const parsed = yamlParse(yamlBlock);
+    const parsed = yamlParse(yamlBlock.replace(/\r\n?/g, '\n'));
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       meta = parsed as Record<string, unknown>;
     }

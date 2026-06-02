@@ -24,8 +24,9 @@ let instance: AgentletServer | null = null;
 export interface MountAcpOptions {
   /**
    * Override the default authenticator. By default we delegate to the
-   * process-wide `TokenStore` (see `./token-store.ts`), which seeds
-   * from `ACP_DEV_TOKEN`.
+   * process-wide pairing-token store (see `./token-store.ts`), which is
+   * seeded on demand by the Settings UI flow — there is no env-var
+   * fallback any more.
    */
   authenticate?: AgentletServerOptions['authenticate'];
 }
@@ -57,6 +58,17 @@ export function mountAgentletServer(
       app.log.info({ agentId: agent.agentId }, '[acp] agent reconnected');
     },
     onDisconnection: (agent, reason) => {
+      // Start the post-disconnect grace window on this agentId's
+      // ticket(s). The agentlet/server layer fires `onDisconnection`
+      // for *any* ws close (wifi blip, dev hot-reload, deliberate
+      // Ctrl-C — there is no signal that distinguishes them), so we
+      // can't drop the ticket immediately without breaking the
+      // client's built-in auto-reconnect. The token store instead
+      // arms a PAIRING_RECONNECT_GRACE_MS timer that a successful
+      // re-validate will cancel; if the agent never comes back, the
+      // ticket is eventually purged so a leaked code cannot be
+      // re-used by an attacker who later learns the agentId.
+      tokenStore.markDisconnected(agent.agentId);
       app.log.info(
         { agentId: agent.agentId, reason },
         '[acp] agent disconnected',

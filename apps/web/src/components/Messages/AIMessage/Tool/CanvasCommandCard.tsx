@@ -53,6 +53,11 @@ export function CanvasCommandCard({
   const upsertAssistantToolPart = useChatStore(
     (s) => s.upsertAssistantToolPart,
   );
+  // The card mounts inside a single chat thread; whichever thread the
+  // user is currently viewing owns this card. Reading `threadId` from
+  // the store at render time keeps the write keyed to the right slice
+  // of `messagesByThread`.
+  const threadId = useChatStore((s) => s.threadId);
 
   const {
     isNodeMissing,
@@ -70,7 +75,7 @@ export function CanvasCommandCard({
    */
   const writeChanges = useCallback(
     (mapper: (changes: CanvasChange[]) => CanvasChange[]) => {
-      upsertAssistantToolPart(messageId, toolCallId, (existing) => {
+      upsertAssistantToolPart(threadId, messageId, toolCallId, (existing) => {
         if (!existing) return part;
         if (existing.variant !== 'canvas_commands') return existing;
         const td = existing.data;
@@ -89,7 +94,7 @@ export function CanvasCommandCard({
         };
       });
     },
-    [messageId, toolCallId, upsertAssistantToolPart, part],
+    [threadId, messageId, toolCallId, upsertAssistantToolPart, part],
   );
 
   const removeChange = useCallback(

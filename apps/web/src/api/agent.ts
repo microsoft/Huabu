@@ -208,7 +208,9 @@ export const agentApi = {
     try {
       const response = await fetch(apiUrl(routes.agent), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify(body),
         signal: options?.signal,
       });

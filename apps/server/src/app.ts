@@ -1,4 +1,6 @@
+import { unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import compress from '@fastify/compress';
 import cors from '@fastify/cors';
@@ -7,7 +9,9 @@ import staticPlugin from '@fastify/static';
 import { fastify } from 'fastify';
 
 import {
+  acpAgentCliRoutes,
   acpAgentsRoutes,
+  acpPairRoutes,
   acpThreadsRoutes,
   mountAgentletServer,
 } from './modules/agent/acp/index.js';
@@ -18,6 +22,11 @@ import { registerOpCounterHook } from './modules/agent/memory/op-counter-hook.js
 import skillsRoutes from './modules/agent/skills.route.js';
 import artifactRoute from './modules/artifact/artifact.route.js';
 import canvasRoutes from './modules/canvas/canvas.route.js';
+import {
+  hostGuardPlugin,
+  originGuardPlugin,
+  resolveAllowedHostnames,
+} from './modules/security/index.js';
 import webRoutes from './modules/web/web.route.js';
 import {
   initWorkspaceFromEnv,
@@ -47,10 +56,45 @@ export const app = fastify({
 // Register response compression
 app.register(compress);
 
-// Register CORS
+// ── CORS ─────────────────────────────────────────────────────────────
+// Locked down to a static allowlist derived from `HUABU_ALLOWED_HOSTS`
+// plus the loopback defaults — see `modules/security`. The cross-origin
+// write guard (see `origin-guard.ts`) enforces the same allowlist for
+// non-safe methods at the HTTP layer using `Sec-Fetch-Site` with an
+// `Origin`/loopback fallback; this CORS config keeps the browser from
+// even attempting cross-origin reads of sensitive GET endpoints. Any
+// scheme/port is accepted on an allowed hostname so
+// `http://localhost:5173` (Vite dev) and `https://sediment.example`
+// (reverse proxy) both work without further configuration.
+const allowedHostnames = resolveAllowedHostnames();
 app.register(cors, {
-  origin: true, // Allow all origins in development, specify domains in production
+  origin: (origin, cb) => {
+    // Non-browser callers (curl, server-to-server, native apps) omit
+    // Origin entirely — allow them; the Host guard already validates
+    // their target hostname.
+    if (!origin) return cb(null, true);
+    try {
+      const parsed = new URL(origin);
+      // URL.hostname strips the port and lowercases; IPv6 literals
+      // come back without the brackets, so re-add them to match the
+      // allowlist's canonical form.
+      const hostname = parsed.hostname.includes(':')
+        ? `[${parsed.hostname}]`
+        : parsed.hostname;
+      cb(null, allowedHostnames.has(hostname));
+    } catch {
+      cb(null, false);
+    }
+  },
+  credentials: false,
 });
+
+// ── Network security guards ──────────────────────────────────────────
+// Registered before basic-auth so misaddressed requests fail fast with
+// a clear 403 instead of an auth challenge. Order matters:
+//   hostGuard → originGuard → basic-auth → workspace guard → routes.
+app.register(hostGuardPlugin);
+app.register(originGuardPlugin);
 
 // Register multipart for file uploads
 // Max file size: 100MB
@@ -120,23 +164,38 @@ app.register(skillsRoutes, { prefix: '/api/skills' });
 app.register(workspaceRoutes, { prefix: '/api/workspace' });
 
 // ── External agent (ACP) bridge ───────────────────────────────────────
-// Mount @agentlet/server (WS upgrade at /api/acp/agent) behind the
-// ENABLE_ACP=1 feature flag so the default startup path is
-// unchanged. See docs/huabu-acp-client-plan.md for the full design.
+// Mount @agentlet/server (WS upgrade at /api/acp/agent) *unconditionally*.
+// The security boundary is the in-memory pairing-token store
+// (`modules/agent/acp/token-store.ts`), which is empty by default and
+// populated on demand when the user clicks "Generate code" in the
+// Settings UI. While no ticket exists, every `bridge/hello` is rejected
+// — but the endpoint stays reachable so the first successful pairing
+// takes effect without a server restart.
 //
-// The agents-list route is registered *unconditionally* so the front-end
-// has one URL to call regardless of flag state — it reports
-// `{ enabled: false, agents: [] }` when the bridge isn't mounted.
-app.register(acpAgentsRoutes, { prefix: '/api/acp' });
-if (process.env.ENABLE_ACP === '1') {
-  mountAgentletServer(app);
-  // Thread-scoped routes (session/commands) only make sense when the
-  // bridge is actually mounted — register them under the same flag so
-  // disabled deployments don't expose endpoints that would always
-  // 503.
-  app.register(acpThreadsRoutes, { prefix: '/api/acp' });
-  app.log.info('ACP (external agent) bridge enabled');
+// Legacy migration: older builds persisted an `enabled` flag + shared
+// token in `data/acp-config.json`. The file is no longer read; if it
+// exists we silently delete it so a stale 0600 file does not linger.
+try {
+  const legacyAcpConfigPath = join(process.cwd(), 'data', 'acp-config.json');
+  unlinkSync(legacyAcpConfigPath);
+  app.log.info(
+    `[acp] removed legacy ${legacyAcpConfigPath} — pairing is now ephemeral`,
+  );
+} catch (err) {
+  // ENOENT is the happy path (no legacy file to remove); anything else
+  // is non-fatal — the bridge does not depend on the file.
+  if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+    app.log.warn({ err }, '[acp] could not remove legacy acp-config.json');
+  }
 }
+mountAgentletServer(app);
+app.register(acpAgentsRoutes, { prefix: '/api/acp' });
+app.register(acpPairRoutes, { prefix: '/api/acp' });
+app.register(acpAgentCliRoutes, { prefix: '/api/acp' });
+app.register(acpThreadsRoutes, { prefix: '/api/acp' });
+app.log.info(
+  '[acp] bridge mounted — generate a pairing code from the Settings UI to connect an external agent',
+);
 
 // Memory op-counter: bump the per-canvas counter on every successful
 // mutating HTTP request scoped to a canvas. Registered last so all

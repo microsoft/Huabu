@@ -1,8 +1,10 @@
-import { Settings, Sparkles } from 'lucide-react';
+import { Settings } from 'lucide-react';
 import React, { useCallback, useRef, useState } from 'react';
 
+import { AcpSettings } from './AcpSettings';
+import { CanvasSettings } from './CanvasSettings';
 import { LLMSettings } from './LLMSettings';
-import useCanvasStore from '../../../store/canvasStore';
+import { useAcpPairingStore } from '../../../store/acpPairingStore';
 import { useLLMStore } from '../../../store/llmStore';
 import { Button } from '../../Common/Button';
 import { Popover } from '../../Common/Popover';
@@ -28,8 +30,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
   size = 'md',
 }) => {
   const llmInit = useLLMStore((s) => s.init);
-  const autoLayoutEnabled = useCanvasStore((s) => s.autoLayoutEnabled);
-  const toggleAutoLayout = useCanvasStore((s) => s.toggleAutoLayout);
+  const acpInit = useAcpPairingStore((s) => s.init);
 
   const [isOpen, setIsOpen] = useState(false);
 
@@ -52,10 +53,13 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
     if (justDismissedRef.current) return;
     setIsOpen((prev) => {
       const next = !prev;
-      if (next) void llmInit();
+      if (next) {
+        void llmInit();
+        void acpInit();
+      }
       return next;
     });
-  }, [llmInit]);
+  }, [acpInit, llmInit]);
 
   const getPopoverPosition = () => {
     if (!triggerRef.current) return { x: 0, y: 0 };
@@ -85,47 +89,21 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
           onDismiss={handleDismiss}
           anchor="top-right"
           offset={{ x: 0, y: 6 }}
-          className="w-80 p-4"
+          className="flex max-h-[calc(100vh-24px)] w-120 flex-col p-4"
         >
-          <h3 className="text-fg-default mb-3 text-sm font-semibold">
+          <h3 className="text-fg-default mb-3 shrink-0 text-sm font-semibold">
             Settings
           </h3>
 
-          <div className="border-edge-default mb-3 border-b pb-3">
-            <label className="text-fg-muted mb-1.5 block text-xs font-medium">
-              Canvas
-            </label>
-            <div className="border-edge-default bg-bg-default flex items-center justify-between rounded-md border px-2 py-1.5">
-              <div className="flex min-w-0 items-center gap-2">
-                <Sparkles size={14} className="text-fg-muted shrink-0" />
-                <div className="min-w-0">
-                  <p className="text-fg-default text-xs font-medium">
-                    Auto Layout
-                  </p>
-                  <p className="text-fg-subtle text-[11px]">
-                    {autoLayoutEnabled ? 'Enabled' : 'Disabled'}
-                  </p>
-                </div>
-              </div>
-              <Button
-                variant={autoLayoutEnabled ? 'solid' : 'outline'}
-                tone={autoLayoutEnabled ? 'info' : 'neutral'}
-                size="sm"
-                onClick={() => toggleAutoLayout()}
-                title={
-                  autoLayoutEnabled
-                    ? 'Disable Auto Layout'
-                    : 'Enable Auto Layout'
-                }
-              >
-                {autoLayoutEnabled ? 'Disable' : 'Enable'}
-              </Button>
-            </div>
+          <div className="-mx-4 min-h-0 flex-1 overflow-y-auto px-4 pb-2">
+            <LLMSettings />
+
+            <AcpSettings />
+
+            <CanvasSettings />
           </div>
 
-          <LLMSettings />
-
-          <div className="flex justify-end">
+          <div className="mt-4 flex shrink-0 justify-end">
             <Button
               variant="outline"
               tone="neutral"

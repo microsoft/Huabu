@@ -1,15 +1,15 @@
 /**
  * ACP (external agent bridge) API client.
  *
- * Wraps the read-only `GET /api/acp/agents` endpoint and the
- * thread-scoped session / commands endpoints used by the slash-command
- * typeahead.
+ * Wraps the read-only `GET /api/acp/agents` endpoint, the ephemeral
+ * pairing-token surface (`POST/GET /api/acp/pair`,
+ * `DELETE /api/acp/pair/:id`), and the thread-scoped session / commands
+ * endpoints used by the slash-command typeahead.
  *
- * The agents-list endpoint is always registered server-side: when the
- * bridge is disabled it returns `{ enabled: false, agents: [] }`, so
- * callers don't need to know about `ENABLE_ACP` themselves.
- * The thread-scoped endpoints, by contrast, are only mounted when the
- * bridge is enabled — calls to them on a disabled server respond 404.
+ * The agents-list endpoint is always registered server-side and now
+ * always responds with `{ agents: [...] }` — the bridge is permanently
+ * mounted; whether any agent is actually reachable is a function of
+ * whether the user has paired one.
  */
 
 import { ApiError, apiFetch } from './_client';
@@ -17,6 +17,9 @@ import { routes } from './_routes';
 
 import type {
   AcpAgentsResponse,
+  AcpAgentCliListResponse,
+  AcpPairingCreatedResponse,
+  AcpPairingListResponse,
   AcpPermissionDecisionRequest,
   AcpPermissionDecisionResponse,
   AcpThreadCommandsResponse,
@@ -31,9 +34,14 @@ import type {
 } from '@sediment/shared';
 
 export type {
+  AcpAgentCliInfo,
+  AcpAgentCliListResponse,
   AcpAgentSummary,
   AcpAgentsResponse,
   AcpModelInfo,
+  AcpPairingCreatedResponse,
+  AcpPairingListResponse,
+  AcpPairingTicket,
   AcpSessionConfigOption,
   AcpSessionMetaSnapshot,
   AcpSessionMode,
@@ -53,6 +61,53 @@ export type {
 export async function listAcpAgents(): Promise<AcpAgentsResponse> {
   return apiFetch<AcpAgentsResponse>(routes.acpAgents, {
     fallbackMessage: 'Failed to list ACP agents',
+  });
+}
+
+/**
+ * Detect ACP-capable agent CLIs installed on the host (`copilot`,
+ * `claude`, `gemini`). Server filters out missing ones; the UI shows
+ * a "Connect" card per installed agent. Also reports whether the
+ * `agentlet` wrapper itself is on PATH so the UI can pick between
+ * `agentlet …` (short form) and `<abs-path>/bin/agentlet …` (full path).
+ */
+export async function listAcpAgentClis(): Promise<AcpAgentCliListResponse> {
+  return apiFetch<AcpAgentCliListResponse>(routes.acpAgentCli, {
+    fallbackMessage: 'Failed to detect installed agent CLIs',
+  });
+}
+
+/**
+ * Mint a fresh ephemeral pairing ticket. The returned `code` is valid
+ * for 60 seconds; once an agentlet successfully runs `bridge/hello`
+ * with that code it gets locked to that agent's `agentId` indefinitely
+ * (until graceful disconnect, explicit revoke, or server restart).
+ */
+export async function createAcpPairing(): Promise<AcpPairingCreatedResponse> {
+  return apiFetch<AcpPairingCreatedResponse>(routes.acpPair, {
+    method: 'POST',
+    fallbackMessage: 'Failed to create pairing code',
+  });
+}
+
+/** Snapshot every still-active pairing ticket. */
+export async function listAcpPairings(): Promise<AcpPairingListResponse> {
+  return apiFetch<AcpPairingListResponse>(routes.acpPair, {
+    fallbackMessage: 'Failed to read pairing codes',
+  });
+}
+
+/**
+ * Revoke a ticket by id. Returns `{ revoked: false }` when the ticket
+ * had already expired / been claimed-then-disconnected — caller can
+ * ignore.
+ */
+export async function revokeAcpPairing(
+  id: string,
+): Promise<{ revoked: boolean }> {
+  return apiFetch<{ revoked: boolean }>(routes.acpPairItem(id), {
+    method: 'DELETE',
+    fallbackMessage: 'Failed to revoke pairing code',
   });
 }
 
