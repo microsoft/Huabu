@@ -571,11 +571,20 @@ function buildHistoryItems(
   messages: ChatHistoryItem[],
 ): void {
   let pendingStatus: ChatHistoryItem | null = null;
+  // Coalesce consecutive pi-ai assistant messages (one per tool
+  // round) into a single ChatHistoryItem so the UI renders ONE
+  // bubble with ONE action bar per agent turn — mirroring the live
+  // SSE behaviour where every event for a startStream call lands on
+  // the same `assistantId`. Reset on any non-assistant boundary
+  // (user / status / prepared-prompt / intent-select).
+  let currentAssistant: Extract<ChatHistoryItem, { role: 'assistant' }> | null =
+    null;
 
   const flushStatus = () => {
     if (pendingStatus) {
       messages.push(pendingStatus);
       pendingStatus = null;
+      currentAssistant = null;
     }
   };
 
@@ -667,6 +676,7 @@ function buildHistoryItems(
             prompt: parsed.prompt,
             ...(parsed.error ? { error: parsed.error } : {}),
           });
+          currentAssistant = null;
         } catch {
           // Malformed sidecar — drop silently rather than break history.
         }
@@ -754,6 +764,7 @@ function buildHistoryItems(
             selectedNodeIds.length > 0 && { selectedNodeIds }),
           ...(invokedSkills && invokedSkills.length > 0 && { invokedSkills }),
         });
+        currentAssistant = null;
       }
     } else if (msg.role === 'assistant') {
       // Walk the assistant content blocks IN ORDER, building a parts
@@ -869,7 +880,19 @@ function buildHistoryItems(
         }
       }
       if (parts.length > 0) {
-        messages.push({ role: 'assistant', parts });
+        if (currentAssistant) {
+          // Same agent turn (additional pi-ai assistant message
+          // emitted after a tool result) — append parts so the UI
+          // still sees one bubble per turn.
+          currentAssistant.parts.push(...parts);
+        } else {
+          const item: Extract<ChatHistoryItem, { role: 'assistant' }> = {
+            role: 'assistant',
+            parts,
+          };
+          messages.push(item);
+          currentAssistant = item;
+        }
       }
       // Flush status after assistant content so it appears below
       flushStatus();
