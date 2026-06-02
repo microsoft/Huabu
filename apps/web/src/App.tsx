@@ -9,6 +9,7 @@ import {
 } from 'react-router-dom';
 
 import { ToastContainer } from './components/Common/Toast';
+import DocsPage from './docs/DocsPage';
 import { useInputModeListener } from './hooks/useInputMode';
 import CanvasListPage from './pages/CanvasListPage';
 import CanvasPage from './pages/CanvasPage/CanvasPage.tsx';
@@ -72,6 +73,12 @@ export default function App() {
             path="/setup"
             element={initialising ? <LoadingScreen /> : <WorkspaceSetupPage />}
           />
+
+          {/* User handbook — also outside the workspace guard so the
+              docs are reachable from a fresh install (e.g. before a
+              workspace folder has been chosen) and from a new browser
+              tab launched via the in-canvas handbook button. */}
+          <Route path="/docs/*" element={<DocsPage />} />
 
           <Route element={<WorkspaceGuardLayout initialising={initialising} />}>
             <Route path="/" element={<CanvasListPage />} />

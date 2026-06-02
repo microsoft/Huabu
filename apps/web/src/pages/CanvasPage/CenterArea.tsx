@@ -1,4 +1,4 @@
-import { Bot, HelpCircle } from 'lucide-react';
+import { Bot, BookOpen, HelpCircle } from 'lucide-react';
 import React, { useCallback, useRef } from 'react';
 
 import { Button } from '../../components/Common/Button';
@@ -138,6 +138,20 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
             they read as a uniform floating control group on top of the
             canvas. */}
         <div className="pointer-events-auto absolute top-3 right-2 z-30 flex items-center gap-1">
+          {/* Handbook — opens the in-app user manual in a new browser
+              tab so the canvas session stays intact while users
+              reference the docs side-by-side. */}
+          <Button
+            variant="ghost"
+            shape="pill"
+            size="lg"
+            iconOnly
+            onClick={() => window.open('/docs', '_blank', 'noopener')}
+            title="User Handbook"
+            aria-label="Open user handbook"
+          >
+            <BookOpen />
+          </Button>
           {onOpenHelp && (
             <Button
               variant="ghost"
