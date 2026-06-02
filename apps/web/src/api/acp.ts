@@ -17,6 +17,7 @@ import { routes } from './_routes';
 
 import type {
   AcpAgentsResponse,
+  AcpAgentCliListResponse,
   AcpPairingCreatedResponse,
   AcpPairingListResponse,
   AcpPermissionDecisionRequest,
@@ -33,6 +34,8 @@ import type {
 } from '@sediment/shared';
 
 export type {
+  AcpAgentCliInfo,
+  AcpAgentCliListResponse,
   AcpAgentSummary,
   AcpAgentsResponse,
   AcpModelInfo,
@@ -58,6 +61,19 @@ export type {
 export async function listAcpAgents(): Promise<AcpAgentsResponse> {
   return apiFetch<AcpAgentsResponse>(routes.acpAgents, {
     fallbackMessage: 'Failed to list ACP agents',
+  });
+}
+
+/**
+ * Detect ACP-capable agent CLIs installed on the host (`copilot`,
+ * `claude`, `gemini`). Server filters out missing ones; the UI shows
+ * a "Connect" card per installed agent. Also reports whether the
+ * `agentlet` wrapper itself is on PATH so the UI can pick between
+ * `agentlet …` (short form) and `<abs-path>/bin/agentlet …` (full path).
+ */
+export async function listAcpAgentClis(): Promise<AcpAgentCliListResponse> {
+  return apiFetch<AcpAgentCliListResponse>(routes.acpAgentCli, {
+    fallbackMessage: 'Failed to detect installed agent CLIs',
   });
 }
 

@@ -68,6 +68,7 @@ export const routes = {
 
   // ── ACP (external agent bridge) ───────────────────────────────────
   acpAgents: '/acp/agents',
+  acpAgentCli: '/acp/agent-cli',
   acpPair: '/acp/pair',
   acpPairItem: (id: string) => `/acp/pair/${enc(id)}`,
   acpThreadSession: (threadId: string) =>

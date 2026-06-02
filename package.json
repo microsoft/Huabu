@@ -14,7 +14,8 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "typecheck": "pnpm -r --parallel typecheck",
-    "prepare": "husky"
+    "prepare": "husky",
+    "postinstall": "node scripts/install-agentlet-to-path.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",

@@ -9,6 +9,7 @@ import staticPlugin from '@fastify/static';
 import { fastify } from 'fastify';
 
 import {
+  acpAgentCliRoutes,
   acpAgentsRoutes,
   acpPairRoutes,
   acpThreadsRoutes,
@@ -190,6 +191,7 @@ try {
 mountAgentletServer(app);
 app.register(acpAgentsRoutes, { prefix: '/api/acp' });
 app.register(acpPairRoutes, { prefix: '/api/acp' });
+app.register(acpAgentCliRoutes, { prefix: '/api/acp' });
 app.register(acpThreadsRoutes, { prefix: '/api/acp' });
 app.log.info(
   '[acp] bridge mounted — generate a pairing code from the Settings UI to connect an external agent',

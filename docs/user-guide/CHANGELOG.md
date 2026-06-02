@@ -4,6 +4,27 @@
 
 ---
 
+## 2026-06-03 · 外部 Agent 一键启动（检测安装 + 自动 PATH）
+
+**What Changed**
+
+- Settings → External Agents 上方新增 **Detected Agents** 区块：server 在 host 上自动探测 `copilot` / `claude` / `gemini` 三种 ACP-capable CLI（用 `which` / `where` + `--version`），只显示**已安装**的；未检测到的不再占位。
+- 每张 Detected Agent 卡片暴露 **Connect** 按钮：一次点击同时完成 ① 生成新的配对码、② 拼出完整的 `agentlet --token <CODE> --agent "<binary> --acp …"` 命令、③ 复制到剪贴板，并 toast 提示用户在 60 秒内粘贴到终端。原来"先生成码，再自己拼命令"的两步流程简化为一步。
+- 卡片上的 **Auto-approve tool calls** toggle：仅在 CLI 支持显式的自动批准 flag 时显示（目前只有 Copilot 的 `--allow-all`），默认开启。Claude / Gemini 没有等价的简单 flag，因此**不**渲染该 toggle——用户如果要类似行为，仍可走下方"Pair manually (advanced)"自行拼命令。
+- 原有"Generate code"按钮保留为 **Pair manually (advanced)**，给需要自定义 binary、远程 shell、定制参数的高级用户作为兜底。
+- `pnpm install` 现在会自动把 `<repo>/bin/` 加到当前用户的 PATH（POSIX 写入对应 shell rc：zsh → `~/.zshrc`、bash → `~/.bashrc`、fish → `~/.config/fish/config.fish`；Windows 调 PowerShell 写 User-scope PATH）。安装完打开**新终端**即可直接敲 `agentlet`，不再需要手动 `export PATH=…`。
+- 后端新增 loopback-only 路由 `GET /api/acp/agent-cli`，返回探测到的 agent 列表 + `agentletOnPath` 标志 + `bin/agentlet` 的绝对路径；前端用后两者决定复制命令时用 `agentlet …`（短）还是 `<abs>/bin/agentlet …`（长）。
+
+**Notes**
+
+- **PATH 写入的安全开关**：postinstall 脚本在以下三种情况下**完全跳过**写入：① `process.env.CI === 'true'`（防止污染 CI shell rc）、② `HUABU_NO_AUTO_PATH=1`（用户显式 opt-out）、③ `bin/` 已经在 PATH 里。失败永远不会让 `pnpm install` 退出非 0——最差情况只是不复制 PATH，wrapper 仍可以走完整绝对路径调用。
+- **PATH 写入的幂等性**：通过 `# Added by Sediment — agentlet CLI` 哨兵注释 + `binDir` 字面量双重检查。多次 `pnpm install` 不会重复追加。
+- **Windows 注意**：`bin/agentlet` 本身是 POSIX sh 脚本，只能在 Git Bash / WSL 里直接运行（cmd.exe / PowerShell 不行）。把 `bin/` 加到 User PATH 仍然有意义——Git Bash 会继承 Windows PATH。如果你只用原生 PowerShell，目前需要走 WSL 或在 `bin/` 旁加 `.cmd` shim（暂未实现）。
+- **Auto-approve 的 scope**：只在 Copilot 一家上提供 toggle 是有意为之。Claude 的 `--dangerously-skip-permissions` 与 Gemini 的对应能力都属于"明确警告级"的 flag，不该作为一键勾选——如果默认勾上+复制到剪贴板，用户很可能在没读完 prompt 的情况下粘贴执行。
+- **检测时机**：Settings 面板每次挂载都会重新探测，所以你新装一个 CLI 之后只要刷新 Settings popover 就能看到，无需重启 server。
+
+---
+
 ## 2026-06-02 · ACP bridge 改用阅后即焚的配对码（破坏性变更）
 
 **What Changed**

@@ -115,6 +115,63 @@ export interface AcpPairingListResponse {
   tickets: AcpPairingTicket[];
 }
 
+// ─── Local agent CLI detection ────────────────────────────────────────
+//
+// To make first-time onboarding one click, the server probes the host
+// for known ACP-capable CLI binaries (`copilot`, `claude`, `gemini`)
+// and reports the ones it found. The Settings UI uses this to render a
+// "Connect" button per detected agent that mints a fresh pairing code
+// AND builds the exact `bin/agentlet --token … --agent "…"` command,
+// so the user just pastes it into a terminal.
+//
+// This endpoint is loopback-only — it shells out to discover host
+// binaries and must never be reachable from a remote browser.
+
+/** Definition + detection result for one known external agent CLI. */
+export interface AcpAgentCliInfo {
+  /** Stable short id used by the UI (`copilot` / `claude` / `gemini`). */
+  id: string;
+  /** Display name shown in the Settings UI. */
+  displayName: string;
+  /** Binary name the user must install (`copilot`). */
+  binary: string;
+  /** Args after the binary to enter ACP mode (typically `['--acp']`). */
+  acpArgs: string[];
+  /**
+   * Auto-approve flag this agent supports, or `null` if none is
+   * recognized. UI shows a toggle ONLY when this is non-null;
+   * checked → flag appended to the launch command.
+   */
+  allowAllFlag: string | null;
+  /**
+   * `<binary> --version` first line (trimmed). May be an empty string
+   * when the binary is on PATH but the version probe failed (network
+   * tool, slow startup, etc.) — `installed` is still `true`.
+   */
+  version?: string;
+  /** True iff `binary` was resolved on the host's PATH. */
+  installed: boolean;
+  /** One-line `npm install -g …` hint used in error / help text. */
+  installHint: string;
+}
+
+/** Response body for `GET /api/acp/agent-cli`. */
+export interface AcpAgentCliListResponse {
+  /**
+   * Detected agent CLIs. By default the server filters out
+   * `installed === false` entries; UI shows nothing for missing agents.
+   */
+  agents: AcpAgentCliInfo[];
+  /**
+   * True iff the `agentlet` wrapper itself is on the host's PATH.
+   * When `false`, the UI prefixes generated launch commands with
+   * the absolute path to the in-repo wrapper.
+   */
+  agentletOnPath: boolean;
+  /** Absolute path to the in-repo `bin/agentlet` wrapper. */
+  agentletWrapperPath: string;
+}
+
 // ─── Thread → agent binding ────────────────────────────────────────────
 //
 // 1 chat thread is permanently bound to a single agent for its entire

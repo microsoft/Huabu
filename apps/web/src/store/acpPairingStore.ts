@@ -50,8 +50,13 @@ interface AcpPairingState {
   init: () => Promise<void>;
   /** Force a fresh GET. Safe to call concurrently. */
   refresh: () => Promise<void>;
-  /** Mint a new pending ticket. Prepended to {@link tickets} on success. */
-  createTicket: () => Promise<void>;
+  /**
+   * Mint a new pending ticket. Prepended to {@link tickets} on success.
+   * Returns the freshly-minted ticket so callers can immediately build
+   * a launch command around `ticket.code`, or `null` on failure (the
+   * error is already surfaced through {@link error}).
+   */
+  createTicket: () => Promise<AcpPairingTicket | null>;
   /** Revoke a ticket by id. Removes it from {@link tickets} on success. */
   revokeTicket: (id: string) => Promise<void>;
 }
@@ -131,12 +136,14 @@ export const useAcpPairingStore = create<AcpPairingState>()((set, get) => ({
       const tickets = [ticket, ...get().tickets];
       set({ tickets, creating: false });
       syncPolling(tickets, get().refresh);
+      return ticket;
     } catch (err) {
       set({
         error:
           err instanceof Error ? err.message : 'Failed to create pairing code',
         creating: false,
       });
+      return null;
     }
   },
 
