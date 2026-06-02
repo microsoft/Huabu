@@ -1,5 +1,5 @@
 /**
- * Tests for the ephemeral pairing-token store.
+ * Tests for the pairing-token store.
  *
  * Coverage:
  *   ✓ createTicket returns a pending ticket with a fresh code + id
@@ -14,7 +14,23 @@
  *   ✓ revoke removes the ticket by id and is a no-op for unknown ids
  *   ✓ list snapshots every active ticket
  *   ✓ multiple concurrent pending tickets are independent
+ *   ✓ persistence: claimed tickets survive a singleton reset (server restart)
+ *   ✓ persistence: pending tickets are NOT persisted
+ *   ✓ persistence: revoke removes the on-disk entry too
+ *   ✓ persistence: grace-window expiry removes the on-disk entry too
+ *   ✓ persistence: missing or corrupted file produces a clean empty state
  */
+
+import { randomUUID } from 'node:crypto';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -22,6 +38,7 @@ import {
   PAIRING_PENDING_TTL_MS,
   PAIRING_RECONNECT_GRACE_MS,
   _resetTokenStoreForTests,
+  _setPersistPathForTests,
   getTokenStore,
 } from './token-store.js';
 
@@ -43,12 +60,16 @@ function hello(
 
 beforeEach(() => {
   _resetTokenStoreForTests();
+  // Existing in-memory tests must not touch the real data directory.
+  // The persistence suite below opts back in with its own tmpdir path.
+  _setPersistPathForTests(null);
   vi.useFakeTimers();
 });
 
 afterEach(() => {
   vi.useRealTimers();
   _resetTokenStoreForTests();
+  _setPersistPathForTests(null);
 });
 
 describe('token-store · createTicket', () => {
@@ -247,5 +268,125 @@ describe('token-store · list', () => {
     const claimed = snapshot.find((t) => t.id === t2.id);
     expect(claimed?.status).toBe('claimed');
     expect(claimed?.claimedAgentId).toBe('agent-1');
+  });
+});
+
+describe('token-store · persistence', () => {
+  let tmpDir: string;
+  let persistPath: string;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'acp-tokens-'));
+    persistPath = join(tmpDir, `acp-tickets-${randomUUID()}.json`);
+    _resetTokenStoreForTests();
+    _setPersistPathForTests(persistPath);
+  });
+
+  afterEach(() => {
+    _resetTokenStoreForTests();
+    _setPersistPathForTests(null);
+    try {
+      rmSync(tmpDir, { recursive: true, force: true });
+    } catch {
+      // Best-effort cleanup; ignore.
+    }
+  });
+
+  it('claimed tickets survive a singleton reset (simulated server restart)', () => {
+    const first = getTokenStore();
+    const ticket = first.createTicket();
+    first.validate(ticket.code, hello(ticket.code, 'agent-A'));
+
+    // Simulate server restart: drop the singleton (but keep the same
+    // persistPath so the rehydrate reads the file we just wrote).
+    _resetTokenStoreForTests();
+    const second = getTokenStore();
+
+    const listed = second.list();
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toMatchObject({
+      id: ticket.id,
+      code: ticket.code,
+      status: 'claimed',
+      claimedAgentId: 'agent-A',
+      claimedAlias: 'copilot',
+      claimedCommand: 'copilot --acp',
+    });
+
+    // The original agentlet should re-pair using the same code.
+    expect(() =>
+      second.validate(ticket.code, hello(ticket.code, 'agent-A')),
+    ).not.toThrow();
+    // An attacker with the code but a different agentId still cannot steal it.
+    expect(() =>
+      second.validate(ticket.code, hello(ticket.code, 'agent-impostor')),
+    ).toThrowError(/already claimed/i);
+  });
+
+  it('does NOT persist pending tickets (they expire on restart)', () => {
+    const first = getTokenStore();
+    const ticket = first.createTicket();
+
+    // No claim yet — nothing should be written.
+    expect(existsSync(persistPath)).toBe(false);
+
+    _resetTokenStoreForTests();
+    const second = getTokenStore();
+    expect(second.list()).toHaveLength(0);
+    expect(() =>
+      second.validate(ticket.code, hello(ticket.code, 'agent-A')),
+    ).toThrowError(/invalid or expired/i);
+  });
+
+  it('revoke removes the on-disk entry as well', () => {
+    const first = getTokenStore();
+    const ticket = first.createTicket();
+    first.validate(ticket.code, hello(ticket.code, 'agent-A'));
+    first.revoke(ticket.id);
+
+    _resetTokenStoreForTests();
+    const second = getTokenStore();
+    expect(second.list()).toHaveLength(0);
+    expect(() =>
+      second.validate(ticket.code, hello(ticket.code, 'agent-A')),
+    ).toThrowError(/invalid or expired/i);
+  });
+
+  it('grace-window expiry removes the on-disk entry as well', () => {
+    const first = getTokenStore();
+    const ticket = first.createTicket();
+    first.validate(ticket.code, hello(ticket.code, 'agent-A'));
+    first.markDisconnected('agent-A');
+    vi.advanceTimersByTime(PAIRING_RECONNECT_GRACE_MS + 1_000);
+
+    _resetTokenStoreForTests();
+    const second = getTokenStore();
+    expect(second.list()).toHaveLength(0);
+  });
+
+  it('starts empty when the persistence file is missing', () => {
+    expect(existsSync(persistPath)).toBe(false);
+    const store = getTokenStore();
+    expect(store.list()).toHaveLength(0);
+  });
+
+  it('starts empty and recovers when the persistence file is corrupted', () => {
+    writeFileSync(persistPath, '{not valid json', 'utf-8');
+    const store = getTokenStore();
+    expect(store.list()).toHaveLength(0);
+    // The corrupt file should have been removed so a fresh claim
+    // rewrites it cleanly on the next persist.
+    expect(existsSync(persistPath)).toBe(false);
+
+    const ticket = store.createTicket();
+    store.validate(ticket.code, hello(ticket.code, 'agent-A'));
+    const written = JSON.parse(readFileSync(persistPath, 'utf-8'));
+    expect(Array.isArray(written)).toBe(true);
+    expect(written).toHaveLength(1);
+    expect(written[0]).toMatchObject({
+      id: ticket.id,
+      code: ticket.code,
+      claimedAgentId: 'agent-A',
+    });
   });
 });

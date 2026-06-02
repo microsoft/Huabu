@@ -1,5 +1,5 @@
 /**
- * Ephemeral pairing-token store for the ACP bridge.
+ * Pairing-token store for the ACP bridge.
  *
  * Lifecycle of a single ticket (see `AcpPairingTicket` in
  * `@sediment/shared` for the wire shape):
@@ -19,17 +19,35 @@
  *              dev hot-reloads, laptop sleep) to keep working without
  *              re-pairing.
  *
- *   <gone>   → explicit revoke or server restart remove the ticket
- *              entirely. A WebSocket close (which the agentlet/server
- *              layer reports as "disconnected" for *any* close — there
- *              is no signal that distinguishes a deliberate Ctrl-C from
- *              a transient drop) starts a {@link PAIRING_RECONNECT_GRACE_MS}
- *              grace timer; the ticket is removed only if no `bridge/hello`
- *              for the same agentId lands inside that window. Successful
+ *   <gone>   → explicit revoke removes the ticket entirely. A WebSocket
+ *              close (which the agentlet/server layer reports as
+ *              "disconnected" for *any* close — there is no signal that
+ *              distinguishes a deliberate Ctrl-C from a transient drop)
+ *              starts a {@link PAIRING_RECONNECT_GRACE_MS} grace timer;
+ *              the ticket is removed only if no `bridge/hello` for the
+ *              same agentId lands inside that window. Successful
  *              re-validate cancels the timer.
  *
- * All state is in-memory and per-process. Pairing tokens are never
- * written to disk.
+ * Persistence
+ * -----------
+ * Claimed tickets are persisted to `data/acp-tickets.json` so that
+ * server restarts do not force the user back to the Settings UI to
+ * re-pair every already-connected agentlet. The same trust model as
+ * `data/oauth-credentials.json` / `data/llm-config.json` applies:
+ * loopback-only access and best-effort `chmod 0600`. Pending tickets
+ * remain ephemeral (the 60-second TTL makes persistence pointless) and
+ * are dropped on restart.
+ *
+ * On startup the constructor rehydrates every persisted record back
+ * into the in-memory `byCode` / `byId` maps with `disconnectedAt = null`
+ * (the previous grace-timer state cannot be recovered, so we give every
+ * rehydrated ticket a fresh "online" slate). Writes happen on:
+ *   - pending → claimed transition (initial pairing)
+ *   - revoke and grace-window expiry (via `removeTicket`)
+ *
+ * Reconnect-only updates to `claimedAt` / `disconnectedAt` are NOT
+ * written; they are in-memory liveness signals that would otherwise
+ * thrash the file on every WS heartbeat.
  *
  * Concurrency notes
  * -----------------
@@ -42,6 +60,16 @@
  */
 
 import { randomBytes, randomUUID } from 'node:crypto';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { dirname, join } from 'node:path';
 
 import type { BridgeHelloParams, AuthResult } from '@agentlet/protocol';
 import type { AcpPairingTicket } from '@sediment/shared';
@@ -99,6 +127,22 @@ interface StoredTicket {
 export type TokenEntry = AcpPairingTicket;
 
 /**
+ * On-disk shape for a single persisted (claimed) ticket. Mirrors the
+ * fields of {@link StoredTicket} that matter for re-establishing a
+ * claim across server restarts; the timer handles and `disconnectedAt`
+ * are deliberately omitted because they are runtime-only.
+ */
+interface PersistedTicket {
+  id: string;
+  code: string;
+  expiresAt: number;
+  claimedAgentId: string;
+  claimedAlias?: string;
+  claimedCommand?: string;
+  claimedAt?: number;
+}
+
+/**
  * Lightweight derivation of the human-readable alias from the agent's
  * launcher command. Kept in sync with `agents.route.deriveAlias` —
  * duplicated here to avoid pulling the route module into the security
@@ -137,6 +181,17 @@ class AcpTokenStore {
   private byCode = new Map<string, StoredTicket>();
   /** Secondary index by `id` for `revoke` and `list`-by-id needs. */
   private byId = new Map<string, StoredTicket>();
+  /**
+   * Absolute path to the JSON file used to persist claimed tickets.
+   * `null` disables persistence entirely (used by unit tests so the
+   * existing in-memory test suite stays filesystem-free).
+   */
+  private readonly persistPath: string | null;
+
+  constructor(persistPath: string | null) {
+    this.persistPath = persistPath;
+    this.rehydrate();
+  }
 
   /**
    * Mint a fresh pending ticket. The caller (the pair route) is the only
@@ -200,6 +255,9 @@ class AcpTokenStore {
       ticket.claimedAlias = deriveAliasFromCommand(meta.agent?.command ?? '');
       ticket.claimedCommand = meta.agent?.command;
       ticket.claimedAt = Date.now();
+      // Persist now so a server restart between claim and the next
+      // bridge/hello doesn't force the user to re-pair.
+      this.persist();
       return { metadata: { ticketId: ticket.id } };
     }
 
@@ -281,8 +339,109 @@ class AcpTokenStore {
       clearTimeout(ticket.graceTimer);
       ticket.graceTimer = null;
     }
+    const wasClaimed = ticket.status === 'claimed';
     this.byCode.delete(ticket.code);
     this.byId.delete(ticket.id);
+    // Only claimed tickets are persisted, so a pending-only removal
+    // doesn't need to touch disk.
+    if (wasClaimed) this.persist();
+  }
+
+  /**
+   * Load claimed tickets from {@link persistPath} into the in-memory
+   * indexes. Safe to call before any tickets exist — missing file or
+   * corrupted JSON both produce an empty starting state.
+   */
+  private rehydrate(): void {
+    if (!this.persistPath) return;
+    if (!existsSync(this.persistPath)) return;
+    let entries: unknown;
+    try {
+      entries = JSON.parse(readFileSync(this.persistPath, 'utf-8'));
+    } catch {
+      // Corrupted file — drop it so the next persist() rewrites cleanly
+      // and the user can re-pair if needed.
+      try {
+        unlinkSync(this.persistPath);
+      } catch {
+        // Best-effort cleanup; ignore.
+      }
+      return;
+    }
+    if (!Array.isArray(entries)) return;
+    for (const raw of entries) {
+      const entry = raw as Partial<PersistedTicket>;
+      // Defensive: skip records missing fields required to re-validate.
+      if (
+        typeof entry.id !== 'string' ||
+        typeof entry.code !== 'string' ||
+        typeof entry.claimedAgentId !== 'string'
+      ) {
+        continue;
+      }
+      const ticket: StoredTicket = {
+        id: entry.id,
+        code: entry.code,
+        status: 'claimed',
+        expiresAt:
+          typeof entry.expiresAt === 'number' ? entry.expiresAt : Date.now(),
+        claimedAgentId: entry.claimedAgentId,
+        claimedAlias: entry.claimedAlias,
+        claimedCommand: entry.claimedCommand,
+        claimedAt: entry.claimedAt,
+        pendingTimer: null,
+        // Rehydrated tickets start with a clean "online" slate; if the
+        // agent never reconnects, the next markDisconnected → grace
+        // window will eventually purge them.
+        disconnectedAt: null,
+        graceTimer: null,
+      };
+      this.byCode.set(ticket.code, ticket);
+      this.byId.set(ticket.id, ticket);
+    }
+  }
+
+  /**
+   * Snapshot every claimed ticket and atomically rewrite the persistence
+   * file. Atomic via temp-file + rename so a `kill -9` mid-write cannot
+   * leave a half-written JSON behind. Persistence failures are swallowed
+   * — losing the rewrite means the next restart falls back to whatever
+   * was last successfully written, which is strictly better than
+   * crashing the request that triggered the write.
+   */
+  private persist(): void {
+    if (!this.persistPath) return;
+    const claimedList: PersistedTicket[] = Array.from(this.byId.values())
+      .filter(
+        (t): t is StoredTicket & { claimedAgentId: string } =>
+          t.status === 'claimed' && typeof t.claimedAgentId === 'string',
+      )
+      .map((t) => ({
+        id: t.id,
+        code: t.code,
+        expiresAt: t.expiresAt,
+        claimedAgentId: t.claimedAgentId,
+        claimedAlias: t.claimedAlias,
+        claimedCommand: t.claimedCommand,
+        claimedAt: t.claimedAt,
+      }));
+    try {
+      const dir = dirname(this.persistPath);
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      const tmp = `${this.persistPath}.tmp`;
+      writeFileSync(tmp, JSON.stringify(claimedList, null, 2), 'utf-8');
+      renameSync(tmp, this.persistPath);
+      try {
+        chmodSync(this.persistPath, 0o600);
+      } catch {
+        // Windows ACLs don't translate cleanly from POSIX mode bits;
+        // matches the best-effort pattern used by llm.ts / oauth.ts.
+      }
+    } catch {
+      // Surfacing this as a thrown error would fail the agentlet
+      // handshake, which is far worse than the next restart losing this
+      // one update.
+    }
   }
 
   /** Test/debug helper. */
@@ -291,14 +450,34 @@ class AcpTokenStore {
   }
 }
 
+/** Default location of the persisted claimed-ticket file. */
+function defaultPersistPath(): string {
+  return join(process.cwd(), 'data', 'acp-tickets.json');
+}
+
 let _store: AcpTokenStore | null = null;
+/**
+ * Override for the persistence path. `undefined` means "use the default";
+ * `null` disables persistence entirely (used by the existing in-memory
+ * test suite); a string overrides it (used by the persistence test
+ * suite to point at a tmpdir file).
+ */
+let _persistPathOverride: string | null | undefined = undefined;
 
 /**
- * Get the process-wide pairing-token store. Starts empty; tickets are
- * created on demand by the user via the Settings UI.
+ * Get the process-wide pairing-token store. The first call materializes
+ * the singleton and rehydrates any previously claimed tickets from
+ * `data/acp-tickets.json` so server restarts do not invalidate already
+ * paired agentlets.
  */
 export function getTokenStore(): AcpTokenStore {
-  if (!_store) _store = new AcpTokenStore();
+  if (!_store) {
+    const path =
+      _persistPathOverride === undefined
+        ? defaultPersistPath()
+        : _persistPathOverride;
+    _store = new AcpTokenStore(path);
+  }
   return _store;
 }
 
@@ -306,4 +485,15 @@ export function getTokenStore(): AcpTokenStore {
 export function _resetTokenStoreForTests(): void {
   if (_store) _store.close();
   _store = null;
+}
+
+/**
+ * Test-only: control where claimed tickets are persisted. Pass `null`
+ * to disable persistence entirely, a path to redirect writes to a
+ * scratch location, or omit (`undefined`) to fall back to the default
+ * `data/acp-tickets.json`. The override takes effect on the next
+ * {@link getTokenStore} call after {@link _resetTokenStoreForTests}.
+ */
+export function _setPersistPathForTests(path: string | null): void {
+  _persistPathOverride = path;
 }
