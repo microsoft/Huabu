@@ -1,29 +1,25 @@
 /**
- * `useAcpAgents` — Fetch `GET /api/acp/agents` on demand and expose the
- * current connected-agents list.
+ * `useAcpAgents` — Subscribe to the connected-agents list with
+ * on-demand refresh.
  *
- * Fetched once at mount; subsequent updates are explicit. The
- * ChatPanel's `NewChatMenu` exposes a "Refresh agents" button that
- * calls `refresh()`. On-demand semantics keep request volume to the
- * bridge minimal — most of the time the agent list doesn't change.
+ * Thin wrapper around the singleton {@link useAcpAgentsStore}. All
+ * consumers share the same agents list, so any caller — including
+ * cross-component triggers like the Settings popover detecting a
+ * fresh pairing claim — can refresh once and be sure every subscriber
+ * sees the new data on the next render. See the store's module
+ * comment for the rationale behind the centralisation.
  *
- * Design notes:
- *  - Fires one fetch at mount so the *first* dropdown open has data
- *    without an extra spinner. After that, the consumer controls when
- *    to re-fetch via `refresh()`.
- *  - Errors are stored on `error` but do not throw — the UI silently
- *    hides instead of disrupting the chat.
- *  - `loaded` is `false` until the first fetch resolves successfully;
- *    consumers should treat the agents list as authoritative only
- *    after `loaded === true` to avoid acting on an empty list during
- *    the initial spinner window.
- *  - `loading` flips true while a refresh is in flight so the consumer
- *    can show a spinner on the refresh affordance.
+ * Behaviour from a consumer's perspective is unchanged:
+ *  - One initial fetch happens at mount so the dropdown has data the
+ *    first time it opens.
+ *  - Subsequent fetches are explicit via `refresh()`.
+ *  - Errors are stored on `error` but do not throw.
+ *  - `loaded` flips true only after the first successful fetch.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect } from 'react';
 
-import { listAcpAgents } from '@/api/acp';
+import { useAcpAgentsStore } from '@/store/acpAgentsStore';
 
 import type { AcpAgentSummary } from '@/api/acp';
 
@@ -48,46 +44,19 @@ export interface UseAcpAgentsResult {
   refresh: () => Promise<void>;
 }
 
-/**
- * Subscribe to the connected-agents list with on-demand refresh.
- *
- * One initial fetch happens at mount so the dropdown has data the first
- * time it opens. All subsequent fetches must be triggered by the
- * consumer calling `refresh()`.
- */
 export function useAcpAgents(): UseAcpAgentsResult {
-  const [agents, setAgents] = useState<AcpAgentSummary[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
-  const [loading, setLoading] = useState(false);
+  const agents = useAcpAgentsStore((s) => s.agents);
+  const loaded = useAcpAgentsStore((s) => s.loaded);
+  const error = useAcpAgentsStore((s) => s.error);
+  const loading = useAcpAgentsStore((s) => s.loading);
+  const init = useAcpAgentsStore((s) => s.init);
+  const refresh = useAcpAgentsStore((s) => s.refresh);
 
-  const cancelledRef = useRef(false);
-
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await listAcpAgents();
-      if (cancelledRef.current) return;
-      setAgents(res.agents);
-      setLoaded(true);
-      setError(null);
-    } catch (err) {
-      if (cancelledRef.current) return;
-      setError(err instanceof Error ? err : new Error(String(err)));
-      // Leave `agents` and `loaded` untouched so transient errors don't
-      // make the indicator flicker.
-    } finally {
-      if (!cancelledRef.current) setLoading(false);
-    }
-  }, []);
-
+  // Idempotent: the store dedupes across multiple consumers mounting
+  // in parallel, so only the first one actually fires a network call.
   useEffect(() => {
-    cancelledRef.current = false;
-    void refresh();
-    return () => {
-      cancelledRef.current = true;
-    };
-  }, [refresh]);
+    void init();
+  }, [init]);
 
   return { agents, loaded, error, loading, refresh };
 }
