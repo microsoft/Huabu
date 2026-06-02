@@ -4,6 +4,7 @@ import {
   ensureNonEmpty,
   markdownEquals,
   normalizeMarkdown,
+  normalizeMathDelimiters,
 } from '../markdownUtils';
 
 describe('normalizeMarkdown', () => {
@@ -93,5 +94,121 @@ describe('markdownEquals', () => {
 
   it('preserves the hard-break marker as significant', () => {
     expect(markdownEquals('a  \nb', 'a\nb')).toBe(false);
+  });
+});
+
+describe('normalizeMathDelimiters', () => {
+  it('returns empty string for empty input', () => {
+    expect(normalizeMathDelimiters('')).toBe('');
+  });
+
+  it('converts a standalone block math span to multi-line $$ form', () => {
+    const input = '\\[ x^2 + y^2 = z^2 \\]';
+    // The helper always emits the canonical paragraph-form block math
+    // (surrounding blank lines) so `remark-math` recognises it as
+    // display math regardless of context.
+    expect(normalizeMathDelimiters(input)).toBe(
+      '\n\n$$\nx^2 + y^2 = z^2\n$$\n\n',
+    );
+  });
+
+  it('converts a multi-line block math span and trims inner whitespace', () => {
+    const input = '\\[\nx^2 + y^2 = z^2\n\\]';
+    expect(normalizeMathDelimiters(input)).toBe(
+      '\n\n$$\nx^2 + y^2 = z^2\n$$\n\n',
+    );
+  });
+
+  it('converts a block math span embedded in paragraph text', () => {
+    const input = 'Pythagoras:\n\n\\[ a^2 + b^2 = c^2 \\]\n\nThat is it.';
+    expect(normalizeMathDelimiters(input)).toBe(
+      'Pythagoras:\n\n$$\na^2 + b^2 = c^2\n$$\n\nThat is it.',
+    );
+  });
+
+  it('converts inline math \\(…\\) to $…$', () => {
+    expect(normalizeMathDelimiters('Let \\( x = 1 \\) and go.')).toBe(
+      'Let $ x = 1 $ and go.',
+    );
+  });
+
+  it('converts multiple inline math spans on the same line', () => {
+    expect(
+      normalizeMathDelimiters('Pairs \\( a \\) and \\( b \\) differ.'),
+    ).toBe('Pairs $ a $ and $ b $ differ.');
+  });
+
+  it('converts mixed block and inline math in the same document', () => {
+    const input = 'Given \\( x = 1 \\), then\n\n\\[ x + 1 = 2 \\]\n';
+    expect(normalizeMathDelimiters(input)).toBe(
+      'Given $ x = 1 $, then\n\n$$\nx + 1 = 2\n$$\n\n',
+    );
+  });
+
+  it('leaves content inside fenced code blocks untouched', () => {
+    const input = '```\n\\[ x \\] and \\( y \\)\n```';
+    expect(normalizeMathDelimiters(input)).toBe(input);
+  });
+
+  it('leaves content inside tilde-fenced code blocks untouched', () => {
+    const input = '~~~\n\\[ x \\] and \\( y \\)\n~~~';
+    expect(normalizeMathDelimiters(input)).toBe(input);
+  });
+
+  it('still rewrites math outside the code fence', () => {
+    const input = '\\( x \\)\n\n```\n\\[ y \\]\n```\n\n\\[ z \\]';
+    expect(normalizeMathDelimiters(input)).toBe(
+      '$ x $\n\n```\n\\[ y \\]\n```\n\n$$\nz\n$$\n\n',
+    );
+  });
+
+  it('leaves content inside inline code spans untouched', () => {
+    const input = 'Use `\\[ x \\]` for display math, e.g. \\( y \\).';
+    expect(normalizeMathDelimiters(input)).toBe(
+      'Use `\\[ x \\]` for display math, e.g. $ y $.',
+    );
+  });
+
+  it('does not rewrite an unpaired opening delimiter (streaming chunk)', () => {
+    expect(normalizeMathDelimiters('partial \\[ x + y')).toBe(
+      'partial \\[ x + y',
+    );
+    expect(normalizeMathDelimiters('inline \\( half')).toBe('inline \\( half');
+  });
+
+  it('completes the rewrite once the closing delimiter arrives', () => {
+    const partial = 'partial \\[ x + y';
+    const complete = partial + ' \\]';
+    // Mid-paragraph block math is uncommon in AI output, but when it
+    // happens we still emit block form. The injected paragraph break
+    // splits the text into a `partial` paragraph and a block math
+    // paragraph, which is the correct rendering for `remark-math`.
+    expect(normalizeMathDelimiters(complete)).toBe(
+      'partial \n\n$$\nx + y\n$$\n\n',
+    );
+  });
+
+  it('does not let \\( … \\) swallow paragraphs across newlines', () => {
+    const input = 'open \\( and then\n\nanother paragraph \\) close';
+    // The opener and closer are on different lines, so nothing matches.
+    expect(normalizeMathDelimiters(input)).toBe(input);
+  });
+
+  it('keeps two adjacent block formulas separate', () => {
+    const input = '\\[ a \\]\n\n\\[ b \\]';
+    expect(normalizeMathDelimiters(input)).toBe(
+      '\n\n$$\na\n$$\n\n$$\nb\n$$\n\n',
+    );
+  });
+
+  it('is a no-op on already-canonical $$ / $ markdown', () => {
+    const input = 'See $x = 1$ and\n\n$$\nx^2\n$$\n';
+    expect(normalizeMathDelimiters(input)).toBe(input);
+  });
+
+  it('is idempotent', () => {
+    const input = 'Given \\( x \\), \\[ x^2 \\].';
+    const once = normalizeMathDelimiters(input);
+    expect(normalizeMathDelimiters(once)).toBe(once);
   });
 });

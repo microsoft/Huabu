@@ -27,6 +27,8 @@ import { $prose, replaceAll } from '@milkdown/utils';
 
 import { fingerprintBlocks, type BlockSnapshot } from '@/utils/blockProvenance';
 
+import { normalizeMathDelimiters } from './markdownUtils';
+
 import type { Ctx } from '@milkdown/ctx';
 import type {
   Node as ProseNode,
@@ -715,9 +717,16 @@ export async function createMilkdown(
     previewMode = false,
   } = options;
 
+  // Normalize LaTeX-style math delimiters (`\[…\]`, `\(…\)`)
+  // emitted by AI assistants into the `$$…$$` / `$…$` form that
+  // `remark-math` understands. See `normalizeMathDelimiters` for the
+  // safeguards (code blocks / inline code are skipped, unpaired
+  // delimiters are left alone). Applied at every markdown-in boundary
+  // so both initial mount and subsequent `setMarkdown` reconciles get
+  // the same treatment.
   const crepe = new Crepe({
     root,
-    defaultValue: initialMarkdown,
+    defaultValue: normalizeMathDelimiters(initialMarkdown),
     features: {
       [Crepe.Feature.ImageBlock]: false,
       [Crepe.Feature.AI]: false,
@@ -921,7 +930,7 @@ export async function createMilkdown(
   return {
     getMarkdown: () => crepe.getMarkdown(),
     setMarkdown: (markdown: string) => {
-      crepe.editor.action(replaceAll(markdown));
+      crepe.editor.action(replaceAll(normalizeMathDelimiters(markdown)));
     },
     setReadonly: (readonly: boolean) => {
       crepe.setReadonly(readonly);

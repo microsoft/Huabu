@@ -19,6 +19,7 @@ export {
   ensureNonEmpty,
   markdownEquals,
   normalizeMarkdown,
+  normalizeMathDelimiters,
 } from './markdownUtils';
 
 export type { MilkdownBlockDragEvent, MilkdownDecorationSpec } from './types';
