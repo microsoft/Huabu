@@ -150,6 +150,11 @@ describe('normalizeMathDelimiters', () => {
     expect(normalizeMathDelimiters(input)).toBe(input);
   });
 
+  it('does not mutate fenced code blocks even with multiple blank lines', () => {
+    const input = '```\nline 1\n\n\nline 2\n```';
+    expect(normalizeMathDelimiters(input)).toBe(input);
+  });
+
   it('leaves content inside tilde-fenced code blocks untouched', () => {
     const input = '~~~\n\\[ x \\] and \\( y \\)\n~~~';
     expect(normalizeMathDelimiters(input)).toBe(input);
