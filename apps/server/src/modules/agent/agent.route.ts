@@ -707,6 +707,28 @@ function buildHistoryItems(
         content = content.replace(/\n?\[SYSTEM attachments:\[.*\]\]/, '');
       }
 
+      // Extract embedded invokedSkills metadata so the UI can
+      // re-render the `/<id>` chips on the user bubble after a
+      // refresh. Same shape as the other SYSTEM tags above.
+      let invokedSkills: string[] | undefined;
+      const skillsMatch = content.match(
+        /\n?\[SYSTEM invokedSkills:(\[.*?\])\]/,
+      );
+      if (skillsMatch) {
+        try {
+          const parsedSkills: unknown = JSON.parse(skillsMatch[1]);
+          if (
+            Array.isArray(parsedSkills) &&
+            parsedSkills.every((s) => typeof s === 'string')
+          ) {
+            invokedSkills = parsedSkills as string[];
+          }
+        } catch {
+          /* ignore */
+        }
+        content = content.replace(/\n?\[SYSTEM invokedSkills:\[.*?\]\]/, '');
+      }
+
       // Also recover image attachments from multipart content blocks
       if (!attachments && Array.isArray(msg.content)) {
         const imageBlocks = msg.content.filter(
@@ -730,6 +752,7 @@ function buildHistoryItems(
           ...(attachments && attachments.length > 0 && { attachments }),
           ...(selectedNodeIds &&
             selectedNodeIds.length > 0 && { selectedNodeIds }),
+          ...(invokedSkills && invokedSkills.length > 0 && { invokedSkills }),
         });
       }
     } else if (msg.role === 'assistant') {
@@ -1265,6 +1288,16 @@ const agentRoutes: FastifyPluginAsync = async (
     if (selectedNodeIds.length > 0) {
       metadataTags.push(
         `[SYSTEM selectedNodeIds:${JSON.stringify(selectedNodeIds)}]`,
+      );
+    }
+    // Persist user-invoked skill ids on the user message so chat
+    // history can re-render the `/skill` chips on refresh. The agent
+    // already received the skill bodies via the SYSTEM preamble above
+    // — this tag is purely a UI breadcrumb and is stripped from the
+    // visible bubble text on the way back out.
+    if (invokedSkills && invokedSkills.length > 0) {
+      metadataTags.push(
+        `[SYSTEM invokedSkills:${JSON.stringify(invokedSkills)}]`,
       );
     }
     if (allAttachments && allAttachments.length > 0) {

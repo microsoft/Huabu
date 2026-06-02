@@ -1,14 +1,14 @@
 import { createId } from '@sediment/shared';
 import { useEffect } from 'react';
 
-import { agentApi } from '@/api/agent';
-import useCanvasStore from '@/store/canvasStore';
-import { useChatStore } from '@/store/chatStore';
-
 import { handleStreamEvent } from './useAgentStream';
 
 import type { ChatMessage } from '../store/chatTypes';
 import type { AgentStreamEvent } from '@sediment/shared';
+
+import { agentApi } from '@/api/agent';
+import useCanvasStore from '@/store/canvasStore';
+import { useChatStore } from '@/store/chatStore';
 
 /**
  * Hook that loads chat history from the server and handles reconnection
@@ -135,12 +135,17 @@ export function useChatHistory(
               m.selectedNodeIds && m.selectedNodeIds.length > 0
                 ? { selectedNodeIds: m.selectedNodeIds }
                 : {};
+            const invokedSkillsField =
+              m.invokedSkills && m.invokedSkills.length > 0
+                ? { invokedSkills: m.invokedSkills }
+                : {};
             return {
               id,
               role: 'user' as const,
               content: m.content || '',
               ...attachmentsField,
               ...selectedNodesField,
+              ...invokedSkillsField,
             };
           },
         );

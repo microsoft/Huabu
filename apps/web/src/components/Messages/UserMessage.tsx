@@ -6,22 +6,42 @@ interface UserMessageProps {
   content: string;
   attachments?: ChatAttachment[];
   selectedNodeIds?: string[];
+  /**
+   * Skill ids the user explicitly invoked via leading `/<id>` tokens.
+   * The tokens are stripped from `content` at submit time (see
+   * `parseSlashInvocations`) so the message body stays clean for the
+   * agent; we re-render them here as chips so the invocation remains
+   * visible in the chat history.
+   */
+  invokedSkills?: string[];
 }
 
 export const UserMessage = ({
   content,
   attachments,
   selectedNodeIds,
+  invokedSkills,
 }: UserMessageProps) => {
   const hasRefs =
     (attachments && attachments.length > 0) ||
     (selectedNodeIds && selectedNodeIds.length > 0);
+  const hasSkills = !!invokedSkills && invokedSkills.length > 0;
 
   return (
     <div className="my-3 flex flex-col items-end">
       <div className="mt-2 flex max-w-[80%] flex-col items-end gap-1">
         <div className="bg-bg-default text-fg-default overflow-hidden rounded-md border border-none px-4 py-2 text-sm">
           <div className="leading-relaxed break-all whitespace-pre-wrap">
+            {hasSkills &&
+              invokedSkills.map((id) => (
+                <span
+                  key={id}
+                  className="text-ai mr-1 font-mono"
+                  title={`Invoked skill: ${id}`}
+                >
+                  /{id}
+                </span>
+              ))}
             {content}
           </div>
         </div>

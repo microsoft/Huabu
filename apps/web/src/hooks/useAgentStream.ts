@@ -1027,6 +1027,9 @@ export function useAgentStream(): UseAgentStreamReturn {
           content: prompt,
           attachments,
           ...(selectedNodeIds.length > 0 ? { selectedNodeIds } : {}),
+          ...(invokedSkills && invokedSkills.length > 0
+            ? { invokedSkills }
+            : {}),
         });
       }
 

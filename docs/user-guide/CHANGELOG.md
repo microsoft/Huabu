@@ -67,6 +67,23 @@
 
 ---
 
+## 2026-06-02 · 聊天气泡显示 `/skill` 调用
+
+**What Changed**
+
+- 用 `/<skill-id>` 调用 skill 后，聊天气泡顶部会用一个 AI 主题色（紫色字 + 浅紫底）的小 chip 把被调用的 skill id 显示出来，例如发送 `/canvas-memory 帮我整理` 时，气泡里会先出现 `/canvas-memory` 的 chip，下面再是消息正文 `帮我整理`。
+- 多个 skill 会一行平铺显示，按用户输入顺序去重，与 server 实际注入的列表一致。
+- 刷新页面后从历史里恢复出来的用户消息同样会显示这些 chip。
+
+**Notes**
+
+- 实现上：parser 仍然会从消息正文里把 `/<id>` 前缀剥掉（避免它在 LLM context 里被当成自然语言），但 chat store 的 user message 上新增 `invokedSkills?: string[]` 字段，由 `UserMessage` 渲染成 chip。
+- 历史持久化：server 端在用户消息正文末尾追加 `[SYSTEM invokedSkills:[...]]` 元数据 tag（与 `selectedNodeIds` / `attachments` 同套机制），history endpoint 读出时再剥掉并填回 `invokedSkills`。ACP preprocessor 也会同步剥掉该 tag，避免泄漏给外部 agent。
+
+---
+
+---
+
 ## 2026-06-01 · 内置 `/create-skill` 与 `/update-skill` 两个 slash skill
 
 **What Changed**

@@ -59,6 +59,14 @@ export type ChatMessage =
       attachments?: ChatAttachment[];
       /** IDs of canvas nodes selected when this message was sent. */
       selectedNodeIds?: string[];
+      /**
+       * Skill ids the user explicitly invoked via leading `/<id>`
+       * tokens in the chat input. The tokens themselves are stripped
+       * from `content` by `parseSlashInvocations` before send — this
+       * field lets the bubble re-render them as styled chips so the
+       * invocation stays visible in the conversation history.
+       */
+      invokedSkills?: string[];
     }
   | {
       id: string;
