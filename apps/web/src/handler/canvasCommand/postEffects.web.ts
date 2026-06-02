@@ -22,16 +22,17 @@
  */
 
 import {
+  applyStructuredFrameRelayout,
   fitFrames,
   type NestableNode,
   type PendingEffects,
 } from '@sediment/shared/canvas-engine';
 
-import { canvasHistoryManager } from '@/store/canvasHistoryManager';
-import { markAiContentEdit } from '@/utils/aiEditFlags';
-
 import type { CanvasExecutionSource } from '@sediment/shared';
 import type { Node } from '@xyflow/react';
+
+import { canvasHistoryManager } from '@/store/canvasHistoryManager';
+import { markAiContentEdit } from '@/utils/aiEditFlags';
 
 /**
  * Source of the executed batch. Re-exports `CanvasExecutionSource`
@@ -100,8 +101,11 @@ export function runWebPostEffects(input: RunWebPostEffectsInput): void {
   // via double-rAF so the inline editor can reflow and ReactFlow's
   // ResizeObserver can update `measured.height` first.
   if (effects.deferredFitFrameIds.length > 0) {
-    const uniqueIds = Array.from(new Set(effects.deferredFitFrameIds));
-    scheduleDeferredFrameFit(uniqueIds, getNodes, setNodes);
+    scheduleDeferredFrameRelayout(
+      effects.deferredFitFrameIds,
+      getNodes,
+      setNodes,
+    );
   }
 }
 
@@ -110,25 +114,65 @@ export function runWebPostEffects(input: RunWebPostEffectsInput): void {
 // are intentionally not exported. If a future consumer needs them
 // elsewhere, lift them to a separate module and add direct tests.
 
+// Module-level coalescing state. Multiple callers in the same tick
+// (e.g. a stream of ResizeObserver fires from `onNodesChange` plus a
+// `SET_NODE_GEOMETRY` height-clear post-effect) collapse into a
+// single double-rAF pass — without this, each call would queue its
+// own double-rAF and we'd run the relayout N times for one logical
+// content reflow.
+const pendingRelayoutFrameIds = new Set<string>();
+let pendingRelayoutScheduled = false;
+
 /**
- * Refit one or more frames to their current children after the next
- * render cycle. Two `requestAnimationFrame` hops give the DOM time to
- * reflow (e.g. the inline editor re-laying out a note whose pinned
- * height was just cleared) and ReactFlow's ResizeObserver time to
- * write the new measurement into `node.measured` before we read it
- * back. Safe to call with frame IDs that no longer exist — `fitFrames`
- * silently skips them.
+ * Run a structured (`column` / `row`) relayout *and* a bounding-box
+ * `fitFrames` pass on the given frame IDs after the next render
+ * cycle.
+ *
+ * Two `requestAnimationFrame` hops give the DOM time to reflow (e.g.
+ * an inline editor re-laying out a note whose pinned height was just
+ * cleared, or a freshly-mounted note settling on its content height)
+ * and ReactFlow's ResizeObserver time to write the new measurement
+ * into `node.measured` before we read it back. Multiple calls within
+ * the same tick are coalesced into a single pass.
+ *
+ * Use this whenever a child's size has changed via something other
+ * than the standard `SET_NODE_GEOMETRY` pipeline:
+ *   - an explicit height clear (`measured.height` left stale on
+ *     purpose because the new content height is unknown until reflow)
+ *   - a content-driven measured-size change picked up by ReactFlow's
+ *     internal `dimensions` change event
+ *
+ * Safe to call with frame IDs that no longer exist or no longer have
+ * a structured layout — both passes silently skip them.
  */
-function scheduleDeferredFrameFit(
-  frameIds: string[],
+export function scheduleDeferredFrameRelayout(
+  frameIds: Iterable<string>,
   getNodes: () => Node[],
   setNodes: (nodes: Node[]) => void,
 ): void {
-  if (frameIds.length === 0) return;
+  let added = false;
+  for (const id of frameIds) {
+    if (!pendingRelayoutFrameIds.has(id)) {
+      pendingRelayoutFrameIds.add(id);
+      added = true;
+    }
+  }
+  if (!added) return;
+  if (pendingRelayoutScheduled) return;
+  pendingRelayoutScheduled = true;
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
+      pendingRelayoutScheduled = false;
+      if (pendingRelayoutFrameIds.size === 0) return;
+      const ids = Array.from(pendingRelayoutFrameIds);
+      pendingRelayoutFrameIds.clear();
       const current = getNodes();
-      const next = fitFrames(current as NestableNode[], frameIds);
+      // Structured pass first — it repositions children into tracks
+      // and sets the frame's content-driven size. `fitFrames` then
+      // cascades to ancestor frames so outer wrappers stay sized
+      // correctly.
+      const structured = applyStructuredFrameRelayout(current, ids);
+      const next = fitFrames(structured.nodes as NestableNode[], ids);
       if (next !== current) setNodes(next);
     });
   });

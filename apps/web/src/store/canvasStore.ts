@@ -27,24 +27,6 @@ import {
 } from '@xyflow/react';
 import { create, type StateCreator } from 'zustand';
 
-import { runWebPostEffects } from '@/handler/canvasCommand/postEffects.web';
-import {
-  resolveUiIntent,
-  type AddNodeInput,
-  type CanvasUiIntent,
-  type UiResolverState,
-} from '@/handler/canvasCommand/uiIntent';
-import {
-  applySnap,
-  beginSnapSession,
-  endSnapSession,
-  getResizeContext,
-  getResizeSnappedRect,
-  isSnapSessionActive,
-  isSnapSessionDragEndCommit,
-  isSnapSessionResizeEndCommit,
-} from '@/handler/snap/snapSession';
-
 import { canvasHistoryManager } from './canvasHistoryManager';
 import { createIntentActionWindow } from './canvasStore/intentActionWindow';
 import { createCanvasEventBuffer } from './canvasStore/save/eventBuffer';
@@ -79,6 +61,27 @@ import type {
   WireCanvasNode,
   WireSelectionNode,
 } from '@sediment/shared';
+
+import {
+  runWebPostEffects,
+  scheduleDeferredFrameRelayout,
+} from '@/handler/canvasCommand/postEffects.web';
+import {
+  resolveUiIntent,
+  type AddNodeInput,
+  type CanvasUiIntent,
+  type UiResolverState,
+} from '@/handler/canvasCommand/uiIntent';
+import {
+  applySnap,
+  beginSnapSession,
+  endSnapSession,
+  getResizeContext,
+  getResizeSnappedRect,
+  isSnapSessionActive,
+  isSnapSessionDragEndCommit,
+  isSnapSessionResizeEndCommit,
+} from '@/handler/snap/snapSession';
 
 const AUTOSAVE_DEBOUNCE_MS = 1000;
 const PREPROCESS_DEBOUNCE_MS = 1000;
@@ -1648,20 +1651,50 @@ const useCanvasStore = create<RFState>()(
       // detector (and resetting the autosave debounce) on every frame.
       get()._setStateNoAutosave({ nodes: nextNodes });
 
-      // Drag-end detection: if this batch contained the final
-      // `dragging:false` commit for any node the snap session is
-      // tracking, the gesture is done — end it *here* (not in
-      // `onNodeDragStop`). Doing the cleanup at the consumption site
-      // means correctness no longer depends on whether React Flow
-      // fires `onNodeDragStop` before or after this final change:
-      // the snap above already ran with a valid index, and the
-      // redundant `endSnapSession` in `onNodeDragStop` is just an
-      // idempotent safety net.
+      // ── Structured frame relayout on measured-size changes ─────────
+
+      if (!resizeCtx && !isSnapSessionActive()) {
+        let framesToRelayout: Set<string> | undefined;
+        for (const c of sanitized) {
+          if (c.type !== 'dimensions') continue;
+          if (c.resizing) continue; // live tick of a resize session
+          const child = nextNodes.find((n) => n.id === c.id);
+          if (!child?.parentId) continue;
+          const parent = nextNodes.find((n) => n.id === child.parentId);
+          if (!parent || parent.type !== 'frame') continue;
+          const mode = (parent.data as { layoutMode?: string } | undefined)
+            ?.layoutMode;
+          if (mode !== 'column' && mode !== 'row') continue;
+          // Skip when measured matches the explicitly-pinned size —
+          // the RO is just confirming the size we already committed
+          // (typical echo right after a `SET_NODE_GEOMETRY` commit)
+          // and no structural change is needed.
+          const dim = c.dimensions;
+          const styleW = (child.style as { width?: number } | undefined)?.width;
+          const styleH = (child.style as { height?: number } | undefined)
+            ?.height;
+          if (
+            dim &&
+            typeof styleW === 'number' &&
+            typeof styleH === 'number' &&
+            Math.abs(dim.width - styleW) <= 1 &&
+            Math.abs(dim.height - styleH) <= 1
+          ) {
+            continue;
+          }
+          if (!framesToRelayout) framesToRelayout = new Set();
+          framesToRelayout.add(parent.id);
+        }
+        if (framesToRelayout && framesToRelayout.size > 0) {
+          scheduleDeferredFrameRelayout(
+            framesToRelayout,
+            () => get().nodes,
+            (nodes) => set({ nodes }),
+          );
+        }
+      }
+
       if (isSnapSessionDragEndCommit(sanitized)) endSnapSession();
-      // Same pattern for resize-end (`resizing:false` dimension
-      // change for the tracked node). `NodeWrapper.handleResizeEnd`
-      // calls `endSnapSession` defensively as well; the second call
-      // here is a no-op since the function is idempotent.
       if (isSnapSessionResizeEndCommit(sanitized)) endSnapSession();
     },
 
