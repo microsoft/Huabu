@@ -59,8 +59,6 @@ import { SettingSection } from '@/components/Common/SettingSection';
 import { toast } from '@/components/Common/Toast';
 import { useAcpAgentsStore } from '@/store/acpAgentsStore';
 import { useAcpPairingStore } from '@/store/acpPairingStore';
-import useCanvasStore from '@/store/canvasStore';
-import { useChatStore } from '@/store/chatStore';
 import { copyToClipboard } from '@/utils/io/clipboard';
 
 import type { AcpAgentCliInfo, AcpPairingTicket } from '@sediment/shared';
@@ -550,49 +548,48 @@ function useActivePairingTicket(
 }
 
 /**
- * Auto-binds the chat panel to a freshly paired external agent. When
- * the user's own session ticket flips from pending → claimed, we set
- * the chat panel's `agentBinding` to that agent (scoped to the
- * current canvas) so the next message goes through it without an
- * extra trip to the New-Chat menu. We refresh the shared connected-
- * agents list BEFORE the binding flip so ChatPanel's stale-binding
- * auto-reset effect sees the new agent on the same render as the new
- * binding (otherwise it would immediately revert to internal). The
- * `autoBoundRef` guard ensures each ticket fires at most one bind
- * even if React re-runs the effect (strict mode dev, dep churn) or
- * the polling refresh delivers the claimed status across multiple
- * renders.
+ * Refresh the shared connected-agents list once the user's pairing
+ * ticket flips from pending → claimed. This is the **only** side
+ * effect of a successful pairing today: the freshly connected agent
+ * shows up in the NewChatMenu's "Connected Agents" picker on the
+ * next render, and the user decides if/when to start a chat with it.
+ *
+ * We intentionally do **not** touch the current thread's
+ * `agentBinding` here. Pairing is an inventory operation ("register
+ * this agent as available"), not a conversation operation. Mutating
+ * the active thread's binding behind the user's back would either:
+ *   - silently route subsequent prompts in a thread whose history
+ *     belongs to agent A to the freshly paired agent B (mixing two
+ *     agents' memories in a single conversation — the bug that
+ *     surfaced when killing + re-pairing copilot mid-chat), or
+ *   - clobber the user's in-progress thread with an empty fork they
+ *     didn't ask for.
+ *
+ * Both fail the "1 thread = 1 binding" invariant from a UX angle:
+ * the only sanctioned way to start talking to a new agent is via
+ * NewChatMenu (which forks a fresh thread atomically).
+ *
+ * The `autoBoundRef` guard still de-dupes per-ticket so the refresh
+ * fires at most once per claim even under strict-mode dev or
+ * polling-induced re-runs of the effect.
  */
-function useAutoBindClaimedAgent(
+function useRefreshAgentsOnClaim(
   activeTicket: AcpPairingTicket | null,
   sessionTicketId: string | null,
 ): void {
-  const autoBoundRef = useRef<string | null>(null);
+  const refreshedRef = useRef<string | null>(null);
   useEffect(() => {
     if (
       activeTicket === null ||
       activeTicket.id !== sessionTicketId ||
       activeTicket.status !== 'claimed' ||
       !activeTicket.claimedAgentId ||
-      autoBoundRef.current === activeTicket.id
+      refreshedRef.current === activeTicket.id
     ) {
       return;
     }
-    autoBoundRef.current = activeTicket.id;
-    const claimedAgentId = activeTicket.claimedAgentId;
-    const claimedAlias = activeTicket.claimedAlias ?? claimedAgentId;
-    void (async () => {
-      await useAcpAgentsStore.getState().refresh();
-      const canvasId = useCanvasStore.getState().canvasId;
-      useChatStore.getState().setAgentBinding(
-        {
-          kind: 'external',
-          alias: claimedAlias,
-          agentletAgentId: claimedAgentId,
-        },
-        canvasId || undefined,
-      );
-    })();
+    refreshedRef.current = activeTicket.id;
+    void useAcpAgentsStore.getState().refresh();
   }, [activeTicket, sessionTicketId]);
 }
 
@@ -634,7 +631,7 @@ export const AcpSettings: React.FC = () => {
   const { activeTicket, launchForActive, activeTicketFromConnect } =
     useActivePairingTicket(sessionTicketId, lastLaunch);
 
-  useAutoBindClaimedAgent(activeTicket, sessionTicketId);
+  useRefreshAgentsOnClaim(activeTicket, sessionTicketId);
 
   // Only tick the countdown clock while there's a pending ticket on
   // screen — otherwise an open Settings popover would spin a 250ms
