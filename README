@@ -69,39 +69,6 @@ details.
 
 ---
 
-## Repository Layout
-
-This is a pnpm workspace.
-
-```
-apps/
-  web/      React + Vite canvas client
-  server/   Fastify backend: agent, canvas, storage, preprocessing, artifact
-  data/     Local working data (sqlite, vault, artifacts)
-packages/
-  shared/   Shared types and utilities
-docs/       Design notes and user guide
-```
-
-Key backend modules ([apps/server/src/modules](apps/server/src/modules)):
-
-- `agent/` — the AI agent runtime that reads and writes the canvas
-- `canvas/` — canvas state, commands, and persistence
-- `storage/` — per-canvas node content storage
-- `preprocessing/` — ingestion pipeline (e.g. PDF → structured content)
-- `artifact/` — generated artifacts produced by the agent
-- `web/` — web fetching utilities used by node ingestion
-
-Key frontend areas ([apps/web/src](apps/web/src)):
-
-- `components/Nodes/` — node implementations
-- `components/Panels/` — side panels including the AI chat
-- `handler/canvasCommand/` — canvas mutation commands shared with the agent
-- `handler/autoLayout/` — semantic auto-layout
-- `hooks/useAgentStream.ts` — streaming agent protocol on the client
-
----
-
 ## Getting Started
 
 Requirements: Node.js 20+ and pnpm 10+.
@@ -111,25 +78,29 @@ pnpm install
 pnpm dev
 ```
 
-This starts the server, the web client, and the shared package in watch mode.
-You can also start them individually:
+This starts the server, the web client, and the shared package in watch
+mode. Open the URL it prints (default <http://localhost:5173>) in your
+browser.
 
-```bash
-pnpm dev:server
-pnpm dev:web
-pnpm dev:shared
-```
+---
 
-Other useful scripts:
+## Configuring an LLM
 
-```bash
-pnpm typecheck   # type-check every workspace package
-pnpm lint        # lint everything
-pnpm lint:fix    # lint and auto-fix
-pnpm format      # prettier write
-```
+Sediment needs an LLM to drive chat, intent suggestions, and other
+in-canvas AI features. Open the Setting Button → **LLM Provider**.
 
-For environment setup details, see [docs/setup.md](./docs/setup.md).
+1. Pick a **Provider** (OpenAI, Anthropic, Google Gemini, OpenRouter,
+   GitHub Copilot, and more).
+2. Pick a **Model**. If the provider doesn't expose a model list,
+   type one in (e.g. `gpt-4o`) and click **Save**.
+3. Authenticate:
+   - **API key** providers — click **Set key**, paste, save.
+   - **GitHub Copilot** (OAuth) — click **Login**, then enter the shown user code at the opened GitHub page.
+
+The config is persisted on the server side, so you only need to do this once per machine.
+
+> Coding agents you connect through **External Agents** (below) bring
+> their own auth and don't use this provider setting.
 
 ---
 
@@ -137,111 +108,53 @@ For environment setup details, see [docs/setup.md](./docs/setup.md).
 
 Sediment can talk to AI coding agents that already run on your machine —
 **GitHub Copilot CLI**, **Claude Code**, **Gemini CLI**, and others that
-speak the [Agent Client Protocol](https://agentclientprotocol.com). Once
-connected, the agent shows up inside Sediment and can read and modify
-files in whatever project folder you pointed it at.
+speak the [Agent Client Protocol](https://agentclientprotocol.com).
+Once connected, the agent shows up inside Sediment and can read and
+modify files in whatever project folder you pointed it at.
 
-### One-time setup
+### Quick start
 
-1. With `pnpm dev` running, open Sediment in your browser, click the
-   **gear icon** (top-right), and open the **External Agents** section.
-   Click **Generate code** — Sediment will show you a short pairing
-   code (e.g. `XXXX-XXXX`) that is valid for 60 seconds. Copy it; you
-   will paste it into the agentlet command in the next step.
+`pnpm install` already added `bin/agentlet` to your user PATH and the
+server probes which agent CLIs are installed on your machine.
 
-   > Pairing codes are **ephemeral**. The first `bin/agentlet` that
-   > successfully hellos with the code claims it for that agent — after
-   > that the code stays valid for reconnects (wifi blips, dev hot-
-   > reloads) but cannot be used to attach a different agent. If the
-   > agentlet stays disconnected longer than ~5 minutes (the wrapper's
-   > default reconnect-backoff cap) the ticket is dropped too, so a
-   > leaked code can't be re-used hours later by someone who learns
-   > the agentId. Clicking the ✕ next to the code in the UI revokes it
-   > immediately; the server holds no persisted token on disk. Setting
-   > `ENABLE_ACP` / `ACP_DEV_TOKEN` in `.env` has no effect.
-
-2. _Optional._ Make the `agentlet` command available from any folder.
-   Run the snippet that matches your shell from the project root:
+1. Install one (or more) of the agents you want to use:
 
    ```bash
-   # bash
-   echo 'export PATH="'"$PWD"'/bin:$PATH"' >> ~/.bashrc && exec bash
+   npm install -g @github/copilot          # GitHub Copilot CLI
+   npm install -g @anthropic-ai/claude-code # Claude Code
+   npm install -g @google/gemini-cli        # Gemini CLI
    ```
 
-   ```bash
-   # zsh (macOS default)
-   echo 'export PATH="'"$PWD"'/bin:$PATH"' >> ~/.zshrc && exec zsh
-   ```
+2. Click the Setting Button → **External Agents**. Each installed CLI appears as a card.
 
-   ```fish
-   # fish
-   fish_add_path "$PWD/bin"
-   ```
+3. Click **Connect** on the one you want. Sediment generates a 60s pairing code, builds the full `agentlet …` launch command, and copies it to your clipboard.
 
-   ```powershell
-   # PowerShell (Windows) — persists for the current user
-   [Environment]::SetEnvironmentVariable(
-     'Path',
-     "$((Get-Location).Path)\bin;$([Environment]::GetEnvironmentVariable('Path','User'))",
-     'User')
-   ```
+4. Open a new terminal, `cd` into your project folder, paste, and hit Enter. The agent appears in the chat panel and is ready to use.
 
-   If you skip this, just use the full path everywhere
-   (e.g. `~/Sediment/bin/agentlet …` or `.\bin\agentlet …` on Windows).
+> **Windows:** paste into **Git Bash** or **WSL**. The `agentlet`
+> wrapper is a POSIX shell script; cmd.exe / PowerShell can't run it
+> directly.
 
-### Connecting an agent
+### Advanced
 
-With `pnpm dev` running, open another terminal, `cd` into the project
-folder you want the agent to work on, generate a fresh pairing code in
-the Settings UI, and start the agent of your choice (replace
-`XXXX-XXXX` with the code Sediment just gave you):
+- **Pair manually** — In **External Agents**, click **Pair manually
+  (advanced)** for a bare 60s code. Use this for custom binary paths,
+  remote shells, or non-default agent flags. Then run agentlet
+  yourself:
 
-```bash
-# GitHub Copilot CLI
-agentlet --token XXXX-XXXX --agent "copilot --acp"
+  ```bash
+  agentlet --token XXXX-XXXX --agent "<cli> --acp [flags]"
+  ```
 
-# Claude Code
-agentlet --token XXXX-XXXX --agent "claude --acp"
-
-# Gemini CLI
-agentlet --token XXXX-XXXX --agent "gemini --acp"
-```
-
-> You can also `export AGENTLET_TOKEN=XXXX-XXXX` before launching and
-> drop the `--token` flag. The wrapper will refuse to start without
-> one or the other.
-
-That's it — the agent will show up in Sediment's external-agent panel and
-you can hand it tasks from any canvas. Reconnect / re-launch attempts
-from the **same** agentlet keep working with the same code; spinning
-up a second agent requires a fresh code.
-
-### Tool-permission prompts
-
-Some agents pause to ask for permission before running a tool that edits
-files, executes commands, etc. When they do, the request surfaces **inline
-in the chat** as a permission card, and the agent waits until you click
-**Allow** or **Reject** (a request times out and is treated as cancelled
-after 5 minutes).
-
-Whether you ever see these prompts is up to the agent, not Sediment:
-
-- `copilot --acp --allow-all` — the `--allow-all` flag tells Copilot to
-  **auto-approve everything on its side**, so it never sends a permission
-  request and no card appears. Drop `--allow-all` if you want to approve
-  each sensitive action yourself.
-- `claude --acp` / `gemini --acp` — these keep their own default policy and
-  will ask before risky operations (typically `edit` / `execute`).
-
-> Permission decisions are transient — they are not persisted and do not
-> appear in canvas history after a refresh.
-
-### Updating the bundled `agentlet`
-
-`external/agentlet/` is a snapshot of
-[`hai-team/agentlet`](https://github.com/hai-team/agentlet). Maintainers
-sync it with `pnpm run subtree:pull:agentlet` (pull upstream changes) or
-`pnpm run subtree:push:agentlet` (publish local changes back).
+- **Tool-permission prompts** — Most agents ask before running
+  edit / execute tools; an **Allow / Reject** card appears inline in
+  chat (5-min timeout). Copilot exposes a one-flag bypass
+  (`--allow-all`, on by default in the Connect button) — uncheck it
+  before clicking **Connect** to approve every tool call yourself.
+- **Pairing-code safety** — Codes are ephemeral, never persisted to
+  disk. Reconnects from the same agentlet keep working until it's
+  been disconnected longer than ~5 minutes; spinning up a different
+  agent always requires a fresh code.
 
 ---
 

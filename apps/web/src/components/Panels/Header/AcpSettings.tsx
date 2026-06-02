@@ -1,35 +1,30 @@
 /**
  * ACP (external agent bridge) pairing section in the Settings popover.
  *
- * Surfaces two complementary entry points:
+ * The section presents a single mental model:
+ *
+ *   "Pick an agent → get a launch command."
+ *
+ * Two sources feed that flow inside one card:
  *
  *  1. **Detected agents** — the server probes the host for installed
- *     ACP-capable CLIs (Copilot / Claude / Gemini). For each one we
- *     render a small card with name + version, an optional
- *     `--allow-all` toggle (only shown when the CLI exposes one), and
- *     a single "Connect" button that mints a fresh pairing code AND
- *     builds the exact `agentlet --token … --agent "…"` command,
- *     copying it to the clipboard so the user just pastes it in a
- *     terminal. This is the zero-friction first-time path.
+ *     ACP-capable CLIs (Copilot / Claude / Gemini). Each is rendered
+ *     as a row with name + version, an optional `--allow-all` toggle
+ *     (only shown when the CLI exposes one), and a **Connect** button
+ *     that mints a fresh pairing code AND builds the exact
+ *     `agentlet --token … --agent "…"` command, copying it to the
+ *     clipboard so the user just pastes it in a terminal.
  *
- *  2. **Manual pairing** — the original "Generate code" button is
- *     kept as a fallback for power users who want to launch agentlet
- *     themselves (custom args, custom binary, remote shell, etc.).
+ *  2. **Pair manually** — a compact fallback row with a **Generate
+ *     code** button for users who want to launch agentlet themselves
+ *     (custom args, custom binary, remote shell, etc.).
  *
- * The actual code is only displayed while a ticket is still in its
- * pending 60-second window. Once claimed (or expired), the code is
- * hidden and only the claimed agent's identity remains visible — so
- * the secret is on screen for as little time as possible
- * (screen-share / shoulder-surf friendly).
- *
- * The store polls `GET /api/acp/pair` once a second while any
- * pending ticket is visible so the countdown stays accurate and the
- * pending → claimed transition surfaces immediately.
- *
- * Visibility: rendered inside the Settings popover, below
- * {@link LLMSettings}. The popover's `init` callback triggers
- * `useAcpPairingStore.init()` so the data is ready by the time the
- * user opens this section.
+ * At any moment there is at most ONE active pairing code — the store's
+ * `createTicket` revokes any prior pending ticket before minting a
+ * new one, and the UI only renders the most-recent ticket as a single
+ * "active code" slot. The list of connected agents lives in the chat
+ * panel's agent picker (see `useAcpAgents`), so this view does not
+ * need to double as a connection manager.
  */
 
 import { Check, ClipboardCopy, Plus, Terminal, X } from 'lucide-react';
@@ -43,7 +38,6 @@ import React, {
 
 import { listAcpAgentClis } from '@/api/acp';
 import { Button } from '@/components/Common/Button';
-import { SettingRow } from '@/components/Common/SettingRow';
 import { SettingSection } from '@/components/Common/SettingSection';
 import { toast } from '@/components/Common/Toast';
 import { useAcpPairingStore } from '@/store/acpPairingStore';
@@ -221,10 +215,10 @@ const DetectedAgentRow: React.FC<DetectedAgentRowProps> = ({
   }, [agent, allowAll, agentletOnPath, agentletWrapperPath, createTicket]);
 
   return (
-    <div className="border-edge-default flex items-center justify-between gap-3 border-t px-3 py-2.5 first:border-t-0">
+    <div className="flex items-center justify-between gap-3 px-3 py-2.5">
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="text-fg-default text-sm font-medium">
+          <span className="text-fg-default text-xs font-medium">
             {agent.displayName}
           </span>
           {agent.version && (
@@ -268,14 +262,23 @@ const DetectedAgentRow: React.FC<DetectedAgentRowProps> = ({
   );
 };
 
-interface TicketRowProps {
+interface ActiveTicketRowProps {
   ticket: AcpPairingTicket;
   now: number;
   onRevoke: (id: string) => void;
   revoking: boolean;
 }
 
-const TicketRow: React.FC<TicketRowProps> = ({
+/**
+ * Single "active code" slot — replaces the old N-ticket list. Renders
+ * one of three states for the most-recent ticket:
+ *
+ *   • pending (window open)    → big code + countdown + copy + cancel
+ *   • claimed                  → "Paired · alias" + disconnect
+ *   • pending (window passed)  → "Waiting for agent…" (defensive: the
+ *                                server should have dropped this by now)
+ */
+const ActiveTicketRow: React.FC<ActiveTicketRowProps> = ({
   ticket,
   now,
   onRevoke,
@@ -309,13 +312,6 @@ const TicketRow: React.FC<TicketRowProps> = ({
   const remainingSec = Math.ceil(remainingMs / 1000);
   const pendingWindowOpen = ticket.status === 'pending' && remainingMs > 0;
 
-  // Title / subtitle differ across the three observable display states:
-  //   • pending (window open)  → big code + countdown
-  //   • claimed                → agent identity (alias + command)
-  //   • pending (window passed)→ "Waiting for agent…" (rare: the server
-  //                              already dropped this; we usually never
-  //                              render it, but render defensively in
-  //                              case a poll race leaves a stale row)
   const titleNode = useMemo(() => {
     if (pendingWindowOpen) {
       return (
@@ -336,7 +332,7 @@ const TicketRow: React.FC<TicketRowProps> = ({
 
   const subtitle = useMemo(() => {
     if (pendingWindowOpen) {
-      return `Valid for ${remainingSec}s — paste into bin/agentlet --token`;
+      return `Expires in ${remainingSec}s`;
     }
     if (ticket.status === 'claimed') {
       return ticket.claimedCommand
@@ -347,7 +343,7 @@ const TicketRow: React.FC<TicketRowProps> = ({
   }, [pendingWindowOpen, remainingSec, ticket]);
 
   return (
-    <div className="flex items-center justify-between gap-3 px-3 py-2.5">
+    <div className="bg-bg-default flex items-center justify-between gap-3 px-3 py-2.5">
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">{titleNode}</div>
         {subtitle && (
@@ -406,26 +402,36 @@ export const AcpSettings: React.FC = () => {
     refresh: refreshDetection,
   } = useAgentCliDetection();
 
+  // Single-slot UI: the store already enforces ≤1 pending ticket via
+  // auto-revoke on create; we render only the most recent ticket so
+  // the panel never grows into a scrolling list. Connected agents
+  // remain visible in the chat panel's agent picker.
+  const activeTicket = tickets[0] ?? null;
+
+  // Detect a Windows host from the wrapper path the server reported
+  // (e.g. `C:\…\bin\agentlet`). Used to surface a one-line hint that
+  // the copied command needs Git Bash / WSL — the wrapper itself is a
+  // POSIX shell script and won't run in cmd.exe or PowerShell.
+  const isWindowsHost = useMemo(
+    () =>
+      agentletWrapperPath !== null &&
+      (/^[A-Za-z]:[\\/]/.test(agentletWrapperPath) ||
+        agentletWrapperPath.includes('\\')),
+    [agentletWrapperPath],
+  );
+
   // Only tick the countdown clock while there's a pending ticket on
   // screen — otherwise an open Settings popover would spin a 250ms
-  // interval forever for no UI change. `tickets` re-renders when the
-  // store polls, so the dependency captures both "new pending ticket
-  // appeared" and "last pending ticket got claimed/expired".
-  const hasPendingTicket = useMemo(
-    () => tickets.some((t) => t.status === 'pending'),
-    [tickets],
-  );
+  // interval forever for no UI change.
+  const hasPendingTicket = activeTicket?.status === 'pending';
   const now = useNow(hasPendingTicket);
 
-  // Surface store errors as transient toasts.
+  // Surface store / detection errors as transient toasts.
   useEffect(() => {
     if (error) {
       toast(error, { variant: 'error' });
     }
   }, [error]);
-
-  // Surface detection errors too — but only once per failure (the
-  // `detectionError` string is stable across re-renders until refresh).
   useEffect(() => {
     if (detectionError) {
       toast(detectionError, { variant: 'error' });
@@ -436,68 +442,68 @@ export const AcpSettings: React.FC = () => {
     void createTicket();
   }, [createTicket]);
 
-  // We surface every active ticket — pending (with countdown still
-  // running), claimed (agent connected), plus anything else the server
-  // happens to be reporting. Stale entries get filtered by the next
-  // poll naturally; no special "expired" branch needed.
-  const visibleTickets = tickets;
-
   return (
-    <>
-      <SettingSection title="Detected Agents">
-        {detectionLoading ? (
-          <div className="text-fg-subtle px-3 py-2.5 text-xs">
-            Scanning your machine for installed agent CLIs…
-          </div>
-        ) : detectedAgents.length === 0 ? (
-          <div className="px-3 py-2.5 text-xs">
-            <p className="text-fg-muted">
-              No ACP-capable agent CLI found on your <code>PATH</code>.
-            </p>
-            <p className="text-fg-subtle mt-1 leading-snug">
-              Install one of: <code className="font-mono">@github/copilot</code>
-              , <code className="font-mono">@anthropic-ai/claude-code</code>,{' '}
-              <code className="font-mono">@google/gemini-cli</code> — then{' '}
-              <button
-                type="button"
-                onClick={refreshDetection}
-                className="text-info hover:underline"
-              >
-                re-scan
-              </button>
-              .
-            </p>
-          </div>
-        ) : (
-          <>
-            {detectedAgents.map((agent) => (
-              <DetectedAgentRow
-                key={agent.id}
-                agent={agent}
-                agentletOnPath={agentletOnPath}
-                agentletWrapperPath={agentletWrapperPath}
-              />
-            ))}
-            {!agentletOnPath && (
-              <p className="text-fg-subtle border-edge-default border-t px-3 py-2 text-[11px] leading-snug">
-                Tip: <code className="font-mono">agentlet</code> isn&apos;t on
-                your <code>PATH</code> yet — the copied command uses the
-                wrapper&apos;s full path. To use the short form, re-run{' '}
-                <code className="font-mono">pnpm install</code> or open a new
-                terminal.
-              </p>
-            )}
-          </>
-        )}
-      </SettingSection>
+    <SettingSection title="External Agents">
+      {/* Windows-host banner: the wrapper is a POSIX shell script and
+          won't run in cmd.exe / PowerShell, so we set expectations
+          before the user copies any command. */}
+      {isWindowsHost && (
+        <p className="text-fg-muted bg-hover px-3 py-2 text-[11px] leading-snug">
+          On Windows, run the copied command in{' '}
+          <span className="text-fg-default font-medium">Git Bash</span> or{' '}
+          <span className="text-fg-default font-medium">WSL</span> — cmd.exe and
+          PowerShell can&apos;t execute the <code>agentlet</code> wrapper
+          directly.
+        </p>
+      )}
 
-      <SettingSection title="External Agents">
-        <SettingRow
-          title="Pair manually (advanced)"
-          description={
-            'Mints a bare token. Use this if you launch agentlet yourself with custom args or a remote shell.'
-          }
-        >
+      {/* Detected-agent rows: the primary one-click path. */}
+      {detectionLoading ? (
+        <div className="text-fg-subtle px-3 py-2.5 text-xs">
+          Scanning your machine for installed agent CLIs…
+        </div>
+      ) : detectedAgents.length === 0 ? (
+        <div className="px-3 py-2.5 text-xs">
+          <p className="text-fg-muted">
+            No ACP-capable agent CLI found on your <code>PATH</code>.
+          </p>
+          <p className="text-fg-subtle mt-1 leading-snug">
+            Install one of: <code className="font-mono">@github/copilot</code>,{' '}
+            <code className="font-mono">@anthropic-ai/claude-code</code>,{' '}
+            <code className="font-mono">@google/gemini-cli</code> — then{' '}
+            <button
+              type="button"
+              onClick={refreshDetection}
+              className="text-info hover:underline"
+            >
+              re-scan
+            </button>
+            .
+          </p>
+        </div>
+      ) : (
+        detectedAgents.map((agent) => (
+          <DetectedAgentRow
+            key={agent.id}
+            agent={agent}
+            agentletOnPath={agentletOnPath}
+            agentletWrapperPath={agentletWrapperPath}
+          />
+        ))
+      )}
+
+      {/* Manual fallback: bare token for power users. */}
+      <div className="flex items-center justify-between gap-3 px-3 py-2.5">
+        <div className="min-w-0 flex-1">
+          <p className="text-fg-default text-xs font-medium">
+            Pair manually (advanced)
+          </p>
+          <p className="text-fg-subtle mt-0.5 text-[11px] leading-snug">
+            Mints a bare token. Use this if you launch agentlet yourself with
+            custom args or a remote shell.
+          </p>
+        </div>
+        <div className="shrink-0">
           <Button
             variant="outline"
             tone="neutral"
@@ -508,18 +514,29 @@ export const AcpSettings: React.FC = () => {
             <Plus />
             <span>{creating ? 'Generating…' : 'Generate code'}</span>
           </Button>
-        </SettingRow>
+        </div>
+      </div>
 
-        {visibleTickets.map((ticket) => (
-          <TicketRow
-            key={ticket.id}
-            ticket={ticket}
-            now={now}
-            onRevoke={revokeTicket}
-            revoking={revoking[ticket.id] === true}
-          />
-        ))}
-      </SettingSection>
-    </>
+      {/* Single active-code slot — replaces the old N-ticket list. */}
+      {activeTicket && (
+        <ActiveTicketRow
+          ticket={activeTicket}
+          now={now}
+          onRevoke={revokeTicket}
+          revoking={revoking[activeTicket.id] === true}
+        />
+      )}
+
+      {/* Path-hint footer only shown when needed. */}
+      {!agentletOnPath && detectedAgents.length > 0 && (
+        <p className="text-fg-subtle px-3 py-2 text-[11px] leading-snug">
+          Tip: <code className="font-mono">agentlet</code> isn&apos;t on your{' '}
+          <code>PATH</code> yet — the copied command uses the wrapper&apos;s
+          full path. To use the short form, re-run{' '}
+          <code className="font-mono">pnpm install</code> or open a new
+          terminal.
+        </p>
+      )}
+    </SettingSection>
   );
 };

@@ -89,19 +89,21 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
           onDismiss={handleDismiss}
           anchor="top-right"
           offset={{ x: 0, y: 6 }}
-          className="w-120 p-4"
+          className="flex max-h-[calc(100vh-24px)] w-120 flex-col p-4"
         >
-          <h3 className="text-fg-default mb-3 text-sm font-semibold">
+          <h3 className="text-fg-default mb-3 shrink-0 text-sm font-semibold">
             Settings
           </h3>
 
-          <CanvasSettings />
+          <div className="-mx-4 min-h-0 flex-1 overflow-y-auto px-4 pb-2">
+            <LLMSettings />
 
-          <LLMSettings />
+            <AcpSettings />
 
-          <AcpSettings />
+            <CanvasSettings />
+          </div>
 
-          <div className="mt-4 flex justify-end">
+          <div className="mt-4 flex shrink-0 justify-end">
             <Button
               variant="outline"
               tone="neutral"

@@ -133,8 +133,28 @@ export const useAcpPairingStore = create<AcpPairingState>()((set, get) => ({
   createTicket: async () => {
     set({ creating: true, error: null });
     try {
+      // Single-active-code invariant: revoke any still-pending tickets
+      // before minting a new one. Claimed tickets (= live agent
+      // connections) are intentionally left alone so generating a new
+      // code never silently disconnects an already-attached agent.
+      const stalePending = get().tickets.filter((t) => t.status === 'pending');
+      if (stalePending.length > 0) {
+        await Promise.all(
+          stalePending.map((t) =>
+            revokeAcpPairing(t.id).catch(() => undefined),
+          ),
+        );
+      }
       const ticket = await createAcpPairing();
-      const tickets = [ticket, ...get().tickets];
+      // Rebuild from server-truth-minus-stale to avoid races between
+      // the revoke calls above and the new POST.
+      const keep = get().tickets.filter(
+        (t) =>
+          t.status !== 'pending' &&
+          !stalePending.some((s) => s.id === t.id) &&
+          t.id !== ticket.id,
+      );
+      const tickets = [ticket, ...keep];
       set({ tickets, creating: false });
       syncPolling(tickets, get().refresh);
       return ticket;
