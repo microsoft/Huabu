@@ -45,6 +45,14 @@ export type ChatHistoryItem =
       attachments?: ChatAttachment[];
       /** IDs of canvas nodes that were selected when this message was sent. */
       selectedNodeIds?: string[];
+      /**
+       * Skill ids the user explicitly invoked via leading `/<id>`
+       * tokens. Preserved across reload so the chat bubble can render
+       * the same `/skill` chips the user typed (the message body
+       * itself has those tokens stripped — see
+       * `parseSlashInvocations`).
+       */
+      invokedSkills?: string[];
     }
   | {
       role: 'assistant';

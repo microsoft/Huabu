@@ -67,6 +67,42 @@
 
 ---
 
+## 2026-06-02 · Frame col/row 布局：子节点尺寸任何方式变化都会触发重排
+
+**What Changed**
+
+- 在 column / row 布局的 frame 里，无论子节点是怎么改变尺寸的，整个 frame 现在都会自动重排：
+  1. 手动拖拽 resize 把手（之前已支持）。
+  2. 在 node toolbar 里输入精确 W/H（之前已支持）。
+  3. **新增**：node toolbar 里的"高度自适应 / 固定"切换按钮（之前只刷新了外接矩形，不会重新分槽）。
+  4. **新增**：在 note 节点里输入内容把节点撑开 / 删除内容把节点收缩（之前完全不会通知父 frame）。
+  5. 新增图片/PDF 等异步资源加载完成后尺寸变化，也会一并触发重排。
+
+**Notes**
+
+- 实现上分两步：
+  1. `postEffects.web.ts` 把原本的 `scheduleDeferredFrameFit` 升级成 `scheduleDeferredFrameRelayout`，DOM reflow + ResizeObserver 完成后先跑 `applyStructuredFrameRelayout`（重新分槽 + 重写 frame 大小），再跑 `fitFrames`（让外层祖先 frame 跟着 cascade）。多次调用在同一个 tick 内被合并成一次 double-rAF，避免高频 RO 触发重复工作。
+  2. `canvasStore.onNodesChange` 里新增一个 watcher：每次 ReactFlow 派发 `dimensions` change 时，如果目标节点的父节点是 column/row frame，且新尺寸跟显式 pin 的 `style.{w,h}` 不一致（避免 commit 后 RO 回声触发空转），就调用上面的 scheduler。live drag / resize 会话期间会跳过（手势结束时的 `SET_NODE_GEOMETRY` 自己会触发重排）。
+- 这条路径是"绕过 command 管道的尺寸变化"的统一兜底通道。未来再有新的此类来源（比如新增节点类型的异步 resize），不需要单独再处理。
+- 不引入新的 undo 步骤：被动重排走的是普通 `set({ nodes })`，跟原有的 `scheduleDeferredFrameFit` 行为一致——属于视觉收敛，会被 autosave 持久化但不进 undo 历史。
+
+---
+
+## 2026-06-02 · 聊天气泡显示 `/skill` 调用
+
+**What Changed**
+
+- 用 `/<skill-id>` 调用 skill 后，聊天气泡顶部会用一个 AI 主题色（紫色字 + 浅紫底）的小 chip 把被调用的 skill id 显示出来，例如发送 `/canvas-memory 帮我整理` 时，气泡里会先出现 `/canvas-memory` 的 chip，下面再是消息正文 `帮我整理`。
+- 多个 skill 会一行平铺显示，按用户输入顺序去重，与 server 实际注入的列表一致。
+- 刷新页面后从历史里恢复出来的用户消息同样会显示这些 chip。
+
+**Notes**
+
+- 实现上：parser 仍然会从消息正文里把 `/<id>` 前缀剥掉（避免它在 LLM context 里被当成自然语言），但 chat store 的 user message 上新增 `invokedSkills?: string[]` 字段，由 `UserMessage` 渲染成 chip。
+- 历史持久化：server 端在用户消息正文末尾追加 `[SYSTEM invokedSkills:[...]]` 元数据 tag（与 `selectedNodeIds` / `attachments` 同套机制），history endpoint 读出时再剥掉并填回 `invokedSkills`。ACP preprocessor 也会同步剥掉该 tag，避免泄漏给外部 agent。
+
+---
+
 ## 2026-06-01 · 内置 `/create-skill` 与 `/update-skill` 两个 slash skill
 
 **What Changed**

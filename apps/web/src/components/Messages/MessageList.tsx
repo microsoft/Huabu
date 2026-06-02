@@ -111,6 +111,7 @@ export const MessageList = ({
                   content={msg.content}
                   attachments={msg.attachments}
                   selectedNodeIds={msg.selectedNodeIds}
+                  invokedSkills={msg.invokedSkills}
                 />,
               );
               i++;
