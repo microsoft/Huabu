@@ -293,7 +293,7 @@ export const CanvasLayerPanel = ({
       onToggle={onToggle}
       iconCollapsed={<PanelLeftOpen size={16} />}
       iconExpanded={<PanelLeftClose size={16} />}
-      className="border-r border-[#eeece7]"
+      className="border-r border-edge-default"
       hideHeader
     >
       {isSearchOpen || availableTypes.length >= 2 ? (
