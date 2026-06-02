@@ -103,13 +103,17 @@ export function markdownEquals(a: string, b: string): boolean {
 export function normalizeMathDelimiters(md: string): string {
   if (!md) return md;
   const segments = splitFencedCode(md);
-  const converted = segments
-    .map((seg) => (seg.isCode ? seg.text : convertOutsideCode(seg.text)))
+  return segments
+    .map((seg) => {
+      if (seg.isCode) return seg.text;
+      const converted = convertOutsideCode(seg.text);
+      if (converted === seg.text) return seg.text;
+      // Collapse runs of 3+ newlines that may appear when we surround a
+      // block math span with `\n\n…\n\n` while it already had blank lines
+      // adjacent in the input.
+      return converted.replace(/\n{3,}/g, '\n\n');
+    })
     .join('\n');
-  // Collapse runs of 3+ newlines that may appear when we surround a
-  // block math span with `\n\n…\n\n` while it already had blank lines
-  // adjacent in the input.
-  return converted.replace(/\n{3,}/g, '\n\n');
 }
 
 interface MarkdownSegment {
