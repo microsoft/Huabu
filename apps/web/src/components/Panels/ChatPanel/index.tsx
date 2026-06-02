@@ -118,6 +118,17 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     agentBinding.kind === 'external' &&
     connectedAgents.some((a) => a.agentId === agentBinding.agentletAgentId);
 
+  // Surface a header badge when the thread's bound external agent has
+  // dropped off the connected list. Gated on `acpAgentsLoaded` so the
+  // badge never flashes during the initial fetch (before that we just
+  // don't know yet — assuming "disconnected" would be a lie). Threads
+  // bound to an internal agent never trigger this — there's nothing to
+  // disconnect from.
+  const isExternalDisconnected =
+    agentBinding.kind === 'external' &&
+    acpAgentsLoaded &&
+    !connectedAgents.some((a) => a.agentId === agentBinding.agentletAgentId);
+
   // Slash commands have two independent sources depending on the
   // thread binding:
   //
@@ -432,8 +443,34 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         // immutable for the life of the thread, so the title is a
         // pure label — switching agents happens through the
         // `NewChatMenu` in the tools slot (it forks a fresh thread).
-        <span className="block min-w-0 flex-1 truncate" title={panelTitle}>
-          {panelTitle}
+        //
+        // For external bindings whose agent has dropped off the
+        // connected list we render an inline "Disconnected" pill so
+        // the user sees up-front why the next send will fail (the
+        // server throws "External agent '<alias>' is not connected"
+        // and the failure ends up in thread history as a system
+        // error). The pill stays subtle (warning, not danger) since
+        // the agent can come back at any moment.
+        <span className="flex min-w-0 flex-1 items-center gap-2">
+          <span className="min-w-0 truncate" title={panelTitle}>
+            {panelTitle}
+          </span>
+          {isExternalDisconnected && (
+            <span
+              className="border-warning-light text-warning inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase"
+              title={
+                agentBinding.kind === 'external'
+                  ? `${agentBinding.alias} is no longer connected. Relaunch the agentlet bridge or start a new chat with a connected agent.`
+                  : 'External agent is no longer connected.'
+              }
+            >
+              <span
+                aria-hidden
+                className="bg-warning h-1.5 w-1.5 shrink-0 rounded-full"
+              />
+              Disconnected
+            </span>
+          )}
         </span>
       }
       isCollapsed={isCollapsed}
@@ -527,7 +564,22 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
                   ? acpSessionMeta.usage
                   : undefined
               }
-              disabled={isLoading || !isHistoryLoaded}
+              // Block the input outright when the bound external agent
+              // has dropped off the connected list. Without this gate
+              // the user can still type + Send, the request reaches
+              // `runAcpAgent` → `ensureAcpSession` → throws "External
+              // agent '<alias>' is not connected", and the failure ends
+              // up in thread history as a `[SYSTEM Error]` row. Pairing
+              // the gate with the header `Disconnected` pill makes the
+              // "you can't send right now" message clear *before* the
+              // user types anything. The pill stays visible so the user
+              // still sees who the thread was bound to.
+              disabled={isLoading || !isHistoryLoaded || isExternalDisconnected}
+              placeholder={
+                isExternalDisconnected && agentBinding.kind === 'external'
+                  ? `${agentBinding.alias} is disconnected — relaunch the agentlet bridge to resume, or use + to start a new chat.`
+                  : undefined
+              }
             />
           </div>
         )}

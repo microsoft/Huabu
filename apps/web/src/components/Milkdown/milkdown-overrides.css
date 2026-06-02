@@ -204,6 +204,22 @@
   border-color: var(--edge-default);
 }
 
+/* Horizontal rule. Crepe paints `<hr>` as a 1px-tall background bar
+   filled with `color-mix(--crepe-color-outline, transparent 80%)` —
+   i.e. 20% of our near-white `--edge-default`, which renders almost
+   invisible against `bg-surface`. Same root cause as the table-border
+   regression above; same fix: use the edge token at full strength so
+   the divider actually reads as a divider. The selected-node state
+   (Crepe's `.ProseMirror-selectednode`) bumps to `--fg-subtle` so the
+   "this block is the selection target" affordance stays distinguishable
+   from the resting line. */
+.milkdown .ProseMirror hr {
+  background-color: var(--edge-default);
+}
+.milkdown .ProseMirror hr.ProseMirror-selectednode {
+  background-color: var(--fg-subtle);
+}
+
 /* ─────────────────────────────────────────────────────────────────────────
    Block handle — shared chrome (chat preview + note editor)
    ─────────────────────────────────────────────────────────────────────────
@@ -274,20 +290,6 @@
   height: 16px;
   fill: var(--fg-subtle);
   transition: fill 0.15s ease;
-}
-
-/* Crepe ships the handle SVGs with hard-coded clip-path IDs
-   (`clip0_971_7676` plus, `clip0_971_7680` drag dots) — every editor
-   instance reuses the SAME ids, so the browser's `url(#id)` lookup
-   resolves to the first matching `<clipPath>` in document order, which
-   sits inside a different SVG context. The resulting cross-document
-   clip leaves the path drawn entirely outside the clipping region, so
-   the glyph renders invisibly. The clipPath itself is a 24×24 rect on
-   a `0 0 24 24` viewBox — a no-op — so neutralising it via CSS is safe
-   and avoids the cross-instance collision. */
-.milkdown-preview-host .milkdown-block-handle .operation-item svg g,
-.milkdown-note-preview .milkdown-block-handle .operation-item svg g {
-  clip-path: none;
 }
 
 .milkdown-preview-host .milkdown-block-handle .operation-item:hover svg,
