@@ -100,20 +100,42 @@ export function markdownEquals(a: string, b: string): boolean {
  *   - The transformation is idempotent: running it on the converted
  *     output is a no-op.
  */
+/**
+ * NUL-byte sentinel that stands in for fenced code segments while we
+ * collapse stray blank lines on the rest of the document. NUL is not
+ * valid in markdown text we receive, which makes it safe to use as a
+ * marker without escaping.
+ */
+const FENCE_SENTINEL = '\x00\x00FENCE\x00\x00';
+
 export function normalizeMathDelimiters(md: string): string {
   if (!md) return md;
-  const segments = splitFencedCode(md);
-  return segments
+  // Replace each fenced code segment with a sentinel so we can safely
+  // collapse runs of 3+ newlines on the rest of the document in a
+  // single pass — a run of `\n\n\n+` outside code is always either an
+  // artefact of the `\n\n…\n\n` padding we add around block math, or
+  // of a seam between a converted outside segment and its neighbour,
+  // and is never semantically meaningful. The sentinel keeps code
+  // content (which may legitimately contain blank lines) verbatim.
+  const codes: string[] = [];
+  const stitched = splitFencedCode(md)
     .map((seg) => {
-      if (seg.isCode) return seg.text;
-      const converted = convertOutsideCode(seg.text);
-      if (converted === seg.text) return seg.text;
-      // Collapse runs of 3+ newlines that may appear when we surround a
-      // block math span with `\n\n…\n\n` while it already had blank lines
-      // adjacent in the input.
-      return converted.replace(/\n{3,}/g, '\n\n');
+      if (!seg.isCode) return convertOutsideCode(seg.text);
+      codes.push(seg.text);
+      return FENCE_SENTINEL;
     })
-    .join('\n');
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n');
+  // Stitch the original code segments back in. `split` gives us
+  // `codes.length + 1` pieces interleaved with the sentinel positions,
+  // so a simple zip-and-join reproduces the document.
+  const parts = stitched.split(FENCE_SENTINEL);
+  if (parts.length === 1) return parts[0];
+  let out = parts[0];
+  for (let i = 1; i < parts.length; i++) {
+    out += codes[i - 1] + parts[i];
+  }
+  return out;
 }
 
 interface MarkdownSegment {
@@ -197,9 +219,15 @@ function splitFencedCode(md: string): MarkdownSegment[] {
  * Walk the segment splitting out inline code spans (`` `…` ``,
  * `` ``…`` ``, etc.) so we never rewrite math-like content that the
  * author put inside backticks.
+ *
+ * Implemented with index-based scanning (no `text.slice` inside the
+ * loop) so cost is strictly O(N) regardless of how many backtick runs
+ * the input contains.
  */
 function convertOutsideCode(text: string): string {
   if (!text) return text;
+  // Fast path: no backticks → no inline code spans to protect.
+  if (text.indexOf('`') === -1) return convertMathInPlain(text);
   const out: string[] = [];
   let i = 0;
   while (i < text.length) {
@@ -211,24 +239,38 @@ function convertOutsideCode(text: string): string {
     if (tickStart > i) {
       out.push(convertMathInPlain(text.slice(i, tickStart)));
     }
-    const tickRunMatch = /^`+/.exec(text.slice(tickStart));
-    // `tickRunMatch` cannot be null — we just confirmed there is a backtick
-    // at `tickStart` — but TypeScript needs the guard.
-    if (!tickRunMatch) {
-      out.push(convertMathInPlain(text.slice(tickStart)));
-      break;
+    // Count the backtick run in place.
+    let runEnd = tickStart + 1;
+    while (runEnd < text.length && text.charCodeAt(runEnd) === 96 /* ` */) {
+      runEnd++;
     }
-    const tickRun = tickRunMatch[0];
-    const restStart = tickStart + tickRun.length;
-    const closeRel = text.slice(restStart).indexOf(tickRun);
-    if (closeRel === -1) {
+    const runLen = runEnd - tickStart;
+    // Find the matching closing run of the same length starting at `runEnd`.
+    let closeStart = runEnd;
+    let matched = -1;
+    while (closeStart < text.length) {
+      const candidate = text.indexOf('`', closeStart);
+      if (candidate === -1) break;
+      let candidateEnd = candidate + 1;
+      while (
+        candidateEnd < text.length &&
+        text.charCodeAt(candidateEnd) === 96
+      ) {
+        candidateEnd++;
+      }
+      if (candidateEnd - candidate === runLen) {
+        matched = candidateEnd;
+        break;
+      }
+      closeStart = candidateEnd;
+    }
+    if (matched === -1) {
       // Unmatched backtick run — treat the tail as plain text.
       out.push(convertMathInPlain(text.slice(tickStart)));
       break;
     }
-    const codeEnd = restStart + closeRel + tickRun.length;
-    out.push(text.slice(tickStart, codeEnd));
-    i = codeEnd;
+    out.push(text.slice(tickStart, matched));
+    i = matched;
   }
   return out.join('');
 }
