@@ -21,9 +21,10 @@ export const Toggle: React.FC<ToggleProps> = ({
   return (
     <button
       id={id}
+      type="button"
       role="switch"
       aria-checked={checked}
-      aria-label={label}
+      aria-label={label ?? 'Toggle'}
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={[
