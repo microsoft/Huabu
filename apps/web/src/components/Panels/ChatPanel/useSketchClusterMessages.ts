@@ -15,13 +15,14 @@
  * intent store; nothing is persisted to the chat thread.
  */
 
-import { createId } from '@sediment/shared';
 import { useMemo } from 'react';
+
+import { createId } from '@sediment/shared';
+
+import { useIntentStore } from '@/store/intentStore';
 
 import type { AssistantSegment, ChatMessage } from '@/store/chatTypes';
 import type { SketchProcessingCluster } from '@/store/intentStore';
-
-import { useIntentStore } from '@/store/intentStore';
 
 /**
  * Build the ChatMessage[] timeline for the given cluster.

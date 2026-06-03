@@ -17,6 +17,25 @@ import React, {
 } from 'react';
 import '@xyflow/react/dist/style.css';
 
+import { ImageNode } from '@/components/Nodes/image/ImageNode';
+import { NoteNode } from '@/components/Nodes/note/NoteNode';
+import { PDFNode } from '@/components/Nodes/pdf/PDFNode';
+import { TextNode } from '@/components/Nodes/text/TextNode';
+import {
+  uploadFileToNodeInput,
+  urlToNodeInput,
+  textToNoteNodeInput,
+} from '@/handler/canvasCommand/nodeInputBuilders';
+import { useCanvasShortcuts } from '@/hooks/shortcuts';
+import { useAutoPanDuringSelection } from '@/hooks/useAutoPanDuringSelection';
+import { useCanvasGestures } from '@/hooks/useCanvasGestures';
+import { useCanvasLasso } from '@/hooks/useCanvasLasso';
+import { useFrameDragToCreate } from '@/hooks/useFrameDragToCreate';
+import { useIsNotMouse } from '@/hooks/useInputMode';
+import { useQuestionRunner } from '@/hooks/useQuestionRunner';
+import { useSketchHoverRouting } from '@/hooks/useSketchHoverRouting';
+import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
+
 import { NodeToolbar } from './CanvasToolbar.tsx';
 import { EdgeStyleToolbar } from './FloatingToolbars/EdgeStyleToolbar.tsx';
 import { MultiSelectToolbar } from './FloatingToolbars/MultiSelectToolbar.tsx';
@@ -44,25 +63,6 @@ import { WebNode } from '../../Nodes/web/WebNode.tsx';
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
 import type { CanvasViewport } from '@sediment/shared';
 import type { FrameFitResult } from '@sediment/shared/canvas-engine';
-
-import { ImageNode } from '@/components/Nodes/image/ImageNode';
-import { NoteNode } from '@/components/Nodes/note/NoteNode';
-import { PDFNode } from '@/components/Nodes/pdf/PDFNode';
-import { TextNode } from '@/components/Nodes/text/TextNode';
-import {
-  uploadFileToNodeInput,
-  urlToNodeInput,
-  textToNoteNodeInput,
-} from '@/handler/canvasCommand/nodeInputBuilders';
-import { useAutoPanDuringSelection } from '@/hooks/useAutoPanDuringSelection';
-import { useCanvasGestures } from '@/hooks/useCanvasGestures';
-import { useCanvasLasso } from '@/hooks/useCanvasLasso';
-import { useCanvasShortcuts } from '@/hooks/useCanvasShortcuts';
-import { useFrameDragToCreate } from '@/hooks/useFrameDragToCreate';
-import { useIsNotMouse } from '@/hooks/useInputMode';
-import { useQuestionRunner } from '@/hooks/useQuestionRunner';
-import { useSketchHoverRouting } from '@/hooks/useSketchHoverRouting';
-import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
 const nodeTypes = {
   image: ImageNode,

@@ -20,17 +20,17 @@
  * server-recognized `trigger: 'flush'` snapshot.
  */
 
-import { createPerKeyDebouncer } from './perKeyDebouncer';
-
-import type { CanvasNodeType } from '@sediment/shared';
-import type { Node } from '@xyflow/react';
-
 import { preprocessNode } from '@/api';
 import {
   buildPreprocessSnapshot,
   preprocessNodeIfNeeded,
   type NodeIngestionInfo,
 } from '@/handler/canvasCommand/preprocess';
+
+import { createPerKeyDebouncer } from './perKeyDebouncer';
+
+import type { CanvasNodeType } from '@sediment/shared';
+import type { Node } from '@xyflow/react';
 
 /**
  * Slice fields the queue reads at fire time. Kept structural (not

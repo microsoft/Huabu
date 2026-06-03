@@ -1,3 +1,6 @@
+import { Sparkles, Trash2 } from 'lucide-react';
+import { useCallback, useMemo } from 'react';
+
 import {
   ACCENT_NONE_TOKEN,
   ACCENT_PICKER_OPTIONS,
@@ -7,11 +10,6 @@ import {
   getSelectionBounds,
   getNodeSize,
 } from '@sediment/shared/canvas-engine';
-import { Sparkles, Trash2 } from 'lucide-react';
-import { useCallback, useMemo } from 'react';
-
-import type { CanvasNode } from '@/components/Nodes/types';
-import type { CanvasNodeId } from '@sediment/shared';
 
 import { CanvasFloatingPopover } from '@/components/Common/CanvasFloatingPopover';
 import {
@@ -22,6 +20,9 @@ import { useIsNotMouse } from '@/hooks/useInputMode';
 import useCanvasStore from '@/store/canvasStore';
 import { useIntentStore } from '@/store/intentStore';
 import { resolveGeometryEdit } from '@/utils/node/geometry';
+
+import type { CanvasNode } from '@/components/Nodes/types';
+import type { CanvasNodeId } from '@sediment/shared';
 
 /** Sentinel token representing "no accent". */
 const ACCENT_NONE = ACCENT_NONE_TOKEN;

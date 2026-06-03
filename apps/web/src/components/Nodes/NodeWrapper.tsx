@@ -1,9 +1,3 @@
-import { resolveSurface, resolveAccent } from '@sediment/shared';
-import {
-  createAbsolutePositionGetter,
-  indexById,
-  type NestableNode,
-} from '@sediment/shared/canvas-engine';
 import {
   Handle,
   Position,
@@ -23,10 +17,12 @@ import React, {
 } from 'react';
 import { createPortal } from 'react-dom';
 
-import { getAccentTokens } from './accentTokens.ts';
-import { SemanticPlaceholder } from './SemanticPlaceholder.tsx';
-
-import type { CanvasNodeType, NodeData } from './types.ts';
+import { resolveSurface, resolveAccent } from '@sediment/shared';
+import {
+  createAbsolutePositionGetter,
+  indexById,
+  type NestableNode,
+} from '@sediment/shared/canvas-engine';
 
 import { cn } from '@/components/Common/cn.ts';
 import { Spinner } from '@/components/Common/Spinner.tsx';
@@ -43,6 +39,11 @@ import { useIsNotMouse } from '@/hooks/useInputMode.ts';
 import { useNodeLOD } from '@/hooks/useNodeLOD.ts';
 import useCanvasStore from '@/store/canvasStore.ts';
 import { coerceProvenance } from '@/utils/blockProvenance';
+
+import { getAccentTokens } from './accentTokens.ts';
+import { SemanticPlaceholder } from './SemanticPlaceholder.tsx';
+
+import type { CanvasNodeType, NodeData } from './types.ts';
 
 /**
  * Global node background opacity, in percent. The wrapper composites every

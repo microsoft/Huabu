@@ -19,10 +19,10 @@
  * row's click target is the surrounding row, not the icon).
  */
 
-import type { QuestionNodeStatus } from '@sediment/shared';
-
 import { getStatusLabel } from '@/components/Common/StatusBadge';
 import { Tooltip } from '@/components/Common/Tooltip';
+
+import type { QuestionNodeStatus } from '@sediment/shared';
 
 interface QuestionStatusDotProps {
   status: QuestionNodeStatus;

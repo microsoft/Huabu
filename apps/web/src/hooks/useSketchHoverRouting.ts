@@ -1,9 +1,9 @@
 import { useEffect } from 'react';
 
-import type { ReactFlowInstance } from '@xyflow/react';
-
 import { findSketchHits } from '@/components/Nodes/sketch/sketchHitTest';
 import useCanvasStore from '@/store/canvasStore';
+
+import type { ReactFlowInstance } from '@xyflow/react';
 
 /**
  * Screen-space hit slack (in CSS px) when looking for the stroke under

@@ -24,6 +24,12 @@ interface CanvasHeaderProps {
    * (`h-8 w-8`) is used on standalone pages such as the canvas list.
    */
   compact?: boolean;
+  /**
+   * Opens the Keyboard Shortcuts modal. Forwarded to the default
+   * `<CanvasMenu />` so the dropdown can host the entry alongside
+   * Undo / Redo / Export.
+   */
+  onOpenShortcuts?: () => void;
 }
 
 /**
@@ -36,6 +42,7 @@ export const CanvasHeader: React.FC<CanvasHeaderProps> = ({
   isCollapsed,
   onToggle,
   compact = false,
+  onOpenShortcuts,
 }) => {
   return (
     <header
@@ -59,7 +66,9 @@ export const CanvasHeader: React.FC<CanvasHeaderProps> = ({
         />
       </Link>
 
-      <div className="min-w-0 flex-1">{children ?? <CanvasMenu />}</div>
+      <div className="min-w-0 flex-1">
+        {children ?? <CanvasMenu onOpenShortcuts={onOpenShortcuts} />}
+      </div>
 
       {onToggle && (
         <Button

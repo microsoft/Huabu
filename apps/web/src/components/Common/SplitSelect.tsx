@@ -11,6 +11,12 @@ export interface SplitSelectOption<T extends string = string> {
   label: string;
   icon?: React.ReactNode;
   buttonLabel?: string;
+  /**
+   * Optional keyboard shortcut hint shown muted on the right side of the
+   * option in the dropdown menu (Figma-style). Purely visual; the parent
+   * is responsible for actually binding the key.
+   */
+  shortcut?: React.ReactNode;
 }
 
 type SplitSelectProps<T extends string = string> = {
@@ -32,6 +38,14 @@ type SplitSelectProps<T extends string = string> = {
   iconOnly?: boolean;
   primaryTitle?: string;
   menuTitle?: string;
+  /**
+   * Optional single-character keyboard hint rendered as a tiny subscript
+   * in the bottom-right corner of the primary (left) button. Mirrors
+   * `Button#shortcutBadge`.
+   */
+  primaryShortcutBadge?: React.ReactNode;
+  /** Highlights `primaryShortcutBadge` in the accent color when `true`. */
+  primaryShortcutBadgeActive?: boolean;
 };
 
 const splitShapeClasses: Record<NonNullable<ButtonProps['shape']>, string> = {
@@ -77,6 +91,8 @@ export function SplitSelect<T extends string = string>({
   iconOnly = false,
   primaryTitle,
   menuTitle,
+  primaryShortcutBadge,
+  primaryShortcutBadgeActive,
 }: SplitSelectProps<T>) {
   const [isOpen, setIsOpen] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
@@ -147,6 +163,8 @@ export function SplitSelect<T extends string = string>({
           disabled={disabled}
           onClick={handlePrimaryAction}
           title={primaryTitle}
+          shortcutBadge={primaryShortcutBadge}
+          shortcutBadgeActive={primaryShortcutBadgeActive}
           className={cn(
             isSeparated ? splitShapeClasses[shape] : leftShapeClasses[shape],
             !isSeparated && variant === 'outline' && 'border-r-0',
@@ -190,25 +208,35 @@ export function SplitSelect<T extends string = string>({
           offset={{ x: 0, y: isTop ? -4 : 4 }}
           className={cn('flex flex-col overflow-hidden py-1', menuClassName)}
         >
-          {options.map((option) => (
-            <Button
-              key={option.value}
-              variant="ghost"
-              tone="neutral"
-              size={size}
-              role="option"
-              aria-selected={option.value === value}
-              onClick={() => handleSelect(option.value)}
-              className={cn(
-                'w-full justify-start rounded-none px-3 py-1.5 text-left',
-                option.value === value ? 'text-info' : 'text-fg-muted',
-              )}
-            >
-              {option.icon && <span className="shrink-0">{option.icon}</span>}
-              <span className="flex-1">{option.label}</span>
-              {option.value === value && <Check />}
-            </Button>
-          ))}
+          {options.map((option) => {
+            const isSelected = option.value === value;
+            return (
+              <Button
+                key={option.value}
+                variant="ghost"
+                tone="neutral"
+                size={size}
+                role="option"
+                aria-selected={isSelected}
+                onClick={() => handleSelect(option.value)}
+                className={cn(
+                  'w-full justify-start rounded-none px-3 py-1.5 text-left',
+                  isSelected ? 'text-info' : 'text-fg-muted',
+                )}
+              >
+                <span className="flex size-4 shrink-0 items-center justify-center">
+                  {isSelected && <Check className="size-4" />}
+                </span>
+                {option.icon && <span className="shrink-0">{option.icon}</span>}
+                <span className="flex-1">{option.label}</span>
+                {option.shortcut != null && option.shortcut !== '' && (
+                  <span className="text-fg-subtle ml-3 shrink-0 text-xs font-medium">
+                    {option.shortcut}
+                  </span>
+                )}
+              </Button>
+            );
+          })}
         </Popover>
       )}
     </>

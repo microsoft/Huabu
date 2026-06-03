@@ -4,9 +4,9 @@ import { Page } from 'react-pdf';
 
 import 'react-pdf/dist/Page/TextLayer.css';
 
-import type { PdfHighlight } from '@sediment/shared';
-
 import { LoadingState } from '@/components/Common/LoadingState';
+
+import type { PdfHighlight } from '@sediment/shared';
 
 import './pdfWorker';
 

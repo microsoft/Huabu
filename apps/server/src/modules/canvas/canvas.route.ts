@@ -3,6 +3,9 @@ import { mkdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
+import archiver from 'archiver';
+import yauzl from 'yauzl';
+
 import {
   createCanvasBodySchema,
   createId,
@@ -13,8 +16,6 @@ import {
   putCanvasBodySchema,
   putNodeContentBodySchema,
 } from '@sediment/shared';
-import archiver from 'archiver';
-import yauzl from 'yauzl';
 
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getPreprocessDispatcher } from '../preprocessing/index.js';

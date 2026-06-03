@@ -15,7 +15,7 @@ const toc: TocEntry[] = [
   { id: 'tools', label: 'Selection & pan tools' },
   { id: 'node-creators', label: 'Node creators' },
   { id: 'upload-and-links', label: 'Upload & links' },
-  { id: 'layout-and-intent', label: 'Layout & intent' },
+  { id: 'intent', label: 'Intent' },
   { id: 'selecting', label: 'Selecting & multi-select' },
   { id: 'creating-nodes', label: 'Creating nodes' },
   { id: 'moving-and-z-order', label: 'Moving & z-order' },
@@ -107,21 +107,19 @@ export default function CanvasBasics() {
         </li>
       </ul>
 
-      <H2>Layout & intent</H2>
-      <P>The last group has two AI-adjacent actions:</P>
-      <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
-        <li>
-          <strong>Auto-layout toggle</strong> (<Kbd>Ctrl</Kbd>/<Kbd>Cmd</Kbd>+
-          <Kbd>Shift</Kbd>+<Kbd>A</Kbd>) — when on, every new node slots in
-          beside related content; frames grow / shrink to fit their children.
-          See <DocLink href="/docs/ai/intent">Intent &amp; Auto-layout</DocLink>
-          .
-        </li>
-        <li>
-          <strong>Intent</strong> (<Kbd>Ctrl</Kbd>/<Kbd>Cmd</Kbd>+<Kbd>I</Kbd>)
-          — pops up 3–5 AI-suggested next moves you can run with one click.
-        </li>
-      </ul>
+      <H2>Intent</H2>
+      <P>
+        The last toolbar group exposes one AI-driven action:{' '}
+        <strong>Intent</strong> (<Kbd>Ctrl</Kbd>/<Kbd>Cmd</Kbd>+<Kbd>I</Kbd>),
+        which pops up 3–5 AI-suggested next moves you can run with one click.
+      </P>
+      <Callout tone="info">
+        Looking for the auto-layout toggle? It no longer lives on the canvas
+        toolbar — open the Settings popover in the header (gear icon), expand{' '}
+        <strong>Canvas</strong>, and flip <strong>Auto Layout</strong>. See{' '}
+        <DocLink href="/docs/ai/intent">Intent &amp; Auto-layout</DocLink> for
+        what changes when it&apos;s on.
+      </Callout>
 
       <H2>Selecting & multi-select</H2>
       <Table

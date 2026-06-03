@@ -1,13 +1,12 @@
+import { useInternalNode } from '@xyflow/react';
+import { Trash2 } from 'lucide-react';
+import { memo, useCallback, useMemo, type ReactNode } from 'react';
+
 import {
   ACCENT_NONE_TOKEN,
   ACCENT_PICKER_OPTIONS,
   ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT,
 } from '@sediment/shared';
-import { useInternalNode } from '@xyflow/react';
-import { Trash2 } from 'lucide-react';
-import { memo, useCallback, useMemo, type ReactNode } from 'react';
-
-import type { CanvasNodeType, NodeData } from '@/components/Nodes/types';
 
 import { CanvasFloatingPopover } from '@/components/Common/CanvasFloatingPopover';
 import {
@@ -19,6 +18,8 @@ import { NODE_ICON } from '@/config/nodeIcons';
 import { useIsNotMouse } from '@/hooks/useInputMode';
 import useCanvasStore from '@/store/canvasStore';
 import { resolveGeometryEdit } from '@/utils/node/geometry';
+
+import type { CanvasNodeType, NodeData } from '@/components/Nodes/types';
 
 /** Sentinel token representing "no accent". */
 const ACCENT_NONE = ACCENT_NONE_TOKEN;

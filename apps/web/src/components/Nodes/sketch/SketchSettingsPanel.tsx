@@ -1,7 +1,5 @@
 import { Eraser } from 'lucide-react';
 
-import { SketchControls } from './SketchControls';
-
 import {
   FLOATING_TOOLBAR_CLASS,
   FloatingToolbar,
@@ -13,6 +11,8 @@ import {
 } from '@/config/canvas';
 import { NODE_ICON } from '@/config/nodeIcons';
 import { useToolStore } from '@/store/toolStore';
+
+import { SketchControls } from './SketchControls';
 
 const PenIcon = NODE_ICON.sketch;
 

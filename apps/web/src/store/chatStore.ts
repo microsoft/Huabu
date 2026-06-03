@@ -1,6 +1,7 @@
-import { createId } from '@sediment/shared';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+
+import { createId } from '@sediment/shared';
 
 import type { ChatMessage } from './chatTypes';
 import type {

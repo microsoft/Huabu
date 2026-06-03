@@ -1,6 +1,11 @@
-import { resolveAccent } from '@sediment/shared';
 import { Sparkles } from 'lucide-react';
 import { memo, useMemo } from 'react';
+
+import { resolveAccent } from '@sediment/shared';
+
+import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
+import useCanvasStore from '@/store/canvasStore';
+import { useIntentStore } from '@/store/intentStore';
 
 import { NodeWrapper } from '../NodeWrapper';
 import { SketchControls } from './SketchControls';
@@ -13,10 +18,6 @@ import {
 import type { CanvasSketchNodeData } from '../types';
 import type { SketchStroke } from '@sediment/shared';
 import type { Node, NodeProps } from '@xyflow/react';
-
-import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
-import useCanvasStore from '@/store/canvasStore';
-import { useIntentStore } from '@/store/intentStore';
 
 export type SketchNodeType = Node<CanvasSketchNodeData, 'sketch'>;
 

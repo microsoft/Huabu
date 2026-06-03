@@ -1,5 +1,5 @@
 import { ArrowLeft, Bot, Columns2, X } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { getNodeIcon } from '../../../config/nodeIcons.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
@@ -7,6 +7,7 @@ import { useChatStore } from '../../../store/chatStore.ts';
 import { usePreviewStore } from '../../../store/previewStore.ts';
 import { Button } from '../../Common/Button.tsx';
 import { NodePreviewContent } from '../../Nodes/NodePreviewContent.tsx';
+import { PreviewHeaderSlotContext } from '../../Nodes/PreviewHeaderSlot.tsx';
 
 // Helper to get meta info (icon, title) for the header
 const getOverlayMeta = (type: string, data: Record<string, unknown>) => {
@@ -129,6 +130,13 @@ export const ExpandedNodePanel = ({
   const panelRef = useRef<HTMLDivElement>(null);
   const setSelectionAttachment = useChatStore((s) => s.setSelectionAttachment);
 
+  // Slot element rendered in the header bar. Nested previews use the
+  // `PreviewHeaderSlot` context + `createPortal` to render their own
+  // action buttons here. `useState` (instead of a plain ref) gives us
+  // a re-render once the element mounts so portal consumers wake up.
+  const [headerSlotEl, setHeaderSlotEl] = useState<HTMLDivElement | null>(null);
+  const headerSlotValue = useMemo(() => ({ el: headerSlotEl }), [headerSlotEl]);
+
   // Listen for text selection inside the panel and auto-attach as pending
   const handleSelectionChange = useCallback(() => {
     const sel = window.getSelection();
@@ -214,6 +222,23 @@ export const ExpandedNodePanel = ({
 
         {/* Right: mode toggle + close */}
         <div className="text-fg-muted flex items-center gap-1">
+          {/* Per-preview action slot (filled via portal by NotePreview
+              and friends). Sits to the LEFT of the universal Bot /
+              mode / close buttons so preview-specific controls feel
+              like first-class header actions while remaining visually
+              grouped on their own. The trailing divider is
+              auto-hidden via `peer-empty:hidden` when the slot has
+              no contributed actions, so we never render a stray
+              vertical line. */}
+          <div
+            ref={setHeaderSlotEl}
+            className="peer flex items-center gap-1 empty:hidden"
+          />
+          <div
+            aria-hidden="true"
+            className="bg-edge-default mx-1 h-5 w-px peer-empty:hidden"
+          />
+
           {isReplace && onToggleChat && (
             <Button
               variant="ghost"
@@ -263,18 +288,20 @@ export const ExpandedNodePanel = ({
 
       {/* Content */}
       <div className="flex-1 overflow-hidden">
-        <NodePreviewContent
-          key={expandedNodeId ?? previewType}
-          id={expandedNodeId ?? undefined}
-          type={activeItem.type}
-          data={activeItem.data}
-          readOnly={activeItem.readOnly}
-          onDataChange={
-            activeItem.isNode && expandedNodeId
-              ? (patch) => updateNodeData(expandedNodeId, patch)
-              : undefined
-          }
-        />
+        <PreviewHeaderSlotContext.Provider value={headerSlotValue}>
+          <NodePreviewContent
+            key={expandedNodeId ?? previewType}
+            id={expandedNodeId ?? undefined}
+            type={activeItem.type}
+            data={activeItem.data}
+            readOnly={activeItem.readOnly}
+            onDataChange={
+              activeItem.isNode && expandedNodeId
+                ? (patch) => updateNodeData(expandedNodeId, patch)
+                : undefined
+            }
+          />
+        </PreviewHeaderSlotContext.Provider>
       </div>
     </div>
   );

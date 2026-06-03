@@ -1,8 +1,8 @@
 import { create } from 'zustand';
 
-import type { CanvasNodeType } from '@sediment/shared';
-
 import { SKETCH_ERASER_RADIUS_SCREEN_PX } from '@/config/canvas';
+
+import type { CanvasNodeType } from '@sediment/shared';
 
 /**
  * Node type awaiting placement on canvas via click or drawing.

@@ -16,7 +16,7 @@ All layout changes are undoable with a single `Ctrl+Z`.
 
 ## Auto-Layout Mode
 
-A single global toggle controls whether layout runs automatically on node creation: `Ctrl+Shift+A` or the toolbar switch. When enabled:
+A single global toggle controls whether layout runs automatically on node creation. Open the **Settings** popover in the header (gear icon), expand the **Canvas** section, and flip the **Auto Layout** toggle. When enabled:
 
 - Every new node added to the canvas is automatically placed via `placeNode`.
 - Frames automatically resize to tightly wrap their children whenever children are added, removed, moved in/out, or resized.

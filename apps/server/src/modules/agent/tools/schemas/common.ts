@@ -7,6 +7,7 @@
  */
 
 import { Type } from '@earendil-works/pi-ai';
+
 import { ACCENT_PALETTE } from '@sediment/shared';
 
 /**

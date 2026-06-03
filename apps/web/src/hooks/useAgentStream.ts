@@ -1,3 +1,5 @@
+import { useCallback, useRef, useEffect } from 'react';
+
 import {
   createId,
   variantForInternalTool,
@@ -9,7 +11,11 @@ import {
   type ToolResponse,
   type WebSearchToolResponse,
 } from '@sediment/shared';
-import { useCallback, useRef, useEffect } from 'react';
+
+import { agentApi } from '@/api/agent';
+import { buildSketchAttachmentsFromSelection } from '@/handler/sketch/buildSketchAttachments';
+import useCanvasStore from '@/store/canvasStore';
+import { useChatStore } from '@/store/chatStore';
 
 import { snapshotAndExtractChanges } from './useCanvasChanges';
 
@@ -20,11 +26,6 @@ import type {
   ChatAttachment,
   IntentCandidate,
 } from '@sediment/shared';
-
-import { agentApi } from '@/api/agent';
-import { buildSketchAttachmentsFromSelection } from '@/handler/sketch/buildSketchAttachments';
-import useCanvasStore from '@/store/canvasStore';
-import { useChatStore } from '@/store/chatStore';
 
 // ==================== Pure Utility Functions ====================
 

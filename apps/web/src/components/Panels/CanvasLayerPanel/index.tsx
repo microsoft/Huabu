@@ -1,11 +1,12 @@
+import { PanelLeftClose, PanelLeftOpen, Search } from 'lucide-react';
+import { useCallback, useMemo, useRef, useState } from 'react';
+
 import {
   CANVAS_NODE_TYPES,
   type CanvasNodeType,
   type QuestionNodeStatus,
   type SketchStroke,
 } from '@sediment/shared';
-import { PanelLeftClose, PanelLeftOpen, Search } from 'lucide-react';
-import { useCallback, useMemo, useRef, useState } from 'react';
 
 import { CanvasLayerTree } from './CanvasLayerTree';
 import { LayerFilterBar } from './LayerFilterBar';

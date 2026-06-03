@@ -1,18 +1,28 @@
 import clsx from 'clsx';
-import { ChevronDown, Download, Redo2, Undo2 } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 import { exportCanvas } from '../../../api/canvas.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
+import { formatShortcut } from '../../../utils/platform.ts';
 import { Button } from '../../Common/Button.tsx';
 import { DropdownMenu, DropdownMenuItem } from '../../Common/DropdownMenu.tsx';
 import { toast } from '../../Common/Toast.tsx';
+
+interface CanvasMenuProps {
+  /**
+   * Opens the Keyboard Shortcuts modal. Wired from `CanvasPage`, which owns
+   * the modal state. When omitted (e.g. on standalone-page headers that do
+   * not host the modal), the menu item is hidden.
+   */
+  onOpenShortcuts?: () => void;
+}
 
 /**
  * canvas title + dropdown menu.
  * Sits in the header and exposes Export / Import canvas actions.
  */
-export const CanvasMenu: React.FC = () => {
+export const CanvasMenu: React.FC<CanvasMenuProps> = ({ onOpenShortcuts }) => {
   const canvasTitle = useCanvasStore((s) => s.canvasTitle);
   const tryRename = useCanvasStore((s) => s.tryRename);
   const canvasId = useCanvasStore((s) => s.canvasId);
@@ -113,7 +123,7 @@ export const CanvasMenu: React.FC = () => {
         }
       >
         <DropdownMenuItem
-          icon={<Undo2 size={14} />}
+          shortcut={formatShortcut('Ctrl/Cmd+Z')}
           disabled={!canUndo}
           onClick={() => {
             setIsOpen(false);
@@ -123,7 +133,7 @@ export const CanvasMenu: React.FC = () => {
           Undo
         </DropdownMenuItem>
         <DropdownMenuItem
-          icon={<Redo2 size={14} />}
+          shortcut={formatShortcut('Ctrl/Cmd+Shift+Z')}
           disabled={!canRedo}
           onClick={() => {
             setIsOpen(false);
@@ -133,12 +143,20 @@ export const CanvasMenu: React.FC = () => {
           Redo
         </DropdownMenuItem>
         <div className="border-edge-default my-1 border-t" />
-        <DropdownMenuItem
-          icon={<Download size={14} />}
-          onClick={() => void handleExport()}
-        >
+        <DropdownMenuItem onClick={() => void handleExport()}>
           Export Canvas
         </DropdownMenuItem>
+        {onOpenShortcuts && (
+          <DropdownMenuItem
+            shortcut="?"
+            onClick={() => {
+              setIsOpen(false);
+              onOpenShortcuts();
+            }}
+          >
+            Keyboard Shortcuts
+          </DropdownMenuItem>
+        )}
       </DropdownMenu>
     </div>
   );

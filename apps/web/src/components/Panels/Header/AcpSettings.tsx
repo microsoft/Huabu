@@ -52,8 +52,6 @@ import React, {
   useState,
 } from 'react';
 
-import type { AcpAgentCliInfo, AcpPairingTicket } from '@sediment/shared';
-
 import { listAcpAgentClis } from '@/api/acp';
 import { Button } from '@/components/Common/Button';
 import { SettingRow } from '@/components/Common/SettingRow';
@@ -62,6 +60,8 @@ import { toast } from '@/components/Common/Toast';
 import { useAcpAgentsStore } from '@/store/acpAgentsStore';
 import { useAcpPairingStore } from '@/store/acpPairingStore';
 import { copyToClipboard } from '@/utils/io/clipboard';
+
+import type { AcpAgentCliInfo, AcpPairingTicket } from '@sediment/shared';
 
 /**
  * Custom hook: returns a millisecond-precision "now" that advances

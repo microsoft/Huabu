@@ -1,3 +1,7 @@
+import clsx from 'clsx';
+import { Columns3, Move, Rows3, Ungroup } from 'lucide-react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
+
 import {
   FRAME_GRID_DEFAULT_COUNT,
   FRAME_GRID_MAX_COUNT,
@@ -6,18 +10,15 @@ import {
   type FrameLayoutMode,
 } from '@sediment/shared';
 import { clampGridCount } from '@sediment/shared/canvas-engine';
-import clsx from 'clsx';
-import { Columns3, Move, Rows3, Ungroup } from 'lucide-react';
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
-
-import type { CanvasFrameNodeData } from '@/components/Nodes/types.ts';
-import type { Node, NodeProps } from '@xyflow/react';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
 import { Input } from '@/components/Common/Input.tsx';
 import { getAccentTokens } from '@/components/Nodes/accentTokens.ts';
 import { NodeWrapper } from '@/components/Nodes/NodeWrapper.tsx';
 import useCanvasStore from '@/store/canvasStore.ts';
+
+import type { CanvasFrameNodeData } from '@/components/Nodes/types.ts';
+import type { Node, NodeProps } from '@xyflow/react';
 
 export type FrameNodeType = Node<CanvasFrameNodeData, 'frame'>;
 

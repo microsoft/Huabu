@@ -1,12 +1,12 @@
 import { resolveAccent } from '@sediment/shared';
 
-import { getAccentTokens } from './accentTokens';
-
-import type { CanvasNodeType, NodeData } from './types';
-
 import { cn } from '@/components/Common/cn';
 import { NODE_TYPE_LABEL } from '@/config/nodeIcons';
 import { useFitText } from '@/hooks/useFitText';
+
+import { getAccentTokens } from './accentTokens';
+
+import type { CanvasNodeType, NodeData } from './types';
 
 const ZWS = '\u200B';
 

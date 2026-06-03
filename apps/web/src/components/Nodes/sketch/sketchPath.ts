@@ -1,5 +1,6 @@
-import { ACCENT_PICKER_OPTIONS } from '@sediment/shared';
 import getStroke from 'perfect-freehand';
+
+import { ACCENT_PICKER_OPTIONS } from '@sediment/shared';
 
 export const SKETCH_OPTIONS = {
   size: 4,

@@ -2,6 +2,14 @@ import { clsx } from 'clsx';
 import { MessageSquare, Pencil, Play, Square } from 'lucide-react';
 import { memo, useCallback, useState, useRef, useEffect, useMemo } from 'react';
 
+import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
+import { StatusBadge } from '@/components/Common/StatusBadge.tsx';
+import { useAcpAgents } from '@/hooks/useAcpAgents';
+import { useTextNodeSurface } from '@/hooks/useTextNodeSurface';
+import useCanvasStore from '@/store/canvasStore.ts';
+import { useChatStore } from '@/store/chatStore.ts';
+import { usePanelStore } from '@/store/panelStore.ts';
+
 import { AgentMentionMenu } from './AgentMentionMenu';
 import { NodeWrapper } from '../NodeWrapper';
 import { TextNodeBody } from '../shared/TextNodeBody';
@@ -13,14 +21,6 @@ import type {
 import type { CanvasQuestionNodeData } from '../types';
 import type { AgentBinding } from '@sediment/shared';
 import type { Node, NodeProps } from '@xyflow/react';
-
-import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
-import { StatusBadge } from '@/components/Common/StatusBadge.tsx';
-import { useAcpAgents } from '@/hooks/useAcpAgents';
-import { useTextNodeSurface } from '@/hooks/useTextNodeSurface';
-import useCanvasStore from '@/store/canvasStore.ts';
-import { useChatStore } from '@/store/chatStore.ts';
-import { usePanelStore } from '@/store/panelStore.ts';
 
 export type QuestionNodeType = Node<CanvasQuestionNodeData, 'question'>;
 
@@ -227,35 +227,48 @@ export const QuestionNode = memo(
       [id, status, hasRun, data.threadId, patchNodeSilent, openInChat],
     );
 
-    const handleBlur = useCallback(() => {
-      setIsEditing(false);
+    const handleBlur = useCallback(
+      (e: React.FocusEvent<HTMLTextAreaElement>) => {
+        // Clicking an option in the `@` mention menu briefly shifts focus
+        // from the textarea to the menu button. That is NOT a real blur:
+        // the user is still composing the prompt, so we must not tear
+        // down edit mode or schedule the auto-run countdown. `acceptMention`
+        // will restore caret position on the next animation frame.
+        const next = e.relatedTarget as HTMLElement | null;
+        if (next?.closest('[role="listbox"][aria-label="Mention agent"]')) {
+          return;
+        }
 
-      const trimmed = surface.draft.trim();
-      const contentChanged = trimmed !== inputContent;
+        setIsEditing(false);
 
-      // Commit input to store if changed.
-      if (contentChanged) {
-        updateNodeData(id, {
-          input: { kind: 'text', content: trimmed },
+        const trimmed = surface.draft.trim();
+        const contentChanged = trimmed !== inputContent;
+
+        // Commit input to store if changed.
+        if (contentChanged) {
+          updateNodeData(id, {
+            input: { kind: 'text', content: trimmed },
+          });
+        }
+
+        // Only schedule auto-run when content actually changed.
+        if (!trimmed || !contentChanged) return;
+
+        const delay = (data.autoRunDelay as number | undefined) ?? 10;
+        patchNodeSilent(id, {
+          status: 'pending',
+          runAt: Date.now() + delay * 1000,
         });
-      }
-
-      // Only schedule auto-run when content actually changed.
-      if (!trimmed || !contentChanged) return;
-
-      const delay = (data.autoRunDelay as number | undefined) ?? 10;
-      patchNodeSilent(id, {
-        status: 'pending',
-        runAt: Date.now() + delay * 1000,
-      });
-    }, [
-      surface.draft,
-      inputContent,
-      id,
-      data.autoRunDelay,
-      updateNodeData,
-      patchNodeSilent,
-    ]);
+      },
+      [
+        surface.draft,
+        inputContent,
+        id,
+        data.autoRunDelay,
+        updateNodeData,
+        patchNodeSilent,
+      ],
+    );
 
     // ------------------------------------------------------------------
     // `@` mention typeahead — pick the agent that will handle this

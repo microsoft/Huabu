@@ -1,7 +1,7 @@
-import type { PreviewComponentProps } from '../note/NotePreview';
-
 import { resolveArtifactUrl } from '@/api/artifact';
 import useCanvasStore from '@/store/canvasStore';
+
+import type { PreviewComponentProps } from '../note/NotePreview';
 
 export const VideoPreview = ({ data }: PreviewComponentProps) => {
   const src = typeof data.src === 'string' ? data.src : '';

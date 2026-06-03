@@ -1,14 +1,15 @@
-import { createId } from '@sediment/shared';
 import { useEffect } from 'react';
+
+import { createId } from '@sediment/shared';
+
+import { agentApi } from '@/api/agent';
+import useCanvasStore from '@/store/canvasStore';
+import { useChatStore } from '@/store/chatStore';
 
 import { handleStreamEvent } from './useAgentStream';
 
 import type { ChatMessage } from '../store/chatTypes';
 import type { AgentStreamEvent } from '@sediment/shared';
-
-import { agentApi } from '@/api/agent';
-import useCanvasStore from '@/store/canvasStore';
-import { useChatStore } from '@/store/chatStore';
 
 /**
  * Hook that loads chat history from the server and handles reconnection

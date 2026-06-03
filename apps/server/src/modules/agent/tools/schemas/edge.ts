@@ -5,6 +5,7 @@
  */
 
 import { Type } from '@earendil-works/pi-ai';
+
 import {
   EDGE_DIRECTIONS,
   EDGE_LINE_STYLES,

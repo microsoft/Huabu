@@ -6,8 +6,13 @@
  *   The chosen intent is sent to the chat panel in operate mode for execution.
  */
 
-import { createId } from '@sediment/shared';
 import { create } from 'zustand';
+
+import { createId } from '@sediment/shared';
+
+import { captureCanvasScreenshot } from '@/handler/canvasCommand/utils/screenshot';
+import { clusterSketches, extractSketchContext } from '@/handler/sketch';
+import { snapshotAndExtractChanges } from '@/hooks/useCanvasChanges';
 
 import useCanvasStore from './canvasStore';
 import {
@@ -29,10 +34,6 @@ import type {
   SketchClusterContext,
 } from '@sediment/shared';
 import type { Node } from '@xyflow/react';
-
-import { captureCanvasScreenshot } from '@/handler/canvasCommand/utils/screenshot';
-import { clusterSketches, extractSketchContext } from '@/handler/sketch';
-import { snapshotAndExtractChanges } from '@/hooks/useCanvasChanges';
 
 /**
  * Lifecycle status for a sketch cluster currently being recognised.

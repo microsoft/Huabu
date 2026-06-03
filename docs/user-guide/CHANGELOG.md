@@ -20,6 +20,169 @@
 - **接口兼容**：`POST /api/intent/recognize` 与 `/recognize-stream` 的 body 新增可选 `canvasId`，缺省时退化为不注入 canvas memory（仍能跑），老前端版本无需修改。
 - **失败处理**：Memory 读 / preamble 拼接失败一律 swallow，intent 识别照常进行，只是这次不带 memory bias。
 - **测试覆盖**：依赖现有 memory worker 集成测试覆盖，没新增专门用例。
+## 2026-06-03 · 画布工具栏新增单键快捷键 + 角标提示
+
+**What Changed**
+
+- 画布顶部工具栏的大部分按钮现在右下角会显示一个浅灰色的小角标快捷键，类似 Figma / Excalidraw 的工具提示样式。选择型工具的快捷键采用字母：`S` Select、`P` Pan、`L` Lasso，节点放置型工具采用连续数字键：`1` Frame、`2` Note、`3` Text、`4` Sketch；Question Sticker 用 `Q`。
+- 工具栏的"选择类"工具按钮维持原有的 SplitSelect 结构：左侧主按钮的图标会跟随当前激活的工具变化（Select / Pan / Lasso），右侧 ▾ 下拉可以切换；下拉菜单中每一项右侧也会显示对应字母快捷键，与 Figma 的菜单样式一致。
+- 按下对应键即可触发按钮等价行为：例如 `1` 等同于点击 Frame 按钮——再按一次会取消 pending；`S` / `P` / `L` 分别切到 Select / Pan / Lasso 并清掉 pending node。当前激活的工具，其角标会变成品牌蓝以提供视觉反馈。
+- 按钮的 tooltip 也补充了快捷键，比如 "Frame (1)"、"Select (S)"、"Question Sticker (Q)"；同时在 `?` 帮助弹窗的快捷键列表中新增 **Toolbar** 分组列出全部绑定。
+
+**Notes**
+
+- 快捷键只在不在输入框 / textarea / contentEditable 元素中、且没有 Ctrl / Cmd / Alt / Shift 修饰键、且没有打开 Upload / Link 模态框时才生效；在 Note / Text 节点里继续输入数字 / 字母完全正常。字母键区分大小写（只响应小写），避免跟 shift 组合挥击。
+- Upload / Link 下拉菜单、Intent、以及非鼠标模式下露出的 Undo / Redo 按钮都没有单键绑定。鼠标用户继续使用既有的 `Ctrl/Cmd+Z` / `Ctrl/Cmd+Shift+Z` 做撤销 / 重做。
+- Pan 仍可通过按住 `Space` 临时进入；按 `P` 或在 Select 旁的 ▾ 下拉菜单里选 Pan 同样可切到 Pan 工具。
+- `Button` 与 `SplitSelect` 公共组件新增 `shortcutBadge` / `primaryShortcutBadge` 等 props；SplitSelect 的 `SplitSelectOption` 另增 `shortcut` 字母键提示字段，其他地方如需相同样式的小角标可以直接复用，避免一次性 hack。`Button` 另外在检测到 `iconOnly + shortcutBadge` 时会用不对称 padding 把图标向左上偏移 2px，让右下角出一块干净的角标空间（按钮尺寸保持不变），避免角标贴图标肉。
+
+---
+
+## 2026-06-03 · 修复聊天消息卡片按 `Tab` 仍会编辑文字
+
+**What Changed**
+
+- AI 消息列表里的 `MilkdownMessageCard`（以及任何用 `MilkdownPreview` + `enableBlockDrag` 的只读富文本卡片）之前按 `Tab` 还能改文档：因为为了显示 Crepe 的 block drag 把手必须保留 `contenteditable=true`，而原先的按键拦截器把 `Tab` 列在 `NAV_KEYS` 白名单里直接放行——ProseMirror 的 keymap 就把 Tab 当成"列表缩进 / 切换嵌套层级 / 在 cell 间移动选区"等编辑动作执行了。
+- 现在 `Tab` 从 `NAV_KEYS` 里移除，单独走一条分支：只调用 `stopPropagation()`，**不**调用 `preventDefault()`。结果是 ProseMirror 完全收不到这个事件（再也不会改动文档），但浏览器原生的"Tab 把焦点移到下一个可聚焦元素"行为保留下来，无障碍体验不受影响。
+
+**Notes**
+
+- 影响范围：聊天气泡里的 AI 回复卡片、Note 收起态的预览卡片——任何走 `MilkdownPreview` 且开启了 `enableBlockDrag` 的只读富文本。普通可编辑的 `MilkdownEditor` 不受影响。
+- Arrow / Home / End / PageUp / PageDown / Escape / Ctrl+C / Ctrl+A 等导航和复制快捷键继续放行，块拖拽、复制选区文本的体验完全没变。
+- 没有改 Crepe 的 keymap 或 ProseMirror 插件，只是在外层 React capture 阶段把 Tab 截住——升级 Milkdown / Crepe 时不需要 patch 上游。
+
+---
+
+## 2026-06-03 · 修复鼠标点选 `@agent` 菜单时误触发倒计时
+
+**What Changed**
+
+- 在 QuestionNode 里用鼠标点选 `@` mention 菜单中的 agent 选项时，textarea 会瞬间失去焦点，导致 `handleBlur` 被触发：之前这会立刻退出编辑态并启动 auto-run 倒计时，但用户其实只是在选 agent，prompt 还在编辑中。
+- 现在 `handleBlur` 会检查焦点是否转移到了 mention 菜单内部（`role="listbox"` / `aria-label="Mention agent"`）。如果是，就直接 return，不退出编辑、不写入 store、不排队 pending 倒计时；`acceptMention` 仍会在下一帧把焦点和光标还回 textarea，编辑流程无缝继续。
+
+**Notes**
+
+- 键盘选择（Tab / Enter）路径走 `handleTextareaKeyDown`，焦点根本没离开 textarea，原本就没问题；这次只修复鼠标点选场景。
+- `TextNodeBody` 的 `onBlur` 现在接收 `React.FocusEvent`（之前是无参 callback）。TextNode 的 handler 忽略参数，行为不变。
+- 没有改 mention 菜单的渲染、过滤逻辑或 `agentBinding` 写入策略；只是把"失去焦点"的判定收紧了一格。
+
+---
+
+## 2026-06-03 · Note 富文本 / 源码切换按钮移到展开面板 header
+
+**What Changed**
+
+- 之前 Note 展开预览右上角浮在编辑区里的 **rich text ↔ raw markdown 切换按钮**，搬到 `ExpandedNodePanel` 顶部 header bar 右侧，跟"Split view"和"Close"放成一排——再也不会盖住第一行正文或 H1 标题。
+- 当前处于 raw 模式时，按钮带上 `text-info bg-info-bg` 的"按下"高亮，和 header 里的 Bot / Split view 等其他 toggle 视觉语言一致；WYSIWYG 模式下保持普通 ghost 样式。
+- 实现方式：新增 `apps/web/src/components/Nodes/PreviewHeaderSlot.tsx`（一个轻量 context + `usePreviewHeaderSlot` hook），`ExpandedNodePanel` 在 header 里放一个空的占位 `<div>`，把它的 DOM 元素通过 context 暴露给嵌套的 preview 组件；`NotePreview` 用 `react-dom` 的 `createPortal` 把自己的切换按钮渲染进那个占位元素——按钮的 React state、event handler 仍然挂在 `NotePreview` 上，只是输出位置被搬到了 header。
+
+**Notes**
+
+- 行为完全没变：点按钮依旧在 WYSIWYG / raw 之间切换，`aria-pressed` 仍然汇报当前模式，`readOnly` 预览下按钮仍然不出现。
+- 同一份数据通路（`writePatch` + provenance 处理）丝毫未动；切换不会触发额外的 patch。
+- Slot 机制是通用的——以后别的 preview（PDF / Web / Sketch 等）如果也想往 header 加自己的 action 按钮，只需要在组件里 `usePreviewHeaderSlot()` 然后 `createPortal` 就行，不用改 `ExpandedNodePanel`。
+- 极少数 preview 不被 `ExpandedNodePanel` 渲染时 `headerSlotEl` 会是 `null`，portal 自动跳过，不会报错。
+
+---
+
+## 2026-06-03 · Keyboard Shortcuts 弹窗用 chip 渲染，修正 `+` / `−` 显示
+
+**What Changed**
+
+- Keyboard Shortcuts 弹窗里的每个按键现在都渲染成一个独立的 `<kbd>` chip：组合键不再挤成 `Ctrl++` 这种容易看错的字符串，而是 `[Ctrl] + [+]`、`[⌘][+]` 这样按平台原生约定排列。
+- `apps/web/src/config/shortcuts.ts` 里把含字面 `+` / `-` 的快捷键改写成 `Ctrl/Cmd+Plus` / `Ctrl/Cmd+Minus`，避免和 `+` 分隔符撞车。`apps/web/src/utils/platform.ts` 新增 `shortcutTokens(template)`，统一处理 `Plus` / `Minus` / `Equal` 等占位符以及 `Ctrl/Cmd` / `Shift` / `Alt` 在 Mac 与 Win/Linux 上的展示差异。
+- 顺手修复了一个 Mac 下的小 bug：原来的 `formatShortcut` 会把 `Ctrl/Cmd++` 一路 strip 成 `⌘`，键位整个丢失；改用 token 化输出后 `⌘+` 会正确显示。
+
+**Notes**
+
+- 菜单里的 shortcut 提示（CanvasMenu 的 Undo / Redo 等）继续走 `formatShortcut` 字符串形态，输出与之前一致（`⌘Z` / `Ctrl+Z`），无视觉变化。
+- 新的 chip 样式只用了既有语义 token（`bg-bg-default` / `border-edge-default` / `text-fg-default`），未引入新颜色
+
+---
+
+## 2026-06-03 · Note 源码模式：CodeMirror 主题对齐 Sediment design token（light）
+
+**What Changed**
+
+- 接着上一条"升级到 CodeMirror 6"的工作，**把默认浅色主题换成自定义的 `sedimentLightTheme`**，让 raw Markdown 源码模式视觉上和应用其他部分彻底贴齐——不再有"突然换了一套配色"的违和感。
+- 新增 `apps/web/src/components/CodeMirror/sedimentLightTheme.ts`，把 CodeMirror chrome（编辑器底色、滚动区、光标、选区、行号槽 / 当前行 / 当前行号、tooltip、autocomplete、search panel、bracket matching 等）以及 Lezer Markdown 高亮 tag 全部映射到 `var(--*)` 设计 token 引用：
+  - **编辑器底色 / 文字**：`--bg-default` + `--fg-default`，行号槽透明，右侧用 `--edge-default` 一条分隔线。
+  - **标题、链接、列表标记**：统一走 `--info`（H1–H3 加粗 700，H4–H6 加粗 600，保持等宽栅格不被字号撑乱）。
+  - **行内 code / 围栏 code 标记 / 关键字**：`--warning`（不加背景色，避免代码块出现碎片化的色块）。
+  - **字符串**：`--success`；**数字**：`--danger`；**布尔 / 原子值**：`--warning`。
+  - **引用 / 注释 / 强调标记**：`--fg-muted` / `--fg-subtle` 配合 italic，强调"次要装饰"的语义。
+  - **选区**：focused 用 `--info-bg`，非 focused 与原生 `::selection` 都退化到 `--bg-hover`，避免高对比的蓝块在失焦时还在抢眼。
+  - **搜索 / 替换面板、autocomplete**：复用 `--bg-surface` / `--bg-default` + `--edge-default` 边框 + `--info-bg` 选中态，整张面板和 Sediment 其他浮层一致。
+- `RawMarkdownEditor` 的 `extensions` 数组追加这个主题（放在 `EditorView.lineWrapping` 之后、`readOnlyCompartment` 之前），原有 `basicSetup` 默认高亮被自定义的 `syntaxHighlighting(...)` 覆盖（默认高亮带 `{ fallback: true }`，自动让位）。
+- `NotePreview` 渲染 `RawMarkdownEditor` 时把容器上多余的 `text-sm` 去掉，CodeMirror 内部字号现在由主题统一控制（13px / line-height 1.65 / `ui-monospace` 系统字体栈）。
+
+**Notes**
+
+- **作用域：仅 light**。按用户要求本次只实现 light 主题，dark 暂未做——目前 `sedimentLightTheme` 是 `{ dark: false }` 的 `EditorView.theme`，但内部用的是 `var(--token)` 而不是 hex，所以即便切到 `.dark` 大多数颜色会跟着 CSS 变量自动级联（除了 `dark` flag 影响的少量内置默认值）。完整 dark 主题（含光标 / 选区 / autocomplete 的暗色优化）留作下次工作。
+- **新依赖**：`@lezer/highlight`（直接 dep，用来 import `tags` 给 `HighlightStyle.define` 用）。不会增加运行时体积——Lezer parser 本身已经被 `@codemirror/lang-markdown` 间接引入。
+- **不替换 `basicSetup`**：保留 `basicSetup` 提供的 `highlightActiveLine` / `highlightSelectionMatches` / `closeBrackets` / `autocompletion` / search keymap 等行为，本主题只负责"上色"，不动行为。
+- **没给围栏代码块加每字符背景**：尝试过 `.cm-line` 内 token 加 `bg-bg-hover` 高亮带，视觉上会变成碎片色块；现按 GitHub / Notion 等惯例只给 token 上色、不带 background，整段代码块本身的辨识度交给 Lezer 已经识别出的 `monospace` tag 配色完成。
+- **想要 dark 主题** / 想调具体某个 tag 颜色（比如 H1 想加大字号、code 想加浅色背景），告诉我就行。
+
+---
+
+## 2026-06-03 · Note 源码模式升级到 CodeMirror 6（语法高亮 + 编辑器能力）
+
+**What Changed**
+
+- 上一条引入的 raw Markdown 模式底层从原生 `<textarea>` 换成 **CodeMirror 6**，带来真正的 Markdown 源码编辑体验：
+  - **语法高亮**：标题层级、`**bold**` / `*italic*` / `` `code` `` 行内强调、`>` 引用、列表 / 任务项、链接、围栏代码块（` ```lang `）等都由 Lezer parser 精确识别并上色（暂用 CodeMirror 内置默认浅色主题，先观察效果再决定是否对齐 Sediment 设计 token）。
+  - **行号、当前行高亮、行包裹**（`EditorView.lineWrapping`），长行不再被横向滚动条藏住。
+  - **多光标编辑**（Alt+Click 加光标、Ctrl/Cmd+D 选下一个相同词）、**列编辑**（Shift+Alt+拖拽）。
+  - **括号 / 引号自动配对**、**智能缩进**（列表项 Enter 自动续接 `- ` / `1. ` / `> `，Tab/Shift+Tab 调整层级）。
+  - **Ctrl/Cmd+F 搜索 & 替换**，**Ctrl/Cmd+Z / Ctrl/Cmd+Shift+Z 独立的撤销栈**（不再和浏览器 / canvas 的撤销混在一起）。
+- 新增 `apps/web/src/components/CodeMirror/` 子目录托管所有 `@codemirror/*` 依赖：`RawMarkdownEditor.tsx`（受控组件）+ `index.ts`（barrel）。和现有 `apps/web/src/components/Milkdown/` 一样属于"被严格隔离的第三方编辑器封装层"，外部只能从 barrel 拿到 `RawMarkdownEditor` / `RawMarkdownEditorProps`，不允许直接 import 任何 `@codemirror/*` 包。
+- `NotePreview` 用 `React.lazy` + `<Suspense>` 包住 `RawMarkdownEditor`：CodeMirror 体积（约 80kb gzipped）只在用户**真的点切换按钮进 raw 模式**时才下载，对首屏完全零影响。Suspense fallback 显示 "Loading source editor…" 一闪而过。
+
+**Notes**
+
+- **主题**：当前用 CodeMirror 默认浅色主题，**视觉上和应用其他部分会有色差**——这是有意为之的第一版，先确认整体能力到位再来对齐 design token（一次性把高亮配色映射到 `text-fg-default` / `text-info` / `text-warning` / `bg-bg-default` 等会更细致）。如果觉得太突兀想立刻换主题，告我一声很快能加。
+- **新依赖**：`codemirror`（meta 包，提供 `basicSetup`）、`@codemirror/lang-markdown`、`@codemirror/state`、`@codemirror/view`、`@codemirror/language`。tree-shake 后约 80kb gzipped。
+- **`codeLanguages: []`**：暂未启用围栏代码块（` ```ts `、` ```py ` 等）的子语言高亮。开启需要按需 dynamic-import `@codemirror/lang-javascript` / `@codemirror/lang-python` 等，包体积会随之增大。后续如果用户反馈"想看 fenced code 里的 ts 高亮"再加。
+- **`readOnly` 切换**：通过 `Compartment` 热重配 facet，不重建 View，光标 / 选区 / 历史栈全部保留。
+- **数据通路不变**：仍然走原来的 `writePatch` + `lastEmittedMarkdownRef` 去重逻辑——同一份 `data.content` 在 Milkdown / CodeMirror 之间无损往返，AI 实时改写、undo / redo 等行为和上一版本一致。
+- **provenance 高亮 / Accept / Reject** 仍只在 WYSIWYG 模式显示（CodeMirror 模式无法依赖 ProseMirror block-key），行为没有变化。
+
+---
+
+## 2026-06-03 · Note 展开视图：一键切换富文本 / 原始 Markdown 模式
+
+**What Changed**
+
+- Note 节点的展开预览（`NotePreview`）右上角新增一个**模式切换按钮**，让用户在 Milkdown 富文本所见即所得（WYSIWYG）模式和原始 Markdown 源码模式之间一键切换。
+- WYSIWYG 模式下按钮显示 `<Code2>` 图标，提示 "Edit raw markdown (source)"；切到源码模式后变成 `<BookOpen>`，提示 "Edit rich text (preview)"。按钮带 `aria-pressed`，对屏幕阅读器明确暴露当前模式。
+- 源码模式渲染一个等宽字体（`font-mono text-sm`）的 `<textarea>`，直接读写 `data.content`，编辑流程沿用与 Milkdown 相同的 `writePatch` 通路——同一字符串在两种编辑器之间无损往返，互改不丢内容。
+
+**Notes**
+
+- **使用场景**：富文本模式适合大多数日常笔记编辑；源码模式适合需要精细控制 Markdown 语法（如 raw HTML、math 分隔符、复杂表格、对齐空格、HTML 注释）或快速大段粘贴的情况，弥补 WYSIWYG 编辑器对某些边角语法支持不完整的问题。
+- **Provenance 行为**：AI 改写块的高亮 / Accept / Reject / 底部"AI edited N blocks"汇总条只在 WYSIWYG 模式渲染——它们基于 ProseMirror 的 block-key 寻址，对自由文本的源码编辑不适用。如果有未处理的 AI 块标记，建议先在富文本模式下 Accept / Reject，再切到源码模式做大段重写；不然块标记会在你切回 WYSIWYG 时根据新内容重新对齐，部分原先的 marker 可能因块身份不再匹配而消失（这是预期行为）。
+- **数据安全**：模式切换不会触发额外的 `writePatch`，也不会清空 `data.provenance`。即使在源码模式里改了内容，未匹配上的 provenance 条目仍保留在数据里（只是不再显示），不影响 undo / redo。
+- **只读模式**：当 `NotePreview` 以 `readOnly` 渲染时（如 source / readonly 节点），切换按钮被隐藏，保持原有行为不变。
+- **现阶段不影响 canvas 上的卡片视图**：节点卡片本身使用的是 `MilkdownPreview`（只读富文本渲染），切换按钮只出现在通过 `openExpanded(id)` 打开的展开模态里。
+
+---
+
+## 2026-06-03 · Canvas 下拉菜单：缩小字号 + 显示快捷键
+
+**What Changed**
+
+- Canvas 标题旁的下拉菜单（Undo / Redo / Export Canvas / Keyboard Shortcuts）整体调整为更紧凑的样式：菜单项字号从 `text-sm` 缩小到 `text-xs`，左右内边距与图标间距也相应收紧。
+- 移除菜单项左侧的 lucide 图标，改为更接近原生编辑器菜单的纯文字布局。
+- 拥有快捷键的菜单项（Undo、Redo、Keyboard Shortcuts `?`）在右侧以 subtle 色显示对应快捷键提示，与 `docs/user-guide/08-shortcuts.md` 文档保持一致。
+- 快捷键提示现在会**根据操作系统自动切换**：Windows / Linux 显示 `Ctrl+Z`、`Ctrl+Shift+Z`，macOS 则显示原生的 `⌘Z`、`⌘⇧Z`。检测逻辑封装在新增的 `apps/web/src/utils/platform.ts` 里（导出 `isMac` 与 `formatShortcut`），其它需要展示快捷键提示的菜单也可以复用。
+- 应用 `?` 打开的 Keyboard Shortcuts 弹窗也接入了 `formatShortcut`：每条快捷键直接显示当前平台的原生写法；顶部那段"Use Ctrl on Windows/Linux and Cmd on macOS"提示因此变得冗余，改成更直白的"Showing shortcuts for macOS / Windows·Linux"。
+
+**Notes**
+
+- 字号与间距调整作用于通用 `DropdownMenuItem` 组件，因此应用内其他使用该组件的菜单（如 `IntentSelectMessage`、Showcase 页）也会变得更紧凑——这是预期的视觉统一，不影响交互。
+- `icon` 与 `shortcut` 仍是 `DropdownMenuItem` 的可选 prop，其它消费者无需改动。
+- `formatShortcut` 只识别 `Ctrl/Cmd` / `Shift` / `Alt` / `Option` 这几个常见占位符，未识别的子串原样输出，避免在不熟悉的按键组合上做"聪明但错误"的替换。
 
 ---
 

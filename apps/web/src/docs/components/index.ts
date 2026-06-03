@@ -9,7 +9,7 @@
 export { Callout } from './Callout';
 export { CardGrid, NavCard } from './Card';
 export { Code, CodeBlock, Kbd } from './Code';
-export { H1, H2, H3, P } from './Heading';
+export { H1, H2, H3, P, slugify } from './Heading';
 export { DocImage } from './Image';
 export { DocLink } from './Link';
 export { PageLayout } from './PageLayout';

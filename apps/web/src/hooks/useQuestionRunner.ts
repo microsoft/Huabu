@@ -9,13 +9,14 @@
  * Mount once in the Canvas component — it is canvas-scoped.
  */
 
-import { createId } from '@sediment/shared';
 import { useEffect, useRef } from 'react';
 
-import type { AgentBinding, AgentMode } from '@sediment/shared';
+import { createId } from '@sediment/shared';
 
 import { agentApi } from '@/api/agent';
 import useCanvasStore from '@/store/canvasStore';
+
+import type { AgentBinding, AgentMode } from '@sediment/shared';
 
 // ── Active run tracking (abort on cancel / node delete) ────────
 

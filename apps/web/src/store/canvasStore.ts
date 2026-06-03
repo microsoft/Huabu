@@ -1,17 +1,3 @@
-import { ARTIFACT_DATA_FIELDS } from '@sediment/shared';
-import {
-  COMMAND_META,
-  applySharedPostEffectsFromWriteResult,
-  executeCanvasCommands,
-  computeFrameFit,
-  getAbsolutePosition as getFrameAbsolutePosition,
-  wouldUnframe,
-  wouldAutoFrame,
-  getNodeSize,
-  type AlignDirection,
-  type FrameFitResult,
-  type NestableNode,
-} from '@sediment/shared/canvas-engine';
 import {
   applyNodeChanges,
   applyEdgeChanges,
@@ -26,6 +12,42 @@ import {
   type ReactFlowInstance,
 } from '@xyflow/react';
 import { create, type StateCreator } from 'zustand';
+
+import { ARTIFACT_DATA_FIELDS } from '@sediment/shared';
+import {
+  COMMAND_META,
+  applySharedPostEffectsFromWriteResult,
+  executeCanvasCommands,
+  computeFrameFit,
+  getAbsolutePosition as getFrameAbsolutePosition,
+  wouldUnframe,
+  wouldAutoFrame,
+  getNodeSize,
+  type AlignDirection,
+  type FrameFitResult,
+  type NestableNode,
+} from '@sediment/shared/canvas-engine';
+
+import {
+  runWebPostEffects,
+  scheduleDeferredFrameRelayout,
+} from '@/handler/canvasCommand/postEffects.web';
+import {
+  resolveUiIntent,
+  type AddNodeInput,
+  type CanvasUiIntent,
+  type UiResolverState,
+} from '@/handler/canvasCommand/uiIntent';
+import {
+  applySnap,
+  beginSnapSession,
+  endSnapSession,
+  getResizeContext,
+  getResizeSnappedRect,
+  isSnapSessionActive,
+  isSnapSessionDragEndCommit,
+  isSnapSessionResizeEndCommit,
+} from '@/handler/snap/snapSession';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
 import { createIntentActionWindow } from './canvasStore/intentActionWindow';
@@ -61,27 +83,6 @@ import type {
   WireCanvasNode,
   WireSelectionNode,
 } from '@sediment/shared';
-
-import {
-  runWebPostEffects,
-  scheduleDeferredFrameRelayout,
-} from '@/handler/canvasCommand/postEffects.web';
-import {
-  resolveUiIntent,
-  type AddNodeInput,
-  type CanvasUiIntent,
-  type UiResolverState,
-} from '@/handler/canvasCommand/uiIntent';
-import {
-  applySnap,
-  beginSnapSession,
-  endSnapSession,
-  getResizeContext,
-  getResizeSnappedRect,
-  isSnapSessionActive,
-  isSnapSessionDragEndCommit,
-  isSnapSessionResizeEndCommit,
-} from '@/handler/snap/snapSession';
 
 const AUTOSAVE_DEBOUNCE_MS = 1000;
 const PREPROCESS_DEBOUNCE_MS = 1000;

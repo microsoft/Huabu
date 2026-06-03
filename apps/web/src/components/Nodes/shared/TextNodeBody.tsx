@@ -39,8 +39,12 @@ export interface TextNodeBodyProps {
   draft: string;
   /** Called on every keystroke with the new value. */
   onChange: (next: string) => void;
-  /** Called when the textarea loses focus. */
-  onBlur: () => void;
+  /**
+   * Called when the textarea loses focus. Receives the native React
+   * focus event so callers can inspect `relatedTarget` and ignore
+   * intra-node focus shifts (e.g. clicking a typeahead menu option).
+   */
+  onBlur: (e: React.FocusEvent<HTMLTextAreaElement>) => void;
   /**
    * Optional textarea keydown handler. Lets the parent intercept keys
    * before the browser's default (used by the QuestionNode `@`

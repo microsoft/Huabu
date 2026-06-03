@@ -61,6 +61,13 @@ import {
   type NestableNode,
 } from '@sediment/shared/canvas-engine';
 
+import {
+  SNAP_MAX_GUIDES_PER_FRAME,
+  SNAP_THRESHOLD_SCREEN_PX,
+} from '@/config/canvas';
+import { buildCandidateIndex, computeSnap } from '@/handler/snap/snapEngine';
+import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
+
 import type { ActiveEdges, Rect, SnapIndex } from '@/handler/snap/types';
 import type {
   NodeChange,
@@ -68,13 +75,6 @@ import type {
   NodePositionChange,
   XYPosition,
 } from '@xyflow/react';
-
-import {
-  SNAP_MAX_GUIDES_PER_FRAME,
-  SNAP_THRESHOLD_SCREEN_PX,
-} from '@/config/canvas';
-import { buildCandidateIndex, computeSnap } from '@/handler/snap/snapEngine';
-import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 
 /** Which gesture is currently driving the snap session. */
 export type GestureKind = 'drag' | 'resize';

@@ -7,6 +7,9 @@
 import { Blend, Check, ChevronRight, Command, Undo2 } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
 
+import useCanvasStore from '@/store/canvasStore';
+import { useChatStore } from '@/store/chatStore';
+
 import {
   partIsExecuting,
   reconstructChangesFromCommands,
@@ -19,9 +22,6 @@ import { Spinner } from '../../../Common/Spinner';
 
 import type { CanvasChange } from '../../../../hooks/useCanvasChanges';
 import type { CanvasCommand, CanvasCommandsToolPart } from '@sediment/shared';
-
-import useCanvasStore from '@/store/canvasStore';
-import { useChatStore } from '@/store/chatStore';
 
 export function CanvasCommandCard({
   messageId,
