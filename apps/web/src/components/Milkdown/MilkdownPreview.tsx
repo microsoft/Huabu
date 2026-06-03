@@ -37,7 +37,16 @@ export interface MilkdownPreviewProps {
   onBlockDragStart?: (event: MilkdownBlockDragEvent) => void;
 }
 
-/** Keys that we still want to bubble even in drag-only readonly mode. */
+/**
+ * Keys that we still want to bubble even in drag-only readonly mode.
+ *
+ * NOTE: `Tab` is intentionally NOT in this set. ProseMirror's keymap
+ * treats Tab as an editing verb (indent list item / change nesting /
+ * move selection across blocks), so we have to keep the event from
+ * reaching the editor. See the dedicated branch in `onKeyDownCapture`
+ * below — it stops propagation without calling `preventDefault`, so
+ * the browser's native focus navigation still works.
+ */
 const NAV_KEYS = new Set([
   'ArrowLeft',
   'ArrowRight',
@@ -48,13 +57,16 @@ const NAV_KEYS = new Set([
   'PageUp',
   'PageDown',
   'Escape',
-  'Tab',
 ]);
 
 const MODIFIER_KEYS = new Set(['Shift', 'Control', 'Alt', 'Meta']);
 
 function shouldSwallowKey(e: React.KeyboardEvent): boolean {
   if (MODIFIER_KEYS.has(e.key) || NAV_KEYS.has(e.key)) return false;
+  // Tab is handled by its own branch in `onKeyDownCapture` — don't
+  // route it through the generic preventDefault path here, since that
+  // would also block browser focus navigation.
+  if (e.key === 'Tab') return false;
   const key = e.key.toLowerCase();
   // Preserve copy / select-all so the user can still pull text out.
   const isCopyOrSelectAll =
@@ -170,6 +182,17 @@ export function MilkdownPreview(props: MilkdownPreviewProps): JSX.Element {
   const onKeyDownCapture = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
       if (!enableBlockDrag) return;
+      // Tab is special: ProseMirror's keymap binds it to indent /
+      // change list nesting / move selection between cells, all of
+      // which mutate the document. Stop the event from reaching the
+      // editor but DON'T call preventDefault — that way the browser
+      // still moves keyboard focus to the next focusable element,
+      // which is the accessibility-correct behavior for a read-only
+      // surface.
+      if (e.key === 'Tab') {
+        e.stopPropagation();
+        return;
+      }
       if (!shouldSwallowKey(e)) return;
       e.preventDefault();
       e.stopPropagation();
