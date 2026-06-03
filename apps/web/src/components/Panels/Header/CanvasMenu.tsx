@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { ChevronDown, Download, Redo2, Undo2 } from 'lucide-react';
+import { ChevronDown, Download, Keyboard, Redo2, Undo2 } from 'lucide-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 import { exportCanvas } from '../../../api/canvas.ts';
@@ -8,11 +8,20 @@ import { Button } from '../../Common/Button.tsx';
 import { DropdownMenu, DropdownMenuItem } from '../../Common/DropdownMenu.tsx';
 import { toast } from '../../Common/Toast.tsx';
 
+interface CanvasMenuProps {
+  /**
+   * Opens the Keyboard Shortcuts modal. Wired from `CanvasPage`, which owns
+   * the modal state. When omitted (e.g. on standalone-page headers that do
+   * not host the modal), the menu item is hidden.
+   */
+  onOpenShortcuts?: () => void;
+}
+
 /**
  * canvas title + dropdown menu.
  * Sits in the header and exposes Export / Import canvas actions.
  */
-export const CanvasMenu: React.FC = () => {
+export const CanvasMenu: React.FC<CanvasMenuProps> = ({ onOpenShortcuts }) => {
   const canvasTitle = useCanvasStore((s) => s.canvasTitle);
   const tryRename = useCanvasStore((s) => s.tryRename);
   const canvasId = useCanvasStore((s) => s.canvasId);
@@ -139,6 +148,17 @@ export const CanvasMenu: React.FC = () => {
         >
           Export Canvas
         </DropdownMenuItem>
+        {onOpenShortcuts && (
+          <DropdownMenuItem
+            icon={<Keyboard size={14} />}
+            onClick={() => {
+              setIsOpen(false);
+              onOpenShortcuts();
+            }}
+          >
+            Keyboard Shortcuts
+          </DropdownMenuItem>
+        )}
       </DropdownMenu>
     </div>
   );

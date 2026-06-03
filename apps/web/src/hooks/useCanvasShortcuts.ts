@@ -317,6 +317,23 @@ export function useCanvasShortcuts(
         return;
       }
 
+      // Cmd/Ctrl + '=' / '+' → zoom in (Shift+= produces '+' on US layouts).
+      // Cmd/Ctrl + '-' / '_' → zoom out. Accept both forms so users don't
+      // have to think about whether Shift is involved. preventDefault stops
+      // the browser from zooming the whole page instead of the canvas.
+      if (key === '=' || key === '+') {
+        if (editable) return;
+        e.preventDefault();
+        rfInstanceRef.current?.zoomIn({ duration: 200 });
+        return;
+      }
+      if (key === '-' || key === '_') {
+        if (editable) return;
+        e.preventDefault();
+        rfInstanceRef.current?.zoomOut({ duration: 200 });
+        return;
+      }
+
       // Remaining shortcuts require Cmd/Ctrl without Shift
       if (e.shiftKey) return;
 
@@ -421,6 +438,7 @@ export function useCanvasShortcuts(
     pasteFiles,
     pasteText,
     toggleAutoLayout,
+    rfInstanceRef,
   ]);
 
   // --- Native paste event listener ---

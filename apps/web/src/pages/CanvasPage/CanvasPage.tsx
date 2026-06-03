@@ -109,14 +109,13 @@ export default function CanvasPage() {
   return (
     <>
       <MainLayout
-        header={<CanvasHeader />}
+        header={
+          <CanvasHeader onOpenShortcuts={() => setIsShortcutsOpen(true)} />
+        }
         leftPanel={<CanvasLayerPanel />}
         rightPanel={<ChatPanel />}
       >
-        <CenterArea
-          canvasShortcutsDisabled={isShortcutsOpen}
-          onOpenHelp={() => setIsShortcutsOpen(true)}
-        />
+        <CenterArea canvasShortcutsDisabled={isShortcutsOpen} />
       </MainLayout>
 
       <KeyboardShortcutsModal

@@ -1,4 +1,4 @@
-import { Bot, BookOpen, HelpCircle } from 'lucide-react';
+import { Bot, BookOpen } from 'lucide-react';
 import React, { useCallback, useRef } from 'react';
 
 import { Button } from '../../components/Common/Button';
@@ -19,7 +19,6 @@ const SPLIT_DEFAULT_RATIO = 0.5;
  */
 type CenterAreaProps = {
   canvasShortcutsDisabled?: boolean;
-  onOpenHelp?: () => void;
   /**
    * Mirrors the chat (right) panel collapse state. Injected by MainLayout
    * so the floating chat-toggle button can live on top of the canvas
@@ -31,7 +30,6 @@ type CenterAreaProps = {
 
 export const CenterArea: React.FC<CenterAreaProps> = ({
   canvasShortcutsDisabled = false,
-  onOpenHelp,
   isChatCollapsed,
   onToggleChat,
 }) => {
@@ -152,19 +150,6 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
           >
             <BookOpen />
           </Button>
-          {onOpenHelp && (
-            <Button
-              variant="ghost"
-              shape="pill"
-              size="lg"
-              iconOnly
-              onClick={onOpenHelp}
-              title="Keyboard Shortcuts (?)"
-              aria-label="Keyboard shortcuts"
-            >
-              <HelpCircle />
-            </Button>
-          )}
           <SettingsPopover variant="ghost" shape="pill" size="lg" />
           {onToggleChat && (
             <Button

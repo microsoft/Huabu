@@ -28,19 +28,20 @@ export const keyboardShortcutSections: ShortcutSection[] = [
   {
     title: 'Layout',
     items: [
-      { keys: 'Ctrl/Cmd+Shift+L', description: 'Auto-layout all nodes' },
       {
         keys: 'Ctrl/Cmd+Shift+A',
         description: 'Toggle auto-layout mode',
       },
+      { keys: 'Ctrl/Cmd+= / +', description: 'Zoom in' },
+      { keys: 'Ctrl/Cmd+-', description: 'Zoom out' },
       { keys: 'Space (hold)', description: 'Temporarily switch to pan tool' },
     ],
   },
   {
     title: 'Layering & Grouping',
     items: [
-      { keys: '[ / 【', description: 'Send selected nodes to back' },
-      { keys: '] / 】', description: 'Bring selected nodes to front' },
+      { keys: '[', description: 'Send selected nodes to back' },
+      { keys: ']', description: 'Bring selected nodes to front' },
       { keys: 'Ctrl/Cmd+G', description: 'Group selected nodes into a frame' },
     ],
   },
