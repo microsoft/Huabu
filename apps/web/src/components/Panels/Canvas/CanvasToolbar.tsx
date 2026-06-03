@@ -12,11 +12,6 @@ import {
 } from 'lucide-react';
 import { useMemo, useRef, useState, type ChangeEvent } from 'react';
 
-import { uploadImage, uploadPdf, uploadVideo } from '@/api/artifact';
-import { useIsNotMouse } from '@/hooks/useInputMode';
-import { useIntentStore } from '@/store/intentStore';
-import { useToolStore } from '@/store/toolStore';
-
 import { NODE_ICON } from '../../../config/nodeIcons.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import { detectNodeType } from '../../../utils/io/media.ts';
@@ -30,6 +25,11 @@ import {
 import { SketchSettingsPanel } from '../../Nodes/sketch/SketchSettingsPanel.tsx';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
+
+import { uploadImage, uploadPdf, uploadVideo } from '@/api/artifact';
+import { useIsNotMouse } from '@/hooks/useInputMode';
+import { useIntentStore } from '@/store/intentStore';
+import { useToolStore } from '@/store/toolStore';
 
 interface NodeToolbarProps {
   activeTool: 'select' | 'pan' | 'lasso';

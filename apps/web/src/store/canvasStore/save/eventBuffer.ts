@@ -16,9 +16,9 @@
  * enforced server-side via Fastify's `bodyLimit`).
  */
 
-import { postCanvasEvents } from '@/api';
-
 import type { CanvasEventInput, RecentAction } from '@sediment/shared';
+
+import { postCanvasEvents } from '@/api';
 
 const EVENT_BATCH_MAX = 200;
 

@@ -2,10 +2,6 @@ import clsx from 'clsx';
 import { MessageSquare, Plus, Star } from 'lucide-react';
 import { useCallback, useRef } from 'react';
 
-import useCanvasStore from '@/store/canvasStore';
-import { usePreviewStore } from '@/store/previewStore';
-import { setDragPayload } from '@/utils/io/dragDrop';
-
 import { NODE_ICON } from '../../config/nodeIcons';
 import { Button } from '../Common/Button';
 import { DragToCanvasHandleButton } from '../Common/DragToCanvasHandleButton';
@@ -14,6 +10,10 @@ import { Spinner } from '../Common/Spinner';
 
 import type { ChatAttachment } from '@sediment/shared';
 import type { FC } from 'react';
+
+import useCanvasStore from '@/store/canvasStore';
+import { usePreviewStore } from '@/store/previewStore';
+import { setDragPayload } from '@/utils/io/dragDrop';
 
 type FloatingDragHandleProps = {
   /** Screen-space position (clientX/Y from the triggering pointerup) */

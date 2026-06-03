@@ -1,10 +1,6 @@
 import { ArrowUp, Square, X } from 'lucide-react';
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 
-import { uploadImage, uploadPdf } from '@/api/artifact';
-import useCanvasStore from '@/store/canvasStore';
-import { selectCurrentMessages, useChatStore } from '@/store/chatStore';
-
 import { ContextUsageRing } from './ContextUsageRing';
 import { SourceCount } from './SelectedNodeRefs';
 import { SlashCommandMenu } from './SlashCommandMenu';
@@ -15,6 +11,10 @@ import { Tooltip } from '../../Common/Tooltip';
 
 import type { ContextUsageOverride } from './ContextUsageRing';
 import type { AgentMode, AvailableCommand } from '@sediment/shared';
+
+import { uploadImage, uploadPdf } from '@/api/artifact';
+import useCanvasStore from '@/store/canvasStore';
+import { selectCurrentMessages, useChatStore } from '@/store/chatStore';
 
 interface ChatInputProps {
   value: string;

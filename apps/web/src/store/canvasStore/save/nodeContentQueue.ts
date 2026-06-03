@@ -20,8 +20,6 @@
  * See `docs/node-content-api-split.md`.
  */
 
-import { CanvasConflictError, putNodeContent } from '@/api/canvas';
-
 import {
   MD_BACKED_NODE_TYPES,
   NODE_CONTENT_KEYS,
@@ -31,6 +29,8 @@ import { createPerKeyDebouncer } from './perKeyDebouncer';
 
 import type { PutNodeContentRequest } from '@sediment/shared';
 import type { Node } from '@xyflow/react';
+
+import { CanvasConflictError, putNodeContent } from '@/api/canvas';
 
 /**
  * Slice fields the queue reads at fire time. Kept structural (not

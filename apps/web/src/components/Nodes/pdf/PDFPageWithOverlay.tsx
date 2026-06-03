@@ -4,6 +4,8 @@ import { Page } from 'react-pdf';
 
 import 'react-pdf/dist/Page/TextLayer.css';
 
+import type { PdfHighlight } from '@sediment/shared';
+
 import { LoadingState } from '@/components/Common/LoadingState';
 
 import './pdfWorker';
@@ -44,8 +46,6 @@ type DragState = {
   currentX: number;
   currentY: number;
 };
-
-import type { PdfHighlight } from '@sediment/shared';
 
 type PDFPageWithOverlayProps = {
   /** 1-based page number for react-pdf */

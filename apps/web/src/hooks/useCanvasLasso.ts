@@ -7,9 +7,9 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 
-import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
-
 import type { Edge, ReactFlowInstance } from '@xyflow/react';
+
+import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
 type Point = {
   x: number;

@@ -39,7 +39,7 @@ export const Toggle: React.FC<ToggleProps> = ({
     >
       <span
         className={[
-          'pointer-events-none inline-block h-4 w-4 rounded-full bg-surface shadow-sm',
+          'bg-surface pointer-events-none inline-block h-4 w-4 rounded-full shadow-sm',
           'transition-transform duration-200 ease-in-out',
           checked ? 'translate-x-4' : 'translate-x-0',
         ].join(' ')}

@@ -1,15 +1,15 @@
 import { Fullscreen } from 'lucide-react';
 import { memo } from 'react';
 
-import { resolveArtifactUrl } from '@/api/artifact';
-import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
-import useCanvasStore from '@/store/canvasStore.ts';
-
 import { MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
 
 import type { CanvasImageNodeData } from '../types';
 import type { Node, NodeProps } from '@xyflow/react';
+
+import { resolveArtifactUrl } from '@/api/artifact';
+import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
+import useCanvasStore from '@/store/canvasStore.ts';
 
 export type ImageNodeType = Node<CanvasImageNodeData, 'image'>;
 

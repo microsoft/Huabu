@@ -4,9 +4,9 @@ import {
   type NestableNode,
 } from '@sediment/shared/canvas-engine';
 
-import useCanvasStore from '@/store/canvasStore';
-
 import type { CanvasSketchNodeData } from '../types';
+
+import useCanvasStore from '@/store/canvasStore';
 
 /**
  * Result of a sketch hit-test at a flow-space point.

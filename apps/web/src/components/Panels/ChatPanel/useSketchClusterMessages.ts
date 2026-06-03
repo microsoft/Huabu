@@ -18,10 +18,10 @@
 import { createId } from '@sediment/shared';
 import { useMemo } from 'react';
 
-import { useIntentStore } from '@/store/intentStore';
-
 import type { AssistantSegment, ChatMessage } from '@/store/chatTypes';
 import type { SketchProcessingCluster } from '@/store/intentStore';
+
+import { useIntentStore } from '@/store/intentStore';
 
 /**
  * Build the ChatMessage[] timeline for the given cluster.

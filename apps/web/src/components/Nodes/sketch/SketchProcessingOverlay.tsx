@@ -16,17 +16,17 @@ import { ViewportPortal } from '@xyflow/react';
 import { Blend, Check, Undo2 } from 'lucide-react';
 import { memo, useMemo } from 'react';
 
-import useCanvasStore from '@/store/canvasStore';
-import { useChatStore } from '@/store/chatStore';
-import { useIntentStore } from '@/store/intentStore';
-import { usePanelStore } from '@/store/panelStore';
-
 import { useCanvasChangePreview } from '../../../hooks/useCanvasChanges';
 import { Button } from '../../Common/Button';
 import { StatusBadge } from '../../Common/StatusBadge';
 
 import type { SketchProcessingCluster } from '@/store/intentStore';
 import type { Node } from '@xyflow/react';
+
+import useCanvasStore from '@/store/canvasStore';
+import { useChatStore } from '@/store/chatStore';
+import { useIntentStore } from '@/store/intentStore';
+import { usePanelStore } from '@/store/panelStore';
 
 /** Walk the parent chain to compute a node's absolute flow-space position. */
 function absolutePosition(

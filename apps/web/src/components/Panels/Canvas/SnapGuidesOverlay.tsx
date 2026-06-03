@@ -1,9 +1,9 @@
 import React, { useMemo } from 'react';
 
-import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
-
 import type { Guide } from '@/handler/snap/types';
 import type { ReactFlowInstance } from '@xyflow/react';
+
+import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 
 type Props = {
   rfInstance: ReactFlowInstance | null;

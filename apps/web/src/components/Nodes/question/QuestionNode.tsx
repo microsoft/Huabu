@@ -2,14 +2,6 @@ import { clsx } from 'clsx';
 import { MessageSquare, Pencil, Play, Square } from 'lucide-react';
 import { memo, useCallback, useState, useRef, useEffect, useMemo } from 'react';
 
-import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
-import { StatusBadge } from '@/components/Common/StatusBadge.tsx';
-import { useAcpAgents } from '@/hooks/useAcpAgents';
-import { useTextNodeSurface } from '@/hooks/useTextNodeSurface';
-import useCanvasStore from '@/store/canvasStore.ts';
-import { useChatStore } from '@/store/chatStore.ts';
-import { usePanelStore } from '@/store/panelStore.ts';
-
 import { AgentMentionMenu } from './AgentMentionMenu';
 import { NodeWrapper } from '../NodeWrapper';
 import { TextNodeBody } from '../shared/TextNodeBody';
@@ -21,6 +13,14 @@ import type {
 import type { CanvasQuestionNodeData } from '../types';
 import type { AgentBinding } from '@sediment/shared';
 import type { Node, NodeProps } from '@xyflow/react';
+
+import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
+import { StatusBadge } from '@/components/Common/StatusBadge.tsx';
+import { useAcpAgents } from '@/hooks/useAcpAgents';
+import { useTextNodeSurface } from '@/hooks/useTextNodeSurface';
+import useCanvasStore from '@/store/canvasStore.ts';
+import { useChatStore } from '@/store/chatStore.ts';
+import { usePanelStore } from '@/store/panelStore.ts';
 
 export type QuestionNodeType = Node<CanvasQuestionNodeData, 'question'>;
 

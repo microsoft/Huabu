@@ -11,8 +11,6 @@
 
 import { useCallback, useMemo, useRef, useState } from 'react';
 
-import useCanvasStore from '@/store/canvasStore';
-
 import { cancelAgentAnimation } from './useAgentStream';
 
 import type {
@@ -23,6 +21,8 @@ import type {
   CanvasNodeGeometryUpdate,
 } from '@sediment/shared';
 import type { Node, Edge } from '@xyflow/react';
+
+import useCanvasStore from '@/store/canvasStore';
 
 // ==================== CanvasChange Type ====================
 

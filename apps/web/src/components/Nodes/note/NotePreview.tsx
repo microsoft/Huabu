@@ -19,6 +19,16 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { ProvenanceOverlay } from './ProvenanceOverlay';
+
+import type {
+  MilkdownBlockDragEvent,
+  MilkdownDecorationSpec,
+  MilkdownInstance,
+} from '@/components/Milkdown';
+import type { NoteDragPayload } from '@/utils/io/dragDrop';
+import type { MarkdownProvenance, NodeOrigin } from '@sediment/shared';
+
 import { Button } from '@/components/Common/Button';
 import { MilkdownEditor } from '@/components/Milkdown';
 import { consumeAiContentEdit } from '@/utils/aiEditFlags';
@@ -31,16 +41,6 @@ import {
   stampAiEdit,
 } from '@/utils/blockProvenance';
 import { setDragPayload } from '@/utils/io/dragDrop';
-
-import { ProvenanceOverlay } from './ProvenanceOverlay';
-
-import type {
-  MilkdownBlockDragEvent,
-  MilkdownDecorationSpec,
-  MilkdownInstance,
-} from '@/components/Milkdown';
-import type { NoteDragPayload } from '@/utils/io/dragDrop';
-import type { MarkdownProvenance, NodeOrigin } from '@sediment/shared';
 
 const PROVENANCE_ENABLED = (import.meta.env.VITE_PROVENANCE ?? 'on') !== 'off';
 

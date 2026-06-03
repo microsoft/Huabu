@@ -23,6 +23,11 @@ import React, {
 } from 'react';
 import { createPortal } from 'react-dom';
 
+import { getAccentTokens } from './accentTokens.ts';
+import { SemanticPlaceholder } from './SemanticPlaceholder.tsx';
+
+import type { CanvasNodeType, NodeData } from './types.ts';
+
 import { cn } from '@/components/Common/cn.ts';
 import { Spinner } from '@/components/Common/Spinner.tsx';
 import { Tooltip } from '@/components/Common/Tooltip.tsx';
@@ -38,11 +43,6 @@ import { useIsNotMouse } from '@/hooks/useInputMode.ts';
 import { useNodeLOD } from '@/hooks/useNodeLOD.ts';
 import useCanvasStore from '@/store/canvasStore.ts';
 import { coerceProvenance } from '@/utils/blockProvenance';
-
-import { getAccentTokens } from './accentTokens.ts';
-import { SemanticPlaceholder } from './SemanticPlaceholder.tsx';
-
-import type { CanvasNodeType, NodeData } from './types.ts';
 
 /**
  * Global node background opacity, in percent. The wrapper composites every

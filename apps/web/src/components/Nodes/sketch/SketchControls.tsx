@@ -1,11 +1,11 @@
-import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
-import { RangeSlider } from '@/components/Common/RangeSlider';
-
 import {
   SKETCH_COLOR_OPTIONS,
   SKETCH_SIZE_MAX,
   SKETCH_SIZE_MIN,
 } from './sketchPath';
+
+import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
+import { RangeSlider } from '@/components/Common/RangeSlider';
 
 interface SketchControlsProps {
   /** Current stroke color (accent palette token; legacy hex also accepted). */

@@ -11,9 +11,9 @@
  * This module replaces both the old `ingest.ts` and `resolveLabel.ts`.
  */
 
-import { preprocessNode } from '@/api/canvas';
-
 import type { Node } from '@xyflow/react';
+
+import { preprocessNode } from '@/api/canvas';
 
 // Re-export the ingestion status types (unchanged interface for canvasStore)
 export type NodeIngestionStatus = 'pending' | 'success' | 'error';

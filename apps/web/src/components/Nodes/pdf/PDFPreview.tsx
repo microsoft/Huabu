@@ -3,14 +3,6 @@ import { Highlighter, Scan } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Document } from 'react-pdf';
 
-import { resolveArtifactUrl, uploadImage } from '@/api/artifact';
-import {
-  computeHighlightUpdate,
-  mergeLineRects,
-} from '@/handler/pdfHighlight/highlight';
-import useCanvasStore from '@/store/canvasStore';
-import { useChatStore } from '@/store/chatStore';
-
 import { FloatingDragHandle } from '../FloatingDragHandle';
 import { PDFPageWithOverlay } from './PDFPageWithOverlay';
 import { PDF_DOCUMENT_OPTIONS } from './pdfWorker';
@@ -20,6 +12,14 @@ import { LoadingState } from '../../Common/LoadingState';
 import type { AreaCapturedEvent, NormalizedRect } from './PDFPageWithOverlay';
 import type { PreviewComponentProps } from '../note/NotePreview';
 import type { ChatAttachment, PdfHighlight } from '@sediment/shared';
+
+import { resolveArtifactUrl, uploadImage } from '@/api/artifact';
+import {
+  computeHighlightUpdate,
+  mergeLineRects,
+} from '@/handler/pdfHighlight/highlight';
+import useCanvasStore from '@/store/canvasStore';
+import { useChatStore } from '@/store/chatStore';
 
 /**
  * When CSS scale-up exceeds this ratio the canvas is re-rendered at the
