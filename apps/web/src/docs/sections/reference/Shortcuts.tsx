@@ -1,22 +1,96 @@
-// TODO: fill in real handbook content for this section.
+import { Fragment } from 'react';
+
+import { keyboardShortcutSections } from '../../../config/shortcuts';
 import {
   Callout,
   H2,
   Kbd,
   P,
   PageLayout,
+  slugify,
   Table,
   type TocEntry,
 } from '../../components';
 
+const PASTE_SECTION = {
+  id: 'paste-behaviour',
+  label: 'Paste behaviour',
+} as const;
+
 const toc: TocEntry[] = [
-  { id: 'editing', label: 'Editing' },
-  { id: 'layout', label: 'Layout' },
-  { id: 'order-and-grouping', label: 'Layering & grouping' },
-  { id: 'ai', label: 'AI' },
-  { id: 'help-modals', label: 'Help' },
-  { id: 'paste-behaviour', label: 'Paste behaviour' },
+  ...keyboardShortcutSections.map((section) => ({
+    id: slugify(section.title),
+    label: section.title,
+  })),
+  { id: PASTE_SECTION.id, label: PASTE_SECTION.label },
 ];
+
+/**
+ * Maps shortcut-template tokens that would otherwise collide with the `+`
+ * separator (e.g. `Ctrl/Cmd+Plus`) to their printable glyphs. Mirrors the
+ * mapping used by `utils/platform.ts` for the in-app shortcuts modal so the
+ * two surfaces stay visually consistent.
+ */
+const KEY_GLYPHS: Record<string, string> = {
+  Plus: '+',
+  Minus: '−', // U+2212 minus sign — distinct from the `+` separator
+  Equal: '=',
+};
+
+/**
+ * Render a shortcut template from `config/shortcuts.ts` as a row of
+ * `<Kbd>` chips. Unlike the in-app modal — which collapses `Ctrl/Cmd` to
+ * the platform-native modifier — the docs always render both `Ctrl` and
+ * `Cmd` so the page reads correctly regardless of the visitor's OS.
+ *
+ * Handles three template shapes:
+ *   - `Key+Key+...` combinations (e.g. `Ctrl/Cmd+Shift+Z`)
+ *   - `Key / Key` alternatives (e.g. `Delete / Backspace`)
+ *   - `Key (qualifier)` annotations (e.g. `Space (hold)`)
+ */
+function ShortcutKbd({ template }: { template: string }) {
+  if (template.includes(' / ')) {
+    const alternatives = template.split(' / ');
+    return (
+      <>
+        {alternatives.map((alt, index) => (
+          <Fragment key={`alt-${index}`}>
+            {index > 0 && ' / '}
+            <ShortcutKbd template={alt} />
+          </Fragment>
+        ))}
+      </>
+    );
+  }
+
+  const qualifierMatch = /^(.+?)\s+\(([^)]+)\)$/.exec(template);
+  if (qualifierMatch) {
+    const [, base, qualifier] = qualifierMatch;
+    return (
+      <>
+        <ShortcutKbd template={base} /> ({qualifier})
+      </>
+    );
+  }
+
+  const parts = template.split('+').map((part) => part.trim());
+  return (
+    <>
+      {parts.map((part, index) => (
+        <Fragment key={`part-${index}`}>
+          {index > 0 && '+'}
+          {part === 'Ctrl/Cmd' ? (
+            <>
+              <Kbd>Ctrl</Kbd>/<Kbd>Cmd</Kbd>
+            </>
+          ) : (
+            <Kbd>{KEY_GLYPHS[part] ?? part}</Kbd>
+          )}
+        </Fragment>
+      ))}
+    </>
+  );
+}
 
 export default function Shortcuts() {
   return (
@@ -31,106 +105,20 @@ export default function Shortcuts() {
       }
       toc={toc}
     >
-      <H2>Editing</H2>
-      <Table
-        headers={['Shortcut', 'Action']}
-        rows={[
-          [
-            <>
-              <Kbd>Ctrl</Kbd>/<Kbd>Cmd</Kbd>+<Kbd>Z</Kbd>
-            </>,
-            'Undo',
-          ],
-          [
-            <>
-              <Kbd>Ctrl</Kbd>/<Kbd>Cmd</Kbd>+<Kbd>Shift</Kbd>+<Kbd>Z</Kbd>
-            </>,
-            'Redo',
-          ],
-          [
-            <>
-              <Kbd>Ctrl</Kbd>/<Kbd>Cmd</Kbd>+<Kbd>C</Kbd>
-            </>,
-            'Copy selected nodes',
-          ],
-          [
-            <>
-              <Kbd>Ctrl</Kbd>/<Kbd>Cmd</Kbd>+<Kbd>V</Kbd>
-            </>,
-            'Paste nodes / files / URLs / text',
-          ],
-          [
-            <>
-              <Kbd>Delete</Kbd> / <Kbd>Backspace</Kbd>
-            </>,
-            'Delete selected nodes or edges',
-          ],
-        ]}
-      />
+      {keyboardShortcutSections.map((section) => (
+        <Fragment key={section.title}>
+          <H2>{section.title}</H2>
+          <Table
+            headers={['Shortcut', 'Action']}
+            rows={section.items.map((item) => [
+              <ShortcutKbd key={item.keys} template={item.keys} />,
+              item.description,
+            ])}
+          />
+        </Fragment>
+      ))}
 
-      <H2>Layout</H2>
-      <Table
-        headers={['Shortcut', 'Action']}
-        rows={[
-          [
-            <>
-              <Kbd>Ctrl</Kbd>/<Kbd>Cmd</Kbd>+<Kbd>Shift</Kbd>+<Kbd>L</Kbd>
-            </>,
-            'Run auto-layout on all nodes',
-          ],
-          [
-            <>
-              <Kbd>Ctrl</Kbd>/<Kbd>Cmd</Kbd>+<Kbd>Shift</Kbd>+<Kbd>A</Kbd>
-            </>,
-            'Toggle incremental auto-layout',
-          ],
-          [
-            <>
-              <Kbd>Space</Kbd> (hold)
-            </>,
-            'Temporary pan tool',
-          ],
-        ]}
-      />
-
-      <H2>Layering & grouping</H2>
-      <Table
-        headers={['Shortcut', 'Action']}
-        rows={[
-          [<Kbd>[</Kbd>, 'Send to back'],
-          [<Kbd>]</Kbd>, 'Bring to front'],
-          [
-            <>
-              <Kbd>Ctrl</Kbd>/<Kbd>Cmd</Kbd>+<Kbd>G</Kbd>
-            </>,
-            'Group selection into a new Frame',
-          ],
-        ]}
-      />
-
-      <H2>AI</H2>
-      <Table
-        headers={['Shortcut', 'Action']}
-        rows={[
-          [
-            <>
-              <Kbd>Ctrl</Kbd>/<Kbd>Cmd</Kbd>+<Kbd>I</Kbd>
-            </>,
-            'Open the Intent popover',
-          ],
-        ]}
-      />
-
-      <H2>Help</H2>
-      <Table
-        headers={['Shortcut', 'Action']}
-        rows={[
-          [<Kbd>?</Kbd>, 'Open the keyboard-shortcut modal'],
-          [<Kbd>Esc</Kbd>, 'Cancel the current tool / close the modal'],
-        ]}
-      />
-
-      <H2>Paste behaviour</H2>
+      <H2>{PASTE_SECTION.label}</H2>
       <P>
         <Kbd>Ctrl</Kbd>/<Kbd>Cmd</Kbd>+<Kbd>V</Kbd> resolves to different node
         types depending on what&apos;s on your clipboard:

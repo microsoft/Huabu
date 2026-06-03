@@ -119,7 +119,6 @@ export function useCanvasShortcuts(
   const disconnectEdges = useCanvasStore((s) => s.disconnectEdges);
   const addNodes = useCanvasStore((s) => s.addNodes);
   const addNode = useCanvasStore((s) => s.addNode);
-  const toggleAutoLayout = useCanvasStore((s) => s.toggleAutoLayout);
   const canvasId = useCanvasStore((s) => s.canvasId);
 
   // --- Tool state (select / lasso / pan) ---
@@ -300,14 +299,6 @@ export function useCanvasShortcuts(
         return;
       }
 
-      // Cmd/Ctrl+Shift+A → toggle auto layout
-      if (lowerKey === 'a' && e.shiftKey) {
-        if (editable) return;
-        e.preventDefault();
-        toggleAutoLayout();
-        return;
-      }
-
       // Cmd/Ctrl + '=' / '+' → zoom in (Shift+= produces '+' on US layouts).
       // Cmd/Ctrl + '-' / '_' → zoom out. Accept both forms so users don't
       // have to think about whether Shift is involved. preventDefault stops
@@ -428,7 +419,6 @@ export function useCanvasShortcuts(
     getFlowPos,
     pasteFiles,
     pasteText,
-    toggleAutoLayout,
     rfInstanceRef,
   ]);
 

@@ -18,6 +18,18 @@ export type ButtonProps = {
   iconOnly?: boolean;
   className?: string;
   tooltipWrapperClassName?: string;
+  /**
+   * Optional single-character keyboard hint rendered as a tiny subscript
+   * in the button's bottom-right corner.
+   * Purely cosmetic — the caller is responsible for wiring the actual
+   * keyboard listener.
+   */
+  shortcutBadge?: ReactNode;
+  /**
+   * When `true`, the shortcut badge is rendered in the brand accent
+   * color to signal that the associated tool is currently active.
+   */
+  shortcutBadgeActive?: boolean;
 } & Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children' | 'className'>;
 
 const variantToneClasses: Record<ButtonVariant, Record<ButtonTone, string>> = {
@@ -67,6 +79,21 @@ const iconOnlySizeClasses: Record<NonNullable<ButtonProps['size']>, string> = {
   lg: 'p-2',
 };
 
+/**
+ * When a corner `shortcutBadge` is present, asymmetric padding shifts the
+ * icon up-left so the badge sits in a clear bottom-right corner instead
+ * of colliding with the icon's pixels. Total button size is preserved:
+ * we just trade padding between top/left and bottom/right.
+ */
+const iconOnlyBadgeShiftClasses: Record<
+  NonNullable<ButtonProps['size']>,
+  string
+> = {
+  sm: 'pt-0.5 pl-0.5 pr-1.5 pb-1.5',
+  md: 'pt-1 pl-1 pr-2 pb-2',
+  lg: 'pt-1.5 pl-1.5 pr-2.5 pb-2.5',
+};
+
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   (
     {
@@ -80,6 +107,8 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       tooltipWrapperClassName,
       type = 'button',
       title,
+      shortcutBadge,
+      shortcutBadgeActive,
       ...props
     },
     ref,
@@ -96,11 +125,25 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
           variantToneClasses[variant][tone],
           iconOnly ? iconOnlySizeClasses[size] : sizeClasses[size],
           iconSizeClasses[size],
+          shortcutBadge != null && 'relative',
+          shortcutBadge != null && iconOnly && iconOnlyBadgeShiftClasses[size],
           className,
         )}
         {...props}
       >
         {children}
+        {shortcutBadge != null && (
+          <span
+            aria-hidden
+            className={cn(
+              'pointer-events-none absolute right-1 bottom-0.5 select-none',
+              'text-[9px] leading-none font-medium',
+              shortcutBadgeActive ? 'text-info' : 'text-fg-subtle',
+            )}
+          >
+            {shortcutBadge}
+          </span>
+        )}
       </button>
     );
 

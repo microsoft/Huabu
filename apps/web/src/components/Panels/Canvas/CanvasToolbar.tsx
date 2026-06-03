@@ -10,7 +10,13 @@ import {
   Redo2,
   Sprout,
 } from 'lucide-react';
-import { useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+
+import { uploadImage, uploadPdf, uploadVideo } from '@/api/artifact';
+import { isEditableTarget } from '@/hooks/shortcuts';
+import { useIsNotMouse } from '@/hooks/useInputMode';
+import { useIntentStore } from '@/store/intentStore';
+import { useToolStore } from '@/store/toolStore';
 
 import { NODE_ICON } from '../../../config/nodeIcons.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
@@ -25,11 +31,6 @@ import {
 import { SketchSettingsPanel } from '../../Nodes/sketch/SketchSettingsPanel.tsx';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
-
-import { uploadImage, uploadPdf, uploadVideo } from '@/api/artifact';
-import { useIsNotMouse } from '@/hooks/useInputMode';
-import { useIntentStore } from '@/store/intentStore';
-import { useToolStore } from '@/store/toolStore';
 
 interface NodeToolbarProps {
   activeTool: 'select' | 'pan' | 'lasso';
@@ -65,15 +66,100 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
   const resourceJustDismissedRef = useRef(false);
   const [linkText, setLinkText] = useState('');
 
-  // Selection / pan tool options for the merged dropdown trigger.
+  // Select / Pan / Lasso live on a single SplitSelect: the primary button
+  // mirrors the currently active tool and the popover lists every option
+  // (with its letter shortcut hint).
   const toolOptions = useMemo<SplitSelectOption<'select' | 'pan' | 'lasso'>[]>(
     () => [
-      { value: 'select', label: 'Select', icon: <MousePointer2 /> },
-      { value: 'pan', label: 'Pan', icon: <Hand /> },
-      { value: 'lasso', label: 'Lasso', icon: <Lasso /> },
+      {
+        value: 'select',
+        label: 'Select',
+        icon: <MousePointer2 />,
+        shortcut: 'S',
+      },
+      {
+        value: 'pan',
+        label: 'Pan',
+        icon: <Hand />,
+        shortcut: 'P',
+      },
+      {
+        value: 'lasso',
+        label: 'Lasso',
+        icon: <Lasso />,
+        shortcut: 'L',
+      },
     ],
     [],
   );
+
+  // Single-character keyboard shortcuts for the toolbar items, mirroring
+  // the badge hints shown on each button. Select / Pan / Lasso get
+  // dedicated letter keys (S / P / L) so each option is directly
+  // addressable; node placement modes keep numeric keys. Intent is
+  // intentionally omitted — it lives on its own bubble UI. Undo / Redo
+  // are not bound here; mouse users have Ctrl/Cmd+Z and the floating
+  // per-context toolbars cover non-mouse modes. Skipped while typing in
+  // an editable target so the keys remain usable inside notes/text nodes.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      if (isEditableTarget(e.target)) return;
+      // Don't fire while a modal is open (file upload / add links).
+      if (activeModal) return;
+
+      switch (e.key) {
+        case 's':
+          e.preventDefault();
+          if (pendingNodeType) setPendingNodeType(null);
+          onToolChange('select');
+          return;
+        case 'p':
+          e.preventDefault();
+          if (pendingNodeType) setPendingNodeType(null);
+          onToolChange('pan');
+          return;
+        case 'l':
+          e.preventDefault();
+          if (pendingNodeType) setPendingNodeType(null);
+          onToolChange('lasso');
+          return;
+        case '1':
+          e.preventDefault();
+          setPendingNodeType(pendingNodeType === 'frame' ? null : 'frame');
+          return;
+        case '2':
+          e.preventDefault();
+          setPendingNodeType(pendingNodeType === 'note' ? null : 'note');
+          return;
+        case '3':
+          e.preventDefault();
+          setPendingNodeType(pendingNodeType === 'text' ? null : 'text');
+          return;
+        case '4':
+          e.preventDefault();
+          // Match the click handler: always reset the sketch tool to draw
+          // mode so the eraser doesn't silently persist between sessions.
+          setSketchDraft({ mode: 'draw' });
+          setPendingNodeType(pendingNodeType === 'sketch' ? null : 'sketch');
+          return;
+        case 'q':
+          e.preventDefault();
+          setPendingNodeType(
+            pendingNodeType === 'question' ? null : 'question',
+          );
+          return;
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [
+    activeModal,
+    onToolChange,
+    pendingNodeType,
+    setPendingNodeType,
+    setSketchDraft,
+  ]);
 
   const resourceOptions: {
     value: 'upload' | 'link';
@@ -232,9 +318,9 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
               if (pendingNodeType) setPendingNodeType(null);
               onToolChange(tool);
             }}
-            onChange={(t) => {
+            onChange={(tool) => {
               if (pendingNodeType) setPendingNodeType(null);
-              onToolChange(t);
+              onToolChange(tool);
             }}
             variant="ghost"
             tone="neutral"
@@ -242,13 +328,17 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             iconOnly
             align="top-left"
             primaryTitle={
-              activeTool === 'select'
-                ? 'Select'
-                : activeTool === 'lasso'
-                  ? 'Lasso'
-                  : 'Pan'
+              activeTool === 'lasso'
+                ? 'Lasso (L)'
+                : activeTool === 'pan'
+                  ? 'Pan (P)'
+                  : 'Select (S)'
             }
             menuTitle="More Tools"
+            primaryShortcutBadge={
+              activeTool === 'lasso' ? 'L' : activeTool === 'pan' ? 'P' : 'S'
+            }
+            primaryShortcutBadgeActive={!pendingNodeType}
             primaryButtonClassName={clsx(
               !pendingNodeType &&
                 'text-info bg-bg-default enabled:hover:bg-bg-default',
@@ -264,7 +354,9 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           <Button
             variant="ghost"
             iconOnly
-            title="Frame"
+            title="Frame (1)"
+            shortcutBadge="1"
+            shortcutBadgeActive={pendingNodeType === 'frame'}
             className={clsx(
               pendingNodeType === 'frame' && 'text-info bg-bg-default',
             )}
@@ -277,7 +369,9 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           <Button
             variant="ghost"
             iconOnly
-            title="Note"
+            title="Note (2)"
+            shortcutBadge="2"
+            shortcutBadgeActive={pendingNodeType === 'note'}
             className={clsx(
               pendingNodeType === 'note' && 'text-info bg-bg-default',
             )}
@@ -290,7 +384,9 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           <Button
             variant="ghost"
             iconOnly
-            title="Text"
+            title="Text (3)"
+            shortcutBadge="3"
+            shortcutBadgeActive={pendingNodeType === 'text'}
             className={clsx(
               pendingNodeType === 'text' && 'text-info bg-bg-default',
             )}
@@ -305,7 +401,9 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             <Button
               variant="ghost"
               iconOnly
-              title="Sketch"
+              title="Sketch (4)"
+              shortcutBadge="4"
+              shortcutBadgeActive={pendingNodeType === 'sketch'}
               className={clsx(
                 pendingNodeType === 'sketch' && 'text-info bg-bg-default',
               )}
@@ -384,7 +482,9 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           <Button
             variant="ghost"
             iconOnly
-            title="Question Sticker"
+            title="Question Sticker (Q)"
+            shortcutBadge="Q"
+            shortcutBadgeActive={pendingNodeType === 'question'}
             className={clsx(
               pendingNodeType === 'question' && 'text-info bg-bg-default',
             )}
