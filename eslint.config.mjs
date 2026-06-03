@@ -17,6 +17,8 @@ export default typescriptEslint.config(
     ignores: [
       '**/node_modules/**',
       '**/dist/**',
+      '**/dist-bundle/**',
+      '**/dist-electron/**',
       '**/out/**',
       '**/.vite/**',
       '**/*.min.*',
@@ -37,6 +39,7 @@ export default typescriptEslint.config(
         project: [
           './tsconfig.base.json',
           './apps/server/tsconfig.json',
+          './apps/desktop/tsconfig.json',
           './apps/web/tsconfig.json',
           './apps/web/tsconfig.node.json',
           './packages/shared/tsconfig.json',
@@ -50,6 +53,7 @@ export default typescriptEslint.config(
           project: [
             './tsconfig.base.json',
             './apps/server/tsconfig.json',
+            './apps/desktop/tsconfig.json',
             './apps/web/tsconfig.json',
             './packages/shared/tsconfig.json',
           ],
@@ -121,6 +125,8 @@ export default typescriptEslint.config(
     // Node.js Env (Server & Shared)
     files: [
       'apps/server/src/**/*.{ts,tsx}',
+      'apps/desktop/src/**/*.{ts,tsx}',
+      'apps/desktop/scripts/**/*.{js,mjs,cjs}',
       'packages/shared/src/**/*.{ts,tsx}',
       'vite.config.ts',
       '*.config.js',

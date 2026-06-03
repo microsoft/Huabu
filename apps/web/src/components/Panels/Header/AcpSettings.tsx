@@ -187,6 +187,15 @@ function useAgentCliDetection(): {
  * When `agentletOnPath` is true we emit the short form `agentlet …`;
  * otherwise we fall back to the absolute path to the in-repo wrapper
  * so the command works from any CWD.
+ *
+ * We always prefix `ACP_URL=ws://<host>/api/acp/agent`, derived from
+ * the page origin. The agentlet wrapper defaults to
+ * `ws://localhost:${SERVER_PORT:-3001}`, which is wrong whenever the
+ * server is bound to a non-default port — e.g. inside Electron when
+ * port 3001 is already taken and `get-port` falls back to a random
+ * one, or in any multi-instance / custom-port deployment. Anchoring
+ * to `window.location.host` guarantees the agentlet talks to the
+ * same backend the UI is talking to.
  */
 function buildLaunchCommand(opts: {
   agent: AcpAgentCliInfo;
@@ -202,7 +211,9 @@ function buildLaunchCommand(opts: {
   const wrapper = agentletOnPath
     ? 'agentlet'
     : (agentletWrapperPath ?? 'bin/agentlet');
-  return `${wrapper} --token ${token} --agent "${agentCmd}"`;
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  const acpUrl = `${wsProtocol}://${window.location.host}/api/acp/agent`;
+  return `ACP_URL=${acpUrl} ${wrapper} --token ${token} --agent "${agentCmd}"`;
 }
 
 interface DetectedAgentRowProps {

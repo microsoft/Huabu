@@ -1,0 +1,61 @@
+appId: com.sediment.app
+productName: Sediment
+copyright: Copyright © 2025 ${author}
+
+# Where electron-builder places the packaged output
+directories:
+  output: dist-electron
+  buildResources: build-resources
+
+# Source files for the main process (compiled JS)
+files:
+  - dist/**
+
+# Extra files bundled into the app's Resources directory:
+#   resources/server/server.js  — self-contained Fastify bundle (tsup full-bundle, ~13MB)
+#   resources/web/              — compiled Vite SPA
+#   resources/agentlet          — shell wrapper for external agent pairing
+#
+# No node_modules needed: all npm deps (except @napi-rs native addons) are
+# inlined into server.js by tsup. @napi-rs/canvas is never called at runtime
+# since pdf2md only uses unpdf's text extraction path.
+extraResources:
+  - from: ../server/dist-bundle/server.js
+    to: server/server.js
+  - from: ../web/dist
+    to: web
+    filter:
+      - '**/*'
+  - from: ../../bin/agentlet
+    to: agentlet
+
+afterPack: scripts/after-pack.mjs
+
+mac:
+  target:
+    - target: dmg
+      arch:
+        - arm64
+  category: public.app-category.productivity
+  darkModeSupport: true
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+
+dmg:
+  window:
+    width: 540
+    height: 380

@@ -23,11 +23,18 @@ import type { AcpAgentCliListResponse, ApiResult } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
 /**
- * Resolve the absolute path to the in-repo `bin/agentlet` wrapper.
- * This module lives at `apps/server/src/modules/agent/acp/` (or the
- * mirrored `dist/` path) — both are 6 levels deep from repo root.
+ * Resolve the absolute path to the `agentlet` wrapper script.
+ *
+ * Resolution order (first match wins):
+ *   1. HUABU_AGENTLET_PATH env var — set by the Electron main process to
+ *      point at the binary extracted into app.resourcesPath.
+ *   2. Relative path from this module's location — works in dev and
+ *      standalone-server deployments where the source tree is intact.
  */
 function resolveAgentletWrapperPath(): string {
+  if (process.env.HUABU_AGENTLET_PATH) {
+    return process.env.HUABU_AGENTLET_PATH;
+  }
   const here = path.dirname(fileURLToPath(import.meta.url));
   return path.resolve(here, '../../../../../..', 'bin', 'agentlet');
 }

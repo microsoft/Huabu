@@ -44,6 +44,7 @@
     "html-to-image": "^1.11.13",
     "katex": "^0.16.47",
     "lucide-react": "^0.577.0",
+    "pdfjs-dist": "5.4.296",
     "perfect-freehand": "^1.2.3",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

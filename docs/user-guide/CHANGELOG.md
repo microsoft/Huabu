@@ -20,6 +20,7 @@
 - **接口兼容**：`POST /api/intent/recognize` 与 `/recognize-stream` 的 body 新增可选 `canvasId`，缺省时退化为不注入 canvas memory（仍能跑），老前端版本无需修改。
 - **失败处理**：Memory 读 / preamble 拼接失败一律 swallow，intent 识别照常进行，只是这次不带 memory bias。
 - **测试覆盖**：依赖现有 memory worker 集成测试覆盖，没新增专门用例。
+
 ## 2026-06-03 · 画布工具栏新增单键快捷键 + 角标提示
 
 **What Changed**

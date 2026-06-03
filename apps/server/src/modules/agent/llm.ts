@@ -29,6 +29,7 @@ import {
   verifyOAuthCredentials,
   applyCopilotModelOverrides,
 } from './oauth.js';
+import { getDataDir } from '../../data-dir.js';
 
 import type {
   Api,
@@ -113,7 +114,7 @@ function getProviderCatalog(): LLMProviderInfo[] {
 
 /** Resolve a data file path relative to the project root. */
 function getDataFilePath(filename: string): string {
-  return join(process.cwd(), 'data', filename);
+  return join(getDataDir(), filename);
 }
 
 const CONFIG_FILE = getDataFilePath('llm-config.json');

@@ -111,13 +111,23 @@ export interface LoadedSkill extends SkillFrontmatter {
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 /**
- * Absolute path of the system skills directory (`src/prompt/skills/`).
+ * Absolute path of the system skills directory.
  *
  * Naming note: previously called `GLOBAL_SKILLS_DIR`; renamed to
  * `SYSTEM_SKILLS_DIR` to make the system / user distinction explicit
  * in the codebase.
+ *
+ * Two runtime layouts (see the parallel comment in `agents/loader.ts`):
+ *   ─ Source (tsx): `HERE = src/prompt/skills/`, use it directly.
+ *   ─ Bundled (tsup): all loaders collapse into one bundle so
+ *     `HERE = dist-bundle/`. The build's `onSuccess` step copies
+ *     `src/prompt/` to `dist-bundle/prompt/`, so we re-root onto
+ *     `dist-bundle/prompt/skills/` when that subdir exists.
  */
-export const SYSTEM_SKILLS_DIR = HERE;
+const BUNDLED_SKILLS_DIR = path.join(HERE, 'prompt', 'skills');
+export const SYSTEM_SKILLS_DIR = existsSync(BUNDLED_SKILLS_DIR)
+  ? BUNDLED_SKILLS_DIR
+  : HERE;
 
 // `userSkillPath()` (the write-back target for `fs_write` on a
 // `skills/<id>/SKILL.md` path) lives in the memory module — see

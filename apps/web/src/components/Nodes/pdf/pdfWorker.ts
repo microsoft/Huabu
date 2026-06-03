@@ -1,4 +1,11 @@
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { pdfjs } from 'react-pdf';
+
+// Import the worker as a Vite static asset so it's served from our own
+// origin in every environment (dev / packaged Electron / production
+// website). Loading it from a public CDN like unpkg.com fails for
+// offline / desktop deployments and previously violated CORS for the
+// HTTP variant. `?url` returns a hashed URL Vite emits into the build.
 
 /**
  * Configure the PDF.js worker URL once at module load.
@@ -6,7 +13,7 @@ import { pdfjs } from 'react-pdf';
  * Importing this module from any PDF component is enough — re-assigning
  * `workerSrc` is idempotent so duplicate imports are safe.
  */
-pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 /**
  * Stable options object passed to every `<Document>` instance.
