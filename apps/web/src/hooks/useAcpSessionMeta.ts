@@ -22,13 +22,13 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { AcpSessionMetaSnapshot, AgentBinding } from '@sediment/shared';
-
 import { ensureAcpSession, getAcpThreadCommands } from '@/api/acp';
 import {
   setAcpSessionMetaSink,
   type AcpSessionMetaStreamEvent,
 } from '@/hooks/useAgentStream';
+
+import type { AcpSessionMetaSnapshot, AgentBinding } from '@sediment/shared';
 
 const RETRY_DELAY_MS = 200;
 const STALE_TTL_MS = 10_000;

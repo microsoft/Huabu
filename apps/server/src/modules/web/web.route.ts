@@ -1,6 +1,7 @@
-import { webLookupQuerySchema } from '@sediment/shared';
 import { marked } from 'marked';
 import sanitizeHtml from 'sanitize-html';
+
+import { webLookupQuerySchema } from '@sediment/shared';
 
 import { getCanvasStore } from '../storage/index.js';
 

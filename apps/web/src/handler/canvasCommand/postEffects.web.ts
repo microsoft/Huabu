@@ -28,11 +28,11 @@ import {
   type PendingEffects,
 } from '@sediment/shared/canvas-engine';
 
-import type { CanvasExecutionSource } from '@sediment/shared';
-import type { Node } from '@xyflow/react';
-
 import { canvasHistoryManager } from '@/store/canvasHistoryManager';
 import { markAiContentEdit } from '@/utils/aiEditFlags';
+
+import type { CanvasExecutionSource } from '@sediment/shared';
+import type { Node } from '@xyflow/react';
 
 /**
  * Source of the executed batch. Re-exports `CanvasExecutionSource`

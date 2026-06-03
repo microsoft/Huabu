@@ -28,10 +28,10 @@
 import { diffWords } from 'diff';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { Button } from '@/components/Common/Button';
+
 import type { MilkdownInstance } from '@/components/Milkdown';
 import type { BlockProvenance, DeletedBlockInfo } from '@sediment/shared';
-
-import { Button } from '@/components/Common/Button';
 
 export interface ProvenanceOverlayProps {
   blocks: ReadonlyArray<BlockProvenance>;

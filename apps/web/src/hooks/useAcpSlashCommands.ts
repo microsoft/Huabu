@@ -36,9 +36,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { AgentBinding, AvailableCommand } from '@sediment/shared';
-
 import { ensureAcpSession, getAcpThreadCommands } from '@/api/acp';
+
+import type { AgentBinding, AvailableCommand } from '@sediment/shared';
 
 /** Delay before the follow-up re-pull, in ms. See file header for rationale. */
 const RETRY_DELAY_MS = 200;

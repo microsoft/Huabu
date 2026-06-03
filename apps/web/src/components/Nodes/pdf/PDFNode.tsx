@@ -6,6 +6,11 @@ import { Document, Page } from 'react-pdf';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
+import { resolveArtifactUrl } from '@/api/artifact';
+import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
+import { useNodeScale } from '@/hooks/useNodeScale';
+import useCanvasStore from '@/store/canvasStore';
+
 import { MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
 import { PreviewCard } from '../PreviewCard';
@@ -13,11 +18,6 @@ import { PDF_DOCUMENT_OPTIONS } from './pdfWorker';
 
 import type { CanvasPdfNodeData } from '../types';
 import type { Node, NodeProps } from '@xyflow/react';
-
-import { resolveArtifactUrl } from '@/api/artifact';
-import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
-import { useNodeScale } from '@/hooks/useNodeScale';
-import useCanvasStore from '@/store/canvasStore';
 
 export type PDFNodeType = Node<CanvasPdfNodeData, 'pdf'>;
 

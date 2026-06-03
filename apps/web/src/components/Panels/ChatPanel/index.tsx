@@ -1,22 +1,6 @@
 import { ArrowLeft, ListIndentIncrease, PanelRightOpen } from 'lucide-react';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 
-import { AcpSessionSelectors } from './AcpSessionSelectors';
-import { ChatInput } from './ChatInput';
-import { NewChatMenu, type NewChatChoice } from './NewChatMenu';
-import { parseSlashInvocations } from './parseSlashInvocations';
-import { useSketchClusterMessages } from './useSketchClusterMessages';
-import { useAgentStream } from '../../../hooks/useAgentStream';
-import { useChatHistory } from '../../../hooks/useChatHistory';
-import { MessageList } from '../../Messages/MessageList';
-import { SidebarPanel } from '../SidebarPanel';
-
-import type {
-  AgentMode,
-  IntentCandidate,
-  IntentEpisode,
-} from '@sediment/shared';
-
 import {
   setAcpSessionConfigOption,
   setAcpSessionMode,
@@ -38,6 +22,22 @@ import {
 import { useIntentStore } from '@/store/intentStore';
 import { useLLMStore } from '@/store/llmStore';
 import { usePanelStore } from '@/store/panelStore';
+
+import { AcpSessionSelectors } from './AcpSessionSelectors';
+import { ChatInput } from './ChatInput';
+import { NewChatMenu, type NewChatChoice } from './NewChatMenu';
+import { parseSlashInvocations } from './parseSlashInvocations';
+import { useSketchClusterMessages } from './useSketchClusterMessages';
+import { useAgentStream } from '../../../hooks/useAgentStream';
+import { useChatHistory } from '../../../hooks/useChatHistory';
+import { MessageList } from '../../Messages/MessageList';
+import { SidebarPanel } from '../SidebarPanel';
+
+import type {
+  AgentMode,
+  IntentCandidate,
+  IntentEpisode,
+} from '@sediment/shared';
 
 interface ChatPanelProps {
   isCollapsed?: boolean;

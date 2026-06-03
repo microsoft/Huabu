@@ -1,6 +1,8 @@
 import { Fullscreen, ArrowUpRight } from 'lucide-react';
 import { memo, useState, useEffect, useMemo } from 'react';
 
+import { getWebPreview } from '@/api/web';
+
 import { useNodeScale } from '../../../hooks/useNodeScale.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import { FloatingToolbar } from '../../Common/FloatingToolbar.tsx';
@@ -10,8 +12,6 @@ import { PreviewCard } from '../PreviewCard.tsx';
 
 import type { CanvasWebNodeData } from '../types.ts';
 import type { Node, NodeProps } from '@xyflow/react';
-
-import { getWebPreview } from '@/api/web';
 
 export type WebNodeType = Node<CanvasWebNodeData, 'web'>;
 

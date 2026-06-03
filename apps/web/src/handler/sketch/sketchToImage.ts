@@ -25,14 +25,14 @@
 
 import { resolveAccent } from '@sediment/shared';
 
-import type { SketchStroke } from '@sediment/shared';
-import type { Node } from '@xyflow/react';
-
 import {
   pointsToPath,
   DEFAULT_STROKE_COLOR,
   DEFAULT_STROKE_SIZE,
 } from '@/components/Nodes/sketch/sketchPath';
+
+import type { SketchStroke } from '@sediment/shared';
+import type { Node } from '@xyflow/react';
 
 /** A sketch node as carried in the React Flow node list. */
 type SketchFlowNode = Node & {

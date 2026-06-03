@@ -1,8 +1,9 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { cloneArtifactBodySchema, createId } from '@sediment/shared';
 import { type FastifyPluginAsync } from 'fastify';
+
+import { cloneArtifactBodySchema, createId } from '@sediment/shared';
 
 import { getCanvasStore } from '../storage/index.js';
 

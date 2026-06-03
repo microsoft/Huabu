@@ -12,6 +12,8 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { encode } from 'gpt-tokenizer';
+
 import {
   AGENT_SSE_EVENTS,
   agentCanvasIdQuerySchema,
@@ -19,7 +21,6 @@ import {
   createId,
   variantForInternalTool,
 } from '@sediment/shared';
-import { encode } from 'gpt-tokenizer';
 
 import {
   getSkill,

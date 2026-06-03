@@ -64,7 +64,6 @@ import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
 import type { CanvasViewport } from '@sediment/shared';
 import type { FrameFitResult } from '@sediment/shared/canvas-engine';
 
-
 const nodeTypes = {
   image: ImageNode,
   text: TextNode,

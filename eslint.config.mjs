@@ -81,6 +81,16 @@ export default typescriptEslint.config(
             'index',
             'type',
           ],
+          // Explicitly classify workspace aliases so ordering does not
+          // depend on the resolver successfully resolving them. Without
+          // this, `eslint-import-resolver-typescript` version drift or
+          // cache state can cause different machines to bucket `@/...`
+          // into different groups, producing diverging lint:fix output.
+          pathGroups: [
+            { pattern: '@sediment/**', group: 'external', position: 'after' },
+            { pattern: '@/**', group: 'internal', position: 'before' },
+          ],
+          pathGroupsExcludedImportTypes: ['type'],
           distinctGroup: true,
           'newlines-between': 'always',
           alphabetize: {

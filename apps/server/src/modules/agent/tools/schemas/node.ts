@@ -9,6 +9,7 @@
  */
 
 import { Type } from '@earendil-works/pi-ai';
+
 import {
   ACCENT_PALETTE,
   AGENT_CREATABLE_NODE_TYPES,

@@ -1,15 +1,15 @@
 import { PlayCircle, Fullscreen, Play } from 'lucide-react';
 import { memo } from 'react';
 
+import { resolveArtifactUrl } from '@/api/artifact';
+import useCanvasStore from '@/store/canvasStore.ts';
+
 import { FloatingToolbar } from '../../Common/FloatingToolbar.tsx';
 import { MissingFileBanner } from '../MissingFileBanner.tsx';
 import { NodeWrapper } from '../NodeWrapper.tsx';
 
 import type { CanvasVideoNodeData } from '../types.ts';
 import type { Node, NodeProps } from '@xyflow/react';
-
-import { resolveArtifactUrl } from '@/api/artifact';
-import useCanvasStore from '@/store/canvasStore.ts';
 
 export type VideoNodeType = Node<CanvasVideoNodeData, 'video'>;
 

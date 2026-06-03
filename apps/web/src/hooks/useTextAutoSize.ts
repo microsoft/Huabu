@@ -19,8 +19,6 @@
 import { useStore } from '@xyflow/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { NodeStyle } from '@sediment/shared';
-
 import useCanvasStore from '@/store/canvasStore';
 import {
   computeFontSizeForHeight,
@@ -28,6 +26,8 @@ import {
   measureTextHeight,
   type FontOpts,
 } from '@/utils/node/textMeasure';
+
+import type { NodeStyle } from '@sediment/shared';
 
 /** Maximum characters per line before wrapping in auto-width mode. */
 const MAX_CHARS_PER_LINE = 18;

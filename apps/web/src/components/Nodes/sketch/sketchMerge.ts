@@ -30,15 +30,15 @@
  * sketch node.
  */
 
+import { SKETCH_STROKE_MERGE_MAX_GAP_MS } from '@/config/canvas';
+import useCanvasStore from '@/store/canvasStore';
+
 import type { CanvasSketchNodeData } from '../types';
 import type {
   CanvasCommand,
   CanvasNodeId,
   SketchStroke,
 } from '@sediment/shared';
-
-import { SKETCH_STROKE_MERGE_MAX_GAP_MS } from '@/config/canvas';
-import useCanvasStore from '@/store/canvasStore';
 
 /** Axis-aligned bounding box in flow-space coordinates. */
 export interface FlowBBox {

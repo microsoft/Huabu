@@ -2,6 +2,9 @@ import { ArrowLeft } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 
+import { CenterArea } from '@/pages/CanvasPage/CenterArea.tsx';
+import { MainLayout } from '@/pages/CanvasPage/MainLayout.tsx';
+
 import { LoadingState } from '../../components/Common/LoadingState.tsx';
 import { CanvasLayerPanel } from '../../components/Panels/CanvasLayerPanel';
 import { ChatPanel } from '../../components/Panels/ChatPanel';
@@ -9,9 +12,6 @@ import { CanvasHeader } from '../../components/Panels/Header/CanvasHeader.tsx';
 import { KeyboardShortcutsModal } from '../../components/Panels/Header/KeyboardShortcutsModal.tsx';
 import { usePageShortcuts } from '../../hooks/shortcuts';
 import useStore from '../../store/canvasStore.ts';
-
-import { CenterArea } from '@/pages/CanvasPage/CenterArea.tsx';
-import { MainLayout } from '@/pages/CanvasPage/MainLayout.tsx';
 
 /**
  * Page component for a single canvas.

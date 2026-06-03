@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { getWebReader } from '@/api/web';
+
 import useCanvasStore from '../../../store/canvasStore.ts';
 import { LoadingState } from '../../Common/LoadingState';
 
 import type { PreviewComponentProps } from '../note/NotePreview';
-
-import { getWebReader } from '@/api/web';
 
 export const WebPreview = ({ id, data }: PreviewComponentProps) => {
   const src = typeof data.src === 'string' ? data.src : '';

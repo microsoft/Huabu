@@ -1,5 +1,6 @@
-import { resolveAccent } from '@sediment/shared';
 import { memo, useMemo } from 'react';
+
+import { resolveAccent } from '@sediment/shared';
 
 import {
   pointsToPath,

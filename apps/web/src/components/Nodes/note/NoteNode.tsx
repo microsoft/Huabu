@@ -3,17 +3,17 @@ import clsx from 'clsx';
 import { ChevronsDown, Fullscreen } from 'lucide-react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 
+import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
+import { MilkdownPreview } from '@/components/Milkdown';
+import { useNodeScale } from '@/hooks/useNodeScale';
+import useCanvasStore from '@/store/canvasStore';
+
 import { MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
 import { NOTE_AUTO_HEIGHT_MIN } from './autoHeight';
 import { useTrackNoteFixedHeight } from './heightMemory';
 
 import type { CanvasNoteNodeData } from '../types';
-
-import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
-import { MilkdownPreview } from '@/components/Milkdown';
-import { useNodeScale } from '@/hooks/useNodeScale';
-import useCanvasStore from '@/store/canvasStore';
 
 export type NoteNodeType = Node<CanvasNoteNodeData, 'note'>;
 

@@ -1,17 +1,18 @@
+import { useStore, useStoreApi, useViewport } from '@xyflow/react';
+import { useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
+
 import {
   getSelectionBounds,
   getNodeSize,
   getAbsolutePosition,
   type NestableNode,
 } from '@sediment/shared/canvas-engine';
-import { useStore, useStoreApi, useViewport } from '@xyflow/react';
-import { useMemo, useRef } from 'react';
-import { createPortal } from 'react-dom';
-
-import type { CanvasNode } from '@/components/Nodes/types';
 
 import { useIsTouch } from '@/hooks/useInputMode.ts';
 import useCanvasStore from '@/store/canvasStore';
+
+import type { CanvasNode } from '@/components/Nodes/types';
 
 /**
  * Multi-select bounding-box resizer.

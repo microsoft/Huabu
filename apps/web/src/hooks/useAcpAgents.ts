@@ -19,9 +19,9 @@
 
 import { useEffect } from 'react';
 
-import type { AcpAgentSummary } from '@/api/acp';
-
 import { useAcpAgentsStore } from '@/store/acpAgentsStore';
+
+import type { AcpAgentSummary } from '@/api/acp';
 
 export interface UseAcpAgentsResult {
   /** Currently-connected agents. Empty array until the first fetch resolves. */
