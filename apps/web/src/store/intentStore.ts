@@ -9,10 +9,6 @@
 import { createId } from '@sediment/shared';
 import { create } from 'zustand';
 
-import { captureCanvasScreenshot } from '@/handler/canvasCommand/utils/screenshot';
-import { clusterSketches, extractSketchContext } from '@/handler/sketch';
-import { snapshotAndExtractChanges } from '@/hooks/useCanvasChanges';
-
 import useCanvasStore from './canvasStore';
 import {
   recognizeIntentStream,
@@ -29,9 +25,14 @@ import type {
   CanvasCommand,
   CanvasNodeId,
   IntentCandidate,
+  IntentEpisode,
   SketchClusterContext,
 } from '@sediment/shared';
 import type { Node } from '@xyflow/react';
+
+import { captureCanvasScreenshot } from '@/handler/canvasCommand/utils/screenshot';
+import { clusterSketches, extractSketchContext } from '@/handler/sketch';
+import { snapshotAndExtractChanges } from '@/hooks/useCanvasChanges';
 
 /**
  * Lifecycle status for a sketch cluster currently being recognised.
@@ -121,16 +122,23 @@ interface IntentState {
 
   /**
    * Callback set by ChatPanel to receive chosen intents.
+   * `episode` is re-upserted by ChatPanel with execution outcome.
+   *
    * @internal — not for external use.
    */
   _onIntentChosen:
-    | ((intent: string, candidates: IntentCandidate[]) => Promise<void> | void)
+    | ((
+        intent: string,
+        candidates: IntentCandidate[],
+        episode: IntentEpisode,
+      ) => Promise<void> | void)
     | null;
   _setOnIntentChosen: (
     cb:
       | ((
           intent: string,
           candidates: IntentCandidate[],
+          episode: IntentEpisode,
         ) => Promise<void> | void)
       | null,
   ) => void;
@@ -193,11 +201,18 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
 
       set({ contextSummary: summary });
 
+      const canvasId = useCanvasStore.getState().canvasId;
+
       // Stream candidates one-by-one as they arrive from the LLM
-      await recognizeIntentStream(canvasContext, (candidate) => {
-        const { candidates: current } = get();
-        set({ candidates: [...current, candidate], isLoading: false });
-      });
+      await recognizeIntentStream(
+        canvasContext,
+        (candidate) => {
+          const { candidates: current } = get();
+          set({ candidates: [...current, candidate], isLoading: false });
+        },
+        undefined,
+        canvasId || undefined,
+      );
 
       // Mark streaming as done when stream completes
       set({ isLoading: false, isStreaming: false });
@@ -222,20 +237,19 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
     const savedCandidates = [...candidates];
     const canvasId = useCanvasStore.getState().canvasId;
 
-    void logIntentEpisode(
-      {
-        id: createId('intent'),
-        timestamp: Date.now(),
-        contextSummary,
-        candidates,
-        outcome: {
-          type: 'selected',
-          chosenIndex: index,
-          chosenLabel,
-        },
+    const episode: IntentEpisode = {
+      id: createId('intent'),
+      timestamp: Date.now(),
+      contextSummary,
+      candidates,
+      outcome: {
+        type: 'selected',
+        chosenIndex: index,
+        chosenLabel,
       },
-      canvasId || undefined,
-    );
+    };
+
+    void logIntentEpisode(episode, canvasId || undefined);
 
     // Dismiss popover and send to chat panel
     set({
@@ -247,7 +261,7 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
       isStreaming: false,
     });
 
-    _onIntentChosen?.(chosenLabel, savedCandidates);
+    _onIntentChosen?.(chosenLabel, savedCandidates, episode);
   },
 
   submitCustomIntent: (text: string) => {
@@ -255,20 +269,19 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
     const { candidates, contextSummary, _onIntentChosen } = get();
     const canvasId = useCanvasStore.getState().canvasId;
 
-    void logIntentEpisode(
-      {
-        id: createId('intent'),
-        timestamp: Date.now(),
-        contextSummary,
-        candidates,
-        outcome: {
-          type: 'selected',
-          chosenIndex: 0,
-          chosenLabel: text.trim(),
-        },
+    const episode: IntentEpisode = {
+      id: createId('intent'),
+      timestamp: Date.now(),
+      contextSummary,
+      candidates,
+      outcome: {
+        type: 'selected',
+        chosenIndex: 0,
+        chosenLabel: text.trim(),
       },
-      canvasId || undefined,
-    );
+    };
+
+    void logIntentEpisode(episode, canvasId || undefined);
 
     // Preserve candidates before clearing state
     const savedCandidates = [...candidates];
@@ -283,7 +296,7 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
       isStreaming: false,
     });
 
-    _onIntentChosen?.(text.trim(), savedCandidates);
+    _onIntentChosen?.(text.trim(), savedCandidates, episode);
   },
 
   setCustomIntent: (text: string) => {

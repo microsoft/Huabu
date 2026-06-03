@@ -1,11 +1,28 @@
 import { ArrowLeft, ListIndentIncrease, PanelRightOpen } from 'lucide-react';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 
+import { AcpSessionSelectors } from './AcpSessionSelectors';
+import { ChatInput } from './ChatInput';
+import { NewChatMenu, type NewChatChoice } from './NewChatMenu';
+import { parseSlashInvocations } from './parseSlashInvocations';
+import { useSketchClusterMessages } from './useSketchClusterMessages';
+import { useAgentStream } from '../../../hooks/useAgentStream';
+import { useChatHistory } from '../../../hooks/useChatHistory';
+import { MessageList } from '../../Messages/MessageList';
+import { SidebarPanel } from '../SidebarPanel';
+
+import type {
+  AgentMode,
+  IntentCandidate,
+  IntentEpisode,
+} from '@sediment/shared';
+
 import {
   setAcpSessionConfigOption,
   setAcpSessionMode,
   setAcpSessionModel,
 } from '@/api/acp';
+import { logIntentEpisode } from '@/api/intent';
 import { Button } from '@/components/Common/Button';
 import { toast } from '@/components/Common/Toast';
 import { useAcpAgents } from '@/hooks/useAcpAgents';
@@ -20,18 +37,7 @@ import {
 } from '@/store/chatStore';
 import { useIntentStore } from '@/store/intentStore';
 import { useLLMStore } from '@/store/llmStore';
-
-import { AcpSessionSelectors } from './AcpSessionSelectors';
-import { ChatInput } from './ChatInput';
-import { NewChatMenu, type NewChatChoice } from './NewChatMenu';
-import { parseSlashInvocations } from './parseSlashInvocations';
-import { useSketchClusterMessages } from './useSketchClusterMessages';
-import { useAgentStream } from '../../../hooks/useAgentStream';
-import { useChatHistory } from '../../../hooks/useChatHistory';
-import { MessageList } from '../../Messages/MessageList';
-import { SidebarPanel } from '../SidebarPanel';
-
-import type { AgentMode, IntentCandidate } from '@sediment/shared';
+import { usePanelStore } from '@/store/panelStore';
 
 interface ChatPanelProps {
   isCollapsed?: boolean;
@@ -341,26 +347,55 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     const handleIntentChosen = async (
       intent: string,
       candidates: IntentCandidate[],
+      episode: IntentEpisode,
     ) => {
-      // Open the chat panel if collapsed
-      if (isCollapsed && onToggle) {
-        onToggle();
-      }
+      // Ensure the right panel is visible before running the intent.
+      usePanelStore.getState().requestOpenRightPanel();
       // Switch mode to operate
       setMode('operate');
-      // Send as operate mode message with intent-select widget.
-      // Return the promise so callers (e.g. sketch recognition) can
-      // await agent completion before cleaning up.
-      await startStream(intent, 'operate', {
-        candidates,
-        selectedIntent: intent,
-      });
+
+      // Run operate turn, then upsert execution outcome on the episode.
+      const writtenCanvasId = useCanvasStore.getState().canvasId || undefined;
+      try {
+        await startStream(intent, 'operate', {
+          candidates,
+          selectedIntent: intent,
+        });
+        if (episode.outcome.type === 'selected') {
+          void logIntentEpisode(
+            {
+              ...episode,
+              outcome: {
+                ...episode.outcome,
+                execution: { status: 'success' },
+              },
+            },
+            writtenCanvasId,
+          );
+        }
+      } catch (err) {
+        if (episode.outcome.type === 'selected') {
+          void logIntentEpisode(
+            {
+              ...episode,
+              outcome: {
+                ...episode.outcome,
+                execution: {
+                  status: 'error',
+                  error: err instanceof Error ? err.message : String(err),
+                },
+              },
+            },
+            writtenCanvasId,
+          );
+        }
+      }
     };
     useIntentStore.getState()._setOnIntentChosen(handleIntentChosen);
     return () => {
       useIntentStore.getState()._setOnIntentChosen(null);
     };
-  }, [startStream, isCollapsed, onToggle]);
+  }, [startStream]);
 
   const handleIntentReselect = useCallback(
     (messageId: string, intent: string) => {
