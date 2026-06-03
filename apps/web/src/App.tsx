@@ -10,6 +10,7 @@ import {
 
 import { ToastContainer } from './components/Common/Toast';
 import DocsPage from './docs/DocsPage';
+import { useDisableBrowserZoom } from './hooks/useDisableBrowserZoom';
 import { useInputModeListener } from './hooks/useInputMode';
 import CanvasListPage from './pages/CanvasListPage';
 import CanvasPage from './pages/CanvasPage/CanvasPage.tsx';
@@ -50,6 +51,7 @@ function WorkspaceGuardLayout({ initialising }: { initialising: boolean }) {
 
 export default function App() {
   useInputModeListener();
+  useDisableBrowserZoom();
 
   const init = useWorkspaceStore((s) => s.init);
   const [initialising, setInitialising] = useState(true);
