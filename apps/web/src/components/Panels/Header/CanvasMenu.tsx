@@ -1,9 +1,10 @@
 import clsx from 'clsx';
-import { ChevronDown, Download, Keyboard, Redo2, Undo2 } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 import { exportCanvas } from '../../../api/canvas.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
+import { formatShortcut } from '../../../utils/platform.ts';
 import { Button } from '../../Common/Button.tsx';
 import { DropdownMenu, DropdownMenuItem } from '../../Common/DropdownMenu.tsx';
 import { toast } from '../../Common/Toast.tsx';
@@ -122,7 +123,7 @@ export const CanvasMenu: React.FC<CanvasMenuProps> = ({ onOpenShortcuts }) => {
         }
       >
         <DropdownMenuItem
-          icon={<Undo2 size={14} />}
+          shortcut={formatShortcut('Ctrl/Cmd+Z')}
           disabled={!canUndo}
           onClick={() => {
             setIsOpen(false);
@@ -132,7 +133,7 @@ export const CanvasMenu: React.FC<CanvasMenuProps> = ({ onOpenShortcuts }) => {
           Undo
         </DropdownMenuItem>
         <DropdownMenuItem
-          icon={<Redo2 size={14} />}
+          shortcut={formatShortcut('Ctrl/Cmd+Shift+Z')}
           disabled={!canRedo}
           onClick={() => {
             setIsOpen(false);
@@ -142,15 +143,12 @@ export const CanvasMenu: React.FC<CanvasMenuProps> = ({ onOpenShortcuts }) => {
           Redo
         </DropdownMenuItem>
         <div className="border-edge-default my-1 border-t" />
-        <DropdownMenuItem
-          icon={<Download size={14} />}
-          onClick={() => void handleExport()}
-        >
+        <DropdownMenuItem onClick={() => void handleExport()}>
           Export Canvas
         </DropdownMenuItem>
         {onOpenShortcuts && (
           <DropdownMenuItem
-            icon={<Keyboard size={14} />}
+            shortcut="?"
             onClick={() => {
               setIsOpen(false);
               onOpenShortcuts();

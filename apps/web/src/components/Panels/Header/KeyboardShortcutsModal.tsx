@@ -1,6 +1,8 @@
 import { X } from 'lucide-react';
+import { Fragment } from 'react';
 
 import { keyboardShortcutSections } from '../../../config/shortcuts';
+import { isMac, shortcutTokens } from '../../../utils/platform';
 import { Button } from '../../Common/Button';
 import { Modal } from '../../Common/Modal';
 
@@ -24,17 +26,6 @@ export function KeyboardShortcutsModal({
           <h3 className="text-fg-default text-base font-semibold">
             Keyboard Shortcuts
           </h3>
-          <p className="text-fg-muted mt-1.5 text-[13px] leading-relaxed">
-            Use{' '}
-            <kbd className="bg-surface rounded border px-1 py-0.5 font-mono text-[11px] shadow-sm">
-              Ctrl
-            </kbd>{' '}
-            on Windows/Linux and{' '}
-            <kbd className="bg-surface rounded border px-1 py-0.5 font-mono text-[11px] shadow-sm">
-              Cmd
-            </kbd>{' '}
-            on macOS.
-          </p>
         </div>
         <Button
           variant="ghost"
@@ -65,9 +56,7 @@ export function KeyboardShortcutsModal({
                         : '',
                     ].join(' ')}
                   >
-                    <span className="text-fg-muted font-mono text-[11px] font-semibold tracking-wide">
-                      {item.keys}
-                    </span>
+                    <ShortcutKeys template={item.keys} />
                     <span className="text-fg-muted text-[13px]">
                       {item.description}
                     </span>
@@ -79,5 +68,35 @@ export function KeyboardShortcutsModal({
         </div>
       </div>
     </Modal>
+  );
+}
+
+/**
+ * Render a shortcut template as a row of `<kbd>` chips. Each key gets its
+ * own chip so combinations involving the `+` or `−` keys (e.g. `Ctrl+Plus`)
+ * are unambiguous. On non-Mac platforms a small `+` glyph is shown between
+ * chips to match the native Windows / Linux convention; on macOS the chips
+ * sit next to each other, matching how `⌘⇧Z` is conventionally rendered.
+ */
+function ShortcutKeys({ template }: { template: string }) {
+  const tokens = shortcutTokens(template);
+  return (
+    <span className="flex flex-wrap items-center gap-1">
+      {tokens.map((token, index) => (
+        <Fragment key={`${token}-${index}`}>
+          {index > 0 && !isMac && (
+            <span
+              aria-hidden
+              className="text-fg-subtle text-[11px] leading-none"
+            >
+              +
+            </span>
+          )}
+          <kbd className="border-edge-default bg-bg-default text-fg-default inline-flex min-w-6 items-center justify-center rounded border px-1.5 py-0.5 font-mono text-[11px] leading-none font-semibold">
+            {token}
+          </kbd>
+        </Fragment>
+      ))}
+    </span>
   );
 }

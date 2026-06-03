@@ -6,28 +6,19 @@ import {
   type MutableRefObject,
 } from 'react';
 
+import { isEditableTarget } from './isEditableTarget';
 import {
   uploadFileToNodeInput,
   urlToNodeInput,
   textToNoteNodeInput,
   textToTextNodeInput,
-} from '../handler/canvasCommand/nodeInputBuilders';
-import useCanvasStore from '../store/canvasStore';
-import { useIntentStore } from '../store/intentStore';
-import { looksLikeUrl } from '../utils/io/media';
+} from '../../handler/canvasCommand/nodeInputBuilders';
+import useCanvasStore from '../../store/canvasStore';
+import { useIntentStore } from '../../store/intentStore';
+import { looksLikeUrl } from '../../utils/io/media';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
 import type { Edge, Node, ReactFlowInstance } from '@xyflow/react';
-
-/** Returns true when the target is an editable element (input/textarea/contentEditable). */
-function isEditableTarget(target: EventTarget | null): boolean {
-  const el = target as HTMLElement | null;
-  const tag = el?.tagName?.toLowerCase();
-  if (tag === 'input' || tag === 'textarea') return true;
-  return (
-    el?.isContentEditable || el?.getAttribute?.('role') === 'textbox' || false
-  );
-}
 
 // Marker keys used to identify serialized canvas nodes / edges in the
 // system clipboard. Older payloads only have `__sediment_nodes__`; the

@@ -1,5 +1,5 @@
 import { ArrowLeft } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 
 import { LoadingState } from '../../components/Common/LoadingState.tsx';
@@ -7,6 +7,7 @@ import { CanvasLayerPanel } from '../../components/Panels/CanvasLayerPanel';
 import { ChatPanel } from '../../components/Panels/ChatPanel';
 import { CanvasHeader } from '../../components/Panels/Header/CanvasHeader.tsx';
 import { KeyboardShortcutsModal } from '../../components/Panels/Header/KeyboardShortcutsModal.tsx';
+import { usePageShortcuts } from '../../hooks/shortcuts';
 import useStore from '../../store/canvasStore.ts';
 
 import { CenterArea } from '@/pages/CanvasPage/CenterArea.tsx';
@@ -30,7 +31,7 @@ export default function CanvasPage() {
   // `loadCanvas` and flips `isLoading` on.
   const storeCanvasId = useStore((s) => s.canvasId);
   const initialised = useRef(false);
-  const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
+  const { isShortcutsOpen, openShortcuts, closeShortcuts } = usePageShortcuts();
 
   useEffect(() => {
     if (!canvasId) {
@@ -50,29 +51,6 @@ export default function CanvasPage() {
       void switchCanvas(canvasId);
     }
   }, [canvasId, storeCanvasId, loadCanvas, switchCanvas, navigate]);
-
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.repeat) return;
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
-      if (e.key !== '?' && e.key !== '？') return;
-
-      const target = e.target as HTMLElement | null;
-      const tag = target?.tagName?.toLowerCase();
-      const isNativeInput = tag === 'input' || tag === 'textarea';
-      const isRichEditor =
-        target?.isContentEditable ||
-        target?.getAttribute?.('role') === 'textbox';
-
-      if (isNativeInput || isRichEditor) return;
-
-      e.preventDefault();
-      setIsShortcutsOpen((prev) => !prev);
-    };
-
-    window.addEventListener('keydown', onKeyDown, true);
-    return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, []);
 
   // Treat any mismatch between the URL canvas and the store canvas as a
   // loading state — covers the gap between this page mounting and the
@@ -109,9 +87,7 @@ export default function CanvasPage() {
   return (
     <>
       <MainLayout
-        header={
-          <CanvasHeader onOpenShortcuts={() => setIsShortcutsOpen(true)} />
-        }
+        header={<CanvasHeader onOpenShortcuts={openShortcuts} />}
         leftPanel={<CanvasLayerPanel />}
         rightPanel={<ChatPanel />}
       >
@@ -120,7 +96,7 @@ export default function CanvasPage() {
 
       <KeyboardShortcutsModal
         isOpen={isShortcutsOpen}
-        onClose={() => setIsShortcutsOpen(false)}
+        onClose={closeShortcuts}
       />
     </>
   );

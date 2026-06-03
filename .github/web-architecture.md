@@ -210,9 +210,13 @@ hooks/
 ├── useAgentStream.ts        # Agent SSE streaming + canvas command execution
 ├── useChatHistory.ts        # Chat history loading + reconnection
 ├── useCanvasChanges.ts      # Per-command canvas change tracking + revert preview
-├── useCanvasShortcuts.ts    # Global keyboard shortcuts + paste handling
 ├── useCornerZoomResize.ts   # Corner-drag viewport zoom
-└── useNodeScale.ts          # Node content CSS scale factor
+├── useNodeScale.ts          # Node content CSS scale factor
+└── shortcuts/               # Keyboard shortcut hooks (canvas + page chrome)
+    ├── useCanvasShortcuts.ts   # Canvas-scoped shortcuts + paste handling
+    ├── usePageShortcuts.ts     # Window-scoped page shortcuts (? help modal)
+    ├── isEditableTarget.ts     # Shared input/textarea/contentEditable guard
+    └── index.ts                # Barrel
 ```
 
 ## `store/`

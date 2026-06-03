@@ -41,7 +41,7 @@ export const DropdownMenuItem: React.FC<DropdownMenuItemProps> = ({
     tone="neutral"
     role="menuitem"
     className={cn(
-      'text-fg-muted w-full justify-start gap-3 rounded-none px-4 py-2 text-sm',
+      'text-fg-muted w-full justify-start gap-2 rounded-none px-3 py-1.5 text-xs',
       className,
     )}
     {...props}
