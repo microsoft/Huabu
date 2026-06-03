@@ -25,8 +25,6 @@ import { NodeSelection, Plugin, PluginKey } from '@milkdown/prose/state';
 import { Decoration, DecorationSet } from '@milkdown/prose/view';
 import { $prose, replaceAll } from '@milkdown/utils';
 
-import { fingerprintBlocks, type BlockSnapshot } from '@/utils/blockProvenance';
-
 import { normalizeMathDelimiters } from './markdownUtils';
 
 import type { Ctx } from '@milkdown/ctx';
@@ -37,6 +35,8 @@ import type {
 } from '@milkdown/prose/model';
 import type { Command, EditorState, Transaction } from '@milkdown/prose/state';
 import type { EditorView } from '@milkdown/prose/view';
+
+import { fingerprintBlocks, type BlockSnapshot } from '@/utils/blockProvenance';
 
 import '@milkdown/crepe/theme/common/style.css';
 import 'katex/dist/katex.min.css';

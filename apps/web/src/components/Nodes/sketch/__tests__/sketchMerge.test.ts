@@ -11,17 +11,17 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 import {
-  SKETCH_STROKE_MERGE_MAX_DISTANCE_SCREEN_PX,
-  SKETCH_STROKE_MERGE_MAX_GAP_MS,
-} from '@/config/canvas';
-
-import {
   buildEraseCommands,
   buildMergeCommands,
   findMergeTarget,
 } from '../sketchMerge';
 
 import type { Node } from '@xyflow/react';
+
+import {
+  SKETCH_STROKE_MERGE_MAX_DISTANCE_SCREEN_PX,
+  SKETCH_STROKE_MERGE_MAX_GAP_MS,
+} from '@/config/canvas';
 
 // ── Store mock ─────────────────────────────────────────────────────────
 //

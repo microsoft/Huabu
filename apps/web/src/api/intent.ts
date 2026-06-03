@@ -25,6 +25,7 @@ export async function recognizeIntentStream(
   canvasContext: IntentContext,
   onCandidate: (candidate: IntentCandidate) => void,
   signal?: AbortSignal,
+  canvasId?: string,
 ): Promise<void> {
   // SSE endpoints can't go through `apiFetch` because we need the streaming
   // body — call `fetch` directly but reuse the URL builder + error envelope.
@@ -33,7 +34,7 @@ export async function recognizeIntentStream(
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ canvasContext }),
+    body: JSON.stringify({ canvasContext, canvasId }),
     signal,
   });
 

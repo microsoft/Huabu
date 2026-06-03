@@ -2,12 +2,12 @@
  * Milkdown-backed renderer for AI chat messages.
  */
 
-import { MilkdownPreview } from '@/components/Milkdown';
-import { setDragPayload } from '@/utils/io/dragDrop';
-
 import type { NoteDragPayload } from '@/utils/io/dragDrop';
 import type { NodeOrigin } from '@sediment/shared';
 import type { FC } from 'react';
+
+import { MilkdownPreview } from '@/components/Milkdown';
+import { setDragPayload } from '@/utils/io/dragDrop';
 
 interface MilkdownMessageCardProps {
   content: string;

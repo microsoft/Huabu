@@ -3,14 +3,6 @@ import { DEFAULT_EDGE_STROKE_WIDTH } from '@sediment/shared/canvas-engine';
 import { Trash2 } from 'lucide-react';
 import { useCallback, useMemo } from 'react';
 
-import { CanvasFloatingPopover } from '@/components/Common/CanvasFloatingPopover';
-import {
-  FloatingToolbar,
-  FLOATING_TOOLBAR_CLASS,
-} from '@/components/Common/FloatingToolbar';
-import { useIsNotMouse } from '@/hooks/useInputMode';
-import useCanvasStore from '@/store/canvasStore';
-
 import type { SelectOption } from '@/components/Common/Select';
 import type { CanvasEdgeId } from '@sediment/shared';
 import type {
@@ -21,6 +13,14 @@ import type {
   EdgeStrokeWidth,
 } from '@sediment/shared';
 import type { Edge, Node } from '@xyflow/react';
+
+import { CanvasFloatingPopover } from '@/components/Common/CanvasFloatingPopover';
+import {
+  FloatingToolbar,
+  FLOATING_TOOLBAR_CLASS,
+} from '@/components/Common/FloatingToolbar';
+import { useIsNotMouse } from '@/hooks/useInputMode';
+import useCanvasStore from '@/store/canvasStore';
 
 // ---- Icon helpers ----
 

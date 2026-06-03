@@ -52,7 +52,10 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
         });
       }
 
-      const intentCandidates = await recognizeIntent(parsed.data.canvasContext);
+      const intentCandidates = await recognizeIntent(
+        parsed.data.canvasContext,
+        parsed.data.canvasId,
+      );
 
       return reply.send({ intentCandidates });
     },
@@ -68,7 +71,7 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
         });
       }
 
-      const { canvasContext } = parsed.data;
+      const { canvasContext, canvasId } = parsed.data;
 
       reply.hijack();
 
@@ -84,7 +87,10 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       reply.raw.write(': ok\n\n');
 
       try {
-        for await (const candidate of recognizeIntentStream(canvasContext)) {
+        for await (const candidate of recognizeIntentStream(
+          canvasContext,
+          canvasId,
+        )) {
           writeIntentSSE(reply.raw, {
             type: INTENT_SSE_EVENTS.Candidate,
             data: candidate,

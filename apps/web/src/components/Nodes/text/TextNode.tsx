@@ -2,10 +2,6 @@ import { resolveAccent } from '@sediment/shared';
 import { Bold, Italic, Underline, Strikethrough } from 'lucide-react';
 import { memo, useCallback, useState, useRef, useMemo } from 'react';
 
-import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
-import { useTextNodeSurface } from '@/hooks/useTextNodeSurface';
-import useCanvasStore from '@/store/canvasStore.ts';
-
 import { getAccentTokens } from '../accentTokens';
 import { MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
@@ -14,6 +10,10 @@ import { TextNodeBody } from '../shared/TextNodeBody';
 import type { CanvasTextNodeData, NodeStyle } from '../types';
 import type { NodeFontFamily } from '@sediment/shared';
 import type { Node, NodeProps } from '@xyflow/react';
+
+import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
+import { useTextNodeSurface } from '@/hooks/useTextNodeSurface';
+import useCanvasStore from '@/store/canvasStore.ts';
 
 /** Map logical font family names to CSS font stacks. */
 const FONT_FAMILY_CSS: Record<NodeFontFamily, string> = {

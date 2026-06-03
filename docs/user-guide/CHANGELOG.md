@@ -4,6 +4,25 @@
 
 ---
 
+## 2026-06-03 · Intent ↔ Memory 闭环：让推荐学会个人偏好
+
+**What Changed**
+
+- Intent 识别（Cmd+I / 工具栏 🧠）现在会把 **Workspace memory + Canvas memory** 折成一段轻量 preamble 一起喂给模型；候选会主动贴近你已经保存的偏好和当前画布目标。
+- 后台 Memory Curator 在 op-counter 触发时除了原来的画布快照 / 聊天 / 操作三路来源，**新增 Intent digest 一路**：统计自上次分析以来用户选了什么、丢弃了什么、执行成功还是失败，并把最近 20 条 episode 以 oneliner 形式喂给 curator，由它沉淀成 `.huabu.md` / `.memory/canvas.md` 的长期记忆。
+- 选中 intent 之后 chat 执行的成败也会被回写到同一个 `IntentEpisode`（新增 `outcome.execution` 字段：`success` / `error` / `stopped`），让"用户点了但跑挂了"和"用户点了画布也变了"在 memory 视角里被区分开。
+- `MemoryState` 新增 `lastSeenIntentCursor`，按 episode 时间戳推进，保证每条 episode 只被 curator 消化一次，不会在每轮分析里重复刷屏。
+
+**Notes**
+
+- **行为变化**：第一次升级后老 episode 一次性全量进入 digest（cursor 是 `null`），之后只看新增；不会重复回流。
+- **隐私边界不变**：所有写入仍然只通过 memory sub-agent 的 `fs_write` 工具，仍然受 4 KB / 80 行 cap 约束；intent digest 只在 curator prompt 里临时存在，不落到任何用户可见文件。
+- **接口兼容**：`POST /api/intent/recognize` 与 `/recognize-stream` 的 body 新增可选 `canvasId`，缺省时退化为不注入 canvas memory（仍能跑），老前端版本无需修改。
+- **失败处理**：Memory 读 / preamble 拼接失败一律 swallow，intent 识别照常进行，只是这次不带 memory bias。
+- **测试覆盖**：依赖现有 memory worker 集成测试覆盖，没新增专门用例。
+
+---
+
 ## 2026-06-03 · ACP 配对码：修复"自动重连一定失败"的回归
 
 **What Changed**

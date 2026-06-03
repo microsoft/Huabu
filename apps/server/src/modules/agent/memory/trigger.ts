@@ -11,6 +11,7 @@
  *   lastSeenThreadCursor pi-ai context timestamp of the last
  *                       analysed chat turn — lets `context.ts` (PR-C)
  *                       only pull "new" turns into the analysis prompt.
+ *   lastSeenIntentCursor epoch ms of the last analysed intent episode.
  *
  * Persisted at `<canvasDir>/.memory/state.json` so the counter
  * survives process restarts. The file is kept tiny (<128 B) and
@@ -23,7 +24,11 @@ import { existsSync } from 'node:fs';
 
 import { createKeyedMutex } from '../../../utils/keyed-mutex.js';
 import { atomicWriteJson, mkdirp, readJson } from '../../storage/io.js';
-import { memoryStatePath, canvasMemoryDir } from '../../storage/paths.js';
+import {
+  memoryStatePath,
+  canvasMemoryDir,
+  canvasRoot,
+} from '../../storage/paths.js';
 
 /** Op-count threshold that triggers a memory analysis pass. */
 export const OP_THRESHOLD = 50;
@@ -39,12 +44,14 @@ export interface MemoryState {
   counter: number;
   lastAnalyzedAt: number | null;
   lastSeenThreadCursor: number | null;
+  lastSeenIntentCursor: number | null;
 }
 
 const EMPTY_STATE: MemoryState = {
   counter: 0,
   lastAnalyzedAt: null,
   lastSeenThreadCursor: null,
+  lastSeenIntentCursor: null,
 };
 
 /**
@@ -67,11 +74,23 @@ export function readMemoryState(canvasId: string): MemoryState {
       typeof raw.lastSeenThreadCursor === 'number'
         ? raw.lastSeenThreadCursor
         : null,
+    lastSeenIntentCursor:
+      typeof raw.lastSeenIntentCursor === 'number'
+        ? raw.lastSeenIntentCursor
+        : null,
   };
 }
 
 /** Atomic write of the memory state, creating `.memory/` on demand. */
 export function writeMemoryState(canvasId: string, state: MemoryState): void {
+  // Resurrection guard: the op-counter `onResponse` hook fires
+  // *after* DELETE /api/canvas/:id has rm -rf'd the canvas dir, and
+  // would otherwise mkdirp `.memory/` + drop a fresh `state.json`
+  // here \u2014 leaving behind a stub canvas dir containing only that
+  // file. Same hazard for any in-flight memory worker that calls
+  // `markAnalyzed` post-delete. Skip the write when the canvas root
+  // is gone; losing one bookkeeping write is harmless.
+  if (!existsSync(canvasRoot(canvasId))) return;
   mkdirp(canvasMemoryDir(canvasId));
   atomicWriteJson(memoryStatePath(canvasId), state);
 }
@@ -123,13 +142,19 @@ export async function bumpOpCounter(
  */
 export async function markAnalyzed(
   canvasId: string,
-  opts: { lastSeenThreadCursor?: number } = {},
+  opts: {
+    lastSeenThreadCursor?: number;
+    lastSeenIntentCursor?: number;
+  } = {},
 ): Promise<void> {
   await stateLock(canvasId, () => {
     const state = readMemoryState(canvasId);
     state.lastAnalyzedAt = Date.now();
     if (opts.lastSeenThreadCursor !== undefined) {
       state.lastSeenThreadCursor = opts.lastSeenThreadCursor;
+    }
+    if (opts.lastSeenIntentCursor !== undefined) {
+      state.lastSeenIntentCursor = opts.lastSeenIntentCursor;
     }
     writeMemoryState(canvasId, state);
   });

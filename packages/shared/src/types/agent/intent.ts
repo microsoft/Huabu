@@ -29,9 +29,21 @@ export interface IntentEpisode {
   candidates: IntentCandidate[];
   /** What the user did */
   outcome:
-    | { type: 'selected'; chosenIndex: number; chosenLabel: string }
+    | {
+        type: 'selected';
+        chosenIndex: number;
+        chosenLabel: string;
+        /** Optional execution result written back after operate settles. */
+        execution?: IntentExecutionOutcome;
+      }
     | { type: 'dismissed' };
 }
+
+/** Settled outcome of an executed intent. */
+export type IntentExecutionOutcome =
+  | { status: 'success'; commandCount?: number }
+  | { status: 'error'; error?: string }
+  | { status: 'stopped' };
 
 /**
  * Response returned by the backend after intent recognition.

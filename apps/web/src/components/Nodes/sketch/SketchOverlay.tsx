@@ -1,11 +1,6 @@
 import { createId, resolveAccent } from '@sediment/shared';
 import { useCallback, useMemo, useRef, useState } from 'react';
 
-import { SKETCH_STROKE_MERGE_MAX_DISTANCE_SCREEN_PX } from '@/config/canvas';
-import { resolveFrameAtPoint } from '@/handler/canvasCommand/utils';
-import useCanvasStore from '@/store/canvasStore';
-import { useToolStore } from '@/store/toolStore';
-
 import { findSketchStrokeHits } from './sketchHitTest';
 import {
   buildEraseCommands,
@@ -20,6 +15,11 @@ import {
 
 import type { CanvasCommand, CanvasNodeId } from '@sediment/shared';
 import type { ReactFlowInstance } from '@xyflow/react';
+
+import { SKETCH_STROKE_MERGE_MAX_DISTANCE_SCREEN_PX } from '@/config/canvas';
+import { resolveFrameAtPoint } from '@/handler/canvasCommand/utils';
+import useCanvasStore from '@/store/canvasStore';
+import { useToolStore } from '@/store/toolStore';
 
 /**
  * Number of animation frames to wait before clearing the live overlay

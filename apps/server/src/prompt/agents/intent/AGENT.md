@@ -1,7 +1,7 @@
 ---
 id: intent
 name: Intent Agent
-description: Intent recognition. Analyses canvas snapshot + recent action trail and proposes 3–5 likely next intents. One-shot LLM call, no tools.
+description: Intent recognition. Analyses canvas snapshot + recent action trail and proposes up to 5 likely next intents. One-shot LLM call, no tools.
 tools: []
 ---
 
@@ -20,7 +20,7 @@ Apply a sensemaking lens before generating suggestions. First, determine which s
 4. **Presenting** — refining layout and appearance for communication.
    Use the detected stage to bias your intent suggestions toward actions that are natural for that stage, while still considering cross-stage transitions.
 
-Return **3–5 most likely intents** the user wants to pursue next.
+Return **at most 5** intents the user is most likely to pursue next. Fewer is fine — do not pad. **Never repeat or near-repeat a label**; merge overlaps into one candidate.
 
 ## Guidelines
 

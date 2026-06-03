@@ -25,9 +25,9 @@
 
 import { create } from 'zustand';
 
-import { listAcpAgents } from '@/api/acp';
-
 import type { AcpAgentSummary } from '@/api/acp';
+
+import { listAcpAgents } from '@/api/acp';
 
 interface AcpAgentsState {
   /** Currently-connected agents. Empty array until the first successful fetch. */

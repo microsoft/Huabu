@@ -9,8 +9,6 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
-
 import {
   applySnap,
   beginSnapSession,
@@ -29,6 +27,8 @@ import type {
   NodeDimensionChange,
   NodePositionChange,
 } from '@xyflow/react';
+
+import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 
 // ── Helpers ───────────────────────────────────────────────────────────
 

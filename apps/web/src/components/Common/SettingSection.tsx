@@ -18,7 +18,7 @@ export const SettingSection: React.FC<SettingSectionProps> = ({
   return (
     <section className="mb-4 last:mb-0">
       <h4 className="text-fg-muted mb-1.5 px-1 text-xs font-medium">{title}</h4>
-      <div className="bg-surface divide-edge-default divide-y overflow-hidden rounded-md shadow-sm ring-1 ring-edge-default/50">
+      <div className="bg-surface divide-edge-default ring-edge-default/50 divide-y overflow-hidden rounded-md shadow-sm ring-1">
         {children}
       </div>
     </section>

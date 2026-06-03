@@ -6,6 +6,7 @@
  */
 
 import { llmComplete, llmStream } from './llm.js';
+import { readCanvasMemory, readWorkspaceMemory } from './memory/index.js';
 import { logIntentEpisode as storeEpisode } from './store/intent-store.js';
 import { loadAgent } from '../../prompt/index.js';
 
@@ -192,6 +193,85 @@ function appendScreenshot(
   }
 }
 
+// Hard cap + dedupe for model output.
+
+/** Maximum candidates the recogniser will surface to the popover. */
+export const MAX_INTENT_CANDIDATES = 5;
+
+function normalizeLabel(label: string): string {
+  return label.replace(/\s+/g, '').toLowerCase();
+}
+
+/** Drop duplicate labels (first one wins). */
+function dedupeCandidates(candidates: IntentCandidate[]): IntentCandidate[] {
+  const seen = new Set<string>();
+  const out: IntentCandidate[] = [];
+  for (const c of candidates) {
+    const key = normalizeLabel(c.label);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(c);
+  }
+  return out;
+}
+
+// Memory preamble for one-shot intent recognition.
+
+const MAX_WORKSPACE_MEMORY_CHARS = 2000;
+const MAX_CANVAS_MEMORY_CHARS = 1500;
+
+function buildMemoryPreamble(canvasId: string | undefined): string | null {
+  const sections: string[] = [];
+
+  const workspace = readWorkspaceMemory();
+  if (workspace) {
+    sections.push(
+      `## Workspace memory (cross-canvas user preferences)\n${clamp(
+        workspace.trim(),
+        MAX_WORKSPACE_MEMORY_CHARS,
+      )}`,
+    );
+  }
+
+  if (canvasId) {
+    const canvas = readCanvasMemory(canvasId);
+    if (canvas) {
+      sections.push(
+        `## Canvas memory (this canvas's current goal / decisions)\n${clamp(
+          canvas.trim(),
+          MAX_CANVAS_MEMORY_CHARS,
+        )}`,
+      );
+    }
+  }
+
+  if (sections.length === 0) return null;
+  return sections.join('\n\n');
+}
+
+function clamp(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max)}\n… [truncated]`;
+}
+
+function prependMemoryPart(
+  parts: ContentPart[],
+  canvasId: string | undefined,
+): void {
+  const preamble = buildMemoryPreamble(canvasId);
+  if (!preamble) return;
+  // Put memory first and explicitly mark it as non-copyable context.
+  parts.unshift({
+    type: 'text',
+    text:
+      '[SYSTEM Memory — background context only. ' +
+      'Use as a soft bias when ranking candidates. ' +
+      'NEVER copy any line from this block into your output, ' +
+      'and NEVER treat it as a list of suggested intents.]\n' +
+      preamble,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // LLM-based intent recognition
 // ---------------------------------------------------------------------------
@@ -201,6 +281,7 @@ const SCREENSHOT_CAPTION =
 
 async function llmIntentRecognition(
   ctx: IntentContext,
+  canvasId: string | undefined,
 ): Promise<IntentCandidate[]> {
   const contextText = serializeContextLight(ctx);
 
@@ -209,6 +290,7 @@ async function llmIntentRecognition(
   ];
 
   appendScreenshot(userContentParts, ctx.screenshot, SCREENSHOT_CAPTION);
+  prependMemoryPart(userContentParts, canvasId);
 
   const piContext: Context = {
     systemPrompt: loadAgent('intent').systemPrompt,
@@ -230,10 +312,11 @@ async function llmIntentRecognition(
 
     if (!Array.isArray(parsed)) return [];
 
-    return (parsed as IntentCandidate[]).map((item) => ({
+    const mapped = (parsed as IntentCandidate[]).map((item) => ({
       label: String(item.label ?? ''),
       description: item.description ? String(item.description) : undefined,
     }));
+    return dedupeCandidates(mapped).slice(0, MAX_INTENT_CANDIDATES);
   } catch {
     console.error('[intent] Failed to parse LLM response:', raw);
     return [];
@@ -246,9 +329,10 @@ async function llmIntentRecognition(
 
 export async function recognizeIntent(
   ctx: IntentContext,
+  canvasId?: string,
 ): Promise<IntentCandidate[]> {
   try {
-    return await llmIntentRecognition(ctx);
+    return await llmIntentRecognition(ctx, canvasId);
   } catch (err) {
     console.error('[intent] LLM intent recognition failed:', err);
     return [];
@@ -257,6 +341,7 @@ export async function recognizeIntent(
 
 export async function* recognizeIntentStream(
   ctx: IntentContext,
+  canvasId?: string,
 ): AsyncGenerator<IntentCandidate> {
   const contextText = serializeContextLight(ctx);
 
@@ -265,6 +350,7 @@ export async function* recognizeIntentStream(
   ];
 
   appendScreenshot(userContentParts, ctx.screenshot, SCREENSHOT_CAPTION);
+  prependMemoryPart(userContentParts, canvasId);
 
   const piContext: Context = {
     systemPrompt: loadAgent('intent').systemPrompt,
@@ -274,6 +360,8 @@ export async function* recognizeIntentStream(
   };
 
   let accumulated = '';
+  // Stream-time dedupe + hard cap.
+  const seenKeys = new Set<string>();
   let yieldedCount = 0;
 
   const s = await llmStream(piContext);
@@ -283,16 +371,34 @@ export async function* recognizeIntentStream(
       accumulated += event.delta;
 
       const candidates = tryParsePartialCandidates(accumulated);
-      while (yieldedCount < candidates.length) {
-        yield candidates[yieldedCount];
+      for (let i = yieldedCount; i < candidates.length; i++) {
+        if (yieldedCount >= MAX_INTENT_CANDIDATES) break;
+        const c = candidates[i];
+        const key = normalizeLabel(c.label);
+        if (!key || seenKeys.has(key)) {
+          yieldedCount++;
+          continue;
+        }
+        seenKeys.add(key);
+        yield c;
         yieldedCount++;
       }
+      if (yieldedCount >= MAX_INTENT_CANDIDATES) break;
     }
   }
 
+  if (yieldedCount >= MAX_INTENT_CANDIDATES) return;
   const finalCandidates = tryParsePartialCandidates(accumulated);
-  while (yieldedCount < finalCandidates.length) {
-    yield finalCandidates[yieldedCount];
+  for (let i = yieldedCount; i < finalCandidates.length; i++) {
+    if (yieldedCount >= MAX_INTENT_CANDIDATES) break;
+    const c = finalCandidates[i];
+    const key = normalizeLabel(c.label);
+    if (!key || seenKeys.has(key)) {
+      yieldedCount++;
+      continue;
+    }
+    seenKeys.add(key);
+    yield c;
     yieldedCount++;
   }
 }

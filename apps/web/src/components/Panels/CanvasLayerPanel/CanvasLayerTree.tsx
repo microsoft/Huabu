@@ -15,13 +15,13 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import React, { useCallback, useMemo } from 'react';
 
-import useCanvasStore from '@/store/canvasStore.ts';
-
 import { TreeRowItem } from './TreeRowItem';
 import { EmptyState } from '../../Common/EmptyState';
 
 import type { DataSourceNodeLike, DataSourceTreeItem } from './types';
 import type { DragEndEvent } from '@dnd-kit/core';
+
+import useCanvasStore from '@/store/canvasStore.ts';
 
 interface SortableRowProps {
   item: DataSourceTreeItem;

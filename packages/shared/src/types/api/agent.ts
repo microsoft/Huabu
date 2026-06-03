@@ -273,6 +273,15 @@ export type AgentCanvasIdQuery = z.infer<typeof agentCanvasIdQuerySchema>;
 /** Body for `POST /api/intent/recognize` and `/recognize-stream`. */
 export const intentRequestSchema = z.object({
   canvasContext: intentContextSchema,
+  /**
+   * Canvas the request was fired from. Optional so the endpoints
+   * stay backwards compatible with older web bundles, but the server
+   * uses it to fold workspace + canvas memory into the recogniser's
+   * prompt (so the candidates respect the user's saved preferences
+   * and the canvas's current goal). Without it the recogniser
+   * still runs, just with no memory preamble.
+   */
+  canvasId: z.string().min(1).optional(),
 });
 export type IntentRequest = z.infer<typeof intentRequestSchema>;
 

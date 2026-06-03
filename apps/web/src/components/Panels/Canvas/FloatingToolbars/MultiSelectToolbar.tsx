@@ -10,6 +10,9 @@ import {
 import { Sparkles, Trash2 } from 'lucide-react';
 import { useCallback, useMemo } from 'react';
 
+import type { CanvasNode } from '@/components/Nodes/types';
+import type { CanvasNodeId } from '@sediment/shared';
+
 import { CanvasFloatingPopover } from '@/components/Common/CanvasFloatingPopover';
 import {
   FloatingToolbar,
@@ -19,9 +22,6 @@ import { useIsNotMouse } from '@/hooks/useInputMode';
 import useCanvasStore from '@/store/canvasStore';
 import { useIntentStore } from '@/store/intentStore';
 import { resolveGeometryEdit } from '@/utils/node/geometry';
-
-import type { CanvasNode } from '@/components/Nodes/types';
-import type { CanvasNodeId } from '@sediment/shared';
 
 /** Sentinel token representing "no accent". */
 const ACCENT_NONE = ACCENT_NONE_TOKEN;

@@ -1,6 +1,6 @@
-import { NodePreviews } from '@/components/Nodes/previews';
-
 import { AiSummaryBanner } from './AiSummaryBanner';
+
+import { NodePreviews } from '@/components/Nodes/previews';
 
 export type PreviewData = {
   type: string;
