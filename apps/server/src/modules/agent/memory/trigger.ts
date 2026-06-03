@@ -23,7 +23,11 @@ import { existsSync } from 'node:fs';
 
 import { createKeyedMutex } from '../../../utils/keyed-mutex.js';
 import { atomicWriteJson, mkdirp, readJson } from '../../storage/io.js';
-import { memoryStatePath, canvasMemoryDir } from '../../storage/paths.js';
+import {
+  memoryStatePath,
+  canvasMemoryDir,
+  canvasRoot,
+} from '../../storage/paths.js';
 
 /** Op-count threshold that triggers a memory analysis pass. */
 export const OP_THRESHOLD = 50;
@@ -72,6 +76,14 @@ export function readMemoryState(canvasId: string): MemoryState {
 
 /** Atomic write of the memory state, creating `.memory/` on demand. */
 export function writeMemoryState(canvasId: string, state: MemoryState): void {
+  // Resurrection guard: the op-counter `onResponse` hook fires
+  // *after* DELETE /api/canvas/:id has rm -rf'd the canvas dir, and
+  // would otherwise mkdirp `.memory/` + drop a fresh `state.json`
+  // here — leaving behind a stub canvas dir containing only that
+  // file. Same hazard for any in-flight memory worker that calls
+  // `markAnalyzed` post-delete. Skip the write when the canvas root
+  // is gone; losing one bookkeeping write is harmless.
+  if (!existsSync(canvasRoot(canvasId))) return;
   mkdirp(canvasMemoryDir(canvasId));
   atomicWriteJson(memoryStatePath(canvasId), state);
 }
