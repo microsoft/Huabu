@@ -33,25 +33,13 @@ export interface IntentEpisode {
         type: 'selected';
         chosenIndex: number;
         chosenLabel: string;
-        /**
-         * Post-execution signal, written back by the frontend after
-         * the operate-agent turn settles. Optional because the
-         * initial `selectCandidate` upsert always runs before
-         * execution — the same episode `id` is re-upserted with
-         * `execution` filled in once the agent finishes. The memory
-         * curator uses it to distinguish "user clicked but the run
-         * crashed" from "user clicked and the canvas changed”.
-         */
+        /** Optional execution result written back after operate settles. */
         execution?: IntentExecutionOutcome;
       }
     | { type: 'dismissed' };
 }
 
-/**
- * Settled outcome of an executed intent. Filled in by the frontend
- * after the operate-agent turn that ran the chosen intent settles
- * (success, error, or user-initiated stop).
- */
+/** Settled outcome of an executed intent. */
 export type IntentExecutionOutcome =
   | { status: 'success'; commandCount?: number }
   | { status: 'error'; error?: string }
