@@ -34,7 +34,13 @@ import {
   RefreshCw,
   Trash2,
 } from 'lucide-react';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 import {
   createAcpProfile,
@@ -721,17 +727,30 @@ export function useDetectedClis(): AcpAgentCliInfo[] {
   const [detectedClis, setDetectedClis] = useState<AcpAgentCliInfo[]>([]);
   useEffect(() => {
     let cancelled = false;
-    listAcpAgentClis()
-      .then((res) => {
-        if (!cancelled) setDetectedClis(res.agents);
-      })
-      .catch(() => {
-        // Detection failure is non-fatal — the Custom option still
-        // works. Don't pop a toast; the dropdown just shows "Custom"
-        // as the only entry.
-      });
+    /**
+     * Fire-and-forget. We refetch on every workspace-ready transition
+     * because `/api/acp/agent-cli` sits behind the server's workspace
+     * guard — if Settings was opened on the WorkspaceSetupPage the
+     * initial fetch 503s and we'd otherwise be stuck with an empty
+     * Built-in list until the user reloads.
+     */
+    const load = () => {
+      listAcpAgentClis()
+        .then((res) => {
+          if (!cancelled) setDetectedClis(res.agents);
+        })
+        .catch(() => {
+          // Detection failure is non-fatal — the Custom option still
+          // works. Don't pop a toast; the dropdown just shows "Custom"
+          // as the only entry.
+        });
+    };
+    load();
+    const handler = () => load();
+    window.addEventListener('workspace-changed', handler);
     return () => {
       cancelled = true;
+      window.removeEventListener('workspace-changed', handler);
     };
   }, []);
   return detectedClis;
@@ -754,10 +773,18 @@ export const AcpSettings: React.FC = () => {
   const [restarting, setRestarting] = useState(false);
 
   // Surface fetch errors as transient toasts so the user notices even
-  // if the section isn't scrolled into view.
+  // if the section isn't scrolled into view. We deliberately ignore
+  // any error that was already cached before this component mounted —
+  // most commonly the workspace-not-configured 503 the store hit when
+  // Settings was opened on the WorkspaceSetupPage. The store wipes
+  // such errors on the next `workspace-changed` event, but the user
+  // might re-open Settings before that fires; replaying a stale
+  // message would be more confusing than helpful.
+  const lastToastedRef = useRef<Error | null>(error);
   useEffect(() => {
-    if (error) {
+    if (error && error !== lastToastedRef.current) {
       toast(error.message, { variant: 'error' });
+      lastToastedRef.current = error;
     }
   }, [error]);
 

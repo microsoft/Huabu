@@ -21,6 +21,17 @@
  * Daemon status is folded into the same response (the server returns
  * `{profiles, daemon}` on every `GET /api/acp/profiles`) so consumers
  * never have to coordinate two GETs and never see a torn view.
+ *
+ * Workspace-readiness retry: `/api/acp/profiles` is behind the server's
+ * workspace-configured guard (everything outside `/api/workspace` and
+ * `/api/llm` 503s until the user picks a workspace). The user can
+ * legitimately open Settings on the WorkspaceSetupPage before picking
+ * a folder; that first fetch will 503 and the error would otherwise
+ * stick around forever (`initStarted` is one-shot). We listen for the
+ * `workspace-changed` window event dispatched by `workspaceStore` and
+ * silently re-fetch on transition, so the cached "Workspace has not
+ * been configured" error doesn't replay as a toast next time Settings
+ * mounts.
  */
 
 import { create } from 'zustand';
@@ -73,6 +84,18 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
         if (document.visibilityState === 'visible') {
           void get().refresh();
         }
+      });
+    }
+    // Same singleton-lifetime story for the workspace-readiness retry:
+    // if the user opened Settings on the WorkspaceSetupPage, our first
+    // fetch 503'd against the workspace guard and `error` would stick.
+    // Clear it and re-fetch the moment the workspace becomes
+    // configured so the next Settings open does not toast a stale
+    // "Workspace has not been configured" message.
+    if (typeof window !== 'undefined') {
+      window.addEventListener('workspace-changed', () => {
+        set({ error: null });
+        void get().refresh();
       });
     }
     await get().refresh();

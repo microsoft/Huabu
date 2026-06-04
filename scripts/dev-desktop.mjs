@@ -110,7 +110,6 @@ function isPortFree(host, port) {
  */
 async function findAvailablePort(host, startPort) {
   for (let p = startPort; p < startPort + PORT_SCAN_RANGE; p += 1) {
-     
     if (await isPortFree(host, p)) return p;
   }
   throw new Error(

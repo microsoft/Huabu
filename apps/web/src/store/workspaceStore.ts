@@ -99,6 +99,20 @@ function fromInfo(info: WorkspaceInfo): Partial<WorkspaceState> {
   };
 }
 
+/**
+ * Notify the rest of the app that a workspace is now active. Dispatched
+ * on every transition from "no workspace" / "different workspace" to
+ * "ready", including auto-activation from a saved path on boot. Stores
+ * gated by the server-side workspace guard (e.g. `acpProfilesStore`,
+ * `useDetectedClis`) listen for this to silently re-fetch and drop the
+ * cached "Workspace has not been configured" 503 they may have hit
+ * before the user picked a folder.
+ */
+function emitWorkspaceChanged(): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new Event('workspace-changed'));
+}
+
 export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   mode: null,
   capabilities: null,
@@ -130,6 +144,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       // Free-mode leftovers are meaningless here.
       localStorage.removeItem(FREE_PATH_KEY);
       set({ isSyncing: false });
+      if (info.configured) emitWorkspaceChanged();
       return info.configured;
     }
 
@@ -139,6 +154,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       localStorage.setItem(FREE_PATH_KEY, info.path);
       const recent = pushRecentWorkspace(info.path);
       set({ recentWorkspaces: recent, isSyncing: false });
+      emitWorkspaceChanged();
       return true;
     }
 
@@ -153,6 +169,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
           recentWorkspaces: recent,
           isSyncing: false,
         });
+        emitWorkspaceChanged();
         return true;
       } catch (err) {
         // Stored path is invalid (e.g. cross-platform leftover). Drop it
@@ -181,6 +198,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       localStorage.setItem(FREE_PATH_KEY, path);
       const recent = pushRecentWorkspace(path);
       set({ ...fromInfo(info), recentWorkspaces: recent, isSyncing: false });
+      emitWorkspaceChanged();
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Failed to update workspace';

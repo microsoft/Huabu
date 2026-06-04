@@ -132,17 +132,11 @@ export interface RunAcpAgentOptions {
    *
    * When omitted, `ensureAcpSession` resolves it from the bound
    * profile's `cwd` (set by the user in Settings → External Agents).
-   * The fallback chain is: explicit `opts.cwd` → `profile.cwd` →
-   * `'/'` (last-resort sentinel, only reachable if the profile
-   * disappeared between binding lookup and session open).
-   *
-   * Historical note: an earlier design relied on an agentlet relay
-   * substituting `'/'` with `process.cwd()`. That substitution was
-   * never actually implemented in the relay (see
-   * `external/agentlet/packages/local/src/relay.ts` — pure
-   * transparent relay), which left the agent with `'/'` as its
-   * workspace and silently broke the user's configured working
-   * directory. We now derive `cwd` from the profile up front.
+   * If the profile has been deleted and no `bindingRecipe` snapshot
+   * was persisted, the call throws — we never silently fall back to
+   * a sentinel like `'/'` (which the old agentlet relay was meant to
+   * substitute with `process.cwd()` but never did, leaving agents
+   * stranded at the filesystem root).
    */
   cwd?: string;
   /**

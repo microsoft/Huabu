@@ -23,6 +23,8 @@
 import { chmodSync } from 'node:fs';
 import path from 'node:path';
 
+import { acpAgentProfileSchema } from '@sediment/shared';
+
 import { getDataDir } from '../../../data-dir.js';
 import { atomicWriteJson, readJson } from '../../storage/io.js';
 
@@ -62,23 +64,16 @@ function loadAll(): AcpAgentProfile[] {
   const file = readJson<ProfileStoreFile>(profilesPath());
   if (!file || !Array.isArray(file.profiles)) return [];
 
-  // Defensive: drop any record missing required fields rather than
-  // crashing on malformed input. We never validate via zod here to
-  // avoid pulling the schema layer into a server-internal store.
-  return file.profiles.filter(
-    (p): p is AcpAgentProfile =>
-      !!p &&
-      typeof p === 'object' &&
-      typeof (p as AcpAgentProfile).id === 'string' &&
-      (p as AcpAgentProfile).id.length > 0 &&
-      typeof (p as AcpAgentProfile).displayName === 'string' &&
-      typeof (p as AcpAgentProfile).cliId === 'string' &&
-      typeof (p as AcpAgentProfile).command === 'string' &&
-      typeof (p as AcpAgentProfile).cwd === 'string' &&
-      typeof (p as AcpAgentProfile).autoRestart === 'boolean' &&
-      typeof (p as AcpAgentProfile).createdAt === 'number' &&
-      typeof (p as AcpAgentProfile).updatedAt === 'number',
-  );
+  // Validate each record through the shared zod schema so the wire
+  // contract and the on-disk contract can't drift. Malformed entries
+  // are dropped rather than throwing — a single hand-edited record
+  // shouldn't bring down the whole store.
+  const out: AcpAgentProfile[] = [];
+  for (const raw of file.profiles) {
+    const parsed = acpAgentProfileSchema.safeParse(raw);
+    if (parsed.success) out.push(parsed.data);
+  }
+  return out;
 }
 
 function saveAll(profiles: AcpAgentProfile[]): void {

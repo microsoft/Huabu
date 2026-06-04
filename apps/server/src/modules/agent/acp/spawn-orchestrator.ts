@@ -171,6 +171,13 @@ export async function ensureAgentForThread(
     );
   }
 
+  // Cache lookup is gated on `daemonId` match: only one daemon is alive at
+  // a time, but the supervisor mints a fresh `daemonId` on every re-fork
+  // (crash, OOM, user-triggered restart), so a mismatch here means the
+  // cached agent belongs to a previous daemon generation and its child
+  // process is by definition dead. We fall through to a fresh spawn and
+  // let the `set()` at the bottom overwrite the stale entry — no explicit
+  // cleanup needed.
   const cached = threadToAgent.get(threadKey);
   if (cached && cached.daemonId === daemon.daemonId) {
     const server = getAgentletServer();
@@ -203,6 +210,13 @@ export async function ensureAgentForThread(
   // and will surface a more contextual error.
   await waitForAgentConnection(agentId, 3000);
 
+  // Race note: if the daemon was re-forked between `readActiveDaemon`
+  // above and this `set`, we may persist a `daemonId` that no longer
+  // matches `activeDaemonId`. That's intentional and self-healing — the
+  // daemonId-match check at the top of the next call rejects the stale
+  // entry and falls through to a fresh spawn, which then overwrites it.
+  // We never need to lock around the write, and callers never observe
+  // an agent from a dead daemon.
   threadToAgent.set(threadKey, {
     agentletAgentId: agentId,
     pid,

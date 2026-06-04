@@ -24,6 +24,7 @@
  * user can see it (window title, installer, Start Menu entry, log dir, etc.).
  */
 
+import { execFile } from 'node:child_process';
 import {
   createWriteStream,
   existsSync,
@@ -99,6 +100,71 @@ process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
   }
   throw err;
 });
+
+// ── Shell PATH harvest ───────────────────────────────────────────────
+
+/**
+ * Packaged apps launched via Finder/Dock/Launchpad inherit a minimal
+ * PATH from launchd (typically `/usr/bin:/bin:/usr/sbin:/sbin` on
+ * macOS), which omits common install locations like `/opt/homebrew/bin`
+ * or `~/.nvm/.../bin` where users keep ACP-capable CLIs (`copilot`,
+ * `claude`, `gemini`). The server's host-CLI detection (`which
+ * <binary>`) then finds nothing and Settings → Built-in shows an empty
+ * agent list — even though the same binaries are reachable from the
+ * user's Terminal.
+ *
+ * To paper over that without forcing a Terminal relaunch, we run the
+ * user's interactive login shell once at startup and harvest its
+ * resolved PATH, then prepend the new entries onto `process.env.PATH`.
+ * `buildServerEnv` already spreads `process.env` into the forked
+ * server, so the child inherits the augmented value transparently.
+ *
+ * Skipped in dev (the Terminal-launched Electron already inherits the
+ * shell PATH) and on Windows (Explorer-launched apps already see the
+ * registry PATH; no dotfile-driven equivalent). Failure is non-fatal —
+ * we keep the launchd PATH and surface the detection gap in the UI.
+ */
+async function ensureShellPath(): Promise<void> {
+  if (IS_DEV) return;
+  if (process.platform === 'win32') return;
+  const shellPath = process.env.SHELL?.trim() || '/bin/sh';
+  const MARKER = '__HUABU_PATH__:';
+  try {
+    const harvested = await new Promise<string>((resolve, reject) => {
+      execFile(
+        shellPath,
+        ['-ilc', `printf '%s' "${MARKER}$PATH"`],
+        { timeout: 3_000, windowsHide: true },
+        (err, stdout) => {
+          if (err) return reject(err);
+          const idx = stdout.lastIndexOf(MARKER);
+          if (idx === -1)
+            return reject(new Error('PATH marker missing from shell output'));
+          resolve(stdout.slice(idx + MARKER.length).trim());
+        },
+      );
+    });
+    if (!harvested) return;
+    const existing = (process.env.PATH ?? '').split(':').filter(Boolean);
+    const seen = new Set(existing);
+    const additions: string[] = [];
+    for (const entry of harvested.split(':')) {
+      if (!entry || seen.has(entry)) continue;
+      seen.add(entry);
+      additions.push(entry);
+    }
+    if (additions.length === 0) return;
+    process.env.PATH = [...additions, ...existing].join(':');
+    console.log(
+      `[desktop] augmented PATH from ${shellPath} (+${additions.length} entries)`,
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(
+      `[desktop] login-shell PATH probe failed (${shellPath}): ${message}`,
+    );
+  }
+}
 
 // ── Server process ───────────────────────────────────────────────────
 
@@ -547,6 +613,12 @@ app.whenReady().then(async () => {
   }
 
   try {
+    // Augment PATH from the user's login shell BEFORE forking the
+    // server so host-CLI detection (`which copilot` / `claude` /
+    // `gemini`) sees the same entries the user has in their Terminal.
+    // See `ensureShellPath` for rationale.
+    await ensureShellPath();
+
     const external = getExternalServerUrl();
     if (external) {
       // External dev server: don't fork our own, just point at the
