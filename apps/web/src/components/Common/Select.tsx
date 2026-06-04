@@ -207,66 +207,74 @@ export function Select<T extends string = string>({
           // ChatPanel). 24rem leaves room for a useful description
           // prefix while still fitting inside the default chat panel;
           // the `min(…, 100vw-1rem)` guard keeps it on-screen at narrow
-          // widths.
-          className="flex max-w-[min(24rem,calc(100vw-1rem))] flex-col overflow-hidden py-1"
+          // widths. The `max-h` cap (paired with the inner scroll
+          // region below) keeps the panel inside the viewport when the
+          // option list is longer than the available space, so the
+          // bottom rows remain reachable via scroll instead of being
+          // clipped off-screen.
+          className="flex max-h-[min(28rem,calc(100vh-1.5rem))] max-w-[min(24rem,calc(100vw-1rem))] flex-col overflow-hidden py-1"
         >
-          {options.map((option) => (
-            <Fragment key={option.value}>
-              {option.sectionLabel && (
-                <div
-                  role="presentation"
-                  className="text-fg-muted mt-1 flex items-center gap-2 px-3 pt-1 pb-0.5 text-[10px] tracking-wider uppercase select-none"
-                >
-                  <span className="bg-edge-default h-px flex-1" />
-                  <span>{option.sectionLabel}</span>
-                  <span className="bg-edge-default h-px flex-1" />
-                </div>
-              )}
-              <Button
-                variant="ghost"
-                tone="neutral"
-                size="sm"
-                role="option"
-                aria-selected={option.value === value}
-                disabled={option.disabled}
-                onClick={() => handleSelect(option.value)}
-                className={cn(
-                  'w-full justify-start gap-2 rounded-none px-3 py-1.5 text-left',
-                  option.disabled
-                    ? 'text-fg-muted cursor-not-allowed'
-                    : option.value === value
-                      ? 'text-info'
-                      : 'text-fg-default',
-                )}
-              >
-                {option.icon && <span className="shrink-0">{option.icon}</span>}
-                <span className="shrink-0">{option.label}</span>
-                {option.description && (
-                  <Tooltip
-                    content={option.description}
-                    wrapperClassName="block min-w-0 flex-1"
+          <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
+            {options.map((option) => (
+              <Fragment key={option.value}>
+                {option.sectionLabel && (
+                  <div
+                    role="presentation"
+                    className="text-fg-muted mt-1 flex items-center gap-2 px-3 pt-1 pb-0.5 text-[10px] tracking-wider uppercase select-none"
                   >
-                    <span className="text-fg-muted block truncate text-left text-xs">
-                      {option.description}
-                    </span>
-                  </Tooltip>
+                    <span className="bg-edge-default h-px flex-1" />
+                    <span>{option.sectionLabel}</span>
+                    <span className="bg-edge-default h-px flex-1" />
+                  </div>
                 )}
-                {/* Reserve a fixed-width slot for the check so the
-                    description column stays aligned across rows whether
-                    or not the row is selected. */}
-                <span className="ml-auto flex w-3.5 shrink-0 justify-center">
-                  {option.value === value && <Check size={14} />}
-                </span>
-              </Button>
-            </Fragment>
-          ))}
+                <Button
+                  variant="ghost"
+                  tone="neutral"
+                  size="sm"
+                  role="option"
+                  aria-selected={option.value === value}
+                  disabled={option.disabled}
+                  onClick={() => handleSelect(option.value)}
+                  className={cn(
+                    'w-full justify-start gap-2 rounded-none px-3 py-1.5 text-left',
+                    option.disabled
+                      ? 'text-fg-muted cursor-not-allowed'
+                      : option.value === value
+                        ? 'text-info'
+                        : 'text-fg-default',
+                  )}
+                >
+                  {option.icon && (
+                    <span className="shrink-0">{option.icon}</span>
+                  )}
+                  <span className="shrink-0">{option.label}</span>
+                  {option.description && (
+                    <Tooltip
+                      content={option.description}
+                      wrapperClassName="block min-w-0 flex-1"
+                    >
+                      <span className="text-fg-muted block truncate text-left text-xs">
+                        {option.description}
+                      </span>
+                    </Tooltip>
+                  )}
+                  {/* Reserve a fixed-width slot for the check so the
+                      description column stays aligned across rows whether
+                      or not the row is selected. */}
+                  <span className="ml-auto flex w-3.5 shrink-0 justify-center">
+                    {option.value === value && <Check size={14} />}
+                  </span>
+                </Button>
+              </Fragment>
+            ))}
+          </div>
           {footerSlot && (
             <>
               <div
                 role="presentation"
-                className="bg-edge-default mt-1 h-px w-full"
+                className="bg-edge-default mt-1 h-px w-full shrink-0"
               />
-              <div className="px-1 py-1">
+              <div className="shrink-0 px-1 py-1">
                 {typeof footerSlot === 'function'
                   ? footerSlot({ dismiss: handleDismiss })
                   : footerSlot}
