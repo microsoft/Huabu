@@ -6,9 +6,9 @@
  *   (logo + Overview + Quick Start) and never scroll.
  * - `groups` are rendered as bold-titled flat lists below the pinned
  *   block, all expanded all the time (no collapse).
- * - Children inside a group only declare their own URL segment; the
- *   full path is composed against the group's `base` so renaming a
- *   group reroutes the whole subtree for free.
+ * - Each item declares its full absolute `to` (under `/docs`). This
+ *   lets a single sidebar group pull pages from any folder, so we
+ *   can regroup the menu without breaking existing URLs.
  * - Section modules are loaded with `React.lazy` so the handbook
  *   never ships in the main bundle.
  */
@@ -20,27 +20,25 @@ import type { ComponentType } from 'react';
 type SectionLoader = () => Promise<{ default: ComponentType }>;
 
 type RawItem = {
-  /** URL segment relative to the group's `base` (or to `/docs` for pinned). */
-  segment: string;
+  /** Absolute path under `/docs`, with leading slash. */
+  to: string;
   label: string;
   load: SectionLoader;
 };
 
 type RawGroup = {
   label: string;
-  /** Path prefix for items in this group, relative to `/docs`. */
-  base: string;
   items: RawItem[];
 };
 
 const pinnedRaw: RawItem[] = [
   {
-    segment: '',
+    to: '/docs',
     label: 'Overview',
     load: () => import('./sections/Overview'),
   },
   {
-    segment: 'quickstart',
+    to: '/docs/quickstart',
     label: 'Quick Start',
     load: () => import('./sections/QuickStart'),
   },
@@ -48,114 +46,165 @@ const pinnedRaw: RawItem[] = [
 
 const groupsRaw: RawGroup[] = [
   {
-    label: 'Core Concepts',
-    base: 'concepts',
+    label: 'Core',
     items: [
       {
-        segment: 'workspaces',
-        label: 'Workspaces & Canvases',
-        load: () => import('./sections/concepts/Workspaces'),
+        to: '/docs/core/externalized-sensemaking',
+        label: 'Externalized Sensemaking',
+        load: () => import('./sections/core/ExternalizedSensemaking'),
       },
       {
-        segment: 'canvas-basics',
-        label: 'Canvas Basics',
-        load: () => import('./sections/concepts/CanvasBasics'),
+        to: '/docs/core/agentic-canvas',
+        label: 'Agentic Canvas',
+        load: () => import('./sections/core/AgenticCanvas'),
       },
       {
-        segment: 'layers-panel',
-        label: 'Layers Panel',
-        load: () => import('./sections/concepts/LayersPanel'),
+        to: '/docs/core/acp',
+        label: 'Agent Client Protocol',
+        load: () => import('./sections/core/Acp'),
+      },
+      {
+        to: '/docs/core/local-first',
+        label: 'Local-first & Markdown',
+        load: () => import('./sections/core/LocalFirst'),
       },
     ],
   },
   {
-    label: 'Nodes & Edges',
-    base: 'nodes',
+    label: 'Demo Cases',
     items: [
       {
-        segment: 'overview',
-        label: 'Node Types',
-        load: () => import('./sections/nodes/Overview'),
+        to: '/docs/demos',
+        label: 'Overview',
+        load: () => import('./sections/demos/Overview'),
       },
       {
-        segment: 'frames',
-        label: 'Frames',
-        load: () => import('./sections/nodes/Frames'),
+        to: '/docs/demos/research-review',
+        label: 'Reading a Research Topic',
+        load: () => import('./sections/demos/ResearchReview'),
       },
       {
-        segment: 'sketch',
-        label: 'Sketch',
-        load: () => import('./sections/nodes/Sketch'),
+        to: '/docs/demos/product-spec',
+        label: 'Drafting a Product Spec',
+        load: () => import('./sections/demos/ProductSpec'),
       },
       {
-        segment: 'question',
-        label: 'Question Nodes',
-        load: () => import('./sections/nodes/Question'),
-      },
-      {
-        segment: 'edges',
-        label: 'Edges & Connections',
-        load: () => import('./sections/nodes/Edges'),
-      },
-      {
-        segment: 'content',
-        label: 'Node Content',
-        load: () => import('./sections/nodes/Content'),
+        to: '/docs/demos/brainstorm',
+        label: 'Brainstorming a Concept',
+        load: () => import('./sections/demos/Brainstorm'),
       },
     ],
   },
   {
-    label: 'AI Collaboration',
-    base: 'ai',
+    label: 'Work with AI',
     items: [
       {
-        segment: 'overview',
-        label: 'Ask & Operate',
+        to: '/docs/ai/overview',
+        label: 'Chat with AI',
         load: () => import('./sections/ai/AskOperate'),
       },
       {
-        segment: 'intent',
+        to: '/docs/ai/intent',
         label: 'Intent & Auto-layout',
         load: () => import('./sections/ai/Intent'),
       },
       {
-        segment: 'context',
-        label: 'How AI Sees the Canvas',
-        load: () => import('./sections/ai/Context'),
+        to: '/docs/nodes/question',
+        label: 'Question Nodes',
+        load: () => import('./sections/nodes/Question'),
       },
       {
-        segment: 'external-agents',
+        to: '/docs/ai/memory',
+        label: 'Memory & Skills',
+        load: () => import('./sections/ai/Memory'),
+      },
+      {
+        to: '/docs/ai/external-agents',
         label: 'External Agents',
         load: () => import('./sections/ai/ExternalAgents'),
       },
       {
-        segment: 'memory',
-        label: 'Memory & Skills',
-        load: () => import('./sections/ai/Memory'),
+        to: '/docs/ai/context',
+        label: 'How AI Sees the Canvas',
+        load: () => import('./sections/ai/Context'),
+      },
+    ],
+  },
+  {
+    label: 'Work in Canvas',
+    items: [
+      {
+        to: '/docs/concepts/workspaces',
+        label: 'Workspaces & Canvases',
+        load: () => import('./sections/concepts/Workspaces'),
+      },
+      {
+        to: '/docs/concepts/canvas-basics',
+        label: 'Canvas Basics',
+        load: () => import('./sections/concepts/CanvasBasics'),
+      },
+      {
+        to: '/docs/nodes/overview',
+        label: 'Nodes',
+        load: () => import('./sections/nodes/Overview'),
+      },
+      {
+        to: '/docs/nodes/edges',
+        label: 'Edges & Connections',
+        load: () => import('./sections/nodes/Edges'),
+      },
+      {
+        to: '/docs/nodes/frames',
+        label: 'Frames',
+        load: () => import('./sections/nodes/Frames'),
+      },
+      {
+        to: '/docs/nodes/sketch',
+        label: 'Sketch',
+        load: () => import('./sections/nodes/Sketch'),
+      },
+      {
+        to: '/docs/nodes/content',
+        label: 'Node Content',
+        load: () => import('./sections/nodes/Content'),
+      },
+      {
+        to: '/docs/concepts/layers-panel',
+        label: 'Layers Panel',
+        load: () => import('./sections/concepts/LayersPanel'),
+      },
+      {
+        to: '/docs/concepts/chat-panel',
+        label: 'Chat Panel',
+        load: () => import('./sections/concepts/ChatPanel'),
       },
     ],
   },
   {
     label: 'Reference',
-    base: 'reference',
     items: [
       {
-        segment: 'shortcuts',
+        to: '/docs/reference/shortcuts',
         label: 'Keyboard Shortcuts',
         load: () => import('./sections/reference/Shortcuts'),
       },
       {
-        segment: 'settings',
+        to: '/docs/reference/settings',
         label: 'Settings & LLM',
         load: () => import('./sections/reference/Settings'),
       },
       {
-        segment: 'storage',
+        to: '/docs/reference/storage',
         label: 'Data Storage',
         load: () => import('./sections/reference/Storage'),
       },
       {
-        segment: 'changelog',
+        to: '/docs/reference/issues',
+        label: 'Reporting Issues',
+        load: () => import('./sections/reference/IssueReporting'),
+      },
+      {
+        to: '/docs/reference/changelog',
         label: 'Changelog',
         load: () => import('./sections/reference/Changelog'),
       },
@@ -175,25 +224,34 @@ export type DocsGroup = {
   items: DocsItem[];
 };
 
-function buildItem(item: RawItem, parent: string): DocsItem {
+function buildItem(item: RawItem): DocsItem {
   return {
-    to: item.segment ? `${parent}/${item.segment}` : parent,
+    to: item.to,
     label: item.label,
     Component: lazy(item.load),
   };
 }
 
-export const pinnedItems: DocsItem[] = pinnedRaw.map((item) =>
-  buildItem(item, '/docs'),
-);
+export const pinnedItems: DocsItem[] = pinnedRaw.map(buildItem);
 
 export const groups: DocsGroup[] = groupsRaw.map((group) => ({
   label: group.label,
-  items: group.items.map((item) => buildItem(item, `/docs/${group.base}`)),
+  items: group.items.map(buildItem),
 }));
 
-/** Flat list consumed by `<Routes>` in `DocsPage`. */
-export const allRoutes: DocsItem[] = [
+/**
+ * Flat list consumed by `<Routes>` in `DocsPage`. Deduplicated by
+ * URL so a page reused across multiple sidebar groups only
+ * registers a single route.
+ */
+const allItems: DocsItem[] = [
   ...pinnedItems,
   ...groups.flatMap((g) => g.items),
 ];
+
+const seen = new Set<string>();
+export const allRoutes: DocsItem[] = allItems.filter((item) => {
+  if (seen.has(item.to)) return false;
+  seen.add(item.to);
+  return true;
+});

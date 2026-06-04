@@ -1,4 +1,3 @@
-import { BookOpen } from 'lucide-react';
 import { Link, NavLink } from 'react-router-dom';
 
 import { cn } from './components/cn';
@@ -30,7 +29,7 @@ import type { CSSProperties, ReactNode } from 'react';
 export function DocsLayout({ children }: { children: ReactNode }) {
   return (
     <div
-      className="relative h-screen w-full overflow-y-auto bg-white bg-[radial-gradient(circle,_rgba(0,0,0,0.12)_1px,_transparent_1px)] bg-[length:22px_22px]"
+      className="relative h-screen w-full overflow-y-auto bg-white"
       style={
         {
           // Single source of truth for the side gutters. Tweak here
@@ -76,7 +75,7 @@ function DocsSidebar() {
           to="/docs"
           className="mb-3 flex items-center gap-2 text-[15px] font-semibold text-gray-900"
         >
-          <BookOpen className="h-4.5 w-4.5" />
+          <img src="/favicon.svg" alt="" className="h-5 w-5" />
           <span>Huabu Handbook</span>
         </Link>
         <ul className="space-y-0.5">
@@ -96,7 +95,7 @@ function DocsSidebar() {
         <ul className="space-y-5">
           {groups.map((group) => (
             <li key={group.label}>
-              <div className="mb-1.5 px-3 text-[11px] font-bold tracking-wider text-gray-500 uppercase">
+              <div className="mb-1.5 px-3 text-[13px] font-semibold tracking-wide text-gray-700 uppercase">
                 {group.label}
               </div>
               <ul className="space-y-0.5">
