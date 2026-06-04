@@ -1,8 +1,19 @@
 import {
+  Bot,
+  Brain,
+  Lightbulb,
+  MessageSquare,
+  Plug,
+  Sparkles,
+  Wrench,
+} from 'lucide-react';
+
+import {
   Callout,
+  CardGrid,
   DocLink,
   H2,
-  Kbd,
+  NavCard,
   P,
   PageLayout,
   Table,
@@ -10,67 +21,114 @@ import {
 } from '../../components';
 
 const toc: TocEntry[] = [
-  { id: 'mental-model', label: 'Shared cognitive space' },
-  { id: 'surfaces', label: 'Five surfaces of AI on the canvas' },
-  { id: 'context', label: 'What the AI actually sees' },
-  { id: 'where-next', label: 'Where to go next' },
+  { id: 'what-it-means', label: 'What "agentic canvas" means' },
+  { id: 'shared-memory', label: 'The canvas as shared memory' },
+  { id: 'surfaces', label: 'Six AI surfaces on one canvas' },
+  { id: 'what-ai-sees', label: 'What the AI actually sees' },
+  { id: 'edits-as-objects', label: 'Edits are first-class objects' },
+  { id: 'safety', label: 'Safety rails' },
 ];
 
 export default function AgenticCanvas() {
   return (
     <PageLayout
       title="Agentic Canvas"
-      description="Huabu's AI lives on the same canvas you do. It can read every node, follow every edge, write back into the surface, and pick up where you left off — across five distinct collaboration surfaces."
+      description="Huabu's AI isn't a sidebar — it's a participant on the same surface you work on. It reads the whole canvas, writes back into it, and exposes its capabilities through six distinct surfaces tuned to different moments in your workflow."
       toc={toc}
     >
-      <H2>Shared cognitive space</H2>
+      <H2>What &quot;agentic canvas&quot; means</H2>
       <P>
-        Most AI products are a sidebar chat that only sees the last message you
-        typed. Huabu inverts that: the canvas is shared memory, and the AI is a
-        participant on the same surface. Selecting a node is a way of pointing;
-        dragging two nodes near each other is a way of suggesting relevance;
-        drawing a sketch is a way of asking a half-formed question.
+        The phrase has two pieces. <strong>Canvas</strong> means the AI works on
+        the same 2D surface you do, with the same nodes, frames and edges.{' '}
+        <strong>Agentic</strong> means the AI can take initiative — call tools,
+        run multi-step plans, edit the canvas, ask permission for anything it
+        can&apos;t do alone — instead of just responding to one prompt at a
+        time.
       </P>
 
-      <H2>Five surfaces of AI on the canvas</H2>
-      <Table
-        headers={['Surface', 'When to reach for it', 'Reference']}
-        rows={[
-          [
-            <strong>Chat — Ask mode</strong>,
-            'Open conversation, explanation, light synthesis. The AI streams replies into the chat panel.',
-            <DocLink href="/docs/ai/overview">Chat with AI</DocLink>,
-          ],
-          [
-            <strong>Chat — Operate mode</strong>,
-            'Batched canvas edits. You describe an outcome; the AI emits a reviewable change list.',
-            <DocLink href="/docs/ai/overview">Chat with AI</DocLink>,
-          ],
-          [
-            <strong>Question nodes</strong>,
-            'Ask a question right where the source material is. The answer lands on the canvas, not in chat.',
-            <DocLink href="/docs/nodes/question">Question Nodes</DocLink>,
-          ],
-          [
-            <strong>Intent</strong>,
-            <>
-              Tap <Kbd>Ctrl</Kbd>/<Kbd>Cmd</Kbd>+<Kbd>I</Kbd> to get
-              context-aware &quot;what next&quot; suggestions you can run with
-              one click.
-            </>,
-            <DocLink href="/docs/ai/intent">Intent &amp; Auto-layout</DocLink>,
-          ],
-          [
-            <strong>External agents</strong>,
-            'Pair Huabu with Claude / Copilot / Gemini CLIs through the ACP bridge.',
-            <DocLink href="/docs/ai/external-agents">External Agents</DocLink>,
-          ],
-        ]}
-      />
+      <H2>The canvas as shared memory</H2>
+      <P>
+        Most assistants are stateless between turns. Huabu&apos;s AI is
+        stateless between turns <em>too</em>, but the canvas itself is the
+        state: what you see is what it sees, and what it writes is something you
+        can edit. Three concrete consequences:
+      </P>
+      <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
+        <li>
+          <strong>Pointing is selection.</strong> Highlighting nodes on the
+          canvas tells the AI which inputs matter for the next turn.
+        </li>
+        <li>
+          <strong>Grouping is grammar.</strong> Frame names and edge labels show
+          up in the canvas overview the AI reads each turn.
+        </li>
+        <li>
+          <strong>Output is durable.</strong> Anything the AI produces is a real
+          node you can keep, edit or delete — not a chat bubble that scrolls
+          off-screen.
+        </li>
+      </ul>
+
+      <H2>Six AI surfaces on one canvas</H2>
+      <P>
+        Pick the surface that matches what you&apos;re trying to do. They all
+        share the canvas, so you can hop between them without losing context.
+      </P>
+      <CardGrid>
+        <NavCard
+          to="/docs/ai/chat-mode"
+          icon={MessageSquare}
+          eyebrow="Chat"
+          title="Chat Mode"
+          description="Open conversation in the chat panel — explanations, syntheses, light note-writing."
+        />
+        <NavCard
+          to="/docs/ai/agent-mode"
+          icon={Bot}
+          eyebrow="Chat"
+          title="Agent Mode"
+          description="Structured canvas edits with a reviewable change list before anything commits."
+        />
+        <NavCard
+          to="/docs/ai/question-mode"
+          icon={Lightbulb}
+          eyebrow="On the canvas"
+          title="Question Mode"
+          description="Ask a question right where the source material is; the AI answers in line."
+        />
+        <NavCard
+          to="/docs/ai/intent"
+          icon={Sparkles}
+          eyebrow="On the canvas"
+          title="Intent"
+          description="Context-aware “what next” suggestions you can run with one click."
+        />
+        <NavCard
+          to="/docs/ai/memory"
+          icon={Brain}
+          eyebrow="Long-term"
+          title="Memory"
+          description="Cross-canvas preferences and per-canvas notes the AI maintains for you."
+        />
+        <NavCard
+          to="/docs/ai/skills"
+          icon={Wrench}
+          eyebrow="Long-term"
+          title="Skills"
+          description="Reusable AI recipes you invoke with /name in the composer."
+        />
+        <NavCard
+          to="/docs/ai/external-agents"
+          icon={Plug}
+          eyebrow="Bring your own"
+          title="External Agents"
+          description="Pair Huabu with Claude / Copilot / Gemini CLIs through the Pluggable Agents bridge."
+        />
+      </CardGrid>
 
       <H2>What the AI actually sees</H2>
       <P>Two things travel with every message you send:</P>
-      <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
+      <ol className="list-decimal space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
           A compact <strong>canvas overview</strong> — node list, frame
           hierarchy, recent operations.
@@ -79,44 +137,44 @@ export default function AgenticCanvas() {
           The full content of any <strong>selected</strong> nodes, never
           truncated.
         </li>
-      </ul>
-      <P>Two more layers are available on demand:</P>
-      <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
-        <li>
-          <DocLink href="/docs/ai/memory">Memory &amp; Skills</DocLink> —
-          workspace-wide preferences and per-canvas notes the AI maintains for
-          you, plus reusable recipes (&quot;skills&quot;) you can invoke with{' '}
-          <code>/&lt;name&gt;</code>.
-        </li>
-        <li>
-          <strong>Tool calls</strong> — the AI can read node bodies, search the
-          canvas, fetch URLs and (when paired with an external agent) reach the
-          rest of your local filesystem.
-        </li>
-      </ul>
+      </ol>
       <P>
-        For the exact payload, see{' '}
-        <DocLink href="/docs/ai/context">How AI Sees the Canvas</DocLink>.
+        Two more layers come in on demand: <strong>memory</strong> for
+        long-lived preferences, and <strong>tool calls</strong> for reading more
+        node bodies, fetching URLs, running the AI&apos;s built-in search.
       </P>
 
-      <Callout tone="info">
-        Edits the AI makes are first-class operations. Undo treats them like
-        your own changes; Operate-mode batches can be reviewed and rolled back
-        as a single unit.
-      </Callout>
+      <H2>Edits are first-class objects</H2>
+      <Table
+        headers={['Mode', 'How edits arrive']}
+        rows={[
+          [
+            <strong>Chat Mode</strong>,
+            'One node at a time, undoable with Ctrl/Cmd+Z like your own edits.',
+          ],
+          [
+            <strong>Agent Mode</strong>,
+            'Batched as a structured change list — accept whole, accept per-item, or discard.',
+          ],
+          [
+            <strong>Question node</strong>,
+            'Reply is appended to the node as soon as the AI finishes.',
+          ],
+          [
+            <strong>Intent</strong>,
+            'Suggested edits are committed as a batch you can roll back.',
+          ],
+        ]}
+      />
 
-      <H2>Where to go next</H2>
-      <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
-        <li>
-          Pair Huabu with an existing agent CLI via{' '}
-          <DocLink href="/docs/core/acp">Agent Client Protocol</DocLink>.
-        </li>
-        <li>
-          Learn how the canvas is{' '}
-          <DocLink href="/docs/core/local-first">stored on disk</DocLink>, so
-          you understand where memory and skills actually live.
-        </li>
-      </ul>
+      <H2>Safety rails</H2>
+      <Callout tone="info">
+        Nothing the AI does happens silently. Built-in tools are sandboxed to
+        the current workspace; external agents stay read-only by default and
+        prompt for permission for anything beyond that. See{' '}
+        <DocLink href="/docs/core/pluggable-agents">Pluggable Agents</DocLink>{' '}
+        for the full security model.
+      </Callout>
     </PageLayout>
   );
 }

@@ -56,7 +56,7 @@ export default function PdfNode() {
       <Callout tone="tip">
         Either way the new node keeps an invisible semantic edge back to the PDF
         so auto-layout keeps them together. See{' '}
-        <DocLink href="/docs/ai/intent">Intent &amp; Auto-layout</DocLink>.
+        <DocLink href="/docs/concepts/auto-layout">Auto-layout</DocLink>.
       </Callout>
 
       <H2>Toolbar</H2>

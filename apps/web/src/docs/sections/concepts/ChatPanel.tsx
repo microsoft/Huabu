@@ -108,7 +108,8 @@ export default function ChatPanel() {
       </ul>
       <P>
         For the full breakdown of the two built-in modes, read{' '}
-        <DocLink href="/docs/ai/overview">Chat with AI</DocLink>.
+        <DocLink href="/docs/ai/chat-mode">Chat Mode</DocLink> and{' '}
+        <DocLink href="/docs/ai/agent-mode">Agent Mode</DocLink>.
       </P>
 
       <H2>Attachments &amp; node references</H2>

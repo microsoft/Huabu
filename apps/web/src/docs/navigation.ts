@@ -3,12 +3,17 @@
  *
  * Authoring rules
  * - `pinned` entries sit in the static top portion of the sidebar
- *   (logo + Overview + Quick Start) and never scroll.
+ *   (logo + Overview + Quick Start + Showcase) and never scroll.
  * - `groups` are rendered as bold-titled flat lists below the pinned
  *   block, all expanded all the time (no collapse).
  * - Each item declares its full absolute `to` (under `/docs`). This
  *   lets a single sidebar group pull pages from any folder, so we
  *   can regroup the menu without breaking existing URLs.
+ * - The same component module may be referenced from more than one
+ *   sidebar URL (e.g. the Question node appears under both "Work with AI"
+ *   as "Question Mode" and under "Work in Canvas" as "Question Node");
+ *   `allRoutes` is deduplicated by URL so each path registers exactly
+ *   one `<Route>`.
  * - Section modules are loaded with `React.lazy` so the handbook
  *   never ships in the main bundle.
  */
@@ -42,6 +47,11 @@ const pinnedRaw: RawItem[] = [
     label: 'Quick Start',
     load: () => import('./sections/QuickStart'),
   },
+  {
+    to: '/docs/showcase',
+    label: 'Showcase',
+    load: () => import('./sections/Showcase'),
+  },
 ];
 
 const groupsRaw: RawGroup[] = [
@@ -59,39 +69,14 @@ const groupsRaw: RawGroup[] = [
         load: () => import('./sections/core/AgenticCanvas'),
       },
       {
-        to: '/docs/core/acp',
-        label: 'Agent Client Protocol',
-        load: () => import('./sections/core/Acp'),
+        to: '/docs/core/pluggable-agents',
+        label: 'Pluggable Agents',
+        load: () => import('./sections/core/PluggableAgents'),
       },
       {
-        to: '/docs/core/local-first',
-        label: 'Local-first & Markdown',
-        load: () => import('./sections/core/LocalFirst'),
-      },
-    ],
-  },
-  {
-    label: 'Demo Cases',
-    items: [
-      {
-        to: '/docs/demos',
-        label: 'Overview',
-        load: () => import('./sections/demos/Overview'),
-      },
-      {
-        to: '/docs/demos/research-review',
-        label: 'Reading a Research Topic',
-        load: () => import('./sections/demos/ResearchReview'),
-      },
-      {
-        to: '/docs/demos/product-spec',
-        label: 'Drafting a Product Spec',
-        load: () => import('./sections/demos/ProductSpec'),
-      },
-      {
-        to: '/docs/demos/brainstorm',
-        label: 'Brainstorming a Concept',
-        load: () => import('./sections/demos/Brainstorm'),
+        to: '/docs/core/open-vault',
+        label: 'Open Vault',
+        load: () => import('./sections/core/OpenVault'),
       },
     ],
   },
@@ -99,34 +84,44 @@ const groupsRaw: RawGroup[] = [
     label: 'Work with AI',
     items: [
       {
-        to: '/docs/ai/overview',
-        label: 'Chat with AI',
-        load: () => import('./sections/ai/AskOperate'),
+        to: '/docs/ai/chat-mode',
+        label: 'Chat Mode',
+        load: () => import('./sections/ai/ChatMode'),
       },
       {
-        to: '/docs/ai/intent',
-        label: 'Intent & Auto-layout',
-        load: () => import('./sections/ai/Intent'),
+        to: '/docs/ai/agent-mode',
+        label: 'Agent Mode',
+        load: () => import('./sections/ai/AgentMode'),
       },
       {
-        to: '/docs/nodes/question',
-        label: 'Question Nodes',
+        to: '/docs/ai/question-mode',
+        label: 'Question Mode',
         load: () => import('./sections/nodes/Question'),
       },
       {
+        to: '/docs/ai/intent',
+        label: 'Intent',
+        load: () => import('./sections/ai/Intent'),
+      },
+      {
+        to: '/docs/ai/digest',
+        label: 'Digest',
+        load: () => import('./sections/ai/Digest'),
+      },
+      {
         to: '/docs/ai/memory',
-        label: 'Memory & Skills',
+        label: 'Memory',
         load: () => import('./sections/ai/Memory'),
+      },
+      {
+        to: '/docs/ai/skills',
+        label: 'Skills',
+        load: () => import('./sections/ai/Skills'),
       },
       {
         to: '/docs/ai/external-agents',
         label: 'External Agents',
         load: () => import('./sections/ai/ExternalAgents'),
-      },
-      {
-        to: '/docs/ai/context',
-        label: 'How AI Sees the Canvas',
-        load: () => import('./sections/ai/Context'),
       },
     ],
   },
@@ -135,38 +130,78 @@ const groupsRaw: RawGroup[] = [
     items: [
       {
         to: '/docs/concepts/workspaces',
-        label: 'Workspaces & Canvases',
+        label: 'Workspaces',
         load: () => import('./sections/concepts/Workspaces'),
       },
       {
         to: '/docs/concepts/canvas-basics',
-        label: 'Canvas Basics',
+        label: 'Canvas',
         load: () => import('./sections/concepts/CanvasBasics'),
       },
       {
-        to: '/docs/nodes/overview',
-        label: 'Nodes',
-        load: () => import('./sections/nodes/Overview'),
+        to: '/docs/nodes/note',
+        label: 'Note Node',
+        load: () => import('./sections/nodes/Note'),
       },
       {
-        to: '/docs/nodes/edges',
-        label: 'Edges & Connections',
-        load: () => import('./sections/nodes/Edges'),
+        to: '/docs/nodes/text',
+        label: 'Text Node',
+        load: () => import('./sections/nodes/Text'),
+      },
+      {
+        to: '/docs/nodes/image',
+        label: 'Image Node',
+        load: () => import('./sections/nodes/Image'),
+      },
+      {
+        to: '/docs/nodes/pdf',
+        label: 'PDF Node',
+        load: () => import('./sections/nodes/Pdf'),
+      },
+      {
+        to: '/docs/nodes/video',
+        label: 'Video Node',
+        load: () => import('./sections/nodes/Video'),
+      },
+      {
+        to: '/docs/nodes/web',
+        label: 'Web Node',
+        load: () => import('./sections/nodes/Web'),
       },
       {
         to: '/docs/nodes/frames',
-        label: 'Frames',
+        label: 'Frame Node',
         load: () => import('./sections/nodes/Frames'),
       },
       {
         to: '/docs/nodes/sketch',
-        label: 'Sketch',
+        label: 'Sketch Node',
         load: () => import('./sections/nodes/Sketch'),
       },
       {
-        to: '/docs/nodes/content',
-        label: 'Node Content',
-        load: () => import('./sections/nodes/Content'),
+        to: '/docs/nodes/question',
+        label: 'Question Node',
+        load: () => import('./sections/nodes/Question'),
+      },
+      {
+        to: '/docs/nodes/edges',
+        label: 'Edges',
+        load: () => import('./sections/nodes/Edges'),
+      },
+      {
+        to: '/docs/concepts/auto-layout',
+        label: 'Auto-layout',
+        load: () => import('./sections/concepts/AutoLayout'),
+      },
+      {
+        to: '/docs/concepts/alignment',
+        label: 'Layout & Alignment',
+        load: () => import('./sections/concepts/Alignment'),
+      },
+      {
+        to: '/docs/concepts/semantic-zoom',
+        label: 'Semantic Zoom',
+        load: () => import('./sections/concepts/SemanticZoom'),
       },
       {
         to: '/docs/concepts/layers-panel',
@@ -241,12 +276,20 @@ export const groups: DocsGroup[] = groupsRaw.map((group) => ({
 
 /**
  * Flat list consumed by `<Routes>` in `DocsPage`. Deduplicated by
- * URL so a page reused across multiple sidebar groups only
- * registers a single route.
+ * URL so a page reused across multiple sidebar groups only registers
+ * a single route. Also keeps a route registered for `/docs/nodes/overview`
+ * (linked from the Overview hub but not present in the sidebar) and
+ * `/docs/ai/question-mode`, which reuses the existing Question node
+ * component under a different URL.
  */
 const allItems: DocsItem[] = [
   ...pinnedItems,
   ...groups.flatMap((g) => g.items),
+  buildItem({
+    to: '/docs/nodes/overview',
+    label: 'Nodes',
+    load: () => import('./sections/nodes/Overview'),
+  }),
 ];
 
 const seen = new Set<string>();
