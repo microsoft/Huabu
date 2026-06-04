@@ -43,7 +43,7 @@ import { cn } from '../../Common/cn';
 import { Popover } from '../../Common/Popover';
 
 import type {
-  AcpAgentSummary,
+  AcpAgentProfileWithRuntime,
   AgentBinding,
   AgentMode,
 } from '@sediment/shared';
@@ -58,11 +58,11 @@ interface NewChatMenuProps {
   currentMode: AgentMode;
   /** Binding of the *current* thread. Used to mark the matching menu row. */
   currentBinding: AgentBinding;
-  /** External agents currently connected through the ACP bridge. */
-  connectedAgents: AcpAgentSummary[];
-  /** Re-fetch the connected-agents list. Wired to the menu footer button. */
-  onRefreshAgents?: () => void | Promise<void>;
-  /** True while an agent-list fetch is in flight — spins the refresh icon. */
+  /** Configured external-agent profiles available for binding. */
+  profiles: AcpAgentProfileWithRuntime[];
+  /** Re-fetch the profile list. Wired to the menu footer button. */
+  onRefreshProfiles?: () => void | Promise<void>;
+  /** True while a profile-list fetch is in flight — spins the refresh icon. */
   refreshing?: boolean;
   /** Atomic "reset thread + apply (mode, binding)". */
   onSelect: (choice: NewChatChoice) => void;
@@ -81,7 +81,7 @@ const INTERNAL: AgentBinding = { kind: 'internal' };
 function bindingsEqual(a: AgentBinding, b: AgentBinding): boolean {
   if (a.kind === 'internal' && b.kind === 'internal') return true;
   if (a.kind === 'external' && b.kind === 'external') {
-    return a.agentletAgentId === b.agentletAgentId;
+    return a.profileId === b.profileId;
   }
   return false;
 }
@@ -89,8 +89,8 @@ function bindingsEqual(a: AgentBinding, b: AgentBinding): boolean {
 export const NewChatMenu = ({
   currentMode,
   currentBinding,
-  connectedAgents,
-  onRefreshAgents,
+  profiles,
+  onRefreshProfiles,
   refreshing = false,
   onSelect,
   disabled = false,
@@ -208,36 +208,39 @@ export const NewChatMenu = ({
               />
             );
           })}
-          {connectedAgents.length > 0 && (
+          {profiles.length > 0 && (
             <div
               role="presentation"
               className="text-fg-muted mt-1 flex items-center gap-2 px-3 pt-1 pb-0.5 text-[10px] tracking-wider uppercase select-none"
             >
               <span className="bg-edge-default h-px flex-1" />
-              <span>Connected Agents</span>
+              <span>External Agents</span>
               <span className="bg-edge-default h-px flex-1" />
             </div>
           )}
-          {connectedAgents.map((agent) => {
+          {profiles.map((profile) => {
             const binding: AgentBinding = {
               kind: 'external',
-              alias: agent.alias,
-              agentletAgentId: agent.agentId,
+              alias: profile.displayName,
+              profileId: profile.id,
             };
             const isCurrent = bindingsEqual(currentBinding, binding);
+            const hint = profile.runtime.spawned
+              ? `running · pid ${profile.runtime.pid ?? '?'}`
+              : 'idle';
             return (
               <MenuRow
-                key={`agent:${agent.agentId}`}
+                key={`profile:${profile.id}`}
                 icon={<Route size={14} />}
-                label={agent.alias}
-                hint={`pid ${agent.pid}`}
+                label={profile.displayName}
+                hint={hint}
                 current={isCurrent}
                 disabled={busy}
                 onClick={() => handleSelect({ mode: currentMode, binding })}
               />
             );
           })}
-          {onRefreshAgents && (
+          {onRefreshProfiles && (
             <>
               <div
                 role="presentation"
@@ -249,7 +252,7 @@ export const NewChatMenu = ({
                   tone="neutral"
                   size="sm"
                   onClick={() => {
-                    void onRefreshAgents();
+                    void onRefreshProfiles();
                   }}
                   disabled={refreshing}
                   className="w-full justify-start gap-1.5 rounded px-2 py-1.5 text-left"

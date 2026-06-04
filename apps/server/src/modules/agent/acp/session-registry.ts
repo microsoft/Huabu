@@ -46,10 +46,16 @@ export interface AcpSessionEntry {
   /** ACP session id returned by `session/new`. */
   sessionId: string;
   /**
-   * The agentlet-side agent id this session was created for. Used to
-   * detect stale entries when a thread\u2019s binding is reassigned.
+   * The user-configured profile this session is bound to. Used to
+   * detect stale entries when a thread's binding is reassigned to a
+   * different profile. The volatile `agentletAgentId` returned by
+   * the daemon's spawn RPC is NOT stored — sessions follow the
+   * profile, not the worker process; if the agent is re-spawned
+   * (crash + auto-restart, or supervisor re-fork) we transparently
+   * try `session/load` against the new agentlet agent and only
+   * fall back to `session/new` if that fails.
    */
-  agentletAgentId: string;
+  profileId: string;
   /**
    * Sediment canvasId this session is bound to. A thread is normally
    * pinned to one canvas for its lifetime, but if it ever rebinds to a

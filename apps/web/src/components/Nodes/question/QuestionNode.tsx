@@ -4,7 +4,7 @@ import { memo, useCallback, useState, useRef, useEffect, useMemo } from 'react';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
 import { StatusBadge } from '@/components/Common/StatusBadge.tsx';
-import { useAcpAgents } from '@/hooks/useAcpAgents';
+import { useAcpProfiles } from '@/hooks/useAcpProfiles';
 import { useTextNodeSurface } from '@/hooks/useTextNodeSurface';
 import useCanvasStore from '@/store/canvasStore.ts';
 import { useChatStore } from '@/store/chatStore.ts';
@@ -46,14 +46,14 @@ export const QuestionNode = memo(
       data.input?.kind === 'text' ? (data.input.content ?? '') : '';
 
     // ------------------------------------------------------------------
-    // Connected ACP agents — feeds the `@` mention picker.
+    // Configured external-agent profiles — feeds the `@` mention picker.
     //
     // We deliberately do NOT mount-fetch on every QuestionNode render
     // because there may be many nodes per canvas; the hook already
-    // does a one-shot fetch at mount and we expose `refreshAgents` on
+    // does a one-shot fetch at mount and we expose `refreshProfiles` on
     // explicit user intent (first `@` keystroke per session).
     // ------------------------------------------------------------------
-    const { agents: connectedAgents, refresh: refreshAgents } = useAcpAgents();
+    const { profiles, refresh: refreshProfiles } = useAcpProfiles();
 
     // Focus textarea when entering edit mode, cursor at end.
     useEffect(() => {
@@ -315,17 +315,17 @@ export const QuestionNode = memo(
       }
     }, [surface.draft, mentionDismissedFor]);
 
-    // Refresh the ACP agent list on the rising edge of "user wants the
-    // mention menu" so a newly-connected agent shows up without
+    // Refresh the profile list on the rising edge of "user wants the
+    // mention menu" so a freshly-added profile shows up without
     // requiring the user to first open the ChatPanel's NewChatMenu.
     const lastMentionWantedRef = useRef(false);
     useEffect(() => {
       const wants = mentionState !== null;
       if (wants && !lastMentionWantedRef.current) {
-        void refreshAgents();
+        void refreshProfiles();
       }
       lastMentionWantedRef.current = wants;
-    }, [mentionState, refreshAgents]);
+    }, [mentionState, refreshProfiles]);
 
     const syncCaret = useCallback(() => {
       const ta = textareaRef.current;
@@ -361,7 +361,7 @@ export const QuestionNode = memo(
             ? {
                 kind: 'external',
                 alias: option.alias,
-                agentletAgentId: option.agentletAgentId,
+                profileId: option.profileId,
               }
             : { kind: 'internal' };
         patchNodeSilent(id, {
@@ -464,7 +464,7 @@ export const QuestionNode = memo(
           {mentionState && (
             <AgentMentionMenu
               ref={mentionMenuRef}
-              agents={connectedAgents}
+              profiles={profiles}
               filter={mentionState.filter}
               onSelect={acceptMention}
             />

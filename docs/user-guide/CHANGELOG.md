@@ -4,6 +4,62 @@
 
 ---
 
+## 2026-06-05 · External Agent 编辑器：分区布局 + 折叠高级选项
+
+**What Changed**
+
+- **重排 Profile 编辑器为四个语义分区**，按使用频率从高到低排列：**Agent**（选哪个 CLI / 自动批准开关 / Custom 模式下的 Launch command）→ **Workspace**（Working directory）→ **Advanced**（折叠）→ **Display name**（自动生成、可覆盖）。每个分区有小号大写标题，区块之间用细横线分隔，整页一眼就能扫完。
+- **高级选项默认折叠**。**Extra args**、**Environment variables**、**Auto-restart on crash** 三项搬进 Advanced 区块，点击标题旁的 chevron 才展开；新建 Profile 或关闭对话框后会自动收起，避免一进来就被一堆字段淹没。
+- **"Agent CLI" 重命名为 "Auto detected agent"**，明确这是"系统自动探测到的 CLI 列表"。下拉里仍然提供 **Custom command** 选项给写自定义命令的高级用户。
+- **结构化模式下不再显示 Launch command 预览**。当你选中检测到的 agent 时，命令行完全由勾选项 + Extra args 拼出，不需要再让你确认；只有切到 Custom command 时才会出现可编辑的命令输入框。
+- **Display Name 改为自动生成、可选覆盖**，默认值是 `"<agent> (<working folder basename>)"`（例如 `Claude Code (sediment)`）。输入框的 placeholder 直接显示这个默认值，下方说明文字也以加粗形式重申一次。这个字段移到了对话框最底部——多数人不需要改它。
+
+**Notes**
+
+- 改动只影响编辑器 UI；落到磁盘的 Profile 结构与字段含义与上一版完全一致，老 Profile 打开就是新布局。
+- 折叠状态不持久化（每次打开 Modal 都从"收起"开始），这是刻意的：默认隐藏让你聚焦在主要选项上，需要时一键展开就行。
+- 如果你写了一个完全空的 Display Name 并保存，后端拿到的依然是非空字符串——前端会在提交前把 placeholder 那个默认名填进去。
+
+---
+
+## 2026-06-04 · External Agent 设置面板：结构化编辑器 + 弹窗交互修复
+
+**What Changed**
+
+- **修了 Settings 弹层在打开"New / Edit agent"对话框后会立刻消失的 bug**。原因是 Modal 通过 React portal 挂在 `document.body`，被 Popover 的 outside-click 判定为"点到外面了"。现在 Popover 会忽略任何落在 `[role="dialog"]` 元素（或显式标注了 `data-popover-dismiss-ignore` 的节点）内的 pointer-down，对话框打开时 Settings 弹层保持挂载。
+- **Profile 编辑器加回了结构化的命令拼装界面**：
+  - **Agent CLI** 选择器现在编辑时也可见（以只读形式展示当前绑定的 CLI；底层 `cliId` 不允许修改）。
+  - 选中检测到的 CLI 后会出现 **Auto-approve all tool calls** 复选框（仅对支持该开关的 CLI 显示，例如 Copilot 的 `--allow-all`），勾上会自动把开关追加到启动命令；旁边附有简要的风险提示。
+  - 新增 **Extra args** 文本输入，用来追加结构化复选框未覆盖的 CLI 参数（例如 `--model claude-sonnet-4 --max-tokens 4000`）。
+  - **Launch command** 预览块以只读 `<code>` 展示最终拼出的命令行，所见即所得。
+  - 编辑已有 Profile 时，编辑器会反向解析 `command`：若它仍匹配 `{binary} {acpArgs...} [allowAllFlag] [extraArgs...]` 的形态，会自动还原复选框与 Extra args 的初始值；若用户曾手动改写或绑定的 CLI 已卸载，则自动退回 **Custom command** 模式并保留原始命令不变。
+- **Environment 字段加了说明文案**，明确这是合并到 agent 进程环境变量的额外 `KEY=VALUE`，常见用途包括 API key、HTTPS_PROXY、CLI 自身的配置项；占位符也换成了更具代表性的 `ANTHROPIC_API_KEY=...` / `HTTPS_PROXY=...`。
+- 顺手清理了 External Agents 卡片里那一条多余的空白行——daemon 在线（happy path）时 Health Banner 现在完全不渲染，不再留下一段带顶部分割线的占位条。
+
+**Notes**
+
+- 历史 Profile 数据完全兼容：持久化 schema 没有变化，新增的"结构化 vs 自定义"是纯编辑器层的概念，保存到磁盘的依然是单一的 `command` 字符串 + `cliId`。
+- 结构化模式只显示后端通过 `GET /api/acp/agent-cli` 返回的、当前在 PATH 上探测到的 CLI；想给一个未检出的 CLI 写 Profile（例如自定义安装路径），直接在选择器里挑 **Custom command** 自己写完整命令即可。
+- 如果你自己写的 Popover 弹层里也想嵌入一个非 `role="dialog"` 的浮层而又不希望它被误判为外部点击，可以给浮层根节点加 `data-popover-dismiss-ignore` 属性，效果等价于 Modal。
+
+## 2026-06-10 · 外部 Agent 新版接入：Profile 编辑器 + 后台 Worker
+
+**What Changed**
+
+- 设置面板里的"External Agents"区域被整体重写：旧的"复制启动命令 → 在终端粘贴 → 等配对码"流程已经下线。现在你直接在 Settings 里维护"Agent Profile"列表——每一项就是一份完整的启动配方 `{cli, command, cwd, env, autoRestart}`，由 Sediment 自己负责拉起进程。
+- 新增"Add agent"对话框：
+  - **Agent CLI** 下拉会列出 Sediment 在本机 PATH 上探测到的 ACP 适配的 CLI（Copilot / Claude / Gemini）。选中后会自动填好 `command`（例如 `copilot --acp`）与 `Display name`。
+  - 想要更精细的命令可以选 **Custom command** 自己写，配合 `Working directory`、`Environment`（一行 `KEY=VALUE`）与 `Auto-restart` 复选框。
+- 聊天侧的 `@mention` 与"New chat → external"菜单不再展示"配对成功的临时 agentId"，而是直接展示你创建的 Profile。每个条目右侧会显示运行态：`running · pid N`（worker 当前已经拉起这个 agent）或 `idle`（尚未唤醒，将在第一次发消息时按 Profile 启动）。
+- Sediment 启动时会自动 fork 一个 agentlet daemon worker，并以指数退避兜底重启。绝大多数时候你完全感觉不到它的存在；只有 worker 真的连不上时，设置面板顶部才会出现一条琥珀色提示，附带 **Restart worker** 按钮强制立即重连。
+
+**Notes**
+
+- **迁移影响**：之前已经创建并绑定过外部 agent 的旧聊天线程会因为 binding key 从 `agentletAgentId` 换成 `profileId` 而失效——这些线程会自动回落到内置 agent。**还没有写入消息的空线程会无缝重置**；已经有对话历史的线程建议新开一个并选择 Profile。
+- 配对码 / 启动命令 / wrapper 路径相关的 API 与 UI 都已经移除；如果你写过基于 `/api/acp/pair/*` 的脚本，需要改用 `/api/acp/profiles` 的 CRUD 接口（详见 `packages/shared/src/types/api/acp.ts` 中的 zod 契约）。
+- Worker 的 token 不再经过 HTTP 边界——它由 server 直接通过 IPC 注入到 daemon 进程，前端永远拿不到也不需要它。
+- 想自定义 daemon 二进制路径（例如指向另一个 agentlet build）可以设置环境变量 `HUABU_AGENTLET_DAEMON_PATH`；不设置时 Sediment 会优先用 `<bundleDir>/agentlet/index.js`，最后回落到 monorepo 内的源码路径。
+
 ## 2026-06-05 · 桌面端硬化：快捷键作用域、导航沙箱、退出兜底
 
 **What Changed**

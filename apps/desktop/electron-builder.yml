@@ -30,18 +30,21 @@ files:
 #                                 and skills/loader.ts). Without this entry,
 #                                 every LLM call 500s because no prompt can
 #                                 be assembled.
+#   resources/server/agentlet/  — agentlet daemon (index.js + sibling .js
+#                                 modules from external/agentlet/.../dist).
+#                                 Forked by `DaemonSupervisor` at server
+#                                 startup; the supervisor resolves it as
+#                                 `<bundleDir>/agentlet/index.js` (see
+#                                 apps/server/src/modules/agent/acp/daemon-supervisor.ts).
+#                                 Without this entry, external-agent
+#                                 dispatch returns "agentlet daemon entry
+#                                 not found" and Settings shows the
+#                                 daemon as permanently offline.
 #   resources/web/              — compiled Vite SPA
 #
 # No node_modules needed: all npm deps (except @napi-rs native addons) are
 # inlined into server.js by tsup. @napi-rs/canvas is never called at runtime
 # since pdf2md only uses unpdf's text extraction path.
-#
-# Not bundled (yet): the `bin/agentlet` shell wrapper. It only works inside
-# the monorepo checkout (auto-runs pnpm, reads .env from repo root) and has
-# no Windows-compatible launcher, so shipping it would advertise a feature
-# that doesn't run in packaged builds. The Settings UI degrades gracefully
-# because the server reports `agentletWrapperPath: null` when the env var
-# is absent.
 extraResources:
   - from: ../server/dist-bundle/server.js
     to: server/server.js
@@ -53,6 +56,13 @@ extraResources:
       # picks up sibling `.ts` source files too; exclude them so we don't
       # bloat the installer with dead source.
       - '**/*.md'
+  - from: ../server/dist-bundle/agentlet
+    to: server/agentlet
+    filter:
+      # Only the compiled .js + sourcemaps are needed at runtime; .d.ts
+      # files bloat the installer for no benefit.
+      - '**/*.js'
+      - '**/*.js.map'
   - from: ../web/dist
     to: web
     filter:

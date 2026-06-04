@@ -128,9 +128,7 @@ export function useAcpSlashCommands({
   // array is a flat list of primitives. Internal bindings get empty
   // strings — the early-return in `refresh` skips work then.
   const bindingKind = binding.kind;
-  const agentletAgentId =
-    binding.kind === 'external' ? binding.agentletAgentId : '';
-  const alias = binding.kind === 'external' ? binding.alias : '';
+  const profileId = binding.kind === 'external' ? binding.profileId : '';
 
   // ── Refresh: ensure session → optional delayed re-pull ───────────
   const refresh = useCallback(async () => {
@@ -157,8 +155,7 @@ export function useAcpSlashCommands({
     try {
       const res = await ensureAcpSession(threadId, {
         canvasId: canvasId ?? undefined,
-        agentletAgentId,
-        alias,
+        profileId,
       });
       if (!isCurrent()) return;
       setCommands(res.availableCommands);
@@ -197,7 +194,7 @@ export function useAcpSlashCommands({
       // the winner of the epoch race is the one that matters.)
       loadingRef.current = false;
     }
-  }, [threadId, canvasId, bindingKind, agentletAgentId, alias, enabled]);
+  }, [threadId, canvasId, bindingKind, profileId, enabled]);
 
   /**
    * Rising-edge / TTL-gated refresh — see {@link UseAcpSlashCommandsResult.refreshIfStale}.

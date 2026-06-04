@@ -215,17 +215,35 @@ export const Popover: FC<PopoverProps> = ({
     return () => ro.disconnect();
   }, [updateClampedPosition]);
 
-  // Dismiss on outside pointer-down
+  // Dismiss on outside pointer-down.
+  //
+  // Caveat: components opened FROM inside the popover (Modal, Toast,
+  // nested Popover) typically use a `createPortal` to `document.body`,
+  // so their DOM lives OUTSIDE `containerRef`. A naive
+  // `!container.contains(target)` check would then mistake any click
+  // inside such a portal for an "outside" click and dismiss the
+  // popover, unmounting the React tree that owns the portal —
+  // making any dialog opened from a popover seem to vanish on click.
+  //
+  // To handle that, we also treat the click as "inside" when it
+  // happens within any open `[role="dialog"]` or any element that
+  // explicitly opts out via `[data-popover-dismiss-ignore]`. Modal
+  // panels set `role="dialog"` so this covers them automatically.
   useEffect(() => {
     if (!onDismiss) return;
 
     const handlePointerDown = (e: PointerEvent) => {
-      if (
-        containerRef.current &&
-        !containerRef.current.contains(e.target as Node)
-      ) {
-        onDismiss();
+      const container = containerRef.current;
+      if (!container) return;
+      const target = e.target;
+      if (!(target instanceof Node)) return;
+      if (container.contains(target)) return;
+      if (target instanceof Element) {
+        if (target.closest('[role="dialog"], [data-popover-dismiss-ignore]')) {
+          return;
+        }
       }
+      onDismiss();
     };
 
     // Delay listener to avoid catching the triggering event

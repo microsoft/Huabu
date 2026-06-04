@@ -67,10 +67,13 @@ export const routes = {
   },
 
   // ── ACP (external agent bridge) ───────────────────────────────────
-  acpAgents: '/acp/agents',
   acpAgentCli: '/acp/agent-cli',
-  acpPair: '/acp/pair',
-  acpPairItem: (id: string) => `/acp/pair/${enc(id)}`,
+  // Profiles (loopback-only) — user-managed spawn recipes.
+  acpProfiles: '/acp/profiles',
+  acpProfileItem: (id: string) => `/acp/profiles/${enc(id)}`,
+  // Embedded agentlet daemon — health + manual restart.
+  acpDaemon: '/acp/daemon',
+  acpDaemonRestart: '/acp/daemon/restart',
   acpThreadSession: (threadId: string) =>
     `/acp/threads/${enc(threadId)}/session`,
   acpThreadCommands: (threadId: string) =>

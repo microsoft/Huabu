@@ -40,10 +40,29 @@ export default defineConfig({
   // them, so copy the entire `src/prompt/` tree next to the bundled
   // `server.js`. The loaders detect this layout via `dist-bundle/prompt/`
   // and switch their resolution root accordingly.
+  //
+  // The agentlet daemon entry point is also copied as a sibling so the
+  // embedded `DaemonSupervisor` can `fork()` it without a separate npm
+  // install at runtime. Resolution order in `daemon-supervisor.ts`:
+  //   1. HUABU_AGENTLET_DAEMON_PATH env override
+  //   2. `<bundleDir>/agentlet/index.js` (packaged path — this copy)
+  //   3. `<repoRoot>/external/agentlet/packages/local/dist/index.js`
+  //      (dev fallback when running `tsx src/server.ts` straight from
+  //      the monorepo)
   async onSuccess() {
     const src = path.resolve('src/prompt');
     const dst = path.resolve('dist-bundle/prompt');
     cpSync(src, dst, { recursive: true });
     console.log(`[tsup] copied prompt templates -> ${dst}`);
+
+    // Agentlet daemon: copy the whole `dist/` tree so any sibling
+    // modules the entry point requires (e.g. `connection-pool.js`)
+    // resolve correctly from the bundle directory.
+    const agentletSrc = path.resolve(
+      '../../external/agentlet/packages/local/dist',
+    );
+    const agentletDst = path.resolve('dist-bundle/agentlet');
+    cpSync(agentletSrc, agentletDst, { recursive: true });
+    console.log(`[tsup] copied agentlet daemon -> ${agentletDst}`);
   },
 });

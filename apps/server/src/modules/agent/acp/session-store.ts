@@ -9,11 +9,11 @@
  *
  *   <canvasId>/.history/acp-sessions.json
  *     {
- *       "schemaVersion": 1,
+ *       "schemaVersion": 2,
  *       "records": {
  *         "<threadId>": {
  *           "sessionId":       "...",        // returned by session/new
- *           "agentletAgentId": "...",        // binding identifier
+ *           "profileId": "...",              // user-configured profile id
  *           "cwd":             "/repo",       // cwd passed to session/new
  *           "updatedAt":       1700000000000, // epoch ms
  *           "meta":            { ... }        // OPTIONAL last-known
@@ -63,8 +63,18 @@ import type {
   AvailableCommand,
 } from '@sediment/shared';
 
-/** Bumped only on a breaking layout change. */
-const ACP_SESSION_STORE_SCHEMA_VERSION = 1;
+/**
+ * Bumped only on a breaking layout change.
+ *
+ * v1 (legacy, removed): record carried `agentletAgentId`, the
+ * volatile agentlet connection id of the per-CLI bridge handshake.
+ * v2 carries `profileId` instead — the user-configured spawn recipe
+ * id, which is stable across daemon re-forks and agent crashes. The
+ * loader silently drops v1 records (one-time loss of cached session
+ * resume on first boot after upgrade — every subsequent prompt re-
+ * opens via `session/new`).
+ */
+const ACP_SESSION_STORE_SCHEMA_VERSION = 2;
 
 /**
  * Snapshot of selector/usage state that the agent pushed via
@@ -98,11 +108,12 @@ export interface AcpSessionRecord {
   /** ACP session id returned by `session/new`; the key for `session/load`. */
   sessionId: string;
   /**
-   * agentlet agent id this session was opened against. We compare on
-   * read so a binding change (thread re-pointed at a different agent)
-   * discards the stale record instead of trying to load it.
+   * User-configured profile id this session was opened against. We
+   * compare on read so a binding change (thread re-pointed at a
+   * different profile) discards the stale record instead of trying
+   * to load it.
    */
-  agentletAgentId: string;
+  profileId: string;
   /** `cwd` originally passed to `session/new`; replayed on `session/load`. */
   cwd: string;
   /** Epoch ms of the last write. Diagnostic only. */
@@ -131,8 +142,8 @@ function isRecord(value: unknown): value is AcpSessionRecord {
     !(
       typeof r.sessionId === 'string' &&
       r.sessionId.length > 0 &&
-      typeof r.agentletAgentId === 'string' &&
-      r.agentletAgentId.length > 0 &&
+      typeof r.profileId === 'string' &&
+      r.profileId.length > 0 &&
       typeof r.cwd === 'string' &&
       typeof r.updatedAt === 'number'
     )
@@ -288,7 +299,7 @@ export function writeAcpSessionRecord(
   const file = readFile(canvasId);
   const next: AcpSessionRecord = {
     sessionId: record.sessionId,
-    agentletAgentId: record.agentletAgentId,
+    profileId: record.profileId,
     cwd: record.cwd,
     updatedAt: Date.now(),
   };
@@ -299,7 +310,7 @@ export function writeAcpSessionRecord(
 
 /**
  * Update only the `meta` field for an existing record, leaving the
- * sessionId / agentletAgentId / cwd untouched. No-op when `canvasId`
+ * sessionId / profileId / cwd untouched. No-op when `canvasId`
  * is empty OR no record exists for `(canvasId, threadId)` — the meta
  * is per-session state, so persisting it without the parent record
  * would leak across recreations.
@@ -322,7 +333,7 @@ export function writeAcpSessionMeta(
   if (!existing) return false;
   const next: AcpSessionRecord = {
     sessionId: existing.sessionId,
-    agentletAgentId: existing.agentletAgentId,
+    profileId: existing.profileId,
     cwd: existing.cwd,
     updatedAt: Date.now(),
   };

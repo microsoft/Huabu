@@ -1,27 +1,37 @@
 /**
  * ACP (external agent bridge) API client.
  *
- * Wraps the read-only `GET /api/acp/agents` endpoint, the ephemeral
- * pairing-token surface (`POST/GET /api/acp/pair`,
- * `DELETE /api/acp/pair/:id`), and the thread-scoped session / commands
- * endpoints used by the slash-command typeahead.
+ * The bridge now uses an **embedded agentlet daemon** managed by the
+ * server's `DaemonSupervisor`. The user never sees the daemon directly
+ * — instead they author **profiles** ({@link AcpAgentProfile}) which
+ * describe how to spawn one external agent CLI on demand. This module
+ * wraps the loopback-only profile/daemon endpoints plus the existing
+ * thread-scoped session / commands routes.
  *
- * The agents-list endpoint is always registered server-side and now
- * always responds with `{ agents: [...] }` — the bridge is permanently
- * mounted; whether any agent is actually reachable is a function of
- * whether the user has paired one.
+ * Endpoint surface:
+ *  - `GET /api/acp/agent-cli` — detect locally installed CLIs (Copilot
+ *     / Claude / Gemini) to populate the profile editor's CLI picker.
+ *  - `GET/POST/PATCH/DELETE /api/acp/profiles` — CRUD for spawn
+ *     recipes. Always returns the runtime status (spawned/pid/etc.)
+ *     alongside each profile.
+ *  - `GET/POST /api/acp/daemon` — daemon liveness + manual restart.
+ *  - `POST /api/acp/threads/:threadId/session` etc. — thread-scoped
+ *     session lifecycle and per-session config knobs.
  */
 
 import { ApiError, apiFetch } from './_client';
 import { routes } from './_routes';
 
 import type {
-  AcpAgentsResponse,
   AcpAgentCliListResponse,
-  AcpPairingCreatedResponse,
-  AcpPairingListResponse,
+  AcpDaemonStatus,
+  AcpDaemonStatusResponse,
   AcpPermissionDecisionRequest,
   AcpPermissionDecisionResponse,
+  AcpProfileCreateRequest,
+  AcpProfileMutationResponse,
+  AcpProfileUpdateRequest,
+  AcpProfilesListResponse,
   AcpThreadCommandsResponse,
   EnsureAcpSessionRequest,
   EnsureAcpSessionResponse,
@@ -36,12 +46,16 @@ import type {
 export type {
   AcpAgentCliInfo,
   AcpAgentCliListResponse,
-  AcpAgentSummary,
-  AcpAgentsResponse,
+  AcpAgentProfile,
+  AcpAgentProfileRuntime,
+  AcpAgentProfileWithRuntime,
+  AcpDaemonStatus,
+  AcpDaemonStatusResponse,
   AcpModelInfo,
-  AcpPairingCreatedResponse,
-  AcpPairingListResponse,
-  AcpPairingTicket,
+  AcpProfileCreateRequest,
+  AcpProfileMutationResponse,
+  AcpProfileUpdateRequest,
+  AcpProfilesListResponse,
   AcpSessionConfigOption,
   AcpSessionMetaSnapshot,
   AcpSessionMode,
@@ -57,19 +71,12 @@ export type {
   SetAcpSessionModeResponse,
 } from '@sediment/shared';
 
-/** List currently-connected external ACP agents. */
-export async function listAcpAgents(): Promise<AcpAgentsResponse> {
-  return apiFetch<AcpAgentsResponse>(routes.acpAgents, {
-    fallbackMessage: 'Failed to list ACP agents',
-  });
-}
+// ── Agent CLI detection ──────────────────────────────────────────────
 
 /**
  * Detect ACP-capable agent CLIs installed on the host (`copilot`,
  * `claude`, `gemini`). Server filters out missing ones; the UI shows
- * a "Connect" card per installed agent. Also reports whether the
- * `agentlet` wrapper itself is on PATH so the UI can pick between
- * `agentlet …` (short form) and `<abs-path>/bin/agentlet …` (full path).
+ * the installed list when the user creates a new profile.
  */
 export async function listAcpAgentClis(): Promise<AcpAgentCliListResponse> {
   return apiFetch<AcpAgentCliListResponse>(routes.acpAgentCli, {
@@ -77,44 +84,92 @@ export async function listAcpAgentClis(): Promise<AcpAgentCliListResponse> {
   });
 }
 
+// ── Profile CRUD ─────────────────────────────────────────────────────
+
+/** Snapshot every profile with its current runtime status. */
+export async function listAcpProfiles(): Promise<AcpProfilesListResponse> {
+  return apiFetch<AcpProfilesListResponse>(routes.acpProfiles, {
+    fallbackMessage: 'Failed to list agent profiles',
+  });
+}
+
 /**
- * Mint a fresh ephemeral pairing ticket. The returned `code` is valid
- * for 60 seconds; once an agentlet successfully runs `bridge/hello`
- * with that code it gets locked to that agent's `agentId` indefinitely
- * (until graceful disconnect, explicit revoke, or server restart).
+ * Create a new profile. The server allocates an id and timestamps;
+ * the request body only carries the user-edited fields. Returns the
+ * fully-formed profile + initial runtime (`spawned: false`).
  */
-export async function createAcpPairing(): Promise<AcpPairingCreatedResponse> {
-  return apiFetch<AcpPairingCreatedResponse>(routes.acpPair, {
+export async function createAcpProfile(
+  payload: AcpProfileCreateRequest,
+): Promise<AcpProfileMutationResponse> {
+  return apiFetch<AcpProfileMutationResponse>(routes.acpProfiles, {
     method: 'POST',
-    fallbackMessage: 'Failed to create pairing code',
-  });
-}
-
-/** Snapshot every still-active pairing ticket. */
-export async function listAcpPairings(): Promise<AcpPairingListResponse> {
-  return apiFetch<AcpPairingListResponse>(routes.acpPair, {
-    fallbackMessage: 'Failed to read pairing codes',
+    json: payload,
+    fallbackMessage: 'Failed to create agent profile',
   });
 }
 
 /**
- * Revoke a ticket by id. Returns `{ revoked: false }` when the ticket
- * had already expired / been claimed-then-disconnected — caller can
- * ignore.
+ * Patch an existing profile. Any field present in the patch replaces
+ * the stored value; omitted fields are left intact. Pass `env: null`
+ * to clear all env vars; pass an object to replace the env map.
  */
-export async function revokeAcpPairing(
+export async function updateAcpProfile(
   id: string,
-): Promise<{ revoked: boolean }> {
-  return apiFetch<{ revoked: boolean }>(routes.acpPairItem(id), {
-    method: 'DELETE',
-    fallbackMessage: 'Failed to revoke pairing code',
+  payload: AcpProfileUpdateRequest,
+): Promise<AcpProfileMutationResponse> {
+  return apiFetch<AcpProfileMutationResponse>(routes.acpProfileItem(id), {
+    method: 'PATCH',
+    json: payload,
+    fallbackMessage: 'Failed to update agent profile',
   });
 }
+
+/**
+ * Delete a profile and (best-effort) ask the daemon to stop the
+ * underlying agent process. Returns `{deleted: false}` when the id
+ * didn't exist (e.g. the user double-clicked Delete) — caller can
+ * treat that as success.
+ */
+export async function deleteAcpProfile(
+  id: string,
+): Promise<{ deleted: boolean }> {
+  return apiFetch<{ deleted: boolean }>(routes.acpProfileItem(id), {
+    method: 'DELETE',
+    fallbackMessage: 'Failed to delete agent profile',
+  });
+}
+
+// ── Daemon status ────────────────────────────────────────────────────
+
+/**
+ * Fetch the embedded agentlet daemon's liveness snapshot. The UI uses
+ * this to render the amber troubleshooting banner when `online: false`
+ * and `lastError` is non-empty.
+ */
+export async function getAcpDaemonStatus(): Promise<AcpDaemonStatus> {
+  return apiFetch<AcpDaemonStatusResponse>(routes.acpDaemon, {
+    fallbackMessage: 'Failed to read agentlet daemon status',
+  });
+}
+
+/**
+ * Force the supervisor to re-fork the daemon immediately, resetting
+ * backoff state. Triggered by the "Restart worker" button in
+ * Settings → External Agents.
+ */
+export async function restartAcpDaemon(): Promise<AcpDaemonStatus> {
+  return apiFetch<AcpDaemonStatusResponse>(routes.acpDaemonRestart, {
+    method: 'POST',
+    fallbackMessage: 'Failed to restart agentlet daemon',
+  });
+}
+
+// ── Per-thread session lifecycle ─────────────────────────────────────
 
 /**
  * Eagerly open (or reuse) the per-thread ACP session so the slash-command
  * typeahead can pull commands BEFORE the user submits their first prompt.
- * Idempotent: calling repeatedly with the same `{threadId, agentletAgentId,
+ * Idempotent: calling repeatedly with the same `{threadId, profileId,
  * canvasId}` triple is a no-op server-side.
  *
  * Response always carries the latest `availableCommands`; an empty array

@@ -132,9 +132,7 @@ export function useAcpSessionMeta({
   const lastFetchedAtRef = useRef(0);
 
   const bindingKind = binding.kind;
-  const agentletAgentId =
-    binding.kind === 'external' ? binding.agentletAgentId : '';
-  const alias = binding.kind === 'external' ? binding.alias : '';
+  const profileId = binding.kind === 'external' ? binding.profileId : '';
 
   const refresh = useCallback(async () => {
     const myEpoch = ++epochRef.current;
@@ -157,8 +155,7 @@ export function useAcpSessionMeta({
     try {
       const res = await ensureAcpSession(threadId, {
         canvasId: canvasId ?? undefined,
-        agentletAgentId,
-        alias,
+        profileId,
       });
       if (!isCurrent()) return;
       setMeta(res.sessionMeta);
@@ -186,7 +183,7 @@ export function useAcpSessionMeta({
       if (isCurrent()) setLoading(false);
       loadingRef.current = false;
     }
-  }, [threadId, canvasId, bindingKind, agentletAgentId, alias, enabled]);
+  }, [threadId, canvasId, bindingKind, profileId, enabled]);
 
   const refreshIfStale = useCallback(
     (ttlMs: number = STALE_TTL_MS) => {

@@ -1,6 +1,6 @@
 import { AgentletServer } from '@agentlet/server';
 
-import { getTokenStore } from './token-store.js';
+import { getDaemonAuth } from './daemon-auth.js';
 
 import type { AgentletServerOptions } from '@agentlet/protocol';
 import type { FastifyInstance } from 'fastify';
@@ -23,18 +23,21 @@ let instance: AgentletServer | null = null;
 
 export interface MountAcpOptions {
   /**
-   * Override the default authenticator. By default we delegate to the
-   * process-wide pairing-token store (see `./token-store.ts`), which is
-   * seeded on demand by the Settings UI flow — there is no env-var
-   * fallback any more.
+   * Override the default authenticator. By default we delegate to
+   * {@link getDaemonAuth}, which only accepts `bridge/hello` calls
+   * carrying `mode: 'daemon'` plus the token minted by the
+   * supervisor at boot — see `./daemon-supervisor.ts`. There is no
+   * persistence and no pairing UI: the only legitimate connection
+   * comes from the daemon we just forked.
    */
   authenticate?: AgentletServerOptions['authenticate'];
 }
 
 /**
- * Embed `@agentlet/server` into the running Fastify HTTP server so external
- * ACP agents (launched via the user's local `agentlet` CLI) can connect over
- * WebSocket. Idempotent — calling twice returns the same instance.
+ * Embed `@agentlet/server` into the running Fastify HTTP server so the
+ * embedded agentlet daemon (forked by {@link getDaemonSupervisor}) can
+ * connect over WebSocket. Idempotent — calling twice returns the same
+ * instance.
  */
 export function mountAgentletServer(
   app: FastifyInstance,
@@ -42,12 +45,12 @@ export function mountAgentletServer(
 ): AgentletServer {
   if (instance) return instance;
 
-  const tokenStore = getTokenStore();
+  const daemonAuth = getDaemonAuth();
 
   const server = new AgentletServer({
     authenticate:
       opts.authenticate ??
-      (async (token, meta) => tokenStore.validate(token, meta)),
+      (async (token, meta) => daemonAuth.validate(token, meta)),
     onConnection: (agent) => {
       app.log.info(
         { agentId: agent.agentId, agentInfo: agent.agentInfo },
@@ -58,17 +61,11 @@ export function mountAgentletServer(
       app.log.info({ agentId: agent.agentId }, '[acp] agent reconnected');
     },
     onDisconnection: (agent, reason) => {
-      // Start the post-disconnect grace window on this agentId's
-      // ticket(s). The agentlet/server layer fires `onDisconnection`
-      // for *any* ws close (wifi blip, dev hot-reload, deliberate
-      // Ctrl-C — there is no signal that distinguishes them), so we
-      // can't drop the ticket immediately without breaking the
-      // client's built-in auto-reconnect. The token store instead
-      // arms a PAIRING_RECONNECT_GRACE_MS timer that a successful
-      // re-validate will cancel; if the agent never comes back, the
-      // ticket is eventually purged so a leaked code cannot be
-      // re-used by an attacker who later learns the agentId.
-      tokenStore.markDisconnected(agent.agentId);
+      // Daemon-mode connections do not need any post-disconnect
+      // bookkeeping — the supervisor owns the daemon's lifecycle and
+      // will surface failures through `/api/acp/daemon`. For agent
+      // (per-CLI) connections we just emit a log line; reconnect /
+      // retry is the agentlet client's responsibility.
       app.log.info(
         { agentId: agent.agentId, reason },
         '[acp] agent disconnected',

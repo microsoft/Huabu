@@ -1,0 +1,100 @@
+/**
+ * `useAcpProfilesStore` — Singleton Zustand store for the user's
+ * external-agent profiles (the data behind {@link useAcpProfiles}).
+ *
+ * Why a store and not per-component state? Several surfaces need the
+ * profile list in lockstep: the Settings editor lets the user CRUD
+ * profiles, the chat picker uses the same list to label "external"
+ * binding options, and ChatPanel's stale-binding auto-reset needs to
+ * see the latest profiles BEFORE flipping a binding. Centralising
+ * the list in a store means any caller can `await
+ * useAcpProfilesStore.getState().refresh()` and be sure every
+ * subscriber sees the new data on the next render.
+ *
+ * Shape change vs the legacy `useAcpAgentsStore`: this store holds
+ * {@link AcpAgentProfileWithRuntime}[] (long-lived spawn recipes
+ * with a `runtime.spawned` flag) instead of `AcpAgentSummary[]`
+ * (volatile bridge connections that came and went on pairing). The
+ * UI now treats "available" as "have a profile" rather than "have a
+ * live connection" — the daemon spawns the agent on first use.
+ *
+ * Daemon status is folded into the same response (the server returns
+ * `{profiles, daemon}` on every `GET /api/acp/profiles`) so consumers
+ * never have to coordinate two GETs and never see a torn view.
+ */
+
+import { create } from 'zustand';
+
+import { listAcpProfiles } from '@/api/acp';
+
+import type { AcpAgentProfileWithRuntime, AcpDaemonStatus } from '@/api/acp';
+
+interface AcpProfilesState {
+  /** Every profile the user has created. Empty until the first fetch. */
+  profiles: AcpAgentProfileWithRuntime[];
+  /** Latest daemon snapshot. `null` until the first fetch resolves. */
+  daemon: AcpDaemonStatus | null;
+  /**
+   * `true` once a fetch has *succeeded* at least once. A failed initial
+   * fetch leaves this `false` (and {@link profiles} empty), so consumers
+   * can use `loaded` to distinguish "no profiles yet" from "we don't
+   * know yet / the last attempt errored" — check {@link error} alongside
+   * for the failure case.
+   */
+  loaded: boolean;
+  /** Last error from a fetch, or `null`. Cleared on the next successful fetch. */
+  error: Error | null;
+  /** True while a fetch is in flight. */
+  loading: boolean;
+  /** Internal dedupe flag for the once-per-app initial fetch. */
+  initStarted: boolean;
+  /** Idempotent first-load helper called by the hook on mount. */
+  init: () => Promise<void>;
+  /** Force a fresh GET. Safe to call concurrently. */
+  refresh: () => Promise<void>;
+}
+
+export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
+  profiles: [],
+  daemon: null,
+  loaded: false,
+  error: null,
+  loading: false,
+  initStarted: false,
+  init: async () => {
+    if (get().initStarted) return;
+    set({ initStarted: true });
+    // Refresh on tab-visible so the runtime.spawned + daemon status
+    // are fresh when the user comes back. Cheap: one GET, server is
+    // an in-memory map walk + a JSON parse. The listener is never
+    // removed because the store is a process singleton.
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          void get().refresh();
+        }
+      });
+    }
+    await get().refresh();
+  },
+  refresh: async () => {
+    set({ loading: true });
+    try {
+      const res = await listAcpProfiles();
+      set({
+        profiles: res.profiles,
+        daemon: res.daemon,
+        loaded: true,
+        error: null,
+        loading: false,
+      });
+    } catch (err) {
+      // Leave the previous snapshot in place so transient errors
+      // don't make the picker flicker between "available" and empty.
+      set({
+        error: err instanceof Error ? err : new Error(String(err)),
+        loading: false,
+      });
+    }
+  },
+}));

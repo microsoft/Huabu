@@ -69,7 +69,7 @@ function snapshotSessionMeta(entry: AcpSessionEntry): AcpSessionMetaSnapshot {
 const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
   /**
    * Open (or reuse) the per-thread ACP session. Idempotent: repeated
-   * calls with the same `{threadId, agentletAgentId, canvasId}` triple
+   * calls with the same `{threadId, profileId, canvasId}` triple
    * return the same session id. Response always includes the latest
    * cached `availableCommands`; an empty array means the agent has
    * not yet pushed its list (caller should poll
@@ -102,8 +102,12 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
       const entry = await ensureAcpSession({
         threadId,
         binding: {
-          alias: parsed.data.alias,
-          agentletAgentId: parsed.data.agentletAgentId,
+          // Alias is purely a display hint at this stage \u2014 there's no
+          // wire field for it on EnsureAcpSessionRequest, so we fall
+          // back to the profileId itself. Real callers (chat panel)
+          // also fetch the profile to render the picker label.
+          alias: parsed.data.profileId,
+          profileId: parsed.data.profileId,
         },
         canvasId: parsed.data.canvasId,
         cwd: parsed.data.cwd,

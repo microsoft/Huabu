@@ -32,6 +32,7 @@ import {
   writeAcpSessionMeta,
   writeAcpSessionRecord,
 } from './session-store.js';
+import { ensureAgentForProfile } from './spawn-orchestrator.js';
 import { acpUpdateToStreamEvent, mergeThinkingChunk } from './translator.js';
 import { canvasRoot as resolveCanvasRoot } from '../../storage/paths.js';
 import {
@@ -94,8 +95,14 @@ function extractText(
 }
 
 export interface RunAcpAgentOptions {
-  /** External binding for the active thread. */
-  binding: { alias: string; agentletAgentId: string };
+  /**
+   * External binding for the active thread. `profileId` references a
+   * user-configured spawn recipe (see `./profile-store.ts`); the
+   * orchestrator resolves it to a live agentlet agent (spawning one
+   * on the daemon if needed). `alias` is purely a label for logs +
+   * `prepared_prompt` events.
+   */
+  binding: { alias: string; profileId: string };
   /** Plain-text or content-block message to send (we extract text below). */
   message: string | ReadonlyArray<{ type: string; text?: string }>;
   /** Sediment thread id \u2014 used as the registry key. */
@@ -147,8 +154,8 @@ export interface RunAcpAgentOptions {
 
 export interface EnsureAcpSessionOptions {
   threadId: string;
-  /** External binding for the thread. */
-  binding: { alias: string; agentletAgentId: string };
+  /** External binding for the thread (see {@link RunAcpAgentOptions.binding}). */
+  binding: { alias: string; profileId: string };
   /**
    * Sediment canvasId scoping the sandbox. Empty string = no canvas
    * (fs/* will be rejected). Mirrors {@link RunAcpAgentOptions.canvasId}.
@@ -162,7 +169,7 @@ export interface EnsureAcpSessionOptions {
 /**
  * Per-key map of in-flight `ensureAcpSession` work, used to coalesce
  * concurrent callers so we never run `initialize() + session/new`
- * twice for the same `{threadId, agentletAgentId, canvasId}` triple.
+ * twice for the same `{threadId, profileId, canvasId}` triple.
  *
  * Why this matters: the ChatPanel mount fires
  * `POST /api/acp/threads/:id/session` to warm the slash-command cache,
@@ -173,7 +180,7 @@ export interface EnsureAcpSessionOptions {
  * `shutdown()`s the first client — which silently invalidates the
  * first request's listener registration and wastes one round-trip.
  *
- * Keying by all three staleness inputs means: different agent / canvas
+ * Keying by all three staleness inputs means: different profile / canvas
  * / thread → independent slots, so a binding switch is never blocked
  * waiting on a stale promise.
  */
@@ -181,10 +188,10 @@ const inflightEnsureSessions = new Map<string, Promise<AcpSessionEntry>>();
 
 function ensureSessionKey(
   threadId: string,
-  agentletAgentId: string,
+  profileId: string,
   canvasId: string,
 ): string {
-  return `${threadId}|${agentletAgentId}|${canvasId}`;
+  return `${threadId}|${profileId}|${canvasId}`;
 }
 
 /**
@@ -327,30 +334,30 @@ function findThreadIdForEntry(entry: AcpSessionEntry): string | null {
 /**
  * Get-or-create the per-thread ACP session, installing the long-lived
  * `available_commands_update` listener on first creation. Idempotent for
- * a given `{threadId, agentletAgentId, canvasId}` triple — repeated calls
+ * a given `{threadId, profileId, canvasId}` triple — repeated calls
  * return the same {@link AcpSessionEntry} without re-issuing `session/new`.
  *
  * Concurrency: thread-safe across overlapping awaits. Multiple calls
- * for the same `{threadId, agentletAgentId, canvasId}` key share the
+ * for the same `{threadId, profileId, canvasId}` key share the
  * same in-flight promise so only one `initialize() + session/new`
  * pair is ever issued for a given coalescing window.
  *
  * Stale-entry rules (mirror the logic previously inlined in
  * `runAcpAgent`):
- *  - Binding switched to a different agent → drop and rebuild.
+ *  - Binding switched to a different profile → drop and rebuild.
  *  - Canvas changed → drop (sandbox scope mismatch).
  *  - Stored client was shut down → drop and reopen.
  *
  * Throws synchronously when the agentlet bridge is not mounted or the
- * agent is not connected — same surface as the inline path so callers
- * can `try`/`catch` uniformly.
+ * daemon refuses to spawn the agent — same surface as the inline path
+ * so callers can `try`/`catch` uniformly.
  */
 export async function ensureAcpSession(
   opts: EnsureAcpSessionOptions,
 ): Promise<AcpSessionEntry> {
   const key = ensureSessionKey(
     opts.threadId,
-    opts.binding.agentletAgentId,
+    opts.binding.profileId,
     opts.canvasId ?? '',
   );
   const existing = inflightEnsureSessions.get(key);
@@ -381,31 +388,38 @@ async function ensureAcpSessionInner(
   const server = getAgentletServer();
   if (!server) {
     throw new Error(
-      'ACP bridge is not mounted \u2014 enable external agents from the Settings panel',
+      'ACP bridge is not mounted \u2014 the embedded agentlet daemon is not running yet',
     );
   }
-  const conn = server.getConnection(binding.agentletAgentId);
+
+  // Resolve `profileId` to a live agentlet agent. The orchestrator
+  // either returns the cached spawn or asks the daemon to start one
+  // and caches the new `agentletAgentId`. Failures here surface as a
+  // 503 from the caller (route or runAcpAgent dispatch path) with a
+  // user-actionable hint pointing at Settings \u2192 External Agents.
+  const { agentletAgentId } = await ensureAgentForProfile(binding.profileId);
+  const conn = server.getConnection(agentletAgentId);
   if (!conn || conn.status !== 'connected') {
     throw new Error(
-      `External agent '${binding.alias}' (id=${binding.agentletAgentId}) is not connected`,
+      `External agent '${binding.alias}' (profile=${binding.profileId}) is not connected`,
     );
   }
 
   let entry = acpSessionRegistry.get(threadId);
-  if (entry && entry.agentletAgentId !== binding.agentletAgentId) {
+  if (entry && entry.profileId !== binding.profileId) {
     logger.info(
       {
         threadId,
-        oldAgentId: entry.agentletAgentId,
-        newAgentId: binding.agentletAgentId,
+        oldProfileId: entry.profileId,
+        newProfileId: binding.profileId,
       },
       '[acp] thread binding changed \u2014 discarding stale session',
     );
     cancelPersistEntryMeta(entry.canvasId, threadId);
     acpSessionRegistry.remove(threadId);
-    // Stale binding → persisted sessionId is also stale (it belongs to
-    // the OLD agent). Drop it so we don't try to load it against the
-    // new agent on the next miss.
+    // Stale binding \u2192 persisted sessionId is also stale (it belongs
+    // to the OLD profile). Drop it so we don't try to load it against
+    // the new profile on the next miss.
     deleteAcpSessionRecord(canvasId, threadId);
     entry = undefined;
   }
@@ -458,14 +472,14 @@ async function ensureAcpSessionInner(
   // in place (see {@link handleSessionMetaUpdate}); the sessionId
   // field is filled in below once known. This matters because
   // `session/load` typically replays the full session history as a
-  // stream of `session/update` notifications — far more than the
+  // stream of `session/update` notifications \u2014 far more than the
   // orphan-buffer cap of `MAX_ORPHAN_UPDATES_PER_SESSION = 32` would
   // tolerate. With a listener attached, dispatched updates skip the
   // orphan buffer entirely.
   const created: AcpSessionEntry = {
     client,
     sessionId: '',
-    agentletAgentId: binding.agentletAgentId,
+    profileId: binding.profileId,
     canvasId,
     cwd,
     createdAt: Date.now(),
@@ -484,13 +498,13 @@ async function ensureAcpSessionInner(
   let sessionId: string | null = null;
   let removeListener: (() => void) | null = null;
 
-  if (persisted && persisted.agentletAgentId === binding.agentletAgentId) {
+  if (persisted && persisted.profileId === binding.profileId) {
     if (agentSupportsLoadSession(client.initializeResult)) {
       logger.info(
         {
           threadId,
           canvasId,
-          agentId: binding.agentletAgentId,
+          profileId: binding.profileId,
           sessionId: persisted.sessionId,
           cwd: persisted.cwd,
         },
@@ -520,7 +534,7 @@ async function ensureAcpSessionInner(
         // "Already loaded" is the BEST possible outcome: the agent
         // process is still alive (typical scenario: only the Sediment
         // server restarted, the user's agentlet CLI kept running) and
-        // already holds the session in memory. Adopt it as-is — no
+        // already holds the session in memory. Adopt it as-is \u2014 no
         // replay needed, no fallback. Copilot CLI surfaces this as
         // `Session <id> is already loaded`; other agents may use
         // different wording, hence the permissive substring check.
@@ -529,7 +543,7 @@ async function ensureAcpSessionInner(
           created.sessionId = sessionId;
           // The agent already holds this session in memory and will
           // NOT replay `available_commands_update` / `current_mode_update`
-          // / `usage_update` / etc. on its own — those notifications
+          // / `usage_update` / etc. on its own \u2014 those notifications
           // only fire on the original `session/new` or `session/load`.
           // Without a fallback the registry entry would surface empty
           // selectors and an empty slash-command list to the UI for the
@@ -540,7 +554,7 @@ async function ensureAcpSessionInner(
           // the server restart. By definition that snapshot reflects
           // what THIS agent process most recently advertised, so it is
           // exactly what a fresh `session/new` against the same agent
-          // would return today — modulo any state the user changed
+          // would return today \u2014 modulo any state the user changed
           // out-of-band while the Sediment server was down (a vanishingly
           // narrow race for typical use). Subsequent `session/update`
           // notifications still take precedence; this is purely a seed.
@@ -590,7 +604,7 @@ async function ensureAcpSessionInner(
       }
     } else {
       logger.info(
-        { threadId, agentId: binding.agentletAgentId },
+        { threadId, profileId: binding.profileId },
         '[acp] agent does not advertise loadSession capability \u2014 cannot resume; using session/new',
       );
       // Don't delete the record here: a future agent upgrade may add
@@ -601,7 +615,7 @@ async function ensureAcpSessionInner(
 
   if (!sessionId) {
     logger.info(
-      { threadId, canvasId, agentId: binding.agentletAgentId, cwd },
+      { threadId, canvasId, profileId: binding.profileId, cwd },
       '[acp] opening new session for thread',
     );
     const newResult = await client.newSession({ cwd });
@@ -616,7 +630,7 @@ async function ensureAcpSessionInner(
     // a wired-up listener. The listener registration itself replays
     // any orphan `available_commands_update` notifications that
     // arrived BEFORE `session/new` resolved (a common ACP wire
-    // ordering — see `AcpAgentClient.orphanUpdates`), so we never
+    // ordering \u2014 see `AcpAgentClient.orphanUpdates`), so we never
     // miss the agent's initial command-list push regardless of who
     // wins the response-vs-notification race.
     client.registerSessionListener(sessionId, (update) => {
@@ -638,7 +652,7 @@ async function ensureAcpSessionInner(
   try {
     writeAcpSessionRecord(canvasId, threadId, {
       sessionId,
-      agentletAgentId: binding.agentletAgentId,
+      profileId: binding.profileId,
       cwd,
       meta: snapshotEntryMeta(created),
     });
@@ -1148,7 +1162,7 @@ export async function* runAcpAgent(
     {
       threadId,
       sessionId: entry.sessionId,
-      agentId: binding.agentletAgentId,
+      profileId: binding.profileId,
       promptLength: promptPayload.length,
       preprocessed: preparedPrompt !== null,
     },

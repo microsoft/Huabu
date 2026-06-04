@@ -235,22 +235,6 @@ function buildServerEnv(port: number): NodeJS.ProcessEnv {
       ? '' // Vite owns the SPA in this case
       : join(__dirname, '../../web/dist')
     : join(process.resourcesPath, 'web');
-  // External-agent (ACP) pairing relies on the in-repo `bin/agentlet`
-  // shell wrapper, which auto-builds the local CLI on demand and reads
-  // a `.env` next to it. Both of those assumptions only hold inside the
-  // monorepo checkout — a packaged Electron build has no `pnpm`, no
-  // source tree, and (on Windows) no POSIX shell to run the wrapper.
-  //
-  // So in prod we deliberately do NOT inject `HUABU_AGENTLET_PATH`. The
-  // server's `resolveAgentletWrapperPath()` falls back to `null`, the
-  // `GET /api/acp/agent-cli` response reports a null wrapper, and the
-  // Settings UI's `useAgentCliDetection` hook already handles that
-  // gracefully (the "Connect" command panel shows `bin/agentlet` as a
-  // hint, but the feature is effectively dev-only until we ship a real
-  // bundled CLI here).
-  const agentletPath = IS_DEV
-    ? join(__dirname, '../../../../bin/agentlet')
-    : undefined;
 
   // Ensure the data directory exists so the server doesn't have to
   // race-condition on first-use creation. The workspace directory is
@@ -269,13 +253,21 @@ function buildServerEnv(port: number): NodeJS.ProcessEnv {
 
   // Notably absent: HUABU_WORKSPACE. Omitting it puts the server in
   // free mode, so the web UI shows its workspace picker on first launch.
+  //
+  // External-agent (ACP) integration: the server embeds an `agentlet`
+  // daemon supervisor (`DaemonSupervisor`) which fork()s the daemon
+  // entry point itself. In packaged builds the entry resolves to
+  // `<resources>/server/agentlet/index.js` (copied by tsup + bundled
+  // by electron-builder, see ./electron-builder.yml extraResources);
+  // in dev it falls back to `external/agentlet/packages/local/dist/index.js`.
+  // No env var injection is needed here \u2014 the resolver in
+  // `daemon-supervisor.ts` covers both layouts.
   return {
     ...process.env,
     SERVER_PORT: String(port),
     HUABU_BIND_HOST: '127.0.0.1',
     HUABU_DATA_DIR: dataDir,
     ...(webDistPath ? { WEB_DIST_PATH: webDistPath } : {}),
-    ...(agentletPath ? { HUABU_AGENTLET_PATH: agentletPath } : {}),
     NODE_ENV: IS_DEV ? 'development' : 'production',
   };
 }

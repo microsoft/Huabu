@@ -6,7 +6,7 @@
  * Option list (in order):
  *   1. `@Chat`  → built-in agent, mode='ask' (default).
  *   2. `@Agent` → built-in agent, mode='operate'.
- *   3. `@<alias>` for every currently-connected ACP agent.
+ *   3. `@<displayName>` for every configured external-agent profile.
  *
  * Filter rule: case-insensitive `startsWith` on the display alias,
  * then `includes` as a fallback. Selecting an item is the parent's
@@ -28,12 +28,12 @@ import {
   useState,
 } from 'react';
 
-import type { AcpAgentSummary, AgentMode } from '@sediment/shared';
+import type { AcpAgentProfileWithRuntime, AgentMode } from '@sediment/shared';
 
 /**
  * One entry surfaced in the mention menu. Internal options expose the
  * built-in agent under two display modes (`ask`, `operate`); external
- * options wrap a single connected ACP agent.
+ * options wrap a single user-configured profile.
  */
 export type AgentMentionOption =
   | {
@@ -47,7 +47,7 @@ export type AgentMentionOption =
       kind: 'external';
       alias: string;
       description: string;
-      agentletAgentId: string;
+      profileId: string;
     };
 
 export interface AgentMentionMenuRef {
@@ -58,8 +58,8 @@ export interface AgentMentionMenuRef {
 }
 
 export interface AgentMentionMenuProps {
-  /** Connected ACP agents from `useAcpAgents`. */
-  agents: AcpAgentSummary[];
+  /** Configured external-agent profiles from `useAcpProfiles`. */
+  profiles: AcpAgentProfileWithRuntime[];
   /** Substring typed after the leading `@`. Empty = show everything. */
   filter: string;
   /** Triggered on click or keyboard accept. */
@@ -68,9 +68,11 @@ export interface AgentMentionMenuProps {
 
 /**
  * Build the full option list. Internal modes always lead so they remain
- * one keystroke away even when many ACP agents are connected.
+ * one keystroke away even when many profiles are configured.
  */
-function buildOptions(agents: AcpAgentSummary[]): AgentMentionOption[] {
+function buildOptions(
+  profiles: AcpAgentProfileWithRuntime[],
+): AgentMentionOption[] {
   const internal: AgentMentionOption[] = [
     {
       kind: 'internal',
@@ -85,11 +87,13 @@ function buildOptions(agents: AcpAgentSummary[]): AgentMentionOption[] {
       mode: 'operate',
     },
   ];
-  const external: AgentMentionOption[] = agents.map((agent) => ({
+  const external: AgentMentionOption[] = profiles.map((profile) => ({
     kind: 'external' as const,
-    alias: agent.alias,
-    description: `pid ${agent.pid}`,
-    agentletAgentId: agent.agentId,
+    alias: profile.displayName,
+    description: profile.runtime.spawned
+      ? `running · pid ${profile.runtime.pid ?? '?'}`
+      : 'idle — spawns on first message',
+    profileId: profile.id,
   }));
   return [...internal, ...external];
 }
@@ -127,8 +131,8 @@ function OptionIcon({ option }: { option: AgentMentionOption }) {
 export const AgentMentionMenu = forwardRef<
   AgentMentionMenuRef,
   AgentMentionMenuProps
->(({ agents, filter, onSelect }, ref) => {
-  const options = useMemo(() => buildOptions(agents), [agents]);
+>(({ profiles, filter, onSelect }, ref) => {
+  const options = useMemo(() => buildOptions(profiles), [profiles]);
   const filtered = useMemo(
     () => filterOptions(options, filter),
     [options, filter],
@@ -166,7 +170,7 @@ export const AgentMentionMenu = forwardRef<
   // the first match selected so hitting Enter immediately picks it.
   useEffect(() => {
     setHighlight(0);
-  }, [filter, agents]);
+  }, [filter, profiles]);
 
   // Keyboard-driven highlight changes scroll the active row into view.
   useEffect(() => {
