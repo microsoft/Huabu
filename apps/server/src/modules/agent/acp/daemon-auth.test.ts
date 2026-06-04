@@ -4,7 +4,7 @@
  * Coverage:
  *   ✓ rotateToken returns a 64-char hex string and updates getToken
  *   ✓ validate rejects when no token has been set yet
-Prompt preprocessing failed for GitHub Copilot CLI  *   ✓ validate rejects mismatched / empty tokens
+ *   ✓ validate rejects mismatched / empty tokens
  *   ✓ validate accepts a matching token for both the daemon control
  *     channel and the per-agent relay sockets the daemon opens
  *   ✓ close clears the in-memory token
