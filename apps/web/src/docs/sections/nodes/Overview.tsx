@@ -1,8 +1,12 @@
 // TODO: fill in real handbook content for this section.
+import { NODE_ICON } from '@/config/nodeIcons';
+
 import {
   Callout,
+  CardGrid,
   DocLink,
   H2,
+  NavCard,
   P,
   PageLayout,
   Table,
@@ -21,69 +25,75 @@ export default function NodesOverview() {
   return (
     <PageLayout
       title="Node Types"
-      description="Huabu ships nine node types. The four media types and Note / Text are pure content. Frame is structure. Sketch and Question are interactive. This page lists what each one does at a glance — dedicated pages go deeper where it matters."
+      description="Huabu ships nine node types. The four media types and Note / Text are pure content. Frame is structure. Sketch and Question are interactive. Each type has its own page — this hub points to them and covers the behaviours every node shares."
       toc={toc}
     >
       <H2>The nine node types</H2>
-      <Table
-        headers={['Type', 'What it carries', 'How you create it']}
-        rows={[
-          [
-            <strong>Note</strong>,
-            'Rich Markdown for thoughts, outlines, AI-written prose. Edited in a block editor.',
-            'Toolbar · paste text · drag a block out of another Note · chat drag-to-canvas.',
-          ],
-          [
-            <strong>Text</strong>,
-            'Short plain text for titles, labels, captions. Edited in place with size / colour / weight controls.',
-            'Toolbar · paste short text.',
-          ],
-          [
-            <strong>Image</strong>,
-            'PNG / JPG / GIF / WebP / SVG. Node auto-fits the source aspect ratio.',
-            'Upload · paste · drag a file · paste an image URL · PDF selection screenshot.',
-          ],
-          [
-            <strong>PDF</strong>,
-            'PDF document with page thumbnails. Selection mode lets you drag text or screenshots back to the canvas.',
-            'Upload · paste · paste URL.',
-          ],
-          [
-            <strong>Video</strong>,
-            'MP4 / WebM / MOV / OGG plus YouTube embeds.',
-            'Upload · paste · paste URL.',
-          ],
-          [
-            <strong>Web</strong>,
-            'Captured URL with the article body extracted in the background.',
-            'Paste URL · link dialog.',
-          ],
-          [
-            <strong>Frame</strong>,
-            'Labelled group container with free / column / row layout.',
-            <>
-              Toolbar (drag to size) · <em>group selection</em> (Ctrl/Cmd+G).
-              See <DocLink href="/docs/nodes/frames">Frames</DocLink>.
-            </>,
-          ],
-          [
-            <strong>Sketch</strong>,
-            'Freehand strokes you can ask the AI to interpret.',
-            <>
-              Toolbar (drag to draw). See{' '}
-              <DocLink href="/docs/nodes/sketch">Sketch</DocLink>.
-            </>,
-          ],
-          [
-            <strong>Question</strong>,
-            'A sticky-note question the AI answers in a connected reply node.',
-            <>
-              Toolbar. See{' '}
-              <DocLink href="/docs/nodes/question">Question Nodes</DocLink>.
-            </>,
-          ],
-        ]}
-      />
+      <CardGrid>
+        <NavCard
+          to="/docs/nodes/note"
+          icon={NODE_ICON.note}
+          eyebrow="Content"
+          title="Note"
+          description="Rich Markdown for thoughts, outlines, AI-written prose."
+        />
+        <NavCard
+          to="/docs/nodes/text"
+          icon={NODE_ICON.text}
+          eyebrow="Content"
+          title="Text"
+          description="Short plain text for titles, labels, captions."
+        />
+        <NavCard
+          to="/docs/nodes/image"
+          icon={NODE_ICON.image}
+          eyebrow="Media"
+          title="Image"
+          description="PNG / JPG / GIF / WebP / SVG, auto-fit to source aspect."
+        />
+        <NavCard
+          to="/docs/nodes/pdf"
+          icon={NODE_ICON.pdf}
+          eyebrow="Media"
+          title="PDF"
+          description="Full document with thumbnails, screenshots, text selection."
+        />
+        <NavCard
+          to="/docs/nodes/video"
+          icon={NODE_ICON.video}
+          eyebrow="Media"
+          title="Video"
+          description="MP4 / WebM / MOV / OGG plus YouTube embeds."
+        />
+        <NavCard
+          to="/docs/nodes/web"
+          icon={NODE_ICON.web}
+          eyebrow="Media"
+          title="Web"
+          description="Captured URL with the article body extracted in the background."
+        />
+        <NavCard
+          to="/docs/nodes/frames"
+          icon={NODE_ICON.frame}
+          eyebrow="Structure"
+          title="Frame"
+          description="Labelled group container with free / column / row layout."
+        />
+        <NavCard
+          to="/docs/nodes/sketch"
+          icon={NODE_ICON.sketch}
+          eyebrow="Interactive"
+          title="Sketch"
+          description="Freehand strokes you can ask the AI to interpret."
+        />
+        <NavCard
+          to="/docs/nodes/question"
+          icon={NODE_ICON.question}
+          eyebrow="Interactive"
+          title="Question"
+          description="A sticky-note question the AI answers in a connected reply."
+        />
+      </CardGrid>
 
       <H2>Expand & edit</H2>
       <P>
@@ -113,33 +123,19 @@ export default function NodesOverview() {
       <H2>Single-select toolbar</H2>
       <P>
         When a single node is selected, a small floating toolbar appears above
-        it. Its actions are tailored to the node type but follow a consistent
-        layout (open / primary actions on the left, type-specific controls in
-        the middle, destructive actions on the right).
+        it. Each per-type page covers its toolbar in detail; the common shape
+        is: open / primary actions on the left, type-specific controls in the
+        middle, destructive actions on the right.
       </P>
-      <Table
-        headers={['Node', 'Toolbar highlights']}
-        rows={[
-          ['Note', 'Expand · Copy content.'],
-          ['Web', 'Open original URL · Expand.'],
-          ['PDF', 'Expand · Download · Set / clear cover image.'],
-          ['Image / Video', 'Expand.'],
-          [
-            'Text',
-            'Font / size · bold / italic / underline / strike · text & background colour.',
-          ],
-          ['Question', 'Edit · Run / Stop · View answers.'],
-          ['Frame', 'Switch layout (free / column / row) · Ungroup.'],
-          ['Sketch', 'Pen colour & size · Apply Sketch (AI interpret).'],
-        ]}
-      />
 
       <H2>Multi-select toolbar</H2>
       <P>
         Selecting two or more nodes brings up a different toolbar with alignment
         (left / centre / right / top / middle / bottom), distribution (spread
         overlapping nodes), and <em>group into Frame</em>
-        (also <code>Ctrl/Cmd+G</code>).
+        (also <code>Ctrl/Cmd+G</code>). See{' '}
+        <DocLink href="/docs/nodes/frames">Frames</DocLink> for what grouping
+        produces.
       </P>
 
       <H2>Locking</H2>
@@ -151,7 +147,9 @@ export default function NodesOverview() {
       </P>
       <Callout tone="info">
         Want more on how node content is stored and retrieved by the AI? See{' '}
-        <DocLink href="/docs/nodes/content">Node Content</DocLink>.
+        <DocLink href="/docs/nodes/content">Node Content</DocLink>. Or jump to{' '}
+        <DocLink href="/docs/nodes/edges">Edges &amp; Connections</DocLink> for
+        the relationship layer.
       </Callout>
     </PageLayout>
   );

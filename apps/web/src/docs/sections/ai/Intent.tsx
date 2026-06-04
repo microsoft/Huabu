@@ -1,7 +1,5 @@
-// TODO: fill in real handbook content for this section.
 import {
   Callout,
-  Code,
   DocLink,
   H2,
   H3,
@@ -13,32 +11,30 @@ import {
 } from '../../components';
 
 const toc: TocEntry[] = [
-  { id: 'intent-system', label: 'Intent system' },
-  { id: 'triggering-intent', label: 'Triggering intent' },
+  { id: 'what-it-is', label: 'What Intent does' },
+  { id: 'triggering', label: 'Triggering Intent' },
   { id: 'two-step-flow', label: 'Two-step flow' },
-  { id: 'intent-history', label: 'Intent history' },
-  { id: 'auto-layout', label: 'Auto-layout' },
-  { id: 'auto-place', label: 'Incremental auto-placement' },
-  { id: 'semantic-edges', label: 'Implicit semantic edges' },
-  { id: 'algorithm', label: 'Layout algorithm' },
+  { id: 'history', label: 'Intent history' },
   { id: 'tips', label: 'Tips' },
 ];
 
 export default function Intent() {
   return (
     <PageLayout
-      title="Intent & Auto-layout"
-      description="Two related capabilities for letting the AI help you organise the canvas: Intent recommends what to do next, auto-layout decides where new nodes go."
+      title="Intent"
+      description="Intent reads the current canvas state and your recent operations, then proposes a few concrete next moves — each one packaged as a one-click executable plan you can review before it touches the canvas."
       toc={toc}
     >
-      <H2>Intent system</H2>
+      <H2>What Intent does</H2>
       <P>
-        The intent system reads the current canvas state and your recent
-        operations, then recommends a few concrete next moves — each one
-        packaged as a one-click executable plan.
+        Most canvas work has a natural rhythm: you capture, the canvas gets
+        busy, you pause, and then it&apos;s not obvious what the highest-value
+        next move is. Intent is built for that pause. It looks at what&apos;s on
+        the canvas (and what you did last), suggests 3–5 things worth doing, and
+        turns whichever one you pick into a reviewable batch of edits.
       </P>
 
-      <H2>Triggering intent</H2>
+      <H2>Triggering Intent</H2>
       <Table
         headers={['Trigger', 'How']}
         rows={[
@@ -53,7 +49,7 @@ export default function Intent() {
             'From a sketch',
             <>
               Select a Sketch node and click <em>Apply Sketch</em> in its
-              toolbar. The AI proposes structured nodes / edges based on what
+              toolbar. The AI proposes structured nodes and edges based on what
               you drew.
             </>,
           ],
@@ -65,7 +61,7 @@ export default function Intent() {
       </P>
 
       <H2>Two-step flow</H2>
-      <H3>Step 1: choose an intent</H3>
+      <H3>Step 1 — Choose an intent</H3>
       <P>
         Huabu sends a canvas overview (node summaries + recent ops) to the AI,
         which streams 3–5 candidate intents, e.g.:
@@ -82,12 +78,14 @@ export default function Intent() {
         </li>
       </ul>
       <P>Pick a suggestion, or type your own intent in the input.</P>
-      <H3>Step 2: resolve into operations</H3>
+
+      <H3>Step 2 — Resolve into operations</H3>
       <P>
         After picking (or typing) an intent, Huabu switches to{' '}
-        <DocLink href="/docs/ai/overview">Operate mode</DocLink> and asks the AI
-        to turn the intent into concrete canvas commands. The result appears
-        with a <strong>change list</strong> so you can undo the whole batch.
+        <DocLink href="/docs/ai/agent-mode">Agent Mode</DocLink> and asks the AI
+        to turn the intent into concrete canvas operations. The result appears
+        with a <strong>change list</strong> so you can accept, tweak or undo the
+        whole batch as a single unit.
       </P>
 
       <H2>Intent history</H2>
@@ -97,100 +95,22 @@ export default function Intent() {
         future recommendations.
       </P>
 
-      <H2>Auto-layout</H2>
-      <P>
-        The layout engine is force-directed. It reads your{' '}
-        <strong>explicit edges</strong>, the structure of your{' '}
-        <strong>frames</strong>, and the{' '}
-        <strong>implicit semantic relationships</strong> between nodes (see
-        below) and arranges accordingly.
-      </P>
-
-      <H2>Incremental auto-placement</H2>
-      <P>
-        The ✨ toolbar toggle (also <Kbd>Ctrl</Kbd>/<Kbd>Cmd</Kbd>+
-        <Kbd>Shift</Kbd>+<Kbd>A</Kbd>) controls whether new nodes get
-        auto-placed:
-      </P>
-      <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
-        <li>
-          <strong>On</strong> (button highlighted) — every new node slots into a
-          sensible spot beside related content. Frames grow / shrink to fit
-          their children, and dragging shows a target-frame outline.
-        </li>
-        <li>
-          <strong>Off</strong> (default) — new nodes drop in the centre and stay
-          put.
-        </li>
-      </ul>
-      <P>
-        Auto-place runs incrementally: the new node is the only thing the solver
-        moves, so positions you&apos;ve already settled stay where you put them.
-        Trigger a manual reorganisation by dragging nodes yourself.
-      </P>
-
-      <H2>Implicit semantic edges</H2>
-      <P>
-        Beyond the lines you draw, the layout engine looks at these
-        relationships and pulls related nodes closer:
-      </P>
-      <Table
-        headers={['Relationship', 'Weight', 'Description']}
-        rows={[
-          [<strong>User edge</strong>, <Code>1.0</Code>, 'Lines you drew.'],
-          [
-            <strong>Research citation</strong>,
-            <Code>0.6</Code>,
-            'A synthesis node and the source node it cites.',
-          ],
-          [
-            <strong>Knowledge source</strong>,
-            <Code>0.4</Code>,
-            'A derived node and its origin node.',
-          ],
-          [
-            <strong>Same intent thread</strong>,
-            <Code>0.3</Code>,
-            'Nodes produced by the same Intent run.',
-          ],
-          [
-            <strong>Same chat thread</strong>,
-            <Code>0.3</Code>,
-            'Nodes dragged out of the same chat conversation.',
-          ],
-          [
-            <strong>Same frame</strong>,
-            <Code>0.2</Code>,
-            'Siblings inside the same frame.',
-          ],
-        ]}
-      />
-      <Callout tone="info">
-        Multiple relationships between the same two nodes don&apos;t stack —
-        only the strongest is used.
-      </Callout>
-
-      <H2>Layout algorithm</H2>
-      <P>
-        Huabu uses <strong>fCoSE</strong> (a fast force-directed layout) with
-        existing nodes pinned. Only the new node is solved for, so the result is
-        predictable: nothing else moves.
-      </P>
-
       <H2>Tips</H2>
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
-          <strong>During research</strong>: leave auto-layout on so AI-created
-          nodes cluster near related content.
+          <strong>Pre-select to scope.</strong> If a few nodes matter more than
+          the rest, select them before triggering — the suggestions narrow
+          accordingly.
         </li>
         <li>
-          <strong>After tidying</strong>: lock the key nodes (from the Layers
-          panel) so subsequent layout passes can&apos;t nudge them.
+          <strong>Use it after capture sprints.</strong> Intent shines right
+          after you&apos;ve dumped a lot of raw material on the canvas and want
+          a hand structuring it.
         </li>
         <li>
-          <strong>Inside a frame</strong>: switch the frame to column or row
-          mode for automatic stacking — see{' '}
-          <DocLink href="/docs/nodes/frames">Frames</DocLink>.
+          <strong>Pair with Auto-layout.</strong> When Intent emits new nodes,{' '}
+          <DocLink href="/docs/concepts/auto-layout">Auto-layout</DocLink>{' '}
+          places them next to related content automatically.
         </li>
       </ul>
       <Callout tone="info">
@@ -200,3 +120,4 @@ export default function Intent() {
     </PageLayout>
   );
 }
+// TODO: fill in real handbook content for this section.

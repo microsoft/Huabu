@@ -122,8 +122,9 @@ export default function QuickStart() {
         Press <Kbd>?</Kbd> on any canvas to view the shortcut modal. Browse{' '}
         <DocLink href="/docs/concepts/canvas-basics">Canvas Basics</DocLink> for
         the rest of the workflow, or jump straight to{' '}
-        <DocLink href="/docs/ai/overview">Ask &amp; Operate</DocLink> to learn
-        the two AI modes.
+        <DocLink href="/docs/ai/chat-mode">Chat Mode</DocLink> and{' '}
+        <DocLink href="/docs/ai/agent-mode">Agent Mode</DocLink> to learn the
+        two AI modes.
       </Callout>
     </PageLayout>
   );
