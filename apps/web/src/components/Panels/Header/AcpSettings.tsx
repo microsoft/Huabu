@@ -27,6 +27,7 @@
 
 import {
   AlertTriangle,
+  Folder,
   Info,
   Pencil,
   Plus,
@@ -42,6 +43,7 @@ import {
   restartAcpDaemon,
   updateAcpProfile,
 } from '@/api/acp';
+import { pickFolder } from '@/api/workspace';
 import { Button } from '@/components/Common/Button';
 import { Input } from '@/components/Common/Input';
 import { Modal } from '@/components/Common/Modal';
@@ -52,6 +54,7 @@ import { TabGroup } from '@/components/Common/TabGroup';
 import { toast } from '@/components/Common/Toast';
 import { Tooltip } from '@/components/Common/Tooltip';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
+import { useFolderPickerSupported } from '@/store/workspaceStore';
 
 import type {
   AcpAgentCliInfo,
@@ -499,6 +502,39 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
     [detectedClis, handleCliChange],
   );
 
+  /**
+   * Show the native folder-picker button only when the server reports
+   * a GUI is available — same capability flag used by the workspace
+   * setup flow. On headless / remote servers we silently degrade to
+   * just the text input, which still works for typing a remote path.
+   */
+  const folderPickerSupported = useFolderPickerSupported();
+  const [picking, setPicking] = useState(false);
+
+  const handlePickCwd = useCallback(async () => {
+    setPicking(true);
+    try {
+      const result = await pickFolder();
+      if (result.ok) {
+        setForm((p) => ({ ...p, cwd: result.path }));
+      } else if (result.reason === 'no-picker') {
+        toast('No folder picker available on this server', {
+          variant: 'error',
+        });
+      }
+      // 'cancelled' is silent.
+    } catch (err) {
+      toast(
+        err instanceof Error ? err.message : 'Failed to open folder picker',
+        {
+          variant: 'error',
+        },
+      );
+    } finally {
+      setPicking(false);
+    }
+  }, []);
+
   return (
     <Modal
       isOpen={isOpen}
@@ -618,12 +654,30 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
             <FieldLabel hint="The agent is spawned with this as its working directory and treats it as the project root for file edits and tool calls.">
               Working directory
             </FieldLabel>
-            <Input
-              value={form.cwd}
-              onChange={(e) => setForm((p) => ({ ...p, cwd: e.target.value }))}
-              placeholder="/Users/me/project-x"
-              className="border-edge-default bg-surface rounded border px-2 py-1 font-mono text-xs"
-            />
+            <div className="flex items-stretch gap-1.5">
+              <Input
+                value={form.cwd}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, cwd: e.target.value }))
+                }
+                placeholder="/Users/me/project-x"
+                wrapperClassName="flex-1"
+                className="border-edge-default bg-surface w-full rounded border px-2 py-1 font-mono text-xs"
+              />
+              {folderPickerSupported && (
+                <Button
+                  variant="outline"
+                  tone="neutral"
+                  size="sm"
+                  iconOnly
+                  title="Pick a folder"
+                  onClick={() => void handlePickCwd()}
+                  disabled={picking}
+                >
+                  <Folder size={14} />
+                </Button>
+              )}
+            </div>
           </label>
         </div>
 

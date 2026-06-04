@@ -218,3 +218,17 @@ export function useWorkspaceLabel(): string | null {
     return null;
   }, [name, path]);
 }
+
+/**
+ * Whether the server can open a native folder-picker dialog. This is a
+ * server-level capability (GUI present) rather than a workspace
+ * property — surfaced via a dedicated hook so callers that only need
+ * the flag don't have to reach into `useWorkspaceStore` and accidentally
+ * imply they're mutating workspace state.
+ *
+ * Returns `false` while the first capability snapshot is still loading,
+ * matching the conservative behaviour of the workspace setup flow.
+ */
+export function useFolderPickerSupported(): boolean {
+  return useWorkspaceStore((s) => s.capabilities?.nativePicker ?? false);
+}
