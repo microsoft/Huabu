@@ -97,7 +97,7 @@ export default function PluggableAgents() {
           icon={Plug}
           eyebrow="Setup"
           title="External Agents"
-          description="One-click pairing for detected CLIs, plus the manual pairing flow."
+          description="Configure agent profiles (Built-in or Custom) and bind chats to them."
         />
         <NavCard
           to="/docs/ai/agent-mode"
@@ -118,7 +118,7 @@ export default function PluggableAgents() {
           icon={Shield}
           eyebrow="Reference"
           title="Settings & LLM"
-          description="Where pairing tokens live and how to revoke them."
+          description="Where agent profiles live and how to edit, restart or delete them."
         />
       </CardGrid>
 
@@ -126,19 +126,30 @@ export default function PluggableAgents() {
       <P>
         Huabu embeds{' '}
         <DocLink href="https://github.com/hai-team/agentlet">agentlet</DocLink>,
-        a small WebSocket bridge, into its server. You install the{' '}
-        <Code>agentlet</Code> CLI on whichever machine the agent should run on
-        (often your own laptop), then point it at Huabu with a one-time pairing
-        token:
+        a small bridge process, into its server. At boot the server forks an
+        in-process agentlet <strong>daemon</strong> and supervises it with
+        exponential-backoff restart. You never need to launch agentlet yourself
+        or paste a pairing command — the daemon is invisible infrastructure that
+        surfaces only when something is wrong.
       </P>
-      <CodeBlock language="bash">{`agentlet \\
-  --agent "claude --acp" \\
-  --server ws://localhost:3001/api/acp/agent \\
-  --token <pairing-token>`}</CodeBlock>
       <P>
-        Detected CLIs (Copilot, Claude, Gemini) get a one-click <em>Connect</em>{' '}
-        in Settings that builds and copies that command for you — see{' '}
-        <DocLink href="/docs/ai/external-agents">External Agents</DocLink>.
+        Instead, you maintain a list of <strong>agent profiles</strong> in
+        Settings → External Agents. Each profile is a stable spawn recipe:
+      </P>
+      <CodeBlock language="json">{`{
+  "displayName": "Copilot (project-x)",
+  "cliId": "copilot",
+  "command": "copilot --acp --allow-all",
+  "cwd": "/Users/me/project-x",
+  "autoRestart": true
+}`}</CodeBlock>
+      <P>
+        When a chat thread bound to that profile sends its first message, the
+        daemon spawns the configured CLI in the right working directory, speaks
+        ACP to it, and translates the streamed <Code>session/update</Code>{' '}
+        events into the same SSE stream Huabu uses for the built-in agent. See{' '}
+        <DocLink href="/docs/ai/external-agents">External Agents</DocLink> for
+        the editor walk-through.
       </P>
 
       <H2>Per-message lifecycle</H2>
@@ -181,15 +192,16 @@ export default function PluggableAgents() {
           Each request shows the exact resource and tool involved.
         </li>
         <li>
-          <strong>Pairing tokens</strong> are scoped, revocable and printed
-          fresh per session.
+          <strong>Daemon tokens never cross the HTTP boundary</strong> — the
+          server injects them into the forked daemon over IPC, so nothing the
+          browser can reach knows the token.
         </li>
       </ul>
 
       <H2>Going further</H2>
       <P>
-        For step-by-step pairing, troubleshooting and the manual flow when an
-        agent isn&apos;t auto-detected, jump to{' '}
+        For the Profile editor walk-through, troubleshooting and how the daemon
+        health banner behaves, jump to{' '}
         <DocLink href="/docs/ai/external-agents">External Agents</DocLink>. For
         the wire format and reference implementation, see the{' '}
         <DocLink href="https://github.com/hai-team/agentlet">

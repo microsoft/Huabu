@@ -103,10 +103,13 @@ export default function Settings() {
 
       <H2>External agents</H2>
       <P>
-        The External Agents section lists the ACP-capable CLIs Huabu detected on
-        your machine (Copilot / Claude / Gemini) and lets you connect any of
-        them with one click. Full details (pairing codes, reconnect grace,
-        agentlet on PATH) live in{' '}
+        The External Agents section is where you maintain a list of{' '}
+        <strong>agent profiles</strong> — stable recipes that tell Huabu which
+        ACP-capable CLI to launch (Copilot, Claude, Gemini, or a custom binary),
+        in which working directory, and with which flags. Huabu&apos;s server
+        forks an embedded agentlet daemon at boot and spawns the configured
+        agent on demand; no pairing codes, no terminal paste. Full details
+        (Profile editor, daemon health banner, troubleshooting) live in{' '}
         <DocLink href="/docs/ai/external-agents">External Agents</DocLink>.
       </P>
 
@@ -134,11 +137,21 @@ export default function Settings() {
             'Check the selected model — Operate runs and complex Intents benefit from a stronger model.',
           ],
           [
-            'External agent connection fails with &quot;Invalid or expired pairing code&quot;',
+            'Amber "Worker offline" banner above the External Agents list',
             <>
-              Generate a fresh code in Settings. Codes expire after 60 seconds
-              if unclaimed, and after a 5-minute grace window once the agent
-              disconnects.
+              The agentlet daemon supervisor cannot keep the worker online. The
+              banner shows the last error; click <strong>Restart worker</strong>{' '}
+              to force an immediate reconnect after you&apos;ve fixed the
+              underlying cause (e.g. installed a missing CLI).
+            </>,
+          ],
+          [
+            'New chat menu does not list a profile you just created',
+            <>
+              The profile list refreshes automatically after save; if a stale
+              menu is open, close and re-open it. Profiles created in Settings
+              and in the inline <strong>Create agent</strong> entry both feed
+              the same store.
             </>,
           ],
         ]}
