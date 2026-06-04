@@ -19,10 +19,22 @@
  * persistence file used by the old per-CLI pairing flow has been
  * removed (the supervisor unlinks it once on boot).
  *
- * Bridge mode (per-CLI agent connections without a daemon) is no
- * longer accepted on this bridge — the only legitimate client is our
- * own daemon. Rejecting `mode !== 'daemon'` here closes off a sloppy
- * loopback-only escape hatch even before the auth check runs.
+ * Two kinds of handshake reach this validator, both legitimate:
+ *
+ *   - `mode: 'daemon'` — the supervised daemon registering its control
+ *     channel after each fork.
+ *   - any other mode (effectively the agentlet `WsClient` per-agent
+ *     relay handshake, which omits the `mode` field) — opened by our
+ *     own daemon every time it spawns a CLI agent, so the agentlet
+ *     server can register an `AgentConnection` and ferry ACP traffic.
+ *
+ * Both paths must present the current daemon token, which is rotated
+ * per supervisor fork and only ever leaves this process inside the
+ * env/argv of the daemon child we just forked. That single shared
+ * secret is what closes off the loopback-only escape hatch: anyone
+ * without the token is rejected before we look at `mode`, and anyone
+ * with the token is — by construction — either our daemon or one of
+ * its children.
  */
 
 import { randomBytes } from 'node:crypto';
@@ -66,18 +78,20 @@ class AcpDaemonAuth {
    * response and closes the socket (see `external/agentlet/packages/
    * server/src/server.ts#handleHello`).
    *
+   * The supervised daemon opens two kinds of WebSocket against this
+   * bridge: a single `mode: 'daemon'` control channel for itself, and
+   * one per-agent relay socket for every CLI agent it spawns. Both
+   * present the same daemon token (rotated per fork, only ever leaves
+   * this process inside the env/argv of the daemon child) so we
+   * accept any handshake that matches it and don't inspect `mode`.
+   *
    * Reasons we reject:
    *  - The daemon supervisor has not finished booting (no token set).
-   *  - The handshake is not in `daemon` mode (legacy bridge handshakes
-   *    are no longer supported by Sediment).
    *  - The supplied token doesn't match the current daemon token.
    */
-  validate(token: string, meta: BridgeHelloParams): AuthResult {
+  validate(token: string, _meta: BridgeHelloParams): AuthResult {
     if (!this.token) {
       throw new Error('Daemon supervisor has not finished initialising');
-    }
-    if (meta.mode !== 'daemon') {
-      throw new Error('Only daemon handshakes are accepted on this bridge');
     }
     if (!token || token !== this.token) {
       throw new Error('Invalid daemon token');

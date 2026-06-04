@@ -24,6 +24,7 @@ import {
   prepareExternalAgentPrompt,
   serializeRawPrompt,
 } from './preprocessor.js';
+import { getProfile } from './profile-store.js';
 import { getAgentletServer } from './server-mount.js';
 import { acpSessionRegistry } from './session-registry.js';
 import {
@@ -126,16 +127,19 @@ export interface RunAcpAgentOptions {
    * `cwd` passed to `session/new` on first prompt for this thread.
    * Ignored for subsequent prompts (the session is already open).
    *
-   * Defaults to `'/'`, which is the **agreed sentinel** with the
-   * agentlet relay: when `params.cwd` is missing or `'/'`, the relay
-   * substitutes its own `process.cwd()` (see
-   * `agentlet/packages/local/src/relay.ts#enrichMessage`). This keeps
-   * the local working directory authoritative on the user's machine
-   * and frees Sediment from guessing repo paths until canvas ↔ repo
-   * binding is wired here.
+   * When omitted, `ensureAcpSession` resolves it from the bound
+   * profile's `cwd` (set by the user in Settings → External Agents).
+   * The fallback chain is: explicit `opts.cwd` → `profile.cwd` →
+   * `'/'` (last-resort sentinel, only reachable if the profile
+   * disappeared between binding lookup and session open).
    *
-   * **Current user contract**: launch agentlet from the project root
-   * (`cd <repo> && agentlet --agent "claude --acp" --server …`).
+   * Historical note: an earlier design relied on an agentlet relay
+   * substituting `'/'` with `process.cwd()`. That substitution was
+   * never actually implemented in the relay (see
+   * `external/agentlet/packages/local/src/relay.ts` — pure
+   * transparent relay), which left the agent with `'/'` as its
+   * workspace and silently broke the user's configured working
+   * directory. We now derive `cwd` from the profile up front.
    */
   cwd?: string;
   /**
@@ -161,7 +165,11 @@ export interface EnsureAcpSessionOptions {
    * (fs/* will be rejected). Mirrors {@link RunAcpAgentOptions.canvasId}.
    */
   canvasId?: string;
-  /** `cwd` for `session/new`. Defaults to `'/'` (relay substitutes its cwd). */
+  /**
+   * `cwd` for `session/new`. When omitted, resolved from the bound
+   * profile's `cwd` (see {@link RunAcpAgentOptions.cwd} for the full
+   * fallback chain).
+   */
   cwd?: string;
   logger: FastifyBaseLogger;
 }
@@ -383,7 +391,14 @@ async function ensureAcpSessionInner(
 ): Promise<AcpSessionEntry> {
   const { threadId, binding, logger } = opts;
   const canvasId = opts.canvasId ?? '';
-  const cwd = opts.cwd ?? '/';
+  // Resolve the session cwd from (in order): explicit caller override,
+  // the bound profile's configured working directory, or a `/` sentinel
+  // as last resort. The profile lookup is cheap (file-backed map) and
+  // is the same record `ensureAgentForProfile` consults below for the
+  // spawn cwd, so the agent process and its ACP session land in the
+  // same directory.
+  const profile = getProfile(binding.profileId);
+  const cwd = opts.cwd ?? profile?.cwd ?? '/';
 
   const server = getAgentletServer();
   if (!server) {
@@ -985,12 +1000,13 @@ export async function* runAcpAgent(
   //          to `nodes/**` + `.artifacts/**`, scoped to this canvasId.
   //        Reachable only via ACP `fs/read_text_file`.
   //
-  //   2. Agent execution workspace (the agent process' own `cwd`)
-  //        = whatever the agentlet relay substitutes for the `'/'`
-  //          sentinel below, i.e. the relay's `process.cwd()`. By
-  //          contract the user launches agentlet from their project
-  //          root, so the agent's native shell/fs sees the repo,
-  //          not the canvas dir.
+  //   2. Agent execution workspace (the agent process' own `cwd`
+  //        plus the `cwd` we pass to `session/new`)
+  //        = the bound profile's configured working directory. The
+  //          daemon spawns the agent process with `profile.cwd` and
+  //          `ensureAcpSession` opens `session/new` with the same
+  //          value, so the agent's native shell/fs and its ACP
+  //          session-scoped workspace agree.
   //
   // Empirically (see /tmp/copilot-acp-probe.mjs) not every agent
   // honours (1): Copilot CLI's `Read` tool **never** calls
@@ -1015,18 +1031,19 @@ export async function* runAcpAgent(
   // `/canvas/<rel>` virtual paths so any spec-compliant agent can
   // still reach files via the ACP fs handler.
   const canvasCwd = canvasId ? resolveCanvasRoot(canvasId) : undefined;
-  const cwd = opts.cwd ?? '/';
 
   // 1-2. Ensure (open or reuse) the per-thread ACP session. The helper
   //      handles connection lookup, stale-entry eviction, initialize +
   //      session/new, and registers the `available_commands_update`
   //      listener so slash-command pushes outside a turn don't get
-  //      silently dropped.
+  //      silently dropped. We deliberately do NOT pass `cwd` here so
+  //      `ensureAcpSession` derives it from the bound profile; passing
+  //      `'/'` would override the user's configured working directory.
   const entry = await ensureAcpSession({
     threadId,
     binding,
     canvasId,
-    cwd,
+    ...(opts.cwd !== undefined && { cwd: opts.cwd }),
     logger,
   });
 

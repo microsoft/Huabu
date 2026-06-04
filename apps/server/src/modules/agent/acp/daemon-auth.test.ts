@@ -4,9 +4,9 @@
  * Coverage:
  *   ✓ rotateToken returns a 64-char hex string and updates getToken
  *   ✓ validate rejects when no token has been set yet
- *   ✓ validate rejects non-daemon handshake modes
- *   ✓ validate rejects mismatched tokens
- *   ✓ validate accepts a matching daemon handshake
+Prompt preprocessing failed for GitHub Copilot CLI  *   ✓ validate rejects mismatched / empty tokens
+ *   ✓ validate accepts a matching token for both the daemon control
+ *     channel and the per-agent relay sockets the daemon opens
  *   ✓ close clears the in-memory token
  *
  * We deliberately do NOT fork the agentlet daemon binary in these
@@ -25,6 +25,13 @@ import type { BridgeHelloParams } from '@agentlet/protocol';
 function makeDaemonHello(): BridgeHelloParams {
   return {
     mode: 'daemon',
+    machine: { hostname: 'test', platform: 'linux' },
+  } as BridgeHelloParams;
+}
+
+function makeAgentHello(): BridgeHelloParams {
+  return {
+    agentId: 'host:copilot:cwd:abc12345',
     machine: { hostname: 'test', platform: 'linux' },
   } as BridgeHelloParams;
 }
@@ -62,21 +69,13 @@ describe('AcpDaemonAuth.validate', () => {
     );
   });
 
-  it('rejects non-daemon handshake modes', () => {
-    const auth = getDaemonAuth();
-    const token = auth.rotateToken();
-    expect(() =>
-      auth.validate(token, {
-        mode: 'bridge',
-        machine: { hostname: 't', platform: 'linux' },
-      } as BridgeHelloParams),
-    ).toThrow(/Only daemon handshakes/);
-  });
-
-  it('rejects mismatched tokens', () => {
+  it('rejects mismatched tokens regardless of handshake mode', () => {
     const auth = getDaemonAuth();
     auth.rotateToken();
     expect(() => auth.validate('wrong', makeDaemonHello())).toThrow(
+      /Invalid daemon token/,
+    );
+    expect(() => auth.validate('wrong', makeAgentHello())).toThrow(
       /Invalid daemon token/,
     );
   });
@@ -89,10 +88,17 @@ describe('AcpDaemonAuth.validate', () => {
     );
   });
 
-  it('accepts a matching daemon handshake', () => {
+  it('accepts a matching token from the daemon control channel', () => {
     const auth = getDaemonAuth();
     const token = auth.rotateToken();
     const result = auth.validate(token, makeDaemonHello());
+    expect(result).toEqual({ metadata: { source: 'daemon' } });
+  });
+
+  it('accepts a matching token from a per-agent relay socket (no mode field)', () => {
+    const auth = getDaemonAuth();
+    const token = auth.rotateToken();
+    const result = auth.validate(token, makeAgentHello());
     expect(result).toEqual({ metadata: { source: 'daemon' } });
   });
 });

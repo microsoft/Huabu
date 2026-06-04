@@ -23,8 +23,9 @@ A JSON object: `{ rawMessage, agentAlias, selectedNodes: [{id, type, label?, fil
 
 ## Two kinds of references
 
-- **Chat-history** (_"that"_, _"as you said"_, _"keep going"_) → **pass through verbatim**. The external agent has its own thread memory via ACP `session/load`; it will resolve them. Do not re-issue earlier asks.
+- **Chat-history** (_"that"_, _"as you said"_, _"keep going"_) → **pass through verbatim**. The external agent has its own thread memory; it will resolve them. Do not re-issue earlier asks.
 - **Canvas-spatial** (_"the node on the left"_, _"the frame I drew"_, _"these"_, _"the selected ones"_) → **you must resolve them**. Inline the content via `read`, or rewrite as a self-contained description (_"a Markdown spec titled 'API design'"_). Never echo spatial language into `task`.
+- **External-agent environment** (_"this folder"_, _"this repo"_, _"the current directory"_, _"here"_, _"my project"_) → **pass through verbatim**. These refer to the external agent's own cwd / workspace, **not** yours. Don't resolve them against your filesystem and don't attach anything from it.
 
 ## Output
 
