@@ -4,7 +4,8 @@ import { ref } from 'vue'
 export interface AgentInfo {
   agentId: string
   status: 'connected' | 'disconnected'
-  agentInfo: { command: string; pid: number }
+  agentInfo: { command: string; pid: number; cwd: string }
+  session?: { sessionId: string; supportsLoad: boolean }
   machine?: { hostname: string; platform: string }
   metadata: Record<string, unknown>
   connectedAt: string

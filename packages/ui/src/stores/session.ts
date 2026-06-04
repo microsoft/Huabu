@@ -1,13 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { AcpTransport, type JsonRpcMessage } from '../lib/transport'
-import { useAgentsStore } from './agents'
-import type {
-  InitializeRequest,
-  NewSessionRequest,
-  NewSessionResponse,
-  PromptRequest,
-} from '@agentclientprotocol/sdk'
+import type { PromptRequest } from '@agentclientprotocol/sdk'
 
 export interface ChatMessage {
   id: string
@@ -25,8 +19,6 @@ export const useSessionStore = defineStore('session', () => {
   const sessionId = ref<string | null>(null)
   const transport = new AcpTransport()
   let nextId = 1
-  let initializeId = 0
-  let sessionNewId = 0
 
   const hasSession = computed(() => sessionId.value !== null)
   const visibleMessages = computed(() =>
@@ -35,18 +27,19 @@ export const useSessionStore = defineStore('session', () => {
       : messages.value.filter(m => m.type === 'message')
   )
 
-  function connectToAgent(agentId: string) {
-    const agentsStore = useAgentsStore()
+  /**
+   * Connect to an agent that already has an active session (bootstrapped by agentlet).
+   * No initialize or session/new — just attach and start relaying messages.
+   */
+  function connectToAgent(agentId: string, agentSessionId: string, token?: string) {
     transport.close()
     messages.value = []
     sessionId.value = null
     isConnected.value = false
     isLoading.value = false
     nextId = 1
-    initializeId = 0
-    sessionNewId = 0
 
-    transport.connect(agentId, agentsStore.userToken || undefined)
+    transport.connect(agentId, token)
 
     transport.onMessage((msg) => {
       console.log('[agentlet-ui] ← received:', JSON.stringify(msg))
@@ -58,39 +51,17 @@ export const useSessionStore = defineStore('session', () => {
       isConnected.value = false
     })
 
-    // Wait for connection then initialize
+    // Wait for connection then mark ready
     const checkOpen = setInterval(() => {
       if (transport.connected) {
         clearInterval(checkOpen)
         isConnected.value = true
-        console.log('[agentlet-ui] WS connected, sending initialize...')
-        initialize()
+        sessionId.value = agentSessionId
+        console.log(`[agentlet-ui] Connected to active session: ${agentSessionId}`)
       }
     }, 50)
 
     setTimeout(() => clearInterval(checkOpen), 10000)
-  }
-
-  function initialize() {
-    initializeId = nextId++
-    const params: InitializeRequest = {
-      protocolVersion: 1,
-      clientCapabilities: {},
-      clientInfo: { name: 'Agentlet UI', version: '0.1.0' },
-    }
-    const msg = { jsonrpc: '2.0' as const, method: 'initialize', id: initializeId, params }
-    console.log('[agentlet-ui] → sending:', JSON.stringify(msg))
-    transport.send(msg)
-  }
-
-  function startSession() {
-    if (!isConnected.value) return
-    sessionNewId = nextId++
-    const params: NewSessionRequest = {
-      cwd: '/',
-      mcpServers: [],
-    }
-    transport.send({ jsonrpc: '2.0', method: 'session/new', id: sessionNewId, params })
   }
 
   function sendPrompt(text: string) {
@@ -127,22 +98,7 @@ export const useSessionStore = defineStore('session', () => {
       return
     }
 
-    // Response to initialize
-    if (msg.id === initializeId && msg.result) {
-      startSession()
-      return
-    }
-
-    // Response to session/new
-    if (msg.id === sessionNewId && msg.result) {
-      const result = msg.result as NewSessionResponse
-      if (result.sessionId && !sessionId.value) {
-        sessionId.value = result.sessionId
-      }
-      return
-    }
-
-    // Response to session/prompt (any other response with result while session active)
+    // Response to session/prompt (any response with result while session active)
     if (msg.id && msg.result && sessionId.value) {
       isLoading.value = false
       return
