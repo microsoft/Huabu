@@ -117,7 +117,7 @@ export default function CanvasBasics() {
         Looking for the auto-layout toggle? It no longer lives on the canvas
         toolbar — open the Settings popover in the header (gear icon), expand{' '}
         <strong>Canvas</strong>, and flip <strong>Auto Layout</strong>. See{' '}
-        <DocLink href="/docs/ai/intent">Intent &amp; Auto-layout</DocLink> for
+        <DocLink href="/docs/concepts/auto-layout">Auto-layout</DocLink> for
         what changes when it&apos;s on.
       </Callout>
 
@@ -259,7 +259,8 @@ export default function CanvasBasics() {
         Paste drops content at the cursor position. Nearly every canvas
         operation is undoable; bulk AI edits in Operate mode come with their own
         batch-undo via the change list — see{' '}
-        <DocLink href="/docs/ai/overview">Ask &amp; Operate</DocLink>.
+        <DocLink href="/docs/ai/chat-mode">Chat Mode</DocLink> and{' '}
+        <DocLink href="/docs/ai/agent-mode">Agent Mode</DocLink>.
       </P>
 
       <H2>Floating top-right controls</H2>

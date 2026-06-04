@@ -114,7 +114,7 @@ keywords: [transformer, attention, ...]
         Auto-layout doesn&apos;t only look at the edges you drew — it also picks
         up reference relationships between nodes and pulls related ones closer.
         See the weight table in{' '}
-        <DocLink href="/docs/ai/intent">Intent &amp; Auto-layout</DocLink>.
+        <DocLink href="/docs/concepts/auto-layout">Auto-layout</DocLink>.
       </P>
     </PageLayout>
   );

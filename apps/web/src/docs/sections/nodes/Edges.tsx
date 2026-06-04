@@ -87,9 +87,9 @@ export default function Edges() {
         render but they influence layout. See{' '}
         <a
           className="font-medium text-gray-900 underline decoration-gray-400 underline-offset-2 hover:decoration-gray-900"
-          href="/docs/ai/intent"
+          href="/docs/concepts/auto-layout"
         >
-          Intent &amp; Auto-layout
+          Auto-layout
         </a>{' '}
         for the weight table.
       </Callout>
