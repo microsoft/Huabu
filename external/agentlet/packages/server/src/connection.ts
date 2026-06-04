@@ -12,7 +12,8 @@ export interface AgentConnectionImplOptions {
   agentId: string
   token: string
   metadata: Record<string, unknown>
-  agentInfo: { command: string; pid: number }
+  agentInfo: { command: string; pid: number; cwd: string }
+  session?: { sessionId: string; supportsLoad: boolean; initializeResult: unknown }
   machine?: { hostname: string; platform: string }
   bridge: { name: string; version: string }
   capabilities: { autoRestart: boolean; bufferLimit: number }
@@ -24,7 +25,8 @@ export class AgentConnectionImpl implements AgentConnection {
   readonly agentId: string
   readonly token: string
   readonly metadata: Record<string, unknown>
-  readonly agentInfo: { command: string; pid: number }
+  readonly agentInfo: { command: string; pid: number; cwd: string }
+  readonly session?: { sessionId: string; supportsLoad: boolean; initializeResult: unknown }
   readonly machine?: { hostname: string; platform: string }
   readonly bridge: { name: string; version: string }
   readonly capabilities: { autoRestart: boolean; bufferLimit: number }
@@ -47,6 +49,7 @@ export class AgentConnectionImpl implements AgentConnection {
     this.token = options.token
     this.metadata = options.metadata
     this.agentInfo = options.agentInfo
+    this.session = options.session
     this.machine = options.machine
     this.bridge = options.bridge
     this.capabilities = options.capabilities
@@ -116,8 +119,18 @@ export class AgentConnectionImpl implements AgentConnection {
   handleReconnect(ws: WebSocket, params: BridgeHelloParams): void {
     this.ws = ws
     this._status = 'connected'
-    // Update agent info (PID may have changed if agent was restarted)
-    ;(this as { agentInfo: { command: string; pid: number } }).agentInfo = params.agent
+    // Update agent info (PID/cwd may have changed if agent was restarted)
+    if (params.agent) {
+      ;(this as { agentInfo: { command: string; pid: number; cwd: string } }).agentInfo = {
+        command: params.agent.command,
+        pid: params.agent.pid,
+        cwd: params.agent.cwd,
+      }
+    }
+    // Update session info
+    if (params.session) {
+      ;(this as { session?: { sessionId: string; supportsLoad: boolean; initializeResult: unknown } }).session = params.session
+    }
   }
 
   /** @internal — flush buffered outbound messages after reconnection */

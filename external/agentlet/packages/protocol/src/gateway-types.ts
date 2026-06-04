@@ -61,7 +61,17 @@ export interface AgentConnection {
   readonly metadata: Record<string, unknown>
 
   /** Agent process info (from bridge/hello) */
-  readonly agentInfo: { command: string; pid: number }
+  readonly agentInfo: { command: string; pid: number; cwd: string }
+
+  /** Active ACP session info (from bridge/hello session bootstrap) */
+  readonly session?: {
+    /** The active ACP sessionId */
+    sessionId: string
+    /** Whether the agent supports session/load */
+    supportsLoad: boolean
+    /** The full ACP initialize response (agent capabilities, info, protocol version) */
+    initializeResult: unknown
+  }
 
   /** Machine info (from bridge/hello, if provided) */
   readonly machine?: { hostname: string; platform: string }

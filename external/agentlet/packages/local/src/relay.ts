@@ -1,4 +1,3 @@
-import path from 'node:path'
 import type { JsonRpcMessage } from '@agentlet/protocol'
 import { AgentProcess } from './agent-process.js'
 import { WsClient } from './ws-client.js'
@@ -9,20 +8,19 @@ import { Logger } from './logger.js'
  * - Agent stdout (parsed JSON) → WebSocket send
  * - WebSocket message → Agent stdin
  *
- * Also intercepts session/new to inject local context (cwd).
+ * Pure transparent relay — no message inspection or transformation.
+ * Session lifecycle is owned by the bootstrap phase, not the relay.
  */
 export class Relay {
   private readonly agent: AgentProcess
   private readonly ws: WsClient
   private readonly logger: Logger
-  private readonly cwd: string
   private active = false
 
   constructor(agent: AgentProcess, ws: WsClient, logger: Logger) {
     this.agent = agent
     this.ws = ws
     this.logger = logger
-    this.cwd = path.resolve(process.cwd())
   }
 
   /** Start relaying messages bidirectionally */
@@ -47,13 +45,12 @@ export class Relay {
       }
     })
 
-    // WebSocket → Agent stdin (with session/new interception)
+    // WebSocket → Agent stdin
     this.ws.on('message', (msg) => {
       if (!this.active) return
 
-      const enriched = this.enrichMessage(msg)
-      this.logger.debug('relay_ws_to_agent', { method: (enriched as unknown as Record<string, unknown>).method, id: (enriched as unknown as Record<string, unknown>).id })
-      const written = this.agent.write(enriched)
+      this.logger.debug('relay_ws_to_agent', { method: (msg as unknown as Record<string, unknown>).method, id: (msg as unknown as Record<string, unknown>).id })
+      const written = this.agent.write(msg)
       if (!written) {
         this.logger.warn('agent_write_failed', { reason: 'Agent stdin not writable' })
       }
@@ -63,26 +60,6 @@ export class Relay {
   /** Stop relaying */
   stop(): void {
     this.active = false
-  }
-
-  /**
-   * Intercept session/new and session/load requests to inject local cwd.
-   * The remote UI doesn't know (or control) the local working directory,
-   * so the relay injects it as the local authority.
-   */
-  private enrichMessage(msg: JsonRpcMessage): JsonRpcMessage {
-    const obj = msg as unknown as Record<string, unknown>
-    if ((obj.method === 'session/new' || obj.method === 'session/load') && obj.params) {
-      const params = obj.params as Record<string, unknown>
-      if (!params.cwd || params.cwd === '/') {
-        params.cwd = this.cwd
-        this.logger.info('session_enriched', { method: obj.method, cwd: this.cwd })
-      }
-      if (!params.mcpServers) {
-        params.mcpServers = []
-      }
-    }
-    return msg
   }
 
   private isValidJsonRpc(msg: unknown): msg is JsonRpcMessage {

@@ -8,15 +8,25 @@ const session = useSessionStore()
 
 function onSelect(agentId: string) {
   agents.selectAgent(agentId)
-  session.connectToAgent(agentId)
+  connectIfReady(agentId)
 }
 
 // Auto-connect when an agent is auto-selected on load
 watch(() => agents.selectedAgentId, (agentId) => {
   if (agentId && !session.isConnected) {
-    session.connectToAgent(agentId)
+    connectIfReady(agentId)
   }
 })
+
+function connectIfReady(agentId: string) {
+  const agent = agents.agents.find(a => a.agentId === agentId)
+  if (!agent || agent.status !== 'connected') return
+  if (!agent.session?.sessionId) {
+    console.warn(`[agentlet-ui] Agent ${agentId} has no active session`)
+    return
+  }
+  session.connectToAgent(agentId, agent.session.sessionId, agents.userToken || undefined)
+}
 </script>
 
 <template>

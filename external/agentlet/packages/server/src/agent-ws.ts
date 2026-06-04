@@ -2,18 +2,8 @@ import { WebSocketServer, WebSocket } from 'ws'
 import type { IncomingMessage } from 'node:http'
 import type { Duplex } from 'node:stream'
 import type { AgentletServer } from './server.js'
-import type { SessionMap } from './session-map.js'
 import type { TokenStore } from './token-store.js'
 import type { AcpMessage } from '@agentlet/protocol'
-
-interface ClientState {
-  ws: WebSocket
-  agentId: string
-  token: string
-  // Track pending request IDs for session interception
-  pendingSessionRequestId: number | string | null
-  isSessionLoad: boolean // true if we rewrote session/new → session/load
-}
 
 /**
  * Per-agent raw ACP WebSocket endpoint (WS /agents/:agentId/ws).
@@ -23,22 +13,18 @@ interface ClientState {
  * internal agent connection. Supports multiple simultaneous clients
  * per agent (e.g., UI + external tool).
  *
- * Also handles session tracking: intercepts session/new and rewrites
- * to session/load when a stored session exists for this (token, agent).
+ * Pure transparent relay — no ACP-level inspection or rewriting.
+ * Session lifecycle is owned by the agentlet (agent-side adapter).
  */
 export class AgentWebSocket {
   private readonly wss: WebSocketServer
   private readonly server: AgentletServer
-  private readonly sessionMap: SessionMap
   private readonly tokenStore: TokenStore
   // Map agentId → set of connected host clients for that agent
   private readonly agentClients = new Map<string, Set<WebSocket>>()
-  // Per-WS client state for session interception
-  private readonly clientState = new Map<WebSocket, ClientState>()
 
-  constructor(server: AgentletServer, sessionMap: SessionMap, tokenStore: TokenStore) {
+  constructor(server: AgentletServer, tokenStore: TokenStore) {
     this.server = server
-    this.sessionMap = sessionMap
     this.tokenStore = tokenStore
     this.wss = new WebSocketServer({ noServer: true })
   }
@@ -92,7 +78,7 @@ export class AgentWebSocket {
   /**
    * Called by standalone wiring when an agent sends an ACP message.
    * Fans out to all raw WS clients subscribed to that agent.
-   * Also intercepts session/new and session/load responses to track sessionId.
+   * Pure transparent relay — no inspection.
    */
   broadcastToAgent(agentId: string, message: AcpMessage): void {
     const clients = this.agentClients.get(agentId)
@@ -105,34 +91,9 @@ export class AgentWebSocket {
     console.log(`[agent-ws] Agent→UI (${agentId}, ${clients.size} clients):`, data.slice(0, 200))
 
     for (const ws of clients) {
-      if (ws.readyState !== WebSocket.OPEN) continue
-
-      // Check if this response matches a pending session request
-      const state = this.clientState.get(ws)
-      if (state && state.pendingSessionRequestId !== null) {
-        const msg = message as unknown as Record<string, unknown>
-        if (msg.id === state.pendingSessionRequestId && msg.result) {
-          const result = msg.result as Record<string, unknown>
-          if (typeof result.sessionId === 'string') {
-            this.sessionMap.set(state.token, agentId, result.sessionId)
-            console.log(`[agent-ws] Session stored: token=${state.token.slice(0, 8)}... agent=${agentId} session=${result.sessionId}`)
-          }
-          state.pendingSessionRequestId = null
-          state.isSessionLoad = false
-        }
-        // If session/load failed, clear state and let UI handle error
-        if (msg.id === state.pendingSessionRequestId && msg.error) {
-          if (state.isSessionLoad) {
-            // session/load failed — clear stored session so next attempt does session/new
-            this.sessionMap.delete(state.token, agentId)
-            console.log(`[agent-ws] session/load failed, cleared stored session for agent=${agentId}`)
-          }
-          state.pendingSessionRequestId = null
-          state.isSessionLoad = false
-        }
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(data)
       }
-
-      ws.send(data)
     }
   }
 
@@ -154,18 +115,9 @@ export class AgentWebSocket {
     }
     this.agentClients.get(agentId)!.add(ws)
 
-    const state: ClientState = {
-      ws,
-      agentId,
-      token,
-      pendingSessionRequestId: null,
-      isSessionLoad: false,
-    }
-    this.clientState.set(ws, state)
-
     console.log(`[agent-ws] Client connected for agent: ${agentId} (total: ${this.agentClients.get(agentId)!.size})`)
 
-    // Forward raw ACP messages from client → agent (with session interception)
+    // Forward raw ACP messages from client → agent (transparent relay)
     ws.on('message', (data, isBinary) => {
       if (isBinary) {
         ws.close(4002, 'Binary frames not supported')
@@ -186,26 +138,6 @@ export class AgentWebSocket {
         return // skip invalid JSON
       }
 
-      // Intercept session/new: rewrite to session/load if we have a stored session
-      const rpcMsg = msg as unknown as Record<string, unknown>
-      if (rpcMsg.method === 'session/new' && token) {
-        const storedSessionId = this.sessionMap.get(token, agentId)
-        if (storedSessionId) {
-          // Rewrite to session/load
-          rpcMsg.method = 'session/load'
-          const params = (rpcMsg.params ?? {}) as Record<string, unknown>
-          params.sessionId = storedSessionId
-          rpcMsg.params = params
-          state.pendingSessionRequestId = rpcMsg.id as number | string
-          state.isSessionLoad = true
-          console.log(`[agent-ws] Rewrote session/new → session/load (sessionId=${storedSessionId})`)
-        } else {
-          // Track session/new so we can capture the sessionId from response
-          state.pendingSessionRequestId = rpcMsg.id as number | string
-          state.isSessionLoad = false
-        }
-      }
-
       console.log(`[agent-ws] UI→Agent (${agentId}):`, JSON.stringify(msg).slice(0, 200))
       conn.send(msg)
     })
@@ -218,13 +150,11 @@ export class AgentWebSocket {
           this.agentClients.delete(agentId)
         }
       }
-      this.clientState.delete(ws)
     })
 
     ws.on('error', () => {
       const clients = this.agentClients.get(agentId)
       clients?.delete(ws)
-      this.clientState.delete(ws)
     })
   }
 }

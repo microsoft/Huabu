@@ -33,6 +33,13 @@ export type {
   BridgePongParams,
   BridgeShutdownParams,
   BridgeLifecycleEvent,
+  DaemonSpawnParams,
+  DaemonSpawnResult,
+  DaemonStopParams,
+  DaemonStopResult,
+  DaemonListParams,
+  DaemonListResult,
+  DaemonConnection,
 } from './bridge-messages.js'
 
 export type {

@@ -8,7 +8,7 @@ import { HostWebSocket } from './host-ws.js'
 import { AgentWebSocket } from './agent-ws.js'
 import { handleRestRequest } from './rest-api.js'
 import { TokenStore } from './token-store.js'
-import { SessionMap } from './session-map.js'
+
 import type { AgentConnection, BridgeHelloParams } from '@agentlet/protocol'
 
 interface StandaloneOptions {
@@ -205,11 +205,8 @@ function main(): void {
   // Host-side WebSocket (envelope protocol)
   const hostWs = new HostWebSocket(agentletServer)
 
-  // Session tracking (in-memory)
-  const sessionMap = new SessionMap()
-
-  // Per-agent raw ACP WebSocket (with session tracking)
-  const agentWs = new AgentWebSocket(agentletServer, sessionMap, tokenStore)
+  // Per-agent raw ACP WebSocket (transparent relay)
+  const agentWs = new AgentWebSocket(agentletServer, tokenStore)
 
   // HTTP server
   const httpServer = createServer((req, res) => {
@@ -261,10 +258,14 @@ function main(): void {
   httpServer.listen(opts.port, opts.host, () => {
     console.log(`[agentlet-server] Listening on ${opts.host}:${opts.port}`)
     console.log(`[agentlet-server] Endpoints:`)
-    console.log(`  WS  /api/bridge         — agent-side connections`)
+    console.log(`  WS  /api/bridge         — agent-side connections (bridge + daemon)`)
     console.log(`  WS  /api/host           — host-side envelope protocol`)
     console.log(`  WS  /agents/:id/ws      — per-agent raw ACP`)
     console.log(`  GET /api/agents         — list agents (filtered by token)`)
+    console.log(`  GET /api/daemons        — list daemons (filtered by token)`)
+    console.log(`  POST /api/daemons/:id/spawn  — spawn agent on daemon`)
+    console.log(`  POST /api/daemons/:id/stop   — stop agent on daemon`)
+    console.log(`  GET /api/daemons/:id/agents  — list agents on daemon`)
     console.log(`  GET /api/health         — health check`)
     if (opts.adminToken) {
       console.log(`  GET /api/admin/tokens   — admin: list tokens`)

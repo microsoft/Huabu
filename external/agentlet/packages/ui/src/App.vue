@@ -3,6 +3,7 @@ import { onMounted, watch } from 'vue'
 import { useAgentsStore } from './stores/agents'
 import AgentSelector from './components/AgentSelector.vue'
 import ChatView from './components/ChatView.vue'
+import DaemonPanel from './components/DaemonPanel.vue'
 import TokenPrompt from './components/TokenPrompt.vue'
 
 const agents = useAgentsStore()
@@ -32,6 +33,7 @@ watch(() => agents.userToken, (token) => {
         <button class="logout-btn" @click="agents.setToken('')">🔓 Logout</button>
       </div>
       <AgentSelector />
+      <DaemonPanel />
     </header>
     <main>
       <ChatView />

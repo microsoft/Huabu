@@ -12,7 +12,7 @@
 
 This is the same class of problem that `ngrok` solves for HTTP servers, or SSH reverse tunnels solve for arbitrary TCP — **but for ACP agents specifically.** The agent can't be a server; someone needs to bridge it out.
 
-### What Agentlet Does
+### 1.1. What Agentlet Does
 
 **Agentlet** is a thin relay process (~500 lines) that upgrades any stdio-only ACP agent into a network-accessible agent. It:
 
@@ -23,7 +23,7 @@ This is the same class of problem that `ngrok` solves for HTTP servers, or SSH r
 
 It has **zero AI logic**, **zero application knowledge**, and is completely server-agnostic. Any system that accepts an ACP-over-WebSocket connection can use Agentlet as its local-side adapter.
 
-### Why not wait for ACP's native WebSocket transport?
+### 1.2. Why not wait for ACP's native WebSocket transport?
 
 The [Streamable HTTP & WebSocket Transport RFD](https://agentclientprotocol.com/rfds/streamable-http-websocket-transport) is in active development (Working Group formed April 2026), but:
 
@@ -42,13 +42,13 @@ The [Streamable HTTP & WebSocket Transport RFD](https://agentclientprotocol.com/
 
 ## 2. Get Started
 
-### Prerequisites
+### 2.1. Prerequisites
 
 - Node.js ≥ 20
 - pnpm ≥ 9 (for building from source)
 - An ACP-compatible agent installed locally (e.g., Claude Code, Copilot CLI, Gemini CLI)
 
-### Quick Start (standalone server + one agent)
+### 2.2. Quick Start (standalone server + one agent)
 
 **1. Install packages**
 
@@ -78,7 +78,7 @@ agentlet-server --port 8080 --token "./tokens.json" --allow-insecure
 
 The server is now listening on `http://localhost:8080` with the Web UI, REST API, and WebSocket endpoints.
 
-**3. Connect an agent**
+**3. Connect an agent (bridge mode — explicit)**
 
 In the agent-side terminal, where you previously ran the agent command (e.g., `copilot --allow-all` or `claude`, etc.), run the `agentlet` CLI to start an agent instance in the current directory and connect it to the server:
 
@@ -89,9 +89,28 @@ agentlet --agent "copilot --acp --allow-all" \
          --allow-insecure
 ```
 
+**3b. Or: run a daemon (server-driven agent spawning)**
+
+Instead of manually specifying which agent to run, start the daemon and let the server decide:
+
+```bash
+agentlet daemon --server "ws://localhost:8080/api/bridge" \
+               --token "tok_dev_123" \
+               --allow-insecure
+```
+
+The daemon connects to the server and waits. Spawn agents remotely via the REST API or Web UI:
+
+```bash
+curl -X POST http://localhost:8080/api/daemons/<daemonId>/spawn \
+  -H "Authorization: Bearer tok_dev_123" \
+  -H "Content-Type: application/json" \
+  -d '{"command": "copilot --acp --allow-all", "cwd": "/home/user/project"}'
+```
+
 **4. Open the Web UI**
 
-Navigate to `http://localhost:8080` — select the agent from the dropdown and start chatting.
+Navigate to `http://localhost:8080` — select the agent from the dropdown and start chatting. The Web UI also shows connected daemons and lets you spawn/stop agents on them.
 
 You can also use the headless WebSocket API (e.g., via `@agentlet/client`) or embed `@agentlet/server` directly in your own host application for programmatic access.
 
@@ -99,14 +118,15 @@ You can also use the headless WebSocket API (e.g., via `@agentlet/client`) or em
 
 ## 3. Architecture
 
-### Three Components
+### 3.1. Three Components
 
 | Component | Package | Where it runs | Nature |
 |---|---|---|---|
 | **Agent-side adapter** | `agentlet` | User's machine (next to the agent) | CLI tool (installed by end user) |
+| **Agent-side daemon** | `agentlet daemon` | Worker node (always-on) | CLI tool — daemon mode (kubelet-like) |
 | **Relay server** | `@agentlet/server` | Remote server | Library (embedded) or standalone executable |
 | **Host-side SDK** | `@agentlet/client` | Inside the host application | Library (imported by host app developers) |
-| **Web UI** | `@agentlet/ui` | Browser (served by standalone server) | Built-in first-party host app (Vue 3 SPA) |
+| **Web UI** | `@agentlet/ui` | Browser (served by standalone server) | Built-in first-party host app (Vue 3 SPA — thin message viewport) |
 
 ```mermaid
 graph LR
@@ -132,7 +152,18 @@ graph LR
     Server -->|"WSS frames"| Client
 ```
 
-### Two modes for the relay server
+### 3.2. Two modes for the agent-side adapter
+
+| Mode | Use case | How |
+|---|---|---|
+| **Daemon** | Machine is an always-on worker node; server controls which agents to spawn | `agentlet daemon --server wss://...` |
+| **Bridge** | User explicitly spawns one agent (ad-hoc / development) | `agentlet --agent "copilot --acp" --server wss://...` |
+
+The **daemon** mode is the expected primary mode for production. It is analogous to `kubelet` in Kubernetes: the daemon registers with the server, and the server (or UI) remotely instructs it to spawn, stop, or list agents. Each spawned agent gets its own bridge connection — from the server's perspective, daemon-spawned agents are indistinguishable from manually-bridged agents.
+
+**Bridge** mode is simpler (one agent, explicit command) and useful during development or when a user wants to connect a single agent on demand. In production deployments, daemon mode is preferred because it enables centralized orchestration — the server decides what to run, where, and when.
+
+### 3.3. Two modes for the relay server
 
 | Mode | Use case | How |
 |---|---|---|
@@ -143,21 +174,45 @@ When embedded, the host app imports `@agentlet/server` and interacts with agents
 
 When standalone, the host app connects remotely via `@agentlet/client` SDK, which provides the **same typed API** as the embedded mode.
 
-### Data flow
+### 3.4. Data flow
 
 ```
 Host Application
     ↕ @agentlet/client (typed API, or direct import of @agentlet/server)
-Relay Server — @agentlet/server (manages connections, routes messages)
+Relay Server — @agentlet/server (manages connections, routes messages, stores session profiles)
     ↕ WebSocket (ACP JSON-RPC + bridge/* control messages)
-Agent-side adapter — agentlet (transparent relay on user's machine)
+Agent-side adapter — agentlet (session bootstrap + transparent relay)
     ↕ stdin/stdout (ACP JSON-RPC)
 Agent Process (Claude Code / Copilot CLI / etc.)
 ```
 
 Every message between the relay server and the agent is a **standard ACP JSON-RPC 2.0** message. The agent-side adapter does not interpret, transform, or filter these messages — it is a transparent pipe.
 
-### Host-side WebSocket protocol
+### 3.5. Session Ownership Model
+
+**Agentlet owns the ACP session lifecycle.** When an agent process is spawned (in both bridge and daemon modes), agentlet immediately sends `initialize` and `session/new` to the agent — before any remote client connects. The resulting session profile (sessionId, agent capabilities) is reported to the server via `bridge/hello`.
+
+This means:
+- The server never sends `initialize` or `session/new` — it's a pure message router
+- The UI never sends `initialize` or `session/new` — it attaches to an active session
+- The UI is a **thin message viewport**: it fetches the sessionId from the REST API, opens a WebSocket, and immediately starts sending `session/prompt`
+- Session bootstrap happens once, locally, with the correct `cwd` — no remote CWD guessing
+
+```
+agentlet spawns agent → initialize → session/new → sessionProfile
+                                                          ↓
+                                          bridge/hello {session: {sessionId, ...}}
+                                                          ↓
+                                              server stores session info
+                                                          ↓
+                                          GET /api/agents/:id → {session: {sessionId}}
+                                                          ↓
+                                              UI reads sessionId, opens WS
+                                                          ↓
+                                              UI sends session/prompt directly
+```
+
+### 3.6. Host-side WebSocket protocol
 
 When the host app connects to the relay server via `@agentlet/client` (or raw WebSocket), the following envelope protocol is used:
 
@@ -174,7 +229,7 @@ When the host app connects to the relay server via `@agentlet/client` (or raw We
 { "type": "lifecycle", "agentId": "dev-laptop:node:my-project:f47ac10b", "event": { "type": "agent_exited", ... } }
 
 // Agent came online
-{ "type": "connected", "agentId": "dev-laptop:node:my-project:f47ac10b", "agentInfo": { "command": "...", "pid": 12345 } }
+{ "type": "connected", "agentId": "dev-laptop:node:my-project:f47ac10b", "agentInfo": { "command": "...", "pid": 12345, "cwd": "/home/user/project" }, "session": { "sessionId": "sess_abc", "supportsLoad": true } }
 
 // Agent went offline
 { "type": "disconnected", "agentId": "dev-laptop:node:my-project:f47ac10b", "reason": "websocket_closed" }
@@ -184,7 +239,7 @@ When the host app connects to the relay server via `@agentlet/client` (or raw We
 
 ## 4. Agent-Side Adapter — `agentlet` CLI
 
-### Agent Identity (`agentId`)
+### 4.1. Agent Identity (`agentId`)
 
 Each agent-side adapter instance generates a globally unique `agentId` on startup:
 
@@ -204,42 +259,45 @@ Example: dev-laptop:node:my-project:f47ac10b
 
 **Used by:** The relay server uses `agentId` as the primary key for its connection registry. Host apps address agents by `agentId`.
 
-### Core Responsibilities
+### 4.2. Core Responsibilities
 
 | # | Responsibility | Details |
 |---|---|---|
 | 1 | **Spawn agent subprocess** | Start the agent command via child process with stdio pipes. Respect the agent's expected working directory and environment. |
-| 2 | **Establish outbound WebSocket** | Connect to the relay server's endpoint using the provided token for authentication. TLS required in production. |
-| 3 | **Relay messages bidirectionally** | Forward every complete JSON-RPC message from stdout → WebSocket and from WebSocket → stdin. No buffering beyond message framing. |
-| 4 | **Handle reconnection** | On WebSocket disconnect: buffer agent stdout, reconnect with exponential backoff, replay buffered messages on reconnection. Agent subprocess is unaffected. |
-| 5 | **Report lifecycle events** | Notify the server of bridge-level events (agent crash, agent exit, bridge shutting down) via bridge-specific control messages. |
-| 6 | **Graceful shutdown** | On SIGINT/SIGTERM: send `bridge/goodbye` to server, send SIGTERM to agent, close WebSocket cleanly. |
+| 2 | **Bootstrap ACP session** | After spawn, send `initialize` and `session/new` to the agent. Capture the session profile (sessionId, capabilities). This happens before any remote connection. |
+| 3 | **Establish outbound WebSocket** | Connect to the relay server's endpoint using the provided token for authentication. Report agent info + session profile in `bridge/hello`. TLS required in production. |
+| 4 | **Relay messages bidirectionally** | Forward every complete JSON-RPC message from stdout → WebSocket and from WebSocket → stdin. No buffering beyond message framing. |
+| 5 | **Handle reconnection** | On WebSocket disconnect: buffer agent stdout, reconnect with exponential backoff, replay buffered messages on reconnection. Agent subprocess is unaffected. |
+| 6 | **Report lifecycle events** | Notify the server of bridge-level events (agent crash, agent exit, bridge shutting down) via bridge-specific control messages. |
+| 7 | **Graceful shutdown** | On SIGINT/SIGTERM: send `bridge/goodbye` to server, send SIGTERM to agent, close WebSocket cleanly. |
 
-### Non-responsibilities (explicit)
+### 4.3. Non-responsibilities (explicit)
 
 - ❌ No AI logic — never generates prompts or interprets agent responses.
 - ❌ No application knowledge — does not know what the remote system does (canvas, IDE, orchestrator — irrelevant).
-- ❌ No message transformation — all ACP messages pass through verbatim.
+- ❌ No message transformation — after session bootstrap, all ACP messages pass through verbatim.
 - ❌ No credential management — does not handle the agent's API keys (those belong to the agent's own environment).
 - ❌ No agent configuration — the agent command is passed opaquely; doesn't know or care which agent it is.
 
 ---
 
-### CLI Interface
+### 4.4. CLI Interface
 
-### Installation
+### 4.5. Installation
 
 ```bash
 npm install -g agentlet
 ```
 
-### Usage
+### 4.6. Usage (Bridge Mode — default)
 
 ```bash
 agentlet --agent <command> --server <wss-url> --token <token> [options]
+# or explicitly:
+agentlet bridge --agent <command> --server <wss-url> --token <token> [options]
 ```
 
-### Required arguments
+### 4.7. Required arguments
 
 | Argument | Description | Example |
 |---|---|---|
@@ -247,7 +305,7 @@ agentlet --agent <command> --server <wss-url> --token <token> [options]
 | `--server` | Remote server's bridge endpoint (WSS URL). | `"wss://app.example.com/api/bridge"` |
 | `--token` | Authentication token identifying this connection to the remote server. | `"tok_abc123..."` |
 
-### Optional arguments
+### 4.8. Optional arguments
 
 | Argument | Default | Description |
 |---|---|---|
@@ -262,7 +320,7 @@ agentlet --agent <command> --server <wss-url> --token <token> [options]
 | `--env` | (none) | Extra environment variables for the agent: `--env KEY=VALUE` (repeatable) |
 | `--heartbeat` | `30` | WebSocket ping interval in seconds (0 to disable) |
 
-### Examples
+### 4.9. Examples
 
 ```bash
 # Connect Claude Code to a remote server
@@ -285,7 +343,69 @@ agentlet --agent "gemini-cli --stdio" \
          --env "PROJECT_ROOT=/workspace"
 ```
 
-### Agent Subprocess Management
+---
+
+### 4.10. Daemon Mode
+
+> **Source:** [`packages/local/src/daemon.ts`](packages/local/src/daemon.ts)
+
+Daemon mode turns a machine into a managed **ACP agent worker node**. Instead of the user deciding which agent to run, the daemon connects to the server and waits for remote instructions to spawn/stop agents.
+
+**Analogy:** Just as `kubelet` makes a machine a Kubernetes worker node (accepting pod scheduling from the control plane), `agentlet daemon` makes a machine an ACP agent pool node (accepting agent spawn commands from the server).
+
+#### Usage
+
+```bash
+agentlet daemon --server <wss-url> --token <token> [options]
+```
+
+#### Required arguments
+
+| Argument | Description | Example |
+|---|---|---|
+| `--server` | Remote server's bridge endpoint (WSS URL). | `"wss://app.example.com/api/bridge"` |
+| `--token` | Authentication token for this daemon. | `"tok_node_123"` |
+
+#### Optional arguments
+
+| Argument | Default | Description |
+|---|---|---|
+| `--reconnect-max` | `300` (5 min) | Maximum reconnection backoff in seconds |
+| `--buffer-limit` | `1000` | Max messages buffered during disconnection per agent |
+| `--max-agents` | `10` | Maximum concurrent agents this daemon can manage |
+| `--heartbeat` | `30` | WebSocket ping interval in seconds (0 to disable) |
+| `--log-level` | `info` | Logging verbosity: `debug`, `info`, `warn`, `error` |
+| `--log-file` | (none) | Path to write structured log output (JSON lines) |
+| `--allow-insecure` | `false` | Allow ws:// (non-TLS) connections (local development only) |
+
+#### Examples
+
+```bash
+# Run daemon connected to a remote server
+agentlet daemon --server "wss://app.example.com/api/bridge" \
+               --token "tok_worker_node_1"
+
+# Local development with higher agent limit
+agentlet daemon --server "ws://localhost:8080/api/bridge" \
+               --token "tok_dev_123" \
+               --max-agents 20 \
+               --allow-insecure
+```
+
+#### How it works
+
+See **§5.1 Connection Establishment** for the full protocol specification, sequence diagrams, and message formats.
+
+In summary:
+1. Daemon connects to the server via `/api/bridge` with `mode: 'daemon'` in the `bridge/hello` handshake.
+2. Server registers the daemon in its daemon registry.
+3. Server (via REST API or UI) sends `bridge/spawn` requests to the daemon.
+4. Daemon spawns the agent, bootstraps its ACP session, then opens a second WebSocket for relay.
+5. Server can send `bridge/stop` to terminate an agent, or `bridge/list` to list running agents.
+
+---
+
+### 4.11. Agent Subprocess Management
 
 #### Spawning
 
@@ -321,7 +441,7 @@ On SIGINT or SIGTERM to Agentlet:
 
 ## 5. Relay Server — `@agentlet/server`
 
-### Overview
+### 5.1. Overview
 
 `@agentlet/server` is a lightweight TypeScript package that manages agent connections over WebSocket. It can be used in two ways:
 
@@ -330,13 +450,13 @@ On SIGINT or SIGTERM to Agentlet:
 
 The relay server is where **multiplexing** happens — a single instance manages connections from many agents simultaneously.
 
-### Installation
+### 5.2. Installation
 
 ```bash
 npm install @agentlet/server
 ```
 
-### Embedded Mode (Library API)
+### 5.3. Embedded Mode (Library API)
 
 ```ts
 import { AgentletServer, type AgentConnection } from '@agentlet/server'
@@ -366,9 +486,9 @@ process.on('SIGTERM', async () => {
 })
 ```
 
-> See **§6.6 Protocol Type Reference** for full `AgentletServerOptions` and `AgentConnection` definitions.
+> See **§5.6 Protocol Type Reference** for full `AgentletServerOptions` and `AgentConnection` definitions.
 
-### Standalone Mode (CLI)
+### 5.4. Standalone Mode (CLI)
 
 ```bash
 agentlet-server --port 8080 --token "tok_abc"
@@ -405,7 +525,7 @@ When running standalone, the server exposes:
 - `GET /api/admin/tokens` — Admin: list all tokens (requires `--admin-token`)
 - `POST /api/admin/tokens` — Admin: replace full token map (requires `--admin-token`)
 
-### `AgentletServer` instance methods
+### 5.5. `AgentletServer` instance methods
 
 > **Source:** [`packages/server/src/server.ts`](packages/server/src/server.ts)
 
@@ -417,13 +537,13 @@ Key methods: `handleUpgrade()`, `getConnection(agentId)`, `getConnections(filter
 > - Importing the package has zero side effects.
 > - Call `server.close()` during shutdown to ensure all agents receive `bridge/shutdown`.
 
-> For full type definitions of `AgentletServerOptions`, `AuthResult`, `AgentConnection`, and `BridgeLifecycleEvent`, see **§6.6 Protocol Type Reference**.
+> For full type definitions of `AgentletServerOptions`, `AuthResult`, `AgentConnection`, and `BridgeLifecycleEvent`, see **§5.6 Protocol Type Reference**.
 
-### Connection Registry & Reconnection
+### 5.6. Connection Registry & Reconnection
 
-The relay server maintains an internal registry: `Map<agentId, AgentConnection>`. The `agentId` is the stable identity (see §4 "Agent Identity"). See **§6.5 Reconnection Protocol** for the full reconnection flow.
+The relay server maintains an internal registry: `Map<agentId, AgentConnection>`. The `agentId` is the stable identity (see §4 "Agent Identity"). See **§5.5 Reconnection Protocol** for the full reconnection flow.
 
-### Core Responsibilities
+### 5.7. Core Responsibilities
 
 | # | Responsibility | Details |
 |---|---|---|
@@ -431,17 +551,20 @@ The relay server maintains an internal registry: `Map<agentId, AgentConnection>`
 | 2 | **Host-side WebSocket endpoint** | Accept incoming WSS connections from host apps (standalone mode) or provide in-process API (embedded mode). |
 | 3 | **Token validation** | Delegate to `authenticate` callback (embedded) or static token file (standalone). Reject invalid/expired tokens. |
 | 4 | **Connection registry** | Track all active agent connections. Provide lookup by agentId. |
-| 5 | **Message routing** | Forward ACP messages from host → correct agent, and from agent → host. |
+| 5 | **Message routing** | Forward ACP messages from host → correct agent, and from agent → host. Pure fan-out relay — no ACP-level inspection or rewriting. |
 | 6 | **Reconnection handling** | Recognize reconnecting agents (same agentId), restore connection state, replay buffered messages. |
-| 7 | **Lifecycle events** | Surface `bridge/agent_exited`, `bridge/goodbye`, etc. to host via typed events. |
+| 7 | **Session info storage** | Store the session profile reported by agentlet in `bridge/hello`. Expose via REST API so UI/clients can discover the active sessionId. |
+| 8 | **Lifecycle events** | Surface `bridge/agent_exited`, `bridge/goodbye`, etc. to host via typed events. |
 
-### Non-responsibilities
+### 5.8. Non-responsibilities
 
 - ❌ No AI logic — never generates prompts or interprets agent responses.
+- ❌ No ACP session management — never sends `initialize`, `session/new`, or `session/load`. Session bootstrap is owned by agentlet.
+- ❌ No message rewriting — all ACP messages pass through verbatim. No CWD injection, no session interception.
 - ❌ No token generation — host app generates and manages tokens. Server only validates.
 - ❌ No persistence — connection and session state is in-memory. If the server restarts, agents reconnect automatically and new sessions are created.
 
-### Web UI (Standalone Mode)
+### 5.9. Web UI (Standalone Mode)
 
 When running in standalone mode, `agentlet-server` serves a built-in web interface at the root path (`/`). This provides a **first-party host application** for interactive use — chatting with agents, monitoring traffic, and managing connections — without requiring a separate host app.
 
@@ -466,14 +589,14 @@ This means:
 ```
 Browser (Web UI)
     ↕ Raw ACP JSON-RPC over WebSocket (/agents/:agentId/ws)
-agentlet-server (standalone)
+agentlet-server (standalone — pure message relay)
     ↕ Internal bridge protocol (already connected)
-agentlet (agent-side adapter)
+agentlet (agent-side adapter — session already bootstrapped)
     ↕ stdin/stdout (ACP JSON-RPC)
 Agent Process
 ```
 
-The per-agent endpoint is essentially a **transparent ACP proxy**: the server strips/adds internal routing but from the UI's perspective it's talking directly to an ACP agent.
+The per-agent endpoint is essentially a **transparent ACP proxy**: the server strips/adds internal routing but from the UI's perspective it's talking directly to an ACP agent. The UI never sends `initialize` or `session/new` — it fetches the active `sessionId` from `GET /api/agents/:id` and sends `session/prompt` immediately.
 
 #### UI Features
 
@@ -481,9 +604,10 @@ The per-agent endpoint is essentially a **transparent ACP proxy**: the server st
 |---|---|
 | **Chat** | Send prompts, receive streaming responses, view agent messages |
 | **Multi-agent** | Agent selector — switch between connected agents (discovered via REST API) |
+| **Daemon management** | View connected daemons, spawn agents on them, stop agents — all from the UI |
 | **Permissions** | Approve/deny agent permission requests (tool calls, file access) |
 | **Traffic monitor** | Inspect raw ACP JSON-RPC messages in real time |
-| **Sessions** | Create, resume, and manage ACP sessions per agent |
+| **Session attach** | Automatically attaches to the agent's active session (bootstrapped by agentlet) — no manual session creation |
 | **Connection status** | Live indicator for agent online/offline/reconnecting state |
 
 #### Technology Stack
@@ -493,7 +617,8 @@ The UI is a Vue 3 single-page application (SPA) built with Vite, bundled as stat
 - **Framework:** Vue 3 + TypeScript + Pinia (state management)
 - **Build:** Vite → static `dist/` directory
 - **Transport:** Standard ACP WebSocket transport (connects to `/agents/:agentId/ws`)
-- **Agent discovery:** `GET /api/agents` REST endpoint (no local config file needed)
+- **Session model:** Thin viewport — fetches `sessionId` from REST API, then sends only `session/prompt`. No `initialize` or `session/new` from the UI.
+- **Agent discovery:** `GET /api/agents` REST endpoint (returns session info per agent)
 - **Packaging:** Pre-built assets included in `@agentlet/server` package, served at `/` in standalone mode
 
 #### Updated Standalone Endpoints
@@ -503,12 +628,17 @@ Full endpoint list when running standalone (supersedes the table above):
 | Endpoint | Purpose |
 |---|---|
 | `GET /` | Web UI (static SPA) |
-| `WS /api/bridge` | Agent-side WebSocket (agentlet CLI connects here) |
+| `WS /api/bridge` | Agent-side WebSocket (agentlet CLI connects here — both bridge and daemon modes) |
 | `WS /api/host` | Host-side WebSocket — envelope protocol (programmatic multi-agent access) |
-| `WS /agents/:agentId/ws?token=<tok>` | Per-agent raw ACP WebSocket — token-authenticated, with session tracking |
-| `GET /api/agents` | REST: list connected agents (filtered by `Authorization: Bearer <token>`) |
+| `WS /agents/:agentId/ws?token=<tok>` | Per-agent raw ACP WebSocket — token-authenticated, transparent relay |
+| `GET /api/agents` | REST: list connected agents with session info (filtered by `Authorization: Bearer <token>`) |
 | `GET /api/agents/:id` | REST: get agent info |
 | `DELETE /api/agents/:id` | REST: disconnect an agent |
+| `GET /api/daemons` | REST: list connected daemons (filtered by `Authorization: Bearer <token>`) |
+| `GET /api/daemons/:id` | REST: get daemon info |
+| `POST /api/daemons/:id/spawn` | REST: spawn an agent on a daemon |
+| `POST /api/daemons/:id/stop` | REST: stop an agent on a daemon |
+| `GET /api/daemons/:id/agents` | REST: list agents running on a daemon |
 | `GET /api/health` | REST: health check |
 | `GET /api/admin/tokens` | Admin: list tokens (gated by `--admin-token`) |
 | `POST /api/admin/tokens` | Admin: replace full token map (gated by `--admin-token`) |
@@ -527,7 +657,7 @@ The UI design is adapted from [acp-ui](https://github.com/formulahendry/acp-ui) 
 
 ---
 
-### Admin Control Plane
+### 5.10. Admin Control Plane
 
 When `--admin-token` is set, the server exposes admin routes for token management:
 
@@ -569,47 +699,39 @@ Each token represents a user. The token is used for:
 
 ---
 
-### Session Reconnection
+### 5.11. Session Lifecycle
 
-The server provides **transparent session reconnection** using ACP's `session/load` protocol. This is entirely server-managed — the UI always sends `session/new`, and the server handles the rest.
+**Agentlet owns the ACP session lifecycle.** The server is a pure message router and the UI is a thin viewport.
 
 #### How It Works
 
 ```
-UI connects → sends session/new → server checks session map
-                                         │
-                              ┌───────────┴───────────┐
-                              No stored session         Has stored sessionId
-                              │                        │
-                              ▼                        ▼
-                         Pass through              Rewrite to session/load
-                         session/new                {sessionId: stored}
-                              │                        │
-                              ▼                        ▼
-                         Agent responds            Agent replays history
-                         {sessionId: new}           via session/update
-                              │                        │
-                              ▼                        ▼
-                         Server stores             UI gets full history
-                         sessionId in map          transparently
+agentlet spawns agent process
+    ↓
+agentlet sends initialize → agent responds with capabilities
+    ↓
+agentlet sends session/new {cwd: actual_local_cwd} → agent responds with sessionId
+    ↓
+agentlet connects to server via bridge/hello {session: {sessionId, supportsLoad, initializeResult}}
+    ↓
+server stores session info in AgentConnection
+    ↓
+UI fetches GET /api/agents/:id → receives {session: {sessionId, supportsLoad}}
+    ↓
+UI opens WebSocket, sets sessionId locally → immediately ready for session/prompt
 ```
 
-#### Session Map
+#### Key Design Decisions
 
-The server maintains an in-memory `SessionMap`: `(token, agentId) → sessionId`
-
-- **On first `session/new`**: server passes through, captures the sessionId from the response, stores in map
-- **On reconnect**: UI sends `session/new` again, server finds stored sessionId, rewrites to `session/load`
-- **On error**: if `session/load` fails (session expired), server clears the stored sessionId → next attempt creates a fresh session
-- **Scope**: per-user, per-agent. Each user has their own session with each agent.
-
-#### Relay CWD Injection
-
-The agentlet-local relay intercepts both `session/new` and `session/load` to inject the real local working directory (`process.cwd()`). The remote UI doesn't know or control where the agent runs — the relay is the local authority.
+- **No session map on the server** — the server never intercepts or rewrites `initialize`, `session/new`, or `session/load`.
+- **No CWD injection** — agentlet knows the correct `cwd` (it spawned the process there) and passes it in `session/new` directly.
+- **No ACP handshake from UI** — the UI never sends `initialize` or `session/new`. It reads the sessionId from the agent's profile and sends prompts immediately.
+- **Session info in REST API** — `GET /api/agents/:id` returns `session: { sessionId, supportsLoad }` so any client can discover the active session.
+- **`supportsLoad` flag** — if the agent supports `session/load` (from `initializeResult.agentCapabilities.loadSession`), a future reconnecting agentlet can resume the session instead of creating a new one.
 
 ---
 
-### Framework Integration Examples (Embedded Mode)
+### 5.12. Framework Integration Examples (Embedded Mode)
 
 ```ts
 // Express
@@ -632,7 +754,7 @@ httpServer.on('upgrade', (req, socket, head) => {
 httpServer.listen(3001)
 ```
 
-### Host App Usage Pattern (Embedded Mode)
+### 5.13. Host App Usage Pattern (Embedded Mode)
 
 ```ts
 // When user triggers an action that requires the agent:
@@ -641,21 +763,28 @@ if (!agent || agent.status !== 'connected') {
   throw new Error('Agent is offline')
 }
 
-// Send ACP initialize (if not already done)
+// Session is already active (bootstrapped by agentlet)
+// Just read the sessionId from the connection profile:
+const sessionId = agent.session?.sessionId
+if (!sessionId) {
+  throw new Error('Agent has no active session')
+}
+
+// Send prompts directly — no initialize or session/new needed
 agent.send({
-  jsonrpc: '2.0', method: 'initialize', id: 1,
-  params: { clientInfo: { name: 'my-app', version: '1.0' } }
+  jsonrpc: '2.0', method: 'session/prompt', id: 1,
+  params: { sessionId, prompt: [{ type: 'text', text: 'Refactor the auth module' }] }
 })
 
 // Listen for responses
 agent.onMessage((msg) => {
-  if (msg.id === 1) {
-    // Initialize response — agent is ready
-    console.log('Agent capabilities:', msg.result)
-  }
-  if (msg.method === 'session/message') {
+  if (msg.method === 'session/update') {
     // Streaming content from agent
-    renderToUI(msg.params.message)
+    renderToUI(msg.params)
+  }
+  if (msg.id === 1 && msg.result) {
+    // Prompt completed
+    console.log('Prompt finished')
   }
 })
 ```
@@ -664,48 +793,145 @@ agent.onMessage((msg) => {
 
 ## 6. Protocol
 
-### 5.1 Connection Establishment
+### 6.1. Connection Establishment
 
-The connection has two phases: the **bridge handshake** (agent-side adapter ↔ server) and then transparent **ACP relay** (host app ↔ agent, flowing through the bridge).
+There are two paths to establishing an agent connection, but both converge on the same outcome: a transparent ACP relay between the host application and the agent process. In production, **daemon mode** is expected to be the most common deployment.
+
+#### Bridge Mode (explicit, single agent)
+
+The user explicitly spawns one agent. Three phases: **session bootstrap** (local), **bridge handshake** (agentlet ↔ server), then **transparent relay**.
 
 ```mermaid
 sequenceDiagram
     participant Agent as Agent Process
-    participant Local as agentlet (agent-side)
+    participant Local as agentlet (bridge)
     participant GW as @agentlet/server
     participant App as Host Application
 
-    Note over Local: Spawns agent subprocess
+    Note over Local: User runs: agentlet --agent "..." --server wss://...
     Local->>Agent: spawn(command, stdio)
     Agent-->>Local: (process started, pid)
 
-    Note over Local,GW: Phase 1 — Bridge Handshake
+    Note over Local,Agent: Phase 1 — Session Bootstrap (local)
+    Local->>Agent: initialize {clientInfo}
+    Agent-->>Local: {agentInfo, agentCapabilities}
+    Local->>Agent: session/new {cwd}
+    Agent-->>Local: {sessionId}
+    Note over Local: Stores sessionProfile
+
+    Note over Local,GW: Phase 2 — Bridge Handshake
     Local->>GW: WebSocket open (outbound WSS)
-    Local->>GW: bridge/hello {token, agentId, bridge, agent, capabilities}
+    Local->>GW: bridge/hello {mode:"bridge", token, agentId, agent:{cmd,pid,cwd}, session:{sessionId,...}}
     GW->>App: authenticate(token, meta)
     App-->>GW: {metadata}
     GW->>App: onConnection(agent)
     GW-->>Local: hello response {agentId, status}
 
-    Note over Local,GW: Phase 2 — Transparent ACP Relay
-    App->>GW: agent.send(initialize)
-    GW->>Local: initialize (WS frame)
-    Local->>Agent: initialize + \n (stdin)
-    Agent-->>Local: init response (stdout)
-    Local-->>GW: init response (WS frame)
-    GW->>App: onMessage(init response)
-
-    Note over Local,GW: All subsequent ACP traffic flows<br/>transparently in both directions
+    Note over Local,GW: Phase 3 — Transparent ACP Relay
+    App->>GW: agent.send(session/prompt)
+    GW->>Local: session/prompt (WS frame)
+    Local->>Agent: session/prompt + \n (stdin)
+    Agent-->>Local: session/update notifications (stdout)
+    Local-->>GW: session/update (WS frame)
+    GW->>App: onMessage(session/update)
 ```
 
-**Identity model:** Each agent is uniquely identified by its `agentId`, generated by the agent-side adapter in the format `<hostname>:<executable>:<cwd-basename>:<8-char-uuid>`. This ID is stable for the lifetime of the bridge process — surviving WebSocket reconnections — and changes only when the bridge process restarts. The server uses `agentId` as the primary key. The `authenticate()` callback only validates the token and returns optional metadata; it does not assign identity.
+#### Daemon Mode (server-driven, multi-agent)
 
-### 5.2 Bridge Handshake Messages
+The daemon registers with the server and waits for spawn commands. In production, this is the expected primary mode — enabling centralized agent orchestration from the server or UI.
+
+```mermaid
+sequenceDiagram
+    participant Server as @agentlet/server
+    participant Daemon as agentlet daemon
+    participant Agent as Agent Process
+
+    Note over Daemon,Server: Phase 1 — Daemon Registration
+    Daemon->>Server: bridge/hello {mode: "daemon", token}
+    Server-->>Daemon: {daemonId, status: "connected"}
+
+    Note over Daemon,Server: Phase 2 — Remote Agent Spawn
+    Server->>Daemon: bridge/spawn {command, cwd}
+    Daemon->>Agent: spawn(command, stdio)
+    Note over Daemon,Agent: Session Bootstrap (local)
+    Daemon->>Agent: initialize {clientInfo}
+    Agent-->>Daemon: {agentInfo, agentCapabilities}
+    Daemon->>Agent: session/new {cwd}
+    Agent-->>Daemon: {sessionId}
+    Daemon->>Server: bridge/hello {mode: "bridge", agentId, session} (new WS)
+    Daemon-->>Server: spawn result {agentId, pid, sessionId}
+
+    Note over Daemon,Server: Phase 3 — Transparent ACP Relay (same as bridge mode)
+    Server->>Daemon: ACP messages (via agent's bridge WS)
+    Daemon->>Agent: stdin
+    Agent-->>Daemon: stdout
+    Daemon-->>Server: ACP messages
+
+    Note over Daemon,Server: Phase 4 — Remote Stop
+    Server->>Daemon: bridge/stop {agentId}
+    Daemon->>Agent: SIGTERM
+    Daemon-->>Server: {stopped: true}
+```
+
+#### Convergence
+
+After connection establishment, **both modes are identical** from the server's perspective: an agent connection with a stable `agentId`, a session profile, and a transparent ACP relay. Daemon-spawned agents are indistinguishable from manually-bridged agents — they appear in `GET /api/agents`, have their own WebSocket, and can be used by any host/UI.
+
+#### Daemon Registration & Control Messages
+
+A daemon connects to the same `/api/bridge` endpoint as a bridge, but sends `mode: "daemon"` in its `bridge/hello`:
+
+```jsonc
+// Daemon → Server
+{
+  "jsonrpc": "2.0",
+  "method": "bridge/hello",
+  "id": 1,
+  "params": {
+    "token": "tok_worker_node_1",
+    "agentId": "worker-01:daemon:agentlet:f47ac10b",
+    "mode": "daemon",
+    "bridge": { "name": "agentlet", "version": "1.0.0" },
+    "machine": { "hostname": "worker-01", "platform": "linux" },
+    "capabilities": { "autoRestart": true, "bufferLimit": 1000, "maxAgents": 10 }
+  }
+}
+```
+
+The server registers the daemon in a separate registry. Daemons are addressable via REST API (`GET /api/daemons`, `POST /api/daemons/:id/spawn`, etc.).
+
+**Daemon control messages** (all are JSON-RPC requests):
+
+| Direction | Method | Params | Response |
+|---|---|---|---|
+| Server → Daemon | `bridge/spawn` | `{ "command": "...", "cwd": "...", "env": {...}, "autoRestart": false }` | `{ "agentId": "...", "pid": 12345, "sessionId": "sess_..." }` |
+| Server → Daemon | `bridge/stop` | `{ "agentId": "..." }` | `{ "stopped": true }` |
+| Server → Daemon | `bridge/list` | `{}` | `{ "agents": [{ "agentId": "...", "command": "...", "pid": 12345 }] }` |
+
+**Spawn lifecycle:** On `bridge/spawn`, the daemon validates `command`/`cwd`, spawns the process, performs session bootstrap, opens a second WebSocket (standard `bridge/hello` with `mode: "bridge"`), and returns the result. If bootstrap fails, the daemon terminates the agent and returns a JSON-RPC error.
+
+#### Identity Model
+
+| Entity | Format | Example | Lifecycle |
+|---|---|---|---|
+| Agent (bridge) | `<hostname>:<executable>:<cwd-basename>:<8-char-uuid>` | `dev-laptop:claude:my-project:a1b2c3d4` | Stable for bridge process lifetime |
+| Daemon | `<hostname>:daemon:agentlet:<8-char-uuid>` | `worker-01:daemon:agentlet:f47ac10b` | Stable for daemon process lifetime |
+
+The server uses `agentId` / `daemonId` as primary keys. The `authenticate()` callback only validates the token and returns optional metadata; it does not assign identity.
+
+#### Security (Daemon Mode)
+
+- Only the token owner can spawn/stop agents on their daemon (validated via `Authorization: Bearer <token>`)
+- The daemon only accepts `bridge/spawn`, `bridge/stop`, and `bridge/list` from the server over its authenticated WebSocket
+- All agent commands run under the daemon's OS user — no privilege escalation
+- The `command` field in `bridge/spawn` is passed to `spawn` with `shell: true` — only trusted commands should be sent
+
+### 6.2. Bridge Handshake Messages
 
 Upon connecting, the agent-side adapter sends a single `bridge/hello` message before any ACP traffic:
 
 ```jsonc
-// Agentlet → Server
+// Agentlet → Server (bridge mode — default)
 {
   "jsonrpc": "2.0",
   "method": "bridge/hello",
@@ -713,13 +939,20 @@ Upon connecting, the agent-side adapter sends a single `bridge/hello` message be
   "params": {
     "token": "tok_abc123...",
     "agentId": "yuqyang-laptop:claude:my-project:a1b2c3d4",
+    "mode": "bridge",
     "bridge": {
       "name": "agentlet",
       "version": "1.0.0"
     },
     "agent": {
       "command": "claude --acp --stdio",
-      "pid": 12345
+      "pid": 12345,
+      "cwd": "/home/user/my-project"
+    },
+    "session": {
+      "sessionId": "sess_a1b2c3d4",
+      "supportsLoad": true,
+      "initializeResult": { "agentInfo": { "name": "claude-code" }, "agentCapabilities": { "loadSession": true } }
     },
     "machine": {
       "hostname": "yuqyang-laptop",
@@ -728,6 +961,33 @@ Upon connecting, the agent-side adapter sends a single `bridge/hello` message be
     "capabilities": {
       "autoRestart": true,
       "bufferLimit": 1000
+    }
+  }
+}
+```
+
+```jsonc
+// Agentlet → Server (daemon mode)
+{
+  "jsonrpc": "2.0",
+  "method": "bridge/hello",
+  "id": 1,
+  "params": {
+    "token": "tok_worker_node_1",
+    "agentId": "worker-01:daemon:agentlet:f47ac10b",
+    "mode": "daemon",
+    "bridge": {
+      "name": "agentlet",
+      "version": "1.0.0"
+    },
+    "machine": {
+      "hostname": "worker-01",
+      "platform": "linux"
+    },
+    "capabilities": {
+      "autoRestart": true,
+      "bufferLimit": 1000,
+      "maxAgents": 10
     }
   }
 }
@@ -759,7 +1019,7 @@ Upon connecting, the agent-side adapter sends a single `bridge/hello` message be
 
 On successful handshake, the WebSocket enters **relay mode** — all subsequent messages are raw ACP JSON-RPC forwarded transparently.
 
-### 5.3 Message Relay (Steady State)
+### 6.3. Message Relay (Steady State)
 
 ```
 Server → Agentlet → Agent stdin:   ACP requests  (initialize, session/new, session/prompt, ...)
@@ -774,13 +1034,13 @@ Agent stdout → Agentlet → Server:  ACP responses (results, notifications, st
 - Invalid JSON from stdout: log warning, skip (do not forward garbage to server).
 - Binary WebSocket frames: reject and log (protocol violation).
 
-### 5.4 Bridge Control Messages
+### 6.4. Bridge Control Messages
 
 These are **not** ACP messages — they are bridge-level events sent alongside ACP traffic. They use the `bridge/` method namespace to avoid collision with ACP methods.
 
 | Direction | Method | When | Params |
 |---|---|---|---|
-| Agentlet → Server | `bridge/hello` | On connect | See §6.2 |
+| Agentlet → Server | `bridge/hello` | On connect | See §5.2 |
 | Agentlet → Server | `bridge/agent_exited` | Agent process exits | `{ "code": 0, "signal": null, "willRestart": true }` |
 | Agentlet → Server | `bridge/agent_restarted` | Agent restarted after crash | `{ "pid": 12346, "attempt": 2 }` |
 | Agentlet → Server | `bridge/goodbye` | Bridge shutting down gracefully | `{ "reason": "user_interrupt" }` |
@@ -789,11 +1049,14 @@ These are **not** ACP messages — they are bridge-level events sent alongside A
 | Server → Agentlet | `bridge/ping` | Keepalive (if heartbeat enabled) | `{}` |
 | Server → Agentlet | `bridge/pong` | Response to ping | `{}` |
 | Server → Agentlet | `bridge/shutdown` | Server requests bridge to terminate | `{ "reason": "token_revoked" }` |
+| Server → Daemon | `bridge/spawn` | Server requests daemon to spawn an agent | `{ "command": "...", "cwd": "...", "env": {...}, "autoRestart": false }` |
+| Server → Daemon | `bridge/stop` | Server requests daemon to stop an agent | `{ "agentId": "..." }` |
+| Server → Daemon | `bridge/list` | Server requests daemon to list running agents | `{}` |
 
-- `bridge/hello` is a **request** (has `id`, expects a response). All others are **notifications** (no `id`, no response expected).
+- `bridge/hello` is a **request** (has `id`, expects a response). `bridge/spawn`, `bridge/stop`, and `bridge/list` are also **requests** (daemon control — see §5.1). All others are **notifications** (no `id`, no response expected).
 - Heartbeat: The agent-side adapter sends WebSocket-level pings at `--heartbeat` interval. `bridge/ping` / `bridge/pong` are application-level keepalives initiated by the server for connection liveness detection.
 
-### 5.5 Reconnection Protocol
+### 6.5. Reconnection Protocol
 
 When the WebSocket drops unexpectedly:
 
@@ -828,7 +1091,7 @@ sequenceDiagram
 
 ---
 
-### 5.6 Protocol Type Reference
+### 6.6. Protocol Type Reference
 
 The definitive type contract for the bridge protocol lives in `@agentlet/protocol` (source of truth). See the source files directly:
 
@@ -840,6 +1103,7 @@ The definitive type contract for the bridge protocol lives in `@agentlet/protoco
 | **Lifecycle Events** — `BridgeLifecycleEvent` | [`packages/protocol/src/bridge-messages.ts`](packages/protocol/src/bridge-messages.ts) |
 | **Server Configuration** — `AgentletServerOptions`, `AuthResult` | [`packages/protocol/src/gateway-types.ts`](packages/protocol/src/gateway-types.ts) |
 | **AgentConnection** — the interface host apps interact with | [`packages/protocol/src/gateway-types.ts`](packages/protocol/src/gateway-types.ts) |
+| **Daemon Control** — `DaemonSpawnParams`, `DaemonSpawnResult`, `DaemonStopParams`, `DaemonStopResult`, `DaemonListParams`, `DaemonListResult`, `DaemonConnection` | [`packages/protocol/src/bridge-messages.ts`](packages/protocol/src/bridge-messages.ts) |
 | **Error Codes & Constants** — `BridgeErrorCodes`, `BridgeMethods`, `PROTOCOL_VERSION` | [`packages/protocol/src/constants.ts`](packages/protocol/src/constants.ts) |
 
 #### Error Codes (quick reference)
@@ -860,7 +1124,7 @@ The definitive type contract for the bridge protocol lives in `@agentlet/protoco
 |---|---|
 | **Token exposure** | Token is passed via CLI argument. Recommend: environment variable (`AGENTLET_TOKEN`) as alternative. Token should be short-lived and revocable from the server. |
 | **WebSocket TLS** | Production connections MUST use `wss://`. Agentlet should reject `ws://` unless `--allow-insecure` is explicitly passed (for local development only). |
-| **Agent command injection** | The `--agent` value is passed to `spawn` with `shell: true`. Document that users should only run trusted agent commands. |
+| **Agent command injection** | The `--agent` value (or daemon's received `command`) is passed to `spawn` with `shell: true`. Document that users should only run trusted agent commands. In daemon mode, only the token owner can trigger spawns. |
 | **Message integrity** | Agentlet relays messages verbatim — no validation of ACP semantics. Server-side must validate all incoming ACP messages. |
 | **Credential isolation** | Agentlet never touches the agent's credentials (API keys, SSH keys). Those live in the agent's own process environment. |
 | **Token revocation** | If the server revokes the token, it sends `bridge/shutdown`. Agentlet terminates agent and exits. |
@@ -869,7 +1133,7 @@ The definitive type contract for the bridge protocol lives in `@agentlet/protoco
 
 ## 8. Observability
 
-### Logging
+### 8.1. Logging
 
 Structured JSON-lines output when `--log-file` is specified:
 
@@ -882,7 +1146,7 @@ Structured JSON-lines output when `--log-file` is specified:
 {"ts":"2026-05-20T10:35:24Z","level":"info","event":"ws_reconnected","buffered_replayed":3}
 ```
 
-### Metrics (future)
+### 8.2. Metrics (future)
 
 Optional Prometheus-compatible metrics endpoint (`--metrics-port`):
 
@@ -910,7 +1174,7 @@ Optional Prometheus-compatible metrics endpoint (`--metrics-port`):
 
 ## 10. Future Evolution
 
-### When ACP HTTP/WebSocket transport stabilizes
+### 10.1. When ACP HTTP/WebSocket transport stabilizes
 
 The [Streamable HTTP & WebSocket Transport RFD](https://agentclientprotocol.com/rfds/streamable-http-websocket-transport) (Working Group formed April 2026) will allow agents to expose a native HTTP/WebSocket endpoint.
 
@@ -924,13 +1188,15 @@ The [Streamable HTTP & WebSocket Transport RFD](https://agentclientprotocol.com/
 
 The current architecture is **forward-compatible**: the bridge/hello handshake and relay protocol remain identical regardless of how the agent is reached locally. Only the "local side" connector changes.
 
-### Multi-agent support
+### 10.2. Multi-agent support
 
 **Current design:** The relay server and Web UI **natively support multiple agents** — any number of agent-side adapters can connect simultaneously, each identified by its unique `agentId`. The server maintains a connection registry (`Map<agentId, AgentConnection>`), the REST API lists all agents, and the UI provides an agent selector.
 
-**Agent-side:** Each `agentlet` CLI instance spawns and manages exactly **one** agent process. To connect multiple agents, run multiple `agentlet` instances (one per agent). This keeps each bridge simple and independently restartable.
+**Agent-side (bridge mode):** Each `agentlet bridge` instance spawns and manages exactly **one** agent process. To connect multiple agents, run multiple `agentlet` instances (one per agent). This keeps each bridge simple and independently restartable.
 
-**Future (post-v1):** A single `agentlet` instance managing multiple agents via config file:
+**Agent-side (daemon mode):** A single `agentlet daemon` instance can manage **multiple** agent processes concurrently — each spawned on demand from the server. This is the recommended approach for worker nodes that need to run multiple agents.
+
+**Future (post-v1):** Static config file support for bridge mode:
 
 ```bash
 agentlet --config agents.yaml --server "wss://app.example.com/api/bridge"
@@ -958,12 +1224,14 @@ agentlet/
 ├── packages/
 │   ├── local/                    # Agent-side adapter (CLI tool: `agentlet`)
 │   │   ├── src/
-│   │   │   ├── index.ts          # CLI entry point
-│   │   │   ├── cli.ts            # Argument parsing & validation
-│   │   │   ├── bridge.ts         # Core orchestrator (lifecycle state machine)
+│   │   │   ├── index.ts          # CLI entry point (routes to bridge or daemon)
+│   │   │   ├── cli.ts            # Argument parsing & validation (bridge + daemon subcommands)
+│   │   │   ├── bridge.ts         # Bridge mode orchestrator (lifecycle state machine)
+│   │   │   ├── daemon.ts         # Daemon mode orchestrator (multi-agent, server-driven)
 │   │   │   ├── agent-process.ts  # Subprocess spawning, stdio handling, restart logic
+│   │   │   ├── session-bootstrap.ts # ACP session bootstrap (initialize + session/new)
 │   │   │   ├── ws-client.ts      # WebSocket connection, reconnection, buffering
-│   │   │   ├── relay.ts          # Message framing & bidirectional forwarding
+│   │   │   ├── relay.ts          # Bidirectional message forwarding (transparent pipe)
 │   │   │   └── logger.ts         # Structured logging
 │   │   ├── tests/
 │   │   └── package.json          # name: "agentlet"
@@ -972,10 +1240,11 @@ agentlet/
 │   │   ├── src/
 │   │   │   ├── index.ts          # Public API exports
 │   │   │   ├── server.ts         # Main AgentletServer class (connection registry, lifecycle)
-│   │   │   ├── connection.ts     # AgentConnection implementation
-│   │   │   ├── handshake.ts      # bridge/hello validation & response
+│   │   │   ├── connection.ts     # AgentConnection implementation (stores session profile)
+│   │   │   ├── agent-ws.ts       # Agent-side WebSocket handler (transparent relay)
 │   │   │   ├── host-ws.ts        # Host-side WebSocket endpoint (standalone mode)
-│   │   │   ├── rest-api.ts       # REST endpoints (standalone mode)
+│   │   │   ├── rest-api.ts       # REST endpoints (standalone mode, exposes session info)
+│   │   │   ├── token-store.ts    # Token validation and management
 │   │   │   └── standalone.ts     # CLI entry point for standalone mode
 │   │   ├── tests/
 │   │   └── package.json          # name: "@agentlet/server"
@@ -1011,7 +1280,7 @@ agentlet/
 │       │   ├── index.ts          # Public exports
 │       │   ├── json-rpc.ts       # JSON-RPC 2.0 base types
 │       │   ├── bridge-messages.ts # bridge/* message type definitions
-│       │   ├── server-types.ts   # AgentletServerOptions, AgentConnection, AuthResult
+│       │   ├── gateway-types.ts   # AgentletServerOptions, AgentConnection, AuthResult
 │       │   └── constants.ts      # Protocol version, method names, error codes
 │       └── package.json          # name: "@agentlet/protocol"
 │
@@ -1033,52 +1302,63 @@ agentlet/
 | **M3: Agent lifecycle** | Auto-restart, graceful shutdown, exit reporting. | Agent crash → auto-restart → server notified → new session resumes. | Not started |
 | **M4: Standalone server** | REST API, host-side WS, per-agent raw ACP WS endpoint, static token auth. | `agentlet-server --port 8080` works; agents connectable via REST + WS. | ✅ Done |
 | **M5: Web UI** | Built-in Vue 3 SPA: chat, agent selector, permissions, traffic monitor. | Can chat with a connected agent via browser at `http://localhost:8080/`. | ✅ Done |
+| **M5.5: Daemon mode** | Daemon CLI, server-side daemon registry, REST API, UI spawn/stop panel. | `agentlet daemon` registers with server; agents spawnable/stoppable via REST/UI. | ✅ Done |
 | **M6: Production readiness** | TLS enforcement, logging, error handling, tests, docs. | CI green, README complete, npm publishable. | Not started |
 | **M7: Distribution** | Standalone binaries (macOS, Linux, Windows). | `npx agentlet` works; standalone binary works without Node.js. | Not started |
 
 ---
 
-## Appendix A: ACP Message Examples
+## 13. Appendix A: ACP Message Examples
 
-For reference — these are the ACP messages that flow **through** Agentlet transparently. Agentlet does not interpret them.
+For reference — these are the ACP messages involved in the session lifecycle. Session bootstrap (`initialize` + `session/new`) is performed **locally by agentlet** before connecting to the server. All subsequent messages flow through the relay transparently.
 
 ```jsonc
-// Server → Agent: Initialize the ACP session
-{ "jsonrpc": "2.0", "method": "initialize", "id": 1, "params": { "clientInfo": { "name": "huabu", "version": "1.0" } } }
+// ─── Session Bootstrap (agentlet → agent, LOCAL, before server connection) ───
 
-// Agent → Server: Initialization response
-{ "jsonrpc": "2.0", "id": 1, "result": { "agentInfo": { "name": "claude-code", "version": "2.1" }, "capabilities": { "streaming": true } } }
+// Agentlet → Agent: Initialize the ACP session
+{ "jsonrpc": "2.0", "method": "initialize", "id": 1, "params": { "protocolVersion": 1, "clientInfo": { "name": "agentlet", "version": "1.0" }, "clientCapabilities": {} } }
 
-// Server → Agent: Start a new session
-{ "jsonrpc": "2.0", "method": "session/new", "id": 2, "params": { "cwd": "/home/user/project" } }
+// Agent → Agentlet: Initialization response (capabilities)
+{ "jsonrpc": "2.0", "id": 1, "result": { "agentInfo": { "name": "claude-code", "version": "2.1" }, "agentCapabilities": { "streaming": true, "loadSession": true } } }
 
-// Server → Agent: Send a prompt
+// Agentlet → Agent: Start a new session (with correct local cwd)
+{ "jsonrpc": "2.0", "method": "session/new", "id": 2, "params": { "cwd": "/home/user/project", "mcpServers": [] } }
+
+// Agent → Agentlet: Session created
+{ "jsonrpc": "2.0", "id": 2, "result": { "sessionId": "sess_1" } }
+
+// ─── After bootstrap, agentlet connects to server with session profile in bridge/hello ───
+// ─── All subsequent messages below flow THROUGH the relay transparently ───
+
+// Host → Agent: Send a prompt (UI only needs sessionId)
 { "jsonrpc": "2.0", "method": "session/prompt", "id": 3, "params": { "sessionId": "sess_1", "prompt": [{ "type": "text", "text": "Refactor the auth module to use JWT" }] } }
 
-// Agent → Server: Streaming response chunks (notifications, no id)
-{ "jsonrpc": "2.0", "method": "session/message", "params": { "sessionId": "sess_1", "message": { "type": "agent", "content": [{ "type": "text", "text": "I'll start by..." }] } } }
+// Agent → Host: Streaming response chunks (notifications, no id)
+{ "jsonrpc": "2.0", "method": "session/update", "params": { "sessionId": "sess_1", "update": { "sessionUpdate": "agent_message_chunk", "content": { "type": "text", "text": "I'll start by..." } } } }
 
-// Agent → Server: Permission request
+// Agent → Host: Permission request
 { "jsonrpc": "2.0", "method": "session/permission", "id": 4, "params": { "sessionId": "sess_1", "permission": { "type": "tool_call", "tool": "bash", "args": { "command": "rm -rf node_modules" } } } }
 
-// Server → Agent: Permission granted
+// Host → Agent: Permission granted
 { "jsonrpc": "2.0", "id": 4, "result": { "granted": true } }
 
-// Server → Agent: Cancel a running session
+// Host → Agent: Cancel a running session
 { "jsonrpc": "2.0", "method": "session/cancel", "id": 5, "params": { "sessionId": "sess_1" } }
 ```
 
 ---
 
-## Appendix B: Server-Side Contract
+## 14. Appendix B: Server-Side Contract
 
 Agentlet is intentionally server-agnostic. Any system can accept Agentlet connections by implementing:
 
 1. **WebSocket endpoint** — accepts incoming WSS connections.
-2. **`bridge/hello` handshake** — validates the token, echoes back the `agentId` and status.
-3. **ACP Client behavior** — sends standard ACP JSON-RPC requests (`initialize`, `session/new`, `session/prompt`, etc.) and receives responses/notifications.
+2. **`bridge/hello` handshake** — validates the token, stores the session profile, echoes back the `agentId` and status.
+3. **ACP message relay** — forwards ACP JSON-RPC messages between host apps and agents transparently (no interpretation or rewriting).
 4. **Bridge control messages** — handles `bridge/agent_exited`, `bridge/goodbye`, etc. as lifecycle signals.
 5. **Reconnection** — recognizes a reconnecting bridge (same token) and optionally replays lost messages.
+
+Note: The server does **not** need to implement ACP client behavior (`initialize`, `session/new`). Session bootstrap is owned by agentlet — the server only stores and exposes the resulting session profile.
 
 This enables:
 

@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import { hostname, platform } from 'node:os'
-import { basename } from 'node:path'
+import { basename, resolve } from 'node:path'
 import { BridgeMethods, type JsonRpcMessage } from '@agentlet/protocol'
 import { AgentProcess } from './agent-process.js'
 import { WsClient } from './ws-client.js'
 import { Relay } from './relay.js'
 import { Logger } from './logger.js'
+import { bootstrapSession, type SessionProfile } from './session-bootstrap.js'
 import type { CliOptions } from './cli.js'
 
 export type BridgeState = 'starting' | 'connecting' | 'handshaking' | 'relaying' | 'reconnecting' | 'shutting_down' | 'stopped'
@@ -31,7 +32,9 @@ export class Bridge {
   private readonly options: CliOptions
   private readonly logger: Logger
   private readonly agentId: string
+  private readonly cwd: string
   private agent!: AgentProcess
+  private sessionProfile!: SessionProfile
   private ws!: WsClient
   private relay!: Relay
   private buffer: JsonRpcMessage[] = []
@@ -42,10 +45,11 @@ export class Bridge {
   constructor(options: CliOptions, logger: Logger) {
     this.options = options
     this.logger = logger
-    this.agentId = generateAgentId(options.agent, options.cwd)
+    this.cwd = resolve(options.cwd)
+    this.agentId = generateAgentId(options.agent, this.cwd)
   }
 
-  /** Start the bridge: spawn agent, connect WebSocket, begin relay */
+  /** Start the bridge: spawn agent, bootstrap session, connect WebSocket, begin relay */
   async start(): Promise<void> {
     this.setupSignalHandlers()
 
@@ -53,19 +57,8 @@ export class Bridge {
     this.state = 'starting'
     this.agent = new AgentProcess({
       command: this.options.agent,
-      cwd: this.options.cwd,
+      cwd: this.cwd,
       env: this.options.env,
-    })
-
-    this.agent.on('message', (data) => {
-      // If we're reconnecting, buffer messages
-      if (this.state === 'reconnecting') {
-        if (this.buffer.length < this.options.bufferLimit) {
-          this.buffer.push(data as JsonRpcMessage)
-        } else {
-          this.logger.warn('buffer_overflow', { dropped: 1 })
-        }
-      }
     })
 
     this.agent.on('exit', (code, signal) => {
@@ -94,7 +87,22 @@ export class Bridge {
     this.agent.start()
     this.logger.info('agent_spawned', { pid: this.agent.pid, command: this.options.agent })
 
-    // 2. Connect WebSocket
+    // 2. Session bootstrap (initialize + session/new)
+    this.sessionProfile = await bootstrapSession(this.agent, { cwd: this.cwd }, this.logger)
+
+    // 3. Now wire up the message handler for relay/buffering (after bootstrap is done)
+    this.agent.on('message', (data) => {
+      // If we're reconnecting, buffer messages
+      if (this.state === 'reconnecting') {
+        if (this.buffer.length < this.options.bufferLimit) {
+          this.buffer.push(data as JsonRpcMessage)
+        } else {
+          this.logger.warn('buffer_overflow', { dropped: 1 })
+        }
+      }
+    })
+
+    // 4. Connect WebSocket
     this.connectWebSocket()
   }
 
@@ -106,7 +114,9 @@ export class Bridge {
       token: this.options.token,
       agentCommand: this.options.agent,
       agentPid: this.agent.pid!,
+      agentCwd: this.cwd,
       agentId: this.agentId,
+      session: this.sessionProfile,
       capabilities: {
         autoRestart: this.options.autoRestart,
         bufferLimit: this.options.bufferLimit,
