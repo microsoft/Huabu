@@ -53,7 +53,7 @@ function hello(
     token,
     agentId,
     bridge: { name: 'agentlet', version: '0.0.0' },
-    agent: { command, pid: 1234 },
+    agent: { command, pid: 1234, cwd: '/tmp/fake' },
     capabilities: { autoRestart: false, bufferLimit: 100 },
   };
 }
