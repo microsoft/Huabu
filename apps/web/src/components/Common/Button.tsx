@@ -1,7 +1,7 @@
 import { forwardRef } from 'react';
 
 import { cn } from './cn';
-import { Tooltip } from './Tooltip';
+import { Tooltip, type TooltipPlacement } from './Tooltip';
 
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 
@@ -18,6 +18,14 @@ export type ButtonProps = {
   iconOnly?: boolean;
   className?: string;
   tooltipWrapperClassName?: string;
+  /**
+   * Preferred placement for the tooltip rendered when `title` is set.
+   * Defaults to `'auto'` (start on top, flip to bottom when there is no
+   * room) — same as `<Tooltip>` itself. Pass `'bottom'` for buttons
+   * that live at the top edge of the window (e.g. the custom title bar
+   * on Electron) where there is no room above to render the tooltip.
+   */
+  tooltipPlacement?: TooltipPlacement;
   /**
    * Optional single-character keyboard hint rendered as a tiny subscript
    * in the button's bottom-right corner.
@@ -105,6 +113,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       iconOnly,
       className,
       tooltipWrapperClassName,
+      tooltipPlacement,
       type = 'button',
       title,
       shortcutBadge,
@@ -148,7 +157,11 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     );
 
     return title ? (
-      <Tooltip content={title} wrapperClassName={tooltipWrapperClassName}>
+      <Tooltip
+        content={title}
+        wrapperClassName={tooltipWrapperClassName}
+        placement={tooltipPlacement}
+      >
         {buttonEl}
       </Tooltip>
     ) : (

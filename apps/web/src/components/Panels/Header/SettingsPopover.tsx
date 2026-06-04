@@ -9,6 +9,8 @@ import { useLLMStore } from '../../../store/llmStore';
 import { Button } from '../../Common/Button';
 import { Popover } from '../../Common/Popover';
 
+import type { TooltipPlacement } from '../../Common/Tooltip';
+
 interface SettingsPopoverProps {
   /**
    * Visual style of the trigger button. Defaults to `ghost` to match the
@@ -18,6 +20,13 @@ interface SettingsPopoverProps {
   variant?: 'ghost' | 'outline';
   shape?: 'default' | 'pill';
   size?: 'sm' | 'md' | 'lg';
+  /**
+   * Override the tooltip placement on the trigger button. Defaults to
+   * `'auto'` (above with flip-to-bottom fallback). Pass `'bottom'` when
+   * the trigger lives at the top edge of the window — e.g. inside the
+   * Electron custom title bar — where there is no room above.
+   */
+  tooltipPlacement?: TooltipPlacement;
 }
 
 /**
@@ -28,6 +37,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
   variant = 'ghost',
   shape = 'default',
   size = 'md',
+  tooltipPlacement,
 }) => {
   const llmInit = useLLMStore((s) => s.init);
   const acpInit = useAcpPairingStore((s) => s.init);
@@ -76,6 +86,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
           size={size}
           iconOnly
           title="Settings"
+          tooltipPlacement={tooltipPlacement}
           onClick={handleToggle}
           aria-label="Open settings"
         >

@@ -36,7 +36,7 @@ export default function WorkspaceSetupPage() {
   }
 
   return (
-    <div className="bg-bg-default flex min-h-screen items-center justify-center">
+    <div className="bg-bg-default flex min-h-full items-center justify-center">
       <div className="w-full max-w-md px-6">
         {/* Logo + Title */}
         <div className="mb-10 text-center">

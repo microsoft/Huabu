@@ -6,7 +6,7 @@ interface LoadingStateProps {
   message?: string;
   /** Absolute-positioned to fill parent container */
   overlay?: boolean;
-  /** Full viewport height (h-screen) */
+  /** Fill the parent container height (h-full). */
   fullScreen?: boolean;
   className?: string;
 }
@@ -22,7 +22,7 @@ export function LoadingState({
       className={cn(
         'flex items-center justify-center gap-2',
         overlay && 'bg-surface absolute inset-0 z-10',
-        fullScreen && 'h-screen',
+        fullScreen && 'h-full w-full',
         !overlay && !fullScreen && 'h-full w-full',
         className,
       )}

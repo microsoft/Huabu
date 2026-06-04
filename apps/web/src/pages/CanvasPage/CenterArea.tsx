@@ -6,6 +6,7 @@ import { cn } from '../../components/Common/cn';
 import { Canvas } from '../../components/Panels/Canvas/Canvas';
 import { ExpandedNodePanel } from '../../components/Panels/Canvas/ExpandedNodePanel';
 import { SettingsPopover } from '../../components/Panels/Header/SettingsPopover';
+import { isElectron } from '../../hooks/useElectron';
 import useCanvasStore from '../../store/canvasStore';
 import { usePreviewStore } from '../../store/previewStore';
 
@@ -39,6 +40,11 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
   const previewData = usePreviewStore((s) => s.previewData);
   const previewType = usePreviewStore((s) => s.previewType);
   const previewExpandMode = usePreviewStore((s) => s.expandMode);
+
+  // The custom Electron title bar already exposes Handbook + Settings
+  // globally — suppress the duplicate floating versions on the canvas
+  // when running inside the desktop shell.
+  const isElectronApp = isElectron();
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const splitRatioRef = useRef(SPLIT_DEFAULT_RATIO);
@@ -129,28 +135,34 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
       >
         <Canvas shortcutsDisabled={canvasShortcutsDisabled} />
 
-        {/* Floating top-right controls — settings always visible; chat
-            toggle is always visible and switches to an "active" solid
-            style while the chat panel is expanded, so it doubles as the
-            collapse control. All three buttons use the pill shape so
-            they read as a uniform floating control group on top of the
-            canvas. */}
+        {/* Floating top-right controls — in the browser these host the
+            Handbook / Settings / Chat-toggle group. In Electron the
+            first two move up to the custom title bar (WindowChrome)
+            so only the canvas-specific chat toggle stays here, and
+            the tooltips of the remaining button can flow upward as
+            usual without being clipped by the title bar above.
+            All visible buttons use the pill shape so they read as a
+            uniform floating control group on top of the canvas. */}
         <div className="pointer-events-auto absolute top-3 right-2 z-30 flex items-center gap-1">
-          {/* Handbook — opens the in-app user manual in a new browser
-              tab so the canvas session stays intact while users
-              reference the docs side-by-side. */}
-          <Button
-            variant="ghost"
-            shape="pill"
-            size="lg"
-            iconOnly
-            onClick={() => window.open('/docs', '_blank', 'noopener')}
-            title="User Handbook"
-            aria-label="Open user handbook"
-          >
-            <BookOpen />
-          </Button>
-          <SettingsPopover variant="ghost" shape="pill" size="lg" />
+          {!isElectronApp && (
+            <>
+              {/* Handbook — opens the in-app user manual in a new browser
+                  tab so the canvas session stays intact while users
+                  reference the docs side-by-side. */}
+              <Button
+                variant="ghost"
+                shape="pill"
+                size="lg"
+                iconOnly
+                onClick={() => window.open('/docs', '_blank', 'noopener')}
+                title="User Handbook"
+                aria-label="Open user handbook"
+              >
+                <BookOpen />
+              </Button>
+              <SettingsPopover variant="ghost" shape="pill" size="lg" />
+            </>
+          )}
           {onToggleChat && (
             <Button
               variant="outline"
@@ -159,6 +171,7 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
               size="lg"
               onClick={onToggleChat}
               title={isChatCollapsed ? 'Open Chat' : 'Close Chat'}
+              tooltipPlacement="bottom"
               aria-label={
                 isChatCollapsed ? 'Open chat panel' : 'Close chat panel'
               }

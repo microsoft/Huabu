@@ -9,6 +9,7 @@ import {
 } from 'react-router-dom';
 
 import { ToastContainer } from './components/Common/Toast';
+import { WindowChrome } from './components/Panels/WindowChrome';
 import DocsPage from './docs/DocsPage';
 import { useDisableBrowserZoom } from './hooks/useDisableBrowserZoom';
 import { useInputModeListener } from './hooks/useInputMode';
@@ -24,7 +25,7 @@ import { useWorkspaceStore } from './store/workspaceStore';
  */
 function LoadingScreen() {
   return (
-    <div className="bg-bg-default flex h-screen items-center justify-center">
+    <div className="bg-bg-default flex h-full items-center justify-center">
       <div className="flex flex-col items-center gap-3">
         <span className="border-fg-subtle inline-block h-6 w-6 animate-spin rounded-full border-2 border-t-transparent" />
         <span className="text-fg-subtle text-sm">Loading workspace…</span>
@@ -67,35 +68,48 @@ export default function App() {
           instantly hides any visible peer, and the close delay is shared
           so quick traversals between buttons feel snappy without flicker. */}
       <FloatingDelayGroup delay={{ open: 150, close: 0 }}>
-        <Routes>
-          {/* Setup route lives outside the guard so the user can still
-              reach it to switch workspaces in free mode. The page itself
-              redirects to "/" in managed mode. */}
-          <Route
-            path="/setup"
-            element={initialising ? <LoadingScreen /> : <WorkspaceSetupPage />}
-          />
+        {/* Top-level vertical stack: an Electron-only custom title bar
+            on top, then the router-driven page area below. In a plain
+            browser `<WindowChrome />` returns null so this collapses to
+            a normal full-viewport layout. */}
+        <div className="flex h-screen flex-col">
+          <WindowChrome />
+          <div className="relative min-h-0 flex-1">
+            <Routes>
+              {/* Setup route lives outside the guard so the user can still
+                  reach it to switch workspaces in free mode. The page itself
+                  redirects to "/" in managed mode. */}
+              <Route
+                path="/setup"
+                element={
+                  initialising ? <LoadingScreen /> : <WorkspaceSetupPage />
+                }
+              />
 
-          {/* User handbook — also outside the workspace guard so the
-              docs are reachable from a fresh install (e.g. before a
-              workspace folder has been chosen) and from a new browser
-              tab launched via the in-canvas handbook button. */}
-          <Route path="/docs/*" element={<DocsPage />} />
+              {/* User handbook — also outside the workspace guard so the
+                  docs are reachable from a fresh install (e.g. before a
+                  workspace folder has been chosen) and from a new browser
+                  tab launched via the in-canvas handbook button. */}
+              <Route path="/docs/*" element={<DocsPage />} />
 
-          <Route element={<WorkspaceGuardLayout initialising={initialising} />}>
-            <Route path="/" element={<CanvasListPage />} />
-            <Route
-              path="/playground/components"
-              element={<ComponentShowcasePage />}
-            />
-            <Route
-              path="/playground/tool-calls"
-              element={<ToolCallPlaygroundPage />}
-            />
-            <Route path="/canvas/:canvasId" element={<CanvasPage />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Route>
-        </Routes>
+              <Route
+                element={<WorkspaceGuardLayout initialising={initialising} />}
+              >
+                <Route path="/" element={<CanvasListPage />} />
+                <Route
+                  path="/playground/components"
+                  element={<ComponentShowcasePage />}
+                />
+                <Route
+                  path="/playground/tool-calls"
+                  element={<ToolCallPlaygroundPage />}
+                />
+                <Route path="/canvas/:canvasId" element={<CanvasPage />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Route>
+            </Routes>
+          </div>
+        </div>
         <ToastContainer />
       </FloatingDelayGroup>
     </BrowserRouter>

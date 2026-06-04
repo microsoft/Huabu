@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 
 import { CanvasMenu } from './CanvasMenu.tsx';
 import { SettingsPopover } from './SettingsPopover';
+import { isElectron } from '../../../hooks/useElectron';
 import { Button } from '../../Common/Button';
 
 interface HeaderProps {
@@ -17,11 +18,18 @@ interface HeaderProps {
  * collapsed / floating logic.
  */
 export const Header: React.FC<HeaderProps> = ({ children, onOpenHelp }) => {
+  // In Electron the custom title bar (`WindowChrome`) already provides a
+  // Home button and the global settings popover, so we hide the duplicates
+  // here to keep the inner header focused on the canvas menu.
+  const isElectronApp = isElectron();
+
   return (
     <header className="border-edge-default bg-surface flex h-12 items-center gap-3 border-b px-3">
-      <Link to="/" aria-label="Back to home">
-        <img src="/favicon.svg" alt="Logo" className="h-6 w-6" />
-      </Link>
+      {!isElectronApp && (
+        <Link to="/" aria-label="Back to home">
+          <img src="/favicon.svg" alt="Logo" className="h-6 w-6" />
+        </Link>
+      )}
 
       {children ?? <CanvasMenu />}
 
@@ -40,7 +48,7 @@ export const Header: React.FC<HeaderProps> = ({ children, onOpenHelp }) => {
         </Button>
       )}
 
-      <SettingsPopover />
+      {!isElectronApp && <SettingsPopover />}
     </header>
   );
 };
