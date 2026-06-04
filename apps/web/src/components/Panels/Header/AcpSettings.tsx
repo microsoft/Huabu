@@ -27,7 +27,7 @@
 
 import {
   AlertTriangle,
-  ChevronRight,
+  Info,
   Pencil,
   Plus,
   RefreshCw,
@@ -48,7 +48,9 @@ import { Modal } from '@/components/Common/Modal';
 import { Select } from '@/components/Common/Select';
 import { SettingRow } from '@/components/Common/SettingRow';
 import { SettingSection } from '@/components/Common/SettingSection';
+import { TabGroup } from '@/components/Common/TabGroup';
 import { toast } from '@/components/Common/Toast';
+import { Tooltip } from '@/components/Common/Tooltip';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 
 import type {
@@ -147,8 +149,8 @@ interface ProfileFormState {
   /**
    * Either the id of a detected CLI (`copilot` / `claude` / …) or
    * the literal `'custom'`. Drives whether structured controls
-   * (auto-approve toggle, extra-args input, command preview) or the
-   * raw `customCommand` field is rendered.
+   * (auto-approve toggle, command preview) or the raw `customCommand`
+   * field is rendered.
    */
   cliId: string;
   /**
@@ -157,12 +159,6 @@ interface ProfileFormState {
    * such flag or when `cliId === 'custom'`.
    */
   allowAll: boolean;
-  /**
-   * Structured mode: free-form extra args appended verbatim after the
-   * binary + acpArgs (+ optional allowAllFlag). Persisted as part of
-   * the resolved `command` — we re-parse on edit to recover the value.
-   */
-  extraArgs: string;
   /**
    * Custom mode (`cliId === 'custom'` or the picked CLI is no longer
    * detected on host): the full command line the worker should spawn.
@@ -176,7 +172,6 @@ const EMPTY_FORM: ProfileFormState = {
   displayName: '',
   cliId: 'custom',
   allowAll: false,
-  extraArgs: '',
   customCommand: '',
   cwd: '',
   autoRestart: true,
@@ -198,7 +193,8 @@ function binaryBasename(token: string): string {
  * Assemble the final command line from a structured form + the
  * selected detected CLI. Returns the trimmed string the worker will
  * spawn. Returns `customCommand` (trimmed) in custom mode or when the
- * referenced CLI isn't currently detected.
+ * referenced CLI isn't currently detected. Use Custom mode for
+ * anything more advanced than `binary + acpArgs (+ allow-all flag)`.
  */
 function buildCommand(
   state: ProfileFormState,
@@ -209,8 +205,6 @@ function buildCommand(
   if (!cli) return state.customCommand.trim();
   const parts: string[] = [cli.binary, ...cli.acpArgs];
   if (state.allowAll && cli.allowAllFlag) parts.push(cli.allowAllFlag);
-  const extras = state.extraArgs.trim();
-  if (extras) parts.push(extras);
   return parts.join(' ');
 }
 
@@ -249,12 +243,13 @@ function buildDefaultDisplayName(
 /**
  * Best-effort reverse of {@link buildCommand}: given a stored
  * `command` plus its `cliId`, recover the structured form fields so
- * the editor opens with the same checkboxes / extra-args the user
- * originally chose. When the command no longer matches the detected
- * CLI's shape (e.g. user manually edited it, or the CLI was
- * uninstalled), returns the original command as `customCommand` and
- * forces `cliId: 'custom'` so the user sees the raw text rather than
- * confusing partial structured controls.
+ * the editor opens with the same checkboxes the user originally
+ * chose. When the command no longer matches the detected CLI's
+ * exact shape (binary + acpArgs (+ allow-all flag)) — e.g. extra
+ * flags were appended, the user hand-edited it, or the CLI was
+ * uninstalled — falls back to Custom mode so the raw command is
+ * fully visible and editable rather than partially hidden behind
+ * structured controls.
  */
 function parseCommandIntoForm(
   command: string,
@@ -263,13 +258,11 @@ function parseCommandIntoForm(
 ): {
   cliId: string;
   allowAll: boolean;
-  extraArgs: string;
   customCommand: string;
 } {
   const fallback = {
     cliId: 'custom',
     allowAll: false,
-    extraArgs: '',
     customCommand: command,
   };
   if (cliId === 'custom') return fallback;
@@ -285,22 +278,47 @@ function parseCommandIntoForm(
     i++;
   }
   const rest = tokens.slice(i);
-  let allowAll = false;
-  let remaining = rest;
-  if (cli.allowAllFlag) {
-    const idx = rest.indexOf(cli.allowAllFlag);
-    if (idx !== -1) {
-      allowAll = true;
-      remaining = [...rest.slice(0, idx), ...rest.slice(idx + 1)];
-    }
+  // The only structured "extra" we recognise is the allow-all flag.
+  // Anything else means the command was customised — drop into
+  // Custom mode so nothing is hidden from the user.
+  if (rest.length === 0) {
+    return { cliId: cli.id, allowAll: false, customCommand: '' };
   }
-  return {
-    cliId: cli.id,
-    allowAll,
-    extraArgs: remaining.join(' '),
-    customCommand: '',
-  };
+  if (cli.allowAllFlag && rest.length === 1 && rest[0] === cli.allowAllFlag) {
+    return { cliId: cli.id, allowAll: true, customCommand: '' };
+  }
+  return fallback;
 }
+
+/**
+ * Field label with an optional trailing info icon that surfaces the
+ * long-form description in a hover tooltip. Used inside
+ * `ProfileEditorModal` to keep each row visually compact while
+ * preserving the explanatory copy.
+ */
+const FieldLabel: React.FC<{
+  children: React.ReactNode;
+  hint?: React.ReactNode;
+}> = ({ children, hint }) => (
+  <span className="text-fg-muted flex items-center gap-1">
+    <span>{children}</span>
+    {hint ? (
+      <Tooltip
+        content={hint}
+        contentClassName="max-w-80 leading-snug whitespace-normal"
+      >
+        <span
+          role="img"
+          aria-label="More info"
+          tabIndex={0}
+          className="text-fg-subtle hover:text-fg-default focus-visible:text-fg-default inline-flex cursor-help outline-none"
+        >
+          <Info size={12} />
+        </span>
+      </Tooltip>
+    ) : null}
+  </span>
+);
 
 export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
   isOpen,
@@ -333,7 +351,6 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
         displayName: editing.displayName,
         cliId: parsed.cliId,
         allowAll: parsed.allowAll,
-        extraArgs: parsed.extraArgs,
         customCommand: parsed.customCommand,
         cwd: editing.cwd,
         autoRestart: editing.autoRestart,
@@ -341,42 +358,32 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
     } else {
       // For new profiles, default to the first detected CLI so the
       // structured controls appear immediately. Falls back to
-      // `'custom'` when nothing is on PATH.
+      // `'custom'` when nothing is on PATH. `displayName` stays empty
+      // so the input's placeholder shows the derived default — the
+      // submit handler falls back to `defaultDisplayName` when the
+      // field is left blank.
       const firstDetected = detectedClis[0];
       setForm({
         ...EMPTY_FORM,
         cliId: firstDetected ? firstDetected.id : 'custom',
-        displayName: firstDetected ? firstDetected.displayName : '',
       });
     }
   }, [isOpen, editing, detectedClis]);
 
   /**
-   * Switching CLIs in structured mode: pre-fill `displayName` when
-   * the user hasn't customised it (so picking "Claude Code" labels
-   * the profile accordingly). All other structured fields are reset
-   * because flag-vocabulary doesn't carry across CLIs.
+   * Switching CLIs resets the per-CLI allow-all flag since the
+   * vocabulary doesn't carry across CLIs. `displayName` is left
+   * untouched — the input's placeholder already reflects the new
+   * default via `buildDefaultDisplayName`, and the submit path
+   * substitutes the derived default when the field is empty.
    */
-  const handleCliChange = useCallback(
-    (cliId: string) => {
-      setForm((prev) => {
-        const next: ProfileFormState = {
-          ...prev,
-          cliId,
-          allowAll: false,
-          extraArgs: '',
-        };
-        if (cliId !== 'custom') {
-          const cli = detectedClis.find((c) => c.id === cliId);
-          if (cli && !prev.displayName.trim()) {
-            next.displayName = cli.displayName;
-          }
-        }
-        return next;
-      });
-    },
-    [detectedClis],
-  );
+  const handleCliChange = useCallback((cliId: string) => {
+    setForm((prev) => ({
+      ...prev,
+      cliId,
+      allowAll: false,
+    }));
+  }, []);
 
   const selectedCli = useMemo(
     () =>
@@ -397,17 +404,6 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
     () => buildDefaultDisplayName(selectedCli?.displayName ?? null, form.cwd),
     [selectedCli, form.cwd],
   );
-
-  /**
-   * Advanced section (extra args, auto-restart) is collapsed
-   * by default — most users only need the agent + working directory.
-   * Resets to collapsed every time the dialog re-opens so an
-   * accidentally-expanded session doesn't leak into the next edit.
-   */
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  useEffect(() => {
-    if (!isOpen) setAdvancedOpen(false);
-  }, [isOpen]);
 
   const handleSubmit = useCallback(async () => {
     const command = buildCommand(form, detectedClis);
@@ -457,20 +453,57 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
     }
   }, [form, defaultDisplayName, detectedClis, editing, onSaved, onClose]);
 
-  const cliOptions = useMemo(() => {
-    const opts = detectedClis.map((c) => ({
-      value: c.id,
-      label: c.version ? `${c.displayName} · ${c.version}` : c.displayName,
-    }));
-    return [...opts, { value: 'custom', label: 'Custom command' }];
-  }, [detectedClis]);
+  const cliOptions = useMemo(
+    () =>
+      detectedClis.map((c) => ({
+        value: c.id,
+        label: c.displayName,
+      })),
+    [detectedClis],
+  );
+
+  /**
+   * The agent picker is a two-tab switch:
+   *   - "detected" → choose from the auto-detected CLIs on PATH.
+   *   - "custom"   → type a full launch command yourself.
+   * `form.cliId === 'custom'` is the single source of truth; the tab
+   * state is derived from it so loading an existing profile lands on
+   * the correct tab automatically.
+   */
+  const agentMode: 'detected' | 'custom' =
+    form.cliId === 'custom' ? 'custom' : 'detected';
+
+  const handleAgentModeChange = useCallback(
+    (mode: 'detected' | 'custom') => {
+      if (mode === 'custom') {
+        // Seed the Custom textarea with whatever Detected would have
+        // launched so the user can tweak instead of typing from
+        // scratch. Skip when the user already has a custom command
+        // (e.g. they toggled away and back) so we don't blow away
+        // their edits.
+        setForm((prev) => {
+          if (prev.cliId === 'custom') return prev;
+          const seeded =
+            prev.customCommand.trim() || buildCommand(prev, detectedClis);
+          return {
+            ...prev,
+            cliId: 'custom',
+            allowAll: false,
+            customCommand: seeded,
+          };
+        });
+      } else {
+        handleCliChange(detectedClis[0]?.id ?? 'custom');
+      }
+    },
+    [detectedClis, handleCliChange],
+  );
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
       title={editing ? 'Edit external agent' : 'New external agent'}
-      description="The worker launches this agent on demand and reuses it across chats."
       className="w-104"
       footer={
         <div className="flex justify-end gap-2">
@@ -498,178 +531,115 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
       <div className="flex flex-col gap-5 px-1 py-1">
         {/* ─── Agent ─────────────────────────────────────────────── */}
         <div className="flex flex-col gap-3">
-          <div className="text-fg-subtle text-[10px] font-semibold tracking-wider uppercase">
-            Agent
-          </div>
-          <label className="flex flex-col gap-1 text-xs">
-            <span className="text-fg-muted">Auto detected agent</span>
-            {/*
-             * Hide the picker on edit because `cliId` is immutable in the
-             * update schema (changing it would silently break the persisted
-             * binding). Show the chosen CLI as a static label so the user
-             * still sees what's wired up.
-             */}
-            {editing ? (
-              <div className="border-edge-default bg-surface text-fg-default rounded border px-2 py-1 text-sm">
-                {cliOptions.find((o) => o.value === form.cliId)?.label ??
-                  form.cliId}
-              </div>
-            ) : (
-              <Select
-                value={form.cliId}
-                onChange={handleCliChange}
-                options={cliOptions}
-              />
-            )}
-            {!editing && (
-              <span className="text-fg-subtle text-[11px] leading-snug">
-                Sediment auto-detected these ACP-capable CLIs on your PATH. Pick
-                one to use its defaults, or choose{' '}
-                <strong>Custom command</strong> to type the launch command
-                yourself.
-              </span>
-            )}
-          </label>
-
-          {isStructured ? (
-            selectedCli?.allowAllFlag && (
-              <label className="text-fg-default flex cursor-pointer items-start gap-2 text-xs select-none">
-                <input
-                  type="checkbox"
-                  className="accent-info mt-0.5 h-3.5 w-3.5"
-                  checked={form.allowAll}
-                  onChange={(e) =>
-                    setForm((p) => ({ ...p, allowAll: e.target.checked }))
-                  }
-                />
-                <span className="flex flex-col gap-0.5">
-                  <span>
-                    Auto-approve all tool calls (
-                    <code className="font-mono">
-                      {selectedCli.allowAllFlag}
-                    </code>
-                    )
-                  </span>
-                  <span className="text-fg-muted text-[11px] leading-snug">
-                    Skip the per-tool confirmation prompt. Convenient for
-                    sandboxed runs, risky for anything that can touch your
-                    filesystem or network.
-                  </span>
-                </span>
-              </label>
-            )
-          ) : (
+          {/*
+           * Hide the picker on edit because `cliId` is immutable in the
+           * update schema (changing it would silently break the persisted
+           * binding). Show the chosen agent as a static label so the user
+           * still sees what's wired up.
+           */}
+          {editing ? (
             <label className="flex flex-col gap-1 text-xs">
-              <span className="text-fg-muted">Launch command</span>
-              <Input
-                value={form.customCommand}
-                onChange={(e) =>
-                  setForm((p) => ({
-                    ...p,
-                    customCommand: e.target.value,
-                  }))
-                }
-                placeholder="/usr/local/bin/copilot --acp --allow-all"
-                className="border-edge-default bg-surface rounded border px-2 py-1 font-mono text-xs"
+              <FieldLabel>Agent</FieldLabel>
+              <div className="border-edge-default bg-surface text-fg-default rounded border px-2 py-1 text-xs">
+                {detectedClis.find((c) => c.id === form.cliId)?.displayName ??
+                  (form.cliId === 'custom' ? 'Custom command' : form.cliId)}
+              </div>
+            </label>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <TabGroup
+                value={agentMode}
+                onChange={handleAgentModeChange}
+                options={[
+                  { value: 'detected', label: 'Built-in' },
+                  { value: 'custom', label: 'Custom' },
+                ]}
+                size="sm"
+                className="self-start"
               />
-              <span className="text-fg-subtle text-[11px] leading-snug">
-                Full command line the worker should spawn (binary + all flags).
-                Use this for binaries that aren't on PATH or for flags not
-                exposed by an auto-detected agent.
-              </span>
+              {agentMode === 'detected' ? (
+                <label className="flex flex-col gap-1 text-xs">
+                  <FieldLabel>Agent</FieldLabel>
+                  {cliOptions.length > 0 ? (
+                    <Select
+                      value={form.cliId}
+                      onChange={handleCliChange}
+                      options={cliOptions}
+                    />
+                  ) : (
+                    <div className="border-edge-default bg-surface text-fg-muted rounded border px-2 py-1 text-xs leading-snug">
+                      No ACP-capable CLIs found on your PATH. Switch to{' '}
+                      <strong>Custom</strong> to type a launch command yourself.
+                    </div>
+                  )}
+                </label>
+              ) : (
+                <label className="flex flex-col gap-1 text-xs">
+                  <FieldLabel hint="Full command line the worker should spawn (binary + all flags). Use this for binaries that aren't on PATH or for flags not exposed by an auto-detected agent.">
+                    Launch command
+                  </FieldLabel>
+                  <Input
+                    value={form.customCommand}
+                    onChange={(e) =>
+                      setForm((p) => ({
+                        ...p,
+                        customCommand: e.target.value,
+                      }))
+                    }
+                    placeholder="/usr/local/bin/copilot --acp --allow-all"
+                    className="border-edge-default bg-surface rounded border px-2 py-1 font-mono text-xs"
+                  />
+                </label>
+              )}
+            </div>
+          )}
+
+          {isStructured && selectedCli?.allowAllFlag && (
+            <label className="text-fg-default flex cursor-pointer items-start gap-2 text-xs select-none">
+              <input
+                type="checkbox"
+                className="accent-info mt-0.5 h-3.5 w-3.5"
+                checked={form.allowAll}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, allowAll: e.target.checked }))
+                }
+              />
+              <FieldLabel hint="Skip the per-tool confirmation prompt. Convenient for sandboxed runs, risky for anything that can touch your filesystem or network.">
+                Auto-approve all tool calls (
+                <code className="font-mono">{selectedCli.allowAllFlag}</code>)
+              </FieldLabel>
             </label>
           )}
         </div>
 
         {/* ─── Workspace ─────────────────────────────────────────── */}
-        <div className="border-edge-default flex flex-col gap-3 border-t pt-4">
-          <div className="text-fg-subtle text-[10px] font-semibold tracking-wider uppercase">
-            Workspace
-          </div>
+        <div className="flex flex-col gap-3">
           <label className="flex flex-col gap-1 text-xs">
-            <span className="text-fg-muted">Working directory</span>
+            <FieldLabel hint="The agent is spawned with this as its working directory and treats it as the project root for file edits and tool calls.">
+              Working directory
+            </FieldLabel>
             <Input
               value={form.cwd}
               onChange={(e) => setForm((p) => ({ ...p, cwd: e.target.value }))}
               placeholder="/Users/me/project-x"
               className="border-edge-default bg-surface rounded border px-2 py-1 font-mono text-xs"
             />
-            <span className="text-fg-subtle text-[11px] leading-snug">
-              The agent is spawned with this as its working directory and treats
-              it as the project root for file edits and tool calls.
-            </span>
           </label>
         </div>
 
-        {/* ─── Advanced (collapsible) ────────────────────────────── */}
-        <div className="border-edge-default border-t pt-3">
-          <button
-            type="button"
-            onClick={() => setAdvancedOpen((o) => !o)}
-            aria-expanded={advancedOpen}
-            className="text-fg-muted hover:text-fg-default flex items-center gap-1.5 select-none"
-          >
-            <ChevronRight
-              size={12}
-              className={`transition-transform ${advancedOpen ? 'rotate-90' : ''}`}
-            />
-            <span className="text-[10px] font-semibold tracking-wider uppercase">
-              Advanced
-            </span>
-          </button>
-          {advancedOpen && (
-            <div className="mt-3 flex flex-col gap-3">
-              {isStructured && (
-                <label className="flex flex-col gap-1 text-xs">
-                  <span className="text-fg-muted">
-                    Extra args{' '}
-                    <span className="text-fg-subtle">(optional)</span>
-                  </span>
-                  <Input
-                    value={form.extraArgs}
-                    onChange={(e) =>
-                      setForm((p) => ({ ...p, extraArgs: e.target.value }))
-                    }
-                    placeholder="--model claude-sonnet-4 --max-tokens 4000"
-                    className="border-edge-default bg-surface rounded border px-2 py-1 font-mono text-xs"
-                  />
-                  <span className="text-fg-subtle text-[11px] leading-snug">
-                    Extra CLI flags appended after the auto-built command.
-                  </span>
-                </label>
-              )}
-              <label className="text-fg-default inline-flex cursor-pointer items-center gap-2 text-xs select-none">
-                <input
-                  type="checkbox"
-                  className="accent-info h-3.5 w-3.5"
-                  checked={form.autoRestart}
-                  onChange={(e) =>
-                    setForm((p) => ({ ...p, autoRestart: e.target.checked }))
-                  }
-                />
-                <span>Auto-restart the agent if it crashes</span>
-              </label>
-            </div>
-          )}
-        </div>
-
         {/* ─── Display name (placed last per UX request) ─────────── */}
-        <label className="border-edge-default flex flex-col gap-1 border-t pt-4 text-xs">
-          <span className="text-fg-muted">
+        <label className="flex flex-col gap-1 text-xs">
+          <FieldLabel>
             Display name <span className="text-fg-subtle">(optional)</span>
-          </span>
+          </FieldLabel>
           <Input
             value={form.displayName}
             onChange={(e) =>
               setForm((p) => ({ ...p, displayName: e.target.value }))
             }
             placeholder={defaultDisplayName}
-            className="border-edge-default bg-surface rounded border px-2 py-1 text-sm"
+            className="border-edge-default bg-surface rounded border px-2 py-1 text-xs"
           />
-          <span className="text-fg-subtle text-[11px] leading-snug">
-            Shown in the chat picker and external-agent list. Defaults to{' '}
-            <strong>{defaultDisplayName}</strong> when left blank.
-          </span>
         </label>
       </div>
     </Modal>
@@ -858,7 +828,7 @@ export const AcpSettings: React.FC = () => {
             ))}
             <SettingRow
               title="Add another agent"
-              description="Configure a new external CLI to bind chats to."
+              description="Configure a new external agent to bind chats to."
             >
               <Button
                 variant="outline"

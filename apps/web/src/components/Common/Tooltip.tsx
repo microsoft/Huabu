@@ -13,6 +13,8 @@ import {
 } from '@floating-ui/react';
 import { cloneElement, useId, useState } from 'react';
 
+import { cn } from './cn';
+
 import type { ReactElement, ReactNode } from 'react';
 
 export type TooltipPlacement = 'auto' | 'top' | 'bottom';
@@ -21,6 +23,8 @@ export type TooltipProps = {
   content: ReactNode;
   children: ReactElement;
   wrapperClassName?: string;
+  /** Extra classes applied to the floating tooltip bubble. */
+  contentClassName?: string;
   /** Distance in px between the trigger and the tooltip. Defaults to 8. */
   offset?: number;
   /**
@@ -58,6 +62,7 @@ export const Tooltip = ({
   content,
   children,
   wrapperClassName,
+  contentClassName,
   offset: offsetProp = 8,
   placement = 'auto',
 }: TooltipProps) => {
@@ -145,8 +150,10 @@ export const Tooltip = ({
             id={tooltipId}
             role="tooltip"
             {...getFloatingProps({
-              className:
+              className: cn(
                 'shadow-bottom bg-inverse text-fg-inverse pointer-events-none z-10001 max-w-[90vw] rounded-md px-2 py-1 text-xs',
+                contentClassName,
+              ),
               style: floatingStyles,
             })}
           >
