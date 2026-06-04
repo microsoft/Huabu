@@ -35,6 +35,7 @@ import type {
   CanvasNodeType,
   Point,
   RecentAction,
+  EdgeStyle,
 } from '@sediment/shared';
 import type { Edge, Node } from '@xyflow/react';
 
@@ -116,7 +117,12 @@ export type CanvasUiIntent =
     }
   | { type: 'DELETE_NODES'; nodeIds: string[] }
   | { type: 'UPDATE_NODE_DATA'; nodeId: string; patch: Record<string, unknown> }
-  | { type: 'CONNECT_EDGE'; source: string; target: string }
+  | {
+      type: 'CONNECT_EDGE';
+      source: string;
+      target: string;
+      style?: EdgeStyle;
+    }
   | { type: 'DISCONNECT_EDGE'; edgeIds: string[] }
   | {
       type: 'RESIZE_NODE';
@@ -413,6 +419,7 @@ function resolveConnectEdge(
           {
             source: intent.source as CanvasNodeId,
             target: intent.target as CanvasNodeId,
+            ...(intent.style && { style: intent.style }),
           },
         ],
       },

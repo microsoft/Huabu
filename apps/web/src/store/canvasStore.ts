@@ -1727,6 +1727,10 @@ const useCanvasStore = create<RFState>()(
         type: 'CONNECT_EDGE',
         source: connection.source,
         target: connection.target,
+        // Default every user-drawn connection to a forward arrow
+        // (source → target). Users can still toggle the direction
+        // afterward via the edge style controls.
+        style: { direction: 'forward' },
       });
     },
 

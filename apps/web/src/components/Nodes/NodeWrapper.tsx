@@ -1,6 +1,4 @@
 import {
-  Handle,
-  Position,
   NodeResizer,
   useInternalNode,
   useViewport,
@@ -41,80 +39,17 @@ import useCanvasStore from '@/store/canvasStore.ts';
 import { coerceProvenance } from '@/utils/blockProvenance';
 
 import { getAccentTokens } from './accentTokens.ts';
+import {
+  NodeConnectionHandles,
+  NodeSideAffordance,
+  useCreateConnectedNode,
+} from './NodeConnectAffordance.tsx';
 import { SemanticPlaceholder } from './SemanticPlaceholder.tsx';
 
 import type { CanvasNodeType, NodeData } from './types.ts';
 
-/**
- * Global node background opacity, in percent. The wrapper composites every
- * resolved `backgroundColor` against `transparent` at this percentage so the
- * canvas grid faintly shows through every node — making overlapping cards
- * read more like layered translucent paper than fully opaque tiles.
- *
- * Centralised here so the same value applies to every node type
- * (SURFACE_PALETTE tints, accent-derived `color-mix(...)` fills, and
- * one-off `var(...)` backgrounds like QuestionNode's).
- */
 const NODE_BG_OPACITY_PCT = 100;
 
-/** Connection handle definitions – source + target on each side. */
-const HANDLE_DEFS = [
-  {
-    type: 'target' as const,
-    id: 'top-target',
-    position: Position.Top,
-  },
-  {
-    type: 'source' as const,
-    id: 'top-source',
-    position: Position.Top,
-  },
-  {
-    type: 'target' as const,
-    id: 'right-target',
-    position: Position.Right,
-  },
-  {
-    type: 'source' as const,
-    id: 'right-source',
-    position: Position.Right,
-  },
-  {
-    type: 'target' as const,
-    id: 'bottom-target',
-    position: Position.Bottom,
-  },
-  {
-    type: 'source' as const,
-    id: 'bottom-source',
-    position: Position.Bottom,
-  },
-  {
-    type: 'target' as const,
-    id: 'left-target',
-    position: Position.Left,
-  },
-  {
-    type: 'source' as const,
-    id: 'left-source',
-    position: Position.Left,
-  },
-] as const;
-
-/**
- * Isolated component that subscribes to viewport changes for the
- * zoom-invariant overlay portal. This prevents the entire NodeWrapper
- * from re-rendering on every pan/zoom event.
- *
- * Uses the FLIP technique to animate position changes in sync with the
- * node's CSS transform transition:
- *  1. Set left/top to the final (new) position immediately — always correct
- *     for pan/zoom.
- *  2. Invert via `transform: translate(-Δx, -Δy)` so the overlay visually
- *     appears at the OLD position without a transition.
- *  3. Play: in the next animation frame, reset transform to (0,0) with a
- *     CSS transition that matches the node animation duration.
- */
 const OverlayPortal = memo(
   ({
     nodeId,
@@ -213,50 +148,21 @@ interface NodeWrapperProps {
   className?: string;
   minWidth?: number;
   minHeight?: number;
-  /**
-   * Group 3 content for the floating toolbar: controls that affect
-   * how the node is displayed on the canvas (text formatting, sketch
-   * stroke controls, frame layout, etc.).
-   */
-  toolbar?: React.ReactNode;
-  /**
-   * Group 4 content for the floating toolbar: action buttons that
-   * trigger operations (open large view, apply AI sketch, download,
-   * unframe, run / cancel AI question, etc.).
-   */
-  actions?: React.ReactNode;
 
-  /**
-   * Content to render in the zoom-invariant overlay layer.
-   * Positioned at the node's top-left corner in screen space.
-   * Use `overlayOffsetY` (screen px) to shift vertically (negative = above the node).
-   */
+  toolbar?: React.ReactNode;
+  actions?: React.ReactNode;
   overlayContent?: React.ReactNode;
   /** Vertical offset in screen pixels from the node's top edge. Negative = above. */
   overlayOffsetY?: number;
 
   keepAspectRatio?: boolean;
   resizable?: boolean;
-
-  /**
-   * Optional override for the outer accent border color. When provided,
-   * this wins over the auto-derived `accentTokens.border` (which is a
-   * 50%-transparent mix of the accent over `transparent`). Useful for
-   * accents like `white` where the default mix is effectively invisible
-   * and a node wants the border to match the swatch exactly.
-   */
   borderColor?: string;
 
   onResizeStart?: () => void;
   onResize?: (width: number, height: number) => void;
   onResizeEnd?: (width: number, height: number) => void;
   onDoubleClick?: React.MouseEventHandler<HTMLDivElement>;
-  /**
-   * When true, the resize-end commit persists only the width — the height
-   * is cleared so the node auto-sizes to its content. Used by text-flow
-   * nodes (TextNode / QuestionNode) where the resize gesture conceptually
-   * sets `style.fontSize` rather than a fixed container height.
-   */
   resizeEndClearHeight?: boolean;
 }
 
@@ -303,23 +209,13 @@ export const NodeWrapper = memo(
     const showIngestionOverlay =
       type !== 'frame' && ingestion?.status === 'pending';
 
+    const [hovered, setHovered] = useState(false);
+    const [editing, setEditing] = useState(false);
+
+    const handleCreateConnected = useCreateConnectedNode(id);
+
     const renderMode = useNodeLOD(id, type);
     const isNotMouse = useIsNotMouse();
-
-    // Zoom-invariant handle style: scale up width/height directly so React
-    // Flow's getBoundingClientRect-based edge routing stays centred on the
-    // handle.  React Flow's default `transform: translate(-50%, -50%)`
-    // already centres handles at any size, so no margin compensation is
-    // needed.
-    const baseHandleSize = isNotMouse ? 10 : 4;
-    const handleStyle: React.CSSProperties = useStore((s) => {
-      const factor = Math.max(1 / s.transform[2], 1);
-      const size = baseHandleSize * factor;
-      return {
-        width: size,
-        height: size,
-      };
-    });
 
     // Read canvas-space dimensions for SemanticPlaceholder text fitting
     const nodeWidth = useStore((s) => {
@@ -330,10 +226,7 @@ export const NodeWrapper = memo(
       const node = s.nodeLookup.get(id);
       return (node?.style?.height as number) || node?.measured?.height || 200;
     });
-    // Whether the node has an explicit pinned height. When false the parent
-    // RF node element is content-sized, so the children area must NOT use
-    // `flex-1 + min-h-0` (which would collapse to 0 in an auto-height flex
-    // column) — it should size to its content instead.
+
     const hasFixedNodeHeight = useStore(
       (s) =>
         (s.nodeLookup.get(id)?.style?.height as number | undefined) !==
@@ -357,32 +250,6 @@ export const NodeWrapper = memo(
       };
     }, [data]);
 
-    // Smart-snap during resize is fully delegated to `snapSession`:
-    //   • `handleResizeStart` captures the start rect and opens a
-    //     resize session — all gesture state lives there, not in
-    //     refs on this component.
-    //   • `handleResize` forwards RF's raw proposal to
-    //     `applyResizeProposal`, which derives `activeEdges`, runs
-    //     the snap engine, caches the snapped local rect, and returns
-    //     it. We immediately forward the snapped width/height to the
-    //     optional `onResize` listener so child auto-fit logic (e.g.
-    //     text font-size) gets the snapped values with no frame lag.
-    //   • The store write happens once in `canvasStore.onNodesChange`
-    //     via `applySnap`, which reads the cached snapped rect and
-    //     rewrites RF's emitted dim/pos NodeChanges. The same
-    //     reducer then mirrors the (possibly snapped) live dim/pos
-    //     values onto `node.style.{width,height}` + `position` so
-    //     the rendered DOM tracks the drag — `applyChange` itself
-    //     only writes `node.measured`, which RF does not read for
-    //     inline sizing. This component no longer issues its own
-    //     `setState` for resize: a single `applyNodeChanges`-based
-    //     write per frame is the only writer, which keeps the
-    //     autosave middleware happy and avoids the double-render the
-    //     previous inline write produced.
-    //   • `handleResizeEnd` reads the cached snapped rect via
-    //     `getResizeSnappedRect` to commit the final geometry through
-    //     the undoable `setNodeGeometry` intent.
-
     const handleResize = useCallback(
       (
         _event: unknown,
@@ -404,13 +271,6 @@ export const NodeWrapper = memo(
       ) => {
         onNodeResizeStart();
 
-        // Capture pre-resize bounds in absolute flow-space so the
-        // snap engine can derive `activeEdges` by diffing each
-        // frame's proposal against this baseline (RF's `direction`
-        // field on `OnResize` describes growth sign, not which edge
-        // is moving — derivation by diff is the cleanest source of
-        // truth). The capture lives inside snapSession for the
-        // duration of the gesture.
         const state = useCanvasStore.getState();
         const nodes = state.nodes as NestableNode[];
         const byId = indexById(nodes);
@@ -455,30 +315,14 @@ export const NodeWrapper = memo(
         _event: unknown,
         params: { x: number; y: number; width: number; height: number },
       ) => {
-        // Clear the preview before dispatching so the overlay disappears as
-        // the frame animates to its final fitted size. `endResizePreview`
-        // also cancels any pending rAF inside `updateResizePreview` —
-        // otherwise a queued fit-pass scheduled milliseconds before
-        // mouseup could fire *after* `setNodeGeometry` lands and
-        // redraw the overlay against the pre-commit geometry.
         endResizePreview();
-        // Prefer the snapped rect cached by `applyResizeProposal` over
-        // RF's raw `params` (which are the cursor-derived pre-snap
-        // numbers). Fall back to `params` if no proposal was processed
-        // (e.g. handle clicked and released without movement, or the
-        // resize session was disabled at gesture start due to mixed
-        // parents — neither case touches `_lastResizeSnapped`).
         const snapped = getResizeSnappedRect();
         const ctx = getResizeContext();
         const finalSize = snapped
           ? { width: snapped.size.width, height: snapped.size.height }
           : { width: params.width, height: params.height };
         const finalLocalPos = snapped?.local ?? { x: params.x, y: params.y };
-        // Skip the position update when snap (and RF) left the
-        // top-left corner exactly where it started — otherwise we'd
-        // create a no-op undo entry on every plain right/bottom-only
-        // resize. Comparison is in local space against the captured
-        // start position.
+
         const positionChanged =
           !!ctx &&
           (finalLocalPos.x !== ctx.startLocalPos.x ||
@@ -565,10 +409,7 @@ export const NodeWrapper = memo(
         <div
           className={cn(
             'group relative flex h-full w-full flex-col rounded-lg transition-all duration-120',
-            // Drop shadow whenever there is no *visible* colored accent.
-            // A `white` accent is visually neutral (its 50%-mix border is
-            // effectively invisible against the canvas), so it should keep
-            // the same soft edge as "no accent".
+
             type !== 'text' &&
               type !== 'sketch' &&
               type !== 'question' &&
@@ -582,13 +423,7 @@ export const NodeWrapper = memo(
               : type === 'sketch'
                 ? ''
                 : 'ring-edge-default hover:ring',
-            // Always reserve a 3px border so toggling accent on/off does
-            // not shift inner content. Default border is transparent;
-            // accent (or other states) override `borderColor` via style.
-            // Sketch nodes have no accent picker and no visible border, so
-            // skip the reservation — otherwise the 3px inset shrinks the
-            // SVG viewBox area vs the on-overlay preview, making the
-            // committed stroke jump and shrink at pointer-up.
+
             type !== 'sketch' && 'border-3 border-transparent',
             // Question nodes need visible overflow for status badges and progress bar
             type === 'question' && 'overflow-visible',
@@ -598,12 +433,7 @@ export const NodeWrapper = memo(
             ...(() => {
               const bg = resolveSurface(data.style?.backgroundColor);
               if (!bg || bg === 'transparent') return {};
-              // Composite every node background against transparent so the
-              // canvas grid faintly shows through. `color-mix` accepts any
-              // valid CSS color (hex, keyword, nested color-mix, var(...)),
-              // so this works uniformly across SURFACE_PALETTE tints,
-              // accent-derived fills (FrameNode / TextNode), and one-off
-              // var(...) colors (QuestionNode).
+
               return {
                 backgroundColor: `color-mix(in srgb, ${bg} ${NODE_BG_OPACITY_PCT}%, transparent)`,
               };
@@ -619,6 +449,10 @@ export const NodeWrapper = memo(
             ...(borderColor && { borderColor }),
           }}
           onDoubleClick={onDoubleClick}
+          onPointerEnter={() => setHovered(true)}
+          onPointerLeave={() => setHovered(false)}
+          onFocus={() => setEditing(true)}
+          onBlur={() => setEditing(false)}
         >
           {showIngestionOverlay && (
             <div className="pointer-events-none absolute right-1.5 bottom-1.5 z-10">
@@ -649,47 +483,31 @@ export const NodeWrapper = memo(
           <div
             className={clsx(
               'p-0',
-              // In fixed-height mode fill the remaining flex track; in
-              // auto-height mode size to content so the chain can grow with
-              // the children (e.g. a Note's editor content). `min-h-0` is
-              // fine while filling but would collapse the auto chain to 0.
+
               hasFixedNodeHeight ? 'min-h-0 flex-1' : 'min-h-0',
               isMinimal && 'invisible',
-              // Match the wrapper's *inner* border radius so children that
-              // paint their own background (e.g. NoteNode's `bg-surface`)
-              // get clipped along the rounded inner edge instead of
-              // poking a sharp rectangular corner into the accent border.
-              // Wrapper has `rounded-lg` (8px) + `border-3` (3px) → inner
-              // radius is ~5px; `rounded-md` (6px) overshoots by 1px which
-              // is hidden under the opaque border. We can't put
-              // `overflow-hidden` on the outer wrapper itself because it
-              // would clip the absolutely-positioned resize handles.
+
               allowOverflow ? 'overflow-visible' : 'overflow-hidden rounded-md',
             )}
           >
             {children}
           </div>
 
-          {HANDLE_DEFS.map((h) => (
-            <Handle
-              key={h.id}
-              type={h.type}
-              id={h.id}
-              position={h.position}
-              style={handleStyle}
-              className={cn(
-                'bg-info! z-20 border-none! transition-opacity',
-                isNotMouse
-                  ? cn(
-                      selected
-                        ? 'opacity-40 active:opacity-100'
-                        : 'pointer-events-none opacity-0',
-                    )
-                  : cn('opacity-0 group-hover:opacity-100'),
-              )}
-            />
-          ))}
+          <NodeConnectionHandles
+            hovered={hovered}
+            selected={!!selected}
+            isNotMouse={isNotMouse}
+          />
         </div>
+
+        <NodeSideAffordance
+          nodeId={id}
+          hovered={hovered}
+          selected={!!selected}
+          editing={editing}
+          isNotMouse={isNotMouse}
+          onCreate={handleCreateConnected}
+        />
       </>
     );
   },
