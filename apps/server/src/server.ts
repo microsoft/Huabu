@@ -1,6 +1,7 @@
 import './load-env.js';
 import './setup-proxy.js';
 import { app } from './app.js';
+import { resolveBindHost } from './bind-host.js';
 
 const DEFAULT_PORT = 3001;
 const parsedPort = Number.parseInt(
@@ -10,11 +11,7 @@ const parsedPort = Number.parseInt(
 const PORT =
   Number.isFinite(parsedPort) && parsedPort > 0 ? parsedPort : DEFAULT_PORT;
 
-// Default to loopback so a fresh install is not silently exposed to the
-// local network. Operators who explicitly want LAN / remote access set
-// `HUABU_BIND_HOST=0.0.0.0` (or a specific interface IP). Pair that
-// with `HUABU_ALLOWED_HOSTS` and `HUABU_BASIC_AUTH_*` — see README.
-const HOST = process.env.HUABU_BIND_HOST ?? '127.0.0.1';
+const HOST = resolveBindHost();
 
 app.listen({ port: PORT, host: HOST }, (err: Error | null) => {
   if (err) {

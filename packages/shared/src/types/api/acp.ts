@@ -168,8 +168,13 @@ export interface AcpAgentCliListResponse {
    * the absolute path to the in-repo wrapper.
    */
   agentletOnPath: boolean;
-  /** Absolute path to the in-repo `bin/agentlet` wrapper. */
-  agentletWrapperPath: string;
+  /**
+   * Absolute path to the in-repo `bin/agentlet` wrapper, or `null`
+   * when no wrapper is available on this host (e.g. packaged Electron
+   * builds, which ship without it). Renderer UI degrades to a
+   * `bin/agentlet` placeholder in copy-paste commands when null.
+   */
+  agentletWrapperPath: string | null;
 }
 
 // ─── Thread → agent binding ────────────────────────────────────────────

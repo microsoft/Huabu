@@ -167,7 +167,7 @@ export default function ToolCallPlaygroundPage() {
   }, [text]);
 
   return (
-    <div className="bg-bg-default flex h-screen flex-col">
+    <div className="bg-bg-default flex h-full flex-col">
       <header className="border-edge-default flex shrink-0 items-center justify-between border-b px-6 py-3">
         <div>
           <h1 className="text-fg-default text-lg font-semibold">

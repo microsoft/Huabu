@@ -1,10 +1,14 @@
 import { readFile } from 'node:fs/promises';
-import { createRequire } from 'node:module';
+
+import pdf2mdImport from '@opendocsg/pdf2md';
 
 import type { IDocumentLoader, LoadResult } from './loader.interface.js';
 
-const require = createRequire(import.meta.url);
-const pdf2md = require('@opendocsg/pdf2md') as (
+// `@opendocsg/pdf2md` is a CJS module that uses `module.exports = function`.
+// Under NodeNext + .d.ts with `export default`, TypeScript's namespace import
+// returns the whole module object. The runtime value differs depending on
+// whether the bundler interops it as default or namespace — handle both.
+type Pdf2Md = (
   pdfBuffer: Buffer,
   callbacks?: {
     metadataParsed?: (metadata: { info?: { Title?: string } }) => void;
@@ -13,6 +17,12 @@ const pdf2md = require('@opendocsg/pdf2md') as (
     documentParsed?: (document: unknown, pages: unknown[]) => void;
   },
 ) => Promise<string>;
+
+const pdf2md = (
+  typeof pdf2mdImport === 'function'
+    ? pdf2mdImport
+    : ((pdf2mdImport as { default: unknown }).default as Pdf2Md)
+) as Pdf2Md;
 
 export class PdfLoader implements IDocumentLoader {
   supports(sourceType: string): boolean {
