@@ -12,11 +12,11 @@
  * subscriber sees the new data on the next render.
  *
  * Shape change vs the legacy `useAcpAgentsStore`: this store holds
- * {@link AcpAgentProfileWithRuntime}[] (long-lived spawn recipes
- * with a `runtime.spawned` flag) instead of `AcpAgentSummary[]`
- * (volatile bridge connections that came and went on pairing). The
- * UI now treats "available" as "have a profile" rather than "have a
- * live connection" — the daemon spawns the agent on first use.
+ * {@link AcpAgentProfile}[] (long-lived spawn recipes) instead of
+ * `AcpAgentSummary[]` (volatile bridge connections that came and
+ * went on pairing). The UI now treats "available" as "have a
+ * profile" rather than "have a live connection" — the daemon spawns
+ * the agent on first use.
  *
  * Daemon status is folded into the same response (the server returns
  * `{profiles, daemon}` on every `GET /api/acp/profiles`) so consumers
@@ -27,11 +27,11 @@ import { create } from 'zustand';
 
 import { listAcpProfiles } from '@/api/acp';
 
-import type { AcpAgentProfileWithRuntime, AcpDaemonStatus } from '@/api/acp';
+import type { AcpAgentProfile, AcpDaemonStatus } from '@/api/acp';
 
 interface AcpProfilesState {
   /** Every profile the user has created. Empty until the first fetch. */
-  profiles: AcpAgentProfileWithRuntime[];
+  profiles: AcpAgentProfile[];
   /** Latest daemon snapshot. `null` until the first fetch resolves. */
   daemon: AcpDaemonStatus | null;
   /**
@@ -64,10 +64,10 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
   init: async () => {
     if (get().initStarted) return;
     set({ initStarted: true });
-    // Refresh on tab-visible so the runtime.spawned + daemon status
-    // are fresh when the user comes back. Cheap: one GET, server is
-    // an in-memory map walk + a JSON parse. The listener is never
-    // removed because the store is a process singleton.
+    // Refresh on tab-visible so the daemon status is fresh when the
+    // user comes back. Cheap: one GET, server is an in-memory map
+    // walk + a JSON parse. The listener is never removed because
+    // the store is a process singleton.
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {

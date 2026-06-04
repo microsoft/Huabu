@@ -47,8 +47,6 @@ export type {
   AcpAgentCliInfo,
   AcpAgentCliListResponse,
   AcpAgentProfile,
-  AcpAgentProfileRuntime,
-  AcpAgentProfileWithRuntime,
   AcpDaemonStatus,
   AcpDaemonStatusResponse,
   AcpModelInfo,

@@ -41,21 +41,11 @@ import { isLoopbackRequest } from '../../security/peer.js';
 
 import type {
   AcpAgentProfile,
-  AcpAgentProfileWithRuntime,
   AcpProfileMutationResponse,
   AcpProfilesListResponse,
   ApiResult,
 } from '@sediment/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
-
-/**
- * Profiles no longer own a CLI process — those live per-thread now.
- * The `runtime` field is kept on the wire response for back-compat
- * with the AcpSettings table; it always reports `spawned: false`.
- */
-function withRuntime(profile: AcpAgentProfile): AcpAgentProfileWithRuntime {
-  return { ...profile, runtime: { spawned: false } };
-}
 
 function denyRemote(request: FastifyRequest, reply: FastifyReply): boolean {
   if (isLoopbackRequest(request)) return false;
@@ -73,7 +63,7 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
     async (request, reply) => {
       if (denyRemote(request, reply)) return;
       return {
-        profiles: listProfiles().map(withRuntime),
+        profiles: listProfiles(),
         daemon: getDaemonSupervisor().getStatus(),
       };
     },
@@ -105,7 +95,7 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
         updatedAt: now,
       };
       insertProfile(profile);
-      return withRuntime(profile);
+      return profile;
     },
   );
 
@@ -142,7 +132,7 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
       }),
       updatedAt: Date.now(),
     });
-    return withRuntime(updated);
+    return updated;
   });
 
   // ── Delete ──────────────────────────────────────────────────────────

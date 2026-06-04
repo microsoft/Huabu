@@ -53,7 +53,7 @@ import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 
 import type {
   AcpAgentCliInfo,
-  AcpAgentProfileWithRuntime,
+  AcpAgentProfile,
   AcpDaemonStatus,
   AcpProfileCreateRequest,
   AcpProfileUpdateRequest,
@@ -134,7 +134,7 @@ const DaemonHealthBanner: React.FC<DaemonHealthBannerProps> = ({
 interface ProfileEditorModalProps {
   isOpen: boolean;
   /** When non-null we're editing; when null we're creating. */
-  editing: AcpAgentProfileWithRuntime | null;
+  editing: AcpAgentProfile | null;
   /** Host-detected CLIs used to pre-fill `command` for new profiles. */
   detectedClis: AcpAgentCliInfo[];
   onClose: () => void;
@@ -302,7 +302,7 @@ function parseCommandIntoForm(
   };
 }
 
-const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
+export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
   isOpen,
   editing,
   detectedClis,
@@ -684,18 +684,16 @@ const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
  * banner. The store loads its initial snapshot lazily; SettingsPopover
  * fires `init()` when the popover opens.
  */
-export const AcpSettings: React.FC = () => {
-  const profiles = useAcpProfilesStore((s) => s.profiles);
-  const daemon = useAcpProfilesStore((s) => s.daemon);
-  const loaded = useAcpProfilesStore((s) => s.loaded);
-  const error = useAcpProfilesStore((s) => s.error);
-  const refresh = useAcpProfilesStore((s) => s.refresh);
-
-  // Host-CLI detection runs once when the section first mounts. We
-  // don't expose a manual refresh because the Profile Editor is the
-  // only consumer, and re-detecting on every open would slow the
-  // dialog without meaningful benefit (the user would have just
-  // installed a CLI; closing & re-opening Settings is enough).
+/**
+ * Fetch the host-detected CLIs on mount. Shared between the Settings
+ * section and the inline "Create agent" entry in `NewChatMenu` so both
+ * surfaces can present the same Profile editor without duplicating the
+ * one-shot detection effect.
+ *
+ * Detection failures degrade silently — callers receive `[]` and the
+ * editor's Auto-detected dropdown just falls back to "Custom command".
+ */
+export function useDetectedClis(): AcpAgentCliInfo[] {
   const [detectedClis, setDetectedClis] = useState<AcpAgentCliInfo[]>([]);
   useEffect(() => {
     let cancelled = false;
@@ -712,11 +710,23 @@ export const AcpSettings: React.FC = () => {
       cancelled = true;
     };
   }, []);
+  return detectedClis;
+}
+
+export const AcpSettings: React.FC = () => {
+  const profiles = useAcpProfilesStore((s) => s.profiles);
+  const daemon = useAcpProfilesStore((s) => s.daemon);
+  const loaded = useAcpProfilesStore((s) => s.loaded);
+  const error = useAcpProfilesStore((s) => s.error);
+  const refresh = useAcpProfilesStore((s) => s.refresh);
+
+  // Host-CLI detection — see the shared `useDetectedClis` hook above
+  // for rationale (single fetch, silent on failure). Re-using the hook
+  // keeps Settings and `NewChatMenu`'s inline editor in lockstep.
+  const detectedClis = useDetectedClis();
 
   const [editorOpen, setEditorOpen] = useState(false);
-  const [editing, setEditing] = useState<AcpAgentProfileWithRuntime | null>(
-    null,
-  );
+  const [editing, setEditing] = useState<AcpAgentProfile | null>(null);
   const [restarting, setRestarting] = useState(false);
 
   // Surface fetch errors as transient toasts so the user notices even
@@ -732,13 +742,13 @@ export const AcpSettings: React.FC = () => {
     setEditorOpen(true);
   }, []);
 
-  const handleEdit = useCallback((profile: AcpAgentProfileWithRuntime) => {
+  const handleEdit = useCallback((profile: AcpAgentProfile) => {
     setEditing(profile);
     setEditorOpen(true);
   }, []);
 
   const handleDelete = useCallback(
-    async (profile: AcpAgentProfileWithRuntime) => {
+    async (profile: AcpAgentProfile) => {
       // Confirm before delete — profiles often have non-trivial cwd /
       // cwd config and re-typing them is annoying. `window.confirm`
       // matches the rest of the codebase's destructive-action UX
@@ -821,15 +831,7 @@ export const AcpSettings: React.FC = () => {
         ) : (
           <>
             {profiles.map((profile) => (
-              <SettingRow
-                key={profile.id}
-                title={profile.displayName}
-                description={
-                  profile.runtime.spawned
-                    ? `running · pid ${profile.runtime.pid ?? '?'}`
-                    : `idle · ${profile.command}`
-                }
-              >
+              <SettingRow key={profile.id} title={profile.displayName}>
                 <div className="flex shrink-0 items-center gap-1">
                   <Button
                     variant="ghost"

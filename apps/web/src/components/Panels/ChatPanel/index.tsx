@@ -82,7 +82,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const {
     profiles: acpProfiles,
     refresh: refreshAcpProfiles,
-    loading: acpProfilesLoading,
     loaded: acpProfilesLoaded,
   } = useAcpProfiles();
 
@@ -549,7 +548,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
             currentBinding={agentBinding}
             profiles={acpProfiles}
             onRefreshProfiles={refreshAcpProfiles}
-            refreshing={acpProfilesLoading}
             onSelect={handleStartNewChat}
             disabled={!isHistoryLoaded}
             busy={isLoading}

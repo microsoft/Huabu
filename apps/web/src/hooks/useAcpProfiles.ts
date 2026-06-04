@@ -22,11 +22,11 @@ import { useEffect } from 'react';
 
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 
-import type { AcpAgentProfileWithRuntime, AcpDaemonStatus } from '@/api/acp';
+import type { AcpAgentProfile, AcpDaemonStatus } from '@/api/acp';
 
 export interface UseAcpProfilesResult {
   /** Every profile the user has created. Empty until the first fetch resolves. */
-  profiles: AcpAgentProfileWithRuntime[];
+  profiles: AcpAgentProfile[];
   /** Latest daemon snapshot, or `null` while the first fetch is in flight. */
   daemon: AcpDaemonStatus | null;
   /**

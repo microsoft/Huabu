@@ -62,27 +62,6 @@ export interface AcpAgentProfile {
   updatedAt: number;
 }
 
-/**
- * Live runtime state of a profile, joined from the daemon's view at
- * read time. Not persisted — recomputed on every list / mutation reply.
- */
-export interface AcpAgentProfileRuntime {
-  /** True iff there is a currently-spawned agent for this profile. */
-  spawned: boolean;
-  /**
-   * agentlet's connection id for the currently-spawned agent, when
-   * `spawned`. Opaque to the client.
-   */
-  agentletAgentId?: string;
-  /** OS pid on the daemon's host, when `spawned`. */
-  pid?: number;
-}
-
-/** A profile plus its current runtime state — the shape the UI consumes. */
-export type AcpAgentProfileWithRuntime = AcpAgentProfile & {
-  runtime: AcpAgentProfileRuntime;
-};
-
 // ─── Daemon status (one daemon per Sediment) ──────────────────────────
 //
 // The server forks the agentlet daemon as a child process at boot and
@@ -118,7 +97,7 @@ export interface AcpDaemonStatus {
 
 /** Response body for `GET /api/acp/profiles`. */
 export interface AcpProfilesListResponse {
-  profiles: AcpAgentProfileWithRuntime[];
+  profiles: AcpAgentProfile[];
   daemon: AcpDaemonStatus;
 }
 
@@ -142,7 +121,7 @@ export interface AcpProfileUpdateRequest {
 }
 
 /** Response body for `POST` / `PATCH` /api/acp/profiles[/:id]. */
-export type AcpProfileMutationResponse = AcpAgentProfileWithRuntime;
+export type AcpProfileMutationResponse = AcpAgentProfile;
 
 /** Response body for `GET /api/acp/daemon`. */
 export type AcpDaemonStatusResponse = AcpDaemonStatus;
@@ -593,18 +572,6 @@ export const acpAgentProfileSchema = z.object({
   updatedAt: z.number().int().nonnegative(),
 }) satisfies z.ZodType<AcpAgentProfile>;
 
-/** Schema mirror of {@link AcpAgentProfileRuntime}. */
-export const acpAgentProfileRuntimeSchema = z.object({
-  spawned: z.boolean(),
-  agentletAgentId: z.string().min(1).optional(),
-  pid: z.number().int().nonnegative().optional(),
-}) satisfies z.ZodType<AcpAgentProfileRuntime>;
-
-/** Schema mirror of {@link AcpAgentProfileWithRuntime}. */
-export const acpAgentProfileWithRuntimeSchema = acpAgentProfileSchema.extend({
-  runtime: acpAgentProfileRuntimeSchema,
-}) satisfies z.ZodType<AcpAgentProfileWithRuntime>;
-
 /** Schema mirror of {@link AcpDaemonStatus}. */
 export const acpDaemonStatusSchema = z.object({
   online: z.boolean(),
@@ -618,7 +585,7 @@ export const acpDaemonStatusSchema = z.object({
 
 /** Schema mirror of {@link AcpProfilesListResponse}. */
 export const acpProfilesListResponseSchema = z.object({
-  profiles: z.array(acpAgentProfileWithRuntimeSchema),
+  profiles: z.array(acpAgentProfileSchema),
   daemon: acpDaemonStatusSchema,
 }) satisfies z.ZodType<AcpProfilesListResponse>;
 
@@ -641,5 +608,5 @@ export const acpProfileUpdateRequestSchema = z.object({
 
 // {@link AcpProfileMutationResponse}, {@link AcpDaemonStatusResponse} and
 // {@link AcpDaemonRestartResponse} are type aliases; reuse
-// `acpAgentProfileWithRuntimeSchema` / `acpDaemonStatusSchema` directly
+// `acpAgentProfileSchema` / `acpDaemonStatusSchema` directly
 // at the route boundary.

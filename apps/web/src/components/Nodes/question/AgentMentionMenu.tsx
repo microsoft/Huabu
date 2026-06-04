@@ -28,7 +28,7 @@ import {
   useState,
 } from 'react';
 
-import type { AcpAgentProfileWithRuntime, AgentMode } from '@sediment/shared';
+import type { AcpAgentProfile, AgentMode } from '@sediment/shared';
 
 /**
  * One entry surfaced in the mention menu. Internal options expose the
@@ -59,7 +59,7 @@ export interface AgentMentionMenuRef {
 
 export interface AgentMentionMenuProps {
   /** Configured external-agent profiles from `useAcpProfiles`. */
-  profiles: AcpAgentProfileWithRuntime[];
+  profiles: AcpAgentProfile[];
   /** Substring typed after the leading `@`. Empty = show everything. */
   filter: string;
   /** Triggered on click or keyboard accept. */
@@ -70,9 +70,7 @@ export interface AgentMentionMenuProps {
  * Build the full option list. Internal modes always lead so they remain
  * one keystroke away even when many profiles are configured.
  */
-function buildOptions(
-  profiles: AcpAgentProfileWithRuntime[],
-): AgentMentionOption[] {
+function buildOptions(profiles: AcpAgentProfile[]): AgentMentionOption[] {
   const internal: AgentMentionOption[] = [
     {
       kind: 'internal',
@@ -90,9 +88,7 @@ function buildOptions(
   const external: AgentMentionOption[] = profiles.map((profile) => ({
     kind: 'external' as const,
     alias: profile.displayName,
-    description: profile.runtime.spawned
-      ? `running · pid ${profile.runtime.pid ?? '?'}`
-      : 'idle — spawns on first message',
+    description: profile.command,
     profileId: profile.id,
   }));
   return [...internal, ...external];
