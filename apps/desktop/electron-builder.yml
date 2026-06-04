@@ -1,10 +1,19 @@
-appId: com.sediment.app
-productName: Sediment
+appId: com.huabu.app
+productName: Huabu
 copyright: Copyright © 2025 ${author}
 
-# Where electron-builder places the packaged output
+# Where electron-builder places the packaged output.
+#
+# IMPORTANT — Windows file-lock workaround:
+# We deliberately output to a sibling of the workspace (../../../huabu-electron-out/
+# i.e. D:/code/huabu-electron-out/) instead of `dist-electron/` inside the repo.
+# On Windows, the VS Code main process opens `app.asar` files it discovers in the
+# workspace with FILE_SHARE_NONE, which prevents electron-builder from overwriting
+# the file on subsequent builds (ERR_ELECTRON_BUILDER_CANNOT_EXECUTE "The process
+# cannot access the file because it is being used by another process"). Placing the
+# output outside the workspace removes the file from VS Code's awareness entirely.
 directories:
-  output: dist-electron
+  output: ../../../huabu-electron-out
   buildResources: build-resources
 
 # Source files for the main process (compiled JS)
@@ -13,6 +22,14 @@ files:
 
 # Extra files bundled into the app's Resources directory:
 #   resources/server/server.js  — self-contained Fastify bundle (tsup full-bundle, ~13MB)
+#   resources/server/prompt/    — AGENT.md / SKILL.md / .md fragments read at
+#                                 runtime by the prompt loaders. The loaders
+#                                 resolve them as `path.join(HERE, 'prompt')`
+#                                 where `HERE` = the dir containing server.js
+#                                 (see apps/server/src/prompt/agents/loader.ts
+#                                 and skills/loader.ts). Without this entry,
+#                                 every LLM call 500s because no prompt can
+#                                 be assembled.
 #   resources/web/              — compiled Vite SPA
 #
 # No node_modules needed: all npm deps (except @napi-rs native addons) are
@@ -28,6 +45,14 @@ files:
 extraResources:
   - from: ../server/dist-bundle/server.js
     to: server/server.js
+  - from: ../server/dist-bundle/prompt
+    to: server/prompt
+    filter:
+      # Only `.md` is read at runtime (AGENT.md / SKILL.md / fragments).
+      # The recursive `cpSync` in apps/server/tsup.config.ts unavoidably
+      # picks up sibling `.ts` source files too; exclude them so we don't
+      # bloat the installer with dead source.
+      - '**/*.md'
   - from: ../web/dist
     to: web
     filter:

@@ -1,5 +1,5 @@
 /**
- * Sediment Electron main process.
+ * Huabu Electron main process.
  *
  * Responsibilities:
  *   1. Pick a free TCP port.
@@ -18,6 +18,10 @@
  *   load the Vite dev server instead, giving live HMR for web code while
  *   the Electron shell is being iterated on. Run `pnpm dev:web` in a
  *   separate terminal first.
+ *
+ * Note: the npm/pnpm package name remains `@sediment/desktop` for monorepo
+ * tooling continuity, but the product is branded as "Huabu" everywhere a
+ * user can see it (window title, installer, Start Menu entry, log dir, etc.).
  */
 
 import {
@@ -42,6 +46,20 @@ import type { WriteStream } from 'node:fs';
 // ── Constants ────────────────────────────────────────────────────────
 
 const IS_DEV = !app.isPackaged;
+
+/**
+ * Force the user-facing Electron app name to "Huabu" regardless of whether
+ * we're running packaged (where `productName` from electron-builder.yml is
+ * already injected) or in dev via `electron .` (where `app.getName()` would
+ * otherwise fall back to `package.json`'s npm name `@sediment/desktop`).
+ *
+ * This single call keeps `app.getPath('logs' | 'userData' | 'sessionData')`
+ * pointing at a clean `Huabu/` folder in both environments, so users don't
+ * see a leaked internal package name in dialogs or filesystem paths.
+ *
+ * Must be invoked before `app.whenReady()` to take effect.
+ */
+app.setName('Huabu');
 
 /**
  * Resolve the on-disk path to a runtime icon asset.
@@ -91,9 +109,12 @@ let serverLogStream: WriteStream | null = null;
 /**
  * Open (and rotate) a per-launch server log file under `app.getPath('logs')`.
  *
- * macOS  → `~/Library/Logs/Sediment/`
- * Win    → `%APPDATA%\Sediment\logs\`
- * Linux  → `~/.config/Sediment/logs/`
+ * The trailing folder name is derived by Electron from `productName` in
+ * `electron-builder.yml`, which is "Huabu".
+ *
+ * macOS  → `~/Library/Logs/Huabu/`
+ * Win    → `%APPDATA%\Huabu\logs\`
+ * Linux  → `~/.config/Huabu/logs/`
  *
  * Layout: one file per launch, timestamped, so a crash investigation
  * maps cleanly to a single file. At open time we prune everything
@@ -264,7 +285,7 @@ async function startServer(port: number): Promise<void> {
 
   if (!existsSync(serverEntry)) {
     await dialog.showErrorBox(
-      'Sediment — Server not found',
+      'Huabu — Server not found',
       `Could not find the server bundle at:\n${serverEntry}\n\nPlease rebuild the project (pnpm --filter @sediment/server build).`,
     );
     app.quit();
@@ -376,7 +397,7 @@ function waitForPort(port: number, timeoutMs = 20_000): Promise<void> {
 let mainWindow: BrowserWindow | null = null;
 
 function createWindow(port: number): void {
-  // Per-platform title bar setup. The Sediment renderer always paints
+  // Per-platform title bar setup. The Huabu renderer always paints
   // its own 36px tall `WindowChrome` strip; what differs across OSes is
   // *who* draws the caption buttons (min/max/close):
   //   - Windows: `titleBarOverlay` keeps the native buttons in the
@@ -416,7 +437,7 @@ function createWindow(port: number): void {
     height: 900,
     minWidth: 800,
     minHeight: 600,
-    title: 'Sediment',
+    title: 'Huabu',
     backgroundColor: '#ffffff',
     ...(windowIcon ? { icon: windowIcon } : {}),
     ...platformChrome,
@@ -469,7 +490,7 @@ function createWindow(port: number): void {
 
   // Keyboard shortcuts scoped to *this* window's webContents instead
   // of the previous `globalShortcut.register` approach. Global hotkeys
-  // intercept the key everywhere on the OS — even while Sediment is in
+  // intercept the key everywhere on the OS — even while Huabu is in
   // the background — which is a UX regression (steals F12 / Ctrl+R
   // from any focused app) and a packaging hazard (Wayland refuses to
   // register global accelerators at all). `before-input-event` fires
@@ -515,7 +536,7 @@ function createWindow(port: number): void {
 
 app.whenReady().then(async () => {
   // Drop the default Electron Application menu (`File / Edit / View /
-  // Window / Help`). The Sediment shell paints its own minimal title
+  // Window / Help`). The Huabu shell paints its own minimal title
   // bar — keeping the OS menu around just adds visual noise. Chromium
   // still wires up the usual editing keyboard accelerators (cut / copy
   // / paste / undo / select-all) without it, and our DevTools /
@@ -555,7 +576,7 @@ app.whenReady().then(async () => {
     createWindow(serverPort);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await dialog.showErrorBox('Sediment failed to start', message);
+    await dialog.showErrorBox('Huabu failed to start', message);
     app.quit();
   }
 });

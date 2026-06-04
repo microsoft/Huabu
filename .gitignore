@@ -156,3 +156,6 @@ apps/server/dist-bundle/
 # OS files
 .DS_Store
 Thumbs.db
+
+# pnpm stale binaries (Windows: locked files moved here during install)
+.stale/

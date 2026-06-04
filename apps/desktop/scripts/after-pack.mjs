@@ -8,9 +8,12 @@
  * Keeping the file (and the `afterPack:` reference in
  * `electron-builder.yml`) means re-introducing a per-platform
  * post-pack tweak later doesn't need a yml edit.
+ *
+ * When re-introducing logic, electron-builder calls this with a single
+ * argument shaped roughly like:
+ *   { appOutDir: string, electronPlatformName: string,
+ *     packager: { appInfo: { productFilename: string } } }
  */
-
-/** @param {{ appOutDir: string, electronPlatformName: string, packager: { appInfo: { productFilename: string } } }} _context */
-export default async function afterPack(_context) {
+export default async function afterPack() {
   // No-op. See module-level docstring for context.
 }

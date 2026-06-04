@@ -2,8 +2,8 @@
   "name": "@sediment/desktop",
   "version": "0.0.1",
   "private": true,
-  "description": "Sediment desktop application (Electron wrapper)",
-  "author": "Sediment Team",
+  "description": "Huabu desktop application (Electron wrapper)",
+  "author": "Huabu Team",
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
