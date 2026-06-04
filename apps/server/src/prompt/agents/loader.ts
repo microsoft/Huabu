@@ -147,8 +147,25 @@ export interface LoadedAgent {
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
-/** Absolute path of the agents directory (`src/prompt/agents`). */
-export const AGENTS_DIR = HERE;
+/**
+ * Resolve the on-disk prompt directories.
+ *
+ * Two runtime layouts are supported:
+ *   ─ Source (tsx, dev / start scripts): this file sits at
+ *     `src/prompt/agents/loader.js`, so `HERE = src/prompt/agents/`
+ *     and `PROMPT_ROOT = src/prompt/`.
+ *   ─ Bundled (tsup → `dist-bundle/server.js`): all loaders collapse
+ *     into the single bundle, so `HERE = dist-bundle/`. The tsup
+ *     `onSuccess` step copies `src/prompt/` to `dist-bundle/prompt/`,
+ *     so we detect that subdir and re-root onto it.
+ */
+const BUNDLED_PROMPT_ROOT = path.join(HERE, 'prompt');
+const IS_BUNDLED = existsSync(path.join(BUNDLED_PROMPT_ROOT, 'agents'));
+
+/** Absolute path of the agents directory. */
+export const AGENTS_DIR = IS_BUNDLED
+  ? path.join(BUNDLED_PROMPT_ROOT, 'agents')
+  : HERE;
 
 /**
  * Root for `{{include:<rel>}}` path resolution. Includes are resolved
@@ -158,7 +175,7 @@ export const AGENTS_DIR = HERE;
  * means an AGENT.md can pull in either a sibling agent's fragment or
  * any global skill without `../../` confusion.
  */
-const PROMPT_ROOT = path.resolve(HERE, '..');
+const PROMPT_ROOT = IS_BUNDLED ? BUNDLED_PROMPT_ROOT : path.resolve(HERE, '..');
 
 // ─── Validation ─────────────────────────────────────────────────────────────
 

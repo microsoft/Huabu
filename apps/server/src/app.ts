@@ -8,6 +8,7 @@ import multipart from '@fastify/multipart';
 import staticPlugin from '@fastify/static';
 import { fastify } from 'fastify';
 
+import { getDataDir } from './data-dir.js';
 import {
   acpAgentCliRoutes,
   acpAgentsRoutes,
@@ -176,7 +177,7 @@ app.register(workspaceRoutes, { prefix: '/api/workspace' });
 // token in `data/acp-config.json`. The file is no longer read; if it
 // exists we silently delete it so a stale 0600 file does not linger.
 try {
-  const legacyAcpConfigPath = join(process.cwd(), 'data', 'acp-config.json');
+  const legacyAcpConfigPath = join(getDataDir(), 'acp-config.json');
   unlinkSync(legacyAcpConfigPath);
   app.log.info(
     `[acp] removed legacy ${legacyAcpConfigPath} — pairing is now ephemeral`,
@@ -203,3 +204,22 @@ app.log.info(
 // `modules/agent/memory/op-counter-hook.ts` for the policy details
 // (which URLs are skipped, how the weight is derived).
 registerOpCounterHook(app);
+
+// ── Electron / production: serve pre-built web assets ─────────────────
+// When WEB_DIST_PATH is set (injected by the Electron main process at
+// startup), Fastify serves the compiled web SPA from that directory.
+// All non-/api paths fall back to index.html so React Router works.
+// In dev mode and standalone-server deployments this block is skipped
+// entirely — no behaviour change.
+const webDistPath = process.env.WEB_DIST_PATH;
+if (webDistPath) {
+  app.register(staticPlugin, {
+    root: webDistPath,
+    prefix: '/',
+    decorateReply: false,
+  });
+  app.setNotFoundHandler((_request, reply) => {
+    void reply.sendFile('index.html', webDistPath);
+  });
+  app.log.info(`[web] serving static assets from ${webDistPath}`);
+}

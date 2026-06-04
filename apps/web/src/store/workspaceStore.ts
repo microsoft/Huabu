@@ -57,6 +57,17 @@ interface WorkspaceState {
   error: string | null;
 
   /**
+   * Number of canvases currently in the active workspace. `null` means
+   * "not yet known" (either CanvasListPage hasn't mounted yet, or the
+   * workspace just changed and a refetch is pending). Populated by
+   * CanvasListPage after each successful `listCanvases()` so that other
+   * shells — currently the Electron `WindowChrome` workspace switcher —
+   * can surface the same count in their hover tooltip without each
+   * caller having to re-fetch the list.
+   */
+  canvasCount: number | null;
+
+  /**
    * Initialise workspace state on app boot.
    * Returns `true` when a workspace is ready, `false` if free-mode setup
    * is needed (managed mode is always ready after a successful init).
@@ -68,6 +79,13 @@ interface WorkspaceState {
 
   /** (Free mode) Remove a path from the recent list. */
   removeRecentWorkspace: (path: string) => void;
+
+  /**
+   * Publish a freshly-counted canvas total. Pass `null` to clear the
+   * cached value (e.g. immediately after the workspace changes, before
+   * the next list fetch lands).
+   */
+  setCanvasCount: (count: number | null) => void;
 }
 
 /** Apply a fresh WorkspaceInfo snapshot to local state. */
@@ -90,6 +108,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   isReady: false,
   isSyncing: false,
   error: null,
+  canvasCount: null,
 
   init: async () => {
     set({ isSyncing: true, error: null });
@@ -156,7 +175,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     if (get().mode === 'managed') {
       throw new Error('Workspace is locked by the server (managed mode)');
     }
-    set({ isSyncing: true, error: null });
+    set({ isSyncing: true, error: null, canvasCount: null });
     try {
       const info = await putWorkspacePath(path);
       localStorage.setItem(FREE_PATH_KEY, path);
@@ -174,6 +193,11 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     const list = loadRecentWorkspaces().filter((p) => p !== path);
     localStorage.setItem(RECENT_PATHS_KEY, JSON.stringify(list));
     set({ recentWorkspaces: list });
+  },
+
+  setCanvasCount: (count: number | null) => {
+    if (get().canvasCount === count) return;
+    set({ canvasCount: count });
   },
 }));
 

@@ -18,6 +18,7 @@ import { toast } from '../components/Common/Toast';
 import { Tooltip } from '../components/Common/Tooltip';
 import { Header } from '../components/Panels/Header/Header';
 import { APP_NAME } from '../config/app';
+import { isElectron } from '../hooks/useElectron';
 import { useWorkspaceLabel, useWorkspaceStore } from '../store/workspaceStore';
 
 import type { CanvasSummary } from '@sediment/shared';
@@ -45,18 +46,21 @@ export default function CanvasListPage() {
   const canChangeWorkspace = useWorkspaceStore(
     (s) => s.capabilities?.canChangeWorkspace ?? true,
   );
+  const setCanvasCount = useWorkspaceStore((s) => s.setCanvasCount);
+  const isElectronApp = isElectron();
 
   const fetchCanvases = useCallback(async () => {
     try {
       setIsLoading(true);
       const response = await listCanvases();
       setCanvases(response.canvases);
+      setCanvasCount(response.canvases.length);
     } catch (error) {
       console.error('Failed to list canvases:', error);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [setCanvasCount]);
 
   useEffect(() => {
     void fetchCanvases();
@@ -118,9 +122,11 @@ export default function CanvasListPage() {
     try {
       setIsDeleting(true);
       await deleteCanvasById(pendingDelete.canvasId);
-      setCanvases((prev) =>
-        prev.filter((c) => c.canvasId !== pendingDelete.canvasId),
-      );
+      setCanvases((prev) => {
+        const next = prev.filter((c) => c.canvasId !== pendingDelete.canvasId);
+        setCanvasCount(next.length);
+        return next;
+      });
       setPendingDelete(null);
     } catch (error) {
       console.error('Failed to delete canvas:', error);
@@ -160,7 +166,7 @@ export default function CanvasListPage() {
   };
 
   return (
-    <div className="bg-bg-default flex h-screen flex-col">
+    <div className="bg-bg-default flex h-full flex-col">
       <Modal
         isOpen={pendingDelete !== null}
         title="Delete canvas?"
@@ -217,46 +223,49 @@ export default function CanvasListPage() {
         onChange={(e) => void handleFileChange(e)}
       />
 
-      {/* Header */}
-      <Header>
-        <h1 className="text-fg-default pl-1 text-lg font-semibold">
-          {APP_NAME}
-        </h1>
-        {workspaceLabel && (
-          <Tooltip
-            content={
-              <div className="text-center">
-                <div>
-                  {workspacePath
-                    ? `Path: ${workspacePath}`
-                    : `Workspace: ${workspaceLabel}`}
+      {/* Header — hidden in Electron, where WindowChrome already shows the
+          workspace folder name + switcher tooltip in the title bar. */}
+      {!isElectronApp && (
+        <Header>
+          <h1 className="text-fg-default pl-1 text-lg font-semibold">
+            {APP_NAME}
+          </h1>
+          {workspaceLabel && (
+            <Tooltip
+              content={
+                <div className="text-center">
+                  <div>
+                    {workspacePath
+                      ? `Path: ${workspacePath}`
+                      : `Workspace: ${workspaceLabel}`}
+                  </div>
+                  <div>
+                    {canvases.length} canvas{canvases.length !== 1 ? 'es' : ''}
+                  </div>
+                  {canChangeWorkspace && (
+                    <div className="text-fg-subtle mt-1">Click to switch</div>
+                  )}
                 </div>
-                <div>
-                  {canvases.length} canvas{canvases.length !== 1 ? 'es' : ''}
-                </div>
-                {canChangeWorkspace && (
-                  <div className="text-fg-subtle mt-1">Click to switch</div>
-                )}
-              </div>
-            }
-          >
-            {canChangeWorkspace ? (
-              <Link
-                to="/setup"
-                className="text-fg-subtle hover:text-fg-default mt-0.5 ml-1 truncate text-xs transition-colors"
-              >
-                {workspacePath ? 'Path: ' : 'Workspace: '}
-                {workspaceLabel}
-              </Link>
-            ) : (
-              <span className="text-fg-subtle mt-0.5 ml-1 cursor-default truncate text-xs">
-                {workspacePath ? 'Path: ' : 'Workspace: '}
-                {workspaceLabel}
-              </span>
-            )}
-          </Tooltip>
-        )}
-      </Header>
+              }
+            >
+              {canChangeWorkspace ? (
+                <Link
+                  to="/setup"
+                  className="text-fg-subtle hover:text-fg-default mt-0.5 ml-1 truncate text-xs transition-colors"
+                >
+                  {workspacePath ? 'Path: ' : 'Workspace: '}
+                  {workspaceLabel}
+                </Link>
+              ) : (
+                <span className="text-fg-subtle mt-0.5 ml-1 cursor-default truncate text-xs">
+                  {workspacePath ? 'Path: ' : 'Workspace: '}
+                  {workspaceLabel}
+                </span>
+              )}
+            </Tooltip>
+          )}
+        </Header>
+      )}
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto">

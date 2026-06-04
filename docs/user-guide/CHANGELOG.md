@@ -4,6 +4,57 @@
 
 ---
 
+## 2026-06-05 · 桌面端硬化：快捷键作用域、导航沙箱、退出兜底
+
+**What Changed**
+
+- 调试 / 刷新快捷键不再走 `globalShortcut` 全局注册，改为 BrowserWindow 的 `before-input-event` 监听：F12 / Ctrl(Cmd)+R / F5、macOS 上的 Cmd+Alt+I、其他平台的 Ctrl+Shift+I 都仅在 Sediment 窗口已经获得键盘焦点时才生效。
+- 渲染进程现在以 `webPreferences.sandbox: true` 启动；preload 只用到 `contextBridge` + `process.versions` + `process.platform`，这些在 sandbox 模式下都可用。
+- 主进程新增 `will-navigate` 兜底：任何想把顶层 frame 导航到非 loopback URL 的尝试都会被拦截，HTTP/HTTPS 链接转发到系统默认浏览器，其它协议直接 deny。
+- 应用退出现在会等待 server 子进程真正退出再关掉 Electron，最长等 3 秒；超时会强制 `app.exit(0)`，避免被卡住的 server 拖死整个 quit 流程。
+
+**Notes**
+
+- 上一版"全局注册 F12/Ctrl+R"会让快捷键即便在 Sediment 处于后台时也被吞掉，影响其它应用，本次改回作用域内监听后与系统主流应用行为一致。
+- sandbox 模式属于 Chromium / Electron 的安全推荐默认值；外部行为完全不变，仅是渲染进程多了一层 OS 级别的隔离（seccomp / Windows Job Object）。
+- 打包版本（DMG / NSIS / AppImage）暂时不再附带 `bin/agentlet` 外部 agent 启动脚本。该 wrapper 依赖 monorepo 内的 `pnpm`、源代码与仓库根 `.env`，在 packaged 环境下原本就跑不起来；现在服务端会上报 `agentletWrapperPath: null`，设置界面里的"复制启动命令"展示退化为占位符 `bin/agentlet`。需要用 Copilot / Claude / Gemini ACP 桥接的用户暂时使用 monorepo 源码运行 `pnpm dev:desktop`；后续会补一个真正可在打包版里跑的 CLI。
+
+## 2026-06-04 · 桌面端开发：全栈热更新脚本 `pnpm dev:desktop`
+
+**What Changed**
+
+- 新增根脚本 `pnpm dev:desktop`（`scripts/dev-desktop.mjs`），一条命令拉起桌面端的"开发模式三件套"：`tsx watch` 起的 server（默认 `:3001`）、Vite 起的 web dev server（默认 `:5173`）、以及 Electron 主进程，三者并行运行并互相清理。
+- Electron 主进程新增 `EXTERNAL_SERVER_URL` 环境变量逃生口：dev 模式下若设置了该 URL，主进程会**跳过** fork 自己的 `dist-bundle/server.js`，直接复用外部已经在跑的 server。这是把 server 热更新串起来的关键。
+- 热更新覆盖范围：
+  - `apps/web/src/**` → Vite HMR，即改即生效；
+  - `apps/server/src/**` → `tsx watch` 自动重启 server，Electron 不重启；
+  - `packages/shared/src/**` → web 端走 Vite 直接读源码，server 端通过 `tsx watch` 跟踪 import 自动重启，**两端都生效**；
+  - `apps/desktop/src/**`（main / preload）→ 仍需重跑脚本（Electron 主进程只在启动时加载一次）。
+
+**Notes**
+
+- 之前的 `pnpm dev:desktop` 是"Vite + Electron + 一次性打包 server bundle"的模式，改 server 必须重跑脚本，体验上等同冷启动。这次重写后日常迭代基本不再需要重启 Electron。
+- server 自动重启的瞬间，开着的 SSE / WebSocket 流（聊天、ACP 推送）会被断开。普通 HTTP 请求会在下一次用户操作时重新发起，无感知；如果你正在跑 agent 任务，可能需要 `Ctrl+R` 刷新一下渲染端。
+- 端口约定与现有 `pnpm dev` 完全一致：`SERVER_PORT` / `PORT` 控制 server，`VITE_PORT` / `WEB_PORT` 控制 Vite，都从 `.env` / `apps/web/.env` 读取，CLI 临时覆写也照常生效。
+- 不影响生产打包路径：`EXTERNAL_SERVER_URL` 只在 `IS_DEV` 时被识别，packaged 应用一定 fork 自己的 server bundle。
+
+## 2026-06-04 · 桌面端自定义窗口标题栏
+
+**What Changed**
+
+- 桌面（Electron）版本不再使用系统默认的应用菜单栏（File / Edit / View / Window / Help），改为一条 36px 高的自绘标题栏（`WindowChrome`）：左侧 Home 按钮回到画布列表，居中显示当前画布名（或在非画布页显示应用名 "Huabu"），右侧承载全局 ⚙ 设置入口；整条标题栏即为窗口拖拽区域，类似 Figma 桌面端的样式。
+- Windows 上通过 `titleBarOverlay` 让系统自带的最小化 / 最大化 / 关闭按钮叠加在标题栏右上角，按钮颜色与背景对齐；macOS 保留原生红黄绿"红绿灯"，并在左侧预留 76px 让出按钮位置；Linux 暂时使用无边框窗口（v1 不内置自定义关闭按钮）。
+- 由于不再有应用菜单，常用调试 / 刷新动作改为全局快捷键直接生效：`F12` 切换 DevTools；macOS 上 `Cmd+Alt+I` 切换 DevTools、`Cmd+R` 刷新；其他平台 `Ctrl+Shift+I` 切换 DevTools、`Ctrl+R` / `F5` 刷新。
+- 画布编辑页的 `CanvasHeader` 与画布列表 / 组件 playground 用的 `Header` 在桌面端会自动隐藏内部的 Logo Home 和设置入口，避免与新标题栏重复出现两套相同按钮；浏览器端样式完全保持原样。
+- 画布列表页（`/`）在桌面端把"当前 workspace 文件夹名"提升到了标题栏正中：点击即跳转到 workspace 切换页（`/setup`），hover 显示与原来一致的提示（完整路径 + 画布数量 + "Click to switch"）。原本列表页顶部那条 "Huabu | Path: …" 的副标题在桌面端被隐藏，浏览器端继续显示。
+
+**Notes**
+
+- 浏览器（vite dev / 部署后的 SPA）模式不受影响：`WindowChrome` 在没有 `window.electronBridge` 时返回 `null`，所有页面继续以原来的全屏布局渲染。
+- **本次刻意没有引入多 Tab**：当前 agent 的画布写命令实际是发回前端在 `useCanvasStore` 中执行，再由前端持久化到 `canvas.json`；若把跑着 agent 的画布切到后台 Tab 并卸载（>60s 后服务端 `eventBuffer` 会清理），这一段 AI 工作将无法落盘，且下一轮 agent 通过 `inspect` 工具看到的会是过期磁盘状态。等服务端能直接完成 canvas mutation 之后再补 Tab 体验。
+- 为了让标题栏占用真实的 36px 高度而不破坏页内布局，应用根节点改用 `flex h-screen flex-col` 包裹路由内容；同时把多处原本写死 `h-screen` / `min-h-screen` 的页面（`CanvasListPage`、`ToolCallPlaygroundPage`、`CanvasPage` 的 not-found 兜底、`WorkspaceSetupPage`、`DocsLayout`、`LoadingState`）改为 `h-full` / `min-h-full`，以适配父容器减去标题栏后的可用高度。视觉效果应与之前一致。
+- Linux 当前没有自定义的最小化 / 最大化 / 关闭按钮（窗口仍可通过窗口管理器关闭），属于已知限制，会在后续版本补齐。
+
 ## 2026-06-03 · Intent ↔ Memory 闭环：让推荐学会个人偏好
 
 **What Changed**
@@ -20,6 +71,7 @@
 - **接口兼容**：`POST /api/intent/recognize` 与 `/recognize-stream` 的 body 新增可选 `canvasId`，缺省时退化为不注入 canvas memory（仍能跑），老前端版本无需修改。
 - **失败处理**：Memory 读 / preamble 拼接失败一律 swallow，intent 识别照常进行，只是这次不带 memory bias。
 - **测试覆盖**：依赖现有 memory worker 集成测试覆盖，没新增专门用例。
+
 ## 2026-06-03 · 画布工具栏新增单键快捷键 + 角标提示
 
 **What Changed**

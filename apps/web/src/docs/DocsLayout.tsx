@@ -29,7 +29,7 @@ import type { CSSProperties, ReactNode } from 'react';
 export function DocsLayout({ children }: { children: ReactNode }) {
   return (
     <div
-      className="relative h-screen w-full overflow-y-auto bg-white"
+      className="relative h-full w-full overflow-y-auto bg-white bg-[radial-gradient(circle,_rgba(0,0,0,0.12)_1px,_transparent_1px)] bg-[length:22px_22px]"
       style={
         {
           // Single source of truth for the side gutters. Tweak here

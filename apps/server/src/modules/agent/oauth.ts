@@ -21,12 +21,14 @@ import {
   loginGitHubCopilot,
 } from '@earendil-works/pi-ai/oauth';
 
+import { getDataDir } from '../../data-dir.js';
+
 import type { OAuthCredentials } from '@earendil-works/pi-ai';
 import type { Api, Model } from '@earendil-works/pi-ai';
 
 // ==================== Persisted Credentials ====================
 
-const AUTH_FILE = join(process.cwd(), 'data', 'oauth-credentials.json');
+const AUTH_FILE = join(getDataDir(), 'oauth-credentials.json');
 
 export function loadCredentials(): OAuthCredentials | null {
   try {

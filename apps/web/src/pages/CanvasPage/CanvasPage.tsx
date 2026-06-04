@@ -64,7 +64,7 @@ export default function CanvasPage() {
 
   if (canvasNotFound) {
     return (
-      <div className="flex h-screen flex-col items-center justify-center gap-4">
+      <div className="flex h-full flex-col items-center justify-center gap-4">
         <div className="text-center">
           <h2 className="text-fg-default text-lg font-semibold">
             Canvas not found

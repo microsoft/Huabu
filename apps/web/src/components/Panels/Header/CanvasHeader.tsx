@@ -4,6 +4,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 
 import { CanvasMenu } from './CanvasMenu.tsx';
+import { isElectron } from '../../../hooks/useElectron';
 import { Button } from '../../Common/Button';
 
 interface CanvasHeaderProps {
@@ -44,6 +45,11 @@ export const CanvasHeader: React.FC<CanvasHeaderProps> = ({
   compact = false,
   onOpenShortcuts,
 }) => {
+  // In Electron the custom title bar (`WindowChrome`) already shows a Home
+  // button, so we drop the in-canvas logo to avoid two side-by-side home
+  // affordances when the layers panel is expanded.
+  const isElectronApp = isElectron();
+
   return (
     <header
       className={clsx(
@@ -58,13 +64,15 @@ export const CanvasHeader: React.FC<CanvasHeaderProps> = ({
           : 'h-12 border-r border-b border-[#eeece7]',
       )}
     >
-      <Link to="/" aria-label="Back to home" className="shrink-0">
-        <img
-          src="/favicon.svg"
-          alt="Logo"
-          className={compact ? 'h-6 w-6' : 'h-8 w-8'}
-        />
-      </Link>
+      {!isElectronApp && (
+        <Link to="/" aria-label="Back to home" className="shrink-0">
+          <img
+            src="/favicon.svg"
+            alt="Logo"
+            className={compact ? 'h-6 w-6' : 'h-8 w-8'}
+          />
+        </Link>
+      )}
 
       <div className="min-w-0 flex-1">
         {children ?? <CanvasMenu onOpenShortcuts={onOpenShortcuts} />}

@@ -71,6 +71,8 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 
+import { getDataDir } from '../../../data-dir.js';
+
 import type { BridgeHelloParams, AuthResult } from '@agentlet/protocol';
 import type { AcpPairingTicket } from '@sediment/shared';
 
@@ -462,7 +464,7 @@ class AcpTokenStore {
 
 /** Default location of the persisted claimed-ticket file. */
 function defaultPersistPath(): string {
-  return join(process.cwd(), 'data', 'acp-tickets.json');
+  return join(getDataDir(), 'acp-tickets.json');
 }
 
 let _store: AcpTokenStore | null = null;

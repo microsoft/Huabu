@@ -1,10 +1,12 @@
 packages:
-  - 'apps/*'
-  - 'packages/*'
-  # Vendored via git subtree from hai-team/agentlet (see external/agentlet/README.md).
-  # Only the leaf packages Sediment consumes are surfaced as workspace members;
-  # the `ui` package (Vue 3 SPA, used only by agentlet's standalone server)
-  # is intentionally excluded to keep our lockfile lean.
-  - 'external/agentlet/packages/protocol'
-  - 'external/agentlet/packages/server'
-  - 'external/agentlet/packages/local'
+  - apps/*
+  - packages/*
+  - external/agentlet/packages/protocol
+  - external/agentlet/packages/server
+  - external/agentlet/packages/local
+
+ignoredBuiltDependencies:
+  - electron-winstaller
+
+onlyBuiltDependencies:
+  - electron
