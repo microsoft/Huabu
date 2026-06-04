@@ -54,8 +54,6 @@ export interface AcpAgentProfile {
   command: string;
   /** Absolute working directory on the daemon's host. */
   cwd: string;
-  /** Extra env vars merged over the daemon's env when spawning. */
-  env?: Record<string, string>;
   /** Whether the daemon should auto-restart the agent on crash. */
   autoRestart: boolean;
   /** Epoch ms. */
@@ -131,7 +129,6 @@ export interface AcpProfileCreateRequest {
   cliId: string;
   command: string;
   cwd: string;
-  env?: Record<string, string>;
   /** Default true. */
   autoRestart?: boolean;
 }
@@ -141,8 +138,6 @@ export interface AcpProfileUpdateRequest {
   displayName?: string;
   command?: string;
   cwd?: string;
-  /** Pass `null` to clear all env vars. */
-  env?: Record<string, string> | null;
   autoRestart?: boolean;
 }
 
@@ -593,7 +588,6 @@ export const acpAgentProfileSchema = z.object({
   cliId: z.string().min(1),
   command: z.string().min(1),
   cwd: z.string().min(1),
-  env: z.record(z.string(), z.string()).optional(),
   autoRestart: z.boolean(),
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
@@ -634,7 +628,6 @@ export const acpProfileCreateRequestSchema = z.object({
   cliId: z.string().min(1),
   command: z.string().min(1),
   cwd: z.string().min(1),
-  env: z.record(z.string(), z.string()).optional(),
   autoRestart: z.boolean().optional(),
 }) satisfies z.ZodType<AcpProfileCreateRequest>;
 
@@ -643,7 +636,6 @@ export const acpProfileUpdateRequestSchema = z.object({
   displayName: z.string().min(1).optional(),
   command: z.string().min(1).optional(),
   cwd: z.string().min(1).optional(),
-  env: z.record(z.string(), z.string()).nullable().optional(),
   autoRestart: z.boolean().optional(),
 }) satisfies z.ZodType<AcpProfileUpdateRequest>;
 

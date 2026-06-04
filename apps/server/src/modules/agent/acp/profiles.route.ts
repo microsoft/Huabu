@@ -2,7 +2,9 @@
  * `GET   /api/acp/profiles`            — list profiles + daemon snapshot
  * `POST  /api/acp/profiles`            — create
  * `PATCH /api/acp/profiles/:id`        — update
- * `DELETE /api/acp/profiles/:id`       — delete (+ best-effort stop agent)
+ * `DELETE /api/acp/profiles/:id`       — delete (template only — live
+ *                                        threads keep running off their
+ *                                        own binding-recipe snapshots)
  *
  * Loopback-only on every verb. Profiles contain a fully-resolved
  * command line that the daemon will execute on this machine; allowing
@@ -13,6 +15,11 @@
  * without a second request — there is only ever one daemon per
  * Sediment instance and the two are conceptually coupled (profiles
  * are useless without a running daemon).
+ *
+ * Profiles are templates: once a thread is created against a profile
+ * we snapshot the recipe onto the thread record and the two become
+ * independent. Deleting the profile here therefore does NOT stop any
+ * running agent process — each thread carries its own recipe.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -30,7 +37,6 @@ import {
   listProfiles,
   updateProfile,
 } from './profile-store.js';
-import { getRuntime, releaseProfile } from './spawn-orchestrator.js';
 import { isLoopbackRequest } from '../../security/peer.js';
 
 import type {
@@ -42,8 +48,13 @@ import type {
 } from '@sediment/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 
+/**
+ * Profiles no longer own a CLI process — those live per-thread now.
+ * The `runtime` field is kept on the wire response for back-compat
+ * with the AcpSettings table; it always reports `spawned: false`.
+ */
 function withRuntime(profile: AcpAgentProfile): AcpAgentProfileWithRuntime {
-  return { ...profile, runtime: getRuntime(profile.id) };
+  return { ...profile, runtime: { spawned: false } };
 }
 
 function denyRemote(request: FastifyRequest, reply: FastifyReply): boolean {
@@ -89,7 +100,6 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
         cliId: parsed.data.cliId,
         command: parsed.data.command,
         cwd: parsed.data.cwd,
-        env: parsed.data.env,
         autoRestart: parsed.data.autoRestart ?? true,
         createdAt: now,
         updatedAt: now,
@@ -119,15 +129,6 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
         code: 'profile_not_found',
       });
     }
-    // `null` env means "clear all env vars"; undefined means "no
-    // change". Translate before handing to the store so the store
-    // stays unaware of the wire convention.
-    const envPatch =
-      parsed.data.env === null
-        ? { env: undefined }
-        : parsed.data.env !== undefined
-          ? { env: parsed.data.env }
-          : {};
     const updated = updateProfile(request.params.id, {
       ...(parsed.data.displayName !== undefined && {
         displayName: parsed.data.displayName,
@@ -139,7 +140,6 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
       ...(parsed.data.autoRestart !== undefined && {
         autoRestart: parsed.data.autoRestart,
       }),
-      ...envPatch,
       updatedAt: Date.now(),
     });
     return withRuntime(updated);
@@ -151,10 +151,9 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
     Reply: ApiResult<{ deleted: boolean }>;
   }>('/profiles/:id', async (request, reply) => {
     if (denyRemote(request, reply)) return;
-    // Stop any in-flight spawn before removing the record so the
-    // daemon isn't left holding a process that has no profile to
-    // map back to.
-    await releaseProfile(request.params.id);
+    // Profile is a template only — threads created against it have
+    // already snapshotted the recipe and continue running their own
+    // CLI processes. Nothing to stop here.
     const deleted = deleteProfile(request.params.id);
     if (!deleted) {
       return reply.status(404).send({

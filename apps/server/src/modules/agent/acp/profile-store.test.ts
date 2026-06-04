@@ -42,7 +42,6 @@ function makeProfile(
     cliId: 'copilot',
     command: 'copilot --acp',
     cwd: '/tmp',
-    env: undefined,
     autoRestart: true,
     createdAt: now,
     updatedAt: now,
@@ -82,7 +81,6 @@ describe('listProfiles', () => {
 describe('insertProfile / getProfile', () => {
   it('round-trips a profile', () => {
     const p = makeProfile({
-      env: { FOO: 'bar' },
       autoRestart: false,
     });
     insertProfile(p);

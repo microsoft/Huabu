@@ -15,7 +15,7 @@
  *
  *  2. **Profile editor** — list + CRUD for user-configured external
  *     agents. Each profile is a stable spawn recipe `{cli, command,
- *     cwd, env, autoRestart}` that the daemon launches on demand.
+ *     cwd, autoRestart}` that the daemon launches on demand.
  *     Profiles persist across restarts; sessions follow the
  *     profileId, not the (volatile) agentlet agentId.
  *
@@ -169,7 +169,6 @@ interface ProfileFormState {
    */
   customCommand: string;
   cwd: string;
-  envText: string;
   autoRestart: boolean;
 }
 
@@ -180,7 +179,6 @@ const EMPTY_FORM: ProfileFormState = {
   extraArgs: '',
   customCommand: '',
   cwd: '',
-  envText: '',
   autoRestart: true,
 };
 
@@ -304,41 +302,6 @@ function parseCommandIntoForm(
   };
 }
 
-/**
- * Serialise an env record to `KEY=VALUE` lines for the textarea. The
- * inverse parse runs at submit time. Empty record → empty string so
- * a fresh profile starts with an empty textarea (vs. `{}`).
- */
-function envRecordToText(env: Record<string, string> | undefined): string {
-  if (!env) return '';
-  return Object.entries(env)
-    .map(([k, v]) => `${k}=${v}`)
-    .join('\n');
-}
-
-/**
- * Parse the textarea contents into an env record. Lines are
- * `KEY=VALUE`, blank lines + lines starting with `#` are ignored.
- * Returns `null` when a non-blank line cannot be parsed so the caller
- * can surface a validation error instead of silently dropping it.
- */
-function parseEnvText(text: string): Record<string, string> | null {
-  const trimmed = text.trim();
-  if (!trimmed) return {};
-  const out: Record<string, string> = {};
-  for (const raw of trimmed.split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line || line.startsWith('#')) continue;
-    const idx = line.indexOf('=');
-    if (idx <= 0) return null;
-    const key = line.slice(0, idx).trim();
-    const value = line.slice(idx + 1);
-    if (!key) return null;
-    out[key] = value;
-  }
-  return out;
-}
-
 const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
   isOpen,
   editing,
@@ -373,7 +336,6 @@ const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
         extraArgs: parsed.extraArgs,
         customCommand: parsed.customCommand,
         cwd: editing.cwd,
-        envText: envRecordToText(editing.env),
         autoRestart: editing.autoRestart,
       });
     } else {
@@ -437,7 +399,7 @@ const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
   );
 
   /**
-   * Advanced section (extra args, env vars, auto-restart) is collapsed
+   * Advanced section (extra args, auto-restart) is collapsed
    * by default — most users only need the agent + working directory.
    * Resets to collapsed every time the dialog re-opens so an
    * accidentally-expanded session doesn't leak into the next edit.
@@ -458,11 +420,6 @@ const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
       toast('Working directory is required', { variant: 'error' });
       return;
     }
-    const env = parseEnvText(form.envText);
-    if (env === null) {
-      toast('Env vars must be one `KEY=VALUE` per line', { variant: 'error' });
-      return;
-    }
     // Empty input → fall back to the computed default so the user
     // doesn't have to type a name to save. The default is also what
     // the placeholder shows, so the saved label matches expectations.
@@ -474,8 +431,6 @@ const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
           displayName,
           command,
           cwd,
-          // Always send env (possibly empty) so removing a var works.
-          env: Object.keys(env).length > 0 ? env : null,
           autoRestart: form.autoRestart,
         };
         await updateAcpProfile(editing.id, patch);
@@ -486,7 +441,6 @@ const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
           cliId: form.cliId,
           command,
           cwd,
-          ...(Object.keys(env).length > 0 ? { env } : {}),
           autoRestart: form.autoRestart,
         };
         await createAcpProfile(payload);
@@ -684,30 +638,6 @@ const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
                   </span>
                 </label>
               )}
-              <label className="flex flex-col gap-1 text-xs">
-                <span className="text-fg-muted">
-                  Environment variables{' '}
-                  <span className="text-fg-subtle">(optional)</span>
-                </span>
-                <textarea
-                  value={form.envText}
-                  onChange={(e) =>
-                    setForm((p) => ({ ...p, envText: e.target.value }))
-                  }
-                  rows={3}
-                  placeholder={
-                    'ANTHROPIC_API_KEY=sk-...\nHTTPS_PROXY=http://proxy:8080'
-                  }
-                  className="border-edge-default bg-surface rounded border px-2 py-1 font-mono text-xs"
-                />
-                <span className="text-fg-subtle text-[11px] leading-snug">
-                  Extra <code className="font-mono">KEY=VALUE</code> pairs
-                  merged into the agent process's environment when it spawns —
-                  useful for API keys, proxy settings, or CLI-specific config
-                  that isn't already in your shell. One per line; lines starting
-                  with <code className="font-mono">#</code> are ignored.
-                </span>
-              </label>
               <label className="text-fg-default inline-flex cursor-pointer items-center gap-2 text-xs select-none">
                 <input
                   type="checkbox"
@@ -810,7 +740,7 @@ export const AcpSettings: React.FC = () => {
   const handleDelete = useCallback(
     async (profile: AcpAgentProfileWithRuntime) => {
       // Confirm before delete — profiles often have non-trivial cwd /
-      // env config and re-typing them is annoying. `window.confirm`
+      // cwd config and re-typing them is annoying. `window.confirm`
       // matches the rest of the codebase's destructive-action UX
       // (no custom dialog primitive yet).
       if (

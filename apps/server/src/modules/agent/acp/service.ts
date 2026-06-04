@@ -33,7 +33,7 @@ import {
   writeAcpSessionMeta,
   writeAcpSessionRecord,
 } from './session-store.js';
-import { ensureAgentForProfile } from './spawn-orchestrator.js';
+import { ensureAgentForThread, threadKey } from './spawn-orchestrator.js';
 import { acpUpdateToStreamEvent, mergeThinkingChunk } from './translator.js';
 import { canvasRoot as resolveCanvasRoot } from '../../storage/paths.js';
 import {
@@ -46,7 +46,10 @@ import {
 } from '../store/chat-parts-store.js';
 
 import type { AcpSessionEntry } from './session-registry.js';
-import type { AcpSessionPersistedMeta } from './session-store.js';
+import type {
+  AcpBindingRecipe,
+  AcpSessionPersistedMeta,
+} from './session-store.js';
 import type { ChatPartsSidecar } from '../store/chat-parts-store.js';
 import type { AssistantMessage, Context } from '@earendil-works/pi-ai';
 import type {
@@ -391,14 +394,35 @@ async function ensureAcpSessionInner(
 ): Promise<AcpSessionEntry> {
   const { threadId, binding, logger } = opts;
   const canvasId = opts.canvasId ?? '';
-  // Resolve the session cwd from (in order): explicit caller override,
-  // the bound profile's configured working directory, or a `/` sentinel
-  // as last resort. The profile lookup is cheap (file-backed map) and
-  // is the same record `ensureAgentForProfile` consults below for the
-  // spawn cwd, so the agent process and its ACP session land in the
-  // same directory.
-  const profile = getProfile(binding.profileId);
-  const cwd = opts.cwd ?? profile?.cwd ?? '/';
+  const persisted = readAcpSessionRecord(canvasId, threadId);
+
+  // Recipe-first resolution:
+  //   1. Trust the persisted `bindingRecipe` snapshot (returning thread —
+  //      profile mutations / deletions after thread creation must NOT
+  //      reach the running agent).
+  //   2. Fall back to the live profile lookup (first-time thread, or
+  //      legacy v2 record without a recipe). We then snapshot the
+  //      profile onto the record below so subsequent calls hit (1).
+  //   3. If neither is available, the binding is unbound — fail with a
+  //      clear, user-actionable error.
+  let recipe: AcpBindingRecipe | null = persisted?.bindingRecipe ?? null;
+  if (!recipe) {
+    const profile = getProfile(binding.profileId);
+    if (profile) {
+      recipe = {
+        command: profile.command,
+        cwd: profile.cwd,
+        autoRestart: profile.autoRestart,
+        alias: profile.displayName,
+      };
+    }
+  }
+  if (!recipe) {
+    throw new Error(
+      `External agent '${binding.alias}' is no longer configured. Re-create the profile in Settings → External Agents, or start a new chat with another agent.`,
+    );
+  }
+  const cwd = opts.cwd ?? recipe.cwd;
 
   const server = getAgentletServer();
   if (!server) {
@@ -407,37 +431,19 @@ async function ensureAcpSessionInner(
     );
   }
 
-  // Resolve `profileId` to a live agentlet agent. The orchestrator
-  // either returns the cached spawn or asks the daemon to start one
-  // and caches the new `agentletAgentId`. Failures here surface as a
-  // 503 from the caller (route or runAcpAgent dispatch path) with a
-  // user-actionable hint pointing at Settings \u2192 External Agents.
-  const { agentletAgentId } = await ensureAgentForProfile(binding.profileId);
+  // Resolve the thread to a live agentlet agent. Each thread owns its
+  // own CLI process — the orchestrator either returns the cached spawn
+  // or asks the daemon to start a new one keyed on `(canvasId, threadId)`.
+  // Failures here surface as a 503 from the caller with a user-actionable
+  // hint pointing at Settings → External Agents.
+  const tk = threadKey(canvasId, threadId);
+  const { agentletAgentId } = await ensureAgentForThread(tk, recipe);
   const conn = server.getConnection(agentletAgentId);
   if (!conn || conn.status !== 'connected') {
-    throw new Error(
-      `External agent '${binding.alias}' (profile=${binding.profileId}) is not connected`,
-    );
+    throw new Error(`External agent '${recipe.alias}' is not connected`);
   }
 
   let entry = acpSessionRegistry.get(threadId);
-  if (entry && entry.profileId !== binding.profileId) {
-    logger.info(
-      {
-        threadId,
-        oldProfileId: entry.profileId,
-        newProfileId: binding.profileId,
-      },
-      '[acp] thread binding changed \u2014 discarding stale session',
-    );
-    cancelPersistEntryMeta(entry.canvasId, threadId);
-    acpSessionRegistry.remove(threadId);
-    // Stale binding \u2192 persisted sessionId is also stale (it belongs
-    // to the OLD profile). Drop it so we don't try to load it against
-    // the new profile on the next miss.
-    deleteAcpSessionRecord(canvasId, threadId);
-    entry = undefined;
-  }
   if (entry && entry.canvasId !== canvasId) {
     logger.info(
       {
@@ -477,7 +483,8 @@ async function ensureAcpSessionInner(
   // sessionId via `session/load`; fall back to `session/new` when
   // there is no record, the agent does not support load, or the load
   // call rejects (e.g. agent restarted and forgot the session).
-  const persisted = readAcpSessionRecord(canvasId, threadId);
+  // (`persisted` was read at the top of this function for recipe
+  // resolution and is reused here unchanged.)
   const client = new AcpAgentClient(conn, { canvasId, logger });
   await client.initialize();
 
@@ -513,7 +520,7 @@ async function ensureAcpSessionInner(
   let sessionId: string | null = null;
   let removeListener: (() => void) | null = null;
 
-  if (persisted && persisted.profileId === binding.profileId) {
+  if (persisted) {
     if (agentSupportsLoadSession(client.initializeResult)) {
       logger.info(
         {
@@ -669,6 +676,7 @@ async function ensureAcpSessionInner(
       sessionId,
       profileId: binding.profileId,
       cwd,
+      bindingRecipe: recipe,
       meta: snapshotEntryMeta(created),
     });
   } catch (err) {

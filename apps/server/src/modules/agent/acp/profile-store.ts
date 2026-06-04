@@ -1,10 +1,10 @@
 /**
  * File-backed CRUD store for user-configured external agent profiles.
  *
- * Profiles are long-lived spawn recipes (cli + cwd + flags + env)
- * persisted to `data/agent-profiles.json`. Each one names a way to
- * launch one external agent process on demand via the embedded daemon
- * (see `./daemon-supervisor.ts`).
+ * Profiles are long-lived spawn recipes (cli + cwd + flags) persisted
+ * to `data/agent-profiles.json`. Each one names a way to launch one
+ * external agent process on demand via the embedded daemon (see
+ * `./daemon-supervisor.ts`).
  *
  * Why a tiny dedicated file instead of the existing `external-agents.
  * json`: the legacy file stored alias-only canvas bindings (see

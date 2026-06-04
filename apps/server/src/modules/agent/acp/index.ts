@@ -28,7 +28,7 @@ export type { TranslatorLogger } from './translator.js';
 export { getDaemonAuth } from './daemon-auth.js';
 export { getDaemonSupervisor, getDaemonStatus } from './daemon-supervisor.js';
 export {
-  ensureAgentForProfile,
-  getRuntime as getProfileRuntime,
-  releaseProfile,
+  ensureAgentForThread,
+  releaseThread,
+  threadKey,
 } from './spawn-orchestrator.js';
