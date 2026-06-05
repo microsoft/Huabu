@@ -2,14 +2,14 @@
  * Tests for the ACP session persistence store.
  *
  * Coverage:
- *   âœ?readAcpSessionRecord â†?null when canvasId missing / file missing
- *   âœ?write + read round-trip
- *   âœ?writeAcpSessionRecord stamps updatedAt and persists across reads
- *   âœ?write replaces the prior record for the same threadId
- *   âœ?multi-thread isolation: writing one threadId leaves others intact
- *   âœ?deleteAcpSessionRecord returns true/false correctly + persists
- *   âœ?corrupt JSON / unknown shape returns null (never throws)
- *   âœ?writeAcpSessionRecord no-op when canvasId is empty
+ *   - readAcpSessionRecord -> null when canvasId missing / file missing
+ *   - write + read round-trip
+ *   - writeAcpSessionRecord stamps updatedAt and persists across reads
+ *   - write replaces the prior record for the same threadId
+ *   - multi-thread isolation: writing one threadId leaves others intact
+ *   - deleteAcpSessionRecord returns true/false correctly + persists
+ *   - corrupt JSON / unknown shape returns null (never throws)
+ *   - writeAcpSessionRecord no-op when canvasId is empty
  */
 
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -290,7 +290,8 @@ describe('session meta persistence', () => {
             profileId: 'agent-1',
             cwd: '/repo',
             updatedAt: Date.now(),
-            // `meta` field present but with no recognisable fields â†?            // sanitizeMeta should return undefined and the parent
+            // `meta` field present but with no recognisable fields -
+            // sanitizeMeta should return undefined and the parent
             // record should still be readable.
             meta: { nonsense: 'value' },
           },

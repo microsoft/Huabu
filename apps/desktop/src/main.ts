@@ -34,7 +34,7 @@ import {
   unlinkSync,
 } from 'node:fs';
 import net from 'node:net';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 
 import { app, BrowserWindow, dialog, Menu, shell } from 'electron';
 import { utilityProcess, type UtilityProcess } from 'electron';
@@ -127,7 +127,16 @@ process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
 async function ensureShellPath(): Promise<void> {
   if (IS_DEV) return;
   if (process.platform === 'win32') return;
-  const shellPath = process.env.SHELL?.trim() || '/bin/sh';
+  // Only trust an ABSOLUTE, EXISTING shell path. `process.env.SHELL` is
+  // user-controlled: if it were unset, relative, or pointed at a missing
+  // file, `execFile` would fall back to PATH resolution and could launch
+  // an unintended binary. Anything that fails these checks degrades to the
+  // POSIX-guaranteed `/bin/sh`.
+  const rawShell = process.env.SHELL?.trim();
+  const shellPath =
+    rawShell && isAbsolute(rawShell) && existsSync(rawShell)
+      ? rawShell
+      : '/bin/sh';
   const MARKER = '__HUABU_PATH__:';
   try {
     const harvested = await new Promise<string>((resolve, reject) => {

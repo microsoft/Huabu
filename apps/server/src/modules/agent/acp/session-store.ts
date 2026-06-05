@@ -9,7 +9,7 @@
  *
  *   <canvasId>/.history/acp-sessions.json
  *     {
- *       "schemaVersion": 2,
+ *       "schemaVersion": 3,
  *       "records": {
  *         "<threadId>": {
  *           "sessionId":       "...",        // returned by session/new

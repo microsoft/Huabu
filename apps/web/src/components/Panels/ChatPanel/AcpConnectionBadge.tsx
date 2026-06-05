@@ -6,14 +6,14 @@
  * {@link useAcpSessionMeta}'s `{loading, error, meta.updatedAt}`):
  *
  *   • `connecting` — first ensure-session in flight. Blue breathing
- *     dot, tooltip "Connecting to {alias}…". No text on the badge
+ *     dot, tooltip. No text on the badge
  *     itself; we don't want to draw attention while the warm-up
  *     usually completes within a few hundred ms. Subsequent
  *     transient loadings (set-mode / set-model) do NOT regress to
  *     this state — see ChatPanel's `acpConnectionStatus` derivation.
  *
  *   • `connected` — at least one successful meta payload has been
- *     received. Green solid dot, tooltip "Connected to {alias}". No
+ *     received. Green solid dot, tooltip. No
  *     visible text either — once everything is working the badge
  *     should be near-invisible chrome.
  *
